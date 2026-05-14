@@ -1,0 +1,2411 @@
+{
+  "name": "dolphin",
+  "children": [
+    {
+      "name": "voice",
+      "children": [
+        {
+          "name": "podcast",
+          "notes": [
+            {
+              "name": "d1ffedcf5aba484496c280121de5cc4f",
+              "body": [
+                {
+                  "createdAt": 1778029796439,
+                  "id": "d1ffedcf5aba484496c280121de5cc4f",
+                  "text": "The Relational Intelligence Podcast — long-form conversations with collaborators in the field."
+                }
+              ]
+            },
+            {
+              "name": "765c87cb0b66456c9f1ac7b59ace4363",
+              "body": [
+                {
+                  "createdAt": 1778029796878,
+                  "id": "765c87cb0b66456c9f1ac7b59ace4363",
+                  "text": "Episode archive, guest pipeline, production rhythm."
+                }
+              ]
+            },
+            {
+              "name": "b531b2f32a41488cb16ea799c45a3159",
+              "body": [
+                {
+                  "createdAt": 1778038926424,
+                  "id": "b531b2f32a41488cb16ea799c45a3159",
+                  "text": "The Relational Intelligence Podcast — long-form conversations with collaborators in the field."
+                }
+              ]
+            },
+            {
+              "name": "cbde7d048f4a4a8e894fab73fba5a477",
+              "body": [
+                {
+                  "createdAt": 1778038926981,
+                  "id": "cbde7d048f4a4a8e894fab73fba5a477",
+                  "text": "Episode archive, guest pipeline, production rhythm."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "writing",
+          "notes": [
+            {
+              "name": "b594a2b8b4fb43ab9a252cdad738f046",
+              "body": [
+                {
+                  "createdAt": 1778029797106,
+                  "id": "b594a2b8b4fb43ab9a252cdad738f046",
+                  "text": "Book manuscript, articles, newsletter, white papers, case studies."
+                }
+              ]
+            },
+            {
+              "name": "46ba19e593de47e89b190f4a1cbce533",
+              "body": [
+                {
+                  "createdAt": 1778029797424,
+                  "id": "46ba19e593de47e89b190f4a1cbce533",
+                  "text": "The book is the anchor — once it exists, everything else points to it."
+                }
+              ]
+            },
+            {
+              "name": "13864a75ac0b4e678e3e5af4c901bcad",
+              "body": [
+                {
+                  "createdAt": 1778038927649,
+                  "id": "13864a75ac0b4e678e3e5af4c901bcad",
+                  "text": "Book manuscript, articles, newsletter, white papers, case studies."
+                }
+              ]
+            },
+            {
+              "name": "8a73545c970b4c17b708eb0a2e735e86",
+              "body": [
+                {
+                  "createdAt": 1778038928064,
+                  "id": "8a73545c970b4c17b708eb0a2e735e86",
+                  "text": "The book is the anchor — once it exists, everything else points to it."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "video",
+          "notes": [
+            {
+              "name": "12fc1651c91b4ca0974a6524125d8f00",
+              "body": [
+                {
+                  "createdAt": 1778029797692,
+                  "id": "12fc1651c91b4ca0974a6524125d8f00",
+                  "text": "YouTube channel, course videos, social clips, documentary project, live streams."
+                }
+              ]
+            },
+            {
+              "name": "b054340538364b5d8ca2d4d102738715",
+              "body": [
+                {
+                  "createdAt": 1778029797997,
+                  "id": "b054340538364b5d8ca2d4d102738715",
+                  "text": "Show the work in action — modeling teaches faster than telling."
+                }
+              ]
+            },
+            {
+              "name": "e821f0f55db04883a0adc6a70af4bb04",
+              "body": [
+                {
+                  "createdAt": 1778038928566,
+                  "id": "e821f0f55db04883a0adc6a70af4bb04",
+                  "text": "YouTube channel, course videos, social clips, documentary project, live streams."
+                }
+              ]
+            },
+            {
+              "name": "f1399a53d4654c0ba1fe010234596f50",
+              "body": [
+                {
+                  "createdAt": 1778038929111,
+                  "id": "f1399a53d4654c0ba1fe010234596f50",
+                  "text": "Show the work in action — modeling teaches faster than telling."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "social",
+          "notes": [
+            {
+              "name": "74e96f192a494d57b9d1a66dfeb09c00",
+              "body": [
+                {
+                  "createdAt": 1778029798264,
+                  "id": "74e96f192a494d57b9d1a66dfeb09c00",
+                  "text": "Instagram, LinkedIn, TikTok, Twitter/X, Facebook, Threads."
+                }
+              ]
+            },
+            {
+              "name": "6fb269393aed4192b8f1c38215cf287b",
+              "body": [
+                {
+                  "createdAt": 1778029798537,
+                  "id": "6fb269393aed4192b8f1c38215cf287b",
+                  "text": "Each platform a different audience and rhythm — stop trying to be everywhere identically."
+                }
+              ]
+            },
+            {
+              "name": "bafec716cb4e4a8ab98bfa5b57e552a2",
+              "body": [
+                {
+                  "createdAt": 1778038929755,
+                  "id": "bafec716cb4e4a8ab98bfa5b57e552a2",
+                  "text": "Instagram, LinkedIn, TikTok, Twitter/X, Facebook, Threads."
+                }
+              ]
+            },
+            {
+              "name": "642f677fdae6498884b0a529b6c8877d",
+              "body": [
+                {
+                  "createdAt": 1778038930192,
+                  "id": "642f677fdae6498884b0a529b6c8877d",
+                  "text": "Each platform a different audience and rhythm — stop trying to be everywhere identically."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "resources",
+          "notes": [
+            {
+              "name": "da14b5e4969746f5b0ea922c64085fc4",
+              "body": [
+                {
+                  "createdAt": 1778029798827,
+                  "id": "da14b5e4969746f5b0ea922c64085fc4",
+                  "text": "Worksheets, guided practices, assessment tools, infographics, templates, reading lists."
+                }
+              ]
+            },
+            {
+              "name": "20fc6e963a234316a7323e71386fab4b",
+              "body": [
+                {
+                  "createdAt": 1778029799268,
+                  "id": "20fc6e963a234316a7323e71386fab4b",
+                  "text": "Free utility that proves the framework works before anyone buys."
+                }
+              ]
+            },
+            {
+              "name": "a35985a0736442f6bdba08883d38718d",
+              "body": [
+                {
+                  "createdAt": 1778038930704,
+                  "id": "a35985a0736442f6bdba08883d38718d",
+                  "text": "Worksheets, guided practices, assessment tools, infographics, templates, reading lists."
+                }
+              ]
+            },
+            {
+              "name": "bad59de400914e98ad575d818c050a54",
+              "body": [
+                {
+                  "createdAt": 1778038931206,
+                  "id": "bad59de400914e98ad575d818c050a54",
+                  "text": "Free utility that proves the framework works before anyone buys."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "notes": [
+        {
+          "name": "4d719b73108242babf5df6e39e2ea75c",
+          "body": [
+            {
+              "createdAt": 1778029795940,
+              "id": "4d719b73108242babf5df6e39e2ea75c",
+              "text": "Outward expression: podcast, writing, video, social, resources."
+            }
+          ]
+        },
+        {
+          "name": "25ef44229df6400793a0179664ee0501",
+          "body": [
+            {
+              "createdAt": 1778029796232,
+              "id": "25ef44229df6400793a0179664ee0501",
+              "text": "How the work reaches people who haven't found it yet."
+            }
+          ]
+        },
+        {
+          "name": "6bc3e72c5ab84aa7a7ac6051b8dc5748",
+          "body": [
+            {
+              "createdAt": 1778038925424,
+              "id": "6bc3e72c5ab84aa7a7ac6051b8dc5748",
+              "text": "Outward expression: podcast, writing, video, social, resources."
+            }
+          ]
+        },
+        {
+          "name": "d751f1c645fd4e0784f1f5182ab13d34",
+          "body": [
+            {
+              "createdAt": 1778038926017,
+              "id": "d751f1c645fd4e0784f1f5182ab13d34",
+              "text": "How the work reaches people who haven't found it yet."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "practice",
+      "children": [
+        {
+          "name": "live",
+          "notes": [
+            {
+              "name": "a08ea4dfc42f45a4ba7532929e601953",
+              "body": [
+                {
+                  "createdAt": 1778029782803,
+                  "id": "a08ea4dfc42f45a4ba7532929e601953",
+                  "text": "Talks, keynotes, workshops, retreats, multi-day immersions — high-bandwidth in-person work."
+                }
+              ]
+            },
+            {
+              "name": "ffc1c3498f2b432694106b28e6cd81c4",
+              "body": [
+                {
+                  "createdAt": 1778029782938,
+                  "id": "ffc1c3498f2b432694106b28e6cd81c4",
+                  "text": "Where transformation happens fastest: a room, a weekend, presence itself as the curriculum."
+                }
+              ]
+            },
+            {
+              "name": "f07c30fbc10f4d139c986f4f5d2c0e6d",
+              "body": [
+                {
+                  "createdAt": 1778038896127,
+                  "id": "f07c30fbc10f4d139c986f4f5d2c0e6d",
+                  "text": "Talks, keynotes, workshops, retreats, multi-day immersions — high-bandwidth in-person work."
+                }
+              ]
+            },
+            {
+              "name": "9ee892c54bda48bdb790ec60c91cfa8a",
+              "body": [
+                {
+                  "createdAt": 1778038896493,
+                  "id": "9ee892c54bda48bdb790ec60c91cfa8a",
+                  "text": "Where transformation happens fastest: a room, a weekend, presence itself as the curriculum."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "online",
+          "notes": [
+            {
+              "name": "75bdb5ead21145cca4ba64c9f9c21153",
+              "body": [
+                {
+                  "createdAt": 1778029783072,
+                  "id": "75bdb5ead21145cca4ba64c9f9c21153",
+                  "text": "Evergreen courses for the self-paced learner; cohort programs for those who need accountability and community."
+                }
+              ]
+            },
+            {
+              "name": "c97202f3febf48b88bfdaa644cd1bd57",
+              "body": [
+                {
+                  "createdAt": 1778029783177,
+                  "id": "c97202f3febf48b88bfdaa644cd1bd57",
+                  "text": "Memberships and masterminds for ongoing practice — relational fitness needs reps over time."
+                }
+              ]
+            },
+            {
+              "name": "525a20dfd0da412d9837fedb877a49c0",
+              "body": [
+                {
+                  "createdAt": 1778038896866,
+                  "id": "525a20dfd0da412d9837fedb877a49c0",
+                  "text": "Evergreen courses for the self-paced learner; cohort programs for those who need accountability and community."
+                }
+              ]
+            },
+            {
+              "name": "42528a5122d347b295274d28dcba71eb",
+              "body": [
+                {
+                  "createdAt": 1778038897381,
+                  "id": "42528a5122d347b295274d28dcba71eb",
+                  "text": "Memberships and masterminds for ongoing practice — relational fitness needs reps over time."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "certification",
+          "notes": [
+            {
+              "name": "e51d1764c6c84911a677945b486eaf09",
+              "body": [
+                {
+                  "createdAt": 1778029783334,
+                  "id": "e51d1764c6c84911a677945b486eaf09",
+                  "text": "Levels 1–4: Foundations → Practitioner → Master → Trainer. A real pathway, not just a course."
+                }
+              ]
+            },
+            {
+              "name": "750eaecea39f4b369dccdd098b2f680f",
+              "body": [
+                {
+                  "createdAt": 1778029783448,
+                  "id": "750eaecea39f4b369dccdd098b2f680f",
+                  "text": "Ethics and standards: what it means to hold this work responsibly with another human."
+                }
+              ]
+            },
+            {
+              "name": "b3cc7d4d067543e9a76c5810d57cd1b8",
+              "body": [
+                {
+                  "createdAt": 1778029783589,
+                  "id": "b3cc7d4d067543e9a76c5810d57cd1b8",
+                  "text": "Dolphin's vision: a global guild of certified RI practitioners."
+                }
+              ]
+            },
+            {
+              "name": "4a241ab404714a58a0eff2cd96a032a4",
+              "body": [
+                {
+                  "createdAt": 1778038897766,
+                  "id": "4a241ab404714a58a0eff2cd96a032a4",
+                  "text": "Levels 1–4: Foundations → Practitioner → Master → Trainer. A real pathway, not just a course."
+                }
+              ]
+            },
+            {
+              "name": "1464a1a4090a4a77b555a774a05d9567",
+              "body": [
+                {
+                  "createdAt": 1778038898133,
+                  "id": "1464a1a4090a4a77b555a774a05d9567",
+                  "text": "Ethics and standards: what it means to hold this work responsibly with another human."
+                }
+              ]
+            },
+            {
+              "name": "6e03fb2f9ff8434591150db92ee1a838",
+              "body": [
+                {
+                  "createdAt": 1778038898587,
+                  "id": "6e03fb2f9ff8434591150db92ee1a838",
+                  "text": "Dolphin's vision: a global guild of certified RI practitioners."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "notes": [
+        {
+          "name": "5bc7d8f1b8a1419788934ff2e8970c6f",
+          "body": [
+            {
+              "createdAt": 1778029782593,
+              "id": "5bc7d8f1b8a1419788934ff2e8970c6f",
+              "text": "How the model becomes lived experience: programs, events, trainings, certification."
+            }
+          ]
+        },
+        {
+          "name": "f780c53ae4ea4179a1234f099eb7e154",
+          "body": [
+            {
+              "createdAt": 1778029782685,
+              "id": "f780c53ae4ea4179a1234f099eb7e154",
+              "text": "The bridge from idea to embodied skill — where audiences actually meet the work."
+            }
+          ]
+        },
+        {
+          "name": "f463b6bceda04ca09679c183db89d93e",
+          "body": [
+            {
+              "createdAt": 1778038895319,
+              "id": "f463b6bceda04ca09679c183db89d93e",
+              "text": "How the model becomes lived experience: programs, events, trainings, certification."
+            }
+          ]
+        },
+        {
+          "name": "6e97f99b47574ceca0557768fb5c2600",
+          "body": [
+            {
+              "createdAt": 1778038895673,
+              "id": "6e97f99b47574ceca0557768fb5c2600",
+              "text": "The bridge from idea to embodied skill — where audiences actually meet the work."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "platform",
+      "children": [
+        {
+          "name": "learning",
+          "notes": [
+            {
+              "name": "feb4125ab853425081defda397a8e876",
+              "body": [
+                {
+                  "createdAt": 1778029793369,
+                  "id": "feb4125ab853425081defda397a8e876",
+                  "text": "Course delivery, live sessions, forums, resource library, progress tracking, peer matching."
+                }
+              ]
+            },
+            {
+              "name": "e2881c2149084e5ab34b96bec3ea3c9a",
+              "body": [
+                {
+                  "createdAt": 1778029793591,
+                  "id": "e2881c2149084e5ab34b96bec3ea3c9a",
+                  "text": "Designed for practice repetition, not just content consumption."
+                }
+              ]
+            },
+            {
+              "name": "6d735e3fec744414ae553e1cd5e593f5",
+              "body": [
+                {
+                  "createdAt": 1778038920471,
+                  "id": "6d735e3fec744414ae553e1cd5e593f5",
+                  "text": "Course delivery, live sessions, forums, resource library, progress tracking, peer matching."
+                }
+              ]
+            },
+            {
+              "name": "cdf1df3441de445e97ef2615f768ba4a",
+              "body": [
+                {
+                  "createdAt": 1778038920988,
+                  "id": "cdf1df3441de445e97ef2615f768ba4a",
+                  "text": "Designed for practice repetition, not just content consumption."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "community-hub",
+          "notes": [
+            {
+              "name": "8a59d63548714c1f8f40da28050723b8",
+              "body": [
+                {
+                  "createdAt": 1778029793833,
+                  "id": "8a59d63548714c1f8f40da28050723b8",
+                  "text": "Member profiles, discussion spaces, events calendar, mentorship matching, project spaces."
+                }
+              ]
+            },
+            {
+              "name": "c32ad961784748228c537a1942f08bd1",
+              "body": [
+                {
+                  "createdAt": 1778029794088,
+                  "id": "c32ad961784748228c537a1942f08bd1",
+                  "text": "Where the network does its own work between live touches."
+                }
+              ]
+            },
+            {
+              "name": "6c659cb91c214de29e1daf8ee3ae0685",
+              "body": [
+                {
+                  "createdAt": 1778038921464,
+                  "id": "6c659cb91c214de29e1daf8ee3ae0685",
+                  "text": "Member profiles, discussion spaces, events calendar, mentorship matching, project spaces."
+                }
+              ]
+            },
+            {
+              "name": "da1ee52aebae400caa35725e5a331cee",
+              "body": [
+                {
+                  "createdAt": 1778038921935,
+                  "id": "da1ee52aebae400caa35725e5a331cee",
+                  "text": "Where the network does its own work between live touches."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "practitioner-tools",
+          "notes": [
+            {
+              "name": "4cf80be325694ade9556461793a1f8e9",
+              "body": [
+                {
+                  "createdAt": 1778029794324,
+                  "id": "4cf80be325694ade9556461793a1f8e9",
+                  "text": "Client management, session notes, assessment delivery, progress dashboards, supervision tools."
+                }
+              ]
+            },
+            {
+              "name": "e1388d7ad4e443fcaecd70962037c75e",
+              "body": [
+                {
+                  "createdAt": 1778029794560,
+                  "id": "e1388d7ad4e443fcaecd70962037c75e",
+                  "text": "Equip certified practitioners to run real practices, not just have credentials."
+                }
+              ]
+            },
+            {
+              "name": "047cb8a0a4e04553850249098b3e207c",
+              "body": [
+                {
+                  "createdAt": 1778038922446,
+                  "id": "047cb8a0a4e04553850249098b3e207c",
+                  "text": "Client management, session notes, assessment delivery, progress dashboards, supervision tools."
+                }
+              ]
+            },
+            {
+              "name": "5614323cb6224843be0f497cf0938fde",
+              "body": [
+                {
+                  "createdAt": 1778038923013,
+                  "id": "5614323cb6224843be0f497cf0938fde",
+                  "text": "Equip certified practitioners to run real practices, not just have credentials."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "ai-automation",
+          "notes": [
+            {
+              "name": "502f1eac35094fd6b4eac7f3f88fea96",
+              "body": [
+                {
+                  "createdAt": 1778029794816,
+                  "id": "502f1eac35094fd6b4eac7f3f88fea96",
+                  "text": "Relational AI companion, practice prompts, journaling assistant, matching algorithms, analytics."
+                }
+              ]
+            },
+            {
+              "name": "4eb944a46b4f4decac1295bc80b7d3c2",
+              "body": [
+                {
+                  "createdAt": 1778029795152,
+                  "id": "4eb944a46b4f4decac1295bc80b7d3c2",
+                  "text": "AI as scaffolding for human practice, never as replacement."
+                }
+              ]
+            },
+            {
+              "name": "c65ae8b34dc9473ca9f27aaee40710d5",
+              "body": [
+                {
+                  "createdAt": 1778038923440,
+                  "id": "c65ae8b34dc9473ca9f27aaee40710d5",
+                  "text": "Relational AI companion, practice prompts, journaling assistant, matching algorithms, analytics."
+                }
+              ]
+            },
+            {
+              "name": "16593fc5a50a414fb181e20677e83123",
+              "body": [
+                {
+                  "createdAt": 1778038924030,
+                  "id": "16593fc5a50a414fb181e20677e83123",
+                  "text": "AI as scaffolding for human practice, never as replacement."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "integrations",
+          "notes": [
+            {
+              "name": "3fb8edfa70754909ab253bbb64335406",
+              "body": [
+                {
+                  "createdAt": 1778029795415,
+                  "id": "3fb8edfa70754909ab253bbb64335406",
+                  "text": "Calendar, payments, email, video conferencing, CRM, social APIs."
+                }
+              ]
+            },
+            {
+              "name": "5a0310989f02404a9de70b09435e011f",
+              "body": [
+                {
+                  "createdAt": 1778029795717,
+                  "id": "5a0310989f02404a9de70b09435e011f",
+                  "text": "Plumbing — invisible when it works, blocking when it doesn't."
+                }
+              ]
+            },
+            {
+              "name": "60bf741004b1485b93ddbd508f00ae68",
+              "body": [
+                {
+                  "createdAt": 1778038924443,
+                  "id": "60bf741004b1485b93ddbd508f00ae68",
+                  "text": "Calendar, payments, email, video conferencing, CRM, social APIs."
+                }
+              ]
+            },
+            {
+              "name": "2a18dc4862104ad5bd581185c34e14af",
+              "body": [
+                {
+                  "createdAt": 1778038924958,
+                  "id": "2a18dc4862104ad5bd581185c34e14af",
+                  "text": "Plumbing — invisible when it works, blocking when it doesn't."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "notes": [
+        {
+          "name": "941105ab91c04a5c9daf2d2a27e84472",
+          "body": [
+            {
+              "createdAt": 1778029792841,
+              "id": "941105ab91c04a5c9daf2d2a27e84472",
+              "text": "The tech infrastructure that hosts the practice — learning environment, community hub, practitioner tools, AI, integrations."
+            }
+          ]
+        },
+        {
+          "name": "0c659c5c56f142ea86fd0db88e10aad7",
+          "body": [
+            {
+              "createdAt": 1778029793118,
+              "id": "0c659c5c56f142ea86fd0db88e10aad7",
+              "text": "A future-proof platform where target audiences find everything they need."
+            }
+          ]
+        },
+        {
+          "name": "d00ad513f0de494fb093f12064a262cf",
+          "body": [
+            {
+              "createdAt": 1778038919532,
+              "id": "d00ad513f0de494fb093f12064a262cf",
+              "text": "The tech infrastructure that hosts the practice — learning environment, community hub, practitioner tools, AI, integrations."
+            }
+          ]
+        },
+        {
+          "name": "b3a7434a563d4f4ea9bd7642a19d1fc1",
+          "body": [
+            {
+              "createdAt": 1778038919975,
+              "id": "b3a7434a563d4f4ea9bd7642a19d1fc1",
+              "text": "A future-proof platform where target audiences find everything they need."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "network",
+      "children": [
+        {
+          "name": "collaborators",
+          "notes": [
+            {
+              "name": "bc50c3f9ccf2416982d5bfed19ea85a7",
+              "body": [
+                {
+                  "createdAt": 1778029786015,
+                  "id": "bc50c3f9ccf2416982d5bfed19ea85a7",
+                  "text": "Relational science core: Terry Real, the Gottmans, Esther Perel, Daniel Siegel, Julie Menanno."
+                }
+              ]
+            },
+            {
+              "name": "f68378e51c8f4ef2b101c8daa51b5def",
+              "body": [
+                {
+                  "createdAt": 1778029786272,
+                  "id": "f68378e51c8f4ef2b101c8daa51b5def",
+                  "text": "Attachment specialists: Sue Johnson, Stan Tatkin, Thais Gibson, Diane Poole Heller."
+                }
+              ]
+            },
+            {
+              "name": "414c629668934bc5bde2244330d1cfbe",
+              "body": [
+                {
+                  "createdAt": 1778029786443,
+                  "id": "414c629668934bc5bde2244330d1cfbe",
+                  "text": "Neuroscience bridge: Andrew Huberman, Joe Dispenza."
+                }
+              ]
+            },
+            {
+              "name": "93b5f742e540464eb73a5484995ef2e7",
+              "body": [
+                {
+                  "createdAt": 1778029786712,
+                  "id": "93b5f742e540464eb73a5484995ef2e7",
+                  "text": "Trauma & healing: Gabor Maté, Peter Crone, Becky Kennedy."
+                }
+              ]
+            },
+            {
+              "name": "25260a65a4a549c69f530eb2a53e722d",
+              "body": [
+                {
+                  "createdAt": 1778029786915,
+                  "id": "25260a65a4a549c69f530eb2a53e722d",
+                  "text": "Wisdom & philosophy: Alain de Botton, Jordan Peterson, Yung Pueblo."
+                }
+              ]
+            },
+            {
+              "name": "eeee226951754acb884f626722566c5a",
+              "body": [
+                {
+                  "createdAt": 1778029787100,
+                  "id": "eeee226951754acb884f626722566c5a",
+                  "text": "Mass-reach distribution: Simon Sinek, Steven Bartlett, Mel Robbins, Brené Brown."
+                }
+              ]
+            },
+            {
+              "name": "bb7187ede59e4352bc05f2325499af9d",
+              "body": [
+                {
+                  "createdAt": 1778029787433,
+                  "id": "bb7187ede59e4352bc05f2325499af9d",
+                  "text": "Platform builders: Sabri Suby, Dan Martell, Alex Hormozi, Chris Do."
+                }
+              ]
+            },
+            {
+              "name": "aa37baeb058b4cc18656052b87f0837e",
+              "body": [
+                {
+                  "createdAt": 1778038905061,
+                  "id": "aa37baeb058b4cc18656052b87f0837e",
+                  "text": "Relational science core: Terry Real, the Gottmans, Esther Perel, Daniel Siegel, Julie Menanno."
+                }
+              ]
+            },
+            {
+              "name": "a6d0d316a2c4475ab13e946a5307074a",
+              "body": [
+                {
+                  "createdAt": 1778038905519,
+                  "id": "a6d0d316a2c4475ab13e946a5307074a",
+                  "text": "Attachment specialists: Sue Johnson, Stan Tatkin, Thais Gibson, Diane Poole Heller."
+                }
+              ]
+            },
+            {
+              "name": "f020151b298a45c58cefe0c3662364f8",
+              "body": [
+                {
+                  "createdAt": 1778038906021,
+                  "id": "f020151b298a45c58cefe0c3662364f8",
+                  "text": "Neuroscience bridge: Andrew Huberman, Joe Dispenza."
+                }
+              ]
+            },
+            {
+              "name": "5bc638c637424867a973ca1091bb9f6f",
+              "body": [
+                {
+                  "createdAt": 1778038906594,
+                  "id": "5bc638c637424867a973ca1091bb9f6f",
+                  "text": "Trauma & healing: Gabor Maté, Peter Crone, Becky Kennedy."
+                }
+              ]
+            },
+            {
+              "name": "71fadd7b589c4602b6c71e732d499538",
+              "body": [
+                {
+                  "createdAt": 1778038907022,
+                  "id": "71fadd7b589c4602b6c71e732d499538",
+                  "text": "Wisdom & philosophy: Alain de Botton, Jordan Peterson, Yung Pueblo."
+                }
+              ]
+            },
+            {
+              "name": "f201ad072e2141f4a1bae0f6fab31b28",
+              "body": [
+                {
+                  "createdAt": 1778038907583,
+                  "id": "f201ad072e2141f4a1bae0f6fab31b28",
+                  "text": "Mass-reach distribution: Simon Sinek, Steven Bartlett, Mel Robbins, Brené Brown."
+                }
+              ]
+            },
+            {
+              "name": "d1020be974d34556b632872190c263ef",
+              "body": [
+                {
+                  "createdAt": 1778038908104,
+                  "id": "d1020be974d34556b632872190c263ef",
+                  "text": "Platform builders: Sabri Suby, Dan Martell, Alex Hormozi, Chris Do."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "roles",
+          "notes": [
+            {
+              "name": "37c5f15a8adb42edab4629b30afd7f84",
+              "body": [
+                {
+                  "createdAt": 1778029787646,
+                  "id": "37c5f15a8adb42edab4629b30afd7f84",
+                  "text": "Founding circle, advisory board, core contributors, certified practitioners, champions, fellows."
+                }
+              ]
+            },
+            {
+              "name": "0ffb6ffe559244f29a1f179b6e3e13da",
+              "body": [
+                {
+                  "createdAt": 1778029787852,
+                  "id": "0ffb6ffe559244f29a1f179b6e3e13da",
+                  "text": "Clear roles let people step into what fits — no gatekeeping, no ambiguity."
+                }
+              ]
+            },
+            {
+              "name": "574cf69685dd43f1b02fe8fee9001b1d",
+              "body": [
+                {
+                  "createdAt": 1778038908629,
+                  "id": "574cf69685dd43f1b02fe8fee9001b1d",
+                  "text": "Founding circle, advisory board, core contributors, certified practitioners, champions, fellows."
+                }
+              ]
+            },
+            {
+              "name": "659cd54c9ebd4aa1ab59b9abf5a953c3",
+              "body": [
+                {
+                  "createdAt": 1778038909054,
+                  "id": "659cd54c9ebd4aa1ab59b9abf5a953c3",
+                  "text": "Clear roles let people step into what fits — no gatekeeping, no ambiguity."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "governance",
+          "notes": [
+            {
+              "name": "f9f9f0bb2be64f0b821d0c6021e42ebf",
+              "body": [
+                {
+                  "createdAt": 1778029788050,
+                  "id": "f9f9f0bb2be64f0b821d0c6021e42ebf",
+                  "text": "Decision-making process, community agreements, conflict resolution, transparency practices."
+                }
+              ]
+            },
+            {
+              "name": "d6b73a35d5ab402392b7e63f057d6ca2",
+              "body": [
+                {
+                  "createdAt": 1778029788335,
+                  "id": "d6b73a35d5ab402392b7e63f057d6ca2",
+                  "text": "A relational platform must demonstrate relational governance — practice what it teaches."
+                }
+              ]
+            },
+            {
+              "name": "8cf8dfee460d4300910ba29b50eb983c",
+              "body": [
+                {
+                  "createdAt": 1778038909529,
+                  "id": "8cf8dfee460d4300910ba29b50eb983c",
+                  "text": "Decision-making process, community agreements, conflict resolution, transparency practices."
+                }
+              ]
+            },
+            {
+              "name": "bcb8a211f5ec4d458517568fc4246a81",
+              "body": [
+                {
+                  "createdAt": 1778038910122,
+                  "id": "bcb8a211f5ec4d458517568fc4246a81",
+                  "text": "A relational platform must demonstrate relational governance — practice what it teaches."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "engagement",
+          "notes": [
+            {
+              "name": "ad460dce014649d6a1260262fd95fe88",
+              "body": [
+                {
+                  "createdAt": 1778029788571,
+                  "id": "ad460dce014649d6a1260262fd95fe88",
+                  "text": "Onboarding journey, recognition, milestone celebrations, annual gathering."
+                }
+              ]
+            },
+            {
+              "name": "20d2fdc6e2904cecb784d4389aa70a12",
+              "body": [
+                {
+                  "createdAt": 1778029788770,
+                  "id": "20d2fdc6e2904cecb784d4389aa70a12",
+                  "text": "Belonging is built through repeated rituals, not just access."
+                }
+              ]
+            },
+            {
+              "name": "314c43a41fa9459485904616131ab012",
+              "body": [
+                {
+                  "createdAt": 1778038910522,
+                  "id": "314c43a41fa9459485904616131ab012",
+                  "text": "Onboarding journey, recognition, milestone celebrations, annual gathering."
+                }
+              ]
+            },
+            {
+              "name": "00fd9f1c0d174120954661dc19bcd736",
+              "body": [
+                {
+                  "createdAt": 1778038910955,
+                  "id": "00fd9f1c0d174120954661dc19bcd736",
+                  "text": "Belonging is built through repeated rituals, not just access."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "notes": [
+        {
+          "name": "f6d32683cf7d4927a9fabea978fd7105",
+          "body": [
+            {
+              "createdAt": 1778029785689,
+              "id": "f6d32683cf7d4927a9fabea978fd7105",
+              "text": "The people around the work: collaborators in the field, community members, governance structures."
+            }
+          ]
+        },
+        {
+          "name": "befc876fc0754079bff42076612aaa73",
+          "body": [
+            {
+              "createdAt": 1778029785870,
+              "id": "befc876fc0754079bff42076612aaa73",
+              "text": "Dolphin builds with peers — RI is co-created, not solo."
+            }
+          ]
+        },
+        {
+          "name": "79a482c839724b0b8634658ed458b544",
+          "body": [
+            {
+              "createdAt": 1778038904230,
+              "id": "79a482c839724b0b8634658ed458b544",
+              "text": "The people around the work: collaborators in the field, community members, governance structures."
+            }
+          ]
+        },
+        {
+          "name": "b162de81cc6844819875215cf3d997bd",
+          "body": [
+            {
+              "createdAt": 1778038904725,
+              "id": "b162de81cc6844819875215cf3d997bd",
+              "text": "Dolphin builds with peers — RI is co-created, not solo."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "model",
+      "children": [
+        {
+          "name": "pillars",
+          "notes": [
+            {
+              "name": "d662f6ddcba84261b13b100cbebf447d",
+              "body": [
+                {
+                  "createdAt": 1778029780787,
+                  "id": "d662f6ddcba84261b13b100cbebf447d",
+                  "text": "Grounded: feeling at home in your body and the present moment, the foundation for all relating."
+                }
+              ]
+            },
+            {
+              "name": "48e2ae3104344bd8b5a58fc1aaf28d56",
+              "body": [
+                {
+                  "createdAt": 1778029780881,
+                  "id": "48e2ae3104344bd8b5a58fc1aaf28d56",
+                  "text": "Present: undivided attention without agenda, the doorway to authentic connection."
+                }
+              ]
+            },
+            {
+              "name": "2955e932ad424772852480597e7c95b8",
+              "body": [
+                {
+                  "createdAt": 1778029780972,
+                  "id": "2955e932ad424772852480597e7c95b8",
+                  "text": "Connected: experiencing the field between people as alive and informative."
+                }
+              ]
+            },
+            {
+              "name": "a59f83ea94e044159c47b456f42ccc1c",
+              "body": [
+                {
+                  "createdAt": 1778029781056,
+                  "id": "a59f83ea94e044159c47b456f42ccc1c",
+                  "text": "Fulfilled: meeting of essence between two differentiated humans."
+                }
+              ]
+            },
+            {
+              "name": "4b2c93cb19724affbbfe227e398c6888",
+              "body": [
+                {
+                  "createdAt": 1778038888958,
+                  "id": "4b2c93cb19724affbbfe227e398c6888",
+                  "text": "Grounded: feeling at home in your body and the present moment, the foundation for all relating."
+                }
+              ]
+            },
+            {
+              "name": "7492e27af5aa4a3e97e48907b38ae59a",
+              "body": [
+                {
+                  "createdAt": 1778038889246,
+                  "id": "7492e27af5aa4a3e97e48907b38ae59a",
+                  "text": "Present: undivided attention without agenda, the doorway to authentic connection."
+                }
+              ]
+            },
+            {
+              "name": "c2a21f2f12fa42559c34d0b76020535b",
+              "body": [
+                {
+                  "createdAt": 1778038889576,
+                  "id": "c2a21f2f12fa42559c34d0b76020535b",
+                  "text": "Connected: experiencing the field between people as alive and informative."
+                }
+              ]
+            },
+            {
+              "name": "2e68dc2d82da47be941bb59ab770553a",
+              "body": [
+                {
+                  "createdAt": 1778038889982,
+                  "id": "2e68dc2d82da47be941bb59ab770553a",
+                  "text": "Fulfilled: meeting of essence between two differentiated humans."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "capacities",
+          "notes": [
+            {
+              "name": "4ef9b918eba34b198276a9f9a64d0739",
+              "body": [
+                {
+                  "createdAt": 1778029781171,
+                  "id": "4ef9b918eba34b198276a9f9a64d0739",
+                  "text": "Attunement: noticing what someone else is actually experiencing, beyond what they're saying."
+                }
+              ]
+            },
+            {
+              "name": "b0ff4ba28b4342409a54f3c22af664c0",
+              "body": [
+                {
+                  "createdAt": 1778029781253,
+                  "id": "b0ff4ba28b4342409a54f3c22af664c0",
+                  "text": "Repair: closing the loop after a rupture without making it worse."
+                }
+              ]
+            },
+            {
+              "name": "55d4463b1f93475086217681eae03309",
+              "body": [
+                {
+                  "createdAt": 1778029781354,
+                  "id": "55d4463b1f93475086217681eae03309",
+                  "text": "Co-regulation: bringing each other back to a settled nervous system together."
+                }
+              ]
+            },
+            {
+              "name": "bd25d8bd8e8f4a14a43cbd3b0166805f",
+              "body": [
+                {
+                  "createdAt": 1778029781454,
+                  "id": "bd25d8bd8e8f4a14a43cbd3b0166805f",
+                  "text": "Differentiation: staying yourself while staying close."
+                }
+              ]
+            },
+            {
+              "name": "378c2d1ff49640c3ba373a41f7cdc6ad",
+              "body": [
+                {
+                  "createdAt": 1778029781566,
+                  "id": "378c2d1ff49640c3ba373a41f7cdc6ad",
+                  "text": "Secure relating: trustworthy, low-defended, willing to be known."
+                }
+              ]
+            },
+            {
+              "name": "ce277a2ae1e94efeaced37dbf6e15ee5",
+              "body": [
+                {
+                  "createdAt": 1778029781681,
+                  "id": "ce277a2ae1e94efeaced37dbf6e15ee5",
+                  "text": "Emotional fluency: naming feelings precisely enough that they move through."
+                }
+              ]
+            },
+            {
+              "name": "e6dba18fde814f0e94ea7554bc452317",
+              "body": [
+                {
+                  "createdAt": 1778029781816,
+                  "id": "e6dba18fde814f0e94ea7554bc452317",
+                  "text": "Relational courage: saying the true thing when it costs something."
+                }
+              ]
+            },
+            {
+              "name": "f3bb75c0d66740168ae6f6e57c2d19db",
+              "body": [
+                {
+                  "createdAt": 1778038890423,
+                  "id": "f3bb75c0d66740168ae6f6e57c2d19db",
+                  "text": "Attunement: noticing what someone else is actually experiencing, beyond what they're saying."
+                }
+              ]
+            },
+            {
+              "name": "c99f3593ed9849cea8cab3753d1a737d",
+              "body": [
+                {
+                  "createdAt": 1778038890799,
+                  "id": "c99f3593ed9849cea8cab3753d1a737d",
+                  "text": "Repair: closing the loop after a rupture without making it worse."
+                }
+              ]
+            },
+            {
+              "name": "04ceb04a90ca4092b1e289187f5de836",
+              "body": [
+                {
+                  "createdAt": 1778038891149,
+                  "id": "04ceb04a90ca4092b1e289187f5de836",
+                  "text": "Co-regulation: bringing each other back to a settled nervous system together."
+                }
+              ]
+            },
+            {
+              "name": "1d317c454c8049a48773ae8cb70f49ad",
+              "body": [
+                {
+                  "createdAt": 1778038891580,
+                  "id": "1d317c454c8049a48773ae8cb70f49ad",
+                  "text": "Differentiation: staying yourself while staying close."
+                }
+              ]
+            },
+            {
+              "name": "f60c988a167b46e996f80394047f14b8",
+              "body": [
+                {
+                  "createdAt": 1778038891930,
+                  "id": "f60c988a167b46e996f80394047f14b8",
+                  "text": "Secure relating: trustworthy, low-defended, willing to be known."
+                }
+              ]
+            },
+            {
+              "name": "4f3064d98e5543e1a6bac571e3a2f065",
+              "body": [
+                {
+                  "createdAt": 1778038892366,
+                  "id": "4f3064d98e5543e1a6bac571e3a2f065",
+                  "text": "Emotional fluency: naming feelings precisely enough that they move through."
+                }
+              ]
+            },
+            {
+              "name": "6a5b22b8fa614d5faad314eb9467ec5e",
+              "body": [
+                {
+                  "createdAt": 1778038892942,
+                  "id": "6a5b22b8fa614d5faad314eb9467ec5e",
+                  "text": "Relational courage: saying the true thing when it costs something."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "frameworks",
+          "notes": [
+            {
+              "name": "011a81b9ec0448e1bb747fa10c061f91",
+              "body": [
+                {
+                  "createdAt": 1778029781934,
+                  "id": "011a81b9ec0448e1bb747fa10c061f91",
+                  "text": "Relational field theory: the space between two people is itself an entity worth attending to."
+                }
+              ]
+            },
+            {
+              "name": "2c02645658d844c289f837f8a616812d",
+              "body": [
+                {
+                  "createdAt": 1778029782046,
+                  "id": "2c02645658d844c289f837f8a616812d",
+                  "text": "Developmental stages: relational capacity grows in identifiable phases, like motor skills."
+                }
+              ]
+            },
+            {
+              "name": "bf542871caf14924b0175811cee7ba42",
+              "body": [
+                {
+                  "createdAt": 1778029782165,
+                  "id": "bf542871caf14924b0175811cee7ba42",
+                  "text": "Assessment tools: ways to see where someone is on the developmental arc."
+                }
+              ]
+            },
+            {
+              "name": "038c774ac4bc44e885bb4dd9d80c8ffb",
+              "body": [
+                {
+                  "createdAt": 1778038893387,
+                  "id": "038c774ac4bc44e885bb4dd9d80c8ffb",
+                  "text": "Relational field theory: the space between two people is itself an entity worth attending to."
+                }
+              ]
+            },
+            {
+              "name": "5626d18eabbc40dfb2010a9aa528c15f",
+              "body": [
+                {
+                  "createdAt": 1778038893734,
+                  "id": "5626d18eabbc40dfb2010a9aa528c15f",
+                  "text": "Developmental stages: relational capacity grows in identifiable phases, like motor skills."
+                }
+              ]
+            },
+            {
+              "name": "a71f7b27824648d48b6eabe8f74cfb87",
+              "body": [
+                {
+                  "createdAt": 1778038894135,
+                  "id": "a71f7b27824648d48b6eabe8f74cfb87",
+                  "text": "Assessment tools: ways to see where someone is on the developmental arc."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "intellectual-property",
+          "notes": [
+            {
+              "name": "89b533e05e2249c8b98f1a4e4c8a2b8b",
+              "body": [
+                {
+                  "createdAt": 1778029782349,
+                  "id": "89b533e05e2249c8b98f1a4e4c8a2b8b",
+                  "text": "Trademarked methodologies, curricula, publications — what makes the work transmissible and protected."
+                }
+              ]
+            },
+            {
+              "name": "934e98cc2ff74337a1fa2a0bb3092a1e",
+              "body": [
+                {
+                  "createdAt": 1778029782448,
+                  "id": "934e98cc2ff74337a1fa2a0bb3092a1e",
+                  "text": "Dolphin's long arc: build IP that can outlive the founder and license cleanly."
+                }
+              ]
+            },
+            {
+              "name": "3dc0cad784534ebaa65b0d310646f1e0",
+              "body": [
+                {
+                  "createdAt": 1778038894622,
+                  "id": "3dc0cad784534ebaa65b0d310646f1e0",
+                  "text": "Trademarked methodologies, curricula, publications — what makes the work transmissible and protected."
+                }
+              ]
+            },
+            {
+              "name": "9ace8438950244c39593e6cfa2bf243d",
+              "body": [
+                {
+                  "createdAt": 1778038894909,
+                  "id": "9ace8438950244c39593e6cfa2bf243d",
+                  "text": "Dolphin's long arc: build IP that can outlive the founder and license cleanly."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "notes": [
+        {
+          "name": "62787c3443f24610a590d37c994edfec",
+          "body": [
+            {
+              "createdAt": 1778029780615,
+              "id": "62787c3443f24610a590d37c994edfec",
+              "text": "The conceptual core: vision, philosophy, the four pillars, and the relational capacities that develop them."
+            }
+          ]
+        },
+        {
+          "name": "02c3ef5b01a44127a106a770491df541",
+          "body": [
+            {
+              "createdAt": 1778029780700,
+              "id": "02c3ef5b01a44127a106a770491df541",
+              "text": "Dolphin's thesis: relating well isn't a personality trait — it's an intelligence that can be named, taught, and practiced."
+            }
+          ]
+        },
+        {
+          "name": "3381e26f16a64f3ab9e7826fca719f37",
+          "body": [
+            {
+              "createdAt": 1778038888093,
+              "id": "3381e26f16a64f3ab9e7826fca719f37",
+              "text": "The conceptual core: vision, philosophy, the four pillars, and the relational capacities that develop them."
+            }
+          ]
+        },
+        {
+          "name": "23f517c2227a411f8deaab4d917b0301",
+          "body": [
+            {
+              "createdAt": 1778038888577,
+              "id": "23f517c2227a411f8deaab4d917b0301",
+              "text": "Dolphin's thesis: relating well isn't a personality trait — it's an intelligence that can be named, taught, and practiced."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "evidence",
+      "children": [
+        {
+          "name": "foundational-science",
+          "notes": [
+            {
+              "name": "15489b09abbc447aa7e5da3e37115d39",
+              "body": [
+                {
+                  "createdAt": 1778029800064,
+                  "id": "15489b09abbc447aa7e5da3e37115d39",
+                  "text": "Attachment theory, interpersonal neurobiology, polyvagal theory, relational psychoanalysis, positive psychology, complexity science."
+                }
+              ]
+            },
+            {
+              "name": "700d774de46242d98500edafdfdd7853",
+              "body": [
+                {
+                  "createdAt": 1778029800376,
+                  "id": "700d774de46242d98500edafdfdd7853",
+                  "text": "Stand on the giants — RI synthesizes existing science into a usable shape."
+                }
+              ]
+            },
+            {
+              "name": "865937cc9fb94f198b9fdcecfbe5cd8f",
+              "body": [
+                {
+                  "createdAt": 1778038932981,
+                  "id": "865937cc9fb94f198b9fdcecfbe5cd8f",
+                  "text": "Attachment theory, interpersonal neurobiology, polyvagal theory, relational psychoanalysis, positive psychology, complexity science."
+                }
+              ]
+            },
+            {
+              "name": "0de35d4787714bd6825c34673eacdb6f",
+              "body": [
+                {
+                  "createdAt": 1778038933528,
+                  "id": "0de35d4787714bd6825c34673eacdb6f",
+                  "text": "Stand on the giants — RI synthesizes existing science into a usable shape."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "applied-research",
+          "notes": [
+            {
+              "name": "1d821dbf3af247b3a40e7eb2588e0156",
+              "body": [
+                {
+                  "createdAt": 1778029800612,
+                  "id": "1d821dbf3af247b3a40e7eb2588e0156",
+                  "text": "Program outcomes, practitioner effectiveness, organizational impact, longitudinal studies."
+                }
+              ]
+            },
+            {
+              "name": "bc4f820764a7418ab1e67c212d321d7e",
+              "body": [
+                {
+                  "createdAt": 1778029801055,
+                  "id": "bc4f820764a7418ab1e67c212d321d7e",
+                  "text": "Measure what matters: do people's relationships actually get better, lastingly?"
+                }
+              ]
+            },
+            {
+              "name": "5c799f3de89b4dd1a631618af159c355",
+              "body": [
+                {
+                  "createdAt": 1778038934122,
+                  "id": "5c799f3de89b4dd1a631618af159c355",
+                  "text": "Program outcomes, practitioner effectiveness, organizational impact, longitudinal studies."
+                }
+              ]
+            },
+            {
+              "name": "26fc84102f244a898a783bbabf022b70",
+              "body": [
+                {
+                  "createdAt": 1778038934646,
+                  "id": "26fc84102f244a898a783bbabf022b70",
+                  "text": "Measure what matters: do people's relationships actually get better, lastingly?"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "academic-partnerships",
+          "notes": [
+            {
+              "name": "b9f9ab3ce64b4956b594c16cb3ae3873",
+              "body": [
+                {
+                  "createdAt": 1778029801358,
+                  "id": "b9f9ab3ce64b4956b594c16cb3ae3873",
+                  "text": "University collaborations, research grants, peer-reviewed publications, doctoral projects."
+                }
+              ]
+            },
+            {
+              "name": "aa55fc0f13da43b795bff71a93af1b18",
+              "body": [
+                {
+                  "createdAt": 1778029801644,
+                  "id": "aa55fc0f13da43b795bff71a93af1b18",
+                  "text": "Take the work into the academy so the next generation of researchers can build on it."
+                }
+              ]
+            },
+            {
+              "name": "ca86feb5e94049628fefed76b9aa6a52",
+              "body": [
+                {
+                  "createdAt": 1778038935203,
+                  "id": "ca86feb5e94049628fefed76b9aa6a52",
+                  "text": "University collaborations, research grants, peer-reviewed publications, doctoral projects."
+                }
+              ]
+            },
+            {
+              "name": "e31991a191364f82a4041228d3838113",
+              "body": [
+                {
+                  "createdAt": 1778038935880,
+                  "id": "e31991a191364f82a4041228d3838113",
+                  "text": "Take the work into the academy so the next generation of researchers can build on it."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "humanity-outcomes",
+          "notes": [
+            {
+              "name": "3a4a98119a4d465f8a7463bd2c7c4bcf",
+              "body": [
+                {
+                  "createdAt": 1778029802008,
+                  "id": "3a4a98119a4d465f8a7463bd2c7c4bcf",
+                  "text": "More grounded, more present, more connected, more fulfilled humans."
+                }
+              ]
+            },
+            {
+              "name": "c31869964dd94f4c9ac7ce12df38a366",
+              "body": [
+                {
+                  "createdAt": 1778029802313,
+                  "id": "c31869964dd94f4c9ac7ce12df38a366",
+                  "text": "The actual deliverable — everything else is in service of these."
+                }
+              ]
+            },
+            {
+              "name": "7612c6c2af6d486990784dc0545ad443",
+              "body": [
+                {
+                  "createdAt": 1778038936336,
+                  "id": "7612c6c2af6d486990784dc0545ad443",
+                  "text": "More grounded, more present, more connected, more fulfilled humans."
+                }
+              ]
+            },
+            {
+              "name": "a1ffac1183c5422891f04892922fd45d",
+              "body": [
+                {
+                  "createdAt": 1778038936991,
+                  "id": "a1ffac1183c5422891f04892922fd45d",
+                  "text": "The actual deliverable — everything else is in service of these."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "systemic-change",
+          "notes": [
+            {
+              "name": "951d8e326fe24ef2a421f4a3cb79a0f9",
+              "body": [
+                {
+                  "createdAt": 1778029802602,
+                  "id": "951d8e326fe24ef2a421f4a3cb79a0f9",
+                  "text": "Relational education in schools, RI in workplaces, relational health in healthcare, relational literacy in media, relational wisdom in policy."
+                }
+              ]
+            },
+            {
+              "name": "6b768f48c51b42b6a4193120a02b0685",
+              "body": [
+                {
+                  "createdAt": 1778029802849,
+                  "id": "6b768f48c51b42b6a4193120a02b0685",
+                  "text": "The long arc: relational capacity becomes part of the public infrastructure, not just private therapy."
+                }
+              ]
+            },
+            {
+              "name": "b0357a850fee4460b664e33a4b16abd8",
+              "body": [
+                {
+                  "createdAt": 1778038937539,
+                  "id": "b0357a850fee4460b664e33a4b16abd8",
+                  "text": "Relational education in schools, RI in workplaces, relational health in healthcare, relational literacy in media, relational wisdom in policy."
+                }
+              ]
+            },
+            {
+              "name": "0c8c97190da84b78ae107a7701e51a13",
+              "body": [
+                {
+                  "createdAt": 1778038938206,
+                  "id": "0c8c97190da84b78ae107a7701e51a13",
+                  "text": "The long arc: relational capacity becomes part of the public infrastructure, not just private therapy."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "legacy",
+          "notes": [
+            {
+              "name": "d629a08f7b4e4769bf9648dd7fdd896d",
+              "body": [
+                {
+                  "createdAt": 1778029803307,
+                  "id": "d629a08f7b4e4769bf9648dd7fdd896d",
+                  "text": "RI Institute, RI Foundation, open-source curricula, global practitioner guild, intergenerational research."
+                }
+              ]
+            },
+            {
+              "name": "4e59dce121fc4e78bf42db20207cbc9b",
+              "body": [
+                {
+                  "createdAt": 1778029803602,
+                  "id": "4e59dce121fc4e78bf42db20207cbc9b",
+                  "text": "Build it so that when Dolphin steps back, the work continues at scale and integrity."
+                }
+              ]
+            },
+            {
+              "name": "d7b1fd806d4e41f0bb836b5a0c3c4d61",
+              "body": [
+                {
+                  "createdAt": 1778038938651,
+                  "id": "d7b1fd806d4e41f0bb836b5a0c3c4d61",
+                  "text": "RI Institute, RI Foundation, open-source curricula, global practitioner guild, intergenerational research."
+                }
+              ]
+            },
+            {
+              "name": "c372bc8a1bea4cfb99b706e226fbf686",
+              "body": [
+                {
+                  "createdAt": 1778038939262,
+                  "id": "c372bc8a1bea4cfb99b706e226fbf686",
+                  "text": "Build it so that when Dolphin steps back, the work continues at scale and integrity."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "notes": [
+        {
+          "name": "9dd8162ebd80458a90895cada918c13d",
+          "body": [
+            {
+              "createdAt": 1778029799493,
+              "id": "9dd8162ebd80458a90895cada918c13d",
+              "text": "The proof: foundational science, applied research, academic partnerships, humanity outcomes, systemic change, legacy."
+            }
+          ]
+        },
+        {
+          "name": "26488a5df29149bcb3597ee9ccfe1c85",
+          "body": [
+            {
+              "createdAt": 1778029799817,
+              "id": "26488a5df29149bcb3597ee9ccfe1c85",
+              "text": "Without research credibility, RI is opinion. With it, it's a field."
+            }
+          ]
+        },
+        {
+          "name": "cecdced1d1934d478e170e9e533ebaf8",
+          "body": [
+            {
+              "createdAt": 1778038931870,
+              "id": "cecdced1d1934d478e170e9e533ebaf8",
+              "text": "The proof: foundational science, applied research, academic partnerships, humanity outcomes, systemic change, legacy."
+            }
+          ]
+        },
+        {
+          "name": "69a375461e01459492036176191db5e4",
+          "body": [
+            {
+              "createdAt": 1778038932281,
+              "id": "69a375461e01459492036176191db5e4",
+              "text": "Without research credibility, RI is opinion. With it, it's a field."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "business",
+      "children": [
+        {
+          "name": "brand",
+          "notes": [
+            {
+              "name": "c0f5557463bc437bbe9592e43a33e69c",
+              "body": [
+                {
+                  "createdAt": 1778029789408,
+                  "id": "c0f5557463bc437bbe9592e43a33e69c",
+                  "text": "Identity, voice, visual identity, story, positioning, media kit."
+                }
+              ]
+            },
+            {
+              "name": "7f873d6f81f4406d9f8f0cae871139e9",
+              "body": [
+                {
+                  "createdAt": 1778029789658,
+                  "id": "7f873d6f81f4406d9f8f0cae871139e9",
+                  "text": "Premium without being precious; warm without being soft."
+                }
+              ]
+            },
+            {
+              "name": "a3063ef165d9492b948b000b06d9c376",
+              "body": [
+                {
+                  "createdAt": 1778038912346,
+                  "id": "a3063ef165d9492b948b000b06d9c376",
+                  "text": "Identity, voice, visual identity, story, positioning, media kit."
+                }
+              ]
+            },
+            {
+              "name": "618f77f4d00d4940bec825b0c664ae59",
+              "body": [
+                {
+                  "createdAt": 1778038912803,
+                  "id": "618f77f4d00d4940bec825b0c664ae59",
+                  "text": "Premium without being precious; warm without being soft."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "operations",
+          "notes": [
+            {
+              "name": "9601408307de4b0cb94e73c1975e7085",
+              "body": [
+                {
+                  "createdAt": 1778029789870,
+                  "id": "9601408307de4b0cb94e73c1975e7085",
+                  "text": "Team, systems & tools, finance, legal, project management, SOPs."
+                }
+              ]
+            },
+            {
+              "name": "5db4ab75b2bd4f3aa3b7b58e5494eec6",
+              "body": [
+                {
+                  "createdAt": 1778029790036,
+                  "id": "5db4ab75b2bd4f3aa3b7b58e5494eec6",
+                  "text": "Boring well-run plumbing is what lets the magic show up reliably."
+                }
+              ]
+            },
+            {
+              "name": "b54e0920c18b4b77a9dbf1812ebc3efb",
+              "body": [
+                {
+                  "createdAt": 1778038913400,
+                  "id": "b54e0920c18b4b77a9dbf1812ebc3efb",
+                  "text": "Team, systems & tools, finance, legal, project management, SOPs."
+                }
+              ]
+            },
+            {
+              "name": "d28e7482fada4666936eafaba516ff7a",
+              "body": [
+                {
+                  "createdAt": 1778038913913,
+                  "id": "d28e7482fada4666936eafaba516ff7a",
+                  "text": "Boring well-run plumbing is what lets the magic show up reliably."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "marketing",
+          "notes": [
+            {
+              "name": "c711515f291e4d3ba663609eabbee282",
+              "body": [
+                {
+                  "createdAt": 1778029790320,
+                  "id": "c711515f291e4d3ba663609eabbee282",
+                  "text": "Content strategy, social, email, podcast, YouTube, SEO, partnerships, PR, paid, funnels."
+                }
+              ]
+            },
+            {
+              "name": "bfab0ed0bfb349e3bbeb67eece54ae00",
+              "body": [
+                {
+                  "createdAt": 1778029790544,
+                  "id": "bfab0ed0bfb349e3bbeb67eece54ae00",
+                  "text": "Educate first; the right people self-select in."
+                }
+              ]
+            },
+            {
+              "name": "54ea02b515cc45eaa4008a506c3276ea",
+              "body": [
+                {
+                  "createdAt": 1778038914335,
+                  "id": "54ea02b515cc45eaa4008a506c3276ea",
+                  "text": "Content strategy, social, email, podcast, YouTube, SEO, partnerships, PR, paid, funnels."
+                }
+              ]
+            },
+            {
+              "name": "40625440802c41218fa0fe38da05116b",
+              "body": [
+                {
+                  "createdAt": 1778038914867,
+                  "id": "40625440802c41218fa0fe38da05116b",
+                  "text": "Educate first; the right people self-select in."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "sales",
+          "notes": [
+            {
+              "name": "e9d1c6dabc814a3cb7e471efdd92ff1b",
+              "body": [
+                {
+                  "createdAt": 1778029790779,
+                  "id": "e9d1c6dabc814a3cb7e471efdd92ff1b",
+                  "text": "Process, discovery calls, proposals, pricing strategy, CRM, pipeline."
+                }
+              ]
+            },
+            {
+              "name": "ddbd75a5d723442cae0ce003e4a40fab",
+              "body": [
+                {
+                  "createdAt": 1778029791023,
+                  "id": "ddbd75a5d723442cae0ce003e4a40fab",
+                  "text": "Sell with the same presence the work teaches — no manipulation."
+                }
+              ]
+            },
+            {
+              "name": "2fb84bfed1ea47f7a056234891a56b66",
+              "body": [
+                {
+                  "createdAt": 1778038915350,
+                  "id": "2fb84bfed1ea47f7a056234891a56b66",
+                  "text": "Process, discovery calls, proposals, pricing strategy, CRM, pipeline."
+                }
+              ]
+            },
+            {
+              "name": "78cef14eaff8477ebdc935b9769d72b9",
+              "body": [
+                {
+                  "createdAt": 1778038915802,
+                  "id": "78cef14eaff8477ebdc935b9769d72b9",
+                  "text": "Sell with the same presence the work teaches — no manipulation."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "client-experience",
+          "notes": [
+            {
+              "name": "a6537a41e7a948589b2ff9ae13933ad8",
+              "body": [
+                {
+                  "createdAt": 1778029791359,
+                  "id": "a6537a41e7a948589b2ff9ae13933ad8",
+                  "text": "Onboarding, delivery, support, feedback loops, testimonials, case studies, alumni network."
+                }
+              ]
+            },
+            {
+              "name": "e9fc7cdb36af48bdb848d448ebcb484e",
+              "body": [
+                {
+                  "createdAt": 1778029791540,
+                  "id": "e9fc7cdb36af48bdb848d448ebcb484e",
+                  "text": "The relationship after the program is as important as the program itself."
+                }
+              ]
+            },
+            {
+              "name": "b82ffa231035479ca4bd1c7dae42c04c",
+              "body": [
+                {
+                  "createdAt": 1778038916229,
+                  "id": "b82ffa231035479ca4bd1c7dae42c04c",
+                  "text": "Onboarding, delivery, support, feedback loops, testimonials, case studies, alumni network."
+                }
+              ]
+            },
+            {
+              "name": "23173e031cb1499bab1000e0ea3e5336",
+              "body": [
+                {
+                  "createdAt": 1778038916810,
+                  "id": "23173e031cb1499bab1000e0ea3e5336",
+                  "text": "The relationship after the program is as important as the program itself."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "phases",
+          "notes": [
+            {
+              "name": "911eb34c3d774017a50e28f0ca5753cb",
+              "body": [
+                {
+                  "createdAt": 1778029791769,
+                  "id": "911eb34c3d774017a50e28f0ca5753cb",
+                  "text": "Phase 1 — Foundation: build the curriculum, brand, signature program, founding cohort."
+                }
+              ]
+            },
+            {
+              "name": "961aa13d0fd94f0881d54cef760611a0",
+              "body": [
+                {
+                  "createdAt": 1778029791989,
+                  "id": "961aa13d0fd94f0881d54cef760611a0",
+                  "text": "Phase 2 — Traction: certification launch, evergreen funnels, podcast, speaking circuit."
+                }
+              ]
+            },
+            {
+              "name": "cfcc21c869124f4db7a1e7654e8ef64b",
+              "body": [
+                {
+                  "createdAt": 1778029792291,
+                  "id": "cfcc21c869124f4db7a1e7654e8ef64b",
+                  "text": "Phase 3 — Scale: platform build, licensee network, corporate division, international expansion."
+                }
+              ]
+            },
+            {
+              "name": "dbb27b8fbc324a6585ea347cc755a0c5",
+              "body": [
+                {
+                  "createdAt": 1778029792524,
+                  "id": "dbb27b8fbc324a6585ea347cc755a0c5",
+                  "text": "Phase 4 — Movement: nonprofit arm, policy influence, academic integration, publishing house."
+                }
+              ]
+            },
+            {
+              "name": "e70fcf7a509a40729b87a7865d441c35",
+              "body": [
+                {
+                  "createdAt": 1778038917440,
+                  "id": "e70fcf7a509a40729b87a7865d441c35",
+                  "text": "Phase 1 — Foundation: build the curriculum, brand, signature program, founding cohort."
+                }
+              ]
+            },
+            {
+              "name": "12656818c9b44b7199ed3c577909af74",
+              "body": [
+                {
+                  "createdAt": 1778038917830,
+                  "id": "12656818c9b44b7199ed3c577909af74",
+                  "text": "Phase 2 — Traction: certification launch, evergreen funnels, podcast, speaking circuit."
+                }
+              ]
+            },
+            {
+              "name": "3e1ac1d6873045bdb504725ece53a188",
+              "body": [
+                {
+                  "createdAt": 1778038918396,
+                  "id": "3e1ac1d6873045bdb504725ece53a188",
+                  "text": "Phase 3 — Scale: platform build, licensee network, corporate division, international expansion."
+                }
+              ]
+            },
+            {
+              "name": "58c1c5ae214e43278a35facb98d43fd0",
+              "body": [
+                {
+                  "createdAt": 1778038919005,
+                  "id": "58c1c5ae214e43278a35facb98d43fd0",
+                  "text": "Phase 4 — Movement: nonprofit arm, policy influence, academic integration, publishing house."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "notes": [
+        {
+          "name": "5657f021dcdf4f9a91d5f8cf8ba29c30",
+          "body": [
+            {
+              "createdAt": 1778029788971,
+              "id": "5657f021dcdf4f9a91d5f8cf8ba29c30",
+              "text": "How RI sustains itself as a business: brand, operations, marketing, sales, client experience, growth phasing."
+            }
+          ]
+        },
+        {
+          "name": "44afebb6a5fa4c688b69308547a9fa67",
+          "body": [
+            {
+              "createdAt": 1778029789164,
+              "id": "44afebb6a5fa4c688b69308547a9fa67",
+              "text": "The discipline of running it well so the work can keep showing up."
+            }
+          ]
+        },
+        {
+          "name": "23e64e2c4ffd4d158b2c3b0253602e41",
+          "body": [
+            {
+              "createdAt": 1778038911498,
+              "id": "23e64e2c4ffd4d158b2c3b0253602e41",
+              "text": "How RI sustains itself as a business: brand, operations, marketing, sales, client experience, growth phasing."
+            }
+          ]
+        },
+        {
+          "name": "eba7bddae7d746209e1ece6888b16cde",
+          "body": [
+            {
+              "createdAt": 1778038911948,
+              "id": "eba7bddae7d746209e1ece6888b16cde",
+              "text": "The discipline of running it well so the work can keep showing up."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "audience",
+      "children": [
+        {
+          "name": "individuals",
+          "notes": [
+            {
+              "name": "f5fe3eb6ed314b6d927b9f90e80bbb1d",
+              "body": [
+                {
+                  "createdAt": 1778029783989,
+                  "id": "f5fe3eb6ed314b6d927b9f90e80bbb1d",
+                  "text": "Personal-growth seekers, people in transition, parents, men and women in their own developmental work."
+                }
+              ]
+            },
+            {
+              "name": "b7a9cfd4de6f4b769d6ea6116e1e8922",
+              "body": [
+                {
+                  "createdAt": 1778029784133,
+                  "id": "b7a9cfd4de6f4b769d6ea6116e1e8922",
+                  "text": "Often arrive via a relationship rupture and stay for the larger transformation."
+                }
+              ]
+            },
+            {
+              "name": "bf20eeefe64e43b3872d81decd96c1c2",
+              "body": [
+                {
+                  "createdAt": 1778038899818,
+                  "id": "bf20eeefe64e43b3872d81decd96c1c2",
+                  "text": "Personal-growth seekers, people in transition, parents, men and women in their own developmental work."
+                }
+              ]
+            },
+            {
+              "name": "c09ab51ea2ea4e3a93d7a8b3678f84e6",
+              "body": [
+                {
+                  "createdAt": 1778038900347,
+                  "id": "c09ab51ea2ea4e3a93d7a8b3678f84e6",
+                  "text": "Often arrive via a relationship rupture and stay for the larger transformation."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "couples",
+          "notes": [
+            {
+              "name": "e160e0a326e046bfbc2139eb4264d7ad",
+              "body": [
+                {
+                  "createdAt": 1778029784419,
+                  "id": "e160e0a326e046bfbc2139eb4264d7ad",
+                  "text": "In conflict, seeking depth, engaged, new parents, long-term partners — every stage has its work."
+                }
+              ]
+            },
+            {
+              "name": "70eff67da2ad449b997f0bcdf837ce80",
+              "body": [
+                {
+                  "createdAt": 1778029784561,
+                  "id": "70eff67da2ad449b997f0bcdf837ce80",
+                  "text": "The couple is the most common laboratory for relational capacity."
+                }
+              ]
+            },
+            {
+              "name": "7d6b6c5ab8ca49d1880ac02c895628da",
+              "body": [
+                {
+                  "createdAt": 1778038900778,
+                  "id": "7d6b6c5ab8ca49d1880ac02c895628da",
+                  "text": "In conflict, seeking depth, engaged, new parents, long-term partners — every stage has its work."
+                }
+              ]
+            },
+            {
+              "name": "48284139d4ff45229a159e7789ee0f9c",
+              "body": [
+                {
+                  "createdAt": 1778038901088,
+                  "id": "48284139d4ff45229a159e7789ee0f9c",
+                  "text": "The couple is the most common laboratory for relational capacity."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "professionals",
+          "notes": [
+            {
+              "name": "dab7ace38ac4432fb186d8ebd5da376b",
+              "body": [
+                {
+                  "createdAt": 1778029784692,
+                  "id": "dab7ace38ac4432fb186d8ebd5da376b",
+                  "text": "Coaches, therapists, counselors, facilitators, consultants, HR leaders, educators, healthcare providers."
+                }
+              ]
+            },
+            {
+              "name": "5424237eebc54b7dafa4fc1b19cf2375",
+              "body": [
+                {
+                  "createdAt": 1778029784883,
+                  "id": "5424237eebc54b7dafa4fc1b19cf2375",
+                  "text": "They take RI back into their own practice and multiply impact."
+                }
+              ]
+            },
+            {
+              "name": "80958ef42567488eb4f7899d1deaded3",
+              "body": [
+                {
+                  "createdAt": 1778038901593,
+                  "id": "80958ef42567488eb4f7899d1deaded3",
+                  "text": "Coaches, therapists, counselors, facilitators, consultants, HR leaders, educators, healthcare providers."
+                }
+              ]
+            },
+            {
+              "name": "f256fccf996244f4b81f1513b51aad5a",
+              "body": [
+                {
+                  "createdAt": 1778038902091,
+                  "id": "f256fccf996244f4b81f1513b51aad5a",
+                  "text": "They take RI back into their own practice and multiply impact."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "organizations",
+          "notes": [
+            {
+              "name": "f985eb212c104fb3b08648dc466c7fb3",
+              "body": [
+                {
+                  "createdAt": 1778029785019,
+                  "id": "f985eb212c104fb3b08648dc466c7fb3",
+                  "text": "Corporate teams, startups, nonprofits, schools, healthcare systems — relational health as organizational health."
+                }
+              ]
+            },
+            {
+              "name": "ddbdb2c5fde941c699049cc3d06c566c",
+              "body": [
+                {
+                  "createdAt": 1778029785167,
+                  "id": "ddbdb2c5fde941c699049cc3d06c566c",
+                  "text": "The leverage point: leaders who relate well change how thousands work together."
+                }
+              ]
+            },
+            {
+              "name": "aae9214d405a443a9115f83bb6ca1293",
+              "body": [
+                {
+                  "createdAt": 1778038902461,
+                  "id": "aae9214d405a443a9115f83bb6ca1293",
+                  "text": "Corporate teams, startups, nonprofits, schools, healthcare systems — relational health as organizational health."
+                }
+              ]
+            },
+            {
+              "name": "d90a222faee04c39a1cc1bf7fce03000",
+              "body": [
+                {
+                  "createdAt": 1778038902927,
+                  "id": "d90a222faee04c39a1cc1bf7fce03000",
+                  "text": "The leverage point: leaders who relate well change how thousands work together."
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "communities",
+          "notes": [
+            {
+              "name": "4f4b8debac04450dbdb146986753aeca",
+              "body": [
+                {
+                  "createdAt": 1778029785383,
+                  "id": "4f4b8debac04450dbdb146986753aeca",
+                  "text": "Men's groups, women's circles, parenting communities, recovery, spiritual, professional networks."
+                }
+              ]
+            },
+            {
+              "name": "2ed1c059591046a5977e0c274c0c8c51",
+              "body": [
+                {
+                  "createdAt": 1778029785549,
+                  "id": "2ed1c059591046a5977e0c274c0c8c51",
+                  "text": "Where relational practice gets normalized — peer-led, no therapist required."
+                }
+              ]
+            },
+            {
+              "name": "4d7fac1f1ba54a5a8ff548c9b8231be7",
+              "body": [
+                {
+                  "createdAt": 1778038903384,
+                  "id": "4d7fac1f1ba54a5a8ff548c9b8231be7",
+                  "text": "Men's groups, women's circles, parenting communities, recovery, spiritual, professional networks."
+                }
+              ]
+            },
+            {
+              "name": "8d4b31e6e26447e184c65cb73458b5ed",
+              "body": [
+                {
+                  "createdAt": 1778038903854,
+                  "id": "8d4b31e6e26447e184c65cb73458b5ed",
+                  "text": "Where relational practice gets normalized — peer-led, no therapist required."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "notes": [
+        {
+          "name": "afcc20a87a3b4d4d92662c7b819f1ecf",
+          "body": [
+            {
+              "createdAt": 1778029783727,
+              "id": "afcc20a87a3b4d4d92662c7b819f1ecf",
+              "text": "Who this is for: from individuals seeking depth to organizations building healthier cultures."
+            }
+          ]
+        },
+        {
+          "name": "554517dc654247fa916dbf827a4ed0c9",
+          "body": [
+            {
+              "createdAt": 1778029783871,
+              "id": "554517dc654247fa916dbf827a4ed0c9",
+              "text": "Each segment shows up with different presenting concerns but the underlying skill is the same."
+            }
+          ]
+        },
+        {
+          "name": "e3f018efd39a4e428a91958c5e131ab6",
+          "body": [
+            {
+              "createdAt": 1778038899008,
+              "id": "e3f018efd39a4e428a91958c5e131ab6",
+              "text": "Who this is for: from individuals seeking depth to organizations building healthier cultures."
+            }
+          ]
+        },
+        {
+          "name": "bcff364f67ac407b8fc7371968aecb22",
+          "body": [
+            {
+              "createdAt": 1778038899416,
+              "id": "bcff364f67ac407b8fc7371968aecb22",
+              "text": "Each segment shows up with different presenting concerns but the underlying skill is the same."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

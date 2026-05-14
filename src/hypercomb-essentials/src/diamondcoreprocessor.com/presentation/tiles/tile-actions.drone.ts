@@ -87,10 +87,15 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'block', svgMarkup: ICONS.block, hoverTint: 0xffc8c8, profile: 'public-external', labelKey: 'action.block', descriptionKey: 'action.block.description' },
 ]
 
-// Default active icons per profile (defines the fallback order)
+// Default active icons per profile (defines the fallback order).
+//
+// public-own is currently reduced to just `expose` while we wire the
+// paired-channel click-test. `hide` and `break-apart` remain
+// registered in the catalog (and reappear instantly if added back
+// here) — they're just not on the active strip right now.
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   'private': ['command', 'edit', 'note', 'reroll', 'remove', 'break-apart'],
-  'public-own': ['hide', 'break-apart'],
+  'public-own': ['expose', 'sync', 'merge'],
   'public-external': ['adopt', 'block'],
 }
 
@@ -414,16 +419,53 @@ export class TileActionsDrone extends Drone {
   }
 
   async #removeTile(label: string): Promise<void> {
-    const lineage = this.resolve<{ explorerDir(): Promise<FileSystemDirectoryHandle | null> }>('lineage')
-    if (!lineage) return
-    const dir = await lineage.explorerDir()
-    if (!dir) return
+    // Layer-as-primitive: drop the cell from the parent layer's children
+    // slot via LayerCommitter.update. The cell's OPFS data stays put so
+    // undoing the head history row restores it.
+    type LineageLike = { domain?: () => string; explorerSegments?: () => readonly string[] }
+    type HistoryServiceLike = {
+      sign(l: LineageLike): Promise<string>
+      currentLayerAt(s: string): Promise<{ children?: readonly string[]; [k: string]: unknown } | null>
+      getLayerBySig(s: string): Promise<{ name?: string } | null>
+    }
+    type LayerCommitterLike = {
+      update(
+        segments: readonly string[],
+        layer: { name?: string; [slot: string]: unknown },
+        nameSlots?: ReadonlySet<string>,
+      ): Promise<string>
+    }
 
-    try {
-      await dir.removeEntry(label, { recursive: true })
-      EffectBus.emit('cell:removed', { cell: label })
-    } catch { /* entry doesn't exist or can't be removed */ }
-    void new hypercomb().act()
+    const lineage = this.resolve<LineageLike>('lineage')
+    const history = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryServiceLike | undefined
+    const committer = (window as any).ioc?.get?.('@diamondcoreprocessor.com/LayerCommitter') as LayerCommitterLike | undefined
+    if (!lineage || !history || !committer) return
+
+    const segments = (lineage.explorerSegments?.() ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const parentLocSig = await history.sign({
+      domain: lineage.domain,
+      explorerSegments: () => segments,
+    })
+    const parent = await history.currentLayerAt(parentLocSig)
+    if (!parent) return
+
+    // Names are the truth. Resolve each child sig to its layer's `name`,
+    // drop the target, and pass the surviving names back. The committer
+    // re-resolves each name to its current head sig at commit time.
+    const childSigs = Array.isArray(parent.children) ? parent.children : []
+    const survivorNames: string[] = []
+    for (const sig of childSigs) {
+      const child = await history.getLayerBySig(sig)
+      if (!child || typeof child.name !== 'string') continue
+      if (child.name !== label) survivorNames.push(child.name)
+    }
+
+    const nextLayer = { ...parent, children: survivorNames }
+    await committer.update(segments, nextLayer)
+
+    EffectBus.emit('cell:removed', { cell: label, segments })
   }
 
   async #rerollSubstrate(label: string): Promise<void> {

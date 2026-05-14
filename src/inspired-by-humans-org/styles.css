@@ -1,11 +1,131 @@
+/* ── theme tokens ─────────────────────────────────────────
+   Single source of truth for the design language. All chrome
+   pulls colors, surfaces, and accents from these variables so
+   the dark + light themes share one shape. */
+
+:root {
+  /* dark (default) */
+  --bg: #050b13;
+  --bg-deep: #03070c;
+  --surface: rgba(7, 15, 24, 0.8);
+  --surface-raised: rgba(255, 255, 255, 0.04);
+  --surface-hover: rgba(158, 196, 255, 0.12);
+  --border: rgba(188, 218, 255, 0.2);
+  --border-soft: rgba(188, 218, 255, 0.14);
+  --border-strong: rgba(222, 234, 255, 0.54);
+
+  --text: #e4edfa;
+  --text-strong: #f8fbff;
+  --text-muted: rgba(228, 237, 251, 0.7);
+  --text-faint: rgba(193, 218, 255, 0.58);
+  --text-eyebrow: rgba(193, 218, 255, 0.68);
+
+  --accent: rgba(255, 255, 255, 0.92);
+  --accent-soft: rgba(255, 255, 255, 0.22);
+  --accent-track: rgba(255, 255, 255, 0.14);
+
+  --backdrop-tint: rgba(53, 92, 160, 0.28);
+  --backdrop-veil: linear-gradient(
+    180deg,
+    rgba(5, 11, 19, 0.16),
+    rgba(5, 11, 19, 0.88) 58%,
+    rgba(3, 7, 12, 0.96)
+  );
+
+  --shadow-panel: 0 24px 80px rgba(0, 0, 0, 0.34);
+  --shadow-track: 0 10px 24px rgba(0, 0, 0, 0.22);
+  --shadow-thumb: 0 2px 6px rgba(0, 0, 0, 0.4);
+
+  --radius-sm: 1rem;
+  --radius-md: 1.5rem;
+  --radius-pill: 999px;
+
+  --font-sans: system-ui, -apple-system, sans-serif;
+  --font-serif: Georgia, 'Times New Roman', serif;
+
+  --duration-quick: 0.14s;
+  --easing: ease;
+}
+
+[data-theme="light"] {
+  --bg: #f4f6fa;
+  --bg-deep: #e7ecf3;
+  --surface: rgba(255, 255, 255, 0.88);
+  --surface-raised: rgba(15, 25, 35, 0.04);
+  --surface-hover: rgba(40, 80, 140, 0.08);
+  --border: rgba(15, 25, 35, 0.14);
+  --border-soft: rgba(15, 25, 35, 0.08);
+  --border-strong: rgba(40, 70, 110, 0.32);
+
+  --text: #0f1923;
+  --text-strong: #050b13;
+  --text-muted: rgba(15, 25, 35, 0.72);
+  --text-faint: rgba(15, 25, 35, 0.5);
+  --text-eyebrow: rgba(40, 70, 110, 0.7);
+
+  --accent: rgba(20, 40, 70, 0.88);
+  --accent-soft: rgba(15, 25, 35, 0.18);
+  --accent-track: rgba(15, 25, 35, 0.12);
+
+  --backdrop-tint: rgba(120, 160, 220, 0.18);
+  --backdrop-veil: linear-gradient(
+    180deg,
+    rgba(244, 246, 250, 0.4),
+    rgba(244, 246, 250, 0.86) 58%,
+    rgba(231, 236, 243, 0.96)
+  );
+
+  --shadow-panel: 0 18px 60px rgba(20, 40, 70, 0.12);
+  --shadow-track: 0 8px 18px rgba(20, 40, 70, 0.08);
+  --shadow-thumb: 0 2px 6px rgba(20, 40, 70, 0.18);
+}
+
+/* Honor OS preference on first paint when no explicit choice
+   exists. JS replaces this with [data-theme=…] once it loads. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    --bg: #f4f6fa;
+    --bg-deep: #e7ecf3;
+    --surface: rgba(255, 255, 255, 0.88);
+    --surface-raised: rgba(15, 25, 35, 0.04);
+    --surface-hover: rgba(40, 80, 140, 0.08);
+    --border: rgba(15, 25, 35, 0.14);
+    --border-soft: rgba(15, 25, 35, 0.08);
+    --border-strong: rgba(40, 70, 110, 0.32);
+
+    --text: #0f1923;
+    --text-strong: #050b13;
+    --text-muted: rgba(15, 25, 35, 0.72);
+    --text-faint: rgba(15, 25, 35, 0.5);
+    --text-eyebrow: rgba(40, 70, 110, 0.7);
+
+    --accent: rgba(20, 40, 70, 0.88);
+    --accent-soft: rgba(15, 25, 35, 0.18);
+    --accent-track: rgba(15, 25, 35, 0.12);
+
+    --backdrop-tint: rgba(120, 160, 220, 0.18);
+    --backdrop-veil: linear-gradient(
+      180deg,
+      rgba(244, 246, 250, 0.4),
+      rgba(244, 246, 250, 0.86) 58%,
+      rgba(231, 236, 243, 0.96)
+    );
+
+    --shadow-panel: 0 18px 60px rgba(20, 40, 70, 0.12);
+    --shadow-track: 0 8px 18px rgba(20, 40, 70, 0.08);
+    --shadow-thumb: 0 2px 6px rgba(20, 40, 70, 0.18);
+  }
+}
+
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html {
   height: 100%;
-  background: #050b13;
-  color: #e4edfa;
-  font-family: system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.2s var(--easing), color 0.2s var(--easing);
 }
 
 body {
@@ -26,9 +146,10 @@ body {
   position: fixed;
   inset: 0;
   background:
-    radial-gradient(circle at top right, rgba(53, 92, 160, 0.28), transparent 34%),
-    linear-gradient(180deg, rgba(5, 11, 19, 0.16), rgba(5, 11, 19, 0.88) 58%, rgba(3, 7, 12, 0.96));
+    radial-gradient(circle at top right, var(--backdrop-tint), transparent 34%),
+    var(--backdrop-veil);
   pointer-events: none;
+  transition: background 0.2s var(--easing);
 }
 
 .track-player__panel {
@@ -38,12 +159,53 @@ body {
   gap: 1.4rem;
   width: min(58rem, 100%);
   padding: clamp(1.2rem, 3vw, 2rem);
-  border: 1px solid rgba(188, 218, 255, 0.2);
-  border-radius: 1.5rem;
-  background: rgba(7, 15, 24, 0.8);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
   backdrop-filter: blur(20px);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+  box-shadow: var(--shadow-panel);
+  transition: background 0.2s var(--easing), border-color 0.2s var(--easing);
 }
+
+/* ── theme toggle ────────────────────────────────────────── */
+
+.theme-toggle {
+  display: inline-grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface-raised);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s var(--easing), border-color 0.15s var(--easing), color 0.15s var(--easing);
+}
+
+.theme-toggle:hover {
+  background: var(--surface-hover);
+  border-color: var(--border-strong);
+  color: var(--text-strong);
+}
+
+.theme-toggle svg {
+  width: 1.05rem;
+  height: 1.05rem;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Show only the icon matching the current theme. Default (no
+   attribute) acts as dark — show the moon. */
+.theme-toggle .theme-icon-sun  { display: none; }
+.theme-toggle .theme-icon-moon { display: block; }
+
+[data-theme="light"] .theme-toggle .theme-icon-sun  { display: block; }
+[data-theme="light"] .theme-toggle .theme-icon-moon { display: none; }
 
 /* ── no-signal interlude ─────────────────────────────────── */
 
@@ -72,7 +234,7 @@ body {
   position: relative;
   z-index: 2;
   text-align: center;
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-sans);
   font-size: clamp(3rem, 14vmin, 9rem);
   font-weight: 900;
   letter-spacing: 0.25em;
@@ -91,7 +253,7 @@ body {
   right: 2.5rem;
   z-index: 3;
   padding: 0.7rem 1.6rem;
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-sans);
   font-size: 0.95rem;
   font-weight: 600;
   letter-spacing: 0.08em;
@@ -99,9 +261,9 @@ body {
   color: rgba(255, 255, 255, 0.85);
   background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s var(--easing), border-color 0.15s var(--easing);
 }
 
 .track-player__skip:hover {
@@ -115,37 +277,64 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 1rem;
 }
 
 .track-player__eyebrow,
 .track-player__label,
 .track-player__track-path,
 .track-player__track-file {
-  font-family: system-ui, sans-serif;
+  font-family: var(--font-sans);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .track-player__eyebrow {
-  color: rgba(193, 218, 255, 0.68);
+  color: var(--text-eyebrow);
   font-size: 0.76rem;
 }
 
+/* Heading + leading-icon pattern.
+   Convention: a heading keeps its content in a `__title-text`
+   span and gets a `__title-icon` sibling on its left. The
+   wrapper aligns them with a small gap so the icon reads as
+   a section marker. Future headings (h2, h3) follow the same
+   shape. */
 .track-player__title {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
   margin: 0;
   width: 100%;
-  color: rgba(228, 237, 251, 0.7);
-  font-family: Georgia, 'Times New Roman', serif;
+  color: var(--text-muted);
+  font-family: var(--font-serif);
   font-size: clamp(1.2rem, 3.5vw, 2.9rem);
   line-height: 1.1;
   font-weight: 400;
   letter-spacing: 0.04em;
 }
 
+.track-player__title-icon {
+  flex-shrink: 0;
+  width: 1em;
+  height: 1em;
+  color: var(--text-eyebrow);
+}
+
+.track-player__title-icon svg {
+  width: 100%;
+  height: 100%;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .track-player__copy {
   margin: 0;
   max-width: 48rem;
-  color: rgba(228, 237, 251, 0.8);
+  color: var(--text-muted);
   font-size: clamp(1rem, 2vw, 1.08rem);
   line-height: 1.6;
 }
@@ -157,7 +346,7 @@ body {
   gap: 1rem;
   grid-template-columns: minmax(0, 1fr);
   padding: 1rem 0 0;
-  border-top: 1px solid rgba(188, 218, 255, 0.14);
+  border-top: 1px solid var(--border-soft);
 }
 
 .track-player__label {
@@ -165,21 +354,21 @@ body {
   align-items: center;
   justify-content: space-between;
   grid-column: 1 / -1;
-  color: rgba(193, 218, 255, 0.55);
+  color: var(--text-faint);
   font-size: 0.7rem;
 }
 
 
 .track-player__track-title {
   margin-top: 0.35rem;
-  color: #f8fbff;
+  color: var(--text-strong);
   font-size: clamp(1.25rem, 3vw, 1.8rem);
   font-weight: 600;
 }
 
 .track-player__track-file {
   margin-top: 0.3rem;
-  color: rgba(193, 218, 255, 0.58);
+  color: var(--text-faint);
   font-size: 0.74rem;
   word-break: break-word;
 }
@@ -202,10 +391,10 @@ body {
   place-items: center;
   background: transparent;
   border: none;
-  color: rgba(255, 255, 255, 0.9);
+  color: var(--accent);
   cursor: pointer;
   padding: 0;
-  transition: transform 0.12s ease, opacity 0.15s ease;
+  transition: transform 0.12s var(--easing), opacity 0.15s var(--easing);
   opacity: 0.85;
 }
 
@@ -226,7 +415,7 @@ body {
   flex-shrink: 0;
   width: 1px;
   height: 1.4rem;
-  background: rgba(255, 255, 255, 0.22);
+  background: var(--accent-soft);
 }
 
 .audio-player__scrub {
@@ -249,7 +438,7 @@ body {
   position: relative;
   width: 100%;
   height: 2px;
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--accent-track);
   border-radius: 2px;
 }
 
@@ -258,7 +447,7 @@ body {
   top: 0;
   left: 0;
   height: 100%;
-  background: rgba(255, 255, 255, 0.22);
+  background: var(--accent-soft);
   border-radius: inherit;
   pointer-events: none;
 }
@@ -268,7 +457,7 @@ body {
   top: 0;
   left: 0;
   height: 100%;
-  background: rgba(255, 255, 255, 0.92);
+  background: var(--accent);
   border-radius: inherit;
   pointer-events: none;
 }
@@ -279,11 +468,11 @@ body {
   width: 11px;
   height: 11px;
   border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  background: var(--accent);
+  box-shadow: var(--shadow-thumb);
   transform: translate(-50%, -50%) scale(0.7);
   opacity: 0.85;
-  transition: opacity 0.15s ease, transform 0.15s ease;
+  transition: opacity 0.15s var(--easing), transform 0.15s var(--easing);
   pointer-events: none;
 }
 
@@ -302,32 +491,31 @@ body {
   width: 100%;
   min-height: 3.2rem;
   padding: 0.95rem 1rem;
-  border: 1px solid rgba(188, 218, 255, 0.12);
-  border-radius: 1rem;
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
   color: inherit;
   cursor: pointer;
   text-align: left;
   font: inherit;
   -webkit-tap-highlight-color: transparent;
-  transition: transform 0.14s ease, border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease;
+  transition: transform 0.14s var(--easing), border-color 0.14s var(--easing), background 0.14s var(--easing), box-shadow 0.14s var(--easing);
 }
 
 .track-player__track:hover,
 .track-player__track:focus-visible {
   transform: translateY(-1px);
-  border-color: rgba(198, 226, 255, 0.42);
-  background: linear-gradient(180deg, rgba(158, 196, 255, 0.12), rgba(255, 255, 255, 0.05));
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
+  box-shadow: var(--shadow-track);
   outline: none;
 }
 
 .track-player__track:active { transform: scale(0.98); }
 
 .track-player__track.is-active {
-  border-color: rgba(222, 234, 255, 0.54);
-  background: linear-gradient(180deg, rgba(158, 196, 255, 0.14), rgba(255, 255, 255, 0.04));
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  border-color: var(--border-strong);
+  background: var(--surface-hover);
 }
 
 
@@ -335,14 +523,14 @@ body {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  color: #f7fbff;
+  color: var(--text-strong);
   font-size: 1rem;
   font-weight: 600;
 }
 
 
 .track-player__track-path {
-  color: rgba(193, 218, 255, 0.58);
+  color: var(--text-faint);
   font-size: 0.7rem;
   word-break: break-word;
 }
@@ -351,9 +539,9 @@ body {
 
 .track-player__status {
   padding: 1rem 1.1rem;
-  border-radius: 1rem;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(232, 239, 249, 0.82);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-muted);
   font-size: 0.96rem;
 }
 
@@ -362,6 +550,11 @@ body {
 .track-player__status--error {
   border: 1px solid rgba(255, 170, 170, 0.28);
   color: rgba(255, 212, 212, 0.92);
+}
+
+[data-theme="light"] .track-player__status--error {
+  border-color: rgba(180, 40, 40, 0.32);
+  color: rgba(140, 30, 30, 0.92);
 }
 
 /* ── animations ──────────────────────────────────────────── */
@@ -389,7 +582,7 @@ body {
 
   .track-player__panel {
     width: 100%;
-    border-radius: 1rem;
+    border-radius: var(--radius-sm);
   }
 
   .track-player__title {

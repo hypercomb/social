@@ -9,16 +9,13 @@
   "activity.mesh-private": "网格 → 私密",
   "activity.undo": "撤销",
   "activity.dismiss": "关闭",
-
   "command-line.placeholder.locked": "输入单元格名称...",
   "command-line.placeholder.filter": "筛选磁贴...",
   "command-line.placeholder.slash": "输入行为...",
   "command-line.placeholder.default": "分享意图...",
-
   "palette.title": "命令面板",
   "palette.placeholder": "输入命令...",
   "palette.empty": "无匹配命令",
-
   "shortcuts.title": "参考",
   "shortcuts.close": "关闭",
   "shortcuts.filter-placeholder": "筛选命令、操作、快捷键…",
@@ -27,7 +24,6 @@
   "shortcuts.section.keyboard": "键盘快捷键",
   "shortcuts.empty": "无匹配",
   "shortcuts.chord-sep": "然后",
-
   "editor.title": "磁贴编辑器",
   "editor.drop-image": "将图片拖放到此处",
   "editor.unlink-transforms": "取消变换链接",
@@ -48,7 +44,6 @@
   "editor.search-google": "搜索Google图片",
   "editor.cancel": "取消",
   "editor.save": "保存",
-
   "controls.go-back": "返回",
   "controls.back": "返回",
   "controls.dcp": "钻石核心处理器",
@@ -86,15 +81,12 @@
   "controls.atomize-particle": "粒子分解",
   "controls.atomize-reassemble": "重新组装",
   "controls.atomize-close": "关闭原子化器",
-
   "slash.atomize-ui": "切换原子化器工具栏",
-
   "atomizer.spacing-placeholder": "例如 8px 12px",
   "atomizer.title": "原子化器",
   "atomizer.close": "关闭原子化器栏",
   "atomizer.empty": "无原子化器",
   "atomizer.reset": "重置属性",
-
   "explorer.title": "OPFS 文件浏览器",
   "explorer.entries-label": "OPFS 条目",
   "explorer.copy-package": "复制包",
@@ -109,18 +101,14 @@
   "explorer.copy": "复制",
   "explorer.remove": "删除",
   "explorer.no-entries": "无条目",
-
   "format-painter.title": "格式刷",
   "format-painter.empty": "此磁贴没有可视属性",
   "format-painter.apply": "应用到选择",
-
   "mesh.secret-placeholder": "保护您的位置",
   "mesh.secured": "已保护",
-
   "portal.title": "传送门",
   "portal.close": "关闭传送门",
   "portal.back": "返回",
-
   "action.command": "命令",
   "action.command.description": "打开此磁贴的命令面板",
   "action.edit": "编辑",
@@ -139,13 +127,11 @@
   "action.adopt.description": "将此磁贴添加到你的收藏",
   "action.block": "屏蔽",
   "action.block.description": "屏蔽此磁贴使其不再显示",
-
   "selection.move": "移动",
   "selection.cut": "剪切",
   "selection.copy": "复制",
   "selection.remove": "删除",
   "selection.paste": "粘贴",
-
   "history.title": "浏览历史",
   "history.back": "后退",
   "history.forward": "前进",
@@ -154,8 +140,6 @@
   "history.path": "路径：",
   "history.depth": "深度：",
   "history.active": "活动：",
-
-  "slash.select": "选择磁贴进行剪切/复制/移动",
   "slash.remove-builtin": "删除所选磁贴",
   "slash.help": "显示参考",
   "slash.clear": "清除活动筛选",
@@ -181,18 +165,14 @@
   "slash.record": "启动AI会议录音与实时层级编译",
   "slash.domain": "添加、删除或列出网格中继域",
   "slash.substrate": "切换新磁贴的默认背景图片",
-
   "substrate.on": "基底已启用 → {path}",
   "substrate.off": "基底已禁用",
   "substrate.here": "基底 → {path}",
-
   "toast.dismiss": "关闭",
-
   "instruction.click-to-restore": "点击恢复",
   "instruction.catalog-title": "所有说明",
   "instruction.no-instructions": "暂无说明。无人机声明说明后将显示在此处。",
   "controls.instructions": "切换说明（Ctrl+点击打开目录）",
-
   "instruction.dcp.open-processor": "打开钻石核心处理器",
   "instruction.dcp.fit-content": "将所有磁贴适应视图",
   "instruction.dcp.zoom-out": "缩小画布",
@@ -201,24 +181,11 @@
   "instruction.dcp.fullscreen": "切换全屏模式",
   "instruction.dcp.layout-mode": "在固定布局和紧凑布局之间切换",
   "instruction.dcp.instructions-toggle": "显示或隐藏所有控件的说明标签",
-
-  "trackplayer.eyebrow": "hypercomb 音频",
-  "trackplayer.title": "《Inspired by Humans》有声书",
-  "trackplayer.description": "在 <a href=\"https://inspiredbyhumans.org\" target=\"_blank\" rel=\"noopener\">inspiredbyhumans.org</a> 收听电子书",
-  "trackplayer.loading": "正在加载曲目...",
-  "trackplayer.empty": "尚未找到曲目。请将文件添加到 hypercomb-shared/tracks。",
-  "trackplayer.selected": "已选曲目",
-  "trackplayer.available": "可用曲目",
-  "trackplayer.no-signal": "无信号",
-  "trackplayer.play-prequel": "立即播放前传",
-  "trackplayer.unavailable": "曲目暂时不可用。",
-
   "confirm.delete-title": "确认删除",
   "confirm.delete-message": "您确定要删除「{name}」吗？",
   "confirm.delete-children-warning": "此项包含子项，它们也将被永久删除。",
   "confirm.delete": "删除",
   "confirm.cancel": "取消",
-
   "editor.done": "完成",
   "mesh.solo": "单人模式",
   "mesh.swarm": "群组模式",
@@ -226,7 +193,6 @@
   "selection.hide": "隐藏",
   "controls.toggle-input": "显示命令行",
   "slash.reroll": "重新生成磁贴的基底背景图片",
-
   "docs.title": "文档",
   "docs.close-sidebar": "关闭侧栏",
   "docs.open-sidebar": "打开侧栏",
@@ -236,26 +202,18 @@
   "docs.loading": "加载中...",
   "docs.main-title": "Hypercomb 文档",
   "docs.welcome-text": "从侧栏选择文档，或使用 /docs glossary 直接跳转到页面。",
-
   "command-line.install-prompt": "安装 Hypercomb",
   "command-line.create-cell": "在当前级别创建新单元格",
   "command-line.create-nested": "创建嵌套文件夹，保留父路径并留在当前级别",
   "command-line.navigate-folder": "转到文件夹，如不存在则创建",
   "command-line.filter-tiles": "按关键词实时筛选磁贴",
-
   "audio.pause": "暂停",
   "audio.play": "播放",
   "audio.seek": "拖动",
-
-  "trackplayer.close-player": "关闭播放器",
-  "trackplayer.no-signal-label": "无信号间奏",
-
   "controls.drag-to-move": "拖动以移动",
   "controls.collapse": "折叠",
   "controls.expand": "展开",
-
   "selection.drag-to-move": "拖动以移动",
-
   "breadcrumb.public": "公开",
   "breadcrumb.private": "私密",
   "breadcrumb.secure": "安全",
@@ -265,7 +223,6 @@
   "breadcrumb.installed": "已安装",
   "breadcrumb.installed-count": "已安装（{count}）",
   "breadcrumb.sync-error": "同步错误",
-
   "keymap.escape": "取消 / 关闭",
   "keymap.shortcuts": "显示键盘快捷键",
   "keymap.palette": "打开命令面板",
@@ -282,7 +239,6 @@
   "keymap.paste": "从剪贴板粘贴",
   "keymap.cut": "剪切所选磁贴",
   "keymap.remove": "删除所选磁贴",
-
   "dcp.title": "钻石核心处理器",
   "dcp.install": "安装",
   "dcp.download-package": "下载包",
@@ -351,7 +307,6 @@
   "dcp.editor-modified": "已修改",
   "dcp.editor-loading-files": "加载文件中...",
   "dcp.editor-empty": "此层无蜂群或依赖。",
-
   "cell.welcome": "欢迎",
   "cell.home": "首页",
   "cell.settings": "设置",
@@ -394,7 +349,6 @@
   "cell.meetings": "会议",
   "cell.the-depths": "深处",
   "cell.one-day": "有朝一日",
-
   "cell.assistant": "助手",
   "cell.avatars": "头像",
   "cell.background": "背景",

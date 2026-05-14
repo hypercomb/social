@@ -2,6 +2,11 @@
 import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
 import type { ClipboardService, ClipboardOp } from './clipboard.service.js'
 
+interface ClipboardEntry {
+  label: string
+  sourceSegments: readonly string[]
+}
+
 const META_FILE = '__meta__'
 
 interface SelectionLike {
@@ -178,64 +183,100 @@ export class ClipboardWorker extends Worker {
 
     const lineage = this.#lineage
     const store = this.#store
-    const segments = lineage?.explorerSegments() ?? []
+    const baseSegments = lineage?.explorerSegments() ?? []
 
     if (op === 'cut') {
       if (!store || !lineage) return
-      const sourceDir = await lineage.explorerDir()
-      if (!sourceDir) return
+      const baseDir = await lineage.explorerDir()
+      if (!baseDir) return
 
-      // Move each cell folder out of source, into store.clipboard.
-      // Skip labels that fail (don't exist, name collision in clipboard).
-      const moved: string[] = []
+      // Move each cell folder out of its source parent into store.clipboard.
+      // Labels may include `/`-separated paths — walk each into the right
+      // parent dir, then move just the leaf. Process deeper paths first so
+      // a parent isn't moved before its descendants are extracted.
+      const sorted = [...labels].sort((a, b) => b.split('/').length - a.split('/').length)
+      const moved: ClipboardEntry[] = []
+      const affectedParents = new Map<string, readonly string[]>()
       // Clear any prior clipboard contents first so the new cut owns the dir.
       await clearDirectory(store.clipboard)
-      for (const label of labels) {
-        const ok = await moveCellFolder(sourceDir, store.clipboard, label)
-        if (ok) moved.push(label)
+      for (const label of sorted) {
+        const pathSegs = label.split('/').filter(Boolean)
+        if (pathSegs.length === 0) continue
+        const leaf = pathSegs[pathSegs.length - 1]
+        const parentSegs: string[] = [...baseSegments, ...pathSegs.slice(0, -1)]
+        let sourceParent: FileSystemDirectoryHandle | null = baseDir
+        for (let i = 0; i < pathSegs.length - 1 && sourceParent; i++) {
+          try {
+            sourceParent = await sourceParent.getDirectoryHandle(pathSegs[i], { create: false })
+          } catch {
+            sourceParent = null
+          }
+        }
+        if (!sourceParent) continue
+        const ok = await moveCellFolder(sourceParent, store.clipboard, leaf)
+        if (ok) {
+          moved.push({ label: leaf, sourceSegments: parentSegs })
+          affectedParents.set(parentSegs.join('/'), parentSegs)
+        }
       }
       if (moved.length === 0) return
 
-      this.#clipboardSvc?.capture(moved, segments, 'cut')
+      this.#clipboardSvc?.captureEntries(moved, 'cut')
 
       // Bump the FS-change marker so renders triggered by the cascade
       // below (cursor.onNewLayer) see the post-mutation OPFS state.
-      EffectBus.emit('fs:changed', { segments: [...segments] })
+      EffectBus.emit('fs:changed', { segments: [...baseSegments] })
 
-      // ONE layer commit reflecting the new children list. Per-cell
-      // cell:removed events fire AFTER so LayerCommitter's per-event
+      // ONE layer commit per affected parent reflecting its new children list.
+      // Per-cell cell:removed events fire AFTER so LayerCommitter's per-event
       // commits dedup against the already-committed bulk state.
       const committer = this.#committer
       if (committer) {
-        const newChildren = await listChildNames(sourceDir)
-        await committer.update(segments, { children: newChildren })
+        for (const parentSegs of affectedParents.values()) {
+          const parentDir = await lineage.tryResolve(parentSegs, store.hypercombRoot)
+          if (!parentDir) continue
+          const newChildren = await listChildNames(parentDir)
+          await committer.update(parentSegs, { children: newChildren })
+        }
       }
 
-      for (const label of moved) {
-        EffectBus.emit('cell:removed', { cell: label, segments: [...segments] })
+      for (const entry of moved) {
+        EffectBus.emit('cell:removed', { cell: entry.label, segments: [...entry.sourceSegments] })
       }
       this.#selection?.clear()
 
-      EffectBus.emit('clipboard:captured', { labels: [...moved], op: 'cut' })
+      EffectBus.emit('clipboard:captured', { labels: moved.map(e => e.label), op: 'cut' })
 
       await new hypercomb().act()
 
-      void this.#persistMeta('cut', moved, segments)
+      void this.#persistMetaEntries('cut', moved)
       return
     }
 
-    // copy: leave folders in place
-    this.#clipboardSvc?.capture(labels, segments, 'copy')
-    EffectBus.emit('clipboard:captured', { labels: [...labels], op: 'copy' })
-    void this.#persistMeta('copy', labels, segments)
+    // copy: leave folders in place. Walk paths to record the exact source
+    // parent per item so paste can find the original.
+    const copyEntries: ClipboardEntry[] = []
+    for (const label of labels) {
+      const pathSegs = label.split('/').filter(Boolean)
+      if (pathSegs.length === 0) continue
+      const leaf = pathSegs[pathSegs.length - 1]
+      copyEntries.push({
+        label: leaf,
+        sourceSegments: [...baseSegments, ...pathSegs.slice(0, -1)],
+      })
+    }
+    if (copyEntries.length === 0) return
+    this.#clipboardSvc?.captureEntries(copyEntries, 'copy')
+    EffectBus.emit('clipboard:captured', { labels: copyEntries.map(e => e.label), op: 'copy' })
+    void this.#persistMetaEntries('copy', copyEntries)
   }
 
-  async #persistMeta(op: ClipboardOp, labels: string[], segments: readonly string[]): Promise<void> {
+  async #persistMetaEntries(op: ClipboardOp, entries: readonly ClipboardEntry[]): Promise<void> {
     const store = this.#store
     if (!store) return
     await writeMeta(store.clipboard, {
       op,
-      items: labels.map(label => ({ label, sourceSegments: [...segments] })),
+      items: entries.map(e => ({ label: e.label, sourceSegments: [...e.sourceSegments] })),
     })
   }
 

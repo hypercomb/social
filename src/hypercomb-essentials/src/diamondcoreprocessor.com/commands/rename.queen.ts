@@ -7,7 +7,7 @@ import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
  *
  * Syntax:
  *   /rename newName                     — rename currently selected tile
- *   /select[old-name]/rename newName    — chained: select then rename
+ *   [old-name]/rename newName           — chained: select then rename
  *
  * The rename operation:
  * 1. Reads all content from the old directory

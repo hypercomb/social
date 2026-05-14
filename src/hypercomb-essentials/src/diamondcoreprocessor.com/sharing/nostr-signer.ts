@@ -6,6 +6,39 @@ const FALLBACK_DEV_SECRET_KEY = 'e9f4f1f67f38a46b71122b81e821fa1ca797c9cf50ae6a3
 
 export class NostrSigner {
 
+  /**
+   * Hex-encoded public key derived from whatever the signer uses to
+   * sign — either the NIP-07 extension's published pubkey, or the
+   * derived pubkey from the resolved secret. Caches the value once
+   * resolved; returns null if no signer is available.
+   *
+   * Used by paired-channel.drone to identify "am I the host?" (compare
+   * to the channel's hostPubkey).
+   */
+  public getPublicKeyHex = async (): Promise<string | null> => {
+    if (this.#cachedPubkey) return this.#cachedPubkey
+    const anyWin = window as any
+    if (anyWin?.nostr?.getPublicKey) {
+      try {
+        const pk = await anyWin.nostr.getPublicKey()
+        if (typeof pk === 'string' && /^[0-9a-f]{64}$/i.test(pk)) {
+          this.#cachedPubkey = pk.toLowerCase()
+          return this.#cachedPubkey
+        }
+      } catch { /* fall through */ }
+    }
+    const secretHex = this.resolveSecretKeyHex()
+    if (!secretHex) return null
+    try {
+      const sk = this.hexToBytes(secretHex)
+      const pk = getPublicKey(sk as any)
+      this.#cachedPubkey = pk.toLowerCase()
+      return this.#cachedPubkey
+    } catch { return null }
+  }
+
+  #cachedPubkey: string | null = null
+
   public signEvent = async (evt: NostrEvent): Promise<NostrEvent> => {
     // already signed
     if (evt?.id && evt?.pubkey && evt?.sig) return evt

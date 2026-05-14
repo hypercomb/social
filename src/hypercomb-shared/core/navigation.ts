@@ -18,23 +18,93 @@ export class Navigation extends hypercomb {
   // reads
   // ----------------------------------
 
-  // normalized segments (good for actions/cells)
+  // ----------------------------------
+  // bracket selection grammar (canonical = query-string form)
+  //
+  //   /parent?[a,b,c]     — preferred: brackets in the query string,
+  //                         pathname stays clean, never mangled by
+  //                         routers / proxies / URL encoders.
+  //   /parent/[a,b,c]     — legacy path-tail form, kept as a fallback
+  //                         reader so older shared links still resolve.
+  //   #name / #(a,b,c)    — legacy hash form, fallback below.
+  //
+  // All three are recognised by `getSelections()`. The bracket content
+  // is stripped from `segments()` / `segmentsRaw()` so callers walking
+  // the path don't see the selection markup. The writer side
+  // (replaceSelections) still uses the hash form for now — migrating
+  // to query is a follow-up so dashboard / paste-URL flows can be
+  // tested against the query form first.
+  // ----------------------------------
+
+  // Match `[a, b, c]` or `[a,b,c]` exactly (brackets included).
+  private readonly bracketRe = /^\[(.+)\]$/
+
+  // Parse the query string for the `?[a,b,c]` bracket form. Returns
+  // the parsed name list (possibly empty) or null when the search
+  // doesn't carry a bracket. URL-encoded brackets are accepted via
+  // safeDecode so paste from any encoder works.
+  private readonly parseQueryBracket = (): string[] | null => {
+    const raw = window.location.search ?? ''
+    if (!raw) return null
+    const trimmed = raw.startsWith('?') ? raw.slice(1) : raw
+    const decoded = this.safeDecode(trimmed).trim()
+    const m = this.bracketRe.exec(decoded)
+    if (!m) return null
+    return m[1].split(',').map(s => this.cleanSegment(s)).filter(Boolean)
+  }
+
+  // Parse current pathname into { pathSegments (no bracket), bracket (names or null) }.
+  // Query-string form wins; falls back to legacy path-tail form.
+  private readonly parsePath = (): { pathSegments: string[]; bracket: string[] | null } => {
+    const raw = window.location.pathname.split('/').filter(Boolean)
+
+    // Query-string form: pathname stays as-is, bracket comes from `?[...]`.
+    const queryBracket = this.parseQueryBracket()
+    if (queryBracket) return { pathSegments: raw, bracket: queryBracket }
+
+    // Legacy path-tail form: last segment is `[a,b,c]`.
+    if (raw.length === 0) return { pathSegments: [], bracket: null }
+    const last = this.safeDecode(raw[raw.length - 1] ?? '')
+    const m = this.bracketRe.exec(last.trim())
+    if (!m) return { pathSegments: raw, bracket: null }
+    const inner = m[1]
+    const names = inner.split(',').map(s => this.cleanSegment(s)).filter(Boolean)
+    return { pathSegments: raw.slice(0, -1), bracket: names }
+  }
+
+  // normalized segments (good for actions/cells); bracket segment stripped
   public segments = (): string[] => {
-    const raw = window.location.pathname.split('/').filter(Boolean)
-    return raw.map(this.cleanSegment).filter(Boolean)
+    const { pathSegments } = this.parsePath()
+    return pathSegments.map(this.cleanSegment).filter(Boolean)
   }
 
-  // raw decoded segments (good for explorer folder names)
+  // raw decoded segments (good for explorer folder names); bracket segment stripped
   public segmentsRaw = (): string[] => {
-    const raw = window.location.pathname.split('/').filter(Boolean)
-    return raw.map(this.safeDecode).map(s => (s ?? '').trim()).filter(Boolean)
+    const { pathSegments } = this.parsePath()
+    return pathSegments.map(this.safeDecode).map(s => (s ?? '').trim()).filter(Boolean)
   }
 
   // ----------------------------------
-  // selection (hash) helpers
+  // selection helpers
+  //   Path bracket (`/parent/[a,b]`) wins over hash form (`#(a,b)`).
+  //   Hash form remains supported for back-compat.
   // ----------------------------------
+
+  /** True iff the current URL path carries a `[...]` selection segment.
+   *  Lets URL-driven consumers (auto-open popup on dashboard click)
+   *  distinguish "user navigated here with a selection intent" from
+   *  "user is just here and might have prior hash-form selection." */
+  public readonly hasBracketSelection = (): boolean => {
+    const { bracket } = this.parsePath()
+    return !!(bracket && bracket.length > 0)
+  }
 
   public readonly getSelections = (): string[] => {
+    // Path-bracket form takes precedence — it's the canonical / shareable
+    // representation. Hash form survives as a back-compat reader.
+    const { bracket } = this.parsePath()
+    if (bracket && bracket.length > 0) return bracket
+
     const raw = window.location.hash ?? ''
     const h = raw.startsWith('#') ? raw.slice(1) : raw
     if (!h.trim()) return []

@@ -59,8 +59,11 @@ export class MousewheelZoomInput {
   private onWheel = (event: WheelEvent): void => {
     if (!this.zoom || !this.canvas) return
 
-    // bail if another interaction owns the gate
-    if (this.gate?.active) return
+    // Bail only when a transient interaction owns the gate (pan, touch,
+    // selection in flight). The sticky `locked` state (lock button or
+    // editor overlay) falls through to zoom-in-place below, so the wheel
+    // can always emit `viewport:manual` and escape a fit-lock trap.
+    if (this.gate?.owner) return
 
     // bail if the event is aimed at a UI surface that wants to consume
     // wheel itself (scrollable panels marked [data-consumes-wheel]).
@@ -76,7 +79,13 @@ export class MousewheelZoomInput {
       event.clientY < rect.top || event.clientY > rect.bottom
     ) return
 
-    const pivot = { x: event.clientX, y: event.clientY }
+    // When locked, ignore the cursor pivot and zoom at the canvas centre
+    // so the viewport doesn't drift under a fixed overlay (editor) or
+    // the lock-button mode. The wheel still reaches zoomToScale /
+    // zoomByFactor, which emit `viewport:manual` and break any fit-lock.
+    const pivot = this.gate?.locked
+      ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
+      : { x: event.clientX, y: event.clientY }
     const zoomIn = event.deltaY < 0
 
     if (event.ctrlKey || event.metaKey) {

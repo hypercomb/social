@@ -163,6 +163,17 @@ export class PixiHostWorker extends Worker {
       const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
       const pan = vp?.lastPan
       app.stage.position.set(cx + (pan?.dx ?? 0), cy + (pan?.dy ?? 0))
+
+      // If the saved zoom was a fit, recompute it for the new viewport.
+      // The fit's saved (cx, cy) was derived from the previous safe
+      // area (header + control pill bounding rects + window size); on
+      // resize/rotation/fullscreen those change, and applying the
+      // stale coords leaves the content shrunk and off-center. Refit
+      // against the new viewport produces a clean centered fit.
+      if (vp?.lastZoom?.fit) {
+        const zoom = (window as any).ioc?.get('@diamondcoreprocessor.com/ZoomDrone')
+        zoom?.zoomToFit?.(true)
+      }
     }
 
     // Pixi's ResizePlugin defers renderer.resize() via requestAnimationFrame

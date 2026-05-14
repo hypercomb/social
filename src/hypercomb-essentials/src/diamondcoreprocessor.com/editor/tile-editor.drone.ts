@@ -156,6 +156,16 @@ export class TileEditorDrone {
     if (!store || !service || !imageEditor || !settings) return
     if (service.mode !== 'editing') return
 
+    // capture cell name up front so we can emit tile:saved if save succeeds.
+    // The whole save body runs inside try/finally — without this guarantee
+    // a thrown step (image capture, OPFS write, etc.) would leave the
+    // editor open and the InputGate locked, permanently blocking zoom.
+    let savedCell = service.cell
+    let saveSucceeded = false
+    let wasNewCell = false
+    let renamed = false
+
+    try {
     const props: Record<string, unknown> = { ...service.properties }
     const currentOrientation = imageEditor.orientation ?? 'point-top'
 
@@ -242,28 +252,24 @@ export class TileEditorDrone {
 
     // 5. rename if the user changed the name
     const pendingName = service.pendingName
-    let savedCell = service.cell
-    let renamed = false
     if (pendingName && pendingName !== savedCell) {
       const result = await this.#renameCell(savedCell, pendingName, store, index, propsSig)
       if (result) { savedCell = pendingName; renamed = true }
     }
 
-    const wasNewCell = service.isNewCell
+    wasNewCell = service.isNewCell
+    saveSucceeded = true
+    } finally {
+      imageEditor.destroy()
+      service.close()
+    }
 
-    // 6. cleanup
-    imageEditor.destroy()
-    service.close()
-
-    // 7. notify — new cells use the fast incremental path (cell:added), which
-    // renders the tile immediately and fire-and-forget loads the image from
-    // OPFS (already written above). tile:saved's full directory rescan is only
-    // needed for existing cells whose cached image needs to be replaced.
-    // Skip cell:added for new cells that were renamed — #renameCell already emitted it.
-    if (wasNewCell && !renamed) {
-      EffectBus.emit<{ cell: string }>('cell:added', { cell: savedCell })
-    } else if (!wasNewCell) {
-      EffectBus.emit<{ cell: string }>('tile:saved', { cell: savedCell })
+    if (saveSucceeded) {
+      if (wasNewCell && !renamed) {
+        EffectBus.emit<{ cell: string }>('cell:added', { cell: savedCell })
+      } else if (!wasNewCell) {
+        EffectBus.emit<{ cell: string }>('tile:saved', { cell: savedCell })
+      }
     }
   }
 

@@ -15,12 +15,11 @@ import { DocsOverlayComponent } from "@hypercomb/shared/ui/docs-overlay/docs-ove
 import { HistoryViewerComponent } from "@hypercomb/shared/ui/history-viewer/history-viewer.component"
 import { NotesStripComponent } from "@hypercomb/shared/ui/notes-strip/notes-strip.component"
 import { NotesViewerComponent } from "@hypercomb/shared/ui/notes-viewer/notes-viewer.component"
-import { WebsiteViewComponent } from "@hypercomb/shared/ui/website-view/website-view.component"
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent, WebsiteViewComponent],
+  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })

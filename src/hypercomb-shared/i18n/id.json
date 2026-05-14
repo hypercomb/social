@@ -9,16 +9,13 @@
   "activity.mesh-private": "mesh → privat",
   "activity.undo": "Urungkan",
   "activity.dismiss": "Tutup",
-
   "command-line.placeholder.locked": "masukkan nama sel...",
   "command-line.placeholder.filter": "filter ubin...",
   "command-line.placeholder.slash": "ketik perilaku...",
   "command-line.placeholder.default": "bagikan niat...",
-
   "palette.title": "Palet Perintah",
   "palette.placeholder": "Ketik perintah...",
   "palette.empty": "Tidak ada perintah yang cocok",
-
   "shortcuts.title": "Referensi",
   "shortcuts.close": "Tutup",
   "shortcuts.filter-placeholder": "Filter perintah, operasi, pintasan…",
@@ -27,7 +24,6 @@
   "shortcuts.section.keyboard": "Pintasan Keyboard",
   "shortcuts.empty": "Tidak ada kecocokan",
   "shortcuts.chord-sep": "lalu",
-
   "editor.title": "editor ubin",
   "editor.drop-image": "letakkan gambar di sini",
   "editor.unlink-transforms": "putuskan tautan transformasi",
@@ -48,7 +44,6 @@
   "editor.search-google": "Cari di Google Gambar",
   "editor.cancel": "batal",
   "editor.save": "simpan",
-
   "controls.go-back": "kembali",
   "controls.back": "kembali",
   "controls.dcp": "prosesor inti berlian",
@@ -86,15 +81,12 @@
   "controls.atomize-particle": "pembongkaran partikel",
   "controls.atomize-reassemble": "rakit ulang",
   "controls.atomize-close": "tutup atomizer",
-
   "slash.atomize-ui": "alihkan bilah atomizer",
-
   "atomizer.spacing-placeholder": "mis. 8px 12px",
   "atomizer.title": "atomizer",
   "atomizer.close": "tutup bilah atomizer",
   "atomizer.empty": "tidak ada atomizer",
   "atomizer.reset": "atur ulang properti",
-
   "explorer.title": "Penjelajah OPFS",
   "explorer.entries-label": "entri OPFS",
   "explorer.copy-package": "Salin paket",
@@ -109,18 +101,14 @@
   "explorer.copy": "salin",
   "explorer.remove": "hapus",
   "explorer.no-entries": "tidak ada entri",
-
   "format-painter.title": "Salin Format",
   "format-painter.empty": "Tidak ada properti visual pada ubin ini",
   "format-painter.apply": "Terapkan ke pilihan",
-
   "mesh.secret-placeholder": "amankan lokasi Anda",
   "mesh.secured": "diamankan",
-
   "portal.title": "portal",
   "portal.close": "tutup portal",
   "portal.back": "kembali",
-
   "action.command": "perintah",
   "action.command.description": "Buka palet perintah untuk ubin ini",
   "action.edit": "edit",
@@ -139,13 +127,11 @@
   "action.adopt.description": "Tambahkan ubin ini ke koleksi Anda",
   "action.block": "blokir",
   "action.block.description": "Blokir ubin ini agar tidak muncul di tampilan Anda",
-
   "selection.move": "pindahkan",
   "selection.cut": "potong",
   "selection.copy": "salin",
   "selection.remove": "hapus",
   "selection.paste": "tempel",
-
   "history.title": "riwayat penelusuran",
   "history.back": "kembali",
   "history.forward": "maju",
@@ -154,8 +140,6 @@
   "history.path": "jalur:",
   "history.depth": "kedalaman:",
   "history.active": "aktif:",
-
-  "slash.select": "pilih ubin untuk potong/salin/pindah",
   "slash.remove-builtin": "hapus ubin terpilih",
   "slash.help": "Tampilkan referensi",
   "slash.clear": "Hapus filter aktif",
@@ -181,18 +165,14 @@
   "slash.record": "Mulai perekaman rapat AI dengan kompilasi hierarki langsung",
   "slash.domain": "Tambah, hapus, atau daftarkan domain relay mesh",
   "slash.substrate": "Alihkan gambar latar default untuk ubin baru",
-
   "substrate.on": "substrat aktif → {path}",
   "substrate.off": "substrat nonaktif",
   "substrate.here": "substrat → {path}",
-
   "toast.dismiss": "Tutup",
-
   "instruction.click-to-restore": "klik untuk memulihkan",
   "instruction.catalog-title": "Semua Instruksi",
   "instruction.no-instructions": "Tidak ada instruksi tersedia. Drone dapat mendeklarasikan instruksi untuk ditampilkan di sini.",
   "controls.instructions": "Alihkan instruksi (Ctrl+Klik untuk katalog)",
-
   "instruction.dcp.open-processor": "Buka prosesor inti berlian",
   "instruction.dcp.fit-content": "Sesuaikan semua ubin ke tampilan",
   "instruction.dcp.zoom-out": "Perkecil kanvas",
@@ -201,24 +181,11 @@
   "instruction.dcp.fullscreen": "Alihkan mode layar penuh",
   "instruction.dcp.layout-mode": "Beralih antara tata letak tersemat dan padat",
   "instruction.dcp.instructions-toggle": "Tampilkan atau sembunyikan label instruksi pada semua kontrol",
-
-  "trackplayer.eyebrow": "audio hypercomb",
-  "trackplayer.title": "Buku audio \u201cInspired by Humans\u201d",
-  "trackplayer.description": "Dengarkan e-book di <a href=\"https://inspiredbyhumans.org\" target=\"_blank\" rel=\"noopener\">inspiredbyhumans.org</a>",
-  "trackplayer.loading": "Memuat trek...",
-  "trackplayer.empty": "Tidak ada trek ditemukan. Tambahkan file ke hypercomb-shared/tracks.",
-  "trackplayer.selected": "Trek terpilih",
-  "trackplayer.available": "Trek tersedia",
-  "trackplayer.no-signal": "tidak ada sinyal",
-  "trackplayer.play-prequel": "putar prekuel sekarang",
-  "trackplayer.unavailable": "Trek tidak tersedia saat ini.",
-
   "confirm.delete-title": "Konfirmasi Penghapusan",
   "confirm.delete-message": "Apakah Anda yakin ingin menghapus \"{name}\"?",
   "confirm.delete-children-warning": "Item ini berisi anak yang juga akan dihapus secara permanen.",
   "confirm.delete": "Hapus",
   "confirm.cancel": "Batal",
-
   "editor.done": "selesai",
   "mesh.solo": "mode solo",
   "mesh.swarm": "mode kawanan",
@@ -226,7 +193,6 @@
   "selection.hide": "sembunyikan",
   "controls.toggle-input": "tampilkan baris perintah",
   "slash.reroll": "Acak ulang gambar latar substrat pada ubin",
-
   "docs.title": "Dokumentasi",
   "docs.close-sidebar": "tutup bilah samping",
   "docs.open-sidebar": "buka bilah samping",
@@ -236,26 +202,18 @@
   "docs.loading": "Memuat...",
   "docs.main-title": "Dokumentasi Hypercomb",
   "docs.welcome-text": "Pilih dokumen dari bilah samping atau gunakan /docs glossary untuk langsung menuju halaman.",
-
   "command-line.install-prompt": "Instal Hypercomb",
   "command-line.create-cell": "Buat sel baru di level saat ini",
   "command-line.create-nested": "Buat folder bertingkat, tetap di level saat ini dengan jalur induk dipertahankan",
   "command-line.navigate-folder": "Buka folder, buat jika belum ada",
   "command-line.filter-tiles": "Filter ubin langsung berdasarkan kata kunci",
-
   "audio.pause": "jeda",
   "audio.play": "putar",
   "audio.seek": "cari",
-
-  "trackplayer.close-player": "tutup pemutar",
-  "trackplayer.no-signal-label": "interlude tanpa sinyal",
-
   "controls.drag-to-move": "seret untuk memindahkan",
   "controls.collapse": "ciutkan",
   "controls.expand": "perluas",
-
   "selection.drag-to-move": "seret untuk memindahkan",
-
   "breadcrumb.public": "publik",
   "breadcrumb.private": "privat",
   "breadcrumb.secure": "aman",
@@ -265,7 +223,6 @@
   "breadcrumb.installed": "terinstal",
   "breadcrumb.installed-count": "terinstal ({count})",
   "breadcrumb.sync-error": "kesalahan sinkronisasi",
-
   "keymap.escape": "Batal / tutup",
   "keymap.shortcuts": "Tampilkan pintasan keyboard",
   "keymap.palette": "Buka palet perintah",
@@ -282,7 +239,6 @@
   "keymap.paste": "Tempel dari papan klip",
   "keymap.cut": "Potong ubin terpilih",
   "keymap.remove": "Hapus ubin terpilih",
-
   "dcp.title": "Prosesor Inti Berlian",
   "dcp.install": "Instal",
   "dcp.download-package": "Unduh paket",
@@ -351,7 +307,6 @@
   "dcp.editor-modified": "dimodifikasi",
   "dcp.editor-loading-files": "Memuat file...",
   "dcp.editor-empty": "Tidak ada lebah atau dependensi di lapisan ini.",
-
   "cell.welcome": "selamat datang",
   "cell.home": "beranda",
   "cell.settings": "pengaturan",
@@ -394,7 +349,6 @@
   "cell.meetings": "pertemuan",
   "cell.the-depths": "kedalaman",
   "cell.one-day": "suatu hari",
-
   "cell.assistant": "asisten",
   "cell.avatars": "avatar",
   "cell.background": "latar",

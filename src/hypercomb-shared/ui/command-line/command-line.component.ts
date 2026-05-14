@@ -16,7 +16,8 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { VoiceInputService } from '../../core/voice-input.service'
 import type { CommandLineBehavior, CommandLineBehaviorMeta, CommandLineOperation } from './command-line-behavior'
 import { ShiftEnterNavigateBehavior } from './shift-enter-navigate.behavior'
-import { BatchCreateBehavior } from './batch-create.behavior'
+import { BracketBehavior } from './bracket.behavior'
+import { PasteUrlNavigateBehavior } from './paste-url-navigate.behavior'
 import { RemoveCellBehavior } from './remove-cell.behavior'
 import { GoParentBehavior } from './go-parent.behavior'
 import { CutPasteBehavior } from './cut-paste.behavior'
@@ -25,7 +26,6 @@ import { SlashBehaviourBehavior } from './slash-behaviour.behavior'
 import { SELECT_OPS } from './select-ops'
 
 const BUILTIN_SLASH: { behaviour: { name: string; description: string; descriptionKey: string }; provider: null }[] = [
-  { behaviour: { name: 'select', description: 'select tiles for cut/copy/move', descriptionKey: 'slash.select' }, provider: null },
   { behaviour: { name: 'remove', description: 'remove selected tiles', descriptionKey: 'slash.remove-builtin' }, provider: null },
 ]
 
@@ -39,31 +39,40 @@ const TAG_ASSIGN_RE = /^([^:]+):([^(]+)(?:\(([^)]+)\))?$/
 const BRACKET_TAG_RE = /^([^\[\/!#~]+):\[(.+?)\](.*)$/
 
 /**
- * Bracket commands — any `/command[items]` that is internally a select operation.
- * `/format[abc]` is a shorthand for `/select[abc]/format`, etc.
- * The regex matches the prefix; `normalizeSelectInput` rewrites to `/select[`.
+ * Brackets `[...]` are the selection grouping primitive. `[a,b]/cut` selects
+ * the group then cuts. Bare `[a,b]` (no op) is interpreted by
+ * `BracketBehavior` as create/delete/tag at the current level — so the
+ * Enter handler routes that case through to the behavior rather than calling
+ * `executeSelectCommand`. `/format[abc]` is a legacy shorthand for
+ * `[abc]/format`, and `/select[...]` is preserved for backward compat — both
+ * normalise to canonical `/select[...]`.
  */
 const BRACKET_CMD_RE = /^\/(select|format|fmt|fp)\[/i
-/** Normalise any bracket command to `/select[...` form for shared parsing. */
+/** Normalise any bracket-primitive input to canonical `/select[...` form. */
 function normalizeSelectInput(v: string): string {
   if (v.match(/^\/select\[/)) return v
 
-  // Bracket-first syntax: [items]/op... → /select[items]/op...
+  // Bracket-first syntax: brackets are the selection grouping primitive.
   if (v.startsWith('[')) {
     const close = v.indexOf(']')
-    if (close > 1 && v[close + 1] === '/') {
+    // Open bracket — still typing the selection group
+    if (close < 0) return '/select' + v
+
+    if (v[close + 1] === '/') {
       const afterSlash = v.slice(close + 2)
       const nextSlash = afterSlash.indexOf('/')
       const firstSeg = (nextSlash === -1 ? afterSlash : afterSlash.slice(0, nextSlash)).toLowerCase().replace(/\(.*$/, '')
-      if (SELECT_OPS.has(firstSeg)) {
-        const items = v.slice(1, close)
-        const tail = firstSeg === 'select'
-          ? (nextSlash === -1 ? '' : afterSlash.slice(nextSlash))
-          : '/' + afterSlash
-        return '/select[' + items + ']' + tail
-      }
+      const items = v.slice(1, close)
+      const tail = firstSeg === 'select'
+        ? (nextSlash === -1 ? '' : afterSlash.slice(nextSlash))
+        : '/' + afterSlash
+      return '/select[' + items + ']' + tail
     }
-    return v
+
+    // Closed bracket, no op — bare grouping (BracketBehavior will
+    // act on Enter, but the live context still gets select treatment so
+    // existing tile names highlight as the user types).
+    return '/select' + v
   }
 
   const m = v.match(/^\/(format|fmt|fp)\[/i)
@@ -79,16 +88,24 @@ function normalizeSelectInput(v: string): string {
   return '/select[' + rest.slice(0, bracketClose) + ']/' + (op === 'fmt' || op === 'fp' ? 'format' : op) + rest.slice(bracketClose + 1)
 }
 
-/** Check if input is any form of select command (slash-first or bracket-first). */
+/** Any `[`-prefixed (or `/select[`-prefixed) input is a select context. */
 function isSelectInput(v: string): boolean {
   if (BRACKET_CMD_RE.test(v)) return true
   if (!v.startsWith('[')) return false
   const close = v.indexOf(']')
-  if (close <= 1 || v[close + 1] !== '/') return false
-  const afterSlash = v.slice(close + 2)
-  const nextSlash = afterSlash.indexOf('/')
-  const firstSeg = (nextSlash === -1 ? afterSlash : afterSlash.slice(0, nextSlash)).toLowerCase().replace(/\(.*$/, '')
-  return SELECT_OPS.has(firstSeg)
+  // Reject literal `[]` — degenerate case
+  if (close === 1) return false
+  return true
+}
+
+/** True when the input is a bracket-primitive that should EXECUTE on Enter
+ *  through `executeSelectCommand` (vs. being routed to BracketBehavior). */
+function isSelectExecution(v: string): boolean {
+  if (/^\/select\[/.test(v)) return true
+  if (!v.startsWith('[')) return BRACKET_CMD_RE.test(v)
+  const close = v.indexOf(']')
+  // Bare `[a,b]` (closed, no op) — BracketBehavior owns the Enter
+  return close > 1 && v[close + 1] === '/'
 }
 
 const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
@@ -269,14 +286,23 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     () => this.cellProvider.suggestions()
   )
 
-  // pluggable behaviors — validated at construction, no overlapping operations
+  // pluggable behaviors — validated at construction, no overlapping operations.
+  //
+  // Order matters: the first behavior whose `match()` returns true claims
+  // the input. PasteUrlNavigateBehavior MUST come before BracketBehavior
+  // because both can match bracket-bearing input — URL-shaped pastes
+  // (`/dolphin?[model]`, `http://host/dolphin?[model]`) go through the
+  // URL behavior; bare typed brackets go through BracketBehavior, which
+  // internally dispatches between select (items exist) and create /
+  // delete / tag based on the parse.
   #behaviors: CommandLineBehavior[] = this.#validateBehaviors([
     new GoParentBehavior(),
     new SlashBehaviourBehavior(),
     new RemoveCellBehavior(),
     new CutPasteBehavior(),
     new HashMarkerBehavior(),
-    new BatchCreateBehavior(),
+    new PasteUrlNavigateBehavior(),
+    new BracketBehavior(),
     new ShiftEnterNavigateBehavior()
   ])
 
@@ -1390,8 +1416,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    // bracket command execution (/select[, /format[, /fmt[, /fp[)
-    if (isSelectInput(v)) {
+    // bracket-primitive execution: `[a,b]/op`, `/select[…]`, or `/format[…]`.
+    // Bare `[a,b]` (no op) is left for BracketBehavior below.
+    if (isSelectExecution(v)) {
       this.shell?.setValue(normalizeSelectInput(v))
       this.value.set(this.shell?.value() ?? '')
       void this.#executeSelectCommand()
@@ -1546,7 +1573,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (bracketClose < 0) { return } // brackets not closed yet, no-op
 
     const inner = v.slice(v.indexOf('[') + 1, bracketClose)
-    const labels = inner.split(',').map(s => this.completions.normalize(this.#stripTagSuffix(s.trim()))).filter(Boolean)
+    const labels = inner.split(',').map(s => this.#parseSelectionItem(s)).filter(Boolean)
     if (labels.length === 0) { this.clear(); return }
 
     const afterBracket = v.slice(bracketClose + 1)
@@ -1634,10 +1661,25 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const lineage = this.lineage
       const dir = await lineage.explorerDir()
       if (dir) {
-        for (const label of labels) {
+        // Sort by path depth descending so nested cells are removed before
+        // their ancestors — otherwise removing the parent renders the
+        // descendant path unresolvable.
+        const sorted = [...labels].sort((a, b) => b.split('/').length - a.split('/').length)
+        for (const label of sorted) {
+          const segments = label.split('/').filter(Boolean)
+          const leaf = segments[segments.length - 1]
+          let parent: FileSystemDirectoryHandle | null = dir
+          for (let i = 0; i < segments.length - 1 && parent; i++) {
+            try {
+              parent = await parent.getDirectoryHandle(segments[i], { create: false })
+            } catch {
+              parent = null
+            }
+          }
+          if (!parent) continue
           try {
-            await dir.removeEntry(label, { recursive: true })
-            EffectBus.emit('cell:removed', { cell: label })
+            await parent.removeEntry(leaf, { recursive: true })
+            EffectBus.emit('cell:removed', { cell: leaf })
           } catch { /* skip */ }
         }
       }
@@ -2212,8 +2254,20 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return colon >= 0 ? raw.slice(0, colon) : raw
   }
 
+  /** Parse one bracket item — supports path syntax `parent/child`. Returns the
+   *  normalized path (segments joined by `/`). Empty if the item normalizes
+   *  to nothing. */
+  #parseSelectionItem(raw: string): string {
+    return this.#stripTagSuffix(raw.trim())
+      .split('/')
+      .map(seg => this.completions.normalize(seg.trim()))
+      .filter(Boolean)
+      .join('/')
+  }
+
   /** Labels derived from value — computed. During selection phase, only includes
-   *  committed labels (before last comma) + the current partial IFF it exactly matches a cell name. */
+   *  committed labels (before last comma) + the current partial IFF it exactly
+   *  matches a cell name. Each label may be a `/`-separated path. */
   #selectLabels = computed<readonly string[]>(() => {
     const v = normalizeSelectInput(this.value())
     if (!v.match(/^\/select\[/)) return []
@@ -2222,17 +2276,18 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // Bracket closed — parse full list
     if (bracketClose >= 0) {
       const inner = v.slice(bracketOpen + 1, bracketClose)
-      return inner.split(',').map(s => this.completions.normalize(this.#stripTagSuffix(s.trim()))).filter(Boolean)
+      return inner.split(',').map(s => this.#parseSelectionItem(s)).filter(Boolean)
     }
     // Bracket still open (selection phase) — committed labels (before last comma)
-    // plus current partial only if it exactly matches a known cell name
+    // plus current partial only if its leaf segment exactly matches a known cell name
     const body = v.slice(bracketOpen + 1)
-    const allParts = body.split(',').map(s => this.completions.normalize(this.#stripTagSuffix(s.trim()))).filter(Boolean)
+    const allParts = body.split(',').map(s => this.#parseSelectionItem(s)).filter(Boolean)
     if (allParts.length === 0) return []
     const committed = allParts.slice(0, -1)
     const partial = allParts[allParts.length - 1]
+    const partialLeaf = partial.includes('/') ? partial.slice(partial.lastIndexOf('/') + 1) : partial
     const cells = new Set(this.cellNames$())
-    if (cells.has(partial)) return allParts
+    if (cells.has(partialLeaf)) return allParts
     return committed
   })
 
@@ -2248,7 +2303,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (lastComma < 0) return new Set<string>()
     const already = new Set<string>()
     for (const item of body.slice(0, lastComma).split(',')) {
-      const n = this.completions.normalize(this.#stripTagSuffix(item.trim()))
+      const n = this.#parseSelectionItem(item)
       if (n) already.add(n)
     }
     return already

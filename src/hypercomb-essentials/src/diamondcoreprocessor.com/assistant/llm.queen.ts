@@ -12,9 +12,9 @@ Respond concisely and helpfully based on the provided context. Your response wil
  * /opus, /sonnet, /haiku — send selected tiles + context refs to Claude API.
  *
  * Syntax:
- *   /select[tiles]/opus('[lineage1, lineage2]')
- *   /select[tiles]/sonnet('[sig1, sig2]')
- *   /select[tiles]/haiku('[lineage]')
+ *   [tiles]/opus('[lineage1, lineage2]')
+ *   [tiles]/sonnet('[sig1, sig2]')
+ *   [tiles]/haiku('[lineage]')
  *
  * The queen's responsibility ends at: call API → store resource → emit effect.
  * Downstream systems (history recorder) handle attaching the response sig to

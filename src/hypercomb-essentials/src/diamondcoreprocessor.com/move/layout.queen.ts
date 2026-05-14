@@ -6,7 +6,7 @@ import type { LayoutService } from './layout.service.js'
 /**
  * /layout — save, apply, list, or remove layout templates.
  *
- * A layout template is a stored array of `/select[label]/move(index)` commands —
+ * A layout template is a stored array of `[label]/move(index)` commands —
  * the grammar is the same whether a human types it or a drone replays it.
  *
  * Syntax:
@@ -67,7 +67,7 @@ export class LayoutQueenBee extends QueenBee {
     if (!order || order.length === 0) return
 
     // express as command template — the grammar IS the storage format
-    const commands = order.map((label, i) => `/select[${label}]/move(${i})`)
+    const commands = order.map((label, i) => `[${label}]/move(${i})`)
 
     const template: LayoutTemplate = { name, order, commands }
 

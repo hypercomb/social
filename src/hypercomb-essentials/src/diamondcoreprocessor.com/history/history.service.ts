@@ -459,6 +459,10 @@ export class HistoryService {
     // back to the bag scan for that sig until the next commit re-mirrors.
     const store = get<{
       writeOptimizedBytes?: (sig: string, b: ArrayBuffer) => Promise<void>
+      writeChildrenManifest?: (
+        parentSig: string,
+        manifest: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }>,
+      ) => Promise<void>
     }>('@hypercomb.social/Store')
     if (store?.writeOptimizedBytes) {
       const buf = bytes.buffer as ArrayBuffer
@@ -467,6 +471,28 @@ export class HistoryService {
           ? (cb) => (window as any).requestIdleCallback(cb, { timeout: 5_000 })
           : (cb) => setTimeout(cb, 0)
       schedule(() => { void store.writeOptimizedBytes!(layerSig, buf) })
+    }
+
+    // Children manifest: for any layer with a non-empty `children` array,
+    // pre-resolve each child sig to its head layer and write the array as
+    // a per-parent decoration at __manifests__/<layerSig>. Reads of this
+    // parent's children skip the per-child sig→layer walk on cold load.
+    // Microtask-scheduled (not idle) — the commit return is unblocked,
+    // but the write fires before the next render frame so the manifest
+    // is reliably present on "next start" after a single commit cycle.
+    const childSigs = Array.isArray(canonical.children) ? canonical.children : []
+    if (store?.writeChildrenManifest && childSigs.length > 0) {
+      queueMicrotask(() => {
+        void (async () => {
+          const manifest: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> = []
+          for (const sig of childSigs) {
+            const child = await this.getLayerBySig(sig)
+            if (!child) continue
+            manifest.push({ sig, layer: child })
+          }
+          if (manifest.length > 0) await store.writeChildrenManifest!(layerSig, manifest)
+        })()
+      })
     }
 
     // Hot-cache the just-written bytes so the cursor's next read does not

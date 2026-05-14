@@ -24,6 +24,15 @@ export class ClipboardService extends EventTarget {
     this.#notify()
   }
 
+  /** Capture entries with per-item sourceSegments — used when selection
+   *  spans multiple parent dirs (path syntax like `[a, b/c]/cut`). */
+  captureEntries(entries: readonly ClipboardEntry[], op: ClipboardOp): void {
+    if (entries.length === 0) return
+    this.#items = entries.map(e => ({ label: e.label, sourceSegments: [...e.sourceSegments] }))
+    this.#op = op
+    this.#notify()
+  }
+
   consume(): { items: readonly ClipboardEntry[]; op: ClipboardOp } {
     const result = { items: this.#items, op: this.#op }
     if (this.#op === 'cut') {

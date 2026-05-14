@@ -26,7 +26,7 @@ const get = (key: string) => (window as any).ioc?.get?.(key)
  *   /accent education aurora         — assign aurora accent to tag "education"
  *   /accent [education, work] bloom  — assign bloom accent to multiple tags
  *   /accent ~education               — remove accent from tag "education"
- *   /select[a,b]/accent bloom        — set per-tile accent on selected tiles
+ *   [a,b]/accent bloom               — set per-tile accent on selected tiles
  */
 export class AccentQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'

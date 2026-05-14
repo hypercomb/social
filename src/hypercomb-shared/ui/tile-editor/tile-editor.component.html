@@ -113,6 +113,42 @@
         </div>
 
       </div>
+
+      <!-- Q&A panel: lists [Q]-prefixed notes on the cell with inline
+           answer inputs. A submitted answer commits as a sibling
+           [A:<qId>] note; the panel refreshes on a short delay. -->
+      @if (qaItems.length > 0) {
+        <div class="qa-section">
+          <header class="qa-header">
+            <span class="hci qa-icon">?</span>
+            <h4>{{ 'editor.qa.title' | t }}</h4>
+          </header>
+          @for (item of qaItems; track item.qId) {
+            <div class="qa-item" [class.qa-answered]="item.answer">
+              <p class="qa-question">{{ item.question }}</p>
+              @if (item.answer) {
+                <p class="qa-answer">{{ item.answer }}</p>
+              } @else {
+                <div class="qa-answer-row">
+                  <input
+                    class="field-input qa-answer-input"
+                    type="text"
+                    name="qa-answer-{{ item.qId }}"
+                    [placeholder]="'editor.qa.answer-placeholder' | t"
+                    [(ngModel)]="qaAnswerDraft[item.qId]"
+                    (keydown.enter)="submitAnswer(item.qId); $event.stopPropagation()"
+                  />
+                  <button
+                    type="button"
+                    class="qa-submit"
+                    (click)="submitAnswer(item.qId)"
+                  >{{ 'editor.qa.reply' | t }}</button>
+                </div>
+              }
+            </div>
+          }
+        </div>
+      }
     </div>
 
     <footer class="editor-footer">

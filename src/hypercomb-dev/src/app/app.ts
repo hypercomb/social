@@ -5,13 +5,11 @@ import { RouterOutlet } from '@angular/router';
 import { CommandLineComponent } from '@hypercomb/shared';
 import { MeshHeaderComponent } from '@hypercomb/shared/ui';
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
-import { TrackPlayerComponent } from '@hypercomb/shared/ui/track-player/track-player.component'
 import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent, HistoryViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent } from '@hypercomb/shared/ui';
 import { FormatPainterComponent } from '@hypercomb/shared/ui/format-painter/format-painter.component'
 import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
 import { SensitivityBarComponent } from '@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component'
 import { YoutubeViewerComponent } from '@hypercomb/shared/ui/youtube-viewer/youtube-viewer.component'
-import { WebsiteViewComponent } from '@hypercomb/shared/ui/website-view/website-view.component'
 import '@hypercomb/shared/ui/command-line/command-line.atomizer'
 
 // One import boots the full essentials module graph — every drone, queen,
@@ -22,7 +20,7 @@ import '@hypercomb/essentials/side-effects'
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, HistoryViewerComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent, TrackPlayerComponent, WebsiteViewComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, HistoryViewerComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
@@ -30,12 +28,6 @@ export class App implements AfterViewInit {
   protected readonly title = signal('hypercomb-dev');
   readonly clipboardMode = signal(false);
   readonly moveMode = signal(false);
-  readonly playerOpen = signal(false);
-
-  dismissPlayer(): void {
-    this.playerOpen.set(false);
-    try { localStorage.setItem('hc:player-dismissed', 'true') } catch { /* storage unavailable */ }
-  }
 
   @HostBinding('class.clipboard-mode')
   get clipboardModeClass() { return this.clipboardMode(); }
@@ -84,11 +76,6 @@ export class App implements AfterViewInit {
     // command-line inside it becomes visible.
     EffectBus.on<{ visible: boolean; mobile: boolean }>('mobile:input-visible', ({ visible, mobile }) => {
       this.inputOpen.set(mobile && visible)
-    })
-
-    // Re-open the track player when /player queen is invoked
-    EffectBus.on('player:open', () => {
-      this.playerOpen.set(true)
     })
 
     // ViewMode subscription — drives Pixi-canvas visibility via app.html

@@ -1,0 +1,142 @@
+{
+  "name": "instructions",
+  "children": [
+    {
+      "name": "styles",
+      "notes": [
+        {
+          "name": "0dfdddb662b74736b87c7bafa38add36",
+          "body": [
+            {
+              "createdAt": 1778040937904,
+              "id": "0dfdddb662b74736b87c7bafa38add36",
+              "text": "Design language for the generated website. Typography (font family, sizes, weights), color palette (accent, background, text), spacing scale, layout grid, border / radius / shadow conventions. Codegen reads this on every regen so the chrome and per-cell deps converge on one aesthetic. Edit freely; new instructions take effect on the next /website upgrade."
+            }
+          ]
+        },
+        {
+          "name": "11c4869414ed4ad1bfe87dae1e6dcb02",
+          "body": [
+            {
+              "createdAt": 1778087546032,
+              "id": "11c4869414ed4ad1bfe87dae1e6dcb02",
+              "text": "allow a light and a dark theme"
+            }
+          ]
+        },
+        {
+          "name": "3f17752b81a540048f22f25a3dc55973",
+          "body": [
+            {
+              "createdAt": 1778136896781,
+              "id": "3f17752b81a540048f22f25a3dc55973",
+              "text": "icons to the left of headings so we have some nice organization"
+            }
+          ]
+        },
+        {
+          "name": "c9bedb5732104936b72368466b16e903",
+          "body": [
+            {
+              "createdAt": 1778190492291,
+              "id": "c9bedb5732104936b72368466b16e903",
+              "text": "Theme tokens are CSS custom properties on :root for the dark default, plus a [data-theme='light'] override block for the light theme. Every chrome rule reads colors / surfaces / borders / shadows through these vars so a single attribute switch flips the whole site."
+            }
+          ]
+        },
+        {
+          "name": "47fd5335e3f8488dbb47af786ca2f1fa",
+          "body": [
+            {
+              "createdAt": 1778190498171,
+              "id": "47fd5335e3f8488dbb47af786ca2f1fa",
+              "text": "Theme persistence: store the user's choice in localStorage under a site-scoped key (e.g. 'ibh:theme'). On first paint, an inline script in <head> reads the key and stamps data-theme on <html> before stylesheet apply, avoiding flash. Fallback when no key is set: a @media (prefers-color-scheme: light) :root:not([data-theme]) block mirrors the light overrides — so OS preference wins until the user picks."
+            }
+          ]
+        },
+        {
+          "name": "a7b9447dd685422789e1ea5c4409e37a",
+          "body": [
+            {
+              "createdAt": 1778190503842,
+              "id": "a7b9447dd685422789e1ea5c4409e37a",
+              "text": "Heading-icon shape: every heading splits into a __title-icon span (leading) and a __title-text span. The wrapper is flex with align-items:center and a small gap. Icons are inline SVG sized via the heading's font-size (1em square) so they scale with type. Stroke-only line icons keep the visual weight light next to large display type."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "voice",
+      "notes": [
+        {
+          "name": "c856ecdbf7e34d7fbab4226d21a73712",
+          "body": [
+            {
+              "createdAt": 1778040946943,
+              "id": "c856ecdbf7e34d7fbab4226d21a73712",
+              "text": "Voice and tone the generated copy should adopt. Formal vs casual, terse vs expansive, technical vs everyday vocabulary. Audience expectations. Voice rules become hard constraints in codegen — say what you mean here so the site sounds like you."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "tech",
+      "notes": [
+        {
+          "name": "0505589649ac48baba4c8f96a520f108",
+          "body": [
+            {
+              "createdAt": 1778040947932,
+              "id": "0505589649ac48baba4c8f96a520f108",
+              "text": "Technology constraints for codegen. Framework choice (vanilla HTML/CSS, vue, react, svelte). Browser targets, performance budgets, accessibility level (WCAG AA?), bundle size limits. Set hard rules here so codegen does not invent dependencies you do not want."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "audience",
+      "notes": [
+        {
+          "name": "622b76484fd74bd6aab8ec55d5516e27",
+          "body": [
+            {
+              "createdAt": 1778040949051,
+              "id": "622b76484fd74bd6aab8ec55d5516e27",
+              "text": "The reader of the generated site — their context, what they already know, what they are trying to learn or accomplish. Codegen calibrates depth, jargon, and section pacing to this audience description."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "examples",
+      "notes": [
+        {
+          "name": "92a3b473e4e840aab9eb26db48d2022b",
+          "body": [
+            {
+              "createdAt": 1778040949923,
+              "id": "92a3b473e4e840aab9eb26db48d2022b",
+              "text": "Reference exemplars — sites whose style or structure should inspire the generation. Drop signatures of resources, links to real sites, or notes describing patterns to emulate. Codegen ingests these as positive examples."
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "notes": [
+    {
+      "name": "5460647d240a4a2086839678deeb2f76",
+      "body": [
+        {
+          "createdAt": 1778040936914,
+          "id": "5460647d240a4a2086839678deeb2f76",
+          "text": "Always-on context for every codegen request. Sub-cells under here divide concerns — styles, voice, tech, audience, examples. Edit any sub-cell to refine what Claude considers when generating chrome and per-cell deps. Never rendered as website pages; always read as the prompt envelope. Codegen also writes its own design decisions back here so the implicit choices stay visible to you."
+        }
+      ]
+    }
+  ]
+}

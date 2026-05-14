@@ -9,16 +9,13 @@
   "activity.mesh-private": "メッシュ → プライベート",
   "activity.undo": "元に戻す",
   "activity.dismiss": "閉じる",
-
   "command-line.placeholder.locked": "セル名を入力...",
   "command-line.placeholder.filter": "タイルを絞り込み...",
   "command-line.placeholder.slash": "ビヘイビアを入力...",
   "command-line.placeholder.default": "意図を共有...",
-
   "palette.title": "コマンドパレット",
   "palette.placeholder": "コマンドを入力...",
   "palette.empty": "一致するコマンドがありません",
-
   "shortcuts.title": "リファレンス",
   "shortcuts.close": "閉じる",
   "shortcuts.filter-placeholder": "コマンド、操作、ショートカットをフィルタ…",
@@ -27,7 +24,6 @@
   "shortcuts.section.keyboard": "キーボードショートカット",
   "shortcuts.empty": "一致なし",
   "shortcuts.chord-sep": "→",
-
   "editor.title": "タイルエディタ",
   "editor.name-placeholder": "タイル名",
   "editor.drop-image": "ここに画像をドロップ",
@@ -51,7 +47,9 @@
   "editor.show-text": "画像上にラベルを表示",
   "editor.cancel": "キャンセル",
   "editor.save": "保存",
-
+  "editor.qa.title": "質問",
+  "editor.qa.answer-placeholder": "回答…",
+  "editor.qa.reply": "返信",
   "controls.go-back": "戻る",
   "controls.back": "戻る",
   "controls.dcp": "ダイヤモンドコアプロセッサ",
@@ -89,15 +87,12 @@
   "controls.atomize-particle": "パーティクル分解",
   "controls.atomize-reassemble": "再組立",
   "controls.atomize-close": "アトマイザーを閉じる",
-
   "slash.atomize-ui": "アトマイザーツールバーを切替",
-
   "atomizer.spacing-placeholder": "例: 8px 12px",
   "atomizer.title": "アトマイザー",
   "atomizer.close": "アトマイザーバーを閉じる",
   "atomizer.empty": "アトマイザーなし",
   "atomizer.reset": "プロパティをリセット",
-
   "explorer.title": "OPFSエクスプローラ",
   "explorer.entries-label": "OPFSエントリ",
   "explorer.copy-package": "パッケージをコピー",
@@ -112,18 +107,14 @@
   "explorer.copy": "コピー",
   "explorer.remove": "削除",
   "explorer.no-entries": "エントリなし",
-
   "format-painter.title": "書式コピー",
   "format-painter.empty": "このタイルにはビジュアルプロパティがありません",
   "format-painter.apply": "選択に適用",
-
   "mesh.secret-placeholder": "ロケーションを保護",
   "mesh.secured": "保護済み",
-
   "portal.title": "ポータル",
   "portal.close": "ポータルを閉じる",
   "portal.back": "戻る",
-
   "action.command": "コマンド",
   "action.command.description": "このタイルのコマンドパレットを開く",
   "action.edit": "編集",
@@ -158,13 +149,11 @@
   "action.adopt.description": "このタイルを自分のコレクションに追加する",
   "action.block": "ブロック",
   "action.block.description": "このタイルを表示しないようにブロックする",
-
   "selection.move": "移動",
   "selection.cut": "切り取り",
   "selection.copy": "コピー",
   "selection.remove": "削除",
   "selection.paste": "貼り付け",
-
   "history.title": "ブラウザ履歴",
   "history.back": "戻る",
   "history.forward": "進む",
@@ -182,8 +171,6 @@
   "history.resize": "ドラッグで履歴パネルの幅を変更",
   "history.selection-make-head": "選択したレイヤーをヘッドに（元を保持）",
   "history.selection-merge": "選択レイヤーを新ヘッドにマージ（元を削除）",
-
-  "slash.select": "切り取り・コピー・移動するタイルを選択",
   "slash.remove-builtin": "選択したタイルを削除",
   "slash.help": "リファレンスを表示",
   "slash.clear": "フィルターをクリア",
@@ -209,18 +196,14 @@
   "slash.record": "AIによるリアルタイム会議録音とライブ階層構築",
   "slash.domain": "メッシュリレードメインの追加・削除・一覧",
   "slash.substrate": "新しいタイルのデフォルト背景画像の切替",
-
   "substrate.on": "サブストレート有効 → {path}",
   "substrate.off": "サブストレート無効",
   "substrate.here": "サブストレート → {path}",
-
   "toast.dismiss": "閉じる",
-
   "instruction.click-to-restore": "クリックして復元",
   "instruction.catalog-title": "すべてのインストラクション",
   "instruction.no-instructions": "インストラクションはありません。ドローンがインストラクションを宣言するとここに表示されます。",
   "controls.instructions": "インストラクション切替（Ctrl+クリックでカタログ）",
-
   "instruction.dcp.open-processor": "ダイヤモンドコアプロセッサを開く",
   "instruction.dcp.fit-content": "すべてのタイルを表示に合わせる",
   "instruction.dcp.zoom-out": "キャンバスを縮小",
@@ -229,24 +212,11 @@
   "instruction.dcp.fullscreen": "全画面モードの切替",
   "instruction.dcp.layout-mode": "固定レイアウトと密集レイアウトの切替",
   "instruction.dcp.instructions-toggle": "すべてのコントロールのインストラクションラベルを表示・非表示",
-
-  "trackplayer.eyebrow": "ハイパーコム オーディオ",
-  "trackplayer.title": "\u201cInspired by Humans\u201d オーディオブック",
-  "trackplayer.description": "<a href=\"https://inspiredbyhumans.org\" target=\"_blank\" rel=\"noopener\">inspiredbyhumans.org</a> でe-bookを聴く",
-  "trackplayer.loading": "トラックを読み込み中...",
-  "trackplayer.empty": "トラックがまだありません。hypercomb-shared/tracksにファイルを追加してください。",
-  "trackplayer.selected": "選択中のトラック",
-  "trackplayer.available": "利用可能なトラック",
-  "trackplayer.no-signal": "信号なし",
-  "trackplayer.play-prequel": "今すぐプリクエルを再生",
-  "trackplayer.unavailable": "現在トラックを利用できません。",
-
   "confirm.delete-title": "削除の確認",
   "confirm.delete-message": "「{name}」を削除してもよろしいですか？",
   "confirm.delete-children-warning": "この項目には子要素が含まれており、すべて完全に削除されます。",
   "confirm.delete": "削除",
   "confirm.cancel": "キャンセル",
-
   "editor.done": "完了",
   "mesh.solo": "ソロモード",
   "mesh.swarm": "スワームモード",
@@ -254,7 +224,6 @@
   "selection.hide": "非表示",
   "controls.toggle-input": "コマンドラインを表示",
   "slash.reroll": "タイルのサブストレート背景画像をリロール",
-
   "docs.title": "ドキュメント",
   "docs.close-sidebar": "サイドバーを閉じる",
   "docs.open-sidebar": "サイドバーを開く",
@@ -264,26 +233,18 @@
   "docs.loading": "読み込み中...",
   "docs.main-title": "Hypercombドキュメント",
   "docs.welcome-text": "サイドバーからドキュメントを選択するか、/docs glossaryで直接ページに移動できます。",
-
   "command-line.install-prompt": "Hypercombをインストール",
   "command-line.create-cell": "現在のレベルに新しいセルを作成",
   "command-line.create-nested": "ネストフォルダを作成し、親パスを保持して現在のレベルに留まる",
   "command-line.navigate-folder": "フォルダに移動（存在しない場合は作成）",
   "command-line.filter-tiles": "キーワードでタイルをリアルタイム絞り込み",
-
   "audio.pause": "一時停止",
   "audio.play": "再生",
   "audio.seek": "シーク",
-
-  "trackplayer.close-player": "プレーヤーを閉じる",
-  "trackplayer.no-signal-label": "信号なしインタールード",
-
   "controls.drag-to-move": "ドラッグして移動",
   "controls.collapse": "折りたたむ",
   "controls.expand": "展開",
-
   "selection.drag-to-move": "ドラッグして移動",
-
   "breadcrumb.public": "パブリック",
   "breadcrumb.private": "プライベート",
   "breadcrumb.secure": "安全",
@@ -293,7 +254,6 @@
   "breadcrumb.installed": "インストール済み",
   "breadcrumb.installed-count": "インストール済み（{count}）",
   "breadcrumb.sync-error": "同期エラー",
-
   "keymap.escape": "キャンセル・閉じる",
   "keymap.shortcuts": "キーボードショートカットを表示",
   "keymap.palette": "コマンドパレットを開く",
@@ -310,7 +270,6 @@
   "keymap.paste": "クリップボードから貼り付け",
   "keymap.cut": "選択タイルを切り取り",
   "keymap.remove": "選択タイルを削除",
-
   "dcp.title": "ダイヤモンドコアプロセッサ",
   "dcp.install": "インストール",
   "dcp.download-package": "パッケージをダウンロード",
@@ -379,7 +338,6 @@
   "dcp.editor-modified": "変更済み",
   "dcp.editor-loading-files": "ファイルを読み込み中...",
   "dcp.editor-empty": "このレイヤーにビーや依存関係はありません。",
-
   "cell.welcome": "ようこそ",
   "cell.home": "ホーム",
   "cell.settings": "設定",
@@ -422,7 +380,6 @@
   "cell.meetings": "会議",
   "cell.the-depths": "深淵",
   "cell.one-day": "いつか",
-
   "cell.assistant": "アシスタント",
   "cell.avatars": "アバター",
   "cell.background": "背景",

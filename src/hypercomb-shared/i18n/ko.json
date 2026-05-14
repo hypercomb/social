@@ -9,16 +9,13 @@
   "activity.mesh-private": "메시 → 비공개",
   "activity.undo": "실행 취소",
   "activity.dismiss": "닫기",
-
   "command-line.placeholder.locked": "셀 이름 입력...",
   "command-line.placeholder.filter": "타일 필터링...",
   "command-line.placeholder.slash": "동작 입력...",
   "command-line.placeholder.default": "의도 공유...",
-
   "palette.title": "명령 팔레트",
   "palette.placeholder": "명령 입력...",
   "palette.empty": "일치하는 명령 없음",
-
   "shortcuts.title": "참조",
   "shortcuts.close": "닫기",
   "shortcuts.filter-placeholder": "명령, 작업, 단축키 필터링…",
@@ -27,7 +24,6 @@
   "shortcuts.section.keyboard": "키보드 단축키",
   "shortcuts.empty": "일치 없음",
   "shortcuts.chord-sep": "그런 다음",
-
   "editor.title": "타일 편집기",
   "editor.drop-image": "여기에 이미지 놓기",
   "editor.unlink-transforms": "변환 연결 해제",
@@ -48,7 +44,6 @@
   "editor.search-google": "Google 이미지 검색",
   "editor.cancel": "취소",
   "editor.save": "저장",
-
   "controls.go-back": "돌아가기",
   "controls.back": "뒤로",
   "controls.dcp": "다이아몬드 코어 프로세서",
@@ -86,15 +81,12 @@
   "controls.atomize-particle": "입자 분해",
   "controls.atomize-reassemble": "재조립",
   "controls.atomize-close": "원자화기 닫기",
-
   "slash.atomize-ui": "원자화기 도구 모음 전환",
-
   "atomizer.spacing-placeholder": "예: 8px 12px",
   "atomizer.title": "원자화기",
   "atomizer.close": "원자화기 바 닫기",
   "atomizer.empty": "원자화기 없음",
   "atomizer.reset": "속성 초기화",
-
   "explorer.title": "OPFS 탐색기",
   "explorer.entries-label": "OPFS 항목",
   "explorer.copy-package": "패키지 복사",
@@ -109,18 +101,14 @@
   "explorer.copy": "복사",
   "explorer.remove": "제거",
   "explorer.no-entries": "항목 없음",
-
   "format-painter.title": "서식 복사",
   "format-painter.empty": "이 타일에 시각적 속성이 없습니다",
   "format-painter.apply": "선택에 적용",
-
   "mesh.secret-placeholder": "위치 보호",
   "mesh.secured": "보호됨",
-
   "portal.title": "포털",
   "portal.close": "포털 닫기",
   "portal.back": "뒤로",
-
   "action.command": "명령",
   "action.command.description": "이 타일의 명령 팔레트 열기",
   "action.edit": "편집",
@@ -139,13 +127,11 @@
   "action.adopt.description": "이 타일을 내 컬렉션에 추가",
   "action.block": "차단",
   "action.block.description": "이 타일이 보이지 않도록 차단",
-
   "selection.move": "이동",
   "selection.cut": "잘라내기",
   "selection.copy": "복사",
   "selection.remove": "제거",
   "selection.paste": "붙여넣기",
-
   "history.title": "브라우저 기록",
   "history.back": "뒤로",
   "history.forward": "앞으로",
@@ -154,8 +140,6 @@
   "history.path": "경로:",
   "history.depth": "깊이:",
   "history.active": "활성:",
-
-  "slash.select": "잘라내기/복사/이동할 타일 선택",
   "slash.remove-builtin": "선택한 타일 제거",
   "slash.help": "참조 표시",
   "slash.clear": "활성 필터 지우기",
@@ -181,18 +165,14 @@
   "slash.record": "AI 회의 녹음 및 실시간 계층 컴파일 시작",
   "slash.domain": "메시 릴레이 도메인 추가, 제거 또는 목록",
   "slash.substrate": "새 타일의 기본 배경 이미지 전환",
-
   "substrate.on": "기판 활성화됨 → {path}",
   "substrate.off": "기판 비활성화됨",
   "substrate.here": "기판 → {path}",
-
   "toast.dismiss": "닫기",
-
   "instruction.click-to-restore": "클릭하여 복원",
   "instruction.catalog-title": "모든 지침",
   "instruction.no-instructions": "사용 가능한 지침이 없습니다. 드론이 지침을 선언하면 여기에 표시됩니다.",
   "controls.instructions": "지침 전환 (Ctrl+클릭으로 카탈로그)",
-
   "instruction.dcp.open-processor": "다이아몬드 코어 프로세서 열기",
   "instruction.dcp.fit-content": "모든 타일을 보기에 맞추기",
   "instruction.dcp.zoom-out": "캔버스 축소",
@@ -201,24 +181,11 @@
   "instruction.dcp.fullscreen": "전체 화면 모드 전환",
   "instruction.dcp.layout-mode": "고정 및 밀집 레이아웃 간 전환",
   "instruction.dcp.instructions-toggle": "모든 컨트롤의 지침 레이블 표시 또는 숨기기",
-
-  "trackplayer.eyebrow": "hypercomb 오디오",
-  "trackplayer.title": "\u201cInspired by Humans\u201d 오디오북",
-  "trackplayer.description": "<a href=\"https://inspiredbyhumans.org\" target=\"_blank\" rel=\"noopener\">inspiredbyhumans.org</a>에서 e-book 듣기",
-  "trackplayer.loading": "트랙 로딩 중...",
-  "trackplayer.empty": "트랙을 찾을 수 없습니다. hypercomb-shared/tracks에 파일을 추가하세요.",
-  "trackplayer.selected": "선택된 트랙",
-  "trackplayer.available": "이용 가능한 트랙",
-  "trackplayer.no-signal": "신호 없음",
-  "trackplayer.play-prequel": "지금 프리퀄 재생",
-  "trackplayer.unavailable": "현재 트랙을 이용할 수 없습니다.",
-
   "confirm.delete-title": "삭제 확인",
   "confirm.delete-message": "\"{name}\"을(를) 삭제하시겠습니까?",
   "confirm.delete-children-warning": "이 항목에는 함께 영구 삭제될 하위 항목이 포함되어 있습니다.",
   "confirm.delete": "삭제",
   "confirm.cancel": "취소",
-
   "editor.done": "완료",
   "mesh.solo": "솔로 모드",
   "mesh.swarm": "스웜 모드",
@@ -226,7 +193,6 @@
   "selection.hide": "숨기기",
   "controls.toggle-input": "명령줄 표시",
   "slash.reroll": "타일의 기판 배경 이미지 다시 생성",
-
   "docs.title": "문서",
   "docs.close-sidebar": "사이드바 닫기",
   "docs.open-sidebar": "사이드바 열기",
@@ -236,26 +202,18 @@
   "docs.loading": "로딩 중...",
   "docs.main-title": "Hypercomb 문서",
   "docs.welcome-text": "사이드바에서 문서를 선택하거나 /docs glossary를 사용하여 페이지로 바로 이동하세요.",
-
   "command-line.install-prompt": "Hypercomb 설치",
   "command-line.create-cell": "현재 레벨에 새 셀 생성",
   "command-line.create-nested": "중첩 폴더 생성, 상위 경로를 유지하며 현재 레벨에 머무름",
   "command-line.navigate-folder": "폴더로 이동, 없으면 생성",
   "command-line.filter-tiles": "키워드로 타일 실시간 필터링",
-
   "audio.pause": "일시정지",
   "audio.play": "재생",
   "audio.seek": "탐색",
-
-  "trackplayer.close-player": "플레이어 닫기",
-  "trackplayer.no-signal-label": "신호 없음 인터루드",
-
   "controls.drag-to-move": "드래그하여 이동",
   "controls.collapse": "접기",
   "controls.expand": "펼치기",
-
   "selection.drag-to-move": "드래그하여 이동",
-
   "breadcrumb.public": "공개",
   "breadcrumb.private": "비공개",
   "breadcrumb.secure": "보안",
@@ -265,7 +223,6 @@
   "breadcrumb.installed": "설치됨",
   "breadcrumb.installed-count": "설치됨 ({count})",
   "breadcrumb.sync-error": "동기화 오류",
-
   "keymap.escape": "취소 / 닫기",
   "keymap.shortcuts": "키보드 단축키 표시",
   "keymap.palette": "명령 팔레트 열기",
@@ -282,7 +239,6 @@
   "keymap.paste": "클립보드에서 붙여넣기",
   "keymap.cut": "선택한 타일 잘라내기",
   "keymap.remove": "선택한 타일 제거",
-
   "dcp.title": "다이아몬드 코어 프로세서",
   "dcp.install": "설치",
   "dcp.download-package": "패키지 다운로드",
@@ -351,7 +307,6 @@
   "dcp.editor-modified": "수정됨",
   "dcp.editor-loading-files": "파일 로딩 중...",
   "dcp.editor-empty": "이 레이어에 벌 또는 의존성이 없습니다.",
-
   "cell.welcome": "환영",
   "cell.home": "홈",
   "cell.settings": "설정",
@@ -394,7 +349,6 @@
   "cell.meetings": "회의",
   "cell.the-depths": "심연",
   "cell.one-day": "언젠가",
-
   "cell.assistant": "도우미",
   "cell.avatars": "아바타",
   "cell.background": "배경",

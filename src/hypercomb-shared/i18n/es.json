@@ -9,16 +9,13 @@
   "activity.mesh-private": "malla → privado",
   "activity.undo": "Deshacer",
   "activity.dismiss": "Cerrar",
-
   "command-line.placeholder.locked": "nombre de celda...",
   "command-line.placeholder.filter": "filtrar mosaicos...",
   "command-line.placeholder.slash": "escribir un comportamiento...",
   "command-line.placeholder.default": "compartir intención...",
-
   "palette.title": "Paleta de comandos",
   "palette.placeholder": "Escribir un comando...",
   "palette.empty": "Sin comandos coincidentes",
-
   "shortcuts.title": "Referencia",
   "shortcuts.close": "Cerrar",
   "shortcuts.filter-placeholder": "Filtrar comandos, operaciones, atajos…",
@@ -27,7 +24,6 @@
   "shortcuts.section.keyboard": "Atajos de teclado",
   "shortcuts.empty": "Sin coincidencias",
   "shortcuts.chord-sep": "luego",
-
   "editor.title": "editor de mosaico",
   "editor.drop-image": "soltar imagen aquí",
   "editor.unlink-transforms": "desvincular transformaciones",
@@ -48,7 +44,6 @@
   "editor.search-google": "Buscar en Google Imágenes",
   "editor.cancel": "cancelar",
   "editor.save": "guardar",
-
   "controls.go-back": "volver",
   "controls.back": "atrás",
   "controls.dcp": "procesador de núcleo diamante",
@@ -86,15 +81,12 @@
   "controls.atomize-particle": "descomposición de partículas",
   "controls.atomize-reassemble": "reensamblar",
   "controls.atomize-close": "cerrar atomizador",
-
   "slash.atomize-ui": "alternar barra del atomizador",
-
   "atomizer.spacing-placeholder": "ej. 8px 12px",
   "atomizer.title": "atomizadores",
   "atomizer.close": "cerrar barra del atomizador",
   "atomizer.empty": "sin atomizadores",
   "atomizer.reset": "restablecer propiedades",
-
   "explorer.title": "Explorador OPFS",
   "explorer.entries-label": "entradas OPFS",
   "explorer.copy-package": "Copiar paquete",
@@ -109,18 +101,14 @@
   "explorer.copy": "copiar",
   "explorer.remove": "eliminar",
   "explorer.no-entries": "sin entradas",
-
   "format-painter.title": "Copiar formato",
   "format-painter.empty": "Sin propiedades visuales en este mosaico",
   "format-painter.apply": "Aplicar a selección",
-
   "mesh.secret-placeholder": "proteger su ubicación",
   "mesh.secured": "protegido",
-
   "portal.title": "portal",
   "portal.close": "cerrar portal",
   "portal.back": "atrás",
-
   "action.command": "comando",
   "action.command.description": "Abrir la paleta de comandos para este tile",
   "action.edit": "editar",
@@ -139,13 +127,11 @@
   "action.adopt.description": "Agregar este tile a tu colección",
   "action.block": "bloquear",
   "action.block.description": "Bloquear este tile para que no aparezca en tu vista",
-
   "selection.move": "mover",
   "selection.cut": "cortar",
   "selection.copy": "copiar",
   "selection.remove": "eliminar",
   "selection.paste": "pegar",
-
   "history.title": "historial de navegación",
   "history.back": "atrás",
   "history.forward": "adelante",
@@ -154,8 +140,6 @@
   "history.path": "ruta:",
   "history.depth": "profundidad:",
   "history.active": "activo:",
-
-  "slash.select": "seleccionar mosaicos para cortar/copiar/mover",
   "slash.remove-builtin": "eliminar mosaicos seleccionados",
   "slash.help": "Mostrar referencia",
   "slash.clear": "Limpiar filtro activo",
@@ -181,18 +165,14 @@
   "slash.record": "Iniciar grabación de reunión con IA y compilación jerárquica en vivo",
   "slash.domain": "Añadir, eliminar o listar dominios de retransmisión de malla",
   "slash.substrate": "Alternar imágenes de fondo predeterminadas para nuevos mosaicos",
-
   "substrate.on": "sustrato activado → {path}",
   "substrate.off": "sustrato desactivado",
   "substrate.here": "sustrato → {path}",
-
   "toast.dismiss": "Cerrar",
-
   "instruction.click-to-restore": "clic para restaurar",
   "instruction.catalog-title": "Todas las instrucciones",
   "instruction.no-instructions": "Sin instrucciones disponibles. Los drones pueden declarar instrucciones para que aparezcan aquí.",
   "controls.instructions": "Alternar instrucciones (Ctrl+Clic para catálogo)",
-
   "instruction.dcp.open-processor": "Abrir el procesador de núcleo diamante",
   "instruction.dcp.fit-content": "Ajustar todos los mosaicos a la vista",
   "instruction.dcp.zoom-out": "Alejar el lienzo",
@@ -201,24 +181,11 @@
   "instruction.dcp.fullscreen": "Alternar modo pantalla completa",
   "instruction.dcp.layout-mode": "Cambiar entre diseño fijo y compacto",
   "instruction.dcp.instructions-toggle": "Mostrar u ocultar etiquetas de instrucciones en todos los controles",
-
-  "trackplayer.eyebrow": "audio hypercomb",
-  "trackplayer.title": "Audiolibro \u201cInspired by Humans\u201d",
-  "trackplayer.description": "Escucha el e-book en <a href=\"https://inspiredbyhumans.org\" target=\"_blank\" rel=\"noopener\">inspiredbyhumans.org</a>",
-  "trackplayer.loading": "Cargando pistas...",
-  "trackplayer.empty": "No se encontraron pistas. Añada archivos a hypercomb-shared/tracks.",
-  "trackplayer.selected": "Pista seleccionada",
-  "trackplayer.available": "Pistas disponibles",
-  "trackplayer.no-signal": "sin señal",
-  "trackplayer.play-prequel": "reproducir precuela ahora",
-  "trackplayer.unavailable": "Las pistas no están disponibles en este momento.",
-
   "confirm.delete-title": "Confirmar eliminación",
   "confirm.delete-message": "¿Está seguro de que desea eliminar \"{name}\"?",
   "confirm.delete-children-warning": "Este elemento contiene hijos que también serán eliminados permanentemente.",
   "confirm.delete": "Eliminar",
   "confirm.cancel": "Cancelar",
-
   "editor.done": "listo",
   "mesh.solo": "modo solo",
   "mesh.swarm": "modo enjambre",
@@ -226,7 +193,6 @@
   "selection.hide": "ocultar",
   "controls.toggle-input": "mostrar línea de comandos",
   "slash.reroll": "Relanzar imágenes de fondo de sustrato en mosaicos",
-
   "docs.title": "Documentación",
   "docs.close-sidebar": "cerrar barra lateral",
   "docs.open-sidebar": "abrir barra lateral",
@@ -236,26 +202,18 @@
   "docs.loading": "Cargando...",
   "docs.main-title": "Documentación de Hypercomb",
   "docs.welcome-text": "Seleccione un documento de la barra lateral o use /docs glossary para ir directamente a una página.",
-
   "command-line.install-prompt": "Instalar Hypercomb",
   "command-line.create-cell": "Crear una nueva celda en el nivel actual",
   "command-line.create-nested": "Crear carpetas anidadas, permanecer en el nivel actual con la ruta padre retenida",
   "command-line.navigate-folder": "Ir a una carpeta, creándola si no existe",
   "command-line.filter-tiles": "Filtrar mosaicos en vivo por palabra clave",
-
   "audio.pause": "pausa",
   "audio.play": "reproducir",
   "audio.seek": "buscar",
-
-  "trackplayer.close-player": "cerrar reproductor",
-  "trackplayer.no-signal-label": "interludio sin señal",
-
   "controls.drag-to-move": "arrastrar para mover",
   "controls.collapse": "contraer",
   "controls.expand": "expandir",
-
   "selection.drag-to-move": "arrastrar para mover",
-
   "breadcrumb.public": "público",
   "breadcrumb.private": "privado",
   "breadcrumb.secure": "seguro",
@@ -265,7 +223,6 @@
   "breadcrumb.installed": "instalado",
   "breadcrumb.installed-count": "instalado ({count})",
   "breadcrumb.sync-error": "error de sincronización",
-
   "keymap.escape": "Cancelar / cerrar",
   "keymap.shortcuts": "Mostrar atajos de teclado",
   "keymap.palette": "Abrir paleta de comandos",
@@ -282,7 +239,6 @@
   "keymap.paste": "Pegar del portapapeles",
   "keymap.cut": "Cortar mosaicos seleccionados",
   "keymap.remove": "Eliminar mosaicos seleccionados",
-
   "dcp.title": "Procesador de Núcleo Diamante",
   "dcp.install": "Instalar",
   "dcp.download-package": "Descargar paquete",
@@ -351,7 +307,6 @@
   "dcp.editor-modified": "modificado",
   "dcp.editor-loading-files": "Cargando archivos...",
   "dcp.editor-empty": "No hay abejas ni dependencias en esta capa.",
-
   "cell.welcome": "bienvenida",
   "cell.home": "inicio",
   "cell.settings": "ajustes",
@@ -394,7 +349,6 @@
   "cell.meetings": "reuniones",
   "cell.the-depths": "las profundidades",
   "cell.one-day": "algún día",
-
   "cell.assistant": "asistente",
   "cell.avatars": "avatares",
   "cell.background": "fondo",

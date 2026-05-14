@@ -144,7 +144,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   #idle = signal(false)
   #hovered = signal(false)
-  #locked = signal(false)
+  // Derive lock state from the gate itself rather than maintaining a local
+  // copy. The gate is shared with the editor (which lock/unlocks across
+  // open/close), so a local signal would silently desync — leaving the
+  // visual button stuck in the wrong state and making toggle clicks behave
+  // inversely after the editor cycles.
+  #locked = fromRuntime(
+    get('@diamondcoreprocessor.com/InputGate') as EventTarget | undefined,
+    () => (get('@diamondcoreprocessor.com/InputGate') as { locked?: boolean } | undefined)?.locked ?? false,
+  )
 
   // ── power key state (ctrl / shift / alt held) ──────────
   readonly powerKey = signal<'ctrl' | 'shift' | 'alt' | null>(null)
@@ -408,6 +416,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #pillDragOffsetY = 0
   #pillPointerId: number | null = null
   #pillStageEl: HTMLElement | null = null
+  // Pill stays anchored to the bottom of the viewport. We track the
+  // distance from the top of the pill to the bottom of the viewport
+  // (`fromBottom`) and recompute y on every window resize so the pill
+  // doesn't drift over tile content when the viewport grows or shrinks
+  // (rotation, fullscreen, devtools, mobile address bar collapse).
+  #pillFromBottom: number | null = null
 
   #viewportCenter = (): { x: number; y: number } => ({
     x: window.innerWidth / 2,
@@ -524,7 +538,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.navigation.segmentsRaw().length > 0
   })
 
-  readonly locked = this.#locked.asReadonly()
+  readonly locked = this.#locked
   /** Effective button state — drives color: white/green/blue. */
   readonly fitButtonState = computed<'off' | 'global' | 'page'>(() => {
     // Track navigation so this recomputes when the user moves between layers.
@@ -1116,12 +1130,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   readonly toggleLock = (): void => {
-    this.#locked.update(v => !v)
-    if (this.#locked()) {
-      this.gate?.lock()
-    } else {
-      this.gate?.unlock()
-    }
+    if (this.gate?.locked) this.gate.unlock()
+    else this.gate?.lock()
   }
 
   readonly zoomIn = (): void => {
@@ -1147,10 +1157,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   readonly toggleFullscreen = (): void => {
-    // Capture how far the pill sits from the viewport bottom so we can
-    // preserve that distance after the viewport height changes.
+    // The window resize handler maintains the pill's bottom-anchor on
+    // fullscreen change, but resize can lag fullscreenchange on some
+    // browsers. We capture the current bottom-anchor and re-apply it
+    // explicitly when fullscreen settles as belt-and-braces.
     const pos = this.#pillPos()
-    const bottomGap = pos ? window.innerHeight - pos.y : null
+    const fromBottom = pos
+      ? (this.#pillFromBottom ?? (window.innerHeight - pos.y))
+      : null
 
     if (document.fullscreenElement) {
       void document.exitFullscreen()
@@ -1158,14 +1172,18 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       void document.documentElement.requestFullscreen()
     }
 
-    // After the viewport settles, slide the pill to the same distance
-    // from the new bottom edge — no visible jump.
-    if (bottomGap !== null) {
+    if (fromBottom !== null && pos) {
       const adjust = (): void => {
         document.removeEventListener('fullscreenchange', adjust)
-        const adjusted = this.#clampPillPos(pos!.x, window.innerHeight - bottomGap)
+        this.#pillFromBottom = fromBottom
+        const adjusted = this.#clampPillPos(pos.x, window.innerHeight - fromBottom)
         this.#pillPos.set(adjusted)
-        try { localStorage.setItem(PILL_POS_KEY, JSON.stringify(adjusted)) } catch { /* ignore */ }
+        try {
+          localStorage.setItem(
+            PILL_POS_KEY,
+            JSON.stringify({ x: adjusted.x, fromBottom }),
+          )
+        } catch { /* ignore */ }
       }
       document.addEventListener('fullscreenchange', adjust)
     }
@@ -1465,9 +1483,17 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── internal ────────────────────────────────────────────
 
   #onResize = (): void => {
-    // clamp persisted pill position to viewport on window resize
+    // Keep the pill anchored to the bottom of the viewport. When
+    // innerHeight changes (rotation, fullscreen, devtools, mobile
+    // address bar showing/hiding), recompute y from #pillFromBottom
+    // so the pill doesn't drift up over the tile render area.
     const pos = this.#pillPos()
-    if (pos) this.#pillPos.set(this.#clampPillPos(pos.x, pos.y))
+    if (pos) {
+      const fromBottom = this.#pillFromBottom ?? (window.innerHeight - pos.y)
+      this.#pillFromBottom = fromBottom
+      const newY = window.innerHeight - fromBottom
+      this.#pillPos.set(this.#clampPillPos(pos.x, newY))
+    }
     // recompute pill zoom for new viewport width
     this.#pillZoom.set(this.#computePillZoomRaw())
   }
@@ -1507,7 +1533,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#pillDragging.set(false)
     const pos = this.#pillPos()
     if (pos) {
-      try { localStorage.setItem(PILL_POS_KEY, JSON.stringify(pos)) } catch { /* ignore */ }
+      // Lock in the bottom-anchor distance now so subsequent resizes
+      // keep the pill at the same height above the viewport bottom.
+      this.#pillFromBottom = window.innerHeight - pos.y
+      try {
+        localStorage.setItem(
+          PILL_POS_KEY,
+          JSON.stringify({ x: pos.x, fromBottom: this.#pillFromBottom }),
+        )
+      } catch { /* ignore */ }
     }
     window.removeEventListener('pointermove', this.#onPillDragMove)
     window.removeEventListener('pointerup', this.#onPillDragEnd)
@@ -1533,9 +1567,20 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     try {
       const raw = localStorage.getItem(PILL_POS_KEY)
       if (!raw) return
-      const parsed = JSON.parse(raw) as { x: number; y: number }
-      if (typeof parsed?.x === 'number' && typeof parsed?.y === 'number') {
-        this.#pillPos.set(parsed)
+      const parsed = JSON.parse(raw) as { x?: number; y?: number; fromBottom?: number }
+      if (typeof parsed?.x !== 'number') return
+      // New format: {x, fromBottom} — recompute y against the current
+      // viewport so cross-session resizes don't leave the pill stranded.
+      if (typeof parsed.fromBottom === 'number') {
+        this.#pillFromBottom = parsed.fromBottom
+        this.#pillPos.set({ x: parsed.x, y: window.innerHeight - parsed.fromBottom })
+        return
+      }
+      // Legacy format: {x, y} (absolute top). Use as-is and seed the
+      // bottom-anchor from current viewport for subsequent resizes.
+      if (typeof parsed.y === 'number') {
+        this.#pillFromBottom = window.innerHeight - parsed.y
+        this.#pillPos.set({ x: parsed.x, y: parsed.y })
       }
     } catch { /* ignore */ }
   }

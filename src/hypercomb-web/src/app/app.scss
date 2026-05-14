@@ -35,12 +35,6 @@
     top: auto !important;
     z-index: 60000;
   }
-
-  // Leave room at the bottom of the website-shell so content doesn't
-  // sit under the now-bottom-docked header-bar.
-  hc-website-view .website-shell {
-    padding-bottom: 4rem;
-  }
 }
 
 .install-prompt {

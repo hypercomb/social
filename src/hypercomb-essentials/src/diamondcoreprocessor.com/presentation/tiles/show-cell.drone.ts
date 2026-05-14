@@ -7,7 +7,7 @@ import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
 import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
-import { isSignature, readCellProperties, writeCellProperties } from '../../editor/tile-properties.js'
+import { isSignature, readCellProperties, writeCellProperties, cellLocationSig } from '../../editor/tile-properties.js'
 import type { HistoryService } from '../../history/history.service.js'
 import type { HistoryCursorService, CursorState } from '../../history/history-cursor.service.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoom/zoom.drone.js'
@@ -165,9 +165,35 @@ async function resolveChildNames(
   _parentSegments: readonly string[],
   _parentDir: FileSystemDirectoryHandle | null,
   content: { children?: string[] } | null,
+  parentLayerSig?: string,
 ): Promise<Set<string>> {
   const out = new Set<string>()
   if (!content?.children?.length) return out
+
+  // Children manifest fast-path. When the parent's sig is known, try
+  // __manifests__/<parentSig> — a single file read returns the resolved
+  // child layer objects with names already inlined. Skips the per-child
+  // getLayerBySig walk entirely on cold load. Falls through to the
+  // signature-resolution path on miss; commitLayer writes a fresh
+  // manifest after every commit so subsequent reads stay hot.
+  const store = parentLayerSig
+    ? (window as any).ioc?.get?.('@hypercomb.social/Store') as {
+        readChildrenManifest?: (sig: string) => Promise<Array<{ sig: string; layer: { name?: string } }> | null>
+        writeChildrenManifest?: (sig: string, m: Array<{ sig: string; layer: { name?: string } }>) => Promise<void>
+      } | undefined
+    : undefined
+
+  if (parentLayerSig && store?.readChildrenManifest) {
+    const manifest = await store.readChildrenManifest(parentLayerSig)
+    if (manifest && manifest.length === content.children.length) {
+      // Manifest is current iff it covers every child sig in the parent.
+      // Trust it: extract names directly, no bag walk.
+      for (const entry of manifest) {
+        if (entry?.layer?.name) out.add(entry.layer.name)
+      }
+      return out
+    }
+  }
 
   // Pure signature resolution. For each child sig in the parent's
   // layer, fetch that child's LayerContent — its `name` field is the
@@ -183,6 +209,25 @@ async function resolveChildNames(
   for (const child of children) {
     if (child?.name) out.add(child.name)
   }
+
+  // Backfill the manifest for pre-existing layers committed before the
+  // decoration shipped (or after a manifest GC). Idle-scheduled so the
+  // current render path doesn't pay the write latency.
+  if (parentLayerSig && store?.writeChildrenManifest && content.children.length === children.length) {
+    const manifest: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> = []
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i]
+      if (!child) continue
+      manifest.push({ sig: content.children[i], layer: child })
+    }
+    if (manifest.length > 0) {
+      const schedule = typeof (window as any).requestIdleCallback === 'function'
+        ? (cb: () => void) => (window as any).requestIdleCallback(cb, { timeout: 5_000 })
+        : (cb: () => void) => setTimeout(cb, 0)
+      schedule(() => { void store.writeChildrenManifest!(parentLayerSig, manifest) })
+    }
+  }
+
   return out
 }
 
@@ -376,6 +421,12 @@ export class ShowCellDrone extends Drone {
   // built the mesh — first render after refresh, deep-link load,
   // post-clearMesh rebuild). Consumed once when the new mesh is created.
   #pendingMeshOffsetRestore: { x: number; y: number } | null = null
+  // When the saved zoom is a fit (snap.zoom.fit), we can't apply its
+  // (cx, cy) directly — those were derived from the safe area at save
+  // time and would leave content shrunk in the new viewport. Set this
+  // flag in #applyViewportFromSnapshot and consume it after
+  // applyGeometry, so the refit runs against valid mesh bounds.
+  #pendingFitRestore = false
   #layoutMode: 'dense' | 'pinned' = 'dense'
 
   // First-visit fit: when navigating to a layer that has no saved viewport
@@ -1568,22 +1619,18 @@ export class ShowCellDrone extends Drone {
     this.#divergenceFutureRemoves = new Set<string>()
     this.#cursorPropsOverride = null
     this.#cursorReconstructionKey = ''
+    // Names listed in the cursor's current layer's `children` slot. When
+    // available, this is the authoritative membership for the location —
+    // both at REWOUND (replace union outright) and at HEAD (used to
+    // reconcile pendingRemoves against layer truth, so layer-only deletes
+    // honored and layer-restoring undos drop stale pending entries).
+    let layerAllowed: Set<string> | null = null
     if (!this.#clipboardView && historyService) {
       const sig = await this.computeSignatureLocation(lineage)
 
       // Load cursor for this location (keeps cursor position if already set)
       if (cursorService) await cursorService.load(sig.sig)
 
-      // Layer drives the cell set. When the cursor has a layer at this
-      // position, intersect union with it AND import any layer cells
-      // missing from disk (so historical cells render even after their
-      // OPFS dirs are gone).
-      //
-      // When there is NO layer at all (fresh lineage, no commits yet),
-      // fall through with `union` = live disk cells. The committer
-      // mints a baseline on the first user event; until then live
-      // disk is the sensible default — refusing to render leaves the
-      // user with a blank canvas and no obvious recovery path.
       if (cursorService) {
         const content = await cursorService.layerContentAtCursor()
         const cursorState = cursorService.state
@@ -1605,27 +1652,23 @@ export class ShowCellDrone extends Drone {
           localCellSet.clear()
         }
 
-        if (content && cursorState?.rewound) {
-          // REWOUND ONLY: the past layer is the source of truth for
-          // which cells render at this historical position. Children
-          // sigs are resolved by walking the merkle so the rewound
-          // view reflects what existed THEN, not what's on disk now.
+        if (content) {
+          // Layer-as-primitive: the layer's children list is the truth at
+          // every position (HEAD and REWOUND alike). Cells in OPFS but not
+          // in the layer are layer-removed (e.g. /remove just landed) and
+          // must not render; cells in the layer but not in OPFS are still
+          // imported so the merkle-stored content is recoverable.
           //
-          // At HEAD, by contrast, OPFS folders are the source of
-          // truth (membership). This was the snap-back source: when
-          // OPFS held a cell the layer didn't yet know about (a fresh
-          // create racing with the cascade, or a paste mid-flight),
-          // resolveChildNames excluded it, #orderByIndexPinned saw
-          // it as unindexed, and the auto-assignment rewrote its
-          // 0000.index to nextFree (= 0). Tile snaps back. With the
-          // HEAD path now leaving `localCellSet` as the OPFS-built
-          // set, the auto-assignment never fires for cells that
-          // genuinely have a valid index.
+          // The cell:added incremental path (#queueIncremental) handles
+          // the brief window between user-action and cascade-landing — new
+          // cells render immediately via the slot machine before the next
+          // computeRender re-fires from cursor.onNewLayer.
           const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
-          const allowed = await resolveChildNames(historyService, parentSegments, dir, content)
+          const parentLayerSig = cursorService.currentLayerSig || ''
+          layerAllowed = await resolveChildNames(historyService, parentSegments, dir, content, parentLayerSig)
           union.clear()
           localCellSet.clear()
-          for (const cell of allowed) {
+          for (const cell of layerAllowed) {
             union.add(cell)
             localCellSet.add(cell)
           }
@@ -1633,22 +1676,25 @@ export class ShowCellDrone extends Drone {
       }
     }
 
-    // filter out cells removed via effect — only honor for active clipboard cut
-    // or confirmed OPFS deletion. Stale #pendingRemoves entries must not hide
-    // tiles that still exist in OPFS (prevents ghost removal after add/rename).
+    // Reconcile pendingRemoves against the layer's children list. Under
+    // layer-as-primitive, the LAYER decides membership: a /remove drops
+    // the cell from layer.children but leaves OPFS bytes intact (so
+    // undo can restore by deleting the head history row). The check is:
+    //   - in layer.children ⇒ pendingRemove is stale (undo restored it,
+    //     paste landed, etc.) → drop the entry, let cell render
+    //   - not in layer.children ⇒ honor the remove
+    // When no layer is available (fresh lineage, clipboard view), fall
+    // back to OPFS-truth — the same semantics this code shipped with.
     if (!this.#clipboardView) {
-      const clipSvc = get<any>('@diamondcoreprocessor.com/ClipboardService')
-      const cutLabels = clipSvc?.operation === 'cut'
-        ? new Set<string>((clipSvc.items as { label: string }[]).map((i: { label: string }) => i.label))
-        : new Set<string>()
       const reconciled: string[] = []
       for (const cell of this.#pendingRemoves) {
-        if (cutLabels.has(cell) || !localCellSet.has(cell)) {
-          // active cut OR OPFS directory already deleted — honor the remove
-          union.delete(cell)
-        } else {
-          // cell exists in OPFS but is not a cut item — stale pendingRemove, clear it
+        const presentInTruth = layerAllowed
+          ? layerAllowed.has(cell)
+          : localCellSet.has(cell)
+        if (presentInTruth) {
           reconciled.push(cell)
+        } else {
+          union.delete(cell)
         }
       }
       for (const cell of reconciled) this.#pendingRemoves.delete(cell)
@@ -1838,18 +1884,27 @@ export class ShowCellDrone extends Drone {
     await this.applyGeometry(cells)
 
     if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer && this.#pendingRecenter) {
-      // first tile on empty screen → center viewport and zoom 2×.
-      // Gated on #pendingRecenter: only the page-nav path opts in.
-      // Data ops (move, add, remove, undo/redo, reorder) never touch
-      // the viewport — user keeps their current scale/pan.
-      const s = this.pixiRenderer.screen
-      this.pixiApp.stage.position.set(s.width * 0.5, s.height * 0.5)
-      this.pixiContainer.scale.set(2)
-      this.pixiContainer.position.set(0, 0)
+      // first tile on empty screen → apply 2× default ONLY when the
+      // user has no saved zoom/pan for this layer. A layer with saved
+      // viewport state (mousewheel zoom, spacebar pan, fit-to-screen)
+      // but missing meshOffset used to land here and have its zoom+pan
+      // wiped to (2, 0, 0) — destroying the user's last position.
+      // Read VP's live state to decide; #applyViewportFromSnapshot has
+      // already restored saved zoom/pan to the container/stage if
+      // present, so we only need to apply the 2× default when VP has
+      // nothing to restore.
       const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
-      if (vp) {
-        vp.setZoom(2, 0, 0)
-        vp.setPan(0, 0)
+      const hasSavedZoom = !!vp?.lastZoom
+      const hasSavedPan = !!vp?.lastPan
+      if (!hasSavedZoom && !hasSavedPan) {
+        const s = this.pixiRenderer.screen
+        this.pixiApp.stage.position.set(s.width * 0.5, s.height * 0.5)
+        this.pixiContainer.scale.set(2)
+        this.pixiContainer.position.set(0, 0)
+        if (vp) {
+          vp.setZoom(2, 0, 0)
+          vp.setPan(0, 0)
+        }
       }
     }
 
@@ -1944,7 +1999,14 @@ export class ShowCellDrone extends Drone {
      if (!vp) return
      const existing = this.#layerViewportCache.get(locationKey) ?? {} as ViewportSnapshot
      const lp = vp.lastPan; if (lp) existing.pan = { dx: lp.dx, dy: lp.dy }
-     const lz = vp.lastZoom; if (lz) existing.zoom = { scale: lz.scale, cx: lz.cx, cy: lz.cy }
+     // Preserve the fit flag — without it, back-navigation cache loses
+     // the marker that tells #applyViewportFromSnapshot to refit on the
+     // new viewport, and the user's `r` fit silently degrades to a
+     // raw (cx, cy) restore that drifts off-center after any resize.
+     const lz = vp.lastZoom
+     if (lz) existing.zoom = lz.fit
+       ? { scale: lz.scale, cx: lz.cx, cy: lz.cy, fit: true }
+       : { scale: lz.scale, cx: lz.cx, cy: lz.cy }
      const lm = vp.lastMeshOffset; if (lm) existing.meshOffset = { x: lm.x, y: lm.y }
      this.#layerViewportCache.set(locationKey, existing)
    }
@@ -1987,11 +2049,18 @@ export class ShowCellDrone extends Drone {
     const s = renderer.screen
 
     if (snap.zoom) {
+      // Apply the saved scale + (cx, cy) as an approximation so the
+      // initial paint isn't blank, but flag the snapshot for a refit
+      // once mesh bounds are available (handled in applyGeometry).
+      // Without this, a fit saved at one viewport size renders shrunk
+      // and off-center after reload at a different size.
       container.scale.set(snap.zoom.scale)
       container.position.set(snap.zoom.cx, snap.zoom.cy)
+      this.#pendingFitRestore = !!snap.zoom.fit
     } else {
       container.scale.set(1)
       container.position.set(0, 0)
+      this.#pendingFitRestore = false
     }
 
     if (snap.pan) {
@@ -2149,6 +2218,19 @@ export class ShowCellDrone extends Drone {
       if (final) this.#pendingRecenter = false  // consumed only on final batch
     }
 
+    // After mesh + recenter have settled on the final batch, refit if
+    // the restored snapshot was a fit (snap.zoom.fit). The applied
+    // (cx, cy) was an approximation derived from the previous
+    // viewport's safe area — refitting against the new viewport keeps
+    // content centered and not "shrunk" after a resize-then-reload.
+    // Gated on `final` so partial-batch bounds don't produce a fit
+    // that's too tight (would zoom in then out as more cells stream).
+    if (final && this.#pendingFitRestore && this.hexMesh?.getLocalBounds) {
+      this.#pendingFitRestore = false
+      const zoom = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ZoomDrone') as { zoomToFit?: (snap?: boolean) => void } | undefined
+      zoom?.zoomToFit?.(true)
+    }
+
     this.geom = geom
     this.renderedCellsKey = nextCellsKey
     this.renderedCount = cells.length
@@ -2229,6 +2311,35 @@ export class ShowCellDrone extends Drone {
     // respond to processor-emitted synchronize and URL navigation
     window.addEventListener('synchronize', this.requestRender)
     window.addEventListener('navigate', this.requestRender)
+
+    // viewport:persisted — VP just wrote pan/zoom/meshOffset for some
+    // directory. Mirror it into our back-nav cache so navigating-out-and-
+    // back sees the latest values WITHOUT a race against an in-flight
+    // OPFS write. Without this, the back-nav fast path (line 1383)
+    // applies the snapshot from the FIRST visit's OPFS read, undoing any
+    // pan/zoom/recenter the user did this session. Symptom: press R,
+    // back, in → viewport resets to pre-R; refresh fixes once but
+    // back/forth resets again.
+    this.onEffect<{ dir: FileSystemDirectoryHandle; snapshot: ViewportSnapshot }>('viewport:persisted', ({ dir, snapshot }) => {
+      // Match the dir to a known location key. The current rendered
+      // layer is the most common case, but a flush from setDir can
+      // also fire for the OUTGOING layer — handle both via the
+      // dir→locationKey index.
+      let locationKey: string | null = null
+      if (this.#layerDirCache.get(this.renderedLocationKey) === dir) {
+        locationKey = this.renderedLocationKey
+      } else {
+        for (const [key, cachedDir] of this.#layerDirCache) {
+          if (cachedDir === dir) { locationKey = key; break }
+        }
+      }
+      if (locationKey) {
+        // Snapshot is the post-write OPFS state — set it as the cached
+        // snap so back-nav fast path reads what's on disk, not a stale
+        // first-visit read.
+        this.#layerViewportCache.set(locationKey, { ...snapshot })
+      }
+    })
 
     // tile:saved effect — invalidate only the saved cell's caches and run an
     // incremental render so the rest of the grid stays untouched.
@@ -3102,6 +3213,20 @@ export class ShowCellDrone extends Drone {
       | { read: (dir: FileSystemDirectoryHandle, key: string) => Promise<number | undefined> }
       | undefined
 
+    // Cache key is the cell's lineage signature, never its bare folder
+    // name. Two cells in different parent folders can share a leaf
+    // name (a "Notes" tile is common at many depths) and a name-keyed
+    // cache returns the first-seen index for every subsequent read of
+    // the same leaf — which on cold-load-at-subfolder + nav-back
+    // resolves to the SUBFOLDER's index, collides with the parent's
+    // real occupant, demotes the loser to unindexed, and persists it
+    // to slot 0. The lineage signature is unique per location and the
+    // same address inflate uses, so the in-memory cache, the on-disk
+    // 0000.index, and the inflate tree all agree on which cell is
+    // which.
+    const lineage = this.resolve<any>('lineage')
+    const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+
     for (const name of names) {
       if (!localCellSet.has(name)) {
         unindexed.push(name)
@@ -3109,8 +3234,9 @@ export class ShowCellDrone extends Drone {
       }
       try {
         const cellDir = await dir.getDirectoryHandle(name, { create: false })
+        const cacheKey = await cellLocationSig(parentSegments, name)
         const idx = indexNurse
-          ? await indexNurse.read(cellDir, name)
+          ? await indexNurse.read(cellDir, cacheKey)
           : await readCellProperties(cellDir).then(p =>
               typeof p['index'] === 'number' ? (p['index'] as number) : undefined,
             )
@@ -3141,8 +3267,11 @@ export class ShowCellDrone extends Drone {
         if (!readOnly && localCellSet.has(name)) {
           try {
             const cellDir = await dir.getDirectoryHandle(name, { create: false })
-            await writeCellProperties(cellDir, { index: nextFree })
-          } catch { /* skip */ }
+            const cacheKey = await cellLocationSig(parentSegments, name)
+            await writeCellProperties(cellDir, { index: nextFree }, cacheKey)
+          } catch (err) {
+            console.warn('[show-cell] failed to persist 0000.index for', name, err)
+          }
         }
         nextFree++
       }
@@ -3233,7 +3362,9 @@ export class ShowCellDrone extends Drone {
 
     try {
       const cellDir = await dir.getDirectoryHandle(cell, { create: false })
-      await writeCellProperties(cellDir, { index: targetIndex })
+      const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+      const cacheKey = await cellLocationSig(parentSegments, cell)
+      await writeCellProperties(cellDir, { index: targetIndex }, cacheKey)
     } catch { /* missing cell dir */ }
 
     this.renderedCellsKey = ''

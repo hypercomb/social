@@ -5,20 +5,17 @@
   "activity.pasted.other": "pasted {count} tiles",
   "activity.moved": "tile moved",
   "activity.droppedThrough": "moved \"{cell}\" into \"{layer}\"",
-  "activity.mesh-public": "mesh \u2192 public",
-  "activity.mesh-private": "mesh \u2192 private",
+  "activity.mesh-public": "mesh → public",
+  "activity.mesh-private": "mesh → private",
   "activity.undo": "Undo",
   "activity.dismiss": "Dismiss",
-
   "command-line.placeholder.locked": "enter cell name...",
   "command-line.placeholder.filter": "filter tiles...",
   "command-line.placeholder.slash": "type a behaviour...",
   "command-line.placeholder.default": "share intent...",
-
   "palette.title": "Command Palette",
   "palette.placeholder": "Type a command...",
   "palette.empty": "No matching commands",
-
   "shortcuts.title": "Reference",
   "shortcuts.close": "Close",
   "shortcuts.filter-placeholder": "Filter commands, operations, shortcuts…",
@@ -27,7 +24,6 @@
   "shortcuts.section.keyboard": "Keyboard Shortcuts",
   "shortcuts.empty": "No matches",
   "shortcuts.chord-sep": "then",
-
   "editor.title": "tile editor",
   "editor.name-placeholder": "tile name",
   "editor.drop-image": "drop image here",
@@ -52,7 +48,9 @@
   "editor.cancel": "cancel",
   "editor.save": "save",
   "editor.done": "done",
-
+  "editor.qa.title": "questions",
+  "editor.qa.answer-placeholder": "answer…",
+  "editor.qa.reply": "reply",
   "controls.go-back": "go back",
   "controls.back": "back",
   "controls.dcp": "diamond core processor",
@@ -91,15 +89,12 @@
   "controls.atomize-particle": "particle disassembly",
   "controls.atomize-reassemble": "reassemble",
   "controls.atomize-close": "close atomizer",
-
   "slash.atomize-ui": "toggle the atomizer toolbar",
-
   "atomizer.spacing-placeholder": "e.g. 8px 12px",
   "atomizer.title": "atomizers",
   "atomizer.close": "close atomizer bar",
   "atomizer.empty": "no atomizers loaded",
   "atomizer.reset": "reset properties",
-
   "explorer.title": "OPFS Explorer",
   "explorer.entries-label": "opfs entries",
   "explorer.copy-package": "Copy package",
@@ -114,20 +109,16 @@
   "explorer.copy": "copy",
   "explorer.remove": "remove",
   "explorer.no-entries": "no entries",
-
   "format-painter.title": "Format Painter",
   "format-painter.empty": "No visual properties on this tile",
   "format-painter.apply": "Apply to selection",
-
   "mesh.secret-placeholder": "secure your location",
   "mesh.secured": "secured",
   "mesh.solo": "solo mode",
   "mesh.swarm": "swarm mode",
-
   "portal.title": "portal",
   "portal.close": "close portal",
   "portal.back": "back",
-
   "action.command": "command",
   "action.command.description": "Open the command palette for this tile",
   "action.edit": "edit",
@@ -162,14 +153,12 @@
   "action.adopt.description": "Add this tile to your own collection",
   "action.block": "block",
   "action.block.description": "Block this tile from appearing in your view",
-
   "selection.move": "move",
   "selection.cut": "cut",
   "selection.copy": "copy",
   "selection.remove": "remove",
   "selection.paste": "paste",
   "selection.reroll": "reroll",
-
   "history.title": "browser history",
   "history.back": "back",
   "history.forward": "forward",
@@ -188,8 +177,6 @@
   "history.selection-make-head": "make selected layers head (keep sources)",
   "history.selection-merge": "merge selected layers into new head (delete sources)",
   "history.group-step": "group step — undo/redo skips edits and jumps to the earliest tile add/remove",
-
-  "slash.select": "select tiles for cut/copy/move",
   "slash.remove-builtin": "remove selected tiles",
   "slash.help": "Show reference",
   "slash.clear": "Clear active filter",
@@ -217,18 +204,14 @@
   "slash.domain": "Add, remove, or list mesh relay domains",
   "slash.substrate": "Toggle default background images for new tiles",
   "slash.reroll": "Reroll substrate background images on tiles",
-
   "substrate.on": "substrate on → {path}",
   "substrate.off": "substrate off",
   "substrate.here": "substrate → {path}",
-
   "toast.dismiss": "Dismiss",
-
   "instruction.click-to-restore": "click to restore",
   "instruction.catalog-title": "All Instructions",
   "instruction.no-instructions": "No instructions available. Drones can declare instructions to appear here.",
   "controls.instructions": "Toggle instructions (Ctrl+Click for catalog)",
-
   "instruction.dcp.open-processor": "Open the Diamond Core Processor",
   "instruction.dcp.fit-content": "Fit all tiles into view",
   "instruction.dcp.zoom-out": "Zoom out of the canvas",
@@ -237,24 +220,11 @@
   "instruction.dcp.fullscreen": "Toggle fullscreen mode",
   "instruction.dcp.layout-mode": "Switch between pinned and dense tile layout",
   "instruction.dcp.instructions-toggle": "Show or hide instruction labels on all controls",
-
-  "trackplayer.eyebrow": "hypercomb audio",
-  "trackplayer.title": "\u201cInspired by Humans\u201d audiobook",
-  "trackplayer.description": "Listen to the e-book on <a href=\"https://inspiredbyhumans.org\" target=\"_blank\" rel=\"noopener\">inspiredbyhumans.org</a>",
-  "trackplayer.loading": "Loading tracks...",
-  "trackplayer.empty": "No tracks found yet. Add files to hypercomb-shared/tracks.",
-  "trackplayer.selected": "Selected track",
-  "trackplayer.available": "Available tracks",
-  "trackplayer.no-signal": "no signal",
-  "trackplayer.play-prequel": "play prequel now",
-  "trackplayer.unavailable": "Tracks are unavailable right now.",
-
   "confirm.delete-title": "Confirm Delete",
   "confirm.delete-message": "Are you sure you want to delete \"{name}\"?",
   "confirm.delete-children-warning": "This item contains children that will also be permanently deleted.",
   "confirm.delete": "Delete",
   "confirm.cancel": "Cancel",
-
   "docs.title": "Documentation",
   "docs.close-sidebar": "close sidebar",
   "docs.open-sidebar": "open sidebar",
@@ -264,28 +234,20 @@
   "docs.loading": "Loading...",
   "docs.main-title": "Hypercomb Documentation",
   "docs.welcome-text": "Select a document from the sidebar or use /docs glossary to jump directly to a page.",
-
   "command-line.install-prompt": "Install Hypercomb",
   "command-line.create-cell": "Create a new cell at the current level",
   "command-line.create-nested": "Create nested folders, stay at current level with parent path retained",
   "command-line.navigate-folder": "Go to a folder, creating it if it doesn't exist",
   "command-line.filter-tiles": "Live-filter visible tiles by keyword",
   "command-line.go": "GO",
-
   "audio.pause": "pause",
   "audio.play": "play",
   "audio.seek": "seek",
-
-  "trackplayer.close-player": "close player",
-  "trackplayer.no-signal-label": "no signal interlude",
-
   "controls.drag-to-move": "drag to move",
   "controls.collapse": "collapse",
   "controls.expand": "expand",
-
   "selection.hide": "hide",
   "selection.drag-to-move": "drag to move",
-
   "breadcrumb.public": "public",
   "breadcrumb.private": "private",
   "breadcrumb.secure": "secure",
@@ -295,7 +257,6 @@
   "breadcrumb.installed": "installed",
   "breadcrumb.installed-count": "installed ({count})",
   "breadcrumb.sync-error": "sync error",
-
   "keymap.escape": "Cancel / dismiss",
   "keymap.shortcuts": "Show keyboard shortcuts",
   "keymap.palette": "Open command palette",
@@ -313,7 +274,6 @@
   "keymap.paste": "Paste from clipboard",
   "keymap.cut": "Cut selected tiles",
   "keymap.remove": "Remove selected tiles",
-
   "dcp.title": "Diamond Core Processor",
   "dcp.install": "Install",
   "dcp.download-package": "Download package",
@@ -382,7 +342,6 @@
   "dcp.editor-modified": "modified",
   "dcp.editor-loading-files": "Loading files...",
   "dcp.editor-empty": "No bees or dependencies in this layer.",
-
   "cell.welcome": "welcome",
   "cell.home": "home",
   "cell.settings": "settings",
@@ -425,7 +384,6 @@
   "cell.meetings": "Meetings",
   "cell.the-depths": "The Depths",
   "cell.one-day": "One Day",
-
   "cell.assistant": "assistant",
   "cell.avatars": "avatars",
   "cell.background": "background",

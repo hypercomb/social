@@ -416,7 +416,15 @@ export class NostrMeshDrone extends Drone {
     const s = String(sig ?? '').trim()
     if (!s) return false
 
-    const tags: string[][] = [['x', s], ['expiration', String(Math.floor(Date.now() / 1000) + 600)]]
+    // Sig tag is always present. Expiration is opt-in: if the caller
+    // didn't supply one in extraTags, the event lives until the relay
+    // purges it (or never, on in-memory / friendly relays). Share
+    // events are state-driven — host's dashboard or source-node
+    // toggle revokes them — so a time-based default would lie.
+    const tags: string[][] = [['x', s]]
+
+    const callerHasExpiration = Array.isArray(extraTags) &&
+      extraTags.some(t => Array.isArray(t) && t[0] === 'expiration')
 
     if (Array.isArray(extraTags)) {
       for (const t of extraTags) {
@@ -424,6 +432,7 @@ export class NostrMeshDrone extends Drone {
         tags.push(t.map(x => String(x)))
       }
     }
+    void callerHasExpiration  // surface for future opt-in hardening
 
     const content = typeof payload === 'string' ? payload : JSON.stringify(payload ?? {})
 

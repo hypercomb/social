@@ -4,7 +4,7 @@ import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js
 import type { Axial } from '../navigation/hex-detector.js'
 import type { LayerTransferService } from './layer-transfer.service.js'
 import type { OrderProjection } from '../history/order-projection.js'
-import { readCellProperties, writeCellProperties } from '../editor/tile-properties.js'
+import { readCellProperties, writeCellProperties, cellLocationSig } from '../editor/tile-properties.js'
 
 type CellCountPayload = { count: number; labels: string[]; coords?: Axial[]; branchLabels?: string[] }
 type MoveRefs = {
@@ -49,9 +49,18 @@ export class MoveDrone extends Drone {
   #occupancy = new Map<string, string>()        // axialKey → label
   #labelToKey = new Map<string, string>()       // label → axialKey (reverse map)
   #keyToIndex = new Map<string, number>()       // axialKey → index (for reordering)
+
+  // Live snapshot — always tracks the latest render:cell-count so a fresh
+  // drag (after cut/paste, redo, etc.) never starts from stale state.
   #cellLabels: string[] = []
   #cellCoords: Axial[] = []
   #cellCount = 0
+
+  // Drag snapshot — captured at beginMove from the live arrays above so
+  // any render:cell-count that fires mid-drag does not shift the geometry
+  // computation under the user's cursor. Cleared on #reset.
+  #dragLabels: string[] = []
+  #dragCoords: Axial[] = []
 
   // ── drop-into modifier state (Ctrl held during drag) ─────
   #dropIntoActive = false
@@ -62,10 +71,14 @@ export class MoveDrone extends Drone {
   get dropIntoActive(): boolean { return this.#dropIntoActive }
 
   labelAtAxial = (axial: Axial): string | null => {
-    for (let i = 0; i < this.#cellLabels.length; i++) {
-      const coord = this.#cellCoords[i]
+    // During a drag, prefer the snapshot so hover detection stays
+    // consistent with the geometry that beginMove captured.
+    const labels = this.#dragLabels.length > 0 ? this.#dragLabels : this.#cellLabels
+    const coords = this.#dragLabels.length > 0 ? this.#dragCoords : this.#cellCoords
+    for (let i = 0; i < labels.length; i++) {
+      const coord = coords[i]
       if (coord && coord.q === axial.q && coord.r === axial.r) {
-        return this.#cellLabels[i] ?? null
+        return labels[i] ?? null
       }
     }
     return null
@@ -110,8 +123,13 @@ export class MoveDrone extends Drone {
     })
 
     this.onEffect<CellCountPayload>('render:cell-count', (payload) => {
-      // freeze snapshot only during pointer drags — command moves rebuild on label changes
-      if (this.#activeSource && this.#activeSource !== 'command') return
+      // ALWAYS update the live snapshot. Drag stability is provided by
+      // #dragLabels / #dragCoords captured at beginMove. Freezing this
+      // path was the cut+paste snap-back bug: any commit that threw
+      // between #begin and #reset left #activeSource stuck and the
+      // freeze became permanent — subsequent drags computed placements
+      // against stale coords and the moved cell appeared to bounce
+      // back to its starting slot.
       this.#cellCount = payload.count
       this.#cellLabels = payload.labels
       this.#cellCoords = payload.coords ?? []
@@ -170,13 +188,40 @@ export class MoveDrone extends Drone {
   // ── public API (called by input handlers) ────────────────
 
   beginMove = (anchorAxial: Axial, source: string): boolean => {
+    // Auto-heal: if a previous drag left state behind without resetting
+    // (e.g., commit threw, browser swallowed pointerup, dialog stole
+    // focus mid-drag), force-clear before starting fresh. The marker
+    // is "activeSource set but no anchor / movedGroup" — a real drag
+    // never sits in that state.
+    if (this.#activeSource && (!this.#anchorAxial || this.#movedGroup.size === 0)) {
+      this.#activeSource = null
+      this.#anchorAxial = null
+      this.#movedGroup.clear()
+      this.#occupancy.clear()
+      this.#labelToKey.clear()
+      this.#keyToIndex.clear()
+      this.#dragLabels = []
+      this.#dragCoords = []
+    }
+
     if (!this.#begin(source)) return false
 
     const anchorKey = axialKey(anchorAxial.q, anchorAxial.r)
 
+    // Snapshot the live arrays so a render:cell-count emitted mid-drag
+    // (image loads, tag changes, etc.) cannot shift the geometry the
+    // user is dragging against.
+    this.#dragLabels = [...this.#cellLabels]
+    this.#dragCoords = this.#cellCoords.map(c => ({ q: c.q, r: c.r }))
+
     // build occupancy snapshot from current cell labels
     const axialSvc = this.resolve<any>('axial')
-    if (!axialSvc?.items) { this.#end(source); return false }
+    if (!axialSvc?.items) {
+      this.#dragLabels = []
+      this.#dragCoords = []
+      this.#end(source)
+      return false
+    }
 
     this.#occupancy.clear()
     this.#labelToKey.clear()
@@ -189,11 +234,11 @@ export class MoveDrone extends Drone {
     }
 
     // occupancy + label reverse map for occupied cells only
-    // use stored coords from render:cell-count (matches labels 1:1, works in pinned mode)
-    for (let i = 0; i < this.#cellLabels.length; i++) {
-      const label = this.#cellLabels[i]
+    // use the just-captured drag snapshot (matches labels 1:1, works in pinned mode)
+    for (let i = 0; i < this.#dragLabels.length; i++) {
+      const label = this.#dragLabels[i]
       if (!label) continue
-      const coord = this.#cellCoords[i] as Axial | undefined
+      const coord = this.#dragCoords[i] as Axial | undefined
       if (!coord) continue
       const key = axialKey(coord.q, coord.r)
       this.#occupancy.set(key, label)
@@ -203,6 +248,8 @@ export class MoveDrone extends Drone {
     // anchor must be on an occupied tile
     const anchorLabel = this.#occupancy.get(anchorKey)
     if (!anchorLabel) {
+      this.#dragLabels = []
+      this.#dragCoords = []
       this.#end(source)
       return false
     }
@@ -214,13 +261,15 @@ export class MoveDrone extends Drone {
     this.#movedGroup.clear()
     if (selected && selected.size > 0) {
       if (!selected.has(anchorLabel)) {
+        this.#dragLabels = []
+        this.#dragCoords = []
         this.#end(source)
         return false
       }
-      for (let i = 0; i < this.#cellLabels.length; i++) {
-        const label = this.#cellLabels[i]
+      for (let i = 0; i < this.#dragLabels.length; i++) {
+        const label = this.#dragLabels[i]
         if (!label) continue
-        const coord = this.#cellCoords[i] as Axial | undefined
+        const coord = this.#dragCoords[i] as Axial | undefined
         if (!coord) continue
         if (selected.has(label)) {
           this.#movedGroup.set(label, { q: coord.q, r: coord.r })
@@ -230,7 +279,7 @@ export class MoveDrone extends Drone {
       this.#movedGroup.set(anchorLabel, { q: anchorAxial.q, r: anchorAxial.r })
     }
 
-    console.log('[move] beginMove', { anchorLabel, selectedLabels: selected ? [...selected] : [], movedGroupSize: this.#movedGroup.size, movedLabels: [...this.#movedGroup.keys()], cellCount: this.#cellCount, cellLabelsLen: this.#cellLabels.length, cellLabels: [...this.#cellLabels] })
+    console.log('[move] beginMove', { anchorLabel, selectedLabels: selected ? [...selected] : [], movedGroupSize: this.#movedGroup.size, movedLabels: [...this.#movedGroup.keys()], cellCount: this.#cellCount, cellLabelsLen: this.#dragLabels.length, cellLabels: [...this.#dragLabels] })
 
     this.#anchorAxial = anchorAxial
     return true
@@ -292,18 +341,28 @@ export class MoveDrone extends Drone {
     if (this.#activeSource !== source) return
     if (!this.#anchorAxial) { this.#reset(source); return }
 
-    const diff: Axial = {
-      q: finalAxial.q - this.#anchorAxial.q,
-      r: finalAxial.r - this.#anchorAxial.r,
+    let didCommit = false
+    try {
+      const diff: Axial = {
+        q: finalAxial.q - this.#anchorAxial.q,
+        r: finalAxial.r - this.#anchorAxial.r,
+      }
+
+      // skip if no movement
+      if (diff.q !== 0 || diff.r !== 0) {
+        const placements = this.#computePlacements(diff)
+        await this.#commitPlacements(placements)
+        didCommit = true
+      }
+    } catch (err) {
+      // Swallow + log so #reset always runs in finally. Leaving
+      // #activeSource set is the bug we just fixed; never regress it.
+      console.warn('[move] commitMoveAt failed:', err)
+      this.emitEffect('move:preview', null)
+    } finally {
+      this.#reset(source)
     }
-
-    // skip if no movement
-    if (diff.q === 0 && diff.r === 0) { this.#reset(source); return }
-
-    const placements = this.#computePlacements(diff)
-    await this.#commitPlacements(placements)
-    this.#reset(source)
-    void new hypercomb().act()
+    if (didCommit) void new hypercomb().act()
   }
 
   /**
@@ -316,6 +375,20 @@ export class MoveDrone extends Drone {
     if (this.#activeSource !== source) { return }
     if (!this.#anchorAxial) { this.#reset(source); return }
 
+    try {
+      await this.#commitDropIntoUnsafe(axial, source)
+    } catch (err) {
+      console.warn('[move] commitDropInto failed:', err)
+      this.emitEffect('move:preview', null)
+      this.emitEffect('move:drop-into', null)
+      this.#dropIntoActive = false
+      this.#dropIntoLabel = null
+      this.#lastHoverAxial = null
+      this.#reset(source)
+    }
+  }
+
+  async #commitDropIntoUnsafe(axial: Axial, source: string): Promise<void> {
     const targetLabel = this.labelAtAxial(axial)
     if (!targetLabel || this.#movedGroup.has(targetLabel)) {
       this.cancelMove(source)
@@ -356,12 +429,18 @@ export class MoveDrone extends Drone {
     } catch { /* no existing children */ }
 
     // transfer each moved cell into the target's children, assigning
-    // monotonically increasing indexes so order is stable and unique
+    // monotonically increasing indexes so order is stable and unique.
+    // Cache key tracks the cell's NEW lineage (under targetLabel), not
+    // its old one — so IndexNurse's broadcast invalidation hits the
+    // address the cell will be read at next render.
+    const sourceSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+    const targetParentSegments = [...sourceSegments, targetLabel]
     for (const label of movedLabels) {
       try {
         await transfer.transfer(sourceDir, targetDir, label)
         const cellDir = await targetDir.getDirectoryHandle(label, { create: false })
-        await writeCellProperties(cellDir, { index: nextIndex })
+        const cacheKey = await cellLocationSig(targetParentSegments, label)
+        await writeCellProperties(cellDir, { index: nextIndex }, cacheKey)
         nextIndex++
       } catch (err) {
         console.warn('[move] drop-into transfer failed for', label, err)
@@ -415,16 +494,20 @@ export class MoveDrone extends Drone {
 
   #reorderNames(placements: Map<string, Axial>): string[] {
     // build a sparse array indexed by grid position (not dense cell index)
-    // so buildCellsFromAxial can use moveNames[gridIndex] directly
+    // so buildCellsFromAxial can use moveNames[gridIndex] directly.
+    // Use the drag snapshot during a drag (#dragLabels populated) so a
+    // mid-drag render:cell-count cannot mutate the geometry under us.
     const axialSvc = this.resolve<any>('axial')
     const gridSize = axialSvc?.count ?? 0
-    const names: string[] = new Array(Math.max(gridSize, this.#cellLabels.length)).fill('')
+    const labels = this.#dragLabels.length > 0 ? this.#dragLabels : this.#cellLabels
+    const coords = this.#dragLabels.length > 0 ? this.#dragCoords : this.#cellCoords
+    const names: string[] = new Array(Math.max(gridSize, labels.length)).fill('')
 
     // place each label at its grid index using stored coords
-    for (let i = 0; i < this.#cellLabels.length; i++) {
-      const label = this.#cellLabels[i]
+    for (let i = 0; i < labels.length; i++) {
+      const label = labels[i]
       if (!label) continue
-      const coord = this.#cellCoords[i]
+      const coord = coords[i]
       if (!coord) continue
       const gridIndex = this.#keyToIndex.get(axialKey(coord.q, coord.r))
       if (gridIndex !== undefined) names[gridIndex] = label
@@ -501,7 +584,7 @@ export class MoveDrone extends Drone {
     return placements
   }
 
-  // ── command-driven move API (for command line /select[...]/move) ──
+  // ── command-driven move API (for command line [...]/move) ──
 
   #commandActive = false
   get moveCommandActive(): boolean { return this.#commandActive }
@@ -512,6 +595,18 @@ export class MoveDrone extends Drone {
    */
   beginCommandMove = (labels: string[]): void => {
     if (labels.length === 0) return
+
+    // Auto-heal stuck state (see beginMove for the full rationale).
+    if (this.#activeSource && (!this.#anchorAxial || this.#movedGroup.size === 0)) {
+      this.#activeSource = null
+      this.#anchorAxial = null
+      this.#movedGroup.clear()
+      this.#occupancy.clear()
+      this.#labelToKey.clear()
+      this.#keyToIndex.clear()
+      this.#dragLabels = []
+      this.#dragCoords = []
+    }
     if (this.#activeSource) return // another move is active
 
     this.#activeSource = 'command'
@@ -519,6 +614,10 @@ export class MoveDrone extends Drone {
 
     const axialSvc = this.resolve<any>('axial')
     if (!axialSvc?.items) { this.#end('command'); this.#commandActive = false; return }
+
+    // Snapshot for the duration of the command move.
+    this.#dragLabels = [...this.#cellLabels]
+    this.#dragCoords = this.#cellCoords.map(c => ({ q: c.q, r: c.r }))
 
     this.#occupancy.clear()
     this.#labelToKey.clear()
@@ -530,11 +629,11 @@ export class MoveDrone extends Drone {
       this.#keyToIndex.set(key, i)
     }
 
-    // occupancy — use stored coords from render:cell-count (works in pinned mode)
-    for (let i = 0; i < this.#cellLabels.length; i++) {
-      const label = this.#cellLabels[i]
+    // occupancy — use the just-captured snapshot (works in pinned mode)
+    for (let i = 0; i < this.#dragLabels.length; i++) {
+      const label = this.#dragLabels[i]
       if (!label) continue
-      const coord = this.#cellCoords[i] as Axial | undefined
+      const coord = this.#dragCoords[i] as Axial | undefined
       if (!coord) continue
       const key = axialKey(coord.q, coord.r)
       this.#occupancy.set(key, label)
@@ -595,21 +694,29 @@ export class MoveDrone extends Drone {
     if (this.#activeSource !== 'command') return
     if (!this.#anchorAxial) { this.#resetCommand(); return }
 
-    const axialSvc = this.resolve<any>('axial')
-    const targetCoord = axialSvc?.items?.get(targetIndex)
-    if (!targetCoord) { this.#resetCommand(); return }
+    let didCommit = false
+    try {
+      const axialSvc = this.resolve<any>('axial')
+      const targetCoord = axialSvc?.items?.get(targetIndex)
+      if (!targetCoord) return
 
-    const diff: Axial = {
-      q: targetCoord.q - this.#anchorAxial.q,
-      r: targetCoord.r - this.#anchorAxial.r,
+      const diff: Axial = {
+        q: targetCoord.q - this.#anchorAxial.q,
+        r: targetCoord.r - this.#anchorAxial.r,
+      }
+
+      if (diff.q !== 0 || diff.r !== 0) {
+        const placements = this.#computePlacements(diff)
+        await this.#commitPlacements(placements)
+        didCommit = true
+      }
+    } catch (err) {
+      console.warn('[move] commitCommandMoveAt failed:', err)
+      this.emitEffect('move:preview', null)
+    } finally {
+      this.#resetCommand()
     }
-
-    if (diff.q === 0 && diff.r === 0) { this.#resetCommand(); return }
-
-    const placements = this.#computePlacements(diff)
-    await this.#commitPlacements(placements)
-    this.#resetCommand()
-    void new hypercomb().act()
+    if (didCommit) void new hypercomb().act()
   }
 
   /**
@@ -669,13 +776,18 @@ export class MoveDrone extends Drone {
     const dir: FileSystemDirectoryHandle | null = lineage?.explorerDir ? await lineage.explorerDir() : null
     if (!dir) return
 
+    const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+
     for (const [label, axial] of placements) {
       const gridIndex = this.#keyToIndex.get(axialKey(axial.q, axial.r))
       if (gridIndex === undefined) continue
       try {
         const cellDir = await dir.getDirectoryHandle(label, { create: false })
-        await writeCellProperties(cellDir, { index: gridIndex })
-      } catch { /* skip missing cell dirs */ }
+        const cacheKey = await cellLocationSig(parentSegments, label)
+        await writeCellProperties(cellDir, { index: gridIndex }, cacheKey)
+      } catch (err) {
+        console.warn('[move] failed to persist 0000.index for', label, err)
+      }
     }
   }
 
@@ -687,6 +799,8 @@ export class MoveDrone extends Drone {
     this.#occupancy.clear()
     this.#labelToKey.clear()
     this.#keyToIndex.clear()
+    this.#dragLabels = []
+    this.#dragCoords = []
     this.#end(source)
   }
 }

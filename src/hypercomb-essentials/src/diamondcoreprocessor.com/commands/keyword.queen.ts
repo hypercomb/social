@@ -10,7 +10,7 @@ import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
  *   /keyword tagName(#ff0000)     — add tag with color
  *   /keyword ~tagName             — remove tag from selected tiles
  *   /keyword [tag1, ~tag2, tag3]  — batch add/remove
- *   /select[a,b]/keyword tagName  — chained: select then tag
+ *   [a,b]/keyword tagName         — chained: select then tag
  */
 export class KeywordQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'

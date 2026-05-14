@@ -9,16 +9,13 @@
   "activity.mesh-private": "сетка → приватная",
   "activity.undo": "Отменить",
   "activity.dismiss": "Закрыть",
-
   "command-line.placeholder.locked": "имя ячейки...",
   "command-line.placeholder.filter": "фильтровать плитки...",
   "command-line.placeholder.slash": "введите поведение...",
   "command-line.placeholder.default": "поделиться намерением...",
-
   "palette.title": "Палитра команд",
   "palette.placeholder": "Введите команду...",
   "palette.empty": "Подходящих команд не найдено",
-
   "shortcuts.title": "Справочник",
   "shortcuts.close": "Закрыть",
   "shortcuts.filter-placeholder": "Фильтр команд, операций, сокращений…",
@@ -27,7 +24,6 @@
   "shortcuts.section.keyboard": "Сочетания клавиш",
   "shortcuts.empty": "Нет совпадений",
   "shortcuts.chord-sep": "затем",
-
   "editor.title": "редактор плитки",
   "editor.drop-image": "перетащите изображение сюда",
   "editor.unlink-transforms": "отвязать трансформации",
@@ -48,7 +44,6 @@
   "editor.search-google": "Поиск в Google Картинках",
   "editor.cancel": "отмена",
   "editor.save": "сохранить",
-
   "controls.go-back": "вернуться",
   "controls.back": "назад",
   "controls.dcp": "алмазный процессор ядра",
@@ -86,15 +81,12 @@
   "controls.atomize-particle": "разборка частиц",
   "controls.atomize-reassemble": "пересобрать",
   "controls.atomize-close": "закрыть атомизатор",
-
   "slash.atomize-ui": "переключить панель атомизатора",
-
   "atomizer.spacing-placeholder": "напр. 8px 12px",
   "atomizer.title": "атомизаторы",
   "atomizer.close": "закрыть панель атомизатора",
   "atomizer.empty": "нет атомизаторов",
   "atomizer.reset": "сбросить свойства",
-
   "explorer.title": "Проводник OPFS",
   "explorer.entries-label": "записи OPFS",
   "explorer.copy-package": "Копировать пакет",
@@ -109,18 +101,14 @@
   "explorer.copy": "копировать",
   "explorer.remove": "удалить",
   "explorer.no-entries": "нет записей",
-
   "format-painter.title": "Копирование формата",
   "format-painter.empty": "Нет визуальных свойств у этой плитки",
   "format-painter.apply": "Применить к выделению",
-
   "mesh.secret-placeholder": "защитите ваше местоположение",
   "mesh.secured": "защищено",
-
   "portal.title": "портал",
   "portal.close": "закрыть портал",
   "portal.back": "назад",
-
   "action.command": "команда",
   "action.command.description": "Открыть палитру команд для этой плитки",
   "action.edit": "редактировать",
@@ -139,13 +127,11 @@
   "action.adopt.description": "Добавить эту плитку в свою коллекцию",
   "action.block": "заблокировать",
   "action.block.description": "Заблокировать эту плитку чтобы она не отображалась",
-
   "selection.move": "переместить",
   "selection.cut": "вырезать",
   "selection.copy": "копировать",
   "selection.remove": "удалить",
   "selection.paste": "вставить",
-
   "history.title": "история браузера",
   "history.back": "назад",
   "history.forward": "вперёд",
@@ -154,8 +140,6 @@
   "history.path": "путь:",
   "history.depth": "глубина:",
   "history.active": "активный:",
-
-  "slash.select": "выбрать плитки для вырезания/копирования/перемещения",
   "slash.remove-builtin": "удалить выбранные плитки",
   "slash.help": "Показать справочник",
   "slash.clear": "Очистить активный фильтр",
@@ -181,18 +165,14 @@
   "slash.record": "Начать ИИ-запись встречи с живой иерархической компиляцией",
   "slash.domain": "Добавить, удалить или перечислить домены сетевых ретрансляторов",
   "slash.substrate": "Переключить фоновые изображения по умолчанию для новых плиток",
-
   "substrate.on": "подложка включена → {path}",
   "substrate.off": "подложка выключена",
   "substrate.here": "подложка → {path}",
-
   "toast.dismiss": "Закрыть",
-
   "instruction.click-to-restore": "нажмите для восстановления",
   "instruction.catalog-title": "Все инструкции",
   "instruction.no-instructions": "Инструкции недоступны. Дроны могут объявлять инструкции для отображения здесь.",
   "controls.instructions": "Переключить инструкции (Ctrl+клик для каталога)",
-
   "instruction.dcp.open-processor": "Открыть алмазный процессор ядра",
   "instruction.dcp.fit-content": "Подогнать все плитки под вид",
   "instruction.dcp.zoom-out": "Уменьшить холст",
@@ -201,24 +181,11 @@
   "instruction.dcp.fullscreen": "Переключить полноэкранный режим",
   "instruction.dcp.layout-mode": "Переключить между закреплённой и компактной компоновкой",
   "instruction.dcp.instructions-toggle": "Показать или скрыть метки инструкций на всех элементах управления",
-
-  "trackplayer.eyebrow": "аудио hypercomb",
-  "trackplayer.title": "Аудиокнига \u201cInspired by Humans\u201d",
-  "trackplayer.description": "Слушайте e-book на <a href=\"https://inspiredbyhumans.org\" target=\"_blank\" rel=\"noopener\">inspiredbyhumans.org</a>",
-  "trackplayer.loading": "Загрузка треков...",
-  "trackplayer.empty": "Треки не найдены. Добавьте файлы в hypercomb-shared/tracks.",
-  "trackplayer.selected": "Выбранный трек",
-  "trackplayer.available": "Доступные треки",
-  "trackplayer.no-signal": "нет сигнала",
-  "trackplayer.play-prequel": "воспроизвести приквел сейчас",
-  "trackplayer.unavailable": "Треки сейчас недоступны.",
-
   "confirm.delete-title": "Подтверждение удаления",
   "confirm.delete-message": "Вы уверены, что хотите удалить \"{name}\"?",
   "confirm.delete-children-warning": "Этот элемент содержит дочерние элементы, которые также будут удалены навсегда.",
   "confirm.delete": "Удалить",
   "confirm.cancel": "Отмена",
-
   "editor.done": "готово",
   "mesh.solo": "одиночный режим",
   "mesh.swarm": "режим роя",
@@ -226,7 +193,6 @@
   "selection.hide": "скрыть",
   "controls.toggle-input": "показать командную строку",
   "slash.reroll": "Перегенерировать фоновые изображения субстрата на плитках",
-
   "docs.title": "Документация",
   "docs.close-sidebar": "закрыть боковую панель",
   "docs.open-sidebar": "открыть боковую панель",
@@ -236,26 +202,18 @@
   "docs.loading": "Загрузка...",
   "docs.main-title": "Документация Hypercomb",
   "docs.welcome-text": "Выберите документ в боковой панели или используйте /docs glossary для перехода к странице.",
-
   "command-line.install-prompt": "Установить Hypercomb",
   "command-line.create-cell": "Создать новую ячейку на текущем уровне",
   "command-line.create-nested": "Создать вложенные папки, оставаться на текущем уровне с сохранением родительского пути",
   "command-line.navigate-folder": "Перейти в папку, создать при необходимости",
   "command-line.filter-tiles": "Фильтровать плитки в реальном времени по ключевому слову",
-
   "audio.pause": "пауза",
   "audio.play": "воспроизвести",
   "audio.seek": "перемотка",
-
-  "trackplayer.close-player": "закрыть плеер",
-  "trackplayer.no-signal-label": "интерлюдия без сигнала",
-
   "controls.drag-to-move": "перетащите для перемещения",
   "controls.collapse": "свернуть",
   "controls.expand": "развернуть",
-
   "selection.drag-to-move": "перетащите для перемещения",
-
   "breadcrumb.public": "публичный",
   "breadcrumb.private": "приватный",
   "breadcrumb.secure": "защищённый",
@@ -265,7 +223,6 @@
   "breadcrumb.installed": "установлено",
   "breadcrumb.installed-count": "установлено ({count})",
   "breadcrumb.sync-error": "ошибка синхронизации",
-
   "keymap.escape": "Отмена / закрыть",
   "keymap.shortcuts": "Показать сочетания клавиш",
   "keymap.palette": "Открыть палитру команд",
@@ -282,7 +239,6 @@
   "keymap.paste": "Вставить из буфера обмена",
   "keymap.cut": "Вырезать выбранные плитки",
   "keymap.remove": "Удалить выбранные плитки",
-
   "dcp.title": "Алмазный Ядерный Процессор",
   "dcp.install": "Установить",
   "dcp.download-package": "Скачать пакет",
@@ -351,7 +307,6 @@
   "dcp.editor-modified": "изменено",
   "dcp.editor-loading-files": "Загрузка файлов...",
   "dcp.editor-empty": "В этом слое нет пчёл или зависимостей.",
-
   "cell.welcome": "добро пожаловать",
   "cell.home": "главная",
   "cell.settings": "настройки",
@@ -394,7 +349,6 @@
   "cell.meetings": "встречи",
   "cell.the-depths": "глубины",
   "cell.one-day": "однажды",
-
   "cell.assistant": "помощник",
   "cell.avatars": "аватары",
   "cell.background": "фон",

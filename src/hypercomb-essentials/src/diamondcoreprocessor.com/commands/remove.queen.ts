@@ -1,18 +1,38 @@
 // diamondcoreprocessor.com/commands/remove.queen.ts
 
-import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
+import { QueenBee, EffectBus } from '@hypercomb/core'
+
+type LineageLike = {
+  domain?: () => string
+  explorerSegments?: () => readonly string[]
+}
+type HistoryServiceLike = {
+  sign(l: LineageLike): Promise<string>
+  currentLayerAt(locationSig: string): Promise<{ children?: readonly string[]; [k: string]: unknown } | null>
+  getLayerBySig(sig: string): Promise<{ name?: string } | null>
+}
+type LayerCommitterLike = {
+  update(
+    segments: readonly string[],
+    layer: { name?: string; [slot: string]: unknown },
+    nameSlots?: ReadonlySet<string>,
+  ): Promise<string>
+}
 
 /**
  * /remove — remove tiles from the current directory.
  *
- * Removes tiles from the visible hierarchy. The underlying data
- * persists in OPFS and can be navigated to again later.
+ * Layer-as-primitive: removes the cells from the parent layer's
+ * `children` slot via `LayerCommitter.update`. The cells' OPFS data
+ * (history bags, body resources, sub-trees) is left intact — undoing
+ * the deletion (deleting the head history row) restores the parent's
+ * children list and the cells reappear.
  *
  * Syntax:
  *   /remove                         — remove currently selected tiles
  *   /remove tileName                — remove a single tile
  *   /remove [tile1, tile2, tile3]   — remove multiple tiles
- *   /select[a,b]/remove             — chained: select then remove
+ *   [a,b]/remove                    — chained: select then remove
  */
 export class RemoveQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -35,27 +55,46 @@ export class RemoveQueenBee extends QueenBee {
 
     if (targets.length === 0) return
 
+    const lineage = get('@hypercomb.social/Lineage') as LineageLike | undefined
+    const history = get('@diamondcoreprocessor.com/HistoryService') as HistoryServiceLike | undefined
+    const committer = get('@diamondcoreprocessor.com/LayerCommitter') as LayerCommitterLike | undefined
+    if (!lineage || !history || !committer) return
+
+    const segments = (lineage.explorerSegments?.() ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const parentLocSig = await history.sign({
+      domain: lineage.domain,
+      explorerSegments: () => segments,
+    })
+    const parent = await history.currentLayerAt(parentLocSig)
+    if (!parent) return
+
+    // Names are the truth. Resolve each child sig to its layer's `name`,
+    // drop the targets, and pass the surviving names back. The committer
+    // re-resolves each name to its current head sig at commit time, so
+    // concurrent edits to a sibling cell are picked up automatically.
+    const childSigs = Array.isArray(parent.children) ? parent.children : []
+    const targetSet = new Set(targets)
+    const survivorNames: string[] = []
+    for (const sig of childSigs) {
+      const child = await history.getLayerBySig(sig)
+      if (!child || typeof child.name !== 'string') continue
+      if (!targetSet.has(child.name)) survivorNames.push(child.name)
+    }
+
+    const nextLayer = { ...parent, children: survivorNames }
+    await committer.update(segments, nextLayer)
+
+    // Notify downstream UI subscribers (activity log, substrate, slot
+    // machine, tile-overlay). The committer's own `cell:removed`
+    // subscription will dedup against the just-landed update.
     const groupId = targets.length > 1
       ? `remove:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`
       : undefined
-
-    const lineage = get('@hypercomb.social/Lineage') as
-      { explorerDir: () => Promise<FileSystemDirectoryHandle | null> } | undefined
-    if (!lineage) return
-
-    const dir = await lineage.explorerDir()
-    if (!dir) return
-
     for (const name of targets) {
-      try {
-        await dir.removeEntry(name, { recursive: true })
-        EffectBus.emit('cell:removed', { cell: name, groupId })
-      } catch (e) {
-        console.error('[remove] removeEntry failed', name, e)
-      }
+      EffectBus.emit('cell:removed', { cell: name, segments, groupId })
     }
-
-    void new hypercomb().act()
   }
 }
 
