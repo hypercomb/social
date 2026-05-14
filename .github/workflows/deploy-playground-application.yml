@@ -45,6 +45,7 @@ jobs:
         run: |
           npm run build
           node ../node_modules/tsx/dist/cli.mjs ./scripts/build-module.ts --local
+          node ../node_modules/tsx/dist/cli.mjs ./scripts/copy-to-dcp.ts
 
       - name: Build web app
         working-directory: src/hypercomb-web
