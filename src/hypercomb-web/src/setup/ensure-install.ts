@@ -134,6 +134,13 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
     return
   }
   EffectBus.emit('boot:status', { kind: 'installed' } as BootStatus)
+  // iOS Safari: the SW may not be controlling the page on first registration
+  // (the controllerchange event is unreliable). Reload so the SW intercepts
+  // dep/bee fetches and serves them from the seeded cache on second load.
+  if (/iP(hone|ad|od)/i.test(navigator.userAgent)) {
+    window.location.reload()
+    await new Promise(() => {})
+  }
 }
 
 // -------------------------------------------------
@@ -202,8 +209,8 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     await Promise.all(sigs.map(async (sig) => {
       const bytes = await fetchBytes(urlFor(sig))
       if (!bytes) return
-      await writeOpfsFile(dirs, nameFor(sig), bytes)
       if (cachePathFor) await seedCacheEntry(cachePathFor(sig), bytes, cacheType)
+      await writeOpfsFile(dirs, nameFor(sig), bytes)
       written++
     }))
     return written
@@ -310,12 +317,12 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
         await seedCacheEntry(`/opfs/__layers__/${file.signature}.json`, file.bytes, 'application/json; charset=utf-8')
         break
       case 'bee':
-        await writeBytes(['__bees__'], `${file.signature}.js`, file.bytes)
         await seedCacheEntry(`/opfs/__bees__/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
+        await writeBytes(['__bees__'], `${file.signature}.js`, file.bytes)
         break
       case 'dependency':
-        await writeBytes(['__dependencies__'], `${file.signature}.js`, file.bytes)
         await seedCacheEntry(`/opfs/__dependencies__/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
+        await writeBytes(['__dependencies__'], `${file.signature}.js`, file.bytes)
         break
     }
   }
