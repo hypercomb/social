@@ -177,7 +177,7 @@ export class Store extends EventTarget {
       // On iOS, load via the SW-served URL instead — the SW cache is pre-seeded
       // by installFromBundled so this is always a cache hit.
       if (/iP(hone|ad|od)/i.test(navigator.userAgent)) {
-        mod = await tryImport(`/opfs/__bees__/${signature}.js`)
+        mod = await tryImport(`/content/__bees__/${signature}.js`)
       } else {
         // Desktop: import from blob URL — bypasses SW, no import-map issues.
         const blob = new Blob([buffer], { type: 'application/javascript' })
