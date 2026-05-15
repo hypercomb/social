@@ -7,29 +7,11 @@ let _worker: Worker | null = null
 let _nextId = 0
 const _pending = new Map<number, { resolve: () => void; reject: (e: Error) => void }>()
 
-const WORKER_SRC = `
-self.onmessage = async ({ data: { id, dirs, name, bytes } }) => {
-  try {
-    const root = await navigator.storage.getDirectory()
-    let dir = root
-    for (const d of dirs) dir = await dir.getDirectoryHandle(d, { create: true })
-    const handle = await dir.getFileHandle(name, { create: true })
-    const sah = await handle.createSyncAccessHandle()
-    sah.truncate(0)
-    sah.write(new Uint8Array(bytes), { at: 0 })
-    sah.flush()
-    sah.close()
-    self.postMessage({ id })
-  } catch (e) {
-    self.postMessage({ id, error: String(e) })
-  }
-}
-`
-
 function ensureWorker(): Worker {
   if (_worker) return _worker
-  const blob = new Blob([WORKER_SRC], { type: 'application/javascript' })
-  _worker = new Worker(URL.createObjectURL(blob))
+  // Same-origin URL so the worker shares the page's OPFS storage partition.
+  // A blob: worker URL is storage-partitioned separately on iOS Safari.
+  _worker = new Worker('/opfs-write.worker.js')
   _worker.onmessage = ({ data: { id, error } }: MessageEvent<{ id: number; error?: string }>) => {
     const p = _pending.get(id)
     if (!p) return
