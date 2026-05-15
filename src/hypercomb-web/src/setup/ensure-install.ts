@@ -180,8 +180,6 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   // Mirror resyncFromSentinel's layout exactly: bees/deps in flat dirs,
   // layers under __layers__/sentinel/. This way the boot fast path and
   // script-preloader find content at the same paths regardless of source.
-  const layerDir = await store.domainLayersDirectory('sentinel', true)
-
   const fetchBytes = async (path: string): Promise<ArrayBuffer | null> => {
     try {
       const res = await fetch(path, { cache: 'no-store' })
@@ -195,22 +193,22 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   const writeAll = async (
     sigs: string[],
     urlFor: (sig: string) => string,
-    dir: FileSystemDirectoryHandle,
+    dirs: string[],
     nameFor: (sig: string) => string,
   ): Promise<number> => {
     let written = 0
     await Promise.all(sigs.map(async (sig) => {
       const bytes = await fetchBytes(urlFor(sig))
       if (!bytes) return
-      await writeOpfsFile(dir, nameFor(sig), bytes)
+      await writeOpfsFile(dirs, nameFor(sig), bytes)
       written++
     }))
     return written
   }
 
-  const beeCount = await writeAll(bundled.bees, (s) => `/content/__bees__/${s}.js`, store.bees, (s) => `${s}.js`)
-  const depCount = await writeAll(bundled.dependencies, (s) => `/content/__dependencies__/${s}.js`, store.dependencies, (s) => `${s}.js`)
-  const layerCount = await writeAll(bundled.layers, (s) => `/content/__layers__/${s}.json`, layerDir, (s) => s)
+  const beeCount = await writeAll(bundled.bees, (s) => `/content/__bees__/${s}.js`, ['__bees__'], (s) => `${s}.js`)
+  const depCount = await writeAll(bundled.dependencies, (s) => `/content/__dependencies__/${s}.js`, ['__dependencies__'], (s) => `${s}.js`)
+  const layerCount = await writeAll(bundled.layers, (s) => `/content/__layers__/${s}.json`, ['__layers__', 'sentinel'], (s) => s)
 
   // Loud failure mode. If any file failed to land, surface it now —
   // otherwise the next boot's spot-check will silently wipe and retry,
@@ -293,15 +291,15 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
   for (const file of files) {
     switch (file.kind) {
       case 'layer':
-        await writeBytes(layerDir, file.signature, file.bytes)
+        await writeBytes(['__layers__', 'sentinel'], file.signature, file.bytes)
         await seedCacheEntry(`/opfs/__layers__/${file.signature}.json`, file.bytes, 'application/json; charset=utf-8')
         break
       case 'bee':
-        await writeBytes(store.bees, `${file.signature}.js`, file.bytes)
+        await writeBytes(['__bees__'], `${file.signature}.js`, file.bytes)
         await seedCacheEntry(`/opfs/__bees__/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
         break
       case 'dependency':
-        await writeBytes(store.dependencies, `${file.signature}.js`, file.bytes)
+        await writeBytes(['__dependencies__'], `${file.signature}.js`, file.bytes)
         await seedCacheEntry(`/opfs/__dependencies__/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
         break
     }
@@ -359,8 +357,8 @@ const tryParseManifest = (json: string): InstallManifest | null => {
   }
 }
 
-const writeBytes = async (dir: FileSystemDirectoryHandle, name: string, bytes: ArrayBuffer): Promise<void> => {
-  await writeOpfsFile(dir, name, bytes)
+const writeBytes = async (dirs: string[], name: string, bytes: ArrayBuffer): Promise<void> => {
+  await writeOpfsFile(dirs, name, bytes)
 }
 
 const seedCacheEntry = async (path: string, bytes: ArrayBuffer, contentType: string): Promise<void> => {
