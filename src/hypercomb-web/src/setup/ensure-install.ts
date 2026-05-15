@@ -195,19 +195,34 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     urlFor: (sig: string) => string,
     dirs: string[],
     nameFor: (sig: string) => string,
+    cachePathFor?: (sig: string) => string,
+    cacheType = 'application/javascript; charset=utf-8',
   ): Promise<number> => {
     let written = 0
     await Promise.all(sigs.map(async (sig) => {
       const bytes = await fetchBytes(urlFor(sig))
       if (!bytes) return
       await writeOpfsFile(dirs, nameFor(sig), bytes)
+      if (cachePathFor) await seedCacheEntry(cachePathFor(sig), bytes, cacheType)
       written++
     }))
     return written
   }
 
-  const beeCount = await writeAll(bundled.bees, (s) => `/content/__bees__/${s}.js`, ['__bees__'], (s) => `${s}.js`)
-  const depCount = await writeAll(bundled.dependencies, (s) => `/content/__dependencies__/${s}.js`, ['__dependencies__'], (s) => `${s}.js`)
+  const beeCount = await writeAll(
+    bundled.bees,
+    (s) => `/content/__bees__/${s}.js`,
+    ['__bees__'],
+    (s) => `${s}.js`,
+    (s) => `/opfs/__bees__/${s}.js`,
+  )
+  const depCount = await writeAll(
+    bundled.dependencies,
+    (s) => `/content/__dependencies__/${s}.js`,
+    ['__dependencies__'],
+    (s) => `${s}.js`,
+    (s) => `/opfs/__dependencies__/${s}.js`,
+  )
   const layerCount = await writeAll(bundled.layers, (s) => `/content/__layers__/${s}.json`, ['__layers__', 'sentinel'], (s) => s)
 
   // Loud failure mode. If any file failed to land, surface it now —
