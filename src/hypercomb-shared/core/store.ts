@@ -173,15 +173,20 @@ export class Store extends EventTarget {
 
       let mod: Record<string, unknown> | null = null
 
-      // Import directly from the verified buffer via blob URL.
-      // This bypasses the service worker entirely — no /opfs/ round-trip,
-      // no cache seeding, no dependency on SW controlling the page.
-      const blob = new Blob([buffer], { type: 'application/javascript' })
-      const blobUrl = URL.createObjectURL(blob)
-      try {
-        mod = await tryImport(blobUrl)
-      } finally {
-        URL.revokeObjectURL(blobUrl)
+      // iOS Safari blob: URL modules can't resolve import-map bare specifiers.
+      // On iOS, load via the SW-served URL instead — the SW cache is pre-seeded
+      // by installFromBundled so this is always a cache hit.
+      if (/iP(hone|ad|od)/i.test(navigator.userAgent)) {
+        mod = await tryImport(`/opfs/__bees__/${signature}.js`)
+      } else {
+        // Desktop: import from blob URL — bypasses SW, no import-map issues.
+        const blob = new Blob([buffer], { type: 'application/javascript' })
+        const blobUrl = URL.createObjectURL(blob)
+        try {
+          mod = await tryImport(blobUrl)
+        } finally {
+          URL.revokeObjectURL(blobUrl)
+        }
       }
 
       if (!mod || typeof mod !== 'object') return null
