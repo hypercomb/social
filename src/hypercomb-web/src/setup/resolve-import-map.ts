@@ -4,7 +4,8 @@ import { environment } from '@hypercomb/shared'
 
 export type ResolvedImports = Record<string, string>
 
-const OPFS_DEPENDENCY_BASE_PATH = '/opfs/__dependencies__'
+const isIOS = /iP(hone|ad|od)/i.test(navigator.userAgent)
+const OPFS_DEPENDENCY_BASE_PATH = isIOS ? '/content/__dependencies__' : '/opfs/__dependencies__'
 
 export const resolveImportMap = async (): Promise<ResolvedImports> => {
   const imports: ResolvedImports = {}
