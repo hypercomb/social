@@ -1,10 +1,18 @@
+// Feature-detect once: iOS Safari has FileSystemFileHandle but not createWritable
+const _supportsCreateWritable: boolean =
+  typeof (globalThis as any).FileSystemFileHandle !== 'undefined' &&
+  typeof (globalThis as any).FileSystemFileHandle.prototype.createWritable === 'function'
+
 let _worker: Worker | null = null
 let _nextId = 0
 const _pending = new Map<number, { resolve: () => void; reject: (e: Error) => void }>()
 
 const WORKER_SRC = `
-self.onmessage = async ({ data: { id, dir, name, bytes } }) => {
+self.onmessage = async ({ data: { id, dirs, name, bytes } }) => {
   try {
+    const root = await navigator.storage.getDirectory()
+    let dir = root
+    for (const d of dirs) dir = await dir.getDirectoryHandle(d, { create: true })
     const handle = await dir.getFileHandle(name, { create: true })
     const sah = await handle.createSyncAccessHandle()
     sah.truncate(0)
@@ -38,23 +46,27 @@ function ensureWorker(): Worker {
   return _worker
 }
 
-function writeViaWorker(dir: FileSystemDirectoryHandle, name: string, bytes: ArrayBuffer): Promise<void> {
+function writeViaWorker(dirs: string[], name: string, bytes: ArrayBuffer): Promise<void> {
   const w = ensureWorker()
   const id = _nextId++
   return new Promise<void>((resolve, reject) => {
     _pending.set(id, { resolve, reject })
-    w.postMessage({ id, dir, name, bytes }, [bytes])
+    w.postMessage({ id, dirs, name, bytes }, [bytes])
   })
 }
 
-export const writeOpfsFile = async (dir: FileSystemDirectoryHandle, name: string, bytes: ArrayBuffer): Promise<void> => {
-  const handle = await dir.getFileHandle(name, { create: true })
-  if (typeof (handle as any).createWritable === 'function') {
+// dirs: path segments from OPFS root (e.g. ['__bees__'] or ['__layers__', 'sentinel'])
+export const writeOpfsFile = async (dirs: string[], name: string, bytes: ArrayBuffer): Promise<void> => {
+  if (_supportsCreateWritable) {
+    const root = await navigator.storage.getDirectory()
+    let dir: FileSystemDirectoryHandle = root
+    for (const d of dirs) dir = await dir.getDirectoryHandle(d, { create: true })
+    const handle = await dir.getFileHandle(name, { create: true })
     const writable = await (handle as any).createWritable()
     await writable.write(bytes)
     await writable.close()
   } else {
-    await writeViaWorker(dir, name, bytes)
+    await writeViaWorker(dirs, name, bytes)
   }
 }
 
