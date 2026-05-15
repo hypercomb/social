@@ -967,21 +967,27 @@ export class NostrMeshDrone extends Drone {
   }
 
   private loadRelays = (fallback: string[]): string[] => {
+    // Always guarantee at least LOCAL_RELAY in the result. Without this,
+    // a fresh browser with no `hc:nostrmesh:relays` localStorage entry
+    // ends up with zero relays and silently drops every publish — events
+    // hit local fanout (so the sender "sees" them) but never reach peers.
+    const defaults = fallback.length > 0 ? fallback : [LOCAL_RELAY]
     try {
       const raw = localStorage.getItem('hc:nostrmesh:relays')
-      if (!raw) return fallback.slice()
+      if (!raw) return defaults.slice()
 
       const parsed = JSON.parse(raw)
-      if (!Array.isArray(parsed)) return fallback.slice()
+      if (!Array.isArray(parsed)) return defaults.slice()
 
       const next = parsed
         .filter((u: any) => typeof u === 'string')
         .map((u: string) => u.trim())
         .filter((u: string) => u.startsWith('ws://') || u.startsWith('wss://'))
 
+      if (next.length === 0) return defaults.slice()
       return Array.from(new Set(next))
     } catch {
-      return fallback.slice()
+      return defaults.slice()
     }
   }
 

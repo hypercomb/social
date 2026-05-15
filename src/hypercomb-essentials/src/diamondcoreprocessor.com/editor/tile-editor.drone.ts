@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/editor/tile-editor.drone.ts
 import { EffectBus } from '@hypercomb/core'
-import { TILE_PROPERTIES_FILE } from './tile-properties.js'
+import { TILE_PROPERTIES_FILE, readCellProperties } from './tile-properties.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
 
@@ -81,7 +81,14 @@ export class TileEditorDrone {
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     if (!store || !service) return
 
-    // 1. read tile properties — prefer content-addressed, fall back to legacy 0000 file
+    // 1. read tile properties — prefer content-addressed, fall back to the
+    // cell's 0000 file. The hc:tile-props-index is label-keyed and so collides
+    // across folders (same label in /a and /b share index['label']), and any
+    // writer that lands properties directly in 0000 (e.g. the headless bridge
+    // `stamp` op used by dashboard refresh) never touches the index. show-cell
+    // already reads 0000 for its visual property snapshot, so keeping the
+    // editor in sync prevents "link badge shows on the tile but the editor's
+    // link field is empty" mismatches.
     let properties: Record<string, unknown> = {}
     try {
       const indexKey = 'hc:tile-props-index'
@@ -93,7 +100,18 @@ export class TileEditorDrone {
       const text = await propsBlob.text()
       properties = JSON.parse(text)
     } catch {
-      // no properties found — use empty
+      try {
+        const lineage = window.ioc.get<{ explorerDir: () => Promise<FileSystemDirectoryHandle | null> }>(
+          '@hypercomb.social/Lineage'
+        )
+        const dir = await lineage?.explorerDir?.()
+        if (dir) {
+          const cellDir = await dir.getDirectoryHandle(cell, { create: false })
+          properties = await readCellProperties(cellDir)
+        }
+      } catch {
+        // truly nothing — leave properties empty
+      }
     }
 
     // 2. load large image blob from __resources__ (if present)

@@ -12,13 +12,20 @@ $bp-phone-max: 599px;
   min-width: 0;
   overflow: hidden;
 
-  --glow-color: #4da6ff;
-  --glow-color-rgb: 77, 166, 255;
-  --shell-bg: rgba(8, 18, 28, 0.85);
+  // Bind the glow color to the Material 3 primary token so the shell's
+  // chrome blue matches the website / Angular shell's primary accent.
+  // The -rgb tuple is kept as Material primary's RGB so rgba() math
+  // still works for fine-grained translucent overlays (focus states,
+  // result rows, etc.). Theme switching: --md-primary swaps to its
+  // light-mode value automatically; the -rgb tuple stays on dark-mode
+  // values, which is a fine fallback for the glow effects below.
+  --glow-color: var(--md-primary);
+  --glow-color-rgb: 126, 182, 214;
+  --shell-bg: color-mix(in srgb, var(--md-surface-c-low) 85%, transparent);
   --shell-border: rgba(var(--glow-color-rgb), 0.45);
   --shell-border-focus: rgba(var(--glow-color-rgb), 0.65);
   --terminal-font: var(--hc-font);
-  --transition-speed: 200ms;
+  --transition-speed: var(--md-dur-medium);
 }
 
 .command-bar { position: relative; width: 100%; }
@@ -99,8 +106,8 @@ $bp-phone-max: 599px;
   min-width: 0.85em;
   height: 0.85em;
   padding: 0 0.15em;
-  border-radius: 2px;
-  background: rgba(8, 14, 22, 0.92);
+  border-radius: var(--md-shape-xs);
+  background: color-mix(in srgb, var(--md-surface-c-lowest) 92%, transparent);
   color: var(--glow-color);
   font: 0.6em / 0.85em var(--terminal-font);
   text-align: center;
@@ -141,7 +148,7 @@ $bp-phone-max: 599px;
 .command-input {
   width: 100%;
   height: 100%;
-  color: #d9d9d9;
+  color: var(--md-on-surface);
   caret-color: var(--glow-color);
   user-select: text;
   cursor: text;
@@ -157,11 +164,11 @@ $bp-phone-max: 599px;
   margin: 0;
   padding: 0.4rem;
   list-style: none;
-  border-radius: 0;
-  background: rgba(8, 14, 22, 0.92);
+  border-radius: var(--md-shape-s);
+  background: color-mix(in srgb, var(--md-surface-c-lowest) 92%, transparent);
   backdrop-filter: blur(12px);
   border: 1.5px solid var(--shell-border);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+  box-shadow: var(--md-elev-3);
   max-height: 16rem;
   overflow: auto;
   font-family: var(--terminal-font);
@@ -180,10 +187,10 @@ $bp-phone-max: 599px;
 .command-results li {
   display: flex;
   padding: 0.5rem 0.6rem;
-  border-radius: 2px;
+  border-radius: var(--md-shape-xs);
   user-select: none;
   cursor: pointer;
-  transition: background var(--transition-speed) ease;
+  transition: background var(--transition-speed) var(--md-easing-standard);
 }
 
 .command-results li:hover { background: rgba(var(--glow-color-rgb), 0.06); }
@@ -226,11 +233,12 @@ $bp-phone-max: 599px;
   padding: 0.15rem 0.35rem;
   background: rgba(var(--glow-color-rgb), 0.12);
   border: 1px solid rgba(var(--glow-color-rgb), 0.25);
-  border-radius: 3px;
+  border-radius: var(--md-shape-xs);
   color: rgba(var(--glow-color-rgb), 0.7);
   font: 0.75em / 1 var(--terminal-font);
   cursor: pointer;
-  transition: background 150ms ease, border-color 150ms ease;
+  transition: background var(--md-dur-short) var(--md-easing-standard),
+              border-color var(--md-dur-short) var(--md-easing-standard);
   user-select: none;
 
   &:hover {

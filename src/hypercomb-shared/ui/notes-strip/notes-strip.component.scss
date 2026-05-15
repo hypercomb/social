@@ -8,7 +8,11 @@
 //               when notes are short.
 // Mode is user-togglable and persisted to localStorage.
 
-$accent: #ffe14a;
+// Material 3 token migration — colors/shapes/elevation/motion all read
+// from the shared token system in hypercomb-shared/styles/_material-tokens.scss.
+// Yellow accent (#ffe14a) → --md-secondary (warm tonal accent), preserving
+// the "important / attention" affordance notes carry without breaking the
+// design system.
 
 :host {
   position: fixed;
@@ -23,20 +27,193 @@ $accent: #ffe14a;
 
 .notes-strip {
   pointer-events: auto;
-  background: rgba(12, 12, 26, 0.88);
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--md-surface-c-low) 88%, transparent);
   backdrop-filter: blur(6px);
   font-family: var(--hc-mono, system-ui);
+  box-shadow: var(--md-elev-2);
 }
 
 // ── Header (shared) ────────────────────────────────────
-// ── Rows mode ──────────────────────────────────────────
-.notes-strip.mode-rows {
+// Compact strip header carrying a panel label on the left and a hide
+// affordance on the right. The hide button dismisses the strip for the
+// current selection only — selecting a different tile re-shows it
+// automatically (see #contextKey in the component).
+.notes-strip-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem 0.35rem 0.75rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+}
+
+// ── Kind filter row ─────────────────────────────────────
+// Three chip buttons under the header: All / Questions / Notes. Selection
+// is sticky (persisted to localStorage via kindFilter signal). Inactive
+// chips read as muted; the active chip carries the secondary accent so
+// the current filter is unambiguous at a glance.
+.notes-strip-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.3rem 0.55rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--md-on-surface) 6%, transparent);
+
+  .kind-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.6rem;
+    border: 1px solid color-mix(in srgb, var(--md-on-surface) 12%, transparent);
+    border-radius: 999px;
+    background: transparent;
+    color: color-mix(in srgb, var(--md-on-surface) 70%, transparent);
+    font-family: inherit;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background var(--md-dur-short) var(--md-easing-standard),
+                color var(--md-dur-short) var(--md-easing-standard),
+                border-color var(--md-dur-short) var(--md-easing-standard);
+  }
+  .kind-tab:hover {
+    color: var(--md-on-surface);
+    border-color: color-mix(in srgb, var(--md-on-surface) 22%, transparent);
+  }
+  .kind-tab.is-active {
+    background: color-mix(in srgb, var(--md-secondary) 18%, transparent);
+    border-color: color-mix(in srgb, var(--md-secondary) 55%, transparent);
+    color: var(--md-on-surface-strong, var(--md-on-surface));
+  }
+  .kind-icon {
+    display: inline-flex;
+    width: 0.85em;
+    height: 0.85em;
+    svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  }
+}
+
+// ── Row kind header (per-entry visual cue) ──────────────
+// A compact icon + label chip at the top of every note row showing
+// what kind it is (Question / Answer / Note). The kind color picks up
+// from the row's existing accent: questions warm yellow, answers cool
+// blue, plain notes muted surface tint.
+.row-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  align-self: flex-start;
+  padding: 0.05rem 0.5rem 0.05rem 0.35rem;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+  color: color-mix(in srgb, var(--md-on-surface) 75%, transparent);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+.row-kind .kind-icon {
+  display: inline-flex;
+  width: 0.95em;
+  height: 0.95em;
+}
+.row-kind .kind-icon svg {
+  width: 100%; height: 100%; fill: none; stroke: currentColor;
+  stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
+}
+.row-kind .kind-label { font-weight: 500; }
+
+.row-kind[data-kind="q"] {
+  background: color-mix(in srgb, var(--md-secondary) 22%, transparent);
+  color: var(--md-on-surface-strong, var(--md-on-surface));
+}
+.row-kind[data-kind="a"] {
+  background: rgba(110, 180, 255, 0.16);
+  color: var(--md-on-surface-strong, var(--md-on-surface));
+}
+
+// Chip mode is space-constrained — show only the icon, no label.
+.row-kind.chip-kind {
+  padding: 0;
+  background: transparent;
+  align-self: center;
+  margin-right: 0.25rem;
+}
+.row-kind.chip-kind .kind-label { display: none; }
+.row-kind.chip-kind[data-kind="q"] { color: var(--md-secondary); }
+.row-kind.chip-kind[data-kind="a"] { color: rgb(110, 180, 255); }
+
+.notes-strip-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.65rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--md-on-surface-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notes-strip-hide {
+  flex-shrink: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--md-on-surface-faint);
+  font-family: inherit;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  line-height: 1;
+  padding: 0.25rem 0.55rem;
+  border-radius: var(--md-shape-xs);
+  cursor: pointer;
+  transition: background var(--md-dur-short) var(--md-easing-standard),
+              color var(--md-dur-short) var(--md-easing-standard),
+              border-color var(--md-dur-short) var(--md-easing-standard);
+
+  &:hover {
+    background: color-mix(in srgb, var(--md-on-surface) calc(var(--md-state-hover) * 100%), transparent);
+    color: var(--md-on-surface-strong);
+    border-color: var(--md-outline-variant);
+  }
+
+  &:focus-visible {
+    outline: 1px solid var(--md-secondary);
+    outline-offset: 2px;
+  }
+}
+
+// ── Body wrappers (mode-specific layouts) ──────────────
+// The body container owns the per-mode layout (padding, gap, direction).
+// Keeping these off `.notes-strip` lets the header sit cleanly above
+// the body without fighting the chip-mode horizontal flex.
+.notes-strip-body {
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  width: min(28rem, calc(100vw - 1rem));
   padding: 0.5rem 0.75rem 0.6rem;
-  border-bottom-right-radius: 6px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.notes-strip-body.notes-strip-accordion {
+  gap: 0.4rem;
+}
+
+.notes-strip.mode-chips .notes-strip-body {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.4rem 0.75rem;
+}
+
+// ── Rows mode ──────────────────────────────────────────
+.notes-strip.mode-rows {
+  width: min(28rem, calc(100vw - 1rem));
+  border-radius: 0 0 var(--md-shape-m) var(--md-shape-m);
   overflow: hidden;
 }
 
@@ -49,16 +226,50 @@ $accent: #ffe14a;
   gap: 0.3rem;
   overflow-y: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba($accent, 0.4) transparent;
+  scrollbar-color: color-mix(in srgb, var(--md-secondary) 40%, transparent) transparent;
 
   &::-webkit-scrollbar { width: 4px; }
-  &::-webkit-scrollbar-thumb { background: rgba($accent, 0.4); border-radius: 2px; }
+  &::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--md-secondary) 40%, transparent);
+    border-radius: var(--md-shape-xs);
+  }
 }
 
 .note-row {
   display: flex;
   align-items: stretch;
   gap: 0.3rem;
+}
+
+// Question rows — warm yellow card, matches the editor's qa-question
+// styling so the same "this is a question" affordance reads the same
+// in both the strip and the editor panel. The accent left border
+// gives the row a distinctive silhouette when scanning a long list.
+.note-row.note-row-q .note-open,
+.chip-wrap.note-row-q .note-chip {
+  background: color-mix(in srgb, var(--md-secondary) 14%, transparent);
+  border-left: 3px solid color-mix(in srgb, var(--md-secondary) 55%, transparent);
+  color: var(--md-on-surface-strong, var(--md-on-surface));
+}
+
+.note-row.note-row-q .note-open:hover,
+.chip-wrap.note-row-q .note-chip:hover {
+  background: color-mix(in srgb, var(--md-secondary) 22%, transparent);
+}
+
+// Answer rows — cool blue card, mirroring the editor's qa-answer
+// accent. Q and A read as a conversation pair when they sit
+// adjacent in the strip.
+.note-row.note-row-a .note-open,
+.chip-wrap.note-row-a .note-chip {
+  background: rgba(110, 180, 255, 0.10);
+  border-left: 3px solid rgba(110, 180, 255, 0.45);
+  color: var(--md-on-surface);
+}
+
+.note-row.note-row-a .note-open:hover,
+.chip-wrap.note-row-a .note-chip:hover {
+  background: rgba(110, 180, 255, 0.18);
 }
 
 .note-open {
@@ -70,23 +281,24 @@ $accent: #ffe14a;
   gap: 0.25rem;
   text-align: left;
   padding: 0.4rem 0.6rem;
-  background: rgba(255, 255, 255, 0.035);
+  background: color-mix(in srgb, var(--md-on-surface) 3.5%, transparent);
   border: none;
-  border-radius: 4px;
-  color: rgba(240, 240, 240, 0.94);
+  border-radius: var(--md-shape-xs);
+  color: var(--md-on-surface);
   font-family: inherit;
   font-size: 0.85rem;
   line-height: 1.35;
   cursor: pointer;
-  transition: background 150ms ease, color 150ms ease;
+  transition: background var(--md-dur-short) var(--md-easing-standard),
+              color var(--md-dur-short) var(--md-easing-standard);
 
   &:hover {
-    background: rgba(255, 255, 255, 0.08);
-    color: #fff;
+    background: color-mix(in srgb, var(--md-on-surface) calc(var(--md-state-hover) * 100%), transparent);
+    color: var(--md-on-surface-strong);
   }
 
   &:focus-visible {
-    outline: 1px solid $accent;
+    outline: 1px solid var(--md-secondary);
     outline-offset: 2px;
   }
 }
@@ -97,14 +309,16 @@ $accent: #ffe14a;
   align-self: stretch;
   padding: 0;
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 4px;
-  color: rgba(255, 255, 255, 0.4);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-xs);
+  color: var(--md-on-surface-faint);
   font-family: inherit;
   font-size: 0.95rem;
   line-height: 1;
   cursor: pointer;
-  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+  transition: background var(--md-dur-short) var(--md-easing-standard),
+              color var(--md-dur-short) var(--md-easing-standard),
+              border-color var(--md-dur-short) var(--md-easing-standard);
 
   &:hover {
     background: rgba(255, 120, 120, 0.15);
@@ -126,16 +340,15 @@ $accent: #ffe14a;
 
 .row-tag {
   font-size: 0.7rem;
-  color: rgba($accent, 0.9);
+  color: color-mix(in srgb, var(--md-secondary) 90%, transparent);
 }
 
 // ── Chips mode ─────────────────────────────────────────
+// Outer card stretches to fill the strip slot; the horizontal chip
+// layout itself lives on `.notes-strip-body` (above) so the header
+// stays stacked on top instead of fighting the row direction.
 .notes-strip.mode-chips {
   flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.4rem 0.75rem;
 }
 
 .chip-track {
@@ -145,10 +358,13 @@ $accent: #ffe14a;
   flex: 1;
   overflow-x: auto;
   scrollbar-width: thin;
-  scrollbar-color: rgba($accent, 0.4) transparent;
+  scrollbar-color: color-mix(in srgb, var(--md-secondary) 40%, transparent) transparent;
 
   &::-webkit-scrollbar { height: 4px; }
-  &::-webkit-scrollbar-thumb { background: rgba($accent, 0.4); border-radius: 2px; }
+  &::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--md-secondary) 40%, transparent);
+    border-radius: var(--md-shape-xs);
+  }
 }
 
 .chip-wrap {
@@ -165,22 +381,23 @@ $accent: #ffe14a;
   gap: 0.4rem;
   max-width: 22rem;
   padding: 0.3rem 0.65rem;
-  background: rgba(255, 255, 255, 0.04);
+  background: color-mix(in srgb, var(--md-on-surface) 4%, transparent);
   border: none;
-  border-radius: 4px;
-  color: rgba(240, 240, 240, 0.92);
+  border-radius: var(--md-shape-s);
+  color: var(--md-on-surface);
   font-family: inherit;
   font-size: 0.85rem;
   cursor: pointer;
-  transition: background 150ms ease, color 150ms ease;
+  transition: background var(--md-dur-short) var(--md-easing-standard),
+              color var(--md-dur-short) var(--md-easing-standard);
 
   &:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: #fff;
+    background: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
+    color: var(--md-on-surface-strong);
   }
 
   &:focus-visible {
-    outline: 1px solid $accent;
+    outline: 1px solid var(--md-secondary);
     outline-offset: 2px;
   }
 }
@@ -198,7 +415,7 @@ $accent: #ffe14a;
 
 .chip-tag {
   font-size: 0.7rem;
-  color: rgba($accent, 0.9);
+  color: color-mix(in srgb, var(--md-secondary) 90%, transparent);
   opacity: 0.9;
 }
 
@@ -215,15 +432,16 @@ $accent: #ffe14a;
 }
 
 .accordion-group {
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-s);
+  background: color-mix(in srgb, var(--md-on-surface) 2%, transparent);
   overflow: hidden;
-  transition: border-color 180ms ease, background 180ms ease;
+  transition: border-color var(--md-dur-medium) var(--md-easing-standard),
+              background var(--md-dur-medium) var(--md-easing-standard);
 
   &.is-open {
-    border-color: rgba($accent, 0.32);
-    background: rgba($accent, 0.045);
+    border-color: color-mix(in srgb, var(--md-secondary) 32%, transparent);
+    background: color-mix(in srgb, var(--md-secondary) 4.5%, transparent);
   }
 }
 
@@ -241,18 +459,18 @@ $accent: #ffe14a;
   text-align: left;
   cursor: pointer;
   user-select: none;
-  transition: background 150ms ease;
+  transition: background var(--md-dur-short) var(--md-easing-standard);
 
   &:hover {
-    background: rgba(255, 255, 255, 0.04);
+    background: color-mix(in srgb, var(--md-on-surface) 4%, transparent);
   }
 
   &:active {
-    background: rgba(255, 255, 255, 0.06);
+    background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
   }
 
   &:focus-visible {
-    outline: 1px solid $accent;
+    outline: 1px solid var(--md-secondary);
     outline-offset: -1px;
   }
 }
@@ -264,39 +482,40 @@ $accent: #ffe14a;
   justify-content: center;
   width: 12px;
   height: 12px;
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--md-on-surface-faint);
   transform: rotate(-90deg);
-  transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1), color 180ms ease;
+  transition: transform var(--md-dur-medium) var(--md-easing-emphasized),
+              color var(--md-dur-medium) var(--md-easing-standard);
 }
 
 .accordion-group.is-open .accordion-chevron {
   transform: rotate(0);
-  color: rgba($accent, 0.85);
+  color: color-mix(in srgb, var(--md-secondary) 85%, transparent);
 }
 
 .accordion-cell {
   flex: 1;
   min-width: 0;
-  color: rgba(240, 240, 240, 0.92);
+  color: var(--md-on-surface);
   font-weight: 500;
   letter-spacing: 0.01em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transition: color 150ms ease;
+  transition: color var(--md-dur-short) var(--md-easing-standard);
 }
 
 .accordion-group.is-open .accordion-cell {
-  color: rgba($accent, 1);
+  color: var(--md-secondary);
 }
 
 .accordion-count {
   flex-shrink: 0;
   min-width: 1.5rem;
   padding: 0.05rem 0.45rem;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 999px;
-  color: rgba(255, 255, 255, 0.55);
+  background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
+  border-radius: var(--md-shape-full);
+  color: var(--md-on-surface-var);
   font-size: 0.7rem;
   font-variant-numeric: tabular-nums;
   text-align: center;
@@ -305,8 +524,8 @@ $accent: #ffe14a;
 }
 
 .accordion-group.is-open .accordion-count {
-  background: rgba($accent, 0.15);
-  color: rgba($accent, 0.95);
+  background: color-mix(in srgb, var(--md-secondary) 15%, transparent);
+  color: color-mix(in srgb, var(--md-secondary) 95%, transparent);
 }
 
 // ── animated panel ─────────────────────────────────────
@@ -329,7 +548,7 @@ $accent: #ffe14a;
 }
 
 .accordion-group.is-open .accordion-panel-inner {
-  border-top: 1px solid rgba($accent, 0.14);
+  border-top: 1px solid color-mix(in srgb, var(--md-secondary) 14%, transparent);
 }
 
 .strip-list-nested {
@@ -347,8 +566,8 @@ $accent: #ffe14a;
 .accordion-empty {
   margin-top: 0.15rem;
   padding: 0.45rem 0.65rem 0.5rem;
-  border: 1px dashed rgba(255, 255, 255, 0.08);
-  border-radius: 6px;
+  border: 1px dashed var(--md-outline-variant);
+  border-radius: var(--md-shape-s);
   background: transparent;
 }
 
@@ -358,7 +577,7 @@ $accent: #ffe14a;
   font-weight: 500;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--md-on-surface-faint);
 }
 
 .accordion-empty-list {
@@ -376,10 +595,10 @@ $accent: #ffe14a;
 
 .accordion-empty-item {
   padding: 0.15rem 0.55rem;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(220, 220, 220, 0.6);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-full);
+  background: color-mix(in srgb, var(--md-on-surface) 4%, transparent);
+  color: var(--md-on-surface-var);
   font-family: inherit;
   font-size: 0.72rem;
   line-height: 1.3;
@@ -388,16 +607,18 @@ $accent: #ffe14a;
   overflow: hidden;
   text-overflow: ellipsis;
   cursor: pointer;
-  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+  transition: background var(--md-dur-short) var(--md-easing-standard),
+              color var(--md-dur-short) var(--md-easing-standard),
+              border-color var(--md-dur-short) var(--md-easing-standard);
 
   &:hover {
-    background: rgba($accent, 0.1);
-    color: rgba($accent, 0.95);
-    border-color: rgba($accent, 0.3);
+    background: color-mix(in srgb, var(--md-secondary) 10%, transparent);
+    color: color-mix(in srgb, var(--md-secondary) 95%, transparent);
+    border-color: color-mix(in srgb, var(--md-secondary) 30%, transparent);
   }
 
   &:focus-visible {
-    outline: 1px solid $accent;
+    outline: 1px solid var(--md-secondary);
     outline-offset: 2px;
   }
 }

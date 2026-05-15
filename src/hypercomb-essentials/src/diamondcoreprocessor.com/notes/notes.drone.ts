@@ -321,6 +321,28 @@ export class NotesService extends HiveParticipant<Note> {
     }
     await this.upsert(segments, [note])
   }
+
+  /**
+   * Remove a note by id at an EXPLICIT cell location (parentSegments + cellLabel)
+   * without depending on the user's current navigation. Headless equivalent
+   * of the EffectBus `note:delete` handler. Goes through the same `remove`
+   * path on hive-participant, so the merkle layer + parent cascade are
+   * identical to user-driven deletion.
+   */
+  public async deleteAtSegments(
+    parentSegments: readonly string[],
+    cellLabel: string,
+    noteId: string,
+  ): Promise<void> {
+    const cleanedParents = (parentSegments ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const cleanedLabel = String(cellLabel ?? '').trim()
+    const cleanedNoteId = String(noteId ?? '').trim()
+    if (!cleanedLabel || !cleanedNoteId) return
+    const segments = [...cleanedParents, cleanedLabel]
+    await this.remove(segments, cleanedNoteId)
+  }
 }
 
 function cryptoRandomId(): string {

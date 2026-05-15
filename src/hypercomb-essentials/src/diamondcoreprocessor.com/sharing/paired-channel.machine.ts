@@ -232,7 +232,15 @@ export class PairedChannelMachine {
     const existing = this.state.shares.get(requestId)
     if (!existing) return []
     if (existing.state !== 'pending') return []
-    if (e.pubkey !== this.state.hostPubkey) return [] // only host approves
+    // Approval is symmetric: either the originating requester
+    // self-attests (signed share = "I confirm my own offer") OR a
+    // designated host approves on a member's behalf. The mesh
+    // subscription (channelId derived from lineage + shared secret)
+    // already gates access — the bag IS the trust boundary, no need
+    // for a host bottleneck. Self-attest also unblocks stale-host
+    // lockout (when a relay retains an announce from a peer who has
+    // since gone away).
+    if (e.pubkey !== this.state.hostPubkey && e.pubkey !== existing.requesterPubkey) return []
     existing.state = 'approved'
     existing.approvalId = e.id || null
     const capObj = c['cap']

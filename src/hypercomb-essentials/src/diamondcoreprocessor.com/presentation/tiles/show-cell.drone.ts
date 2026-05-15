@@ -345,6 +345,12 @@ export class ShowCellDrone extends Drone {
   #substrateFadeRaf = 0
   #showHiddenItems = false
   #currentHiddenSet = new Set<string>()
+  // Names of cells in the current render that came from an ephemeral
+  // tile source (sync preview, not adopted to OPFS). Used by the pinned
+  // index writer to skip per-cell OPFS writes that would NotFound, and
+  // by the pixi draw path to apply the dashed-accent preview style.
+  // Cleared and rebuilt on each renderFromSynchronize.
+  #ephemeralCellSet = new Set<string>()
 
   // mesh scoping — space + secret feed into the signature key
   #space = ''
@@ -1606,6 +1612,37 @@ export class ShowCellDrone extends Drone {
 
     const localCellSet = new Set(localCells)
 
+    // Ephemeral previews from the swarm — tiles the user hasn't adopted
+    // to OPFS yet. Sourced via the TileSourceRegistry so this drone
+    // doesn't need to know anything about sync; any future contributor
+    // (clipboard, AI suggestions, etc.) lands here through the same path.
+    // Names not in localCellSet → render as preview; names already in
+    // localCellSet are owned and the ephemeral entry is redundant (the
+    // source-side echo guard in expose.drone usually prevents this, but
+    // dedup here too in case of races).
+    const ephemeralCellSet = new Set<string>()
+    try {
+      const registry = (window as any).ioc?.get?.('@hypercomb.social/TileSourceRegistry') as
+        | { resolve: (loc: { segments: readonly string[]; dir: FileSystemDirectoryHandle | null }) => Promise<readonly { name: string; kind: string }[]> }
+        | undefined
+      if (registry?.resolve) {
+        const segs = lineage?.explorerSegments?.() ?? []
+        const entries = await registry.resolve({ segments: segs, dir })
+        for (const e of entries) {
+          if (e.kind !== 'ephemeral') continue
+          if (localCellSet.has(e.name)) continue
+          ephemeralCellSet.add(e.name)
+          union.add(e.name)
+        }
+      }
+    } catch (err) {
+      // Registry hiccups must never block the render. The OPFS pass above
+      // already populated union with owned tiles; previews just won't
+      // appear this pass and will catch up on the next render trigger.
+      console.warn('[show-cell] ephemeral source resolution failed', err)
+    }
+    this.#ephemeralCellSet = ephemeralCellSet
+
     // detect which local cells have children (branches) — memoized per
     // (dir, lineage.fsRevision); see #computeBranchSet for rationale
     const branchSet = await this.#computeBranchSet(dir, localCells)
@@ -2747,6 +2784,22 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // Paired-channel share-ephemeral: an incoming share landed as a
+    // preview (no OPFS write). Invalidate caches + re-render so the
+    // ephemeral tile surfaces. `paired-channel:share-installed` fires
+    // after adopt commits to OPFS — the ephemeral entry's already
+    // cleared on the drone, so we just need to re-render.
+    this.onEffect<{ location?: string; branchName?: string }>('paired-channel:share-ephemeral', () => {
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+    this.onEffect<{ location?: string; branchName?: string }>('paired-channel:share-installed', () => {
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
     // listen for pivot mode toggle (loads pre-rotated snapshots + rotated labels)
     this.onEffect<{ pivot: boolean }>('render:set-pivot', (payload) => {
       if (this.#pivot !== payload.pivot) {
@@ -3275,6 +3328,31 @@ export class ShowCellDrone extends Drone {
         }
         nextFree++
       }
+    }
+
+    // Append ephemeral preview tiles for any paired-channel share at
+    // the current lineage. These tiles are NOT in OPFS — they live
+    // only in the drone's ephemeral cache until the user adopts them.
+    // They render as `external` (since !localCellSet.has(name)) so
+    // they get the public-external profile + adopt icon.
+    try {
+      const droneAny = (window as any).ioc?.get?.('@diamondcoreprocessor.com/PairedChannelDrone') as
+        | { ephemeralSharesAt?: (location: string) => { branchName: string }[] }
+        | undefined
+      if (droneAny?.ephemeralSharesAt) {
+        const here = '/' + parentSegments.join('/')
+        const eph = droneAny.ephemeralSharesAt(here) ?? []
+        for (const e of eph) {
+          const name = e.branchName
+          if (!name || sparse.includes(name)) continue
+          while (nextFree <= maxSlot && sparse[nextFree] !== '') nextFree++
+          if (nextFree > maxSlot) break
+          sparse[nextFree] = name
+          nextFree++
+        }
+      }
+    } catch (err) {
+      console.warn('[show-cell] ephemeral share render failed', err)
     }
 
     return sparse

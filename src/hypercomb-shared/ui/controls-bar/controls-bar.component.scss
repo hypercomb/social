@@ -81,13 +81,13 @@
   font-size: 0.5rem;
   white-space: nowrap;
   padding: 0.05rem 0.45rem;
-  border: 0.5px solid rgba(200, 200, 200, 0.5);
-  border-radius: 1px;
+  border: 0.5px solid var(--md-outline);
+  border-radius: var(--md-shape-xs);
   background: none;
-  color: rgba(200, 200, 200, 0.8);
+  color: var(--md-on-surface-var);
   cursor: pointer;
   font-family: inherit;
-  transition: opacity 150ms ease;
+  transition: opacity var(--md-dur-short) var(--md-easing-standard);
   &:hover { opacity: 0.8; }
 }
 
@@ -124,7 +124,7 @@
 }
 
 .tag-active {
-  background: rgba(255, 255, 255, 0.08) !important;
+  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent) !important;
   opacity: 1 !important;
 }
 
@@ -145,7 +145,7 @@
 .tag-separator {
   width: 1px;
   height: 0.7rem;
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--md-outline-variant);
   margin: 0 0.15rem;
   flex-shrink: 0;
 }
@@ -204,11 +204,11 @@
   cursor: grab;
   user-select: none;
   touch-action: none;
-  color: rgba(220, 220, 220, 0.6);
-  transition: color 150ms ease;
+  color: var(--md-on-surface-var);
+  transition: color var(--md-dur-short) var(--md-easing-standard);
   flex-shrink: 0;
 
-  &:hover  { color: rgba(240, 240, 240, 0.95); }
+  &:hover  { color: var(--md-on-surface-strong); }
   &:active { cursor: grabbing; }
 
   // 2 columns × 4 rows grid of dots for the vertical (side of pill) grip.
@@ -237,18 +237,20 @@
   display: flex;
   align-items: center;
   gap: 0.15rem;
-  padding: 0.24rem 0.4rem;
+  padding: 0 0.4rem;
 
-  background: rgba(14, 18, 24, 0.78);
+  // Material 3 elevated surface — translucent so the underlying hex grid
+  // tones through but the pill reads as a distinct surface tier above it.
+  background: color-mix(in srgb, var(--md-surface-c-low) 78%, transparent);
   backdrop-filter: blur(12px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 4px;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-s);
 
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+  box-shadow: var(--md-elev-3);
 
   font-family: var(--hc-mono);
   font-size: 0.65rem;
-  color: rgba(245, 245, 245, 0.85);
+  color: var(--md-on-surface);
 }
 
 // ── public mode ──────────────────────────────────────────
@@ -305,11 +307,18 @@
   border-radius: 3px;
 }
 
-// Muted (user-disabled) controls: grayed but still in the row so the
-// user can see them and toggle them on via edit mode. In normal mode
-// they're click-no-op (handled in the click router); the visual cue
-// is just a low opacity. No animation, no glow.
-.ctl-btn.muted {
+// Muted (user-disabled) controls: completely hidden in normal mode so
+// the pill stays compact. In edit mode they reappear at low opacity so
+// the user can see and toggle them back on. The row truly compacts via
+// `display: none` rather than the previous opacity-only dim which left
+// disabled icons visible-but-faded.
+.ctl-btn.muted:not(.editing) {
+  display: none;
+}
+
+// In edit mode, disabled controls show at low opacity so the user can
+// re-enable them.
+.ctl-btn.editing.muted {
   opacity: 0.32;
 }
 
@@ -361,7 +370,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 0.56rem 0.72rem;
+  padding: 0.3rem 0.72rem;
   min-width: 2.88rem;
 
   background: none;
@@ -375,20 +384,22 @@
   // and mask-SVG icons size their square off 1em so they track the same scale.
   // Breakpoints redefine --icon-size; the chevron renders at 2× to read as a
   // distinct UI control rather than an in-row icon.
-  --icon-size: 1.52rem;
+  --icon-size: 1.6rem;
 
-  .hci, .mic-icon, .bee-icon {
+  .hci {
     font-size: var(--icon-size);
     line-height: 1;
   }
-  // Mask-SVG icons read ~15% bigger than the rest at every breakpoint —
-  // their paths leave more empty viewBox margin than the hci glyphs.
-  .eye-icon, .text-only-icon {
-    width: 1em;
-    height: 1em;
-    font-size: calc(var(--icon-size) * 1.15);
+  // Material Symbols have ~2px of built-in padding inside their 24×24
+  // glyph viewport, so at the same font-size they read smaller than
+  // the hypercomb-icons letter glyphs (which fill most of their box).
+  // Compensate with a ~18% size bump so the visual weight matches the
+  // hci letters in the same row.
+  .mat-sym {
+    font-size: calc(var(--icon-size) * 1.18);
     line-height: 1;
   }
+
   .expand-chevron {
     font-size: calc(var(--icon-size) * 2);
     line-height: 1;
@@ -479,115 +490,7 @@
   &.active .mesh-label { color: #00e5a0; }
 }
 
-// ── bee toggle ──────────────────────────────────────────
-
-.bee-icon {
-  filter: grayscale(1);
-  opacity: 0.75;
-
-  .active > & {
-    filter: none;
-    opacity: 1;
-  }
-}
-
-// ── eye toggle (show hidden items) ───────────────────
-
-.eye-btn {
-  &.active .eye-icon {
-    background: rgba(102, 204, 255, 0.9);
-    &::after { opacity: 0; }
-  }
-}
-
-.eye-icon {
-  display: inline-block;
-  position: relative;
-
-  // eye shape via mask
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z'/%3E%3Ccircle cx='12' cy='12' r='3'/%3E%3C/svg%3E");
-  -webkit-mask-size: contain;
-  mask-size: contain;
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  mask-position: center;
-
-  background: rgba(200, 200, 200, 0.6);
-  transition: background 200ms ease;
-
-  // diagonal strike-through for "hidden" state
-  &::after {
-    content: '';
-    position: absolute;
-    top: 10%;
-    left: -5%;
-    width: 130%;
-    height: 1.5px;
-    background: #cc4444;
-    transform: rotate(-25deg);
-    transform-origin: center;
-    opacity: 0.85;
-    transition: opacity 200ms ease;
-    pointer-events: none;
-  }
-
-  &.struck::after { opacity: 0.85; }
-  &:not(.struck)::after { opacity: 0; }
-}
-
-// ── text-only toggle (suppress images) ───────────────
-
-.text-only-btn {
-  &.active .text-only-icon {
-    background: rgba(102, 204, 255, 0.9);
-    &::after { opacity: 0; }
-  }
-}
-
-.text-only-icon {
-  display: inline-block;
-  position: relative;
-
-  // image icon via mask (mountain + sun)
-  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2' ry='2'/%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'/%3E%3Cpolyline points='21 15 16 10 5 21'/%3E%3C/svg%3E");
-  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='3' y='3' width='18' height='18' rx='2' ry='2'/%3E%3Ccircle cx='8.5' cy='8.5' r='1.5'/%3E%3Cpolyline points='21 15 16 10 5 21'/%3E%3C/svg%3E");
-  -webkit-mask-size: contain;
-  mask-size: contain;
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  -webkit-mask-position: center;
-  mask-position: center;
-
-  background: rgba(200, 200, 200, 0.6);
-  transition: background 200ms ease;
-
-  // diagonal strike-through for "images off" state
-  &::after {
-    content: '';
-    position: absolute;
-    top: 10%;
-    left: -5%;
-    width: 130%;
-    height: 1.5px;
-    background: #cc4444;
-    transform: rotate(-25deg);
-    transform-origin: center;
-    opacity: 0;
-    transition: opacity 200ms ease;
-    pointer-events: none;
-  }
-
-  &.struck::after { opacity: 0.85; }
-  &:not(.struck)::after { opacity: 0; }
-}
-
 // ── voice input mic button ────────────────────────────
-
-.mic-icon {
-  opacity: 0.85;
-}
 
 .mic-btn {
   position: relative;
@@ -598,8 +501,7 @@
     color: #ff4444;
     background: rgba(255, 68, 68, 0.12);
 
-    .mic-icon {
-      opacity: 1;
+    .mat-sym {
       animation: mic-pulse 1.2s ease-in-out infinite;
     }
 
@@ -932,7 +834,7 @@
     background: rgba(255, 68, 68, 0.18);
     border-color: rgba(255, 68, 68, 0.55);
 
-    .mic-icon { animation: mic-pulse 1.2s ease-in-out infinite; }
+    .mat-sym { animation: mic-pulse 1.2s ease-in-out infinite; }
 
     &::after {
       content: '';
@@ -980,7 +882,7 @@
   .mobile-nav { flex-direction: row; }
 
   .ctl-btn .hci,
-  .ctl-btn .mic-icon {
+  .ctl-btn .mat-sym {
     display: inline-block;
     transform: rotate(90deg);
   }
@@ -999,7 +901,7 @@
   .ctl-btn {
     min-width: 3.2rem;
     padding: 0.64rem 0.84rem;
-    --icon-size: 1.64rem;
+    --icon-size: 1.85rem;
     .dcp-icon { font-size: 2.2rem; }
   }
 
@@ -1019,7 +921,7 @@
   .ctl-btn {
     min-width: 3.44rem;
     padding: 0.72rem 0.96rem;
-    --icon-size: 1.76rem;
+    --icon-size: 2rem;
     .dcp-icon { font-size: 2.32rem; }
   }
 

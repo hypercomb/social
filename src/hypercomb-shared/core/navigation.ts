@@ -19,21 +19,25 @@ export class Navigation extends hypercomb {
   // ----------------------------------
 
   // ----------------------------------
-  // bracket selection grammar (canonical = query-string form)
+  // bracket selection grammar
   //
-  //   /parent?[a,b,c]     — preferred: brackets in the query string,
-  //                         pathname stays clean, never mangled by
-  //                         routers / proxies / URL encoders.
-  //   /parent/[a,b,c]     — legacy path-tail form, kept as a fallback
-  //                         reader so older shared links still resolve.
-  //   #name / #(a,b,c)    — legacy hash form, fallback below.
+  // Read side accepts three forms (any one parses):
+  //   /parent/[a,b,c]     — path-tail. Address bar shows brackets literally
+  //                         in modern browsers. Canonical writer form.
+  //   /parent?[a,b,c]     — query-string. Survives proxies / routers but
+  //                         browsers re-serialize `[a]` as `%5Ba%5D=`,
+  //                         which is ugly in the address bar. Reader-
+  //                         only — no longer written.
+  //   #name / #(a,b,c)    — legacy hash form. Reader fallback so old
+  //                         shared links still resolve.
   //
-  // All three are recognised by `getSelections()`. The bracket content
-  // is stripped from `segments()` / `segmentsRaw()` so callers walking
-  // the path don't see the selection markup. The writer side
-  // (replaceSelections) still uses the hash form for now — migrating
-  // to query is a follow-up so dashboard / paste-URL flows can be
-  // tested against the query form first.
+  // Writer side (`replaceSelections`) emits path-tail brackets so a
+  // user-typed `/[dolphin]` URL survives any in-app round-trip — sync
+  // → notify → potential re-write all preserve the bracket segment
+  // instead of clobbering it to `#dolphin`.
+  //
+  // The bracket content is stripped from `segments()` / `segmentsRaw()`
+  // so callers walking the path don't see the selection markup.
   // ----------------------------------
 
   // Match `[a, b, c]` or `[a,b,c]` exactly (brackets included).
@@ -123,18 +127,31 @@ export class Navigation extends hypercomb {
   public readonly replaceSelections = (names: readonly string[]): void => {
     const clean = Array.from(new Set(names.map(this.cleanSegment).filter(Boolean)))
 
+    // Path-tail bracket form (`/parent/[a,b,c]`) is the canonical writer
+    // shape so any in-app round-trip preserves what the user typed.
+    // Strip an existing trailing `[…]` segment (or a legacy `?[…]` query)
+    // so we don't end up doubling the bracket each time the selection is
+    // re-written.
+    const { pathSegments } = this.parsePath()
+    const basePath = pathSegments.length === 0 ? '' : '/' + pathSegments.join('/')
+
+    // Search may legitimately carry app params unrelated to selection.
+    // Drop it only if it's the `?[…]` legacy form; preserve otherwise.
+    const rawSearch = window.location.search ?? ''
+    const decodedSearch = this.safeDecode(rawSearch.startsWith('?') ? rawSearch.slice(1) : rawSearch).trim()
+    const search = this.bracketRe.test(decodedSearch) ? '' : rawSearch
+
+    const hash = window.location.hash ?? ''
+
     if (!clean.length) {
-      window.history.replaceState(window.history.state, '', window.location.pathname)
+      const newUrl = (basePath || '/') + search + hash
+      window.history.replaceState(window.history.state, '', newUrl)
       this.dispatchSelection([])
       return
     }
 
-    const hash =
-      clean.length === 1
-        ? '#' + clean[0]
-        : '#(' + clean.join(',') + ')'
-
-    window.history.replaceState(window.history.state, '', window.location.pathname + hash)
+    const bracket = `/[${clean.join(',')}]`
+    window.history.replaceState(window.history.state, '', basePath + bracket + search + hash)
     this.dispatchSelection(clean)
   }
 

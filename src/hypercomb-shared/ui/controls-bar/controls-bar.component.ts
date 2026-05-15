@@ -30,11 +30,15 @@ const PILL_POS_KEY = 'hc:controls-pill-pos'
 const ENABLED_MAP_KEY = 'hc:controls-enabled-map'
 
 // ── control registry ──────────────────────────────────────
+//
+// Each control has an id, a localization key for its label, the action
+// name dispatched on click, and a visibility predicate. Icons are
+// resolved by id via iconSymbol() (returns a Material Symbols Outlined
+// glyph name). No per-control icon field — the icon mapping is owned
+// by the component, not the registry.
 
 interface ControlItem {
   id: string
-  icon: 'hci' | 'eye' | 'text-only' | 'mic' | 'bee'
-  hci?: string
   label: string
   instruction?: string
   action: string
@@ -42,22 +46,22 @@ interface ControlItem {
 }
 
 const CONTROL_REGISTRY: readonly ControlItem[] = [
-  { id: 'back',         icon: 'hci',       hci: 'A', label: 'controls.back',         action: 'goBack',             visibleWhen: 'always' },
-  { id: 'dcp',          icon: 'hci',       hci: '$', label: 'controls.dcp',          action: 'openDcp',            visibleWhen: 'always', instruction: 'dcp.open-processor' },
-  { id: 'fit',          icon: 'hci',       hci: 'q', label: 'controls.fit-content',  action: 'fitOrCenter',        visibleWhen: 'always', instruction: 'dcp.fit-content' },
-  { id: 'zoom-out',     icon: 'hci',       hci: 'I', label: 'controls.zoom-out',     action: 'zoomOut',            visibleWhen: 'always', instruction: 'dcp.zoom-out' },
-  { id: 'zoom-in',      icon: 'hci',       hci: 'K', label: 'controls.zoom-in',      action: 'zoomIn',             visibleWhen: 'always', instruction: 'dcp.zoom-in' },
-  { id: 'lock',         icon: 'hci',                  label: 'controls.lock',         action: 'toggleLock',         visibleWhen: 'always', instruction: 'dcp.lock' },
-  { id: 'fullscreen',   icon: 'hci',       hci: "'", label: 'controls.fullscreen',   action: 'toggleFullscreen',   visibleWhen: 'always', instruction: 'dcp.fullscreen' },
-  { id: 'instructions', icon: 'hci',       hci: '?', label: 'controls.instructions', action: 'toggleInstructions', visibleWhen: 'always', instruction: 'dcp.instructions-toggle' },
-  { id: 'show-hidden',  icon: 'eye',                  label: 'controls.show-hidden',  action: 'toggleShowHidden',   visibleWhen: 'always' },
-  { id: 'text-only',    icon: 'text-only',             label: 'controls.text-only',    action: 'toggleTextOnly',     visibleWhen: 'always' },
-  { id: 'cut',          icon: 'hci',       hci: 'F', label: 'selection.cut',         action: 'cut',                visibleWhen: 'hasSelection' },
-  { id: 'copy',         icon: 'hci',       hci: '%', label: 'selection.copy',        action: 'copy',               visibleWhen: 'hasSelection' },
-  { id: 'clipboard',    icon: 'hci',       hci: 'y', label: 'controls.clipboard',    action: 'openClipboard',      visibleWhen: 'clipboardHasItems' },
-  { id: 'voice',        icon: 'mic',                   label: 'controls.voice',        action: 'toggleVoice',        visibleWhen: 'voiceSupported' },
-  { id: 'room',         icon: 'hci',       hci: 'p', label: 'controls.location',     action: 'toggleRoom',         visibleWhen: 'public' },
-  { id: 'bees',         icon: 'bee',                   label: 'controls.toggle-bees',  action: 'toggleBees',         visibleWhen: 'public' },
+  { id: 'back',         label: 'controls.back',         action: 'goBack',             visibleWhen: 'always' },
+  { id: 'dcp',          label: 'controls.dcp',          action: 'openDcp',            visibleWhen: 'always', instruction: 'dcp.open-processor' },
+  { id: 'fit',          label: 'controls.fit-content',  action: 'fitOrCenter',        visibleWhen: 'always', instruction: 'dcp.fit-content' },
+  { id: 'zoom-out',     label: 'controls.zoom-out',     action: 'zoomOut',            visibleWhen: 'always', instruction: 'dcp.zoom-out' },
+  { id: 'zoom-in',      label: 'controls.zoom-in',      action: 'zoomIn',             visibleWhen: 'always', instruction: 'dcp.zoom-in' },
+  { id: 'lock',         label: 'controls.lock',         action: 'toggleLock',         visibleWhen: 'always', instruction: 'dcp.lock' },
+  { id: 'fullscreen',   label: 'controls.fullscreen',   action: 'toggleFullscreen',   visibleWhen: 'always', instruction: 'dcp.fullscreen' },
+  { id: 'instructions', label: 'controls.instructions', action: 'toggleInstructions', visibleWhen: 'always', instruction: 'dcp.instructions-toggle' },
+  { id: 'show-hidden',  label: 'controls.show-hidden',  action: 'toggleShowHidden',   visibleWhen: 'always' },
+  { id: 'text-only',    label: 'controls.text-only',    action: 'toggleTextOnly',     visibleWhen: 'always' },
+  { id: 'cut',          label: 'selection.cut',         action: 'cut',                visibleWhen: 'hasSelection' },
+  { id: 'copy',         label: 'selection.copy',        action: 'copy',               visibleWhen: 'hasSelection' },
+  { id: 'clipboard',    label: 'controls.clipboard',    action: 'openClipboard',      visibleWhen: 'clipboardHasItems' },
+  { id: 'voice',        label: 'controls.voice',        action: 'toggleVoice',        visibleWhen: 'voiceSupported' },
+  { id: 'room',         label: 'controls.location',     action: 'toggleRoom',         visibleWhen: 'public' },
+  { id: 'bees',         label: 'controls.toggle-bees',  action: 'toggleBees',         visibleWhen: 'public' },
 ]
 
 // First-time defaults: items the previous primary-row had on stay enabled,
@@ -343,9 +347,37 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     }
   }
 
-  readonly iconText = (ctrl: ControlItem): string => {
-    if (ctrl.id === 'lock') return this.#locked() ? 'a' : 'b'
-    return ctrl.hci ?? ''
+  /** Material Symbols name for each control id. Used by the desktop
+   *  control row to render Material Symbols instead of the custom
+   *  'hypercomb-icons' font glyphs. Stateful controls (lock, show-hidden,
+   *  text-only, voice, bees) return different symbols based on state.
+   *  Returns an empty string for unknown ids so the template falls back
+   *  to the legacy glyph rendering. */
+  readonly iconSymbol = (ctrl: ControlItem): string => {
+    switch (ctrl.id) {
+      case 'back':         return 'arrow_back'
+      case 'dcp':          return 'dashboard_customize'
+      case 'fit':          return 'center_focus_strong'
+      // zoom_in/zoom_out is the lens-style magnifying glass (circle +
+      // handle). Visually off-centre by default because the handle
+      // extends bottom-right of the lens — the .zoom-btn class in
+      // controls-bar.component.scss bumps the icon size and translates
+      // it so the lens lands roughly on the button's geometric centre.
+      case 'zoom-out':     return 'zoom_out'
+      case 'zoom-in':      return 'zoom_in'
+      case 'lock':         return this.#locked() ? 'lock' : 'lock_open'
+      case 'fullscreen':   return 'fullscreen'
+      case 'instructions': return 'help'
+      case 'show-hidden':  return this.showHidden() ? 'visibility' : 'visibility_off'
+      case 'text-only':    return this.textOnly() ? 'text_fields' : 'subject'
+      case 'cut':          return 'content_cut'
+      case 'copy':         return 'content_copy'
+      case 'clipboard':    return 'content_paste'
+      case 'voice':        return 'mic'
+      case 'room':         return 'pin_drop'
+      case 'bees':         return 'hub'
+      default:             return ''
+    }
   }
 
   readonly badgeValue = (ctrl: ControlItem): number => {
@@ -470,14 +502,18 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     return segs.length > 0 ? segs[segs.length - 1].name : ''
   })
 
-  // Dev-only: 10-char prefix of the current layer marker sig, shown
-  // in front of the leaf breadcrumb so we can verify which historical
-  // layer the renderer is on. Updates on every cursor change.
+  // Dev-only: 10-char prefix of the BAG sig (lineage path-only sha256).
+  // Identical on every peer at the same lineage, regardless of what
+  // children are currently in their layer — so "did we land at the
+  // same place?" is a quick visual check.
+  //
+  // The historical-layer-content sig (which used to drive this) lives
+  // separately in HistoryCursorService for anyone who needs it; for
+  // the breadcrumb we just want bag identity.
   readonly isDev = !environment.production
-  readonly #currentLayerSig$ = signal<string>('')
   readonly currentLayerSigShort = computed(() => {
     if (!this.isDev) return ''
-    const sig = this.#currentLayerSig$()
+    const sig = this.signedAddress()
     return sig ? sig.slice(0, 10) : ''
   })
 
@@ -513,18 +549,21 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     return window.location.hostname || 'hypercomb.io'
   })
 
-  /** Full FQDN key: space/domain/lineage/secret/cell */
-  readonly #fqdn = computed(() => {
+  /**
+   * Lineage sig used as the breadcrumb marker — depends ONLY on the
+   * navigation path. Two peers at the same lineage display the same
+   * marker regardless of their room or secret.
+   *
+   * The full FQDN (room + secret + domain) is the MESH KEY — it's
+   * what gates access to the channel. The marker is the SHAPE of the
+   * thing you're looking at; the mesh key is the gate to it.
+   */
+  readonly #lineageKey = computed(() => {
     this.#moved$()
-    const space = this.#room$()
-    const domain = window.location.hostname || 'hypercomb.io'
-    const lineagePath = this.navigation.segmentsRaw().join('/')
-    const secret = this.#secret$()
-    const parts = [space, domain, lineagePath, secret, 'cell'].filter(Boolean)
-    return parts.join('/')
+    return this.navigation.segmentsRaw().join('/')
   })
 
-  /** SHA-256 mesh signature of the FQDN */
+  /** SHA-256 of the lineage path — stable across browsers at same path. */
   readonly signedAddress = signal('')
 
   readonly canGoBack = computed(() => {
@@ -627,7 +666,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #hoverTagsUnsub: (() => void) | null = null
   #voiceActiveUnsub: (() => void) | null = null
   #showHiddenUnsub: (() => void) | null = null
-  #cursorSigUnsub: (() => void) | null = null
   #textOnlyUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
   #clipboardCloseUnsub: (() => void) | null = null
@@ -743,14 +781,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       this.#showHidden.set(active)
     })
 
-    // Dev-only: keep currentLayerSig in sync with the cursor's current
-    // marker sig so the breadcrumb shows which layer is rendered.
-    if (this.isDev) {
-      this.#cursorSigUnsub = EffectBus.on('history:cursor-changed', () => {
-        const cursor = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<{ currentLayerSig: string }>('@diamondcoreprocessor.com/HistoryCursorService')
-        this.#currentLayerSig$.set(cursor?.currentLayerSig ?? '')
-      })
-    }
+    // (Cursor-driven layer-content sig listener removed — breadcrumb
+    // now derives from `signedAddress` which is the bag/lineage sig.)
 
     this.#textOnlyUnsub = EffectBus.on<{ textOnly: boolean }>('render:set-text-only', ({ textOnly }) => {
       this.#textOnly.set(textOnly)
@@ -804,7 +836,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   #recomputeAddress = (): void => {
-    const key = this.#fqdn()
+    const key = this.#lineageKey()
     SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer)
       .then(sig => this.signedAddress.set(sig))
   }
@@ -844,7 +876,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#beesUnsub?.()
     this.#voiceActiveUnsub?.()
     this.#showHiddenUnsub?.()
-    this.#cursorSigUnsub?.()
     this.#textOnlyUnsub?.()
     this.#clipboardAvailableUnsub?.()
     this.#clipboardCloseUnsub?.()

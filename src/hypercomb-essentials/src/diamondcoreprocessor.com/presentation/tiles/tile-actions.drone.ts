@@ -132,7 +132,7 @@ const ARRANGEMENT_KEY = 'iconArrangement'
 type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 
 // ── Action names this bee handles ─────────────────────────────────
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'note', 'hide', 'break-apart', 'adopt', 'block', 'remove', 'reroll'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'note', 'hide', 'break-apart', 'adopt', 'block', 'remove', 'reroll', 'import'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -401,8 +401,19 @@ export class TileActionsDrone extends Drone {
         break
 
       case 'adopt':
-        EffectBus.emit('cell:added', { cell: label })
-        void new hypercomb().act()
+        // Route to paired-channel adopt — looks up the ephemeral share
+        // for this branchName and runs materialiseFromSig with full
+        // depth so the entire subtree lands in OPFS as real layers.
+        console.log('[sync] tile-actions: adopt →', label)
+        EffectBus.emit('paired-channel:adopt-request', { branchName: label })
+        break
+
+      case 'import':
+        // Promote a transient sync tile (and its descendants) to a
+        // permanent layer — clear the `transient: true` marker so the
+        // boot sweep won't wipe it next session.
+        console.log('[sync] tile-actions: import →', label)
+        EffectBus.emit('paired-channel:import-request', { branchName: label })
         break
       case 'block':
         this.#hideOrBlock(label, 'hc:blocked-tiles', 'tile:blocked')

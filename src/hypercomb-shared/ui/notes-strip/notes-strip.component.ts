@@ -40,6 +40,40 @@ type SelectionService = EventTarget & {
   count: number
 }
 
+/** Single open question — Claude's side of the comm channel.
+ *  Lives in the cell's `qa` layer slot (or in `__optimization__/` with
+ *  kind=qa for the substrate-stored variant) as a content-addressed
+ *  JSON: `{ qId, question, askedAt }`. Surfaced into the notes strip
+ *  alongside user notes so the conversation reads in one list. */
+type QaItem = {
+  qId: string
+  question: string
+}
+
+type HistoryServiceLike = {
+  sign(lineageLike: { explorerSegments?: () => readonly string[] }): Promise<string>
+  currentLayerAt(locationSig: string): Promise<{ qa?: unknown } | null>
+}
+
+type StoreLike = {
+  resolve<T = unknown>(value: unknown): Promise<T>
+}
+
+type LineageLike = {
+  explorerSegments?: () => readonly string[]
+}
+
+/** Structural type for the InputModeStack lookup — avoids a build-time
+ *  import from essentials (shared must never import from modules).
+ *  Resolved at runtime via window.ioc, falls through cleanly if the
+ *  service isn't registered (dev/test environments). */
+type InputModeLike = { name: string; mount(): void; unmount(): void }
+type InputModeStackLike = {
+  push(mode: InputModeLike): void
+  pop(name: string): void
+  remove(name: string): void
+}
+
 @Component({
   selector: 'hc-notes-strip',
   standalone: true,
@@ -86,6 +120,22 @@ export class NotesStripComponent implements OnDestroy {
   // the effect AS SOON AS the service registers, regardless of selection.
   readonly #notesServiceReady = signal<boolean>(false)
 
+  // Per-cell qa items resolved from the layer's `qa` slot. The notes
+  // strip surfaces these alongside regular notes so the user sees the
+  // full comm transcript: Claude's questions (qa-slot, yellow rows) +
+  // user notes (which include the user's answer notes `[A:<qId>] …`).
+  // When a question is answered the answer-note appears in the strip
+  // and the qa slot is cleared by the editor's submit path — Claude
+  // sees the answer-note on its next walk and updates its model.
+  readonly #qaByCell = signal<ReadonlyMap<string, readonly QaItem[]>>(new Map())
+
+  // Context key captured at the moment the user clicked "hide notes".
+  // The strip stays hidden only while the current context still matches —
+  // change selection and the equality check fails, so the strip reappears
+  // naturally without any explicit reset. Capture mode trumps hide
+  // (see `visible`) so authoring always shows the strip.
+  readonly #hiddenContext = signal<string | null>(null)
+
   /**
    * Display mode — `chips` is the horizontal scrolling chip row, `rows` is
    * the vertical stack (better for long sentence-style rules). Persisted
@@ -95,11 +145,80 @@ export class NotesStripComponent implements OnDestroy {
     (localStorage.getItem('hc:notes-strip-mode') as 'chips' | 'rows' | null) ?? 'rows'
   )
 
+  /**
+   * Kind filter — `all` (default) shows every entry, `q` only open questions,
+   * `note` only real notes (answered Qs included since "resolved-Q notes are
+   * just notes"). Selection persists in localStorage so the user's view
+   * survives navigation and reloads. The chip-style toggle row sits above
+   * the list; clicking a chip swaps the active filter.
+   */
+  readonly kindFilter = signal<'all' | 'q' | 'note'>(
+    (localStorage.getItem('hc:notes-strip-kind-filter') as 'all' | 'q' | 'note' | null) ?? 'all'
+  )
+
+  setKindFilter(filter: 'all' | 'q' | 'note'): void {
+    if (filter === this.kindFilter()) return
+    this.kindFilter.set(filter)
+    try { localStorage.setItem('hc:notes-strip-kind-filter', filter) } catch { /* ignore */ }
+  }
+
+  /** True if a row of `kind` should render under the current filter. */
+  #passesFilter(kind: 'q' | 'a' | 'note'): boolean {
+    const f = this.kindFilter()
+    if (f === 'all') return true
+    if (f === 'q') return kind === 'q'
+    // f === 'note' — surface every non-question entry (answers count as
+    // notes per the "resolved-Q notes are just notes" rule).
+    return kind !== 'q'
+  }
+
   readonly notes = computed<readonly Note[]>(() => {
     const cell = this.cell()
     if (!cell) return []
-    return this.#notesByCell().get(cell) ?? []
+    const stored = this.#notesByCell().get(cell) ?? []
+    const qa = this.#qaByCell().get(cell) ?? []
+    const merged = this.#mergeQaWithNotes(qa, stored)
+    return merged.filter(n => this.#passesFilter(this.noteKind(n)))
   })
+
+  /** Display label for a row's kind affordance — shown in a small header
+   *  chip alongside the kind icon at the top of each row. Plain English
+   *  for now; i18n keys can layer on later without touching the consumers. */
+  noteKindLabel(note: Note): string {
+    switch (this.noteKind(note)) {
+      case 'q': return 'Question'
+      case 'a': return 'Answer'
+      default:  return 'Note'
+    }
+  }
+
+  /** Merge open qa-slot questions with the cell's notes into a single
+   *  display list. Logic:
+   *   - qa items appear FIRST as synthetic notes (`id = 'qa:<qId>'`,
+   *     `text = '[Q] …'` so the existing `noteKind` / styling pick
+   *     them up as yellow Q rows automatically).
+   *   - Any legacy `[Q] …` note whose question text matches a qa-slot
+   *     entry is DROPPED — the qa slot is canonical; the legacy note
+   *     was a pre-migration artifact and surfacing both clutters the
+   *     comm channel with the same question repeated.
+   *   - Plain notes (and `[A:<qId>] …` answer notes) pass through
+   *     unchanged in their original order.
+   */
+  #mergeQaWithNotes(qa: readonly QaItem[], notes: readonly Note[]): readonly Note[] {
+    const qaTexts = new Set(qa.map(q => q.question.trim()))
+    const synthetic: Note[] = qa.map(q => ({
+      id: 'qa:' + q.qId,
+      text: '[Q] ' + q.question,
+      createdAt: 0,
+    }))
+    const filtered = notes.filter(n => {
+      const t = (n.text ?? '').trimStart()
+      if (!t.startsWith('[Q]')) return true
+      const body = t.slice(3).trim()
+      return !qaTexts.has(body)
+    })
+    return [...synthetic, ...filtered]
+  }
 
   /**
    * Multi-selection mode: more than one tile is selected. Switches the
@@ -120,26 +239,34 @@ export class NotesStripComponent implements OnDestroy {
     const cells = this.#selectedCells()
     if (cells.length <= 1) return []
     const byCell = this.#notesByCell()
+    const byQa = this.#qaByCell()
     // Only the most-recent N selections show in the menu — large
     // selections would otherwise flood the strip and bury the cells the
     // user is actually working with.
     const recent = cells.slice(-MAX_VISIBLE_SELECTIONS)
-    const withNotes = recent.filter(c => (byCell.get(c)?.length ?? 0) > 0)
+    // Resolve the merged (qa + notes) list per cell once; reuse below
+    // for the "has anything" filter and for the rendered groups.
+    const mergedByCell = new Map<string, readonly Note[]>()
+    for (const c of recent) {
+      const merged = this.#mergeQaWithNotes(byQa.get(c) ?? [], byCell.get(c) ?? [])
+      mergedByCell.set(c, merged.filter(n => this.#passesFilter(this.noteKind(n))))
+    }
+    const withContent = recent.filter(c => (mergedByCell.get(c)?.length ?? 0) > 0)
     const open = this.#openGroup()
     const closed = this.#userClosed()
     // Resolution order:
     //   1. If user explicitly collapsed everything, honour that — none open.
     //   2. If a specific group was opened and is still in the list, use it.
-    //   3. Otherwise auto-pick the first group with notes so first-time
+    //   3. Otherwise auto-pick the first group with content so first-time
     //      multi-select shows something instead of an all-closed wall.
     const expanded = closed
       ? null
-      : (open && withNotes.includes(open))
+      : (open && withContent.includes(open))
         ? open
-        : withNotes[0] ?? null
-    return withNotes.map(c => ({
+        : withContent[0] ?? null
+    return withContent.map(c => ({
       cell: c,
-      notes: byCell.get(c) ?? [],
+      notes: mergedByCell.get(c) ?? [],
       expanded: c === expanded,
     }))
   })
@@ -156,8 +283,13 @@ export class NotesStripComponent implements OnDestroy {
     if (cells.length <= 1) return []
     const warmed = this.#warmed()
     const byCell = this.#notesByCell()
+    const byQa = this.#qaByCell()
     const recent = cells.slice(-MAX_VISIBLE_SELECTIONS)
-    return recent.filter(c => warmed.has(c) && (byCell.get(c)?.length ?? 0) === 0)
+    // A cell is "empty" only if BOTH sources are empty — a qa-only cell
+    // still has Claude-side content the user might want to answer.
+    return recent.filter(c => warmed.has(c)
+      && (byCell.get(c)?.length ?? 0) === 0
+      && (byQa.get(c)?.length ?? 0) === 0)
   })
 
   /**
@@ -168,11 +300,27 @@ export class NotesStripComponent implements OnDestroy {
   readonly cell = computed<string | null>(() => this.#capturingFor() ?? this.#activeCell())
 
   /**
+   * Selection identity that "hide notes" is scoped to. The user-clicked-hide
+   * signal stores this key; the visible computed compares it against the
+   * current key to decide whether hide is still in effect. When selection
+   * changes, the key changes and the hidden state lapses automatically.
+   */
+  readonly #contextKey = computed<string>(() => {
+    const cells = this.#selectedCells()
+    if (cells.length > 1) return 'multi:' + [...cells].sort().join('|')
+    return 'single:' + (this.cell() ?? '')
+  })
+
+  /**
    * Visible whenever the active cell has notes, or the user is actively
-   * authoring one, OR multi-selection has any cells with notes.
+   * authoring one, OR multi-selection has any cells with notes — unless
+   * the user has explicitly hidden the strip for the current selection
+   * via the header hide button. Capture mode always trumps hide.
    */
   readonly visible = computed<boolean>(() => {
     if (this.#capturingFor()) return true
+    const hidden = this.#hiddenContext()
+    if (hidden && hidden === this.#contextKey()) return false
     if (this.multi()) {
       // Show whenever any selected cell has notes — emptyCells is only ever
       // shown alongside a populated accordion, never on its own.
@@ -197,6 +345,18 @@ export class NotesStripComponent implements OnDestroy {
   #cleanups: (() => void)[] = []
   #selectionListener: (() => void) | null = null
 
+  // Input-mode stack participation. When the user hovers the notes strip,
+  // we push a 'notes-hover' mode that mechanically unmounts the hex grid's
+  // wheel-zoom listener — so scrolling the notes never bleeds into zooming
+  // the underlying hexagons. The mode itself mounts no listeners; its
+  // presence on top of the stack is what suspends what's below.
+  readonly #notesHoverMode = {
+    name: 'notes-hover',
+    mount: (): void => { /* no listeners — suspension is structural */ },
+    unmount: (): void => { /* nothing to tear down */ },
+  }
+  #hoverActive = false
+
   constructor() {
     // Build identification log — if you don't see this in the console after
     // a hard reload, the new bundle isn't running. Bumping the tag below
@@ -214,6 +374,7 @@ export class NotesStripComponent implements OnDestroy {
       const onLineage = (): void => {
         this.#warmed.set(new Set())
         this.#notesByCell.set(new Map())
+        this.#qaByCell.set(new Map())
         this.#version.update(v => v + 1)
       }
       lineage.addEventListener('change', onLineage)
@@ -278,17 +439,28 @@ export class NotesStripComponent implements OnDestroy {
 
     this.#cleanups.push(EffectBus.on<{ segments?: readonly string[] }>('notes:changed', async (p) => {
       // HiveParticipant emits with `segments` only — derive the cell
-      // label from the last segment. Refresh the per-cell notes cache so
-      // the strip immediately reflects the write.
+      // label from the last segment. Refresh both notes AND qa caches
+      // so a freshly-committed `[A:<qId>] …` answer note immediately
+      // surfaces AND any qa-slot mutation in the same cascade is
+      // picked up. Same single trigger keeps both halves of the comm
+      // channel in lock-step.
       const cellLabel = Array.isArray(p?.segments) && p!.segments!.length > 0
         ? String(p!.segments![p!.segments!.length - 1] ?? '').trim()
         : ''
       const svc = this.#notes
       if (svc && cellLabel) {
-        const fresh = await svc.getNotes(cellLabel)
+        const [fresh, qa] = await Promise.all([
+          svc.getNotes(cellLabel),
+          this.#loadQaFor(cellLabel),
+        ])
         this.#notesByCell.update(prev => {
           const next = new Map(prev)
           next.set(cellLabel, fresh.slice())
+          return next
+        })
+        this.#qaByCell.update(prev => {
+          const next = new Map(prev)
+          next.set(cellLabel, qa)
           return next
         })
         this.#warmed.update(prev => {
@@ -345,14 +517,22 @@ export class NotesStripComponent implements OnDestroy {
       for (const target of targets) {
         if (this.#warmed().has(target)) continue
         console.log('[notes-strip] warmup start', target)
-        void svc.getNotes(target).then((notes) => {
-          console.log('[notes-strip] warmup done', target, 'notes.length=', notes.length)
-          // Store the resolved notes directly. notes() / groups() /
-          // emptyCells() read from this map — no sync notesFor() that
-          // would hit the empty peek cache and lose data.
+        // Warm both sources in parallel so the strip surfaces the full
+        // comm transcript (Claude's questions + user notes) in a single
+        // render pass, not two.
+        void Promise.all([
+          svc.getNotes(target),
+          this.#loadQaFor(target),
+        ]).then(([notes, qa]) => {
+          console.log('[notes-strip] warmup done', target, 'notes=', notes.length, 'qa=', qa.length)
           this.#notesByCell.update(prev => {
             const next = new Map(prev)
             next.set(target, notes.slice())
+            return next
+          })
+          this.#qaByCell.update(prev => {
+            const next = new Map(prev)
+            next.set(target, qa)
             return next
           })
           this.#warmed.update(prev => {
@@ -369,15 +549,93 @@ export class NotesStripComponent implements OnDestroy {
     })
   }
 
+  /** Resolve the `qa` slot of a cell's current layer and return the
+   *  decoded questions. The strip uses this to surface Claude's open
+   *  questions alongside user notes — same list, same row affordance.
+   *  Each entry's underlying resource is a `{ qId, question, askedAt }`
+   *  JSON; inflate returns the parsed object for sig values. Failures
+   *  silently return `[]` — the strip degrades to showing notes only
+   *  rather than throwing on a missing service. */
+  async #loadQaFor(cell: string): Promise<readonly QaItem[]> {
+    const history = window.ioc?.get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
+    const store = window.ioc?.get<StoreLike>('@hypercomb.social/Store')
+    if (!history || !store) return []
+    const lineage = window.ioc?.get<LineageLike>('@hypercomb.social/Lineage')
+    const parent = lineage?.explorerSegments?.() ?? []
+    const segments = [...parent, cell]
+    try {
+      const locSig = await history.sign({ explorerSegments: () => segments })
+      const layer = await history.currentLayerAt(locSig)
+      const raw = layer && (layer as { qa?: unknown }).qa
+      if (!Array.isArray(raw)) return []
+      const items: QaItem[] = []
+      for (const sig of raw) {
+        if (typeof sig !== 'string') continue
+        try {
+          const resolved = await store.resolve<{ qId?: string; question?: string }>(sig)
+          if (resolved && typeof resolved.question === 'string') {
+            items.push({
+              qId: String(resolved.qId || sig.slice(0, 16)),
+              question: resolved.question.trim(),
+            })
+          }
+        } catch { /* skip bad resource */ }
+      }
+      return items
+    } catch {
+      return []
+    }
+  }
+
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
     this.#selectionListener?.()
+    // Safety: ensure we never leave a 'notes-hover' mode pushed on the
+    // stack if the component is destroyed mid-hover (e.g. selection
+    // change triggers re-render while cursor is over the strip).
+    this.#popNotesMode()
   }
 
-  /** Click a note row → open the viewer modal centred on this note. */
+  // ── input-mode stack handlers ────────────────────────────
+  // Wired from the template via (pointerenter) / (pointerleave) on the
+  // notes-strip root. Pointer events cover both mouse and pen/touch.
+
+  onNotesEnter(): void {
+    if (this.#hoverActive) return
+    const stack = this.#stack()
+    if (!stack) return
+    stack.push(this.#notesHoverMode)
+    this.#hoverActive = true
+  }
+
+  onNotesLeave(): void {
+    this.#popNotesMode()
+  }
+
+  #popNotesMode(): void {
+    if (!this.#hoverActive) return
+    this.#stack()?.pop(this.#notesHoverMode.name)
+    this.#hoverActive = false
+  }
+
+  #stack(): InputModeStackLike | undefined {
+    return window.ioc?.get<InputModeStackLike>('@diamondcoreprocessor.com/InputModeStack')
+  }
+
+  /** Click a note row → open the viewer modal centred on this note.
+   *  Question rows (`[Q] …` prefix) shortcut to the tile editor instead
+   *  so the Q&A panel is immediately available — that's the only
+   *  surface with the answer composer + Done button. One click goes
+   *  from "I see a question on this tile" to "I'm typing the answer."
+   */
   open(noteId: string): void {
     const cell = this.#activeCell()
     if (!cell) return
+    const note = this.#notesByCell().get(cell)?.find(n => n.id === noteId)
+    if (note && this.noteKind(note) === 'q') {
+      EffectBus.emit('tile:action', { action: 'edit', label: cell, q: 0, r: 0, index: 0 })
+      return
+    }
     EffectBus.emit('notes:open', { cellLabel: cell, noteId })
   }
 
@@ -400,6 +658,13 @@ export class NotesStripComponent implements OnDestroy {
     EffectBus.emit('notes:cancel', {})
   }
 
+  /** Header "hide" button — collapse the strip for the current selection.
+   *  Re-shows automatically when the user selects a different tile (the
+   *  context key changes and the saved hidden context no longer matches). */
+  hide(): void {
+    this.#hiddenContext.set(this.#contextKey())
+  }
+
   /** Delete a single note from the active cell's list. */
   remove(noteId: string, event: Event): void {
     console.log('[notes-strip] × clicked', { noteId, cell: this.cell() })
@@ -413,6 +678,32 @@ export class NotesStripComponent implements OnDestroy {
   preview(text: string): string {
     const trimmed = text.replace(/\s+/g, ' ').trim()
     return trimmed.length > 64 ? trimmed.slice(0, 61) + '…' : trimmed
+  }
+
+  /** Classify a note by its legacy text prefix. `[Q] …` is a question
+   *  carried over from the pre-qa-slot era; `[A:<qId>] …` is its paired
+   *  answer. Anything else is a plain user note. The strip styles each
+   *  kind with a distinct background card so the user can scan a cell
+   *  and immediately see what's a question, what's an answer, and what
+   *  is their own context. */
+  noteKind(note: Note): 'q' | 'a' | 'note' {
+    const t = (note?.text ?? '').trimStart()
+    if (t.startsWith('[Q]')) return 'q'
+    if (t.startsWith('[A:') || t.startsWith('[A ')) return 'a'
+    return 'note'
+  }
+
+  /** Strip the legacy `[Q]` / `[A:<qId>]` prefix from the displayed text.
+   *  The kind-styling already signals what the row is, so the bracket
+   *  marker is redundant noise to the reader. The raw text is kept for
+   *  tooltips / inspector flows. */
+  noteDisplayText(note: Note): string {
+    const t = (note?.text ?? '')
+    const trimmed = t.trimStart()
+    if (trimmed.startsWith('[Q]')) return trimmed.slice(3).trimStart()
+    const aMatch = /^\[A:[^\]]*\]\s*/.exec(trimmed) || /^\[A\s[^\]]*\]\s*/.exec(trimmed)
+    if (aMatch) return trimmed.slice(aMatch[0].length)
+    return t
   }
 
   trackById = (_i: number, n: Note): string => n.id
@@ -449,6 +740,11 @@ export class NotesStripComponent implements OnDestroy {
 
   /** Open a specific note from within an accordion group. */
   openInGroup(cell: string, noteId: string): void {
+    const note = this.#notesByCell().get(cell)?.find(n => n.id === noteId)
+    if (note && this.noteKind(note) === 'q') {
+      EffectBus.emit('tile:action', { action: 'edit', label: cell, q: 0, r: 0, index: 0 })
+      return
+    }
     EffectBus.emit('notes:open', { cellLabel: cell, noteId })
   }
 

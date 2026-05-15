@@ -97,19 +97,19 @@
     @case ('browsing') {
 
       @if (isMobile()) {
-        <!-- ═══ MOBILE: 5 floating icons (no chrome) ═══ -->
+        <!-- ═══ MOBILE: 5 floating icons (no chrome) — Material Symbols ═══ -->
         <!-- back · talk · center · fullscreen · solo/swarm -->
         <div class="controls-section mobile-nav">
           <button class="ctl-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()"
                   (pointerdown)="onBackPointerDown($event)" (click)="onBackClick()"
                   [attr.aria-label]="'controls.go-back' | t">
-            <span class="hci">A</span>
+            <span class="mat-sym">arrow_back</span>
           </button>
           @if (voiceSupported) {
             <button class="ctl-btn mic-btn" [class.recording]="voiceActive()"
               (pointerdown)="mobileMicDown($event)" (pointerup)="mobileMicUp()" (pointercancel)="mobileMicUp()" (pointerleave)="mobileMicUp()"
               [attr.aria-label]="'controls.voice-hold' | t">
-              <span class="mic-icon">{{ voiceActive() ? '🎙' : '🎤' }}</span>
+              <span class="mat-sym" [class.filled]="voiceActive()">mic</span>
             </button>
           }
           <button class="ctl-btn fit-btn"
@@ -117,13 +117,13 @@
                   [class.fit-page]="fitButtonState() === 'page'"
                   (click)="fitOrCenter($event)" (dblclick)="lockFit()"
                   [attr.aria-label]="'controls.fit-content' | t">
-            <span class="hci">q</span>
+            <span class="mat-sym">center_focus_strong</span>
           </button>
           <button class="ctl-btn" (click)="toggleFullscreen()" [attr.aria-label]="'controls.fullscreen' | t">
-            <span class="hci">'</span>
+            <span class="mat-sym">fullscreen</span>
           </button>
           <button class="ctl-btn mesh-mobile-btn" [class.shield-mode]="meshPublic()" (click)="toggleMeshPublic()" [attr.aria-label]="(meshPublic() ? 'mesh.swarm' : 'mesh.solo') | t">
-            <span class="hci">{{ meshPublic() ? 'e' : 'i' }}</span>
+            <span class="mat-sym" [class.filled]="meshPublic()">{{ meshPublic() ? 'groups' : 'person' }}</span>
           </button>
         </div>
       } @else {
@@ -147,26 +147,19 @@
                       [class.fit-btn]="ctrl.id === 'fit'"
                       [class.fit-global]="ctrl.id === 'fit' && fitButtonState() === 'global'"
                       [class.fit-page]="ctrl.id === 'fit' && fitButtonState() === 'page'"
+                      [class.zoom-btn]="ctrl.id === 'zoom-in' || ctrl.id === 'zoom-out'"
                       (click)="onCtrlClick(ctrl, $event)"
                       [attr.aria-label]="ctrl.label | t"
                       [attr.data-instruction]="ctrl.instruction ?? null">
-                @switch (ctrl.icon) {
-                  @case ('hci') {
-                    <span class="hci" [class.dcp-icon]="ctrl.id === 'dcp'">{{ iconText(ctrl) }}</span>
-                  }
-                  @case ('eye') {
-                    <span class="eye-icon" [class.struck]="!showHidden()"></span>
-                  }
-                  @case ('text-only') {
-                    <span class="text-only-icon" [class.struck]="!textOnly()"></span>
-                  }
-                  @case ('mic') {
-                    <span class="mic-icon">{{ voiceActive() ? '🎙' : '🎤' }}</span>
-                  }
-                  @case ('bee') {
-                    <span class="bee-icon">🐝</span>
-                  }
-                }
+                <!-- Material Symbols Outlined — every desktop control
+                     maps to a Symbol name via iconSymbol(). The .filled
+                     modifier flips the FILL axis on stateful toggles
+                     (voice/bees/etc.) so active controls read distinctly
+                     without needing a separate icon glyph. -->
+                <span class="mat-sym"
+                      [class.filled]="isActive(ctrl) && ctrl.id !== 'fit'">
+                  {{ iconSymbol(ctrl) }}
+                </span>
                 @if (ctrl.id === 'clipboard' && badgeValue(ctrl) > 0) {
                   <span class="badge">{{ badgeValue(ctrl) }}</span>
                 }
@@ -212,17 +205,17 @@
         <div class="controls-divider"></div>
         @if (clipboardCount() > 0) {
           <button class="ctl-btn" (click)="place()" [attr.aria-label]="'controls.place-selected' | t">
-            <span class="hci" [style.display]="'inline-block'" [style.transform]="'rotate(90deg)'" [style.color]="hasSelection() ? '#4caf50' : ''">A</span>
+            <span class="mat-sym" [style.color]="hasSelection() ? '#4caf50' : ''">place_item</span>
           </button>
           <button class="ctl-btn" (click)="paste()" [attr.aria-label]="'controls.paste-clipboard' | t">
-            <span class="hci" style="color:#4caf50">G</span>
+            <span class="mat-sym" style="color:#4caf50">content_paste</span>
           </button>
         }
         <button class="ctl-btn" (click)="clearClipboard()" [attr.aria-label]="'controls.clear-clipboard' | t">
-          <span class="hci">Q</span>
+          <span class="mat-sym">delete</span>
         </button>
         <button class="ctl-btn" (click)="closeClipboard()" [attr.aria-label]="'controls.close-clipboard' | t">
-          <span class="close-x">&times;</span>
+          <span class="mat-sym">close</span>
         </button>
       }
     }
@@ -246,10 +239,10 @@
       </div>
       <div class="controls-divider"></div>
       <button class="ctl-btn" (click)="reassemble()" [attr.aria-label]="'controls.atomize-reassemble' | t">
-        <span class="hci" style="color:#4caf50">H</span>
+        <span class="mat-sym" style="color:#4caf50">join_full</span>
       </button>
       <button class="ctl-btn" (click)="closeAtomize()" [attr.aria-label]="'controls.atomize-close' | t">
-        <span class="close-x">&times;</span>
+        <span class="mat-sym">close</span>
       </button>
     }
 

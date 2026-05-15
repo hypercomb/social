@@ -19,7 +19,10 @@
 .editor-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.82);
+  // Scrim — Material 3's modal scrim role uses surface-c-lowest at high
+  // opacity. Slightly less opaque than pure black so a hint of the hex
+  // grid still tones through while the editor reads as the active layer.
+  background: color-mix(in srgb, var(--md-surface-c-lowest) 82%, transparent);
   z-index: 100000;
 }
 
@@ -37,11 +40,14 @@
   display: flex;
   flex-direction: column;
 
-  background: #1a1a1e;
-  color: #e0e0e0;
-  border: 1px solid #333;
-  border-radius: 10px;
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.7);
+  // Material 3 elevated dialog surface — surface-c-low for the elevated
+  // container tier, outline for the border, shape-l matches the website's
+  // section / tile-card radius so the editor reads as a peer surface.
+  background: var(--md-surface-c-low);
+  color: var(--md-on-surface);
+  border: 1px solid var(--md-outline);
+  border-radius: var(--md-shape-l);
+  box-shadow: var(--md-elev-4);
   font-family: var(--hc-font);
 }
 
@@ -52,7 +58,7 @@
   align-items: center;
   gap: 0.5em;
   padding: 0.6em 0.8em;
-  border-bottom: 1px solid #2a2a2e;
+  border-bottom: 1px solid var(--md-outline-variant);
 
   h3 {
     margin: 0;
@@ -62,18 +68,19 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    color: var(--md-on-surface-strong);
   }
 }
 
 .header-icon {
   font-size: 1.1em;
-  color: #c8975a;
+  color: var(--md-secondary);
 }
 
 .editor-close {
   background: none;
   border: none;
-  color: #666;
+  color: var(--md-on-surface-faint);
   font-size: 1em;
   cursor: pointer;
   line-height: 1;
@@ -746,8 +753,8 @@
 .qa-item {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.55rem 0;
+  gap: 0.5rem;
+  padding: 0.65rem 0 0.2rem;
   border-top: 1px solid rgba(255, 225, 74, 0.10);
 
   &:first-of-type {
@@ -760,49 +767,78 @@
   }
 }
 
+// Question card — warm tint, distinct from both the section bg and the
+// answer composer below. Reads as "here's what's being asked" so the
+// user's eye lands here first when the panel opens.
 .qa-question {
   margin: 0;
+  padding: 0.55rem 0.7rem;
   font-size: 0.92rem;
   line-height: 1.45;
-  color: #e8e8e8;
+  color: #f7eecf;
+  background: rgba(255, 225, 74, 0.13);
+  border: 1px solid rgba(255, 225, 74, 0.32);
+  border-left-width: 3px;
+  border-radius: 4px 6px 6px 4px;
 }
 
+// Posted answer — cool / neutral, clearly NOT the question. Same
+// rounded-card shape as the question but flipped accent so the
+// Q/A pair reads like a conversation.
 .qa-answer {
   margin: 0;
+  padding: 0.5rem 0.7rem;
   font-size: 0.88rem;
   line-height: 1.45;
-  color: rgba(232, 232, 232, 0.72);
-  padding: 0.45rem 0.6rem;
-  background: rgba(255, 255, 255, 0.03);
-  border-left: 2px solid rgba(255, 225, 74, 0.45);
-  border-radius: 0 4px 4px 0;
+  color: rgba(232, 232, 232, 0.85);
+  background: rgba(110, 180, 255, 0.08);
+  border: 1px solid rgba(110, 180, 255, 0.22);
+  border-left-width: 3px;
+  border-radius: 4px 6px 6px 4px;
 }
 
+// Answer composer — multi-line textarea + Done button. Cooler tint
+// to mirror the posted-answer card so user sees "this is where
+// your answer lands."
 .qa-answer-row {
   display: flex;
   align-items: stretch;
   gap: 0.4rem;
+  padding: 0.45rem 0.55rem;
+  background: rgba(110, 180, 255, 0.05);
+  border: 1px solid rgba(110, 180, 255, 0.20);
+  border-left-width: 3px;
+  border-radius: 4px 6px 6px 4px;
 }
 
 .qa-answer-input {
   flex: 1;
   min-width: 0;
+  resize: vertical;
+  min-height: 2.2rem;
+  font-family: inherit;
+  font-size: 0.88rem;
+  line-height: 1.45;
+  padding: 0.4rem 0.55rem;
 }
 
 .qa-submit {
   flex-shrink: 0;
-  padding: 0 0.85rem;
-  background: rgba(255, 225, 74, 0.16);
-  border: 1px solid rgba(255, 225, 74, 0.40);
+  align-self: flex-end;
+  padding: 0.35rem 0.95rem;
+  background: rgba(110, 180, 255, 0.18);
+  border: 1px solid rgba(110, 180, 255, 0.45);
   border-radius: 6px;
-  color: #ffe14a;
+  color: #b6d4ff;
   font-size: 0.84rem;
   font-weight: 600;
+  letter-spacing: 0.02em;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 
   &:hover {
-    background: rgba(255, 225, 74, 0.26);
-    border-color: rgba(255, 225, 74, 0.60);
+    background: rgba(110, 180, 255, 0.28);
+    border-color: rgba(110, 180, 255, 0.65);
+    color: #d4e6ff;
   }
 }

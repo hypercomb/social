@@ -95,21 +95,31 @@ interface HistoryServiceLike {
 }
 
 /**
- * Derive the channel id from a lineage signature + secret. Both sides
- * MUST sign the same lineage (same explorerSegments) and supply the
- * same secret, or their channelIds diverge.
+ * Derive the channel id from bag (lineage sig) + secret. Two peers
+ * at the same lineage with the same secret meet on the same channel.
  *
- * Output: 64 lowercase hex characters (sha-256).
+ *   channelId = sha256( lineageSig | secret )
+ *
+ * Length-prefixed concat so the pair maps uniquely. Secret required.
+ * Output: 64 lowercase hex characters.
+ *
+ * The `room` argument is accepted for API stability but currently
+ * not part of the derivation — rooms are a UI grouping concept,
+ * not a mesh-level scope. Same-room is implied by same-bag at
+ * present. (If we later need multi-room-per-bag, re-introduce it.)
  */
-export async function channelIdFor(lineageSig: string, secret: string): Promise<string> {
+export async function channelIdFor(
+  lineageSig: string,
+  _room: string,
+  secret: string,
+): Promise<string> {
   const sig = String(lineageSig ?? '').trim().toLowerCase()
-  const sec = String(secret ?? '')
+  const sec = String(secret ?? '').trim()
   if (!/^[0-9a-f]{64}$/.test(sig)) throw new Error('paired-channel: lineageSig must be 64 hex chars')
   if (!sec) throw new Error('paired-channel: secret is required')
-  // Length-prefixed concat so the (sig, sec) tuple maps to a unique
-  // input. You can't construct two distinct (a, b) and (a', b') that
-  // hash to the same channel by playing with separators.
-  const buf = TEXT_ENCODER.encode(`${sig.length}:${sig}|${sec.length}:${sec}`)
+  const buf = TEXT_ENCODER.encode(
+    `${sig.length}:${sig}|${sec.length}:${sec}`,
+  )
   return SignatureService.sign(buf.buffer as ArrayBuffer)
 }
 
@@ -124,6 +134,7 @@ export async function channelIdFor(lineageSig: string, secret: string): Promise<
  */
 export async function channelIdForLineage(
   lineage: LineageLike,
+  room: string,
   secret: string,
 ): Promise<string> {
   const history = window.ioc.get(
@@ -142,7 +153,7 @@ export async function channelIdForLineage(
     const key = segments.join('/')
     lineageSig = await SignatureService.sign(TEXT_ENCODER.encode(key).buffer as ArrayBuffer)
   }
-  return channelIdFor(lineageSig, secret)
+  return channelIdFor(lineageSig, room, secret)
 }
 
 /**
@@ -150,9 +161,13 @@ export async function channelIdForLineage(
  * when inputs are invalid. Useful in UI paths where the user is
  * mid-typing.
  */
-export async function tryChannelId(lineageSig: string, secret: string): Promise<string | null> {
+export async function tryChannelId(
+  lineageSig: string,
+  room: string,
+  secret: string,
+): Promise<string | null> {
   try {
-    return await channelIdFor(lineageSig, secret)
+    return await channelIdFor(lineageSig, room, secret)
   } catch {
     return null
   }
@@ -191,7 +206,9 @@ export class PairedChannelService {
       return false
     }
     const tags = [['type', String(type)], ...extraTags.filter(t => Array.isArray(t) && t.length >= 2)]
-    return mesh.publish(PAIRED_CHANNEL_KIND, channelId, payload, tags)
+    const result = await mesh.publish(PAIRED_CHANNEL_KIND, channelId, payload, tags)
+    console.log('[sync] mesh.publish', { channel: channelId.slice(0, 12), verb: type, ok: result })
+    return result
   }
 
   /**
@@ -220,12 +237,16 @@ export class PairedChannelService {
       return { close: () => this.#detach(channelId, handler) }
     }
 
+    console.log('[sync] mesh.subscribe', { channel: channelId.slice(0, 12) })
     const handlers = new Set<ChannelHandler>([handler])
     const meshSub = mesh.subscribe(channelId, (msg) => {
       const evt = msg?.event
       if (!evt) return
       const ce = parseChannelEvent(channelId, evt)
-      if (!ce) return
+      if (!ce) {
+        console.warn('[sync] mesh.subscribe: parseChannelEvent failed', { channel: channelId.slice(0, 12), type: (evt as any)?.tags })
+        return
+      }
       // Snapshot handlers — handlers may unsubscribe inside their callback.
       for (const h of [...handlers]) {
         try { h(ce) } catch (err) { console.warn('[paired-channel] handler threw', ce.type, err) }

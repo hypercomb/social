@@ -20,7 +20,20 @@ export class BootstrapHistory {
     const preloader = get('@hypercomb.social/ScriptPreloader') as any
     const utility = get('@hypercomb.social/CompletionUtility') as CompletionUtility
 
-    const inputPath = window.location.pathname || '/'
+    // Decode any percent-encoded path characters so the address bar
+    // settles to the literal form the user typed. Chrome reports
+    // `window.location.pathname` for `/[dolphin]` as the encoded
+    // `/%5Bdolphin%5D` in some entry paths; without this decode the
+    // final replaceState below pins that ugly form into the URL bar
+    // even though the navigation parser handles both. Decode per
+    // segment so a stray `%2F` inside a segment doesn't get turned
+    // into a directory separator.
+    const rawPath = window.location.pathname || '/'
+    const inputPath = '/' + rawPath
+      .split('/')
+      .filter(Boolean)
+      .map(seg => { try { return decodeURIComponent(seg) } catch { return seg } })
+      .join('/')
     const inputSuffix = (window.location.search || '') + (window.location.hash || '')
 
     // use the same decode + normalize rules as navigation.cleanSegment

@@ -151,227 +151,656 @@ function iconSvg(name) {
 // ─── chrome stylesheet (one resource, every page links it) ──────────
 
 const CHROME_CSS = `
+/* ── Material 3 design tokens ─────────────────────────────────────────
+ * Brand-driven palette mapped onto Material's surface/primary/secondary
+ * roles. Surface tonal levels mirror Material's elevation hierarchy so
+ * cards and chips read as a coherent system. Late-bound friendly: every
+ * visual is CSS-driven, so the first paint is the final paint — no JS
+ * required for layout, color, or typography. */
 :root {
-  --ink: #0c1622;
-  --ink-deep: #07101b;
-  --paper: #e8e2d6;
-  --paper-strong: #f6f0e2;
-  --paper-muted: rgba(232, 226, 214, 0.62);
-  --paper-faint: rgba(232, 226, 214, 0.34);
-  --accent: #7eb6d6;
-  --accent-soft: rgba(126, 182, 214, 0.16);
-  --rule: rgba(232, 226, 214, 0.14);
-  --rule-strong: rgba(232, 226, 214, 0.32);
-  --serif: "Source Serif 4", "Iowan Old Style", Georgia, "Times New Roman", serif;
-  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-  --easing: cubic-bezier(.2, .7, .2, 1);
+  /* Surface system (LIGHT default — per /instructions/styles doctrine).
+   * Fresh sites default to light; dark is the explicit override below. */
+  --md-surface:           #f5ede0;
+  --md-surface-dim:       #e8dec6;
+  --md-surface-bright:    #fdf7ea;
+  --md-surface-c-lowest:  #ffffff;
+  --md-surface-c-low:     #efe7d4;
+  --md-surface-c:         #e9ddc4;
+  --md-surface-c-high:    #e0d3b6;
+  --md-surface-c-highest: #d7c9a6;
+  --md-on-surface:        #1a1f2c;
+  --md-on-surface-strong: #0a1020;
+  --md-on-surface-var:    #4f566a;
+  --md-on-surface-faint:  #8c8a82;
+
+  /* Primary / secondary (Material's accent roles) */
+  --md-primary:           #1f4376;
+  --md-on-primary:        #ffffff;
+  --md-primary-container: #cce0f2;
+  --md-on-primary-c:      #062340;
+
+  --md-secondary:         #794c1e;
+  --md-on-secondary:      #ffffff;
+  --md-secondary-c:       #f4dcc1;
+  --md-on-secondary-c:    #2a1a08;
+
+  --md-tertiary:          #5a3d68;
+  --md-tertiary-c:        #ead0f1;
+
+  /* Outline / divider */
+  --md-outline:           rgba(26, 31, 44, 0.24);
+  --md-outline-variant:   rgba(26, 31, 44, 0.10);
+
+  /* State layers (Material's hover/focus/pressed overlay opacities) */
+  --md-state-hover:    0.08;
+  --md-state-focus:    0.12;
+  --md-state-pressed:  0.16;
+
+  /* Shape tokens (Material 3 corner radius scale) */
+  --md-shape-xs:    4px;
+  --md-shape-s:     8px;
+  --md-shape-m:    12px;
+  --md-shape-l:    16px;
+  --md-shape-xl:   28px;
+  --md-shape-full: 999px;
+
+  /* Elevation (Material 3 box-shadow sets, tuned for light surfaces) */
+  --md-elev-0: none;
+  --md-elev-1: 0 1px 2px rgba(0,0,0,.06), 0 1px 3px 1px rgba(0,0,0,.04);
+  --md-elev-2: 0 1px 2px rgba(0,0,0,.06), 0 2px 6px 2px rgba(0,0,0,.04);
+  --md-elev-3: 0 4px 8px 3px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.10);
+  --md-elev-4: 0 6px 10px 4px rgba(0,0,0,.06), 0 2px 3px rgba(0,0,0,.10);
+
+  /* Typography — serif for editorial, sans for UI/chips */
+  --md-font-display: "Source Serif 4", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --md-font-body:    "Source Serif 4", "Iowan Old Style", Georgia, serif;
+  --md-font-ui:      Inter, "Segoe UI Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Motion */
+  --md-easing-emphasized: cubic-bezier(.2, 0, 0, 1);
+  --md-easing-standard:   cubic-bezier(.2, 0, .2, 1);
+  --md-dur-short:    150ms;
+  --md-dur-medium:   250ms;
+  --md-dur-long:     400ms;
 }
-[data-theme="light"] {
-  --ink: #f5ede0;
-  --ink-deep: #ece2cf;
-  --paper: #1a1f2c;
-  --paper-strong: #0a1020;
-  --paper-muted: rgba(26, 31, 44, 0.62);
-  --paper-faint: rgba(26, 31, 44, 0.36);
-  --accent: #1f4376;
-  --accent-soft: rgba(31, 67, 118, 0.10);
-  --rule: rgba(26, 31, 44, 0.16);
-  --rule-strong: rgba(26, 31, 44, 0.34);
+
+[data-theme="dark"] {
+  --md-surface:           #0c1622;
+  --md-surface-dim:       #07101b;
+  --md-surface-bright:    #19283a;
+  --md-surface-c-lowest:  #050b13;
+  --md-surface-c-low:     #0e1b29;
+  --md-surface-c:         #142233;
+  --md-surface-c-high:    #1b2c41;
+  --md-surface-c-highest: #233650;
+  --md-on-surface:        #e8e2d6;
+  --md-on-surface-strong: #f6f0e2;
+  --md-on-surface-var:    #b6a99a;
+  --md-on-surface-faint:  #7a7060;
+
+  --md-primary:           #7eb6d6;
+  --md-on-primary:        #06121c;
+  --md-primary-container: #1f4f76;
+  --md-on-primary-c:      #c8e1f0;
+
+  --md-secondary:         #d3a47a;
+  --md-on-secondary:      #2a1a08;
+  --md-secondary-c:       #5a3a18;
+  --md-on-secondary-c:    #f3d8b6;
+
+  --md-tertiary:          #b297c2;
+  --md-tertiary-c:        #4a3a55;
+
+  --md-outline:           rgba(232, 226, 214, 0.20);
+  --md-outline-variant:   rgba(232, 226, 214, 0.10);
+
+  --md-elev-1: 0 1px 2px rgba(0,0,0,.30), 0 1px 3px 1px rgba(0,0,0,.15);
+  --md-elev-2: 0 1px 2px rgba(0,0,0,.30), 0 2px 6px 2px rgba(0,0,0,.15);
+  --md-elev-3: 0 4px 8px 3px rgba(0,0,0,.15), 0 1px 3px rgba(0,0,0,.30);
+  --md-elev-4: 0 6px 10px 4px rgba(0,0,0,.15), 0 2px 3px rgba(0,0,0,.30);
 }
-@media (prefers-color-scheme: light) {
+
+@media (prefers-color-scheme: dark) {
   :root:not([data-theme]) {
-    --ink: #f5ede0; --ink-deep: #ece2cf;
-    --paper: #1a1f2c; --paper-strong: #0a1020;
-    --paper-muted: rgba(26, 31, 44, 0.62);
-    --paper-faint: rgba(26, 31, 44, 0.36);
-    --accent: #1f4376; --accent-soft: rgba(31, 67, 118, 0.10);
-    --rule: rgba(26, 31, 44, 0.16); --rule-strong: rgba(26, 31, 44, 0.34);
+    --md-surface:           #0c1622;
+    --md-surface-dim:       #07101b;
+    --md-surface-bright:    #19283a;
+    --md-surface-c-lowest:  #050b13;
+    --md-surface-c-low:     #0e1b29;
+    --md-surface-c:         #142233;
+    --md-surface-c-high:    #1b2c41;
+    --md-surface-c-highest: #233650;
+    --md-on-surface:        #e8e2d6;
+    --md-on-surface-strong: #f6f0e2;
+    --md-on-surface-var:    #b6a99a;
+    --md-on-surface-faint:  #7a7060;
+    --md-primary:           #7eb6d6;
+    --md-on-primary:        #06121c;
+    --md-primary-container: #1f4f76;
+    --md-on-primary-c:      #c8e1f0;
+    --md-secondary:         #d3a47a;
+    --md-on-secondary:      #2a1a08;
+    --md-secondary-c:       #5a3a18;
+    --md-on-secondary-c:    #f3d8b6;
+    --md-tertiary:          #b297c2;
+    --md-tertiary-c:        #4a3a55;
+    --md-outline:           rgba(232, 226, 214, 0.20);
+    --md-outline-variant:   rgba(232, 226, 214, 0.10);
   }
 }
+
+/* ── reset ─────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { min-height: 100%; }
-html {
-  background: var(--ink); color: var(--paper);
-  font-family: var(--serif);
-  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
-  transition: background-color .25s var(--easing), color .25s var(--easing);
+
+/* Lock the page to one viewport on wide screens so the layout never
+ * scrolls — per /instructions/layout doctrine. Each internal column
+ * scrolls independently if its content exceeds the available height.
+ * On narrow (mobile), the page flows naturally to keep content reachable. */
+@media (min-width: 880px) {
+  html, body {
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
 }
-/* Centering: site-view mounts pages inside a position:fixed host div,
- * which takes them out of the body flex flow. Center via main with
- * margin auto and put the padding on main so it works regardless of
- * where the page is mounted. */
+html {
+  background: var(--md-surface);
+  color: var(--md-on-surface);
+  font-family: var(--md-font-body);
+  -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  transition: background-color var(--md-dur-medium) var(--md-easing-standard),
+              color var(--md-dur-medium) var(--md-easing-standard);
+}
 body { margin: 0; }
+
+/* ── layout shell — balanced-in-threes, locked to one viewport ────────
+ * "Balanced in threes" reads as a rhythm not a rigid 3-column rule.
+ * The shell is a grid with three logical rows (bar / main / foot); the
+ * main row is itself either three columns (wide) or a single column
+ * (narrow). Internal regions scroll independently — the page never does. */
 main {
   width: 100%;
-  max-width: 38rem;
+  max-width: 86rem;
   margin: 0 auto;
-  padding: clamp(2.5rem, 6vw, 5rem) clamp(1rem, 4vw, 2rem) 5rem;
+  padding: clamp(0.6rem, 1.5vw, 1.1rem) clamp(0.8rem, 2vw, 1.4rem);
   display: grid;
-  gap: 2.6rem;
+  gap: clamp(0.5rem, 1.2vw, 1rem) clamp(0.8rem, 2vw, 1.6rem);
+  grid-template-columns: 1fr;
+  grid-template-rows: auto auto auto auto;
+  grid-template-areas:
+    "bar"
+    "content"
+    "right"
+    "foot";
+  align-content: start;
 }
 
-.fn-eyebrow {
-  display: flex; align-items: center; justify-content: space-between; gap: 1rem;
-  font-family: var(--sans); font-size: 0.74rem;
-  letter-spacing: 0.18em; text-transform: uppercase;
-  color: var(--paper-faint);
-}
-.fn-eyebrow nav { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
-.fn-eyebrow nav a { color: inherit; text-decoration: none; transition: color .15s var(--easing); }
-.fn-eyebrow nav a:hover { color: var(--paper); }
-.fn-eyebrow nav span.sep { opacity: 0.55; }
-.fn-eyebrow nav b { color: var(--paper-muted); font-weight: 600; }
+.md-top-bar     { grid-area: bar; }
+.md-content     { grid-area: content; display: grid; gap: 0.7rem; align-content: start; min-width: 0; }
+.md-aside-left  { display: none; }
+.md-aside-right { grid-area: right; display: grid; gap: 0.65rem; align-content: start; min-width: 0; }
+.md-foot        { grid-area: foot; }
 
-.theme-toggle {
+/* Wide breakpoint — single-viewport three-column layout. Lateral rail
+ * (siblings/ancestors), main content (current cell), explore rail
+ * (children + cross-links). Each column scrolls independently if its
+ * content overflows; the page itself never scrolls. */
+@media (min-width: 880px) {
+  main {
+    height: 100vh;
+    height: 100dvh;
+    grid-template-columns: 13rem minmax(0, 1fr) 17rem;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "bar  bar     bar"
+      "left content right"
+      "foot foot    foot";
+    align-content: stretch;
+  }
+  .md-content {
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .md-aside-left {
+    display: grid;
+    grid-area: left;
+    gap: 0.65rem;
+    align-content: start;
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+  }
+  .md-aside-right {
+    min-height: 0;
+    overflow-y: auto;
+  }
+}
+
+/* Subtle scrollbar styling on the internal scroll regions — overflow is
+ * the exception not the rule, but when it happens it should feel like
+ * the rest of the design, not a default chrome bar. */
+.md-content, .md-aside-left, .md-aside-right {
+  scrollbar-width: thin;
+  scrollbar-color: var(--md-outline-variant) transparent;
+}
+.md-content::-webkit-scrollbar,
+.md-aside-left::-webkit-scrollbar,
+.md-aside-right::-webkit-scrollbar { width: 6px; }
+.md-content::-webkit-scrollbar-thumb,
+.md-aside-left::-webkit-scrollbar-thumb,
+.md-aside-right::-webkit-scrollbar-thumb {
+  background: var(--md-outline-variant);
+  border-radius: var(--md-shape-full);
+}
+
+/* ── top app bar (Material small top app bar) ──────────────────────── */
+.md-top-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem;
+  padding: 0.25rem 0;
+}
+.md-top-bar nav {
+  display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap;
+  font-family: var(--md-font-ui);
+  font-size: 0.78rem;
+  letter-spacing: 0.10em;
+  color: var(--md-on-surface-var);
+}
+.md-top-bar nav a {
+  color: inherit; text-decoration: none;
+  padding: 0.25rem 0.55rem;
+  border-radius: var(--md-shape-full);
+  position: relative;
+  transition: background var(--md-dur-short) var(--md-easing-standard),
+              color var(--md-dur-short) var(--md-easing-standard);
+}
+.md-top-bar nav a:hover {
+  background: color-mix(in srgb, var(--md-primary) calc(var(--md-state-hover) * 100%), transparent);
+  color: var(--md-on-surface);
+}
+.md-top-bar nav span.sep { opacity: 0.45; }
+.md-top-bar nav b {
+  color: var(--md-on-surface); font-weight: 500;
+  padding: 0.25rem 0.55rem;
+  background: var(--md-surface-c);
+  border-radius: var(--md-shape-full);
+  letter-spacing: 0.04em;
+  text-transform: none;
+  font-size: 0.85rem;
+}
+
+/* Material icon button — round, state-layered. */
+.md-icon-btn {
   display: inline-grid; place-items: center;
-  width: 2rem; height: 2rem;
-  border: 1px solid var(--rule); border-radius: 999px;
-  background: transparent; color: var(--paper-muted); cursor: pointer;
-  transition: color .15s var(--easing), border-color .15s var(--easing), background .15s var(--easing);
+  width: 2.5rem; height: 2.5rem;
+  border: 0; padding: 0;
+  border-radius: var(--md-shape-full);
+  background: transparent;
+  color: var(--md-on-surface-var);
+  cursor: pointer;
+  position: relative;
+  transition: color var(--md-dur-short) var(--md-easing-standard),
+              background var(--md-dur-short) var(--md-easing-standard);
 }
-.theme-toggle:hover { color: var(--paper); border-color: var(--rule-strong); background: var(--accent-soft); }
-.theme-toggle svg { width: 1rem; height: 1rem; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.theme-toggle .sun { display: none; } .theme-toggle .moon { display: block; }
-[data-theme="light"] .theme-toggle .sun { display: block; }
-[data-theme="light"] .theme-toggle .moon { display: none; }
+.md-icon-btn:hover {
+  background: color-mix(in srgb, var(--md-primary) calc(var(--md-state-hover) * 100%), transparent);
+  color: var(--md-on-surface);
+}
+.md-icon-btn:focus-visible {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
+.md-icon-btn svg {
+  width: 1.25rem; height: 1.25rem;
+  fill: none; stroke: currentColor;
+  stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
+}
+.md-icon-btn .sun { display: none; } .md-icon-btn .moon { display: block; }
+[data-theme="light"] .md-icon-btn .sun { display: block; }
+[data-theme="light"] .md-icon-btn .moon { display: none; }
 
-/* Heading-icon shape (per /instructions/styles note #6):
- * h1.fn-title contains a .fn-title-icon span (inline SVG, 1em square)
- * and a .fn-title-text span. Flex wrapper, align-center, small gap.
- * Icon scales with the heading's font-size. Stroke-only line icons
- * keep visual weight light against the display type. */
-h1.fn-title {
-  display: flex; align-items: center; gap: 0.55em;
-  font-family: var(--serif); font-weight: 400;
-  font-size: clamp(1.75rem, 4.6vw, 2.85rem); line-height: 1.08;
-  letter-spacing: -0.01em; color: var(--paper-strong);
-  margin: -0.2rem 0 0;
+/* ── headline (Material 3 display scale, compacted for zero-scroll) ── */
+.md-headline {
+  display: flex; align-items: flex-start; gap: 0.5em;
+  font-family: var(--md-font-display); font-weight: 400;
+  font-size: clamp(1.55rem, 3.4vw, 2.3rem);
+  line-height: 1.08; letter-spacing: -0.012em;
+  color: var(--md-on-surface-strong);
+  margin: 0;
 }
-h1.fn-title .fn-title-icon {
-  flex-shrink: 0; width: 1em; height: 1em; color: var(--accent);
+.md-headline-icon {
+  flex-shrink: 0; width: 1em; height: 1em;
+  color: var(--md-primary);
+  margin-top: 0.05em;
 }
-h1.fn-title .fn-title-icon svg {
+.md-headline-icon svg {
   width: 100%; height: 100%; fill: none; stroke: currentColor;
   stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round;
 }
-h1.fn-title .fn-title-text { flex: 1; }
+.md-headline-text { flex: 1; }
 
-.fn-lede {
-  font-family: var(--serif);
-  font-size: clamp(1.1rem, 1.6vw, 1.22rem); line-height: 1.55;
-  color: var(--paper-muted); max-width: 36rem;
+/* ── lede / body-large ─────────────────────────────────────────────── */
+.md-lede {
+  font-family: var(--md-font-body);
+  font-size: clamp(1rem, 1.4vw, 1.12rem);
+  line-height: 1.5;
+  color: var(--md-on-surface-var);
+  max-width: 38rem;
+  margin: 0;
 }
 
-.fn-rule { height: 1px; background: var(--rule); border: 0; margin: 0; }
+/* ── prose body ────────────────────────────────────────────────────── */
+.md-prose {
+  display: grid; gap: 0.9rem;
+  font-size: 0.99rem; line-height: 1.55;
+  color: var(--md-on-surface);
+}
+.md-prose p { font-family: var(--md-font-body); }
+.md-prose a {
+  color: var(--md-on-surface-strong);
+  text-decoration: underline;
+  text-decoration-color: var(--md-primary);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.16em;
+  transition: text-decoration-color var(--md-dur-short) var(--md-easing-standard),
+              color var(--md-dur-short) var(--md-easing-standard);
+}
+.md-prose a:hover {
+  color: var(--md-primary);
+  text-decoration-color: var(--md-on-surface);
+}
 
-.fn-body { display: grid; gap: 1.4rem; font-size: 1.04rem; line-height: 1.7; color: var(--paper); }
-.fn-body h2 {
+/* Section card — promoted H2 subsections when a leaf has multiple
+ * "Heading: text" notes. Material 3 filled-tonal surface. */
+.md-section {
+  display: grid; gap: 0.55rem;
+  padding: 1.15rem 1.3rem 1.25rem;
+  background: var(--md-surface-c-low);
+  border-radius: var(--md-shape-l);
+  border: 1px solid var(--md-outline-variant);
+  transition: background var(--md-dur-short) var(--md-easing-standard),
+              border-color var(--md-dur-short) var(--md-easing-standard);
+}
+.md-section:hover {
+  background: var(--md-surface-c);
+  border-color: var(--md-outline);
+}
+.md-section h2 {
   display: flex; align-items: center; gap: 0.55em;
-  font-family: var(--serif); font-weight: 500;
-  font-size: 1.3rem; line-height: 1.25; letter-spacing: -0.005em;
-  color: var(--paper-strong); margin-top: 0.6rem;
+  font-family: var(--md-font-display); font-weight: 500;
+  font-size: 1.2rem; line-height: 1.25;
+  letter-spacing: -0.005em;
+  color: var(--md-on-surface-strong);
+  margin: 0;
 }
-.fn-body h2 .fn-title-icon {
-  flex-shrink: 0; width: 1em; height: 1em; color: var(--accent);
+.md-section h2 .md-section-icon {
+  flex-shrink: 0; width: 1em; height: 1em; color: var(--md-primary);
 }
-.fn-body h2 .fn-title-icon svg {
+.md-section h2 .md-section-icon svg {
   width: 100%; height: 100%; fill: none; stroke: currentColor;
   stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
 }
-.fn-body h2 .fn-title-text { flex: 1; }
-.fn-body p { font-family: var(--serif); }
-.fn-body a {
-  color: var(--paper-strong); text-decoration: underline;
-  text-decoration-color: var(--accent); text-decoration-thickness: 1.5px;
-  text-underline-offset: 0.16em;
-  transition: text-decoration-color .15s var(--easing), color .15s var(--easing);
+.md-section p {
+  font-family: var(--md-font-body); font-size: 1.04rem; line-height: 1.65;
+  color: var(--md-on-surface);
 }
-.fn-body a:hover { color: var(--accent); text-decoration-color: var(--paper); }
 
-/* Q&A section — inline questions on cell pages. Visible directly on
- * the page the dashboard links to, so the user sees what's being
- * asked without having to open the editor. */
-.fn-qa {
-  display: grid;
-  gap: 1rem;
-  padding: 1.1rem 1.3rem;
-  background: var(--accent-soft);
-  border: 1px solid var(--rule);
-  border-radius: 12px;
+/* ── divider (Material 3 divider) ──────────────────────────────────── */
+.md-divider {
+  height: 1px;
+  background: var(--md-outline-variant);
+  border: 0; margin: 0;
 }
-.fn-qa h2 {
-  margin: 0 0 0.25rem;
-  font-family: var(--serif); font-weight: 500;
-  font-size: 1.05rem; letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--paper-muted);
+
+/* ── Q&A — Material outlined surface with question chips ──────────── */
+.md-qa {
+  display: grid; gap: 0.95rem;
+  padding: 1.2rem 1.35rem 1.3rem;
+  background: var(--md-surface-c-low);
+  border: 1px solid var(--md-outline);
+  border-radius: var(--md-shape-l);
+  position: relative;
+}
+.md-qa-head {
   display: flex; align-items: center; gap: 0.55em;
+  font-family: var(--md-font-ui); font-weight: 500;
+  font-size: 0.78rem; letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--md-on-surface-var);
 }
-.fn-qa h2 .fn-title-icon { flex-shrink: 0; width: 1em; height: 1em; color: var(--accent); }
-.fn-qa h2 .fn-title-icon svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-.fn-qa-item {
-  display: grid; gap: 0.45rem;
-  padding-bottom: 0.85rem;
-  border-bottom: 1px solid var(--rule);
+.md-qa-head .md-chip {
+  margin-left: auto;
 }
-.fn-qa-item:last-child { padding-bottom: 0; border-bottom: 0; }
-.fn-qa-question {
-  font-family: var(--serif); margin: 0;
-  color: var(--paper-strong); font-size: 1.02rem; line-height: 1.55;
+.md-qa-item {
+  display: grid; gap: 0.5rem;
+  padding: 0.75rem 0 0.85rem;
+  border-bottom: 1px solid var(--md-outline-variant);
 }
-.fn-qa-answer {
-  margin: 0; padding: 0.4rem 0 0.4rem 0.85rem;
-  border-left: 2px solid var(--accent);
-  color: var(--paper-muted); font-size: 0.95rem; line-height: 1.5;
+.md-qa-item:first-of-type { padding-top: 0; }
+.md-qa-item:last-child { padding-bottom: 0; border-bottom: 0; }
+.md-qa-q {
+  display: flex; gap: 0.65rem; align-items: flex-start;
+  font-family: var(--md-font-body);
+  color: var(--md-on-surface-strong);
+  font-size: 1.04rem; line-height: 1.55;
+  margin: 0;
 }
-.fn-qa-open .fn-qa-question::before {
-  content: '?'; display: inline-block; width: 1.1em;
-  text-align: center; margin-right: 0.4em;
-  color: var(--accent); font-weight: 600;
+.md-qa-q::before {
+  content: 'help';
+  font-family: 'Material Symbols Outlined', system-ui;
+  font-size: 1.2rem;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  color: var(--md-primary);
+  flex-shrink: 0;
+  line-height: 1.35;
 }
-.fn-qa-foot {
-  font-family: var(--sans); font-size: 0.74rem;
-  letter-spacing: 0.16em; text-transform: uppercase;
-  color: var(--paper-faint);
-  margin-top: 0.3rem;
+.md-qa-a {
+  font-family: var(--md-font-body);
+  margin: 0; padding: 0.45rem 0 0.45rem 0.95rem;
+  border-left: 3px solid var(--md-primary);
+  color: var(--md-on-surface-var);
+  font-size: 0.97rem; line-height: 1.55;
+  background: color-mix(in srgb, var(--md-primary) 4%, transparent);
+  border-radius: 0 var(--md-shape-s) var(--md-shape-s) 0;
 }
-
-.fn-index {
-  display: grid; gap: 1.1rem; list-style: none;
-  counter-reset: fn-children; padding: 0; margin: 0;
-}
-.fn-index > li {
-  counter-increment: fn-children; position: relative; padding-left: 2.7rem;
-}
-.fn-index > li::before {
-  content: counter(fn-children, decimal-leading-zero);
-  position: absolute; left: 0; top: 0.1em;
-  font-family: var(--sans); font-size: 0.74rem; letter-spacing: 0.18em;
-  color: var(--paper-faint);
-}
-.fn-index a.fn-index-link {
-  display: grid; gap: 0.35rem; color: inherit; text-decoration: none;
-  transition: transform .15s var(--easing);
-}
-.fn-index a.fn-index-link:hover { transform: translateX(2px); }
-.fn-index .fn-index-name {
-  font-family: var(--serif); font-size: 1.18rem; font-weight: 500;
-  letter-spacing: -0.005em; color: var(--paper-strong);
-  text-decoration: underline; text-decoration-color: transparent;
-  text-decoration-thickness: 1.5px; text-underline-offset: 0.18em;
-  transition: text-decoration-color .15s var(--easing);
-}
-.fn-index a.fn-index-link:hover .fn-index-name { text-decoration-color: var(--accent); }
-.fn-index .fn-index-blurb {
-  font-family: var(--serif); font-size: 0.99rem; line-height: 1.5;
-  color: var(--paper-muted);
+.md-qa-foot {
+  display: inline-flex; align-items: center; gap: 0.4em;
+  font-family: var(--md-font-ui); font-size: 0.74rem;
+  letter-spacing: 0.06em;
+  color: var(--md-on-surface-faint);
+  margin-top: 0.1rem;
+  padding-left: 1.85rem;
 }
 
-footer.fn-foot {
-  font-family: var(--sans); font-size: 0.74rem;
-  letter-spacing: 0.16em; text-transform: uppercase;
-  color: var(--paper-faint); text-align: center;
-  margin-top: 1rem;
+/* Material 3 assist chip */
+.md-chip {
+  display: inline-flex; align-items: center; gap: 0.4em;
+  height: 1.75rem;
+  padding: 0 0.75rem;
+  border-radius: var(--md-shape-s);
+  background: var(--md-surface-c-high);
+  border: 1px solid var(--md-outline-variant);
+  font-family: var(--md-font-ui); font-size: 0.78rem; font-weight: 500;
+  color: var(--md-on-surface);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+.md-chip-primary {
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-c);
+  border-color: transparent;
+}
+
+/* ── lateral / cross-link rails (left + right column content) ──────── */
+.md-rail {
+  display: grid; gap: 0.4rem;
+  padding: 0.85rem 0.9rem;
+  background: var(--md-surface-c-low);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--md-shape-l);
+}
+.md-rail-head {
+  font-family: var(--md-font-ui);
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--md-on-surface-faint);
+  margin-bottom: 0.15rem;
+}
+.md-rail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.25rem;
+}
+.md-rail-list a {
+  display: block;
+  padding: 0.35rem 0.55rem;
+  border-radius: var(--md-shape-s);
+  color: var(--md-on-surface);
+  text-decoration: none;
+  font-family: var(--md-font-body);
+  font-size: 0.92rem;
+  line-height: 1.3;
+  transition:
+    background var(--md-dur-short) var(--md-easing-standard),
+    color var(--md-dur-short) var(--md-easing-standard);
+}
+.md-rail-list a:hover {
+  background: color-mix(in srgb, var(--md-primary) calc(var(--md-state-hover) * 100%), transparent);
+  color: var(--md-on-surface-strong);
+}
+.md-rail-list a.current {
+  background: var(--md-primary-container);
+  color: var(--md-on-primary-c);
+}
+
+/* ── tile-card grid — the "tile sections" the dashboard / index use ──
+ * Material 3 elevated card with hover lift + state-layer overlay. */
+.md-tile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+  gap: 0.55rem;
+  list-style: none;
+  counter-reset: md-tiles;
+  padding: 0; margin: 0;
+}
+.md-tile {
+  counter-increment: md-tiles;
+  position: relative;
+  border-radius: var(--md-shape-l);
+  overflow: hidden;
+  background: var(--md-surface-c);
+  border: 1px solid var(--md-outline-variant);
+  box-shadow: var(--md-elev-0);
+  transition:
+    transform var(--md-dur-medium) var(--md-easing-emphasized),
+    box-shadow var(--md-dur-medium) var(--md-easing-emphasized),
+    background var(--md-dur-short) var(--md-easing-standard),
+    border-color var(--md-dur-short) var(--md-easing-standard);
+  /* Material 3 state-layer overlay (pseudo) */
+}
+.md-tile::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: var(--md-primary);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--md-dur-short) var(--md-easing-standard);
+}
+.md-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--md-elev-2);
+  background: var(--md-surface-c-high);
+  border-color: var(--md-outline);
+}
+.md-tile:hover::before { opacity: var(--md-state-hover); }
+.md-tile:focus-within {
+  outline: 2px solid var(--md-primary);
+  outline-offset: 2px;
+}
+.md-tile-link {
+  display: grid; gap: 0.35rem;
+  padding: 0.7rem 0.85rem 0.8rem;
+  color: inherit; text-decoration: none;
+  height: 100%;
+  position: relative; z-index: 1;
+}
+.md-tile-number {
+  font-family: var(--md-font-ui);
+  font-size: 0.68rem; letter-spacing: 0.16em;
+  color: var(--md-on-surface-faint);
+  text-transform: uppercase;
+  display: flex; align-items: center; gap: 0.4em;
+}
+.md-tile-number::before {
+  content: counter(md-tiles, decimal-leading-zero);
+}
+.md-tile-icon {
+  width: 1.25rem; height: 1.25rem;
+  color: var(--md-primary);
+  display: inline-flex;
+  margin-left: auto;
+}
+.md-tile-icon svg {
+  width: 100%; height: 100%;
+  fill: none; stroke: currentColor;
+  stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round;
+}
+.md-tile-name {
+  font-family: var(--md-font-display);
+  font-size: 1.02rem; font-weight: 500;
+  line-height: 1.2; letter-spacing: -0.005em;
+  color: var(--md-on-surface-strong);
+}
+.md-tile-blurb {
+  font-family: var(--md-font-body);
+  font-size: 0.85rem; line-height: 1.4;
+  color: var(--md-on-surface-var);
+}
+.md-tile-trail {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-top: auto;
+  padding-top: 0.4rem;
+  font-family: var(--md-font-ui); font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: var(--md-on-surface-faint);
+}
+.md-tile-trail .md-arrow {
+  width: 1.1rem; height: 1.1rem;
+  color: var(--md-on-surface-var);
+  transition: transform var(--md-dur-medium) var(--md-easing-emphasized),
+              color var(--md-dur-short) var(--md-easing-standard);
+}
+.md-tile-trail .md-arrow svg {
+  width: 100%; height: 100%; fill: none; stroke: currentColor;
+  stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
+}
+.md-tile:hover .md-tile-trail .md-arrow {
+  transform: translateX(4px);
+  color: var(--md-primary);
+}
+
+/* ── footer ────────────────────────────────────────────────────────── */
+footer.md-foot {
+  font-family: var(--md-font-ui);
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--md-on-surface-faint);
+  text-align: center;
+  margin-top: 0.5rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--md-outline-variant);
+}
+
+/* ── reduced motion ────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+  .md-tile:hover { transform: none; }
+  .md-tile:hover .md-tile-trail .md-arrow { transform: none; }
 }
 `.trim()
 
@@ -437,41 +866,86 @@ function breadcrumbHtml(segments) {
 function renderQaSection(qaItems) {
   if (!qaItems || qaItems.length === 0) return ''
   const items = qaItems.map(({ qId, question, answer }) => `
-    <div id="q-${escapeHtml(qId)}" class="fn-qa-item ${answer ? 'fn-qa-answered' : 'fn-qa-open'}">
-      <p class="fn-qa-question">${escapeHtml(question)}</p>
+    <div id="q-${escapeHtml(qId)}" class="md-qa-item ${answer ? 'md-qa-answered' : 'md-qa-open'}">
+      <p class="md-qa-q">${escapeHtml(question)}</p>
       ${answer
-        ? `<p class="fn-qa-answer">${escapeHtml(answer)}</p>`
-        : `<p class="fn-qa-foot">Open in editor to answer</p>`}
+        ? `<p class="md-qa-a">${escapeHtml(answer)}</p>`
+        : `<span class="md-qa-foot">Open in editor to answer</span>`}
     </div>`).join('')
   const openCount = qaItems.filter(i => !i.answer).length
-  const heading = openCount > 0
-    ? `${openCount} open question${openCount === 1 ? '' : 's'}`
-    : `${qaItems.length} question${qaItems.length === 1 ? '' : 's'}`
+  const total = qaItems.length
+  const headLabel = openCount > 0
+    ? `${openCount} open ${openCount === 1 ? 'question' : 'questions'}`
+    : `${total} ${total === 1 ? 'question' : 'questions'}`
+  const chipClass = openCount > 0 ? 'md-chip md-chip-primary' : 'md-chip'
   return `
-    <section class="fn-qa" id="qa">
-      <h2><span class="fn-title-icon">${iconSvg('leaf')}</span><span class="fn-title-text">${heading}</span></h2>
+    <section class="md-qa" id="qa" aria-labelledby="qa-head">
+      <div class="md-qa-head" id="qa-head">
+        <span>Questions</span>
+        <span class="${chipClass}">${escapeHtml(headLabel)}</span>
+      </div>
       ${items}
     </section>`
 }
 
-function shellHtml({ chromeSig, segments, title, titleIconName, lede, body, qaItems, indexHeadingTitle, indexHeadingIconName, indexLinks }) {
+// Material-style trailing arrow (chevron-right) for tile cards.
+const TILE_ARROW_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>'
+
+function renderTileGrid(indexLinks) {
+  if (!indexLinks || indexLinks.length === 0) return ''
+  const tiles = indexLinks.map(({ name, href, blurb, iconName }) => `
+    <li class="md-tile">
+      <a class="md-tile-link" href="${escapeHtml(href)}">
+        <div class="md-tile-number">
+          <span aria-hidden="true"></span>
+          ${iconName ? `<span class="md-tile-icon">${iconSvg(iconName)}</span>` : ''}
+        </div>
+        <div class="md-tile-name">${escapeHtml(name)}</div>
+        ${blurb ? `<div class="md-tile-blurb">${escapeHtml(blurb)}</div>` : ''}
+        <div class="md-tile-trail">
+          <span>Open</span>
+          <span class="md-arrow">${TILE_ARROW_SVG}</span>
+        </div>
+      </a>
+    </li>`).join('')
+  return `<ul class="md-tile-grid" role="list">${tiles}</ul>`
+}
+
+function renderRail(headLabel, items, currentName) {
+  if (!items || items.length === 0) return ''
+  const listItems = items.map(({ name, href }) => {
+    const isCurrent = currentName && name === currentName
+    return `<li><a href="${escapeHtml(href)}"${isCurrent ? ' class="current" aria-current="page"' : ''}>${escapeHtml(name)}</a></li>`
+  }).join('')
+  return `<nav class="md-rail" aria-label="${escapeHtml(headLabel)}">
+    <div class="md-rail-head">${escapeHtml(headLabel)}</div>
+    <ul class="md-rail-list">${listItems}</ul>
+  </nav>`
+}
+
+function shellHtml({
+  chromeSig, segments, title, titleIconName, lede, body,
+  qaItems, indexLinks,
+  leftRails = [],   // [{ heading, items: [{ name, href }], currentName? }, ...]
+  rightRails = [],  // additional rails to render in the right column (e.g. cross-links)
+}) {
   const breadcrumb = breadcrumbHtml(segments)
   const qaHtml = renderQaSection(qaItems)
-  const indexHtml = indexLinks && indexLinks.length
-    ? `<ol class="fn-index">${indexLinks.map(({ name, href, blurb }) => `
-      <li><a class="fn-index-link" href="${escapeHtml(href)}">
-        <span class="fn-index-name">${escapeHtml(name)}</span>
-        ${blurb ? `<span class="fn-index-blurb">${escapeHtml(blurb)}</span>` : ''}
-      </a></li>`).join('')}</ol>`
-    : ''
+  const tilesHtml = renderTileGrid(indexLinks)
 
-  const indexHeading = indexLinks && indexLinks.length && indexHeadingTitle
-    ? `<h2><span class="fn-title-icon">${iconSvg(indexHeadingIconName ?? 'leaf')}</span><span class="fn-title-text">${escapeHtml(indexHeadingTitle)}</span></h2>`
-    : ''
+  const leftHtml = leftRails
+    .map(r => renderRail(r.heading, r.items, r.currentName))
+    .filter(Boolean)
+    .join('')
+
+  const extraRightHtml = rightRails
+    .map(r => renderRail(r.heading, r.items, r.currentName))
+    .filter(Boolean)
+    .join('')
 
   const footerLabel = segments.length
-    ? '— ' + segments.map(s => s.replace(/-/g, ' ')).join(' / ') + ' —'
-    : '— relational intelligence —'
+    ? segments.map(s => s.replace(/-/g, ' ')).join(' · ')
+    : 'relational intelligence'
 
   return `<!doctype html>
 <html lang="en">
@@ -479,34 +953,42 @@ function shellHtml({ chromeSig, segments, title, titleIconName, lede, body, qaIt
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escapeHtml(title)} — Relational Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,500;8..60,600&family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block">
 <script>${PAINT_SCRIPT}</script>
 <link rel="stylesheet" href="resource:${chromeSig}/chrome.css">
 </head>
 <body>
 <main>
-  <header class="fn-eyebrow">
+  <header class="md-top-bar">
     <nav>${breadcrumb}</nav>
-    <button id="themeToggle" type="button" class="theme-toggle" aria-label="toggle theme">
+    <button id="themeToggle" type="button" class="md-icon-btn" aria-label="toggle theme">
       <svg class="moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.7 14.5a8 8 0 0 1-11.2-11.2 8 8 0 1 0 11.2 11.2z"/></svg>
       <svg class="sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.6"/><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M5.6 18.4l1.6-1.6M16.8 7.2l1.6-1.6"/></svg>
     </button>
   </header>
 
-  <h1 class="fn-title">
-    <span class="fn-title-icon">${iconSvg(titleIconName ?? 'leaf')}</span>
-    <span class="fn-title-text">${escapeHtml(title)}</span>
-  </h1>
-  ${lede ? `<p class="fn-lede">${escapeHtml(lede)}</p>` : ''}
+  <aside class="md-aside-left">${leftHtml}</aside>
 
-  <hr class="fn-rule">
+  <section class="md-content">
+    <h1 class="md-headline">
+      <span class="md-headline-icon">${iconSvg(titleIconName ?? 'leaf')}</span>
+      <span class="md-headline-text">${escapeHtml(title)}</span>
+    </h1>
+    ${lede ? `<p class="md-lede">${escapeHtml(lede)}</p>` : ''}
+    <hr class="md-divider">
+    <div class="md-prose">${body}</div>
+    ${qaHtml}
+  </section>
 
-  <div class="fn-body">${body}${indexHeading ? '<hr class="fn-rule">' + indexHeading : ''}</div>
+  <aside class="md-aside-right">
+    ${tilesHtml}
+    ${extraRightHtml}
+  </aside>
 
-  ${qaHtml}
-
-  ${indexHtml}
-
-  <footer class="fn-foot">${escapeHtml(footerLabel)}</footer>
+  <footer class="md-foot">${escapeHtml(footerLabel)}</footer>
 </main>
 <script>${TOGGLE_SCRIPT}</script>
 </body>
@@ -570,12 +1052,31 @@ function renderRoot(tree, chromeSig) {
     name: BRANCH_META[b.name].title.replace(/^The /, ''),
     href: `${b.name}/`,
     blurb: BRANCH_META[b.name].summary,
+    iconName: b.name,
   }))
 
+  // Compact body — single paragraph for zero-scroll. The lede already
+  // sets up the "field, not a feeling" angle; the body adds one beat.
   const body = `
-    <p>Relational Intelligence isn’t a personality trait or a soft skill. It’s a learnable capacity that shows up in how individuals, couples, professionals, organizations, and communities meet each other.</p>
-    <p>This is the field — its model, its practice, its evidence, and the people building it together. Each branch below is its own self-contained area of the work; together they hold the whole.</p>
+    <p>This is the field — its model, its practice, its evidence, and the people building it together. Each branch below is its own self-contained area; together they hold the whole.</p>
   `
+
+  // Left rail at root surfaces the same branches as a flat list so the
+  // user can hop sideways without going through the tile grid. Mirrors
+  // the right-column tile cards but in compact-link form.
+  const leftRails = [
+    {
+      heading: 'Branches',
+      items: branches.map(b => ({
+        name: BRANCH_META[b.name].title.replace(/^The /, ''),
+        href: `${b.name}/`,
+      })),
+    },
+    {
+      heading: 'Tools',
+      items: [{ name: 'Dashboard', href: '/dashboard/' }],
+    },
+  ]
 
   return shellHtml({
     chromeSig,
@@ -585,23 +1086,23 @@ function renderRoot(tree, chromeSig) {
     lede: 'A field, not a feeling — the model, the practice, the evidence, and the people building it together.',
     body,
     qaItems: parseQaSlot(tree),
-    indexHeadingTitle: 'The eight branches',
-    indexHeadingIconName: 'leaf',
     indexLinks,
+    leftRails,
   })
 }
 
-function renderBranch(branch, chromeSig) {
+function renderBranch(branch, chromeSig, tree) {
   const meta = BRANCH_META[branch.name]
   const segments = ['dolphin', branch.name]
   const notes = uniqueNotes(branch.notes)
 
+  // Compact body — top 2 notes for zero-scroll, the lede already sets
+  // up the section's premise.
   let body
   if (notes.length === 0) {
     body = `<p>This area is being scoped. The shape is named; the depth is still being written.</p>`
   } else {
-    const paragraphs = notes.slice(0, 3).map(n => `<p>${escapeHtml(n)}</p>`).join('')
-    body = paragraphs
+    body = notes.slice(0, 2).map(n => `<p>${escapeHtml(n)}</p>`).join('')
   }
 
   const indexLinks = (branch.children || []).map(child => {
@@ -610,9 +1111,27 @@ function renderBranch(branch, chromeSig) {
     return {
       name: titleCase(child.name),
       href: `${child.name}/`,
-      blurb: blurb.length > 110 ? blurb.slice(0, 107) + '…' : blurb,
+      blurb: blurb.length > 90 ? blurb.slice(0, 87) + '…' : blurb,
+      iconName: 'leaf',
     }
   })
+
+  // Left rail = lateral nav across all 8 branches with current one
+  // highlighted. Gives the reader a clear "where am I" + 1-click hops
+  // to siblings, per /instructions/layout cross-linking doctrine.
+  const allBranches = (tree?.children || []).filter(c => BRANCH_META[c.name])
+  allBranches.sort((a, b) => BRANCH_ORDER.indexOf(a.name) - BRANCH_ORDER.indexOf(b.name))
+  const branchTitle = meta.title.replace(/^The /, '')
+  const leftRails = [
+    {
+      heading: 'Branches',
+      items: allBranches.map(b => ({
+        name: BRANCH_META[b.name].title.replace(/^The /, ''),
+        href: b.name === branch.name ? './' : `../${b.name}/`,
+      })),
+      currentName: branchTitle,
+    },
+  ]
 
   return shellHtml({
     chromeSig,
@@ -622,18 +1141,20 @@ function renderBranch(branch, chromeSig) {
     lede: meta.lede,
     body,
     qaItems: parseQaSlot(branch),
-    indexHeadingTitle: branch.children?.length ? 'In this branch' : '',
-    indexHeadingIconName: 'leaf',
     indexLinks,
+    leftRails,
   })
 }
 
-function renderLeaf(leaf, branchName, chromeSig) {
+function renderLeaf(leaf, branchName, chromeSig, branchNode, tree) {
   const segments = ['dolphin', branchName, leaf.name]
   const notes = uniqueNotes(leaf.notes)
   const title = titleCase(leaf.name)
   const branchTitle = BRANCH_META[branchName]?.title?.replace(/^The /, '') ?? titleCase(branchName)
 
+  // Promote "Heading: text" notes into Material 3 section cards. Bare
+  // paragraphs render inline; structured notes become discrete cards
+  // so the leaf reads as a tile composition rather than a wall of text.
   let body
   if (notes.length === 0) {
     body = `<p>This area is being scoped.</p>`
@@ -643,21 +1164,55 @@ function renderLeaf(leaf, branchName, chromeSig) {
     body = notes.map(n => {
       const m = /^([^:]{2,40}):\s*(.+)$/.exec(n)
       if (m) {
-        return `<div><h2>${escapeHtml(m[1].trim())}</h2><p>${escapeHtml(m[2].trim())}</p></div>`
+        return `<section class="md-section">
+          <h2><span class="md-section-icon">${iconSvg(branchName)}</span><span>${escapeHtml(m[1].trim())}</span></h2>
+          <p>${escapeHtml(m[2].trim())}</p>
+        </section>`
       }
       return `<p>${escapeHtml(n)}</p>`
     }).join('')
   }
 
+  // Left rail = sibling leaves under the same branch. Current leaf is
+  // highlighted. Lateral hops within the section without going up to
+  // the branch page first.
+  const siblings = (branchNode?.children || []).map(s => ({
+    name: titleCase(s.name),
+    href: s.name === leaf.name ? './' : `../${s.name}/`,
+  }))
+  const leftRails = [
+    {
+      heading: branchTitle,
+      items: siblings,
+      currentName: title,
+    },
+  ]
+
+  // Leaves have no children, so the right column's tile grid would be
+  // empty. Surface cross-links to other branches' parallel sections
+  // instead — gives the reader a way to jump laterally across the tree
+  // without going back to root, per /instructions/layout cross-linking.
+  const allBranches = (tree?.children || []).filter(c => BRANCH_META[c.name] && c.name !== branchName)
+  allBranches.sort((a, b) => BRANCH_ORDER.indexOf(a.name) - BRANCH_ORDER.indexOf(b.name))
+  const crossLinks = allBranches.slice(0, 6).map(b => ({
+    name: BRANCH_META[b.name].title.replace(/^The /, ''),
+    href: `../../${b.name}/`,
+  }))
+  const rightRails = crossLinks.length > 0
+    ? [{ heading: 'Other branches', items: crossLinks }]
+    : []
+
   return shellHtml({
     chromeSig,
     segments,
     title,
-    titleIconName: 'leaf',
+    titleIconName: branchName,
     lede: `Part of ${branchTitle}.`,
     body,
     qaItems: parseQaSlot(leaf),
     indexLinks: [],
+    leftRails,
+    rightRails,
   })
 }
 
@@ -667,6 +1222,7 @@ function renderDashboard({ chromeSig, qaItems }) {
     name: '/' + path.join('/'),
     href: '/' + path.join('/') + '/',
     blurb: question.length > 130 ? question.slice(0, 127) + '…' : question,
+    iconName: BRANCH_META[path[1]] ? path[1] : 'leaf',
   }))
 
   const body = qaItems.length === 0
@@ -769,14 +1325,14 @@ async function pinStyleDecisions() {
   console.log('4) Stamping branches...')
   for (const branch of tree.data.children || []) {
     if (!BRANCH_META[branch.name]) continue
-    await mintAndStamp(['dolphin', branch.name], renderBranch(branch, chromeSig))
+    await mintAndStamp(['dolphin', branch.name], renderBranch(branch, chromeSig, tree.data))
   }
 
   console.log('5) Stamping leaves...')
   for (const branch of tree.data.children || []) {
     if (!BRANCH_META[branch.name]) continue
     for (const leaf of branch.children || []) {
-      await mintAndStamp(['dolphin', branch.name, leaf.name], renderLeaf(leaf, branch.name, chromeSig))
+      await mintAndStamp(['dolphin', branch.name, leaf.name], renderLeaf(leaf, branch.name, chromeSig, branch, tree.data))
     }
   }
 
