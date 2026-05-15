@@ -11,6 +11,7 @@
 import { EffectBus, SignatureStore } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared/core'
 import type { SentinelBridge } from './sentinel-bridge'
+import { writeOpfsFile, terminateOpfsWorker } from './opfs-write.js'
 
 export type BootStatus =
   | { kind: 'cached' }
@@ -201,10 +202,7 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     await Promise.all(sigs.map(async (sig) => {
       const bytes = await fetchBytes(urlFor(sig))
       if (!bytes) return
-      const handle = await dir.getFileHandle(nameFor(sig), { create: true })
-      const writable = await handle.createWritable()
-      await writable.write(bytes)
-      await writable.close()
+      await writeOpfsFile(dir, nameFor(sig), bytes)
       written++
     }))
     return written
@@ -232,6 +230,7 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   if (bundled.beeDeps) (globalThis as any).__hypercombBeeDeps = bundled.beeDeps
   sigStore.trustAll([...bundled.bees, ...bundled.dependencies, ...bundled.layers])
   localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
+  terminateOpfsWorker()
   console.log(`[ensure-install] bundled install complete: ${bundled.packageSig.slice(0, 12)} (${beeCount}/${bundled.bees.length} bees, ${depCount}/${bundled.dependencies.length} deps, ${layerCount}/${bundled.layers.length} layers)`)
 }
 
@@ -328,6 +327,7 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
     localStorage.setItem(INSTALLED_FLAG_KEY, 'true')
   }
 
+  terminateOpfsWorker()
   console.log(`[ensure-install] resync complete: ${syncSig.slice(0, 12)} (${enabledBees.length} bees, ${enabledDeps.length} deps, ${enabledLayers.length} layers)`)
 }
 
@@ -360,10 +360,7 @@ const tryParseManifest = (json: string): InstallManifest | null => {
 }
 
 const writeBytes = async (dir: FileSystemDirectoryHandle, name: string, bytes: ArrayBuffer): Promise<void> => {
-  const handle = await dir.getFileHandle(name, { create: true })
-  const writable = await handle.createWritable()
-  await writable.write(bytes)
-  await writable.close()
+  await writeOpfsFile(dir, name, bytes)
 }
 
 const seedCacheEntry = async (path: string, bytes: ArrayBuffer, contentType: string): Promise<void> => {
