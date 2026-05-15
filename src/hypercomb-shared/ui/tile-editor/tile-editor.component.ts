@@ -427,7 +427,8 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly openCamera = async (): Promise<void> => {
     if (this.cameraActive || this.#stream) return
-    if (!navigator.mediaDevices?.getUserMedia) {
+    const isMobile = navigator.maxTouchPoints > 0 && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
+    if (isMobile || !navigator.mediaDevices?.getUserMedia) {
       this.cameraFallbackInput?.nativeElement?.click()
       return
     }
@@ -436,7 +437,6 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
         video: { facingMode: { ideal: this.#facingMode } },
       })
     } catch {
-      this.cameraFallbackInput?.nativeElement?.click()
       return
     }
     this.cameraActive = true
