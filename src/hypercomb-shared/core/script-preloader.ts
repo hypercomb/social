@@ -208,10 +208,22 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 
     EffectBus.emit('loader:bees-progress', { loading: pending.length, total: this.#beeCache.size + pending.length })
 
-    const results = await Promise.allSettled(
-      pending.map(sig => this.#loadBeeBySignature(sig))
-    )
-    const loaded = results.filter(r => r.status === 'fulfilled' && r.value !== null).length
+    // On iOS: load sequentially. getBee() snapshots IoC before import and checks
+    // new keys after — concurrent HTTP/2 imports complete in the same microtask
+    // batch, so all concurrent getBee() calls see the same IoC diff and return
+    // the same first new key (wrong drone). Serial execution isolates each
+    // snapshot-import-check so every bee gets its own correct instance.
+    // On desktop: parallel load is safe (imports resolve more sequentially).
+    let loaded = 0
+    if (/iP(hone|ad|od)/i.test(navigator.userAgent)) {
+      for (const sig of pending) {
+        const bee = await this.#loadBeeBySignature(sig).catch(() => null)
+        if (bee !== null) loaded++
+      }
+    } else {
+      const results = await Promise.allSettled(pending.map(sig => this.#loadBeeBySignature(sig)))
+      loaded = results.filter(r => r.status === 'fulfilled' && r.value !== null).length
+    }
 
     if (loaded) {
       this.#refreshProjection()
@@ -236,21 +248,28 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   #tryLoadBee = async (signature: string): Promise<Bee | null> => {
     console.log(`[script-preloader] loading bee ${signature}`)
 
-    // Try __bees__/{sig}.js then __bees__/{sig}
-    let handle: FileSystemFileHandle | null = null
-    try {
-      handle = await this.store.bees.getFileHandle(`${signature}.js`)
-    } catch {
+    // On iOS, store.getBee() ignores the buffer and imports from /content/__bees__/
+    // directly. Skip the OPFS read — getFileHandle throws on fresh/partial installs
+    // and would block bee loading before getBee() ever runs.
+    let buffer: ArrayBuffer
+    if (/iP(hone|ad|od)/i.test(navigator.userAgent)) {
+      buffer = new ArrayBuffer(0)
+    } else {
+      // Try __bees__/{sig}.js then __bees__/{sig}
+      let handle: FileSystemFileHandle | null = null
       try {
-        handle = await this.store.bees.getFileHandle(signature)
+        handle = await this.store.bees.getFileHandle(`${signature}.js`)
       } catch {
-        console.warn(`[script-preloader] bee ${signature} not found in OPFS`)
-        return null
+        try {
+          handle = await this.store.bees.getFileHandle(signature)
+        } catch {
+          console.warn(`[script-preloader] bee ${signature} not found in OPFS`)
+          return null
+        }
       }
+      const file = await handle.getFile()
+      buffer = await file.arrayBuffer()
     }
-
-    const file = await handle.getFile()
-    const buffer = await file.arrayBuffer()
 
     // Ensure namespace dependencies are loaded before the bee
     await this.#ensureDeps(signature)
