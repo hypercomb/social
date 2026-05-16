@@ -21,8 +21,11 @@
  *                 OPFS. Source carries the layer sig (look up content
  *                 in the paired-channel machine's state.layers).
  * - `clipboard` — A clipboard overlay (cross-browser drag preview).
+ * - `peer`      — A tile contributed by another peer in the public
+ *                 swarm at the current lineage. Source carries the
+ *                 publisher's Nostr pubkey for mine/theirs tagging.
  */
-export type TileKind = 'opfs' | 'ephemeral' | 'clipboard'
+export type TileKind = 'opfs' | 'ephemeral' | 'clipboard' | 'peer'
 
 /**
  * One contributed tile. The renderer treats it as opaque — name + kind
@@ -52,6 +55,10 @@ export interface TileSourceRef {
   /** Channel the ephemeral came in on — needed for adopt-time
    *  materialiseFromSig calls. */
   readonly channelId?: string
+  /** Publisher's Nostr pubkey — set on kind='peer'. Identifies the
+   *  swarm participant whose layer contributed this tile, so the
+   *  renderer can distinguish my-tiles from theirs at draw time. */
+  readonly peerPubkey?: string
 }
 
 /**

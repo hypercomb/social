@@ -271,38 +271,21 @@ export class ExposeDrone extends Drone {
   // ── expose path ────────────────────────────────────────────────────
 
   #registerIcon(): void {
-    const registry = window.ioc.get('@hypercomb.social/IconProviderRegistry') as IconProviderRegistry | undefined
-    // Both go on `public-own` (tiles the user owns in public mode).
-    // EggMenuPack also surfaces unlock for multi-select, but the
-    // per-tile sync icon is the discoverable button users will reach
-    // for first. Click handlers are inert on non-facade tiles.
-    registry?.add({
-      name: EXPOSE_ICON_NAME,
-      owner: '@diamondcoreprocessor.com/ExposeDrone',
-      svgMarkup: EXPOSE_ICON_SVG,
-      profile: 'public-own',
-      hoverTint: 0xa6e3a1,
-      labelKey: 'action.expose',
-      descriptionKey: 'action.expose.description',
-    })
-    registry?.add({
-      name: SYNC_ICON_NAME,
-      owner: '@diamondcoreprocessor.com/ExposeDrone',
-      svgMarkup: SYNC_ICON_SVG,
-      profile: 'public-own',
-      hoverTint: 0x80c8ff,
-      labelKey: 'action.sync',
-      descriptionKey: 'action.sync.description',
-    })
-    registry?.add({
-      name: MERGE_ICON_NAME,
-      owner: '@diamondcoreprocessor.com/ExposeDrone',
-      svgMarkup: MERGE_ICON_SVG,
-      profile: 'public-own',
-      hoverTint: 0xc8a8ff,
-      labelKey: 'action.merge',
-      descriptionKey: 'action.merge.description',
-    })
+    // Intentionally registers no icons. The swarm subsumes the
+    // paired-channel expose/sync/merge flow:
+    //
+    //   - For PEER (public-external) tiles, the canonical icons are
+    //     `adopt` and `block` registered by tile-actions.drone with
+    //     profile 'public-external'. Both wire to my SwarmAdoptDrone
+    //     and the show-cell hidden-tiles filter respectively.
+    //
+    //   - For OWNED (public-own) tiles, the previous expose/sync/merge
+    //     trio was paired-channel-specific and confusing on the canvas
+    //     (clicking sync on a tile you already own bails silently —
+    //     "nothing happens"). The handlers (#onExpose etc.) remain in
+    //     this drone so any code path that still emits
+    //     `tile:action` with action='expose' programmatically works.
+    void this.#firstJoinedChannel  // keep TS happy when icon usage is removed
   }
 
   async #onExpose(tileLabel: string): Promise<void> {
@@ -387,10 +370,11 @@ export class ExposeDrone extends Drone {
     })
     console.log('[sync] requestShare', { tile: tileLabel, branchSig: root.sig.slice(0, 12), ok })
 
-    if (ok) {
-      this.#toast('info', 'Exposed',
-        `Pushed ${layers.length} layer${layers.length === 1 ? '' : 's'} for "${tileLabel}" and requested share. Waiting for host approval.`)
-    } else {
+    if (!ok) {
+      // Success path is silent — the user just clicked expose and the
+      // tile change is visible; a confirmation toast on every expose
+      // turns the corner into wallpaper. Failures still surface (the
+      // user needs to know if mesh/signer/relay is unreachable).
       this.#toast('warning', 'Expose failed',
         `Couldn't publish share-request — mesh signer or relay unavailable.`)
     }

@@ -254,7 +254,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -351,6 +351,15 @@ export class ShowCellDrone extends Drone {
   // by the pixi draw path to apply the dashed-accent preview style.
   // Cleared and rebuilt on each renderFromSynchronize.
   #ephemeralCellSet = new Set<string>()
+
+  // Names of cells in the current render that came from a swarm peer
+  // (kind:'peer' from TileSourceRegistry). Treated like ephemeral for
+  // visual treatment, but additionally surfaced as branches so a click
+  // navigates into them — that's the "browse a peer's tree without
+  // adopting first" path. The new lineage's swarm subscription picks
+  // up whatever the peer is publishing at the deeper level (if any),
+  // and the user can add normally from there to mint local tiles.
+  #peerCellSet = new Set<string>()
 
   // mesh scoping — space + secret feed into the signature key
   #space = ''
@@ -591,6 +600,15 @@ export class ShowCellDrone extends Drone {
 
       if (typeof mesh.subscribe === 'function') {
         this.meshSub = mesh.subscribe(sig, (evt) => {
+          // Only react to the legacy ephemeral kind that this drone owns.
+          // Swarm-layer events (kind 30200) belong to SwarmDrone and don't
+          // affect meshCells — re-rendering on every one of them churns
+          // show-cell on each peer publish (and on our own local fanout).
+          // Peer tiles still update at the next render trigger (navigation
+          // / user interaction); they don't need per-event refreshes.
+          const kind = Number((evt?.event as { kind?: number } | undefined)?.kind ?? 0)
+          if (kind && kind !== 29010) return
+
           // detect sync-request from another publisher — trigger immediate republish
           this.#handleIncomingSyncRequest(evt, mesh, sig)
 
@@ -1612,36 +1630,15 @@ export class ShowCellDrone extends Drone {
 
     const localCellSet = new Set(localCells)
 
-    // Ephemeral previews from the swarm — tiles the user hasn't adopted
-    // to OPFS yet. Sourced via the TileSourceRegistry so this drone
-    // doesn't need to know anything about sync; any future contributor
-    // (clipboard, AI suggestions, etc.) lands here through the same path.
-    // Names not in localCellSet → render as preview; names already in
-    // localCellSet are owned and the ephemeral entry is redundant (the
-    // source-side echo guard in expose.drone usually prevents this, but
-    // dedup here too in case of races).
+    // Preview tile sets — populated AFTER the layer-filter block runs
+    // (~line 1750+). Why: dedup against localCellSet has to happen on
+    // the post-filter set, otherwise a peer tile whose name matches
+    // an OPFS dir that the layer says "doesn't render" gets dropped
+    // from BOTH the local pass (because it's in OPFS) AND the layer
+    // pass (because the layer wiped localCellSet). The user then sees
+    // neither — even though the swarm has the data.
     const ephemeralCellSet = new Set<string>()
-    try {
-      const registry = (window as any).ioc?.get?.('@hypercomb.social/TileSourceRegistry') as
-        | { resolve: (loc: { segments: readonly string[]; dir: FileSystemDirectoryHandle | null }) => Promise<readonly { name: string; kind: string }[]> }
-        | undefined
-      if (registry?.resolve) {
-        const segs = lineage?.explorerSegments?.() ?? []
-        const entries = await registry.resolve({ segments: segs, dir })
-        for (const e of entries) {
-          if (e.kind !== 'ephemeral') continue
-          if (localCellSet.has(e.name)) continue
-          ephemeralCellSet.add(e.name)
-          union.add(e.name)
-        }
-      }
-    } catch (err) {
-      // Registry hiccups must never block the render. The OPFS pass above
-      // already populated union with owned tiles; previews just won't
-      // appear this pass and will catch up on the next render trigger.
-      console.warn('[show-cell] ephemeral source resolution failed', err)
-    }
-    this.#ephemeralCellSet = ephemeralCellSet
+    const peerCellSet = new Set<string>()
 
     // detect which local cells have children (branches) — memoized per
     // (dir, lineage.fsRevision); see #computeBranchSet for rationale
@@ -1703,15 +1700,65 @@ export class ShowCellDrone extends Drone {
           const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
           const parentLayerSig = cursorService.currentLayerSig || ''
           layerAllowed = await resolveChildNames(historyService, parentSegments, dir, content, parentLayerSig)
-          union.clear()
-          localCellSet.clear()
-          for (const cell of layerAllowed) {
-            union.add(cell)
-            localCellSet.add(cell)
+          // Defensive: a corrupt layer can land here with null/empty
+          // entries in its children list (seen on root lineage when an
+          // upstream commit recorded children:[null]). Without this
+          // filter the bad entries replace the real local cells in
+          // localCellSet, dropping every real tile from the render.
+          // Treat a non-empty-but-all-invalid layer as "no constraint"
+          // and fall through to OPFS truth.
+          const validNames: string[] = []
+          for (const n of layerAllowed) {
+            if (typeof n === 'string' && n.length > 0) validNames.push(n)
           }
+          const layerWasEmpty = layerAllowed.size === 0
+          const allEntriesInvalid = !layerWasEmpty && validNames.length === 0
+          if (!allEntriesInvalid) {
+            union.clear()
+            localCellSet.clear()
+            for (const cell of validNames) {
+              union.add(cell)
+              localCellSet.add(cell)
+            }
+            layerAllowed = new Set(validNames)
+          }
+          // else: keep union + localCellSet as-is so OPFS truth survives
         }
       }
     }
+
+    // Now that localCellSet reflects layer-truth (or OPFS truth when no
+    // layer constraint applies), pull peer/ephemeral previews from the
+    // TileSourceRegistry. Doing this AFTER the layer block is what lets
+    // a peer publishing a tile name that the local layer "doesn't have"
+    // surface as a preview the user can adopt — without this ordering,
+    // the dedup against the pre-filter localCellSet drops it before the
+    // layer block ever runs.
+    try {
+      const registry = (window as any).ioc?.get?.('@hypercomb.social/TileSourceRegistry') as
+        | { resolve: (loc: { segments: readonly string[]; dir: FileSystemDirectoryHandle | null }) => Promise<readonly { name: string; kind: string }[]> }
+        | undefined
+      if (registry?.resolve) {
+        const segs = lineage?.explorerSegments?.() ?? []
+        const entries = await registry.resolve({ segments: segs, dir })
+        for (const e of entries) {
+          if (e.kind !== 'ephemeral' && e.kind !== 'peer') continue
+          if (localCellSet.has(e.name)) continue
+          ephemeralCellSet.add(e.name)
+          // Track peer-kind separately so #buildCellCountPayload can mark
+          // them as branches, making clicks route through #navigateInto
+          // instead of falling through to the 'open' editor action.
+          if (e.kind === 'peer') peerCellSet.add(e.name)
+          union.add(e.name)
+        }
+      }
+    } catch (err) {
+      // Registry hiccups must never block the render. Previews just
+      // won't appear this pass and will catch up on the next render.
+      console.warn('[show-cell] ephemeral source resolution failed', err)
+    }
+    this.#ephemeralCellSet = ephemeralCellSet
+    this.#peerCellSet = peerCellSet
 
     // Reconcile pendingRemoves against the layer's children list. Under
     // layer-as-primitive, the LAYER decides membership: a /remove drops
@@ -1747,11 +1794,20 @@ export class ShowCellDrone extends Drone {
     // bee-owned primitive. Read live localStorage in both rewound and
     // head positions. (Per-position playback of visibility is the
     // visibility bee's responsibility, not the renderer's.)
+    //
+    // Block list also covers swarm peer tiles: a hidden name should
+    // disappear regardless of whether the user owns it or it arrived
+    // from a peer publish. Without the unconditional delete a user
+    // who hides a peer tile would see it pop back on every swarm
+    // republish. ephemeralCellSet/peerCellSet stay in sync so the
+    // tile-overlay doesn't keep treating it as a dashed preview.
     const hiddenSet = new Set<string>(JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? '[]'))
     this.#currentHiddenSet = hiddenSet
     if (!this.#showHiddenItems) {
       for (const hidden of hiddenSet) {
-        if (localCellSet.has(hidden)) union.delete(hidden)
+        union.delete(hidden)
+        ephemeralCellSet.delete(hidden)
+        peerCellSet.delete(hidden)
       }
     }
 
@@ -2839,6 +2895,28 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // SwarmDrone fires this when a peer arrives or its layer changes
+    // (and again on mesh-public toggling off, with reason='mode-private',
+    // so the cleared peer state surfaces as an empty TileSourceRegistry
+    // contribution and temp shared tiles disappear). show-cell's mesh
+    // callback no longer reacts to swarm-kind events directly — this
+    // drone-to-drone effect is the explicit handoff that triggers the
+    // repaint exactly when peer state actually changed.
+    //
+    // Aggressive invalidation: clearing cellsKey alone wasn't enough —
+    // the back-nav fast path matches by locationKey and serves a stale
+    // cells cache that doesn't reflect the new peer entries. Clear the
+    // location key + layer-cells cache for the current location so the
+    // next render runs the full path (lists local cells, queries the
+    // registry, includes peer additions, re-seeds the slot machine).
+    this.onEffect('swarm:peers-changed', () => {
+      this.renderedCellsKey = ''
+      const locationKey = this.renderedLocationKey
+      this.renderedLocationKey = ''
+      if (locationKey) this.#layerCellsCache.delete(locationKey)
+      this.requestRender()
+    })
+
     // substrate:applied — substrate has just written a new propsSig for this
     // cell. Only this one cell's imageSig changed; route through the in-place
     // buffer update so the rest of the grid never repaints. If the cell isn't
@@ -3218,11 +3296,15 @@ export class ShowCellDrone extends Drone {
     linkLabels: string[]
     hiddenLabels: string[]
   } {
+    // Peer tiles get marked as branches so tile-overlay routes their
+    // clicks through #navigateInto (URL changes, lineage updates, swarm
+    // re-subscribes). Without this they fall through to the editor's
+    // 'open' action and the user can't browse a peer's tree.
     return {
       count: cells.length,
       labels: cells.map(c => c.label),
       coords: cells.map(c => ({ q: c.q, r: c.r })),
-      branchLabels: cells.filter(c => c.hasBranch).map(c => c.label),
+      branchLabels: cells.filter(c => c.hasBranch || this.#peerCellSet.has(c.label)).map(c => c.label),
       externalLabels: cells.filter(c => c.external).map(c => c.label),
       noImageLabels: cells.filter(c => !c.imageSig).map(c => c.label),
       substrateLabels: cells.filter(c => c.hasSubstrate).map(c => c.label),

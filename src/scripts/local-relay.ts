@@ -72,6 +72,37 @@ wss.on('connection', (ws) => {
       const event = msg[1] as NostrEvent
       if (!event?.id) return
 
+      // NIP-01 / NIP-33 replaceability — without this the dev relay
+      // accumulates one stored event per publish, so a peer that
+      // republishes its layer ten times leaves ten ghost copies that
+      // late subscribers all see. Real public relays enforce these
+      // ranges by spec; the local one was the outlier.
+      //
+      //   30000–39999  parameterized replaceable: one event per
+      //                (pubkey, kind, d-tag). New publish overwrites
+      //                the prior event with the matching triple.
+      //   10000–19999  plain replaceable: one event per (pubkey, kind).
+      //   20000–29999  ephemeral: never stored, fan-out only (the
+      //                outer flow still stores them — keep current
+      //                behaviour for now since paired-channel relies
+      //                on the cache for late delivery).
+      if (event.kind >= 30000 && event.kind < 40000) {
+        const dTag = (event.tags || []).find(t => t[0] === 'd')?.[1] ?? ''
+        for (const [id, stored] of events) {
+          if (stored.kind !== event.kind) continue
+          if (stored.pubkey !== event.pubkey) continue
+          const storedD = (stored.tags || []).find(t => t[0] === 'd')?.[1] ?? ''
+          if (storedD !== dTag) continue
+          events.delete(id)
+        }
+      } else if (event.kind >= 10000 && event.kind < 20000) {
+        for (const [id, stored] of events) {
+          if (stored.kind !== event.kind) continue
+          if (stored.pubkey !== event.pubkey) continue
+          events.delete(id)
+        }
+      }
+
       // No signature verification for local dev relay
       const existed = events.has(event.id)
       events.set(event.id, event)
