@@ -137,7 +137,10 @@ export class DependencyLoader extends EventTarget {
   #verifyAndImport = async (sig: string, alias: string): Promise<string> => {
     const pureSig = sig.replace(/\.js$/i, '')
     console.log(`[dependency-loader] importing ${alias} (${pureSig})`)
-    const mod = await import(/* @vite-ignore */ alias)
+    const target = /iP(hone|ad|od)/i.test(navigator.userAgent)
+      ? `/content/__dependencies__/${pureSig}.js`
+      : alias
+    const mod = await import(/* @vite-ignore */ target)
     void mod
     console.log(`[dependency-loader] imported ${alias}`)
     return sig

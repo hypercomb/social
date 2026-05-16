@@ -311,7 +311,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 
       try {
         console.log(`[script-preloader] loading dep ${depSig} (${alias}) for bee ${beeSig}`)
-        await import(/* @vite-ignore */ alias)
+        const target = /iP(hone|ad|od)/i.test(navigator.userAgent)
+          ? `/content/__dependencies__/${depSig}.js`
+          : alias
+        await import(/* @vite-ignore */ target)
         this.#loadedDeps.add(depSig)
         console.log(`[script-preloader] dep ${depSig} loaded`)
       } catch (err) {
