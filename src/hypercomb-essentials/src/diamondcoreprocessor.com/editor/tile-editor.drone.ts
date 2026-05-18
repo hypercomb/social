@@ -6,9 +6,11 @@ import type { ImageEditorService } from './image-editor.service.js'
 
 // SVG markup for the pencil "edit" icon. Owned by this drone so that
 // when the editor is toggled off in DCP the icon never reaches the
-// tile overlay arranger and never appears on the hex.
+// tile overlay arranger and never appears on the hex. Material Design
+// `edit` (filled) — solid white fill so the Pixi sprite-tint pipeline
+// preserves colour; matches the rest of the tile-overlay icon set.
 const EDIT_ICON_SVG =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l4 4L7 21H3v-4L17 3z"/></svg>`
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>`
 
 type IconProvider = {
   name: string

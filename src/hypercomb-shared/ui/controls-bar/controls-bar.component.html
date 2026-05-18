@@ -164,20 +164,6 @@
                   <span class="badge">{{ badgeValue(ctrl) }}</span>
                 }
               </button>
-              <!-- room input inline after room button (only shown when room is enabled & open) -->
-              @if (ctrl.id === 'room' && roomOpen() && isEnabled(ctrl) && !editMode()) {
-                <div class="room-shell">
-                  <input
-                    class="room-input"
-                    type="text"
-                    [placeholder]="'controls.room-placeholder' | t"
-                    [value]="roomValue()"
-                    (input)="onRoomInput($event)"
-                    (keydown.enter)="submitRoom()"
-                    (keydown.escape)="toggleRoom()"
-                  />
-                </div>
-              }
             }
           </div>
         </div>

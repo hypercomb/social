@@ -42,12 +42,6 @@
   display: flex;
   align-items: stretch;
   flex-shrink: 0;
-
-  // expand when secret input is showing
-  &.secret-active {
-    flex: 1;
-    min-width: 0;
-  }
 }
 
 // ── status icons (non-interactive mode indicators) ───────
@@ -144,51 +138,6 @@
 }
 
 
-// ── secret input area ────────────────────────────────────
-
-.secret-input-wrap {
-  position: relative;
-  display: flex;
-  align-items: stretch;
-  flex: 1;
-  min-width: 0;
-  border-left: 1.5px solid rgba(77, 166, 255, 0.4);
-
-  &::before {
-    content: '>';
-    display: flex;
-    align-items: center;
-    flex-shrink: 0;
-    padding-left: 1.4rem;
-    font: 600 1em/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
-    color: rgba(245, 245, 245, 0.35);
-    background: transparent;
-    border: none;
-  }
-}
-
-.header-secret-input {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 0.6rem 0.75rem;
-  border: none;
-  background: transparent;
-  color: rgba(248, 248, 244, 0.9);
-  font: 600 0.7rem/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-
-  &::placeholder {
-    color: rgba(245, 245, 245, 0.24);
-    letter-spacing: 0.1em;
-    font-weight: 400;
-  }
-
-  &:focus {
-    outline: none;
-  }
-}
-
 // ═══════════════════════════════════════════════════════════
 // RESPONSIVE OVERRIDES — minimal, layout-only
 // ═══════════════════════════════════════════════════════════
@@ -202,10 +151,6 @@
 
   .header-bar > * {
     pointer-events: auto;
-  }
-
-  .header-secret-input {
-    font-size: 16px;
   }
 }
 
@@ -242,9 +187,5 @@
   .secured-label,
   .mode-crumb {
     display: none;
-  }
-
-  .header-secret-input {
-    font-size: 16px;
   }
 }

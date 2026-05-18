@@ -30,6 +30,20 @@ type Filter = {
 const events = new Map<string, NostrEvent>()
 const subs = new Map<string, Sub[]>()
 
+// NIP-40 — events carrying an `expiration` tag past the current unix
+// time MUST NOT be delivered to subscribers. Returning true here means
+// the event is dead-on-arrival from the subscriber's perspective and
+// the relay should treat it as if it never existed for REQ purposes.
+// A periodic sweep below also evicts expired entries from the storage
+// map so memory doesn't grow unboundedly with one-shot publishes.
+function isExpired(e: NostrEvent, nowSecs: number): boolean {
+  const tag = (e.tags || []).find(t => t[0] === 'expiration')
+  if (!tag) return false
+  const exp = Number(tag[1])
+  if (!Number.isFinite(exp)) return false
+  return exp <= nowSecs
+}
+
 function matchesFilter(e: NostrEvent, f: Filter): boolean {
   if (f.ids?.length && !f.ids.includes(e.id)) return false
   if (f.authors?.length && !f.authors.includes(e.pubkey)) return false
@@ -129,10 +143,15 @@ wss.on('connection', (ws) => {
       subs.get(subId)!.push(entry)
       clientSubs.add(subId)
 
-      // Send matching stored events
+      // Send matching stored events. Expired events (NIP-40) are
+      // skipped — same effect as if they'd already been swept from
+      // storage, just with finer-grained timing so subscribers never
+      // receive past-its-TTL data even between sweep ticks.
       let sent = 0
       const limit = filters.reduce((min, f) => Math.min(min, f.limit ?? Infinity), Infinity)
+      const nowSecs = Math.floor(Date.now() / 1000)
       for (const event of events.values()) {
+        if (isExpired(event, nowSecs)) continue
         if (filters.some(f => matchesFilter(event, f))) {
           send(ws, ['EVENT', subId, event])
           sent++
@@ -164,5 +183,20 @@ wss.on('connection', (ws) => {
     }
   })
 })
+
+// Periodic NIP-40 sweep — evict expired events from storage so memory
+// stays bounded as one-shot publishes accumulate. REQ delivery already
+// guards against expired events; this just reclaims the slots.
+setInterval(() => {
+  const nowSecs = Math.floor(Date.now() / 1000)
+  let removed = 0
+  for (const [id, event] of events) {
+    if (isExpired(event, nowSecs)) {
+      events.delete(id)
+      removed++
+    }
+  }
+  if (removed > 0) console.log(`[local-relay] swept ${removed} expired event(s)`)
+}, 30_000)
 
 console.log(`[local-relay] nostr relay listening on ws://localhost:${PORT}`)

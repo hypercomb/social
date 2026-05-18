@@ -20,7 +20,7 @@ import type {
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 
 interface SwarmDroneLike {
-  peerTilesAtCurrentSig: () => readonly { name: string; peerPubkey: string }[]
+  peerTilesAtCurrentSig: () => readonly { name: string; peerPubkey: string; index?: number }[]
 }
 
 /** The swarm source: emits TileEntries for each tile any peer is
@@ -35,9 +35,12 @@ export const swarmTileSource: TileSource = async (
   ) as SwarmDroneLike | undefined
   if (!drone?.peerTilesAtCurrentSig) return []
   const tiles = drone.peerTilesAtCurrentSig()
-  return tiles.map(({ name, peerPubkey }) => ({
+  return tiles.map(({ name, peerPubkey, index }) => ({
     name,
     kind: 'peer' as const,
-    source: { peerPubkey },
+    source: {
+      peerPubkey,
+      ...(typeof index === 'number' ? { peerIndex: index } : {}),
+    },
   }))
 }

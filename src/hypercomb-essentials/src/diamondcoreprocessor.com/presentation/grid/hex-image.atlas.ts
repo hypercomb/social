@@ -36,6 +36,9 @@ export class HexImageAtlas {
   readonly #renderer: any
   static readonly MAX_RETRIES = 3
 
+  // one-shot boot marker: first successful atlas write
+  static #firstPaintMarked = false
+
   constructor(renderer: any, cellPx = 256, cols = 8, rows = 8) {
     this.#renderer = renderer
     this.#cellPx = Math.max(1, cellPx)
@@ -89,6 +92,7 @@ export class HexImageAtlas {
   }
 
   async loadImage(sig: string, blob: Blob): Promise<ImageUV | null> {
+    const tLoad = performance.now()
     const existing = this.#map.get(sig)
     if (existing) return existing
 
@@ -207,6 +211,15 @@ export class HexImageAtlas {
     const uv: ImageUV = { u0, v0, u1, v1 }
     this.#map.set(sig, uv)
     this.#slotToSig[slot] = sig
+
+    const loadMs = performance.now() - tLoad
+    if (loadMs > 5) {
+      console.log(`[atlas] SLOW loadImage ${loadMs.toFixed(0)}ms (sig=${sig.slice(0, 12)}…, ${bitmap.width}x${bitmap.height})`)
+    }
+    if (!HexImageAtlas.#firstPaintMarked) {
+      HexImageAtlas.#firstPaintMarked = true
+      ;(window as any).__hcBoot?.(`first tile painted to atlas (${loadMs.toFixed(0)}ms)`)
+    }
     return uv
   }
 

@@ -142,7 +142,6 @@ export class TileOverlayDrone extends Drone {
   #hiddenLabels = new Set<string>()
 
   // break-apart effect state
-  #crackOverlay: Graphics | null = null
   #shatterContainer: Container | null = null
   #shatterAnimating = false
 
@@ -549,7 +548,6 @@ export class TileOverlayDrone extends Drone {
       this.#overlay = null
       this.#hexBg = null
       this.#buttonTray = null
-      this.#crackOverlay = null
       this.#actions = []
     }
   }
@@ -570,12 +568,6 @@ export class TileOverlayDrone extends Drone {
     this.#buttonTray = new Graphics()
     this.#buttonTray.visible = false
     this.#overlay.addChild(this.#buttonTray)
-
-    // crack overlay for break-apart preview
-    this.#crackOverlay = new Graphics()
-    this.#crackOverlay.visible = false
-    this.#crackOverlay.zIndex = 100
-    this.#overlay.addChild(this.#crackOverlay)
 
     this.#renderContainer.addChild(this.#overlay)
     this.#renderContainer.sortableChildren = true
@@ -1407,15 +1399,6 @@ export class TileOverlayDrone extends Drone {
       if (isHovered) hoveredName = a.name
     }
 
-    // show/hide crack preview when hovering break-apart icon
-    if (this.#crackOverlay) {
-      if (hoveredName === 'break-apart') {
-        this.#showCrackPreview()
-      } else {
-        this.#crackOverlay.visible = false
-      }
-    }
-
     // ── Action hint timer ──────────────────────────────────────────
     if (hoveredName !== this.#hintActionName) {
       this.#clearHint()
@@ -1852,45 +1835,7 @@ export class TileOverlayDrone extends Drone {
     }
   }
 
-  // ── Break-apart: crack preview + shatter animation ─────────────────
-
-  #showCrackPreview(): void {
-    const g = this.#crackOverlay
-    if (!g || g.visible) return
-
-    g.clear()
-    const R = this.#geo.circumRadiusPx
-
-    // draw 5 crack lines radiating from a point near center
-    const cx = (Math.random() - 0.5) * R * 0.3
-    const cy = (Math.random() - 0.5) * R * 0.3
-    const cracks = 5
-
-    for (let i = 0; i < cracks; i++) {
-      const angle = (i / cracks) * Math.PI * 2 + (Math.random() - 0.5) * 0.6
-      const len = R * (0.5 + Math.random() * 0.4)
-      const midAngle = angle + (Math.random() - 0.5) * 0.3
-      const midLen = len * (0.3 + Math.random() * 0.3)
-
-      g.moveTo(cx, cy)
-      g.lineTo(cx + Math.cos(midAngle) * midLen, cy + Math.sin(midAngle) * midLen)
-      g.lineTo(cx + Math.cos(angle) * len, cy + Math.sin(angle) * len)
-      g.stroke({ width: 0.8, color: 0xffffff, alpha: 0.5 })
-
-      // small branch from midpoint
-      if (Math.random() > 0.4) {
-        const bAngle = midAngle + (Math.random() > 0.5 ? 0.7 : -0.7)
-        const bLen = len * 0.25
-        const mx = cx + Math.cos(midAngle) * midLen
-        const my = cy + Math.sin(midAngle) * midLen
-        g.moveTo(mx, my)
-        g.lineTo(mx + Math.cos(bAngle) * bLen, my + Math.sin(bAngle) * bLen)
-        g.stroke({ width: 0.5, color: 0xffffff, alpha: 0.35 })
-      }
-    }
-
-    g.visible = true
-  }
+  // ── Break-apart: shatter animation ─────────────────────────────────
 
   /** Run the shatter animation then emit the action. */
   playShatterAnimation(q: number, r: number, label: string): void {
@@ -1904,7 +1849,6 @@ export class TileOverlayDrone extends Drone {
 
     // hide the overlay during animation
     if (this.#overlay) this.#overlay.visible = false
-    if (this.#crackOverlay) this.#crackOverlay.visible = false
 
     // create fragment container at tile position
     const container = new Container()

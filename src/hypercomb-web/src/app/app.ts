@@ -15,11 +15,12 @@ import { DocsOverlayComponent } from "@hypercomb/shared/ui/docs-overlay/docs-ove
 import { HistoryViewerComponent } from "@hypercomb/shared/ui/history-viewer/history-viewer.component"
 import { NotesStripComponent } from "@hypercomb/shared/ui/notes-strip/notes-strip.component"
 import { NotesViewerComponent } from "@hypercomb/shared/ui/notes-viewer/notes-viewer.component"
+import { MeshModalComponent } from "@hypercomb/shared/ui/mesh-modal/mesh-modal.component"
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent],
+  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent, MeshModalComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
@@ -32,7 +33,6 @@ export class App implements AfterViewInit {
   // modes plug in via additional Angular components or drones that
   // gate on the same signal.
   protected readonly viewMode = signal<string>('hexagons')
-  protected readonly secretOpen = signal(false)
   protected readonly inputOpen = signal(false)
   public showHeader = true
   public readonly viewActive = signal(false)

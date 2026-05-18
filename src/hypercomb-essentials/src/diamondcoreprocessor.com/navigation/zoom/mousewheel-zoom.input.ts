@@ -86,11 +86,15 @@ export class MousewheelZoomInput {
   private onWheel = (event: WheelEvent): void => {
     if (!this.zoom || !this.canvas) return
 
-    // Bail only when a transient interaction owns the gate (pan, touch,
-    // selection in flight). The sticky `locked` state (lock button or
-    // editor overlay) falls through to zoom-in-place below, so the wheel
-    // can always emit `viewport:manual` and escape a fit-lock trap.
-    if (this.gate?.owner) return
+    // Wheel zoom is always-on. UI that needs to take precedence does so
+    // structurally — by pushing its own mode onto InputModeStack (which
+    // unmounts this listener entirely) or by tagging its scroll surface
+    // with [data-consumes-wheel] (handled below). Transient input claims
+    // on the legacy InputGate (touch-coordinator pan/pinch/momentum,
+    // selection drag, spacebar pan) are NOT a reason to silently drop
+    // wheel events — those gestures don't conflict with wheel zoom, and
+    // any leaked claim would otherwise leave wheel scrolling permanently
+    // dead until an escape-cascade clear.
 
     // bail if the event is aimed at a UI surface that wants to consume
     // wheel itself (scrollable panels marked [data-consumes-wheel]).

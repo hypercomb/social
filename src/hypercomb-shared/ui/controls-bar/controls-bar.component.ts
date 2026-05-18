@@ -203,7 +203,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #moveMode = signal(false)
   #mode = signal<'browsing' | 'clipboard' | 'atomize'>('browsing')
   #clipboardItems = signal<string[]>([])
-  #roomValue = signal('')
   #roomOpen = signal(false)
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
   #showHidden = signal(localStorage.getItem('hc:show-hidden') === '1')
@@ -644,7 +643,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     return tagNameToColor(name)
   }
   readonly visible = computed(() => !this.#touchDragging() && !this.#viewActive())
-  readonly roomValue = this.#roomValue.asReadonly()
   readonly roomOpen = this.#roomOpen.asReadonly()
   readonly beesVisible = this.#beesVisible.asReadonly()
   readonly showHidden = this.#showHidden.asReadonly()
@@ -672,8 +670,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #atomizeModeUnsub: (() => void) | null = null
   #atomizeAtomsUnsub: (() => void) | null = null
   #atomizeStrategyUnsub: (() => void) | null = null
+  #meshModalUnsub: (() => void) | null = null
 
   ngOnInit(): void {
+    this.#meshModalUnsub = EffectBus.on<{ open: boolean }>('mesh:modal-open', ({ open }) => {
+      this.#roomOpen.set(!!open)
+    })
+
     // ── mobile detection via matchMedia ──
     // Only actual smartphones (viewport ≤599px wide) collapse the command
     // line and show the mobile floating-icon strip. Anything larger —
@@ -689,10 +692,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#landscapeQuery.addEventListener('change', this.#landscapeHandler)
 
     this.#syncInputVisibility()
-
-    // pre-fill room from store
-    const stored = this.roomStore?.value ?? ''
-    if (stored) this.#roomValue.set(stored)
 
     this.#restorePillPos()
 
@@ -884,6 +883,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#atomizeModeUnsub?.()
     this.#atomizeAtomsUnsub?.()
     this.#atomizeStrategyUnsub?.()
+    this.#meshModalUnsub?.()
     window.removeEventListener('keydown', this.#onPowerKeyDown)
     window.removeEventListener('keyup', this.#onPowerKeyUp)
     window.removeEventListener('blur', this.#onPowerKeyReset)
@@ -1410,33 +1410,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── room ────────────────────────────────────────────
 
   readonly toggleRoom = (): void => {
-    if (this.#roomOpen()) {
-      // closing: save current value (including empty to clear)
-      const value = this.#roomValue().trim()
-      this.roomStore?.set(value)
-      EffectBus.emit('mesh:room', { room: value })
-      this.#roomOpen.set(false)
-    } else {
-      // opening: load stored value and focus
-      const stored = this.roomStore?.value ?? ''
-      if (stored) this.#roomValue.set(stored)
-      this.#roomOpen.set(true)
-      queueMicrotask(() => {
-        document.querySelector<HTMLInputElement>('.room-input')?.focus()
-      })
-    }
+    EffectBus.emit('mesh:open-modal', {})
   }
 
-  readonly onRoomInput = (event: Event): void => {
-    this.#roomValue.set((event.target as HTMLInputElement).value)
-  }
-
-  readonly submitRoom = (): void => {
-    const value = this.#roomValue().trim()
-    this.roomStore?.set(value)
-    EffectBus.emit('mesh:room', { room: value })
-    this.#roomOpen.set(false)
-  }
   // ── hover / idle ──────────────────────────────────────
 
   readonly onBarEnter = (): void => { this.#hovered.set(true) }

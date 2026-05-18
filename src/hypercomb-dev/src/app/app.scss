@@ -252,11 +252,6 @@ hc-command-line {
   min-width: 0;
 }
 
-// hide command-line when secret input is expanded (all screen sizes)
-.header-bar.secret-open hc-command-line {
-  display: none;
-}
-
 // ── atomizer drop target highlights ──────────────────────
 // Applied by AtomizerDropWorker during drag
 :global(.atomizer-drop-target) {

@@ -80,6 +80,8 @@ export class PixiHostWorker extends Worker {
 
     const app = this.app = new Application()
 
+    ;(window as any).__hcBoot?.('PixiHostWorker.act → Application.init() starting')
+    const tPixiInit = performance.now()
     await app.init({
       // Size to the host element, not the window, so anything that
       // narrows the host (the history sidebar taking a column on the
@@ -93,6 +95,9 @@ export class PixiHostWorker extends Worker {
       autoDensity: true,
       antialias: true,
     })
+    const pixiInitMs = performance.now() - tPixiInit
+    console.log(`[pixi-host] Application.init() ${pixiInitMs.toFixed(0)}ms`)
+    ;(window as any).__hcBoot?.(`Application.init() done (${pixiInitMs.toFixed(0)}ms)`)
 
     app.stage.scale.set(1.8, 1.8)
     app.stage.interactiveChildren = false
@@ -219,6 +224,7 @@ export class PixiHostWorker extends Worker {
       canvas: this.app.canvas as HTMLCanvasElement,
       renderer: this.app.renderer,
     })
+    ;(window as any).__hcBoot?.('render:host-ready emitted')
   }
 }
 

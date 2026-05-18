@@ -65,6 +65,9 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   // In-flight dedup: prevents two callers from loading the same bee concurrently
   readonly #inFlight = new Map<string, Promise<Bee | null>>()
 
+  // one-shot boot marker: first find() call done
+  static #firstFindMarked = false
+
   public resolveBySignature = (signature: string): ActionDescriptor | undefined =>
     this.#bySignature.get(signature)
 
@@ -133,6 +136,11 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       const findMsg = `[script-preloader] find: total=${findMs.toFixed(0)}ms walk=${walkMs.toFixed(0)}ms bees=${beesMs.toFixed(0)}ms (${walked.bees.length}b/${walked.dependencies.length}d/${walked.resources.length}r)`
       console.log(findMsg)
       try { localStorage.setItem('hc:perf-find-last', `${Date.now()}:${findMsg}`) } catch {}
+
+      if (!ScriptPreloader.#firstFindMarked) {
+        ScriptPreloader.#firstFindMarked = true
+        ;(window as any).__hcBoot?.(`first preloader.find done (total=${findMs.toFixed(0)}ms walk=${walkMs.toFixed(0)}ms bees=${beesMs.toFixed(0)}ms)`)
+      }
 
       return [...this.#beeCache.values()]
     }

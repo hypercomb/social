@@ -215,11 +215,6 @@ app-header {
   min-width: 0;
 }
 
-// hide command-line when secret input is expanded (all screen sizes)
-.header-bar.secret-open app-header {
-  display: none;
-}
-
 :host {
   display: block;
 

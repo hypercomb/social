@@ -1,9 +1,29 @@
 // Refresh the /dashboard cell with the current open Q&A across the
-// tree. Walks every branch via `inflate`, pairs `[Q ...]` notes with
-// their matching `[A:<qId>]` answers, filters to unanswered, and
-// generates a dashboard page whose links use the path-bracket URL
-// form (`/parent/[name]`) so clicking opens the editor for that
-// tile with its notes visible (Phase 2 auto-open).
+// tree. Reads `kind: 'qa'` optimizations from `__optimization__/`
+// (the single source of truth — layer's `qa` slot is retired) and
+// generates a dashboard page that renders each open Q as a card
+// with an inline answer composer.
+//
+// One child cell is minted under /dashboard per open Q so the hex
+// grid shows pending work spatially. Clicking a child tile in the
+// hex grid does NOT navigate — `DashboardQOpenWorker` (in
+// essentials/diamondcoreprocessor.com/dashboard) intercepts the
+// `tile:action open` effect, looks up the matching
+// `dashboard-q-binding` optimization, and opens `QaModalView` — a
+// shell-level DOM modal that holds the question and an answer
+// composer. The modal works in hexagons mode too; it isn't tied to
+// the website-mode HTML overlay. The rendered dashboard HTML's
+// inline-card composer is the same flow surfaced for users in
+// website mode.
+//
+// The dashboard is the answer location; we never leave it to "go
+// visit" the source cell. Answering mints a `kind: 'qa-answer'`
+// optimization (decoration, layer untouched) and removes the
+// original `kind: 'qa'`. The next codegen pass reads `qa-answer`
+// items, interprets each, and (if warranted) writes a note via the
+// state-machine `update(layer)` path as Claude's instruction-form
+// interpretation. The user's raw answer never becomes a note
+// directly.
 //
 // Also writes an "intel manifest" — a JSON resource that records
 // what this run saw (tree roots walked, Qs total/answered/open, Q
@@ -53,45 +73,19 @@ async function withRenderer(req, attempts = 4) {
   return { ok: false, error: 'renderer never connected' }
 }
 
-// ─── Q&A walk (reads the `qa` slot, not notes) ─────────────────────
+// ─── Q&A source: `__optimization__/` only ──────────────────────────
 //
-// Q&A items live in a dedicated `qa` slot on each cell layer. The
-// inflated layer surfaces it as an array of resource stubs (same shape
-// as `context`). Each Q resource carries `{ qId, question, askedAt }`.
-// Walks the tree, parses each cell's qa stubs, returns the open
-// questions with their lineage path. "Open" is implicit: when a Q is
-// answered, it's bag-removed from the qa slot, so anything still here
-// is open.
-
-function walkForQa(rootCell, basePath = []) {
-  const items = []
-  const visit = (cell, path) => {
-    const here = cell.name ? [...path, cell.name] : path
-    const slot = Array.isArray(cell.qa) ? cell.qa : []
-    for (const item of slot) {
-      if (!item || typeof item !== 'object') continue
-      // inflate resolves the qa slot's resource sigs into JSON, so
-      // entries arrive as `{ qId, question, ... }` objects directly.
-      // Fallback to stub form for resilience.
-      let q = (typeof item.question === 'string') ? item : null
-      if (!q) {
-        try { q = JSON.parse(item.$preview ?? '') } catch { /* ignore */ }
-      }
-      if (!q || typeof q.question !== 'string') continue
-      items.push({
-        qId: q.qId || item.$sig?.slice(0, 16) || String(items.length),
-        question: q.question.trim(),
-        answer: null,  // qa slot only carries OPEN Qs by design
-        path: here,
-        sig: item.$sig,
-        source: 'qa-slot',
-      })
-    }
-    for (const child of cell.children || []) visit(child, here)
-  }
-  visit(rootCell, basePath)
-  return { items, answered: 0 }
-}
+// Q&A is decoration (per `feedback_layer_purity_optimizations_external.md`)
+// — it never touches a cell's layer slot. Open questions live as
+// `kind: 'qa'` optimizations in OPFS `__optimization__/`, keyed to
+// the tile owner via `appliesTo: [...cellPath]`. Answered questions
+// become `kind: 'qa-answer'` optimizations (same shape + answer text)
+// and the original `kind: 'qa'` is removed. The next codegen pass
+// (e.g. `_dolphin-revision.cjs`) reads `qa-answer` items, interprets
+// each, optionally writes a note via the state-machine path, and
+// removes the optimization once handled.
+//
+// One source of truth. Dashboard only reflects.
 
 // ─── chrome — reuse the existing Field Notes stylesheet ─────────────
 
@@ -112,22 +106,38 @@ const TOGGLE_SCRIPT = `
 // site-view.drone (no iframe, no shadow DOM), so the script runs in the
 // shell's JS context and `window.ioc` reaches every registered service
 // directly. Clicking a card's Done button:
-//   1. Reads the answer text from the textarea
-//   2. Calls NotesService.addAtSegments(parent, cell, '[A:<qId>] <text>')
-//      — same upsert path user-typed notes use, so the merkle cascade,
-//      `notes:changed` event, and Claude-visible note all happen.
-//   3. If the source is the layer's `qa` slot, calls
-//      LayerCommitter.commitSlotRemove(cellSegments, 'qa', sig) so the
-//      question disappears from the dashboard's next refresh and from
-//      the notes-strip's yellow-row surface immediately.
+//   1. Reads the answer text from the textarea.
+//   2. Mints a `kind: 'qa-answer'` optimization pairing the question
+//      with the raw answer text via `Store.putOptimization` — pure
+//      decoration, layer untouched.
+//   3. Removes the original `kind: 'qa'` optimization via
+//      `Store.removeOptimization` so the open question disappears
+//      from the dashboard's next refresh and from any other surface
+//      that reads the optimization substrate.
 //   4. Marks the card answered in the UI (button → "answered ✓", inputs
 //      disabled, card dimmed) — no full reload required.
+//
+// Notes are NOT written here. The user's raw answer is decoration,
+// not canonical content. The next codegen pass reads `qa-answer`
+// items, interprets each, and (if warranted) writes a note via the
+// state-machine `update(layer)` path as Claude's instruction-form
+// interpretation. The `qa-answer` is cleaned up once handled.
 const ANSWER_SCRIPT = `
 (function(){
   function getSvc(key){ try { return window.ioc && window.ioc.get && window.ioc.get(key); } catch(_) { return null; } }
   function setStatus(card, msg, isErr){
     var s = card.querySelector('.dash-q-status');
     if (s) { s.textContent = msg || ''; s.classList.toggle('is-err', !!isErr); }
+  }
+  function openCard(card){
+    if (!card || card.classList.contains('dash-q-answered')) return;
+    var alreadyOpen = card.classList.contains('is-open');
+    card.classList.add('is-open');
+    if (!alreadyOpen) {
+      try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(_) {}
+      var input = card.querySelector('.dash-q-input');
+      if (input) setTimeout(function(){ try { input.focus(); } catch(_){} }, 100);
+    }
   }
   // Toggle-on-click: each card starts collapsed (just path + question
   // preview). Clicking the card body (anywhere outside the composer or
@@ -149,6 +159,37 @@ const ANSWER_SCRIPT = `
       }
     });
   });
+  // Hex-grid tile click → open the matching card inline. The /dashboard
+  // cell has one child per open Q (computed at render time), and the
+  // mapping label→qId is embedded as window.__hcDashboardLabelToQ.
+  // Subscribing to 'tile:action' on the global EffectBus is how we
+  // catch a leaf-tile click without taking over the normal click flow:
+  // LinkOpenWorker also subscribes to the same effect and no-ops when
+  // the tile has no link (which is now the case for dashboard children
+  // — we no longer stamp a link to keep clicks from spawning a new
+  // tab). The dashboard cell may be re-mounted during a session, so
+  // stash the unsub on window and tear down the previous subscription
+  // before adding a new one to avoid stacked listeners.
+  try {
+    if (typeof window.__hcDashboardOpenQUnsub === 'function') {
+      try { window.__hcDashboardOpenQUnsub(); } catch(_) {}
+    }
+    window.__hcDashboardOpenQUnsub = null;
+    var bus = (typeof globalThis !== 'undefined' && globalThis.__hypercombEffectBus) || null;
+    if (bus && typeof bus.on === 'function') {
+      window.__hcDashboardOpenQUnsub = bus.on('tile:action', function(payload){
+        if (!payload || payload.action !== 'open') return;
+        var label = payload.label;
+        var map = window.__hcDashboardLabelToQ || {};
+        var qId = map[label];
+        if (!qId) return;
+        var card = document.querySelector('.dash-q-card[data-q-id="' + qId + '"]');
+        openCard(card);
+      });
+    }
+  } catch (err) {
+    console.warn('[dashboard] tile:action subscribe failed', err);
+  }
   document.querySelectorAll('.dash-q-card').forEach(function(card){
     var btn = card.querySelector('.dash-q-done');
     var input = card.querySelector('.dash-q-input');
@@ -158,41 +199,38 @@ const ANSWER_SCRIPT = `
       if (!text) { setStatus(card, 'type an answer first', true); input.focus(); return; }
       var qId = card.dataset.qId || '';
       var sig = card.dataset.qSig || '';
-      var source = card.dataset.qSource || 'qa-slot';
+      var question = card.dataset.qQuestion || '';
       var path;
       try { path = JSON.parse(card.dataset.qPath || '[]'); } catch(_) { path = []; }
       if (!Array.isArray(path) || path.length === 0) { setStatus(card, 'missing cell path', true); return; }
-      var notes = getSvc('@diamondcoreprocessor.com/NotesService');
-      if (!notes || typeof notes.addAtSegments !== 'function') { setStatus(card, 'notes service unavailable', true); return; }
-      var parent = path.slice(0, -1);
-      var cell = path[path.length - 1];
-      btn.disabled = true; input.disabled = true; setStatus(card, 'committing answer…');
+      var store = getSvc('@hypercomb.social/Store');
+      if (!store || typeof store.putOptimization !== 'function') {
+        setStatus(card, 'optimization store unavailable', true); return;
+      }
+      btn.disabled = true; input.disabled = true; setStatus(card, 'recording answer…');
       try {
-        // Resolved-Q notes are just notes — no provenance prefix, no
-        // special styling. Per memory:
-        // feedback_layer_purity_optimizations_external.md.
-        await notes.addAtSegments(parent, cell, text);
-        // Clear the qa source so the question doesn't re-surface.
-        if (source === 'qa-slot' && sig) {
-          // LayerCommitter has no public commitSlotRemove; mirror what
-          // the bridge worker's bag-remove does inline: read current
-          // layer, filter the slot, commit a name+slot layer (other
-          // slots merge per LayerCommitter's update contract).
-          var history = getSvc('@diamondcoreprocessor.com/HistoryService');
-          var committer = getSvc('@diamondcoreprocessor.com/LayerCommitter');
-          if (history && committer && typeof committer.update === 'function') {
-            var locSig = await history.sign({ explorerSegments: function(){ return path; } });
-            var layer = await history.currentLayerAt(locSig);
-            var prior = Array.isArray(layer && layer.qa) ? layer.qa.map(String) : [];
-            var next = prior.filter(function(s){ return s !== sig; });
-            var nextLayer = { name: (layer && layer.name) || cell, qa: next };
-            await committer.update(path, nextLayer);
-          }
-        } else if (source === 'optimization' && sig) {
-          var store = getSvc('@hypercomb.social/Store');
-          if (store && typeof store.removeOptimization === 'function') {
-            try { await store.removeOptimization(sig); } catch(_) {}
-          }
+        // Mint a kind:'qa-answer' optimization pairing question +
+        // raw user answer. The next codegen pass reads this, decides
+        // whether the answer warrants a note (Claude's interpretation,
+        // not the raw text), and cleans it up. Layer is untouched —
+        // Q&A is pure decoration.
+        var answer = {
+          kind: 'qa-answer',
+          appliesTo: path,
+          payload: {
+            qId: qId,
+            qSig: sig,
+            question: question,
+            answer: text,
+            answeredAt: Date.now()
+          },
+          mark: 'persistent'
+        };
+        var blob = new Blob([JSON.stringify(answer)]);
+        await store.putOptimization(blob);
+        // Retire the open Q so the dashboard's next refresh drops it.
+        if (sig && typeof store.removeOptimization === 'function') {
+          try { await store.removeOptimization(sig); } catch(_) {}
         }
         card.classList.add('dash-q-answered');
         btn.textContent = 'answered ✓';
@@ -210,43 +248,33 @@ const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 })[c])
 
-// Builds a direct link to the cell that owns the question, with the
-// `#q-<qId>` anchor so the inline Q&A render on that cell's page
-// scrolls to the specific row on arrival. Plain paths only — no
-// bracket-selection markup. The previous designs (`?[name]` query
-// form, `/parent/[name]` path-tail form) both leaked encoding /
-// normalization artifacts into the address bar (`%5B…%5D=`, stray
-// brackets) and the Q&A is already rendered inline on each cell
-// page, so the simpler URL gets the user to the same content
-// without the extra syntax to read.
-function cellUrl(path, qId) {
-  if (path.length === 0) return '/'
-  return '/' + path.join('/') + (qId ? `#q-${qId}` : '#qa')
-}
-
 // Trailing arrow svg (kept in sync with dolphin-revision's TILE_ARROW_SVG).
 const TILE_ARROW_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>'
 const HELP_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><circle cx="12" cy="17" r="0.6" fill="currentColor" stroke="none"/></svg>'
 const DASHBOARD_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="8" height="8" rx="1.2"/><rect x="13" y="3" width="8" height="5" rx="1.2"/><rect x="13" y="10" width="8" height="11" rx="1.2"/><rect x="3" y="13" width="8" height="8" rx="1.2"/></svg>'
 
-function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPreview }) {
+function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPreview, labelToQId }) {
   // Each open Q becomes a Material 3 elevated tile card with an INLINE
   // answer composer — type, click Done, the answer commits to the
   // source cell's lineage and the qa entry disappears from the
-  // dashboard. The card also keeps a small `↗` link to the source
-  // cell page for users who want to read more context before
-  // answering. Data attrs carry everything the in-page script needs
+  // dashboard. Data attrs carry everything the in-page script needs
   // to dispatch the right writes; the answer pipeline runs entirely
   // in the renderer's JS context (cell pages are mounted inline, so
   // window.ioc is reachable directly — no postMessage / iframe).
-  const tiles = openItems.map(({ path, question, qId, sig, source }) => {
+  //
+  // The `id="q-<qId>"` on each `<li>` is the scroll target when a
+  // hex-grid child tile is clicked: the ANSWER_SCRIPT looks up the
+  // qId from the label→qId map embedded below, finds the matching
+  // card, and scrolls/focuses it. No new tab, no navigation.
+  const tiles = openItems.map(({ path, question, qId, sig }) => {
     const pathStr = '/' + path.join('/')
     return `
     <li class="md-tile dash-q-card"
+        id="q-${escapeHtml(qId)}"
         data-q-id="${escapeHtml(qId)}"
         data-q-path="${escapeHtml(JSON.stringify(path))}"
         data-q-sig="${escapeHtml(sig || '')}"
-        data-q-source="${escapeHtml(source || 'qa-slot')}">
+        data-q-question="${escapeHtml(question)}">
       <div class="md-tile-link" style="cursor:default">
         <div class="md-tile-number">
           <span aria-hidden="true"></span>
@@ -263,6 +291,14 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
       </div>
     </li>`
   }).join('')
+
+  // JSON-safe embed of the label→qId mapping. Closing `</script>` in
+  // any qId would break out of the `<script>` block; replace `<` with
+  // its unicode escape so the embedded string is opaque to the HTML
+  // parser. The map is plain ASCII hex in practice (qIds are
+  // signature prefixes / generated ids), but the escape is cheap and
+  // future-proof.
+  const labelMapJson = JSON.stringify(labelToQId || {}).replace(/</g, '\\u003c')
 
   const body = openItems.length === 0
     ? `<p>No open questions right now. ${answeredCount} of ${totalCount} answered. As Claude needs input, items will surface here.</p>`
@@ -368,6 +404,7 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
   <footer class="md-foot">${openItems.length} open · ${answeredCount}/${totalCount} answered · intel ${escapeHtml(manifestSigPreview)}</footer>
 </main>
 <script>${TOGGLE_SCRIPT}</script>
+<script>window.__hcDashboardLabelToQ = ${labelMapJson};</script>
 <script>${ANSWER_SCRIPT}</script>
 </body>
 </html>`
@@ -376,50 +413,8 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
 // ─── main ───────────────────────────────────────────────────────────
 
 ;(async () => {
-  console.log('1) Reading top-level cells...')
-  const root = await withRenderer({ op: 'list-at', segments: [] })
-  if (!root.ok) { console.log('   FAILED:', root.error); process.exit(1) }
-  const topCells = (root.data || []).filter(name => name !== 'dashboard')
-  console.log(`   ${topCells.join(', ')}`)
-
-  console.log('2) Walking each tree, collecting open Q items from `qa` slots...')
+  console.log('1) Listing open Q optimizations from __optimization__/...')
   const allItems = []
-  for (const name of topCells) {
-    const inf = await withRenderer({ op: 'inflate', segments: [name] })
-    if (!inf.ok) {
-      console.log(`   skipping /${name}: ${inf.error}`)
-      continue
-    }
-    const { items } = walkForQa(inf.data, [])
-    // `inflate` drops the underlying qa-slot sigs (they're resolved into
-    // their JSON content), but the dashboard's in-page answer composer
-    // needs the sig to bag-remove the entry on submit. Fetch each
-    // path's raw layer separately and zip the sigs back onto the items
-    // in question order. Same source-of-truth (the layer's qa slot) —
-    // just a non-resolving read.
-    const byPath = new Map()
-    for (const it of items) {
-      const key = it.path.join('/')
-      if (!byPath.has(key)) byPath.set(key, [])
-      byPath.get(key).push(it)
-    }
-    for (const [key, group] of byPath) {
-      const segs = key === '' ? [] : key.split('/')
-      const raw = await withRenderer({ op: 'layer-at', segments: segs })
-      const sigs = raw.ok && Array.isArray(raw.data?.qa) ? raw.data.qa.filter(s => typeof s === 'string') : []
-      for (let i = 0; i < group.length && i < sigs.length; i++) {
-        group[i].sig = sigs[i]
-      }
-    }
-    if (items.length > 0) console.log(`   /${name}: ${items.length} open Q`)
-    allItems.push(...items)
-  }
-
-  // 2b) Also pull qa-kind optimizations from `__optimization__/` — the
-  // architecturally-correct home for Q&A (layer-untouched). Cell qa-slot
-  // walk above is legacy and gets retired once the dolphin pipeline
-  // migrates over.
-  console.log('2b) Listing qa-kind optimizations from __optimization__/...')
   const opts = await withRenderer({ op: 'optimization-list', kind: 'qa' })
   if (opts.ok && Array.isArray(opts.data?.items)) {
     const optItems = opts.data.items
@@ -430,19 +425,18 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
         answer: null,
         path: Array.isArray(o.appliesTo) ? o.appliesTo : [],
         sig: o.sig,
-        source: 'optimization',
       }))
-    if (optItems.length > 0) console.log(`   __optimization__/: ${optItems.length} open Q`)
+    if (optItems.length > 0) console.log(`   ${optItems.length} open Q`)
     allItems.push(...optItems)
   } else if (!opts.ok) {
-    console.log(`   skipping optimization-list: ${opts.error}`)
+    console.log(`   FAILED: ${opts.error}`); process.exit(1)
   }
 
-  // Dedupe: same path + same question text counts as one row even if
-  // there are multiple [Q] notes (we double-seeded some earlier). The
-  // group resolves to answered if ANY member has an [A] — answering
-  // one auto-clears the duplicate's row, but the other underlying
-  // notes still exist and can be cleaned up via a follow-up sweep.
+  // Dedupe: same path + same question text counts as one row. The
+  // optimization substrate is content-addressed so identical content
+  // collapses to one sig already; this dedupe catches the edge case
+  // where two `qa` records carry the same logical question with
+  // different metadata (e.g. different `askedAt`).
   const seen = new Set()
   const openItems = []
   for (const item of allItems) {
@@ -451,18 +445,37 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
     seen.add(key)
     openItems.push(item)
   }
-  const answeredCount = 0  // qa slot is open-only; answered → bag-removed.
-  console.log(`3) ${openItems.length} open Q${openItems.length === 1 ? '' : 's'} (qa slot is open-only — answered Qs are bag-removed).`)
+  const answeredCount = 0  // open-Q optimizations are open-only; answered → `qa-answer` kind.
+  console.log(`2) ${openItems.length} open Q${openItems.length === 1 ? '' : 's'}.`)
 
-  // 4) Build intel manifest first so we know its sig before rendering
+  // Compute one child cell label per open Q. The dashboard cell is drillable
+  // in the hex grid — drilling reveals a tile for each open question, not an
+  // empty cell. Label uses the source path's last segment (closest to the
+  // user's mental model — "the question about certification lives at tile
+  // 'certification'"), with a numeric suffix when multiple Qs share the same
+  // source segment so every label is unique. The label→qId map is embedded
+  // in the rendered HTML; the in-page script listens for tile clicks via the
+  // global EffectBus and opens the matching card inline.
+  const childLabels = []
+  const labelCounts = new Map()
+  const labelToQId = {}
+  for (const item of openItems) {
+    const base = (item.path.length === 0 ? 'root' : item.path[item.path.length - 1]) || 'q'
+    const n = (labelCounts.get(base) ?? 0) + 1
+    labelCounts.set(base, n)
+    const label = n === 1 ? base : `${base}-${n}`
+    childLabels.push(label)
+    labelToQId[label] = item.qId
+  }
+
+  // 3) Build intel manifest first so we know its sig before rendering
   //    the dashboard footer.
-  console.log('4) Minting intel manifest...')
+  console.log('3) Minting intel manifest...')
   const manifest = {
     schemaVersion: 1,
     kind: 'dashboard-intel',
     generatedAt: new Date().toISOString(),
     chromeSig: CHROME_SIG,
-    branchesWalked: topCells,
     totals: { open: openItems.length, answered: 0 },
     open: openItems.map(({ qId, question, path }) => ({ qId, path, question })),
     answered: [],
@@ -474,43 +487,31 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
   const manifestSig = manifestPut.data.sig
   console.log(`   manifest sig=${manifestSig.slice(0, 12)} (${manifestJson.length} bytes)`)
 
-  console.log('5) Rendering dashboard HTML...')
+  console.log('4) Rendering dashboard HTML...')
   const html = renderDashboard({
     openItems,
     answeredCount,
     totalCount: allItems.length,
     manifestSigPreview: manifestSig.slice(0, 12),
+    labelToQId,
   })
   const htmlPut = await withRenderer({ op: 'put-resource', text: html })
   if (!htmlPut.ok) { console.log('   FAILED:', htmlPut.error); process.exit(1) }
   const htmlSig = htmlPut.data.sig
   console.log(`   dashboard html sig=${htmlSig.slice(0, 12)} (${html.length} bytes)`)
 
-  // 6) Compute one child cell per open Q. The dashboard cell is supposed
-  //    to be drillable in the hex grid — clicking it should reveal a tile
-  //    for each open question, not an empty cell. Label uses the source
-  //    path's last segment (closest to the user's mental model — "the
-  //    question about certification lives at tile 'certification'"), with
-  //    a numeric suffix when multiple Qs share the same source segment so
-  //    every label is unique. normalizeCell on the bridge side strips any
-  //    stray punctuation and lowercases.
-  const childLabels = []
-  const labelCounts = new Map()
-  const labelToItem = []
-  for (const item of openItems) {
-    const base = (item.path.length === 0 ? 'root' : item.path[item.path.length - 1]) || 'q'
-    const n = (labelCounts.get(base) ?? 0) + 1
-    labelCounts.set(base, n)
-    const label = n === 1 ? base : `${base}-${n}`
-    childLabels.push(label)
-    labelToItem.push({ label, item })
-  }
-
-  console.log('6) Updating /dashboard layer — context [html, manifest] + children for each open Q...')
+  console.log('5) Updating /dashboard layer — context [html, manifest] + children for each open Q...')
   // One layer-as-primitive update preserves both slots in a single cascade.
   // Using `bag-set` here would only carry `context`, wiping `children` on
   // every refresh (and vice versa). `update` is the canonical surface for
   // multi-slot writes.
+  //
+  // No `link` property gets stamped on children any more. Tile clicks on
+  // /dashboard's children are caught by the rendered page's ANSWER_SCRIPT
+  // (which subscribes to `tile:action` on the global EffectBus) and resolved
+  // inline against the embedded label→qId map. Clicking opens the matching
+  // card inside /dashboard — no new tab, no navigation away from the
+  // dashboard, no leaked URL with `%5B…%5D` brackets.
   const stamp = await withRenderer({
     op: 'update',
     segments: ['dashboard'],
@@ -523,24 +524,68 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
   if (!stamp.ok) { console.log('   FAILED:', stamp.error); process.exit(1) }
   console.log(`   /dashboard stamped — context = [${htmlSig.slice(0, 8)}…, ${manifestSig.slice(0, 8)}…], children = ${childLabels.length}`)
 
-  // 7) Stamp each child's `link` property so the tile shows the link
-  //    badge and clicking the open action opens the source cell page.
-  //    Stays best-effort — a failed stamp doesn't break the dashboard;
-  //    the cell still exists and can be linked manually later.
+  // 6) Defensive: clear any leftover `link` on the current dashboard children.
+  //    Earlier revisions of this script stamped link=`/source#q-<id>` so a
+  //    hex-grid tile click would open the source cell in a new tab. We've
+  //    moved off that pattern — clicks are caught inline by the dashboard
+  //    page's ANSWER_SCRIPT via the EffectBus — but the children's `0000`
+  //    files may still carry the old link string from those prior runs.
+  //    LinkOpenWorker treats an empty-string link as "no link" and no-ops,
+  //    so stamping `link: ''` is the right way to retire the old value
+  //    without inventing a "delete-property" bridge op.
   if (childLabels.length > 0) {
-    console.log('7) Stamping child link properties...')
-    let linked = 0
-    for (const { label, item } of labelToItem) {
-      const href = cellUrl(item.path, item.qId)
+    console.log('6) Clearing legacy `link` on dashboard children...')
+    let cleared = 0
+    for (const label of childLabels) {
       const res = await withRenderer({
         op: 'stamp',
         segments: ['dashboard', label],
-        layer: { link: href },
+        layer: { link: '' },
       })
-      if (res.ok) linked++
+      if (res.ok) cleared++
       else console.log(`   /${label}: ${res.error}`)
     }
-    console.log(`   ${linked}/${childLabels.length} children linked`)
+    console.log(`   ${cleared}/${childLabels.length} legacy links cleared`)
+  }
+
+  // 7) Write one `dashboard-q-binding` optimization per child so the
+  //    in-shell DashboardQOpenWorker can route hex-grid tile clicks to
+  //    the QA modal. The binding's `appliesTo` is `['dashboard', label]`
+  //    — the worker matches that against `[…explorerSegments, label]`
+  //    on click, reads the payload, and hands it to QaModalView.show.
+  //    Q&A lives in the optimization substrate per the layer-purity
+  //    rule; cells' `0000` files stay clean.
+  //
+  //    Idempotency: we don't dedupe by content. Re-running the refresh
+  //    just adds new binding records; stale ones are tolerated by the
+  //    worker (it scans for the first appliesTo match). A periodic GC
+  //    over `__optimization__/` can prune kind=`dashboard-q-binding`
+  //    records whose qId is no longer present in the open-Q list —
+  //    separate sweep, not this script's job.
+  if (childLabels.length > 0) {
+    console.log('7) Writing dashboard-q-binding optimizations...')
+    let written = 0
+    for (let i = 0; i < childLabels.length; i++) {
+      const label = childLabels[i]
+      const item = openItems[i]
+      const binding = {
+        kind: 'dashboard-q-binding',
+        appliesTo: ['dashboard', label],
+        payload: {
+          qId: item.qId,
+          qSig: item.sig || '',
+          qPath: item.path,
+          question: item.question,
+        },
+      }
+      const res = await withRenderer({
+        op: 'optimization-add',
+        text: JSON.stringify(binding),
+      })
+      if (res.ok) written++
+      else console.log(`   /${label}: ${res.error}`)
+    }
+    console.log(`   ${written}/${childLabels.length} bindings written`)
   }
 
   console.log('\nDone.')
@@ -548,13 +593,13 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
   console.log(`  Dashboard URL: http://localhost:4250/dashboard`)
   console.log(`  Refresh the dev shell to load the new context.`)
   if (openItems.length > 0) {
-    console.log('\nOpen Qs (click any to open in the editor):')
+    console.log('\nOpen Qs (click any tile on /dashboard to open its card inline):')
     for (let i = 0; i < openItems.length; i++) {
       const { path, question, qId } = openItems[i]
       const label = childLabels[i]
-      const url = cellUrl(path, qId)
+      const pathStr = path.length === 0 ? '/' : '/' + path.join('/')
       const preview = question.length > 70 ? question.slice(0, 67) + '…' : question
-      console.log(`  /dashboard/${label}  →  ${url}\n    ${preview}`)
+      console.log(`  /dashboard/${label}  (${pathStr}, q=${qId.slice(0, 8)}…)\n    ${preview}`)
     }
   }
 })().catch(err => { console.error('FATAL:', err); process.exit(1) })

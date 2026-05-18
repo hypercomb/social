@@ -59,6 +59,13 @@ export interface TileSourceRef {
    *  swarm participant whose layer contributed this tile, so the
    *  renderer can distinguish my-tiles from theirs at draw time. */
   readonly peerPubkey?: string
+  /** Slot index the peer was rendering this tile at — set on kind='peer'
+   *  when the publisher included an `index` in their swarm payload.
+   *  Show-cell's pinned order resolver honours this so a peer's tile
+   *  lands at the same axial position the publisher sees, instead of
+   *  being demoted to the next-free slot starting at 0 (which collides
+   *  with the local cell at index 0 and produces a disjoint layout). */
+  readonly peerIndex?: number
 }
 
 /**
