@@ -45,12 +45,20 @@ export class HexImageAtlas {
     this.#cols = Math.max(1, cols)
     this.#rows = Math.max(1, rows)
 
+    // Mobile: drop resolution 2 → 1 and disable MSAA. Original config
+    // allocated cols*cellPx × rows*cellPx × resolution² × 4 bytes RGBA ≈
+    // 4096×4096×4×4 = 256 MB GPU memory, plus MSAA samples. That alone
+    // exceeds iPhone WKWebView's GPU process budget and silently kills
+    // the renderer on the first ticker tick after this atlas is added
+    // to the stage. Resolution 1, no MSAA = 64 MB — fits, and the atlas
+    // holds pre-sized images so the lower resolution is visually fine.
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
     this.#atlas = RenderTexture.create({
       width: this.#cols * this.#cellPx,
       height: this.#rows * this.#cellPx,
-      resolution: 2,
+      resolution: isMobile ? 1 : 2,
       scaleMode: 'linear',
-      antialias: true,
+      antialias: !isMobile,
     })
     this.#slotToSig = new Array(this.#cols * this.#rows).fill(null)
 
