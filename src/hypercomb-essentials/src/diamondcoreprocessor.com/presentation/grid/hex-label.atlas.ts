@@ -35,10 +35,17 @@ export class HexLabelAtlas {
     this.rows = Math.max(1, rows)
     this.slotToLabel = new Array(this.cols * this.rows).fill(null)
 
+    // Mobile: drop resolution 8 → 2. At cellPx=128 cols=rows=8, resolution
+    // 8 allocates 1024×1024×8²×4 bytes = 256 MB of GPU memory just for
+    // labels. Combined with HexImageAtlas it blows past iPhone WKWebView's
+    // GPU process budget and kills the renderer on the first ticker tick.
+    // Resolution 2 keeps text crisp at iPhone DPR 1.5 (capped in
+    // pixi-host.worker.ts) and drops the allocation to 16 MB.
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
     this.atlas = RenderTexture.create({
       width: this.cols * this.cellPx,
       height: this.rows * this.cellPx,
-      resolution: 8,
+      resolution: isMobile ? 2 : 8,
     })
 
     // clear once so sampling starts transparent
