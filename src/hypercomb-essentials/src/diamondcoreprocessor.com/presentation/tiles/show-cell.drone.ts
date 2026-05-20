@@ -1434,6 +1434,7 @@ export class ShowCellDrone extends Drone {
 
     // note: init layer + atlases (and reset shader if renderer changes)
     if (!this.layer) {
+      ;(window as any).__hcBoot?.('ShowCellDrone: first atlas init start')
       this.layer = new Container()
       this.pixiContainer.addChild(this.layer)
 
@@ -1445,7 +1446,9 @@ export class ShowCellDrone extends Drone {
       this.#invalidateAllLabelDerivedState()
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
+      ;(window as any).__hcBoot?.('ShowCellDrone: first atlas init done')
     } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
+      ;(window as any).__hcBoot?.('ShowCellDrone: atlas re-init start')
       this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
       this.attachLabelResolver(this.atlas)
       this.atlas.setPivot(this.#pivot)
@@ -1454,6 +1457,7 @@ export class ShowCellDrone extends Drone {
       this.#invalidateAllLabelDerivedState()
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
+      ;(window as any).__hcBoot?.('ShowCellDrone: atlas re-init done')
     }
 
     // ── back-nav fast path ─────────────────────────────────
