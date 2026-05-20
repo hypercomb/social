@@ -427,28 +427,41 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly openCamera = async (): Promise<void> => {
     if (this.cameraActive || this.#stream) return
-    const isMobile = navigator.maxTouchPoints > 0 && /Android|iPhone|iPad|iPod/i.test(navigator.userAgent)
-    if (isMobile || !navigator.mediaDevices?.getUserMedia) {
-      this.cameraFallbackInput?.nativeElement?.click()
-      return
+
+    // Prefer the in-app camera overlay (hex viewfinder) on every platform.
+    // Falls back to the native file-input camera when getUserMedia is
+    // unavailable or denied (e.g. iOS Safari rejecting because the user
+    // gesture got lost through the EffectBus → editor.open chain, or the
+    // user previously declined camera permission).
+    if (navigator.mediaDevices?.getUserMedia) {
+      // Show the black overlay immediately — before awaiting getUserMedia
+      // so the editor chrome that opened with autoCamera is visually
+      // hidden during the permission prompt / stream-setup window.
+      this.cameraActive = true
+      this.#cdr.detectChanges()
+
+      try {
+        this.#stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: { ideal: this.#facingMode } },
+        })
+        const video = this.cameraVideo?.nativeElement
+        if (video) {
+          video.srcObject = this.#stream
+          video.play().catch(() => {})
+        }
+        navigator.mediaDevices.enumerateDevices()
+          .then(devices => { this.hasMultipleCameras = devices.filter(d => d.kind === 'videoinput').length > 1 })
+          .catch(() => {})
+        return
+      } catch {
+        // Permission denied / no gesture / no camera — undo the overlay
+        // and fall through to the native file-input fallback.
+        this.cameraActive = false
+        this.#cdr.detectChanges()
+      }
     }
-    try {
-      this.#stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: this.#facingMode } },
-      })
-    } catch {
-      return
-    }
-    this.cameraActive = true
-    this.#cdr.detectChanges()
-    const video = this.cameraVideo?.nativeElement
-    if (video) {
-      video.srcObject = this.#stream
-      video.play().catch(() => {})
-    }
-    navigator.mediaDevices.enumerateDevices()
-      .then(devices => { this.hasMultipleCameras = devices.filter(d => d.kind === 'videoinput').length > 1 })
-      .catch(() => {})
+
+    this.cameraFallbackInput?.nativeElement?.click()
   }
 
   readonly capturePhoto = async (): Promise<void> => {
