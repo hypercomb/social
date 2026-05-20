@@ -9,7 +9,9 @@ if (!username || !accessKey) {
   process.exit(1)
 }
 
-console.log('Connecting to LambdaTest — starting iPhone 15 Safari session...')
+// Target: iOS 26 (matches real device iOS 26.4.2 where SAH concurrency OOM occurs).
+// If LambdaTest doesn't have iOS 26 yet, change platformVersion to '18'.
+console.log('Connecting to LambdaTest — starting iPhone 16 iOS 26 Safari session...')
 
 const driver = await remote({
   hostname: 'mobile-hub.lambdatest.com',
@@ -19,8 +21,8 @@ const driver = await remote({
   logLevel: 'warn',
   capabilities: {
     platformName: 'iOS',
-    'appium:deviceName': 'iPhone 15',
-    'appium:platformVersion': '17',
+    'appium:deviceName': 'iPhone 16',
+    'appium:platformVersion': '26',
     browserName: 'Safari',
     'lt:options': {
       username,

@@ -20,8 +20,9 @@ export abstract class Worker extends Bee {
     if (this._state === BeeState.Disposed) return
     if (this.#acted) return
     if (!(await this.ready(grammar))) return
-    await this.act(grammar)
+    if (this.#acted) return  // re-check after async ready() — closes concurrent pulse race
     this.#acted = true
+    await this.act(grammar)
     if (this._state === BeeState.Created || this._state === BeeState.Registered) {
       this._state = BeeState.Active
     }

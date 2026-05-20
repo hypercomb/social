@@ -100,7 +100,7 @@ export class PixiHostWorker extends Worker {
       backgroundAlpha: 0,
       resolution: dpr,
       autoDensity: true,
-      antialias: dpr < 2,
+      antialias: !isMobile && dpr < 2,
       // Hint to iOS to use the efficiency GPU core — it has a larger
       // memory headroom relative to workload than the performance core.
       powerPreference: 'low-power',
