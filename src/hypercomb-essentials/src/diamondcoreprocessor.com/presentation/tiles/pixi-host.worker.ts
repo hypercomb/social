@@ -51,6 +51,7 @@ export class PixiHostWorker extends Worker {
   }
 
   protected override act = async (): Promise<void> => {
+    ;(window as any).__hcBoot?.('PixiHostWorker.act() entry')
     // guard: prevent duplicate canvas from double-loaded modules
     if (document.querySelector('[data-hypercomb-pixi="root"] canvas')) return
 
@@ -78,7 +79,9 @@ export class PixiHostWorker extends Worker {
     // pixi app
     // -------------------------------------------------
 
+    ;(window as any).__hcBoot?.('PixiHostWorker.act() before new Application')
     const app = this.app = new Application()
+    ;(window as any).__hcBoot?.('PixiHostWorker.act() after new Application')
 
     // Mobile: cap DPR at 1.5. iPhone Pro has DPR=3 → 3M-pixel framebuffer at 60fps which
     // pushes the iOS GPU process over its memory limit → repeated WKWebView crash → Safari
@@ -115,7 +118,9 @@ export class PixiHostWorker extends Worker {
 
     app.stage.scale.set(1.8, 1.8)
     app.stage.interactiveChildren = false
+    ;(window as any).__hcBoot?.('PixiHostWorker.act() before host.appendChild(canvas)')
     host.appendChild(app.canvas)
+    ;(window as any).__hcBoot?.('PixiHostWorker.act() after host.appendChild(canvas)')
 
     // Pause the ticker when the tab is hidden — a backgrounded page
     // burning GPU cycles at 30-60fps is a leading cause of iOS GPU
@@ -239,6 +244,7 @@ export class PixiHostWorker extends Worker {
     // broadcast pixi resources to other drones via effect bus
     // -------------------------------------------------
 
+    ;(window as any).__hcBoot?.('PixiHostWorker.act() before emit render:host-ready')
     this.emitEffect<HostReadyPayload>('render:host-ready', {
       app: this.app,
       container: this.container,
@@ -246,6 +252,7 @@ export class PixiHostWorker extends Worker {
       renderer: this.app.renderer,
     })
     ;(window as any).__hcBoot?.('render:host-ready emitted')
+    ;(window as any).__hcBoot?.('PixiHostWorker.act() returning')
   }
 }
 

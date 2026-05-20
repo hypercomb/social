@@ -308,6 +308,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     const pending = sigs.filter(sig => sig && this.#isSignature(sig) && !this.#beeCache.has(sig))
     if (!pending.length) return
 
+    ;(globalThis as any).__hcBoot?.(`#loadBeesPrioritized entry pending=${pending.length}`)
     EffectBus.emit('loader:bees-progress', { loading: pending.length, total: this.#beeCache.size + pending.length })
 
     // iOS: sequential load. Concurrent dynamic imports + concurrent drone
@@ -316,9 +317,12 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     // rest-pending wave after boot completed). Serial loading trades
     // a few seconds of boot time for not crashing.
     if (/iP(hone|ad|od)/i.test(navigator.userAgent)) {
+      ;(globalThis as any).__hcBoot?.('iOS serial branch entry')
       const tIOS = performance.now()
       for (const sig of pending) {
+        ;(globalThis as any).__hcBoot?.(`iOS bee load start ${sig.slice(0, 12)}`)
         await this.#loadBeeBySignature(sig).catch(() => null)
+        ;(globalThis as any).__hcBoot?.(`iOS bee load done ${sig.slice(0, 12)}`)
       }
       for (const sig of this.#beeCache.keys()) this.#firstPulsed.add(sig)
       this.#refreshProjection()
@@ -326,6 +330,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       const iosMs = performance.now() - tIOS
       const iosMsg = `[script-preloader] iOS serial wave (${pending.length}) loaded in ${iosMs.toFixed(0)}ms`
       console.log(iosMsg)
+      ;(globalThis as any).__hcBoot?.(`iOS serial branch done ${iosMs.toFixed(0)}ms`)
       try { localStorage.setItem('hc:perf-last-boot', `${Date.now()}:${iosMsg}`) } catch {}
       EffectBus.emit('loader:bees-done', {
         loaded: this.#beeCache.size,

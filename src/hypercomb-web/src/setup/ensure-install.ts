@@ -36,6 +36,7 @@ type InstallManifest = {
 }
 
 export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<void> => {
+  ;(window as any).__hcBoot?.('ensureInstall entry')
   // register the central signature allowlist — scripts in the store skip re-verification
   const sigStore = new SignatureStore()
   register('@hypercomb/SignatureStore', sigStore)
@@ -47,6 +48,7 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
   }
 
   await store.initialize()
+  ;(window as any).__hcBoot?.('ensureInstall: store.initialize done')
 
   if (!store.opfsAvailable) {
     console.warn('[ensure-install] OPFS unavailable — skipping install; app will boot without persistence')
@@ -73,6 +75,7 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
     await purgeStaleOpfsArtifacts(store)
   }
   const usableCache = !stale && cachedManifest && cachedManifest.bees.length > 0
+  ;(window as any).__hcBoot?.(`ensureInstall: usableCache=${!!usableCache}`)
   if (usableCache) {
     // Verify EVERY bee + EVERY dep + EVERY layer file is in OPFS. Partial
     // installs (e.g. Edge cold-load with SW race, network glitch mid-fetch)
@@ -91,6 +94,7 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
           console.warn('[ensure-install] boot resync failed; continuing with cached state', err)
         }
       }
+      ;(window as any).__hcBoot?.('ensureInstall: cached fast path')
       console.log('[ensure-install] booting from cached state')
       restoreSignatureStore(sigStore)
       restoreCachedBeeDeps()
@@ -138,6 +142,7 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
   // (the controllerchange event is unreliable). Reload so the SW intercepts
   // dep/bee fetches and serves them from the seeded cache on second load.
   if (/iP(hone|ad|od)/i.test(navigator.userAgent)) {
+    ;(window as any).__hcBoot?.('ensureInstall: iOS post-install reload')
     window.location.reload()
     await new Promise(() => {})
   }

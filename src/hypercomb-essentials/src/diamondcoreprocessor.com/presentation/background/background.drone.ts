@@ -22,11 +22,14 @@ export class BackgroundDrone extends Drone {
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
     this.#effectsRegistered = true
+    ;(window as any).__hcBoot?.('BackgroundDrone.heartbeat: subscribed render:host-ready')
 
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
+      ;(window as any).__hcBoot?.('BackgroundDrone: render:host-ready received')
       this.#container = payload.container
       this.#initGraphics()
       this.#redraw()
+      ;(window as any).__hcBoot?.('BackgroundDrone: initial redraw done')
     })
   }
 
