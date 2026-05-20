@@ -614,6 +614,19 @@ export class SubstrateService extends EventTarget {
     return this.#propsPool[Math.floor(Math.random() * this.#propsPool.length)].imageSig
   }
 
+  /** Deterministic per-label picker for display-time fallback rendering.
+   *  Same label always returns the same image sig. Used by show-cell to
+   *  show a substrate background on label-only tiles (those with props
+   *  in the index but no `small.image`), without mutating the user's
+   *  persistent props blob. */
+  pickImageForLabel(label: string): string | null {
+    if (this.#propsPool.length === 0) return null
+    let hash = 5381
+    for (let i = 0; i < label.length; i++) hash = ((hash << 5) + hash + label.charCodeAt(i)) | 0
+    const idx = Math.abs(hash) % this.#propsPool.length
+    return this.#propsPool[idx].imageSig
+  }
+
   // ────────────────────── cell assignment API ──────────────────────
 
   applyToCell(label: string): boolean {

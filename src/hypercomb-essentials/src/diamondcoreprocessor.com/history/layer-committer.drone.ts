@@ -714,17 +714,22 @@ export class LayerCommitter {
             const values = Array.isArray(raw) ? raw : []
             let sigs: string[]
             if (nameSlots.has(slot)) {
-              sigs = []
-              for (const cell of values) {
+              // Each child's sign + latestMarkerSigFor pair is independent —
+              // pure compute (memoized) and a bag head read respectively, with
+              // no shared mutable state. Running them sequentially was O(N)
+              // OPFS round-trips on cold cache (multi-second for large layers);
+              // Promise.all collapses the wall-clock to ~one round-trip while
+              // preserving order. filter() drops empty names and miss-resolves.
+              const resolved = await Promise.all(values.map(async (cell) => {
                 const trimmed = String(cell ?? '').trim()
-                if (!trimmed) continue
+                if (!trimmed) return ''
                 const cellLocSig = await history.sign({
                   domain: lineage.domain,
                   explorerSegments: () => [...sub, trimmed],
                 } as Lineage)
-                const cellSig = await history.latestMarkerSigFor(cellLocSig, trimmed)
-                if (cellSig) sigs.push(cellSig)
-              }
+                return await history.latestMarkerSigFor(cellLocSig, trimmed)
+              }))
+              sigs = resolved.filter(Boolean)
             } else {
               sigs = values.map(v => String(v)).filter(Boolean)
             }

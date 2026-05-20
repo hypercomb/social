@@ -16,12 +16,38 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   // SHA-256 of canonical JSON: [] → 4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945
   static readonly #EMPTY_SIGS: readonly string[] = Object.freeze([])
 
+  // Render-critical IoC keys. find() resolves as soon as every key here
+  // is registered; remaining bees keep loading in background. This is the
+  // minimum set required to paint the first hive frame: Pixi host, hex
+  // math, layout solver, the cell renderer, and its prerequisites.
+  //
+  // Keep this list small — every entry blocks first paint. If a drone
+  // belongs here, it should be because the visible grid genuinely cannot
+  // render without it. Anything tile-action / overlay / network / history
+  // related does NOT belong here.
+  static readonly #RENDER_CRITICAL_KEYS: readonly string[] = Object.freeze([
+    '@diamondcoreprocessor.com/PixiHostWorker',
+    '@diamondcoreprocessor.com/Settings',
+    '@diamondcoreprocessor.com/AxialService',
+    '@diamondcoreprocessor.com/LayoutService',
+    '@diamondcoreprocessor.com/ShowCellDrone',
+    // Hot-reloaded class name in dev shell (esbuild collision-rename adds
+    // a `_` prefix). Production sees the un-prefixed form.
+    '@diamondcoreprocessor.com/_ShowCellDrone',
+    '@diamondcoreprocessor.com/BackgroundDrone',
+  ])
+
   private get store(): Store { return <Store>get("@hypercomb.social/Store") }
 
   #actions: readonly ActionDescriptor[] = []
   #actionNames: readonly string[] = []
   #resourceCount = 0
   #finding: Promise<Bee[]> | null = null
+
+  // Bees pulsed at least once (either by the processor's encounter loop
+  // for the first wave, or individually here once they land off the
+  // critical path). Ensures every bee gets exactly one initial pulse.
+  readonly #firstPulsed = new Set<string>()
 
   public get actions(): readonly ActionDescriptor[] { return this.#actions }
   public get actionNames(): readonly string[] { return this.#actionNames }
@@ -39,6 +65,9 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   // In-flight dedup: prevents two callers from loading the same bee concurrently
   readonly #inFlight = new Map<string, Promise<Bee | null>>()
 
+  // one-shot boot marker: first find() call done
+  static #firstFindMarked = false
+
   public resolveBySignature = (signature: string): ActionDescriptor | undefined =>
     this.#bySignature.get(signature)
 
@@ -53,29 +82,34 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     if (this.#finding) return this.#finding
 
     const run = async (): Promise<Bee[]> => {
+      const tFind = performance.now()
+
       // Layer-walk: layers are the source of truth. Union every signature
       // array they declare (bees, dependencies, resources, nested layers).
       // Falls back to the flat install-manifest bees list for legacy/dev.
       const layerRoots = ScriptPreloader.readManifestLayers()
+      const tWalk = performance.now()
       const walked = layerRoots.length
         ? await this.#walkLayers(layerRoots)
         : { bees: ScriptPreloader.readManifestBees(), dependencies: ScriptPreloader.#EMPTY_SIGS, resources: ScriptPreloader.#EMPTY_SIGS }
+      const walkMs = performance.now() - tWalk
 
-      // Prefetch __resources__ in parallel with bee loading — tiles and
-      // drones that need these blobs will find them hot in the Store cache.
-      const prefetch = walked.resources.length
-        ? Promise.allSettled(walked.resources.map(sig => this.store.preheatResource(sig)))
-        : Promise.resolve([])
-
-      if (walked.bees.length) {
-        await this.#loadBeesFromList(walked.bees)
+      // Background cache warming — `preheatResource` is just `getResource`,
+      // so cold reads work fine. Awaiting these would scale first paint
+      // linearly with tile count; pulse must not wait on preloader work.
+      if (walked.resources.length) {
+        void Promise.allSettled(walked.resources.map(sig => this.store.preheatResource(sig)))
       }
 
-      await prefetch
+      const tBees = performance.now()
+      if (walked.bees.length) {
+        await this.#loadBeesPrioritized(walked.bees)
+      }
+      const beesMs = performance.now() - tBees
 
-      // Warmup hooks — every freshly-registered bee gets one shot to
-      // pre-rasterize glyphs, compile shaders, open connections, etc.
-      await this.#runWarmups()
+      // Warmup hooks (e.g. atlas seeding) — fire and forget. Drones must
+      // render correctly without their warmup having completed.
+      void this.#runWarmups()
 
       // Enforce manifest: dispose and evict bees that are no longer enabled.
       // This is the trust boundary — if DCP says a bee is off, it must not pulse.
@@ -98,6 +132,16 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         if (evicted) this.#refreshProjection()
       }
 
+      const findMs = performance.now() - tFind
+      const findMsg = `[script-preloader] find: total=${findMs.toFixed(0)}ms walk=${walkMs.toFixed(0)}ms bees=${beesMs.toFixed(0)}ms (${walked.bees.length}b/${walked.dependencies.length}d/${walked.resources.length}r)`
+      console.log(findMsg)
+      try { localStorage.setItem('hc:perf-find-last', `${Date.now()}:${findMsg}`) } catch {}
+
+      if (!ScriptPreloader.#firstFindMarked) {
+        ScriptPreloader.#firstFindMarked = true
+        ;(window as any).__hcBoot?.(`first preloader.find done (total=${findMs.toFixed(0)}ms walk=${walkMs.toFixed(0)}ms bees=${beesMs.toFixed(0)}ms)`)
+      }
+
       return [...this.#beeCache.values()]
     }
 
@@ -111,6 +155,17 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 
   readonly #warmedUp = new Set<string>()
 
+  // Per-signature parse cache. Layer sigs are immutable by definition
+  // (SHA-256 of canonical bytes), so once parsed the structure is forever
+  // valid — there is no invalidation case. Subsequent walks reuse the
+  // arrays directly with no OPFS read and no JSON parse.
+  readonly #layerCache = new Map<string, {
+    bees: string[]
+    dependencies: string[]
+    resources: string[]
+    children: string[]
+  }>()
+
   #walkLayers = async (
     roots: string[]
   ): Promise<{ bees: string[]; dependencies: string[]; resources: string[] }> => {
@@ -119,34 +174,57 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     const dependencies = new Set<string>()
     const resources = new Set<string>()
 
+    let opfsReads = 0
+    let cacheHits = 0
+    let opfsMs = 0
+    let parseMs = 0
+
     const visit = async (sig: string): Promise<void> => {
       const clean = this.#stripExt(sig)
       if (!clean || visited.has(clean)) return
       visited.add(clean)
 
-      const bytes = await this.store.getLayerBytes(clean)
-      if (!bytes) {
-        console.warn(`[script-preloader] layer ${clean} not found in OPFS`)
-        return
+      let parsed = this.#layerCache.get(clean)
+      if (parsed) {
+        cacheHits++
+      } else {
+        const tOpfs = performance.now()
+        const bytes = await this.store.getLayerBytes(clean)
+        opfsMs += performance.now() - tOpfs
+        opfsReads++
+        if (!bytes) {
+          console.warn(`[script-preloader] layer ${clean} not found in OPFS`)
+          return
+        }
+
+        const tParse = performance.now()
+        try {
+          const layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
+          parsed = {
+            bees: ((layer['bees'] as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
+            dependencies: ((layer['dependencies'] as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
+            resources: ((layer['resources'] as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
+            children: ((layer['layers'] as string[] | undefined) ?? []).map(s => this.#stripExt(s)).filter(Boolean),
+          }
+          this.#layerCache.set(clean, parsed)
+        } catch (err) {
+          console.warn(`[script-preloader] failed to parse layer ${clean}:`, err)
+          return
+        }
+        parseMs += performance.now() - tParse
       }
 
-      let layer: Record<string, unknown>
-      try {
-        layer = JSON.parse(new TextDecoder().decode(bytes))
-      } catch (err) {
-        console.warn(`[script-preloader] failed to parse layer ${clean}:`, err)
-        return
-      }
+      for (const b of parsed.bees) bees.add(b)
+      for (const d of parsed.dependencies) dependencies.add(d)
+      for (const r of parsed.resources) resources.add(r)
 
-      for (const b of (layer['bees'] as string[] | undefined) ?? []) bees.add(this.#stripExt(b))
-      for (const d of (layer['dependencies'] as string[] | undefined) ?? []) dependencies.add(this.#stripExt(d))
-      for (const r of (layer['resources'] as string[] | undefined) ?? []) resources.add(this.#stripExt(r))
-
-      const children = (layer['layers'] as string[] | undefined) ?? []
-      await Promise.all(children.map(visit))
+      await Promise.all(parsed.children.map(visit))
     }
 
     await Promise.all(roots.map(visit))
+
+    console.log(`[script-preloader] walkLayers: ${visited.size} layers (${opfsReads} OPFS reads = ${opfsMs.toFixed(0)}ms, ${cacheHits} cache hits, parse ${parseMs.toFixed(0)}ms)`)
+
     return {
       bees: [...bees].filter(Boolean),
       dependencies: [...dependencies].filter(Boolean),
@@ -202,6 +280,177 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     }
   }
 
+  /**
+   * Priority-aware bee loading.
+   *
+   * Two strategies, picked based on whether we have a learned sig→iocKey
+   * cache from prior boots:
+   *
+   *   FAST PATH (warm cache): we already know which sigs are render-
+   *     critical. Load JUST those in wave 1, awaited. The remaining
+   *     ~48 bees start AFTER critical finishes, in background. Critical
+   *     gets exclusive use of the browser's eval thread for ~6 modules
+   *     instead of competing with 48 — empirically the difference between
+   *     ~400ms (everything jammed in parallel) and ~50ms (just critical).
+   *
+   *   COLD PATH (no cache): we don't know which sigs map to critical IoC
+   *     keys yet, so we fall back to the onRegister race — start all
+   *     loads, resolve as soon as the six critical keys appear. Slower
+   *     than the warm path, but populates the cache so the next boot is
+   *     fast.
+   *
+   * Non-critical bees that arrive after find() returns get their own
+   * first pulse from the background continuation — drones whose
+   * heartbeat wires EffectBus listeners (NostrMeshDrone, PairedChannelDrone)
+   * require this or their listeners never register.
+   */
+  #loadBeesPrioritized = async (sigs: string[]): Promise<void> => {
+    const pending = sigs.filter(sig => sig && this.#isSignature(sig) && !this.#beeCache.has(sig))
+    if (!pending.length) return
+
+    EffectBus.emit('loader:bees-progress', { loading: pending.length, total: this.#beeCache.size + pending.length })
+
+    const learnedCritical = ScriptPreloader.#readLearnedCriticalSigs()
+    const criticalSet = new Set(learnedCritical.filter(sig => pending.includes(sig)))
+
+    // ── FAST PATH ────────────────────────────────────────────────
+    if (criticalSet.size > 0) {
+      const criticalPending = pending.filter(sig => criticalSet.has(sig))
+      const restPending = pending.filter(sig => !criticalSet.has(sig))
+
+      const tWave1 = performance.now()
+      await Promise.allSettled(criticalPending.map(sig => this.#loadBeeBySignature(sig)))
+      const wave1Ms = performance.now() - tWave1
+
+      // Encounter loop will pulse these. Mark them.
+      for (const sig of this.#beeCache.keys()) this.#firstPulsed.add(sig)
+
+      const fastMsg = `[script-preloader] FAST critical wave (${criticalPending.length}) loaded in ${wave1Ms.toFixed(0)}ms; ${restPending.length} backgrounded`
+      console.log(fastMsg)
+      try { localStorage.setItem('hc:perf-last-boot', `${Date.now()}:${fastMsg}`) } catch {}
+
+      // Background: load the rest and pulse them individually.
+      void (async () => {
+        const restLoads = restPending.map(sig => this.#loadBeeBySignature(sig))
+        await Promise.allSettled(restLoads)
+        for (const [sig, bee] of this.#beeCache) {
+          if (this.#firstPulsed.has(sig)) continue
+          this.#firstPulsed.add(sig)
+          try { await bee.pulse('') } catch (err) {
+            console.warn(`[script-preloader] late pulse failed for ${bee.iocKey}:`, err)
+          }
+        }
+        this.#refreshProjection()
+        ScriptPreloader.#updateLearnedCriticalSigs(this.#beeCache)
+        EffectBus.emit('loader:bees-done', {
+          loaded: this.#beeCache.size,
+          failed: pending.length - this.#beeCache.size,
+          total: this.#beeCache.size,
+        })
+      })()
+      return
+    }
+
+    // ── COLD PATH (no cache yet) ─────────────────────────────────
+    const allLoads = pending.map(sig => this.#loadBeeBySignature(sig))
+
+    const critical = ScriptPreloader.#RENDER_CRITICAL_KEYS
+    const tCriticalStart = performance.now()
+    const criticalReady = new Promise<void>(resolve => {
+      const stillNeeded = new Set<string>(critical)
+      for (const k of [...stillNeeded]) {
+        if (window.ioc.has?.(k)) stillNeeded.delete(k)
+      }
+      if (stillNeeded.size === 0) { resolve(); return }
+
+      let unsub: (() => void) | undefined
+      unsub = window.ioc.onRegister?.((key) => {
+        if (!stillNeeded.has(key)) return
+        stillNeeded.delete(key)
+        if (stillNeeded.size === 0) {
+          unsub?.()
+          resolve()
+        }
+      })
+      if (!unsub) {
+        void Promise.allSettled(allLoads).then(() => resolve())
+      }
+    })
+
+    await Promise.race([
+      criticalReady,
+      Promise.allSettled(allLoads).then(() => {}),
+    ])
+    const criticalMs = performance.now() - tCriticalStart
+
+    for (const sig of this.#beeCache.keys()) this.#firstPulsed.add(sig)
+
+    console.log(`[script-preloader] COLD critical bees ready in ${criticalMs.toFixed(0)}ms; populating sig→iocKey cache for next boot`)
+
+    void (async () => {
+      await Promise.allSettled(allLoads)
+      for (const [sig, bee] of this.#beeCache) {
+        if (this.#firstPulsed.has(sig)) continue
+        this.#firstPulsed.add(sig)
+        try { await bee.pulse('') } catch (err) {
+          console.warn(`[script-preloader] late pulse failed for ${bee.iocKey}:`, err)
+        }
+      }
+      this.#refreshProjection()
+      ScriptPreloader.#updateLearnedCriticalSigs(this.#beeCache)
+      EffectBus.emit('loader:bees-done', {
+        loaded: this.#beeCache.size,
+        failed: pending.length - this.#beeCache.size,
+        total: this.#beeCache.size,
+      })
+    })()
+  }
+
+  /** Read learned critical-bee sigs from prior boots. Empty on first run. */
+  static #readLearnedCriticalSigs(): readonly string[] {
+    try {
+      const raw = localStorage.getItem('hc:critical-bee-sigs')
+      if (!raw) return []
+      const parsed = JSON.parse(raw)
+      return Array.isArray(parsed)
+        ? parsed.filter(s => typeof s === 'string' && /^[a-f0-9]{64}$/i.test(s))
+        : []
+    } catch { return [] }
+  }
+
+  /** Persist learned sig→iocKey mapping for render-critical bees so the
+   *  next boot can hit the fast path. Best-effort; failures are silent.
+   *
+   *  Matches by constructor.name string, not by instance identity. Dev-
+   *  shell hot-reload creates parallel class objects: the instance in
+   *  `window.ioc` (registered first by a stale module) can be a different
+   *  object than the one in `beeCache` (created fresh by `store.getBee`).
+   *  Instance comparison fails. Constructor.name is stable across the
+   *  module-boundary because esbuild keeps the class name. */
+  static #updateLearnedCriticalSigs(beeCache: Map<string, Bee>): void {
+    try {
+      const criticalClassNames = new Set<string>()
+      for (const key of ScriptPreloader.#RENDER_CRITICAL_KEYS) {
+        const className = key.split('/').pop()
+        if (className) criticalClassNames.add(className)
+      }
+      const sigs: string[] = []
+      const seenKeys: string[] = []
+      const distinctInstances = new Set<unknown>()
+      for (const [sig, bee] of beeCache) {
+        distinctInstances.add(bee)
+        const iocKey = (bee as any)?.iocKey ?? '(null)'
+        seenKeys.push(iocKey)
+        const className = iocKey.split('/').pop()
+        if (className && criticalClassNames.has(className)) sigs.push(sig)
+      }
+      localStorage.setItem('hc:critical-bee-sigs', JSON.stringify(sigs))
+      console.log(`[script-preloader] cached ${sigs.length} critical sigs (saw ${seenKeys.length} bees, ${distinctInstances.size} distinct instances); want=${[...criticalClassNames].join(',')}; got_first5=${seenKeys.slice(0, 5).join('|')}`)
+    } catch (err) {
+      console.warn('[script-preloader] failed to persist critical bee sigs:', err)
+    }
+  }
+
   #loadBeesFromList = async (sigs: string[]): Promise<void> => {
     const pending = sigs.filter(sig => sig && this.#isSignature(sig) && !this.#beeCache.has(sig))
     if (!pending.length) return
@@ -246,7 +495,8 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   }
 
   #tryLoadBee = async (signature: string): Promise<Bee | null> => {
-    console.log(`[script-preloader] loading bee ${signature}`)
+    const tStart = performance.now()
+    let tOpfs = 0, tDeps = 0, tEval = 0
 
     // On iOS, store.getBee() ignores the buffer and imports from /content/__bees__/
     // directly. Skip the OPFS read — getFileHandle throws on fresh/partial installs
@@ -271,10 +521,17 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       buffer = await file.arrayBuffer()
     }
 
-    // Ensure namespace dependencies are loaded before the bee
-    await this.#ensureDeps(signature)
+    tOpfs = performance.now() - tStart
 
+
+    // Ensure namespace dependencies are loaded before the bee
+    const tDepsStart = performance.now()
+    await this.#ensureDeps(signature)
+    tDeps = performance.now() - tDepsStart
+
+    const tEvalStart = performance.now()
     const bee = await this.store.getBee(signature, buffer)
+    tEval = performance.now() - tEvalStart
     if (!bee) {
       console.warn(`[script-preloader] bee ${signature} returned null from getBee()`)
       return null
@@ -296,7 +553,11 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     this.#resourceCount++
     this.dispatchEvent(new CustomEvent('change'))
 
-    console.log(`[script-preloader] bee ${signature} loaded as ${bee.iocKey}`)
+    const total = performance.now() - tStart
+    // Only log slow bees (>30ms) to keep console quiet on the common case.
+    if (total > 30) {
+      console.log(`[script-preloader] SLOW ${total.toFixed(0)}ms (opfs=${tOpfs.toFixed(0)} deps=${tDeps.toFixed(0)} eval=${tEval.toFixed(0)}) ${bee.iocKey}`)
+    }
     return bee
   }
 

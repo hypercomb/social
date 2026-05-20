@@ -117,6 +117,7 @@ export class ExposeDrone extends Drone {
     EGG_UNLOCK_EFFECT,
     SHARE_APPROVE_EFFECT,
     SHARE_REJECT_EFFECT,
+    'paired-channel:adopt-request',
   ]
 
   protected override emits: string[] = ['toast:show']
@@ -143,13 +144,10 @@ export class ExposeDrone extends Drone {
       }
     })
 
-    this.onEffect<{ channelId: string; share: ShareState }>(
-      PAIRED_CHANNEL_EFFECTS.shareRequestReceived,
-      (payload) => {
-        if (!payload?.share) return
-        this.#offerApproval(payload.channelId, payload.share)
-      },
-    )
+    // No share-request approval prompt — every peer auto-attests its
+    // own shares now, so receivers don't need to "Approve". The legacy
+    // #offerApproval toast was firing on every incoming share-request
+    // and asking the user to confirm what's already being delivered.
 
     this.onEffect<{ channelId: string; share: ShareState }>(
       PAIRED_CHANNEL_EFFECTS.shareApproved,
@@ -173,6 +171,98 @@ export class ExposeDrone extends Drone {
       // so the toast's reject button has a destination and we can
       // wire an explicit `reject` verb later if we want auditability.
     })
+
+    // Adopt: receiver clicked import on an ephemeral preview tile.
+    // Look up the share by branchName, run materialiseFromSig with
+    // full depth so the entire subtree lands in OPFS as real layers.
+    this.onEffect<{ branchName?: string }>('paired-channel:adopt-request', (payload) => {
+      console.log('[sync] expose: adopt-request received', payload)
+      const name = payload?.branchName
+      if (typeof name !== 'string' || !name) return
+      void this.#adoptEphemeral(name)
+    })
+
+    // Import: receiver promotes a transient sync tile to a permanent
+    // layer. Clears `transient: true` recursively so the boot sweep
+    // doesn't remove it next session.
+    this.onEffect<{ branchName?: string }>('paired-channel:import-request', async (payload) => {
+      const name = payload?.branchName
+      if (typeof name !== 'string' || !name) return
+      const drone = this.#pairedChannelDrone()
+      if (!drone?.importTransientTree) {
+        this.#toast('warning', 'Import failed', 'PairedChannelDrone unavailable.')
+        return
+      }
+      const result = await drone.importTransientTree(name)
+      if (result.cleared === 0) {
+        this.#toast('tip', 'Nothing to import', `"${name}" is already permanent.`)
+      } else {
+        this.#toast('success', 'Imported',
+          `"${name}" (${result.cleared} cell${result.cleared === 1 ? '' : 's'}) is now permanent.`)
+      }
+    })
+  }
+
+  async #adoptEphemeral(branchName: string): Promise<void> {
+    console.log('[sync] adopt: start', { branchName })
+    const drone = this.#pairedChannelDrone()
+    if (!drone) {
+      console.warn('[sync] adopt: PairedChannelDrone unavailable')
+      this.#toast('warning', 'Adopt failed', 'PairedChannelDrone unavailable.')
+      return
+    }
+    const lineage = window.ioc.get('@hypercomb.social/Lineage') as LineageLike | undefined
+    const dir = await lineage?.explorerDir?.()
+    if (!dir) {
+      console.warn('[sync] adopt: no explorer dir')
+      this.#toast('warning', 'Adopt failed', 'No explorer directory.')
+      return
+    }
+    const segments = lineage?.explorerSegments?.() ?? []
+    const here = '/' + segments.join('/')
+
+    // Find the ephemeral entry for this branchName at the current bag.
+    const candidates = (drone as any).ephemeralSharesAt?.(here) ?? []
+    console.log('[sync] adopt: ephemeral candidates at', here, ':', candidates.map((c: any) => c.branchName))
+    const match = candidates.find((e: { branchName: string }) => e.branchName === branchName)
+    if (!match) {
+      console.warn('[sync] adopt: no ephemeral share found for', branchName)
+      this.#toast('warning', 'Adopt failed', `No ephemeral share found for "${branchName}".`)
+      return
+    }
+    if (!drone.layerOf?.(match.channelId, match.branchSig)) {
+      console.warn('[sync] adopt: root layer not buffered', match.branchSig)
+      this.#toast('warning', 'Adopt failed',
+        `Root layer ${match.branchSig.slice(0, 8)} hasn't arrived yet — try again in a moment.`)
+      return
+    }
+    console.log('[sync] adopt: materialising', { channelId: match.channelId.slice(0, 12), branchSig: match.branchSig.slice(0, 12) })
+
+    let result: { written: number; missing: string[]; skipped: number }
+    try {
+      result = await drone.materialiseFromSig(match.channelId, match.branchSig, dir, {
+        maxDepth: Number.POSITIVE_INFINITY,
+        parentSegments: segments,
+        approvalId: match.approvalId,
+      })
+    } catch (err) {
+      this.#toast('warning', 'Adopt failed', String((err as Error)?.message ?? err))
+      return
+    }
+
+    // Drop the ephemeral entry — the cells now live in OPFS.
+    drone.clearEphemeralShare?.(branchName)
+    EffectBus.emit('paired-channel:share-installed', { branchName, location: here })
+
+    if (result.missing.length > 0) {
+      this.#toast('tip', 'Adopted (partial)',
+        `Wrote ${result.written} layer(s). ${result.missing.length} sig(s) still missing.`)
+    } else {
+      this.#toast('success', 'Adopted',
+        `"${branchName}" + ${Math.max(0, result.written - 1)} descendant(s) are now yours.`)
+    }
+
+    if (match.approvalId) void drone.markPulled?.(match.channelId, match.approvalId)
   }
 
   // No per-pulse work; all behavior is event-driven.
@@ -181,47 +271,32 @@ export class ExposeDrone extends Drone {
   // ── expose path ────────────────────────────────────────────────────
 
   #registerIcon(): void {
-    const registry = window.ioc.get('@hypercomb.social/IconProviderRegistry') as IconProviderRegistry | undefined
-    // Both go on `public-own` (tiles the user owns in public mode).
-    // EggMenuPack also surfaces unlock for multi-select, but the
-    // per-tile sync icon is the discoverable button users will reach
-    // for first. Click handlers are inert on non-facade tiles.
-    registry?.add({
-      name: EXPOSE_ICON_NAME,
-      owner: '@diamondcoreprocessor.com/ExposeDrone',
-      svgMarkup: EXPOSE_ICON_SVG,
-      profile: 'public-own',
-      hoverTint: 0xa6e3a1,
-      labelKey: 'action.expose',
-      descriptionKey: 'action.expose.description',
-    })
-    registry?.add({
-      name: SYNC_ICON_NAME,
-      owner: '@diamondcoreprocessor.com/ExposeDrone',
-      svgMarkup: SYNC_ICON_SVG,
-      profile: 'public-own',
-      hoverTint: 0x80c8ff,
-      labelKey: 'action.sync',
-      descriptionKey: 'action.sync.description',
-    })
-    registry?.add({
-      name: MERGE_ICON_NAME,
-      owner: '@diamondcoreprocessor.com/ExposeDrone',
-      svgMarkup: MERGE_ICON_SVG,
-      profile: 'public-own',
-      hoverTint: 0xc8a8ff,
-      labelKey: 'action.merge',
-      descriptionKey: 'action.merge.description',
-    })
+    // Intentionally registers no icons. The swarm subsumes the
+    // paired-channel expose/sync/merge flow:
+    //
+    //   - For PEER (public-external) tiles, the canonical icons are
+    //     `adopt` and `block` registered by tile-actions.drone with
+    //     profile 'public-external'. Both wire to my SwarmAdoptDrone
+    //     and the show-cell hidden-tiles filter respectively.
+    //
+    //   - For OWNED (public-own) tiles, the previous expose/sync/merge
+    //     trio was paired-channel-specific and confusing on the canvas
+    //     (clicking sync on a tile you already own bails silently —
+    //     "nothing happens"). The handlers (#onExpose etc.) remain in
+    //     this drone so any code path that still emits
+    //     `tile:action` with action='expose' programmatically works.
+    void this.#firstJoinedChannel  // keep TS happy when icon usage is removed
   }
 
   async #onExpose(tileLabel: string): Promise<void> {
     const channel = this.#firstJoinedChannel()
     if (!channel) {
+      console.warn('[sync] expose blocked: no joined channel for', tileLabel)
       this.#toast('warning', 'No paired channel',
         'Set hypercomb.paired-channel.location and hypercomb.paired-channel.secret in localStorage, then reload.')
       return
     }
+    console.log('[sync] expose start', { tile: tileLabel, channel: channel.slice(0, 12) })
 
     const lineage = window.ioc.get('@hypercomb.social/Lineage') as LineageLike | undefined
     const dir = await lineage?.explorerDir?.()
@@ -266,6 +341,7 @@ export class ExposeDrone extends Drone {
       const ok = await drone.publishLayer(channel, sig, content)
       if (ok) pushed++
     }
+    console.log('[sync] published layers', { tile: tileLabel, pushed, total: layers.length })
     if (pushed === 0) {
       this.#toast('warning', 'Expose failed',
         'No layer events were published — mesh signer or relay unavailable.')
@@ -292,11 +368,13 @@ export class ExposeDrone extends Drone {
       preview,
       body: null, // bytes flow via separate `layer` events now
     })
+    console.log('[sync] requestShare', { tile: tileLabel, branchSig: root.sig.slice(0, 12), ok })
 
-    if (ok) {
-      this.#toast('info', 'Exposed',
-        `Pushed ${layers.length} layer${layers.length === 1 ? '' : 's'} for "${tileLabel}" and requested share. Waiting for host approval.`)
-    } else {
+    if (!ok) {
+      // Success path is silent — the user just clicked expose and the
+      // tile change is visible; a confirmation toast on every expose
+      // turns the corner into wallpaper. Failures still surface (the
+      // user needs to know if mesh/signer/relay is unreachable).
       this.#toast('warning', 'Expose failed',
         `Couldn't publish share-request — mesh signer or relay unavailable.`)
     }
@@ -359,41 +437,51 @@ export class ExposeDrone extends Drone {
   async #materialiseFacade(channelId: string, share: ShareState): Promise<void> {
     const lineage = window.ioc.get('@hypercomb.social/Lineage') as LineageLike | undefined
     const dir = await lineage?.explorerDir?.()
-    if (!dir) return
+    if (!dir) {
+      console.warn('[sync] share: no explorer dir', { tile: share.branchName })
+      return
+    }
+    const segments = lineage?.explorerSegments?.() ?? []
 
     const targetName = share.branchName
     if (!targetName) return
 
-    // Skip if the tile already exists locally (source-side echo).
+    // Source-side echo: the sender's own approval comes back through
+    // the channel. Skip if the tile already exists locally — we own it,
+    // it doesn't need to appear as a preview of itself.
     try {
       await dir.getDirectoryHandle(targetName, { create: false })
-      return // already present — do nothing
-    } catch { /* not present, proceed */ }
+      return
+    } catch { /* not present, proceed as ephemeral */ }
 
-    let cellDir: FileSystemDirectoryHandle
-    try {
-      cellDir = await dir.getDirectoryHandle(targetName, { create: true })
-    } catch (err) {
-      console.warn('[expose] facade: getDirectoryHandle failed', targetName, err)
+    // EPHEMERAL PREVIEW: don't write to OPFS. Record the share in the
+    // drone's #ephemeralShares; show-cell renders these as dashed/distinct
+    // preview tiles by merging them into its tile list. The user clicks
+    // the per-tile adopt icon to commit the subtree to OPFS, which fires
+    // 'paired-channel:adopt-request' → #adoptEphemeral → materialiseFromSig.
+    // Until adopted: the tile lives only in memory (machine.state.layers
+    // + this share entry). Close the tab and it's gone.
+    const drone = this.#pairedChannelDrone()
+    if (!drone) {
+      console.warn('[sync] share: PairedChannelDrone unavailable')
       return
     }
-
-    const meta: FacadeMetadata = {
-      facade: true,
+    if (!drone.layerOf(channelId, share.branchSig)) {
+      console.warn('[sync] share: root layer not buffered yet', share.branchSig)
+      return
+    }
+    const location = '/' + segments.join('/')
+    drone.recordEphemeralShare({
       channelId,
+      location,
+      branchName: targetName,
       branchSig: share.branchSig,
       approvalId: share.approvalId,
-    }
-
-    try {
-      await writeCellProperties(cellDir, meta as unknown as Record<string, unknown>)
-    } catch (err) {
-      console.warn('[expose] facade: writeCellProperties failed', targetName, err)
-      return
-    }
-
-    // Trigger render of the new tile.
-    EffectBus.emit('cell:added', { cell: targetName })
+    })
+    console.log('[sync] share: ephemeral preview', { tile: targetName, location, branchSig: share.branchSig.slice(0, 12) })
+    if (share.approvalId) void drone.markPulled(channelId, share.approvalId)
+    // Signal renderers to pick up the new ephemeral tile.
+    EffectBus.emit('paired-channel:preview-changed', { channelId, location, branchName: targetName })
   }
 
   /**
@@ -407,11 +495,11 @@ export class ExposeDrone extends Drone {
    * the unlock invoked — they fall through silently here rather
    * than misbehaving.
    */
-  async #onUnlockTile(tileLabel: string, mode: 'create' | 'merge' = 'create'): Promise<void> {
+  async #onUnlockTile(tileLabel: string, _mode: 'create' | 'merge' = 'create'): Promise<void> {
     const lineage = window.ioc.get('@hypercomb.social/Lineage') as LineageLike | undefined
     const dir = await lineage?.explorerDir?.()
     if (!dir) {
-      this.#toast('warning', `${mode === 'merge' ? 'Merge' : 'Sync'} failed`, 'No explorer directory.')
+      this.#toast('warning', 'Sync failed', 'No explorer directory.')
       return
     }
 
@@ -419,61 +507,66 @@ export class ExposeDrone extends Drone {
     try {
       cellDir = await dir.getDirectoryHandle(tileLabel, { create: false })
     } catch {
-      this.#toast('warning', `${mode === 'merge' ? 'Merge' : 'Sync'} failed`, `Tile "${tileLabel}" not found.`)
+      this.#toast('warning', 'Sync failed', `Tile "${tileLabel}" not found.`)
       return
     }
 
     const props = await readCellProperties(cellDir)
     if (props['facade'] !== true) {
-      // Plain tile, not a facade — both sync and merge are no-ops.
+      // Plain tile, not a facade — nothing to fill in.
       return
     }
     const channelId = typeof props['channelId'] === 'string' ? props['channelId'] : ''
     const branchSig = typeof props['branchSig'] === 'string' ? props['branchSig'] : ''
     if (!channelId || !branchSig) {
-      this.#toast('warning', `${mode === 'merge' ? 'Merge' : 'Sync'} failed`, 'Facade metadata is incomplete.')
+      this.#toast('warning', 'Sync failed', 'Facade metadata is incomplete.')
       return
     }
 
     const drone = this.#pairedChannelDrone()
     if (!drone) {
-      this.#toast('warning', `${mode === 'merge' ? 'Merge' : 'Sync'} failed`, 'PairedChannelDrone is not available.')
+      this.#toast('warning', 'Sync failed', 'PairedChannelDrone is not available.')
       return
     }
 
     if (!drone.layerOf(channelId, branchSig)) {
-      this.#toast('warning', `${mode === 'merge' ? 'Merge' : 'Sync'} failed`,
+      this.#toast('warning', 'Sync failed',
         `Root layer ${branchSig.slice(0, 8)} hasn't arrived yet. Wait a moment and try again.`)
       return
     }
 
-    // Materialise into the parent directory (so the tile's content
-    // overwrites its own folder rather than nesting another copy).
-    // `mode` controls whether existing cells get overwritten (create)
-    // or merged (incoming-wins for property conflicts, children
-    // unioned via recursion).
-    let result: { written: number; missing: string[] }
+    // Strict preserve: existing cells stay untouched, only genuinely-
+    // new descendants get added. The facade tile itself already
+    // exists — its 0000 keeps whatever it already has — we just
+    // recurse to fill new descendants beneath it. Always-on
+    // preserve also means there is no "overwrite" mode to choose.
+    const parentSegments = lineage?.explorerSegments?.() ?? []
+    let result: { written: number; missing: string[]; skipped: number }
     try {
-      result = await drone.materialiseFromSig(channelId, branchSig, dir, { mode })
+      result = await drone.materialiseFromSig(channelId, branchSig, dir, { parentSegments })
     } catch (err) {
-      this.#toast('warning', `${mode === 'merge' ? 'Merge' : 'Sync'} failed`, String((err as Error)?.message ?? err))
+      this.#toast('warning', 'Sync failed', String((err as Error)?.message ?? err))
       return
     }
 
-    // Drop the facade flag so the tile becomes a normal cell.
+    // Drop the facade flag so the tile no longer surfaces the adopt
+    // icon. Done as an explicit step because strict-preserve never
+    // touches existing cells' 0000s.
     try {
       await writeCellProperties(cellDir, { facade: false })
     } catch (err) {
       console.warn('[expose] sync: failed to drop facade flag', err)
     }
 
-    const verb = mode === 'merge' ? 'Merged' : 'Synced'
     if (result.missing.length > 0) {
-      this.#toast('tip', `${verb} (partial)`,
-        `Wrote ${result.written} layer(s). ${result.missing.length} sig(s) still missing — they may arrive later.`)
+      this.#toast('tip', 'Synced (partial)',
+        `Added ${result.written} layer(s). ${result.missing.length} sig(s) still missing — they may arrive later.`)
+    } else if (result.written === 0) {
+      this.#toast('info', 'Nothing to sync',
+        `"${tileLabel}" and its descendants are already in your hive.`)
     } else {
-      this.#toast('success', verb,
-        `"${tileLabel}" + ${result.written - 1} descendant(s) ${mode === 'merge' ? 'integrated' : 'filled in'}.`)
+      this.#toast('success', 'Synced',
+        `Added ${result.written} new descendant${result.written === 1 ? '' : 's'} under "${tileLabel}".`)
     }
 
     const approvalId = typeof props['approvalId'] === 'string' ? props['approvalId'] : ''
@@ -525,6 +618,40 @@ async function listChildNames(dir: FileSystemDirectoryHandle): Promise<string[]>
  * named foo" as the first layer event, which makes diagnostics
  * easier.
  */
+/**
+ * 0000 keys that are local render-cache decorations, NOT content
+ * identity. Stripped from `properties` before computing layer sigs
+ * (so two peers with the same actual content but different cache
+ * states still hash to the same sig) and stripped again on the
+ * receiver before writing to 0000.
+ *
+ *   `children`     — sighash pointer into a children-list cache file
+ *                    (the canonical child list lives in the layer's
+ *                    `children` array, not here).
+ *   `facade*`      — paired-channel sync placeholder markers; the
+ *                    receiver writes its own based on its local state.
+ */
+const SYNC_DECORATION_KEYS = [
+  // Sync-protocol decorations (already excluded)
+  'children', 'facade', 'branchSig', 'channelId', 'approvalId',
+  // Render / layout state — must not be part of the canonical layer sig.
+  // These vary per browser (viewport per-tab) or per-render-pass (pinned
+  // index after zoom-to-fit) and would cause the layer sig to drift on
+  // every pan or zoom. Per-cell layout belongs in the optimization
+  // (decoration) layer alongside Q&A and comms, not in canonical content.
+  'index', 'viewport', 'pan', 'zoom', 'meshOffset',
+  // Stale transient marker from the old in-OPFS-with-marker model — kept
+  // out of sig so it doesn't survive into the layer identity even if it
+  // accidentally appears in a cell's 0000.
+  'transient',
+] as const
+
+function stripDecorations(props: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...props }
+  for (const k of SYNC_DECORATION_KEYS) delete out[k]
+  return out
+}
+
 async function buildSubtreeLayers(
   cellDir: FileSystemDirectoryHandle,
   cellName: string,
@@ -545,7 +672,10 @@ async function buildSubtreeLayers(
       children.push({ name: childName, sig: child.sig })
       descendants.push(child)
     }
-    const properties = await readCellProperties(dir)
+    // Strip decorations: layer sigs must depend on content alone, not
+    // on whether the sender's local cache happened to be populated.
+    const rawProperties = await readCellProperties(dir)
+    const properties = stripDecorations(rawProperties)
     const content: PairedLayerContent = { name, properties, children }
     const sig = await computeLayerSig(content)
     return { sig, content }

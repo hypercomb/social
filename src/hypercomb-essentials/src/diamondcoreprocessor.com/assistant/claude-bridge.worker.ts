@@ -36,6 +36,10 @@ type BridgeRequest = {
   sig?: string
   /** Bag manipulation. */
   slot?: string
+  /** Optimization filter — `optimization-list` returns only entries
+   *  whose top-level `kind` matches (e.g. `'qa'`). Layer slots are
+   *  unrelated to this filter. */
+  kind?: string
 }
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
@@ -157,10 +161,15 @@ export class ClaudeBridgeWorker extends Worker {
       case 'update':       return this.#update(req)
       case 'note-add':     return this.#noteAdd(req)
       case 'note-list':    return this.#noteList(req)
+      case 'note-delete':  return this.#noteDelete(req)
       case 'list-at':      return this.#listAt(req)
       case 'inflate':      return this.#inflate(req)
+      case 'layer-at':     return this.#layerAt(req)
       case 'put-resource': return this.#putResource(req)
       case 'get-resource': return this.#getResource(req)
+      case 'optimization-add':    return this.#optimizationAdd(req)
+      case 'optimization-list':   return this.#optimizationList(req)
+      case 'optimization-remove': return this.#optimizationRemove(req)
       case 'bag-add':      return this.#bagMutate(req, 'add')
       case 'bag-remove':   return this.#bagMutate(req, 'remove')
       case 'bag-set':      return this.#bagSet(req)
@@ -228,6 +237,60 @@ export class ClaudeBridgeWorker extends Worker {
       ok: true,
       data: { sig, encoding: 'base64' as const, base64: bytesToBase64(bytes), bytes: bytes.byteLength },
     }
+  }
+
+  // ─── persistent decoration substrate (__optimization__) ────────────
+  //
+  // Mint, list, and remove optimization objects in OPFS `__optimization__/`.
+  // Each entry is a content-addressed JSON file (Q&A, comm, future kinds).
+  // Layer-untouched: this directory is structurally separate from any
+  // cell's layer slots. The dashboard reader and state-machine wrappers
+  // around base objects pull from here at access/render time.
+
+  async #optimizationAdd(req: BridgeRequest): Promise<BridgeResponse> {
+    const store = get<{ putOptimization?: (blob: Blob) => Promise<string> }>('@hypercomb.social/Store')
+    if (!store?.putOptimization) return { id: req.id, ok: false, error: 'Store.putOptimization not available' }
+    if (typeof req.text !== 'string' || req.text.length === 0) {
+      return { id: req.id, ok: false, error: 'optimization-add needs `text` (JSON payload)' }
+    }
+    try { JSON.parse(req.text) } catch {
+      return { id: req.id, ok: false, error: 'optimization-add: `text` must be valid JSON' }
+    }
+    const bytes = new TextEncoder().encode(req.text)
+    const blob = new Blob([bytes as BlobPart])
+    const sig = await store.putOptimization(blob)
+    return { id: req.id, ok: true, data: { sig, bytes: bytes.byteLength } }
+  }
+
+  async #optimizationList(req: BridgeRequest): Promise<BridgeResponse> {
+    const store = get<{
+      listOptimizations?: () => Promise<string[]>
+      getOptimization?: (sig: string) => Promise<Blob | null>
+    }>('@hypercomb.social/Store')
+    if (!store?.listOptimizations || !store?.getOptimization) {
+      return { id: req.id, ok: false, error: 'Store optimization API not available' }
+    }
+    const wantKind = typeof req.kind === 'string' && req.kind.trim() ? req.kind.trim() : null
+    const sigs = await store.listOptimizations()
+    const items: Array<{ sig: string; kind?: string; appliesTo?: unknown; payload?: unknown; mark?: string }> = []
+    for (const sig of sigs) {
+      const blob = await store.getOptimization(sig)
+      if (!blob) continue
+      let parsed: any
+      try { parsed = JSON.parse(await blob.text()) } catch { continue }
+      if (wantKind && parsed?.kind !== wantKind) continue
+      items.push({ sig, kind: parsed?.kind, appliesTo: parsed?.appliesTo, payload: parsed?.payload, mark: parsed?.mark })
+    }
+    return { id: req.id, ok: true, data: { items, count: items.length } }
+  }
+
+  async #optimizationRemove(req: BridgeRequest): Promise<BridgeResponse> {
+    const store = get<{ removeOptimization?: (sig: string) => Promise<boolean> }>('@hypercomb.social/Store')
+    if (!store?.removeOptimization) return { id: req.id, ok: false, error: 'Store.removeOptimization not available' }
+    const sig = typeof req.sig === 'string' ? req.sig.trim() : ''
+    if (!isSignature(sig)) return { id: req.id, ok: false, error: 'optimization-remove requires `sig` (64-hex)' }
+    const removed = await store.removeOptimization(sig)
+    return { id: req.id, ok: true, data: { sig, removed } }
   }
 
   // ─── context-bag helpers ───────────────────────────────────────────
@@ -358,6 +421,23 @@ export class ClaudeBridgeWorker extends Worker {
   // location) and receives the fully-inflated merkle subtree as a
   // self-contained JSON value. Mechanical primitive — the LLM
   // composes by passing sigs around, this returns the content.
+  // Raw layer read — returns slot values with their underlying sig
+  // arrays preserved, NOT recursively resolved into their content.
+  // Use when the caller needs the canonical sig of a slot entry
+  // (e.g. dashboard refresh needs the qa-slot resource sig so the
+  // in-page answer composer can `bag-remove` the right entry on
+  // submit). `inflate` resolves sigs into their JSON which drops
+  // the addressing — this op keeps the addressing intact.
+  async #layerAt(req: BridgeRequest): Promise<BridgeResponse> {
+    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (!history) return { id: req.id, ok: false, error: 'HistoryService not available' }
+    const locationSig = await history.sign({ explorerSegments: () => segments })
+    const layer = await history.currentLayerAt(locationSig)
+    if (!layer) return { id: req.id, ok: false, error: `no layer at /${segments.join('/')}` }
+    return { id: req.id, ok: true, data: layer }
+  }
+
   async #inflate(req: BridgeRequest): Promise<BridgeResponse> {
     let sig = typeof req.cell === 'string' ? req.cell.trim() : ''
 
@@ -443,6 +523,30 @@ export class ClaudeBridgeWorker extends Worker {
     }
     await notes.addAtSegments(segments, cell, text)
     return { id: req.id, ok: true }
+  }
+
+  // Remove a note by id from a cell at explicit segments. Calls
+  // NotesService.deleteAtSegments — same merkle cascade as user-driven
+  // delete. Used for migration scripts that retract [Q]-prefixed legacy
+  // notes once they've been copied into __optimization__/.
+  async #noteDelete(req: BridgeRequest): Promise<BridgeResponse> {
+    const cell = req.cell
+    const noteId = typeof req.sig === 'string' ? req.sig.trim() : ''
+    const segments = req.segments ?? []
+    if (typeof cell !== 'string' || !cell) {
+      return { id: req.id, ok: false, error: 'missing cell label' }
+    }
+    if (!noteId) {
+      return { id: req.id, ok: false, error: 'missing noteId (pass via `sig` field)' }
+    }
+    const notes = get<{
+      deleteAtSegments?: (s: readonly string[], c: string, n: string) => Promise<void>
+    }>('@diamondcoreprocessor.com/NotesService')
+    if (!notes?.deleteAtSegments) {
+      return { id: req.id, ok: false, error: 'NotesService.deleteAtSegments not available' }
+    }
+    await notes.deleteAtSegments(segments, cell, noteId)
+    return { id: req.id, ok: true, data: { cell, noteId } }
   }
 
   // Layer-as-primitive update. Caller passes `{ segments, layer }` where
@@ -576,6 +680,30 @@ export class ClaudeBridgeWorker extends Worker {
   }
 
   async #inspect(req: BridgeRequest): Promise<BridgeResponse> {
+    // Two addressing modes:
+    //   - segments: explicit absolute path from hypercombRoot (headless,
+    //     same shape #stamp / #update use). Use this from CLI tooling
+    //     that wants to verify what stamp wrote without depending on
+    //     the user's current navigation.
+    //   - cell: legacy single-name lookup relative to explorerDir.
+    const segmentsRaw = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    if (segmentsRaw.length > 0) {
+      const store = get<{ hypercombRoot?: FileSystemDirectoryHandle | null }>('@hypercomb.social/Store')
+      let dir: FileSystemDirectoryHandle | null = store?.hypercombRoot ?? null
+      if (!dir) return { id: req.id, ok: false, error: 'no hypercombRoot' }
+      for (const seg of segmentsRaw) {
+        const clean = normalizeCell(seg)
+        if (!clean) continue
+        try {
+          dir = await dir.getDirectoryHandle(clean, { create: false })
+        } catch {
+          return { id: req.id, ok: false, error: `path not found: ${segmentsRaw.join('/')}` }
+        }
+      }
+      const props = await readCellProperties(dir!)
+      return { id: req.id, ok: true, data: props }
+    }
+
     const name = req.cell ? normalizeCell(req.cell) : ''
     if (!name) return { id: req.id, ok: false, error: 'no cell name' }
 

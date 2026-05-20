@@ -87,6 +87,8 @@ export class PixiHostWorker extends Worker {
     const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
     const dpr = Math.min(devicePixelRatio || 1, isMobile ? 1.5 : 2)
 
+    ;(window as any).__hcBoot?.('PixiHostWorker.act → Application.init() starting')
+    const tPixiInit = performance.now()
     await app.init({
       // Size to the host element, not the window, so anything that
       // narrows the host (the history sidebar taking a column on the
@@ -103,6 +105,9 @@ export class PixiHostWorker extends Worker {
       // memory headroom relative to workload than the performance core.
       powerPreference: 'low-power',
     })
+    const pixiInitMs = performance.now() - tPixiInit
+    console.log(`[pixi-host] Application.init() ${pixiInitMs.toFixed(0)}ms`)
+    ;(window as any).__hcBoot?.(`Application.init() done (${pixiInitMs.toFixed(0)}ms)`)
 
     // On mobile, cap at 30fps. The shaders are complex and running all
     // tickers at 60fps on a small screen is pure GPU waste.
@@ -240,6 +245,7 @@ export class PixiHostWorker extends Worker {
       canvas: this.app.canvas as HTMLCanvasElement,
       renderer: this.app.renderer,
     })
+    ;(window as any).__hcBoot?.('render:host-ready emitted')
   }
 }
 

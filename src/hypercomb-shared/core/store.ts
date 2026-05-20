@@ -35,6 +35,18 @@ export class Store extends EventTarget {
    *  after every commitLayer that has children; orphaned when the parent
    *  is superseded — pure derived state, safe to GC. */
   public static readonly MANIFESTS_DIRECTORY = '__manifests__'
+  /** Persistent decoration substrate. Holds Q&A, comm threads, future
+   *  optimization kinds — anything authored-or-derived that gets applied
+   *  to base objects in memory at runtime without polluting their layer.
+   *  Loaded at startup; entries survive reloads. Layer-untouched: the
+   *  layer-commit primitive never reads or writes here. State-machine
+   *  wrappers around base objects compose entries onto the cell view
+   *  without mutating the underlying layer; the only legitimate bridge
+   *  from this directory into the layer is when an optimization resolves
+   *  into a note (Q&A answered → note appended). See
+   *  `feedback_layer_purity_optimizations_external.md` /
+   *  `project_optimization_substrate.md` in user memory. */
+  public static readonly OPTIMIZATION_DIRECTORY = '__optimization__'
 
   private static readonly CACHE_NAME = 'hypercomb-modules-v2'
 
@@ -50,6 +62,7 @@ export class Store extends EventTarget {
   public computation!: FileSystemDirectoryHandle
   public optimized!: FileSystemDirectoryHandle
   public manifests!: FileSystemDirectoryHandle
+  public optimization!: FileSystemDirectoryHandle
 
   #initPromise: Promise<void> | null = null
   #opfsAvailable = true
@@ -97,6 +110,7 @@ export class Store extends EventTarget {
         this.computation,
         this.optimized,
         this.manifests,
+        this.optimization,
       ] = await Promise.all([
         dir('hypercomb.io'),
         dir(Store.BEES_DIRECTORY),
@@ -109,6 +123,7 @@ export class Store extends EventTarget {
         dir(Store.COMPUTATION_DIRECTORY),
         dir(Store.OPTIMIZED_DIRECTORY),
         dir(Store.MANIFESTS_DIRECTORY),
+        dir(Store.OPTIMIZATION_DIRECTORY),
       ])
     } catch (err) {
       console.warn('[store] OPFS subdirectory init failed — running without persistent storage', err)
@@ -168,9 +183,6 @@ export class Store extends EventTarget {
 
     try {
 
-      // Snapshot IoC keys before import so we can detect self-registration
-      const keysBefore = new Set(window.ioc.list())
-
       let mod: Record<string, unknown> | null = null
 
       // iOS Safari blob: URL modules can't resolve import-map bare specifiers.
@@ -191,23 +203,33 @@ export class Store extends EventTarget {
 
       if (!mod || typeof mod !== 'object') return null
 
-      // If the module's side-effect already registered a bee, reuse it
-      // instead of creating a duplicate via buildInstance().
-      // Use duck-typing instead of instanceof: bee bundles import Bee from the
-      // import-mapped runtime URL, while this file uses the Vite-resolved path —
-      // two different class objects, so instanceof always fails across the boundary.
-      let selfRegistered = false
-      for (const key of window.ioc.list()) {
-        if (keysBefore.has(key)) continue
-        selfRegistered = true
-        const value = window.ioc.get(key)
-        if (value != null && typeof (value as any).pulse === 'function') return value as Bee
+      // Find the bee by class identity. Each bee module exports its
+      // class; its side-effect `register(key, new SomeClass())` puts an
+      // instance in IoC whose constructor === SomeClass. We scan IoC for
+      // the entry whose constructor matches one of this module's exports.
+      //
+      // This is parallel-safe (class identity is stable across imports)
+      // unlike the previous "new keys since snapshot" scan, which under
+      // concurrent loads returned the same first-registered instance to
+      // every caller.
+      const exportedCtors = new Set<unknown>()
+      for (const value of Object.values(mod)) {
+        if (typeof value === 'function' && (value as any).prototype) {
+          exportedCtors.add(value)
+        }
+      }
+      if (exportedCtors.size > 0) {
+        for (const key of window.ioc.list()) {
+          const candidate = window.ioc.get(key) as any
+          if (candidate == null || typeof candidate !== 'object') continue
+          if (typeof candidate.pulse !== 'function') continue
+          if (exportedCtors.has(candidate.constructor)) {
+            return candidate as Bee
+          }
+        }
       }
 
-      // Module self-registered as non-Bee — skip buildInstance to avoid duplicates
-      if (selfRegistered) return null
-
-      // Fallback for modules without self-registration side-effects
+      // No singleton match — fall back to buildInstance (creates fresh).
       return buildInstance(mod)
     } catch {
       return null
@@ -287,6 +309,53 @@ export class Store extends EventTarget {
    *  for the same signature — in-flight loads are deduped. */
   public preheatResource = async (signature: string): Promise<Blob | null> =>
     this.getResource(signature)
+
+  // -------------------------------------------------
+  // persistent decoration substrate (__optimization__)
+  // -------------------------------------------------
+  //
+  // Holds optimization objects (Q&A, comms, future kinds) outside the
+  // layer. Content-addressed by sha-256 of the bytes, same as
+  // __resources__/, so identical content dedupes. The state-machine
+  // wrappers around base objects read from here at access time; the
+  // layer-commit primitive never sees this directory.
+
+  public putOptimization = async (blob: Blob): Promise<string> => {
+    if (!this.optimization) throw new Error('optimization dir not initialized')
+    const bytes = await blob.arrayBuffer()
+    const signature = await SignatureService.sign(bytes)
+    try {
+      await this.optimization.getFileHandle(signature)
+      return signature
+    } catch { /* not present — create */ }
+    const handle = await this.optimization.getFileHandle(signature, { create: true })
+    const writable = await handle.createWritable()
+    try { await writable.write(blob) } finally { await writable.close() }
+    return signature
+  }
+
+  public getOptimization = async (signature: string): Promise<Blob | null> => {
+    if (!this.optimization) return null
+    try {
+      const handle = await this.optimization.getFileHandle(signature)
+      return await handle.getFile()
+    } catch { return null }
+  }
+
+  public removeOptimization = async (signature: string): Promise<boolean> => {
+    if (!this.optimization) return false
+    try { await this.optimization.removeEntry(signature); return true }
+    catch { return false }
+  }
+
+  public listOptimizations = async (): Promise<string[]> => {
+    if (!this.optimization) return []
+    const sigs: string[] = []
+    for await (const [name] of (this.optimization as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+      if (/^[0-9a-f]{64}$/.test(name)) sigs.push(name)
+    }
+    return sigs
+  }
 
   // -------------------------------------------------
   // universal signature resolver

@@ -1,30 +1,10 @@
-<div class="mesh-header" [class.secret-active]="showSecretInput()">
-  <!-- Secret input: visible when in shield mode and editing -->
-  @if (showSecretInput()) {
-    <div class="secret-input-wrap">
-      <input
-        class="header-secret-input"
-        type="text"
-        [placeholder]="'mesh.secret-placeholder' | t"
-        [value]="secretValue()"
-        (input)="onSecretInput($event)"
-        (keydown.enter)="submitSecret($event)"
-        (keydown.escape)="cancelSecret()"
-      />
-    </div>
-  }
-
-  <!-- Mode toggle: invisible tap/long-press target -->
+<div class="mesh-header">
   <button class="mode-toggle"
     [class.solo-mode]="!meshPublic"
     [class.shield-mode]="!!meshPublic"
     [style.--shield-color]="shieldColor()"
-    [title]="shieldTooltip()"
     type="button"
-    (pointerdown)="onPointerDown()"
-    (pointerup)="onPointerUp()"
-    (pointerleave)="onPointerLeave()">
+    (click)="onToggle()">
     <span class="hci">{{ meshPublic ? 'e' : 'i' }}</span>
   </button>
 </div>
-

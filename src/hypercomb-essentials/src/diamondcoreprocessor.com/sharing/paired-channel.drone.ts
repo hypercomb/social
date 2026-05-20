@@ -29,9 +29,19 @@ import {
   type ShareState,
   type Transition,
 } from './paired-channel.machine.js'
+import { ephemeralTileSource } from '../presentation/tiles/sources/ephemeral-tile.source.js'
+import {
+  TILE_SOURCE_REGISTRY_KEY,
+  type TileSourceRegistry,
+} from '../presentation/tiles/tile-source-registry.js'
 
-const SECRET_STORAGE_KEY = 'hypercomb.paired-channel.secret'
-const LOCATION_STORAGE_KEY = 'hypercomb.paired-channel.location'
+// Canonical store keys — the same ones the rest of the mesh layer
+// reads. Drone tracks the live values so navigation changes drive
+// channel rejoin automatically. The mesh contract is room + lineage
+// + secret; the drone reads all three from the canonical stores.
+const ROOM_STORE_KEY = '@hypercomb.social/RoomStore'
+const SECRET_STORE_KEY = '@hypercomb.social/SecretStore'
+const LINEAGE_KEY = '@hypercomb.social/Lineage'
 
 // EffectBus events emitted to UI consumers.
 export const PAIRED_CHANNEL_EFFECTS = {
@@ -69,9 +79,93 @@ export class PairedChannelDrone extends Drone {
 
   public override effects = [] as const
 
-  // No special listens — the drone subscribes to the mesh directly via
-  // PairedChannelService, not via the EffectBus.
-  protected override listens: string[] = []
+  // The drone reads channel events directly via PairedChannelService.
+  // `fs:changed` / `cell:added` / `cell:removed` are subscribed for
+  // re-evaluation triggers (navigation, structural mutations) — these
+  // are the only EffectBus signals the drone cares about.
+  protected override listens: string[] = ['fs:changed', 'cell:added', 'cell:removed']
+
+  constructor() {
+    super()
+    // Register the ephemeral tile source with the TileSourceRegistry.
+    // Show-cell unions all registered sources to decide what tiles to
+    // render at the current location; this is how preview tiles surface
+    // without show-cell having to know anything about sync. The source
+    // is a pure read of #ephemeralShares, so it's safe to register
+    // synchronously even before the first channel is joined — it just
+    // returns [] until shares appear.
+    //
+    // Lazy resolve of the registry: it lives in IoC and may not be
+    // registered yet at drone-construction time (essentials module load
+    // order varies). Retry briefly, then give up — the registry being
+    // absent means render is also absent (no consumer), which is fine.
+    const tryRegisterEphemeralSource = (attempts: number): void => {
+      const registry = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(
+        TILE_SOURCE_REGISTRY_KEY,
+      ) as TileSourceRegistry | undefined
+      if (registry?.register) {
+        registry.register(ephemeralTileSource)
+        return
+      }
+      if (attempts > 0) setTimeout(() => tryRegisterEphemeralSource(attempts - 1), 50)
+    }
+    tryRegisterEphemeralSource(40) // ~2s
+    // Wire EffectBus listeners IMMEDIATELY at construction. The drone
+    // heartbeat only fires on `hypercomb().act()` (command-line,
+    // clipboard, etc.) — it does not fire on page boot. If we waited
+    // for the first heartbeat to register listeners, any cell:added
+    // emitted before that first pulse would be lost. The act() that
+    // typically follows an add fires AFTER cell:added, so the
+    // first-pulse path is permanently late.
+    //
+    // EffectBus is keyed by event name; multiple onEffect registrations
+    // for the same key from the same bee don't stack, so subsequent
+    // setup paths (heartbeat) won't duplicate handlers.
+    const reEval = () => { void this.#reEvaluateChannel() }
+    this.onEffect('fs:changed', reEval)
+    this.onEffect('cell:removed', reEval)
+    // cell:added has to await the channel join before broadcasting:
+    // on a cold-loaded receiver, the FIRST cell:added it sees might
+    // be the user adding a tile right after page boot — its drone
+    // hasn't joined a channel yet, so #onLocalCellAdded would find
+    // `joinedChannels: []` and silently no-op. Awaiting reEvaluate
+    // first ensures the channel is live before we decide whether to
+    // re-broadcast.
+    this.onEffect<{ cell?: string; segments?: readonly string[]; source?: string }>('cell:added', async (payload) => {
+      if (payload?.source === 'paired-channel') return
+      await this.#reEvaluateChannel()
+      void this.#onLocalCellAdded(payload)
+    })
+    // Hook the Lineage's 'change' event lazily — the Lineage might
+    // not be registered yet at module-load time. Poll briefly then
+    // attach. Also poll a few times to FIRE reEval until the drone
+    // has joined a channel — this is the boot-time join because
+    // neither lineage 'change' nor cell:added might fire before the
+    // user's first action.
+    const tryWireLineage = (attempts: number) => {
+      const lineage = window.ioc?.get?.(LINEAGE_KEY) as
+        (EventTarget & { addEventListener: EventTarget['addEventListener'] }) | undefined
+      if (lineage?.addEventListener) {
+        lineage.addEventListener('change', reEval)
+        return
+      }
+      if (attempts > 0) setTimeout(() => tryWireLineage(attempts - 1), 100)
+    }
+    tryWireLineage(50) // up to ~5s
+
+    // Active boot-time join: poll reEvaluate every 250ms for up to
+    // ~10s, stopping once we have at least one channel joined. This
+    // covers the cold-start case where no event fires before the
+    // user's first action but the credentials are already in
+    // localStorage.
+    const tryInitialJoin = async (attempts: number): Promise<void> => {
+      if (this.#channels.size > 0) return
+      await this.#reEvaluateChannel()
+      if (this.#channels.size > 0) return
+      if (attempts > 0) setTimeout(() => { void tryInitialJoin(attempts - 1) }, 250)
+    }
+    void tryInitialJoin(40)
+  }
 
   protected override emits: string[] = Object.values(PAIRED_CHANNEL_EFFECTS)
 
@@ -79,23 +173,240 @@ export class PairedChannelDrone extends Drone {
 
   readonly #channels = new Map<string, JoinedChannel>()
 
+  /**
+   * Bumped while materialiseFromSig is writing to OPFS. Reserved for
+   * future use (e.g. a cell:added listener that re-broadcasts local
+   * adds — needs this to suppress echo when the "add" came from the
+   * sync write itself).
+   */
+  #materialiseInProgress = 0
+
   // ── lifecycle ─────────────────────────────────────────────────────
 
   /**
-   * Drone heartbeat — runs on every pulse. v0: reads a single
-   * (location, secret) from localStorage and auto-joins. The location
-   * is parsed into segments and signed identically to how
-   * HistoryService.sign would sign it, so the channelId aligns with
-   * the canonical lineage signature. Settings UI lands later.
-   * Idempotent: re-joining is a no-op once the channel is in
-   * #channels.
+   * Drone heartbeat — runs on every pulse. Reads the user's ACTUAL
+   * secret (`SecretStore.value` = `hc:secret`) and the LIVE lineage
+   * (`@hypercomb.social/Lineage`), then ensures we're subscribed to
+   * the channel that matches the current navigation + secret.
+   *
+   * No invented localStorage keys, no static config — the drone
+   * follows wherever you navigate.
+   *
+   * Guards:
+   *  - NostrMeshDrone must be registered (load-order race on cold
+   *    start; without this, subscribe returns a no-op and wedges the
+   *    drone permanently).
+   *  - SecretStore must have a value (no secret = no channel).
+   *  - Lineage must expose `explorerSegments`.
+   *
+   * Navigation switching: if the live lineage's channelId differs
+   * from what we're currently subscribed to, leave the old channel
+   * and join the new one. One active channel = current bag.
    */
   public override heartbeat = async (): Promise<void> => {
-    if (this.#channels.size > 0) return
-    const location = readLocalStorage(LOCATION_STORAGE_KEY)
-    const secret = readLocalStorage(SECRET_STORAGE_KEY)
-    if (!location || !secret) return
-    await this.join(location, secret)
+    // Listeners are wired in the constructor; the heartbeat just
+    // re-evaluates the desired channel. (Heartbeat still useful as a
+    // safety net for navigation switching when no other event fires.)
+    await this.#reEvaluateChannel()
+  }
+
+  /**
+   * Live re-broadcast on local cell:added.
+   *
+   * - Skip if the cell:added came from materialise itself (echo guard
+   *   via `#materialiseInProgress`).
+   * - Find any joined channel whose recorded location matches the
+   *   cell's PARENT lineage. If none, do nothing — the cell was added
+   *   somewhere we're not currently syncing.
+   * - Fire `tile:action expose` for that cell. expose.drone walks the
+   *   subtree, publishes layer events, publishes share-request. The
+   *   sender's own #maybeAutoApprove (if host) elevates it to a share.
+   *
+   * Channels store `location` as the slash-joined segments string. We
+   * compare normalised paths so the matcher works regardless of any
+   * leading/trailing slashes.
+   */
+  async #onLocalCellAdded(payload: { cell?: string; segments?: readonly string[] }): Promise<void> {
+    if (this.#materialiseInProgress > 0) return
+    const cellName = payload?.cell
+    if (typeof cellName !== 'string' || cellName.length === 0) return
+    // Resolve parent lineage. Some emit sites pass `segments`
+    // explicitly (clipboard, claude-bridge); the canonical add path
+    // (slash-behavior) does not — so fall back to the LIVE lineage
+    // segments. Without this fallback, an add at /dolphin would be
+    // attributed to / and never match any channel rooted at /dolphin.
+    let segments: readonly string[]
+    if (Array.isArray(payload?.segments)) {
+      segments = payload!.segments!
+    } else {
+      const lineage = window.ioc.get(LINEAGE_KEY) as LineageLike | undefined
+      segments = lineage?.explorerSegments?.() ?? []
+    }
+    const targetSegs = segments.map(s => String(s ?? '').trim()).filter(Boolean).join('/')
+    let matched = false
+    for (const joined of this.#channels.values()) {
+      const here = parseLocationSegments(joined.location).join('/')
+      if (here === targetSegs) { matched = true; break }
+    }
+    if (!matched) {
+      console.log('[sync] cell:added: no channel matches parent', { cell: cellName, parent: '/' + targetSegs, joinedChannels: [...this.#channels.values()].map(j => j.location) })
+      return
+    }
+    console.log('[sync] cell:added → expose', { cell: cellName, parent: '/' + targetSegs })
+    EffectBus.emit('tile:action', { action: 'expose', label: cellName, q: 0, r: 0, index: 0 })
+  }
+
+  /**
+   * Compute the current desired channelId from live state, then join /
+   * leave so the drone is always subscribed to exactly the channel
+   * matching the user's current navigation + secret. Re-entrant safe
+   * (joinLineage is idempotent on dedup).
+   */
+  async #reEvaluateChannel(): Promise<void> {
+    const mesh = window.ioc.get('@diamondcoreprocessor.com/NostrMeshDrone') as
+      { isNetworkEnabled?: () => boolean } | undefined
+    if (!mesh) return // mesh drone not registered yet
+
+    // Hard privacy gate: if the user has mesh set to private, the paired
+    // channel must not join channels or rebroadcast local cells.
+    // Without this gate, having a `hc:secret` set was enough to trigger
+    // `joinLineage` + `#broadcastExistingCellsAt`, which emits
+    // `tile:action expose` for every local cell — surfacing "Exposed"
+    // toasts and putting layer sigs into the channel even though the
+    // user explicitly stayed private. Mesh.isNetworkEnabled() is the
+    // single source of truth for "may we touch the wire."
+    if (typeof mesh.isNetworkEnabled === 'function' && !mesh.isNetworkEnabled()) {
+      if (this.#channels.size > 0) {
+        console.log('[sync] heartbeat: mesh private, leaving all channels')
+        for (const cid of [...this.#channels.keys()]) this.leave(cid)
+      }
+      return
+    }
+
+    const secretStore = window.ioc.get(SECRET_STORE_KEY) as { value?: string } | undefined
+    const secret = String(secretStore?.value ?? '').trim()
+    if (!secret) {
+      // Secret cleared → drop every channel.
+      if (this.#channels.size > 0) {
+        console.log('[sync] heartbeat: secret cleared, leaving all channels')
+        for (const cid of [...this.#channels.keys()]) this.leave(cid)
+      }
+      return
+    }
+
+    const roomStore = window.ioc.get(ROOM_STORE_KEY) as { value?: string } | undefined
+    const room = String(roomStore?.value ?? '').trim()
+
+    const lineage = window.ioc.get(LINEAGE_KEY) as LineageLike | undefined
+    if (!lineage?.explorerSegments) return
+
+    let desiredChannelId: string
+    try { desiredChannelId = await channelIdForLineage(lineage, room, secret) }
+    catch (err) { console.warn('[sync] channel derivation failed', err); return }
+
+    if (this.#channels.has(desiredChannelId)) return
+
+    const segments = lineage.explorerSegments?.() ?? []
+    console.log('[sync] heartbeat: joining channel', {
+      channelId: desiredChannelId.slice(0, 12),
+      room,
+      lineage: '/' + segments.join('/'),
+      secretSet: !!secret,
+    })
+    // Lineage / secret changed — leave any stale channels first.
+    for (const oldChannelId of [...this.#channels.keys()]) {
+      if (oldChannelId !== desiredChannelId) {
+        console.log('[sync] heartbeat: leaving stale channel', oldChannelId.slice(0, 12))
+        this.leave(oldChannelId)
+      }
+    }
+    // Sweep disabled — received cells now install as permanent, so
+    // there are no transient markers to clean up. Old transient
+    // markers from prior sessions get a free pass; if they collide
+    // with newly-arrived sigs, the existing-tile guard in
+    // #materialiseFacade ('share: tile already exists locally, skipping')
+    // handles it.
+    await this.joinLineage(lineage, room, secret)
+    // After join: broadcast pre-existing real cells at this lineage so
+    // peers receive them as transient. Without this, sync only flows
+    // for cells added AFTER the channel is live — existing tiles are
+    // invisible to the other side. Skip cells flagged transient (they
+    // came from the channel; rebroadcasting them is echo).
+    void this.#broadcastExistingCellsAt(lineage)
+  }
+
+  /**
+   * Walk the lineage's OPFS dir and fire `tile:action expose` for each
+   * non-transient real cell. Runs once after a successful join, so
+   * peers receive the existing tile tree as transient previews.
+   *
+   * Skips `__system__` directories and any cell whose 0000 has
+   * `transient: true` (echo guard — those cells came in via sync and
+   * the original publisher is responsible for keeping them alive).
+   */
+  async #broadcastExistingCellsAt(
+    lineage: LineageLike & { explorerDir?: () => Promise<FileSystemDirectoryHandle | null> },
+  ): Promise<void> {
+    const dir = await lineage?.explorerDir?.()
+    if (!dir) return
+    const { readCellProperties } = await import('../editor/tile-properties.js')
+    let exposed = 0
+    try {
+      for await (const [name, handle] of (dir as unknown as { entries: () => AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+        if (handle.kind !== 'directory') continue
+        if (name.startsWith('__') && name.endsWith('__')) continue
+        try {
+          const childDir = handle as FileSystemDirectoryHandle
+          const props = await readCellProperties(childDir).catch(() => ({} as Record<string, unknown>))
+          if (props['transient'] === true) continue
+          EffectBus.emit('tile:action', { action: 'expose', label: name, q: 0, r: 0, index: 0 })
+          exposed++
+        } catch { /* skip */ }
+      }
+    } catch (err) {
+      console.warn('[sync] broadcast-existing failed', err)
+      return
+    }
+    if (exposed > 0) {
+      console.log('[sync] broadcast-existing: exposed', exposed, 'cell(s)')
+    }
+  }
+
+  /**
+   * Walk the current bag's OPFS dir and delete any cell whose 0000
+   * has `transient: true`. Called before joining a channel — clears
+   * stale ephemeral state from the previous session. The sender's
+   * still-active share events will re-install via materialiseFromSig.
+   *
+   * Best-effort: failures don't abort the join.
+   */
+  async #sweepTransientCellsAt(lineage: LineageLike & { explorerDir?: () => Promise<FileSystemDirectoryHandle | null> }): Promise<void> {
+    const dir = await lineage?.explorerDir?.()
+    if (!dir) return
+    const { readCellProperties } = await import('../editor/tile-properties.js')
+    let swept = 0
+    try {
+      for await (const [name, handle] of (dir as unknown as { entries: () => AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+        if (handle.kind !== 'directory') continue
+        if (name.startsWith('__') && name.endsWith('__')) continue
+        try {
+          const childDir = handle as FileSystemDirectoryHandle
+          const props = await readCellProperties(childDir).catch(() => ({} as Record<string, unknown>))
+          if (props['transient'] === true) {
+            await dir.removeEntry(name, { recursive: true })
+            swept++
+          }
+        } catch { /* skip */ }
+      }
+    } catch (err) {
+      console.warn('[sync] transient sweep failed', err)
+      return
+    }
+    if (swept > 0) {
+      console.log('[sync] transient sweep: removed', swept, 'unimported cell(s)')
+      // Trigger render refresh.
+      EffectBus.emit('fs:changed', { source: 'paired-channel:transient-sweep' })
+    }
   }
 
   /**
@@ -107,12 +418,12 @@ export class PairedChannelDrone extends Drone {
    * Idempotent: re-joining the same pair is a no-op. Returns the
    * channelId on success, null on failure.
    */
-  async join(location: string, secret: string): Promise<string | null> {
+  async join(location: string, secret: string, room: string = ''): Promise<string | null> {
     const lineage: LineageLike = {
       explorerSegments: () => parseLocationSegments(location),
     }
     let channelId: string
-    try { channelId = await channelIdForLineage(lineage, secret) }
+    try { channelId = await channelIdForLineage(lineage, room, secret) }
     catch (err) { console.warn('[paired-channel] join: derivation failed', err); return null }
 
     if (this.#channels.has(channelId)) return channelId
@@ -120,6 +431,14 @@ export class PairedChannelDrone extends Drone {
     const service = this.#service()
     if (!service) {
       console.warn('[paired-channel] join: PairedChannelService not available')
+      return null
+    }
+    // Belt-and-suspenders: NostrMeshDrone must be registered before
+    // we attempt subscribe. If it isn't, abort the join entirely so
+    // the heartbeat retries on the next pulse — better than leaving
+    // a half-committed JoinedChannel with a no-op subscription.
+    if (!window.ioc.get('@diamondcoreprocessor.com/NostrMeshDrone')) {
+      console.warn('[paired-channel] join: NostrMeshDrone not registered yet, will retry')
       return null
     }
 
@@ -148,10 +467,10 @@ export class PairedChannelDrone extends Drone {
    * hold the live lineage so the channelId aligns exactly with the
    * lineage's canonical signature.
    */
-  async joinLineage(lineage: LineageLike, secret: string): Promise<string | null> {
+  async joinLineage(lineage: LineageLike, room: string, secret: string): Promise<string | null> {
     let channelId: string
-    try { channelId = await channelIdForLineage(lineage, secret) }
-    catch (err) { console.warn('[paired-channel] joinLineage: derivation failed', err); return null }
+    try { channelId = await channelIdForLineage(lineage, room, secret) }
+    catch (err) { console.warn('[sync] joinLineage: derivation failed', err); return null }
     if (this.#channels.has(channelId)) return channelId
     const service = this.#service()
     if (!service) return null
@@ -160,7 +479,8 @@ export class PairedChannelDrone extends Drone {
     const segments = lineage.explorerSegments?.() ?? []
     const location = '/' + segments.join('/')
     this.#channels.set(channelId, { channelId, location, secret, machine, subscription })
-    EffectBus.emit(PAIRED_CHANNEL_EFFECTS.joined, { channelId, location })
+    console.log('[sync] joined channel', { channelId: channelId.slice(0, 12), location, room })
+    EffectBus.emit(PAIRED_CHANNEL_EFFECTS.joined, { channelId, location, room })
     void this.#announceIfNeeded(channelId)
     return channelId
   }
@@ -199,6 +519,91 @@ export class PairedChannelDrone extends Drone {
   /** Read-only view of a joined channel's machine state. */
   stateOf(channelId: string): PairedChannelMachine | null {
     return this.#channels.get(channelId)?.machine ?? null
+  }
+
+  /**
+   * Ephemeral shares at a given lineage location, deduplicated by
+   * branchName. Returned values include the branchSig so consumers
+   * can later call `materialiseFromSig` to commit.
+   *
+   * Used by show-cell to render preview tiles at the receiver's
+   * current bag without touching OPFS. Adopt is the only path that
+   * commits — after that the cell lands in OPFS and renders
+   * normally, and the ephemeral entry should be cleared via
+   * `clearEphemeral`.
+   */
+  ephemeralSharesAt(location: string): { branchName: string; branchSig: string; channelId: string; approvalId: string | null }[] {
+    const target = parseLocationSegments(location).join('/')
+    const out: { branchName: string; branchSig: string; channelId: string; approvalId: string | null }[] = []
+    const seen = new Set<string>()
+    for (const entry of this.#ephemeralShares) {
+      if (entry.location !== target) continue
+      if (seen.has(entry.branchName)) continue
+      seen.add(entry.branchName)
+      out.push({ branchName: entry.branchName, branchSig: entry.branchSig, channelId: entry.channelId, approvalId: entry.approvalId })
+    }
+    return out
+  }
+
+  /** Record an ephemeral share (called when materialiseFacade fires). */
+  recordEphemeralShare(payload: { channelId: string; location: string; branchName: string; branchSig: string; approvalId: string | null }): void {
+    const normalised = parseLocationSegments(payload.location).join('/')
+    // Dedupe on (channelId, branchName) — incoming retransmits don't
+    // double up.
+    const exists = this.#ephemeralShares.find(e =>
+      e.channelId === payload.channelId && e.branchName === payload.branchName
+    )
+    if (exists) return
+    this.#ephemeralShares.push({
+      channelId: payload.channelId,
+      location: normalised,
+      branchName: payload.branchName,
+      branchSig: payload.branchSig,
+      approvalId: payload.approvalId,
+    })
+  }
+
+  /** Clear an ephemeral share once it's committed to OPFS via adopt. */
+  clearEphemeralShare(branchName: string): void {
+    this.#ephemeralShares = this.#ephemeralShares.filter(e => e.branchName !== branchName)
+  }
+
+  /** Internal storage. One entry per (channel, branchName) pair. */
+  #ephemeralShares: { channelId: string; location: string; branchName: string; branchSig: string; approvalId: string | null }[] = []
+
+  /**
+   * Import — flip `transient: true` off on a cell + every descendant.
+   * After import the cell survives reload (the boot sweep no longer
+   * sees it). Idempotent: importing a non-transient cell is a no-op.
+   */
+  async importTransientTree(cellName: string): Promise<{ cleared: number }> {
+    const lineage = window.ioc.get(LINEAGE_KEY) as LineageLike | undefined
+    const dir = await (lineage as { explorerDir?: () => Promise<FileSystemDirectoryHandle | null> } | undefined)?.explorerDir?.()
+    if (!dir) return { cleared: 0 }
+    const { readCellProperties, writeCellProperties } = await import('../editor/tile-properties.js')
+    let cleared = 0
+    const walk = async (current: FileSystemDirectoryHandle, name: string): Promise<void> => {
+      try {
+        const props = await readCellProperties(current).catch(() => ({} as Record<string, unknown>))
+        if (props['transient'] === true) {
+          await writeCellProperties(current, { transient: false })
+          cleared++
+        }
+        for await (const [childName, handle] of (current as unknown as { entries: () => AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+          if (handle.kind !== 'directory') continue
+          if (childName.startsWith('__') && childName.endsWith('__')) continue
+          await walk(handle as FileSystemDirectoryHandle, childName)
+        }
+      } catch { /* skip */ }
+    }
+    try {
+      const cellDir = await dir.getDirectoryHandle(cellName, { create: false })
+      await walk(cellDir, cellName)
+    } catch { /* missing cell */ }
+    if (cleared > 0) {
+      EffectBus.emit('paired-channel:imported', { cellName, cleared })
+    }
+    return { cleared }
   }
 
   // ── public API for callers (expose drone, accept toast, etc.) ─────
@@ -270,23 +675,22 @@ export class PairedChannelDrone extends Drone {
   }
 
   /**
-   * If we are the host of `channelId` AND the share was requested by
-   * the host (us), auto-approve it without waiting for a UI prompt.
-   * Member-initiated requests fall through and surface the prompt.
+   * Self-attestation: each peer auto-approves its OWN share-requests
+   * by publishing a matching `share` event signed by the same key.
+   * The state machine accepts requester-signed shares (in addition to
+   * host-signed ones), so every peer can promote its own offers to
+   * "approved" with no host bottleneck.
    *
-   * Host identity is determined by comparing our NostrSigner pubkey
-   * to the channel's `hostPubkey` (set by whoever published the first
-   * `announce`).
+   * Trust boundary: the channelId (sha256 of lineage + secret) IS the
+   * access filter. Anyone in the channel proved knowledge of the
+   * shared password, so the bag itself is the gate. Host approval
+   * remains available for future "I want to share but ask permission
+   * first" flows; it isn't required for symmetric sync.
    */
   async #maybeAutoApprove(channelId: string, share: ShareState): Promise<void> {
-    const machine = this.#channels.get(channelId)?.machine
-    if (!machine) return
-    const hostPubkey = machine.state.hostPubkey
-    if (!hostPubkey) return // no announce yet
-    if (share.requesterPubkey !== hostPubkey) return // member request → need manual allow
     const myPubkey = await this.#myPubkey()
     if (!myPubkey) return
-    if (myPubkey !== hostPubkey) return // someone else is host
+    if (share.requesterPubkey !== myPubkey) return // someone else's request
     void this.approveShare(channelId, share.requestId, null)
   }
 
@@ -358,23 +762,48 @@ export class PairedChannelDrone extends Drone {
     channelId: string,
     sig: string,
     parentDir: FileSystemDirectoryHandle,
-    opts: { mode?: 'create' | 'merge' } = {},
-  ): Promise<{ written: number; missing: string[] }> {
-    const mode = opts.mode ?? 'create'
+    opts: {
+      maxDepth?: number
+      parentSegments?: readonly string[]
+      approvalId?: string | null
+      /**
+       * Mark every written cell with `transient: true` in 0000.
+       * Boot sweep (`sweepTransientCellsAt`) removes these when the
+       * receiver joins a channel, so unimported shares evaporate
+       * across sessions. Import (`clearTransientMarker`) flips the
+       * marker off, promoting the cell to a permanent layer.
+       */
+      transient?: boolean
+    } = {},
+  ): Promise<{ written: number; missing: string[]; skipped: number }> {
+    const maxDepth = opts.maxDepth ?? Number.POSITIVE_INFINITY
+    const approvalId = opts.approvalId ?? null
+    const transient = opts.transient === true
     const machine = this.#channels.get(channelId)?.machine
-    if (!machine) return { written: 0, missing: [sig] }
+    if (!machine) return { written: 0, missing: [sig], skipped: 0 }
     const visited = new Set<string>()
     const missing: string[] = []
     let written = 0
+    let skipped = 0
+    const initialSegments: readonly string[] = opts.parentSegments ?? []
 
-    const walk = async (s: string, dir: FileSystemDirectoryHandle, parentSegments: readonly string[]): Promise<void> => {
+    const walk = async (s: string, dir: FileSystemDirectoryHandle, parentSegments: readonly string[], depth: number): Promise<void> => {
       if (visited.has(s)) return
       visited.add(s)
       const content = machine.layer(s)
       if (!content) { missing.push(s); return }
 
-      // Probe for existence first so we can distinguish "new" (emit
-      // cell:added) from "existing" (don't double-record).
+      // Three cases:
+      //   - Cell doesn't exist → CREATE with incoming props (+ facade
+      //     markers if we'll stop here and there are children).
+      //   - Cell exists and is a facade (placeholder from a prior
+      //     `#materialiseFacade`) → FILL: write real content, clear
+      //     the marker so it's no longer a placeholder.
+      //   - Cell exists and is a real tile → PRESERVE: skip entirely.
+      //     User's properties stay untouched; incoming is discarded.
+      //
+      // Recursion still happens in all cases (subject to maxDepth)
+      // so new descendants under preserved tiles are additive.
       let existed = true
       try { await dir.getDirectoryHandle(content.name, { create: false }) }
       catch { existed = false }
@@ -383,46 +812,78 @@ export class PairedChannelDrone extends Drone {
       try { cellDir = await dir.getDirectoryHandle(content.name, { create: true }) }
       catch (err) { console.warn('[paired-channel] materialise: getDirectoryHandle failed', content.name, err); return }
 
-      // Resolve the properties to write based on mode.
-      let propsToWrite: Record<string, unknown>
-      if (!existed) {
-        // New cell — incoming props are the full body.
-        propsToWrite = { ...content.properties }
-      } else if (mode === 'merge') {
-        // Shallow merge — incoming wins on key conflicts, but local
-        // keys not present in incoming survive.
+      let isFacade = false
+      if (existed) {
         const { readCellProperties } = await import('../editor/tile-properties.js')
-        const existing = await readCellProperties(cellDir).catch(() => ({} as Record<string, unknown>))
-        propsToWrite = { ...existing, ...content.properties }
+        const existingProps = await readCellProperties(cellDir).catch(() => ({} as Record<string, unknown>))
+        isFacade = existingProps['facade'] === true
+      }
+
+      const willRecurse = depth + 1 < maxDepth
+
+      if (existed && !isFacade) {
+        // Real tile already on disk — preserve it. Incoming discarded.
+        skipped++
       } else {
-        // Create mode against an existing cell — overwrite.
-        propsToWrite = { ...content.properties }
+        // New cell, or filling an existing facade.
+        // Marker keys are un-prefixed to match what expose.drone reads.
+        //
+        // Strip decoration keys from incoming — `children` is a local
+        // render cache (sighash into the children-list cache file),
+        // not content. Same for any leaked facade-marker fields. The
+        // receiver builds its own decorations based on its own state.
+        const propsToWrite: Record<string, unknown> = { ...content.properties }
+        for (const k of ['children', 'facade', 'branchSig', 'channelId', 'approvalId']) {
+          delete propsToWrite[k]
+        }
+        if (!willRecurse && content.children.length > 0) {
+          // Stopping here and there are deferred children → mark facade.
+          propsToWrite['facade'] = true
+          propsToWrite['branchSig'] = s
+          propsToWrite['channelId'] = channelId
+          if (approvalId) propsToWrite['approvalId'] = approvalId
+        } else if (isFacade) {
+          // Filling a facade and either no children or we're walking
+          // them all now — clear the placeholder markers.
+          propsToWrite['facade'] = false
+          propsToWrite['branchSig'] = undefined
+          propsToWrite['channelId'] = undefined
+          propsToWrite['approvalId'] = undefined
+        }
+        if (transient) {
+          // Mark this cell as transient — boot sweep removes it next
+          // session unless `clearTransientMarker` flips it off via
+          // explicit import.
+          propsToWrite['transient'] = true
+        }
+        try {
+          await this.#writeProperties(cellDir, propsToWrite)
+        } catch (err) {
+          console.warn('[paired-channel] materialise: write 0000 failed', content.name, err)
+        }
+        written++
+        if (!existed) {
+          // Tag source so the drone's own cell:added listener skips
+          // these (otherwise the receiver re-broadcasts everything it
+          // just installed — an instant echo loop on every share).
+          EffectBus.emit('cell:added', { cell: content.name, segments: [...parentSegments], source: 'paired-channel' })
+        }
       }
 
-      try {
-        await this.#writeProperties(cellDir, propsToWrite)
-      } catch (err) {
-        console.warn('[paired-channel] materialise: write 0000 failed', content.name, err)
-      }
-      written++
-
-      // Emit cell:added so HistoryRecorder logs the add. Only on truly
-      // new cells — re-emitting for existing cells would create
-      // bogus history entries.
-      if (!existed) {
-        EffectBus.emit('cell:added', { cell: content.name, segments: [...parentSegments] })
-      }
-
-      // Recurse into children. Pass the current segments + this cell's
-      // name for nested cell:added emissions.
+      if (!willRecurse) return
       const childSegments = [...parentSegments, content.name]
       for (const child of content.children) {
-        await walk(child.sig, cellDir, childSegments)
+        await walk(child.sig, cellDir, childSegments, depth + 1)
       }
     }
 
-    await walk(sig, parentDir, [])
-    return { written, missing }
+    this.#materialiseInProgress++
+    try {
+      await walk(sig, parentDir, initialSegments, 0)
+    } finally {
+      this.#materialiseInProgress--
+    }
+    return { written, missing, skipped }
   }
 
   // Lazy-imported to avoid a hard dependency cycle from the drone into
@@ -442,10 +903,17 @@ export class PairedChannelDrone extends Drone {
     const joined = this.#channels.get(channelId)
     if (!joined) return
     const transitions = joined.machine.apply(event)
+    console.log('[sync] event in', {
+      channel: channelId.slice(0, 12),
+      verb: event.type,
+      from: String(event.pubkey ?? '').slice(0, 8),
+      transitions: transitions.map(t => t.kind),
+    })
     for (const t of transitions) this.#onTransition(channelId, t)
   }
 
   #onTransition(channelId: string, t: Transition): void {
+    console.log('[sync] transition', { channel: channelId.slice(0, 12), kind: t.kind })
     switch (t.kind) {
       case 'host-elected':
         EffectBus.emit(PAIRED_CHANNEL_EFFECTS.hostElected, { channelId, pubkey: t.pubkey })
@@ -530,8 +998,18 @@ function parseLocationSegments(location: string): string[] {
 
 // ── registration ─────────────────────────────────────────────────────
 
-const _pairedChannelDrone = new PairedChannelDrone()
-window.ioc.register('@diamondcoreprocessor.com/PairedChannelDrone', _pairedChannelDrone)
+// Singleton guard: if an older version of this bee was already
+// shipped (multiple `__bees__/<sig>.js` files all register the same
+// ioc key), the FIRST instance wins. The constructor side-effects
+// (listeners, boot-poll) only run once. Without this every legacy
+// bee's heartbeat fires in parallel and they subscribe to different
+// channels — which is exactly what was producing the "two channelIds
+// in one browser" bug.
+const IOC_KEY = '@diamondcoreprocessor.com/PairedChannelDrone'
+if (!(window as any).ioc.get(IOC_KEY)) {
+  const _pairedChannelDrone = new PairedChannelDrone()
+  window.ioc.register(IOC_KEY, _pairedChannelDrone)
+}
 
 // Suppress unused warnings for verbs that callers will use elsewhere.
 const _verbs: ChannelVerb[] = ['announce', 'join', 'admit', 'revoke', 'share-request', 'share', 'share-revoked', 'pulled', 'layer', 'node', 'audit-needed', 'approve', 'reject', 'auditors']

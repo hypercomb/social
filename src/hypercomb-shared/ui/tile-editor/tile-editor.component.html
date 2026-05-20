@@ -130,19 +130,18 @@
                 <p class="qa-answer">{{ item.answer }}</p>
               } @else {
                 <div class="qa-answer-row">
-                  <input
+                  <textarea
                     class="field-input qa-answer-input"
-                    type="text"
                     name="qa-answer-{{ item.qId }}"
+                    rows="2"
                     [placeholder]="'editor.qa.answer-placeholder' | t"
                     [(ngModel)]="qaAnswerDraft[item.qId]"
-                    (keydown.enter)="submitAnswer(item.qId); $event.stopPropagation()"
-                  />
+                  ></textarea>
                   <button
                     type="button"
                     class="qa-submit"
                     (click)="submitAnswer(item.qId)"
-                  >{{ 'editor.qa.reply' | t }}</button>
+                  >{{ 'editor.qa.done' | t }}</button>
                 </div>
               }
             </div>

@@ -84,17 +84,20 @@ export class RemoveQueenBee extends QueenBee {
     }
 
     const nextLayer = { ...parent, children: survivorNames }
-    await committer.update(segments, nextLayer)
 
     // Notify downstream UI subscribers (activity log, substrate, slot
-    // machine, tile-overlay). The committer's own `cell:removed`
-    // subscription will dedup against the just-landed update.
+    // machine, tile-overlay) BEFORE awaiting the commit so the visual
+    // unmount runs immediately. LayerCommitter.update is O(siblings)
+    // per ancestor depth and can take seconds with large layers; gating
+    // the visual on it makes deletes feel broken.
     const groupId = targets.length > 1
       ? `remove:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`
       : undefined
     for (const name of targets) {
       EffectBus.emit('cell:removed', { cell: name, segments, groupId })
     }
+
+    await committer.update(segments, nextLayer)
   }
 }
 

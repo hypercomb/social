@@ -1,0 +1,76 @@
+@if (open()) {
+  <div class="mesh-modal-backdrop" (click)="dismiss()"></div>
+  <div class="mesh-modal-panel" role="dialog" [attr.aria-label]="'mesh-modal.title' | t">
+
+    <header class="mesh-modal-header">
+      <h3>{{ 'mesh-modal.title' | t }}</h3>
+      <button class="mesh-modal-close" type="button" (click)="dismiss()" [attr.aria-label]="'mesh-modal.close' | t">&times;</button>
+    </header>
+
+    <div class="mesh-modal-body">
+
+      <section class="mesh-modal-section">
+        <label class="mesh-modal-label" for="mesh-modal-room-input">{{ 'mesh-modal.location-label' | t }}</label>
+        <input
+          id="mesh-modal-room-input"
+          class="mesh-modal-input mesh-modal-room"
+          type="text"
+          [placeholder]="'mesh-modal.location-placeholder' | t"
+          [value]="roomDraft()"
+          (input)="onRoomInput($event)"
+          (keydown.enter)="save()"
+        />
+        @if (savedLocations().length > 0) {
+          <div class="mesh-modal-chips">
+            @for (loc of savedLocations(); track loc) {
+              <button class="mesh-modal-chip" type="button" (click)="pickLocation(loc)">
+                <span class="mesh-modal-chip-text">{{ loc }}</span>
+                <span class="mesh-modal-chip-remove"
+                      role="button"
+                      [attr.aria-label]="'mesh-modal.remove-saved' | t"
+                      (click)="removeSaved($event, loc)">&times;</span>
+              </button>
+            }
+          </div>
+        }
+      </section>
+
+      <section class="mesh-modal-section">
+        <div class="mesh-modal-label-row">
+          <label class="mesh-modal-label" for="mesh-modal-secret-input">{{ 'mesh-modal.secret-label' | t }}</label>
+          <span class="mesh-modal-shield material-symbols-outlined" [style.color]="shieldColor()" aria-hidden="true">shield</span>
+        </div>
+        <div class="mesh-modal-secret-row">
+          <input
+            id="mesh-modal-secret-input"
+            class="mesh-modal-input mesh-modal-secret"
+            [type]="secretInputType()"
+            [placeholder]="'mesh-modal.secret-placeholder' | t"
+            [value]="secretDraft()"
+            (input)="onSecretInput($event)"
+            (keydown.enter)="save()"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button class="mesh-modal-eye"
+                  type="button"
+                  (click)="toggleSecretVisible()"
+                  [attr.aria-label]="(secretVisible() ? 'mesh-modal.hide-secret' : 'mesh-modal.show-secret') | t">
+            <span class="material-symbols-outlined">{{ secretVisible() ? 'visibility_off' : 'visibility' }}</span>
+          </button>
+        </div>
+      </section>
+
+    </div>
+
+    <footer class="mesh-modal-actions">
+      <button class="mesh-modal-btn cancel" type="button" (click)="dismiss()">
+        {{ 'mesh-modal.cancel' | t }}
+      </button>
+      <button class="mesh-modal-btn primary" type="button" (click)="save()">
+        {{ 'mesh-modal.save' | t }}
+      </button>
+    </footer>
+
+  </div>
+}

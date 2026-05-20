@@ -3,6 +3,21 @@ import { Drone, EffectBus, hypercomb, normalizeCell } from '@hypercomb/core'
 import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey, OverlayTintFn } from './tile-overlay.drone.js'
 import { readCellProperties, writeCellProperties } from '../../editor/tile-properties.js'
 
+/** Zone-scoped localStorage key for the hide list at this location.
+ *  SwarmDrone writes `hc:current-zone` on every room/secret change
+ *  (or clears it when going private), so we read it sync here and
+ *  append it to the key when present. Bleed-protection: switching
+ *  zone changes the suffix, so the new zone reads from an empty key
+ *  even if the old zone's data is still on disk. Block list never
+ *  uses this helper — block is device-scoped on purpose.
+ *  Exported so show-cell uses the same key for its render-time read. */
+export function hideStorageKey(location: string): string {
+  const zone = localStorage.getItem('hc:current-zone') ?? ''
+  return zone
+    ? `hc:hidden-tiles:${location}:z${zone}`
+    : `hc:hidden-tiles:${location}`
+}
+
 type IconProviderEntry = {
   name: string
   owner?: string
@@ -27,30 +42,34 @@ export const NOTE_ACCENT = 0xffe14a
 export const NOTE_ACCENT_CSS = '#ffe14a'
 
 // ── SVG icons ─────────────────────────────────────────────────────
-// Clean line icons — 24×24 viewBox, 2px stroke, round caps/joins, white fill.
+// Material Design icons — 24×24 viewBox, solid white fill. Tint is
+// applied at the Pixi Sprite level via `tint`; the SVG's fill must be
+// pure white so the tint multiplication preserves chroma. Paths are
+// taken from Google's Material Icons Filled set (verbatim, single-path
+// where possible) so the visual language matches material.io.
 
-const svg = (d: string) =>
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`
+const md = (d: string) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="${d}"/></svg>`
 
 const ICONS = {
-  // Terminal prompt >_
-  command: svg('<polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>'),
-  // Magnifying glass
-  search: svg('<circle cx="11" cy="11" r="7"/><line x1="16" y1="16" x2="21" y2="21"/>'),
-  // Eye with slash
-  hide: svg('<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8S1 12 1 12z"/><circle cx="12" cy="12" r="3"/><line x1="4" y1="4" x2="20" y2="20"/>'),
-  // Break apart — four fragments separating
-  breakApart: svg('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>'),
-  // Plus
-  adopt: svg('<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>'),
-  // Circle with slash
-  block: svg('<circle cx="12" cy="12" r="9"/><line x1="5.7" y1="5.7" x2="18.3" y2="18.3"/>'),
-  // Trash bin
-  remove: svg('<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>'),
-  // Refresh / reroll — two curved arrows
-  reroll: svg('<path d="M1 4v6h6"/><path d="M23 20v-6h-6"/><path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10"/><path d="M3.51 15A9 9 0 0 0 18.36 18.36L23 14"/>'),
-  // Sticky note — small page with a folded corner
-  note: svg('<path d="M4 4h12l4 4v12H4z"/><polyline points="16 4 16 8 20 8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="14" y2="16"/>'),
+  // terminal — Material Icons Filled
+  command: md('M20 4H4c-1.11 0-1.99.89-1.99 2L2 18c0 1.1.89 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.11-.9-2-2-2zm0 14H4V8h16v10zM7.5 17l-1.41-1.41L8.67 13l-2.58-2.59L7.5 9l4 4-4 4zM13 17v-2h5v2h-5z'),
+  // search — Material Icons Filled
+  search: md('M15.5 14h-.79l-.28-.27C15.41 12.59 16 11.11 16 9.5 16 5.91 13.09 3 9.5 3S3 5.91 3 9.5 5.91 16 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z'),
+  // visibility_off — Material Icons Filled
+  hide: md('M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z'),
+  // grid_view — Material Icons Filled
+  breakApart: md('M3 3v8h8V3H3zm6 6H5V5h4v4zm-6 4v8h8v-8H3zm6 6H5v-4h4v4zm4-16v8h8V3h-8zm6 6h-4V5h4v4zm-6 4v8h8v-8h-8zm6 6h-4v-4h4v4z'),
+  // add — Material Icons Filled
+  adopt: md('M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z'),
+  // block — Material Icons Filled
+  block: md('M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM4 12c0-4.42 3.58-8 8-8 1.85 0 3.55.63 4.9 1.69L5.69 16.9C4.63 15.55 4 13.85 4 12zm8 8c-1.85 0-3.55-.63-4.9-1.69L18.31 7.1C19.37 8.45 20 10.15 20 12c0 4.42-3.58 8-8 8z'),
+  // delete — Material Icons Filled
+  remove: md('M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z'),
+  // refresh — Material Icons Filled
+  reroll: md('M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z'),
+  // sticky_note_2 — Material Icons Filled
+  note: md('M19 3H4.99c-1.11 0-1.98.9-1.98 2L3 19c0 1.1.89 2 2 2h10l6-6V5c0-1.1-.9-2-2-2zM7 8h10v2H7V8zm5 6H7v-2h5v2zm2 5.5V14h5.5L14 19.5z'),
 } as const
 
 // ── Icon registry ─────────────────────────────────────────────────
@@ -80,23 +99,46 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private', labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   // ── public-own profile ──
-  { name: 'hide', svgMarkup: ICONS.hide, hoverTint: 0xffd8a8, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => !ctx.isHidden, labelKey: 'action.hide', descriptionKey: 'action.hide.description' },
+  // Your own tile in public mode. Removal is the existing trash-bin
+  // delete, which routes through LayerCommitter and is recorded in
+  // history (so it can be undone, time-travelled to, and is part of
+  // the lineage's canonical state). Hide doesn't belong here — hide
+  // is a session-scoped per-view filter, but you OWN this tile and
+  // the correct dismissal is to delete it from your layer.
+  { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'public-own', labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   // ── public-external profile ──
   { name: 'adopt', svgMarkup: ICONS.adopt, hoverTint: 0xa8ffd8, profile: 'public-external', labelKey: 'action.adopt', descriptionKey: 'action.adopt.description' },
+  // 'hide' also lives in `public-own` (your own tile in public mode);
+  // re-registering for `public-external` lets the same handler apply
+  // when the tile is a peer-only mesh entry. Same dispatch through
+  // tile:hidden, same instant repaint (show-cell listens directly),
+  // same mesh propagation via publishHide. Peer tiles disappear
+  // immediately without needing to adopt them first.
+  { name: 'hide', svgMarkup: ICONS.hide, hoverTint: 0xffd8a8, profile: 'public-external', visibleWhen: (ctx: OverlayTileContext) => !ctx.isHidden, labelKey: 'action.hide', descriptionKey: 'action.hide.description' },
   { name: 'block', svgMarkup: ICONS.block, hoverTint: 0xffc8c8, profile: 'public-external', labelKey: 'action.block', descriptionKey: 'action.block.description' },
 ]
 
 // Default active icons per profile (defines the fallback order).
 //
-// public-own is currently reduced to just `expose` while we wire the
-// paired-channel click-test. `hide` and `break-apart` remain
-// registered in the catalog (and reappear instantly if added back
-// here) — they're just not on the active strip right now.
+// public-own previously listed `expose`/`sync`/`merge` from the legacy
+// paired-channel path. Those icon providers were retired with the
+// move to the swarm model — leaving the entry pointing at names no
+// catalog (local + provided) had, which filtered to empty and rendered
+// nothing on hover in public mode. Now reflects the live catalog:
+// `hide` and `break-apart` are real entries on `public-own` in
+// ICON_REGISTRY above; adopting a peer tile is handled by the
+// `public-external` profile (the tile flips kind once it's local).
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   'private': ['command', 'edit', 'note', 'reroll', 'remove', 'break-apart'],
-  'public-own': ['expose', 'sync', 'merge'],
-  'public-external': ['adopt', 'block'],
+  // Your own tile in public mode — same trash-bin remove that
+  // private mode uses. Records a history op, can be undone.
+  'public-own': ['remove', 'break-apart'],
+  // Peer-only mesh tiles you haven't adopted. `adopt` materialises
+  // them locally (carries the publisher's 0000 + image); `hide`
+  // dismisses without taking ownership (zone-scoped, instant,
+  // mesh-published so the filter survives reload + multi-device).
+  'public-external': ['adopt', 'hide'],
 }
 
 // ── Position computation ──────────────────────────────────────────
@@ -132,7 +174,7 @@ const ARRANGEMENT_KEY = 'iconArrangement'
 type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 
 // ── Action names this bee handles ─────────────────────────────────
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'note', 'hide', 'break-apart', 'adopt', 'block', 'remove', 'reroll'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'note', 'hide', 'break-apart', 'adopt', 'block', 'remove', 'reroll', 'import'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -401,8 +443,19 @@ export class TileActionsDrone extends Drone {
         break
 
       case 'adopt':
-        EffectBus.emit('cell:added', { cell: label })
-        void new hypercomb().act()
+        // Route to paired-channel adopt — looks up the ephemeral share
+        // for this branchName and runs materialiseFromSig with full
+        // depth so the entire subtree lands in OPFS as real layers.
+        console.log('[sync] tile-actions: adopt →', label)
+        EffectBus.emit('paired-channel:adopt-request', { branchName: label })
+        break
+
+      case 'import':
+        // Promote a transient sync tile (and its descendants) to a
+        // permanent layer — clear the `transient: true` marker so the
+        // boot sweep won't wipe it next session.
+        console.log('[sync] tile-actions: import →', label)
+        EffectBus.emit('paired-channel:import-request', { branchName: label })
         break
       case 'block':
         this.#hideOrBlock(label, 'hc:blocked-tiles', 'tile:blocked')
@@ -463,9 +516,16 @@ export class TileActionsDrone extends Drone {
     }
 
     const nextLayer = { ...parent, children: survivorNames }
-    await committer.update(segments, nextLayer)
 
+    // Emit BEFORE awaiting the commit so the visual unmount (ShowCellDrone's
+    // sync incremental path) runs immediately. The OPFS cascade in
+    // LayerCommitter.update is O(siblings) per ancestor depth and can take
+    // seconds with large layers — gating the visual on it makes deletes feel
+    // broken. All cell:removed listeners do in-memory work only, so eager
+    // emit is safe; if the background commit throws, the cell will reappear
+    // on the next layer re-read (no worse than today's failure mode).
     EffectBus.emit('cell:removed', { cell: label, segments })
+    await committer.update(segments, nextLayer)
   }
 
   async #rerollSubstrate(label: string): Promise<void> {
@@ -508,11 +568,22 @@ export class TileActionsDrone extends Drone {
   #unhide(label: string): void {
     const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
     const location = lineage?.explorerLabel() ?? '/'
-    const key = `hc:hidden-tiles:${location}`
+    const key = hideStorageKey(location)
     const existing: string[] = JSON.parse(localStorage.getItem(key) ?? '[]')
     const updated = existing.filter(l => l !== label)
     localStorage.setItem(key, JSON.stringify(updated))
     EffectBus.emit('tile:unhidden', { cell: label, location })
+
+    // Mirror to the mesh — same scope rule as hide. Publishing an
+    // updated `{ hidden: [...] }` with the removed name absent
+    // replaces the prior parameterized-replaceable slot at this
+    // pubkey+kind+lineage; the relay-echo on subsequent reads will
+    // then carry the cleared list.
+    const swarm = window.ioc.get<{ publishHide?: (names: Iterable<string>) => Promise<void> }>(
+      '@diamondcoreprocessor.com/SwarmDrone',
+    )
+    void swarm?.publishHide?.(updated)
+
     void new hypercomb().act()
   }
 
@@ -522,20 +593,26 @@ export class TileActionsDrone extends Drone {
 
     const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
     const location = lineage?.explorerLabel() ?? '/'
-    const key = `hc:hidden-tiles:${location}`
+    const key = hideStorageKey(location)
     const hidden: string[] = JSON.parse(localStorage.getItem(key) ?? '[]')
     const hiddenSet = new Set(hidden)
 
     const labels = [...selection.selected]
     const allHidden = labels.every(l => hiddenSet.has(l))
 
+    const swarm = window.ioc.get<{ publishHide?: (names: Iterable<string>) => Promise<void> }>(
+      '@diamondcoreprocessor.com/SwarmDrone',
+    )
+
     if (allHidden) {
       // Every selected tile is hidden → remove them from the hidden list
       const removeSet = new Set(labels)
-      localStorage.setItem(key, JSON.stringify(hidden.filter(l => !removeSet.has(l))))
+      const updated = hidden.filter(l => !removeSet.has(l))
+      localStorage.setItem(key, JSON.stringify(updated))
       for (const label of labels) EffectBus.emit('tile:unhidden', { cell: label, location })
       // Re-emit to force show-cell cache clear and re-render without the grayed state
       EffectBus.emit('visibility:show-hidden', { active: localStorage.getItem('hc:show-hidden') === '1' })
+      void swarm?.publishHide?.(updated)
     } else {
       // At least one visible → add all to the hidden list
       for (const label of labels) if (!hiddenSet.has(label)) hidden.push(label)
@@ -544,6 +621,7 @@ export class TileActionsDrone extends Drone {
       // Auto-enable show-hidden so grayed tiles are visible
       localStorage.setItem('hc:show-hidden', '1')
       EffectBus.emit('visibility:show-hidden', { active: true })
+      void swarm?.publishHide?.(hidden)
     }
 
     selection.clear()
@@ -553,11 +631,29 @@ export class TileActionsDrone extends Drone {
   #hideOrBlock(label: string, storagePrefix: string, effect: string): void {
     const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
     const location = lineage?.explorerLabel() ?? '/'
-    const key = `${storagePrefix}:${location}`
+    // Hide list is zone-scoped when a zone is active so switching
+    // room/secret gives a fresh empty filter at the new zone instead
+    // of bleeding stale hides through. Block stays device-scoped —
+    // a personal/permanent signal not tied to any session.
+    const key = (storagePrefix === 'hc:hidden-tiles')
+      ? hideStorageKey(location)
+      : `${storagePrefix}:${location}`
     const existing: string[] = JSON.parse(localStorage.getItem(key) ?? '[]')
     if (!existing.includes(label)) existing.push(label)
     localStorage.setItem(key, JSON.stringify(existing))
     EffectBus.emit(effect, { cell: label, location })
+
+    // Mirror hide list onto the mesh as a kind-30202 event so the
+    // filter survives reloads via relay echo and naturally evaporates
+    // when the user switches zone (different room+secret = different
+    // composed sig = no hides at that sig). Block list stays local.
+    if (storagePrefix === 'hc:hidden-tiles') {
+      const swarm = window.ioc.get<{ publishHide?: (names: Iterable<string>) => Promise<void> }>(
+        '@diamondcoreprocessor.com/SwarmDrone',
+      )
+      void swarm?.publishHide?.(existing)
+    }
+
     void new hypercomb().act()
   }
 }

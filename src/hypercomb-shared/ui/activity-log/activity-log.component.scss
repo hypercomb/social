@@ -13,6 +13,13 @@
   max-height: 50vh;
   overflow-y: auto;
 
+  // Item cap is enforced upstream (max 10 entries kept in state). The
+  // overflow + scroll-on-wheel still works for the rare full-list case,
+  // but the scrollbar itself is hidden so the panel reads as a quiet
+  // text strip — no chrome competing with the canvas.
+  scrollbar-width: none;        // Firefox
+  -ms-overflow-style: none;     // IE/old Edge
+
   display: flex;
   flex-direction: column-reverse;
   gap: 0.1rem;
@@ -25,13 +32,7 @@
   font-size: 0.7rem;
   color: rgba(245, 245, 245, 0.4);
 
-  &::-webkit-scrollbar { width: 4px; }
-  &::-webkit-scrollbar-track { background: transparent; }
-  &::-webkit-scrollbar-thumb {
-    background: rgba(77, 166, 255, 0.15);
-    border-radius: 2px;
-    &:hover { background: rgba(77, 166, 255, 0.3); }
-  }
+  &::-webkit-scrollbar { display: none; }   // Chromium / Safari
 }
 
 // ── entry rows ───────────────────────────────────────────

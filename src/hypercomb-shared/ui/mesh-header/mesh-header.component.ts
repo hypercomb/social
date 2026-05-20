@@ -1,154 +1,53 @@
-import { Component, computed, EventEmitter, Input, Output, signal } from '@angular/core'
+import { Component, EventEmitter, Input, Output, computed, signal, type OnInit, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
-import { TranslatePipe } from '../../core/i18n.pipe'
 import type { SecretStore } from '../../core/secret-store'
 import type { SecretStrengthProvider } from '../../core/secret-strength'
-import { secretTag } from '../controls-bar/secret-words'
 
 @Component({
   selector: 'hc-mesh-header',
   standalone: true,
-  imports: [TranslatePipe],
+  imports: [],
   templateUrl: './mesh-header.component.html',
   styleUrls: ['./mesh-header.component.scss'],
 })
-export class MeshHeaderComponent {
+export class MeshHeaderComponent implements OnInit, OnDestroy {
 
   @Input() meshPublic: boolean | null = false
   @Output() readonly meshToggled = new EventEmitter<void>()
-  @Output() readonly secretExpandedChange = new EventEmitter<boolean>()
 
-  #secretValue = signal('')
-  #secretExpanded = signal(false)
-  #locale$ = fromRuntime(
-    get('@hypercomb.social/I18n') as EventTarget | undefined,
-    () => (get('@hypercomb.social/I18n') as { locale?: string } | undefined)?.locale ?? 'en',
+  #secret$ = fromRuntime(
+    get('@hypercomb.social/SecretStore') as EventTarget | undefined,
+    () => (get('@hypercomb.social/SecretStore') as SecretStore | undefined)?.value ?? '',
   )
 
-  readonly secretValue = this.#secretValue.asReadonly()
-  readonly hasSecret = computed(() => this.#secretValue().trim().length > 0)
-  readonly showSecretInput = () => !!this.meshPublic && this.#secretExpanded()
-
-  readonly secretWords = computed(() => {
-    const secret = this.#secretValue().trim()
-    return secret ? secretTag(secret, this.#locale$()) : ''
-  })
-
-  readonly shieldTooltip = computed(() => {
-    if (!this.meshPublic) return ''
-    return this.hasSecret() ? 'Public · SEC' : 'Public · unsecure'
-  })
+  // While the mesh-modal is editing, it broadcasts the draft so the header
+  // shield can preview the strength in real time. Null = no active draft;
+  // header falls back to the persisted store value.
+  readonly #draft = signal<string | null>(null)
+  #unsubDraft: (() => void) | null = null
 
   readonly shieldColor = computed(() => {
-    const secret = this.#secretValue().trim()
-    if (!secret) return 'rgba(245, 245, 245, 0.35)'
+    const draft = this.#draft()
+    const secret = (draft !== null ? draft : this.#secret$()).trim()
+    if (!secret) return 'rgba(245, 245, 245, 0.45)'
     const provider = get('@hypercomb.social/SecretStrengthProvider') as SecretStrengthProvider | undefined
     const score = provider?.evaluate(secret) ?? 0.5
     const hue = Math.round(score * 130)
     return `hsl(${hue}, 70%, 50%)`
   })
 
-  constructor() {
-    const store = this.#store
-    if (store?.value) {
-      this.#secretValue.set(store.value)
-      this.#secretExpanded.set(false)
-    }
+  ngOnInit(): void {
+    this.#unsubDraft = EffectBus.on<{ secret: string | null }>('mesh:secret-draft', ({ secret }) => {
+      this.#draft.set(secret)
+    })
   }
 
-  get #store(): SecretStore | undefined {
-    return get('@hypercomb.social/SecretStore') as SecretStore | undefined
+  ngOnDestroy(): void {
+    this.#unsubDraft?.()
   }
 
-  #longPressTimer: ReturnType<typeof setTimeout> | null = null
-
-  /** Tap: toggle solo ↔ shield. Long-press in shield: expand secret input. */
-  readonly onPointerDown = (): void => {
-    this.#longPressTimer = setTimeout(() => {
-      this.#longPressTimer = null
-      if (this.meshPublic && !this.#secretExpanded()) {
-        this.#secretExpanded.set(true)
-        this.secretExpandedChange.emit(true)
-      }
-    }, 500)
-  }
-
-  readonly onPointerUp = (): void => {
-    if (this.#longPressTimer !== null) {
-      clearTimeout(this.#longPressTimer)
-      this.#longPressTimer = null
-      this.#handleTap()
-    }
-  }
-
-  /** pointerleave cancels the gesture entirely — no tap, no long-press. */
-  readonly onPointerLeave = (): void => {
-    if (this.#longPressTimer !== null) {
-      clearTimeout(this.#longPressTimer)
-      this.#longPressTimer = null
-    }
-  }
-
-  readonly #handleTap = (): void => {
-    if (!this.meshPublic) {
-      // solo → shield
-      this.meshToggled.emit()
-    } else if (this.showSecretInput()) {
-      // shield tap while editing: save and collapse
-      this.#saveAndCollapse()
-    } else {
-      // shield collapsed → toggle to solo
-      this.meshToggled.emit()
-    }
-  }
-
-  readonly expandSecret = (): void => {
-    this.#secretExpanded.set(true)
-    this.secretExpandedChange.emit(true)
-  }
-
-  readonly onSecretInput = (event: Event): void => {
-    this.#secretValue.set((event.target as HTMLInputElement).value)
-  }
-
-  readonly submitSecret = (event: Event): void => {
-    const value = (event.target as HTMLInputElement).value.trim()
-    if (value.length > 0 && value.length < 8) return
-    this.#secretValue.set(value)
-    this.#saveAndCollapse()
-  }
-
-  readonly cancelSecret = (): void => {
-    // Revert to last persisted value and collapse
-    const stored = this.#store?.value ?? ''
-    this.#secretValue.set(stored)
-    this.#secretExpanded.set(false)
-    this.secretExpandedChange.emit(false)
-    if (!stored) {
-      this.meshToggled.emit()
-    }
-  }
-
-  readonly #saveAndCollapse = (): void => {
-    const value = this.#secretValue().trim()
-    if (value.length > 0 && value.length < 8) return
-    this.#store?.set(value)
-    EffectBus.emit('mesh:secret', { secret: value })
-    if (value.length > 0) {
-      this.#secretExpanded.set(false)
-      this.secretExpandedChange.emit(false)
-    } else {
-      // No secret: go back to solo
-      this.#secretExpanded.set(false)
-      this.meshToggled.emit()
-      this.secretExpandedChange.emit(false)
-    }
-  }
-
-  readonly clearSecret = (): void => {
-    this.#secretValue.set('')
-    this.#store?.set('')
-    EffectBus.emit('mesh:secret', { secret: '' })
+  readonly onToggle = (): void => {
+    this.meshToggled.emit()
   }
 }

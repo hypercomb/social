@@ -1,4 +1,37 @@
 // diamondcoreprocessor.com/editor/tile-properties.ts
+//
+// 0000 — canonical tile properties
+// ================================
+// Every cell directory holds a `0000` JSON file with the cell's stable
+// per-instance properties — the values that identify the cell's place
+// and look. Read paths assume 0000 is cheap and present (lazy-patched
+// if missing), so first-paint can lay tiles out without waiting on
+// layer hydration.
+//
+// What belongs here:
+//   - `index: number` — slot in the AxialService spiral (the pinned-
+//     layout position). Required for placement; render lazy-patches a
+//     missing index by writing the next free slot back, so a tile
+//     never renders unanchored.
+//   - Other lightweight per-instance attributes (e.g. `imageSig` for a
+//     bootstrap atlas image; resolves to `__resources__/{sig}`).
+//
+// What does NOT belong here:
+//   - Authoritative cross-peer state — that's the layer's job. Canonical
+//     primitives (notes, children, etc.) sit in layer state, not 0000.
+//   - Decorations, conversation state, Q&A, comms, per-render computed
+//     values — those live in `__optimization__/<sig>.json` (the
+//     optimization substrate). Keeping 0000 free of decorations
+//     preserves layer purity and lets sig-based sync addressing stay
+//     stable across browsers.
+//
+// Cache coherence: writes broadcast `cell:0000-changed` via EffectBus
+// with the cell's cache key (see `cellLocationSig`); NurseBee
+// subscribers invalidate their per-attribute caches in response. The
+// broadcast is the canonical invalidation channel — there are no
+// other writers — so the nurses' cached reads stay coherent without
+// anyone else having to remember to invalidate.
+
 import { EffectBus, SignatureService, type Signature } from '@hypercomb/core'
 
 export const TILE_PROPERTIES_FILE = '0000'

@@ -1,6 +1,6 @@
 // hypercomb-web/src/setup/resolve-import-map.ts
 
-import { environment } from '@hypercomb/shared'
+import { environment, Store } from '@hypercomb/shared'
 
 export type ResolvedImports = Record<string, string>
 
@@ -13,26 +13,29 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   imports['@hypercomb/core'] = '/hypercomb-core.runtime.js'
   imports['pixi.js'] = '/vendor/pixi.runtime.js'
 
-
-  let root: FileSystemDirectoryHandle
-  try {
-    root = await Promise.race([
-      navigator.storage.getDirectory(),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('OPFS timed out')), 3_000)
-      )
-    ])
-  } catch (err) {
-    console.warn('[resolveImportMap] OPFS unavailable — returning core imports only', err)
+  // Reuse the OPFS handles `ensureInstall` already initialized via `Store`.
+  // Calling `navigator.storage.getDirectory()` a second time here (with its
+  // own short timeout) used to race on slower systems (e.g. macOS Catalina
+  // + Chrome 128): the timeout fired, the import map shipped without any
+  // namespace aliases, then `DependencyLoader` fell back to scanning OPFS
+  // directly, found a dep file, and tried `import('@dcp.com/link')` against
+  // the now-empty import map → `Failed to resolve module specifier`.
+  // `Store.initialize` memoizes, so this is idempotent.
+  const store = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(
+    '@hypercomb.social/Store',
+  ) as Store | undefined
+  if (!store) {
+    console.warn('[resolveImportMap] Store not registered — returning core imports only')
     return imports
   }
 
-  let depsDir: FileSystemDirectoryHandle | null = null
-  try {
-    depsDir = await root.getDirectoryHandle('__dependencies__')
-  } catch {
-    depsDir = null
+  await store.initialize()
+  if (!store.opfsAvailable) {
+    console.warn('[resolveImportMap] OPFS unavailable — returning core imports only')
+    return imports
   }
+
+  const depsDir = store.dependencies
   if (!depsDir) return imports
 
   for await (const [signature, handle] of depsDir.entries()) {

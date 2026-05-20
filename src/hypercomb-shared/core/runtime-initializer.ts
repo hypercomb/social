@@ -158,12 +158,15 @@ const _runInitializeRuntime = async (
 
   const store = get('@hypercomb.social/Store') as Store | undefined
   await store?.initialize?.()
+  ;(window as any).__hcBoot?.('store.initialize done')
 
   // Materialize layer tree → tile directories in hypercomb.io/ (no-op if tiles already exist)
   if (store) await materializeInstalledLayers(store)
+  ;(window as any).__hcBoot?.('materializeInstalledLayers done')
 
   // Materialize install structure tree → __structure__/ for program inspection
   if (store) await materializeStructure(store)
+  ;(window as any).__hcBoot?.('materializeStructure done')
 
   // Load host translations for the i18n service
   const i18n = get('@hypercomb.social/I18n') as LocalizationService | undefined
@@ -200,6 +203,7 @@ const _runInitializeRuntime = async (
       i18n.registerTranslations('app', 'tr', tr.default)
       i18n.registerTranslations('app', 'it', it.default)
     } catch { /* translations unavailable — graceful degradation */ }
+    ;(window as any).__hcBoot?.('i18n catalogs loaded')
 
     // User override layer — a single JSON file in OPFS whose shape is
     //   { "<locale>": { "<key>": "<value>", ... }, ... }
@@ -224,6 +228,7 @@ const _runInitializeRuntime = async (
 
   const lineage = get('@hypercomb.social/Lineage') as Lineage | undefined
   await lineage?.initialize?.()
+  ;(window as any).__hcBoot?.('lineage.initialize done')
 
   const navigation = get('@hypercomb.social/Navigation') as Navigation | undefined
   navigation?.listen?.()
@@ -232,6 +237,7 @@ const _runInitializeRuntime = async (
   // encounter() calls find() → reads markers → loads bees → pulses them.
   const history = get('@hypercomb.social/BootstrapHistory') as BootstrapHistory | undefined
   await history?.run?.()
+  ;(window as any).__hcBoot?.('BootstrapHistory.run done (Phase-1 URL restore; bees load in Phase-2 background)')
 
   // console.log('[runtime-initializer] ioc keys:', list())
 

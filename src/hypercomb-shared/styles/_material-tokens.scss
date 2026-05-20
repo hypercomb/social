@@ -1,0 +1,179 @@
+// hypercomb-shared/styles/_material-tokens.scss
+//
+// Material 3 design tokens — the single source of truth for the entire
+// system. Both the Angular shell (notes-strip, controls-bar, command-line,
+// etc.) and the standalone website pages (dolphin / dashboard, generated
+// as static HTML resources) consume these tokens. Keeping them aligned
+// here means the design language stays unified across both surfaces.
+//
+// IMPORTANT: the same tokens are duplicated as literal CSS in the website
+// generator (`scripts/bridge/_dolphin-revision.cjs`, inside CHROME_CSS).
+// If you change values here, mirror them there too. Drift only matters
+// visually — both files render in different runtimes (Angular shell vs.
+// static HTML resource), so a build-time concat isn't feasible.
+//
+// Token surfaces:
+//   --md-surface*     surface tonal scale (background + elevation tiers)
+//   --md-on-surface*  text/foreground colors at the various contrast levels
+//   --md-primary*     primary accent (default action color, focus rings)
+//   --md-secondary*   secondary accent (warm tone — alerts, chips)
+//   --md-tertiary*    tertiary accent (cool tone — decoration, badges)
+//   --md-outline*     borders + dividers
+//   --md-state-*      hover / focus / pressed overlay opacities
+//   --md-shape-*      corner radius scale
+//   --md-elev-*       elevation shadow stacks
+//   --md-font-*       typography role fonts
+//   --md-easing-*     motion curves
+//   --md-dur-*        motion durations
+
+:root {
+  // ── surface system (LIGHT default — per /instructions/styles doctrine) ─
+  // Fresh sites and the dev shell default to light. Dark is the explicit
+  // override via [data-theme="dark"] or prefers-color-scheme: dark when no
+  // explicit user preference is set.
+  --md-surface:           #f5ede0;
+  --md-surface-dim:       #e8dec6;
+  --md-surface-bright:    #fdf7ea;
+  --md-surface-c-lowest:  #ffffff;
+  --md-surface-c-low:     #efe7d4;
+  --md-surface-c:         #e9ddc4;
+  --md-surface-c-high:    #e0d3b6;
+  --md-surface-c-highest: #d7c9a6;
+  --md-on-surface:        #1a1f2c;
+  --md-on-surface-strong: #0a1020;
+  --md-on-surface-var:    #4f566a;
+  --md-on-surface-faint:  #8c8a82;
+
+  // ── primary / secondary / tertiary ────────────────────────────────
+  --md-primary:           #1f4376;
+  --md-on-primary:        #ffffff;
+  --md-primary-container: #cce0f2;
+  --md-on-primary-c:      #062340;
+
+  --md-secondary:         #794c1e;
+  --md-on-secondary:      #ffffff;
+  --md-secondary-c:       #f4dcc1;
+  --md-on-secondary-c:    #2a1a08;
+
+  --md-tertiary:          #5a3d68;
+  --md-tertiary-c:        #ead0f1;
+
+  // ── outline / divider ─────────────────────────────────────────────
+  --md-outline:           rgba(26, 31, 44, 0.24);
+  --md-outline-variant:   rgba(26, 31, 44, 0.10);
+
+  // ── state-layer overlay opacities ─────────────────────────────────
+  --md-state-hover:    0.08;
+  --md-state-focus:    0.12;
+  --md-state-pressed:  0.16;
+
+  // ── shape (Material 3 corner radius scale) ────────────────────────
+  --md-shape-xs:    4px;
+  --md-shape-s:     8px;
+  --md-shape-m:    12px;
+  --md-shape-l:    16px;
+  --md-shape-xl:   28px;
+  --md-shape-full: 999px;
+
+  // ── elevation (Material 3 box-shadow sets, tuned for light surfaces) ──
+  --md-elev-0: none;
+  --md-elev-1: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 3px 1px rgba(0, 0, 0, 0.04);
+  --md-elev-2: 0 1px 2px rgba(0, 0, 0, 0.06), 0 2px 6px 2px rgba(0, 0, 0, 0.04);
+  --md-elev-3: 0 4px 8px 3px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.10);
+  --md-elev-4: 0 6px 10px 4px rgba(0, 0, 0, 0.06), 0 2px 3px rgba(0, 0, 0, 0.10);
+
+  // ── typography (role fonts) ───────────────────────────────────────
+  //
+  // Editorial surfaces (website pages) lean serif for display + body.
+  // Productivity surfaces (the Angular shell) keep their compact-sans
+  // role — they can opt into the editorial fonts when needed but the
+  // default is the existing `--hc-font` already defined globally.
+  --md-font-display: "Source Serif 4", "Iowan Old Style", Georgia, "Times New Roman", serif;
+  --md-font-body:    "Source Serif 4", "Iowan Old Style", Georgia, serif;
+  --md-font-ui:      Inter, "Segoe UI Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  // ── motion ────────────────────────────────────────────────────────
+  --md-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --md-easing-standard:   cubic-bezier(0.2, 0, 0.2, 1);
+  --md-dur-short:    150ms;
+  --md-dur-medium:   250ms;
+  --md-dur-long:     400ms;
+}
+
+// ── dark theme override ───────────────────────────────────────────────
+//
+// Light is the default (see /instructions/styles doctrine). Dark activates
+// either explicitly via [data-theme="dark"] on <html>, or implicitly via
+// prefers-color-scheme: dark when no explicit user preference is set.
+// Same shape as light — only the values flip — so any component that uses
+// these tokens gets dark mode for free with no per-component code.
+
+@mixin md-dark-tokens {
+  --md-surface:           #0c1622;
+  --md-surface-dim:       #07101b;
+  --md-surface-bright:    #19283a;
+  --md-surface-c-lowest:  #050b13;
+  --md-surface-c-low:     #0e1b29;
+  --md-surface-c:         #142233;
+  --md-surface-c-high:    #1b2c41;
+  --md-surface-c-highest: #233650;
+  --md-on-surface:        #e8e2d6;
+  --md-on-surface-strong: #f6f0e2;
+  --md-on-surface-var:    #b6a99a;
+  --md-on-surface-faint:  #7a7060;
+  --md-primary:           #7eb6d6;
+  --md-on-primary:        #06121c;
+  --md-primary-container: #1f4f76;
+  --md-on-primary-c:      #c8e1f0;
+  --md-secondary:         #d3a47a;
+  --md-on-secondary:      #2a1a08;
+  --md-secondary-c:       #5a3a18;
+  --md-on-secondary-c:    #f3d8b6;
+  --md-tertiary:          #b297c2;
+  --md-tertiary-c:        #4a3a55;
+  --md-outline:           rgba(232, 226, 214, 0.20);
+  --md-outline-variant:   rgba(232, 226, 214, 0.10);
+  --md-elev-1: 0 1px 2px rgba(0, 0, 0, 0.30), 0 1px 3px 1px rgba(0, 0, 0, 0.15);
+  --md-elev-2: 0 1px 2px rgba(0, 0, 0, 0.30), 0 2px 6px 2px rgba(0, 0, 0, 0.15);
+  --md-elev-3: 0 4px 8px 3px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.30);
+  --md-elev-4: 0 6px 10px 4px rgba(0, 0, 0, 0.15), 0 2px 3px rgba(0, 0, 0, 0.30);
+}
+
+[data-theme="dark"] { @include md-dark-tokens; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) { @include md-dark-tokens; }
+}
+
+// ── Material Symbols icon class ────────────────────────────────────────
+//
+// Shorthand for inline icons using the Material Symbols Outlined variable
+// font (loaded in each shell's index.html). Use as:
+//
+//   <span class="mat-sym">arrow_back</span>
+//
+// Optional sizing/weight axes per usage via inline style:
+//   font-size: 1.25rem
+//   font-variation-settings: 'FILL' 1, 'wght' 500
+//
+// Color inherits from currentColor by default so wrapping it in a token-
+// coloured element automatically themes it.
+.mat-sym {
+  font-family: 'Material Symbols Outlined', system-ui;
+  font-weight: 400;
+  font-style: normal;
+  font-size: 1.2rem;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  user-select: none;
+}
+
+.mat-sym.filled { font-variation-settings: 'FILL' 1, 'wght' 400, 'GRAD' 0, 'opsz' 24; }

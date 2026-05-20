@@ -1,4 +1,5 @@
 @use '../../hypercomb-shared/fonts/fonts';
+@use '../../hypercomb-shared/styles/material-tokens';
 
 *,
 *::before,
@@ -16,7 +17,9 @@ body {
   // Fixed-positioned UI (command line, controls bar, overlays) stays
   // on-screen regardless of inner content height.
   overflow: hidden;
-  background-color: #050f17;
+  // Surface tonal background — same token the website pages use, so the
+  // shell's body and the website's body read as one continuous surface.
+  background-color: var(--md-surface);
   touch-action: manipulation;
   font-family: var(--hc-font);
 }

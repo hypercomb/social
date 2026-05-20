@@ -20,23 +20,22 @@
 }
 
 // ── Note capture intent ──────────────────────────────────
-// When the user is composing or editing a note the typed text turns the
-// same bright yellow the note icon uses on tiles that contain notes.
-// No outline, no glow — just the text colour, so it reads as the
-// content itself becoming a note rather than a chrome state.
-$note-accent: #ffe14a;
+// When the user is composing or editing a note the typed text picks up
+// the same warm secondary accent the notes-strip uses for its "this is
+// a note" affordance. Same token, same semantic — content becomes a
+// note rather than a chrome state.
 
 :host(.note-intent) ::ng-deep .command-input {
-  color: $note-accent;
-  caret-color: $note-accent;
+  color: var(--md-secondary);
+  caret-color: var(--md-secondary);
 }
 
 :host(.note-intent) ::ng-deep .command-input::placeholder {
-  color: rgba($note-accent, 0.55);
+  color: color-mix(in srgb, var(--md-secondary) 55%, transparent);
 }
 
 :host(.note-intent) ::ng-deep .ghost {
-  color: rgba($note-accent, 0.35);
+  color: color-mix(in srgb, var(--md-secondary) 35%, transparent);
 }
 
 .command-line-wrapper {
@@ -59,16 +58,17 @@ $note-accent: #ffe14a;
   width: 100%;
   padding: 0 0.75rem;
   font-size: 1em;
-  color: rgba(77, 166, 255, 0.8);
+  color: color-mix(in srgb, var(--md-primary) 80%, transparent);
   background: transparent;
   border: none;
   cursor: pointer;
   text-decoration: none;
-  transition: color 200ms ease, background 200ms ease;
+  transition: color var(--md-dur-medium) var(--md-easing-standard),
+              background var(--md-dur-medium) var(--md-easing-standard);
 
   &:hover {
-    color: rgba(77, 166, 255, 1);
-    background: rgba(77, 166, 255, 0.06);
+    color: var(--md-primary);
+    background: color-mix(in srgb, var(--md-primary) 6%, transparent);
   }
 }
 
@@ -83,16 +83,17 @@ $note-accent: #ffe14a;
   padding: 0;
   background: transparent;
   border: none;
-  border-left: 1.5px solid rgba(77, 166, 255, 0.4);
+  border-left: 1.5px solid color-mix(in srgb, var(--md-primary) 40%, transparent);
   border-radius: 0;
-  color: rgba(200, 200, 200, 0.6);
+  color: var(--md-on-surface-var);
   cursor: pointer;
   user-select: none;
   touch-action: none;
-  transition: color 200ms ease, background 200ms ease;
+  transition: color var(--md-dur-medium) var(--md-easing-standard),
+              background var(--md-dur-medium) var(--md-easing-standard);
 
   &:hover {
-    color: rgba(200, 200, 200, 0.9);
+    color: var(--md-on-surface-strong);
   }
 
   &.recording {
@@ -121,13 +122,11 @@ $note-accent: #ffe14a;
 .mobile-go-btn {
   display: none;
   flex-shrink: 0;
-  align-self: center;
-  padding: 0.5rem 1rem;
-  margin: 0 0.6rem;
-  background: rgba(120, 200, 255, 0.1);
-  border: 1px solid rgba(120, 200, 255, 0.4);
-  border-radius: 0.4rem;
-  color: rgba(120, 200, 255, 1);
+  padding: 0 1.1rem;
+  background: transparent;
+  border: none;
+  border-left: 1.5px solid color-mix(in srgb, var(--md-primary) 45%, transparent);
+  color: var(--md-primary);
   font-family: var(--hc-mono);
   font-size: 0.95rem;
   font-weight: 700;
@@ -138,13 +137,11 @@ $note-accent: #ffe14a;
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 
   &:hover {
-    color: #fff;
-    background: rgba(120, 200, 255, 0.2);
-    border-color: rgba(120, 200, 255, 0.7);
+    color: var(--md-on-surface-strong);
+    background: color-mix(in srgb, var(--md-primary) 10%, transparent);
   }
   &:active {
-    background: rgba(120, 200, 255, 0.28);
-    border-color: rgba(120, 200, 255, 0.85);
+    background: color-mix(in srgb, var(--md-primary) 18%, transparent);
   }
 }
 

@@ -1,5 +1,6 @@
 // diamondcoreprocessor.com/input/zoom/mousewheel-zoom.input.ts
 import type { InputGate } from '../input-gate.service.js'
+import type { InputMode, InputModeStack } from '../input-mode-stack.service.js'
 
 type Point = { x: number; y: number }
 
@@ -24,7 +25,15 @@ export class MousewheelZoomInput {
   } | null = null
 
   private gate: InputGate | null = null
+  private stack: InputModeStack | null = null
+  #mode: InputMode | null = null
 
+  /** Registers this wheel-zoom handler as the default input mode on the
+   *  InputModeStack so other modes (notes-hover, future overlays) can
+   *  mechanically suspend it by pushing on top. Fallback to direct
+   *  window.addEventListener if the stack isn't available (defensive —
+   *  shouldn't happen in normal boot order, but keeps the bee functional
+   *  if its dependencies haven't loaded). */
   public attach = (
     zoom: {
       zoomByFactor: (factor: number, pivot: Point) => void
@@ -38,32 +47,54 @@ export class MousewheelZoomInput {
     this.zoom = zoom
     this.canvas = canvas
     this.gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate') ?? null
+    this.stack = window.ioc.get<InputModeStack>('@diamondcoreprocessor.com/InputModeStack') ?? null
 
     // canvas has pointer-events:none so this must be global
     // gating uses the canvas rect so behavior matches "over the container"
-    window.addEventListener('wheel', this.onWheel, { passive: false })
+    if (this.stack) {
+      this.#mode = {
+        name: 'hex-grid-wheel-zoom',
+        mount: () => window.addEventListener('wheel', this.onWheel, { passive: false }),
+        unmount: () => window.removeEventListener('wheel', this.onWheel),
+      }
+      this.stack.push(this.#mode)
+    } else {
+      window.addEventListener('wheel', this.onWheel, { passive: false })
+    }
     this.enabled = true
   }
 
   public detach = (): void => {
     if (!this.enabled) return
 
-    window.removeEventListener('wheel', this.onWheel)
+    if (this.stack && this.#mode) {
+      // Force-remove regardless of position — detach may run while a
+      // notes-hover (or other) mode is layered above us.
+      this.stack.remove(this.#mode.name)
+      this.#mode = null
+    } else {
+      window.removeEventListener('wheel', this.onWheel)
+    }
 
     this.zoom = null
     this.canvas = null
     this.gate = null
+    this.stack = null
     this.enabled = false
   }
 
   private onWheel = (event: WheelEvent): void => {
     if (!this.zoom || !this.canvas) return
 
-    // Bail only when a transient interaction owns the gate (pan, touch,
-    // selection in flight). The sticky `locked` state (lock button or
-    // editor overlay) falls through to zoom-in-place below, so the wheel
-    // can always emit `viewport:manual` and escape a fit-lock trap.
-    if (this.gate?.owner) return
+    // Wheel zoom is always-on. UI that needs to take precedence does so
+    // structurally — by pushing its own mode onto InputModeStack (which
+    // unmounts this listener entirely) or by tagging its scroll surface
+    // with [data-consumes-wheel] (handled below). Transient input claims
+    // on the legacy InputGate (touch-coordinator pan/pinch/momentum,
+    // selection drag, spacebar pan) are NOT a reason to silently drop
+    // wheel events — those gestures don't conflict with wheel zoom, and
+    // any leaked claim would otherwise leave wheel scrolling permanently
+    // dead until an escape-cascade clear.
 
     // bail if the event is aimed at a UI surface that wants to consume
     // wheel itself (scrollable panels marked [data-consumes-wheel]).

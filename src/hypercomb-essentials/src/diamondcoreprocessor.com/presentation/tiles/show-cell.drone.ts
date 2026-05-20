@@ -8,6 +8,7 @@ import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
 import { isSignature, readCellProperties, writeCellProperties, cellLocationSig } from '../../editor/tile-properties.js'
+import { hideStorageKey } from './tile-actions.drone.js'
 import type { HistoryService } from '../../history/history.service.js'
 import type { HistoryCursorService, CursorState } from '../../history/history-cursor.service.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoom/zoom.drone.js'
@@ -254,7 +255,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -327,6 +328,13 @@ export class ShowCellDrone extends Drone {
   // check alone misses these — back-nav was running its body twice per
   // click because of the popstate→navigate→lineage-change cascade.
   #activeRenderTarget: string | null = null
+  // Set by invalidation effects (e.g. swarm:resource-arrived) that fire
+  // while a render may be in flight. Without it, the in-flight render
+  // writes a fresh renderedCellsKey on completion, and the queued
+  // re-render hits the fast-path skip below because renderedCellsKey is
+  // no longer empty. Honoring this flag in the fast-path check (and
+  // clearing it once we proceed) makes the invalidation survive the race.
+  #forceNextRender = false
   private renderedLocationKey = ''
   #axialToIndex = new Map<string, number>()
   #heartbeatInitialized = false
@@ -345,6 +353,21 @@ export class ShowCellDrone extends Drone {
   #substrateFadeRaf = 0
   #showHiddenItems = false
   #currentHiddenSet = new Set<string>()
+  // Names of cells in the current render that came from an ephemeral
+  // tile source (sync preview, not adopted to OPFS). Used by the pinned
+  // index writer to skip per-cell OPFS writes that would NotFound, and
+  // by the pixi draw path to apply the dashed-accent preview style.
+  // Cleared and rebuilt on each renderFromSynchronize.
+  #ephemeralCellSet = new Set<string>()
+
+  // Names of cells in the current render that came from a swarm peer
+  // (kind:'peer' from TileSourceRegistry). Treated like ephemeral for
+  // visual treatment, but additionally surfaced as branches so a click
+  // navigates into them — that's the "browse a peer's tree without
+  // adopting first" path. The new lineage's swarm subscription picks
+  // up whatever the peer is publishing at the deeper level (if any),
+  // and the user can add normally from there to mint local tiles.
+  #peerCellSet = new Set<string>()
 
   // mesh scoping — space + secret feed into the signature key
   #space = ''
@@ -571,6 +594,28 @@ export class ShowCellDrone extends Drone {
 
     if (!sig) return
 
+    // Privacy gate — show-cell's legacy kind-29010 subscribe + publish
+    // path was the un-credentialled leak the user reported ("the mesh
+    // is sharing even without a location or password"). Without both
+    // a room and a secret we MUST NOT subscribe (would receive other
+    // peers' cached events from the relay) or publish (would broadcast
+    // our local cell list to anyone listening on this lineage sig).
+    // SwarmDrone has the same gate for the new kind-30200 path.
+    if (!this.#space || !this.#secret) {
+      // If we previously had a subscription open from a session with
+      // credentials, close it now so the leak is sealed immediately
+      // when the user clears credentials, not just on next lineage
+      // change.
+      if (this.meshSub) {
+        try { this.meshSub.close() } catch { /* ignore */ }
+        this.meshSub = null
+      }
+      this.meshSig = ''
+      this.meshCells = []
+      this.meshCellsRev++
+      return
+    }
+
     const sigChanged = sig !== this.meshSig
 
     if (sigChanged) {
@@ -585,6 +630,15 @@ export class ShowCellDrone extends Drone {
 
       if (typeof mesh.subscribe === 'function') {
         this.meshSub = mesh.subscribe(sig, (evt) => {
+          // Only react to the legacy ephemeral kind that this drone owns.
+          // Swarm-layer events (kind 30200) belong to SwarmDrone and don't
+          // affect meshCells — re-rendering on every one of them churns
+          // show-cell on each peer publish (and on our own local fanout).
+          // Peer tiles still update at the next render trigger (navigation
+          // / user interaction); they don't need per-event refreshes.
+          const kind = Number((evt?.event as { kind?: number } | undefined)?.kind ?? 0)
+          if (kind && kind !== 29010) return
+
           // detect sync-request from another publisher — trigger immediate republish
           this.#handleIncomingSyncRequest(evt, mesh, sig)
 
@@ -1317,9 +1371,17 @@ export class ShowCellDrone extends Drone {
 
     // fast path: skip all OPFS work when nothing has changed
     // renderedCellsKey is cleared by any invalidation event (tile:saved, orientation, clipboard, etc.)
-    if (locationKey === this.renderedLocationKey && this.renderedCellsKey !== '' && !this.#clipboardView) {
+    // #forceNextRender overrides the skip when an effect needs the next render to actually run
+    // (e.g. swarm:resource-arrived firing mid-render — see the field declaration for the race details).
+    if (
+      !this.#forceNextRender
+      && locationKey === this.renderedLocationKey
+      && this.renderedCellsKey !== ''
+      && !this.#clipboardView
+    ) {
       return
     }
+    this.#forceNextRender = false
 
     // ── coalesce duplicate renders for the same target ───────────────
     // One user nav gesture fires 3–5 events: popstate, navigate,
@@ -1606,6 +1668,16 @@ export class ShowCellDrone extends Drone {
 
     const localCellSet = new Set(localCells)
 
+    // Preview tile sets — populated AFTER the layer-filter block runs
+    // (~line 1750+). Why: dedup against localCellSet has to happen on
+    // the post-filter set, otherwise a peer tile whose name matches
+    // an OPFS dir that the layer says "doesn't render" gets dropped
+    // from BOTH the local pass (because it's in OPFS) AND the layer
+    // pass (because the layer wiped localCellSet). The user then sees
+    // neither — even though the swarm has the data.
+    const ephemeralCellSet = new Set<string>()
+    const peerCellSet = new Set<string>()
+
     // detect which local cells have children (branches) — memoized per
     // (dir, lineage.fsRevision); see #computeBranchSet for rationale
     const branchSet = await this.#computeBranchSet(dir, localCells)
@@ -1666,15 +1738,91 @@ export class ShowCellDrone extends Drone {
           const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
           const parentLayerSig = cursorService.currentLayerSig || ''
           layerAllowed = await resolveChildNames(historyService, parentSegments, dir, content, parentLayerSig)
-          union.clear()
-          localCellSet.clear()
-          for (const cell of layerAllowed) {
-            union.add(cell)
-            localCellSet.add(cell)
+          // Defensive: a corrupt layer can land here with null/empty
+          // entries in its children list (seen on root lineage when an
+          // upstream commit recorded children:[null]). Without this
+          // filter the bad entries replace the real local cells in
+          // localCellSet, dropping every real tile from the render.
+          // Treat a non-empty-but-all-invalid layer as "no constraint"
+          // and fall through to OPFS truth.
+          const validNames: string[] = []
+          for (const n of layerAllowed) {
+            if (typeof n === 'string' && n.length > 0) validNames.push(n)
           }
+          const layerWasEmpty = layerAllowed.size === 0
+          const allEntriesInvalid = !layerWasEmpty && validNames.length === 0
+          if (!allEntriesInvalid) {
+            union.clear()
+            localCellSet.clear()
+            for (const cell of validNames) {
+              union.add(cell)
+              localCellSet.add(cell)
+            }
+            layerAllowed = new Set(validNames)
+          }
+          // else: keep union + localCellSet as-is so OPFS truth survives
         }
       }
     }
+
+    // Now that localCellSet reflects layer-truth (or OPFS truth when no
+    // layer constraint applies), pull peer/ephemeral previews from the
+    // TileSourceRegistry. Doing this AFTER the layer block is what lets
+    // a peer publishing a tile name that the local layer "doesn't have"
+    // surface as a preview the user can adopt — without this ordering,
+    // the dedup against the pre-filter localCellSet drops it before the
+    // layer block ever runs.
+    // Per-render map of peer-published slot indices. Built from any
+    // kind:'peer' TileEntry that carries source.peerIndex. Passed into
+    // the pinned-order resolver so peer tiles land at the publisher's
+    // slot instead of being demoted to the next-free slot (which
+    // collides with local cells at low indices).
+    const peerIndices = new Map<string, number>()
+    try {
+      const registry = (window as any).ioc?.get?.('@hypercomb.social/TileSourceRegistry') as
+        | { resolve: (loc: { segments: readonly string[]; dir: FileSystemDirectoryHandle | null }) => Promise<readonly { name: string; kind: string; source?: { peerIndex?: number } }[]> }
+        | undefined
+      if (registry?.resolve) {
+        const segs = lineage?.explorerSegments?.() ?? []
+        const entries = await registry.resolve({ segments: segs, dir })
+
+        // Mismatch check — only mismatched peer/ephemeral names produce
+        // any peer-aware state. If every peer-or-ephemeral name already
+        // exists in localCellSet, the contributor pipeline has nothing
+        // new to surface and we render purely from local-derived state.
+        // This makes the intent visible in code ("only my tiles when
+        // peers add nothing new") instead of relying on the per-entry
+        // dedup to silently no-op below.
+        const mismatched = entries.filter(e =>
+          (e.kind === 'ephemeral' || e.kind === 'peer') && !localCellSet.has(e.name),
+        )
+
+        for (const e of mismatched) {
+          ephemeralCellSet.add(e.name)
+          // Track peer-kind separately so #buildCellCountPayload can mark
+          // them as branches, making clicks route through #navigateInto
+          // instead of falling through to the 'open' editor action.
+          if (e.kind === 'peer') {
+            peerCellSet.add(e.name)
+            const pidx = e.source?.peerIndex
+            // First-publisher-wins — if a second peer publishes the same
+            // name with a different index, the first one we encountered
+            // anchors the slot. The collision check in #orderByIndexPinned
+            // catches any pathological overlap with local indices.
+            if (typeof pidx === 'number' && Number.isFinite(pidx) && pidx >= 0 && !peerIndices.has(e.name)) {
+              peerIndices.set(e.name, pidx)
+            }
+          }
+          union.add(e.name)
+        }
+      }
+    } catch (err) {
+      // Registry hiccups must never block the render. Previews just
+      // won't appear this pass and will catch up on the next render.
+      console.warn('[show-cell] ephemeral source resolution failed', err)
+    }
+    this.#ephemeralCellSet = ephemeralCellSet
+    this.#peerCellSet = peerCellSet
 
     // Reconcile pendingRemoves against the layer's children list. Under
     // layer-as-primitive, the LAYER decides membership: a /remove drops
@@ -1710,11 +1858,45 @@ export class ShowCellDrone extends Drone {
     // bee-owned primitive. Read live localStorage in both rewound and
     // head positions. (Per-position playback of visibility is the
     // visibility bee's responsibility, not the renderer's.)
-    const hiddenSet = new Set<string>(JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? '[]'))
+    //
+    // Block list also covers swarm peer tiles: a hidden name should
+    // disappear regardless of whether the user owns it or it arrived
+    // from a peer publish. Without the unconditional delete a user
+    // who hides a peer tile would see it pop back on every swarm
+    // republish. ephemeralCellSet/peerCellSet stay in sync so the
+    // tile-overlay doesn't keep treating it as a dashed preview.
+    // Hide list lives in THREE places that union into the renderer's
+    // filter:
+    //   1. Zone-scoped localStorage: `hc:hidden-tiles:<loc>:z<zone>`
+    //      where zone is base64url(room\0secret), written/cleared by
+    //      SwarmDrone#updateZoneKey on every credential change. Per-
+    //      session/per-zone scope: switching zone gives a fresh empty
+    //      filter at the new zone.
+    //   2. Bare-key localStorage: `hc:hidden-tiles:<loc>` — the legacy
+    //      pre-zone-scoping key. Always read alongside (1) so any hide
+    //      that was ever written under either key survives. Bleed
+    //      protection still holds at the WRITE side because new
+    //      writes only go to the zone-scoped key while public.
+    //   3. SwarmDrone.hiddenAtCurrentSig() — peer-published kind 30202
+    //      events at the current composed sig. Restores filter on
+    //      refresh via relay echo with no client storage.
+    // Any source hiding a name drops it from the render.
+    const localHidden: string[] = JSON.parse(localStorage.getItem(hideStorageKey(locationKey)) ?? '[]')
+    const bareHidden: string[] = JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? '[]')
+    const hiddenSet = new Set<string>([...localHidden, ...bareHidden])
+    try {
+      const swarm = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone') as
+        | { hiddenAtCurrentSig?: () => ReadonlySet<string> }
+        | undefined
+      const swarmHidden = swarm?.hiddenAtCurrentSig?.() ?? new Set<string>()
+      for (const n of swarmHidden) hiddenSet.add(n)
+    } catch { /* swarm not registered yet — local hides still apply */ }
     this.#currentHiddenSet = hiddenSet
     if (!this.#showHiddenItems) {
       for (const hidden of hiddenSet) {
-        if (localCellSet.has(hidden)) union.delete(hidden)
+        union.delete(hidden)
+        ephemeralCellSet.delete(hidden)
+        peerCellSet.delete(hidden)
       }
     }
 
@@ -1740,7 +1922,7 @@ export class ShowCellDrone extends Drone {
     this.#layoutMode = this.#readLayoutMode(locationKey)
 
     // resolve cell ordering through the layout mode strategy
-    const cellNames = await this.#resolveCellOrder(this.#layoutMode, dir, union, localCellSet, lineage)
+    const cellNames = await this.#resolveCellOrder(this.#layoutMode, dir, union, localCellSet, lineage, peerIndices)
 
     const previousLocationKey = this.renderedLocationKey
     const layerChanged = locationKey !== previousLocationKey
@@ -2747,6 +2929,22 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // Paired-channel share-ephemeral: an incoming share landed as a
+    // preview (no OPFS write). Invalidate caches + re-render so the
+    // ephemeral tile surfaces. `paired-channel:share-installed` fires
+    // after adopt commits to OPFS — the ephemeral entry's already
+    // cleared on the drone, so we just need to re-render.
+    this.onEffect<{ location?: string; branchName?: string }>('paired-channel:share-ephemeral', () => {
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+    this.onEffect<{ location?: string; branchName?: string }>('paired-channel:share-installed', () => {
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
     // listen for pivot mode toggle (loads pre-rotated snapshots + rotated labels)
     this.onEffect<{ pivot: boolean }>('render:set-pivot', (payload) => {
       if (this.#pivot !== payload.pivot) {
@@ -2786,6 +2984,28 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // SwarmDrone fires this when a peer arrives or its layer changes
+    // (and again on mesh-public toggling off, with reason='mode-private',
+    // so the cleared peer state surfaces as an empty TileSourceRegistry
+    // contribution and temp shared tiles disappear). show-cell's mesh
+    // callback no longer reacts to swarm-kind events directly — this
+    // drone-to-drone effect is the explicit handoff that triggers the
+    // repaint exactly when peer state actually changed.
+    //
+    // Aggressive invalidation: clearing cellsKey alone wasn't enough —
+    // the back-nav fast path matches by locationKey and serves a stale
+    // cells cache that doesn't reflect the new peer entries. Clear the
+    // location key + layer-cells cache for the current location so the
+    // next render runs the full path (lists local cells, queries the
+    // registry, includes peer additions, re-seeds the slot machine).
+    this.onEffect('swarm:peers-changed', () => {
+      this.renderedCellsKey = ''
+      const locationKey = this.renderedLocationKey
+      this.renderedLocationKey = ''
+      if (locationKey) this.#layerCellsCache.delete(locationKey)
+      this.requestRender()
+    })
+
     // substrate:applied — substrate has just written a new propsSig for this
     // cell. Only this one cell's imageSig changed; route through the in-place
     // buffer update so the rest of the grid never repaints. If the cell isn't
@@ -2812,6 +3032,77 @@ export class ShowCellDrone extends Drone {
           void this.renderIncremental({ changedContent: [payload.cell] })
         }
       })
+    })
+
+    // tile:hidden / tile:unhidden — instant local response to the
+    // user clicking the hide icon. localStorage has already been
+    // written by tile-actions; show-cell wipes its render caches and
+    // re-renders so the tile disappears (or reappears) without the
+    // user waiting for the swarm round-trip. The mesh publish + relay
+    // echo arrive moments later via swarm:hide-changed and are no-op
+    // because the cache is already clear. Pattern matches the delete
+    // path (cell:removed handler) — instant repaint, no waiting on
+    // network or processor pulse.
+    const invalidateForHide = (): void => {
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.requestRender()
+    }
+    this.onEffect<{ cell: string; location: string }>('tile:hidden', invalidateForHide)
+    this.onEffect<{ cell: string; location: string }>('tile:unhidden', invalidateForHide)
+
+    // swarm:hide-changed — a hide event for the current lineage just
+    // landed (could be our own echo on first reload, or a multi-device
+    // sync from another tab signed by the same pubkey). Same render
+    // path as the local tile:hidden — the union read picks up
+    // whichever source has new names.
+    this.onEffect<{ sig: string; pubkey: string }>('swarm:hide-changed', invalidateForHide)
+
+    // swarm:resource-arrived — the swarm pipeline just wrote a peer's
+    // image bytes (or nested propsSig blob) to local OPFS. A tile whose
+    // image was previously unresolved (referenced sig wasn't yet on
+    // disk, so the renderer drew a blank) can now be painted.
+    //
+    // Two patterns of stale per-cell state need to be cleared so the
+    // next render actually picks up the freshly-streamed bytes:
+    //
+    //   1. cellImageCache[label] === arrivedSig — the cell knows its
+    //      image sig, the atlas just didn't have it. After clearing,
+    //      the slow path will re-call loadImageOnce(sig) and bind the
+    //      atlas slot. The buildCellsKey hash includes imageSig and
+    //      the atlas eviction generation, so applyGeometry will see
+    //      a changed key and rebuild the UV buffer.
+    //
+    //   2. cellImageCache[label] === null — the previous resolve gave
+    //      up (no propsIndex, or propsBlob fetch failed). The arriving
+    //      sig may be the propsBlob a peer just published, or the
+    //      small.image bytes inside one. Either way, the next slow
+    //      path needs a chance to re-resolve, so clearing the null
+    //      entry is the unblock.
+    //
+    // Plain `requestRender()` alone is insufficient because the
+    // fast-path skip in renderFromSynchronize honors renderedCellsKey;
+    // if a render is in flight when this effect fires, the in-flight
+    // render writes renderedCellsKey at completion and the do-while
+    // re-render sees it non-empty and returns early. Setting
+    // #forceNextRender carries the invalidation across that race.
+    this.onEffect<{ sig: string }>('swarm:resource-arrived', ({ sig }) => {
+      let touched = false
+      if (sig) {
+        for (const [label, cached] of this.cellImageCache) {
+          if (cached === sig || cached === null) {
+            this.cellImageCache.delete(label)
+            touched = true
+          }
+        }
+      }
+      if (this.renderedLocationKey) {
+        this.#layerCellsCache.delete(this.renderedLocationKey)
+      }
+      this.renderedCellsKey = ''
+      this.#forceNextRender = true
+      void touched  // touched is informational; render always proceeds in case a peer tile depends on the arrived sig without a prior cache entry
+      this.requestRender()
     })
 
     // substrate:rerolled — user rerolled a single tile's substrate. Same
@@ -3165,11 +3456,15 @@ export class ShowCellDrone extends Drone {
     linkLabels: string[]
     hiddenLabels: string[]
   } {
+    // Peer tiles get marked as branches so tile-overlay routes their
+    // clicks through #navigateInto (URL changes, lineage updates, swarm
+    // re-subscribes). Without this they fall through to the editor's
+    // 'open' action and the user can't browse a peer's tree.
     return {
       count: cells.length,
       labels: cells.map(c => c.label),
       coords: cells.map(c => ({ q: c.q, r: c.r })),
-      branchLabels: cells.filter(c => c.hasBranch).map(c => c.label),
+      branchLabels: cells.filter(c => c.hasBranch || this.#peerCellSet.has(c.label)).map(c => c.label),
       externalLabels: cells.filter(c => c.external).map(c => c.label),
       noImageLabels: cells.filter(c => !c.imageSig).map(c => c.label),
       substrateLabels: cells.filter(c => c.hasSubstrate).map(c => c.label),
@@ -3196,7 +3491,7 @@ export class ShowCellDrone extends Drone {
     localStorage.setItem(this.#layoutModeKey(locationKey), mode)
   }
 
-  async #orderByIndexPinned(dir: FileSystemDirectoryHandle, names: string[], localCellSet: Set<string>, readOnly = false): Promise<string[]> {
+  async #orderByIndexPinned(dir: FileSystemDirectoryHandle, names: string[], localCellSet: Set<string>, readOnly = false, peerIndices?: Map<string, number>): Promise<string[]> {
     const axial = this.resolve<any>('axial')
     const maxSlot = axial?.count ?? 60
     const sparse: string[] = new Array(maxSlot + 1).fill('')
@@ -3227,9 +3522,13 @@ export class ShowCellDrone extends Drone {
     const lineage = this.resolve<any>('lineage')
     const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
 
+    // Pass 1 — place LOCAL indexed cells first so they own their persisted
+    // slots before any peer-published index gets a chance to claim them.
+    // Peer tiles deferred to Pass 2 below.
+    const peerNames: string[] = []
     for (const name of names) {
       if (!localCellSet.has(name)) {
-        unindexed.push(name)
+        peerNames.push(name)
         continue
       }
       try {
@@ -3259,6 +3558,22 @@ export class ShowCellDrone extends Drone {
       }
     }
 
+    // Pass 2 — peer tiles. Honour the publisher's `index` when supplied
+    // so a tile a peer rendered at their slot N appears at our slot N
+    // too (provided that slot isn't already occupied by a local cell).
+    // Without this peers fall straight into the unindexed allocator and
+    // crowd onto the lowest free slots starting at 0 — producing a
+    // disjoint cluster offset from the local cells. Collisions still
+    // demote to the next-free bucket; no peer index can evict a local.
+    for (const name of peerNames) {
+      const peerIdx = peerIndices?.get(name)
+      if (typeof peerIdx === 'number' && peerIdx >= 0 && peerIdx <= maxSlot && sparse[peerIdx] === '') {
+        sparse[peerIdx] = name
+      } else {
+        unindexed.push(name)
+      }
+    }
+
     // place unindexed cells in the first available empty slots and persist their index
     for (const name of unindexed) {
       while (nextFree <= maxSlot && sparse[nextFree] !== '') nextFree++
@@ -3275,6 +3590,31 @@ export class ShowCellDrone extends Drone {
         }
         nextFree++
       }
+    }
+
+    // Append ephemeral preview tiles for any paired-channel share at
+    // the current lineage. These tiles are NOT in OPFS — they live
+    // only in the drone's ephemeral cache until the user adopts them.
+    // They render as `external` (since !localCellSet.has(name)) so
+    // they get the public-external profile + adopt icon.
+    try {
+      const droneAny = (window as any).ioc?.get?.('@diamondcoreprocessor.com/PairedChannelDrone') as
+        | { ephemeralSharesAt?: (location: string) => { branchName: string }[] }
+        | undefined
+      if (droneAny?.ephemeralSharesAt) {
+        const here = '/' + parentSegments.join('/')
+        const eph = droneAny.ephemeralSharesAt(here) ?? []
+        for (const e of eph) {
+          const name = e.branchName
+          if (!name || sparse.includes(name)) continue
+          while (nextFree <= maxSlot && sparse[nextFree] !== '') nextFree++
+          if (nextFree > maxSlot) break
+          sparse[nextFree] = name
+          nextFree++
+        }
+      }
+    } catch (err) {
+      console.warn('[show-cell] ephemeral share render failed', err)
     }
 
     return sparse
@@ -3294,6 +3634,7 @@ export class ShowCellDrone extends Drone {
     union: Set<string>,
     localCellSet: Set<string>,
     _lineage: any,
+    peerIndices?: Map<string, number>,
   ): Promise<string[]> {
     // Clipboard view is a preview surface — pack cells contiguously from
     // slot 0 so they render near the viewport origin regardless of whatever
@@ -3331,12 +3672,12 @@ export class ShowCellDrone extends Drone {
         // don't shift across undo — only membership (which slots are
         // occupied) changes between history points. readOnly: rewound
         // viewing must not mutate disk indices.
-        cellNames = await this.#orderByIndexPinned(dir, filtered, localCellSet, true)
+        cellNames = await this.#orderByIndexPinned(dir, filtered, localCellSet, true, peerIndices)
       } else {
-        cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet)
+        cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet, false, peerIndices)
       }
     } else {
-      cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet)
+      cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet, false, peerIndices)
     }
 
     if (this.filterKeyword) {
@@ -3432,6 +3773,27 @@ export class ShowCellDrone extends Drone {
       ? Object.fromEntries([...Object.entries(livePropsIndex), ...this.#cursorPropsOverride])
       : livePropsIndex
 
+    // Peer-published image sigs for tiles the user hasn't adopted yet.
+    // For each peer-only tile (kind:'peer', `cell.external === true`),
+    // the SwarmDrone may have streamed an imageSig — the publisher's
+    // substrate-cache pointer — which now lives in OPFS via the
+    // resource-pull pipeline. Looking it up here lets the image-load
+    // path treat the peer's sig as if it were a local propsIndex entry
+    // and render the publisher's image as a preview before the user
+    // commits to adopt.
+    const peerImageSigByLabel = new Map<string, string>()
+    try {
+      const swarm = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone') as
+        | { peerTilesAtCurrentSig?: () => readonly { name: string; imageSig?: string }[] }
+        | undefined
+      const peerTiles = swarm?.peerTilesAtCurrentSig?.() ?? []
+      for (const t of peerTiles) {
+        if (typeof t.imageSig === 'string' && !peerImageSigByLabel.has(t.name)) {
+          peerImageSigByLabel.set(t.name, t.imageSig)
+        }
+      }
+    } catch { /* swarm not registered yet — no peer previews */ }
+
     // Per-batch dedup so cells sharing an image (e.g. substrate fills) only fetch + decode once
     const inFlightImages = new Map<string, Promise<void>>()
     const loadImageOnce = (sig: string): Promise<void> => {
@@ -3450,8 +3812,65 @@ export class ShowCellDrone extends Drone {
     }
 
     const loadOne = async (cell: Cell): Promise<void> => {
-      // external cells don't have local OPFS data
-      if (cell.external) return
+      // External cells (kind:'peer' from the SwarmDrone, kind:'ephemeral'
+      // from paired-channel) have no local OPFS dir, so the OPFS-based
+      // tags/link/substrate reads further down would always throw. The
+      // peer path has its OWN content-addressed image source though:
+      // the swarm streamed the publisher's `imageSig` and the bytes are
+      // already in __resources__/. Resolve it the same way local cells
+      // do (propsBlob → small.image → imageAtlas), then return without
+      // touching the OPFS-only caches.
+      if (cell.external) {
+        // Cache fast-path — but only when the cached value is a real
+        // sig. A null cache entry means the previous resolve failed
+        // (peer image bytes hadn't arrived yet, or the peer never
+        // streamed an imageSig). Returning early on null permanently
+        // strands the tile blank: swarm:resource-arrived clears layer
+        // caches and requests a render, but on the re-render we'd hit
+        // this branch again and return without re-attempting the load.
+        // Falling through on null lets the peer rendering path below
+        // re-fetch peerImageSigByLabel and load the bytes that may
+        // have arrived in the meantime.
+        const cached = this.cellImageCache.get(cell.label)
+        if (cached) {
+          cell.imageSig = cached
+          return
+        }
+        // Peer-only tiles render ONLY the publisher's streamed image.
+        // No local-pool fallback — calling pickImageForLabel here
+        // would paint a deterministic-but-arbitrary image from the
+        // receiver's substrate pool, which is wrong on a tile the
+        // receiver doesn't own. If the publisher's bytes haven't
+        // arrived (or they never published an imageSig at all), the
+        // tile stays blank until either the receiver adopts (then
+        // it's an owned tile and substrate fallback is legitimate)
+        // or the publisher's bytes land via the swarm resource pull.
+        const peerSig = peerImageSigByLabel.get(cell.label)
+        if (!peerSig) {
+          this.cellImageCache.set(cell.label, null)
+          return
+        }
+        try {
+          const blob = await store.getResource(peerSig)
+          if (!blob) {
+            this.cellImageCache.set(cell.label, null)
+            return
+          }
+          const text = await blob.text()
+          const props = JSON.parse(text)
+          const smallSig = (this.#flat && props?.flat?.small?.image) || props?.small?.image
+          if (smallSig && isSignature(smallSig)) {
+            await loadImageOnce(smallSig)
+            cell.imageSig = smallSig
+            this.cellImageCache.set(cell.label, smallSig)
+          } else {
+            this.cellImageCache.set(cell.label, null)
+          }
+        } catch {
+          this.cellImageCache.set(cell.label, null)
+        }
+        return
+      }
 
       // load tags + link from OPFS if not cached (independent of image cache)
       if (!this.cellTagsCache.has(cell.label)) {
@@ -3552,7 +3971,21 @@ export class ShowCellDrone extends Drone {
           cell.imageSig = smallSig
           this.cellImageCache.set(cell.label, smallSig)
         } else {
-          this.cellImageCache.set(cell.label, null)
+          // No image on this tile's persistent props (commonly label-only
+          // tiles with viewport state). Ask substrate for a deterministic
+          // per-label fallback so the tile shows a background instead of
+          // empty. Does NOT mutate the user's props — only sets the
+          // display-time imageSig.
+          const subSvc = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SubstrateService') as
+            { pickImageForLabel?: (label: string) => string | null } | undefined
+          const fallbackSig = subSvc?.pickImageForLabel?.(cell.label) ?? null
+          if (fallbackSig && isSignature(fallbackSig)) {
+            await loadImageOnce(fallbackSig)
+            cell.imageSig = fallbackSig
+            this.cellImageCache.set(cell.label, fallbackSig)
+          } else {
+            this.cellImageCache.set(cell.label, null)
+          }
         }
       } catch {
         // no cell dir or no properties file — no image

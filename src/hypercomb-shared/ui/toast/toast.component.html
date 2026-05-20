@@ -6,32 +6,22 @@
         [class.fading]="toast.fading"
         [attr.data-type]="toast.type">
 
-        <div class="toast-accent"></div>
+        <span class="toast-icon">{{ typeIcon(toast.type) }}</span>
 
-        <div class="toast-icon">{{ typeIcon(toast.type) }}</div>
-
-        <div class="toast-body">
-          @if (toast.title) {
-            <div class="toast-title">{{ toast.title }}</div>
-          }
-          <div class="toast-message">{{ toast.message }}</div>
-        </div>
-
-        <div class="toast-actions">
-          @if (toast.actionLabel) {
-            <button class="toast-action" (click)="executeAction(toast.id)">
-              {{ toast.actionLabel }}
-            </button>
-          }
-          <button
-            class="toast-dismiss"
-            (click)="dismiss(toast.id)"
-            [attr.aria-label]="'toast.dismiss' | t">&times;</button>
-        </div>
-
-        @if (toast.duration > 0) {
-          <div class="toast-progress" [style.animation-duration.ms]="toast.duration"></div>
+        @if (toast.title) {
+          <span class="toast-title">{{ toast.title }}</span>
         }
+        <span class="toast-message">{{ toast.message }}</span>
+
+        @if (toast.actionLabel) {
+          <button class="toast-action" (click)="executeAction(toast.id)">
+            {{ toast.actionLabel }}
+          </button>
+        }
+        <button
+          class="toast-dismiss"
+          (click)="dismiss(toast.id)"
+          [attr.aria-label]="'toast.dismiss' | t">&times;</button>
       </div>
     }
   </div>

@@ -26,8 +26,11 @@ import { EffectBus } from '@hypercomb/core'
 import type { LayerContent } from '../history/history.service.js'
 import { HiveParticipant } from '../history/hive-participant.js'
 
+// Material Design `sticky_note_2` (filled) — solid white fill so the
+// Pixi sprite-tint pipeline preserves colour; matches the rest of the
+// tile-overlay icon set in tile-actions.
 const NOTE_ICON_SVG =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h12l4 4v12H4z"/><polyline points="16 4 16 8 20 8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="14" y2="16"/></svg>`
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M19 3H4.99c-1.11 0-1.98.9-1.98 2L3 19c0 1.1.89 2 2 2h10l6-6V5c0-1.1-.9-2-2-2zM7 8h10v2H7V8zm5 6H7v-2h5v2zm2 5.5V14h5.5L14 19.5z"/></svg>`
 
 const NOTE_ACCENT = 0xffe14a
 
@@ -320,6 +323,28 @@ export class NotesService extends HiveParticipant<Note> {
       createdAt: Date.now(),
     }
     await this.upsert(segments, [note])
+  }
+
+  /**
+   * Remove a note by id at an EXPLICIT cell location (parentSegments + cellLabel)
+   * without depending on the user's current navigation. Headless equivalent
+   * of the EffectBus `note:delete` handler. Goes through the same `remove`
+   * path on hive-participant, so the merkle layer + parent cascade are
+   * identical to user-driven deletion.
+   */
+  public async deleteAtSegments(
+    parentSegments: readonly string[],
+    cellLabel: string,
+    noteId: string,
+  ): Promise<void> {
+    const cleanedParents = (parentSegments ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const cleanedLabel = String(cellLabel ?? '').trim()
+    const cleanedNoteId = String(noteId ?? '').trim()
+    if (!cleanedLabel || !cleanedNoteId) return
+    const segments = [...cleanedParents, cleanedLabel]
+    await this.remove(segments, cleanedNoteId)
   }
 }
 

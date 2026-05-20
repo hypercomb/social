@@ -1,14 +1,16 @@
 // diamondcoreprocessor.com/editor/tile-editor.drone.ts
 import { EffectBus, SignatureService } from '@hypercomb/core'
-import { TILE_PROPERTIES_FILE } from './tile-properties.js'
+import { TILE_PROPERTIES_FILE, readCellProperties } from './tile-properties.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
 
 // SVG markup for the pencil "edit" icon. Owned by this drone so that
 // when the editor is toggled off in DCP the icon never reaches the
-// tile overlay arranger and never appears on the hex.
+// tile overlay arranger and never appears on the hex. Material Design
+// `edit` (filled) — solid white fill so the Pixi sprite-tint pipeline
+// preserves colour; matches the rest of the tile-overlay icon set.
 const EDIT_ICON_SVG =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3l4 4L7 21H3v-4L17 3z"/></svg>`
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34a.9959.9959 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>`
 
 type IconProvider = {
   name: string
@@ -119,7 +121,14 @@ export class TileEditorDrone {
     const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
     if (!store || !service) return
 
-    // 1. read tile properties — prefer content-addressed, fall back to legacy 0000 file
+    // 1. read tile properties — prefer content-addressed, fall back to the
+    // cell's 0000 file. The hc:tile-props-index is label-keyed and so collides
+    // across folders (same label in /a and /b share index['label']), and any
+    // writer that lands properties directly in 0000 (e.g. the headless bridge
+    // `stamp` op used by dashboard refresh) never touches the index. show-cell
+    // already reads 0000 for its visual property snapshot, so keeping the
+    // editor in sync prevents "link badge shows on the tile but the editor's
+    // link field is empty" mismatches.
     let properties: Record<string, unknown> = {}
     try {
       const indexKey = 'hc:tile-props-index'
@@ -131,7 +140,18 @@ export class TileEditorDrone {
       const text = await propsBlob.text()
       properties = JSON.parse(text)
     } catch {
-      // no properties found — use empty
+      try {
+        const lineage = window.ioc.get<{ explorerDir: () => Promise<FileSystemDirectoryHandle | null> }>(
+          '@hypercomb.social/Lineage'
+        )
+        const dir = await lineage?.explorerDir?.()
+        if (dir) {
+          const cellDir = await dir.getDirectoryHandle(cell, { create: false })
+          properties = await readCellProperties(cellDir)
+        }
+      } catch {
+        // truly nothing — leave properties empty
+      }
     }
 
     // 2. load large image blob from __resources__ (if present)

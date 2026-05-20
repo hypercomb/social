@@ -103,7 +103,7 @@ export class ActivityLogComponent implements OnDestroy {
     const id = this.#nextId++
     const timer = setTimeout(() => this.dismiss(id), TIMEOUT_S * 1000)
     const entry: ActivityEntry = { id, icon, message, timer, fading: false, revert: revert ?? null }
-    this.#entries.update(list => [entry, ...list].slice(0, 20))
+    this.#entries.update(list => [entry, ...list].slice(0, 10))
     this.#appRef.tick()
   }
 
