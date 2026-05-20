@@ -48,18 +48,11 @@ const TARGET = 'es2022'
 // domains to exclude from the build output
 const EXCLUDED_DOMAINS: string[] = ['revolucionstyle.com']
 
-// path-prefix exclusions within domains — experimental cut to test
-// whether the iOS Safari "problem repeatedly occurred" crash is caused
-// by subsystem-count explosion at boot rather than per-drone memory.
-// Restore by clearing this array. Paths are POSIX relative to SRC_ROOT.
-const EXCLUDED_PATHS: string[] = [
-  'diamondcoreprocessor.com/meeting',
-  'diamondcoreprocessor.com/sharing',
-  'diamondcoreprocessor.com/assistant',
-  'diamondcoreprocessor.com/dashboard',
-  'diamondcoreprocessor.com/recording',
-  'diamondcoreprocessor.com/presentation/avatars',
-]
+// path-prefix exclusions within domains. Hypothesis cut for iOS 2026-05-20
+// was falsified — actual root cause was Pixi RenderTexture atlas memory
+// (see hex-image.atlas.ts, hex-label.atlas.ts). Keeping this hook in place
+// because it's useful for future bisection but no paths are excluded now.
+const EXCLUDED_PATHS: string[] = []
 
 const isExcludedPath = (relPath: string): boolean =>
   EXCLUDED_PATHS.some(prefix => relPath === prefix || relPath.startsWith(`${prefix}/`))

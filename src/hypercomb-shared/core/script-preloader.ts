@@ -311,34 +311,13 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     ;(globalThis as any).__hcBoot?.(`#loadBeesPrioritized entry pending=${pending.length}`)
     EffectBus.emit('loader:bees-progress', { loading: pending.length, total: this.#beeCache.size + pending.length })
 
-    // iOS: sequential load. Concurrent dynamic imports + concurrent drone
-    // constructors during live Pixi rendering exceed the WKWebView
-    // renderer-process budget and kill the page (was crashing in the
-    // rest-pending wave after boot completed). Serial loading trades
-    // a few seconds of boot time for not crashing.
-    if (/iP(hone|ad|od)/i.test(navigator.userAgent)) {
-      ;(globalThis as any).__hcBoot?.('iOS serial branch entry')
-      const tIOS = performance.now()
-      for (const sig of pending) {
-        ;(globalThis as any).__hcBoot?.(`iOS bee load start ${sig.slice(0, 12)}`)
-        await this.#loadBeeBySignature(sig).catch(() => null)
-        ;(globalThis as any).__hcBoot?.(`iOS bee load done ${sig.slice(0, 12)}`)
-      }
-      for (const sig of this.#beeCache.keys()) this.#firstPulsed.add(sig)
-      this.#refreshProjection()
-      ScriptPreloader.#updateLearnedCriticalSigs(this.#beeCache)
-      const iosMs = performance.now() - tIOS
-      const iosMsg = `[script-preloader] iOS serial wave (${pending.length}) loaded in ${iosMs.toFixed(0)}ms`
-      console.log(iosMsg)
-      ;(globalThis as any).__hcBoot?.(`iOS serial branch done ${iosMs.toFixed(0)}ms`)
-      try { localStorage.setItem('hc:perf-last-boot', `${Date.now()}:${iosMsg}`) } catch {}
-      EffectBus.emit('loader:bees-done', {
-        loaded: this.#beeCache.size,
-        failed: pending.length - this.#beeCache.size,
-        total: this.#beeCache.size,
-      })
-      return
-    }
+    // (Removed iOS serial-load branch 2026-05-20. It was added when we
+    // hypothesised the iOS WKWebView crash was caused by concurrent
+    // bee-load memory pressure. Root cause was actually Pixi
+    // RenderTexture atlas allocation — see hex-image.atlas.ts /
+    // hex-label.atlas.ts. Parallel loading on iOS is the same as on
+    // desktop now that GPU headroom is reclaimed. Brings iPhone boot
+    // back down by ~2-3 seconds.)
 
     const learnedCritical = ScriptPreloader.#readLearnedCriticalSigs()
     const criticalSet = new Set(learnedCritical.filter(sig => pending.includes(sig)))

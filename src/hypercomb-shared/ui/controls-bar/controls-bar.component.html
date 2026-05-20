@@ -18,10 +18,14 @@
   @if (currentLayerSigShort()) {
     <span class="layer-sig-crumb" title="current layer marker sig (dev only)">"{{ currentLayerSigShort() }}"</span><span class="sep-crumb">◆</span>
   }
-  @if (meshPublic()) {
-    <span class="public-crumb" [style.color]="shieldColor()">{{ 'breadcrumb.public' | t }}</span><span class="sep-crumb">◆</span>
-  } @else {
-    <span class="private-crumb">{{ 'breadcrumb.private' | t }}</span><span class="sep-crumb">◆</span>
+  <!-- public/private chip hidden on mobile — it lives in the bottom
+       command bar's status cluster (see Hypercomb Mobile design). -->
+  @if (!isMobile()) {
+    @if (meshPublic()) {
+      <span class="public-crumb" [style.color]="shieldColor()">{{ 'breadcrumb.public' | t }}</span><span class="sep-crumb">◆</span>
+    } @else {
+      <span class="private-crumb">{{ 'breadcrumb.private' | t }}</span><span class="sep-crumb">◆</span>
+    }
   }
   <span class="domain-crumb crumb-link" (click)="navigateTo([])">{{ activeDomain() }}</span>
   @for (seg of pathSegments(); track seg.target.length; let last = $last) {
@@ -113,8 +117,10 @@
     @case ('browsing') {
 
       @if (isMobile()) {
-        <!-- ═══ MOBILE: floating icons (no chrome) — Material Symbols ═══ -->
-        <!-- back · talk · camera · center · fullscreen · solo/swarm -->
+        <!-- ═══ MOBILE: 5 floating icons (no chrome) ═══ -->
+        <!-- back · mic · camera · fit · fullscreen -->
+        <!-- Public/private status is shown ONLY by .mobile-mesh-header-btn
+             (top-right) when the command-line input is held open. -->
         <div class="controls-section mobile-nav">
           <button class="ctl-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()"
                   (pointerdown)="onBackPointerDown($event)" (click)="onBackClick()"
@@ -138,9 +144,6 @@
           </button>
           <button class="ctl-btn" (click)="toggleFullscreen()" [attr.aria-label]="'controls.fullscreen' | t">
             <span class="mat-sym">fullscreen</span>
-          </button>
-          <button class="ctl-btn mesh-mobile-btn" [class.shield-mode]="meshPublic()" (click)="toggleMeshPublic()" [attr.aria-label]="(meshPublic() ? 'mesh.swarm' : 'mesh.solo') | t">
-            <span class="mat-sym" [class.filled]="meshPublic()">{{ meshPublic() ? 'groups' : 'person' }}</span>
           </button>
         </div>
       } @else {
