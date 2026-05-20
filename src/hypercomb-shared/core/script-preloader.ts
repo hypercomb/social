@@ -310,6 +310,31 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 
     EffectBus.emit('loader:bees-progress', { loading: pending.length, total: this.#beeCache.size + pending.length })
 
+    // iOS: sequential load. Concurrent dynamic imports + concurrent drone
+    // constructors during live Pixi rendering exceed the WKWebView
+    // renderer-process budget and kill the page (was crashing in the
+    // rest-pending wave after boot completed). Serial loading trades
+    // a few seconds of boot time for not crashing.
+    if (/iP(hone|ad|od)/i.test(navigator.userAgent)) {
+      const tIOS = performance.now()
+      for (const sig of pending) {
+        await this.#loadBeeBySignature(sig).catch(() => null)
+      }
+      for (const sig of this.#beeCache.keys()) this.#firstPulsed.add(sig)
+      this.#refreshProjection()
+      ScriptPreloader.#updateLearnedCriticalSigs(this.#beeCache)
+      const iosMs = performance.now() - tIOS
+      const iosMsg = `[script-preloader] iOS serial wave (${pending.length}) loaded in ${iosMs.toFixed(0)}ms`
+      console.log(iosMsg)
+      try { localStorage.setItem('hc:perf-last-boot', `${Date.now()}:${iosMsg}`) } catch {}
+      EffectBus.emit('loader:bees-done', {
+        loaded: this.#beeCache.size,
+        failed: pending.length - this.#beeCache.size,
+        total: this.#beeCache.size,
+      })
+      return
+    }
+
     const learnedCritical = ScriptPreloader.#readLearnedCriticalSigs()
     const criticalSet = new Set(learnedCritical.filter(sig => pending.includes(sig)))
 

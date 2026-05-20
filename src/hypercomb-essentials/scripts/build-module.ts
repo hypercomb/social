@@ -47,6 +47,22 @@ const TARGET = 'es2022'
 
 // domains to exclude from the build output
 const EXCLUDED_DOMAINS: string[] = ['revolucionstyle.com']
+
+// path-prefix exclusions within domains — experimental cut to test
+// whether the iOS Safari "problem repeatedly occurred" crash is caused
+// by subsystem-count explosion at boot rather than per-drone memory.
+// Restore by clearing this array. Paths are POSIX relative to SRC_ROOT.
+const EXCLUDED_PATHS: string[] = [
+  'diamondcoreprocessor.com/meeting',
+  'diamondcoreprocessor.com/sharing',
+  'diamondcoreprocessor.com/assistant',
+  'diamondcoreprocessor.com/dashboard',
+  'diamondcoreprocessor.com/recording',
+  'diamondcoreprocessor.com/presentation/avatars',
+]
+
+const isExcludedPath = (relPath: string): boolean =>
+  EXCLUDED_PATHS.some(prefix => relPath === prefix || relPath.startsWith(`${prefix}/`))
 const NAMESPACE_SEGMENTS_MAX = 3
 const PLATFORM_EXTERNALS = ['@hypercomb/core', 'pixi.js']
 
@@ -436,6 +452,7 @@ const discoverSources = (): SourceFile[] =>
       if (relPath === 'types' || relPath.startsWith('types/')) return false
       const domain = relPath.split('/')[0]
       if (EXCLUDED_DOMAINS.includes(domain)) return false
+      if (isExcludedPath(relPath)) return false
       if (isEntry(relPath)) return false
       const relDir = relPosix(SRC_ROOT, dirname(f))
       if (!relDir) return false
@@ -463,7 +480,9 @@ const readDirTree = (root: string, rel: string): DirNode => {
     if (!rel && EXCLUDED_DOMAINS.includes(name)) continue
     const child = join(full, name)
     if (statSync(child).isDirectory()) {
-      children.push(readDirTree(root, rel ? `${rel}/${name}` : name))
+      const childRel = rel ? `${rel}/${name}` : name
+      if (isExcludedPath(childRel)) continue
+      children.push(readDirTree(root, childRel))
     }
   }
   return { rel, children }
