@@ -148,15 +148,28 @@ export class PixiHostWorker extends Worker {
       const pan = vp?.lastPan
       app.stage.position.set(cx + (pan?.dx ?? 0), cy + (pan?.dy ?? 0))
 
-      // If the saved zoom was a fit, recompute it for the new viewport.
-      // The fit's saved (cx, cy) was derived from the previous safe
-      // area (header + control pill bounding rects + window size); on
+      // If the saved zoom was a fit AND the user hasn't panned away
+      // from it, recompute the fit for the new viewport. The fit's
+      // saved (cx, cy) was derived from the previous safe area
+      // (header + control pill bounding rects + window size); on
       // resize/rotation/fullscreen those change, and applying the
       // stale coords leaves the content shrunk and off-center. Refit
       // against the new viewport produces a clean centered fit.
+      //
+      // Critical guard: only refit when we KNOW pan is zero. A user
+      // pan implies they explicitly moved away from the fit position,
+      // so refitting (which calls setPan(0,0)) would clobber their
+      // saved pan on every boot. When `lastPan` is undefined the
+      // VP read may still be in flight — defer to show-cell's
+      // #applyViewportFromSnapshot rather than risk a destructive
+      // refit against half-loaded state.
       if (vp?.lastZoom?.fit) {
-        const zoom = (window as any).ioc?.get('@diamondcoreprocessor.com/ZoomDrone')
-        zoom?.zoomToFit?.(true)
+        const lp = vp?.lastPan
+        const knownZeroPan = lp && lp.dx === 0 && lp.dy === 0
+        if (knownZeroPan) {
+          const zoom = (window as any).ioc?.get('@diamondcoreprocessor.com/ZoomDrone')
+          zoom?.zoomToFit?.(true)
+        }
       }
     }
 

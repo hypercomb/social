@@ -460,16 +460,24 @@ const PAGES = [
       const put = await send({ op: 'put-resource', text: html })
       if (!put.ok) throw new Error(put.error || 'put-resource failed')
       const sig = put.data.sig
-      // Replace the cell's `context` slot with [sig] — one rendering
-      // per cell. `bag-set` only touches the named slot; children /
-      // notes / other slots stay intact.
-      const upd = await send({
-        op: 'bag-set',
+      // Write the page as a visual-bee DECORATION (kind
+      // `visual:website:page`) rather than a raw entry in the cell's
+      // `context` slot. `decoration-add` with `replaceKind: true` drops
+      // any prior website decoration on this cell and appends the new
+      // one to the cell's `decorations` slot. site-view.drone's
+      // `#findDecorationPage` resolves the decoration → payload.htmlSig
+      // → resource bytes → renders.
+      const dec = await send({
+        op: 'decoration-add',
         segments: page.segments,
-        cells: [sig],
+        kind: 'visual:website:page',
+        appliesTo: page.segments,
+        payload: { htmlSig: sig, order: 0, createdAt: Date.now() },
+        mark: 'persistent',
+        replaceKind: true,
       })
-      if (!upd.ok) throw new Error(upd.error || 'bag-set failed')
-      console.log(`sig=${sig.slice(0, 12)}`)
+      if (!dec.ok) throw new Error(dec.error || 'decoration-add failed')
+      console.log(`sig=${sig.slice(0, 12)} dec=${dec.data.sig.slice(0, 12)}`)
       ok++
     } catch (err) {
       console.log(`FAILED: ${err.message}`)

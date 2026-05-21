@@ -4,7 +4,7 @@ import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js
 import type { Axial } from '../navigation/hex-detector.js'
 import type { LayerTransferService } from './layer-transfer.service.js'
 import type { OrderProjection } from '../history/order-projection.js'
-import { readCellProperties, writeCellProperties, cellLocationSig } from '../editor/tile-properties.js'
+import { readCellProperties, writeCellProperties, cellLocationSig, writeTilePropertiesAt } from '../editor/tile-properties.js'
 
 type CellCountPayload = { count: number; labels: string[]; coords?: Axial[]; branchLabels?: string[] }
 type MoveRefs = {
@@ -772,21 +772,23 @@ export class MoveDrone extends Drone {
   }
 
   async #persistPinnedIndices(placements: Map<string, Axial>): Promise<void> {
+    // Layer-slot write: each placed tile's `index` property goes into the
+    // tile's layer via the `properties` slot. No OPFS dir consulted or
+    // minted — the lineage signature locates the tile's history bag, and
+    // commitSlotSet replaces the slot's single sig with one pointing at
+    // the new merged-properties resource. The cascade folds the new tile-
+    // layer sig into each ancestor's `children` slot, so the index write
+    // produces one undoable / time-travelable marker per ancestor.
     const lineage = this.resolve<any>('lineage')
-    const dir: FileSystemDirectoryHandle | null = lineage?.explorerDir ? await lineage.explorerDir() : null
-    if (!dir) return
-
     const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
 
     for (const [label, axial] of placements) {
       const gridIndex = this.#keyToIndex.get(axialKey(axial.q, axial.r))
       if (gridIndex === undefined) continue
       try {
-        const cellDir = await dir.getDirectoryHandle(label, { create: false })
-        const cacheKey = await cellLocationSig(parentSegments, label)
-        await writeCellProperties(cellDir, { index: gridIndex }, cacheKey)
+        await writeTilePropertiesAt(parentSegments, label, { index: gridIndex })
       } catch (err) {
-        console.warn('[move] failed to persist 0000.index for', label, err)
+        console.warn('[move] failed to persist index for', label, err)
       }
     }
   }

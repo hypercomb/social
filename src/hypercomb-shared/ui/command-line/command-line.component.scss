@@ -116,6 +116,75 @@
   50% { opacity: 1; transform: scale(1.2); }
 }
 
+// ── History nav arrows (undo / redo, always present) ──────
+// Sit on the right of the command line beside the Save As button.
+// Strong enabled state (md-primary) so an actionable arrow reads as
+// clearly active; muted disabled state (faded on-surface-var) so the
+// "nothing to do this direction" condition is obvious at a glance.
+// Without this contrast both states blend into the chrome and the
+// user can't tell which buttons are live.
+.history-nav-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.2rem;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-left: 1.5px solid color-mix(in srgb, var(--md-primary) 40%, transparent);
+  color: var(--md-primary);
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--md-dur-medium) var(--md-easing-standard),
+              background var(--md-dur-medium) var(--md-easing-standard);
+
+  &:hover:not(:disabled) {
+    color: var(--md-on-surface-strong);
+    background: color-mix(in srgb, var(--md-primary) 12%, transparent);
+  }
+
+  &:disabled {
+    color: color-mix(in srgb, var(--md-on-surface-var) 28%, transparent);
+    cursor: default;
+  }
+}
+
+// ── Save As head button (visible only when cursor is rewound) ──
+// Surfaced on the right side of the command-line whenever the user has
+// undone past head. Click promotes the rewound layer to be the new head
+// (HistoryService.promoteToHead). Uses the warm secondary accent so it
+// reads as a positive forward action — same family as the notes-strip
+// note affordance.
+.save-as-head-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 0.9rem;
+  background: color-mix(in srgb, var(--md-secondary) 10%, transparent);
+  border: none;
+  border-left: 1.5px solid color-mix(in srgb, var(--md-secondary) 45%, transparent);
+  color: var(--md-secondary);
+  font-family: var(--hc-mono);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  transition: color var(--md-dur-medium) var(--md-easing-standard),
+              background var(--md-dur-medium) var(--md-easing-standard);
+
+  &:hover {
+    color: var(--md-on-surface-strong);
+    background: color-mix(in srgb, var(--md-secondary) 22%, transparent);
+  }
+  &:active {
+    background: color-mix(in srgb, var(--md-secondary) 32%, transparent);
+  }
+}
+
 // ── mobile GO / submit button (right of the text box on phone) ──
 // Hidden on desktop / tablet. On phone, it submits the current text
 // (creating a tile) or collapses the command line when empty.

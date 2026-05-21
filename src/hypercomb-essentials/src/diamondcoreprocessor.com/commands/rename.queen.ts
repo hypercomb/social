@@ -36,64 +36,63 @@ export class RenameQueenBee extends QueenBee {
     const oldName = [...selection.selected][0]
     if (oldName === newName) return
 
+    // Pure layer-only rename. No OPFS dir copy, no removeEntry. The
+    // tile's identity is its layer in the merkle tree; renaming = pull
+    // the old layer's slots forward into a new layer with the new
+    // name, then remove the old name from the parent's children.
     const lineage = get('@hypercomb.social/Lineage') as
-      { explorerDir: () => Promise<FileSystemDirectoryHandle | null> } | undefined
-    if (!lineage) return
+      { explorerSegments?: () => readonly string[] } | undefined
+    const history = get('@diamondcoreprocessor.com/HistoryService') as
+      {
+        sign?: (l: { explorerSegments?: () => readonly string[] }) => Promise<string>
+        currentLayerAt?: (s: string) => Promise<unknown>
+        getLayerBySig?: (s: string) => Promise<{ name?: string; [slot: string]: unknown } | null>
+      } | undefined
+    const committer = get('@diamondcoreprocessor.com/LayerCommitter') as
+      { update?: (segments: readonly string[], layer: { name?: string; [slot: string]: unknown }) => Promise<string> } | undefined
+    if (!history?.sign || !history?.currentLayerAt || !history?.getLayerBySig || !committer?.update) return
 
-    const dir = await lineage.explorerDir()
-    if (!dir) return
+    const parentSegments = lineage?.explorerSegments?.() ?? []
 
     try {
-      // Check old directory exists
-      const oldDir = await dir.getDirectoryHandle(oldName, { create: false })
+      const parentSig = await history.sign({ explorerSegments: () => parentSegments })
+      const parentLayer = await history.currentLayerAt(parentSig) as { children?: readonly unknown[] } | null
+      const childSigs = (parentLayer?.children ?? []) as readonly unknown[]
 
-      // Check new name isn't taken
-      try {
-        await dir.getDirectoryHandle(newName, { create: false })
-        return  // name already exists
-      } catch { /* good — name is available */ }
+      // Find the old layer by walking the parent's children. Bail if a
+      // sibling already carries the new name.
+      let oldLayer: { name?: string; [slot: string]: unknown } | null = null
+      for (const cs of childSigs) {
+        if (typeof cs !== 'string') continue
+        const cl = await history.getLayerBySig(cs)
+        if (!cl) continue
+        if (cl.name === newName) return // name taken
+        if (cl.name === oldName) oldLayer = cl
+      }
+      if (!oldLayer) return // old name not in parent's children
 
-      // Create new directory and copy all contents
-      const newDir = await dir.getDirectoryHandle(newName, { create: true })
-      await copyDirectory(oldDir, newDir)
+      // Build the new layer: same slots, new name. `name` is intrinsic
+      // identity; the rest copies over verbatim so every slot survives.
+      const renamedLayer: { name: string; [slot: string]: unknown } = { name: newName }
+      for (const [k, v] of Object.entries(oldLayer)) {
+        if (k === 'name') continue
+        renamedLayer[k] = v
+      }
 
-      // Remove old directory
-      await dir.removeEntry(oldName, { recursive: true })
+      // Commit the new layer at [...parent, newName]. The committer
+      // cascade folds the new sig into parent.children alongside the
+      // old one (transient state — next step removes the old).
+      await committer.update([...parentSegments, newName], renamedLayer)
 
-      // The cell:removed + cell:added pair below routes through
-      // LayerCommitter's #queueChildName, which rewrites the parent's
-      // children slot (oldName sig → newName sig) and cascades to root.
-      // The rename is captured in the layer marker chain — no parallel
-      // history-op log is needed (and the legacy historyService.record
-      // path is dead; see history-recorder.drone.ts).
+      // Drop the old name from parent.children via the cascade.
       const groupId = `rename:${Date.now().toString(36)}`
-      EffectBus.emit('cell:removed', { cell: oldName, groupId })
-      EffectBus.emit('cell:added', { cell: newName, groupId })
+      EffectBus.emit('cell:removed', { cell: oldName, segments: parentSegments, groupId })
       EffectBus.emit('cell:renamed', { oldName, newName })
 
       selection.clear()
       void new hypercomb().act()
-    } catch { /* old directory doesn't exist or can't be renamed */ }
-  }
-}
-
-// ── OPFS directory copy ────────────────────────────────
-
-async function copyDirectory(
-  src: FileSystemDirectoryHandle,
-  dest: FileSystemDirectoryHandle
-): Promise<void> {
-  for await (const [name, handle] of src.entries()) {
-    if (handle.kind === 'file') {
-      const srcFile = await (handle as FileSystemFileHandle).getFile()
-      const destFile = await dest.getFileHandle(name, { create: true })
-      const writable = await destFile.createWritable()
-      await writable.write(await srcFile.arrayBuffer())
-      await writable.close()
-    } else if (handle.kind === 'directory') {
-      const srcDir = handle as FileSystemDirectoryHandle
-      const destDir = await dest.getDirectoryHandle(name, { create: true })
-      await copyDirectory(srcDir, destDir)
+    } catch (err) {
+      console.warn('[rename] failed', err)
     }
   }
 }

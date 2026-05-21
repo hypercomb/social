@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/bridge/claude-bridge.worker.ts
 import { Worker, EffectBus, normalizeCell, hypercomb, isSignature } from '@hypercomb/core'
-import { readCellProperties, writeCellProperties } from '../editor/tile-properties.js'
+import { readCellProperties, writeCellProperties, readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import type { HistoryService } from '../history/history.service.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 import { inflate } from '../history/inflate.js'
@@ -38,8 +38,18 @@ type BridgeRequest = {
   slot?: string
   /** Optimization filter — `optimization-list` returns only entries
    *  whose top-level `kind` matches (e.g. `'qa'`). Layer slots are
-   *  unrelated to this filter. */
+   *  unrelated to this filter. Also used by `decoration-add` as the
+   *  kind tag on the new decoration record. */
   kind?: string
+  /** Decoration record fields (decoration-add). */
+  appliesTo?: string[]
+  payload?: unknown
+  mark?: string
+  /** When true (decoration-add), drop existing decorations of the same
+   *  kind from the cell's `decorations` slot before appending the new
+   *  sig. Preserves the "one per kind" semantic for single-output bees
+   *  like /website. */
+  replaceKind?: boolean
 }
 type BridgeResponse = { id: string; ok: boolean; data?: unknown; error?: string }
 
@@ -170,6 +180,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'optimization-add':    return this.#optimizationAdd(req)
       case 'optimization-list':   return this.#optimizationList(req)
       case 'optimization-remove': return this.#optimizationRemove(req)
+      case 'decoration-add':      return this.#decorationAdd(req)
       case 'bag-add':      return this.#bagMutate(req, 'add')
       case 'bag-remove':   return this.#bagMutate(req, 'remove')
       case 'bag-set':      return this.#bagSet(req)
@@ -293,6 +304,122 @@ export class ClaudeBridgeWorker extends Worker {
     return { id: req.id, ok: true, data: { sig, removed } }
   }
 
+  // ─── decoration-add ────────────────────────────────────────────────
+  //
+  // Composite write: mint a decoration record in `__resources__` AND
+  // wire its sig into the cell's `decorations` slot in one bridge call.
+  // Equivalent to `put-resource` + `bag-add slot=decorations` but
+  // saves a round-trip and atomically applies the cascade.
+  //
+  // Decoration JSONs live in `__resources__` (not `__optimization__`)
+  // so they ride the existing replication/sharing pipeline. Peer adopters
+  // resolve decoration sigs through the same getResource path as HTML
+  // pages, images, and other shared content. `__optimization__` stays
+  // reserved for personal-only decorations (Q&A, comms) that should not
+  // leak across peers.
+  //
+  // Request shape:
+  //   {
+  //     op: 'decoration-add',
+  //     segments: ['dolphin', 'site'],
+  //     kind: 'visual:website:page',
+  //     appliesTo: ['dolphin', 'site'],   // typically same as segments
+  //     payload: { htmlSig: '…', ... },   // bee-specific, any JSON
+  //     mark?: 'persistent',
+  //     replaceKind?: true,               // remove existing of same kind
+  //   }
+  //
+  // When `replaceKind` is true the worker scans the cell's current
+  // `decorations` slot, fetches each entry from `__resources__` to read
+  // its kind, drops any whose kind matches `req.kind`, then appends the
+  // new sig. This preserves the "one page per cell" semantic for visual
+  // bees like /website while leaving decorations of other kinds intact.
+  // The dropped decoration JSONs themselves stay in `__resources__`
+  // (signature-addressed; deduped against other consumers). GC of
+  // orphans is a separate concern.
+  async #decorationAdd(req: BridgeRequest): Promise<BridgeResponse> {
+    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    if (segments.length === 0) return { id: req.id, ok: false, error: 'decoration-add requires `segments`' }
+
+    const kind = typeof req.kind === 'string' ? req.kind.trim() : ''
+    if (!kind) return { id: req.id, ok: false, error: 'decoration-add requires `kind`' }
+
+    const appliesTo = Array.isArray(req.appliesTo) ? req.appliesTo.map(s => String(s)) : [...segments]
+    const payload = (req.payload && typeof req.payload === 'object') ? req.payload : null
+    if (!payload) return { id: req.id, ok: false, error: 'decoration-add requires `payload` (object)' }
+    const mark = req.mark === 'persistent' ? 'persistent' : undefined
+
+    const store = get<{
+      putResource?: (blob: Blob) => Promise<string>
+      getResource?: (sig: string) => Promise<Blob | null>
+    }>('@hypercomb.social/Store')
+    if (!store?.putResource) return { id: req.id, ok: false, error: 'Store.putResource not available' }
+
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (!history) return { id: req.id, ok: false, error: 'HistoryService not available' }
+
+    const committer = get<{
+      update?: (segments: readonly string[], layer: object) => Promise<string>
+    }>('@diamondcoreprocessor.com/LayerCommitter')
+    if (!committer?.update) return { id: req.id, ok: false, error: 'LayerCommitter.update not available' }
+
+    // 1. Mint the decoration record.
+    const record: Record<string, unknown> = { kind, appliesTo, payload }
+    if (mark) record['mark'] = mark
+    const recordBytes = new TextEncoder().encode(JSON.stringify(record))
+    const newSig = await store.putResource(new Blob([recordBytes as BlobPart]))
+
+    // 2. Read the cell's current decorations slot.
+    const locationSig = await history.sign({ explorerSegments: () => segments })
+    const layer = await history.currentLayerAt(locationSig)
+    const cellName = layer?.name ?? segments[segments.length - 1] ?? ''
+    const priorRaw = (layer as Record<string, unknown> | null)?.['decorations']
+    let prior: string[] = Array.isArray(priorRaw) ? priorRaw.map(s => String(s)).filter(s => /^[0-9a-f]{64}$/.test(s)) : []
+
+    // 3. If replaceKind, filter out existing entries of the same kind.
+    //    Track dropped sigs so we can notify downstream observers
+    //    (decoration-kind-index, etc.) that those entries are gone.
+    const dropped: string[] = []
+    if (req.replaceKind === true && store.getResource) {
+      const kept: string[] = []
+      for (const existingSig of prior) {
+        if (existingSig === newSig) continue // dedup with new write
+        try {
+          const blob = await store.getResource(existingSig)
+          if (!blob) { kept.push(existingSig); continue }
+          const parsed = JSON.parse(await blob.text()) as { kind?: string }
+          if (parsed?.kind === kind) { dropped.push(existingSig); continue }
+          kept.push(existingSig)
+        } catch {
+          kept.push(existingSig) // malformed → keep (don't lose data on parse error)
+        }
+      }
+      prior = kept
+    }
+
+    // 4. Idempotency: skip the cascade if the sig is already in the slot
+    //    and nothing else changed.
+    if (prior.includes(newSig) && dropped.length === 0) {
+      return { id: req.id, ok: true, data: { sig: newSig, slot: 'decorations', unchanged: true, count: prior.length } }
+    }
+    const next = prior.includes(newSig) ? prior : [...prior, newSig]
+
+    // 5. Cascade.
+    const nextLayer: { name: string; decorations: readonly string[] } = { name: cellName, decorations: next }
+    await committer.update(segments, nextLayer)
+
+    // 6. Notify downstream observers. The cascade is already complete;
+    //    LayerCommitter's `onTrigger` handler dedups against the
+    //    no-op layer state. The decoration-kind-index listens here so
+    //    visibleWhen reflects the new state without an OPFS round-trip.
+    for (const removedSig of dropped) {
+      EffectBus.emit('decorations:changed', { segments, op: 'removeSig', sig: removedSig })
+    }
+    EffectBus.emit('decorations:changed', { segments, op: 'append', sig: newSig })
+
+    return { id: req.id, ok: true, data: { sig: newSig, slot: 'decorations', count: next.length, dropped: dropped.length } }
+  }
+
   // ─── context-bag helpers ───────────────────────────────────────────
   //
   // Mutate a sig-array slot at `segments`. The slot defaults to
@@ -377,13 +504,17 @@ export class ClaudeBridgeWorker extends Worker {
 
   // ─── property stamp ────────────────────────────────────────────────
   //
-  // Write a key=value into the cell's 0000 properties JSON. Used for
-  // legacy paths still living on cell properties (websiteSig, custom
-  // renderer overrides). Slot-based authors should prefer `update` /
-  // `bag-add`. Property writes go through `writeCellProperties` so the
-  // nurse cache invalidation event fires correctly.
+  // Write a key=value into the cell's properties slot on its layer.
+  // Used for legacy paths still keyed by cell-property name (websiteSig,
+  // custom renderer overrides). Slot-based authors should prefer
+  // `update` / `bag-add` for new fields; `stamp` is for the pre-slot
+  // property surface that lives in the layer's `properties` slot.
+  // Layer-slot writes emit `cell:0000-changed` so nurse cache
+  // invalidation fires correctly across both legacy and new paths.
   async #stamp(req: BridgeRequest): Promise<BridgeResponse> {
-    const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    const segments = (req.segments ?? [])
+      .map(s => normalizeCell(String(s ?? '').trim()))
+      .filter(Boolean) as string[]
     if (segments.length === 0) return { id: req.id, ok: false, error: 'stamp requires `segments`' }
 
     const layer = req.layer
@@ -391,19 +522,8 @@ export class ClaudeBridgeWorker extends Worker {
       return { id: req.id, ok: false, error: 'stamp requires `layer` with property key→value pairs' }
     }
 
-    const store = get<{ hypercombRoot?: FileSystemDirectoryHandle | null }>('@hypercomb.social/Store')
-    let dir = store?.hypercombRoot ?? null
-    if (!dir) return { id: req.id, ok: false, error: 'no hypercombRoot' }
-
-    for (const seg of segments) {
-      const clean = normalizeCell(seg)
-      if (!clean) continue
-      try {
-        dir = await dir.getDirectoryHandle(clean, { create: false })
-      } catch {
-        return { id: req.id, ok: false, error: `path not found: ${segments.join('/')}` }
-      }
-    }
+    const parentSegments = segments.slice(0, -1)
+    const cellName = segments[segments.length - 1]
 
     // Strip non-scalar values so callers can't accidentally smuggle a
     // nested object that would round-trip through JSON.stringify but
@@ -412,7 +532,7 @@ export class ClaudeBridgeWorker extends Worker {
     for (const [k, v] of Object.entries(layer)) {
       if (v === null || ['string', 'number', 'boolean'].includes(typeof v)) updates[k] = v
     }
-    await writeCellProperties(dir, updates)
+    await writeTilePropertiesAt(parentSegments, cellName, updates)
     return { id: req.id, ok: true, data: { keys: Object.keys(updates) } }
   }
 

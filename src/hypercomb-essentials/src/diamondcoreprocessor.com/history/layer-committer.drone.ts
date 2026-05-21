@@ -195,8 +195,22 @@ export class LayerCommitter {
     // happened. When present, cascade starts at THAT depth so a tile
     // created at /abc cascades through /abc → / regardless of which
     // page the user is currently looking at.
-    EffectBus.on<{ cell?: string; segments?: string[] }>('cell:added',   p => this.#queueChildName(p?.segments, 'add', p?.cell))
-    EffectBus.on<{ cell?: string; segments?: string[] }>('cell:removed', p => this.#queueChildName(p?.segments, 'remove', p?.cell))
+    // The `fromCascade` flag is set by THIS drone when it emits
+    // cell:added / cell:removed during the slot-machine reconciliation
+    // path below (post-commit children-set diff). Skipping the queue on
+    // fromCascade prevents an infinite loop: cascade emits → handler
+    // queues another commit → that commit's diff emits again → ...
+    // Listeners that DON'T originate commits (show-cell's slot machine,
+    // activity log, etc.) don't care about the flag and process the
+    // event normally, which is exactly the reconciliation we want.
+    EffectBus.on<{ cell?: string; segments?: string[]; fromCascade?: boolean }>('cell:added',   p => {
+      if (p?.fromCascade) return
+      this.#queueChildName(p?.segments, 'add', p?.cell)
+    })
+    EffectBus.on<{ cell?: string; segments?: string[]; fromCascade?: boolean }>('cell:removed', p => {
+      if (p?.fromCascade) return
+      this.#queueChildName(p?.segments, 'remove', p?.cell)
+    })
     EffectBus.on<{ cell?: string; segments?: string[] }>('tile:saved',   p => this.#queueBare(p?.segments))
     EffectBus.on<{ cell?: string; segments?: string[] }>('tile:hidden',  p => this.#queueBare(p?.segments))
     EffectBus.on<{ cell?: string; segments?: string[] }>('tile:unhidden',p => this.#queueBare(p?.segments))
@@ -764,6 +778,61 @@ export class LayerCommitter {
       }
 
       const newSig = await history.commitLayer(ancestorLocSig, machine.output())
+
+      // Slot-machine reconciliation at LEAF depth only. When a commit
+      // replaces the children slot (e.g. via 'set' or 'layer' deltas,
+      // or even when 'name' ops add/remove a child the slot-machine
+      // listener didn't already know about), every other tab's
+      // show-cell has a stale #slots state — names that were dropped
+      // are still in the slot machine, names that were added aren't.
+      // Without this, a fresh tab inheriting a previously-large
+      // OPFS would render every dir it ever saw forever, until the
+      // user navigates away (which is the only thing that re-seeds
+      // the slot machine from layer truth).
+      //
+      // Diff the previous layer's children names vs the new layer's,
+      // and emit cell:added / cell:removed for the deltas with the
+      // fromCascade flag set so the committer's OWN listeners don't
+      // re-queue them. Other listeners (show-cell, activity log, the
+      // notes pane) process them normally and update their state.
+      //
+      // Done at the LEAF only to keep cascade ancestors quiet — the
+      // ancestor levels are just bumping a single child sig, they
+      // don't carry user-meaningful name changes.
+      if (depth === segments.length && req.delta && (
+        req.delta.kind === 'set' || req.delta.kind === 'layer' || req.delta.kind === 'name'
+      )) {
+        try {
+          const prevChildSigs: readonly string[] = Array.isArray(prevLayer?.children)
+            ? prevLayer.children as readonly string[]
+            : []
+          const newChildSigs = machine.getSlot('children') as readonly string[]
+          const prevNames = new Set<string>()
+          const newNames = new Set<string>()
+          await Promise.all([
+            ...prevChildSigs.map(async sig => {
+              const c = await history.getLayerBySig(sig)
+              if (c?.name) prevNames.add(c.name)
+            }),
+            ...newChildSigs.map(async sig => {
+              const c = await history.getLayerBySig(sig)
+              if (c?.name) newNames.add(c.name)
+            }),
+          ])
+          const added: string[] = []
+          const removed: string[] = []
+          for (const n of newNames) if (!prevNames.has(n)) added.push(n)
+          for (const n of prevNames) if (!newNames.has(n)) removed.push(n)
+          for (const name of added) {
+            EffectBus.emit('cell:added', { cell: name, segments: sub, fromCascade: true })
+          }
+          for (const name of removed) {
+            EffectBus.emit('cell:removed', { cell: name, segments: sub, fromCascade: true })
+          }
+        } catch (err) {
+          console.warn('[LayerCommitter] post-commit reconcile failed:', err)
+        }
+      }
 
       belowOldSig = prevSig
       belowNewSig = newSig

@@ -230,6 +230,9 @@ export class KeyMapService extends EventTarget {
   // -------------------------------------------------
 
   #normalize(key: string): string {
+    // Defensive: synthetic events can deliver undefined key. Returning
+    // an empty string is harmless — it just won't match any binding.
+    if (typeof key !== 'string' || !key) return ''
     const k = key.toLowerCase()
     if (k === 'control') return 'ctrl'
     if (k === ' ') return 'space'
@@ -237,7 +240,14 @@ export class KeyMapService extends EventTarget {
   }
 
   #isModifierOnly(e: KeyboardEvent): boolean {
-    const k = e.key.toLowerCase()
+    // Some keyboard events (synthetic IME, certain mobile soft-keyboards,
+    // browser-internal autofill chips) deliver an event with `key`
+    // undefined. Guard before .toLowerCase() so the keymap pipeline
+    // doesn't throw on every keystroke and abort the surrounding
+    // listeners (which include swarm-related render triggers).
+    const raw = typeof e.key === 'string' ? e.key : ''
+    if (!raw) return false
+    const k = raw.toLowerCase()
     return k === 'control' || k === 'shift' || k === 'alt' || k === 'meta'
   }
 

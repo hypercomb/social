@@ -37,6 +37,20 @@ import {
   readCellProperties,
   isSignature,
 } from '../editor/tile-properties.js'
+import type { VisualBeeRegistry } from './visual-bee-registry.js'
+// Side-effect imports: ensure foundational modules load at startup.
+// Some bundler configurations drop modules whose value exports aren't
+// directly imported elsewhere; the explicit imports here anchor them
+// against tree-shaking.
+//
+//   - decoration-manifest: registers the `decorations` layer slot
+//   - decoration-kind-index: maintains in-memory cell-label → kind
+//     index for visibleWhen lookups
+//   - visual-bee-icons: syncs visual-bee declarations to
+//     IconProviderRegistry; dispatches clicks to the bee's queen
+import './decoration-manifest.js'
+import './decoration-kind-index.js'
+import './visual-bee-icons.js'
 
 // View-mode toggle constants. These are the args /website accepts as
 // "I want to switch rendering surface" instead of "stamp / export."
@@ -587,3 +601,26 @@ export class WebsiteQueenBee extends QueenBee {
 
 const _website = new WebsiteQueenBee()
 window.ioc.register('@diamondcoreprocessor.com/WebsiteQueenBee', _website)
+
+// Visual-bee registration. Declares the view identity, decoration kind,
+// and adoption icon name so the renderer + adoption UI can discover the
+// website bee. Decoration writes (to `__optimization__` + the cell's
+// `decorations` slot) are still handled by the bridge worker / build
+// drone via the helpers in decoration-manifest.ts — this registration
+// is just the declaration. Adoption icons surface for any tile whose
+// peer manifest contains entries matching this decorationKind.
+;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<VisualBeeRegistry>(
+  '@diamondcoreprocessor.com/VisualBeeRegistry',
+  (registry) => {
+    registry.register({
+      view: 'website',
+      slashCommand: '/website',
+      iconName: 'website',
+      decorationKind: 'visual:website:page',
+      labelKey: 'view.website',
+      descriptionKey: 'view.website.description',
+      queenKey: '@diamondcoreprocessor.com/WebsiteQueenBee',
+      adoptable: true,
+    })
+  },
+)

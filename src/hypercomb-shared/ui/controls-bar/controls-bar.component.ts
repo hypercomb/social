@@ -71,7 +71,7 @@ const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'back': true, 'dcp': true, 'fit': true, 'zoom-out': true, 'zoom-in': true, 'lock': true, 'fullscreen': true,
   'instructions': false, 'show-hidden': false, 'text-only': false,
   'cut': false, 'copy': false,
-  'clipboard': false, 'voice': false, 'room': false, 'bees': false,
+  'clipboard': false, 'voice': false, 'room': true, 'bees': false,
 }
 
 @Component({
@@ -529,8 +529,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly secretWords = computed(() => {
     const secret = this.#secret$()
-    return secret ? secretTag(secret, this.#locale$()) : ''
+    const lineage = this.#lineageKey()
+    if (!lineage && !secret) return ''
+    return secretTag(`${lineage}|${secret}`, this.#locale$())
   })
+
+  readonly hasSecret = computed(() => !!this.#secret$().trim())
 
   readonly shieldColor = computed(() => {
     const secret = this.#secret$().trim()

@@ -1567,12 +1567,12 @@ describe('layer ↔ tiles invariant: every layer\'s children resolve to real til
     // ("click #1 → nothing" with the old data).
     const names = await resolveChildNames(historyRoot, headContent)
     expect(names.size).toBe(0)
-    // FIX: the user must /compact to rebuild children sigs against
+    // FIX: the user must /flatten to rebuild children sigs against
     // freshly-materialized child bags (latestMarkerSigFor now writes
-    // real bytes). After /compact, the sig→content invariant holds.
+    // real bytes). After /flatten, the sig→content invariant holds.
   })
 
-  it('AFTER /compact: stale sigs are replaced with materialized ones, all resolve', async () => {
+  it('AFTER /flatten: stale sigs are replaced with materialized ones, all resolve', async () => {
     // Start with a stale layer like above
     const rootSig = await signLineage([])
     const ghostSig = await sha256Hex('{"name":"phantom-x","cells":[]}')
@@ -1580,7 +1580,7 @@ describe('layer ↔ tiles invariant: every layer\'s children resolve to real til
     await ensureEmptyMarker(root, '/')
     await writeBytes(root, '00000001', new TextEncoder().encode(JSON.stringify({ name: '/', children: [ghostSig] })))
 
-    // /compact wipe-and-rebuild: drop all markers, re-cascade with
+    // /flatten wipe-and-rebuild: drop all markers, re-cascade with
     // CURRENT on-disk children. Since the spec mock doesn't model
     // hypercomb.io tile dirs, we just simulate the rebuild step:
     // remove everything, cascade fresh.

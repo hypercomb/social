@@ -97,10 +97,20 @@ export type MeshOffsetSnapshot = { x: number; y: number }
 export type ViewportSnapshot = { zoom?: ZoomSnapshot; pan?: PanSnapshot; meshOffset?: MeshOffsetSnapshot }
 
 // Debounce window for coalescing rapid pan/zoom changes within a gesture.
-// Short enough that a quick gesture-then-reload doesn't lose the gesture;
-// pagehide/visibilitychange handlers below also fire any pending write so
-// the worst case is the in-flight pointermove (≤ DEBOUNCE_MS old).
-const DEBOUNCE_MS = 100
+//
+// Zero so each gesture lands in the file within one microtask. The
+// previous 100ms window was the race window for "pan-then-refresh"
+// losses — gesture ends, refresh fires before debounce timer
+// elapses, pagehide's fire-and-forget flush can't await OPFS writes
+// to completion, last pan is gone.
+//
+// Coalescing still happens within a single microtask: multiple
+// setPan/setZoom calls in the same tick all overwrite `#pending`
+// before the scheduled persist runs, so we still write once per
+// tick. With 60fps panning that's ~60 OPFS writes/sec, serialized
+// through #opQueue — well within OPFS throughput and never blocks
+// the render thread.
+const DEBOUNCE_MS = 0
 
 export class ViewportPersistence extends EventTarget {
 
@@ -164,9 +174,39 @@ export class ViewportPersistence extends EventTarget {
     }
   }
 
+  // Self-heal: when a setter fires before show-cell has called setDirSilent
+  // (the very first pan/zoom after boot, before the initial render lands),
+  // #dir is null and the gesture is lost. Resolve dir from lineage now so
+  // the persist of the in-flight gesture lands once dir is known.
+  // Idempotent — no-op when dir is already set or no resolver is available.
+  #resolvingDir: Promise<void> | null = null
+  #ensureDirFromLineage = (): void => {
+    if (this.#dir) return
+    if (this.#resolvingDir) return
+    const lineage = (window as any).ioc?.get('@hypercomb.social/Lineage') as
+      { explorerDir?: () => Promise<FileSystemDirectoryHandle | null> } | undefined
+    if (!lineage?.explorerDir) return
+    this.#resolvingDir = (async () => {
+      try {
+        const dir = await lineage.explorerDir!()
+        if (dir && !this.#dir) {
+          console.log('[vp] #ensureDirFromLineage: resolved', { dir: dir.name })
+          this.#dir = dir
+          // Drain anything that was queued while dir was null.
+          if (this.#pending.zoom || this.#pending.pan || this.#pending.meshOffset) {
+            this.#schedulePersist()
+          }
+        }
+      } catch { /* leave dir null; next gesture will retry */ }
+      finally { this.#resolvingDir = null }
+    })()
+  }
+
   /** Switch directory without reading or dispatching restore — caller already applied the viewport. */
   setDirSilent = (dir: FileSystemDirectoryHandle | null): void => {
     if (this.#dir === dir) return
+
+    console.log('[vp] setDirSilent', { from: this.#dir?.name ?? null, to: dir?.name ?? null })
 
     // Queue the flush so a subsequent read of this dir (e.g. nav back)
     // sees the post-flush bytes — both go through the same op queue.
@@ -176,8 +216,18 @@ export class ViewportPersistence extends EventTarget {
     }
     const flushDir = this.#dir
     const flushPending = this.#pending
-    if (flushDir && (flushPending.zoom || flushPending.pan || flushPending.meshOffset)) {
+    const hasPending = flushPending.zoom || flushPending.pan || flushPending.meshOffset
+    if (flushDir && hasPending) {
       void this.#serialize(() => this.#persistTo(flushDir, flushPending))
+    } else if (!flushDir && hasPending && dir) {
+      // Orphaned pending: a gesture (pan/zoom/meshOffset) landed
+      // while #dir was still null — typically the first user input
+      // racing show-cell's first render. The gesture was implicitly
+      // for the current location; persist it to the new dir we just
+      // learned about, otherwise the gesture is silently dropped on
+      // every wipe of #pending below.
+      console.log('[vp] setDirSilent: draining orphaned pending to new dir', { dir: dir.name, pending: flushPending })
+      void this.#serialize(() => this.#persistTo(dir, flushPending))
     }
 
     this.#dir = dir
@@ -207,8 +257,13 @@ export class ViewportPersistence extends EventTarget {
     }
     const flushDir = this.#dir
     const flushPending = this.#pending
-    if (flushDir && (flushPending.zoom || flushPending.pan || flushPending.meshOffset)) {
+    const hasPending = flushPending.zoom || flushPending.pan || flushPending.meshOffset
+    if (flushDir && hasPending) {
       void this.#serialize(() => this.#persistTo(flushDir, flushPending))
+    } else if (!flushDir && hasPending && dir) {
+      // Same orphan-drain as setDirSilent: a gesture queued before
+      // any dir was known belongs to the location we just learned.
+      void this.#serialize(() => this.#persistTo(dir, flushPending))
     }
 
     this.#dir = dir
@@ -233,20 +288,37 @@ export class ViewportPersistence extends EventTarget {
 
   // -- drone-facing api --
 
+  // Setter contract: every update writes to BOTH the in-memory cache
+  // (#lastRead) and the pending-to-disk buffer (#pending) in the same
+  // tick. The cache is the source for synchronous getters; the file
+  // is the source of truth on disk (debounced to coalesce gesture
+  // bursts). Cache and file are kept in lock-step — never diverge.
+
   setZoom = (scale: number, cx: number, cy: number, fit = false): void => {
     if (this.#suspended) return
     if (!this.#dir) this.#syncWithStore()
+    if (!this.#dir) this.#ensureDirFromLineage()
     // Strip `fit: false` from the stored snapshot to keep JSON minimal —
     // absence == not a fit. Only set the property when truly a fit.
-    this.#pending.zoom = fit ? { scale, cx, cy, fit: true } : { scale, cx, cy }
+    const zoom = fit ? { scale, cx, cy, fit: true } : { scale, cx, cy }
+    this.#pending.zoom = zoom
+    this.#lastRead = { ...this.#lastRead, zoom }
     if (this.#dir) this.#schedulePersist()
   }
 
   setPan = (dx: number, dy: number): void => {
-    if (this.#suspended) return
+    if (this.#suspended) { console.log('[vp] setPan: suspended, bail'); return }
     if (!this.#dir) this.#syncWithStore()
-    this.#pending.pan = { dx, dy }
-    if (this.#dir) this.#schedulePersist()
+    if (!this.#dir) this.#ensureDirFromLineage()
+    const pan = { dx, dy }
+    this.#pending.pan = pan
+    this.#lastRead = { ...this.#lastRead, pan }
+    if (this.#dir) {
+      console.log('[vp] setPan → schedule', { dx, dy, dir: this.#dir.name })
+      this.#schedulePersist()
+    } else {
+      console.log('[vp] setPan: NO #dir, will drain after async lineage resolve', { dx, dy })
+    }
   }
 
   /** Persist the renderer's mesh offset (its position inside the layer
@@ -256,7 +328,10 @@ export class ViewportPersistence extends EventTarget {
   setMeshOffset = (x: number, y: number): void => {
     if (this.#suspended) return
     if (!this.#dir) this.#syncWithStore()
-    this.#pending.meshOffset = { x, y }
+    if (!this.#dir) this.#ensureDirFromLineage()
+    const meshOffset = { x, y }
+    this.#pending.meshOffset = meshOffset
+    this.#lastRead = { ...this.#lastRead, meshOffset }
     if (this.#dir) this.#schedulePersist()
   }
 
@@ -341,9 +416,16 @@ export class ViewportPersistence extends EventTarget {
       } finally {
         await writable.close()
       }
+      console.log('[vp] #persistTo: wrote', { dir: dir.name, viewport })
 
-      // sync last-read only if dir is still current
-      if (this.#dir === dir) this.#lastRead = viewport
+      // DON'T overwrite #lastRead from the file here — setters update
+      // the cache synchronously on every gesture, so the in-memory
+      // value is always as fresh or fresher than what we just wrote.
+      // The file is the source of truth across reloads; the cache is
+      // the source for in-session reads, and setters keep them in
+      // lock-step. Letting #persistTo blow over #lastRead with a
+      // stale-by-one-tick merge would race a setter that fired between
+      // pending-snapshot and write-completion.
 
       // Cache invalidation broadcast — any consumer that mirrors 0000 in
       // memory can drop their copy and re-read on next access. The OPFS
@@ -356,7 +438,7 @@ export class ViewportPersistence extends EventTarget {
 
   #persist = async (): Promise<void> => {
     const dir = this.#dir
-    if (!dir) return
+    if (!dir) { console.log('[vp] #persist: NO dir, bail'); return }
 
     // Snapshot pending and clear it BEFORE awaiting so a fast follow-up
     // gesture doesn't write the same data twice. If the persist throws,
@@ -366,9 +448,10 @@ export class ViewportPersistence extends EventTarget {
     // setMeshOffset writes never reach 0000 (mesh-offset would not
     // round-trip through OPFS, and "position should never be forgotten"
     // would be violated on every reload).
-    if (!pending.zoom && !pending.pan && !pending.meshOffset) return
+    if (!pending.zoom && !pending.pan && !pending.meshOffset) { console.log('[vp] #persist: empty pending'); return }
     this.#pending = {}
 
+    console.log('[vp] #persist → write', { dir: dir.name, pending })
     await this.#serialize(() => this.#persistTo(dir, pending))
   }
 }

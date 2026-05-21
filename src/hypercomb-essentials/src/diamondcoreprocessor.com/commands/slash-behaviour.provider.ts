@@ -8,7 +8,7 @@ export interface SlashBehaviour {
   /**
    * When true, this behaviour is invokable but does not appear in
    * autocomplete suggestions. Use for destructive / dev-only commands
-   * the user must type in full (e.g. /compact, /collapse-history).
+   * the user must type in full (e.g. /flatten, /collapse-history).
    */
   readonly hidden?: boolean
 }

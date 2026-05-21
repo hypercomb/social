@@ -37,6 +37,16 @@ export class SiteViewDrone extends Drone {
   #lineageBound = false
   #viewModeBound = false
   #globalContextMenuBound = false
+  /**
+   * Lineage of the cell where the current website session started —
+   * captured the moment ViewMode flipped from hexagons → website (or
+   * on boot if VM was already 'website'). Acts as the navigation
+   * floor: right-click (and anchor `..`) inside the site can walk
+   * up freely until segments shrink down to this length, then the
+   * next "go up" exits the site instead of crossing into the parent
+   * hexagon hierarchy. Null while not in a website session.
+   */
+  #siteEntrySegments: readonly string[] | null = null
 
   protected override deps = {
     lineage: '@hypercomb.social/Lineage',
@@ -73,6 +83,13 @@ export class SiteViewDrone extends Drone {
       window.addEventListener('contextmenu', this.#onGlobalContextMenu, true)
       this.#globalContextMenuBound = true
     }
+    // Boot-time entry capture. If ViewMode persisted as 'website'
+    // across a reload, no 'change' event will fire — record the
+    // current lineage as this session's site root once on boot.
+    if (this.#siteEntrySegments === null) {
+      const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<{ mode: string }>('@hypercomb.social/ViewMode')
+      if (vm?.mode === 'website') this.#captureSiteEntry()
+    }
     void this.#reconcile()
   }
 
@@ -92,21 +109,60 @@ export class SiteViewDrone extends Drone {
   }
 
   readonly #onLineageChange = (): void => { void this.#reconcile() }
-  readonly #onViewModeChange = (): void => { void this.#reconcile() }
+  readonly #onViewModeChange = (): void => {
+    // Track session entry: capture on hexagons → website, drop on exit.
+    // Boundary check in #onGlobalContextMenu / onAnchorClick keys off this.
+    const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<{ mode: string }>('@hypercomb.social/ViewMode')
+    if (vm?.mode === 'website') {
+      if (this.#siteEntrySegments === null) this.#captureSiteEntry()
+    } else {
+      this.#siteEntrySegments = null
+    }
+    void this.#reconcile()
+  }
+
+  #captureSiteEntry(): void {
+    const lineage = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
+    this.#siteEntrySegments = [...(lineage?.explorerSegments?.() ?? [])]
+  }
 
   /** Window-level contextmenu handler. Active only in website mode —
-   *  right-click navigates up one level, matching the iframe-injected
-   *  hook and hexagon-view's right-button-down. The capture-phase
-   *  listener fires before downstream consumers so the browser's
-   *  default context menu never appears in this mode. */
+   *  right-click as a universal "back to the site" gesture. The
+   *  capture-phase listener fires before downstream consumers so the
+   *  browser's default context menu never appears in this mode.
+   *
+   *  The "site root" is the cell where this website session began
+   *  (`#siteEntrySegments`), not the hypercomb lineage root. Three
+   *  cases, keyed on the relationship between current segments and
+   *  the site entry:
+   *
+   *   • Inside the site (descendant of entry) → walk up one level.
+   *   • At the site root (segments equal entry) → no-op. We stay
+   *     rather than walking up into `/`, which usually has no
+   *     content. The way out is the `/website` toggle, not right-
+   *     click.
+   *   • Outside the site (sibling or unrelated cell, e.g. an
+   *     `<a href="/dashboard">` link navigated to a route not under
+   *     the site root) → jump back to the entry. Without this the
+   *     user gets stranded on a blank route with no page mounted.
+   *
+   *  We do NOT exit website mode in any case: the gesture is a
+   *  back-to-the-site, not a back-to-hexagons. */
   readonly #onGlobalContextMenu = (e: MouseEvent): void => {
     const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<{ mode: string }>('@hypercomb.social/ViewMode')
     if (!vm || vm.mode !== 'website') return
     e.preventDefault()
     const lineage = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
     const segments = [...(lineage?.explorerSegments?.() ?? [])]
-    if (segments.length === 0) return
-    this.#navigate(segments.slice(0, -1))
+    const entry = this.#siteEntrySegments ?? []
+    const insideSite = segments.length >= entry.length
+      && entry.every((seg, i) => segments[i] === seg)
+    if (insideSite) {
+      if (segments.length <= entry.length) return
+      this.#navigate(segments.slice(0, -1))
+      return
+    }
+    this.#navigate(entry)
   }
 
   async #reconcile(): Promise<void> {
@@ -136,11 +192,18 @@ export class SiteViewDrone extends Drone {
 
     const segments: string[] = [...(lineage.explorerSegments?.() ?? [])]
 
-    // The current cell's `context` slot may hold an HTML resource sig —
-    // that's the cell's page. Each cell carries its own; lineage
-    // navigation drives page changes. No bundle, no manifest, no path
-    // table — the lineage IS the route.
-    const cellPageSig = await this.#findContextPage(segments, store)
+    // The cell's page lives in one of two places, queried in order:
+    //   1. The `decorations` slot — sigs into `__optimization__` of
+    //      shape `{ kind: 'visual:website:page', payload: { htmlSig } }`.
+    //      This is the visual-bee migration target.
+    //   2. The legacy `context` slot — raw HTML resource sigs. Existing
+    //      data lives here; falls back when no decoration is present.
+    // Each cell carries its own; lineage navigation drives page changes.
+    // No bundle, no manifest, no path table — the lineage IS the route.
+    let cellPageSig = await this.#findDecorationPage(segments, store)
+    if (!cellPageSig) {
+      cellPageSig = await this.#findContextPage(segments, store)
+    }
     if (cellPageSig) {
       await this.#mountCellPage(segments, cellPageSig, store)
       return
@@ -152,12 +215,81 @@ export class SiteViewDrone extends Drone {
     this.#teardown()
   }
 
-  /** Per-cell page lookup. Reads the cell's layer at `segments`,
+  /** Decoration-based page lookup (the visual-bee migration target).
+   *  Reads the cell's `decorations` slot, loads each sig from
+   *  `__resources__`, filters by the website bee's declared
+   *  `decorationKind` (looked up via VisualBeeRegistry), and returns the
+   *  first match's `payload.htmlSig` — the HTML resource the renderer
+   *  ultimately mounts.
+   *
+   *  Decoration JSONs live in `__resources__` (the shared content store)
+   *  so peer-supplied decorations come through the same fetch pipeline
+   *  as any other resource — adopter sees peer's `decorations` slot
+   *  sigs in the merkle tree, and resolving them through getResource
+   *  works whether the content is local or pulled from a relay.
+   *
+   *  Returns null if VisualBeeRegistry is unavailable, the website bee
+   *  isn't registered yet, the cell has no `decorations` slot, or no
+   *  entries match the kind. The caller then falls back to the legacy
+   *  `context` slot for cells whose pages haven't been migrated. */
+  async #findDecorationPage(
+    segments: readonly string[],
+    store: {
+      getResource?: (sig: string) => Promise<Blob | null>
+    },
+  ): Promise<string | null> {
+    if (!store.getResource) return null
+    const ioc = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+    if (!ioc) return null
+
+    const registry = ioc.get<{
+      get: (view: string) => { decorationKind: string } | undefined
+    }>('@diamondcoreprocessor.com/VisualBeeRegistry')
+    const bee = registry?.get('website')
+    if (!bee?.decorationKind) return null
+
+    const history = ioc.get<{
+      sign: (lineage: { explorerSegments?: () => readonly string[] }) => Promise<string>
+      currentLayerAt: (locationSig: string) => Promise<{ decorations?: unknown } | null>
+    }>('@diamondcoreprocessor.com/HistoryService')
+    if (!history) return null
+
+    try {
+      const locationSig = await history.sign({ explorerSegments: () => segments })
+      const layer = await history.currentLayerAt(locationSig)
+      if (!layer) return null
+      const decorations = (layer as { decorations?: unknown }).decorations
+      const sigs: string[] = Array.isArray(decorations)
+        ? decorations.map((s: unknown) => String(s)).filter(s => /^[0-9a-f]{64}$/.test(s))
+        : []
+      for (const decorationSig of sigs) {
+        const blob = await store.getResource(decorationSig)
+        if (!blob) continue
+        try {
+          const record = JSON.parse(await blob.text()) as {
+            kind?: string
+            payload?: { htmlSig?: string }
+          }
+          if (record?.kind !== bee.decorationKind) continue
+          const htmlSig = record?.payload?.htmlSig
+          if (typeof htmlSig === 'string' && /^[0-9a-f]{64}$/.test(htmlSig)) {
+            return htmlSig
+          }
+        } catch { /* malformed record — skip */ }
+      }
+    } catch { /* fall through — caller will try legacy context */ }
+    return null
+  }
+
+  /** Legacy per-cell page lookup. Reads the cell's layer at `segments`,
    *  scans its `context` slot for the first HTML-shaped resource,
    *  returns that sig. Probes the resource head to detect HTML rather
    *  than trusting position — a cell's bag is heterogeneous (prior
    *  impls, chrome refs, examples) and the renderer should pick the
-   *  page kind by content, not by index. */
+   *  page kind by content, not by index.
+   *
+   *  Used as fallback when `#findDecorationPage` returns null — i.e. for
+   *  cells whose pages were written before the visual-bee migration. */
   async #findContextPage(
     segments: readonly string[],
     store: { getResource: (sig: string) => Promise<Blob | null> },
@@ -289,7 +421,13 @@ export class SiteViewDrone extends Drone {
       if (href.startsWith(RESOURCE_URL_PREFIX)) return
       e.preventDefault()
       if (href === '..' || href === '../') {
-        if (segments.length > 0) this.#navigate(segments.slice(0, -1))
+        // Same site-entry floor as right-click — clicking `..` at or
+        // below the site root is a no-op. We don't exit website mode
+        // here; the user only asked to block nav past root, not to
+        // be ejected back to hexagons.
+        const entry = this.#siteEntrySegments ?? []
+        if (segments.length <= entry.length) return
+        this.#navigate(segments.slice(0, -1))
         return
       }
       if (href.startsWith('/')) {

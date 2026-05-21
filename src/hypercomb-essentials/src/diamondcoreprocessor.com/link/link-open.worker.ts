@@ -4,7 +4,7 @@
 
 import { Worker, EffectBus } from '@hypercomb/core'
 import { isImageUrl, fetchImageBlob } from './photo.js'
-import { readCellProperties } from '../editor/tile-properties.js'
+import { readCellProperties, readTilePropertiesAt } from '../editor/tile-properties.js'
 import type { PhotoView } from './photo.view.js'
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
@@ -41,7 +41,21 @@ export class LinkOpenWorker extends Worker {
   }
 
   async #readTileLink(label: string): Promise<string | null> {
-    // Try content-addressed properties first (tile-editor save path).
+    const lineage = get('@hypercomb.social/Lineage') as
+      { explorerSegments?: () => readonly string[]; explorerDir?: () => Promise<FileSystemDirectoryHandle | null> } | undefined
+    const parentSegments = lineage?.explorerSegments?.() ?? []
+
+    // Canonical path: tile's layer's `properties` slot.
+    try {
+      const props = await readTilePropertiesAt(parentSegments, label)
+      if (typeof props['link'] === 'string' && (props['link'] as string).length > 0) {
+        return props['link'] as string
+      }
+    } catch { /* fall through */ }
+
+    // Legacy localStorage-keyed properties index (tile-editor save path —
+    // separate from the canonical layer slot; kept while that path
+    // is migrated to writeTilePropertiesAt).
     try {
       const index: Record<string, string> = JSON.parse(
         localStorage.getItem('hc:tile-props-index') ?? '{}'
@@ -56,15 +70,13 @@ export class LinkOpenWorker extends Worker {
           if (typeof props.link === 'string' && props.link.length > 0) return props.link
         }
       }
-    } catch { /* fall through to 0000 fallback */ }
+    } catch { /* fall through to 0000 */ }
 
-    // Fallback: read the cell's 0000 file at the current navigation level.
-    // The label-keyed index is path-blind and the headless bridge `stamp` op
-    // (dashboard refresh) writes only to 0000 — without this fallback,
-    // bridge-stamped links would never resolve and the open action would
-    // silently no-op even though the link badge renders.
+    // Legacy 0000 fallback for pre-migration tiles whose link was
+    // written to the phantom <cellDir>/0000 file. Goes away once
+    // every writer is on the canonical path and tiles have been
+    // swept.
     try {
-      const lineage = get('@hypercomb.social/Lineage') as { explorerDir?: () => Promise<FileSystemDirectoryHandle | null> } | undefined
       const dir = await lineage?.explorerDir?.()
       if (!dir) return null
       const cellDir = await dir.getDirectoryHandle(label, { create: false })

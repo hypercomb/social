@@ -637,13 +637,88 @@ export class HistoryService {
    * Two markers with identical content have the same `layerSig`; the
    * filenames stay distinct (they're the per-event timeline).
    */
+  /**
+   * Cheap list of every marker file in the bag — names only, no bytes
+   * read, no parse, no filter beyond the marker-name regex. The viewer
+   * uses this as the source of truth for "what files exist right now"
+   * and resolves content lazily through `readMarker` with a per-bag
+   * per-filename cache. Returns empty array if the bag doesn't exist
+   * yet.
+   *
+   * Marker contents are immutable (markers are append-only and content-
+   * addressed at write), so a filename-keyed cache never needs
+   * invalidation. Re-reading the directory listing on every render is
+   * cheap (an OPFS dir enumeration is one syscall-ish, no I/O on the
+   * files themselves) and guarantees the viewer reflects whatever is
+   * currently on disk — no stale "X says total=N but only 1 row
+   * rendered" desync.
+   */
+  public readonly listMarkerFilenames = async (
+    locationSig: string,
+  ): Promise<readonly string[]> => {
+    let bag: FileSystemDirectoryHandle
+    try {
+      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+    } catch {
+      return []
+    }
+    const names: string[] = []
+    for await (const [name, handle] of (bag as any).entries()) {
+      if (handle.kind !== 'file') continue
+      if (!HistoryService.#MARKER_RE.test(name)) continue
+      names.push(name)
+    }
+    names.sort((a, b) => a.localeCompare(b))
+    return names
+  }
+
+  /**
+   * Read and parse one marker by filename. Returns the raw bytes, the
+   * parsed JSON (or null on parse failure — caller decides how to
+   * surface it), the file's lastModified timestamp, and the bytes' sig.
+   * No filtering — even non-canonical files come back so the viewer
+   * can display "something is here, here's what it looks like" instead
+   * of silently dropping the row.
+   */
+  public readonly readMarker = async (
+    locationSig: string,
+    filename: string,
+  ): Promise<{ bytes: ArrayBuffer; parsed: LayerContent | null; layerSig: string; at: number; rawText: string } | null> => {
+    let bag: FileSystemDirectoryHandle
+    try {
+      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+    } catch {
+      return null
+    }
+    let handle: FileSystemFileHandle
+    try {
+      handle = await bag.getFileHandle(filename)
+    } catch {
+      return null
+    }
+    try {
+      const file = await handle.getFile()
+      const bytes = await file.arrayBuffer()
+      const rawText = new TextDecoder().decode(bytes)
+      const layerSig = await SignatureService.sign(bytes)
+      let parsed: LayerContent | null = null
+      try {
+        const obj = JSON.parse(rawText)
+        if (obj && typeof obj === 'object') parsed = obj as LayerContent
+      } catch { /* leave parsed null; viewer surfaces raw */ }
+      return { bytes, parsed, layerSig, at: file.lastModified, rawText }
+    } catch {
+      return null
+    }
+  }
+
   public readonly listLayers = async (
     locationSig: string,
   ): Promise<Array<LayerEntry & { index: number; filename: string }>> => {
     // SKIP non-canonical entries; do NOT delete them. Auto-delete on
     // every read is destructive and not user-driven — a single bad
     // detection rule could erase real markers and lose history. To
-    // explicitly purge non-canonical files, the user can run /compact
+    // explicitly purge non-canonical files, the user can run /flatten
     // which calls #quarantineNonLayerFiles via a dedicated path.
     let bag: FileSystemDirectoryHandle
     try {
@@ -666,7 +741,7 @@ export class HistoryService {
         // (JSON object with children[]). Pre-merkle bare-sig markers
         // and op-JSON entries are skipped from the active list but
         // are NOT deleted — the file stays on disk until the user
-        // explicitly compacts.
+        // explicitly flattens.
         const text = new TextDecoder().decode(bytes)
         const trimmed = text.trim()
         if (HistoryService.#SIG_RE.test(trimmed)) continue   // legacy bare-sig marker
@@ -692,7 +767,7 @@ export class HistoryService {
    * 8-digit zero-padded starting at 00000001. Scans existing markers
    * AND the __temporary__ archive (if present) for the current max so
    * a re-issued name can never collide with an archived entry — that
-   * matters after /compact, which archives every existing marker and
+   * matters after /flatten, which archives every existing marker and
    * then commits a fresh one. Without this scan the new marker would
    * be named 00000001 and shadow the archived 00000001.
    */
@@ -1013,10 +1088,17 @@ export class HistoryService {
   public readonly preloadAllBags = async (): Promise<void> => {
     if (this.#preloadAllBagsPromise) return this.#preloadAllBagsPromise
     this.#preloadAllBagsPromise = (async () => {
+      const startMs = performance.now()
       const root = this.historyRoot
+      let bagCount = 0
+      let markerCount = 0
+      let cachedCount = 0
+      const previewSigs: string[] = []
+
       for await (const [lineageSig, dirHandle] of (root as any).entries()) {
         if (dirHandle.kind !== 'directory') continue
         if (!HistoryService.#SIG_RE.test(lineageSig)) continue
+        bagCount++
         const bag = dirHandle as FileSystemDirectoryHandle
 
         // Pass 1: filename-only enumeration to find the latest marker.
@@ -1025,6 +1107,7 @@ export class HistoryService {
         for await (const [name, fileHandle] of (bag as any).entries()) {
           if (fileHandle.kind !== 'file') continue
           if (!HistoryService.#MARKER_RE.test(name)) continue
+          markerCount++
           if (name > latestName) latestName = name
         }
         if (!latestName) continue
@@ -1037,10 +1120,87 @@ export class HistoryService {
           const sig = await SignatureService.sign(bytes)
           this.#preloaderCache.set(sig, bytes)
           this.#latestSigByLineage.set(lineageSig, sig)
+          cachedCount++
+          if (previewSigs.length < 10) previewSigs.push(sig.slice(0, 12))
         } catch { /* skip unreadable */ }
+      }
+
+      const elapsed = Math.round(performance.now() - startMs)
+      console.log(
+        `[preload] preloadAllBags done: ${cachedCount} heads cached / ${bagCount} bags scanned / ${markerCount} markers seen (${elapsed}ms). ` +
+        `first sigs: [${previewSigs.join(', ')}${cachedCount > previewSigs.length ? ', …' : ''}]`
+      )
+
+      // Phase 2: walk from root layer recursively to warm the parsed
+      // cache for every reachable descendant. After this, render
+      // queries hit the cache exclusively (the cold bag scan in
+      // getLayerBySig becomes a fallback path only). Chained into the
+      // shared `#preloadAllBagsPromise` so a single await covers both
+      // phases — callers don't need to know about the two-step.
+      try {
+        const rootLineageSig = await this.sign({ explorerSegments: () => [] })
+        const rootHeadSig = await this.latestMarkerSigFor(rootLineageSig, '/')
+        if (rootHeadSig) {
+          await this.preloadFromRoot(rootHeadSig)
+        } else {
+          console.log('[preload] preloadFromRoot skipped: no root head sig')
+        }
+      } catch (err) {
+        console.warn('[preload] preloadFromRoot failed (non-fatal):', err)
       }
     })()
     return this.#preloadAllBagsPromise
+  }
+
+  /**
+   * Walk the layer tree from a root sig, fetching every descendant and
+   * warming the cache. Two-path-strict discipline: every fetch routes
+   * through {@link getLayerBySig}, which itself checks the cache first
+   * and only falls back to a cold bag scan on miss. By the time this
+   * returns, the render path can navigate to any reachable sub-layer
+   * and hit the cache exclusively — no further walks.
+   *
+   * Logs progress every 50 layers so a long boot doesn't look frozen,
+   * and emits a summary at the end with depth-binned counts.
+   */
+  public readonly preloadFromRoot = async (rootSig: string): Promise<void> => {
+    if (!HistoryService.#SIG_RE.test(rootSig)) return
+    const startMs = performance.now()
+    const visited = new Set<string>()
+    const depthHistogram = new Map<number, number>()
+    let cacheHits = 0
+    let walked = 0
+
+    const walk = async (sig: string, depth: number): Promise<void> => {
+      if (visited.has(sig)) return
+      visited.add(sig)
+      const wasCached = this.#parsedLayerCache.has(sig) || this.#preloaderCache.has(sig)
+      const layer = await this.getLayerBySig(sig)
+      if (!layer) return
+      walked++
+      depthHistogram.set(depth, (depthHistogram.get(depth) ?? 0) + 1)
+      if (wasCached) cacheHits++
+      if (walked > 0 && walked % 50 === 0) {
+        console.log(`[preload] preloadFromRoot progress: ${walked} layers walked (depth ≤ ${Math.max(...depthHistogram.keys())})`)
+      }
+      const children = Array.isArray(layer.children) ? layer.children : []
+      for (const childSig of children) {
+        if (HistoryService.#SIG_RE.test(childSig)) {
+          await walk(childSig, depth + 1)
+        }
+      }
+    }
+
+    await walk(rootSig, 0)
+    const elapsed = Math.round(performance.now() - startMs)
+    const depthSummary = [...depthHistogram.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([d, n]) => `d${d}:${n}`)
+      .join(' ')
+    console.log(
+      `[preload] preloadFromRoot done: ${walked} layers reachable from ${rootSig.slice(0, 12)} ` +
+      `(${cacheHits} already cached, ${walked - cacheHits} newly warmed) in ${elapsed}ms. depths: ${depthSummary}`
+    )
   }
 
   /**
@@ -1102,7 +1262,7 @@ export class HistoryService {
    * USER-DRIVEN ONLY. listLayers no longer calls this — silently
    * deleting markers from a passive read path is destructive (a single
    * detection bug could erase real history). The only call site is
-   * /compact, which the user invokes deliberately.
+   * /flatten, which the user invokes deliberately.
    *
    * Idempotent: a clean bag is unchanged.
    */
@@ -1166,40 +1326,28 @@ export class HistoryService {
 
   /**
    * Bring a layer sig back to head by appending a fresh marker that
-   * points at it. The sig content file is NOT touched — its mtime
-   * stays put, no Blob handles invalidated. Markers, not content,
-   * carry the per-event timeline.
+   * carries that layer's content. Resolves the sig to its canonical
+   * layer JSON and routes through {@link commitLayer} so the new
+   * marker is a canonical JSON marker (the only format
+   * {@link listLayers} surfaces).
+   *
+   * Returns the resulting layer sig — which equals the input
+   * `layerSig` whenever the content is byte-identical (the normal
+   * case). If the sig matches the bag's current head, commitLayer's
+   * dedup makes this a no-op (no spurious marker for "promote
+   * already-head").
+   *
+   * Returns null when the sig cannot be resolved to a layer (dead
+   * pointer; refuse to write a placeholder).
    */
   public readonly promoteToHead = async (
     locationSig: string,
     layerSig: string,
   ): Promise<string | null> => {
     if (!HistoryService.#SIG_RE.test(layerSig)) return null
-    const bag = await this.getBag(locationSig)
-
-    // Sanity: the sig file should exist in the bag (or be hydrate-able
-    // from the Store). If neither, the marker would be a dead pointer.
-    let sigExists = true
-    try { await bag.getFileHandle(layerSig, { create: false }) } catch { sigExists = false }
-    if (!sigExists) {
-      const store = get<{ getResource: (sig: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
-      const blob = store ? await store.getResource(layerSig).catch(() => null) : null
-      if (!blob) return null
-      // Materialise the sig file in the bag so the marker resolves.
-      const bytes = await blob.arrayBuffer()
-      const handle = await bag.getFileHandle(layerSig, { create: true })
-      const writable = await handle.createWritable()
-      try { await writable.write(bytes) } finally { await writable.close() }
-    }
-
-    const markerName = await this.#nextMarkerName(bag)
-    const markerHandle = await bag.getFileHandle(markerName, { create: true })
-    const markerWritable = await markerHandle.createWritable()
-    try { await markerWritable.write(layerSig) } finally { await markerWritable.close() }
-    // Housekeeping: head changed. Invalidate the lineage's cached
-    // latest sig — the next read repopulates from disk.
-    this.#latestSigByLineage.delete(locationSig)
-    return layerSig
+    const layer = await this.getLayerBySig(layerSig)
+    if (!layer) return null
+    return await this.commitLayer(locationSig, layer)
   }
 
   /**
@@ -1240,7 +1388,7 @@ export class HistoryService {
    * `#nextMarkerName` scans the archive too, so newly committed markers
    * cannot collide with an archived one.
    *
-   * USED ONLY BY /collapse-history AND /compact. These are the rare
+   * USED ONLY BY /collapse-history AND /flatten. These are the rare
    * paths that wipe non-head markers in bulk; everywhere else
    * (single-entry UI delete, mergeEntries) stays on the hard-delete
    * primitive `removeEntries`.
