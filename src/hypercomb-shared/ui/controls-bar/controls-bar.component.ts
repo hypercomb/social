@@ -101,6 +101,23 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   private get zoom(): any {
     return get('@diamondcoreprocessor.com/ZoomDrone')
   }
+
+  /**
+   * Resolve ZoomDrone from IoC and run `fn` with it. Logs a warning when the
+   * drone isn't registered (silent-undefined was the dominant source of
+   * "toolbar zoom suddenly stops working" reports — see
+   * `project_ioc_eviction_kills_new_instance` memory). The getter above
+   * already re-reads on every access, so the next click after the drone
+   * re-registers will pick it up automatically.
+   */
+  #withZoom(label: string, fn: (zoom: any) => void): void {
+    const zoom = this.zoom
+    if (!zoom) {
+      console.warn(`[controls-bar] ${label}: ZoomDrone unavailable from IoC. Possible mid-resync race; will recover on next interaction once it re-registers.`)
+      return
+    }
+    fn(zoom)
+  }
   private get pixiHost(): any {
     return get('@diamondcoreprocessor.com/PixiHostWorker')
   }
@@ -985,12 +1002,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     if (event.ctrlKey || event.metaKey) {
       this.#cycleFitMode()
     } else {
-      this.zoom?.zoomToFit?.()
+      this.#withZoom('fitOrCenter', z => z.zoomToFit?.())
     }
   }
 
   readonly fitContent = (): void => {
-    this.zoom?.zoomToFit?.()
+    this.#withZoom('fitContent', z => z.zoomToFit?.())
   }
 
   /** Advance the fit button through its three states. */
@@ -1016,7 +1033,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     }
     const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
     vp?.suspend?.()
-    this.zoom?.zoomToFit?.()
+    this.#withZoom('enterGlobalFit', z => z.zoomToFit?.())
     this.#enableFitLocked()
   }
 
@@ -1039,7 +1056,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     next.add(key)
     this.#fitPinnedPages.set(next)
     this.#persistFitPinnedPages(next)
-    this.zoom?.zoomToFit?.()
+    this.#withZoom('enterPageFit', z => z.zoomToFit?.())
     // Keep the navigation:guard-end listener installed so return visits fit.
     this.#enableFitLocked()
   }
@@ -1081,7 +1098,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
       if (this.fitLocked()) {
         vp?.suspend?.()
-        this.zoom?.zoomToFit?.(true)
+        this.#withZoom('autoFitLocked', z => z.zoomToFit?.(true))
       } else {
         vp?.resume?.()
       }
@@ -1168,15 +1185,19 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly zoomIn = (): void => {
     if (this.#locked()) return
     const center = this.#viewportCenter()
-    this.zoom?.zoomByFactor?.(1.25, center, 'controls-bar')
-    this.zoom?.end?.('controls-bar')
+    this.#withZoom('zoomIn', z => {
+      z.zoomByFactor?.(1.25, center, 'controls-bar')
+      z.end?.('controls-bar')
+    })
   }
 
   readonly zoomOut = (): void => {
     if (this.#locked()) return
     const center = this.#viewportCenter()
-    this.zoom?.zoomByFactor?.(0.8, center, 'controls-bar')
-    this.zoom?.end?.('controls-bar')
+    this.#withZoom('zoomOut', z => {
+      z.zoomByFactor?.(0.8, center, 'controls-bar')
+      z.end?.('controls-bar')
+    })
   }
 
   readonly toggleInstructions = (event: MouseEvent): void => {
@@ -1338,7 +1359,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       if (fired) return
       fired = true
       unsub()
-      requestAnimationFrame(() => this.zoom?.zoomToFit?.())
+      requestAnimationFrame(() => this.#withZoom('rafFit', z => z.zoomToFit?.()))
     }
     unsub = EffectBus.on('render:cell-count', fit)
     setTimeout(fit, 120)
