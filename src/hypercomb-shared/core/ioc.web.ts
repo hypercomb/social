@@ -12,8 +12,24 @@ if (!window.ioc) {
         ? signature.key
         : signature
 
-      if (instances.has(key)) return
-
+      // OVERWRITE on re-register, not no-op. Idempotent-skip was the
+      // original behaviour but it had a nasty interaction with the
+      // bee-eviction lifecycle: when a bee's signature changed (e.g. DCP
+      // push that updates a drone), the new bee's module-load called
+      // register(key, newInstance), but this slot already held the old
+      // instance — so the call was silently skipped, the IoC slot kept
+      // the OLD reference, then eviction came along and unregister'd it,
+      // leaving the slot empty. Consumers (toolbar zoom etc.) saw
+      // undefined and silently no-op'd.
+      //
+      // Overwriting is the correct semantic: re-registration means "the
+      // canonical implementation has changed, use this from now on." The
+      // identity-guard in script-preloader.ts's eviction loop (lines
+      // ~135) then correctly recognises that the slot now holds someone
+      // else and skips the unregister.
+      //
+      // Previous callers that defensively did `if (!ioc.get(key)) register(...)`
+      // still work — their guard just short-circuits before this code.
       instances.set(key, value)
 
       for (const cb of listeners) {

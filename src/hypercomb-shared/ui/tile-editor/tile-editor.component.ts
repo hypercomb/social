@@ -72,38 +72,43 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
   // ── reactive state ─────────────────────────────────────────────
 
+  // Use string IoC keys (not pre-resolved EventTargets) so fromRuntime
+  // lazy-binds via ioc.whenReady. If a service isn't registered yet when
+  // the component instantiates (rare but real on cold load / mid-resync),
+  // the signal will subscribe once the service arrives — instead of being
+  // permanently stuck at undefined as the pre-resolved pattern produces.
   private readonly mode$ = fromRuntime(
-    get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
+    '@diamondcoreprocessor.com/TileEditorService',
     () => this.editorService?.mode ?? 'idle',
   )
 
   private readonly cell$ = fromRuntime(
-    get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
+    '@diamondcoreprocessor.com/TileEditorService',
     () => this.editorService?.cell ?? '',
   )
 
   private readonly link$ = fromRuntime(
-    get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
+    '@diamondcoreprocessor.com/TileEditorService',
     () => this.editorService?.link ?? '',
   )
 
   private readonly borderColor$ = fromRuntime(
-    get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
+    '@diamondcoreprocessor.com/TileEditorService',
     () => this.editorService?.borderColor ?? '',
   )
 
   private readonly backgroundColor$ = fromRuntime(
-    get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
+    '@diamondcoreprocessor.com/TileEditorService',
     () => this.editorService?.backgroundColor ?? '',
   )
 
   private readonly hasImage$ = fromRuntime(
-    get('@diamondcoreprocessor.com/ImageEditorService') as EventTarget,
+    '@diamondcoreprocessor.com/ImageEditorService',
     () => this.imageEditor?.hasImage ?? false,
   )
 
   private readonly hideText$ = fromRuntime(
-    get('@diamondcoreprocessor.com/TileEditorService') as EventTarget,
+    '@diamondcoreprocessor.com/TileEditorService',
     () => this.editorService?.hideText ?? false,
   )
 

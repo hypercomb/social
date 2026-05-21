@@ -44,6 +44,15 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
   #resourceCount = 0
   #finding: Promise<Bee[]> | null = null
 
+  // Tracks the most recent fire-and-forget late-pulse continuation kicked
+  // off by #loadBeesPrioritized's FAST/COLD path. A subsequent find() call
+  // (e.g. triggered by `actions:available` → resyncAndEnforce after a DCP
+  // push) awaits this before walking layers + evicting bees, so the new
+  // run's eviction loop can't race the previous run's still-pulsing late
+  // bees. Without this, mid-session resyncs randomly stop drones that
+  // were mid-pulse when the second find() started.
+  #backgroundContinuation: Promise<void> | null = null
+
   // Bees pulsed at least once (either by the processor's encounter loop
   // for the first wave, or individually here once they land off the
   // critical path). Ensures every bee gets exactly one initial pulse.
@@ -82,6 +91,13 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     if (this.#finding) return this.#finding
 
     const run = async (): Promise<Bee[]> => {
+      // Wait for any in-flight late-pulse continuation from a previous
+      // find() before starting this run. Prevents the new eviction loop
+      // from racing the previous run's still-pulsing late bees.
+      if (this.#backgroundContinuation) {
+        try { await this.#backgroundContinuation } catch { /* swallow — previous run's failure shouldn't block us */ }
+      }
+
       const tFind = performance.now()
 
       // Layer-walk: layers are the source of truth. Union every signature
@@ -121,7 +137,20 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
             console.log(`[script-preloader] evicting disabled bee ${sig} (${bee.iocKey})`)
             const key = bee.iocKey
             bee.markDisposed()
-            window.ioc.unregister(key)
+            // Only unregister if the IoC slot still holds THIS instance.
+            // After a sentinel resync that changes a bee's signature, the
+            // new bee's module-load already called register(key, newInstance)
+            // before this eviction loop ran — so the slot now holds the
+            // NEW instance. Unconditional unregister(key) would kill the
+            // new instance too, leaving ioc.get(key) === undefined and
+            // breaking every consumer that looks up the drone by key
+            // (toolbar zoomIn/zoomOut, fit.queen, auto-fit-first-add,
+            // show-cell's zoomToFit, etc.). Identity-guarding the unregister
+            // is safe because if someone newer is in the slot, the eviction
+            // of THIS bee shouldn't disturb them.
+            if (window.ioc.get(key) === bee) {
+              window.ioc.unregister(key)
+            }
             this.#beeCache.delete(sig)
             this.#bySignature.delete(sig)
             this.#warmedUp.delete(sig)
@@ -338,8 +367,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       console.log(fastMsg)
       try { localStorage.setItem('hc:perf-last-boot', `${Date.now()}:${fastMsg}`) } catch {}
 
-      // Background: load the rest and pulse them individually.
-      void (async () => {
+      // Background: load the rest and pulse them individually. Tracked
+      // via #backgroundContinuation so the next find() can await it before
+      // its eviction loop runs.
+      const continuation = (async () => {
         const restLoads = restPending.map(sig => this.#loadBeeBySignature(sig))
         await Promise.allSettled(restLoads)
         for (const [sig, bee] of this.#beeCache) {
@@ -357,6 +388,12 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
           total: this.#beeCache.size,
         })
       })()
+      this.#backgroundContinuation = continuation
+      void continuation.finally(() => {
+        if (this.#backgroundContinuation === continuation) {
+          this.#backgroundContinuation = null
+        }
+      })
       return
     }
 
@@ -396,7 +433,7 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 
     console.log(`[script-preloader] COLD critical bees ready in ${criticalMs.toFixed(0)}ms; populating sig→iocKey cache for next boot`)
 
-    void (async () => {
+    const continuation = (async () => {
       await Promise.allSettled(allLoads)
       for (const [sig, bee] of this.#beeCache) {
         if (this.#firstPulsed.has(sig)) continue
@@ -413,6 +450,12 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         total: this.#beeCache.size,
       })
     })()
+    this.#backgroundContinuation = continuation
+    void continuation.finally(() => {
+      if (this.#backgroundContinuation === continuation) {
+        this.#backgroundContinuation = null
+      }
+    })
   }
 
   /** Read learned critical-bee sigs from prior boots. Empty on first run. */
