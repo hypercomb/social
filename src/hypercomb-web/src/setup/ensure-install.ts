@@ -23,6 +23,7 @@ const MANIFEST_KEY = 'core-adapter.installed-manifest'
 const SIG_STORE_KEY = 'hypercomb.signature-store'
 const SYNC_SIG_KEY = 'sentinel.sync-signature'
 const INSTALLED_FLAG_KEY = 'hypercomb.installed'
+const BUNDLED_PKG_SIG_KEY = 'hypercomb.bundled-pkg-sig'
 
 // ensure side-effect registrations
 const _deps = [Store]
@@ -67,13 +68,20 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
   // diff so a fresh deploy lands on the next reload instead of waiting
   // for a DCP toggle.
   const cachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
-  const stale = cachedManifest && bundled && bundledDiffersFromCached(bundled, cachedManifest)
+  // Self-heal fires only when the bundled package signature changes (new
+  // deploy). Comparing cached bees against bundled bees would mis-fire any
+  // time the user disabled a drone via DCP — cached.bees is shorter by
+  // design in that case, and a wipe-and-reinstall-from-bundled would
+  // resurrect the disabled drone on every reload.
+  const lastBundledSig = localStorage.getItem(BUNDLED_PKG_SIG_KEY)
+  const stale = cachedManifest && bundled && lastBundledSig !== null && lastBundledSig !== bundled.packageSig
   if (stale) {
-    console.warn('[ensure-install] bundled package sig differs from cached install — invalidating cache')
+    console.warn('[ensure-install] bundled package sig changed — invalidating cache')
     localStorage.removeItem(MANIFEST_KEY)
     localStorage.removeItem(SYNC_SIG_KEY)
     await purgeStaleOpfsArtifacts(store)
   }
+  if (bundled) localStorage.setItem(BUNDLED_PKG_SIG_KEY, bundled.packageSig)
   const usableCache = !stale && cachedManifest && cachedManifest.bees.length > 0
   ;(window as any).__hcBoot?.(`ensureInstall: usableCache=${!!usableCache}`)
   if (usableCache) {
@@ -174,15 +182,6 @@ const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
   } catch {
     return null
   }
-}
-
-const bundledDiffersFromCached = (bundled: BundledPackage, cached: InstallManifest): boolean => {
-  if (bundled.bees.length !== cached.bees.length) return true
-  const cachedSet = new Set(cached.bees)
-  for (const sig of bundled.bees) {
-    if (!cachedSet.has(sig)) return true
-  }
-  return false
 }
 
 const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureStore): Promise<void> => {
