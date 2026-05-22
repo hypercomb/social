@@ -81,30 +81,14 @@ export class TileEditorDrone {
   }
 
   #onCameraOpen = (): void => {
+    // No-selection case is owned by CameraCaptureComponent (shell-level
+    // overlay → arm in command-line chevron → user types name + Enter).
+    // We only handle the retake-on-selected-tile case from here.
     const selection = window.ioc.get<{ active: string | null }>('@diamondcoreprocessor.com/SelectionService')
     const activeCell = selection?.active
     if (activeCell) {
       void this.#openEditingWithCamera(activeCell)
-    } else {
-      void this.#createCellAndOpenCamera()
     }
-  }
-
-  #createCellAndOpenCamera = async (): Promise<void> => {
-    const newCell = `photo-${Date.now()}`
-
-    // Create directory so tile:saved's full OPFS rescan finds this cell.
-    // Do NOT emit cell:added here — that would show a blank tile while the
-    // camera is open. Defer it to saveAndComplete so the tile first appears
-    // with its image already in the resource store.
-    const lineage = window.ioc.get<{ explorerDir?: () => Promise<FileSystemDirectoryHandle | null> | FileSystemDirectoryHandle | null }>('@hypercomb.social/Lineage')
-    const dir = lineage?.explorerDir ? await Promise.resolve(lineage.explorerDir()) : null
-    if (dir) await dir.getDirectoryHandle(newCell, { create: true })
-
-    const service = window.ioc.get<TileEditorService>('@diamondcoreprocessor.com/TileEditorService')
-    if (service) service.isNewCell = true
-
-    await this.#openEditingWithCamera(newCell)
   }
 
   async #openEditingWithCamera(cell: string): Promise<void> {
