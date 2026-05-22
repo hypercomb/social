@@ -30,13 +30,6 @@ Modules             → must NEVER import from → Shared, Web, or Dev
 
 If a drone or service in essentials needs something that currently lives in shared, it must be migrated down to **core** (if it's a primitive) or kept in **essentials** (if it's module-level). Shared and web must never be upstream of a module.
 
-### What belongs where
-
-- **Core**: Primitives that any module on any platform needs — IoC, EffectBus, Drone base, Signatures, I18nProvider.
-- **Essentials (modules)**: All features and functionality — drones, supporting services, resources (static assets like images, text, styles, JSON, byte arrays), and domain logic. These are signed, interchangeable, and community-shareable.
-- **Shared**: Shell-level plumbing shared between web implementations — bootstrapping, installing/deploying files, Angular UI chrome. Temporary home for code migrating toward modules.
-- **Web / Dev**: Bootstrapping shells. Deploy files, initialize the runtime, load modules. A different platform (e.g., Windows native, mobile) would replace the shell but load the same signed modules.
-
 ### Dev-time vs Runtime loading
 
 - **hypercomb-dev** imports essentials classes directly in TypeScript. The constructor instantiates them and they self-register in `window.ioc`. Fast iteration, no OPFS needed.
@@ -60,39 +53,11 @@ hypercomb-core → hypercomb-essentials → hypercomb-web / hypercomb-dev
 | **hypercomb-web** | Nothing extra — `ng serve` or `ng build` |
 | **hypercomb-dev** | Nothing extra — `ng serve` or `ng build` |
 
-### Key commands (run from monorepo root `src/`)
-
-```bash
-npm run build:packages          # Build core + essentials in order
-npm run build:core              # Build core only
-npm run build:essentials        # Build essentials (tsup + esbuild modules + copy to web)
-npm run deploy:essentials       # Build essentials + deploy to Azure (production)
-```
-
-From `hypercomb-web/`:
-```bash
-npm start                       # ng serve
-npm run runtime                 # Copy core dist + bundle pixi.js to public/
-npm run runtime:core            # Copy core dist to public/core/
-```
-
-### Module delivery pipeline
-
-Essentials are built as **signature-addressed modules** and auto-installed into OPFS at runtime:
-
-1. **Build** (`npm run build:essentials`): esbuild bundles drones into flat `dist/` with `__layers__/`, `__bees__/`, `__dependencies__/`, and `manifest.json`. Then `copy-to-web.ts` copies output to `hypercomb-web/public/content/`.
-2. **Deploy** (`npm run deploy:essentials`): Same build, but uploads flat content to Azure blob storage (`storagehypercomb`) instead of copying locally. Uploads `manifest.json` for discovery.
-3. **Runtime auto-install**: On app load, `ensureInstall()` uses sentinel sync or `LayerInstaller` fetches `manifest.json` → looks up package by signature → downloads all listed layers/bees/deps → writes to OPFS. Skips if already installed (checked via `localStorage` + OPFS directory presence).
-4. **Import map**: `resolveImportMap()` reads `__dependencies__/` from OPFS, extracts aliases from first-line comments (`// @scope/name`), and injects a dynamic `<script type="importmap">`.
-5. **Module loading**: `DependencyLoader` imports dependencies via the import map. `ScriptPreloader` loads bees from OPFS, instantiates them, and registers in IoC.
+For full command reference, deploy flow, and the runtime install pipeline (esbuild → OPFS → ScriptPreloader), see [documentation/build-pipeline.md](documentation/build-pipeline.md).
 
 ## Documentation File Placement
 
-**All documentation lives in `src/documentation/`.** There is no `docs/` folder. Do **not** create a `docs/` directory at the repository root or anywhere else — it has been removed and all content consolidated into `src/documentation/`.
-
-- **`src/documentation/`** — The **sole** location for all markdown documentation: protocol specs, governance, licensing, glossary, contributing guides, feature docs, implementation guides, runtime behavior docs, architecture docs, and any new documentation you create.
-
-**Rule**: Never create or write to a `docs/` folder. Always place all markdown documentation in `src/documentation/`.
+All markdown documentation lives in `src/documentation/`. Never create a `docs/` folder.
 
 ## Monorepo Structure
 
@@ -151,38 +116,17 @@ src/
 
 SHA-256 hash (64 hex chars) of canonical content. Created via `SignatureService.sign(bytes)`. Immutable identity.
 
-**Signatures are not just identifiers — they are the composition mechanism.** Any JSON field, class property, array element, or configuration value that references content must hold a signature pointing to a resource in `__resources__/`, not inline data. This is the fundamental pattern of the architecture:
+**Core rule**: Any JSON field, class property, or configuration value holding content that could be shared, cached, versioned, or composed must hold a **signature reference** to a resource in `__resources__/`, not inline data. Same content → same signature → stored once, referenced many times.
 
 ```typescript
-// ✅ CORRECT: signature references — content lives in __resources__/<sig>
+// ✅ signature reference
 { "op": "reorder", "cell": "a1b2c3d4...", "at": 1712345678 }
-{ "turns": [{ "role": "user", "contentSig": "e5f6a7b8..." }] }
-{ "manifestSig": "c9d0e1f2...", "hidden": ["selector1", "selector2"] }
 
-// ❌ WRONG: inline data that should be a resource
+// ❌ inline data that should be a resource
 { "op": "reorder", "cell": "my-tile-name", "data": { "order": ["a","b","c"] } }
-{ "turns": [{ "role": "user", "content": "Hello, this is a long message..." }] }
 ```
 
-**Why this matters:**
-- **Deduplication**: same content → same signature → stored once, referenced many times
-- **Instant cache hits**: hold the signature, load from `__resources__/<sig>` — no queries, no lookups
-- **History composition**: history ops point at resource signatures. Undo = load the previous resource. Time-travel = load the resource at any timestamp. Infinitely expandable.
-- **Sharing**: a signature can be shared, imported, or bundled. The recipient resolves it against their own OPFS.
-- **Immutability**: content never changes. New content = new signature. Old signatures remain valid forever.
-
-**The expansion pattern**: JSON files embed signatures as string values. At runtime, code resolves them lazily via `Store.getResource(sig)` or `Store.getBee(sig)`. The resolution is always on-demand — signatures remain as lightweight string pointers until explicitly expanded.
-
-**Where this applies (non-exhaustive):**
-- History operations (`cell` field holds resource signatures for complex payloads)
-- Thread manifests (`contentSig` holds message content signatures)
-- Layer files (`bees[]`, `layers[]`, `dependencies[]` are all signature arrays)
-- Install manifests (`packages` keyed by package signature)
-- Settings and presets (stored as resources, referenced by signature in history)
-- Instruction manifests and instruction settings (signature-addressed resources)
-- Any new feature that stores structured data
-
-**Rule**: When designing a new feature, data structure, or JSON format — if a field contains content that could be shared, cached, versioned, or composed, it must be a signature reference to a resource. Never store expandable content inline when it can be content-addressed. See `src/documentation/signature-algebra.md` for the formal theory and `src/documentation/signature-system.md` for the expansion doctrine and practical guide.
+For the full doctrine (deduplication, snapshots, composition, anti-patterns, audit criteria, where signatures appear), see [documentation/signature-system.md](documentation/signature-system.md) and [documentation/signature-algebra.md](documentation/signature-algebra.md).
 
 ### IoC (Service Locator)
 ```typescript
@@ -190,6 +134,8 @@ window.ioc.register('@domain.com/ClassName', instance)
 window.ioc.get<T>('@domain.com/ClassName')
 ```
 Keys follow format `@namespace/Name`. Global via `window.ioc`.
+
+**Registration semantics must be explicit.** Distinguish first-time `register` from intentional `replace` when re-registering. Silent-skip and silent-overwrite are both bug-classes — if your code path may re-register a key, the intent must be named (replace/conflict-error/no-op), not left to default behaviour. See commit f4f7c86c.
 
 ### EffectBus (Pub/Sub with Last-Value Replay)
 ```typescript
@@ -220,69 +166,9 @@ Self-contained modules. Lifecycle: Created → Registered → Active → Dispose
 
 ## Localization (i18n)
 
-Runtime localization framework — no build-time compilation. All UI text goes through `LocalizationService` so the app can switch languages instantly.
+All UI text routes through `LocalizationService` for runtime locale switching. In Angular templates: `{{ 'key' | t }}` (or `'key' | t: { count: n }` for interpolation). In TypeScript: `ioc.get('@hypercomb.social/I18n').t('key', params)`. Bees register namespace translations via `i18n.registerTranslations(domain, locale, catalog)` inside `whenReady(I18N_IOC_KEY, …)`. Slash behaviours use `descriptionKey` for localized autocomplete.
 
-### Architecture
-
-```
-hypercomb-core/src/i18n.types.ts        ← I18nProvider interface + I18N_IOC_KEY (modules import this)
-hypercomb-shared/core/i18n.service.ts   ← LocalizationService (extends EventTarget, self-registers)
-hypercomb-shared/core/i18n.pipe.ts      ← Angular `| t` pipe for templates
-hypercomb-shared/core/i18n.signal.ts    ← ti18n() signal helper for component classes
-hypercomb-shared/i18n/en.json           ← English catalog
-hypercomb-shared/i18n/ja.json           ← Japanese catalog
-```
-
-### Usage in Angular templates
-
-```html
-{{ 'editor.save' | t }}                          <!-- simple key -->
-{{ 'activity.pasted' | t: { count: 5 } }}        <!-- with interpolation -->
-[placeholder]="'palette.placeholder' | t"         <!-- attribute binding -->
-[attr.aria-label]="'controls.center' | t"         <!-- aria-label -->
-```
-
-### Usage in TypeScript (components/bees)
-
-```typescript
-const i18n = get('@hypercomb.social/I18n') as I18nProvider | undefined
-const msg = i18n?.t('activity.added', { cell: name }) ?? `added "${name}"`
-```
-
-### Slash behaviour descriptions
-
-Slash behaviours use `descriptionKey` on `SlashBehaviour` for localized autocomplete:
-```typescript
-{ name: 'help', description: 'Show keyboard shortcuts', descriptionKey: 'slash.help' }
-```
-`SlashBehaviourDrone.match()` resolves descriptions via i18n at match time.
-
-### Community module translations
-
-Bees register namespace-scoped translations at load time:
-```typescript
-import type { I18nProvider, I18N_IOC_KEY } from '@hypercomb/core'
-window.ioc.whenReady(I18N_IOC_KEY, (i18n: I18nProvider) => {
-  i18n.registerTranslations('my-module.com', 'en', { 'greeting': 'Hello' })
-  i18n.registerTranslations('my-module.com', 'ja', { 'greeting': 'こんにちは' })
-})
-```
-
-### Locale switching
-
-```typescript
-window.ioc.get('@hypercomb.social/I18n').setLocale('ja')  // persists to localStorage, updates document.lang
-```
-
-Or via slash behaviour: `/language ja`, `/language en`, `/lang jp`
-
-### Key conventions
-
-- Flat dot-separated keys: `component.element` (e.g., `editor.save`, `controls.clipboard`)
-- Slash behaviour keys: `slash.behaviourName` (e.g., `slash.help`, `slash.language`)
-- Plurals: `key.zero`, `key.one`, `key.other` (triggered when `params.count` is present)
-- Interpolation: `{token}` placeholders (e.g., `added "{cell}"`)
-- Namespace: `'app'` for host, domain name for modules (e.g., `'revolucionstyle.com'`)
+For catalog layout, key conventions (flat dot-separated, plurals, interpolation), locale switching, and full examples, see [documentation/i18n.md](documentation/i18n.md).
 
 ## Coding Conventions
 
@@ -304,6 +190,10 @@ Or via slash behaviour: `/language ja`, `/language en`, `/lang jp`
 - Over-engineering or premature abstraction
 - Hardcoding features into the web shell — if it can be a drone module, it should be
 
+## State contracts: explicit divergence
+
+Heuristic comparisons over user-mutable state (`.length`, equality, "did this change?") must justify which kind of divergence they're claiming and which mutations are user-driven vs system-driven. Don't conflate user state changes with deployment drift — that's how silent state-clobber bugs ship. See commit f93b9c7d.
+
 ## OPFS: user data vs install cache (READ BEFORE TOUCHING)
 
 The web shell's OPFS root is split into two zones with different ownership:
@@ -322,6 +212,8 @@ The web shell's OPFS root is split into two zones with different ownership:
 - `__layers__/sentinel/` — sentinel-scoped layer cache (NOT `__layers__/` root, which may hold domain-scoped user-installed data)
 
 **Verification rule:** to prove an essentials change reaches the web shell, do NOT clear OPFS. Use signature comparison instead — make a source change, rebuild, reload, and check that the new bee signatures appear in the manifest and the new bytes are in `__bees__/`. The user's data dirs should be unchanged across the test. If you find yourself reaching for `localStorage.clear()` or `navigator.storage.getDirectory()` removal, stop — there is a non-destructive way to verify.
+
+**Destructive-op discipline:** any code that calls `removeEntry`, `clear`, or full OPFS traversal must explicitly name which zone (user data vs install/sync cache) it is touching and justify why it isn't reaching user data. Default-deny for any path not in the install/sync allowlist above.
 
 ## Web/Dev shell parity
 
@@ -345,6 +237,3 @@ When working in a worktree alongside other agents:
 
 Angular 21 · TypeScript 5.9 (ES2022, strict) · Pixi.js 8 · tsup · esbuild · nostr-tools · Node >=20.19.0
 
-## License
-
-Code: AGPL-3.0-only · Docs: CC BY-SA 4.0
