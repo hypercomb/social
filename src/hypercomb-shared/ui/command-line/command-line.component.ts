@@ -32,6 +32,9 @@ const BUILTIN_SLASH: { behaviour: { name: string; description: string; descripti
 /** Threshold between a tap and a long-press on the mobile mic button (ms). */
 const MIC_LONG_PRESS_MS = 300
 
+/** How long the undo/redo arrows linger after the last undo/redo activity. */
+const HISTORY_NAV_HIDE_MS = 3000
+
 /** Matches label:tagName or label:tagName(#color) (plain colon syntax, no brackets). */
 const TAG_ASSIGN_RE = /^([^:]+):([^(]+)(?:\(([^)]+)\))?$/
 
@@ -317,6 +320,23 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return s.total === 0 || s.position >= s.total
   })
 
+  // Undo/redo arrows are hidden by default and only surface while the user
+  // is actively navigating history — driven by the cursor-transition detector
+  // in the constructor. Stay visible while rewound so the "Save As" button
+  // doesn't sit alone on the bar. See HISTORY_NAV_HIDE_MS for the linger.
+  private readonly _historyNavVisible = signal(false)
+  readonly historyNavVisible = this._historyNavVisible.asReadonly()
+  #historyNavHideTimer: ReturnType<typeof setTimeout> | null = null
+
+  #showHistoryNav(): void {
+    this._historyNavVisible.set(true)
+    if (this.#historyNavHideTimer) clearTimeout(this.#historyNavHideTimer)
+    this.#historyNavHideTimer = setTimeout(() => {
+      this._historyNavVisible.set(false)
+      this.#historyNavHideTimer = null
+    }, HISTORY_NAV_HIDE_MS)
+  }
+
   /** Fire undo. Routes through the cursor's group-step logic. */
   doUndo = (): void => {
     const c = get('@diamondcoreprocessor.com/HistoryCursorService') as { undo?: () => void } | undefined
@@ -515,10 +535,25 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // re-render — the symptom Jaime reported as "undo/redo only activate
     // on undo initially."
     const wireCursor = (cursor: { state: { position: number; total: number; rewound: boolean } } & EventTarget) => {
+      // Track previous position/total to distinguish undo/redo (position
+      // changes while total stays put) from a new layer being appended
+      // (total grows, position may follow it to head). Only the former
+      // surfaces the nav arrows. -1 sentinel = no prior sync, skip detection.
+      let prevPosition = -1
+      let prevTotal = -1
       const sync = () => {
+        const nextPosition = cursor.state.position ?? 0
+        const nextTotal = cursor.state.total ?? 0
+        if (prevPosition !== -1
+            && nextTotal === prevTotal
+            && nextPosition !== prevPosition) {
+          this.#showHistoryNav()
+        }
+        prevPosition = nextPosition
+        prevTotal = nextTotal
         this._cursorState.set({
-          position: cursor.state.position ?? 0,
-          total: cursor.state.total ?? 0,
+          position: nextPosition,
+          total: nextTotal,
           rewound: !!cursor.state.rewound,
         })
       }
@@ -1331,6 +1366,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (this.#micHoldTimer) {
       clearTimeout(this.#micHoldTimer)
       this.#micHoldTimer = null
+    }
+    if (this.#historyNavHideTimer) {
+      clearTimeout(this.#historyNavHideTimer)
+      this.#historyNavHideTimer = null
     }
     for (const unsub of this.#indicatorUnsubs) unsub()
     window.removeEventListener('navigate', this.#onNavigate)

@@ -23,23 +23,25 @@
       (armedResourceDismiss)="onArmedResourceDismiss()"
     />
 
-    <!-- History nav: undo / redo arrows. Always present (greyed when
-         there's nothing to undo / redo), so the user's eye learns one
-         fixed spot. -->
-    <button class="history-nav-btn history-undo-btn" type="button"
-      [disabled]="undoDisabled()"
-      (click)="doUndo()"
-      [attr.aria-label]="'history.undo' | t"
-      [title]="'history.undo' | t">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-    </button>
-    <button class="history-nav-btn history-redo-btn" type="button"
-      [disabled]="redoDisabled()"
-      (click)="doRedo()"
-      [attr.aria-label]="'history.redo' | t"
-      [title]="'history.redo' | t">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
-    </button>
+    <!-- History nav: undo / redo arrows. Hidden by default; surface
+         briefly on undo/redo activity (see #showHistoryNav) and stay
+         visible while rewound so the Save As button isn't orphaned. -->
+    @if (historyNavVisible() || cursorRewound()) {
+      <button class="history-nav-btn history-undo-btn" type="button"
+        [disabled]="undoDisabled()"
+        (click)="doUndo()"
+        [attr.aria-label]="'history.undo' | t"
+        [title]="'history.undo' | t">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <button class="history-nav-btn history-redo-btn" type="button"
+        [disabled]="redoDisabled()"
+        (click)="doRedo()"
+        [attr.aria-label]="'history.redo' | t"
+        [title]="'history.redo' | t">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
+      </button>
+    }
     @if (cursorRewound()) {
       <!-- Visible only when the history cursor is rewound (the user has
            stepped back from head). Promotes the rewound layer to be the
