@@ -105,6 +105,16 @@ export interface LayerSlot {
 
 const RESERVED_NAMES = new Set(['name', 'children'])
 
+const sameTriggers = (a: readonly string[], b: readonly string[]): boolean => {
+  if (a.length !== b.length) return false
+  const sortedA = [...a].sort()
+  const sortedB = [...b].sort()
+  for (let i = 0; i < sortedA.length; i++) {
+    if (sortedA[i] !== sortedB[i]) return false
+  }
+  return true
+}
+
 /**
  * Listener for new-trigger notifications. Fires once per unique
  * trigger event name as it becomes known to the registry — including
@@ -155,8 +165,15 @@ export class LayerSlotRegistry {
       throw new Error(`[LayerSlotRegistry] slot "${slot.slot}" must define a triggers array (use [] for passive slots)`)
     }
     const existing = this.#slots.get(slot.slot)
-    if (existing && existing !== slot) {
-      throw new Error(`[LayerSlotRegistry] slot "${slot.slot}" already registered by a different provider`)
+    if (existing) {
+      // Re-registration with an equivalent definition (same name + same
+      // trigger list) is a no-op. Multiple bees can bundle the same
+      // slot-registering module (e.g. tile-properties.ts), each producing
+      // a fresh object literal at module load — object identity differs
+      // but the definition is identical. Only a definition mismatch is a
+      // real collision.
+      if (sameTriggers(existing.triggers, slot.triggers)) return
+      throw new Error(`[LayerSlotRegistry] slot "${slot.slot}" already registered with different triggers (existing: [${existing.triggers.join(',')}], new: [${slot.triggers.join(',')}])`)
     }
     this.#slots.set(slot.slot, slot)
 
