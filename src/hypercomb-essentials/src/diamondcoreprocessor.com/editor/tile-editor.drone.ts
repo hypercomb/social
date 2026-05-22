@@ -81,6 +81,9 @@ export class TileEditorDrone {
   }
 
   #onCameraOpen = (): void => {
+    // No-selection case is owned by CameraCaptureComponent (shell-level
+    // overlay → arm in command-line chevron → user types name + Enter).
+    // We only handle the retake-on-selected-tile case from here.
     const selection = window.ioc.get<{ active: string | null }>('@diamondcoreprocessor.com/SelectionService')
     const activeCell = selection?.active
     if (!activeCell) return

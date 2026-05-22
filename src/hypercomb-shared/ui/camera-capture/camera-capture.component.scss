@@ -1,0 +1,83 @@
+// hypercomb-shared/ui/camera-capture/camera-capture.component.scss
+// Lifted from tile-editor.component.scss (.camera-overlay block).
+
+.camera-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100002;
+  background: #000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+
+.camera-hex-container {
+  width: 100vmin;
+  height: 100vmin;
+  flex-shrink: 0;
+  clip-path: polygon(50% 0%, 93.3% 25%, 93.3% 75%, 50% 100%, 6.7% 75%, 6.7% 25%);
+
+  &.flat-top {
+    clip-path: polygon(100% 50%, 75% 93.3%, 25% 93.3%, 0% 50%, 25% 6.7%, 75% 6.7%);
+  }
+
+  video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+}
+
+.camera-controls {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  padding: 1.5em;
+  padding-bottom: calc(1.5em + var(--hc-safe-bottom, 0px));
+}
+
+.camera-shutter {
+  width: 4em;
+  height: 4em;
+  border-radius: 50%;
+  border: 4px solid #fff;
+  background: transparent;
+  cursor: pointer;
+  position: relative;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 4px;
+    border-radius: 50%;
+    background: #fff;
+  }
+
+  &:active::after {
+    background: #c8975a;
+  }
+}
+
+.camera-control-btn {
+  width: 3em;
+  height: 3em;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  .hci {
+    font-size: 1.2em;
+  }
+}
