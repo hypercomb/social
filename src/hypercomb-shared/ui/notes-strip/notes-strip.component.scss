@@ -16,7 +16,13 @@
 
 :host {
   position: fixed;
-  top: calc(var(--hc-header-height, 3rem) + 5px);
+  // Header bar starts ~2.5px down from the viewport top and runs ~44.8px
+  // tall, so its actual bottom is ~47.3px. The default --hc-header-height
+  // (3rem = 48px) covers the height but not the top inset, so a +5px
+  // breathing space wasn't enough — the strip's top edge ended up only
+  // ~2px below the header. Bump the spacer so the strip sits cleanly
+  // below the header at the new height.
+  top: calc(var(--hc-header-height, 3rem) + 14px);
   left: 5px;
   right: 5px;
   z-index: 60001;

@@ -166,14 +166,19 @@
   transition: opacity 200ms ease, transform 200ms ease;
   pointer-events: auto;
 
+  // Faded state (a `view:active` overlay is open or touch drag is in flight):
+  // we dim the pill visually but keep pointer-events on children so the
+  // icons remain reachable in a single tap. The previous version stripped
+  // pointer-events from children and restored them only on `:hover`, which
+  // produced a "first click wakes the pill, second click runs the action"
+  // bug on hover-capable devices and made the icons completely unreachable
+  // on touch devices where `:hover` never fires.
   &.faded {
     opacity: 0.35;
     transform: translateX(-50%) translateY(4px);
-    > * { pointer-events: none; }
     &:hover {
       opacity: 1;
       transform: translateX(-50%) translateY(0);
-      > * { pointer-events: auto; }
     }
   }
 
@@ -633,7 +638,6 @@
     &.faded {
       opacity: 1;
       transform: translateX(-50%);
-      > * { pointer-events: auto; }
     }
 
   }

@@ -57,7 +57,6 @@ export class PanningDrone extends Drone {
 
       // resolve ViewportPersistence and subscribe to navigation restores
       this.vp = window.ioc.get<ViewportPersistence>('@diamondcoreprocessor.com/ViewportPersistence') ?? null
-      console.log('[pan] host-ready: resolved vp?', !!this.vp, 'stage?', !!this.stage, 'renderer?', !!this.renderer)
       if (this.vp) {
         void this.vp.read().then(snap => this.#applyPanSnapshot(snap))
         this.vp.addEventListener('restore', ((e: CustomEvent<ViewportSnapshot>) => {
@@ -150,7 +149,7 @@ export class PanningDrone extends Drone {
   // -------------------------------------------------
 
   public panBy = (delta: Point): void => {
-    if (!this.stage) { console.log('[pan] panBy: no stage, bail'); return }
+    if (!this.stage) return
 
     EffectBus.emitTransient('viewport:manual', {})
 
@@ -175,10 +174,7 @@ export class PanningDrone extends Drone {
       const s = this.renderer.screen
       const dx = this.stage.position.x - s.width * 0.5
       const dy = this.stage.position.y - s.height * 0.5
-      console.log('[pan] panBy → setPan', { delta: clamped, stagePos: { x: this.stage.position.x, y: this.stage.position.y }, screen: { w: s.width, h: s.height }, save: { dx, dy } })
       vp.setPan(dx, dy)
-    } else {
-      console.log('[pan] panBy: skipped save', { hasRenderer: !!this.renderer, hasVp: !!vp })
     }
   }
 }

@@ -41,21 +41,13 @@ export type PanSnapshot = { dx: number; dy: number }
 export type MeshOffsetSnapshot = { x: number; y: number }
 export type ViewportSnapshot = { zoom?: ZoomSnapshot; pan?: PanSnapshot; meshOffset?: MeshOffsetSnapshot }
 
-// Debounce window for coalescing rapid pan/zoom changes within a gesture.
-//
-// Zero so each gesture lands in the file within one microtask. The
-// previous 100ms window was the race window for "pan-then-refresh"
-// losses — gesture ends, refresh fires before debounce timer
-// elapses, pagehide's fire-and-forget flush can't await OPFS writes
-// to completion, last pan is gone.
-//
-// Coalescing still happens within a single microtask: multiple
-// setPan/setZoom calls in the same tick all overwrite `#pending`
-// before the scheduled persist runs, so we still write once per
-// tick. With 60fps panning that's ~60 OPFS writes/sec, serialized
-// through #opQueue — well within OPFS throughput and never blocks
-// the render thread.
-const DEBOUNCE_MS = 0
+// Persist is scheduled via requestAnimationFrame so multiple
+// setPan/setZoom calls within the same frame collapse into one OPFS
+// write. Frame-aligned (not setTimeout 0) so the write runs after the
+// paint instead of competing with it, and the cap is ~60 writes/sec
+// even on a high-poll pointing device. The "pan-then-refresh loses
+// last gesture" race is covered by the pagehide / visibilitychange
+// flush handlers below, which call #flushNow before the page unloads.
 
 export class ViewportPersistence extends EventTarget {
 
@@ -76,7 +68,7 @@ export class ViewportPersistence extends EventTarget {
   }
 
   #dir: FileSystemDirectoryHandle | null = null
-  #debounceTimer: ReturnType<typeof setTimeout> | null = null
+  #rafId: number | null = null
   #pending: ViewportSnapshot = {}
   #lastRead: ViewportSnapshot = {}
   #storeListening = false
@@ -135,7 +127,6 @@ export class ViewportPersistence extends EventTarget {
       try {
         const dir = await lineage.explorerDir!()
         if (dir && !this.#dir) {
-          console.log('[vp] #ensureDirFromLineage: resolved', { dir: dir.name })
           this.#dir = dir
           // Drain anything that was queued while dir was null.
           if (this.#pending.zoom || this.#pending.pan || this.#pending.meshOffset) {
@@ -151,13 +142,11 @@ export class ViewportPersistence extends EventTarget {
   setDirSilent = (dir: FileSystemDirectoryHandle | null): void => {
     if (this.#dir === dir) return
 
-    console.log('[vp] setDirSilent', { from: this.#dir?.name ?? null, to: dir?.name ?? null })
-
     // Queue the flush so a subsequent read of this dir (e.g. nav back)
     // sees the post-flush bytes — both go through the same op queue.
-    if (this.#debounceTimer) {
-      clearTimeout(this.#debounceTimer)
-      this.#debounceTimer = null
+    if (this.#rafId !== null) {
+      cancelAnimationFrame(this.#rafId)
+      this.#rafId = null
     }
     const flushDir = this.#dir
     const flushPending = this.#pending
@@ -171,7 +160,6 @@ export class ViewportPersistence extends EventTarget {
       // for the current location; persist it to the new dir we just
       // learned about, otherwise the gesture is silently dropped on
       // every wipe of #pending below.
-      console.log('[vp] setDirSilent: draining orphaned pending to new dir', { dir: dir.name, pending: flushPending })
       void this.#serialize(() => this.#persistTo(dir, flushPending))
     }
 
@@ -196,9 +184,9 @@ export class ViewportPersistence extends EventTarget {
     // subsequent navigation back is guaranteed to see this flush's bytes
     // — no race between fire-and-forget write and immediate read on
     // nav-back.
-    if (this.#debounceTimer) {
-      clearTimeout(this.#debounceTimer)
-      this.#debounceTimer = null
+    if (this.#rafId !== null) {
+      cancelAnimationFrame(this.#rafId)
+      this.#rafId = null
     }
     const flushDir = this.#dir
     const flushPending = this.#pending
@@ -252,18 +240,13 @@ export class ViewportPersistence extends EventTarget {
   }
 
   setPan = (dx: number, dy: number): void => {
-    if (this.#suspended) { console.log('[vp] setPan: suspended, bail'); return }
+    if (this.#suspended) return
     if (!this.#dir) this.#syncWithStore()
     if (!this.#dir) this.#ensureDirFromLineage()
     const pan = { dx, dy }
     this.#pending.pan = pan
     this.#lastRead = { ...this.#lastRead, pan }
-    if (this.#dir) {
-      console.log('[vp] setPan → schedule', { dx, dy, dir: this.#dir.name })
-      this.#schedulePersist()
-    } else {
-      console.log('[vp] setPan: NO #dir, will drain after async lineage resolve', { dx, dy })
-    }
+    if (this.#dir) this.#schedulePersist()
   }
 
   /** Persist the renderer's mesh offset (its position inside the layer
@@ -324,20 +307,20 @@ export class ViewportPersistence extends EventTarget {
   // -- internals --
 
   #schedulePersist = (): void => {
-    if (this.#debounceTimer) clearTimeout(this.#debounceTimer)
-    this.#debounceTimer = setTimeout(() => {
-      this.#debounceTimer = null
+    if (this.#rafId !== null) return
+    this.#rafId = requestAnimationFrame(() => {
+      this.#rafId = null
       void this.#persist()
-    }, DEBOUNCE_MS)
+    })
   }
 
-  /** Cancel the debounce timer and queue an immediate flush. Used by
+  /** Cancel the scheduled frame and queue an immediate flush. Used by
    *  pagehide/visibilitychange handlers so the user's last gesture
    *  isn't stranded in #pending when the tab closes or backgrounds. */
   #flushNow = (): void => {
-    if (this.#debounceTimer) {
-      clearTimeout(this.#debounceTimer)
-      this.#debounceTimer = null
+    if (this.#rafId !== null) {
+      cancelAnimationFrame(this.#rafId)
+      this.#rafId = null
     }
     void this.#persist()
   }
@@ -361,7 +344,6 @@ export class ViewportPersistence extends EventTarget {
       } finally {
         await writable.close()
       }
-      console.log('[vp] #persistTo: wrote', { dir: dir.name, viewport })
 
       // DON'T overwrite #lastRead from the file here — setters update
       // the cache synchronously on every gesture, so the in-memory
@@ -383,7 +365,7 @@ export class ViewportPersistence extends EventTarget {
 
   #persist = async (): Promise<void> => {
     const dir = this.#dir
-    if (!dir) { console.log('[vp] #persist: NO dir, bail'); return }
+    if (!dir) return
 
     // Snapshot pending and clear it BEFORE awaiting so a fast follow-up
     // gesture doesn't write the same data twice. If the persist throws,
@@ -393,10 +375,9 @@ export class ViewportPersistence extends EventTarget {
     // setMeshOffset writes never reach 0000 (mesh-offset would not
     // round-trip through OPFS, and "position should never be forgotten"
     // would be violated on every reload).
-    if (!pending.zoom && !pending.pan && !pending.meshOffset) { console.log('[vp] #persist: empty pending'); return }
+    if (!pending.zoom && !pending.pan && !pending.meshOffset) return
     this.#pending = {}
 
-    console.log('[vp] #persist → write', { dir: dir.name, pending })
     await this.#serialize(() => this.#persistTo(dir, pending))
   }
 }
