@@ -138,6 +138,7 @@
   "action.note": "note",
   "action.note.description": "Add a note to this tile",
   "notes.capturePlaceholder": "type a note and press Enter (Esc to cancel)...",
+  "notes.capturePlaceholder.targeted": "add a note for \"{tile}\" — press Enter (Esc to cancel)...",
   "notes.add": "add a note",
   "notes.add.another": "add another",
   "notes.addNote": "+ add a note",

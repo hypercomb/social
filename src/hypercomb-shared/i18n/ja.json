@@ -123,6 +123,7 @@
   "action.note": "メモ",
   "action.note.description": "このタイルにメモを追加する",
   "notes.capturePlaceholder": "メモを入力してEnterを押してください（Escで取消）...",
+  "notes.capturePlaceholder.targeted": "「{tile}」へのメモを入力してEnterを押してください（Escで取消）...",
   "notes.add": "メモを追加",
   "notes.add.another": "もう一つ追加",
   "notes.addNote": "＋ ノートを追加",

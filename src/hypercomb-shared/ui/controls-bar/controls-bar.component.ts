@@ -444,13 +444,18 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── pill zoom (scales with viewport width) ────────────────
   // Baseline 1.0 at 1920px wide (half the previous fixed 2× size).
   // Scales up linearly on larger monitors; clamped on small/huge screens.
+  // 13" laptop band (1367–2559px) gets a 1.34× bump to match the header
+  // zoom in `_header-bar.scss` — keeps top + bottom chrome visually paired.
   // Mobile uses a separate floating-icon layout that ignores this zoom.
   readonly #pillZoom = signal(this.#computePillZoomRaw())
   readonly pillZoom = computed(() => this.isMobile() ? 1 : this.#pillZoom())
 
   #computePillZoomRaw(): number {
-    const ratio = window.innerWidth / 1920
-    return Math.max(0.9, Math.min(ratio, 1.6))
+    const w = window.innerWidth
+    const ratio = w / 1920
+    const base = Math.max(0.9, Math.min(ratio, 1.6))
+    const laptopBand = w >= 1367 && w <= 2559 ? 1.34 : 1
+    return base * laptopBand
   }
 
   // ── pill position (drag-to-move; no resize) ───────────────

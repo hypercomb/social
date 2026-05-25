@@ -5,7 +5,7 @@
 // viewer; click the plus to enter capture mode for that tile. Collapses
 // entirely when the active tile has no notes.
 
-import { Component, computed, effect, signal, type OnDestroy } from '@angular/core'
+import { Component, ElementRef, computed, effect, signal, viewChild, type OnDestroy } from '@angular/core'
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 
@@ -20,6 +20,12 @@ console.log('[notes-strip] MODULE LOADED build=2026-05-05-accordion-update')
  * most recent N picks are always the most relevant to current work.
  */
 const MAX_VISIBLE_SELECTIONS = 10
+
+// localStorage keys for the slide-resizable panel. Persisted as integer
+// pixel strings; missing/non-numeric values fall back to the CSS defaults
+// (28rem wide, content-height tall).
+const NOTES_STRIP_WIDTH_KEY = 'hc:notes-strip-width'
+const NOTES_STRIP_HEIGHT_KEY = 'hc:notes-strip-height'
 
 type Note = {
   id: string
@@ -377,6 +383,18 @@ export class NotesStripComponent implements OnDestroy {
   #cleanups: (() => void)[] = []
   #selectionListener: (() => void) | null = null
 
+  // ── slide-resizable panel state ───────────────────────────
+  // The panel exposes the browser's native bottom-right resize grip
+  // (`resize: both` in the SCSS). On mount we restore the user's last
+  // width/height from localStorage; a ResizeObserver mirrors subsequent
+  // drags back into storage so the size persists across reloads. Only
+  // engages on `mode-rows` — chips mode is a fixed-height horizontal
+  // strip where resize would conflict with the flex stretch.
+  readonly panel = viewChild<ElementRef<HTMLElement>>('panel')
+  #resizeObserver: ResizeObserver | null = null
+  #observingEl: HTMLElement | null = null
+  #applyingDimensions = false
+
   // Input-mode stack participation. When the user hovers the notes strip,
   // we push a 'notes-hover' mode that mechanically unmounts the hex grid's
   // wheel-zoom listener — so scrolling the notes never bleeds into zooming
@@ -514,6 +532,20 @@ export class NotesStripComponent implements OnDestroy {
       if (p?.mode === 'note-capture') this.#capturingFor.set(null)
     }))
 
+    // Mount/teardown the resize observer whenever the panel element appears
+    // or its mode changes. Reads `visible/multi/mode` so the effect re-runs
+    // on every transition — chips mode tears the observer down and clears
+    // any inline dimensions, rows mode restores stored dims and observes.
+    effect(() => {
+      this.visible()
+      this.multi()
+      this.mode()
+      this.panel()
+      // Defer one microtask so Angular has applied the latest classes
+      // (mode-chips/mode-rows) before we inspect classList.
+      queueMicrotask(() => this.#syncPanelResize())
+    })
+
     // Warm the decoded-set cache for every cell the strip might display
     // (active/capture cell in single mode, AND every selected cell in
     // multi mode) so groups() / emptyCells() / notes() classify accurately
@@ -622,10 +654,77 @@ export class NotesStripComponent implements OnDestroy {
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
     this.#selectionListener?.()
+    this.#resizeObserver?.disconnect()
+    this.#resizeObserver = null
+    this.#observingEl = null
     // Safety: ensure we never leave a 'notes-hover' mode pushed on the
     // stack if the component is destroyed mid-hover (e.g. selection
     // change triggers re-render while cursor is over the strip).
     this.#popNotesMode()
+  }
+
+  // ── resize wiring ─────────────────────────────────────────
+  // Single sync point for the slide-panel: attach the observer when a
+  // mode-rows element is in the DOM, detach (and clear inline dims) when
+  // it isn't. Keeping all transitions in one method avoids the half-state
+  // bug where a mode toggle leaves a stale observer pointed at a
+  // detached element.
+  #syncPanelResize(): void {
+    const el = this.panel()?.nativeElement ?? null
+    const isResizable = !!el && el.classList.contains('mode-rows')
+    if (!isResizable) {
+      if (this.#observingEl) {
+        this.#resizeObserver?.disconnect()
+        // Strip inline dimensions so chips mode (or hide) renders cleanly
+        // — leftover width/height would override the flex layout.
+        this.#observingEl.style.width = ''
+        this.#observingEl.style.height = ''
+        this.#observingEl = null
+      }
+      return
+    }
+    if (this.#observingEl === el) return
+    this.#resizeObserver?.disconnect()
+    this.#observingEl = el!
+    this.#applyStoredDimensions(el!)
+    this.#observePanelResize(el!)
+  }
+
+  #applyStoredDimensions(el: HTMLElement): void {
+    let width: string | null = null
+    let height: string | null = null
+    try {
+      width = localStorage.getItem(NOTES_STRIP_WIDTH_KEY)
+      height = localStorage.getItem(NOTES_STRIP_HEIGHT_KEY)
+    } catch { /* private mode / quota — ignore, fall back to CSS defaults */ }
+    // Suppress the observer's first-callback so the restoration itself
+    // doesn't get re-written to storage (the contentRect after our set
+    // matches what we just wrote anyway, but skipping avoids the round-trip).
+    this.#applyingDimensions = true
+    if (width && /^\d+$/.test(width)) el.style.width = `${width}px`
+    if (height && /^\d+$/.test(height)) el.style.height = `${height}px`
+    queueMicrotask(() => { this.#applyingDimensions = false })
+  }
+
+  #observePanelResize(el: HTMLElement): void {
+    let savePending = false
+    this.#resizeObserver = new ResizeObserver((entries) => {
+      if (this.#applyingDimensions) return
+      if (savePending) return
+      savePending = true
+      requestAnimationFrame(() => {
+        savePending = false
+        const entry = entries[entries.length - 1]
+        if (!entry) return
+        const w = Math.round(entry.contentRect.width)
+        const h = Math.round(entry.contentRect.height)
+        try {
+          localStorage.setItem(NOTES_STRIP_WIDTH_KEY, String(w))
+          localStorage.setItem(NOTES_STRIP_HEIGHT_KEY, String(h))
+        } catch { /* ignore */ }
+      })
+    })
+    this.#resizeObserver.observe(el)
   }
 
   // ── input-mode stack handlers ────────────────────────────

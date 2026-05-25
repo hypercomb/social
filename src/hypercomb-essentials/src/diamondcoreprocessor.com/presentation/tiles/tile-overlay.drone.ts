@@ -88,12 +88,18 @@ const DRAG_ALPHA = 0.6
 const DROP_HIGHLIGHT_TINT = 0x88ffff
 
 // ── Action hint constants ────────────────────────────────────────
-const HINT_DELAY_MS = 1500       // show hint after 1.5s sustained hover
+const HINT_DELAY_MS = 350       // snappy hover-to-hint — long enough to filter mouse glances, short enough to feel responsive
 const HINT_Y_OFFSET = 22        // below the icon row
 const HINT_FONT_SIZE = 6
 const HINT_COLOR = 0xb0c0e0
 const HINT_EXPANDED_FONT_SIZE = 5.5
 const HINT_MAX_WIDTH = 60
+// Hint Text rasterisation resolution. The stage is scaled 1.8× and the
+// camera can zoom further, so the renderer's default DPR alone leaves
+// the 6pt font visibly soft. Oversample at 4× DPR (min 6) so the texture
+// stays sharp through typical zoom-in. Matches the SVG icon strategy
+// (rasterise at 4× viewBox — see hex-icon-button.ts).
+const HINT_TEXT_RESOLUTION = Math.max(6, (typeof window !== 'undefined' ? (window.devicePixelRatio || 1) : 1) * 4)
 
 // ── Pool icon wrapper (tracks identity for drag) ──────────────────
 
@@ -1435,6 +1441,7 @@ export class TileOverlayDrone extends Drone {
         fill: HINT_COLOR,
         align: 'center',
       }),
+      resolution: HINT_TEXT_RESOLUTION,
     })
     this.#hintText.anchor.set(0.5, 0)
     this.#hintText.position.set(action.button.position.x, HINT_Y_OFFSET)
@@ -1464,6 +1471,7 @@ export class TileOverlayDrone extends Drone {
         wordWrap: true,
         wordWrapWidth: HINT_MAX_WIDTH,
       }),
+      resolution: HINT_TEXT_RESOLUTION,
     })
     this.#hintDescriptionText.anchor.set(0.5, 0)
     const yBelow = HINT_Y_OFFSET + (this.#hintText ? this.#hintText.height + 2 : HINT_FONT_SIZE + 2)

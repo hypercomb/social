@@ -98,3 +98,13 @@
     font-size: 0.56rem;
   }
 }
+
+// ── 13" laptop band (1367–2559px) ─────────────────────────
+// Header is zoomed 1.34x in this band (see `_header-bar.scss`); shift the
+// hint-bar down by the same factor so it keeps the same proportional gap
+// below the (now taller) header.
+@media (min-width: 1367px) and (max-width: 2559px) {
+  .hint-bar {
+    top: 6.16rem;
+  }
+}

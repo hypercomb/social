@@ -3658,24 +3658,86 @@ export class ShowCellDrone extends Drone {
       }
     }
 
-    // place unindexed cells in the first available empty slots and persist their index
+    // Place unindexed cells by scoring every empty slot on three
+    // factors and picking the minimum:
+    //
+    //   1. off          — how far off-screen, in screen-fractions
+    //                     (0 if the slot is on-screen). From the
+    //                     CenterSlotTracker, refreshed passively
+    //                     whenever the viewport changes.
+    //   2. -whitespace  — negated count of empty/off-grid neighbours
+    //                     so that more whitespace (better fit) sorts
+    //                     before crowded slots. Computed here against
+    //                     the current sparse[] since occupancy is
+    //                     transient render state.
+    //   3. center       — squared screen-fraction distance from screen
+    //                     center, aspect-aware tiebreaker.
+    //
+    // Falls back to the lowest free slot if neither the tracker nor
+    // axial adjacency is available (very early boot).
+    const slotTracker = (window as any).ioc?.get?.('@diamondcoreprocessor.com/CenterSlotTracker') as
+      | { scores: ReadonlyMap<number, { off: number; center: number }> }
+      | undefined
+    const axialAny = (window as any).ioc?.get?.('@diamondcoreprocessor.com/AxialService') as
+      | { Adjacents: Map<number, { index: number }[]> }
+      | undefined
+    const scoreMap = slotTracker?.scores
+    const adjacents = axialAny?.Adjacents
+
     for (const name of unindexed) {
-      while (nextFree <= maxSlot && sparse[nextFree] !== '') nextFree++
-      if (nextFree <= maxSlot) {
-        sparse[nextFree] = name
-        if (!readOnly && localCellSet.has(name)) {
-          try {
-            // Lazy-patch the index into the cell's layer (canonical
-            // path). The cascade folds the new tile-layer sig into the
-            // parent's children slot; the IndexNurse picks the new
-            // value up on its next read via the cell:0000-changed
-            // broadcast. No OPFS dir lookup, no 0000 write.
-            await writeTilePropertiesAt(parentSegments, name, { index: nextFree })
-          } catch (err) {
-            console.warn('[show-cell] failed to persist index for', name, err)
+      let placed = -1
+
+      if (scoreMap && adjacents) {
+        let bestOff = Infinity
+        let bestWhitespace = -1
+        let bestCenter = Infinity
+        for (let i = 0; i <= maxSlot; i++) {
+          if (sparse[i] !== '') continue
+          const s = scoreMap.get(i)
+          if (!s) continue
+          // Count neighbours that aren't occupied tiles — off-grid
+          // neighbours at the rim of the grid count as whitespace
+          // because the visual area beyond the grid edge is empty.
+          let whitespace = 0
+          const neighbours = adjacents.get(i) ?? []
+          for (const adj of neighbours) {
+            const ai = adj.index
+            if (!Number.isFinite(ai) || ai < 0 || ai > maxSlot || sparse[ai] === '') whitespace++
+          }
+          if (
+            s.off < bestOff ||
+            (s.off === bestOff && whitespace > bestWhitespace) ||
+            (s.off === bestOff && whitespace === bestWhitespace && s.center < bestCenter)
+          ) {
+            bestOff = s.off
+            bestWhitespace = whitespace
+            bestCenter = s.center
+            placed = i
           }
         }
+      }
+
+      // Lowest-free fallback — only if scoring couldn't find anything
+      // (tracker/adjacency missing, or grid genuinely full above).
+      if (placed < 0) {
+        while (nextFree <= maxSlot && sparse[nextFree] !== '') nextFree++
+        if (nextFree > maxSlot) continue
+        placed = nextFree
         nextFree++
+      }
+
+      sparse[placed] = name
+      if (!readOnly && localCellSet.has(name)) {
+        try {
+          // Lazy-patch the index into the cell's layer (canonical
+          // path). The cascade folds the new tile-layer sig into the
+          // parent's children slot; the IndexNurse picks the new
+          // value up on its next read via the cell:0000-changed
+          // broadcast. No OPFS dir lookup, no 0000 write.
+          await writeTilePropertiesAt(parentSegments, name, { index: placed })
+        } catch (err) {
+          console.warn('[show-cell] failed to persist index for', name, err)
+        }
       }
     }
 

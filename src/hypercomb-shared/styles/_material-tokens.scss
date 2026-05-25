@@ -109,14 +109,14 @@
 // these tokens gets dark mode for free with no per-component code.
 
 @mixin md-dark-tokens {
-  --md-surface:           #0c1622;
-  --md-surface-dim:       #07101b;
-  --md-surface-bright:    #19283a;
-  --md-surface-c-lowest:  #050b13;
-  --md-surface-c-low:     #0e1b29;
-  --md-surface-c:         #142233;
-  --md-surface-c-high:    #1b2c41;
-  --md-surface-c-highest: #233650;
+  --md-surface:           #0e161c;
+  --md-surface-dim:       #090f15;
+  --md-surface-bright:    #1c2832;
+  --md-surface-c-lowest:  #070a0e;
+  --md-surface-c-low:     #101a23;
+  --md-surface-c:         #16212c;
+  --md-surface-c-high:    #1d2b37;
+  --md-surface-c-highest: #263544;
   --md-on-surface:        #e8e2d6;
   --md-on-surface-strong: #f6f0e2;
   --md-on-surface-var:    #b6a99a;
@@ -144,6 +144,14 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme]) { @include md-dark-tokens; }
 }
+
+// ── temporary: force dark as default ──────────────────────────────────
+// The theme queen bee that switched themes is gone. Until theming is
+// rebuilt, the shell defaults to dark regardless of OS preference or
+// data-theme attribute. Remove this block when the theme switcher is
+// reintroduced — the light defaults above + dark override above are
+// already shaped to take over.
+:root { @include md-dark-tokens; }
 
 // ── Material Symbols icon class ────────────────────────────────────────
 //

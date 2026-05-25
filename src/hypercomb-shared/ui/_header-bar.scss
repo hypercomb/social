@@ -142,6 +142,18 @@
 // RESPONSIVE OVERRIDES — minimal, layout-only
 // ═══════════════════════════════════════════════════════════
 
+// ── 13" laptop band (1367–2559px) ─────────────────────────
+// Zoom the whole header 34% so the command-line + mesh-header chips
+// read at a comfortable size on a typical laptop. `zoom` scales both
+// rendering and layout — the bar genuinely takes 34% more vertical
+// space, and the hint-bar below shifts down to match (see
+// `hint-bar.component.scss`).
+@media (min-width: #{$bp-desktop}) and (max-width: #{$bp-desktop-wide - 1}) {
+  .header-bar {
+    zoom: 1.34;
+  }
+}
+
 // ── touch behavioral (all touch devices) ──────────────────
 @include touch {
 

@@ -4,6 +4,7 @@
          Custom accordion (not <details>) so we can animate the panel smoothly
          via the grid-template-rows 0fr→1fr trick and own the aria semantics. -->
     <div class="notes-strip mode-rows" role="region" [attr.aria-label]="'notes.strip.aria' | t"
+         #panel
          (pointerenter)="onNotesEnter()" (pointerleave)="onNotesLeave()">
       <div class="notes-strip-header">
         <span class="notes-strip-title">{{ 'notes.strip.title' | t }}</span>
@@ -116,6 +117,7 @@
   } @else {
     <!-- Single-selection: existing flat list / chip layout -->
     <div class="notes-strip" [class.mode-chips]="mode() === 'chips'" [class.mode-rows]="mode() === 'rows'"
+         #panel
          role="list" [attr.aria-label]="'notes.strip.aria' | t"
          (pointerenter)="onNotesEnter()" (pointerleave)="onNotesLeave()">
       <div class="notes-strip-header">
