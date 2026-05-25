@@ -23,7 +23,7 @@
 //     subtree sharing.
 
 import { Drone, EffectBus } from '@hypercomb/core'
-import { readCellProperties, writeCellProperties } from '../editor/tile-properties.js'
+import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import { PAIRED_CHANNEL_EFFECTS } from './paired-channel.drone.js'
 import type { PairedChannelDrone } from './paired-channel.drone.js'
 import {
@@ -299,19 +299,7 @@ export class ExposeDrone extends Drone {
     console.log('[sync] expose start', { tile: tileLabel, channel: channel.slice(0, 12) })
 
     const lineage = window.ioc.get('@hypercomb.social/Lineage') as LineageLike | undefined
-    const dir = await lineage?.explorerDir?.()
-    if (!dir) {
-      this.#toast('warning', 'Expose failed', 'No explorer directory for the current lineage.')
-      return
-    }
-
-    let cellDir: FileSystemDirectoryHandle
-    try {
-      cellDir = await dir.getDirectoryHandle(tileLabel, { create: false })
-    } catch {
-      this.#toast('warning', 'Expose failed', `Tile "${tileLabel}" was not found in the current location.`)
-      return
-    }
+    const segments = lineage?.explorerSegments?.() ?? []
 
     const drone = this.#pairedChannelDrone()
     if (!drone) {
@@ -319,15 +307,42 @@ export class ExposeDrone extends Drone {
       return
     }
 
-    // Walk the subtree depth-first, computing each cell's canonical
-    // layer sig and collecting the (sig, content) pairs to publish.
+    // Walk the tile's layer tree (not OPFS dirs) depth-first, computing
+    // each layer's PairedLayerContent sig and collecting (sig, content)
+    // pairs to publish. The tile may live entirely in the layer graph
+    // with no on-disk dir — that's the new normal.
     let layers: { sig: string; content: PairedLayerContent }[]
     try {
-      layers = await buildSubtreeLayers(cellDir, tileLabel)
+      layers = await buildSubtreeLayersFromLayerTree(segments, tileLabel)
     } catch (err) {
-      this.#toast('warning', 'Expose failed', `Subtree walk threw: ${(err as Error)?.message ?? err}`)
+      this.#toast('warning', 'Expose failed',
+        `Couldn't read layer tree for "${tileLabel}": ${(err as Error)?.message ?? err}`)
       return
     }
+
+    // Verbose summary so a cross-browser test can see exactly what
+    // the sender is shipping. Logs every node + child count; if this
+    // says `total: 1` for a tile that has children on disk, the
+    // walker missed them and we have a regression to fix.
+    console.log('[sync] expose subtree summary', {
+      tile: tileLabel,
+      total: layers.length,
+      nodes: layers.map(l => ({
+        name: l.content.name,
+        sig: l.sig.slice(0, 12),
+        childCount: l.content.children.length,
+        propKeys: Object.keys(l.content.properties),
+      })),
+    })
+
+    // Surface the walk result as a tip toast too — saves having to
+    // open devtools to confirm "did expose actually find the subtree?"
+    // when troubleshooting a cross-browser session. Lists at most the
+    // first few names so the toast stays readable on small screens.
+    const previewNames = layers.slice(0, 6).map(l => l.content.name).join(', ')
+    const more = layers.length > 6 ? `, +${layers.length - 6} more` : ''
+    this.#toast('tip', 'Expose: walked subtree',
+      `${tileLabel}: ${layers.length} layer${layers.length === 1 ? '' : 's'} (${previewNames}${more})`)
 
     if (layers.length === 0) {
       this.#toast('warning', 'Expose failed', 'No layers produced from the subtree.')
@@ -337,11 +352,24 @@ export class ExposeDrone extends Drone {
     // Publish every layer event before the share-request so receivers
     // have the bytes buffered by the time they see the offer.
     let pushed = 0
+    const publishFailures: string[] = []
     for (const { sig, content } of layers) {
       const ok = await drone.publishLayer(channel, sig, content)
       if (ok) pushed++
+      else publishFailures.push(content.name)
     }
-    console.log('[sync] published layers', { tile: tileLabel, pushed, total: layers.length })
+    console.log('[sync] published layers', { tile: tileLabel, pushed, total: layers.length, failures: publishFailures })
+    // Surface the publish result so a cross-browser test can see
+    // whether ALL descendants made it onto the wire or only the root.
+    // Mirrors the walker summary toast above — same pattern lets the
+    // user pinpoint which hop is the broken one without devtools.
+    if (pushed < layers.length) {
+      this.#toast('warning', 'Expose: partial publish',
+        `Published ${pushed}/${layers.length} layers. ${publishFailures.length} failed${publishFailures.length > 0 ? `: ${publishFailures.slice(0, 3).join(', ')}${publishFailures.length > 3 ? '…' : ''}` : ''}.`)
+    } else {
+      this.#toast('tip', 'Expose: all layers on the wire',
+        `Published ${pushed}/${layers.length} layers.`)
+    }
     if (pushed === 0) {
       this.#toast('warning', 'Expose failed',
         'No layer events were published — mesh signer or relay unavailable.')
@@ -446,21 +474,28 @@ export class ExposeDrone extends Drone {
     const targetName = share.branchName
     if (!targetName) return
 
-    // Source-side echo: the sender's own approval comes back through
-    // the channel. Skip if the tile already exists locally — we own it,
-    // it doesn't need to appear as a preview of itself.
-    try {
-      await dir.getDirectoryHandle(targetName, { create: false })
+    // Source-side echo filter, properly done by PUBKEY (not by "tile
+    // exists locally", which had to come out — it also blocked
+    // legitimate peer shares for a name the receiver happened to
+    // have). Every channel member subscribes to share events for the
+    // channel, so my OWN share-request → auto-approve cycle echoes
+    // share-approved back to me. Without this filter, every tile I've
+    // ever exposed accumulates as an ephemeral preview in my own
+    // view, polluting the grid with my own offers (the 19 ghost tiles
+    // Jaime saw).
+    //
+    // We use share.requesterPubkey (the original publisher who fired
+    // the share-request) — not share.approvalId's signer — because in
+    // the symmetric auto-approve world every peer hosts their own
+    // shares and the request and the approval both originate at me.
+    const signer = window.ioc.get('@diamondcoreprocessor.com/NostrSigner') as
+      { getPublicKeyHex?: () => Promise<string | null> } | undefined
+    const myPubkey = signer?.getPublicKeyHex ? await signer.getPublicKeyHex() : null
+    if (myPubkey && share.requesterPubkey === myPubkey) {
+      console.log('[sync] share: skipping self-echo', { tile: targetName, branchSig: share.branchSig.slice(0, 12) })
       return
-    } catch { /* not present, proceed as ephemeral */ }
+    }
 
-    // EPHEMERAL PREVIEW: don't write to OPFS. Record the share in the
-    // drone's #ephemeralShares; show-cell renders these as dashed/distinct
-    // preview tiles by merging them into its tile list. The user clicks
-    // the per-tile adopt icon to commit the subtree to OPFS, which fires
-    // 'paired-channel:adopt-request' → #adoptEphemeral → materialiseFromSig.
-    // Until adopted: the tile lives only in memory (machine.state.layers
-    // + this share entry). Close the tab and it's gone.
     const drone = this.#pairedChannelDrone()
     if (!drone) {
       console.warn('[sync] share: PairedChannelDrone unavailable')
@@ -497,21 +532,12 @@ export class ExposeDrone extends Drone {
    */
   async #onUnlockTile(tileLabel: string, _mode: 'create' | 'merge' = 'create'): Promise<void> {
     const lineage = window.ioc.get('@hypercomb.social/Lineage') as LineageLike | undefined
+    const parentSegments = lineage?.explorerSegments?.() ?? []
     const dir = await lineage?.explorerDir?.()
-    if (!dir) {
-      this.#toast('warning', 'Sync failed', 'No explorer directory.')
-      return
-    }
 
-    let cellDir: FileSystemDirectoryHandle
-    try {
-      cellDir = await dir.getDirectoryHandle(tileLabel, { create: false })
-    } catch {
-      this.#toast('warning', 'Sync failed', `Tile "${tileLabel}" not found.`)
-      return
-    }
-
-    const props = await readCellProperties(cellDir)
+    // Read properties from the cell's layer (canonical). The tile may
+    // exist as a layer-only entry with no OPFS dir — that's fine.
+    const props = await readTilePropertiesAt(parentSegments, tileLabel)
     if (props['facade'] !== true) {
       // Plain tile, not a facade — nothing to fill in.
       return
@@ -537,10 +563,13 @@ export class ExposeDrone extends Drone {
 
     // Strict preserve: existing cells stay untouched, only genuinely-
     // new descendants get added. The facade tile itself already
-    // exists — its 0000 keeps whatever it already has — we just
-    // recurse to fill new descendants beneath it. Always-on
-    // preserve also means there is no "overwrite" mode to choose.
-    const parentSegments = lineage?.explorerSegments?.() ?? []
+    // exists — we just recurse to fill new descendants beneath it.
+    // materialiseFromSig still consults the OPFS subtree for now —
+    // its migration belongs to a separate cut.
+    if (!dir) {
+      this.#toast('warning', 'Sync failed', 'No explorer directory.')
+      return
+    }
     let result: { written: number; missing: string[]; skipped: number }
     try {
       result = await drone.materialiseFromSig(channelId, branchSig, dir, { parentSegments })
@@ -549,11 +578,11 @@ export class ExposeDrone extends Drone {
       return
     }
 
-    // Drop the facade flag so the tile no longer surfaces the adopt
-    // icon. Done as an explicit step because strict-preserve never
-    // touches existing cells' 0000s.
+    // Drop the facade flag from the layer's properties slot so the
+    // tile no longer surfaces the adopt icon. Layer write, no OPFS
+    // dir touched.
     try {
-      await writeCellProperties(cellDir, { facade: false })
+      await writeTilePropertiesAt(parentSegments, tileLabel, { facade: false })
     } catch (err) {
       console.warn('[expose] sync: failed to drop facade flag', err)
     }
@@ -596,40 +625,18 @@ export class ExposeDrone extends Drone {
 
 // ── pure utilities ──────────────────────────────────────────────────
 
-async function listChildNames(dir: FileSystemDirectoryHandle): Promise<string[]> {
-  const out: string[] = []
-  for await (const [name, handle] of (dir as unknown as { entries: () => AsyncIterable<[string, FileSystemHandle]> }).entries()) {
-    if (handle.kind !== 'directory') continue
-    if (name.startsWith('__') && name.endsWith('__')) continue
-    out.push(name)
-  }
-  out.sort((a, b) => a.localeCompare(b))
-  return out
-}
-
 /**
- * Walk a cell directory recursively, computing the canonical
- * (sig, content) pair for every cell in the subtree. Returns the
- * root at `result[0]` followed by descendants in post-order.
+ * Property keys that are local render-cache decorations, NOT content
+ * identity. Stripped from `properties` before computing layer sigs so
+ * two peers with the same actual content but different cache states
+ * still hash to the same sig.
  *
- * Receivers don't depend on the order — they materialise by sig
- * lookup into the buffer, which fills as events arrive — but emitting
- * the root first means a relay watcher can immediately see "share X
- * named foo" as the first layer event, which makes diagnostics
- * easier.
- */
-/**
- * 0000 keys that are local render-cache decorations, NOT content
- * identity. Stripped from `properties` before computing layer sigs
- * (so two peers with the same actual content but different cache
- * states still hash to the same sig) and stripped again on the
- * receiver before writing to 0000.
- *
- *   `children`     — sighash pointer into a children-list cache file
- *                    (the canonical child list lives in the layer's
- *                    `children` array, not here).
+ *   `children`     — legacy sighash pointer (the canonical child list
+ *                    lives in the layer's `children` array now).
  *   `facade*`      — paired-channel sync placeholder markers; the
- *                    receiver writes its own based on its local state.
+ *                    receiver writes its own based on local state.
+ *   `index/viewport/pan/zoom/meshOffset` — per-tab render state.
+ *   `transient`    — old in-OPFS-with-marker model leftover.
  */
 const SYNC_DECORATION_KEYS = [
   // Sync-protocol decorations (already excluded)
@@ -652,36 +659,77 @@ function stripDecorations(props: Record<string, unknown>): Record<string, unknow
   return out
 }
 
-async function buildSubtreeLayers(
-  cellDir: FileSystemDirectoryHandle,
-  cellName: string,
+type HistoryServiceLike = {
+  sign: (l: { explorerSegments: () => readonly string[] }) => Promise<string>
+  latestMarkerSigFor: (lineageSig: string, name: string) => Promise<string>
+  getLayerBySig: (sig: string) => Promise<{ name: string; children?: readonly string[]; [k: string]: unknown } | null>
+}
+
+/**
+ * Walk a tile's full subtree from the layer graph and produce a flat
+ * list of `PairedLayerContent` records — one per node — each with a
+ * stable sig computed from its canonical bytes.
+ *
+ * Layer-as-primitive: the sig bag IS the source of truth. Children
+ * are sig pointers in `layer.children`; each child's name lives
+ * INSIDE that child's layer. Properties resolve through the layer's
+ * `properties` slot via {@link readTilePropertiesAt}. No OPFS
+ * directory walk and no `0000` file fallback — if a tile isn't in
+ * the layer graph, it doesn't exist.
+ */
+async function buildSubtreeLayersFromLayerTree(
+  parentSegments: readonly string[],
+  tileName: string,
 ): Promise<{ sig: string; content: PairedLayerContent }[]> {
+  const iocGet = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get
+  const history = iocGet?.('@diamondcoreprocessor.com/HistoryService') as HistoryServiceLike | undefined
+  if (!history) throw new Error('HistoryService unavailable')
+
   const descendants: { sig: string; content: PairedLayerContent }[] = []
+  const visited = new Set<string>() // guard against cycles in the layer graph
 
   const visit = async (
-    dir: FileSystemDirectoryHandle,
+    segments: readonly string[],
     name: string,
-  ): Promise<{ sig: string; content: PairedLayerContent }> => {
-    const childNames = await listChildNames(dir)
+  ): Promise<{ sig: string; content: PairedLayerContent } | null> => {
+    // Resolve this tile's bag location, then its head layer.
+    const lineageSig = await history.sign({ explorerSegments: () => [...segments, name] })
+    if (!lineageSig) return null
+    if (visited.has(lineageSig)) return null
+    visited.add(lineageSig)
+
+    const layerSig = await history.latestMarkerSigFor(lineageSig, name)
+    const layer = layerSig ? await history.getLayerBySig(layerSig) : null
+
+    const childLayerSigs: readonly string[] = Array.isArray(layer?.children)
+      ? (layer!.children as readonly string[])
+      : []
     const children: { name: string; sig: string }[] = []
-    for (const childName of childNames) {
-      let childDir: FileSystemDirectoryHandle
-      try { childDir = await dir.getDirectoryHandle(childName, { create: false }) }
-      catch (err) { console.warn('[expose] subtree: skipping', childName, err); continue }
-      const child = await visit(childDir, childName)
-      children.push({ name: childName, sig: child.sig })
-      descendants.push(child)
+    for (const childLayerSig of childLayerSigs) {
+      const childLayer = await history.getLayerBySig(childLayerSig)
+      const childName = typeof childLayer?.name === 'string' ? childLayer.name : ''
+      if (!childName) continue
+      const childResult = await visit([...segments, name], childName)
+      if (!childResult) continue
+      children.push({ name: childName, sig: childResult.sig })
+      descendants.push(childResult)
     }
-    // Strip decorations: layer sigs must depend on content alone, not
-    // on whether the sender's local cache happened to be populated.
-    const rawProperties = await readCellProperties(dir)
+
+    // Properties: layer slot only. The renderer reads from the same
+    // primitive, so anything not on the layer doesn't visibly exist —
+    // we don't ship it.
+    let rawProperties: Record<string, unknown> = {}
+    try { rawProperties = await readTilePropertiesAt(segments, name) }
+    catch { /* leave empty */ }
     const properties = stripDecorations(rawProperties)
+
     const content: PairedLayerContent = { name, properties, children }
     const sig = await computeLayerSig(content)
     return { sig, content }
   }
 
-  const root = await visit(cellDir, cellName)
+  const root = await visit(parentSegments, tileName)
+  if (!root) throw new Error(`No layer found for tile "${tileName}"`)
   return [root, ...descendants]
 }
 

@@ -21,19 +21,7 @@ export class HistorySliderDrone {
   #scopeLabel: HTMLElement | null = null
   #activityLabel: HTMLElement | null = null
   #scrubber: HTMLInputElement | null = null
-  #notification: HTMLElement | null = null
-  #notifLabel: HTMLElement | null = null
-  #notifRestore: HTMLElement | null = null
-  #notifLatest: HTMLElement | null = null
-  #notifClose: HTMLElement | null = null
   #visible = false
-  #notifVisible = false
-  // Sticky-open state: the bar opens on the first undo per-location and
-  // stays until the user explicitly closes it (×). Redo to head does not
-  // hide it on its own.
-  #notifOpen = false
-  #notifLastRewound = false
-  #notifLastLocationSig = ''
   #reviseActive = false
   #globalTimeActive = false
   #scrubbing = false
@@ -317,89 +305,11 @@ export class HistorySliderDrone {
     this.#latestBtn = latestBtn
     this.#scrubber = scrubber
 
-    // ── compact notification bar (shows when rewound outside revision mode) ──
-    this.#buildNotification()
-  }
-
-  #buildNotification(): void {
-    const bar = document.createElement('div')
-    bar.id = 'hc-history-notification'
-    bar.style.cssText = `
-      position: fixed;
-      bottom: 8px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 9000;
-      display: none;
-      align-items: center;
-      gap: 10px;
-      padding: 6px 14px;
-      background: rgba(10, 12, 18, 0.92);
-      border: 1px solid rgba(255, 170, 60, 0.3);
-      border-radius: 6px;
-      backdrop-filter: blur(8px);
-      font-family: var(--hc-mono);
-      font-size: 11px;
-      color: rgba(255, 200, 120, 0.85);
-      user-select: none;
-      pointer-events: auto;
-      white-space: nowrap;
-    `
-
-    const label = document.createElement('span')
-
-    const btnStyle = (accent: boolean) => `
-      cursor: pointer;
-      padding: 2px 8px;
-      border: 1px solid ${accent ? 'rgba(255, 170, 60, 0.4)' : 'rgba(200, 220, 240, 0.25)'};
-      border-radius: 3px;
-      background: ${accent ? 'rgba(255, 170, 60, 0.12)' : 'rgba(200, 220, 240, 0.06)'};
-      color: ${accent ? 'rgba(255, 200, 120, 0.9)' : 'rgba(200, 220, 240, 0.7)'};
-      font-weight: 600;
-      font-size: 10px;
-      letter-spacing: 0.3px;
-    `
-
-    const restore = document.createElement('span')
-    restore.textContent = 'Restore'
-    restore.title = 'Make this the current state'
-    restore.style.cssText = btnStyle(true)
-    restore.addEventListener('click', () => this.#promote())
-
-    const latest = document.createElement('span')
-    latest.textContent = 'Jump to latest'
-    latest.title = 'Discard undo position'
-    latest.style.cssText = btnStyle(false)
-    latest.addEventListener('click', () => {
-      const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
-      cursor?.jumpToLatest()
-    })
-
-    const close = document.createElement('span')
-    close.textContent = '×'
-    close.title = 'Close'
-    close.style.cssText = `
-      cursor: pointer;
-      padding: 0 6px;
-      margin-left: 2px;
-      color: rgba(200, 220, 240, 0.5);
-      font-weight: 600;
-      font-size: 14px;
-      line-height: 1;
-    `
-    close.addEventListener('click', () => {
-      this.#notifOpen = false
-      this.#syncUI()
-    })
-
-    bar.append(label, restore, latest, close)
-    document.body.appendChild(bar)
-
-    this.#notification = bar
-    this.#notifLabel = label
-    this.#notifRestore = restore
-    this.#notifLatest = latest
-    this.#notifClose = close
+    // The old bottom-center "<N steps back> [Restore] [Jump to latest] [×]"
+    // bar lived here. Removed — its affordances now live inside the
+    // command-line component (Save As head button + undo/redo arrows),
+    // surfaced reactively via cursor.state.rewound. One place to look,
+    // no overlap with the canvas.
   }
 
   // ── sync UI ────────────────────────────────────────────────
@@ -408,9 +318,6 @@ export class HistorySliderDrone {
     if (!this.#clock || !this.#timeLabel || !this.#posLabel || !this.#restoreBtn || !this.#latestBtn || !this.#scopeLabel || !this.#activityLabel || !this.#scrubber) return
 
     const { position, total, rewound, at } = this.#state
-
-    // ── Compact notification bar (sticky after first undo) ──
-    this.#syncNotification(rewound, position, total)
 
     // ── Full revision clock (only in /revise mode) ──
     const shouldShowClock = this.#reviseActive && total > 0
@@ -466,52 +373,6 @@ export class HistorySliderDrone {
     this.#latestBtn.style.display = rewound ? 'inline-block' : 'none'
   }
 
-  #syncNotification(rewound: boolean, position: number, total: number): void {
-    if (!this.#notification || !this.#notifLabel || !this.#notifRestore || !this.#notifLatest) return
-
-    // "First undo" is tracked per-location — switching layers resets the
-    // sticky state so an unrelated layer doesn't open with a stale bar.
-    if (this.#state.locationSig !== this.#notifLastLocationSig) {
-      this.#notifLastLocationSig = this.#state.locationSig
-      this.#notifOpen = false
-      this.#notifLastRewound = false
-    }
-
-    // Open on the edge into rewound (the first undo), outside revision mode.
-    // Once open, stays open until the × close button fires.
-    if (rewound && !this.#notifLastRewound && !this.#reviseActive) {
-      this.#notifOpen = true
-    }
-    this.#notifLastRewound = rewound
-
-    const shouldDisplay = this.#notifOpen && !this.#reviseActive
-
-    if (!shouldDisplay) {
-      if (this.#notifVisible) {
-        this.#notification.style.display = 'none'
-        this.#notifVisible = false
-      }
-      return
-    }
-
-    if (!this.#notifVisible) {
-      this.#notification.style.display = 'flex'
-      this.#notifVisible = true
-    }
-
-    // Restore / Jump-to-latest only apply while rewound; hide them at head
-    // so the sticky bar keeps just the status text + close affordance.
-    if (rewound) {
-      const stepsBack = total - position
-      this.#notifLabel.textContent = `${stepsBack} step${stepsBack === 1 ? '' : 's'} back`
-      this.#notifRestore.style.display = 'inline-block'
-      this.#notifLatest.style.display = 'inline-block'
-    } else {
-      this.#notifLabel.textContent = 'At latest'
-      this.#notifRestore.style.display = 'none'
-      this.#notifLatest.style.display = 'none'
-    }
-  }
 }
 
 const _historySliderDrone = new HistorySliderDrone()

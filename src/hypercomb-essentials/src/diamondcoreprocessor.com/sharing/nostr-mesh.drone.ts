@@ -62,7 +62,17 @@ export class NostrMeshDrone extends Drone {
   private relays: string[] = []
 
   // note: set to null to accept any kind matching x
-  private kinds: number[] | null = [29010]
+  // Default to null (no kind filter) so the relay returns every event
+  // matching the #x tag — caller drones (SwarmDrone, PairedChannelDrone)
+  // narrow via configureKinds() once they finish loading. The previous
+  // default [29010] hard-coded the paired-channel kind and silently
+  // dropped swarm layer/resource/hide events (30200/30201/30202) on
+  // any fresh localStorage profile (every incognito session, every
+  // browser-data clear). The resubscribeAll() that fires when swarm
+  // later calls configureKinds is racy on incognito; defaulting null
+  // makes the filter universally permissive until something explicitly
+  // narrows it.
+  private kinds: number[] | null = null
 
   // note: expiry rules live here
   private ttlMs = 600_000
@@ -832,6 +842,68 @@ export class NostrMeshDrone extends Drone {
       if (ws.readyState !== WebSocket.OPEN) continue
       try { ws.send(frame) } catch { /* ignore */ }
     }
+  }
+
+  /**
+   * Host-driven nuke. Sends `["HC_CLEAR"]` to every connected relay and
+   * wipes our own in-memory item cache so the local view immediately
+   * reflects the empty store. The HC_CLEAR message is a dev-only
+   * extension recognised by `scripts/local-relay.ts`; compliant public
+   * relays will treat it as an unknown frame and ignore it. The local
+   * cache wipe is unconditional and helps when the user was looking at
+   * cached peer state that had drifted from the relay.
+   *
+   * Public so MeshClearQueenBee (the `/clear-mesh` slash command) can
+   * invoke it directly without going through the effect bus.
+   */
+  /**
+   * Host-driven block. Sends `["HC_BLOCK", pubkey]` to every relay so
+   * the relay drops every cached event from that pubkey and refuses
+   * future EVENT messages from it. Pubkey may be a full 64-hex or a
+   * short prefix (8–16 hex) — the relay handles both. Wipes any
+   * matching events from our local cache too. Idempotent.
+   */
+  public sendHcBlock = (pubkey: string): { sent: number; cachedWiped: number } => {
+    const pk = String(pubkey ?? '').trim().toLowerCase()
+    if (!/^[0-9a-f]{8,64}$/.test(pk)) {
+      console.warn('[nostr-mesh] sendHcBlock: invalid pubkey', pk)
+      return { sent: 0, cachedWiped: 0 }
+    }
+    const frame = JSON.stringify(['HC_BLOCK', pk])
+    let sent = 0
+    for (const ws of this.sockets.values()) {
+      if (ws.readyState !== WebSocket.OPEN) continue
+      try { ws.send(frame); sent++ } catch { /* ignore */ }
+    }
+    // Wipe matching events from our own cache so the swarm view drops
+    // immediately. Mirror the relay's prefix-matching behaviour.
+    let cachedWiped = 0
+    for (const [sig, arr] of this.itemsBySig) {
+      const filtered = arr.filter(it => {
+        const evtPk = String(it?.event?.pubkey ?? '').toLowerCase()
+        const match = pk.length === 64 ? evtPk === pk : evtPk.startsWith(pk)
+        if (match) cachedWiped++
+        return !match
+      })
+      if (filtered.length !== arr.length) this.itemsBySig.set(sig, filtered)
+    }
+    this.note('hc-block:sent', undefined, undefined, undefined, undefined)
+    return { sent, cachedWiped }
+  }
+
+  public sendHcClear = (): { sent: number; cachedBefore: number } => {
+    const cachedBefore = this.itemsBySig.size
+    const frame = JSON.stringify(['HC_CLEAR'])
+    let sent = 0
+    for (const ws of this.sockets.values()) {
+      if (ws.readyState !== WebSocket.OPEN) continue
+      try { ws.send(frame); sent++ } catch { /* ignore */ }
+    }
+    // Wipe local cache so peer views drop immediately (don't wait for
+    // the relay's broadcast NOTICE — that's an opportunistic UI hint).
+    this.itemsBySig.clear()
+    this.note('hc-clear:sent', undefined, undefined, undefined, undefined)
+    return { sent, cachedBefore }
   }
 
   private fanoutToSig = (relay: string, sig: string, evt: NostrEvent): void => {

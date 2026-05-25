@@ -24,9 +24,7 @@ const MAX_VISIBLE_SELECTIONS = 10
 type Note = {
   id: string
   text: string
-  createdAt: number
-  updatedAt?: number
-  tags?: string[]
+  children: Note[]
 }
 
 type NotesService = {
@@ -162,9 +160,43 @@ export class NotesStripComponent implements OnDestroy {
     try { localStorage.setItem('hc:notes-strip-kind-filter', filter) } catch { /* ignore */ }
   }
 
+  /**
+   * True when any visible cell carries an unanswered Claude question — either
+   * a live qa-slot entry or a legacy `[Q] …` note. Only Claude authors
+   * questions, so a notes view with none can drop the kind-filter row
+   * entirely; "All" and "Notes" would be identical tabs otherwise.
+   */
+  readonly hasQuestions = computed<boolean>(() => {
+    const byCell = this.#notesByCell()
+    const byQa = this.#qaByCell()
+    const cells: string[] = []
+    if (this.multi()) {
+      cells.push(...this.#selectedCells().slice(-MAX_VISIBLE_SELECTIONS))
+    } else {
+      const c = this.cell()
+      if (c) cells.push(c)
+    }
+    for (const c of cells) {
+      if ((byQa.get(c)?.length ?? 0) > 0) return true
+      const notes = byCell.get(c) ?? []
+      if (notes.some(n => this.noteKind(n) === 'q')) return true
+    }
+    return false
+  })
+
+  /** Effective filter: a saved `'q'` preference falls through to `'all'`
+   *  when there are no questions to filter — otherwise hiding the filter
+   *  row would silently strand the user with an empty list. The saved
+   *  preference is untouched so it snaps back to `'q'` once Claude asks
+   *  the next question. */
+  readonly #effectiveFilter = computed<'all' | 'q' | 'note'>(() => {
+    const f = this.kindFilter()
+    return (f === 'q' && !this.hasQuestions()) ? 'all' : f
+  })
+
   /** True if a row of `kind` should render under the current filter. */
   #passesFilter(kind: 'q' | 'a' | 'note'): boolean {
-    const f = this.kindFilter()
+    const f = this.#effectiveFilter()
     if (f === 'all') return true
     if (f === 'q') return kind === 'q'
     // f === 'note' — surface every non-question entry (answers count as
@@ -209,7 +241,7 @@ export class NotesStripComponent implements OnDestroy {
     const synthetic: Note[] = qa.map(q => ({
       id: 'qa:' + q.qId,
       text: '[Q] ' + q.question,
-      createdAt: 0,
+      children: [],
     }))
     const filtered = notes.filter(n => {
       const t = (n.text ?? '').trimStart()

@@ -1,40 +1,44 @@
 // diamondcoreprocessor.com/notes/notes.drone.ts
 //
-// Notes participate in the merkle layer tree as first-class layers.
-// One Note → one body resource (its canonical JSON content) → one
-// participant layer at sign([...cellSegments, '__notes__', noteId])
-// holding `{ name: noteId, body: [bodyResourceSig] }`.
+// A note is a content-addressed JSON blob with the shape:
 //
-// The clicked cell's layer carries `notes: [noteLayerSig, ...]` —
-// the array of participant layer sigs. When a note changes:
-//   1. Its body resource is hashed + persisted.
-//   2. Its participant layer commits at its synthetic location (its own
-//      bag, its own immutable history).
-//   3. The notes index at the cell's locationSig updates with the new
-//      participant layer sig array.
-//   4. `notes:changed` fires with the cell's segments.
-//   5. LayerCommitter cascades from the cell up to root: the cell's
-//      `notes` slot reads the new sig array, cell layer sig changes,
-//      every ancestor swaps the cell sig pair in its children.
+//     { "children": ["<sub-note-sig>", ...], "note": "<the note text>" }
 //
-// All five steps are mechanical — provided by HiveParticipant. The
-// only NotesService-specific code is the Note shape, the EffectBus
-// wiring (note:capture / commit / delete / tag), and the icon
-// registration.
+// `note` is the body text inline; `children` is a flat array of sub-note
+// layer sigs (recursive — sub-notes are notes too). No name field, no id
+// field, no createdAt, no tags. The blob's signature IS the note's
+// identity for the lifetime of those exact bytes — edit the text or any
+// child sig → new canonical JSON → new sig → swap in the parent's slot.
+//
+// The owning cell carries the top-level notes in its `notes` slot
+// (`notes: [<note-sig>, ...]`). Sub-notes live in each note's own
+// `children` slot. Both arrays hold the same kind of value — note layer
+// sigs — but the slot names differ because the containers differ (cells
+// call them `notes`; notes call their sub-notes `children`).
+//
+// Storage: note blobs live in `__resources__/<sig>` alongside other
+// content-addressed resources. No per-note history bag — the note is
+// just its bytes. Per-note edit history is reconstructed by walking the
+// owning cell's layer history and looking at which sig occupied each
+// position at each revision.
+//
+// Cascade: when a note is added / edited / deleted, NotesService emits
+// `notes:changed` with `{ segments, op, sig }`. The `notes` slot is
+// registered with LayerSlotRegistry under that trigger, so LayerCommitter
+// picks up the event and folds the change into the cell's layer, which
+// propagates to root via the standard merkle cascade.
 
 import { EffectBus } from '@hypercomb/core'
-import type { LayerContent } from '../history/history.service.js'
-import { HiveParticipant } from '../history/hive-participant.js'
 
-// Material Design `sticky_note_2` (filled) — solid white fill so the
-// Pixi sprite-tint pipeline preserves colour; matches the rest of the
-// tile-overlay icon set in tile-actions.
 const NOTE_ICON_SVG =
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M19 3H4.99c-1.11 0-1.98.9-1.98 2L3 19c0 1.1.89 2 2 2h10l6-6V5c0-1.1-.9-2-2-2zM7 8h10v2H7V8zm5 6H7v-2h5v2zm2 5.5V14h5.5L14 19.5z"/></svg>`
 
 const NOTE_ACCENT = 0xffe14a
-
+const NOTES_TRIGGER = 'notes:changed'
+const NOTES_SLOT = 'notes'
 const CAPTURE_MODE = 'note-capture' as const
+
+const SIG_REGEX = /^[a-f0-9]{64}$/
 
 type IconProvider = {
   name: string
@@ -53,80 +57,104 @@ type IconProviderRegistry = {
 }
 
 type Lineage = {
-  explorerSegments?: () => string[]
+  explorerSegments?: () => readonly string[]
 }
 
 type HistoryServiceLike = {
   sign: (lineage: Lineage) => Promise<string>
+  currentLayerAt: (locSig: string) => Promise<{ [k: string]: unknown } | null>
+  peekCurrentLayer: (locSig: string) => { [k: string]: unknown } | null
+  getLayerBySig: (sig: string) => Promise<{ [k: string]: unknown } | null>
 }
 
-export type Note = {
-  id: string
-  text: string
-  createdAt: number
-  updatedAt?: number
-  tags?: string[]
+type StoreLike = {
+  putResource: (blob: Blob) => Promise<string>
+  getResource: (sig: string) => Promise<Blob | null>
+  resolve: <T = unknown>(sig: string) => Promise<T>
+}
+
+type LayerCommitterLike = {
+  update: (
+    segments: readonly string[],
+    layer: { name?: string; [slot: string]: unknown },
+    nameSlots?: ReadonlySet<string>,
+  ) => Promise<string>
+}
+
+type LayerSlotRegistryLike = {
+  register: (slot: { slot: string; triggers: readonly string[] }) => void
+}
+
+/** Storage shape on disk — the canonical JSON every note blob holds. */
+type NoteLayer = {
+  note: string
+  children: string[]
 }
 
 /**
- * NotesService — the canonical participant for tile notes.
+ * Consumer-facing note shape (notes-strip, notes-viewer, etc).
  *
- * The clicked tile is the OWNER (parent for HiveParticipant purposes).
- * Notes belong to the tile's own layer — the tile's `notes` slot holds
- * the sig array of note participant layers. Cells at different lineages
- * with the same label have independent notes (the parent locationSig
- * differs).
+ * `id` is the note's layer signature — stable for the lifetime of those
+ * exact bytes. Edit the text → new layer → new sig → consumers will see
+ * a different `id` for the edited version. There is no separate
+ * "identity across edits" concept; each version is its own entity.
  */
-export class NotesService extends HiveParticipant<Note> {
+export type Note = {
+  id: string
+  text: string
+  children: Note[]
+}
 
-  readonly slot = 'notes'
-  readonly triggerName = 'notes:changed'
+/**
+ * NotesService — content-addressed notes attached to cells.
+ *
+ * Cells carry top-level notes in their `notes` slot (sigs pointing at
+ * note blobs in `__resources__/`). Notes carry sub-notes in their own
+ * `children` slot. No HiveParticipant base class; this service stands
+ * on its own (cells and notes are independent shapes that happen to
+ * share `children` as a hierarchy slot — they don't implement a common
+ * interface).
+ */
+export class NotesService {
 
-  // Memoized cell-locationSig keyed by `parent/cellLabel`. Cleared
-  // when Lineage changes (the same cellLabel resolves to a different
-  // location depending on which folder the user is in).
+  readonly slot = NOTES_SLOT
+  readonly triggerName = NOTES_TRIGGER
+
+  // Decoded note layers, keyed by layer sig. Populated lazily on read,
+  // and on write right after we mint a layer.
+  readonly #cache = new Map<string, NoteLayer>()
+
+  // Memoized cell-locationSig keyed by `parent/cellLabel`. Cleared on
+  // lineage navigation (same cellLabel resolves to a different location
+  // depending on the current folder).
   readonly #cellLocSigCache = new Map<string, string>()
 
-  idOf(note: Note): string { return note.id }
-
-  sortKey(note: Note): number { return note.createdAt }
-
-  canonicalizeBody(note: Note): string {
-    return canonicalJSON(note)
-  }
-
-  decodeBody(text: string): Note {
-    const parsed = JSON.parse(text)
-    if (!parsed || typeof parsed !== 'object') {
-      throw new Error('[notes] body did not parse to an object')
-    }
-    if (typeof parsed.id !== 'string' || typeof parsed.text !== 'string' || typeof parsed.createdAt !== 'number') {
-      throw new Error('[notes] body is missing required fields {id, text, createdAt}')
-    }
-    return parsed as Note
-  }
-
-  layerFor(note: Note, bodySig: string): LayerContent {
-    return { name: note.id, body: [bodySig] }
-  }
-
   constructor() {
-    super()
+    // Drop the previous notes-system localStorage key. The new system
+    // is fully content-addressed — anything legacy is cruft.
+    this.#purgeLegacyKey('hc:notes-index')
 
-    // Drop the previous notes-system localStorage key, fully and
-    // explicitly. The new system uses HiveParticipant's namespaced
-    // index — the legacy entry would just sit there as cruft.
-    this.purgeLegacyKey('hc:notes-index')
+    // Register the `notes` slot as PASSIVE — no triggers — because we
+    // drive the cascade ourselves via LayerCommitter.update() so we can
+    // await it and emit `notes:changed` for UI consumers strictly AFTER
+    // the cell layer has settled. If we registered with triggers here,
+    // LayerCommitter would also queue the change asynchronously and the
+    // UI listener would race the cascade.
+    window.ioc.whenReady<LayerSlotRegistryLike>(
+      '@diamondcoreprocessor.com/LayerSlotRegistry',
+      (registry) => {
+        registry.register({ slot: NOTES_SLOT, triggers: [] })
+      },
+    )
 
     // Lineage navigation invalidates the per-cell locationSig cache —
-    // the same cellLabel resolves to a different location depending on
-    // which folder the user is currently inside.
+    // same cellLabel resolves to a different location depending on the
+    // current folder.
     const lineage = get<EventTarget>('@hypercomb.social/Lineage') as unknown as EventTarget | undefined
     lineage?.addEventListener?.('change', () => this.#cellLocSigCache.clear())
 
-    // Self-register the 'note' tile icon. Toggle this drone off in DCP
-    // → constructor never runs → icon never reaches the arranger →
-    // never appears on the hex.
+    // Tile icon. Toggle this drone off in DCP → constructor never runs
+    // → icon never reaches the arranger → never appears on the hex.
     const iconRegistry = get<IconProviderRegistry>('@hypercomb.social/IconProviderRegistry')
     iconRegistry?.add({
       name: 'note',
@@ -139,11 +167,8 @@ export class NotesService extends HiveParticipant<Note> {
       descriptionKey: 'action.note.description',
     })
 
-    // ── EffectBus wiring ────────────────────────────────────────────
-    //
-    // `note:capture` accepts `{ cellLabel, prefill?, editId? }`. UI
-    // event — drives the command line into capture mode. No data
-    // mutation here.
+    // ── EffectBus wiring ──────────────────────────────────────────────
+
     EffectBus.on<{ cellLabel: string; prefill?: string; editId?: string }>('note:capture', (payload) => {
       if (!payload?.cellLabel) return
       EffectBus.emit('command:enter-mode', {
@@ -154,118 +179,255 @@ export class NotesService extends HiveParticipant<Note> {
       })
     })
 
-    // `note:commit` — append a new note OR replace the note with `editId`.
     EffectBus.on<{ cellLabel: string; text: string; editId?: string }>('note:commit', (payload) => {
       const text = (payload?.text ?? '').trim()
       if (!payload?.cellLabel || !text) return
-      void this.#applyToCell(payload.cellLabel, async (prior) => {
-        const now = Date.now()
-        if (payload.editId) {
-          const idx = prior.findIndex(n => n.id === payload.editId)
-          if (idx >= 0) {
-            const next = prior.slice()
-            next[idx] = { ...prior[idx], text, updatedAt: now }
-            return { upsert: [next[idx]] }
-          }
-        }
-        return { upsert: [{ id: cryptoRandomId(), text, createdAt: now }] }
-      })
+      void this.#commit(payload.cellLabel, text, payload.editId)
     })
 
-    // `note:delete` — remove a note by id from the cell.
     EffectBus.on<{ cellLabel: string; noteId: string }>('note:delete', (payload) => {
       if (!payload?.cellLabel || !payload?.noteId) return
-      void this.#applyToCell(payload.cellLabel, async () => ({ remove: payload.noteId }))
-    })
-
-    // `note:tag` — attach or detach a tag on a single note.
-    EffectBus.on<{ cellLabel: string; noteId: string; tag: string; remove?: boolean }>('note:tag', (payload) => {
-      const tag = (payload?.tag ?? '').trim()
-      if (!payload?.cellLabel || !payload?.noteId || !tag) return
-      void this.#applyToCell(payload.cellLabel, async (prior) => {
-        const note = prior.find(n => n.id === payload.noteId)
-        if (!note) return null
-        const tags = new Set(note.tags ?? [])
-        if (payload.remove) tags.delete(tag); else tags.add(tag)
-        return {
-          upsert: [{ ...note, tags: [...tags].sort(), updatedAt: Date.now() }],
-        }
-      })
+      void this.#deleteByCellLabel(payload.cellLabel, payload.noteId)
     })
   }
 
-  // ── Public read API (back-compat with UI consumers) ───────────────
+  // ── Public read API ───────────────────────────────────────────────
 
-  /** Synchronous notes for a cell at the user's current lineage.
-   *  Empty array if no notes (or the warm cache hasn't loaded yet —
-   *  call getNotes() async or warmup() at boot to populate). */
+  /**
+   * Synchronous notes for a cell at the user's current lineage. Reads
+   * from the peek cache (populated by the preloader walk and by writes).
+   * Returns an empty array if the cell hasn't been touched yet — call
+   * `getNotes()` for the async hydrating read.
+   */
   public readonly notesFor = (cellLabel: string): Note[] => {
+    const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
+    if (!history) return []
     const locSig = this.#cellLocationSigSync(cellLabel)
     if (!locSig) return []
-    return this.itemsAt(locSig)
-      .slice()
-      .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    const layer = history.peekCurrentLayer(locSig)
+    if (!layer) return []
+    const sigs = (layer as Record<string, unknown>)[NOTES_SLOT]
+    if (!Array.isArray(sigs)) return []
+    const out: Note[] = []
+    for (const sig of sigs) {
+      if (typeof sig !== 'string' || !SIG_REGEX.test(sig)) continue
+      const cached = this.#cache.get(sig)
+      if (cached) out.push(this.#hydrate(sig, cached))
+    }
+    return out
   }
 
-  /** Async-resolving notes for a cell. Hydrates the participant-body
-   *  cache from OPFS via the same async path the write side uses, so
-   *  the strip's first-selection read returns the same items the user
-   *  would see after committing a new note. After this, notesFor() reads
-   *  sync from the now-populated cache. */
+  /**
+   * Async-resolving notes for a cell at the user's current lineage.
+   * Walks OPFS as needed so reads at first selection match what writes
+   * see.
+   */
   public readonly getNotes = async (cellLabel: string): Promise<Note[]> => {
     const resolved = await this.#resolveCellLocation(cellLabel)
     if (!resolved) return []
-    // Use the async hydrator (HiveParticipant.itemsAtSegmentsAsync) instead
-    // of itemsAt(). itemsAt reads from the SYNC peek cache which the boot
-    // warmup may not have populated for first-touch cells, so it would
-    // return [] even when notes exist on disk. The async path goes through
-    // currentLayerAt + getLayerBySig + store.getResource — same as upsert's
-    // #priorItemsAt — guaranteeing the read sees what the write would.
-    const items = await this.itemsAtSegmentsAsync(resolved.segments)
-    return items.slice()
-      .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    return this.#readAtLocation(resolved.locationSig)
   }
 
-  /** Async-resolving notes for an EXPLICIT segments path — bypasses the
-   *  user's current lineage. Used by renderers that need to traverse a
-   *  whole tree (e.g. the website surface walking children → grandchildren
-   *  → leaves) without temporarily re-navigating the user. Same async
-   *  hydration as getNotes(), so reads match what a write would commit. */
+  /**
+   * Async-resolving notes for an EXPLICIT segments path — bypasses the
+   * user's current lineage. Used by renderers walking a tree (e.g. the
+   * website surface) without temporarily navigating the user.
+   */
   public readonly getNotesAtSegments = async (segments: readonly string[]): Promise<Note[]> => {
     const cleaned = (segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
     if (cleaned.length === 0) return []
-    const items = await this.itemsAtSegmentsAsync(cleaned)
-    return items.slice()
-      .sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+    const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
+    if (!history) return []
+    const locSig = await history.sign({ explorerSegments: () => cleaned })
+    return this.#readAtLocation(locSig)
   }
 
-  // ── Internal: cell-location resolution + transform plumbing ───────
+  // ── Public write API ──────────────────────────────────────────────
 
   /**
-   * Apply a transform to a cell's notes. The transform returns either
-   * `{ upsert: Note[] }` (add or replace items by id) or
-   * `{ remove: string }` (drop a single note by id) or `null` (no-op).
-   * Resolves the cell's full lineage segments internally.
+   * Append a top-level note at an explicit cell location. Used by the
+   * bridge for headless note authoring during imports / scripted hive
+   * builds.
    */
-  async #applyToCell(
+  public async addAtSegments(
+    parentSegments: readonly string[],
     cellLabel: string,
-    transform: (prior: Note[]) => Promise<{ upsert?: Note[]; remove?: string } | null>,
+    text: string,
   ): Promise<void> {
+    const cleanedParents = (parentSegments ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const cleanedLabel = String(cellLabel ?? '').trim()
+    const cleanedText = String(text ?? '').trim()
+    if (!cleanedLabel || !cleanedText) return
+    const segments = [...cleanedParents, cleanedLabel]
+    const sig = await this.#writeNoteLayer(cleanedText, [])
+    await this.#commitCellNotes(segments, (prior) => [...prior, sig])
+  }
+
+  /**
+   * Remove a top-level note by its layer sig at an explicit cell
+   * location. Headless equivalent of the `note:delete` EffectBus
+   * handler.
+   */
+  public async deleteAtSegments(
+    parentSegments: readonly string[],
+    cellLabel: string,
+    noteId: string,
+  ): Promise<void> {
+    const cleanedParents = (parentSegments ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const cleanedLabel = String(cellLabel ?? '').trim()
+    const cleanedSig = String(noteId ?? '').trim()
+    if (!cleanedLabel || !cleanedSig) return
+    const segments = [...cleanedParents, cleanedLabel]
+    await this.#commitCellNotes(segments, (prior) => prior.filter(s => s !== cleanedSig))
+  }
+
+  // ── Internal: commit + delete flows ───────────────────────────────
+
+  async #commit(cellLabel: string, text: string, editId?: string): Promise<void> {
     const resolved = await this.#resolveCellLocation(cellLabel)
     if (!resolved) {
       console.warn('[notes] cannot resolve cell location for', cellLabel)
       return
     }
-    const { segments, locationSig } = resolved
-    const prior = this.itemsAt(locationSig)
-    const result = await transform(prior)
-    if (!result) return
-    if (result.remove) {
-      await this.remove(segments, result.remove)
-    } else if (result.upsert && result.upsert.length > 0) {
-      await this.upsert(segments, result.upsert)
+    const { segments } = resolved
+    const newSig = await this.#writeNoteLayer(text, [])
+    if (editId && SIG_REGEX.test(editId)) {
+      await this.#commitCellNotes(segments, (prior) => prior.map(s => s === editId ? newSig : s))
+    } else {
+      await this.#commitCellNotes(segments, (prior) => [...prior, newSig])
     }
   }
+
+  async #deleteByCellLabel(cellLabel: string, noteId: string): Promise<void> {
+    const resolved = await this.#resolveCellLocation(cellLabel)
+    if (!resolved) return
+    await this.#commitCellNotes(resolved.segments, (prior) => prior.filter(s => s !== noteId))
+  }
+
+  /**
+   * Read the cell's current `notes` slot, apply a transform to get the
+   * next list, and commit the entire cell layer with the new list via
+   * LayerCommitter. Awaits the cascade so the cell layer + every
+   * ancestor up to root is at its new sig by the time we resolve.
+   * Emits `notes:changed` once the cascade has settled so UI consumers
+   * read fresh state.
+   */
+  async #commitCellNotes(
+    segments: readonly string[],
+    transform: (priorSigs: readonly string[]) => readonly string[],
+  ): Promise<void> {
+    const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
+    const committer = get<LayerCommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
+    if (!history || !committer) {
+      throw new Error('[notes] HistoryService / LayerCommitter missing on ioc')
+    }
+    const locSig = await history.sign({ explorerSegments: () => segments })
+    const priorLayer = await history.currentLayerAt(locSig)
+    const priorNotes = Array.isArray(priorLayer?.[NOTES_SLOT])
+      ? (priorLayer[NOTES_SLOT] as readonly unknown[]).filter((s): s is string => typeof s === 'string')
+      : []
+    const nextNotes = transform(priorNotes)
+    const base: { name?: string; [k: string]: unknown } = priorLayer
+      ? { ...priorLayer }
+      : { name: segments[segments.length - 1] ?? '' }
+    base[NOTES_SLOT] = nextNotes.slice()
+    await committer.update(segments, base, new Set(['children']))
+    EffectBus.emit(NOTES_TRIGGER, {
+      segments: [...segments],
+      op: 'set' as const,
+      sigs: nextNotes.slice(),
+    })
+  }
+
+  // ── Internal: note layer write ────────────────────────────────────
+
+  async #writeNoteLayer(text: string, children: readonly string[]): Promise<string> {
+    const store = get<StoreLike>('@hypercomb.social/Store')
+    if (!store) throw new Error('[notes] Store missing on ioc')
+    const layer: NoteLayer = { children: children.slice(), note: text }
+    const json = canonicalJSON(layer)
+    const sig = await store.putResource(new Blob([json], { type: 'application/json' }))
+    this.#cache.set(sig, layer)
+    return sig
+  }
+
+  // ── Internal: read paths ──────────────────────────────────────────
+
+  async #readAtLocation(locationSig: string): Promise<Note[]> {
+    const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
+    if (!history) return []
+    const layer = await history.currentLayerAt(locationSig)
+    if (!layer) return []
+    const sigs = (layer as Record<string, unknown>)[NOTES_SLOT]
+    if (!Array.isArray(sigs)) return []
+    const out: Note[] = []
+    for (const sig of sigs) {
+      if (typeof sig !== 'string' || !SIG_REGEX.test(sig)) continue
+      const decoded = await this.#loadNoteLayer(sig)
+      if (decoded) out.push(this.#hydrate(sig, decoded))
+    }
+    return out
+  }
+
+  async #loadNoteLayer(sig: string): Promise<NoteLayer | null> {
+    const cached = this.#cache.get(sig)
+    if (cached) return cached
+    const store = get<StoreLike>('@hypercomb.social/Store')
+    if (!store) return null
+
+    // New shape: the sig points at a content-addressed resource holding
+    // canonical JSON `{ note, children }`. Try the resource path first.
+    const parsed = await store.resolve<unknown>(sig)
+    if (parsed && typeof parsed === 'object') {
+      const p = parsed as { note?: unknown; children?: unknown }
+      if (typeof p.note === 'string') {
+        const children = Array.isArray(p.children)
+          ? p.children.filter((c): c is string => typeof c === 'string' && SIG_REGEX.test(c))
+          : []
+        const layer: NoteLayer = { children, note: p.note }
+        this.#cache.set(sig, layer)
+        return layer
+      }
+    }
+
+    // Back-compat shim: legacy notes were stored as HiveParticipant
+    // layers in history bags with shape `{ name: noteId, body: [bodySig] }`,
+    // where the body resource held `{ id, text, createdAt, tags }`.
+    // Read it through HistoryService, extract the text, and surface as
+    // the new shape (empty children — legacy notes were flat). Writes
+    // never produce the legacy shape; this is read-only compatibility.
+    const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
+    if (!history) return null
+    const legacy = await history.getLayerBySig(sig)
+    const body = legacy && Array.isArray(legacy['body']) ? legacy['body'] : null
+    const bodySig = body && body.length === 1 && typeof body[0] === 'string' ? body[0] : null
+    if (!bodySig) return null
+    const bodyParsed = await store.resolve<unknown>(bodySig)
+    if (!bodyParsed || typeof bodyParsed !== 'object') return null
+    const text = (bodyParsed as { text?: unknown }).text
+    if (typeof text !== 'string') return null
+    const layer: NoteLayer = { children: [], note: text }
+    this.#cache.set(sig, layer)
+    return layer
+  }
+
+  #hydrate(sig: string, layer: NoteLayer): Note {
+    // Children are resolved sync from cache only — async children
+    // populate on subsequent reads after warmup walks them. This keeps
+    // the sync notesFor() truly synchronous for the rendered surface.
+    const children: Note[] = []
+    for (const childSig of layer.children) {
+      const cached = this.#cache.get(childSig)
+      if (cached) children.push(this.#hydrate(childSig, cached))
+    }
+    return { id: sig, text: layer.note, children }
+  }
+
+  // ── Internal: cell-location resolution ────────────────────────────
 
   async #resolveCellLocation(cellLabel: string): Promise<{ locationSig: string; segments: string[] } | null> {
     const lineage = get<Lineage>('@hypercomb.social/Lineage')
@@ -298,62 +460,13 @@ export class NotesService extends HiveParticipant<Note> {
     return this.#cellLocSigCache.get(segments.join('/')) ?? ''
   }
 
-  /**
-   * Append a note at an EXPLICIT cell location (parentSegments + cellLabel)
-   * without depending on the user's current navigation. Used by the bridge
-   * for headless note authoring during imports / scripted hive builds.
-   * Goes through the same `upsert` path as user-typed notes — same merkle
-   * commit, same trigger event, same render pipeline.
-   */
-  public async addAtSegments(
-    parentSegments: readonly string[],
-    cellLabel: string,
-    text: string,
-  ): Promise<void> {
-    const cleanedParents = (parentSegments ?? [])
-      .map(s => String(s ?? '').trim())
-      .filter(Boolean)
-    const cleanedLabel = String(cellLabel ?? '').trim()
-    const cleanedText = String(text ?? '').trim()
-    if (!cleanedLabel || !cleanedText) return
-    const segments = [...cleanedParents, cleanedLabel]
-    const note: Note = {
-      id: cryptoRandomId(),
-      text: cleanedText,
-      createdAt: Date.now(),
+  // ── Internal: legacy cleanup ──────────────────────────────────────
+
+  #purgeLegacyKey(key: string): void {
+    if (typeof localStorage !== 'undefined' && localStorage.getItem(key) !== null) {
+      localStorage.removeItem(key)
     }
-    await this.upsert(segments, [note])
   }
-
-  /**
-   * Remove a note by id at an EXPLICIT cell location (parentSegments + cellLabel)
-   * without depending on the user's current navigation. Headless equivalent
-   * of the EffectBus `note:delete` handler. Goes through the same `remove`
-   * path on hive-participant, so the merkle layer + parent cascade are
-   * identical to user-driven deletion.
-   */
-  public async deleteAtSegments(
-    parentSegments: readonly string[],
-    cellLabel: string,
-    noteId: string,
-  ): Promise<void> {
-    const cleanedParents = (parentSegments ?? [])
-      .map(s => String(s ?? '').trim())
-      .filter(Boolean)
-    const cleanedLabel = String(cellLabel ?? '').trim()
-    const cleanedNoteId = String(noteId ?? '').trim()
-    if (!cleanedLabel || !cleanedNoteId) return
-    const segments = [...cleanedParents, cleanedLabel]
-    await this.remove(segments, cleanedNoteId)
-  }
-}
-
-function cryptoRandomId(): string {
-  const c = (globalThis as { crypto?: Crypto }).crypto
-  if (c?.randomUUID) return c.randomUUID().replace(/-/g, '')
-  const bytes = new Uint8Array(16)
-  c?.getRandomValues?.(bytes)
-  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
 }
 
 function canonicalJSON(value: unknown): string {

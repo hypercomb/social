@@ -1,6 +1,7 @@
 // diamondcoreprocessor.com/meeting/meeting.queen.ts
 
 import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
+import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 
 /**
  * /meeting — tag the selected tile with `cascade` to create a meeting room,
@@ -47,25 +48,22 @@ export class MeetingQueenBee extends QueenBee {
 
     // for each selected tile: tag it with the meeting keyword, then trigger join
     const lineage = get('@hypercomb.social/Lineage') as
-      { explorerDir: () => Promise<FileSystemDirectoryHandle | null> } | undefined
-    const dir = lineage ? await lineage.explorerDir() : null
+      { explorerSegments?: () => readonly string[] } | undefined
+    const parentSegments = lineage?.explorerSegments?.() ?? []
 
     for (const label of selectedLabels) {
-      if (dir) {
-        // read current tags
-        const cellDir = await dir.getDirectoryHandle(label, { create: true })
-        const props = await readProps(cellDir)
-        const tags: string[] = Array.isArray(props['tags']) ? props['tags'] : []
+      // Read current tags from the tile's layer (canonical) — no OPFS
+      // dir consulted or minted.
+      const props = await readTilePropertiesAt(parentSegments, label)
+      const tags: string[] = Array.isArray(props['tags']) ? [...props['tags'] as string[]] : []
 
-        // check if already has a meeting tag
-        const hasMeetingTag = tags.some(t => t === template || t.startsWith(template + ':'))
+      // check if already has a meeting tag
+      const hasMeetingTag = tags.some(t => t === template || t.startsWith(template + ':'))
 
-        if (!hasMeetingTag) {
-          // add the meeting keyword tag
-          tags.push(template)
-          await writeProps(cellDir, { tags })
-          EffectBus.emit('tags:changed', { updates: [{ cell: label, tag: template }] })
-        }
+      if (!hasMeetingTag) {
+        tags.push(template)
+        await writeTilePropertiesAt(parentSegments, label, { tags })
+        EffectBus.emit('tags:changed', { updates: [{ cell: label, tag: template }] })
       }
 
       // trigger the meeting action (join/toggle)

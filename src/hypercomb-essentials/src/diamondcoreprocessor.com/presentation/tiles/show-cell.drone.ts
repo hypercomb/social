@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/pixi/show-cell.drone.ts
-import { Drone, SignatureService, SignatureStore, I18N_IOC_KEY } from '@hypercomb/core'
+import { Drone, I18N_IOC_KEY } from '@hypercomb/core'
 import type { I18nProvider } from '@hypercomb/core'
 import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
@@ -7,7 +7,7 @@ import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
 import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
-import { isSignature, readCellProperties, writeCellProperties, cellLocationSig } from '../../editor/tile-properties.js'
+import { isSignature, readCellProperties, writeCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
 import { hideStorageKey } from './tile-actions.drone.js'
 import type { HistoryService } from '../../history/history.service.js'
 import type { HistoryCursorService, CursorState } from '../../history/history-cursor.service.js'
@@ -779,37 +779,26 @@ export class ShowCellDrone extends Drone {
   // the placeholder { sig: '' }. That bug surfaced as a render loop:
   // cursor.load('') reset cursor state to empty → emit → re-render →
   // cursor.load('') again, indefinitely.
-  #cachedSigLocationKey: string | null = null
-  #cachedSigLocation: { key: string; sig: string } = { key: '', sig: '' }
-
+  /**
+   * Returns the canonical sigbag for the current lineage location, plus
+   * the key that produced it. Goes through lineage.currentSig() — the
+   * single navigation+sig primitive — so every caller in this codebase
+   * resolves the same sig for the same location via the same cache.
+   * The `{ key, sig }` shape is preserved so call sites don't need to
+   * change; `key` is `explorerSegments.join('/')` post-normalization,
+   * useful for display / logging only.
+   */
   private computeSignatureLocation = async (lineage: any): Promise<{ key: string; sig: string }> => {
-    const explorerSegmentsRaw = lineage?.explorerSegments?.()
+    const currentSig: () => Promise<string> | undefined = lineage?.currentSig
+    const sig = typeof currentSig === 'function' ? await lineage.currentSig() : ''
+    const explorerSegmentsRaw = lineage?.explorerSegments?.() ?? []
     const explorerSegments = Array.isArray(explorerSegmentsRaw)
       ? explorerSegmentsRaw
         .map((x: unknown) => String(x ?? '').trim())
         .filter((x: string) => x.length > 0)
       : []
-
-    // Bag identity = ancestry only. No domain (display namespace, not
-    // identity). No room/secret (mesh-layer concerns; they shift with
-    // peer credentials but the local bag is the location, you're
-    // already there). Must match HistoryService.sign().
     const key = explorerSegments.join('/')
-
-    // fast path: return cached result if key hasn't changed (and we've
-    // actually computed at least once — null sentinel above guards the
-    // first call from a placeholder hit).
-    if (this.#cachedSigLocationKey !== null && key === this.#cachedSigLocationKey) return this.#cachedSigLocation
-
-    // use SignatureStore.signText() for memoization — same lineage path = same sig
-    const sigStore = get<SignatureStore>('@hypercomb/SignatureStore')
-    const sig = sigStore
-      ? await sigStore.signText(key)
-      : await SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer)
-
-    this.#cachedSigLocationKey = key
-    this.#cachedSigLocation = { key, sig }
-    return this.#cachedSigLocation
+    return { key, sig }
   }
 
   // mesh discovery — resolves whichever mesh drone is registered
@@ -822,12 +811,32 @@ export class ShowCellDrone extends Drone {
 
   private publishLocalCells = async (lineage: any, mesh: MeshApi, sig: string, grammar: string = ''): Promise<void> => {
     if (typeof mesh.publish !== 'function') return
-    if (!lineage?.explorerDir) return
 
-    const dir = await lineage.explorerDir()
-    if (!dir) return
-
-    const localCells = await this.listCellFolders(dir)
+    // Source the cell list from the current layer's children (layer-as-primitive),
+    // not from an OPFS dir walk. Reads via lineage.currentLayer() — the
+    // single navigation+state primitive — and resolves child sigs to
+    // names via HistoryService.getLayerBySig. If neither is ready we
+    // publish an empty children list (same semantic as "I'm here,
+    // contributing nothing yet"); we never fall back to OPFS dirs.
+    const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as {
+      getLayerBySig: (s: string) => Promise<{ name?: string } | null>
+    } | undefined
+    let localCells: string[] = []
+    if (typeof (lineage as { currentLayer?: () => Promise<unknown> })?.currentLayer === 'function' && historyService?.getLayerBySig) {
+      try {
+        const layer = await (lineage as { currentLayer: () => Promise<unknown> }).currentLayer()
+        const childSigs = Array.isArray((layer as { children?: readonly unknown[] } | null)?.children)
+          ? ((layer as { children: readonly unknown[] }).children)
+          : []
+        const resolved = await Promise.all(childSigs.map(async (cs) => {
+          try {
+            const child = await historyService.getLayerBySig(String(cs ?? ''))
+            return typeof child?.name === 'string' && child.name.length > 0 ? child.name : null
+          } catch { return null }
+        }))
+        localCells = resolved.filter((n): n is string => n !== null)
+      } catch { /* keep empty */ }
+    }
     const previousCells = this.lastLocalCellsBySig.get(sig) ?? []
 
     // 1) one snapshot post per signature: full array of items
@@ -1611,17 +1620,49 @@ export class ShowCellDrone extends Drone {
       }
     } else {
       dir = await lineage.explorerDir()
+      // Lazy-create the OPFS dir for this location if the read-only
+      // lookup didn't find one. Per the architecture, tile MEMBERSHIP
+      // comes from layer.children (we don't mint dirs to create tiles);
+      // but the per-location 0000 file IS the canonical storage for
+      // viewport / properties state, so the dir has to exist as soon
+      // as the user actually navigates there. Lazy-create walks
+      // segments from hypercombRoot with create:true.
+      if (!dir) {
+        const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
+          { hypercombRoot?: FileSystemDirectoryHandle } | undefined
+        const root = store?.hypercombRoot
+        const segs = lineage?.explorerSegments?.() ?? []
+        if (root && segs.length > 0) {
+          try {
+            let walker: FileSystemDirectoryHandle = root
+            for (const seg of segs) {
+              const trimmed = String(seg ?? '').trim()
+              if (!trimmed) continue
+              walker = await walker.getDirectoryHandle(trimmed, { create: true })
+            }
+            dir = walker
+          } catch { /* OPFS write may fail (quota); leave dir null */ }
+        }
+      }
     }
     if (!this.#clipboardView && isStale()) {
       this.renderQueued = true
       return
     }
-    if (!dir) {
-      this.clearMesh()
-      return
+    // Layer-as-primitive: a missing OPFS dir is the new normal — tile
+    // membership lives in the lineage's history bag, not on disk. Sub-
+    // layer locations that don't have a `__hive__/...` mirror still need
+    // to render from `layer.children`. The old `if (!dir) return` bail
+    // was the path that turned /dolphin (and every other sub-layer)
+    // into a blank canvas after the OPFS-dir migration.
+    //
+    // Downstream code that genuinely requires `dir` (image loaders,
+    // viewport persistence per dir) is gated on its presence — null
+    // dir means "no on-disk shortcut, fall back to layer-only resolve."
+    if (dir) {
+      // populate back-nav fast-path dir cache (only when we have a real dir)
+      this.#layerDirCache.set(locationKey, dir)
     }
-    // populate back-nav fast-path dir cache
-    this.#layerDirCache.set(locationKey, dir)
 
     // ── tag flatten override ──────────────────────────────
     // When tag filter is active, use pre-scanned cross-page results instead of explorer
@@ -1637,8 +1678,10 @@ export class ShowCellDrone extends Drone {
       const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, flatSeedSet)
       if (cells.length === 0) { this.clearMesh(); this.rendering = false; return }
 
-      // load images from the first matching dir (best-effort)
-      await this.loadCellImages(cells, dir!)
+      // load images from the explorer dir (best-effort). Skip when
+      // dir is null — sub-layer locations no longer mint OPFS dirs
+      // for tiles, so the image-load path is allowed to no-op.
+      if (dir) await this.loadCellImages(cells, dir)
 
       this.cachedCellNames = cellNames
       this.cachedLocalCellSet = flatSeedSet
@@ -1658,19 +1701,31 @@ export class ShowCellDrone extends Drone {
       return
     }
 
-    // note: cell collection — always fresh, never cached
-    const localCells = await this.listCellFolders(dir)
+    // Tile membership is layer-only (project_layer_is_primitive). The
+    // layer's children slot is the sole source of truth for "what tiles
+    // exist at this location". OPFS dirs at hypercomb.io/<name>/ are a
+    // retired artifact of the legacy add path; they may still exist
+    // from old sessions but the render path no longer consults them.
+    //
+    // localCells stays empty here. It gets populated below from the
+    // layer's children once the cursor + history are resolved. Same
+    // identifier kept so the rest of the render path (which uses it as
+    // "what's owned here") doesn't need to be rewritten.
+    const localCells: string[] = []
     if (!this.#clipboardView && isStale()) {
       this.renderQueued = true
       return
     }
 
-    // note: union with mesh cells (shared)
+    // note: union with mesh cells (shared). localCells is empty at this
+    // point — the layer-fill below populates `union` and `localCellSet`
+    // from layer.children. Until then, only mesh-provided cells live in
+    // union, which is correct: peer tiles render whether or not the
+    // local layer has them.
     const union = new Set<string>()
-    for (const s of localCells) union.add(s)
     for (const s of this.meshCells) union.add(s)
 
-    const localCellSet = new Set(localCells)
+    const localCellSet = new Set<string>()
 
     // Preview tile sets — populated AFTER the layer-filter block runs
     // (~line 1750+). Why: dedup against localCellSet has to happen on
@@ -1682,9 +1737,12 @@ export class ShowCellDrone extends Drone {
     const ephemeralCellSet = new Set<string>()
     const peerCellSet = new Set<string>()
 
-    // detect which local cells have children (branches) — memoized per
-    // (dir, lineage.fsRevision); see #computeBranchSet for rationale
-    const branchSet = await this.#computeBranchSet(dir, localCells)
+    // branchSet holds names whose tile has its own sub-tiles (so a
+    // click drills in instead of opening the editor). Starts empty;
+    // populated from layer sublayers once the cursor's content is
+    // resolved below. The old OPFS-walking #computeBranchSet path is
+    // retired — branches are a property of the merkle tree, not OPFS.
+    let branchSet: Set<string> = new Set()
 
     // note: apply history — filter out cells whose last operation is "remove"
     // When a cursor is rewound, also compute divergence (future adds/removes)
@@ -1742,29 +1800,45 @@ export class ShowCellDrone extends Drone {
           const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
           const parentLayerSig = cursorService.currentLayerSig || ''
           layerAllowed = await resolveChildNames(historyService, parentSegments, dir, content, parentLayerSig)
-          // Defensive: a corrupt layer can land here with null/empty
-          // entries in its children list (seen on root lineage when an
-          // upstream commit recorded children:[null]). Without this
-          // filter the bad entries replace the real local cells in
-          // localCellSet, dropping every real tile from the render.
-          // Treat a non-empty-but-all-invalid layer as "no constraint"
-          // and fall through to OPFS truth.
+          // Layer is the only source of truth (project_layer_is_primitive).
+          // Whatever resolveChildNames returns IS the tile membership at
+          // this location — empty layer means zero owned tiles, broken
+          // layer means zero owned tiles. There is no OPFS fallback;
+          // OPFS dirs are retired artifact storage and the render path
+          // ignores them entirely. If a layer is corrupt the right
+          // remedy is to fix it through the history pipeline, not to
+          // fake-show OPFS contents that may be drift.
           const validNames: string[] = []
           for (const n of layerAllowed) {
             if (typeof n === 'string' && n.length > 0) validNames.push(n)
           }
-          const layerWasEmpty = layerAllowed.size === 0
-          const allEntriesInvalid = !layerWasEmpty && validNames.length === 0
-          if (!allEntriesInvalid) {
-            union.clear()
-            localCellSet.clear()
-            for (const cell of validNames) {
-              union.add(cell)
-              localCellSet.add(cell)
-            }
-            layerAllowed = new Set(validNames)
+          union.clear()
+          localCellSet.clear()
+          for (const cell of validNames) {
+            union.add(cell)
+            localCellSet.add(cell)
           }
-          // else: keep union + localCellSet as-is so OPFS truth survives
+          layerAllowed = new Set(validNames)
+
+          // Compute branchSet from the layer's sub-layers. Each entry in
+          // content.children is a sig pointing to that child's layer; if
+          // THAT layer has a non-empty children slot, the child is a
+          // branch (clicking should drill in). Pure merkle read, no
+          // OPFS walk. Errors are skipped — a child that fails to
+          // resolve isn't a branch.
+          const childSigs = Array.isArray(content.children) ? content.children : []
+          const branchNames = new Set<string>()
+          await Promise.all(childSigs.map(async (cs: unknown) => {
+            try {
+              const childLayer = await historyService.getLayerBySig(String(cs ?? ''))
+              const subChildren = (childLayer as { children?: readonly unknown[] } | null)?.children
+              if (Array.isArray(subChildren) && subChildren.length > 0) {
+                const name = (childLayer as { name?: string } | null)?.name
+                if (typeof name === 'string' && name.length > 0) branchNames.add(name)
+              }
+            } catch { /* sublayer missing — not a branch */ }
+          }))
+          branchSet = branchNames
         }
       }
     }
@@ -1925,8 +1999,11 @@ export class ShowCellDrone extends Drone {
     // read layout mode for this location
     this.#layoutMode = this.#readLayoutMode(locationKey)
 
-    // resolve cell ordering through the layout mode strategy
-    const cellNames = await this.#resolveCellOrder(this.#layoutMode, dir, union, localCellSet, lineage, peerIndices)
+    // resolve cell ordering through the layout mode strategy. `dir`
+    // may be null when no OPFS folder mirror exists for this sub-layer;
+    // pass a typed sentinel so the resolver chooses its layer-only
+    // strategy instead of guarding on null shape inside the resolver.
+    const cellNames = await this.#resolveCellOrder(this.#layoutMode, dir as FileSystemDirectoryHandle, union, localCellSet, lineage, peerIndices)
 
     const previousLocationKey = this.renderedLocationKey
     const layerChanged = locationKey !== previousLocationKey
@@ -1964,7 +2041,7 @@ export class ShowCellDrone extends Drone {
       if (vpSnap) {
         this.#applyViewportFromSnapshot(vpSnap)
         appliedSnap = vpSnap
-      } else {
+      } else if (dir) {
         appliedSnap = await this.#applyViewportForLayerReadSnapshot(dir)
       }
 
@@ -1988,9 +2065,13 @@ export class ShowCellDrone extends Drone {
       // of truth for this layer's render.
       if (myToken !== this.#streamToken) return
 
-      // sync VP directory so subsequent pan/zoom writes persist to the correct layer
+      // sync VP directory so subsequent pan/zoom writes persist to the correct
+      // layer. The dir is the canonical key — viewport lives in
+      // `<dir>/0000` as `properties.viewport`. For sub-layers that don't
+      // have an OPFS dir yet, we lazy-create it just above (see the
+      // dir-resolution block).
       const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
-      if (vp) vp.setDirSilent(dir)
+      if (vp && dir) vp.setDirSilent(dir)
 
       if (cellNames.length === 0) {
         if (this.layer) this.layer.visible = true
@@ -2027,7 +2108,10 @@ export class ShowCellDrone extends Drone {
       // token + locationKey so the stream works against the snapshot
       // that was authoritative when it started; if a newer stream
       // preempts, we stop touching shared state instead of fighting it.
-      void this.streamCells(dir, cellNames, localCellSet, axial, branchSet, myToken, locationKey)
+      // streamCells signature still wants a non-null dir for image loads;
+      // when we have none, hand a typed sentinel and let the function's
+      // null-tolerant branches no-op the disk lookups.
+      void this.streamCells(dir as FileSystemDirectoryHandle, cellNames, localCellSet, axial, branchSet, myToken, locationKey)
       return
     }
 
@@ -2053,7 +2137,9 @@ export class ShowCellDrone extends Drone {
     }
 
     // note: load cell images from 0000 properties → __resources__/
-    await this.loadCellImages(cells, dir)
+    // Skip when dir is null — sub-layer image loading still expects
+    // a dir; this becomes a no-op until the layer-slot image refactor.
+    if (dir) await this.loadCellImages(cells, dir)
     if (!this.#clipboardView && isStale()) {
       this.renderQueued = true
       return
@@ -2242,7 +2328,12 @@ export class ShowCellDrone extends Drone {
       // and off-center after reload at a different size.
       container.scale.set(snap.zoom.scale)
       container.position.set(snap.zoom.cx, snap.zoom.cy)
-      this.#pendingFitRestore = !!snap.zoom.fit
+      // Pan-respects-fit: refit ONLY when the saved pan is zero (or
+      // absent). A non-zero saved pan means the user explicitly moved
+      // away from the fit position; refitting (which calls
+      // setPan(0,0)) would clobber their pan on every boot.
+      const panIsZero = !snap.pan || (snap.pan.dx === 0 && snap.pan.dy === 0)
+      this.#pendingFitRestore = !!snap.zoom.fit && panIsZero
     } else {
       container.scale.set(1)
       container.position.set(0, 0)
@@ -2497,6 +2588,31 @@ export class ShowCellDrone extends Drone {
     // respond to processor-emitted synchronize and URL navigation
     window.addEventListener('synchronize', this.requestRender)
     window.addEventListener('navigate', this.requestRender)
+
+    // Lineage 'change' is the canonical "the user's explorerPath
+    // changed" signal — fired by every code path that mutates the
+    // path (URL-bar navigation, explorerEnter, explorerUp,
+    // showDomainRoot, etc.). Without this listener, navigation into
+    // sub-layers (e.g., /dolphin) doesn't trigger a fresh render of
+    // the new location's tiles; the cursor never auto-loads the new
+    // bag and the canvas stays empty until something else (mouse
+    // click on a tile, manual refresh, a synchronize event) forces a
+    // requestRender. The `navigate` window event covers URL-driven
+    // nav but not internal explorerEnter / explorerUp paths, so
+    // listening to both gives us full coverage.
+    const lineage = this.resolve<EventTarget>('lineage')
+    lineage?.addEventListener('change', this.onLineageChange)
+
+    // Initial-load kick. When the page boots at a non-root URL (e.g.
+    // /dolphin), the Lineage has already settled to that path before
+    // ensureListeners runs, so the 'change' event we just hooked never
+    // fires for the boot state. Without this explicit request the
+    // sub-layer canvas stays empty until the user does something that
+    // causes a render — clicking, panning, navigating away and back.
+    // Calling requestRender here is idempotent (the per-pulse render
+    // lock collapses repeats), so it's safe to fire alongside the
+    // first heartbeat-driven pass.
+    this.requestRender()
 
     // viewport:persisted — VP just wrote pan/zoom/meshOffset for some
     // directory. Mirror it into our back-nav cache so navigating-out-and-
@@ -3091,12 +3207,10 @@ export class ShowCellDrone extends Drone {
     // re-render sees it non-empty and returns early. Setting
     // #forceNextRender carries the invalidation across that race.
     this.onEffect<{ sig: string }>('swarm:resource-arrived', ({ sig }) => {
-      let touched = false
       if (sig) {
         for (const [label, cached] of this.cellImageCache) {
           if (cached === sig || cached === null) {
             this.cellImageCache.delete(label)
-            touched = true
           }
         }
       }
@@ -3105,7 +3219,6 @@ export class ShowCellDrone extends Drone {
       }
       this.renderedCellsKey = ''
       this.#forceNextRender = true
-      void touched  // touched is informational; render always proceeds in case a peer tile depends on the arrived sig without a prior cache entry
       this.requestRender()
     })
 
@@ -3359,49 +3472,10 @@ export class ShowCellDrone extends Drone {
 
   // Per-revision cache. Multiple callers per nav ask for the same dir's
   // children; the OPFS scan is the same answer until lineage's #fsRevision
-  // bumps. WeakMap so handles can be GC'd; revision in the value handles
-  // invalidation. In-flight dedup keyed on revision keeps a stale walk
-  // from poisoning cache after invalidation.
-  readonly #listCellFoldersCache = new WeakMap<FileSystemDirectoryHandle, { revision: number; result: string[] }>()
-  readonly #listCellFoldersPending = new WeakMap<FileSystemDirectoryHandle, { revision: number; promise: Promise<string[]> }>()
-
-  private listCellFolders = async (dir: FileSystemDirectoryHandle): Promise<string[]> => {
-    const lineage = this.resolve<any>('lineage')
-    const revision = Number(lineage?.changed?.() ?? 0)
-
-    const cached = this.#listCellFoldersCache.get(dir)
-    if (cached?.revision === revision) return cached.result
-
-    const pending = this.#listCellFoldersPending.get(dir)
-    if (pending?.revision === revision) return pending.promise
-
-    const promise = (async (): Promise<string[]> => {
-      const out: string[] = []
-      for await (const [name, handle] of dir.entries()) {
-        if (handle.kind !== 'directory') continue
-        if (!name) continue
-        if (name === '__dependencies__') continue
-        if (name === '__bees__') continue
-        if (name === '__layers__') continue
-        if (name === '__location__') continue
-        if (name.startsWith('__') && name.endsWith('__')) continue
-        out.push(name)
-      }
-      out.sort((a, b) => a.localeCompare(b))
-      if (Number(lineage?.changed?.() ?? 0) === revision) {
-        this.#listCellFoldersCache.set(dir, { revision, result: out })
-      }
-      return out
-    })()
-
-    this.#listCellFoldersPending.set(dir, { revision, promise })
-    promise.finally(() => {
-      const p = this.#listCellFoldersPending.get(dir)
-      if (p?.promise === promise) this.#listCellFoldersPending.delete(dir)
-    })
-
-    return promise
-  }
+  // listCellFolders retired: tile membership is read exclusively from
+  // the current layer's children slot via history.currentLayerAt +
+  // history.getLayerBySig. The OPFS hierarchy at hypercomb.io/<tile>/
+  // is no longer the source of truth for tile lists.
 
   // Per-revision branch detection cache. checkCellHasBranch is one OPFS
   // getDirectoryHandle + entries() iteration per cell — for an N-tile
@@ -3503,13 +3577,15 @@ export class ShowCellDrone extends Drone {
     let nextFree = 0
     const unindexed: string[] = []
 
-    // IndexNurse owns the 0000.index read path — caches the value
-    // per cell and invalidates whenever writeCellProperties touches
-    // `index`. Cold misses fall through to disk; warm reads are
-    // constant-time. The nurse is registered eagerly in side-effects
-    // so it's always present by the time render runs.
+    // IndexNurse owns the index read path — layer-slot first, 0000
+    // fallback (the legacy path; consulted only when the layer carries
+    // no properties yet). Caches per cell; invalidates on
+    // `cell:0000-changed` broadcast (both writeTilePropertiesAt and
+    // writeCellProperties emit it). Cold misses fall through to either
+    // the layer's properties slot or the 0000 file; warm reads are
+    // constant-time. Registered eagerly in side-effects.
     const indexNurse = (window as any).ioc?.get?.('@diamondcoreprocessor.com/IndexNurse') as
-      | { read: (dir: FileSystemDirectoryHandle, key: string) => Promise<number | undefined> }
+      | { read: (parentSegments: readonly string[], cellName: string, cellDir?: FileSystemDirectoryHandle, cacheKey?: string) => Promise<number | undefined> }
       | undefined
 
     // Cache key is the cell's lineage signature, never its bare folder
@@ -3536,11 +3612,15 @@ export class ShowCellDrone extends Drone {
         continue
       }
       try {
-        const cellDir = await dir.getDirectoryHandle(name, { create: false })
+        // Layer-slot read with 0000 fallback. cellDir is opportunistic
+        // — the dir may not exist for layer-only tiles, in which case
+        // getDirectoryHandle throws and we still read from the layer.
+        let cellDir: FileSystemDirectoryHandle | undefined
+        try { cellDir = await dir.getDirectoryHandle(name, { create: false }) } catch { /* layer-only tile */ }
         const cacheKey = await cellLocationSig(parentSegments, name)
         const idx = indexNurse
-          ? await indexNurse.read(cellDir, cacheKey)
-          : await readCellProperties(cellDir).then(p =>
+          ? await indexNurse.read(parentSegments, name, cellDir, cacheKey)
+          : await readTilePropertiesAt(parentSegments, name).then(p =>
               typeof p['index'] === 'number' ? (p['index'] as number) : undefined,
             )
         if (typeof idx === 'number') {
@@ -3585,11 +3665,14 @@ export class ShowCellDrone extends Drone {
         sparse[nextFree] = name
         if (!readOnly && localCellSet.has(name)) {
           try {
-            const cellDir = await dir.getDirectoryHandle(name, { create: false })
-            const cacheKey = await cellLocationSig(parentSegments, name)
-            await writeCellProperties(cellDir, { index: nextFree }, cacheKey)
+            // Lazy-patch the index into the cell's layer (canonical
+            // path). The cascade folds the new tile-layer sig into the
+            // parent's children slot; the IndexNurse picks the new
+            // value up on its next read via the cell:0000-changed
+            // broadcast. No OPFS dir lookup, no 0000 write.
+            await writeTilePropertiesAt(parentSegments, name, { index: nextFree })
           } catch (err) {
-            console.warn('[show-cell] failed to persist 0000.index for', name, err)
+            console.warn('[show-cell] failed to persist index for', name, err)
           }
         }
         nextFree++
@@ -3702,15 +3785,13 @@ export class ShowCellDrone extends Drone {
     // free slot.
     const lineage = this.resolve<any>('lineage')
     if (!lineage) return
-    const dir = await lineage.explorerDir() as FileSystemDirectoryHandle | null
-    if (!dir) return
 
+    const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
     try {
-      const cellDir = await dir.getDirectoryHandle(cell, { create: false })
-      const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
-      const cacheKey = await cellLocationSig(parentSegments, cell)
-      await writeCellProperties(cellDir, { index: targetIndex }, cacheKey)
-    } catch { /* missing cell dir */ }
+      await writeTilePropertiesAt(parentSegments, cell, { index: targetIndex })
+    } catch (err) {
+      console.warn('[show-cell] place-at failed for', cell, err)
+    }
 
     this.renderedCellsKey = ''
     this.#layerCellsCache.clear()

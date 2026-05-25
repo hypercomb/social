@@ -1,10 +1,10 @@
 // hypercomb-shared/ui/notes-viewer/notes-viewer.component.ts
 //
-// Centred modal that shows one note in full, with affordances for editing
-// the text, attaching/detaching tags, and adding another note to the same
-// tile. All editing actions delegate back to the command line in capture
-// mode — no in-place input here. That keeps every authoring path going
-// through one place that knows about gold lighting and history commit.
+// Centred modal that shows one note in full, with affordances for
+// editing the text and adding another note to the same tile. All
+// editing actions delegate back to the command line in capture mode —
+// no in-place input here. That keeps every authoring path going through
+// one place that knows about gold lighting and history commit.
 
 import { Component, computed, signal, type OnDestroy } from '@angular/core'
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
@@ -13,18 +13,12 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 type Note = {
   id: string
   text: string
-  createdAt: number
-  updatedAt?: number
-  tags?: string[]
+  children: Note[]
 }
 
 type NotesService = {
   notesFor(cellLabel: string): Note[]
   getNotes(cellLabel: string): Promise<Note[]>
-}
-
-type TagRegistry = {
-  names: string[]
 }
 
 @Component({
@@ -40,7 +34,6 @@ export class NotesViewerComponent implements OnDestroy {
   readonly cellLabel = signal<string | null>(null)
   readonly noteId = signal<string | null>(null)
   readonly #version = signal(0)
-  readonly tagPickerOpen = signal(false)
 
   readonly note = computed<Note | null>(() => {
     this.#version()
@@ -51,16 +44,6 @@ export class NotesViewerComponent implements OnDestroy {
     return svc?.notesFor(cell).find(n => n.id === id) ?? null
   })
 
-  readonly availableTags = computed<readonly string[]>(() => {
-    this.#version()
-    const registry = get('@hypercomb.social/TagRegistry') as TagRegistry | undefined
-    const all = registry?.names ?? []
-    const current = new Set(this.note()?.tags ?? [])
-    return all.filter(t => !current.has(t)).sort()
-  })
-
-  readonly currentTags = computed<readonly string[]>(() => this.note()?.tags ?? [])
-
   #cleanups: (() => void)[] = []
 
   constructor() {
@@ -68,7 +51,6 @@ export class NotesViewerComponent implements OnDestroy {
       if (!p?.cellLabel || !p?.noteId) return
       this.cellLabel.set(p.cellLabel)
       this.noteId.set(p.noteId)
-      this.tagPickerOpen.set(false)
       this.visible.set(true)
       // Announce visibility so the global escape cascade can close us
       // ahead of clearing selection. Without this, Escape falls through
@@ -101,7 +83,6 @@ export class NotesViewerComponent implements OnDestroy {
 
   close(): void {
     this.visible.set(false)
-    this.tagPickerOpen.set(false)
     this.cellLabel.set(null)
     this.noteId.set(null)
     EffectBus.emit('notes:viewer', { active: false })
@@ -124,25 +105,6 @@ export class NotesViewerComponent implements OnDestroy {
     this.close()
   }
 
-  toggleTagPicker(): void {
-    this.tagPickerOpen.update(v => !v)
-  }
-
-  attachTag(tag: string): void {
-    const cell = this.cellLabel()
-    const note = this.note()
-    if (!cell || !note) return
-    EffectBus.emit('note:tag', { cellLabel: cell, noteId: note.id, tag })
-    this.tagPickerOpen.set(false)
-  }
-
-  detachTag(tag: string): void {
-    const cell = this.cellLabel()
-    const note = this.note()
-    if (!cell || !note) return
-    EffectBus.emit('note:tag', { cellLabel: cell, noteId: note.id, tag, remove: true })
-  }
-
   /** Backdrop click → close. */
   onBackdrop(event: MouseEvent): void {
     if (event.target === event.currentTarget) this.close()
@@ -155,16 +117,6 @@ export class NotesViewerComponent implements OnDestroy {
       this.close()
     }
   }
-
-  formatDate(ts: number): string {
-    try {
-      return new Date(ts).toLocaleString()
-    } catch {
-      return ''
-    }
-  }
-
-  trackTag = (_i: number, tag: string): string => tag
 
   // ── service resolution ──────────────────────────────────
 

@@ -6,6 +6,15 @@ import { WebSocketServer, WebSocket } from 'ws'
 
 const PORT = 7777
 
+// Auto-expire window for ephemeral-range (20000-29999) events. Long
+// enough that a receiver who reloads / joins shortly after a publisher
+// shares can still see the bundle (share-approved + layer-received +
+// resource-pull) and complete an adopt — short enough that test-session
+// debris doesn't accumulate across hours of dev work. 5 minutes is a
+// comfortable middle ground for the local dev relay; tighten in
+// production hosting where the relay can be authoritatively cleared.
+const EPHEMERAL_TTL_SECS = 300
+
 type NostrEvent = {
   id: string
   pubkey: string
@@ -30,6 +39,16 @@ type Filter = {
 const events = new Map<string, NostrEvent>()
 const subs = new Map<string, Sub[]>()
 
+// Per-pubkey blocklist. Dev-only — there's no authn on this relay, so
+// any connected client can block any pubkey. The block has three
+// effects: (a) drop every cached event from that pubkey immediately,
+// (b) refuse to store new EVENT messages from that pubkey going
+// forward, (c) skip events from that pubkey on REQ even if they
+// somehow landed (defence-in-depth in case (b) regresses). Persists
+// only for the lifetime of the relay process — restart wipes the
+// blocklist along with the in-memory event store.
+const blockedPubkeys = new Set<string>()
+
 // NIP-40 — events carrying an `expiration` tag past the current unix
 // time MUST NOT be delivered to subscribers. Returning true here means
 // the event is dead-on-arrival from the subscriber's perspective and
@@ -42,6 +61,24 @@ function isExpired(e: NostrEvent, nowSecs: number): boolean {
   const exp = Number(tag[1])
   if (!Number.isFinite(exp)) return false
   return exp <= nowSecs
+}
+
+// Block-check that handles both full-key matches and short-prefix
+// matches. HC_BLOCK stores either:
+//   - the FULL 64-hex pubkey (for every pubkey that matched the
+//     block call's prefix at the time of the call), AND
+//   - the short prefix itself (when a prefix was passed) so future
+//     EVENT messages from never-seen-before pubkeys matching the
+//     prefix still get rejected.
+// This function iterates the blocklist and prefix-matches.
+function isBlocked(pubkey: string): boolean {
+  if (blockedPubkeys.has(pubkey)) return true
+  // Short-prefix entries: any blocklist entry whose length < 64 is
+  // treated as a prefix. Match if this pubkey starts with it.
+  for (const entry of blockedPubkeys) {
+    if (entry.length < 64 && pubkey.startsWith(entry)) return true
+  }
+  return false
 }
 
 function matchesFilter(e: NostrEvent, f: Filter): boolean {
@@ -86,6 +123,17 @@ wss.on('connection', (ws) => {
       const event = msg[1] as NostrEvent
       if (!event?.id) return
 
+      // Drop EVENTs from blocked pubkeys before storage / fanout. The
+      // OK frame's accepted bit is false so the publisher sees the
+      // rejection; the reason string mentions the policy so a future
+      // UI could show it. Existing cached events from this pubkey
+      // were already evicted at block time, so there's nothing to
+      // unsubscribe — just don't accept the new one.
+      if (event.pubkey && isBlocked(event.pubkey)) {
+        send(ws, ['OK', event.id, false, `blocked: pubkey ${event.pubkey.slice(0,8)} is on this relay's blocklist`])
+        return
+      }
+
       // NIP-01 / NIP-33 replaceability — without this the dev relay
       // accumulates one stored event per publish, so a peer that
       // republishes its layer ten times leaves ten ghost copies that
@@ -115,6 +163,47 @@ wss.on('connection', (ws) => {
           if (stored.pubkey !== event.pubkey) continue
           events.delete(id)
         }
+      } else if (event.kind >= 20000 && event.kind < 30000) {
+        // NIP-01 says ephemeral range MUST NOT be stored. We deliberately
+        // violate that for paired-channel (kind 29010) because the adopt
+        // flow REQUIRES the share-approved + layer-received bundle to
+        // arrive in the receiver's session BEFORE the user clicks adopt.
+        // A purely-fan-out relay misses every receiver that joined after
+        // the publisher's burst — adopt then has nothing to look up.
+        //
+        // Compromise: store but auto-expire fast (EPHEMERAL_TTL_SECS).
+        // The periodic sweep below evicts entries older than that, so
+        // past-session events don't pollute fresh subscribers, but
+        // late joiners within the TTL window still get the bundle they
+        // need to materialise the facade + adopt.
+        //
+        // We piggyback the sweep on the existing isExpired helper by
+        // stamping a synthetic `expiration` tag on the event before
+        // storage. Forging the tag is a relay-local concern (clients
+        // never re-publish what they receive from us) so the stamp
+        // doesn't leak.
+        const stampedTags = (event.tags || []).slice()
+        const hasExpiration = stampedTags.some(t => t[0] === 'expiration')
+        if (!hasExpiration) {
+          const expireAtSec = Math.floor(Date.now() / 1000) + EPHEMERAL_TTL_SECS
+          stampedTags.push(['expiration', String(expireAtSec)])
+        }
+        const stampedEvent: NostrEvent = { ...event, tags: stampedTags }
+
+        const existed = events.has(stampedEvent.id)
+        events.set(stampedEvent.id, stampedEvent)
+        send(ws, ['OK', stampedEvent.id, true, ''])
+
+        if (!existed) {
+          for (const [subId, subList] of subs) {
+            for (const sub of subList) {
+              if (sub.filters.some(f => matchesFilter(stampedEvent, f))) {
+                send(sub.ws, ['EVENT', subId, stampedEvent])
+              }
+            }
+          }
+        }
+        return
       }
 
       // No signature verification for local dev relay
@@ -146,12 +235,16 @@ wss.on('connection', (ws) => {
       // Send matching stored events. Expired events (NIP-40) are
       // skipped — same effect as if they'd already been swept from
       // storage, just with finer-grained timing so subscribers never
-      // receive past-its-TTL data even between sweep ticks.
+      // receive past-its-TTL data even between sweep ticks. Blocked
+      // pubkeys are also skipped (defence-in-depth — the EVENT path
+      // already refuses to store them, but if storage gets seeded
+      // some other way the REQ pass catches it).
       let sent = 0
       const limit = filters.reduce((min, f) => Math.min(min, f.limit ?? Infinity), Infinity)
       const nowSecs = Math.floor(Date.now() / 1000)
       for (const event of events.values()) {
         if (isExpired(event, nowSecs)) continue
+        if (event.pubkey && isBlocked(event.pubkey)) continue
         if (filters.some(f => matchesFilter(event, f))) {
           send(ws, ['EVENT', subId, event])
           sent++
@@ -169,6 +262,82 @@ wss.on('connection', (ws) => {
         if (filtered.length) subs.set(subId, filtered)
         else subs.delete(subId)
       }
+    } else if (type === 'HC_BLOCK') {
+      // Custom: add a pubkey to the blocklist. Drops every cached
+      // event from that pubkey immediately so subscribers see the
+      // change on their next render, and refuses future EVENT
+      // messages from the pubkey (returns OK false with a reason
+      // string). No auth — dev-only relay, loopback only.
+      const pubkey = String(msg[1] ?? '').toLowerCase()
+      if (!/^[0-9a-f]{64}$/.test(pubkey) && !/^[0-9a-f]{8,16}$/.test(pubkey)) {
+        send(ws, ['NOTICE', `HC_BLOCK: invalid pubkey "${pubkey}"`])
+        return
+      }
+      // Accept both full 64-hex and short prefixes (8-16 hex) because
+      // the host-side UI only carries truncated forms in many code
+      // paths. Match by prefix when shorter than 64.
+      const matcher = pubkey.length === 64
+        ? (pk: string) => pk === pubkey
+        : (pk: string) => pk.startsWith(pubkey)
+      // Find every matching FULL pubkey from the current event store
+      // and add ALL of them to the block set, so a short-prefix block
+      // catches every pubkey that prefix matches.
+      const fullKeysHit = new Set<string>()
+      for (const e of events.values()) {
+        if (e.pubkey && matcher(e.pubkey)) fullKeysHit.add(e.pubkey)
+      }
+      for (const pk of fullKeysHit) blockedPubkeys.add(pk)
+      // Also store the prefix itself so future EVENT from a pubkey
+      // we've never seen before (but matching the prefix) still gets
+      // rejected. The EVENT path needs a check that handles prefixes.
+      if (pubkey.length < 64) blockedPubkeys.add(pubkey)
+      // Wipe cached events.
+      let removed = 0
+      for (const [id, e] of events) {
+        if (e.pubkey && matcher(e.pubkey)) { events.delete(id); removed++ }
+      }
+      send(ws, ['NOTICE', `HC_BLOCK: blocked ${fullKeysHit.size} full pubkey(s) matching "${pubkey}", wiped ${removed} event(s)`])
+      console.log(`[local-relay] HC_BLOCK "${pubkey}" — full pubkeys: ${[...fullKeysHit].join(',') || '(none)'}, wiped ${removed} event(s)`)
+    } else if (type === 'HC_UNBLOCK') {
+      const pubkey = String(msg[1] ?? '').toLowerCase()
+      let removed = 0
+      // Remove every matching entry from the block set (handles both
+      // full keys and the prefix entry that HC_BLOCK may have added).
+      for (const pk of [...blockedPubkeys]) {
+        if (pk === pubkey || pk.startsWith(pubkey) || (pubkey.length < 64 && pk.startsWith(pubkey))) {
+          blockedPubkeys.delete(pk); removed++
+        }
+      }
+      send(ws, ['NOTICE', `HC_UNBLOCK: removed ${removed} blocklist entr${removed === 1 ? 'y' : 'ies'} matching "${pubkey}"`])
+      console.log(`[local-relay] HC_UNBLOCK "${pubkey}" — removed ${removed} entr${removed === 1 ? 'y' : 'ies'}`)
+    } else if (type === 'HC_CLEAR') {
+      // Custom: wipe every stored event. Dev-only convenience for the
+      // host to nuke stale-session ghosts without restarting the relay
+      // process. Not a Nostr standard — this relay is dev-only and the
+      // ws is loopback, so there's no auth required.
+      //
+      // After clearing, broadcast a per-sig empty-children "EVENT" to
+      // every subscriber so their swarm caches drop the previous bag
+      // immediately instead of waiting for PEER_STALE_MS. We can't
+      // forge signatures, so we send a kind-1 NOTICE-shaped marker and
+      // let the client side handle it as a hint to clear local peer
+      // caches. The receiving swarm code looks for kind 30200 events
+      // with `content: { children: [] }` from each pubkey it has cached
+      // — sending nothing here is fine, the periodic sweep will catch
+      // it. We just nuke our storage.
+      const before = events.size
+      events.clear()
+      send(ws, ['NOTICE', `HC_CLEAR: wiped ${before} event(s)`])
+      // Notify ALL connected subscribers via OK frame so their UIs can
+      // optionally repaint. Use the conventional NOTICE channel.
+      for (const sub of subs.values()) {
+        for (const s of sub) {
+          if (s.ws !== ws && s.ws.readyState === WebSocket.OPEN) {
+            send(s.ws, ['NOTICE', `HC_CLEAR: peer cleared the relay (${before} event(s) wiped)`])
+          }
+        }
+      }
+      console.log(`[local-relay] HC_CLEAR — wiped ${before} event(s)`)
     }
   })
 

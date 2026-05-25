@@ -11,7 +11,6 @@
 import { EffectBus, SignatureStore } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared/core'
 import type { SentinelBridge } from './sentinel-bridge'
-import { writeOpfsFile, terminateOpfsWorker } from './opfs-write.js'
 
 export type BootStatus =
   | { kind: 'cached' }
@@ -23,7 +22,6 @@ const MANIFEST_KEY = 'core-adapter.installed-manifest'
 const SIG_STORE_KEY = 'hypercomb.signature-store'
 const SYNC_SIG_KEY = 'sentinel.sync-signature'
 const INSTALLED_FLAG_KEY = 'hypercomb.installed'
-const BUNDLED_PKG_SIG_KEY = 'hypercomb.bundled-pkg-sig'
 
 // ensure side-effect registrations
 const _deps = [Store]
@@ -37,7 +35,6 @@ type InstallManifest = {
 }
 
 export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<void> => {
-  ;(window as any).__hcBoot?.('ensureInstall entry')
   // register the central signature allowlist — scripts in the store skip re-verification
   const sigStore = new SignatureStore()
   register('@hypercomb/SignatureStore', sigStore)
@@ -49,7 +46,6 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
   }
 
   await store.initialize()
-  ;(window as any).__hcBoot?.('ensureInstall: store.initialize done')
 
   if (!store.opfsAvailable) {
     console.warn('[ensure-install] OPFS unavailable — skipping install; app will boot without persistence')
@@ -57,33 +53,23 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
     return
   }
 
-  // Read the bundled manifest sig shipped with this build of the web shell.
-  // Used to detect a stale OPFS cache when the deployed shell carries
-  // newer content than what's installed (e.g., user reloads after a
-  // deploy but before DCP has had a chance to push).
-  const bundled = await fetchBundledPackage()
-
-  // Fast path: cached install present and intact → boot from cache.
-  // Before short-circuiting we ask the sentinel to apply any pending
-  // diff so a fresh deploy lands on the next reload instead of waiting
-  // for a DCP toggle.
+  // Push-only contract. Boot reads OPFS only — no `/content/manifest.json`
+  // fetch, no staleness comparison against bundled, no silent fallback
+  // install. The boot path's job is:
+  //
+  //   1) If a usable cached install is on disk → boot from cache.
+  //   2) Otherwise → emit `install-needed` and let the user explicitly
+  //      open DCP (push-driven install) or click "Upgrade Hypercomb"
+  //      (user-initiated bundled refresh — see {@link upgradeFromBundled}).
+  //
+  // The previous behaviour fetched `/content/manifest.json` on every
+  // single boot just to do a staleness diff against the cached sigs.
+  // That meant every reload paid a network round-trip and could
+  // silently reinstall from the shell's bundled content even when DCP
+  // was the user's intended source of truth. Push-only means: DCP
+  // initiates upgrades, the user initiates upgrades. Boot never does.
   const cachedManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
-  // Self-heal fires only when the bundled package signature changes (new
-  // deploy). Comparing cached bees against bundled bees would mis-fire any
-  // time the user disabled a drone via DCP — cached.bees is shorter by
-  // design in that case, and a wipe-and-reinstall-from-bundled would
-  // resurrect the disabled drone on every reload.
-  const lastBundledSig = localStorage.getItem(BUNDLED_PKG_SIG_KEY)
-  const stale = cachedManifest && bundled && lastBundledSig !== null && lastBundledSig !== bundled.packageSig
-  if (stale) {
-    console.warn('[ensure-install] bundled package sig changed — invalidating cache')
-    localStorage.removeItem(MANIFEST_KEY)
-    localStorage.removeItem(SYNC_SIG_KEY)
-    await purgeStaleOpfsArtifacts(store)
-  }
-  if (bundled) localStorage.setItem(BUNDLED_PKG_SIG_KEY, bundled.packageSig)
-  const usableCache = !stale && cachedManifest && cachedManifest.bees.length > 0
-  ;(window as any).__hcBoot?.(`ensureInstall: usableCache=${!!usableCache}`)
+  const usableCache = cachedManifest && cachedManifest.bees.length > 0
   if (usableCache) {
     // Verify EVERY bee + EVERY dep + EVERY layer file is in OPFS. Partial
     // installs (e.g. Edge cold-load with SW race, network glitch mid-fetch)
@@ -102,7 +88,6 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
           console.warn('[ensure-install] boot resync failed; continuing with cached state', err)
         }
       }
-      ;(window as any).__hcBoot?.('ensureInstall: cached fast path')
       console.log('[ensure-install] booting from cached state')
       restoreSignatureStore(sigStore)
       restoreCachedBeeDeps()
@@ -121,39 +106,79 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
     await purgeStaleOpfsArtifacts(store)
   }
 
-  // Sentinel preferred. If unavailable, fall back to installing from the
-  // bundled `/content/` shipped with the shell so dev/offline still works.
+  // Cold boot / cache miss. Only DCP push is allowed to install; no
+  // bundled silent fallback. If a sentinel is already wired (rare —
+  // main.ts passes null here per push-only contract), let it try.
+  // Otherwise surface install-needed so the install-prompt UI can
+  // route the user to DCP or to the explicit Upgrade button.
   if (sentinel) {
     console.log('[ensure-install] cold/refresh boot — awaiting sentinel sync')
     EffectBus.emit('boot:status', { kind: 'installing' } as BootStatus)
     await resyncFromSentinel(sentinel)
-  } else if (bundled) {
-    console.log('[ensure-install] no sentinel — installing from bundled /content/')
-    EffectBus.emit('boot:status', { kind: 'installing' } as BootStatus)
-    await installFromBundled(bundled, sigStore)
-  } else {
-    console.warn('[ensure-install] no sentinel and no bundled content — install needed')
-    EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-sentinel' } as BootStatus)
+    const postSyncManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
+    if (!postSyncManifest || postSyncManifest.bees.length === 0) {
+      EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'sentinel-empty' } as BootStatus)
+      return
+    }
+    EffectBus.emit('boot:status', { kind: 'installed' } as BootStatus)
     return
   }
 
-  // After sync: if nothing landed in OPFS, DCP is reachable but has no
-  // content for us. Surface as install-needed so the shell prompts the
-  // user to install at DCP rather than rendering an empty hex grid.
-  const postSyncManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
-  if (!postSyncManifest || postSyncManifest.bees.length === 0) {
-    EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'sentinel-empty' } as BootStatus)
-    return
+  console.log('[ensure-install] no cached install + no sentinel — surfacing install-needed')
+  EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-sentinel' } as BootStatus)
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// User-initiated bundled upgrade. Fired explicitly by the "Upgrade
+// Hypercomb" button in the install prompt UI. Walks the same path
+// the old auto-fallback used (fetch /content/manifest.json → install
+// every sig listed → reload), but only on click — not at boot.
+// ─────────────────────────────────────────────────────────────────────
+
+/**
+ * Force an install from the shell's bundled `/content/` package. Called
+ * by the "Upgrade Hypercomb" UI button. Unlike {@link ensureInstall},
+ * which is automatic and push-only, this path is ALWAYS user-initiated.
+ * On success the caller is expected to `location.reload()` so the
+ * freshly-installed bees take over.
+ *
+ * Returns `true` when at least one bee landed in OPFS, `false`
+ * otherwise (network down, no bundled package, partial fetch).
+ */
+export const upgradeFromBundled = async (): Promise<boolean> => {
+  const store = get('@hypercomb.social/Store') as Store | undefined
+  if (!store || !store.opfsAvailable) {
+    console.warn('[upgrade-from-bundled] Store unavailable')
+    return false
   }
-  EffectBus.emit('boot:status', { kind: 'installed' } as BootStatus)
+  const sigStore = get('@hypercomb/SignatureStore') as SignatureStore | undefined
+  if (!sigStore) {
+    console.warn('[upgrade-from-bundled] SignatureStore not registered')
+    return false
+  }
+  const bundled = await fetchBundledPackage()
+  if (!bundled) {
+    console.warn('[upgrade-from-bundled] no bundled /content/manifest.json available')
+    return false
+  }
+  // Wipe stale artifacts before reinstall so signatures dropped from
+  // the new bundle don't linger and load on next boot.
+  const cached = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
+  if (cached) {
+    localStorage.removeItem(MANIFEST_KEY)
+    localStorage.removeItem(SYNC_SIG_KEY)
+    await purgeStaleOpfsArtifacts(store)
+  }
+  await installFromBundled(bundled, sigStore)
   // iOS Safari: the SW may not be controlling the page on first registration
   // (the controllerchange event is unreliable). Reload so the SW intercepts
   // dep/bee fetches and serves them from the seeded cache on second load.
   if (/iP(hone|ad|od)/i.test(navigator.userAgent)) {
-    ;(window as any).__hcBoot?.('ensureInstall: iOS post-install reload')
+    ;(window as any).__hcBoot?.('upgradeFromBundled: iOS post-install reload')
     window.location.reload()
     await new Promise(() => {})
   }
+  return true
 }
 
 // -------------------------------------------------
@@ -184,6 +209,15 @@ const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
   }
 }
 
+const bundledDiffersFromCached = (bundled: BundledPackage, cached: InstallManifest): boolean => {
+  if (bundled.bees.length !== cached.bees.length) return true
+  const cachedSet = new Set(cached.bees)
+  for (const sig of bundled.bees) {
+    if (!cachedSet.has(sig)) return true
+  }
+  return false
+}
+
 const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureStore): Promise<void> => {
   const store = get('@hypercomb.social/Store') as Store | undefined
   if (!store) return
@@ -191,6 +225,8 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   // Mirror resyncFromSentinel's layout exactly: bees/deps in flat dirs,
   // layers under __layers__/sentinel/. This way the boot fast path and
   // script-preloader find content at the same paths regardless of source.
+  const layerDir = await store.domainLayersDirectory('sentinel', true)
+
   const fetchBytes = async (path: string): Promise<ArrayBuffer | null> => {
     try {
       const res = await fetch(path, { cache: 'no-store' })
@@ -204,37 +240,25 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   const writeAll = async (
     sigs: string[],
     urlFor: (sig: string) => string,
-    dirs: string[],
+    dir: FileSystemDirectoryHandle,
     nameFor: (sig: string) => string,
-    cachePathFor?: (sig: string) => string,
-    cacheType = 'application/javascript; charset=utf-8',
   ): Promise<number> => {
     let written = 0
     await Promise.all(sigs.map(async (sig) => {
       const bytes = await fetchBytes(urlFor(sig))
       if (!bytes) return
-      if (cachePathFor) await seedCacheEntry(cachePathFor(sig), bytes, cacheType)
-      await writeOpfsFile(dirs, nameFor(sig), bytes)
+      const handle = await dir.getFileHandle(nameFor(sig), { create: true })
+      const writable = await handle.createWritable()
+      await writable.write(bytes)
+      await writable.close()
       written++
     }))
     return written
   }
 
-  const beeCount = await writeAll(
-    bundled.bees,
-    (s) => `/content/__bees__/${s}.js`,
-    ['__bees__'],
-    (s) => `${s}.js`,
-    (s) => `/opfs/__bees__/${s}.js`,
-  )
-  const depCount = await writeAll(
-    bundled.dependencies,
-    (s) => `/content/__dependencies__/${s}.js`,
-    ['__dependencies__'],
-    (s) => `${s}.js`,
-    (s) => `/opfs/__dependencies__/${s}.js`,
-  )
-  const layerCount = await writeAll(bundled.layers, (s) => `/content/__layers__/${s}.json`, ['__layers__', 'sentinel'], (s) => s)
+  const beeCount = await writeAll(bundled.bees, (s) => `/content/__bees__/${s}.js`, store.bees, (s) => `${s}.js`)
+  const depCount = await writeAll(bundled.dependencies, (s) => `/content/__dependencies__/${s}.js`, store.dependencies, (s) => `${s}.js`)
+  const layerCount = await writeAll(bundled.layers, (s) => `/content/__layers__/${s}.json`, layerDir, (s) => s)
 
   // Loud failure mode. If any file failed to land, surface it now —
   // otherwise the next boot's spot-check will silently wipe and retry,
@@ -254,7 +278,6 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   if (bundled.beeDeps) (globalThis as any).__hypercombBeeDeps = bundled.beeDeps
   sigStore.trustAll([...bundled.bees, ...bundled.dependencies, ...bundled.layers])
   localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
-  terminateOpfsWorker()
   console.log(`[ensure-install] bundled install complete: ${bundled.packageSig.slice(0, 12)} (${beeCount}/${bundled.bees.length} bees, ${depCount}/${bundled.dependencies.length} deps, ${layerCount}/${bundled.layers.length} layers)`)
 }
 
@@ -276,7 +299,7 @@ const purgeStaleOpfsArtifacts = async (store: Store): Promise<void> => {
       try { await dir.removeEntry(name, { recursive: true }) } catch { /* skip */ }
     }
   }
-  await Promise.all([purgeDir(store.bees), purgeDir(store.dependencies), purgeDir(store.resources)])
+  await Promise.all([purgeDir(store.bees), purgeDir(store.dependencies)])
   try {
     for await (const [, handle] of store.layers.entries()) {
       if (handle.kind === 'directory') await purgeDir(handle as FileSystemDirectoryHandle)
@@ -317,16 +340,16 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
   for (const file of files) {
     switch (file.kind) {
       case 'layer':
-        await writeBytes(['__layers__', 'sentinel'], file.signature, file.bytes)
+        await writeBytes(layerDir, file.signature, file.bytes)
         await seedCacheEntry(`/opfs/__layers__/${file.signature}.json`, file.bytes, 'application/json; charset=utf-8')
         break
       case 'bee':
+        await writeBytes(store.bees, `${file.signature}.js`, file.bytes)
         await seedCacheEntry(`/opfs/__bees__/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
-        await writeBytes(['__bees__'], `${file.signature}.js`, file.bytes)
         break
       case 'dependency':
+        await writeBytes(store.dependencies, `${file.signature}.js`, file.bytes)
         await seedCacheEntry(`/opfs/__dependencies__/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
-        await writeBytes(['__dependencies__'], `${file.signature}.js`, file.bytes)
         break
     }
   }
@@ -351,7 +374,6 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
     localStorage.setItem(INSTALLED_FLAG_KEY, 'true')
   }
 
-  terminateOpfsWorker()
   console.log(`[ensure-install] resync complete: ${syncSig.slice(0, 12)} (${enabledBees.length} bees, ${enabledDeps.length} deps, ${enabledLayers.length} layers)`)
 }
 
@@ -383,8 +405,11 @@ const tryParseManifest = (json: string): InstallManifest | null => {
   }
 }
 
-const writeBytes = async (dirs: string[], name: string, bytes: ArrayBuffer): Promise<void> => {
-  await writeOpfsFile(dirs, name, bytes)
+const writeBytes = async (dir: FileSystemDirectoryHandle, name: string, bytes: ArrayBuffer): Promise<void> => {
+  const handle = await dir.getFileHandle(name, { create: true })
+  const writable = await handle.createWritable()
+  await writable.write(bytes)
+  await writable.close()
 }
 
 const seedCacheEntry = async (path: string, bytes: ArrayBuffer, contentType: string): Promise<void> => {

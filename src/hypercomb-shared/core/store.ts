@@ -15,6 +15,13 @@ export type DevManifest = {
 
 export class Store extends EventTarget {
 
+  /** User-content root. Historically named `hypercomb.io/` — renamed to
+   *  the underscored form so the OPFS root inventory is uniformly
+   *  `__*__` per Jaime's directive. Property name on Store stays
+   *  `hypercombRoot` (consumers untouched); only the on-disk dir name
+   *  moved. Old `hypercomb.io/` dirs from prior sessions are orphans
+   *  swept by `/sweep`. */
+  public static readonly HIVE_DIRECTORY = '__hive__'
   public static readonly BEES_DIRECTORY = '__bees__'
   public static readonly DEPENDENCIES_DIRECTORY = '__dependencies__'
   public static readonly LAYERS_DIRECTORY = '__layers__'
@@ -112,7 +119,15 @@ export class Store extends EventTarget {
         this.manifests,
         this.optimization,
       ] = await Promise.all([
-        dir('hypercomb.io'),
+        // Architectural rule: only `__*__` folders live at the OPFS root.
+        // The user-content root was historically `hypercomb.io/` — that
+        // name is the violation Jaime called out. Renamed to `__hive__`
+        // so the root inventory reads as a clean set of system dirs.
+        // Consumers continue to use `store.hypercombRoot` as the
+        // property name; only the on-disk name changed. Pre-existing
+        // `hypercomb.io/` directories from older sessions become orphan
+        // and are cleaned by `/sweep` (task #50).
+        dir(Store.HIVE_DIRECTORY),
         dir(Store.BEES_DIRECTORY),
         dir(Store.DEPENDENCIES_DIRECTORY),
         dir(Store.LAYERS_DIRECTORY),

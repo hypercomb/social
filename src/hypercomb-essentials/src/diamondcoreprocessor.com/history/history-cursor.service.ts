@@ -265,30 +265,174 @@ export class HistoryCursorService extends EventTarget {
   }
 
   /**
-   * Step backward. Minimal step (one layer) by default; when group-step is
-   * on, skip edit-only layers and land on the earliest cell add/remove in
-   * the preceding group. Walks all the way down to position 0 (empty
-   * pre-history state).
+   * Step backward by one USER ACTION. Skips both the cascade markers
+   * AND the user-action marker that triggered the current cascade
+   * chain — landing on the PREVIOUS group's user-action marker.
+   *
+   * What's a "group"? A user-action marker plus any trailing cascade
+   * markers (lazy-patch ripples, sig swaps from downstream commits).
+   * Group leader = the user-action marker. The viewer hides cascade
+   * markers and shows only group leaders as rows, so to the user a
+   * group IS a single row.
+   *
+   * Why land on the previous group's leader instead of stopping on
+   * the current group's leader? Because the current group's leader
+   * renders the same as HEAD (the cascade above it just patches an
+   * internal property — index, tags — that's already reflected in
+   * HEAD's visual). Landing there means "undo did nothing visually."
+   * Skipping to the previous group's leader gives every undo a
+   * visible state delta — matching the viewer's row-by-row mental
+   * model.
+   *
+   * Walks all the way down to position 0 (pre-history) when the user
+   * has undone past the first marker.
    */
   undo(): void {
     if (this.#groupStepEnabled) {
       void this.#undoGroupStep()
       return
     }
-    if (this.#position > 0) this.seek(this.#position - 1)
+    void this.#stepToPrevGroupLeader()
   }
 
   /**
-   * Step forward. Minimal step by default; when group-step is on, skip
-   * edit-only layers and land on the earliest cell add/remove of the next
-   * group.
+   * Step forward by one USER ACTION. Mirror of {@link undo}: walks
+   * past any trailing cascades of the current group and lands on the
+   * next group's user-action leader. When the cursor is at the last
+   * group, jumps to head (so the rewound flag clears).
    */
   redo(): void {
     if (this.#groupStepEnabled) {
       void this.#redoGroupStep()
       return
     }
-    if (this.#position < this.#layers.length) this.seek(this.#position + 1)
+    void this.#stepToNextGroupLeader()
+  }
+
+  /**
+   * Walk down from {@link this.#position} through any contiguous
+   * cascade markers to the current group's user-action leader, then
+   * step past it and walk further down through the previous group's
+   * cascades to land on THAT group's leader. Result: one press =
+   * undo one user-meaningful step.
+   *
+   * Edge cases:
+   *  - `position <= 0` → no-op (already pre-history).
+   *  - Current leader is position 1 (the empty `00000000` marker) or
+   *    falls below it during the walk → land at 0 (pre-history).
+   */
+  async #stepToPrevGroupLeader(): Promise<void> {
+    if (this.#position <= 0) return
+    const currentLeader = await this.#findGroupLeader(this.#position)
+    if (currentLeader < 1) {
+      this.seek(0)
+      return
+    }
+    // Step past the current group's leader to the previous group's
+    // top, then walk down through cascades to find the leader.
+    const prevLeader = await this.#findGroupLeader(currentLeader - 1)
+    this.seek(Math.max(0, prevLeader))
+  }
+
+  /**
+   * Walk forward from {@link this.#position} past any contiguous
+   * cascade markers and land on the next group's user-action leader.
+   *
+   * Special case for the HEAD group: if the target's group runs all
+   * the way up to {@link this.#layers.length} (i.e. everything above
+   * the target is a cascade chain trailing it), land on `max` instead
+   * of the target. That makes the cursor reach actual head (rewound
+   * flips to false) in one press — otherwise the cursor would stop on
+   * the user-action leader of the head group and `rewound` would stay
+   * true, requiring a second redo press for "Save As" to disappear
+   * and the rewound notification to clear.
+   *
+   * If walking falls off the top before finding a non-cascade,
+   * clamp to `max` (head).
+   */
+  async #stepToNextGroupLeader(): Promise<void> {
+    const max = this.#layers.length
+    if (this.#position >= max) return
+
+    let target = this.#position + 1
+    while (target <= max && await this.#isCascadeAtPosition(target)) {
+      target += 1
+    }
+    if (target > max) {
+      // No non-cascade found between current position and max — every
+      // marker above us is a cascade. Land at max directly.
+      this.seek(max)
+      return
+    }
+
+    // target is now the next group's user-action leader (non-cascade).
+    // Check whether anything ABOVE target is also a non-cascade. If
+    // only cascades remain, target IS the head group's leader — promote
+    // the landing to max so rewound clears.
+    let probe = target + 1
+    while (probe <= max && await this.#isCascadeAtPosition(probe)) {
+      probe += 1
+    }
+    if (probe > max) {
+      this.seek(max)
+    } else {
+      this.seek(target)
+    }
+  }
+
+  /**
+   * Walk down from `position` through any contiguous cascade markers
+   * until landing on the user-action leader of `position`'s group.
+   * Returns the leader's 1-based index, or 0 if the walk falls off
+   * the bottom (i.e., the entire chain from `position` down to 1 is
+   * cascades — pathological, shouldn't happen since position 1
+   * (`00000000`, the empty start) is never a cascade).
+   *
+   * Position 1's empty start marker is always treated as a leader
+   * (its `#isCascadeAtPosition` returns false because there's no
+   * preceding marker to diff against).
+   */
+  async #findGroupLeader(position: number): Promise<number> {
+    if (position <= 0) return 0
+    let leader = position
+    while (leader >= 2 && await this.#isCascadeAtPosition(leader)) {
+      leader -= 1
+    }
+    return leader
+  }
+
+  /**
+   * True when the layer at `position` differs from the layer at
+   * `position-1` ONLY by a 1-for-1 cell sig swap — one added, one
+   * removed, no other diffs. That shape is the cascade fingerprint:
+   * a child layer's bytes changed downstream, so the parent's
+   * children slot has the old child sig replaced with the new one,
+   * but nothing else moves. Any user-initiated edit (add a tile, edit
+   * content, change a tag) produces a different diff shape on this
+   * layer.
+   *
+   * Returns false at position 1 (no prior to compare against) and
+   * outside [1, #layers.length].
+   */
+  async #isCascadeAtPosition(position: number): Promise<boolean> {
+    if (position < 1 || position > this.#layers.length) return false
+    if (position < 2) return false // first marker has no prior to compare
+    const currentSig = this.#layers[position - 1].layerSig
+    const previousSig = this.#layers[position - 2].layerSig
+    const [currentContent, previousContent] = await Promise.all([
+      this.#loadContentForSig(currentSig),
+      this.#loadContentForSig(previousSig),
+    ])
+    if (!currentContent || !previousContent) return false
+    const diffs = diffLayers(previousContent, currentContent)
+    if (diffs.length !== 2) return false
+    let added = 0, removed = 0
+    for (const d of diffs) {
+      if (d.kind === 'cell-added') added++
+      else if (d.kind === 'cell-removed') removed++
+      else return false
+    }
+    return added === 1 && removed === 1
   }
 
   /**

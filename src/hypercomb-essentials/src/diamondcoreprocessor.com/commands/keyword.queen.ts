@@ -1,6 +1,7 @@
 // diamondcoreprocessor.com/commands/keyword.queen.ts
 
 import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
+import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 
 /**
  * /keyword — add or remove keywords (tags) on selected tiles.
@@ -32,32 +33,33 @@ export class KeywordQueenBee extends QueenBee {
     const selectedLabels = selection ? Array.from(selection.selected) : []
 
     if (selectedLabels.length > 0 && lineage) {
-      // Apply to all selected tiles
-      const dir = await lineage.explorerDir()
-      if (dir) {
+      // Apply to all selected tiles via the layer-slot tile-properties
+      // API. No OPFS dir consulted or minted — tags travel in the tile's
+      // layer's properties slot.
+      const parentSegments = (lineage as { explorerSegments?: () => readonly string[] }).explorerSegments?.() ?? []
+      {
         const updates: { cell: string; tag: string; color?: string }[] = []
 
         for (const label of selectedLabels) {
           for (const op of parsed) {
             try {
-              const cellDir = await dir.getDirectoryHandle(label, { create: true })
-              const props = await readProps(cellDir)
-              const tags: string[] = Array.isArray(props['tags']) ? props['tags'] : []
+              const props = await readTilePropertiesAt(parentSegments, label)
+              const tags: string[] = Array.isArray(props['tags']) ? [...props['tags'] as string[]] : []
 
               if (op.remove) {
                 const idx = tags.indexOf(op.tag)
                 if (idx >= 0) {
                   tags.splice(idx, 1)
-                  await writeProps(cellDir, { tags })
+                  await writeTilePropertiesAt(parentSegments, label, { tags })
                 }
               } else {
                 if (!tags.includes(op.tag)) {
                   tags.push(op.tag)
-                  await writeProps(cellDir, { tags })
+                  await writeTilePropertiesAt(parentSegments, label, { tags })
                 }
               }
               updates.push({ cell: label, tag: op.tag, color: op.color })
-            } catch { /* skip inaccessible tiles */ }
+            } catch (err) { console.warn('[keyword] update failed for', label, err) }
           }
         }
 

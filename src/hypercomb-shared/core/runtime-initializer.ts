@@ -230,6 +230,65 @@ const _runInitializeRuntime = async (
   await lineage?.initialize?.()
   ;(window as any).__hcBoot?.('lineage.initialize done')
 
+  // Boot-time data preload. Two-path access discipline says renders
+  // should hit the cache exclusively; bag scans are the cold-miss
+  // fallback only. To make that real, warm the cache here BEFORE the
+  // first drone heartbeat — by the time show-cell asks for layers,
+  // they're already in `#preloaderCache` / `#parsedLayerCache`.
+  //
+  // Step 1: `preloadAllBags` indexes every bag's head marker (cheap
+  //          enumerate + one read per bag). After this, every lineage's
+  //          head sig is in cache.
+  // Step 2: `preloadFromRoot(rootSig)` walks layer.children from the
+  //          root, fetching every reachable descendant via the
+  //          cache-first `getLayerBySig` primitive. Cold descendants
+  //          land in cache as the walk finds them.
+  //
+  // Logs in both methods show counts + timing so a stuck preload is
+  // visible. Failures are non-fatal: cold render is correct, just slower.
+  const historyService = get('@diamondcoreprocessor.com/HistoryService') as {
+    preloadAllBags?: () => Promise<void>
+    preloadFromRoot?: (rootSig: string) => Promise<void>
+    sign?: (l: { explorerSegments: () => readonly string[] }) => Promise<string>
+    latestMarkerSigFor?: (lineageSig: string, name: string) => Promise<string>
+  } | undefined
+  console.log('[preload] runtime-initializer reached preload step. history methods:', {
+    historyExists: !!historyService,
+    preloadAllBags: typeof historyService?.preloadAllBags,
+    preloadFromRoot: typeof historyService?.preloadFromRoot,
+    sign: typeof historyService?.sign,
+    latestMarkerSigFor: typeof historyService?.latestMarkerSigFor,
+  })
+  if (historyService?.preloadAllBags) {
+    try {
+      await historyService.preloadAllBags()
+      // Walk from the lineage root's head so descendants are warmed
+      // before any render fetches them. The root lineage is sig of
+      // the empty-segments key (sha256('')); its head layer's children
+      // are the user's top-level tiles, recurse from there.
+      if (historyService.sign && historyService.latestMarkerSigFor && historyService.preloadFromRoot) {
+        const rootLineageSig = await historyService.sign({ explorerSegments: () => [] })
+        const rootHeadSig = await historyService.latestMarkerSigFor(rootLineageSig, '/')
+        console.log('[preload] root layer resolved:', {
+          rootLineageSig: rootLineageSig?.slice?.(0, 12),
+          rootHeadSig: rootHeadSig?.slice?.(0, 12),
+        })
+        if (rootHeadSig) {
+          await historyService.preloadFromRoot(rootHeadSig)
+        } else {
+          console.warn('[preload] no rootHeadSig — preloadFromRoot skipped')
+        }
+      } else {
+        console.warn('[preload] preloadFromRoot capability missing on history service')
+      }
+    } catch (err) {
+      console.warn('[runtime-initializer] preload failed (non-fatal):', err)
+    }
+  } else {
+    console.warn('[preload] HistoryService unavailable at preload step')
+  }
+  ;(window as any).__hcBoot?.('history preload done')
+
   const navigation = get('@hypercomb.social/Navigation') as Navigation | undefined
   navigation?.listen?.()
 

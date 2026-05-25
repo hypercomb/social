@@ -86,17 +86,40 @@ export class ImagePasteWorker extends Worker {
   // ── helpers ──────────────────────────────────────────────────
 
   async #createImageCell(): Promise<string | null> {
-    const lineage = get('@hypercomb.social/Lineage') as Lineage | undefined
+    // Tile creation is a layer mutation — read existing siblings from
+    // the current layer's children, generate a unique name, emit
+    // cell:added. LayerCommitter's cascade folds the new child sig
+    // into the parent layer. No OPFS dir minted; the merkle tree is
+    // where the new tile lives.
+    const lineage = get('@hypercomb.social/Lineage') as (Lineage & {
+      currentLayer?: () => Promise<unknown>
+      explorerSegments?: () => readonly string[]
+    }) | undefined
     if (!lineage) return null
 
-    const dir = await lineage.explorerDir()
-    if (!dir) return null
+    const history = get('@diamondcoreprocessor.com/HistoryService') as
+      { getLayerBySig?: (s: string) => Promise<{ name?: string } | null> } | undefined
 
-    // find a unique name: "image", "image-2", "image-3", ...
+    // Resolve existing sibling names from the layer (single source of
+    // truth for "what tiles are here"). When history/layer aren't ready
+    // yet the set stays empty and we land on 'image'; first sibling
+    // wins, the next paste resolves correctly on the following render.
     const existing = new Set<string>()
-    for await (const [key] of (dir as any).entries()) {
-      existing.add(key)
+    if (typeof lineage.currentLayer === 'function' && history?.getLayerBySig) {
+      try {
+        const layer = await lineage.currentLayer()
+        const childSigs = Array.isArray((layer as { children?: readonly unknown[] } | null)?.children)
+          ? ((layer as { children: readonly unknown[] }).children)
+          : []
+        await Promise.all(childSigs.map(async (cs) => {
+          try {
+            const child = await history.getLayerBySig!(String(cs ?? ''))
+            if (typeof child?.name === 'string' && child.name.length > 0) existing.add(child.name)
+          } catch { /* unresolvable child sig — skip */ }
+        }))
+      } catch { /* keep existing empty */ }
     }
+
     let finalName = 'image'
     if (existing.has(finalName)) {
       let counter = 2
@@ -104,8 +127,11 @@ export class ImagePasteWorker extends Worker {
       finalName = `image-${counter}`
     }
 
-    await dir.getDirectoryHandle(finalName, { create: true })
-    EffectBus.emit('cell:added', { cell: finalName })
+    const segments = (lineage.explorerSegments?.() ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+
+    EffectBus.emit('cell:added', { cell: finalName, segments })
     void new hypercomb().act()
 
     return finalName

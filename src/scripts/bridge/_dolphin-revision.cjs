@@ -1309,12 +1309,25 @@ async function pinStyleDecisions() {
       failed++; return null
     }
     const sig = put.data.sig
-    const set = await withRenderer({ op: 'bag-set', segments, cells: [sig] })
-    if (!set.ok) {
-      console.log(`   FAILED to stamp /${segments.join('/')}: ${set.error}`)
+    // Visual-bee path: write the page as a decoration of kind
+    // `visual:website:page`. `replaceKind: true` drops any prior
+    // website decoration on this cell so re-runs are idempotent.
+    // site-view.drone's renderer resolves the decoration → payload.htmlSig
+    // → resource bytes.
+    const dec = await withRenderer({
+      op: 'decoration-add',
+      segments,
+      kind: 'visual:website:page',
+      appliesTo: segments,
+      payload: { htmlSig: sig, order: 0, createdAt: Date.now() },
+      mark: 'persistent',
+      replaceKind: true,
+    })
+    if (!dec.ok) {
+      console.log(`   FAILED to stamp /${segments.join('/')}: ${dec.error}`)
       failed++; return null
     }
-    console.log(`   /${segments.join('/')} → ${sig.slice(0, 12)} (${html.length}B)`)
+    console.log(`   /${segments.join('/')} → ${sig.slice(0, 12)} (${html.length}B, dec=${dec.data.sig.slice(0, 12)})`)
     stamped++
     return sig
   }
@@ -1363,7 +1376,8 @@ async function pinStyleDecisions() {
   const dashPut = await withRenderer({ op: 'put-resource', text: dashboardHtml })
   if (!dashPut.ok) { console.log('   FAILED dashboard mint:', dashPut.error); process.exit(1) }
   const dashboardSig = dashPut.data.sig
-  // Use update to create dashboard cell at root if it doesn't exist, then bag-set the context.
+  // Use update to create dashboard cell at root if it doesn't exist, then
+  // stamp the rendered page as a `visual:website:page` decoration.
   const dashUpdate = await withRenderer({
     op: 'update',
     segments: ['dashboard'],
@@ -1372,9 +1386,17 @@ async function pinStyleDecisions() {
   if (!dashUpdate.ok && !/already|exists/i.test(String(dashUpdate.error || ''))) {
     console.log(`   note: dashboard update returned: ${dashUpdate.error}`)
   }
-  const dashSet = await withRenderer({ op: 'bag-set', segments: ['dashboard'], cells: [dashboardSig] })
-  if (dashSet.ok) console.log(`   /dashboard → ${dashboardSig.slice(0, 12)}`)
-  else console.log(`   FAILED dashboard stamp: ${dashSet.error}`)
+  const dashDec = await withRenderer({
+    op: 'decoration-add',
+    segments: ['dashboard'],
+    kind: 'visual:website:page',
+    appliesTo: ['dashboard'],
+    payload: { htmlSig: dashboardSig, order: 0, createdAt: Date.now() },
+    mark: 'persistent',
+    replaceKind: true,
+  })
+  if (dashDec.ok) console.log(`   /dashboard → ${dashboardSig.slice(0, 12)} (dec=${dashDec.data.sig.slice(0, 12)})`)
+  else console.log(`   FAILED dashboard stamp: ${dashDec.error}`)
 
   console.log(`\nDone. chrome=${chromeSig.slice(0, 12)}, ${stamped} pages stamped, ${failed} failed.`)
   console.log('Refresh the dev shell to see the new revision (or navigate away + back).')

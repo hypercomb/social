@@ -57,6 +57,7 @@ export class PanningDrone extends Drone {
 
       // resolve ViewportPersistence and subscribe to navigation restores
       this.vp = window.ioc.get<ViewportPersistence>('@diamondcoreprocessor.com/ViewportPersistence') ?? null
+      console.log('[pan] host-ready: resolved vp?', !!this.vp, 'stage?', !!this.stage, 'renderer?', !!this.renderer)
       if (this.vp) {
         void this.vp.read().then(snap => this.#applyPanSnapshot(snap))
         this.vp.addEventListener('restore', ((e: CustomEvent<ViewportSnapshot>) => {
@@ -149,7 +150,7 @@ export class PanningDrone extends Drone {
   // -------------------------------------------------
 
   public panBy = (delta: Point): void => {
-    if (!this.stage) return
+    if (!this.stage) { console.log('[pan] panBy: no stage, bail'); return }
 
     EffectBus.emitTransient('viewport:manual', {})
 
@@ -157,13 +158,27 @@ export class PanningDrone extends Drone {
     this.stage.position.x += clamped.x
     this.stage.position.y += clamped.y
 
+    // Defense-in-depth: if heartbeat-time vp resolution failed (race
+    // with VP registration), fall back to a fresh IoC lookup. Cache
+    // on success so future calls take the fast path. Zoom save works
+    // because mousewheel doesn't fire until the user can interact —
+    // by then everything has settled. Spacebar pan can fire much
+    // earlier (user holds space during page load).
+    let vp = this.vp
+    if (!vp) {
+      vp = window.ioc.get<ViewportPersistence>('@diamondcoreprocessor.com/ViewportPersistence') ?? null
+      if (vp) this.vp = vp
+    }
+
     // persist pan offset relative to center
-    if (this.renderer && this.vp) {
+    if (this.renderer && vp) {
       const s = this.renderer.screen
-      this.vp.setPan(
-        this.stage.position.x - s.width * 0.5,
-        this.stage.position.y - s.height * 0.5,
-      )
+      const dx = this.stage.position.x - s.width * 0.5
+      const dy = this.stage.position.y - s.height * 0.5
+      console.log('[pan] panBy → setPan', { delta: clamped, stagePos: { x: this.stage.position.x, y: this.stage.position.y }, screen: { w: s.width, h: s.height }, save: { dx, dy } })
+      vp.setPan(dx, dy)
+    } else {
+      console.log('[pan] panBy: skipped save', { hasRenderer: !!this.renderer, hasVp: !!vp })
     }
   }
 }

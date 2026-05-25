@@ -12,27 +12,29 @@
           {{ 'notes.hide' | t }}
         </button>
       </div>
-      <div class="notes-strip-filter" role="group" aria-label="filter by kind">
-        <button type="button" class="kind-tab"
-                [class.is-active]="kindFilter() === 'all'"
-                (click)="setKindFilter('all')">All</button>
-        <button type="button" class="kind-tab"
-                [class.is-active]="kindFilter() === 'q'"
-                (click)="setKindFilter('q')">
-          <span class="kind-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><circle cx="12" cy="17" r="0.7" fill="currentColor" stroke="none"/></svg>
-          </span>
-          Questions
-        </button>
-        <button type="button" class="kind-tab"
-                [class.is-active]="kindFilter() === 'note'"
-                (click)="setKindFilter('note')">
-          <span class="kind-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false"><path d="M5 4h11l4 4v12H5z"/><path d="M16 4v4h4"/><path d="M8 12h8M8 16h6"/></svg>
-          </span>
-          Notes
-        </button>
-      </div>
+      @if (hasQuestions()) {
+        <div class="notes-strip-filter" role="group" aria-label="filter by kind">
+          <button type="button" class="kind-tab"
+                  [class.is-active]="kindFilter() === 'all'"
+                  (click)="setKindFilter('all')">All</button>
+          <button type="button" class="kind-tab"
+                  [class.is-active]="kindFilter() === 'q'"
+                  (click)="setKindFilter('q')">
+            <span class="kind-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><circle cx="12" cy="17" r="0.7" fill="currentColor" stroke="none"/></svg>
+            </span>
+            Questions
+          </button>
+          <button type="button" class="kind-tab"
+                  [class.is-active]="kindFilter() === 'note'"
+                  (click)="setKindFilter('note')">
+            <span class="kind-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false"><path d="M5 4h11l4 4v12H5z"/><path d="M16 4v4h4"/><path d="M8 12h8M8 16h6"/></svg>
+            </span>
+            Notes
+          </button>
+        </div>
+      }
       <div class="notes-strip-body notes-strip-accordion">
         @for (group of groups(); track trackByGroup($index, group)) {
           <div class="accordion-group" [class.is-open]="group.expanded">
@@ -60,30 +62,29 @@
                         [class.note-row-q]="noteKind(note) === 'q'"
                         [class.note-row-a]="noteKind(note) === 'a'">
                       <button class="note-open" type="button" (click)="openInGroup(group.cell, note.id)" [title]="note.text">
-                        <span class="row-kind" [attr.data-kind]="noteKind(note)">
-                          <span class="kind-icon" aria-hidden="true">
-                            @switch (noteKind(note)) {
-                              @case ('q')  { <svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><circle cx="12" cy="17" r="0.7" fill="currentColor" stroke="none"/></svg> }
-                              @case ('a')  { <svg viewBox="0 0 24 24" focusable="false"><path d="M21 11.5a8.4 8.4 0 0 1-8.4 8.4c-1.7 0-3.3-.5-4.6-1.4L3 20l1.4-4.4A8.4 8.4 0 1 1 21 11.5z"/></svg> }
-                              @default     { <svg viewBox="0 0 24 24" focusable="false"><path d="M5 4h11l4 4v12H5z"/><path d="M16 4v4h4"/><path d="M8 12h8M8 16h6"/></svg> }
-                            }
-                          </span>
-                          <span class="kind-label">{{ noteKindLabel(note) }}</span>
-                        </span>
-                        <span class="row-text">{{ noteDisplayText(note) }}</span>
-                        @if (note.tags && note.tags.length) {
-                          <span class="row-tags">
-                            @for (tag of note.tags; track tag) {
-                              <span class="row-tag">#{{ tag }}</span>
-                            }
+                        @if (noteKind(note) !== 'note') {
+                          <span class="row-kind" [attr.data-kind]="noteKind(note)">
+                            <span class="kind-icon" aria-hidden="true">
+                              @switch (noteKind(note)) {
+                                @case ('q')  { <svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><circle cx="12" cy="17" r="0.7" fill="currentColor" stroke="none"/></svg> }
+                                @case ('a')  { <svg viewBox="0 0 24 24" focusable="false"><path d="M21 11.5a8.4 8.4 0 0 1-8.4 8.4c-1.7 0-3.3-.5-4.6-1.4L3 20l1.4-4.4A8.4 8.4 0 1 1 21 11.5z"/></svg> }
+                              }
+                            </span>
+                            <span class="kind-label">{{ noteKindLabel(note) }}</span>
                           </span>
                         }
+                        <span class="row-text">{{ noteDisplayText(note) }}</span>
                       </button>
                       <button class="note-delete" type="button"
                               (click)="removeInGroup(group.cell, note.id, $event)"
                               [attr.aria-label]="'notes.delete' | t" [title]="'notes.delete' | t">×</button>
                     </li>
                   }
+                  <li class="add-rule-row" role="presentation">
+                    <button type="button" class="add-rule-btn" (click)="captureForEmpty(group.cell)">
+                      {{ 'notes.addNote' | t }}
+                    </button>
+                  </li>
                 </ul>
               </div>
             </div>
@@ -124,27 +125,29 @@
           {{ 'notes.hide' | t }}
         </button>
       </div>
-      <div class="notes-strip-filter" role="group" aria-label="filter by kind">
-        <button type="button" class="kind-tab"
-                [class.is-active]="kindFilter() === 'all'"
-                (click)="setKindFilter('all')">All</button>
-        <button type="button" class="kind-tab"
-                [class.is-active]="kindFilter() === 'q'"
-                (click)="setKindFilter('q')">
-          <span class="kind-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><circle cx="12" cy="17" r="0.7" fill="currentColor" stroke="none"/></svg>
-          </span>
-          Questions
-        </button>
-        <button type="button" class="kind-tab"
-                [class.is-active]="kindFilter() === 'note'"
-                (click)="setKindFilter('note')">
-          <span class="kind-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" focusable="false"><path d="M5 4h11l4 4v12H5z"/><path d="M16 4v4h4"/><path d="M8 12h8M8 16h6"/></svg>
-          </span>
-          Notes
-        </button>
-      </div>
+      @if (hasQuestions()) {
+        <div class="notes-strip-filter" role="group" aria-label="filter by kind">
+          <button type="button" class="kind-tab"
+                  [class.is-active]="kindFilter() === 'all'"
+                  (click)="setKindFilter('all')">All</button>
+          <button type="button" class="kind-tab"
+                  [class.is-active]="kindFilter() === 'q'"
+                  (click)="setKindFilter('q')">
+            <span class="kind-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><circle cx="12" cy="17" r="0.7" fill="currentColor" stroke="none"/></svg>
+            </span>
+            Questions
+          </button>
+          <button type="button" class="kind-tab"
+                  [class.is-active]="kindFilter() === 'note'"
+                  (click)="setKindFilter('note')">
+            <span class="kind-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false"><path d="M5 4h11l4 4v12H5z"/><path d="M16 4v4h4"/><path d="M8 12h8M8 16h6"/></svg>
+            </span>
+            Notes
+          </button>
+        </div>
+      }
       <div class="notes-strip-body">
         @if (mode() === 'chips') {
           <div class="chip-track">
@@ -158,23 +161,17 @@
                   (click)="open(note.id)"
                   [title]="note.text"
                 >
-                  <span class="row-kind chip-kind" [attr.data-kind]="noteKind(note)">
-                    <span class="kind-icon" aria-hidden="true">
-                      @switch (noteKind(note)) {
-                        @case ('q')  { <svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><circle cx="12" cy="17" r="0.7" fill="currentColor" stroke="none"/></svg> }
-                        @case ('a')  { <svg viewBox="0 0 24 24" focusable="false"><path d="M21 11.5a8.4 8.4 0 0 1-8.4 8.4c-1.7 0-3.3-.5-4.6-1.4L3 20l1.4-4.4A8.4 8.4 0 1 1 21 11.5z"/></svg> }
-                        @default     { <svg viewBox="0 0 24 24" focusable="false"><path d="M5 4h11l4 4v12H5z"/><path d="M16 4v4h4"/><path d="M8 12h8M8 16h6"/></svg> }
-                      }
-                    </span>
-                  </span>
-                  <span class="chip-text">{{ preview(noteDisplayText(note)) }}</span>
-                  @if (note.tags && note.tags.length) {
-                    <span class="chip-tags">
-                      @for (tag of note.tags; track tag) {
-                        <span class="chip-tag">#{{ tag }}</span>
-                      }
+                  @if (noteKind(note) !== 'note') {
+                    <span class="row-kind chip-kind" [attr.data-kind]="noteKind(note)">
+                      <span class="kind-icon" aria-hidden="true">
+                        @switch (noteKind(note)) {
+                          @case ('q')  { <svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><circle cx="12" cy="17" r="0.7" fill="currentColor" stroke="none"/></svg> }
+                          @case ('a')  { <svg viewBox="0 0 24 24" focusable="false"><path d="M21 11.5a8.4 8.4 0 0 1-8.4 8.4c-1.7 0-3.3-.5-4.6-1.4L3 20l1.4-4.4A8.4 8.4 0 1 1 21 11.5z"/></svg> }
+                        }
+                      </span>
                     </span>
                   }
+                  <span class="chip-text">{{ preview(noteDisplayText(note)) }}</span>
                 </button>
                 <button
                   class="note-delete"
@@ -199,13 +196,6 @@
                   [title]="note.text"
                 >
                   <span class="row-text">{{ noteDisplayText(note) }}</span>
-                  @if (note.tags && note.tags.length) {
-                    <span class="row-tags">
-                      @for (tag of note.tags; track tag) {
-                        <span class="row-tag">#{{ tag }}</span>
-                      }
-                    </span>
-                  }
                 </button>
                 <button
                   class="note-delete"
@@ -216,6 +206,11 @@
                 >×</button>
               </li>
             }
+            <li class="add-rule-row" role="presentation">
+              <button type="button" class="add-rule-btn" (click)="add()">
+                {{ 'notes.addNote' | t }}
+              </button>
+            </li>
           </ul>
         }
       </div>

@@ -71,6 +71,83 @@ export class Lineage extends EventTarget {
     return '/' + this.explorerPath.join('/')
   }
 
+  // -------------------------------------------------
+  // sigbag + current layer — the canonical layer-as-truth accessors.
+  //
+  // The navigation primitive IS the sigbag — "where the user is" =
+  // "which __history__/<sig>/ bag they're addressing". Every reader
+  // that wants "what tiles exist here?" or "what's this location's
+  // state?" should go through these two methods. There is ONE source
+  // of truth for sigbag computation (HistoryService.sign), and ONE
+  // place we cache the resolution per navigation step.
+  //
+  // Invalidation: explorerPath change → invalidate() → fsRevision++
+  //   → cache entries that don't match the new revision are stale.
+  //   Both methods short-circuit on cached revision match.
+  // -------------------------------------------------
+
+  #cachedSig: { revision: number; sig: string } | null = null
+  #pendingSig: { revision: number; promise: Promise<string> } | null = null
+  #cachedLayer: { revision: number; layer: unknown } | null = null
+  #pendingLayer: { revision: number; promise: Promise<unknown> } | null = null
+
+  /** The sigbag for the current explorerPath. Delegates to
+   *  HistoryService.sign (the single source of truth) and memoizes per
+   *  fsRevision. Returns '' if HistoryService isn't registered yet. */
+  public currentSig = async (): Promise<string> => {
+    const revision = this.#fsRevision
+    if (this.#cachedSig?.revision === revision) return this.#cachedSig.sig
+    if (this.#pendingSig?.revision === revision) return this.#pendingSig.promise
+
+    const promise = (async (): Promise<string> => {
+      const history = get('@diamondcoreprocessor.com/HistoryService') as
+        { sign?: (l: { explorerSegments?: () => readonly string[] }) => Promise<string> } | undefined
+      if (!history?.sign) return ''
+      const sig = await history.sign(this)
+      if (this.#fsRevision === revision) {
+        this.#cachedSig = { revision, sig }
+      }
+      return sig
+    })()
+
+    this.#pendingSig = { revision, promise }
+    promise.finally(() => {
+      if (this.#pendingSig?.promise === promise) this.#pendingSig = null
+    })
+    return promise
+  }
+
+  /** The current layer for the user's lineage location — the
+   *  authoritative "what's here" view. Resolved as
+   *  HistoryService.currentLayerAt(currentSig()). Cached per
+   *  fsRevision so a render that asks for the layer multiple times
+   *  pays one resolve. Returns null if HistoryService isn't ready
+   *  or there's no committed layer at the location yet. */
+  public currentLayer = async (): Promise<unknown> => {
+    const revision = this.#fsRevision
+    if (this.#cachedLayer?.revision === revision) return this.#cachedLayer.layer
+    if (this.#pendingLayer?.revision === revision) return this.#pendingLayer.promise
+
+    const promise = (async (): Promise<unknown> => {
+      const sig = await this.currentSig()
+      if (!sig) return null
+      const history = get('@diamondcoreprocessor.com/HistoryService') as
+        { currentLayerAt?: (s: string) => Promise<unknown> } | undefined
+      if (!history?.currentLayerAt) return null
+      const layer = await history.currentLayerAt(sig)
+      if (this.#fsRevision === revision) {
+        this.#cachedLayer = { revision, layer }
+      }
+      return layer
+    })()
+
+    this.#pendingLayer = { revision, promise }
+    promise.finally(() => {
+      if (this.#pendingLayer?.promise === promise) this.#pendingLayer = null
+    })
+    return promise
+  }
+
   // Per-revision memoization. invalidate() bumps #fsRevision on any FS change,
   // so the cache is auto-invalidated. In-flight dedup is keyed on revision so
   // a stale walk that resolves after a new invalidate() can't poison the cache.

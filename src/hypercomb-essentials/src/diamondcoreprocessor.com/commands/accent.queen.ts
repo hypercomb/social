@@ -1,6 +1,7 @@
 // diamondcoreprocessor.com/commands/accent.queen.ts
 
 import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
+import { writeTilePropertiesAt } from '../editor/tile-properties.js'
 const STORAGE_KEY = 'hc:neon-color'
 
 // Accent preset names → neon color index (maps to NEON_PRESETS in hex-overlay.shader)
@@ -124,18 +125,15 @@ export class AccentQueenBee extends QueenBee {
 
   async #setTileAccent(labels: string[], presetName: string): Promise<void> {
     const lineage = get('@hypercomb.social/Lineage') as
-      { explorerDir: () => Promise<FileSystemDirectoryHandle | null> } | undefined
-    if (!lineage) return
-    const dir = await lineage.explorerDir()
-    if (!dir) return
+      { explorerSegments?: () => readonly string[] } | undefined
+    const parentSegments = lineage?.explorerSegments?.() ?? []
 
     for (const label of labels) {
       try {
-        const cellDir = await dir.getDirectoryHandle(label, { create: true })
-        const props = await readProps(cellDir)
-        props['accent'] = presetName
-        await writeProps(cellDir, props)
-      } catch { /* skip inaccessible tiles */ }
+        await writeTilePropertiesAt(parentSegments, label, { accent: presetName })
+      } catch (err) {
+        console.warn('[accent] write failed for', label, err)
+      }
     }
 
     void new hypercomb().act()

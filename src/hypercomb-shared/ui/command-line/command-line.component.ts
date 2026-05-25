@@ -32,6 +32,9 @@ const BUILTIN_SLASH: { behaviour: { name: string; description: string; descripti
 /** Threshold between a tap and a long-press on the mobile mic button (ms). */
 const MIC_LONG_PRESS_MS = 300
 
+/** How long the undo/redo arrows linger after the last undo/redo activity. */
+const HISTORY_NAV_HIDE_MS = 3000
+
 /** Matches label:tagName or label:tagName(#color) (plain colon syntax, no brackets). */
 const TAG_ASSIGN_RE = /^([^:]+):([^(]+)(?:\(([^)]+)\))?$/
 
@@ -286,6 +289,96 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     () => this.cellProvider.suggestions()
   )
 
+  // Reactive view of the history cursor's full state. Drives the
+  // command-line's history affordances: undo arrow (disabled at the
+  // start), redo arrow (disabled at head), and the Save As button
+  // (only visible while rewound). Reading the whole state from one
+  // signal keeps the three controls in lockstep.
+  //
+  // Writable so we can keep it correct even when the cursor service
+  // registers AFTER this component's class fields evaluate. fromRuntime
+  // requires a defined target at call time — a one-shot signal that
+  // never updates if the target wasn't there yet — which produced the
+  // "buttons stuck disabled until the first undo" bug at boot. Instead
+  // we own the signal and listen via whenReady so the wiring survives
+  // any load-order. Sync from cursor.state on every 'change' event.
+  private readonly _cursorState = signal({ position: 0, total: 0, rewound: false })
+  readonly cursorState = this._cursorState.asReadonly()
+
+  /** True while the cursor has been moved off head. Drives Save As visibility. */
+  readonly cursorRewound = computed(() => this.cursorState().rewound)
+
+  /** True when there's nowhere to undo to (no history yet OR already at pre-history). */
+  readonly undoDisabled = computed(() => {
+    const s = this.cursorState()
+    return s.total === 0 || s.position <= 0
+  })
+
+  /** True when there's nothing to redo (already at head). */
+  readonly redoDisabled = computed(() => {
+    const s = this.cursorState()
+    return s.total === 0 || s.position >= s.total
+  })
+
+  // Undo/redo arrows are hidden by default and only surface while the user
+  // is actively navigating history — driven by the cursor-transition detector
+  // in the constructor. Stay visible while rewound so the "Save As" button
+  // doesn't sit alone on the bar. See HISTORY_NAV_HIDE_MS for the linger.
+  private readonly _historyNavVisible = signal(false)
+  readonly historyNavVisible = this._historyNavVisible.asReadonly()
+  #historyNavHideTimer: ReturnType<typeof setTimeout> | null = null
+
+  #showHistoryNav(): void {
+    this._historyNavVisible.set(true)
+    if (this.#historyNavHideTimer) clearTimeout(this.#historyNavHideTimer)
+    this.#historyNavHideTimer = setTimeout(() => {
+      this._historyNavVisible.set(false)
+      this.#historyNavHideTimer = null
+    }, HISTORY_NAV_HIDE_MS)
+  }
+
+  /** Fire undo. Routes through the cursor's group-step logic. */
+  doUndo = (): void => {
+    const c = get('@diamondcoreprocessor.com/HistoryCursorService') as { undo?: () => void } | undefined
+    c?.undo?.()
+  }
+
+  /** Fire redo. Mirror of {@link doUndo}. */
+  doRedo = (): void => {
+    const c = get('@diamondcoreprocessor.com/HistoryCursorService') as { redo?: () => void } | undefined
+    c?.redo?.()
+  }
+
+  /**
+   * Promote the rewound layer at the cursor position to be the new head.
+   * Wired to the "Save As" button surfaced by the template when
+   * {@link cursorRewound} is true.
+   *
+   * Routes through HistoryService.promoteToHead, which the history-viewer
+   * also uses for per-row "make HEAD". After promotion the cursor
+   * re-hydrates and lands on the new top.
+   */
+  saveAsHead = async (): Promise<void> => {
+    const cursor = get('@diamondcoreprocessor.com/HistoryCursorService') as {
+      state: { locationSig: string; position: number }
+      currentLayerSig: string
+      load: (sig: string) => Promise<void>
+      seek: (n: number) => void
+    } | undefined
+    const history = get('@diamondcoreprocessor.com/HistoryService') as {
+      promoteToHead?: (locSig: string, layerSig: string) => Promise<void>
+    } | undefined
+    if (!cursor || !history?.promoteToHead) return
+    const locSig = cursor.state.locationSig
+    const layerSig = cursor.currentLayerSig
+    if (!locSig || !layerSig) return
+    await history.promoteToHead(locSig, layerSig)
+    await cursor.load(locSig)
+    // load() puts cursor at head already; explicit jump for clarity.
+    const total = (cursor.state as { total?: number }).total ?? 0
+    cursor.seek(total)
+  }
+
   // pluggable behaviors — validated at construction, no overlapping operations.
   //
   // Order matters: the first behavior whose `match()` returns true claims
@@ -431,6 +524,55 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   public constructor() {
     console.log('[command-line] initialized with url segments:', this.navigation.segments())
+
+    // Wire cursor state → signal. Uses whenReady so the wiring survives
+    // any IoC load-order: if the cursor service registers AFTER this
+    // component constructs (the common case in hypercomb-web's runtime
+    // bee loading), the callback fires the moment it lands and the
+    // signal starts mirroring `cursor.state`. Without this, fromRuntime
+    // would have captured an undefined target and the buttons would
+    // freeze in their boot-time state until something else forced a
+    // re-render — the symptom Jaime reported as "undo/redo only activate
+    // on undo initially."
+    const wireCursor = (cursor: { state: { position: number; total: number; rewound: boolean } } & EventTarget) => {
+      // Track previous position/total to distinguish undo/redo (position
+      // changes while total stays put) from a new layer being appended
+      // (total grows, position may follow it to head). Only the former
+      // surfaces the nav arrows. -1 sentinel = no prior sync, skip detection.
+      let prevPosition = -1
+      let prevTotal = -1
+      const sync = () => {
+        const nextPosition = cursor.state.position ?? 0
+        const nextTotal = cursor.state.total ?? 0
+        if (prevPosition !== -1
+            && nextTotal === prevTotal
+            && nextPosition !== prevPosition) {
+          this.#showHistoryNav()
+        }
+        prevPosition = nextPosition
+        prevTotal = nextTotal
+        this._cursorState.set({
+          position: nextPosition,
+          total: nextTotal,
+          rewound: !!cursor.state.rewound,
+        })
+      }
+      cursor.addEventListener('change', sync)
+      sync() // pull initial state immediately so the first render has it
+    }
+    const iocAny = (window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void; get?: (k: string) => unknown } }).ioc
+    if (iocAny?.whenReady) {
+      iocAny.whenReady<{ state: { position: number; total: number; rewound: boolean } } & EventTarget>(
+        '@diamondcoreprocessor.com/HistoryCursorService',
+        wireCursor,
+      )
+    } else {
+      // Defensive: if whenReady isn't exposed, fall back to direct get.
+      const direct = iocAny?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as
+        | ({ state: { position: number; total: number; rewound: boolean } } & EventTarget)
+        | undefined
+      if (direct) wireCursor(direct)
+    }
 
     // Listen for indicator registration/removal
     this.#indicatorUnsubs.push(
@@ -1225,6 +1367,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       clearTimeout(this.#micHoldTimer)
       this.#micHoldTimer = null
     }
+    if (this.#historyNavHideTimer) {
+      clearTimeout(this.#historyNavHideTimer)
+      this.#historyNavHideTimer = null
+    }
     for (const unsub of this.#indicatorUnsubs) unsub()
     window.removeEventListener('navigate', this.#onNavigate)
     window.removeEventListener('popstate', this.#onNavigate)
@@ -1479,17 +1625,26 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // them, because the directory might have been created externally
     // and the bag has no history for it yet, in which case the event
     // bootstraps it.
-    const dir = await this.lineage.explorerDir()
+    // Tile creation is a layer-only mutation. Per the architecture
+    // doctrine (project_layer_is_primitive) the current layer is the
+    // sole source of truth for tile membership — OPFS dirs at
+    // hypercomb.io/<name>/ are retired artifact storage. We do NOT
+    // mint a dir here; the LayerCommitter cascade is the only thing
+    // that adds children to the parent layer, and the merkle tree is
+    // where the new tile lives. Reading back uses currentLayerAt +
+    // getLayerBySig, never an OPFS walk.
+    //
+    // We still build the (segments, cell) tuple for each nested level
+    // so the cascade fires from root downward: a `/foo/bar/baz` input
+    // adds `foo` to root.children, then `bar` to foo.children, then
+    // `baz` to bar.children. Each level's commit auto-mints the empty
+    // 00000000 layer for the new lineage on first touch.
     const baseSegments = (this.lineage as unknown as { explorerSegments?: () => string[] })?.explorerSegments?.() ?? []
     const events: { cell: string; segments: string[] }[] = []
-    if (dir) {
-      let parent = dir
-      const accumulated: string[] = [...baseSegments]
-      for (const part of parts) {
-        events.push({ cell: part, segments: accumulated.slice() })
-        parent = await parent.getDirectoryHandle(part, { create: true })
-        accumulated.push(part)
-      }
+    const accumulated: string[] = [...baseSegments]
+    for (const part of parts) {
+      events.push({ cell: part, segments: accumulated.slice() })
+      accumulated.push(part)
     }
 
     const leafCell = parts[parts.length - 1]

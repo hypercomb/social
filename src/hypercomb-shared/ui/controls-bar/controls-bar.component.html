@@ -38,7 +38,7 @@
   @if (secretWords()) {
     <span class="sep-crumb">◆</span><span class="secret-crumb">{{ secretWords() }}</span>
   }
-  @if (secretWords()) {
+  @if (hasSecret()) {
     <span class="sep-crumb">◆</span><span class="secure-crumb" [style.color]="shieldColor()">{{ 'breadcrumb.secure' | t }}</span>
   } @else {
     <span class="sep-crumb">◆</span><span class="unsecure-crumb">{{ 'breadcrumb.unsecured' | t }}</span>

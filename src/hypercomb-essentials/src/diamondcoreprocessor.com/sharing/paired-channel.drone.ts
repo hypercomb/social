@@ -173,6 +173,19 @@ export class PairedChannelDrone extends Drone {
 
   readonly #channels = new Map<string, JoinedChannel>()
 
+  // Boot timestamp (seconds) for the channel-event freshness gate. Any
+  // ChannelEvent with createdAt older than (#sessionBootSec - GRACE) is
+  // dropped before reaching the state machine. Rationale: dev relay
+  // (and most public relays) cache past-session events and replay them
+  // on subscribe, so a fresh session joining an existing channel would
+  // otherwise auto-materialise dozens of ephemeral facades for shares
+  // that were posted months ago. The gate keeps the boot view quiet
+  // and only lets through events from live, currently-publishing peers.
+  // Grace window is twice the swarm heartbeat (60s) to tolerate clock
+  // skew + a missed heartbeat without dropping live peers.
+  readonly #sessionBootSec = Math.floor(Date.now() / 1000)
+  static readonly CHANNEL_EVENT_GRACE_SEC = 60
+
   /**
    * Bumped while materialiseFromSig is writing to OPFS. Reserved for
    * future use (e.g. a cell:added listener that re-broadcasts local
@@ -578,27 +591,51 @@ export class PairedChannelDrone extends Drone {
    */
   async importTransientTree(cellName: string): Promise<{ cleared: number }> {
     const lineage = window.ioc.get(LINEAGE_KEY) as LineageLike | undefined
-    const dir = await (lineage as { explorerDir?: () => Promise<FileSystemDirectoryHandle | null> } | undefined)?.explorerDir?.()
-    if (!dir) return { cleared: 0 }
-    const { readCellProperties, writeCellProperties } = await import('../editor/tile-properties.js')
+    const parentSegments = (lineage as { explorerSegments?: () => readonly string[] } | undefined)?.explorerSegments?.() ?? []
+    const history = window.ioc.get('@diamondcoreprocessor.com/HistoryService') as
+      { getLayerBySig?: (s: string) => Promise<{ name?: string; children?: readonly unknown[] } | null> } | undefined
+    const { readTilePropertiesAt, writeTilePropertiesAt } = await import('../editor/tile-properties.js')
     let cleared = 0
-    const walk = async (current: FileSystemDirectoryHandle, name: string): Promise<void> => {
+    // Walk the cell's layer tree (canonical), not the OPFS dir tree.
+    // The layer's children array holds child layer sigs; resolve each
+    // to its layer JSON to get its name, then recurse. Same shape as
+    // the old OPFS walk but driven by the merkle tree.
+    const walk = async (segments: readonly string[], name: string, layerSig?: string): Promise<void> => {
       try {
-        const props = await readCellProperties(current).catch(() => ({} as Record<string, unknown>))
+        const props = await readTilePropertiesAt(segments, name).catch(() => ({} as Record<string, unknown>))
         if (props['transient'] === true) {
-          await writeCellProperties(current, { transient: false })
+          await writeTilePropertiesAt(segments, name, { transient: false })
           cleared++
         }
-        for await (const [childName, handle] of (current as unknown as { entries: () => AsyncIterable<[string, FileSystemHandle]> }).entries()) {
-          if (handle.kind !== 'directory') continue
-          if (childName.startsWith('__') && childName.endsWith('__')) continue
-          await walk(handle as FileSystemDirectoryHandle, childName)
+        if (!history?.getLayerBySig || !layerSig) return
+        const layer = await history.getLayerBySig(layerSig)
+        const childSigs = (layer && Array.isArray(layer.children) ? layer.children : []) as readonly unknown[]
+        for (const cs of childSigs) {
+          if (typeof cs !== 'string') continue
+          const childLayer = await history.getLayerBySig(cs)
+          const childName = typeof childLayer?.name === 'string' ? childLayer.name : ''
+          if (!childName) continue
+          await walk([...segments, name], childName, cs)
         }
       } catch { /* skip */ }
     }
+    // Resolve the root cell's layer sig from the parent's children.
     try {
-      const cellDir = await dir.getDirectoryHandle(cellName, { create: false })
-      await walk(cellDir, cellName)
+      const historyAny = history as { sign?: (l: { explorerSegments?: () => readonly string[] }) => Promise<string>; currentLayerAt?: (s: string) => Promise<unknown> } | undefined
+      if (historyAny?.sign && historyAny?.currentLayerAt) {
+        const parentSig = await historyAny.sign({ explorerSegments: () => parentSegments })
+        const parentLayer = await historyAny.currentLayerAt(parentSig) as { children?: readonly unknown[] } | null
+        const childSigs = (parentLayer?.children ?? []) as readonly unknown[]
+        let cellLayerSig: string | undefined
+        for (const cs of childSigs) {
+          if (typeof cs !== 'string') continue
+          const cl = await history?.getLayerBySig?.(cs)
+          if (cl?.name === cellName) { cellLayerSig = cs; break }
+        }
+        await walk(parentSegments, cellName, cellLayerSig)
+      } else {
+        await walk(parentSegments, cellName)
+      }
     } catch { /* missing cell */ }
     if (cleared > 0) {
       EffectBus.emit('paired-channel:imported', { cellName, cleared })
@@ -902,6 +939,27 @@ export class PairedChannelDrone extends Drone {
   #onChannelEvent(channelId: string, event: ChannelEvent): void {
     const joined = this.#channels.get(channelId)
     if (!joined) return
+
+    // Freshness gate. Reject events older than (boot - 60s). Without
+    // this, the relay's replay-on-subscribe seeds every brand-new
+    // session with months of past share-approved verbs, each one
+    // auto-materialising as an ephemeral preview tile. With it, the
+    // state machine only ever sees fresh peer publishes — exactly the
+    // verbs the user is producing right now in their other tab.
+    //
+    // Note: this gate is tighter than the swarm freshness gate (90s)
+    // because paired-channel state transitions are decisions the user
+    // sees on canvas (toasts, facades). A 60s window is more than
+    // enough for live peers (heartbeat-equivalent is ≤30s) and keeps
+    // boot-time clutter to zero.
+    const minAcceptableSec = this.#sessionBootSec - PairedChannelDrone.CHANNEL_EVENT_GRACE_SEC
+    if (event.createdAt && event.createdAt < minAcceptableSec) {
+      // Silent drop — verbose log would spam on every join. Uncomment
+      // if debugging unexpected facade absences:
+      // console.log('[paired-channel] dropping stale event', { age: this.#sessionBootSec - event.createdAt, verb: event.type })
+      return
+    }
+
     const transitions = joined.machine.apply(event)
     console.log('[sync] event in', {
       channel: channelId.slice(0, 12),

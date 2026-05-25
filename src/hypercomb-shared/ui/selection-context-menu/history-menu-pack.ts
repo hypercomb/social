@@ -1,10 +1,10 @@
 // hypercomb-shared/ui/selection-context-menu/history-menu-pack.ts
 //
 // HistoryMenuPack — the set of buttons the vertical menu shows when the
-// user is navigating history (after Ctrl+Z / Ctrl+Y or clicking the
-// first history button on the menu). Stays visible until the user
-// explicitly hides it, per the design: history navigation is a mode
-// that persists across excursions to head and back.
+// user is navigating history. Hidden by default; opens only via the
+// `/history` slash command (registered in essentials) which calls
+// `toggle()` through IoC. Undo / redo keystrokes still work — they
+// don't pop the panel open.
 
 import { computed, signal, type Signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
@@ -94,14 +94,26 @@ class HistoryMenuPackImpl {
   }
 
   /**
+   * Flip the panel between hidden and visible. Bound to the
+   * `/history` slash command (see `history.queen.ts` in essentials);
+   * the queen resolves this pack via IoC and calls toggle directly.
+   */
+  readonly toggle = (): void => {
+    if (this.#visible()) {
+      this.onHide()
+      return
+    }
+    this.#visible.set(true)
+    MenuRegistry.activate(this.id)
+  }
+
+  /**
    * Initialise subscriptions. Called once at boot. Wires to the global
    * history cursor state so the pack's buttons always reflect the
-   * current position — but *opening* the menu now only happens in
-   * response to a user-initiated history action (undo / redo / seek),
-   * not on the initial cursor-load that fires at boot or on every
-   * page navigation. Previously the menu popped open the first time
-   * any cursor-changed arrived, which included the boot-time hydration
-   * emit, so the panel always appeared on load.
+   * current position. The panel itself does NOT auto-open on
+   * cursor-changed or keymap:invoke any more — visibility is owned
+   * by the `/history` toggle (and the in-menu hide button). Undo /
+   * redo keystrokes still go through, they just don't pop the surface.
    */
   install(): void {
     EffectBus.on<CursorState>('history:cursor-changed', (state) => {
@@ -111,18 +123,17 @@ class HistoryMenuPackImpl {
       this.#cursorRewound.set(state.rewound)
     })
 
-    // Only a keyboard/menu-invoked history action (undo, redo,
-    // make-head, toggle-slider, etc.) opens the panel. That maps
-    // exactly to intentional history navigation — hydration events
-    // don't go through keymap.
-    EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
-      if (!payload?.cmd?.startsWith('history.')) return
-      if (this.#visible()) return
-      this.#visible.set(true)
-      MenuRegistry.activate(this.id)
-    })
-
     MenuRegistry.register(this as unknown as MenuPack)
+
+    // IoC handle for the `/history` slash command. Essentials can't
+    // import shared types (dependency direction), so the queen
+    // resolves a minimal `{ toggle, visible }` shape by key.
+    try {
+      ;(globalThis as { ioc?: { register: (k: string, v: unknown) => void } }).ioc?.register?.(
+        '@hypercomb.social/HistoryMenuPack',
+        { toggle: this.toggle, visible: this.visible },
+      )
+    } catch { /* ioc not ready in some test envs — non-fatal */ }
   }
 }
 

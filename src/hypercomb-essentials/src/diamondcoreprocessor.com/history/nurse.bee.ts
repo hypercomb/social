@@ -28,22 +28,29 @@
 // Each nurse keeps a Map<cacheKey, { value, layerSig }>. The
 // `layerSig` annotation lets a consumer detect "different layer, same
 // composed value" — the renderJson stays valid as long as the cell's
-// own 0000 (and any inherited ancestor 0000s) haven't changed. Writes
-// invalidate via the `cell:0000-changed` event broadcast by
-// `writeCellProperties`. Layer cascades do NOT invalidate the cache —
-// the value is independent of the layer.
+// own properties (and any inherited ancestor properties) haven't
+// changed. Writes invalidate via the `cell:0000-changed` event
+// broadcast by both `writeTilePropertiesAt` (the canonical layer-slot
+// path) and `writeCellProperties` (the legacy 0000-file path during
+// migration).
 //
 // ── Subclass contract ─────────────────────────────────────────────────
 //
-//   readonly attribute: string                — the 0000 key (e.g. 'index')
+//   readonly attribute: string                — the property key (e.g. 'index')
 //   parse(raw: unknown): T | undefined        — coerce stored value to T
 //
-// Reads:   await nurse.read(cellDir, cacheKey)
-// Writes:  writeCellProperties(cell, { ... })  — the only writer; nurses
-//                                                react to the broadcast.
+// Reads:   await nurse.read(parentSegments, cellName, cellDir?, cacheKey?)
+//          — layer-slot first via readTilePropertiesAt; falls back to
+//            readCellProperties(cellDir) only when the layer slot is
+//            empty AND cellDir is provided.
+// Writes:  writeTilePropertiesAt(parentSegments, cellName, { ... })
+//          — the canonical writer. Layer slot, cascade, broadcast.
+//          writeCellProperties(cellDir, ...) is the legacy writer kept
+//          callable during caller-by-caller migration; both emit the
+//          same broadcast so cache invalidation works uniformly.
 
 import { Bee, EffectBus } from '@hypercomb/core'
-import { readCellProperties } from '../editor/tile-properties.js'
+import { readCellProperties, readTilePropertiesAt, cellLocationSig } from '../editor/tile-properties.js'
 
 type CacheEntry<T> = { value: T | undefined; layerSig: string }
 
@@ -63,22 +70,44 @@ export abstract class NurseBee<T = unknown> extends Bee {
   /**
    * Read the value for a cell.
    *
-   * `cacheKey` should uniquely identify the cell across renders — the
-   * cell's lineage path (e.g. `'instructions/section'`) or its
-   * locationSig. The caller chooses; the nurse just keys by it.
+   * Layer-slot first (the canonical storage during the layer-as-primitive
+   * migration); falls back to the legacy 0000 file only if the cell's
+   * layer carries no `properties` slot yet AND a `cellDir` handle is
+   * available. New writes go via `writeTilePropertiesAt`, so reads of
+   * newly-written tiles hit the layer; tiles whose properties pre-date
+   * the migration still resolve through the 0000 fallback. Once every
+   * writer has flipped and every legacy 0000 has been swept, the
+   * fallback branch goes dead.
    *
-   * Hot path: cache hit returns without touching disk. Cold path:
-   * read 0000, parse, cache.
+   * `parentSegments` + `cellName` locate the cell's history bag (the
+   * single source of truth for the lineage sig). `cellDir` is optional
+   * — only consulted when the layer slot is empty. `cacheKey` is the
+   * cell's lineage signature; recomputed via `cellLocationSig` when
+   * not supplied so the nurse stays callable from contexts that don't
+   * have one in hand.
    */
   async read(
-    cellDir: FileSystemDirectoryHandle,
-    cacheKey: string,
+    parentSegments: readonly string[],
+    cellName: string,
+    cellDir?: FileSystemDirectoryHandle,
+    cacheKey?: string,
   ): Promise<T | undefined> {
-    const cached = this.#cache.get(cacheKey)
+    const key = cacheKey ?? await cellLocationSig(parentSegments, cellName)
+    const cached = this.#cache.get(key)
     if (cached) return cached.value
-    const props = await readCellProperties(cellDir)
-    const value = this.parse(props[this.attribute])
-    this.#cache.set(cacheKey, { value, layerSig: '' })
+
+    // Primary path: layer slot.
+    const layerProps = await readTilePropertiesAt(parentSegments, cellName)
+    let value = this.parse(layerProps[this.attribute])
+
+    // Fallback: legacy 0000 file. Only consulted when the layer slot
+    // didn't carry the value AND we have a dir handle to read from.
+    if (value === undefined && cellDir) {
+      const fileProps = await readCellProperties(cellDir)
+      value = this.parse(fileProps[this.attribute])
+    }
+
+    this.#cache.set(key, { value, layerSig: '' })
     return value
   }
 
