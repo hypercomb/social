@@ -508,7 +508,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const t = this.#i18n
     if (this.locked()) return t?.t('command-line.placeholder.locked') ?? 'enter cell name...'
     const capture = this.#captureMode()
-    if (capture) return t?.t(capture.placeholderKey) ?? 'type a note...'
+    if (capture) {
+      const tile = capture.target?.trim()
+      if (tile) {
+        return t?.t(`${capture.placeholderKey}.targeted`, { tile }) ?? `add a note for "${tile}"...`
+      }
+      return t?.t(capture.placeholderKey) ?? 'type a note...'
+    }
     const ctx = this.context()
     if (ctx.active && ctx.mode === 'filter') return t?.t('command-line.placeholder.filter') ?? 'filter tiles...'
     if (ctx.active && ctx.mode === 'slash') return t?.t('command-line.placeholder.slash') ?? 'type a command...'

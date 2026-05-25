@@ -211,10 +211,20 @@
 }
 
 // ── Rows mode ──────────────────────────────────────────
+// `resize: both` exposes the browser's native bottom-right drag grip,
+// giving the panel a slide-to-adjust affordance. Min bounds keep the
+// header usable; max bounds keep the panel inside the viewport. The
+// host's pointer-events:none lets clicks fall through to the canvas
+// everywhere except the panel itself, so the grip stays interactive.
 .notes-strip.mode-rows {
   width: min(28rem, calc(100vw - 1rem));
+  min-width: 16rem;
+  min-height: 5rem;
+  max-width: calc(100vw - 1rem);
+  max-height: calc(100vh - var(--hc-header-height, 3rem) - 5rem);
   border-radius: 0 0 var(--md-shape-m) var(--md-shape-m);
   overflow: hidden;
+  resize: both;
 }
 
 .strip-list {
