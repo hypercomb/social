@@ -4,64 +4,9 @@ import { Application, Container, Point } from 'pixi.js'
 import type { HostReadyPayload } from '../../presentation/tiles/pixi-host.worker.js'
 import type { HexGeometry } from '../../presentation/grid/hex-geometry.js'
 import { DEFAULT_HEX_GEOMETRY } from '../../presentation/grid/hex-geometry.js'
+import type { InputGate } from '../input-gate.service.js'
 
 type Pt = { x: number; y: number }
-
-// ── InputGate — shared input exclusivity ─────────────
-// Inlined here so Angular's esbuild cannot tree-shake the IoC registration.
-// One source at a time. Context menu auto-suppressed while claimed.
-
-export class InputGate extends EventTarget {
-  #owner: string | null = null
-  #locked = false
-
-  get active(): boolean { return this.#locked || this.#owner !== null }
-  get locked(): boolean { return this.#locked }
-  get owner(): string | null { return this.#owner }
-
-  lock = (): void => {
-    if (this.#locked) return
-    this.#locked = true
-    this.dispatchEvent(new CustomEvent('change'))
-  }
-  unlock = (): void => {
-    if (!this.#locked) return
-    this.#locked = false
-    this.dispatchEvent(new CustomEvent('change'))
-  }
-
-  claim = (source: string): boolean => {
-    if (this.#locked) return false
-    if (this.#owner && this.#owner !== source) return false
-    if (this.#owner === source) return true
-    this.#owner = source
-    this.dispatchEvent(new CustomEvent('change'))
-    return true
-  }
-
-  release = (source: string): void => {
-    if (this.#owner !== source) return
-    this.#owner = null
-    this.dispatchEvent(new CustomEvent('change'))
-  }
-
-  /** Emergency reset — drops all locks and ownership.
-   *  Wired to the Escape cascade as a last-resort recovery so a leaked
-   *  claim or unmatched lock can never permanently block input. */
-  clear = (): void => {
-    if (!this.#locked && this.#owner === null) return
-    this.#locked = false
-    this.#owner = null
-    this.dispatchEvent(new CustomEvent('change'))
-  }
-
-  constructor() {
-    super()
-    document.addEventListener('contextmenu', (e) => {
-      if (this.#owner || e.ctrlKey || e.metaKey) e.preventDefault()
-    }, true)
-  }
-}
 
 // -------------------------------------------------
 // ViewportPersistence — thin write coordinator
@@ -525,32 +470,44 @@ export class ZoomDrone extends Drone {
       this.canvas = payload.canvas
       this.renderer = payload.renderer
 
-      const mouseWheel = this.resolve<any>('mouseWheel')
-      mouseWheel?.attach(
-        {
-          zoomByFactor: this.zoomByFactor,
-          zoomToScale: this.zoomToScale,
-          animateToScale: this.animateToScale,
-          currentScale: this.currentScale,
-        },
-        this.canvas,
-      )
+      // Web shell loads bees asynchronously from OPFS, so the input
+      // delegates (MousewheelZoomInput, PinchZoomInput, TouchGestureCoordinator,
+      // TouchPanInput) can register AFTER render:host-ready fires. A
+      // synchronous resolve() then returns undefined and `?.attach` silently
+      // no-ops, leaving wheel/pinch zoom permanently dead. whenReady fires
+      // the callback immediately if the key is already in IoC, otherwise
+      // queues it for the moment registration lands.
+      window.ioc.whenReady<any>('@diamondcoreprocessor.com/MousewheelZoomInput', (mouseWheel) => {
+        if (!this.canvas) return
+        mouseWheel.attach(
+          {
+            zoomByFactor: this.zoomByFactor,
+            zoomToScale: this.zoomToScale,
+            animateToScale: this.animateToScale,
+            currentScale: this.currentScale,
+          },
+          this.canvas,
+        )
+      })
 
-      // attach pinch-zoom as a math delegate
-      const pinchZoom = this.resolve<any>('pinchZoom')
-      pinchZoom?.attach(this, this.minScale)
+      window.ioc.whenReady<any>('@diamondcoreprocessor.com/PinchZoomInput', (pinchZoom) => {
+        pinchZoom.attach(this, this.minScale)
+      })
 
-      // attach touch gesture coordinator — owns all touch pointer events
-      // and delegates to pinch-zoom and touch-pan math delegates
-      const touchPan = this.resolve<any>('touchPan')
-      const coordinator = this.resolve<any>('coordinator')
-      if (coordinator && this.canvas) {
+      // Coordinator owns all touch pointer events and delegates to
+      // pinch-zoom + touch-pan as math delegates. Wait on coordinator;
+      // pinch and touchPan may or may not be there — fall back to
+      // no-op delegates to preserve the original behavior.
+      window.ioc.whenReady<any>('@diamondcoreprocessor.com/TouchGestureCoordinator', (coordinator) => {
+        if (!this.canvas) return
+        const touchPan = window.ioc.get<any>('@diamondcoreprocessor.com/TouchPanInput')
+        const pinchZoom = window.ioc.get<any>('@diamondcoreprocessor.com/PinchZoomInput')
         coordinator.attach(
           this.canvas,
           touchPan ?? { panUpdate: () => {} },
           pinchZoom ?? { pinchUpdate: () => ({ distance: 0 }) },
         )
-      }
+      })
 
       // resolve ViewportPersistence and subscribe to navigation restores
       this.vp = window.ioc.get<ViewportPersistence>('@diamondcoreprocessor.com/ViewportPersistence') ?? null
@@ -1026,9 +983,6 @@ export class ZoomDrone extends Drone {
 // -------------------------------------------------
 // IoC registration (side-effects — must survive tree-shaking)
 // -------------------------------------------------
-
-const _inputGate = new InputGate()
-window.ioc.register('@diamondcoreprocessor.com/InputGate', _inputGate)
 
 const _viewportPersistence = new ViewportPersistence()
 window.ioc.register('@diamondcoreprocessor.com/ViewportPersistence', _viewportPersistence)
