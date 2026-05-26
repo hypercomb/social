@@ -453,7 +453,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #computePillZoomRaw(): number {
     const w = window.innerWidth
     const ratio = w / 1920
-    const base = Math.max(0.9, Math.min(ratio, 1.6))
+    const base = Math.max(0.9, Math.min(ratio, 1))
     const laptopBand = w >= 1367 && w <= 2559 ? 1.34 : 1
     return base * laptopBand
   }

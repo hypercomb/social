@@ -1,12 +1,6 @@
 @use '../../hypercomb-shared/fonts/fonts';
 @use '../../hypercomb-shared/styles/material-tokens';
 
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-}
-
 html,
 body {
   margin: 0;
