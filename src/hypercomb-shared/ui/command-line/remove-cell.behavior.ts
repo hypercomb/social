@@ -6,7 +6,6 @@ import type { Lineage } from '../../core/lineage'
 import type { Navigation } from '../../core/navigation'
 import { EffectBus, hypercomb } from '@hypercomb/core'
 import { parseArrayItems, parseOneItem } from '../../core/array-parser'
-import { persistTagOps, type TagOp } from '../../core/tag-ops'
 
 /**
  * Enter with `~` prefix → remove a cell (folder) from the current level.
@@ -63,8 +62,6 @@ export class RemoveCellBehavior implements CommandLineBehavior {
 
     if (!items.length) return
 
-    const tagOps: TagOp[] = []
-
     // Track removals per parent lineage so we can fire ONE layer commit
     // per affected parent (vs N per cell). Map<parent-key, { segments, removedNames[] }>.
     const baseSegments = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? ''))
@@ -72,31 +69,21 @@ export class RemoveCellBehavior implements CommandLineBehavior {
 
     for (const item of items) {
       if (item.op === 'tag-add' || item.op === 'tag-remove') {
-        // tag operations within remove context
-        if (item.tag) {
-          tagOps.push({
-            label: item.segments[item.segments.length - 1],
-            tag: item.tag,
-            color: item.tagColor,
-            remove: item.op === 'tag-remove',
-          })
-        }
-      } else {
-        // in ~ context, treat plain names as removes
-        const ok = await this.#removeTarget(dir, item.segments)
-        if (ok) {
-          const parentSegs = [...baseSegments, ...item.segments.slice(0, -1)]
-          const leafName = item.segments[item.segments.length - 1]
-          const key = parentSegs.join('/')
-          const entry = removalsByParent.get(key) ?? { segments: parentSegs, names: [] }
-          entry.names.push(leafName)
-          removalsByParent.set(key, entry)
-        }
+        // Folder-based tag persistence retired (layer is the only source
+        // of truth for tag state). Tag mutations in remove-context are
+        // dropped; layer-slot tag writes are the path forward.
+        continue
       }
-    }
-
-    if (tagOps.length > 0) {
-      await persistTagOps(tagOps, dir)
+      // in ~ context, treat plain names as removes
+      const ok = await this.#removeTarget(dir, item.segments)
+      if (ok) {
+        const parentSegs = [...baseSegments, ...item.segments.slice(0, -1)]
+        const leafName = item.segments[item.segments.length - 1]
+        const key = parentSegs.join('/')
+        const entry = removalsByParent.get(key) ?? { segments: parentSegs, names: [] }
+        entry.names.push(leafName)
+        removalsByParent.set(key, entry)
+      }
     }
 
     // Bump FS-change marker so renders during the cascade see fresh OPFS.

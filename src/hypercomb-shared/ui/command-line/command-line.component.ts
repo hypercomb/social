@@ -10,7 +10,8 @@ import type { ScriptPreloader } from '../../core/script-preloader'
 import type { CellSuggestionProvider } from '../../core/cell-suggestion.provider'
 import type { CompletionUtility, CompletionContext } from '@hypercomb/shared/core/completion-utility'
 import { fromRuntime } from '../../core/from-runtime'
-import { readTagProps, writeTagProps, persistTagOps, type TagOp } from '../../core/tag-ops'
+// Folder-based tag persistence retired. TagOp type is local-only now.
+type TagOp = { label: string; tag: string; color?: string; remove: boolean }
 import { EffectBus, hypercomb, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { VoiceInputService } from '../../core/voice-input.service'
@@ -2050,11 +2051,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return input
   }
 
-  /** Persist tag add/remove operations to OPFS + master registry. */
-  async #persistTagOps(ops: TagOp[]): Promise<void> {
-    const dir = await this.lineage.explorerDir()
-    if (!dir) return
-    await persistTagOps(ops, dir)
+  /**
+   * Folder-based tag persistence retired. Layer is the only source of
+   * truth for tag state; the on-disk `<cell>/0000` files this used to
+   * touch are not a write path the render pipeline observes. Pending
+   * layer-slot tag write API, tag ops collected by command-line
+   * behaviours are dropped here.
+   */
+  async #persistTagOps(_ops: TagOp[]): Promise<void> {
+    return
   }
 
   /** After an operation completes, collapse the command line to /select[remaining-tiles] */
@@ -2690,18 +2695,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   /** Pending tag adds/removes typed in the current bracket input (not yet persisted). */
   #bracketPendingTags: { adds: Set<string>; removes: Set<string> } = { adds: new Set(), removes: new Set() }
 
-  /** Load a cell's existing tags from OPFS into the cache signal. */
-  async #loadCellTags(label: string): Promise<void> {
-    try {
-      const dir = await this.lineage.explorerDir()
-      if (!dir) { this.#bracketCellTags.set(new Set()); return }
-      const cellDir = await dir.getDirectoryHandle(label, { create: false })
-      const props = await readTagProps(cellDir)
-      const tags: string[] = Array.isArray(props['tags']) ? props['tags'] : []
-      this.#bracketCellTags.set(new Set(tags))
-    } catch {
-      this.#bracketCellTags.set(new Set())
-    }
+  /**
+   * Load a cell's existing tags into the cache signal. Folder-based
+   * tag storage retired — until layer-slot tag reads are wired, cells
+   * appear tagless to the bracket-pending UI.
+   */
+  async #loadCellTags(_label: string): Promise<void> {
+    this.#bracketCellTags.set(new Set())
   }
 
   /** Parse tag items in cell:[...] syntax (no : prefix — items are plain names, ~ for removal). */
