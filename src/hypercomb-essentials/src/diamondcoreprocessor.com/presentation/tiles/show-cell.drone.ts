@@ -9,7 +9,7 @@ import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
 import { isSignature, readCellProperties, writeCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
 import { hideStorageKey } from './tile-actions.drone.js'
-import type { HistoryService } from '../../history/history.service.js'
+import type { HistoryService, LayerContent } from '../../history/history.service.js'
 import type { HistoryCursorService, CursorState } from '../../history/history-cursor.service.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoom/zoom.drone.js'
 
@@ -1758,11 +1758,18 @@ export class ShowCellDrone extends Drone {
     if (!this.#clipboardView && historyService) {
       const sig = await this.computeSignatureLocation(lineage)
 
-      // Load cursor for this location (keeps cursor position if already set)
-      if (cursorService) await cursorService.load(sig.sig)
+      // Load cursor for this location (keeps cursor position if already set).
+      // Hardened with a 3-second ceiling so a hang in listLayers /
+      // warmupHistoricalResources can never freeze the render path.
+      // The cursor's state remains whatever the partial load left it; the
+      // fallback path below uses lineage.currentLayer() to recover.
+      if (cursorService) {
+        const loadTimeout = new Promise<void>(resolve => setTimeout(resolve, 3000))
+        await Promise.race([cursorService.load(sig.sig).catch(() => {}), loadTimeout])
+      }
 
       if (cursorService) {
-        const content = await cursorService.layerContentAtCursor()
+        let content = await cursorService.layerContentAtCursor()
         const cursorState = cursorService.state
 
         // Two distinct null-content cases:
@@ -1773,13 +1780,27 @@ export class ShowCellDrone extends Drone {
         //
         //   (B) Bag has no markers at all (fresh lineage, sig migration
         //       orphaned old bags, etc.) → also position 0, also null.
-        //       Fall through to live OPFS so tiles display from disk.
+        //       Fall through to lineage.currentLayer() so tiles still
+        //       display when history is missing but the layer is live.
         //
         // Distinguish by total: total > 0 means "history exists, you're
         // before it" (case A). total === 0 means "no history" (case B).
         if (!content && cursorState?.position === 0 && (cursorState?.total ?? 0) > 0) {
           union.clear()
           localCellSet.clear()
+        } else if (!content && (cursorState?.total ?? 0) === 0) {
+          // Live-layer fallback. The lineage primitive holds the current
+          // layer in memory once HistoryService.preloadAllBags has run;
+          // when the cursor's bag scan misses (timeout, no markers,
+          // sig drift) we still have authoritative layer data from the
+          // navigation side. This is the safety net that keeps the
+          // canvas non-blank when the cursor path stalls.
+          try {
+            const live = await (lineage as { currentLayer?: () => Promise<LayerContent | null> }).currentLayer?.()
+            if (live && typeof (live as { name?: unknown }).name === 'string') {
+              content = live
+            }
+          } catch { /* lineage unavailable — fall through to empty */ }
         }
 
         if (content) {
