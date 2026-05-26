@@ -1763,9 +1763,18 @@ export class ShowCellDrone extends Drone {
       // warmupHistoricalResources can never freeze the render path.
       // The cursor's state remains whatever the partial load left it; the
       // fallback path below uses lineage.currentLayer() to recover.
+      // Timer is cleared on load resolution so we don't queue a long-tail
+      // setTimeout per render when cursor.load returned quickly.
       if (cursorService) {
-        const loadTimeout = new Promise<void>(resolve => setTimeout(resolve, 3000))
-        await Promise.race([cursorService.load(sig.sig).catch(() => {}), loadTimeout])
+        let timeoutId: ReturnType<typeof setTimeout> | undefined
+        const loadTimeout = new Promise<void>(resolve => {
+          timeoutId = setTimeout(resolve, 3000)
+        })
+        try {
+          await Promise.race([cursorService.load(sig.sig).catch(() => {}), loadTimeout])
+        } finally {
+          if (timeoutId !== undefined) clearTimeout(timeoutId)
+        }
       }
 
       if (cursorService) {

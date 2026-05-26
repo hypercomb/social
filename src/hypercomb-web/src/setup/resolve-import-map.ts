@@ -63,40 +63,42 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
         for await (const [name] of bagDir.entries()) indexNames.push(name)
         indexNames.sort()
 
-        for (const indexName of indexNames) {
-          const entryHandle = await bagDir.getFileHandle(indexName)
+        // Parallel two-step read: bag entry → leaf file's first 512 bytes.
+        // Serial awaits dominated the import-map build time on cold boots;
+        // Promise.all collapses the entire walk into ~one OPFS round-trip
+        // per layer. Returns sorted [alias, leafSig] tuples preserving the
+        // bag's index order so the importmap object retains the canonical
+        // load order (relevant for collision dedup).
+        const resolved = await Promise.all(indexNames.map(async (indexName) => {
+          const entryHandle = await bagDir.getFileHandle(indexName).catch(() => null)
+          if (!entryHandle) return null
           const entryFile = await entryHandle.getFile()
           const leafSig = (await entryFile.text()).trim()
-          if (!leafSig) continue
-
+          if (!leafSig) return null
           const leafHandle = await depsDir.getFileHandle(`${leafSig}.js`).catch(() => null)
-          if (!leafHandle) {
-            // Bag points at a leaf we don't have on disk — fall back
-            // to flat scan rather than emit a half-built importmap.
-            console.warn(`[resolveImportMap] bag entry ${indexName} -> ${leafSig} missing leaf; falling back to flat scan`)
-            bagWalkSucceeded = false
-            break
-          }
-
+          if (!leafHandle) return { indexName, leafSig, missing: true as const }
           const leafFile = await leafHandle.getFile()
           const prefix = await leafFile.slice(0, 512).arrayBuffer()
           const firstLine = new TextDecoder().decode(prefix).split('\n', 1)[0]?.trim()
-          if (!firstLine) continue
-          const alias = firstLine.split(/\s+/)[1]
-          if (!alias) continue
+          const alias = firstLine?.split(/\s+/)[1]
+          return alias ? { indexName, leafSig, alias, missing: false as const } : null
+        }))
 
-          if (imports[alias]) {
-            const existing = aliasSource.get(alias) ?? 'unknown'
-            console.warn(`[resolveImportMap] alias collision for ${alias}; keeping ${existing}, skipping ${leafSig}`)
-            continue
+        let missingLeaf = false
+        for (const entry of resolved) {
+          if (!entry) continue
+          if (entry.missing) {
+            console.warn(`[resolveImportMap] bag entry ${entry.indexName} -> ${entry.leafSig} missing leaf; falling back to flat scan`)
+            missingLeaf = true
+            break
           }
-
-          imports[alias] = `${OPFS_DEPENDENCY_BASE_PATH}/${leafSig}`
-          aliasSource.set(alias, leafSig)
+          if (imports[entry.alias!]) continue
+          imports[entry.alias!] = `${OPFS_DEPENDENCY_BASE_PATH}/${entry.leafSig}`
+          aliasSource.set(entry.alias!, entry.leafSig)
         }
-        bagWalkSucceeded = bagWalkSucceeded || indexNames.length > 0
-        if (bagWalkSucceeded) {
-          console.log(`[resolveImportMap] resolved ${aliasSource.size} aliases from bag ${activeBagSig.slice(0, 12)}`)
+
+        if (!missingLeaf && indexNames.length > 0) {
+          bagWalkSucceeded = true
         }
       }
     }
