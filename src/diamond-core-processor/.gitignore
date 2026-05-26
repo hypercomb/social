@@ -8,6 +8,14 @@
 /build
 dist/
 
+# Content-addressed artifacts sourced from Azure blob storage at runtime
+# (built by hypercomb-essentials copy-to-dcp.ts for local dev only — never commit)
+/public/__bees__/
+/public/__dependencies__/
+/public/__layers__/
+/public/__resources__/
+/public/manifest.json
+
 # Node
 /node_modules
 npm-debug.log

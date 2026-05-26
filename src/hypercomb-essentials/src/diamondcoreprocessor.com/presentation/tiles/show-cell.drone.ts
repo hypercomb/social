@@ -1758,58 +1758,50 @@ export class ShowCellDrone extends Drone {
     if (!this.#clipboardView && historyService) {
       const sig = await this.computeSignatureLocation(lineage)
 
-      // Load cursor for this location (keeps cursor position if already set).
-      // Hardened with a 3-second ceiling so a hang in listLayers /
-      // warmupHistoricalResources can never freeze the render path.
-      // The cursor's state remains whatever the partial load left it; the
-      // fallback path below uses lineage.currentLayer() to recover.
-      // Timer is cleared on load resolution so we don't queue a long-tail
-      // setTimeout per render when cursor.load returned quickly.
-      if (cursorService) {
-        let timeoutId: ReturnType<typeof setTimeout> | undefined
-        const loadTimeout = new Promise<void>(resolve => {
-          timeoutId = setTimeout(resolve, 3000)
-        })
-        try {
-          await Promise.race([cursorService.load(sig.sig).catch(() => {}), loadTimeout])
-        } finally {
-          if (timeoutId !== undefined) clearTimeout(timeoutId)
-        }
+      // Real-time supersedes preloader: cursor.load runs a bag scan +
+      // warmupHistoricalResources walk that can take 600ms-1.5s on a
+      // 100-marker lineage. That is preloader work for undo/redo — render
+      // must NOT wait on it. Fire-and-forget so it warms in the
+      // background; the user only feels its cost when they actually
+      // invoke /undo or open the history viewer.
+      if (cursorService && sig.sig) {
+        void cursorService.load(sig.sig).catch(() => {})
       }
 
       if (cursorService) {
-        let content = await cursorService.layerContentAtCursor()
-        const cursorState = cursorService.state
+        // Primary content source: lineage.currentLayer() is memoized per
+        // fsRevision and returns in <1ms from in-memory state. It IS the
+        // live layer for the current location at HEAD. The cursor path
+        // is only consulted when the user has actively rewound.
+        let content: LayerContent | null = null
+        try {
+          const live = await (lineage as { currentLayer?: () => Promise<LayerContent | null> }).currentLayer?.()
+          if (live && typeof (live as { name?: unknown }).name === 'string') {
+            content = live as LayerContent
+          }
+        } catch { /* lineage unavailable — fall through to cursor */ }
 
-        // Two distinct null-content cases:
-        //
-        //   (A) Bag has markers, user undone past them → position 0,
-        //       cursor.layerContentAtCursor returns null. Render empty
-        //       (synthetic "pre-history" view).
-        //
-        //   (B) Bag has no markers at all (fresh lineage, sig migration
-        //       orphaned old bags, etc.) → also position 0, also null.
-        //       Fall through to lineage.currentLayer() so tiles still
-        //       display when history is missing but the layer is live.
-        //
-        // Distinguish by total: total > 0 means "history exists, you're
-        // before it" (case A). total === 0 means "no history" (case B).
-        if (!content && cursorState?.position === 0 && (cursorState?.total ?? 0) > 0) {
-          union.clear()
-          localCellSet.clear()
-        } else if (!content && (cursorState?.total ?? 0) === 0) {
-          // Live-layer fallback. The lineage primitive holds the current
-          // layer in memory once HistoryService.preloadAllBags has run;
-          // when the cursor's bag scan misses (timeout, no markers,
-          // sig drift) we still have authoritative layer data from the
-          // navigation side. This is the safety net that keeps the
-          // canvas non-blank when the cursor path stalls.
-          try {
-            const live = await (lineage as { currentLayer?: () => Promise<LayerContent | null> }).currentLayer?.()
-            if (live && typeof (live as { name?: unknown }).name === 'string') {
-              content = live
-            }
-          } catch { /* lineage unavailable — fall through to empty */ }
+        // Rewound view: if the user has scrubbed history (cursor.position
+        // < cursor.total) the cursor points at a historical layer and
+        // overrides the live content. cursorState is only meaningful when
+        // cursor.load has already completed for this location — typically
+        // true because the user spent time here before rewinding. On a
+        // freshly-navigated-to location the cursor's state is zeroed
+        // (position=0, total=0) which is NOT rewound, so live content wins.
+        const cursorState = cursorService.state
+        const isRewound = (cursorState?.total ?? 0) > 0
+          && (cursorState?.position ?? 0) < (cursorState?.total ?? 0)
+        if (isRewound) {
+          const cursorContent = await cursorService.layerContentAtCursor().catch(() => null)
+          if (cursorContent) {
+            content = cursorContent
+          } else if ((cursorState?.position ?? 0) === 0) {
+            // Pre-history view (case A from the previous implementation):
+            // user has rewound past every marker. Render empty.
+            content = null
+            union.clear()
+            localCellSet.clear()
+          }
         }
 
         if (content) {
@@ -1824,7 +1816,17 @@ export class ShowCellDrone extends Drone {
           // cells render immediately via the slot machine before the next
           // computeRender re-fires from cursor.onNewLayer.
           const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
-          const parentLayerSig = cursorService.currentLayerSig || ''
+          // Prefer cursor's currentLayerSig when it's known (it points at
+          // the historical layer when rewound). Fall back to lineage's
+          // live sig — important when cursor.load hasn't completed yet,
+          // because without a parentLayerSig resolveChildNames skips its
+          // manifest fast-path and pays per-child sig resolution.
+          let parentLayerSig: string = cursorService.currentLayerSig || ''
+          if (!parentLayerSig) {
+            try {
+              parentLayerSig = await (lineage as { currentSig?: () => Promise<string> }).currentSig?.() ?? ''
+            } catch { /* leave empty */ }
+          }
           layerAllowed = await resolveChildNames(historyService, parentSegments, dir, content, parentLayerSig)
           // Layer is the only source of truth (project_layer_is_primitive).
           // Whatever resolveChildNames returns IS the tile membership at

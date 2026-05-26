@@ -994,25 +994,54 @@ const main = async (): Promise<void> => {
   for (const [sig, bytes] of dependencyBytes) writeSigJsFile(depDir, sig, bytes)
   for (const [sig, bytes] of resourceBytes) writeSigJsFile(resDir, sig, bytes)
 
-  // Sigbag emission (Phase 1: additive — flat leaves above remain unchanged).
-  // A bag is a directory named by its merkle root; entries are zero-padded
-  // index files (0000, 0001, ...) whose contents are the bare leaf signature.
-  // Bag sig = SHA-256 of JSON.stringify(sortedSigs). Two bags with identical
-  // entries produce identical bag sigs (content-addressable).
-  const writeBag = async (parentDir: string, sigs: string[]): Promise<string> => {
-    const sorted = [...sigs].sort((a, b) => a.localeCompare(b))
-    const json = JSON.stringify(sorted)
-    const bagSig = await SignatureService.sign(toArrayBuffer(textToBytes(json)))
+  // Sigbag emission. A bag is a directory named by its content sig; entries
+  // are zero-padded index files (0000, 0001, …) whose contents carry the
+  // leaf metadata needed to build the importmap directly — no follow-up
+  // leaf-file open required.
+  //
+  // Entry format (two-line text):
+  //   line 1: alias (e.g. `@diamondcoreprocessor.com/clipboard`) or empty
+  //   line 2: leaf sig
+  //
+  // Bag sig = SHA-256 of canonical bytestream (entry contents joined by NUL).
+  // Format changes propagate to the bag sig automatically — old bags don't
+  // collide with new ones.
+  //
+  // `__dependencies__/HEAD` and `__bees__/HEAD` carry the active bag sig
+  // for the receiver to read straight from OPFS at boot — no localStorage,
+  // no manifest fetch, no leaf reads on the critical path.
+  type BagEntry = { sig: string; content: string }
+  const writeBag = async (parentDir: string, entries: BagEntry[]): Promise<string> => {
+    const sorted = [...entries].sort((a, b) => a.sig.localeCompare(b.sig))
+    const canonical = sorted.map(e => e.content).join('\0')
+    const bagSig = await SignatureService.sign(toArrayBuffer(textToBytes(canonical)))
     const bagDir = join(parentDir, bagSig)
     ensureDir(bagDir)
-    sorted.forEach((sig, i) => {
-      writeFileSync(join(bagDir, String(i).padStart(4, '0')), sig, 'utf8')
+    sorted.forEach((entry, i) => {
+      writeFileSync(join(bagDir, String(i).padStart(4, '0')), entry.content, 'utf8')
     })
+    writeFileSync(join(parentDir, 'HEAD'), bagSig, 'utf8')
     return bagSig
   }
 
-  const dependenciesBag = await writeBag(depDir, Array.from(dependencyBytes.keys()))
-  const beesBag = await writeBag(resDir, Array.from(resourceBytes.keys()))
+  // Build alias → sig index for dependencies. Each namespace's compiled
+  // output sig pairs with its `@namespace/path` import specifier.
+  const depAliasBySig = new Map<string, string>()
+  for (const [ns, unit] of Object.entries(newNamespaces)) {
+    depAliasBySig.set(unit.outputSig, specifierFromNamespaceRelDir(ns))
+  }
+
+  const depEntries: BagEntry[] = Array.from(dependencyBytes.keys()).map(sig => {
+    const alias = depAliasBySig.get(sig) ?? ''
+    return { sig, content: `${alias}\n${sig}\n` }
+  })
+  const beeEntries: BagEntry[] = Array.from(resourceBytes.keys()).map(sig => ({
+    sig,
+    content: `\n${sig}\n`,   // empty alias line; layout matches dep entries
+  }))
+
+  const dependenciesBag = await writeBag(depDir, depEntries)
+  const beesBag = await writeBag(resDir, beeEntries)
   console.log(`[build-module] bags: dependencies=${dependenciesBag.slice(0, 12)} bees=${beesBag.slice(0, 12)}`)
 
   // content manifest — package entry keyed by root signature.
