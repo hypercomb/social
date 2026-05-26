@@ -1615,31 +1615,13 @@ export class ShowCellDrone extends Drone {
         dir = await lineage.explorerDir()
       }
     } else {
+      // Read-only explorer dir lookup. Layer-as-primitive — hierarchy
+      // lives in layer.children, not in `hypercomb.io/<path>/` folders.
+      // The renderer no longer mints folders to hold viewport state;
+      // viewport persistence lives keyed by lineageSig (flat), not by
+      // a parallel folder tree. A null dir is the new normal for any
+      // sub-layer location.
       dir = await lineage.explorerDir()
-      // Lazy-create the OPFS dir for this location if the read-only
-      // lookup didn't find one. Per the architecture, tile MEMBERSHIP
-      // comes from layer.children (we don't mint dirs to create tiles);
-      // but the per-location 0000 file IS the canonical storage for
-      // viewport / properties state, so the dir has to exist as soon
-      // as the user actually navigates there. Lazy-create walks
-      // segments from hypercombRoot with create:true.
-      if (!dir) {
-        const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
-          { hypercombRoot?: FileSystemDirectoryHandle } | undefined
-        const root = store?.hypercombRoot
-        const segs = lineage?.explorerSegments?.() ?? []
-        if (root && segs.length > 0) {
-          try {
-            let walker: FileSystemDirectoryHandle = root
-            for (const seg of segs) {
-              const trimmed = String(seg ?? '').trim()
-              if (!trimmed) continue
-              walker = await walker.getDirectoryHandle(trimmed, { create: true })
-            }
-            dir = walker
-          } catch { /* OPFS write may fail (quota); leave dir null */ }
-        }
-      }
     }
     if (!this.#clipboardView && isStale()) {
       this.renderQueued = true
