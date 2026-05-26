@@ -188,14 +188,6 @@ function is-content-addressed {
     [string]$RelativePath
   )
 
-  # HEAD pointer files (`__bees__/HEAD`, `__dependencies__/HEAD`) carry
-  # the active bag sig. Their NAME is constant across deploys but their
-  # CONTENT changes every bag rotation, so they are NOT content-addressed.
-  # Treat them as ordinary mutable files so each deploy overwrites them.
-  if ($RelativePath -match '^(__layers__|__bees__|__dependencies__)/HEAD$') {
-    return $false
-  }
-
   return $RelativePath -match '^(__layers__|__bees__|__dependencies__)/'
 }
 

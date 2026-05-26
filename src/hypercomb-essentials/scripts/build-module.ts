@@ -1007,9 +1007,11 @@ const main = async (): Promise<void> => {
   // Format changes propagate to the bag sig automatically — old bags don't
   // collide with new ones.
   //
-  // `__dependencies__/HEAD` and `__bees__/HEAD` carry the active bag sig
-  // for the receiver to read straight from OPFS at boot — no localStorage,
-  // no manifest fetch, no leaf reads on the critical path.
+  // No HEAD pointer file is emitted. Everything written here is content-
+  // addressed: the bag dir is named by its sig, entries are named by
+  // index, leaves are named by their own sig. The receiver discovers the
+  // active bag by scanning `__dependencies__/` for the single bag dir —
+  // `installFromBundled` removes prior bag dirs to maintain that invariant.
   type BagEntry = { sig: string; content: string }
   const writeBag = async (parentDir: string, entries: BagEntry[]): Promise<string> => {
     const sorted = [...entries].sort((a, b) => a.sig.localeCompare(b.sig))
@@ -1020,7 +1022,6 @@ const main = async (): Promise<void> => {
     sorted.forEach((entry, i) => {
       writeFileSync(join(bagDir, String(i).padStart(4, '0')), entry.content, 'utf8')
     })
-    writeFileSync(join(parentDir, 'HEAD'), bagSig, 'utf8')
     return bagSig
   }
 

@@ -7,23 +7,27 @@ export type ResolvedImports = Record<string, string>
 const OPFS_DEPENDENCY_BASE_PATH = '/opfs/__dependencies__'
 
 /**
- * Build the runtime importmap entirely from OPFS — no localStorage,
- * no manifest fetch, no leaf-file opens.
+ * Build the runtime importmap by opening exactly one bag.
  *
- * Boot reads exactly one bag:
+ * Receiver-side `__dependencies__/` contains:
+ *   - `<bagSig>/0000…` — the active bag, named by its content sig
+ *   - `<leafSig>.js`   — namespace bundles at root, one per dep
  *
- *   1. `__dependencies__/HEAD`         — file containing the active bag sig
- *   2. `__dependencies__/<HEAD>/000x`  — bag entries, each is two-line text:
- *                                         line 1 = `@scope/name` alias
- *                                         line 2 = leaf sig
+ * `installFromBundled` enforces the single-bag invariant: only one bag
+ * directory ever exists in `__dependencies__/` at a time (old ones are
+ * evicted before the new one is written). So the boot path:
  *
- * Entries are read in parallel; the importmap is assembled directly from
- * the (alias, sig) pairs. The leaf files (`__dependencies__/<sig>.js`)
- * are never opened during import-map resolution.
+ *   1. scan `__dependencies__/` until we find a directory (the bag);
+ *   2. iterate its entries in parallel; each entry is two-line text
+ *      (line 1 = `@scope/name` alias, line 2 = leaf sig);
+ *   3. assemble the importmap directly from those pairs.
  *
- * A flat-scan fallback survives for installs predating the HEAD pointer
- * (older `installFromBundled` runs that wrote leaves but no HEAD). On
- * future installs the fallback never fires.
+ * No localStorage on the critical path. No leaf-file opens. No pointer
+ * file. The bag dir's existence IS the signal that an install is present.
+ *
+ * A flat-scan fallback survives for installs that predate the bag
+ * (`installFromBundled` runs without `dependenciesBag` set). New installs
+ * always populate the bag, so the fallback eventually goes idle.
  */
 export const resolveImportMap = async (): Promise<ResolvedImports> => {
   const imports: ResolvedImports = {}
@@ -48,54 +52,53 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   const depsDir = store.dependencies
   if (!depsDir) return imports
 
-  // HEAD-file fast path. One stat + one read of `HEAD`, one dir scan of
-  // the active bag, parallel reads of N small two-line entries. The bag
-  // sig in HEAD is the disk truth — no cross-checking against localStorage.
+  // Bag-discovery fast path. Iterate `__dependencies__/` once; the first
+  // directory whose name is a 64-hex sig is the active bag.
   let bagPathSucceeded = false
   try {
-    const headHandle = await depsDir.getFileHandle('HEAD').catch(() => null)
-    if (headHandle) {
-      const activeBagSig = (await (await headHandle.getFile()).text()).trim()
-      if (activeBagSig) {
-        const bagDir = await depsDir.getDirectoryHandle(activeBagSig).catch(() => null)
-        if (bagDir) {
-          const names: string[] = []
-          for await (const [n] of bagDir.entries()) names.push(n)
-          names.sort()
+    let bagDir: FileSystemDirectoryHandle | null = null
+    for await (const [name, handle] of depsDir.entries()) {
+      if (handle.kind !== 'directory') continue
+      if (!/^[a-f0-9]{64}$/i.test(name)) continue
+      bagDir = handle as FileSystemDirectoryHandle
+      break
+    }
 
-          const entries = await Promise.all(names.map(async (n) => {
-            const h = await bagDir.getFileHandle(n).catch(() => null)
-            if (!h) return null
-            const text = (await (await h.getFile()).text()).trim()
-            const newlineIdx = text.indexOf('\n')
-            if (newlineIdx < 0) return null
-            const alias = text.slice(0, newlineIdx).trim()
-            const sig = text.slice(newlineIdx + 1).trim()
-            return alias && sig ? { alias, sig } : null
-          }))
+    if (bagDir) {
+      const names: string[] = []
+      for await (const [n] of bagDir.entries()) names.push(n)
+      names.sort()
 
-          for (const entry of entries) {
-            if (!entry) continue
-            if (imports[entry.alias]) continue
-            imports[entry.alias] = `${OPFS_DEPENDENCY_BASE_PATH}/${entry.sig}`
-            aliasSource.set(entry.alias, entry.sig)
-          }
-          bagPathSucceeded = aliasSource.size > 0
-        }
+      const entries = await Promise.all(names.map(async (n) => {
+        const h = await bagDir!.getFileHandle(n).catch(() => null)
+        if (!h) return null
+        const text = (await (await h.getFile()).text()).trim()
+        const nl = text.indexOf('\n')
+        if (nl < 0) return null
+        const alias = text.slice(0, nl).trim()
+        const sig = text.slice(nl + 1).trim()
+        return alias && sig ? { alias, sig } : null
+      }))
+
+      for (const entry of entries) {
+        if (!entry) continue
+        if (imports[entry.alias]) continue
+        imports[entry.alias] = `${OPFS_DEPENDENCY_BASE_PATH}/${entry.sig}`
+        aliasSource.set(entry.alias, entry.sig)
       }
+      bagPathSucceeded = aliasSource.size > 0
     }
   } catch (err) {
-    console.warn('[resolveImportMap] HEAD-path build failed; falling back to flat scan', err)
+    console.warn('[resolveImportMap] bag scan failed; falling back to flat scan', err)
     bagPathSucceeded = false
   }
 
-  // Flat-scan fallback. Only runs when no HEAD file exists yet (older
-  // installs that predate the HEAD pointer). New installs always hit
-  // the bag path above.
+  // Flat-scan fallback. Only runs when no bag dir is present (installs
+  // that predate the bag emission). Reads each leaf's first 512 bytes
+  // to extract the namespace alias from the source-path comment.
   if (!bagPathSucceeded) {
     for await (const [signature, handle] of depsDir.entries()) {
       if (handle.kind !== 'file') continue
-      if (signature === 'HEAD') continue
 
       const file = await (handle as FileSystemFileHandle).getFile()
       const prefix = await file.slice(0, 512).arrayBuffer()
@@ -116,9 +119,8 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
     }
   }
 
-  // Cache the alias map so DependencyLoader can skip its own OPFS scan
-  // later in this session. NOT consulted on the next boot — that path
-  // re-reads OPFS truth from HEAD.
+  // Cache the alias map for in-session reuse by DependencyLoader.
+  // NOT consulted on the next boot — every cold boot re-derives from OPFS.
   ;(globalThis as any).__hypercombAliasMap = aliasSource
 
   return imports

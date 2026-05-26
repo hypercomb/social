@@ -58,14 +58,8 @@ const syncTarget = (targetDir: string): { copied: number; skipped: number; remov
     // beeline: entry name IS the signature (file = leaf, directory = bag).
     // Either way, if the name exists in target, content-addressing guarantees
     // it's the same content — skip.
-    //
-    // Exception: `HEAD` files. Their name is constant across deploys but
-    // their content (the active bag sig) changes every time the bag rotates.
-    // Skip-if-exists would leave the receiver pointing at a stale bag, so
-    // HEAD always overwrites.
     for (const name of srcEntries) {
-      const isHeadPointer = name === 'HEAD'
-      if (tgtEntries.has(name) && !isHeadPointer) {
+      if (tgtEntries.has(name)) {
         skipped++
         continue
       }

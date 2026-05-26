@@ -291,6 +291,25 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     return written
   }
 
+  // Single-bag invariant: before writing the new bag dir, evict any prior
+  // bag dirs so `__dependencies__/` and `__bees__/` each contain exactly
+  // one bag dir after install. The receiver's importmap build relies on
+  // a `readdir` finding only the active bag — no pointer file needed.
+  const evictOldBagDirs = async (parentDir: FileSystemDirectoryHandle, keepSig: string): Promise<void> => {
+    const stale: string[] = []
+    for await (const [name, handle] of parentDir.entries()) {
+      if (handle.kind !== 'directory') continue
+      if (!/^[a-f0-9]{64}$/i.test(name)) continue
+      if (name === keepSig) continue
+      stale.push(name)
+    }
+    for (const name of stale) {
+      try { await parentDir.removeEntry(name, { recursive: true }) } catch { /* skip */ }
+    }
+  }
+  if (bundled.dependenciesBag) await evictOldBagDirs(store.dependencies, bundled.dependenciesBag)
+  if (bundled.beesBag) await evictOldBagDirs(store.bees, bundled.beesBag)
+
   let depBagCount = 0
   let beeBagCount = 0
   if (bundled.dependenciesBag) {
@@ -299,21 +318,6 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   if (bundled.beesBag) {
     beeBagCount = await writeBag(store.bees, bundled.beesBag, bundled.bees.length, '/content/__bees__')
   }
-
-  // HEAD pointer files: tiny text files at each bag-parent dir naming
-  // the active bag sig. The boot importmap path reads these directly
-  // (no localStorage, no manifest fetch) — OPFS is the truth, the
-  // localStorage manifest is a hot-path hint only.
-  const writeHead = async (parentDir: FileSystemDirectoryHandle, contentPath: string): Promise<void> => {
-    const bytes = await fetchBytes(`${contentPath}/HEAD`)
-    if (!bytes) return
-    const handle = await parentDir.getFileHandle('HEAD', { create: true })
-    const writable = await handle.createWritable()
-    await writable.write(bytes)
-    await writable.close()
-  }
-  if (bundled.dependenciesBag) await writeHead(store.dependencies, '/content/__dependencies__')
-  if (bundled.beesBag) await writeHead(store.bees, '/content/__bees__')
 
   // Loud failure mode. If any file failed to land, surface it now —
   // otherwise the next boot's spot-check will silently wipe and retry,
