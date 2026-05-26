@@ -6,122 +6,13 @@ import { OpfsTreeLogger } from './tree-logger'
 import './install-monitor'
 import type { BootstrapHistory } from './bootstrap-history'
 import { Store } from './store'
-import { materializeStructure } from './structure-materializer'
 
-// ─── layer tree materialization ───────────────────────────────────────────────
-// After a sentinel or local install the layer JSON files land in
-// __layers__/<domain>/<sig> but the tile directories under hypercomb.io/ are
-// never created.  This step walks the layer tree and creates those directories
-// so ShowCellDrone has something to render on first boot.
-
-type LayerNode = { name: string; children: string[] }
-
-const readLayerNode = async (
-  dir: FileSystemDirectoryHandle,
-  sig: string,
-): Promise<LayerNode | null> => {
-  try {
-    const handle = await dir.getFileHandle(sig)
-    const file = await handle.getFile()
-    const parsed = JSON.parse(await file.text())
-    const name = String(parsed?.name ?? '').trim()
-    // Child layer sigs live under `cells` — same primitive name as
-    // the slim hypercomb.io layer. Accept legacy `layers`/`children`
-    // as fallbacks during the transition.
-    const rawChildren = Array.isArray(parsed?.cells) ? parsed.cells
-      : Array.isArray(parsed?.layers) ? parsed.layers
-      : Array.isArray(parsed?.children) ? parsed.children
-      : []
-    const children = (rawChildren as unknown[])
-      .map(c => String(c).trim())
-      .filter(c => /^[a-f0-9]{64}$/i.test(c))
-    if (!name) return null
-    return { name, children }
-  } catch {
-    return null
-  }
-}
-
-const applyLayerToDir = async (
-  targetDir: FileSystemDirectoryHandle,
-  layer: LayerNode,
-  layerMap: Map<string, LayerNode>,
-  depth: number = 0,
-): Promise<void> => {
-  if (depth > 8) return // guard against unexpectedly deep trees
-  for (const childSig of layer.children) {
-    const childLayer = layerMap.get(childSig)
-    if (!childLayer?.name) continue
-    try {
-      const childDir = await targetDir.getDirectoryHandle(childLayer.name, { create: true })
-      if (childLayer.children.length > 0) {
-        await applyLayerToDir(childDir, childLayer, layerMap, depth + 1)
-      }
-    } catch { /* skip individual failures */ }
-  }
-}
-
-const materializeInstalledLayers = async (store: Store): Promise<void> => {
-  try {
-    const raw = localStorage.getItem('core-adapter.installed-manifest')
-    if (!raw) return
-
-    let manifest: unknown
-    try { manifest = JSON.parse(raw) } catch { return }
-
-    const layerSigs: string[] = Array.isArray((manifest as any)?.layers)
-      ? ((manifest as any).layers as unknown[]).map(s => String(s)).filter(s => /^[a-f0-9]{64}$/i.test(s))
-      : []
-    if (!layerSigs.length) return
-
-    // Skip if hypercomb.io/ already has tile directories
-    for await (const [, handle] of store.hypercombRoot.entries()) {
-      if (handle.kind === 'directory') return
-    }
-
-    // Find which domain directory holds these layer files
-    let layerDir: FileSystemDirectoryHandle | null = null
-    for (const domain of ['sentinel', 'local']) {
-      try {
-        const candidate = await store.domainLayersDirectory(domain)
-        await candidate.getFileHandle(layerSigs[0])
-        layerDir = candidate
-        break
-      } catch { /* try next domain */ }
-    }
-    if (!layerDir) return
-
-    // Parse all layer nodes
-    const layerMap = new Map<string, LayerNode>()
-    for (const sig of layerSigs) {
-      const node = await readLayerNode(layerDir, sig)
-      if (node) layerMap.set(sig, node)
-    }
-    if (!layerMap.size) return
-
-    // Root = the layer sig not referenced as a child of any other
-    const allChildSigs = new Set<string>()
-    for (const { children } of layerMap.values()) {
-      for (const c of children) allChildSigs.add(c)
-    }
-    const rootSig = layerSigs.find(sig => layerMap.has(sig) && !allChildSigs.has(sig))
-    if (!rootSig) return
-
-    // The slim meta-root (built with name `"root"` when the layer has no
-    // rel path of its own) groups domain wrappers — its children are
-    // namespaces like `miro.com` and `diamondcoreprocessor.com`, not
-    // user-content tiles. Iterating it would write one tile dir per
-    // domain into hypercomb.io/. User content tiles only live under a
-    // real domain root, so bail when the root is the meta-root.
-    if (layerMap.get(rootSig)!.name === 'root') return
-
-    await applyLayerToDir(store.hypercombRoot, layerMap.get(rootSig)!, layerMap)
-    console.log('[runtime-initializer] materialized layer tree into hypercomb.io/')
-  } catch (err) {
-    console.warn('[runtime-initializer] layer materialization failed (non-fatal):', err)
-  }
-}
-// ──────────────────────────────────────────────────────────────────────────────
+// Note: the legacy layer-tree materializers (materializeInstalledLayers,
+// materializeStructure) and their helpers (readLayerNode, applyLayerToDir)
+// were removed. They mirrored layer.children as folders under hypercomb.io/
+// and __structure__/ — a parallel-store violation now that layers are the
+// only source of truth for hierarchy. Render reads layer.children directly;
+// no on-disk mirror is needed or wanted.
 
 export type RuntimeInitializerOptions = {
   logOpfs?: boolean
@@ -160,13 +51,8 @@ const _runInitializeRuntime = async (
   await store?.initialize?.()
   ;(window as any).__hcBoot?.('store.initialize done')
 
-  // Materialize layer tree → tile directories in hypercomb.io/ (no-op if tiles already exist)
-  if (store) await materializeInstalledLayers(store)
-  ;(window as any).__hcBoot?.('materializeInstalledLayers done')
-
-  // Materialize install structure tree → __structure__/ for program inspection
-  if (store) await materializeStructure(store)
-  ;(window as any).__hcBoot?.('materializeStructure done')
+  // Legacy layer-tree materialization removed. Layers are the only source
+  // of truth for hierarchy; no on-disk mirror.
 
   // Load host translations for the i18n service
   const i18n = get('@hypercomb.social/I18n') as LocalizationService | undefined
