@@ -260,30 +260,40 @@ const _runInitializeRuntime = async (
     latestMarkerSigFor: typeof historyService?.latestMarkerSigFor,
   })
   if (historyService?.preloadAllBags) {
-    try {
-      await historyService.preloadAllBags()
-      // Walk from the lineage root's head so descendants are warmed
-      // before any render fetches them. The root lineage is sig of
-      // the empty-segments key (sha256('')); its head layer's children
-      // are the user's top-level tiles, recurse from there.
-      if (historyService.sign && historyService.latestMarkerSigFor && historyService.preloadFromRoot) {
-        const rootLineageSig = await historyService.sign({ explorerSegments: () => [] })
-        const rootHeadSig = await historyService.latestMarkerSigFor(rootLineageSig, '/')
-        console.log('[preload] root layer resolved:', {
-          rootLineageSig: rootLineageSig?.slice?.(0, 12),
-          rootHeadSig: rootHeadSig?.slice?.(0, 12),
-        })
-        if (rootHeadSig) {
-          await historyService.preloadFromRoot(rootHeadSig)
+    // Preloader is a background warming pass — never block boot/render on it.
+    // Awaiting these here previously hung Angular bootstrap when
+    // `preloadFromRoot`'s recursive walk encountered a non-resolving
+    // `getLayerBySig` for one descendant: the entire shell never rendered
+    // (blank page on the bg color). Fire-and-forget per the design rule
+    // "real-time supersedes preloader"; the cache warms behind the shell,
+    // first render may pay a cold miss but every subsequent navigation
+    // hits the cache. Logs in the service still surface progress / errors.
+    void (async () => {
+      try {
+        await historyService.preloadAllBags!()
+        // Walk from the lineage root's head so descendants are warmed
+        // before any render fetches them. The root lineage is sig of
+        // the empty-segments key (sha256('')); its head layer's children
+        // are the user's top-level tiles, recurse from there.
+        if (historyService.sign && historyService.latestMarkerSigFor && historyService.preloadFromRoot) {
+          const rootLineageSig = await historyService.sign({ explorerSegments: () => [] })
+          const rootHeadSig = await historyService.latestMarkerSigFor(rootLineageSig, '/')
+          console.log('[preload] root layer resolved:', {
+            rootLineageSig: rootLineageSig?.slice?.(0, 12),
+            rootHeadSig: rootHeadSig?.slice?.(0, 12),
+          })
+          if (rootHeadSig) {
+            await historyService.preloadFromRoot(rootHeadSig)
+          } else {
+            console.warn('[preload] no rootHeadSig — preloadFromRoot skipped')
+          }
         } else {
-          console.warn('[preload] no rootHeadSig — preloadFromRoot skipped')
+          console.warn('[preload] preloadFromRoot capability missing on history service')
         }
-      } else {
-        console.warn('[preload] preloadFromRoot capability missing on history service')
+      } catch (err) {
+        console.warn('[runtime-initializer] preload failed (non-fatal):', err)
       }
-    } catch (err) {
-      console.warn('[runtime-initializer] preload failed (non-fatal):', err)
-    }
+    })()
   } else {
     console.warn('[preload] HistoryService unavailable at preload step')
   }
