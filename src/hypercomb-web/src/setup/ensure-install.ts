@@ -32,6 +32,8 @@ type InstallManifest = {
   bees: string[]
   dependencies: string[]
   beeDeps?: Record<string, string[]>
+  dependenciesBag?: string
+  beesBag?: string
 }
 
 export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<void> => {
@@ -179,13 +181,24 @@ export const upgradeFromBundled = async (): Promise<boolean> => {
 // DCP hasn't pushed yet.
 // -------------------------------------------------
 
-type BundledPackage = { packageSig: string; bees: string[]; dependencies: string[]; layers: string[]; beeDeps?: Record<string, string[]> }
+type BundledPackage = {
+  packageSig: string
+  bees: string[]
+  dependencies: string[]
+  layers: string[]
+  beeDeps?: Record<string, string[]>
+  // Sigbag (Phase 1 additive): when present, the bundle ships
+  // `__dependencies__/<dependenciesBag>/0000…` and `__bees__/<beesBag>/0000…`
+  // alongside the flat leaves. Absent for older bundles.
+  dependenciesBag?: string
+  beesBag?: string
+}
 
 const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
   try {
     const res = await fetch('/content/manifest.json', { cache: 'no-store' })
     if (!res.ok) return null
-    const content = await res.json() as { packages?: Record<string, { bees?: string[]; dependencies?: string[]; layers?: string[]; beeDeps?: Record<string, string[]> }> }
+    const content = await res.json() as { packages?: Record<string, { bees?: string[]; dependencies?: string[]; layers?: string[]; beeDeps?: Record<string, string[]>; dependenciesBag?: string; beesBag?: string }> }
     const sig = Object.keys(content.packages ?? {})[0]
     if (!sig) return null
     const pkg = content.packages![sig]
@@ -195,6 +208,8 @@ const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
       dependencies: pkg.dependencies ?? [],
       layers: pkg.layers ?? [],
       beeDeps: pkg.beeDeps,
+      dependenciesBag: pkg.dependenciesBag,
+      beesBag: pkg.beesBag,
     }
   } catch {
     return null
@@ -252,6 +267,39 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   const depCount = await writeAll(bundled.dependencies, (s) => `/content/__dependencies__/${s}.js`, store.dependencies, (s) => `${s}.js`)
   const layerCount = await writeAll(bundled.layers, (s) => `/content/__layers__/${s}.json`, layerDir, (s) => s)
 
+  // Sigbag fetch (Phase 2 additive): when the bundle declares a bag sig,
+  // fetch each indexed entry and write under <bagSig>/<index>. Entry count
+  // matches the flat array length by construction (the build emits both).
+  const writeBag = async (
+    parentDir: FileSystemDirectoryHandle,
+    bagSig: string,
+    entryCount: number,
+    contentPath: string,
+  ): Promise<number> => {
+    const bagDir = await parentDir.getDirectoryHandle(bagSig, { create: true })
+    let written = 0
+    await Promise.all(Array.from({ length: entryCount }, (_, i) => i).map(async (i) => {
+      const indexName = String(i).padStart(4, '0')
+      const bytes = await fetchBytes(`${contentPath}/${bagSig}/${indexName}`)
+      if (!bytes) return
+      const handle = await bagDir.getFileHandle(indexName, { create: true })
+      const writable = await handle.createWritable()
+      await writable.write(bytes)
+      await writable.close()
+      written++
+    }))
+    return written
+  }
+
+  let depBagCount = 0
+  let beeBagCount = 0
+  if (bundled.dependenciesBag) {
+    depBagCount = await writeBag(store.dependencies, bundled.dependenciesBag, bundled.dependencies.length, '/content/__dependencies__')
+  }
+  if (bundled.beesBag) {
+    beeBagCount = await writeBag(store.bees, bundled.beesBag, bundled.bees.length, '/content/__bees__')
+  }
+
   // Loud failure mode. If any file failed to land, surface it now —
   // otherwise the next boot's spot-check will silently wipe and retry,
   // and the user just sees a flash of the install prompt.
@@ -262,15 +310,24 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   }
 
   // Mirror the manifest + sync state that resyncFromSentinel would write
-  // so the next reload boots through the cached fast path.
-  const manifest = { version: 2, layers: bundled.layers, bees: bundled.bees, dependencies: bundled.dependencies, beeDeps: bundled.beeDeps }
+  // so the next reload boots through the cached fast path. Bag sigs are
+  // included so `resolveImportMap` can prefer the bag over flat scan.
+  const manifest = {
+    version: 2,
+    layers: bundled.layers,
+    bees: bundled.bees,
+    dependencies: bundled.dependencies,
+    beeDeps: bundled.beeDeps,
+    dependenciesBag: bundled.dependenciesBag,
+    beesBag: bundled.beesBag,
+  }
   localStorage.setItem(MANIFEST_KEY, JSON.stringify(manifest))
   localStorage.setItem(SYNC_SIG_KEY, bundled.packageSig)
   localStorage.setItem(INSTALLED_FLAG_KEY, 'true')
   if (bundled.beeDeps) (globalThis as any).__hypercombBeeDeps = bundled.beeDeps
   sigStore.trustAll([...bundled.bees, ...bundled.dependencies, ...bundled.layers])
   localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
-  console.log(`[ensure-install] bundled install complete: ${bundled.packageSig.slice(0, 12)} (${beeCount}/${bundled.bees.length} bees, ${depCount}/${bundled.dependencies.length} deps, ${layerCount}/${bundled.layers.length} layers)`)
+  console.log(`[ensure-install] bundled install complete: ${bundled.packageSig.slice(0, 12)} (${beeCount}/${bundled.bees.length} bees, ${depCount}/${bundled.dependencies.length} deps, ${layerCount}/${bundled.layers.length} layers, bags: deps=${depBagCount} bees=${beeBagCount})`)
 }
 
 /**
@@ -323,8 +380,13 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
   const enabledDepSet = new Set(enabledDeps)
   const enabledLayerSet = new Set(enabledLayers)
 
-  await removeDisabled(store.bees, enabledBeeSet, '.js')
-  await removeDisabled(store.dependencies, enabledDepSet, '.js')
+  // Bag-aware GC (Phase 3): the sentinel result doesn't carry bag sigs yet,
+  // so preserve whichever bag the previously-cached manifest declared.
+  // When sentinel later pushes its own bag sigs, swap in those instead.
+  const priorManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
+
+  await removeDisabled(store.bees, enabledBeeSet, '.js', priorManifest?.beesBag)
+  await removeDisabled(store.dependencies, enabledDepSet, '.js', priorManifest?.dependenciesBag)
   const layerDir = await store.domainLayersDirectory('sentinel', true)
   await removeDisabled(layerDir, enabledLayerSet, '')
   await clearStaleCaches()
@@ -353,7 +415,20 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
     localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
   }
 
-  const syncManifest = { version: 2, layers: enabledLayers, bees: enabledBees, dependencies: enabledDeps, beeDeps }
+  // Carry forward bag sigs from the prior manifest. The sentinel sync
+  // protocol doesn't transport them yet, so absent an explicit value we
+  // assume the active bag is unchanged from the last bundled install.
+  // When sentinel push gains bag awareness, override here with the value
+  // it sends.
+  const syncManifest = {
+    version: 2,
+    layers: enabledLayers,
+    bees: enabledBees,
+    dependencies: enabledDeps,
+    beeDeps,
+    dependenciesBag: priorManifest?.dependenciesBag,
+    beesBag: priorManifest?.beesBag,
+  }
   localStorage.setItem(SYNC_SIG_KEY, syncSig)
   localStorage.setItem(MANIFEST_KEY, JSON.stringify(syncManifest))
   if (beeDeps) (globalThis as any).__hypercombBeeDeps = beeDeps
@@ -391,6 +466,8 @@ const tryParseManifest = (json: string): InstallManifest | null => {
       bees: Array.isArray(parsed.bees) ? parsed.bees : [],
       dependencies: Array.isArray(parsed.dependencies) ? parsed.dependencies : [],
       beeDeps: parsed.beeDeps && typeof parsed.beeDeps === 'object' ? parsed.beeDeps : undefined,
+      dependenciesBag: typeof parsed.dependenciesBag === 'string' ? parsed.dependenciesBag : undefined,
+      beesBag: typeof parsed.beesBag === 'string' ? parsed.beesBag : undefined,
     }
   } catch {
     return null
@@ -423,13 +500,30 @@ const seedCacheEntry = async (path: string, bytes: ArrayBuffer, contentType: str
 /**
  * Remove files from a directory whose signature is NOT in the enabled set.
  * Handles files stored as `{sig}{ext}` or bare `{sig}`.
+ *
+ * Bag-aware (Phase 3): directories whose name is a 64-hex sig are treated as
+ * sigbags. The currently active bag (passed as `enabledBagSig`) is preserved;
+ * any other bag-shaped directory is recursively removed. When `enabledBagSig`
+ * is undefined, ALL bag-shaped directories are left untouched — this keeps
+ * older bundled-install bags alive across sentinel resyncs that don't yet
+ * carry bag info in their payload.
  */
 const removeDisabled = async (
   dir: FileSystemDirectoryHandle,
   enabledSigs: Set<string>,
-  ext: string
+  ext: string,
+  enabledBagSig?: string,
 ): Promise<void> => {
-  for await (const [name] of dir.entries()) {
+  for await (const [name, handle] of dir.entries()) {
+    if (handle.kind === 'directory') {
+      // Bag directory: only act when an explicit active-bag sig is known.
+      // Without it, we have no authority to remove — leave bags alone.
+      if (enabledBagSig === undefined) continue
+      if (/^[a-f0-9]{64}$/i.test(name) && name !== enabledBagSig) {
+        try { await dir.removeEntry(name, { recursive: true }) } catch { /* skip */ }
+      }
+      continue
+    }
     const sig = ext ? name.replace(new RegExp(`\\${ext}$`, 'i'), '') : name
     if (/^[a-f0-9]{64}$/i.test(sig) && !enabledSigs.has(sig)) {
       try { await dir.removeEntry(name) } catch { /* skip */ }

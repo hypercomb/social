@@ -1,6 +1,6 @@
 import { AfterViewInit, Component, computed, effect, HostBinding, inject, signal } from '@angular/core'
 import { type Bee, EffectBus } from '@hypercomb/core'
-import type { BootStatus } from '../setup/ensure-install'
+import { upgradeFromBundled, type BootStatus } from '../setup/ensure-install'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
 import { CoreAdapter } from './core-adapter'
@@ -51,6 +51,26 @@ export class App implements AfterViewInit {
     window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'dcp' } }))
   }
 
+  /**
+   * User-initiated install from the shell's bundled `/content/` package.
+   * Wired to the "Upgrade Hypercomb" button in the install-needed prompt;
+   * also surfaced as `window.upgradeHypercomb` for headless triggering.
+   * On success, reloads the page so the freshly-installed bees take over.
+   */
+  protected upgrading = signal(false)
+  protected async upgradeFromBundledClicked(): Promise<void> {
+    if (this.upgrading()) return
+    this.upgrading.set(true)
+    try {
+      const ok = await upgradeFromBundled()
+      if (ok) location.reload()
+      else this.upgrading.set(false)
+    } catch (err) {
+      console.error('[app] upgradeFromBundled failed', err)
+      this.upgrading.set(false)
+    }
+  }
+
   @HostBinding('class.clipboard-mode')
   get clipboardModeClass() { return this.clipboardMode(); }
 
@@ -80,6 +100,10 @@ export class App implements AfterViewInit {
     })
 
     this.runtimeReady = this.core.initialize()
+
+    // Exposed for console / headless testing. Same effect as clicking
+    // "Upgrade Hypercomb" in the install-needed prompt.
+    ;(window as any).upgradeHypercomb = () => this.upgradeFromBundledClicked()
 
     EffectBus.on<BootStatus>('boot:status', (status) => {
       this.bootStatus.set(status)

@@ -994,6 +994,27 @@ const main = async (): Promise<void> => {
   for (const [sig, bytes] of dependencyBytes) writeSigJsFile(depDir, sig, bytes)
   for (const [sig, bytes] of resourceBytes) writeSigJsFile(resDir, sig, bytes)
 
+  // Sigbag emission (Phase 1: additive — flat leaves above remain unchanged).
+  // A bag is a directory named by its merkle root; entries are zero-padded
+  // index files (0000, 0001, ...) whose contents are the bare leaf signature.
+  // Bag sig = SHA-256 of JSON.stringify(sortedSigs). Two bags with identical
+  // entries produce identical bag sigs (content-addressable).
+  const writeBag = async (parentDir: string, sigs: string[]): Promise<string> => {
+    const sorted = [...sigs].sort((a, b) => a.localeCompare(b))
+    const json = JSON.stringify(sorted)
+    const bagSig = await SignatureService.sign(toArrayBuffer(textToBytes(json)))
+    const bagDir = join(parentDir, bagSig)
+    ensureDir(bagDir)
+    sorted.forEach((sig, i) => {
+      writeFileSync(join(bagDir, String(i).padStart(4, '0')), sig, 'utf8')
+    })
+    return bagSig
+  }
+
+  const dependenciesBag = await writeBag(depDir, Array.from(dependencyBytes.keys()))
+  const beesBag = await writeBag(resDir, Array.from(resourceBytes.keys()))
+  console.log(`[build-module] bags: dependencies=${dependenciesBag.slice(0, 12)} bees=${beesBag.slice(0, 12)}`)
+
   // content manifest — package entry keyed by root signature.
   // No version field; the package's identity is its rootLayerSig and
   // its meaning is its sig arrays. Adding a version pollutes the
@@ -1004,6 +1025,8 @@ const main = async (): Promise<void> => {
     bees: Array.from(resourceBytes.keys()).sort((a, b) => a.localeCompare(b)),
     dependencies: dependencySigs,
     beeDeps: Object.fromEntries(beeDepsMap),
+    dependenciesBag,
+    beesBag,
   }
 
   // Single-package manifest: always write only the current rootLayerSig.

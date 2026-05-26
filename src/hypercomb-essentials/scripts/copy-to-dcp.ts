@@ -7,7 +7,7 @@
 //   diamond-core-processor/public/   — production proxy (serves content into OPFS)
 //   hypercomb-web/public/content/    — local dev server (feeds OPFS via localInstall)
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'fs'
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'fs'
 import { dirname, join, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -24,6 +24,19 @@ const TARGETS = [
 const CONTENT_DIRS = ['__layers__', '__bees__', '__dependencies__', '__resources__']
 const MANIFEST_FILE = 'manifest.json'
 
+const copyDirRecursive = (srcDir: string, tgtDir: string): void => {
+  mkdirSync(tgtDir, { recursive: true })
+  for (const name of readdirSync(srcDir)) {
+    const srcPath = join(srcDir, name)
+    const tgtPath = join(tgtDir, name)
+    if (statSync(srcPath).isDirectory()) {
+      copyDirRecursive(srcPath, tgtPath)
+    } else {
+      copyFileSync(srcPath, tgtPath)
+    }
+  }
+}
+
 const syncTarget = (targetDir: string): { copied: number; skipped: number; removed: number } => {
   mkdirSync(targetDir, { recursive: true })
 
@@ -39,23 +52,32 @@ const syncTarget = (targetDir: string): { copied: number; skipped: number; remov
 
     mkdirSync(tgtDir, { recursive: true })
 
-    const srcFiles = new Set(readdirSync(srcDir))
-    const tgtFiles = existsSync(tgtDir) ? new Set(readdirSync(tgtDir)) : new Set<string>()
+    const srcEntries = new Set(readdirSync(srcDir))
+    const tgtEntries = existsSync(tgtDir) ? new Set(readdirSync(tgtDir)) : new Set<string>()
 
-    // beeline: filename IS the signature — if it exists in target, it's correct
-    for (const file of srcFiles) {
-      if (tgtFiles.has(file)) {
+    // beeline: entry name IS the signature (file = leaf, directory = bag).
+    // Either way, if the name exists in target, content-addressing guarantees
+    // it's the same content — skip.
+    for (const name of srcEntries) {
+      if (tgtEntries.has(name)) {
         skipped++
-      } else {
-        copyFileSync(join(srcDir, file), join(tgtDir, file))
-        copied++
+        continue
       }
+      const srcPath = join(srcDir, name)
+      const tgtPath = join(tgtDir, name)
+      if (statSync(srcPath).isDirectory()) {
+        copyDirRecursive(srcPath, tgtPath)
+      } else {
+        copyFileSync(srcPath, tgtPath)
+      }
+      copied++
     }
 
-    // remove stale files (signatures no longer in source)
-    for (const file of tgtFiles) {
-      if (!srcFiles.has(file)) {
-        rmSync(join(tgtDir, file), { force: true })
+    // remove stale entries (signatures no longer in source) — recursive
+    // handles bag directories.
+    for (const name of tgtEntries) {
+      if (!srcEntries.has(name)) {
+        rmSync(join(tgtDir, name), { recursive: true, force: true })
         removed++
       }
     }
