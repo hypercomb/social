@@ -729,48 +729,107 @@ export class PairedChannelDrone extends Drone {
    * continue to compile — but no folder mints, no 0000 writes, no
    * filesystem side effects.
    *
-   * PENDING re-wire: under the layer-primitive doctrine the destination
-   * write path is `LayerCommitter.update(segments, { properties, children })`
-   * per layer node. That needs the committer to accept a layer tree
-   * (or this function to walk children → properties resource → commitSlotSet
-   * pairs depth-first). Until that path exists, the receive side falls
-   * through to whatever events the publish path emits; nothing materialises
-   * locally.
+   * Layer-primitive materialise: walks the buffered chain depth-first and
+   * commits each node into the receiver's layer tree at the appropriate
+   * segments path. Tree membership flows through `cell:added` events at
+   * each depth — the LayerCommitter's by-name delta path translates these
+   * into APPEND ops on the parent's `children` slot, so receiver siblings
+   * are preserved (no full-replace wipe). Per-node properties are stored
+   * as a content-addressed resource and written via the
+   * `writeTilePropertiesAt` layer-slot API so the renderer can bind
+   * images / tags / link from the adopted layer the same way it would
+   * for a user-authored tile.
    *
-   * Compile-time stub — preserves the shape, drops the legacy folder writes.
+   * The `_parentDir` argument is retained for backward-compatible call
+   * sites but ignored — addressing is by segments, not by dir handle.
    */
   async materialiseFromSig(
     channelId: string,
     sig: string,
-    _parentDir: FileSystemDirectoryHandle,
-    _opts: {
+    _parentDir: FileSystemDirectoryHandle | null,
+    opts: {
       maxDepth?: number
       parentSegments?: readonly string[]
       approvalId?: string | null
       transient?: boolean
     } = {},
   ): Promise<{ written: number; missing: string[]; skipped: number }> {
+    const maxDepth = opts.maxDepth ?? Number.POSITIVE_INFINITY
+    const initialSegments = (opts.parentSegments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
     const machine = this.#channels.get(channelId)?.machine
     if (!machine) return { written: 0, missing: [sig], skipped: 0 }
 
+    // Late imports to keep this drone self-contained (essentials is the
+    // dependency direction; pulling editor/tile-properties.ts through a
+    // dynamic import avoids a static cycle).
+    const { writeTilePropertiesAt } = await import('../editor/tile-properties.js')
+
     const visited = new Set<string>()
     const missing: string[] = []
+    let written = 0
     let skipped = 0
 
-    const walk = (s: string): void => {
+    type Content = NonNullable<ReturnType<typeof machine.layer>>
+
+    // Top-down walk: emit cell:added at each depth so the committer
+    // builds the layer-tree skeleton with append semantics. Per-node
+    // properties write goes through the standard layer-slot path
+    // (writeTilePropertiesAt), which is segments-addressed and
+    // cooperates cleanly with the cell:added cascade.
+    const walk = async (s: string, parentSegments: readonly string[], depth: number): Promise<void> => {
       if (visited.has(s)) return
       visited.add(s)
-      const content = machine.layer(s)
+      const content = machine.layer(s) as Content | null
       if (!content) { missing.push(s); return }
-      skipped++ // every buffered node is "skipped" — no write path yet
-      for (const child of content.children) walk(child.sig)
+
+      const name = String(content.name ?? '').trim()
+      if (!name) return
+      const segments = [...parentSegments, name]
+
+      // Emit cell:added on the PARENT lineage — the committer translates
+      // this into an APPEND on the parent's `children` slot, resolving
+      // `name → sig` at commit time via `latestMarkerSigFor`. Siblings
+      // are preserved.
+      EffectBus.emit('cell:added', { cell: name, segments: [...parentSegments] })
+
+      // Property carry-over via the layer-slot API. Strip control fields
+      // (children/facade/branchSig/channelId/approvalId) that aren't user
+      // properties; the rest writes into the cell's own `properties` slot
+      // as a content-addressed resource. Transient marker (when the
+      // adopter wanted a preview rather than a permanent adopt) is set
+      // here so a later "import" call can clear it.
+      const propsIn = (content as { properties?: Record<string, unknown> }).properties ?? {}
+      const propsOut: Record<string, unknown> = { ...propsIn }
+      for (const k of ['children', 'facade', 'branchSig', 'channelId', 'approvalId']) {
+        delete propsOut[k]
+      }
+      if (opts.transient) propsOut['transient'] = true
+      if (Object.keys(propsOut).length > 0) {
+        try {
+          await writeTilePropertiesAt(parentSegments, name, propsOut)
+        } catch (err) {
+          console.warn('[paired-channel] materialise: property write failed for', name, err)
+        }
+      }
+      written++
+
+      if (depth + 1 >= maxDepth) {
+        skipped += content.children.length
+        return
+      }
+      for (const child of content.children) {
+        await walk(child.sig, segments, depth + 1)
+      }
     }
 
     this.#materialiseInProgress++
-    try { walk(sig) }
-    finally { this.#materialiseInProgress-- }
+    try {
+      await walk(sig, initialSegments, 0)
+    } finally {
+      this.#materialiseInProgress--
+    }
 
-    return { written: 0, missing, skipped }
+    return { written, missing, skipped }
   }
 
   // ── internal: event routing & rules ───────────────────────────────

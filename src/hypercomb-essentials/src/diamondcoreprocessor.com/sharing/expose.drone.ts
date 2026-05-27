@@ -211,13 +211,11 @@ export class ExposeDrone extends Drone {
       this.#toast('warning', 'Adopt failed', 'PairedChannelDrone unavailable.')
       return
     }
+    // Layer-primitive: sub-layer locations have no on-disk dir, so the
+    // adopt path no longer needs (or has) one. We address everything by
+    // segments; the LayerCommitter cascade folds the adopted subtree
+    // into the parent layer's `children` slot.
     const lineage = window.ioc.get('@hypercomb.social/Lineage') as LineageLike | undefined
-    const dir = await lineage?.explorerDir?.()
-    if (!dir) {
-      console.warn('[sync] adopt: no explorer dir')
-      this.#toast('warning', 'Adopt failed', 'No explorer directory.')
-      return
-    }
     const segments = lineage?.explorerSegments?.() ?? []
     const here = '/' + segments.join('/')
 
@@ -240,7 +238,7 @@ export class ExposeDrone extends Drone {
 
     let result: { written: number; missing: string[]; skipped: number }
     try {
-      result = await drone.materialiseFromSig(match.channelId, match.branchSig, dir, {
+      result = await drone.materialiseFromSig(match.channelId, match.branchSig, null as unknown as FileSystemDirectoryHandle, {
         maxDepth: Number.POSITIVE_INFINITY,
         parentSegments: segments,
         approvalId: match.approvalId,
