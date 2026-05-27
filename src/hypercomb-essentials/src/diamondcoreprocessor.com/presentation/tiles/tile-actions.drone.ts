@@ -1,7 +1,9 @@
 // diamondcoreprocessor.com/pixi/tile-actions.drone.ts
 import { Drone, EffectBus, hypercomb, normalizeCell } from '@hypercomb/core'
 import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey, OverlayTintFn } from './tile-overlay.drone.js'
-import { readCellProperties, writeCellProperties } from '../../editor/tile-properties.js'
+// Arrangement persistence currently disabled — `#getRootDir` returns
+// null pending the layer-slot read/write path, so the legacy
+// readCellProperties / writeCellProperties imports are no longer needed.
 
 /** Zone-scoped localStorage key for the hide list at this location.
  *  SwarmDrone writes `hc:current-zone` on every room/secret change
@@ -169,7 +171,10 @@ function computeIconPositions(activeNames: string[]): { x: number; y: number }[]
 
 // ── Persistence key in root properties ────────────────────────────
 
-const ARRANGEMENT_KEY = 'iconArrangement'
+// ARRANGEMENT_KEY removed alongside the dead persistence path; left as
+// a comment so anyone restoring the layer-slot-backed arrangement
+// reader/writer can pick the same property name back up.
+// const ARRANGEMENT_KEY = 'iconArrangement'
 
 type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 
@@ -270,22 +275,10 @@ export class TileActionsDrone extends Drone {
   // ── Arrangement loading & registration ──────────────────────────
 
   async #loadArrangementAndRegister(): Promise<void> {
-    // Load saved arrangement from root properties
-    try {
-      const lineage = this.resolve<{ explorerDir(): Promise<FileSystemDirectoryHandle | null> }>('lineage')
-      const rootDir = await this.#getRootDir(lineage)
-      if (rootDir) {
-        const props = await readCellProperties(rootDir)
-        const saved = props[ARRANGEMENT_KEY] as IconArrangement | undefined
-        if (saved && typeof saved === 'object') {
-          this.#arrangement = saved
-        }
-      }
-    } catch {
-      // fallback to defaults — no saved arrangement
-    }
-
-    // Register icons for all profiles
+    // Arrangement load path pending re-wire through the layer-slot
+    // properties API. `#getRootDir` returns null today, so the legacy
+    // OPFS-backed load was unreachable; dropping the dead branch.
+    // Register icons for all profiles with the default arrangement.
     const descriptors = this.#buildAllDescriptors()
     this.emitEffect('overlay:register-action', descriptors)
 
@@ -390,19 +383,11 @@ export class TileActionsDrone extends Drone {
   // ── Persistence ─────────────────────────────────────────────────
 
   async #persistArrangement(): Promise<void> {
-    try {
-      const lineage = this.resolve<{ explorerDir(): Promise<FileSystemDirectoryHandle | null> }>('lineage')
-      const rootDir = await this.#getRootDir(lineage)
-      if (rootDir) {
-        await writeCellProperties(rootDir, { [ARRANGEMENT_KEY]: this.#arrangement })
-      }
-    } catch {
-      // persistence failure — silently ignore
-    }
-  }
-
-  async #getRootDir(_lineage: unknown): Promise<FileSystemDirectoryHandle | null> {
-    return null
+    // Persistence pending re-wire through the layer-slot properties API
+    // — the legacy OPFS write was unreachable (rootDir was always null),
+    // so we're dropping the dead body. The in-memory arrangement still
+    // drives the current session; it just doesn't survive restart yet.
+    void this.#arrangement
   }
 
   // ── Action handlers ─────────────────────────────────────────────

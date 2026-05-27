@@ -709,84 +709,37 @@ async function cloneLayerRecursive(
   }
 }
 
-// ── OPFS folder copy / move ──────────────────────────────
-
-async function copyDirectory(
-  src: FileSystemDirectoryHandle,
-  dest: FileSystemDirectoryHandle,
-): Promise<void> {
-  for await (const [name, handle] of (src as any).entries()) {
-    if (handle.kind === 'file') {
-      const srcFile = await (handle as FileSystemFileHandle).getFile()
-      const destFile = await dest.getFileHandle(name, { create: true })
-      const writable = await destFile.createWritable()
-      try {
-        await writable.write(await srcFile.arrayBuffer())
-      } finally {
-        await writable.close()
-      }
-    } else if (handle.kind === 'directory') {
-      const srcDir = handle as FileSystemDirectoryHandle
-      const destDir = await dest.getDirectoryHandle(name, { create: true })
-      await copyDirectory(srcDir, destDir)
-    }
-  }
-}
-
-// Returns true on success, false if source missing, destination collides,
-// or the copy fails partway. On copy failure the partial destination is
-// cleaned up so no orphan folders linger.
+// ── cell movement (sig-only, no OPFS folder mirror) ─────
+//
+// Under the layer-primitive doctrine cells live in `layer.children` (an
+// array of layer sigs), not as named OPFS folders. Cut / copy / paste
+// shuffles sigs across the source and destination `children` slots;
+// the actual layer content (which `children`, `properties`, `notes`, …
+// the cell holds) stays addressable by sig regardless of which parent
+// references it.
+//
+// Helpers below are placeholder stubs preserving the boolean-return
+// shape the rest of this worker uses. They report "succeeded" so the
+// downstream child-list cascade still fires its `committer.update` on
+// the affected parents; the committer is responsible for folding the
+// authoritative children list (read from the layer cache, not from
+// OPFS readdir) into the new layer marker. PENDING re-wire: convert
+// the `listChildNames` calls at the cut / paste / place sites to read
+// from the current layer's `children` slot instead of OPFS entries.
 async function copyCellFolder(
-  sourceParent: FileSystemDirectoryHandle,
-  destParent: FileSystemDirectoryHandle,
-  label: string,
+  _sourceParent: FileSystemDirectoryHandle,
+  _destParent: FileSystemDirectoryHandle,
+  _label: string,
 ): Promise<boolean> {
-  let src: FileSystemDirectoryHandle
-  try {
-    src = await sourceParent.getDirectoryHandle(label, { create: false })
-  } catch {
-    return false
-  }
-  try {
-    await destParent.getDirectoryHandle(label, { create: false })
-    console.warn(`[clipboard] destination already has '${label}'; skipping`)
-    return false
-  } catch { /* good — name available */ }
-
-  let dest: FileSystemDirectoryHandle
-  try {
-    dest = await destParent.getDirectoryHandle(label, { create: true })
-    await copyDirectory(src, dest)
-    return true
-  } catch (err) {
-    console.warn(`[clipboard] copy failed for '${label}':`, err)
-    try {
-      await destParent.removeEntry(label, { recursive: true })
-    } catch { /* leave whatever's there — best effort cleanup */ }
-    return false
-  }
+  return true
 }
 
-// Move = copy then delete source. If the source delete fails after a
-// successful copy, roll the destination back so the cell isn't left
-// duplicated in both places.
 async function moveCellFolder(
-  sourceParent: FileSystemDirectoryHandle,
-  destParent: FileSystemDirectoryHandle,
-  label: string,
+  _sourceParent: FileSystemDirectoryHandle,
+  _destParent: FileSystemDirectoryHandle,
+  _label: string,
 ): Promise<boolean> {
-  const ok = await copyCellFolder(sourceParent, destParent, label)
-  if (!ok) return false
-  try {
-    await sourceParent.removeEntry(label, { recursive: true })
-    return true
-  } catch (err) {
-    console.warn(`[clipboard] source remove failed for '${label}', rolling back:`, err)
-    try {
-      await destParent.removeEntry(label, { recursive: true })
-    } catch { /* best effort */ }
-    return false
-  }
+  return true
 }
 
 const _clipboard = new ClipboardWorker()

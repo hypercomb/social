@@ -335,7 +335,17 @@ export class NotesService {
       ? { ...priorLayer }
       : { name: segments[segments.length - 1] ?? '' }
     base[NOTES_SLOT] = nextNotes.slice()
-    await committer.update(segments, base, new Set(['children']))
+    // `nameSlots: new Set()` is critical. The default `new Set(['children'])`
+    // is for callers passing children as NAMES (e.g. the `#add` path which
+    // emits `cell:added` events that the committer translates to a name
+    // delta). Here, `priorLayer.children` are already SIGS read from the
+    // current head — feeding them through name→sig resolution treats each
+    // sig as a phantom cell name, mints empty markers at fake lineages,
+    // and replaces every child with the phantom-bag sig. The render then
+    // shows the original sigs as tile labels (because the phantom layer's
+    // `name` is the sig string). Passing an empty nameSlots set leaves
+    // every value verbatim.
+    await committer.update(segments, base, new Set())
     EffectBus.emit(NOTES_TRIGGER, {
       segments: [...segments],
       op: 'set' as const,

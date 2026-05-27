@@ -1,43 +1,32 @@
 // diamondcoreprocessor.com/move/layer-transfer.service.ts
-// Handles OPFS directory transfer between layers during drag-through.
+//
+// Under the layer-primitive doctrine cells live in layer.children (a sig
+// array) and not as named OPFS folders. The legacy implementation here
+// copied a cell's OPFS folder + all its descendants from one layer's
+// directory into another, then removed the original. That parallel-store
+// write is retired: a "layer transfer" is now a children-slot edit on
+// both source and destination layers (remove sig from source.children,
+// add sig to destination.children), driven through `LayerCommitter`.
+//
+// PENDING re-wire: the existing call site
+// (drag-through onto a different layer) needs to be rerouted to the
+// committer with the source cell's layer sig. Until then this service
+// is a no-op so the drag completes without folder mints.
 
 export class LayerTransferService {
 
   /**
-   * Transfer a cell directory from sourceDir into targetLayerDir.
-   * Creates `targetLayerDir/{cellLabel}/` as a deep copy of `sourceDir/{cellLabel}/`,
-   * then removes the original.
+   * Stub — see header. Returns immediately so the drag pipeline doesn't
+   * stall, but performs no filesystem writes. The caller's downstream
+   * layer-commit step (children slot of source + destination) is the
+   * authoritative state change.
    */
   transfer = async (
-    sourceDir: FileSystemDirectoryHandle,
-    targetLayerDir: FileSystemDirectoryHandle,
-    cellLabel: string,
+    _sourceDir: FileSystemDirectoryHandle,
+    _targetLayerDir: FileSystemDirectoryHandle,
+    _cellLabel: string,
   ): Promise<void> => {
-    const srcCell = await sourceDir.getDirectoryHandle(cellLabel, { create: false })
-    const destCell = await targetLayerDir.getDirectoryHandle(cellLabel, { create: true })
-
-    await this.#copyRecursive(srcCell, destCell)
-    await sourceDir.removeEntry(cellLabel, { recursive: true })
-  }
-
-  async #copyRecursive(
-    src: FileSystemDirectoryHandle,
-    dest: FileSystemDirectoryHandle,
-  ): Promise<void> {
-    for await (const [name, handle] of (src as any).entries()) {
-      if (handle.kind === 'file') {
-        const srcFile = handle as FileSystemFileHandle
-        const file = await srcFile.getFile()
-        const destFile = await dest.getFileHandle(name, { create: true })
-        const writable = await destFile.createWritable()
-        await writable.write(await file.arrayBuffer())
-        await writable.close()
-      } else {
-        const srcSub = handle as FileSystemDirectoryHandle
-        const destSub = await dest.getDirectoryHandle(name, { create: true })
-        await this.#copyRecursive(srcSub, destSub)
-      }
-    }
+    /* no-op pending children-slot transfer */
   }
 }
 

@@ -8,6 +8,7 @@ import {
   type ThreadManifest, type ThreadTurn,
   computeThreadId, saveThread, loadThread, buildMessages,
 } from './thread.js'
+import { writeTilePropertiesAt } from '../editor/tile-properties.js'
 
 type ConversationSendPayload = {
   threadId?: string
@@ -18,8 +19,6 @@ type ConversationSendPayload = {
 const SYSTEM_PROMPT = `You are an assistant integrated into a spatial knowledge graph called Hypercomb.
 You receive context gathered from content-addressed lineages (folder paths) and signatures (SHA-256 hashes).
 Respond concisely and helpfully based on the provided context. Your response will be stored as a content-addressed resource.`
-
-const PROPS_FILE = '0000'
 
 /**
  * Orchestrates multi-turn Claude conversations.
@@ -75,7 +74,7 @@ export class ConversationDrone extends Drone {
         threads: FileSystemDirectoryHandle
       }>('store')
       const lineage = this.resolve<{
-        explorerDir: () => Promise<FileSystemDirectoryHandle | null>
+        explorerSegments?: () => readonly string[]
       }>('lineage')
 
       if (!store || !lineage) {
@@ -83,8 +82,7 @@ export class ConversationDrone extends Drone {
         return
       }
 
-      const explorerDir = await lineage.explorerDir()
-      if (!explorerDir) return
+      const parentSegments = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? ''))
 
       const modelKey = payload.model?.toLowerCase() ?? 'opus'
       const model = MODELS[modelKey] ?? MODELS['opus']
@@ -93,10 +91,16 @@ export class ConversationDrone extends Drone {
       // ── resolve or create thread ────────────────────
 
       let manifest: ThreadManifest
-      let questionDir: FileSystemDirectoryHandle
+      let questionTileName: string
+      let questionSegments: string[] // parent path of the question tile (== current explorer)
+      let questionPath: string[] // segments-path-to-question (questionSegments + questionTileName)
 
       if (payload.threadId) {
-        // Continue existing thread — find the question tile
+        // Continue existing thread — load manifest. Locating the original
+        // question tile under the layer-primitive doctrine requires a
+        // layer.children scan, which isn't wired here yet; we recover the
+        // tile name from the manifest's first turn (saved at create time)
+        // and trust the segments match the current explorer.
         const loaded = await loadThread(store.threads, payload.threadId)
         if (!loaded) {
           console.warn(`[conversation] Thread not found: ${payload.threadId}`)
@@ -104,29 +108,34 @@ export class ConversationDrone extends Drone {
         }
         manifest = loaded
 
-        const tileName = await this.#findThreadTile(explorerDir, payload.threadId)
-        if (!tileName) {
-          console.warn(`[conversation] Question tile not found for: ${payload.threadId}`)
+        const firstTurn = manifest.turns[0]
+        if (!firstTurn?.tileName) {
+          console.warn(`[conversation] Thread has no question tile recorded: ${payload.threadId}`)
           return
         }
-        questionDir = await explorerDir.getDirectoryHandle(tileName)
+        questionTileName = firstTurn.tileName
+        questionSegments = parentSegments
+        questionPath = [...questionSegments, questionTileName]
       } else {
-        // New thread — create question tile at current level
+        // New thread — create question tile at current level via layer-slot
+        // write. Folder mints are retired; writeTilePropertiesAt commits a
+        // properties slot on the tile's own layer and the cell:added emit
+        // drives the children-slot cascade up the parent chain.
         const threadId = await computeThreadId(SYSTEM_PROMPT, payload.message)
-        const tileName = normalizeCell(payload.message.slice(0, 40)) || `chat-${threadId.slice(0, 8)}`
-
-        questionDir = await explorerDir.getDirectoryHandle(tileName, { create: true })
+        questionTileName = normalizeCell(payload.message.slice(0, 40)) || `chat-${threadId.slice(0, 8)}`
+        questionSegments = parentSegments
+        questionPath = [...questionSegments, questionTileName]
 
         // Store question text as resource
         const questionBlob = new Blob([payload.message], { type: 'text/plain' })
         const questionSig = await store.putResource(questionBlob)
 
-        await this.#writeProps(questionDir, {
+        await writeTilePropertiesAt(questionSegments, questionTileName, {
           thread: threadId,
           contentSig: questionSig,
           tags: ['question', modelAlias],
         })
-        EffectBus.emit('cell:added', { cell: tileName })
+        EffectBus.emit('cell:added', { cell: questionTileName, segments: questionSegments.slice() })
 
         manifest = {
           id: threadId,
@@ -141,7 +150,7 @@ export class ConversationDrone extends Drone {
         manifest.turns.push({
           role: 'user',
           contentSig: questionSig,
-          tileName,
+          tileName: questionTileName,
           at: Date.now(),
         })
       }
@@ -156,12 +165,11 @@ export class ConversationDrone extends Drone {
 
         const turnIndex = manifest.turns.length + 1
         const followUpName = `${String(turnIndex).padStart(2, '0')}-followup`
-        const followUpDir = await questionDir.getDirectoryHandle(followUpName, { create: true })
-        await this.#writeProps(followUpDir, {
+        await writeTilePropertiesAt(questionPath, followUpName, {
           contentSig: userSig,
           tags: ['followup'],
         })
-        EffectBus.emit('cell:added', { cell: followUpName })
+        EffectBus.emit('cell:added', { cell: followUpName, segments: questionPath.slice() })
 
         manifest.turns.push({
           role: 'user',
@@ -189,10 +197,9 @@ export class ConversationDrone extends Drone {
 
       const responseIndex = manifest.turns.length + 1
       const responseName = `${String(responseIndex).padStart(2, '0')}-response`
-      const responseDir = await questionDir.getDirectoryHandle(responseName, { create: true })
 
       const stopReasonTag = result.stopReason.replace(/_/g, '-')
-      await this.#writeProps(responseDir, {
+      await writeTilePropertiesAt(questionPath, responseName, {
         contentSig: responseSig,
         stopReason: result.stopReason,
         inputTokens: result.inputTokens,
@@ -200,7 +207,7 @@ export class ConversationDrone extends Drone {
         model: result.model,
         tags: ['response', modelAlias, stopReasonTag],
       })
-      EffectBus.emit('cell:added', { cell: responseName })
+      EffectBus.emit('cell:added', { cell: responseName, segments: questionPath.slice() })
 
       const responseTurn: ThreadTurn = {
         role: 'assistant',
@@ -237,42 +244,6 @@ export class ConversationDrone extends Drone {
     }
   }
 
-  async #findThreadTile(
-    dir: FileSystemDirectoryHandle,
-    threadId: string,
-  ): Promise<string | null> {
-    for await (const [name, handle] of (dir as any).entries()) {
-      if (handle.kind !== 'directory') continue
-      if (name.startsWith('__')) continue
-      try {
-        const props = await this.#readProps(handle as FileSystemDirectoryHandle)
-        if (props['thread'] === threadId) return name
-      } catch { /* skip */ }
-    }
-    return null
-  }
-
-  async #readProps(cellDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
-    try {
-      const fh = await cellDir.getFileHandle(PROPS_FILE)
-      const file = await fh.getFile()
-      return JSON.parse(await file.text())
-    } catch {
-      return {}
-    }
-  }
-
-  async #writeProps(cellDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
-    const existing = await this.#readProps(cellDir)
-    const merged = { ...existing, ...updates }
-    const fh = await cellDir.getFileHandle(PROPS_FILE, { create: true })
-    const writable = await fh.createWritable()
-    try {
-      await writable.write(JSON.stringify(merged))
-    } finally {
-      await writable.close()
-    }
-  }
 }
 
 const _conversation = new ConversationDrone()

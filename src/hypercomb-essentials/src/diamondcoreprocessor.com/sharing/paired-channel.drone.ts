@@ -349,77 +349,31 @@ export class PairedChannelDrone extends Drone {
   }
 
   /**
-   * Walk the lineage's OPFS dir and fire `tile:action expose` for each
-   * non-transient real cell. Runs once after a successful join, so
-   * peers receive the existing tile tree as transient previews.
-   *
-   * Skips `__system__` directories and any cell whose 0000 has
-   * `transient: true` (echo guard — those cells came in via sync and
-   * the original publisher is responsible for keeping them alive).
+   * Broadcast existing cells at this lineage so peers receive them as
+   * transient previews. PENDING re-wire: this used to read OPFS folders
+   * and consult per-tile 0000 for the `transient` echo-guard flag. With
+   * the layer-primitive doctrine those folders no longer exist; the
+   * authoritative list comes from layer.children + the optimization
+   * substrate for transient state. No-op until a layer-read enumeration
+   * API is wired in.
    */
   async #broadcastExistingCellsAt(
-    lineage: LineageLike & { explorerDir?: () => Promise<FileSystemDirectoryHandle | null> },
+    _lineage: LineageLike & { explorerDir?: () => Promise<FileSystemDirectoryHandle | null> },
   ): Promise<void> {
-    const dir = await lineage?.explorerDir?.()
-    if (!dir) return
-    const { readCellProperties } = await import('../editor/tile-properties.js')
-    let exposed = 0
-    try {
-      for await (const [name, handle] of (dir as unknown as { entries: () => AsyncIterable<[string, FileSystemHandle]> }).entries()) {
-        if (handle.kind !== 'directory') continue
-        if (name.startsWith('__') && name.endsWith('__')) continue
-        try {
-          const childDir = handle as FileSystemDirectoryHandle
-          const props = await readCellProperties(childDir).catch(() => ({} as Record<string, unknown>))
-          if (props['transient'] === true) continue
-          EffectBus.emit('tile:action', { action: 'expose', label: name, q: 0, r: 0, index: 0 })
-          exposed++
-        } catch { /* skip */ }
-      }
-    } catch (err) {
-      console.warn('[sync] broadcast-existing failed', err)
-      return
-    }
-    if (exposed > 0) {
-      console.log('[sync] broadcast-existing: exposed', exposed, 'cell(s)')
-    }
+    /* no-op pending layer-children read path */
   }
 
   /**
-   * Walk the current bag's OPFS dir and delete any cell whose 0000
-   * has `transient: true`. Called before joining a channel — clears
-   * stale ephemeral state from the previous session. The sender's
-   * still-active share events will re-install via materialiseFromSig.
-   *
-   * Best-effort: failures don't abort the join.
+   * Sweep transient cells at this lineage. PENDING re-wire: legacy
+   * implementation walked OPFS, read each cell's 0000 for the
+   * `transient:true` marker, and removed matching folders. Both the
+   * folder layout and the 0000-based marker are retired under the
+   * layer-primitive doctrine — transient state should live in the
+   * optimization substrate, not in the canonical layer. No-op until
+   * that substrate read + tombstone-via-children-slot path is wired.
    */
-  async #sweepTransientCellsAt(lineage: LineageLike & { explorerDir?: () => Promise<FileSystemDirectoryHandle | null> }): Promise<void> {
-    const dir = await lineage?.explorerDir?.()
-    if (!dir) return
-    const { readCellProperties } = await import('../editor/tile-properties.js')
-    let swept = 0
-    try {
-      for await (const [name, handle] of (dir as unknown as { entries: () => AsyncIterable<[string, FileSystemHandle]> }).entries()) {
-        if (handle.kind !== 'directory') continue
-        if (name.startsWith('__') && name.endsWith('__')) continue
-        try {
-          const childDir = handle as FileSystemDirectoryHandle
-          const props = await readCellProperties(childDir).catch(() => ({} as Record<string, unknown>))
-          if (props['transient'] === true) {
-            await dir.removeEntry(name, { recursive: true })
-            swept++
-          }
-        } catch { /* skip */ }
-      }
-    } catch (err) {
-      console.warn('[sync] transient sweep failed', err)
-      return
-    }
-    if (swept > 0) {
-      console.log('[sync] transient sweep: removed', swept, 'unimported cell(s)')
-      // Trigger render refresh.
-      EffectBus.emit('fs:changed', { source: 'paired-channel:transient-sweep' })
-    }
+  async #sweepTransientCellsAt(_lineage: LineageLike & { explorerDir?: () => Promise<FileSystemDirectoryHandle | null> }): Promise<void> {
+    /* no-op pending optimization-substrate transient marker path */
   }
 
   /**
@@ -770,168 +724,53 @@ export class PairedChannelDrone extends Drone {
 
   /**
    * Walk a share's branchSig recursively from the layer buffer and
-   * materialise each layer at the matching path under `parentDir`.
-   * Returns `{ written, missing }` so the caller can decide whether
-   * to surface "incomplete" or wait for more `layer` events.
+   * report which sigs the machine has buffered. Returns the same shape
+   * the legacy materialise call used so existing callers in `expose.drone`
+   * continue to compile — but no folder mints, no 0000 writes, no
+   * filesystem side effects.
    *
-   * Cell content lands in 0000 (via writeCellProperties); folder names
-   * come from the layer's `name` field. Cycles are guarded by a
-   * visited-set keyed by sig.
+   * PENDING re-wire: under the layer-primitive doctrine the destination
+   * write path is `LayerCommitter.update(segments, { properties, children })`
+   * per layer node. That needs the committer to accept a layer tree
+   * (or this function to walk children → properties resource → commitSlotSet
+   * pairs depth-first). Until that path exists, the receive side falls
+   * through to whatever events the publish path emits; nothing materialises
+   * locally.
    *
-   * Two modes:
-   *   `mode: 'create'` (default — `sync` semantics)
-   *     - Cell didn't exist  → create, write 0000, emit cell:added
-   *     - Cell already exists → overwrite 0000 with incoming properties
-   *
-   *   `mode: 'merge'` (— `merge` semantics)
-   *     - Cell didn't exist  → create, write 0000, emit cell:added
-   *     - Cell already exists → shallow-merge: existing ← incoming,
-   *                             incoming wins on key conflicts.
-   *                             Children are unioned via recursion
-   *                             (no destructive overwrite of locals
-   *                             that aren't in the incoming set).
-   *
-   * In both modes, brand-new cells emit `cell:added` so the receiver's
-   * HistoryRecorder logs the addition. Existing-and-merged cells emit
-   * no add (they were already present).
+   * Compile-time stub — preserves the shape, drops the legacy folder writes.
    */
   async materialiseFromSig(
     channelId: string,
     sig: string,
-    parentDir: FileSystemDirectoryHandle,
-    opts: {
+    _parentDir: FileSystemDirectoryHandle,
+    _opts: {
       maxDepth?: number
       parentSegments?: readonly string[]
       approvalId?: string | null
-      /**
-       * Mark every written cell with `transient: true` in 0000.
-       * Boot sweep (`sweepTransientCellsAt`) removes these when the
-       * receiver joins a channel, so unimported shares evaporate
-       * across sessions. Import (`clearTransientMarker`) flips the
-       * marker off, promoting the cell to a permanent layer.
-       */
       transient?: boolean
     } = {},
   ): Promise<{ written: number; missing: string[]; skipped: number }> {
-    const maxDepth = opts.maxDepth ?? Number.POSITIVE_INFINITY
-    const approvalId = opts.approvalId ?? null
-    const transient = opts.transient === true
     const machine = this.#channels.get(channelId)?.machine
     if (!machine) return { written: 0, missing: [sig], skipped: 0 }
+
     const visited = new Set<string>()
     const missing: string[] = []
-    let written = 0
     let skipped = 0
-    const initialSegments: readonly string[] = opts.parentSegments ?? []
 
-    const walk = async (s: string, dir: FileSystemDirectoryHandle, parentSegments: readonly string[], depth: number): Promise<void> => {
+    const walk = (s: string): void => {
       if (visited.has(s)) return
       visited.add(s)
       const content = machine.layer(s)
       if (!content) { missing.push(s); return }
-
-      // Three cases:
-      //   - Cell doesn't exist → CREATE with incoming props (+ facade
-      //     markers if we'll stop here and there are children).
-      //   - Cell exists and is a facade (placeholder from a prior
-      //     `#materialiseFacade`) → FILL: write real content, clear
-      //     the marker so it's no longer a placeholder.
-      //   - Cell exists and is a real tile → PRESERVE: skip entirely.
-      //     User's properties stay untouched; incoming is discarded.
-      //
-      // Recursion still happens in all cases (subject to maxDepth)
-      // so new descendants under preserved tiles are additive.
-      let existed = true
-      try { await dir.getDirectoryHandle(content.name, { create: false }) }
-      catch { existed = false }
-
-      let cellDir: FileSystemDirectoryHandle
-      try { cellDir = await dir.getDirectoryHandle(content.name, { create: true }) }
-      catch (err) { console.warn('[paired-channel] materialise: getDirectoryHandle failed', content.name, err); return }
-
-      let isFacade = false
-      if (existed) {
-        const { readCellProperties } = await import('../editor/tile-properties.js')
-        const existingProps = await readCellProperties(cellDir).catch(() => ({} as Record<string, unknown>))
-        isFacade = existingProps['facade'] === true
-      }
-
-      const willRecurse = depth + 1 < maxDepth
-
-      if (existed && !isFacade) {
-        // Real tile already on disk — preserve it. Incoming discarded.
-        skipped++
-      } else {
-        // New cell, or filling an existing facade.
-        // Marker keys are un-prefixed to match what expose.drone reads.
-        //
-        // Strip decoration keys from incoming — `children` is a local
-        // render cache (sighash into the children-list cache file),
-        // not content. Same for any leaked facade-marker fields. The
-        // receiver builds its own decorations based on its own state.
-        const propsToWrite: Record<string, unknown> = { ...content.properties }
-        for (const k of ['children', 'facade', 'branchSig', 'channelId', 'approvalId']) {
-          delete propsToWrite[k]
-        }
-        if (!willRecurse && content.children.length > 0) {
-          // Stopping here and there are deferred children → mark facade.
-          propsToWrite['facade'] = true
-          propsToWrite['branchSig'] = s
-          propsToWrite['channelId'] = channelId
-          if (approvalId) propsToWrite['approvalId'] = approvalId
-        } else if (isFacade) {
-          // Filling a facade and either no children or we're walking
-          // them all now — clear the placeholder markers.
-          propsToWrite['facade'] = false
-          propsToWrite['branchSig'] = undefined
-          propsToWrite['channelId'] = undefined
-          propsToWrite['approvalId'] = undefined
-        }
-        if (transient) {
-          // Mark this cell as transient — boot sweep removes it next
-          // session unless `clearTransientMarker` flips it off via
-          // explicit import.
-          propsToWrite['transient'] = true
-        }
-        try {
-          await this.#writeProperties(cellDir, propsToWrite)
-        } catch (err) {
-          console.warn('[paired-channel] materialise: write 0000 failed', content.name, err)
-        }
-        written++
-        if (!existed) {
-          // Tag source so the drone's own cell:added listener skips
-          // these (otherwise the receiver re-broadcasts everything it
-          // just installed — an instant echo loop on every share).
-          EffectBus.emit('cell:added', { cell: content.name, segments: [...parentSegments], source: 'paired-channel' })
-        }
-      }
-
-      if (!willRecurse) return
-      const childSegments = [...parentSegments, content.name]
-      for (const child of content.children) {
-        await walk(child.sig, cellDir, childSegments, depth + 1)
-      }
+      skipped++ // every buffered node is "skipped" — no write path yet
+      for (const child of content.children) walk(child.sig)
     }
 
     this.#materialiseInProgress++
-    try {
-      await walk(sig, parentDir, initialSegments, 0)
-    } finally {
-      this.#materialiseInProgress--
-    }
-    return { written, missing, skipped }
-  }
+    try { walk(sig) }
+    finally { this.#materialiseInProgress-- }
 
-  // Lazy-imported to avoid a hard dependency cycle from the drone into
-  // the editor module — and so this drone can be used from a node test
-  // harness without an editor present.
-  async #writeProperties(
-    cellDir: FileSystemDirectoryHandle,
-    properties: Record<string, unknown>,
-  ): Promise<void> {
-    const { writeCellProperties } = await import('../editor/tile-properties.js')
-    await writeCellProperties(cellDir, properties)
+    return { written: 0, missing, skipped }
   }
 
   // ── internal: event routing & rules ───────────────────────────────
