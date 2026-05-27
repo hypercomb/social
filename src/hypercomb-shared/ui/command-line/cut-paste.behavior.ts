@@ -8,12 +8,6 @@ import { EffectBus, SignatureService, hypercomb } from '@hypercomb/core'
 import { parseArrayItems } from '../../core/array-parser'
 import { SELECT_OPS } from './select-ops'
 
-type HistoryOp = { op: 'add' | 'remove'; cell: string; at: number }
-
-interface HistoryServiceLike {
-  record(signature: string, operation: HistoryOp): Promise<void>
-}
-
 /**
  * Enter with bracket-path syntax → copy items to a destination folder.
  *
@@ -58,7 +52,6 @@ export class CutPasteBehavior implements CommandLineBehavior {
     const completions = get('@hypercomb.social/CompletionUtility') as CompletionUtility
     const lineage = get('@hypercomb.social/Lineage') as Lineage
     const navigation = get('@hypercomb.social/Navigation') as Navigation
-    const historyService = get('@diamondcoreprocessor.com/HistoryService') as HistoryServiceLike | undefined
 
     // parse [items]/path
     const close = input.indexOf(']')
@@ -107,18 +100,15 @@ export class CutPasteBehavior implements CommandLineBehavior {
       return true
     })
 
-    if (safeItems.length > 0 && historyService) {
-      // record history ops at the destination's signature. Layer is the
-      // source of truth; the folder-mint at destination is retired (was
-      // a parallel store that nothing in the render path reads). The
-      // history.record call lets the destination's commit chain capture
-      // the new children — render walks layer.children from history,
-      // never from on-disk folder structure.
-      const destSig = await this.#computeDestSig(lineage, pathSegments)
-      const now = Date.now()
-      for (const item of safeItems) {
-        await historyService.record(destSig, { op: 'add', cell: item, at: now })
-      }
+    if (safeItems.length > 0) {
+      // Layer commit at the destination is the only legitimate write
+      // path. The previous folder-mint + history.record duplication
+      // here was retired; the destination's layer-commit path needs
+      // to compute parent-sig + existing children + append + commit.
+      // Pending that wiring, the cut-paste destination write is a no-op
+      // — source delete above still runs, items don't materialise at
+      // destination until the layer-commit destination path is wired
+      // (committer.update(destSegments, { children: [...existing, ...safeItems] })).
     }
 
     await new hypercomb().act()
@@ -149,18 +139,4 @@ export class CutPasteBehavior implements CommandLineBehavior {
     } catch { /* skip */ }
   }
 
-  async #computeDestSig(lineage: Lineage, extraSegments: string[]): Promise<string> {
-    const domain = window.location.hostname || 'hypercomb.io'
-    const currentSegments = lineage.explorerSegments?.() ?? []
-    const destPath = [...currentSegments, ...extraSegments].join('/')
-
-    const roomStore = get<any>('@hypercomb.social/RoomStore')
-    const secretStore = get<any>('@hypercomb.social/SecretStore')
-    const space = roomStore?.value ?? ''
-    const secret = secretStore?.value ?? ''
-    const parts = [space, domain, destPath, secret, 'cell'].filter(Boolean)
-    const key = parts.join('/')
-
-    return await SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer)
-  }
 }
