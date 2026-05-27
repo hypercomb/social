@@ -10,7 +10,6 @@ export type HistoryOpType =
   | 'add'
   | 'remove'
   | 'reorder'
-  | 'rename'
   // Drone lifecycle
   | 'add-drone'
   | 'remove-drone'
@@ -1321,8 +1320,16 @@ export class HistoryService {
   //
   //   removeEntries(markers[])  → bag.removeEntry(markerName) per item.
   //
-  //   mergeEntries(markers[])   → take newest selected marker's sig,
-  //                                promote to head, delete the rest.
+  //   mergeEntries(markers[])   → cherry-pick: union all slot arrays
+  //                                across selected layers, newest layer
+  //                                wins on `name`, commit the merged
+  //                                content as a fresh marker at head.
+  //                                Source markers are preserved so the
+  //                                user keeps the lineage trail.
+  //
+  //   projectMerge(markers[])   → same union as mergeEntries but no
+  //                                write — returns the projected layer
+  //                                content for preview.
 
   /**
    * Bring a layer sig back to head by appending a fresh marker that
@@ -1423,40 +1430,97 @@ export class HistoryService {
   }
 
   /**
-   * Multi-select "merge into head". Pick the newest selected marker's
-   * sig, promote it (append a fresh marker), then delete every other
-   * selected marker. Net effect: one new marker at head, the merged-
-   * source markers are gone from the active list.
+   * Multi-select cherry-pick "merge into head". Reads every selected
+   * marker's layer, computes the projected union (newest wins on
+   * `name`, every other slot is the deduped union of all selected
+   * layers' sig arrays), then commits the merged content as a fresh
+   * marker at head. Source markers are preserved so the user keeps
+   * the lineage trail visible.
+   *
+   * Single-selection callers are routed through {@link promoteToHead}
+   * by the viewer; this path always merges N ≥ 2 layers' contents.
    */
   public readonly mergeEntries = async (
     locationSig: string,
     filenames: string[],
   ): Promise<string | null> => {
+    const merged = await this.projectMerge(locationSig, filenames)
+    if (!merged) return null
+    return await this.commitLayer(locationSig, merged)
+  }
+
+  /**
+   * Compute the projected merged layer for a set of selected markers
+   * without committing. Used by the viewer's merge preview so the user
+   * sees exactly what the new head would contain before they confirm.
+   *
+   * Merge rules:
+   *  - `name` = newest selected layer's name (chronological by marker
+   *    filename, which is monotonic per-bag).
+   *  - Every other slot = deduplicated union of every selected layer's
+   *    array values, preserving chronological order (oldest first).
+   *    Non-array slot values are ignored.
+   *  - Empty slots are dropped from the result — sparse-layer invariant.
+   */
+  public readonly projectMerge = async (
+    locationSig: string,
+    filenames: string[],
+  ): Promise<LayerContent | null> => {
     if (filenames.length === 0) return null
-    let bag: FileSystemDirectoryHandle
-    try {
-      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
-    } catch { return null }
 
-    let newestMarker: string | null = null
-    let newestSig: string | null = null
-    for (const filename of filenames) {
-      if (!HistoryService.#MARKER_RE.test(filename)) continue
-      try {
-        const handle = await bag.getFileHandle(filename, { create: false })
-        const file = await handle.getFile()
-        if (newestMarker === null || filename.localeCompare(newestMarker) > 0) {
-          newestMarker = filename
-          newestSig = (await file.text()).trim()
-        }
-      } catch { /* skip missing */ }
+    // Read each marker's parsed layer content in chronological order
+    // (markers are 8-digit monotonic names, so filename sort gives the
+    // timeline). Markers carry the layer JSON inline — readMarker
+    // parses the bytes directly, so we don't need to resolve a sig.
+    const ordered = [...filenames]
+      .filter(name => HistoryService.#MARKER_RE.test(name))
+      .sort((a, b) => a.localeCompare(b))
+    if (ordered.length === 0) return null
+
+    const layers: LayerContent[] = []
+    for (const filename of ordered) {
+      const m = await this.readMarker(locationSig, filename)
+      if (m?.parsed) layers.push(m.parsed)
     }
-    if (!newestSig) return null
+    if (layers.length === 0) return null
 
-    const promoted = await this.promoteToHead(locationSig, newestSig)
-    if (!promoted) return null
-    await this.removeEntries(locationSig, filenames.filter(f => f !== newestMarker))
-    return promoted
+    // Newest wins on name — last entry in the chronologically-sorted
+    // list. Fall back to empty string if the newest layer somehow has
+    // no name set (shouldn't happen for committed layers).
+    const newestName = layers[layers.length - 1].name ?? ''
+
+    // Union every other slot. Walk every layer in order and accumulate
+    // sig arrays per slot, deduping by string equality. Inline values
+    // (non-string array elements) pass through with JSON-keyed dedupe.
+    const slotUnions = new Map<string, unknown[]>()
+    const slotSeen = new Map<string, Set<string>>()
+    for (const layer of layers) {
+      for (const key of Object.keys(layer)) {
+        if (key === 'name') continue
+        const value = (layer as Record<string, unknown>)[key]
+        if (!Array.isArray(value) || value.length === 0) continue
+        let bucket = slotUnions.get(key)
+        let seen = slotSeen.get(key)
+        if (!bucket) {
+          bucket = []
+          seen = new Set<string>()
+          slotUnions.set(key, bucket)
+          slotSeen.set(key, seen)
+        }
+        for (const entry of value) {
+          const dedupeKey = typeof entry === 'string' ? entry : JSON.stringify(entry)
+          if (seen!.has(dedupeKey)) continue
+          seen!.add(dedupeKey)
+          bucket.push(entry)
+        }
+      }
+    }
+
+    const merged: LayerContent = { name: newestName }
+    for (const [key, values] of slotUnions) {
+      (merged as Record<string, unknown>)[key] = values
+    }
+    return merged
   }
 
   // -------------------------------------------------

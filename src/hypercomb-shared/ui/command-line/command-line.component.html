@@ -39,10 +39,11 @@
   }
 </div>
 
-<!-- History controls cluster — floats at the bottom-right of the viewport.
-     Undo/redo arrows surface briefly on undo/redo activity and stay
-     visible while rewound. Save As head joins them when the cursor is
-     rewound so all three sit together. -->
+<!-- Undo / redo cluster — floats at the bottom-right of the viewport.
+     Surfaces briefly on undo/redo activity and stays visible while
+     rewound so the keyboard arrows have a clickable counterpart. Save
+     As / Merge are selection-driven and live in the history viewer
+     header, not here. -->
 @if (historyNavVisible() || cursorRewound()) {
   <div class="history-controls-cluster">
     <button class="history-nav-btn history-undo-btn" type="button"
@@ -59,14 +60,6 @@
       [title]="'history.redo' | t">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
     </button>
-    @if (cursorRewound()) {
-      <button class="save-as-head-btn" type="button"
-        (click)="saveAsHead()"
-        [attr.aria-label]="'history.make-head' | t"
-        [title]="'history.make-head' | t">
-        {{ 'history.save-as' | t }}
-      </button>
-    }
   </div>
 }
 

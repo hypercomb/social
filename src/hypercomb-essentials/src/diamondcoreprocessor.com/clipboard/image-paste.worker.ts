@@ -99,24 +99,29 @@ export class ImagePasteWorker extends Worker {
 
     const history = get('@diamondcoreprocessor.com/HistoryService') as
       { getLayerBySig?: (s: string) => Promise<{ name?: string } | null> } | undefined
+    const committer = get('@diamondcoreprocessor.com/LayerCommitter') as
+      { update?: (segments: readonly string[], layer: { name?: string; [slot: string]: unknown }) => Promise<string> } | undefined
 
     // Resolve existing sibling names from the layer (single source of
     // truth for "what tiles are here"). When history/layer aren't ready
     // yet the set stays empty and we land on 'image'; first sibling
     // wins, the next paste resolves correctly on the following render.
+    type ParentLayer = { name?: string; children?: readonly unknown[]; [slot: string]: unknown }
+    const existingNames: string[] = []
     const existing = new Set<string>()
+    let parentLayer: ParentLayer | null = null
     if (typeof lineage.currentLayer === 'function' && history?.getLayerBySig) {
       try {
-        const layer = await lineage.currentLayer()
-        const childSigs = Array.isArray((layer as { children?: readonly unknown[] } | null)?.children)
-          ? ((layer as { children: readonly unknown[] }).children)
-          : []
-        await Promise.all(childSigs.map(async (cs) => {
+        const raw = await lineage.currentLayer()
+        parentLayer = (raw && typeof raw === 'object') ? raw as ParentLayer : null
+        const childSigs: readonly unknown[] = Array.isArray(parentLayer?.children) ? parentLayer.children : []
+        const resolved = await Promise.all(childSigs.map(async (cs: unknown) => {
           try {
             const child = await history.getLayerBySig!(String(cs ?? ''))
-            if (typeof child?.name === 'string' && child.name.length > 0) existing.add(child.name)
-          } catch { /* unresolvable child sig — skip */ }
+            return (typeof child?.name === 'string' && child.name.length > 0) ? child.name : ''
+          } catch { return '' }
         }))
+        for (const n of resolved) if (n) { existingNames.push(n); existing.add(n) }
       } catch { /* keep existing empty */ }
     }
 
@@ -131,7 +136,25 @@ export class ImagePasteWorker extends Worker {
       .map(s => String(s ?? '').trim())
       .filter(Boolean)
 
-    EffectBus.emit('cell:added', { cell: finalName, segments })
+    // Emit cell:added BEFORE committing so UI subscribers (show-cell
+    // incremental mount, activity log) react instantly. viaUpdate skips
+    // the LayerCommitter's per-event commit queue since the explicit
+    // update() below IS the atomic commit.
+    EffectBus.emit('cell:added', { cell: finalName, segments, viaUpdate: true })
+
+    // ONE atomic layer commit: take the current parent layer, append the
+    // new tile name, save.
+    if (committer?.update) {
+      const nextParent: { [slot: string]: unknown } = {}
+      if (parentLayer) {
+        for (const [k, v] of Object.entries(parentLayer)) {
+          if (k === 'children') continue
+          nextParent[k] = v
+        }
+      }
+      nextParent['children'] = [...existingNames, finalName]
+      await committer.update(segments, nextParent)
+    }
     void new hypercomb().act()
 
     return finalName

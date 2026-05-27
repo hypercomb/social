@@ -81,7 +81,7 @@ export class HashMarkerBehavior implements CommandLineBehavior {
       await writePropsAt(parentSegments, cellName, { markers: existing })
     }
 
-    EffectBus.emit('cell:added', { cell: cellName, segments: parentSegments.slice() })
+    EffectBus.emit('cell:added', { cell: cellName, segments: parentSegments.slice(), viaUpdate: true })
     EffectBus.emit('marker:added', { cell: cellName, marker })
     await new hypercomb().act()
   }

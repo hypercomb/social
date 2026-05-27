@@ -80,7 +80,7 @@ export class TagAssignBehavior implements CommandLineBehavior {
     }
 
     EffectBus.emit('tags:changed', { updates: [{ cell: cellName, tag: tagName, color }] })
-    EffectBus.emit('cell:added', { cell: cellName, segments: parentSegments.slice() })
+    EffectBus.emit('cell:added', { cell: cellName, segments: parentSegments.slice(), viaUpdate: true })
     await new hypercomb().act()
   }
 }

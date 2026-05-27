@@ -10,6 +10,27 @@
     <header class="history-viewer-header">
       <span class="title">{{ 'history.viewer-title' | t }}</span>
       <span class="count">{{ total() }}</span>
+      @if (selectedCount() > 0) {
+        <span class="selection-gap"></span>
+        <span class="selection-count">{{ selectedCount() }}</span>
+        @if (selectedCount() === 1) {
+          <button type="button"
+                  class="selection-action save-as-head"
+                  [attr.aria-label]="'history.selection-make-head' | t"
+                  [title]="'history.selection-make-head' | t"
+                  (click)="makeHeadSelection()">
+            {{ 'history.save-as' | t }}
+          </button>
+        } @else {
+          <button type="button"
+                  class="selection-action merge-to-head"
+                  [attr.aria-label]="'history.selection-merge' | t"
+                  [title]="'history.selection-merge' | t"
+                  (click)="openMergePreview()">
+            {{ 'history.selection-merge' | t }}
+          </button>
+        }
+      }
       <button type="button"
               class="group-step-toggle"
               [class.active]="groupStepEnabled()"
@@ -23,7 +44,7 @@
               [title]="'history.hide' | t"
               (click)="hide()">×</button>
     </header>
-    @if (filterCategories().length > 0 || selectedCount() > 0) {
+    @if (filterCategories().length > 0) {
       <div class="filter-bar" role="toolbar" (wheel)="$event.stopPropagation()">
         @for (def of filterCategories(); track def.id) {
           <button type="button"
@@ -36,20 +57,6 @@
                   (click)="toggleCategory(def.id)">
             <hc-icon [ref]="def.icon ?? null"></hc-icon>
           </button>
-        }
-        @if (selectedCount() > 0) {
-          <span class="selection-gap"></span>
-          <span class="selection-count">{{ selectedCount() }}</span>
-          <button type="button"
-                  class="selection-action make-head"
-                  [attr.aria-label]="'history.selection-make-head' | t"
-                  [title]="'history.selection-make-head' | t"
-                  (click)="makeHeadSelection()">^</button>
-          <button type="button"
-                  class="selection-action merge"
-                  [attr.aria-label]="'history.selection-merge' | t"
-                  [title]="'history.selection-merge' | t"
-                  (click)="mergeSelection()">&#8801;</button>
         }
       </div>
     }
@@ -119,6 +126,27 @@
                 (click)="closeSlice()">×</button>
       </header>
       <pre class="slice-json">@for (line of slice.lines; track $index) {@if (lineSig(line.text); as sig) {<span class="slice-line slice-sig" [attr.data-status]="line.status" [attr.data-sig]="sig" (click)="drillIntoSig(sig)" role="button" tabindex="0">{{ line.text }}</span>
+} @else {<span class="slice-line" [attr.data-status]="line.status">{{ line.text }}</span>
+}}</pre>
+    </div>
+  }
+
+  @if (mergePreview(); as preview) {
+    <div class="slice-backdrop" (click)="closeMergePreview()"></div>
+    <div class="slice-modal merge-preview-modal" role="dialog" aria-modal="true">
+      <header>
+        <span class="slice-label">{{ 'history.merge-preview-title' | t }} · {{ preview.sourceCount }}</span>
+        <button type="button"
+                class="merge-commit"
+                [disabled]="mergeCommitting()"
+                [attr.aria-label]="'history.merge-preview-commit' | t"
+                (click)="commitMergePreview()">{{ 'history.merge-preview-commit' | t }}</button>
+        <button type="button"
+                class="slice-close"
+                [attr.aria-label]="'history.merge-preview-cancel' | t"
+                (click)="closeMergePreview()">×</button>
+      </header>
+      <pre class="slice-json">@for (line of preview.lines; track $index) {@if (lineSig(line.text); as sig) {<span class="slice-line slice-sig" [attr.data-status]="line.status" [attr.data-sig]="sig" (click)="drillIntoSig(sig)" role="button" tabindex="0">{{ line.text }}</span>
 } @else {<span class="slice-line" [attr.data-status]="line.status">{{ line.text }}</span>
 }}</pre>
     </div>

@@ -227,9 +227,11 @@ export class ClipboardWorker extends Worker {
       // below (cursor.onNewLayer) see the post-mutation OPFS state.
       EffectBus.emit('fs:changed', { segments: [...baseSegments] })
 
-      // ONE layer commit per affected parent reflecting its new children list.
-      // Per-cell cell:removed events fire AFTER so LayerCommitter's per-event
-      // commits dedup against the already-committed bulk state.
+      // ONE layer commit per affected parent reflecting its new children
+      // list. Per-cell cell:removed events carry `viaUpdate: true` so the
+      // LayerCommitter listener skips queueing — the update() above IS the
+      // atomic commit, and UI subscribers still receive the events for
+      // visual unmount.
       const committer = this.#committer
       if (committer) {
         for (const parentSegs of affectedParents.values()) {
@@ -241,7 +243,7 @@ export class ClipboardWorker extends Worker {
       }
 
       for (const entry of moved) {
-        EffectBus.emit('cell:removed', { cell: entry.label, segments: [...entry.sourceSegments] })
+        EffectBus.emit('cell:removed', { cell: entry.label, segments: [...entry.sourceSegments], viaUpdate: true })
       }
       this.#selection?.clear()
 
@@ -342,6 +344,9 @@ export class ClipboardWorker extends Worker {
     if (placed.length > 0) EffectBus.emit('fs:changed', { segments: [...targetSegments] })
 
     // ONE layer commit reflecting the new children list at the target.
+    // Per-cell cell:added events carry `viaUpdate: true` so the
+    // LayerCommitter listener skips queueing — the update() above IS the
+    // atomic commit, and UI subscribers still receive the events.
     const committer = this.#committer
     if (committer && placed.length > 0) {
       const newChildren = await listChildNames(targetDir)
@@ -349,7 +354,7 @@ export class ClipboardWorker extends Worker {
     }
 
     for (const entry of placed) {
-      EffectBus.emit('cell:added', { cell: entry.label, segments: [...targetSegments] })
+      EffectBus.emit('cell:added', { cell: entry.label, segments: [...targetSegments], viaUpdate: true })
     }
     if (placed.length > 0) await new hypercomb().act()
 
@@ -432,6 +437,9 @@ export class ClipboardWorker extends Worker {
     if (placed.length > 0) EffectBus.emit('fs:changed', { segments: [...targetSegments] })
 
     // ONE layer commit reflecting the new children list at the target.
+    // Per-cell cell:added events carry `viaUpdate: true` so the
+    // LayerCommitter listener skips queueing — the update() above IS the
+    // atomic commit, and UI subscribers still receive the events.
     const committer = this.#committer
     if (committer && placed.length > 0) {
       const newChildren = await listChildNames(targetDir)
@@ -439,7 +447,7 @@ export class ClipboardWorker extends Worker {
     }
 
     for (const entry of placed) {
-      EffectBus.emit('cell:added', { cell: entry.label, segments: [...targetSegments] })
+      EffectBus.emit('cell:added', { cell: entry.label, segments: [...targetSegments], viaUpdate: true })
     }
     if (placed.length > 0) await new hypercomb().act()
 

@@ -1617,35 +1617,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
-    // Create the cell directory in OPFS at every level so listCellFolders
-    // sees them, AND record each (parent_segments, leaf_cell) pair so we
-    // can emit one cell:added event per gained child. This is critical
-    // for nested paths like "meals/breakfast": the leaf "breakfast"
-    // needs its own cell:added with segments=[..., "meals"], otherwise
-    // /meals's bag never learns "breakfast" was added and the cascade
-    // chain breaks above the first level.
-    //
-    // Idempotent: if a directory already existed before we walked into
-    // it, the layer-committer's delta path no-ops (sig already in
-    // children, dedup at commitLayer). So redundant events for
-    // already-existing intermediates do no harm — but we still emit
-    // them, because the directory might have been created externally
-    // and the bag has no history for it yet, in which case the event
-    // bootstraps it.
     // Tile creation is a layer-only mutation. Per the architecture
     // doctrine (project_layer_is_primitive) the current layer is the
-    // sole source of truth for tile membership — OPFS dirs at
-    // hypercomb.io/<name>/ are retired artifact storage. We do NOT
-    // mint a dir here; the LayerCommitter cascade is the only thing
-    // that adds children to the parent layer, and the merkle tree is
-    // where the new tile lives. Reading back uses currentLayerAt +
-    // getLayerBySig, never an OPFS walk.
+    // sole source of truth for tile membership.
     //
-    // We still build the (segments, cell) tuple for each nested level
-    // so the cascade fires from root downward: a `/foo/bar/baz` input
-    // adds `foo` to root.children, then `bar` to foo.children, then
-    // `baz` to bar.children. Each level's commit auto-mints the empty
-    // 00000000 layer for the new lineage on first touch.
+    // For nested paths like `meals/breakfast/pastries`, every level
+    // gains a child: root.children += meals, meals.children += breakfast,
+    // breakfast.children += pastries. Build one (segments, cell) tuple
+    // per gained level, then commit them in ONE shared importTree cascade
+    // — each affected ancestor commits exactly once with the union of
+    // changes. The leaf event still drives UI fade-in via cell:added,
+    // marked `viaUpdate: true` so the per-event commit listener skips it.
     const baseSegments = (this.lineage as unknown as { explorerSegments?: () => string[] })?.explorerSegments?.() ?? []
     const events: { cell: string; segments: string[] }[] = []
     const accumulated: string[] = [...baseSegments]
@@ -1664,12 +1646,32 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       EffectBus.emit('cell:attach-pending', { cell: leafCell, pending: true })
     }
 
-    // Emit one cell:added per level in DOWN order — root level first,
-    // then leaf last. Each event triggers its own delta cascade. The
-    // delta cascade is idempotent for already-existing children, so
-    // emitting redundantly for unchanged intermediates is safe.
+    // UI subscribers (show-cell incremental render, activity log,
+    // substrate trigger) need the cell:added event BEFORE the commit
+    // so the visual mount happens immediately — the layer cascade can
+    // take a tick to settle and gating the render on it makes creates
+    // feel laggy. `viaUpdate: true` tells the LayerCommitter listener
+    // to skip queueing because the upcoming importTree IS the commit.
     for (const evt of events) {
-      EffectBus.emit('cell:added', evt)
+      EffectBus.emit('cell:added', { ...evt, viaUpdate: true })
+    }
+
+    // ONE atomic cascade: importTree commits every affected ancestor
+    // exactly once. For `a/b/c` from root that's 1 marker each in root,
+    // /a, /a/b, /a/b/c — never N markers per level.
+    const committer = (window as unknown as { ioc: { get(key: string): unknown } }).ioc.get(
+      '@diamondcoreprocessor.com/LayerCommitter',
+    ) as {
+      importTree?: (
+        updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],
+      ) => Promise<void>
+    } | undefined
+    if (committer?.importTree) {
+      const updates = events.map(evt => ({
+        segments: [...evt.segments, evt.cell],
+        layer: { name: evt.cell },
+      }))
+      await committer.importTree(updates)
     }
 
     if (armed) {

@@ -62,6 +62,8 @@ type HistoryService = {
   promoteToHead?(locationSig: string, layerSig: string): Promise<string | null>
   removeEntries?(locationSig: string, filenames: string[]): Promise<number>
   mergeEntries?(locationSig: string, filenames: string[]): Promise<string | null>
+  /** Compute the projected merged layer for preview without writing. */
+  projectMerge?(locationSig: string, filenames: string[]): Promise<Content | null>
   pruneExpiredDeletes?(locationSig: string): Promise<number>
 }
 type CursorService = {
@@ -540,24 +542,64 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     cursor.seek(this.#total())
   }
 
+  // Merge preview state — populated by openMergePreview, cleared by
+  // closeMergePreview / commitMergePreview. While non-null the modal
+  // renders. `sourceCount` lets the modal label "X selected".
+  #mergePreview = signal<{
+    lines: ReadonlyArray<{ text: string; status: 'add' }>
+    sourceCount: number
+  } | null>(null)
+  readonly mergePreview = this.#mergePreview.asReadonly()
+  /** True while the merge commit is in flight — disables the button. */
+  readonly mergeCommitting = signal(false)
+
   /**
-   * Merge: same as makeHeadSelection, but also soft-deletes all the
-   * selected source entries. Net effect: one new row at top, selected
-   * sources disappear from the active list (still restorable from
-   * __deleted__ for 30 days).
+   * Compute the projected merged layer for the current selection and
+   * open the preview modal. Triggered from the header when N ≥ 2 rows
+   * are selected. Read-only — no marker is written until the user
+   * clicks commit.
    */
-  readonly mergeSelection = async (): Promise<void> => {
+  readonly openMergePreview = async (): Promise<void> => {
+    const history = this.#history()
+    const cursor = this.#cursor()
+    if (!history?.projectMerge || !cursor) return
+    const sel = this.#selected()
+    if (sel.size < 2) return
+    const projected = await history.projectMerge(cursor.state.locationSig, [...sel])
+    if (!projected) return
+    const lines = layerToDiffableLines(projected).map(text => ({ text, status: 'add' as const }))
+    this.#mergePreview.set({ lines, sourceCount: sel.size })
+  }
+
+  readonly closeMergePreview = (): void => {
+    this.#mergePreview.set(null)
+    this.mergeCommitting.set(false)
+  }
+
+  /**
+   * Commit the projected merge. Calls mergeEntries to write the unioned
+   * layer as a fresh head marker (sources are preserved — cherry-pick
+   * semantics). Closes the preview, clears selection, and seeks the
+   * cursor to the new head so the canvas reflects the merged state.
+   */
+  readonly commitMergePreview = async (): Promise<void> => {
     const history = this.#history()
     const cursor = this.#cursor()
     if (!history?.mergeEntries || !cursor) return
     const sel = this.#selected()
-    if (sel.size === 0) return
-    await history.mergeEntries(cursor.state.locationSig, [...sel])
-    await this.#refreshCursor(cursor)
-    this.#selected.set(new Set())
-    this.#lastSelectionAnchor = null
-    await this.#reload()
-    cursor.seek(this.#total())
+    if (sel.size < 2) return
+    this.mergeCommitting.set(true)
+    try {
+      await history.mergeEntries(cursor.state.locationSig, [...sel])
+      await this.#refreshCursor(cursor)
+      this.#selected.set(new Set())
+      this.#lastSelectionAnchor = null
+      this.#mergePreview.set(null)
+      await this.#reload()
+      cursor.seek(this.#total())
+    } finally {
+      this.mergeCommitting.set(false)
+    }
   }
 
   readonly openSlice = (index: number, event: Event): void => {
