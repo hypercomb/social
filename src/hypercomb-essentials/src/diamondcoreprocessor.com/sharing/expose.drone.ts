@@ -462,11 +462,9 @@ export class ExposeDrone extends Drone {
    */
   async #materialiseFacade(channelId: string, share: ShareState): Promise<void> {
     const lineage = window.ioc.get('@hypercomb.social/Lineage') as LineageLike | undefined
-    const dir = await lineage?.explorerDir?.()
-    if (!dir) {
-      console.warn('[sync] share: no explorer dir', { tile: share.branchName })
-      return
-    }
+    // Layer-primitive: no `dir` gate. The ephemeral facade preview path
+    // only records metadata against the segments-keyed channel state —
+    // the actual layer commit happens on adopt (`#adoptEphemeral`).
     const segments = lineage?.explorerSegments?.() ?? []
 
     const targetName = share.branchName
@@ -531,7 +529,6 @@ export class ExposeDrone extends Drone {
   async #onUnlockTile(tileLabel: string, _mode: 'create' | 'merge' = 'create'): Promise<void> {
     const lineage = window.ioc.get('@hypercomb.social/Lineage') as LineageLike | undefined
     const parentSegments = lineage?.explorerSegments?.() ?? []
-    const dir = await lineage?.explorerDir?.()
 
     // Read properties from the cell's layer (canonical). The tile may
     // exist as a layer-only entry with no OPFS dir — that's fine.
@@ -559,18 +556,15 @@ export class ExposeDrone extends Drone {
       return
     }
 
-    // Strict preserve: existing cells stay untouched, only genuinely-
-    // new descendants get added. The facade tile itself already
-    // exists — we just recurse to fill new descendants beneath it.
-    // materialiseFromSig still consults the OPFS subtree for now —
-    // its migration belongs to a separate cut.
-    if (!dir) {
-      this.#toast('warning', 'Sync failed', 'No explorer directory.')
-      return
-    }
+    // Layer-primitive: no `dir` gate. materialiseFromSig now walks the
+    // buffered chain by segments and writes each layer through
+    // LayerCommitter, preserving existing siblings via the cell:added
+    // delta path. The facade tile itself is at [...parentSegments,
+    // tileLabel]; we hand its parentSegments to materialiseFromSig so
+    // the subtree lands at that path.
     let result: { written: number; missing: string[]; skipped: number }
     try {
-      result = await drone.materialiseFromSig(channelId, branchSig, dir, { parentSegments })
+      result = await drone.materialiseFromSig(channelId, branchSig, null as unknown as FileSystemDirectoryHandle, { parentSegments })
     } catch (err) {
       this.#toast('warning', 'Sync failed', String((err as Error)?.message ?? err))
       return
