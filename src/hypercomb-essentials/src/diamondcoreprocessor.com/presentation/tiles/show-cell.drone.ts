@@ -1479,8 +1479,18 @@ export class ShowCellDrone extends Drone {
       && !(this.#tagFlattenResults && this.#tagFlattenResults.length > 0)
     ) {
       const cached = this.#layerCellsCache.get(locationKey)
+      // Sub-layer locations no longer mint OPFS folders (layer-primitive
+      // doctrine), so `lineage.explorerDir()` returns null for them and
+      // `#layerDirCache` is never populated. The fast path used to
+      // require `cachedDir`, which silently disabled it for every
+      // sub-layer back-click — every back to /alpha, /dolphin, etc.
+      // hit the slow path (full layer fetch + cell stream + atlas refill)
+      // when the user perceived the operation as just "redraw what was
+      // there 2 seconds ago." Drop the cachedDir requirement and gate
+      // the dir-dependent side effects (viewport OPFS read, vp.setDir,
+      // image refill) on its presence below.
       const cachedDir = this.#layerDirCache.get(locationKey)
-      if (cached && cached.cells.length > 0 && cachedDir) {
+      if (cached && cached.cells.length > 0) {
         // Capture the OUTGOING layer's live VP state into our cache so
         // a future return to that layer restores where the user actually
         // left it (pan/zoom/meshOffset they applied this session). VP's
@@ -1490,17 +1500,18 @@ export class ShowCellDrone extends Drone {
         // abort any stream still running for the previous layer
         ++this.#streamToken
 
-        // Viewport: prefer cached snapshot (sync). If none cached, MUST
-        // await the OPFS read — otherwise mesh renders at the previous
-        // layer's pan/zoom, then snaps to the saved viewport once the
-        // read completes, which the user perceives as drift. Position
-        // accuracy outweighs the one-time OPFS round-trip on cold load.
+        // Viewport: prefer cached snapshot (sync). If none cached AND
+        // we have a dir to read from, await the OPFS read so the mesh
+        // doesn't render at the previous layer's pan/zoom and snap into
+        // place. For sub-layers with no on-disk dir (layer-primitive
+        // model) we skip the OPFS round-trip entirely — the in-memory
+        // snapshot cache is the source of truth.
         let appliedSnap: ViewportSnapshot | null = null
         const vpSnap = this.#layerViewportCache.get(locationKey)
         if (vpSnap) {
           this.#applyViewportFromSnapshot(vpSnap)
           appliedSnap = vpSnap
-        } else {
+        } else if (cachedDir) {
           appliedSnap = await this.#applyViewportForLayerReadSnapshot(cachedDir)
         }
         // Explicit set — never inherit from prior render. The back-nav
@@ -1510,7 +1521,7 @@ export class ShowCellDrone extends Drone {
         this.#pendingRecenter = !appliedSnap?.meshOffset
 
         const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
-        if (vp) vp.setDirSilent(cachedDir)
+        if (vp && cachedDir) vp.setDirSilent(cachedDir)
 
         this.renderedLocationKey = locationKey
         this.cachedCellNames = cached.cellNames
@@ -1569,8 +1580,10 @@ export class ShowCellDrone extends Drone {
         // (still-hot) Store resource cache. When new images land, the
         // shader picks them up by sig — no rerender needed. If a sig
         // was missing (substrate gap), do nothing (a future render can
-        // resolve it).
-        if (evictedSigs.length > 0) {
+        // resolve it). Skip entirely when no dir — sub-layers with no
+        // on-disk mirror serve images through the resource cache
+        // independent of any per-cell folder.
+        if (evictedSigs.length > 0 && cachedDir) {
           void this.loadCellImages(cached.cells, cachedDir)
         }
 
