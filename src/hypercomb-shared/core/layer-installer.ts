@@ -10,35 +10,30 @@ type ContentManifest = { version: number; packages: Record<string, InstallManife
 
 export class LayerInstaller {
 
-  readonly #localManifestName = '__install_cache__.json'
-
   public install = async (parsed: LocationParseResult): Promise<boolean> => {
     const baseUrl = parsed?.baseUrl ?? ''
     const packageSig = parsed?.signature ?? ''
     if (!baseUrl || !packageSig) return false
 
-    // domain folder key used for: opfsroot/__layers__/<domain>/
-    const domainKey = parsed?.domain || this.#tryHost(baseUrl)
-    if (!domainKey) return false
-
     const store = get('@hypercomb.social/Store') as Store
 
-    // layers are stored per domain: opfsroot/__layers__/<domain>/
-    const domainLayersDir = await store.domainLayersDirectory(domainKey, true)
+    // Layers go directly into the canonical `__layers__/<sig>` pool — no
+    // per-domain partition. The install pipeline is literally xcopy: the
+    // host serves flat sig-keyed files; the installer copies them flat
+    // into OPFS. Resume is by pool presence (no install-cache file).
+    const layersDir = store.layers
 
     // 1) fetch content manifest and resolve the package by signature
-    const manifest = await this.#getOrFetchPackage(domainLayersDir, baseUrl, packageSig)
+    const manifest = await this.#fetchPackage(baseUrl, packageSig)
     if (!manifest) return false
 
     // 2) install all files (flat — files live at baseUrl root)
-    await this.#installLayers(domainLayersDir, baseUrl, manifest.layers || [])
+    await this.#installLayers(layersDir, baseUrl, manifest.layers || [])
     await this.#installDependencies(store, baseUrl, manifest.dependencies || [])
     await this.#installBees(store, baseUrl, manifest.bees || [])
 
-    // 3) remove cached manifest when complete
-    const complete = await this.#isComplete(domainLayersDir, store, manifest)
+    const complete = await this.#isComplete(layersDir, store, manifest)
     if (complete) {
-      await this.#safeRemove(domainLayersDir, this.#localManifestName)
       console.log('[layer-installer] install complete')
     } else {
       console.warn('[layer-installer] install incomplete — missing files will be retried on next load')
@@ -50,21 +45,14 @@ export class LayerInstaller {
   // manifest
   // -------------------------------------------------
 
-  #getOrFetchPackage = async (
-    domainLayersDir: FileSystemDirectoryHandle,
+  #fetchPackage = async (
     baseUrl: string,
-    packageSig: string
+    packageSig: string,
   ): Promise<InstallManifest | null> => {
-
-    // local first (resume — cached package entry)
-    const localText = await this.#tryReadText(domainLayersDir, this.#localManifestName)
-    if (localText) {
-      const local = this.#tryParseInstallManifest(localText)
-      if (local) return local
-      await this.#safeRemove(domainLayersDir, this.#localManifestName)
-    }
-
-    // remote — fetch content manifest and extract package
+    // Stateless: always re-fetch the content manifest and extract the
+    // package. Resume-after-partial-install works via pool presence
+    // check (already-installed sigs are skipped in #installLayers etc.),
+    // so we don't need a local cache file at all.
     const url = `${baseUrl}/manifest.json`
     const bytes = await this.#fetchBytes(url)
     if (!bytes) return null
@@ -78,10 +66,6 @@ export class LayerInstaller {
       console.warn(`[layer-installer] package ${packageSig.slice(0, 12)} not found in manifest`)
       return null
     }
-
-    // cache the resolved package entry locally for resume
-    const pkgBytes = new TextEncoder().encode(JSON.stringify(pkg))
-    await this.#writeBytesFile(domainLayersDir, this.#localManifestName, pkgBytes)
     return pkg
   }
 
@@ -108,17 +92,19 @@ export class LayerInstaller {
   // -------------------------------------------------
 
   #installLayers = async (
-    domainLayersDir: FileSystemDirectoryHandle,
+    layersDir: FileSystemDirectoryHandle,
     endpoint: string,
     layers: string[]
   ): Promise<void> => {
     for (const sig of layers) {
       if (!sig) continue
 
-      // Layers are stored as `sig` (no extension) — check both forms for compatibility
+      // Resume: layers are sig-keyed; if `__layers__/<sig>` already
+      // exists, the content IS correct (sig === hash(bytes)) — skip.
+      // Also tolerate legacy `<sig>.json` files from older installs.
       const existing =
-        (await this.#tryGetFileHandle(domainLayersDir, sig)) ??
-        (await this.#tryGetFileHandle(domainLayersDir, `${sig}.json`))
+        (await this.#tryGetFileHandle(layersDir, sig)) ??
+        (await this.#tryGetFileHandle(layersDir, `${sig}.json`))
       if (existing) {
         console.log(`[layer-installer] layer ${sig} already installed, skipping`)
         continue
@@ -132,8 +118,10 @@ export class LayerInstaller {
         continue
       }
 
-      // store as: opfsroot/__layers__/<domain>/<sig>
-      await this.#writeBytesFile(domainLayersDir, sig, bytes)
+      // Store flat at `__layers__/<sig>` — no extension, no domain
+      // partition. Matches what commitLayer writes; readers find it
+      // via store.getLayerPoolBytes(sig).
+      await this.#writeBytesFile(layersDir, sig, bytes)
       console.log(`[layer-installer] layer ${sig} installed`)
     }
   }
@@ -207,14 +195,14 @@ export class LayerInstaller {
   }
 
   #isComplete = async (
-    domainLayersDir: FileSystemDirectoryHandle,
+    layersDir: FileSystemDirectoryHandle,
     store: Store,
     manifest: InstallManifest
   ): Promise<boolean> => {
     for (const sig of manifest.layers || []) {
       if (!sig) continue
-      const a = await this.#tryGetFileHandle(domainLayersDir, sig)
-      const b = await this.#tryGetFileHandle(domainLayersDir, `${sig}.json`)
+      const a = await this.#tryGetFileHandle(layersDir, sig)
+      const b = await this.#tryGetFileHandle(layersDir, `${sig}.json`)
       if (!a && !b) return false
     }
 
@@ -252,28 +240,6 @@ export class LayerInstaller {
     }
   }
 
-  #safeRemove = async (
-    dir: FileSystemDirectoryHandle,
-    name: string
-  ): Promise<void> => {
-    try {
-      await dir.removeEntry(name)
-    } catch {
-      // ignore
-    }
-  }
-
-  #tryReadText = async (
-    dir: FileSystemDirectoryHandle,
-    name: string
-  ): Promise<string | null> => {
-    const handle = await this.#tryGetFileHandle(dir, name)
-    if (!handle) return null
-    const file = await handle.getFile().catch(() => null)
-    if (!file) return null
-    return await file.text().catch(() => null)
-  }
-
   #writeBytesFile = async (
     dir: FileSystemDirectoryHandle,
     name: string,
@@ -293,14 +259,6 @@ export class LayerInstaller {
       return new Uint8Array(buf)
     } catch {
       return null
-    }
-  }
-
-  #tryHost = (url: string): string => {
-    try {
-      return new URL(url).host
-    } catch {
-      return ''
     }
   }
 }

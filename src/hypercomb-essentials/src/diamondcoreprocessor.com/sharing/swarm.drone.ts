@@ -27,6 +27,7 @@
 // arrives, so we don't need to dispatch a render signal ourselves.
 
 import { Drone } from '@hypercomb/core'
+import { readTilePropertiesAt } from '../editor/tile-properties.js'
 
 const SWARM_LAYER_KIND = 30200
 
@@ -123,32 +124,26 @@ const RESOURCE_REPUBLISH_BUFFER_MS = 5 * 60 * 1000
 const MAX_RESOURCE_BYTES = 256 * 1024  // 256 KB
 
 interface SwarmLayerPayload {
-  // Two sig pointers per child, both content-addressed, both streamed
-  // via the companion kind 30201 resource pipeline:
+  // The 0000 array — one entry per child at the publisher's current
+  // location. `name` is the lineage leaf; `props` is the child's
+  // canonical 0000 JSON inlined directly into the event (NOT a sig
+  // pointer). The 0000 is small text content, safe to ship, and
+  // inlining collapses the publish-fetch-parse round-trip into a
+  // single layer event — receivers have the full visual data the
+  // moment the event lands.
   //
-  //   propsSig — sha256 of the child's `0000` file bytes. The
-  //              canonical tile-properties blob (see memory: "0000
-  //              canonical"). On adopt, written verbatim into the
-  //              new local tile's `0000` so the adopted tile inherits
-  //              the publisher's index/viewport/transient state.
+  // Image bytes (the heavy binary content) still ride the companion
+  // kind 30201 resource pipeline, referenced by sig inside the props
+  // (e.g. `props.small.image = "4444…"`). The publisher's
+  // `collectNestedSigs` walk finds them and publishes each as its own
+  // kind 30201 event; the receiver's `#pullResourcesFromLayer` walks
+  // the same path to fetch.
   //
-  //   imageSig — the value of `localStorage['hc:tile-props-index'][name]`
-  //              on the publisher's side. This is the substrate-cache
-  //              propsSig pointer — when the editor or substrate has
-  //              applied an image to the tile, this blob contains the
-  //              `small.image` / `flat.small.image` references. Streamed
-  //              so the receiver can render the publisher's image
-  //              without re-rolling substrate locally. On adopt, written
-  //              into the local index entry so the renderer's tile-
-  //              properties read finds the image references the
-  //              publisher saw.
-  //
-  // The two often refer to the same blob; when they do the recursive
-  // resource walk dedupes via `#publishedResources`. When they differ
-  // (substrate has assigned an image but the canonical 0000 has not
-  // been updated to record it), both are needed for the receiver to
-  // recover the full visual.
-  children: { name: string; index?: number; propsSig?: string; imageSig?: string }[]
+  // The 0000 contents are canonicalized before inlining so identical
+  // logical content produces identical bytes on the wire regardless
+  // of which writer (editor, AI bridge, manual edit) wrote the local
+  // file. Same content → same event content → relay dedup just works.
+  visuals: { name: string; props?: Record<string, unknown> }[]
 }
 
 interface MeshEvtLike {
@@ -245,6 +240,48 @@ function isSystemDirName(name: string): boolean {
   if (!name) return true
   if (SYSTEM_DIR_NAMES.has(name)) return true
   return name.startsWith('__') && name.endsWith('__')
+}
+
+/** Deep-canonicalize a JSON-shaped value before signing. Object keys
+ *  are sorted alphabetically recursively; arrays preserve their order
+ *  (arrays are semantically ordered). JSON.stringify's compact default
+ *  output handles whitespace deterministically — no extra trim needed.
+ *
+ *  The state-machine boundary uses this any time a sig-bound resource
+ *  is produced. Same logical content → same canonical bytes → same
+ *  sig across the network, regardless of which writer (editor save,
+ *  AI bridge stamp, manual edit, swarm publish) touched the source.
+ *  Prevents the "two peers ship the same tile, different sigs" drift
+ *  that would otherwise cripple dedup and adoption. */
+function canonicaliseValue(value: unknown): unknown {
+  if (value === null) return null
+  if (Array.isArray(value)) return value.map(canonicaliseValue)
+  if (typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const k of Object.keys(value as Record<string, unknown>).sort()) {
+      out[k] = canonicaliseValue((value as Record<string, unknown>)[k])
+    }
+    return out
+  }
+  return value
+}
+
+/** Read the lineage-keyed hide list from localStorage. Path strings of
+ *  the form `parent/segments/name` — sync, fast, persistent across
+ *  sessions, cross-zone (one personal preference list per device).
+ *  Returns an empty Set on missing / malformed storage; the swarm
+ *  tile source uses this as the canonical "skip these peer visuals
+ *  forever" filter. */
+function readHiddenLineages(): ReadonlySet<string> {
+  try {
+    const raw = localStorage.getItem('hc:hidden-lineages')
+    if (!raw) return new Set()
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(parsed.filter((x): x is string => typeof x === 'string' && x.length > 0))
+  } catch {
+    return new Set()
+  }
 }
 
 // ── Resource encoding helpers ──────────────────────────────────────
@@ -401,6 +438,10 @@ export class SwarmDrone extends Drone {
   // against (now - RESOURCE_TTL_SECS + RESOURCE_REPUBLISH_BUFFER_MS)
   // to decide when to refresh. Cleared on dispose.
   #publishedResources = new Map<string, number>()
+
+  // (Derived parse cache removed — props are now inlined on the wire,
+  // so receivers have the parsed object directly in #peerLayersBySig.
+  // No separate sig→derived map needed.)
 
   // Resource sigs we're currently subscribed to (waiting for bytes).
   // One sub per sig (mesh dedupes consumers, but the bookkeeping is
@@ -777,71 +818,24 @@ export class SwarmDrone extends Drone {
     lastPublishedBySig: Array.from(this.#lastPublishedBySig.keys()).map(s => s.slice(0, 12)),
   })
 
-  /** All children any peer is currently publishing at #currentSig,
-   *  excluding our own slot. Each entry carries:
-   *    - peerPubkey  : for mine-vs-theirs render treatment
-   *    - index?      : peer-published slot so the receiver places at
-   *                    the same axial position the publisher rendered
-   *                    at (vs. drifting to next-free)
-   *    - propsSig?   : sha256 of the publisher's child `0000`. On
-   *                    adopt, the bytes (already in our OPFS by the
-   *                    time the user clicks adopt, thanks to the pull
-   *                    pipeline) are copied verbatim into the new
-   *                    local tile's `0000` — same image, same index,
-   *                    same viewport state as the publisher saw. */
-  public peerTilesAtCurrentSig = (): readonly { name: string; peerPubkey: string; index?: number; propsSig?: string; imageSig?: string }[] => {
-    const peerLayers = this.#peerLayersBySig.get(this.#currentSig)
-    if (!peerLayers || peerLayers.size === 0) return []
-    const out: { name: string; peerPubkey: string; index?: number; propsSig?: string; imageSig?: string }[] = []
-
-    // Walk peers in freshest-first order so downstream consumers that
-    // first-write-wins (peerImageSigByLabel in show-cell, peerIndices
-    // in the slot resolver) prefer the most-recent peer's data. A
-    // stale peer who shipped an outdated index, or who's still cached
-    // in the relay from before they disconnected, gets superseded by
-    // any live peer.
-    const lastSeenBag = this.#peerLastSeenMsBySig.get(this.#currentSig) ?? new Map<string, number>()
-    const nowMs = Date.now()
-    const sortedPeers = [...peerLayers.entries()].sort(([pkA], [pkB]) => {
-      const tA = lastSeenBag.get(pkA) ?? 0
-      const tB = lastSeenBag.get(pkB) ?? 0
-      return tB - tA  // newest first
-    })
-
-    for (const [pubkey, layer] of sortedPeers) {
-      if (this.#myPubkey && pubkey === this.#myPubkey) continue
-
-      // Stale-peer filter — skip any peer whose last event is older
-      // than PEER_STALE_MS. Same threshold the sweep uses for hard
-      // eviction; doing the check here too means a peer that's gone
-      // stale between sweeps still doesn't leak through to the
-      // renderer.
-      const lastMs = lastSeenBag.get(pubkey)
-      if (lastMs !== undefined && nowMs - lastMs > PEER_STALE_MS) continue
-
-      const children = Array.isArray(layer?.children) ? layer.children : []
-      for (const c of children) {
-        const name = String(c?.name ?? '').trim()
-        if (!name) continue
-        const idx = typeof c?.index === 'number' && Number.isFinite(c.index) && c.index >= 0
-          ? c.index
-          : undefined
-        const propsSig = typeof c?.propsSig === 'string' && /^[0-9a-f]{64}$/.test(c.propsSig)
-          ? c.propsSig
-          : undefined
-        const imageSig = typeof c?.imageSig === 'string' && /^[0-9a-f]{64}$/.test(c.imageSig)
-          ? c.imageSig
-          : undefined
-        out.push({
-          name,
-          peerPubkey: pubkey,
-          ...(idx !== undefined ? { index: idx } : {}),
-          ...(propsSig !== undefined ? { propsSig } : {}),
-          ...(imageSig !== undefined ? { imageSig } : {}),
-        })
-      }
-    }
-    return out
+  /** All visuals any peer is currently publishing at #currentSig,
+   *  excluding our own slot. Delegates to `peerTilesAtSig` — same
+   *  shape, same cache reads, same staleness filter.
+   *
+   *  Each entry carries:
+   *    - peerPubkey : for mine-vs-theirs render treatment
+   *    - props?     : the publisher's inlined 0000 JSON (already on
+   *                   the wire). Adopt feeds this straight into
+   *                   writeTilePropertiesAt for full carry-over.
+   *    - imageSig?  : convenience pointer extracted from props
+   *                   (props.imageSig | props.small.image |
+   *                   props.flat.small.image). Render binds sync via
+   *                   the existing imageAtlas pipeline.
+   *    - index?     : convenience pointer extracted from props.index.
+   *                   A hint; local layout owns final placement.
+   */
+  public peerTilesAtCurrentSig = (): readonly { name: string; peerPubkey: string; props?: Record<string, unknown>; imageSig?: string; index?: number }[] => {
+    return this.peerTilesAtSig(this.#currentSig)
   }
 
   // -----------------------------------------------------------------
@@ -905,13 +899,29 @@ export class SwarmDrone extends Drone {
    * synced to. Without this split, peer events from a previously-
    * visited location leak into the current view whenever the source
    * is called before #currentSig has caught up.
+   *
+   * Reads the in-memory cache `#peerLayersBySig` — the wire payload
+   * already contains parsed props inline, so there's no second cache
+   * to merge. The cache is the source of truth — debounced render
+   * emits notify subscribers WHEN to read, but the data they read is
+   * always live. Multiple peer updates inside one debounce window all
+   * land in the cache; the render that follows sees the latest
+   * aggregate state.
+   *
+   * `imageSig` + `index` are pulled out of the inlined props for
+   * consumer convenience (show-cell binds images sync without
+   * reaching into the props shape).
    */
-  public peerTilesAtSig = (sig: string): readonly { name: string; peerPubkey: string; index?: number; propsSig?: string; imageSig?: string }[] => {
+  public peerTilesAtSig = (sig: string): readonly { name: string; peerPubkey: string; props?: Record<string, unknown>; imageSig?: string; index?: number }[] => {
     if (!sig) return []
     const peerLayers = this.#peerLayersBySig.get(sig)
     if (!peerLayers || peerLayers.size === 0) return []
-    const out: { name: string; peerPubkey: string; index?: number; propsSig?: string; imageSig?: string }[] = []
+    const out: { name: string; peerPubkey: string; props?: Record<string, unknown>; imageSig?: string; index?: number }[] = []
 
+    // Walk peers in freshest-first order so downstream consumers that
+    // first-write-wins (peerImageSigByLabel in show-cell) prefer the
+    // most-recent peer's data. A stale peer still cached in the relay
+    // from before they disconnected gets superseded by any live peer.
     const lastSeenBag = this.#peerLastSeenMsBySig.get(sig) ?? new Map<string, number>()
     const nowMs = Date.now()
     const sortedPeers = [...peerLayers.entries()].sort(([pkA], [pkB]) => {
@@ -920,25 +930,49 @@ export class SwarmDrone extends Drone {
       return tB - tA
     })
 
+    const sigRe = /^[0-9a-f]{64}$/
     for (const [pubkey, layer] of sortedPeers) {
       if (this.#myPubkey && pubkey === this.#myPubkey) continue
+      // Stale-peer filter — skip any peer whose last event is older
+      // than PEER_STALE_MS. Same threshold the sweep uses for hard
+      // eviction; doing the check here too means a peer that's gone
+      // stale between sweeps still doesn't leak through to the
+      // renderer.
       const lastMs = lastSeenBag.get(pubkey)
       if (lastMs !== undefined && nowMs - lastMs > PEER_STALE_MS) continue
-      const children = Array.isArray(layer?.children) ? layer.children : []
-      for (const c of children) {
-        const name = String(c?.name ?? '').trim()
+      const visuals = Array.isArray(layer?.visuals) ? layer.visuals : []
+      for (const v of visuals) {
+        const name = String(v?.name ?? '').trim()
         if (!name) continue
-        const idx = typeof c?.index === 'number' && Number.isFinite(c.index) && c.index >= 0
-          ? c.index : undefined
-        const propsSig = typeof c?.propsSig === 'string' && /^[0-9a-f]{64}$/.test(c.propsSig)
-          ? c.propsSig : undefined
-        const imageSig = typeof c?.imageSig === 'string' && /^[0-9a-f]{64}$/.test(c.imageSig)
-          ? c.imageSig : undefined
+        const props = (v?.props && typeof v.props === 'object' && !Array.isArray(v.props))
+          ? v.props as Record<string, unknown> : undefined
+        // Convenience extraction — imageSig is checked in priority
+        // order so the renderer's atlas binds to the first valid sig
+        // it finds. Mirrors the substrate / editor write path.
+        let imageSig: string | undefined
+        if (props) {
+          const direct = props['imageSig']
+          if (typeof direct === 'string' && sigRe.test(direct)) imageSig = direct
+          if (!imageSig) {
+            const small = props['small'] as Record<string, unknown> | undefined
+            const smImg = small?.['image']
+            if (typeof smImg === 'string' && sigRe.test(smImg)) imageSig = smImg
+          }
+          if (!imageSig) {
+            const flat = props['flat'] as Record<string, unknown> | undefined
+            const flSmall = flat?.['small'] as Record<string, unknown> | undefined
+            const flImg = flSmall?.['image']
+            if (typeof flImg === 'string' && sigRe.test(flImg)) imageSig = flImg
+          }
+        }
+        const rawIdx = props?.['index']
+        const index = typeof rawIdx === 'number' && Number.isFinite(rawIdx) && rawIdx >= 0
+          ? rawIdx : undefined
         out.push({
           name, peerPubkey: pubkey,
-          ...(idx !== undefined ? { index: idx } : {}),
-          ...(propsSig !== undefined ? { propsSig } : {}),
-          ...(imageSig !== undefined ? { imageSig } : {}),
+          ...(props !== undefined ? { props } : {}),
+          ...(imageSig ? { imageSig } : {}),
+          ...(index !== undefined ? { index } : {}),
         })
       }
     }
@@ -960,14 +994,27 @@ export class SwarmDrone extends Drone {
         const sig = await this.composeSigForSegments(loc.segments)
         if (!sig) return []
         const tiles = this.peerTilesAtSig(sig)
-        return tiles.map(({ name, peerPubkey, index }) => ({
-          name,
-          kind: 'peer' as const,
-          source: {
-            peerPubkey,
-            ...(typeof index === 'number' ? { peerIndex: index } : {}),
-          },
-        }))
+        // Lineage-keyed hide filter — drop any peer visual whose path
+        // (currentSegments + name) is in the local hide list. Path-keyed
+        // is sync (no sign() needed) and matches the user-visible
+        // identity of the tile, so a hide at /foo/bar/baz stays hidden
+        // forever regardless of which swarm surfaces it later.
+        const hiddenLineages = readHiddenLineages()
+        const locKey = loc.segments
+          .map(s => String(s ?? '').trim())
+          .filter(Boolean)
+          .join('/')
+        return tiles
+          .filter(({ name }) => !hiddenLineages.has(locKey ? `${locKey}/${name}` : name))
+          .map(({ name, peerPubkey, imageSig, index }) => ({
+            name,
+            kind: 'peer' as const,
+            source: {
+              peerPubkey,
+              ...(imageSig ? { imageSig } : {}),
+              ...(typeof index === 'number' ? { peerIndex: index } : {}),
+            },
+          }))
       }
       registry.register(source)
       return
@@ -1250,7 +1297,7 @@ export class SwarmDrone extends Drone {
     const payload = evt?.payload
     if (!payload || typeof payload !== 'object') { console.log('[swarm] onEvent DROPPED: payload not object', { pubkey: pubkey.slice(0,8), payloadType: typeof payload }); return }
     const layer = payload as SwarmLayerPayload
-    if (!Array.isArray(layer.children)) { console.log('[swarm] onEvent DROPPED: children not array', { pubkey: pubkey.slice(0,8), childrenType: typeof layer.children }); return }
+    if (!Array.isArray(layer.visuals)) { console.log('[swarm] onEvent DROPPED: visuals not array', { pubkey: pubkey.slice(0,8), visualsType: typeof layer.visuals }); return }
 
     let bag = this.#peerLayersBySig.get(sig)
     if (!bag) { bag = new Map(); this.#peerLayersBySig.set(sig, bag) }
@@ -1259,7 +1306,7 @@ export class SwarmDrone extends Drone {
     const layerChanged = isNewPeer ||
       JSON.stringify(previousLayer) !== JSON.stringify(layer)
     bag.set(pubkey, layer)
-    console.log('[swarm] onEvent CACHED', { sig: sig.slice(0,8), pubkey: pubkey.slice(0,8), childCount: layer.children.length, isNewPeer, layerChanged })
+    console.log('[swarm] onEvent CACHED', { sig: sig.slice(0,8), pubkey: pubkey.slice(0,8), visualCount: layer.visuals.length, isNewPeer, layerChanged })
 
     // Stamp this peer's last-seen time at this sig. Drives the
     // staleness sweep below — peers whose last event is older than
@@ -1425,92 +1472,48 @@ export class SwarmDrone extends Drone {
       childNames = await listLocalChildren(dir)
     }
 
-    // Read each child's index from its 0000 file in parallel — gives
-    // followers (peers in follow-host mode) a (name, index) map they
-    // can apply to their own pinned-layout slot machine. Children with
-    // no 0000 or no index field publish without `index` (downstream
-    // assigns next-free slot).
-    // For each child we publish:
-    //   index    — slot ordering (from 0000.index)
-    //   propsSig — sha256 of the canonical 0000 bytes (whole file)
-    //   imageSig — sha256 of a props-shaped blob that points at the
-    //              tile's visible image. Three sources, in priority:
-    //                1. localStorage['hc:tile-props-index'][name] when
-    //                   it points at a blob that already contains
-    //                   `small.image` or `flat.small.image` refs (the
-    //                   editor-saved or substrate-applied case).
-    //                2. substrate.pickImageForLabel(name) — the
-    //                   deterministic per-label fallback the renderer
-    //                   uses for label-only tiles. We synthesize a
-    //                   {small: {image}} blob, store it, and ship its
-    //                   sig. Without this, MOST tiles' images would
-    //                   never cross the wire because their props
-    //                   blob has only {index, viewport}.
-    //                3. Skipped — no imageSig field if neither source
-    //                   yields anything (no substrate pool, no editor
-    //                   image, no fallback).
-    let propsIndex: Record<string, unknown> = {}
-    try {
-      propsIndex = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
-    } catch { /* malformed — treat as empty */ }
-
-    const store = this.#getStore()
-    type ChildEntry = { name: string; index?: number; propsSig?: string; imageSig?: string }
+    // Publish one entry per child: { name, propsSig? }.
+    //   name     — lineage leaf
+    //   propsSig — sha256 of the child's canonical 0000 bytes (the
+    //              whole file). The 0000 already contains everything
+    //              else (imageSig, index, tags, …); receivers derive
+    //              what they need by parsing the bytes once they
+    //              arrive via kind-30201. No separate `imageSig` or
+    //              `index` field on the wire — both were redundant
+    //              with the 0000 contents.
+    //
+    // The substrate-fallback imageSig synthesis is gone. A peer
+    // running pure substrate fill on a label-only tile no longer
+    // ships an arbitrary chosen image across the wire; the receiver
+    // sees a label-only tile until adopt, then their own substrate
+    // picks. Matches user intent: only intentionally-placed images
+    // travel via the swarm.
+    // Read each child's visuals through the canonical preloaded path —
+    // same primitive (`readTilePropertiesAt`) that show-cell uses for
+    // render. Mechanical integrity: render and share read the same
+    // bytes from the same cache, so the same logical tile produces
+    // the same on-wire props. The chain `history.sign → currentLayerAt
+    // → store.getResource` is preloader-warmed for the current
+    // location's children (the user is here, they've been rendered),
+    // so this is a string of cache hits in the normal case.
+    //
+    // canonicaliseValue is kept as belt-and-braces — bytes written
+    // through writeTilePropertiesAt are already canonical (it sorts
+    // shallow at write time), so re-canonicalizing the parsed object
+    // is a no-op for that path and recovers any legacy 0000 written
+    // before the canonicalizer existed.
+    type ChildEntry = { name: string; props?: Record<string, unknown> }
     const children: ChildEntry[] = await Promise.all(childNames.map(async (name): Promise<ChildEntry> => {
+      const out: ChildEntry = { name }
       try {
-        const childDir = await dir.getDirectoryHandle(name, { create: false })
-        const props = await readChildProperties(childDir)
-        const idx = Number(props['index'])
-        const out: ChildEntry = { name }
-        if (Number.isFinite(idx) && idx >= 0) out.index = idx
-        if (store?.putResource) {
-          try {
-            const fileHandle = await childDir.getFileHandle('0000', { create: false })
-            const blob = await fileHandle.getFile()
-            if (blob.size > 0) {
-              out.propsSig = await store.putResource(blob)
-            }
-          } catch { /* no 0000 file yet */ }
+        const props = await readTilePropertiesAt(segments, name)
+        if (props && Object.keys(props).length > 0) {
+          out.props = canonicaliseValue(props) as Record<string, unknown>
         }
-
-        // Only forward an imageSig when the publisher's tile-props-
-        // index points to a blob that contains REAL image refs — i.e.
-        // the user has actually placed/saved an image on this tile
-        // (editor save, substrate apply, AI bridge stamp). The
-        // substrate's deterministic per-label picker is NOT a real
-        // image — it's a display-time fallback the renderer uses for
-        // label-only tiles, picked from the local pool every render.
-        // Forwarding that across the wire would paint a peer-only
-        // tile with what amounts to a default image the publisher
-        // never intentionally chose, which is misleading to the
-        // receiver. So: editor-saved or substrate-applied → carry
-        // imageSig. Label-only tile → no imageSig, receiver renders
-        // blank until the user explicitly adopts.
-        const rawCached = propsIndex[name]
-        if (typeof rawCached === 'string' && /^[0-9a-f]{64}$/.test(rawCached) && store?.getResource) {
-          try {
-            const cachedBlob = await store.getResource(rawCached)
-            if (cachedBlob) {
-              const text = await cachedBlob.text()
-              const parsed = JSON.parse(text)
-              const hasImage = (parsed && (
-                (parsed.small && typeof parsed.small.image === 'string') ||
-                (parsed.flat && parsed.flat.small && typeof parsed.flat.small.image === 'string') ||
-                typeof parsed.imageSig === 'string'
-              ))
-              if (hasImage) {
-                out.imageSig = rawCached
-              }
-            }
-          } catch { /* not JSON / no image refs — leave imageSig unset */ }
-        }
-
-        return out
-      } catch {
-        return { name }
-      }
+      } catch { /* no props yet — name-only publish */ }
+      return out
     }))
-    const payload: SwarmLayerPayload = { children }
+    const payload: SwarmLayerPayload = { visuals: children }
 
     // Dedupe — only publish if our local layer at this sig has actually
     // changed since the last publish, OR enough wall-clock time has
@@ -1531,23 +1534,20 @@ export class SwarmDrone extends Drone {
       counter.count++
 
       // A "share" is the layer payload AND every resource it
-      // references — they're one logical unit. Publish resources
-      // FIRST so by the time a subscriber receives the layer event
-      // and starts fetching referenced sigs, the relay already has
-      // those resources cached and serves them on the REQ.
+      // references — they're one logical unit. The 0000 contents
+      // travel inline in the layer payload, but image bytes (the
+      // heavy binary refs nested inside each props object) still ride
+      // kind 30201. Walk every child's inlined props for signature-
+      // shaped fields and publish each as its own resource event.
       //
-      // Resources are independent of each other — fire them in
-      // parallel via Promise.all, but await the whole batch before
-      // the layer publish so the strict ordering guarantee survives.
-      // Sequential await was correct but slowed each subtree level
-      // to N × per-resource-publish-time, which delayed the deeper
-      // recursion enough that the user's experience was "only the
-      // top tile shows, children come much later." Parallel resource
-      // publishes restore the speed without giving up the contract.
+      // Publish resources FIRST so by the time a subscriber receives
+      // the layer event and starts fetching referenced sigs, the
+      // relay already has them cached and serves them on the REQ.
+      // Parallel via Promise.all, await the whole batch before the
+      // layer publish so the strict ordering guarantee survives.
       const referenced = new Set<string>()
       for (const c of children) {
-        if (c.propsSig) referenced.add(c.propsSig)
-        if (c.imageSig) referenced.add(c.imageSig)
+        if (c.props) collectNestedSigs(c.props, referenced)
       }
       await Promise.all([...referenced].map(s => this.#publishResource(s, mesh)))
 
@@ -1676,23 +1676,25 @@ export class SwarmDrone extends Drone {
     } catch { /* not JSON — leaf resource */ }
   }
 
-  // Walk a received layer's children for propsSig references; for
-  // each we don't already have locally, subscribe by sig so the
-  // companion resource event lands and `#onResourceEvent` writes the
-  // bytes to OPFS. The subscription is closed inside the handler once
-  // the resource is persisted, keeping the per-shell sub count bounded.
-  // The propsSig blob is the publisher's child `0000` — the receiver
-  // needs it on disk so that adopting the peer tile can copy it
-  // straight into the new local tile's `0000` and bring the same
-  // visual state along.
+  // Walk a received layer's inlined props for image sigs (or any
+  // other nested content-addressed reference); for each we don't
+  // already have locally, subscribe by sig so the companion resource
+  // event lands and `#onResourceEvent` writes the bytes to OPFS. The
+  // subscription is closed inside the handler once the resource is
+  // persisted, keeping the per-shell sub count bounded.
+  //
+  // The 0000 itself is inlined in the layer event — no fetch needed.
+  // Only the binary content the 0000 references (images, future
+  // attachments) ride kind 30201.
   #pullResourcesFromLayer = async (layer: SwarmLayerPayload): Promise<void> => {
     const store = this.#getStore()
     const mesh = this.#getMesh()
     if (!store?.getResource || !mesh?.subscribe) return
     const needed = new Set<string>()
-    for (const child of layer.children) {
-      if (typeof child?.propsSig === 'string') needed.add(child.propsSig)
-      if (typeof child?.imageSig === 'string') needed.add(child.imageSig)
+    for (const v of layer.visuals) {
+      if (v?.props && typeof v.props === 'object') {
+        collectNestedSigs(v.props, needed)
+      }
     }
     for (const sig of needed) {
       if (this.#resourceSubs.has(sig)) continue

@@ -8,6 +8,7 @@ import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
 import { isSignature, readCellProperties, writeCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
+import { readViewportAt } from '../../editor/viewport-store.js'
 import { hideStorageKey } from './tile-actions.drone.js'
 import type { HistoryService, LayerContent } from '../../history/history.service.js'
 import type { HistoryCursorService, CursorState } from '../../history/history-cursor.service.js'
@@ -1512,7 +1513,10 @@ export class ShowCellDrone extends Drone {
           this.#applyViewportFromSnapshot(vpSnap)
           appliedSnap = vpSnap
         } else if (cachedDir) {
-          appliedSnap = await this.#applyViewportForLayerReadSnapshot(cachedDir)
+          appliedSnap = await this.#applyViewportForLayerReadSnapshot(
+            cachedDir ?? null,
+            lineage.explorerSegments?.() ?? [],
+          )
         }
         // Explicit set — never inherit from prior render. The back-nav
         // fast path's mesh ALREADY exists, so we only need to mark
@@ -1522,6 +1526,10 @@ export class ShowCellDrone extends Drone {
 
         const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
         if (vp && cachedDir) vp.setDirSilent(cachedDir)
+        // New-path: tell VP which lineage segments to address its
+        // tile-properties commit at. Works for sub-layers without an
+        // OPFS dir; works for root (segments=[]) → sign('/').
+        vp?.setCurrentLocation?.(lineage.explorerSegments?.() ?? [])
 
         this.renderedLocationKey = locationKey
         this.cachedCellNames = cached.cellNames
@@ -1887,15 +1895,15 @@ export class ShowCellDrone extends Drone {
         const segs = lineage?.explorerSegments?.() ?? []
         const entries = await registry.resolve({ segments: segs, dir })
 
-        // Mismatch check — only mismatched peer/ephemeral names produce
-        // any peer-aware state. If every peer-or-ephemeral name already
-        // exists in localCellSet, the contributor pipeline has nothing
-        // new to surface and we render purely from local-derived state.
+        // Mismatch check — only mismatched peer names produce any
+        // peer-aware state. If every peer name already exists in
+        // localCellSet, the contributor pipeline has nothing new to
+        // surface and we render purely from local-derived state.
         // This makes the intent visible in code ("only my tiles when
         // peers add nothing new") instead of relying on the per-entry
         // dedup to silently no-op below.
         const mismatched = entries.filter(e =>
-          (e.kind === 'ephemeral' || e.kind === 'peer') && !localCellSet.has(e.name),
+          e.kind === 'peer' && !localCellSet.has(e.name),
         )
 
         for (const e of mismatched) {
@@ -2065,7 +2073,10 @@ export class ShowCellDrone extends Drone {
         this.#applyViewportFromSnapshot(vpSnap)
         appliedSnap = vpSnap
       } else if (dir) {
-        appliedSnap = await this.#applyViewportForLayerReadSnapshot(dir)
+        appliedSnap = await this.#applyViewportForLayerReadSnapshot(
+          dir,
+          lineage.explorerSegments?.() ?? [],
+        )
       }
 
       // Set pendingRecenter EXPLICITLY based on the new layer's saved
@@ -2095,6 +2106,9 @@ export class ShowCellDrone extends Drone {
       // dir-resolution block).
       const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
       if (vp && dir) vp.setDirSilent(dir)
+      // New-path: same as fast-path branch above. Always sync segments,
+      // even when `dir` is null (sub-layer with no folder).
+      vp?.setCurrentLocation?.(lineage.explorerSegments?.() ?? [])
 
       if (cellNames.length === 0) {
         if (this.layer) this.layer.visible = true
@@ -2307,24 +2321,52 @@ export class ShowCellDrone extends Drone {
    }
 
   readonly #applyViewportForLayer = async (dir: FileSystemDirectoryHandle): Promise<boolean> => {
-    const snap = await this.#applyViewportForLayerReadSnapshot(dir)
+    // Legacy wrapper — no segments available at this call site, so it
+    // falls through to the legacy `<dir>/0000` fallback. (Currently has
+    // no live callers; left here for back-compat until Step 5 retires
+    // the legacy path entirely.)
+    const snap = await this.#applyViewportForLayerReadSnapshot(dir, null)
     return !!(snap?.zoom || snap?.pan || snap?.meshOffset)
   }
 
   // Same as #applyViewportForLayer but returns the snapshot itself so
   // the caller can decide whether to recenter (when there's no saved
   // meshOffset for the layer) or keep the mesh where it was last left.
-  readonly #applyViewportForLayerReadSnapshot = async (dir: FileSystemDirectoryHandle): Promise<ViewportSnapshot> => {
-    // read 0000 directly from the target dir — VP.#dir may still
-    // point at the previous layer (navigate fires before store.change)
+  //
+  // Phase B: read prefers the new tile-properties-backed viewport store
+  // (signature-addressed, works for sub-layers without OPFS dirs). Falls
+  // back to legacy `<dir>/0000.viewport` only if the new path has nothing
+  // yet — preserves any pre-migration data while user gestures populate
+  // the new path. Once the legacy fallback proves unused, it can be
+  // dropped (Step 5).
+  readonly #applyViewportForLayerReadSnapshot = async (
+    dir: FileSystemDirectoryHandle | null,
+    segments: readonly string[] | null = null,
+  ): Promise<ViewportSnapshot> => {
     let snap: ViewportSnapshot = {}
-    try {
-      const fh = await dir.getFileHandle('0000')
-      const file = await fh.getFile()
-      const props = JSON.parse(await file.text())
-      snap = (props as any).viewport ?? {}
-    } catch {
-      // no 0000 yet — defaults
+
+    // Primary: new-path tile-properties read by lineage segments.
+    if (segments) {
+      try {
+        snap = await readViewportAt(segments)
+      } catch {
+        // fall through to legacy read
+      }
+    }
+
+    // Fallback: legacy <dir>/0000.viewport, only if new-path returned
+    // empty AND we still have a dir handle (root + any pre-migration
+    // dirs). Sub-layers without a dir return whatever new-path gave us.
+    const newPathEmpty = !snap.zoom && !snap.pan && !snap.meshOffset
+    if (newPathEmpty && dir) {
+      try {
+        const fh = await dir.getFileHandle('0000')
+        const file = await fh.getFile()
+        const props = JSON.parse(await file.text())
+        snap = (props as any).viewport ?? {}
+      } catch {
+        // no 0000 yet — defaults
+      }
     }
 
     // populate back-nav fast-path cache
@@ -3072,22 +3114,6 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
-    // Paired-channel share-ephemeral: an incoming share landed as a
-    // preview (no OPFS write). Invalidate caches + re-render so the
-    // ephemeral tile surfaces. `paired-channel:share-installed` fires
-    // after adopt commits to OPFS — the ephemeral entry's already
-    // cleared on the drone, so we just need to re-render.
-    this.onEffect<{ location?: string; branchName?: string }>('paired-channel:share-ephemeral', () => {
-      this.#layerCellsCache.clear()
-      this.renderedCellsKey = ''
-      this.requestRender()
-    })
-    this.onEffect<{ location?: string; branchName?: string }>('paired-channel:share-installed', () => {
-      this.#layerCellsCache.clear()
-      this.renderedCellsKey = ''
-      this.requestRender()
-    })
-
     // listen for pivot mode toggle (loads pre-rotated snapshots + rotated labels)
     this.onEffect<{ pivot: boolean }>('render:set-pivot', (payload) => {
       if (this.#pivot !== payload.pivot) {
@@ -3764,30 +3790,6 @@ export class ShowCellDrone extends Drone {
       }
     }
 
-    // Append ephemeral preview tiles for any paired-channel share at
-    // the current lineage. These tiles are NOT in OPFS — they live
-    // only in the drone's ephemeral cache until the user adopts them.
-    // They render as `external` (since !localCellSet.has(name)) so
-    // they get the public-external profile + adopt icon.
-    try {
-      const droneAny = (window as any).ioc?.get?.('@diamondcoreprocessor.com/PairedChannelDrone') as
-        | { ephemeralSharesAt?: (location: string) => { branchName: string }[] }
-        | undefined
-      if (droneAny?.ephemeralSharesAt) {
-        const here = '/' + parentSegments.join('/')
-        const eph = droneAny.ephemeralSharesAt(here) ?? []
-        for (const e of eph) {
-          const name = e.branchName
-          if (!name || sparse.includes(name)) continue
-          while (nextFree <= maxSlot && sparse[nextFree] !== '') nextFree++
-          if (nextFree > maxSlot) break
-          sparse[nextFree] = name
-          nextFree++
-        }
-      }
-    } catch (err) {
-      console.warn('[show-cell] ephemeral share render failed', err)
-    }
 
     return sparse
   }
@@ -3982,8 +3984,8 @@ export class ShowCellDrone extends Drone {
     }
 
     const loadOne = async (cell: Cell): Promise<void> => {
-      // External cells (kind:'peer' from the SwarmDrone, kind:'ephemeral'
-      // from paired-channel) have no local OPFS dir, so the OPFS-based
+      // External cells (kind:'peer' from the SwarmDrone) have no local
+      // OPFS dir, so the OPFS-based
       // tags/link/substrate reads further down would always throw. The
       // peer path has its OWN content-addressed image source though:
       // the swarm streamed the publisher's `imageSig` and the bytes are

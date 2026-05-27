@@ -9,18 +9,18 @@ export type LayerFile = { signature: string; name?: string; layers?: string[]; b
 @Injectable({ providedIn: 'root' })
 export class LayerService {
 
-  // local: opfsroot/__layers__/<domain>/<signature>
+  // local: opfsroot/__layers__/<signature>   (flat, sig-keyed)
   // remote: <endpoint>/<rootSig>/__layers__/<signature>.json
   public get = async (parsed: LocationParseResult, signature: string): Promise<LayerFile | null> => {
-    const dom = (parsed?.domain ?? '').trim().toLowerCase()
     const rootSig = (parsed?.signature ?? '').trim()
     const requestedSig = (signature ?? '').trim()
 
-    if (!dom || !rootSig || !requestedSig) return null
+    if (!rootSig || !requestedSig) return null
 
     const store = get('@hypercomb.social/Store') as Store
 
-    const dir = await store.domainLayersDirectory(dom, true)
+    // Single layer pool at OPFS root — no per-domain partition.
+    const dir = store.layers
 
     // step 1: local lookup for requested signature
     const local = await this.tryReadLayer(dir, requestedSig)

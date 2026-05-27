@@ -93,6 +93,65 @@ export type LayerEntry = {
   at: number
 }
 
+/**
+ * Marker file shape. A marker at `__history__/<lineage>/<NNNN>` is a
+ * small JSON record naming WHICH layer this revision points at, plus
+ * (optionally) any supporting-data sigs attached to the same revision.
+ *
+ * Legacy markers contain the full layer JSON directly (the bytes
+ * themselves were the layer). Readers detect this by parsing: if the
+ * parsed object has a `.layer` field that looks like a sig, treat as
+ * pointer record. Otherwise treat as legacy layer bytes (and hash the
+ * bytes to derive the layer sig).
+ */
+export type MarkerRecord = {
+  /** Sig of the layer bytes for this revision. Resolves through
+   *  `store.getLayerBytes(sig)` to the canonical layer JSON. */
+  layer: string
+  /** Optional named supporting-data sig fields — decorations, context,
+   *  receipts, future kinds. Each resolves through the appropriate pool.
+   *  Versioning + undo + share-ability come automatically because the
+   *  marker IS the revision. */
+  [field: string]: unknown
+}
+
+const SIG_RE = /^[0-9a-f]{64}$/i
+
+/**
+ * Extract the layer sig from a marker file's bytes. Handles both:
+ *   1. Pointer records — JSON `{ "layer": "<sig>", ... }` — modern shape.
+ *   2. Legacy layer bytes — the full layer JSON. Sig = hash(bytes).
+ *
+ * Returns `{ layerSig, isPointer, record? }`. `isPointer === false` means
+ * the bytes ARE the layer (legacy); caller can opportunistically migrate
+ * by writing those bytes to the layer pool.
+ */
+export async function extractLayerSigFromMarker(
+  bytes: ArrayBuffer | Uint8Array,
+): Promise<{ layerSig: string; isPointer: boolean; record?: MarkerRecord }> {
+  const buf = bytes instanceof Uint8Array ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer : bytes
+  // Try parse as pointer record first.
+  try {
+    const text = new TextDecoder().decode(buf)
+    const trimmed = text.trim()
+    if (trimmed.startsWith('{')) {
+      const parsed = JSON.parse(trimmed)
+      const layerField = parsed?.layer
+      if (typeof layerField === 'string' && SIG_RE.test(layerField)) {
+        // Pointer-record shape. Also has `name` somewhere? No — `name`
+        // belongs on the LAYER (which lives in the pool), not on the
+        // marker. The marker only carries sigs into pools.
+        // The presence of `.name` on a parsed marker means it's a legacy
+        // layer JSON, not a pointer record. Distinguish by `.layer` field.
+        return { layerSig: layerField, isPointer: true, record: parsed as MarkerRecord }
+      }
+    }
+  } catch { /* fall through to legacy hash */ }
+  // Legacy bytes — hash them to derive the layer sig.
+  const sig = await SignatureService.sign(buf)
+  return { layerSig: sig, isPointer: false }
+}
+
 export class HistoryService {
 
   // In-memory cache of full replay per signature. Keeps navigation instant —
@@ -445,32 +504,40 @@ export class HistoryService {
     const bag = await this.getBag(locationSig)
     await this.#ensureEmptyMarker(bag, layer.name)
 
-    const markerName = await this.#nextMarkerName(bag)
-    const markerHandle = await bag.getFileHandle(markerName, { create: true })
-    const markerWritable = await markerHandle.createWritable()
-    try { await markerWritable.write(bytes.buffer as ArrayBuffer) } finally { await markerWritable.close() }
-
-    // Mirror to __optimized__/<sig> as a sig-addressed cache. Deferred to
-    // idle time so it doesn't compete with renders or flood the microtask
-    // queue. Each commit's write runs when the main thread is free; if a
-    // burst of commits queues many writes, they drain in idle order. Pure
-    // derived state — losing one is fine, the optimized lookup just falls
-    // back to the bag scan for that sig until the next commit re-mirrors.
+    // Pool write FIRST — the marker (about to be written) is a pointer
+    // record referencing this sig. The pool entry must exist by the time
+    // any reader resolves the marker, so we await it before the marker
+    // write. Subsequent reads (this session or after reload) find the
+    // bytes via store.getLayerPoolBytes(layerSig).
     const store = get<{
-      writeOptimizedBytes?: (sig: string, b: ArrayBuffer) => Promise<void>
+      writeLayerBytes?: (sig: string, b: ArrayBuffer) => Promise<void>
       writeChildrenManifest?: (
         parentSig: string,
         manifest: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }>,
       ) => Promise<void>
     }>('@hypercomb.social/Store')
-    if (store?.writeOptimizedBytes) {
-      const buf = bytes.buffer as ArrayBuffer
-      const schedule: (cb: () => void) => void =
-        typeof (window as any).requestIdleCallback === 'function'
-          ? (cb) => (window as any).requestIdleCallback(cb, { timeout: 5_000 })
-          : (cb) => setTimeout(cb, 0)
-      schedule(() => { void store.writeOptimizedBytes!(layerSig, buf) })
+    if (store?.writeLayerBytes) {
+      await store.writeLayerBytes(layerSig, bytes.buffer as ArrayBuffer)
     }
+
+    // Write marker as a POINTER RECORD: {"layer": "<sig>"}. The
+    // layer bytes themselves live in the pool (written above). The
+    // marker is the revision; supporting-data sigs (context, decorations,
+    // receipts) can be added as additional fields without changing
+    // anything else. Cursor traversal still works against marker
+    // filenames (NNNNNNNN); each marker yields its layerSig via the
+    // pointer record.
+    const markerName = await this.#nextMarkerName(bag)
+    const markerHandle = await bag.getFileHandle(markerName, { create: true })
+    const markerRecord: MarkerRecord = { layer: layerSig }
+    const markerBytes = new TextEncoder().encode(JSON.stringify(markerRecord))
+    const markerWritable = await markerHandle.createWritable()
+    try { await markerWritable.write(markerBytes.buffer as ArrayBuffer) } finally { await markerWritable.close() }
+
+    // Pool is the only writer destination. No legacy mirror — sig is
+    // hash(bytes), one pool entry per sig, content-addressed and never
+    // stale. Anything that still reads from __optimized__/ resolves
+    // through the pool now (or has been retired).
 
     // Children manifest: for any layer with a non-empty `children` array,
     // pre-resolve each child sig to its head layer and write the array as
@@ -537,13 +604,27 @@ export class HistoryService {
     const empty = HistoryService.canonicalizeLayer(emptyLayer(name))
     const json = JSON.stringify(empty)
     const bytes = new TextEncoder().encode(json)
-    const handle = await bag.getFileHandle('00000000', { create: true })
-    const writable = await handle.createWritable()
-    try { await writable.write(bytes.buffer as ArrayBuffer) } finally { await writable.close() }
-    // Preloader cache: every sig must be addressable. The bytes are
-    // now on disk; mirror them in memory so a sig→content lookup
-    // anywhere in the app hits without a re-read.
     const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+
+    // Pool write FIRST — the 00000000 marker is a pointer to the empty
+    // layer; the pool must hold its bytes when the marker becomes readable.
+    const store = get<{
+      writeLayerBytes?: (sig: string, b: ArrayBuffer) => Promise<void>
+    }>('@hypercomb.social/Store')
+    if (store?.writeLayerBytes) {
+      await store.writeLayerBytes(sig, bytes.buffer as ArrayBuffer)
+    }
+
+    // Write the 00000000 marker as a POINTER RECORD pointing at the
+    // empty layer's sig.
+    const handle = await bag.getFileHandle('00000000', { create: true })
+    const markerRecord: MarkerRecord = { layer: sig }
+    const markerBytes = new TextEncoder().encode(JSON.stringify(markerRecord))
+    const writable = await handle.createWritable()
+    try { await writable.write(markerBytes.buffer as ArrayBuffer) } finally { await writable.close() }
+
+    // Mirror the LAYER bytes (not marker bytes) into the preloader cache
+    // — sig→content lookups want the layer JSON, not the marker JSON.
     this.#preloaderCache.set(sig, bytes.buffer as ArrayBuffer)
     this.#parsedLayerCache.set(sig, empty)
   }
@@ -595,12 +676,62 @@ export class HistoryService {
     const handle = await bag.getFileHandle(latestName, { create: false })
     const file = await handle.getFile()
     const bytes = await file.arrayBuffer()
-    const sig = await SignatureService.sign(bytes)
-    // Mirror the marker bytes into the preloader so subsequent
-    // sig→content lookups hit memory, not disk.
-    this.#preloaderCache.set(sig, bytes)
-    this.#latestSigByLineage.set(lineageSig, sig)
-    return sig
+    // Extract layer sig — handles both modern pointer records and
+    // legacy markers (where bytes ARE the layer JSON).
+    const { layerSig, isPointer } = await extractLayerSigFromMarker(bytes)
+    if (!isPointer) {
+      // Legacy: marker bytes == layer bytes. Cache them, and migrate
+      // the marker to a pointer record (and the bytes into the pool)
+      // so subsequent reads find the canonical shape.
+      this.#preloaderCache.set(layerSig, bytes)
+      this.#opportunisticMigrateMarker(layerSig, bytes, handle)
+    }
+    this.#latestSigByLineage.set(lineageSig, layerSig)
+    return layerSig
+  }
+
+  /**
+   * Opportunistic legacy-marker migration: when a marker is read in its
+   * legacy bytes-in-marker shape, (1) write its bytes to the canonical
+   * pool at `__layers__/<sig>`, then (2) rewrite the marker file itself
+   * as a pointer record `{"layer":"<sig>"}`. After this the marker is
+   * indistinguishable from a fresh commit. Best-effort, idle-deferred —
+   * no caller waits.
+   *
+   * Sequencing matters: the pool write must complete before the marker
+   * rewrite, otherwise a concurrent reader could see the new
+   * pointer-shape marker pointing at bytes that aren't in the pool yet.
+   *
+   * Marker filename (NNNNNNNN) stays sequential — only its content
+   * shape changes. Layer-sig identity (what `latestMarkerSigFor` and
+   * `getLayerBySig` use) is unchanged because the layer bytes are
+   * unchanged; the marker rewrite is purely a shape migration.
+   */
+  #opportunisticMigrateMarker = (
+    layerSig: string,
+    bytes: ArrayBuffer,
+    markerHandle: FileSystemFileHandle | null,
+  ): void => {
+    const store = get<{
+      writeLayerBytes?: (sig: string, b: ArrayBuffer) => Promise<void>
+    }>('@hypercomb.social/Store')
+    if (!store?.writeLayerBytes) return
+    const schedule: (cb: () => void) => void =
+      typeof (window as any).requestIdleCallback === 'function'
+        ? (cb) => (window as any).requestIdleCallback(cb, { timeout: 5_000 })
+        : (cb) => setTimeout(cb, 0)
+    schedule(async () => {
+      try {
+        // 1. Pool write FIRST — marker rewrite must point at present bytes.
+        await store.writeLayerBytes!(layerSig, bytes)
+        // 2. Rewrite the marker file as a pointer record.
+        if (!markerHandle) return
+        const record = JSON.stringify({ layer: layerSig })
+        const recordBytes = new TextEncoder().encode(record)
+        const writable = await markerHandle.createWritable()
+        try { await writable.write(recordBytes.buffer as ArrayBuffer) } finally { await writable.close() }
+      } catch { /* best-effort */ }
+    })
   }
 
   /**
@@ -950,25 +1081,24 @@ export class HistoryService {
       } catch { /* fall through to disk */ }
     }
 
-    // Sig-direct optimized lookup. Every commit mirrors layer bytes to
-    // `__optimized__/<sig>` so renders can find them in O(1) — one direct
-    // file read, no bag scan, no per-bag enumeration. This is the path
-    // the user-content render hits for everything previously committed.
+    // Sig-direct lookup through the canonical layer pool. Markers in
+    // __history__/ are revision-pointers; layer bytes live ONLY in
+    // __layers__/<sig>. One pool, content-addressed, no mirrors.
     const store = get<{
-      getOptimizedBytes?: (sig: string) => Promise<Uint8Array | null>
+      getLayerPoolBytes?: (sig: string) => Promise<Uint8Array | null>
     }>('@hypercomb.social/Store')
-    if (store?.getOptimizedBytes) {
-      const optimized = await store.getOptimizedBytes(layerSig)
-      if (optimized) {
+    if (store?.getLayerPoolBytes) {
+      const poolBytes = await store.getLayerPoolBytes(layerSig)
+      if (poolBytes) {
         try {
-          const parsed = JSON.parse(new TextDecoder().decode(optimized)) as Partial<LayerContent>
+          const parsed = JSON.parse(new TextDecoder().decode(poolBytes)) as Partial<LayerContent>
           if (parsed.name) {
             const hydrated = HistoryService.#hydrateLayer(parsed)
             this.#parsedLayerCache.set(layerSig, hydrated)
-            this.#preloaderCache.set(layerSig, optimized.buffer as ArrayBuffer)
+            this.#preloaderCache.set(layerSig, poolBytes.buffer as ArrayBuffer)
             return hydrated
           }
-        } catch { /* malformed optimized file — fall through to bag scan */ }
+        } catch { /* malformed pool file — fall through */ }
       }
     }
 
@@ -976,14 +1106,34 @@ export class HistoryService {
     // session) so this and every future getLayerBySig hits the cache.
     await this.preloadAllBags()
     const refreshed = this.#preloaderCache.get(layerSig)
-    if (!refreshed) return null
-    try {
-      const parsed = JSON.parse(new TextDecoder().decode(refreshed)) as Partial<LayerContent>
-      if (!parsed.name) return null
-      const hydrated = HistoryService.#hydrateLayer(parsed)
-      this.#parsedLayerCache.set(layerSig, hydrated)
-      return hydrated
-    } catch { return null }
+    if (refreshed) {
+      try {
+        const parsed = JSON.parse(new TextDecoder().decode(refreshed)) as Partial<LayerContent>
+        if (!parsed.name) return null
+        const hydrated = HistoryService.#hydrateLayer(parsed)
+        this.#parsedLayerCache.set(layerSig, hydrated)
+        return hydrated
+      } catch { return null }
+    }
+    // After preload, pointer markers don't populate #preloaderCache —
+    // the layer bytes live in the pool. Retry the pool lookup one more
+    // time (might have been migrated by another reader since the first
+    // pool check above).
+    if (store?.getLayerPoolBytes) {
+      const retry = await store.getLayerPoolBytes(layerSig)
+      if (retry) {
+        try {
+          const parsed = JSON.parse(new TextDecoder().decode(retry)) as Partial<LayerContent>
+          if (parsed.name) {
+            const hydrated = HistoryService.#hydrateLayer(parsed)
+            this.#parsedLayerCache.set(layerSig, hydrated)
+            this.#preloaderCache.set(layerSig, retry.buffer as ArrayBuffer)
+            return hydrated
+          }
+        } catch { /* malformed */ }
+      }
+    }
+    return null
   }
 
   /**
@@ -1111,16 +1261,26 @@ export class HistoryService {
         }
         if (!latestName) continue
 
-        // Pass 2: read + sign ONLY the latest marker. Cache the head.
+        // Pass 2: read latest marker, extract layer sig. Handles BOTH
+        // pointer-record markers (modern) and legacy layer-byte markers
+        // — extractLayerSigFromMarker tries pointer-shape first, falls
+        // back to hashing bytes (which IS the layer sig in legacy data).
         try {
           const fileHandle = await bag.getFileHandle(latestName, { create: false })
           const file = await fileHandle.getFile()
           const bytes = await file.arrayBuffer()
-          const sig = await SignatureService.sign(bytes)
-          this.#preloaderCache.set(sig, bytes)
-          this.#latestSigByLineage.set(lineageSig, sig)
+          const { layerSig, isPointer } = await extractLayerSigFromMarker(bytes)
+          if (!isPointer) {
+            // Legacy: marker bytes == layer bytes. Cache them + actively
+            // migrate the marker file to pointer-record shape, with bytes
+            // landing in the canonical pool. After this drains the marker
+            // is indistinguishable from a fresh commit.
+            this.#preloaderCache.set(layerSig, bytes)
+            this.#opportunisticMigrateMarker(layerSig, bytes, fileHandle)
+          }
+          this.#latestSigByLineage.set(lineageSig, layerSig)
           cachedCount++
-          if (previewSigs.length < 10) previewSigs.push(sig.slice(0, 12))
+          if (previewSigs.length < 10) previewSigs.push(layerSig.slice(0, 12))
         } catch { /* skip unreadable */ }
       }
 

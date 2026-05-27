@@ -125,19 +125,18 @@ function parseQaSlot(cell) {
 // specific symbol, and one for the dashboard cell.
 
 const BRANCH_ICONS = {
-  root:     '<circle cx="12" cy="12" r="9"/><path d="M3 12c4 0 4-4 9-4s5 4 9 4M3 12c4 0 4 4 9 4s5-4 9-4"/>',
-  model:    '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/>',
-  practice: '<circle cx="12" cy="8" r="3"/><path d="M4 19c4-6 12-6 16 0"/>',
-  evidence: '<path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h5M9 8h5"/>',
-  audience: '<circle cx="9" cy="9" r="3.2"/><circle cx="17" cy="11" r="2.4"/><path d="M2 19c1-3 4-5 7-5s6 2 7 5M14 19c.5-2 2.5-3 4.5-3s3 1 3.5 3"/>',
-  voice:    '<path d="M12 4v11"/><path d="M8 11a4 4 0 0 0 8 0"/><path d="M12 19v2M9 21h6"/>',
-  network:  '<circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M6.5 7.3 11 16.3M17.5 7.3 13 16.3"/>',
-  platform: '<path d="M12 3 21 8l-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
-  business: '<path d="M3 21h18"/><path d="M5 21V9l7-5 7 5v12"/><path d="M10 21v-7h4v7"/>',
+  root:           '<circle cx="12" cy="12" r="9"/><path d="M3 12c4 0 4-4 9-4s5 4 9 4M3 12c4 0 4 4 9 4s5-4 9-4"/>',
+  coaching:       '<circle cx="9" cy="8" r="3"/><circle cx="17" cy="10" r="2.4"/><path d="M3 19c1-3 4-5 7-5s6 2 7 5M15 19c.5-2 2.5-3 4.5-3s3 1 3.5 3"/>',
+  certifications: '<path d="M12 3l2.7 5.5 6.3.9-4.5 4.4 1 6.2L12 17l-5.5 3 1-6.2L3 9.4l6.3-.9z"/>',
+  'live-events':  '<rect x="4" y="6" width="16" height="14" rx="1.5"/><path d="M4 10h16M9 4v4M15 4v4"/>',
+  community:      '<circle cx="12" cy="12" r="8"/><circle cx="8" cy="9" r="2"/><circle cx="16" cy="9" r="2"/><circle cx="12" cy="16" r="2"/><path d="M8 9l4 7M16 9l-4 7"/>',
+  content:        '<path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h5M9 8h5"/>',
+  operations:     '<circle cx="12" cy="12" r="3"/><path d="M12 2v4M12 18v4M22 12h-4M6 12H2M19 5l-2.8 2.8M7.8 16.2L5 19M19 19l-2.8-2.8M7.8 7.8L5 5"/>',
+  identity:       '<path d="M5 5v15l4-3 3 3 3-3 4 3V5z"/>',
   // generic fallback for leaves
-  leaf:     '<circle cx="12" cy="12" r="3"/>',
+  leaf:           '<circle cx="12" cy="12" r="3"/>',
   // dashboard cell
-  dashboard:'<rect x="3" y="3" width="8" height="8" rx="1.2"/><rect x="13" y="3" width="8" height="5" rx="1.2"/><rect x="13" y="10" width="8" height="11" rx="1.2"/><rect x="3" y="13" width="8" height="8" rx="1.2"/>',
+  dashboard:      '<rect x="3" y="3" width="8" height="8" rx="1.2"/><rect x="13" y="3" width="8" height="5" rx="1.2"/><rect x="13" y="10" width="8" height="11" rx="1.2"/><rect x="3" y="13" width="8" height="8" rx="1.2"/>',
 }
 
 // Section heading icon — a quiet "list of items" mark for `<h2>`s.
@@ -998,49 +997,44 @@ function shellHtml({
 // ─── per-cell metadata ──────────────────────────────────────────────
 
 const BRANCH_META = {
-  model: {
-    title: 'The Model',
-    lede: 'The conceptual core: vision, philosophy, the four pillars, and the relational capacities that develop. The thesis that relating well is an intelligence — nameable, trainable.',
-    summary: 'Relational Intelligence as a learnable capacity, not a personality trait. Pillars, capacities, frameworks.',
+  coaching: {
+    title: 'Coaching',
+    lede: 'The pressure-test of Relational Intelligence. 1:1 and group work IS the methodology — every session generates evidence of what works, what doesn\'t, what the next cohort needs to learn. Treat coaching engagements as both revenue and R&D.',
+    summary: 'One-on-one, group, retreats. Where the methodology gets sharpened.',
   },
-  practice: {
-    title: 'The Practice',
-    lede: 'How the model becomes lived experience — programs, events, trainings, certification. The bridge from idea to embodied skill.',
-    summary: 'Programs, events, trainings, certification. Where the model meets a room.',
+  certifications: {
+    title: 'Certifications',
+    lede: 'Multi-tier path that propagates RI without diluting it. Foundational teaches the practice. Advanced teaches teaching. Mentor teaches assessing. Each tier is gated by demonstrated outcomes, not seat-time. The directory of certified practitioners is the public proof of the method.',
+    summary: 'Foundational → advanced → mentor. Curriculum, cohorts, assessments.',
   },
-  evidence: {
-    title: 'The Evidence',
-    lede: 'The proof: foundational science, applied research, academic partnerships, humanity outcomes, systemic change. Without research credibility, the work is opinion.',
-    summary: 'Research credibility — foundational, applied, partnerships, outcomes, legacy.',
+  'live-events': {
+    title: 'Live Events',
+    lede: 'In-person ritual matters for relational work in ways async media can\'t replicate. Workshops are entry points, retreats deepen practice, summits gather the certified field. Calendar drives the year\'s rhythm; the playbook makes each format reproducible.',
+    summary: 'Workshops, retreats, summits — the in-person ritual side of RI.',
   },
-  audience: {
-    title: 'The Audience',
-    lede: 'Who this is for: individuals, couples, professionals, organizations, communities. Same underlying skill — different presenting concerns.',
-    summary: 'Individuals, couples, professionals, organizations, communities.',
+  community: {
+    title: 'Community',
+    lede: 'Connective tissue between coaching, certs, and events. Circles run between formal touchpoints. Practice spaces let new graduates flex without high stakes. Library curates what the field is producing. Feedback loops route signal back into curriculum + content.',
+    summary: 'Circles, practice spaces, members, library, feedback, governance.',
   },
-  voice: {
-    title: 'The Voice',
-    lede: "Outward expression — podcast, writing, video, social, resources. How the work reaches people who haven't found it yet.",
-    summary: 'Podcast, writing, video, social, resources — outward expression.',
+  content: {
+    title: 'Content',
+    lede: 'How RI reaches people who haven\'t signed up for anything yet. Essays make the case. Podcasts let people meet Dolphin\'s voice. Talks plant flags at adjacent conferences. Frameworks are the canonical artifacts — the named, drawn, citable models practitioners can point to.',
+    summary: 'Essays, podcasts, talks, frameworks, case studies, publishing.',
   },
-  network: {
-    title: 'The Network',
-    lede: 'The people around the work: collaborators, governance, engagement. Co-created, not solo.',
-    summary: 'Collaborators, roles, governance, engagement — co-created.',
+  operations: {
+    title: 'Operations',
+    lede: 'The substrate that keeps everything else from breaking. Pricing model determines who can afford the path. Pipeline tracks who\'s mid-journey. Team & roles define who handles what. Legal protects the certification mark. Tools are the tech stack supporting the practice.',
+    summary: 'Pipeline, team, legal, finances, tools — back-of-house.',
   },
-  platform: {
-    title: 'The Platform',
-    lede: 'The tech infrastructure that hosts the practice — learning, community, practitioner tools, AI automation, integrations. A future-proof home for the field.',
-    summary: 'Learning, community, practitioner tools, AI, integrations.',
-  },
-  business: {
-    title: 'The Business',
-    lede: 'How RI sustains itself: brand, operations, marketing, sales, client experience, growth phases. The discipline of running it well so the work can keep showing up.',
-    summary: 'Brand, operations, marketing, sales, client experience, growth phases.',
+  identity: {
+    title: 'Identity',
+    lede: 'Who Dolphin is, in language consistent across every surface. Manifesto is the why. Voice is the how. Audiences names the who. Visual is the look. When all four cohere, every artifact reinforces every other artifact.',
+    summary: 'Manifesto, voice, audiences, visual — the brand spine.',
   },
 }
 
-const BRANCH_ORDER = ['model', 'practice', 'evidence', 'audience', 'voice', 'network', 'platform', 'business']
+const BRANCH_ORDER = ['coaching', 'certifications', 'live-events', 'community', 'content', 'operations', 'identity']
 
 // ─── renderers ──────────────────────────────────────────────────────
 
@@ -1058,7 +1052,7 @@ function renderRoot(tree, chromeSig) {
   // Compact body — single paragraph for zero-scroll. The lede already
   // sets up the "field, not a feeling" angle; the body adds one beat.
   const body = `
-    <p>This is the field — its model, its practice, its evidence, and the people building it together. Each branch below is its own self-contained area; together they hold the whole.</p>
+    <p>This is the field — coaching is where it gets pressure-tested, certifications propagate it, live events deepen it, community holds it together, content makes it findable, operations keeps it running, identity makes it coherent. Each branch below is its own self-contained area; together they hold the whole.</p>
   `
 
   // Left rail at root surfaces the same branches as a flat list so the
@@ -1083,7 +1077,7 @@ function renderRoot(tree, chromeSig) {
     segments: ['dolphin'],
     title: 'Relating well is an intelligence — name it, train it, live it.',
     titleIconName: 'root',
-    lede: 'A field, not a feeling — the model, the practice, the evidence, and the people building it together.',
+    lede: 'A field, not a feeling — the practice, the path that propagates it, the people building it together.',
     body,
     qaItems: parseQaSlot(tree),
     indexLinks,
@@ -1351,9 +1345,10 @@ async function pinStyleDecisions() {
 
   console.log('6) Pushing Q&A items into the `qa` slot (decorations, not notes)...')
   const qaItems = [
-    { path: ['dolphin'], question: 'Primary CTA — book a session, podcast subscribe, register for next event, or something else? This determines the root page’s call-to-action.' },
-    { path: ['dolphin', 'practice', 'certification'], question: 'Is the certification program live and accepting applicants, or is this aspirational structure for the site to communicate the long-term plan?' },
-    { path: ['dolphin', 'business', 'sales'], question: 'Same question — is sales an active operation, or is this section roadmap-stage for now?' },
+    { path: ['dolphin'], question: 'Primary CTA — book a session, podcast subscribe, register for next event, or something else? This determines the root page\'s call-to-action.' },
+    { path: ['dolphin', 'certifications', 'foundational'], question: 'Is the foundational certification cohort accepting applicants, or is this aspirational structure for the site to communicate the long-term plan?' },
+    { path: ['dolphin', 'coaching', '1-on-1'], question: 'Is 1:1 coaching open for new clients right now, or running closed with current waitlist? The page CTA depends on this.' },
+    { path: ['dolphin', 'live-events', 'calendar'], question: 'What\'s the first scheduled event the site should announce? Workshop, retreat, summit — and approximate date?' },
   ]
   // Each Q is its own content-addressed resource; the cell's `qa`
   // slot collects their sigs. bag-set replaces the slot wholesale so

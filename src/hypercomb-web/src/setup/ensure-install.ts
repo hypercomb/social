@@ -229,10 +229,12 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   const store = get('@hypercomb.social/Store') as Store | undefined
   if (!store) return
 
-  // Mirror resyncFromSentinel's layout exactly: bees/deps in flat dirs,
-  // layers under __layers__/sentinel/. This way the boot fast path and
-  // script-preloader find content at the same paths regardless of source.
-  const layerDir = await store.domainLayersDirectory('sentinel', true)
+  // All layers — boot bundle, sentinel sync, user commits — share one
+  // flat pool at `__layers__/<sig>`. No subdirectories. Sig-keyed
+  // content-addressed storage means there's no "install-scope" to
+  // partition by; everything that lives at sig X is, by definition,
+  // the bytes that hash to X.
+  const layerDir = store.layers
 
   const fetchBytes = async (path: string): Promise<ArrayBuffer | null> => {
     try {
@@ -406,8 +408,13 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
 
   await removeDisabled(store.bees, enabledBeeSet, '.js', priorManifest?.beesBag)
   await removeDisabled(store.dependencies, enabledDepSet, '.js', priorManifest?.dependenciesBag)
-  const layerDir = await store.domainLayersDirectory('sentinel', true)
-  await removeDisabled(layerDir, enabledLayerSet, '')
+  // Layers live flat in `__layers__/<sig>` shared with user commits.
+  // We can't blindly remove sigs not in `enabledLayerSet` here — that
+  // would also delete every user-committed layer. GC for the layer
+  // pool requires a separate reachability sweep (mark-and-sweep over
+  // history markers + install set). For now, layers grow monotonically;
+  // a future `/sweep` command cleans unreachable sigs.
+  const layerDir = store.layers
   await clearStaleCaches()
 
   for (const file of files) {

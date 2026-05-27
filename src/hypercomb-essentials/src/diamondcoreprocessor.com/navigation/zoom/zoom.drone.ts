@@ -5,6 +5,7 @@ import type { HostReadyPayload } from '../../presentation/tiles/pixi-host.worker
 import type { HexGeometry } from '../../presentation/grid/hex-geometry.js'
 import { DEFAULT_HEX_GEOMETRY } from '../../presentation/grid/hex-geometry.js'
 import type { InputGate } from '../input-gate.service.js'
+import { writeViewportAt } from '../../editor/viewport-store.js'
 
 type Pt = { x: number; y: number }
 
@@ -41,6 +42,20 @@ export type PanSnapshot = { dx: number; dy: number }
 export type MeshOffsetSnapshot = { x: number; y: number }
 export type ViewportSnapshot = { zoom?: ZoomSnapshot; pan?: PanSnapshot; meshOffset?: MeshOffsetSnapshot }
 
+/**
+ * Source of a viewport setter call.
+ * - `'user'`: result of an explicit user gesture (mousewheel, pinch,
+ *   spacebar pan, touch pan, /fit shortcut). Schedules a debounced
+ *   commit to the new tile-properties-backed viewport store so the
+ *   state persists across navigation and reload.
+ * - `'auto'` (default): automatic / programmatic write (refit-on-entry,
+ *   auto-fit-first-add, init defaults, fullscreen recenter). Updates
+ *   in-memory state only; does NOT trigger the persistent commit.
+ *   Otherwise re-entering a layer would commit a fresh fit-snapshot
+ *   on every visit and clobber the user's saved pan.
+ */
+export type ViewportSource = 'user' | 'auto'
+
 // Persist is scheduled via requestAnimationFrame so multiple
 // setPan/setZoom calls within the same frame collapse into one OPFS
 // write. Frame-aligned (not setTimeout 0) so the write runs after the
@@ -74,6 +89,26 @@ export class ViewportPersistence extends EventTarget {
   #storeListening = false
   #reading: Promise<ViewportSnapshot> | null = null
   #suspended = false
+
+  // ── New-path commit (viewport-store via tile-properties) ──────────────
+  //
+  // The legacy OPFS-folder path above (setDirSilent → __hive__/<path>/0000)
+  // is unsuitable for sub-layers because the layer-as-primitive migration
+  // removed their per-tile dirs. The new path commits viewport state into
+  // the layer's properties at `__history__/<sign(segments)>/...` —
+  // uniform addressing for root and sub-layers, no folder coupling.
+  //
+  // Trigger: only `source: 'user'` setter calls schedule a commit. Auto
+  // sources (refit-on-entry, auto-fit-first-add, init defaults) update
+  // in-memory state only — committing them would clobber the user's
+  // saved gesture every visit.
+  //
+  // Cadence: ~200ms debounce after the last user-source set. A nav that
+  // changes the current location flushes immediately so the gesture
+  // doesn't get stranded in the timer.
+  #currentSegments: readonly string[] | null = null
+  #commitTimer: ReturnType<typeof setTimeout> | null = null
+  #COMMIT_DEBOUNCE_MS = 200
 
   // Single op queue: every read and write goes through this so a read of
   // dir-A's 0000 cannot start before an in-flight write to dir-A's 0000
@@ -153,15 +188,15 @@ export class ViewportPersistence extends EventTarget {
     const hasPending = flushPending.zoom || flushPending.pan || flushPending.meshOffset
     if (flushDir && hasPending) {
       void this.#serialize(() => this.#persistTo(flushDir, flushPending))
-    } else if (!flushDir && hasPending && dir) {
-      // Orphaned pending: a gesture (pan/zoom/meshOffset) landed
-      // while #dir was still null — typically the first user input
-      // racing show-cell's first render. The gesture was implicitly
-      // for the current location; persist it to the new dir we just
-      // learned about, otherwise the gesture is silently dropped on
-      // every wipe of #pending below.
-      void this.#serialize(() => this.#persistTo(dir, flushPending))
     }
+    // Orphan-drain removed (was the source of cross-layer data leakage:
+    // pending state from a sub-layer with no #dir would flush into the
+    // NEXT dir's 0000 on nav, contaminating root or whichever layer's
+    // dir VP next learned about). The new tile-properties commit path
+    // (setCurrentLocation + #scheduleStoreCommit) handles sub-layers
+    // correctly, so anything still sitting in #pending without a
+    // flushDir is from the legacy folder path — safe to drop here since
+    // the new path already wrote it (or didn't, if source was 'auto').
 
     this.#dir = dir
     this.#pending = {}
@@ -193,11 +228,10 @@ export class ViewportPersistence extends EventTarget {
     const hasPending = flushPending.zoom || flushPending.pan || flushPending.meshOffset
     if (flushDir && hasPending) {
       void this.#serialize(() => this.#persistTo(flushDir, flushPending))
-    } else if (!flushDir && hasPending && dir) {
-      // Same orphan-drain as setDirSilent: a gesture queued before
-      // any dir was known belongs to the location we just learned.
-      void this.#serialize(() => this.#persistTo(dir, flushPending))
     }
+    // Orphan-drain removed (see setDirSilent for rationale). The new
+    // tile-properties commit path is now the source of truth for
+    // sub-layer viewport state.
 
     this.#dir = dir
     this.#pending = {}
@@ -227,7 +261,7 @@ export class ViewportPersistence extends EventTarget {
   // is the source of truth on disk (debounced to coalesce gesture
   // bursts). Cache and file are kept in lock-step — never diverge.
 
-  setZoom = (scale: number, cx: number, cy: number, fit = false): void => {
+  setZoom = (scale: number, cx: number, cy: number, fit = false, source: ViewportSource = 'auto'): void => {
     if (this.#suspended) return
     if (!this.#dir) this.#syncWithStore()
     if (!this.#dir) this.#ensureDirFromLineage()
@@ -237,9 +271,10 @@ export class ViewportPersistence extends EventTarget {
     this.#pending.zoom = zoom
     this.#lastRead = { ...this.#lastRead, zoom }
     if (this.#dir) this.#schedulePersist()
+    if (source === 'user') this.#scheduleStoreCommit()
   }
 
-  setPan = (dx: number, dy: number): void => {
+  setPan = (dx: number, dy: number, source: ViewportSource = 'auto'): void => {
     if (this.#suspended) return
     if (!this.#dir) this.#syncWithStore()
     if (!this.#dir) this.#ensureDirFromLineage()
@@ -247,13 +282,14 @@ export class ViewportPersistence extends EventTarget {
     this.#pending.pan = pan
     this.#lastRead = { ...this.#lastRead, pan }
     if (this.#dir) this.#schedulePersist()
+    if (source === 'user') this.#scheduleStoreCommit()
   }
 
   /** Persist the renderer's mesh offset (its position inside the layer
    *  container). Saved per-layer so the position stays fixed across
    *  navigation; never auto-changed by the renderer. Only updated when
    *  the user explicitly recenters via the navigation command. */
-  setMeshOffset = (x: number, y: number): void => {
+  setMeshOffset = (x: number, y: number, source: ViewportSource = 'auto'): void => {
     if (this.#suspended) return
     if (!this.#dir) this.#syncWithStore()
     if (!this.#dir) this.#ensureDirFromLineage()
@@ -261,6 +297,7 @@ export class ViewportPersistence extends EventTarget {
     this.#pending.meshOffset = meshOffset
     this.#lastRead = { ...this.#lastRead, meshOffset }
     if (this.#dir) this.#schedulePersist()
+    if (source === 'user') this.#scheduleStoreCommit()
   }
 
   get lastPan(): PanSnapshot | undefined {
@@ -323,6 +360,60 @@ export class ViewportPersistence extends EventTarget {
       this.#rafId = null
     }
     void this.#persist()
+    // Also fire any pending tile-properties commit so the gesture-end
+    // viewport state lands in __history__ before the tab closes.
+    this.#flushStoreCommit()
+  }
+
+  // ── New-path commit (tile-properties via viewport-store) ──────────────
+
+  /**
+   * Set the location this VP instance is reporting to. Called by show-cell
+   * on every layer change. Flushes any pending tile-properties commit for
+   * the OLD location before switching, so a gesture-then-nav doesn't
+   * strand the gesture in the debounce timer.
+   */
+  setCurrentLocation = (segments: readonly string[] | null): void => {
+    const next = segments ? [...segments] : null
+    const prev = this.#currentSegments
+    // Identity-by-value compare; nav events that re-emit the same segments
+    // shouldn't fire a spurious flush.
+    if (prev && next && prev.length === next.length && prev.every((s, i) => s === next![i])) return
+    if (prev) this.#flushStoreCommit()
+    this.#currentSegments = next
+  }
+
+  #scheduleStoreCommit = (): void => {
+    if (this.#commitTimer !== null) clearTimeout(this.#commitTimer)
+    this.#commitTimer = setTimeout(() => {
+      this.#commitTimer = null
+      void this.#commitToStore()
+    }, this.#COMMIT_DEBOUNCE_MS)
+  }
+
+  #flushStoreCommit = (): void => {
+    if (this.#commitTimer !== null) {
+      clearTimeout(this.#commitTimer)
+      this.#commitTimer = null
+      void this.#commitToStore()
+    }
+  }
+
+  #commitToStore = async (): Promise<void> => {
+    const segs = this.#currentSegments
+    if (!segs) return
+    // Snapshot the current in-memory state and commit it. Subsequent
+    // user-source setters will re-schedule another commit naturally.
+    const snapshot: ViewportSnapshot = {
+      zoom: this.lastZoom,
+      pan: this.lastPan,
+      meshOffset: this.lastMeshOffset,
+    }
+    try {
+      await writeViewportAt(segs, snapshot)
+    } catch (err) {
+      console.warn('[viewport] tile-properties commit failed:', err)
+    }
   }
 
   #persistTo = async (
@@ -430,7 +521,9 @@ export class ZoomDrone extends Drone {
     this.#registerKeybindings()
 
     this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
-      if (cmd === 'navigation.fitToScreen' || cmd === 'navigation.recenter') this.zoomToFit()
+      // User-invoked fit via keyboard shortcut — write through as 'user'
+      // so the new-path commit fires and the fit persists.
+      if (cmd === 'navigation.fitToScreen' || cmd === 'navigation.recenter') this.zoomToFit(false, 'user')
     })
 
     this.onEffect<HexGeometry>('render:geometry-changed', (geo) => {
@@ -590,7 +683,7 @@ export class ZoomDrone extends Drone {
     // sibling.
     this.#cancelAnim()
     const clamped = this.clamp(scale)
-    this.adjustZoom(this.renderContainer, clamped, pivotClient)
+    this.adjustZoom(this.renderContainer, clamped, pivotClient, 'user')
   }
 
   public zoomByFactor = (factor: number, pivotClient: Pt): void => {
@@ -607,19 +700,19 @@ export class ZoomDrone extends Drone {
 
     // if pinch-zoom pushes below minScale, trigger zoom-to-fit
     if (raw < this.minScale) {
-      this.zoomToFit()
+      this.zoomToFit(false, 'user')
       return
     }
 
     const next = this.clamp(raw)
-    this.adjustZoom(target, next, pivotClient)
+    this.adjustZoom(target, next, pivotClient, 'user')
   }
 
   /**
    * Zoom-to-fit: calculates the bounding box of all hex cells via the
    * mesh adapter and animates the viewport to center and fit all content.
    */
-  public zoomToFit = (snap = false): void => {
+  public zoomToFit = (snap = false, source: ViewportSource = 'auto'): void => {
     if (!this.renderContainer || !this.renderer || !this.app) return
 
     this.#cancelAnim()
@@ -653,7 +746,7 @@ export class ZoomDrone extends Drone {
     const screenCx = window.innerWidth * 0.5
     const screenCy = window.innerHeight * 0.5
     this.app.stage.position.set(screenCx, screenCy)
-    this.vp?.setPan(0, 0)
+    this.vp?.setPan(0, 0, source)
 
     // content screen size = bounds * containerScale * stageScale
     // so containerScale = availPx / (bounds * stageScale)
@@ -684,7 +777,7 @@ export class ZoomDrone extends Drone {
       // stale (cx, cy) — the saved coords were derived from this
       // moment's safeMidX/Y and would otherwise leave content shrunk
       // and off-center in the new viewport.
-      this.#saveZoom(target, true)
+      this.#saveZoom(target, true, source)
       return
     }
 
@@ -716,7 +809,7 @@ export class ZoomDrone extends Drone {
       // coalesces to one OPFS write per gesture, but if the user
       // navigates / closes the tab mid-animation, the partial fit
       // state is captured rather than dropped.
-      this.#saveZoom(target, true)
+      this.#saveZoom(target, true, source)
 
       if (t < 1) {
         this.#animFrameId = requestAnimationFrame(animate)
@@ -797,7 +890,8 @@ export class ZoomDrone extends Drone {
     // navigation, page close, or another gesture, the partial scale
     // still persists. The previous "save only on completion" pattern
     // dropped state when animations didn't reach t=1.
-    this.#saveZoom(target)
+    // animateToScale is called by mousewheel input — user-source.
+    this.#saveZoom(target, false, 'user')
 
     if (t < 1) {
       this.#animFrameId = requestAnimationFrame(this.#animTick)
@@ -820,7 +914,7 @@ export class ZoomDrone extends Drone {
   // - translate to cancel the difference
   //
 
-  private adjustZoom = (target: any, newScale: number, pivotClient: Pt): void => {
+  private adjustZoom = (target: any, newScale: number, pivotClient: Pt, source: ViewportSource = 'auto'): void => {
     if (!this.renderer || !this.canvas) return
 
     const pivotGlobal = this.clientToPixiGlobal(pivotClient)
@@ -845,7 +939,7 @@ export class ZoomDrone extends Drone {
         target.position.y + (pivotParent.y - postParent.y)
       )
       this.#clampContentPosition()
-      this.#saveZoom(target)
+      this.#saveZoom(target, false, source)
       return
     }
 
@@ -855,7 +949,7 @@ export class ZoomDrone extends Drone {
     )
 
     this.#clampContentPosition()
-    this.#saveZoom(target)
+    this.#saveZoom(target, false, source)
   }
 
   // Single cancellation primitive for every animation path. Both
@@ -873,8 +967,8 @@ export class ZoomDrone extends Drone {
     }
   }
 
-  #saveZoom = (target: any, fit = false): void => {
-    this.vp?.setZoom(target.scale.x, target.position.x, target.position.y, fit)
+  #saveZoom = (target: any, fit = false, source: ViewportSource = 'auto'): void => {
+    this.vp?.setZoom(target.scale.x, target.position.x, target.position.y, fit, source)
   }
 
   // After any zoom-induced position/scale change, ensure at least one tile
