@@ -16,13 +16,13 @@
     @if (selectionActive()) {
       <!-- selection pack (hard-coded for parity with previous behaviour) -->
       <button class="ctx-btn" (click)="cut()" [attr.aria-label]="'selection.cut' | t">
-        <span class="hci">F</span>
+        <span class="mat-sym">content_cut</span>
       </button>
       <button class="ctx-btn" (click)="copy()" [attr.aria-label]="'selection.copy' | t">
-        <span class="hci">%</span>
+        <span class="mat-sym">content_copy</span>
       </button>
       <button class="ctx-btn" (click)="remove()" [attr.aria-label]="'selection.remove' | t">
-        <span class="hci">Q</span>
+        <span class="mat-sym">delete</span>
       </button>
 
       <div class="ctx-divider"></div>
@@ -36,7 +36,7 @@
       @if (clipboardCount() > 0) {
         <div class="ctx-divider"></div>
         <button class="ctx-btn" (click)="paste()" [attr.aria-label]="'selection.paste' | t">
-          <span class="hci" style="color:#4caf50">G</span>
+          <span class="mat-sym" style="color:#4caf50">content_paste</span>
         </button>
       }
     } @else if (activePack(); as pack) {
