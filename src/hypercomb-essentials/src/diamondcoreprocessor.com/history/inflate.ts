@@ -164,3 +164,43 @@ export const inflate = async (
 
   return value
 }
+
+/**
+ * Inflate a layer sig to its immediate shape — every slot except
+ * `children` gets recursively inflated; `children` is left as the raw
+ * sig array. Lets callers walk a branch one hop at a time: hand any
+ * layer sig in, render the visuals it carries (notes, properties via
+ * 0000, etc.), then choose whether to descend into a specific child
+ * later.
+ *
+ * Matches the design principle "a layer is not dependent on any layer
+ * ever": a single sig in, the layer's own state out, no implicit
+ * recursion into the merkle subtree. Branch expansion is the caller's
+ * choice, not the inflater's.
+ *
+ * Returns null when the sig doesn't resolve to a layer-shaped object
+ * (not a layer, missing, or only a binary/text resource). Caller
+ * should fall back to `inflate` for non-layer sigs.
+ */
+export const inflateLayer = async (
+  sig: string,
+  visited: Set<string> = new Set(),
+): Promise<LayerLike | null> => {
+  if (!isSignature(sig)) return null
+  if (visited.has(sig)) return null
+  visited.add(sig)
+  const raw = await resolveOne(sig)
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  if (isMarker(raw)) return null
+  const layer = raw as LayerLike
+  const out: LayerLike = { name: typeof layer.name === 'string' ? layer.name : '' }
+  for (const [key, value] of Object.entries(layer)) {
+    if (key === 'name') continue
+    if (key === 'children') {
+      out.children = Array.isArray(value) ? (value as string[]).slice() : undefined
+      continue
+    }
+    out[key] = await inflate(value, visited)
+  }
+  return out
+}
