@@ -370,6 +370,18 @@ export class ShowCellDrone extends Drone {
   // and the user can add normally from there to mint local tiles.
   #peerCellSet = new Set<string>()
 
+  // Per-label pubkey of the peer that contributed each peer-kind tile.
+  // Populated alongside #peerCellSet; the spotlight render hook reads
+  // this to decide which tiles to glow when a peer is active. Cleared
+  // and rebuilt on each renderFromSynchronize pass.
+  #peerPubkeyByLabel = new Map<string, string>()
+
+  // Currently spotlit peer pubkey (from SpotlightService), or null
+  // when no layer is surfaced. Subscribed on the first heartbeat so
+  // the service is registered by then. Render reads this in
+  // buildCellsFromAxial to override borderColor for matching tiles.
+  #spotlightPubkey: string | null = null
+
   // mesh scoping — space + secret feed into the signature key
   #space = ''
   #secret = ''
@@ -1921,6 +1933,12 @@ export class ShowCellDrone extends Drone {
             if (typeof pidx === 'number' && Number.isFinite(pidx) && pidx >= 0 && !peerIndices.has(e.name)) {
               peerIndices.set(e.name, pidx)
             }
+            // Remember which peer contributed this tile so the spotlight
+            // render hook can match cells to the active layer.
+            const ppk = (e.source as { peerPubkey?: string } | undefined)?.peerPubkey
+            if (typeof ppk === 'string' && ppk.length > 0 && !this.#peerPubkeyByLabel.has(e.name)) {
+              this.#peerPubkeyByLabel.set(e.name, ppk)
+            }
           }
           union.add(e.name)
         }
@@ -1932,6 +1950,12 @@ export class ShowCellDrone extends Drone {
     }
     this.#ephemeralCellSet = ephemeralCellSet
     this.#peerCellSet = peerCellSet
+    // Drop pubkey entries for labels that fell out of the peer set
+    // (peer went stale, navigated away). Keeps the map tight; new peer
+    // contributions repopulate it in the loop above.
+    for (const label of [...this.#peerPubkeyByLabel.keys()]) {
+      if (!peerCellSet.has(label)) this.#peerPubkeyByLabel.delete(label)
+    }
 
     // Reconcile pendingRemoves against the layer's children list. Under
     // layer-as-primitive, the LAYER decides membership: a /remove drops
@@ -3175,6 +3199,17 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // Spotlight changes — a peer's layer was surfaced (or dismissed
+    // back to merged). Update the cached pubkey and invalidate the
+    // render cache so the next pass re-runs the borderColor path with
+    // the new spotlight state. Cheap: same layer-cells data, just a
+    // different borderColor computation per cell.
+    this.onEffect<{ activePeer: string | null }>('spotlight:changed', (payload) => {
+      this.#spotlightPubkey = payload?.activePeer ?? null
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
     // substrate:applied — substrate has just written a new propsSig for this
     // cell. Only this one cell's imageSig changed; route through the in-place
     // buffer update so the rest of the grid never repaints. If the cell isn't
@@ -4261,6 +4296,19 @@ export class ShowCellDrone extends Drone {
       if (isHiddenItem) {
         const bgray = bcr * 0.3 + bcg * 0.3 + bcb * 0.3
         bcr = bgray * 0.5; bcg = bgray * 0.5; bcb = bgray * 0.5
+      }
+      // Spotlight override — when a peer's layer is surfaced and this
+      // cell came from that peer, paint its border in the peer's
+      // identity color (same labelToRgb hash applied to the pubkey)
+      // so the spotlit layer reads as a unified accent. Wins over any
+      // cached borderColor; cleared automatically when spotlight
+      // dismisses (spotlight:changed clears the per-label caches +
+      // re-renders, which lands back here without the override).
+      if (this.#spotlightPubkey) {
+        const cellPubkey = this.#peerPubkeyByLabel.get(c.label)
+        if (cellPubkey === this.#spotlightPubkey) {
+          ;[bcr, bcg, bcb] = labelToRgb(cellPubkey)
+        }
       }
       borderColor.set([bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb], bcp)
       bcp += 12

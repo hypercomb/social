@@ -1,0 +1,16 @@
+@if (visible()) {
+  <div class="layer-cycle-strip" data-consumes-wheel>
+    @for (entry of entries(); track entry.pubkey) {
+      <button
+        type="button"
+        class="entry"
+        [class.active]="entry.active"
+        [title]="'Layer: ' + entry.label + (entry.active ? ' (active — click to dismiss)' : '')"
+        (click)="onEntryClick(entry)">
+        <span class="dot" [style.background-color]="entry.color"
+                          [style.box-shadow]="entry.active ? '0 0 12px ' + entry.color : 'none'"></span>
+        <span class="label">{{ entry.label }}</span>
+      </button>
+    }
+  </div>
+}

@@ -71,15 +71,18 @@ export class ClaudeBridgeWorker extends Worker {
   #ws: WebSocket | null = null
   #timer: ReturnType<typeof setTimeout> | null = null
 
-  /** Warmup is no-op: the worker registers in IoC and subscribes to its
-   *  wake-up signal, but never opens the WebSocket on its own. The bridge
-   *  server (`ws://localhost:2401`) might not be running — and almost
-   *  never is during normal dev — so connecting at boot just produces a
-   *  guaranteed-failed WS attempt in the console. Connection is explicit:
-   *  emit `claude-bridge:connect` (e.g. from a slash command or CLI
-   *  sentinel) or call `connect()` on the IoC-registered instance. */
+  /** Warmup: subscribe to the explicit `claude-bridge:connect` event AND
+   *  attempt an auto-connect. The auto-connect is gated by `#isEnabled()`
+   *  (localhost + opt-in flag via URL query or localStorage), so users who
+   *  haven't enabled the bridge see no WS attempt at all. Users who HAVE
+   *  enabled it get a renderer registration on every page load — no manual
+   *  `connect()` console paste needed for Node scripts (e.g.
+   *  `_dolphin-revision.cjs`) to find a renderer. */
   protected override act = async (): Promise<void> => {
     this.onEffect('claude-bridge:connect', () => this.connect())
+    // Auto-connect when the opt-in flag is set; #isEnabled() short-circuits
+    // for everyone else, keeping the console clean in default dev sessions.
+    this.connect()
   }
 
   /** Open the bridge WebSocket. Gated by `#isEnabled()` (host + opt-in

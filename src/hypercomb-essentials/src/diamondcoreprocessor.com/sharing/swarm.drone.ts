@@ -730,6 +730,24 @@ export class SwarmDrone extends Drone {
     this.onEffect<{ room?: string }>('mesh:room', () => this.#teardownAndResync('mesh:room-effect'))
     this.onEffect<{ secret?: string }>('mesh:secret', () => this.#teardownAndResync('mesh:secret-effect'))
 
+    // Tile properties changed — any writer that updates a child's 0000
+    // (layout index write, editor save, AI bridge stamp, substrate
+    // apply) should reach the swarm wire promptly so peers see the
+    // full props rather than the snapshot captured at the moment the
+    // tile was first added. Without this, a tile added then enriched
+    // 50ms later would publish empty props in the swarm event and
+    // only catch up at the next 30s heartbeat.
+    //
+    // Debounced to coalesce bursts (a single user action may fire
+    // multiple 0000 writes across several tiles in the same turn) —
+    // ~250ms is comfortably under perceived-instant and well above
+    // the layer cascade settle time.
+    this.onEffect('cell:0000-changed', () => this.#schedulePropsRepublish())
+    // Also covers the bare cell:added → layout cascade race; if the
+    // initial publish caught a child mid-write, the property edit that
+    // follows triggers cell:0000-changed and we re-publish.
+    this.onEffect('cell:added', () => this.#schedulePropsRepublish())
+
     // Mesh-public toggle handler. Going OFF tears down state so temp
     // shared tiles disappear from the canvas. Going ON re-runs the
     // current-lineage sync so subscriptions reattach + we publish
@@ -836,6 +854,33 @@ export class SwarmDrone extends Drone {
    */
   public peerTilesAtCurrentSig = (): readonly { name: string; peerPubkey: string; props?: Record<string, unknown>; imageSig?: string; index?: number }[] => {
     return this.peerTilesAtSig(this.#currentSig)
+  }
+
+  /** Ordered list of pubkeys currently publishing at the live sig,
+   *  excluding self and stale (last-seen older than PEER_STALE_MS).
+   *  Sorted freshness-first — most recent activity at index 0.
+   *
+   *  Backing for SpotlightService.participants() and the layer-cycle
+   *  strip UI. Reads in-memory cache live; multiple peer updates
+   *  during a debounce window all reflect in the returned list. */
+  public participantsAtCurrentSig = (): readonly string[] => {
+    const sig = this.#currentSig
+    if (!sig) return []
+    const peerLayers = this.#peerLayersBySig.get(sig)
+    if (!peerLayers || peerLayers.size === 0) return []
+    const lastSeenBag = this.#peerLastSeenMsBySig.get(sig) ?? new Map<string, number>()
+    const nowMs = Date.now()
+    const out: string[] = []
+    for (const pubkey of peerLayers.keys()) {
+      if (this.#myPubkey && pubkey === this.#myPubkey) continue
+      const lastMs = lastSeenBag.get(pubkey)
+      if (lastMs !== undefined && nowMs - lastMs > PEER_STALE_MS) continue
+      out.push(pubkey)
+    }
+    // Freshness-first — newest activity at index 0. Tie-breaks fall
+    // through to insertion order (Map iteration order).
+    out.sort((a, b) => (lastSeenBag.get(b) ?? 0) - (lastSeenBag.get(a) ?? 0))
+    return out
   }
 
   // -----------------------------------------------------------------
@@ -1350,6 +1395,20 @@ export class SwarmDrone extends Drone {
       this.#peersChangedTimer = null
       this.emitEffect('swarm:peers-changed', payload)
     }, 150)
+  }
+
+  /** Debounce token for "republish my current layer because something
+   *  changed in a child's 0000 (or a cell was added)." Bursts of
+   *  writes coalesce into one publish at the trailing edge. */
+  #propsRepublishTimer: ReturnType<typeof setTimeout> | null = null
+
+  #schedulePropsRepublish = (): void => {
+    if (!this.#currentSig) return
+    if (this.#propsRepublishTimer !== null) return  // already queued
+    this.#propsRepublishTimer = setTimeout(() => {
+      this.#propsRepublishTimer = null
+      void this.#publishMyLayerAt(this.#currentSig)
+    }, 250)
   }
 
   // -----------------------------------------------------------------

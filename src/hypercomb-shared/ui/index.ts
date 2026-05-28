@@ -17,4 +17,5 @@ export * from './instruction-overlay/instruction-overlay.component'
 export * from './docs-overlay/docs-overlay.component'
 export * from './notes-strip/notes-strip.component'
 export * from './notes-viewer/notes-viewer.component'
+export * from './layer-cycle-strip/layer-cycle-strip.component'
 
