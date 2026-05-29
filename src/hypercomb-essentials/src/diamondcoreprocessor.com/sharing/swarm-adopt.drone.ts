@@ -34,10 +34,13 @@ const MAX_ADOPT_DEPTH = 3
 
 // How long we wait for the relay to replay sub-location events into the
 // swarm cache after we subscribe. The relay's REQ-replay arrives within
-// one round-trip on local dev (sub-100ms) but production relays can be
-// 200-800ms; 1500ms is a comfortable upper bound that keeps the adopt
-// click feeling instant on local while not giving up on slower paths.
-const SUBSCRIBE_WAIT_MS = 1500
+// one round-trip on local dev (sub-100ms) but public relays via CDN
+// (wss://jwize.com) have round-trip + Cloudflare overhead that can
+// reach 1-2s under load. With the swarm.drone polling fix landed,
+// ensurePeerCacheAt early-exits the instant peer data appears — so
+// raising this ceiling to 4000ms is essentially free for fast paths
+// (most walks finish in <500ms) while letting slower relays complete.
+const SUBSCRIBE_WAIT_MS = 4000
 
 // Property keys we strip from the peer's 0000 before committing — they
 // represent stale protocol markers or per-session render state that

@@ -410,6 +410,17 @@ export class SwarmDrone extends Drone {
   // has lapsed in the relay's cache.
   #peerLastSeenMsBySig = new Map<string, Map<string, number>>()
 
+  // Per (sig, pubkey) — the highest `created_at` we've ever cached
+  // for that peer at that sig. Used in #onEvent to reject inbound
+  // events that are OLDER than what we already have cached. The
+  // relay-side dedup of parameterized-replaceable events is supposed
+  // to keep only the latest event per (pubkey, kind, d-tag), but some
+  // public relays don't enforce strictly and replay multiple versions
+  // out of order on REQ. Without this guard, an older empty publish
+  // arriving last clobbers a newer populated layer — visible as
+  // "subtree adopt finds nothing even though A clearly published it."
+  #peerLatestCreatedAtBySig = new Map<string, Map<string, number>>()
+
   // Per-pubkey-per-lineage hidden-tile names. Populated from kind-
   // 30202 events (SWARM_HIDE_KIND). The publisher's own hide event
   // echoes back from the relay and seeds this map on refresh; that's
@@ -628,6 +639,7 @@ export class SwarmDrone extends Drone {
     }
     this.#peerLayersBySig.delete(sig)
     this.#peerLastSeenMsBySig.delete(sig)
+    this.#peerLatestCreatedAtBySig.delete(sig)
     this.#lastPublishedBySig.delete(sig)
     this.#lastPublishTimeMsBySig.delete(sig)
     this.emitEffect('swarm:peers-changed', { sig, pubkey: '', reason: 'manual-refresh' })
@@ -679,6 +691,7 @@ export class SwarmDrone extends Drone {
     const affectedSigs = [...this.#peerLayersBySig.keys()]
     this.#peerLayersBySig.clear()
     this.#peerLastSeenMsBySig.clear()
+    this.#peerLatestCreatedAtBySig.clear()
     this.#lastPublishedBySig.clear()
     this.#lastPublishTimeMsBySig.clear()
     for (const sig of affectedSigs) {
@@ -796,6 +809,7 @@ export class SwarmDrone extends Drone {
         this.#subsBySig.clear()
         this.#peerLayersBySig.clear()
         this.#peerLastSeenMsBySig.clear()
+        this.#peerLatestCreatedAtBySig.clear()
         this.#lastPublishedBySig.clear()
         this.#lastPublishTimeMsBySig.clear()
         // Resource subs ride the same mesh socket as layer subs; tear
@@ -1346,6 +1360,7 @@ export class SwarmDrone extends Drone {
     this.#subsBySig.clear()
     this.#peerLayersBySig.clear()
     this.#peerLastSeenMsBySig.clear()
+    this.#peerLatestCreatedAtBySig.clear()
     this.#lastPublishedBySig.clear()
     this.#lastPublishTimeMsBySig.clear()
     this.#hiddenByPubkeyBySig.clear()
@@ -1394,6 +1409,7 @@ export class SwarmDrone extends Drone {
       }
       this.#peerLayersBySig.delete(prevSig)
       this.#peerLastSeenMsBySig.delete(prevSig)
+      this.#peerLatestCreatedAtBySig.delete(prevSig)
       this.#lastPublishedBySig.delete(prevSig)
       this.#lastPublishTimeMsBySig.delete(prevSig)
       this.#hiddenByPubkeyBySig.delete(prevSig)
@@ -1519,6 +1535,28 @@ export class SwarmDrone extends Drone {
     }
     const layer: SwarmLayerPayload = { visuals: cleanVisuals }
 
+    // Stale-event guard. Public relays that don't strictly enforce
+    // NIP-33 parameterized-replaceable dedup may replay multiple
+    // versions of the same (pubkey, kind, d-tag) event, sometimes
+    // out of chronological order. Without comparing `created_at`,
+    // an older publish arriving LAST would clobber a newer one
+    // we already cached — observed on wss://jwize.com replaying
+    // A's pre-add empty `{visuals: []}` after the populated `[team]`
+    // version, with the empty winning. Track the highest
+    // `created_at` we've seen per (sig, pubkey) and drop anything
+    // older.
+    const incomingCreatedAt = Number(evt?.event?.created_at ?? 0)
+    let latestBag = this.#peerLatestCreatedAtBySig.get(sig)
+    if (!latestBag) { latestBag = new Map(); this.#peerLatestCreatedAtBySig.set(sig, latestBag) }
+    const cachedCreatedAt = latestBag.get(pubkey) ?? 0
+    if (incomingCreatedAt > 0 && incomingCreatedAt < cachedCreatedAt) {
+      console.log('[swarm] onEvent DROPPED: older event', {
+        sig: sig.slice(0, 8), pubkey: pubkey.slice(0, 8),
+        incomingCreatedAt, cachedCreatedAt,
+      })
+      return
+    }
+
     let bag = this.#peerLayersBySig.get(sig)
     if (!bag) { bag = new Map(); this.#peerLayersBySig.set(sig, bag) }
     const previousLayer = bag.get(pubkey)
@@ -1526,6 +1564,7 @@ export class SwarmDrone extends Drone {
     const layerChanged = isNewPeer ||
       JSON.stringify(previousLayer) !== JSON.stringify(layer)
     bag.set(pubkey, layer)
+    latestBag.set(pubkey, incomingCreatedAt)
     console.log('[swarm] onEvent CACHED', { sig: sig.slice(0,8), pubkey: pubkey.slice(0,8), visualCount: layer.visuals.length, isNewPeer, layerChanged })
 
     // Stamp this peer's last-seen time at this sig. Drives the
