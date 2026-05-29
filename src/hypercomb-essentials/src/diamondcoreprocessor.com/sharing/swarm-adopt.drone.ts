@@ -25,6 +25,30 @@ import { writeTilePropertiesAt } from '../editor/tile-properties.js'
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const SUBSTRATE_SERVICE_KEY = '@diamondcoreprocessor.com/SubstrateService'
+const CONTENT_BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
+const STORE_KEY = '@hypercomb.social/Store'
+
+const SIG_RE = /^[0-9a-f]{64}$/
+
+/** Walk a value (the peer's adopted props object) for sig-shaped
+ *  strings — `imageSig`, `small.image`, `flat.small.image`, anything
+ *  nested deeper. Returns deduped sigs the receiver should try to
+ *  resolve via broker so adopt brings the visual content along with
+ *  the tile shape. */
+function collectSigs(value: unknown, out: Set<string>): void {
+  if (!value) return
+  if (typeof value === 'string') {
+    if (SIG_RE.test(value)) out.add(value)
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const v of value) collectSigs(v, out)
+    return
+  }
+  if (typeof value === 'object') {
+    for (const v of Object.values(value as Record<string, unknown>)) collectSigs(v, out)
+  }
+}
 
 // Property keys we strip from the peer's 0000 before committing — they
 // represent stale protocol markers or per-session render state that
@@ -179,6 +203,23 @@ export class SwarmAdoptDrone extends Drone {
       try {
         await writeTilePropertiesAt(segmentsClean, label, peerProps)
         EffectBus.emit('tile:saved', { cell: label })
+
+        // Adopt brings the tile AND its resources. Walk the props the
+        // peer published for any sig-shaped fields (imageSig,
+        // small.image, flat.small.image, anything nested deeper) and
+        // ask the broker to fetch each. Fire-and-forget — the broker
+        // verifies sha256 on receive and writes to Store, so the
+        // resource lands in __resources__/<sig> ready for show-cell's
+        // atlas binder to pick up on its next render.
+        //
+        // The same sigs also become "keys to look for unexplored
+        // resources": broker subscribes to the sig channel; any other
+        // participant who has cached the bytes responds. Even if the
+        // original publisher leaves, the swarm collectively serves it.
+        //
+        // This is the line of consent: visuals-only browse never
+        // triggers this; only explicit adopt does.
+        void this.#fetchAdoptedResources(peerProps)
         return
       } catch (err) {
         console.warn('[swarm-adopt] writeTilePropertiesAt failed for', label, err)
@@ -203,6 +244,36 @@ export class SwarmAdoptDrone extends Drone {
       } catch (err) {
         console.warn('[swarm-adopt] substrate.applyToCell failed for', label, err)
       }
+    }
+  }
+
+  /** After committing an adopted tile, walk its props for sig-shaped
+   *  fields and ask the broker to fetch each one. Verified bytes land
+   *  in Store via the broker's own write path. Already-cached sigs are
+   *  no-ops at the Store layer. Sigs the swarm can't locate just fail
+   *  silently — the tile still renders (substrate fills in the gap)
+   *  and a later re-trigger can succeed if a host turns up.
+   *
+   *  Fire-and-forget — the adopt success isn't blocked on resource
+   *  arrival. The renderer's atlas binder picks up the bytes the next
+   *  time it walks the cell. */
+  #fetchAdoptedResources = async (peerProps: Record<string, unknown>): Promise<void> => {
+    const ioc = (window as { ioc?: { get: (k: string) => unknown } }).ioc
+    const broker = ioc?.get?.(CONTENT_BROKER_KEY) as {
+      fetchBySig?: (sig: string, type: string, timeoutMs?: number) => Promise<Uint8Array | null>
+    } | undefined
+    if (!broker?.fetchBySig) return
+
+    const sigs = new Set<string>()
+    collectSigs(peerProps, sigs)
+    if (sigs.size === 0) return
+
+    // Don't await all — the tile commit already succeeded; the resources
+    // arrive when they arrive. The broker coalesces concurrent fetches
+    // for the same sig, so multiple adopts touching the same resource
+    // share one in-flight request.
+    for (const sig of sigs) {
+      void broker.fetchBySig(sig, 'resource').catch(() => { /* silent — broker logs */ })
     }
   }
 }
