@@ -1539,7 +1539,10 @@ export class ShowCellDrone extends Drone {
         if (vpSnap) {
           this.#applyViewportFromSnapshot(vpSnap)
           appliedSnap = vpSnap
-        } else if (cachedDir) {
+        } else {
+          // Viewport is sig-keyed by lineage segments now (no OPFS dir
+          // required), so always read — sub-layers without a dir restore
+          // identically to root.
           appliedSnap = await this.#applyViewportForLayerReadSnapshot(
             cachedDir ?? null,
             lineage.explorerSegments?.() ?? [],
@@ -1552,10 +1555,9 @@ export class ShowCellDrone extends Drone {
         this.#pendingRecenter = !appliedSnap?.meshOffset
 
         const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
-        if (vp && cachedDir) vp.setDirSilent(cachedDir)
-        // New-path: tell VP which lineage segments to address its
-        // tile-properties commit at. Works for sub-layers without an
-        // OPFS dir; works for root (segments=[]) → sign('/').
+        // Tell VP which location it's reporting to. Viewport is keyed by
+        // lineage segments in the sig-keyed __viewport__ store — works for
+        // sub-layers without an OPFS dir and for root (segments=[] → '/').
         vp?.setCurrentLocation?.(lineage.explorerSegments?.() ?? [])
 
         this.renderedLocationKey = locationKey
@@ -2111,7 +2113,9 @@ export class ShowCellDrone extends Drone {
       if (vpSnap) {
         this.#applyViewportFromSnapshot(vpSnap)
         appliedSnap = vpSnap
-      } else if (dir) {
+      } else {
+        // Viewport is sig-keyed by lineage segments (no OPFS dir
+        // required) — always read so dir-less sub-layers restore too.
         appliedSnap = await this.#applyViewportForLayerReadSnapshot(
           dir,
           lineage.explorerSegments?.() ?? [],
@@ -2138,15 +2142,11 @@ export class ShowCellDrone extends Drone {
       // of truth for this layer's render.
       if (myToken !== this.#streamToken) return
 
-      // sync VP directory so subsequent pan/zoom writes persist to the correct
-      // layer. The dir is the canonical key — viewport lives in
-      // `<dir>/0000` as `properties.viewport`. For sub-layers that don't
-      // have an OPFS dir yet, we lazy-create it just above (see the
-      // dir-resolution block).
+      // Tell VP which location it's reporting to so subsequent pan/zoom
+      // writes persist to the correct layer. Viewport is keyed by lineage
+      // segments in the sig-keyed __viewport__ store — no OPFS dir needed,
+      // so this works for dir-less sub-layers and for root alike.
       const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
-      if (vp && dir) vp.setDirSilent(dir)
-      // New-path: same as fast-path branch above. Always sync segments,
-      // even when `dir` is null (sub-layer with no folder).
       vp?.setCurrentLocation?.(lineage.explorerSegments?.() ?? [])
 
       if (cellNames.length === 0) {
@@ -2379,33 +2379,17 @@ export class ShowCellDrone extends Drone {
   // the new path. Once the legacy fallback proves unused, it can be
   // dropped (Step 5).
   readonly #applyViewportForLayerReadSnapshot = async (
-    dir: FileSystemDirectoryHandle | null,
+    _dir: FileSystemDirectoryHandle | null,
     segments: readonly string[] | null = null,
   ): Promise<ViewportSnapshot> => {
+    // Viewport lives in the sig-keyed `__viewport__` store, addressed by
+    // the location's lineage segments — no OPFS dir, no history. Works
+    // identically for root and dir-less sub-layers.
     let snap: ViewportSnapshot = {}
-
-    // Primary: new-path tile-properties read by lineage segments.
-    if (segments) {
-      try {
-        snap = await readViewportAt(segments)
-      } catch {
-        // fall through to legacy read
-      }
-    }
-
-    // Fallback: legacy <dir>/0000.viewport, only if new-path returned
-    // empty AND we still have a dir handle (root + any pre-migration
-    // dirs). Sub-layers without a dir return whatever new-path gave us.
-    const newPathEmpty = !snap.zoom && !snap.pan && !snap.meshOffset
-    if (newPathEmpty && dir) {
-      try {
-        const fh = await dir.getFileHandle('0000')
-        const file = await fh.getFile()
-        const props = JSON.parse(await file.text())
-        snap = (props as any).viewport ?? {}
-      } catch {
-        // no 0000 yet — defaults
-      }
+    try {
+      snap = await readViewportAt(segments ?? [])
+    } catch {
+      snap = {}
     }
 
     // populate back-nav fast-path cache
@@ -2726,24 +2710,19 @@ export class ShowCellDrone extends Drone {
     // pan/zoom/recenter the user did this session. Symptom: press R,
     // back, in → viewport resets to pre-R; refresh fixes once but
     // back/forth resets again.
-    this.onEffect<{ dir: FileSystemDirectoryHandle; snapshot: ViewportSnapshot }>('viewport:persisted', ({ dir, snapshot }) => {
-      // Match the dir to a known location key. The current rendered
-      // layer is the most common case, but a flush from setDir can
-      // also fire for the OUTGOING layer — handle both via the
-      // dir→locationKey index.
-      let locationKey: string | null = null
-      if (this.#layerDirCache.get(this.renderedLocationKey) === dir) {
-        locationKey = this.renderedLocationKey
-      } else {
-        for (const [key, cachedDir] of this.#layerDirCache) {
-          if (cachedDir === dir) { locationKey = key; break }
-        }
-      }
-      if (locationKey) {
-        // Snapshot is the post-write OPFS state — set it as the cached
-        // snap so back-nav fast path reads what's on disk, not a stale
-        // first-visit read.
-        this.#layerViewportCache.set(locationKey, { ...snapshot })
+    this.onEffect<{ segments: readonly string[]; snapshot: ViewportSnapshot | null }>('viewport:persisted', ({ segments, snapshot }) => {
+      // The viewport store just wrote `segments`. If that's the layer we
+      // currently have rendered, mirror the post-write snapshot into the
+      // back-nav cache so navigating out and back reads the latest values
+      // rather than a stale first-visit snapshot.
+      const lineage = (window as any).ioc?.get?.('@hypercomb.social/Lineage') as
+        { explorerSegments?: () => readonly string[] } | undefined
+      const cur = lineage?.explorerSegments?.() ?? []
+      const same = Array.isArray(segments)
+        && segments.length === cur.length
+        && segments.every((s, i) => s === cur[i])
+      if (same) {
+        this.#layerViewportCache.set(this.renderedLocationKey, { ...(snapshot ?? {}) })
       }
     })
 
