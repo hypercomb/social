@@ -2,6 +2,7 @@
 // do not edit manually
 
 export type * from './ambient-presence.worker'
+export type * from './follow.drone'
 export type * from './mesh-adapter.drone'
 export * from './mesh-block.queen'
 export * from './mesh-clear.queen'

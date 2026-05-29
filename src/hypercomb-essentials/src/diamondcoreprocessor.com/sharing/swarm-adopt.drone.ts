@@ -77,6 +77,16 @@ interface SwarmDroneLike {
     peerPubkey: string
     imageSig?: string
   } & Record<string, unknown>)[]
+  /** Tiles from the subscribed leader's personal channel. Adopt looks
+   *  here as a fallback when the requested label isn't at the current
+   *  location — this is how auto-adopt-on-subscribe works: the leader's
+   *  tiles live at THEIR channel sig, but the adopter writes them into
+   *  the adopter's own current location. */
+  subscribedTiles?: () => readonly ({
+    name: string
+    peerPubkey: string
+    imageSig?: string
+  } & Record<string, unknown>)[]
 }
 
 interface LineageLike {
@@ -162,8 +172,18 @@ export class SwarmAdoptDrone extends Drone {
     // peer updates that landed during the debounce window are all
     // reflected, so we always commit the latest props the peer
     // published.
+    // Look first in the current-location peer cache (the common case
+    // for click-adopt of a peer tile we can see at our spot). If not
+    // found, fall back to the subscribed channel — that's how
+    // auto-adopt-on-subscribe gets the leader's tiles even though
+    // they live at the leader's personal channel sig rather than our
+    // own current sig.
     const peerTiles = swarm.peerTilesAtCurrentSig()
-    const peerEntry = peerTiles.find(p => p.name === label)
+    let peerEntry = peerTiles.find(p => p.name === label)
+    if (!peerEntry && swarm.subscribedTiles) {
+      const subTiles = swarm.subscribedTiles()
+      peerEntry = subTiles.find(p => p.name === label)
+    }
     if (!peerEntry) return
 
     const lineage = ioc?.get?.(LINEAGE_KEY) as LineageLike | undefined
