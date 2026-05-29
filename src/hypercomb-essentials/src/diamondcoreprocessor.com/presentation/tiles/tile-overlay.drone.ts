@@ -1714,6 +1714,19 @@ export class TileOverlayDrone extends Drone {
     if (!lineage) return
     this.#clearSelectionOnNavigate()
     this.emitEffect('tile:navigate-in', { label })
+
+    // Side-channel: ping the swarm interest signal BEFORE we lineage-
+    // enter. Other participants at the SAME location see our cue and
+    // can choose to join — "I'm going in there, please follow."
+    // Fire-and-forget; the publish is a kind-30203 with parameterized-
+    // replaceable d-tag so repeated entries refresh rather than spam.
+    // Safe when no swarm bee is loaded — silent no-op.
+    interface SwarmInterestApi { publishInterest: (name: string) => Promise<void> }
+    const swarm = window.ioc.get<SwarmInterestApi>('@diamondcoreprocessor.com/SwarmDrone')
+    if (swarm?.publishInterest) {
+      void swarm.publishInterest(label).catch(() => { /* silent — swarm logs internally */ })
+    }
+
     lineage.explorerEnter(label)
     // Processor pulse triggered by lineage change
   }
