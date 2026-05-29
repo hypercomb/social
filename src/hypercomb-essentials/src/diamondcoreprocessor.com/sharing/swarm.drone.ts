@@ -64,15 +64,6 @@ const SIGNATURE_STORE_KEY = '@hypercomb/SignatureStore'
 const STORE_KEY = '@hypercomb.social/Store'
 const ROOM_STORE_KEY = '@hypercomb.social/RoomStore'
 const SECRET_STORE_KEY = '@hypercomb.social/SecretStore'
-const CONTENT_BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
-
-// Cooldown between consecutive broker visuals fetches for the same sig.
-// Tile sources are queried on every render; without this, an empty
-// cache for a sig would spam a fetch every frame. 15s is short enough
-// that browsing into a new area gets a re-attempt soon if the first
-// pass found nothing, long enough that idle render churn doesn't
-// generate traffic.
-const BROKER_FETCH_COOLDOWN_MS = 15_000
 
 // How deep we walk our local subtree on each publish. Capped so a
 // publisher's entire OPFS isn't dumped onto the relay at boot — but
@@ -390,7 +381,7 @@ export class SwarmDrone extends Drone {
   // resolves, we still subscribe + publish on time. The primary trigger is
   // the Lineage `change` event we wire up in the constructor below.
   protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret']
-  protected override emits: string[] = ['swarm:peers-changed', 'swarm:resource-arrived', 'swarm:hide-changed']
+  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed']
 
   // Per-lineage subscription handle. We open one per visited sig and
   // never close (cheap — mesh dedupes by sig at the bucket layer).
@@ -409,17 +400,6 @@ export class SwarmDrone extends Drone {
   // side so we don't keep showing a peer's tiles after their event
   // has lapsed in the relay's cache.
   #peerLastSeenMsBySig = new Map<string, Map<string, number>>()
-
-  // Per (sig, pubkey) — the highest `created_at` we've ever cached
-  // for that peer at that sig. Used in #onEvent to reject inbound
-  // events that are OLDER than what we already have cached. The
-  // relay-side dedup of parameterized-replaceable events is supposed
-  // to keep only the latest event per (pubkey, kind, d-tag), but some
-  // public relays don't enforce strictly and replay multiple versions
-  // out of order on REQ. Without this guard, an older empty publish
-  // arriving last clobbers a newer populated layer — visible as
-  // "subtree adopt finds nothing even though A clearly published it."
-  #peerLatestCreatedAtBySig = new Map<string, Map<string, number>>()
 
   // Per-pubkey-per-lineage hidden-tile names. Populated from kind-
   // 30202 events (SWARM_HIDE_KIND). The publisher's own hide event
@@ -480,13 +460,6 @@ export class SwarmDrone extends Drone {
   // peers in different rooms or with wrong secrets don't see each
   // other's tiles even though they're at the same lineage path.
   #currentSig = ''
-
-  // Cooldown set for broker visuals fetches. The tile source runs
-  // every render — without a cooldown, a peer with an empty cache at
-  // a sig would broadcast a visuals request on every frame. After a
-  // fetch attempt (success OR failure), the sig sits in this set for
-  // BROKER_FETCH_COOLDOWN_MS before another fetch is allowed.
-  #brokerFetchAttempts = new Set<string>()
 
   // Privacy credentials are sourced from the canonical RoomStore +
   // SecretStore singletons (one source of truth, also read by show-
@@ -639,7 +612,6 @@ export class SwarmDrone extends Drone {
     }
     this.#peerLayersBySig.delete(sig)
     this.#peerLastSeenMsBySig.delete(sig)
-    this.#peerLatestCreatedAtBySig.delete(sig)
     this.#lastPublishedBySig.delete(sig)
     this.#lastPublishTimeMsBySig.delete(sig)
     this.emitEffect('swarm:peers-changed', { sig, pubkey: '', reason: 'manual-refresh' })
@@ -691,7 +663,6 @@ export class SwarmDrone extends Drone {
     const affectedSigs = [...this.#peerLayersBySig.keys()]
     this.#peerLayersBySig.clear()
     this.#peerLastSeenMsBySig.clear()
-    this.#peerLatestCreatedAtBySig.clear()
     this.#lastPublishedBySig.clear()
     this.#lastPublishTimeMsBySig.clear()
     for (const sig of affectedSigs) {
@@ -809,7 +780,6 @@ export class SwarmDrone extends Drone {
         this.#subsBySig.clear()
         this.#peerLayersBySig.clear()
         this.#peerLastSeenMsBySig.clear()
-        this.#peerLatestCreatedAtBySig.clear()
         this.#lastPublishedBySig.clear()
         this.#lastPublishTimeMsBySig.clear()
         // Resource subs ride the same mesh socket as layer subs; tear
@@ -932,15 +902,7 @@ export class SwarmDrone extends Drone {
     // CRITICAL: without our kind in the list, the mesh's REQ filter pins
     // to the legacy default [29010] and our swarm events get filtered
     // out at the relay — silent miss.
-    // Includes 20400 (broker request, ephemeral) + 30401 (broker
-    // response, parameterized-replaceable). The replaceable kind means
-    // the relay caches one response per (pubkey, sig) — newcomers
-    // hit the cache on REQ replay without anyone re-publishing.
-    // Documented coupling: see content-broker.drone.ts. Adding them
-    // here (rather than having the broker call configureKinds with
-    // its own list) keeps the kinds allowlist mechanically single-source
-    // so a future kinds-registry refactor has one site to migrate.
-    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, 20400, 30401], true)
+    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND], true)
   }
 
   /**
@@ -993,50 +955,6 @@ export class SwarmDrone extends Drone {
    * consumer convenience (show-cell binds images sync without
    * reaching into the props shape).
    */
-  /**
-   * Subscribe to a peer slot identified by a path off the current zone
-   * and resolve once the first relay-replayed event has landed (or the
-   * timeout elapses). Used by the recursive-adopt walk: an adopt at /
-   * needs to see what the peer has at /<name>, /<name>/<grand>, etc.
-   * without the user actually navigating there.
-   *
-   * Routes through `#ensureSubscribed` so the swarm's own `#onEvent`
-   * runs on inbound events — that's what populates `#peerLayersBySig`,
-   * which `peerTilesAtSig` reads. Calling `mesh.ensureStartedForSig`
-   * directly fills only the MESH cache, leaving the swarm cache empty.
-   *
-   * Idempotent — repeat calls for the same sig reuse the existing
-   * bucket without sending another REQ.
-   */
-  public ensurePeerCacheAt = async (
-    segments: readonly string[],
-    timeoutMs = 1500,
-  ): Promise<string> => {
-    const sig = await this.composeSigForSegments(segments)
-    if (!sig) return ''
-    this.#ensureSubscribed(sig)
-
-    // Wait for ACTUAL peer tile data to land — not just any event on
-    // the sig channel. mesh.awaitReadyForSig resolves on the first
-    // event of any kind, but the channel carries multiple kinds:
-    // kind 30200 (swarm layer events) populate #peerLayersBySig via
-    // #onEvent, but kind 30401 (broker visuals responses) and other
-    // events arrive on the same bucket and would prematurely resolve
-    // the wait. Caller (adopt walk) then reads peerTilesAtSig before
-    // any 30200 has been processed → returns empty → recursion stops
-    // even though the peer DID publish here.
-    //
-    // Poll the actual cache instead. 50ms granularity gives well-under-
-    // 100ms latency in the hot path while keeping CPU cost negligible.
-    // Early-return when data appears; fall through to timeout otherwise.
-    const start = Date.now()
-    while (Date.now() - start < timeoutMs) {
-      if (this.peerTilesAtSig(sig).length > 0) return sig
-      await new Promise(r => setTimeout(r, 50))
-    }
-    return sig
-  }
-
   public peerTilesAtSig = (sig: string): readonly ({ name: string; peerPubkey: string; imageSig?: string } & Record<string, unknown>)[] => {
     if (!sig) return []
     const peerLayers = this.#peerLayersBySig.get(sig)
@@ -1114,17 +1032,6 @@ export class SwarmDrone extends Drone {
         const sig = await this.composeSigForSegments(loc.segments)
         if (!sig) return []
         const tiles = this.peerTilesAtSig(sig)
-
-        // Empty peer cache for this location? Fire a broker visuals
-        // fetch in the background. Any peer in the swarm who has
-        // cached events for this composedSig will respond; on success
-        // we inject those events into our own peer cache and emit
-        // swarm:peers-changed, which triggers show-cell's repaint.
-        // The render at hand returns whatever's already in cache (may
-        // be empty this pass — render is non-blocking by design).
-        if (tiles.length === 0) {
-          void this.#maybeBrokerFetchVisuals(sig)
-        }
         // Lineage-keyed hide filter — drop any peer visual whose path
         // (currentSegments + name) is in the local hide list. Path-keyed
         // is sync (no sign() needed) and matches the user-visible
@@ -1152,88 +1059,6 @@ export class SwarmDrone extends Drone {
     }
     if (attempts >= 50) return  // ~5s of retries is enough; give up silently
     setTimeout(() => this.#registerTileSource(attempts + 1), 100)
-  }
-
-  /**
-   * Background broker visuals fetch — kicked off from the tile source
-   * when the live peer cache is empty for a composedSig. Asks the
-   * swarm "anyone have visuals at this sig?" via the broker; on
-   * response, injects the cached events into #peerLayersBySig as if
-   * they had arrived through normal subscription. Triggers the
-   * standard swarm:peers-changed emit so show-cell repaints.
-   *
-   * Cooldown via #brokerFetchAttempts prevents per-frame spam — once
-   * we've attempted a sig, no retry for BROKER_FETCH_COOLDOWN_MS
-   * regardless of whether the attempt succeeded or timed out.
-   *
-   * Silent on no-broker (the dependency may not be registered yet on
-   * boot), silent on no-responder, silent on malformed responses.
-   * The render path is non-blocking; failures simply mean "no peer
-   * tiles at this location this pass" — same as before.
-   */
-  #maybeBrokerFetchVisuals = async (composedSig: string): Promise<void> => {
-    if (this.#brokerFetchAttempts.has(composedSig)) return
-    this.#brokerFetchAttempts.add(composedSig)
-    setTimeout(() => this.#brokerFetchAttempts.delete(composedSig), BROKER_FETCH_COOLDOWN_MS)
-
-    const broker = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(
-      CONTENT_BROKER_KEY,
-    ) as { fetchVisualsAt?: (sig: string, timeoutMs?: number) => Promise<readonly {
-      pubkey: string; content: string; created_at: number; tags: string[][]
-    }[] | null> } | undefined
-    if (!broker?.fetchVisualsAt) return
-
-    const entries = await broker.fetchVisualsAt(composedSig, 1500)
-    if (!entries || entries.length === 0) return
-
-    // Inject each entry into the swarm cache. Per-pubkey, per-sig —
-    // mirrors what #onEvent does for live subscription arrivals so
-    // downstream readers (peerTilesAtSig, render path) don't need to
-    // distinguish broker-origin from live.
-    let bag = this.#peerLayersBySig.get(composedSig)
-    if (!bag) { bag = new Map(); this.#peerLayersBySig.set(composedSig, bag) }
-    let lastSeenBag = this.#peerLastSeenMsBySig.get(composedSig)
-    if (!lastSeenBag) { lastSeenBag = new Map(); this.#peerLastSeenMsBySig.set(composedSig, lastSeenBag) }
-
-    let injected = 0
-    for (const entry of entries) {
-      const pubkey = String(entry.pubkey ?? '').toLowerCase()
-      if (!pubkey) continue
-      if (this.#myPubkey && pubkey === this.#myPubkey) continue  // self-skip
-      // Freshness gate — same logic as #onEvent's gate for live
-      // arrivals. A broker-served stale event isn't more trustworthy
-      // than a relay-served one.
-      const nowSec = Math.floor(Date.now() / 1000)
-      const expirationTag = entry.tags?.find(t => t[0] === 'expiration')?.[1]
-      if (expirationTag) {
-        const expirationSec = Number(expirationTag)
-        if (Number.isFinite(expirationSec) && expirationSec <= nowSec) continue
-      }
-
-      let payload: unknown
-      try { payload = JSON.parse(entry.content) } catch { continue }
-      if (!payload || typeof payload !== 'object') continue
-      const raw = payload as SwarmLayerPayload
-      if (!Array.isArray(raw.visuals)) continue
-
-      const cleanVisuals: ({ name: string } & Record<string, unknown>)[] = []
-      for (const v of raw.visuals) {
-        if (!v || typeof v !== 'object' || Array.isArray(v)) continue
-        const cleaned = sanitizeVisual(v as Record<string, unknown>)
-        if (cleaned) cleanVisuals.push(cleaned)
-      }
-      bag.set(pubkey, { visuals: cleanVisuals })
-      lastSeenBag.set(pubkey, Date.now())
-      injected++
-    }
-
-    if (injected > 0) {
-      this.#schedulePeersChangedEmit({
-        sig: composedSig,
-        pubkey: '',
-        reason: 'broker-visuals-fetched',
-      })
-    }
   }
 
   #resolveMyPubkey = async (): Promise<boolean> => {
@@ -1360,7 +1185,6 @@ export class SwarmDrone extends Drone {
     this.#subsBySig.clear()
     this.#peerLayersBySig.clear()
     this.#peerLastSeenMsBySig.clear()
-    this.#peerLatestCreatedAtBySig.clear()
     this.#lastPublishedBySig.clear()
     this.#lastPublishTimeMsBySig.clear()
     this.#hiddenByPubkeyBySig.clear()
@@ -1409,7 +1233,6 @@ export class SwarmDrone extends Drone {
       }
       this.#peerLayersBySig.delete(prevSig)
       this.#peerLastSeenMsBySig.delete(prevSig)
-      this.#peerLatestCreatedAtBySig.delete(prevSig)
       this.#lastPublishedBySig.delete(prevSig)
       this.#lastPublishTimeMsBySig.delete(prevSig)
       this.#hiddenByPubkeyBySig.delete(prevSig)
@@ -1535,28 +1358,6 @@ export class SwarmDrone extends Drone {
     }
     const layer: SwarmLayerPayload = { visuals: cleanVisuals }
 
-    // Stale-event guard. Public relays that don't strictly enforce
-    // NIP-33 parameterized-replaceable dedup may replay multiple
-    // versions of the same (pubkey, kind, d-tag) event, sometimes
-    // out of chronological order. Without comparing `created_at`,
-    // an older publish arriving LAST would clobber a newer one
-    // we already cached — observed on wss://jwize.com replaying
-    // A's pre-add empty `{visuals: []}` after the populated `[team]`
-    // version, with the empty winning. Track the highest
-    // `created_at` we've seen per (sig, pubkey) and drop anything
-    // older.
-    const incomingCreatedAt = Number(evt?.event?.created_at ?? 0)
-    let latestBag = this.#peerLatestCreatedAtBySig.get(sig)
-    if (!latestBag) { latestBag = new Map(); this.#peerLatestCreatedAtBySig.set(sig, latestBag) }
-    const cachedCreatedAt = latestBag.get(pubkey) ?? 0
-    if (incomingCreatedAt > 0 && incomingCreatedAt < cachedCreatedAt) {
-      console.log('[swarm] onEvent DROPPED: older event', {
-        sig: sig.slice(0, 8), pubkey: pubkey.slice(0, 8),
-        incomingCreatedAt, cachedCreatedAt,
-      })
-      return
-    }
-
     let bag = this.#peerLayersBySig.get(sig)
     if (!bag) { bag = new Map(); this.#peerLayersBySig.set(sig, bag) }
     const previousLayer = bag.get(pubkey)
@@ -1564,7 +1365,6 @@ export class SwarmDrone extends Drone {
     const layerChanged = isNewPeer ||
       JSON.stringify(previousLayer) !== JSON.stringify(layer)
     bag.set(pubkey, layer)
-    latestBag.set(pubkey, incomingCreatedAt)
     console.log('[swarm] onEvent CACHED', { sig: sig.slice(0,8), pubkey: pubkey.slice(0,8), visualCount: layer.visuals.length, isNewPeer, layerChanged })
 
     // Stamp this peer's last-seen time at this sig. Drives the
@@ -1608,6 +1408,26 @@ export class SwarmDrone extends Drone {
     this.#peersChangedTimer = setTimeout(() => {
       this.#peersChangedTimer = null
       this.emitEffect('swarm:peers-changed', payload)
+      // Convenience presence signal — UI doesn't have to compute the
+      // count itself or know about peerLayersBySig. Emitted alongside
+      // peers-changed; same debounce window so a burst of joins/leaves
+      // collapses to one presence emit per ~150ms.
+      //
+      // `alone` = no live peers at this sig OTHER than ourselves
+      // (participantsAtCurrentSig already excludes self + stale).
+      // UI uses this for "you're the first one in here" indicators
+      // when a user navigates into an empty location, and updates
+      // when a host arrives.
+      if (payload.sig === this.#currentSig) {
+        const peers = this.participantsAtCurrentSig()
+        this.emitEffect('swarm:presence-changed', {
+          sig: payload.sig,
+          peerCount: peers.length,
+          alone: peers.length === 0,
+          peers,
+          reason: payload.reason,
+        })
+      }
     }, 150)
   }
 

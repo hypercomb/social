@@ -38,12 +38,3 @@ src/hypercomb-web/public/content/*
 src/hypercomb-essentials/src/**/index.ts
 src/hypercomb-essentials/src/**/*-keys.ts
 src/hypercomb-relay/.gitignore
-
-# hypercomb-relay runtime artifacts (SQLite event store + NSSM service logs)
-src/hypercomb-relay/relay.db
-src/hypercomb-relay/relay.db-shm
-src/hypercomb-relay/relay.db-wal
-src/hypercomb-relay/relay.out.log
-src/hypercomb-relay/relay.err.log
-src/hypercomb-relay/relay.out.log.*
-src/hypercomb-relay/relay.err.log.*
