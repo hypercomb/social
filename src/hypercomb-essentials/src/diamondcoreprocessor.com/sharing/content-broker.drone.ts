@@ -50,7 +50,27 @@ const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 const STORE_KEY = '@hypercomb.social/Store'
 
 const KIND_FETCH_REQUEST = 20400
-const KIND_FETCH_RESPONSE = 20401
+// Responses are PARAMETERIZED-REPLACEABLE (30000-39999 range). The
+// relay enforces one stored event per (pubkey, kind, d-tag=sig), so
+// each responder's bytes for a given sig live in the relay cache and
+// survive across sessions. Newcomers subscribed to the sig get cached
+// responses via REQ replay — no broadcast needed for the second-onward
+// requester. The relay IS the cache; we don't have to coordinate.
+//
+// Trade-off: we don't try to prevent multiple responders publishing
+// duplicate bytes (no jitter, no check-before-publish). With N peers
+// holding the same sig, we get up to N responses on the wire per
+// uncached request. The requester takes the first valid one; the
+// others are wasted bandwidth but harmless. "First valid wins" stays
+// the simplest and lowest-latency design — useful coordination only
+// matters at large swarm sizes, which we can layer in later if needed.
+const KIND_FETCH_RESPONSE = 30401
+
+// Long expiration on responses. Content is sig-addressed and immutable,
+// so technically a response could live forever — but most relays
+// garbage-collect old events. 1 day keeps newcomers' REQ replays useful
+// for an active session window without piling up indefinitely.
+const RESPONSE_TTL_SECS = 86_400
 
 // Well-known broadcast channel. Every participant subscribes here at
 // boot; every request publishes here. Could be made room-scoped later
@@ -76,6 +96,32 @@ const DEFAULT_TIMEOUT_MS = 2000
 
 export type ContentType = 'layer' | 'resource' | 'dependency'
 
+// Visuals-by-composedSig is the second flavor of fetch this drone
+// handles. Unlike layer/resource/dependency (content-addressed by
+// merkle hash), visuals are LOCATION-addressed — the sig is
+// sha256(path + room + secret), what the swarm publishes events
+// against on kind 30200. The broker serves the latest cached event
+// per pubkey from any participant who's seen the location recently,
+// so a peer whose original publisher has gone offline (NIP-40
+// expiration past at the relay) is still reachable through anyone
+// else in the swarm who saw their visuals. "Swarm memory" without
+// any dedicated host role.
+//
+// Wire-shape difference from the content-addressed flavor:
+//   - Response content is NOT verified against the sig hash (the
+//     sig isn't a content hash; it's a location). Trust comes from
+//     the responder being a swarm member at the same room+secret —
+//     they can already publish under their own pubkey freely, so
+//     forwarding cached events is no worse than re-publishing them.
+//   - Response content is a JSON array of per-pubkey visuals records
+//     so the requester can preserve peer attribution in their cache.
+export interface CachedVisualsEntry {
+  pubkey: string
+  content: string  // The original kind-30200 event content (visuals JSON string).
+  created_at: number
+  tags: string[][]
+}
+
 interface NostrEventLike {
   id?: string
   pubkey?: string
@@ -98,6 +144,11 @@ interface MeshApi {
   publish: (kind: number, sig: string, payload: unknown, extraTags?: string[][]) => Promise<boolean>
   subscribe: (sig: string, cb: (e: MeshEvtLike) => void) => MeshSubLike
   ensureStartedForSig?: (sig: string) => void
+  // Read cached non-expired events for a sig. Backed by the mesh's
+  // own per-sig cache (itemsBySig, TTL-bounded by configureExpiry).
+  // The broker uses this to serve 'visuals' requests without keeping
+  // its own LRU — the mesh already does the work.
+  getNonExpired?: (sig: string) => readonly { event: NostrEventLike }[]
 }
 
 interface SignerApi {
@@ -133,7 +184,7 @@ function base64ToBytes(b64: string): Uint8Array {
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const hash = await crypto.subtle.digest('SHA-256', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+  const hash = await crypto.subtle.digest('SHA-256', bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
   const view = new Uint8Array(hash)
   let hex = ''
   for (let i = 0; i < view.length; i++) hex += view[i].toString(16).padStart(2, '0')
@@ -170,6 +221,10 @@ export class ContentBrokerDrone extends Drone {
   // resolving from a single response. Cleaned up when the fetch
   // settles.
   #pendingFetches = new Map<string, Promise<Uint8Array | null>>()
+
+  // Same coalescing for visuals fetches — distinct map because the
+  // return shape is different (CachedVisualsEntry[] vs Uint8Array).
+  #pendingVisuals = new Map<string, Promise<readonly CachedVisualsEntry[] | null>>()
 
   constructor() {
     super()
@@ -222,6 +277,37 @@ export class ContentBrokerDrone extends Drone {
     this.#pendingFetches.set(s, fetchPromise)
     try { return await fetchPromise }
     finally { this.#pendingFetches.delete(s) }
+  }
+
+  /**
+   * Fetch the cached visuals for a composedSig from any participant
+   * in the swarm. Returns an array of per-pubkey visuals entries —
+   * the requester feeds these into their own swarm peer cache so
+   * show-cell renders them as if the original publishes had just
+   * arrived. Returns null on timeout or no responder.
+   *
+   * Coalesced like fetchBySig: concurrent callers for the same
+   * composedSig share one in-flight broadcast.
+   *
+   * Unlike layer/resource/dependency, no sha256 verification — the
+   * sig isn't a content hash. Trust comes from swarm membership
+   * (matching room+secret); content sanitisation happens at the
+   * swarm cache injection point, not here.
+   */
+  public fetchVisualsAt = async (
+    composedSig: string,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+  ): Promise<readonly CachedVisualsEntry[] | null> => {
+    const s = String(composedSig ?? '').toLowerCase().trim()
+    if (!SIG_RE.test(s)) return null
+
+    const inFlight = this.#pendingVisuals.get(s)
+    if (inFlight) return inFlight
+
+    const fetchPromise = this.#fetchVisualsOverMesh(s, timeoutMs)
+    this.#pendingVisuals.set(s, fetchPromise)
+    try { return await fetchPromise }
+    finally { this.#pendingVisuals.delete(s) }
   }
 
   // ─────────────────────────────────────────────────────────────────
@@ -281,6 +367,69 @@ export class ContentBrokerDrone extends Drone {
     })
   }
 
+  #fetchVisualsOverMesh = async (composedSig: string, timeoutMs: number): Promise<readonly CachedVisualsEntry[] | null> => {
+    const mesh = this.#getMesh()
+    if (!mesh) return null
+
+    return new Promise<readonly CachedVisualsEntry[] | null>((resolve) => {
+      let settled = false
+      const cleanup = (): void => {
+        if (settled) return
+        settled = true
+        try { sub?.close() } catch { /* ignore */ }
+      }
+
+      // Subscribe to responses on the composedSig channel BEFORE
+      // publishing the request — same fast-path concern as the
+      // content-by-sig flow above.
+      const sub: MeshSubLike = mesh.subscribe(composedSig, (evt) => {
+        if (settled) return
+        if (Number(evt.event?.kind) !== KIND_FETCH_RESPONSE) return
+        const pubkey = String(evt.event?.pubkey ?? '').toLowerCase()
+        if (!pubkey) return  // local fanout, pre-sign
+        if (this.#myPubkey && pubkey === this.#myPubkey) return  // self-echo
+        const typeTag = evt.event?.tags?.find(t => t[0] === 't')?.[1]
+        if (typeTag !== 'visuals') return
+
+        const b64 = String(evt.event?.content ?? '')
+        if (!b64) return
+        try {
+          const bytes = base64ToBytes(b64)
+          const decoded = new TextDecoder().decode(bytes)
+          const parsed = JSON.parse(decoded)
+          if (!Array.isArray(parsed)) return
+          // Light shape validation — entries must have pubkey + content
+          // strings. Anything else gets filtered out.
+          const entries: CachedVisualsEntry[] = []
+          for (const raw of parsed) {
+            if (!raw || typeof raw !== 'object') continue
+            const pk = String(raw.pubkey ?? '').toLowerCase()
+            if (!/^[0-9a-f]{64}$/.test(pk)) continue
+            const content = typeof raw.content === 'string' ? raw.content : ''
+            const createdAt = Number(raw.created_at ?? 0)
+            const tags = Array.isArray(raw.tags) ? raw.tags : []
+            entries.push({ pubkey: pk, content, created_at: createdAt, tags })
+          }
+          if (entries.length === 0) return
+          cleanup()
+          resolve(entries)
+        } catch { /* malformed — keep waiting for another responder */ }
+      })
+
+      // Broadcast the request.
+      void mesh.publish(KIND_FETCH_REQUEST, BROADCAST_TAG, '', [
+        ['d', composedSig],
+        ['t', 'visuals'],
+      ])
+
+      setTimeout(() => {
+        if (settled) return
+        cleanup()
+        resolve(null)
+      }, Math.max(100, timeoutMs))
+    })
+  }
+
   /**
    * Verify a response payload against the requested sig and, on
    * success, persist to the local Store at the canonical location for
@@ -306,9 +455,9 @@ export class ContentBrokerDrone extends Drone {
     const store = this.#getStore()
     try {
       if (type === 'layer' && store?.writeLayerBytes) {
-        await store.writeLayerBytes(sig, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+        await store.writeLayerBytes(sig, bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
       } else if (type === 'resource' && store?.putResource) {
-        await store.putResource(new Blob([bytes]))
+        await store.putResource(new Blob([bytes as BlobPart]))
       } else if (type === 'dependency') {
         await this.#writeDependencyBytes(sig, bytes)
       }
@@ -371,7 +520,7 @@ export class ContentBrokerDrone extends Drone {
       const deps = await root.getDirectoryHandle('__dependencies__', { create: true })
       const handle = await deps.getFileHandle(sig, { create: true })
       const w = await handle.createWritable()
-      try { await w.write(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)) }
+      try { await w.write(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer) }
       finally { await w.close() }
     } catch { /* best-effort */ }
   }
@@ -402,6 +551,16 @@ export class ContentBrokerDrone extends Drone {
     const sigTag = evt.event?.tags?.find(t => t[0] === 'd')?.[1]
     const typeTag = evt.event?.tags?.find(t => t[0] === 't')?.[1]
     if (!sigTag || !SIG_RE.test(sigTag)) return
+
+    // Visuals path — fetch from the mesh's per-sig cache and serve
+    // whatever kind-30200 events we have cached for this composedSig.
+    // The mesh's TTL window (ttlMs in nostr-mesh.drone) bounds how
+    // long a peer can serve as proxy for another peer's view.
+    if (typeTag === 'visuals') {
+      await this.#serveVisuals(sigTag)
+      return
+    }
+
     if (typeTag !== 'layer' && typeTag !== 'resource' && typeTag !== 'dependency') return
 
     const bytes = await this.#readLocal(sigTag, typeTag as ContentType)
@@ -410,11 +569,85 @@ export class ContentBrokerDrone extends Drone {
 
     const mesh = this.#getMesh()
     if (!mesh?.publish) return
-    const content = arrayBufferToBase64(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength))
+    const content = arrayBufferToBase64(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
+    // Parameterized-replaceable: ['d', sig] makes the relay store
+    // exactly one of these per (pubkey, kind, sig). Future requesters
+    // for the same sig hit the cached event via REQ replay — they
+    // don't even need to publish a request, the relay just delivers
+    // what's already there. ['expiration', ...] lets the relay garbage-
+    // collect after RESPONSE_TTL_SECS so the cache doesn't grow
+    // unbounded.
+    const expirationSecs = Math.floor(Date.now() / 1000) + RESPONSE_TTL_SECS
     try {
-      await mesh.publish(KIND_FETCH_RESPONSE, sigTag, content, [['t', typeTag]])
+      await mesh.publish(KIND_FETCH_RESPONSE, sigTag, content, [
+        ['d', sigTag],
+        ['t', typeTag],
+        ['expiration', String(expirationSecs)],
+      ])
     } catch (err) {
       console.warn('[content-broker] response publish failed', { sig: sigTag.slice(0, 12), err })
+    }
+  }
+
+  /**
+   * Serve a visuals broker request from the mesh's cached events.
+   * Reads non-expired events at the composedSig, filters to kind-30200,
+   * packages them into the CachedVisualsEntry[] wire shape, publishes
+   * as a parameterized-replaceable response keyed on the sig.
+   *
+   * Silent no-op when we have nothing cached — keeps the swarm quiet
+   * when only some peers can serve a given location.
+   */
+  #serveVisuals = async (composedSig: string): Promise<void> => {
+    const mesh = this.#getMesh()
+    if (!mesh?.getNonExpired || !mesh?.publish) return
+
+    const cached = mesh.getNonExpired(composedSig)
+    // Only the swarm's layer kind. Hide events (30202), resource events
+    // (30201), and other kinds at this sig aren't part of the "what's
+    // here" surface — they have their own broker types if needed later.
+    const visualEvents = cached.filter(e => Number(e.event?.kind) === 30200)
+    if (visualEvents.length === 0) return
+
+    // Dedupe by pubkey, keeping the latest per peer. The relay's
+    // parameterized-replaceable rules already enforce this on its
+    // side, but our local cache (mesh.itemsBySig) keeps the full
+    // multi-pubkey list — so we squash on the way out.
+    const latestByPubkey = new Map<string, NostrEventLike>()
+    for (const item of visualEvents) {
+      const pk = String(item.event?.pubkey ?? '').toLowerCase()
+      if (!pk) continue
+      const prev = latestByPubkey.get(pk)
+      if (!prev || Number(item.event?.created_at ?? 0) > Number(prev.created_at ?? 0)) {
+        latestByPubkey.set(pk, item.event)
+      }
+    }
+
+    const entries: CachedVisualsEntry[] = []
+    for (const [pubkey, ev] of latestByPubkey) {
+      entries.push({
+        pubkey,
+        content: String(ev.content ?? ''),
+        created_at: Number(ev.created_at ?? 0),
+        tags: Array.isArray(ev.tags) ? ev.tags : [],
+      })
+    }
+    if (entries.length === 0) return
+
+    const packed = JSON.stringify(entries)
+    const bytes = new TextEncoder().encode(packed)
+    if (bytes.byteLength === 0 || bytes.byteLength > MAX_RESPONSE_BYTES) return
+
+    const content = arrayBufferToBase64(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
+    const expirationSecs = Math.floor(Date.now() / 1000) + RESPONSE_TTL_SECS
+    try {
+      await mesh.publish(KIND_FETCH_RESPONSE, composedSig, content, [
+        ['d', composedSig],
+        ['t', 'visuals'],
+        ['expiration', String(expirationSecs)],
+      ])
+    } catch (err) {
+      console.warn('[content-broker] visuals response publish failed', { sig: composedSig.slice(0, 12), err })
     }
   }
 

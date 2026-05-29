@@ -64,6 +64,15 @@ const SIGNATURE_STORE_KEY = '@hypercomb/SignatureStore'
 const STORE_KEY = '@hypercomb.social/Store'
 const ROOM_STORE_KEY = '@hypercomb.social/RoomStore'
 const SECRET_STORE_KEY = '@hypercomb.social/SecretStore'
+const CONTENT_BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
+
+// Cooldown between consecutive broker visuals fetches for the same sig.
+// Tile sources are queried on every render; without this, an empty
+// cache for a sig would spam a fetch every frame. 15s is short enough
+// that browsing into a new area gets a re-attempt soon if the first
+// pass found nothing, long enough that idle render churn doesn't
+// generate traffic.
+const BROKER_FETCH_COOLDOWN_MS = 15_000
 
 // How deep we walk our local subtree on each publish. Capped so a
 // publisher's entire OPFS isn't dumped onto the relay at boot — but
@@ -460,6 +469,13 @@ export class SwarmDrone extends Drone {
   // peers in different rooms or with wrong secrets don't see each
   // other's tiles even though they're at the same lineage path.
   #currentSig = ''
+
+  // Cooldown set for broker visuals fetches. The tile source runs
+  // every render — without a cooldown, a peer with an empty cache at
+  // a sig would broadcast a visuals request on every frame. After a
+  // fetch attempt (success OR failure), the sig sits in this set for
+  // BROKER_FETCH_COOLDOWN_MS before another fetch is allowed.
+  #brokerFetchAttempts = new Set<string>()
 
   // Privacy credentials are sourced from the canonical RoomStore +
   // SecretStore singletons (one source of truth, also read by show-
@@ -902,13 +918,15 @@ export class SwarmDrone extends Drone {
     // CRITICAL: without our kind in the list, the mesh's REQ filter pins
     // to the legacy default [29010] and our swarm events get filtered
     // out at the relay — silent miss.
-    // Includes 20400/20401 — content-broker request/response kinds — so
-    // the broker drone's subscribes/publishes flow through the same mesh
-    // sockets. Documented coupling: see content-broker.drone.ts. Adding
-    // them here (rather than having the broker call configureKinds with
+    // Includes 20400 (broker request, ephemeral) + 30401 (broker
+    // response, parameterized-replaceable). The replaceable kind means
+    // the relay caches one response per (pubkey, sig) — newcomers
+    // hit the cache on REQ replay without anyone re-publishing.
+    // Documented coupling: see content-broker.drone.ts. Adding them
+    // here (rather than having the broker call configureKinds with
     // its own list) keeps the kinds allowlist mechanically single-source
     // so a future kinds-registry refactor has one site to migrate.
-    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, 20400, 20401], true)
+    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, 20400, 30401], true)
   }
 
   /**
@@ -1072,6 +1090,17 @@ export class SwarmDrone extends Drone {
         const sig = await this.composeSigForSegments(loc.segments)
         if (!sig) return []
         const tiles = this.peerTilesAtSig(sig)
+
+        // Empty peer cache for this location? Fire a broker visuals
+        // fetch in the background. Any peer in the swarm who has
+        // cached events for this composedSig will respond; on success
+        // we inject those events into our own peer cache and emit
+        // swarm:peers-changed, which triggers show-cell's repaint.
+        // The render at hand returns whatever's already in cache (may
+        // be empty this pass — render is non-blocking by design).
+        if (tiles.length === 0) {
+          void this.#maybeBrokerFetchVisuals(sig)
+        }
         // Lineage-keyed hide filter — drop any peer visual whose path
         // (currentSegments + name) is in the local hide list. Path-keyed
         // is sync (no sign() needed) and matches the user-visible
@@ -1099,6 +1128,88 @@ export class SwarmDrone extends Drone {
     }
     if (attempts >= 50) return  // ~5s of retries is enough; give up silently
     setTimeout(() => this.#registerTileSource(attempts + 1), 100)
+  }
+
+  /**
+   * Background broker visuals fetch — kicked off from the tile source
+   * when the live peer cache is empty for a composedSig. Asks the
+   * swarm "anyone have visuals at this sig?" via the broker; on
+   * response, injects the cached events into #peerLayersBySig as if
+   * they had arrived through normal subscription. Triggers the
+   * standard swarm:peers-changed emit so show-cell repaints.
+   *
+   * Cooldown via #brokerFetchAttempts prevents per-frame spam — once
+   * we've attempted a sig, no retry for BROKER_FETCH_COOLDOWN_MS
+   * regardless of whether the attempt succeeded or timed out.
+   *
+   * Silent on no-broker (the dependency may not be registered yet on
+   * boot), silent on no-responder, silent on malformed responses.
+   * The render path is non-blocking; failures simply mean "no peer
+   * tiles at this location this pass" — same as before.
+   */
+  #maybeBrokerFetchVisuals = async (composedSig: string): Promise<void> => {
+    if (this.#brokerFetchAttempts.has(composedSig)) return
+    this.#brokerFetchAttempts.add(composedSig)
+    setTimeout(() => this.#brokerFetchAttempts.delete(composedSig), BROKER_FETCH_COOLDOWN_MS)
+
+    const broker = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(
+      CONTENT_BROKER_KEY,
+    ) as { fetchVisualsAt?: (sig: string, timeoutMs?: number) => Promise<readonly {
+      pubkey: string; content: string; created_at: number; tags: string[][]
+    }[] | null> } | undefined
+    if (!broker?.fetchVisualsAt) return
+
+    const entries = await broker.fetchVisualsAt(composedSig, 1500)
+    if (!entries || entries.length === 0) return
+
+    // Inject each entry into the swarm cache. Per-pubkey, per-sig —
+    // mirrors what #onEvent does for live subscription arrivals so
+    // downstream readers (peerTilesAtSig, render path) don't need to
+    // distinguish broker-origin from live.
+    let bag = this.#peerLayersBySig.get(composedSig)
+    if (!bag) { bag = new Map(); this.#peerLayersBySig.set(composedSig, bag) }
+    let lastSeenBag = this.#peerLastSeenMsBySig.get(composedSig)
+    if (!lastSeenBag) { lastSeenBag = new Map(); this.#peerLastSeenMsBySig.set(composedSig, lastSeenBag) }
+
+    let injected = 0
+    for (const entry of entries) {
+      const pubkey = String(entry.pubkey ?? '').toLowerCase()
+      if (!pubkey) continue
+      if (this.#myPubkey && pubkey === this.#myPubkey) continue  // self-skip
+      // Freshness gate — same logic as #onEvent's gate for live
+      // arrivals. A broker-served stale event isn't more trustworthy
+      // than a relay-served one.
+      const nowSec = Math.floor(Date.now() / 1000)
+      const expirationTag = entry.tags?.find(t => t[0] === 'expiration')?.[1]
+      if (expirationTag) {
+        const expirationSec = Number(expirationTag)
+        if (Number.isFinite(expirationSec) && expirationSec <= nowSec) continue
+      }
+
+      let payload: unknown
+      try { payload = JSON.parse(entry.content) } catch { continue }
+      if (!payload || typeof payload !== 'object') continue
+      const raw = payload as SwarmLayerPayload
+      if (!Array.isArray(raw.visuals)) continue
+
+      const cleanVisuals: ({ name: string } & Record<string, unknown>)[] = []
+      for (const v of raw.visuals) {
+        if (!v || typeof v !== 'object' || Array.isArray(v)) continue
+        const cleaned = sanitizeVisual(v as Record<string, unknown>)
+        if (cleaned) cleanVisuals.push(cleaned)
+      }
+      bag.set(pubkey, { visuals: cleanVisuals })
+      lastSeenBag.set(pubkey, Date.now())
+      injected++
+    }
+
+    if (injected > 0) {
+      this.#schedulePeersChangedEmit({
+        sig: composedSig,
+        pubkey: '',
+        reason: 'broker-visuals-fetched',
+      })
+    }
   }
 
   #resolveMyPubkey = async (): Promise<boolean> => {
