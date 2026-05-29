@@ -149,6 +149,95 @@ export class CommandShellComponent implements AfterViewInit {
     queueMicrotask(() => el.setSelectionRange(0, el.value.length))
   }
 
+  /** Wrap the current selection with `marker` on both sides. If nothing
+   *  is selected, the marker is inserted at the caret twice and the
+   *  caret is placed between the markers so the user can type inside.
+   *  Used by the notes-strip formatting toolbar (B/I/U/code/strike). */
+  wrapSelection(marker: string): void {
+    const el = this.inputElement
+    if (!el) return
+    el.focus()
+    const value = el.value
+    const start = el.selectionStart ?? value.length
+    const end = el.selectionEnd ?? start
+    const before = value.slice(0, start)
+    const middle = value.slice(start, end)
+    const after = value.slice(end)
+    el.value = before + marker + middle + marker + after
+    // Place caret/selection so the user's flow continues naturally:
+    // empty wrap → caret between the markers; non-empty → re-select
+    // the wrapped text so the next click on a marker layers on top.
+    const newStart = start + marker.length
+    const newEnd = newStart + middle.length
+    el.setSelectionRange(newStart, newEnd)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+
+  /** Insert text at the caret. Used by the link button (`[](url)`) and
+   *  similar template insertions. */
+  insertAtCaret(text: string): void {
+    const el = this.inputElement
+    if (!el) return
+    el.focus()
+    const value = el.value
+    const start = el.selectionStart ?? value.length
+    const end = el.selectionEnd ?? start
+    el.value = value.slice(0, start) + text + value.slice(end)
+    const caret = start + text.length
+    el.setSelectionRange(caret, caret)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+
+  /** Prefix the current line with `prefix + ' '`. The "current line" is
+   *  bounded by the nearest `\n` on either side of the caret. For the
+   *  `<input>`-backed shell there's no newline, so the prefix lands at
+   *  the start of the value. */
+  prefixLine(prefix: string): void {
+    const el = this.inputElement
+    if (!el) return
+    el.focus()
+    const value = el.value
+    const caret = el.selectionStart ?? 0
+    // Find line bounds. <input> has no \n, so this collapses to {0, len}.
+    const lineStart = value.lastIndexOf('\n', Math.max(0, caret - 1)) + 1
+    const insertion = prefix + ' '
+    el.value = value.slice(0, lineStart) + insertion + value.slice(lineStart)
+    const newCaret = caret + insertion.length
+    el.setSelectionRange(newCaret, newCaret)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+
+  /** Shift the current line by N indent units (positive indents,
+   *  negative outdents). One unit = two spaces. Outdent removes up to
+   *  one unit; never produces negative indent. */
+  indentLine(delta: number): void {
+    const el = this.inputElement
+    if (!el) return
+    el.focus()
+    const value = el.value
+    const caret = el.selectionStart ?? 0
+    const lineStart = value.lastIndexOf('\n', Math.max(0, caret - 1)) + 1
+    const lineEndCandidate = value.indexOf('\n', caret)
+    const lineEnd = lineEndCandidate === -1 ? value.length : lineEndCandidate
+    const line = value.slice(lineStart, lineEnd)
+    // Count current leading spaces (tabs converted to 2 spaces).
+    const lead = /^([ \t]*)/.exec(line)?.[1] ?? ''
+    const normalized = lead.replace(/\t/g, '  ')
+    const rest = line.slice(lead.length)
+    const UNIT = 2
+    const currentUnits = Math.floor(normalized.length / UNIT)
+    const nextUnits = Math.max(0, currentUnits + delta)
+    const newLead = ' '.repeat(nextUnits * UNIT)
+    const newLine = newLead + rest
+    el.value = value.slice(0, lineStart) + newLine + value.slice(lineEnd)
+    // Caret tracks the indent shift so the user stays at the same
+    // logical column within the text after the leading whitespace.
+    const shift = newLead.length - lead.length
+    const newCaret = Math.max(lineStart + newLead.length, caret + shift)
+    el.setSelectionRange(newCaret, newCaret)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+
   /** Suppress the suggestion dropdown (e.g. after an explicit accept). */
   suppress(): void {
     this.suppressed.set(true)

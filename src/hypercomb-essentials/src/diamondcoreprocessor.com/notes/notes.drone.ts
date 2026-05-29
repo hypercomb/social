@@ -85,9 +85,24 @@ type LayerSlotRegistryLike = {
   register: (slot: { slot: string; triggers: readonly string[] }) => void
 }
 
+/** Allowed shape tag values. Used as a presentation hint by the strip
+ *  and viewer; null means "no tag, render as plain text only".
+ *  Names are deliberately concrete (no `kind` / `category`) — they map
+ *  1:1 to the CSS-drawn shape classes that paint the glyph. */
+export type ShapeId = 'circle' | 'square' | 'triangle' | 'diamond' | 'star' | 'hexagon'
+
+const SHAPE_IDS: ReadonlySet<string> = new Set<string>([
+  'circle', 'square', 'triangle', 'diamond', 'star', 'hexagon',
+])
+
+function normalizeShape(value: unknown): ShapeId | null {
+  return typeof value === 'string' && SHAPE_IDS.has(value) ? (value as ShapeId) : null
+}
+
 /** Storage shape on disk — the canonical JSON every note blob holds. */
 type NoteLayer = {
   note: string
+  shape: ShapeId | null
   children: string[]
 }
 
@@ -102,6 +117,7 @@ type NoteLayer = {
 export type Note = {
   id: string
   text: string
+  shape: ShapeId | null
   children: Note[]
 }
 
@@ -123,6 +139,12 @@ export class NotesService {
   // Decoded note layers, keyed by layer sig. Populated lazily on read,
   // and on write right after we mint a layer.
   readonly #cache = new Map<string, NoteLayer>()
+
+  // Latest shape staged by the strip's toolbar via `notes:active-shape`.
+  // Written into the layer at commit time, so the strip's UI choice
+  // travels through the command-line's text-only payload without
+  // entering the command-line's surface. Reset to null on capture exit.
+  #activeShape: ShapeId | null = null
 
   // Memoized cell-locationSig keyed by `parent/cellLabel`. Cleared on
   // lineage navigation (same cellLabel resolves to a different location
@@ -169,25 +191,90 @@ export class NotesService {
 
     // ── EffectBus wiring ──────────────────────────────────────────────
 
-    EffectBus.on<{ cellLabel: string; prefill?: string; editId?: string }>('note:capture', (payload) => {
+    EffectBus.on<{ cellLabel: string; prefill?: string; editId?: string; shape?: unknown }>('note:capture', (payload) => {
       if (!payload?.cellLabel) return
       EffectBus.emit('command:enter-mode', {
         mode: CAPTURE_MODE,
         target: payload.cellLabel,
         prefill: payload.prefill ?? '',
         editId: payload.editId ?? '',
+        shape: normalizeShape(payload.shape),
       })
     })
 
-    EffectBus.on<{ cellLabel: string; text: string; editId?: string }>('note:commit', (payload) => {
+    // The strip emits this whenever the user picks / clears a shape
+    // in the toolbar, OR when capture mode opens (so we get the
+    // pre-filled shape for an in-flight edit). Last-value wins.
+    EffectBus.on<{ shape?: unknown }>('notes:active-shape', (payload) => {
+      this.#activeShape = normalizeShape(payload?.shape)
+    })
+
+    EffectBus.on<{ cellLabel: string; text: string; shape?: unknown; editId?: string }>('note:commit', (payload) => {
       const text = (payload?.text ?? '').trim()
       if (!payload?.cellLabel || !text) return
-      void this.#commit(payload.cellLabel, text, payload.editId)
+      // Prefer an explicit shape on the payload (rare — most paths route
+      // the choice through `notes:active-shape`). Fall back to the
+      // cached active shape staged by the strip.
+      const payloadShape = normalizeShape(payload.shape)
+      const shape = payloadShape ?? this.#activeShape
+      void this.#commit(payload.cellLabel, text, shape, payload.editId)
     })
 
     EffectBus.on<{ cellLabel: string; noteId: string }>('note:delete', (payload) => {
       if (!payload?.cellLabel || !payload?.noteId) return
       void this.#deleteByCellLabel(payload.cellLabel, payload.noteId)
+    })
+
+    // Reorder a cell's notes by moving `sourceId` to a new index. The
+    // strip's drag-handle UI fires this; under the hood it's just a
+    // permutation of the existing `notes` slot's sig array — no new
+    // resource bytes get written.
+    EffectBus.on<{ cellLabel: string; sourceId: string; targetIndex: number }>(
+      'note:reorder',
+      (payload) => {
+        if (!payload?.cellLabel || !payload?.sourceId) return
+        if (typeof payload.targetIndex !== 'number') return
+        void this.#reorderByCellLabel(payload.cellLabel, payload.sourceId, payload.targetIndex)
+      },
+    )
+
+    // Nest `sourceId` under `targetParentId`. Both must already exist in
+    // the cell's tree (any depth). The full tree is read, mutated, and
+    // re-materialized from leaves up — unchanged subtrees hit the
+    // Store's content-address dedup and produce identical sigs.
+    EffectBus.on<{ cellLabel: string; sourceId: string; targetParentId: string }>(
+      'note:nest',
+      (payload) => {
+        if (!payload?.cellLabel || !payload?.sourceId || !payload?.targetParentId) return
+        if (payload.sourceId === payload.targetParentId) return
+        void this.#moveNote(payload.cellLabel, payload.sourceId, payload.targetParentId)
+      },
+    )
+
+    // Un-nest `sourceId` — move it back to the cell's top level.
+    // Equivalent to `#moveNote(cellLabel, sourceId, null)`.
+    EffectBus.on<{ cellLabel: string; sourceId: string }>(
+      'note:unnest',
+      (payload) => {
+        if (!payload?.cellLabel || !payload?.sourceId) return
+        void this.#moveNote(payload.cellLabel, payload.sourceId, null)
+      },
+    )
+  }
+
+  /** Move the sig identified by `sourceId` to `targetIndex` within the
+   *  cell's notes slot. Out-of-range indices are clamped. If sourceId
+   *  is already at the target index it's a no-op. */
+  async #reorderByCellLabel(cellLabel: string, sourceId: string, targetIndex: number): Promise<void> {
+    const resolved = await this.#resolveCellLocation(cellLabel)
+    if (!resolved) return
+    await this.#commitCellNotes(resolved.segments, (prior) => {
+      const current = prior.findIndex(s => s === sourceId)
+      if (current === -1) return prior  // sourceId not in this cell; ignore
+      const without = prior.filter(s => s !== sourceId)
+      const idx = Math.max(0, Math.min(targetIndex, without.length))
+      if (idx === current) return prior  // no-op
+      return [...without.slice(0, idx), sourceId, ...without.slice(idx)]
     })
   }
 
@@ -253,6 +340,7 @@ export class NotesService {
     parentSegments: readonly string[],
     cellLabel: string,
     text: string,
+    shape: ShapeId | null = null,
   ): Promise<void> {
     const cleanedParents = (parentSegments ?? [])
       .map(s => String(s ?? '').trim())
@@ -261,14 +349,15 @@ export class NotesService {
     const cleanedText = String(text ?? '').trim()
     if (!cleanedLabel || !cleanedText) return
     const segments = [...cleanedParents, cleanedLabel]
-    const sig = await this.#writeNoteLayer(cleanedText, [])
+    const sig = await this.#writeNoteLayer(cleanedText, normalizeShape(shape), [])
     await this.#commitCellNotes(segments, (prior) => [...prior, sig])
   }
 
   /**
-   * Remove a top-level note by its layer sig at an explicit cell
-   * location. Headless equivalent of the `note:delete` EffectBus
-   * handler.
+   * Remove a note by its layer sig at an explicit cell location. Works
+   * for top-level AND nested notes — walks the tree, drops the node
+   * (and its entire subtree), then re-materializes from leaves. Used
+   * by the `note:delete` EffectBus handler and headless callers.
    */
   public async deleteAtSegments(
     parentSegments: readonly string[],
@@ -282,19 +371,59 @@ export class NotesService {
     const cleanedSig = String(noteId ?? '').trim()
     if (!cleanedLabel || !cleanedSig) return
     const segments = [...cleanedParents, cleanedLabel]
-    await this.#commitCellNotes(segments, (prior) => prior.filter(s => s !== cleanedSig))
+    await this.#deleteFromTree(segments, cleanedSig)
   }
 
-  // ── Internal: commit + delete flows ───────────────────────────────
+  /**
+   * Nest `sourceId` under `targetParentId` at an explicit cell location.
+   * Both must already exist in the cell's tree (any depth). Headless
+   * equivalent of the `note:nest` EffectBus handler.
+   */
+  public async nestAtSegments(
+    parentSegments: readonly string[],
+    cellLabel: string,
+    sourceId: string,
+    targetParentId: string,
+  ): Promise<void> {
+    const cleanedParents = (parentSegments ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const cleanedLabel = String(cellLabel ?? '').trim()
+    if (!cleanedLabel || !sourceId || !targetParentId) return
+    if (sourceId === targetParentId) return
+    const segments = [...cleanedParents, cleanedLabel]
+    await this.#moveNoteAtSegments(segments, sourceId, targetParentId)
+  }
 
-  async #commit(cellLabel: string, text: string, editId?: string): Promise<void> {
+  /**
+   * Un-nest `sourceId` — move it back to the cell's top level. No-op
+   * if it's already at the top level. Headless equivalent of
+   * `note:unnest`.
+   */
+  public async unnestAtSegments(
+    parentSegments: readonly string[],
+    cellLabel: string,
+    sourceId: string,
+  ): Promise<void> {
+    const cleanedParents = (parentSegments ?? [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    const cleanedLabel = String(cellLabel ?? '').trim()
+    if (!cleanedLabel || !sourceId) return
+    const segments = [...cleanedParents, cleanedLabel]
+    await this.#moveNoteAtSegments(segments, sourceId, null)
+  }
+
+  // ── Internal: commit + delete + tree-move flows ──────────────────
+
+  async #commit(cellLabel: string, text: string, shape: ShapeId | null, editId?: string): Promise<void> {
     const resolved = await this.#resolveCellLocation(cellLabel)
     if (!resolved) {
       console.warn('[notes] cannot resolve cell location for', cellLabel)
       return
     }
     const { segments } = resolved
-    const newSig = await this.#writeNoteLayer(text, [])
+    const newSig = await this.#writeNoteLayer(text, shape, [])
     if (editId && SIG_REGEX.test(editId)) {
       await this.#commitCellNotes(segments, (prior) => prior.map(s => s === editId ? newSig : s))
     } else {
@@ -305,7 +434,108 @@ export class NotesService {
   async #deleteByCellLabel(cellLabel: string, noteId: string): Promise<void> {
     const resolved = await this.#resolveCellLocation(cellLabel)
     if (!resolved) return
-    await this.#commitCellNotes(resolved.segments, (prior) => prior.filter(s => s !== noteId))
+    await this.#deleteFromTree(resolved.segments, noteId)
+  }
+
+  /**
+   * Delete `noteId` from the cell's tree — top-level OR any nested
+   * position. Cascade-deletes its subtree (children go with the parent).
+   * Reads the current tree, walks once to drop the node, re-materializes
+   * the surviving nodes from leaves up, then commits the cell layer.
+   * No-op when the node isn't found.
+   */
+  async #deleteFromTree(segments: readonly string[], noteId: string): Promise<void> {
+    const locSig = await this.#locSig(segments)
+    const tree = await this.#readAtLocation(locSig)
+    const { tree: nextTree, removed } = removeFromTree(tree, noteId)
+    if (!removed) return  // node wasn't in this cell — leave layer alone
+    const rootSigs: string[] = []
+    for (const node of nextTree) {
+      rootSigs.push(await this.#materializeNote(node))
+    }
+    await this.#commitCellNotes(segments, () => rootSigs)
+  }
+
+  /**
+   * Move `sourceId` into `targetParentId`'s children (or to the cell's
+   * top level when `targetParentId` is null). The full tree is read,
+   * the source node + its subtree relocated, then everything is
+   * re-materialized from leaves up. Content-addressed storage dedups
+   * unchanged subtrees so only branches touched by the move yield new
+   * sigs.
+   *
+   * Cycle prevention: if `targetParentId` lives inside `sourceId`'s
+   * own subtree, the move is rejected (would create a cycle).
+   */
+  async #moveNote(cellLabel: string, sourceId: string, targetParentId: string | null): Promise<void> {
+    const resolved = await this.#resolveCellLocation(cellLabel)
+    if (!resolved) return
+    await this.#moveNoteAtSegments(resolved.segments, sourceId, targetParentId)
+  }
+
+  async #moveNoteAtSegments(
+    segments: readonly string[],
+    sourceId: string,
+    targetParentId: string | null,
+  ): Promise<void> {
+    const locSig = await this.#locSig(segments)
+    const tree = await this.#readAtLocation(locSig)
+
+    // 1. Locate the source node and pluck it (with its subtree) out
+    //    of wherever it currently lives.
+    const { tree: withoutSource, removed: source } = removeFromTree(tree, sourceId)
+    if (!source) return  // source wasn't in this cell's tree
+
+    // 2. Cycle check: target must not be inside source's subtree.
+    if (targetParentId && subtreeContains(source, targetParentId)) {
+      console.warn('[notes] refused nest — would create a cycle', { sourceId, targetParentId })
+      return
+    }
+
+    // 3. Place the source back into the tree at its new home.
+    let nextTree: readonly Note[]
+    if (targetParentId === null) {
+      // Un-nest: append to top level.
+      nextTree = [...withoutSource, source]
+    } else {
+      const placed = insertAsChild(withoutSource, targetParentId, source)
+      if (!placed.placed) {
+        console.warn('[notes] refused nest — target parent not found', { targetParentId })
+        return
+      }
+      nextTree = placed.tree
+    }
+
+    // 4. Re-materialize the surviving tree from leaves up. The Store
+    //    dedups by content sig, so unchanged subtrees produce identical
+    //    sigs and don't write new bytes.
+    const rootSigs: string[] = []
+    for (const node of nextTree) {
+      rootSigs.push(await this.#materializeNote(node))
+    }
+    await this.#commitCellNotes(segments, () => rootSigs)
+  }
+
+  /**
+   * Recursively write `note` and every descendant as a content-addressed
+   * resource. Returns the sig of the freshly-written (or dedup-matched)
+   * resource for this node. Walks bottom-up so children are sigged
+   * before their parent's `children` array gets materialized.
+   */
+  async #materializeNote(note: Note): Promise<string> {
+    const childSigs: string[] = []
+    for (const child of note.children) {
+      childSigs.push(await this.#materializeNote(child))
+    }
+    return await this.#writeNoteLayer(note.text, note.shape, childSigs)
+  }
+
+  /** Resolve a segments array to its locationSig. Used by tree-mutating
+   *  flows that need direct access (not the segments path). */
+  async #locSig(segments: readonly string[]): Promise<string> {
+    const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
+    if (!history) throw new Error('[notes] HistoryService missing on ioc')
+    return await history.sign({ explorerSegments: () => [...segments] })
   }
 
   /**
@@ -345,10 +575,10 @@ export class NotesService {
 
   // ── Internal: note layer write ────────────────────────────────────
 
-  async #writeNoteLayer(text: string, children: readonly string[]): Promise<string> {
+  async #writeNoteLayer(text: string, shape: ShapeId | null, children: readonly string[]): Promise<string> {
     const store = get<StoreLike>('@hypercomb.social/Store')
     if (!store) throw new Error('[notes] Store missing on ioc')
-    const layer: NoteLayer = { children: children.slice(), note: text }
+    const layer: NoteLayer = { children: children.slice(), note: text, shape }
     const json = canonicalJSON(layer)
     const sig = await store.putResource(new Blob([json], { type: 'application/json' }))
     this.#cache.set(sig, layer)
@@ -357,6 +587,20 @@ export class NotesService {
 
   // ── Internal: read paths ──────────────────────────────────────────
 
+  /**
+   * Async-hydrating tree read. Top-level sigs are loaded first, then
+   * each note is recursively walked via `#hydrateAsync` so every
+   * descendant is loaded from storage and parked in `#cache`. After
+   * this resolves, the sync `notesFor` path sees the full tree because
+   * every node's bytes are now in the cache.
+   *
+   * Before this consolidation there was a separate sync-hydrate path
+   * that dropped uncached descendants on initial reads — so the
+   * strip's chevron could disappear after a refresh even when the
+   * parent layer's `children` array carried valid sigs. Tree-mutating
+   * flows (move, cascade-delete) also use this method so the source's
+   * full subtree travels with the operation.
+   */
   async #readAtLocation(locationSig: string): Promise<Note[]> {
     const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
     if (!history) return []
@@ -367,10 +611,24 @@ export class NotesService {
     const out: Note[] = []
     for (const sig of sigs) {
       if (typeof sig !== 'string' || !SIG_REGEX.test(sig)) continue
-      const decoded = await this.#loadNoteLayer(sig)
-      if (decoded) out.push(this.#hydrate(sig, decoded))
+      const node = await this.#hydrateAsync(sig)
+      if (node) out.push(node)
     }
     return out
+  }
+
+  /** Async, recursive hydrate — resolves every descendant from storage.
+   *  Returns null when a sig fails to load (corrupt / missing); the
+   *  callers' tree walks treat null as "skip this branch". */
+  async #hydrateAsync(sig: string): Promise<Note | null> {
+    const layer = await this.#loadNoteLayer(sig)
+    if (!layer) return null
+    const children: Note[] = []
+    for (const childSig of layer.children) {
+      const child = await this.#hydrateAsync(childSig)
+      if (child) children.push(child)
+    }
+    return { id: sig, text: layer.note, shape: layer.shape, children }
   }
 
   async #loadNoteLayer(sig: string): Promise<NoteLayer | null> {
@@ -380,15 +638,16 @@ export class NotesService {
     if (!store) return null
 
     // New shape: the sig points at a content-addressed resource holding
-    // canonical JSON `{ note, children }`. Try the resource path first.
+    // canonical JSON `{ note, shape, children }`. Try the resource path first.
+    // Legacy resources without `shape` parse with shape: null.
     const parsed = await store.resolve<unknown>(sig)
     if (parsed && typeof parsed === 'object') {
-      const p = parsed as { note?: unknown; children?: unknown }
+      const p = parsed as { note?: unknown; shape?: unknown; children?: unknown }
       if (typeof p.note === 'string') {
         const children = Array.isArray(p.children)
           ? p.children.filter((c): c is string => typeof c === 'string' && SIG_REGEX.test(c))
           : []
-        const layer: NoteLayer = { children, note: p.note }
+        const layer: NoteLayer = { children, note: p.note, shape: normalizeShape(p.shape) }
         this.#cache.set(sig, layer)
         return layer
       }
@@ -410,7 +669,7 @@ export class NotesService {
     if (!bodyParsed || typeof bodyParsed !== 'object') return null
     const text = (bodyParsed as { text?: unknown }).text
     if (typeof text !== 'string') return null
-    const layer: NoteLayer = { children: [], note: text }
+    const layer: NoteLayer = { children: [], note: text, shape: null }
     this.#cache.set(sig, layer)
     return layer
   }
@@ -424,7 +683,7 @@ export class NotesService {
       const cached = this.#cache.get(childSig)
       if (cached) children.push(this.#hydrate(childSig, cached))
     }
-    return { id: sig, text: layer.note, children }
+    return { id: sig, text: layer.note, shape: layer.shape, children }
   }
 
   // ── Internal: cell-location resolution ────────────────────────────
@@ -467,6 +726,92 @@ export class NotesService {
       localStorage.removeItem(key)
     }
   }
+}
+
+/**
+ * Walk `tree` and return a new tree without the first occurrence of
+ * `noteId`, alongside the removed node (if any). Operates immutably —
+ * input arrays / objects are untouched. Used by tree-mutating flows
+ * that re-materialize the modified tree afterwards.
+ */
+function removeFromTree(
+  tree: readonly Note[],
+  noteId: string,
+): { tree: readonly Note[]; removed: Note | null } {
+  let removed: Note | null = null
+  const walk = (nodes: readonly Note[]): readonly Note[] => {
+    const next: Note[] = []
+    for (const n of nodes) {
+      if (removed) {
+        // Already found the target this walk; just copy the rest.
+        next.push(n)
+        continue
+      }
+      if (n.id === noteId) {
+        removed = n
+        continue  // drop this node
+      }
+      const newChildren = walk(n.children)
+      if (newChildren !== n.children) {
+        next.push({ ...n, children: newChildren as Note[] })
+      } else {
+        next.push(n)
+      }
+    }
+    return next
+  }
+  const nextTree = walk(tree)
+  return { tree: nextTree, removed }
+}
+
+/**
+ * Insert `node` as the last child of the first occurrence of
+ * `targetParentId` in `tree`. Returns the new tree and a flag
+ * indicating whether the parent was found. Immutable — input arrays /
+ * objects untouched.
+ */
+function insertAsChild(
+  tree: readonly Note[],
+  targetParentId: string,
+  node: Note,
+): { tree: readonly Note[]; placed: boolean } {
+  let placed = false
+  const walk = (nodes: readonly Note[]): readonly Note[] => {
+    const next: Note[] = []
+    for (const n of nodes) {
+      if (placed) {
+        next.push(n)
+        continue
+      }
+      if (n.id === targetParentId) {
+        placed = true
+        next.push({ ...n, children: [...n.children, node] })
+        continue
+      }
+      const newChildren = walk(n.children)
+      if (newChildren !== n.children) {
+        next.push({ ...n, children: newChildren as Note[] })
+      } else {
+        next.push(n)
+      }
+    }
+    return next
+  }
+  const nextTree = walk(tree)
+  return { tree: nextTree, placed }
+}
+
+/**
+ * Whether `node` or any of its descendants has id `targetId`. Used to
+ * reject nest operations that would create a cycle (moving a parent
+ * underneath one of its own descendants).
+ */
+function subtreeContains(node: Note, targetId: string): boolean {
+  if (node.id === targetId) return true
+  for (const child of node.children) {
+    if (subtreeContains(child, targetId)) return true
+  }
+  return false
 }
 
 function canonicalJSON(value: unknown): string {

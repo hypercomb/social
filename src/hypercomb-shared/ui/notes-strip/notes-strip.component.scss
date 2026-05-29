@@ -13,32 +13,75 @@
 // Yellow accent (#ffe14a) → --md-secondary (warm tonal accent), preserving
 // the "important / attention" affordance notes carry without breaking the
 // design system.
+@use '../../styles/notes-shapes';
 
 :host {
   position: fixed;
-  // Header bar starts ~2.5px down from the viewport top and runs ~44.8px
-  // tall, so its actual bottom is ~47.3px. The default --hc-header-height
-  // (3rem = 48px) covers the height but not the top inset, so a +5px
-  // breathing space wasn't enough — the strip's top edge ended up only
-  // ~2px below the header. Bump the spacer so the strip sits cleanly
-  // below the header at the new height.
+  // The strip is a dock-style panel: it fills the entire vertical
+  // space between the header (top) and the controls-bar pill (bottom)
+  // so the footer is always anchored to the viewport bottom (above
+  // the pill). Header is ~50px; the pill floats with bottom: 0.6rem
+  // and is ~3rem tall, so we reserve 5rem at the bottom to clear it.
   top: calc(var(--hc-header-height, 3rem) + 14px);
-  left: 5px;
-  right: 5px;
+  bottom: 5rem;
+  left: 0;
+  right: 0;
   z-index: 60001;
   display: flex;
+  justify-content: center;
   pointer-events: none;
-  max-height: calc(100vh - var(--hc-header-height, 3rem) - 5rem);
+  padding: 0 16px;
+}
+
+// Fullscreen mode — covers everything below the command-line strip
+// (header-bar at top stays visible). Releases the width cap and the
+// user's drag offset so the strip fills the canvas. The pill
+// toolbar at the bottom IS covered intentionally — users asked for
+// "everything except the command line".
+:host.is-fullscreen {
+  top: var(--hc-header-height, 3rem);
+  bottom: 0;
+  padding: 0;
+}
+:host.is-fullscreen .notes-strip {
+  // !important on size to override the inline width/height the
+  // resize observer writes for the user's stored dock dimensions.
+  width: 100% !important;
+  max-width: none !important;
+  height: 100% !important;
+  max-height: none !important;
+  border-radius: 0;
+  transform: none !important; // override panel-offset translate
+}
+:host.is-fullscreen .cv2-list {
+  max-height: none;
+  flex: 1 1 auto;
 }
 
 .notes-strip {
   pointer-events: auto;
+  position: relative;  // anchor for absolute children (resize handle)
   display: flex;
   flex-direction: column;
-  background: color-mix(in srgb, var(--md-surface-c-low) 88%, transparent);
+  background: linear-gradient(180deg,
+                color-mix(in srgb, var(--md-surface-c-low) 96%, transparent),
+                color-mix(in srgb, var(--md-surface-c) 94%, transparent));
   backdrop-filter: blur(6px);
-  font-family: var(--hc-mono, system-ui);
-  box-shadow: var(--md-elev-2);
+  font-family: var(--md-font-ui, Inter, system-ui);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 12px;
+  box-shadow: var(--md-elev-3);
+  // The strip docks vertically: full height of :host (which already
+  // reserves space for header + pill) so the footer always sits at
+  // viewport bottom (minus pill clearance). Width + height are
+  // user-controllable via the corner resize handle and persisted to
+  // localStorage; max-height: 100% prevents the user from dragging
+  // the strip past the host's bounds.
+  width: 500px;
+  height: 100%;
+  max-width: calc(100% - 32px);
+  max-height: 100%;
+  overflow: visible; // palette overhangs below the strip
 }
 
 // ── Header (shared) ────────────────────────────────────
@@ -202,7 +245,11 @@
   gap: 0.35rem;
   padding: 0.5rem 0.75rem 0.6rem;
   min-height: 0;
-  overflow: hidden;
+  // Stretch to fill the strip's remaining vertical space so the
+  // footer (sibling, flex-shrink: 0) anchors to the strip's bottom
+  // edge regardless of content height. Body scrolls internally.
+  flex: 1 1 auto;
+  overflow-y: auto;
 }
 
 .notes-strip-body.notes-strip-accordion {
@@ -222,16 +269,54 @@
 // header usable; max bounds keep the panel inside the viewport. The
 // host's pointer-events:none lets clicks fall through to the canvas
 // everywhere except the panel itself, so the grip stays interactive.
+// User-controlled resize via a custom corner grip (see
+// .cv2-resize-handle below). The native `resize: both` is dropped
+// because Chrome ignores it when overflow is visible — which we
+// need so the tool palette can overhang the strip's bottom. The
+// custom handle works regardless and gives us styling control.
 .notes-strip.mode-rows {
-  width: min(28rem, calc(100vw - 1rem));
   min-width: 16rem;
   min-height: 5rem;
-  max-width: calc(100vw - 1rem);
-  max-height: calc(100vh - var(--hc-header-height, 3rem) - 5rem);
-  border-radius: 0 0 var(--md-shape-m) var(--md-shape-m);
-  overflow: hidden;
-  resize: both;
 }
+
+// Custom resize grip — small triangle at the bottom-right corner.
+// Hidden in fullscreen (size is forced). Sits inside the strip's
+// padding zone via position: absolute; the strip is position:
+// relative (set on the base rule).
+.cv2-resize-handle {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  z-index: 5;
+  user-select: none;
+  touch-action: none;
+}
+// Diagonal lines drawn via repeating gradient so we never inject
+// any DOM from user content.
+.cv2-resize-handle::before {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  background:
+    linear-gradient(135deg,
+      transparent 0%,
+      transparent 40%,
+      var(--md-on-surface-faint) 40%,
+      var(--md-on-surface-faint) 50%,
+      transparent 50%,
+      transparent 70%,
+      var(--md-on-surface-faint) 70%,
+      var(--md-on-surface-faint) 80%,
+      transparent 80%);
+  opacity: 0.5;
+  border-bottom-right-radius: 11px;
+  transition: opacity var(--md-dur-short) var(--md-easing-standard);
+}
+.cv2-resize-handle:hover::before { opacity: 1; }
+:host.is-fullscreen .cv2-resize-handle { display: none; }
 
 .strip-list {
   list-style: none;
@@ -280,6 +365,40 @@
   display: flex;
   align-items: stretch;
   gap: 0.3rem;
+  position: relative;
+
+  &.is-selected {
+    background: color-mix(in srgb, var(--md-secondary) 12%, transparent);
+    border-radius: 6px;
+  }
+  &.is-dragging {
+    opacity: 0.4;
+  }
+}
+
+// Checkbox + grip affordances inside multi-cell rows — match the
+// single-cell .cv2-note-select / .cv2-note-grip behaviour: hidden by
+// default, visible on row-hover or while selected.
+.note-row-select,
+.note-row-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  color: var(--md-on-surface-faint);
+  opacity: 0;
+  cursor: pointer;
+  transition: opacity var(--md-dur-short) var(--md-easing-standard);
+
+  .note-row:hover &,
+  .note-row.is-selected & { opacity: 1; }
+}
+.note-row-grip {
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+  &:active { cursor: grabbing; }
 }
 
 // Question rows — warm yellow card, matches the editor's qa-question
@@ -727,3 +846,789 @@
     transition: none;
   }
 }
+
+// ── Comb v2 (Concept 06) styles ────────────────────────────
+// Ported from the design canvas at hypercomb-notes/project/
+// concept-6-editor.css. Tokens (--md-*) align with the shared
+// material token set so the strip reads as part of the system.
+
+// Tiny hex glyph used in the drag-bar to mark the active cell
+// (and in 'recently used' / context-pill surfaces later). Reserved
+// for cell identity language; never used on tool tiles.
+.hex-mark {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  background: currentColor;
+  clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  color: var(--md-secondary);
+}
+
+// Custom thin scrollbar — applied to the notes list. Picks up the
+// secondary tonal accent so it reads as part of the panel chrome.
+.thin-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--md-secondary) 40%, transparent) transparent;
+  &::-webkit-scrollbar { width: 6px; height: 6px; }
+  &::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--md-secondary) 40%, transparent);
+    border-radius: 4px;
+  }
+}
+
+// ── drag-bar (replaces .notes-strip-header) ──────────────
+.cv2-dragbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 8px 0 6px;
+  background: linear-gradient(180deg,
+                color-mix(in srgb, var(--md-on-surface) 4%, var(--md-surface-c)),
+                color-mix(in srgb, var(--md-on-surface) 2%, var(--md-surface-c-low)));
+  border-bottom: 1px solid var(--md-outline-variant);
+  border-radius: 12px 12px 0 0;
+  cursor: grab;
+  user-select: none;
+  flex-shrink: 0;
+
+  &:active { cursor: grabbing; }
+}
+
+.cv2-grip {
+  display: inline-grid;
+  grid-template-columns: repeat(2, 3px);
+  grid-template-rows: repeat(3, 3px);
+  gap: 3px;
+  padding: 4px;
+  border-radius: 4px;
+  margin-right: 2px;
+  opacity: 0.7;
+
+  span {
+    display: block;
+    width: 3px;
+    height: 3px;
+    background: var(--md-on-surface-faint);
+    border-radius: 50%;
+  }
+
+  .cv2-dragbar:hover & { opacity: 1; }
+}
+
+.cv2-dragbar-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--md-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--md-on-surface);
+}
+
+.cv2-dragbar-sep { color: var(--md-on-surface-faint); }
+.cv2-dragbar-faint { color: var(--md-on-surface-faint); }
+.cv2-dragbar-spacer { flex: 1; }
+
+.cv2-mini-btn {
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--md-on-surface-faint);
+  border-radius: 5px;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+
+  &:hover {
+    color: var(--md-on-surface-strong);
+    background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
+  }
+
+  &.ghost { color: var(--md-on-surface-faint); }
+}
+
+// Labeled exit pill — sits in the dragbar when see-all mode is on.
+// Tonal-accent so it reads as the meaningful "out" of the current
+// expanded view, distinct from the close (×) which kills the strip.
+.cv2-exit-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  background: color-mix(in srgb, var(--md-secondary) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--md-secondary) 40%, transparent);
+  border-radius: 999px;
+  color: var(--md-secondary);
+  font-family: var(--md-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  margin-right: 4px;
+
+  &:hover {
+    background: color-mix(in srgb, var(--md-secondary) 26%, transparent);
+    color: var(--md-on-surface-strong);
+  }
+}
+
+// ── formatting toolbar ───────────────────────────────────
+.cv2-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
+  background: color-mix(in srgb, var(--md-surface-c-low) 80%, transparent);
+  border-bottom: 1px solid var(--md-outline-variant);
+  flex-shrink: 0;
+}
+
+.cv2-toolbar-spacer { flex: 1; }
+
+// Shape picker row — six CSS-drawn glyph buttons. Each button's glyph
+// is delivered by a literal .hc-shape-X class on a static <span>;
+// nothing on the data side influences its appearance.
+.cv2-shape-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.cv2-shape-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  cursor: pointer;
+  color: var(--md-on-surface);
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+
+  &.is-active {
+    background: color-mix(in srgb, var(--md-secondary) 22%, transparent);
+    border-color: color-mix(in srgb, var(--md-secondary) 45%, transparent);
+  }
+}
+
+.cv2-tool {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 26px;
+  min-width: 28px;
+  padding: 0 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--md-on-surface);
+  font-family: var(--md-font-ui);
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
+  }
+
+  &:disabled {
+    cursor: default;
+    color: var(--md-on-surface-faint);
+  }
+
+  &.active {
+    background: color-mix(in srgb, var(--md-secondary) 18%, transparent);
+    color: var(--md-on-surface-strong);
+    border-color: color-mix(in srgb, var(--md-secondary) 30%, transparent);
+  }
+}
+
+// Toolbar variants — readonly (no capture mode) dims the disabled
+// buttons.
+.cv2-toolbar.is-readonly {
+  .cv2-shape-btn:disabled,
+  .cv2-tool:disabled { opacity: 0.45; }
+}
+
+.cv2-sep {
+  display: inline-block;
+  width: 1px;
+  height: 18px;
+  background: var(--md-outline-variant);
+  margin: 0 4px;
+}
+
+// selection-bar variant — same row, recolored chrome
+.cv2-toolbar-select {
+  background: color-mix(in srgb, var(--md-secondary) 10%, var(--md-surface-c-low));
+  border-bottom-color: color-mix(in srgb, var(--md-secondary) 28%, transparent);
+  // Allow wrapping so the action buttons reflow to a second row
+  // when the strip is narrow. Each button takes its natural size;
+  // the trailing buttons spill below rather than getting squished.
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.cv2-select-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 6px 0 4px;
+  font-family: var(--md-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--md-on-surface);
+  flex-shrink: 0;
+
+  strong {
+    color: var(--md-secondary);
+    font-family: var(--md-font-mono);
+    font-weight: 500;
+  }
+}
+
+.cv2-toolbar-select .cv2-tool {
+  // Keep the icon visible even when the label hides; prevent buttons
+  // from collapsing below their icon size.
+  flex-shrink: 0;
+}
+// Label spans only — never the .mat-sym icon spans, which need to
+// keep the Material Symbols font for their ligature glyphs.
+.cv2-toolbar-select .cv2-tool span:not(.mat-sym) {
+  font-family: var(--md-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+// At narrow widths, drop the verbose action labels — keep the icons
+// only. The button tooltips still carry the full action name. The
+// container query targets the strip itself (set container-type below)
+// so we react to the panel's actual width, not the viewport's.
+.notes-strip {
+  container-type: inline-size;
+  container-name: notesstrip;
+}
+@container notesstrip (max-width: 460px) {
+  .cv2-toolbar-select .cv2-tool > span:not(.mat-sym) {
+    display: none;
+  }
+}
+
+// ── filter strip ────────────────────────────────────────
+.cv2-filter {
+  display: flex;
+  gap: 6px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--md-outline-variant);
+  flex-shrink: 0;
+
+  &-faded {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+}
+
+.cv2-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  background: transparent;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 999px;
+  color: var(--md-on-surface-var);
+  font-family: var(--md-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+
+  span {
+    color: var(--md-on-surface-faint);
+    font-variant-numeric: tabular-nums;
+    margin-left: 2px;
+  }
+
+  &.active {
+    background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+    color: var(--md-on-surface-strong);
+    border-color: color-mix(in srgb, var(--md-on-surface) 22%, transparent);
+  }
+}
+
+// helper dot colors used inside filter chips and palette indicators
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+
+  &.all { background: var(--md-on-surface-var); }
+  &.q   { background: var(--md-secondary); }
+  &.a   { background: var(--md-primary); }
+  &.n   { background: var(--md-tertiary); }
+}
+
+// ── notes list (Comb v2 cards) ──────────────────────────
+// Body fills whatever vertical space the strip's chrome (dragbar,
+// toolbar, filter, footer) leaves behind. No max-height — the strip
+// itself is window-height by default, and the user's resize is honored
+// via the .mode-rows ResizeObserver path.
+.cv2-list {
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.cv2-note {
+  display: grid;
+  // chevron (16px) · select (22px) · grip (16px) · body (1fr) · kebab (22px)
+  grid-template-columns: 16px 22px 16px 1fr 22px;
+  gap: 6px;
+  align-items: start;
+  padding: 8px;
+  position: relative;  // anchor for kebab + nest-picker popovers
+  background: color-mix(in srgb, var(--md-on-surface) 2.5%, transparent);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  margin-bottom: 4px;
+  transition: background var(--md-dur-short) var(--md-easing-standard),
+              border-color var(--md-dur-short) var(--md-easing-standard);
+
+  &:hover {
+    background: color-mix(in srgb, var(--md-on-surface) 5%, transparent);
+  }
+
+  &.is-selected {
+    background: color-mix(in srgb, var(--md-secondary) 12%, transparent);
+    border-color: color-mix(in srgb, var(--md-secondary) 32%, transparent);
+  }
+
+  &.is-editing {
+    background: color-mix(in srgb, var(--md-secondary) 6%, transparent);
+    border-color: color-mix(in srgb, var(--md-secondary) 36%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--md-secondary) 8%, transparent);
+  }
+
+  &.cv2-note-q {
+    background: color-mix(in srgb, var(--md-secondary) 8%, transparent);
+  }
+
+  &.cv2-note-a {
+    background: color-mix(in srgb, var(--md-primary) 8%, transparent);
+  }
+}
+
+.cv2-note-select,
+.cv2-note-grip {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  color: var(--md-on-surface-faint);
+  padding-top: 1px;
+  cursor: pointer;
+}
+
+.cv2-note-select {
+  opacity: 0;
+  transition: opacity var(--md-dur-short) var(--md-easing-standard);
+
+  .cv2-note:hover &,
+  .cv2-note.is-selected & { opacity: 1; }
+}
+
+.cv2-note-grip {
+  opacity: 0;
+  cursor: grab;
+  user-select: none;
+  touch-action: none;  // let the pointer drag take over (no native scroll)
+
+  .cv2-note:hover & { opacity: 1; }
+  &:active { cursor: grabbing; }
+}
+
+// ── note drag-reorder visuals ────────────────────────────
+// Source row dims while being dragged; the drop indicator is a thin
+// secondary-accent line drawn between rows where the drop would land.
+.cv2-note.is-dragging {
+  opacity: 0.4;
+}
+.cv2-note-drop-indicator {
+  height: 2px;
+  margin: 2px 0;
+  background: var(--md-secondary);
+  border-radius: 2px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--md-secondary) 25%, transparent);
+}
+
+.cv2-note-body {
+  min-width: 0;
+  cursor: pointer;
+}
+
+.cv2-note-kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--md-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--md-secondary);
+  margin-bottom: 4px;
+
+  &.cv2-kind-a { color: var(--md-primary); }
+}
+
+.cv2-note-text {
+  margin: 0;
+  font-family: var(--md-font-display);
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--md-on-surface);
+  text-wrap: pretty;
+  // pre-wrap preserves user-typed newlines without consuming whitespace,
+  // and lets browsers wrap long lines naturally.
+  white-space: pre-wrap;
+  // Plain-text rendering only — no HTML inside this element. Defense-
+  // in-depth: even if an upstream change accidentally rendered tags,
+  // hyphens / no-break would not be an attack vector here.
+  overflow-wrap: anywhere;
+
+  .cv2-note-q & {
+    font-style: italic;
+    color: var(--md-on-surface-strong);
+  }
+
+  .cv2-note.is-editing & { color: var(--md-on-surface-strong); }
+}
+
+.cv2-caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 1.05em;
+  background: var(--md-secondary);
+  margin-left: 2px;
+  vertical-align: -2px;
+  animation: cv2-blink 1.1s steps(2, end) infinite;
+}
+
+@keyframes cv2-blink { 50% { opacity: 0; } }
+
+.cv2-note-kebab {
+  background: transparent;
+  border: 0;
+  color: var(--md-on-surface-faint);
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0;
+  padding: 0;
+
+  .cv2-note:hover &,
+  &.is-open { opacity: 1; }
+
+  &:hover, &.is-open {
+    background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+    color: var(--md-on-surface);
+  }
+}
+
+// ── Tree (chevron + drop states + popovers) ───────────────────
+//
+// The chevron column sits at the row's leading edge. Leaves render a
+// transparent spacer of the same width so rows align horizontally
+// across the tree regardless of whether a node has children.
+.cv2-note-chevron,
+.cv2-note-chevron-spacer {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 22px;
+  flex-shrink: 0;
+}
+
+.cv2-note-chevron {
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  color: var(--md-on-surface-faint);
+
+  &:hover { color: var(--md-on-surface); }
+
+  // Chevron mark is a pure-CSS triangle pointing down. Rotates -90deg
+  // when collapsed so it points right ("expand me"). No glyph font.
+  .cv2-chevron-mark {
+    display: inline-block;
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid currentColor;
+    transition: transform var(--md-dur-short, 0.12s) var(--md-easing-standard, ease);
+  }
+  &.is-collapsed .cv2-chevron-mark {
+    transform: rotate(-90deg);
+  }
+}
+
+// Drop indicators painted on the row itself during a drag-to-nest.
+// 'into' = ring around the row (= drop as child).
+// 'before' / 'after' = top / bottom edge accent.
+.cv2-note.is-drop-into {
+  background: color-mix(in srgb, var(--md-secondary) 12%, transparent);
+  outline: 2px solid color-mix(in srgb, var(--md-secondary) 65%, transparent);
+  outline-offset: -2px;
+  border-radius: 6px;
+}
+.cv2-note.is-drop-before {
+  box-shadow: inset 0 2px 0 0 color-mix(in srgb, var(--md-secondary) 75%, transparent);
+}
+.cv2-note.is-drop-after {
+  box-shadow: inset 0 -2px 0 0 color-mix(in srgb, var(--md-secondary) 75%, transparent);
+}
+
+// Root-drop affordance: when the user drags a nested note to the empty
+// area below all rows, the list body shows a faint accent at its
+// bottom edge to telegraph "drop here to un-nest".
+.cv2-list.has-root-drop {
+  box-shadow: inset 0 -3px 0 0 color-mix(in srgb, var(--md-secondary) 60%, transparent);
+}
+
+// Kebab popover — small anchored menu off the kebab button. Positioned
+// absolutely against the .cv2-note article (which has position: relative
+// elsewhere in the file).
+.cv2-kebab-menu {
+  position: absolute;
+  top: 26px;
+  right: 6px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  min-width: 168px;
+  padding: 4px;
+  background: var(--md-surface-c-high);
+  border: 1px solid color-mix(in srgb, var(--md-outline-variant) 80%, transparent);
+  border-radius: 6px;
+  box-shadow: var(--md-elev-3);
+  font-family: var(--md-font-ui);
+  font-size: 12px;
+}
+
+.cv2-kebab-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--md-on-surface);
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover { background: color-mix(in srgb, var(--md-on-surface) 6%, transparent); }
+
+  &.cv2-kebab-danger {
+    color: color-mix(in srgb, var(--md-error, #d33) 85%, var(--md-on-surface));
+  }
+}
+
+// Nest-target picker popover — same anchor as the kebab; replaces the
+// kebab menu while open. Scrolls when the candidate list is tall.
+.cv2-nest-picker {
+  position: absolute;
+  top: 26px;
+  right: 6px;
+  z-index: 12;
+  display: flex;
+  flex-direction: column;
+  min-width: 220px;
+  max-height: 280px;
+  padding: 4px;
+  background: var(--md-surface-c-high);
+  border: 1px solid color-mix(in srgb, var(--md-outline-variant) 80%, transparent);
+  border-radius: 6px;
+  box-shadow: var(--md-elev-3);
+  font-family: var(--md-font-ui);
+  font-size: 12px;
+  overflow-y: auto;
+}
+
+.cv2-nest-picker-head {
+  padding: 4px 8px 6px;
+  font-family: var(--md-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--md-on-surface-faint);
+}
+
+.cv2-nest-picker-empty {
+  padding: 8px;
+  color: var(--md-on-surface-faint);
+  font-style: italic;
+}
+
+.cv2-nest-picker-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--md-on-surface);
+  font-family: inherit;
+  font-size: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+
+  &:hover { background: color-mix(in srgb, var(--md-on-surface) 6%, transparent); }
+}
+
+.cv2-nest-picker-shape {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+.cv2-nest-picker-item:not(:has(.hc-shape-circle, .hc-shape-square, .hc-shape-triangle, .hc-shape-diamond, .hc-shape-star, .hc-shape-hexagon)) .cv2-nest-picker-shape {
+  display: none;
+}
+
+.cv2-nest-picker-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+// ── per-note shape glyph ─────────────────────────────────
+// Each .cv2-note article carries an .hc-shape-X class (toggled from
+// the data via [class.hc-shape-X]) when the user has tagged the note.
+// The static <span class="hc-shape-glyph cv2-note-shape"> lives at the
+// top of the body; the parent's class chooses which shape paints it.
+// All shape paint rules come from hypercomb-shared/styles/_notes-shapes
+// (imported above).
+.cv2-note-shape {
+  margin-right: 6px;
+  align-self: flex-start;
+  margin-top: 5px;
+}
+.cv2-note:not(.hc-shape-circle):not(.hc-shape-square):not(.hc-shape-triangle):not(.hc-shape-diamond):not(.hc-shape-star):not(.hc-shape-hexagon) .cv2-note-shape {
+  display: none;
+}
+
+// add-note row
+.cv2-add-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 8px 12px;
+  background: transparent;
+  border: 1px dashed var(--md-outline-variant);
+  border-radius: 8px;
+  color: var(--md-on-surface-faint);
+  font-family: var(--md-font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+
+  &:hover {
+    border-color: color-mix(in srgb, var(--md-secondary) 35%, transparent);
+    color: var(--md-on-surface-var);
+  }
+}
+
+.cv2-add-kbd {
+  margin-left: auto;
+  padding: 1px 5px;
+  background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 3px;
+  color: var(--md-on-surface-faint);
+}
+
+// ── footer ─────────────────────────────────────────────
+.cv2-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--md-outline-variant);
+  background: color-mix(in srgb, var(--md-on-surface) 2.5%, transparent);
+  font-family: var(--md-font-mono);
+  font-size: 10.5px;
+  color: var(--md-on-surface-faint);
+  border-radius: 0 0 12px 12px;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+
+  strong {
+    color: var(--md-secondary);
+    font-weight: 500;
+  }
+
+  code {
+    color: var(--md-secondary);
+    background: color-mix(in srgb, var(--md-secondary) 12%, transparent);
+    padding: 0 4px;
+    border-radius: 3px;
+  }
+}
+
+.cv2-foot-spacer { flex: 1; }
+
+.cv2-foot-kbd {
+  padding: 1px 5px;
+  background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 3px;
+  color: var(--md-on-surface-var);
+}
+
+.cv2-foot-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 0;
+  color: var(--md-secondary);
+  font-family: inherit;
+  font-size: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+  padding: 0;
+}
+

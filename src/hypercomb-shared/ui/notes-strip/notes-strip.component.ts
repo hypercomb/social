@@ -5,14 +5,11 @@
 // viewer; click the plus to enter capture mode for that tile. Collapses
 // entirely when the active tile has no notes.
 
-import { Component, ElementRef, computed, effect, signal, viewChild, type OnDestroy } from '@angular/core'
+import { Component, ElementRef, HostBinding, HostListener, computed, effect, inject, signal, untracked, viewChild, type OnDestroy } from '@angular/core'
+import { NgTemplateOutlet } from '@angular/common'
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 
-// MODULE-LOAD LOG — fires the moment this file is parsed, regardless of
-// whether the component is ever rendered. If you don't see this in the
-// console after a hard reload, the new bundle isn't being served.
-console.log('[notes-strip] MODULE LOADED build=2026-05-05-accordion-update')
 
 /**
  * Cap on how many selected tiles the multi-select accordion will surface
@@ -27,9 +24,21 @@ const MAX_VISIBLE_SELECTIONS = 10
 const NOTES_STRIP_WIDTH_KEY = 'hc:notes-strip-width'
 const NOTES_STRIP_HEIGHT_KEY = 'hc:notes-strip-height'
 
+// Translate delta from the panel's natural (centered) position. Persisted
+// across reloads so the strip stays where the user dropped it.
+const NOTES_STRIP_OFFSET_KEY = 'hc:notes-strip-offset'
+
+/** Fixed shape set — six CSS-drawn glyphs. The shape is the only
+ *  visual category a note carries. Names map 1:1 to .hc-shape-X
+ *  classes defined in hypercomb-shared/styles/_notes-shapes.scss. */
+export type ShapeId = 'circle' | 'square' | 'triangle' | 'diamond' | 'star' | 'hexagon'
+
+const SHAPE_IDS: readonly ShapeId[] = ['circle', 'square', 'triangle', 'diamond', 'star', 'hexagon']
+
 type Note = {
   id: string
   text: string
+  shape: ShapeId | null
   children: Note[]
 }
 
@@ -81,7 +90,7 @@ type InputModeStackLike = {
 @Component({
   selector: 'hc-notes-strip',
   standalone: true,
-  imports: [TranslatePipe],
+  imports: [TranslatePipe, NgTemplateOutlet],
   templateUrl: './notes-strip.component.html',
   styleUrls: ['./notes-strip.component.scss'],
 })
@@ -166,6 +175,854 @@ export class NotesStripComponent implements OnDestroy {
     try { localStorage.setItem('hc:notes-strip-kind-filter', filter) } catch { /* ignore */ }
   }
 
+  // ── Comb v2 editor state ─────────────────────────────────
+  // Note ids currently checked for bulk action. Scoped to the active
+  // cell — clears when the cell changes. Drives the toolbar's morph
+  // between edit (formatting) and select (bulk-action) modes.
+  // Per-cell selection — Map<cellLabel, Set<noteId>>. Tracking which
+  // CELL each selected note lives in (instead of a flat note-id set)
+  // makes cross-cell selection in see-all / multi-cell mode safe: bulk
+  // actions iterate per cell and route each emit to the right
+  // cellLabel instead of all going to the single active cell.
+  readonly selectedNotes = signal<ReadonlyMap<string, ReadonlySet<string>>>(new Map())
+
+  /** Total count of selected notes across all cells. */
+  readonly selectionCount = computed<number>(() => {
+    let sum = 0
+    for (const ids of this.selectedNotes().values()) sum += ids.size
+    return sum
+  })
+
+  /** Set of selected note ids in the currently-active cell. Kept for
+   *  the single-cell template's existing API surface; multi-cell rows
+   *  pass their group.cell explicitly. */
+  readonly selectedNoteIds = computed<ReadonlySet<string>>(() => {
+    const cell = this.cell()
+    if (!cell) return new Set<string>()
+    return this.selectedNotes().get(cell) ?? new Set<string>()
+  })
+
+  /** True when there's at least one note selected — toolbar swaps to
+   *  the selection-bar variant and per-row checkboxes pin visible. */
+  readonly selectionMode = computed<boolean>(() => this.selectionCount() > 0)
+
+  /** Which note currently shows the editing caret in the v2 panel.
+   *  Visual indicator only — wiring the actual rich-text editor is a
+   *  follow-up. */
+  readonly editingNoteId = signal<string | null>(null)
+
+  /** Shape ids exposed to the template for the picker row. Static. */
+  readonly shapeIds: readonly ShapeId[] = SHAPE_IDS
+
+  /** Currently-staged shape for the in-progress note. Set by clicking
+   *  a shape button in the toolbar (`setShape`) or cleared via
+   *  `clearShape`. On capture mode entry it pre-fills from the note
+   *  being edited; on exit it resets to null. Mirrored to the drone
+   *  via `notes:active-shape` so the next `note:commit` carries it. */
+  readonly shape = signal<ShapeId | null>(null)
+
+  /** Set of note ids whose subtree is currently collapsed. State is
+   *  in-memory only — resets on reload. Keys are note ids, not paths,
+   *  so two distinct notes with the same id (impossible since ids are
+   *  signatures) would conflict, which they can't.
+   *
+   *  A note is rendered expanded by default. Toggle adds / removes it
+   *  from this set. Notes that aren't keyed render their children. */
+  readonly collapsed = signal<ReadonlySet<string>>(new Set())
+
+  /** Note id whose kebab popover is currently open, or null. Only one
+   *  kebab can be open at a time. ESC and click-outside close it. */
+  readonly kebabOpenId = signal<string | null>(null)
+
+  /** Note id whose "Nest under…" picker is currently open, or null.
+   *  Opened by clicking the kebab's Nest entry. Same close semantics
+   *  as the kebab (ESC, click-outside). */
+  readonly pickerOpenForId = signal<string | null>(null)
+
+  /** Selected cell count — public mirror of the private #selectedCells for
+   *  the drag-bar's "N cells" label in multi-cell mode. */
+  readonly selectedCellsCount = computed<number>(() => this.#selectedCells().length)
+
+  // ── Comb v2 actions ──────────────────────────────────────
+
+  /** Is the given (cell, noteId) pair currently selected? Cell-aware
+   *  so the same note id in two different cells doesn't collide. */
+  isNoteSelected(cellLabel: string, noteId: string): boolean {
+    return this.selectedNotes().get(cellLabel)?.has(noteId) ?? false
+  }
+
+  toggleNoteSelection(cellLabel: string, noteId: string, event?: Event): void {
+    event?.stopPropagation()
+    this.selectedNotes.update(prev => {
+      const next = new Map(prev)
+      const existing = new Set(next.get(cellLabel) ?? [])
+      if (existing.has(noteId)) existing.delete(noteId)
+      else existing.add(noteId)
+      if (existing.size === 0) next.delete(cellLabel)
+      else next.set(cellLabel, existing)
+      return next
+    })
+  }
+
+  clearNoteSelection(): void {
+    this.selectedNotes.set(new Map())
+  }
+
+  /** Resolve a (cellLabel, noteId) pair to its current Note record by
+   *  reading from #notesByCell + qa-merge, exactly like notes() does.
+   *  Used by bulk actions so they can operate on cells the user has
+   *  selected via the multi-cell accordion (not just the active cell). */
+  #resolveSelectedNote(cellLabel: string, noteId: string): Note | undefined {
+    const stored = this.#notesByCell().get(cellLabel) ?? []
+    const qa = this.#qaByCell().get(cellLabel) ?? []
+    return this.#mergeQaWithNotes(qa, stored).find(n => n.id === noteId)
+  }
+
+  /** Bulk-delete every currently selected note, regardless of cell. */
+  deleteSelectedNotes(): void {
+    const map = this.selectedNotes()
+    for (const [cellLabel, ids] of map) {
+      for (const id of ids) {
+        EffectBus.emit('note:delete', { cellLabel, noteId: id })
+      }
+    }
+    this.clearNoteSelection()
+  }
+
+  /** Toggle the `[Q]` question prefix on every currently selected note.
+   *  Note ↔ Question. Answer notes (`[A:qId] …`) are skipped — they're
+   *  paired with a question and toggling them would orphan the link. */
+  toggleSelectionKind(): void {
+    for (const [cellLabel, ids] of this.selectedNotes()) {
+      for (const id of ids) {
+        const note = this.#resolveSelectedNote(cellLabel, id)
+        if (!note) continue
+        const kind = this.noteKind(note)
+        if (kind === 'a') continue
+        const trimmed = note.text.replace(/^\s+/, '')
+        const stripped = kind === 'q'
+          ? trimmed.replace(/^\[Q\]\s?/, '')
+          : '[Q] ' + trimmed
+        EffectBus.emit('note:commit', { cellLabel, text: stripped, editId: id })
+      }
+    }
+    this.clearNoteSelection()
+  }
+
+  /** Copy the text of every selected note to the clipboard, one per
+   *  line. Iterates across all cells in the selection so see-all mode
+   *  exports notes from every cell the user has checked. */
+  async copySelectedNotesText(): Promise<void> {
+    if (this.selectionCount() === 0) return
+    const lines: string[] = []
+    for (const [cellLabel, ids] of this.selectedNotes()) {
+      for (const id of ids) {
+        const note = this.#resolveSelectedNote(cellLabel, id)
+        if (!note) continue
+        // noteDisplayText strips [Q]/[A:qId]. Notes are plain text
+        // (no line markers anymore), so no further plainification.
+        lines.push(this.noteDisplayText(note))
+      }
+    }
+    try {
+      await navigator.clipboard.writeText(lines.join('\n\n'))
+    } catch { /* permission denied / insecure context — no-op */ }
+    this.clearNoteSelection()
+  }
+
+  /** Duplicate each selected note in its own cell — emits a fresh
+   *  `note:commit` with the same text (no editId), which appends a
+   *  new sig to that cell's notes slot. */
+  duplicateSelectedNotes(): void {
+    for (const [cellLabel, ids] of this.selectedNotes()) {
+      for (const id of ids) {
+        const note = this.#resolveSelectedNote(cellLabel, id)
+        if (!note) continue
+        EffectBus.emit('note:commit', { cellLabel, text: note.text })
+      }
+    }
+    this.clearNoteSelection()
+  }
+
+  /** Shift indentation on every selected note's text by the given
+   *  delta (positive indents, negative outdents). Operates on the
+   *  whole stored text — every line shifts together. */
+  shiftSelectedIndent(delta: number): void {
+    const UNIT = 2
+    for (const [cellLabel, ids] of this.selectedNotes()) {
+      for (const id of ids) {
+        const note = this.#resolveSelectedNote(cellLabel, id)
+        if (!note) continue
+        const shifted = note.text.split(/\r?\n/).map(line => {
+          const m = /^([ \t]*)(.*)$/.exec(line)
+          const lead = (m?.[1] ?? '').replace(/\t/g, '  ')
+          const rest = m?.[2] ?? line
+          const units = Math.floor(lead.length / UNIT)
+          const next = Math.max(0, units + delta)
+          return ' '.repeat(next * UNIT) + rest
+        }).join('\n')
+        if (shifted === note.text) continue
+        EffectBus.emit('note:commit', { cellLabel, text: shifted, editId: id })
+      }
+    }
+    this.clearNoteSelection()
+  }
+
+  /** Pick a shape for the in-progress note. The shape becomes the
+   *  category tag — written into the layer at commit. Updates the
+   *  signal AND broadcasts on `notes:active-shape` so the drone reads
+   *  the latest value when it handles `note:commit`. */
+  setShape(id: ShapeId): void {
+    if (this.shape() === id) return
+    this.shape.set(id)
+    EffectBus.emit('notes:active-shape', { shape: id })
+  }
+
+  /** Remove the shape tag from the in-progress note (revert to plain). */
+  clearShape(): void {
+    if (this.shape() === null) return
+    this.shape.set(null)
+    EffectBus.emit('notes:active-shape', { shape: null })
+  }
+
+  /** Indent the current capture-input line one level (two spaces). */
+  indent(): void {
+    if (!this.capturing()) return
+    EffectBus.emit('note-capture:indent', { delta: 1 })
+  }
+
+  /** Outdent the current capture-input line one level. */
+  outdent(): void {
+    if (!this.capturing()) return
+    EffectBus.emit('note-capture:indent', { delta: -1 })
+  }
+
+  // ── Tree (children) — collapse / kebab / picker / nest / promote ──
+
+  /** Is this note's subtree currently collapsed? */
+  isCollapsed(noteId: string): boolean {
+    return this.collapsed().has(noteId)
+  }
+
+  /** Toggle collapsed state for a note. No-op when called on a leaf. */
+  toggleCollapse(noteId: string, event?: Event): void {
+    event?.stopPropagation()
+    this.collapsed.update(prev => {
+      const next = new Set(prev)
+      if (next.has(noteId)) next.delete(noteId)
+      else next.add(noteId)
+      return next
+    })
+  }
+
+  /** Open the kebab popover for a note (closing any other). */
+  openKebab(noteId: string, event?: Event): void {
+    event?.stopPropagation()
+    this.pickerOpenForId.set(null)
+    this.kebabOpenId.set(this.kebabOpenId() === noteId ? null : noteId)
+  }
+
+  closeKebab(): void {
+    if (this.kebabOpenId() !== null) this.kebabOpenId.set(null)
+  }
+
+  /** Open the "Nest under…" picker for a note (closes the kebab). */
+  openPicker(noteId: string, event?: Event): void {
+    event?.stopPropagation()
+    this.kebabOpenId.set(null)
+    this.pickerOpenForId.set(noteId)
+  }
+
+  closePicker(): void {
+    if (this.pickerOpenForId() !== null) this.pickerOpenForId.set(null)
+  }
+
+  /** Whether a note is currently nested (has any ancestor). Used by the
+   *  kebab to decide whether to surface the "Promote" entry. */
+  isNested(noteId: string): boolean {
+    const cell = this.cell()
+    if (!cell) return false
+    const tree = this.#notesByCell().get(cell) ?? []
+    // A note is nested iff it isn't a top-level entry of the tree.
+    return !tree.some(n => n.id === noteId)
+  }
+
+  /** Nest `sourceId` under `targetParentId`. Emits to the drone which
+   *  performs the tree rewrite + cascade. Closes the picker. */
+  nestUnder(sourceId: string, targetParentId: string): void {
+    const cell = this.cell()
+    if (!cell || !sourceId || !targetParentId || sourceId === targetParentId) {
+      this.closePicker()
+      return
+    }
+    EffectBus.emit('note:nest', { cellLabel: cell, sourceId, targetParentId })
+    this.closePicker()
+    this.closeKebab()
+  }
+
+  /** Promote a nested note back to the cell's top level. */
+  promote(sourceId: string): void {
+    const cell = this.cell()
+    if (!cell || !sourceId) return
+    EffectBus.emit('note:unnest', { cellLabel: cell, sourceId })
+    this.closeKebab()
+  }
+
+  /** Build the list of valid nest targets for `sourceId`:
+   *  - all notes in the cell's tree (any depth)
+   *  - minus `sourceId` itself
+   *  - minus every descendant of `sourceId` (cycle prevention)
+   *  - minus the source's current direct parent (no-op nest)
+   *
+   *  Returns a flat list of { id, text, shape, depth } so the picker
+   *  can render a single scrollable list with visual depth hints. */
+  nestCandidates(sourceId: string): readonly { id: string; text: string; shape: ShapeId | null; depth: number }[] {
+    const cell = this.cell()
+    if (!cell) return []
+    const tree = this.#notesByCell().get(cell) ?? []
+    const forbidden = new Set<string>([sourceId])
+    // Walk source's subtree to collect descendant ids.
+    const collectDescendants = (nodes: readonly Note[]): void => {
+      for (const n of nodes) {
+        if (n.id === sourceId) {
+          const drainDesc = (sub: readonly Note[]): void => {
+            for (const c of sub) {
+              forbidden.add(c.id)
+              drainDesc(c.children)
+            }
+          }
+          drainDesc(n.children)
+          return
+        }
+        collectDescendants(n.children)
+      }
+    }
+    collectDescendants(tree)
+    // Walk the whole tree and emit all non-forbidden notes.
+    const out: { id: string; text: string; shape: ShapeId | null; depth: number }[] = []
+    const walk = (nodes: readonly Note[], depth: number): void => {
+      for (const n of nodes) {
+        if (!forbidden.has(n.id)) {
+          out.push({ id: n.id, text: this.noteDisplayText(n), shape: n.shape, depth })
+        }
+        walk(n.children, depth + 1)
+      }
+    }
+    walk(tree, 0)
+    return out
+  }
+
+  /** Fullscreen toggle — sets `isFullscreen`; the HostBinding adds
+   *  `is-fullscreen` to the host element and the SCSS releases the
+   *  width cap + panel-offset transform so the strip fills the
+   *  canvas area between the header and the controls-bar pill. */
+  readonly isFullscreen = signal<boolean>(false)
+
+  @HostBinding('class.is-fullscreen')
+  get fullscreenClass(): boolean { return this.isFullscreen() }
+
+  toggleFullscreen(): void {
+    this.isFullscreen.update(v => !v)
+    EffectBus.emit('notes:expand-to-index', { cellLabel: this.cell(), fullscreen: this.isFullscreen() })
+  }
+
+  /** "See all across the hive" — per the design concept, this should
+   *  show notes from every cell in the current layer. We achieve that
+   *  by enumerating cell labels via CellSuggestionProvider, treating
+   *  them as a virtual multi-cell selection, and rendering through
+   *  the existing accordion path. Also activates fullscreen since
+   *  there's now more content to display. */
+  readonly seeAllInLayer = signal<boolean>(false)
+  readonly #layerCellLabels = signal<readonly string[]>([])
+
+  toggleSeeAll(): void {
+    const next = !this.seeAllInLayer()
+    this.seeAllInLayer.set(next)
+    if (next) {
+      this.#refreshLayerCellLabels()
+    } else {
+      this.#layerCellLabels.set([])
+    }
+    // NOTE: fullscreen is an independent toggle now. Coupling them
+    // caused two regressions — drag stopped working in see-all
+    // (fullscreen's transform: none override killed panel-offset)
+    // and the panel position visibly shifted between modes. The user
+    // can expand to fullscreen via the expand button if they want
+    // the larger surface; see-all alone keeps the docked layout.
+  }
+
+  /** Pull the current layer's cell labels from CellSuggestionProvider
+   *  (the same source the command-line autocomplete uses). The provider
+   *  refreshes on `synchronize` / `lineage:change`, so we re-poll on
+   *  those events while see-all is active. */
+  #refreshLayerCellLabels(): void {
+    const provider = get<{ suggestions(): readonly string[] }>(
+      '@hypercomb.social/CellSuggestionProvider'
+    )
+    if (!provider) {
+      this.#layerCellLabels.set([])
+      return
+    }
+    const labels = provider.suggestions()
+    this.#layerCellLabels.set([...labels])
+  }
+
+  /** Legacy alias kept for any external callers; routes to the
+   *  fullscreen toggle. */
+  expandToIndex(): void {
+    this.toggleFullscreen()
+  }
+
+  /** Click a row's body — in select mode it toggles selection,
+   *  otherwise it opens the viewer. Cell-aware so see-all rows
+   *  add to the right per-cell bucket. */
+  onRowBodyClick(cellLabel: string, noteId: string, event: Event): void {
+    if (this.selectionMode()) {
+      this.toggleNoteSelection(cellLabel, noteId, event)
+      return
+    }
+    this.open(noteId, cellLabel)
+  }
+
+  // ── Panel drag-to-reposition ─────────────────────────────
+  // Translate delta from the natural centered baseline. {0,0} = the
+  // CSS-default position; any non-zero delta is a user drag we persist.
+  // The transform sits on top of `:host { justify-content: center }` so
+  // we never have to reach for absolute positioning math.
+
+  readonly panelOffset = signal<{ x: number; y: number }>(((): { x: number; y: number } => {
+    try {
+      const raw = localStorage.getItem(NOTES_STRIP_OFFSET_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed && typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+          return { x: parsed.x, y: parsed.y }
+        }
+      }
+    } catch { /* corrupt entry — fall through */ }
+    return { x: 0, y: 0 }
+  })())
+
+  readonly panelTransform = computed<string>(() => {
+    const { x, y } = this.panelOffset()
+    return `translate(${x}px, ${y}px)`
+  })
+
+  // Drag bookkeeping — pointerId guards against a second finger
+  // hijacking the active drag; #dragStart captures the pixel offset
+  // between cursor and panel-baseline so the delta math is stable
+  // even when the cursor sweeps far from the grip element.
+  #dragPointerId: number | null = null
+  #dragStart: { px: number; py: number; ox: number; oy: number } | null = null
+
+  // Input mode pushed during the drag — suspends the underlying
+  // zoom/pan listeners just like 'notes-hover' does. Empty mount/
+  // unmount because the suspension is purely structural (top-of-stack
+  // wins). Mirrors the #notesHoverMode template above.
+  readonly #notesDragMode = {
+    name: 'notes-drag',
+    mount: (): void => { /* no listeners — suspension is structural */ },
+    unmount: (): void => { /* nothing to tear down */ },
+  }
+  #dragModeActive = false
+
+  onDragStart(event: PointerEvent): void {
+    // Don't initiate drag from mini-buttons (expand / hide) — they
+    // share the dragbar element. The buttons themselves stop
+    // propagation, but a primary-button-down on a button still fires
+    // the dragbar's pointerdown handler.
+    const tgt = event.target as HTMLElement | null
+    if (tgt && tgt.closest('button, [role="button"]')) return
+    // Only primary mouse button or pen/touch primary.
+    if (event.button !== 0) return
+    event.preventDefault()
+    this.#dragPointerId = event.pointerId
+    const offset = this.panelOffset()
+    this.#dragStart = {
+      px: event.clientX,
+      py: event.clientY,
+      ox: offset.x,
+      oy: offset.y,
+    }
+    window.addEventListener('pointermove', this.#onDragMove)
+    window.addEventListener('pointerup', this.#onDragEnd)
+    window.addEventListener('pointercancel', this.#onDragEnd)
+    const stack = this.#stack()
+    if (stack && !this.#dragModeActive) {
+      stack.push(this.#notesDragMode)
+      this.#dragModeActive = true
+    }
+  }
+
+  #onDragMove = (event: PointerEvent): void => {
+    if (event.pointerId !== this.#dragPointerId) return
+    const start = this.#dragStart
+    if (!start) return
+    // Compute the candidate offset, then clamp it against the current
+    // viewport BEFORE writing the signal. Clamping live (vs. on release)
+    // is what prevents the panel from flying off-screen mid-drag.
+    const candidate = {
+      x: start.ox + (event.clientX - start.px),
+      y: start.oy + (event.clientY - start.py),
+    }
+    this.panelOffset.set(this.#clampOffsetCandidate(candidate))
+  }
+
+  #onDragEnd = (event: PointerEvent): void => {
+    if (event.pointerId !== this.#dragPointerId) return
+    this.#dragPointerId = null
+    this.#dragStart = null
+    window.removeEventListener('pointermove', this.#onDragMove)
+    window.removeEventListener('pointerup', this.#onDragEnd)
+    window.removeEventListener('pointercancel', this.#onDragEnd)
+    if (this.#dragModeActive) {
+      this.#stack()?.pop(this.#notesDragMode.name)
+      this.#dragModeActive = false
+    }
+    // Persist final position. Already clamped during the drag.
+    const off = this.panelOffset()
+    try {
+      localStorage.setItem(NOTES_STRIP_OFFSET_KEY, JSON.stringify(off))
+    } catch { /* ignore */ }
+  }
+
+  /** Given a candidate offset, return the closest offset that keeps the
+   *  ENTIRE panel inside the viewport (with a small margin). Previously
+   *  this only enforced a tiny visible corner, which let the footer slip
+   *  below the viewport when the dragbar was dragged downward — the
+   *  user couldn't see (or click) the footer anymore.
+   *
+   *  If the panel is larger than the viewport in either axis, the top-
+   *  left edges take priority — the user can still scroll the list
+   *  body (overflow-y: auto) to see the rest of the strip. */
+  #clampOffsetCandidate(candidate: { x: number; y: number }): { x: number; y: number } {
+    const el = this.panel()?.nativeElement
+    if (!el) return candidate
+    const rect = el.getBoundingClientRect()
+    const current = this.panelOffset()
+
+    // Resolve the panel's "natural" top-left (at zero offset) by
+    // backing the current offset out of the rendered rect.
+    const panelWidth  = rect.right  - rect.left
+    const panelHeight = rect.bottom - rect.top
+    const naturalLeft = rect.left - current.x
+    const naturalTop  = rect.top  - current.y
+
+    // Apply the candidate offset to that natural rect.
+    const newLeft = naturalLeft + candidate.x
+    const newTop  = naturalTop  + candidate.y
+
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const margin = 8
+
+    // Clamp each axis. If the panel fits in that axis, hold it inside;
+    // otherwise, anchor to the leading edge (top / left) and let the
+    // trailing edge overflow — the body's overflow-y handles the rest.
+    let allowedLeft: number
+    if (panelWidth <= vw - 2 * margin) {
+      const maxLeft = vw - margin - panelWidth
+      allowedLeft = Math.max(margin, Math.min(maxLeft, newLeft))
+    } else {
+      allowedLeft = Math.min(margin, newLeft)
+    }
+    let allowedTop: number
+    if (panelHeight <= vh - 2 * margin) {
+      const maxTop = vh - margin - panelHeight
+      allowedTop = Math.max(margin, Math.min(maxTop, newTop))
+    } else {
+      allowedTop = Math.min(margin, newTop)
+    }
+
+    return {
+      x: candidate.x + (allowedLeft - newLeft),
+      y: candidate.y + (allowedTop  - newTop),
+    }
+  }
+
+  /** Double-click the grip dots → reset position to centered default. */
+  resetPanelOffset(): void {
+    this.panelOffset.set({ x: 0, y: 0 })
+    try { localStorage.removeItem(NOTES_STRIP_OFFSET_KEY) } catch { /* ignore */ }
+  }
+
+  // ── Custom corner-resize handle ──────────────────────────
+  // The browser-native `resize: both` is ignored when overflow is
+  // visible (which we need so the palette popover can overhang
+  // below the strip). This custom handle gives us the same UX
+  // independent of overflow + persists via the existing
+  // ResizeObserver path.
+  #resizePointerId: number | null = null
+  #resizeStart: { px: number; py: number; w: number; h: number } | null = null
+
+  onResizeStart(event: PointerEvent): void {
+    if (event.button !== 0) return
+    if (this.#dragPointerId !== null || this.#noteDragPointerId !== null) return
+    if (this.isFullscreen()) return  // size is forced; no-op
+    event.preventDefault()
+    event.stopPropagation()
+    const el = this.panel()?.nativeElement
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    this.#resizePointerId = event.pointerId
+    this.#resizeStart = {
+      px: event.clientX,
+      py: event.clientY,
+      w: rect.width,
+      h: rect.height,
+    }
+    window.addEventListener('pointermove', this.#onResizeMove)
+    window.addEventListener('pointerup', this.#onResizeEnd)
+    window.addEventListener('pointercancel', this.#onResizeEnd)
+  }
+
+  #onResizeMove = (event: PointerEvent): void => {
+    if (event.pointerId !== this.#resizePointerId) return
+    const start = this.#resizeStart
+    const el = this.panel()?.nativeElement
+    if (!start || !el) return
+    // Clamp to the host's available area so the user can't drag
+    // the strip past its dock bounds.
+    const host = this.#host.nativeElement
+    const hostRect = host.getBoundingClientRect()
+    const minW = 256  // ~16rem
+    const minH = 80   // ~5rem
+    const maxW = Math.max(minW, hostRect.width - 16)
+    const maxH = Math.max(minH, hostRect.height - 4)
+    const w = Math.max(minW, Math.min(maxW, start.w + (event.clientX - start.px)))
+    const h = Math.max(minH, Math.min(maxH, start.h + (event.clientY - start.py)))
+    el.style.width = `${Math.round(w)}px`
+    el.style.height = `${Math.round(h)}px`
+  }
+
+  #onResizeEnd = (event: PointerEvent): void => {
+    if (event.pointerId !== this.#resizePointerId) return
+    this.#resizePointerId = null
+    this.#resizeStart = null
+    window.removeEventListener('pointermove', this.#onResizeMove)
+    window.removeEventListener('pointerup', this.#onResizeEnd)
+    window.removeEventListener('pointercancel', this.#onResizeEnd)
+    // The ResizeObserver in #observePanelResize will catch the
+    // final size and persist it; no extra work here.
+  }
+
+  // ── Note-row drag-reorder ─────────────────────────────────
+  // Pointer-based (not HTML5 DnD) so we keep tight control over the
+  // visual ghost + drop indicator and don't have to fight the
+  // existing dataTransfer mime used by the palette pin gesture.
+
+  readonly noteDragSourceId = signal<string | null>(null)
+  readonly noteDragSourceCell = signal<string | null>(null)
+  // Legacy: multi-cell accordion mode still uses an insertion index.
+  // Single-cell tree mode uses noteDropTargetId + noteDropMode.
+  readonly noteDropIndex = signal<number | null>(null)
+  readonly noteDropTargetId = signal<string | null>(null)
+  readonly noteDropMode = signal<'before' | 'into' | 'after' | 'root' | null>(null)
+  #noteDragPointerId: number | null = null
+
+  onNoteGripPointerDown(cellLabel: string, noteId: string, event: PointerEvent): void {
+    // Primary mouse button / pen / touch primary only. Don't initiate
+    // if the user is already mid-panel-drag.
+    if (event.button !== 0) return
+    if (this.#dragPointerId !== null) return
+    event.preventDefault()
+    event.stopPropagation()
+    this.#noteDragPointerId = event.pointerId
+    this.noteDragSourceId.set(noteId)
+    this.noteDragSourceCell.set(cellLabel)
+    // Multi-cell mode still uses the flat index. Find the row's
+    // starting index within its OWN cell — see-all accordion may show
+    // many cells; the reorder is always per-cell.
+    const cellNotes = this.#mergeQaWithNotes(
+      this.#qaByCell().get(cellLabel) ?? [],
+      this.#notesByCell().get(cellLabel) ?? [],
+    )
+    this.noteDropIndex.set(cellNotes.findIndex(n => n.id === noteId))
+    this.noteDropTargetId.set(null)
+    this.noteDropMode.set(null)
+    window.addEventListener('pointermove', this.#onNoteDragMove)
+    window.addEventListener('pointerup', this.#onNoteDragEnd)
+    window.addEventListener('pointercancel', this.#onNoteDragEnd)
+  }
+
+  #onNoteDragMove = (event: PointerEvent): void => {
+    if (event.pointerId !== this.#noteDragPointerId) return
+    const sourceCell = this.noteDragSourceCell()
+    if (!sourceCell) return
+
+    // Multi-cell accordion mode — keep the legacy flat-index logic.
+    // Trees only show in single-cell mode for now.
+    if (this.multi()) {
+      const root = this.#host.nativeElement
+      const group = root.querySelector(`[data-cell="${CSS.escape(sourceCell)}"]`)
+      const rows = group
+        ? (Array.from(group.querySelectorAll('.note-row')) as HTMLElement[])
+        : []
+      if (rows.length === 0) return
+      const y = event.clientY
+      let idx = rows.length
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i].getBoundingClientRect()
+        if (y < r.top + r.height / 2) { idx = i; break }
+      }
+      this.noteDropIndex.set(idx)
+      return
+    }
+
+    // Single-cell tree mode — detect hovered row + zone (upper third =
+    // before, middle = into, lower = after). Pointer below all rows =
+    // root drop (promote to top level).
+    const root = this.#host.nativeElement
+    const rows = Array.from(root.querySelectorAll('article.cv2-note[data-note-id]')) as HTMLElement[]
+    if (rows.length === 0) {
+      this.noteDropTargetId.set(null)
+      this.noteDropMode.set(null)
+      return
+    }
+
+    const sourceId = this.noteDragSourceId()
+    const y = event.clientY
+    let hovered: HTMLElement | null = null
+    let mode: 'before' | 'into' | 'after' | null = null
+
+    for (const row of rows) {
+      const r = row.getBoundingClientRect()
+      if (y < r.top || y >= r.bottom) continue
+      hovered = row
+      const within = (y - r.top) / r.height
+      if (within < 0.33) mode = 'before'
+      else if (within < 0.67) mode = 'into'
+      else mode = 'after'
+      break
+    }
+
+    if (!hovered || !mode) {
+      // Past the last row → root drop (un-nest to top level), but
+      // only if the source isn't already at the top level (in that
+      // case it's a no-op and the indicator confuses the user).
+      const lastRect = rows[rows.length - 1].getBoundingClientRect()
+      if (y >= lastRect.bottom) {
+        this.noteDropTargetId.set(null)
+        this.noteDropMode.set(this.isNested(sourceId ?? '') ? 'root' : null)
+      } else {
+        this.noteDropTargetId.set(null)
+        this.noteDropMode.set(null)
+      }
+      return
+    }
+
+    const targetId = hovered.getAttribute('data-note-id')
+    if (!targetId || targetId === sourceId) {
+      // Hovering over self — no valid drop here.
+      this.noteDropTargetId.set(null)
+      this.noteDropMode.set(null)
+      return
+    }
+    this.noteDropTargetId.set(targetId)
+    this.noteDropMode.set(mode)
+  }
+
+  #onNoteDragEnd = (event: PointerEvent): void => {
+    if (event.pointerId !== this.#noteDragPointerId) return
+    const sourceId = this.noteDragSourceId()
+    const sourceCell = this.noteDragSourceCell()
+    const flatIndex = this.noteDropIndex()
+    const targetId = this.noteDropTargetId()
+    const mode = this.noteDropMode()
+    this.#noteDragPointerId = null
+    this.noteDragSourceId.set(null)
+    this.noteDragSourceCell.set(null)
+    this.noteDropIndex.set(null)
+    this.noteDropTargetId.set(null)
+    this.noteDropMode.set(null)
+    window.removeEventListener('pointermove', this.#onNoteDragMove)
+    window.removeEventListener('pointerup', this.#onNoteDragEnd)
+    window.removeEventListener('pointercancel', this.#onNoteDragEnd)
+    if (!sourceId || !sourceCell) return
+
+    // Tree-mode drops take precedence — they only fire in single-cell
+    // mode where data-note-id is set on each row.
+    if (mode === 'into' && targetId) {
+      EffectBus.emit('note:nest', { cellLabel: sourceCell, sourceId, targetParentId: targetId })
+      return
+    }
+    if (mode === 'root') {
+      EffectBus.emit('note:unnest', { cellLabel: sourceCell, sourceId })
+      return
+    }
+    // 'before' / 'after' in tree mode aren't yet wired to a reorder
+    // event (which assumes a flat array of top-level sigs). For now,
+    // only handle top-level reorder via the multi-cell fall-through.
+
+    // Legacy flat reorder (multi-cell accordion mode).
+    if (this.multi() && flatIndex !== null) {
+      EffectBus.emit('note:reorder', { cellLabel: sourceCell, sourceId, targetIndex: flatIndex })
+    }
+  }
+
+  // ── ESC cascade + click-outside dismissal ────────────────
+  // Host ElementRef so click-outside can decide whether the click
+  // hit our panel or somewhere else in the document.
+  readonly #host = inject(ElementRef<HTMLElement>)
+
+  /** ESC cascades through the popovers and selection in priority order
+   *  so the user can "back out" of nested state without having to find
+   *  the right close button. Falls through to the global escape-cascade
+   *  (notes-viewer, command-line, etc.) if nothing here is dismissable. */
+  @HostListener('document:keydown.escape', ['$event'])
+  onEscape(event: Event): void {
+    if (!this.visible()) return
+    // Cascade — most local / transient state first, broader state
+    // last. Stop propagation once we've handled one level so the
+    // global escape-cascade doesn't ALSO fire for the same press.
+    if (this.pickerOpenForId() !== null) {
+      this.closePicker()
+      event.stopPropagation()
+      event.preventDefault()
+      return
+    }
+    if (this.kebabOpenId() !== null) {
+      this.closeKebab()
+      event.stopPropagation()
+      event.preventDefault()
+      return
+    }
+    if (this.isFullscreen()) {
+      this.isFullscreen.set(false)
+      event.stopPropagation()
+      event.preventDefault()
+      return
+    }
+    if (this.seeAllInLayer()) {
+      this.toggleSeeAll()  // also clears layer cells signal
+      event.stopPropagation()
+      event.preventDefault()
+      return
+    }
+    if (this.selectionMode()) {
+      this.clearNoteSelection()
+      event.stopPropagation()
+      event.preventDefault()
+      return
+    }
+    // Otherwise: leave the event alone so the surrounding escape-
+    // cascade (notes-viewer dismissal, command-line clear, etc.)
+    // keeps running. We're a non-modal panel — escape is shared.
+  }
+
+  /** Click anywhere outside the strip closes the kebab popover and
+   *  picker. Clicks inside the strip itself are handled by the buttons'
+   *  own stopPropagation so opening doesn't immediately close. */
+  @HostListener('document:click', ['$event'])
+  onDocumentClick(event: Event): void {
+    if (this.kebabOpenId() === null && this.pickerOpenForId() === null) return
+    const root = this.#host.nativeElement
+    const target = event.target as Node | null
+    if (target && root.contains(target)) return
+    this.closeKebab()
+    this.closePicker()
+  }
+
   /**
    * True when any visible cell carries an unanswered Claude question — either
    * a live qa-slot entry or a legacy `[Q] …` note. Only Claude authors
@@ -177,7 +1034,7 @@ export class NotesStripComponent implements OnDestroy {
     const byQa = this.#qaByCell()
     const cells: string[] = []
     if (this.multi()) {
-      cells.push(...this.#selectedCells().slice(-MAX_VISIBLE_SELECTIONS))
+      cells.push(...this.#effectiveCells().slice(-MAX_VISIBLE_SELECTIONS))
     } else {
       const c = this.cell()
       if (c) cells.push(c)
@@ -247,6 +1104,7 @@ export class NotesStripComponent implements OnDestroy {
     const synthetic: Note[] = qa.map(q => ({
       id: 'qa:' + q.qId,
       text: '[Q] ' + q.question,
+      shape: null,
       children: [],
     }))
     const filtered = notes.filter(n => {
@@ -265,7 +1123,16 @@ export class NotesStripComponent implements OnDestroy {
    * mode) so the user can click a tab, drop the cursor into the command
    * line, and type a new note without losing the multi-cell view.
    */
-  readonly multi = computed<boolean>(() => this.#selectedCells().length > 1)
+  /** Cells the strip should currently display as a multi-cell accordion.
+   *  When `seeAllInLayer` is on, we substitute the lineage's full cell
+   *  list (via CellSuggestionProvider) — that's the design's
+   *  "see all across the hive" behaviour. */
+  readonly #effectiveCells = computed<readonly string[]>(() => {
+    if (this.seeAllInLayer()) return this.#layerCellLabels()
+    return this.#selectedCells()
+  })
+
+  readonly multi = computed<boolean>(() => this.#effectiveCells().length > 1)
 
   /**
    * Per-cell note groups for the accordion — ONLY cells that actually have
@@ -274,7 +1141,7 @@ export class NotesStripComponent implements OnDestroy {
    * bumps via the notes:changed effect.
    */
   readonly groups = computed<readonly { cell: string; notes: readonly Note[]; expanded: boolean }[]>(() => {
-    const cells = this.#selectedCells()
+    const cells = this.#effectiveCells()
     if (cells.length <= 1) return []
     const byCell = this.#notesByCell()
     const byQa = this.#qaByCell()
@@ -317,7 +1184,7 @@ export class NotesStripComponent implements OnDestroy {
    * cell as empty during the initial warmup window.
    */
   readonly emptyCells = computed<readonly string[]>(() => {
-    const cells = this.#selectedCells()
+    const cells = this.#effectiveCells()
     if (cells.length <= 1) return []
     const warmed = this.#warmed()
     const byCell = this.#notesByCell()
@@ -408,11 +1275,6 @@ export class NotesStripComponent implements OnDestroy {
   #hoverActive = false
 
   constructor() {
-    // Build identification log — if you don't see this in the console after
-    // a hard reload, the new bundle isn't running. Bumping the tag below
-    // forces a visible signal on every meaningful change to this component.
-    console.log('[notes-strip] build=2026-05-05-accordion-update boot')
-
     // Folder navigation invalidates NotesService's cell-locationSig cache
     // (the same label resolves differently per folder), so notesFor() will
     // start returning [] for previously-warmed cells until getNotes runs
@@ -426,6 +1288,10 @@ export class NotesStripComponent implements OnDestroy {
         this.#notesByCell.set(new Map())
         this.#qaByCell.set(new Map())
         this.#version.update(v => v + 1)
+        // Refresh the layer's cell list if see-all is currently active —
+        // the user navigated into a new layer and the displayed set of
+        // cells just changed.
+        if (this.seeAllInLayer()) this.#refreshLayerCellLabels()
       }
       lineage.addEventListener('change', onLineage)
       this.#cleanups.push(() => lineage.removeEventListener('change', onLineage))
@@ -439,7 +1305,6 @@ export class NotesStripComponent implements OnDestroy {
     // window.ioc.whenReady so the wire-up happens whenever the service
     // arrives, before-or-after construction.
     const wireSelection = (selection: SelectionService): void => {
-      console.log('[notes-strip] wiring SelectionService, active=', selection.active)
       const sync = (): void => {
         // String signal: primitive equality dedups automatically.
         this.#activeCell.set(selection.active)
@@ -487,6 +1352,32 @@ export class NotesStripComponent implements OnDestroy {
       })
     }
 
+    // Reset Comb v2 transient state whenever the active cell switches.
+    // Selection / popovers / editing-caret are all cell-scoped — letting
+    // them persist across navigation would surface stale ids and confuse
+    // the bulk-action paths.
+    //
+    // Reads must be untracked: if the effect tracks these signals it
+    // re-runs every time the popovers open and immediately closes them
+    // again — the "palette won't open" bug.
+    effect(() => {
+      this.cell()  // sole dependency — re-fires on cell change only
+      untracked(() => {
+        if (this.selectionCount() > 0) this.selectedNotes.set(new Map())
+        if (this.editingNoteId() !== null) this.editingNoteId.set(null)
+        if (this.kebabOpenId() !== null) this.kebabOpenId.set(null)
+        if (this.pickerOpenForId() !== null) this.pickerOpenForId.set(null)
+        // See-all is layer-scoped: clicking into a specific cell
+        // implies the user wants to focus on that cell, so we
+        // collapse out of see-all. Fullscreen is a separate
+        // user-controlled toggle and persists across cell changes.
+        if (this.seeAllInLayer()) {
+          this.seeAllInLayer.set(false)
+          this.#layerCellLabels.set([])
+        }
+      })
+    })
+
     this.#cleanups.push(EffectBus.on<{ segments?: readonly string[] }>('notes:changed', async (p) => {
       // HiveParticipant emits with `segments` only — derive the cell
       // label from the last segment. Refresh both notes AND qa caches
@@ -524,13 +1415,38 @@ export class NotesStripComponent implements OnDestroy {
     }))
 
     // Track command-line capture state so the strip pops in for the target
-    // tile while authoring — even when that tile has no notes yet.
-    this.#cleanups.push(EffectBus.on<{ mode: string; target: string }>('command:enter-mode', (p) => {
-      if (p?.mode === 'note-capture' && p.target) this.#capturingFor.set(p.target)
+    // tile while authoring — even when that tile has no notes yet. Also
+    // synchronise the staged shape with the note being edited (or reset
+    // to null for fresh capture) and broadcast on `notes:active-shape`
+    // so the drone has the right shape to write at commit time.
+    this.#cleanups.push(EffectBus.on<{ mode: string; target: string; editId?: string; shape?: unknown }>('command:enter-mode', (p) => {
+      if (p?.mode !== 'note-capture' || !p.target) return
+      this.#capturingFor.set(p.target)
+      // Prefer an explicitly-passed shape (e.g. from notes-viewer's edit())
+      // so we can stage the correct shape even when the source cell's
+      // notes haven't warmed in this strip yet. Fall back to looking up
+      // the existing note by editId. Null for fresh capture.
+      let nextShape: ShapeId | null = null
+      if (typeof p.shape === 'string' && SHAPE_IDS.includes(p.shape as ShapeId)) {
+        nextShape = p.shape as ShapeId
+      } else if (p.editId) {
+        const existing = this.#notesByCell().get(p.target)?.find(n => n.id === p.editId)
+        nextShape = existing?.shape ?? null
+      }
+      this.shape.set(nextShape)
+      EffectBus.emit('notes:active-shape', { shape: nextShape })
     }))
     this.#cleanups.push(EffectBus.on<{ mode: string }>('command:exit-mode', (p) => {
-      if (p?.mode === 'note-capture') this.#capturingFor.set(null)
+      if (p?.mode !== 'note-capture') return
+      this.#capturingFor.set(null)
+      this.shape.set(null)
+      EffectBus.emit('notes:active-shape', { shape: null })
     }))
+
+    // Stale legacy localStorage key — the user's pinned-tools list no
+    // longer applies (the tool palette has been removed). One-time wipe
+    // on construction keeps the storage tidy across reloads.
+    try { localStorage.removeItem('hc:notes-strip-pinned-tools') } catch { /* ignore */ }
 
     // Mount/teardown the resize observer whenever the panel element appears
     // or its mode changes. Reads `visible/multi/mode` so the effect re-runs
@@ -575,12 +1491,13 @@ export class NotesStripComponent implements OnDestroy {
       const c = this.cell()
       if (c) targets.add(c)
       // Match the last-N cap that groups() / emptyCells() apply — no
-      // point pre-warming cells the strip will never display.
-      for (const cell of this.#selectedCells().slice(-MAX_VISIBLE_SELECTIONS)) targets.add(cell)
+      // point pre-warming cells the strip will never display. Reads
+      // through #effectiveCells so see-all-in-layer also warms the
+      // lineage's cells, not just the user's selection.
+      for (const cell of this.#effectiveCells().slice(-MAX_VISIBLE_SELECTIONS)) targets.add(cell)
       if (targets.size === 0) return
       for (const target of targets) {
         if (this.#warmed().has(target)) continue
-        console.log('[notes-strip] warmup start', target)
         // Warm both sources in parallel so the strip surfaces the full
         // comm transcript (Claude's questions + user notes) in a single
         // render pass, not two.
@@ -588,7 +1505,6 @@ export class NotesStripComponent implements OnDestroy {
           svc.getNotes(target),
           this.#loadQaFor(target),
         ]).then(([notes, qa]) => {
-          console.log('[notes-strip] warmup done', target, 'notes=', notes.length, 'qa=', qa.length)
           this.#notesByCell.update(prev => {
             const next = new Map(prev)
             next.set(target, notes.slice())
@@ -661,6 +1577,19 @@ export class NotesStripComponent implements OnDestroy {
     // stack if the component is destroyed mid-hover (e.g. selection
     // change triggers re-render while cursor is over the strip).
     this.#popNotesMode()
+    // Same safety for an interrupted drag — release the window listeners
+    // and pop the drag mode so we don't leak handlers across remounts.
+    if (this.#dragPointerId !== null) {
+      window.removeEventListener('pointermove', this.#onDragMove)
+      window.removeEventListener('pointerup', this.#onDragEnd)
+      window.removeEventListener('pointercancel', this.#onDragEnd)
+      this.#dragPointerId = null
+      this.#dragStart = null
+    }
+    if (this.#dragModeActive) {
+      this.#stack()?.pop(this.#notesDragMode.name)
+      this.#dragModeActive = false
+    }
   }
 
   // ── resize wiring ─────────────────────────────────────────
@@ -698,8 +1627,7 @@ export class NotesStripComponent implements OnDestroy {
       height = localStorage.getItem(NOTES_STRIP_HEIGHT_KEY)
     } catch { /* private mode / quota — ignore, fall back to CSS defaults */ }
     // Suppress the observer's first-callback so the restoration itself
-    // doesn't get re-written to storage (the contentRect after our set
-    // matches what we just wrote anyway, but skipping avoids the round-trip).
+    // doesn't get re-written to storage.
     this.#applyingDimensions = true
     if (width && /^\d+$/.test(width)) el.style.width = `${width}px`
     if (height && /^\d+$/.test(height)) el.style.height = `${height}px`
@@ -710,6 +1638,10 @@ export class NotesStripComponent implements OnDestroy {
     let savePending = false
     this.#resizeObserver = new ResizeObserver((entries) => {
       if (this.#applyingDimensions) return
+      // Never persist while fullscreen — the size is forced by the
+      // !important rules, not the user's docked preference, and
+      // writing it would clobber their last-set docked dimensions.
+      if (this.isFullscreen()) return
       if (savePending) return
       savePending = true
       requestAnimationFrame(() => {
@@ -758,11 +1690,29 @@ export class NotesStripComponent implements OnDestroy {
    *  so the Q&A panel is immediately available — that's the only
    *  surface with the answer composer + Done button. One click goes
    *  from "I see a question on this tile" to "I'm typing the answer."
-   */
-  open(noteId: string): void {
-    const cell = this.#activeCell()
+   *
+   *  Takes `cellLabel` from the template (`cell()`, which falls back
+   *  through capture target before active cell) instead of re-reading
+   *  `#activeCell()` — the strip is visible whenever `cell()` resolves,
+   *  so the click handler must use the same source of truth or it'll
+   *  silently bail when active cell is null but capture target is set,
+   *  or when the strip stays open from cached notes after a tile
+   *  deselect. Falls back to `cell()` for callers that don't pass one. */
+  open(noteId: string, cellLabel?: string): void {
+    const cell = cellLabel ?? this.cell()
     if (!cell) return
-    const note = this.#notesByCell().get(cell)?.find(n => n.id === noteId)
+    // Walk the cell's tree so the note resolves even when it lives
+    // inside a parent's `children` (clicked from a nested row).
+    const tree = this.#notesByCell().get(cell) ?? []
+    const findInTree = (nodes: readonly Note[]): Note | undefined => {
+      for (const n of nodes) {
+        if (n.id === noteId) return n
+        const found = findInTree(n.children)
+        if (found) return found
+      }
+      return undefined
+    }
+    const note = findInTree(tree)
     if (note && this.noteKind(note) === 'q') {
       EffectBus.emit('tile:action', { action: 'edit', label: cell, q: 0, r: 0, index: 0 })
       return
@@ -791,14 +1741,18 @@ export class NotesStripComponent implements OnDestroy {
 
   /** Header "hide" button — collapse the strip for the current selection.
    *  Re-shows automatically when the user selects a different tile (the
-   *  context key changes and the saved hidden context no longer matches). */
+   *  context key changes and the saved hidden context no longer matches).
+   *  Also cancels any in-progress capture; otherwise the capture-trumps-
+   *  hide rule in `visible()` would keep the strip open while authoring. */
   hide(): void {
+    if (this.#capturingFor()) {
+      EffectBus.emit('notes:cancel', {})
+    }
     this.#hiddenContext.set(this.#contextKey())
   }
 
   /** Delete a single note from the active cell's list. */
   remove(noteId: string, event: Event): void {
-    console.log('[notes-strip] × clicked', { noteId, cell: this.cell() })
     event.stopPropagation()
     const cell = this.cell()
     if (!cell || !noteId) return

@@ -10,12 +10,60 @@
   >
     <div class="viewer-card">
       <header class="viewer-header">
-        <span class="viewer-cell">{{ cellLabel() }}</span>
+        @if (openTabs().length > 1) {
+          <!-- Tab strip — one button per open note. Active tab is
+               highlighted; each tab has its own × so the user can
+               peel notes off one at a time. -->
+          <div class="viewer-tabs" role="tablist">
+            @for (label of tabLabels(); track trackByTab($index, openTabs()[$index])) {
+              <button type="button"
+                      class="viewer-tab"
+                      role="tab"
+                      [class.is-active]="$index === activeIndex()"
+                      [attr.aria-selected]="$index === activeIndex()"
+                      [title]="label.cellLabel + ' · ' + label.preview"
+                      (click)="setActive($index)">
+                <span class="viewer-tab-cell">{{ label.cellLabel }}</span>
+                <span class="viewer-tab-preview">{{ label.preview }}</span>
+                <span class="viewer-tab-close" (click)="closeTab($index, $event)"
+                      [attr.aria-label]="'Close ' + label.cellLabel">×</span>
+              </button>
+            }
+          </div>
+        } @else {
+          <span class="viewer-cell">{{ activeTab()?.cellLabel }}</span>
+        }
         <button class="viewer-close" type="button" (click)="close()" [attr.aria-label]="'notes.close' | t">×</button>
       </header>
 
+      <!-- Recursive outline row template. The viewer always renders
+           the active note at depth 0; if the note has children they
+           render indented below as a read-only tree (clicking a child
+           opens its own viewer tab). The root row is styled larger
+           than its descendants to keep the focused note prominent. -->
+      <ng-template #viewerRowTpl let-note="note" let-depth="depth">
+        <div class="viewer-row"
+             [class.viewer-row-root]="depth === 0"
+             [style.paddingLeft.px]="depth * 20"
+             [class.hc-shape-circle]="note.shape === 'circle'"
+             [class.hc-shape-square]="note.shape === 'square'"
+             [class.hc-shape-triangle]="note.shape === 'triangle'"
+             [class.hc-shape-diamond]="note.shape === 'diamond'"
+             [class.hc-shape-star]="note.shape === 'star'"
+             [class.hc-shape-hexagon]="note.shape === 'hexagon'"
+             (click)="depth > 0 ? openChild(note.id, $event) : null"
+             [attr.role]="depth > 0 ? 'button' : null"
+             [attr.tabindex]="depth > 0 ? 0 : null">
+          <span class="hc-shape-glyph viewer-row-shape" aria-hidden="true"></span>
+          <p class="viewer-row-text">{{ note.text }}</p>
+        </div>
+        @for (child of note.children; track child.id) {
+          <ng-container *ngTemplateOutlet="viewerRowTpl; context: { note: child, depth: depth + 1 }"></ng-container>
+        }
+      </ng-template>
+
       <article class="viewer-body">
-        <p class="viewer-text">{{ n.text }}</p>
+        <ng-container *ngTemplateOutlet="viewerRowTpl; context: { note: n, depth: 0 }"></ng-container>
       </article>
 
       <footer class="viewer-footer">

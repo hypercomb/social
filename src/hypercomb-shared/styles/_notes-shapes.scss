@@ -1,0 +1,126 @@
+// hypercomb-shared/styles/_notes-shapes.scss
+//
+// Notes feature — pure-CSS shape glyphs.
+//
+// Each shape is a static <span class="hc-shape-glyph hc-shape-X"> in the
+// template. The glyph never contains text, never uses a font ligature,
+// and is never the target of any binding except a literal-class toggle.
+//
+// All visual differentiation lives here — colours and clip-paths only.
+// The data layer holds only the shape's *name* (e.g. 'circle'); the
+// appearance is entirely a CSS concern.
+//
+// Two usage modes share one source of truth:
+//   1. Direct: `<span class="hc-shape-glyph hc-shape-circle">` paints a
+//      shape immediately. Used by the toolbar's shape-picker buttons.
+//   2. Cascaded: `<article class="hc-shape-circle"> ... <span class="hc-shape-glyph">`
+//      paints the glyph based on a class on an ancestor. Used by the
+//      note article so the shape tag travels with the data class on
+//      the parent. The ancestor selector is `.hc-shape-glyph-host`
+//      OR any of the known wrapper classes (.cv2-note, .viewer-body) —
+//      kept as a fixed selector list so the data can only flip
+//      predefined ancestor classes, never invent new ones.
+
+@mixin shape-circle {
+  background: var(--md-primary);
+  border-radius: 50%;
+}
+@mixin shape-square {
+  background: var(--md-secondary);
+  border-radius: 2px;
+}
+@mixin shape-triangle {
+  background: var(--md-tertiary);
+  clip-path: polygon(50% 8%, 96% 92%, 4% 92%);
+}
+@mixin shape-diamond {
+  background: var(--md-primary);
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+}
+@mixin shape-star {
+  background: var(--md-tertiary);
+  clip-path: polygon(
+    50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%,
+    50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%
+  );
+}
+@mixin shape-hexagon {
+  background: var(--md-secondary);
+  clip-path: polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%);
+}
+
+// Base glyph — sized + reset. Specific shape classes below paint it.
+.hc-shape-glyph {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  vertical-align: middle;
+  // Default: invisible. A shape class below paints it. Untagged notes
+  // leave the span empty (transparent) so layout is stable across
+  // tagged / untagged rows.
+  background: transparent;
+}
+
+// ── Direct paint (toolbar buttons) ──────────────────────────────
+.hc-shape-circle.hc-shape-glyph   { @include shape-circle; }
+.hc-shape-square.hc-shape-glyph   { @include shape-square; }
+.hc-shape-triangle.hc-shape-glyph { @include shape-triangle; }
+.hc-shape-diamond.hc-shape-glyph  { @include shape-diamond; }
+.hc-shape-star.hc-shape-glyph     { @include shape-star; }
+.hc-shape-hexagon.hc-shape-glyph  { @include shape-hexagon; }
+
+// ── Cascaded paint (note article, viewer row) ───────────────────
+// The parent's literal class chooses the paint. Allowed ancestor
+// classes are listed by name; no wildcard, no interpolation.
+.cv2-note.hc-shape-circle   .hc-shape-glyph,
+.viewer-row.hc-shape-circle  .hc-shape-glyph { @include shape-circle; }
+
+.cv2-note.hc-shape-square   .hc-shape-glyph,
+.viewer-row.hc-shape-square  .hc-shape-glyph { @include shape-square; }
+
+.cv2-note.hc-shape-triangle  .hc-shape-glyph,
+.viewer-row.hc-shape-triangle .hc-shape-glyph { @include shape-triangle; }
+
+.cv2-note.hc-shape-diamond   .hc-shape-glyph,
+.viewer-row.hc-shape-diamond  .hc-shape-glyph { @include shape-diamond; }
+
+.cv2-note.hc-shape-star      .hc-shape-glyph,
+.viewer-row.hc-shape-star     .hc-shape-glyph { @include shape-star; }
+
+.cv2-note.hc-shape-hexagon   .hc-shape-glyph,
+.viewer-row.hc-shape-hexagon  .hc-shape-glyph { @include shape-hexagon; }
+
+// ── Toolbar utility icons — also pure CSS, no font ──────────────
+//
+// Each tool button has its own .hc-tool-X class. The glyph element is
+// the same static <span class="hc-shape-glyph hc-tool-X">. Drawn from
+// linear-gradients on a transparent base so they pick up `currentColor`
+// from the button's text colour (which gives us hover / disabled states
+// for free).
+
+// Indent: three horizontal bars, the middle one offset right.
+.hc-tool-indent.hc-shape-glyph {
+  --bar: currentColor;
+  background:
+    linear-gradient(var(--bar), var(--bar)) 0%   25% / 100% 2px no-repeat,
+    linear-gradient(var(--bar), var(--bar)) 100% 50% /  64% 2px no-repeat,
+    linear-gradient(var(--bar), var(--bar)) 0%   75% / 100% 2px no-repeat;
+}
+
+// Outdent: mirrored — middle bar offset left.
+.hc-tool-outdent.hc-shape-glyph {
+  --bar: currentColor;
+  background:
+    linear-gradient(var(--bar), var(--bar)) 0% 25% / 100% 2px no-repeat,
+    linear-gradient(var(--bar), var(--bar)) 0% 50% /  64% 2px no-repeat,
+    linear-gradient(var(--bar), var(--bar)) 0% 75% / 100% 2px no-repeat;
+}
+
+// Clear (✕): two crossed strokes via rotated gradients on a 14px square.
+.hc-tool-clear.hc-shape-glyph {
+  --stroke: currentColor;
+  background:
+    linear-gradient( 45deg, transparent 45%, var(--stroke) 45% 55%, transparent 55%),
+    linear-gradient(-45deg, transparent 45%, var(--stroke) 45% 55%, transparent 55%);
+}
