@@ -144,6 +144,15 @@ const RESOURCE_REPUBLISH_BUFFER_MS = 5 * 60 * 1000
 const MAX_RESOURCE_BYTES = 256 * 1024  // 256 KB
 
 interface SwarmLayerPayload {
+  // Optional human-readable label the publisher set for themselves
+  // (e.g. "Alice"). Per-participant identity affordance — UI uses it to
+  // render a name next to peer tiles, sort participant lists, and let
+  // the user pick who to auto-adopt. Pubkey remains the canonical
+  // identity; label is decoration that can be changed any time. Length
+  // capped + filtered through the visual-sanitizer's ident shape on
+  // receive so a malicious peer can't inject markup or unbounded text.
+  label?: string
+
   // The 0000 array — one entry per child at the publisher's current
   // location. Each entry is flat: `name` is the lineage leaf, and
   // every other field is a first-class cell property (index, imageSig,
@@ -152,15 +161,12 @@ interface SwarmLayerPayload {
   // that identifies which child it belongs to.
   //
   // Image bytes (heavy binary content) still ride the companion kind
-  // 30201 resource pipeline, referenced by sig inside the visual
-  // (e.g. `small.image = "4444…"`). The publisher's `collectNestedSigs`
-  // walk finds them and publishes each as its own kind 30201 event;
-  // the receiver's `#pullResourcesFromLayer` walks the same path.
-  //
-  // Each visual is canonicalized before inlining so identical logical
-  // content produces identical wire bytes regardless of which writer
-  // (editor, AI bridge, manual edit) wrote the local 0000. Same
-  // content → same event content → relay dedup just works.
+  // 30201 resource pipeline, referenced by sig inside the visual.
+  // Receive-side auto-pull of those bytes was REMOVED — see #onEvent
+  // and #maybeAutoAdoptForPubkey. Resources are only fetched when the
+  // receiver has opted in (per-pubkey auto-adopt) or explicitly adopts
+  // a tile; raw browsing of the visuals payload never touches the
+  // resource pipeline.
   visuals: ({ name: string } & Record<string, unknown>)[]
 }
 
@@ -400,7 +406,7 @@ export class SwarmDrone extends Drone {
   // resolves, we still subscribe + publish on time. The primary trigger is
   // the Lineage `change` event we wire up in the constructor below.
   protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret']
-  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed']
+  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:auto-adopt-changed', 'tile:action']
 
   // Per-lineage subscription handle. We open one per visited sig and
   // never close (cheap — mesh dedupes by sig at the bucket layer).
@@ -440,6 +446,14 @@ export class SwarmDrone extends Drone {
   // so a long click-hover holds the cue alive; also drives the dedupe
   // (don't re-publish identical interest within the heartbeat window).
   #myInterestBySig = new Map<string, Map<string, number>>()
+
+  // Peer label cache. Each participant can stamp a human-readable
+  // label on their published payload ("Alice", "Bob's bee-keep") so
+  // UI can render names alongside pubkeys. Pubkey stays the canonical
+  // identity; label is decoration that can change at any time. Latest
+  // event per peer wins; the older-event guard in #onEvent keeps stale
+  // labels from clobbering newer ones.
+  #labelByPubkey = new Map<string, string>()
 
   // Per-lineage local memo of what we last published as our hidden
   // list. Drives the dedupe + heartbeat for hide events: skip a
@@ -1418,12 +1432,48 @@ export class SwarmDrone extends Drone {
     if (!lastSeenBag) { lastSeenBag = new Map(); this.#peerLastSeenMsBySig.set(sig, lastSeenBag) }
     lastSeenBag.set(pubkey, Date.now())
 
-    // Resource pull — for any child the peer references an imageSig
-    // for, ensure we have the bytes locally. Skipped when this peer's
-    // layer hasn't changed (the imageSig set is the same).
-    if (layerChanged) {
-      void this.#pullResourcesFromLayer(layer)
+    // Auto-resource-pull DISABLED for the exploration-first model.
+    // Visuals carry only inert metadata (names, accents, tags, hideText),
+    // which is safe to render from any peer in the swarm. Image bytes,
+    // layer bytes, and dependency code are gated behind explicit user
+    // action (adopt, or per-participant auto-adopt opt-in below) — a
+    // peer publishing a malicious imageSig should NOT trigger us to
+    // fetch their bytes into our OPFS just because we saw their visuals.
+
+    // Label parse + cache. Length-capped, non-control-char string.
+    // Empty / oversized / nested values are dropped silently. The cache
+    // is keyed by pubkey only — same label across every sig the peer
+    // appears at (it's per-participant, not per-location).
+    const incomingLabel = typeof (raw as { label?: unknown }).label === 'string'
+      ? (raw as { label: string }).label.trim().slice(0, 64).replace(/[\x00-\x1f]/g, '')
+      : ''
+    if (incomingLabel && incomingLabel !== this.#labelByPubkey.get(pubkey)) {
+      this.#labelByPubkey.set(pubkey, incomingLabel)
+      this.emitEffect('swarm:label-changed', { pubkey, label: incomingLabel })
     }
+
+    // Auto-adopt: if the user has opted to follow this peer AND this
+    // event lands at OUR current location, queue adoption for any
+    // tile names they're publishing that aren't already in our local
+    // layer view. swarm-adopt drone handles the per-tile writes; we
+    // just emit one tile:action with the full set of names from
+    // their visuals (the adopt drone iterates and skips duplicates
+    // via the layer's natural idempotency at commit time).
+    //
+    // Why only at #currentSig: writeTilePropertiesAt resolves the
+    // PARENT layer by the lineage we're sitting at. Auto-adopting a
+    // peer's event from a sub-location we never visited has nowhere
+    // to commit; the user would need to navigate there first (which
+    // is exactly the exploration handshake from the lifecycle).
+    if (layerChanged && sig === this.#currentSig && this.#isAutoAdopting(pubkey)) {
+      const names = layer.visuals
+        .map(v => String((v as { name?: unknown }).name ?? '').trim())
+        .filter(n => n.length > 0)
+      if (names.length > 0) {
+        this.emitEffect('tile:action', { action: 'adopt', labels: names })
+      }
+    }
+    void layerChanged  // silence unused if neither branch ran
 
     // Tell renderers about the new/changed peer so they repaint without
     // waiting for the user to navigate or interact. Show-cell's mesh
@@ -1662,7 +1712,15 @@ export class SwarmDrone extends Drone {
       } catch { /* no props yet — name-only publish */ }
       return visual
     }))
-    const payload: SwarmLayerPayload = { visuals: children }
+    // Stamp our chosen label onto the payload so participants can render
+// "Alice's tiles" next to peer entries without a separate subscription.
+// Length-capped + plain-text (no nested objects/arrays), so the worst
+// a malicious peer can do is spoof someone else's chosen text — they
+// can't escape the visual sanitizer that filters this on receive.
+const myLabel = this.#readMyLabel()
+const payload: SwarmLayerPayload = myLabel
+  ? { label: myLabel, visuals: children }
+  : { visuals: children }
 
     // Dedupe — only publish if our local layer at this sig has actually
     // changed since the last publish, OR enough wall-clock time has
@@ -2105,6 +2163,83 @@ export class SwarmDrone extends Drone {
    *  one lookup per tile. */
   public interestSnapshotAtCurrentSig = (): ReadonlyMap<string, ReadonlySet<string>> => {
     return this.#interestByChildBySig.get(this.#currentSig) ?? new Map()
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Participant labels — human-readable per-pubkey identity
+  // ─────────────────────────────────────────────────────────────────
+
+  /** This participant's chosen label, persisted across sessions so the
+   *  identity is sticky. Set via setMyLabel(); stamped onto every
+   *  outgoing visuals payload. Empty string when unset. */
+  public myLabel = (): string => this.#readMyLabel()
+
+  /** Choose / change the participant's own label. Writes to localStorage
+   *  AND forces a fresh publish so peers see the new name immediately
+   *  rather than waiting for the next heartbeat. */
+  public setMyLabel = (label: string): void => {
+    const clean = String(label ?? '').trim().slice(0, 64).replace(/[\x00-\x1f]/g, '')
+    try { localStorage.setItem('hc:user-label', clean) } catch { /* ignore */ }
+    // Invalidate publish memo so the next sync re-emits with the new label
+    // (the publish dedup compares serialized payload; changing label
+    // changes the bytes, so this is belt-and-braces).
+    this.#lastPublishedBySig.clear()
+    void this.#syncForCurrentLineage()
+  }
+
+  /** A peer's last-seen label, or empty string when we haven't received
+   *  one yet. UI uses this to render names in participant lists,
+   *  participant indicators on peer tiles, etc. */
+  public labelFor = (pubkey: string): string => this.#labelByPubkey.get(pubkey) ?? ''
+
+  // ─────────────────────────────────────────────────────────────────
+  // Per-participant auto-adopt ("follow")
+  // ─────────────────────────────────────────────────────────────────
+
+  /** Opt in / out of automatically importing a peer's tiles. Stored in
+   *  localStorage keyed by pubkey so the choice survives reloads and is
+   *  scoped to this device (not synced across devices the way a peer
+   *  publish would be). */
+  public setAutoAdopt = (pubkey: string, on: boolean): void => {
+    const pk = String(pubkey ?? '').trim().toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(pk)) return
+    try {
+      if (on) localStorage.setItem(`hc:auto-adopt:${pk}`, '1')
+      else localStorage.removeItem(`hc:auto-adopt:${pk}`)
+    } catch { /* ignore */ }
+    this.emitEffect('swarm:auto-adopt-changed', { pubkey: pk, on: !!on })
+  }
+
+  /** Is the local user following this pubkey? When true, the swarm
+   *  auto-fires tile:action with action='adopt' for new tiles the
+   *  peer publishes at our current sig. */
+  public isAutoAdopting = (pubkey: string): boolean => this.#isAutoAdopting(pubkey)
+
+  /** All pubkeys we're currently following. UI can render the list, show
+   *  online indicators, etc. */
+  public listAutoAdopting = (): readonly string[] => {
+    const out: string[] = []
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key && key.startsWith('hc:auto-adopt:')) {
+          out.push(key.slice('hc:auto-adopt:'.length))
+        }
+      }
+    } catch { /* ignore */ }
+    return out
+  }
+
+  #isAutoAdopting = (pubkey: string): boolean => {
+    const pk = String(pubkey ?? '').trim().toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(pk)) return false
+    try { return localStorage.getItem(`hc:auto-adopt:${pk}`) === '1' }
+    catch { return false }
+  }
+
+  #readMyLabel = (): string => {
+    try { return String(localStorage.getItem('hc:user-label') ?? '').trim().slice(0, 64) }
+    catch { return '' }
   }
 
   // -----------------------------------------------------------------
