@@ -2,6 +2,24 @@
 import { Drone } from '@hypercomb/core'
 
 const LOCAL_RELAY = 'ws://localhost:7777'
+// Live bootstrap relay.
+//
+// ⚠️ HARD GUARANTEE: This constant is referenced in EXACTLY ONE
+// runtime branch — the gated seed expression in `loadRelays()` below.
+// Casual / first-time browsers must NEVER hit this URL without an
+// explicit opt-in from the user. If you find yourself referencing
+// `LIVE_RELAY` anywhere else — adding it to a defaults array, pushing
+// it into `configureRelays()`, returning it from a fallback, putting
+// it in a docs example that runs as code — STOP. You're about to
+// route every visitor's events onto the operator's home-hosted server
+// without their permission. The opt-in flow is:
+//
+//   localStorage['hc:nostrmesh:use-live-relay'] = '1'   (gates LIVE_RELAY)
+//   localStorage['hc:nostrmesh:relays']        = '[…]'  (manual override, wins)
+//
+// Both are user-driven (DevTools or explicit slash command), never set
+// by code. Keep it that way.
+const LIVE_RELAY = 'wss://jwize.com'
 
 type NostrEvent = { id?: string; pubkey?: string; created_at: number; kind: number; tags: string[][]; content: string; sig?: string }
 type MeshEvt = { relay: string; sig: string; event: NostrEvent; payload: any }
@@ -654,6 +672,22 @@ export class NostrMeshDrone extends Drone {
     return false
   }
 
+  private isLocalContext = (): boolean => {
+    // True when the app itself is being served from a local-development
+    // origin. Used by loadRelays to prefer LOCAL_RELAY over LIVE_RELAY
+    // when the operator is testing on the same machine that hosts the
+    // relay — avoids round-tripping their own events through Cloudflare.
+    try {
+      const host = String(window?.location?.hostname ?? '').toLowerCase()
+      if (!host) return false
+      if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true
+      if (host.endsWith('.local')) return true
+      return false
+    } catch {
+      return false
+    }
+  }
+
   private isLoopbackRelay = (relay: string): boolean => {
     try {
       const u = new URL(relay)
@@ -1065,11 +1099,29 @@ export class NostrMeshDrone extends Drone {
   }
 
   private loadRelays = (fallback: string[]): string[] => {
-    // Always guarantee at least LOCAL_RELAY in the result. Without this,
+    // Always guarantee at least one relay in the result. Without this,
     // a fresh browser with no `hc:nostrmesh:relays` localStorage entry
     // ends up with zero relays and silently drops every publish — events
     // hit local fanout (so the sender "sees" them) but never reach peers.
-    const defaults = fallback.length > 0 ? fallback : [LOCAL_RELAY]
+    //
+    // `hc:nostrmesh:use-live-relay='1'` is the opt-in for the shared
+    // bootstrap relay (LIVE_RELAY). Without it we default to LOCAL_RELAY
+    // so first-time / casual visitors never touch the shared server.
+    // An explicit `hc:nostrmesh:relays` always wins over both.
+    //
+    // Dev-machine override: even when the live-relay flag is on, if the
+    // app itself was loaded from a local context (localhost / 127.0.0.1
+    // / ::1 / *.local), we prefer LOCAL_RELAY. Rationale: when the relay
+    // operator is testing their own deployed build on the same machine
+    // that hosts the relay, every event would otherwise round-trip
+    // through Cloudflare back to themselves — wasted hop, noisier
+    // metrics, slower iteration. From any other origin (the real
+    // deployment domain) the flag uses LIVE_RELAY as before.
+    let useLive = false
+    try { useLive = localStorage.getItem('hc:nostrmesh:use-live-relay') === '1' } catch { /* ignore */ }
+    const localContext = this.isLocalContext()
+    const seed = (useLive && !localContext) ? [LIVE_RELAY] : [LOCAL_RELAY]
+    const defaults = fallback.length > 0 ? fallback : seed
     try {
       const raw = localStorage.getItem('hc:nostrmesh:relays')
       if (!raw) return defaults.slice()

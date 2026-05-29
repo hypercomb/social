@@ -20,8 +20,8 @@ Client ──── wss:// ────► Relay (stateless)
 
 - Relays follow the Nostr relay protocol (NIP-01).
 - Relays store nothing long-term. They forward frames and serve recent events per standard Nostr behavior.
-- The client maintains a configurable relay list. Default: `wss://relay.snort.social`.
-- Configuration key: `localStorage['hc:nostrmesh:relays']` (JSON array of `wss://` URLs).
+- The client maintains a configurable relay list. Default: `ws://localhost:7777` (loopback, gated behind `hc:nostrmesh:allow-loopback`). The shared bootstrap relay `wss://jwize.com` is opt-in via `localStorage['hc:nostrmesh:use-live-relay'] = '1'` — without that flag, casual visitors never touch the shared server.
+- Configuration key: `localStorage['hc:nostrmesh:relays']` (JSON array of `wss://` URLs) overrides both defaults.
 
 ### 2.2 Connection Management
 
@@ -624,9 +624,11 @@ Lookup resolves by exact signature first, then by name alias.
 
 | Key                              | Type          | Default                      | Description                        |
 |----------------------------------|---------------|------------------------------|------------------------------------|
-| `hc:nostrmesh:relays`            | JSON string[] | `["wss://relay.snort.social"]` | Nostr relay endpoints            |
+| `hc:nostrmesh:relays`            | JSON string[] | `["ws://localhost:7777"]` (or `["wss://jwize.com"]` when `use-live-relay`) | Nostr relay endpoints |
+| `hc:nostrmesh:use-live-relay`    | `"0"\|"1"`    | `"0"`                        | Use shared bootstrap relay `wss://jwize.com` as the default seed |
 | `hc:nostrmesh:kinds`             | JSON int[]    | `[29010]`                    | Accepted event kinds               |
 | `hc:nostrmesh:debug`             | `"0"\|"1"`    | `"0"`                        | Debug logging                      |
 | `hc:nostrmesh:allow-loopback`    | `"0"\|"1"`    | `"0"`                        | Allow localhost relay connections   |
+| `hc:mesh-public`                 | `"true"\|other` | (unset)                    | Master privacy switch. Mesh networking is OFF unless this is `"true"`. |
 | `hc:nostr:secret-key`            | hex string    | (none)                       | Nostr private key (32 bytes hex)   |
 | `hc:show-honeycomb:publisher-id` | UUID string   | auto-generated               | Persistent client identity for self-filter |

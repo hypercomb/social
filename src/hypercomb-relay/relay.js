@@ -1,6 +1,12 @@
 #!/usr/bin/env node
 // hypercomb-relay — minimal Nostr relay for private swarm meetings
 // usage: node relay.js [--port 7777] [--pubkeys hex1,hex2] [--memory] [--db ./relay.db] [--max-event-size 65536]
+//
+// env fallbacks (used when the matching --flag is absent):
+//   PORT             → port to listen on (Azure App Service injects this)
+//   WEBSITE_HOSTNAME → presence implies App Service: default db moves to
+//                      /home/relay.db (persistent across restarts on the
+//                      App Service Linux /home mount).
 
 import { createServer } from 'node:http'
 import { randomBytes } from 'node:crypto'
@@ -12,7 +18,15 @@ import { nip19 } from 'nostr-tools'
 // ── cli ──────────────────────────────────────────────────────────────────────
 
 function parseArgs(argv) {
-  const args = { port: 7777, pubkeys: null, memory: false, db: './relay.db', maxEventSize: 65536 }
+  const envPort = Number(process.env.PORT)
+  const onAppService = !!process.env.WEBSITE_HOSTNAME
+  const args = {
+    port: Number.isFinite(envPort) && envPort > 0 ? envPort : 7777,
+    pubkeys: null,
+    memory: false,
+    db: onAppService ? '/home/relay.db' : './relay.db',
+    maxEventSize: 65536
+  }
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--memory') { args.memory = true; continue }

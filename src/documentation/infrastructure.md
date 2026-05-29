@@ -19,6 +19,10 @@ everything is a signed resource. the app itself, the relay list, user content �
 | **vancouver** | `van.hypercomb.io` | primary relay, north america coverage |
 | **japan** | `jp.hypercomb.io` | secondary relay, asia-pacific coverage |
 
+### bootstrap relay (jwize.com)
+
+Pending the Vancouver / Japan VPS rollout, a single bootstrap relay is planned at `wss://jwize.com` (concrete deploy path TBD — local-with-Cloudflare-Tunnel or VPS). It is **off by default in the client** — users must explicitly set `localStorage['hc:nostrmesh:use-live-relay'] = '1'` for the default relay list to seed with it. This keeps casual / first-load browsers off the shared server while we ramp.
+
 ### what runs on each
 
 a Nostr relay. that's it.
