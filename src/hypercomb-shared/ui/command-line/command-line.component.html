@@ -15,12 +15,16 @@
       [colorMap]="accentColorMap()"
       [indicators]="activeIndicators()"
       [armedResource]="armedResource()"
+      [showOpenForSubscribersToggle]="showOpenForSubscribersToggle()"
+      [openForSubscribers]="openForSubscribers()"
+      [openForSubscribersLabel]="'command-line.open-for-subscribers' | t"
       (valueChange)="onShellValueChange($event)"
       (commit)="onShellCommit($event)"
       (completionAccepted)="onShellCompletionAccepted($event)"
       (shellKeydown)="onShellKeydown($event)"
       (indicatorDismiss)="onIndicatorDismiss($event)"
       (armedResourceDismiss)="onArmedResourceDismiss()"
+      (openForSubscribersToggle)="onOpenForSubscribersToggle()"
     />
 
     @if (voiceSupported && pushToTalkEnabled()) {

@@ -257,6 +257,7 @@
   "docs.main-title": "Hypercomb Documentation",
   "docs.welcome-text": "Select a document from the sidebar or use /docs glossary to jump directly to a page.",
   "command-line.install-prompt": "Install Hypercomb",
+  "command-line.open-for-subscribers": "Allow anyone in the swarm to subscribe to my hive",
   "command-line.create-cell": "Create a new cell at the current level",
   "command-line.create-nested": "Create nested folders, stay at current level with parent path retained",
   "command-line.navigate-folder": "Go to a folder, creating it if it doesn't exist",

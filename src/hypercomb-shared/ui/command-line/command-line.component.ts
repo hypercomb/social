@@ -529,6 +529,18 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   #indicatorUnsubs: (() => void)[] = []
 
+  // ── open-for-subscribers toggle ───────────────────────
+  //
+  // Floating icon inside the command-line that flips
+  // swarm.setOpenForSubscribers. Visible whenever the SwarmDrone has
+  // registered in IoC (so it appears the moment the swarm module is
+  // loaded; stays hidden in non-swarm contexts).
+
+  readonly #swarmAvailable = signal(false)
+  readonly #openForSubscribers = signal(true)  // matches swarm default
+  readonly openForSubscribers = this.#openForSubscribers.asReadonly()
+  readonly showOpenForSubscribersToggle = this.#swarmAvailable.asReadonly()
+
   public constructor() {
     console.log('[command-line] initialized with url segments:', this.navigation.segments())
 
@@ -605,6 +617,52 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         this.#indicators.set(m)
       } catch { /* ignore corrupt data */ }
     }
+
+    // Bind the open-for-subscribers toggle to the SwarmDrone via
+    // whenReady so the icon appears the moment the swarm registers
+    // in IoC (could be after this component constructs in the web
+    // shell's runtime-bee loading path). Seed the signal from the
+    // drone's persisted state, then mirror future changes via
+    // EffectBus 'swarm:open-for-subscribers-changed'.
+    interface SwarmOpenApi {
+      openForSubscribers: () => boolean
+      setOpenForSubscribers: (on: boolean) => void
+    }
+    const ioc = (window as { ioc?: { whenReady?: (k: string, fn: (v: unknown) => void) => void; get?: (k: string) => unknown } }).ioc
+    const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
+    const onSwarmReady = (swarm: SwarmOpenApi): void => {
+      this.#swarmAvailable.set(true)
+      try { this.#openForSubscribers.set(!!swarm.openForSubscribers()) } catch { /* keep default */ }
+    }
+    if (typeof ioc?.whenReady === 'function') {
+      ioc.whenReady(SWARM_KEY, (v) => onSwarmReady(v as SwarmOpenApi))
+    } else {
+      const existing = ioc?.get?.(SWARM_KEY) as SwarmOpenApi | undefined
+      if (existing) onSwarmReady(existing)
+    }
+    this.#indicatorUnsubs.push(
+      EffectBus.on<{ open: boolean }>('swarm:open-for-subscribers-changed', (p) => {
+        this.#openForSubscribers.set(!!p?.open)
+      }),
+    )
+  }
+
+  /** Flip the open-for-subscribers toggle. Called from the shell's
+   *  floating icon. Idempotent — re-reads the swarm state in case
+   *  another tab changed it (localStorage is the source of truth and
+   *  the swarm's setter dispatches the effect; we just route the
+   *  click to it). */
+  onOpenForSubscribersToggle(): void {
+    interface SwarmOpenApi {
+      openForSubscribers: () => boolean
+      setOpenForSubscribers: (on: boolean) => void
+    }
+    const swarm = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(
+      '@diamondcoreprocessor.com/SwarmDrone',
+    ) as SwarmOpenApi | undefined
+    if (!swarm?.setOpenForSubscribers) return
+    const current = !!swarm.openForSubscribers()
+    swarm.setOpenForSubscribers(!current)
   }
 
   onIndicatorDismiss(key: string): void {

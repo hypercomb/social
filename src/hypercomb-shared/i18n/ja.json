@@ -244,6 +244,7 @@
   "docs.main-title": "Hypercombドキュメント",
   "docs.welcome-text": "サイドバーからドキュメントを選択するか、/docs glossaryで直接ページに移動できます。",
   "command-line.install-prompt": "Hypercombをインストール",
+  "command-line.open-for-subscribers": "群れの参加者が私のハイブを購読することを許可",
   "command-line.create-cell": "現在のレベルに新しいセルを作成",
   "command-line.create-nested": "ネストフォルダを作成し、親パスを保持して現在のレベルに留まる",
   "command-line.navigate-folder": "フォルダに移動（存在しない場合は作成）",
