@@ -80,10 +80,14 @@ export class MeshModalComponent implements OnInit, OnDestroy {
 
     this.#onWindowKeyDown = (e: KeyboardEvent): void => {
       if (!this.open() || e.key !== 'Enter') return
-      const active = document.activeElement as HTMLElement | null
-      if (active?.tagName === 'BUTTON' && active.closest('.mesh-modal-panel')) return
       e.preventDefault()
-      this.save()
+      // Enter always saves while the modal is open — unless the Cancel
+      // button itself is the focused element, in which case Enter
+      // dismisses (matching the visible focus ring).
+      const active = document.activeElement as HTMLElement | null
+      const cancelFocused = !!active?.closest?.('.mesh-modal-panel .mesh-modal-btn.cancel')
+      if (cancelFocused) this.dismiss()
+      else this.save()
     }
     window.addEventListener('keydown', this.#onWindowKeyDown)
   }
