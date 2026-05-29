@@ -1,4 +1,9 @@
 // diamondcoreprocessor.com/nostr/nostr-mesh.drone.ts
+//
+// Live bootstrap relay (wss://jwize.com) shipped 2026-05-29. Behind the
+// hc:nostrmesh:use-live-relay localStorage flag; default-off so casual
+// browsers never touch the operator's home-hosted server. See lines
+// below for full LIVE_RELAY guardrail and the dev-machine override.
 import { Drone } from '@hypercomb/core'
 
 const LOCAL_RELAY = 'ws://localhost:7777'
