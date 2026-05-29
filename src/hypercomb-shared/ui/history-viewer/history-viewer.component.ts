@@ -89,6 +89,14 @@ type Slice = {
   lines: ReadonlyArray<{ text: string; status: 'same' | 'add' | 'remove' }>
   /** Raw JSON of the layer at this slice — copy button source. */
   json: string
+  /** Inflated tile properties (the 0000 resource at `properties[0]`)
+   *  formatted as pretty JSON. Null when the layer carries no
+   *  `properties` slot (e.g. root layer, freshly minted child with no
+   *  visual props yet) or when the resource fails to resolve / parse.
+   *  Renders as a separate read-only section below the layer JSON so
+   *  the user can see the canonical visual primitives without having
+   *  to click into the sig manually. */
+  properties: string | null
 }
 
 type Row = {
@@ -634,8 +642,56 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
       label: `#${index + 1} · ${when} · ${entry.layerSig.slice(0, 12)}…`,
       lines,
       json: nextJson,
+      properties: null,
     }])
     this.sliceCopied.set(false)
+    // Inflate the layer's `properties[0]` (the canonical 0000 resource)
+    // in the background and stitch it into the open slice when it
+    // resolves. Decoupled from the synchronous slice render so the
+    // modal pops instantly; the 0000 section fades in when ready.
+    void this.#hydrateSliceProperties(content)
+  }
+
+  /** Fetch and parse the layer's `properties[0]` resource — the canonical
+   *  0000 visual-properties JSON — and graft the formatted result onto
+   *  the topmost slice so the inspector shows the visual primitives
+   *  alongside the layer's slot bag. Silent on every miss path: a layer
+   *  with no properties slot, a missing resource, or unparseable bytes
+   *  all leave the slice's `properties` field null and the section
+   *  hidden. The user always has the manual-drill path as fallback. */
+  async #hydrateSliceProperties(content: Content): Promise<void> {
+    const propsSlot = (content as Record<string, unknown>)['properties']
+    if (!Array.isArray(propsSlot) || propsSlot.length === 0) return
+    const propSig = propsSlot[0]
+    if (typeof propSig !== 'string' || !/^[0-9a-f]{64}$/.test(propSig)) return
+    const store = this.#store()
+    if (!store) return
+    try {
+      const blob = await store.getResource(propSig)
+      if (!blob) return
+      const text = await blob.text()
+      let pretty = text
+      try {
+        const parsed = JSON.parse(text)
+        // Sort keys for stable display — same canonicalization the
+        // writer applies. Cosmetic; the underlying resource bytes are
+        // already canonical because writeTilePropertiesAt sorts keys
+        // before storing.
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          const sortedKeys = Object.keys(parsed).sort()
+          const canonical: Record<string, unknown> = {}
+          for (const k of sortedKeys) canonical[k] = (parsed as Record<string, unknown>)[k]
+          pretty = JSON.stringify(canonical, null, 2)
+        }
+      } catch { /* keep raw text */ }
+      // Patch only the topmost slice (matches the layer that just opened)
+      // and only if the user hasn't drilled away in the meantime.
+      this.#sliceStack.update(stack => {
+        if (stack.length === 0) return stack
+        const top = stack[stack.length - 1]
+        return [...stack.slice(0, -1), { ...top, properties: pretty }]
+      })
+    } catch { /* silent fallback to drill-in path */ }
   }
 
   readonly closeSlice = (): void => {
@@ -756,9 +812,17 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
       label: `↳ ${niceName}`,
       lines,
       json: json ?? '',
+      properties: null,
     }
     this.#sliceStack.update(s => [...s, slice])
     this.sliceCopied.set(false)
+    // Inflate 0000 for this drilled layer too — when the user walks
+    // INTO a child layer (e.g. clicks a sig in the parent's `children`
+    // array), they typically want to see what that child's visual
+    // primitives are. Same async hydrate path as openSlice.
+    if (parsed && typeof parsed === 'object') {
+      void this.#hydrateSliceProperties(parsed as Content)
+    }
   }
 
   /**

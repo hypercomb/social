@@ -376,6 +376,21 @@ export class ShowCellDrone extends Drone {
   // and rebuilt on each renderFromSynchronize pass.
   #peerPubkeyByLabel = new Map<string, string>()
 
+  // Per-session in-memory slot assignment cache. Once a tile is placed
+  // via score-based logic (or any other path), its slot is remembered
+  // here so later renders — including pan-triggered re-renders — re-use
+  // the same slot regardless of viewport changes.
+  //
+  // User-spec rule: indexes are fixed; tiles never relocate on pan,
+  // only on manual reorganize. The on-disk index persistence path is
+  // async and can race a rapid pan; this cache fills the gap so
+  // anything once placed stays put for the session.
+  //
+  // Cleared on location change (different lineage = different cell
+  // set; stale cache entries get caught by the sparse-slot-occupied
+  // check anyway, but a fresh cache per location avoids leaks).
+  #sessionSlotByLabel = new Map<string, number>()
+
   // Currently spotlit peer pubkey (from SpotlightService), or null
   // when no layer is surfaced. Subscribed on the first heartbeat so
   // the service is registered by then. Render reads this in
@@ -3210,6 +3225,21 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // Location change — different lineage means different cell set;
+    // the session slot cache is keyed by label and the new cells may
+    // share names with the old ones (rare but possible at deep
+    // navigations). Wipe the cache on every lineage change to keep
+    // slot assignments scoped per location.
+    this.onEffect('fs:changed', () => {
+      // fs:changed fires on navigation as well as data mutations;
+      // gating on locationKey change keeps it cheap.
+      const lineage = this.resolve<any>('lineage')
+      const here = String(lineage?.explorerLabel?.() ?? '/')
+      if (here !== this.renderedLocationKey) {
+        this.#sessionSlotByLabel.clear()
+      }
+    })
+
     // substrate:applied — substrate has just written a new propsSig for this
     // cell. Only this one cell's imageSig changed; route through the in-place
     // buffer update so the rest of the grid never repaints. If the cell isn't
@@ -3726,13 +3756,30 @@ export class ShowCellDrone extends Drone {
       }
     }
 
-    // Pass 2 — peer tiles. Honour the publisher's `index` when supplied
-    // so a tile a peer rendered at their slot N appears at our slot N
-    // too (provided that slot isn't already occupied by a local cell).
-    // Without this peers fall straight into the unindexed allocator and
-    // crowd onto the lowest free slots starting at 0 — producing a
-    // disjoint cluster offset from the local cells. Collisions still
-    // demote to the next-free bucket; no peer index can evict a local.
+    // Pass 2 — peer tiles. Honor the publisher's `index` when the
+    // matching slot is free locally; otherwise demote to the unindexed
+    // pile and let the score-based fill below pick a slot.
+    //
+    // Why honor it: when the receiver has no conflicting local tile at
+    // the published index, using it preserves the visual identity the
+    // publisher set (a tile at "their" slot 3 sits at slot 3 on every
+    // receiver who has slot 3 free). On a fresh incognito canvas with
+    // zero local tiles every peer index lands clean — exactly the
+    // scenario the user called out: "there are most certainly no
+    // indexes in the way with zero initial tiles."
+    //
+    // Why the collision check is enough: Pass 1 (above) has already
+    // claimed every slot a local indexed tile owns. If a peer index
+    // collides with one of those, sparse[peerIdx] !== '' and we fall
+    // through to the unindexed queue. So local layout stays sovereign;
+    // peer indices are only respected on otherwise-empty slots.
+    //
+    // Deterministic peer order: sort peer names before placement so
+    // multi-peer rendering is stable across reruns and freshness
+    // rotation. Without this, two peers republishing the same name
+    // with different indices could flip the surviving slot every
+    // render based on Map-iteration order.
+    peerNames.sort((a, b) => a.localeCompare(b))
     for (const name of peerNames) {
       const peerIdx = peerIndices?.get(name)
       if (typeof peerIdx === 'number' && peerIdx >= 0 && peerIdx <= maxSlot && sparse[peerIdx] === '') {
@@ -3741,6 +3788,16 @@ export class ShowCellDrone extends Drone {
         unindexed.push(name)
       }
     }
+
+    // Sort the unindexed pile alphabetically before the score-based
+    // fill below. Same determinism reason: scoreMap is deterministic
+    // (slots evaluate identically given the same viewport), so the
+    // ONLY non-deterministic input is the iteration order of unindexed
+    // — sort it and the whole layout becomes reproducible across
+    // renders. Local-without-index and peers share the queue at this
+    // point; both classes are stable name-keyed, which is what the
+    // user-spec wants.
+    unindexed.sort((a, b) => a.localeCompare(b))
 
     // Place unindexed cells by scoring every empty slot on three
     // factors and picking the minimum:
@@ -3769,6 +3826,30 @@ export class ShowCellDrone extends Drone {
     const adjacents = axialAny?.Adjacents
 
     for (const name of unindexed) {
+      // Session-cache short-circuit. If this tile was already placed
+      // in a prior render (local-no-index path during persistence
+      // race, or any peer tile) and the slot is still free, drop it
+      // back into the same slot. Pans don't change cached assignments;
+      // only manual reorganize clears this map.
+      const cachedSlot = this.#sessionSlotByLabel.get(name)
+      if (typeof cachedSlot === 'number' && cachedSlot >= 0 && cachedSlot <= maxSlot && sparse[cachedSlot] === '') {
+        sparse[cachedSlot] = name
+        // Persist on every cache hit too — first-write may have failed
+        // silently (storage cold, committer queue full, race with cell
+        // commit), leaving the tile indexless in the layer. Retrying
+        // on cache hit makes the repair eventually-consistent:
+        // writeTilePropertiesAt is content-addressed and idempotent on
+        // identical bytes, so once one write succeeds the layer has
+        // the index permanently and future renders go through Pass 1
+        // directly without ever touching this loop.
+        if (!readOnly && localCellSet.has(name)) {
+          void writeTilePropertiesAt(parentSegments, name, { index: cachedSlot }).catch(err =>
+            console.warn('[show-cell] index persist retry failed for', name, err)
+          )
+        }
+        continue
+      }
+
       let placed = -1
 
       if (scoreMap && adjacents) {
@@ -3811,17 +3892,21 @@ export class ShowCellDrone extends Drone {
       }
 
       sparse[placed] = name
+      // Cache the assignment so subsequent renders skip the score
+      // recomputation. Same memory cell whether this is a local tile
+      // awaiting persistence or a peer tile that won't ever persist
+      // here. Stable across pan, viewport change, freshness rotation.
+      this.#sessionSlotByLabel.set(name, placed)
       if (!readOnly && localCellSet.has(name)) {
-        try {
-          // Lazy-patch the index into the cell's layer (canonical
-          // path). The cascade folds the new tile-layer sig into the
-          // parent's children slot; the IndexNurse picks the new
-          // value up on its next read via the cell:0000-changed
-          // broadcast. No OPFS dir lookup, no 0000 write.
-          await writeTilePropertiesAt(parentSegments, name, { index: placed })
-        } catch (err) {
+        // Fire-and-forget — the session cache provides intra-render
+        // stability regardless of when persistence completes, and the
+        // cache-hit branch above retries persistence on every later
+        // render until one write succeeds. So we don't need to await
+        // here; awaiting just blocks the placement loop for no
+        // synchronization benefit.
+        void writeTilePropertiesAt(parentSegments, name, { index: placed }).catch(err =>
           console.warn('[show-cell] failed to persist index for', name, err)
-        }
+        )
       }
     }
 
@@ -4297,18 +4382,29 @@ export class ShowCellDrone extends Drone {
         const bgray = bcr * 0.3 + bcg * 0.3 + bcb * 0.3
         bcr = bgray * 0.5; bcg = bgray * 0.5; bcb = bgray * 0.5
       }
-      // Spotlight override — when a peer's layer is surfaced and this
-      // cell came from that peer, paint its border in the peer's
-      // identity color (same labelToRgb hash applied to the pubkey)
-      // so the spotlit layer reads as a unified accent. Wins over any
-      // cached borderColor; cleared automatically when spotlight
-      // dismisses (spotlight:changed clears the per-label caches +
-      // re-renders, which lands back here without the override).
-      if (this.#spotlightPubkey) {
-        const cellPubkey = this.#peerPubkeyByLabel.get(c.label)
-        if (cellPubkey === this.#spotlightPubkey) {
-          ;[bcr, bcg, bcb] = labelToRgb(cellPubkey)
-        }
+      // Group accent for peer tiles — every peer-contributed tile gets
+      // the publisher's deterministic pubkey-derived color as its
+      // border, ALWAYS (not just in spotlight mode). Each contributor
+      // is visually identifiable at a glance: Alice's tiles glow one
+      // hue, Bob's another. Same labelToRgb hash used for label-based
+      // identity colors, just keyed on pubkey — uniform "identity
+      // color" architecture across own tiles and peer groups.
+      //
+      // Spotlight emphasis: when a peer's layer is surfaced via the
+      // layer-cycle strip / alt+scroll, their tiles render at full
+      // brightness; other peer groups dim slightly so the active layer
+      // pops without losing the rest. Own tiles keep their normal
+      // borderColor (label or substrate-derived).
+      const cellPubkey = this.#peerPubkeyByLabel.get(c.label)
+      if (cellPubkey) {
+        const [pr, pg, pb] = labelToRgb(cellPubkey)
+        const brightness = this.#spotlightPubkey === null
+          ? 0.85                                          // no spotlight — all groups at uniform group brightness
+          : (this.#spotlightPubkey === cellPubkey ? 1.0   // this peer is active — full intensity
+            : 0.45)                                       // other peer — recede so the active group pops
+        bcr = pr * brightness
+        bcg = pg * brightness
+        bcb = pb * brightness
       }
       borderColor.set([bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb], bcp)
       bcp += 12

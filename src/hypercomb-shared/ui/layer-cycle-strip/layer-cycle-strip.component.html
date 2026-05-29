@@ -5,11 +5,11 @@
         type="button"
         class="entry"
         [class.active]="entry.active"
-        [title]="'Layer: ' + entry.label + (entry.active ? ' (active — click to dismiss)' : '')"
+        [attr.aria-label]="entry.active ? 'Active layer (click to dismiss)' : 'Spotlight this layer'"
+        [title]="entry.active ? 'click to dismiss' : ''"
         (click)="onEntryClick(entry)">
         <span class="dot" [style.background-color]="entry.color"
-                          [style.box-shadow]="entry.active ? '0 0 12px ' + entry.color : 'none'"></span>
-        <span class="label">{{ entry.label }}</span>
+                          [style.box-shadow]="entry.active ? '0 0 14px ' + entry.color + ', 0 0 4px ' + entry.color : 'none'"></span>
       </button>
     }
   </div>

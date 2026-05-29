@@ -27,23 +27,32 @@ const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const SUBSTRATE_SERVICE_KEY = '@diamondcoreprocessor.com/SubstrateService'
 
 // Property keys we strip from the peer's 0000 before committing — they
-// represent local render state or stale protocol markers that don't
-// belong on the adopter's layer. `index` is excluded because the local
-// layout owns slot assignment.
+// represent stale protocol markers or per-session render state that
+// doesn't belong on the adopter's layer.
+//
+// `index` is KEPT (not stripped) — adopt-in-place is the user-facing
+// promise: the peer tile sits at slot N on the receiver's canvas (we
+// honor peer.index when the slot is free, per show-cell.drone.ts
+// Pass 2); adopting it should leave it sitting at slot N, not toss
+// it back into the score-based unindexed pile. Dropping `index` here
+// produced the jarring "tile leaps to a different slot the moment I
+// adopt it" UX. Local layout sovereignty is already enforced in
+// Pass 1 — if the adopter ALSO has a local tile at slot N (or any
+// tile occupies it before this commit lands), #orderByIndexPinned's
+// collision check demotes the new arrival to unindexed; the
+// publisher's index only ever sticks when the slot is genuinely free.
 const STRIPPED_PEER_KEYS = [
   'children', 'facade', 'branchSig', 'channelId', 'approvalId',
-  'index', 'viewport', 'pan', 'zoom', 'meshOffset',
+  'viewport', 'pan', 'zoom', 'meshOffset',
   'transient',
 ] as const
 
 interface SwarmDroneLike {
-  peerTilesAtCurrentSig: () => readonly {
+  peerTilesAtCurrentSig: () => readonly ({
     name: string
     peerPubkey: string
-    props?: Record<string, unknown>
     imageSig?: string
-    index?: number
-  }[]
+  } & Record<string, unknown>)[]
 }
 
 interface LineageLike {
@@ -111,15 +120,27 @@ export class SwarmAdoptDrone extends Drone {
       .map(s => String(s ?? '').trim())
       .filter(Boolean)
 
-    // The peer's 0000 is already parsed and inlined in peerEntry.props
-    // — no fetch, no parse. Strip session-only / paired-channel-era
-    // markers and we're ready to commit.
+    // The peer's 0000 is already inlined as first-class fields on
+    // peerEntry (no `props` wrapper — they ARE the cell properties).
+    // Destructure off the swarm-only fields and strip session-only /
+    // paired-channel-era markers; what's left is what we commit.
+    //
+    // Trust boundary: `peerEntry` is read from `peerTilesAtCurrentSig`,
+    // which surfaces data from `#peerLayersBySig` — every entry in that
+    // map was filtered through `sanitizeVisual` at receive time
+    // (swarm.drone.ts `#onEvent`). So `rest` here contains only known-
+    // safe keys with validated value shapes: nothing the renderer or
+    // any downstream consumer treats as code, no unknown-key escape
+    // vectors. The STRIPPED_PEER_KEYS pass below remains as
+    // defence-in-depth, dropping fields that ARE safe-shaped but are
+    // local-only by policy (session viewport, paired-channel-era ids,
+    // the publisher's `index` since local layout owns slot assignment).
     let peerProps: Record<string, unknown> | null = null
-    if (peerEntry.props && typeof peerEntry.props === 'object' && !Array.isArray(peerEntry.props)) {
-      const cloned = { ...peerEntry.props }
-      for (const k of STRIPPED_PEER_KEYS) delete cloned[k]
-      if (Object.keys(cloned).length > 0) peerProps = cloned
-    }
+    const { name: _n, peerPubkey: _p, imageSig: _i, ...rest } = peerEntry as Record<string, unknown>
+    void _n; void _p; void _i  // intentionally discarded
+    const cloned: Record<string, unknown> = { ...rest }
+    for (const k of STRIPPED_PEER_KEYS) delete cloned[k]
+    if (Object.keys(cloned).length > 0) peerProps = cloned
 
     if (peerProps) {
       // Atomic adopt-with-carry-over. writeTilePropertiesAt writes the

@@ -1006,16 +1006,27 @@ export class NostrMeshDrone extends Drone {
     // Master privacy switch. Private mode (`hc:mesh-public` not set
     // to 'true') means zero mesh network — no relay subscriptions,
     // no publishes, no boot-time WebSocket bootstrap. The local
-    // `hc:nostrmesh:network` key is a finer-grained override but
-    // can never override the master to enable network when private.
+    // `hc:nostrmesh:network` key is a finer-grained opt-OUT, never
+    // an opt-IN: when mesh-public is true the user has already
+    // consented to mesh networking, so the network defaults ON
+    // unless they explicitly disabled it via the `'0'` value.
+    //
+    // Why the asymmetry: the OLD behaviour was "mesh-public on AND
+    // hc:nostrmesh:network='1' AND `hc:nostrmesh:relays` set". A fresh
+    // incognito tab with mesh-public toggled on via UI would have
+    // `hc:nostrmesh:network` UNSET → fall through → networkEnabled
+    // stayed false, mesh never opened sockets, no peer events ever
+    // arrived. The user saw their tiles never sync and concluded "the
+    // mesh is broken". Treating absence as opt-in (default ON when
+    // mesh-public is true) makes the public switch self-sufficient.
+    // Users who want fine-grained off without flipping privacy still
+    // have the explicit `'0'` value.
     if (localStorage.getItem('hc:mesh-public') !== 'true') return false
     const v = localStorage.getItem('hc:nostrmesh:network')
     if (v === '0') return false
-    if (v === '1') return true
+    return true
   } catch {}
-  // Default to OFF (private). Users opt INTO mesh networking via
-  // the mesh-public toggle; they should never get surprise outbound
-  // connections to public Nostr relays on first launch.
+  // Storage unavailable: default to OFF so we never surprise-connect.
   return false
 }
 
@@ -1032,6 +1043,21 @@ export class NostrMeshDrone extends Drone {
     this.sockets.delete(url)
     this.note('socket:pause', url)
   }
+
+  // Reset the across-relay event-id dedupe set on pause. The
+  // replaceable-event slot at the relay survives our disconnect;
+  // when we come back online (re-toggle to public) the relay
+  // replays its latest stored event for our resubscribe — but the
+  // publisher's heartbeat may not have re-fired yet, so the event
+  // ID is identical to the one we already saw in the previous
+  // session. Without this clear, `onMessage` would treat it as a
+  // duplicate and silently drop it, leaving SwarmDrone's peer
+  // cache empty until the publisher's next heartbeat (up to 30s).
+  // Clearing here means the replay always reaches consumers; the
+  // worst case is a single duplicate emission if the user toggles
+  // rapidly, which is benign — replaceable caches converge.
+  this.recentIds = []
+  this.recentIdsSet.clear()
 }
 
   private loadDebugFlag = (): boolean => {

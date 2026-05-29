@@ -31,39 +31,33 @@
 .entry {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.25rem 0.6rem;
+  padding: 0.3rem;
 
   background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 999px;
-  color: rgba(255, 255, 255, 0.75);
-
-  font-family: monospace;
-  font-size: 0.75rem;
-  line-height: 1;
+  border: 1px solid transparent;
+  border-radius: 50%;
   cursor: pointer;
 
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
 
   &:hover {
     background: rgba(255, 255, 255, 0.06);
-    color: rgba(255, 255, 255, 0.95);
+    transform: scale(1.08);
   }
 
   &.active {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.4);
-    color: white;
+    border-color: rgba(255, 255, 255, 0.45);
   }
 
   .dot {
     display: inline-block;
-    width: 0.6rem;
-    height: 0.6rem;
+    width: 0.8rem;
+    height: 0.8rem;
     border-radius: 50%;
-    transition: box-shadow 150ms ease;
+    transition: box-shadow 150ms ease, transform 150ms ease;
   }
 
-  .label { letter-spacing: 0.5px; }
+  &.active .dot {
+    transform: scale(1.15);
+  }
 }

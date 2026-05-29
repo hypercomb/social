@@ -12,10 +12,12 @@
 // arbitrary per-tile data — index, imageSig, tags, link, substrate.
 // We add `viewport` as another field on that same bag.
 //
-// For root (segments=[]), `commitSlotSet([], 'properties', [sig])`
-// commits to root layer's properties — no cascade because root has no
-// parent. For sub-locations, the same call cascades up normally.
-// One uniform API, no sentinel names, no synthetic child tiles.
+// Segments are passed RAW into `history.sign` / `commitSlotSet`. Root
+// (segments=[]) signs to `sign([])` — the same canonical sigbag the
+// rest of the cascade uses for root (see `LayerCommitter.#commit` at
+// `depth=0`). DO NOT inject `[ROOT_NAME]` here: passing `['/']` to
+// `commitSlotSet` makes the cascade commit a sub-layer named '/' and
+// attach it as a child of root, materializing a phantom tile.
 //
 // Importer contract
 // ─────────────────
@@ -26,7 +28,6 @@
 
 import { EffectBus } from '@hypercomb/core'
 import type { ViewportSnapshot } from '../navigation/zoom/zoom.drone.js'
-import { ROOT_NAME } from '../history/history.service.js'
 
 export type { ViewportSnapshot }
 
@@ -57,25 +58,9 @@ const iocGet = <T>(key: string): T | undefined => {
 }
 
 /**
- * Resolve the signing-segments for a location. Root is named `/` so its
- * bag is `__history__/<sign('/')>/...`, addressed identically to every
- * other location ('a' is at `sign('a')`, 'a/b' is at `sign('a/b')`,
- * root is at `sign('/')`). Without this, root would collapse to
- * `sign('')` because history.sign's canonicalization filters empty
- * strings — a parallel sig-bag that nothing else uses.
- *
- * `ROOT_NAME` is imported from history.service so there's a single
- * source of truth for "what root's lineage name is" instead of every
- * subsystem hard-coding `'/'`.
- */
-function signingSegments(segments: readonly string[]): readonly string[] {
-  return segments.length === 0 ? [ROOT_NAME] : segments
-}
-
-/**
  * Read the full properties bag at a location. Returns `{}` for any of
- * the legitimate "no properties yet" states. Works for root (segments=[])
- * by signing as `['/']`.
+ * the legitimate "no properties yet" states. Root (segments=[]) signs
+ * to the same canonical sigbag the layer cascade uses for root.
  */
 async function readPropertiesAtSegments(
   segments: readonly string[],
@@ -84,8 +69,7 @@ async function readPropertiesAtSegments(
   const store   = iocGet<StoreLike>(STORE_KEY)
   if (!history?.sign || !history?.currentLayerAt || !store?.getResource) return {}
 
-  const signSegs = signingSegments(segments)
-  const sig = await history.sign({ explorerSegments: () => [...signSegs] })
+  const sig = await history.sign({ explorerSegments: () => [...segments] })
   if (!sig) return {}
 
   const layer = await history.currentLayerAt(sig) as
@@ -111,7 +95,7 @@ async function readPropertiesAtSegments(
  * Write merged properties at a location. Reads existing properties,
  * merges `updates`, content-addresses, commits the new sig to the
  * `properties` slot at the given segments. For root (segments=[])
- * commitSlotSet is a single-layer commit with no cascade.
+ * this is a single-layer commit on the root bag with no cascade.
  */
 async function writePropertiesAtSegments(
   segments: readonly string[],
@@ -136,10 +120,12 @@ async function writePropertiesAtSegments(
   const blob = new Blob([JSON.stringify(canonical)], { type: 'application/json' })
   const propSig = await store.putResource(blob)
 
-  // Same segment policy as the reader: root commits to the `/` bag so
-  // a future read at the same location resolves to the same sig.
-  const commitSegs = signingSegments(segments)
-  await committer.commitSlotSet(commitSegs, PROPERTIES_SLOT, [propSig])
+  // Pass segments raw. Root (segments=[]) commits to the root layer
+  // directly — `commitSlotSet([], …)` runs one cascade step at depth=0
+  // and writes the properties slot on the root layer. Injecting `['/']`
+  // here would commit a sub-layer NAMED '/' and attach it as a phantom
+  // child of root via the cascade's name-fallback append path.
+  await committer.commitSlotSet(segments, PROPERTIES_SLOT, [propSig])
 }
 
 // ── Public API ───────────────────────────────────────────────────────

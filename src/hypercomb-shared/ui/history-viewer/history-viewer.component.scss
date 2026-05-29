@@ -334,6 +334,32 @@
   color: rgba(230, 235, 245, 0.92);
 }
 
+// 0000 visual-properties section. Lives below the layer's slot bag,
+// separated by a thin divider so the eye reads them as distinct
+// primitives (layer's slot bag = canonical; 0000 = visual decoration
+// of the cell). Header label calls it out so the user knows what
+// they're looking at.
+.slice-modal .slice-section {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.slice-modal .slice-section-header {
+  padding: 8px 16px 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(180, 188, 200, 0.7);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.slice-modal .slice-props {
+  color: rgba(220, 226, 238, 0.88);
+  background: rgba(0, 0, 0, 0.1);
+}
+
 // Per-line diff highlight inside the slice inspector. `same` lines
 // render plain; `add` lines get a green wash with a subtle left
 // accent bar; `remove` lines get a red wash with strikethrough so

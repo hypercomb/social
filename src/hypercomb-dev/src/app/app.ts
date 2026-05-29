@@ -96,10 +96,19 @@ export class App implements AfterViewInit {
       document.body.classList.add(`hc-view-${m}`)
     })
 
-    // Runtime already initialized by main.ts — go straight to bee startup
+    // Runtime already initialized by main.ts — go straight to bee startup.
+    //
+    // Dev shell defaults `hc:mesh-public` to ON. The dev relay
+    // (ws://localhost:7777) is already in the relay-list default
+    // (loadRelays in nostr-mesh.drone.ts), so a fresh tab — including
+    // a brand-new incognito session — has everything it needs to join
+    // the swarm immediately once the user sets a room + secret. This
+    // avoids the "I configured everything but it's still not syncing"
+    // trap where mesh-public stays off silently. Production
+    // (hypercomb-web) keeps the privacy default (off).
     queueMicrotask(() => {
       if (localStorage.getItem('hc:mesh-public') === null) {
-        localStorage.setItem('hc:mesh-public', 'false')
+        localStorage.setItem('hc:mesh-public', 'true')
       }
       const stored = localStorage.getItem('hc:mesh-public')
       if (stored !== null) {

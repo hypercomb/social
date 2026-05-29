@@ -128,6 +128,12 @@
       <pre class="slice-json">@for (line of slice.lines; track $index) {@if (lineSig(line.text); as sig) {<span class="slice-line slice-sig" [attr.data-status]="line.status" [attr.data-sig]="sig" (click)="drillIntoSig(sig)" role="button" tabindex="0">{{ line.text }}</span>
 } @else {<span class="slice-line" [attr.data-status]="line.status">{{ line.text }}</span>
 }}</pre>
+      @if (slice.properties; as props) {
+        <div class="slice-section">
+          <div class="slice-section-header">0000 (tile properties)</div>
+          <pre class="slice-json slice-props">{{ props }}</pre>
+        </div>
+      }
     </div>
   }
 

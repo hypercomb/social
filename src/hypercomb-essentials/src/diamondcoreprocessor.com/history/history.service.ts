@@ -1284,9 +1284,54 @@ export class HistoryService {
    */
   public readonly preloadAllBags = async (): Promise<void> => {
     if (this.#preloadAllBagsPromise) return this.#preloadAllBagsPromise
+    // Defensive root resolution: Store.initialize() is async, and any
+    // caller that fires before it resolves (early swarm publish, boot-
+    // time tile selection, show-cell's layer-driven children read on
+    // first paint) would land here with `historyRoot` undefined.
+    //
+    // CRITICAL: do NOT return early on miss. show-cell now reads tile
+    // membership EXCLUSIVELY from history.currentLayerAt → which calls
+    // here. An early return leaves `#latestSigByLineage` empty forever
+    // (nothing schedules a re-warm), so the canvas shows zero tiles
+    // even after Store finishes initializing. Instead: AWAIT Store
+    // becoming ready by polling Store.initialize() — once it resolves,
+    // historyRoot is guaranteed defined (or `#opfsAvailable === false`,
+    // in which case we bail with an empty cache, which is correct for
+    // a session running without persistent storage).
     this.#preloadAllBagsPromise = (async () => {
+      const rootStore = get<{
+        history?: FileSystemDirectoryHandle
+        initialize?: () => Promise<void>
+        opfsAvailable?: boolean
+      }>('@hypercomb.social/Store')
+
+      // Wait for Store.initialize() to resolve. The promise is memoized
+      // inside Store so multiple awaits share one boot. If Store isn't
+      // even registered yet (race against module load order), poll
+      // briefly and retry — bounded so we don't spin forever.
+      let store = rootStore
+      let polls = 0
+      while ((!store?.initialize || !store?.history) && polls < 50) {
+        if (store?.initialize) await store.initialize()
+        if (store?.history) break
+        await new Promise(r => setTimeout(r, 100))
+        store = get<{
+          history?: FileSystemDirectoryHandle
+          initialize?: () => Promise<void>
+          opfsAvailable?: boolean
+        }>('@hypercomb.social/Store')
+        polls++
+      }
+      const root = store?.history
+      if (!root) {
+        // OPFS unavailable for the whole session (Store gave up). Leave
+        // the preloader cache empty — currentLayerAt returns null for
+        // every location, which is correct for a no-persistence run.
+        console.warn('[preload] preloadAllBags: Store.history never became ready; running with empty cache')
+        return
+      }
+
       const startMs = performance.now()
-      const root = this.historyRoot
       let bagCount = 0
       let markerCount = 0
       let cachedCount = 0
@@ -1356,6 +1401,13 @@ export class HistoryService {
         console.warn('[preload] preloadFromRoot failed (non-fatal):', err)
       }
     })()
+    // Belt-and-braces: if the IIFE itself rejects (e.g. OPFS handle revoked
+    // mid-walk), clear the cached promise so a later call can re-attempt.
+    // Without this, one transient failure would poison every subsequent
+    // currentLayerAt for the rest of the session.
+    this.#preloadAllBagsPromise.catch(() => {
+      this.#preloadAllBagsPromise = null
+    })
     return this.#preloadAllBagsPromise
   }
 

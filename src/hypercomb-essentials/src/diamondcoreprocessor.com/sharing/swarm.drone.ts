@@ -28,6 +28,7 @@
 
 import { Drone } from '@hypercomb/core'
 import { readTilePropertiesAt } from '../editor/tile-properties.js'
+import { sanitizeVisual } from './visual-sanitizer.js'
 
 const SWARM_LAYER_KIND = 30200
 
@@ -125,25 +126,23 @@ const MAX_RESOURCE_BYTES = 256 * 1024  // 256 KB
 
 interface SwarmLayerPayload {
   // The 0000 array — one entry per child at the publisher's current
-  // location. `name` is the lineage leaf; `props` is the child's
-  // canonical 0000 JSON inlined directly into the event (NOT a sig
-  // pointer). The 0000 is small text content, safe to ship, and
-  // inlining collapses the publish-fetch-parse round-trip into a
-  // single layer event — receivers have the full visual data the
-  // moment the event lands.
+  // location. Each entry is flat: `name` is the lineage leaf, and
+  // every other field is a first-class cell property (index, imageSig,
+  // small.image, tags, hideText, link, etc.) inlined directly. No
+  // `props` wrapper — the visual IS the properties, plus the name
+  // that identifies which child it belongs to.
   //
-  // Image bytes (the heavy binary content) still ride the companion
-  // kind 30201 resource pipeline, referenced by sig inside the props
-  // (e.g. `props.small.image = "4444…"`). The publisher's
-  // `collectNestedSigs` walk finds them and publishes each as its own
-  // kind 30201 event; the receiver's `#pullResourcesFromLayer` walks
-  // the same path to fetch.
+  // Image bytes (heavy binary content) still ride the companion kind
+  // 30201 resource pipeline, referenced by sig inside the visual
+  // (e.g. `small.image = "4444…"`). The publisher's `collectNestedSigs`
+  // walk finds them and publishes each as its own kind 30201 event;
+  // the receiver's `#pullResourcesFromLayer` walks the same path.
   //
-  // The 0000 contents are canonicalized before inlining so identical
-  // logical content produces identical bytes on the wire regardless
-  // of which writer (editor, AI bridge, manual edit) wrote the local
-  // file. Same content → same event content → relay dedup just works.
-  visuals: { name: string; props?: Record<string, unknown> }[]
+  // Each visual is canonicalized before inlining so identical logical
+  // content produces identical wire bytes regardless of which writer
+  // (editor, AI bridge, manual edit) wrote the local 0000. Same
+  // content → same event content → relay dedup just works.
+  visuals: ({ name: string } & Record<string, unknown>)[]
 }
 
 interface MeshEvtLike {
@@ -841,18 +840,17 @@ export class SwarmDrone extends Drone {
    *  shape, same cache reads, same staleness filter.
    *
    *  Each entry carries:
-   *    - peerPubkey : for mine-vs-theirs render treatment
-   *    - props?     : the publisher's inlined 0000 JSON (already on
-   *                   the wire). Adopt feeds this straight into
-   *                   writeTilePropertiesAt for full carry-over.
-   *    - imageSig?  : convenience pointer extracted from props
-   *                   (props.imageSig | props.small.image |
-   *                   props.flat.small.image). Render binds sync via
-   *                   the existing imageAtlas pipeline.
-   *    - index?     : convenience pointer extracted from props.index.
-   *                   A hint; local layout owns final placement.
+   *    - name        : the cell's lineage leaf
+   *    - peerPubkey  : for mine-vs-theirs render treatment
+   *    - ...rest     : every other first-class cell property from the
+   *                    publisher's inlined 0000 (index, imageSig,
+   *                    small.image, tags, link, etc.). Adopt spreads
+   *                    these straight into writeTilePropertiesAt.
+   *    - imageSig?   : convenience pointer extracted from the entry
+   *                    (top-level → small.image → flat.small.image).
+   *                    Render binds sync via the existing imageAtlas.
    */
-  public peerTilesAtCurrentSig = (): readonly { name: string; peerPubkey: string; props?: Record<string, unknown>; imageSig?: string; index?: number }[] => {
+  public peerTilesAtCurrentSig = (): readonly ({ name: string; peerPubkey: string; imageSig?: string } & Record<string, unknown>)[] => {
     return this.peerTilesAtSig(this.#currentSig)
   }
 
@@ -957,11 +955,11 @@ export class SwarmDrone extends Drone {
    * consumer convenience (show-cell binds images sync without
    * reaching into the props shape).
    */
-  public peerTilesAtSig = (sig: string): readonly { name: string; peerPubkey: string; props?: Record<string, unknown>; imageSig?: string; index?: number }[] => {
+  public peerTilesAtSig = (sig: string): readonly ({ name: string; peerPubkey: string; imageSig?: string } & Record<string, unknown>)[] => {
     if (!sig) return []
     const peerLayers = this.#peerLayersBySig.get(sig)
     if (!peerLayers || peerLayers.size === 0) return []
-    const out: { name: string; peerPubkey: string; props?: Record<string, unknown>; imageSig?: string; index?: number }[] = []
+    const out: ({ name: string; peerPubkey: string; imageSig?: string } & Record<string, unknown>)[] = []
 
     // Walk peers in freshest-first order so downstream consumers that
     // first-write-wins (peerImageSigByLabel in show-cell) prefer the
@@ -987,37 +985,32 @@ export class SwarmDrone extends Drone {
       if (lastMs !== undefined && nowMs - lastMs > PEER_STALE_MS) continue
       const visuals = Array.isArray(layer?.visuals) ? layer.visuals : []
       for (const v of visuals) {
-        const name = String(v?.name ?? '').trim()
+        if (!v || typeof v !== 'object' || Array.isArray(v)) continue
+        const name = String((v as Record<string, unknown>)['name'] ?? '').trim()
         if (!name) continue
-        const props = (v?.props && typeof v.props === 'object' && !Array.isArray(v.props))
-          ? v.props as Record<string, unknown> : undefined
         // Convenience extraction — imageSig is checked in priority
-        // order so the renderer's atlas binds to the first valid sig
-        // it finds. Mirrors the substrate / editor write path.
+        // order (top-level → small.image → flat.small.image) so the
+        // renderer's atlas binds to the first valid sig it finds.
+        const flat = v as Record<string, unknown>
         let imageSig: string | undefined
-        if (props) {
-          const direct = props['imageSig']
-          if (typeof direct === 'string' && sigRe.test(direct)) imageSig = direct
-          if (!imageSig) {
-            const small = props['small'] as Record<string, unknown> | undefined
-            const smImg = small?.['image']
-            if (typeof smImg === 'string' && sigRe.test(smImg)) imageSig = smImg
-          }
-          if (!imageSig) {
-            const flat = props['flat'] as Record<string, unknown> | undefined
-            const flSmall = flat?.['small'] as Record<string, unknown> | undefined
-            const flImg = flSmall?.['image']
-            if (typeof flImg === 'string' && sigRe.test(flImg)) imageSig = flImg
-          }
+        const direct = flat['imageSig']
+        if (typeof direct === 'string' && sigRe.test(direct)) imageSig = direct
+        if (!imageSig) {
+          const small = flat['small'] as Record<string, unknown> | undefined
+          const smImg = small?.['image']
+          if (typeof smImg === 'string' && sigRe.test(smImg)) imageSig = smImg
         }
-        const rawIdx = props?.['index']
-        const index = typeof rawIdx === 'number' && Number.isFinite(rawIdx) && rawIdx >= 0
-          ? rawIdx : undefined
+        if (!imageSig) {
+          const flatBag = flat['flat'] as Record<string, unknown> | undefined
+          const flSmall = flatBag?.['small'] as Record<string, unknown> | undefined
+          const flImg = flSmall?.['image']
+          if (typeof flImg === 'string' && sigRe.test(flImg)) imageSig = flImg
+        }
         out.push({
-          name, peerPubkey: pubkey,
-          ...(props !== undefined ? { props } : {}),
+          ...flat,                // spread all first-class properties
+          name,                   // overwrite with the trimmed/validated value
+          peerPubkey: pubkey,
           ...(imageSig ? { imageSig } : {}),
-          ...(index !== undefined ? { index } : {}),
         })
       }
     }
@@ -1341,8 +1334,29 @@ export class SwarmDrone extends Drone {
 
     const payload = evt?.payload
     if (!payload || typeof payload !== 'object') { console.log('[swarm] onEvent DROPPED: payload not object', { pubkey: pubkey.slice(0,8), payloadType: typeof payload }); return }
-    const layer = payload as SwarmLayerPayload
-    if (!Array.isArray(layer.visuals)) { console.log('[swarm] onEvent DROPPED: visuals not array', { pubkey: pubkey.slice(0,8), visualsType: typeof layer.visuals }); return }
+    const raw = payload as SwarmLayerPayload
+    if (!Array.isArray(raw.visuals)) { console.log('[swarm] onEvent DROPPED: visuals not array', { pubkey: pubkey.slice(0,8), visualsType: typeof raw.visuals }); return }
+
+    // Sanitize at the trust boundary. Every peer visual is filtered
+    // through the closed-shape whitelist BEFORE landing in cache —
+    // visualsanitizer drops unknown keys, validates value shapes (sig
+    // strings, scalars, length-bounded labels, javascript-URL-rejecting
+    // links). Output is a fresh object with only inert content; the
+    // raw inbound JSON never reaches any downstream consumer. This
+    // applies the user's "visuals can carry no possibility of code
+    // injection" invariant at one mechanical chokepoint.
+    const cleanVisuals: ({ name: string } & Record<string, unknown>)[] = []
+    let droppedCount = 0
+    for (const v of raw.visuals) {
+      if (!v || typeof v !== 'object' || Array.isArray(v)) { droppedCount++; continue }
+      const cleaned = sanitizeVisual(v as Record<string, unknown>)
+      if (cleaned) cleanVisuals.push(cleaned)
+      else droppedCount++
+    }
+    if (droppedCount > 0) {
+      console.log('[swarm] onEvent sanitized', { pubkey: pubkey.slice(0,8), kept: cleanVisuals.length, dropped: droppedCount })
+    }
+    const layer: SwarmLayerPayload = { visuals: cleanVisuals }
 
     let bag = this.#peerLayersBySig.get(sig)
     if (!bag) { bag = new Map(); this.#peerLayersBySig.set(sig, bag) }
@@ -1422,9 +1436,14 @@ export class SwarmDrone extends Drone {
 
     // Resolve the lineage's directory ourselves from Store.hypercombRoot
     // rather than calling lineage.explorerDir() — see LineageLike comment.
+    // When the current lineage has no OPFS dir (sub-layer that exists in
+    // the layer tree but never got a physical directory), we still want
+    // to publish — #publishSubtree reads children from the layer, not the
+    // OPFS dir, so name+props transport works without a dir. Recursion
+    // into child subtrees is gated downstream; null dir just stops the
+    // walk at this level, which is the correct behavior.
     const dir = await this.#resolveLineageDir()
-    if (!dir) { console.log('[swarm] publishMyLayerAt: no dir from #resolveLineageDir — sub-layer probably has no OPFS dir post-sweep'); return }
-    console.log('[swarm] publishMyLayerAt:', { sig: sig.slice(0, 8), dirName: dir.name })
+    console.log('[swarm] publishMyLayerAt:', { sig: sig.slice(0, 8), dirName: dir?.name ?? '(no-opfs-dir)' })
 
     const lineage = this.#getLineage()
     const segsRaw = lineage?.explorerSegments?.() ?? []
@@ -1450,7 +1469,7 @@ export class SwarmDrone extends Drone {
   }
 
   #publishSubtree = async (
-    dir: FileSystemDirectoryHandle,
+    dir: FileSystemDirectoryHandle | null,
     segments: readonly string[],
     depth: number,
     counter: { count: number },
@@ -1500,9 +1519,11 @@ export class SwarmDrone extends Drone {
         if (childSigs.length === 0 && layer == null) {
           // No layer yet — first publish at this location. Fall back to
           // OPFS so the initial commit's tiles propagate before history
-          // cascade lands.
-          childNames = await listLocalChildren(dir)
-          console.log('[swarm] publishSubtree: layer null → OPFS fallback', { childNames })
+          // cascade lands. When the lineage has no OPFS dir either
+          // (sub-layer never minted a physical directory) there's
+          // literally nothing to publish at this level — empty list.
+          childNames = dir ? await listLocalChildren(dir) : []
+          console.log('[swarm] publishSubtree: layer null → OPFS fallback', { childNames, hadDir: !!dir })
         } else {
           // Layer exists (possibly empty children). Resolve each child
           // sig to its `name`. Empty children means "this layer has
@@ -1524,33 +1545,40 @@ export class SwarmDrone extends Drone {
         // History resolve failed for any reason — fall back to OPFS so
         // we don't silently stop publishing.
         console.log('[swarm] publishSubtree: history resolve threw → OPFS fallback', { err: String(err) })
-        childNames = await listLocalChildren(dir)
+        childNames = dir ? await listLocalChildren(dir) : []
       }
     } else {
-      console.log('[swarm] publishSubtree: no history service → OPFS fallback', { dir: dir.name })
-      childNames = await listLocalChildren(dir)
+      console.log('[swarm] publishSubtree: no history service → OPFS fallback', { dirName: dir?.name ?? '(none)' })
+      childNames = dir ? await listLocalChildren(dir) : []
     }
 
-    // Publish one entry per child: { name, propsSig? }.
-    //   name     — lineage leaf
-    //   propsSig — sha256 of the child's canonical 0000 bytes (the
-    //              whole file). The 0000 already contains everything
-    //              else (imageSig, index, tags, …); receivers derive
-    //              what they need by parsing the bytes once they
-    //              arrive via kind-30201. No separate `imageSig` or
-    //              `index` field on the wire — both were redundant
-    //              with the 0000 contents.
+    // Publish one entry per child — flat: { name, ...0000_fields }.
+    //   name        — lineage leaf, identifies which child this is
+    //   ...rest     — every first-class cell property from the child's
+    //                 canonical 0000 (index, imageSig, small.image, tags,
+    //                 link, …) inlined directly. No `props` wrapper —
+    //                 these ARE the cell properties; nesting them under
+    //                 `props` would be dead weight on the wire AND force
+    //                 every receiver (render, adopt) to do an extra
+    //                 unwrap before reaching the actual data.
     //
-    // The substrate-fallback imageSig synthesis is gone. A peer
-    // running pure substrate fill on a label-only tile no longer
-    // ships an arbitrary chosen image across the wire; the receiver
-    // sees a label-only tile until adopt, then their own substrate
-    // picks. Matches user intent: only intentionally-placed images
-    // travel via the swarm.
-    // Read each child's visuals through the canonical preloaded path —
-    // same primitive (`readTilePropertiesAt`) that show-cell uses for
-    // render. Mechanical integrity: render and share read the same
-    // bytes from the same cache, so the same logical tile produces
+    // Image bytes referenced inside the 0000 (typically as `small.image`
+    // or top-level `imageSig`) still ride kind 30201 as separate
+    // resource events — heavy binary content doesn't get inlined. The
+    // resource walk below (`collectNestedSigs(c, referenced)`) finds
+    // every sig in the flat visual and ships the bytes ahead of the
+    // layer event so subscribers see referenced resources land first.
+    //
+    // The substrate-fallback imageSig synthesis is gone. A peer running
+    // pure substrate fill on a label-only tile no longer ships an
+    // arbitrary chosen image across the wire; the receiver sees a
+    // label-only tile until adopt, then their own substrate picks.
+    // Matches user intent: only intentionally-placed images travel.
+    //
+    // Read each child's properties through the canonical preloaded
+    // path — same primitive (`readTilePropertiesAt`) that show-cell
+    // uses for render. Mechanical integrity: render and share read the
+    // same bytes from the same cache, so the same logical tile produces
     // the same on-wire props. The chain `history.sign → currentLayerAt
     // → store.getResource` is preloader-warmed for the current
     // location's children (the user is here, they've been rendered),
@@ -1561,16 +1589,18 @@ export class SwarmDrone extends Drone {
     // shallow at write time), so re-canonicalizing the parsed object
     // is a no-op for that path and recovers any legacy 0000 written
     // before the canonicalizer existed.
-    type ChildEntry = { name: string; props?: Record<string, unknown> }
+    type ChildEntry = { name: string } & Record<string, unknown>
     const children: ChildEntry[] = await Promise.all(childNames.map(async (name): Promise<ChildEntry> => {
-      const out: ChildEntry = { name }
+      let visual: ChildEntry = { name }
       try {
         const props = await readTilePropertiesAt(segments, name)
         if (props && Object.keys(props).length > 0) {
-          out.props = canonicaliseValue(props) as Record<string, unknown>
+          // Canonicalize the merged shape so the whole visual entry
+          // is deterministic, not just the props portion.
+          visual = canonicaliseValue({ name, ...props }) as ChildEntry
         }
       } catch { /* no props yet — name-only publish */ }
-      return out
+      return visual
     }))
     const payload: SwarmLayerPayload = { visuals: children }
 
@@ -1604,9 +1634,14 @@ export class SwarmDrone extends Drone {
       // relay already has them cached and serves them on the REQ.
       // Parallel via Promise.all, await the whole batch before the
       // layer publish so the strict ordering guarantee survives.
+      //
+      // Visuals are flat now (name + first-class cell props), so walk
+      // the whole entry — collectNestedSigs handles arbitrary depth and
+      // finds image sigs at any nesting (top-level imageSig, small.image,
+      // flat.small.image, etc.) in one pass.
       const referenced = new Set<string>()
       for (const c of children) {
-        if (c.props) collectNestedSigs(c.props, referenced)
+        collectNestedSigs(c, referenced)
       }
       await Promise.all([...referenced].map(s => this.#publishResource(s, mesh)))
 
@@ -1636,19 +1671,25 @@ export class SwarmDrone extends Drone {
     const subtreeWork: Promise<void>[] = []
     for (const childName of childNames) {
       if (counter.count >= MAX_PUBLISH_NODES) break
-      try {
-        const childDir = await dir.getDirectoryHandle(childName, { create: false })
-        subtreeWork.push(this.#publishSubtree(
-          childDir,
-          [...segments, childName],
-          depth + 1,
-          counter,
-          sigStore,
-          mesh,
-          room,
-          secret,
-        ))
-      } catch { /* child dir gone — skip */ }
+      // When the parent has no OPFS dir, child recursion can't walk
+      // physical directories — pass null and let the child level read
+      // its layer-state directly. Same layer-as-primitive treatment as
+      // the level we're publishing now.
+      let childDir = null
+      if (dir) {
+        try { childDir = await dir.getDirectoryHandle(childName, { create: false }) }
+        catch { childDir = null }
+      }
+      subtreeWork.push(this.#publishSubtree(
+        childDir,
+        [...segments, childName],
+        depth + 1,
+        counter,
+        sigStore,
+        mesh,
+        room,
+        secret,
+      ))
     }
     await Promise.all(subtreeWork)
   }
@@ -1751,8 +1792,11 @@ export class SwarmDrone extends Drone {
     if (!store?.getResource || !mesh?.subscribe) return
     const needed = new Set<string>()
     for (const v of layer.visuals) {
-      if (v?.props && typeof v.props === 'object') {
-        collectNestedSigs(v.props, needed)
+      if (v && typeof v === 'object') {
+        // Walk the whole flat visual entry for nested image sigs.
+        // collectNestedSigs handles arbitrary depth so small.image,
+        // flat.small.image, etc. all get found in one pass.
+        collectNestedSigs(v, needed)
       }
     }
     for (const sig of needed) {
