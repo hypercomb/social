@@ -2417,6 +2417,13 @@ const payload: SwarmLayerPayload = myLabel
     if (!requesterPubkey) return
     if (this.#myPubkey && requesterPubkey === this.#myPubkey) return  // ignore self
 
+    // Consent gate. Pre-decisions silence the toast:
+    //   declined → drop, no surface (user already said no)
+    //   allowed  → still emit so UI can show a benign info notice,
+    //              but tag pre-allowed so the consent drone uses a
+    //              non-modal variant (no Accept/No-thanks buttons).
+    if (this.isSubscribeDeclined(requesterPubkey)) return
+
     const payload = evt.payload
     const requesterLabel = (payload && typeof payload === 'object')
       ? String((payload as { label?: unknown }).label ?? '').trim().slice(0, 64)
@@ -2425,6 +2432,7 @@ const payload: SwarmLayerPayload = myLabel
     this.emitEffect('swarm:subscribe-request-received', {
       requesterPubkey,
       requesterLabel,
+      preApproved: this.isSubscribeAllowed(requesterPubkey),
     })
   }
 
@@ -2724,6 +2732,104 @@ const payload: SwarmLayerPayload = myLabel
     try { localStorage.setItem('hc:open-for-subscribers', on ? '1' : '0') }
     catch { /* ignore */ }
     this.emitEffect('swarm:open-for-subscribers-changed', { open: !!on })
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Per-pubkey subscribe consent (allow / decline lists)
+  // ─────────────────────────────────────────────────────────────────
+  //
+  // Decisions persist in two localStorage keys:
+  //   hc:subscribe-allowed   — comma-separated pubkey hex list
+  //   hc:subscribe-declined  — comma-separated pubkey hex list
+  //
+  // The channel publish (#publishCurrentVisualsToMyChannel) is the
+  // same bytes for every subscriber — Nostr broadcasts can't be
+  // truly per-recipient. So "decline" doesn't prevent the bytes from
+  // reaching that peer once openForSubscribers is on. What these
+  // lists DO drive: the consent toast pipeline. When a subscribe-
+  // request fires, we check both lists first — already allowed →
+  // silent auto-accept; already declined → silent ignore; otherwise
+  // → swarm:subscribe-request-received fires and the UI surfaces a
+  // toast. Accept calls #setSubscribeAllowed, decline calls
+  // #setSubscribeDeclined; both dispatch swarm:subscribe-consent-
+  // changed for any UI mirroring the lists.
+
+  #readPubkeyList = (key: string): Set<string> => {
+    try {
+      const raw = String(localStorage.getItem(key) ?? '').trim()
+      if (!raw) return new Set()
+      return new Set(raw.split(',').map(s => s.trim().toLowerCase()).filter(s => /^[0-9a-f]{64}$/.test(s)))
+    } catch { return new Set() }
+  }
+  #writePubkeyList = (key: string, set: Set<string>): void => {
+    try { localStorage.setItem(key, Array.from(set).join(',')) }
+    catch { /* ignore */ }
+  }
+
+  /** Is this peer pre-approved? Returns true when their pubkey is in
+   *  hc:subscribe-allowed. Used by the consent flow to skip the toast
+   *  on returning subscribers. */
+  public isSubscribeAllowed = (pubkey: string): boolean => {
+    const pk = String(pubkey ?? '').trim().toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(pk)) return false
+    return this.#readPubkeyList('hc:subscribe-allowed').has(pk)
+  }
+
+  /** Is this peer pre-declined? Returns true when their pubkey is in
+   *  hc:subscribe-declined. Used by the consent flow to silently
+   *  ignore repeat requests from someone the user already said no to. */
+  public isSubscribeDeclined = (pubkey: string): boolean => {
+    const pk = String(pubkey ?? '').trim().toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(pk)) return false
+    return this.#readPubkeyList('hc:subscribe-declined').has(pk)
+  }
+
+  /** Mark a peer as allowed to subscribe (called from the consent
+   *  toast's Accept button). Removes from declined list if present —
+   *  the user's most recent decision wins. */
+  public acceptSubscribeRequest = (pubkey: string): void => {
+    const pk = String(pubkey ?? '').trim().toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(pk)) return
+    const allowed = this.#readPubkeyList('hc:subscribe-allowed')
+    const declined = this.#readPubkeyList('hc:subscribe-declined')
+    allowed.add(pk); declined.delete(pk)
+    this.#writePubkeyList('hc:subscribe-allowed', allowed)
+    this.#writePubkeyList('hc:subscribe-declined', declined)
+    this.emitEffect('swarm:subscribe-consent-changed', {
+      pubkey: pk, decision: 'allowed',
+    })
+  }
+
+  /** Mark a peer as declined (the consent toast's No-thanks button).
+   *  Future subscribe requests from this pubkey are silently ignored
+   *  (no toast) until the user clears their decision. */
+  public declineSubscribeRequest = (pubkey: string): void => {
+    const pk = String(pubkey ?? '').trim().toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(pk)) return
+    const allowed = this.#readPubkeyList('hc:subscribe-allowed')
+    const declined = this.#readPubkeyList('hc:subscribe-declined')
+    declined.add(pk); allowed.delete(pk)
+    this.#writePubkeyList('hc:subscribe-allowed', allowed)
+    this.#writePubkeyList('hc:subscribe-declined', declined)
+    this.emitEffect('swarm:subscribe-consent-changed', {
+      pubkey: pk, decision: 'declined',
+    })
+  }
+
+  /** Clear all decisions for a given pubkey — future requests from
+   *  them surface the consent toast again. */
+  public clearSubscribeDecision = (pubkey: string): void => {
+    const pk = String(pubkey ?? '').trim().toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(pk)) return
+    const allowed = this.#readPubkeyList('hc:subscribe-allowed')
+    const declined = this.#readPubkeyList('hc:subscribe-declined')
+    const wasInAny = allowed.delete(pk) || declined.delete(pk)
+    if (!wasInAny) return
+    this.#writePubkeyList('hc:subscribe-allowed', allowed)
+    this.#writePubkeyList('hc:subscribe-declined', declined)
+    this.emitEffect('swarm:subscribe-consent-changed', {
+      pubkey: pk, decision: 'cleared',
+    })
   }
 
   // -----------------------------------------------------------------

@@ -41,6 +41,11 @@ export class ToastComponent implements OnDestroy {
     this.#drone?.executeAction?.(id)
   }
 
+  /** Multi-action variant. Mounted via the toast's `actions` array. */
+  executeActionAt(id: number, index: number): void {
+    this.#drone?.executeActionAt?.(id, index)
+  }
+
   typeIcon(type: string): string {
     switch (type) {
       case 'tip':     return '\u2728'  // sparkles

@@ -17,11 +17,12 @@ import { NotesStripComponent } from "@hypercomb/shared/ui/notes-strip/notes-stri
 import { NotesViewerComponent } from "@hypercomb/shared/ui/notes-viewer/notes-viewer.component"
 import { MeshModalComponent } from "@hypercomb/shared/ui/mesh-modal/mesh-modal.component"
 import { LayerCycleStripComponent } from "@hypercomb/shared/ui/layer-cycle-strip/layer-cycle-strip.component"
+import { ToastComponent } from "@hypercomb/shared/ui/toast/toast.component"
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent, MeshModalComponent, LayerCycleStripComponent],
+  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent, MeshModalComponent, LayerCycleStripComponent, ToastComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
