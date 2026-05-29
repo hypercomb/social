@@ -26,22 +26,6 @@ const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const SUBSTRATE_SERVICE_KEY = '@diamondcoreprocessor.com/SubstrateService'
 
-// Mirror of swarm.drone.ts MAX_PUBLISH_DEPTH. The publisher walks their
-// subtree this many levels deep on each publish, so a single adopt can
-// in principle pull this much depth from one peer in one click. Going
-// deeper than this finds nothing — the publisher didn't ship it.
-const MAX_ADOPT_DEPTH = 3
-
-// How long we wait for the relay to replay sub-location events into the
-// swarm cache after we subscribe. The relay's REQ-replay arrives within
-// one round-trip on local dev (sub-100ms) but public relays via CDN
-// (wss://jwize.com) have round-trip + Cloudflare overhead that can
-// reach 1-2s under load. With the swarm.drone polling fix landed,
-// ensurePeerCacheAt early-exits the instant peer data appears — so
-// raising this ceiling to 4000ms is essentially free for fast paths
-// (most walks finish in <500ms) while letting slower relays complete.
-const SUBSCRIBE_WAIT_MS = 4000
-
 // Property keys we strip from the peer's 0000 before committing — they
 // represent stale protocol markers or per-session render state that
 // doesn't belong on the adopter's layer.
@@ -69,17 +53,6 @@ interface SwarmDroneLike {
     peerPubkey: string
     imageSig?: string
   } & Record<string, unknown>)[]
-  // Public APIs used for the recursive-adopt walk below.
-  composeSigForSegments?: (segments: readonly string[]) => Promise<string>
-  peerTilesAtSig?: (sig: string) => readonly ({
-    name: string
-    peerPubkey: string
-    imageSig?: string
-  } & Record<string, unknown>)[]
-  // Subscribe + wait for the swarm's own cache (not just the mesh
-  // cache) to populate at a sub-location, so peerTilesAtSig() returns
-  // populated data after this resolves.
-  ensurePeerCacheAt?: (segments: readonly string[], timeoutMs?: number) => Promise<string>
 }
 
 interface LineageLike {
@@ -92,10 +65,14 @@ interface SubstrateServiceLike {
 
 interface TileActionPayload {
   action: string
-  label: string
-  q: number
-  r: number
-  index: number
+  label?: string
+  // When the action is fired from the selection menu (Adopt All on
+  // a multi-selected set), `labels` carries the full set and `label`
+  // is unused. Single-tile adopt continues to use `label`.
+  labels?: readonly string[]
+  q?: number
+  r?: number
+  index?: number
 }
 
 export class SwarmAdoptDrone extends Drone {
@@ -115,6 +92,30 @@ export class SwarmAdoptDrone extends Drone {
     this.onEffect<TileActionPayload>('tile:action', (payload) => {
       const action = String(payload?.action ?? '')
       if (action !== 'adopt' && action !== 'sync') return
+
+      // Multi-tile adopt — UI fires this from the selection vertical
+      // menu with the set of selected names. We iterate and adopt each
+      // one independently; each call creates its own local layer commit
+      // (writeTilePropertiesAt cascades a per-tile marker through the
+      // ancestor chain), so undo replays one tile at a time too.
+      //
+      // Sequential rather than parallel: writeTilePropertiesAt resolves
+      // the PARENT layer at write time, and parallel writes against the
+      // same parent race on the cascade. Sequential is also the natural
+      // mental model — "adopt these three in order" — and on the local
+      // commit path it's plenty fast (no network gating).
+      const labels = Array.isArray(payload?.labels)
+        ? payload.labels.map(s => String(s ?? '').trim()).filter(Boolean)
+        : []
+      if (labels.length > 0) {
+        void (async () => {
+          for (const label of labels) {
+            await this.#adoptPeerTile(label)
+          }
+        })()
+        return
+      }
+
       const label = String(payload?.label ?? '').trim()
       if (!label) return
       void this.#adoptPeerTile(label)
@@ -125,74 +126,43 @@ export class SwarmAdoptDrone extends Drone {
   protected override heartbeat = async (): Promise<void> => { /* noop */ }
 
   #adoptPeerTile = async (label: string): Promise<void> => {
-    const lineage = (window as { ioc?: { get: (k: string) => unknown } }).ioc
-      ?.get?.(LINEAGE_KEY) as LineageLike | undefined
+    const ioc = (window as { ioc?: { get: (k: string) => unknown } }).ioc
+    const swarm = ioc?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
+    if (!swarm?.peerTilesAtCurrentSig) return
+
+    // Filter — only act if this tile is currently surfaced as a peer
+    // tile by the swarm. Other action handlers (editor for owned tiles)
+    // cover their own kinds; we no-op so they don't double-handle.
+    //
+    // Reads from the in-memory cache LIVE at click-time — multiple
+    // peer updates that landed during the debounce window are all
+    // reflected, so we always commit the latest props the peer
+    // published.
+    const peerTiles = swarm.peerTilesAtCurrentSig()
+    const peerEntry = peerTiles.find(p => p.name === label)
+    if (!peerEntry) return
+
+    const lineage = ioc?.get?.(LINEAGE_KEY) as LineageLike | undefined
     const segments = lineage?.explorerSegments?.() ?? []
     const segmentsClean = (Array.isArray(segments) ? segments : [])
       .map(s => String(s ?? '').trim())
       .filter(Boolean)
-
-    // Top-level adopt at the current location. The single click drives
-    // both this and the recursive-descendant walk below — one action,
-    // one undoable cascade per layer touched, full subtree imported.
-    const adopted = await this.#adoptOneAt(segmentsClean, label)
-    if (!adopted) return
-
-    // Recursive descendant walk. The publisher already ships layer events
-    // for every location they visit up to swarm.drone.ts MAX_PUBLISH_DEPTH;
-    // we follow that ladder by subscribing to each sub-sig and adopting
-    // whatever the peer cache contains there. Stops naturally when a
-    // sub-location has nothing published (leaf or unvisited subtree).
-    //
-    // Fire-and-forget — the user gets their top-level tile committed
-    // immediately and the rest streams in as relay replays arrive.
-    // Errors at any depth are warned but never abort the top-level adopt.
-    void this.#adoptDescendants([...segmentsClean, label], 1).catch(err =>
-      console.warn('[swarm-adopt] descendant walk failed', err))
-  }
-
-  /**
-   * Adopt one peer-published tile at an arbitrary location, not just
-   * the current one. Used recursively below — we need to commit tiles
-   * under "/dolphin/team/foo" while the user is still at "/", so the
-   * trigger location ≠ the commit location.
-   *
-   * Returns true when something was written (top-level commit OR
-   * fallback cascade), false when there was nothing for this label
-   * at the given location (peer cache miss).
-   */
-  #adoptOneAt = async (parentSegments: string[], label: string): Promise<boolean> => {
-    const ioc = (window as { ioc?: { get: (k: string) => unknown } }).ioc
-    const swarm = ioc?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
-    if (!swarm?.composeSigForSegments || !swarm?.peerTilesAtSig) return false
-
-    const parentSig = await swarm.composeSigForSegments(parentSegments)
-    if (!parentSig) return false
-
-    // Filter — only act if this tile is currently surfaced as a peer
-    // tile at this location by the swarm. Other action handlers cover
-    // their own kinds; we no-op so they don't double-handle.
-    //
-    // Reads from the in-memory cache LIVE at call-time — multiple peer
-    // updates that landed during the debounce window are all reflected,
-    // so we always commit the latest props the peer published.
-    const peerTiles = swarm.peerTilesAtSig(parentSig)
-    const peerEntry = peerTiles.find(p => p.name === label)
-    if (!peerEntry) return false
 
     // The peer's 0000 is already inlined as first-class fields on
     // peerEntry (no `props` wrapper — they ARE the cell properties).
     // Destructure off the swarm-only fields and strip session-only /
     // paired-channel-era markers; what's left is what we commit.
     //
-    // Trust boundary: `peerEntry` is read from `peerTilesAtSig`, which
-    // surfaces data from `#peerLayersBySig` — every entry in that map
-    // was filtered through `sanitizeVisual` at receive time
+    // Trust boundary: `peerEntry` is read from `peerTilesAtCurrentSig`,
+    // which surfaces data from `#peerLayersBySig` — every entry in that
+    // map was filtered through `sanitizeVisual` at receive time
     // (swarm.drone.ts `#onEvent`). So `rest` here contains only known-
-    // safe keys with validated value shapes. The STRIPPED_PEER_KEYS pass
-    // below remains as defence-in-depth, dropping fields that ARE safe-
-    // shaped but are local-only by policy (session viewport, paired-
-    // channel-era ids).
+    // safe keys with validated value shapes: nothing the renderer or
+    // any downstream consumer treats as code, no unknown-key escape
+    // vectors. The STRIPPED_PEER_KEYS pass below remains as
+    // defence-in-depth, dropping fields that ARE safe-shaped but are
+    // local-only by policy (session viewport, paired-channel-era ids,
+    // the publisher's `index` since local layout owns slot assignment).
     let peerProps: Record<string, unknown> | null = null
     const { name: _n, peerPubkey: _p, imageSig: _i, ...rest } = peerEntry as Record<string, unknown>
     void _n; void _p; void _i  // intentionally discarded
@@ -207,9 +177,9 @@ export class SwarmAdoptDrone extends Drone {
       // ONE undoable marker per ancestor depth — no per-event legacy
       // commit hop (we never emit cell:added in this branch).
       try {
-        await writeTilePropertiesAt(parentSegments, label, peerProps)
+        await writeTilePropertiesAt(segmentsClean, label, peerProps)
         EffectBus.emit('tile:saved', { cell: label })
-        return true
+        return
       } catch (err) {
         console.warn('[swarm-adopt] writeTilePropertiesAt failed for', label, err)
         // Fall through to legacy path so the tile still becomes
@@ -221,7 +191,7 @@ export class SwarmAdoptDrone extends Drone {
     // commit failed. Use the legacy cell:added cascade so the tile
     // still mints into the parent's children, then let substrate fill
     // in a placeholder image so the result is at least visible.
-    EffectBus.emit('cell:added', { cell: label, segments: parentSegments })
+    EffectBus.emit('cell:added', { cell: label, segments: segmentsClean })
     EffectBus.emit('tile:saved', { cell: label })
 
     const substrate = ioc?.get?.(SUBSTRATE_SERVICE_KEY) as SubstrateServiceLike | undefined
@@ -234,59 +204,6 @@ export class SwarmAdoptDrone extends Drone {
         console.warn('[swarm-adopt] substrate.applyToCell failed for', label, err)
       }
     }
-    return true
-  }
-
-  /**
-   * Recursively adopt everything the peer has published under a given
-   * location. We subscribe to the location's composed sig so the mesh
-   * fans relay-replayed events into the swarm cache, wait briefly for
-   * them to arrive, then adopt each child and recurse.
-   *
-   * The walk halts naturally when:
-   *   - depth > MAX_ADOPT_DEPTH (matches publisher's MAX_PUBLISH_DEPTH —
-   *     deeper than this the publisher didn't ship anything anyway).
-   *   - sub-location has no peer events after SUBSCRIBE_WAIT_MS
-   *     (the peer never visited that subtree, so the relay has nothing
-   *     to replay).
-   *
-   * Concurrent across sibling children — each child's subtree imports
-   * in parallel via Promise.allSettled. Resilient: a single child's
-   * subtree failing doesn't poison the others.
-   */
-  #adoptDescendants = async (parentSegments: string[], depth: number): Promise<void> => {
-    if (depth > MAX_ADOPT_DEPTH) return
-
-    const ioc = (window as { ioc?: { get: (k: string) => unknown } }).ioc
-    const swarm = ioc?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
-    if (!swarm?.ensurePeerCacheAt || !swarm?.peerTilesAtSig) return
-
-    // Subscribe through the swarm's own subscribe path (NOT mesh.ensureStartedForSig)
-    // — that's the only route that routes inbound events through the swarm's
-    // #onEvent handler, which is what populates #peerLayersBySig. Using the mesh
-    // method alone fills only the mesh-level cache, so peerTilesAtSig() comes
-    // back empty even though the bytes are in memory.
-    //
-    // Returns the sub-sig so we can read peerTilesAtSig immediately after.
-    // Idempotent — repeat calls for the same sig reuse the bucket.
-    const subSig = await swarm.ensurePeerCacheAt(parentSegments, SUBSCRIBE_WAIT_MS)
-    if (!subSig) return
-
-    const subTiles = swarm.peerTilesAtSig(subSig)
-    if (subTiles.length === 0) return
-
-    // Adopt all children of this sub-location, then recurse into each
-    // one's subtree. Parallel siblings (each subtree is independent);
-    // sequential within a chain so a parent commits before its children
-    // try to write under it (writeTilePropertiesAt resolves the parent
-    // layer at write time and would create a stub if the parent didn't
-    // exist yet — fine but redundant work).
-    await Promise.allSettled(subTiles.map(async (subTile) => {
-      const adopted = await this.#adoptOneAt(parentSegments, subTile.name)
-      if (adopted) {
-        await this.#adoptDescendants([...parentSegments, subTile.name], depth + 1)
-      }
-    }))
   }
 }
 
