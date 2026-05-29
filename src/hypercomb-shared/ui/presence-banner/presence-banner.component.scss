@@ -1,0 +1,72 @@
+// hypercomb-shared/ui/presence-banner/presence-banner.component.scss
+//
+// Quiet top-center strip. Positioned absolutely so it doesn't push
+// layout; pointer-events:none on the wrapper means it never blocks
+// clicks on the canvas below. Backdrop blur keeps the strip readable
+// over busy tile backgrounds without solid fill.
+
+:host {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 50;
+  pointer-events: none;
+}
+
+.presence-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 0.55rem;
+  padding: 0.25rem 0.85rem;
+  background: color-mix(in srgb, var(--md-surface-c-low, #1a1a1a) 75%, transparent);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(245, 245, 245, 0.08);
+  border-radius: 999px;
+  font-family: var(--hc-font);
+  font-size: 0.72rem;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  max-width: 60vw;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  animation: presence-fade-in 360ms ease-out;
+}
+
+.presence-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.presence-alone {
+  color: rgba(245, 245, 245, 0.32);
+  font-style: italic;
+}
+
+.presence-with-others {
+  color: rgba(245, 245, 245, 0.75);
+}
+
+.presence-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6ec96e;
+  box-shadow: 0 0 5px rgba(110, 201, 110, 0.5);
+  animation: presence-pulse 2s ease-in-out infinite;
+}
+
+@keyframes presence-fade-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0);   }
+}
+
+@keyframes presence-pulse {
+  0%, 100% { opacity: 1;   transform: scale(1);    }
+  50%      { opacity: 0.65; transform: scale(0.85); }
+}

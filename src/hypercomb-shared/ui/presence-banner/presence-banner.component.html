@@ -1,0 +1,16 @@
+@if (visible()) {
+  <div class="presence-banner" role="status" aria-live="polite">
+    @if (alone()) {
+      <span class="presence-text presence-alone">{{ 'presence.alone' | t }}</span>
+    } @else {
+      <span class="presence-text presence-with-others">
+        <span class="presence-dot" aria-hidden="true"></span>
+        @if (peerCount() === 1) {
+          {{ 'presence.one-here' | t: { who: joinedLabels() } }}
+        } @else {
+          {{ 'presence.many-here' | t: { count: peerCount(), who: joinedLabels() } }}
+        }
+      </span>
+    }
+  </div>
+}

@@ -1266,6 +1266,22 @@ export class SwarmDrone extends Drone {
     // either, both, or neither. Subscribe is data-flow; follow is
     // navigation-sync.
     void this.#publishMyPresence(segments)
+
+    // Initial presence emit — fires once per location after sync sets
+    // up, even when nobody else is here. The UI presence banner needs
+    // this to render the "first one here" state on cold arrival;
+    // without it the banner stays hidden until SOMEONE causes a
+    // peer-cache event, and a user alone in a swarm sees nothing.
+    // Subsequent peer joins/leaves come through #emitPeersChanged on
+    // the normal debounce.
+    const peers = this.participantsAtCurrentSig()
+    this.emitEffect('swarm:presence-changed', {
+      sig: composedSig,
+      peerCount: peers.length,
+      alone: peers.length === 0,
+      peers,
+      reason: 'initial-sync',
+    })
   }
 
   // Tear down all per-sig state at the OLD #currentSig (subscriptions,
