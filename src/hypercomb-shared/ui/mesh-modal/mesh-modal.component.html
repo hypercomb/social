@@ -59,6 +59,21 @@
         </div>
       </section>
 
+      <section class="mesh-modal-section">
+        <label class="mesh-modal-label" for="mesh-modal-label-input">{{ 'mesh-modal.label-label' | t }}</label>
+        <input
+          id="mesh-modal-label-input"
+          class="mesh-modal-input mesh-modal-label-field"
+          type="text"
+          maxlength="64"
+          [placeholder]="'mesh-modal.label-placeholder' | t"
+          [value]="labelDraft()"
+          (input)="onLabelInput($event)"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </section>
+
     </div>
 
     <footer class="mesh-modal-actions">

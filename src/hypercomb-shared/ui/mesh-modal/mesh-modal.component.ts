@@ -28,6 +28,7 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   readonly open = signal(false)
   readonly roomDraft = signal('')
   readonly secretDraft = signal('')
+  readonly labelDraft = signal('')
   readonly secretVisible = signal(false)
 
   readonly savedLocations = fromRuntime(
@@ -61,17 +62,14 @@ export class MeshModalComponent implements OnInit, OnDestroy {
       const initialSecret = this.#secretStore?.value ?? ''
       this.roomDraft.set(this.#roomStore?.value ?? '')
       this.secretDraft.set(initialSecret)
+      this.labelDraft.set(this.#readMyLabel())
       this.secretVisible.set(false)
       this.open.set(true)
       EffectBus.emit('mesh:modal-open', { open: true })
       EffectBus.emit('mesh:secret-draft', { secret: initialSecret })
-      // setTimeout(0), not queueMicrotask: Angular renders the @if panel
-      // in a later microtask after change detection, so a microtask-scheduled
-      // querySelector misses the input and focus stays wherever it was
-      // (usually the command-line shell, which then eats Enter).
-      setTimeout(() => {
+      queueMicrotask(() => {
         document.querySelector<HTMLInputElement>('.mesh-modal-room')?.focus()
-      }, 0)
+      })
     })
 
     this.#unsubEscape = EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
@@ -80,14 +78,10 @@ export class MeshModalComponent implements OnInit, OnDestroy {
 
     this.#onWindowKeyDown = (e: KeyboardEvent): void => {
       if (!this.open() || e.key !== 'Enter') return
-      e.preventDefault()
-      // Enter always saves while the modal is open — unless the Cancel
-      // button itself is the focused element, in which case Enter
-      // dismisses (matching the visible focus ring).
       const active = document.activeElement as HTMLElement | null
-      const cancelFocused = !!active?.closest?.('.mesh-modal-panel .mesh-modal-btn.cancel')
-      if (cancelFocused) this.dismiss()
-      else this.save()
+      if (active?.tagName === 'BUTTON' && active.closest('.mesh-modal-panel')) return
+      e.preventDefault()
+      this.save()
     }
     window.addEventListener('keydown', this.#onWindowKeyDown)
   }
@@ -108,6 +102,24 @@ export class MeshModalComponent implements OnInit, OnDestroy {
     EffectBus.emit('mesh:secret-draft', { secret: value })
   }
 
+  readonly onLabelInput = (event: Event): void => {
+    this.labelDraft.set((event.target as HTMLInputElement).value)
+  }
+
+  /** Read the persisted swarm label, preferring the SwarmDrone's
+   *  canonical accessor when present so any future-tightened
+   *  sanitization (length cap, control-char filter) applies. Falls
+   *  back to localStorage when the drone hasn't loaded yet — the
+   *  modal can still surface and save without a hard swarm
+   *  dependency. */
+  #readMyLabel = (): string => {
+    interface SwarmLabelApi { myLabel: () => string }
+    const swarm = get('@diamondcoreprocessor.com/SwarmDrone') as SwarmLabelApi | undefined
+    if (swarm?.myLabel) return swarm.myLabel()
+    try { return String(localStorage.getItem('hc:user-label') ?? '').trim().slice(0, 64) }
+    catch { return '' }
+  }
+
   readonly toggleSecretVisible = (): void => {
     this.secretVisible.set(!this.secretVisible())
   }
@@ -124,11 +136,25 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   readonly save = (): void => {
     const room = this.roomDraft().trim()
     const secret = this.secretDraft().trim()
+    const label = this.labelDraft().trim().slice(0, 64)
     this.#roomStore?.set(room)
     this.#secretStore?.set(secret)
     EffectBus.emit('mesh:room', { room })
     EffectBus.emit('mesh:secret', { secret })
     if (room) this.#savedStore?.add(room)
+
+    // Label routes through swarm.setMyLabel when available — it
+    // clears the publish memo + triggers re-sync so the new label
+    // propagates immediately. localStorage fallback covers the case
+    // where the swarm bee hasn't loaded yet.
+    interface SwarmLabelApi { setMyLabel: (s: string) => void }
+    const swarm = get('@diamondcoreprocessor.com/SwarmDrone') as SwarmLabelApi | undefined
+    if (swarm?.setMyLabel) {
+      swarm.setMyLabel(label)
+    } else {
+      try { localStorage.setItem('hc:user-label', label) } catch { /* ignore */ }
+    }
+
     this.#close()
   }
 

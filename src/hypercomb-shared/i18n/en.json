@@ -122,6 +122,8 @@
   "mesh-modal.location-placeholder": "type a location name",
   "mesh-modal.secret-label": "secret",
   "mesh-modal.secret-placeholder": "shared key",
+  "mesh-modal.label-label": "your name",
+  "mesh-modal.label-placeholder": "how others see you in the swarm",
   "mesh-modal.show-secret": "show secret",
   "mesh-modal.hide-secret": "hide secret",
   "mesh-modal.remove-saved": "remove saved location",

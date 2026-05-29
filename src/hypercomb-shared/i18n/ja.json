@@ -251,6 +251,8 @@
   "swarm.consent.decline": "やめておく",
   "swarm.consent.info-title": "新しい購読者",
   "swarm.consent.info-message": "{requester} さんがあなたのハイブを購読しました",
+  "mesh-modal.label-label": "あなたの名前",
+  "mesh-modal.label-placeholder": "群れの中での表示名",
   "command-line.create-cell": "現在のレベルに新しいセルを作成",
   "command-line.create-nested": "ネストフォルダを作成し、親パスを保持して現在のレベルに留まる",
   "command-line.navigate-folder": "フォルダに移動（存在しない場合は作成）",
