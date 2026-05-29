@@ -65,9 +65,13 @@ export class MeshModalComponent implements OnInit, OnDestroy {
       this.open.set(true)
       EffectBus.emit('mesh:modal-open', { open: true })
       EffectBus.emit('mesh:secret-draft', { secret: initialSecret })
-      queueMicrotask(() => {
+      // setTimeout(0), not queueMicrotask: Angular renders the @if panel
+      // in a later microtask after change detection, so a microtask-scheduled
+      // querySelector misses the input and focus stays wherever it was
+      // (usually the command-line shell, which then eats Enter).
+      setTimeout(() => {
         document.querySelector<HTMLInputElement>('.mesh-modal-room')?.focus()
-      })
+      }, 0)
     })
 
     this.#unsubEscape = EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {

@@ -902,7 +902,13 @@ export class SwarmDrone extends Drone {
     // CRITICAL: without our kind in the list, the mesh's REQ filter pins
     // to the legacy default [29010] and our swarm events get filtered
     // out at the relay — silent miss.
-    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND], true)
+    // Includes 20400/20401 — content-broker request/response kinds — so
+    // the broker drone's subscribes/publishes flow through the same mesh
+    // sockets. Documented coupling: see content-broker.drone.ts. Adding
+    // them here (rather than having the broker call configureKinds with
+    // its own list) keeps the kinds allowlist mechanically single-source
+    // so a future kinds-registry refactor has one site to migrate.
+    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, 20400, 20401], true)
   }
 
   /**
@@ -955,6 +961,40 @@ export class SwarmDrone extends Drone {
    * consumer convenience (show-cell binds images sync without
    * reaching into the props shape).
    */
+  /**
+   * Subscribe to a peer slot identified by a path off the current zone
+   * and resolve once the first relay-replayed event has landed (or the
+   * timeout elapses). Used by the recursive-adopt walk: an adopt at /
+   * needs to see what the peer has at /<name>, /<name>/<grand>, etc.
+   * without the user actually navigating there.
+   *
+   * Routes through `#ensureSubscribed` so the swarm's own `#onEvent`
+   * runs on inbound events — that's what populates `#peerLayersBySig`,
+   * which `peerTilesAtSig` reads. Calling `mesh.ensureStartedForSig`
+   * directly fills only the MESH cache, leaving the swarm cache empty.
+   *
+   * Idempotent — repeat calls for the same sig reuse the existing
+   * bucket without sending another REQ.
+   */
+  public ensurePeerCacheAt = async (
+    segments: readonly string[],
+    timeoutMs = 1500,
+  ): Promise<string> => {
+    const sig = await this.composeSigForSegments(segments)
+    if (!sig) return ''
+    this.#ensureSubscribed(sig)
+    const mesh = this.#getMesh() as (MeshApi & {
+      awaitReadyForSig?: (sig: string, timeoutMs?: number) => Promise<void>
+    }) | undefined
+    if (mesh?.awaitReadyForSig) {
+      try { await mesh.awaitReadyForSig(sig, timeoutMs) } catch { /* timeout */ }
+    } else {
+      // Fallback for older mesh builds — best-effort sleep.
+      await new Promise(r => setTimeout(r, timeoutMs))
+    }
+    return sig
+  }
+
   public peerTilesAtSig = (sig: string): readonly ({ name: string; peerPubkey: string; imageSig?: string } & Record<string, unknown>)[] => {
     if (!sig) return []
     const peerLayers = this.#peerLayersBySig.get(sig)
