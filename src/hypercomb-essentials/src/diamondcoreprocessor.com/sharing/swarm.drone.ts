@@ -1001,14 +1001,24 @@ export class SwarmDrone extends Drone {
     const sig = await this.composeSigForSegments(segments)
     if (!sig) return ''
     this.#ensureSubscribed(sig)
-    const mesh = this.#getMesh() as (MeshApi & {
-      awaitReadyForSig?: (sig: string, timeoutMs?: number) => Promise<void>
-    }) | undefined
-    if (mesh?.awaitReadyForSig) {
-      try { await mesh.awaitReadyForSig(sig, timeoutMs) } catch { /* timeout */ }
-    } else {
-      // Fallback for older mesh builds — best-effort sleep.
-      await new Promise(r => setTimeout(r, timeoutMs))
+
+    // Wait for ACTUAL peer tile data to land — not just any event on
+    // the sig channel. mesh.awaitReadyForSig resolves on the first
+    // event of any kind, but the channel carries multiple kinds:
+    // kind 30200 (swarm layer events) populate #peerLayersBySig via
+    // #onEvent, but kind 30401 (broker visuals responses) and other
+    // events arrive on the same bucket and would prematurely resolve
+    // the wait. Caller (adopt walk) then reads peerTilesAtSig before
+    // any 30200 has been processed → returns empty → recursion stops
+    // even though the peer DID publish here.
+    //
+    // Poll the actual cache instead. 50ms granularity gives well-under-
+    // 100ms latency in the hot path while keeping CPU cost negligible.
+    // Early-return when data appears; fall through to timeout otherwise.
+    const start = Date.now()
+    while (Date.now() - start < timeoutMs) {
+      if (this.peerTilesAtSig(sig).length > 0) return sig
+      await new Promise(r => setTimeout(r, 50))
     }
     return sig
   }
