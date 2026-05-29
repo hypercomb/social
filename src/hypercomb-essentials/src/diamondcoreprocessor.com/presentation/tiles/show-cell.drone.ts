@@ -1615,13 +1615,14 @@ export class ShowCellDrone extends Drone {
 
         // Background: if any atlas slots were evicted, refill from the
         // (still-hot) Store resource cache. When new images land, the
-        // shader picks them up by sig — no rerender needed. If a sig
-        // was missing (substrate gap), do nothing (a future render can
-        // resolve it). Skip entirely when no dir — sub-layers with no
-        // on-disk mirror serve images through the resource cache
-        // independent of any per-cell folder.
-        if (evictedSigs.length > 0 && cachedDir) {
-          void this.loadCellImages(cached.cells, cachedDir)
+        // shader picks them up by sig — no rerender needed. The refill
+        // runs even when cachedDir is null: substrate images live in
+        // __resources__ keyed by signature, so loadCellImages only needs
+        // the dir for tags/link reads (already null-tolerant). Without
+        // this, sub-layer tiles whose atlas slot got displaced by other
+        // layers' loads while the user was away never re-paint.
+        if (evictedSigs.length > 0) {
+          void this.loadCellImages(cached.cells, cachedDir ?? null)
         }
 
         // background: refresh cursor for undo/redo readiness. Renderer
@@ -4030,7 +4031,7 @@ export class ShowCellDrone extends Drone {
    */
   private loadCellImages = async (
     cells: Cell[],
-    _dir: FileSystemDirectoryHandle,
+    _dir: FileSystemDirectoryHandle | null,
     forceReload?: Set<string>,
   ): Promise<void> => {
     const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
@@ -4143,19 +4144,26 @@ export class ShowCellDrone extends Drone {
         return
       }
 
-      // load tags + link from OPFS if not cached (independent of image cache)
+      // load tags + link from OPFS if not cached (independent of image cache).
+      // Sub-layer locations have no on-disk dir under layer-as-primitive; the
+      // image path below still resolves via __resources__, so we just skip
+      // the tags/link folder read when _dir is null.
       if (!this.cellTagsCache.has(cell.label)) {
-        try {
-          const cellDir = await _dir.getDirectoryHandle(cell.label)
-          const tagProps = await readCellProperties(cellDir)
-          const rawTags = tagProps?.['tags']
-          this.cellTagsCache.set(cell.label, Array.isArray(rawTags)
-            ? (rawTags as unknown[]).filter((t): t is string => typeof t === 'string')
-            : [])
-          if (!this.cellLinkCache.has(cell.label)) {
-            this.cellLinkCache.set(cell.label, typeof tagProps?.['link'] === 'string' && (tagProps['link'] as string).length > 0)
-          }
-        } catch { this.cellTagsCache.set(cell.label, []) }
+        if (_dir) {
+          try {
+            const cellDir = await _dir.getDirectoryHandle(cell.label)
+            const tagProps = await readCellProperties(cellDir)
+            const rawTags = tagProps?.['tags']
+            this.cellTagsCache.set(cell.label, Array.isArray(rawTags)
+              ? (rawTags as unknown[]).filter((t): t is string => typeof t === 'string')
+              : [])
+            if (!this.cellLinkCache.has(cell.label)) {
+              this.cellLinkCache.set(cell.label, typeof tagProps?.['link'] === 'string' && (tagProps['link'] as string).length > 0)
+            }
+          } catch { this.cellTagsCache.set(cell.label, []) }
+        } else {
+          this.cellTagsCache.set(cell.label, [])
+        }
       }
 
       // check cache first — unless the caller forced a reload for this

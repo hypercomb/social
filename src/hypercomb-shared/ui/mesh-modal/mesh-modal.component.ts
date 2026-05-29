@@ -23,6 +23,7 @@ export class MeshModalComponent implements OnInit, OnDestroy {
 
   #unsubOpen: (() => void) | null = null
   #unsubEscape: (() => void) | null = null
+  #onWindowKeyDown: ((e: KeyboardEvent) => void) | null = null
 
   readonly open = signal(false)
   readonly roomDraft = signal('')
@@ -72,11 +73,21 @@ export class MeshModalComponent implements OnInit, OnDestroy {
     this.#unsubEscape = EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
       if (payload?.cmd === 'global.escape' && this.open()) this.dismiss()
     })
+
+    this.#onWindowKeyDown = (e: KeyboardEvent): void => {
+      if (!this.open() || e.key !== 'Enter') return
+      const active = document.activeElement as HTMLElement | null
+      if (active?.tagName === 'BUTTON' && active.closest('.mesh-modal-panel')) return
+      e.preventDefault()
+      this.save()
+    }
+    window.addEventListener('keydown', this.#onWindowKeyDown)
   }
 
   ngOnDestroy(): void {
     this.#unsubOpen?.()
     this.#unsubEscape?.()
+    if (this.#onWindowKeyDown) window.removeEventListener('keydown', this.#onWindowKeyDown)
   }
 
   readonly onRoomInput = (event: Event): void => {
