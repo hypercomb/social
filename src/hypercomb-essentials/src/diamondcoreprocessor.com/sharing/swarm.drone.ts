@@ -55,6 +55,25 @@ const SWARM_HIDE_KIND = 30202
 // duplicates, and late subscribers always get the latest copy.
 const SWARM_RESOURCE_KIND = 30201
 
+// Interest events — "I'm clicking your tile, please come show me what's
+// inside." Published at the PARENT lineage's composedSig (not the
+// child's), so the tile owner (who is sitting at the parent and sees
+// their own published tile there) gets the signal without needing to
+// be subscribed to every sub-location ahead of time.
+//
+// Parameterized-replaceable per (pubkey, kind, d-tag) where the d-tag
+// is `${parentSig}:${childName}` — each peer can express at most one
+// current interest per (parent, child) pair. Re-clicking the same tile
+// refreshes the expiration tag so the cue stays alive while the
+// adventurer is genuinely waiting.
+//
+// Companion-effect on the receive side: the swarm exposes
+// `interestedAt(childName)` so render paths can paint a visual cue on
+// the tile ("X is interested in this"). The tile-clicker also
+// navigates into the child as usual — interest is the side-channel
+// signal, NOT a gate on navigation.
+const SWARM_INTEREST_KIND = 30203
+
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 const TILE_SOURCE_REGISTRY_KEY = '@hypercomb.social/TileSourceRegistry'
@@ -381,7 +400,7 @@ export class SwarmDrone extends Drone {
   // resolves, we still subscribe + publish on time. The primary trigger is
   // the Lineage `change` event we wire up in the constructor below.
   protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret']
-  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed']
+  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed']
 
   // Per-lineage subscription handle. We open one per visited sig and
   // never close (cheap — mesh dedupes by sig at the bucket layer).
@@ -408,6 +427,19 @@ export class SwarmDrone extends Drone {
   // Outer key = composed lineage sig; inner key = peer pubkey; value
   // = Set of tile names that pubkey wants hidden at that lineage.
   #hiddenByPubkeyBySig = new Map<string, Map<string, Set<string>>>()
+
+  // Interest cache. Outer key = parent composedSig (the lineage where
+  // the interest was expressed). Inner key = child tile name. Value =
+  // Set of pubkeys currently interested in that child tile at that
+  // lineage. Populated by inbound kind-30203 events; consumers read
+  // via interestedAt(name).
+  #interestByChildBySig = new Map<string, Map<string, Set<string>>>()
+
+  // What we ourselves currently have interest in — per parent sig,
+  // map of childName → expirationMs. Drives heartbeat-style refresh
+  // so a long click-hover holds the cue alive; also drives the dedupe
+  // (don't re-publish identical interest within the heartbeat window).
+  #myInterestBySig = new Map<string, Map<string, number>>()
 
   // Per-lineage local memo of what we last published as our hidden
   // list. Drives the dedupe + heartbeat for hide events: skip a
@@ -902,7 +934,7 @@ export class SwarmDrone extends Drone {
     // CRITICAL: without our kind in the list, the mesh's REQ filter pins
     // to the legacy default [29010] and our swarm events get filtered
     // out at the relay — silent miss.
-    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND], true)
+    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND], true)
   }
 
   /**
@@ -1190,6 +1222,8 @@ export class SwarmDrone extends Drone {
     this.#hiddenByPubkeyBySig.clear()
     this.#lastPublishedHideBySig.clear()
     this.#lastHidePublishTimeMsBySig.clear()
+    this.#interestByChildBySig.clear()
+    this.#myInterestBySig.clear()
     // Tear down resource subs and the published-resource memo too —
     // a zone change means a different audience for our resources, so
     // we want to re-assert them in the new zone (and stop fetching
@@ -1236,6 +1270,8 @@ export class SwarmDrone extends Drone {
       this.#lastPublishedBySig.delete(prevSig)
       this.#lastPublishTimeMsBySig.delete(prevSig)
       this.#hiddenByPubkeyBySig.delete(prevSig)
+      this.#interestByChildBySig.delete(prevSig)
+      this.#myInterestBySig.delete(prevSig)
       this.#lastPublishedHideBySig.delete(prevSig)
       this.#lastHidePublishTimeMsBySig.delete(prevSig)
       // Tell show-cell to drop any peer tiles it surfaced for the OLD
@@ -1293,7 +1329,7 @@ export class SwarmDrone extends Drone {
     // wanted (an older publish of bytes a newer layer references).
     // So we DON'T gate resources here; gate only layer + hide which
     // carry session-scoped membership state.
-    if (kind === SWARM_LAYER_KIND || kind === SWARM_HIDE_KIND) {
+    if (kind === SWARM_LAYER_KIND || kind === SWARM_HIDE_KIND || kind === SWARM_INTEREST_KIND) {
       const nowSec = Math.floor(Date.now() / 1000)
       const tags = evt?.event?.tags ?? []
       const expirationTag = tags.find(t => t[0] === 'expiration')?.[1]
@@ -1318,6 +1354,10 @@ export class SwarmDrone extends Drone {
     }
     if (kind === SWARM_HIDE_KIND) {
       this.#onHideEvent(sig, evt)
+      return
+    }
+    if (kind === SWARM_INTEREST_KIND) {
+      this.#onInterestEvent(sig, evt)
       return
     }
     if (kind !== SWARM_LAYER_KIND) return
@@ -1972,6 +2012,99 @@ export class SwarmDrone extends Drone {
       console.warn('[swarm] publishHide failed', { sig: sig.slice(0, 12), err })
       this.#lastHidePublishTimeMsBySig.delete(sig)
     }
+  }
+
+  // -----------------------------------------------------------------
+  // Interest events (kind 30203)
+  // -----------------------------------------------------------------
+
+  // Inbound interest from a peer at the parent sig. The d-tag carries
+  // `${parentSig}:${childName}` so the relay's parameterized-replaceable
+  // store keeps exactly one interest per (peer, parent, child); the
+  // 'n' tag carries the bare child name so we can read it without
+  // re-parsing the d-tag.
+  //
+  // Self-event is NOT skipped here — a host watching their own tile
+  // wants to see their own interest cue come back from the relay too
+  // (it confirms the publish landed). The render layer can choose to
+  // hide self-interest if desired.
+  #onInterestEvent = (sig: string, evt: MeshEvtLike): void => {
+    const pubkey = String(evt?.event?.pubkey ?? '').trim().toLowerCase()
+    if (!pubkey) return  // local fanout, pre-sign — wait for relay echo
+
+    const tags = evt?.event?.tags ?? []
+    const childName = tags.find(t => t[0] === 'n')?.[1]
+    if (typeof childName !== 'string' || childName.length === 0 || childName.length > 256) return
+
+    let bag = this.#interestByChildBySig.get(sig)
+    if (!bag) { bag = new Map(); this.#interestByChildBySig.set(sig, bag) }
+    let set = bag.get(childName)
+    if (!set) { set = new Set(); bag.set(childName, set) }
+
+    const wasNew = !set.has(pubkey)
+    set.add(pubkey)
+    if (wasNew) {
+      this.emitEffect('swarm:interest-changed', { sig, childName, pubkey, joined: true })
+    }
+  }
+
+  /** Express interest in a child tile at the current lineage. Publishes
+   *  a parameterized-replaceable kind-30203 event so the publisher of
+   *  this view (and any other participant subscribed at the current
+   *  sig) sees the cue. Auto-refreshes the NIP-40 expiration if called
+   *  repeatedly with the same name (idle hover holds the cue alive).
+   *
+   *  Side-channel only — the caller is still expected to navigate into
+   *  the child themselves. The interest event is the SIGNAL to others
+   *  that "I'm going in there, please join me." */
+  public publishInterest = async (childName: string): Promise<void> => {
+    const sig = this.#currentSig
+    if (!sig) return
+    const mesh = this.#getMesh()
+    if (!mesh?.publish) return
+    const name = String(childName ?? '').trim()
+    if (!name || name.length > 256) return
+
+    const nowMs = Date.now()
+    let myBag = this.#myInterestBySig.get(sig)
+    if (!myBag) { myBag = new Map(); this.#myInterestBySig.set(sig, myBag) }
+    const lastExpMs = myBag.get(name) ?? 0
+    // Refresh interval — re-publish only if our current interest event
+    // is past 2/3 of its TTL. Same shape as the layer-event heartbeat.
+    if (lastExpMs - nowMs > Math.floor(EVENT_TTL_SECS * 1000 / 3)) return
+
+    const expirationSecs = Math.floor(nowMs / 1000) + EVENT_TTL_SECS
+    myBag.set(name, expirationSecs * 1000)
+
+    try {
+      await mesh.publish(SWARM_INTEREST_KIND, sig, { name }, [
+        ['d', `${sig}:${name}`],
+        ['n', name],
+        ['expiration', String(expirationSecs)],
+      ])
+    } catch (err) {
+      console.warn('[swarm] publishInterest failed', { sig: sig.slice(0, 12), name, err })
+      myBag.delete(name)  // allow retry on next call
+    }
+  }
+
+  /** Pubkeys currently interested in `childName` at the current sig.
+   *  Includes self when self has expressed interest (UI decides whether
+   *  to render self separately). Empty Set when no one is interested.
+   *
+   *  Bound to #currentSig so the data follows the navigation surface
+   *  show-cell renders against. */
+  public interestedAt = (childName: string): ReadonlySet<string> => {
+    const bag = this.#interestByChildBySig.get(this.#currentSig)
+    return bag?.get(childName) ?? new Set()
+  }
+
+  /** Full snapshot — every child name at #currentSig with at least one
+   *  interested peer, mapped to the peer pubkeys. Useful for render
+   *  paths that want to render all interest cues in one pass without
+   *  one lookup per tile. */
+  public interestSnapshotAtCurrentSig = (): ReadonlyMap<string, ReadonlySet<string>> => {
+    return this.#interestByChildBySig.get(this.#currentSig) ?? new Map()
   }
 
   // -----------------------------------------------------------------
