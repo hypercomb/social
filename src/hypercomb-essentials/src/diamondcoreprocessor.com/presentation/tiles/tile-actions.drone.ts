@@ -131,11 +131,16 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   // Your own tile in public mode — same trash-bin remove that
   // private mode uses. Records a history op, can be undone.
   'public-own': ['remove', 'break-apart'],
-  // Peer-only mesh tiles you haven't adopted. `adopt` materialises
-  // them locally (carries the publisher's 0000 + image); `hide`
-  // dismisses without taking ownership (zone-scoped, instant,
-  // mesh-published so the filter survives reload + multi-device).
-  'public-external': ['adopt', 'hide'],
+  // Peer-only mesh tiles. `adopt` is temporarily REMOVED from the
+  // default active set while we iterate on the navigation-as-
+  // exploration model — peer tiles render with hide/block only;
+  // adoption happens through a different mechanism (selection menu
+  // multi-adopt or a slash command) that we're still designing.
+  //
+  // The `adopt` icon is still REGISTERED in ICON_REGISTRY above so
+  // re-enabling it later is a one-line change here; the SwarmAdoptDrone
+  // listener (tile:action with action='adopt') stays wired up.
+  'public-external': ['hide'],
 }
 
 // ── Position computation ──────────────────────────────────────────
