@@ -27,7 +27,7 @@
 // arrives, so we don't need to dispatch a render signal ourselves.
 
 import { Drone } from '@hypercomb/core'
-import { readTilePropertiesAt } from '../editor/tile-properties.js'
+import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
 
 const SWARM_LAYER_KIND = 30200
@@ -974,7 +974,13 @@ export class SwarmDrone extends Drone {
     // CRITICAL: without our kind in the list, the mesh's REQ filter pins
     // to the legacy default [29010] and our swarm events get filtered
     // out at the relay — silent miss.
-    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND], true)
+    // Includes BROKER kinds 20400 (fetch request) + 30401 (fetch
+    // response) — the content-broker drone subscribes to BROADCAST_TAG
+    // expecting these to arrive, but the mesh narrows its relay filter
+    // to whatever's in this list. Omitting them is a silent miss: the
+    // broker subscription registers but never receives events, so
+    // swarm.requestSubtree() always times out with "no responder."
+    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND, 20400, 30401], true)
   }
 
   /**
@@ -1671,7 +1677,11 @@ export class SwarmDrone extends Drone {
     // path with the layer-driven list.
     const lineage = this.#getLineage()
     const history = this.#getHistory()
-    let childNames: string[]
+    // {name, layerSig?} — layerSig is only known on the layer-driven
+    // path. OPFS-fallback children have no sig (the layer hasn't been
+    // committed yet), so the wire payload omits layerSig for those.
+    // Subscribers tolerate either shape.
+    let childRefs: { name: string; layerSig?: string }[]
     if (history?.sign && history?.currentLayerAt && history?.getLayerBySig) {
       try {
         const locationSig = await history.sign({
@@ -1687,35 +1697,41 @@ export class SwarmDrone extends Drone {
           // cascade lands. When the lineage has no OPFS dir either
           // (sub-layer never minted a physical directory) there's
           // literally nothing to publish at this level — empty list.
-          childNames = dir ? await listLocalChildren(dir) : []
-          console.log('[swarm] publishSubtree: layer null → OPFS fallback', { childNames, hadDir: !!dir })
+          const names = dir ? await listLocalChildren(dir) : []
+          childRefs = names.map(name => ({ name }))
+          console.log('[swarm] publishSubtree: layer null → OPFS fallback', { childNames: names, hadDir: !!dir })
         } else {
           // Layer exists (possibly empty children). Resolve each child
-          // sig to its `name`. Empty children means "this layer has
-          // nothing to share" — publish empty children, peers see soft-
-          // leave and drop the prior content.
+          // sig to its `name` AND preserve the sig as the merkle handle —
+          // peers receive {name, layerSig} and can call
+          // swarm.requestSubtree(layerSig) to pull deeper via broker.
           const resolved = await Promise.all(childSigs.map(async (cs) => {
             try {
               const child = await history.getLayerBySig(cs)
-              return typeof child?.name === 'string' && child.name.length > 0 ? child.name : null
+              return typeof child?.name === 'string' && child.name.length > 0
+                ? { name: child.name, layerSig: cs }
+                : null
             } catch { return null }
           }))
-          childNames = resolved.filter((n): n is string => n !== null)
-          const droppedCount = resolved.length - childNames.length
+          childRefs = resolved.filter((n): n is { name: string; layerSig: string } => n !== null)
+          const droppedCount = resolved.length - childRefs.length
           if (droppedCount > 0) {
-            console.log('[swarm] publishSubtree: dropped unresolved child sigs', { droppedCount, totalChildSigs: childSigs.length, resolvedNames: childNames })
+            console.log('[swarm] publishSubtree: dropped unresolved child sigs', { droppedCount, totalChildSigs: childSigs.length, resolvedNames: childRefs.map(c => c.name) })
           }
         }
       } catch (err) {
         // History resolve failed for any reason — fall back to OPFS so
         // we don't silently stop publishing.
         console.log('[swarm] publishSubtree: history resolve threw → OPFS fallback', { err: String(err) })
-        childNames = dir ? await listLocalChildren(dir) : []
+        const names = dir ? await listLocalChildren(dir) : []
+        childRefs = names.map(name => ({ name }))
       }
     } else {
       console.log('[swarm] publishSubtree: no history service → OPFS fallback', { dirName: dir?.name ?? '(none)' })
-      childNames = dir ? await listLocalChildren(dir) : []
+      const names = dir ? await listLocalChildren(dir) : []
+      childRefs = names.map(name => ({ name }))
     }
+    const childNames = childRefs.map(c => c.name)  // legacy local var — still used by recursion + log
 
     // Publish one entry per child — flat: { name, ...0000_fields }.
     //   name        — lineage leaf, identifies which child this is
@@ -1754,15 +1770,16 @@ export class SwarmDrone extends Drone {
     // shallow at write time), so re-canonicalizing the parsed object
     // is a no-op for that path and recovers any legacy 0000 written
     // before the canonicalizer existed.
-    type ChildEntry = { name: string } & Record<string, unknown>
-    const children: ChildEntry[] = await Promise.all(childNames.map(async (name): Promise<ChildEntry> => {
-      let visual: ChildEntry = { name }
+    type ChildEntry = { name: string; layerSig?: string } & Record<string, unknown>
+    const children: ChildEntry[] = await Promise.all(childRefs.map(async ({ name, layerSig }): Promise<ChildEntry> => {
+      const base = layerSig ? { name, layerSig } : { name }
+      let visual: ChildEntry = base
       try {
         const props = await readTilePropertiesAt(segments, name)
         if (props && Object.keys(props).length > 0) {
           // Canonicalize the merged shape so the whole visual entry
           // is deterministic, not just the props portion.
-          visual = canonicaliseValue({ name, ...props }) as ChildEntry
+          visual = canonicaliseValue({ ...base, ...props }) as ChildEntry
         }
       } catch { /* no props yet — name-only publish */ }
       return visual
@@ -2323,9 +2340,16 @@ const payload: SwarmLayerPayload = myLabel
     // (the lineage's layer at this location). Empty children publishes
     // an empty visuals array; followers see we have nothing here, which
     // is correct.
+    // Resolve {name, layerSig} for each child. The layerSig is the
+    // merkle handle — subscribers receive it and can call
+    // `swarm.requestSubtree(layerSig)` to pull deeper subtrees via the
+    // content broker, even subtrees the publisher never personally
+    // navigated into. Wire-side cost is +64 hex chars per child; the
+    // sig is inert by itself (no code, no bytes), but functions as a
+    // best-effort dial-tone for merkle exploration.
     const history = this.#getHistory()
     const lineage = this.#getLineage()
-    let childNames: string[] = []
+    let childEntries: { name: string; layerSig: string }[] = []
     try {
       if (history?.sign && history?.currentLayerAt && history?.getLayerBySig) {
         const locationSig = await history.sign({
@@ -2337,22 +2361,24 @@ const payload: SwarmLayerPayload = myLabel
         const resolved = await Promise.all(childSigs.map(async (cs) => {
           try {
             const child = await history.getLayerBySig(cs)
-            return typeof child?.name === 'string' && child.name.length > 0 ? child.name : null
+            return typeof child?.name === 'string' && child.name.length > 0
+              ? { name: child.name, layerSig: cs }
+              : null
           } catch { return null }
         }))
-        childNames = resolved.filter((n): n is string => n !== null)
+        childEntries = resolved.filter((n): n is { name: string; layerSig: string } => n !== null)
       }
     } catch { /* fall through with empty children */ }
 
-    type ChildEntry = { name: string } & Record<string, unknown>
-    const children: ChildEntry[] = await Promise.all(childNames.map(async (name): Promise<ChildEntry> => {
-      let visual: ChildEntry = { name }
+    type ChildEntry = { name: string; layerSig: string } & Record<string, unknown>
+    const children: ChildEntry[] = await Promise.all(childEntries.map(async ({ name, layerSig }): Promise<ChildEntry> => {
+      let visual: ChildEntry = { name, layerSig }
       try {
         const props = await readTilePropertiesAt(segments, name)
         if (props && Object.keys(props).length > 0) {
-          visual = canonicaliseValue({ name, ...props }) as ChildEntry
+          visual = canonicaliseValue({ name, layerSig, ...props }) as ChildEntry
         }
-      } catch { /* name-only */ }
+      } catch { /* name-only + sig */ }
       return visual
     }))
 
@@ -2462,10 +2488,124 @@ const payload: SwarmLayerPayload = myLabel
    *  location, irrespective of where the local user is. UI uses this
    *  to surface "what is the broadcaster looking at right now." Empty
    *  array when not subscribed or the leader hasn't broadcast yet. */
-  public subscribedTiles = (): readonly ({ name: string; peerPubkey: string; imageSig?: string } & Record<string, unknown>)[] => {
+  public subscribedTiles = (): readonly ({ name: string; peerPubkey: string; imageSig?: string; layerSig?: string } & Record<string, unknown>)[] => {
     const sig = this.#subscribedChannelSig
     if (!sig) return []
     return this.peerTilesAtSig(sig)
+  }
+
+  /**
+   * Merkle pull. Given any layer signature you've seen on the wire,
+   * ask the content broker for the bytes and recursively walk the
+   * subtree, committing each found layer under the caller's current
+   * location. "You are always free to send out a layer request based
+   * on the merkle tree — you might not get it but you can always try."
+   *
+   * Behavior:
+   *  - Best effort. A sig with no responding peer fails silently
+   *    (recorded in the failed counter) but doesn't throw.
+   *  - sha256-verified end-to-end by the broker. Tampered responses
+   *    are dropped at the broker layer.
+   *  - Capped by maxNodes (default 256) to bound runaway pulls. Each
+   *    visited sig is deduped so cycles can't loop.
+   *  - Structure-only for v1: only the names are committed. Tile
+   *    properties (images, accent, link, …) ride a separate fetch
+   *    pipeline keyed by their own sigs — invoke that path after
+   *    requestSubtree if you want a fully painted subtree.
+   *  - Idempotent: re-adopting a name that's already at this location
+   *    is a no-op via the layer's name-keyed deduplication.
+   *  - Side effect: writeTilePropertiesAt commits trigger a normal
+   *    layer cascade, so the new subtree integrates with history,
+   *    undo/redo, and downstream peers' merkle roots.
+   */
+  public requestSubtree = async (
+    parentSig: string,
+    opts?: { maxNodes?: number; timeoutMs?: number },
+  ): Promise<{ adopted: number; failed: number }> => {
+    const max = Math.max(1, Math.min(opts?.maxNodes ?? 256, 1024))
+    const timeoutMs = Math.max(500, opts?.timeoutMs ?? 5000)
+
+    const sigClean = String(parentSig ?? '').trim().toLowerCase()
+    if (!/^[0-9a-f]{64}$/.test(sigClean)) return { adopted: 0, failed: 0 }
+
+    const broker = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(
+      '@diamondcoreprocessor.com/ContentBrokerDrone',
+    ) as { fetchBySig?: (sig: string, type: string, timeoutMs?: number) => Promise<Uint8Array | null> } | undefined
+    if (!broker?.fetchBySig) {
+      console.warn('[swarm] requestSubtree: no content broker available')
+      return { adopted: 0, failed: 0 }
+    }
+
+    const lineage = this.#getLineage()
+    const baseSegmentsRaw = lineage?.explorerSegments?.() ?? []
+    const baseSegments = (Array.isArray(baseSegmentsRaw) ? baseSegmentsRaw : [])
+      .map((x: unknown) => String(x ?? '').trim())
+      .filter((x: string) => x.length > 0)
+
+    const seen = new Set<string>()
+    let adopted = 0, failed = 0
+
+    /** Adopt one layer at parentSegments + [its name], then recurse
+     *  into its grandchildren. Hard cap via `seen.size` so cycles or
+     *  pathological fan-outs can't run away. */
+    const adoptChild = async (childSig: string, parentSegments: readonly string[]): Promise<void> => {
+      if (seen.size >= max) return
+      if (seen.has(childSig)) return
+      seen.add(childSig)
+
+      let bytes: Uint8Array | null = null
+      try { bytes = await broker.fetchBySig!(childSig, 'layer', timeoutMs) }
+      catch { /* network error — count as failed */ }
+      if (!bytes) { failed++; return }
+
+      let layer: { name?: string; children?: string[] }
+      try { layer = JSON.parse(new TextDecoder().decode(bytes)) }
+      catch { failed++; return }
+
+      const name = typeof layer.name === 'string' ? layer.name.trim() : ''
+      if (!name || name.length > 256) { failed++; return }
+
+      try {
+        await writeTilePropertiesAt(parentSegments, name, {})
+        adopted++
+      } catch (err) {
+        console.warn('[swarm] requestSubtree: writeTilePropertiesAt failed', { name, err })
+        failed++
+        return
+      }
+
+      const childSegments = [...parentSegments, name]
+      const grandSigs = Array.isArray(layer.children) ? layer.children : []
+      for (const gs of grandSigs) {
+        if (seen.size >= max) break
+        await adoptChild(gs, childSegments)
+      }
+    }
+
+    // Top level: fetch the parent layer (whose CHILDREN we want),
+    // iterate its children. Each child gets adopted under baseSegments
+    // and recursed into for grandchildren — matching the publisher's
+    // own layout where parentSig describes "what's at this location."
+    seen.add(sigClean)
+    let parentBytes: Uint8Array | null = null
+    try { parentBytes = await broker.fetchBySig(sigClean, 'layer', timeoutMs) }
+    catch {}
+    if (!parentBytes) { failed++; return { adopted, failed } }
+
+    let parentLayer: { children?: string[] }
+    try { parentLayer = JSON.parse(new TextDecoder().decode(parentBytes)) }
+    catch { failed++; return { adopted, failed } }
+
+    const childSigs = Array.isArray(parentLayer.children) ? parentLayer.children : []
+    for (const cs of childSigs) {
+      if (seen.size >= max) break
+      await adoptChild(cs, baseSegments)
+    }
+
+    this.emitEffect('swarm:subtree-requested', {
+      parentSig: sigClean, adopted, failed, atSegments: baseSegments,
+    })
+    return { adopted, failed }
   }
 
   // ─────────────────────────────────────────────────────────────────

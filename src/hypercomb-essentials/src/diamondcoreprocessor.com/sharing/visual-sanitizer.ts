@@ -32,6 +32,15 @@
 //   - `thread`       : 64-char lowercase hex (assistant)
 //   - `contentSig`   : 64-char lowercase hex (assistant)
 //   - `stopReason`   : short identifier-shaped string (assistant)
+//   - `layerSig`     : 64-char lowercase hex — the publisher's signature
+//                      for this child's layer. Inert (just a pointer).
+//                      Used by the receiver as a merkle handle: with the
+//                      sig the receiver can call
+//                      `swarm.requestSubtree(sig)` to pull deeper layers
+//                      via the content broker even when the publisher
+//                      never personally navigated into them. "Signatures
+//                      are streamed so you can add them" — this is that
+//                      stream.
 //
 // What's stripped on adopt (in addition to swarm-only metadata):
 //   - session-only keys, paired-channel-era markers, the publisher's
@@ -157,6 +166,9 @@ export function sanitizeVisualProperties(
 
   const stopReason = asIdent(input['stopReason'])
   if (stopReason) out['stopReason'] = stopReason
+
+  const layerSig = asSig(input['layerSig'])
+  if (layerSig) out['layerSig'] = layerSig
 
   return out
 }
