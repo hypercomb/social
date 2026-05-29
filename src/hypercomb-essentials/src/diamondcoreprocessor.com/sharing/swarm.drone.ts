@@ -74,6 +74,25 @@ const SWARM_RESOURCE_KIND = 30201
 // signal, NOT a gate on navigation.
 const SWARM_INTEREST_KIND = 30203
 
+// Follow-request event. The would-be follower publishes one of these
+// at the leader's "request channel" sig
+// (sha256(`request:${leaderPubkey}\0room\0secret`)) so the leader,
+// who is subscribed to their own request channel from boot, receives
+// a notification: "X wants to follow you. Accept / No thanks."
+// Content { requesterPubkey, requesterLabel } — the leader's UI uses
+// the label to decide.
+//
+// Why a separate event kind: the technical subscription to the
+// leader's personal channel happens regardless of acceptance (the
+// relay has no way to enforce permission on a public sig channel
+// inside a shared room+secret). Acceptance is the social ack — the
+// leader chooses whether to publish back an acknowledgement event
+// the follower's UI surfaces as "you're now following X." A "no
+// thanks" is silent on the wire; the follower's UI can just decide
+// to render "still waiting" indefinitely or surface a generic prompt
+// after a timeout.
+const SWARM_FOLLOW_REQUEST_KIND = 30205
+
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 const TILE_SOURCE_REGISTRY_KEY = '@hypercomb.social/TileSourceRegistry'
@@ -406,7 +425,7 @@ export class SwarmDrone extends Drone {
   // resolves, we still subscribe + publish on time. The primary trigger is
   // the Lineage `change` event we wire up in the constructor below.
   protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret']
-  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:auto-adopt-changed', 'tile:action']
+  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:following-changed', 'swarm:follow-request-received', 'tile:action']
 
   // Per-lineage subscription handle. We open one per visited sig and
   // never close (cheap — mesh dedupes by sig at the bucket layer).
@@ -454,6 +473,10 @@ export class SwarmDrone extends Drone {
   // event per peer wins; the older-event guard in #onEvent keeps stale
   // labels from clobbering newer ones.
   #labelByPubkey = new Map<string, string>()
+
+  // Open subscription to a followed leader's personal channel sig.
+  // Closed and reopened whenever setFollowing changes.
+  #followSub: { close: () => void } | null = null
 
   // Per-lineage local memo of what we last published as our hidden
   // list. Drives the dedupe + heartbeat for hide events: skip a
@@ -948,7 +971,7 @@ export class SwarmDrone extends Drone {
     // CRITICAL: without our kind in the list, the mesh's REQ filter pins
     // to the legacy default [29010] and our swarm events get filtered
     // out at the relay — silent miss.
-    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND], true)
+    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_FOLLOW_REQUEST_KIND], true)
   }
 
   /**
@@ -1114,6 +1137,10 @@ export class SwarmDrone extends Drone {
       const pk = await signer.getPublicKeyHex()
       if (!pk) return false
       this.#myPubkey = pk.toLowerCase()
+      // Pubkey is resolved — subscribe to our own follow-request
+      // channel so we receive "X wants to follow you" notifications.
+      // Idempotent: re-subscribe attempts no-op if already subscribed.
+      void this.#subscribeToMyFollowRequests()
       // Retroactive self-eviction: any cached peer entries arriving
       // before our pubkey resolved bypassed the self-skip filter at
       // line ~1036 and may include OUR OWN relay-echoed publishes
@@ -1217,6 +1244,16 @@ export class SwarmDrone extends Drone {
     this.#lastSyncInput = { segments, room, secretLen: secret.length, key: `${lineageKey} ${room} ${secret}` }
     
     await this.#syncForSig(composedSig)
+
+    // Personal channel publish — same kind-30200 visuals, second sig.
+    // The leader broadcasts their CURRENT children to a sig that's a
+    // function of their pubkey (sha256(`channel:${pubkey}\0room\0secret`)),
+    // so anyone following them (subscribed to that sig) sees their
+    // tiles wherever the leader goes, without needing to be at the same
+    // lineage. Same #onEvent path handles inbound — the cache populates
+    // at the channel sig keyed by the leader's pubkey, and the follower
+    // reads via swarm.followedTiles().
+    void this.#publishCurrentVisualsToMyChannel(segments)
   }
 
   // Tear down all per-sig state at the OLD #currentSig (subscriptions,
@@ -1343,7 +1380,7 @@ export class SwarmDrone extends Drone {
     // wanted (an older publish of bytes a newer layer references).
     // So we DON'T gate resources here; gate only layer + hide which
     // carry session-scoped membership state.
-    if (kind === SWARM_LAYER_KIND || kind === SWARM_HIDE_KIND || kind === SWARM_INTEREST_KIND) {
+    if (kind === SWARM_LAYER_KIND || kind === SWARM_HIDE_KIND || kind === SWARM_INTEREST_KIND || kind === SWARM_FOLLOW_REQUEST_KIND) {
       const nowSec = Math.floor(Date.now() / 1000)
       const tags = evt?.event?.tags ?? []
       const expirationTag = tags.find(t => t[0] === 'expiration')?.[1]
@@ -1372,6 +1409,10 @@ export class SwarmDrone extends Drone {
     }
     if (kind === SWARM_INTEREST_KIND) {
       this.#onInterestEvent(sig, evt)
+      return
+    }
+    if (kind === SWARM_FOLLOW_REQUEST_KIND) {
+      this.#onFollowRequest(evt)
       return
     }
     if (kind !== SWARM_LAYER_KIND) return
@@ -1465,7 +1506,11 @@ export class SwarmDrone extends Drone {
     // peer's event from a sub-location we never visited has nowhere
     // to commit; the user would need to navigate there first (which
     // is exactly the exploration handshake from the lifecycle).
-    if (layerChanged && sig === this.#currentSig && this.#isAutoAdopting(pubkey)) {
+    // Follow == auto-adopt. When the publisher is who we're following,
+    // queue adoption for the visuals they just published — whether
+    // they arrived via our current-location subscription or via the
+    // dedicated personal-channel subscription opened by setFollowing.
+    if (layerChanged && this.following() === pubkey) {
       const names = layer.visuals
         .map(v => String((v as { name?: unknown }).name ?? '').trim())
         .filter(n => n.length > 0)
@@ -2192,54 +2237,225 @@ const payload: SwarmLayerPayload = myLabel
    *  participant indicators on peer tiles, etc. */
   public labelFor = (pubkey: string): string => this.#labelByPubkey.get(pubkey) ?? ''
 
-  // ─────────────────────────────────────────────────────────────────
-  // Per-participant auto-adopt ("follow")
-  // ─────────────────────────────────────────────────────────────────
-
-  /** Opt in / out of automatically importing a peer's tiles. Stored in
-   *  localStorage keyed by pubkey so the choice survives reloads and is
-   *  scoped to this device (not synced across devices the way a peer
-   *  publish would be). */
-  public setAutoAdopt = (pubkey: string, on: boolean): void => {
-    const pk = String(pubkey ?? '').trim().toLowerCase()
-    if (!/^[0-9a-f]{64}$/.test(pk)) return
-    try {
-      if (on) localStorage.setItem(`hc:auto-adopt:${pk}`, '1')
-      else localStorage.removeItem(`hc:auto-adopt:${pk}`)
-    } catch { /* ignore */ }
-    this.emitEffect('swarm:auto-adopt-changed', { pubkey: pk, on: !!on })
-  }
-
-  /** Is the local user following this pubkey? When true, the swarm
-   *  auto-fires tile:action with action='adopt' for new tiles the
-   *  peer publishes at our current sig. */
-  public isAutoAdopting = (pubkey: string): boolean => this.#isAutoAdopting(pubkey)
-
-  /** All pubkeys we're currently following. UI can render the list, show
-   *  online indicators, etc. */
-  public listAutoAdopting = (): readonly string[] => {
-    const out: string[] = []
-    try {
-      for (let i = 0; i < localStorage.length; i++) {
-        const key = localStorage.key(i)
-        if (key && key.startsWith('hc:auto-adopt:')) {
-          out.push(key.slice('hc:auto-adopt:'.length))
-        }
-      }
-    } catch { /* ignore */ }
-    return out
-  }
-
-  #isAutoAdopting = (pubkey: string): boolean => {
-    const pk = String(pubkey ?? '').trim().toLowerCase()
-    if (!/^[0-9a-f]{64}$/.test(pk)) return false
-    try { return localStorage.getItem(`hc:auto-adopt:${pk}`) === '1' }
-    catch { return false }
-  }
-
   #readMyLabel = (): string => {
     try { return String(localStorage.getItem('hc:user-label') ?? '').trim().slice(0, 64) }
     catch { return '' }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Follow — auto-adopt one participant's broadcasts
+  // ─────────────────────────────────────────────────────────────────
+  //
+  // Follow IS auto-adopt — same concept, single API. When you follow X,
+  // you subscribe to their personal channel sig and their tiles flow
+  // into your view via the same #onEvent path as any other peer event.
+  // You can adopt anything they publish (one tile at a time, or via
+  // selection menu), and the swarm-adopt drone fetches resources for
+  // adopted tiles via the broker.
+  //
+  // Consent: setFollowing publishes a follow-request event on the
+  // leader's request channel; the leader subscribes to that channel
+  // from boot and receives a swarm:follow-request-received effect so
+  // their UI can show "X wants to follow you. Accept / No thanks."
+
+  /** The cached followed channel sig — what swarm.followedTiles reads
+   *  from. Computed when setFollowing is called; null when not following. */
+  #followingChannelSig: string | null = null
+
+  /** Open subscription to followed leader's request-acknowledgement
+   *  channel (the leader publishes an accept to this for the follower
+   *  to know they've been accepted). Closed and reopened by setFollowing. */
+  #followAckSub: { close: () => void } | null = null
+
+  /** Sub to OUR OWN follow-request channel — populated on boot so we
+   *  receive notifications when participants ask to follow us. */
+  #myRequestSub: { close: () => void } | null = null
+
+  /** Compute the deterministic channel sig for a participant's
+   *  personal layer broadcasts, scoped to the active room+secret.
+   *  Same algorithm both sides use, so leader and follower address
+   *  the same channel without any out-of-band handshake. */
+  #computeChannelSig = async (pubkey: string): Promise<string> => {
+    const sigStore = this.#getSignatureStore()
+    if (!sigStore?.signText) return ''
+    const room = this.#getRoomStore()?.value?.trim() ?? ''
+    const secret = this.#getSecretStore()?.value?.trim() ?? ''
+    if (!room || !secret) return ''
+    try { return await sigStore.signText(`channel:${pubkey}\0${room}\0${secret}`) }
+    catch { return '' }
+  }
+
+  /** Compute the deterministic follow-request channel sig for a
+   *  participant. The participant subscribes to this sig to receive
+   *  follow requests; would-be followers publish there. */
+  #computeFollowRequestSig = async (pubkey: string): Promise<string> => {
+    const sigStore = this.#getSignatureStore()
+    if (!sigStore?.signText) return ''
+    const room = this.#getRoomStore()?.value?.trim() ?? ''
+    const secret = this.#getSecretStore()?.value?.trim() ?? ''
+    if (!room || !secret) return ''
+    try { return await sigStore.signText(`request:${pubkey}\0${room}\0${secret}`) }
+    catch { return '' }
+  }
+
+  /** Republish the current location's children at our PERSONAL channel
+   *  sig so followers see what we're seeing wherever we go. Same flat
+   *  visuals payload as the location publish — only the sig differs. */
+  #publishCurrentVisualsToMyChannel = async (segments: readonly string[]): Promise<void> => {
+    const mesh = this.#getMesh()
+    if (!mesh?.publish) return
+    const myPubkey = this.#myPubkey
+    if (!myPubkey) return
+    const channelSig = await this.#computeChannelSig(myPubkey)
+    if (!channelSig) return
+
+    // Resolve current children — same source-of-truth as publishSubtree
+    // (the lineage's layer at this location). Empty children publishes
+    // an empty visuals array; followers see we have nothing here, which
+    // is correct.
+    const history = this.#getHistory()
+    const lineage = this.#getLineage()
+    let childNames: string[] = []
+    try {
+      if (history?.sign && history?.currentLayerAt && history?.getLayerBySig) {
+        const locationSig = await history.sign({
+          domain: lineage?.domain,
+          explorerSegments: () => segments,
+        } as LineageLike)
+        const layer = await history.currentLayerAt(locationSig)
+        const childSigs = Array.isArray(layer?.children) ? layer.children : []
+        const resolved = await Promise.all(childSigs.map(async (cs) => {
+          try {
+            const child = await history.getLayerBySig(cs)
+            return typeof child?.name === 'string' && child.name.length > 0 ? child.name : null
+          } catch { return null }
+        }))
+        childNames = resolved.filter((n): n is string => n !== null)
+      }
+    } catch { /* fall through with empty children */ }
+
+    type ChildEntry = { name: string } & Record<string, unknown>
+    const children: ChildEntry[] = await Promise.all(childNames.map(async (name): Promise<ChildEntry> => {
+      let visual: ChildEntry = { name }
+      try {
+        const props = await readTilePropertiesAt(segments, name)
+        if (props && Object.keys(props).length > 0) {
+          visual = canonicaliseValue({ name, ...props }) as ChildEntry
+        }
+      } catch { /* name-only */ }
+      return visual
+    }))
+
+    const myLabel = this.#readMyLabel()
+    const payload: SwarmLayerPayload = myLabel
+      ? { label: myLabel, visuals: children }
+      : { visuals: children }
+    const expirationSecs = Math.floor(Date.now() / 1000) + EVENT_TTL_SECS
+    try {
+      await mesh.publish(SWARM_LAYER_KIND, channelSig, payload, [
+        ['d', channelSig],
+        ['expiration', String(expirationSecs)],
+      ])
+    } catch (err) {
+      console.warn('[swarm] publish to personal channel failed', { err })
+    }
+  }
+
+  /** Subscribe to OUR follow-request channel so we receive
+   *  notifications when participants ask to follow us. Called once on
+   *  boot after the pubkey resolves. */
+  #subscribeToMyFollowRequests = async (): Promise<void> => {
+    if (this.#myRequestSub) return  // already subscribed
+    const mesh = this.#getMesh()
+    if (!mesh?.subscribe) return
+    const myPubkey = this.#myPubkey
+    if (!myPubkey) return
+    const reqSig = await this.#computeFollowRequestSig(myPubkey)
+    if (!reqSig) return
+    this.#myRequestSub = mesh.subscribe(reqSig, (evt) => this.#onFollowRequest(evt))
+  }
+
+  #onFollowRequest = (evt: MeshEvtLike): void => {
+    if (Number(evt.event?.kind) !== SWARM_FOLLOW_REQUEST_KIND) return
+    const requesterPubkey = String(evt.event?.pubkey ?? '').trim().toLowerCase()
+    if (!requesterPubkey) return
+    if (this.#myPubkey && requesterPubkey === this.#myPubkey) return  // ignore self
+
+    const payload = evt.payload
+    const requesterLabel = (payload && typeof payload === 'object')
+      ? String((payload as { label?: unknown }).label ?? '').trim().slice(0, 64)
+      : ''
+
+    this.emitEffect('swarm:follow-request-received', {
+      requesterPubkey,
+      requesterLabel,
+    })
+  }
+
+  /** Follow ONE participant (single follow for now). Side effects:
+   *    - Closes any prior follow subscription
+   *    - Subscribes to the leader's personal channel sig (their layer
+   *      broadcasts arrive via the standard #onEvent path)
+   *    - Publishes a follow request to the leader's request channel
+   *      so they see "X wants to follow you"
+   *    - Stores 'hc:following' = pubkey for persistence across reloads
+   *  Pass null to unfollow. */
+  public setFollowing = async (pubkey: string | null): Promise<void> => {
+    // Tear down old
+    if (this.#followSub) { try { this.#followSub.close() } catch { /* ignore */ } this.#followSub = null }
+    if (this.#followAckSub) { try { this.#followAckSub.close() } catch { /* ignore */ } this.#followAckSub = null }
+    this.#followingChannelSig = null
+
+    const pk = pubkey ? String(pubkey).trim().toLowerCase() : ''
+    try {
+      if (pk && /^[0-9a-f]{64}$/.test(pk)) localStorage.setItem('hc:following', pk)
+      else localStorage.removeItem('hc:following')
+    } catch { /* ignore */ }
+    this.emitEffect('swarm:following-changed', { pubkey: pk })
+    if (!pk || !/^[0-9a-f]{64}$/.test(pk)) return
+
+    const mesh = this.#getMesh()
+    if (!mesh?.subscribe || !mesh?.publish) return
+
+    // Subscribe to leader's layer broadcasts on their personal channel.
+    // Events arrive via #onEvent → cached in #peerLayersBySig at the
+    // leader channel sig keyed by the leader's pubkey.
+    const channelSig = await this.#computeChannelSig(pk)
+    if (channelSig) {
+      this.#followingChannelSig = channelSig
+      this.#followSub = mesh.subscribe(channelSig, (evt) => this.#onEvent(channelSig, evt))
+    }
+
+    // Publish a follow request so the leader sees a notification.
+    const requestSig = await this.#computeFollowRequestSig(pk)
+    if (requestSig) {
+      const myLabel = this.#readMyLabel()
+      const expirationSecs = Math.floor(Date.now() / 1000) + EVENT_TTL_SECS
+      try {
+        await mesh.publish(SWARM_FOLLOW_REQUEST_KIND, requestSig, { label: myLabel }, [
+          ['d', `${requestSig}:${this.#myPubkey ?? ''}`],
+          ['expiration', String(expirationSecs)],
+        ])
+      } catch (err) {
+        console.warn('[swarm] follow request publish failed', err)
+      }
+    }
+  }
+
+  /** Who we're currently following — pubkey hex or empty string. */
+  public following = (): string => {
+    try { return String(localStorage.getItem('hc:following') ?? '') } catch { return '' }
+  }
+
+  /** Tiles the followed leader is currently broadcasting on their
+   *  personal channel — whatever children they have at THEIR current
+   *  location, irrespective of where the local user is. UI uses this
+   *  to surface "what is the teacher looking at right now." Empty
+   *  array when not following or the leader hasn't broadcast yet. */
+  public followedTiles = (): readonly ({ name: string; peerPubkey: string; imageSig?: string } & Record<string, unknown>)[] => {
+    const sig = this.#followingChannelSig
+    if (!sig) return []
+    return this.peerTilesAtSig(sig)
   }
 
   // -----------------------------------------------------------------
