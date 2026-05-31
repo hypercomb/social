@@ -1122,8 +1122,16 @@ export class NostrMeshDrone extends Drone {
     // through Cloudflare back to themselves — wasted hop, noisier
     // metrics, slower iteration. From any other origin (the real
     // deployment domain) the flag uses LIVE_RELAY as before.
-    let useLive = false
-    try { useLive = localStorage.getItem('hc:nostrmesh:use-live-relay') === '1' } catch { /* ignore */ }
+    // IIFE on purpose: a `let useLive = false; try { useLive = ... }` pattern
+    // here lets esbuild constant-propagate `false` into the seed expression,
+    // dead-code-eliminating the LIVE_RELAY branch and removing the
+    // 'wss://jwize.com' literal from the bundle entirely. Wrapping the read
+    // in an IIFE makes the value opaque to constant propagation — esbuild
+    // cannot statically evaluate the return.
+    const useLive = ((): boolean => {
+      try { return localStorage.getItem('hc:nostrmesh:use-live-relay') === '1' }
+      catch { return false }
+    })()
     const localContext = this.isLocalContext()
     const seed = (useLive && !localContext) ? [LIVE_RELAY] : [LOCAL_RELAY]
     const defaults = fallback.length > 0 ? fallback : seed
