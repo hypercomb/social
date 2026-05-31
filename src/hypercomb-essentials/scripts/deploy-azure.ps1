@@ -343,6 +343,40 @@ write-step ''
 # the local manifest we just attempted to upload. If they don't match, the
 # deploy did not actually publish — fail loudly with diagnostic info.
 
+# --- Phase 2.5: Force manifest.json re-upload as the last write ---
+#
+# The Phase 2 foreach claims to upload manifest.json (it's the last item
+# in $files), and the az CLI returns 0 + a fresh etag. But the verify
+# step then downloads the blob and finds the OLD content unchanged. The
+# upload appears to be either silently no-op'd or shadowed by some other
+# write. Re-uploading explicitly here, AFTER all content-addressed
+# blobs have landed, gives us a final chance to flip the pointer — and
+# we log the az response in full so the diagnostic shows the etag the
+# upload claims to have written.
+
+if (Test-Path -LiteralPath $localManifestPath -PathType Leaf) {
+  write-step '--- Phase 2.5: explicit final manifest re-upload ---'
+
+  $manifestBlobNameFinal = if ($resolvedDestination) { "$resolvedDestination/manifest.json" } else { 'manifest.json' }
+  $finalSize = (Get-Item -LiteralPath $localManifestPath).Length
+  write-step " local manifest size : $finalSize bytes"
+  write-step " blob target         : $containerName/$manifestBlobNameFinal"
+
+  $finalArgs = (@(
+    'storage', 'blob', 'upload',
+    '--container-name', $containerName,
+    '--file', $localManifestPath,
+    '--name', $manifestBlobNameFinal,
+    '--overwrite', 'true',
+    '--content-type', 'application/json',
+    '--no-progress'
+  ) + $authArguments)
+
+  invoke-az -Arguments $finalArgs
+
+  write-step ''
+}
+
 if (Test-Path -LiteralPath $localManifestPath -PathType Leaf) {
   write-step '--- Phase 3: verifying live manifest matches local ---'
 
