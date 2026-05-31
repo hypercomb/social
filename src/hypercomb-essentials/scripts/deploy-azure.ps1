@@ -328,3 +328,83 @@ write-step ''
 write-step " uploaded  : $uploaded"
 write-step " skipped   : $skipped (already exist)"
 write-step ''
+
+# --- Phase 3: Post-upload verification ---
+#
+# Trust nothing. Earlier the pipeline reported "uploaded: 210, skipped: 0"
+# for several days in a row while the live manifest never actually changed
+# (blob etag stayed pinned to a stale value, possibly an `az storage blob
+# upload` silently no-op'ing under some auth / storage-account-policy /
+# CDN-passthrough condition we don't yet understand). The fix to that is
+# not to debug the symptom — it's to refuse to claim success unless we can
+# read back what we just wrote and confirm it's our content.
+#
+# Download the live manifest.json, parse it, and compare its rootHash to
+# the local manifest we just attempted to upload. If they don't match, the
+# deploy did not actually publish — fail loudly with diagnostic info.
+
+if (Test-Path -LiteralPath $localManifestPath -PathType Leaf) {
+  write-step '--- Phase 3: verifying live manifest matches local ---'
+
+  $localManifest = Get-Content -LiteralPath $localManifestPath -Raw | ConvertFrom-Json
+  $localRootHash = $null
+  if ($null -ne $localManifest.rootHash) {
+    $localRootHash = [string]$localManifest.rootHash
+  }
+  $localPackageCount = if ($null -ne $localManifest.packages) {
+    @($localManifest.packages.PSObject.Properties).Count
+  } else { 0 }
+
+  write-step " local rootHash      : $localRootHash"
+  write-step " local package count : $localPackageCount"
+
+  $manifestBlobNameVerify = if ($resolvedDestination) { "$resolvedDestination/manifest.json" } else { 'manifest.json' }
+  $tempDirVerify = if (-not [string]::IsNullOrWhiteSpace($env:TEMP)) { $env:TEMP } `
+                  elseif (-not [string]::IsNullOrWhiteSpace($env:TMPDIR)) { $env:TMPDIR } `
+                  else { '/tmp' }
+  $tempVerifyPath = Join-Path $tempDirVerify 'hypercomb-verify-manifest.json'
+  Remove-Item -LiteralPath $tempVerifyPath -Force -ErrorAction SilentlyContinue
+
+  $verifyResult = invoke-az-silent -Arguments (@(
+    'storage', 'blob', 'download',
+    '--container-name', $containerName,
+    '--name', $manifestBlobNameVerify,
+    '--file', $tempVerifyPath,
+    '--overwrite', 'true',
+    '--only-show-errors'
+  ) + $authArguments)
+
+  if ($verifyResult.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $tempVerifyPath -PathType Leaf)) {
+    fail "verification failed: could not download manifest.json after upload (container=$containerName blob=$manifestBlobNameVerify exit=$($verifyResult.ExitCode))"
+  }
+
+  $remoteManifest = Get-Content -LiteralPath $tempVerifyPath -Raw | ConvertFrom-Json
+  $remoteRootHash = $null
+  if ($null -ne $remoteManifest.rootHash) {
+    $remoteRootHash = [string]$remoteManifest.rootHash
+  }
+  $remotePackageCount = if ($null -ne $remoteManifest.packages) {
+    @($remoteManifest.packages.PSObject.Properties).Count
+  } else { 0 }
+
+  write-step " remote rootHash     : $remoteRootHash"
+  write-step " remote package count: $remotePackageCount"
+
+  Remove-Item -LiteralPath $tempVerifyPath -Force -ErrorAction SilentlyContinue
+
+  if ($localRootHash -ne $remoteRootHash) {
+    fail @"
+verification failed: live manifest does not match local after upload.
+  expected (local) rootHash : $localRootHash  (with $localPackageCount packages)
+  actual   (remote) rootHash: $remoteRootHash  (with $remotePackageCount packages)
+
+The az CLI reported $uploaded uploads completed, but the manifest at
+$containerName/$manifestBlobNameVerify still does not reflect those writes.
+This is the silent-success bug — investigate auth, storage account, or
+blob policies. Failing the deploy so it cannot be mistaken for a success.
+"@
+  }
+
+  write-step " ✓ verified — live manifest matches local rootHash ($localRootHash)"
+  write-step ''
+}
