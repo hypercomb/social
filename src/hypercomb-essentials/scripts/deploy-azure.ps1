@@ -346,16 +346,25 @@ write-step ''
 if (Test-Path -LiteralPath $localManifestPath -PathType Leaf) {
   write-step '--- Phase 3: verifying live manifest matches local ---'
 
+  # Compare the manifest as bytes, not by relying on a specific JSON field.
+  # The previous version compared `.rootHash`, which doesn't exist on the
+  # uploaded manifest — both sides came back empty and "matched," silently
+  # confirming a broken deploy. SHA-256 of the raw file bytes is the
+  # honest test: same bytes → same content → upload propagated.
+
+  $localBytes = [System.IO.File]::ReadAllBytes($localManifestPath)
+  $sha = [System.Security.Cryptography.SHA256]::Create()
+  $localHash = ($sha.ComputeHash($localBytes) | ForEach-Object { $_.ToString('x2') }) -join ''
+
   $localManifest = Get-Content -LiteralPath $localManifestPath -Raw | ConvertFrom-Json
-  $localRootHash = $null
-  if ($null -ne $localManifest.rootHash) {
-    $localRootHash = [string]$localManifest.rootHash
-  }
   $localPackageCount = if ($null -ne $localManifest.packages) {
     @($localManifest.packages.PSObject.Properties).Count
   } else { 0 }
+  $localPackageKeys = if ($null -ne $localManifest.packages) {
+    @($localManifest.packages.PSObject.Properties.Name | Sort-Object)
+  } else { @() }
 
-  write-step " local rootHash      : $localRootHash"
+  write-step " local content-hash  : $localHash"
   write-step " local package count : $localPackageCount"
 
   $manifestBlobNameVerify = if ($resolvedDestination) { "$resolvedDestination/manifest.json" } else { 'manifest.json' }
@@ -378,33 +387,62 @@ if (Test-Path -LiteralPath $localManifestPath -PathType Leaf) {
     fail "verification failed: could not download manifest.json after upload (container=$containerName blob=$manifestBlobNameVerify exit=$($verifyResult.ExitCode))"
   }
 
+  $remoteBytes = [System.IO.File]::ReadAllBytes($tempVerifyPath)
+  $remoteHash = ($sha.ComputeHash($remoteBytes) | ForEach-Object { $_.ToString('x2') }) -join ''
+
   $remoteManifest = Get-Content -LiteralPath $tempVerifyPath -Raw | ConvertFrom-Json
-  $remoteRootHash = $null
-  if ($null -ne $remoteManifest.rootHash) {
-    $remoteRootHash = [string]$remoteManifest.rootHash
-  }
   $remotePackageCount = if ($null -ne $remoteManifest.packages) {
     @($remoteManifest.packages.PSObject.Properties).Count
   } else { 0 }
+  $remotePackageKeys = if ($null -ne $remoteManifest.packages) {
+    @($remoteManifest.packages.PSObject.Properties.Name | Sort-Object)
+  } else { @() }
 
-  write-step " remote rootHash     : $remoteRootHash"
+  write-step " remote content-hash : $remoteHash"
   write-step " remote package count: $remotePackageCount"
 
   Remove-Item -LiteralPath $tempVerifyPath -Force -ErrorAction SilentlyContinue
 
-  if ($localRootHash -ne $remoteRootHash) {
+  if ($localHash -ne $remoteHash) {
+    $localOnly = @($localPackageKeys | Where-Object { $remotePackageKeys -notcontains $_ })
+    $remoteOnly = @($remotePackageKeys | Where-Object { $localPackageKeys -notcontains $_ })
+
+    $diffLines = @()
+    if ($localOnly.Count -gt 0) {
+      $diffLines += "  packages in LOCAL but missing from REMOTE ($($localOnly.Count)):"
+      foreach ($k in $localOnly) { $diffLines += "    + $k" }
+    }
+    if ($remoteOnly.Count -gt 0) {
+      $diffLines += "  packages in REMOTE but missing from LOCAL ($($remoteOnly.Count)):"
+      foreach ($k in $remoteOnly) { $diffLines += "    - $k" }
+    }
+    $diff = $diffLines -join "`n"
+
     fail @"
 verification failed: live manifest does not match local after upload.
-  expected (local) rootHash : $localRootHash  (with $localPackageCount packages)
-  actual   (remote) rootHash: $remoteRootHash  (with $remotePackageCount packages)
+
+  local content-hash  : $localHash    ($localPackageCount packages)
+  remote content-hash : $remoteHash    ($remotePackageCount packages)
+
+$diff
 
 The az CLI reported $uploaded uploads completed, but the manifest at
-$containerName/$manifestBlobNameVerify still does not reflect those writes.
-This is the silent-success bug — investigate auth, storage account, or
-blob policies. Failing the deploy so it cannot be mistaken for a success.
+$containerName/$manifestBlobNameVerify did not actually update. This is
+the silent-success bug we are trying to surface. Likely causes to
+investigate, in order of probability:
+
+  1. The az upload to manifest.json is being silently no-op'd (auth
+     scope, container-level RBAC permissions, or storage account
+     soft-delete/immutability policy).
+  2. The merge phase wrote to a different local path than the upload
+     reads from (encoding, BOM, or path-resolution mismatch).
+  3. A different process is racing the deploy and restoring the old
+     manifest after this script completes.
+
+Failing the deploy so it cannot be mistaken for a success.
 "@
   }
 
-  write-step " ✓ verified — live manifest matches local rootHash ($localRootHash)"
+  write-step " ✓ verified — live manifest bytes match local (sha256 $($localHash.Substring(0,16))...)"
   write-step ''
 }
