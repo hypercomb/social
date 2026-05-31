@@ -26,6 +26,16 @@ const LOCAL_RELAY = 'ws://localhost:7777'
 // by code. Keep it that way.
 const LIVE_RELAY = 'wss://jwize.com'
 
+// Anchor LIVE_RELAY in an exported symbol so esbuild's tree-shaker
+// cannot prove the constant is unreferenced after optimizing the
+// loadRelays ternary. Without this, the 'wss://jwize.com' literal
+// gets pruned out of the bundle entirely (confirmed: zero deployed
+// bees contained 'jwize' before this anchor was added).
+export const RELAY_URLS = Object.freeze({
+  local: LOCAL_RELAY,
+  live: LIVE_RELAY,
+} as const)
+
 type NostrEvent = { id?: string; pubkey?: string; created_at: number; kind: number; tags: string[][]; content: string; sig?: string }
 type MeshEvt = { relay: string; sig: string; event: NostrEvent; payload: any }
 type MeshCb = (e: MeshEvt) => void
