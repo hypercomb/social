@@ -5,6 +5,6 @@
     [style.--shield-color]="shieldColor()"
     type="button"
     (click)="onToggle()">
-    <span class="hci">{{ meshPublic ? 'e' : 'i' }}</span>
+    <span class="mat-sym" [class.filled]="meshPublic">{{ meshPublic ? 'groups' : 'person' }}</span>
   </button>
 </div>

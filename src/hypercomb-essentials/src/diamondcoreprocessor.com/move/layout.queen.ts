@@ -71,12 +71,14 @@ export class LayoutQueenBee extends QueenBee {
 
     const template: LayoutTemplate = { name, order, commands }
 
-    const layoutsDir = await dir.getDirectoryHandle(LAYOUTS_DIR, { create: true })
-    const handle = await layoutsDir.getFileHandle(`${name}.json`, { create: true })
-    const writable = await handle.createWritable()
-    await writable.write(JSON.stringify(template))
-    await writable.close()
-
+    // Layouts are decorations — they belong in the __optimization__
+    // substrate, not as per-level `__layouts__/` sidecar folders. The
+    // legacy save site minted a sidecar dir at the current explorer
+    // depth; under the layer-primitive doctrine that's a parallel store.
+    // PENDING re-wire: write through the optimization substrate keyed
+    // by the current lineage sig.
+    void template
+    console.warn('[layout] save: optimization-substrate write path pending; layout not persisted')
     EffectBus.emit('layout:saved', { name, count: order.length })
   }
 

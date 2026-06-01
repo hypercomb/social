@@ -34,7 +34,7 @@
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import { CELL_WEBSITE_PROPERTY } from '@hypercomb/core'
 import {
-  readCellProperties,
+  readTilePropertiesAt,
   isSignature,
 } from '../editor/tile-properties.js'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
@@ -150,38 +150,22 @@ async function ensureInstructionsBootstrap(): Promise<void> {
     }
   }
 
-  // Need OPFS dirs created BEFORE cell:added — the layout queen and
-  // move drone read/write per-cell `index` properties via OPFS dir
-  // handles. No dir → no index → "tile hops back to original position"
-  // because the move write silently fails.
-  const store = get<StoreLike>('@hypercomb.social/Store')
-  const userRoot = store?.hypercombRoot
-  if (!userRoot) {
-    console.warn('[/website] Store.hypercombRoot unavailable — skipping bootstrap')
-    return
-  }
+  console.log('[/website] bootstrapping instructions/ tree at root (additive, layer-only)')
 
-  console.log('[/website] bootstrapping instructions/ tree at root (additive)')
-
-  // 1) Create the `instructions/` OPFS dir under hypercomb.io/.
-  const instructionsDir = await userRoot.getDirectoryHandle('instructions', { create: true })
-
-  // 2) Emit cell:added so the layout queen assigns its index, history
-  //    records the addition, and the renderer picks it up.
+  // Layer-primitive bootstrap: emit `cell:added` per node and rely on
+  // the LayerCommitter's children-slot subscriber to fold the additions
+  // into the parent layer's children list. The legacy OPFS dir mints
+  // (`hypercomb.io/instructions/` + per-sub-cell dirs) are retired —
+  // hierarchy lives in `layer.children`, not in the folder tree.
   EffectBus.emit('cell:added', { cell: 'instructions', segments: [] })
   await notes.addAtSegments([], 'instructions', INSTRUCTIONS_ROOT_STARTER)
 
-  // 3) For each default: create OPFS subdir under instructions/, then
-  //    emit cell:added with the parent segments. Order matters — dir
-  //    creation must complete before the index-assignment listener
-  //    runs, otherwise the listener sees no dir and skips.
   for (const d of INSTRUCTIONS_DEFAULTS) {
-    await instructionsDir.getDirectoryHandle(d.name, { create: true })
     EffectBus.emit('cell:added', { cell: d.name, segments: ['instructions'] })
     await notes.addAtSegments(['instructions'], d.name, d.starter)
   }
 
-  console.log(`[/website] instructions/ bootstrapped with ${INSTRUCTIONS_DEFAULTS.length} default sub-cells (with OPFS dirs)`)
+  console.log(`[/website] instructions/ bootstrapped with ${INSTRUCTIONS_DEFAULTS.length} default sub-cells (layer-only)`)
 }
 
 const toast = (type: 'info' | 'success' | 'warning' | 'tip', title: string, message: string): void => {
@@ -359,42 +343,68 @@ function resolveSignatureFromName(spec: string | null): string | null {
 
 async function snapshot(target: Target): Promise<HierarchyExport> {
   const nodes: HierarchyNode[] = []
-  await walk(target.dir, [], nodes)
+  // Root node — its properties live on its own layer; the path is
+  // segments to the target, so the parent-of-root is everything except
+  // the last segment (or empty list for the hypercomb root).
+  const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
+  if (!history) return { rootPath: target.path, currentWebsiteSig: undefined, nodes }
 
-  const rootProps: Record<string, unknown> = await readCellProperties(target.dir).catch(() => ({} as Record<string, unknown>))
-  const current = rootProps[CELL_WEBSITE_PROPERTY]
-  const currentWebsiteSig = isSignature(current) ? (current as string) : undefined
+  await walkLayer(history, target.path, nodes)
 
+  // Root websiteSig — for the snapshot root, read its props from the layer.
+  let currentWebsiteSig: string | undefined
+  if (target.path.length > 0) {
+    const parent = target.path.slice(0, -1)
+    const leaf = target.path[target.path.length - 1]
+    const rootProps = await readTilePropertiesAt(parent, leaf).catch(() => ({} as Record<string, unknown>))
+    const current = rootProps[CELL_WEBSITE_PROPERTY]
+    if (isSignature(current)) currentWebsiteSig = current as string
+  }
   return { rootPath: target.path, currentWebsiteSig, nodes }
 }
 
-async function walk(
-  dir: FileSystemDirectoryHandle,
+async function walkLayer(
+  history: HistoryServiceLike,
   path: readonly string[],
-  out: HierarchyNode[]
+  out: HierarchyNode[],
 ): Promise<void> {
-  const props: Record<string, unknown> = await readCellProperties(dir).catch(() => ({} as Record<string, unknown>))
+  // Build this node's HierarchyNode. Properties + websiteSig come from
+  // the tile's own layer via readTilePropertiesAt. The root entry
+  // (path = []) has no parent; skip the per-tile properties read for it.
   const node: HierarchyNode = { path }
-  const sig = props[CELL_WEBSITE_PROPERTY]
-  if (isSignature(sig)) node.websiteSig = sig as string
-  const label = props['label'] ?? props['title']
-  if (typeof label === 'string' && label.trim()) node.label = label
+  if (path.length > 0) {
+    const parent = path.slice(0, -1)
+    const leaf = path[path.length - 1]
+    const props = await readTilePropertiesAt(parent, leaf).catch(() => ({} as Record<string, unknown>))
+    const sig = props[CELL_WEBSITE_PROPERTY]
+    if (isSignature(sig)) node.websiteSig = sig as string
+    const label = props['label'] ?? props['title']
+    if (typeof label === 'string' && label.trim()) node.label = label
+  }
   out.push(node)
 
-  const children: string[] = []
-  try {
-    // @ts-ignore async-iterable
-    for await (const [name, entry] of (dir as any).entries()) {
-      if ((entry as any).kind === 'directory' && !name.startsWith('_')) children.push(name as string)
-    }
-  } catch { /* noop */ }
-  children.sort()
+  // Descend via the layer's `children` slot — the only legitimate
+  // source of hierarchy. Each entry is either a sig (descend via
+  // getLayerBySig) or a name string (descend by name).
+  const locSig = await history.sign({ explorerSegments: () => path })
+  const layer = await history.currentLayerAt(locSig)
+  const rawChildren = Array.isArray(layer?.children) ? layer!.children : []
 
-  for (const name of children) {
-    try {
-      const childDir = await dir.getDirectoryHandle(name)
-      await walk(childDir, [...path, name], out)
-    } catch { /* noop */ }
+  const childNames: string[] = []
+  for (const entry of rawChildren) {
+    const s = String(entry ?? '').trim()
+    if (!s) continue
+    if (SIG_REGEX.test(s)) {
+      const child = await history.getLayerBySig(s).catch(() => null)
+      if (child?.name) childNames.push(String(child.name))
+    } else {
+      childNames.push(s)
+    }
+  }
+  childNames.sort()
+
+  for (const name of childNames) {
+    await walkLayer(history, [...path, name], out)
   }
 }
 

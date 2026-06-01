@@ -61,7 +61,6 @@ type StoreHandle = {
   layers: FileSystemDirectoryHandle
   getResource: (sig: string) => Promise<Blob | null>
   putResource: (blob: Blob) => Promise<string>
-  domainLayersDirectory?: (domain: string, create?: boolean) => Promise<FileSystemDirectoryHandle>
 }
 
 type LineageHandle = {

@@ -18,6 +18,20 @@
             {{ toast.actionLabel }}
           </button>
         }
+
+        @if (toast.actions.length) {
+          <div class="toast-actions" role="group">
+            @for (action of toast.actions; track $index; let i = $index) {
+              <button
+                class="toast-combo-btn"
+                [class.primary]="action.kind === 'primary'"
+                [class.secondary]="action.kind !== 'primary'"
+                (click)="executeActionAt(toast.id, i)">
+                {{ action.label }}
+              </button>
+            }
+          </div>
+        }
         <button
           class="toast-dismiss"
           (click)="dismiss(toast.id)"

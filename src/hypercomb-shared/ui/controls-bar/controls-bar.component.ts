@@ -1004,14 +1004,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   /**
    * Fit button click.
-   * - Plain click: one-shot zoom-to-fit, no state change.
+   * - Plain click: zoom-to-fit, persisted as a user gesture so the fit
+   *   (fit:true) survives refresh and refits to the new viewport size.
    * - Ctrl/Meta+click: cycle state off → global → page → off.
    */
   readonly fitOrCenter = (event: MouseEvent): void => {
     if (event.ctrlKey || event.metaKey) {
       this.#cycleFitMode()
     } else {
-      this.#withZoom('fitOrCenter', z => z.zoomToFit?.())
+      this.#withZoom('fitOrCenter', z => z.zoomToFit?.(false, 'user'))
     }
   }
 

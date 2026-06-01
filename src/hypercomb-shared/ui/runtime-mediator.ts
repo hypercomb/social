@@ -3,33 +3,24 @@
 import { DependencyLoader, LayerInstaller, Store } from '@hypercomb/shared/core'
 import { type LocationParseResult } from '@hypercomb/shared/core/initializers/location-parser'
 
-const INSTALL_CACHE_NAME = '__install_cache__.json'
-
-// Push-only install model: only bootstrap when OPFS is empty or a prior install was interrupted.
+// Push-only install model: only bootstrap when the local layer pool is
+// empty (genesis case — fresh OPFS or first visit). After that, updates
+// come via DCP push notifications, not auto-fetch from hypercomb.
 // See documentation/install-push-only.md for the full design.
-async function shouldBootstrap(domain: string): Promise<boolean> {
+async function shouldBootstrap(): Promise<boolean> {
   const store = get('@hypercomb.social/Store') as Store
+  if (!store.layers) return true
   try {
-    const dir = await store.domainLayersDirectory(domain, false)
-    let hasLayerFile = false
-    let hasInstallCache = false
-    for await (const name of (dir as any).keys()) {
-      if (name === INSTALL_CACHE_NAME) hasInstallCache = true
-      else hasLayerFile = true
+    // Any presence in the pool means we've installed (and possibly the
+    // user has committed) — skip re-bootstrap. Install pipeline is
+    // idempotent so re-running it is safe, just wasted bandwidth.
+    for await (const _name of (store.layers as any).keys()) {
+      return false
     }
-    if (!hasLayerFile) return true       // empty directory → genesis bootstrap
-    if (hasInstallCache) return true     // interrupted install → resume
-    return false                         // populated and complete → skip
+    return true   // empty pool → genesis bootstrap
   } catch {
-    return true                          // directory doesn't exist → genesis bootstrap
+    return true   // pool unreachable → bootstrap and let install handle it
   }
-}
-
-function resolveDomainKey(parsed: LocationParseResult): string | null {
-  if (parsed?.domain) return parsed.domain
-  const baseUrl = parsed?.baseUrl ?? ''
-  if (!baseUrl) return null
-  try { return new URL(baseUrl).hostname || null } catch { return null }
 }
 
 export class RuntimeMediator {
@@ -41,10 +32,9 @@ export class RuntimeMediator {
       const installer = get('@hypercomb.social/LayerInstaller') as LayerInstaller
       const dependency = get('@hypercomb.social/DependencyLoader') as DependencyLoader
 
-      // 1) install only on genesis (empty OPFS) or resume (interrupted prior install).
-      //    Subsequent loads are inert — DCP pushes handle updates.
-      const domainKey = resolveDomainKey(parsed)
-      if (domainKey && await shouldBootstrap(domainKey)) {
+      // 1) install only on genesis (empty layer pool). Subsequent loads
+      //    are inert — DCP pushes handle updates explicitly.
+      if (await shouldBootstrap()) {
         await installer.install(parsed)
       }
 

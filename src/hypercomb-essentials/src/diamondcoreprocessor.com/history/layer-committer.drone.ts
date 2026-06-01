@@ -39,16 +39,18 @@ type LayoutSnapshot = {
 }
 
 /**
- * Strict FIFO commit chain. One event = one commit slot, no
- * coalescing. Every `request()` appends to the tail of a Promise
- * chain that runs `#run(payload)` in order. Layer count grows by
- * exactly one per event — that's the contract.
+ * Strict FIFO commit chain. Every `request()` appends to the tail of
+ * a Promise chain that runs `#run(payload)` in order.
  *
- * Why no coalescing: the user's mental model is "every action is
- * one undo step." A multi-select delete of 5 cells emits 5
- * `cell:removed` events; each must produce its own marker so the
- * user can undo cell-by-cell. Coalescing collapses the burst into
- * one marker that undoes all 5 at once — wrong granularity.
+ * Atomicity is the queen's responsibility, not the committer's. A
+ * queen that mutates the layer via `committer.update(segments, full
+ * new layer)` produces ONE marker for the whole user action — that's
+ * the canonical commit path. The per-event listeners for `cell:added`
+ * / `cell:removed` are a legacy convenience path for one-off
+ * mutations; when a queen drives an atomic update they fire eagerly
+ * for snappy UI feedback but must set `viaUpdate: true` so the
+ * listeners SKIP queueing and don't produce N redundant markers for a
+ * single multi-select action.
  *
  * Serialisation is still required because each commit allocates a
  * numeric marker name (max+1 of existing markers). Two parallel
@@ -200,15 +202,23 @@ export class LayerCommitter {
     // path below (post-commit children-set diff). Skipping the queue on
     // fromCascade prevents an infinite loop: cascade emits → handler
     // queues another commit → that commit's diff emits again → ...
+    //
+    // The `viaUpdate` flag is set by queens (e.g. RemoveQueenBee) that
+    // drive an atomic layer mutation via `committer.update(...)` and
+    // ALSO eager-emit cell:added/cell:removed for snappy UI. The
+    // upcoming update() call is the canonical commit for the whole
+    // action; queueing here would mint one redundant marker per event,
+    // turning a single multi-select delete into N history entries.
+    //
     // Listeners that DON'T originate commits (show-cell's slot machine,
-    // activity log, etc.) don't care about the flag and process the
+    // activity log, etc.) don't care about either flag and process the
     // event normally, which is exactly the reconciliation we want.
-    EffectBus.on<{ cell?: string; segments?: string[]; fromCascade?: boolean }>('cell:added',   p => {
-      if (p?.fromCascade) return
+    EffectBus.on<{ cell?: string; segments?: string[]; fromCascade?: boolean; viaUpdate?: boolean }>('cell:added',   p => {
+      if (p?.fromCascade || p?.viaUpdate) return
       this.#queueChildName(p?.segments, 'add', p?.cell)
     })
-    EffectBus.on<{ cell?: string; segments?: string[]; fromCascade?: boolean }>('cell:removed', p => {
-      if (p?.fromCascade) return
+    EffectBus.on<{ cell?: string; segments?: string[]; fromCascade?: boolean; viaUpdate?: boolean }>('cell:removed', p => {
+      if (p?.fromCascade || p?.viaUpdate) return
       this.#queueChildName(p?.segments, 'remove', p?.cell)
     })
     EffectBus.on<{ cell?: string; segments?: string[] }>('tile:saved',   p => this.#queueBare(p?.segments))
@@ -558,10 +568,17 @@ export class LayerCommitter {
       // swap them to newSig values. If a child wasn't named in the update
       // (incremental import preserving existing children), its sig in the
       // current children list still needs swapping.
+      //
+      // We can't early-skip when prevSig === newSig: that condition fires
+      // both when "child is already linked under this exact sig" (no-op
+      // desired) AND when "child is brand new and its bytes happened to
+      // match the auto-minted seed sig" (must still append into parent.
+      // children). Always run swap + name-fallback + append; the machine
+      // ops are themselves no-ops when nothing actually needs to change,
+      // and commitLayer dedup absorbs unchanged ancestor bytes.
       for (const childPathKey of childrenOf.get(pathKey) ?? []) {
         const transition = transitions.get(childPathKey)
         if (!transition) continue
-        if (transition.prevSig === transition.newSig) continue
         const swapResult = machine.apply({
           slot: 'children',
           op: 'swap',
@@ -578,7 +595,9 @@ export class LayerCommitter {
           for (const sig of prevChildren) {
             const child = await history.getLayerBySig(sig)
             if (child?.name === childName) {
-              machine.apply({ slot: 'children', op: 'swap', from: sig, to: transition.newSig })
+              if (sig !== transition.newSig) {
+                machine.apply({ slot: 'children', op: 'swap', from: sig, to: transition.newSig })
+              }
               resolved = true
               break
             }
@@ -591,6 +610,40 @@ export class LayerCommitter {
 
       const newSig = await history.commitLayer(ancestorLocSig, machine.output())
       transitions.set(pathKey, { prevSig, newSig, name: ancestorName })
+
+      // Post-commit reconcile — mirror what #commit emits so subscribers
+      // (show-cell's slot machine, activity log, substrate, tile-overlay)
+      // see the children-set delta in name-space against the freshly
+      // committed layer. Without this, the eager cell:added events that
+      // queens emit BEFORE the import run against a still-stale layer and
+      // the visual mount/unmount never reconciles to the new truth. Same
+      // shape as the leaf-reconcile in #commit at lines 802-835.
+      try {
+        const prevChildSigs: readonly string[] = Array.isArray(prevLayer?.children)
+          ? prevLayer.children as readonly string[]
+          : []
+        const newChildSigs = machine.getSlot('children') as readonly string[]
+        const prevNames = new Set<string>()
+        const newNames = new Set<string>()
+        await Promise.all([
+          ...prevChildSigs.map(async sig => {
+            const c = await history.getLayerBySig(sig)
+            if (c?.name) prevNames.add(c.name)
+          }),
+          ...newChildSigs.map(async sig => {
+            const c = await history.getLayerBySig(sig)
+            if (c?.name) newNames.add(c.name)
+          }),
+        ])
+        for (const n of newNames) if (!prevNames.has(n)) {
+          EffectBus.emit('cell:added', { cell: n, segments, fromCascade: true })
+        }
+        for (const n of prevNames) if (!newNames.has(n)) {
+          EffectBus.emit('cell:removed', { cell: n, segments, fromCascade: true })
+        }
+      } catch (err) {
+        console.warn('[LayerCommitter] importTree post-commit reconcile failed:', err)
+      }
     }
 
     const cursorAfter = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')

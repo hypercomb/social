@@ -96,14 +96,15 @@ export class HistoryCursorService extends EventTarget {
     const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!historyService) return
 
-    // Housekeeping: one-shot session preload. Walks every bag once,
-    // populates HistoryService's preloader so every sig anywhere in
-    // any layer is resolvable in O(1) for the rest of the session —
-    // no cold walks during render or undo/redo. Subsequent calls are
-    // free (the in-flight promise is cached).
-    const preloadable = historyService as unknown as { preloadAllBags?: () => Promise<void> }
-    if (preloadable.preloadAllBags) await preloadable.preloadAllBags()
-
+    // NOTE: we intentionally do NOT await `preloadAllBags()` here.
+    // The global preloader is fired from `runtime-initializer` as
+    // fire-and-forget at boot; gating cursor.load on it made every
+    // first navigation wait ~4.7s on real data (159 bags × scan + hash).
+    // Per the doctrine "real-time supersedes preloader" — render must
+    // never block on background warming. Our own work below only needs
+    // *this* lineage's bag, which `listLayers` scans on its own.
+    // Cross-lineage cache hits still get the benefit once the
+    // background preload completes.
     this.#layers = await historyService.listLayers(locationSig)
 
     // Self-heal: bagless lineage with on-disk tiles → ask the committer

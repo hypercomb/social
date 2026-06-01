@@ -55,8 +55,8 @@
     </div>
 
     @if (!domains().length) {
-      <a class="sample-link" (click)="domainInput.set(selfOrigin)">
-        {{ selfOrigin }}
+      <a class="sample-link" (click)="domainInput.set(defaultContentBase)">
+        {{ defaultContentBase }}
       </a>
     }
 

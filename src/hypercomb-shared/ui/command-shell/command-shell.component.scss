@@ -271,6 +271,52 @@ $bp-phone-max: 599px;
   transition: opacity 150ms ease;
 }
 
+// ── open-for-subscribers toggle (floats inside command-line, right) ──
+//
+// Small antenna icon that flips swarm.setOpenForSubscribers. Off state:
+// subdued outline that doesn't compete with input text. On state: full
+// glow color + soft halo, signalling "I'm broadcasting acceptance to
+// subscriber requests." Click toggles; persisted via swarm drone (no
+// session-local state in the shell).
+.open-for-subscribers-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.8em;
+  height: 1.8em;
+  margin-right: 0.45rem;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: rgba(var(--glow-color-rgb), 0.42);
+  cursor: pointer;
+  transition: color var(--md-dur-short) var(--md-easing-standard),
+              background var(--md-dur-short) var(--md-easing-standard),
+              box-shadow var(--md-dur-short) var(--md-easing-standard);
+  user-select: none;
+
+  &:hover {
+    color: rgba(var(--glow-color-rgb), 0.85);
+    background: rgba(var(--glow-color-rgb), 0.1);
+  }
+
+  &.on {
+    color: var(--glow-color);
+    background: rgba(var(--glow-color-rgb), 0.18);
+    box-shadow: 0 0 6px rgba(var(--glow-color-rgb), 0.55);
+  }
+
+  &.on:hover {
+    background: rgba(var(--glow-color-rgb), 0.28);
+  }
+
+  svg {
+    display: block;
+  }
+}
+
 // ═══════════════════════════════════════════════════════════
 // RESPONSIVE — only touch zoom prevention, no layout changes
 // ═══════════════════════════════════════════════════════════

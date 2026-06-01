@@ -107,32 +107,29 @@ export class ActivityLogComponent implements OnDestroy {
     this.#appRef.tick()
   }
 
-  /** Revert an add — remove the cell directory and emit cell:removed. */
+  /** Revert an add — emit `cell:removed` so the children-slot
+   *  subscriber rewrites the parent layer without this cell. Layer is
+   *  the only source of truth for hierarchy; the legacy `removeEntry`
+   *  on a phantom OPFS dir is retired. */
   async #revertAdd(cell: string): Promise<void> {
     const lineage = get('@hypercomb.social/Lineage') as Lineage
-    const dir = await lineage.explorerDir()
-    if (!dir) return
-    try {
-      await dir.removeEntry(cell, { recursive: true })
-      this.#reverting = true
-      EffectBus.emit('cell:removed', { cell })
-      this.#reverting = false
-      await new hypercomb().act()
-    } catch { /* entry doesn't exist — nothing to undo */ }
+    const segments = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? ''))
+    this.#reverting = true
+    EffectBus.emit('cell:removed', { cell, segments })
+    this.#reverting = false
+    await new hypercomb().act()
   }
 
-  /** Revert a remove — re-create the cell directory and emit cell:added. */
+  /** Revert a remove — emit `cell:added` so the children-slot
+   *  subscriber re-includes the cell in the parent layer's children.
+   *  No folder mint: the layer is authoritative. */
   async #revertRemove(cell: string): Promise<void> {
     const lineage = get('@hypercomb.social/Lineage') as Lineage
-    const dir = await lineage.explorerDir()
-    if (!dir) return
-    try {
-      await dir.getDirectoryHandle(cell, { create: true })
-      this.#reverting = true
-      EffectBus.emit('cell:added', { cell })
-      this.#reverting = false
-      await new hypercomb().act()
-    } catch { /* failed to create — skip */ }
+    const segments = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? ''))
+    this.#reverting = true
+    EffectBus.emit('cell:added', { cell, segments })
+    this.#reverting = false
+    await new hypercomb().act()
   }
 
   async revertEntry(id: number): Promise<void> {

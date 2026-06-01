@@ -25,14 +25,37 @@ import type { MiroApiService, MiroBoard, MiroItem } from './miro-api.service.js'
 
 const ioc = (key: string) => (window as any).ioc?.get?.(key)
 
-const TILE_PROPERTIES_FILE = '0000'
-
 interface StoreHandle {
   putResource(blob: Blob): Promise<string>
 }
 
 interface LineageHandle {
-  explorerDir(): Promise<FileSystemDirectoryHandle | null>
+  explorerSegments?(): readonly string[]
+}
+
+interface LayerCommitterHandle {
+  importTree?(
+    updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],
+    nameSlots?: ReadonlySet<string>,
+  ): Promise<void>
+}
+
+const TILE_PROPERTIES_SLOT = 'properties'
+
+/** Serialise the properties bag with sorted keys and store it as a
+ *  content-addressed resource. Returns the resource sig that the tile's
+ *  layer should reference in its `properties` slot — same canonical
+ *  bytes that writeTilePropertiesAt produces, just without the per-tile
+ *  commitSlotSet so we can batch the whole import into one cascade. */
+async function computePropertyResourceSig(
+  store: StoreHandle,
+  properties: Record<string, unknown>,
+): Promise<string> {
+  const sortedKeys = Object.keys(properties).sort()
+  const canonical: Record<string, unknown> = {}
+  for (const k of sortedKeys) canonical[k] = properties[k]
+  const blob = new Blob([JSON.stringify(canonical)], { type: 'application/json' })
+  return store.putResource(blob)
 }
 
 export class MiroImportQueenBee extends QueenBee {
@@ -59,8 +82,7 @@ export class MiroImportQueenBee extends QueenBee {
       return
     }
 
-    const currentDir = await lineage.explorerDir()
-    if (!currentDir) { this.#toast('navigate into a hive first'); return }
+    const baseSegments = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? ''))
 
     api.rememberBoard(boardId)
     this.#toast(`fetching miro board ${boardId}...`)
@@ -84,28 +106,21 @@ export class MiroImportQueenBee extends QueenBee {
     this.#toast(`importing ${items.length} item${items.length === 1 ? '' : 's'} from "${board.name}"`)
 
     const rootName = normalizeCell(board.name) || `miro-${boardId.replace(/[^a-z0-9]/gi, '').slice(0, 12)}`
-    const rootDir = await currentDir.getDirectoryHandle(rootName, { create: true })
-
-    await writeTileProperties(rootDir, {
-      'miro.boardId': board.id,
-      'miro.boardName': board.name,
-      'miro.viewLink': board.viewLink ?? '',
-      'miro.importedAt': new Date().toISOString(),
-      'miro.itemCount': items.length,
-    })
+    const rootSegments = [...baseSegments, rootName]
 
     const { topLevel, framedBy } = groupByFrame(items)
 
     let resourcesFetched = 0
     let resourceErrors = 0
-    const usedAtLevel = new Map<string, Set<string>>()
-    const uniqueKey = (dir: FileSystemDirectoryHandle) => {
-      const key = (dir as any).name ?? String(Math.random())
-      if (!usedAtLevel.has(key)) usedAtLevel.set(key, new Set())
-      return usedAtLevel.get(key)!
-    }
-    const claim = (dir: FileSystemDirectoryHandle, base: string): string => {
-      const used = uniqueKey(dir)
+
+    // Name de-duplication: track names used at each lineage depth via
+    // the segments-joined key. Equivalent to the old per-dir map but
+    // keyed off the parent path rather than a directory handle.
+    const usedByParent = new Map<string, Set<string>>()
+    const claim = (parent: readonly string[], base: string): string => {
+      const key = parent.join('/')
+      let used = usedByParent.get(key)
+      if (!used) { used = new Set(); usedByParent.set(key, used) }
       let candidate = base
       let n = 2
       while (used.has(candidate)) candidate = `${base}-${n++}`
@@ -113,30 +128,75 @@ export class MiroImportQueenBee extends QueenBee {
       return candidate
     }
 
+    // ── Build the import as ONE atomic layer-tree ────────────────────
+    // Every tile (root, top-level, framed children) is rendered into a
+    // single (segments, layer) update with its `properties` slot already
+    // populated. We compute each property bag's content-addressed sig
+    // up-front (no commit), then ship the whole batch through
+    // committer.importTree — one shared cascade, one marker per affected
+    // ancestor depth, not N markers per tile.
+    const updates: { segments: readonly string[]; layer: { name: string; [slot: string]: unknown } }[] = []
+    const uiEvents: { cell: string; segments: readonly string[] }[] = []
+
+    // Root tile
+    const rootPropSig = await computePropertyResourceSig(store, {
+      'miro.boardId': board.id,
+      'miro.boardName': board.name,
+      'miro.viewLink': board.viewLink ?? '',
+      'miro.importedAt': new Date().toISOString(),
+      'miro.itemCount': items.length,
+    })
+    updates.push({
+      segments: rootSegments,
+      layer: { name: rootName, [TILE_PROPERTIES_SLOT]: [rootPropSig] },
+    })
+    uiEvents.push({ cell: rootName, segments: baseSegments.slice() })
+
     for (const item of topLevel) {
       if (item.type === 'connector') continue
-      const tileName = claim(rootDir, tileNameForItem(item))
-      const tileDir = await rootDir.getDirectoryHandle(tileName, { create: true })
-      const result = await attachItem(api, store, tileDir, item)
-      if (result === 'fetched') resourcesFetched++
-      else if (result === 'errored') resourceErrors++
+      const tileName = claim(rootSegments, tileNameForItem(item))
+      const { properties, status } = await buildItemProperties(api, store, item)
+      const propSig = await computePropertyResourceSig(store, properties)
+      updates.push({
+        segments: [...rootSegments, tileName],
+        layer: { name: tileName, [TILE_PROPERTIES_SLOT]: [propSig] },
+      })
+      uiEvents.push({ cell: tileName, segments: rootSegments.slice() })
+      if (status === 'fetched') resourcesFetched++
+      else if (status === 'errored') resourceErrors++
 
       if (item.type === 'frame') {
+        const frameSegments = [...rootSegments, tileName]
         const children = framedBy.get(item.id) ?? []
         for (const child of children) {
           if (child.type === 'connector') continue
-          const childName = claim(tileDir, tileNameForItem(child))
-          const childDir = await tileDir.getDirectoryHandle(childName, { create: true })
-          const childResult = await attachItem(api, store, childDir, child)
-          if (childResult === 'fetched') resourcesFetched++
-          else if (childResult === 'errored') resourceErrors++
+          const childName = claim(frameSegments, tileNameForItem(child))
+          const { properties: childProps, status: childStatus } = await buildItemProperties(api, store, child)
+          const childPropSig = await computePropertyResourceSig(store, childProps)
+          updates.push({
+            segments: [...frameSegments, childName],
+            layer: { name: childName, [TILE_PROPERTIES_SLOT]: [childPropSig] },
+          })
+          uiEvents.push({ cell: childName, segments: frameSegments.slice() })
+          if (childStatus === 'fetched') resourcesFetched++
+          else if (childStatus === 'errored') resourceErrors++
         }
       }
     }
 
+    // UI subscribers (show-cell incremental mount, activity log) receive
+    // their events BEFORE the commit so visual mount runs instantly;
+    // viaUpdate suppresses the LayerCommitter per-event commit since
+    // importTree below IS the atomic commit for the whole import.
+    for (const evt of uiEvents) {
+      EffectBus.emit('cell:added', { cell: evt.cell, segments: evt.segments, viaUpdate: true })
+    }
+
+    const committer = ioc('@diamondcoreprocessor.com/LayerCommitter') as LayerCommitterHandle | undefined
+    if (committer?.importTree) await committer.importTree(updates)
+
     this.#toast(`miro import done: ${items.length} item${items.length === 1 ? '' : 's'}, ${resourcesFetched} asset${resourcesFetched === 1 ? '' : 's'}${resourceErrors ? `, ${resourceErrors} failed` : ''}`)
 
-    EffectBus.emit('cell:added', { cell: rootName })
     await new hypercomb().act()
   }
 
@@ -191,12 +251,11 @@ function groupByFrame(items: readonly MiroItem[]): {
   return { topLevel, framedBy }
 }
 
-async function attachItem(
+async function buildItemProperties(
   api: MiroApiService,
   store: StoreHandle,
-  tileDir: FileSystemDirectoryHandle,
   item: MiroItem,
-): Promise<'none' | 'fetched' | 'errored'> {
+): Promise<{ properties: Record<string, unknown>; status: 'none' | 'fetched' | 'errored' }> {
   const properties: Record<string, unknown> = {
     'miro.id': item.id,
     'miro.type': item.type,
@@ -229,27 +288,7 @@ async function attachItem(
     }
   }
 
-  await writeTileProperties(tileDir, properties)
-  return status
-}
-
-async function writeTileProperties(
-  dir: FileSystemDirectoryHandle,
-  updates: Record<string, unknown>,
-): Promise<void> {
-  let existing: Record<string, unknown> = {}
-  try {
-    const fileHandle = await dir.getFileHandle(TILE_PROPERTIES_FILE)
-    const file = await fileHandle.getFile()
-    existing = JSON.parse(await file.text()) as Record<string, unknown>
-  } catch {
-    existing = {}
-  }
-  const merged = { ...existing, ...updates }
-  const fileHandle = await dir.getFileHandle(TILE_PROPERTIES_FILE, { create: true })
-  const writable = await fileHandle.createWritable()
-  await writable.write(JSON.stringify(merged))
-  await writable.close()
+  return { properties, status }
 }
 
 const _instance = new MiroImportQueenBee()

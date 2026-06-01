@@ -6,7 +6,7 @@
       <span class="hci header-icon">k</span>
       <input #nameInput class="editor-name-input" type="text" name="tile-name" [ngModel]="nameValue" (ngModelChange)="nameValue = $event" (blur)="onNameBlur()" [placeholder]="'editor.name-placeholder' | t" />
       <button class="editor-close" type="button" (click)="save()">
-        <span class="hci">Q</span>
+        <span class="mat-sym">close</span>
       </button>
     </header>
 
@@ -22,7 +22,7 @@
         >
           @if (!hasImage()) {
             <div class="image-placeholder">
-              <span class="hci placeholder-icon">U</span>
+              <span class="mat-sym placeholder-icon">image</span>
               <span>{{ 'editor.drop-image' | t }}</span>
             </div>
           }
@@ -37,13 +37,13 @@
             <span class="link-icon" [class.broken]="!isLinked"></span>
           </button>
           <button type="button" class="upload-btn" (click)="fileInput.click()">
-            <span class="hci">U</span> {{ 'editor.upload' | t }}
+            <span class="mat-sym">upload</span> {{ 'editor.upload' | t }}
           </button>
           <button type="button" class="camera-btn" (click)="openCamera()">
-            <span class="hci">U</span> {{ 'editor.camera' | t }}
+            <span class="mat-sym">photo_camera</span> {{ 'editor.camera' | t }}
           </button>
           <button type="button" class="orientation-btn" (click)="toggleOrientation()" [attr.title]="(isFlat ? 'editor.switch-to-point' : 'editor.switch-to-flat') | t">
-            <span class="hci">r</span> {{ (isFlat ? 'editor.flat-top' : 'editor.point-top') | t }}
+            <span class="mat-sym">crop_rotate</span> {{ (isFlat ? 'editor.flat-top' : 'editor.point-top') | t }}
           </button>
           <input #fileInput type="file" name="tile-image" accept="image/*" hidden (change)="onFileSelect($event)" />
           <input #cameraFallbackInput type="file" accept="image/*" capture="environment" hidden (change)="onFileSelect($event)" />
@@ -53,7 +53,7 @@
       <!-- property fields -->
       <div class="fields">
         <label class="field-row">
-          <span class="field-label"><span class="hci">*</span> {{ 'editor.link' | t }}</span>
+          <span class="field-label"><span class="mat-sym">link</span> {{ 'editor.link' | t }}</span>
           <input
             class="field-input link-input"
             [class.link-denied]="linkDenied"
@@ -71,7 +71,7 @@
         <div class="color-row">
           <label class="color-control">
             <span class="color-btn">
-              <span class="hci">s</span> {{ 'editor.bg' | t }}
+              <span class="mat-sym">palette</span> {{ 'editor.bg' | t }}
             </span>
             <input
               class="field-input color-text"
@@ -92,7 +92,7 @@
 
           <label class="color-control">
             <span class="color-btn">
-              <span class="hci">s</span> {{ 'editor.border' | t }}
+              <span class="mat-sym">border_color</span> {{ 'editor.border' | t }}
             </span>
             <input
               class="field-input color-text"
@@ -120,7 +120,7 @@
       @if (qaItems.length > 0) {
         <div class="qa-section">
           <header class="qa-header">
-            <span class="hci qa-icon">?</span>
+            <span class="mat-sym qa-icon">quiz</span>
             <h4>{{ 'editor.qa.title' | t }}</h4>
           </header>
           @for (item of qaItems; track item.qId) {
@@ -153,10 +153,10 @@
     <footer class="editor-footer">
       <div class="footer-tools">
         <button type="button" class="tool-btn" [title]="'editor.search-google' | t" (click)="searchGoogle()">
-          <span class="hci">)</span>
+          <span class="mat-sym">search</span>
         </button>
         <button type="button" class="tool-btn" [class.active]="!hideText()" [title]="(hideText() ? 'editor.show-text' : 'editor.hide-text') | t" (click)="toggleHideText()">
-          <span class="hci">{{ hideText() ? 'T' : 't' }}</span>
+          <span class="mat-sym" [class.filled]="!hideText()">{{ hideText() ? 'visibility_off' : 'text_fields' }}</span>
         </button>
       </div>
       <div class="footer-actions">
@@ -173,7 +173,7 @@
       </div>
       <div class="camera-controls">
         <button type="button" class="camera-control-btn" (click)="closeCamera()">
-          <span class="hci">Q</span>
+          <span class="mat-sym">close</span>
         </button>
         <button type="button" class="camera-shutter" (click)="capturePhoto()"></button>
         @if (hasMultipleCameras) {

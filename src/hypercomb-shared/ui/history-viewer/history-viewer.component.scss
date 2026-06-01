@@ -7,10 +7,11 @@
 
 .history-viewer {
   position: fixed;
-  // Leave room for the command-line / header-bar above. The header-bar
-  // is 2.8rem on desktop and ~3.5rem on narrow viewports — bumping up
-  // a little further so the first row never kisses the header border.
-  top: 3.2rem;
+  // Leave room for the command-line / header-bar above. Matches the
+  // notes-strip offset (`--hc-header-height + 14px`) so both side
+  // panels sit on the same horizontal line below the command line
+  // and never overlap it on either desktop or narrow viewports.
+  top: calc(var(--hc-header-height, 3rem) + 14px);
   left: 0;
   bottom: 0;
   width: max-content;
@@ -333,6 +334,32 @@
   color: rgba(230, 235, 245, 0.92);
 }
 
+// 0000 visual-properties section. Lives below the layer's slot bag,
+// separated by a thin divider so the eye reads them as distinct
+// primitives (layer's slot bag = canonical; 0000 = visual decoration
+// of the cell). Header label calls it out so the user knows what
+// they're looking at.
+.slice-modal .slice-section {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.slice-modal .slice-section-header {
+  padding: 8px 16px 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: rgba(180, 188, 200, 0.7);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.slice-modal .slice-props {
+  color: rgba(220, 226, 238, 0.88);
+  background: rgba(0, 0, 0, 0.1);
+}
+
 // Per-line diff highlight inside the slice inspector. `same` lines
 // render plain; `add` lines get a green wash with a subtle left
 // accent bar; `remove` lines get a red wash with strikethrough so
@@ -482,43 +509,87 @@
 .filter-toggle[data-category="visibility"]  { color: #b1b7c2; }
 .filter-toggle[data-category="system"]      { color: #e08c4d; }
 
-// Selection-scoped actions appear on the right side of the filter
-// bar when any rows are selected. A flexible gap pushes them all
-// the way over and a faint count tag anchors them visually so the
-// user knows "this action applies to N rows".
-.filter-bar .selection-gap {
-  flex: 1;
+// Selection-scoped actions appear in the viewer header when any rows
+// are selected. The selection-gap separates the count + buttons from
+// the title/count cluster on the left and the close/group controls on
+// the right. The count tag anchors the cluster so the user knows
+// "this action applies to N rows".
+.selection-gap {
+  width: 1px;
+  align-self: stretch;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 0 4px;
 }
 
-.filter-bar .selection-count {
+.selection-count {
   align-self: center;
   font-size: 10px;
   color: rgba(200, 210, 230, 0.65);
-  padding: 0 4px;
+  padding: 0 2px;
   font-variant-numeric: tabular-nums;
 }
 
 .selection-action {
   background: transparent;
-  border: 1px solid transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 4px;
-  padding: 3px 6px;
+  padding: 3px 8px;
   cursor: pointer;
   color: rgba(210, 220, 240, 0.85);
-  font-size: 14px;
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
   line-height: 1;
-  transition: opacity 80ms linear, background 80ms linear, border-color 80ms linear;
+  text-transform: lowercase;
+  white-space: nowrap;
+  transition: opacity 80ms linear, background 80ms linear, border-color 80ms linear, color 80ms linear;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 22px;
   height: 22px;
 }
 
+.selection-action.save-as-head {
+  border-color: rgba(255, 170, 60, 0.45);
+  color: rgba(255, 200, 120, 0.95);
+}
+
+.selection-action.merge-to-head {
+  border-color: rgba(120, 180, 255, 0.45);
+  color: rgba(160, 200, 255, 0.95);
+}
+
 .selection-action:hover {
-  background: rgba(255, 255, 255, 0.06);
-  border-color: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 1);
+}
+
+// Merge preview modal — reuses the slice-modal layout. Commit button
+// uses the secondary accent so it reads as the positive forward action.
+.merge-preview-modal .merge-commit {
+  background: color-mix(in srgb, rgba(255, 170, 60, 1) 18%, transparent);
+  border: 1px solid rgba(255, 170, 60, 0.45);
+  border-radius: 4px;
+  padding: 3px 10px;
+  color: rgba(255, 200, 120, 0.95);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+  cursor: pointer;
+  transition: background 80ms linear, color 80ms linear;
+}
+
+.merge-preview-modal .merge-commit:hover:not(:disabled) {
+  background: color-mix(in srgb, rgba(255, 170, 60, 1) 32%, transparent);
+  color: rgba(255, 255, 255, 1);
+}
+
+.merge-preview-modal .merge-commit:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .row .idx {

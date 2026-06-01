@@ -5,7 +5,7 @@ import { RouterOutlet } from '@angular/router';
 import { CommandLineComponent } from '@hypercomb/shared';
 import { MeshHeaderComponent } from '@hypercomb/shared/ui';
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
-import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent, HistoryViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent, MeshModalComponent, CameraCaptureComponent } from '@hypercomb/shared/ui';
+import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent, HistoryViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent, MeshModalComponent, CameraCaptureComponent, LayerCycleStripComponent, PresenceBannerComponent } from '@hypercomb/shared/ui';
 import { FormatPainterComponent } from '@hypercomb/shared/ui/format-painter/format-painter.component'
 import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
 import { SensitivityBarComponent } from '@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component'
@@ -20,7 +20,7 @@ import '@hypercomb/essentials/side-effects'
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, HistoryViewerComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent, MeshModalComponent, CameraCaptureComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, HistoryViewerComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent, MeshModalComponent, CameraCaptureComponent, LayerCycleStripComponent, PresenceBannerComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
@@ -96,10 +96,19 @@ export class App implements AfterViewInit {
       document.body.classList.add(`hc-view-${m}`)
     })
 
-    // Runtime already initialized by main.ts — go straight to bee startup
+    // Runtime already initialized by main.ts — go straight to bee startup.
+    //
+    // Dev shell defaults `hc:mesh-public` to ON. The dev relay
+    // (ws://localhost:7777) is already in the relay-list default
+    // (loadRelays in nostr-mesh.drone.ts), so a fresh tab — including
+    // a brand-new incognito session — has everything it needs to join
+    // the swarm immediately once the user sets a room + secret. This
+    // avoids the "I configured everything but it's still not syncing"
+    // trap where mesh-public stays off silently. Production
+    // (hypercomb-web) keeps the privacy default (off).
     queueMicrotask(() => {
       if (localStorage.getItem('hc:mesh-public') === null) {
-        localStorage.setItem('hc:mesh-public', 'false')
+        localStorage.setItem('hc:mesh-public', 'true')
       }
       const stored = localStorage.getItem('hc:mesh-public')
       if (stored !== null) {

@@ -6,14 +6,7 @@ import type { Lineage } from '../../core/lineage'
 import type { Navigation } from '../../core/navigation'
 import { EffectBus, SignatureService, hypercomb } from '@hypercomb/core'
 import { parseArrayItems } from '../../core/array-parser'
-import { persistTagOps, type TagOp } from '../../core/tag-ops'
 import { SELECT_OPS } from './select-ops'
-
-type HistoryOp = { op: 'add' | 'remove'; cell: string; at: number }
-
-interface HistoryServiceLike {
-  record(signature: string, operation: HistoryOp): Promise<void>
-}
 
 /**
  * Enter with bracket-path syntax → copy items to a destination folder.
@@ -59,7 +52,6 @@ export class CutPasteBehavior implements CommandLineBehavior {
     const completions = get('@hypercomb.social/CompletionUtility') as CompletionUtility
     const lineage = get('@hypercomb.social/Lineage') as Lineage
     const navigation = get('@hypercomb.social/Navigation') as Navigation
-    const historyService = get('@diamondcoreprocessor.com/HistoryService') as HistoryServiceLike | undefined
 
     // parse [items]/path
     const close = input.indexOf(']')
@@ -80,22 +72,22 @@ export class CutPasteBehavior implements CommandLineBehavior {
     const currentDir = await lineage.explorerDir()
     if (!currentDir) return
 
-    // Process delete and tag ops from source
-    const tagOps: TagOp[] = []
+    // Process deletes + collect create labels. Tag operations under
+    // doctrine are layer-slot writes; folder-based tag persistence is
+    // retired — tag-add / tag-remove are dropped here pending the
+    // layer-slot tag write path.
     const createItems: string[] = []
 
     for (const item of parsed) {
       const label = item.segments[item.segments.length - 1]
-
       if (item.op === 'delete') {
-        // delete from current directory
         await this.#deleteTarget(currentDir, item.segments)
-      } else if (item.op === 'tag-add' || item.op === 'tag-remove') {
-        if (item.tag) {
-          tagOps.push({ label, tag: item.tag, color: item.tagColor, remove: item.op === 'tag-remove' })
-        }
-        // tag-add items also get copied to destination
-        if (item.op === 'tag-add') createItems.push(label)
+      } else if (item.op === 'tag-add') {
+        // tag-add items still get copied to destination; tag-write itself dropped
+        createItems.push(label)
+      } else if (item.op === 'tag-remove') {
+        // tag-remove dropped (no folder-write path)
+        continue
       } else {
         createItems.push(label)
       }
@@ -109,30 +101,14 @@ export class CutPasteBehavior implements CommandLineBehavior {
     })
 
     if (safeItems.length > 0) {
-      // resolve destination OPFS directory
-      let destDir = currentDir
-      for (const seg of pathSegments) {
-        destDir = await destDir.getDirectoryHandle(seg, { create: true })
-      }
-
-      // create cell directories at destination
-      for (const item of safeItems) {
-        await destDir.getDirectoryHandle(item, { create: true })
-      }
-
-      // record history ops at the destination's signature
-      if (historyService) {
-        const destSig = await this.#computeDestSig(lineage, pathSegments)
-        const now = Date.now()
-        for (const item of safeItems) {
-          await historyService.record(destSig, { op: 'add', cell: item, at: now })
-        }
-      }
-    }
-
-    // persist tag ops at current directory
-    if (tagOps.length > 0) {
-      await persistTagOps(tagOps, currentDir)
+      // Layer commit at the destination is the only legitimate write
+      // path. The previous folder-mint + history.record duplication
+      // here was retired; the destination's layer-commit path needs
+      // to compute parent-sig + existing children + append + commit.
+      // Pending that wiring, the cut-paste destination write is a no-op
+      // — source delete above still runs, items don't materialise at
+      // destination until the layer-commit destination path is wired
+      // (committer.update(destSegments, { children: [...existing, ...safeItems] })).
     }
 
     await new hypercomb().act()
@@ -163,18 +139,4 @@ export class CutPasteBehavior implements CommandLineBehavior {
     } catch { /* skip */ }
   }
 
-  async #computeDestSig(lineage: Lineage, extraSegments: string[]): Promise<string> {
-    const domain = window.location.hostname || 'hypercomb.io'
-    const currentSegments = lineage.explorerSegments?.() ?? []
-    const destPath = [...currentSegments, ...extraSegments].join('/')
-
-    const roomStore = get<any>('@hypercomb.social/RoomStore')
-    const secretStore = get<any>('@hypercomb.social/SecretStore')
-    const space = roomStore?.value ?? ''
-    const secret = secretStore?.value ?? ''
-    const parts = [space, domain, destPath, secret, 'cell'].filter(Boolean)
-    const key = parts.join('/')
-
-    return await SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer)
-  }
 }

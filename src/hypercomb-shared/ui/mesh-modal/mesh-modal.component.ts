@@ -23,10 +23,12 @@ export class MeshModalComponent implements OnInit, OnDestroy {
 
   #unsubOpen: (() => void) | null = null
   #unsubEscape: (() => void) | null = null
+  #onWindowKeyDown: ((e: KeyboardEvent) => void) | null = null
 
   readonly open = signal(false)
   readonly roomDraft = signal('')
   readonly secretDraft = signal('')
+  readonly labelDraft = signal('')
   readonly secretVisible = signal(false)
 
   readonly savedLocations = fromRuntime(
@@ -60,6 +62,7 @@ export class MeshModalComponent implements OnInit, OnDestroy {
       const initialSecret = this.#secretStore?.value ?? ''
       this.roomDraft.set(this.#roomStore?.value ?? '')
       this.secretDraft.set(initialSecret)
+      this.labelDraft.set(this.#readMyLabel())
       this.secretVisible.set(false)
       this.open.set(true)
       EffectBus.emit('mesh:modal-open', { open: true })
@@ -72,11 +75,21 @@ export class MeshModalComponent implements OnInit, OnDestroy {
     this.#unsubEscape = EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
       if (payload?.cmd === 'global.escape' && this.open()) this.dismiss()
     })
+
+    this.#onWindowKeyDown = (e: KeyboardEvent): void => {
+      if (!this.open() || e.key !== 'Enter') return
+      const active = document.activeElement as HTMLElement | null
+      if (active?.tagName === 'BUTTON' && active.closest('.mesh-modal-panel')) return
+      e.preventDefault()
+      this.save()
+    }
+    window.addEventListener('keydown', this.#onWindowKeyDown)
   }
 
   ngOnDestroy(): void {
     this.#unsubOpen?.()
     this.#unsubEscape?.()
+    if (this.#onWindowKeyDown) window.removeEventListener('keydown', this.#onWindowKeyDown)
   }
 
   readonly onRoomInput = (event: Event): void => {
@@ -87,6 +100,24 @@ export class MeshModalComponent implements OnInit, OnDestroy {
     const value = (event.target as HTMLInputElement).value
     this.secretDraft.set(value)
     EffectBus.emit('mesh:secret-draft', { secret: value })
+  }
+
+  readonly onLabelInput = (event: Event): void => {
+    this.labelDraft.set((event.target as HTMLInputElement).value)
+  }
+
+  /** Read the persisted swarm label, preferring the SwarmDrone's
+   *  canonical accessor when present so any future-tightened
+   *  sanitization (length cap, control-char filter) applies. Falls
+   *  back to localStorage when the drone hasn't loaded yet — the
+   *  modal can still surface and save without a hard swarm
+   *  dependency. */
+  #readMyLabel = (): string => {
+    interface SwarmLabelApi { myLabel: () => string }
+    const swarm = get('@diamondcoreprocessor.com/SwarmDrone') as SwarmLabelApi | undefined
+    if (swarm?.myLabel) return swarm.myLabel()
+    try { return String(localStorage.getItem('hc:user-label') ?? '').trim().slice(0, 64) }
+    catch { return '' }
   }
 
   readonly toggleSecretVisible = (): void => {
@@ -105,11 +136,25 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   readonly save = (): void => {
     const room = this.roomDraft().trim()
     const secret = this.secretDraft().trim()
+    const label = this.labelDraft().trim().slice(0, 64)
     this.#roomStore?.set(room)
     this.#secretStore?.set(secret)
     EffectBus.emit('mesh:room', { room })
     EffectBus.emit('mesh:secret', { secret })
     if (room) this.#savedStore?.add(room)
+
+    // Label routes through swarm.setMyLabel when available — it
+    // clears the publish memo + triggers re-sync so the new label
+    // propagates immediately. localStorage fallback covers the case
+    // where the swarm bee hasn't loaded yet.
+    interface SwarmLabelApi { setMyLabel: (s: string) => void }
+    const swarm = get('@diamondcoreprocessor.com/SwarmDrone') as SwarmLabelApi | undefined
+    if (swarm?.setMyLabel) {
+      swarm.setMyLabel(label)
+    } else {
+      try { localStorage.setItem('hc:user-label', label) } catch { /* ignore */ }
+    }
+
     this.#close()
   }
 

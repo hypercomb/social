@@ -48,6 +48,20 @@ export class CommandShellComponent implements AfterViewInit {
   readonly indicators = input<readonly { key: string; icon: string; label: string; dismissable?: boolean }[]>([])
 
   /**
+   * Whether the "open for subscribers" floating icon is rendered. When
+   * false the slot is hidden entirely (no whitespace) — used to gate
+   * the toggle on swarm-capable contexts only. Backed by SwarmDrone
+   * via the parent; the shell stays presentational.
+   */
+  readonly showOpenForSubscribersToggle = input<boolean>(false)
+
+  /** Current state of the open-for-subscribers toggle. */
+  readonly openForSubscribers = input<boolean>(false)
+
+  /** Optional aria-label override for the open-for-subscribers button. */
+  readonly openForSubscribersLabel = input<string>('Allow anyone to subscribe to my hive')
+
+  /**
    * Optional armed-resource preview — when set, the chevron is replaced
    * with this thumbnail (same box, no reflow). Clicking it dismisses the arm.
    */
@@ -76,6 +90,10 @@ export class CommandShellComponent implements AfterViewInit {
 
   /** Emitted when the user clicks the armed-resource thumbnail to dismiss it. */
   readonly armedResourceDismiss = output<void>()
+
+  /** Emitted when the open-for-subscribers icon is clicked. Parent
+   *  flips swarm.setOpenForSubscribers — the shell never touches IoC. */
+  readonly openForSubscribersToggle = output<void>()
 
   /** Template handler for clicks on the armed-resource thumbnail. */
   onArmedGlyphMouseDown = (e: MouseEvent): void => {

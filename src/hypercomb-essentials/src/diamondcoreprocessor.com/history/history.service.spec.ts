@@ -114,16 +114,32 @@ class MockDir {
 // Mirrors the production logic for the merkle-composing model.
 // -------------------------------------------------
 
+// A layer is `{ name }` plus whatever slots were committed with it. No
+// predefined slot schema — `children` is kept typed because the merkle
+// backbone code throughout the spec accesses it directly, but every
+// other slot is generic. Tests that touch `notes` (or any other slot)
+// reach for it by bracket notation, not a typed field.
 type LayerContent = {
   name: string
   children?: string[]
+  [slot: string]: unknown
 }
 
 const emptyLayer = (name: string): LayerContent => ({ name })
 
+// Sparse-layer invariant: any slot whose value is an empty array gets
+// stripped from the canonical bytes. Iterates generically — the
+// canonicalizer does not know or care which slots exist.
 const canonicalizeLayer = (layer: LayerContent): LayerContent => {
-  if (!layer.children || layer.children.length === 0) return { name: layer.name }
-  return { name: layer.name, children: layer.children.slice() }
+  const out: LayerContent = { name: layer.name }
+  for (const key of Object.keys(layer)) {
+    if (key === 'name') continue
+    const v = (layer as Record<string, unknown>)[key]
+    if (Array.isArray(v) && v.length > 0) {
+      (out as Record<string, unknown>)[key] = (v as readonly unknown[]).slice()
+    }
+  }
+  return out
 }
 
 const nextMarkerName = async (bag: MockDir): Promise<string> => {
@@ -267,7 +283,11 @@ const getLayerContent = async (
       const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<LayerContent>
       if (!parsed.name) continue
       const out: LayerContent = { name: parsed.name }
-      if (Array.isArray(parsed.children) && parsed.children.length > 0) out.children = parsed.children
+      for (const k of Object.keys(parsed)) {
+        if (k === 'name') continue
+        const v = (parsed as Record<string, unknown>)[k]
+        if (Array.isArray(v) && v.length > 0) (out as Record<string, unknown>)[k] = v
+      }
       return out
     } catch { /* skip unreadable */ }
   }
@@ -326,7 +346,11 @@ const getLayerBySig = async (
       const parsed = JSON.parse(new TextDecoder().decode(cached)) as Partial<LayerContent>
       if (!parsed.name) return null
       const out: LayerContent = { name: parsed.name }
-      if (Array.isArray(parsed.children) && parsed.children.length > 0) out.children = parsed.children
+      for (const k of Object.keys(parsed)) {
+        if (k === 'name') continue
+        const v = (parsed as Record<string, unknown>)[k]
+        if (Array.isArray(v) && v.length > 0) (out as Record<string, unknown>)[k] = v
+      }
       return out
     } catch { /* fall through */ }
   }
@@ -344,7 +368,11 @@ const getLayerBySig = async (
         const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<LayerContent>
         if (!parsed.name) return null
         const out: LayerContent = { name: parsed.name }
-        if (Array.isArray(parsed.children) && parsed.children.length > 0) out.children = parsed.children
+        for (const k of Object.keys(parsed)) {
+          if (k === 'name') continue
+          const v = (parsed as Record<string, unknown>)[k]
+          if (Array.isArray(v) && v.length > 0) (out as Record<string, unknown>)[k] = v
+        }
         return out
       } catch { return null }
     }
@@ -1873,6 +1901,397 @@ describe('Delta cascade — every increment is one item change', () => {
     const removed: string[] = [...beforeSet].filter(s => !afterSet.has(s))
     expect(added.length).toBe(1)
     expect(removed.length).toBe(0)
+  })
+})
+
+// =====================================================================
+// `update(layer)` is full-layer replace
+// =====================================================================
+//
+// Doctrine: `committer.update(segments, layer)` always takes a complete
+// copy of the layer. No partial-update / patch / additive primitive at
+// this API. The layer the caller passes is exactly what gets committed
+// (modulo the canonicalizer dropping empty arrays).
+//
+// To do an additive write (e.g. "add a note", "append a child"), the
+// caller does the merge themselves:
+//
+//   1. Pull the current head layer (or build an empty one if fresh).
+//   2. Compute the new full layer object — copy the prior slots, then
+//      add/remove/replace whatever changes.
+//   3. Call `update(segments, fullLayer)`.
+//
+// Slots absent from the passed layer are GONE in the new head — there
+// is no implicit "preserve unmentioned slots." That's the contract.
+//
+// The tests below pin that contract: replace semantics, sparse-layer
+// invariant, and the additive caller pattern.
+
+// Pull the current head's content for a lineage (or null if the bag is
+// fresh / never written). Used as the "step 1: read prior" of the
+// additive pattern.
+const currentLayer = async (
+  historyRoot: MockDir,
+  lineageSig: string,
+): Promise<LayerContent | null> => {
+  const layers = await listLayers(historyRoot, lineageSig)
+  if (layers.length === 0) return null
+  const last = layers[layers.length - 1]
+  return await getLayerContent(historyRoot, lineageSig, last.layerSig)
+}
+
+describe('commitLayer — full-layer replace (no implicit slot preservation)', () => {
+  it('writes a layer carrying multiple slots in one commit', async () => {
+    const segSig = await signLineage(['parent'])
+    const sigA = fakeSig('a'); const sigB = fakeSig('b'); const sigC = fakeSig('c')
+    const noteA = fakeSig('na'); const noteB = fakeSig('nb')
+
+    await commitLayer(historyRoot, segSig, {
+      name: 'parent',
+      children: [sigA, sigB, sigC],
+      notes:    [noteA, noteB],
+    })
+
+    const layer = await currentLayer(historyRoot, segSig)
+    expect(layer?.name).toBe('parent')
+    expect(layer?.children).toEqual([sigA, sigB, sigC])
+    expect(layer?.['notes']).toEqual([noteA, noteB])
+  })
+
+  it('sparse-layer invariant — empty arrays are stripped from canonical bytes', async () => {
+    const segSig = await signLineage(['parent'])
+    await commitLayer(historyRoot, segSig, {
+      name: 'parent',
+      children: [],
+      notes:    [],
+    })
+    const layer = await currentLayer(historyRoot, segSig)
+    expect(layer?.name).toBe('parent')
+    expect(layer?.children).toBeUndefined()
+    expect(layer?.['notes']).toBeUndefined()
+  })
+
+  it('partial layer drops unmentioned slots — replace semantics, not merge', async () => {
+    const segSig = await signLineage(['parent'])
+    const sigA = fakeSig('a'); const noteSig = fakeSig('n')
+
+    // First commit: name + children + notes.
+    await commitLayer(historyRoot, segSig, {
+      name: 'parent', children: [sigA], notes: [noteSig],
+    })
+
+    // Second commit: name + children only. Notes slot was not in the
+    // passed layer, so it's gone in the new head. No implicit
+    // preservation — that's the doctrine.
+    await commitLayer(historyRoot, segSig, {
+      name: 'parent', children: [sigA, fakeSig('b')],
+    })
+
+    const head = await currentLayer(historyRoot, segSig)
+    expect(head?.children).toEqual([sigA, fakeSig('b')])
+    expect(head?.['notes']).toBeUndefined()
+  })
+
+  it('renaming via {name} only — every other slot is gone (no preservation)', async () => {
+    const segSig = await signLineage(['old-name'])
+    await commitLayer(historyRoot, segSig, {
+      name: 'old-name', children: [fakeSig('a')], notes: [fakeSig('n')],
+    })
+
+    // Caller passes only {name}. children + notes were not in the
+    // layer, so they're not in the new head.
+    await commitLayer(historyRoot, segSig, { name: 'new-name' })
+
+    const head = await currentLayer(historyRoot, segSig)
+    expect(head?.name).toBe('new-name')
+    expect(head?.children).toBeUndefined()
+    expect(head?.['notes']).toBeUndefined()
+  })
+})
+
+describe('additive write pattern — caller pulls head, builds full layer, commits', () => {
+  it('appending a child preserves every other slot because the caller copied them in', async () => {
+    const segSig = await signLineage(['parent'])
+    const sigA = fakeSig('a'); const sigB = fakeSig('b')
+    const note1 = fakeSig('n1')
+
+    // Initial state: name + children + notes.
+    await commitLayer(historyRoot, segSig, {
+      name: 'parent', children: [sigA], notes: [note1],
+    })
+
+    // Caller wants to APPEND sigB to children, keeping notes.
+    //   step 1: read prior
+    //   step 2: build full layer with new children + everything else
+    //   step 3: commit
+    const prior = await currentLayer(historyRoot, segSig)
+    await commitLayer(historyRoot, segSig, {
+      ...(prior ?? { name: 'parent' }),
+      name: prior?.name ?? 'parent',
+      children: [...(prior?.children ?? []), sigB],
+    })
+
+    const head = await currentLayer(historyRoot, segSig)
+    expect(head?.children).toEqual([sigA, sigB])
+    expect(head?.['notes']).toEqual([note1])
+  })
+
+  it('appending a note: read prior notes, push the new sig, commit the full layer', async () => {
+    const segSig = await signLineage(['parent'])
+    const note1 = fakeSig('n1'); const note2 = fakeSig('n2'); const note3 = fakeSig('n3')
+
+    await commitLayer(historyRoot, segSig, { name: 'parent', notes: [note1] })
+
+    const prior = await currentLayer(historyRoot, segSig)
+    const priorNotes = Array.isArray(prior?.['notes']) ? prior!['notes'] as string[] : []
+    await commitLayer(historyRoot, segSig, {
+      ...(prior ?? { name: 'parent' }),
+      name: prior?.name ?? 'parent',
+      notes: [...priorNotes, note2, note3],
+    })
+
+    const head = await currentLayer(historyRoot, segSig)
+    expect(head?.['notes']).toEqual([note1, note2, note3])
+  })
+
+  it('multi-delete: caller computes the new children list without the dropped items, commits full layer', async () => {
+    const segSig = await signLineage(['parent'])
+    const [a, b, c, d, e] = ['a', 'b', 'c', 'd', 'e'].map(fakeSig)
+    const note1 = fakeSig('n1')
+
+    await commitLayer(historyRoot, segSig, {
+      name: 'parent', children: [a, b, c, d, e], notes: [note1],
+    })
+
+    // Drop b and d in a SINGLE commit. Caller scoped the children
+    // change but explicitly copies notes into the new full layer.
+    const prior = await currentLayer(historyRoot, segSig)
+    const remaining = (prior?.children ?? []).filter(s => s !== b && s !== d)
+    await commitLayer(historyRoot, segSig, {
+      ...(prior ?? { name: 'parent' }),
+      name: prior?.name ?? 'parent',
+      children: remaining,
+    })
+
+    const head = await currentLayer(historyRoot, segSig)
+    expect(head?.children).toEqual([a, c, e])
+    expect(head?.['notes']).toEqual([note1])
+
+    // One added marker for the multi-delete (empty + initial + multi-delete = 3).
+    expect((await listLayers(historyRoot, segSig)).length).toBe(3)
+  })
+
+  it('clearing children via empty list — sparse invariant strips the slot', async () => {
+    const segSig = await signLineage(['parent'])
+    const [a, b, c] = ['a', 'b', 'c'].map(fakeSig)
+
+    await commitLayer(historyRoot, segSig, { name: 'parent', children: [a, b, c] })
+    await commitLayer(historyRoot, segSig, { name: 'parent', children: [] })
+
+    const layer = await currentLayer(historyRoot, segSig)
+    expect(layer?.children).toBeUndefined()
+  })
+
+  it('renaming additively: caller copies every prior slot, sets new name, commits', async () => {
+    const segSig = await signLineage(['old-name'])
+    const [a, b] = ['a', 'b'].map(fakeSig)
+    const noteSig = fakeSig('note')
+
+    await commitLayer(historyRoot, segSig, {
+      name: 'old-name', children: [a, b], notes: [noteSig],
+    })
+
+    const prior = await currentLayer(historyRoot, segSig)
+    await commitLayer(historyRoot, segSig, {
+      ...(prior ?? { name: 'old-name' }),
+      name: 'new-name',
+    })
+
+    const head = await currentLayer(historyRoot, segSig)
+    expect(head?.name).toBe('new-name')
+    expect(head?.children).toEqual([a, b])
+    expect(head?.['notes']).toEqual([noteSig])
+  })
+})
+
+// =====================================================================
+// Clipboard as a sigbag lineage
+// =====================================================================
+//
+// Clipboard model under the layer-primitive doctrine:
+//
+//   - The clipboard is a normal lineage at segments=['__clipboard__'].
+//     It has its own sigbag in __history__/, just like any cell.
+//   - Cut / copy = compute the source-cell sigs that are moving (their
+//     current head-layer sigs), then commit a NEW FULL layer at the
+//     clipboard lineage whose `children` are those sigs.
+//   - For cut: ALSO commit a NEW FULL layer at the source lineage with
+//     its children minus the moved items (caller pulls prior, drops the
+//     cut sigs, commits full).
+//   - Paste = pull dest's prior layer + pull clipboard's children +
+//     commit a NEW FULL layer at dest whose children include both.
+//
+// Every step is `commitLayer(historyRoot, lineageSig, fullLayer)` — no
+// merging primitive, no partial update. The caller is responsible for
+// reading what they want to preserve and putting it in the full layer
+// they pass.
+
+describe('clipboard sigbag — copy / paste / cut via full-layer commits', () => {
+  it('copy: clipboard gets a fresh layer holding the copied child sigs; source unchanged', async () => {
+    const srcSeg  = await signLineage(['source'])
+    const clipSeg = await signLineage(['__clipboard__'])
+    const [a, b, c] = ['a', 'b', 'c'].map(fakeSig)
+
+    // Source starts with three children.
+    await commitLayer(historyRoot, srcSeg, { name: 'source', children: [a, b, c] })
+
+    // Copy a + b to clipboard — a full new clipboard layer.
+    await commitLayer(historyRoot, clipSeg, { name: '__clipboard__', children: [a, b] })
+
+    expect((await currentLayer(historyRoot, srcSeg))?.children).toEqual([a, b, c])
+    expect((await currentLayer(historyRoot, clipSeg))?.children).toEqual([a, b])
+  })
+
+  it('paste: caller pulls dest + clipboard, builds full dest layer with both, commits', async () => {
+    const clipSeg = await signLineage(['__clipboard__'])
+    const dstSeg  = await signLineage(['dest'])
+    const [a, b, x, y] = ['a', 'b', 'x', 'y'].map(fakeSig)
+
+    await commitLayer(historyRoot, clipSeg, { name: '__clipboard__', children: [a, b] })
+    await commitLayer(historyRoot, dstSeg,  { name: 'dest',          children: [x, y] })
+
+    // Paste: pull both, build full dest layer with appended children.
+    const clip = await currentLayer(historyRoot, clipSeg)
+    const dst  = await currentLayer(historyRoot, dstSeg)
+    await commitLayer(historyRoot, dstSeg, {
+      ...(dst ?? { name: 'dest' }),
+      name: dst?.name ?? 'dest',
+      children: [...((dst?.children) ?? []), ...((clip?.children) ?? [])],
+    })
+
+    expect((await currentLayer(historyRoot, dstSeg))?.children).toEqual([x, y, a, b])
+    // Copy semantics — clipboard layer was not touched.
+    expect((await currentLayer(historyRoot, clipSeg))?.children).toEqual([a, b])
+  })
+
+  it('cut + paste: source full-layer commit drops cut sigs; clipboard fills; dest full-layer commit appends', async () => {
+    const srcSeg  = await signLineage(['source'])
+    const clipSeg = await signLineage(['__clipboard__'])
+    const dstSeg  = await signLineage(['dest'])
+    const [a, b, c, x] = ['a', 'b', 'c', 'x'].map(fakeSig)
+
+    await commitLayer(historyRoot, srcSeg, { name: 'source', children: [a, b, c] })
+    await commitLayer(historyRoot, dstSeg, { name: 'dest',   children: [x] })
+
+    // CUT a + b. Each affected lineage gets a fresh full layer.
+    const srcPrior = await currentLayer(historyRoot, srcSeg)
+    await commitLayer(historyRoot, srcSeg, {
+      ...(srcPrior ?? { name: 'source' }),
+      name: srcPrior?.name ?? 'source',
+      children: (srcPrior?.children ?? []).filter(s => s !== a && s !== b),
+    })
+    await commitLayer(historyRoot, clipSeg, { name: '__clipboard__', children: [a, b] })
+
+    // PASTE.
+    const clip = await currentLayer(historyRoot, clipSeg)
+    const dst  = await currentLayer(historyRoot, dstSeg)
+    await commitLayer(historyRoot, dstSeg, {
+      ...(dst ?? { name: 'dest' }),
+      name: dst?.name ?? 'dest',
+      children: [...((dst?.children) ?? []), ...((clip?.children) ?? [])],
+    })
+    // Clear clipboard. Empty children → slot stripped by canonicalize.
+    await commitLayer(historyRoot, clipSeg, { name: '__clipboard__' })
+
+    expect((await currentLayer(historyRoot, srcSeg))?.children).toEqual([c])
+    expect((await currentLayer(historyRoot, dstSeg))?.children).toEqual([x, a, b])
+    expect((await currentLayer(historyRoot, clipSeg))?.children).toBeUndefined()
+  })
+
+  it('cut multi + paste multi: arbitrary count moved through clipboard via single commits each', async () => {
+    const srcSeg  = await signLineage(['source'])
+    const clipSeg = await signLineage(['__clipboard__'])
+    const dstSeg  = await signLineage(['dest'])
+    const [a, b, c, d, e, f] = ['a', 'b', 'c', 'd', 'e', 'f'].map(fakeSig)
+
+    await commitLayer(historyRoot, srcSeg, { name: 'source', children: [a, b, c, d, e, f] })
+
+    // Cut four (a, c, d, f) in one full-layer commit; leave [b, e].
+    const srcPrior = await currentLayer(historyRoot, srcSeg)
+    const cutSet = new Set([a, c, d, f])
+    await commitLayer(historyRoot, srcSeg, {
+      ...(srcPrior ?? { name: 'source' }),
+      name: srcPrior?.name ?? 'source',
+      children: (srcPrior?.children ?? []).filter(s => !cutSet.has(s)),
+    })
+    await commitLayer(historyRoot, clipSeg, { name: '__clipboard__', children: [a, c, d, f] })
+
+    // Paste all four at dest in one commit.
+    const clip = await currentLayer(historyRoot, clipSeg)
+    await commitLayer(historyRoot, dstSeg, {
+      name: 'dest',
+      children: (clip?.children ?? []).slice(),
+    })
+
+    expect((await currentLayer(historyRoot, srcSeg))?.children).toEqual([b, e])
+    expect((await currentLayer(historyRoot, dstSeg))?.children).toEqual([a, c, d, f])
+
+    // Source bag: empty + initial + multi-cut commit = 3 markers.
+    expect((await listLayers(historyRoot, srcSeg)).length).toBe(3)
+    // Destination bag: empty + paste = 2 markers.
+    expect((await listLayers(historyRoot, dstSeg)).length).toBe(2)
+  })
+
+  it('cut-paste does not touch the moved cells — notes on those cell layers stay because sigs are stable', async () => {
+    const cellAseg = await signLineage(['source', 'A'])
+    const cellBseg = await signLineage(['source', 'B'])
+    const clipSeg  = await signLineage(['__clipboard__'])
+    const dstSeg   = await signLineage(['dest'])
+    const noteA = fakeSig('note-on-A')
+    const noteB = fakeSig('note-on-B')
+
+    // Each cell layer carries a notes slot.
+    await commitLayer(historyRoot, cellAseg, { name: 'A', notes: [noteA] })
+    await commitLayer(historyRoot, cellBseg, { name: 'B', notes: [noteB] })
+
+    // Resolve each cell's current head sig (the cell's identity for
+    // the clipboard layer to reference).
+    const aLayers = await listLayers(historyRoot, cellAseg)
+    const bLayers = await listLayers(historyRoot, cellBseg)
+    const aHeadSig = aLayers[aLayers.length - 1].layerSig
+    const bHeadSig = bLayers[bLayers.length - 1].layerSig
+
+    // Cut A and B into clipboard (a layer pointing at their head sigs).
+    await commitLayer(historyRoot, clipSeg, { name: '__clipboard__', children: [aHeadSig, bHeadSig] })
+
+    // Paste at dest.
+    await commitLayer(historyRoot, dstSeg, { name: 'dest', children: [aHeadSig, bHeadSig] })
+
+    // Notes on the underlying cell layers are still visible — sig
+    // addressing is invariant to "where" they're referenced from.
+    const a = await getLayerBySig(historyRoot, aHeadSig)
+    const b = await getLayerBySig(historyRoot, bHeadSig)
+    expect(a?.['notes']).toEqual([noteA])
+    expect(b?.['notes']).toEqual([noteB])
+
+    // Destination layer references both cell sigs.
+    expect((await currentLayer(historyRoot, dstSeg))?.children).toEqual([aHeadSig, bHeadSig])
+  })
+
+  it('clipboard layer can carry its own notes alongside children — a single full-layer commit writes both', async () => {
+    const clipSeg = await signLineage(['__clipboard__'])
+    const [a, b]   = ['a', 'b'].map(fakeSig)
+    const clipNote = fakeSig('clipboard-note')
+
+    await commitLayer(historyRoot, clipSeg, {
+      name: '__clipboard__',
+      children: [a, b],
+      notes:    [clipNote],
+    })
+
+    const layer = await currentLayer(historyRoot, clipSeg)
+    expect(layer?.children).toEqual([a, b])
+    expect(layer?.['notes']).toEqual([clipNote])
   })
 })
 

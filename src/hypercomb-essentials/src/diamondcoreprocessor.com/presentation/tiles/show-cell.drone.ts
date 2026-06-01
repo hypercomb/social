@@ -8,8 +8,9 @@ import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
 import { isSignature, readCellProperties, writeCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
+import { readViewportAt } from '../../editor/viewport-store.js'
 import { hideStorageKey } from './tile-actions.drone.js'
-import type { HistoryService } from '../../history/history.service.js'
+import type { HistoryService, LayerContent } from '../../history/history.service.js'
 import type { HistoryCursorService, CursorState } from '../../history/history-cursor.service.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoom/zoom.drone.js'
 
@@ -368,6 +369,33 @@ export class ShowCellDrone extends Drone {
   // up whatever the peer is publishing at the deeper level (if any),
   // and the user can add normally from there to mint local tiles.
   #peerCellSet = new Set<string>()
+
+  // Per-label pubkey of the peer that contributed each peer-kind tile.
+  // Populated alongside #peerCellSet; the spotlight render hook reads
+  // this to decide which tiles to glow when a peer is active. Cleared
+  // and rebuilt on each renderFromSynchronize pass.
+  #peerPubkeyByLabel = new Map<string, string>()
+
+  // Per-session in-memory slot assignment cache. Once a tile is placed
+  // via score-based logic (or any other path), its slot is remembered
+  // here so later renders — including pan-triggered re-renders — re-use
+  // the same slot regardless of viewport changes.
+  //
+  // User-spec rule: indexes are fixed; tiles never relocate on pan,
+  // only on manual reorganize. The on-disk index persistence path is
+  // async and can race a rapid pan; this cache fills the gap so
+  // anything once placed stays put for the session.
+  //
+  // Cleared on location change (different lineage = different cell
+  // set; stale cache entries get caught by the sparse-slot-occupied
+  // check anyway, but a fresh cache per location avoids leaks).
+  #sessionSlotByLabel = new Map<string, number>()
+
+  // Currently spotlit peer pubkey (from SpotlightService), or null
+  // when no layer is surfaced. Subscribed on the first heartbeat so
+  // the service is registered by then. Render reads this in
+  // buildCellsFromAxial to override borderColor for matching tiles.
+  #spotlightPubkey: string | null = null
 
   // mesh scoping — space + secret feed into the signature key
   #space = ''
@@ -1483,8 +1511,18 @@ export class ShowCellDrone extends Drone {
       && !(this.#tagFlattenResults && this.#tagFlattenResults.length > 0)
     ) {
       const cached = this.#layerCellsCache.get(locationKey)
+      // Sub-layer locations no longer mint OPFS folders (layer-primitive
+      // doctrine), so `lineage.explorerDir()` returns null for them and
+      // `#layerDirCache` is never populated. The fast path used to
+      // require `cachedDir`, which silently disabled it for every
+      // sub-layer back-click — every back to /alpha, /dolphin, etc.
+      // hit the slow path (full layer fetch + cell stream + atlas refill)
+      // when the user perceived the operation as just "redraw what was
+      // there 2 seconds ago." Drop the cachedDir requirement and gate
+      // the dir-dependent side effects (viewport OPFS read, vp.setDir,
+      // image refill) on its presence below.
       const cachedDir = this.#layerDirCache.get(locationKey)
-      if (cached && cached.cells.length > 0 && cachedDir) {
+      if (cached && cached.cells.length > 0) {
         // Capture the OUTGOING layer's live VP state into our cache so
         // a future return to that layer restores where the user actually
         // left it (pan/zoom/meshOffset they applied this session). VP's
@@ -1494,18 +1532,25 @@ export class ShowCellDrone extends Drone {
         // abort any stream still running for the previous layer
         ++this.#streamToken
 
-        // Viewport: prefer cached snapshot (sync). If none cached, MUST
-        // await the OPFS read — otherwise mesh renders at the previous
-        // layer's pan/zoom, then snaps to the saved viewport once the
-        // read completes, which the user perceives as drift. Position
-        // accuracy outweighs the one-time OPFS round-trip on cold load.
+        // Viewport: prefer cached snapshot (sync). If none cached AND
+        // we have a dir to read from, await the OPFS read so the mesh
+        // doesn't render at the previous layer's pan/zoom and snap into
+        // place. For sub-layers with no on-disk dir (layer-primitive
+        // model) we skip the OPFS round-trip entirely — the in-memory
+        // snapshot cache is the source of truth.
         let appliedSnap: ViewportSnapshot | null = null
         const vpSnap = this.#layerViewportCache.get(locationKey)
         if (vpSnap) {
           this.#applyViewportFromSnapshot(vpSnap)
           appliedSnap = vpSnap
         } else {
-          appliedSnap = await this.#applyViewportForLayerReadSnapshot(cachedDir)
+          // Viewport is sig-keyed by lineage segments now (no OPFS dir
+          // required), so always read — sub-layers without a dir restore
+          // identically to root.
+          appliedSnap = await this.#applyViewportForLayerReadSnapshot(
+            cachedDir ?? null,
+            lineage.explorerSegments?.() ?? [],
+          )
         }
         // Explicit set — never inherit from prior render. The back-nav
         // fast path's mesh ALREADY exists, so we only need to mark
@@ -1514,7 +1559,10 @@ export class ShowCellDrone extends Drone {
         this.#pendingRecenter = !appliedSnap?.meshOffset
 
         const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
-        if (vp) vp.setDirSilent(cachedDir)
+        // Tell VP which location it's reporting to. Viewport is keyed by
+        // lineage segments in the sig-keyed __viewport__ store — works for
+        // sub-layers without an OPFS dir and for root (segments=[] → '/').
+        vp?.setCurrentLocation?.(lineage.explorerSegments?.() ?? [])
 
         this.renderedLocationKey = locationKey
         this.cachedCellNames = cached.cellNames
@@ -1571,11 +1619,14 @@ export class ShowCellDrone extends Drone {
 
         // Background: if any atlas slots were evicted, refill from the
         // (still-hot) Store resource cache. When new images land, the
-        // shader picks them up by sig — no rerender needed. If a sig
-        // was missing (substrate gap), do nothing (a future render can
-        // resolve it).
+        // shader picks them up by sig — no rerender needed. The refill
+        // runs even when cachedDir is null: substrate images live in
+        // __resources__ keyed by signature, so loadCellImages only needs
+        // the dir for tags/link reads (already null-tolerant). Without
+        // this, sub-layer tiles whose atlas slot got displaced by other
+        // layers' loads while the user was away never re-paint.
         if (evictedSigs.length > 0) {
-          void this.loadCellImages(cached.cells, cachedDir)
+          void this.loadCellImages(cached.cells, cachedDir ?? null)
         }
 
         // background: refresh cursor for undo/redo readiness. Renderer
@@ -1619,31 +1670,13 @@ export class ShowCellDrone extends Drone {
         dir = await lineage.explorerDir()
       }
     } else {
+      // Read-only explorer dir lookup. Layer-as-primitive — hierarchy
+      // lives in layer.children, not in `hypercomb.io/<path>/` folders.
+      // The renderer no longer mints folders to hold viewport state;
+      // viewport persistence lives keyed by lineageSig (flat), not by
+      // a parallel folder tree. A null dir is the new normal for any
+      // sub-layer location.
       dir = await lineage.explorerDir()
-      // Lazy-create the OPFS dir for this location if the read-only
-      // lookup didn't find one. Per the architecture, tile MEMBERSHIP
-      // comes from layer.children (we don't mint dirs to create tiles);
-      // but the per-location 0000 file IS the canonical storage for
-      // viewport / properties state, so the dir has to exist as soon
-      // as the user actually navigates there. Lazy-create walks
-      // segments from hypercombRoot with create:true.
-      if (!dir) {
-        const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
-          { hypercombRoot?: FileSystemDirectoryHandle } | undefined
-        const root = store?.hypercombRoot
-        const segs = lineage?.explorerSegments?.() ?? []
-        if (root && segs.length > 0) {
-          try {
-            let walker: FileSystemDirectoryHandle = root
-            for (const seg of segs) {
-              const trimmed = String(seg ?? '').trim()
-              if (!trimmed) continue
-              walker = await walker.getDirectoryHandle(trimmed, { create: true })
-            }
-            dir = walker
-          } catch { /* OPFS write may fail (quota); leave dir null */ }
-        }
-      }
     }
     if (!this.#clipboardView && isStale()) {
       this.renderQueued = true
@@ -1762,28 +1795,50 @@ export class ShowCellDrone extends Drone {
     if (!this.#clipboardView && historyService) {
       const sig = await this.computeSignatureLocation(lineage)
 
-      // Load cursor for this location (keeps cursor position if already set)
-      if (cursorService) await cursorService.load(sig.sig)
+      // Real-time supersedes preloader: cursor.load runs a bag scan +
+      // warmupHistoricalResources walk that can take 600ms-1.5s on a
+      // 100-marker lineage. That is preloader work for undo/redo — render
+      // must NOT wait on it. Fire-and-forget so it warms in the
+      // background; the user only feels its cost when they actually
+      // invoke /undo or open the history viewer.
+      if (cursorService && sig.sig) {
+        void cursorService.load(sig.sig).catch(() => {})
+      }
 
       if (cursorService) {
-        const content = await cursorService.layerContentAtCursor()
-        const cursorState = cursorService.state
+        // Primary content source: lineage.currentLayer() is memoized per
+        // fsRevision and returns in <1ms from in-memory state. It IS the
+        // live layer for the current location at HEAD. The cursor path
+        // is only consulted when the user has actively rewound.
+        let content: LayerContent | null = null
+        try {
+          const live = await (lineage as { currentLayer?: () => Promise<LayerContent | null> }).currentLayer?.()
+          if (live && typeof (live as { name?: unknown }).name === 'string') {
+            content = live as LayerContent
+          }
+        } catch { /* lineage unavailable — fall through to cursor */ }
 
-        // Two distinct null-content cases:
-        //
-        //   (A) Bag has markers, user undone past them → position 0,
-        //       cursor.layerContentAtCursor returns null. Render empty
-        //       (synthetic "pre-history" view).
-        //
-        //   (B) Bag has no markers at all (fresh lineage, sig migration
-        //       orphaned old bags, etc.) → also position 0, also null.
-        //       Fall through to live OPFS so tiles display from disk.
-        //
-        // Distinguish by total: total > 0 means "history exists, you're
-        // before it" (case A). total === 0 means "no history" (case B).
-        if (!content && cursorState?.position === 0 && (cursorState?.total ?? 0) > 0) {
-          union.clear()
-          localCellSet.clear()
+        // Rewound view: if the user has scrubbed history (cursor.position
+        // < cursor.total) the cursor points at a historical layer and
+        // overrides the live content. cursorState is only meaningful when
+        // cursor.load has already completed for this location — typically
+        // true because the user spent time here before rewinding. On a
+        // freshly-navigated-to location the cursor's state is zeroed
+        // (position=0, total=0) which is NOT rewound, so live content wins.
+        const cursorState = cursorService.state
+        const isRewound = (cursorState?.total ?? 0) > 0
+          && (cursorState?.position ?? 0) < (cursorState?.total ?? 0)
+        if (isRewound) {
+          const cursorContent = await cursorService.layerContentAtCursor().catch(() => null)
+          if (cursorContent) {
+            content = cursorContent
+          } else if ((cursorState?.position ?? 0) === 0) {
+            // Pre-history view (case A from the previous implementation):
+            // user has rewound past every marker. Render empty.
+            content = null
+            union.clear()
+            localCellSet.clear()
+          }
         }
 
         if (content) {
@@ -1798,7 +1853,17 @@ export class ShowCellDrone extends Drone {
           // cells render immediately via the slot machine before the next
           // computeRender re-fires from cursor.onNewLayer.
           const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
-          const parentLayerSig = cursorService.currentLayerSig || ''
+          // Prefer cursor's currentLayerSig when it's known (it points at
+          // the historical layer when rewound). Fall back to lineage's
+          // live sig — important when cursor.load hasn't completed yet,
+          // because without a parentLayerSig resolveChildNames skips its
+          // manifest fast-path and pays per-child sig resolution.
+          let parentLayerSig: string = cursorService.currentLayerSig || ''
+          if (!parentLayerSig) {
+            try {
+              parentLayerSig = await (lineage as { currentSig?: () => Promise<string> }).currentSig?.() ?? ''
+            } catch { /* leave empty */ }
+          }
           layerAllowed = await resolveChildNames(historyService, parentSegments, dir, content, parentLayerSig)
           // Layer is the only source of truth (project_layer_is_primitive).
           // Whatever resolveChildNames returns IS the tile membership at
@@ -1864,15 +1929,15 @@ export class ShowCellDrone extends Drone {
         const segs = lineage?.explorerSegments?.() ?? []
         const entries = await registry.resolve({ segments: segs, dir })
 
-        // Mismatch check — only mismatched peer/ephemeral names produce
-        // any peer-aware state. If every peer-or-ephemeral name already
-        // exists in localCellSet, the contributor pipeline has nothing
-        // new to surface and we render purely from local-derived state.
+        // Mismatch check — only mismatched peer names produce any
+        // peer-aware state. If every peer name already exists in
+        // localCellSet, the contributor pipeline has nothing new to
+        // surface and we render purely from local-derived state.
         // This makes the intent visible in code ("only my tiles when
         // peers add nothing new") instead of relying on the per-entry
         // dedup to silently no-op below.
         const mismatched = entries.filter(e =>
-          (e.kind === 'ephemeral' || e.kind === 'peer') && !localCellSet.has(e.name),
+          e.kind === 'peer' && !localCellSet.has(e.name),
         )
 
         for (const e of mismatched) {
@@ -1890,6 +1955,12 @@ export class ShowCellDrone extends Drone {
             if (typeof pidx === 'number' && Number.isFinite(pidx) && pidx >= 0 && !peerIndices.has(e.name)) {
               peerIndices.set(e.name, pidx)
             }
+            // Remember which peer contributed this tile so the spotlight
+            // render hook can match cells to the active layer.
+            const ppk = (e.source as { peerPubkey?: string } | undefined)?.peerPubkey
+            if (typeof ppk === 'string' && ppk.length > 0 && !this.#peerPubkeyByLabel.has(e.name)) {
+              this.#peerPubkeyByLabel.set(e.name, ppk)
+            }
           }
           union.add(e.name)
         }
@@ -1901,6 +1972,12 @@ export class ShowCellDrone extends Drone {
     }
     this.#ephemeralCellSet = ephemeralCellSet
     this.#peerCellSet = peerCellSet
+    // Drop pubkey entries for labels that fell out of the peer set
+    // (peer went stale, navigated away). Keeps the map tight; new peer
+    // contributions repopulate it in the loop above.
+    for (const label of [...this.#peerPubkeyByLabel.keys()]) {
+      if (!peerCellSet.has(label)) this.#peerPubkeyByLabel.delete(label)
+    }
 
     // Reconcile pendingRemoves against the layer's children list. Under
     // layer-as-primitive, the LAYER decides membership: a /remove drops
@@ -2041,8 +2118,13 @@ export class ShowCellDrone extends Drone {
       if (vpSnap) {
         this.#applyViewportFromSnapshot(vpSnap)
         appliedSnap = vpSnap
-      } else if (dir) {
-        appliedSnap = await this.#applyViewportForLayerReadSnapshot(dir)
+      } else {
+        // Viewport is sig-keyed by lineage segments (no OPFS dir
+        // required) — always read so dir-less sub-layers restore too.
+        appliedSnap = await this.#applyViewportForLayerReadSnapshot(
+          dir,
+          lineage.explorerSegments?.() ?? [],
+        )
       }
 
       // Set pendingRecenter EXPLICITLY based on the new layer's saved
@@ -2065,13 +2147,12 @@ export class ShowCellDrone extends Drone {
       // of truth for this layer's render.
       if (myToken !== this.#streamToken) return
 
-      // sync VP directory so subsequent pan/zoom writes persist to the correct
-      // layer. The dir is the canonical key — viewport lives in
-      // `<dir>/0000` as `properties.viewport`. For sub-layers that don't
-      // have an OPFS dir yet, we lazy-create it just above (see the
-      // dir-resolution block).
+      // Tell VP which location it's reporting to so subsequent pan/zoom
+      // writes persist to the correct layer. Viewport is keyed by lineage
+      // segments in the sig-keyed __viewport__ store — no OPFS dir needed,
+      // so this works for dir-less sub-layers and for root alike.
       const vp = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ViewportPersistence') as ViewportPersistence | undefined
-      if (vp && dir) vp.setDirSilent(dir)
+      vp?.setCurrentLocation?.(lineage.explorerSegments?.() ?? [])
 
       if (cellNames.length === 0) {
         if (this.layer) this.layer.visible = true
@@ -2284,24 +2365,36 @@ export class ShowCellDrone extends Drone {
    }
 
   readonly #applyViewportForLayer = async (dir: FileSystemDirectoryHandle): Promise<boolean> => {
-    const snap = await this.#applyViewportForLayerReadSnapshot(dir)
+    // Legacy wrapper — no segments available at this call site, so it
+    // falls through to the legacy `<dir>/0000` fallback. (Currently has
+    // no live callers; left here for back-compat until Step 5 retires
+    // the legacy path entirely.)
+    const snap = await this.#applyViewportForLayerReadSnapshot(dir, null)
     return !!(snap?.zoom || snap?.pan || snap?.meshOffset)
   }
 
   // Same as #applyViewportForLayer but returns the snapshot itself so
   // the caller can decide whether to recenter (when there's no saved
   // meshOffset for the layer) or keep the mesh where it was last left.
-  readonly #applyViewportForLayerReadSnapshot = async (dir: FileSystemDirectoryHandle): Promise<ViewportSnapshot> => {
-    // read 0000 directly from the target dir — VP.#dir may still
-    // point at the previous layer (navigate fires before store.change)
+  //
+  // Phase B: read prefers the new tile-properties-backed viewport store
+  // (signature-addressed, works for sub-layers without OPFS dirs). Falls
+  // back to legacy `<dir>/0000.viewport` only if the new path has nothing
+  // yet — preserves any pre-migration data while user gestures populate
+  // the new path. Once the legacy fallback proves unused, it can be
+  // dropped (Step 5).
+  readonly #applyViewportForLayerReadSnapshot = async (
+    _dir: FileSystemDirectoryHandle | null,
+    segments: readonly string[] | null = null,
+  ): Promise<ViewportSnapshot> => {
+    // Viewport lives in the sig-keyed `__viewport__` store, addressed by
+    // the location's lineage segments — no OPFS dir, no history. Works
+    // identically for root and dir-less sub-layers.
     let snap: ViewportSnapshot = {}
     try {
-      const fh = await dir.getFileHandle('0000')
-      const file = await fh.getFile()
-      const props = JSON.parse(await file.text())
-      snap = (props as any).viewport ?? {}
+      snap = await readViewportAt(segments ?? [])
     } catch {
-      // no 0000 yet — defaults
+      snap = {}
     }
 
     // populate back-nav fast-path cache
@@ -2622,24 +2715,19 @@ export class ShowCellDrone extends Drone {
     // pan/zoom/recenter the user did this session. Symptom: press R,
     // back, in → viewport resets to pre-R; refresh fixes once but
     // back/forth resets again.
-    this.onEffect<{ dir: FileSystemDirectoryHandle; snapshot: ViewportSnapshot }>('viewport:persisted', ({ dir, snapshot }) => {
-      // Match the dir to a known location key. The current rendered
-      // layer is the most common case, but a flush from setDir can
-      // also fire for the OUTGOING layer — handle both via the
-      // dir→locationKey index.
-      let locationKey: string | null = null
-      if (this.#layerDirCache.get(this.renderedLocationKey) === dir) {
-        locationKey = this.renderedLocationKey
-      } else {
-        for (const [key, cachedDir] of this.#layerDirCache) {
-          if (cachedDir === dir) { locationKey = key; break }
-        }
-      }
-      if (locationKey) {
-        // Snapshot is the post-write OPFS state — set it as the cached
-        // snap so back-nav fast path reads what's on disk, not a stale
-        // first-visit read.
-        this.#layerViewportCache.set(locationKey, { ...snapshot })
+    this.onEffect<{ segments: readonly string[]; snapshot: ViewportSnapshot | null }>('viewport:persisted', ({ segments, snapshot }) => {
+      // The viewport store just wrote `segments`. If that's the layer we
+      // currently have rendered, mirror the post-write snapshot into the
+      // back-nav cache so navigating out and back reads the latest values
+      // rather than a stale first-visit snapshot.
+      const lineage = (window as any).ioc?.get?.('@hypercomb.social/Lineage') as
+        { explorerSegments?: () => readonly string[] } | undefined
+      const cur = lineage?.explorerSegments?.() ?? []
+      const same = Array.isArray(segments)
+        && segments.length === cur.length
+        && segments.every((s, i) => s === cur[i])
+      if (same) {
+        this.#layerViewportCache.set(this.renderedLocationKey, { ...(snapshot ?? {}) })
       }
     })
 
@@ -3049,22 +3137,6 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
-    // Paired-channel share-ephemeral: an incoming share landed as a
-    // preview (no OPFS write). Invalidate caches + re-render so the
-    // ephemeral tile surfaces. `paired-channel:share-installed` fires
-    // after adopt commits to OPFS — the ephemeral entry's already
-    // cleared on the drone, so we just need to re-render.
-    this.onEffect<{ location?: string; branchName?: string }>('paired-channel:share-ephemeral', () => {
-      this.#layerCellsCache.clear()
-      this.renderedCellsKey = ''
-      this.requestRender()
-    })
-    this.onEffect<{ location?: string; branchName?: string }>('paired-channel:share-installed', () => {
-      this.#layerCellsCache.clear()
-      this.renderedCellsKey = ''
-      this.requestRender()
-    })
-
     // listen for pivot mode toggle (loads pre-rotated snapshots + rotated labels)
     this.onEffect<{ pivot: boolean }>('render:set-pivot', (payload) => {
       if (this.#pivot !== payload.pivot) {
@@ -3124,6 +3196,32 @@ export class ShowCellDrone extends Drone {
       this.renderedLocationKey = ''
       if (locationKey) this.#layerCellsCache.delete(locationKey)
       this.requestRender()
+    })
+
+    // Spotlight changes — a peer's layer was surfaced (or dismissed
+    // back to merged). Update the cached pubkey and invalidate the
+    // render cache so the next pass re-runs the borderColor path with
+    // the new spotlight state. Cheap: same layer-cells data, just a
+    // different borderColor computation per cell.
+    this.onEffect<{ activePeer: string | null }>('spotlight:changed', (payload) => {
+      this.#spotlightPubkey = payload?.activePeer ?? null
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // Location change — different lineage means different cell set;
+    // the session slot cache is keyed by label and the new cells may
+    // share names with the old ones (rare but possible at deep
+    // navigations). Wipe the cache on every lineage change to keep
+    // slot assignments scoped per location.
+    this.onEffect('fs:changed', () => {
+      // fs:changed fires on navigation as well as data mutations;
+      // gating on locationKey change keeps it cheap.
+      const lineage = this.resolve<any>('lineage')
+      const here = String(lineage?.explorerLabel?.() ?? '/')
+      if (here !== this.renderedLocationKey) {
+        this.#sessionSlotByLabel.clear()
+      }
     })
 
     // substrate:applied — substrate has just written a new propsSig for this
@@ -3642,13 +3740,30 @@ export class ShowCellDrone extends Drone {
       }
     }
 
-    // Pass 2 — peer tiles. Honour the publisher's `index` when supplied
-    // so a tile a peer rendered at their slot N appears at our slot N
-    // too (provided that slot isn't already occupied by a local cell).
-    // Without this peers fall straight into the unindexed allocator and
-    // crowd onto the lowest free slots starting at 0 — producing a
-    // disjoint cluster offset from the local cells. Collisions still
-    // demote to the next-free bucket; no peer index can evict a local.
+    // Pass 2 — peer tiles. Honor the publisher's `index` when the
+    // matching slot is free locally; otherwise demote to the unindexed
+    // pile and let the score-based fill below pick a slot.
+    //
+    // Why honor it: when the receiver has no conflicting local tile at
+    // the published index, using it preserves the visual identity the
+    // publisher set (a tile at "their" slot 3 sits at slot 3 on every
+    // receiver who has slot 3 free). On a fresh incognito canvas with
+    // zero local tiles every peer index lands clean — exactly the
+    // scenario the user called out: "there are most certainly no
+    // indexes in the way with zero initial tiles."
+    //
+    // Why the collision check is enough: Pass 1 (above) has already
+    // claimed every slot a local indexed tile owns. If a peer index
+    // collides with one of those, sparse[peerIdx] !== '' and we fall
+    // through to the unindexed queue. So local layout stays sovereign;
+    // peer indices are only respected on otherwise-empty slots.
+    //
+    // Deterministic peer order: sort peer names before placement so
+    // multi-peer rendering is stable across reruns and freshness
+    // rotation. Without this, two peers republishing the same name
+    // with different indices could flip the surviving slot every
+    // render based on Map-iteration order.
+    peerNames.sort((a, b) => a.localeCompare(b))
     for (const name of peerNames) {
       const peerIdx = peerIndices?.get(name)
       if (typeof peerIdx === 'number' && peerIdx >= 0 && peerIdx <= maxSlot && sparse[peerIdx] === '') {
@@ -3657,6 +3772,16 @@ export class ShowCellDrone extends Drone {
         unindexed.push(name)
       }
     }
+
+    // Sort the unindexed pile alphabetically before the score-based
+    // fill below. Same determinism reason: scoreMap is deterministic
+    // (slots evaluate identically given the same viewport), so the
+    // ONLY non-deterministic input is the iteration order of unindexed
+    // — sort it and the whole layout becomes reproducible across
+    // renders. Local-without-index and peers share the queue at this
+    // point; both classes are stable name-keyed, which is what the
+    // user-spec wants.
+    unindexed.sort((a, b) => a.localeCompare(b))
 
     // Place unindexed cells by scoring every empty slot on three
     // factors and picking the minimum:
@@ -3685,6 +3810,30 @@ export class ShowCellDrone extends Drone {
     const adjacents = axialAny?.Adjacents
 
     for (const name of unindexed) {
+      // Session-cache short-circuit. If this tile was already placed
+      // in a prior render (local-no-index path during persistence
+      // race, or any peer tile) and the slot is still free, drop it
+      // back into the same slot. Pans don't change cached assignments;
+      // only manual reorganize clears this map.
+      const cachedSlot = this.#sessionSlotByLabel.get(name)
+      if (typeof cachedSlot === 'number' && cachedSlot >= 0 && cachedSlot <= maxSlot && sparse[cachedSlot] === '') {
+        sparse[cachedSlot] = name
+        // Persist on every cache hit too — first-write may have failed
+        // silently (storage cold, committer queue full, race with cell
+        // commit), leaving the tile indexless in the layer. Retrying
+        // on cache hit makes the repair eventually-consistent:
+        // writeTilePropertiesAt is content-addressed and idempotent on
+        // identical bytes, so once one write succeeds the layer has
+        // the index permanently and future renders go through Pass 1
+        // directly without ever touching this loop.
+        if (!readOnly && localCellSet.has(name)) {
+          void writeTilePropertiesAt(parentSegments, name, { index: cachedSlot }).catch(err =>
+            console.warn('[show-cell] index persist retry failed for', name, err)
+          )
+        }
+        continue
+      }
+
       let placed = -1
 
       if (scoreMap && adjacents) {
@@ -3727,44 +3876,24 @@ export class ShowCellDrone extends Drone {
       }
 
       sparse[placed] = name
+      // Cache the assignment so subsequent renders skip the score
+      // recomputation. Same memory cell whether this is a local tile
+      // awaiting persistence or a peer tile that won't ever persist
+      // here. Stable across pan, viewport change, freshness rotation.
+      this.#sessionSlotByLabel.set(name, placed)
       if (!readOnly && localCellSet.has(name)) {
-        try {
-          // Lazy-patch the index into the cell's layer (canonical
-          // path). The cascade folds the new tile-layer sig into the
-          // parent's children slot; the IndexNurse picks the new
-          // value up on its next read via the cell:0000-changed
-          // broadcast. No OPFS dir lookup, no 0000 write.
-          await writeTilePropertiesAt(parentSegments, name, { index: placed })
-        } catch (err) {
+        // Fire-and-forget — the session cache provides intra-render
+        // stability regardless of when persistence completes, and the
+        // cache-hit branch above retries persistence on every later
+        // render until one write succeeds. So we don't need to await
+        // here; awaiting just blocks the placement loop for no
+        // synchronization benefit.
+        void writeTilePropertiesAt(parentSegments, name, { index: placed }).catch(err =>
           console.warn('[show-cell] failed to persist index for', name, err)
-        }
+        )
       }
     }
 
-    // Append ephemeral preview tiles for any paired-channel share at
-    // the current lineage. These tiles are NOT in OPFS — they live
-    // only in the drone's ephemeral cache until the user adopts them.
-    // They render as `external` (since !localCellSet.has(name)) so
-    // they get the public-external profile + adopt icon.
-    try {
-      const droneAny = (window as any).ioc?.get?.('@diamondcoreprocessor.com/PairedChannelDrone') as
-        | { ephemeralSharesAt?: (location: string) => { branchName: string }[] }
-        | undefined
-      if (droneAny?.ephemeralSharesAt) {
-        const here = '/' + parentSegments.join('/')
-        const eph = droneAny.ephemeralSharesAt(here) ?? []
-        for (const e of eph) {
-          const name = e.branchName
-          if (!name || sparse.includes(name)) continue
-          while (nextFree <= maxSlot && sparse[nextFree] !== '') nextFree++
-          if (nextFree > maxSlot) break
-          sparse[nextFree] = name
-          nextFree++
-        }
-      }
-    } catch (err) {
-      console.warn('[show-cell] ephemeral share render failed', err)
-    }
 
     return sparse
   }
@@ -3906,7 +4035,7 @@ export class ShowCellDrone extends Drone {
    */
   private loadCellImages = async (
     cells: Cell[],
-    _dir: FileSystemDirectoryHandle,
+    _dir: FileSystemDirectoryHandle | null,
     forceReload?: Set<string>,
   ): Promise<void> => {
     const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
@@ -3959,8 +4088,8 @@ export class ShowCellDrone extends Drone {
     }
 
     const loadOne = async (cell: Cell): Promise<void> => {
-      // External cells (kind:'peer' from the SwarmDrone, kind:'ephemeral'
-      // from paired-channel) have no local OPFS dir, so the OPFS-based
+      // External cells (kind:'peer' from the SwarmDrone) have no local
+      // OPFS dir, so the OPFS-based
       // tags/link/substrate reads further down would always throw. The
       // peer path has its OWN content-addressed image source though:
       // the swarm streamed the publisher's `imageSig` and the bytes are
@@ -4019,19 +4148,26 @@ export class ShowCellDrone extends Drone {
         return
       }
 
-      // load tags + link from OPFS if not cached (independent of image cache)
+      // load tags + link from OPFS if not cached (independent of image cache).
+      // Sub-layer locations have no on-disk dir under layer-as-primitive; the
+      // image path below still resolves via __resources__, so we just skip
+      // the tags/link folder read when _dir is null.
       if (!this.cellTagsCache.has(cell.label)) {
-        try {
-          const cellDir = await _dir.getDirectoryHandle(cell.label)
-          const tagProps = await readCellProperties(cellDir)
-          const rawTags = tagProps?.['tags']
-          this.cellTagsCache.set(cell.label, Array.isArray(rawTags)
-            ? (rawTags as unknown[]).filter((t): t is string => typeof t === 'string')
-            : [])
-          if (!this.cellLinkCache.has(cell.label)) {
-            this.cellLinkCache.set(cell.label, typeof tagProps?.['link'] === 'string' && (tagProps['link'] as string).length > 0)
-          }
-        } catch { this.cellTagsCache.set(cell.label, []) }
+        if (_dir) {
+          try {
+            const cellDir = await _dir.getDirectoryHandle(cell.label)
+            const tagProps = await readCellProperties(cellDir)
+            const rawTags = tagProps?.['tags']
+            this.cellTagsCache.set(cell.label, Array.isArray(rawTags)
+              ? (rawTags as unknown[]).filter((t): t is string => typeof t === 'string')
+              : [])
+            if (!this.cellLinkCache.has(cell.label)) {
+              this.cellLinkCache.set(cell.label, typeof tagProps?.['link'] === 'string' && (tagProps['link'] as string).length > 0)
+            }
+          } catch { this.cellTagsCache.set(cell.label, []) }
+        } else {
+          this.cellTagsCache.set(cell.label, [])
+        }
       }
 
       // check cache first — unless the caller forced a reload for this
@@ -4236,6 +4372,30 @@ export class ShowCellDrone extends Drone {
       if (isHiddenItem) {
         const bgray = bcr * 0.3 + bcg * 0.3 + bcb * 0.3
         bcr = bgray * 0.5; bcg = bgray * 0.5; bcb = bgray * 0.5
+      }
+      // Group accent for peer tiles — every peer-contributed tile gets
+      // the publisher's deterministic pubkey-derived color as its
+      // border, ALWAYS (not just in spotlight mode). Each contributor
+      // is visually identifiable at a glance: Alice's tiles glow one
+      // hue, Bob's another. Same labelToRgb hash used for label-based
+      // identity colors, just keyed on pubkey — uniform "identity
+      // color" architecture across own tiles and peer groups.
+      //
+      // Spotlight emphasis: when a peer's layer is surfaced via the
+      // layer-cycle strip / alt+scroll, their tiles render at full
+      // brightness; other peer groups dim slightly so the active layer
+      // pops without losing the rest. Own tiles keep their normal
+      // borderColor (label or substrate-derived).
+      const cellPubkey = this.#peerPubkeyByLabel.get(c.label)
+      if (cellPubkey) {
+        const [pr, pg, pb] = labelToRgb(cellPubkey)
+        const brightness = this.#spotlightPubkey === null
+          ? 0.85                                          // no spotlight — all groups at uniform group brightness
+          : (this.#spotlightPubkey === cellPubkey ? 1.0   // this peer is active — full intensity
+            : 0.45)                                       // other peer — recede so the active group pops
+        bcr = pr * brightness
+        bcg = pg * brightness
+        bcb = pb * brightness
       }
       borderColor.set([bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb, bcr, bcg, bcb], bcp)
       bcp += 12

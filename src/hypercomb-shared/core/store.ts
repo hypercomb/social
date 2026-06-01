@@ -24,17 +24,25 @@ export class Store extends EventTarget {
   public static readonly HIVE_DIRECTORY = '__hive__'
   public static readonly BEES_DIRECTORY = '__bees__'
   public static readonly DEPENDENCIES_DIRECTORY = '__dependencies__'
+  /** Canonical layer-bytes pool. Sig-keyed entries at top level
+   *  (`__layers__/<sig>`) hold the layer JSON for user content; markers
+   *  in `__history__/<lineage>/<NNNN>` are pointer records that reference
+   *  them. Per-domain subdirectories at `__layers__/<domain>/` hold
+   *  install manifests (deployment artifacts) — distinguishable from
+   *  sig entries by name shape (sig = 64 hex, domain = non-hex). */
   public static readonly LAYERS_DIRECTORY = '__layers__'
   public static readonly RESOURCES_DIRECTORY = '__resources__'
   public static readonly CLIPBOARD_DIRECTORY = '__clipboard__'
   public static readonly HISTORY_DIRECTORY = '__history__'
   public static readonly THREADS_DIRECTORY = '__threads__'
   public static readonly COMPUTATION_DIRECTORY = '__computation__'
-  /** Render-cache decorations: pre-expanded, sig-keyed snapshots produced
-   *  passively after first render. Lookups for a sig check this directory
-   *  first — single file read, content already inlined — before falling
-   *  back to walking history bags. Pure derived state; can be deleted and
-   *  regenerated from the merkle truth in `__history__/`. */
+  /** Legacy sig-keyed layer-bytes pool. Pre-migration data lives here;
+   *  read path falls back to it after `__layers__/<sig>` misses. New
+   *  writes go to the canonical `__layers__/<sig>` pool, not here.
+   *  Sig-keyed pools are not "derived" — sig === hash(bytes), so an
+   *  entry either matches its address or doesn't exist. Deletion is
+   *  always safe in the sense that any peer with the same bytes can
+   *  re-serve them under the same sig. */
   public static readonly OPTIMIZED_DIRECTORY = '__optimized__'
   /** Children manifests: per-parent decoration that inlines the resolved
    *  child layer objects. Keyed by parent layer sig. Lets show-cell skip
@@ -146,12 +154,12 @@ export class Store extends EventTarget {
     }
   }
 
-  public domainLayersDirectory = async (
-    domain: string,
-    create: boolean = false
-  ): Promise<FileSystemDirectoryHandle> => {
-    return await this.layers.getDirectoryHandle(domain, { create })
-  }
+  // `domainLayersDirectory` removed: `__layers__/` has no subdirectories.
+  // All layers live flat at `__layers__/<sig>` regardless of source
+  // (boot install, sentinel sync, user commit, peer pull). Sig
+  // identity makes per-domain partitioning unnecessary — same content
+  // gets the same address from anywhere. Callers use `store.layers`
+  // directly when they need the dir handle.
 
   // -------------------------------------------------
   // bee loader
@@ -524,14 +532,6 @@ export class Store extends EventTarget {
   readonly #layerBytesCache = new Map<string, Uint8Array>()
   readonly #layerBytesPending = new Map<string, Promise<Uint8Array | null>>()
 
-  // Sig → "<domain>/<filename>" index, built on first lookup miss by scanning
-  // every domain dir once. After that, getFileHandle goes directly to the right
-  // place — no per-fetch domain scan, no exception loop.
-  // The index covers what's on disk at build time; new commits add entries.
-  #layerIndex = new Map<string, { domain: string; filename: string }>()
-  #layerIndexBuilt = false
-  #layerIndexBuilding: Promise<void> | null = null
-
   // PERF INSTRUMENTATION (temporary — remove after diagnosis)
   #perfStats = {
     cacheHits: 0,
@@ -539,9 +539,6 @@ export class Store extends EventTarget {
     pendingHits: 0,
     loadCalls: 0,
     totalLoadMs: 0,
-    indexHits: 0,
-    indexBuildMs: 0,
-    indexEntries: 0,
   }
   public dumpPerfStats(): void {
     const s = this.#perfStats
@@ -549,10 +546,9 @@ export class Store extends EventTarget {
     console.log(`[store-perf] avg load ms: ${s.loadCalls ? (s.totalLoadMs / s.loadCalls).toFixed(2) : 0}`)
   }
 
-  /** Read a layer JSON by signature. Tiered lookup:
+  /** Read layer bytes by signature. Resolves through:
    *    1. In-memory layerBytesCache (hot, instant)
-   *    2. `__optimized__/<sig>` (single file read, pre-expanded — fast)
-   *    3. `__layers__/<domain>/<sig>` history fallback (slow)
+   *    2. `__layers__/<sig>` pool (single file read)
    *  Once read, cached in memory for subsequent calls. */
   public getLayerBytes = async (signature: string): Promise<Uint8Array | null> => {
     const cached = this.#layerBytesCache.get(signature)
@@ -571,10 +567,37 @@ export class Store extends EventTarget {
     }
   }
 
-  /** Read the pre-expanded render-cache decoration for a sig from
-   *  `__optimized__/<sig>`. Returns null if absent. Single file read,
-   *  no domain scan. Decorations are written passively after first render
-   *  / commitLayer; safe to delete and regenerate from history. */
+  /** Read bytes from the sig-keyed layer pool at `__layers__/<sig>`.
+   *  Single direct file read; absent → null. The pool is content-
+   *  addressed: sig === hash(bytes), so an entry can never be stale,
+   *  only present or absent. Markers in `__history__/<lineage>/<NNNN>`
+   *  reference into this pool. */
+  public getLayerPoolBytes = async (signature: string): Promise<Uint8Array | null> => {
+    if (!this.layers) return null
+    try {
+      const handle = await this.layers.getFileHandle(signature, { create: false })
+      const file = await handle.getFile()
+      return new Uint8Array(await file.arrayBuffer())
+    } catch { return null }
+  }
+
+  /** Write bytes to the sig-keyed layer pool at `__layers__/<sig>`.
+   *  Idempotent (sig === hash(bytes), so identical writes produce
+   *  identical bytes). Best-effort; the marker is the canonical
+   *  reference, the pool entry is its resolved content. */
+  public writeLayerBytes = async (signature: string, bytes: ArrayBuffer): Promise<void> => {
+    if (!this.layers) return
+    try {
+      const handle = await this.layers.getFileHandle(signature, { create: true })
+      const writable = await handle.createWritable()
+      try { await writable.write(bytes) } finally { await writable.close() }
+    } catch { /* best-effort */ }
+  }
+
+  /** Legacy alias for `getLayerPoolBytes` against `__optimized__/<sig>`.
+   *  Pre-migration data lives here; readers fall back to it after the
+   *  sig-keyed `__layers__/<sig>` pool misses. New writes go to the
+   *  pool only; this method exists for back-compat with stored data. */
   public getOptimizedBytes = async (signature: string): Promise<Uint8Array | null> => {
     if (!this.optimized) return null
     try {
@@ -584,16 +607,16 @@ export class Store extends EventTarget {
     } catch { return null }
   }
 
-  /** Write a pre-expanded layer decoration to `__optimized__/<sig>`.
-   *  Idempotent — same content overwrites same file. Best-effort; any
-   *  error is silent because the decoration is pure cache. */
+  /** Legacy mirror writer — keeps `__optimized__/<sig>` populated for
+   *  pre-migration readers. New code should call `writeLayerBytes`
+   *  (which targets the canonical `__layers__/<sig>` pool). */
   public writeOptimizedBytes = async (signature: string, bytes: ArrayBuffer): Promise<void> => {
     if (!this.optimized) return
     try {
       const handle = await this.optimized.getFileHandle(signature, { create: true })
       const writable = await handle.createWritable()
       try { await writable.write(bytes) } finally { await writable.close() }
-    } catch { /* cache miss on next read is fine */ }
+    } catch { /* best-effort */ }
   }
 
   /** Read the children manifest for a parent layer sig. Returns the
@@ -629,66 +652,16 @@ export class Store extends EventTarget {
     } catch { /* cache miss on next read is fine */ }
   }
 
-  /** Scans every domain dir once and indexes every layer file by signature.
-   *  Idempotent and lazy — only runs on first cache miss after construction. */
-  #ensureLayerIndex = async (): Promise<void> => {
-    if (this.#layerIndexBuilt) return
-    if (this.#layerIndexBuilding) return this.#layerIndexBuilding
-    this.#layerIndexBuilding = (async () => {
-      const t0 = performance.now()
-      const domainNames: string[] = []
-      for await (const [name, entry] of (this.layers as any).entries() as AsyncIterable<[string, FileSystemHandle]>) {
-        if (entry.kind === 'directory') domainNames.push(name)
-      }
-      for (const domain of domainNames) {
-        const domainDir = await this.layers.getDirectoryHandle(domain).catch(() => null)
-        if (!domainDir) continue
-        for await (const [filename, entry] of (domainDir as any).entries() as AsyncIterable<[string, FileSystemHandle]>) {
-          if (entry.kind !== 'file') continue
-          const sig = filename.replace(/\.json$/i, '')
-          if (!this.#layerIndex.has(sig)) {
-            this.#layerIndex.set(sig, { domain, filename })
-          }
-        }
-      }
-      this.#layerIndexBuilt = true
-      this.#perfStats.indexBuildMs = performance.now() - t0
-      this.#perfStats.indexEntries = this.#layerIndex.size
-      console.log(`[store-perf] layer index built: ${this.#layerIndex.size} entries in ${this.#perfStats.indexBuildMs.toFixed(2)}ms`)
-    })()
-    try { await this.#layerIndexBuilding } finally { this.#layerIndexBuilding = null }
-  }
-
   #loadLayerBytes = async (signature: string): Promise<Uint8Array | null> => {
     const t0 = performance.now()
     this.#perfStats.loadCalls++
     try {
-      // Tier 1: pre-expanded render decoration (single file, no scan).
-      const optimized = await this.getOptimizedBytes(signature)
-      if (optimized) return optimized
-
-      // Tier 2: indexed history layer file (one direct file read).
-      await this.#ensureLayerIndex()
-      const hit = this.#layerIndex.get(signature)
-      if (!hit) return null
-      this.#perfStats.indexHits++
-      const domainDir = await this.layers.getDirectoryHandle(hit.domain).catch(() => null)
-      if (!domainDir) return null
-      const handle = await domainDir.getFileHandle(hit.filename).catch(() => null)
-      if (!handle) return null
-      const file = await handle.getFile()
-      return new Uint8Array(await file.arrayBuffer())
+      // `__layers__/<sig>` is the only place layer bytes live —
+      // boot install, sentinel sync, user commits, peer pulls all
+      // write here. One pool, content-addressed, no fallbacks.
+      return await this.getLayerPoolBytes(signature)
     } finally {
       this.#perfStats.totalLoadMs += performance.now() - t0
-    }
-  }
-
-  /** Update the layer index when a new layer is committed to OPFS. Callers that
-   *  write layer files should invoke this so subsequent reads find them via the
-   *  index rather than triggering a rebuild. */
-  public registerLayer(signature: string, domain: string, filename = signature): void {
-    if (!this.#layerIndex.has(signature)) {
-      this.#layerIndex.set(signature, { domain, filename })
     }
   }
 

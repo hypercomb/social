@@ -13,14 +13,29 @@ import { EffectBus } from '@hypercomb/core'
 
 export type ToastType = 'info' | 'success' | 'tip' | 'warning'
 
+/**
+ * A single button on a toast. Multi-action toasts (e.g. an Accept /
+ * No thanks consent prompt) pass `actions: ToastAction[]` instead of
+ * the legacy single `actionLabel` + `actionEffect`. `kind` drives the
+ * visual style — `primary` is filled (the affirmative choice),
+ * `secondary` is text-only (the soft decline). Default `secondary`.
+ */
+export interface ToastAction {
+  label: string
+  effect: string
+  payload?: unknown
+  kind?: 'primary' | 'secondary'
+}
+
 export interface ToastRequest {
   type: ToastType
   message: string
   title?: string
   duration?: number            // ms — 0 means sticky (no auto-dismiss)
-  actionLabel?: string         // optional action button text
-  actionEffect?: string        // effect to emit when action is clicked
-  actionPayload?: unknown      // payload for the action effect
+  actionLabel?: string         // legacy single-action label
+  actionEffect?: string        // legacy single-action effect to emit
+  actionPayload?: unknown      // legacy single-action payload
+  actions?: ToastAction[]      // multi-action variant (Material combo)
 }
 
 export interface Toast {
@@ -32,6 +47,7 @@ export interface Toast {
   actionLabel: string | null
   actionEffect: string | null
   actionPayload: unknown
+  actions: readonly ToastAction[]
   fading: boolean
   createdAt: number
 }
@@ -80,6 +96,9 @@ export class ToastDrone extends EventTarget {
       actionLabel: request.actionLabel ?? null,
       actionEffect: request.actionEffect ?? null,
       actionPayload: request.actionPayload ?? null,
+      actions: Array.isArray(request.actions)
+        ? request.actions.filter(a => !!a?.label && !!a?.effect).slice(0, 4)
+        : [],
       fading: false,
       createdAt: Date.now(),
     }
@@ -118,6 +137,19 @@ export class ToastDrone extends EventTarget {
     const toast = this.#toasts.find(t => t.id === id)
     if (!toast?.actionEffect) return
     EffectBus.emit(toast.actionEffect, toast.actionPayload)
+    this.dismiss(id)
+  }
+
+  /** Execute one button from a multi-action toast (index into the
+   *  `actions` array as ordered at show-time). Emits the bound effect
+   *  and dismisses the toast. Safe to call with out-of-range index — no
+   *  effect fires, no dismiss. */
+  executeActionAt(id: number, actionIndex: number): void {
+    const toast = this.#toasts.find(t => t.id === id)
+    if (!toast) return
+    const action = toast.actions?.[actionIndex]
+    if (!action?.effect) return
+    EffectBus.emit(action.effect, action.payload)
     this.dismiss(id)
   }
 

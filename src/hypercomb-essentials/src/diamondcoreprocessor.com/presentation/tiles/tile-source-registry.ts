@@ -97,7 +97,17 @@ export class TileSourceRegistry {
 
 // IoC registration — the singleton instance any contributor or
 // consumer can resolve.
+//
+// MUST start the line with `window.ioc.register(` (no leading `;`, no
+// optional-chaining, no cast) so scripts/prepare.ts at prepare.ts:86
+// picks this file up as a side-effect module and adds an import to
+// side-effects.ts. Without this exact shape, the regex misses the
+// file → side-effects barrel skips it → the module never loads →
+// the registry is never registered in IoC → show-cell silently
+// no-ops its peer-pull at show-cell.drone.ts:1921 → peer tiles arrive
+// in the swarm cache but never reach the renderer. That was the
+// "incognito sees nothing" bug.
 const _registry = new TileSourceRegistry()
-;(window as any).ioc?.register?.(IOC_KEY, _registry)
+window.ioc.register(IOC_KEY, _registry)
 
 export const TILE_SOURCE_REGISTRY_KEY = IOC_KEY

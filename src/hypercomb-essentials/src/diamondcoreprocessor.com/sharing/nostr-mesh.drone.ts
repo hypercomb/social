@@ -1,7 +1,40 @@
 // diamondcoreprocessor.com/nostr/nostr-mesh.drone.ts
+//
+// Live bootstrap relay (wss://jwize.com) shipped 2026-05-29. Behind the
+// hc:nostrmesh:use-live-relay localStorage flag; default-off so casual
+// browsers never touch the operator's home-hosted server. See lines
+// below for full LIVE_RELAY guardrail and the dev-machine override.
 import { Drone } from '@hypercomb/core'
 
 const LOCAL_RELAY = 'ws://localhost:7777'
+// Live bootstrap relay.
+//
+// ⚠️ HARD GUARANTEE: This constant is referenced in EXACTLY ONE
+// runtime branch — the gated seed expression in `loadRelays()` below.
+// Casual / first-time browsers must NEVER hit this URL without an
+// explicit opt-in from the user. If you find yourself referencing
+// `LIVE_RELAY` anywhere else — adding it to a defaults array, pushing
+// it into `configureRelays()`, returning it from a fallback, putting
+// it in a docs example that runs as code — STOP. You're about to
+// route every visitor's events onto the operator's home-hosted server
+// without their permission. The opt-in flow is:
+//
+//   localStorage['hc:nostrmesh:use-live-relay'] = '1'   (gates LIVE_RELAY)
+//   localStorage['hc:nostrmesh:relays']        = '[…]'  (manual override, wins)
+//
+// Both are user-driven (DevTools or explicit slash command), never set
+// by code. Keep it that way.
+const LIVE_RELAY = 'wss://jwize.com'
+
+// Anchor LIVE_RELAY in an exported symbol so esbuild's tree-shaker
+// cannot prove the constant is unreferenced after optimizing the
+// loadRelays ternary. Without this, the 'wss://jwize.com' literal
+// gets pruned out of the bundle entirely (confirmed: zero deployed
+// bees contained 'jwize' before this anchor was added).
+export const RELAY_URLS = Object.freeze({
+  local: LOCAL_RELAY,
+  live: LIVE_RELAY,
+} as const)
 
 type NostrEvent = { id?: string; pubkey?: string; created_at: number; kind: number; tags: string[][]; content: string; sig?: string }
 type MeshEvt = { relay: string; sig: string; event: NostrEvent; payload: any }
@@ -654,6 +687,22 @@ export class NostrMeshDrone extends Drone {
     return false
   }
 
+  private isLocalContext = (): boolean => {
+    // True when the app itself is being served from a local-development
+    // origin. Used by loadRelays to prefer LOCAL_RELAY over LIVE_RELAY
+    // when the operator is testing on the same machine that hosts the
+    // relay — avoids round-tripping their own events through Cloudflare.
+    try {
+      const host = String(window?.location?.hostname ?? '').toLowerCase()
+      if (!host) return false
+      if (host === 'localhost' || host === '127.0.0.1' || host === '::1') return true
+      if (host.endsWith('.local')) return true
+      return false
+    } catch {
+      return false
+    }
+  }
+
   private isLoopbackRelay = (relay: string): boolean => {
     try {
       const u = new URL(relay)
@@ -1006,16 +1055,27 @@ export class NostrMeshDrone extends Drone {
     // Master privacy switch. Private mode (`hc:mesh-public` not set
     // to 'true') means zero mesh network — no relay subscriptions,
     // no publishes, no boot-time WebSocket bootstrap. The local
-    // `hc:nostrmesh:network` key is a finer-grained override but
-    // can never override the master to enable network when private.
+    // `hc:nostrmesh:network` key is a finer-grained opt-OUT, never
+    // an opt-IN: when mesh-public is true the user has already
+    // consented to mesh networking, so the network defaults ON
+    // unless they explicitly disabled it via the `'0'` value.
+    //
+    // Why the asymmetry: the OLD behaviour was "mesh-public on AND
+    // hc:nostrmesh:network='1' AND `hc:nostrmesh:relays` set". A fresh
+    // incognito tab with mesh-public toggled on via UI would have
+    // `hc:nostrmesh:network` UNSET → fall through → networkEnabled
+    // stayed false, mesh never opened sockets, no peer events ever
+    // arrived. The user saw their tiles never sync and concluded "the
+    // mesh is broken". Treating absence as opt-in (default ON when
+    // mesh-public is true) makes the public switch self-sufficient.
+    // Users who want fine-grained off without flipping privacy still
+    // have the explicit `'0'` value.
     if (localStorage.getItem('hc:mesh-public') !== 'true') return false
     const v = localStorage.getItem('hc:nostrmesh:network')
     if (v === '0') return false
-    if (v === '1') return true
+    return true
   } catch {}
-  // Default to OFF (private). Users opt INTO mesh networking via
-  // the mesh-public toggle; they should never get surprise outbound
-  // connections to public Nostr relays on first launch.
+  // Storage unavailable: default to OFF so we never surprise-connect.
   return false
 }
 
@@ -1032,6 +1092,21 @@ export class NostrMeshDrone extends Drone {
     this.sockets.delete(url)
     this.note('socket:pause', url)
   }
+
+  // Reset the across-relay event-id dedupe set on pause. The
+  // replaceable-event slot at the relay survives our disconnect;
+  // when we come back online (re-toggle to public) the relay
+  // replays its latest stored event for our resubscribe — but the
+  // publisher's heartbeat may not have re-fired yet, so the event
+  // ID is identical to the one we already saw in the previous
+  // session. Without this clear, `onMessage` would treat it as a
+  // duplicate and silently drop it, leaving SwarmDrone's peer
+  // cache empty until the publisher's next heartbeat (up to 30s).
+  // Clearing here means the replay always reaches consumers; the
+  // worst case is a single duplicate emission if the user toggles
+  // rapidly, which is benign — replaceable caches converge.
+  this.recentIds = []
+  this.recentIdsSet.clear()
 }
 
   private loadDebugFlag = (): boolean => {
@@ -1039,11 +1114,37 @@ export class NostrMeshDrone extends Drone {
   }
 
   private loadRelays = (fallback: string[]): string[] => {
-    // Always guarantee at least LOCAL_RELAY in the result. Without this,
+    // Always guarantee at least one relay in the result. Without this,
     // a fresh browser with no `hc:nostrmesh:relays` localStorage entry
     // ends up with zero relays and silently drops every publish — events
     // hit local fanout (so the sender "sees" them) but never reach peers.
-    const defaults = fallback.length > 0 ? fallback : [LOCAL_RELAY]
+    //
+    // `hc:nostrmesh:use-live-relay='1'` is the opt-in for the shared
+    // bootstrap relay (LIVE_RELAY). Without it we default to LOCAL_RELAY
+    // so first-time / casual visitors never touch the shared server.
+    // An explicit `hc:nostrmesh:relays` always wins over both.
+    //
+    // Dev-machine override: even when the live-relay flag is on, if the
+    // app itself was loaded from a local context (localhost / 127.0.0.1
+    // / ::1 / *.local), we prefer LOCAL_RELAY. Rationale: when the relay
+    // operator is testing their own deployed build on the same machine
+    // that hosts the relay, every event would otherwise round-trip
+    // through Cloudflare back to themselves — wasted hop, noisier
+    // metrics, slower iteration. From any other origin (the real
+    // deployment domain) the flag uses LIVE_RELAY as before.
+    // IIFE on purpose: a `let useLive = false; try { useLive = ... }` pattern
+    // here lets esbuild constant-propagate `false` into the seed expression,
+    // dead-code-eliminating the LIVE_RELAY branch and removing the
+    // 'wss://jwize.com' literal from the bundle entirely. Wrapping the read
+    // in an IIFE makes the value opaque to constant propagation — esbuild
+    // cannot statically evaluate the return.
+    const useLive = ((): boolean => {
+      try { return localStorage.getItem('hc:nostrmesh:use-live-relay') === '1' }
+      catch { return false }
+    })()
+    const localContext = this.isLocalContext()
+    const seed = (useLive && !localContext) ? [LIVE_RELAY] : [LOCAL_RELAY]
+    const defaults = fallback.length > 0 ? fallback : seed
     try {
       const raw = localStorage.getItem('hc:nostrmesh:relays')
       if (!raw) return defaults.slice()

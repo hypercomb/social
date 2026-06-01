@@ -64,6 +64,25 @@
         </div>
       }
 
+      @if (showOpenForSubscribersToggle()) {
+        <button
+          class="open-for-subscribers-btn"
+          [class.on]="openForSubscribers()"
+          type="button"
+          (mousedown)="$event.preventDefault(); openForSubscribersToggle.emit()"
+          [attr.aria-label]="openForSubscribersLabel()"
+          [attr.aria-pressed]="openForSubscribers()"
+          [title]="openForSubscribersLabel()"
+        >
+          <!-- broadcast / antenna icon — on = filled rays, off = outline -->
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="2"/>
+            <path d="M16.24 7.76a6 6 0 0 1 0 8.49M7.76 16.24a6 6 0 0 1 0-8.49"/>
+            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 19.07a10 10 0 0 1 0-14.14"/>
+          </svg>
+        </button>
+      }
+
     </div>
   </div>
 

@@ -17,11 +17,14 @@ import { NotesStripComponent } from "@hypercomb/shared/ui/notes-strip/notes-stri
 import { NotesViewerComponent } from "@hypercomb/shared/ui/notes-viewer/notes-viewer.component"
 import { MeshModalComponent } from "@hypercomb/shared/ui/mesh-modal/mesh-modal.component"
 import { CameraCaptureComponent } from "@hypercomb/shared/ui/camera-capture/camera-capture.component"
+import { LayerCycleStripComponent } from "@hypercomb/shared/ui/layer-cycle-strip/layer-cycle-strip.component"
+import { ToastComponent } from "@hypercomb/shared/ui/toast/toast.component"
+import { PresenceBannerComponent } from "@hypercomb/shared/ui/presence-banner/presence-banner.component"
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent, MeshModalComponent, CameraCaptureComponent],
+  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent, MeshModalComponent, CameraCaptureComponent, LayerCycleStripComponent, ToastComponent, PresenceBannerComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })

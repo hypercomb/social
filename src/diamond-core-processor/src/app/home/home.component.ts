@@ -65,7 +65,10 @@ export class HomeComponent implements OnDestroy {
   #installToastTimer: ReturnType<typeof setTimeout> | null = null
 
   // state
-  readonly selfOrigin = location.origin
+  // Default content source: Azure blob storage (the canonical, deployed
+  // location for bee/layer/dependency bundles). DCP's own origin no
+  // longer serves content — it is a UI-only static web app.
+  readonly defaultContentBase = 'https://storagehypercomb.blob.core.windows.net/dcp'
   readonly domains = signal<string[]>(this.#loadDomains())
   readonly domainInput = signal('')
   readonly searchTerm = signal('')

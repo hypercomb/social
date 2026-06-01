@@ -5,6 +5,7 @@ import type { HostReadyPayload } from '../../presentation/tiles/pixi-host.worker
 import type { HexGeometry } from '../../presentation/grid/hex-geometry.js'
 import { DEFAULT_HEX_GEOMETRY } from '../../presentation/grid/hex-geometry.js'
 import type { InputGate } from '../input-gate.service.js'
+import { readViewportAt, writeViewportAt } from '../../editor/viewport-store.js'
 
 type Pt = { x: number; y: number }
 
@@ -12,22 +13,11 @@ type Pt = { x: number; y: number }
 // ViewportPersistence — thin write coordinator
 // -------------------------------------------------
 // Inlined here so Angular's esbuild cannot tree-shake the IoC registration.
-// Both ZoomDrone and PanningDrone report state here; writes are debounced
-// and merged into the existing 0000 JSON atomically.
-
-const PROPERTIES_FILE = '0000'
-
-const readProperties = async (
-  dir: FileSystemDirectoryHandle
-): Promise<Record<string, unknown>> => {
-  try {
-    const fh = await dir.getFileHandle(PROPERTIES_FILE)
-    const file = await fh.getFile()
-    return JSON.parse(await file.text())
-  } catch {
-    return {}
-  }
-}
+// Both ZoomDrone and PanningDrone report viewport state here. It is
+// persisted by LOCATION SIGNATURE into the flat, non-history
+// `__viewport__/<sig>` store (see editor/viewport-store.ts) — never into
+// the content-addressed layer, so panning/zooming can't skew a layer's
+// signature or pollute undo/redo.
 
 // `fit: true` marks a zoom that came from zoomToFit (or auto-fit), so the
 // next viewport-size change can recompute the fit transform instead of
@@ -41,13 +31,19 @@ export type PanSnapshot = { dx: number; dy: number }
 export type MeshOffsetSnapshot = { x: number; y: number }
 export type ViewportSnapshot = { zoom?: ZoomSnapshot; pan?: PanSnapshot; meshOffset?: MeshOffsetSnapshot }
 
-// Persist is scheduled via requestAnimationFrame so multiple
-// setPan/setZoom calls within the same frame collapse into one OPFS
-// write. Frame-aligned (not setTimeout 0) so the write runs after the
-// paint instead of competing with it, and the cap is ~60 writes/sec
-// even on a high-poll pointing device. The "pan-then-refresh loses
-// last gesture" race is covered by the pagehide / visibilitychange
-// flush handlers below, which call #flushNow before the page unloads.
+/**
+ * Source of a viewport setter call.
+ * - `'user'`: result of an explicit user gesture (mousewheel, pinch,
+ *   spacebar pan, touch pan, /fit shortcut). Schedules a debounced
+ *   commit to the new tile-properties-backed viewport store so the
+ *   state persists across navigation and reload.
+ * - `'auto'` (default): automatic / programmatic write (refit-on-entry,
+ *   auto-fit-first-add, init defaults, fullscreen recenter). Updates
+ *   in-memory state only; does NOT trigger the persistent commit.
+ *   Otherwise re-entering a layer would commit a fresh fit-snapshot
+ *   on every visit and clobber the user's saved pan.
+ */
+export type ViewportSource = 'user' | 'auto'
 
 export class ViewportPersistence extends EventTarget {
 
@@ -56,7 +52,7 @@ export class ViewportPersistence extends EventTarget {
     // Pagehide is the canonical "user is leaving" signal — flush any
     // pending write so a gesture-then-close doesn't lose the last frame.
     // Async OPFS writes inside pagehide may not always complete, but the
-    // 100ms debounce already keeps the at-risk window small.
+    // ~200ms debounce already keeps the at-risk window small.
     if (typeof window !== 'undefined') {
       window.addEventListener('pagehide', this.#flushNow)
       // visibilitychange covers tab-switch / mobile app-switch where
@@ -67,235 +63,95 @@ export class ViewportPersistence extends EventTarget {
     }
   }
 
-  #dir: FileSystemDirectoryHandle | null = null
-  #rafId: number | null = null
-  #pending: ViewportSnapshot = {}
+  // In-memory mirror of the current location's viewport. Synchronous
+  // getters (read by applyCenter on resize/boot) serve from here; the
+  // sig-keyed `__viewport__` store is the source of truth across reloads.
   #lastRead: ViewportSnapshot = {}
-  #storeListening = false
   #reading: Promise<ViewportSnapshot> | null = null
   #suspended = false
 
-  // Single op queue: every read and write goes through this so a read of
-  // dir-A's 0000 cannot start before an in-flight write to dir-A's 0000
-  // has landed. Without this, navigating out (which fire-and-forgets the
-  // flush) and back races the pending write — the back-nav read reaches
-  // OPFS first and sees the pre-flush snapshot, undoing the user's last
-  // change. Symptom: press R, navigate up, navigate back — viewport
-  // resets to the pre-R position; refresh then hovering shows the correct
-  // (post-R) state.
-  #opQueue: Promise<unknown> = Promise.resolve()
+  // ── Persist coordination ──────────────────────────────────────────
+  //
+  // Viewport is committed to `__viewport__/<sign(segments)>` (flat,
+  // non-history) keyed by the CURRENT location. Only `source: 'user'`
+  // setter calls schedule a commit — auto sources (refit-on-entry,
+  // init defaults) update the in-memory mirror only, so re-entering a
+  // layer can't clobber the user's saved gesture. ~200ms debounce; a
+  // nav that changes location flushes the pending commit first so the
+  // gesture isn't stranded in the timer.
+  #currentSegments: readonly string[] | null = null
+  #commitTimer: ReturnType<typeof setTimeout> | null = null
+  #COMMIT_DEBOUNCE_MS = 200
 
-  #serialize = <T>(op: () => Promise<T>): Promise<T> => {
-    const p = this.#opQueue.then(op, op)
-    this.#opQueue = p.catch(() => undefined)
-    return p
-  }
-
-  /** Suspend persistence — viewport changes are applied visually but not saved to OPFS. */
+  /** Suspend persistence — viewport changes are applied visually but not saved. */
   suspend = (): void => { this.#suspended = true }
   /** Resume persistence. */
   resume = (): void => { this.#suspended = false }
 
-  // -- directory tracking --
-
-  #syncWithStore = (): void => {
-    const store = (window as any).ioc?.get('@hypercomb.social/Store') as
-      { current: FileSystemDirectoryHandle; addEventListener: EventTarget['addEventListener'] } | undefined
-    if (!store) return
-
-    this.setDir(store.current)
-
-    if (!this.#storeListening) {
-      this.#storeListening = true
-      store.addEventListener('change', () => this.setDir(store.current))
-    }
-  }
-
-  // Self-heal: when a setter fires before show-cell has called setDirSilent
-  // (the very first pan/zoom after boot, before the initial render lands),
-  // #dir is null and the gesture is lost. Resolve dir from lineage now so
-  // the persist of the in-flight gesture lands once dir is known.
-  // Idempotent — no-op when dir is already set or no resolver is available.
-  #resolvingDir: Promise<void> | null = null
-  #ensureDirFromLineage = (): void => {
-    if (this.#dir) return
-    if (this.#resolvingDir) return
-    const lineage = (window as any).ioc?.get('@hypercomb.social/Lineage') as
-      { explorerDir?: () => Promise<FileSystemDirectoryHandle | null> } | undefined
-    if (!lineage?.explorerDir) return
-    this.#resolvingDir = (async () => {
-      try {
-        const dir = await lineage.explorerDir!()
-        if (dir && !this.#dir) {
-          this.#dir = dir
-          // Drain anything that was queued while dir was null.
-          if (this.#pending.zoom || this.#pending.pan || this.#pending.meshOffset) {
-            this.#schedulePersist()
-          }
-        }
-      } catch { /* leave dir null; next gesture will retry */ }
-      finally { this.#resolvingDir = null }
-    })()
-  }
-
-  /** Switch directory without reading or dispatching restore — caller already applied the viewport. */
-  setDirSilent = (dir: FileSystemDirectoryHandle | null): void => {
-    if (this.#dir === dir) return
-
-    // Queue the flush so a subsequent read of this dir (e.g. nav back)
-    // sees the post-flush bytes — both go through the same op queue.
-    if (this.#rafId !== null) {
-      cancelAnimationFrame(this.#rafId)
-      this.#rafId = null
-    }
-    const flushDir = this.#dir
-    const flushPending = this.#pending
-    const hasPending = flushPending.zoom || flushPending.pan || flushPending.meshOffset
-    if (flushDir && hasPending) {
-      void this.#serialize(() => this.#persistTo(flushDir, flushPending))
-    } else if (!flushDir && hasPending && dir) {
-      // Orphaned pending: a gesture (pan/zoom/meshOffset) landed
-      // while #dir was still null — typically the first user input
-      // racing show-cell's first render. The gesture was implicitly
-      // for the current location; persist it to the new dir we just
-      // learned about, otherwise the gesture is silently dropped on
-      // every wipe of #pending below.
-      void this.#serialize(() => this.#persistTo(dir, flushPending))
-    }
-
-    this.#dir = dir
-    this.#pending = {}
-    this.#lastRead = {}
-    this.#reading = null
-
-    // Notify drones the directory has changed. ZoomDrone uses this to
-    // cancel any in-flight zoom animation — without this the animation
-    // would keep ticking against the new layer's container, overwriting
-    // its restored zoom with mid-frame values from the outgoing layer's
-    // fit / animateToScale.
-    this.dispatchEvent(new CustomEvent('dir-change'))
-  }
-
-  setDir = (dir: FileSystemDirectoryHandle | null): void => {
-    if (this.#dir === dir) return
-
-    // Queue the flush of the old dir's pending writes BEFORE the new dir
-    // read. read() also goes through the op queue, so the read on a
-    // subsequent navigation back is guaranteed to see this flush's bytes
-    // — no race between fire-and-forget write and immediate read on
-    // nav-back.
-    if (this.#rafId !== null) {
-      cancelAnimationFrame(this.#rafId)
-      this.#rafId = null
-    }
-    const flushDir = this.#dir
-    const flushPending = this.#pending
-    const hasPending = flushPending.zoom || flushPending.pan || flushPending.meshOffset
-    if (flushDir && hasPending) {
-      void this.#serialize(() => this.#persistTo(flushDir, flushPending))
-    } else if (!flushDir && hasPending && dir) {
-      // Same orphan-drain as setDirSilent: a gesture queued before
-      // any dir was known belongs to the location we just learned.
-      void this.#serialize(() => this.#persistTo(dir, flushPending))
-    }
-
-    this.#dir = dir
-    this.#pending = {}
-    this.#lastRead = {}
-    this.#reading = null
-
-    // Same dir-change notice as setDirSilent — drones cancel in-flight
-    // animations before the new layer's snapshot lands.
-    this.dispatchEvent(new CustomEvent('dir-change'))
-
-    // Read the new directory's viewport and notify subscribers — queued
-    // after the flush above (and any other in-flight writes).
-    if (dir) {
-      void this.read().then(snap => {
-        if (this.#dir === dir) {
-          this.dispatchEvent(new CustomEvent('restore', { detail: snap }))
-        }
-      })
-    }
-  }
-
   // -- drone-facing api --
 
-  // Setter contract: every update writes to BOTH the in-memory cache
-  // (#lastRead) and the pending-to-disk buffer (#pending) in the same
-  // tick. The cache is the source for synchronous getters; the file
-  // is the source of truth on disk (debounced to coalesce gesture
-  // bursts). Cache and file are kept in lock-step — never diverge.
+  // Setter contract: update the in-memory mirror synchronously (the
+  // source for the getters below) and, for user gestures, schedule a
+  // debounced commit to the sig-keyed store.
 
-  setZoom = (scale: number, cx: number, cy: number, fit = false): void => {
+  setZoom = (scale: number, cx: number, cy: number, fit = false, source: ViewportSource = 'auto'): void => {
     if (this.#suspended) return
-    if (!this.#dir) this.#syncWithStore()
-    if (!this.#dir) this.#ensureDirFromLineage()
     // Strip `fit: false` from the stored snapshot to keep JSON minimal —
     // absence == not a fit. Only set the property when truly a fit.
     const zoom = fit ? { scale, cx, cy, fit: true } : { scale, cx, cy }
-    this.#pending.zoom = zoom
     this.#lastRead = { ...this.#lastRead, zoom }
-    if (this.#dir) this.#schedulePersist()
+    if (source === 'user') this.#scheduleStoreCommit()
   }
 
-  setPan = (dx: number, dy: number): void => {
+  setPan = (dx: number, dy: number, source: ViewportSource = 'auto'): void => {
     if (this.#suspended) return
-    if (!this.#dir) this.#syncWithStore()
-    if (!this.#dir) this.#ensureDirFromLineage()
     const pan = { dx, dy }
-    this.#pending.pan = pan
     this.#lastRead = { ...this.#lastRead, pan }
-    if (this.#dir) this.#schedulePersist()
+    if (source === 'user') this.#scheduleStoreCommit()
   }
 
   /** Persist the renderer's mesh offset (its position inside the layer
    *  container). Saved per-layer so the position stays fixed across
    *  navigation; never auto-changed by the renderer. Only updated when
    *  the user explicitly recenters via the navigation command. */
-  setMeshOffset = (x: number, y: number): void => {
+  setMeshOffset = (x: number, y: number, source: ViewportSource = 'auto'): void => {
     if (this.#suspended) return
-    if (!this.#dir) this.#syncWithStore()
-    if (!this.#dir) this.#ensureDirFromLineage()
     const meshOffset = { x, y }
-    this.#pending.meshOffset = meshOffset
     this.#lastRead = { ...this.#lastRead, meshOffset }
-    if (this.#dir) this.#schedulePersist()
+    if (source === 'user') this.#scheduleStoreCommit()
   }
 
   get lastPan(): PanSnapshot | undefined {
-    return this.#pending.pan ?? this.#lastRead.pan
+    return this.#lastRead.pan
   }
 
   get lastZoom(): ZoomSnapshot | undefined {
-    return this.#pending.zoom ?? this.#lastRead.zoom
+    return this.#lastRead.zoom
   }
 
   get lastMeshOffset(): MeshOffsetSnapshot | undefined {
-    return this.#pending.meshOffset ?? this.#lastRead.meshOffset
+    return this.#lastRead.meshOffset
   }
 
   read = (): Promise<ViewportSnapshot> => {
-    if (!this.#dir) this.#syncWithStore()
-    if (!this.#dir) return Promise.resolve({})
-
     // deduplicate concurrent reads (both drones call read() on host-ready)
     if (this.#reading) return this.#reading
 
-    const dir = this.#dir
-    // Queue the read so any pending writes (including a fire-and-forget
-    // flush from a recent setDir) land before we read.
-    this.#reading = this.#serialize(async () => {
+    const segs = this.#currentSegments ?? this.#segmentsFromLineage()
+    if (!segs) return Promise.resolve({})
+
+    this.#reading = (async () => {
       try {
-        const props = await readProperties(dir)
-        const vp = (props as any).viewport as ViewportSnapshot | undefined
-        if (this.#dir === dir) this.#lastRead = vp ?? {}
-        return vp ?? {} as ViewportSnapshot
+        const snap = await readViewportAt(segs)
+        // Only adopt into the cache if we're still at this location — a
+        // nav during the read must not let stale data overwrite the new
+        // location's snapshot.
+        if (this.#sameLocation(segs)) this.#lastRead = snap ?? {}
+        return snap ?? {}
       } catch {
-        if (this.#dir === dir) this.#lastRead = {}
         return {} as ViewportSnapshot
       }
-    })
+    })()
 
     void this.#reading.finally(() => {
       this.#reading = null
@@ -304,81 +160,89 @@ export class ViewportPersistence extends EventTarget {
     return this.#reading
   }
 
+  /** Resolve the current location's lineage segments (root = []). Used
+   *  as a fallback when show-cell hasn't called setCurrentLocation yet
+   *  (very first read at boot). */
+  #segmentsFromLineage = (): readonly string[] | null => {
+    const lineage = (window as any).ioc?.get('@hypercomb.social/Lineage') as
+      { explorerSegments?: () => readonly string[] } | undefined
+    const segs = lineage?.explorerSegments?.()
+    return segs ? [...segs] : null
+  }
+
+  #sameLocation = (segs: readonly string[]): boolean => {
+    const cur = this.#currentSegments
+    return !!cur && cur.length === segs.length && cur.every((s, i) => s === segs[i])
+  }
+
   // -- internals --
 
-  #schedulePersist = (): void => {
-    if (this.#rafId !== null) return
-    this.#rafId = requestAnimationFrame(() => {
-      this.#rafId = null
-      void this.#persist()
-    })
-  }
-
-  /** Cancel the scheduled frame and queue an immediate flush. Used by
-   *  pagehide/visibilitychange handlers so the user's last gesture
-   *  isn't stranded in #pending when the tab closes or backgrounds. */
+  /** Flush any pending store commit immediately. Used by pagehide /
+   *  visibilitychange so the user's last gesture isn't stranded in the
+   *  debounce timer when the tab closes or backgrounds. */
   #flushNow = (): void => {
-    if (this.#rafId !== null) {
-      cancelAnimationFrame(this.#rafId)
-      this.#rafId = null
-    }
-    void this.#persist()
+    this.#flushStoreCommit()
   }
 
-  #persistTo = async (
-    dir: FileSystemDirectoryHandle,
-    pending: ViewportSnapshot,
-  ): Promise<void> => {
+  /**
+   * Set the location this VP instance is reporting to. Called by show-cell
+   * on every layer change. Flushes any pending viewport commit for the OLD
+   * location before switching, so a gesture-then-nav doesn't strand the
+   * gesture in the debounce timer.
+   */
+  setCurrentLocation = (segments: readonly string[] | null): void => {
+    const next = segments ? [...segments] : null
+    const prev = this.#currentSegments
+    // Identity-by-value compare; nav events that re-emit the same segments
+    // shouldn't fire a spurious flush.
+    if (prev && next && prev.length === next.length && prev.every((s, i) => s === next![i])) return
+    if (prev) this.#flushStoreCommit()
+    this.#currentSegments = next
+    // Drop any in-flight read for the previous location and load the new
+    // one into the in-memory cache so synchronous getters (lastPan /
+    // lastZoom, read by applyCenter on resize/boot) reflect where we are.
+    this.#reading = null
+    // Location changed — tell ZoomDrone to cancel any in-flight zoom
+    // animation so it can't tick stale mid-frame values onto the new
+    // layer's container. (Formerly fired by setDir/setDirSilent.)
+    this.dispatchEvent(new CustomEvent('dir-change'))
+    if (next) void this.read()
+  }
+
+  #scheduleStoreCommit = (): void => {
+    if (this.#commitTimer !== null) clearTimeout(this.#commitTimer)
+    this.#commitTimer = setTimeout(() => {
+      this.#commitTimer = null
+      void this.#commitToStore()
+    }, this.#COMMIT_DEBOUNCE_MS)
+  }
+
+  #flushStoreCommit = (): void => {
+    if (this.#commitTimer !== null) {
+      clearTimeout(this.#commitTimer)
+      this.#commitTimer = null
+      void this.#commitToStore()
+    }
+  }
+
+  #commitToStore = async (): Promise<void> => {
+    // Prefer the location show-cell told us about; fall back to the live
+    // lineage so a gesture that fires before setCurrentLocation lands
+    // still persists to the right place instead of being silently lost.
+    const segs = this.#currentSegments ?? this.#segmentsFromLineage()
+    if (!segs) return
+    // Snapshot the current in-memory state and commit it. Subsequent
+    // user-source setters will re-schedule another commit naturally.
+    const snapshot: ViewportSnapshot = {
+      zoom: this.lastZoom,
+      pan: this.lastPan,
+      meshOffset: this.lastMeshOffset,
+    }
     try {
-      const props = await readProperties(dir)
-      const viewport: ViewportSnapshot = {
-        ...((props as any).viewport as ViewportSnapshot | undefined),
-        ...pending,
-      }
-      ;(props as any).viewport = viewport
-
-      const fileHandle = await dir.getFileHandle(PROPERTIES_FILE, { create: true })
-      const writable = await fileHandle.createWritable()
-      try {
-        await writable.write(JSON.stringify(props, null, 2))
-      } finally {
-        await writable.close()
-      }
-
-      // DON'T overwrite #lastRead from the file here — setters update
-      // the cache synchronously on every gesture, so the in-memory
-      // value is always as fresh or fresher than what we just wrote.
-      // The file is the source of truth across reloads; the cache is
-      // the source for in-session reads, and setters keep them in
-      // lock-step. Letting #persistTo blow over #lastRead with a
-      // stale-by-one-tick merge would race a setter that fired between
-      // pending-snapshot and write-completion.
-
-      // Cache invalidation broadcast — any consumer that mirrors 0000 in
-      // memory can drop their copy and re-read on next access. The OPFS
-      // write is the source of truth; this event is the "it changed" signal.
-      EffectBus.emit('viewport:persisted', { dir, snapshot: viewport })
-    } catch {
-      // OPFS write failed — silently drop, will retry on next gesture
+      await writeViewportAt(segs, snapshot)
+    } catch (err) {
+      console.warn('[viewport] commit failed:', err)
     }
-  }
-
-  #persist = async (): Promise<void> => {
-    const dir = this.#dir
-    if (!dir) return
-
-    // Snapshot pending and clear it BEFORE awaiting so a fast follow-up
-    // gesture doesn't write the same data twice. If the persist throws,
-    // the next setX call simply re-populates pending.
-    const pending = { ...this.#pending }
-    // Bail when nothing is pending. Must include meshOffset — otherwise
-    // setMeshOffset writes never reach 0000 (mesh-offset would not
-    // round-trip through OPFS, and "position should never be forgotten"
-    // would be violated on every reload).
-    if (!pending.zoom && !pending.pan && !pending.meshOffset) return
-    this.#pending = {}
-
-    await this.#serialize(() => this.#persistTo(dir, pending))
   }
 }
 
@@ -430,7 +294,9 @@ export class ZoomDrone extends Drone {
     this.#registerKeybindings()
 
     this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
-      if (cmd === 'navigation.fitToScreen' || cmd === 'navigation.recenter') this.zoomToFit()
+      // User-invoked fit via keyboard shortcut — write through as 'user'
+      // so the new-path commit fires and the fit persists.
+      if (cmd === 'navigation.fitToScreen' || cmd === 'navigation.recenter') this.zoomToFit(false, 'user')
     })
 
     this.onEffect<HexGeometry>('render:geometry-changed', (geo) => {
@@ -590,7 +456,7 @@ export class ZoomDrone extends Drone {
     // sibling.
     this.#cancelAnim()
     const clamped = this.clamp(scale)
-    this.adjustZoom(this.renderContainer, clamped, pivotClient)
+    this.adjustZoom(this.renderContainer, clamped, pivotClient, 'user')
   }
 
   public zoomByFactor = (factor: number, pivotClient: Pt): void => {
@@ -607,19 +473,19 @@ export class ZoomDrone extends Drone {
 
     // if pinch-zoom pushes below minScale, trigger zoom-to-fit
     if (raw < this.minScale) {
-      this.zoomToFit()
+      this.zoomToFit(false, 'user')
       return
     }
 
     const next = this.clamp(raw)
-    this.adjustZoom(target, next, pivotClient)
+    this.adjustZoom(target, next, pivotClient, 'user')
   }
 
   /**
    * Zoom-to-fit: calculates the bounding box of all hex cells via the
    * mesh adapter and animates the viewport to center and fit all content.
    */
-  public zoomToFit = (snap = false): void => {
+  public zoomToFit = (snap = false, source: ViewportSource = 'auto'): void => {
     if (!this.renderContainer || !this.renderer || !this.app) return
 
     this.#cancelAnim()
@@ -653,7 +519,7 @@ export class ZoomDrone extends Drone {
     const screenCx = window.innerWidth * 0.5
     const screenCy = window.innerHeight * 0.5
     this.app.stage.position.set(screenCx, screenCy)
-    this.vp?.setPan(0, 0)
+    this.vp?.setPan(0, 0, source)
 
     // content screen size = bounds * containerScale * stageScale
     // so containerScale = availPx / (bounds * stageScale)
@@ -684,7 +550,7 @@ export class ZoomDrone extends Drone {
       // stale (cx, cy) — the saved coords were derived from this
       // moment's safeMidX/Y and would otherwise leave content shrunk
       // and off-center in the new viewport.
-      this.#saveZoom(target, true)
+      this.#saveZoom(target, true, source)
       return
     }
 
@@ -716,7 +582,7 @@ export class ZoomDrone extends Drone {
       // coalesces to one OPFS write per gesture, but if the user
       // navigates / closes the tab mid-animation, the partial fit
       // state is captured rather than dropped.
-      this.#saveZoom(target, true)
+      this.#saveZoom(target, true, source)
 
       if (t < 1) {
         this.#animFrameId = requestAnimationFrame(animate)
@@ -797,7 +663,8 @@ export class ZoomDrone extends Drone {
     // navigation, page close, or another gesture, the partial scale
     // still persists. The previous "save only on completion" pattern
     // dropped state when animations didn't reach t=1.
-    this.#saveZoom(target)
+    // animateToScale is called by mousewheel input — user-source.
+    this.#saveZoom(target, false, 'user')
 
     if (t < 1) {
       this.#animFrameId = requestAnimationFrame(this.#animTick)
@@ -820,7 +687,7 @@ export class ZoomDrone extends Drone {
   // - translate to cancel the difference
   //
 
-  private adjustZoom = (target: any, newScale: number, pivotClient: Pt): void => {
+  private adjustZoom = (target: any, newScale: number, pivotClient: Pt, source: ViewportSource = 'auto'): void => {
     if (!this.renderer || !this.canvas) return
 
     const pivotGlobal = this.clientToPixiGlobal(pivotClient)
@@ -845,7 +712,7 @@ export class ZoomDrone extends Drone {
         target.position.y + (pivotParent.y - postParent.y)
       )
       this.#clampContentPosition()
-      this.#saveZoom(target)
+      this.#saveZoom(target, false, source)
       return
     }
 
@@ -855,7 +722,7 @@ export class ZoomDrone extends Drone {
     )
 
     this.#clampContentPosition()
-    this.#saveZoom(target)
+    this.#saveZoom(target, false, source)
   }
 
   // Single cancellation primitive for every animation path. Both
@@ -873,8 +740,8 @@ export class ZoomDrone extends Drone {
     }
   }
 
-  #saveZoom = (target: any, fit = false): void => {
-    this.vp?.setZoom(target.scale.x, target.position.x, target.position.y, fit)
+  #saveZoom = (target: any, fit = false, source: ViewportSource = 'auto'): void => {
+    this.vp?.setZoom(target.scale.x, target.position.x, target.position.y, fit, source)
   }
 
   // After any zoom-induced position/scale change, ensure at least one tile

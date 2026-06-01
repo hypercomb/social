@@ -24,7 +24,7 @@ import type { ImageEditorService } from
 import type { LinkSafetyService } from
   '@hypercomb/essentials/diamondcoreprocessor.com/safety/link-safety.service'
 import type { NotesService, Note } from
-  '@hypercomb/essentials/diamondcoreprocessor.com/notes'
+  '@hypercomb/essentials/diamondcoreprocessor.com/notes/notes.drone'
 
 /** Q&A item view-model — pairs a `[Q]`-prefixed note with the
  *  matching `[A:<qId>]` answer note when one exists. The qId is the

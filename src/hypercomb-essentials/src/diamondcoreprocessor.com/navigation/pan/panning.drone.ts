@@ -174,7 +174,9 @@ export class PanningDrone extends Drone {
       const s = this.renderer.screen
       const dx = this.stage.position.x - s.width * 0.5
       const dy = this.stage.position.y - s.height * 0.5
-      vp.setPan(dx, dy)
+      // 'user' source so the new-path debounced commit fires; the user
+      // gesture is what we want preserved across nav.
+      vp.setPan(dx, dy, 'user')
     }
   }
 }

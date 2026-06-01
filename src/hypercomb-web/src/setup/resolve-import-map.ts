@@ -7,20 +7,35 @@ export type ResolvedImports = Record<string, string>
 const isIOS = /iP(hone|ad|od)/i.test(navigator.userAgent)
 const OPFS_DEPENDENCY_BASE_PATH = isIOS ? '/content/__dependencies__' : '/opfs/__dependencies__'
 
+/**
+ * Build the runtime importmap by opening exactly one bag.
+ *
+ * Receiver-side `__dependencies__/` contains:
+ *   - `<bagSig>/0000…` — the active bag, named by its content sig
+ *   - `<leafSig>.js`   — namespace bundles at root, one per dep
+ *
+ * `installFromBundled` enforces the single-bag invariant: only one bag
+ * directory ever exists in `__dependencies__/` at a time (old ones are
+ * evicted before the new one is written). So the boot path:
+ *
+ *   1. scan `__dependencies__/` until we find a directory (the bag);
+ *   2. iterate its entries in parallel; each entry is two-line text
+ *      (line 1 = `@scope/name` alias, line 2 = leaf sig);
+ *   3. assemble the importmap directly from those pairs.
+ *
+ * No localStorage on the critical path. No leaf-file opens. No pointer
+ * file. The bag dir's existence IS the signal that an install is present.
+ *
+ * A flat-scan fallback survives for installs that predate the bag
+ * (`installFromBundled` runs without `dependenciesBag` set). New installs
+ * always populate the bag, so the fallback eventually goes idle.
+ */
 export const resolveImportMap = async (): Promise<ResolvedImports> => {
   const imports: ResolvedImports = {}
   const aliasSource = new Map<string, string>()
   imports['@hypercomb/core'] = '/hypercomb-core.runtime.js'
   imports['pixi.js'] = '/vendor/pixi.runtime.js'
 
-  // Reuse the OPFS handles `ensureInstall` already initialized via `Store`.
-  // Calling `navigator.storage.getDirectory()` a second time here (with its
-  // own short timeout) used to race on slower systems (e.g. macOS Catalina
-  // + Chrome 128): the timeout fired, the import map shipped without any
-  // namespace aliases, then `DependencyLoader` fell back to scanning OPFS
-  // directly, found a dep file, and tried `import('@dcp.com/link')` against
-  // the now-empty import map → `Failed to resolve module specifier`.
-  // `Store.initialize` memoizes, so this is idempotent.
   const store = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(
     '@hypercomb.social/Store',
   ) as Store | undefined
@@ -38,83 +53,55 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   const depsDir = store.dependencies
   if (!depsDir) return imports
 
-  // Sigbag path (Phase 2): when the installed manifest carries a
-  // `dependenciesBag` sig AND that bag directory is in OPFS, walk it
-  // in index order. Each entry file's contents is a leaf sig; the leaf
-  // file's first line carries the `// @namespace/name` alias.
-  //
-  // Benefits over flat scan:
-  //   - Order is authoritative (bag index = canonical load order)
-  //   - Skips bag directories that aren't the active one (if multiple
-  //     bag versions coexist during rollback / A-B)
-  //   - One file-handle open per entry instead of scanning the whole dir
-  //
-  // Falls through to flat scan if no bag is declared or the bag dir
-  // isn't present (older installs, partial transitions).
-  let bagWalkSucceeded = false
+  // Bag-discovery fast path. Iterate `__dependencies__/` once; the first
+  // directory whose name is a 64-hex sig is the active bag.
+  let bagPathSucceeded = false
   try {
-    const installedManifestRaw = localStorage.getItem('core-adapter.installed-manifest')
-    const installedManifest = installedManifestRaw ? JSON.parse(installedManifestRaw) : null
-    const activeBagSig: string | undefined = installedManifest?.dependenciesBag
+    let bagDir: FileSystemDirectoryHandle | null = null
+    for await (const [name, handle] of depsDir.entries()) {
+      if (handle.kind !== 'directory') continue
+      if (!/^[a-f0-9]{64}$/i.test(name)) continue
+      bagDir = handle as FileSystemDirectoryHandle
+      break
+    }
 
-    if (activeBagSig) {
-      const bagDir = await depsDir.getDirectoryHandle(activeBagSig).catch(() => null)
-      if (bagDir) {
-        const indexNames: string[] = []
-        for await (const [name] of bagDir.entries()) indexNames.push(name)
-        indexNames.sort()
+    if (bagDir) {
+      const names: string[] = []
+      for await (const [n] of bagDir.entries()) names.push(n)
+      names.sort()
 
-        for (const indexName of indexNames) {
-          const entryHandle = await bagDir.getFileHandle(indexName)
-          const entryFile = await entryHandle.getFile()
-          const leafSig = (await entryFile.text()).trim()
-          if (!leafSig) continue
+      const entries = await Promise.all(names.map(async (n) => {
+        const h = await bagDir!.getFileHandle(n).catch(() => null)
+        if (!h) return null
+        const text = (await (await h.getFile()).text()).trim()
+        const nl = text.indexOf('\n')
+        if (nl < 0) return null
+        const alias = text.slice(0, nl).trim()
+        const sig = text.slice(nl + 1).trim()
+        return alias && sig ? { alias, sig } : null
+      }))
 
-          const leafHandle = await depsDir.getFileHandle(`${leafSig}.js`).catch(() => null)
-          if (!leafHandle) {
-            // Bag points at a leaf we don't have on disk — fall back
-            // to flat scan rather than emit a half-built importmap.
-            console.warn(`[resolveImportMap] bag entry ${indexName} -> ${leafSig} missing leaf; falling back to flat scan`)
-            bagWalkSucceeded = false
-            break
-          }
-
-          const leafFile = await leafHandle.getFile()
-          const prefix = await leafFile.slice(0, 512).arrayBuffer()
-          const firstLine = new TextDecoder().decode(prefix).split('\n', 1)[0]?.trim()
-          if (!firstLine) continue
-          const alias = firstLine.split(/\s+/)[1]
-          if (!alias) continue
-
-          if (imports[alias]) {
-            const existing = aliasSource.get(alias) ?? 'unknown'
-            console.warn(`[resolveImportMap] alias collision for ${alias}; keeping ${existing}, skipping ${leafSig}`)
-            continue
-          }
-
-          imports[alias] = `${OPFS_DEPENDENCY_BASE_PATH}/${leafSig}`
-          aliasSource.set(alias, leafSig)
-        }
-        bagWalkSucceeded = bagWalkSucceeded || indexNames.length > 0
-        if (bagWalkSucceeded) {
-          console.log(`[resolveImportMap] resolved ${aliasSource.size} aliases from bag ${activeBagSig.slice(0, 12)}`)
-        }
+      for (const entry of entries) {
+        if (!entry) continue
+        if (imports[entry.alias]) continue
+        imports[entry.alias] = `${OPFS_DEPENDENCY_BASE_PATH}/${entry.sig}`
+        aliasSource.set(entry.alias, entry.sig)
       }
+      bagPathSucceeded = aliasSource.size > 0
     }
   } catch (err) {
-    console.warn('[resolveImportMap] bag walk failed; falling back to flat scan', err)
-    bagWalkSucceeded = false
+    console.warn('[resolveImportMap] bag scan failed; falling back to flat scan', err)
+    bagPathSucceeded = false
   }
 
-  // Flat-scan fallback (existing behavior). Always runs when the bag
-  // path is absent or failed. Idempotent — `imports[alias]` collision
-  // check skips anything already set by the bag walk.
-  if (!bagWalkSucceeded) {
+  // Flat-scan fallback. Only runs when no bag dir is present (installs
+  // that predate the bag emission). Reads each leaf's first 512 bytes
+  // to extract the namespace alias from the source-path comment.
+  if (!bagPathSucceeded) {
     for await (const [signature, handle] of depsDir.entries()) {
       if (handle.kind !== 'file') continue
 
       const file = await (handle as FileSystemFileHandle).getFile()
-
       const prefix = await file.slice(0, 512).arrayBuffer()
       const firstLine = new TextDecoder().decode(prefix).split('\n', 1)[0]?.trim()
       if (!firstLine) continue
@@ -133,7 +120,8 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
     }
   }
 
-  // Cache alias map so DependencyLoader can skip redundant OPFS scan
+  // Cache the alias map for in-session reuse by DependencyLoader.
+  // NOT consulted on the next boot — every cold boot re-derives from OPFS.
   ;(globalThis as any).__hypercombAliasMap = aliasSource
 
   return imports

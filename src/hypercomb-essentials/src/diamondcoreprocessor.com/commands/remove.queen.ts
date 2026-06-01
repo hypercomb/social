@@ -90,11 +90,14 @@ export class RemoveQueenBee extends QueenBee {
     // unmount runs immediately. LayerCommitter.update is O(siblings)
     // per ancestor depth and can take seconds with large layers; gating
     // the visual on it makes deletes feel broken.
-    const groupId = targets.length > 1
-      ? `remove:${Date.now().toString(36)}:${Math.random().toString(36).slice(2, 8)}`
-      : undefined
+    //
+    // `viaUpdate: true` tells LayerCommitter's per-event commit listener
+    // to skip queueing — the upcoming committer.update() call IS the
+    // atomic commit for this whole operation. Without the flag, N tiles
+    // produce N history markers (one per event); with it, the whole
+    // multi-delete collapses into a single marker.
     for (const name of targets) {
-      EffectBus.emit('cell:removed', { cell: name, segments, groupId })
+      EffectBus.emit('cell:removed', { cell: name, segments, viaUpdate: true })
     }
 
     await committer.update(segments, nextLayer)

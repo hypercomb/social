@@ -144,23 +144,6 @@ export class OrderProjection {
             }
           }
           break
-        case 'rename':
-          // Rename op: cell field is resource sig → { oldName, newName }
-          if (store) {
-            const blob: Blob | null = await store.getResource(op.cell)
-            if (blob) {
-              try {
-                const parsed = JSON.parse(await blob.text())
-                if (parsed?.oldName && parsed?.newName) {
-                  const idx = order.indexOf(parsed.oldName)
-                  if (idx !== -1) {
-                    order[idx] = parsed.newName
-                  }
-                }
-              } catch { /* skip corrupted payload */ }
-            }
-          }
-          break
         // other op types (add-drone, remove-drone, tag-state, content-state, layout-state, instruction-state) don't affect order
       }
     }

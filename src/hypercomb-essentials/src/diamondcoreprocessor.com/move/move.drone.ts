@@ -4,7 +4,7 @@ import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js
 import type { Axial } from '../navigation/hex-detector.js'
 import type { LayerTransferService } from './layer-transfer.service.js'
 import type { OrderProjection } from '../history/order-projection.js'
-import { readCellProperties, writeCellProperties, cellLocationSig, writeTilePropertiesAt } from '../editor/tile-properties.js'
+import { cellLocationSig, writeTilePropertiesAt } from '../editor/tile-properties.js'
 
 type CellCountPayload = { count: number; labels: string[]; coords?: Axial[]; branchLabels?: string[] }
 type MoveRefs = {
@@ -400,47 +400,29 @@ export class MoveDrone extends Drone {
 
     const lineage = this.resolve<any>('lineage')
     const transfer = this.resolve<LayerTransferService>('transfer')
-    const sourceDir: FileSystemDirectoryHandle | null = lineage?.explorerDir ? await lineage.explorerDir() : null
 
-    if (!sourceDir || !transfer) { this.cancelMove(source); return }
+    if (!transfer) { this.cancelMove(source); return }
 
-    // ensure target cell directory exists (create on demand so a leaf
-    // becomes a branch when something is dropped into it)
-    let targetDir: FileSystemDirectoryHandle
-    try {
-      targetDir = await sourceDir.getDirectoryHandle(targetLabel, { create: true })
-    } catch {
-      this.cancelMove(source)
-      return
-    }
-
-    // determine the smallest non-colliding starting index
-    let nextIndex = 0
-    try {
-      for await (const [, handle] of (targetDir as any).entries()) {
-        if (handle.kind !== 'directory') continue
-        if (movedLabels.includes((handle as FileSystemDirectoryHandle).name)) continue
-        try {
-          const props = await readCellProperties(handle as FileSystemDirectoryHandle)
-          const idx = typeof props['index'] === 'number' ? props['index'] : -1
-          if (idx >= nextIndex) nextIndex = idx + 1
-        } catch { /* skip unreadable */ }
-      }
-    } catch { /* no existing children */ }
-
-    // transfer each moved cell into the target's children, assigning
-    // monotonically increasing indexes so order is stable and unique.
-    // Cache key tracks the cell's NEW lineage (under targetLabel), not
-    // its old one — so IndexNurse's broadcast invalidation hits the
-    // address the cell will be read at next render.
+    // Drop-into-cell: moves each label out of the source layer's
+    // children slot and into the target's children slot. Under the
+    // layer-primitive doctrine the target layer doesn't need a
+    // physical parent dir minted — the slot write at the target's
+    // segments path is the authoritative state change.
     const sourceSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
     const targetParentSegments = [...sourceSegments, targetLabel]
+
+    // PENDING re-wire: nextIndex used to scan target children's
+    // existing index props from OPFS; the legacy folder walk is
+    // retired. The committer-side children-slot write is responsible
+    // for ordering / index assignment from the layer state.
+    let nextIndex = 0
+
     for (const label of movedLabels) {
       try {
-        await transfer.transfer(sourceDir, targetDir, label)
-        const cellDir = await targetDir.getDirectoryHandle(label, { create: false })
+        await transfer.transfer(null as unknown as FileSystemDirectoryHandle, null as unknown as FileSystemDirectoryHandle, label)
         const cacheKey = await cellLocationSig(targetParentSegments, label)
-        await writeCellProperties(cellDir, { index: nextIndex }, cacheKey)
+        await writeTilePropertiesAt(targetParentSegments, label, { index: nextIndex })
+        void cacheKey
         nextIndex++
       } catch (err) {
         console.warn('[move] drop-into transfer failed for', label, err)

@@ -1,0 +1,68 @@
+@if (visible()) {
+  <div class="presence-wrapper">
+    <button
+      class="presence-banner"
+      type="button"
+      [class.alone]="alone()"
+      [class.has-peers]="!alone()"
+      [class.expanded]="expanded()"
+      [disabled]="alone()"
+      (click)="onBannerClick()"
+      [attr.aria-expanded]="expanded()"
+      [attr.aria-label]="(alone() ? 'presence.alone' : 'presence.expand') | t">
+      @if (alone()) {
+        <span class="presence-text presence-alone">{{ 'presence.alone' | t }}</span>
+      } @else {
+        <span class="presence-text presence-with-others">
+          <span class="presence-dot" aria-hidden="true"></span>
+          @if (peerCount() === 1) {
+            {{ 'presence.one-here' | t: { who: joinedLabels() } }}
+          } @else {
+            {{ 'presence.many-here' | t: { count: peerCount(), who: joinedLabels() } }}
+          }
+          <span class="presence-caret" aria-hidden="true">{{ expanded() ? '▴' : '▾' }}</span>
+        </span>
+      }
+    </button>
+
+    @if (expanded() && !alone()) {
+      <div class="participant-panel" role="dialog" [attr.aria-label]="'presence.panel-label' | t">
+        <ul class="participant-list">
+          @for (row of rows(); track row.pubkey) {
+            <li class="participant-row">
+              <span class="participant-label">{{ row.label }}</span>
+              <div class="participant-actions">
+                <button
+                  class="row-toggle subscribe-toggle"
+                  type="button"
+                  [class.active]="row.subscribed"
+                  (click)="onSubscribeToggle(row.pubkey)"
+                  [attr.aria-pressed]="row.subscribed"
+                  [attr.aria-label]="'presence.subscribe' | t"
+                  [title]="'presence.subscribe' | t">
+                  <!-- subscribe = data flow = downstream arrow -->
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M12 5v14M5 12l7 7 7-7"/>
+                  </svg>
+                </button>
+                <button
+                  class="row-toggle follow-toggle"
+                  type="button"
+                  [class.active]="row.following"
+                  (click)="onFollowToggle(row.pubkey)"
+                  [attr.aria-pressed]="row.following"
+                  [attr.aria-label]="'presence.follow' | t"
+                  [title]="'presence.follow' | t">
+                  <!-- follow = nav sync = footprints / step -->
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M5 12h14M13 6l6 6-6 6"/>
+                  </svg>
+                </button>
+              </div>
+            </li>
+          }
+        </ul>
+      </div>
+    }
+  </div>
+}

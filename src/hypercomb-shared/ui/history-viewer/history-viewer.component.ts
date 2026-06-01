@@ -62,6 +62,8 @@ type HistoryService = {
   promoteToHead?(locationSig: string, layerSig: string): Promise<string | null>
   removeEntries?(locationSig: string, filenames: string[]): Promise<number>
   mergeEntries?(locationSig: string, filenames: string[]): Promise<string | null>
+  /** Compute the projected merged layer for preview without writing. */
+  projectMerge?(locationSig: string, filenames: string[]): Promise<Content | null>
   pruneExpiredDeletes?(locationSig: string): Promise<number>
 }
 type CursorService = {
@@ -87,6 +89,14 @@ type Slice = {
   lines: ReadonlyArray<{ text: string; status: 'same' | 'add' | 'remove' }>
   /** Raw JSON of the layer at this slice — copy button source. */
   json: string
+  /** Inflated tile properties (the 0000 resource at `properties[0]`)
+   *  formatted as pretty JSON. Null when the layer carries no
+   *  `properties` slot (e.g. root layer, freshly minted child with no
+   *  visual props yet) or when the resource fails to resolve / parse.
+   *  Renders as a separate read-only section below the layer JSON so
+   *  the user can see the canonical visual primitives without having
+   *  to click into the sig manually. */
+  properties: string | null
 }
 
 type Row = {
@@ -540,24 +550,64 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     cursor.seek(this.#total())
   }
 
+  // Merge preview state — populated by openMergePreview, cleared by
+  // closeMergePreview / commitMergePreview. While non-null the modal
+  // renders. `sourceCount` lets the modal label "X selected".
+  #mergePreview = signal<{
+    lines: ReadonlyArray<{ text: string; status: 'add' }>
+    sourceCount: number
+  } | null>(null)
+  readonly mergePreview = this.#mergePreview.asReadonly()
+  /** True while the merge commit is in flight — disables the button. */
+  readonly mergeCommitting = signal(false)
+
   /**
-   * Merge: same as makeHeadSelection, but also soft-deletes all the
-   * selected source entries. Net effect: one new row at top, selected
-   * sources disappear from the active list (still restorable from
-   * __deleted__ for 30 days).
+   * Compute the projected merged layer for the current selection and
+   * open the preview modal. Triggered from the header when N ≥ 2 rows
+   * are selected. Read-only — no marker is written until the user
+   * clicks commit.
    */
-  readonly mergeSelection = async (): Promise<void> => {
+  readonly openMergePreview = async (): Promise<void> => {
+    const history = this.#history()
+    const cursor = this.#cursor()
+    if (!history?.projectMerge || !cursor) return
+    const sel = this.#selected()
+    if (sel.size < 2) return
+    const projected = await history.projectMerge(cursor.state.locationSig, [...sel])
+    if (!projected) return
+    const lines = layerToDiffableLines(projected).map(text => ({ text, status: 'add' as const }))
+    this.#mergePreview.set({ lines, sourceCount: sel.size })
+  }
+
+  readonly closeMergePreview = (): void => {
+    this.#mergePreview.set(null)
+    this.mergeCommitting.set(false)
+  }
+
+  /**
+   * Commit the projected merge. Calls mergeEntries to write the unioned
+   * layer as a fresh head marker (sources are preserved — cherry-pick
+   * semantics). Closes the preview, clears selection, and seeks the
+   * cursor to the new head so the canvas reflects the merged state.
+   */
+  readonly commitMergePreview = async (): Promise<void> => {
     const history = this.#history()
     const cursor = this.#cursor()
     if (!history?.mergeEntries || !cursor) return
     const sel = this.#selected()
-    if (sel.size === 0) return
-    await history.mergeEntries(cursor.state.locationSig, [...sel])
-    await this.#refreshCursor(cursor)
-    this.#selected.set(new Set())
-    this.#lastSelectionAnchor = null
-    await this.#reload()
-    cursor.seek(this.#total())
+    if (sel.size < 2) return
+    this.mergeCommitting.set(true)
+    try {
+      await history.mergeEntries(cursor.state.locationSig, [...sel])
+      await this.#refreshCursor(cursor)
+      this.#selected.set(new Set())
+      this.#lastSelectionAnchor = null
+      this.#mergePreview.set(null)
+      await this.#reload()
+      cursor.seek(this.#total())
+    } finally {
+      this.mergeCommitting.set(false)
+    }
   }
 
   readonly openSlice = (index: number, event: Event): void => {
@@ -592,8 +642,56 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
       label: `#${index + 1} · ${when} · ${entry.layerSig.slice(0, 12)}…`,
       lines,
       json: nextJson,
+      properties: null,
     }])
     this.sliceCopied.set(false)
+    // Inflate the layer's `properties[0]` (the canonical 0000 resource)
+    // in the background and stitch it into the open slice when it
+    // resolves. Decoupled from the synchronous slice render so the
+    // modal pops instantly; the 0000 section fades in when ready.
+    void this.#hydrateSliceProperties(content)
+  }
+
+  /** Fetch and parse the layer's `properties[0]` resource — the canonical
+   *  0000 visual-properties JSON — and graft the formatted result onto
+   *  the topmost slice so the inspector shows the visual primitives
+   *  alongside the layer's slot bag. Silent on every miss path: a layer
+   *  with no properties slot, a missing resource, or unparseable bytes
+   *  all leave the slice's `properties` field null and the section
+   *  hidden. The user always has the manual-drill path as fallback. */
+  async #hydrateSliceProperties(content: Content): Promise<void> {
+    const propsSlot = (content as Record<string, unknown>)['properties']
+    if (!Array.isArray(propsSlot) || propsSlot.length === 0) return
+    const propSig = propsSlot[0]
+    if (typeof propSig !== 'string' || !/^[0-9a-f]{64}$/.test(propSig)) return
+    const store = this.#store()
+    if (!store) return
+    try {
+      const blob = await store.getResource(propSig)
+      if (!blob) return
+      const text = await blob.text()
+      let pretty = text
+      try {
+        const parsed = JSON.parse(text)
+        // Sort keys for stable display — same canonicalization the
+        // writer applies. Cosmetic; the underlying resource bytes are
+        // already canonical because writeTilePropertiesAt sorts keys
+        // before storing.
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          const sortedKeys = Object.keys(parsed).sort()
+          const canonical: Record<string, unknown> = {}
+          for (const k of sortedKeys) canonical[k] = (parsed as Record<string, unknown>)[k]
+          pretty = JSON.stringify(canonical, null, 2)
+        }
+      } catch { /* keep raw text */ }
+      // Patch only the topmost slice (matches the layer that just opened)
+      // and only if the user hasn't drilled away in the meantime.
+      this.#sliceStack.update(stack => {
+        if (stack.length === 0) return stack
+        const top = stack[stack.length - 1]
+        return [...stack.slice(0, -1), { ...top, properties: pretty }]
+      })
+    } catch { /* silent fallback to drill-in path */ }
   }
 
   readonly closeSlice = (): void => {
@@ -714,9 +812,17 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
       label: `↳ ${niceName}`,
       lines,
       json: json ?? '',
+      properties: null,
     }
     this.#sliceStack.update(s => [...s, slice])
     this.sliceCopied.set(false)
+    // Inflate 0000 for this drilled layer too — when the user walks
+    // INTO a child layer (e.g. clicks a sig in the parent's `children`
+    // array), they typically want to see what that child's visual
+    // primitives are. Same async hydrate path as openSlice.
+    if (parsed && typeof parsed === 'object') {
+      void this.#hydrateSliceProperties(parsed as Content)
+    }
   }
 
   /**

@@ -107,6 +107,54 @@ $types: (
   white-space: nowrap;
 }
 
+// Multi-action group — Material 3 combo: paired primary (filled) +
+// secondary (text). The two buttons sit flush in a small row so the
+// pairing reads as a single decision affordance, not two unrelated
+// chips. Used for the subscribe-request consent ("Accept" / "No
+// thanks") and any future multi-option toast.
+.toast-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.toast-combo-btn {
+  flex-shrink: 0;
+  border-radius: 999px;
+  padding: 0.18rem 0.65rem;
+  font-family: inherit;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease;
+  white-space: nowrap;
+
+  &.primary {
+    background: var(--md-primary, #7eb6d6);
+    color: var(--md-on-primary, #0a0a0a);
+    border: 1px solid var(--md-primary, #7eb6d6);
+    box-shadow: 0 0 5px rgba(126, 182, 214, 0.35);
+
+    &:hover {
+      filter: brightness(1.1);
+      box-shadow: 0 0 8px rgba(126, 182, 214, 0.55);
+    }
+  }
+
+  &.secondary {
+    background: transparent;
+    color: rgba(245, 245, 245, 0.75);
+    border: 1px solid transparent;
+
+    &:hover {
+      background: rgba(245, 245, 245, 0.06);
+      color: rgba(245, 245, 245, 0.95);
+    }
+  }
+}
+
 .toast-dismiss {
   flex-shrink: 0;
   display: flex;

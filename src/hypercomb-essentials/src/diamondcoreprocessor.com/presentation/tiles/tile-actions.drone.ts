@@ -1,7 +1,9 @@
 // diamondcoreprocessor.com/pixi/tile-actions.drone.ts
 import { Drone, EffectBus, hypercomb, normalizeCell } from '@hypercomb/core'
 import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey, OverlayTintFn } from './tile-overlay.drone.js'
-import { readCellProperties, writeCellProperties } from '../../editor/tile-properties.js'
+// Arrangement persistence currently disabled — `#getRootDir` returns
+// null pending the layer-slot read/write path, so the legacy
+// readCellProperties / writeCellProperties imports are no longer needed.
 
 /** Zone-scoped localStorage key for the hide list at this location.
  *  SwarmDrone writes `hc:current-zone` on every room/secret change
@@ -121,23 +123,21 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 
 // Default active icons per profile (defines the fallback order).
 //
-// public-own previously listed `expose`/`sync`/`merge` from the legacy
-// paired-channel path. Those icon providers were retired with the
-// move to the swarm model — leaving the entry pointing at names no
-// catalog (local + provided) had, which filtered to empty and rendered
-// nothing on hover in public mode. Now reflects the live catalog:
-// `hide` and `break-apart` are real entries on `public-own` in
-// ICON_REGISTRY above; adopting a peer tile is handled by the
+// public-own: `hide` and `break-apart` are real entries on `public-own`
+// in ICON_REGISTRY above; adopting a peer tile is handled by the
 // `public-external` profile (the tile flips kind once it's local).
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   'private': ['command', 'edit', 'note', 'reroll', 'remove', 'break-apart'],
   // Your own tile in public mode — same trash-bin remove that
   // private mode uses. Records a history op, can be undone.
   'public-own': ['remove', 'break-apart'],
-  // Peer-only mesh tiles you haven't adopted. `adopt` materialises
-  // them locally (carries the publisher's 0000 + image); `hide`
-  // dismisses without taking ownership (zone-scoped, instant,
-  // mesh-published so the filter survives reload + multi-device).
+  // Peer-only mesh tiles. Single-click `adopt` is the explicit
+  // "I want to expand on this topic" action — writes the tile to
+  // your local layer AND pulls the resources it references (images
+  // etc.) via the content broker. Different mechanism from auto-
+  // adopt: auto-adopt follows a participant continuously, single-
+  // adopt is one tile + its resources, on demand. `hide` dismisses
+  // a peer tile from view without taking ownership.
   'public-external': ['adopt', 'hide'],
 }
 
@@ -169,12 +169,19 @@ function computeIconPositions(activeNames: string[]): { x: number; y: number }[]
 
 // ── Persistence key in root properties ────────────────────────────
 
-const ARRANGEMENT_KEY = 'iconArrangement'
+// ARRANGEMENT_KEY removed alongside the dead persistence path; left as
+// a comment so anyone restoring the layer-slot-backed arrangement
+// reader/writer can pick the same property name back up.
+// const ARRANGEMENT_KEY = 'iconArrangement'
 
 type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 
 // ── Action names this bee handles ─────────────────────────────────
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'note', 'hide', 'break-apart', 'adopt', 'block', 'remove', 'reroll', 'import'])
+// 'adopt' is intentionally NOT in this set — SwarmAdoptDrone owns the
+// adopt path directly (its own tile:action listener at
+// swarm-adopt.drone.ts:63). The legacy paired-channel 'adopt' / 'import'
+// handlers were retired with the paired-channel subsystem.
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'note', 'hide', 'break-apart', 'block', 'remove', 'reroll'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -270,22 +277,10 @@ export class TileActionsDrone extends Drone {
   // ── Arrangement loading & registration ──────────────────────────
 
   async #loadArrangementAndRegister(): Promise<void> {
-    // Load saved arrangement from root properties
-    try {
-      const lineage = this.resolve<{ explorerDir(): Promise<FileSystemDirectoryHandle | null> }>('lineage')
-      const rootDir = await this.#getRootDir(lineage)
-      if (rootDir) {
-        const props = await readCellProperties(rootDir)
-        const saved = props[ARRANGEMENT_KEY] as IconArrangement | undefined
-        if (saved && typeof saved === 'object') {
-          this.#arrangement = saved
-        }
-      }
-    } catch {
-      // fallback to defaults — no saved arrangement
-    }
-
-    // Register icons for all profiles
+    // Arrangement load path pending re-wire through the layer-slot
+    // properties API. `#getRootDir` returns null today, so the legacy
+    // OPFS-backed load was unreachable; dropping the dead branch.
+    // Register icons for all profiles with the default arrangement.
     const descriptors = this.#buildAllDescriptors()
     this.emitEffect('overlay:register-action', descriptors)
 
@@ -390,19 +385,11 @@ export class TileActionsDrone extends Drone {
   // ── Persistence ─────────────────────────────────────────────────
 
   async #persistArrangement(): Promise<void> {
-    try {
-      const lineage = this.resolve<{ explorerDir(): Promise<FileSystemDirectoryHandle | null> }>('lineage')
-      const rootDir = await this.#getRootDir(lineage)
-      if (rootDir) {
-        await writeCellProperties(rootDir, { [ARRANGEMENT_KEY]: this.#arrangement })
-      }
-    } catch {
-      // persistence failure — silently ignore
-    }
-  }
-
-  async #getRootDir(_lineage: unknown): Promise<FileSystemDirectoryHandle | null> {
-    return null
+    // Persistence pending re-wire through the layer-slot properties API
+    // — the legacy OPFS write was unreachable (rootDir was always null),
+    // so we're dropping the dead body. The in-memory arrangement still
+    // drives the current session; it just doesn't survive restart yet.
+    void this.#arrangement
   }
 
   // ── Action handlers ─────────────────────────────────────────────
@@ -442,21 +429,6 @@ export class TileActionsDrone extends Drone {
         this.#unhide(label)
         break
 
-      case 'adopt':
-        // Route to paired-channel adopt — looks up the ephemeral share
-        // for this branchName and runs materialiseFromSig with full
-        // depth so the entire subtree lands in OPFS as real layers.
-        console.log('[sync] tile-actions: adopt →', label)
-        EffectBus.emit('paired-channel:adopt-request', { branchName: label })
-        break
-
-      case 'import':
-        // Promote a transient sync tile (and its descendants) to a
-        // permanent layer — clear the `transient: true` marker so the
-        // boot sweep won't wipe it next session.
-        console.log('[sync] tile-actions: import →', label)
-        EffectBus.emit('paired-channel:import-request', { branchName: label })
-        break
       case 'block':
         this.#hideOrBlock(label, 'hc:blocked-tiles', 'tile:blocked')
         break
@@ -584,6 +556,11 @@ export class TileActionsDrone extends Drone {
     )
     void swarm?.publishHide?.(updated)
 
+    // Drop the lineage-keyed hide too — break-apart unhides across
+    // every layer the user is filtering on, including the persistent
+    // cross-zone hide for peer visuals.
+    removeHiddenLineage(this.#segments(), label)
+
     void new hypercomb().act()
   }
 
@@ -652,10 +629,72 @@ export class TileActionsDrone extends Drone {
         '@diamondcoreprocessor.com/SwarmDrone',
       )
       void swarm?.publishHide?.(existing)
+
+      // Lineage-keyed hide — additional persistent layer so a hide
+      // survives across zones and sessions. The path string is the
+      // user-visible identity of the tile (parent segments + name).
+      // The swarm tile source filters against this list at render
+      // time, so a peer publishing the same lineage anywhere later
+      // stays hidden until the user explicitly un-hides via
+      // break-apart.
+      addHiddenLineage(this.#segments(), label)
     }
 
     void new hypercomb().act()
   }
+
+  /** Current navigation segments as a clean string array. Used to
+   *  compose the lineage-hide path for #hideOrBlock and #unhide. */
+  #segments(): readonly string[] {
+    const lineage = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
+    const segs = lineage?.explorerSegments?.() ?? []
+    return (Array.isArray(segs) ? segs : [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+  }
+}
+
+/** Append `parentSegments.join('/') + '/' + name` to the persistent
+ *  `hc:hidden-lineages` localStorage array. Cross-zone, cross-session
+ *  hide for peer visuals (and own tiles too — same key). Idempotent on
+ *  duplicates. The swarm tile source reads this list at render time. */
+function addHiddenLineage(parentSegments: readonly string[], name: string): void {
+  const locKey = parentSegments
+    .map(s => String(s ?? '').trim())
+    .filter(Boolean)
+    .join('/')
+  const path = locKey ? `${locKey}/${name}` : name
+  try {
+    const raw = localStorage.getItem('hc:hidden-lineages')
+    const parsed = raw ? JSON.parse(raw) : []
+    const list = Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []
+    if (list.includes(path)) return
+    list.push(path)
+    localStorage.setItem('hc:hidden-lineages', JSON.stringify(list))
+  } catch {
+    // localStorage might be unavailable (private browsing edge case);
+    // the hide still applies in the in-session name-keyed list.
+  }
+}
+
+/** Remove `parentSegments.join('/') + '/' + name` from the persistent
+ *  `hc:hidden-lineages` localStorage array. Paired with break-apart so
+ *  the cross-zone hide can be cleared by the same gesture that clears
+ *  the name-keyed local hide. */
+function removeHiddenLineage(parentSegments: readonly string[], name: string): void {
+  const locKey = parentSegments
+    .map(s => String(s ?? '').trim())
+    .filter(Boolean)
+    .join('/')
+  const path = locKey ? `${locKey}/${name}` : name
+  try {
+    const raw = localStorage.getItem('hc:hidden-lineages')
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return
+    const next = parsed.filter((x): x is string => typeof x === 'string' && x !== path)
+    localStorage.setItem('hc:hidden-lineages', JSON.stringify(next))
+  } catch { /* leave list as-is */ }
 }
 
 // ── Exports for overlay arrange mode ──────────────────────────────

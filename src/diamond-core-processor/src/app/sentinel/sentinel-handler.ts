@@ -565,14 +565,15 @@ export class SentinelHandler {
   }
 
   #loadDomains(): string[] {
-    const selfOrigin = location.origin
+    // Content lives in Azure blob storage; DCP itself no longer ships
+    // bee/layer/dependency bundles from its origin.
+    const azureBase = 'https://storagehypercomb.blob.core.windows.net/dcp'
     try {
       const stored: string[] = JSON.parse(localStorage.getItem(DOMAINS_KEY) ?? '[]')
-      // DCP always includes its own origin — modules are bundled in public/
-      if (!stored.includes(selfOrigin)) return [selfOrigin, ...stored]
+      if (!stored.includes(azureBase)) return [azureBase, ...stored]
       return stored
     } catch {
-      return [selfOrigin]
+      return [azureBase]
     }
   }
 }

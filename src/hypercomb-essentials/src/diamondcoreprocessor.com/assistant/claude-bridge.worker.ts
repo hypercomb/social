@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/bridge/claude-bridge.worker.ts
 import { Worker, EffectBus, normalizeCell, hypercomb, isSignature } from '@hypercomb/core'
-import { readCellProperties, writeCellProperties, readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
+import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import type { HistoryService } from '../history/history.service.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 import { inflate } from '../history/inflate.js'
@@ -71,7 +71,24 @@ export class ClaudeBridgeWorker extends Worker {
   #ws: WebSocket | null = null
   #timer: ReturnType<typeof setTimeout> | null = null
 
+  /** Warmup: subscribe to the explicit `claude-bridge:connect` event AND
+   *  attempt an auto-connect. The auto-connect is gated by `#isEnabled()`
+   *  (localhost + opt-in flag via URL query or localStorage), so users who
+   *  haven't enabled the bridge see no WS attempt at all. Users who HAVE
+   *  enabled it get a renderer registration on every page load — no manual
+   *  `connect()` console paste needed for Node scripts (e.g.
+   *  `_dolphin-revision.cjs`) to find a renderer. */
   protected override act = async (): Promise<void> => {
+    this.onEffect('claude-bridge:connect', () => this.connect())
+    // Auto-connect when the opt-in flag is set; #isEnabled() short-circuits
+    // for everyone else, keeping the console clean in default dev sessions.
+    this.connect()
+  }
+
+  /** Open the bridge WebSocket. Gated by `#isEnabled()` (host + opt-in
+   *  flag) and idempotent — safe to call multiple times. */
+  public connect(): void {
+    if (this.#ws) return
     if (!this.#isEnabled()) return
     this.#connect()
   }
@@ -680,36 +697,22 @@ export class ClaudeBridgeWorker extends Worker {
       return { id: req.id, ok: false, error: 'no layer provided' }
     }
 
-    // Walk from the absolute hypercombRoot, NOT lineage.explorerDir.
-    // The bridge is headless — segments must be interpreted as a path
-    // from root, identical regardless of where the user is currently
-    // navigated. Same fix as #listAt; the legacy explorerDir-relative
-    // semantics broke any caller that didn't first navigate the user.
-    const store = get<{ hypercombRoot?: FileSystemDirectoryHandle | null }>('@hypercomb.social/Store')
-    let dir: FileSystemDirectoryHandle | null = store?.hypercombRoot ?? null
-    if (!dir) return { id: req.id, ok: false, error: 'no hypercombRoot' }
-
-    // Walk to / create the parent path so OPFS reflects the segments.
+    // Build parentSegments from the request — no folder walk, no
+    // dir minting. Layer is the only source of truth for hierarchy;
+    // committer.update is the only write API. The previous folder-mirror
+    // step (mint parent dirs + mint each child name) was a parallel-store
+    // write that nothing in the render path reads.
     const parentSegments: string[] = []
     if (req.segments?.length) {
       for (const raw of req.segments) {
         const seg = normalizeCell(raw)
-        if (!seg) continue
-        dir = await dir.getDirectoryHandle(seg, { create: true })
-        parentSegments.push(seg)
+        if (seg) parentSegments.push(seg)
       }
     }
 
-    // Mirror children list to OPFS folders. Create any named child that
-    // isn't already a directory; existing folders not in children remain
-    // (orphan removal is a separate sweep, out of scope here).
     const childrenRaw = (layer as { children?: unknown }).children
     const children = Array.isArray(childrenRaw) ? childrenRaw.map(c => normalizeCell(String(c))).filter(Boolean) : []
-    for (const name of children) {
-      await dir.getDirectoryHandle(name, { create: true })
-    }
 
-    // Hand the whole layer to the committer's awaited update path.
     const committer = get<{
       update?: (segments: readonly string[], layer: object) => Promise<void>
     }>('@diamondcoreprocessor.com/LayerCommitter')
@@ -740,27 +743,28 @@ export class ClaudeBridgeWorker extends Worker {
     const cells = req.cells
     if (!cells?.length) return { id: req.id, ok: false, error: 'no cells provided' }
 
-    let dir = await this.#explorerDir()
-    if (!dir) return { id: req.id, ok: false, error: 'no explorer directory' }
-
-    // Walk to optional parent path. Children are added there with segments-aware
-    // cell:added events so the cascade starts at the correct depth regardless of
-    // the user's current navigation. One awaited cascade for the whole batch.
+    // Build parentSegments from the request — no folder walk, no
+    // dir minting. Layer is the only source of truth for hierarchy.
     const parentSegments: string[] = []
     if (req.segments?.length) {
       for (const raw of req.segments) {
         const seg = normalizeCell(raw)
-        if (!seg) continue
-        dir = await dir.getDirectoryHandle(seg, { create: true })
-        parentSegments.push(seg)
+        if (seg) parentSegments.push(seg)
       }
     }
 
+    // Per-cell `cell:added` events drive LayerCommitter's by-name
+    // delta path: each event queues a single APPEND op for the
+    // parent's `children` slot (committer resolves name → sig at
+    // commit time via `latestMarkerSigFor`). The commit machine
+    // batches all queued additions and emits ONE marker per ancestor
+    // — preserving every prior child verbatim. Do NOT call
+    // `committer.update(parent, { children: [new] })` here: that's a
+    // SET op which would replace the slot, wiping prior tiles.
     let count = 0
     for (const name of cells) {
       const normalized = normalizeCell(name)
       if (!normalized) continue
-      await dir.getDirectoryHandle(normalized, { create: true })
       EffectBus.emit('cell:added', { cell: normalized, segments: parentSegments.slice() })
       count++
     }
@@ -805,38 +809,27 @@ export class ClaudeBridgeWorker extends Worker {
     //     same shape #stamp / #update use). Use this from CLI tooling
     //     that wants to verify what stamp wrote without depending on
     //     the user's current navigation.
-    //   - cell: legacy single-name lookup relative to explorerDir.
+    //   - cell: legacy single-name lookup relative to explorer segments.
+    // Both modes resolve through readTilePropertiesAt, which reads from
+    // the layer-slot store (not OPFS folders). Layer is the only source
+    // of truth — folder walks are retired.
     const segmentsRaw = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
     if (segmentsRaw.length > 0) {
-      const store = get<{ hypercombRoot?: FileSystemDirectoryHandle | null }>('@hypercomb.social/Store')
-      let dir: FileSystemDirectoryHandle | null = store?.hypercombRoot ?? null
-      if (!dir) return { id: req.id, ok: false, error: 'no hypercombRoot' }
-      for (const seg of segmentsRaw) {
-        const clean = normalizeCell(seg)
-        if (!clean) continue
-        try {
-          dir = await dir.getDirectoryHandle(clean, { create: false })
-        } catch {
-          return { id: req.id, ok: false, error: `path not found: ${segmentsRaw.join('/')}` }
-        }
-      }
-      const props = await readCellProperties(dir!)
+      const normalized = segmentsRaw.map(s => normalizeCell(s)).filter(Boolean)
+      if (normalized.length === 0) return { id: req.id, ok: false, error: 'no segments' }
+      const cellName = normalized[normalized.length - 1]
+      const parentSegments = normalized.slice(0, -1)
+      const props = await readTilePropertiesAt(parentSegments, cellName)
       return { id: req.id, ok: true, data: props }
     }
 
     const name = req.cell ? normalizeCell(req.cell) : ''
     if (!name) return { id: req.id, ok: false, error: 'no cell name' }
 
-    const dir = await this.#explorerDir()
-    if (!dir) return { id: req.id, ok: false, error: 'no explorer directory' }
-
-    try {
-      const cellDir = await dir.getDirectoryHandle(name, { create: false })
-      const props = await readCellProperties(cellDir)
-      return { id: req.id, ok: true, data: props }
-    } catch {
-      return { id: req.id, ok: false, error: `cell not found: ${name}` }
-    }
+    const lineage = get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+    const parentSegments = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? ''))
+    const props = await readTilePropertiesAt(parentSegments, name)
+    return { id: req.id, ok: true, data: props }
   }
 
   async #history(req: BridgeRequest): Promise<BridgeResponse> {

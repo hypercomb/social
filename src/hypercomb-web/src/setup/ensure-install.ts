@@ -237,10 +237,12 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   const store = get('@hypercomb.social/Store') as Store | undefined
   if (!store) return
 
-  // Mirror resyncFromSentinel's layout exactly: bees/deps in flat dirs,
-  // layers under __layers__/sentinel/. This way the boot fast path and
-  // script-preloader find content at the same paths regardless of source.
-  const layerDir = await store.domainLayersDirectory('sentinel', true)
+  // All layers — boot bundle, sentinel sync, user commits — share one
+  // flat pool at `__layers__/<sig>`. No subdirectories. Sig-keyed
+  // content-addressed storage means there's no "install-scope" to
+  // partition by; everything that lives at sig X is, by definition,
+  // the bytes that hash to X.
+  const layerDir = store.layers
 
   const fetchBytes = async (path: string): Promise<ArrayBuffer | null> => {
     try {
@@ -298,6 +300,25 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     }))
     return written
   }
+
+  // Single-bag invariant: before writing the new bag dir, evict any prior
+  // bag dirs so `__dependencies__/` and `__bees__/` each contain exactly
+  // one bag dir after install. The receiver's importmap build relies on
+  // a `readdir` finding only the active bag — no pointer file needed.
+  const evictOldBagDirs = async (parentDir: FileSystemDirectoryHandle, keepSig: string): Promise<void> => {
+    const stale: string[] = []
+    for await (const [name, handle] of parentDir.entries()) {
+      if (handle.kind !== 'directory') continue
+      if (!/^[a-f0-9]{64}$/i.test(name)) continue
+      if (name === keepSig) continue
+      stale.push(name)
+    }
+    for (const name of stale) {
+      try { await parentDir.removeEntry(name, { recursive: true }) } catch { /* skip */ }
+    }
+  }
+  if (bundled.dependenciesBag) await evictOldBagDirs(store.dependencies, bundled.dependenciesBag)
+  if (bundled.beesBag) await evictOldBagDirs(store.bees, bundled.beesBag)
 
   let depBagCount = 0
   let beeBagCount = 0
@@ -395,8 +416,13 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
 
   await removeDisabled(store.bees, enabledBeeSet, '.js', priorManifest?.beesBag)
   await removeDisabled(store.dependencies, enabledDepSet, '.js', priorManifest?.dependenciesBag)
-  const layerDir = await store.domainLayersDirectory('sentinel', true)
-  await removeDisabled(layerDir, enabledLayerSet, '')
+  // Layers live flat in `__layers__/<sig>` shared with user commits.
+  // We can't blindly remove sigs not in `enabledLayerSet` here — that
+  // would also delete every user-committed layer. GC for the layer
+  // pool requires a separate reachability sweep (mark-and-sweep over
+  // history markers + install set). For now, layers grow monotonically;
+  // a future `/sweep` command cleans unreachable sigs.
+  const layerDir = store.layers
   await clearStaleCaches()
 
   for (const file of files) {

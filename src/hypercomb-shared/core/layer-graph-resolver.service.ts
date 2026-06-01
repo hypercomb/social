@@ -35,7 +35,10 @@ export class LayerGraphResolver {
 
     if (!this.isSignature(signature)) return null
 
-    const layersDir = await this.store.domainLayersDirectory(domain, true)
+    // Single flat layer pool — domain has no effect on storage location.
+    // `domain` parameter kept for caller-API back-compat but unused here.
+    void domain
+    const layersDir = this.store.layers
 
     const result = await this.getLayerJsonText(layersDir, location, signature)
     if (!result.content) return null
