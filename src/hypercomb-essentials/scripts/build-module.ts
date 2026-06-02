@@ -992,7 +992,20 @@ const main = async (): Promise<void> => {
 
   for (const [sig, json] of layers) writeLayerJsonFile(layersDir, sig, json)
   for (const [sig, bytes] of dependencyBytes) writeSigJsFile(depDir, sig, bytes)
+  // DIAGNOSTIC: pre-write counts so we know whether the maps are populated when
+  // we reach this point. Earlier observations showed dist/__bees__/ contained
+  // only the empty bag dir, suggesting resourceBytes was empty here — but the
+  // code unconditionally populates it during the bee build. Logging both sides
+  // to pin it down precisely.
+  console.log(`[build-module] WRITE-PHASE: layers=${layers.size} deps=${dependencyBytes.size} bees=${resourceBytes.size}`)
   for (const [sig, bytes] of resourceBytes) writeSigJsFile(resDir, sig, bytes)
+  // DIAGNOSTIC: post-write count via readdirSync to confirm files actually landed
+  try {
+    const after = readdirSync(resDir).filter(f => f.endsWith('.js')).length
+    console.log(`[build-module] WRITE-PHASE: __bees__/ now has ${after} .js files`)
+  } catch (e) {
+    console.log(`[build-module] WRITE-PHASE: readdir failed: ${e}`)
+  }
 
   // Sigbag emission. A bag is a directory named by its content sig; entries
   // are zero-padded index files (0000, 0001, …) whose contents carry the
