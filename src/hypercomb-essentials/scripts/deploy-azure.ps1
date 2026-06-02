@@ -297,6 +297,24 @@ if (Test-Path -LiteralPath $localManifestPath -PathType Leaf) {
 
 $uploaded = 0
 $skipped = 0
+# Track files we attempted to upload so we can verify they actually landed.
+# Observed: `az storage blob upload` can return 0 (success) without actually
+# writing the blob, especially for newly-created content-addressed paths.
+# We saw this for the new nostr-mesh bee — a manual `az storage blob upload`
+# later succeeded with no other changes. Match the pattern that fixed the
+# same bug for manifest.json (explicit content-type + no-progress flags),
+# AND verify each upload after the fact, retrying any that silently dropped.
+$uploadAttempts = @()
+
+function get-content-type {
+  param([Parameter(Mandatory = $true)][string]$Path)
+  if ($Path -match '\.js$')   { return 'application/javascript' }
+  if ($Path -match '\.json$') { return 'application/json' }
+  if ($Path -match '\.css$')  { return 'text/css' }
+  if ($Path -match '\.html$') { return 'text/html' }
+  if ($Path -match '\.svg$')  { return 'image/svg+xml' }
+  return 'application/octet-stream'  # bag entries (no extension)
+}
 
 foreach ($file in $files) {
   $relativePath = get-relative-file-path -BasePath $resolvedSource -FullPath $file.FullName
@@ -311,23 +329,73 @@ foreach ($file in $files) {
     }
   }
 
+  $contentType = get-content-type -Path $relativePath
+
   $arguments = (@(
     'storage', 'blob', 'upload',
     '--container-name', $containerName,
     '--file', $file.FullName,
     '--name', $blobName,
     '--overwrite', 'true',
+    '--content-type', $contentType,
+    '--no-progress',
     '--only-show-errors'
   ) + $authArguments)
 
   invoke-az -Arguments $arguments
   $uploaded++
+  $uploadAttempts += @{ Name = $blobName; Path = $file.FullName; ContentType = $contentType }
 }
 
 write-step ''
 write-step " uploaded  : $uploaded"
 write-step " skipped   : $skipped (already exist)"
 write-step ''
+
+# --- Phase 2.6: Retry pass for silently-dropped uploads ---
+#
+# The az CLI's `storage blob upload` will sometimes return 0 without
+# actually writing the blob for newly-created content-addressed paths.
+# We can't reliably reproduce when this happens — it's not auth-related,
+# not file-size-related, and not content-related. The safest fix is to
+# verify every file we tried to upload actually exists at the target,
+# and explicitly re-upload any that don't.
+
+if ($uploadAttempts.Count -gt 0) {
+  write-step '--- Phase 2.6: verifying uploads landed (retry silent drops) ---'
+
+  $retryCount = 0
+  $verified = 0
+  foreach ($attempt in $uploadAttempts) {
+    $exists = test-blob-exists -ContainerName $containerName -BlobName $attempt.Name -AuthArguments $authArguments
+    if (-not $exists) {
+      $retryCount++
+      write-step "  retry: $($attempt.Name) was silently dropped — re-uploading"
+      invoke-az -Arguments (@(
+        'storage', 'blob', 'upload',
+        '--container-name', $containerName,
+        '--file', $attempt.Path,
+        '--name', $attempt.Name,
+        '--overwrite', 'true',
+        '--content-type', $attempt.ContentType,
+        '--no-progress',
+        '--only-show-errors'
+      ) + $authArguments)
+
+      # Verify the retry actually landed; fail loudly if it still didn't.
+      $existsAfterRetry = test-blob-exists -ContainerName $containerName -BlobName $attempt.Name -AuthArguments $authArguments
+      if (-not $existsAfterRetry) {
+        fail "verification failed: $($attempt.Name) still missing after retry upload"
+      }
+    } else {
+      $verified++
+    }
+  }
+
+  write-step " verified  : $verified"
+  write-step " retried   : $retryCount (silently-dropped on first attempt)"
+  write-step ''
+}
 
 # --- Phase 3: Post-upload verification ---
 #
