@@ -32,7 +32,10 @@ const LIVE_RELAY = 'wss://jwize.com'
 // IIFE) were insufficient — the constant kept getting tree-shaken out
 // when the loadRelays ternary's LIVE_RELAY branch was optimized away.
 // A globalThis write is the bluntest object esbuild won't touch.
-;(globalThis as Record<string, unknown>).__HYPERCOMB_RELAYS__ = Object.freeze({
+//
+// Bracket access: strict TS (`noPropertyAccessFromIndexSignature`)
+// forbids dot-access on `Record<string, unknown>` types.
+;(globalThis as Record<string, unknown>)['__HYPERCOMB_RELAYS__'] = Object.freeze({
   local: LOCAL_RELAY,
   live: LIVE_RELAY,
 })
