@@ -767,3 +767,79 @@ Implications encoded in this protocol:
 - **Federation is byte-copy, no protocol** — adding a feed source is just adoption. There is no separate "federate with alice.dev" handshake. The mechanism doesn't distinguish "I authored this" from "I adopted this from alice.dev" — both are "`jwize.com` has these bytes at this URL."
 
 Provenance (who originally captured, who adopted from whom, who endorsed whom) is a separate concern, layered on top via the witness graph and community membership. The content itself is universally addressable; trust is per-operator.
+
+### 21.9 Host filesystem layout
+
+Because signatures are universal addresses, host storage collapses to two zones plus an active state:
+
+```
+content/
+  ┌─ Universal sig pool ── deduped across all domains
+  │   __layers__/<sig>
+  │   __bees__/<sig>
+  │   __dependencies__/<sig>
+  │   __resources__/<sig>
+  │
+  ├─ Active state ── who this host is RIGHT NOW
+  │   manifest.json
+  │
+  └─ Domains ── snapshots + mirrors
+      __domains__/
+        <self-domain>/<branch>/manifest.json   ← own named snapshots
+        <other-domain>/manifest.json           ← mirrored other-domain view
+        <other-domain>/<branch>/manifest.json  ← mirrored named branches
+```
+
+**Data vs scripts is a manifest-layer view, not a storage split.** Both flow through the same sig-addressed pool. The distinction is which array a sig appears in:
+
+- `manifest.bees[]` / `dependencies[]` → installable script/package
+- `manifest.layers[]` (under `hypercomb.io/...` segments) → user-generated content
+
+The bytes are interchangeable — `__layers__/<sig>` is just a layer whether it encodes user tiles, notes, or code-package structure.
+
+**Active backup vs branch save.** The root `manifest.json` is the live backup — every user mutation (add tile, remove tile, edit) immediately updates it. Old layer sigs are NOT deleted from the pool; they remain available for time-travel. Branching is explicit: `save as foo` copies the current root manifest to `__domains__/<self>/foo/manifest.json` and the root continues advancing.
+
+**Adopting another domain = mirror + pool fill.** Fetch `<other>/manifest.json` → write to `__domains__/<other>/manifest.json` → fan out every sig in their manifest into the universal pool. From that point, your host serves any of their sigs at the standard URLs. No special mirror endpoint needed.
+
+**Two free properties:**
+
+- **No "whose bytes are these" ambiguity** — a sig in the pool is just bytes. Provenance lives in manifests, not the filesystem. Two domains attesting the same sig consume one slot.
+- **"Diff" is a manifest set operation** — `set(now.layers) - set(branch_v3.layers)` answers "what did I add since v3?" with no filesystem walking.
+
+**Routes on the operator's HTTP host:**
+
+```
+GET  /manifest.json                              → root active manifest
+GET  /__layers__/<sig>                           → universal pool
+GET  /__resources__/<sig>                        → universal pool
+GET  /__dependencies__/<sig>                     → universal pool
+GET  /__bees__/<sig>                             → universal pool
+GET  /__domains__/<domain>/manifest.json         → mirrored or our snapshot
+GET  /__domains__/<domain>/<branch>/manifest.json → named branch view
+```
+
+Sig lookups don't filter by domain — they are universal pool reads. Domain routes only serve manifest attestations.
+
+**Garbage collection is opt-in.** The pool is durable by default; the rule is *never delete from `__layers__/`, `__bees__/`, `__dependencies__/`, `__resources__/` unless an explicit GC phase runs.* A future GC walks all manifests (active + every snapshot + every mirrored domain) plus a configurable retention window for unreferenced sigs, then trims. Operator-initiated only; never automatic.
+
+### 21.10 Extension-free sig URLs
+
+Sig-addressed paths drop their format extension. The path prefix already encodes the type; the extension is redundant build-tooling residue.
+
+| URL | Content-Type returned by server |
+|---|---|
+| `/__layers__/<sig>` | `application/json` |
+| `/__bees__/<sig>` | `application/javascript` |
+| `/__dependencies__/<sig>` | `application/javascript` |
+| `/__resources__/<sig>` | per the resource's stored type, or `application/octet-stream` |
+
+**Why this is structurally better:**
+
+- **Format-agnostic URLs.** If the layer manifest format evolves (JSON → CBOR → MessagePack), the URL doesn't move. The bytes change; the address stays.
+- **The address IS the identity.** Sig is the universal name; extension was carrying redundant metadata.
+- **Matches `__resources__/` which was already extension-free.** No special case for "structured" types.
+- **ESM module loading still works.** `import('https://host/__bees__/<sig>')` evaluates as a module when the server returns `Content-Type: application/javascript`. The browser's module loader doesn't require a `.js` extension in the URL.
+
+**The one real cost** is that the server MUST set `Content-Type` by path prefix rather than by file extension. The deploy pipeline's MIME-mapping function and the relay's HTTP host become prefix-keyed rather than extension-keyed. Trivial.
+
+**`manifest.json` keeps its extension.** It is a well-known root entry point (cf. `package.json`, `robots.txt`), not sig-addressed, and the explicit name aids tooling/humans. The rule is specifically: drop the extension on sig-addressed paths.
