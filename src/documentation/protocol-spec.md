@@ -770,21 +770,20 @@ Provenance (who originally captured, who adopted from whom, who endorsed whom) i
 
 ### 21.9 Host filesystem layout
 
-Because signatures are universal addresses *and* every layer transitively references its own children (sub-layers, bees, dependencies, resources), host storage collapses to **five flat sig-addressed pools** plus a tiny discovery index. Nothing else.
+Because signatures are universal addresses *and* every layer transitively references its own children (sub-layers, bees, dependencies, resources), host storage collapses to **five pools** — four flat and sig-keyed, one shallow and domain-keyed. Nothing else.
 
 ```
 content/
-  __layers__/<sig>           ← layer (refs to its children via sig arrays)
-  __bees__/<sig>              ← bee
-  __dependencies__/<sig>      ← dep
-  __resources__/<sig>         ← resource (arbitrary bytes)
-  __roots__/<sig>             ← attestation record (see below)
-  roots.json                  ← discovery index: list of __roots__/ sigs
+  __layers__/<sig>                 ← layer (refs to its children via sig arrays)
+  __bees__/<sig>                    ← bee
+  __dependencies__/<sig>            ← dep
+  __resources__/<sig>               ← resource (arbitrary bytes)
+  __roots__/<domain>/<sig>          ← attestation, grouped by attester domain
 ```
 
-That is the entire surface. No `manifest.json` with expanded `bees[]`/`layers[]` arrays. No `__domains__/<domain>/` folder hierarchy. The bee/dep/resource arrays the old manifest carried were walk results, not configuration — knowing the root layer is sufficient because the layer itself references its children.
+That is the entire surface. No `manifest.json` with expanded `bees[]`/`layers[]` arrays — those arrays were walk results, not configuration, and every layer already references its own children. No top-level discovery index file — directory listing IS the discovery surface.
 
-**A root attestation** (one file at `__roots__/<sig>`) is a small signed record:
+**A root attestation** (one file at `__roots__/<domain>/<sig>`) is a small signed record:
 
 ```json
 {
@@ -796,58 +795,56 @@ That is the entire surface. No `manifest.json` with expanded `bees[]`/`layers[]`
 }
 ```
 
-The file is content-addressed: its name is the sha256 of its bytes. Two domains attesting the same layer produce two different attestation files (different content → different sig). One operator re-attesting at different times produces different files (different `attestedAt` → different content → different sig). Withdrawing an attestation is a delete of one specific `__roots__/<sig>` file (with the rest of the pool untouched).
+The file is content-addressed: its name is the sha256 of its bytes. Two domains attesting the same layer produce two different attestation files under their respective `__roots__/<domain>/` folders (different content → different sig). One operator re-attesting at different times produces different files within the same domain folder (different `attestedAt` → different content → different sig). Withdrawing an attestation is a delete of one specific `__roots__/<domain>/<sig>` file, with the rest of the pool untouched.
 
-**Discovery** is a single JSON file at the host's root:
+**Discovery is directory listing** — no auxiliary index file:
 
-```json
-// roots.json
-["<attest-sig-1>", "<attest-sig-2>", "<attest-sig-3>"]
+```
+GET /__roots__/                  → list of domains this host serves
+GET /__roots__/<domain>/         → list of attestation sigs for that domain
+GET /__roots__/<domain>/<sig>    → the attestation file
 ```
 
-Just a list of attestation sigs. Tiny. The actual attestation bytes live in `__roots__/<sig>`, untouched on rewrites. Losing `roots.json` loses your discovery surface, not your data — `ls __roots__/` rebuilds it.
+The relay's HTTP host can serve directory listings trivially. No `roots.json`, no `index.json`, no manifest-merge logic. The filesystem listing IS the protocol's discovery surface.
 
-**Data vs scripts is a manifest-layer view, not a storage split.** Both flow through the same sig-addressed pool. The distinction is which array within a *layer* a sig appears in (`bees[]`/`dependencies[]` vs sub-`layers[]`). The bytes are interchangeable — `__layers__/<sig>` is just a layer whether it encodes user tiles, notes, or code-package structure.
+**Data vs scripts is a manifest-layer view, not a storage split.** Both flow through the same sig pool. The distinction is which array within a *layer* a sig appears in (`bees[]`/`dependencies[]` vs sub-`layers[]`). The bytes are interchangeable — `__layers__/<sig>` is just a layer whether it encodes user tiles, notes, or code-package structure.
 
-**Active backup vs branch save.** Every user mutation (add tile, remove tile, edit) creates:
-- a new layer sig (the immutable updated layer) → written to `__layers__/`
-- a new attestation file pointing at that layer sig → written to `__roots__/`
-- `roots.json` rewritten to include the new attestation sig
+**Every update = one new attestation file.** User mutations and branch operations all produce exactly one new sig-addressed file in `__roots__/<domain>/`:
 
-Old layer sigs are NOT deleted from the pool. Old attestation files are NOT deleted. Time-travel is intact for free. Branching is just creating an attestation with `branch: "foo"` — one new file in `__roots__/`. Switching branches is reading the attestation matching `(domain, branch)` and walking from its layer.
+| Operation | What changes |
+|---|---|
+| Add a tile | new layer sig → `__layers__/`. New attestation pointing at it → `__roots__/<self>/<sig>` |
+| Remove a tile | new layer (without tile) → `__layers__/`. New attestation → `__roots__/<self>/<sig>` |
+| Save as branch `foo` | new attestation with `branch: "foo"` → `__roots__/<self>/<sig>` |
+| Switch to branch `foo` | reader scans `__roots__/<self>/` for `branch === "foo"` → walks from its layer |
+| Adopt alice.dev | for each attestation in her `__roots__/alice.dev/`, write to your own `__roots__/alice.dev/`. Fan reachable sigs into the pool. |
+| Withdraw an attestation | `rm __roots__/<domain>/<sig>` on one specific file. Pool untouched. |
 
-**Adopting another domain = mirror their attestations.** Pull `<other>/roots.json` → for each sig, pull the attestation file → write to your own `__roots__/`. Fan out every sig reachable from those attestations' layers into your universal pool. From that point your host serves any of their sigs at the standard URLs, and your `roots.json` enumerates their attestations alongside your own. No domain folders, no mirror endpoints.
+Old layer sigs are NOT deleted. Old attestation files are NOT deleted. Time-travel is intact for free. Multiple attestations of the same `(domain, branch)` coexist; the most recent `attestedAt` is canonically active.
 
-**Active pointer** (optional fast-path):
-
-```json
-// active.json
-{ "jwize.com/main": "<attestation-sig>" }
-```
-
-For each `(domain, branch)` tuple, the attestation with the most recent `attestedAt` is canonically active. `active.json` is a tiny cache so readers don't have to enumerate `__roots__/` to find the current main. Losing it means scanning, never losing data.
+**Active pointer is optional.** Readers can scan `__roots__/<domain>/` and pick the most recent `attestedAt` matching `branch: "main"`. With a few attestations per domain that's instantaneous. If a host accumulates so many attestations that scanning is slow, the operator can ship an `active.json` cache as a pure optimization — but it is not a protocol commitment, and losing it never loses data.
 
 **Three free properties from this collapse:**
 
-- **No "whose bytes are these" ambiguity** — a sig in the pool is just bytes. Provenance lives in the attestation files, never in the filesystem.
-- **"Diff" is a set operation on attestation layers** — `walk(now.layer) - walk(branch_v3.layer)` answers "what did I add since v3?" without any directory walking.
-- **Atomic operations on individual roots** — one file per attestation means a partial write or accidental `rm` targets exactly one record. There is no merge-manifest bug because there is no manifest-merge.
+- **No "whose bytes are these" ambiguity** — a sig in the layer/bee/dep/resource pools is just bytes. Provenance lives in attestation files. Path encoding (`__roots__/<domain>/...`) is a convenient access pattern; the file content (signed by the attester's key) is the authoritative claim.
+- **"Diff" is a set operation on layer walks** — `walk(now.layer) - walk(branch_v3.layer)` answers "what did I add since v3?" without filesystem walking.
+- **Atomic per-attestation files** — one file per attestation means partial writes or accidental `rm` target exactly one record. There is no manifest-merge step, so no manifest-merge bug class exists.
 
 **HTTP routes:**
 
 ```
-GET  /__layers__/<sig>          → universal pool
-GET  /__bees__/<sig>             → universal pool
-GET  /__dependencies__/<sig>     → universal pool
-GET  /__resources__/<sig>        → universal pool
-GET  /__roots__/<sig>            → attestation file
-GET  /roots.json                 → discovery index (list of attestation sigs)
-GET  /active.json                → optional fast-path active-pointer cache
+GET  /__layers__/<sig>           → universal pool
+GET  /__bees__/<sig>              → universal pool
+GET  /__dependencies__/<sig>      → universal pool
+GET  /__resources__/<sig>         → universal pool
+GET  /__roots__/                  → directory listing (domains served)
+GET  /__roots__/<domain>/         → directory listing (attestation sigs)
+GET  /__roots__/<domain>/<sig>    → the attestation file
 ```
 
-Sig lookups never filter by domain — they are universal pool reads. Discovery is one tiny index file. There are no domain folders, no expansion-manifest routes, no merge endpoints.
+Sig lookups never filter by domain — they are universal pool reads. Domain scoping appears only in `__roots__/`. There are no merge endpoints and no expansion-manifest routes.
 
-**Garbage collection is opt-in.** The pool is durable by default; the rule is *never delete from `__layers__/`, `__bees__/`, `__dependencies__/`, `__resources__/` unless an explicit GC phase runs.* A future GC walks every attestation in `__roots__/`, transitively walks the layer trees, marks reachable sigs, then trims unreferenced ones (subject to a configurable retention window). Operator-initiated only; never automatic.
+**Garbage collection is opt-in.** The pool is durable by default; the rule is *never delete from `__layers__/`, `__bees__/`, `__dependencies__/`, `__resources__/` unless an explicit GC phase runs.* A future GC walks every attestation in every `__roots__/<domain>/`, transitively walks the layer trees, marks reachable sigs, then trims unreferenced ones (subject to a configurable retention window). Operator-initiated only; never automatic.
 
 ### 21.10 Extension-free sig URLs
 
