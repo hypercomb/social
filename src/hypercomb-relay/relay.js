@@ -1,31 +1,53 @@
 #!/usr/bin/env node
-// hypercomb-relay — minimal Nostr relay for private swarm meetings
-// usage: node relay.js [--port 7777] [--pubkeys hex1,hex2] [--memory] [--db ./relay.db] [--max-event-size 65536]
+// hypercomb-relay — minimal Nostr relay AND HTTP content host for private swarm meetings
+// usage: node relay.js [--port 7777] [--pubkeys hex1,hex2] [--memory] [--db ./relay.db] [--max-event-size 65536] [--content-dir ./content]
 //
 // env fallbacks (used when the matching --flag is absent):
 //   PORT             → port to listen on (Azure App Service injects this)
 //   WEBSITE_HOSTNAME → presence implies App Service: default db moves to
 //                      /home/relay.db (persistent across restarts on the
 //                      App Service Linux /home mount).
+//   CONTENT_DIR      → directory to serve HTTP content from (sig-addressed
+//                      content store). Defaults to ./content next to the
+//                      script. Operators populate it however they want
+//                      (rsync, symlink, manual copy); the relay just
+//                      serves whatever's in there.
+//
+// HTTP file serving makes this a "host" in the domain-as-identity sense
+// (per project_domain_as_identity.md). The relay endpoint (wss://) and
+// the content endpoint (https://) share a hostname; askers learn the
+// hostname via the { bytes, domains } primitive and HTTPS-GET against
+// it for resources/bees/deps/layers.
 
 import { createServer } from 'node:http'
 import { randomBytes } from 'node:crypto'
+import { existsSync, readFileSync, statSync } from 'node:fs'
+import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
 import { WebSocketServer } from 'ws'
 import { verifyEvent } from 'nostr-tools/pure'
 import { nip19 } from 'nostr-tools'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 // ── cli ──────────────────────────────────────────────────────────────────────
 
 function parseArgs(argv) {
   const envPort = Number(process.env.PORT)
   const onAppService = !!process.env.WEBSITE_HOSTNAME
+  const envContentDir = String(process.env.CONTENT_DIR ?? '').trim()
   const args = {
     port: Number.isFinite(envPort) && envPort > 0 ? envPort : 7777,
     pubkeys: null,
     memory: false,
     db: onAppService ? '/home/relay.db' : './relay.db',
-    maxEventSize: 65536
+    maxEventSize: 65536,
+    // Content dir for HTTP file serving. Default: ./content next to the
+    // script. Operators populate it however they like (symlink to their
+    // dist/, rsync from elsewhere, manual copy). The relay serves only
+    // files inside this dir — directory traversal is blocked.
+    contentDir: envContentDir || resolve(__dirname, 'content'),
   }
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i]
@@ -35,6 +57,7 @@ function parseArgs(argv) {
     else if (a === '--pubkeys' && next) { args.pubkeys = next.split(',').map(normalizePubkey).filter(Boolean); i++ }
     else if (a === '--db' && next) { args.db = next; i++ }
     else if (a === '--max-event-size' && next) { args.maxEventSize = Number(next); i++ }
+    else if (a === '--content-dir' && next) { args.contentDir = resolve(next); i++ }
   }
   return args
 }
@@ -276,14 +299,98 @@ const relayInfo = {
   }
 }
 
+// ── content-host (HTTP file serving) ─────────────────────────────────────────
+//
+// Per the "host is a verb" doctrine (project_domain_as_identity.md):
+// a host captures + packages + SERVES. This is the serve half — the
+// relay's http handler also returns sig-addressed content blobs at
+// well-known paths so peers can HTTPS-GET them directly without
+// going through the mesh broker.
+//
+// Path validation:
+//  - Accepted paths: anything that resolves inside cfg.contentDir
+//  - Rejected: ../, absolute paths, anything escaping the content root
+//  - This is a content store, not a filesystem — only files matching
+//    the standard hypercomb layout (__bees__/, __dependencies__/,
+//    __layers__/, __resources__/, manifest.json) are intended targets,
+//    but the resolution check below is generic — anything inside the
+//    contentDir is fair game. Operators control what's there.
+
+function getContentType(path) {
+  const ext = extname(path).toLowerCase()
+  if (ext === '.js')   return 'application/javascript; charset=utf-8'
+  if (ext === '.json') return 'application/json; charset=utf-8'
+  if (ext === '.css')  return 'text/css; charset=utf-8'
+  if (ext === '.html') return 'text/html; charset=utf-8'
+  if (ext === '.svg')  return 'image/svg+xml'
+  if (ext === '.png')  return 'image/png'
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg'
+  if (ext === '.webp') return 'image/webp'
+  return 'application/octet-stream'
+}
+
+function tryServeContent(req, res) {
+  if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') return false
+
+  // CORS preflight — relays serve from <op>.domain, askers come from
+  // other origins (hypercomb.io, alice.dev, etc.); blanket-permit.
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Max-Age': '86400',
+    })
+    res.end()
+    return true
+  }
+
+  // Strip query string + decode
+  let urlPath
+  try { urlPath = decodeURIComponent((req.url || '').split('?')[0]) } catch { return false }
+  if (!urlPath || urlPath === '/') return false
+
+  // Resolve under contentDir, then verify the result is still inside it.
+  // normalize() collapses ../, resolve() handles absolute-path attacks.
+  const resolved = resolve(cfg.contentDir, '.' + urlPath)
+  const root = resolve(cfg.contentDir)
+  if (!resolved.startsWith(root + sep) && resolved !== root) return false
+
+  if (!existsSync(resolved)) return false
+  let st
+  try { st = statSync(resolved) } catch { return false }
+  if (!st.isFile()) return false
+
+  try {
+    const bytes = readFileSync(resolved)
+    res.writeHead(200, {
+      'Content-Type': getContentType(resolved),
+      'Content-Length': String(bytes.length),
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    })
+    if (req.method === 'HEAD') { res.end(); return true }
+    res.end(bytes)
+    return true
+  } catch {
+    return false
+  }
+}
+
 const server = createServer((req, res) => {
+  // NIP-11 relay metadata (Accept: application/nostr+json)
   if (req.headers.accept?.includes('application/nostr+json')) {
     res.writeHead(200, { 'Content-Type': 'application/nostr+json', 'Access-Control-Allow-Origin': '*' })
     res.end(JSON.stringify(relayInfo))
-  } else {
-    res.writeHead(200, { 'Content-Type': 'text/plain' })
-    res.end('hypercomb-relay running. Connect via WebSocket.')
+    return
   }
+
+  // Try content-host serving (returns true if it handled the request)
+  if (tryServeContent(req, res)) return
+
+  // Default: liveness message
+  res.writeHead(200, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' })
+  res.end('hypercomb-relay running. Connect via WebSocket or GET sig-addressed content.')
 })
 
 const wss = new WebSocketServer({ server })
@@ -321,8 +428,10 @@ process.on('SIGTERM', shutdown)
 
 // start
 server.listen(cfg.port, () => {
-  console.log(`hypercomb-relay listening on ws://0.0.0.0:${cfg.port}`)
+  console.log(`hypercomb-relay listening on ws://0.0.0.0:${cfg.port} (WebSocket relay + HTTP content host)`)
   if (authRequired) console.log(`auth required — ${cfg.pubkeys.length} pubkey(s) whitelisted`)
   if (cfg.memory) console.log('in-memory mode — events will not persist')
   else console.log(`database: ${cfg.db}`)
+  const contentReady = existsSync(cfg.contentDir)
+  console.log(`content-dir: ${cfg.contentDir} ${contentReady ? '(ready)' : '(empty — host will 404 until populated)'}`)
 })
