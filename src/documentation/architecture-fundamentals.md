@@ -209,17 +209,18 @@ Local memory. Browser-native. No server, no cloud.
 
 ```
 opfs root
-├── hypercomb.io/            domain root (cell tree)
-│   ├── Alice/               cell directory (becomes a hex tile)
-│   └── Bob/
-├── __bees__/                compiled bee modules (by signature)
-├── __dependencies__/        namespace service bundles (by signature)
-├── __layers__/              layer installation manifests
-├── __resources__/           content-addressed blobs (images, JSON)
-└── __history__/             history bags (sequenced operations per lineage)
+├── __layers__/<sig>              layer JSON, sig-keyed, FLAT — user content lives here
+├── __layers__/<domain>/          install manifests (deployment artifacts; non-hex name)
+├── __bees__/<sig>                compiled bee modules
+├── __dependencies__/<sig>        namespace service bundles
+├── __resources__/<sig>           content-addressed blobs (images, JSON, bytes)
+├── __history__/<lineage>/<NNNN>  history markers (sequenced pointers to layer sigs)
+├── __manifests__/<parent-sig>    children manifests (derived inline cache for cold load)
+├── __hive__/                     user-content root (formerly hypercomb.io/)
+└── __optimization__/ __threads__/ __computation__/ __clipboard__/   decoration + participant-local state
 ```
 
-Cells are non-reserved subdirectories under the domain root. Folders prefixed with `__` are reserved for the runtime.
+Everything content-bearing is content-addressed by SHA-256. A **cell is not a directory** — it is content inside a signature-addressed *layer* (`__layers__/<sig>`); the hierarchy is layers referencing their child layers by signature (a sparse Merkle tree), not nested folders. Folders prefixed with `__` are runtime-reserved. (Cells-as-named-directories under `hypercomb.io/` is the retired model; any such dirs are swept orphans.)
 
 ---
 

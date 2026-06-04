@@ -346,34 +346,39 @@ The Origin Private File System is the persistent local store. No server storage 
 
 ### 12.1 Directory Structure
 
+Everything content-bearing is **signature-keyed** (sig = SHA-256 of the bytes, §11). The OPFS root is the local mirror of the host filesystem layout (§21.9) — the same sig pools, plus participant-local state the host never sees.
+
 ```
 opfsRoot/                          (navigator.storage.getDirectory())
-  hypercomb.io/                    (domain root — user cell hierarchy)
-    {cell}/                        (directory = cell)
-      {child-cell}/                (nested cell)
-      ...
-  __bees__/                        (compiled bee modules, keyed by SHA-256)
-  __dependencies__/                (shared JS libraries, keyed by SHA-256)
-  __layers__/                      (layer metadata, per-domain)
-    {domain}/
-      {signature}.json             (layer definition)
-      {signature}-install          (installation manifest)
+  __layers__/<sig>                 (canonical layer-bytes pool — layer JSON, sig-keyed, FLAT)
+  __layers__/<domain>/             (install manifests — deployment artifacts; <domain> is
+                                    non-hex, distinguishing it from 64-hex sig entries)
+  __bees__/<sig>                   (compiled bee modules)
+  __dependencies__/<sig>           (shared JS bundles)
+  __resources__/<sig>              (content blobs — images, text, byte arrays)
+  __history__/<lineage>/<NNNN>     (append-only marker records — pointers to layer sigs)
+  __manifests__/<parent-sig>       (children manifests — derived; inlines resolved child
+                                    layers so cold-load skips per-child sig lookups)
+  __optimization__/                (persistent decoration substrate — Q&A, comms; applied
+                                    in memory, layer-untouched)
+  __threads__/  __computation__/  __clipboard__/  __hive__/   (thread state, receipts,
+                                    clipboard, user-content root)
 ```
 
-### 12.2 Cells
+`__hive__/` is the user-content root (historically `hypercomb.io/`, renamed to the
+underscored form so the root inventory is uniformly `__*__`). Old `hypercomb.io/`
+directories from prior sessions are orphans, swept by `/sweep`.
 
-A cell is a directory under the domain root. The directory name IS the cell name. Cells form a hierarchy:
+### 12.2 Cells are layer content, not directories
 
-```
-hypercomb.io/
-  chemistry/
-    organic/
-    inorganic/
-  music/
-    jazz/
-```
+A cell is **not** a directory and its name is **not** a path segment. A cell is content inside a signature-addressed **layer** (`__layers__/<sig>`): the layer JSON holds the cell's fields — name, the sigs of its child layers, notes, and so on. The cell hierarchy is expressed by a layer referencing its child layers **by signature** (a sparse Merkle tree, see the Merkle Layer Model), never by nested folders.
 
-Hidden directories (`__*__`) and install markers (`*-install`) are excluded from cell listings.
+Consequences:
+- A cell's **identity is its signature**, not a name. There is no rename op — the atomic unit is immutable; you delete + create, never rename.
+- Navigation position (lineage, §4 / §12.3) **computes a signature** that addresses the layer for that location. The signature — not a directory traversal — resolves the content.
+- Reading a cell = read `__layers__/<sig>` → resolve its children's sigs from the same flat pool (or the derived `__manifests__/<parent-sig>` inline cache). No directory walking.
+
+> **Retired model.** Cells were once stored as named directories under `hypercomb.io/`, with the directory name as the cell name and nesting as the hierarchy. That model is obsolete — superseded by signature-addressed layers. Any surviving `hypercomb.io/{cell}/…` folders are orphans and are swept; they are not part of the storage model.
 
 ### 12.3 Lineage
 
@@ -386,8 +391,8 @@ label:    "/chemistry/organic"
 
 Lineage drives:
 - The browser URL path (via `Navigation.goRaw()`).
-- The signature computation for mesh subscribe/publish.
-- The OPFS directory handle resolution.
+- The signature computation for mesh subscribe/publish (§4).
+- The layer-signature lookup that resolves content (`__layers__/<sig>`) — *not* a cell-directory traversal (§12.2).
 - The visual render of the honeycomb grid.
 
 ### 12.4 Synchronization Event
