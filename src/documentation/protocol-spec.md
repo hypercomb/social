@@ -732,3 +732,38 @@ wss://<domain>/                            ← WebSocket relay endpoint
 ```
 
 Build output (`hypercomb-essentials/dist/`) is copied to `hypercomb-relay/content/` by `scripts/copy-to-dcp.ts` on every build, so the operator's own machine is always serving the latest content their build produced. See `memory: project_domain_as_identity.md` for the full "host is a verb" doctrine.
+
+### 21.8 Daisy-chain federation (structural property)
+
+The URL shape in Section 21.7 is **identical at every host**, and the signature universe is global. The combination produces a structural federation property: **adoption IS mirroring**.
+
+When `jwize.com` adopts `sigX` from `alice.dev`:
+
+1. HTTPS-GET `https://alice.dev/__layers__/<sigX>.json`
+2. SHA-256 verify the bytes against `sigX`
+3. Write to `jwize.com`'s local `__layers__/<sigX>.json`
+
+From that moment, any peer asking `jwize.com` for `sigX` receives byte-identical content to what `alice.dev` would have served. The daisy chain forms with no integration code, no auth handshake, no registry entry — just the URL shape and the sig universe.
+
+```
+       sigX                             sigX                             sigX
+alice.dev ────────── HTTPS-GET ──────── jwize.com ──── HTTPS-GET ──── carol.io
+       │                                  │                              │
+       └─ original capture                └─ adopted from alice           └─ adopted from jwize
+                                            mirrors at /__layers__/<sigX>
+                                            serves to her community
+```
+
+Implications encoded in this protocol:
+
+- **`hc:community:domains` is dual-purpose** — the same list names (a) hosts the broker trusts for HTTP-direct queries (Section 21.3 binary in-community gate), and (b) hosts the operator can choose to adopt content *from* (turning HTTP-direct query candidates into mirror sources).
+
+- **Network resilience is automatic** — if `alice.dev` goes offline, every host that adopted any of her sigs continues to serve them. The community is a redundancy graph, not hub-and-spoke. The only way a sig becomes globally unavailable is if no operator anywhere has adopted it.
+
+- **The DAG is the protocol** — operators form a directed "I feed from these hosts" graph. There is no central registry of edges; the graph is emergent from each operator's adoption choices. Walking the chain backward from any sig finds who adopted it; walking forward finds who they fed.
+
+- **Overlap is the join** — where two hosts adopt the same sig, they structurally overlap on that sig. The overlap doubles capacity for that content (two parallel HTTPS sources) and connects the two operators' communities through the shared sig.
+
+- **Federation is byte-copy, no protocol** — adding a feed source is just adoption. There is no separate "federate with alice.dev" handshake. The mechanism doesn't distinguish "I authored this" from "I adopted this from alice.dev" — both are "`jwize.com` has these bytes at this URL."
+
+Provenance (who originally captured, who adopted from whom, who endorsed whom) is a separate concern, layered on top via the witness graph and community membership. The content itself is universally addressable; trust is per-operator.
