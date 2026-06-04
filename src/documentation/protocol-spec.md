@@ -656,15 +656,15 @@ Resources and dependencies have NO mesh fallback. If HTTP-direct can't find them
 
 ### 21.2 HTTP-direct: candidate URLs
 
-For each content type the operator's HTTP host serves:
+The operator's HTTP host serves every content-addressed blob at a bare-sig URL, regardless of type (§21.10):
 
-| Type         | URL path                       |
-|--------------|--------------------------------|
-| `layer`      | `/__layers__/<sig>.json`       |
-| `resource`   | `/__resources__/<sig>`         |
-| `dependency` | `/__dependencies__/<sig>.js`   |
+```
+https://<domain>/<sig>
+```
 
-These are static `https://<domain><path>` fetches with no auth. Each candidate's bytes are SHA-256 verified against the requested sig before being returned — bad bytes are dropped and the next candidate is tried.
+These are static fetches with no auth. Each candidate's bytes are SHA-256 verified against the requested sig before being returned — bad bytes are dropped and the next candidate is tried. The fetcher already knows the type from the referring context, so it does not need a typed path.
+
+> **Implementation lag:** the shipped content-broker (`#httpPathForType`) and relay HTTP host currently use typed paths with extensions (`/__layers__/<sig>.json`, `/__resources__/<sig>`, `/__dependencies__/<sig>.js`). The bare-sig form (§21.10) is the target; the typed paths remain valid during migration and the relay can serve both while the cutover happens.
 
 ### 21.3 HTTP-direct: candidate ordering (binary in-community trust)
 
@@ -724,14 +724,15 @@ Mismatched bytes are discarded silently and the broker keeps waiting (until time
 The operator's relay binary (`hypercomb-relay/relay.js`) serves HTTP content alongside the WebSocket relay. Both share the same hostname:
 
 ```
-https://<domain>/__layers__/<sig>.json     ← static layer manifest
-https://<domain>/__resources__/<sig>       ← arbitrary content blob
-https://<domain>/__dependencies__/<sig>.js ← signed dependency bundle
-https://<domain>/manifest.json             ← the operator's package manifest
-wss://<domain>/                            ← WebSocket relay endpoint
+https://<domain>/<sig>            ← any content-addressed blob (§21.9 universal handler, §21.10)
+https://<domain>/__roots__/       ← discovery index (domains served)
+https://<domain>/__roots__/<dom>/ ← discovery index (attestation sigs)
+wss://<domain>/                   ← WebSocket relay endpoint
 ```
 
 Build output (`hypercomb-essentials/dist/`) is copied to `hypercomb-relay/content/` by `scripts/copy-to-dcp.ts` on every build, so the operator's own machine is always serving the latest content their build produced. See `memory: project_domain_as_identity.md` for the full "host is a verb" doctrine.
+
+> **Implementation lag:** the shipped relay HTTP host currently serves typed paths with extensions (`/__layers__/<sig>.json`, etc.) and a `manifest.json`. The bare-sig universal handler (§21.9) and the retirement of `manifest.json` in favor of `__roots__/` attestations (§21.9) are the target; the relay can serve both forms during cutover.
 
 ### 21.8 Daisy-chain federation (structural property)
 
@@ -739,9 +740,9 @@ The URL shape in Section 21.7 is **identical at every host**, and the signature 
 
 When `jwize.com` adopts `sigX` from `alice.dev`:
 
-1. HTTPS-GET `https://alice.dev/__layers__/<sigX>.json`
+1. HTTPS-GET `https://alice.dev/<sigX>` (flat sig endpoint, §21.10)
 2. SHA-256 verify the bytes against `sigX`
-3. Write to `jwize.com`'s local `__layers__/<sigX>.json`
+3. Write to `jwize.com`'s local pool
 
 From that moment, any peer asking `jwize.com` for `sigX` receives byte-identical content to what `alice.dev` would have served. The daisy chain forms with no integration code, no auth handshake, no registry entry — just the URL shape and the sig universe.
 
@@ -750,7 +751,7 @@ From that moment, any peer asking `jwize.com` for `sigX` receives byte-identical
 alice.dev ────────── HTTPS-GET ──────── jwize.com ──── HTTPS-GET ──── carol.io
        │                                  │                              │
        └─ original capture                └─ adopted from alice           └─ adopted from jwize
-                                            mirrors at /__layers__/<sigX>
+                                            mirrors at /<sigX>
                                             serves to her community
 ```
 
@@ -768,20 +769,104 @@ Implications encoded in this protocol:
 
 Provenance (who originally captured, who adopted from whom, who endorsed whom) is a separate concern, layered on top via the witness graph and community membership. The content itself is universally addressable; trust is per-operator.
 
+#### 21.8.1 Subscription and co-hosting (upstream propagation)
+
+§21.8 covers *downstream* flow — one-shot adoption, content pulled toward whoever wants it. The complementary direction is *upstream*: a subscriber tracks a producer continuously, so the producer's updates propagate up automatically.
+
+**Subscription is the cross-domain form of lineage-pull.** Within one domain, changing a cell re-signs every ancestor to root (§21.11.2). Across domains it's the same mechanic: a parent domain authors an aggregate layer that references a child domain's root **by sig**, exactly like any child reference. When the child produces a new root, that child-sig changed, so the parent's aggregate must re-point and re-cascade. Subscription is the trigger that carries the child's new root up.
+
+**Mechanism — reuses every primitive already defined:**
+
+```
+child.com commits → new root R → backed up + receipted (§21.11)
+       ▼
+child.com ANNOUNCES "latest root = R" on the mesh         (a layer sig + domain — §21.4 layer-only)
+       ▼
+parent.com (subscribed to child.com) receives R into a PULL QUEUE
+       ▼
+parent drains: GET each cascade sig + closure-minus-what-parent-has   (HTTP-direct, §21.11.2)
+       ▼
+parent verifies child's attestation signature (identity) + each sig (integrity)
+       ▼
+queue empty → parent now CO-HOSTS child.com up to R
+       ▼
+parent (if it has parents) announces ITS new root → propagates up
+```
+
+**The pull queue is the mirror image of the §21.11 push queue** — same primitive, opposite direction:
+
+| | Push queue (§21.11) | Pull queue (subscription) |
+|---|---|---|
+| Direction | authoring → your own host | subscribed child → parent |
+| Fed by | your commit's cascade sigs | child's announced cascade sigs |
+| Drains by | `PUT` each layer | `GET` each + closure delta |
+| Per-item confirm | receipt = host serves it | verify = sig matches + stored |
+| Loop closes when | queue empty → "backed up" | queue empty → "caught up", now co-hosting |
+
+So the queue is the universal sync unit; **direction is the only difference between backing up your own work (push) and mirroring someone you follow (pull).**
+
+**Subscription = co-hosting.** Once the parent has drained the pull queue, `parent.com/<sig>` and `child.com/<sig>` return byte-identical content. The parent is now a full replica. This produces **replication-follows-interest**: every subscriber is a new origin, so popular content accumulates replicas organically (every aggregator that subscribes becomes a mirror) while niche content is hosted by exactly whoever cares. The subscription graph IS the replication topology — no central replication policy.
+
+**Hosting ≠ attesting.** Co-hosting spreads *bytes*, not *identity*:
+
+| | What it is | Who can do it | Spreads how |
+|---|---|---|---|
+| **Hosting** | serving bytes at `your.com/<sig>` | anyone | permissionless, replicable |
+| **Attesting** | authoring + signing a root | only the domain's key | identity-bound, cryptographic |
+
+A reader pulling alice's content *from jwize.com* still verifies alice's attestation signature — so jwize is a **replica, not an impersonator**. You can't fake being alice by hosting her bytes; you can only relay them, and the signature is checked regardless of relay. Hosting stays cheap and spreadable (resilience); identity stays a signature (trust).
+
+**`__roots__/<domain>/` is the multi-tenancy.** A subscriber grows sibling domain folders:
+
+```
+jwize.com/__roots__/
+  jwize.com/    ← own attestations
+  alice.dev/    ← alice's, mirrored via subscription (co-hosted)
+  bob.io/       ← bob's, likewise
+```
+
+`GET jwize.com/__roots__/` lists everyone jwize co-hosts — jwize advertising "here's whose content I serve." Readers discover replicas by which domain folders a host carries.
+
+**Other properties:**
+- **Deliberate redundancy** — §21.8's resilience was incidental (someone happened to adopt); subscription makes it intentional (a parent commits to mirroring a child, guaranteeing survival if the child goes offline).
+- **Address-graph density** — each co-host is another domain that serves the sig, another fallback in the `{ bytes, domains }` cascade (§21.5). Interest → co-hosts → resolution redundancy.
+- **Cycle-safe** — mirroring a child's content is *pool growth*, not a root change; it doesn't re-sign the parent's own authored roots. So A↔B mutual subscription converges and goes quiet; only deliberately authoring an aggregate layer creates a new root.
+- **Cost is bounded** — opt-in (you chose to subscribe), content-addressed (a sig shared across subscriptions stored once), GC-able (stop subscribing → unreferenced sigs collectable). Serving-what-you-mirror is the default; private backup-only mirroring is an access-control layer on top.
+
 ### 21.9 Host filesystem layout
 
-Because signatures are universal addresses *and* every layer transitively references its own children (sub-layers, bees, dependencies, resources), host storage collapses to **five pools** — four flat and sig-keyed, one shallow and domain-keyed. Nothing else.
+Because signatures are universal addresses *and* every layer transitively references its own children (sub-layers, bees, dependencies, resources), host storage organizes into typed pools — and **the folder path encodes the Content-Type at whatever granularity you want.**
 
 ```
-content/
-  __layers__/<sig>                 ← layer (refs to its children via sig arrays)
-  __bees__/<sig>                    ← bee
-  __dependencies__/<sig>            ← dep
-  __resources__/<sig>               ← resource (arbitrary bytes)
-  __roots__/<domain>/<sig>          ← attestation, grouped by attester domain
+content/                                  ← internal STORAGE layout (not the URL — see §21.10)
+  __layers__/<sig>                         → application/json
+  __bees__/<sig>                           → application/javascript
+  __dependencies__/<sig>                   → application/javascript
+  __resources__/image/png/<sig>            → image/png        (MIME from subfolder)
+  __resources__/image/webp/<sig>           → image/webp
+  __resources__/audio/mpeg/<sig>           → audio/mpeg
+  __roots__/<domain>/<sig>                 → application/json (attestation)
 ```
 
-That is the entire surface. No `manifest.json` with expanded `bees[]`/`layers[]` arrays — those arrays were walk results, not configuration, and every layer already references its own children. No top-level discovery index file — directory listing IS the discovery surface.
+The folder tree IS the type metadata — no sidecar files, no content sniffing, no separate MIME store. The host files content into its type folder at ingest (it knows the type then), and the type is recoverable from the path forever. Resources subdivide by MIME; the same trick can shard by hash-prefix (`…/png/ab/cdef…`) for large pools without changing anything observable.
+
+This is **storage layout, not URL shape**. The read URL is a bare `/<sig>` (§21.10); the pools exist only inside the host. No `manifest.json` with expanded `bees[]`/`layers[]` arrays — those arrays were walk results, not configuration, and every layer already references its own children.
+
+**Resolution: universal handler over an in-memory key index.** The host reads every sig filename into memory at startup — just `readdir` per pool; keys are 64-hex, tiny (~64 B + a pool/type tag each, ~10 MB per 100 K sigs). A request resolves O(1):
+
+```
+GET /<sig>  →  index lookup
+                hit  → serve bytes from its pool, Content-Type from its folder path
+                miss → instant 404  (no filesystem probing — misses were probing's worst case)
+```
+
+The in-memory key set is not just a GET cache — it is the **membership oracle the whole system queries**:
+- **GET resolution** — is the sig present? what type? (lookup → pool + Content-Type)
+- **Push dedup** (§21.11) — "does my host already have this sig?" → skip vs enqueue
+- **Pull dedup** (§21.8.1) — "is this in my pool?" → closure-minus-what-I-have
+- **Address graph** (§21.5) — "what do I serve?" → the key set itself
+
+It is a pure cache over the filesystem: rebuilt by re-scanning on startup, updated incrementally on PUT/GC, never a source of truth. Probing the pools directly is the cold path (and the rebuild path); the index is the warm path. Filesystem stays truth. (This is the host-side twin of the warmup/preloader pattern — warm the keys, serve instant.)
 
 **A root attestation** (one file at `__roots__/<domain>/<sig>`) is a small signed record:
 
@@ -800,12 +885,11 @@ The file is content-addressed: its name is the sha256 of its bytes. Two domains 
 **Discovery is directory listing** — no auxiliary index file:
 
 ```
-GET /__roots__/                  → list of domains this host serves
-GET /__roots__/<domain>/         → list of attestation sigs for that domain
-GET /__roots__/<domain>/<sig>    → the attestation file
+GET /__roots__/                  → list of domains this host serves (mutable)
+GET /__roots__/<domain>/         → list of attestation sigs for that domain (mutable)
 ```
 
-The relay's HTTP host can serve directory listings trivially. No `roots.json`, no `index.json`, no manifest-merge logic. The filesystem listing IS the protocol's discovery surface.
+The relay's HTTP host serves directory listings trivially. `__roots__/<domain>/` is the *discovery index* — a mutable listing of attestation sigs. The attestation **bytes** those sigs name resolve through the same universal `/<sig>` handler as everything else (immutable, edge-cached). So the only mutable surface is the listing; everything it points at is immutable content. No `roots.json`, no `index.json`, no manifest-merge logic.
 
 **Data vs scripts is a manifest-layer view, not a storage split.** Both flow through the same sig pool. The distinction is which array within a *layer* a sig appears in (`bees[]`/`dependencies[]` vs sub-`layers[]`). The bytes are interchangeable — `__layers__/<sig>` is just a layer whether it encodes user tiles, notes, or code-package structure.
 
@@ -833,40 +917,46 @@ Old layer sigs are NOT deleted. Old attestation files are NOT deleted. Time-trav
 **HTTP routes:**
 
 ```
-GET  /__layers__/<sig>           → universal pool
-GET  /__bees__/<sig>              → universal pool
-GET  /__dependencies__/<sig>      → universal pool
-GET  /__resources__/<sig>         → universal pool
-GET  /__roots__/                  → directory listing (domains served)
-GET  /__roots__/<domain>/         → directory listing (attestation sigs)
-GET  /__roots__/<domain>/<sig>    → the attestation file
+GET  /<sig>            → universal handler: ANY content-addressed blob
+                         (layer / bee / dep / resource / attestation).
+                         Resolved via the in-memory key index; Content-Type
+                         from the blob's pool/subfolder. Immutable → cached
+                         forever (§21.10). 404 if the sig isn't held.
+GET  /__roots__/              → discovery index: domains this host serves (mutable)
+GET  /__roots__/<domain>/     → discovery index: attestation sigs for a domain (mutable)
 ```
 
-Sig lookups never filter by domain — they are universal pool reads. Domain scoping appears only in `__roots__/`. There are no merge endpoints and no expansion-manifest routes.
+Two surfaces, cleanly split: **immutable content at `/<sig>`** (everything — including attestation bytes — cache-forever) and the **mutable discovery index at `/__roots__/`** (revalidated). Sig reads never filter by domain — domain scoping appears only in the discovery index. There are no merge endpoints and no expansion-manifest routes. The `__` prefix on `__roots__` never collides with a 64-hex sig, so routing is unambiguous: match `/<64-hex>` → universal handler; `/__roots__/…` → discovery; else 404.
 
 **Garbage collection is opt-in.** The pool is durable by default; the rule is *never delete from `__layers__/`, `__bees__/`, `__dependencies__/`, `__resources__/` unless an explicit GC phase runs.* A future GC walks every attestation in every `__roots__/<domain>/`, transitively walks the layer trees, marks reachable sigs, then trims unreferenced ones (subject to a configurable retention window). Operator-initiated only; never automatic.
 
-### 21.10 Extension-free sig URLs
+### 21.10 Flat sig URLs and immutable caching
 
-Sig-addressed paths drop their format extension. The path prefix already encodes the type; the extension is redundant build-tooling residue.
+The read endpoint for any content-addressed blob is a **bare signature** — no type prefix, no extension:
 
-| URL | Content-Type returned by server |
-|---|---|
-| `/__layers__/<sig>` | `application/json` |
-| `/__bees__/<sig>` | `application/javascript` |
-| `/__dependencies__/<sig>` | `application/javascript` |
-| `/__resources__/<sig>` | per the resource's stored type, or `application/octet-stream` |
+```
+https://<domain>/<sig>
+```
 
-**Why this is structurally better:**
+This drops *both* the extension (`.json`/`.js` — build-tooling residue) *and* the type prefix (`__layers__/` etc. — which moves to internal storage, §21.9). The URL commits to nothing but the sig. Content-Type comes from the host's pool/subfolder via the in-memory index (§21.9); the consumer also knows the type from the referring context (a sig in a layer's `bees[]` is a bee), so neither side needs the URL to carry it.
 
-- **Format-agnostic URLs.** If the layer manifest format evolves (JSON → CBOR → MessagePack), the URL doesn't move. The bytes change; the address stays.
-- **The address IS the identity.** Sig is the universal name; extension was carrying redundant metadata.
-- **Matches `__resources__/` which was already extension-free.** No special case for "structured" types.
-- **ESM module loading still works.** `import('https://host/__bees__/<sig>')` evaluates as a module when the server returns `Content-Type: application/javascript`. The browser's module loader doesn't require a `.js` extension in the URL.
+**Why bare-sig URLs are the right address:**
 
-**The one real cost** is that the server MUST set `Content-Type` by path prefix rather than by file extension. The deploy pipeline's MIME-mapping function and the relay's HTTP host become prefix-keyed rather than extension-keyed. Trivial.
+- **The address IS the identity.** Sig is the universal name; prefix and extension were both redundant metadata.
+- **Format-agnostic.** If a blob's representation evolves (JSON → CBOR → MessagePack), the URL never moves — the bytes change, so the sig changes, but the *scheme* of the address is stable.
+- **ESM still loads.** `import('https://host/<sig>')` evaluates as a module when the host returns `Content-Type: application/javascript` (which it does for bee/dep sigs, resolved by pool). The loader doesn't require a `.js` in the URL.
 
-**`manifest.json` keeps its extension.** It is a well-known root entry point (cf. `package.json`, `robots.txt`), not sig-addressed, and the explicit name aids tooling/humans. The rule is specifically: drop the extension on sig-addressed paths.
+**Immutable caching — the built-in CDN.** A sig is the SHA-256 of the content, so `<domain>/<sig>` is an **immutable URL by construction**: the bytes there can never change. Serve it with:
+
+```
+Cache-Control: public, max-age=31536000, immutable
+```
+
+and every cache layer holds it forever with zero invalidation logic — browser cache, service worker (cache-first, no staleness risk), reverse proxy, and the CDN edge. This is the same content-hashed-asset trick the modern web already uses (`app.a3f4b2.js`), applied *universally* because every blob already is its hash.
+
+**This is what makes home-hosting scale.** The weakness of running `jwize.com` off a home machine via Cloudflare Tunnel is residential upload bandwidth. But with immutable `/<sig>` URLs, **Cloudflare's edge caches every blob after the first fetch** — the home machine serves each unique sig once, globally; the edge serves the millions of repeat reads. The home box becomes an origin-of-last-resort, not a bottleneck. The grid doctrine (everyone hosts their own domain) only works at scale *because* the URLs are immutable. It is load-bearing, not cosmetic.
+
+**The only mutable surface** is the discovery index (`/__roots__/`, `/__roots__/<domain>/`) — it must revalidate (new attestations appear). Perfect split: a mutable index pointing at immutable content. There is no `manifest.json` (retired in favor of `__roots__` attestations); the named `__roots__/` routes are the sole non-sig paths.
 
 ### 21.11 Host sync — continuous backup, cascade queue, receipts
 
@@ -944,6 +1034,8 @@ queue stuck (offline / no receipt)         → "pending — not yet backed up"
 #### 21.11.5 Branch-attestation gate
 
 `save as branch` may only attest a root once its *entire closure* is receipted — all cascade layers **and** any newly-authored resources the root transitively references (queue drained for that root). Otherwise the attestation would point at a root whose ancestors or resources aren't fully present on the host. Empty queue is the green light.
+
+The same drain gate governs **announcing to subscribers** (§21.8.1): once the root receipt closes the loop, the operator announces "latest root = R" on the mesh so subscribed parents feed their pull queues. Never announce a root whose closure your own host can't yet serve — backup → receipt → announce, in that order. The push queue (this section) and the subscriber's pull queue (§21.8.1) are the same primitive pointed in opposite directions; the announce is the handoff between them.
 
 #### 21.11.6 Reconciliation on reconnect
 
