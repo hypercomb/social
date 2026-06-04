@@ -57,14 +57,25 @@ const KIND_FETCH_REQUEST = 20400
 // responses via REQ replay — no broadcast needed for the second-onward
 // requester. The relay IS the cache; we don't have to coordinate.
 //
-// Trade-off: we don't try to prevent multiple responders publishing
-// duplicate bytes (no jitter, no check-before-publish). With N peers
-// holding the same sig, we get up to N responses on the wire per
-// uncached request. The requester takes the first valid one; the
-// others are wasted bandwidth but harmless. "First valid wins" stays
-// the simplest and lowest-latency design — useful coordination only
-// matters at large swarm sizes, which we can layer in later if needed.
+// Coordination: see KIND_FETCH_CANCEL below. The asker publishes a
+// cancel signal once it has verified bytes for a sig, and any other
+// peer mid-preparation (between readLocal and publish) aborts. This
+// implements the doctrine's "live shrinking broadcast" — first valid
+// wins, others stand down, bandwidth converges to 1x per resource
+// regardless of peer count.
 const KIND_FETCH_RESPONSE = 30401
+
+// Cancel signals — published by an asker once a sig has been resolved
+// with verified bytes. Any peer currently preparing a response for that
+// sig (between #readLocal and the publish call) checks the cancelled
+// set before committing bandwidth and aborts if the sig is now done.
+//
+// The cancel event flows on BROADCAST_TAG (same channel as requests) so
+// every broker already subscribed there sees it without needing
+// per-sig subscriptions. Short expiration — just long enough to outlast
+// in-flight preparations.
+const KIND_FETCH_CANCEL = 20402
+const CANCEL_TTL_MS = 30_000  // 30s — enough to cover any reasonable readLocal duration
 
 // Long expiration on responses. Content is sig-addressed and immutable,
 // so technically a response could live forever — but most relays
@@ -237,6 +248,13 @@ export class ContentBrokerDrone extends Drone {
   // See: project_public_navigation_lineage_filter.md / "The response
   // primitive: { bytes, domains }".
   #knownDomainsBySig = new Map<string, Set<string>>()
+
+  // Cancelled sigs — populated by inbound KIND_FETCH_CANCEL events.
+  // Used by #handleFetchRequest to abort preparation when an asker has
+  // already received valid bytes from another peer. Keyed by sig, value
+  // is the local-time expiration (ms epoch). Stale entries are pruned
+  // lazily before each check.
+  #cancelledSigs = new Map<string, number>()
 
   constructor() {
     super()
@@ -414,12 +432,18 @@ export class ContentBrokerDrone extends Drone {
         if (!b64) return
         void this.#acceptResponseBytes(sig, type, b64).then((bytes) => {
           if (bytes) {
+            // Cooperative-cancellable broadcast: signal that the sig
+            // is satisfied so other in-flight preparers abort before
+            // committing duplicate bandwidth. Fire-and-forget — we
+            // don't await; the fetch itself resolves immediately.
+            void this.#publishCancel(sig)
             cleanup()
             resolve(bytes)
           }
           // If the bytes failed verification we DON'T resolve — keep
           // waiting; some other (honest) responder may still answer
-          // before the timeout.
+          // before the timeout. We also don't cancel — other peers may
+          // still legitimately need to send.
         })
       })
 
@@ -487,6 +511,10 @@ export class ContentBrokerDrone extends Drone {
             entries.push({ pubkey: pk, content, created_at: createdAt, tags })
           }
           if (entries.length === 0) return
+          // Cooperative cancellation for visuals too — signal that this
+          // composedSig has been resolved so other peers preparing
+          // visuals responses can abort.
+          void this.#publishCancel(composedSig)
           cleanup()
           resolve(entries)
         } catch { /* malformed — keep waiting for another responder */ }
@@ -615,10 +643,82 @@ export class ContentBrokerDrone extends Drone {
       return
     }
     if (this.#broadcastSub) return  // already subscribed
-    this.#broadcastSub = mesh.subscribe(BROADCAST_TAG, (evt) => void this.#handleRequest(evt))
+    this.#broadcastSub = mesh.subscribe(BROADCAST_TAG, (evt) => void this.#handleBroadcast(evt))
   }
 
-  #handleRequest = async (evt: MeshEvtLike): Promise<void> => {
+  // Dispatch inbound broadcast events by kind. Requests get handled
+  // by #handleFetchRequest; cancel signals update #cancelledSigs so
+  // any preparation-in-flight aborts before publishing duplicate bytes.
+  #handleBroadcast = async (evt: MeshEvtLike): Promise<void> => {
+    const kind = Number(evt.event?.kind)
+    if (kind === KIND_FETCH_REQUEST) return void this.#handleFetchRequest(evt)
+    if (kind === KIND_FETCH_CANCEL)  return void this.#handleFetchCancel(evt)
+  }
+
+  // Record a cancel signal. The sig tag identifies which fetch has
+  // already been satisfied; any in-flight preparation for that sig
+  // should now abort. Stored with a TTL so the entry self-cleans.
+  #handleFetchCancel = (evt: MeshEvtLike): void => {
+    const pubkey = String(evt.event?.pubkey ?? '').toLowerCase()
+    if (!pubkey) return  // local fanout of our own publish — no need to act on it
+    if (this.#myPubkey && pubkey === this.#myPubkey) return  // self-echo
+
+    const sigTag = evt.event?.tags?.find(t => t[0] === 'd')?.[1]
+    if (!sigTag || !SIG_RE.test(sigTag)) return
+
+    this.#cancelledSigs.set(sigTag, Date.now() + CANCEL_TTL_MS)
+    this.#pruneStaleCancellations()
+  }
+
+  // Lazy cleanup — called whenever we touch the cancelled set so
+  // entries that have aged out don't linger forever. O(N) but the
+  // set should stay small (only sigs currently being raced for).
+  #pruneStaleCancellations = (): void => {
+    const now = Date.now()
+    for (const [sig, expiresAt] of this.#cancelledSigs) {
+      if (expiresAt <= now) this.#cancelledSigs.delete(sig)
+    }
+  }
+
+  // Is a sig currently in the "just-resolved, don't bother sending"
+  // window? Called by #handleFetchRequest before committing to a
+  // publish.
+  #isCancelled = (sig: string): boolean => {
+    this.#pruneStaleCancellations()
+    const expiresAt = this.#cancelledSigs.get(sig)
+    return expiresAt != null && expiresAt > Date.now()
+  }
+
+  // Asker-side: publish a cancel signal so any other peer currently
+  // preparing a response for the same sig can abort before committing
+  // bandwidth. Fire-and-forget — best-effort coordination, not a
+  // correctness primitive (workers that miss the cancel just publish
+  // an extra response, which the relay's parameterized-replaceable
+  // semantics dedup at storage anyway).
+  #publishCancel = async (sig: string): Promise<void> => {
+    const mesh = this.#getMesh()
+    if (!mesh?.publish) return
+    if (!SIG_RE.test(sig)) return
+
+    // Also note locally so a self-fanout of the cancel (which would
+    // skip the pubkey check in #handleFetchCancel) still has the
+    // intended effect on subsequent #isCancelled checks.
+    this.#cancelledSigs.set(sig, Date.now() + CANCEL_TTL_MS)
+
+    const expirationSecs = Math.floor((Date.now() + CANCEL_TTL_MS) / 1000)
+    try {
+      await mesh.publish(KIND_FETCH_CANCEL, BROADCAST_TAG, '', [
+        ['d', sig],
+        ['expiration', String(expirationSecs)],
+      ])
+    } catch (err) {
+      // best-effort; do nothing on failure — extra response events
+      // are harmless under the parameterized-replaceable storage rules
+      void err
+    }
+  }
+
+  #handleFetchRequest = async (evt: MeshEvtLike): Promise<void> => {
     if (Number(evt.event?.kind) !== KIND_FETCH_REQUEST) return
     const pubkey = String(evt.event?.pubkey ?? '').toLowerCase()
     if (!pubkey) return  // local fanout of our own publish
@@ -639,9 +739,21 @@ export class ContentBrokerDrone extends Drone {
 
     if (typeTag !== 'layer' && typeTag !== 'resource' && typeTag !== 'dependency') return
 
+    // Early cancel-check: if some other peer has already satisfied this
+    // sig (we saw their cancel signal), skip the readLocal+publish
+    // pipeline entirely. Saves a disk read and a publish round-trip.
+    if (this.#isCancelled(sigTag)) return
+
     const bytes = await this.#readLocal(sigTag, typeTag as ContentType)
     if (!bytes) return  // we don't have it — silent no-op
     if (bytes.byteLength === 0 || bytes.byteLength > MAX_RESPONSE_BYTES) return
+
+    // Re-check cancellation AFTER the readLocal await — a cancel may
+    // have arrived during the async disk read. This is the window the
+    // doctrine's "cooperative cancellable broadcast" closes; without
+    // this check, every peer that races the readLocal commits bytes
+    // even after the first responder has already resolved the sig.
+    if (this.#isCancelled(sigTag)) return
 
     const mesh = this.#getMesh()
     if (!mesh?.publish) return
