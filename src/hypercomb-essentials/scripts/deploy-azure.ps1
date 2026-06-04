@@ -364,10 +364,17 @@ foreach ($file in $files) {
   $relativePath = get-relative-file-path -BasePath $resolvedSource -FullPath $file.FullName
   $blobName = if ($resolvedDestination) { "$resolvedDestination/$relativePath" } else { $relativePath }
 
-  # content-addressed files: skip if blob already exists on remote
+  # content-addressed files: skip if blob already exists on remote.
+  # We require BOTH the metadata check AND the public HTTP HEAD to pass
+  # before skipping. The metadata-only check was returning TRUE for blobs
+  # whose entry was written but bytes never replicated — those files were
+  # then skipped here (not added to $uploadAttempts) so Phase 2.6 never
+  # caught the silent drop. The HTTP HEAD is what readers actually
+  # experience, so it's the source of truth for "this is already served."
   if (is-content-addressed -RelativePath $relativePath) {
-    $exists = test-blob-exists -ContainerName $containerName -BlobName $blobName -AuthArguments $authArguments
-    if ($exists) {
+    $existsMeta = test-blob-exists -ContainerName $containerName -BlobName $blobName -AuthArguments $authArguments
+    $existsHttp = if ($existsMeta) { test-blob-http-reachable -StorageAccount $resolvedStorageAccount -ContainerName $containerName -BlobName $blobName } else { $false }
+    if ($existsMeta -and $existsHttp) {
       $skipped++
       continue
     }
