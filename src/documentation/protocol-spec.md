@@ -867,3 +867,96 @@ Sig-addressed paths drop their format extension. The path prefix already encodes
 **The one real cost** is that the server MUST set `Content-Type` by path prefix rather than by file extension. The deploy pipeline's MIME-mapping function and the relay's HTTP host become prefix-keyed rather than extension-keyed. Trivial.
 
 **`manifest.json` keeps its extension.** It is a well-known root entry point (cf. `package.json`, `robots.txt`), not sig-addressed, and the explicit name aids tooling/humans. The rule is specifically: drop the extension on sig-addressed paths.
+
+### 21.11 Host sync — continuous backup, cascade queue, receipts
+
+hypercomb.io is the **authoring** surface; the operator's host is the **backup + serve** surface. Sync is one-way push (browser → host), continuous, and acknowledged by receipts that close the loop back to the authoring surface.
+
+#### 21.11.1 Save / branch / restore model
+
+- **Root (HEAD)** — the live state. Advances on *every* change. Continuously backed up to the host. The latest is always pushed; you never depend on a manual save to avoid loss.
+- **Branch** — a *named freeze* of the root at a moment. `save as branch v1` (from DCP or the host domain) writes a named attestation pointing at the current root. Immediately after: root == v1. Keep working: root advances, v1 stays frozen; changes accumulate.
+- **Restore** — moving HEAD back to a branch's root. Realized as a **"Make HEAD"** append (see the linear-history model): new ops are appended that bring the live state to equal the branch's root. History stays linear and append-only — restoring is a forward entry, never a truncation or fork.
+
+A "branch" here is a **name on a merkle root**, not a fork in the op-history. The history remains one linear chain; only the *labels* branch. This is consistent with the linear-append-only history model.
+
+**Restore guard.** Restoring moves the active line back. Changes since the last save aren't erased — they remain in the layer pool and the linear history — but if the current root wasn't *named*, it becomes orphaned: retained yet unreachable by label, findable only by scrubbing the timeline. So before restore: either **save current as a new branch** (keep it reachable by name) or **explicitly discard**. "Lost" means lost-from-the-active-line, never physically deleted — the append-only invariant holds.
+
+#### 21.11.2 The sync unit is a cascade chain, not one layer
+
+Layers reference their children by signature, so changing one cell re-signs that cell's layer, which changes its parent's bytes (the parent holds the child's sig), which re-signs the parent — up to the root (lineage-pull). **One user action re-signs every ancestor on the path to root:**
+
+```
+edit cell C at depth 4  →  new sigs for [L_C, L_3, L_2, L_1, ROOT]   (5 layers from 1 action)
+```
+
+One commit marker per action (the commit is atomic), but the commit yields a *chain* of new layer sigs. All are real intermediate state; all must reach the host.
+
+**The cascade is layer-only.** Only layers hold child-signatures that shift when a descendant changes. The leaves the cascade points at are unchanged:
+
+- **Resources** (image/text bytes) — same bytes → same sig → already on host.
+- **Dependencies** (bee/namespace bundles) — package-level, immutable, shipped at install.
+
+(The one exception: the originating change may introduce a *new* resource — e.g. a pasted image — pushed once as the leaf. Everything *above* it in the cascade is pure layers.)
+
+#### 21.11.3 Durable local queue + receipts
+
+```
+commit → cascade yields [L_C, L_3, L_2, L_1, ROOT]
+       ▼
+enqueue all sigs to a DURABLE local queue (OPFS-backed; survives offline + restart)
+       ▼
+drain (bottom-up): PUT each layer to the host
+       ▼
+RECEIPT per layer = confirmed read-back (host serves the sig, HEAD 200) — NOT "PUT returned 200"
+       ▼
+clear a queue entry only on its receipt; retry until received
+```
+
+**Receipt = confirmed read-back, never a bare PUT 200.** A `PUT` returning success does not mean the bytes are serving — proven by the deploy-pipeline silent-drop (blobs that 404'd after a "successful" upload). The queue entry stays open until the host actually serves the layer. Nothing is fire-and-forget.
+
+**Two granularities:**
+
+- **Per-layer receipts** — the queue's internal completeness tracking.
+- **Root receipt** — the user-facing answer to "you got my latest update?" Because a branch attestation is gated on all cascade ancestors being present, a confirmed root sig *implies* the whole chain landed. The root receipt is the single "backed up" signal.
+
+#### 21.11.4 The loop closes at hypercomb.io
+
+The receipt must reach the authoring surface — an open loop is the silent-drop failure mode. The HostSync drone receives the confirmed read-back and `emitEffect('sync:state', { root, status })`; UI components `onEffect` it. EffectBus last-value replay means a panel mounting later still sees the current state.
+
+Two distinct confidence levels surface:
+
+- **Saved locally** — OPFS commit, instant, always true.
+- **Backed up** — host receipt confirms it *serves* the latest root.
+
+```
+queue draining, root not yet confirmed   → "syncing…"
+root receipt received                      → "backed up to <domain>"
+queue stuck (offline / no receipt)         → "pending — not yet backed up"
+```
+
+#### 21.11.5 Branch-attestation gate
+
+`save as branch` may only attest a root once *all* its cascade layers are receipted (queue drained for that root) — otherwise the attestation would reference a root whose ancestors aren't fully present on the host. Empty queue is the green light.
+
+#### 21.11.6 Reconciliation on reconnect
+
+"You got my latest update?" is also asked proactively on reconnect/startup:
+
+```
+hypercomb.io → host: "latest root you hold for <domain>?"
+  host behind  → drain the queue (push the gap)
+  host equal   → fully synced
+  host ahead   → another device pushed → pull (sync's read side)
+```
+
+The same handshake, on a timer/reconnect rather than per-commit. This is what makes multi-device safe: each authoring instance reconciles its latest root against the host, and the receipt is the shared truth.
+
+#### 21.11.7 Offline accumulation policy
+
+Ten rapid offline changes produce ten cascades; early intermediate roots are superseded by reconnect time. Two policies:
+
+- **Push them all** (default) — every committed state recoverable; honors time-travel + append-only; more receipts.
+- **Coalesce** (opt-in) — push only layers reachable from states you keep; fewer pushes, loses fine-grained scrub points between offline edits.
+
+Default is push-them-all, matching the durable-pool posture. Coalescing is opt-in compaction, same stance as GC (§21.9).
