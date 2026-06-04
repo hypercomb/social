@@ -1,38 +1,61 @@
 // diamondcoreprocessor.com/sharing/content-broker.drone.ts
 //
-// Content-addressed fetch over the Nostr mesh. Decentralised lookup —
-// any participant in the swarm who has a piece of content (a layer
-// blob, a resource blob, a dependency bundle) can serve it; the
-// requester broadcasts a sig, listens for the first valid response,
-// and verifies it cryptographically.
+// Content-addressed fetch with two transports:
+//   1. HTTP-direct (preferred) — fetch from operator domains' HTTP
+//      content endpoints. Used for ALL content types (layer, resource,
+//      dependency). Self-domain + community-trusted + mesh-learned
+//      domains, tried in trust order; first verified-bytes wins.
+//   2. Mesh broker (layer-only fallback) — broadcast a sig request on
+//      the Nostr mesh and let any peer who has the bytes respond.
+//      Resources and dependencies do NOT use the mesh — they're heavy
+//      bytes that belong on direct HTTPS, per the doctrine in
+//      project_public_navigation_lineage_filter.md:
+//        "Mesh transports LAYER SIGS ONLY — layers are tiny directories;
+//         resources / deps / bees / blobs travel via direct HTTPS
+//         fetches to the domains the mesh told you about."
 //
 // Why this exists: the swarm publish path (kind 30200 etc.) is
 // LOCATION-keyed and depth-bounded (MAX_PUBLISH_DEPTH = 3 in
-// swarm.drone.ts). When an adopter wants content the original
-// publisher hasn't re-walked recently — or wants content from a peer
+// swarm.drone.ts). When an adopter wants a LAYER the original
+// publisher hasn't re-walked recently — or wants it from a peer
 // who joined long after the publisher left — the location-keyed flow
 // has nothing for them. The broker replaces "ask the one publisher"
-// with "ask the swarm" and lets ANY participant who's cached the bytes
-// respond. Resilient, depth-independent, single primitive that
-// generalises across layer / resource / dependency fetches.
+// with "ask the swarm" for layer sigs. Resources/deps are served by
+// the operator's own HTTP endpoint (jwize.com etc.) on signature URLs,
+// learned via the `{ bytes, domains }` response primitive on layer
+// fetches.
 //
-// Wire shape:
+// Wire shape (layer-only on the mesh):
 //
-//   REQUEST  kind 20400, tags [['x', BROADCAST_TAG], ['d', sig], ['t', type]]
-//            content empty; the sig + type travel as tags.
+//   REQUEST  kind 20400, tags [['x', BROADCAST_TAG], ['d', sig], ['t', 'layer']]
+//            content empty; the sig travels as a tag.
 //            Broadcast to every participant subscribed on BROADCAST_TAG.
+//            `t` field retained for forward compatibility but the
+//            responder ignores any value other than 'layer'.
 //
-//   RESPONSE kind 20401, tags [['x', sig], ['t', type]]
+//   RESPONSE kind 30401 (parameterized-replaceable),
+//            tags [['d', sig], ['t', 'layer'],
+//                  ['expiration', secs],
+//                  ['domain', wssOrHostUrl]?]
 //            content base64 of bytes.
-//            Targeted at the requester via the sig channel — any peer
-//            also listening on the same sig (e.g. another requester
-//            who fired the same fetch) gets a free copy too.
+//            The ['domain', ...] tag is the optional address-graph
+//            attribution — operators set hc:nostrmesh:self-domain in
+//            localStorage to advertise themselves; clients leave it
+//            empty. Receivers accumulate domains into
+//            #knownDomainsBySig for future HTTP-direct queries.
+//
+//   CANCEL   kind 20402, tags [['d', sig], ['expiration', secs]]
+//            Published by the asker once a sig is satisfied. Peers
+//            preparing responses for the same sig abort before
+//            committing bandwidth. Best-effort coordination.
 //
 // Content verification: the requester recomputes sha256 of the
 // response bytes and compares to the requested sig. Mismatched bytes
 // (malicious peer, transmission corruption) are discarded. Result is
 // content-address-clean: a fetch never returns bytes that don't match
-// the sig the caller asked for.
+// the sig the caller asked for. Trust ordering in HTTP-direct adds
+// a complementary protection — it bounds the TIME wasted on bad
+// hosts before sig-verification rejects their bytes.
 //
 // Self-skip: requesters filter their own pubkey out of inbound events
 // so we don't loop on our own broadcasts. Local-fanout events arrive
@@ -282,6 +305,44 @@ export class ContentBrokerDrone extends Drone {
     catch { return '' }
   }
 
+  // ─────────────────────────────────────────────────────────────────
+  // Community-trust gate — the binary in-community trust formula
+  // ─────────────────────────────────────────────────────────────────
+  //
+  // The operator declares their trusted-community as a list of domain
+  // strings in localStorage['hc:community:domains'] (JSON array).
+  // Examples:
+  //   '["alice.dev", "bob.io"]'              — endorsed by domain
+  //   '["wss://alice.dev", "https://bob.io"] ' — same; scheme is stripped
+  //
+  // This list is THE trust signal. The doctrine in
+  // project_public_navigation_lineage_filter.md says trust accrues via
+  // the community graph; this implementation collapses that to its
+  // simplest binary form: a domain is either in your community
+  // (endorsed) or not. That's enough to:
+  //   - protect HTTP-direct fetch ordering against adversarial mesh
+  //     advertisements (community-trusted hosts are tried first)
+  //   - try community hosts even when they haven't witnessed a given
+  //     sig via the mesh (endorsement carries weight on its own)
+  //
+  // Future refinements (graph-distance, overlap-count, explicit-
+  // endorsement) layer on top by re-ranking inside the community tier
+  // without changing the binary in/out gate.
+  #getCommunityDomains = (): Set<string> => {
+    try {
+      const raw = String(localStorage.getItem('hc:community:domains') ?? '').trim()
+      if (!raw) return new Set<string>()
+      const parsed = JSON.parse(raw)
+      if (!Array.isArray(parsed)) return new Set<string>()
+      const out = new Set<string>()
+      for (const entry of parsed) {
+        const host = this.#domainToHost(String(entry ?? ''))
+        if (host) out.add(host)
+      }
+      return out
+    } catch { return new Set<string>() }
+  }
+
   // Pull all `['domain', host]` tags out of an incoming response event.
   // The protocol's optional-domains-list half: any host that knows about
   // canonical hosts for this sig can include them here, and the receiver
@@ -352,24 +413,52 @@ export class ContentBrokerDrone extends Drone {
   // and shouldn't ride the mesh. Layers go HTTP too here when a
   // domain's known to host them; the doctrine just says they CAN go
   // mesh-only, not that they MUST. A working HTTP path is faster.
+  //
+  // Candidate ordering — the binary in-community trust formula:
+  //   Tier 0  Self-domain        (you; instant on operator's own machine)
+  //   Tier 1  Community-trusted  (operator-endorsed; tried whether or not
+  //                               they've been mesh-witnessed for this sig
+  //                               — endorsement carries weight on its own)
+  //   Tier 2  Mesh-learned       (witnessed via prior response for this
+  //                               sig but NOT in the operator's community)
+  //
+  // Within a tier, insertion order. This protects fetch latency against
+  // adversarial mesh advertisements: a malicious peer flooding fake
+  // `domain` tags into responses can only push their host into Tier 2,
+  // never ahead of community-trusted hosts. sha256 verification of bytes
+  // is the absolute backstop — wrong bytes are dropped regardless of
+  // which tier they came from — but trust-ordering protects time and
+  // bandwidth, which sig-verification alone cannot.
   #fetchOverHttp = async (sig: string, type: ContentType): Promise<Uint8Array | null> => {
     const path = this.#httpPathForType(sig, type)
     if (!path) return null
 
-    // Candidate domains: operator's own self-domain (instant — their
-    // own machine via Cloudflare Tunnel), plus every domain we've
-    // learned about from prior responses for this sig.
-    const candidates = new Set<string>()
-    let selfDomain = ''
-    try { selfDomain = String(localStorage.getItem('hc:nostrmesh:self-domain') ?? '').trim() } catch {}
-    if (selfDomain) candidates.add(selfDomain)
-    for (const d of this.getKnownDomains(sig)) candidates.add(d)
+    const ordered: string[] = []
+    const seen = new Set<string>()
+    const push = (raw: string): void => {
+      const host = this.#domainToHost(raw)
+      if (!host || seen.has(host)) return
+      seen.add(host)
+      ordered.push(host)
+    }
 
-    if (candidates.size === 0) return null
+    // Tier 0 — self-domain.
+    push(this.#getSelfDomain())
 
-    for (const domain of candidates) {
-      const host = this.#domainToHost(domain)
-      if (!host) continue
+    // Tier 1 — community-trusted domains. Always included regardless
+    // of whether they've witnessed this sig via the mesh: the operator
+    // endorsed them, so they're worth a direct query.
+    const community = this.#getCommunityDomains()
+    for (const host of community) push(host)
+
+    // Tier 2 — mesh-learned domains that aren't in the community set.
+    // (Domains in community already landed in Tier 1; the `seen` guard
+    // deduplicates.)
+    for (const domain of this.getKnownDomains(sig)) push(domain)
+
+    if (ordered.length === 0) return null
+
+    for (const host of ordered) {
       const url = `https://${host}${path}`
       try {
         const res = await fetch(url, { cache: 'no-store' })
@@ -379,7 +468,7 @@ export class ContentBrokerDrone extends Drone {
         if (!await this.#verifyBytes(bytes, sig)) continue
         return bytes
       } catch {
-        // network error / CORS / cert issue — try next domain
+        // network error / CORS / cert issue — try next host
         continue
       }
     }
@@ -434,14 +523,28 @@ export class ContentBrokerDrone extends Drone {
     if (local) return local
 
     // HTTP-direct path — try known domains' content endpoints first.
-    // Per the layer-only-mesh doctrine, the heavy bytes should travel
-    // via HTTP, not the mesh. Self-domain + learned domains form the
-    // candidate set; first verified-bytes wins.
+    // Per the layer-only-mesh doctrine, heavy bytes (resources, deps)
+    // travel via HTTP exclusively; layers can fall back to mesh.
+    // Self-domain + community + mesh-learned domains form the
+    // candidate set (see #fetchOverHttp); first verified-bytes wins.
     const fromHttp = await this.#fetchOverHttp(s, type)
     if (fromHttp) return fromHttp
 
-    // Mesh broker fallback — used when HTTP-direct returns nothing
-    // (no known domains, or every candidate 404'd / failed verify).
+    // Layer-only mesh transport. Per the doctrine in
+    // project_public_navigation_lineage_filter.md:
+    //   "Mesh transports LAYER SIGS ONLY — layers are tiny directories;
+    //    resources / deps / bees / blobs travel via direct HTTPS fetches
+    //    to the domains the mesh told you about."
+    // Resources and dependencies have no mesh fallback. If they aren't
+    // available via HTTP-direct, the asker simply doesn't get them —
+    // they'll be re-tried on the next access, by which point HTTP-
+    // direct may have learned new domains via subsequent layer fetches.
+    if (type !== 'layer') return null
+
+    // Mesh broker fallback for layers only. Used when HTTP-direct
+    // returns nothing (no known domains, or every candidate 404'd /
+    // failed verify). Layers are tiny — typically <2KB of refs — so
+    // the mesh round-trip is cheap.
     const fetchPromise = this.#fetchOverMesh(s, type, timeoutMs)
     this.#pendingFetches.set(s, fetchPromise)
     try { return await fetchPromise }
@@ -823,7 +926,17 @@ export class ContentBrokerDrone extends Drone {
       return
     }
 
-    if (typeTag !== 'layer' && typeTag !== 'resource' && typeTag !== 'dependency') return
+    // Layer-only mesh transport. Per the doctrine in
+    // project_public_navigation_lineage_filter.md, the mesh carries
+    // layer sigs only — resources, dependencies, bees, and blobs
+    // travel via direct HTTPS fetches to the domains the mesh told
+    // you about. We silently ignore any inbound `t=resource` or
+    // `t=dependency` request — those are protocol violations now,
+    // and the asker should be using HTTP-direct against the domains
+    // they learned about. (Legacy peers that haven't been rebuilt
+    // yet may still send them; ignoring is the kindest forward-
+    // compatible response.)
+    if (typeTag !== 'layer') return
 
     // Early cancel-check: if some other peer has already satisfied this
     // sig (we saw their cancel signal), skip the readLocal+publish
