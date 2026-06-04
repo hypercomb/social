@@ -1058,3 +1058,51 @@ Ten rapid offline changes produce ten cascades; early intermediate roots are sup
 - **Coalesce** (opt-in) — push only layers reachable from states you keep; fewer pushes, loses fine-grained scrub points between offline edits.
 
 Default is push-them-all, matching the durable-pool posture. Coalescing is opt-in compaction, same stance as GC (§21.9).
+
+### 21.12 Write contract and authorization
+
+§21.1–21.11 specify reading, resolving, and the *flow* of pushing. This section pins how content is actually accepted **onto** a host. There are two write paths, with different trust:
+
+```
+PUT /<sig>                       → store a content blob (layer/bee/dep/resource)
+PUT /__roots__/<domain>/<sig>    → store an attestation
+```
+
+**Content PUT is self-verifying.** On `PUT /<sig>`, the host computes `sha256(body)` and **rejects unless it equals the URL sig.** You cannot forge a sig without breaking SHA-256, so the bytes authenticate themselves — the host never has to trust the *content* of a PUT, only check the hash. Idempotent by construction: the same sig is the same bytes, so a re-PUT is a no-op (or an identical overwrite). This is why mirroring/adoption is safe — a host storing bytes pulled from anywhere can verify them locally before serving.
+
+**Attestation PUT is identity-verified.** On `PUT /__roots__/<domain>/<sig>`, the host (a) checks `sha256(body) == sig` like any blob, *and* (b) verifies the attestation's `signature` field against `<domain>`'s authorized key(s) per §21.13. An attestation claiming `domain: "alice.dev"` is rejected unless signed by a key alice.dev has published. This is what enforces **hosting ≠ attesting**: anyone can store alice's *bytes*, but only alice's key can mint alice's *roots*.
+
+**Who may write (storage authorization).** Storing bytes consumes the host's disk, so the *inbound* write path is gated by an **authorized-writer set** — pubkeys the operator permits to PUT, configured on the host:
+
+- **Browser → own host** (the §21.11 backup): the operator's own device keys are authorized writers. Each PUT is signed by (or the session authenticated as) an authorized writer. This is the only path that needs inbound write-auth.
+- **Host → own pool** (co-hosting via subscription, §21.8.1): the host *initiated* the pull, so it writes to its own pool with no inbound auth — there is no untrusted writer, just the host fetching what it chose to mirror.
+
+So content-integrity is permissionless (the hash proves the bytes) while disk-write is permissioned (the authorized-writer set proves the *writer*). The two are orthogonal: a bad actor can neither forge bytes (SHA-256) nor fill your disk (writer auth) nor impersonate a domain (§21.13).
+
+**The write isn't done until it serves.** Per §21.11.3, the receipt is confirmed read-back, not a PUT 200. So the write contract is *accepted, stored, and serving* — a host that returns 200 but can't subsequently serve the sig has not fulfilled the write. (This is the deploy silent-drop lesson made part of the contract.)
+
+### 21.13 Domain ↔ key binding (the trust root)
+
+Attestation verification (§21.8.1, §21.12) reduces to one question: *given an attestation claiming `domain: "alice.dev"` signed by key K, how does a verifier know K is legitimately alice.dev's?* The answer uses the web's existing two-factor identity — **a signature proves you hold the key; DNS + TLS proves you control the domain** — and binds them by having the domain publish its keys over its own TLS:
+
+```
+GET https://alice.dev/__keys__   → alice.dev's authorized public key(s)   (mutable; revalidated)
+```
+
+Because that endpoint is served over TLS *for alice.dev*, the CA + DNS system vouches that "alice.dev asserts these are its keys." No separate PKI is introduced — the binding rides on the same TLS that already authenticates the domain. Verification of an attestation is then:
+
+1. Read the attestation's `domain` (alice.dev) and `signature` (by K).
+2. `GET https://alice.dev/__keys__` (TLS-authenticated for alice.dev).
+3. Confirm K is in the published set.
+4. Verify the attestation signature with K.
+
+Two independent attestations now agree: DNS+TLS says alice.dev endorses K, and K signed the root. Only when both hold is the attestation trusted.
+
+**Properties:**
+
+- **Key rotation** — alice.dev updates its published set. *Old* attestations signed by a retired key stay valid (they're immutable, content-addressed); *new* attestations use the new key. The set may carry validity windows, but the minimal form is just "current authorized keys."
+- **Survives key loss** — because the binding is anchored in *domain control* (DNS/registrar), a lost signing key is recoverable: you still control alice.dev, so you publish a new key. This is exactly why domain-as-identity is more durable than pubkey-as-identity — the key can rotate under a stable name.
+- **Not immutable-cached** — the key set is mutable (rotation happens), so unlike `/<sig>` content it must revalidate. It joins `__roots__/` as a mutable, named (non-sig) route with a short cache.
+- **Composes with community trust** — `hc:community:domains` (§21.3) names the domains a verifier trusts; this binding resolves each trusted *domain* to the *keys* whose attestations it will accept. The trust graph is domain-keyed; the key binding is the domain→key lookup underneath it.
+
+With this, the two verification primitives that the whole protocol rests on are both pinned: **content is verified by hash** (SHA-256, §21.6/§21.12) and **identity is verified by domain-published key over TLS** (§21.13). Everything else — resolution, federation, subscription, co-hosting, sync — is consequence.
