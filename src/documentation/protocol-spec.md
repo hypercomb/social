@@ -632,3 +632,103 @@ Lookup resolves by exact signature first, then by name alias.
 | `hc:mesh-public`                 | `"true"\|other` | (unset)                    | Master privacy switch. Mesh networking is OFF unless this is `"true"`. |
 | `hc:nostr:secret-key`            | hex string    | (none)                       | Nostr private key (32 bytes hex)   |
 | `hc:show-honeycomb:publisher-id` | UUID string   | auto-generated               | Persistent client identity for self-filter |
+| `hc:nostrmesh:self-domain`       | string        | `""`                         | Operator's own domain (e.g., `wss://jwize.com` or `jwize.com`). When set, the content broker advertises this domain in every response so requesters accumulate it into their HTTP-direct address graph. Empty for non-host clients. |
+| `hc:community:domains`           | JSON string[] | `[]`                         | Operator's trusted-community domain list. Drives HTTP-direct fetch ordering: community-trusted domains are tried before mesh-learned ones, even when not witnessed for a given sig. See Section 21. |
+
+---
+
+## 21. Content Broker Protocol
+
+The content broker is the on-demand fetch primitive for sig-addressed content (layers, resources, dependencies). It rides alongside the cell-exchange protocol (Section 14) on the same Nostr relays but uses distinct event kinds and is layered for a different purpose: cell-exchange is location-keyed and pushes presence; the broker is signature-keyed and pulls bytes.
+
+### 21.1 Two transports, one API
+
+The broker exposes a single public method, `fetchBySig(sig, type, timeoutMs?)`. Internally it composes two transports in fallback order:
+
+1. **HTTP-direct** (preferred, all types) — fetch from the operator's own HTTP content endpoint and from learned/community domains. First verified-bytes wins.
+2. **Nostr mesh broker** (layer-only fallback) — broadcast a sig request on the Nostr relay; any peer with the bytes can respond.
+
+Per the doctrine in `memory: project_public_navigation_lineage_filter.md`:
+
+> Mesh transports LAYER SIGS ONLY — layers are tiny directories; resources / deps / bees / blobs travel via direct HTTPS fetches to the domains the mesh told you about.
+
+Resources and dependencies have NO mesh fallback. If HTTP-direct can't find them, the call returns `null` and the caller retries on next access (by which point new domains may have been learned via subsequent layer fetches).
+
+### 21.2 HTTP-direct: candidate URLs
+
+For each content type the operator's HTTP host serves:
+
+| Type         | URL path                       |
+|--------------|--------------------------------|
+| `layer`      | `/__layers__/<sig>.json`       |
+| `resource`   | `/__resources__/<sig>`         |
+| `dependency` | `/__dependencies__/<sig>.js`   |
+
+These are static `https://<domain><path>` fetches with no auth. Each candidate's bytes are SHA-256 verified against the requested sig before being returned — bad bytes are dropped and the next candidate is tried.
+
+### 21.3 HTTP-direct: candidate ordering (binary in-community trust)
+
+Domains are tried in tiered order:
+
+| Tier  | Source                | Always tried? | Notes |
+|-------|-----------------------|---------------|-------|
+| 0     | Self-domain           | when set      | `localStorage['hc:nostrmesh:self-domain']` — operator's own machine |
+| 1     | Community-trusted     | always        | `localStorage['hc:community:domains']` (JSON array). Tried even without mesh witness for the sig — endorsement carries weight on its own |
+| 2     | Mesh-learned          | only if witnessed | Domains observed in prior response `domain` tags for this sig |
+
+Within a tier, insertion order. This bounds the time wasted on adversarial mesh advertisements: a malicious peer flooding fake `domain` tags can only push their host into Tier 2, never ahead of community-trusted hosts. SHA-256 verification of returned bytes remains the absolute backstop.
+
+Future refinements (graph-distance, overlap-count, explicit-endorsement) layer on top by re-ranking inside the community tier without changing the binary in/out gate.
+
+### 21.4 Mesh broker: wire shape (layer-only)
+
+| Kind  | Purpose                                                                 | Tags |
+|-------|-------------------------------------------------------------------------|------|
+| 20400 | Fetch request                                                           | `[["x", "broker:fetch"], ["d", "<sig>"], ["t", "layer"]]` |
+| 30401 | Fetch response (parameterized-replaceable)                              | `[["d", "<sig>"], ["t", "layer"], ["expiration", "<unix-secs>"], ["domain", "<host>"]?]` |
+| 20402 | Fetch cancel (cooperative cancellable broadcast)                        | `[["d", "<sig>"], ["expiration", "<unix-secs>"]]` |
+
+- **Request** content is empty; sig + type travel as tags. Broadcast on the well-known `broker:fetch` channel — every participant subscribes there at boot.
+- **Response** content is base64 of the bytes. Responder MAY include zero or more `["domain", "<host>"]` tags advertising themselves and other hosts they know serve this sig — receivers accumulate these into the address graph for future HTTP-direct queries.
+- **Cancel** is published by the asker once a sig has been resolved with verified bytes. Other peers preparing a response for the same sig abort before committing bandwidth (best-effort coordination).
+- **Type tag** retained for forward compatibility but the responder ignores any value other than `"layer"`. Requests with `t=resource` or `t=dependency` are silently dropped — those types are HTTP-direct only.
+
+### 21.5 Response primitive: `{ bytes, domains }`
+
+Every broker response carries both:
+- **bytes** — synchronous payload; the requester verifies via SHA-256 and persists to local store
+- **domains** — zero or more `domain` tags accumulated into the receiver's address graph
+
+Both halves serve different timescales. `bytes` is for now (verify + hatch the egg); `domains` is for later (accumulate addresses for future direct queries). A host that responds with `bytes` AND advertises itself via a `domain` tag teaches the requester to bypass the mesh next time and go HTTP-direct.
+
+Silent-when-stale: hosts only respond if they have the bytes cached and the request hasn't been cancelled. The act of responding IS the freshness gate.
+
+### 21.6 Content verification
+
+The requester computes SHA-256 of the response bytes and compares to the requested sig:
+
+```
+expected = sig
+actual   = lowercase(hex(SHA-256(bytes)))
+accept   = (actual === expected)
+```
+
+Mismatched bytes are discarded silently and the broker keeps waiting (until timeout) for a valid responder. Combined with parameterized-replaceable response storage at the relay, the broker guarantees:
+
+- No fetch ever returns bytes that don't match the requested sig
+- No "winner takes all" failure mode — slow honest responders still get a chance
+- Cache amplification across the swarm: every verified response becomes the responder's new local copy, so they can serve future requesters for the same sig
+
+### 21.7 Operator domain as HTTP content host
+
+The operator's relay binary (`hypercomb-relay/relay.js`) serves HTTP content alongside the WebSocket relay. Both share the same hostname:
+
+```
+https://<domain>/__layers__/<sig>.json     ← static layer manifest
+https://<domain>/__resources__/<sig>       ← arbitrary content blob
+https://<domain>/__dependencies__/<sig>.js ← signed dependency bundle
+https://<domain>/manifest.json             ← the operator's package manifest
+wss://<domain>/                            ← WebSocket relay endpoint
+```
+
+Build output (`hypercomb-essentials/dist/`) is copied to `hypercomb-relay/content/` by `scripts/copy-to-dcp.ts` on every build, so the operator's own machine is always serving the latest content their build produced. See `memory: project_domain_as_identity.md` for the full "host is a verb" doctrine.
