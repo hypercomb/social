@@ -4,8 +4,12 @@
 // the target with the same name, it IS the correct content. No hashing needed.
 //
 // Targets:
-//   diamond-core-processor/public/   — production proxy (serves content into OPFS)
+//   diamond-core-processor/public/   — DCP browser app (local-backup tool)
 //   hypercomb-web/public/content/    — local dev server (feeds OPFS via localInstall)
+//   hypercomb-relay/content/         — operator's HTTP host content dir
+//                                      (jwize.com serves layer/resource/dependency
+//                                      resolution endpoints from here — see
+//                                      memory: project_domain_as_identity.md)
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'fs'
 import { dirname, join, resolve } from 'path'
@@ -19,6 +23,7 @@ const DIST_ROOT = resolve(__dirname, '..', 'dist')
 const TARGETS = [
   resolve(__dirname, '..', '..', 'diamond-core-processor', 'public'),
   resolve(__dirname, '..', '..', 'hypercomb-web', 'public', 'content'),
+  resolve(__dirname, '..', '..', 'hypercomb-relay', 'content'),
 ]
 
 const CONTENT_DIRS = ['__layers__', '__bees__', '__dependencies__', '__resources__']

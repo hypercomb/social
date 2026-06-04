@@ -38,3 +38,15 @@ src/hypercomb-web/public/content/*
 src/hypercomb-essentials/src/**/index.ts
 src/hypercomb-essentials/src/**/*-keys.ts
 src/hypercomb-relay/.gitignore
+
+# Relay runtime artifacts: copy-to-dcp.ts mirrors the build output
+# to the operator's HTTP host content dir; the SQLite event DB and
+# NSSM service logs are created at runtime. None are source-of-truth.
+src/hypercomb-relay/content/
+src/hypercomb-relay/relay.db
+src/hypercomb-relay/relay.db-shm
+src/hypercomb-relay/relay.db-wal
+src/hypercomb-relay/relay.out.log
+src/hypercomb-relay/relay.err.log
+src/hypercomb-relay/relay.out-*
+src/hypercomb-relay/relay.err-*
