@@ -892,12 +892,18 @@ edit cell C at depth 4  →  new sigs for [L_C, L_3, L_2, L_1, ROOT]   (5 layers
 
 One commit marker per action (the commit is atomic), but the commit yields a *chain* of new layer sigs. All are real intermediate state; all must reach the host.
 
-**The cascade is layer-only.** Only layers hold child-signatures that shift when a descendant changes. The leaves the cascade points at are unchanged:
+**The push set = the new root's transitive closure minus what the host already holds.** The discriminator is not "layer vs resource" — it is "does the host already have this sig?":
 
-- **Resources** (image/text bytes) — same bytes → same sig → already on host.
-- **Dependencies** (bee/namespace bundles) — package-level, immutable, shipped at install.
+| Kind | Pushed? | Why |
+|---|---|---|
+| Cascade layers | **always** | every ancestor re-signs → new sigs by construction → host can't have them yet |
+| Newly-authored resource (pasted image, new blob) | **yes** | new bytes → new sig → not yet on host |
+| Resource merely *referenced*, not added | **no** | sig already exists on host; content-addressing dedups it |
+| Dependencies (bee/namespace bundles) | **no** | package-level, immutable, shipped at install |
 
-(The one exception: the originating change may introduce a *new* resource — e.g. a pasted image — pushed once as the leaf. Everything *above* it in the cascade is pure layers.)
+So the rule is **push what the host lacks**, and "cascade-layers-plus-any-new-resources" falls out of it automatically. Dedup makes re-use free: reference the same image in ten tiles → push it once; the other nine references resolve to a sig the host already serves. How "new vs already-there" is known: the receipt-maintained known-on-host set. Any sig in the new root's closure not in that set is enqueued (layer or resource); anything already receipted is skipped.
+
+**Channel distinction.** This is the sync/push side — HTTP PUT to *your own* host. It is separate from the mesh, which carries layer sigs only (§21.4); resources travel HTTP-direct on the *pull* side. Pushing a new resource to your host over HTTP does not touch the mesh, so there is no conflict with layer-only-mesh. Backup ≠ broadcast.
 
 #### 21.11.3 Durable local queue + receipts
 
@@ -937,7 +943,7 @@ queue stuck (offline / no receipt)         → "pending — not yet backed up"
 
 #### 21.11.5 Branch-attestation gate
 
-`save as branch` may only attest a root once *all* its cascade layers are receipted (queue drained for that root) — otherwise the attestation would reference a root whose ancestors aren't fully present on the host. Empty queue is the green light.
+`save as branch` may only attest a root once its *entire closure* is receipted — all cascade layers **and** any newly-authored resources the root transitively references (queue drained for that root). Otherwise the attestation would point at a root whose ancestors or resources aren't fully present on the host. Empty queue is the green light.
 
 #### 21.11.6 Reconciliation on reconnect
 
