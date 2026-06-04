@@ -309,6 +309,83 @@ export class ContentBrokerDrone extends Drone {
     this.#knownDomainsBySig.set(sig, set)
   }
 
+  // Map a domain advertisement (which may be wss://host, https://host,
+  // or bare host) to a hostname suitable for building HTTPS URLs.
+  // Strips scheme prefix, trims trailing slash.
+  #domainToHost = (domain: string): string => {
+    return String(domain ?? '')
+      .replace(/^wss?:\/\//, '')
+      .replace(/^https?:\/\//, '')
+      .replace(/\/+$/, '')
+      .trim()
+  }
+
+  // Standard URL path for each content type on a host's HTTP endpoint.
+  // Matches the layout served by hypercomb-relay's HTTP file handler.
+  #httpPathForType = (sig: string, type: ContentType): string => {
+    switch (type) {
+      case 'layer':      return `/__layers__/${sig}.json`
+      case 'resource':   return `/__resources__/${sig}`
+      case 'dependency': return `/__dependencies__/${sig}.js`
+      default:           return ''
+    }
+  }
+
+  // Verify bytes hash to the claimed sig. Defense against any host
+  // (canonical or not) serving incorrect bytes for a given URL.
+  #verifyBytes = async (bytes: Uint8Array, expectedSig: string): Promise<boolean> => {
+    try {
+      const actual = await sha256Hex(bytes)
+      return actual === expectedSig
+    } catch {
+      return false
+    }
+  }
+
+  // HTTP-direct fetch from learned domains + self-domain. Tries each
+  // domain in sequence; first verified-bytes wins. Falls through to
+  // null if all domains 404 or fail verification — the caller (fetchBySig)
+  // then falls back to the mesh broker path.
+  //
+  // Per the layer-only-mesh / HTTP-for-everything-else doctrine, this
+  // is the preferred path for resources/deps — they're heavy bytes
+  // and shouldn't ride the mesh. Layers go HTTP too here when a
+  // domain's known to host them; the doctrine just says they CAN go
+  // mesh-only, not that they MUST. A working HTTP path is faster.
+  #fetchOverHttp = async (sig: string, type: ContentType): Promise<Uint8Array | null> => {
+    const path = this.#httpPathForType(sig, type)
+    if (!path) return null
+
+    // Candidate domains: operator's own self-domain (instant — their
+    // own machine via Cloudflare Tunnel), plus every domain we've
+    // learned about from prior responses for this sig.
+    const candidates = new Set<string>()
+    let selfDomain = ''
+    try { selfDomain = String(localStorage.getItem('hc:nostrmesh:self-domain') ?? '').trim() } catch {}
+    if (selfDomain) candidates.add(selfDomain)
+    for (const d of this.getKnownDomains(sig)) candidates.add(d)
+
+    if (candidates.size === 0) return null
+
+    for (const domain of candidates) {
+      const host = this.#domainToHost(domain)
+      if (!host) continue
+      const url = `https://${host}${path}`
+      try {
+        const res = await fetch(url, { cache: 'no-store' })
+        if (!res.ok) continue
+        const buf = await res.arrayBuffer()
+        const bytes = new Uint8Array(buf)
+        if (!await this.#verifyBytes(bytes, sig)) continue
+        return bytes
+      } catch {
+        // network error / CORS / cert issue — try next domain
+        continue
+      }
+    }
+    return null
+  }
+
   // ─────────────────────────────────────────────────────────────────
   // Public API
   // ─────────────────────────────────────────────────────────────────
@@ -356,6 +433,15 @@ export class ContentBrokerDrone extends Drone {
     const local = await this.#readLocal(s, type)
     if (local) return local
 
+    // HTTP-direct path — try known domains' content endpoints first.
+    // Per the layer-only-mesh doctrine, the heavy bytes should travel
+    // via HTTP, not the mesh. Self-domain + learned domains form the
+    // candidate set; first verified-bytes wins.
+    const fromHttp = await this.#fetchOverHttp(s, type)
+    if (fromHttp) return fromHttp
+
+    // Mesh broker fallback — used when HTTP-direct returns nothing
+    // (no known domains, or every candidate 404'd / failed verify).
     const fetchPromise = this.#fetchOverMesh(s, type, timeoutMs)
     this.#pendingFetches.set(s, fetchPromise)
     try { return await fetchPromise }
