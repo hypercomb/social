@@ -182,6 +182,38 @@ function test-blob-exists {
   return $result.Output.Trim().ToLower() -eq 'true'
 }
 
+# HTTP-level blob availability check — verifies the public storage
+# endpoint can actually serve the bytes, not just that metadata exists.
+#
+# Why this exists: `az storage blob exists` (metadata-level check) can
+# return TRUE for blobs whose entry was written but byte data hasn't
+# replicated to the read endpoint. We observed this in the wild: Phase
+# 2.6 reported "verified: 210" while 14 of those bees returned 404 on
+# public HTTP GET. The metadata-level check is too optimistic; an
+# end-to-end HTTP HEAD against the public URL is what readers actually
+# experience.
+function test-blob-http-reachable {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$StorageAccount,
+
+    [Parameter(Mandatory = $true)]
+    [string]$ContainerName,
+
+    [Parameter(Mandatory = $true)]
+    [string]$BlobName
+  )
+
+  $url = "https://$StorageAccount.blob.core.windows.net/$ContainerName/$BlobName"
+  try {
+    $resp = Invoke-WebRequest -Uri $url -Method Head -UseBasicParsing -ErrorAction Stop -TimeoutSec 15
+    return $resp.StatusCode -eq 200
+  } catch {
+    # 404, network error, anything that isn't 200 — treat as unreachable
+    return $false
+  }
+}
+
 function is-content-addressed {
   param(
     [Parameter(Mandatory = $true)]
@@ -205,6 +237,18 @@ if (-not (Test-Path -LiteralPath $resolvedSource)) {
 
 if (-not (Test-Path -LiteralPath $resolvedSource -PathType Container)) {
   fail "source path must be a directory: $resolvedSource"
+}
+
+# Resolved at script level so Phase 2.6's HTTP HEAD verifier can build
+# the public URL ('https://<account>.blob.core.windows.net/<container>/<blob>').
+# Same fallback chain as the auth-args resolver — if env doesn't set it,
+# default to 'storagehypercomb'.
+$resolvedStorageAccount = get-optional-env -Names @(
+  'AZURE_STORAGE_ACCOUNT',
+  'AZURE_STORAGE_ACCOUNT_NAME'
+)
+if ([string]::IsNullOrWhiteSpace($resolvedStorageAccount)) {
+  $resolvedStorageAccount = 'storagehypercomb'
 }
 
 $containerName = get-optional-env -Names @(
@@ -364,13 +408,25 @@ write-step ''
 if ($uploadAttempts.Count -gt 0) {
   write-step '--- Phase 2.6: verifying uploads landed (retry silent drops) ---'
 
+  # Verification is two-layered: the az CLI metadata check is fast but
+  # too optimistic (returns true for blobs whose metadata was written
+  # but byte data didn't replicate). The HTTP HEAD against the public
+  # endpoint is what readers actually experience, and is the source of
+  # truth for "is this blob serving."
+  #
+  # We observed in production that metadata-only verification declared
+  # "verified: 210" while 14 content-addressed bees in the same deploy
+  # returned 404 on public GET. So we now require BOTH checks to pass.
   $retryCount = 0
   $verified = 0
+  $stillMissing = @()
   foreach ($attempt in $uploadAttempts) {
-    $exists = test-blob-exists -ContainerName $containerName -BlobName $attempt.Name -AuthArguments $authArguments
-    if (-not $exists) {
+    $existsMeta = test-blob-exists -ContainerName $containerName -BlobName $attempt.Name -AuthArguments $authArguments
+    $existsHttp = test-blob-http-reachable -StorageAccount $resolvedStorageAccount -ContainerName $containerName -BlobName $attempt.Name
+    if (-not $existsMeta -or -not $existsHttp) {
       $retryCount++
-      write-step "  retry: $($attempt.Name) was silently dropped — re-uploading"
+      $reason = if (-not $existsMeta) { 'metadata check failed' } elseif (-not $existsHttp) { 'HTTP HEAD 404 (metadata claimed present)' } else { 'unknown' }
+      write-step "  retry: $($attempt.Name) — $reason"
       invoke-az -Arguments (@(
         'storage', 'blob', 'upload',
         '--container-name', $containerName,
@@ -382,14 +438,27 @@ if ($uploadAttempts.Count -gt 0) {
         '--only-show-errors'
       ) + $authArguments)
 
-      # Verify the retry actually landed; fail loudly if it still didn't.
-      $existsAfterRetry = test-blob-exists -ContainerName $containerName -BlobName $attempt.Name -AuthArguments $authArguments
-      if (-not $existsAfterRetry) {
-        fail "verification failed: $($attempt.Name) still missing after retry upload"
+      # Verify the retry actually landed via BOTH checks.
+      $existsMetaAfter = test-blob-exists -ContainerName $containerName -BlobName $attempt.Name -AuthArguments $authArguments
+      $existsHttpAfter = test-blob-http-reachable -StorageAccount $resolvedStorageAccount -ContainerName $containerName -BlobName $attempt.Name
+      if (-not $existsMetaAfter -or -not $existsHttpAfter) {
+        $stillMissing += $attempt.Name
       }
     } else {
       $verified++
     }
+  }
+
+  if ($stillMissing.Count -gt 0) {
+    $missingList = ($stillMissing | ForEach-Object { "    - $_" }) -join "`n"
+    fail @"
+verification failed after retry: the following blobs are still missing
+after a second upload attempt. The az CLI claimed upload success but
+public HTTP GET continues to 404. Failing the deploy so callers don't
+mistake an incomplete upload for a successful one.
+
+$missingList
+"@
   }
 
   write-step " verified  : $verified"
