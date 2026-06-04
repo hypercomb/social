@@ -226,6 +226,18 @@ export class ContentBrokerDrone extends Drone {
   // return shape is different (CachedVisualsEntry[] vs Uint8Array).
   #pendingVisuals = new Map<string, Promise<readonly CachedVisualsEntry[] | null>>()
 
+  // Per the response-primitive doctrine, every broker response carries
+  // BOTH bytes (synchronous: hatch the egg now) AND domains (async:
+  // accumulate the address graph for future direct queries). This map
+  // is the receiver-side accumulator — each domain we've seen serve
+  // a given sig gets recorded here. Future HTTP-direct fetch code
+  // queries this map to know which domains to try directly without
+  // re-broadcasting on the mesh.
+  //
+  // See: project_public_navigation_lineage_filter.md / "The response
+  // primitive: { bytes, domains }".
+  #knownDomainsBySig = new Map<string, Set<string>>()
+
   constructor() {
     super()
     queueMicrotask(() => this.#resolveMyPubkeyWithRetry(0))
@@ -239,8 +251,61 @@ export class ContentBrokerDrone extends Drone {
   }
 
   // ─────────────────────────────────────────────────────────────────
+  // Domain accumulation — the `{ bytes, domains }` response primitive
+  // ─────────────────────────────────────────────────────────────────
+
+  // Read the operator's own domain from localStorage. A relay host that
+  // wants to advertise itself in responses sets this key (e.g. to
+  // `wss://jwize.com`). Regular clients leave it empty and emit
+  // domain-less responses — their attribution is implicit in the
+  // WebSocket source endpoint.
+  #getSelfDomain = (): string => {
+    try { return String(localStorage.getItem('hc:nostrmesh:self-domain') ?? '').trim() }
+    catch { return '' }
+  }
+
+  // Pull all `['domain', host]` tags out of an incoming response event.
+  // The protocol's optional-domains-list half: any host that knows about
+  // canonical hosts for this sig can include them here, and the receiver
+  // accumulates the resulting address graph.
+  #extractDomains = (evt: MeshEvtLike): string[] => {
+    const tags = evt.event?.tags
+    if (!Array.isArray(tags)) return []
+    const out: string[] = []
+    for (const t of tags) {
+      if (!Array.isArray(t) || t.length < 2) continue
+      if (String(t[0]) !== 'domain') continue
+      const v = String(t[1] ?? '').trim()
+      if (v) out.push(v)
+    }
+    return out
+  }
+
+  // Record a sig→domain mapping. Called whenever a response carrying
+  // domain attributions arrives. Domains are deduped per-sig; the map
+  // grows monotonically until the drone restarts.
+  #noteDomains = (sig: string, domains: string[]): void => {
+    if (!domains.length) return
+    const set = this.#knownDomainsBySig.get(sig) ?? new Set<string>()
+    for (const d of domains) set.add(d)
+    this.#knownDomainsBySig.set(sig, set)
+  }
+
+  // ─────────────────────────────────────────────────────────────────
   // Public API
   // ─────────────────────────────────────────────────────────────────
+
+  /**
+   * Return all known domains that have served a given sig. Future
+   * HTTP-direct fetch code (per the layer-only-mesh / HTTP-for-everything-else
+   * doctrine) uses this to pick which domains to GET resources from
+   * without re-broadcasting on the mesh. Empty array if no responses
+   * have been observed yet for this sig.
+   */
+  public getKnownDomains = (sig: string): string[] => {
+    const set = this.#knownDomainsBySig.get(sig)
+    return set ? Array.from(set) : []
+  }
 
   /**
    * Ask the swarm for content addressed by sig. Returns the verified
@@ -339,6 +404,12 @@ export class ContentBrokerDrone extends Drone {
         const typeTag = evt.event?.tags?.find(t => t[0] === 't')?.[1]
         if (typeTag !== type) return  // wrong content kind
 
+        // Accumulate domain attributions regardless of whether the bytes
+        // verify. The address graph is informational — a domain that
+        // responded once for this sig is worth recording even if their
+        // particular byte payload was malformed.
+        this.#noteDomains(sig, this.#extractDomains(evt))
+
         const b64 = String(evt.event?.content ?? '')
         if (!b64) return
         void this.#acceptResponseBytes(sig, type, b64).then((bytes) => {
@@ -390,6 +461,11 @@ export class ContentBrokerDrone extends Drone {
         if (this.#myPubkey && pubkey === this.#myPubkey) return  // self-echo
         const typeTag = evt.event?.tags?.find(t => t[0] === 't')?.[1]
         if (typeTag !== 'visuals') return
+
+        // Accumulate domain attributions from visuals responses too —
+        // a peer who can serve visuals for this location is worth
+        // remembering as a future address.
+        this.#noteDomains(composedSig, this.#extractDomains(evt))
 
         const b64 = String(evt.event?.content ?? '')
         if (!b64) return
@@ -578,12 +654,20 @@ export class ContentBrokerDrone extends Drone {
     // collect after RESPONSE_TTL_SECS so the cache doesn't grow
     // unbounded.
     const expirationSecs = Math.floor(Date.now() / 1000) + RESPONSE_TTL_SECS
+    // Doctrine: response carries { bytes, domains }. Include our own
+    // domain when set so requesters accumulate it into their address
+    // graph for future direct queries. Operators publish via
+    // localStorage['hc:nostrmesh:self-domain'] (e.g. 'wss://jwize.com');
+    // regular peers leave it empty and emit domain-less responses.
+    const selfDomain = this.#getSelfDomain()
+    const responseTags: string[][] = [
+      ['d', sigTag],
+      ['t', typeTag],
+      ['expiration', String(expirationSecs)],
+    ]
+    if (selfDomain) responseTags.push(['domain', selfDomain])
     try {
-      await mesh.publish(KIND_FETCH_RESPONSE, sigTag, content, [
-        ['d', sigTag],
-        ['t', typeTag],
-        ['expiration', String(expirationSecs)],
-      ])
+      await mesh.publish(KIND_FETCH_RESPONSE, sigTag, content, responseTags)
     } catch (err) {
       console.warn('[content-broker] response publish failed', { sig: sigTag.slice(0, 12), err })
     }
@@ -640,12 +724,17 @@ export class ContentBrokerDrone extends Drone {
 
     const content = arrayBufferToBase64(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer)
     const expirationSecs = Math.floor(Date.now() / 1000) + RESPONSE_TTL_SECS
+    // Same { bytes, domains } shape on visuals responses — include our
+    // own domain when set so requesters learn we serve this location.
+    const selfDomain = this.#getSelfDomain()
+    const visualsTags: string[][] = [
+      ['d', composedSig],
+      ['t', 'visuals'],
+      ['expiration', String(expirationSecs)],
+    ]
+    if (selfDomain) visualsTags.push(['domain', selfDomain])
     try {
-      await mesh.publish(KIND_FETCH_RESPONSE, composedSig, content, [
-        ['d', composedSig],
-        ['t', 'visuals'],
-        ['expiration', String(expirationSecs)],
-      ])
+      await mesh.publish(KIND_FETCH_RESPONSE, composedSig, content, visualsTags)
     } catch (err) {
       console.warn('[content-broker] visuals response publish failed', { sig: composedSig.slice(0, 12), err })
     }
