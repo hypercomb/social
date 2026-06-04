@@ -1,26 +1,22 @@
 # Cell Rendering & Tile Materialization
 
-How cells become tiles on the honeycomb grid — from OPFS folders to hexagonal cells rendered via Pixi.js.
+How cells become tiles on the honeycomb grid — from signature-addressed layers to hexagonal cells rendered via Pixi.js.
 
 ---
 
 ## Cells
 
-A **cell** is a folder in the OPFS content tree under `hypercomb.io/`. Its name is its label. Cells are discovered by iterating the entries of the current explorer directory and collecting all subdirectories that are not reserved (`__*__` folders).
+A **cell** is content inside a signature-addressed *layer* (`__layers__/<sig>`), **not a folder**. The current navigation location (lineage, §4 of protocol-spec) computes a signature that resolves to the layer for that location; that layer's **child-layer signatures** are the cells rendered as tiles. Each child sig resolves to a child layer holding the cell's name and content.
 
 ```
-opfs://hypercomb.io/
-  ├── Alice/            ← cell
-  ├── Bob/              ← cell
-  ├── Photos/           ← cell
-  ├── __bees__/         ← reserved (not a cell)
-  ├── __dependencies__/ ← reserved (not a cell)
-  ├── __history__/      ← reserved (not a cell)
-  ├── __layers__/       ← reserved (not a cell)
-  └── __resources__/    ← reserved (not a cell)
+location /cigars  →  sig = SHA-256("hypercomb.io/cigars/cell")  →  __layers__/<sig>
+   layer {
+     name:     "cigars",
+     children: ["<sig-brands>", "<sig-reviews>", ...]    ← each child sig = one hex tile
+   }
 ```
 
-Each discovered cell folder name becomes one hexagonal tile on the honeycomb grid.
+Child layers resolve by signature from the flat `__layers__/<sig>` pool (or the derived `__manifests__/<parent-sig>` inline cache, which pre-resolves them so cold load skips per-child lookups). There is **no folder iteration** — the hierarchy lives in the layer's child-sig references, not in OPFS directories.
 
 ---
 
@@ -36,7 +32,7 @@ A fallback path exists for development environments without a cached manifest: `
 
 ## The Zero-Signature Properties File
 
-Every cell folder should contain a special file named with 64 zeros:
+Each cell's properties are held in a record named with 64 zeros (the zero-signature), referenced from the cell's layer:
 
 ```
 0000000000000000000000000000000000000000000000000000000000000000
@@ -66,12 +62,9 @@ The zero-signature file is a JSON document holding all properties that can be ap
 
 A single place to **collapse many properties** that would otherwise be scattered or computed during creation. When the cell is encountered at runtime (heartbeat), the zero-signature file is read and its properties are materialized into a runtime object.
 
-### Cell folder structure
+### Where it lives
 
-```
-opfs://hypercomb.io/Alice/
-  └── 0000000000000000000000000000000000000000000000000000000000000000   ← properties (JSON)
-```
+The cell's layer (`__layers__/<sig>`) references the zero-signature properties record; the runtime resolves it like any signature reference. There is no per-cell folder — the layer is the container.
 
 ---
 
@@ -79,7 +72,7 @@ opfs://hypercomb.io/Alice/
 
 When the zero-signature properties file is **materialized**, any value that is itself a 64-character hex string triggers a lookup into `__resources__/`.
 
-1. The runtime reads the zero-signature JSON from the cell folder
+1. The runtime reads the zero-signature properties (resolved from the cell's layer)
 2. For each value, it checks whether the value is a signature
 3. If so, the runtime reads `__resources__/{signature}` — JSON resources replace the signature value in the materialized object; binary resources (images) are handed to the rendering pipeline (e.g., `HexImageAtlas` for tile textures)
 
@@ -104,8 +97,8 @@ This enables deduplication (multiple cells reference the same resource by signat
 
 `ShowCellDrone` listens for `synchronize` events and runs the render pipeline:
 
-1. Get the current explorer directory from `Lineage`
-2. List all cell folders (non-reserved subdirectories)
+1. Compute the current location's layer signature from `Lineage` (§4)
+2. Read that layer's child-layer signatures — each child is one cell
 3. Union with mesh cells (shared cells from nostr relays)
 4. Replay history operations — remove cells whose last operation was `remove`
 
@@ -143,8 +136,8 @@ Each cell becomes a quad tile rendered with Pixi.js:
 
 | Concept | What it is | Where it lives |
 |---------|-----------|---------------|
-| **Cell** | A folder = one tile on the grid | `opfs://hypercomb.io/path/` |
-| **Zero-sig file** | JSON properties, name is 64 zeros | Inside cell folder |
+| **Cell** | Layer content = one tile on the grid | `__layers__/<sig>` |
+| **Zero-sig file** | JSON properties, name is 64 zeros | Referenced from the layer |
 | **Resource** | Data (JSON or binary) addressed by signature | `__resources__/{sig}` |
 | **Bee module** | Compiled JS addressed by signature | `__bees__/{sig}.js` |
 | **Install manifest** | Lists all bee/dep/resource signatures | `localStorage` (cached from `install.manifest.json`) |

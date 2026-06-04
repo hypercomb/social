@@ -74,7 +74,7 @@ these terms are the most fundamental concepts in the architecture. they appear a
 sha-256 hash (64 hex chars) of canonical content. the universal reference primitive — signatures name drones, layers, dependencies, history entries, and resources. created via `SignatureService.sign(bytes)`. immutable identity: same content always produces the same signature. signatures are not just identifiers — they are the composition mechanism. see [signature-system.md](signature-system.md).
 
 ### cell
-the atomic unit of content in the hierarchy. a cell is an opfs folder under the user content tree (e.g., `hypercomb.io/path/cell`). cells contain a zero-signature properties file, optional resources, and child cells. developer-facing term — see **tile** for the user-facing equivalent.
+the atomic unit of content in the hierarchy. a cell is content inside a signature-addressed *layer* (`__layers__/<sig>`), not a folder — the layer holds the cell's name, the signatures of its child layers, notes, and resource references. the hierarchy is layers referencing child layers by signature (a sparse merkle tree), never nested folders. (the old `hypercomb.io/path/cell` opfs-folder form is retired.) developer-facing term — see **tile** for the user-facing equivalent.
 
 ### tile
 the user-facing name for a **cell**. what appears on the hex grid as an interactive hexagonal element. "tile" is used in ui, help text, and user communication. "cell" is used in code, architecture docs, and developer communication.

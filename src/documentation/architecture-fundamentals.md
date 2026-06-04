@@ -216,7 +216,6 @@ opfs root
 ├── __resources__/<sig>           content-addressed blobs (images, JSON, bytes)
 ├── __history__/<lineage>/<NNNN>  history markers (sequenced pointers to layer sigs)
 ├── __manifests__/<parent-sig>    children manifests (derived inline cache for cold load)
-├── __hive__/                     user-content root (formerly hypercomb.io/)
 └── __optimization__/ __threads__/ __computation__/ __clipboard__/   decoration + participant-local state
 ```
 

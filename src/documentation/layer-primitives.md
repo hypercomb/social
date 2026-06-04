@@ -14,7 +14,7 @@ layers are not containers. they are pointers. the actual bytes live in `__bees__
 
 ## lineage
 
-every layer has a `lineage` — the path from the domain root to the folder it represents.
+every layer has a `lineage` — the explorer path from the domain root to the node it represents (a position, not a folder).
 
 ```
 lineage: 'cigars/brands'
@@ -22,7 +22,7 @@ lineage: 'cigars/brands'
 
 this means: "i am a snapshot of the `brands` folder inside `cigars`."
 
-lineage is the local identity of a layer. it maps directly to the explorer path (`Lineage.explorerSegments`) and the OPFS folder hierarchy under `hypercomb.io/`.
+lineage is the local identity of a layer. it maps directly to the explorer path (`Lineage.explorerSegments`); from it a signature is computed (§4) that addresses the layer in the flat `__layers__/<sig>` pool. there is no OPFS folder hierarchy — see opfs mapping below.
 
 ### lineage as hash
 
@@ -141,14 +141,12 @@ when a peer arrives at a mesh location with no items, it sends a sync-request as
 
 ```
 opfsroot/
-  hypercomb.io/                         # cell tree (flat content)
-    cigars/                             # cell folder
-      brands/                           # child cell folder
-  __bees__/{signature}.js               # compiled bee modules
-  __dependencies__/{signature}.js       # namespace service bundles
+  __layers__/{signature}                # layer JSON — sig-keyed, FLAT (all user content)
+  __layers__/{domain}/                  # install manifests (deployment artifacts; non-hex name)
+  __bees__/{signature}                  # compiled bee modules
+  __dependencies__/{signature}          # namespace service bundles
   __resources__/{signature}             # content-addressed static assets
-  __layers__/{domain}/{signature}       # layer manifests (per-domain)
-  __history__/{lineage-sig}/            # history records per lineage
+  __history__/{lineage-sig}/{NNNN}      # history markers per lineage
 ```
 
-the layer's `lineage` maps to the folder path under `hypercomb.io/`. the layer's referenced signatures map to files in the `__bees__/`, `__dependencies__/`, and `__resources__/` directories. the layer manifest itself lives in `__layers__/{domain}/`. bees are discovered via the install manifest (cached in `localStorage`), not by scanning cell folders.
+the layer's `lineage` **computes a signature** (§4) that addresses the layer in the flat `__layers__/<sig>` pool — it does not map to a folder path. the layer's referenced signatures map to files in the `__bees__/`, `__dependencies__/`, and `__resources__/` pools; its **child layers are referenced by signature** and resolved from the same flat `__layers__/` pool — the hierarchy lives inside layers, not in folders. bees are discovered via the install manifest (cached in `localStorage`), not by scanning folders.

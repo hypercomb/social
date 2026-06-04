@@ -22,7 +22,7 @@ The brood phase gathers everything the mesh will need before any vertices are wr
 
 `renderFromSynchronize()` in `ShowCellDrone` is the entry point, triggered by the `synchronize` window event (dispatched solely by the processor).
 
-- Lists cell folders from the OPFS explorer directory
+- Resolves the current location's layer (by computed signature) and reads its child-layer signatures — each child is one cell
 - Unions with mesh cells (Nostr relay items)
 - Filters out deleted cells via history
 - Orders by `OrderProjection` or persisted index

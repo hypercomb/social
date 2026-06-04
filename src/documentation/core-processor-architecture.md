@@ -279,7 +279,7 @@ the mesh.
 
 ### The Runtime Loop
 
-When the application starts, it begins at the root of the cell tree. At each
+When the application starts, it begins at the root of the cell hierarchy. At each
 position in the tree, the runtime checks whether any scripts should run at this
 location and then moves on. The loop works as follows:
 
@@ -330,8 +330,8 @@ active branches can execute their pulses in parallel.
 
 ### Cells Are Content-Addressable Locations
 
-The cell hierarchy isn't just a folder structure. Each location in the tree has
-a **signature** computed from its lineage path:
+The cell hierarchy is not a folder structure — it is content-addressed. Each
+location in the tree has a **signature** computed from its lineage path:
 
 ```
 sig = SHA-256("hypercomb.io/domain/path/to/cell")

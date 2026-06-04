@@ -361,13 +361,15 @@ opfsRoot/                          (navigator.storage.getDirectory())
                                     layers so cold-load skips per-child sig lookups)
   __optimization__/                (persistent decoration substrate — Q&A, comms; applied
                                     in memory, layer-untouched)
-  __threads__/  __computation__/  __clipboard__/  __hive__/   (thread state, receipts,
-                                    clipboard, user-content root)
+  __threads__/  __computation__/  __clipboard__/   (thread state, receipts, clipboard)
 ```
 
-`__hive__/` is the user-content root (historically `hypercomb.io/`, renamed to the
-underscored form so the root inventory is uniformly `__*__`). Old `hypercomb.io/`
-directories from prior sessions are orphans, swept by `/sweep`.
+**There is no on-disk hierarchy of user content.** Cells — their names, children,
+and notes — are stored entirely as signature-addressed layers in `__layers__/<sig>`;
+the hierarchy is encoded *inside* layers as child-layer sig references (§12.2), never
+as nested folders. The legacy `hypercomb.io/` / `__hive__/` content-folder tree
+(pre-layer-as-primitive) is retired; any surviving dirs are orphans, swept by
+`/sweep`.
 
 ### 12.2 Cells are layer content, not directories
 
