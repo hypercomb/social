@@ -434,6 +434,10 @@ export class SwarmDrone extends Drone {
   // never close (cheap — mesh dedupes by sig at the bucket layer).
   #subsBySig = new Map<string, MeshSubLike>()
 
+  // Late-joiner visuals recovery (#48): sigs with an in-flight
+  // fetchVisualsAt, so concurrent #syncForSig passes don't double-fetch.
+  #visualsRecoveryInFlight = new Set<string>()
+
   // Per-lineage peer state. Outer key = lineage sig, inner key = peer
   // pubkey. Updated on every incoming event; replaceability means the
   // last write wins per peer, which matches what we want at render.
@@ -1365,6 +1369,15 @@ export class SwarmDrone extends Drone {
 
     this.#currentSig = sig
     this.#ensureSubscribed(sig)
+    // Late-joiner recovery (#48): the live subscription only delivers
+    // broadcasts published AFTER we subscribe. If no peer has broadcast at
+    // this sig yet, any peers already present here published before us and
+    // the relay won't replay those to a new subscriber — so ask the swarm
+    // for their cached visuals. Fire-and-forget: never block navigation
+    // (real-time supersedes the preloader); injected results emit
+    // swarm:peers-changed when they land, and show-cell repaints.
+    const existingBag = this.#peerLayersBySig.get(sig)
+    if (!existingBag || existingBag.size === 0) void this.#recoverVisualsAt(sig)
     await this.#publishMyLayerAt(sig)
   }
 
@@ -1378,6 +1391,79 @@ export class SwarmDrone extends Drone {
     if (!mesh?.subscribe) return
     const sub = mesh.subscribe(sig, (evt) => this.#onEvent(sig, evt))
     this.#subsBySig.set(sig, sub)
+  }
+
+  // -----------------------------------------------------------------
+  // Late-joiner visuals recovery (#48)
+  // -----------------------------------------------------------------
+
+  // Ask the swarm for cached visuals at `sig` and inject them as if the
+  // original publishes had just arrived. Closes the late-joiner gap: a
+  // participant arriving AFTER present peers published never receives
+  // those broadcasts over the live subscription. Fire-and-forget;
+  // coalesced per sig; visuals only (no bytes — witness, not adopt).
+  #recoverVisualsAt = async (sig: string): Promise<void> => {
+    if (!sig || this.#visualsRecoveryInFlight.has(sig)) return
+    this.#visualsRecoveryInFlight.add(sig)
+    try {
+      const broker = this.#getBroker()
+      if (!broker?.fetchVisualsAt) return
+      const entries = await broker.fetchVisualsAt(sig)
+      if (!entries || entries.length === 0) return
+      // The user may have navigated away during the await — only inject if
+      // this is still the current location (matches the flush model: peer
+      // state is kept for the current location only).
+      if (this.#currentSig !== sig) return
+      this.#injectRecoveredVisuals(sig, entries)
+    } catch { /* best-effort — recovery is an optimization, never fatal */ }
+    finally { this.#visualsRecoveryInFlight.delete(sig) }
+  }
+
+  // Inject recovered visuals into the peer cache, mirroring the live
+  // #onEvent cache write. Sanitization is MANDATORY here: fetchVisualsAt
+  // does none (the broker defers it to "the swarm cache injection point" —
+  // this). Live data wins: a pubkey already cached from a live broadcast
+  // is left untouched.
+  #injectRecoveredVisuals = (
+    sig: string,
+    entries: readonly { pubkey: string; content: string }[],
+  ): void => {
+    let bag = this.#peerLayersBySig.get(sig)
+    let injected = 0
+    for (const entry of entries) {
+      const pubkey = String(entry.pubkey ?? '').toLowerCase()
+      if (!/^[0-9a-f]{64}$/.test(pubkey)) continue
+      if (this.#myPubkey && pubkey === this.#myPubkey) continue   // self-echo
+      if (bag?.has(pubkey)) continue                              // live data wins
+      let raw: unknown
+      try { raw = JSON.parse(entry.content) } catch { continue }
+      const visualsRaw = (raw as { visuals?: unknown })?.visuals
+      if (!Array.isArray(visualsRaw)) continue
+      const cleanVisuals: ({ name: string } & Record<string, unknown>)[] = []
+      for (const v of visualsRaw) {
+        if (!v || typeof v !== 'object' || Array.isArray(v)) continue
+        const cleaned = sanitizeVisual(v as Record<string, unknown>)
+        if (cleaned) cleanVisuals.push(cleaned)
+      }
+      if (cleanVisuals.length === 0) continue
+      if (!bag) { bag = new Map(); this.#peerLayersBySig.set(sig, bag) }
+      bag.set(pubkey, { visuals: cleanVisuals })
+      let lastSeenBag = this.#peerLastSeenMsBySig.get(sig)
+      if (!lastSeenBag) { lastSeenBag = new Map(); this.#peerLastSeenMsBySig.set(sig, lastSeenBag) }
+      lastSeenBag.set(pubkey, Date.now())
+      const incomingLabel = typeof (raw as { label?: unknown }).label === 'string'
+        ? (raw as { label: string }).label.trim().slice(0, 64).replace(/[\x00-\x1f]/g, '')
+        : ''
+      if (incomingLabel && incomingLabel !== this.#labelByPubkey.get(pubkey)) {
+        this.#labelByPubkey.set(pubkey, incomingLabel)
+        this.emitEffect('swarm:label-changed', { pubkey, label: incomingLabel })
+      }
+      injected++
+    }
+    if (injected > 0) {
+      console.log(`[swarm] late-join recovery injected ${injected} peer visual(s) at ${sig.slice(0, 8)}`)
+      this.emitEffect('swarm:peers-changed', { sig, reason: 'late-join-recovery' })
+    }
   }
 
   #onEvent = (sig: string, evt: MeshEvtLike): void => {
@@ -2854,6 +2940,14 @@ const payload: SwarmLayerPayload = myLabel
 
   #getMesh = (): MeshApi | undefined =>
     (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(NOSTR_MESH_KEY) as MeshApi | undefined
+
+  // Content broker — late-joiner visuals recovery (#48). Resolved at
+  // runtime via IoC (no import); inert until the broker registers.
+  #getBroker = () =>
+    (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.('@diamondcoreprocessor.com/ContentBrokerDrone') as {
+      fetchVisualsAt?: (sig: string, timeoutMs?: number) =>
+        Promise<readonly { pubkey: string; content: string; created_at: number; tags: string[][] }[] | null>
+    } | undefined
 
   #getSigner = (): SignerApi | undefined =>
     (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(NOSTR_SIGNER_KEY) as SignerApi | undefined
