@@ -244,7 +244,7 @@ export class ContentBrokerDrone extends Drone {
     signer: NOSTR_SIGNER_KEY,
   }
   protected override listens: string[] = []
-  protected override emits: string[] = ['broker:fetched']
+  protected override emits: string[] = ['broker:fetched', 'adopt:progress', 'adopt:done']
 
   #broadcastSub: MeshSubLike | null = null
   #myPubkey: string | null = null
@@ -580,6 +580,92 @@ export class ContentBrokerDrone extends Drone {
     this.#pendingVisuals.set(s, fetchPromise)
     try { return await fetchPromise }
     finally { this.#pendingVisuals.delete(s) }
+  }
+
+  /**
+   * Adopt a hive (or any subtree) by signature: recursively pull a root
+   * layer's transitive closure into the local pool so it renders and
+   * serves locally — the daisy-chain mirror (protocol-spec §21.8).
+   *
+   * This is NOT a bespoke walker — it reuses the existing layer-signature
+   * cycle. `fetchBySig` fills each sig (local → HTTP-direct → mesh for
+   * layers; HTTP-direct for resources), verifies it against its sha256,
+   * and stores it. We expand each layer, recurse into its child layers,
+   * and fetch its referenced resources. Once the bytes are in the pool an
+   * adopted cell is indistinguishable from a locally-authored one — same
+   * machinery, remote source. The root layer fills first (instantly
+   * renderable); resources sprout in behind it.
+   *
+   * Classification from the layer shape:
+   *   - children slot (cells / layers / children) → child LAYERS → recurse
+   *   - bees slot → skipped: bees are package content the adopter already
+   *     has from install (the broker has no 'bee' fetch type by design)
+   *   - every other referenced sig → resource leaf → fetchBySig(_, 'resource')
+   *
+   * Idempotent + dedup via a visited set; fetchBySig's local fast-path
+   * makes already-present sigs free. Emits `adopt:progress` as it fills
+   * and `adopt:done` at the end (UI can sprout the cell as counts climb).
+   */
+  public adopt = async (rootSig: string): Promise<{ layers: number; leaves: number; failed: number }> => {
+    const root = String(rootSig ?? '').toLowerCase().trim()
+    const stats = { layers: 0, leaves: 0, failed: 0 }
+    if (!SIG_RE.test(root)) return stats
+    const visited = new Set<string>()
+
+    const asSigs = (v: unknown): string[] =>
+      Array.isArray(v) ? v.map(x => String(x).toLowerCase().trim()).filter(s => SIG_RE.test(s)) : []
+
+    const walkLayer = async (sig: string): Promise<void> => {
+      if (visited.has(sig)) return
+      visited.add(sig)
+      const bytes = await this.fetchBySig(sig, 'layer') // fill + verify + store
+      if (!bytes) { stats.failed++; return }
+      stats.layers++
+      this.emitEffect('adopt:progress', { sig, ...stats })
+
+      let parsed: Record<string, unknown>
+      try { parsed = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown> }
+      catch { return } // not a parseable layer — nothing to recurse
+
+      const children = asSigs(parsed.cells).length ? asSigs(parsed.cells)
+        : asSigs(parsed.layers).length ? asSigs(parsed.layers)
+        : asSigs(parsed.children)
+      const childSet = new Set(children)
+      const bees = new Set(asSigs(parsed.bees)) // skip — installed package content
+
+      // Every sig the layer references, recursively (covers resources
+      // nested in cell properties), minus child layers and bees.
+      const referenced = new Set<string>()
+      this.#collectSigs(parsed, referenced)
+      for (const r of referenced) {
+        if (childSet.has(r) || bees.has(r) || visited.has(r)) continue
+        visited.add(r)
+        const got = await this.fetchBySig(r, 'resource')
+        if (got) stats.leaves++; else stats.failed++
+      }
+
+      for (const c of children) await walkLayer(c)
+    }
+
+    await walkLayer(root)
+    this.emitEffect('adopt:done', { root, ...stats })
+    return stats
+  }
+
+  /** Recursively collect every 64-hex signature reachable inside a value
+   *  (strings, arrays, object values). Used by adopt() to find a layer's
+   *  referenced resources wherever they sit, including nested in cell
+   *  properties — not just top-level slots. */
+  #collectSigs = (value: unknown, out: Set<string>): void => {
+    if (typeof value === 'string') {
+      const s = value.toLowerCase()
+      if (SIG_RE.test(s)) out.add(s)
+      return
+    }
+    if (Array.isArray(value)) { for (const v of value) this.#collectSigs(v, out); return }
+    if (value && typeof value === 'object') {
+      for (const v of Object.values(value as Record<string, unknown>)) this.#collectSigs(v, out)
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────
