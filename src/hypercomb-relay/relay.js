@@ -21,7 +21,7 @@
 
 import { createServer } from 'node:http'
 import { randomBytes, createHash } from 'node:crypto'
-import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs'
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
@@ -349,6 +349,41 @@ function getContentType(path) {
   return 'application/octet-stream'
 }
 
+// Flat sig resolution (protocol-spec §21.10): a bare `/<64-hex>` resolves
+// to whichever pool holds it — no type prefix, no extension. The pool the
+// sig is found in supplies the Content-Type. This is the canonical read
+// endpoint: `https://<host>/<sig>`. Knowing the address is decoupled from
+// knowing the type — the consumer already knows the type from the
+// referring layer; the host resolves the bytes by probing its pools.
+//
+// Probe order is the membership oracle; first hit wins. A sig lives in
+// exactly one pool (its bytes are one thing), so order only decides which
+// stat lands first. __roots__ attestations (grouped by domain) resolve
+// too when present. Returns { path, contentType } or null (→ 404).
+function resolveFlatSig(sig) {
+  const root = resolve(cfg.contentDir)
+  const probes = [
+    [join(root, '__layers__', sig + '.json'), 'application/json; charset=utf-8'],
+    [join(root, '__bees__', sig + '.js'), 'application/javascript; charset=utf-8'],
+    [join(root, '__dependencies__', sig + '.js'), 'application/javascript; charset=utf-8'],
+    [join(root, '__resources__', sig), 'application/octet-stream'],
+  ]
+  for (const [p, ct] of probes) {
+    try { if (statSync(p).isFile()) return { path: p, contentType: ct } } catch { /* not in this pool */ }
+  }
+  // __roots__/<domain>/<sig> — attestations, grouped by attester domain.
+  try {
+    const rootsDir = join(root, '__roots__')
+    if (statSync(rootsDir).isDirectory()) {
+      for (const domain of readdirSync(rootsDir)) {
+        const p = join(rootsDir, domain, sig)
+        try { if (statSync(p).isFile()) return { path: p, contentType: 'application/json; charset=utf-8' } } catch { /* next domain */ }
+      }
+    }
+  } catch { /* no __roots__ pool */ }
+  return null
+}
+
 function tryServeContent(req, res) {
   if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') return false
 
@@ -370,21 +405,37 @@ function tryServeContent(req, res) {
   try { urlPath = decodeURIComponent((req.url || '').split('?')[0]) } catch { return false }
   if (!urlPath || urlPath === '/') return false
 
-  // Resolve under contentDir, then verify the result is still inside it.
-  // normalize() collapses ../, resolve() handles absolute-path attacks.
-  const resolved = resolve(cfg.contentDir, '.' + urlPath)
-  const root = resolve(cfg.contentDir)
-  if (!resolved.startsWith(root + sep) && resolved !== root) return false
-
-  if (!existsSync(resolved)) return false
-  let st
-  try { st = statSync(resolved) } catch { return false }
-  if (!st.isFile()) return false
+  let resolved
+  let contentType
+  const sigMatch = urlPath.match(/^\/([0-9a-f]{64})$/)
+  if (sigMatch) {
+    // Flat sig endpoint: /<sig> → probe the pools (§21.10). A miss is a
+    // clean 404 (NOT the liveness fallthrough) so an adopting client can
+    // tell "host doesn't have it" from real content and try another host
+    // / treat it as an egg. No immutable cache on the 404 — the sig may
+    // arrive later.
+    const hit = resolveFlatSig(sigMatch[1])
+    if (!hit) { respondText(res, 404, 'sig not held'); return true }
+    resolved = hit.path
+    contentType = hit.contentType
+  } else {
+    // Legacy typed path (/__bees__/<sig>.js, /__layers__/<sig>.json, …),
+    // kept during the migration to bare-sig URLs. Resolve under
+    // contentDir, then verify the result is still inside it.
+    resolved = resolve(cfg.contentDir, '.' + urlPath)
+    const rootDir = resolve(cfg.contentDir)
+    if (!resolved.startsWith(rootDir + sep) && resolved !== rootDir) return false
+    if (!existsSync(resolved)) return false
+    let st
+    try { st = statSync(resolved) } catch { return false }
+    if (!st.isFile()) return false
+    contentType = getContentType(resolved)
+  }
 
   try {
     const bytes = readFileSync(resolved)
     res.writeHead(200, {
-      'Content-Type': getContentType(resolved),
+      'Content-Type': contentType,
       'Content-Length': String(bytes.length),
       'Access-Control-Allow-Origin': '*',
       'Cache-Control': 'public, max-age=31536000, immutable',
