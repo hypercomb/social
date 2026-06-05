@@ -158,7 +158,10 @@ export class HostSyncService extends EventTarget {
 
     const path = this.#pathFor(entry.sig, entry.kind)
     if (!path) return false
-    const url = `https://${host}${path}`
+    // Loopback hosts use plain http (content-side analog of allow-loopback);
+    // real domains use https.
+    const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
+    const url = `${scheme}://${host}${path}`
 
     const auth = await this.#nip98(url, 'PUT')
     if (!auth) return false // no signer available
