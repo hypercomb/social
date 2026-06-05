@@ -627,11 +627,11 @@ export class ContentBrokerDrone extends Drone {
       try { parsed = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown> }
       catch { return } // not a parseable layer — nothing to recurse
 
-      const children = asSigs(parsed.cells).length ? asSigs(parsed.cells)
-        : asSigs(parsed.layers).length ? asSigs(parsed.layers)
-        : asSigs(parsed.children)
+      const children = asSigs(parsed['cells']).length ? asSigs(parsed['cells'])
+        : asSigs(parsed['layers']).length ? asSigs(parsed['layers'])
+        : asSigs(parsed['children'])
       const childSet = new Set(children)
-      const bees = new Set(asSigs(parsed.bees)) // skip — installed package content
+      const bees = new Set(asSigs(parsed['bees'])) // skip — installed package content
 
       // Every sig the layer references, recursively (covers resources
       // nested in cell properties), minus child layers and bees.
