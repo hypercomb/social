@@ -14,6 +14,15 @@ const LAYER_PREFIX = '/opfs/__layers__/'
 // Any content-type — resolved from blob mime sniff / extension fallback.
 const SITE_RESOURCE_PREFIX = '/@resource/'
 
+// Phase-2 resource streaming. The page posts host domains (self + community)
+// via postMessage; on an OPFS miss for /@resource/<sig> the SW streams the
+// bytes from a host and sha256-verifies them before serving. KNOWN_DOMAINS is
+// the in-memory copy; it's also persisted inside CACHE_NAME (DOMAINS_CACHE_KEY)
+// so a restarted SW that serves before the page re-posts still has the list.
+const SW_DOMAINS_MSG = 'hc:sw:domains'
+const DOMAINS_CACHE_KEY = '/__hc_sw_domains__'
+let KNOWN_DOMAINS = []
+
 self.addEventListener('install', (event) => {
   event.waitUntil(self.skipWaiting())
 })
@@ -24,8 +33,24 @@ self.addEventListener('activate', (event) => {
       .then(names => Promise.all(
         names.filter(n => n !== CACHE_NAME).map(n => caches.delete(n))
       ))
+      .then(() => loadDomains())
+      .then(domains => { if (domains.length) KNOWN_DOMAINS = domains })
       .then(() => self.clients.claim())
   )
+})
+
+// Page → SW host-domain hand-off (see hypercomb-shared/core/sw-domains.ts).
+// Used by the /@resource/ OPFS-miss fallback to know which hosts to try.
+self.addEventListener('message', (event) => {
+  const data = event.data
+  if (!data || data.type !== SW_DOMAINS_MSG) return
+  const domains = Array.isArray(data.domains)
+    ? data.domains.filter((d) => typeof d === 'string' && d)
+    : []
+  if (domains.length) {
+    KNOWN_DOMAINS = domains
+    void persistDomains(domains)
+  }
 })
 
 self.addEventListener('fetch', (event) => {
@@ -162,7 +187,19 @@ async function handleSiteResourceRequest(request) {
     await cachePut(request, response)
     return toHeadIfNeeded(request, response.clone())
   } catch {
-    return new Response('resource not found', { status: 404 })
+    // OPFS miss → stream from a host (Phase 2). The SW has no IoC, so it uses
+    // the domains the page posted. Bytes are sha256-verified before serving,
+    // then written through to OPFS (silently — the SW can't emit
+    // content:wrote) so future reads (SW or Store) hit locally and offline.
+    const fetched = await fetchResourceFromHosts(sig)
+    if (!fetched) return new Response('resource not found', { status: 404 })
+    void writeResourceToOpfs(sig, fetched.buf)
+    const headers = new Headers()
+    headers.set('content-type', fetched.contentType || guessResourceContentType(rest, new Blob([fetched.buf])))
+    headers.set('cache-control', 'public, max-age=31536000, immutable')
+    const response = new Response(fetched.buf, { status: 200, headers })
+    await cachePut(request, response)
+    return toHeadIfNeeded(request, response.clone())
   }
 }
 
@@ -339,4 +376,71 @@ function asJsResponse(file) {
   headers.set('content-type', guessContentType(file.name))
   headers.set('cache-control', 'no-store')
   return new Response(file, { status: 200, headers })
+}
+
+/* ----------------------------------------
+ * host streaming (Phase 2): /@resource/ OPFS-miss fallback
+ * ------------------------------------- */
+
+async function persistDomains(domains) {
+  try {
+    const cache = await caches.open(CACHE_NAME)
+    await cache.put(DOMAINS_CACHE_KEY, new Response(JSON.stringify(domains), {
+      headers: { 'content-type': 'application/json' }
+    }))
+  } catch { /* best-effort */ }
+}
+
+async function loadDomains() {
+  try {
+    const cache = await caches.open(CACHE_NAME)
+    const res = await cache.match(DOMAINS_CACHE_KEY)
+    if (res) { const arr = await res.json(); if (Array.isArray(arr)) return arr }
+  } catch { /* ignore */ }
+  return []
+}
+
+async function sha256Hex(buffer) {
+  const digest = await crypto.subtle.digest('SHA-256', buffer)
+  let hex = ''
+  for (const b of new Uint8Array(digest)) hex += b.toString(16).padStart(2, '0')
+  return hex
+}
+
+// Try each known host in order; the first response whose bytes sha256 to the
+// requested sig wins. Loopback hosts use http (content-side analog of the
+// mesh allow-loopback); real domains use https. Returns { buf, contentType }
+// or null. Verification is the backstop — a wrong/hostile domain can only
+// cost a 404, never serve incorrect bytes.
+async function fetchResourceFromHosts(sig) {
+  let domains = KNOWN_DOMAINS
+  if (!domains || domains.length === 0) domains = await loadDomains()
+  for (const raw of (domains || [])) {
+    const host = String(raw || '').replace(/^https?:\/\//, '').replace(/\/+$/, '').trim()
+    if (!host) continue
+    const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
+    const url = `${scheme}://${host}/__resources__/${sig}`
+    try {
+      const res = await fetch(url, { cache: 'no-store' })
+      if (!res || !res.ok) continue
+      const buf = await res.arrayBuffer()
+      if (await sha256Hex(buf) !== sig) continue
+      return { buf, contentType: res.headers.get('content-type') || '' }
+    } catch { /* network / CORS / cert — try next host */ }
+  }
+  return null
+}
+
+// Write-through to OPFS. Skip if already present — re-writing an existing
+// content-addressed file invalidates any Blob already handed out for that sig
+// (NotReadableError), the hazard Store.putResource documents.
+async function writeResourceToOpfs(sig, buffer) {
+  try {
+    const root = await self.navigator.storage.getDirectory()
+    const dir = await root.getDirectoryHandle('__resources__', { create: true })
+    try { await dir.getFileHandle(sig); return } catch { /* not present — create */ }
+    const handle = await dir.getFileHandle(sig, { create: true })
+    const writable = await handle.createWritable()
+    try { await writable.write(buffer) } finally { await writable.close() }
+  } catch { /* best-effort cache fill */ }
 }

@@ -9,6 +9,7 @@ import { resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
 import { App } from './app/app'
 import { DependencyLoader, initializeRuntime } from '@hypercomb/shared/core'
+import { postCommunityDomainsToServiceWorker } from '@hypercomb/shared/core/sw-domains'
 
 // Ensure side-effect registration
 const _deps = [DependencyLoader]
@@ -41,6 +42,11 @@ const attachImportMap = async (): Promise<void> => {
 
 const bootstrap = async (): Promise<void> => {
   await ensureSwControl()
+
+  // Hand the service worker the host domains (self + community) so an
+  // embedded-site /@resource/<sig> request can stream from a host on an OPFS
+  // miss. The SW has no localStorage/IoC, so the page must post them.
+  await postCommunityDomainsToServiceWorker()
 
   // Capture install state BEFORE ensureInstall so the cold-install path
   // is detectable. ensureInstall flips this flag when the first sync

@@ -24,6 +24,7 @@ import { bootstrapApplication } from '@angular/platform-browser'
 import { SignatureStore } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared'
 import { initializeRuntime, DroneRegistry, IconProviderRegistry } from '@hypercomb/shared/core'
+import { postCommunityDomainsToServiceWorker } from '@hypercomb/shared/core/sw-domains'
 import { appConfig } from './app/app.config'
 import { App } from './app/app'
 
@@ -63,6 +64,11 @@ const main = async (): Promise<void> => {
 
   ;(window as any).__hcBoot('main() started')
   await ensureSwControl()
+
+  // Hand the service worker the host domains (self + community) so an
+  // embedded-site /@resource/<sig> request can stream from a host on an
+  // OPFS miss. The SW has no localStorage/IoC, so the page must post them.
+  await postCommunityDomainsToServiceWorker()
   ;(window as any).__hcBoot('ensureSwControl done')
   await initializeRuntime()
   ;(window as any).__hcBoot('initializeRuntime done')

@@ -192,6 +192,7 @@ interface SignerApi {
 interface StoreApi {
   opfsRoot?: FileSystemDirectoryHandle
   getResource?: (sig: string) => Promise<Blob | null>
+  getResourceLocal?: (sig: string) => Promise<Blob | null>
   putResource?: (blob: Blob) => Promise<string>
   getLayerBytes?: (sig: string) => Promise<Uint8Array | null>
   getLayerPoolBytes?: (sig: string) => Promise<Uint8Array | null>
@@ -459,7 +460,10 @@ export class ContentBrokerDrone extends Drone {
     if (ordered.length === 0) return null
 
     for (const host of ordered) {
-      const url = `https://${host}${path}`
+      // Loopback hosts are served over plain http — the content-side analog
+      // of the mesh's allow-loopback. Real domains always use https.
+      const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
+      const url = `${scheme}://${host}${path}`
       try {
         const res = await fetch(url, { cache: 'no-store' })
         if (!res.ok) continue
@@ -864,7 +868,11 @@ export class ContentBrokerDrone extends Drone {
         return null
       }
       if (type === 'resource') {
-        const blob = store.getResource ? await store.getResource(sig) : null
+        // Pure-local read ONLY — getResourceLocal never falls back to the
+        // host. Calling getResource here would re-enter the broker
+        // (getResource → #fetchResourceFromHost → fetchBySig → #readLocal)
+        // and deadlock on the coalesced pending fetch.
+        const blob = store.getResourceLocal ? await store.getResourceLocal(sig) : null
         if (!blob) return null
         return new Uint8Array(await blob.arrayBuffer())
       }

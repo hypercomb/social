@@ -284,7 +284,7 @@ export class Store extends EventTarget {
   // content-addressed resource storage (__resources__)
   // -------------------------------------------------
 
-  public putResource = async (blob: Blob): Promise<string> => {
+  public putResource = async (blob: Blob, options?: { emit?: boolean }): Promise<string> => {
     const bytes = await blob.arrayBuffer()
     const signature = await SignatureService.sign(bytes)
     // Content-addressed: same sig ⇒ same bytes, so if the file already
@@ -310,23 +310,97 @@ export class Store extends EventTarget {
     // Mirror up to DCP. PushQueueService (in essentials) subscribes to
     // `content:wrote` and queues the bytes for sentinel intake. Going
     // through EffectBus avoids a shared→essentials import.
-    EffectBus.emit('content:wrote', { sig: signature, kind: 'resource' as const, bytes })
+    //
+    // Suppressed (emit: false) for cache-fill writes — bytes pulled FROM a
+    // host via getResource's cold-miss fallback must NOT echo back into
+    // HostSync/PushQueue as if we authored them. Only genuine local
+    // authoring emits.
+    if (options?.emit !== false) {
+      EffectBus.emit('content:wrote', { sig: signature, kind: 'resource' as const, bytes })
+    }
     return signature
   }
 
   readonly #resourceCache = new Map<string, Blob>()
   readonly #resourcePending = new Map<string, Promise<Blob | null>>()
+  readonly #hostFetchPending = new Map<string, Promise<Blob | null>>()
 
-  public getResource = async (signature: string): Promise<Blob | null> => {
+  /**
+   * Local-only resource read: in-memory cache → OPFS. Never touches the
+   * network. This is the pure-local primitive the content broker uses for
+   * its fast-path / responder lookup — it MUST NOT trigger the host
+   * fallback, or the broker re-enters getResource and deadlocks:
+   *   getResource → #fetchResourceFromHost → broker.fetchBySig
+   *     → #readLocal → getResource → (coalesced) awaits its own pending fetch.
+   */
+  public getResourceLocal = async (signature: string): Promise<Blob | null> => {
     const cached = this.#resourceCache.get(signature)
     if (cached) return cached
     return this.#loadResource(signature)
+  }
+
+  public getResource = async (signature: string): Promise<Blob | null> => {
+    // Hot path: memory → OPFS (getResourceLocal). The host fetch is a
+    // STRICT fallback after a local miss — never reorder it ahead of the
+    // local read, or the warm case (we already have the bytes) pays a
+    // network round-trip it shouldn't. Ordering is the contract:
+    // memory → OPFS → host.
+    const local = await this.getResourceLocal(signature)
+    if (local) return local
+    return this.#fetchResourceFromHost(signature)
   }
 
   /** Prefetch a resource into the in-memory cache. Safe to call concurrently
    *  for the same signature — in-flight loads are deduped. */
   public preheatResource = async (signature: string): Promise<Blob | null> =>
     this.getResource(signature)
+
+  /**
+   * Cold-miss fallback for getResource: resolve the bytes from a host via
+   * the content broker (essentials), then silently write them through to
+   * OPFS so the next read is a local hit — and offline-safe. The broker
+   * verifies sha256 before returning, so the bytes are guaranteed to match
+   * `signature`; OPFS becomes a cache of the host's flat sig directory
+   * rather than the sole source.
+   *
+   * Resolved through window.ioc, NOT an import: Store lives in shared and
+   * must never import essentials. Same runtime-IoC pattern the rest of
+   * shared already uses (controls-bar → ViewportPersistence; the bee scan
+   * above at L241). Inert when no broker is registered or no host domains
+   * are configured — returns null, exactly today's miss behavior, so a
+   * solo/offline participant is unaffected.
+   *
+   * Concurrent callers coalesce on #hostFetchPending; the broker also
+   * coalesces its own fetches, so a double-miss never double-fetches.
+   */
+  #fetchResourceFromHost = (signature: string): Promise<Blob | null> => {
+    const existing = this.#hostFetchPending.get(signature)
+    if (existing) return existing
+    const promise = (async (): Promise<Blob | null> => {
+      try {
+        const broker = (window.ioc?.get?.('@diamondcoreprocessor.com/ContentBrokerDrone')) as
+          | { fetchBySig?: (sig: string, type: string, timeoutMs?: number) => Promise<Uint8Array | null> }
+          | undefined
+        const bytes = await broker?.fetchBySig?.(signature, 'resource')
+        if (!bytes || bytes.byteLength === 0) return null
+        // Copy into a fresh ArrayBuffer-backed view: TS 5.9's BlobPart
+        // excludes Uint8Array<ArrayBufferLike> (SharedArrayBuffer guard).
+        // Negligible vs the network fetch we just did.
+        const blob = new Blob([new Uint8Array(bytes)])
+        this.#resourceCache.set(signature, blob)
+        // Silent write-through: persist for offline + future local hits
+        // WITHOUT the content:wrote echo (these are someone else's bytes).
+        try { await this.putResource(blob, { emit: false }) } catch { /* cache-only is acceptable */ }
+        return blob
+      } catch {
+        return null
+      } finally {
+        this.#hostFetchPending.delete(signature)
+      }
+    })()
+    this.#hostFetchPending.set(signature, promise)
+    return promise
+  }
 
   // -------------------------------------------------
   // persistent decoration substrate (__optimization__)
