@@ -4,6 +4,7 @@
 export type * from './ambient-presence.worker'
 export type * from './content-broker.drone'
 export type * from './follow.drone'
+export * from './host-sync.service'
 export type * from './mesh-adapter.drone'
 export * from './mesh-block.queen'
 export * from './mesh-clear.queen'
