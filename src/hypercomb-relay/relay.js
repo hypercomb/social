@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // hypercomb-relay — minimal Nostr relay AND HTTP content host for private swarm meetings
-// usage: node relay.js [--port 7777] [--pubkeys hex1,hex2] [--memory] [--db ./relay.db] [--max-event-size 65536] [--content-dir ./content]
+// usage: node relay.js [--port 7777] [--pubkeys hex1,hex2] [--memory] [--db ./relay.db] [--max-event-size 65536] [--content-dir ./content] [--writers hex1,hex2] [--max-body-bytes 52428800]
 //
 // env fallbacks (used when the matching --flag is absent):
 //   PORT             → port to listen on (Azure App Service injects this)
@@ -20,8 +20,8 @@
 // it for resources/bees/deps/layers.
 
 import { createServer } from 'node:http'
-import { randomBytes } from 'node:crypto'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { randomBytes, createHash } from 'node:crypto'
+import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
@@ -48,6 +48,12 @@ function parseArgs(argv) {
     // dist/, rsync from elsewhere, manual copy). The relay serves only
     // files inside this dir — directory traversal is blocked.
     contentDir: envContentDir || resolve(__dirname, 'content'),
+    // Allowed-writer pubkeys for HTTP PUT (content backup). When unset
+    // here, falls back to --pubkeys after parse; empty => writes disabled.
+    // Each PUT carries a NIP-98 signed event whose pubkey must be in this set.
+    writers: (() => { const e = String(process.env.WRITERS ?? '').trim(); return e ? e.split(',').map(normalizePubkey).filter(Boolean) : null })(),
+    // Hard cap on a single PUT body (default 50 MB) — prevents disk-fill abuse.
+    maxBodyBytes: 52_428_800,
   }
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i]
@@ -58,6 +64,8 @@ function parseArgs(argv) {
     else if (a === '--db' && next) { args.db = next; i++ }
     else if (a === '--max-event-size' && next) { args.maxEventSize = Number(next); i++ }
     else if (a === '--content-dir' && next) { args.contentDir = resolve(next); i++ }
+    else if (a === '--writers' && next) { args.writers = next.split(',').map(normalizePubkey).filter(Boolean); i++ }
+    else if (a === '--max-body-bytes' && next) { args.maxBodyBytes = Number(next); i++ }
   }
   return args
 }
@@ -70,6 +78,18 @@ function normalizePubkey(raw) {
 }
 
 const cfg = parseArgs(process.argv)
+
+// Allowed-writer pubkeys for HTTP PUT. Defaults to the relay's event-auth
+// whitelist (--pubkeys) when --writers is absent. Empty set => writes are
+// rejected — an open relay does not accept content writes by default; the
+// operator opts in by listing their own pubkey(s).
+const writers = new Set(
+  ((cfg.writers && cfg.writers.length ? cfg.writers : cfg.pubkeys) || []).map((p) => p.toLowerCase())
+)
+
+function sha256Hex(buf) {
+  return createHash('sha256').update(buf).digest('hex')
+}
 
 // ── database ─────────────────────────────────────────────────────────────────
 
@@ -337,8 +357,8 @@ function tryServeContent(req, res) {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Allow-Methods': 'GET, HEAD, PUT, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       'Access-Control-Max-Age': '86400',
     })
     res.end()
@@ -377,6 +397,102 @@ function tryServeContent(req, res) {
   }
 }
 
+function respondText(res, code, msg) {
+  res.writeHead(code, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' })
+  res.end(msg)
+}
+
+// ── content-host (HTTP write — the backup/push side) ─────────────────────────
+//
+// The push counterpart to tryServeContent. A PUT lands content into the
+// sig pool so the host can serve it (and others adopt it). Two guards,
+// independent (protocol-spec §21.12):
+//   1. content-integrity — the target must be sig-addressed, and
+//      sha256(body) MUST equal that sig. Bytes authenticate themselves;
+//      a forged sig is computationally impossible. Idempotent: same sig
+//      == same bytes.
+//   2. writer-authorization — a NIP-98 signed event (Authorization:
+//      Nostr <base64-event>) whose pubkey is in the allowed-writers set.
+//      Proves WHO without ever sending a secret; the host holds only
+//      public keys. Empty writer set => writes disabled.
+//
+// Reads stay open (tryServeContent); only writes are gated.
+
+function verifyWriteAuth(req) {
+  if (writers.size === 0) return { ok: false, reason: 'writes not enabled (no authorized writers configured)' }
+  const header = String(req.headers['authorization'] || '').trim()
+  const m = /^Nostr\s+(.+)$/i.exec(header)
+  if (!m) return { ok: false, reason: 'missing Nostr authorization header' }
+  let evt
+  try { evt = JSON.parse(Buffer.from(m[1], 'base64').toString('utf8')) } catch { return { ok: false, reason: 'malformed auth token' } }
+  try { if (!verifyEvent(evt)) return { ok: false, reason: 'invalid signature' } } catch { return { ok: false, reason: 'invalid signature' } }
+  if (Number(evt.kind) !== 27235) return { ok: false, reason: 'wrong auth event kind (expected NIP-98 27235)' }
+  const pubkey = String(evt.pubkey || '').toLowerCase()
+  if (!writers.has(pubkey)) return { ok: false, reason: 'pubkey is not an authorized writer' }
+  // freshness window (±60s) — bounds replay of a captured token
+  const now = Math.floor(Date.now() / 1000)
+  if (Math.abs(now - Number(evt.created_at || 0)) > 60) return { ok: false, reason: 'auth token outside freshness window' }
+  // bind to method + path (body is bound implicitly: the URL sig == sha256(body))
+  const tags = Array.isArray(evt.tags) ? evt.tags : []
+  const methodTag = tags.find((t) => Array.isArray(t) && t[0] === 'method')?.[1]
+  if (String(methodTag || '').toUpperCase() !== 'PUT') return { ok: false, reason: 'auth method tag mismatch' }
+  const uTag = tags.find((t) => Array.isArray(t) && t[0] === 'u')?.[1]
+  let signedPath
+  try { signedPath = new URL(String(uTag)).pathname } catch { signedPath = String(uTag || '') }
+  const reqPath = (req.url || '').split('?')[0]
+  if (signedPath !== reqPath) return { ok: false, reason: 'auth url tag mismatch' }
+  return { ok: true, pubkey }
+}
+
+function tryWriteContent(req, res) {
+  if (req.method !== 'PUT') return false
+
+  let urlPath
+  try { urlPath = decodeURIComponent((req.url || '').split('?')[0]) } catch { respondText(res, 400, 'bad path'); return true }
+  if (!urlPath || urlPath === '/') { respondText(res, 400, 'no target path'); return true }
+
+  // traversal defense — identical to the read path
+  const resolved = resolve(cfg.contentDir, '.' + urlPath)
+  const root = resolve(cfg.contentDir)
+  if (!resolved.startsWith(root + sep) && resolved !== root) { respondText(res, 403, 'target outside content root'); return true }
+
+  // writes must be sig-addressed: basename (minus .js/.json) must be a 64-hex sig
+  const base = urlPath.split('/').pop() || ''
+  const sig = base.replace(/\.(js|json)$/i, '').toLowerCase()
+  if (!/^[0-9a-f]{64}$/.test(sig)) { respondText(res, 400, 'target is not sig-addressed'); return true }
+
+  const auth = verifyWriteAuth(req)
+  if (!auth.ok) { respondText(res, 401, auth.reason); return true }
+
+  const chunks = []
+  let size = 0
+  let aborted = false
+  req.on('data', (c) => {
+    if (aborted) return
+    size += c.length
+    if (size > cfg.maxBodyBytes) { aborted = true; respondText(res, 413, 'body too large'); req.destroy(); return }
+    chunks.push(c)
+  })
+  req.on('end', () => {
+    if (aborted) return
+    const body = Buffer.concat(chunks)
+    const actual = sha256Hex(body)
+    if (actual !== sig) { respondText(res, 422, `hash mismatch: sha256(body)=${actual.slice(0, 12)} != ${sig.slice(0, 12)}`); return }
+    try {
+      mkdirSync(dirname(resolved), { recursive: true })
+      writeFileSync(resolved, body)
+    } catch (e) {
+      respondText(res, 500, 'write failed: ' + (e?.message || 'unknown'))
+      return
+    }
+    res.writeHead(201, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' })
+    res.end(`stored ${sig}`)
+    console.log(`[write] ${auth.pubkey.slice(0, 8)}… PUT ${urlPath} (${body.length} bytes)`)
+  })
+  req.on('error', () => { if (!aborted) respondText(res, 400, 'request stream error') })
+  return true
+}
+
 const server = createServer((req, res) => {
   // NIP-11 relay metadata (Accept: application/nostr+json)
   if (req.headers.accept?.includes('application/nostr+json')) {
@@ -385,8 +501,11 @@ const server = createServer((req, res) => {
     return
   }
 
-  // Try content-host serving (returns true if it handled the request)
+  // Read side: GET/HEAD/OPTIONS content serving (returns true if handled)
   if (tryServeContent(req, res)) return
+
+  // Write side: PUT content into the sig pool (gated). Returns true if handled.
+  if (tryWriteContent(req, res)) return
 
   // Default: liveness message
   res.writeHead(200, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' })
@@ -434,4 +553,6 @@ server.listen(cfg.port, () => {
   else console.log(`database: ${cfg.db}`)
   const contentReady = existsSync(cfg.contentDir)
   console.log(`content-dir: ${cfg.contentDir} ${contentReady ? '(ready)' : '(empty — host will 404 until populated)'}`)
+  if (writers.size > 0) console.log(`writes: enabled — ${writers.size} authorized writer pubkey(s) (NIP-98 + sha256 verify)`)
+  else console.log('writes: disabled (no --writers / --pubkeys configured)')
 })
