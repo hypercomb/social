@@ -454,10 +454,15 @@ export class HomeComponent implements OnDestroy {
             s.rootSig === branchSig
               // Preserve any visual-context nodes (#77-B) already appended to
               // the section — resolution replaces only the resolved root, not
-              // the read-only context of other domains' features.
-              ? { ...s, items: [root, ...s.items.filter(it => it.visualContext)], loading: false, installStatus: null }
+              // the read-only context of other domains' features. #74:
+              // auto-EXPAND the adopted branch root so its features are
+              // visible the moment you land — "explore in realtime".
+              ? { ...s, items: [{ ...root, expanded: true }, ...s.items.filter(it => it.visualContext)], loading: false, installStatus: null }
               : s
           ))
+          // #74: now that the content is resolved + expanded, scroll to it
+          // and briefly highlight so the participant lands ON the new node.
+          setTimeout(() => this.#scrollSectionIntoView(sectionDomain, true), 60)
           return
         }
       } catch { /* swallow + retry — bytes may not have landed yet */ }
@@ -506,11 +511,17 @@ export class HomeComponent implements OnDestroy {
    *  adopted from. The DCP installer scrolls within the page's main
    *  scrolling element, so behavior is the standard browser smooth
    *  scroll. No-op if the section hasn't rendered yet. */
-  #scrollSectionIntoView(domain: string): void {
+  #scrollSectionIntoView(domain: string, highlight = false): void {
     try {
       const el = document.querySelector(`.domain-section[data-domain="${CSS.escape(domain)}"]`)
       if (!el) return
       el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      // #74: brief highlight so the participant sees WHERE they landed —
+      // "the tree opens to that newly created node". Auto-clears.
+      if (highlight) {
+        el.classList.add('just-adopted')
+        setTimeout(() => el.classList.remove('just-adopted'), 2200)
+      }
     } catch { /* CSS.escape missing in old browsers, querySelector failed — non-fatal */ }
   }
 

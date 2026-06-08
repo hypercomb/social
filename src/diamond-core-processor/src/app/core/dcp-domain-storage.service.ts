@@ -55,6 +55,10 @@ export const SETTINGS_LINEAGE = 'settings'
 // refs), recomputed (never differentiated) on every toggle/adopt/install.
 export const DEFAULT_LINEAGE = 'default'
 export const LOGICAL_LINEAGE = 'logical'
+// `home` = the revision history: default (base) + named branch saves. Each
+// save freezes the current logical HEAD under a name; restore makes a saved
+// (or default) logical root the new HEAD via Make-HEAD append (linear).
+export const HOME_LINEAGE = 'home'
 
 const MARKER_RE = /^\d{4}$/
 const SIG_RE = /^[a-f0-9]{64}$/i
@@ -401,6 +405,47 @@ export class DcpDomainStorage {
     if (!sig) return []
     const layer = await this.#loadJson<{ name: string; refs: string[] }>(sig)
     return layer?.refs ?? []
+  }
+
+  // ── save / branch / home-history (default → v1 → v2 …) ─────────────────────
+  //
+  // SAVE = freeze the current logical HEAD as a NAMED branch revision in the
+  // home history. The logical is unchanged (it was already current — we only
+  // take the named snapshot). RESTORE = make a saved (or default) logical
+  // root the new logical HEAD via Make-HEAD append (forward, linear,
+  // never truncates — per the append-only history model).
+
+  /** Save the current logical HEAD under a name. Returns the home root sig. */
+  async saveBranch(name: string): Promise<string | null> {
+    await this.initialize()
+    const logicalRoot = await this.currentRootSig(LOGICAL_LINEAGE)
+    if (!logicalRoot) return null
+    const count = await this.markerCount(HOME_LINEAGE)
+    const label = String(name ?? '').trim() || `save-${count + 1}`
+    // The home entry's branchSig = the frozen logical root sig (the snapshot).
+    return this.addBranch(HOME_LINEAGE, HOME_LINEAGE, logicalRoot, [], label)
+  }
+
+  /** The home revision history: named branch saves, in save order.
+   *  (`default` is the implicit base; restoreDefault() returns to it.) */
+  async loadHomeHistory(): Promise<{ name: string; logicalRootSig: string }[]> {
+    const branches = await this.loadTileBranches(HOME_LINEAGE, HOME_LINEAGE)
+    return branches.map(b => ({ name: b.name, logicalRootSig: b.branchSig }))
+  }
+
+  /** Restore: make a saved logical root the current logical HEAD via
+   *  Make-HEAD append (the saved state becomes current; history preserved). */
+  async restoreLogicalRoot(logicalRootSig: string): Promise<void> {
+    const sig = String(logicalRootSig ?? '').trim().toLowerCase()
+    if (!SIG_RE.test(sig)) return
+    await this.initialize()
+    await this.#appendMarker(LOGICAL_LINEAGE, sig)
+  }
+
+  /** Restore to the base: recompute the logical with NO domains enabled, so
+   *  only the `default` (base) refs remain — the restorable starting point. */
+  async restoreDefault(): Promise<{ refs: string[]; rootSig: string | null }> {
+    return this.computeLogicalInstall(new Set<string>())
   }
 
   // ── host-domains lineage (public wrappers) ─────────────────────────────────

@@ -174,6 +174,16 @@ dcp-command-line {
   overflow: hidden;
 }
 
+/* #74: brief highlight when the tree auto-opens to a freshly-adopted
+   branch, so the participant sees WHERE they landed. Auto-cleared. */
+.domain-section.just-adopted {
+  animation: section-just-adopted 2.2s ease-out;
+}
+@keyframes section-just-adopted {
+  0%   { box-shadow: 0 0 0 3px rgba(90, 120, 200, 0.55); background: rgba(90, 120, 200, 0.10); }
+  100% { box-shadow: 0 0 0 0 rgba(90, 120, 200, 0);     background: #fafafa; }
+}
+
 .domain-header {
   display: flex;
   align-items: center;
