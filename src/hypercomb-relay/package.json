@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node relay.js",
-    "setup": "node setup.js"
+    "setup": "node setup.js",
+    "serve": "node relay.js --port 7777 --memory --content-dir ./content"
   },
   "dependencies": {
     "better-sqlite3": "^11.0.0",

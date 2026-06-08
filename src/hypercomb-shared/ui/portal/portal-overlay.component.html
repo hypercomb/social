@@ -9,6 +9,17 @@
       sandbox="allow-scripts allow-forms allow-same-origin"
       referrerpolicy="no-referrer"
     ></iframe>
+
+    <!-- Iframe-address breadcrumb. Matches the top-right corner where the
+         install-crumb sits in the underlying shell so the participant has
+         continuous awareness of "which host am I looking at right now." -->
+    @if (addressLabel) {
+      <div class="portal-address" [title]="activeUrl ?? ''">
+        <span class="address-dot"></span>
+        <span class="address-text">{{ addressLabel }}</span>
+      </div>
+    }
+
     <button class="portal-close" (click)="close()">
       <span class="close-icon">&times;</span>
       <span class="close-label">{{ 'portal.back' | t }}</span>

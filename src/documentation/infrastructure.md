@@ -50,7 +50,7 @@ we're not in the relay business. we run enough infrastructure to bootstrap the n
 
 the hypercomb.io web app (Angular build output — HTML, JS, CSS) is not hosted on a traditional web server or CDN. it's a set of signed resources distributed through the relay mesh, just like everything else.
 
-1. the app is built as signature-addressed bundles (this already exists — `install.manifest.json`, `__bees__/`, `__dependencies__/`, `__layers__/`)
+1. the app is built as signature-addressed bundles (this already exists — every artifact has a `<sig>` in the flat content bucket)
 2. the bundles are published as Nostr events to the relay network
 3. a client loading for the first time connects to a bootstrap relay, fetches the app resources by signature, verifies them, and stores them in OPFS
 4. subsequent loads are instant — served from local OPFS, with the mesh providing updates when signatures change

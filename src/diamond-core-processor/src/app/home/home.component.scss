@@ -185,6 +185,29 @@ dcp-command-line {
   top: 0;
   z-index: 10;
   min-width: 0;
+
+  // Visual state when the participant has toggled this domain hidden via
+  // the visibility eye-icon. The domain section stays in the installer
+  // (un-hidden is one click away) but signals visually that it's
+  // currently filtered out of the rendered union view.
+  &.domain-hidden {
+    opacity: 0.55;
+    background: repeating-linear-gradient(
+      45deg,
+      #f0f2f5,
+      #f0f2f5 6px,
+      #e6e8ec 6px,
+      #e6e8ec 12px
+    );
+  }
+}
+
+// Visibility eye toggle — pressed-state styling when hidden.
+.visibility-toggle {
+  font-size: 13px !important;
+  &.hidden-state {
+    color: #ca8b3b;
+  }
 }
 
 .domain-url {

@@ -52,14 +52,15 @@ export const EMPTY_LAYER_STATE: Readonly<LayerState> = Object.freeze({ bees: [],
  * slot's `slot` name. Slots returning undefined at read time are
  * omitted entirely (sparse layer shape — empty fields cost nothing).
  *
- * Marker sig = sha256 of the marker file's bytes. When ANY field
- * changes (children, notes, tags, ...), bytes change, sig changes,
- * cascade propagates to the root. Undo restores the layer's bytes →
- * restores every slot at once.
+ * Layer sig = sha256 of the canonical layer bytes (the pooled JSON).
+ * When ANY field changes (children, notes, tags, ...), bytes change,
+ * sig changes, cascade propagates to the root. Undo restores the
+ * layer's bytes → restores every slot at once. (The history marker is
+ * a separate pointer record `{"layer":"<sig>"}` — see commitLayer.)
  *
  * SOURCE OF TRUTH for child names = the child layer's own `name`
- * field. To display children, fetch each child sig's marker file
- * and read its name. To navigate, append the name to the current
+ * field. To display children, fetch each child sig's layer from the
+ * pool and read its name. To navigate, append the name to the current
  * path → resolve the target lineage sig → open its bag.
  */
 export type LayerContent = {
@@ -465,27 +466,36 @@ export class HistoryService {
   /**
    * Commit a complete layer snapshot for a lineage.
    *
-   * The marker file IS the full layer JSON — no pool indirection on
-   * hypercomb. Bag layout:
+   * Two writes per commit:
+   *   1. layer bytes → content pool `__layers__/<layerSig>`
+   *      (layerSig = sha256 of the canonical layer JSON);
+   *   2. a POINTER-RECORD marker — `{"layer":"<layerSig>"}` — appended
+   *      to the lineage bag. The marker is META (names which layer this
+   *      revision points at); the layer itself lives in the pool. Bag layout:
    *
-   *   __history__/{lineageSig}/00000000  ← empty layer (auto-minted on first touch)
-   *   __history__/{lineageSig}/00000001  ← first user-event commit
+   *   __history__/{lineageSig}/00000000  ← marker for the empty layer (auto-minted on first touch)
+   *   __history__/{lineageSig}/00000001  ← marker for the first user-event commit
    *   __history__/{lineageSig}/00000002
    *   ...
    *
-   * Each file's content is the full layer JSON; sha256(file bytes) is
-   * the marker's "sig" (the layer's identity). Parent layers reference
-   * each child's current marker sig in their `cells` array — the
-   * cascade walk that ancestors do upstream of every commit produces
-   * a new marker at every level, so the root lineage's bag's latest
-   * marker IS the global merkle root.
+   * Each NNNNNNNN file is a pointer record, NOT a layer; the highest
+   * number is the current revision (history = the run, current = max).
+   * The layer's identity is `layerSig`; parents reference each child's
+   * current `layerSig` in their `children` array — the cascade walk
+   * ancestors do upstream of every commit produces a new layer + marker
+   * at each level, so the root lineage's latest layer sig IS the global
+   * merkle root.
    *
-   * commitLayer here writes ONE marker for ONE lineage. Cascade is
-   * orchestrated by the caller (LayerCommitter): walk leaf → root,
-   * call commitLayer at each level with that level's freshly-assembled
-   * layer (which references its children's just-committed marker sigs).
+   * (Legacy markers stored the full layer JSON inline; readers still
+   *  handle both via `extractLayerSigFromMarker`, migrating on read.)
    *
-   * @returns the new marker's sig (sha256 of the file bytes).
+   * commitLayer writes ONE marker for ONE lineage. Cascade is orchestrated
+   * by the caller (LayerCommitter): walk leaf → root, calling commitLayer
+   * at each level with that level's freshly-assembled layer (which
+   * references its children's just-committed layer sigs).
+   *
+   * @returns the new layer's sig (sha256 of the canonical layer bytes) —
+   *          also what the freshly-written marker points at.
    */
   public readonly commitLayer = async (
     locationSig: string,

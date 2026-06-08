@@ -16,6 +16,7 @@ import { HistoryViewerComponent } from "@hypercomb/shared/ui/history-viewer/hist
 import { NotesStripComponent } from "@hypercomb/shared/ui/notes-strip/notes-strip.component"
 import { NotesViewerComponent } from "@hypercomb/shared/ui/notes-viewer/notes-viewer.component"
 import { MeshModalComponent } from "@hypercomb/shared/ui/mesh-modal/mesh-modal.component"
+import { TrustPromptComponent } from "@hypercomb/shared/ui/trust-prompt/trust-prompt.component"
 import { LayerCycleStripComponent } from "@hypercomb/shared/ui/layer-cycle-strip/layer-cycle-strip.component"
 import { ToastComponent } from "@hypercomb/shared/ui/toast/toast.component"
 import { PresenceBannerComponent } from "@hypercomb/shared/ui/presence-banner/presence-banner.component"
@@ -23,7 +24,7 @@ import { PresenceBannerComponent } from "@hypercomb/shared/ui/presence-banner/pr
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent, MeshModalComponent, LayerCycleStripComponent, ToastComponent, PresenceBannerComponent],
+  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, ToastComponent, PresenceBannerComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
@@ -129,6 +130,16 @@ export class App implements AfterViewInit {
     // un-hide so the command-line inside it is visible.
     EffectBus.on<{ visible: boolean; mobile: boolean }>('mobile:input-visible', ({ visible, mobile }) => {
       this.inputOpen.set(mobile && visible)
+    })
+
+    // ─── Return to the hive on adopt complete ──────────────────────────
+    // Web/dev shell parity with hypercomb-dev: after broker.adopt walks
+    // the peer's subtree → adopt:done fires, ensure the participant lands
+    // on the tile-grid view at their current location so the adopted
+    // content renders. Idempotent — already on 'hexagons' = no-op.
+    EffectBus.on('adopt:done', () => {
+      this.viewMode.set('hexagons')
+      EffectBus.emit('nav:to-hive', { reason: 'adopt-complete' })
     })
 
     window.addEventListener('portal:open', (e) => {

@@ -2,9 +2,12 @@
 
 import { Component, signal, OnDestroy } from '@angular/core'
 import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
+import { defaultHostOrigin } from '../core/default-host'
 
 const RELAY_KEY = 'dcp.relay'
-const DEFAULT_RELAY = 'http://localhost:7777'
+// Local dev fallback. On a real host (jwize.com etc.) the default is the
+// page's own origin — see defaultHostOrigin() and #defaultRelay() below.
+const LOCALHOST_RELAY = 'http://localhost:7777'
 const POLL_INTERVAL = 10_000
 
 interface RelayInfo {
@@ -396,7 +399,7 @@ export class RelayPanelComponent implements OnDestroy {
   }
 
   async probe(): Promise<void> {
-    const base = this.relayUrl().trim() || DEFAULT_RELAY
+    const base = this.relayUrl().trim() || this.#defaultRelay()
     this.status.set('checking')
     try {
       const res = await fetch(base, {
@@ -431,7 +434,12 @@ export class RelayPanelComponent implements OnDestroy {
   }
 
   #loadUrl(): string {
-    return localStorage.getItem(RELAY_KEY) ?? DEFAULT_RELAY
+    return localStorage.getItem(RELAY_KEY) ?? this.#defaultRelay()
+  }
+
+  /** Canonical default — page's origin on a real host, localhost on dev. */
+  #defaultRelay(): string {
+    return defaultHostOrigin(LOCALHOST_RELAY)
   }
 
   #batScript(): { name: string; content: string } {

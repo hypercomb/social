@@ -42,4 +42,23 @@ export interface TreeNode {
   audit?: AuditResult
   doc?: BeeDocEntry
   layerDocs?: LayerDocs
+
+  /**
+   * True when this node is a placeholder for content still being fetched
+   * (the typical case: adoption just kicked off; the host is materializing
+   * bytes; the row is visible as a muted "...resolving" placeholder until
+   * the real subtree replaces it). Optional / defaults to false; existing
+   * nodes are unaffected.
+   */
+  pending?: boolean
+
+  /**
+   * True when this node is a READ-ONLY VISUAL of an item already in the
+   * logical install from ANOTHER domain or the default base — shown as
+   * context (border/background-marked) so you see how this domain's
+   * incoming features land among what's already there. Visual-context
+   * nodes are not toggleable (they belong to another silo); only this
+   * domain's own (non-visual) features toggle. Optional / defaults false.
+   */
+  visualContext?: boolean
 }

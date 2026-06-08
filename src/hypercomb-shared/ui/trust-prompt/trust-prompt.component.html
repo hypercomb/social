@@ -1,0 +1,36 @@
+@if (visible()) {
+  <div class="trust-prompt-backdrop" (click)="deny()"></div>
+  <div class="trust-prompt-panel" role="dialog" [attr.aria-label]="'trust-prompt.title' | t">
+
+    <header class="trust-prompt-header">
+      <h3>{{ 'trust-prompt.title' | t }}</h3>
+    </header>
+
+    <div class="trust-prompt-body">
+      <p class="trust-prompt-summary">
+        {{ 'trust-prompt.summary' | t: { domain: primaryDomain() } }}
+      </p>
+      @if (additionalCount() > 0) {
+        <p class="trust-prompt-additional">
+          {{ 'trust-prompt.additional' | t: { count: additionalCount() } }}
+        </p>
+      }
+      <p class="trust-prompt-warning">
+        {{ 'trust-prompt.warning' | t }}
+      </p>
+    </div>
+
+    <footer class="trust-prompt-actions">
+      <button class="trust-prompt-btn deny" type="button" (click)="deny()">
+        {{ 'trust-prompt.deny' | t }}
+      </button>
+      <button class="trust-prompt-btn allow-once" type="button" (click)="allowOnce()">
+        {{ 'trust-prompt.allow-once' | t }}
+      </button>
+      <button class="trust-prompt-btn allow-always" type="button" (click)="allowAlways()">
+        {{ 'trust-prompt.allow-always' | t }}
+      </button>
+    </footer>
+
+  </div>
+}

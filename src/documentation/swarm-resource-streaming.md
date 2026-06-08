@@ -45,7 +45,7 @@ A publisher's substrate-applied tile holds image refs at:
 
     localStorage['hc:tile-props-index'][name] = propsSig
 
-…where propsSig points to OPFS `__resources__/<propsSig>` containing:
+…where propsSig points to OPFS content bucket at `<propsSig>` containing:
 
     { small: { image: <smallImgSig> },
       flat:  { small: { image: <flatImgSig> } },

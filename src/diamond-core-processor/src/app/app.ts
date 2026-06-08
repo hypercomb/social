@@ -1,12 +1,19 @@
 import { Component, OnDestroy, OnInit } from '@angular/core'
 import { RouterOutlet } from '@angular/router'
+import { TrustPromptComponent } from '@hypercomb/shared/ui/trust-prompt/trust-prompt.component'
+
+// Pulling in the trust-service module registers @hypercomb.social/TrustService
+// in window.ioc so DCP's home.component and any other DCP-side caller can
+// invoke trust.check() at activation time (same instance the trust-prompt
+// listens to via EffectBus).
+import '@hypercomb/shared/core/trust-service'
 
 const LIFECYCLE_CHANNEL = 'dcp-toggle-state'
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet],
+  imports: [RouterOutlet, TrustPromptComponent],
   templateUrl: './app.html'
 })
 export class App implements OnInit, OnDestroy {

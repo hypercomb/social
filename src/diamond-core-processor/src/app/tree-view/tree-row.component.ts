@@ -11,12 +11,15 @@ import type { TreeNode } from '../core/tree-node'
   imports: [ToggleComponent, DiamondIconComponent],
   template: `
     @if (visible()) {
-      <div class="row" [style.--depth]="node().depth">
-        @if (node().kind === 'layer' || node().kind === 'domain') {
+      <div class="row" [class.pending]="node().pending" [class.visual-context]="node().visualContext" [style.--depth]="node().depth">
+        @if ((node().kind === 'layer' || node().kind === 'domain') && !node().visualContext) {
           <dcp-toggle
             [enabled]="enabled()"
             [effectivelyEnabled]="effectivelyEnabled()"
             (toggled)="toggle.emit(node())" />
+        }
+        @if (node().visualContext) {
+          <span class="visual-marker" title="Already in the logical install (from another domain or the base) — shown for context">&#9676;</span>
         }
 
         <dcp-diamond
@@ -85,6 +88,38 @@ import type { TreeNode } from '../core/tree-node'
 
     .row:hover {
       background: rgba(0,0,0,0.02);
+    }
+
+    /* Visual-context: a read-only item already in the logical install from
+       ANOTHER domain or the base — shown so you see how this domain's
+       incoming features land among what's already there. Marked by a left
+       border + tinted background; no toggle, dimmed. */
+    .row.visual-context {
+      opacity: 0.7;
+      background: rgba(90, 120, 200, 0.06);
+      border-left: 3px solid rgba(90, 120, 200, 0.5);
+    }
+    .visual-marker {
+      color: rgba(90, 120, 200, 0.8);
+      font-size: 12px;
+      width: 16px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+
+    /* Pending: this row is a placeholder for content still being fetched.
+       Muted text, gentle pulse, no edit/toggle actions reachable until
+       the real subtree replaces it. */
+    .row.pending {
+      opacity: 0.55;
+      pointer-events: none;
+      font-style: italic;
+      animation: row-pending-pulse 1.6s ease-in-out infinite;
+    }
+
+    @keyframes row-pending-pulse {
+      0%, 100% { opacity: 0.55; }
+      50%      { opacity: 0.85; }
     }
 
     .label {

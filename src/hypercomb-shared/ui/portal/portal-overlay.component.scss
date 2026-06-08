@@ -24,6 +24,51 @@
   opacity: 0.92;
 }
 
+// ── Iframe-address breadcrumb ────────────────────────────────────────
+// Top-right corner of the panel; matches the install-crumb's position in
+// the underlying shell so the participant always knows "which host's UI
+// am I looking at right now." Title attr shows the full URL on hover.
+.portal-address {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.85rem;
+
+  background: rgba(14, 18, 24, 0.78);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+
+  color: rgba(245, 245, 245, 0.85);
+  font-family: var(--hc-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: lowercase;
+  pointer-events: auto;
+  user-select: text;
+  max-width: 60%;
+  overflow: hidden;
+}
+
+.address-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(200, 151, 90, 0.9);
+  flex-shrink: 0;
+}
+
+.address-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .portal-close {
   position: absolute;
   bottom: 1.2rem;

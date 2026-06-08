@@ -3,6 +3,7 @@
 import { Component, computed, effect, inject, OnDestroy, signal } from '@angular/core'
 import { TreeResolverService } from '../core/tree-resolver.service'
 import { ToggleStateService } from '../core/toggle-state.service'
+import { DcpDomainStorage, normalizeDomainKey } from '../core/dcp-domain-storage.service'
 import { PatchStore, type PatchRecord } from '../core/patch-store'
 import { PackageExportService } from '../core/package-export.service'
 import { TreeViewComponent } from '../tree-view/tree-view.component'
@@ -14,6 +15,8 @@ import { PatchListComponent } from '../patch-list/patch-list.component'
 import { DcpCommandLineComponent } from '../command-line/dcp-command-line.component'
 import { LayerEditorComponent } from '../layer-editor/layer-editor.component'
 import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
+import { defaultHostOrigin } from '../core/default-host'
+import { EffectBus } from '@hypercomb/core'
 import type { BatchPatchResult, PatchResult } from '../core/merkle-patch.service'
 import type { BeeDocEntry, TreeNode, TreeNodeKind } from '../core/tree-node'
 
@@ -52,8 +55,22 @@ export class HomeComponent implements OnDestroy {
 
   readonly #resolver = inject(TreeResolverService)
   readonly #toggleState = inject(ToggleStateService)
+  readonly #domainStorage = inject(DcpDomainStorage)
   readonly #patchStore = inject(PatchStore)
   readonly #exporter = inject(PackageExportService)
+
+  // Per-domain visibility is PARTICIPANT-LOCAL decoration (localStorage),
+  // NOT in the domains lineage — same principle as "viewport/clipboard
+  // never in history". DcpDomainStorage owns the sticky storage; this
+  // signal is just a reactivity trigger so the template re-renders when a
+  // toggle flips. isDomainVisible() reads the service synchronously.
+  readonly #visibilityVersion = signal(0)
+
+  // Reactivity trigger bumped after a logical recompute so any view reading
+  // the logical (e.g. the visual-context nodes) re-renders. The logical
+  // itself lives in the `logical` sigbag lineage (DcpDomainStorage); this is
+  // just the signal that says "it changed, re-read it".
+  readonly #logicalVersion = signal(0)
 
   readonly receivedLayerSigs = signal<string[]>([])
   #fromHcChannel: BroadcastChannel | null = null
@@ -68,7 +85,13 @@ export class HomeComponent implements OnDestroy {
   // Default content source: Azure blob storage (the canonical, deployed
   // location for bee/layer/dependency bundles). DCP's own origin no
   // longer serves content — it is a UI-only static web app.
-  readonly defaultContentBase = 'https://storagehypercomb.blob.core.windows.net/dcp'
+  // Default trusted-domain suggestion. On a real host (e.g. jwize.com) this
+  // is the page's own origin — the host that served you the SPA is the
+  // obvious source of truth for which domain to install from. On localhost
+  // we fall back to the Azure blob storage URL so dev keeps working without
+  // configuration. Same helper backs the relay-panel's URL default so both
+  // install UIs in the top bar agree on what "this DCP instance's host" is.
+  readonly defaultContentBase = defaultHostOrigin('https://storagehypercomb.blob.core.windows.net/dcp')
   readonly domains = signal<string[]>(this.#loadDomains())
   readonly domainInput = signal('')
   readonly searchTerm = signal('')
@@ -185,6 +208,35 @@ export class HomeComponent implements OnDestroy {
       if (doms.length) this.#loadAllDomains(doms)
     })
 
+    // Warm the settings sigbag into the in-memory cache so visibility reads
+    // are accurate, then bump the reactivity trigger so the template
+    // re-renders with the loaded values. Settings now live in an undoable
+    // sigbag lineage (not localStorage) — load it like any other hive.
+    void this.#domainStorage.loadSettingsCache()
+      .then(() => this.#visibilityVersion.update(v => v + 1))
+      .catch(() => { /* empty/first-run — defaults apply */ })
+
+    // #60: render the installer's adopted-branch sections FROM the domains
+    // lineage on load. The lineage is the durable source of "what I've
+    // adopted, from whom, where" (it persists across reloads in OPFS); the
+    // sections signal does not. So on init we rebuild the per-domain
+    // sections from loadDomainsHive() — adopted branches reappear under
+    // their owner domain (the root/[domain] view) every time the installer
+    // opens, sourced from the sigbag, not from a transient in-memory push.
+    void this.#refreshFromLineage()
+
+    // Dev-only: expose the lineage-storage service on window so the driver
+    // test can exercise the domains / host-domains / settings sigbags
+    // against the real service code. Guarded to loopback so it never
+    // appears in a production installer.
+    try {
+      const host = window.location.hostname
+      if (host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+        ;(window as unknown as { __dcpDomains?: unknown }).__dcpDomains = this.#domainStorage
+        ;(window as unknown as { __dcpHome?: unknown }).__dcpHome = this
+      }
+    } catch { /* ignore */ }
+
     // Surface anything the user has authored in hypercomb-web — every
     // sentinel intake broadcasts here, so this list reflects all the
     // changes the user has made up to this point in time.
@@ -199,6 +251,267 @@ export class HomeComponent implements OnDestroy {
         this.#refreshSections()
       }
     } catch { /* BroadcastChannel unavailable */ }
+
+    // Adoption flow — branch-rooted section.
+    //
+    // Click Adopt → broker.adopt(branchSig) walks recursively → adopt:meta
+    // fires with { rootSig: branchSig, domains }. We push a NEW section
+    // keyed by the branchSig, NOT by the source domain. The section
+    // displays ONLY the recursive subtree under that branchSig — the
+    // dependencies the participant actually adopted, not the whole
+    // host's manifest. Idempotent: if a section for this branchSig is
+    // already present, we just scroll to it (no duplicate).
+    //
+    // The section starts in `loading: true`. In parallel, broker.adopt is
+    // landing bytes in OPFS; #resolveBranchSection polls
+    // TreeResolver.resolveFromLocal until the walk completes, then
+    // populates section.items. Failure after the retry budget surfaces
+    // as section.error.
+    EffectBus.on<{ rootSig?: string; domains?: string[] }>('adopt:meta', (p) => {
+      const branchSig = String(p?.rootSig ?? '').trim().toLowerCase()
+      if (!/^[a-f0-9]{64}$/.test(branchSig)) return
+
+      const domains = Array.isArray(p?.domains)
+        ? p.domains.map(d => String(d ?? '').trim()).filter(Boolean)
+        : []
+      const sourceDomainScoped = domains[0] ? this.#prependScheme(domains[0]) : ''
+
+      // Idempotent re-adopt: existing section for this branchSig wins
+      const existing = this.sections().find(s => s.rootSig === branchSig)
+      if (existing) {
+        setTimeout(() => this.#scrollSectionIntoView(existing.domain), 50)
+        return
+      }
+
+      // Derive display labels. Prefer the source domain hostname when known
+      // (jwize.com, alice.dev). Fall back to a sig-prefix label so a
+      // domainless adoption (anonymous swarm publisher) still has a
+      // recognizable section header.
+      const sourceHost = (() => {
+        try { return sourceDomainScoped ? new URL(sourceDomainScoped).hostname.toLowerCase() : '' }
+        catch { return sourceDomainScoped }
+      })()
+      const displayName = sourceHost || `branch-${branchSig.slice(0, 8)}`
+
+      const branchSection: DomainSection = {
+        // domain doubles as the section's idempotency key + scroll target
+        // selector; for branch sections without a known source we synthesize
+        // a `branch://` URI so the section still has a unique identifier.
+        domain:         sourceDomainScoped || `branch://${branchSig}`,
+        domainName:     displayName,
+        displayDomain:  displayName,
+        rootSig:        branchSig,
+        originalRootSig: branchSig,
+        items:          [],
+        loading:        true,
+        error:          null,
+        installStatus:  'Adopting branch — resolving content…',
+        patches:        [],
+        enabled:        true,
+      }
+      this.sections.update(secs => [...secs, branchSection])
+
+      // Resolve the walked subtree from local OPFS in parallel. broker.adopt
+      // is already fetching the bytes; this just waits for them to land.
+      void this.#resolveBranchSection(branchSig, branchSection.domain)
+
+      // Scroll once Angular renders the new section element.
+      setTimeout(() => this.#scrollSectionIntoView(branchSection.domain), 100)
+    })
+
+    // ─── URL-hash handoff from the hive's adopt button ─────────────────
+    // When the hive (hypercomb-dev / hypercomb-web) opens DCP via
+    // portal:open with a branchSig, portal-overlay appends `#branch=<sig>`
+    // to the iframe URL. This reads that sig on init and fires a synthetic
+    // adopt:meta so the branch-section handler above picks it up — same
+    // path as an in-process adopt would take, just sourced from the URL
+    // instead of EffectBus. Also kicks off this DCP instance's broker.adopt
+    // so the bytes land in DCP's OPFS for resolveFromLocal to find. Defers
+    // a microtask so the adopt:meta listener (registered above) and the
+    // broker IoC entry are both in place when we fire.
+    this.#processBranchHash()
+
+    // Browsers do NOT reload an iframe on hash-only URL changes, so when
+    // portal-overlay swaps `…#branch=A` → `…#branch=B` for a second adopt
+    // the constructor doesn't re-run. Listen for hashchange too so each
+    // adopt-via-iframe gets processed even on a persistent DCP instance.
+    window.addEventListener('hashchange', () => this.#processBranchHash())
+  }
+
+  /** Read `#branch=<sig>&at=<segments>` from the URL hash and route it
+   *  through the same adopt:meta pathway the in-process adopt button uses.
+   *  `branch` = WHAT (the meta-layer signature). `at` = WHERE (the
+   *  participant's current location at click-time, comma-joined segments).
+   *  Together they're the entire iframe handoff: the gesture IS the
+   *  placement, no installer organization step. */
+  #processBranchHash(): void {
+    try {
+      const hash = window.location.hash.replace(/^#/, '')
+      if (!hash) return
+      const params = new URLSearchParams(hash)
+      const branchSig = (params.get('branch') ?? '').trim().toLowerCase()
+      if (!/^[a-f0-9]{64}$/.test(branchSig)) return
+
+      // Comma-joined segments because URLSearchParams reserves `&` and `=`.
+      // Empty `at` = root; non-empty = path from root.
+      const atRaw = params.get('at') ?? ''
+      const at = atRaw.split(',').map(s => s.trim()).filter(Boolean)
+
+      queueMicrotask(() => {
+        EffectBus.emit('adopt:meta', { rootSig: branchSig, domains: [], at })
+
+        const ioc = (window as { ioc?: {
+          get?: (k: string) => unknown
+          whenReady?: <T>(k: string, cb: (v: T) => void) => void
+        } }).ioc
+
+        // After the walk resolves, record the adoption in the OWNING
+        // domain's lineage sigbag at the placement location. Per the design:
+        // "add the current adopt to that folder and that location in DCP …
+        // the domain request dictates what domain sigbag it runs in and the
+        // domain comes from the adopt click." The mesh is pubkey-based, so
+        // the publisher's DOMAIN is learned during the walk (the broker's
+        // {bytes, domains} address graph) — getKnownDomains(branchSig)
+        // returns it once attributed. We record under the FIRST known owner
+        // domain; if the owner isn't attributed yet we DEFER (don't mis-file
+        // under a guessed domain) — the existing synthetic section still
+        // surfaces the branch, and a later re-adopt can record it once the
+        // owner is known. Dependencies are resolved by the broker from THEIR
+        // respective domains (the walk's per-sig domain attribution +
+        // TreeResolver's namespace-lineage map); recording each dep under
+        // its own domain silo is the follow-on refinement.
+        type BrokerLike = {
+          adopt?: (sig: string) => Promise<unknown>
+          getKnownDomains?: (sig: string) => string[]
+        }
+        const recordInLineage = (broker: BrokerLike): void => {
+          try {
+            const domains = broker.getKnownDomains?.(branchSig) ?? []
+            const owner = String(domains[0] ?? '').trim().toLowerCase()
+            if (!owner) {
+              console.info('[home] adopt owner not yet attributed; deferring lineage record for', branchSig.slice(0, 12))
+              return
+            }
+            void this.#domainStorage.addDomainBranch(owner, branchSig, at)
+              .then(() => {
+                console.info('[home] recorded adopt in lineage:', owner, '←', branchSig.slice(0, 12), 'at', at.join('/') || '/')
+                // #60: reflect the lineage's domain organization in the
+                // render. The adopt:meta handler created the branch's
+                // section under a provisional `branch://<sig>` bucket
+                // (owner wasn't known at hash-time). Now that the walk has
+                // resolved the OWNER domain, reclassify the section under
+                // it so domainGrouped() groups the branch in the
+                // root/[domain] view (e.g. under "alice.com") — the
+                // per-domain source view you adopt into. Matched by
+                // rootSig so it finds the right section regardless of the
+                // in-flight resolveBranchSection poll.
+                this.sections.update(secs => secs.map(s =>
+                  s.rootSig === branchSig
+                    ? { ...s, domain: `https://${owner}`, domainName: owner, displayDomain: owner }
+                    : s
+                ))
+              })
+              .catch(e => console.warn('[home] addDomainBranch failed', e))
+          } catch (e) { console.warn('[home] recordInLineage failed', e) }
+        }
+
+        const startWalk = (broker: BrokerLike): void => {
+          if (broker?.adopt) {
+            void broker.adopt(branchSig)
+              .then(() => recordInLineage(broker))
+              .catch(e =>
+                console.warn('[home] broker.adopt failed for branch', branchSig.slice(0, 12), e)
+              )
+          }
+        }
+
+        const now = ioc?.get?.('@diamondcoreprocessor.com/ContentBrokerDrone') as
+          BrokerLike | undefined
+        if (now?.adopt) {
+          startWalk(now)
+        } else if (ioc?.whenReady) {
+          ioc.whenReady<BrokerLike>(
+            '@diamondcoreprocessor.com/ContentBrokerDrone',
+            (broker) => startWalk(broker)
+          )
+        }
+      })
+    } catch { /* malformed hash → silent — user can re-trigger adopt */ }
+  }
+
+  /** Poll TreeResolver.resolveFromLocal until the branch's content is
+   *  available in OPFS (broker.adopt is fetching in parallel), then
+   *  populate the section's items. Bounded retries — if the walk doesn't
+   *  complete in time the section surfaces an error and the user can
+   *  decide whether to retry the adoption. */
+  async #resolveBranchSection(branchSig: string, sectionDomain: string): Promise<void> {
+    const MAX_RETRIES = 30 // ~6s at 200ms cadence
+    for (let i = 0; i < MAX_RETRIES; i++) {
+      try {
+        const root = await this.#resolver.resolveFromLocal(branchSig, sectionDomain)
+        if (root) {
+          this.sections.update(secs => secs.map(s =>
+            s.rootSig === branchSig
+              // Preserve any visual-context nodes (#77-B) already appended to
+              // the section — resolution replaces only the resolved root, not
+              // the read-only context of other domains' features.
+              ? { ...s, items: [root, ...s.items.filter(it => it.visualContext)], loading: false, installStatus: null }
+              : s
+          ))
+          return
+        }
+      } catch { /* swallow + retry — bytes may not have landed yet */ }
+      await new Promise(r => setTimeout(r, 200))
+    }
+    // Bytes never arrived. Surface as error; user can re-adopt or pull
+    // host-side to retry.
+    this.sections.update(secs => secs.map(s =>
+      s.rootSig === branchSig
+        ? { ...s, loading: false, error: 'Branch content unavailable — adoption may have failed', installStatus: null }
+        : s
+    ))
+  }
+
+  /** Add a domain to the trusted-domains list without going through the
+   *  input field. Same dedupe + normalization as addDomain(); silent
+   *  no-op if the domain is already trusted (the existing section stays
+   *  put — the user already has it open). */
+  #addTrustedDomainProgrammatic(rawUrl: string): void {
+    try {
+      const url = new URL(rawUrl)
+      const scope = url.pathname && url.pathname !== '/'
+        ? `${url.origin}${url.pathname.replace(/\/+$/, '')}`
+        : url.origin
+      if (this.domains().includes(scope)) return
+      const next = [...this.domains(), scope]
+      this.domains.set(next)
+      localStorage.setItem(DOMAINS_KEY, JSON.stringify(next))
+    } catch { /* malformed URL — drop silently */ }
+  }
+
+  /** Make a bare host name (e.g. `jwize.com`, `wss://jwize.com`) into a
+   *  proper https URL that DCP's trusted-domain machinery understands.
+   *  Mesh attributions arrive in any of these shapes; DCP needs an
+   *  https origin. */
+  #prependScheme(raw: string): string {
+    const trimmed = String(raw ?? '').trim().replace(/\/+$/, '')
+    if (!trimmed) return ''
+    if (/^https?:\/\//i.test(trimmed)) return trimmed
+    if (/^wss?:\/\//i.test(trimmed)) return trimmed.replace(/^wss?:\/\//i, 'https://')
+    return 'https://' + trimmed
+  }
+
+  /** Scroll the .domain-section corresponding to `domain` into view so
+   *  the user lands ON the installer node for the host they just
+   *  adopted from. The DCP installer scrolls within the page's main
+   *  scrolling element, so behavior is the standard browser smooth
+   *  scroll. No-op if the section hasn't rendered yet. */
+  #scrollSectionIntoView(domain: string): void {
+    try {
+      const el = document.querySelector(`.domain-section[data-domain="${CSS.escape(domain)}"]`)
+      if (!el) return
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    } catch { /* CSS.escape missing in old browsers, querySelector failed — non-fatal */ }
   }
 
   ngOnDestroy(): void {
@@ -332,6 +645,135 @@ export class HomeComponent implements OnDestroy {
     this.showAllVersions.set(!this.showAllVersions())
   }
 
+  // ─── Per-domain visibility toggle (sticky, OPFS-persisted) ──────────
+  // Master switch per domain. When toggled OFF, the domain's contribution
+  // to the rendered installation union is filtered out even if individual
+  // node toggles are on. Toggle state lives in
+  // __domains__/<domain>/meta.json (via DcpDomainStorage) so it survives
+  // reloads — "sticky" in user vocabulary.
+  //
+  // Default for any domain not in the visibility map is TRUE (visible).
+  // First contact via touchDomain() also sets visible: true.
+
+  /** #60: rebuild adopted-branch sections from the domains lineage. The
+   *  lineage (sigbag, OPFS-durable) is the source of truth for what's been
+   *  adopted and from whom; this reflects it into the rendered sections so
+   *  adopted branches show under their OWNER domain (root/[domain] view) on
+   *  every load — not just in the frame they were adopted. Idempotent:
+   *  skips branchSigs that already have a section (so it composes with the
+   *  live adopt:meta path without duplicating). Best-effort resolution via
+   *  resolveFromLocal — content fetched during the original adopt persists
+   *  in OPFS, so it re-resolves; if absent it surfaces as a loading/error
+   *  row (the branch still shows under its domain). */
+  async #refreshFromLineage(): Promise<void> {
+    try {
+      const hive = await this.#domainStorage.loadDomainsHive()
+      if (!hive.length) return
+      const fresh: DomainSection[] = []
+      for (const domain of hive) {
+        const branches = await this.#domainStorage.loadDomainBranches(domain.name)
+        for (const b of branches) {
+          const sig = String(b.branchSig ?? '').trim().toLowerCase()
+          if (!/^[a-f0-9]{64}$/.test(sig)) continue
+          if (this.sections().some(s => s.rootSig === sig)) continue   // idempotent
+          if (fresh.some(s => s.rootSig === sig)) continue
+          fresh.push({
+            domain: `https://${domain.name}`,
+            domainName: domain.name,
+            displayDomain: domain.name,
+            rootSig: sig,
+            originalRootSig: sig,
+            items: [],
+            loading: true,
+            error: null,
+            installStatus: 'Resolving adopted branch…',
+            patches: [],
+            enabled: true,
+          })
+        }
+      }
+      if (!fresh.length) return
+      this.sections.update(secs => [...secs, ...fresh])
+      // #77-B: seed each fresh section with the visual-context nodes (the
+      // already-there items from other enabled domains + default) so the
+      // single tree shows incoming features landing among what's there.
+      for (const s of fresh) {
+        const ctx = await this.buildVisualContext(s.domainName)
+        if (ctx.length) {
+          this.sections.update(secs => secs.map(sec =>
+            sec.rootSig === s.rootSig ? { ...sec, items: [...sec.items, ...ctx] } : sec
+          ))
+        }
+      }
+      for (const s of fresh) void this.#resolveBranchSection(s.rootSig, s.domain)
+    } catch (e) {
+      console.warn('[home] #refreshFromLineage failed', e)
+    }
+  }
+
+  /** #77-B: build read-only VISUAL-CONTEXT nodes for a domain's tree — the
+   *  features already in the logical from OTHER enabled domains + the default
+   *  base. Marked visualContext:true so tree-row renders them dimmed +
+   *  bordered (incoming vs already-there) with no toggle. Only ENABLED
+   *  branches are included (they're what's actually in the logical). The
+   *  focused domain's own features are excluded (they're the toggleable
+   *  incoming nodes). Public so the UI + driver tests can call it. */
+  async buildVisualContext(forDomain: string): Promise<TreeNode[]> {
+    const me = normalizeDomainKey(forDomain)
+    const out: TreeNode[] = []
+    let i = 0
+    const mkNode = (label: string, lineage: string, branchSig: string): TreeNode => ({
+      id: `visual:${lineage}:${branchSig.slice(0, 12)}:${i++}`,
+      name: label,
+      kind: 'layer',
+      lineage,
+      children: [],
+      expanded: false,
+      loaded: true,
+      depth: 0,
+      visualContext: true,
+    })
+
+    // other enabled domains' features
+    const hive = await this.#domainStorage.loadDomainsHive()
+    for (const dom of hive) {
+      if (normalizeDomainKey(dom.name) === me) continue        // skip the focused domain's own
+      const branches = await this.#domainStorage.loadDomainBranches(dom.name)
+      for (const b of branches) {
+        if (!this.#domainStorage.isFeatureEnabled(b.branchSig)) continue   // only enabled = in logical
+        out.push(mkNode(b.name, dom.name, b.branchSig))
+      }
+    }
+    // default base items (always in the logical)
+    const defaults = await this.#domainStorage.loadDefaultBranches()
+    for (const b of defaults) out.push(mkNode(b.name, 'default', b.branchSig))
+
+    return out
+  }
+
+  /** Synchronous read for the template. Reads the participant-local
+   *  visibility from DcpDomainStorage (localStorage-backed). The
+   *  #visibilityVersion() read registers the reactive dependency so the
+   *  template re-renders when toggleDomainVisibility bumps it. Default for
+   *  unknown domains is true. */
+  isDomainVisible(domain: string): boolean {
+    this.#visibilityVersion()                 // reactive dependency
+    return this.#domainStorage.isDomainVisible(domain)
+  }
+
+  /** Toggle visibility. The service updates its in-memory cache
+   *  synchronously (instant UI) and persists to the undoable settings
+   *  sigbag asynchronously — so we bump the reactivity trigger immediately
+   *  and let the sigbag append run in the background. */
+  toggleDomainVisibility(domain: string): void {
+    const next = !this.#domainStorage.isDomainVisible(domain)
+    void this.#domainStorage.setDomainVisible(domain, next)
+    this.#visibilityVersion.update(v => v + 1)
+    // Notify the sentinel + any subscribers that visibility changed so the
+    // hive's render filter (and any other consumer) can resync.
+    this.#toggleState.notifyChanged()
+  }
+
 
   // tree interactions
   async onExpandToggle(node: TreeNode): Promise<void> {
@@ -358,9 +800,89 @@ export class HomeComponent implements OnDestroy {
     this.#refreshSections()
   }
 
-  onToggle(node: TreeNode): void {
+  async onToggle(node: TreeNode): Promise<void> {
+    // Trust gate at activation. Tiles (layers, domain) and resources are
+    // always safe to flip — they're data. Code items (bees, deps, workers,
+    // drones) are gated: when turning ON code whose source domain isn't
+    // in the participant's trusted community, the trust prompt fires
+    // (community-trusted code activates silently — no nag).
+    //
+    // Disables and re-enables of already-on items always pass through.
+    // The gate is one-way: off→on for code only.
+    const currentlyEnabled = this.#toggleState.isEnabled(node.id)
+    const isCode = node.kind === 'bee' || node.kind === 'dependency'
+                || node.kind === 'worker' || node.kind === 'drone'
+
+    if (!currentlyEnabled && isCode) {
+      const sourceDomain = this.#findSectionDomain(node)
+      if (sourceDomain) {
+        interface TrustLike {
+          check: (domains: string[]) => Promise<{ allow: boolean; addToCommunity: boolean }>
+        }
+        const trust = (window as { ioc?: { get: (k: string) => unknown } }).ioc
+          ?.get?.('@hypercomb.social/TrustService') as TrustLike | undefined
+        if (trust?.check) {
+          const decision = await trust.check([sourceDomain])
+          if (!decision.allow) {
+            // User refused activation. Leave the toggle in its current
+            // (off) state; nothing changes.
+            return
+          }
+        }
+      }
+    }
+
     this.#toggleState.toggle(node.id)
     this.#refreshSections()
+
+    // #77: if a SECTION (adopted branch) was toggled, drive the LOGICAL
+    // install. The feature's branchSig = the containing section's rootSig.
+    // Flip its participant-local enabled flag + recompute the logical
+    // (union-recompute; canonical layers + domain lineage untouched, per
+    // the purity guarantee). Sub-node toggles (a bee within a branch) stay
+    // with ToggleStateService only — the logical projection is at branch
+    // granularity, so we recompute only when the branch root itself flips.
+    const branchSig = this.#sectionRootSigForNode(node)
+    if (/^[a-f0-9]{64}$/.test(branchSig)) {
+      const nowEnabled = this.#toggleState.isEnabled(node.id)
+      void this.#domainStorage.setFeatureEnabled(branchSig, nowEnabled)
+        .then(() => this.#domainStorage.recomputeLogical())
+        .then(() => this.#logicalVersion.update(v => v + 1))
+        .catch(e => console.warn('[home] logical recompute on toggle failed', e))
+    }
+  }
+
+  /** Return the branchSig (section rootSig) iff `node` is a top-level
+   *  section item (the adopted branch root). Sub-nodes return '' so the
+   *  logical recompute fires only at branch granularity. */
+  #sectionRootSigForNode(node: TreeNode): string {
+    for (const section of this.sections()) {
+      if (section.items.some(top => top.id === node.id)) return section.rootSig
+    }
+    return ''
+  }
+
+  /** Walk up the node tree to find which section's root contains this
+   *  node, then return that section's domain hostname. Used by the
+   *  activation trust gate to identify the source of code being turned on. */
+  #findSectionDomain(node: TreeNode): string {
+    const map = this.nodeMap()
+    let current: TreeNode | undefined = node
+    while (current?.parentId) {
+      const parent = map.get(current.parentId)
+      if (!parent) break
+      current = parent
+    }
+    if (!current) return ''
+    for (const section of this.sections()) {
+      for (const top of section.items) {
+        if (top.id === current.id) {
+          try { return new URL(section.domain).hostname.toLowerCase() }
+          catch { return String(section.domain ?? '').replace(/^https?:\/\//, '').replace(/\/+$/, '').toLowerCase() }
+        }
+      }
+    }
+    return ''
   }
 
   onOpen(node: TreeNode): void {

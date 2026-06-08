@@ -61,7 +61,7 @@ A single resource (an image, a JSON blob, a module) is computed and signed once.
 
 ```
 sign(image-bytes) → sig_A
-// Anyone who needs this image just fetches __resources__/sig_A
+// Anyone who needs this image just fetches GET /sig_A
 // The "computation" (in this case, just hashing) happened once
 ```
 
@@ -72,7 +72,7 @@ A set of fragments composed together produces a new signature. The composition i
 ```
 manifest = { bees: [sig_1, sig_2], deps: [sig_3] }
 manifest_sig = sign(JSON.stringify(manifest))
-// Anyone who needs this exact combination fetches __resources__/manifest_sig
+// Anyone who needs this exact combination fetches GET /manifest_sig
 // They don't need to discover, collect, or assemble the parts
 ```
 

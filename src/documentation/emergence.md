@@ -55,7 +55,7 @@ Two texture atlases are prepared:
 | Atlas | Class | Purpose |
 |-------|-------|---------|
 | **Label** | `HexLabelAtlas` | Renders cell names as text into a shared texture |
-| **Image** | `HexImageAtlas` | Loads cell thumbnail blobs from `__resources__/` into a shared texture |
+| **Image** | `HexImageAtlas` | Loads cell thumbnail blobs from the content bucket by signature into a shared texture |
 
 `loadCellImages()` reads each cell's `0000` properties file, extracts the image signature, and loads the blob into the image atlas. Signatures that are already in the atlas are skipped.
 

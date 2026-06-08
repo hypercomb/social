@@ -16,7 +16,7 @@ Same content always produces the same signature. Different content always produc
 ### What this enables
 
 - **Content addressing.** No version numbers, no sequential IDs, no registries. The hash of the content names the content. Two systems that have never communicated will derive the same signature for the same artifact.
-- **Deduplication.** If two cells reference the same image, they store one copy in `__resources__/<sig>`. The signature guarantees they are identical.
+- **Deduplication.** If two cells reference the same image, they store one copy in the content bucket keyed by `<sig>`. The signature guarantees they are identical.
 - **Integrity verification.** Before any code executes, its bytes are hashed and compared against the expected signature. Mismatch means corruption or tampering — the artifact is rejected, no fallback.
 - **Reproducibility.** Given the same inputs and the same build rules, the output signature is identical. If the signature matches, the artifact is proven correct without re-executing the build.
 
@@ -92,7 +92,7 @@ You can't retrofit composition onto inline data. You can't add caching to embedd
 
 > If a field contains content that could be shared, cached, versioned, or composed — it must be a signature reference to a resource. Never store expandable content inline.
 
-A signature is a 64-character hex string. It points to a blob in `__resources__/<signature>`. The blob is immutable — same content always produces the same signature. Resolution is lazy — signatures remain as lightweight string pointers until explicitly expanded via `Store.getResource(sig)`.
+A signature is a 64-character hex string. It points to a blob in the flat content bucket addressed by `<signature>`. The blob is immutable — same content always produces the same signature. Resolution is lazy — signatures remain as lightweight string pointers until explicitly expanded via `Store.getResource(sig)`.
 
 ---
 
@@ -104,7 +104,7 @@ A signature is a 64-character hex string. It points to a blob in `__resources__/
 const json = JSON.stringify(data, Object.keys(data).sort(), 0) // deterministic key order
 const sig = await Store.putResource(new Blob([json]))
 // sig = "a1b2c3d4e5f6…" (64 hex chars)
-// content now lives at __resources__/a1b2c3d4e5f6…
+// content now lives in the bucket at <sig>=a1b2c3d4e5f6…
 ```
 
 ### Reference
@@ -129,18 +129,18 @@ Keys must be sorted before signing. `JSON.stringify(data, Object.keys(data).sort
 
 ## Where signatures appear
 
-| context | what is signed | signature names |
+All artifacts share **one** flat content bucket addressed by `<sig>` — the host probes by signature, never by type prefix. The signature appears in:
+
+| context | what is signed | how the signature is used |
 |---|---|---|
-| Bee modules | Compiled JS bundle | `__bees__/<sig>.js` |
-| Dependencies | Namespace service bundle | `__dependencies__/<sig>.js` |
-| Resources | Static asset (image, JSON) | `__resources__/<sig>` |
-| Layers | Layer manifest JSON | `__layers__/<sig>.json` |
-| Root release | `install.manifest.json` | Root signature in `latest.json` |
+| Bee modules | Compiled JS bundle | Loaded by signature from the content bucket |
+| Dependencies | Namespace service bundle | Loaded by signature from the content bucket |
+| Resources | Static asset (image, JSON) | Loaded by signature from the content bucket |
+| Layers | Layer JSON | Resolved by signature from the content bucket |
 | Lineage paths | UTF-8 path string | Location signature for mesh subscription |
-| History ops | Operation content | Cell identity in history bags |
+| Sigbag markers | Marker JSON `{ layer, context?, expiresAt? }` | The marker IS the attestation; max marker = current root |
 | Thread manifests | `contentSig` | Message content blob |
-| Layer files | `bees[]`, `layers[]`, `dependencies[]` | Bee modules, child layers, dependency bundles |
-| Install manifests | `packages[sig]` | Package keyed by its own signature |
+| Layer fields | `bees[]`, `layers[]`, `dependencies[]` | Bee modules, child layers, dependency bundles |
 | Deterministic computation | `authenticity` | Composition of script-sig + resource-sig |
 | Computation results | `result-sig` | Content-addressed output blob |
 
@@ -265,7 +265,7 @@ This is why we call it signature algebra (see [signature-algebra.md](signature-a
 | level | storage | speed | invalidation |
 |---|---|---|---|
 | In-memory | `Map<string, T>` in the service | synchronous | service lifecycle |
-| OPFS | `__resources__/<sig>` | microseconds | never (immutable content) |
+| OPFS | content bucket at `<sig>` | microseconds | never (immutable content) |
 | SignatureStore | `signText()` memo | synchronous | never (deterministic) |
 
 ### Cache hit flow

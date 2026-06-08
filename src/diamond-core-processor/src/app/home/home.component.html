@@ -62,8 +62,21 @@
 
     <!-- domain sections -->
     @for (group of domainGrouped(); track group.domain) {
-      <section class="domain-section">
-        <div class="domain-header">
+      <section class="domain-section" [attr.data-domain]="group.domain">
+        <div class="domain-header" [class.domain-hidden]="!isDomainVisible(group.domain)">
+          <button class="domain-action visibility-toggle"
+            (click)="toggleDomainVisibility(group.domain)"
+            [class.hidden-state]="!isDomainVisible(group.domain)"
+            [title]="isDomainVisible(group.domain) ? 'Hide this domain from the rendered union view' : 'Show this domain in the rendered union view'"
+            attr.aria-pressed="{{ !isDomainVisible(group.domain) }}">
+            @if (isDomainVisible(group.domain)) {
+              <!-- eye-open: domain visible (default) -->
+              &#x1F441;
+            } @else {
+              <!-- eye-slash: domain hidden -->
+              &#x1F576;
+            }
+          </button>
           <span class="domain-url" [title]="group.domain">{{ group.domainName }}/</span>
           <span class="header-sig">{{ group.sections[0]?.rootSig }}</span>
           @if (group.hiddenVersionCount > 0 || showAllVersions()) {

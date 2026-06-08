@@ -56,7 +56,7 @@ genomes are stored as signature-addressed resources, like everything else.
 ### storage
 
 ```
-__resources__/{genome-sig}  →  GenomePayload (JSON blob)
+GET /{genome-sig}  →  GenomePayload (JSON blob)
 ```
 
 the genome payload for a subtree contains the pre-computed results of whatever derived computation was performed against that genome:

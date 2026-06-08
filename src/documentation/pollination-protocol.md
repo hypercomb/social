@@ -58,9 +58,9 @@ This is strict by default: no domain, no pollination. Owners who want to accept 
 The contributor stands up any HTTP-reachable location (personal server, static host, IPFS gateway, GitHub Pages, blob storage — doesn't matter) laid out as:
 
 ```
-<host>/manifest.json                 ← the pollen manifest (see above)
-<host>/__resources__/<sig>           ← every file referenced in files[]
-<host>/__resources__/<intent-sig>    ← the human-readable description
+<host>/<pollen-manifest-sig>         ← the pollen manifest (see above)
+<host>/<sig>                         ← every file referenced in files[]
+<host>/<intent-sig>                  ← the human-readable description
 ```
 
 Because every file is addressed by its signature, the host cannot serve tampered content without breaking the hash check. If the host disappears after the pollination is grafted, the owner has already mirrored the resources into their own OPFS — the host is not load-bearing after adoption.
@@ -116,7 +116,7 @@ When the owner next connects DCP and opens the affected `(marker, domain)`, they
 - The contributor's intent description
 - A single action: **Graft**
 
-Grafting pulls the resources out of the contributor's host and into the owner's OPFS under `__resources__/`, then appends a history operation to the module's lineage that references the pollen manifest signature. That history entry is the permanent record of the graft — auditable, reversible, shareable.
+Grafting pulls the resources out of the contributor's host and into the owner's OPFS content bucket, then appends a new sigbag marker to the module's lineage that references the pollen manifest signature. That marker is the permanent record of the graft — auditable, reversible, shareable.
 
 Shedding the pollination simply drops it. Because it was never merged into the owner's tree, nothing needs cleanup.
 

@@ -74,7 +74,7 @@ these terms are the most fundamental concepts in the architecture. they appear a
 sha-256 hash (64 hex chars) of canonical content. the universal reference primitive — signatures name drones, layers, dependencies, history entries, and resources. created via `SignatureService.sign(bytes)`. immutable identity: same content always produces the same signature. signatures are not just identifiers — they are the composition mechanism. see [signature-system.md](signature-system.md).
 
 ### cell
-the atomic unit of content in the hierarchy. a cell is content inside a signature-addressed *layer* (`__layers__/<sig>`), not a folder — the layer holds the cell's name, the signatures of its child layers, notes, and resource references. the hierarchy is layers referencing child layers by signature (a sparse merkle tree), never nested folders. (the old `hypercomb.io/path/cell` opfs-folder form is retired.) developer-facing term — see **tile** for the user-facing equivalent.
+the atomic unit of content in the hierarchy. a cell is content inside a signature-addressed *layer*, not a folder — the layer holds the cell's name, the signatures of its child layers, notes, and resource references. the hierarchy is layers referencing child layers by signature (a sparse merkle tree), never nested folders. developer-facing term — see **tile** for the user-facing equivalent.
 
 ### tile
 the user-facing name for a **cell**. what appears on the hex grid as an interactive hexagonal element. "tile" is used in ui, help text, and user communication. "cell" is used in code, architecture docs, and developer communication.
@@ -83,10 +83,10 @@ the user-facing name for a **cell**. what appears on the hex grid as an interact
 the path from root to the current cell in the hierarchy. a lineage like `domain/parent/child` is hashed via `SignatureService` to produce a **location signature** — the key used for mesh addressing, history bag storage, and opfs directory mapping. the `Lineage` service in `@hypercomb/shared` tracks the current path and provides navigation.
 
 ### layer
-a snapshot of a folder — the atomic unit of hypercomb content distribution. layers are content-addressed by sha-256 and contain references to bees, dependencies, resources, and child layers. distributed over the nostr mesh as kind 29010 events. see [layer-primitives.md](layer-primitives.md).
+a snapshot of a node's state — the atomic unit of hypercomb content distribution. layers are content-addressed by sha-256 and contain references to bees, dependencies, resources, and child layers. distributed over the nostr mesh as kind 29010 events.
 
-### history bag
-an append-only sequence of history operations stored in opfs under `__history__/{locationSig}/`. each operation is a numbered file (e.g., `00000001`). replaying all ops from zero to head produces the current state. the bag is permanent — "removal" is an appended `remove` op, not a file deletion. see [data-primitive.md](data-primitive.md).
+### history bag (sigbag)
+an append-only sequence of layer-metadata markers (`0000`, `0001`, ...) sitting alongside the flat `<sig>` content bucket. each marker is a tiny record `{ layer: <sig>, context?: [<sig>, ...], expiresAt?: <ms> }`. the max marker IS the current root + entrance + attestation in one — there is no separate `__history__`, `__roots__`, or `manifest.json`. per-lineage sigbags carry the same shape at every level. see [history-sigbag-as-root.md](history-sigbag-as-root.md) for the unified model.
 
 ---
 
@@ -243,6 +243,6 @@ origin private file system. browser-native local storage api. used for persistin
 | relay (network) | nostr mesh |
 | wax seal / dna integrity | signature service (sha-256 content addressing) |
 | dna capsule format | drone payload v1 |
-| meadow log | history bag (`__history__/{locationSig}/`) |
+| meadow log | history bag (sigbag of `000x` markers at the content root) |
 | neighbor (nnn) | axial coordinate adjacency (6 edges) |
 | path / trail | lineage (hashed to location signature) |

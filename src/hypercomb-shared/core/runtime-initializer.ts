@@ -42,6 +42,47 @@ const _runInitializeRuntime = async (
     onMeshStateChange,
   } = options
 
+  // Every participant has a host. Three cases, resolved in order:
+  //
+  //   1. Real domain origin (jwize.com, alice.dev) — auto-bootstrap to the
+  //      page's origin. Casual visitors and operators-in-production both
+  //      get the right value with zero config.
+  //
+  //   2. Loopback origin + a `window.HYPERCOMB_DEV_HOST` global set by the
+  //      shell's env.js — auto-bootstrap to that. This is how an operator
+  //      tells their dev shell "I am jwize.com, even though the browser
+  //      loaded me from localhost:4250." env.js is gitignored so the value
+  //      is per-developer, not committed.
+  //
+  //   3. Loopback origin and no dev-host global — leave empty. The operator
+  //      sets it via the mesh-modal once and it persists in localStorage.
+  //      Avoids mislabeling the operator as "localhost:4250."
+  try {
+    if (!localStorage.getItem('hc:nostrmesh:self-domain')) {
+      const rawOrigin = String(window.location.origin ?? '')
+      const isLoopback = /^https?:\/\/(localhost|127(?:\.\d+){3}|\[?::1\]?)(:|\/|$)/i.test(rawOrigin)
+      const normalize = (raw: string): string => raw
+        .replace(/^wss?:\/\//i, '')
+        .replace(/^https?:\/\//i, '')
+        .replace(/\/+$/, '')
+        .toLowerCase()
+
+      let candidate = ''
+      if (!isLoopback) {
+        // Case 1 — real domain. Use the page's origin.
+        candidate = normalize(rawOrigin)
+      } else {
+        // Case 2 — loopback with a dev-host override. env.js sets this
+        // global per-developer (file is gitignored).
+        const devHost = normalize(String((window as { HYPERCOMB_DEV_HOST?: string }).HYPERCOMB_DEV_HOST ?? ''))
+        if (devHost) candidate = devHost
+        // Case 3 — leave empty; the operator sets it via mesh-modal.
+      }
+
+      if (candidate) localStorage.setItem('hc:nostrmesh:self-domain', candidate)
+    }
+  } catch { /* private mode — readers handle the empty case */ }
+
   if (logOpfs) {
     const logger = get('@hypercomb.social/OpfsTreeLogger') as OpfsTreeLogger | undefined
     await logger?.log?.()

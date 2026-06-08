@@ -9,6 +9,38 @@
 
     <div class="mesh-modal-body">
 
+      <!-- 1. Alias (display name / "label") -->
+      <section class="mesh-modal-section">
+        <label class="mesh-modal-label" for="mesh-modal-label-input">{{ 'mesh-modal.label-label' | t }}</label>
+        <input
+          id="mesh-modal-label-input"
+          class="mesh-modal-input mesh-modal-label-field"
+          type="text"
+          maxlength="64"
+          [placeholder]="'mesh-modal.label-placeholder' | t"
+          [value]="labelDraft()"
+          (input)="onLabelInput($event)"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </section>
+
+      <!-- 2. Host (which domain you're connected through — every participant has one) -->
+      <section class="mesh-modal-section">
+        <label class="mesh-modal-label" for="mesh-modal-host-input">{{ 'mesh-modal.host-label' | t }}</label>
+        <input
+          id="mesh-modal-host-input"
+          class="mesh-modal-input mesh-modal-host"
+          type="text"
+          [placeholder]="'mesh-modal.host-placeholder' | t"
+          [value]="hostDraft()"
+          (input)="onHostInput($event)"
+          autocomplete="off"
+          spellcheck="false"
+        />
+      </section>
+
+      <!-- 3. Location (room — folds into the subscription sig) -->
       <section class="mesh-modal-section">
         <label class="mesh-modal-label" for="mesh-modal-room-input">{{ 'mesh-modal.location-label' | t }}</label>
         <input
@@ -34,6 +66,7 @@
         }
       </section>
 
+      <!-- 4. Secret (folds into the subscription sig) -->
       <section class="mesh-modal-section">
         <div class="mesh-modal-label-row">
           <label class="mesh-modal-label" for="mesh-modal-secret-input">{{ 'mesh-modal.secret-label' | t }}</label>
@@ -59,26 +92,14 @@
         </div>
       </section>
 
-      <section class="mesh-modal-section">
-        <label class="mesh-modal-label" for="mesh-modal-label-input">{{ 'mesh-modal.label-label' | t }}</label>
-        <input
-          id="mesh-modal-label-input"
-          class="mesh-modal-input mesh-modal-label-field"
-          type="text"
-          maxlength="64"
-          [placeholder]="'mesh-modal.label-placeholder' | t"
-          [value]="labelDraft()"
-          (input)="onLabelInput($event)"
-          autocomplete="off"
-          spellcheck="false"
-        />
-      </section>
-
     </div>
 
     <footer class="mesh-modal-actions">
       <button class="mesh-modal-btn cancel" type="button" (click)="dismiss()">
         {{ 'mesh-modal.cancel' | t }}
+      </button>
+      <button class="mesh-modal-btn share" type="button" (click)="copyShareLink()" [class.copied]="copiedFlash()">
+        {{ copiedFlash() ? ('mesh-modal.share-copied' | t) : ('mesh-modal.share' | t) }}
       </button>
       <button class="mesh-modal-btn primary" type="button" (click)="save()">
         {{ 'mesh-modal.save' | t }}

@@ -58,7 +58,7 @@ shadow DOM render, emit view:active { active: true }
 ```
 
 The resource service worker already serves `/@resource/<sig>` from
-OPFS `__resources__/<sig>` with content-type inferred from URL tail
+the OPFS content bucket at `<sig>` with content-type inferred from URL tail
 or blob mime. That's the only network shape the runtime needs.
 
 ## Authoring — design-time AI loop
@@ -107,8 +107,8 @@ Each `/website` invocation is non-destructive:
 - Signed content never mutates. Old sigs stay valid.
 - Unchanged pages keep their signatures across runs — only edits
   produce new sigs.
-- Remove a tile → its page sig disappears from the new manifest but
-  the blob in `__resources__/` remains (GC is a future concern).
+- Remove a tile → its page sig disappears from the new sigbag but
+  the blob in the content bucket remains (GC is a future concern).
 - Add a tile → the skill generates a new default page for it.
 
 ## Asset reference forms

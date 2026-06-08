@@ -296,11 +296,11 @@ export class ContentBrokerDrone extends Drone {
   // Domain accumulation — the `{ bytes, domains }` response primitive
   // ─────────────────────────────────────────────────────────────────
 
-  // Read the operator's own domain from localStorage. A relay host that
-  // wants to advertise itself in responses sets this key (e.g. to
-  // `wss://jwize.com`). Regular clients leave it empty and emit
-  // domain-less responses — their attribution is implicit in the
-  // WebSocket source endpoint.
+  // Read the participant's host directly from localStorage. The single
+  // key `hc:nostrmesh:self-domain` is the canonical "one place" — every
+  // reader pulls from it. The runtime initializer pre-populates the key
+  // with window.location.origin on first boot so this never returns ""
+  // for any participant.
   #getSelfDomain = (): string => {
     try { return String(localStorage.getItem('hc:nostrmesh:self-domain') ?? '').trim() }
     catch { return '' }
@@ -342,6 +342,37 @@ export class ContentBrokerDrone extends Drone {
       }
       return out
     } catch { return new Set<string>() }
+  }
+
+  // Public fallback CDN — Tier 3 of the HTTP-direct cascade. When self,
+  // community, and mesh-learned domains have all returned nothing for a
+  // sig, this is what we try last. The default is the Azure blob serving
+  // DCP's deployed content (the same fallback DCP's installer uses when
+  // no trusted domains are configured); operators override by setting
+  // `hc:fallback-domains` in localStorage as a JSON array — same shape as
+  // hc:community:domains, just used at a lower-priority tier.
+  //
+  // This is the "if none are used the DCP is used" reading wired into
+  // the broker as a real fallback, not just an installer default.
+  static readonly #DEFAULT_FALLBACK_DOMAINS: readonly string[] = [
+    'storagehypercomb.blob.core.windows.net/dcp',
+  ]
+  #getFallbackDomains = (): string[] => {
+    try {
+      const raw = String(localStorage.getItem('hc:fallback-domains') ?? '').trim()
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          const out: string[] = []
+          for (const entry of parsed) {
+            const host = this.#domainToHost(String(entry ?? ''))
+            if (host) out.push(host)
+          }
+          if (out.length > 0) return out
+        }
+      }
+    } catch { /* fall through to default */ }
+    return [...ContentBrokerDrone.#DEFAULT_FALLBACK_DOMAINS]
   }
 
   // Pull all `['domain', host]` tags out of an incoming response event.
@@ -456,6 +487,15 @@ export class ContentBrokerDrone extends Drone {
     // (Domains in community already landed in Tier 1; the `seen` guard
     // deduplicates.)
     for (const domain of this.getKnownDomains(sig)) push(domain)
+
+    // Tier 3 — public fallback CDN. When self / community / mesh-learned
+    // have all returned nothing for this sig, we try the canonical
+    // public source as a last resort. Defaults to the Azure blob hosting
+    // DCP's deployed content; operators override via the localStorage
+    // list `hc:fallback-domains` (same JSON-array shape as
+    // hc:community:domains). sha256 verification still gates acceptance —
+    // a wrong-bytes fallback is rejected like any other tier.
+    for (const host of this.#getFallbackDomains()) push(host)
 
     if (ordered.length === 0) return null
 
@@ -615,6 +655,22 @@ export class ContentBrokerDrone extends Drone {
     const stats = { layers: 0, leaves: 0, failed: 0 }
     if (!SIG_RE.test(root)) return stats
     const visited = new Set<string>()
+
+    // Announce the rootSig + every known source domain BEFORE the walk
+    // starts, so DCP can open to that domain's installer section and
+    // create a pending row in the same frame. The domains come from the
+    // {bytes, domains} address graph we've accumulated from prior mesh
+    // responses; if we have no domain attribution for the root yet we
+    // emit an empty array and the UI falls back to trusted-domain
+    // heuristics (e.g. the operator's self-domain, or "via swarm host").
+    //
+    // Multiple domains is the normal case — the address graph grows
+    // monotonically as more peers attribute the same sig. Letting DCP
+    // see the full list means it can pick its preferred mirror, show all
+    // sources to the user, and fall back across them if any fail.
+    const knownDomains = this.#knownDomainsBySig.get(root)
+    const domains: string[] = knownDomains && knownDomains.size ? [...knownDomains] : []
+    this.emitEffect('adopt:meta', { rootSig: root, domains })
 
     const asSigs = (v: unknown): string[] =>
       Array.isArray(v) ? v.map(x => String(x).toLowerCase().trim()).filter(s => SIG_RE.test(s)) : []

@@ -23,7 +23,7 @@ The system is non-destructive: moving through time never mutates history. The cu
 Seven components work together:
 
 ```
-HistoryService           — persistent storage (OPFS __history__/ bags)
+HistoryService           — persistent storage (per-lineage sigbags)
 HistoryRecorder          — listens for effects (cell, tag, content), writes ops
 HistoryCursorService     — movable cursor, undo/redo, seekToTime, promote, divergence
 GlobalTimeClock          — session-wide timestamp for cross-hierarchy snapshots
@@ -37,7 +37,7 @@ OrderProjection          — derives and caches display order from history ops
 ```
 User action (add/remove cell)
   → EffectBus: cell:added / cell:removed
-  → HistoryRecorder writes op to __history__/{locationSig}/00000047
+  → HistoryRecorder writes a new marker to the lineage's sigbag at {locationSig}/000x
   → HistoryCursorService.onNewOp() keeps cursor at latest
   → HistorySliderDrone updates clock display
 
@@ -112,16 +112,17 @@ type HistoryOpType =
 
 ### Storage format
 
-Operations are stored as numbered files inside OPFS history bags:
+Operations are stored as numbered markers inside per-lineage sigbags at the OPFS content root:
 
 ```
-__history__/
-  {locationSig}/          ← SHA-256 of lineage path
-    00000001              ← {"op":"add","cell":"My First Tile","at":1672531200000}
-    00000002              ← {"op":"add","cell":"Second Tile","at":1672531205000}
-    00000003              ← {"op":"reorder","cell":"a1b2c3...","at":1672531210000}
-    layer.json            ← materialized layer state snapshot
+{locationSig}/            ← SHA-256 of lineage path
+  0000                    ← visuals (broadcast in witness mode)
+  0001                    ← { layer: <sig>, context?: [<sig>...], at: 1672531200000 }
+  0002                    ← { layer: <sig>, ... }
+  000x                    ← max marker = current root + entrance + attestation
 ```
+
+Layer bytes live in the flat `<sig>` content bucket alongside the sigbags. The max marker addresses the current state; older markers form the history.
 
 File names are 8-digit zero-padded sequential indices. The sequence is the total order.
 

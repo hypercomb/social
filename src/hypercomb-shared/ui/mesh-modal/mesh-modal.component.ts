@@ -11,6 +11,21 @@ import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
 import type { SecretStrengthProvider } from '../../core/secret-strength'
 import type { SavedLocationsStore } from '../../core/saved-locations-store'
+import { encodeAddress } from '../../core/address-record'
+
+const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
+
+/** Normalize a host string the same way the rest of the codebase does:
+ *  strip protocol prefix, trailing slashes, lowercase. Keeps localStorage
+ *  in the canonical bare-host form. */
+function normalizeHost(raw: string): string {
+  return String(raw ?? '')
+    .trim()
+    .replace(/^wss?:\/\//i, '')
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/+$/, '')
+    .toLowerCase()
+}
 
 @Component({
   selector: 'hc-mesh-modal',
@@ -29,6 +44,7 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   readonly roomDraft = signal('')
   readonly secretDraft = signal('')
   readonly labelDraft = signal('')
+  readonly hostDraft = signal('')
   readonly secretVisible = signal(false)
 
   readonly savedLocations = fromRuntime(
@@ -56,6 +72,17 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   get #savedStore(): SavedLocationsStore | undefined {
     return get('@hypercomb.social/SavedLocationsStore') as SavedLocationsStore | undefined
   }
+  #readHost = (): string => {
+    try { return normalizeHost(localStorage.getItem(SELF_DOMAIN_KEY) ?? '') }
+    catch { return '' }
+  }
+  #writeHost = (v: string): void => {
+    try {
+      const clean = normalizeHost(v)
+      if (clean) localStorage.setItem(SELF_DOMAIN_KEY, clean)
+      else localStorage.removeItem(SELF_DOMAIN_KEY)
+    } catch { /* ignore */ }
+  }
 
   ngOnInit(): void {
     this.#unsubOpen = EffectBus.on('mesh:open-modal', () => {
@@ -63,6 +90,7 @@ export class MeshModalComponent implements OnInit, OnDestroy {
       this.roomDraft.set(this.#roomStore?.value ?? '')
       this.secretDraft.set(initialSecret)
       this.labelDraft.set(this.#readMyLabel())
+      this.hostDraft.set(this.#readHost())
       this.secretVisible.set(false)
       this.open.set(true)
       EffectBus.emit('mesh:modal-open', { open: true })
@@ -106,6 +134,33 @@ export class MeshModalComponent implements OnInit, OnDestroy {
     this.labelDraft.set((event.target as HTMLInputElement).value)
   }
 
+  readonly onHostInput = (event: Event): void => {
+    this.hostDraft.set((event.target as HTMLInputElement).value)
+  }
+
+  /** Compose the four draft fields into a share-link URL and copy it
+   *  to the clipboard. Uses the navigator clipboard API; falls back
+   *  silently if unavailable. The URL never contains the secret in
+   *  the path or query — secret lives only in the hash fragment, which
+   *  isn't sent to the server. */
+  readonly copyShareLink = async (): Promise<void> => {
+    try {
+      const url = encodeAddress({
+        alias:    this.labelDraft().trim() || undefined,
+        host:     this.hostDraft().trim(),
+        location: this.roomDraft().trim() || undefined,
+        secret:   this.secretDraft().trim() || undefined,
+      })
+      await navigator.clipboard.writeText(url)
+      this.copiedFlash.set(true)
+      setTimeout(() => this.copiedFlash.set(false), 1500)
+    } catch (e) {
+      console.warn('[mesh-modal] copyShareLink failed:', e)
+    }
+  }
+
+  readonly copiedFlash = signal(false)
+
   /** Read the persisted swarm label, preferring the SwarmDrone's
    *  canonical accessor when present so any future-tightened
    *  sanitization (length cap, control-char filter) applies. Falls
@@ -137,10 +192,16 @@ export class MeshModalComponent implements OnInit, OnDestroy {
     const room = this.roomDraft().trim()
     const secret = this.secretDraft().trim()
     const label = this.labelDraft().trim().slice(0, 64)
+    const host = this.hostDraft().trim()
     this.#roomStore?.set(room)
     this.#secretStore?.set(secret)
+    // Host writes directly to localStorage — single canonical key, no
+    // wrapper. Empty save doesn't unset it (the runtime bootstrap default
+    // of window.location.origin stays), so we only write on non-empty.
+    if (host) this.#writeHost(host)
     EffectBus.emit('mesh:room', { room })
     EffectBus.emit('mesh:secret', { secret })
+    EffectBus.emit('mesh:host', { host: this.#readHost() })
     if (room) this.#savedStore?.add(room)
 
     // Label routes through swarm.setMyLabel when available — it

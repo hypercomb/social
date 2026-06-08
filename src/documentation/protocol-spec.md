@@ -344,43 +344,16 @@ signature = lowercase(hex(SHA-256(bytes)))
 
 The Origin Private File System is the persistent local store. No server storage exists.
 
-### 12.1 Directory Structure
+> **Superseded — see [history-sigbag-as-root.md](history-sigbag-as-root.md).** This section's pool-based layout (`__layers__/`, `__bees__/`, `__dependencies__/`, `__resources__/`, `__history__/`, `__manifests__/`, `__roots__/`) is the legacy model. The agreed model is a single flat content bucket at the root (one `<sig>` file per artifact) with sigbag markers (`0000`, `0001`, ...) at the root and at each lineage, where the max marker IS the current root + entrance + attestation in one. The storage and discovery model below has been retired; the wire protocol, signing, and lineage sections of this spec remain valid.
 
-Everything content-bearing is **signature-keyed** (sig = SHA-256 of the bytes, §11). The OPFS root is the local mirror of the host filesystem layout (§21.9) — the same sig pools, plus participant-local state the host never sees.
+### 12.1 Cells are layer content, not directories
 
-```
-opfsRoot/                          (navigator.storage.getDirectory())
-  __layers__/<sig>                 (canonical layer-bytes pool — layer JSON, sig-keyed, FLAT)
-  __layers__/<domain>/             (install manifests — deployment artifacts; <domain> is
-                                    non-hex, distinguishing it from 64-hex sig entries)
-  __bees__/<sig>                   (compiled bee modules)
-  __dependencies__/<sig>           (shared JS bundles)
-  __resources__/<sig>              (content blobs — images, text, byte arrays)
-  __history__/<lineage>/<NNNN>     (append-only marker records — pointers to layer sigs)
-  __manifests__/<parent-sig>       (children manifests — derived; inlines resolved child
-                                    layers so cold-load skips per-child sig lookups)
-  __optimization__/                (persistent decoration substrate — Q&A, comms; applied
-                                    in memory, layer-untouched)
-  __threads__/  __computation__/  __clipboard__/   (thread state, receipts, clipboard)
-```
-
-**There is no on-disk hierarchy of user content.** Cells — their names, children,
-and notes — are stored entirely as signature-addressed layers in `__layers__/<sig>`;
-the hierarchy is encoded *inside* layers as child-layer sig references (§12.2), never
-as nested folders. The legacy `hypercomb.io/` / `__hive__/` content-folder tree
-(pre-layer-as-primitive) is retired; any surviving dirs are orphans, swept by
-`/sweep`.
-
-### 12.2 Cells are layer content, not directories
-
-A cell is **not** a directory and its name is **not** a path segment. A cell is content inside a signature-addressed **layer** (`__layers__/<sig>`): the layer JSON holds the cell's fields — name, the sigs of its child layers, notes, and so on. The cell hierarchy is expressed by a layer referencing its child layers **by signature** (a sparse Merkle tree, see the Merkle Layer Model), never by nested folders.
+A cell is **not** a directory and its name is **not** a path segment. A cell is content inside a signature-addressed **layer**: the layer's bytes hold the cell's fields — name, the sigs of its child layers, notes, and so on. The cell hierarchy is expressed by a layer referencing its child layers **by signature** (a sparse Merkle tree, see the Merkle Layer Model), never by nested folders.
 
 Consequences:
 - A cell's **identity is its signature**, not a name. There is no rename op — the atomic unit is immutable; you delete + create, never rename.
-- Navigation position (lineage, §4 / §12.3) **computes a signature** that addresses the layer for that location. The signature — not a directory traversal — resolves the content.
-- Reading a cell = read `__layers__/<sig>` → resolve its children's sigs from the same flat pool (or the derived `__manifests__/<parent-sig>` inline cache). No directory walking.
-
-> **Retired model.** Cells were once stored as named directories under `hypercomb.io/`, with the directory name as the cell name and nesting as the hierarchy. That model is obsolete — superseded by signature-addressed layers. Any surviving `hypercomb.io/{cell}/…` folders are orphans and are swept; they are not part of the storage model.
+- Navigation position (lineage, §12.2) **computes a signature** that addresses the layer for that location. The signature — not a directory traversal — resolves the content.
+- Reading a cell = `get(sig)` from the flat content bucket → parse the layer → resolve its children's sigs the same way. No directory walking, no per-type pool probing.
 
 ### 12.3 Lineage
 
@@ -842,100 +815,11 @@ jwize.com/__roots__/
 
 ### 21.9 Host filesystem layout
 
-Because signatures are universal addresses *and* every layer transitively references its own children (sub-layers, bees, dependencies, resources), host storage organizes into typed pools — and **the folder path encodes the Content-Type at whatever granularity you want.**
-
-```
-content/                                  ← internal STORAGE layout (not the URL — see §21.10)
-  __layers__/<sig>                         → application/json
-  __bees__/<sig>                           → application/javascript
-  __dependencies__/<sig>                   → application/javascript
-  __resources__/image/png/<sig>            → image/png        (MIME from subfolder)
-  __resources__/image/webp/<sig>           → image/webp
-  __resources__/audio/mpeg/<sig>           → audio/mpeg
-  __roots__/<domain>/<sig>                 → application/json (attestation)
-```
-
-The folder tree IS the type metadata — no sidecar files, no content sniffing, no separate MIME store. The host files content into its type folder at ingest (it knows the type then), and the type is recoverable from the path forever. Resources subdivide by MIME; the same trick can shard by hash-prefix (`…/png/ab/cdef…`) for large pools without changing anything observable.
-
-This is **storage layout, not URL shape**. The read URL is a bare `/<sig>` (§21.10); the pools exist only inside the host. No `manifest.json` with expanded `bees[]`/`layers[]` arrays — those arrays were walk results, not configuration, and every layer already references its own children.
-
-**Resolution: universal handler over an in-memory key index.** The host reads every sig filename into memory at startup — just `readdir` per pool; keys are 64-hex, tiny (~64 B + a pool/type tag each, ~10 MB per 100 K sigs). A request resolves O(1):
-
-```
-GET /<sig>  →  index lookup
-                hit  → serve bytes from its pool, Content-Type from its folder path
-                miss → instant 404  (no filesystem probing — misses were probing's worst case)
-```
-
-The in-memory key set is not just a GET cache — it is the **membership oracle the whole system queries**:
-- **GET resolution** — is the sig present? what type? (lookup → pool + Content-Type)
-- **Push dedup** (§21.11) — "does my host already have this sig?" → skip vs enqueue
-- **Pull dedup** (§21.8.1) — "is this in my pool?" → closure-minus-what-I-have
-- **Address graph** (§21.5) — "what do I serve?" → the key set itself
-
-It is a pure cache over the filesystem: rebuilt by re-scanning on startup, updated incrementally on PUT/GC, never a source of truth. Probing the pools directly is the cold path (and the rebuild path); the index is the warm path. Filesystem stays truth. (This is the host-side twin of the warmup/preloader pattern — warm the keys, serve instant.)
-
-**A root attestation** (one file at `__roots__/<domain>/<sig>`) is a small signed record:
-
-```json
-{
-  "layer":      "<layer-sig>",     // the entry-point layer this attests
-  "domain":     "jwize.com",       // attester's domain identity
-  "branch":     "main",            // optional named branch
-  "attestedAt": 1234567890,        // unix seconds
-  "signature":  "<ed25519-sig>"    // signed by attester's key
-}
-```
-
-The file is content-addressed: its name is the sha256 of its bytes. Two domains attesting the same layer produce two different attestation files under their respective `__roots__/<domain>/` folders (different content → different sig). One operator re-attesting at different times produces different files within the same domain folder (different `attestedAt` → different content → different sig). Withdrawing an attestation is a delete of one specific `__roots__/<domain>/<sig>` file, with the rest of the pool untouched.
-
-**Discovery is directory listing** — no auxiliary index file:
-
-```
-GET /__roots__/                  → list of domains this host serves (mutable)
-GET /__roots__/<domain>/         → list of attestation sigs for that domain (mutable)
-```
-
-The relay's HTTP host serves directory listings trivially. `__roots__/<domain>/` is the *discovery index* — a mutable listing of attestation sigs. The attestation **bytes** those sigs name resolve through the same universal `/<sig>` handler as everything else (immutable, edge-cached). So the only mutable surface is the listing; everything it points at is immutable content. No `roots.json`, no `index.json`, no manifest-merge logic.
-
-**Data vs scripts is a manifest-layer view, not a storage split.** Both flow through the same sig pool. The distinction is which array within a *layer* a sig appears in (`bees[]`/`dependencies[]` vs sub-`layers[]`). The bytes are interchangeable — `__layers__/<sig>` is just a layer whether it encodes user tiles, notes, or code-package structure.
-
-**Every update = one new attestation file.** User mutations and branch operations all produce exactly one new sig-addressed file in `__roots__/<domain>/`:
-
-| Operation | What changes |
-|---|---|
-| Add a tile | new layer sig → `__layers__/`. New attestation pointing at it → `__roots__/<self>/<sig>` |
-| Remove a tile | new layer (without tile) → `__layers__/`. New attestation → `__roots__/<self>/<sig>` |
-| Save as branch `foo` | new attestation with `branch: "foo"` → `__roots__/<self>/<sig>` |
-| Switch to branch `foo` | reader scans `__roots__/<self>/` for `branch === "foo"` → walks from its layer |
-| Adopt alice.dev | for each attestation in her `__roots__/alice.dev/`, write to your own `__roots__/alice.dev/`. Fan reachable sigs into the pool. |
-| Withdraw an attestation | `rm __roots__/<domain>/<sig>` on one specific file. Pool untouched. |
-
-Old layer sigs are NOT deleted. Old attestation files are NOT deleted. Time-travel is intact for free. Multiple attestations of the same `(domain, branch)` coexist; the most recent `attestedAt` is canonically active.
-
-**Active pointer is optional.** Readers can scan `__roots__/<domain>/` and pick the most recent `attestedAt` matching `branch: "main"`. With a few attestations per domain that's instantaneous. If a host accumulates so many attestations that scanning is slow, the operator can ship an `active.json` cache as a pure optimization — but it is not a protocol commitment, and losing it never loses data.
-
-**Three free properties from this collapse:**
-
-- **No "whose bytes are these" ambiguity** — a sig in the layer/bee/dep/resource pools is just bytes. Provenance lives in attestation files. Path encoding (`__roots__/<domain>/...`) is a convenient access pattern; the file content (signed by the attester's key) is the authoritative claim.
-- **"Diff" is a set operation on layer walks** — `walk(now.layer) - walk(branch_v3.layer)` answers "what did I add since v3?" without filesystem walking.
-- **Atomic per-attestation files** — one file per attestation means partial writes or accidental `rm` target exactly one record. There is no manifest-merge step, so no manifest-merge bug class exists.
-
-**HTTP routes:**
-
-```
-GET  /<sig>            → universal handler: ANY content-addressed blob
-                         (layer / bee / dep / resource / attestation).
-                         Resolved via the in-memory key index; Content-Type
-                         from the blob's pool/subfolder. Immutable → cached
-                         forever (§21.10). 404 if the sig isn't held.
-GET  /__roots__/              → discovery index: domains this host serves (mutable)
-GET  /__roots__/<domain>/     → discovery index: attestation sigs for a domain (mutable)
-```
-
-Two surfaces, cleanly split: **immutable content at `/<sig>`** (everything — including attestation bytes — cache-forever) and the **mutable discovery index at `/__roots__/`** (revalidated). Sig reads never filter by domain — domain scoping appears only in the discovery index. There are no merge endpoints and no expansion-manifest routes. The `__` prefix on `__roots__` never collides with a 64-hex sig, so routing is unambiguous: match `/<64-hex>` → universal handler; `/__roots__/…` → discovery; else 404.
-
-**Garbage collection is opt-in.** The pool is durable by default; the rule is *never delete from `__layers__/`, `__bees__/`, `__dependencies__/`, `__resources__/` unless an explicit GC phase runs.* A future GC walks every attestation in every `__roots__/<domain>/`, transitively walks the layer trees, marks reachable sigs, then trims unreferenced ones (subject to a configurable retention window). Operator-initiated only; never automatic.
+> **Superseded — see [history-sigbag-as-root.md](history-sigbag-as-root.md).** The typed-pool layout (`__layers__/`, `__bees__/`, `__dependencies__/`, `__resources__/`, `__roots__/<domain>/`) and the typed-path read endpoints are the legacy model. The agreed model is a **single flat content bucket** (one `<sig>` file per artifact, no type subdirs) plus **sigbag markers** at the root and at each lineage (`0000`, `0001`, … where the max marker IS the current root + attestation in one).
+>
+> Three retirements: `__roots__/<domain>/<sig>` collapses into the root-level sigbag (the max marker is the root + attestation; no separate pool). `__history__/<lineage>/<NNNN>` collapses into per-lineage sigbags (same shape, one level down). `manifest.json` is retired — discovery is the sigbag listing. The HTTP routes survive but reduce to `GET /<sig>` over the flat bucket and `GET /<sigbag-id>/000x` for marker reads.
+>
+> The §21.10 flat-`/<sig>` URL surface, the §21.5 `{ bytes, domains }` response primitive, the §21.6 sha256 content verification, and §21.11/§21.12 push semantics all remain valid in the unified model.
 
 ### 21.10 Flat sig URLs and immutable caching
 

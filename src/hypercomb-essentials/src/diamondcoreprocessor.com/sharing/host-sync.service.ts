@@ -27,9 +27,21 @@
 //   __host_push__/queue/{sig}.{kind}  ← queued bytes (FIFO by mtime)
 //   __host_receipts__/{sig}           ← receipt (existence = host serves it)
 //
-// Inert until the operator names their host via
-// localStorage['hc:nostrmesh:self-domain']. No host => nothing to push;
-// the queue simply accumulates and drains once a host appears.
+// Inert by default. Two operator-controlled gates must BOTH be on for
+// the service to subscribe to content commits, enqueue bytes, or invoke
+// the signer:
+//
+//   1. localStorage['hc:nostrmesh:self-domain'] — the host to push to.
+//   2. localStorage['hc:host-sync:enabled']     — explicit opt-in flag.
+//
+// Both off keeps the service silent: no enqueue, no timer drain, no
+// signer call. This is the gate that prevents casual visitors from
+// triggering a Nostr-signer permission prompt (the NIP-07 extension
+// on desktop; on Android, Amber — whose intent-discovery permission
+// is what Android describes as "access other apps and services").
+//
+// Toggle live via the public enable()/disable() methods; localStorage
+// changes take effect on the next event, no reload required.
 
 import { EffectBus } from '@hypercomb/core'
 
@@ -47,6 +59,18 @@ const RECEIPTS_DIR = '__host_receipts__'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 const STORE_KEY = '@hypercomb.social/Store'
 const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
+// Explicit opt-in gate. Default false → no `content:wrote` handler
+// reaches the signer, so a casual visitor never triggers a Nostr-signer
+// prompt. Operators flip to 'true' once they've configured a host AND
+// understand each commit will be signed.
+const ENABLED_KEY = 'hc:host-sync:enabled'
+// Push mode. 'host' = PUT to /__layers__/<sig>.json etc. (operator-owned
+// permanent pools, requires being in the relay's writers allowlist).
+// 'temp-swarm' = PUT to /__swarm_temp__/<pubkey>/<sig> (the swarm host's
+// per-participant staging area — sandboxed to the participant's pubkey,
+// TTL-bounded, size-capped; for browser-only members who want to share
+// back without running their own host).
+const MODE_KEY = 'hc:host-sync:mode'
 const NIP98_KIND = 27235
 const RETRY_MS = 30_000
 
@@ -56,18 +80,69 @@ export class HostSyncService extends EventTarget {
 
   constructor() {
     super()
-    // Auto-enqueue every committed sig (same hook PushQueueService uses).
-    // Store (shared) and HistoryService (essentials) both emit this after a
-    // successful OPFS write; routing through EffectBus keeps shared from
-    // importing essentials.
+    // Auto-enqueue every committed sig — gated on #isEnabled(). With the
+    // gate off, the handler exits before reaching enqueue/signer, so no
+    // permission prompt can fire. Subscription stays live so toggling the
+    // gate takes effect without reload.
     EffectBus.on<{ sig: string; kind: HostSyncKind; bytes: ArrayBuffer }>(
       'content:wrote',
-      ({ sig, kind, bytes }) => { void this.enqueue(sig, kind, bytes) }
+      ({ sig, kind, bytes }) => {
+        if (!this.#isEnabled()) return
+        void this.enqueue(sig, kind, bytes)
+      }
     )
-    // Periodic retry — the host may be offline, or configured only after
-    // content was queued. Cheap: drain() is single-flight and returns
-    // immediately on an empty queue or an unconfigured host.
-    setInterval(() => { void this.drain() }, RETRY_MS)
+    // Periodic retry — skipped while the gate is off so the signer is never
+    // invoked for an un-opted-in visitor.
+    setInterval(() => {
+      if (!this.#isEnabled()) return
+      void this.drain()
+    }, RETRY_MS)
+  }
+
+  /** True iff the operator has both opted in AND configured a self-domain. */
+  public readonly isEnabled = (): boolean => this.#isEnabled()
+
+  /** Turn host backup on. Optionally set the self-domain and the push mode
+   *  in the same call. Effect is immediate — no reload required. Caller is
+   *  responsible for showing the user a clear "we will sign each backup
+   *  to <domain> in <mode> mode" dialog BEFORE invoking this.
+   *
+   *  Modes:
+   *   - 'host' (default): you own the host; writes go to permanent typed
+   *     pools and require your pubkey to be in the relay's writers list.
+   *   - 'temp-swarm': you don't own a host; writes go to the swarm host's
+   *     per-participant staging area /__swarm_temp__/<your-pubkey>/<sig>,
+   *     which is TTL-bounded and size-capped. Other swarm members fetch
+   *     from the same host at /<sig>. */
+  public readonly enable = (selfDomain?: string, opts?: { mode?: 'host' | 'temp-swarm' }): void => {
+    try {
+      if (selfDomain) localStorage.setItem(SELF_DOMAIN_KEY, selfDomain.trim())
+      const mode = opts?.mode ?? 'host'
+      localStorage.setItem(MODE_KEY, mode)
+      localStorage.setItem(ENABLED_KEY, 'true')
+    } catch { /* private mode — caller still has to honor in-session */ }
+  }
+
+  /** Current push mode — 'host' (default) or 'temp-swarm'. Read fresh
+   *  from localStorage so toggling at runtime is honored without reload. */
+  public readonly mode = (): 'host' | 'temp-swarm' => {
+    try {
+      const raw = String(localStorage.getItem(MODE_KEY) ?? '').trim().toLowerCase()
+      return raw === 'temp-swarm' ? 'temp-swarm' : 'host'
+    } catch { return 'host' }
+  }
+
+  /** Turn host backup off. Existing queued entries stay on disk (not
+   *  destructive); they resume draining if the gate is flipped back on. */
+  public readonly disable = (): void => {
+    try { localStorage.setItem(ENABLED_KEY, 'false') } catch { /* ignore */ }
+  }
+
+  readonly #isEnabled = (): boolean => {
+    let flag = ''
+    try { flag = String(localStorage.getItem(ENABLED_KEY) ?? '').trim().toLowerCase() } catch { return false }
+    if (flag !== 'true') return false
+    return this.#hostBase().length > 0
   }
 
   // -------------------------------------------------
@@ -156,7 +231,7 @@ export class HostSyncService extends EventTarget {
       bytes = await (await handle.getFile()).arrayBuffer()
     } catch { return false }
 
-    const path = this.#pathFor(entry.sig, entry.kind)
+    const path = await this.#pathFor(entry.sig, entry.kind)
     if (!path) return false
     // Loopback hosts use plain http (content-side analog of allow-loopback);
     // real domains use https.
@@ -188,9 +263,24 @@ export class HostSyncService extends EventTarget {
     } catch { return false }
   }
 
-  /** kind → the host's typed URL path. Matches the relay's content layout
-   *  (the relay strips .js/.json to recover the sig and verifies the hash). */
-  readonly #pathFor = (sig: string, kind: HostSyncKind): string => {
+  /** sig+kind → host URL path.
+   *
+   *  In 'host' mode (default), returns the typed pool path matching the
+   *  relay's permanent layout (`/__layers__/<sig>.json` etc.); the writer
+   *  must be in the relay's allow-list. In 'temp-swarm' mode, returns the
+   *  per-participant staging path `/__swarm_temp__/<pubkey>/<sig>` — pool
+   *  is single-namespace (no typed differentiation), and the participant
+   *  authenticates as themselves rather than going through an operator
+   *  writer-set. Pubkey is fetched once from the signer and cached.
+   *
+   *  Returns '' if a path cannot be constructed (unknown kind in host
+   *  mode, or temp-swarm mode without an available signer pubkey). */
+  readonly #pathFor = async (sig: string, kind: HostSyncKind): Promise<string> => {
+    if (this.mode() === 'temp-swarm') {
+      const pubkey = await this.#getOwnPubkey()
+      if (!pubkey) return ''
+      return `/__swarm_temp__/${pubkey}/${sig}`
+    }
     switch (kind) {
       case 'layer':      return `/__layers__/${sig}.json`
       case 'bee':        return `/__bees__/${sig}.js`
@@ -198,6 +288,27 @@ export class HostSyncService extends EventTarget {
       case 'resource':   return `/__resources__/${sig}`
       default:           return ''
     }
+  }
+
+  /** Cache for the signer's pubkey. NostrSigner.getPublicKeyHex() is
+   *  async (may dial out to a NIP-07 extension); we want #pathFor to be
+   *  cheap on the hot path. First lookup pays the cost, subsequent
+   *  lookups are O(1). Reset on disable() so a key change between sessions
+   *  is respected. */
+  #ownPubkey: string | null = null
+
+  readonly #getOwnPubkey = async (): Promise<string> => {
+    if (this.#ownPubkey) return this.#ownPubkey
+    const signer = this.#getSigner() as (SignerLike & { getPublicKeyHex?: () => Promise<string | null> }) | undefined
+    if (!signer?.getPublicKeyHex) return ''
+    try {
+      const pk = await signer.getPublicKeyHex()
+      if (pk && /^[0-9a-f]{64}$/i.test(pk)) {
+        this.#ownPubkey = pk.toLowerCase()
+        return this.#ownPubkey
+      }
+    } catch { /* fall through */ }
+    return ''
   }
 
   /** Build a NIP-98 Authorization header: a kind-27235 Nostr event signed
@@ -221,8 +332,10 @@ export class HostSyncService extends EventTarget {
     }
   }
 
-  /** The operator's host, scheme/slash stripped (e.g. 'jwize.com'). Empty
-   *  string when unconfigured. */
+  /** The participant's host, scheme/slash stripped (e.g. 'jwize.com').
+   *  Read straight from localStorage — the runtime initializer ensures
+   *  the key is populated with window.location.origin on first boot, so
+   *  this never returns "" except in private-mode storage edge cases. */
   readonly #hostBase = (): string => {
     let raw = ''
     try { raw = String(localStorage.getItem(SELF_DOMAIN_KEY) ?? '').trim() } catch { return '' }
@@ -286,5 +399,8 @@ export class HostSyncService extends EventTarget {
 const _hostSync = new HostSyncService()
 window.ioc.register('@diamondcoreprocessor.com/HostSyncService', _hostSync)
 
-// On boot, drain anything left from a prior session (crash-safe, single-flight).
-void _hostSync.drain()
+// On boot, drain anything left from a prior session — only if the operator
+// has explicitly opted in. Visitors with no host configured (or who haven't
+// flipped the gate) skip the drain entirely, so the signer is never invoked
+// at startup and no Nostr-signer prompt appears.
+if (_hostSync.isEnabled()) void _hostSync.drain()

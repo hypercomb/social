@@ -20,10 +20,17 @@ const __dirname = dirname(__filename)
 
 const DIST_ROOT = resolve(__dirname, '..', 'dist')
 
+// `additive: true` = persistent pool — never mirror. The operator HOST pool
+// holds package content AND user-authored (HostSync PUT) AND adopted/co-hosted
+// content, all signature-addressed and deduped. Removing "stale" entries (sigs
+// not in the current build) would wipe user/adopted bytes that the build never
+// produced. Additive only; reclaiming space is a separate, deliberate GC phase
+// (mark-sweep over active roots), never a build-time side effect.
+// The dev OPFS feeds (web/dcp public) stay mirrored — they're regenerable.
 const TARGETS = [
-  resolve(__dirname, '..', '..', 'diamond-core-processor', 'public'),
-  resolve(__dirname, '..', '..', 'hypercomb-web', 'public', 'content'),
-  resolve(__dirname, '..', '..', 'hypercomb-relay', 'content'),
+  { dir: resolve(__dirname, '..', '..', 'diamond-core-processor', 'public'), additive: false },
+  { dir: resolve(__dirname, '..', '..', 'hypercomb-web', 'public', 'content'), additive: false },
+  { dir: resolve(__dirname, '..', '..', 'hypercomb-relay', 'content'), additive: true },
 ]
 
 const CONTENT_DIRS = ['__layers__', '__bees__', '__dependencies__', '__resources__']
@@ -42,7 +49,7 @@ const copyDirRecursive = (srcDir: string, tgtDir: string): void => {
   }
 }
 
-const syncTarget = (targetDir: string): { copied: number; skipped: number; removed: number } => {
+const syncTarget = (targetDir: string, additive: boolean): { copied: number; skipped: number; removed: number } => {
   mkdirSync(targetDir, { recursive: true })
 
   let copied = 0
@@ -79,11 +86,14 @@ const syncTarget = (targetDir: string): { copied: number; skipped: number; remov
     }
 
     // remove stale entries (signatures no longer in source) — recursive
-    // handles bag directories.
-    for (const name of tgtEntries) {
-      if (!srcEntries.has(name)) {
-        rmSync(join(tgtDir, name), { recursive: true, force: true })
-        removed++
+    // handles bag directories. SKIPPED for additive (persistent) pools so a
+    // rebuild never deletes user-authored or adopted content sharing the dir.
+    if (!additive) {
+      for (const name of tgtEntries) {
+        if (!srcEntries.has(name)) {
+          rmSync(join(tgtDir, name), { recursive: true, force: true })
+          removed++
+        }
       }
     }
   }
@@ -119,9 +129,9 @@ const main = () => {
     process.exit(1)
   }
 
-  for (const target of TARGETS) {
-    const { copied, skipped, removed } = syncTarget(target)
-    console.log(`[copy-to-dcp] ${target}`)
+  for (const { dir, additive } of TARGETS) {
+    const { copied, skipped, removed } = syncTarget(dir, additive)
+    console.log(`[copy-to-dcp] ${dir}${additive ? ' (additive/persistent)' : ''}`)
     console.log(`  ${copied} copied, ${skipped} unchanged, ${removed} removed`)
   }
 }

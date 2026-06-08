@@ -5,7 +5,7 @@ import { RouterOutlet } from '@angular/router';
 import { CommandLineComponent } from '@hypercomb/shared';
 import { MeshHeaderComponent } from '@hypercomb/shared/ui';
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
-import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent, HistoryViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent, MeshModalComponent, LayerCycleStripComponent, PresenceBannerComponent } from '@hypercomb/shared/ui';
+import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent, HistoryViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, PresenceBannerComponent } from '@hypercomb/shared/ui';
 import { FormatPainterComponent } from '@hypercomb/shared/ui/format-painter/format-painter.component'
 import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
 import { SensitivityBarComponent } from '@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component'
@@ -20,7 +20,7 @@ import '@hypercomb/essentials/side-effects'
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, HistoryViewerComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent, MeshModalComponent, LayerCycleStripComponent, PresenceBannerComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, HistoryViewerComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, PresenceBannerComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
@@ -94,6 +94,24 @@ export class App implements AfterViewInit {
       const m = this.viewMode()
       document.body.classList.remove('hc-view-hexagons', 'hc-view-website')
       document.body.classList.add(`hc-view-${m}`)
+    })
+
+    // ─── Return to the hive on adopt complete ──────────────────────────
+    // After a successful branch adoption (broker.adopt walked the peer's
+    // subtree → adopt:done fires), bring the participant back to the
+    // tile-grid view at their current location. The adopted tiles
+    // render there with their newly-fetched resources. Code items stay
+    // off until the participant explicitly toggles them on (which fires
+    // the trust prompt in DCP for non-community sources, per
+    // home.component.onToggle).
+    //
+    // "Go back to the hive" semantics: the shell makes sure viewMode is
+    // 'hexagons' (any non-tile view from before adopt is dismissed) and
+    // emits 'nav:to-hive' so any other listener (toasts, banners, future
+    // routing) can react. Idempotent — already on hexagons = no-op.
+    EffectBus.on('adopt:done', () => {
+      this.viewMode.set('hexagons')
+      EffectBus.emit('nav:to-hive', { reason: 'adopt-complete' })
     })
 
     // Runtime already initialized by main.ts — go straight to bee startup.
