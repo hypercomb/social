@@ -157,10 +157,23 @@ export class SwarmAdoptDrone extends Drone {
       .filter(Boolean)
     const atPath = segmentsClean.length > 0 ? segmentsClean.join(',') : ''
 
+    // Capture the publisher's DOMAIN at click time (if they advertised one
+    // via their mesh broadcast — operators set hc:nostrmesh:self-domain, so
+    // their kind-30401 responses carry a ['domain',…] tag the adopter has
+    // already accumulated into the broker's known-domains for this sig).
+    // Threaded through the handoff so the installer — a fresh iframe that
+    // has observed no mesh responses of its own — knows WHERE to HTTP-direct
+    // fetch the adopted content's resources from (the byte path). Empty for
+    // a browser-only publisher with no domain (then the installer falls back
+    // to mesh/community/CDN, and durable resources require a host).
+    const broker = ioc?.get?.('@diamondcoreprocessor.com/ContentBrokerDrone') as
+      { getKnownDomains?: (s: string) => string[] } | undefined
+    const ownerDomain = String(broker?.getKnownDomains?.(layerSig)?.[0] ?? '').trim()
+
     // Hand off to the embedded installer. portal-overlay listens at the
     // window level (matches the pattern used by command-line + controls-
     // bar when opening DCP from their own buttons). The installer reads
-    // both `branchSig` and `at` from the URL hash on init + on every
+    // `branchSig`, `at`, and `domain` from the URL hash on init + on every
     // hashchange so subsequent adopts in the same session re-route the
     // iframe correctly.
     window.dispatchEvent(new CustomEvent('portal:open', {
@@ -168,6 +181,7 @@ export class SwarmAdoptDrone extends Drone {
         target: 'dcp',
         branchSig: layerSig,
         at: atPath,
+        domain: ownerDomain,
         label,
       },
     }))

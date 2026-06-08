@@ -107,7 +107,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   // -------------------------------------------------
   private readonly onPortalOpen = (e: Event): void => {
     const detail = (e as CustomEvent).detail as
-      { target?: string; url?: string; branchSig?: string; at?: string; label?: string } | null
+      { target?: string; url?: string; branchSig?: string; at?: string; domain?: string; label?: string } | null
     let url = detail?.url ?? resolvePortalUrl(detail?.target ?? '')
     if (!url) return
 
@@ -128,6 +128,12 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
         url += (url.includes('#') ? '&' : '#') + `branch=${sig}`
         if (detail?.at !== undefined) {
           url += `&at=${encodeURIComponent(String(detail.at))}`
+        }
+        // The publisher's domain — WHERE the installer HTTP-direct-fetches
+        // the adopted content's resources from (the byte path). Empty for a
+        // domainless browser-only publisher.
+        if (detail?.domain) {
+          url += `&domain=${encodeURIComponent(String(detail.domain))}`
         }
       }
     }

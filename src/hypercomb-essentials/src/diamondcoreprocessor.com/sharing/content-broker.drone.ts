@@ -273,6 +273,16 @@ export class ContentBrokerDrone extends Drone {
   // primitive: { bytes, domains }".
   #knownDomainsBySig = new Map<string, Set<string>>()
 
+  // Session-scoped fetch sources — domains noted as places to HTTP-direct
+  // fetch from, for THIS session, independent of the per-sig mesh-learned
+  // map. Seeded by noteDomain() — e.g. the adopt handoff passes the
+  // publisher's domain here so the installer (a fresh iframe context that
+  // has observed no mesh responses) still knows where to fetch the adopted
+  // content's resources from. This is a FETCH source, NOT a trust grant:
+  // sha256 verification gates acceptance regardless, so noting a domain
+  // can only ever speed up finding correct bytes, never accept wrong ones.
+  #sessionKnownDomains = new Set<string>()
+
   // Cancelled sigs — populated by inbound KIND_FETCH_CANCEL events.
   // Used by #handleFetchRequest to abort preparation when an asker has
   // already received valid bytes from another peer. Keyed by sig, value
@@ -488,6 +498,12 @@ export class ContentBrokerDrone extends Drone {
     // deduplicates.)
     for (const domain of this.getKnownDomains(sig)) push(domain)
 
+    // Tier 2.5 — session-noted fetch sources (e.g. the publisher's domain
+    // handed through the adopt flow). Tried before the public fallback so a
+    // freshly-opened installer fetches adopted resources from the source
+    // host rather than failing through to the CDN. sha256 still gates.
+    for (const host of this.#sessionKnownDomains) push(host)
+
     // Tier 3 — public fallback CDN. When self / community / mesh-learned
     // have all returned nothing for this sig, we try the canonical
     // public source as a last resort. Defaults to the Azure blob hosting
@@ -533,6 +549,20 @@ export class ContentBrokerDrone extends Drone {
   public getKnownDomains = (sig: string): string[] => {
     const set = this.#knownDomainsBySig.get(sig)
     return set ? Array.from(set) : []
+  }
+
+  /**
+   * Note a domain as a session-scoped HTTP-direct fetch source. Used by the
+   * adopt handoff: the publisher's domain (learned from the swarm at click
+   * time) is noted here so a freshly-opened installer — which has observed
+   * no mesh responses of its own — still knows where to fetch the adopted
+   * content's resources from. A FETCH source, not a trust grant: sha256
+   * verification gates acceptance, so this can only speed finding correct
+   * bytes. Accepts a host or URL; normalises to a bare host. No-op on empty.
+   */
+  public noteDomain = (domain: string): void => {
+    const host = this.#domainToHost(String(domain ?? ''))
+    if (host) this.#sessionKnownDomains.add(host)
   }
 
   /**

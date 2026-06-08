@@ -357,6 +357,13 @@ export class HomeComponent implements OnDestroy {
       const atRaw = params.get('at') ?? ''
       const at = atRaw.split(',').map(s => s.trim()).filter(Boolean)
 
+      // The publisher's domain (byte path) — WHERE to HTTP-direct fetch the
+      // adopted content's resources from. Seeded into the broker as a
+      // session fetch source so this fresh installer context (no observed
+      // mesh responses) can pull resources from the source host. Empty for
+      // a domainless browser-only publisher.
+      const ownerDomain = (params.get('domain') ?? '').trim()
+
       queueMicrotask(() => {
         EffectBus.emit('adopt:meta', { rootSig: branchSig, domains: [], at })
 
@@ -383,6 +390,7 @@ export class HomeComponent implements OnDestroy {
         type BrokerLike = {
           adopt?: (sig: string) => Promise<unknown>
           getKnownDomains?: (sig: string) => string[]
+          noteDomain?: (domain: string) => void
         }
         const recordInLineage = (broker: BrokerLike): void => {
           try {
@@ -416,6 +424,13 @@ export class HomeComponent implements OnDestroy {
         }
 
         const startWalk = (broker: BrokerLike): void => {
+          // Byte path: seed the publisher's domain as a fetch source BEFORE
+          // the walk, so broker.adopt's HTTP-direct resource fetches have a
+          // target host (this installer context has observed no mesh
+          // responses of its own). sha256 still gates acceptance.
+          if (ownerDomain && broker?.noteDomain) {
+            try { broker.noteDomain(ownerDomain) } catch { /* non-fatal */ }
+          }
           if (broker?.adopt) {
             void broker.adopt(branchSig)
               .then(() => recordInLineage(broker))
