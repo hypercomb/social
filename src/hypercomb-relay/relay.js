@@ -68,30 +68,12 @@ function parseArgs(argv) {
     // routing, no index.html fallback. If you want to develop on the
     // installer, run `npm start` from `diamond-core-processor/` separately
     // (it serves at localhost:2400). Don't conflate.
-    // Swarm-temp pool: a per-participant, sandboxed, TTL-bounded staging
-    // area where pure-browser swarm members can PUT signed content the
-    // host then serves via the standard /<sig> endpoint. Lets non-host
-    // participants "share back" to the swarm without running infra.
     //
-    // Trust model: bytes verify by sha256 (same as every other write),
-    // pubkey in the path MUST match the NIP-98 auth event pubkey
-    // (sandbox per participant), per-pubkey + total size caps bound
-    // disk abuse, TTL evaporates idle data. The client install side's
-    // Merkle verification makes content-poisoning impossible — the host
-    // is a CDN with strict TTL, not a trust authority.
-    //
-    // Default: ENABLED in dev (handy for local swarm testing) but easy
-    // to disable in production with RELAY_SWARM_TEMP=off or
-    // --swarm-temp off.
-    swarmTempEnabled: (() => {
-      const v = String(process.env.RELAY_SWARM_TEMP ?? '').trim().toLowerCase()
-      if (v === 'off' || v === 'false' || v === '0') return false
-      return true
-    })(),
-    swarmTempTtlMs: 60 * 60 * 1000,        // 1 hour idle → evict
-    swarmTempPerPubkeyCap: 50 * 1024 * 1024,   // 50 MB per participant
-    swarmTempTotalCap: 1024 * 1024 * 1024,     // 1 GB total
-    swarmTempSweepMs: 5 * 60 * 1000,           // sweep every 5 minutes
+    // swarm-temp REMOVED — the relay does not host other participants'
+    // bytes. Per the byte-path model: the mesh resolves sig→domains, bytes
+    // come HTTP-direct from real endpoints, and a sig with no endpoint
+    // stays an EGG (durable placeholder, hatches when an endpoint delivers).
+    // No mesh file transfers, no host-brokering of others' content.
   }
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i]
@@ -113,14 +95,10 @@ function parseArgs(argv) {
       console.error('[relay] To develop on the installer, run `npm start` from diamond-core-processor/ separately (localhost:2400).')
       process.exit(2)
     }
-    else if (a === '--swarm-temp' && next) {
-      const v = String(next).trim().toLowerCase()
-      args.swarmTempEnabled = !(v === 'off' || v === 'false' || v === '0')
-      i++
+    else if (a === '--swarm-temp' || a === '--swarm-temp-ttl' || a === '--swarm-temp-cap' || a === '--swarm-temp-total') {
+      console.error(`[relay] ${a} was removed — swarm-temp no longer exists (no host-brokering; missing sigs are eggs). Drop it from your startup script.`)
+      process.exit(2)
     }
-    else if (a === '--swarm-temp-ttl' && next) { args.swarmTempTtlMs = Number(next); i++ }
-    else if (a === '--swarm-temp-cap' && next) { args.swarmTempPerPubkeyCap = Number(next); i++ }
-    else if (a === '--swarm-temp-total' && next) { args.swarmTempTotalCap = Number(next); i++ }
   }
   return args
 }
@@ -146,195 +124,14 @@ function sha256Hex(buf) {
   return createHash('sha256').update(buf).digest('hex')
 }
 
-// ── swarm-temp pool ──────────────────────────────────────────────────────────
+// ── swarm-temp pool: REMOVED ─────────────────────────────────────────────────
 //
-// Per-participant staging area at __swarm_temp__/<pubkey>/<sig> that lets a
-// pure-browser swarm member PUT signed content the host then serves through
-// the standard /<sig> read endpoint. Adopters fetching by sig don't care
-// which pool actually holds the bytes — resolveFlatSig probes them all.
-//
-// Lifecycle: each PUT extends the participant's `.meta.expiresAt` by ttlMs;
-// a sweeper running every sweepMs removes participants whose meta is past
-// expiry. Startup clears whatever's left from the previous process — temp
-// is, by definition, never durable. The whole pool can be disabled with
-// RELAY_SWARM_TEMP=off or --swarm-temp off.
-const SWARM_TEMP_DIR = '__swarm_temp__'
-
-/** Total bytes currently occupied by one pubkey's temp folder. Excludes
- *  the dotfile `.meta` since it isn't content. Returns 0 if the folder
- *  doesn't exist. */
-function swarmTempPubkeyBytes(pubkey) {
-  try {
-    const dir = join(cfg.contentDir, SWARM_TEMP_DIR, pubkey)
-    if (!statSync(dir).isDirectory()) return 0
-    let total = 0
-    for (const f of readdirSync(dir)) {
-      if (f.startsWith('.')) continue
-      try { total += statSync(join(dir, f)).size } catch { /* skip */ }
-    }
-    return total
-  } catch { return 0 }
-}
-
-/** Total bytes occupied by the entire swarm-temp pool across all
- *  participants. Used to enforce the operator's global cap. */
-function swarmTempTotalBytes() {
-  try {
-    const root = join(cfg.contentDir, SWARM_TEMP_DIR)
-    if (!statSync(root).isDirectory()) return 0
-    let total = 0
-    for (const pk of readdirSync(root)) {
-      total += swarmTempPubkeyBytes(pk)
-    }
-    return total
-  } catch { return 0 }
-}
-
-/** Sweep the swarm-temp pool. For each participant, read their .meta;
- *  if `expiresAt` is in the past (or meta is missing/corrupt), nuke
- *  the whole pubkey folder. Cheap, idempotent, safe to run on a timer. */
-function sweepSwarmTemp() {
-  if (!cfg.swarmTempEnabled) return
-  const root = join(cfg.contentDir, SWARM_TEMP_DIR)
-  try {
-    if (!statSync(root).isDirectory()) return
-  } catch { return }
-  const now = Date.now()
-  for (const pubkey of readdirSync(root)) {
-    const pkDir = join(root, pubkey)
-    const metaPath = join(pkDir, '.meta')
-    let expiresAt = 0
-    try { expiresAt = Number(JSON.parse(readFileSync(metaPath, 'utf-8'))?.expiresAt ?? 0) }
-    catch { /* missing or corrupt → treat as expired */ }
-    if (expiresAt > now) continue
-    try {
-      rmSync(pkDir, { recursive: true, force: true })
-      console.log(`[swarm-temp] swept expired participant ${pubkey.slice(0, 8)}…`)
-    } catch { /* permission / race — skip, next sweep retries */ }
-  }
-}
-
-/** Probe the swarm-temp pool for a sig. Iterates pubkey folders since the
- *  read endpoint is /<sig> only — clients don't know which participant
- *  cached the bytes. First hit wins; pool ordering doesn't matter since
- *  content is verified by hash on write. */
-function resolveSwarmTemp(sig) {
-  if (!cfg.swarmTempEnabled) return null
-  try {
-    const root = join(cfg.contentDir, SWARM_TEMP_DIR)
-    if (!statSync(root).isDirectory()) return null
-    for (const pubkey of readdirSync(root)) {
-      const p = join(root, pubkey, sig)
-      try {
-        if (statSync(p).isFile()) return { path: p, contentType: 'application/octet-stream' }
-      } catch { /* not in this participant's slice */ }
-    }
-  } catch { /* no pool */ }
-  return null
-}
-
-/** NIP-98 auth verifier specifically for the swarm-temp endpoint. Same
- *  shape as verifyWriteAuth but with TWO differences:
- *   1. The pubkey allow-list is NOT consulted — any keypair can write to
- *      its own slice (that's the whole point of the temp pool).
- *   2. The path's pubkey MUST equal the auth event's pubkey — sandbox
- *      per participant. A can't write into B's folder. */
-function verifySwarmTempAuth(req, expectedPubkey) {
-  const header = String(req.headers['authorization'] || '').trim()
-  const m = /^Nostr\s+(.+)$/i.exec(header)
-  if (!m) return { ok: false, reason: 'missing Nostr authorization header' }
-  let evt
-  try { evt = JSON.parse(Buffer.from(m[1], 'base64').toString('utf8')) }
-  catch { return { ok: false, reason: 'malformed auth token' } }
-  try { if (!verifyEvent(evt)) return { ok: false, reason: 'invalid signature' } }
-  catch { return { ok: false, reason: 'invalid signature' } }
-  if (Number(evt.kind) !== 27235) return { ok: false, reason: 'wrong auth event kind (expected NIP-98 27235)' }
-  const pubkey = String(evt.pubkey || '').toLowerCase()
-  if (pubkey !== expectedPubkey) return { ok: false, reason: 'auth pubkey does not match path pubkey' }
-  const now = Math.floor(Date.now() / 1000)
-  if (Math.abs(now - Number(evt.created_at || 0)) > 60) return { ok: false, reason: 'auth token outside freshness window' }
-  const tags = Array.isArray(evt.tags) ? evt.tags : []
-  const methodTag = tags.find((t) => Array.isArray(t) && t[0] === 'method')?.[1]
-  if (String(methodTag || '').toUpperCase() !== 'PUT') return { ok: false, reason: 'auth method tag mismatch' }
-  const uTag = tags.find((t) => Array.isArray(t) && t[0] === 'u')?.[1]
-  let signedPath
-  try { signedPath = new URL(String(uTag)).pathname } catch { signedPath = String(uTag || '') }
-  const reqPath = (req.url || '').split('?')[0]
-  if (signedPath !== reqPath) return { ok: false, reason: 'auth url tag mismatch' }
-  return { ok: true, pubkey }
-}
-
-/** Handle a PUT into the swarm-temp pool. Branches off from tryWriteContent
- *  so it never goes through the operator writer-allowlist check. */
-function trySwarmTempWrite(req, res, urlPath, pathPubkey, sig) {
-  if (!cfg.swarmTempEnabled) { respondText(res, 403, 'swarm-temp pool disabled'); return true }
-
-  const auth = verifySwarmTempAuth(req, pathPubkey)
-  if (!auth.ok) { respondText(res, 401, auth.reason); return true }
-
-  const root = resolve(cfg.contentDir)
-  const pkDir = join(root, SWARM_TEMP_DIR, pathPubkey)
-  const target = join(pkDir, sig)
-  // Traversal guard — both the parent and the file must live inside the
-  // contentDir root (no symlink/path tricks).
-  if (!pkDir.startsWith(root + sep) || !target.startsWith(pkDir + sep)) {
-    respondText(res, 403, 'target outside content root')
-    return true
-  }
-
-  const chunks = []
-  let size = 0
-  let aborted = false
-  req.on('data', (c) => {
-    if (aborted) return
-    size += c.length
-    if (size > cfg.maxBodyBytes) { aborted = true; respondText(res, 413, 'body too large'); req.destroy(); return }
-    chunks.push(c)
-  })
-  req.on('end', () => {
-    if (aborted) return
-    const body = Buffer.concat(chunks)
-    const actual = sha256Hex(body)
-    if (actual !== sig) {
-      respondText(res, 422, `hash mismatch: sha256(body)=${actual.slice(0, 12)} != ${sig.slice(0, 12)}`)
-      return
-    }
-    let existingSize = 0
-    try { existingSize = statSync(target).size } catch { /* not present */ }
-    // Per-participant cap check (accounting for replacement of an existing sig)
-    const projectedPubkey = swarmTempPubkeyBytes(pathPubkey) - existingSize + body.length
-    if (projectedPubkey > cfg.swarmTempPerPubkeyCap) {
-      respondText(res, 413, `per-participant cap exceeded: ${projectedPubkey} > ${cfg.swarmTempPerPubkeyCap} bytes`)
-      return
-    }
-    // Total pool cap check
-    const projectedTotal = swarmTempTotalBytes() - existingSize + body.length
-    if (projectedTotal > cfg.swarmTempTotalCap) {
-      respondText(res, 507, 'swarm-temp pool full')
-      return
-    }
-    try {
-      mkdirSync(pkDir, { recursive: true })
-      writeFileSync(target, body)
-    } catch (e) {
-      respondText(res, 500, 'write failed: ' + (e?.message || 'unknown'))
-      return
-    }
-    // Update .meta — first write timestamp, last write timestamp, new expiry.
-    const metaPath = join(pkDir, '.meta')
-    let meta = { firstWrite: Date.now(), lastWrite: Date.now(), expiresAt: Date.now() + cfg.swarmTempTtlMs }
-    try {
-      const existing = JSON.parse(readFileSync(metaPath, 'utf-8'))
-      if (Number.isFinite(existing?.firstWrite)) meta.firstWrite = Number(existing.firstWrite)
-    } catch { /* fresh meta */ }
-    try { writeFileSync(metaPath, JSON.stringify(meta)) } catch { /* non-fatal */ }
-    res.writeHead(201, { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' })
-    res.end(`stored ${sig} in swarm-temp/${pathPubkey.slice(0, 8)}…`)
-    console.log(`[swarm-temp] ${pathPubkey.slice(0, 8)}… PUT ${urlPath} (${body.length}B, pubkey-total ${projectedPubkey}/${cfg.swarmTempPerPubkeyCap})`)
-  })
-  req.on('error', () => { if (!aborted) respondText(res, 400, 'request stream error') })
-  return true
-}
+// The relay no longer hosts other participants' bytes. Per the byte-path
+// model (confirmed 2026-06): the mesh resolves sig→domains, bytes come
+// HTTP-direct from real endpoints, and a sig with no endpoint stays an EGG
+// (durable placeholder that hatches when an endpoint delivers). No mesh file
+// transfers, no host-brokering — so the __swarm_temp__ pool, its NIP-98
+// per-participant write path, quotas, and sweeper are all gone.
 
 // ── permissions-policy ───────────────────────────────────────────────────────
 //
@@ -686,12 +483,6 @@ function resolveFlatSig(sig) {
       }
     }
   } catch { /* no __roots__ pool */ }
-  // __swarm_temp__/<pubkey>/<sig> — last probe because permanent pools
-  // (above) win on collision. A sig found in the permanent pool was
-  // either author-attested or already adopted — temp is the transient
-  // staging area that hasn't aged into a permanent location yet.
-  const temp = resolveSwarmTemp(sig)
-  if (temp) return temp
   return null
 }
 
@@ -814,14 +605,6 @@ function tryWriteContent(req, res) {
   try { urlPath = decodeURIComponent((req.url || '').split('?')[0]) } catch { respondText(res, 400, 'bad path'); return true }
   if (!urlPath || urlPath === '/') { respondText(res, 400, 'no target path'); return true }
 
-  // Swarm-temp PUTs branch FIRST — they have their own auth flow (the
-  // path's pubkey is its own allow-list, no operator writer-set check)
-  // so they never reach the operator-writer machinery below.
-  const tempMatch = urlPath.match(/^\/__swarm_temp__\/([0-9a-f]{64})\/([0-9a-f]{64})$/i)
-  if (tempMatch) {
-    return trySwarmTempWrite(req, res, urlPath, tempMatch[1].toLowerCase(), tempMatch[2].toLowerCase())
-  }
-
   // traversal defense — identical to the read path
   const resolved = resolve(cfg.contentDir, '.' + urlPath)
   const root = resolve(cfg.contentDir)
@@ -915,7 +698,7 @@ function renderLandingHtml() {
 <p>This domain is a <strong>storage and mesh host</strong> in the hypercomb network. It serves signature-addressed content and relays peer messages.</p>
 <p>It does <strong>not</strong> run the installer. To use the network, open the installer:</p>
 <p><a class="cta" href="${CANONICAL_INSTALLER_URL}" rel="noopener">${CANONICAL_INSTALLER_URL}</a></p>
-<p class="small">Storage endpoint: <code>GET /&lt;sig&gt;</code> &nbsp;·&nbsp; Mesh endpoint: <code>wss://</code> &nbsp;·&nbsp; Peer-write temp: <code>PUT /__swarm_temp__/&lt;pubkey&gt;/&lt;sig&gt;</code>${hostHint}</p>
+<p class="small">Storage endpoint: <code>GET /&lt;sig&gt;</code> &nbsp;·&nbsp; Mesh endpoint: <code>wss://</code>${hostHint}</p>
 </body>
 </html>`
 }
@@ -1012,16 +795,6 @@ wss.on('connection', (ws, req) => {
 // periodic cleanup
 setInterval(deleteExpired, 60_000)
 
-// Swarm-temp sweeper — evict expired per-participant slices on a timer.
-// Also runs once on startup to clean leftovers from the previous process
-// (temp is by definition not durable across restarts).
-if (cfg.swarmTempEnabled) {
-  try { sweepSwarmTemp() } catch (e) { console.warn('[swarm-temp] startup sweep failed:', e?.message || e) }
-  setInterval(() => {
-    try { sweepSwarmTemp() } catch (e) { console.warn('[swarm-temp] sweep failed:', e?.message || e) }
-  }, cfg.swarmTempSweepMs)
-}
-
 // graceful shutdown
 function shutdown() {
   console.log('\nshutting down...')
@@ -1047,12 +820,4 @@ server.listen(cfg.port, () => {
   // Banner: slim storage-host announcement (no SPA — full-split model).
   // Visitors hitting `/` see the landing page → linked to canonical installer.
   console.log(`role: storage + mesh (slim host — installer code is canonical at ${CANONICAL_INSTALLER_URL})`)
-  if (cfg.swarmTempEnabled) {
-    const perPubkeyMB = Math.round(cfg.swarmTempPerPubkeyCap / (1024 * 1024))
-    const totalMB = Math.round(cfg.swarmTempTotalCap / (1024 * 1024))
-    const ttlMin = Math.round(cfg.swarmTempTtlMs / 60_000)
-    console.log(`swarm-temp: enabled (${perPubkeyMB}MB/participant, ${totalMB}MB total, ${ttlMin}min idle TTL)`)
-  } else {
-    console.log('swarm-temp: disabled (RELAY_SWARM_TEMP=off)')
-  }
 })

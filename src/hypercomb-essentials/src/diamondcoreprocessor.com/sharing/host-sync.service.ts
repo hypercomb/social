@@ -64,13 +64,6 @@ const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
 // prompt. Operators flip to 'true' once they've configured a host AND
 // understand each commit will be signed.
 const ENABLED_KEY = 'hc:host-sync:enabled'
-// Push mode. 'host' = PUT to /__layers__/<sig>.json etc. (operator-owned
-// permanent pools, requires being in the relay's writers allowlist).
-// 'temp-swarm' = PUT to /__swarm_temp__/<pubkey>/<sig> (the swarm host's
-// per-participant staging area — sandboxed to the participant's pubkey,
-// TTL-bounded, size-capped; for browser-only members who want to share
-// back without running their own host).
-const MODE_KEY = 'hc:host-sync:mode'
 const NIP98_KIND = 27235
 const RETRY_MS = 30_000
 
@@ -102,34 +95,21 @@ export class HostSyncService extends EventTarget {
   /** True iff the operator has both opted in AND configured a self-domain. */
   public readonly isEnabled = (): boolean => this.#isEnabled()
 
-  /** Turn host backup on. Optionally set the self-domain and the push mode
-   *  in the same call. Effect is immediate — no reload required. Caller is
-   *  responsible for showing the user a clear "we will sign each backup
-   *  to <domain> in <mode> mode" dialog BEFORE invoking this.
+  /** Turn host backup on. Optionally set the self-domain in the same call.
+   *  Effect is immediate — no reload required. Caller is responsible for
+   *  showing the user a clear "we will sign each backup to <domain>" dialog
+   *  BEFORE invoking this.
    *
-   *  Modes:
-   *   - 'host' (default): you own the host; writes go to permanent typed
-   *     pools and require your pubkey to be in the relay's writers list.
-   *   - 'temp-swarm': you don't own a host; writes go to the swarm host's
-   *     per-participant staging area /__swarm_temp__/<your-pubkey>/<sig>,
-   *     which is TTL-bounded and size-capped. Other swarm members fetch
-   *     from the same host at /<sig>. */
-  public readonly enable = (selfDomain?: string, opts?: { mode?: 'host' | 'temp-swarm' }): void => {
+   *  You own the host: writes go to permanent typed pools and require your
+   *  pubkey to be in the relay's writers list. (The old 'temp-swarm' mode —
+   *  pushing to a host's per-participant staging pool — was removed: the
+   *  relay no longer host-brokers others' bytes; a sig with no endpoint is
+   *  an egg, per the byte-path model.) */
+  public readonly enable = (selfDomain?: string): void => {
     try {
       if (selfDomain) localStorage.setItem(SELF_DOMAIN_KEY, selfDomain.trim())
-      const mode = opts?.mode ?? 'host'
-      localStorage.setItem(MODE_KEY, mode)
       localStorage.setItem(ENABLED_KEY, 'true')
     } catch { /* private mode — caller still has to honor in-session */ }
-  }
-
-  /** Current push mode — 'host' (default) or 'temp-swarm'. Read fresh
-   *  from localStorage so toggling at runtime is honored without reload. */
-  public readonly mode = (): 'host' | 'temp-swarm' => {
-    try {
-      const raw = String(localStorage.getItem(MODE_KEY) ?? '').trim().toLowerCase()
-      return raw === 'temp-swarm' ? 'temp-swarm' : 'host'
-    } catch { return 'host' }
   }
 
   /** Turn host backup off. Existing queued entries stay on disk (not
@@ -263,24 +243,11 @@ export class HostSyncService extends EventTarget {
     } catch { return false }
   }
 
-  /** sig+kind → host URL path.
-   *
-   *  In 'host' mode (default), returns the typed pool path matching the
+  /** sig+kind → host URL path. Returns the typed pool path matching the
    *  relay's permanent layout (`/__layers__/<sig>.json` etc.); the writer
-   *  must be in the relay's allow-list. In 'temp-swarm' mode, returns the
-   *  per-participant staging path `/__swarm_temp__/<pubkey>/<sig>` — pool
-   *  is single-namespace (no typed differentiation), and the participant
-   *  authenticates as themselves rather than going through an operator
-   *  writer-set. Pubkey is fetched once from the signer and cached.
-   *
-   *  Returns '' if a path cannot be constructed (unknown kind in host
-   *  mode, or temp-swarm mode without an available signer pubkey). */
+   *  must be in the relay's allow-list (you own the host). Returns '' for
+   *  an unknown kind. */
   readonly #pathFor = async (sig: string, kind: HostSyncKind): Promise<string> => {
-    if (this.mode() === 'temp-swarm') {
-      const pubkey = await this.#getOwnPubkey()
-      if (!pubkey) return ''
-      return `/__swarm_temp__/${pubkey}/${sig}`
-    }
     switch (kind) {
       case 'layer':      return `/__layers__/${sig}.json`
       case 'bee':        return `/__bees__/${sig}.js`
