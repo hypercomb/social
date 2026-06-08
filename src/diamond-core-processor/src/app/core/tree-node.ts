@@ -61,4 +61,17 @@ export interface TreeNode {
    * domain's own (non-visual) features toggle. Optional / defaults false.
    */
   visualContext?: boolean
+
+  /**
+   * EGG state — a layer that is KNOWN (held in the lineage) but has not
+   * HATCHED (is not active in the logical install), for one of two reasons:
+   *   - 'undelivered': its resources haven't resolved — no endpoint has the
+   *     bytes yet. Hatches when an endpoint delivers (re-fetch succeeds).
+   *   - 'untrusted': it's blocked because it doesn't meet the community
+   *     safety requirements. Hatches when it meets the bar (a community
+   *     attestation arrives, or the participant overrides the trust gate).
+   * Eggs are durable + visible (never "failed", just "not yet"). Unset =
+   * hatched/normal. The two causes render with one unified egg affordance.
+   */
+  hatchBlocker?: 'undelivered' | 'untrusted'
 }

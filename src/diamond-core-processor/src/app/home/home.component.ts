@@ -850,10 +850,18 @@ export class HomeComponent implements OnDestroy {
         if (trust?.check) {
           const decision = await trust.check([sourceDomain])
           if (!decision.allow) {
-            // User refused activation. Leave the toggle in its current
-            // (off) state; nothing changes.
+            // Blocked by community safety → mark as an UNTRUSTED EGG: the
+            // layer is known + visible but can't hatch (activate) until it
+            // meets the bar (a community attestation arrives) or the
+            // participant overrides. Durable, never "failed". The tree
+            // renders the egg affordance with the "waiting for community
+            // trust" reason.
+            node.hatchBlocker = 'untrusted'
+            this.#refreshSections()
             return
           }
+          // Allowed → it hatched; clear any prior untrusted-egg state.
+          if (node.hatchBlocker === 'untrusted') node.hatchBlocker = undefined
         }
       }
     }

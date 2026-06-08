@@ -11,8 +11,8 @@ import type { TreeNode } from '../core/tree-node'
   imports: [ToggleComponent, DiamondIconComponent],
   template: `
     @if (visible()) {
-      <div class="row" [class.pending]="node().pending" [class.visual-context]="node().visualContext" [style.--depth]="node().depth">
-        @if ((node().kind === 'layer' || node().kind === 'domain') && !node().visualContext) {
+      <div class="row" [class.pending]="node().pending" [class.visual-context]="node().visualContext" [class.egg]="node().hatchBlocker" [style.--depth]="node().depth">
+        @if ((node().kind === 'layer' || node().kind === 'domain') && !node().visualContext && !node().hatchBlocker) {
           <dcp-toggle
             [enabled]="enabled()"
             [effectivelyEnabled]="effectivelyEnabled()"
@@ -20,6 +20,12 @@ import type { TreeNode } from '../core/tree-node'
         }
         @if (node().visualContext) {
           <span class="visual-marker" title="Already in the logical install (from another domain or the base) — shown for context">&#9676;</span>
+        }
+        @if (node().hatchBlocker) {
+          <span class="egg-marker"
+            [title]="node().hatchBlocker === 'undelivered'
+              ? 'Egg — waiting for bytes: no endpoint has delivered this content yet. Hatches when an endpoint serves it.'
+              : 'Egg — waiting for community trust: blocked until it meets the safety bar (an attestation arrives) or you override.'">&#129370;</span>
         }
 
         <dcp-diamond
@@ -31,6 +37,11 @@ import type { TreeNode } from '../core/tree-node'
             <span class="lineage">{{ lineageDisplay() }}</span>
           }
           <span class="name" [class]="node().kind">{{ node().name }}</span>
+          @if (node().hatchBlocker) {
+            <span class="egg-reason" [class]="node().hatchBlocker!">
+              {{ node().hatchBlocker === 'undelivered' ? 'waiting for bytes' : 'waiting for community trust' }}
+            </span>
+          }
           @if (description()) {
             <span class="description">{{ description() }}</span>
           }
@@ -105,6 +116,32 @@ import type { TreeNode } from '../core/tree-node'
       width: 16px;
       text-align: center;
       flex-shrink: 0;
+    }
+
+    /* Egg: a known-but-not-hatched layer. Two causes (undelivered bytes /
+       untrusted), one affordance — muted row, egg marker, reason chip, no
+       toggle (it can't activate until it hatches). */
+    .row.egg { opacity: 0.78; }
+    .egg-marker {
+      font-size: 13px;
+      width: 16px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .egg-reason {
+      font-size: 0.58rem;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+      padding: 1px 6px;
+      border-radius: 3px;
+      white-space: nowrap;
+      flex-shrink: 0;
+      background: rgba(200, 151, 90, 0.16);
+      color: rgba(150, 100, 35, 0.95);
+    }
+    .egg-reason.untrusted {
+      background: rgba(200, 90, 90, 0.16);
+      color: rgba(155, 45, 45, 0.95);
     }
 
     /* Pending: this row is a placeholder for content still being fetched.
