@@ -1143,16 +1143,19 @@ export class NostrMeshDrone extends Drone {
     // in an IIFE makes the value opaque to constant propagation — esbuild
     // cannot statically evaluate the return.
     const useLive = ((): boolean => {
-      try { return localStorage.getItem('hc:nostrmesh:use-live-relay') === '1' }
-      catch { return false }
+      try {
+        const v = localStorage.getItem('hc:nostrmesh:use-live-relay')
+        if (v === '1') return true    // explicit opt-in
+        if (v === '0') return false   // explicit opt-out → use the local relay
+        // Unset: default ON for the operator's LOOPBACK dev, so both browser
+        // tabs share via the stable jwize.com relay with zero per-tab setup
+        // (a restarting in-memory localhost relay can't hold a swarm). OFF for
+        // casual PRODUCTION browsers (non-loopback) so they never auto-hit the
+        // operator's home server — the "don't get swamped" gate. The flag (1/0)
+        // and an explicit hc:nostrmesh:relays both still override this.
+        return this.isLocalContext()
+      } catch { return false }
     })()
-    // The live-relay flag is the explicit PRODUCTION opt-in: when set it uses
-    // LIVE_RELAY (jwize.com) — EVEN on loopback. Rationale: a restarting
-    // in-memory dev relay can't hold a swarm (events wipe on restart), so the
-    // operator testing tiles across two browsers needs the stable shared
-    // relay. Casual browsers never set the flag, so they still default to
-    // LOCAL_RELAY and never touch the operator's home server (the flag is the
-    // "don't get swamped" gate). An explicit hc:nostrmesh:relays still wins.
     const seed = useLive ? [LIVE_RELAY] : [LOCAL_RELAY]
     const defaults = fallback.length > 0 ? fallback : seed
     try {
