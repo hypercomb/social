@@ -178,7 +178,11 @@ export class HomeComponent implements OnDestroy {
     for (const group of groups.values()) {
       if (!showAll && group.sections.length > 1) {
         group.hiddenVersionCount = group.sections.length - 1
-        group.sections = group.sections.slice(0, 1)
+        // Prefer the section WITH content (e.g. a freshly-adopted tile) over an
+        // empty import-source marker, so the adopted node shows INSIDE the
+        // host folder instead of being hidden behind the empty marker.
+        const best = [...group.sections].sort((a, b) => (b.items?.length || 0) - (a.items?.length || 0))[0]
+        group.sections = [best]
       }
     }
     // Library/source siblings, sorted alphabetically (diamondcoreprocessor.com,
@@ -410,10 +414,16 @@ export class HomeComponent implements OnDestroy {
         try { return sourceDomainScoped ? new URL(sourceDomainScoped).hostname.toLowerCase() : '' }
         catch { return sourceDomainScoped }
       })()
-      const displayName = sourceHost || tileName || `branch-${branchSig.slice(0, 8)}`
-      // The cue always names the tile being adopted, even when the folder is
-      // the domain.
-      const cueName = tileName || displayName
+      // The adopt nests INSIDE the importing host's folder (jwize.com) — you
+      // import INTO your host at your current lineage level — so the folder is
+      // the importing host; the adopted tile (dolphin) is a child node inside
+      // it. Fall back to the source host, then the tile name, then a sig
+      // prefix when no host is configured.
+      const importHost = (devDefaultBootstrap()?.host || '').trim()
+      const displayName = importHost || sourceHost || tileName || `branch-${branchSig.slice(0, 8)}`
+      // The cue always names the tile being adopted (the child), even though
+      // the folder is the host.
+      const cueName = tileName || sourceHost || displayName
 
       const branchSection: DomainSection = {
         // domain doubles as the section's idempotency key + scroll target
