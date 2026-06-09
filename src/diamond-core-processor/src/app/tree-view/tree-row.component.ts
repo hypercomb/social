@@ -12,7 +12,12 @@ import type { TreeNode } from '../core/tree-node'
   template: `
     @if (visible()) {
       <div class="row" [class.pending]="node().pending" [class.visual-context]="node().visualContext" [class.egg]="node().hatchBlocker" [style.--depth]="node().depth">
-        @if ((node().kind === 'layer' || node().kind === 'domain') && !node().visualContext && !node().hatchBlocker) {
+        @if (!node().visualContext && !node().hatchBlocker) {
+          <!-- Enable switch at EVERY level — adopt/enable from any node (the
+               root you imported to, a collection, or a single behavior).
+               Flipping it puts that node in the logical tree; effectively-
+               enabled greys it out when an ancestor in the hierarchy is off
+               (turning on "anywhere in the hierarchy" cascades down). -->
           <dcp-toggle
             [enabled]="enabled()"
             [effectivelyEnabled]="effectivelyEnabled()"
