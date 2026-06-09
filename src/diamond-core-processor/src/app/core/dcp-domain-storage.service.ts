@@ -473,6 +473,19 @@ export class DcpDomainStorage {
     return this.computeLogicalInstall(new Set<string>())
   }
 
+  /** Capture the CURRENT logical install as the default baseline — "default
+   *  is the starting point". Freezes the current effective set into the
+   *  `default` lineage so a later restoreDefault() returns to exactly this
+   *  state (rather than an empty base). Use after a fresh canonical install,
+   *  or whenever the participant wants to pin "this is my known-good base".
+   *  Idempotent on the same logical (addDefaultBranch dedups by sig). */
+  async captureLogicalAsDefault(): Promise<string | null> {
+    const refs = await this.loadLogical()
+    const logicalRoot = await this.currentRootSig(LOGICAL_LINEAGE)
+    if (!logicalRoot) return null
+    return this.addDefaultBranch(logicalRoot, [], 'baseline', refs)
+  }
+
   // ── host-domains lineage (public wrappers) ─────────────────────────────────
 
   addHostDomain(host: string) { return this.addTile(HOST_DOMAINS_LINEAGE, host) }
