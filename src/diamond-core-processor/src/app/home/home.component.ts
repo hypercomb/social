@@ -197,14 +197,19 @@ export class HomeComponent implements OnDestroy {
       }],
     }
 
-    // IMPORT mode: while adopting, the importing domain shows the LOGICAL PANE
-    // (the merged mix) inside itself — "what's here + what you're adding" —
-    // instead of its own bare content, so you preview the combined result
-    // before committing. Normal package management leaves it untouched.
-    if (this.importMode() && this.importDomainName()) {
-      const g = libraryGroups.find(x => x.domainName === this.importDomainName())
-      if (g?.sections[0]) {
-        g.sections = [{ ...g.sections[0], items: this.logicalViewItems() }]
+    // VIEW-LOGICAL OVERLAY: any folder with the toggle on (or the importing
+    // domain during an adopt) APPENDS the current logical view's behaviors to
+    // its own list — own content first (what's here / newly adopted), then the
+    // existing logical behaviors (deduped by name), so you see the combined
+    // set "what's here + what's enabled". Append, not replace, so the folder's
+    // own/new content stays visible.
+    const logical = this.logicalViewItems()
+    for (const g of libraryGroups) {
+      if (!this.isViewLogical(g.domainName) || !g.sections[0]) continue
+      const ownNames = new Set(g.sections[0].items.map(i => i.name))
+      const overlay = logical.filter(i => !ownNames.has(i.name)).map(i => ({ ...i }))
+      if (overlay.length) {
+        g.sections = [{ ...g.sections[0], items: [...g.sections[0].items, ...overlay] }]
       }
     }
 
@@ -239,6 +244,24 @@ export class HomeComponent implements OnDestroy {
    *  management; cleared on any manual navigation (toggleGroupOpen). */
   readonly importMode = signal(false)
   readonly importDomainName = signal('')
+
+  /** "View logical" overlay per domain folder: when on, the folder ALSO lists
+   *  the current active logical view's behaviors alongside its own — so you
+   *  can imagine the combined set ("what's here + what might soon be on"). A
+   *  per-folder toggle; defaults ON for the importing domain during an adopt
+   *  so you immediately see the new behaviors against the existing logical. */
+  readonly viewLogicalGroups = signal<Set<string>>(new Set<string>())
+  toggleViewLogical(domainName: string): void {
+    this.viewLogicalGroups.update(s => {
+      const next = new Set(s)
+      if (next.has(domainName)) next.delete(domainName); else next.add(domainName)
+      return next
+    })
+  }
+  isViewLogical(domainName: string): boolean {
+    return this.viewLogicalGroups().has(domainName) ||
+      (this.importMode() && domainName === this.importDomainName())
+  }
 
   readonly filteredSections = computed(() => {
     const term = this.searchTerm().toLowerCase().trim()

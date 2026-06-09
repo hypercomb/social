@@ -77,6 +77,14 @@
               &#x1F576;
             }
           </button>
+          @if (group.domain !== '@logical') {
+            <button class="domain-action view-logical-toggle"
+              (click)="toggleViewLogical(group.domainName)"
+              [class.active]="isViewLogical(group.domainName)"
+              [title]="isViewLogical(group.domainName) ? 'Hide the current logical behaviors from this folder' : 'Show the current logical behaviors alongside this folder (imagine the combined set)'">
+              &#8801;
+            </button>
+          }
           <button class="domain-url" [title]="group.domain"
             (click)="toggleGroupOpen(group.domainName)"
             [class.open]="isGroupOpen(group.domainName)">
