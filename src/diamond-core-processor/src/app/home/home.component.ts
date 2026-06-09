@@ -1293,14 +1293,18 @@ export class HomeComponent implements OnDestroy {
    *  so a rebuild never leaves dev blank. */
   async #seedDefaultBaseline(): Promise<void> {
     const cfg = devDefaultBootstrap()
-    if (!cfg?.domain) return
+    if (!cfg?.byteSource) return
 
     // Let #refreshFromLineage + the persisted-domains effect settle first, so
     // we only seed into a genuinely empty dashboard.
     await new Promise(r => setTimeout(r, 80))
     if (this.domains().length > 0 || this.sections().length > 0) return
 
-    const base = cfg.domain.replace(/\/+$/, '')
+    // byteSource = where we fetch (dev relay); host = the capture-source
+    // identity that names the installer's DOMAIN FOLDER (jwize.com). In prod
+    // these are the same; in dev the bytes are local but the folder is the host.
+    const base = cfg.byteSource.replace(/\/+$/, '')
+    const host = (cfg.host || base).trim()
     let sig = String(cfg.sig ?? '').trim().toLowerCase()
     if (!/^[a-f0-9]{64}$/.test(sig)) {
       // No pinned sig (or stale) → take the domain's current manifest root.
@@ -1309,15 +1313,15 @@ export class HomeComponent implements OnDestroy {
     if (!/^[a-f0-9]{64}$/.test(sig)) return
 
     const section: DomainSection = {
-      domain: base, domainName: 'default', displayDomain: 'default',
+      domain: base, domainName: host, displayDomain: host,
       rootSig: sig, originalRootSig: sig, items: [],
-      loading: true, error: null, installStatus: 'Loading default baseline…',
+      loading: true, error: null, installStatus: `Loading ${host} baseline…`,
       patches: [], enabled: true,
     }
     this.sections.set([section])
 
     try {
-      let root = await this.#resolver.resolveRoot(base, sig, 'default', (p) => {
+      let root = await this.#resolver.resolveRoot(base, sig, host, (p) => {
         section.installStatus = `Installing ${p.phase} ${p.current}/${p.total}`
         this.#refreshSections()
       })
@@ -1327,7 +1331,7 @@ export class HomeComponent implements OnDestroy {
         if (/^[a-f0-9]{64}$/.test(live) && live !== sig) {
           section.rootSig = live
           section.originalRootSig = live
-          root = await this.#resolver.resolveRoot(base, live, 'default')
+          root = await this.#resolver.resolveRoot(base, live, host)
         }
       }
       if (root) {

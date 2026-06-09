@@ -72,17 +72,29 @@ export function defaultHostOrigin(localFallback: string): string {
  * = { domain, sig } in env.js) to point at your own host / a specific
  * baseline.
  */
-export function devDefaultBootstrap(): { domain: string; sig?: string } | null {
+export function devDefaultBootstrap(): { host: string; byteSource: string; sig?: string } | null {
   if (isOnRealHost()) return null
   try {
-    const override = (window as { HYPERCOMB_DEV_DEFAULT?: { domain?: string; sig?: string } })
-      .HYPERCOMB_DEV_DEFAULT
-    if (override?.domain) {
-      return { domain: String(override.domain).replace(/\/+$/, ''), sig: override.sig }
+    const override = (window as {
+      HYPERCOMB_DEV_DEFAULT?: { host?: string; byteSource?: string; domain?: string; sig?: string }
+    }).HYPERCOMB_DEV_DEFAULT
+    if (override?.host || override?.byteSource || override?.domain) {
+      const byteSource = String(override.byteSource ?? override.domain ?? '').replace(/\/+$/, '')
+      const host = String(override.host ?? override.domain ?? byteSource).replace(/^https?:\/\//i, '').replace(/\/+$/, '')
+      if (byteSource) return { host, byteSource, sig: override.sig }
     }
   } catch { /* fall through to hard-coded dev default */ }
   return {
-    domain: 'http://localhost:7777',
+    // host = the capture-source identity → the installer's DOMAIN FOLDER
+    // label. We self-host on jwize.com, so adopted/default content lands in
+    // a `jwize.com/` folder.
+    host: 'jwize.com',
+    // byteSource = where dev actually FETCHES the bytes. jwize.com's live
+    // relay isn't serving content yet, so dev resolves from the local relay
+    // (run: cd hypercomb-relay && node relay.js --port 7777 --memory \
+    //   --content-dir ../hypercomb-web/public/content). In production
+    // host === byteSource (jwize.com serves its own content).
+    byteSource: 'http://localhost:7777',
     sig: '82dfae009ba26dc568be55d2b24833e6e2f8027c2723600248d6bb8467ab3373',
   }
 }
