@@ -54,7 +54,7 @@
       <button class="btn" (click)="addDomain()">{{ 'dcp.install' | t }}</button>
     </div>
 
-    @if (!domains().length) {
+    @if (!domainGrouped().length) {
       <a class="sample-link" (click)="domainInput.set(defaultContentBase)">
         {{ defaultContentBase }}
       </a>
@@ -125,7 +125,7 @@
       </section>
     }
 
-    @if (!domains().length) {
+    @if (!domainGrouped().length) {
       <p class="empty">{{ 'dcp.add-domain-prompt' | t }}</p>
     }
 

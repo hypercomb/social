@@ -52,3 +52,37 @@ export function defaultHostOrigin(localFallback: string): string {
   } catch { /* fall through */ }
   return localFallback
 }
+
+/**
+ * DEV-ONLY default-baseline bootstrap: a hard-coded (domain, sig) so the
+ * installer dashboard is NEVER empty in development — it resolves a default
+ * baseline exactly the way an adopt does (a signature filled out by a
+ * domain). Returns null on a real host; production seeds the baseline from
+ * the deploy's own default signature instead (not yet wired).
+ *
+ *   domain — a host serving the content (layers/bees/deps/resources +
+ *            manifest.json) with CORS. The local relay does this:
+ *              cd hypercomb-relay && node relay.js --port 7777 --memory \
+ *                --content-dir ../hypercomb-web/public/content
+ *   sig    — the baseline's root signature. If it goes stale (a rebuild
+ *            changes content sigs) the caller falls back to the domain's
+ *            current manifest root, so dev never breaks on a rebuild.
+ *
+ * Override either value while developing (or set window.HYPERCOMB_DEV_DEFAULT
+ * = { domain, sig } in env.js) to point at your own host / a specific
+ * baseline.
+ */
+export function devDefaultBootstrap(): { domain: string; sig?: string } | null {
+  if (isOnRealHost()) return null
+  try {
+    const override = (window as { HYPERCOMB_DEV_DEFAULT?: { domain?: string; sig?: string } })
+      .HYPERCOMB_DEV_DEFAULT
+    if (override?.domain) {
+      return { domain: String(override.domain).replace(/\/+$/, ''), sig: override.sig }
+    }
+  } catch { /* fall through to hard-coded dev default */ }
+  return {
+    domain: 'http://localhost:7777',
+    sig: '82dfae009ba26dc568be55d2b24833e6e2f8027c2723600248d6bb8467ab3373',
+  }
+}

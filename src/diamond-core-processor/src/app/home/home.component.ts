@@ -15,7 +15,7 @@ import { PatchListComponent } from '../patch-list/patch-list.component'
 import { DcpCommandLineComponent } from '../command-line/dcp-command-line.component'
 import { LayerEditorComponent } from '../layer-editor/layer-editor.component'
 import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
-import { defaultHostOrigin } from '../core/default-host'
+import { defaultHostOrigin, devDefaultBootstrap } from '../core/default-host'
 import { EffectBus } from '@hypercomb/core'
 import type { BatchPatchResult, PatchResult } from '../core/merkle-patch.service'
 import { isCodeKind, defaultEnabled } from '../core/tree-node'
@@ -227,6 +227,11 @@ export class HomeComponent implements OnDestroy {
     // their owner domain (the root/[domain] view) every time the installer
     // opens, sourced from the sigbag, not from a transient in-memory push.
     void this.#refreshFromLineage()
+
+    // Default baseline: if the dashboard would otherwise be empty, resolve a
+    // hard-coded dev (domain, sig) so we always see files load. The baseline
+    // resolves EXACTLY like an adopt — a signature filled out by a domain.
+    void this.#seedDefaultBaseline()
 
     // #62: post an initial registry snapshot to the hive on load, so the
     // consumer surface has the current logical projection from the start.
@@ -1277,6 +1282,69 @@ export class HomeComponent implements OnDestroy {
       if (found) return found
     }
     return null
+  }
+
+  /** Resolve the dev default baseline (a hard-coded (domain, sig)) into a
+   *  section so the dashboard is never empty in development. Same resolve as
+   *  an adopt: a signature filled out by a domain. No-ops on a real host, and
+   *  only seeds when the dashboard would otherwise be empty (never clobbers
+   *  the user's own persisted domains / adopted-branch sections). If the
+   *  pinned sig is stale it falls back to the domain's current manifest root,
+   *  so a rebuild never leaves dev blank. */
+  async #seedDefaultBaseline(): Promise<void> {
+    const cfg = devDefaultBootstrap()
+    if (!cfg?.domain) return
+
+    // Let #refreshFromLineage + the persisted-domains effect settle first, so
+    // we only seed into a genuinely empty dashboard.
+    await new Promise(r => setTimeout(r, 80))
+    if (this.domains().length > 0 || this.sections().length > 0) return
+
+    const base = cfg.domain.replace(/\/+$/, '')
+    let sig = String(cfg.sig ?? '').trim().toLowerCase()
+    if (!/^[a-f0-9]{64}$/.test(sig)) {
+      // No pinned sig (or stale) → take the domain's current manifest root.
+      sig = (await this.#resolver.fetchAllRootSignatures(base))[0] ?? ''
+    }
+    if (!/^[a-f0-9]{64}$/.test(sig)) return
+
+    const section: DomainSection = {
+      domain: base, domainName: 'default', displayDomain: 'default',
+      rootSig: sig, originalRootSig: sig, items: [],
+      loading: true, error: null, installStatus: 'Loading default baseline…',
+      patches: [], enabled: true,
+    }
+    this.sections.set([section])
+
+    try {
+      let root = await this.#resolver.resolveRoot(base, sig, 'default', (p) => {
+        section.installStatus = `Installing ${p.phase} ${p.current}/${p.total}`
+        this.#refreshSections()
+      })
+      // Pinned sig stale (404 / not in manifest) → retry with the live root.
+      if (!root) {
+        const live = (await this.#resolver.fetchAllRootSignatures(base))[0] ?? ''
+        if (/^[a-f0-9]{64}$/.test(live) && live !== sig) {
+          section.rootSig = live
+          section.originalRootSig = live
+          root = await this.#resolver.resolveRoot(base, live, 'default')
+        }
+      }
+      if (root) {
+        section.rootSig = root.signature ?? section.rootSig
+        section.originalRootSig = root.signature ?? section.originalRootSig
+        const flat = this.#flattenDomainSubfolder(root.children)
+        section.items = flat.items
+      } else {
+        section.error = 'default baseline did not resolve'
+      }
+    } catch (e: unknown) {
+      section.error = e instanceof Error ? e.message : 'failed to load default baseline'
+    } finally {
+      section.loading = false
+      section.installStatus = null
+      this.#refreshSections()
+    }
   }
 
   // auto-load all domains — each root signature in the manifest becomes its own section
