@@ -431,10 +431,14 @@ export class HomeComponent implements OnDestroy {
       const cueName = tileName || sourceHost || displayName
 
       const branchSection: DomainSection = {
-        // domain doubles as the section's idempotency key + scroll target
-        // selector; for branch sections without a known source we synthesize
-        // a `branch://` URI so the section still has a unique identifier.
-        domain:         sourceDomainScoped || `branch://${branchSig}`,
+        // The section's domain == the IMPORTING HOST (https://<displayName>,
+        // e.g. https://jwize.com) so the layer bytes #fetchLayer writes land
+        // in the SAME per-domain OPFS dir the lineage rebuild reads from
+        // (#refreshFromLineage resolves under `https://<host>`). Aligning them
+        // is what makes the adopt "saved": after a reload the subtree resolves
+        // straight from local OPFS, no re-fetch. Falls back to the source
+        // scope / a synthetic branch:// id only when there's no host.
+        domain:         displayName ? `https://${displayName}` : (sourceDomainScoped || `branch://${branchSig}`),
         domainName:     displayName,
         displayDomain:  displayName,
         rootSig:        branchSig,
@@ -870,6 +874,14 @@ export class HomeComponent implements OnDestroy {
     const next = this.domains().filter(d => d !== domain)
     this.domains.set(next)
     localStorage.setItem(DOMAINS_KEY, JSON.stringify(next))
+    // Clear the matched domains from the SIGBAG too, so the removal PERSISTS —
+    // otherwise #refreshFromLineage rebuilds them from the lineage on the next
+    // reload (which is why stale adopts kept coming back). Keyed by the tile
+    // name (domainName), the sigbag's tile key.
+    const removedNames = new Set(this.sections().filter(s => s.domain === domain).map(s => s.domainName))
+    for (const name of removedNames) {
+      if (name) void this.#domainStorage.removeDomain(name).catch(() => { /* non-fatal */ })
+    }
     const remaining = this.sections().filter(s => s.domain !== domain)
     this.sections.set(remaining)
 
