@@ -407,6 +407,31 @@ export class DcpDomainStorage {
     return layer?.refs ?? []
   }
 
+  /** A read-only projection of the registry for the consumer surface
+   *  (hypercomb.io) — what's effectively installed + which domains are
+   *  present/visible. The hive uses `logical` as its render filter (only
+   *  show/activate effectively-installed content) and direct-fetches the
+   *  bytes itself. This is the control-plane → data-plane bridge: DCP owns
+   *  the registry; the hive reads its projection. No bytes here, just the
+   *  effective set + domain visibility. */
+  async getRegistrySnapshot(): Promise<{
+    logical: string[]
+    logicalRootSig: string | null
+    domains: { name: string; visible: boolean; branchCount: number }[]
+    generatedAt: number
+  }> {
+    await this.initialize()
+    const logical = await this.loadLogical()
+    const logicalRootSig = await this.currentRootSig(LOGICAL_LINEAGE)
+    const hive = await this.loadDomainsHive()
+    const domains = hive.map(d => ({
+      name: d.name,
+      visible: this.isDomainVisible(d.name),
+      branchCount: d.branchCount,
+    }))
+    return { logical, logicalRootSig, domains, generatedAt: Date.now() }
+  }
+
   // ── save / branch / home-history (default → v1 → v2 …) ─────────────────────
   //
   // SAVE = freeze the current logical HEAD as a NAMED branch revision in the

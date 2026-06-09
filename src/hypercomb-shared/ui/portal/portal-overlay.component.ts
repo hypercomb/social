@@ -169,6 +169,16 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
       case 'dcp:cancel':
         this.close()
         break
+
+      // #62: registry snapshot from the DCP installer (control plane) →
+      // the hive (data plane). Re-emit on EffectBus (last-value replay, so
+      // late subscribers get it) so the consumer surface can use `logical`
+      // as a render filter — show/activate only effectively-installed
+      // content — and direct-fetch the bytes itself. Origin already
+      // enforced above (must match the installer iframe's origin).
+      case 'hc:registry-snapshot':
+        EffectBus.emit('registry:snapshot', data)
+        break
     }
   }
 

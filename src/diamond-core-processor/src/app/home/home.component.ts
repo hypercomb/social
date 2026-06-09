@@ -225,6 +225,10 @@ export class HomeComponent implements OnDestroy {
     // opens, sourced from the sigbag, not from a transient in-memory push.
     void this.#refreshFromLineage()
 
+    // #62: post an initial registry snapshot to the hive on load, so the
+    // consumer surface has the current logical projection from the start.
+    void this.#postRegistrySnapshot()
+
     // Dev-only: expose the lineage-storage service on window so the driver
     // test can exercise the domains / host-domains / settings sigbags
     // against the real service code. Guarded to loopback so it never
@@ -418,6 +422,8 @@ export class HomeComponent implements OnDestroy {
                     ? { ...s, domain: `https://${owner}`, domainName: owner, displayDomain: owner }
                     : s
                 ))
+                // #62: a new adoption changed the registry — tell the hive.
+                void this.#postRegistrySnapshot()
               })
               .catch(e => console.warn('[home] addDomainBranch failed', e))
           } catch (e) { console.warn('[home] recordInLineage failed', e) }
@@ -904,8 +910,27 @@ export class HomeComponent implements OnDestroy {
       const nowEnabled = this.#toggleState.isEnabled(node.id)
       void this.#domainStorage.setFeatureEnabled(branchSig, nowEnabled)
         .then(() => this.#domainStorage.recomputeLogical())
-        .then(() => this.#logicalVersion.update(v => v + 1))
+        .then(() => {
+          this.#logicalVersion.update(v => v + 1)
+          void this.#postRegistrySnapshot()   // #62: tell the hive the logical changed
+        })
         .catch(e => console.warn('[home] logical recompute on toggle failed', e))
+    }
+  }
+
+  /** #62: post the registry snapshot (the logical projection + domain
+   *  visibility) to the hive parent, so the consumer surface can use it as a
+   *  render filter (show/activate only effectively-installed content) and
+   *  direct-fetch the bytes itself. DCP runs in a cross-origin iframe inside
+   *  the hive; postMessage is the bridge. Standalone (not framed) →
+   *  window.parent === window, so this harmlessly posts to self. Fire after
+   *  any registry/logical change. */
+  async #postRegistrySnapshot(): Promise<void> {
+    try {
+      const snapshot = await this.#domainStorage.getRegistrySnapshot()
+      window.parent?.postMessage({ type: 'hc:registry-snapshot', ...snapshot }, '*')
+    } catch (e) {
+      console.warn('[home] postRegistrySnapshot failed', e)
     }
   }
 
