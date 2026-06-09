@@ -4,6 +4,7 @@ import type { LocalizationService } from './i18n.service'
 import type { Navigation } from './navigation'
 import { OpfsTreeLogger } from './tree-logger'
 import './install-monitor'
+import './registry-snapshot'
 import type { BootstrapHistory } from './bootstrap-history'
 import { Store } from './store'
 

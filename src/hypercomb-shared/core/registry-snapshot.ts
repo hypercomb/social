@@ -1,0 +1,67 @@
+// hypercomb-shared/core/registry-snapshot.ts
+//
+// The hive's read-only view of the DCP installer's registry projection (#62).
+//
+// DCP (the installer = control plane) owns the registry — domains, the
+// logical install, toggles, eggs. The hive (consumer surface = data plane)
+// needs to know the EFFECTIVE installed set so it can render/activate only
+// what's actually installed, then direct-fetch the bytes itself.
+//
+// They're cross-origin (DCP iframe ↔ hive parent), so the bridge is
+// postMessage: DCP posts 'hc:registry-snapshot' on every logical change;
+// portal-overlay (hive side) re-emits it on EffectBus as 'registry:snapshot'
+// (last-value replay). This store subscribes, caches the latest snapshot,
+// and exposes it as the hive's RENDER FILTER:
+//   - isInLogical(sig)     — is this content effectively installed?
+//   - isDomainVisible(dom) — did the participant hide this domain?
+//
+// Fail-open by design: until a snapshot arrives (the installer hasn't
+// spoken yet, or the participant never opened it), everything reads as
+// "in logical / visible" so the hive never hides the user's own content
+// waiting on the installer. The filter only ever NARROWS once the installer
+// has projected an explicit set.
+
+import { EffectBus } from '@hypercomb/core'
+
+export interface RegistrySnapshot {
+  logical: string[]
+  logicalRootSig: string | null
+  domains: { name: string; visible: boolean; branchCount: number }[]
+  generatedAt: number
+}
+
+export class RegistrySnapshotStore extends EventTarget {
+  #snapshot: RegistrySnapshot | null = null
+  #logical = new Set<string>()
+
+  constructor() {
+    super()
+    EffectBus.on<RegistrySnapshot>('registry:snapshot', (snap) => {
+      if (!snap || !Array.isArray(snap.logical)) return
+      this.#snapshot = snap
+      this.#logical = new Set(snap.logical.map(s => String(s ?? '').toLowerCase()))
+      this.dispatchEvent(new CustomEvent('change'))
+    })
+  }
+
+  /** The latest snapshot, or null if none received yet. */
+  get snapshot(): RegistrySnapshot | null { return this.#snapshot }
+
+  /** Is a content sig in the effective (logical) install? Fail-open: true
+   *  when no snapshot has arrived yet, so the hive renders before the
+   *  installer has spoken. Once a snapshot exists, only its `logical` set
+   *  passes. */
+  isInLogical(sig: string): boolean {
+    if (!this.#snapshot) return true
+    return this.#logical.has(String(sig ?? '').toLowerCase())
+  }
+
+  /** Is a domain visible per the participant's installer visibility toggle?
+   *  Default true when unknown / no snapshot. */
+  isDomainVisible(domain: string): boolean {
+    const d = this.#snapshot?.domains?.find(x => x.name === domain)
+    return d ? d.visible : true
+  }
+}
+
+register('@hypercomb.social/RegistrySnapshot', new RegistrySnapshotStore())
