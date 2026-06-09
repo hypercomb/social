@@ -483,11 +483,34 @@ export class HomeComponent implements OnDestroy {
       } catch { /* swallow + retry — bytes may not have landed yet */ }
       await new Promise(r => setTimeout(r, 200))
     }
-    // Bytes never arrived. Surface as error; user can re-adopt or pull
-    // host-side to retry.
+    // Bytes never arrived → the branch is an UNDELIVERED EGG: known (we hold
+    // the sig in the lineage) but not hatched — no endpoint has delivered
+    // the bytes yet. Show it as an egg "waiting for bytes", NOT a hard error:
+    // it's durable + re-fetchable, never "failed", just "not yet delivered".
+    // A later fetch (re-adopt, or an endpoint appearing for this sig) hatches
+    // it. Preserve any visual-context nodes.
     this.sections.update(secs => secs.map(s =>
       s.rootSig === branchSig
-        ? { ...s, loading: false, error: 'Branch content unavailable — adoption may have failed', installStatus: null }
+        ? {
+            ...s,
+            loading: false,
+            error: null,
+            installStatus: null,
+            items: [
+              {
+                id: `egg:${branchSig.slice(0, 12)}`,
+                name: s.domainName || branchSig.slice(0, 8),
+                kind: 'layer',
+                lineage: s.domainName || '',
+                children: [],
+                expanded: false,
+                loaded: true,
+                depth: 0,
+                hatchBlocker: 'undelivered',
+              } as TreeNode,
+              ...s.items.filter(it => it.visualContext),
+            ],
+          }
         : s
     ))
   }
