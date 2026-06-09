@@ -20,6 +20,16 @@ export type RuntimeInitializerOptions = {
   onMeshStateChange?: (enabled: boolean) => void
 }
 
+// Dev-build defaults, applied on a LOOPBACK origin only (the operator's own
+// dev machine) and only when the value is unset — so two localhost tabs join
+// the same swarm (same host + same room secret) with zero manual setup, while
+// a real deployed origin (non-loopback) is never affected. An env.js
+// HYPERCOMB_DEV_HOST still overrides the host; an explicit clear still empties
+// the secret. The mesh relay's own loopback default (nostr-mesh.drone) lands
+// on the same jwize.com relay.
+const DEV_DEFAULT_HOST = 'jwize.com'
+const DEV_DEFAULT_SECRET = 'downtown'
+
 // Idempotent: callers in different parts of the boot sequence (web's
 // main.ts, then App constructor → CoreAdapter.initialize) used to each
 // call initializeRuntime, double-registering EffectBus listeners and
@@ -55,32 +65,41 @@ const _runInitializeRuntime = async (
   //      loaded me from localhost:4250." env.js is gitignored so the value
   //      is per-developer, not committed.
   //
-  //   3. Loopback origin and no dev-host global — leave empty. The operator
-  //      sets it via the mesh-modal once and it persists in localStorage.
-  //      Avoids mislabeling the operator as "localhost:4250."
+  //   3. Loopback origin and no dev-host global — default to DEV_DEFAULT_HOST
+  //      (jwize.com) so the operator's dev tabs auto-resolve against the host
+  //      with zero config. The mesh-modal still lets them change it.
   try {
-    if (!localStorage.getItem('hc:nostrmesh:self-domain')) {
-      const rawOrigin = String(window.location.origin ?? '')
-      const isLoopback = /^https?:\/\/(localhost|127(?:\.\d+){3}|\[?::1\]?)(:|\/|$)/i.test(rawOrigin)
-      const normalize = (raw: string): string => raw
-        .replace(/^wss?:\/\//i, '')
-        .replace(/^https?:\/\//i, '')
-        .replace(/\/+$/, '')
-        .toLowerCase()
+    const rawOrigin = String(window.location.origin ?? '')
+    const isLoopback = /^https?:\/\/(localhost|127(?:\.\d+){3}|\[?::1\]?)(:|\/|$)/i.test(rawOrigin)
+    const normalize = (raw: string): string => raw
+      .replace(/^wss?:\/\//i, '')
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/+$/, '')
+      .toLowerCase()
 
+    // ── host (self-domain) ──
+    if (!localStorage.getItem('hc:nostrmesh:self-domain')) {
       let candidate = ''
       if (!isLoopback) {
         // Case 1 — real domain. Use the page's origin.
         candidate = normalize(rawOrigin)
       } else {
-        // Case 2 — loopback with a dev-host override. env.js sets this
-        // global per-developer (file is gitignored).
+        // Case 2 — env.js per-developer override (gitignored); Case 3 — the
+        // dev-build default host.
         const devHost = normalize(String((window as { HYPERCOMB_DEV_HOST?: string }).HYPERCOMB_DEV_HOST ?? ''))
-        if (devHost) candidate = devHost
-        // Case 3 — leave empty; the operator sets it via mesh-modal.
+        candidate = devHost || DEV_DEFAULT_HOST
       }
-
       if (candidate) localStorage.setItem('hc:nostrmesh:self-domain', candidate)
+    }
+
+    // ── location secret (dev-build default) ──
+    // On loopback, seed the room secret so two localhost tabs land in the same
+    // swarm room without typing it. Respects an explicit clear; never touches
+    // a real origin.
+    if (isLoopback) {
+      const cleared = (() => { try { return localStorage.getItem('hc:secret-cleared') === '1' } catch { return false } })()
+      const secretStore = get('@hypercomb.social/SecretStore') as { value: string; set: (s: string) => void } | undefined
+      if (secretStore && !secretStore.value && !cleared) secretStore.set(DEV_DEFAULT_SECRET)
     }
   } catch { /* private mode — readers handle the empty case */ }
 
