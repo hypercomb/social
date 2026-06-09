@@ -220,6 +220,19 @@ export class DcpDomainStorage {
     return this.rootAtMarker(lineage, nums[nums.length - 1])
   }
 
+  // Serialize ALL read-modify-write lineage mutations. Each mutation reads the
+  // current HEAD, derives a new root, and appends a marker; if two run
+  // concurrently they both read the SAME HEAD, each derives a root carrying
+  // only ITS change, and the last marker wins — the other change is silently
+  // lost (this is why a bulk remove of several tiles only dropped the last
+  // one). Routing every mutator through this single chain makes them atomic.
+  #writeLock: Promise<unknown> = Promise.resolve()
+  #withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.#writeLock.then(fn, fn)
+    this.#writeLock = run.then(() => undefined, () => undefined)
+    return run
+  }
+
   /** Append a marker pointing at rootSig. One marker = one undoable action. */
   async #appendMarker(lineage: string, rootSig: string): Promise<number> {
     const dir = await this.#lineageDir(lineage)
@@ -252,29 +265,33 @@ export class DcpDomainStorage {
 
   /** Add a named tile to a hive lineage. Idempotent — no marker if present. */
   async addTile(lineage: string, tileName: string): Promise<string | null> {
-    const key = normalizeDomainKey(tileName)
-    if (!key) return null
-    const root = await this.#currentHiveRoot(lineage)
-    if (await this.#findTile(root, key)) return this.currentRootSig(lineage)
-    const tileSig = await this.#signJson({ name: key, children: [] } as TileLayer)
-    const newRootSig = await this.#signJson({ name: lineage, children: [...root.children, tileSig] })
-    await this.#appendMarker(lineage, newRootSig)
-    return newRootSig
+    return this.#withWriteLock(async () => {
+      const key = normalizeDomainKey(tileName)
+      if (!key) return null
+      const root = await this.#currentHiveRoot(lineage)
+      if (await this.#findTile(root, key)) return this.currentRootSig(lineage)
+      const tileSig = await this.#signJson({ name: key, children: [] } as TileLayer)
+      const newRootSig = await this.#signJson({ name: lineage, children: [...root.children, tileSig] })
+      await this.#appendMarker(lineage, newRootSig)
+      return newRootSig
+    })
   }
 
   /** Remove a tile from a hive lineage by appending a new root that omits it.
    *  History retained (earlier markers still reference it); HEAD drops it —
    *  removal-as-append, consistent with linear append-only history. */
   async removeTile(lineage: string, tileName: string): Promise<string | null> {
-    const key = normalizeDomainKey(tileName)
-    if (!key) return null
-    const root = await this.#currentHiveRoot(lineage)
-    const found = await this.#findTile(root, key)
-    if (!found) return this.currentRootSig(lineage)   // not present — no-op
-    const newChildren = root.children.filter(c => c !== found.sig)
-    const newRootSig = await this.#signJson({ name: lineage, children: newChildren })
-    await this.#appendMarker(lineage, newRootSig)
-    return newRootSig
+    return this.#withWriteLock(async () => {
+      const key = normalizeDomainKey(tileName)
+      if (!key) return null
+      const root = await this.#currentHiveRoot(lineage)
+      const found = await this.#findTile(root, key)
+      if (!found) return this.currentRootSig(lineage)   // not present — no-op
+      const newChildren = root.children.filter(c => c !== found.sig)
+      const newRootSig = await this.#signJson({ name: lineage, children: newChildren })
+      await this.#appendMarker(lineage, newRootSig)
+      return newRootSig
+    })
   }
 
   /** Adopt a branch under a tile (creating the tile if absent). Cascades to a
@@ -282,34 +299,36 @@ export class DcpDomainStorage {
    *  content sigs this branch contributes to the logical union. */
   async addBranch(lineage: string, tileName: string, branchSig: string, at: string[], label?: string, refs?: string[]):
     Promise<string | null> {
-    const key = normalizeDomainKey(tileName)
-    const sig = String(branchSig ?? '').trim().toLowerCase()
-    if (!key || !SIG_RE.test(sig)) return null
-    const root = await this.#currentHiveRoot(lineage)
-    const existing = await this.#findTile(root, key)
-    const tile: TileLayer = existing?.layer ?? { name: key, children: [] }
+    return this.#withWriteLock(async () => {
+      const key = normalizeDomainKey(tileName)
+      const sig = String(branchSig ?? '').trim().toLowerCase()
+      if (!key || !SIG_RE.test(sig)) return null
+      const root = await this.#currentHiveRoot(lineage)
+      const existing = await this.#findTile(root, key)
+      const tile: TileLayer = existing?.layer ?? { name: key, children: [] }
 
-    for (const entrySig of tile.children) {
-      const entry = await this.#loadJson<BranchEntryLayer>(entrySig)
-      if (entry && entry.branchSig === sig && JSON.stringify(entry.at) === JSON.stringify(at)) {
-        return this.currentRootSig(lineage)  // idempotent
+      for (const entrySig of tile.children) {
+        const entry = await this.#loadJson<BranchEntryLayer>(entrySig)
+        if (entry && entry.branchSig === sig && JSON.stringify(entry.at) === JSON.stringify(at)) {
+          return this.currentRootSig(lineage)  // idempotent
+        }
       }
-    }
 
-    const cleanRefs = Array.isArray(refs)
-      ? refs.map(r => String(r ?? '').trim().toLowerCase()).filter(r => SIG_RE.test(r))
-      : []
-    const entrySig = await this.#signJson({
-      name: label || sig.slice(0, 8), branchSig: sig, at: Array.isArray(at) ? at : [],
-      ...(cleanRefs.length ? { refs: cleanRefs } : {}),
-    } as BranchEntryLayer)
-    const newTileSig = await this.#signJson({ name: key, children: [...tile.children, entrySig] })
-    const newChildren = existing
-      ? root.children.map(c => (c === existing.sig ? newTileSig : c))
-      : [...root.children, newTileSig]
-    const newRootSig = await this.#signJson({ name: lineage, children: newChildren })
-    await this.#appendMarker(lineage, newRootSig)
-    return newRootSig
+      const cleanRefs = Array.isArray(refs)
+        ? refs.map(r => String(r ?? '').trim().toLowerCase()).filter(r => SIG_RE.test(r))
+        : []
+      const entrySig = await this.#signJson({
+        name: label || sig.slice(0, 8), branchSig: sig, at: Array.isArray(at) ? at : [],
+        ...(cleanRefs.length ? { refs: cleanRefs } : {}),
+      } as BranchEntryLayer)
+      const newTileSig = await this.#signJson({ name: key, children: [...tile.children, entrySig] })
+      const newChildren = existing
+        ? root.children.map(c => (c === existing.sig ? newTileSig : c))
+        : [...root.children, newTileSig]
+      const newRootSig = await this.#signJson({ name: lineage, children: newChildren })
+      await this.#appendMarker(lineage, newRootSig)
+      return newRootSig
+    })
   }
 
   /** Load a hive lineage's tiles — "load it like any other hive and choose". */
