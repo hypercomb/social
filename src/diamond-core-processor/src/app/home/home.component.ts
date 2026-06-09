@@ -1205,7 +1205,12 @@ export class HomeComponent implements OnDestroy {
       if (!isRoot) {
         const sig = String(node.signature ?? '').trim().toLowerCase()
         const depDomain = normalizeDomainKey(String(node.lineage ?? '').split('/')[0])
-        if (/^[a-f0-9]{64}$/.test(sig) && depDomain && depDomain !== owner && !seen.has(`${depDomain}:${sig}`)) {
+        // Only a REAL cross-domain dependency counts — the dep's domain must
+        // look like a domain (contain a dot, e.g. "diamondcoreprocessor.com").
+        // A content tree's lineage segments are tile names ("coaching",
+        // "intake") with no dot; without this guard every nested content tile
+        // got filed as its own top-level domain, flooding the installer.
+        if (/^[a-f0-9]{64}$/.test(sig) && depDomain && depDomain.includes('.') && depDomain !== owner && !seen.has(`${depDomain}:${sig}`)) {
           seen.add(`${depDomain}:${sig}`)
           await this.#domainStorage.addDomainBranch(depDomain, sig, [], node.name)
           recorded++
