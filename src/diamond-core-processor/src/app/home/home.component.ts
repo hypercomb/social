@@ -484,6 +484,13 @@ export class HomeComponent implements OnDestroy {
           // #74: now that the content is resolved + expanded, scroll to it
           // and briefly highlight so the participant lands ON the new node.
           setTimeout(() => this.#scrollSectionIntoView(sectionDomain, true), 60)
+          // #71: record cross-domain dependencies under THEIR own silos.
+          const sec = this.sections().find(s => s.rootSig === branchSig)
+          if (sec) {
+            void this.recordTreeDeps(root, sec.domainName)
+              .then(n => { if (n > 0) void this.#postRegistrySnapshot() })
+              .catch(e => console.warn('[home] recordTreeDeps failed', e))
+          }
           return
         }
       } catch { /* swallow + retry — bytes may not have landed yet */ }
@@ -939,6 +946,35 @@ export class HomeComponent implements OnDestroy {
     const contains = (nodes: TreeNode[]): boolean =>
       nodes.some(n => n.id === node.id || contains(n.children))
     return this.sections().find(s => contains(s.items))
+  }
+
+  /** #71: record cross-domain DEPENDENCIES under THEIR respective domain
+   *  silos. Walks a resolved subtree; for every node whose owning domain
+   *  (derived from its `lineage` namespace) differs from the branch's
+   *  owner, records its sig in that OTHER domain's tile — so a branch from
+   *  alice.com that depends on a bee from bob.com puts bob's bee in
+   *  bob.com's silo (auto-creating it), not lumped under alice. Realizes
+   *  "resolve the dependencies from their respective domains" at the
+   *  lineage layer. Public so the resolve path + driver tests can call it.
+   *  Returns the number of cross-domain deps recorded. */
+  async recordTreeDeps(root: TreeNode, ownerDomain: string): Promise<number> {
+    const owner = normalizeDomainKey(ownerDomain)
+    const seen = new Set<string>()
+    let recorded = 0
+    const visit = async (node: TreeNode, isRoot: boolean): Promise<void> => {
+      if (!isRoot) {
+        const sig = String(node.signature ?? '').trim().toLowerCase()
+        const depDomain = normalizeDomainKey(String(node.lineage ?? '').split('/')[0])
+        if (/^[a-f0-9]{64}$/.test(sig) && depDomain && depDomain !== owner && !seen.has(`${depDomain}:${sig}`)) {
+          seen.add(`${depDomain}:${sig}`)
+          await this.#domainStorage.addDomainBranch(depDomain, sig, [], node.name)
+          recorded++
+        }
+      }
+      for (const c of (node.children ?? [])) await visit(c, false)
+    }
+    await visit(root, true)
+    return recorded
   }
 
   /** Hatch an egg — clear its blocker and activate/retry it.
