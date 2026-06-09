@@ -143,15 +143,20 @@ export class HomeComponent implements OnDestroy {
   // all nodes flattened for toggle lookups
   readonly toggleMap = computed(() => {
     const map = new Map<string, boolean>()
-    const walk = (nodes: TreeNode[]) => {
+    const walk = (nodes: TreeNode[], adopted: boolean) => {
       for (const n of nodes) {
-        // Kind-aware absent-default: adopted CODE reads OFF, DATA reads ON,
-        // so the tree shows "adopt all tiles, functions off" out of the box.
-        map.set(n.id, this.#toggleState.isEnabled(n.id, defaultEnabled(n.kind)))
-        walk(n.children)
+        // ADOPTED content is OFF by default at EVERY level (tiles AND
+        // functions) — you adopt the files, then opt each behavior in. Outside
+        // an adopted subtree, the kind-aware default applies (own DATA reads
+        // ON, CODE OFF). `adopted` latches on the freshly-adopted root and
+        // flows to all descendants.
+        const inAdopted = adopted || !!n.freshlyAdopted
+        const def = inAdopted ? false : defaultEnabled(n.kind)
+        map.set(n.id, this.#toggleState.isEnabled(n.id, def))
+        walk(n.children, inAdopted)
       }
     }
-    for (const s of this.sections()) walk(s.items)
+    for (const s of this.sections()) walk(s.items, false)
     return map
   })
 

@@ -56,7 +56,10 @@ export class TreeViewComponent {
   hatch = output<TreeNode>()
 
   isEmptyFolder(node: TreeNode): boolean {
-    return (node.kind === 'layer' || node.kind === 'domain') && node.loaded && node.children.length === 0
+    // Only hide empty DOMAIN placeholders. A leaf LAYER with no children is a
+    // real content tile (a page like "intake"/"outcomes"), not an empty
+    // folder — hiding it dropped the deepest level of an adopted tree.
+    return node.kind === 'domain' && node.loaded && node.children.length === 0
   }
 
   isEnabled(node: TreeNode): boolean {

@@ -330,10 +330,23 @@ import type { TreeNode } from '../core/tree-node'
       background: rgba(74, 111, 165, 0.08);
     }
 
-    /* info button — hidden on desktop, visible on mobile */
+    /* info / review-code button — opens the detail (doc, source, audit) for a
+       code item (bee/worker/drone/dependency). Visible on desktop again (was
+       hidden); mobile gets the larger tap-target below. */
     .info-btn {
-      display: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: none;
+      border: 1px solid rgba(0,0,0,0.08);
+      border-radius: 2px;
+      cursor: pointer;
+      font-size: 12px;
+      color: #4a6fa5;
+      padding: 1px 5px;
+      flex-shrink: 0;
     }
+    .info-btn:hover { background: rgba(74, 111, 165, 0.08); }
 
     @media (max-width: 600px) {
       .row {
