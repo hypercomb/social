@@ -48,12 +48,23 @@ export class DcpStore {
     this.#patches = await this.#root.getDirectoryHandle(DcpStore.PATCHES_DIRECTORY, { create: true })
   }
 
+  /** OPFS directory names can't contain `/` or `:`, so a scoped domain like
+   *  `https://jwize.com` or `branch://<sig>` must be reduced to a safe key
+   *  (`jwize.com`). Both the live-adopt write and the lineage-rebuild read go
+   *  through here, so they always land in the same per-domain dir. */
+  #domainKey(domain: string): string {
+    return (String(domain || 'default')
+      .replace(/^[a-z][a-z0-9+.-]*:\/\//i, '')   // strip scheme (https://, branch://, wss://)
+      .replace(/[^a-z0-9._-]/gi, '_')             // remaining illegal chars → _
+      .toLowerCase()) || 'default'
+  }
+
   async domainLayersDir(domain: string): Promise<FileSystemDirectoryHandle> {
-    return await this.#layers.getDirectoryHandle(domain, { create: true })
+    return await this.#layers.getDirectoryHandle(this.#domainKey(domain), { create: true })
   }
 
   async domainPatchesDir(domain: string): Promise<FileSystemDirectoryHandle> {
-    return await this.#patches.getDirectoryHandle(domain, { create: true })
+    return await this.#patches.getDirectoryHandle(this.#domainKey(domain), { create: true })
   }
 
   /**

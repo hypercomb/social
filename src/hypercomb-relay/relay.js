@@ -54,6 +54,11 @@ function parseArgs(argv) {
     writers: (() => { const e = String(process.env.WRITERS ?? '').trim(); return e ? e.split(',').map(normalizePubkey).filter(Boolean) : null })(),
     // Hard cap on a single PUT body (default 50 MB) — prevents disk-fill abuse.
     maxBodyBytes: 52_428_800,
+    // DEV ONLY: skip writer-authorization on PUT (sha256 content-integrity is
+    // STILL enforced — bytes must hash to the sig). Lets a local browser stage
+    // its own authored content on a dev relay without NIP-98 key setup. Never
+    // use on a public host.
+    devOpenWrites: false,
     // SPA serving REMOVED — the relay is a slim STORAGE/MESH host only.
     //
     // Under the full-split model, the installer's code-serving role is fixed
@@ -78,6 +83,7 @@ function parseArgs(argv) {
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i]
     if (a === '--memory') { args.memory = true; continue }
+    if (a === '--dev-open-writes') { args.devOpenWrites = true; continue }
     const next = argv[i + 1]
     if (a === '--port' && next) { args.port = Number(next); i++ }
     else if (a === '--pubkeys' && next) { args.pubkeys = next.split(',').map(normalizePubkey).filter(Boolean); i++ }
@@ -573,6 +579,9 @@ function respondText(res, code, msg) {
 // Reads stay open (tryServeContent); only writes are gated.
 
 function verifyWriteAuth(req) {
+  // DEV ONLY: bypass writer-auth (sha256(body)===sig is still enforced by the
+  // caller, so content can't be forged — only the WHO check is skipped).
+  if (cfg.devOpenWrites) return { ok: true, pubkey: 'dev-open' }
   if (writers.size === 0) return { ok: false, reason: 'writes not enabled (no authorized writers configured)' }
   const header = String(req.headers['authorization'] || '').trim()
   const m = /^Nostr\s+(.+)$/i.exec(header)
