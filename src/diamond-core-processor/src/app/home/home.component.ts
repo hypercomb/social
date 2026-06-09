@@ -217,17 +217,37 @@ export class HomeComponent implements OnDestroy {
     return [logicalGroup, ...libraryGroups]
   })
 
-  /** The current active logical view: the MERGE of every library's content
-   *  into one root-level hierarchy (the .com domain layer dissolved; same-
-   *  named folders combined). This is the "mixed" result — what actually runs
-   *  in hypercomb.io — as opposed to the per-domain source siblings. Reactive
-   *  to the sections + (later) the enable selections. */
+  /** The current active logical view: the MERGE of every library's
+   *  EFFECTIVELY-ENABLED content into one root-level hierarchy (the .com
+   *  domain layer dissolved; same-named folders combined). This is what
+   *  actually RUNS in hypercomb.io — DISABLED features are filtered out (they
+   *  live in their owning-domain sibling, where you re-enable them). Reactive
+   *  to toggles (a toggle bumps sections via #refreshSections, recomputing
+   *  this). */
   readonly logicalViewItems = computed<TreeNode[]>(() => {
     // every source sibling EXCEPT the synthetic logical view itself; the
     // jwize.com import marker + unresolved adopt eggs contribute [] naturally.
     const sources = this.sections().filter(s => s.domain !== '@logical')
-    return this.#mergeTrees(sources.map(s => s.items))
+    const enabled = sources.map(s => this.#enabledSubtree(s.items, true))
+    return this.#mergeTrees(enabled)
   })
+
+  /** Keep only the EFFECTIVELY-ENABLED subtree: a node survives iff its own
+   *  toggle is on AND its parent chain is on (parentEnabled). An enabled LEAF
+   *  is kept; a folder is kept only if it has surviving descendants (so the
+   *  logical view never shows empty branches for disabled features). */
+  #enabledSubtree(nodes: TreeNode[], parentEnabled: boolean): TreeNode[] {
+    const out: TreeNode[] = []
+    for (const n of (nodes ?? [])) {
+      const selfOn = this.#toggleState.isEnabled(n.id, defaultEnabled(n.kind))
+      const eff = parentEnabled && selfOn
+      const kids = this.#enabledSubtree(n.children ?? [], eff)
+      if (kids.length > 0 || (eff && !(n.children?.length))) {
+        out.push({ ...n, children: kids })
+      }
+    }
+    return out
+  }
 
   /** Accordion: the one top-level sibling whose tree is open (mutually
    *  exclusive — look at one level at a time). Empty = all collapsed. */
