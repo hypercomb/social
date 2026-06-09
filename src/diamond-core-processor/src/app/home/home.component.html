@@ -61,7 +61,7 @@
     }
 
     <!-- domain sections -->
-    @for (group of domainGrouped(); track group.domain) {
+    @for (group of domainGrouped(); track group.domainName) {
       <section class="domain-section" [attr.data-domain]="group.domain">
         <div class="domain-header" [class.domain-hidden]="!isDomainVisible(group.domain)">
           <button class="domain-action visibility-toggle"

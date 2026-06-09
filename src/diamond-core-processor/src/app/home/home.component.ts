@@ -562,38 +562,35 @@ export class HomeComponent implements OnDestroy {
           getKnownDomains?: (sig: string) => string[]
           noteDomain?: (domain: string) => void
         }
-        const recordInLineage = (broker: BrokerLike): void => {
+        const recordInLineage = (): void => {
           try {
-            const domains = broker.getKnownDomains?.(branchSig) ?? []
-            const owner = String(domains[0] ?? '').trim().toLowerCase()
-            if (!owner) {
-              console.info('[home] adopt owner not yet attributed; deferring lineage record for', branchSig.slice(0, 12))
-              return
-            }
+            // SAVE the adopted layer's signature into the IMPORTING HOST's
+            // sigbag — the SAME folder the section renders under (displayName,
+            // e.g. jwize.com). You import INTO your host at your lineage level.
+            // Recording the ADDRESS is independent of fetching the bytes (the
+            // egg model: known now, hatches when the bytes arrive) — so this
+            // runs IMMEDIATELY, not gated on the broker walk succeeding (a
+            // browser-published tile may have no advertised owner domain at
+            // all, which is why the old getKnownDomains[0] path deferred
+            // forever and nothing persisted). tileName is stored as the branch
+            // entry's name so the rebuild reads the tile ("dolphin"), not the
+            // layer's internal name.
+            // Same precedence as the section's displayName (importing host
+            // first), so the sigbag tile == the rendered folder.
+            const owner = (devDefaultBootstrap()?.host || ownerDomain || tileName || '').trim().toLowerCase()
+            if (!owner) return
             void this.#domainStorage.addDomainBranch(owner, branchSig, at, tileName || undefined)
               .then(() => {
-                console.info('[home] recorded adopt in lineage:', owner, '←', branchSig.slice(0, 12), 'at', at.join('/') || '/')
-                // #60: reflect the lineage's domain organization in the
-                // render. The adopt:meta handler created the branch's
-                // section under a provisional `branch://<sig>` bucket
-                // (owner wasn't known at hash-time). Now that the walk has
-                // resolved the OWNER domain, reclassify the section under
-                // it so domainGrouped() groups the branch in the
-                // root/[domain] view (e.g. under "alice.com") — the
-                // per-domain source view you adopt into. Matched by
-                // rootSig so it finds the right section regardless of the
-                // in-flight resolveBranchSection poll.
-                this.sections.update(secs => secs.map(s =>
-                  s.rootSig === branchSig
-                    ? { ...s, domain: `https://${owner}`, domainName: owner, displayDomain: owner }
-                    : s
-                ))
+                console.info('[home] recorded adopt in', owner, 'sigbag ←', branchSig.slice(0, 12), 'at', at.join('/') || '/')
                 // #62: a new adoption changed the registry — tell the hive.
                 void this.#postRegistrySnapshot()
               })
               .catch(e => console.warn('[home] addDomainBranch failed', e))
           } catch (e) { console.warn('[home] recordInLineage failed', e) }
         }
+
+        // Persist the adopt into the host sigbag NOW (independent of bytes).
+        recordInLineage()
 
         const startWalk = (broker: BrokerLike): void => {
           // Byte path: seed the publisher's domain as a fetch source BEFORE
@@ -605,7 +602,6 @@ export class HomeComponent implements OnDestroy {
           }
           if (broker?.adopt) {
             void broker.adopt(branchSig)
-              .then(() => recordInLineage(broker))
               .catch(e =>
                 console.warn('[home] broker.adopt failed for branch', branchSig.slice(0, 12), e)
               )
@@ -670,7 +666,9 @@ export class HomeComponent implements OnDestroy {
             items: [
               {
                 id: `egg:${branchSig.slice(0, 12)}`,
-                name: s.domainName || branchSig.slice(0, 8),
+                // an un-hatched adopt still reads as the TILE you adopted
+                // ("dolphin"), not the host folder name.
+                name: s.adoptLabel || s.domainName || branchSig.slice(0, 8),
                 kind: 'layer',
                 lineage: s.domainName || '',
                 children: [],
@@ -678,6 +676,7 @@ export class HomeComponent implements OnDestroy {
                 loaded: true,
                 depth: 0,
                 hatchBlocker: 'undelivered',
+                freshlyAdopted: true,
               } as TreeNode,
               ...s.items.filter(it => it.visualContext),
             ],
@@ -962,7 +961,13 @@ export class HomeComponent implements OnDestroy {
           ))
         }
       }
-      for (const s of fresh) void this.#resolveBranchSection(s.rootSig, s.domain)
+      // Pass the dev byteSource so the rebuild can RE-FETCH the branch from
+      // the host (the live adopt fetched into memory; on reload the bytes may
+      // not be in local OPFS). Without it the section can only poll local and
+      // falls to an egg named after the domain. In prod (no dev bootstrap)
+      // byteSource is undefined → poll-local → broker-adopted bytes or egg.
+      const byteSource = (devDefaultBootstrap()?.byteSource || '').trim() || undefined
+      for (const s of fresh) void this.#resolveBranchSection(s.rootSig, s.domain, byteSource)
     } catch (e) {
       console.warn('[home] #refreshFromLineage failed', e)
     }
