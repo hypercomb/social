@@ -1418,9 +1418,11 @@ export class HomeComponent implements OnDestroy {
       for (const child of domainChildren) {
         siblings.push(mk(base, child.name, child.signature ?? rootSig, child.children, null))
       }
-      // the host/import source — a sibling created on import (NOT a wrapper
-      // for the domains). Opens to the current import root.
-      siblings.push(mk(base, host, rootSig, [], 'open to current import'))
+      // the host/import source — a sibling created on import. Opening it (the
+      // accordion action) reveals the current import; adopted items (e.g.
+      // dolphin) nest INSIDE here, not at the root. No label — "open to
+      // current import" is what clicking it DOES, not text on the node.
+      siblings.push(mk(base, host, rootSig, [], null))
 
       // keep any pre-existing (adopted) sections, drop the loading placeholder,
       // then append the default's siblings; the template sorts for display.

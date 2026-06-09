@@ -11,7 +11,7 @@ import type { TreeNode } from '../core/tree-node'
   imports: [ToggleComponent, DiamondIconComponent],
   template: `
     @if (visible()) {
-      <div class="row" [class.pending]="node().pending" [class.visual-context]="node().visualContext" [class.egg]="node().hatchBlocker" [style.--depth]="node().depth">
+      <div class="row" [class.pending]="node().pending" [class.visual-context]="node().visualContext" [class.egg]="node().hatchBlocker" [class.domain-tinted]="domainHue() !== null" [style.--depth]="node().depth" [style.--domain-hue]="domainHue()">
         @if (!node().visualContext && !node().hatchBlocker) {
           <!-- Enable switch at EVERY level — adopt/enable from any node (the
                root you imported to, a collection, or a single behavior).
@@ -114,6 +114,17 @@ import type { TreeNode } from '../core/tree-node'
 
     .row:hover {
       background: rgba(0,0,0,0.02);
+    }
+
+    /* Per-domain tint — a colored left edge + faint background keyed to the
+       node's source domain, so in the mixed logical view you can tell which
+       domain each feature belongs to. */
+    .row.domain-tinted {
+      border-left: 3px solid hsl(var(--domain-hue, 220), 58%, 60%);
+      background: hsla(var(--domain-hue, 220), 58%, 55%, 0.05);
+    }
+    .row.domain-tinted:hover {
+      background: hsla(var(--domain-hue, 220), 58%, 55%, 0.11);
     }
 
     /* Visual-context: a read-only item already in the logical install from
@@ -406,6 +417,19 @@ export class TreeRowComponent implements OnInit, OnDestroy {
     const parts = n.lineage.split('/')
     if (parts.length <= 1) return n.lineage + ' /'
     return parts.slice(0, -1).join('/') + ' / ' + parts[parts.length - 1] + ' /'
+  })
+
+  /** A stable hue (0–359) derived from the node's SOURCE DOMAIN (the first
+   *  dotted segment of its lineage, e.g. "diamondcoreprocessor.com"). Tints
+   *  the row so that in the mixed logical view you can see which domain each
+   *  feature belongs to. Null when no domain can be derived (uncolored). */
+  domainHue = computed<number | null>(() => {
+    const lineage = this.node().lineage ?? ''
+    const seg = lineage.split('/').find(s => s.includes('.')) || lineage.split('/')[0] || ''
+    if (!seg) return null
+    let h = 0
+    for (let i = 0; i < seg.length; i++) h = (h * 31 + seg.charCodeAt(i)) % 360
+    return h
   })
 
   splitClassName = computed(() => {
