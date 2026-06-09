@@ -938,6 +938,12 @@ export class HomeComponent implements OnDestroy {
       if (!hive.length) return
       const fresh: DomainSection[] = []
       for (const domain of hive) {
+        // Skip junk pseudo-domains left by the old recordTreeDeps bug: a real
+        // host has a dot (jwize.com); a content tile mis-filed as a domain
+        // (coaching, intake, alumni) has none. Ignoring them on rebuild means
+        // no manual cleanup is needed and they stop flooding the installer +
+        // rendering as non-dolphin content at the root.
+        if (!String(domain.name ?? '').includes('.')) continue
         const branches = await this.#domainStorage.loadDomainBranches(domain.name)
         for (const b of branches) {
           const sig = String(b.branchSig ?? '').trim().toLowerCase()
