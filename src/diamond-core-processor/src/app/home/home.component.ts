@@ -23,6 +23,9 @@ import type { BeeDocEntry, TreeNode, TreeNodeKind } from '../core/tree-node'
 
 const DOMAINS_KEY = 'dcp.domains'
 
+/** The always-first sibling: the active/logical install view. */
+const LOGICAL_VIEW_NAME = 'current active logical view'
+
 export interface DomainSection {
   domain: string
   domainName: string
@@ -177,8 +180,22 @@ export class HomeComponent implements OnDestroy {
         group.sections = group.sections.slice(0, 1)
       }
     }
-    return Array.from(groups.values())
+    // Top-level siblings, sorted: the current-active-logical view first, then
+    // domains alphabetically (diamondcoreprocessor.com, jwize.com, miro.com…).
+    return Array.from(groups.values()).sort((a, b) => {
+      if (a.domainName === LOGICAL_VIEW_NAME) return -1
+      if (b.domainName === LOGICAL_VIEW_NAME) return 1
+      return a.domainName.localeCompare(b.domainName)
+    })
   })
+
+  /** Accordion: the one top-level sibling whose tree is open (mutually
+   *  exclusive — look at one level at a time). Empty = all collapsed. */
+  readonly openGroup = signal<string>(LOGICAL_VIEW_NAME)
+  toggleGroupOpen(domainName: string): void {
+    this.openGroup.update(cur => cur === domainName ? '' : domainName)
+  }
+  isGroupOpen(domainName: string): boolean { return this.openGroup() === domainName }
 
   readonly filteredSections = computed(() => {
     const term = this.searchTerm().toLowerCase().trim()
@@ -1331,41 +1348,65 @@ export class HomeComponent implements OnDestroy {
     }
     if (!/^[a-f0-9]{64}$/.test(sig)) return
 
-    const section: DomainSection = {
+    const loading: DomainSection = {
       domain: base, domainName: host, displayDomain: host,
       rootSig: sig, originalRootSig: sig, items: [],
       loading: true, error: null, installStatus: `Loading ${host} baseline…`,
       patches: [], enabled: true,
     }
-    this.sections.set([section])
+    this.sections.set([...this.sections(), loading])
 
     try {
       let root = await this.#resolver.resolveRoot(base, sig, host, (p) => {
-        section.installStatus = `Installing ${p.phase} ${p.current}/${p.total}`
+        loading.installStatus = `Installing ${p.phase} ${p.current}/${p.total}`
         this.#refreshSections()
       })
       // Pinned sig stale (404 / not in manifest) → retry with the live root.
       if (!root) {
         const live = (await this.#resolver.fetchAllRootSignatures(base))[0] ?? ''
         if (/^[a-f0-9]{64}$/.test(live) && live !== sig) {
-          section.rootSig = live
-          section.originalRootSig = live
           root = await this.#resolver.resolveRoot(base, live, host)
         }
       }
-      if (root) {
-        section.rootSig = root.signature ?? section.rootSig
-        section.originalRootSig = root.signature ?? section.originalRootSig
-        const flat = this.#flattenDomainSubfolder(root.children)
-        section.items = flat.items
-      } else {
-        section.error = 'default baseline did not resolve'
+      if (!root) {
+        loading.loading = false
+        loading.installStatus = null
+        loading.error = 'default baseline did not resolve'
+        this.#refreshSections()
+        return
       }
+
+      const rootSig = root.signature ?? sig
+      const children = root.children ?? []
+      // The content's OWN domains (diamondcoreprocessor.com, miro.com) are
+      // HOISTED to top-level SIBLINGS — never nested under the host folder.
+      const domainChildren = children.filter(c => c.kind === 'layer' && c.name.includes('.'))
+      const mk = (domain: string, name: string, rs: string, items: TreeNode[],
+                  status: string | null): DomainSection => ({
+        domain, domainName: name, displayDomain: name,
+        rootSig: rs, originalRootSig: rs, items,
+        loading: false, error: null, installStatus: status, patches: [], enabled: true,
+      })
+
+      const siblings: DomainSection[] = []
+      // 1) the current active logical view (the baseline as it runs now)
+      siblings.push(mk('@logical', LOGICAL_VIEW_NAME, rootSig, children, null))
+      // 2) one sibling PER content domain — its features directly inside
+      for (const child of domainChildren) {
+        siblings.push(mk(base, child.name, child.signature ?? rootSig, child.children, null))
+      }
+      // 3) the host/import source — a sibling created on import (NOT a wrapper
+      //    for the domains). Opens to the current import root.
+      siblings.push(mk(base, host, rootSig, [], 'open to current import'))
+
+      // keep any pre-existing (adopted) sections, drop the loading placeholder,
+      // then append the default's siblings; the template sorts for display.
+      const others = this.sections().filter(s => s !== loading && s.domain !== base && s.domain !== '@logical')
+      this.sections.set([...others, ...siblings])
     } catch (e: unknown) {
-      section.error = e instanceof Error ? e.message : 'failed to load default baseline'
-    } finally {
-      section.loading = false
-      section.installStatus = null
+      loading.loading = false
+      loading.installStatus = null
+      loading.error = e instanceof Error ? e.message : 'failed to load default baseline'
       this.#refreshSections()
     }
   }

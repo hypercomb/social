@@ -77,7 +77,15 @@
               &#x1F576;
             }
           </button>
-          <span class="domain-url" [title]="group.domain">{{ group.domainName }}/</span>
+          <button class="domain-url" [title]="group.domain"
+            (click)="toggleGroupOpen(group.domainName)"
+            [class.open]="isGroupOpen(group.domainName)">
+            <span class="group-chevron">{{ isGroupOpen(group.domainName) ? '▾' : '▸' }}</span>
+            {{ group.domainName }}/
+            @if (group.sections[0]?.installStatus && !group.sections[0]?.loading) {
+              <span class="group-note">{{ group.sections[0]?.installStatus }}</span>
+            }
+          </button>
           <span class="header-sig">{{ group.sections[0]?.rootSig }}</span>
           @if (group.hiddenVersionCount > 0 || showAllVersions()) {
             <button class="domain-action versions-toggle"
@@ -91,6 +99,7 @@
           <button class="remove" (click)="removeDomain(group.domain)">&times;</button>
         </div>
 
+        @if (isGroupOpen(group.domainName)) {
         @for (section of group.sections; track section.rootSig) {
           <div class="package-row">
             @if (section.loading) {
@@ -121,6 +130,7 @@
               [originalRootSig]="section.originalRootSig"
               (switchRoot)="onSwitchRoot(section, $event)" />
           </div>
+        }
         }
       </section>
     }
