@@ -196,6 +196,18 @@ export class HomeComponent implements OnDestroy {
         loading: false, error: null, installStatus: null, patches: [], enabled: true,
       }],
     }
+
+    // IMPORT mode: while adopting, the importing domain shows the LOGICAL PANE
+    // (the merged mix) inside itself — "what's here + what you're adding" —
+    // instead of its own bare content, so you preview the combined result
+    // before committing. Normal package management leaves it untouched.
+    if (this.importMode() && this.importDomainName()) {
+      const g = libraryGroups.find(x => x.domainName === this.importDomainName())
+      if (g?.sections[0]) {
+        g.sections = [{ ...g.sections[0], items: this.logicalViewItems() }]
+      }
+    }
+
     return [logicalGroup, ...libraryGroups]
   })
 
@@ -215,9 +227,18 @@ export class HomeComponent implements OnDestroy {
    *  exclusive — look at one level at a time). Empty = all collapsed. */
   readonly openGroup = signal<string>(LOGICAL_VIEW_NAME)
   toggleGroupOpen(domainName: string): void {
+    this.importMode.set(false)   // any manual navigation leaves import mode
     this.openGroup.update(cur => cur === domainName ? '' : domainName)
   }
   isGroupOpen(domainName: string): boolean { return this.openGroup() === domainName }
+
+  /** IMPORT mode: set when you arrive via an adopt (a #branch handoff), so
+   *  the installer opens the IMPORTING domain (not the logical-view sibling)
+   *  and renders the logical PANE — the merged "what's here + what you're
+   *  adding" view — INSIDE that domain. Distinct from normal package
+   *  management; cleared on any manual navigation (toggleGroupOpen). */
+  readonly importMode = signal(false)
+  readonly importDomainName = signal('')
 
   readonly filteredSections = computed(() => {
     const term = this.searchTerm().toLowerCase().trim()
@@ -426,6 +447,16 @@ export class HomeComponent implements OnDestroy {
       const tileName = (params.get('label') ?? '').trim()
 
       queueMicrotask(() => {
+        // IMPORT mode: arriving by adopt opens the IMPORTING domain (the
+        // host you're importing into) and shows the logical pane inside it —
+        // "what's here + what you're adding" — not the logical-view sibling.
+        const importHost = (ownerDomain || devDefaultBootstrap()?.host || '').trim()
+        if (importHost) {
+          this.importMode.set(true)
+          this.importDomainName.set(importHost)
+          this.openGroup.set(importHost)
+        }
+
         // Pass the publisher's domain so the branch organizes under its
         // capture-source DOMAIN FOLDER (where it came from), same as the
         // default baseline. Empty for a browser-published tile → the handler
