@@ -23,8 +23,9 @@ import type { BeeDocEntry, TreeNode, TreeNodeKind } from '../core/tree-node'
 
 const DOMAINS_KEY = 'dcp.domains'
 
-/** The always-first sibling: the active/logical install view. */
-const LOGICAL_VIEW_NAME = 'current active logical view'
+/** The always-first sibling: the active/logical install view — this IS the
+ *  data plane (the hive), so it's labelled by the hive domain. */
+const LOGICAL_VIEW_NAME = 'hypercomb.io'
 
 export interface DomainSection {
   domain: string
