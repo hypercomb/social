@@ -180,13 +180,35 @@ export class HomeComponent implements OnDestroy {
         group.sections = group.sections.slice(0, 1)
       }
     }
-    // Top-level siblings, sorted: the current-active-logical view first, then
-    // domains alphabetically (diamondcoreprocessor.com, jwize.com, miro.com…).
-    return Array.from(groups.values()).sort((a, b) => {
-      if (a.domainName === LOGICAL_VIEW_NAME) return -1
-      if (b.domainName === LOGICAL_VIEW_NAME) return 1
-      return a.domainName.localeCompare(b.domainName)
-    })
+    // Library/source siblings, sorted alphabetically (diamondcoreprocessor.com,
+    // jwize.com, miro.com…).
+    const libraryGroups = Array.from(groups.values())
+      .sort((a, b) => a.domainName.localeCompare(b.domainName))
+
+    // The "current active logical view" is NOT a domain — it's the MERGED mix
+    // of all enabled libraries, combined into one root-level hierarchy (no
+    // .coms; same-named folders fold together). Prepended as the first sibling.
+    const logicalGroup: DomainGroup = {
+      domain: '@logical', domainName: LOGICAL_VIEW_NAME, hiddenVersionCount: 0,
+      sections: [{
+        domain: '@logical', domainName: LOGICAL_VIEW_NAME, displayDomain: LOGICAL_VIEW_NAME,
+        rootSig: '', originalRootSig: '', items: this.logicalViewItems(),
+        loading: false, error: null, installStatus: null, patches: [], enabled: true,
+      }],
+    }
+    return [logicalGroup, ...libraryGroups]
+  })
+
+  /** The current active logical view: the MERGE of every library's content
+   *  into one root-level hierarchy (the .com domain layer dissolved; same-
+   *  named folders combined). This is the "mixed" result — what actually runs
+   *  in hypercomb.io — as opposed to the per-domain source siblings. Reactive
+   *  to the sections + (later) the enable selections. */
+  readonly logicalViewItems = computed<TreeNode[]>(() => {
+    // every source sibling EXCEPT the synthetic logical view itself; the
+    // jwize.com import marker + unresolved adopt eggs contribute [] naturally.
+    const sources = this.sections().filter(s => s.domain !== '@logical')
+    return this.#mergeTrees(sources.map(s => s.items))
   })
 
   /** Accordion: the one top-level sibling whose tree is open (mutually
@@ -1389,14 +1411,15 @@ export class HomeComponent implements OnDestroy {
       })
 
       const siblings: DomainSection[] = []
-      // 1) the current active logical view (the baseline as it runs now)
-      siblings.push(mk('@logical', LOGICAL_VIEW_NAME, rootSig, children, null))
-      // 2) one sibling PER content domain — its features directly inside
+      // one sibling PER content domain — its features directly inside. These
+      // are the SOURCE libraries; the "current active logical view" is a
+      // separate computed MERGE of what's enabled across them (see
+      // logicalViewItems), so it never appears here as a static section.
       for (const child of domainChildren) {
         siblings.push(mk(base, child.name, child.signature ?? rootSig, child.children, null))
       }
-      // 3) the host/import source — a sibling created on import (NOT a wrapper
-      //    for the domains). Opens to the current import root.
+      // the host/import source — a sibling created on import (NOT a wrapper
+      // for the domains). Opens to the current import root.
       siblings.push(mk(base, host, rootSig, [], 'open to current import'))
 
       // keep any pre-existing (adopted) sections, drop the loading placeholder,
@@ -1554,6 +1577,29 @@ export class HomeComponent implements OnDestroy {
    * name looks like a domain (contains a dot), promote its children up and return
    * the domain name for display.
    */
+  /** Merge several trees into one by NAME at each level — same-named nodes
+   *  fold together (their children merge recursively). This is how the logical
+   *  view combines all libraries into one root-level hierarchy: e.g. two
+   *  libraries that each contribute a "tools" folder yield ONE "tools" with the
+   *  union of both. First occurrence wins for a node's own metadata; children
+   *  are unioned. Pure (clones nodes) so it never mutates the source sections. */
+  #mergeTrees(groups: TreeNode[][]): TreeNode[] {
+    const order: string[] = []
+    const byName = new Map<string, TreeNode>()
+    for (const nodes of groups) {
+      for (const n of (nodes ?? [])) {
+        const existing = byName.get(n.name)
+        if (existing) {
+          existing.children = this.#mergeTrees([existing.children, n.children ?? []])
+        } else {
+          order.push(n.name)
+          byName.set(n.name, { ...n, children: this.#mergeTrees([n.children ?? []]) })
+        }
+      }
+    }
+    return order.map(name => byName.get(name)!)
+  }
+
   #flattenDomainSubfolder(items: TreeNode[]): { items: TreeNode[], displayDomain: string | null } {
     if (items.length === 1 && items[0].kind === 'layer' && items[0].name.includes('.')) {
       return { items: items[0].children, displayDomain: items[0].name }
