@@ -84,6 +84,38 @@ export class TreeResolverService {
   }
 
   /**
+   * Resolve an arbitrary BRANCH (a layer signature, not necessarily a manifest
+   * package) by FETCHING it from a domain: download the branch layer + walk
+   * its refs recursively, caching layers to OPFS as it goes. Unlike
+   * resolveRoot this does NOT run the package installer (a branch is not a
+   * package) — it fetches only what the tree needs to render (layers; bees/
+   * deps stay lazy for analysis/run). This is the adopt byte path: "send the
+   * signature → fetch from the domain → the tree fills." Returns null if the
+   * branch layer can't be fetched (no endpoint serves it → egg).
+   */
+  async resolveBranchFromDomain(contentBase: string, branchSig: string, domain: string): Promise<TreeNode | null> {
+    const base = (contentBase ?? '').replace(/\/+$/, '')
+    const sig = (branchSig ?? '').trim().toLowerCase()
+    if (!base || !/^[a-f0-9]{64}$/.test(sig)) return null
+
+    await this.#store.initialize()
+    this.#depLineage.clear()
+
+    const rootLayer = await this.#fetchLayer(base, sig, sig, domain)
+    if (!rootLayer) return null
+
+    const root = this.#buildNode(rootLayer, sig, '', undefined, 0)
+    await this.#expandAll(root, base, sig, domain)
+
+    const allSigs = this.#collectSignatures(root)
+    if (allSigs.length > 0 && this.#auditor.endpoints.length > 0) {
+      const auditResults = await this.#auditor.auditBatch(allSigs)
+      this.#applyAuditResults(root, auditResults)
+    }
+    return root
+  }
+
+  /**
    * Resolve a tree from local OPFS only — no network calls.
    * Used after patching to rebuild the tree from a new root sig
    * where all layers/bees/deps are already stored locally.

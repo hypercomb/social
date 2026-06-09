@@ -389,9 +389,13 @@ export class HomeComponent implements OnDestroy {
       }
       this.sections.update(secs => [...secs, branchSection])
 
-      // Resolve the walked subtree from local OPFS in parallel. broker.adopt
-      // is already fetching the bytes; this just waits for them to land.
-      void this.#resolveBranchSection(branchSig, branchSection.domain)
+      // Resolve the branch by FETCHING it from its byte source — "send the
+      // signature → fetch → fill." byteSource = the dev relay (devDefault-
+      // Bootstrap) in development, else the publisher's advertised domain.
+      // If neither serves it (browser-published, no endpoint), the resolver
+      // falls back to polling local OPFS and ultimately an undelivered egg.
+      const byteSource = (devDefaultBootstrap()?.byteSource || sourceDomainScoped || '').trim()
+      void this.#resolveBranchSection(branchSig, branchSection.domain, byteSource)
 
       // Scroll once Angular renders the new section element.
       setTimeout(() => this.#scrollSectionIntoView(branchSection.domain), 100)
@@ -562,34 +566,26 @@ export class HomeComponent implements OnDestroy {
    *  populate the section's items. Bounded retries — if the walk doesn't
    *  complete in time the section surfaces an error and the user can
    *  decide whether to retry the adoption. */
-  async #resolveBranchSection(branchSig: string, sectionDomain: string): Promise<void> {
+  async #resolveBranchSection(branchSig: string, sectionDomain: string, byteSource?: string): Promise<void> {
+    // BYTE PATH — "send the signature → fetch from the domain → the tree
+    // fills." If we know where the bytes live, FETCH the branch (layer + refs)
+    // from that domain first, so the subtree appears rather than waiting for
+    // the mesh broker to maybe deliver. resolveBranchFromDomain caches layers
+    // to OPFS as it walks.
+    if (byteSource) {
+      try {
+        const root = await this.#resolver.resolveBranchFromDomain(byteSource, branchSig, sectionDomain)
+        if (root) { this.#fillBranchSection(branchSig, sectionDomain, root); return }
+      } catch (e) { console.warn('[home] branch fetch from domain failed', e) }
+    }
+
+    // Fallback: poll local OPFS — the mesh broker may have delivered the bytes
+    // out-of-band (browser-published content with no HTTP endpoint).
     const MAX_RETRIES = 30 // ~6s at 200ms cadence
     for (let i = 0; i < MAX_RETRIES; i++) {
       try {
         const root = await this.#resolver.resolveFromLocal(branchSig, sectionDomain)
-        if (root) {
-          this.sections.update(secs => secs.map(s =>
-            s.rootSig === branchSig
-              // Preserve any visual-context nodes (#77-B) already appended to
-              // the section — resolution replaces only the resolved root, not
-              // the read-only context of other domains' features. #74:
-              // auto-EXPAND the adopted branch root so its features are
-              // visible the moment you land — "explore in realtime".
-              ? { ...s, items: [{ ...root, expanded: true }, ...s.items.filter(it => it.visualContext)], loading: false, installStatus: null }
-              : s
-          ))
-          // #74: now that the content is resolved + expanded, scroll to it
-          // and briefly highlight so the participant lands ON the new node.
-          setTimeout(() => this.#scrollSectionIntoView(sectionDomain, true), 60)
-          // #71: record cross-domain dependencies under THEIR own silos.
-          const sec = this.sections().find(s => s.rootSig === branchSig)
-          if (sec) {
-            void this.recordTreeDeps(root, sec.domainName)
-              .then(n => { if (n > 0) void this.#postRegistrySnapshot() })
-              .catch(e => console.warn('[home] recordTreeDeps failed', e))
-          }
-          return
-        }
+        if (root) { this.#fillBranchSection(branchSig, sectionDomain, root); return }
       } catch { /* swallow + retry — bytes may not have landed yet */ }
       await new Promise(r => setTimeout(r, 200))
     }
@@ -623,6 +619,27 @@ export class HomeComponent implements OnDestroy {
           }
         : s
     ))
+  }
+
+  /** Populate a branch section with its resolved tree — auto-expanded so its
+   *  features are visible the moment it fills (whether the bytes came from a
+   *  domain fetch or local OPFS). Preserves visual-context nodes; scrolls to
+   *  it; records cross-domain deps. */
+  #fillBranchSection(branchSig: string, sectionDomain: string, root: TreeNode): void {
+    this.sections.update(secs => secs.map(s =>
+      s.rootSig === branchSig
+        ? { ...s, items: [{ ...root, expanded: true }, ...s.items.filter(it => it.visualContext)], loading: false, installStatus: null }
+        : s
+    ))
+    // #74: scroll to + briefly highlight the freshly-filled branch.
+    setTimeout(() => this.#scrollSectionIntoView(sectionDomain, true), 60)
+    // #71: record cross-domain dependencies under THEIR own silos.
+    const sec = this.sections().find(s => s.rootSig === branchSig)
+    if (sec) {
+      void this.recordTreeDeps(root, sec.domainName)
+        .then(n => { if (n > 0) void this.#postRegistrySnapshot() })
+        .catch(e => console.warn('[home] recordTreeDeps failed', e))
+    }
   }
 
   /** Add a domain to the trusted-domains list without going through the
