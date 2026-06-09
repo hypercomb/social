@@ -1298,10 +1298,11 @@ export class HomeComponent implements OnDestroy {
   }
 
   /** Resolve the dev default baseline (a hard-coded (domain, sig)) into a
-   *  section so the dashboard is never empty in development. Same resolve as
-   *  an adopt: a signature filled out by a domain. No-ops on a real host, and
-   *  only seeds when the dashboard would otherwise be empty (never clobbers
-   *  the user's own persisted domains / adopted-branch sections). If the
+   *  section — the user's always-present starting point, the same resolve as
+   *  an adopt (a signature filled out by a domain). Shows even alongside
+   *  adopted sections (it's the baseline, not an empty-dashboard fallback);
+   *  idempotent against its own section so it never double-seeds. No-ops on a
+   *  real host (production seeds from the deploy's default signature). If the
    *  pinned sig is stale it falls back to the domain's current manifest root,
    *  so a rebuild never leaves dev blank. */
   async #seedDefaultBaseline(): Promise<void> {
@@ -1309,15 +1310,20 @@ export class HomeComponent implements OnDestroy {
     if (!cfg?.byteSource) return
 
     // Let #refreshFromLineage + the persisted-domains effect settle first, so
-    // we only seed into a genuinely empty dashboard.
+    // the idempotency check below sees any already-present default section.
     await new Promise(r => setTimeout(r, 80))
-    if (this.domains().length > 0 || this.sections().length > 0) return
 
     // byteSource = where we fetch (dev relay); host = the capture-source
     // identity that names the installer's DOMAIN FOLDER (jwize.com). In prod
     // these are the same; in dev the bytes are local but the folder is the host.
     const base = cfg.byteSource.replace(/\/+$/, '')
     const host = (cfg.host || base).trim()
+
+    // The baseline is ALWAYS present — it shows even alongside adopted
+    // sections (it's the user's starting point, not a fallback for an empty
+    // dashboard). Skip only if the default's OWN section is already seeded
+    // (idempotency), so it never double-seeds across reloads / hashchange.
+    if (this.sections().some(s => s.domain === base)) return
     let sig = String(cfg.sig ?? '').trim().toLowerCase()
     if (!/^[a-f0-9]{64}$/.test(sig)) {
       // No pinned sig (or stale) → take the domain's current manifest root.
