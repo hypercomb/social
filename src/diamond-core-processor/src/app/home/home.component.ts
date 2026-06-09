@@ -934,6 +934,62 @@ export class HomeComponent implements OnDestroy {
     }
   }
 
+  /** Find the section that contains a node (top-level OR nested). */
+  #findSectionForNode(node: TreeNode): DomainSection | undefined {
+    const contains = (nodes: TreeNode[]): boolean =>
+      nodes.some(n => n.id === node.id || contains(n.children))
+    return this.sections().find(s => contains(s.items))
+  }
+
+  /** Hatch an egg — clear its blocker and activate/retry it.
+   *
+   *  'untrusted' → the EXPLICIT ALLOW that bypasses the (absent) community
+   *  check. There is no community yet, so the participant is the authority:
+   *  we surface the trust prompt (allow-once / allow-always / deny); on
+   *  allow, the egg hatches — its feature is enabled and the logical
+   *  recomputes. This is the deliberate "I allow this to run" path.
+   *
+   *  'undelivered' → re-attempt resolution; the bytes may have arrived since
+   *  (an endpoint appeared). If they still don't, it falls back to an egg. */
+  async onHatchEgg(node: TreeNode): Promise<void> {
+    const section = this.#findSectionForNode(node)
+
+    if (node.hatchBlocker === 'untrusted') {
+      const sourceDomain = this.#findSectionDomain(node) || (section?.domainName ?? '')
+      interface TrustLike {
+        check: (domains: string[]) => Promise<{ allow: boolean; addToCommunity: boolean }>
+      }
+      const trust = (window as { ioc?: { get: (k: string) => unknown } }).ioc
+        ?.get?.('@hypercomb.social/TrustService') as TrustLike | undefined
+      // Explicit allow — surface the prompt. With no source domain we still
+      // allow (the participant deliberately clicked Allow on a clearly
+      // marked untrusted egg).
+      let allowed = true
+      if (trust?.check && sourceDomain) {
+        allowed = (await trust.check([sourceDomain])).allow
+      }
+      if (!allowed) return   // still an egg
+
+      node.hatchBlocker = undefined
+      this.#refreshSections()
+      if (section && /^[a-f0-9]{64}$/.test(section.rootSig)) {
+        void this.#domainStorage.setFeatureEnabled(section.rootSig, true)
+          .then(() => this.#domainStorage.recomputeLogical())
+          .then(() => { this.#logicalVersion.update(v => v + 1); void this.#postRegistrySnapshot() })
+          .catch(e => console.warn('[home] hatch recompute failed', e))
+      }
+      return
+    }
+
+    if (node.hatchBlocker === 'undelivered' && section) {
+      node.hatchBlocker = undefined
+      this.sections.update(secs => secs.map(s =>
+        s.rootSig === section.rootSig ? { ...s, loading: true, installStatus: 'Re-fetching…' } : s
+      ))
+      void this.#resolveBranchSection(section.rootSig, section.domain)
+    }
+  }
+
   /** Return the branchSig (section rootSig) iff `node` is a top-level
    *  section item (the adopted branch root). Sub-nodes return '' so the
    *  logical recompute fires only at branch granularity. */

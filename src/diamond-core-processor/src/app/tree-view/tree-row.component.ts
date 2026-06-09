@@ -47,6 +47,16 @@ import type { TreeNode } from '../core/tree-node'
           }
         </button>
 
+        @if (node().hatchBlocker) {
+          <button class="egg-hatch-btn" [class]="node().hatchBlocker!"
+            (click)="hatch.emit(node()); $event.stopPropagation()"
+            [title]="node().hatchBlocker === 'untrusted'
+              ? 'Allow this to run — explicit override (there is no community verification yet, so you are the authority)'
+              : 'Retry fetching this content from an endpoint'">
+            {{ node().hatchBlocker === 'untrusted' ? 'Allow' : 'Retry' }}
+          </button>
+        }
+
         @if (splitClassName()) {
           <span class="kind-label" [class]="docKind()">{{ splitClassName() }}</span>
         }
@@ -143,6 +153,20 @@ import type { TreeNode } from '../core/tree-node'
       background: rgba(200, 90, 90, 0.16);
       color: rgba(155, 45, 45, 0.95);
     }
+    .egg-hatch-btn {
+      font-size: 0.6rem;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      padding: 2px 9px;
+      border-radius: 3px;
+      cursor: pointer;
+      flex-shrink: 0;
+      border: 1px solid currentColor;
+      background: transparent;
+    }
+    .egg-hatch-btn.untrusted { color: rgba(155, 45, 45, 0.95); }
+    .egg-hatch-btn.undelivered { color: rgba(150, 100, 35, 0.95); }
+    .egg-hatch-btn:hover { background: rgba(0,0,0,0.04); }
 
     /* Pending: this row is a placeholder for content still being fetched.
        Muted text, gentle pulse, no edit/toggle actions reachable until
@@ -362,6 +386,10 @@ export class TreeRowComponent implements OnInit, OnDestroy {
   expandToggle = output<TreeNode>()
   promoteToPackage = output<TreeNode>()
   openEditor = output<TreeNode>()
+  /** Request to HATCH an egg — explicitly clear its blocker. For an
+   *  'untrusted' egg this is the explicit ALLOW that bypasses the (absent)
+   *  community check; for 'undelivered' it's a re-fetch attempt. */
+  hatch = output<TreeNode>()
 
   visible = signal(true)
 
