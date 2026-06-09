@@ -2,6 +2,24 @@
 
 export type TreeNodeKind = 'domain' | 'layer' | 'bee' | 'dependency' | 'worker' | 'drone'
 
+/**
+ * Code kinds EXECUTE (bees, deps, workers, drones); data kinds (domain,
+ * layer, tile, resource) are inert content. This split is the basis for
+ * "adopt all tiles, leave functions off": adopted DATA defaults visible/on,
+ * adopted CODE defaults OFF until the participant explicitly enables it
+ * (which is also where the trust gate fires). One definition, used by both
+ * the toggle DISPLAY default and the activation gate so they never diverge.
+ */
+export function isCodeKind(kind: TreeNodeKind | undefined): boolean {
+  return kind === 'bee' || kind === 'dependency' || kind === 'worker' || kind === 'drone'
+}
+
+/** The absent-flag default for a node's toggle: adopted CODE is OFF until
+ *  explicitly enabled; adopted DATA is ON. */
+export function defaultEnabled(kind: TreeNodeKind | undefined): boolean {
+  return !isCodeKind(kind)
+}
+
 export interface AuditResult {
   signature: string
   approvedBy: string[]

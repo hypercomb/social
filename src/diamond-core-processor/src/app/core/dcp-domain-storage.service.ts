@@ -561,11 +561,16 @@ export class DcpDomainStorage {
   // Turning a feature off and recomputing the logical is the union-recompute:
   // the feature's silo leaves the enabled set; shared/own content survives.
 
-  /** Default ENABLED unless explicitly turned off (absent key = on). */
+  /** Default DISABLED — adopted features are OFF until the participant
+   *  explicitly turns them on (absent key = off; explicit `true` = on).
+   *  Adoption brings content into the tree WITHOUT activating it; the
+   *  participant opts each feature in. The DEFAULT lineage (own base) is
+   *  always-in the logical regardless of these flags (see computeLogical-
+   *  Install), so this gate only governs ADOPTED domain features. */
   isFeatureEnabled(branchSig: string): boolean {
     const sig = String(branchSig ?? '').trim().toLowerCase()
     if (!SIG_RE.test(sig)) return false
-    return this.getSetting<boolean>(`feature.${sig}`, true) !== false
+    return this.getSetting<boolean>(`feature.${sig}`, false) === true
   }
 
   /** Set + persist a feature's enabled flag (participant-local, sticky).
@@ -574,14 +579,15 @@ export class DcpDomainStorage {
     const sig = String(branchSig ?? '').trim().toLowerCase()
     if (!SIG_RE.test(sig)) return Promise.resolve(null)
     if (!this.#settingsCache) this.#settingsCache = {}
-    if (enabled) delete this.#settingsCache[`feature.${sig}`]    // absent = enabled
-    else this.#settingsCache[`feature.${sig}`] = false
+    if (enabled) this.#settingsCache[`feature.${sig}`] = true     // explicit on
+    else delete this.#settingsCache[`feature.${sig}`]             // absent = off (default)
     return this.#persistSettings()
   }
 
   /** The set of currently-enabled branch sigs across all domain silos —
    *  derived from the participant-local feature flags. Feeds the logical
-   *  recompute. (Default-enabled branches are included unless turned off.) */
+   *  recompute. (Adopted branches are OFF until explicitly enabled, so this
+   *  is empty right after adoption — features opt in one at a time.) */
   async enabledBranchSigs(): Promise<Set<string>> {
     await this.initialize()
     const set = new Set<string>()

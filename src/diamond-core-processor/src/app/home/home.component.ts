@@ -18,6 +18,7 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
 import { defaultHostOrigin } from '../core/default-host'
 import { EffectBus } from '@hypercomb/core'
 import type { BatchPatchResult, PatchResult } from '../core/merkle-patch.service'
+import { isCodeKind, defaultEnabled } from '../core/tree-node'
 import type { BeeDocEntry, TreeNode, TreeNodeKind } from '../core/tree-node'
 
 const DOMAINS_KEY = 'dcp.domains'
@@ -135,7 +136,9 @@ export class HomeComponent implements OnDestroy {
     const map = new Map<string, boolean>()
     const walk = (nodes: TreeNode[]) => {
       for (const n of nodes) {
-        map.set(n.id, this.#toggleState.isEnabled(n.id))
+        // Kind-aware absent-default: adopted CODE reads OFF, DATA reads ON,
+        // so the tree shows "adopt all tiles, functions off" out of the box.
+        map.set(n.id, this.#toggleState.isEnabled(n.id, defaultEnabled(n.kind)))
         walk(n.children)
       }
     }
@@ -271,7 +274,7 @@ export class HomeComponent implements OnDestroy {
     // TreeResolver.resolveFromLocal until the walk completes, then
     // populates section.items. Failure after the retry budget surfaces
     // as section.error.
-    EffectBus.on<{ rootSig?: string; domains?: string[] }>('adopt:meta', (p) => {
+    EffectBus.on<{ rootSig?: string; domains?: string[]; label?: string }>('adopt:meta', (p) => {
       const branchSig = String(p?.rootSig ?? '').trim().toLowerCase()
       if (!/^[a-f0-9]{64}$/.test(branchSig)) return
 
@@ -279,6 +282,7 @@ export class HomeComponent implements OnDestroy {
         ? p.domains.map(d => String(d ?? '').trim()).filter(Boolean)
         : []
       const sourceDomainScoped = domains[0] ? this.#prependScheme(domains[0]) : ''
+      const tileName = String(p?.label ?? '').trim()
 
       // Idempotent re-adopt: existing section for this branchSig wins
       const existing = this.sections().find(s => s.rootSig === branchSig)
@@ -295,7 +299,8 @@ export class HomeComponent implements OnDestroy {
         try { return sourceDomainScoped ? new URL(sourceDomainScoped).hostname.toLowerCase() : '' }
         catch { return sourceDomainScoped }
       })()
-      const displayName = sourceHost || `branch-${branchSig.slice(0, 8)}`
+      // Prefer the human tile name; then the source host; last a sig prefix.
+      const displayName = tileName || sourceHost || `branch-${branchSig.slice(0, 8)}`
 
       const branchSection: DomainSection = {
         // domain doubles as the section's idempotency key + scroll target
@@ -309,7 +314,7 @@ export class HomeComponent implements OnDestroy {
         items:          [],
         loading:        true,
         error:          null,
-        installStatus:  'Adopting branch — resolving content…',
+        installStatus:  `Adopting ${displayName} — resolving content. Features arrive OFF; turn on what you want.`,
         patches:        [],
         enabled:        true,
       }
@@ -368,8 +373,12 @@ export class HomeComponent implements OnDestroy {
       // a domainless browser-only publisher.
       const ownerDomain = (params.get('domain') ?? '').trim()
 
+      // Human tile name (display only — never used for resolution). Lets the
+      // section header read "Adopting <name>" instead of a sig prefix.
+      const tileName = (params.get('label') ?? '').trim()
+
       queueMicrotask(() => {
-        EffectBus.emit('adopt:meta', { rootSig: branchSig, domains: [], at })
+        EffectBus.emit('adopt:meta', { rootSig: branchSig, domains: [], at, label: tileName })
 
         const ioc = (window as { ioc?: {
           get?: (k: string) => unknown
@@ -871,9 +880,10 @@ export class HomeComponent implements OnDestroy {
     //
     // Disables and re-enables of already-on items always pass through.
     // The gate is one-way: off→on for code only.
-    const currentlyEnabled = this.#toggleState.isEnabled(node.id)
-    const isCode = node.kind === 'bee' || node.kind === 'dependency'
-                || node.kind === 'worker' || node.kind === 'drone'
+    const isCode = isCodeKind(node.kind)
+    // Kind-aware default so an unset adopted-code node reads OFF (first click
+    // = turn ON → trust gate fires) and data reads ON.
+    const currentlyEnabled = this.#toggleState.isEnabled(node.id, defaultEnabled(node.kind))
 
     if (!currentlyEnabled && isCode) {
       const sourceDomain = this.#findSectionDomain(node)
@@ -902,7 +912,10 @@ export class HomeComponent implements OnDestroy {
       }
     }
 
-    this.#toggleState.toggle(node.id)
+    // Kind-aware default so the flip is computed from the node's TRUE current
+    // state (an unset code node is OFF, not the bare default-true) — otherwise
+    // the first click on an off-by-default code node would flip OFF→OFF.
+    this.#toggleState.toggle(node.id, defaultEnabled(node.kind))
     this.#refreshSections()
 
     // #77: if a SECTION (adopted branch) was toggled, drive the LOGICAL
@@ -914,7 +927,7 @@ export class HomeComponent implements OnDestroy {
     // granularity, so we recompute only when the branch root itself flips.
     const branchSig = this.#sectionRootSigForNode(node)
     if (/^[a-f0-9]{64}$/.test(branchSig)) {
-      const nowEnabled = this.#toggleState.isEnabled(node.id)
+      const nowEnabled = this.#toggleState.isEnabled(node.id, defaultEnabled(node.kind))
       void this.#domainStorage.setFeatureEnabled(branchSig, nowEnabled)
         .then(() => this.#domainStorage.recomputeLogical())
         .then(() => {

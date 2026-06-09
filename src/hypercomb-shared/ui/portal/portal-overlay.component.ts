@@ -88,8 +88,14 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
       const u = new URL(url)
       let label = u.hostname
       const hashParams = new URLSearchParams(u.hash.replace(/^#/, ''))
+      // Prefer the human tile name when the hive threaded one through; fall
+      // back to the branch-sig prefix so a domainless/nameless adoption still
+      // reads "what am I about to adopt."
+      const tileName = (hashParams.get('label') ?? '').trim()
       const branch = hashParams.get('branch')
-      if (branch && /^[a-f0-9]{64}$/i.test(branch)) {
+      if (tileName) {
+        label += ` · adopting “${tileName}”`
+      } else if (branch && /^[a-f0-9]{64}$/i.test(branch)) {
         label += ` · branch=${branch.slice(0, 6)}`
       }
       const at = hashParams.get('at')
@@ -134,6 +140,12 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
         // domainless browser-only publisher.
         if (detail?.domain) {
           url += `&domain=${encodeURIComponent(String(detail.domain))}`
+        }
+        // The human tile name — purely a display label so the installer's
+        // breadcrumb + section header read "adopting <name>" instead of a
+        // sig prefix. Never used for resolution (the sig is canonical).
+        if (detail?.label) {
+          url += `&label=${encodeURIComponent(String(detail.label))}`
         }
       }
     }

@@ -1,7 +1,7 @@
 // diamond-core-processor/src/app/core/toggle-state.service.ts
 
 import { Injectable } from '@angular/core'
-import type { TreeNode } from './tree-node'
+import { defaultEnabled, type TreeNode } from './tree-node'
 
 const STORAGE_KEY = 'dcp.toggleState'
 const TOGGLE_CHANNEL = 'dcp-toggle-state'
@@ -16,8 +16,8 @@ export class ToggleStateService {
     this.#state = this.#load()
   }
 
-  toggle(nodeId: string): void {
-    const current = this.isEnabled(nodeId)
+  toggle(nodeId: string, def = true): void {
+    const current = this.isEnabled(nodeId, def)
     this.#state.set(nodeId, !current)
     this.#persist()
     this.#broadcastChange()
@@ -41,12 +41,15 @@ export class ToggleStateService {
     } catch { /* BroadcastChannel unavailable — sentinel sync will pick up on next poll */ }
   }
 
-  isEnabled(nodeId: string): boolean {
-    return this.#state.get(nodeId) ?? true
+  /** Enabled state with an explicit absent-default. Callers that know the
+   *  node's kind pass `defaultEnabled(kind)` so adopted CODE reads OFF and
+   *  adopted DATA reads ON when no explicit flag has been set. */
+  isEnabled(nodeId: string, def = true): boolean {
+    return this.#state.get(nodeId) ?? def
   }
 
   isEffectivelyEnabled(node: TreeNode, nodeMap: Map<string, TreeNode>): boolean {
-    if (!this.isEnabled(node.id)) return false
+    if (!this.isEnabled(node.id, defaultEnabled(node.kind))) return false
     if (!node.parentId) return true
 
     const parent = nodeMap.get(node.parentId)
