@@ -92,4 +92,11 @@ export interface TreeNode {
    * hatched/normal. The two causes render with one unified egg affordance.
    */
   hatchBlocker?: 'undelivered' | 'untrusted'
+
+  /**
+   * True for the node you JUST adopted (the tile's resolved root nested under
+   * its host folder). Persistently highlighted — "this is what you just added,
+   * ready to enable" — until you enable it or navigate away. Optional/false.
+   */
+  freshlyAdopted?: boolean
 }

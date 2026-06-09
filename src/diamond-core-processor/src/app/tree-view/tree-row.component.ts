@@ -11,7 +11,7 @@ import type { TreeNode } from '../core/tree-node'
   imports: [ToggleComponent, DiamondIconComponent],
   template: `
     @if (visible()) {
-      <div class="row" [class.pending]="node().pending" [class.visual-context]="node().visualContext" [class.egg]="node().hatchBlocker" [class.domain-tinted]="domainHue() !== null" [style.--depth]="node().depth" [style.--domain-hue]="domainHue()">
+      <div class="row" [class.pending]="node().pending" [class.visual-context]="node().visualContext" [class.egg]="node().hatchBlocker" [class.freshly-adopted]="node().freshlyAdopted" [class.domain-tinted]="domainHue() !== null" [style.--depth]="node().depth" [style.--domain-hue]="domainHue()">
         @if (!node().visualContext && !node().hatchBlocker) {
           <!-- Enable switch at EVERY level — adopt/enable from any node (the
                root you imported to, a collection, or a single behavior).
@@ -126,6 +126,15 @@ import type { TreeNode } from '../core/tree-node'
     .row.domain-tinted:hover {
       background: hsla(var(--domain-hue, 220), 58%, 55%, 0.11);
     }
+
+    /* Freshly-adopted: the tile you just adopted — persistently highlighted
+       ("ready to enable") until you enable it or navigate away. */
+    .row.freshly-adopted {
+      background: rgba(90, 200, 120, 0.16);
+      border-left: 3px solid rgba(60, 180, 100, 0.9);
+      box-shadow: inset 0 0 0 1px rgba(60, 180, 100, 0.25);
+    }
+    .row.freshly-adopted .name { font-weight: 600; }
 
     /* Visual-context: a read-only item already in the logical install from
        ANOTHER domain or the base — shown so you see how this domain's

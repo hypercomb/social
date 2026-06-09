@@ -40,6 +40,11 @@ export interface DomainSection {
   installStatus: string | null
   patches: PatchRecord[]
   enabled: boolean
+  /** For an adopted branch nested under a host folder: the human TILE name
+   *  the participant adopted (e.g. "dolphin"). The resolved root node is
+   *  renamed to this so the tree reads "<host>/ → dolphin → …" rather than
+   *  exposing the layer's internal name (e.g. "presentation"). */
+  adoptLabel?: string
 }
 
 export interface DomainGroup {
@@ -442,6 +447,10 @@ export class HomeComponent implements OnDestroy {
         installStatus:  `Adopting ${cueName}'s files — enable a behavior to adopt it (all off by default).`,
         patches:        [],
         enabled:        true,
+        // the resolved root is renamed to this tile name (e.g. "dolphin") so
+        // the nested node reads as what you adopted, not the layer's internal
+        // name — and you walk its resolved children underneath.
+        adoptLabel:     cueName,
       }
       this.sections.update(secs => [...secs, branchSection])
 
@@ -561,7 +570,7 @@ export class HomeComponent implements OnDestroy {
               console.info('[home] adopt owner not yet attributed; deferring lineage record for', branchSig.slice(0, 12))
               return
             }
-            void this.#domainStorage.addDomainBranch(owner, branchSig, at)
+            void this.#domainStorage.addDomainBranch(owner, branchSig, at, tileName || undefined)
               .then(() => {
                 console.info('[home] recorded adopt in lineage:', owner, '←', branchSig.slice(0, 12), 'at', at.join('/') || '/')
                 // #60: reflect the lineage's domain organization in the
@@ -682,11 +691,21 @@ export class HomeComponent implements OnDestroy {
    *  domain fetch or local OPFS). Preserves visual-context nodes; scrolls to
    *  it; records cross-domain deps. */
   #fillBranchSection(branchSig: string, sectionDomain: string, root: TreeNode): void {
-    this.sections.update(secs => secs.map(s =>
-      s.rootSig === branchSig
-        ? { ...s, items: [{ ...root, expanded: true }, ...s.items.filter(it => it.visualContext)], loading: false, installStatus: null }
-        : s
-    ))
+    this.sections.update(secs => secs.map(s => {
+      if (s.rootSig !== branchSig) return s
+      // Rename the resolved root to the TILE name the participant adopted
+      // (e.g. "dolphin") instead of the layer's internal name (e.g.
+      // "presentation"); its resolved children stay underneath so you walk
+      // the hierarchy. Expanded so the subtree shows immediately. freshly-
+      // Adopted marks it for the persistent highlight.
+      const named: TreeNode = {
+        ...root,
+        name: s.adoptLabel || root.name,
+        expanded: true,
+        freshlyAdopted: true,
+      }
+      return { ...s, items: [named, ...s.items.filter(it => it.visualContext)], loading: false, installStatus: null }
+    }))
     // #74: scroll to + briefly highlight the freshly-filled branch.
     setTimeout(() => this.#scrollSectionIntoView(sectionDomain, true), 60)
     // #71: record cross-domain dependencies under THEIR own silos.
@@ -909,6 +928,11 @@ export class HomeComponent implements OnDestroy {
           if (!/^[a-f0-9]{64}$/.test(sig)) continue
           if (this.sections().some(s => s.rootSig === sig)) continue   // idempotent
           if (fresh.some(s => s.rootSig === sig)) continue
+          // The recorded tile name (e.g. "dolphin") renames the resolved root
+          // so the rebuilt section reads as what was adopted, not the layer's
+          // internal name. Skip a bare sig-prefix fallback (8 hex).
+          const recordedName = String(b.name ?? '').trim()
+          const adoptLabel = /^[a-f0-9]{8}$/.test(recordedName) ? undefined : (recordedName || undefined)
           fresh.push({
             domain: `https://${domain.name}`,
             domainName: domain.name,
@@ -921,6 +945,7 @@ export class HomeComponent implements OnDestroy {
             installStatus: 'Resolving adopted branch…',
             patches: [],
             enabled: true,
+            adoptLabel,
           })
         }
       }
