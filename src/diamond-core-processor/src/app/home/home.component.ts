@@ -383,7 +383,9 @@ export class HomeComponent implements OnDestroy {
         items:          [],
         loading:        true,
         error:          null,
-        installStatus:  `Adopting ${cueName} — resolving content. Features arrive OFF; turn on what you want.`,
+        // Language: clicking adopt fetches the FILES (adopts them); ENABLING a
+        // behavior is what "adopts the behavior" (activation). Off by default.
+        installStatus:  `Adopting ${cueName}'s files — enable a behavior to adopt it (all off by default).`,
         patches:        [],
         enabled:        true,
       }
@@ -1021,6 +1023,25 @@ export class HomeComponent implements OnDestroy {
     // state (an unset code node is OFF, not the bare default-true) — otherwise
     // the first click on an off-by-default code node would flip OFF→OFF.
     this.#toggleState.toggle(node.id, defaultEnabled(node.kind))
+
+    // ENABLE CASCADES DOWN: turning a node ON enables its whole subtree, so
+    // adopting a branch and flipping it on activates everything under it. To
+    // be selective you go toward the leaves and enable only what you want
+    // (turning a node OFF does NOT force-disable descendants — you can leave
+    // a sub-feature on). The trust gate already cleared above covers the
+    // subtree's source domain, so the cascade doesn't re-prompt.
+    const nowOn = this.#toggleState.isEnabled(node.id, defaultEnabled(node.kind))
+    if (nowOn && node.children?.length) {
+      const cascade = (nodes: TreeNode[]) => {
+        for (const c of nodes) {
+          if (!this.#toggleState.isEnabled(c.id, defaultEnabled(c.kind))) {
+            this.#toggleState.toggle(c.id, defaultEnabled(c.kind))
+          }
+          if (c.children?.length) cascade(c.children)
+        }
+      }
+      cascade(node.children)
+    }
     this.#refreshSections()
 
     // #77: if a SECTION (adopted branch) was toggled, drive the LOGICAL
