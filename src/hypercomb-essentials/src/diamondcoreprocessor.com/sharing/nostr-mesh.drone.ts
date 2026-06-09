@@ -1146,8 +1146,14 @@ export class NostrMeshDrone extends Drone {
       try { return localStorage.getItem('hc:nostrmesh:use-live-relay') === '1' }
       catch { return false }
     })()
-    const localContext = this.isLocalContext()
-    const seed = (useLive && !localContext) ? [LIVE_RELAY] : [LOCAL_RELAY]
+    // The live-relay flag is the explicit PRODUCTION opt-in: when set it uses
+    // LIVE_RELAY (jwize.com) — EVEN on loopback. Rationale: a restarting
+    // in-memory dev relay can't hold a swarm (events wipe on restart), so the
+    // operator testing tiles across two browsers needs the stable shared
+    // relay. Casual browsers never set the flag, so they still default to
+    // LOCAL_RELAY and never touch the operator's home server (the flag is the
+    // "don't get swamped" gate). An explicit hc:nostrmesh:relays still wins.
+    const seed = useLive ? [LIVE_RELAY] : [LOCAL_RELAY]
     const defaults = fallback.length > 0 ? fallback : seed
     try {
       const raw = localStorage.getItem('hc:nostrmesh:relays')
