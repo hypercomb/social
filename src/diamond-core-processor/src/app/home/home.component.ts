@@ -1071,6 +1071,12 @@ export class HomeComponent implements OnDestroy {
       }
     }
 
+    // Accordion: only one node open per level. Collapse this node's siblings
+    // (the parent's other children) before opening it, so the tree stays a
+    // single drill-down path instead of a sprawl.
+    const parent = this.#findParentNode(node)
+    if (parent) for (const sib of parent.children) { if (sib.id !== node.id) sib.expanded = false }
+
     node.expanded = true
     if (node.kind === 'layer' && this.layersCollapsed()) {
       this.layersCollapsed.set(false)
@@ -1790,6 +1796,22 @@ export class HomeComponent implements OnDestroy {
       if (this.#containsNode(n.children, id)) return true
     }
     return false
+  }
+
+  /** The node whose children include `target` (its parent), searched across
+   *  all sections. Null for a top-level node. Used by the accordion to find
+   *  a node's siblings. */
+  #findParentNode(target: TreeNode): TreeNode | null {
+    const search = (nodes: TreeNode[]): TreeNode | null => {
+      for (const n of nodes) {
+        if ((n.children ?? []).some(c => c.id === target.id)) return n
+        const found = search(n.children ?? [])
+        if (found) return found
+      }
+      return null
+    }
+    for (const s of this.sections()) { const r = search(s.items); if (r) return r }
+    return null
   }
 
   #walkLayers(nodes: TreeNode[], fn: (node: TreeNode) => void): void {
