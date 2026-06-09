@@ -471,6 +471,29 @@ export class ContentBrokerDrone extends Drone {
   // is the absolute backstop — wrong bytes are dropped regardless of
   // which tier they came from — but trust-ordering protects time and
   // bandwidth, which sig-verification alone cannot.
+  /** DEV-only: sigs already pushed to the local relay this session (dedupe). */
+  #devPushed = new Set<string>()
+
+  /** DEV write-through (loopback origin only): PUT bytes we hold locally to the
+   *  dev relay so a witnessing tab can fetch them. Fire-and-forget; the relay
+   *  verifies sha256(body)===sig (run it with --dev-open-writes), so it's
+   *  content-safe + idempotent. This is the swarm byte-path's PUSH half, scoped
+   *  to dev — the production push is the host-sync/auto-push flow. */
+  #devPushToHost = (sig: string, type: ContentType, bytes: Uint8Array): void => {
+    try {
+      if (this.#devPushed.has(sig)) return
+      if (typeof location === 'undefined' ||
+          !/^https?:\/\/(localhost|127(?:\.\d+){3}|\[?::1\]?)(:|\/|$)/i.test(location.origin)) return
+      const path = this.#httpPathForType(sig, type)
+      if (!path) return
+      this.#devPushed.add(sig)
+      let devHost = 'localhost:7777'
+      try { devHost = (localStorage.getItem('hc:dev-resource-host') || '').trim() || devHost } catch { /* ignore */ }
+      void fetch(`http://${devHost}${path}`, { method: 'PUT', body: bytes as BodyInit })
+        .catch(() => { /* host may not accept writes — non-fatal */ })
+    } catch { /* non-fatal */ }
+  }
+
   #fetchOverHttp = async (sig: string, type: ContentType): Promise<Uint8Array | null> => {
     const path = this.#httpPathForType(sig, type)
     if (!path) return null
@@ -483,6 +506,19 @@ export class ContentBrokerDrone extends Drone {
       seen.add(host)
       ordered.push(host)
     }
+
+    // Tier -1 — DEV ONLY (loopback origin): the local relay. Browser-authored
+    // content staged on the dev host resolves locally instead of round-tripping
+    // to the remote host / Azure CDN — so two localhost tabs share content
+    // without a deployed backend. sha256 still gates. Overridable via the
+    // localStorage `hc:dev-resource-host` (default localhost:7777).
+    try {
+      if (/^https?:\/\/(localhost|127(?:\.\d+){3}|\[?::1\]?)(:|\/|$)/i.test(location.origin)) {
+        let devHost = 'localhost:7777'
+        try { devHost = (localStorage.getItem('hc:dev-resource-host') || '').trim() || devHost } catch { /* ignore */ }
+        push(devHost)
+      }
+    } catch { /* non-DOM context */ }
 
     // Tier 0 — self-domain.
     push(this.#getSelfDomain())
@@ -594,7 +630,14 @@ export class ContentBrokerDrone extends Drone {
 
     // Fast path — already in local store.
     const local = await this.#readLocal(s, type)
-    if (local) return local
+    if (local) {
+      // DEV write-through: a tab that HAS the bytes (the author) pushes them to
+      // the local relay so a witnessing tab can fetch them (the missing half of
+      // the swarm byte-path — the mesh carries layer sigs only). Fire-and-
+      // forget; the relay verifies sha256 so it's content-integrity-safe.
+      this.#devPushToHost(s, type, local)
+      return local
+    }
 
     // HTTP-direct path — try known domains' content endpoints first.
     // Per the layer-only-mesh doctrine, heavy bytes (resources, deps)
