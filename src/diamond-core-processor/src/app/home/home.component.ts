@@ -296,16 +296,20 @@ export class HomeComponent implements OnDestroy {
         return
       }
 
-      // Derive display labels. Prefer the source domain hostname when known
-      // (jwize.com, alice.dev). Fall back to a sig-prefix label so a
-      // domainless adoption (anonymous swarm publisher) still has a
-      // recognizable section header.
+      // Organize by capture-source DOMAIN folder — content lands under the
+      // host it came from (jwize.com, alice.dev), the same as the default
+      // baseline. The tile name is the CUE (installStatus + the portal
+      // breadcrumb), NOT the folder label. Only when the publisher advertised
+      // no domain (a browser-published swarm tile) do we fall back to the
+      // tile name, then a sig prefix, so the section still reads recognizably.
       const sourceHost = (() => {
         try { return sourceDomainScoped ? new URL(sourceDomainScoped).hostname.toLowerCase() : '' }
         catch { return sourceDomainScoped }
       })()
-      // Prefer the human tile name; then the source host; last a sig prefix.
-      const displayName = tileName || sourceHost || `branch-${branchSig.slice(0, 8)}`
+      const displayName = sourceHost || tileName || `branch-${branchSig.slice(0, 8)}`
+      // The cue always names the tile being adopted, even when the folder is
+      // the domain.
+      const cueName = tileName || displayName
 
       const branchSection: DomainSection = {
         // domain doubles as the section's idempotency key + scroll target
@@ -319,7 +323,7 @@ export class HomeComponent implements OnDestroy {
         items:          [],
         loading:        true,
         error:          null,
-        installStatus:  `Adopting ${displayName} — resolving content. Features arrive OFF; turn on what you want.`,
+        installStatus:  `Adopting ${cueName} — resolving content. Features arrive OFF; turn on what you want.`,
         patches:        [],
         enabled:        true,
       }
@@ -383,7 +387,16 @@ export class HomeComponent implements OnDestroy {
       const tileName = (params.get('label') ?? '').trim()
 
       queueMicrotask(() => {
-        EffectBus.emit('adopt:meta', { rootSig: branchSig, domains: [], at, label: tileName })
+        // Pass the publisher's domain so the branch organizes under its
+        // capture-source DOMAIN FOLDER (where it came from), same as the
+        // default baseline. Empty for a browser-published tile → the handler
+        // falls back to the tile name.
+        EffectBus.emit('adopt:meta', {
+          rootSig: branchSig,
+          domains: ownerDomain ? [ownerDomain] : [],
+          at,
+          label: tileName,
+        })
 
         const ioc = (window as { ioc?: {
           get?: (k: string) => unknown
