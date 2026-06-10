@@ -41,6 +41,9 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   #onWindowKeyDown: ((e: KeyboardEvent) => void) | null = null
 
   readonly open = signal(false)
+  /** JOIN mode: opened from the solo→public flip. The primary button reads
+   *  "start" and confirming also joins the swarm (emits 'mesh:join'). */
+  readonly joinMode = signal(false)
   readonly roomDraft = signal('')
   readonly secretDraft = signal('')
   readonly labelDraft = signal('')
@@ -85,7 +88,8 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    this.#unsubOpen = EffectBus.on('mesh:open-modal', () => {
+    this.#unsubOpen = EffectBus.on<{ join?: boolean }>('mesh:open-modal', (payload) => {
+      this.joinMode.set(!!payload?.join)
       const initialSecret = this.#secretStore?.value ?? ''
       this.roomDraft.set(this.#roomStore?.value ?? '')
       this.secretDraft.set(initialSecret)
@@ -215,6 +219,10 @@ export class MeshModalComponent implements OnInit, OnDestroy {
     } else {
       try { localStorage.setItem('hc:user-label', label) } catch { /* ignore */ }
     }
+
+    // JOIN mode: confirming the location IS the act of going public — the
+    // controls-bar listens for 'mesh:join' and flips solo → swarm.
+    if (this.joinMode()) EffectBus.emit('mesh:join', {})
 
     this.#close()
   }

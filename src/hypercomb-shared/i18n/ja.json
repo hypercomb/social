@@ -432,5 +432,6 @@
   "cell.substrate": "基盤",
   "cell.tiles": "タイル",
   "cell.touch": "タッチ",
-  "cell.zoom": "ズーム"
+  "cell.zoom": "ズーム",
+  "mesh-modal.start": "開始"
 }

@@ -60,7 +60,9 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   { id: 'copy',         label: 'selection.copy',        action: 'copy',               visibleWhen: 'hasSelection' },
   { id: 'clipboard',    label: 'controls.clipboard',    action: 'openClipboard',      visibleWhen: 'clipboardHasItems' },
   { id: 'voice',        label: 'controls.voice',        action: 'toggleVoice',        visibleWhen: 'voiceSupported' },
-  { id: 'room',         label: 'controls.location',     action: 'toggleRoom',         visibleWhen: 'public' },
+  // 'room' (the location icon) is gone from the bar — the location dialog now
+  // pops as the JOIN step when the participant flips solo → public (see
+  // toggleMeshPublic below): configure where, press start, you're in the swarm.
   { id: 'bees',         label: 'controls.toggle-bees',  action: 'toggleBees',         visibleWhen: 'public' },
 ]
 
@@ -71,7 +73,7 @@ const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'back': true, 'dcp': true, 'fit': true, 'zoom-out': true, 'zoom-in': true, 'lock': true, 'fullscreen': true,
   'instructions': false, 'show-hidden': false, 'text-only': false,
   'cut': false, 'copy': false,
-  'clipboard': false, 'voice': false, 'room': true, 'bees': false,
+  'clipboard': false, 'voice': false, 'bees': false,
 }
 
 @Component({
@@ -325,7 +327,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     copy: () => this.copy(),
     openClipboard: () => this.openClipboard(),
     toggleVoice: () => this.toggleVoice(),
-    toggleRoom: () => this.toggleRoom(),
     toggleBees: () => this.toggleBees(),
   }
 
@@ -339,7 +340,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'fit': return this.fitLocked()
       case 'show-hidden': return this.#showHidden()
       case 'text-only': return this.#textOnly()
-      case 'room': return this.#roomOpen()
       case 'bees': return this.#beesVisible()
       case 'voice': return this.voiceActive()
       default: return false
@@ -373,7 +373,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'copy':         return 'content_copy'
       case 'clipboard':    return 'content_paste'
       case 'voice':        return 'mic'
-      case 'room':         return 'pin_drop'
       case 'bees':         return 'hub'
       default:             return ''
     }
@@ -680,10 +679,17 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #atomizeAtomsUnsub: (() => void) | null = null
   #atomizeStrategyUnsub: (() => void) | null = null
   #meshModalUnsub: (() => void) | null = null
+  #meshJoinUnsub: (() => void) | null = null
 
   ngOnInit(): void {
     this.#meshModalUnsub = EffectBus.on<{ open: boolean }>('mesh:modal-open', ({ open }) => {
       this.#roomOpen.set(!!open)
+    })
+
+    // The location dialog's "start" confirmed (join mode) — flip to public
+    // now that the where/secret are set. Idempotent: already public → no-op.
+    this.#meshJoinUnsub = EffectBus.on('mesh:join', () => {
+      if (!this.meshPublic()) this.meshToggled.emit()
     })
 
     // ── mobile detection via matchMedia ──
@@ -893,6 +899,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#atomizeAtomsUnsub?.()
     this.#atomizeStrategyUnsub?.()
     this.#meshModalUnsub?.()
+    this.#meshJoinUnsub?.()
     window.removeEventListener('keydown', this.#onPowerKeyDown)
     window.removeEventListener('keyup', this.#onPowerKeyUp)
     window.removeEventListener('blur', this.#onPowerKeyReset)
@@ -1278,6 +1285,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   readonly toggleMeshPublic = (): void => {
+    // Going PUBLIC routes through the location dialog first: pop it in JOIN
+    // mode (primary button reads "start"); the actual flip happens on
+    // confirm via the 'mesh:join' effect below — configure where, start,
+    // you're in the swarm. Going PRIVATE stays one click.
+    if (!this.meshPublic()) {
+      EffectBus.emit('mesh:open-modal', { join: true })
+      return
+    }
     this.meshToggled.emit()
   }
 
@@ -1418,10 +1433,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   // ── room ────────────────────────────────────────────
-
-  readonly toggleRoom = (): void => {
-    EffectBus.emit('mesh:open-modal', {})
-  }
+  // (the location icon is gone — the dialog opens via toggleMeshPublic's
+  // join flow; see above)
 
   // ── hover / idle ──────────────────────────────────────
 

@@ -102,7 +102,7 @@
         {{ copiedFlash() ? ('mesh-modal.share-copied' | t) : ('mesh-modal.share' | t) }}
       </button>
       <button class="mesh-modal-btn primary" type="button" (click)="save()">
-        {{ 'mesh-modal.save' | t }}
+        {{ (joinMode() ? 'mesh-modal.start' : 'mesh-modal.save') | t }}
       </button>
     </footer>
 

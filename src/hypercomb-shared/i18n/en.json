@@ -459,5 +459,6 @@
   "cell.substrate": "substrate",
   "cell.tiles": "tiles",
   "cell.touch": "touch",
-  "cell.zoom": "zoom"
+  "cell.zoom": "zoom",
+  "mesh-modal.start": "start"
 }
