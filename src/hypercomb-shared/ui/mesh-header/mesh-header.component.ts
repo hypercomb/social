@@ -48,6 +48,17 @@ export class MeshHeaderComponent implements OnInit, OnDestroy {
   }
 
   readonly onToggle = (): void => {
+    // Going PUBLIC routes through the location dialog (JOIN mode): the form
+    // pops, you set where + secret, press START, and the join happens on
+    // confirm via 'mesh:join' (the single listener in the controls-bar
+    // performs the flip — one listener only, or the toggle would fire
+    // twice). Going PRIVATE stays one click. Without this gate there is no
+    // way to set the location — the bar's location icon was removed in
+    // favor of this flow.
+    if (!this.meshPublic) {
+      EffectBus.emit('mesh:open-modal', { join: true })
+      return
+    }
     this.meshToggled.emit()
   }
 }
