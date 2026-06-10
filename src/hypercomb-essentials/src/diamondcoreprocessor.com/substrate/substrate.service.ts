@@ -761,14 +761,19 @@ export class SubstrateService extends EventTarget {
     this.#stampRunning = true
     try {
       const store = this.#store()
-      if (!store) return 0
+      if (!store) { console.info('[substrate] stamp pass: store not ready'); return 0 }
       const index: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
-      if (Object.keys(index).length === 0) return 0
+      const indexSize = Object.keys(index).length
+      if (indexSize === 0) { console.info('[substrate] stamp pass: index empty — nothing to stamp'); return 0 }
 
       let stamped = 0
+      let walked = 0
+      let matched = 0
       const stampIfNeeded = async (segments: string[], name: string): Promise<void> => {
+        walked++
         const propsSig = index[name]
         if (typeof propsSig !== 'string' || !/^[0-9a-f]{64}$/.test(propsSig)) return
+        matched++
         try {
           const canonical = await readTilePropertiesAt(segments, name)
           const has = (canonical as any)?.small?.image ?? (canonical as any)?.flat?.small?.image
@@ -835,9 +840,14 @@ export class SubstrateService extends EventTarget {
         await walkDirs(store.hypercombRoot, [])
       }
 
-      if (stamped > 0) console.info(`[substrate] stamped ${stamped} tile image(s) into canonical props`)
+      // Always log the summary — the silent-0 case is exactly what made the
+      // earlier failures (dir walk on a dir-less tree, too-early boot timer)
+      // invisible. walked=0 means the tree walk found nothing (history not
+      // ready or empty root); matched=0 with walked>0 means labels in the
+      // tree don't match index keys.
+      console.info(`[substrate] stamp pass: index=${indexSize} walked=${walked} matched=${matched} stamped=${stamped}`)
       return stamped
-    } catch { return 0 }
+    } catch (err) { console.warn('[substrate] stamp pass failed', err); return 0 }
     finally { this.#stampRunning = false }
   }
 
@@ -890,12 +900,25 @@ export class SubstrateService extends EventTarget {
 const _substrateService = new SubstrateService()
 window.ioc.register('@diamondcoreprocessor.com/SubstrateService', _substrateService)
 
-// BOOT-TIME RECONCILE — runs once per session shortly after load, without
-// requiring any substrate command. Stamps label-index image assignments into
-// the canonical 0000 so the tile's image travels everywhere its layer does:
+// BOOT-TIME RECONCILE — stamps label-index image assignments into the
+// canonical 0000 so the tile's image travels everywhere its layer does:
 // the swarm publish inlines canonical props (readTilePropertiesAt), stamping
 // fires cell:0000-changed, and SwarmDrone's existing listener republishes —
 // so the witness sees the EXACT image + position the host renders, and
-// adopts carry both. Delayed so history/store/committer have registered;
-// idempotent and cheap when there's nothing to stamp.
-setTimeout(() => { void _substrateService.reconcileCanonicalImageStamps() }, 15_000)
+// adopts carry both.
+//
+// RETRY SCHEDULE, not a one-shot: a single 15s timer raced the hive boot
+// (install/preload can exceed it) — if History/Store/bags weren't ready the
+// pass no-opped silently and never ran again that session. Each attempt
+// logs its summary; retries stop early once a pass actually stamps, and the
+// passes are idempotent so overlapping schedules are harmless.
+{
+  const delays = [15_000, 45_000, 120_000, 300_000]
+  let done = false
+  for (const d of delays) {
+    setTimeout(() => {
+      if (done) return
+      void _substrateService.reconcileCanonicalImageStamps().then(n => { if (n > 0) done = true })
+    }, d)
+  }
+}
