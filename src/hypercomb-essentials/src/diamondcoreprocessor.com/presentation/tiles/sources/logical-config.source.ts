@@ -34,7 +34,8 @@ const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
 interface SnapshotBranch { domain: string; name: string; branchSig: string; at: string[]; enabled?: boolean }
 interface SnapshotStoreLike { readonly snapshot: { readonly branches?: SnapshotBranch[] } | null }
 interface BrokerLike { fetchBySig: (sig: string, type: string) => Promise<Uint8Array | null> }
-interface LayerLike { name?: string; cells?: unknown[]; layers?: unknown[]; children?: unknown[] }
+interface LayerLike { name?: string; cells?: unknown[]; layers?: unknown[]; children?: unknown[]; properties?: unknown[] }
+interface TilePropsLike { index?: number; small?: { image?: string }; flat?: { small?: { image?: string } } }
 
 const SIG_RE = /^[a-f0-9]{64}$/i
 
@@ -68,6 +69,34 @@ export const logicalConfigSource: TileSource = async (
     } catch { return null }
   }
 
+  // A tile's canonical 0000 props (the layer's `properties` slot) carry its
+  // grid `index` and — when the image association was stamped canonically —
+  // its image sig (`small.image` / `flat.small.image`, the same derivation
+  // substrate + show-cell use). Emitting them as peerIndex/imageSig lets the
+  // pinned-order resolver place the tile at the PUBLISHER'S slot (instead of
+  // demoting it to next-free) and the renderer bind the image via the
+  // resource stream. A tile whose props lack an image key renders label-only
+  // — that's a content gap (image association never left the author's local
+  // cache), not resolvable consumer-side.
+  const sourceRefFor = async (layer: LayerLike | null): Promise<{ peerIndex?: number; imageSig?: string }> => {
+    const ref: { peerIndex?: number; imageSig?: string } = {}
+    if (!layer) return ref
+    const propSigs = (Array.isArray(layer.properties) ? layer.properties : [])
+      .filter((s): s is string => typeof s === 'string' && SIG_RE.test(s))
+    for (const ps of propSigs) {
+      try {
+        const bytes = await broker.fetchBySig(ps, 'resource')
+        if (!bytes) continue
+        const p = JSON.parse(new TextDecoder().decode(bytes)) as TilePropsLike
+        if (ref.peerIndex === undefined && typeof p?.index === 'number') ref.peerIndex = p.index
+        const img = p?.small?.image ?? p?.flat?.small?.image
+        if (!ref.imageSig && typeof img === 'string' && SIG_RE.test(img)) ref.imageSig = img
+        if (ref.peerIndex !== undefined && ref.imageSig) break
+      } catch { /* one bad props resource must not drop the tile */ }
+    }
+    return ref
+  }
+
   const segs = loc.segments
   const out: TileEntry[] = []
 
@@ -81,9 +110,10 @@ export const logicalConfigSource: TileSource = async (
     if (!SIG_RE.test(sig) || !name) continue
     const at = Array.isArray(b.at) ? b.at.map(s => String(s ?? '').trim()).filter(Boolean) : []
 
-    // Case 1 — we are AT the adopt location: the branch itself is a tile.
+    // Case 1 — we are AT the adopt location: the branch itself is a tile,
+    // placed at the publisher's slot with its image (when canonical).
     if (segs.length === at.length && at.every((s, i) => s === segs[i])) {
-      out.push({ name, kind: 'peer', source: {} })
+      out.push({ name, kind: 'peer', source: await sourceRefFor(await resolveLayer(sig)) })
       continue
     }
 
@@ -110,7 +140,7 @@ export const logicalConfigSource: TileSource = async (
     for (const csig of childSigsOf(layer)) {
       const cl = await resolveLayer(csig)
       const childName = typeof cl?.name === 'string' ? cl.name.trim() : ''
-      if (childName) out.push({ name: childName, kind: 'peer', source: {} })
+      if (childName) out.push({ name: childName, kind: 'peer', source: await sourceRefFor(cl) })
     }
   }
 
