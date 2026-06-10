@@ -159,7 +159,7 @@ export class HistoryCursorService extends EventTarget {
    */
   async #warmupHistoricalResources(): Promise<void> {
     const store = get<{
-      resolve: <T>(v: unknown) => Promise<T>
+      resolve: <T>(v: unknown, localOnly?: boolean) => Promise<T>
       collectSignatures: (v: unknown, out?: Set<string>) => Set<string>
     }>('@hypercomb.social/Store')
     if (!store?.resolve) return
@@ -176,7 +176,11 @@ export class HistoryCursorService extends EventTarget {
       })
       if (fresh.length === 0) continue
       const resolved = await Promise.all(
-        fresh.map(signature => store.resolve<unknown>(signature).catch(() => null))
+        // localOnly: warm from memory/OPFS only. A historical sig that isn't
+        // local is skipped, NOT fetched from the host — otherwise a GC'd /
+        // dangling past version logs a 404 chain (localhost → host → CDN) for
+        // a best-effort background warm.
+        fresh.map(signature => store.resolve<unknown>(signature, true).catch(() => null))
       )
       const nextSignatures = new Set<string>()
       for (const content of resolved) {

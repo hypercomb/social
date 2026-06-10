@@ -507,7 +507,7 @@ export class Store extends EventTarget {
    * getResource, while consumers that want the JSON pay the parse
    * cost exactly once per signature.
    */
-  public resolve = async <T = unknown>(value: unknown): Promise<T> => {
+  public resolve = async <T = unknown>(value: unknown, localOnly = false): Promise<T> => {
     if (!isSignature(value)) return value as T
     const cached = this.#parsedResourceCache.get(value)
     if (cached !== undefined) return cached as T
@@ -515,7 +515,11 @@ export class Store extends EventTarget {
     if (pending) return pending as Promise<T>
     const promise = (async (): Promise<T> => {
       try {
-        const blob = await this.getResource(value)
+        // localOnly (warmup pre-cache): memory → OPFS only, NEVER the host. A
+        // missing historical resource must not trigger a host fetch — that
+        // logs a 404 in the console for a purely best-effort warm. A real
+        // on-demand read (localOnly=false) still falls through to the host.
+        const blob = localOnly ? await this.getResourceLocal(value) : await this.getResource(value)
         if (!blob) return value as T
         const parsed = JSON.parse(await blob.text()) as T
         this.#parsedResourceCache.set(value, parsed)
