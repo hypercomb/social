@@ -7,6 +7,7 @@
 // the user ever opening the tile editor UI.
 
 import { EffectBus } from '@hypercomb/core'
+import { writeTilePropertiesAt } from './tile-properties.js'
 
 type Store = {
   putResource: (blob: Blob) => Promise<string>
@@ -75,6 +76,23 @@ export class ResourceAttachDrone {
     const index: Record<string, string> = JSON.parse(localStorage.getItem(PROPS_INDEX_KEY) ?? '{}')
     index[payload.cell] = propsSig
     localStorage.setItem(PROPS_INDEX_KEY, JSON.stringify(index))
+
+    // CANONICAL WRITE — a user-supplied image is creation-time CONTENT, so
+    // it must land in the tile's canonical 0000 (the layer's properties
+    // slot), not just this browser's label index. Without this the tile is
+    // blank on every other device/witness/adopt and the substrate hands it
+    // a RANDOM image; with it, everyone sees the exact supplied image.
+    // writeTilePropertiesAt merges over existing canonical props (index,
+    // viewport, …), commits through the LayerCommitter cascade, and
+    // broadcasts cell:0000-changed — which SwarmDrone already listens to,
+    // so the swarm republishes with the image inlined automatically.
+    try {
+      const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+      const segments = lineage?.explorerSegments?.() ?? []
+      await writeTilePropertiesAt(segments, payload.cell, props)
+    } catch (err) {
+      console.warn('[resource-attach] canonical props write failed', err)
+    }
 
     EffectBus.emit<{ cell: string }>('tile:saved', { cell: payload.cell })
 

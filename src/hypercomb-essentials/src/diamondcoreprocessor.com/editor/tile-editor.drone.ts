@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/editor/tile-editor.drone.ts
 import { EffectBus } from '@hypercomb/core'
-import { TILE_PROPERTIES_FILE, readCellProperties, readTilePropertiesAt } from './tile-properties.js'
+import { TILE_PROPERTIES_FILE, readCellProperties, readTilePropertiesAt, writeTilePropertiesAt } from './tile-properties.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
 
@@ -241,6 +241,19 @@ export class TileEditorDrone {
     const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
     index[service.cell] = propsSig
     localStorage.setItem(indexKey, JSON.stringify(index))
+
+    // CANONICAL WRITE — the edited image/link is the user's content, so it
+    // must land in the tile's canonical 0000 (the layer's properties slot),
+    // not just this browser's label index. Merges over existing canonical
+    // props, commits via the LayerCommitter cascade, and broadcasts
+    // cell:0000-changed — SwarmDrone republishes with it inlined.
+    try {
+      const lineageForSave = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+      const segmentsForSave = lineageForSave?.explorerSegments?.() ?? []
+      await writeTilePropertiesAt(segmentsForSave, service.cell, props as Record<string, unknown>)
+    } catch (err) {
+      console.warn('[tile-editor] canonical props write failed', err)
+    }
 
     saveSucceeded = true
     } finally {
