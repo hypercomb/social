@@ -209,14 +209,27 @@ Self-contained modules. Lifecycle: Created → Registered → Active → Dispose
 - Declare `deps`, `listens`, `emits` for introspection
 
 ### OPFS (Origin-Private File System)
+
+There is **no `__layers__` folder** (phased out — never reintroduce it). Typed
+content-pool folders are gone: content is **signature-named files at the root
+of their owning scope**, and **sigbags** (`0000`, `0001`, … `000x` marker
+files) are the only structure — the max marker IS the current root. When
+resolving a sig, the only local fallback is the owning **folder** itself.
+
 ```
-/opfs/
-  __bees__/{signature}.js         # Compiled drone/bee modules
-  __dependencies__/{signature}.js # Namespace service bundles (first line: // @scope/alias)
-  __resources__/{signature}       # Content-addressed static assets
-  __layers__/{domain}/            # Domain-scoped layer manifests + install.manifest.json
-  hypercomb.io/                   # User content tree
+# Hive (hypercomb.io app)
+hypercomb.io/                # the participant's own tree: sigbag + sig files at the root
+
+# DCP (installer)
+dcp/hypercomb.io/            # the LOGICAL install: sigbags (packages + pushed tiles)
+dcp/<current files>/         # pushed tiles
+dcp/domain.com/              # one folder per adopted domain: its sigbag + sig files at the root
+dcp/domain2.com/
 ```
+
+Legacy install-cache dirs that still exist in code (`__bees__/`,
+`__dependencies__/`, `__resources__/`) hold sig-named files and are owned by
+the install/sync path; do not add new typed folders.
 
 ## Localization (i18n)
 
@@ -319,7 +332,7 @@ The web shell's OPFS root is split into two zones with different ownership:
 **Install/sync cache — owned by `ensureInstall` / `resyncFromSentinel`, safe to clear if you're inside that code path:**
 - `__bees__/` — drone bundles by signature
 - `__dependencies__/` — namespace deps by signature
-- `__layers__/sentinel/` — sentinel-scoped layer cache (NOT `__layers__/` root, which may hold domain-scoped user-installed data)
+- `__layers__/sentinel/` — LEGACY sentinel-scoped layer cache (the `__layers__` folder is phased out; per-domain folders + sigbags are canonical — never write new content here)
 
 **Verification rule:** to prove an essentials change reaches the web shell, do NOT clear OPFS. Use signature comparison instead — make a source change, rebuild, reload, and check that the new bee signatures appear in the manifest and the new bytes are in `__bees__/`. The user's data dirs should be unchanged across the test. If you find yourself reaching for `localStorage.clear()` or `navigator.storage.getDirectory()` removal, stop — there is a non-destructive way to verify.
 

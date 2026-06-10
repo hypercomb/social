@@ -18,10 +18,16 @@ import type { TreeNode } from '../core/tree-node'
                Flipping it puts that node in the logical tree; effectively-
                enabled greys it out when an ancestor in the hierarchy is off
                (turning on "anywhere in the hierarchy" cascades down). -->
-          <dcp-toggle
-            [enabled]="enabled()"
-            [effectivelyEnabled]="effectivelyEnabled()"
-            (toggled)="toggle.emit(node())" />
+          <!-- Ctrl/Cmd+click = select-all gesture: force the WHOLE subtree to
+               the clicked node's new state (all on / all off). Modifier is
+               captured at pointerdown because dcp-toggle's (toggled) doesn't
+               carry the mouse event. -->
+          <span (pointerdown)="ctrlHeld = $event.ctrlKey || $event.metaKey">
+            <dcp-toggle
+              [enabled]="enabled()"
+              [effectivelyEnabled]="effectivelyEnabled()"
+              (toggled)="(ctrlHeld ? toggleAll : toggle).emit(node()); ctrlHeld = false" />
+          </span>
         }
         @if (node().visualContext) {
           <span class="visual-marker" title="Already in the logical install (from another domain or the base) — shown for context">&#9676;</span>
@@ -419,6 +425,10 @@ export class TreeRowComponent implements OnInit, OnDestroy {
   hasChildren = input(false)
 
   toggle = output<TreeNode>()
+  /** Ctrl/Cmd was held on the switch — force the whole subtree to the new state. */
+  toggleAll = output<TreeNode>()
+  /** Modifier latch between pointerdown and dcp-toggle's (toggled). */
+  ctrlHeld = false
   open = output<TreeNode>()
   openDetail = output<TreeNode>()
   expandToggle = output<TreeNode>()

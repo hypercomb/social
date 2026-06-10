@@ -17,6 +17,7 @@ import type { TreeNode } from '../core/tree-node'
           [effectivelyEnabled]="isEffectivelyEnabled(node)"
           [hasChildren]="node.children.length > 0 || !node.loaded"
           (toggle)="toggle.emit($event)"
+          (toggleAll)="toggleAll.emit($event)"
           (open)="open.emit($event)"
           (openDetail)="openDetail.emit($event)"
           (expandToggle)="expandToggle.emit($event)"
@@ -30,6 +31,7 @@ import type { TreeNode } from '../core/tree-node'
             [toggleState]="toggleState()"
             [nodeMap]="nodeMap()"
             (toggle)="toggle.emit($event)"
+            (toggleAll)="toggleAll.emit($event)"
             (open)="open.emit($event)"
             (openDetail)="openDetail.emit($event)"
             (expandToggle)="expandToggle.emit($event)"
@@ -48,6 +50,7 @@ export class TreeViewComponent {
   nodeMap = input<Map<string, TreeNode>>(new Map())
 
   toggle = output<TreeNode>()
+  toggleAll = output<TreeNode>()
   open = output<TreeNode>()
   openDetail = output<TreeNode>()
   expandToggle = output<TreeNode>()

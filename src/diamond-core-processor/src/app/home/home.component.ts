@@ -1213,6 +1213,62 @@ export class HomeComponent implements OnDestroy {
     }
   }
 
+  /** Ctrl/Cmd+click on a switch — the select-all / clear-all gesture: flip
+   *  the clicked node and force its ENTIRE subtree to that same explicit
+   *  state (all on / all off). Explicit states are sticky (persisted per
+   *  node), unlike the defaults. Turning ON runs the same activation trust
+   *  gate as a normal enable when the subtree contains code. */
+  async onToggleAll(node: TreeNode): Promise<void> {
+    const before = this.toggleMap()
+    const current = before.get(node.id) ?? defaultEnabled(node.kind)
+    const next = !current
+
+    if (next) {
+      const hasCode = (n: TreeNode): boolean =>
+        isCodeKind(n.kind) || (n.children ?? []).some(hasCode)
+      if (hasCode(node)) {
+        const sourceDomain = this.#findSectionDomain(node)
+        if (sourceDomain) {
+          interface TrustLike {
+            check: (domains: string[]) => Promise<{ allow: boolean; addToCommunity: boolean }>
+          }
+          const trust = (window as { ioc?: { get: (k: string) => unknown } }).ioc
+            ?.get?.('@hypercomb.social/TrustService') as TrustLike | undefined
+          if (trust?.check) {
+            const decision = await trust.check([sourceDomain])
+            if (!decision.allow) {
+              node.hatchBlocker = 'untrusted'
+              this.#refreshSections()
+              return
+            }
+            if (node.hatchBlocker === 'untrusted') node.hatchBlocker = undefined
+          }
+        }
+      }
+    }
+
+    const ids: string[] = []
+    const collect = (n: TreeNode): void => {
+      ids.push(n.id)
+      for (const c of (n.children ?? [])) collect(c)
+    }
+    collect(node)
+    this.#toggleState.setManyEnabled(ids, next)
+    this.#refreshSections()
+
+    // Same branch-granularity logical drive as onToggle.
+    const branchSig = this.#sectionRootSigForNode(node)
+    if (/^[a-f0-9]{64}$/.test(branchSig)) {
+      void this.#domainStorage.setFeatureEnabled(branchSig, next)
+        .then(() => this.#domainStorage.recomputeLogical())
+        .then(() => {
+          this.#logicalVersion.update(v => v + 1)
+          void this.#postRegistrySnapshot()
+        })
+        .catch(e => console.warn('[home] logical recompute on toggle-all failed', e))
+    }
+  }
+
   /** #62: post the registry snapshot (the logical projection + domain
    *  visibility) to the hive parent, so the consumer surface can use it as a
    *  render filter (show/activate only effectively-installed content) and

@@ -23,6 +23,24 @@ export class ToggleStateService {
     this.#broadcastChange()
   }
 
+  /** Force an explicit state (the select-all / clear-all gesture). One
+   *  persist+broadcast per call — callers batching a subtree should use
+   *  setManyEnabled instead. */
+  setEnabled(nodeId: string, value: boolean): void {
+    this.#state.set(nodeId, value)
+    this.#persist()
+    this.#broadcastChange()
+  }
+
+  /** Batch form of setEnabled: one persist + one broadcast for the whole
+   *  set, so a ctrl+click over a large subtree doesn't write localStorage
+   *  per node. */
+  setManyEnabled(nodeIds: Iterable<string>, value: boolean): void {
+    for (const id of nodeIds) this.#state.set(id, value)
+    this.#persist()
+    this.#broadcastChange()
+  }
+
   /**
    * Public hook for non-toggle events that should still trigger a web
    * resync — e.g. a freshly installed domain on DCP. The sentinel
