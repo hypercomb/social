@@ -333,10 +333,38 @@ export class Store extends EventTarget {
    *   getResource → #fetchResourceFromHost → broker.fetchBySig
    *     → #readLocal → getResource → (coalesced) awaits its own pending fetch.
    */
+  /** DEV-only: sigs already pushed to the local relay this session (dedupe). */
+  #devPushed = new Set<string>()
+
+  /** DEV write-through (loopback origin only): a tab that HOLDS the bytes (the
+   *  author) PUTs them to the local relay so another localhost tab — or the DCP
+   *  installer, which fetches over HTTP and doesn't join the mesh — can pull
+   *  them. This is the byte-path's PUSH half: the mesh carries layer sigs only,
+   *  and the author reads its own content straight from OPFS (here), never
+   *  through the broker's host-fetch path, so this is the only place the author
+   *  actually touches its bytes. Fire-and-forget; the relay verifies sha256
+   *  (run it with --dev-open-writes), so it's content-safe + idempotent. The
+   *  production analog is the host-sync/auto-push flow. */
+  #devPushToHost(signature: string, kind: 'resource' | 'layer', data: Blob | Uint8Array): void {
+    try {
+      if (this.#devPushed.has(signature)) return
+      if (typeof location === 'undefined' ||
+          !/^https?:\/\/(localhost|127(?:\.\d+){3}|\[?::1\]?)(:|\/|$)/i.test(location.origin)) return
+      this.#devPushed.add(signature)
+      let devHost = 'localhost:7777'
+      try { devHost = (localStorage.getItem('hc:dev-resource-host') || '').trim() || devHost } catch { /* ignore */ }
+      const path = kind === 'layer' ? `/__layers__/${signature}.json` : `/__resources__/${signature}`
+      void fetch(`http://${devHost}${path}`, { method: 'PUT', body: data as BodyInit })
+        .catch(() => { /* host may not accept writes — non-fatal */ })
+    } catch { /* non-fatal */ }
+  }
+
   public getResourceLocal = async (signature: string): Promise<Blob | null> => {
     const cached = this.#resourceCache.get(signature)
-    if (cached) return cached
-    return this.#loadResource(signature)
+    if (cached) { this.#devPushToHost(signature, 'resource', cached); return cached }
+    const blob = await this.#loadResource(signature)
+    if (blob) this.#devPushToHost(signature, 'resource', blob)
+    return blob
   }
 
   public getResource = async (signature: string): Promise<Blob | null> => {
@@ -621,7 +649,7 @@ export class Store extends EventTarget {
    *  Once read, cached in memory for subsequent calls. */
   public getLayerBytes = async (signature: string): Promise<Uint8Array | null> => {
     const cached = this.#layerBytesCache.get(signature)
-    if (cached) { this.#perfStats.cacheHits++; return cached }
+    if (cached) { this.#perfStats.cacheHits++; this.#devPushToHost(signature, 'layer', cached); return cached }
     const pending = this.#layerBytesPending.get(signature)
     if (pending) { this.#perfStats.pendingHits++; return pending }
     this.#perfStats.cacheMisses++
@@ -629,7 +657,7 @@ export class Store extends EventTarget {
     this.#layerBytesPending.set(signature, promise)
     try {
       const bytes = await promise
-      if (bytes) this.#layerBytesCache.set(signature, bytes)
+      if (bytes) { this.#layerBytesCache.set(signature, bytes); this.#devPushToHost(signature, 'layer', bytes) }
       return bytes
     } finally {
       this.#layerBytesPending.delete(signature)
