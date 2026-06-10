@@ -164,13 +164,15 @@ export class HomeComponent implements OnDestroy {
     const map = new Map<string, boolean>()
     const walk = (nodes: TreeNode[], adopted: boolean) => {
       for (const n of nodes) {
-        // ADOPTED content is OFF by default at EVERY level (tiles AND
-        // functions) — you adopt the files, then opt each behavior in. Outside
-        // an adopted subtree, the kind-aware default applies (own DATA reads
+        // ADOPTED root = the MASTER SWITCH: off by default (nothing runs
+        // until the participant flips it). Its DESCENDANTS default ON, so
+        // one click on the root lights the whole subtree through the
+        // effective-enabled cascade — no per-level clicking. Outside an
+        // adopted subtree, the kind-aware default applies (own DATA reads
         // ON, CODE OFF). `adopted` latches on the freshly-adopted root and
         // flows to all descendants.
         const inAdopted = adopted || !!n.freshlyAdopted
-        const def = inAdopted ? false : defaultEnabled(n.kind)
+        const def = adopted ? true : (n.freshlyAdopted ? false : defaultEnabled(n.kind))
         map.set(n.id, this.#toggleState.isEnabled(n.id, def))
         walk(n.children, inAdopted)
       }
@@ -274,8 +276,12 @@ export class HomeComponent implements OnDestroy {
    *  logical view never shows empty branches for disabled features). */
   #enabledSubtree(nodes: TreeNode[], parentEnabled: boolean): TreeNode[] {
     const out: TreeNode[] = []
+    const map = this.toggleMap()
     for (const n of (nodes ?? [])) {
-      const selfOn = this.#toggleState.isEnabled(n.id, defaultEnabled(n.kind))
+      // Same source of truth as the rendered toggles (adopted-aware
+      // defaults) — reading the bare kind default here made the logical view
+      // disagree with what the switches showed.
+      const selfOn = map.get(n.id) ?? defaultEnabled(n.kind)
       const eff = parentEnabled && selfOn
       const kids = this.#enabledSubtree(n.children ?? [], eff)
       if (kids.length > 0 || (eff && !(n.children?.length))) {
@@ -1128,9 +1134,12 @@ export class HomeComponent implements OnDestroy {
     // Disables and re-enables of already-on items always pass through.
     // The gate is one-way: off→on for code only.
     const isCode = isCodeKind(node.kind)
-    // Kind-aware default so an unset adopted-code node reads OFF (first click
-    // = turn ON → trust gate fires) and data reads ON.
-    const currentlyEnabled = this.#toggleState.isEnabled(node.id, defaultEnabled(node.kind))
+    // Read the node's current state from the SAME map the tree displays
+    // (adopted-aware defaults). Reading a different default here (the bare
+    // kind default) made the first click a visual no-op — it "flipped" from a
+    // state the user never saw — so every toggle took two clicks.
+    const before = this.toggleMap()
+    const currentlyEnabled = before.get(node.id) ?? defaultEnabled(node.kind)
 
     if (!currentlyEnabled && isCode) {
       const sourceDomain = this.#findSectionDomain(node)
@@ -1159,24 +1168,24 @@ export class HomeComponent implements OnDestroy {
       }
     }
 
-    // Kind-aware default so the flip is computed from the node's TRUE current
-    // state (an unset code node is OFF, not the bare default-true) — otherwise
-    // the first click on an off-by-default code node would flip OFF→OFF.
-    this.#toggleState.toggle(node.id, defaultEnabled(node.kind))
+    // Flip from the TRUE displayed state (toggle negates `stored ?? def`, so
+    // passing the displayed value as def is an exact single-click flip
+    // whether or not a stored value exists).
+    this.#toggleState.toggle(node.id, currentlyEnabled)
 
-    // ENABLE CASCADES DOWN: turning a node ON enables its whole subtree, so
-    // adopting a branch and flipping it on activates everything under it. To
-    // be selective you go toward the leaves and enable only what you want
-    // (turning a node OFF does NOT force-disable descendants — you can leave
-    // a sub-feature on). The trust gate already cleared above covers the
-    // subtree's source domain, so the cascade doesn't re-prompt.
-    const nowOn = this.#toggleState.isEnabled(node.id, defaultEnabled(node.kind))
+    // ENABLE CASCADES DOWN: turning a node ON turns its whole subtree on —
+    // descendants already default ON inside an adopted tree, so this only
+    // has to revive ones the participant explicitly switched off. To be
+    // selective you flip the parent on, then switch off what you don't want
+    // (turning a node OFF does NOT force-disable descendants). The trust
+    // gate already cleared above covers the subtree's source domain, so the
+    // cascade doesn't re-prompt.
+    const nowOn = !currentlyEnabled
     if (nowOn && node.children?.length) {
       const cascade = (nodes: TreeNode[]) => {
         for (const c of nodes) {
-          if (!this.#toggleState.isEnabled(c.id, defaultEnabled(c.kind))) {
-            this.#toggleState.toggle(c.id, defaultEnabled(c.kind))
-          }
+          const cur = before.get(c.id) ?? defaultEnabled(c.kind)
+          if (!cur) this.#toggleState.toggle(c.id, cur)
           if (c.children?.length) cascade(c.children)
         }
       }
