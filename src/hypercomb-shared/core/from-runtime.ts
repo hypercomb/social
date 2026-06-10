@@ -19,7 +19,16 @@ export function fromRuntime<T>(
   getter: () => T,
   event = 'change'
 ): Signal<T> {
-  const initial = target ? getter() : undefined as T
+  // Run the getter even when the target service is missing — getters are
+  // written null-safe by convention (`this.#svc?.value ?? fallback`), so
+  // they supply their own fallback shape ([] / '' / default). Initializing
+  // to bare `undefined` instead handed every consumer a permanently
+  // undefined signal (no listener ever attaches without a target), which
+  // is how toast.component's `state$().length` crashed on a shell whose
+  // drone never registered. try/catch keeps the old behavior for getters
+  // that genuinely can't run without the service.
+  let initial: T
+  try { initial = getter() } catch { initial = undefined as T }
   const s: WritableSignal<T> = signal(initial)
   if (target) {
     // Defer the signal update to a microtask so it lands AFTER any

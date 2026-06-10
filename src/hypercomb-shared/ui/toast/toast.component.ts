@@ -26,8 +26,8 @@ export class ToastComponent implements OnDestroy {
     () => (this.#drone?.toasts ?? []) as readonly Toast[],
   )
 
-  readonly toasts = computed(() => this.state$())
-  readonly hasToasts = computed(() => this.state$().length > 0)
+  readonly toasts = computed(() => this.state$() ?? [])
+  readonly hasToasts = computed(() => (this.state$()?.length ?? 0) > 0)
 
   constructor() {
     this.#drone = get('@diamondcoreprocessor.com/ToastDrone')
