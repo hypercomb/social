@@ -126,7 +126,18 @@ const httpServer = createServer(async (req, res) => {
   res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, HEAD, OPTIONS')
   res.setHeader('Access-Control-Allow-Headers', '*')
   if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return }
-  const m = (req.url || '').match(POOL_RE)
+  const path = (req.url || '').split('?')[0]
+  // Health root — the DCP relay-panel probes GET / on an interval; answer 200
+  // so it reads "up" instead of logging a 404 every tick.
+  if (path === '/' || path === '/health') { res.writeHead(200); res.end('local-relay ok'); return }
+  // Empty package manifest — the installer's default-baseline seed fetches
+  // /manifest.json; the dev relay hosts no packages (the baseline ships
+  // bundled in the DCP), so return an empty one (200) rather than 404.
+  if (path === '/manifest.json') {
+    res.setHeader('Content-Type', 'application/json')
+    res.writeHead(200); res.end('{"packages":{}}'); return
+  }
+  const m = path.match(POOL_RE)
   if (!m) { res.writeHead(404); res.end('not found'); return }
   const filePath = join(CONTENT_DIR, m[1], m[2].toLowerCase() + (m[3] || ''))
   if (req.method === 'GET' || req.method === 'HEAD') {

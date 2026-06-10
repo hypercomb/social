@@ -1147,13 +1147,14 @@ export class NostrMeshDrone extends Drone {
         const v = localStorage.getItem('hc:nostrmesh:use-live-relay')
         if (v === '1') return true    // explicit opt-in
         if (v === '0') return false   // explicit opt-out → use the local relay
-        // Unset: default ON for the operator's LOOPBACK dev, so both browser
-        // tabs share via the stable jwize.com relay with zero per-tab setup
-        // (a restarting in-memory localhost relay can't hold a swarm). OFF for
-        // casual PRODUCTION browsers (non-loopback) so they never auto-hit the
-        // operator's home server — the "don't get swamped" gate. The flag (1/0)
-        // and an explicit hc:nostrmesh:relays both still override this.
-        return this.isLocalContext()
+        // Unset: ALWAYS use the LOCAL relay (LOCAL_RELAY). The dev relay
+        // (scripts/local-relay.ts) now serves the WS mesh AND HTTP content on
+        // one port and persists content across restarts, so two loopback tabs
+        // share a fully self-contained swarm — no cross-origin wss://jwize.com
+        // hop (whose browser WS was intermittently failing) and no per-tab
+        // setup. LIVE_RELAY is reachable ONLY via the explicit '1' opt-in
+        // above. The flag (1/0) and an explicit hc:nostrmesh:relays override.
+        return false
       } catch { return false }
     })()
     const seed = useLive ? [LIVE_RELAY] : [LOCAL_RELAY]
