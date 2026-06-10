@@ -846,4 +846,15 @@ export class SubstrateService extends EventTarget {
   }
 }
 
-window.ioc.register('@diamondcoreprocessor.com/SubstrateService', new SubstrateService())
+const _substrateService = new SubstrateService()
+window.ioc.register('@diamondcoreprocessor.com/SubstrateService', _substrateService)
+
+// BOOT-TIME RECONCILE — runs once per session shortly after load, without
+// requiring any substrate command. Stamps label-index image assignments into
+// the canonical 0000 so the tile's image travels everywhere its layer does:
+// the swarm publish inlines canonical props (readTilePropertiesAt), stamping
+// fires cell:0000-changed, and SwarmDrone's existing listener republishes —
+// so the witness sees the EXACT image + position the host renders, and
+// adopts carry both. Delayed so history/store/committer have registered;
+// idempotent and cheap when there's nothing to stamp.
+setTimeout(() => { void _substrateService.reconcileCanonicalImageStamps() }, 15_000)
