@@ -752,48 +752,89 @@ export class SubstrateService extends EventTarget {
 
   #stampRunning = false
 
-  /** Walk hypercomb.io/ and stamp index-assigned images into canonical
-   *  props. Returns the number of tiles stamped. Safe to call repeatedly. */
+  /** Stamp index-assigned images into canonical props for every tile in the
+   *  tree. Walks the LAYER tree (layer-as-primitive — tiles need no OPFS
+   *  dir), falling back to the hypercomb.io/ dir walk when the history
+   *  service isn't available. Returns the number stamped; idempotent. */
   async reconcileCanonicalImageStamps(): Promise<number> {
     if (this.#stampRunning) return 0
     this.#stampRunning = true
     try {
       const store = this.#store()
-      if (!store?.hypercombRoot) return 0
+      if (!store) return 0
       const index: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
       if (Object.keys(index).length === 0) return 0
 
       let stamped = 0
-      const walk = async (dir: FileSystemDirectoryHandle, segments: string[]): Promise<void> => {
-        if (segments.length > 8) return   // depth guard
-        for await (const [name, handle] of (dir as any).entries()) {
-          if (handle.kind !== 'directory' || name.startsWith('__')) continue
-          const propsSig = index[name]
-          if (typeof propsSig === 'string' && /^[0-9a-f]{64}$/.test(propsSig)) {
-            try {
-              const canonical = await readTilePropertiesAt(segments, name)
-              const has = (canonical as any)?.small?.image ?? (canonical as any)?.flat?.small?.image
-              if (!has) {
-                const blob = await store.getResource(propsSig)
-                if (blob) {
-                  const p = JSON.parse(await blob.text())
-                  const img = p?.small?.image ?? p?.flat?.small?.image
-                  if (typeof img === 'string') {
-                    await writeTilePropertiesAt(segments, name, {
-                      ...(p?.small?.image ? { small: { image: p.small.image } } : {}),
-                      ...(p?.flat?.small?.image ? { flat: { small: { image: p.flat.small.image } } } : {}),
-                      substrate: true,
-                    })
-                    stamped++
-                  }
-                }
-              }
-            } catch { /* one tile must not stop the pass */ }
-          }
-          await walk(handle as FileSystemDirectoryHandle, [...segments, name])
-        }
+      const stampIfNeeded = async (segments: string[], name: string): Promise<void> => {
+        const propsSig = index[name]
+        if (typeof propsSig !== 'string' || !/^[0-9a-f]{64}$/.test(propsSig)) return
+        try {
+          const canonical = await readTilePropertiesAt(segments, name)
+          const has = (canonical as any)?.small?.image ?? (canonical as any)?.flat?.small?.image
+          if (has) return
+          const blob = await store.getResource(propsSig)
+          if (!blob) return
+          const p = JSON.parse(await blob.text())
+          const img = p?.small?.image ?? p?.flat?.small?.image
+          if (typeof img !== 'string') return
+          await writeTilePropertiesAt(segments, name, {
+            ...(p?.small?.image ? { small: { image: p.small.image } } : {}),
+            ...(p?.flat?.small?.image ? { flat: { small: { image: p.flat.small.image } } } : {}),
+            substrate: true,
+          })
+          stamped++
+        } catch { /* one tile must not stop the pass */ }
       }
-      await walk(store.hypercombRoot, [])
+
+      // PRIMARY: walk the layer tree — the same source the swarm publishes
+      // from. Tiles are layer-state; many have NO OPFS directory, so a dir
+      // walk silently misses them (the original bug: 0 stamped on a tree
+      // that renders fine).
+      const history = get('@diamondcoreprocessor.com/HistoryService') as {
+        sign?: (l: { explorerSegments?: () => readonly string[] }) => Promise<string>
+        currentLayerAt?: (sig: string) => Promise<unknown>
+        getLayerBySig?: (s: string) => Promise<{ name?: string } | null>
+      } | undefined
+
+      if (history?.sign && history?.currentLayerAt && history?.getLayerBySig) {
+        const childNamesAt = async (segments: string[]): Promise<string[]> => {
+          try {
+            // Root is named '/' in the signing scheme (same convention as
+            // viewport-store) so it addresses like every other location.
+            const segs = segments.length === 0 ? ['/'] : segments
+            const sig = await history.sign!({ explorerSegments: () => segs })
+            if (!sig) return []
+            const layer = await history.currentLayerAt!(sig) as { children?: readonly unknown[] } | null
+            const sigs = Array.isArray(layer?.children) ? layer!.children! : []
+            const names = await Promise.all(sigs.map(async (cs) => {
+              try { return (await history.getLayerBySig!(String(cs ?? '')))?.name ?? null }
+              catch { return null }
+            }))
+            return names.filter((n): n is string => typeof n === 'string' && n.length > 0)
+          } catch { return [] }
+        }
+        const walkLayers = async (segments: string[]): Promise<void> => {
+          if (segments.length > 8) return
+          for (const name of await childNamesAt(segments)) {
+            await stampIfNeeded(segments, name)
+            await walkLayers([...segments, name])
+          }
+        }
+        await walkLayers([])
+      } else if (store.hypercombRoot) {
+        // FALLBACK: legacy dir-backed tiles.
+        const walkDirs = async (dir: FileSystemDirectoryHandle, segments: string[]): Promise<void> => {
+          if (segments.length > 8) return
+          for await (const [name, handle] of (dir as any).entries()) {
+            if (handle.kind !== 'directory' || name.startsWith('__')) continue
+            await stampIfNeeded(segments, name)
+            await walkDirs(handle as FileSystemDirectoryHandle, [...segments, name])
+          }
+        }
+        await walkDirs(store.hypercombRoot, [])
+      }
+
       if (stamped > 0) console.info(`[substrate] stamped ${stamped} tile image(s) into canonical props`)
       return stamped
     } catch { return 0 }
