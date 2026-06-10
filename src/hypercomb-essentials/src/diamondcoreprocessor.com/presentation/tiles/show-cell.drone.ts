@@ -267,6 +267,12 @@ export class ShowCellDrone extends Drone {
 
   // cache: cell label → small image signature (avoids re-reading 0000 on every render)
   private readonly cellImageCache = new Map<string, string | null>()
+  /** For EXTERNAL (peer) labels: which publisher imageSig the cached value
+   *  was derived from. The publisher's CURRENT sig is authoritative — a
+   *  cache entry is only reusable while its source sig is unchanged, so a
+   *  stale or cross-contaminated entry can never pin a peer tile to the
+   *  wrong image. */
+  private readonly peerImageSourceByLabel = new Map<string, string>()
   // cache: cell label → tag names (avoids re-reading 0000 on every render)
   private readonly cellTagsCache = new Map<string, string[]>()
   // cache: cell label → border color RGB floats
@@ -4103,54 +4109,60 @@ export class ShowCellDrone extends Drone {
       // do (propsBlob → small.image → imageAtlas), then return without
       // touching the OPFS-only caches.
       if (cell.external) {
-        // Cache fast-path — but only when the cached value is a real
-        // sig. A null cache entry means the previous resolve failed
-        // (peer image bytes hadn't arrived yet, or the peer never
-        // streamed an imageSig). Returning early on null permanently
-        // strands the tile blank: swarm:resource-arrived clears layer
-        // caches and requests a render, but on the re-render we'd hit
-        // this branch again and return without re-attempting the load.
-        // Falling through on null lets the peer rendering path below
-        // re-fetch peerImageSigByLabel and load the bytes that may
-        // have arrived in the meantime.
-        const cached = this.cellImageCache.get(cell.label)
-        if (cached) {
-          cell.imageSig = cached
-          return
-        }
-        // Peer-only tiles render ONLY the publisher's streamed image.
-        // No local-pool fallback — calling pickImageForLabel here
-        // would paint a deterministic-but-arbitrary image from the
-        // receiver's substrate pool, which is wrong on a tile the
-        // receiver doesn't own. If the publisher's bytes haven't
-        // arrived (or they never published an imageSig at all), the
-        // tile stays blank until either the receiver adopts (then
-        // it's an owned tile and substrate fallback is legitimate)
-        // or the publisher's bytes land via the swarm resource pull.
+        // Peer-only tiles render ONLY the publisher's streamed image — the
+        // sig is content-addressed and the publisher is the authority, so
+        // the CURRENT peerImageSigByLabel value always wins. The cache is a
+        // derivation memo, valid only while its SOURCE sig is unchanged
+        // (peerImageSourceByLabel) — without that check, a stale or
+        // cross-contaminated entry pinned peer tiles to WRONG images
+        // forever (the witness showed shuffled/random tiles even though
+        // the wire carried the exact right sigs per name).
+        // No local-pool fallback in any branch: painting the receiver's
+        // substrate pick on a tile the receiver doesn't own is wrong.
         const peerSig = peerImageSigByLabel.get(cell.label)
-        if (!peerSig) {
-          this.cellImageCache.set(cell.label, null)
-          return
-        }
-        try {
-          const blob = await store.getResource(peerSig)
-          if (!blob) {
-            this.cellImageCache.set(cell.label, null)
+        if (peerSig) {
+          const cached = this.cellImageCache.get(cell.label)
+          if (cached && this.peerImageSourceByLabel.get(cell.label) === peerSig) {
+            cell.imageSig = cached
             return
           }
-          const text = await blob.text()
-          const props = JSON.parse(text)
-          const smallSig = (this.#flat && props?.flat?.small?.image) || props?.small?.image
-          if (smallSig && isSignature(smallSig)) {
-            await loadImageOnce(smallSig)
-            cell.imageSig = smallSig
-            this.cellImageCache.set(cell.label, smallSig)
-          } else {
+          try {
+            const blob = await store.getResource(peerSig)
+            if (!blob) { this.cellImageCache.set(cell.label, null); return }
+            // The wire has carried two shapes: a PROPS pointer (JSON blob
+            // whose small.image holds the image sig — the old substrate-
+            // cache pointer) and the DIRECT image sig (current visuals
+            // inline the canonical 0000, whose small.image IS the image).
+            // Parse-as-JSON distinguishes them: parseable → derive; binary
+            // → the sig is the image itself.
+            let finalSig: string | null = null
+            try {
+              const props = JSON.parse(await blob.text())
+              const smallSig = (this.#flat && props?.flat?.small?.image) || props?.small?.image
+              if (smallSig && isSignature(smallSig)) finalSig = smallSig
+            } catch {
+              finalSig = peerSig
+            }
+            if (finalSig) {
+              await loadImageOnce(finalSig)
+              cell.imageSig = finalSig
+              this.cellImageCache.set(cell.label, finalSig)
+              this.peerImageSourceByLabel.set(cell.label, peerSig)
+            } else {
+              this.cellImageCache.set(cell.label, null)
+            }
+          } catch {
             this.cellImageCache.set(cell.label, null)
           }
-        } catch {
-          this.cellImageCache.set(cell.label, null)
+          return
         }
+        // No CURRENT peer sig (bytes/visual not arrived this pass): reuse a
+        // previously-derived value if one exists — re-render passes must not
+        // strand the tile — otherwise mark null and wait for the next
+        // visuals/resource arrival to re-attempt.
+        const cached = this.cellImageCache.get(cell.label)
+        if (cached) { cell.imageSig = cached; return }
+        this.cellImageCache.set(cell.label, null)
         return
       }
 
