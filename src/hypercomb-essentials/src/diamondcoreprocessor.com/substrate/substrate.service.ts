@@ -852,10 +852,12 @@ export class SubstrateService extends EventTarget {
       if (history?.sign && history?.currentLayerAt && history?.getLayerBySig) {
         const childNamesAt = async (segments: string[]): Promise<string[]> => {
           try {
-            // Root is named '/' in the signing scheme (same convention as
-            // viewport-store) so it addresses like every other location.
-            const segs = segments.length === 0 ? ['/'] : segments
-            const sig = await history.sign!({ explorerSegments: () => segs })
+            // Segments pass through RAW — the root bag signs as the EMPTY
+            // list (sig e3b0c442…, the hash of ''), matching how show-cell /
+            // the swarm sign locations. (viewport-store's ROOT_NAME='/'
+            // convention names a DIFFERENT, empty decoy bag — substituting it
+            // here made the walk read 0 children at root, forever.)
+            const sig = await history.sign!({ explorerSegments: () => [...segments] })
             if (!sig) return []
             const layer = await history.currentLayerAt!(sig) as { children?: readonly unknown[] } | null
             const sigs = Array.isArray(layer?.children) ? layer!.children! : []
