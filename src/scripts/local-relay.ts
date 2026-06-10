@@ -3,8 +3,22 @@
 // Launched automatically by the dev server prestart script.
 
 import { WebSocketServer, WebSocket } from 'ws'
+import { createServer } from 'node:http'
+import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const PORT = 7777
+
+// Persistent dev content store, HTTP-served alongside the WS mesh on the SAME
+// port. A witnessing tab — or the installer, which fetches over HTTP and never
+// joins the mesh — pulls layers/resources the author pushed via write-through.
+// Kept OUT of public/content so `build:essentials` (which overwrites that dir)
+// can't wipe pushed swarm content. Fills via dev-open PUTs; sha256 self-
+// authenticates every write, so an open relay is still content-safe.
+const CONTENT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '.dev-relay-content')
+const POOL_RE = /^\/(__layers__|__resources__|__bees__|__dependencies__)\/([a-f0-9]{64})(\.json|\.js)?$/i
 
 // Auto-expire window for ephemeral-range (20000-29999) events. Long
 // enough that a receiver who reloads / joins shortly after a publisher
@@ -103,7 +117,45 @@ function send(ws: WebSocket, msg: unknown[]): void {
   }
 }
 
-const wss = new WebSocketServer({ port: PORT })
+// HTTP content server (GET/PUT) + WS mesh share ONE port: the installer and
+// witnessing tabs fetch bytes over HTTP, the mesh rides the same port as an
+// upgrade. Without the HTTP half a witness gets the visuals but never the
+// bytes — the "nothing renders" gap.
+const httpServer = createServer(async (req, res) => {
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, PUT, HEAD, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', '*')
+  if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return }
+  const m = (req.url || '').match(POOL_RE)
+  if (!m) { res.writeHead(404); res.end('not found'); return }
+  const filePath = join(CONTENT_DIR, m[1], m[2].toLowerCase() + (m[3] || ''))
+  if (req.method === 'GET' || req.method === 'HEAD') {
+    try {
+      const bytes = await readFile(filePath)
+      res.setHeader('Cache-Control', 'immutable, max-age=31536000')
+      res.writeHead(200)
+      res.end(req.method === 'HEAD' ? undefined : bytes)
+    } catch { res.writeHead(404); res.end('not found') }
+    return
+  }
+  if (req.method === 'PUT') {
+    const chunks: Buffer[] = []
+    for await (const c of req) chunks.push(c as Buffer)
+    const body = Buffer.concat(chunks)
+    const actual = createHash('sha256').update(body).digest('hex')
+    if (actual !== m[2].toLowerCase()) { res.writeHead(422); res.end('sig mismatch'); return }
+    await mkdir(join(CONTENT_DIR, m[1]), { recursive: true })
+    await writeFile(filePath, body)
+    res.writeHead(201); res.end('stored ' + actual)
+    return
+  }
+  res.writeHead(405); res.end('method not allowed')
+})
+
+const wss = new WebSocketServer({ noServer: true })
+httpServer.on('upgrade', (req, socket, head) => {
+  wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req))
+})
 
 wss.on('connection', (ws) => {
   const clientSubs = new Set<string>()
@@ -368,4 +420,6 @@ setInterval(() => {
   if (removed > 0) console.log(`[local-relay] swept ${removed} expired event(s)`)
 }, 30_000)
 
-console.log(`[local-relay] nostr relay listening on ws://localhost:${PORT}`)
+httpServer.listen(PORT, () => {
+  console.log(`[local-relay] listening on :${PORT} — ws:// (mesh) + http:// (content @ ${CONTENT_DIR})`)
+})

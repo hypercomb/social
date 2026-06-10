@@ -1,3 +1,4 @@
 node_modules
 scripts/.build-state.json
 **/public/env.js
+.dev-relay-content/
