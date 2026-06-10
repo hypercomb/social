@@ -3,7 +3,8 @@
 import '@hypercomb/shared/core/ioc.web'
 
 import { bootstrapApplication } from '@angular/platform-browser'
-import { ensureInstall, resyncFromSentinel } from './setup/ensure-install'
+import { EffectBus } from '@hypercomb/core'
+import { ensureInstall, resyncFromSentinel, upgradeFromBundled, type BootStatus } from './setup/ensure-install'
 import { initSentinel, type SentinelBridge } from './setup/sentinel-bridge'
 import { resolveImportMap } from './setup/resolve-import-map'
 import { appConfig } from './app.config'
@@ -146,6 +147,33 @@ const bootstrap = async (): Promise<void> => {
   })
   window.addEventListener('actions:available', resyncAndEnforce)
   window.addEventListener('dcp:embed-closed', () => reloadIfDrifted('dcp embed closed'))
+
+  // First-run "Start" — the welcome card's single button, fully unattended.
+  // Mount the hidden sentinel and pull DCP's enabled set: DCP resolves
+  // everything from its content domains, so a sig (or several) + the
+  // domain is the entire barrier to entry. resyncAndEnforce already
+  // reloads the shell when the cold install lands. If DCP is unreachable
+  // (no installer deployed, offline), fall back silently to the package
+  // bundled with this shell — same contract either way, every byte
+  // sha256-verified against its signature. Only when BOTH sources come
+  // up empty does the card re-arm (boot:status install-needed).
+  window.addEventListener('hypercomb:start-install', () => {
+    void (async () => {
+      // Note: boot status stays 'install-needed' while this runs so the
+      // welcome card remains visible with its "Starting…" state — the
+      // participant watches one card until the shell reloads ready.
+      try {
+        await resyncAndEnforce()   // reloads on cold-install success
+      } catch (err) {
+        console.warn('[main] first-run sentinel install failed', err)
+      }
+      if (localStorage.getItem('hypercomb.installed') === 'true') return
+      const ok = await upgradeFromBundled().catch(() => false)
+      if (ok) { location.reload(); return }
+      console.warn('[main] first-run install exhausted both sources (sentinel + bundled)')
+      EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-sentinel' } as BootStatus)
+    })()
+  })
 }
 
 bootstrap().catch(err => console.error(err))

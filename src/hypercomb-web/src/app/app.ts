@@ -47,12 +47,16 @@ export class App implements AfterViewInit {
   protected readonly installNeeded = computed(() =>
     this.bootStatus()?.kind === 'install-needed' && !this.dcpPortalOpen()
   )
-  protected readonly installReason = computed(() => {
-    const s = this.bootStatus()
-    return s?.kind === 'install-needed' ? s.reason : null
-  })
-  protected openDcpPortal(): void {
-    window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'dcp' } }))
+  /** First-run "Start" — one button, zero choices. Hands off to main.ts's
+   *  unattended install routine (hidden sentinel → DCP resolves from its
+   *  content domains → stream → reload; bundled package as the silent
+   *  fallback). The card shows "Starting…" until the routine either
+   *  reloads the shell (success) or re-emits install-needed (re-arm,
+   *  handled in the boot:status subscription below). */
+  protected startWelcome(): void {
+    if (this.upgrading()) return
+    this.upgrading.set(true)
+    window.dispatchEvent(new CustomEvent('hypercomb:start-install'))
   }
 
   /**
@@ -111,6 +115,10 @@ export class App implements AfterViewInit {
 
     EffectBus.on<BootStatus>('boot:status', (status) => {
       this.bootStatus.set(status)
+      // A fresh install-needed while "Starting…" means the unattended
+      // routine exhausted both sources (sentinel + bundled) — re-arm the
+      // Start button so the participant can retry.
+      if (status?.kind === 'install-needed') this.upgrading.set(false)
     })
 
     EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {

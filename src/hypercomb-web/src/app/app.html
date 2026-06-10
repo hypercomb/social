@@ -28,17 +28,10 @@
 @if (installNeeded()) {
 <div class="install-prompt" role="dialog" aria-modal="true" aria-labelledby="install-title">
   <div class="install-card">
-    <h2 id="install-title">Install Hypercomb</h2>
-    @if (installReason() === 'no-sentinel') {
-    <p>This Hypercomb shell needs content from your Diamond Core Processor. Open DCP, install the modules you want, and they'll stream here automatically.</p>
-    } @else {
-    <p>Connected to DCP, but no modules are enabled there yet. Open DCP and install or enable modules to populate this view.</p>
-    }
-    <button class="install-cta" type="button" (click)="openDcpPortal()">Open Diamond Core Processor</button>
-    <button class="install-cta" type="button" (click)="upgradeFromBundledClicked()" [disabled]="upgrading()">
-      @if (upgrading()) { Installing… } @else { Install Bundled }
+    <h2 id="install-title">Welcome to Hypercomb</h2>
+    <button class="install-cta" type="button" (click)="startWelcome()" [disabled]="upgrading()">
+      @if (upgrading()) { Starting… } @else { Start }
     </button>
-    <p class="install-hint">DCP installs the modules you want. "Install Bundled" uses the package shipped with this shell.</p>
   </div>
 </div>
 }
