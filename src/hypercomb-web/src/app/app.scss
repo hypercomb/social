@@ -49,50 +49,48 @@
   font-family: var(--hc-font, system-ui, sans-serif);
   color: rgba(255, 255, 255, 0.92);
 
+  // One line: title left, Start right. Crisp — hairline border, flat
+  // surface, no decoration beyond what the type carries.
   .install-card {
-    max-width: 28rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 2.5rem;
+    max-width: 30rem;
     width: calc(100vw - 3rem);
-    padding: 2rem 2.2rem;
-    background: rgba(20, 20, 26, 0.96);
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 14px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
-    text-align: center;
+    padding: 1rem 1rem 1rem 1.6rem;
+    background: rgba(16, 16, 21, 0.97);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
   }
 
   h2 {
-    margin: 0 0 0.8rem;
-    font-size: 1.4rem;
-    font-weight: 700;
-    letter-spacing: 0.02em;
-  }
-
-  p {
-    margin: 0 0 1.2rem;
-    font-size: 0.98rem;
-    line-height: 1.5;
-    color: rgba(255, 255, 255, 0.78);
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    color: rgba(255, 255, 255, 0.92);
+    white-space: nowrap;
   }
 
   .install-cta {
-    display: inline-block;
-    padding: 0.75rem 1.6rem;
-    margin: 0.4rem 0 0.8rem;
-    font-size: 0.98rem;
+    flex: none;
+    padding: 0.55rem 1.5rem;
+    margin: 0;
+    font-size: 0.85rem;
     font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
     color: #0a0a0a;
     background: rgba(255, 255, 255, 0.92);
+    border: none;
     border-radius: 999px;
-    text-decoration: none;
+    cursor: pointer;
     transition: background 0.15s ease;
 
-    &:hover { background: rgba(255, 255, 255, 1); }
-  }
-
-  .install-hint {
-    margin: 0;
-    font-size: 0.82rem;
-    color: rgba(255, 255, 255, 0.5);
+    &:hover:not(:disabled) { background: #fff; }
+    &:disabled { opacity: 0.55; cursor: default; }
   }
 }
 
