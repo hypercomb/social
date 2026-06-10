@@ -316,8 +316,13 @@ export class HomeComponent implements OnDestroy {
     })
   }
   isViewLogical(domainName: string): boolean {
-    return this.viewLogicalGroups().has(domainName) ||
-      (this.importMode() && domainName === this.importDomainName())
+    // Manual toggle ONLY. Import mode used to auto-apply the logical overlay
+    // to the importing host group, which made an adopt land in a merged
+    // "logical view" instead of the host domain at the adopted location. An
+    // adopt now opens the host folder showing ITS OWN tree (adopted node
+    // focused); the logical stays what it is — the hypercomb.io sibling that
+    // reflects the enabled features across folders, combined.
+    return this.viewLogicalGroups().has(domainName)
   }
 
   readonly filteredSections = computed(() => {

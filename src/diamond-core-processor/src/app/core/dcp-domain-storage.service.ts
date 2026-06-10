@@ -437,6 +437,7 @@ export class DcpDomainStorage {
     logical: string[]
     logicalRootSig: string | null
     domains: { name: string; visible: boolean; branchCount: number }[]
+    branches: { domain: string; name: string; branchSig: string; at: string[] }[]
     generatedAt: number
   }> {
     await this.initialize()
@@ -448,7 +449,22 @@ export class DcpDomainStorage {
       visible: this.isDomainVisible(d.name),
       branchCount: d.branchCount,
     }))
-    return { logical, logicalRootSig, domains, generatedAt: Date.now() }
+    // The adopted branches, with placement. This is what the HIVE renders
+    // from: `logicalRootSig` names a layer that lives only in DCP's OPFS,
+    // but a branch root (e.g. an adopted site's root layer) is fetchable
+    // anywhere — it came from a host/relay in the first place. The hive
+    // mounts each branch at its `at` location and walks the tree itself.
+    const branches: { domain: string; name: string; branchSig: string; at: string[] }[] = []
+    for (const d of hive) {
+      try {
+        for (const b of await this.loadDomainBranches(d.name)) {
+          const sig = String(b.branchSig ?? '').trim().toLowerCase()
+          if (!/^[a-f0-9]{64}$/.test(sig)) continue
+          branches.push({ domain: d.name, name: b.name, branchSig: sig, at: b.at ?? [] })
+        }
+      } catch { /* one bad domain dir must not sink the snapshot */ }
+    }
+    return { logical, logicalRootSig, domains, branches, generatedAt: Date.now() }
   }
 
   // ── save / branch / home-history (default → v1 → v2 …) ─────────────────────

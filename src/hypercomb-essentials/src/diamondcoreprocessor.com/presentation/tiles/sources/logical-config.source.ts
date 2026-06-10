@@ -2,24 +2,23 @@
 //
 // The logical-config contributor — the missing CONSUME side of #62.
 //
-// The DCP installer owns the registry and posts its MATERIALIZED logical
-// install to the hive as a snapshot (RegistrySnapshotStore): the union of
-// (default ⊕ enabled domain refs) = the participant's own always-on data +
-// the adopted/enabled set, rooted at `logicalRootSig`. Until now the hive
-// CACHED that snapshot but never rendered from it, so adopting/enabling in
-// the installer (or coming back to solo from a swarm) had no effect on what
+// The DCP installer owns the registry and posts a snapshot of it to the hive
+// (RegistrySnapshotStore, persisted across reloads). Until now the hive
+// CACHED that snapshot but never rendered from it, so adopting in the
+// installer (or coming back to solo from a swarm) had no effect on what
 // hypercomb.io showed.
 //
-// This source closes that loop: it reads the snapshot's `logicalRootSig`,
-// walks that materialized tree to the current location by child name, and
-// contributes the location's children as tiles. So hypercomb.io REFLECTS the
-// current configuration — the adopted tiles appear in solo.
+// This source closes the loop by mounting the snapshot's ADOPTED BRANCHES:
+// each branch is (domain, name, branchSig, at) — e.g. dolphin adopted into
+// jwize.com at the root. At location `at` the branch's NAME appears as a
+// tile; beneath it the branch's tree is walked layer-by-layer via the
+// ContentBroker (local OPFS → host/relay → mesh). Branch roots are fetchable
+// anywhere — they came from a host in the first place — unlike the DCP's
+// internal `logicalRootSig` layer, which lives only in the installer's OPFS.
 //
-// Bytes: the logical layers resolve through the ContentBroker (local OPFS →
-// host → mesh) — the same path every sig uses. Fail-open: no snapshot yet
-// (installer hasn't projected) → []. show-cell unions by (kind, name) and
-// dedupes against the locally-owned set, so this only ADDS config tiles the
-// hive doesn't already have.
+// Fail-open: no snapshot / no branches → []. show-cell unions by (kind,
+// name) and dedupes against the locally-owned set, so this only ADDS config
+// tiles the hive doesn't already have.
 //
 // Kind: 'peer' for now — it rides show-cell's existing non-local render +
 // navigate path (the adopted set is "from elsewhere" until the participant
@@ -32,7 +31,8 @@ import { TILE_SOURCE_REGISTRY_KEY } from '../tile-source-registry.js'
 const SNAPSHOT_KEY = '@hypercomb.social/RegistrySnapshot'
 const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
 
-interface SnapshotStoreLike { readonly snapshot: { readonly logicalRootSig: string | null } | null }
+interface SnapshotBranch { domain: string; name: string; branchSig: string; at: string[] }
+interface SnapshotStoreLike { readonly snapshot: { readonly branches?: SnapshotBranch[] } | null }
 interface BrokerLike { fetchBySig: (sig: string, type: string) => Promise<Uint8Array | null> }
 interface LayerLike { name?: string; cells?: unknown[]; layers?: unknown[]; children?: unknown[] }
 
@@ -54,8 +54,8 @@ export const logicalConfigSource: TileSource = async (
 ): Promise<readonly TileEntry[]> => {
   const ioc = (window as unknown as { ioc?: { get?: (k: string) => unknown } }).ioc
   const store = ioc?.get?.(SNAPSHOT_KEY) as SnapshotStoreLike | undefined
-  const rootSig = store?.snapshot?.logicalRootSig
-  if (!rootSig || !SIG_RE.test(rootSig)) return []
+  const branches = store?.snapshot?.branches
+  if (!Array.isArray(branches) || branches.length === 0) return []
   const broker = ioc?.get?.(BROKER_KEY) as BrokerLike | undefined
   if (!broker?.fetchBySig) return []
 
@@ -68,26 +68,48 @@ export const logicalConfigSource: TileSource = async (
     } catch { return null }
   }
 
-  // Walk the materialized logical tree down to the current location by name.
-  let layer = await resolveLayer(rootSig)
-  if (!layer) return []
-  for (const seg of loc.segments) {
-    let next: LayerLike | null = null
+  const segs = loc.segments
+  const out: TileEntry[] = []
+
+  for (const b of branches) {
+    const sig = String(b?.branchSig ?? '').trim().toLowerCase()
+    const name = String(b?.name ?? '').trim()
+    if (!SIG_RE.test(sig) || !name) continue
+    const at = Array.isArray(b.at) ? b.at.map(s => String(s ?? '').trim()).filter(Boolean) : []
+
+    // Case 1 — we are AT the adopt location: the branch itself is a tile.
+    if (segs.length === at.length && at.every((s, i) => s === segs[i])) {
+      out.push({ name, kind: 'peer', source: {} })
+      continue
+    }
+
+    // Case 2 — we are INSIDE the branch: [...at, name, ...rest]. Walk the
+    // branch tree by the remaining segment names and contribute that node's
+    // children.
+    const mount = [...at, name]
+    const inside = segs.length >= mount.length && mount.every((s, i) => s === segs[i])
+    if (!inside) continue
+    const rest = segs.slice(mount.length)
+
+    let layer = await resolveLayer(sig)
+    for (const seg of rest) {
+      if (!layer) break
+      let next: LayerLike | null = null
+      for (const csig of childSigsOf(layer)) {
+        const cl = await resolveLayer(csig)
+        if (cl?.name === seg) { next = cl; break }
+      }
+      layer = next
+    }
+    if (!layer) continue
+
     for (const csig of childSigsOf(layer)) {
       const cl = await resolveLayer(csig)
-      if (cl?.name === seg) { next = cl; break }
+      const childName = typeof cl?.name === 'string' ? cl.name.trim() : ''
+      if (childName) out.push({ name: childName, kind: 'peer', source: {} })
     }
-    if (!next) return []   // this location isn't in the logical config
-    layer = next
   }
 
-  // Contribute the children at this location.
-  const out: TileEntry[] = []
-  for (const csig of childSigsOf(layer)) {
-    const cl = await resolveLayer(csig)
-    const name = typeof cl?.name === 'string' ? cl.name.trim() : ''
-    if (name) out.push({ name, kind: 'peer', source: {} })
-  }
   return out
 }
 

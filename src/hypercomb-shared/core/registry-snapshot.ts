@@ -27,6 +27,13 @@ export interface RegistrySnapshot {
   logical: string[]
   logicalRootSig: string | null
   domains: { name: string; visible: boolean; branchCount: number }[]
+  /** The adopted branches with placement — what the hive RENDERS from.
+   *  `logicalRootSig` names a layer materialized inside DCP's own OPFS (not
+   *  fetchable from the hive), but each branch root came from a host/relay
+   *  and resolves anywhere. The hive mounts `name` as a tile at `at` and
+   *  walks the branch tree beneath it. Optional: older DCP builds didn't
+   *  post it. */
+  branches?: { domain: string; name: string; branchSig: string; at: string[] }[]
   generatedAt: number
 }
 
