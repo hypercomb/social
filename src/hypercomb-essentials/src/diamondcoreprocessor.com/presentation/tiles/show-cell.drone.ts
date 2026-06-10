@@ -1130,12 +1130,22 @@ export class ShowCellDrone extends Drone {
     const atlas = this.imageAtlas
     const needReload: Cell[] = []
     for (const cell of cells) {
-      // EXTERNAL (peer) cells keep the PUBLISHER'S imageSig from the visuals.
-      // The label cache holds THIS participant's own picks (incl. substrate
-      // defaults assigned back when the peer tile looked blank) — letting it
-      // override here made the witness's random default trump the host's
-      // real image on every render. Same guard as the sibling loops below.
-      if (cell.external) continue
+      // EXTERNAL (peer) cells: the cache is coherent by construction now —
+      // loadOne validates it against the publisher's CURRENT sig
+      // (peerImageSourceByLabel) and externals never receive local
+      // substrate picks. Bind it so peer images survive synchronize-
+      // driven fast rebuilds (skipping entirely left them imageless);
+      // queue a load when no derivation exists yet or the atlas evicted.
+      if (cell.external) {
+        const cachedSig = this.cellImageCache.get(cell.label) ?? undefined
+        if (cachedSig) {
+          cell.imageSig = cachedSig
+          if (atlas && !atlas.hasImage(cachedSig) && !atlas.hasFailed(cachedSig)) needReload.push(cell)
+        } else {
+          needReload.push(cell)
+        }
+        continue
+      }
       if (this.cellImageCache.has(cell.label)) {
         const cachedSig = this.cellImageCache.get(cell.label) ?? undefined
         cell.imageSig = cachedSig
@@ -1151,8 +1161,9 @@ export class ShowCellDrone extends Drone {
     if (needReload.length > 0) {
       void (async () => {
         const lineage = this.resolve<any>('lineage')
-        const dir = await lineage?.explorerDir?.()
-        if (!dir) return
+        // dir may be null at foreign locations — loadCellImages is
+        // null-tolerant and external tiles don't need a local dir.
+        const dir = (await lineage?.explorerDir?.()) ?? null
         await this.loadCellImages(needReload, dir)
         this.requestRender()
       })()
@@ -1244,7 +1255,20 @@ export class ShowCellDrone extends Drone {
     const atlas = this.imageAtlas
     const needReload: Cell[] = []
     for (const cell of cells) {
-      if (cell.external) continue
+      // EXTERNAL cells: bind the coherent cache value (publisher-sig
+      // validated in loadOne) and queue missing/evicted ones — but skip
+      // the LOCAL decoration caches below (borderColor/link/substrate
+      // are this participant's own per-label state, not the peer's).
+      if (cell.external) {
+        const cachedSig = this.cellImageCache.get(cell.label) ?? undefined
+        if (cachedSig) {
+          cell.imageSig = cachedSig
+          if (atlas && !atlas.hasImage(cachedSig) && !atlas.hasFailed(cachedSig)) needReload.push(cell)
+        } else {
+          needReload.push(cell)
+        }
+        continue
+      }
       if (this.cellImageCache.has(cell.label)) {
         const cachedSig = this.cellImageCache.get(cell.label) ?? undefined
         cell.imageSig = cachedSig
@@ -1264,8 +1288,9 @@ export class ShowCellDrone extends Drone {
     if (needReload.length > 0) {
       void (async () => {
         const lineage = this.resolve<any>('lineage')
-        const dir = await lineage?.explorerDir?.()
-        if (!dir) return
+        // dir may be null at foreign locations — loadCellImages is
+        // null-tolerant and external tiles don't need a local dir.
+        const dir = (await lineage?.explorerDir?.()) ?? null
         await this.loadCellImages(needReload, dir)
         this.requestRender()
       })()
@@ -1375,7 +1400,17 @@ export class ShowCellDrone extends Drone {
     if (needLoad.length > 0) await this.loadCellImages(needLoad, dir)
 
     for (const cell of cells) {
-      if (cell.external) continue
+      // EXTERNAL cells: needLoad above already queued the no-cache and
+      // evicted cases (loadOne binds those directly); here just bind the
+      // coherent cache value when loadOne didn't touch this cell. Local
+      // decoration caches stay local-only.
+      if (cell.external) {
+        if (!cell.imageSig) {
+          const cachedSig = this.cellImageCache.get(cell.label) ?? undefined
+          if (cachedSig) cell.imageSig = cachedSig
+        }
+        continue
+      }
       if (this.cellImageCache.has(cell.label)) cell.imageSig = this.cellImageCache.get(cell.label) ?? undefined
       const bc = this.cellBorderColorCache.get(cell.label)
       if (bc) cell.borderColor = bc
@@ -1594,10 +1629,23 @@ export class ShowCellDrone extends Drone {
         const evictedSigs: string[] = []
         for (const cell of cached.cells) {
           const label = cell.label
-          // Same external guard as the render loops: a peer cell's imageSig
-          // came from the publisher's visuals — the local label cache (own
-          // picks + substrate defaults) must not overwrite it on restore.
-          if (cell.external) { this.renderedCells.set(label, cell); continue }
+          // EXTERNAL cells restore with the imageSig they were cached
+          // with (bound from the publisher's visuals). Top up from the
+          // coherent label cache only when the cached object predates a
+          // derivation, and queue eviction refills the same as local
+          // cells — previously externals were skipped here, so an
+          // atlas-evicted peer image never re-painted.
+          if (cell.external) {
+            if (!cell.imageSig) {
+              const sig = this.cellImageCache.get(label) ?? undefined
+              if (sig) cell.imageSig = sig
+            }
+            if (cell.imageSig && atlas && !atlas.hasImage(cell.imageSig) && !atlas.hasFailed(cell.imageSig)) {
+              evictedSigs.push(cell.imageSig)
+            }
+            this.renderedCells.set(label, cell)
+            continue
+          }
           if (this.cellImageCache.has(label)) {
             const sig = this.cellImageCache.get(label) ?? undefined
             cell.imageSig = sig
