@@ -307,11 +307,20 @@ export class DcpDomainStorage {
       const existing = await this.#findTile(root, key)
       const tile: TileLayer = existing?.layer ?? { name: key, children: [] }
 
+      const kept: string[] = []
       for (const entrySig of tile.children) {
         const entry = await this.#loadJson<BranchEntryLayer>(entrySig)
         if (entry && entry.branchSig === sig && JSON.stringify(entry.at) === JSON.stringify(at)) {
           return this.currentRootSig(lineage)  // idempotent
         }
+        // RE-ADOPT advances the pointer: the same tile name at the same
+        // location with a DIFFERENT branchSig REPLACES the older entry
+        // instead of accumulating duplicates — a stale pre-update root
+        // otherwise shadows the fresh adopt downstream (first-wins dedup
+        // mounted the old imageless tree in solo). The old branch layers
+        // stay in the content pool (history); only the entry advances.
+        if (entry && label && entry.name === label && JSON.stringify(entry.at) === JSON.stringify(at)) continue
+        kept.push(entrySig)
       }
 
       const cleanRefs = Array.isArray(refs)
@@ -321,7 +330,7 @@ export class DcpDomainStorage {
         name: label || sig.slice(0, 8), branchSig: sig, at: Array.isArray(at) ? at : [],
         ...(cleanRefs.length ? { refs: cleanRefs } : {}),
       } as BranchEntryLayer)
-      const newTileSig = await this.#signJson({ name: key, children: [...tile.children, entrySig] })
+      const newTileSig = await this.#signJson({ name: key, children: [...kept, entrySig] })
       const newChildren = existing
         ? root.children.map(c => (c === existing.sig ? newTileSig : c))
         : [...root.children, newTileSig]
