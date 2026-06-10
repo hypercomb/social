@@ -1124,6 +1124,12 @@ export class ShowCellDrone extends Drone {
     const atlas = this.imageAtlas
     const needReload: Cell[] = []
     for (const cell of cells) {
+      // EXTERNAL (peer) cells keep the PUBLISHER'S imageSig from the visuals.
+      // The label cache holds THIS participant's own picks (incl. substrate
+      // defaults assigned back when the peer tile looked blank) — letting it
+      // override here made the witness's random default trump the host's
+      // real image on every render. Same guard as the sibling loops below.
+      if (cell.external) continue
       if (this.cellImageCache.has(cell.label)) {
         const cachedSig = this.cellImageCache.get(cell.label) ?? undefined
         cell.imageSig = cachedSig
@@ -1582,6 +1588,10 @@ export class ShowCellDrone extends Drone {
         const evictedSigs: string[] = []
         for (const cell of cached.cells) {
           const label = cell.label
+          // Same external guard as the render loops: a peer cell's imageSig
+          // came from the publisher's visuals — the local label cache (own
+          // picks + substrate defaults) must not overwrite it on restore.
+          if (cell.external) { this.renderedCells.set(label, cell); continue }
           if (this.cellImageCache.has(label)) {
             const sig = this.cellImageCache.get(label) ?? undefined
             cell.imageSig = sig
