@@ -30,18 +30,36 @@ export interface RegistrySnapshot {
   generatedAt: number
 }
 
+const STORAGE_KEY = 'hc:registry-snapshot'
+
 export class RegistrySnapshotStore extends EventTarget {
   #snapshot: RegistrySnapshot | null = null
   #logical = new Set<string>()
 
   constructor() {
     super()
-    EffectBus.on<RegistrySnapshot>('registry:snapshot', (snap) => {
-      if (!snap || !Array.isArray(snap.logical)) return
-      this.#snapshot = snap
-      this.#logical = new Set(snap.logical.map(s => String(s ?? '').toLowerCase()))
-      this.dispatchEvent(new CustomEvent('change'))
-    })
+    // Hydrate the LAST projected snapshot. The live channel only flows while
+    // the installer iframe is open (portal-overlay relays + origin-checks),
+    // so without persistence every hive reload forgot the configuration and
+    // solo stopped reflecting the adopted/enabled set until the participant
+    // re-opened the installer. Fail-open is preserved: a participant who
+    // never opened the installer has nothing persisted and everything still
+    // reads as in-logical/visible.
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY)
+      if (raw) this.#apply(JSON.parse(raw) as RegistrySnapshot, false)
+    } catch { /* corrupt/absent — stay fail-open */ }
+    EffectBus.on<RegistrySnapshot>('registry:snapshot', (snap) => this.#apply(snap, true))
+  }
+
+  #apply(snap: RegistrySnapshot, persist: boolean): void {
+    if (!snap || !Array.isArray(snap.logical)) return
+    this.#snapshot = snap
+    this.#logical = new Set(snap.logical.map(s => String(s ?? '').toLowerCase()))
+    if (persist) {
+      try { localStorage.setItem(STORAGE_KEY, JSON.stringify(snap)) } catch { /* quota — live copy still works */ }
+    }
+    this.dispatchEvent(new CustomEvent('change'))
   }
 
   /** The latest snapshot, or null if none received yet. */
