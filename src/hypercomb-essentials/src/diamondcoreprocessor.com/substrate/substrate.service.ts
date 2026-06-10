@@ -786,34 +786,54 @@ export class SubstrateService extends EventTarget {
       let stamped = 0
       let walked = 0
       let matched = 0
+      const imageOf = (p: any): string | undefined => {
+        const img = p?.small?.image ?? p?.flat?.small?.image
+        return (typeof img === 'string' && /^[0-9a-f]{64}$/.test(img)) ? img : undefined
+      }
+
       const stampIfNeeded = async (segments: string[], name: string): Promise<void> => {
         walked++
         try {
-          const canonical = await readTilePropertiesAt(segments, name)
-          const has = (canonical as any)?.small?.image ?? (canonical as any)?.flat?.small?.image
-          if (has) return
+          const canonical = await readTilePropertiesAt(segments, name) as any
+          const canonicalImg = imageOf(canonical)
+          const canonicalIsDefault = canonical?.substrate === true
 
-          // Source the image-bearing props from ANY pre-canonical generation:
-          // (a) the label index → content-addressed resource, (b) the legacy
-          // dir-file 0000. Whichever yields an image first wins.
-          let p: any = null
+          // PRIORITY RULE — intentional beats default, defaults never
+          // overwrite anything:
+          //   1. Canonical INTENTIONAL image → untouchable. Done.
+          //   2. Gather candidates from the pre-canonical generations
+          //      (label index, legacy dir-file 0000) and split by intent:
+          //      `substrate: true` marks a default pick; its absence marks a
+          //      user-supplied image (resource-attach / tile-editor never
+          //      set the flag).
+          //   3. An INTENTIONAL candidate stamps over an empty slot AND over
+          //      a substrate-default canonical (upgrading a tile an earlier
+          //      pass default-stamped).
+          //   4. A DEFAULT candidate only ever fills an EMPTY slot.
+          if (canonicalImg && !canonicalIsDefault) return
+
+          let fromIndex: any = null
           const propsSig = index[name]
           if (typeof propsSig === 'string' && /^[0-9a-f]{64}$/.test(propsSig)) {
             const blob = await store.getResource(propsSig)
-            if (blob) { try { p = JSON.parse(await blob.text()) } catch { p = null } }
+            if (blob) { try { fromIndex = JSON.parse(await blob.text()) } catch { fromIndex = null } }
           }
-          if (!(p?.small?.image ?? p?.flat?.small?.image)) {
-            const dirProps = await dirPropsFor(segments, name)
-            if (dirProps?.['small'] || dirProps?.['flat']) p = dirProps
-          }
-          const img = p?.small?.image ?? p?.flat?.small?.image
-          if (typeof img !== 'string' || !/^[0-9a-f]{64}$/.test(img)) return
+          const fromDir = await dirPropsFor(segments, name)
+
+          const candidates = [fromIndex, fromDir].filter(p => imageOf(p))
+          const intentional = candidates.find(p => p?.substrate !== true)
+          const defaultPick = candidates.find(p => p?.substrate === true)
+          const source = intentional ?? (canonicalImg ? null : defaultPick)
+          if (!source) return
           matched++
 
           await writeTilePropertiesAt(segments, name, {
-            ...(p?.small?.image ? { small: { image: p.small.image } } : {}),
-            ...(p?.flat?.small?.image ? { flat: { small: { image: p.flat.small.image } } } : {}),
-            ...(p?.substrate === true ? { substrate: true } : {}),
+            ...(source?.small?.image ? { small: { image: source.small.image } } : {}),
+            ...(source?.flat?.small?.image ? { flat: { small: { image: source.flat.small.image } } } : {}),
+            // Carry the default marker ONLY for default picks, and clear it
+            // when an intentional image replaces one — the reroll affordance
+            // must not appear on a user-supplied image.
+            substrate: source?.substrate === true ? true : undefined,
           })
           stamped++
         } catch { /* one tile must not stop the pass */ }
