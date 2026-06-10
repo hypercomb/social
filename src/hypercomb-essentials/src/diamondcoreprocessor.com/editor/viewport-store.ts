@@ -26,6 +26,7 @@
 import { EffectBus } from '@hypercomb/core'
 import type { ViewportSnapshot } from '../navigation/zoom/zoom.drone.js'
 import { ROOT_NAME } from '../history/history.service.js'
+import { readTilePropertiesAt } from './tile-properties.js'
 
 export type { ViewportSnapshot }
 
@@ -98,7 +99,7 @@ export const readViewportAt = async (
   const dir = await viewportDir()
   const sig = await locationSig(segments)
   if (!dir || !sig) return {}
-  return serialize(async () => {
+  const local = await serialize(async (): Promise<ViewportSnapshot> => {
     try {
       const fh = await dir.getFileHandle(sig)
       const text = await (await fh.getFile()).text()
@@ -108,6 +109,22 @@ export const readViewportAt = async (
       return {}
     }
   })
+  if (Object.keys(local).length > 0) return local
+
+  // FIRST-VISIT SEED: no participant-local viewport at this location yet. If
+  // the location's canonical props carry the publisher's viewport stamp
+  // (their framing — e.g. an adopted site authored at scale 2), use it as
+  // the default so the imported view opens at the HOST'S scale instead of an
+  // arbitrary one. Read-only: nothing is written here, so the doctrine holds
+  // (viewport stays participant-local — the local file appears on the
+  // participant's first own zoom/pan and overrides this seed permanently).
+  if (segments.length === 0) return {}
+  try {
+    const props = await readTilePropertiesAt(segments.slice(0, -1), segments[segments.length - 1])
+    const vp = (props as { viewport?: unknown })?.viewport
+    if (vp && typeof vp === 'object') return vp as ViewportSnapshot
+  } catch { /* no canonical stamp — fall through */ }
+  return {}
 }
 
 /**
