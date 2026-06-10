@@ -31,7 +31,7 @@ import { TILE_SOURCE_REGISTRY_KEY } from '../tile-source-registry.js'
 const SNAPSHOT_KEY = '@hypercomb.social/RegistrySnapshot'
 const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
 
-interface SnapshotBranch { domain: string; name: string; branchSig: string; at: string[] }
+interface SnapshotBranch { domain: string; name: string; branchSig: string; at: string[]; enabled?: boolean }
 interface SnapshotStoreLike { readonly snapshot: { readonly branches?: SnapshotBranch[] } | null }
 interface BrokerLike { fetchBySig: (sig: string, type: string) => Promise<Uint8Array | null> }
 interface LayerLike { name?: string; cells?: unknown[]; layers?: unknown[]; children?: unknown[] }
@@ -72,6 +72,10 @@ export const logicalConfigSource: TileSource = async (
   const out: TileEntry[] = []
 
   for (const b of branches) {
+    // The participant's master switch: only ENABLED branches mount — solo
+    // reflects "the features that are on". Absent field (older snapshot) =
+    // enabled, so a stale persisted snapshot doesn't hide everything.
+    if (b?.enabled === false) continue
     const sig = String(b?.branchSig ?? '').trim().toLowerCase()
     const name = String(b?.name ?? '').trim()
     if (!SIG_RE.test(sig) || !name) continue

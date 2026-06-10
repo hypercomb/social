@@ -437,7 +437,7 @@ export class DcpDomainStorage {
     logical: string[]
     logicalRootSig: string | null
     domains: { name: string; visible: boolean; branchCount: number }[]
-    branches: { domain: string; name: string; branchSig: string; at: string[] }[]
+    branches: { domain: string; name: string; branchSig: string; at: string[]; enabled: boolean }[]
     generatedAt: number
   }> {
     await this.initialize()
@@ -454,13 +454,17 @@ export class DcpDomainStorage {
     // but a branch root (e.g. an adopted site's root layer) is fetchable
     // anywhere — it came from a host/relay in the first place. The hive
     // mounts each branch at its `at` location and walks the tree itself.
-    const branches: { domain: string; name: string; branchSig: string; at: string[] }[] = []
+    const branches: { domain: string; name: string; branchSig: string; at: string[]; enabled: boolean }[] = []
     for (const d of hive) {
       try {
         for (const b of await this.loadDomainBranches(d.name)) {
           const sig = String(b.branchSig ?? '').trim().toLowerCase()
           if (!/^[a-f0-9]{64}$/.test(sig)) continue
-          branches.push({ domain: d.name, name: b.name, branchSig: sig, at: b.at ?? [] })
+          // `enabled` = the participant-local master switch (settings sigbag;
+          // absent = off). The hive mounts ONLY enabled branches, so solo
+          // reflects "the features that are on" — toggling in the installer
+          // adds/removes the branch from hypercomb.io.
+          branches.push({ domain: d.name, name: b.name, branchSig: sig, at: b.at ?? [], enabled: this.isFeatureEnabled(sig) })
         }
       } catch { /* one bad domain dir must not sink the snapshot */ }
     }
