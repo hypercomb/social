@@ -756,6 +756,25 @@ export class HomeComponent implements OnDestroy {
         .then(n => { if (n > 0) void this.#postRegistrySnapshot() })
         .catch(e => console.warn('[home] recordTreeDeps failed', e))
     }
+
+    // Adopt = intent to use. A CONTENT-ONLY branch (no code anywhere in the
+    // resolved subtree) auto-enables on arrival, so solo reflects the
+    // adoption immediately — otherwise "adopted, back to solo, refresh" shows
+    // nothing until the participant finds the master switch. Branches that
+    // carry CODE keep the OFF default: their first enable goes through the
+    // activation trust gate (#32), which auto-enable must not bypass.
+    const subtreeHasCode = (n: TreeNode): boolean =>
+      isCodeKind(n.kind) || (n.children ?? []).some(subtreeHasCode)
+    if (!subtreeHasCode(root)) {
+      this.#toggleState.setEnabled(root.id, true)
+      void this.#domainStorage.setFeatureEnabled(branchSig, true)
+        .then(() => this.#domainStorage.recomputeLogical())
+        .then(() => {
+          this.#logicalVersion.update(v => v + 1)
+          void this.#postRegistrySnapshot()
+        })
+        .catch(e => console.warn('[home] auto-enable on adopt failed', e))
+    }
   }
 
   /** Add a domain to the trusted-domains list without going through the
