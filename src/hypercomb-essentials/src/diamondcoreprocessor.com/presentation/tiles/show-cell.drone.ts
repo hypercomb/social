@@ -273,6 +273,10 @@ export class ShowCellDrone extends Drone {
    *  stale or cross-contaminated entry can never pin a peer tile to the
    *  wrong image. */
   private readonly peerImageSourceByLabel = new Map<string, string>()
+  /** Publisher image sigs from TileSourceRegistry entries (config/snapshot
+   *  sources, e.g. DCP-adopted branches mounted in SOLO). Fallback source
+   *  for external cells when no live swarm publisher is present. */
+  private readonly registryImageByLabel = new Map<string, string>()
   // cache: cell label → tag names (avoids re-reading 0000 on every render)
   private readonly cellTagsCache = new Map<string, string[]>()
   // cache: cell label → border color RGB floats
@@ -2023,6 +2027,15 @@ export class ShowCellDrone extends Drone {
             const ppk = (e.source as { peerPubkey?: string } | undefined)?.peerPubkey
             if (typeof ppk === 'string' && ppk.length > 0 && !this.#peerPubkeyByLabel.has(e.name)) {
               this.#peerPubkeyByLabel.set(e.name, ppk)
+            }
+            // The registry entry's publisher image (canonical 0000's
+            // small.image, carried by config/snapshot sources). This is
+            // the SOLO image path: with no swarm running, loadOne's
+            // peerTilesAtCurrentSig lookup is empty, and without this
+            // map config-mounted tiles render imageless forever.
+            const isig = (e.source as { imageSig?: string } | undefined)?.imageSig
+            if (typeof isig === 'string' && /^[a-f0-9]{64}$/i.test(isig) && !this.registryImageByLabel.has(e.name)) {
+              this.registryImageByLabel.set(e.name, isig.toLowerCase())
             }
           }
           union.add(e.name)
@@ -4171,7 +4184,13 @@ export class ShowCellDrone extends Drone {
         // the wire carried the exact right sigs per name).
         // No local-pool fallback in any branch: painting the receiver's
         // substrate pick on a tile the receiver doesn't own is wrong.
+        // LIVE publisher sig first (swarm visuals); REGISTRY entry sig as
+        // the solo fallback — config-mounted tiles (DCP-adopted branches)
+        // have no live publisher, their canonical image rides the
+        // TileSourceRegistry entry instead. Both are publisher-derived
+        // from the same canonical 0000, so either is exact.
         const peerSig = peerImageSigByLabel.get(cell.label)
+          ?? this.registryImageByLabel.get(cell.label)
         if (peerSig) {
           const cached = this.cellImageCache.get(cell.label)
           if (cached && this.peerImageSourceByLabel.get(cell.label) === peerSig) {

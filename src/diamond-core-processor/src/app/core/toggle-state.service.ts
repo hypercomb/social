@@ -66,6 +66,13 @@ export class ToggleStateService {
     return this.#state.get(nodeId) ?? def
   }
 
+  /** The raw stored flag — undefined when the participant never explicitly
+   *  toggled this node. Lets callers distinguish "default off" (safe to
+   *  auto-enable on adopt) from "participant turned it OFF" (sacred). */
+  stored(nodeId: string): boolean | undefined {
+    return this.#state.get(nodeId)
+  }
+
   isEffectivelyEnabled(node: TreeNode, nodeMap: Map<string, TreeNode>): boolean {
     if (!this.isEnabled(node.id, defaultEnabled(node.kind))) return false
     if (!node.parentId) return true

@@ -765,7 +765,10 @@ export class HomeComponent implements OnDestroy {
     // activation trust gate (#32), which auto-enable must not bypass.
     const subtreeHasCode = (n: TreeNode): boolean =>
       isCodeKind(n.kind) || (n.children ?? []).some(subtreeHasCode)
-    if (!subtreeHasCode(root)) {
+    // Explicit participant OFF is sacred — a re-resolve/refill of a branch
+    // the participant deliberately disabled must NOT flip it back on. Only
+    // the never-touched default qualifies for auto-enable.
+    if (!subtreeHasCode(root) && this.#toggleState.stored(root.id) !== false) {
       this.#toggleState.setEnabled(root.id, true)
       void this.#domainStorage.setFeatureEnabled(branchSig, true)
         .then(() => this.#domainStorage.recomputeLogical())
