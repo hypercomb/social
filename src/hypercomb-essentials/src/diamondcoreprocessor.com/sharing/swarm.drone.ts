@@ -1914,28 +1914,17 @@ const payload: SwarmLayerPayload = myLabel
       this.#lastPublishTimeMsBySig.set(sig, nowMs)
       counter.count++
 
-      // A "share" is the layer payload AND every resource it
-      // references — they're one logical unit. The 0000 contents
-      // travel inline in the layer payload, but image bytes (the
-      // heavy binary refs nested inside each props object) still ride
-      // kind 30201. Walk every child's inlined props for signature-
-      // shaped fields and publish each as its own resource event.
-      //
-      // Publish resources FIRST so by the time a subscriber receives
-      // the layer event and starts fetching referenced sigs, the
-      // relay already has them cached and serves them on the REQ.
-      // Parallel via Promise.all, await the whole batch before the
-      // layer publish so the strict ordering guarantee survives.
-      //
-      // Visuals are flat now (name + first-class cell props), so walk
-      // the whole entry — collectNestedSigs handles arbitrary depth and
-      // finds image sigs at any nesting (top-level imageSig, small.image,
-      // flat.small.image, etc.) in one pass.
-      const referenced = new Set<string>()
-      for (const c of children) {
-        collectNestedSigs(c, referenced)
-      }
-      await Promise.all([...referenced].map(s => this.#publishResource(s, mesh)))
+      // SIG-ONLY ON THE WIRE. The visuals inline each child's 0000, and any
+      // image inside it travels as a SIGNATURE (small.image / flat.small.
+      // image / imageSig) — never bytes. Receivers pick the bytes up at
+      // RUNTIME on request: getResource resolves memory → OPFS → host
+      // HTTP-direct, so only images someone actually asked for move, and
+      // they come from a host, not the mesh. The previous proactive
+      // kind-30201 broadcast (ship every referenced resource's bytes ahead
+      // of the layer event) bloated the relay with content nobody may ever
+      // request and violated the layer-sigs-only mesh doctrine — removed.
+      // (#publishResource below is retained for a future REQUEST-driven
+      // ship path only; it has no proactive callers.)
 
       // Now the layer itself. d-tag = lineage sig
       // (parameterized-replaceable per pubkey+kind+lineage). NIP-40
