@@ -1723,10 +1723,13 @@ export class ShowCellDrone extends Drone {
       const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, flatSeedSet)
       if (cells.length === 0) { this.clearMesh(); this.rendering = false; return }
 
-      // load images from the explorer dir (best-effort). Skip when
-      // dir is null — sub-layer locations no longer mint OPFS dirs
-      // for tiles, so the image-load path is allowed to no-op.
-      if (dir) await this.loadCellImages(cells, dir)
+      // load images (best-effort). Runs even when dir is null —
+      // loadCellImages only needs the dir for tags/link reads (already
+      // null-tolerant), and EXTERNAL (peer) tiles resolve images purely
+      // from the swarm's streamed sigs + __resources__. Gating on dir
+      // left a witness refreshing at a foreign location (no local dir)
+      // with permanently imageless tiles.
+      await this.loadCellImages(cells, dir)
 
       this.cachedCellNames = cellNames
       this.cachedLocalCellSet = flatSeedSet
@@ -2230,9 +2233,10 @@ export class ShowCellDrone extends Drone {
     }
 
     // note: load cell images from 0000 properties → __resources__/
-    // Skip when dir is null — sub-layer image loading still expects
-    // a dir; this becomes a no-op until the layer-slot image refactor.
-    if (dir) await this.loadCellImages(cells, dir)
+    // Runs even when dir is null — loadCellImages is null-tolerant (dir
+    // only feeds tags/link reads) and EXTERNAL (peer) tiles resolve
+    // images from streamed sigs + __resources__ without any local dir.
+    await this.loadCellImages(cells, dir)
     if (!this.#clipboardView && isStale()) {
       this.renderQueued = true
       return
