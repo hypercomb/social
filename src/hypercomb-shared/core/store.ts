@@ -355,7 +355,8 @@ export class Store extends EventTarget {
       try { devHost = (localStorage.getItem('hc:dev-resource-host') || '').trim() || devHost } catch { /* ignore */ }
       const path = kind === 'layer' ? `/__layers__/${signature}.json` : `/__resources__/${signature}`
       void fetch(`http://${devHost}${path}`, { method: 'PUT', body: data as BodyInit })
-        .catch(() => { /* host may not accept writes — non-fatal */ })
+        .then(r => { if (!r || !r.ok) this.#devPushed.delete(signature) })  // failed → retry on next read
+        .catch(() => { this.#devPushed.delete(signature) })  // relay hiccup mid-burst → don't lose this sig
     } catch { /* non-fatal */ }
   }
 
@@ -674,7 +675,13 @@ export class Store extends EventTarget {
     try {
       const handle = await this.layers.getFileHandle(signature, { create: false })
       const file = await handle.getFile()
-      return new Uint8Array(await file.arrayBuffer())
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      // The warmup/preloader reads layers through the pool directly (not via
+      // getLayerBytes), so without this the author only pushed the branches it
+      // navigated, leaving sibling tiles 404 on the relay. Push here too so the
+      // FULL walked tree reaches the host.
+      this.#devPushToHost(signature, 'layer', bytes)
+      return bytes
     } catch { return null }
   }
 
