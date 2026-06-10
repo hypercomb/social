@@ -764,29 +764,56 @@ export class SubstrateService extends EventTarget {
       if (!store) { console.info('[substrate] stamp pass: store not ready'); return 0 }
       const index: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
       const indexSize = Object.keys(index).length
-      if (indexSize === 0) { console.info('[substrate] stamp pass: index empty — nothing to stamp'); return 0 }
+
+      // Legacy dir-file 0000 source: the OLDEST props generation lives as a
+      // `0000` FILE inside the tile's hypercomb.io/ directory. Tiles whose
+      // images render from there are in NEITHER the canonical layer slot NOR
+      // the label index — the host shows them fine (the editor/render
+      // fallback chain reads the dir file) while every witness/adopt sees
+      // nothing. Resolve the tile's dir lazily from the segments path.
+      const dirPropsFor = async (segments: string[], name: string): Promise<Record<string, unknown> | null> => {
+        try {
+          if (!store.hypercombRoot) return null
+          let dir: FileSystemDirectoryHandle = store.hypercombRoot
+          for (const seg of segments) dir = await dir.getDirectoryHandle(seg, { create: false })
+          const cellDir = await dir.getDirectoryHandle(name, { create: false })
+          const fh = await cellDir.getFileHandle('0000', { create: false })
+          const parsed = JSON.parse(await (await fh.getFile()).text())
+          return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
+        } catch { return null }
+      }
 
       let stamped = 0
       let walked = 0
       let matched = 0
       const stampIfNeeded = async (segments: string[], name: string): Promise<void> => {
         walked++
-        const propsSig = index[name]
-        if (typeof propsSig !== 'string' || !/^[0-9a-f]{64}$/.test(propsSig)) return
-        matched++
         try {
           const canonical = await readTilePropertiesAt(segments, name)
           const has = (canonical as any)?.small?.image ?? (canonical as any)?.flat?.small?.image
           if (has) return
-          const blob = await store.getResource(propsSig)
-          if (!blob) return
-          const p = JSON.parse(await blob.text())
+
+          // Source the image-bearing props from ANY pre-canonical generation:
+          // (a) the label index → content-addressed resource, (b) the legacy
+          // dir-file 0000. Whichever yields an image first wins.
+          let p: any = null
+          const propsSig = index[name]
+          if (typeof propsSig === 'string' && /^[0-9a-f]{64}$/.test(propsSig)) {
+            const blob = await store.getResource(propsSig)
+            if (blob) { try { p = JSON.parse(await blob.text()) } catch { p = null } }
+          }
+          if (!(p?.small?.image ?? p?.flat?.small?.image)) {
+            const dirProps = await dirPropsFor(segments, name)
+            if (dirProps?.['small'] || dirProps?.['flat']) p = dirProps
+          }
           const img = p?.small?.image ?? p?.flat?.small?.image
-          if (typeof img !== 'string') return
+          if (typeof img !== 'string' || !/^[0-9a-f]{64}$/.test(img)) return
+          matched++
+
           await writeTilePropertiesAt(segments, name, {
             ...(p?.small?.image ? { small: { image: p.small.image } } : {}),
             ...(p?.flat?.small?.image ? { flat: { small: { image: p.flat.small.image } } } : {}),
-            substrate: true,
+            ...(p?.substrate === true ? { substrate: true } : {}),
           })
           stamped++
         } catch { /* one tile must not stop the pass */ }
