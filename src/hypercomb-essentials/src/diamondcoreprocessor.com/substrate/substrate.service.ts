@@ -35,6 +35,7 @@ import {
   readImagesFromHandle,
   isFolderAccessSupported,
 } from './folder-handles.js'
+import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 
 const PROPS_FILE = '0000'
 const HIVE_KEY = 'substrate'                 // per-hive override (path string)
@@ -446,6 +447,10 @@ export class SubstrateService extends EventTarget {
     await this.#preloadAtlas(images)
     await this.#fillPropsPool(images)
     void this.#migrateLegacySubstrateProps()
+    // Reconcile the label-index image assignments into the CANONICAL props
+    // (background; idempotent) — without this the association only exists in
+    // this browser's localStorage and adopted/synced copies render imageless.
+    void this.reconcileCanonicalImageStamps()
   }
 
   /**
@@ -729,6 +734,70 @@ export class SubstrateService extends EventTarget {
     if (cleared > 0) localStorage.setItem(indexKey, JSON.stringify(index))
 
     return this.applyToAllBlanks(visibleLabels).length
+  }
+
+  // ───────────── canonical image stamping (reconciler) ─────────────
+  //
+  // The assignment API above writes ONLY the participant-local label index
+  // (`hc:tile-props-index`). The tile's CANONICAL layer (`properties` slot)
+  // never learns about the image — so an adopted/synced copy of the tree
+  // renders label-only tiles: the bytes exist, but the association lives in
+  // one browser's localStorage. This reconciler closes that gap: walk the
+  // hive tree, and for every tile whose label has an index assignment but
+  // whose canonical props lack an image key, stamp `small.image` /
+  // `flat.small.image` into the canonical props via writeTilePropertiesAt
+  // (content-addressed + committed through the LayerCommitter cascade, so
+  // it travels with the tree). Idempotent: already-stamped tiles are
+  // skipped, identical content dedups in the committer.
+
+  #stampRunning = false
+
+  /** Walk hypercomb.io/ and stamp index-assigned images into canonical
+   *  props. Returns the number of tiles stamped. Safe to call repeatedly. */
+  async reconcileCanonicalImageStamps(): Promise<number> {
+    if (this.#stampRunning) return 0
+    this.#stampRunning = true
+    try {
+      const store = this.#store()
+      if (!store?.hypercombRoot) return 0
+      const index: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
+      if (Object.keys(index).length === 0) return 0
+
+      let stamped = 0
+      const walk = async (dir: FileSystemDirectoryHandle, segments: string[]): Promise<void> => {
+        if (segments.length > 8) return   // depth guard
+        for await (const [name, handle] of (dir as any).entries()) {
+          if (handle.kind !== 'directory' || name.startsWith('__')) continue
+          const propsSig = index[name]
+          if (typeof propsSig === 'string' && /^[0-9a-f]{64}$/.test(propsSig)) {
+            try {
+              const canonical = await readTilePropertiesAt(segments, name)
+              const has = (canonical as any)?.small?.image ?? (canonical as any)?.flat?.small?.image
+              if (!has) {
+                const blob = await store.getResource(propsSig)
+                if (blob) {
+                  const p = JSON.parse(await blob.text())
+                  const img = p?.small?.image ?? p?.flat?.small?.image
+                  if (typeof img === 'string') {
+                    await writeTilePropertiesAt(segments, name, {
+                      ...(p?.small?.image ? { small: { image: p.small.image } } : {}),
+                      ...(p?.flat?.small?.image ? { flat: { small: { image: p.flat.small.image } } } : {}),
+                      substrate: true,
+                    })
+                    stamped++
+                  }
+                }
+              }
+            } catch { /* one tile must not stop the pass */ }
+          }
+          await walk(handle as FileSystemDirectoryHandle, [...segments, name])
+        }
+      }
+      await walk(store.hypercombRoot, [])
+      if (stamped > 0) console.info(`[substrate] stamped ${stamped} tile image(s) into canonical props`)
+      return stamped
+    } catch { return 0 }
+    finally { this.#stampRunning = false }
   }
 
   // ───────────────────────── OPFS helpers ─────────────────────────
