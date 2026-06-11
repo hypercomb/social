@@ -100,7 +100,15 @@ export class LinkSafetyService {
       return { decision: 'deny', reason: 'invalid URL' }
     }
 
-    // LLM path
+    // LLM path — gated to local origins. The checker is a loopback endpoint
+    // (LM Studio on the dev machine); from a deployed host nothing listens
+    // on a visitor's 127.0.0.1, and a public origin touching loopback trips
+    // Chrome's Local Network Access permission prompt.
+    const host = location.hostname
+    if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1') {
+      EffectBus.emit('link:safety-unavailable', { url })
+      return { decision: 'allow', reason: 'Safety check unavailable' }
+    }
     try {
       return await this.#callLLM(url)
     } catch {

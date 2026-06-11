@@ -124,6 +124,11 @@ export class RecordingDrone extends Drone {
   // ── bridge connection ───────────────────────────────────
 
   #connectBridge(): WebSocket | null {
+    // bridge runs on the dev machine only — from a deployed host, dialing
+    // localhost fails for every visitor and trips Chrome's Local Network
+    // Access permission prompt
+    const host = location.hostname
+    if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1') return null
     try {
       const ws = new WebSocket(`ws://localhost:${BRIDGE_PORT}`)
       ws.onopen = () => {

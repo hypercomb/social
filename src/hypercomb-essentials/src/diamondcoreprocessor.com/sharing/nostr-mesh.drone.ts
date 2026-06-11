@@ -1,29 +1,28 @@
 // diamondcoreprocessor.com/nostr/nostr-mesh.drone.ts
 //
-// Live bootstrap relay (wss://jwize.com) shipped 2026-05-29. Behind the
-// hc:nostrmesh:use-live-relay localStorage flag; default-off so casual
-// browsers never touch the operator's home-hosted server. See lines
-// below for full LIVE_RELAY guardrail and the dev-machine override.
+// Live bootstrap relay (wss://jwize.com) shipped 2026-05-29; default-ON
+// for real hosts since 2026-06-10 (see LIVE_RELAY notes below). Local
+// origins seed the loopback dev relay instead; hc:nostrmesh:use-live-relay
+// ('1'/'0') and hc:nostrmesh:relays override.
 import { Drone } from '@hypercomb/core'
 
 const LOCAL_RELAY = 'ws://localhost:7777'
 // Live bootstrap relay.
 //
-// ⚠️ HARD GUARANTEE: This constant is referenced in EXACTLY ONE
-// runtime branch — the gated seed expression in `loadRelays()` below.
-// Casual / first-time browsers must NEVER hit this URL without an
-// explicit opt-in from the user. If you find yourself referencing
-// `LIVE_RELAY` anywhere else — adding it to a defaults array, pushing
-// it into `configureRelays()`, returning it from a fallback, putting
-// it in a docs example that runs as code — STOP. You're about to
-// route every visitor's events onto the operator's home-hosted server
-// without their permission. The opt-in flow is:
+// ⚠️ This constant is referenced in EXACTLY ONE runtime branch — the
+// seed expression in `loadRelays()` below. Keep it that way so the
+// relay policy stays auditable in one place.
 //
-//   localStorage['hc:nostrmesh:use-live-relay'] = '1'   (gates LIVE_RELAY)
-//   localStorage['hc:nostrmesh:relays']        = '[…]'  (manual override, wins)
+// Policy (since 2026-06-10): real hosts seed LIVE_RELAY by DEFAULT.
+// A deployed origin must never dial loopback — nothing listens on a
+// visitor's machine, and a public origin touching localhost trips
+// Chrome's Local Network Access permission prompt at page open.
+// Local origins seed LOCAL_RELAY for the self-contained dev loop.
 //
-// Both are user-driven (DevTools or explicit slash command), never set
-// by code. Keep it that way.
+//   localStorage['hc:nostrmesh:use-live-relay'] = '1'   force LIVE_RELAY
+//   localStorage['hc:nostrmesh:use-live-relay'] = '0'   opt out (real host
+//                                                       idles, no loopback)
+//   localStorage['hc:nostrmesh:relays']        = '[…]'  manual override, wins
 const LIVE_RELAY = 'wss://jwize.com'
 
 // Force the literal into the bundle via a globalThis assignment.
@@ -683,12 +682,28 @@ export class NostrMeshDrone extends Drone {
 
   private canAttemptRelay = (relay: string): boolean => {
     if (!this.isLoopbackRelay(relay)) return true
-    // allow loopback if explicitly in relay list or localStorage flag is set
-    if (this.relays.includes(relay)) return true
+    // Loopback is fine when the app itself runs on a local origin. From a
+    // real host it needs an EXPLICIT signal: the user-configured
+    // hc:nostrmesh:relays list or the allow-loopback flag. Membership in
+    // this.relays is not a signal — every relay we are asked about came
+    // from this.relays, so that check passed unconditionally and let the
+    // seeded loopback default through on production.
+    if (this.isLocalContext()) return true
+    if (this.userConfiguredRelays().includes(relay)) return true
     if (this.allowLoopbackRelay()) return true
 
     this.note('socket:skip-loopback-relay', relay)
     return false
+  }
+
+  private userConfiguredRelays = (): string[] => {
+    // Only the explicit hc:nostrmesh:relays override counts — never seeds.
+    try {
+      const raw = localStorage.getItem('hc:nostrmesh:relays')
+      const parsed = raw ? JSON.parse(raw) : null
+      if (!Array.isArray(parsed)) return []
+      return parsed.filter((u: any) => typeof u === 'string').map((u: string) => u.trim())
+    } catch { return [] }
   }
 
   private isLocalContext = (): boolean => {
@@ -1118,46 +1133,36 @@ export class NostrMeshDrone extends Drone {
   }
 
   private loadRelays = (fallback: string[]): string[] => {
-    // Always guarantee at least one relay in the result. Without this,
-    // a fresh browser with no `hc:nostrmesh:relays` localStorage entry
-    // ends up with zero relays and silently drops every publish — events
-    // hit local fanout (so the sender "sees" them) but never reach peers.
+    // Seed policy is origin-aware:
     //
-    // `hc:nostrmesh:use-live-relay='1'` is the opt-in for the shared
-    // bootstrap relay (LIVE_RELAY). Without it we default to LOCAL_RELAY
-    // so first-time / casual visitors never touch the shared server.
-    // An explicit `hc:nostrmesh:relays` always wins over both.
+    //   local origin → LOCAL_RELAY. The dev relay (scripts/local-relay.ts)
+    //   serves the WS mesh AND HTTP content on one port and persists content
+    //   across restarts, so two loopback tabs share a fully self-contained
+    //   swarm with no per-tab setup.
     //
-    // Dev-machine override: even when the live-relay flag is on, if the
-    // app itself was loaded from a local context (localhost / 127.0.0.1
-    // / ::1 / *.local), we prefer LOCAL_RELAY. Rationale: when the relay
-    // operator is testing their own deployed build on the same machine
-    // that hosts the relay, every event would otherwise round-trip
-    // through Cloudflare back to themselves — wasted hop, noisier
-    // metrics, slower iteration. From any other origin (the real
-    // deployment domain) the flag uses LIVE_RELAY as before.
-    // IIFE on purpose: a `let useLive = false; try { useLive = ... }` pattern
-    // here lets esbuild constant-propagate `false` into the seed expression,
-    // dead-code-eliminating the LIVE_RELAY branch and removing the
-    // 'wss://jwize.com' literal from the bundle entirely. Wrapping the read
-    // in an IIFE makes the value opaque to constant propagation — esbuild
-    // cannot statically evaluate the return.
-    const useLive = ((): boolean => {
-      try {
-        const v = localStorage.getItem('hc:nostrmesh:use-live-relay')
-        if (v === '1') return true    // explicit opt-in
-        if (v === '0') return false   // explicit opt-out → use the local relay
-        // Unset: ALWAYS use the LOCAL relay (LOCAL_RELAY). The dev relay
-        // (scripts/local-relay.ts) now serves the WS mesh AND HTTP content on
-        // one port and persists content across restarts, so two loopback tabs
-        // share a fully self-contained swarm — no cross-origin wss://jwize.com
-        // hop (whose browser WS was intermittently failing) and no per-tab
-        // setup. LIVE_RELAY is reachable ONLY via the explicit '1' opt-in
-        // above. The flag (1/0) and an explicit hc:nostrmesh:relays override.
-        return false
-      } catch { return false }
+    //   real host → LIVE_RELAY. Seeding LOCAL_RELAY here was a bug twice
+    //   over: every visitor dialed a dead loopback socket on infinite
+    //   backoff, AND a public origin touching localhost trips Chrome's
+    //   Local Network Access permission prompt at page open.
+    //
+    //   'hc:nostrmesh:use-live-relay' — '1' forces LIVE_RELAY anywhere,
+    //   '0' opts out of it: a real host then idles with ZERO relays
+    //   (publishes hit local fanout only) rather than falling back to
+    //   loopback. 'hc:nostrmesh:relays' (explicit list) wins over both.
+    //
+    // IIFE on purpose: an inlined `let` here lets esbuild constant-propagate
+    // the flag into the seed expression, dead-code-eliminating a LIVE_RELAY
+    // or LOCAL_RELAY branch and removing the literal from the bundle.
+    // Wrapping the read in an IIFE makes the value opaque to constant
+    // propagation — esbuild cannot statically evaluate the return.
+    const flag = ((): string | null => {
+      try { return localStorage.getItem('hc:nostrmesh:use-live-relay') } catch { return null }
     })()
-    const seed = useLive ? [LIVE_RELAY] : [LOCAL_RELAY]
+    const seed =
+      flag === '1' ? [LIVE_RELAY]
+      : this.isLocalContext() ? [LOCAL_RELAY]
+      : flag === '0' ? []
+      : [LIVE_RELAY]
     const defaults = fallback.length > 0 ? fallback : seed
     try {
       const raw = localStorage.getItem('hc:nostrmesh:relays')
