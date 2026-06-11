@@ -106,7 +106,17 @@ const bootstrap = async (): Promise<void> => {
   // currently loaded drones. Reload happens when the user leaves DCP
   // (embed close, or standalone tab close) and we detect drift from
   // bootSyncSig.
-  const resyncAndEnforce = async () => {
+  //
+  // SINGLE-FLIGHT + COALESCE. DCP fires toggle-changed in BURSTS (domain
+  // load completion, per-toggle notifications — three in one frame is
+  // normal), and each event used to start a full resync + preloader pass
+  // concurrently. Two passes racing means one pass's removeDisabled/write
+  // can yank a bee file out from under another pass's getBee() — the
+  // preloader logs "returned null", that drone never registers, and the
+  // session runs without it (dead selection, missing critical sigs) until
+  // a reload. One pass runs at a time; events that arrive mid-pass
+  // coalesce into a single trailing rerun.
+  const runResyncPass = async () => {
     const sentinel = await getSentinel()
     if (!sentinel) return
     await resyncFromSentinel(sentinel)
@@ -125,11 +135,28 @@ const bootstrap = async (): Promise<void> => {
     if (preloader?.find) await preloader.find('')
     appRef.tick()
   }
+  let syncInFlight: Promise<void> | null = null
+  let syncQueued = false
+  const resyncAndEnforce = (): Promise<void> => {
+    if (syncInFlight) { syncQueued = true; return syncInFlight }
+    syncInFlight = (async () => {
+      try {
+        do {
+          syncQueued = false
+          await runResyncPass()
+        } while (syncQueued)
+      } finally {
+        syncInFlight = null
+      }
+    })()
+    return syncInFlight
+  }
 
   const reloadIfDrifted = async (source: string) => {
-    const sentinel = await getSentinel()
-    if (!sentinel) return
-    await resyncFromSentinel(sentinel)
+    // Route through the same single-flight gate — a direct
+    // resyncFromSentinel here would race a toggle-changed pass's
+    // preloader exactly like concurrent toggle events did.
+    await resyncAndEnforce()
     const currentSyncSig = localStorage.getItem('sentinel.sync-signature') ?? ''
     if (currentSyncSig && currentSyncSig !== bootSyncSig) {
       console.log(`[main] ${source} with drift — reloading`)
