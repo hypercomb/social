@@ -48,6 +48,12 @@ jobs:
       - name: Install diamond-core-processor dependencies
         working-directory: src/diamond-core-processor
         run: npm install
+      # index.html loads env.js unconditionally (per-developer dev overrides,
+      # gitignored). The other apps get a stub via prebuild.ts; DCP's CI calls
+      # ng build directly, so write the stub here or every iframe load of the
+      # deployed DCP 404s in the host page's console. No secrets — ever.
+      - name: Write env.js stub (no secrets)
+        run: node src/scripts/write-env-js.cjs src/diamond-core-processor/public
       - name: Build diamond-core-processor
         working-directory: src/diamond-core-processor
         run: npx ng build --configuration production
@@ -59,6 +65,7 @@ jobs:
             "index.html"
             "manifest.json"
             "staticwebapp.config.json"
+            "env.js"
           )
           for f in "${REQUIRED[@]}"; do
             if [ ! -f "$ROOT/$f" ]; then
