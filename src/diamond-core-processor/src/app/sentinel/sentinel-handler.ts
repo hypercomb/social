@@ -619,15 +619,29 @@ export class SentinelHandler {
   }
 
   #loadDomains(): string[] {
-    // Content lives in Azure blob storage; DCP itself no longer ships
-    // bee/layer/dependency bundles from its origin.
+    // SOURCE-OF-TRUTH ORDER for the default package:
+    //   1. DCP's OWN ORIGIN — the installer app and its default package
+    //      deploy together (diamondcoreprocessor.com in production, the
+    //      dev server locally; copy-to-dcp stages manifest.json + the
+    //      flat sig dirs at the origin root), so deploying DCP IS
+    //      publishing the default content. The canonical origin outranks
+    //      stored hosts here: a participant/dev-seeded host serving a
+    //      stale manifest must not shadow the baseline (Azure-first had
+    //      exactly that bug; jwize-seeded dev hit it again).
+    //   2. participant-stored domains — additional content sources;
+    //   3. Azure blob — legacy last resort during the transition off
+    //      central storage.
     const azureBase = 'https://storagehypercomb.blob.core.windows.net/dcp'
+    const own = globalThis.location?.origin ?? ''
+    const out: string[] = []
+    if (own) out.push(own)
     try {
-      const stored: string[] = JSON.parse(localStorage.getItem(DOMAINS_KEY) ?? '[]')
-      if (!stored.includes(azureBase)) return [azureBase, ...stored]
-      return stored
-    } catch {
-      return [azureBase]
-    }
+      const stored: unknown = JSON.parse(localStorage.getItem(DOMAINS_KEY) ?? '[]')
+      if (Array.isArray(stored)) {
+        for (const d of stored) if (typeof d === 'string' && d && !out.includes(d)) out.push(d)
+      }
+    } catch { /* malformed — fall through to defaults */ }
+    if (!out.includes(azureBase)) out.push(azureBase)
+    return out
   }
 }

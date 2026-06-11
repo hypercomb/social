@@ -1646,31 +1646,60 @@ export class HomeComponent implements OnDestroy {
    *  pinned sig is stale it falls back to the domain's current manifest root,
    *  so a rebuild never leaves dev blank. */
   async #seedDefaultBaseline(): Promise<void> {
-    const cfg = devDefaultBootstrap()
-    if (!cfg?.byteSource) return
-
     // Let #refreshFromLineage + the persisted-domains effect settle first, so
     // the idempotency check below sees any already-present default section.
     await new Promise(r => setTimeout(r, 80))
 
-    // byteSource = where we fetch (dev relay); host = the capture-source
-    // identity that names the installer's DOMAIN FOLDER (jwize.com). In prod
-    // these are the same; in dev the bytes are local but the folder is the host.
-    const base = cfg.byteSource.replace(/\/+$/, '')
-    const host = (cfg.host || base).trim()
-
-    // The baseline is ALWAYS present — it shows even alongside adopted
-    // sections (it's the user's starting point, not a fallback for an empty
-    // dashboard). Skip only if the default's OWN section is already seeded
-    // (idempotency), so it never double-seeds across reloads / hashchange.
-    if (this.sections().some(s => s.domain === base)) return
-    let sig = String(cfg.sig ?? '').trim().toLowerCase()
-    if (!/^[a-f0-9]{64}$/.test(sig)) {
-      // No pinned sig (or stale) → take the domain's current manifest root.
-      sig = (await this.#resolver.fetchAllRootSignatures(base))[0] ?? ''
+    // SOURCE-OF-TRUTH ORDER for the baseline. The installer app and its
+    // default package DEPLOY TOGETHER — diamondcoreprocessor.com in
+    // production, the dev server locally (copy-to-dcp stages manifest.json
+    // + the flat sig dirs at the origin root) — so the canonical source is
+    // DCP's OWN ORIGIN. The dev bootstrap (byteSource + pinned sig) is the
+    // FALLBACK: a stale pin must never leave the baseline unresolved when
+    // the origin serves current content (jwize-pinned 82dfae00 did exactly
+    // that).
+    const candidates: { base: string; host: string; sig: string }[] = []
+    const own = (globalThis.location?.origin ?? '').replace(/\/+$/, '')
+    if (own) {
+      const ownSig = (await this.#resolver.fetchAllRootSignatures(own).catch(() => []))[0] ?? ''
+      if (/^[a-f0-9]{64}$/.test(ownSig)) {
+        candidates.push({ base: own, host: globalThis.location?.hostname || own, sig: ownSig })
+      }
     }
-    if (!/^[a-f0-9]{64}$/.test(sig)) return
+    const cfg = devDefaultBootstrap()
+    if (cfg?.byteSource) {
+      const base = cfg.byteSource.replace(/\/+$/, '')
+      let sig = String(cfg.sig ?? '').trim().toLowerCase()
+      if (!/^[a-f0-9]{64}$/.test(sig)) {
+        sig = (await this.#resolver.fetchAllRootSignatures(base).catch(() => []))[0] ?? ''
+      }
+      if (/^[a-f0-9]{64}$/.test(sig)) candidates.push({ base, host: (cfg.host || base).trim(), sig })
+    }
+    if (!candidates.length) return
 
+    for (const { base, host, sig } of candidates) {
+      // The baseline is ALWAYS present — it shows even alongside adopted
+      // sections (it's the user's starting point, not a fallback for an
+      // empty dashboard). Skip only if the default's OWN section is already
+      // seeded (idempotency), so it never double-seeds across reloads.
+      if (this.sections().some(s => s.domain === base)) return
+      const resolved = await this.#resolveBaselineCandidate(base, host, sig)
+      if (resolved) return
+    }
+
+    // Every candidate failed — surface one error row for visibility.
+    const first = candidates[0]
+    this.sections.set([...this.sections(), {
+      domain: first.base, domainName: first.host, displayDomain: first.host,
+      rootSig: first.sig, originalRootSig: first.sig, items: [],
+      loading: false, error: 'default baseline did not resolve',
+      installStatus: null, patches: [], enabled: true,
+    }])
+  }
+
+  /** Resolve ONE baseline candidate into sections. Returns true on success;
+   *  false (with its loading row removed) so the caller can try the next. */
+  async #resolveBaselineCandidate(base: string, host: string, sig: string): Promise<boolean> {
     const loading: DomainSection = {
       domain: base, domainName: host, displayDomain: host,
       rootSig: sig, originalRootSig: sig, items: [],
@@ -1692,11 +1721,8 @@ export class HomeComponent implements OnDestroy {
         }
       }
       if (!root) {
-        loading.loading = false
-        loading.installStatus = null
-        loading.error = 'default baseline did not resolve'
-        this.#refreshSections()
-        return
+        this.sections.set(this.sections().filter(s => s !== loading))
+        return false
       }
 
       const rootSig = root.signature ?? sig
@@ -1729,11 +1755,12 @@ export class HomeComponent implements OnDestroy {
       // then append the default's siblings; the template sorts for display.
       const others = this.sections().filter(s => s !== loading && s.domain !== base && s.domain !== '@logical')
       this.sections.set([...others, ...siblings])
-    } catch (e: unknown) {
-      loading.loading = false
-      loading.installStatus = null
-      loading.error = e instanceof Error ? e.message : 'failed to load default baseline'
-      this.#refreshSections()
+      return true
+    } catch {
+      // This candidate failed — remove its loading row so the caller can
+      // try the next source (own origin → dev bootstrap).
+      this.sections.set(this.sections().filter(s => s !== loading))
+      return false
     }
   }
 
