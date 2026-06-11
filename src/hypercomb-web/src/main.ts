@@ -172,7 +172,16 @@ const bootstrap = async (): Promise<void> => {
           // last-resort content domain. The sync below then streams the
           // recorded, enabled set into this shell's OPFS.
           try {
-            await sentinel.install(undefined, undefined, `${location.origin}/content`)
+            // Bounded: the bridge promise only settles when DCP replies — a
+            // handler that dies mid-request would otherwise pin the card at
+            // "Starting…" forever. On timeout, fall through to the sync +
+            // bundled fallback; a slow-but-alive install keeps streaming in
+            // the background and the resync picks its results up.
+            const INSTALL_TIMEOUT_MS = 180_000
+            await Promise.race([
+              sentinel.install(undefined, undefined, `${location.origin}/content`),
+              new Promise(resolve => setTimeout(resolve, INSTALL_TIMEOUT_MS)),
+            ])
           } catch (err) {
             console.warn('[main] first-run dcp install failed', err)
           }

@@ -73,6 +73,7 @@ export class SentinelHandler {
     await this.#store.initialize()
 
     for (const domain of domains) {
+     try {
       const rootSig = await this.#fetchRootSignature(domain)
       if (!rootSig) continue
 
@@ -82,6 +83,11 @@ export class SentinelHandler {
         return
       }
 
+      // Guarded: a malformed stored domain (e.g. a bare host with no
+      // protocol) makes `new URL` THROW — and an escaped throw here meant
+      // NO reply was ever posted, so the caller's install promise hung
+      // forever ("Starting…" that never finishes). The per-domain
+      // try/catch turns any bad entry into "skip to the next source".
       const domainName = new URL(domain).hostname
       const manifest = await this.#installer.install(domain, rootSig, domainName, (p) => {
         port.postMessage({ type: 'progress', rid: msg.rid, phase: p.phase, current: p.current, total: p.total })
@@ -121,6 +127,13 @@ export class SentinelHandler {
         beeDeps: (manifest as any).beeDeps
       })
       return
+     } catch (e) {
+      // One bad source must never kill the whole install — and must NEVER
+      // leave the request unanswered (the caller would hang). Skip to the
+      // next candidate; the ok:false post below covers total failure.
+      console.warn('[sentinel] install attempt failed for', domain, e)
+      continue
+     }
     }
 
     port.postMessage({ type: 'result', rid: msg.rid, ok: false, error: 'No content found on any trusted domain' })
