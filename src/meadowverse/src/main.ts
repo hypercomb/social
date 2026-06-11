@@ -15,13 +15,17 @@ const ensureSwControl = async (): Promise<void> => {
   if (!('serviceWorker' in navigator)) return
 
   await navigator.serviceWorker.register('/meadowverse.worker.js', { scope: '/' })
-  await navigator.serviceWorker.ready
+  const reg = await navigator.serviceWorker.ready
 
   if (navigator.serviceWorker.controller) return
 
+  // Hard-reload state (active worker, nothing installing/waiting):
+  // controllerchange can never fire — don't stall boot waiting for it.
+  if (reg.active && !reg.installing && !reg.waiting) return
+
   await new Promise<void>(resolve => {
     navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true })
-    setTimeout(resolve, 3000)
+    setTimeout(resolve, 1500)
   })
 }
 

@@ -46,11 +46,17 @@ const ensureSwControl = async (): Promise<void> => {
   if (!('serviceWorker' in navigator)) return
   try {
     await navigator.serviceWorker.register('/hypercomb.worker.js', { scope: '/' })
-    await navigator.serviceWorker.ready
+    const reg = await navigator.serviceWorker.ready
     if (navigator.serviceWorker.controller) return
+    // Hard-reload state: active worker, nothing installing/waiting —
+    // controllerchange can never fire (claim ran long ago) and the page
+    // stays uncontrolled regardless; waiting 3s here bought nothing.
+    // First tiles never touch the SW route, so proceed immediately.
+    if (reg.active && !reg.installing && !reg.waiting) return
+    // Worker genuinely installing/updating: claim fires sub-second.
     await new Promise<void>(resolve => {
       navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true })
-      setTimeout(resolve, 3000)
+      setTimeout(resolve, 1500)
     })
   } catch (err) {
     console.warn('[hypercomb-dev] service-worker registration failed', err)

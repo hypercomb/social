@@ -217,26 +217,14 @@ const _runInitializeRuntime = async (
     // hits the cache. Logs in the service still surface progress / errors.
     void (async () => {
       try {
+        // preloadAllBags' shared promise already CHAINS the root-walk
+        // (Phase 2 preloadFromRoot inside history.service.ts) — the
+        // explicit re-derivation + second preloadFromRoot call that used
+        // to follow here re-walked the entire tree (fresh visited set, no
+        // memo) right while the critical bee wave, Pixi init, and Angular
+        // bootstrap were competing for the main thread and OPFS. One
+        // await covers both phases.
         await historyService.preloadAllBags!()
-        // Walk from the lineage root's head so descendants are warmed
-        // before any render fetches them. The root lineage is sig of
-        // the empty-segments key (sha256('')); its head layer's children
-        // are the user's top-level tiles, recurse from there.
-        if (historyService.sign && historyService.latestMarkerSigFor && historyService.preloadFromRoot) {
-          const rootLineageSig = await historyService.sign({ explorerSegments: () => [] })
-          const rootHeadSig = await historyService.latestMarkerSigFor(rootLineageSig, '/')
-          console.log('[preload] root layer resolved:', {
-            rootLineageSig: rootLineageSig?.slice?.(0, 12),
-            rootHeadSig: rootHeadSig?.slice?.(0, 12),
-          })
-          if (rootHeadSig) {
-            await historyService.preloadFromRoot(rootHeadSig)
-          } else {
-            console.warn('[preload] no rootHeadSig — preloadFromRoot skipped')
-          }
-        } else {
-          console.warn('[preload] preloadFromRoot capability missing on history service')
-        }
       } catch (err) {
         console.warn('[runtime-initializer] preload failed (non-fatal):', err)
       }

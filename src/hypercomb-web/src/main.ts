@@ -19,14 +19,25 @@ const ensureSwControl = async (): Promise<void> => {
   if (!('serviceWorker' in navigator)) return
 
   await navigator.serviceWorker.register('/hypercomb.worker.js', { scope: '/' })
-  await navigator.serviceWorker.ready
+  const reg = await navigator.serviceWorker.ready
 
   if (navigator.serviceWorker.controller) return
 
-  // Wait for clients.claim() to propagate (fires controllerchange)
+  // Uncontrolled page + active worker + nothing installing/waiting is the
+  // HARD-RELOAD state: clients.claim() ran long ago, controllerchange can
+  // never fire, and the page stays uncontrolled for its lifetime no
+  // matter how long we wait — this gate used to stall every hard reload
+  // the full 3s for nothing. Nothing on the first-tiles path needs page
+  // control (the SW's /@resource/ route serves embedded-site composition
+  // only), so proceed immediately.
+  if (reg.active && !reg.installing && !reg.waiting) return
+
+  // A worker IS installing/waiting (first visit / worker update):
+  // clients.claim() fires controllerchange sub-second — wait for it,
+  // briefly.
   await new Promise<void>(resolve => {
     navigator.serviceWorker.addEventListener('controllerchange', () => resolve(), { once: true })
-    setTimeout(resolve, 3000)
+    setTimeout(resolve, 1500)
   })
 }
 

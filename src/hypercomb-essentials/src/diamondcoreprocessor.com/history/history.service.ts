@@ -1264,10 +1264,57 @@ export class HistoryService {
     if (!HistoryService.#SIG_RE.test(locationSig)) return null
     const cached = this.#latestSigByLineage.get(locationSig)
     if (cached) return this.getLayerBySig(cached)
-    await this.preloadAllBags()
+    // SINGLE-LINEAGE cold path — first paint must be linear in "this
+    // layer + its tiles", never in tree size. Joining preloadAllBags here
+    // made the first tile read wait for EVERY bag's head scan PLUS the
+    // chained whole-tree preloadFromRoot walk (the shared promise covers
+    // both phases). Instead: warm just THIS lineage's head (one dir
+    // listing + one marker read) and kick the full preload passively so
+    // later navigations stay warm. Fall back to the full preload only
+    // when the history root isn't ready yet (Store still initializing —
+    // preloadAllBags owns the readiness polling).
+    void this.preloadAllBags()
+    try {
+      await this.#warmLineageHead(locationSig)
+    } catch {
+      await this.preloadAllBags()
+    }
     const refreshed = this.#latestSigByLineage.get(locationSig)
     if (!refreshed) return null
     return this.getLayerBySig(refreshed)
+  }
+
+  /**
+   * Warm ONE lineage's head into `#latestSigByLineage`: filename-only
+   * enumeration to find the latest NNNN marker, then a single byte read —
+   * the per-lineage analog of preloadAllBags' two-pass discipline. Cost is
+   * one directory listing + one file read regardless of how deep the
+   * bag's history runs (the root lineage gains a marker on every cascade,
+   * so reading every marker — what refreshLineageCache does — is not
+   * first-paint material). An absent bag returns silently (the location
+   * truly has no committed marker, no minting); a missing history root
+   * THROWS so the caller can fall back to the store-ready-polling preload.
+   */
+  readonly #warmLineageHead = async (lineageSig: string): Promise<void> => {
+    const root = this.historyRoot
+    let bag: FileSystemDirectoryHandle
+    try {
+      bag = await root.getDirectoryHandle(lineageSig, { create: false })
+    } catch { return }
+    let latestName = ''
+    for await (const [name, handle] of (bag as any).entries()) {
+      if (handle.kind !== 'file') continue
+      if (!HistoryService.#MARKER_RE.test(name)) continue
+      if (name > latestName) latestName = name
+    }
+    if (!latestName) return
+    try {
+      const fileHandle = await bag.getFileHandle(latestName, { create: false })
+      const bytes = await (await fileHandle.getFile()).arrayBuffer()
+      const { layerSig, isPointer } = await extractLayerSigFromMarker(bytes)
+      if (!isPointer) this.#preloaderCache.set(layerSig, bytes)
+      this.#latestSigByLineage.set(lineageSig, layerSig)
+    } catch { /* unreadable head — stay cold; the passive preload may resolve it */ }
   }
 
   /**

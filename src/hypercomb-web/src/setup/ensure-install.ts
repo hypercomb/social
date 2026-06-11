@@ -79,9 +79,18 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
     // reload trusted the cached manifest and the dependency-loader threw
     // "Failed to fetch dynamically imported module" for the missing ones.
     // One missing file → wipe + reinstall.
-    const beeOk = await allFilesPresent(store.bees, cachedManifest.bees, '.js')
-    const beeDepsOk = beeOk && await beeDepValuesPresent(store.dependencies, cachedManifest.beeDeps)
-    const allDepsOk = beeDepsOk && await allFilesPresent(store.dependencies, cachedManifest.dependencies, '.js')
+    // ONE directory listing per dir instead of ~97 serial getFileHandle
+    // probes (59 bees + 28 deps + 10 beeDep values, each a sequential
+    // awaited OPFS roundtrip blocking the import map, dep loading, and
+    // first paint). Enumerate names once, check membership in memory.
+    const [beeNames, depNames] = await Promise.all([
+      listFileNames(store.bees),
+      listFileNames(store.dependencies),
+    ])
+    const beeOk = (cachedManifest.bees ?? []).every(sig => beeNames.has(`${sig}.js`))
+    const beeDepSigs = new Set(Object.values(cachedManifest.beeDeps ?? {}).flatMap(list => list ?? []))
+    const beeDepsOk = [...beeDepSigs].every(sig => depNames.has(`${sig}.js`))
+    const allDepsOk = (cachedManifest.dependencies ?? []).every(sig => depNames.has(`${sig}.js`))
     if (beeOk && beeDepsOk && allDepsOk) {
       if (sentinel) {
         try {
@@ -578,51 +587,15 @@ const restoreSignatureStore = (sigStore: SignatureStore): void => {
   }
 }
 
-const fileExists = async (dir: FileSystemDirectoryHandle, name: string): Promise<boolean> => {
+/** All file names in a directory as a Set — one enumeration replaces N
+ *  serial getFileHandle existence probes on the boot spot-check. */
+const listFileNames = async (dir: FileSystemDirectoryHandle): Promise<Set<string>> => {
+  const names = new Set<string>()
   try {
-    await dir.getFileHandle(name)
-    return true
-  } catch {
-    return false
-  }
+    for await (const [name, handle] of dir.entries()) {
+      if (handle.kind === 'file') names.add(name)
+    }
+  } catch { /* dir unreadable — empty set fails the spot-check, triggering reinstall */ }
+  return names
 }
 
-/**
- * Return true when every signature listed across the beeDeps map values
- * is present in the dependencies directory. Empty/absent map → true
- * (nothing to verify). A single missing sig → false (resync).
- */
-const beeDepValuesPresent = async (
-  depsDir: FileSystemDirectoryHandle,
-  beeDeps: Record<string, string[]> | undefined,
-): Promise<boolean> => {
-  if (!beeDeps) return true
-  const seen = new Set<string>()
-  for (const list of Object.values(beeDeps)) {
-    for (const sig of list ?? []) seen.add(sig)
-  }
-  for (const sig of seen) {
-    if (!await fileExists(depsDir, `${sig}.js`)) return false
-  }
-  return true
-}
-
-/**
- * Check every signature in `signatures` has a file `<sig><suffix>` in `dir`.
- * Catches partial installs where installFromBundled silently dropped some
- * fetches (network glitch / SW race on cold load) and the next boot would
- * otherwise resolve aliases via the importmap to URLs that 404 — or where
- * a bee referenced from the manifest just isn't on disk so the bee never
- * loads.
- */
-const allFilesPresent = async (
-  dir: FileSystemDirectoryHandle,
-  signatures: readonly string[] | undefined,
-  suffix: string,
-): Promise<boolean> => {
-  if (!signatures?.length) return true
-  for (const sig of signatures) {
-    if (!await fileExists(dir, `${sig}${suffix}`)) return false
-  }
-  return true
-}
