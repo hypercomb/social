@@ -388,7 +388,10 @@ export class HostSyncService extends EventTarget {
       // Confirmed read-back: a fresh GET (cache-bypassing) must show the
       // host actually serving the sig. A bare PUT 200 is NOT proof — the
       // silent-drop lesson. Only a served read-back closes the loop.
+      // The receipt needs the STATUS, not the bytes — cancel the body so
+      // backup doesn't re-download every byte it just uploaded.
       const back = await fetch(url, { cache: 'no-store' })
+      try { await back.body?.cancel() } catch { /* already drained/closed */ }
       if (!back.ok) return false
     } catch {
       return false // network/CORS/host-down — retry later

@@ -128,6 +128,13 @@ const MAX_RESPONSE_BYTES = 256 * 1024
 // a caller knows their content is rare in the swarm.
 const DEFAULT_TIMEOUT_MS = 2000
 
+// Hard cap on a single HTTP-direct probe. DEFAULT_TIMEOUT_MS bounds only
+// the MESH wait; the HTTP cascade's fetches had no timeout at all, so one
+// hung/unreachable host wedged every awaiting caller for the browser's
+// connect timeout (tens of seconds). 3s comfortably covers a healthy
+// host's 404 (~50-250ms observed) while bounding the pathological case.
+const HTTP_PROBE_TIMEOUT_MS = 3000
+
 export type ContentType = 'layer' | 'resource' | 'dependency'
 
 // Visuals-by-composedSig is the second flavor of fetch this drone
@@ -565,8 +572,13 @@ export class ContentBrokerDrone extends Drone {
       // public/content), kept during the migration.
       for (const tryPath of [`/${sig}`, path]) {
         const url = `${scheme}://${host}${tryPath}`
+        // Bounded probe: a dead/hung host must cost at most
+        // HTTP_PROBE_TIMEOUT_MS, never the browser's connect timeout —
+        // callers on the render path await this cascade.
+        const probeCtrl = new AbortController()
+        const probeTimer = setTimeout(() => probeCtrl.abort(), HTTP_PROBE_TIMEOUT_MS)
         try {
-          const res = await fetch(url, { cache: 'no-store' })
+          const res = await fetch(url, { cache: 'no-store', signal: probeCtrl.signal })
           if (!res.ok) continue
           // SPA fallback guard: sig-addressed bytes are never text/html —
           // skip before hashing (an extension-less /<sig> on a dev-server
@@ -585,8 +597,11 @@ export class ContentBrokerDrone extends Drone {
           if (type === 'layer') this.#attributeClosure(bytes, host)
           return bytes
         } catch {
-          // network error / CORS / cert issue — try next path / host
+          // network error / CORS / cert issue / probe timeout — try next
+          // path / host
           continue
+        } finally {
+          clearTimeout(probeTimer)
         }
       }
     }

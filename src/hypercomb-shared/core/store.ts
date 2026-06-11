@@ -5,6 +5,11 @@ import { Bee, EffectBus, SignatureService, isSignature } from '@hypercomb/core'
 
 type BeeCtor = new () => Bee
 
+/** How long a host-resolution MISS is remembered before the cascade may be
+ *  re-dialed for that sig. Render passes within the window get an instant
+ *  null instead of a network storm; the egg stays retryable after it. */
+const HOST_MISS_TTL_MS = 60_000
+
 export type DevManifest = {
   dependencies: Record<string, string>
   imports: Record<string, string>
@@ -324,6 +329,15 @@ export class Store extends EventTarget {
   readonly #resourceCache = new Map<string, Blob>()
   readonly #resourcePending = new Map<string, Promise<Blob | null>>()
   readonly #hostFetchPending = new Map<string, Promise<Blob | null>>()
+  // Host-miss NEGATIVE cache (egg semantics): a sig the cascade could not
+  // resolve is "not yet delivered", and re-dialing the network for it on
+  // every render pass turned one missing image into a per-synchronize
+  // fetch storm (~175ms × N tiles × every pass — measured). A miss is
+  // remembered for a TTL and the host step returns null instantly during
+  // that window; local arrival bypasses this entirely (memory/OPFS are
+  // checked first), and the TTL keeps the egg retryable — "not yet
+  // delivered", never "failed".
+  readonly #hostFetchMissUntil = new Map<string, number>()
 
   /**
    * Local-only resource read: in-memory cache → OPFS. Never touches the
@@ -414,13 +428,23 @@ export class Store extends EventTarget {
   #fetchResourceFromHost = (signature: string): Promise<Blob | null> => {
     const existing = this.#hostFetchPending.get(signature)
     if (existing) return existing
+    // Within a miss window → answer null instantly, no network. The egg
+    // re-tries when the window lapses (or the bytes arrive locally first).
+    const missUntil = this.#hostFetchMissUntil.get(signature)
+    if (missUntil !== undefined) {
+      if (Date.now() < missUntil) return Promise.resolve(null)
+      this.#hostFetchMissUntil.delete(signature)
+    }
     const promise = (async (): Promise<Blob | null> => {
       try {
         const broker = (window.ioc?.get?.('@diamondcoreprocessor.com/ContentBrokerDrone')) as
           | { fetchBySig?: (sig: string, type: string, timeoutMs?: number) => Promise<Uint8Array | null> }
           | undefined
         const bytes = await broker?.fetchBySig?.(signature, 'resource')
-        if (!bytes || bytes.byteLength === 0) return null
+        if (!bytes || bytes.byteLength === 0) {
+          this.#hostFetchMissUntil.set(signature, Date.now() + HOST_MISS_TTL_MS)
+          return null
+        }
         // Copy into a fresh ArrayBuffer-backed view: TS 5.9's BlobPart
         // excludes Uint8Array<ArrayBufferLike> (SharedArrayBuffer guard).
         // Negligible vs the network fetch we just did.
@@ -431,6 +455,7 @@ export class Store extends EventTarget {
         try { await this.putResource(blob, { emit: false }) } catch { /* cache-only is acceptable */ }
         return blob
       } catch {
+        this.#hostFetchMissUntil.set(signature, Date.now() + HOST_MISS_TTL_MS)
         return null
       } finally {
         this.#hostFetchPending.delete(signature)

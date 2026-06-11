@@ -294,6 +294,14 @@ export class ShowCellDrone extends Drone {
 
   // cache: cell label → small image signature (avoids re-reading 0000 on every render)
   private readonly cellImageCache = new Map<string, string | null>()
+
+  /** Sigs with a detached host-fill in flight. Render passes NEVER await
+   *  the network (tile creation is a dequeue): a local miss paints
+   *  label-only NOW, and the full cascade (memory → OPFS → host,
+   *  miss-negative-cached in the Store) runs detached, re-rendering when
+   *  the bytes land. This set only prevents stacking duplicate fills for
+   *  the same sig while one is in flight. */
+  readonly #hostFillInFlight = new Set<string>()
   /** For EXTERNAL (peer) labels: which publisher imageSig the cached value
    *  was derived from. The publisher's CURRENT sig is authoritative — a
    *  cache entry is only reusable while its source sig is unchanged, so a
@@ -4241,9 +4249,31 @@ export class ShowCellDrone extends Drone {
     forceReload?: Set<string>,
   ): Promise<void> => {
     const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
-      { getResource: (sig: string) => Promise<Blob | null> } | undefined
+      { getResource: (sig: string) => Promise<Blob | null>; getResourceLocal: (sig: string) => Promise<Blob | null> } | undefined
     if (!store || !this.imageAtlas) return
     const imageAtlas = this.imageAtlas
+
+    // Detached host fill — the render path's bytes come from LOCAL reads
+    // only (memory/OPFS); anything missing is fetched off-path through the
+    // full cascade and re-rendered on arrival. The Store negative-caches
+    // misses, so an unresolvable sig costs one bounded cascade per TTL
+    // window instead of a network storm on every synchronize pass.
+    const fillFromHost = (sig: string, label?: string): void => {
+      if (this.#hostFillInFlight.has(sig)) return
+      this.#hostFillInFlight.add(sig)
+      void (async () => {
+        try {
+          const blob = await store.getResource(sig)
+          if (!blob) return // not yet delivered — egg; retried after the miss TTL
+          // Bytes landed (memory + OPFS write-through). Drop the label's
+          // cached derivation so the next pass re-derives from fresh
+          // bytes, then schedule that pass.
+          if (label) this.cellImageCache.delete(label)
+          this.requestRender()
+        } catch { /* bounded by the Store's miss cache */ }
+        finally { this.#hostFillInFlight.delete(sig) }
+      })()
+    }
 
     const livePropsIndex: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
     // When cursor is rewound and we have content-state overrides, use those
@@ -4280,8 +4310,10 @@ export class ShowCellDrone extends Drone {
       if (existing) return existing
       const promise = (async () => {
         try {
-          const blob = await store.getResource(sig)
-          if (!blob) return
+          // LOCAL only — a miss never stalls the batch; the detached fill
+          // pulls the bytes and a follow-up render atlas-loads them.
+          const blob = await store.getResourceLocal(sig)
+          if (!blob) { fillFromHost(sig); return }
           await imageAtlas.loadImage(sig, blob)
         } catch { /* per-cell warnings removed — fired on every nav */ }
       })()
@@ -4323,8 +4355,10 @@ export class ShowCellDrone extends Drone {
             return
           }
           try {
-            const blob = await store.getResource(peerSig)
-            if (!blob) { this.cellImageCache.set(cell.label, null); return }
+            // LOCAL only — peer bytes that haven't streamed yet must not
+            // stall the pass; the detached fill re-renders on arrival.
+            const blob = await store.getResourceLocal(peerSig)
+            if (!blob) { fillFromHost(peerSig, cell.label); this.cellImageCache.set(cell.label, null); return }
             // The wire has carried two shapes: a PROPS pointer (JSON blob
             // whose small.image holds the image sig — the old substrate-
             // cache pointer) and the DIRECT image sig (current visuals
@@ -4419,8 +4453,10 @@ export class ShowCellDrone extends Drone {
       try {
         const propsSig = propsIndex[cell.label]
         if (!propsSig) throw new Error('no props')
-        const blob = await store.getResource(propsSig)
-        if (!blob) throw new Error('no blob')
+        // LOCAL only — a props blob not yet pulled renders label-only this
+        // pass; the detached fill invalidates + re-renders when it lands.
+        const blob = await store.getResourceLocal(propsSig)
+        if (!blob) { fillFromHost(propsSig, cell.label); throw new Error('no blob') }
         const text = await blob.text()
         const props = JSON.parse(text)
 
