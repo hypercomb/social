@@ -512,7 +512,7 @@ export class HistoryService {
     if (lastSig === layerSig) return layerSig
 
     const bag = await this.getBag(locationSig)
-    await this.#ensureEmptyMarker(bag, layer.name)
+    await this.#ensureEmptyMarker(bag, layer.name, locationSig)
 
     // Pool write FIRST — the marker (about to be written) is a pointer
     // record referencing this sig. The pool entry must exist by the time
@@ -537,12 +537,26 @@ export class HistoryService {
     // anything else. Cursor traversal still works against marker
     // filenames (NNNNNNNN); each marker yields its layerSig via the
     // pointer record.
-    const markerName = await this.#nextMarkerName(bag)
+    // Marker name: when the in-memory marker list is warm its max
+    // filename is the bag's max — sequence numbers only grow (flatten
+    // archives below the first post-flatten commit, whose number
+    // #nextMarkerName derived from live ∪ archive; deletions drop the
+    // cache entirely). Cold cache → one O(markers) enumeration, after
+    // which listLayers' next scan re-warms it.
+    const knownList = this.#layerListCache.get(locationSig)
+    const markerName = (knownList && knownList.length > 0)
+      ? String(knownList.reduce((max, e) => Math.max(max, parseInt(e.filename, 10) || 0), 0) + 1).padStart(8, '0')
+      : await this.#nextMarkerName(bag)
     const markerHandle = await bag.getFileHandle(markerName, { create: true })
     const markerRecord: MarkerRecord = { layer: layerSig }
     const markerBytes = new TextEncoder().encode(JSON.stringify(markerRecord))
     const markerWritable = await markerHandle.createWritable()
     try { await markerWritable.write(markerBytes.buffer as ArrayBuffer) } finally { await markerWritable.close() }
+
+    // Keep the in-memory marker list coherent: the entry we just wrote
+    // IS the bag's new tail. cursor.onNewLayer reads it via listLayers'
+    // warm path instead of re-scanning the whole bag.
+    if (knownList) knownList.push({ layerSig, at: Date.now(), filename: markerName })
 
     // Pool is the only writer destination. No legacy mirror — sig is
     // hash(bytes), one pool entry per sig, content-addressed and never
@@ -607,10 +621,16 @@ export class HistoryService {
   readonly #ensureEmptyMarker = async (
     bag: FileSystemDirectoryHandle,
     name: string,
+    locationSig?: string,
   ): Promise<void> => {
     let exists = true
     try { await bag.getFileHandle('00000000', { create: false }) } catch { exists = false }
     if (exists) return
+    // Planting 00000000 changes the bag's marker set outside the
+    // commitLayer append path — drop the in-memory marker list so the
+    // next listLayers re-scans (the bag is brand-new here, so the
+    // re-scan is O(1)).
+    if (locationSig) this.#layerListCache.delete(locationSig)
     const empty = HistoryService.canonicalizeLayer(emptyLayer(name))
     const json = JSON.stringify(empty)
     const bytes = new TextEncoder().encode(json)
@@ -679,7 +699,7 @@ export class HistoryService {
     if (!latestName) {
       // Brand-new bag: materialize the empty marker on disk so its
       // sig is the hash of real file bytes, not a virtual computation.
-      await this.#ensureEmptyMarker(bag, name)
+      await this.#ensureEmptyMarker(bag, name, lineageSig)
       latestName = '00000000'
     }
 
@@ -874,6 +894,15 @@ export class HistoryService {
   public readonly listLayers = async (
     locationSig: string,
   ): Promise<Array<LayerEntry & { index: number; filename: string }>> => {
+    // Warm path: the in-memory marker list is maintained by commitLayer
+    // (append) and invalidated by every marker-deleting path. Returning
+    // it here keeps cursor.onNewLayer — which runs after EVERY commit —
+    // from re-reading the whole bag (O(history-depth) OPFS reads).
+    const cachedList = this.#layerListCache.get(locationSig)
+    if (cachedList) {
+      return cachedList.map((entry, position) => ({ ...entry, index: position }))
+    }
+
     // SKIP non-canonical entries; do NOT delete them. Auto-delete on
     // every read is destructive and not user-driven — a single bad
     // detection rule could erase real markers and lose history. To
@@ -922,6 +951,9 @@ export class HistoryService {
       } catch { /* skip unreadable */ }
     }
     markers.sort((a, b) => a.filename.localeCompare(b.filename))
+    // Populate the warm-path cache. commitLayer appends to this array
+    // in place on every subsequent commit; deletion paths drop it.
+    this.#layerListCache.set(locationSig, markers)
     return markers.map((entry, position) => ({ ...entry, index: position }))
   }
 
@@ -1090,6 +1122,25 @@ export class HistoryService {
    * "what's the latest sig for /A/B?" doesn't have to re-walk the bag.
    */
   readonly #latestSigByLineage = new Map<string, string>()
+
+  /**
+   * Per-lineage marker list — the in-memory mirror of what listLayers
+   * reads off disk. Without it, EVERY commit re-enumerated the bag and
+   * re-read EVERY marker file (cursor.onNewLayer → listLayers), making
+   * create cost O(history-depth) — measured at ~1.8s per create at
+   * 2000 markers. The cache turns that into an O(1) append.
+   *
+   * Coherence contract (same as #latestSigByLineage): commitLayer
+   * appends the entry it just wrote; every path that deletes or
+   * archives markers (removeEntries, archiveEntries, quarantine,
+   * refreshLineageCache, #ensureEmptyMarker's first-touch plant)
+   * drops the lineage's entry so the next listLayers re-scans disk.
+   * promoteToHead / mergeEntries route through commitLayer and need
+   * no special handling. Opportunistic marker migration rewrites a
+   * marker's SHAPE in place (same filename, same layerSig) so cached
+   * entries stay valid.
+   */
+  readonly #layerListCache = new Map<string, Array<LayerEntry & { filename: string }>>()
 
   /**
    * Reverse index: marker sig → the lineage bag it lives in. Lets the
@@ -1480,6 +1531,7 @@ export class HistoryService {
    */
   public readonly refreshLineageCache = async (lineageSig: string): Promise<void> => {
     this.#latestSigByLineage.delete(lineageSig)
+    this.#layerListCache.delete(lineageSig)
     let bag: FileSystemDirectoryHandle
     try {
       bag = await this.historyRoot.getDirectoryHandle(lineageSig, { create: false })
@@ -1575,6 +1627,7 @@ export class HistoryService {
     for (const name of drop) {
       try { await bag.removeEntry(name) } catch { /* already gone */ }
     }
+    if (drop.length > 0) this.#layerListCache.delete(locationSig)
   }
 
   // -------------------------------------------------
@@ -1656,7 +1709,10 @@ export class HistoryService {
     // whether one of the deleted files was the head). Cheap to drop
     // the cached entry; next read repopulates from the bag's actual
     // last NNNNNNNN.
-    if (removed > 0) this.#latestSigByLineage.delete(locationSig)
+    if (removed > 0) {
+      this.#latestSigByLineage.delete(locationSig)
+      this.#layerListCache.delete(locationSig)
+    }
     return removed
   }
 
@@ -1698,7 +1754,10 @@ export class HistoryService {
         archived++
       } catch { /* already gone or unreadable — skip */ }
     }
-    if (archived > 0) this.#latestSigByLineage.delete(locationSig)
+    if (archived > 0) {
+      this.#latestSigByLineage.delete(locationSig)
+      this.#layerListCache.delete(locationSig)
+    }
     return archived
   }
 

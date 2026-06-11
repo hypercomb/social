@@ -133,6 +133,33 @@ class CellSlots {
     if (hasBranch) this.#branches.add(label)
     return true
   }
+
+  /**
+   * Pinned-mode counterpart to add(): place a label at a specific sparse
+   * slot the caller already computed (the LayoutService scoring lives in
+   * the drone, not here). Grows the backing array with '' gaps as needed.
+   * Idempotent when the label is already present. Returns false only if a
+   * DIFFERENT label already holds the slot, signalling the caller to fall
+   * back to a full render.
+   */
+  addAt(label: string, index: number, hasBranch: boolean): boolean {
+    if (this.#names.includes(label)) {
+      this.#local.add(label)
+      if (hasBranch) this.#branches.add(label)
+      return true
+    }
+    while (this.#names.length <= index) this.#names.push('')
+    if (this.#names[index] !== '' && this.#names[index] !== label) return false
+    this.#names[index] = label
+    this.#local.add(label)
+    if (hasBranch) this.#branches.add(label)
+    return true
+  }
+
+  /** Mark an already-present label as having a branch. No-op if absent. */
+  markBranch(label: string): void {
+    if (this.#names.includes(label)) this.#branches.add(label)
+  }
 }
 
 /**
@@ -1229,8 +1256,15 @@ export class ShowCellDrone extends Drone {
     for (const name of change.added) {
       // hasBranch defaults to false for newly-added cells (no children yet).
       // The async fill pass below will correct this if needed.
-      if (!this.#slots.add(name, false)) {
-        // pinned mode — LayoutService owns slot assignment, fall back to full render
+      if (this.#slots.add(name, false)) continue
+      // Pinned mode (the only mode): #slots.add defers slot assignment.
+      // Place the new cell HERE exactly as #orderByIndexPinned would for an
+      // unindexed cell — viewport-scored free slot, persisted fire-and-forget
+      // — and render incrementally. The old behaviour fell back to a full
+      // OPFS re-scan of the whole grid on every create, which both lagged the
+      // click and re-rendered every existing tile. Only a genuinely full grid
+      // (or missing axial) forces the slow path now.
+      if (this.#placePinnedCell(name) < 0) {
         this.#layerCellsCache.delete(this.renderedLocationKey)
         this.renderedCellsKey = ''
         this.requestRender()
@@ -1321,7 +1355,7 @@ export class ShowCellDrone extends Drone {
         // Branch flags (cheap, parallel)
         await Promise.all(added.map(async name => {
           const hasBranch = await this.checkCellHasBranch(dir, name)
-          if (hasBranch) this.#slots.add(name, true)  // idempotent
+          if (hasBranch) this.#slots.markBranch(name)  // idempotent; pinned-safe
         }))
         // Images + props — pushed per-cell via in-place update
         for (const name of added) {
@@ -2868,8 +2902,14 @@ export class ShowCellDrone extends Drone {
     // next microtask runs one applyGeometry, and images for new cells are
     // loaded fire-and-forget afterward. Rapid clicks in one JS turn coalesce
     // into a single render.
-    this.onEffect<{ cell: string; groupId?: string }>('cell:added', (payload) => {
+    this.onEffect<{ cell: string; segments?: string[]; groupId?: string }>('cell:added', (payload) => {
       if (!payload?.cell) return
+      // Only react to additions at the location we're currently showing.
+      // One create can emit cell:added for several locations at once — a
+      // nested `a/b/c` adds a child to root, /a AND /a/b — and the tiles for
+      // the other locations must NOT appear in this view. When segments are
+      // absent (legacy emitters) we assume the current location.
+      if (payload.segments && !this.#segmentsAreCurrent(payload.segments)) return
       this.#pendingRemoves.delete(payload.cell)
       this.#startNewCellFade(payload.cell)
       if (this.#slots.seeded) {
@@ -2923,6 +2963,29 @@ export class ShowCellDrone extends Drone {
       if (nowLocationSig !== this.#lastCursorLocationSig) {
         // Adopt the new location's cursor state silently, no cache wipe.
         this.#lastCursorLocationSig = nowLocationSig
+        this.#lastCursorPosition = nowPosition
+        this.#lastCursorRewound = nowRewound
+        return
+      }
+
+      // Head-advancing COMMIT (not a scrub). importTree's onNewLayer bumps
+      // the cursor to a higher position with rewound still false whenever a
+      // new layer is appended while we're at head — which is EVERY create.
+      // The incremental cell:added / cell:removed path has already
+      // reconciled this view, so wiping the caches and running a full
+      // renderFromSynchronize below is pure redundant work: a second
+      // full-grid OPFS re-read + rebuild right after the cheap incremental
+      // render already painted. That redundant render is the residual
+      // create lag. Adopt the new position silently — exactly like the
+      // navigation branch above. This is the skip the comment at the top of
+      // this handler always intended but never implemented.
+      //
+      // Genuine scrubs still fall through to the full re-render: undo has
+      // nowRewound=true; redo and redo-to-head / Make-HEAD have the PREVIOUS
+      // state rewound (#lastCursorRewound=true), so !#lastCursorRewound
+      // excludes them. Only a was-at-head → still-at-head → position-up
+      // transition (a fresh commit) is skipped.
+      if (!nowRewound && !this.#lastCursorRewound && nowPosition > this.#lastCursorPosition) {
         this.#lastCursorPosition = nowPosition
         this.#lastCursorRewound = nowRewound
         return
@@ -3749,7 +3812,6 @@ export class ShowCellDrone extends Drone {
     const maxSlot = axial?.count ?? 60
     const sparse: string[] = new Array(maxSlot + 1).fill('')
 
-    let nextFree = 0
     const unindexed: string[] = []
 
     // IndexNurse owns the index read path — layer-slot first, 0000
@@ -3860,23 +3922,65 @@ export class ShowCellDrone extends Drone {
     // user-spec wants.
     unindexed.sort((a, b) => a.localeCompare(b))
 
-    // Place unindexed cells by scoring every empty slot on three
-    // factors and picking the minimum:
-    //
-    //   1. off          — how far off-screen, in screen-fractions
-    //                     (0 if the slot is on-screen). From the
-    //                     CenterSlotTracker, refreshed passively
-    //                     whenever the viewport changes.
-    //   2. -whitespace  — negated count of empty/off-grid neighbours
-    //                     so that more whitespace (better fit) sorts
-    //                     before crowded slots. Computed here against
-    //                     the current sparse[] since occupancy is
-    //                     transient render state.
-    //   3. center       — squared screen-fraction distance from screen
-    //                     center, aspect-aware tiebreaker.
-    //
-    // Falls back to the lowest free slot if neither the tracker nor
-    // axial adjacency is available (very early boot).
+    // Place each unindexed cell at the best free slot. #bestFreeSlotByScore
+    // scores empty slots by off-screen distance, then whitespace, then
+    // center proximity (lowest-free fallback when the viewport tracker isn't
+    // ready) — the SAME helper the pinned incremental-add path uses, so a
+    // cell created via the fast path and one placed in a full render land on
+    // identical slots.
+    for (const name of unindexed) {
+      // Session-cache short-circuit. If this tile was already placed in a
+      // prior render (local-no-index path during a persistence race, or any
+      // peer tile) and the slot is still free, drop it back into the same
+      // slot. Pans don't change cached assignments; only manual reorganize
+      // clears this map.
+      const cachedSlot = this.#sessionSlotByLabel.get(name)
+      let placed: number
+      if (typeof cachedSlot === 'number' && cachedSlot >= 0 && cachedSlot <= maxSlot && sparse[cachedSlot] === '') {
+        placed = cachedSlot
+      } else {
+        placed = this.#bestFreeSlotByScore(sparse, maxSlot)
+        if (placed < 0) continue  // grid genuinely full
+      }
+
+      sparse[placed] = name
+      // Cache the assignment so subsequent renders skip the score
+      // recomputation. Stable across pan, viewport change, freshness rotation.
+      this.#sessionSlotByLabel.set(name, placed)
+      if (!readOnly && localCellSet.has(name)) {
+        // Fire-and-forget — the session cache provides intra-render stability
+        // regardless of when persistence completes, and the cache-hit branch
+        // above retries persistence on every later render until one write
+        // succeeds (writeTilePropertiesAt is content-addressed and idempotent
+        // on identical bytes). So we don't await here; awaiting just blocks
+        // the placement loop for no synchronization benefit.
+        void writeTilePropertiesAt(parentSegments, name, { index: placed }).catch(err =>
+          console.warn('[show-cell] failed to persist index for', name, err)
+        )
+      }
+    }
+
+
+    return sparse
+  }
+
+  /**
+   * Score every free slot in `sparse` and return the best one for a new
+   * cell: minimal off-screen distance, then maximal whitespace, then closest
+   * to center — the placement rule pinned layout uses for any cell without a
+   * persisted index. Falls back to the lowest free slot when the viewport
+   * tracker / axial adjacency isn't ready yet (early boot). Returns -1 when
+   * the grid is full. Pure: no side effects, no persistence.
+   *
+   * Shared by #orderByIndexPinned (batch full-render) and #placePinnedCell
+   * (pinned incremental add) so both place new cells identically. A slot is
+   * free when sparse[i] is '' or absent — the incremental caller passes the
+   * slot machine's sparse array, which may be shorter than maxSlot+1, so
+   * trailing indices are unoccupied.
+   */
+  #bestFreeSlotByScore(sparse: readonly string[], maxSlot: number): number {
+    const free = (i: number): boolean => { const v = sparse[i]; return v === '' || v == null }
+
     const slotTracker = (window as any).ioc?.get?.('@diamondcoreprocessor.com/CenterSlotTracker') as
       | { scores: ReadonlyMap<number, { off: number; center: number }> }
       | undefined
@@ -3886,93 +3990,99 @@ export class ShowCellDrone extends Drone {
     const scoreMap = slotTracker?.scores
     const adjacents = axialAny?.Adjacents
 
-    for (const name of unindexed) {
-      // Session-cache short-circuit. If this tile was already placed
-      // in a prior render (local-no-index path during persistence
-      // race, or any peer tile) and the slot is still free, drop it
-      // back into the same slot. Pans don't change cached assignments;
-      // only manual reorganize clears this map.
-      const cachedSlot = this.#sessionSlotByLabel.get(name)
-      if (typeof cachedSlot === 'number' && cachedSlot >= 0 && cachedSlot <= maxSlot && sparse[cachedSlot] === '') {
-        sparse[cachedSlot] = name
-        // Persist on every cache hit too — first-write may have failed
-        // silently (storage cold, committer queue full, race with cell
-        // commit), leaving the tile indexless in the layer. Retrying
-        // on cache hit makes the repair eventually-consistent:
-        // writeTilePropertiesAt is content-addressed and idempotent on
-        // identical bytes, so once one write succeeds the layer has
-        // the index permanently and future renders go through Pass 1
-        // directly without ever touching this loop.
-        if (!readOnly && localCellSet.has(name)) {
-          void writeTilePropertiesAt(parentSegments, name, { index: cachedSlot }).catch(err =>
-            console.warn('[show-cell] index persist retry failed for', name, err)
-          )
+    let placed = -1
+    if (scoreMap && adjacents) {
+      let bestOff = Infinity
+      let bestWhitespace = -1
+      let bestCenter = Infinity
+      for (let i = 0; i <= maxSlot; i++) {
+        if (!free(i)) continue
+        const s = scoreMap.get(i)
+        if (!s) continue
+        // Count neighbours that aren't occupied tiles — off-grid neighbours
+        // at the rim of the grid count as whitespace because the visual area
+        // beyond the grid edge is empty.
+        let whitespace = 0
+        const neighbours = adjacents.get(i) ?? []
+        for (const adj of neighbours) {
+          const ai = adj.index
+          if (!Number.isFinite(ai) || ai < 0 || ai > maxSlot || free(ai)) whitespace++
         }
-        continue
-      }
-
-      let placed = -1
-
-      if (scoreMap && adjacents) {
-        let bestOff = Infinity
-        let bestWhitespace = -1
-        let bestCenter = Infinity
-        for (let i = 0; i <= maxSlot; i++) {
-          if (sparse[i] !== '') continue
-          const s = scoreMap.get(i)
-          if (!s) continue
-          // Count neighbours that aren't occupied tiles — off-grid
-          // neighbours at the rim of the grid count as whitespace
-          // because the visual area beyond the grid edge is empty.
-          let whitespace = 0
-          const neighbours = adjacents.get(i) ?? []
-          for (const adj of neighbours) {
-            const ai = adj.index
-            if (!Number.isFinite(ai) || ai < 0 || ai > maxSlot || sparse[ai] === '') whitespace++
-          }
-          if (
-            s.off < bestOff ||
-            (s.off === bestOff && whitespace > bestWhitespace) ||
-            (s.off === bestOff && whitespace === bestWhitespace && s.center < bestCenter)
-          ) {
-            bestOff = s.off
-            bestWhitespace = whitespace
-            bestCenter = s.center
-            placed = i
-          }
+        if (
+          s.off < bestOff ||
+          (s.off === bestOff && whitespace > bestWhitespace) ||
+          (s.off === bestOff && whitespace === bestWhitespace && s.center < bestCenter)
+        ) {
+          bestOff = s.off
+          bestWhitespace = whitespace
+          bestCenter = s.center
+          placed = i
         }
-      }
-
-      // Lowest-free fallback — only if scoring couldn't find anything
-      // (tracker/adjacency missing, or grid genuinely full above).
-      if (placed < 0) {
-        while (nextFree <= maxSlot && sparse[nextFree] !== '') nextFree++
-        if (nextFree > maxSlot) continue
-        placed = nextFree
-        nextFree++
-      }
-
-      sparse[placed] = name
-      // Cache the assignment so subsequent renders skip the score
-      // recomputation. Same memory cell whether this is a local tile
-      // awaiting persistence or a peer tile that won't ever persist
-      // here. Stable across pan, viewport change, freshness rotation.
-      this.#sessionSlotByLabel.set(name, placed)
-      if (!readOnly && localCellSet.has(name)) {
-        // Fire-and-forget — the session cache provides intra-render
-        // stability regardless of when persistence completes, and the
-        // cache-hit branch above retries persistence on every later
-        // render until one write succeeds. So we don't need to await
-        // here; awaiting just blocks the placement loop for no
-        // synchronization benefit.
-        void writeTilePropertiesAt(parentSegments, name, { index: placed }).catch(err =>
-          console.warn('[show-cell] failed to persist index for', name, err)
-        )
       }
     }
 
+    // Lowest-free fallback — tracker/adjacency missing (very early boot).
+    if (placed < 0) {
+      for (let i = 0; i <= maxSlot; i++) {
+        if (free(i)) { placed = i; break }
+      }
+    }
+    return placed
+  }
 
-    return sparse
+  /**
+   * Pinned-mode incremental placement for a brand-new cell. Picks a slot the
+   * same way #orderByIndexPinned would for an unindexed cell — reuse the
+   * session-cached slot if still free, else the best free slot by viewport
+   * score — injects it into the slot machine at that index, and persists the
+   * index fire-and-forget so the next full render reads it back from Pass 1
+   * (the tile never jumps). Returns the slot, or -1 when the grid is full /
+   * axial isn't ready, signalling the caller to fall back to a full render.
+   */
+  #placePinnedCell(name: string): number {
+    const axial = this.resolve<any>('axial')
+    if (!axial?.items) return -1
+    const maxSlot = axial?.count ?? 60
+    const sparse = this.#slots.snapshot().names
+
+    // Already placed — a re-emitted cell:added for a tile that's already on
+    // screen (e.g. a tag/marker refresh re-fires the event to repaint). Keep
+    // its slot; never relocate or re-persist, or the tile would jump on the
+    // next full render.
+    const existing = sparse.indexOf(name)
+    if (existing >= 0) return existing
+
+    const cachedSlot = this.#sessionSlotByLabel.get(name)
+    const free = (i: number): boolean => { const v = sparse[i]; return v === '' || v == null }
+    const slot = (typeof cachedSlot === 'number' && cachedSlot >= 0 && cachedSlot <= maxSlot && free(cachedSlot))
+      ? cachedSlot
+      : this.#bestFreeSlotByScore(sparse, maxSlot)
+    if (slot < 0) return -1
+
+    if (!this.#slots.addAt(name, slot, false)) return -1
+    this.#sessionSlotByLabel.set(name, slot)
+
+    const lineage = this.resolve<any>('lineage')
+    const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+    void writeTilePropertiesAt(parentSegments, name, { index: slot }).catch(err =>
+      console.warn('[show-cell] failed to persist index for new cell', name, err),
+    )
+    return slot
+  }
+
+  /**
+   * True when `segments` names the location currently rendered. Used to
+   * filter cell:added events so a nested create (which fires one event per
+   * affected ancestor location) only mounts the tile that belongs here.
+   */
+  #segmentsAreCurrent(segments: readonly string[]): boolean {
+    const lineage = this.resolve<any>('lineage')
+    const current: readonly string[] = lineage?.explorerSegments?.() ?? []
+    if (segments.length !== current.length) return false
+    for (let i = 0; i < segments.length; i++) {
+      if (String(segments[i]) !== String(current[i])) return false
+    }
+    return true
   }
 
   /**
