@@ -195,12 +195,19 @@ export class HomeComponent implements OnDestroy {
     const showAll = this.showAllVersions()
     for (const group of groups.values()) {
       if (!showAll && group.sections.length > 1) {
-        group.hiddenVersionCount = group.sections.length - 1
-        // Prefer the section WITH content (e.g. a freshly-adopted tile) over an
-        // empty import-source marker, so the adopted node shows INSIDE the
-        // host folder instead of being hidden behind the empty marker.
-        const best = [...group.sections].sort((a, b) => (b.items?.length || 0) - (a.items?.length || 0))[0]
-        group.sections = [best]
+        // Version-dedup applies to PACKAGE sections only — multiple package
+        // sections under one domain are versions of the same install, so
+        // show the best one (most items, so a resolved tree beats an empty
+        // import-source marker). CONTENT sections are adopted tiles, not
+        // versions — collapsing them into the pick hid dolphin behind the
+        // jwize.com manual-install section. They always render.
+        const packages = group.sections.filter(s => s.kind === 'package')
+        const content = group.sections.filter(s => s.kind !== 'package')
+        if (packages.length > 1) {
+          group.hiddenVersionCount = packages.length - 1
+          const best = [...packages].sort((a, b) => (b.items?.length || 0) - (a.items?.length || 0))[0]
+          group.sections = [best, ...content]
+        }
       }
     }
     // Library/source siblings, sorted alphabetically (diamondcoreprocessor.com,
@@ -1707,9 +1714,13 @@ export class HomeComponent implements OnDestroy {
     for (const { base, host, sig } of candidates) {
       // The baseline is ALWAYS present — it shows even alongside adopted
       // sections (it's the user's starting point, not a fallback for an
-      // empty dashboard). Skip only if the default's OWN section is already
-      // seeded (idempotency), so it never double-seeds across reloads.
-      if (this.sections().some(s => s.domain === base)) return
+      // empty dashboard). Skip only if the default's OWN PACKAGE sections
+      // are already seeded (idempotency). Keyed on (domain AND kind):
+      // an adopted CONTENT section can legitimately share the base domain
+      // (dolphin under jwize.com), and matching on domain alone made the
+      // race outcome either "baseline never seeds" or "adopt section
+      // wiped" depending on who finished first.
+      if (this.sections().some(s => s.domain === base && s.kind === 'package')) return
       const resolved = await this.#resolveBaselineCandidate(base, host, sig)
       if (resolved) return
     }
@@ -1781,9 +1792,12 @@ export class HomeComponent implements OnDestroy {
       // current import" is what clicking it DOES, not text on the node.
       siblings.push(mk(base, host, rootSig, [], null))
 
-      // keep any pre-existing (adopted) sections, drop the loading placeholder,
-      // then append the default's siblings; the template sorts for display.
-      const others = this.sections().filter(s => s !== loading && s.domain !== base && s.domain !== '@logical')
+      // keep any pre-existing (adopted) sections, drop the loading placeholder
+      // and only OUR prior package output for this base — an adopted content
+      // section sharing the base domain must survive the reseed — then append
+      // the default's siblings; the template sorts for display.
+      const others = this.sections().filter(s =>
+        s !== loading && !(s.domain === base && s.kind === 'package') && s.domain !== '@logical')
       this.sections.set([...others, ...siblings])
       return true
     } catch {
@@ -1825,7 +1839,18 @@ export class HomeComponent implements OnDestroy {
       }
     }
 
-    this.sections.set([...results])
+    // MERGE, never clobber. Sections are produced by THREE async paths —
+    // this manual/stored-domain loader, #refreshFromLineage (adopted
+    // branches), and #seedDefaultBaseline — and a wholesale
+    // `sections.set(results)` here erased whichever of the others had
+    // already landed (the dolphin section under jwize.com appeared, then
+    // vanished when this finished). Replace only OUR OWN prior output:
+    // package sections for the domains being (re)loaded. Adopted content
+    // sections sharing the same domain survive.
+    this.sections.update(secs => [
+      ...secs.filter(s => !(doms.includes(s.domain) && s.kind === 'package')),
+      ...results,
+    ])
 
     // load each section in parallel
     for (const section of results) {
@@ -1834,7 +1859,7 @@ export class HomeComponent implements OnDestroy {
       try {
         const root = await this.#resolver.resolveRoot(section.domain, section.rootSig, section.domainName, (p) => {
           section.installStatus = `Installing ${p.phase} ${p.current}/${p.total}`
-          this.sections.set([...results])
+          this.#refreshSections()
         })
         if (root) {
           section.rootSig = root.signature ?? section.rootSig
@@ -1865,7 +1890,7 @@ export class HomeComponent implements OnDestroy {
         section.loading = false
         section.installStatus = null
       }
-      this.sections.set([...results])
+      this.#refreshSections()
     }
 
     // Tell the sentinel that DCP's content set has changed so any
