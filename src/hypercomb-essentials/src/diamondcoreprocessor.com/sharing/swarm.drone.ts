@@ -1426,10 +1426,11 @@ export class SwarmDrone extends Drone {
   // is left untouched.
   #injectRecoveredVisuals = (
     sig: string,
-    entries: readonly { pubkey: string; content: string }[],
+    entries: readonly { pubkey: string; content: string; tags?: string[][] }[],
   ): void => {
     let bag = this.#peerLayersBySig.get(sig)
     let injected = 0
+    const broker = this.#getBroker()
     for (const entry of entries) {
       const pubkey = String(entry.pubkey ?? '').toLowerCase()
       if (!/^[0-9a-f]{64}$/.test(pubkey)) continue
@@ -1446,6 +1447,23 @@ export class SwarmDrone extends Drone {
         if (cleaned) cleanVisuals.push(cleaned)
       }
       if (cleanVisuals.length === 0) continue
+
+      // Domain attribution — recovered entries are the ORIGINAL layer
+      // events (pubkey/content/tags preserved by the responder), so the
+      // publisher's ['domain', …] tag is attributed per layerSig exactly
+      // like the live #onEvent path. A late joiner receives peer tiles
+      // through THIS path, not a live broadcast — without this, their
+      // adopt had no capture-source host and the tile fell to a root
+      // folder instead of jwize.com/<tile>.
+      const domainTags = (entry.tags ?? [])
+        .filter((t): t is string[] => Array.isArray(t) && String(t[0]) === 'domain' && !!String(t[1] ?? '').trim())
+        .map(t => String(t[1]).trim())
+      if (domainTags.length && broker?.noteDomainsForSig) {
+        for (const v of cleanVisuals) {
+          const ls = String(v['layerSig'] ?? '').trim().toLowerCase()
+          if (/^[a-f0-9]{64}$/.test(ls)) broker.noteDomainsForSig(ls, domainTags)
+        }
+      }
       if (!bag) { bag = new Map(); this.#peerLayersBySig.set(sig, bag) }
       bag.set(pubkey, { visuals: cleanVisuals })
       let lastSeenBag = this.#peerLastSeenMsBySig.get(sig)
