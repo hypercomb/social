@@ -89,12 +89,13 @@ export function devDefaultBootstrap(): { host: string; byteSource: string; sig?:
     // label. We self-host on jwize.com, so adopted/default content lands in
     // a `jwize.com/` folder.
     host: 'jwize.com',
-    // byteSource = where dev actually FETCHES the bytes. jwize.com's live
-    // relay isn't serving content yet, so dev resolves from the local relay
-    // (run: cd hypercomb-relay && node relay.js --port 7777 --memory \
-    //   --content-dir ../hypercomb-web/public/content). In production
-    // host === byteSource (jwize.com serves its own content).
-    byteSource: 'http://localhost:7777',
+    // byteSource = where dev actually FETCHES the bytes. The app never
+    // dials localhost: jwize.com serves its own content (the relay's
+    // content dir, kept current by copy-to-dcp), and it resolves locally
+    // anyway when the tunnel terminates on this machine. If the host is
+    // down, the bootstrap is simply unavailable — functionality lost,
+    // never redirected to a local port.
+    byteSource: 'https://jwize.com',
     sig: '82dfae009ba26dc568be55d2b24833e6e2f8027c2723600248d6bb8467ab3373',
   }
 }

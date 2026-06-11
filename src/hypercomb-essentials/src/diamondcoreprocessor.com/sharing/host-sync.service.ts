@@ -66,10 +66,21 @@ const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
 const ENABLED_KEY = 'hc:host-sync:enabled'
 const NIP98_KIND = 27235
 const RETRY_MS = 30_000
+// After a writer-auth rejection (401/403) the channel goes quiet for this
+// long — the fix is operator action on the relay (--writers), so retrying
+// every enqueue/timer tick only spams the console. enable() clears it.
+const UNAUTHORIZED_BACKOFF_MS = 300_000
 
 export class HostSyncService extends EventTarget {
 
   #draining = false
+
+  /** Epoch ms until which drains are suppressed after a writer-auth
+   *  rejection. 0 = no suppression. */
+  #unauthorizedUntil = 0
+
+  /** One-time "no signer" console warning latch (see #pushAndReceipt). */
+  #warnedNoSigner = false
 
   constructor() {
     super()
@@ -110,6 +121,10 @@ export class HostSyncService extends EventTarget {
       if (selfDomain) localStorage.setItem(SELF_DOMAIN_KEY, selfDomain.trim())
       localStorage.setItem(ENABLED_KEY, 'true')
     } catch { /* private mode — caller still has to honor in-session */ }
+    // Re-arm after a writer-auth backoff: enable() is the operator's
+    // "I fixed the relay, retry now" signal.
+    this.#unauthorizedUntil = 0
+    void this.drain()
   }
 
   /** Turn host backup off. Existing queued entries stay on disk (not
@@ -134,7 +149,22 @@ export class HostSyncService extends EventTarget {
    *  file so drain is self-contained and crash-safe. */
   public readonly enqueue = async (sig: string, kind: HostSyncKind, bytes: ArrayBuffer): Promise<void> => {
     if (!SIG_RE.test(sig)) return
-    if (await this.hasReceipt(sig)) return
+    // CLOSURE WALK — runs even when this layer is already receipted: a
+    // receipt proves THIS sig serves, not its refs. The doctrine is
+    // "push set = the root's transitive closure minus what the host
+    // holds"; without the walk, only what the authoring tab happens to
+    // read/write gets staged, and a witnessing peer finds the root but
+    // 404s on every child. Session-deduped, local-reads only.
+    if (kind === 'layer') void this.#enqueueLayerRefs(sig, bytes)
+    // A receipt is a CACHE of "the host serves this sig" — hosts drift
+    // (content dirs move, protocol eras change, operators clean up), so a
+    // receipt about to suppress a push is re-verified ONCE per session
+    // with a cheap HEAD. A 404 revokes it and the push proceeds; anything
+    // else (offline, 5xx, auth trouble) keeps the receipt — only the
+    // host's own "not held" answer can unsay a receipt.
+    if (await this.hasReceipt(sig)) {
+      if (await this.#receiptStillHonored(sig)) return
+    }
     const queueDir = await this.#getQueueDir()
     if (!queueDir) return // store not ready — silent no-op; boot drain catches up
     try {
@@ -145,12 +175,84 @@ export class HostSyncService extends EventTarget {
     void this.drain()
   }
 
+  /** Layers whose refs were already walked this session (the walk is
+   *  re-runnable but pointless to repeat — layer bytes are immutable). */
+  #walkedLayers = new Set<string>()
+
+  /** Enqueue everything a layer references, recursively. Slot → kind:
+   *  `cells`/`layers`/`children` are child LAYERS (recurse via enqueue →
+   *  walk), `bees`/`dependencies` keep their kind, every other sig-array
+   *  slot (properties, notes, decorations, qa, future slots) is a
+   *  RESOURCE. Refs we don't hold locally are skipped — nothing to push;
+   *  the kind only picks the local store to read from, since the host
+   *  stores one flat heap regardless. */
+  readonly #enqueueLayerRefs = async (sig: string, bytes: ArrayBuffer): Promise<void> => {
+    if (this.#walkedLayers.has(sig)) return
+    this.#walkedLayers.add(sig)
+    let layer: Record<string, unknown>
+    try { layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown> } catch { return }
+    if (!layer || typeof layer !== 'object') return
+    const CHILD_SLOTS = new Set(['cells', 'layers', 'children'])
+    for (const [slot, value] of Object.entries(layer)) {
+      if (!Array.isArray(value)) continue
+      const kind: HostSyncKind = CHILD_SLOTS.has(slot) ? 'layer'
+        : slot === 'bees' ? 'bee'
+        : slot === 'dependencies' ? 'dependency'
+        : 'resource'
+      for (const raw of value) {
+        const ref = String(raw ?? '').trim().toLowerCase()
+        if (!SIG_RE.test(ref) || ref === sig) continue
+        try {
+          const refBytes = await this.#readLocalBytes(ref, kind)
+          if (refBytes) await this.enqueue(ref, kind, refBytes)
+        } catch { /* not held locally — nothing to push */ }
+      }
+    }
+  }
+
+  /** Read a sig's bytes from the matching LOCAL store only — never the
+   *  network (the walk pushes what we hold; it must not trigger fetches). */
+  readonly #readLocalBytes = async (sig: string, kind: HostSyncKind): Promise<ArrayBuffer | null> => {
+    const store = this.#ioc<{
+      getLayerPoolBytes?: (s: string) => Promise<Uint8Array | null>
+      getResourceLocal?: (s: string) => Promise<Blob | null>
+      bees?: FileSystemDirectoryHandle
+      dependencies?: FileSystemDirectoryHandle
+    }>(STORE_KEY)
+    if (!store) return null
+    if (kind === 'layer') {
+      const bytes = await store.getLayerPoolBytes?.(sig)
+      return bytes ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer : null
+    }
+    if (kind === 'resource') {
+      const blob = await store.getResourceLocal?.(sig)
+      return blob ? await blob.arrayBuffer() : null
+    }
+    // bee / dependency — sig-named .js files in their OPFS dirs
+    const dir = kind === 'bee' ? store.bees : store.dependencies
+    if (!dir) return null
+    for (const name of [`${sig}.js`, sig]) {
+      try {
+        const handle = await dir.getFileHandle(name, { create: false })
+        return await (await handle.getFile()).arrayBuffer()
+      } catch { /* try next name shape */ }
+    }
+    return null
+  }
+
   /** Drain the queue to the host. Single-flight. Each entry: signed PUT +
    *  confirmed read-back; on success writes a receipt and drops the entry;
    *  on failure leaves it for the retry timer. No-op when no host is
    *  configured. */
   public readonly drain = async (): Promise<void> => {
     if (this.#draining) return
+    // Writer-auth backoff: a 401 is a HOST config gap (writers list), not
+    // something that heals in seconds — and every read-triggered enqueue()
+    // kicks a fresh drain, so without this gate each staged sig costs one
+    // more 401 in the console. One rejection silences the channel for the
+    // backoff window; enable() clears it so an operator who just fixed the
+    // relay retries immediately.
+    if (Date.now() < this.#unauthorizedUntil) return
     const host = this.#hostBase()
     if (!host) return // no host named — stay inert
     this.#draining = true
@@ -162,6 +264,24 @@ export class HostSyncService extends EventTarget {
         for (const entry of entries) {
           if (await this.hasReceipt(entry.sig)) { await this.#removeEntry(entry.fileName); continue }
           const ok = await this.#pushAndReceipt(host, entry)
+          if (ok === 'unauthorized') {
+            // The host refused our writer key — a config gap, not a
+            // per-entry failure. One rejection covers the whole queue;
+            // stop the pass, back off, and surface the EXACT pubkey to
+            // whitelist. enable() clears the backoff for an instant retry
+            // once the operator fixes the relay.
+            this.#unauthorizedUntil = Date.now() + UNAUTHORIZED_BACKOFF_MS
+            const pubkey = await this.#getOwnPubkey()
+            console.warn(
+              `[host-sync] ${host} rejected writer auth (401) — drain paused for ` +
+              `${Math.round(UNAUTHORIZED_BACKOFF_MS / 60_000)} min. Add this browser's pubkey to the relay's ` +
+              `--writers list (configure-writers.bat), then call ` +
+              `ioc.get('@diamondcoreprocessor.com/HostSyncService').enable() to retry now: ` +
+              `${pubkey || '(no signer available)'}`
+            )
+            EffectBus.emit('sync:state', { host, pending: entries.length, status: 'unauthorized' })
+            return
+          }
           if (!ok) continue // leave entry; retry timer handles offline/host-down
           await this.#removeEntry(entry.fileName)
           progressed = true
@@ -175,6 +295,34 @@ export class HostSyncService extends EventTarget {
     } finally {
       this.#draining = false
     }
+  }
+
+  /** Receipts re-verified against the live host this session (HEAD 200). */
+  #verifiedOnHost = new Set<string>()
+
+  /** Re-check a receipted sig against the host: HEAD the flat address,
+   *  once per session. 404 → the receipt lied (host drift) → revoke it
+   *  and return false so the caller re-stages. Network trouble or any
+   *  non-404 keeps the receipt — absence must be asserted by the host,
+   *  never inferred from failure. */
+  readonly #receiptStillHonored = async (sig: string): Promise<boolean> => {
+    if (this.#verifiedOnHost.has(sig)) return true
+    const host = this.#hostBase()
+    if (!host) return true // nothing to check against — keep the receipt
+    const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
+    try {
+      const res = await fetch(`${scheme}://${host}/${sig}`, { method: 'HEAD', cache: 'no-store' })
+      if (res.ok) { this.#verifiedOnHost.add(sig); return true }
+      if (res.status === 404) {
+        try {
+          const dir = await this.#getReceiptsDir()
+          await dir?.removeEntry(sig)
+        } catch { /* already gone */ }
+        console.warn(`[host-sync] revoked stale receipt ${sig.slice(0, 12)} — host no longer serves it; re-staging`)
+        return false
+      }
+      return true
+    } catch { return true } // offline / CORS — keep the receipt
   }
 
   /** True iff the host has confirmed (read-back) this sig. */
@@ -202,7 +350,7 @@ export class HostSyncService extends EventTarget {
   // transport — signed HTTP PUT + confirmed read-back
   // -------------------------------------------------
 
-  readonly #pushAndReceipt = async (host: string, entry: { sig: string; kind: HostSyncKind; fileName: string }): Promise<boolean> => {
+  readonly #pushAndReceipt = async (host: string, entry: { sig: string; kind: HostSyncKind; fileName: string }): Promise<boolean | 'unauthorized'> => {
     let bytes: ArrayBuffer
     try {
       const dir = await this.#getQueueDir()
@@ -211,18 +359,31 @@ export class HostSyncService extends EventTarget {
       bytes = await (await handle.getFile()).arrayBuffer()
     } catch { return false }
 
-    const path = await this.#pathFor(entry.sig, entry.kind)
-    if (!path) return false
+    const path = this.#pathFor(entry.sig)
     // Loopback hosts use plain http (content-side analog of allow-loopback);
     // real domains use https.
     const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
     const url = `${scheme}://${host}${path}`
 
     const auth = await this.#nip98(url, 'PUT')
-    if (!auth) return false // no signer available
+    if (!auth) {
+      // Without this warning a missing/failed signer is INVISIBLE: every
+      // push returns false, the retry timer spins forever, and nothing in
+      // the console says why the host never receives bytes. Once per
+      // session is enough — the condition doesn't change between entries.
+      if (!this.#warnedNoSigner) {
+        this.#warnedNoSigner = true
+        console.warn('[host-sync] no Nostr signer available — backup PUTs cannot be signed; queue will retry once a signer registers')
+      }
+      return false
+    }
 
     try {
       const put = await fetch(url, { method: 'PUT', headers: { Authorization: auth }, body: bytes })
+      // Writer-auth rejection applies to EVERY queued entry equally — the
+      // caller stops the whole drain pass instead of 401-spamming one PUT
+      // per entry every retry tick.
+      if (put.status === 401 || put.status === 403) return 'unauthorized'
       if (!put.ok) return false
       // Confirmed read-back: a fresh GET (cache-bypassing) must show the
       // host actually serving the sig. A bare PUT 200 is NOT proof — the
@@ -243,19 +404,12 @@ export class HostSyncService extends EventTarget {
     } catch { return false }
   }
 
-  /** sig+kind → host URL path. Returns the typed pool path matching the
-   *  relay's permanent layout (`/__layers__/<sig>.json` etc.); the writer
-   *  must be in the relay's allow-list (you own the host). Returns '' for
-   *  an unknown kind. */
-  readonly #pathFor = async (sig: string, kind: HostSyncKind): Promise<string> => {
-    switch (kind) {
-      case 'layer':      return `/__layers__/${sig}.json`
-      case 'bee':        return `/__bees__/${sig}.js`
-      case 'dependency': return `/__dependencies__/${sig}.js`
-      case 'resource':   return `/__resources__/${sig}`
-      default:           return ''
-    }
-  }
+  /** sig → host URL path. ONE FLAT HEAP: every sig lives at `/<sig>` —
+   *  no typed pools, no extensions. The consumer knows the type (it holds
+   *  the referring layer), the bytes authenticate themselves (sha256 ===
+   *  sig), so the URL carries identity only. `kind` still rides the queue
+   *  entry for bookkeeping but never shapes the address. */
+  readonly #pathFor = (sig: string): string => `/${sig}`
 
   /** Cache for the signer's pubkey. NostrSigner.getPublicKeyHex() is
    *  async (may dial out to a NIP-07 extension); we want #pathFor to be

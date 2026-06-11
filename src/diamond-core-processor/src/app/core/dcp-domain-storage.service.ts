@@ -88,6 +88,15 @@ export interface BranchEntryLayer {
   branchSig: string
   at: string[]
   refs?: string[]
+  /** Provenance — decides RENDERING, stamped at the acquisition channel:
+   *  'content' = adopted host content (the adopt gesture) → mounts as
+   *  visual tiles in the hive. 'package' = functionality (manifest
+   *  install, dependency record) → its refs join the logical union but
+   *  it NEVER renders visuals; a package's code runs only when a
+   *  behavior references it. Per-branch, never per-domain — one domain
+   *  (e.g. jwize.com) legitimately holds both kinds. Absent on legacy
+   *  entries → inferred at snapshot time (name === domain ⇒ package). */
+  kind?: 'package' | 'content'
 }
 
 /** The settings-lineage root: a flat key→value map. Its own shape (kv), not
@@ -296,8 +305,9 @@ export class DcpDomainStorage {
 
   /** Adopt a branch under a tile (creating the tile if absent). Cascades to a
    *  new root, appends a marker. Idempotent on (branchSig, at). `refs` = the
-   *  content sigs this branch contributes to the logical union. */
-  async addBranch(lineage: string, tileName: string, branchSig: string, at: string[], label?: string, refs?: string[]):
+   *  content sigs this branch contributes to the logical union. `kind` =
+   *  provenance ('content' adopt / 'package' install) — see BranchEntryLayer. */
+  async addBranch(lineage: string, tileName: string, branchSig: string, at: string[], label?: string, refs?: string[], kind?: 'package' | 'content'):
     Promise<string | null> {
     return this.#withWriteLock(async () => {
       const key = normalizeDomainKey(tileName)
@@ -329,6 +339,7 @@ export class DcpDomainStorage {
       const entrySig = await this.#signJson({
         name: label || sig.slice(0, 8), branchSig: sig, at: Array.isArray(at) ? at : [],
         ...(cleanRefs.length ? { refs: cleanRefs } : {}),
+        ...(kind ? { kind } : {}),
       } as BranchEntryLayer)
       const newTileSig = await this.#signJson({ name: key, children: [...kept, entrySig] })
       const newChildren = existing
@@ -370,8 +381,8 @@ export class DcpDomainStorage {
 
   addDomain(domain: string) { return this.addTile(DOMAINS_LINEAGE, domain) }
   removeDomain(domain: string) { return this.removeTile(DOMAINS_LINEAGE, domain) }
-  addDomainBranch(domain: string, branchSig: string, at: string[], label?: string, refs?: string[]) {
-    return this.addBranch(DOMAINS_LINEAGE, domain, branchSig, at, label, refs)
+  addDomainBranch(domain: string, branchSig: string, at: string[], label?: string, refs?: string[], kind?: 'package' | 'content') {
+    return this.addBranch(DOMAINS_LINEAGE, domain, branchSig, at, label, refs, kind)
   }
   loadDomainsHive() { return this.loadHive(DOMAINS_LINEAGE) }
   loadDomainBranches(domain: string) { return this.loadTileBranches(DOMAINS_LINEAGE, domain) }
@@ -446,7 +457,7 @@ export class DcpDomainStorage {
     logical: string[]
     logicalRootSig: string | null
     domains: { name: string; visible: boolean; branchCount: number }[]
-    branches: { domain: string; name: string; branchSig: string; at: string[]; enabled: boolean }[]
+    branches: { domain: string; name: string; branchSig: string; at: string[]; enabled: boolean; kind: 'package' | 'content' }[]
     generatedAt: number
   }> {
     await this.initialize()
@@ -463,7 +474,7 @@ export class DcpDomainStorage {
     // but a branch root (e.g. an adopted site's root layer) is fetchable
     // anywhere — it came from a host/relay in the first place. The hive
     // mounts each branch at its `at` location and walks the tree itself.
-    const branches: { domain: string; name: string; branchSig: string; at: string[]; enabled: boolean }[] = []
+    const branches: { domain: string; name: string; branchSig: string; at: string[]; enabled: boolean; kind: 'package' | 'content' }[] = []
     for (const d of hive) {
       try {
         for (const b of await this.loadDomainBranches(d.name)) {
@@ -473,7 +484,16 @@ export class DcpDomainStorage {
           // absent = off). The hive mounts ONLY enabled branches, so solo
           // reflects "the features that are on" — toggling in the installer
           // adds/removes the branch from hypercomb.io.
-          branches.push({ domain: d.name, name: b.name, branchSig: sig, at: b.at ?? [], enabled: this.isFeatureEnabled(sig) })
+          //
+          // `kind` = provenance, per-branch (one domain holds both kinds:
+          // jwize.com carries the default PACKAGE install and adopted
+          // dolphin CONTENT). Legacy entries pre-date the field — infer
+          // 'package' when the entry was recorded under the domain's own
+          // name (the manifest-install shape: addDomainBranch(domain, root,
+          // [], domainName)); everything else stays 'content' and the
+          // per-domain eye toggle covers stragglers.
+          const kind: 'package' | 'content' = b.kind ?? (b.name === d.name ? 'package' : 'content')
+          branches.push({ domain: d.name, name: b.name, branchSig: sig, at: b.at ?? [], enabled: this.isFeatureEnabled(sig), kind })
         }
       } catch { /* one bad domain dir must not sink the snapshot */ }
     }

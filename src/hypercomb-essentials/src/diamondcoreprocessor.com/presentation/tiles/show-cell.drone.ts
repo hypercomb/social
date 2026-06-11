@@ -2119,6 +2119,21 @@ export class ShowCellDrone extends Drone {
       if (!localCellSet.has(blocked)) union.delete(blocked)
     }
 
+    // Global blocklist: the BARE `hc:hidden-tiles` key (no location
+    // suffix) holds tile NAMES blocked at every location. Set by hand:
+    //   localStorage.setItem('hc:hidden-tiles', JSON.stringify(['name']))
+    // Unconditional — not subject to the show-hidden toggle — and
+    // covers own, ephemeral, and peer tiles alike. Parse is guarded
+    // because this key is hand-edited; a malformed value means an
+    // empty list, never a broken render pass.
+    let globalBlocked: string[] = []
+    try { globalBlocked = JSON.parse(localStorage.getItem('hc:hidden-tiles') ?? '[]') } catch { /* hand-edited key — ignore malformed value */ }
+    for (const blocked of globalBlocked) {
+      union.delete(blocked)
+      ephemeralCellSet.delete(blocked)
+      peerCellSet.delete(blocked)
+    }
+
     // Layer no longer carries a `hidden` array — visibility is a
     // bee-owned primitive. Read live localStorage in both rewound and
     // head positions. (Per-position playback of visibility is the

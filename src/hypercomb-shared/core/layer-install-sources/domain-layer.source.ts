@@ -12,11 +12,16 @@ export class DomainLayerSource implements LayerInstallSource {
     const base = (ctx.location ?? '').replace(/\/+$/, '')
     if (!base) return null
 
-    // domain convention: <location>/__layers__/<sig>[.json]
+    // Flat heap first: `<location>/<sig>` is the canonical address (one
+    // bucket, no typed pools, no extensions). The typed `__layers__/`
+    // shapes are the legacy fallback for hosts that haven't migrated.
+    const flat = `${base}/${ctx.signature}`
     const a = `${base}/__layers__/${ctx.signature}`
     const b = `${base}/__layers__/${ctx.signature}.json`
 
-    const manifest = await this.tryFetchLayer(a, ctx.signature) ?? await this.tryFetchLayer(b, ctx.signature)
+    const manifest = await this.tryFetchLayer(flat, ctx.signature)
+      ?? await this.tryFetchLayer(a, ctx.signature)
+      ?? await this.tryFetchLayer(b, ctx.signature)
     if (!manifest) return null
 
     return manifest

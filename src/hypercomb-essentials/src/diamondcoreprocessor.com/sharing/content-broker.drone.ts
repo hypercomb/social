@@ -354,35 +354,28 @@ export class ContentBrokerDrone extends Drone {
     } catch { return new Set<string>() }
   }
 
-  // Public fallback CDN — Tier 3 of the HTTP-direct cascade. When self,
-  // community, and mesh-learned domains have all returned nothing for a
-  // sig, this is what we try last. The default is the Azure blob serving
-  // DCP's deployed content (the same fallback DCP's installer uses when
-  // no trusted domains are configured); operators override by setting
+  // Optional fallback hosts — Tier 3 of the HTTP-direct cascade. EMPTY by
+  // default: there is no public default registry (domain-as-identity —
+  // bootstrap is an operator domain, and every participant's self-domain
+  // already sits at Tier 0). The old hard-coded Azure CDN default is
+  // retired — a self-hosting operator must never see the app dial central
+  // storage. Operators who WANT extra last-resort mirrors set
   // `hc:fallback-domains` in localStorage as a JSON array — same shape as
-  // hc:community:domains, just used at a lower-priority tier.
-  //
-  // This is the "if none are used the DCP is used" reading wired into
-  // the broker as a real fallback, not just an installer default.
-  static readonly #DEFAULT_FALLBACK_DOMAINS: readonly string[] = [
-    'storagehypercomb.blob.core.windows.net/dcp',
-  ]
+  // hc:community:domains, just used at a lower-priority tier; sha256 still
+  // gates acceptance.
   #getFallbackDomains = (): string[] => {
     try {
       const raw = String(localStorage.getItem('hc:fallback-domains') ?? '').trim()
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        if (Array.isArray(parsed)) {
-          const out: string[] = []
-          for (const entry of parsed) {
-            const host = this.#domainToHost(String(entry ?? ''))
-            if (host) out.push(host)
-          }
-          if (out.length > 0) return out
-        }
+      if (!raw) return []
+      const parsed = JSON.parse(raw)
+      if (!Array.isArray(parsed)) return []
+      const out: string[] = []
+      for (const entry of parsed) {
+        const host = this.#domainToHost(String(entry ?? ''))
+        if (host) out.push(host)
       }
-    } catch { /* fall through to default */ }
-    return [...ContentBrokerDrone.#DEFAULT_FALLBACK_DOMAINS]
+      return out
+    } catch { return [] }
   }
 
   // Pull all `['domain', host]` tags out of an incoming response event.
@@ -410,6 +403,25 @@ export class ContentBrokerDrone extends Drone {
     const set = this.#knownDomainsBySig.get(sig) ?? new Set<string>()
     for (const d of domains) set.add(d)
     this.#knownDomainsBySig.set(sig, set)
+  }
+
+  /** §21.14 — parse a verified layer's sig-array slots and attribute the
+   *  serving host to every ref. The branch-closure hosting standard says
+   *  the host of a root serves the root's whole closure, so one layer
+   *  fetch teaches the address graph where the entire subtree lives.
+   *  Best-effort: malformed JSON attributes nothing. */
+  #attributeClosure = (bytes: Uint8Array, host: string): void => {
+    try {
+      const layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
+      if (!layer || typeof layer !== 'object') return
+      for (const value of Object.values(layer)) {
+        if (!Array.isArray(value)) continue
+        for (const raw of value) {
+          const ref = String(raw ?? '').trim().toLowerCase()
+          if (/^[a-f0-9]{64}$/.test(ref)) this.#noteDomains(ref, [host])
+        }
+      }
+    } catch { /* not a JSON layer — nothing to attribute */ }
   }
 
   // Map a domain advertisement (which may be wss://host, https://host,
@@ -471,26 +483,29 @@ export class ContentBrokerDrone extends Drone {
   // is the absolute backstop — wrong bytes are dropped regardless of
   // which tier they came from — but trust-ordering protects time and
   // bandwidth, which sig-verification alone cannot.
-  /** DEV-only: sigs already pushed to the local relay this session (dedupe). */
-  #devPushed = new Set<string>()
+  /** Sigs already handed to the host-sync queue this session (dedupe —
+   *  receipts make staging idempotent; this avoids re-resolving the
+   *  service on every read). */
+  #stagedToHost = new Set<string>()
 
-  /** DEV write-through (loopback origin only): PUT bytes we hold locally to the
-   *  dev relay so a witnessing tab can fetch them. Fire-and-forget; the relay
-   *  verifies sha256(body)===sig (run it with --dev-open-writes), so it's
-   *  content-safe + idempotent. This is the swarm byte-path's PUSH half, scoped
-   *  to dev — the production push is the host-sync/auto-push flow. */
-  #devPushToHost = (sig: string, type: ContentType, bytes: Uint8Array): void => {
+  /** Read-triggered staging: bytes we hold locally are handed to
+   *  HostSyncService so the participant's own host (self-domain) serves
+   *  them — signed NIP-98 PUT, durable queue, read-back receipts. The
+   *  app NEVER dials localhost or any host other than the configured
+   *  self-domain; with host-sync disabled (the default) this is a no-op
+   *  and witnessing tabs simply can't pull these bytes — functionality
+   *  lost, not redirected. This is the swarm byte-path's PUSH half. */
+  #stageToHost = (sig: string, type: ContentType, bytes: Uint8Array): void => {
     try {
-      if (this.#devPushed.has(sig)) return
-      if (typeof location === 'undefined' ||
-          !/^https?:\/\/(localhost|127(?:\.\d+){3}|\[?::1\]?)(:|\/|$)/i.test(location.origin)) return
-      const path = this.#httpPathForType(sig, type)
-      if (!path) return
-      this.#devPushed.add(sig)
-      let devHost = 'localhost:7777'
-      try { devHost = (localStorage.getItem('hc:dev-resource-host') || '').trim() || devHost } catch { /* ignore */ }
-      void fetch(`http://${devHost}${path}`, { method: 'PUT', body: bytes as BodyInit })
-        .catch(() => { /* host may not accept writes — non-fatal */ })
+      if (this.#stagedToHost.has(sig)) return
+      const hostSync = window.ioc?.get?.('@diamondcoreprocessor.com/HostSyncService') as
+        | { isEnabled?: () => boolean; enqueue?: (sig: string, kind: string, bytes: ArrayBuffer) => Promise<void> }
+        | undefined
+      if (!hostSync?.isEnabled?.() || !hostSync.enqueue) return
+      this.#stagedToHost.add(sig)
+      const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+      void hostSync.enqueue(sig, type, buffer)
+        .catch(() => { this.#stagedToHost.delete(sig) })  // enqueue hiccup → retry on next read
     } catch { /* non-fatal */ }
   }
 
@@ -507,20 +522,11 @@ export class ContentBrokerDrone extends Drone {
       ordered.push(host)
     }
 
-    // Tier -1 — DEV ONLY (loopback origin): the local relay. Browser-authored
-    // content staged on the dev host resolves locally instead of round-tripping
-    // to the remote host / Azure CDN — so two localhost tabs share content
-    // without a deployed backend. sha256 still gates. Overridable via the
-    // localStorage `hc:dev-resource-host` (default localhost:7777).
-    try {
-      if (/^https?:\/\/(localhost|127(?:\.\d+){3}|\[?::1\]?)(:|\/|$)/i.test(location.origin)) {
-        let devHost = 'localhost:7777'
-        try { devHost = (localStorage.getItem('hc:dev-resource-host') || '').trim() || devHost } catch { /* ignore */ }
-        push(devHost)
-      }
-    } catch { /* non-DOM context */ }
-
-    // Tier 0 — self-domain.
+    // Tier 0 — self-domain. There is NO localhost tier: the app only ever
+    // dials real domains. The operator's own domain resolves locally anyway
+    // when the tunnel terminates on this machine (e.g. jwize.com →
+    // cloudflared → the local relay), so a localhost shortcut buys nothing
+    // and costs the guarantee that local ports are never fetched directly.
     push(this.#getSelfDomain())
 
     // Tier 1 — community-trusted domains. Always included regardless
@@ -540,13 +546,10 @@ export class ContentBrokerDrone extends Drone {
     // host rather than failing through to the CDN. sha256 still gates.
     for (const host of this.#sessionKnownDomains) push(host)
 
-    // Tier 3 — public fallback CDN. When self / community / mesh-learned
-    // have all returned nothing for this sig, we try the canonical
-    // public source as a last resort. Defaults to the Azure blob hosting
-    // DCP's deployed content; operators override via the localStorage
-    // list `hc:fallback-domains` (same JSON-array shape as
-    // hc:community:domains). sha256 verification still gates acceptance —
-    // a wrong-bytes fallback is rejected like any other tier.
+    // Tier 3 — operator-configured fallback hosts (hc:fallback-domains).
+    // Empty unless the operator deliberately added extra mirrors — there
+    // is no hard-coded public CDN. sha256 verification still gates
+    // acceptance — a wrong-bytes fallback is rejected like any other tier.
     for (const host of this.#getFallbackDomains()) push(host)
 
     if (ordered.length === 0) return null
@@ -555,17 +558,36 @@ export class ContentBrokerDrone extends Drone {
       // Loopback hosts are served over plain http — the content-side analog
       // of the mesh's allow-loopback. Real domains always use https.
       const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
-      const url = `${scheme}://${host}${path}`
-      try {
-        const res = await fetch(url, { cache: 'no-store' })
-        if (!res.ok) continue
-        const buf = await res.arrayBuffer()
-        const bytes = new Uint8Array(buf)
-        if (!await this.#verifyBytes(bytes, sig)) continue
-        return bytes
-      } catch {
-        // network error / CORS / cert issue — try next host
-        continue
+      // Flat heap first — `/<sig>` is the canonical address (§21.10): one
+      // bucket, no typed pools, no extensions; the consumer knows the type
+      // and sha256 gates the bytes. The typed path is the legacy fallback
+      // for static layouts that can't resolve flat (Azure blob, ng-serve
+      // public/content), kept during the migration.
+      for (const tryPath of [`/${sig}`, path]) {
+        const url = `${scheme}://${host}${tryPath}`
+        try {
+          const res = await fetch(url, { cache: 'no-store' })
+          if (!res.ok) continue
+          // SPA fallback guard: sig-addressed bytes are never text/html —
+          // skip before hashing (an extension-less /<sig> on a dev-server
+          // origin 200s with index.html).
+          if ((res.headers.get('content-type') || '').toLowerCase().includes('text/html')) continue
+          const buf = await res.arrayBuffer()
+          const bytes = new Uint8Array(buf)
+          if (!await this.#verifyBytes(bytes, sig)) continue
+          // Branch-closure attribution (§21.14): a host serving a LAYER is
+          // presumed to serve the layer's entire closure — the standard is
+          // "a branch merkle signature hosts all its contents". Every ref
+          // in the layer learns this host as a first-try fetch source, so
+          // resolving a branch collapses to ONE host instead of per-sig
+          // discovery. sha256 still gates every byte; a non-conforming
+          // host costs a 404 and the tier cascade takes over (the 1%).
+          if (type === 'layer') this.#attributeClosure(bytes, host)
+          return bytes
+        } catch {
+          // network error / CORS / cert issue — try next path / host
+          continue
+        }
       }
     }
     return null
@@ -646,11 +668,11 @@ export class ContentBrokerDrone extends Drone {
     // Fast path — already in local store.
     const local = await this.#readLocal(s, type)
     if (local) {
-      // DEV write-through: a tab that HAS the bytes (the author) pushes them to
-      // the local relay so a witnessing tab can fetch them (the missing half of
-      // the swarm byte-path — the mesh carries layer sigs only). Fire-and-
-      // forget; the relay verifies sha256 so it's content-integrity-safe.
-      this.#devPushToHost(s, type, local)
+      // A tab that HAS the bytes (the author) stages them on its own host
+      // so a witnessing tab can fetch them (the missing half of the swarm
+      // byte-path — the mesh carries layer sigs only). Routed through
+      // HostSyncService: signed, queued, receipted, self-domain only.
+      this.#stageToHost(s, type, local)
       return local
     }
 

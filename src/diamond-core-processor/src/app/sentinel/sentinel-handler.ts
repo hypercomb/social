@@ -108,7 +108,9 @@ export class SentinelHandler {
       try {
         const rootLayer = await this.#findPackageRootLayer(domainName, (manifest as { layers?: string[] }).layers ?? [])
         if (rootLayer) {
-          await this.#domainStorage.addDomainBranch(domainName, rootLayer, [], domainName)
+          // 'package' — a manifest install is functionality provenance: its
+          // refs join the logical union, but it never renders visual tiles.
+          await this.#domainStorage.addDomainBranch(domainName, rootLayer, [], domainName, undefined, 'package')
           await this.#domainStorage.setFeatureEnabled(rootLayer, true)
           await this.#domainStorage.recomputeLogical()
         }
@@ -598,24 +600,32 @@ export class SentinelHandler {
     sig: string,
     kind: 'layer' | 'bee' | 'dependency'
   ): Promise<ArrayBuffer | null> {
+    // FLAT heap first: `/<sig>` is the canonical address (one bucket, no
+    // typed pools, no extensions — sha256 below is the gate). Host-sync
+    // pushes land flat, so freshly-backed-up content only resolves there.
+    // The typed path is the legacy fallback for hosts that haven't
+    // migrated (static layouts: Azure blob, ng-serve public/content).
     const ext = kind === 'layer' ? '.json' : '.js'
     const folder = kind === 'layer' ? '__layers__' : kind === 'bee' ? '__bees__' : '__dependencies__'
-    const url = `${base}/${folder}/${sig}${ext}`
+    for (const url of [`${base}/${sig}`, `${base}/${folder}/${sig}${ext}`]) {
+      try {
+        const res = await fetch(url, { cache: 'no-store' })
+        if (!res.ok) continue
+        // SPA fallback guard: sig-addressed bytes are never text/html.
+        if ((res.headers.get('content-type') || '').toLowerCase().includes('text/html')) continue
 
-    try {
-      const res = await fetch(url, { cache: 'no-store' })
-      if (!res.ok) return null
-
-      const bytes = await res.arrayBuffer()
-      const actual = await SignatureService.sign(bytes)
-      if (actual !== sig) {
-        console.error(`[sentinel] signature mismatch: expected ${sig}, got ${actual}`)
-        return null
+        const bytes = await res.arrayBuffer()
+        const actual = await SignatureService.sign(bytes)
+        if (actual !== sig) {
+          console.error(`[sentinel] signature mismatch: expected ${sig}, got ${actual}`)
+          continue
+        }
+        return bytes
+      } catch {
+        // network error on this shape — try the next
       }
-      return bytes
-    } catch {
-      return null
     }
+    return null
   }
 
   async #fetchRootSignature(base: string): Promise<string | null> {
@@ -641,10 +651,10 @@ export class SentinelHandler {
     //      stored hosts here: a participant/dev-seeded host serving a
     //      stale manifest must not shadow the baseline (Azure-first had
     //      exactly that bug; jwize-seeded dev hit it again).
-    //   2. participant-stored domains — additional content sources;
-    //   3. Azure blob — legacy last resort during the transition off
-    //      central storage.
-    const azureBase = 'https://storagehypercomb.blob.core.windows.net/dcp'
+    //   2. participant-stored domains — additional content sources.
+    // No central-storage tier: Azure is retired (domain-as-identity —
+    // operator domains are the hosts). The caller's bundledBase, appended
+    // in #handleInstall, already covers the fresh cold start.
     const own = globalThis.location?.origin ?? ''
     const out: string[] = []
     if (own) out.push(own)
@@ -654,7 +664,6 @@ export class SentinelHandler {
         for (const d of stored) if (typeof d === 'string' && d && !out.includes(d)) out.push(d)
       }
     } catch { /* malformed — fall through to defaults */ }
-    if (!out.includes(azureBase)) out.push(azureBase)
     return out
   }
 }

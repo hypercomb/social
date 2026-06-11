@@ -333,38 +333,47 @@ export class Store extends EventTarget {
    *   getResource → #fetchResourceFromHost → broker.fetchBySig
    *     → #readLocal → getResource → (coalesced) awaits its own pending fetch.
    */
-  /** DEV-only: sigs already pushed to the local relay this session (dedupe). */
-  #devPushed = new Set<string>()
+  /** Sigs already handed to the host-sync queue this session (dedupe —
+   *  receipts make staging idempotent anyway; this just avoids re-resolving
+   *  the service on every cache hit). */
+  #stagedToHost = new Set<string>()
 
-  /** DEV write-through (loopback origin only): a tab that HOLDS the bytes (the
-   *  author) PUTs them to the local relay so another localhost tab — or the DCP
-   *  installer, which fetches over HTTP and doesn't join the mesh — can pull
-   *  them. This is the byte-path's PUSH half: the mesh carries layer sigs only,
-   *  and the author reads its own content straight from OPFS (here), never
-   *  through the broker's host-fetch path, so this is the only place the author
-   *  actually touches its bytes. Fire-and-forget; the relay verifies sha256
-   *  (run it with --dev-open-writes), so it's content-safe + idempotent. The
-   *  production analog is the host-sync/auto-push flow. */
-  #devPushToHost(signature: string, kind: 'resource' | 'layer', data: Blob | Uint8Array): void {
+  /** Read-triggered staging: a tab that HOLDS the bytes (the author) hands
+   *  them to HostSyncService so the participant's own host (self-domain)
+   *  serves them — signed NIP-98 PUT, durable OPFS queue, confirmed
+   *  read-back receipts. This is the byte-path's PUSH half for content the
+   *  author reads (warmup walk, cache hits) rather than writes — `content:
+   *  wrote` covers fresh authoring; this covers everything that predates it.
+   *  The app NEVER dials localhost or any host other than the configured
+   *  self-domain: with host-sync disabled (the default) this is a no-op and
+   *  the staging functionality is simply absent. Resolved via IoC so shared
+   *  never imports essentials. */
+  #stageToHost(signature: string, kind: 'resource' | 'layer', data: Blob | Uint8Array): void {
     try {
-      if (this.#devPushed.has(signature)) return
-      if (typeof location === 'undefined' ||
-          !/^https?:\/\/(localhost|127(?:\.\d+){3}|\[?::1\]?)(:|\/|$)/i.test(location.origin)) return
-      this.#devPushed.add(signature)
-      let devHost = 'localhost:7777'
-      try { devHost = (localStorage.getItem('hc:dev-resource-host') || '').trim() || devHost } catch { /* ignore */ }
-      const path = kind === 'layer' ? `/__layers__/${signature}.json` : `/__resources__/${signature}`
-      void fetch(`http://${devHost}${path}`, { method: 'PUT', body: data as BodyInit })
-        .then(r => { if (!r || !r.ok) this.#devPushed.delete(signature) })  // failed → retry on next read
-        .catch(() => { this.#devPushed.delete(signature) })  // relay hiccup mid-burst → don't lose this sig
+      if (this.#stagedToHost.has(signature)) return
+      const hostSync = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.(
+        '@diamondcoreprocessor.com/HostSyncService',
+      ) as { isEnabled?: () => boolean; enqueue?: (sig: string, kind: string, bytes: ArrayBuffer) => Promise<void> } | undefined
+      if (!hostSync?.isEnabled?.() || !hostSync.enqueue) return
+      this.#stagedToHost.add(signature)
+      void (async () => {
+        try {
+          const bytes = data instanceof Blob
+            ? await data.arrayBuffer()
+            : data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
+          await hostSync.enqueue!(signature, kind, bytes)
+        } catch {
+          this.#stagedToHost.delete(signature)  // enqueue hiccup → retry on next read
+        }
+      })()
     } catch { /* non-fatal */ }
   }
 
   public getResourceLocal = async (signature: string): Promise<Blob | null> => {
     const cached = this.#resourceCache.get(signature)
-    if (cached) { this.#devPushToHost(signature, 'resource', cached); return cached }
+    if (cached) { this.#stageToHost(signature, 'resource', cached); return cached }
     const blob = await this.#loadResource(signature)
-    if (blob) this.#devPushToHost(signature, 'resource', blob)
+    if (blob) this.#stageToHost(signature, 'resource', blob)
     return blob
   }
 
@@ -654,7 +663,7 @@ export class Store extends EventTarget {
    *  Once read, cached in memory for subsequent calls. */
   public getLayerBytes = async (signature: string): Promise<Uint8Array | null> => {
     const cached = this.#layerBytesCache.get(signature)
-    if (cached) { this.#perfStats.cacheHits++; this.#devPushToHost(signature, 'layer', cached); return cached }
+    if (cached) { this.#perfStats.cacheHits++; this.#stageToHost(signature, 'layer', cached); return cached }
     const pending = this.#layerBytesPending.get(signature)
     if (pending) { this.#perfStats.pendingHits++; return pending }
     this.#perfStats.cacheMisses++
@@ -662,7 +671,7 @@ export class Store extends EventTarget {
     this.#layerBytesPending.set(signature, promise)
     try {
       const bytes = await promise
-      if (bytes) { this.#layerBytesCache.set(signature, bytes); this.#devPushToHost(signature, 'layer', bytes) }
+      if (bytes) { this.#layerBytesCache.set(signature, bytes); this.#stageToHost(signature, 'layer', bytes) }
       return bytes
     } finally {
       this.#layerBytesPending.delete(signature)
@@ -684,7 +693,7 @@ export class Store extends EventTarget {
       // getLayerBytes), so without this the author only pushed the branches it
       // navigated, leaving sibling tiles 404 on the relay. Push here too so the
       // FULL walked tree reaches the host.
-      this.#devPushToHost(signature, 'layer', bytes)
+      this.#stageToHost(signature, 'layer', bytes)
       return bytes
     } catch { return null }
   }

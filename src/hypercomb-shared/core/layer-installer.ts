@@ -111,8 +111,10 @@ export class LayerInstaller {
       }
 
       console.log(`[layer-installer] downloading layer ${sig}`)
-      const url = `${endpoint}/__layers__/${sig}.json`
-      const bytes = await this.#fetchBytes(url)
+      // Flat heap first (`/<sig>` — the canonical address; host-sync pushes
+      // land there), legacy typed path fallback for unmigrated hosts.
+      const bytes = await this.#fetchBytes(`${endpoint}/${sig}`)
+        ?? await this.#fetchBytes(`${endpoint}/__layers__/${sig}.json`)
       if (!bytes) {
         console.warn(`[layer-installer] failed to download layer ${sig}`)
         continue
@@ -147,8 +149,9 @@ export class LayerInstaller {
       }
 
       console.log(`[layer-installer] downloading dependency ${sig}`)
-      const url = `${endpoint}/__dependencies__/${name}`
-      const bytes = await this.#fetchBytes(url)
+      // Flat heap first, legacy typed path fallback.
+      const bytes = await this.#fetchBytes(`${endpoint}/${sig}`)
+        ?? await this.#fetchBytes(`${endpoint}/__dependencies__/${name}`)
       if (!bytes) {
         console.warn(`[layer-installer] failed to download dependency ${sig}`)
         continue
@@ -181,8 +184,9 @@ export class LayerInstaller {
       }
 
       console.log(`[layer-installer] downloading bee ${sig}`)
-      const url = `${endpoint}/__bees__/${name}`
-      const bytes = await this.#fetchBytes(url)
+      // Flat heap first, legacy typed path fallback.
+      const bytes = await this.#fetchBytes(`${endpoint}/${sig}`)
+        ?? await this.#fetchBytes(`${endpoint}/__bees__/${name}`)
       if (!bytes) {
         console.warn(`[layer-installer] failed to download bee ${sig}`)
         continue
@@ -255,6 +259,9 @@ export class LayerInstaller {
     try {
       const res = await fetch(url, { cache: 'no-store' })
       if (!res.ok) return null
+      // SPA fallback guard: an extension-less /<sig> on a dev-server origin
+      // returns index.html with 200. Sig-addressed bytes are never text/html.
+      if ((res.headers.get('content-type') || '').toLowerCase().includes('text/html')) return null
       const buf = await res.arrayBuffer()
       return new Uint8Array(buf)
     } catch {

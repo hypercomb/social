@@ -36,7 +36,11 @@ export interface RegistrySnapshot {
    *  reflects "the features that are on" (absent = enabled, for snapshots
    *  from builds that predate the field). Optional: older DCP builds didn't
    *  post branches at all. */
-  branches?: { domain: string; name: string; branchSig: string; at: string[]; enabled?: boolean }[]
+  /** `kind` = provenance: 'content' (adopted host content — renders as
+   *  tiles) vs 'package' (functionality — refs join the logical install
+   *  but NEVER mounts visuals). Absent on snapshots from older DCP
+   *  builds → treated as 'content'. */
+  branches?: { domain: string; name: string; branchSig: string; at: string[]; enabled?: boolean; kind?: 'package' | 'content' }[]
   generatedAt: number
 }
 

@@ -354,26 +354,35 @@ export class TreeResolverService {
       }
     }
 
-    // fetch from network (flat — files live at base root)
-    try {
-      const url = `${base}/__layers__/${layerSig}.json`
-      const res = await fetch(url, { cache: 'no-store' })
-      if (!res.ok) return null
+    // Fetch from network — FLAT heap first: `/<sig>` is the canonical
+    // address (one bucket, no typed pools, no extensions; the sha256 check
+    // below is the gate, the URL carries identity only). Host-sync pushes
+    // land flat, so this is where freshly-backed-up branches live. The
+    // typed path is the legacy fallback for hosts that haven't migrated
+    // (static layouts: Azure blob, ng-serve public/content).
+    for (const url of [`${base}/${layerSig}`, `${base}/__layers__/${layerSig}.json`]) {
+      try {
+        const res = await fetch(url, { cache: 'no-store' })
+        if (!res.ok) continue
+        // SPA fallback guard: sig-addressed bytes are never text/html.
+        if ((res.headers.get('content-type') || '').toLowerCase().includes('text/html')) continue
 
-      const bytes = await res.arrayBuffer()
-      const actual = await SignatureService.sign(bytes)
-      if (actual !== layerSig) return null
+        const bytes = await res.arrayBuffer()
+        const actual = await SignatureService.sign(bytes)
+        if (actual !== layerSig) continue
 
-      // persist to OPFS
-      await this.#store.writeFile(domainDir, layerSig, bytes)
+        // persist to OPFS
+        await this.#store.writeFile(domainDir, layerSig, bytes)
 
-      const text = new TextDecoder().decode(bytes)
-      const parsed = JSON.parse(text) as LayerJson
-      this.#cache.set(layerSig, parsed)
-      return parsed
-    } catch {
-      return null
+        const text = new TextDecoder().decode(bytes)
+        const parsed = JSON.parse(text) as LayerJson
+        this.#cache.set(layerSig, parsed)
+        return parsed
+      } catch {
+        // network error on this shape — try the next
+      }
     }
+    return null
   }
 
   #collectSignatures(node: TreeNode): string[] {

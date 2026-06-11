@@ -471,6 +471,12 @@ function getContentType(path) {
 function resolveFlatSig(sig) {
   const root = resolve(cfg.contentDir)
   const probes = [
+    // Flat heap — canonical. One bucket, sig-named files at the content
+    // root, no extensions: the consumer knows the type (it holds the
+    // referring layer), so the wire type is opaque bytes. New writes
+    // (PUT /<sig>) land here; the typed pools below are the legacy
+    // layout, kept as fallback during the migration.
+    [join(root, sig), 'application/octet-stream'],
     [join(root, '__layers__', sig + '.json'), 'application/json; charset=utf-8'],
     [join(root, '__bees__', sig + '.js'), 'application/javascript; charset=utf-8'],
     [join(root, '__dependencies__', sig + '.js'), 'application/javascript; charset=utf-8'],
@@ -824,7 +830,8 @@ server.listen(cfg.port, () => {
   else console.log(`database: ${cfg.db}`)
   const contentReady = existsSync(cfg.contentDir)
   console.log(`content-dir: ${cfg.contentDir} ${contentReady ? '(ready)' : '(empty — host will 404 until populated)'}`)
-  if (writers.size > 0) console.log(`writes: enabled — ${writers.size} authorized writer pubkey(s) (NIP-98 + sha256 verify)`)
+  if (cfg.devOpenWrites) console.log('writes: OPEN (--dev-open-writes — sha256 verify only, NEVER use on a public host)')
+  else if (writers.size > 0) console.log(`writes: enabled — ${writers.size} authorized writer pubkey(s) (NIP-98 + sha256 verify)`)
   else console.log('writes: disabled (no --writers / --pubkeys configured)')
   // Banner: slim storage-host announcement (no SPA — full-split model).
   // Visitors hitting `/` see the landing page → linked to canonical installer.

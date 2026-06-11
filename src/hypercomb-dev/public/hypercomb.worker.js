@@ -419,14 +419,19 @@ async function fetchResourceFromHosts(sig) {
     const host = String(raw || '').replace(/^https?:\/\//, '').replace(/\/+$/, '').trim()
     if (!host) continue
     const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
-    const url = `${scheme}://${host}/__resources__/${sig}`
-    try {
-      const res = await fetch(url, { cache: 'no-store' })
-      if (!res || !res.ok) continue
-      const buf = await res.arrayBuffer()
-      if (await sha256Hex(buf) !== sig) continue
-      return { buf, contentType: res.headers.get('content-type') || '' }
-    } catch { /* network / CORS / cert — try next host */ }
+    // Flat heap first (`/<sig>` — the canonical address; host-sync pushes
+    // land there), legacy typed pool fallback for unmigrated hosts.
+    for (const path of [`/${sig}`, `/__resources__/${sig}`]) {
+      try {
+        const res = await fetch(`${scheme}://${host}${path}`, { cache: 'no-store' })
+        if (!res || !res.ok) continue
+        // SPA fallback guard: sig-addressed bytes are never text/html.
+        if ((res.headers.get('content-type') || '').toLowerCase().includes('text/html')) continue
+        const buf = await res.arrayBuffer()
+        if (await sha256Hex(buf) !== sig) continue
+        return { buf, contentType: res.headers.get('content-type') || '' }
+      } catch { /* network / CORS / cert — try next path / host */ }
+    }
   }
   return null
 }

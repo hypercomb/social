@@ -45,6 +45,13 @@ export interface DomainSection {
    *  renamed to this so the tree reads "<host>/ → dolphin → …" rather than
    *  exposing the layer's internal name (e.g. "presentation"). */
   adoptLabel?: string
+  /** Provenance — mirrors BranchEntryLayer.kind. 'content' = adopted host
+   *  content, the ONLY kind the logical (hypercomb.io) view renders.
+   *  'package' = functionality (baseline install, manual domain installs,
+   *  dependency records): its files show under their OWN domain group for
+   *  management, but never join the logical view and never nest under a
+   *  host folder. */
+  kind?: 'package' | 'content'
 }
 
 export interface DomainGroup {
@@ -92,16 +99,15 @@ export class HomeComponent implements OnDestroy {
   #installToastTimer: ReturnType<typeof setTimeout> | null = null
 
   // state
-  // Default content source: Azure blob storage (the canonical, deployed
-  // location for bee/layer/dependency bundles). DCP's own origin no
-  // longer serves content — it is a UI-only static web app.
   // Default trusted-domain suggestion. On a real host (e.g. jwize.com) this
   // is the page's own origin — the host that served you the SPA is the
   // obvious source of truth for which domain to install from. On localhost
-  // we fall back to the Azure blob storage URL so dev keeps working without
-  // configuration. Same helper backs the relay-panel's URL default so both
+  // (no env.js dev-host override) we fall back to the project's operator
+  // host — the same self-hosted domain devDefaultBootstrap dials. Azure is
+  // retired as a runtime source (domain-as-identity: operator domains are
+  // the hosts). Same helper backs the relay-panel's URL default so both
   // install UIs in the top bar agree on what "this DCP instance's host" is.
-  readonly defaultContentBase = defaultHostOrigin('https://storagehypercomb.blob.core.windows.net/dcp')
+  readonly defaultContentBase = defaultHostOrigin('https://jwize.com')
   readonly domains = signal<string[]>(this.#loadDomains())
   readonly domainInput = signal('')
   readonly searchTerm = signal('')
@@ -241,14 +247,15 @@ export class HomeComponent implements OnDestroy {
    *  to toggles (a toggle bumps sections via #refreshSections, recomputing
    *  this). */
   readonly logicalViewItems = computed<TreeNode[]>(() => {
-    // every source sibling EXCEPT the synthetic logical view itself. EVERY
-    // library contributes its EFFECTIVELY-ENABLED content — including the
-    // default baseline package (diamondcoreprocessor.com, miro.com): the
-    // first-run install registers + enables it (sentinel #handleInstall), so
-    // whatever is active in those packages is part of what actually runs and
-    // must show here. The import marker + unresolved adopt eggs contribute []
-    // naturally.
-    const sources = this.sections().filter(s => s.domain !== '@logical')
+    // every CONTENT source sibling — adopted host content is the only
+    // provenance that renders in the hive, so it's the only thing the
+    // logical view mirrors. PACKAGE sections (the default baseline install,
+    // manual domain installs) are functionality: their refs join the logical
+    // install and their code runs, but their file trees never mount as
+    // visuals — they're managed in their own domain groups (same rule the
+    // hive's logical-config source applies to snapshot branches). The import
+    // marker + unresolved adopt eggs contribute [] naturally.
+    const sources = this.sections().filter(s => s.domain !== '@logical' && s.kind !== 'package')
     const enabled = sources.map(s => this.#enabledSubtree(s.items, true))
     return this.#mergeTrees(enabled)
   })
@@ -476,6 +483,9 @@ export class HomeComponent implements OnDestroy {
         // the nested node reads as what you adopted, not the layer's internal
         // name — and you walk its resolved children underneath.
         adoptLabel:     cueName,
+        // the adopt gesture imports HOST CONTENT — the only provenance the
+        // logical view renders.
+        kind:           'content',
       }
       this.sections.update(secs => [...secs, branchSection])
 
@@ -613,7 +623,9 @@ export class HomeComponent implements OnDestroy {
             // host first), so the sigbag tile == the rendered folder.
             const owner = (ownerHost || devDefaultBootstrap()?.host || tileName || '').trim().toLowerCase()
             if (!owner) return
-            void this.#domainStorage.addDomainBranch(owner, branchSig, at, tileName || undefined)
+            // 'content' — the adopt gesture imports HOST CONTENT into the
+            // hive; this is the only provenance that renders visual tiles.
+            void this.#domainStorage.addDomainBranch(owner, branchSig, at, tileName || undefined, undefined, 'content')
               .then(() => {
                 console.info('[home] recorded adopt in', owner, 'sigbag ←', branchSig.slice(0, 12), 'at', at.join('/') || '/')
                 // #62: a new adoption changed the registry — tell the hive.
@@ -995,6 +1007,19 @@ export class HomeComponent implements OnDestroy {
         for (const b of branches) {
           const sig = String(b.branchSig ?? '').trim().toLowerCase()
           if (!/^[a-f0-9]{64}$/.test(sig)) continue
+          // PACKAGES NEVER REBUILD AS CONTENT SECTIONS. A 'package' entry
+          // (the baseline manifest install the sentinel records under the
+          // install host, a cross-domain dependency record) is registry
+          // provenance: its refs are in the logical union and its code runs,
+          // but rendering its file tree as an adopted folder put
+          // diamondcoreprocessor.com's files inside jwize.com — and filling
+          // that section sprayed every package layer into the domains
+          // lineage via recordTreeDeps. Package files are managed in the
+          // package's OWN domain group (the baseline siblings). Legacy
+          // entries pre-date `kind` — infer 'package' when the entry was
+          // recorded under the domain's own name (the manifest-install
+          // shape), same inference as getRegistrySnapshot.
+          if ((b.kind ?? (b.name === domain.name ? 'package' : 'content')) === 'package') continue
           if (this.sections().some(s => s.rootSig === sig)) continue   // idempotent
           if (fresh.some(s => s.rootSig === sig)) continue
           // The recorded tile name (e.g. "dolphin") renames the resolved root
@@ -1015,6 +1040,7 @@ export class HomeComponent implements OnDestroy {
             patches: [],
             enabled: true,
             adoptLabel,
+            kind: 'content',
           })
         }
       }
@@ -1031,13 +1057,15 @@ export class HomeComponent implements OnDestroy {
           ))
         }
       }
-      // Pass the dev byteSource so the rebuild can RE-FETCH the branch from
-      // the host (the live adopt fetched into memory; on reload the bytes may
-      // not be in local OPFS). Without it the section can only poll local and
-      // falls to an egg named after the domain. In prod (no dev bootstrap)
-      // byteSource is undefined → poll-local → broker-adopted bytes or egg.
-      const byteSource = (devDefaultBootstrap()?.byteSource || '').trim() || undefined
-      for (const s of fresh) void this.#resolveBranchSection(s.rootSig, s.domain, byteSource)
+      // "You have the signature, you have the host" — each branch's
+      // recorded OWNER domain is its byte source (the capture-source host
+      // the adopt filed it under). Fetch the branch from there on every
+      // rebuild; local OPFS is just the cache, and an egg is only correct
+      // when the host genuinely doesn't serve the bytes yet. The dev
+      // bootstrap byteSource is a last resort for sections without a
+      // dialable domain.
+      const fallback = (devDefaultBootstrap()?.byteSource || '').trim() || undefined
+      for (const s of fresh) void this.#resolveBranchSection(s.rootSig, s.domain, s.domain || fallback)
     } catch (e) {
       console.warn('[home] #refreshFromLineage failed', e)
     }
@@ -1072,6 +1100,9 @@ export class HomeComponent implements OnDestroy {
       if (normalizeDomainKey(dom.name) === me) continue        // skip the focused domain's own
       const branches = await this.#domainStorage.loadDomainBranches(dom.name)
       for (const b of branches) {
+        // packages never render — not even as dimmed context (the baseline
+        // install is enabled by default, but it's functionality, not tiles)
+        if ((b.kind ?? (b.name === dom.name ? 'package' : 'content')) === 'package') continue
         if (!this.#domainStorage.isFeatureEnabled(b.branchSig)) continue   // only enabled = in logical
         out.push(mkNode(b.name, dom.name, b.branchSig))
       }
@@ -1330,7 +1361,9 @@ export class HomeComponent implements OnDestroy {
         // got filed as its own top-level domain, flooding the installer.
         if (/^[a-f0-9]{64}$/.test(sig) && depDomain && depDomain.includes('.') && depDomain !== owner && !seen.has(`${depDomain}:${sig}`)) {
           seen.add(`${depDomain}:${sig}`)
-          await this.#domainStorage.addDomainBranch(depDomain, sig, [], node.name)
+          // 'package' — a cross-domain dependency record is functionality
+          // provenance; it must never mount as visual tiles in the hive.
+          await this.#domainStorage.addDomainBranch(depDomain, sig, [], node.name, undefined, 'package')
           recorded++
         }
       }
@@ -1501,6 +1534,8 @@ export class HomeComponent implements OnDestroy {
       installStatus: null,
       patches: [],
       enabled: true,
+      // promoted from a package source → inherits package provenance
+      kind: sourceSection.kind ?? 'package',
     }
 
     this.sections.set([...this.sections(), section])
@@ -1685,7 +1720,7 @@ export class HomeComponent implements OnDestroy {
       domain: first.base, domainName: first.host, displayDomain: first.host,
       rootSig: first.sig, originalRootSig: first.sig, items: [],
       loading: false, error: 'default baseline did not resolve',
-      installStatus: null, patches: [], enabled: true,
+      installStatus: null, patches: [], enabled: true, kind: 'package',
     }])
   }
 
@@ -1696,7 +1731,7 @@ export class HomeComponent implements OnDestroy {
       domain: base, domainName: host, displayDomain: host,
       rootSig: sig, originalRootSig: sig, items: [],
       loading: true, error: null, installStatus: `Loading ${host} baseline…`,
-      patches: [], enabled: true,
+      patches: [], enabled: true, kind: 'package',
     }
     this.sections.set([...this.sections(), loading])
 
@@ -1727,6 +1762,9 @@ export class HomeComponent implements OnDestroy {
         domain, domainName: name, displayDomain: name,
         rootSig: rs, originalRootSig: rs, items,
         loading: false, error: null, installStatus: status, patches: [], enabled: true,
+        // the baseline IS the package install — files manageable here,
+        // never merged into the logical view
+        kind: 'package',
       })
 
       const siblings: DomainSection[] = []
@@ -1770,16 +1808,19 @@ export class HomeComponent implements OnDestroy {
         // no packages found — show placeholder with error
         results.push({
           domain, domainName, displayDomain: domainName, rootSig: '', originalRootSig: '', items: [],
-          loading: false, error: 'No packages found in manifest', installStatus: null, patches: [], enabled: true
+          loading: false, error: 'No packages found in manifest', installStatus: null, patches: [], enabled: true,
+          kind: 'package'
         })
         continue
       }
 
-      // create a section per root signature
+      // create a section per root signature — manifest installs are
+      // package provenance (functionality), never logical-view content
       for (const rootSig of rootSigs) {
         results.push({
           domain, domainName, displayDomain: domainName, rootSig, originalRootSig: rootSig, items: [],
-          loading: true, error: null, installStatus: null, patches: [], enabled: true
+          loading: true, error: null, installStatus: null, patches: [], enabled: true,
+          kind: 'package'
         })
       }
     }

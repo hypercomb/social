@@ -2,3 +2,8 @@ node_modules
 scripts/.build-state.json
 **/public/env.js
 .dev-relay-content/
+
+# relay ops diagnostics (local transcripts + staged dev content)
+hypercomb-relay/fix-result.txt
+hypercomb-relay/add-writer-result.txt
+hypercomb-relay/dev-content/

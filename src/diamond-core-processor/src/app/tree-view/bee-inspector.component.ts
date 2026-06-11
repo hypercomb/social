@@ -636,10 +636,14 @@ export class BeeInspectorComponent {
       }
     }
 
-    // 2. fetch from content server, verify, store locally
+    // 2. fetch from content server, verify, store locally. Flat heap first
+    // (`/<sig>` — the canonical address), then the plain typed pool, then
+    // the stale root-scoped shape kept last for ancient hosts.
     const base = this.contentBase().replace(/\/+$/, '')
     const root = this.rootSig()
     const urls = [
+      `${base}/${sig}`,
+      `${base}/${folder}/${sig}.js`,
       root ? `${base}/${root}/${folder}/${sig}.js` : null,
     ].filter(Boolean) as string[]
 

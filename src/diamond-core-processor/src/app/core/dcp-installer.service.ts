@@ -63,24 +63,24 @@ export class DcpInstallerService {
     // 2) purge stale layers from previous installs
     await this.#purgeStale(domainDir, new Set(layers))
 
-    // 3) install layers (flat — files live at base root) — parallel
+    // 3) install layers — flat heap first, legacy typed path fallback — parallel
     onProgress?.({ phase: 'layers', current: 0, total: layers.length })
     await Promise.all(layers.map((sig, i) =>
-      this.#installFile(domainDir, `${base}/__layers__/${sig}.json`, sig, sig)
+      this.#installFile(domainDir, [`${base}/${sig}`, `${base}/__layers__/${sig}.json`], sig, sig)
         .then(() => onProgress?.({ phase: 'layers', current: i + 1, total: layers.length }))
     ))
 
     // 4) install bees — parallel
     onProgress?.({ phase: 'bees', current: 0, total: bees.length })
     await Promise.all(bees.map((sig, i) =>
-      this.#installFile(this.#store.bees, `${base}/__bees__/${sig}.js`, sig, `${sig}.js`)
+      this.#installFile(this.#store.bees, [`${base}/${sig}`, `${base}/__bees__/${sig}.js`], sig, `${sig}.js`)
         .then(() => onProgress?.({ phase: 'bees', current: i + 1, total: bees.length }))
     ))
 
     // 5) install dependencies — parallel
     onProgress?.({ phase: 'dependencies', current: 0, total: deps.length })
     await Promise.all(deps.map((sig, i) =>
-      this.#installFile(this.#store.dependencies, `${base}/__dependencies__/${sig}.js`, sig, `${sig}.js`)
+      this.#installFile(this.#store.dependencies, [`${base}/${sig}`, `${base}/__dependencies__/${sig}.js`], sig, `${sig}.js`)
         .then(() => onProgress?.({ phase: 'dependencies', current: i + 1, total: deps.length }))
     ))
 
@@ -132,9 +132,13 @@ export class DcpInstallerService {
     }
   }
 
+  /** Download + verify + store one sig. `urls` are candidate shapes tried
+   *  in order — the FLAT heap address (`/<sig>`) first, then the legacy
+   *  typed path for hosts that haven't migrated. sha256 gates every byte
+   *  regardless of which shape answered. */
   async #installFile(
     dir: FileSystemDirectoryHandle,
-    url: string,
+    urls: string[],
     expectedSig: string,
     fileName: string
   ): Promise<boolean> {
@@ -144,25 +148,29 @@ export class DcpInstallerService {
     if (await this.#store.hasFile(dir, fileName)) return true
     if (fileName !== expectedSig && await this.#store.hasFile(dir, expectedSig)) return true
 
-    try {
-      const res = await fetch(url, { cache: 'no-store' })
-      if (!res.ok) {
-        console.warn(`[dcp-installer] failed to fetch ${expectedSig}`)
-        return false
-      }
+    for (const url of urls) {
+      try {
+        const res = await fetch(url, { cache: 'no-store' })
+        if (!res.ok) continue
+        // SPA fallback guard: an extension-less /<sig> on a dev-server
+        // origin returns index.html with 200. Sig-addressed bytes are
+        // never text/html — skip quietly, no mismatch noise.
+        if ((res.headers.get('content-type') || '').toLowerCase().includes('text/html')) continue
 
-      const bytes = await res.arrayBuffer()
-      const actual = await SignatureService.sign(bytes)
-      if (actual !== expectedSig) {
-        console.error(`[dcp-installer] signature mismatch: expected ${expectedSig}, got ${actual}`)
-        return false
-      }
+        const bytes = await res.arrayBuffer()
+        const actual = await SignatureService.sign(bytes)
+        if (actual !== expectedSig) {
+          console.error(`[dcp-installer] signature mismatch: expected ${expectedSig}, got ${actual}`)
+          continue
+        }
 
-      await this.#store.writeFile(dir, fileName, bytes)
-      return true
-    } catch {
-      console.warn(`[dcp-installer] error installing ${expectedSig}`)
-      return false
+        await this.#store.writeFile(dir, fileName, bytes)
+        return true
+      } catch {
+        // network error on this shape — try the next
+      }
     }
+    console.warn(`[dcp-installer] failed to fetch ${expectedSig}`)
+    return false
   }
 }

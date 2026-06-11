@@ -997,3 +997,23 @@ Two independent attestations now agree: DNS+TLS says alice.dev endorses K, and K
 - **Composes with community trust** — `hc:community:domains` (§21.3) names the domains a verifier trusts; this binding resolves each trusted *domain* to the *keys* whose attestations it will accept. The trust graph is domain-keyed; the key binding is the domain→key lookup underneath it.
 
 With this, the two verification primitives that the whole protocol rests on are both pinned: **content is verified by hash** (SHA-256, §21.6/§21.12) and **identity is verified by domain-published key over TLS** (§21.13). Everything else — resolution, federation, subscription, co-hosting, sync — is consequence.
+
+### 21.14 Branch-closure hosting — the completeness standard
+
+**The standard: a domain that serves a branch's merkle root serves the root's entire transitive closure.** Every sig reachable from the root through layer ref slots — child layers (`cells`), resources (`properties`, `notes`, `decorations`, `qa`, any future slot), bees, dependencies — resolves at the same host, at the same flat `/<sig>` address (§21.10), deduplicated by "does the host already hold it."
+
+This collapses resolution from a per-sig search problem to a one-host walk. Knowing a branch's root **and** one domain that serves it is sufficient to materialize the whole branch: fetch the root, parse refs, fetch refs from the same host, recurse. Per-sig host discovery (the broker's tier cascade — self-domain, community, mesh-learned, fallback, §21.3) remains as the **fallback**, not the default. In practice this eliminates nearly all of the time spent finding content; the cascade handles the residue (host drift, partial outage, a non-conforming host).
+
+The invariant cannot be *proven* from outside — it is a hosting **contract**, enforced mechanically where the bytes originate and assumed optimistically where they are consumed:
+
+**Publisher side (enforcement):**
+1. **Closure staging** — when a layer enters the host-sync queue, every sig it references is staged with it (children recurse). A layer's receipt proves *that sig* serves, never its refs, so the closure walk runs even for receipted layers.
+2. **Receipt = confirmed read-back** (§21.11.3) — a sig counts as hosted only when the host *serves* it.
+3. **Receipt re-verification** — receipts are caches of the host's holdings, and holdings drift; a receipt about to suppress a push is re-checked (HEAD, once per session) and revoked on the host's own 404. The closure self-heals.
+4. **Announce gate** (generalizes §21.11.5) — a root is advertised, attested, or handed off (adopt links, mesh announcements) only after its closure is fully receipted. Never name a root your host can't yet serve in full.
+
+**Mirror side (propagation):** adoption and subscription mirror *closures*, not roots — adopting a branch pulls and re-serves everything reachable from it. The daisy-chain (§21.12, domain-as-identity) therefore preserves the invariant: every conforming mirror is itself a complete host for the branch.
+
+**Consumer side (assumption):** a resolver MAY treat the root's known host as the source for the entire closure — and SHOULD seed its address graph accordingly: each verified layer fetched from host H attributes H to every ref the layer carries, so the subtree's fetches go straight to H without rediscovery. A miss inside a presumed-complete closure is the *signal* of non-conformance: fall back to the tier cascade, and treat the sig as an egg if no endpoint answers. sha256 gates every byte regardless of which host supplied it (§21.6) — the standard optimizes *time*, never *trust*.
+
+One sentence captures it: **the root sig is the address of everything beneath it, and the root's host is where everything beneath it lives.**
