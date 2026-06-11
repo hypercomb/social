@@ -6,6 +6,7 @@
 
 import { inject, Injectable } from '@angular/core'
 import { SignatureService } from '@hypercomb/core'
+import { DcpDomainStorage } from '../core/dcp-domain-storage.service'
 import { DcpInstallerService } from '../core/dcp-installer.service'
 import { DcpStore } from '../core/dcp-store'
 import { ToggleStateService } from '../core/toggle-state.service'
@@ -24,7 +25,7 @@ export type SyncManifest = {
 export type IntakeKind = 'layer' | 'bee' | 'dependency' | 'resource'
 
 export type SentinelRequest =
-  | { type: 'install'; rid: string; installedSig?: string }
+  | { type: 'install'; rid: string; installedSig?: string; bundledBase?: string }
   | { type: 'sync'; rid: string; currentSyncSig?: string }
   | { type: 'fetch-content'; rid: string; signature: string; kind: 'layer' | 'bee' | 'dependency'; rootSig: string }
   | { type: 'intake'; rid: string; signature: string; kind: IntakeKind; bytes: ArrayBuffer }
@@ -44,6 +45,7 @@ export class SentinelHandler {
   #installer = inject(DcpInstallerService)
   #store = inject(DcpStore)
   #toggleState = inject(ToggleStateService)
+  #domainStorage = inject(DcpDomainStorage)
 
   async handle(msg: SentinelRequest, port: MessagePort): Promise<void> {
     switch (msg.type) {
@@ -56,6 +58,13 @@ export class SentinelHandler {
 
   async #handleInstall(msg: SentinelRequest & { type: 'install' }, port: MessagePort): Promise<void> {
     const domains = this.#loadDomains()
+    // The caller's bundled content base is a LAST-RESORT content domain —
+    // "bundled" is just a domain like any other (the shell ships
+    // /content/manifest.json + flat sig files). Lets a fresh participant
+    // complete the first run with zero network beyond their own origin;
+    // sha256 verification gates the bytes exactly like every other source.
+    const bundled = (msg.bundledBase ?? '').trim()
+    if (/^https?:\/\//i.test(bundled) && !domains.includes(bundled)) domains.push(bundled)
     if (!domains.length) {
       port.postMessage({ type: 'result', rid: msg.rid, ok: false, error: 'No trusted domains configured in DCP' })
       return
@@ -80,6 +89,27 @@ export class SentinelHandler {
 
       if (!manifest) continue
 
+      // REGISTER the installed package in the registry. The hive can RUN
+      // content streamed straight into pools, but only a recorded branch is
+      // visible/manageable in the installer tree — without this the
+      // installer looked empty while everything ran ("how is it running if
+      // there are no modules installed"). Branch root = the package's root
+      // LAYER (the one no other layer references) so the section resolves
+      // and walks exactly like an adopted branch, every feature toggleable
+      // from the start. Enabled by default: installing IS the
+      // participant's intent to use (same doctrine as adopt auto-enable);
+      // the master switch stays one click to turn anything off.
+      try {
+        const rootLayer = await this.#findPackageRootLayer(domainName, (manifest as { layers?: string[] }).layers ?? [])
+        if (rootLayer) {
+          await this.#domainStorage.addDomainBranch(domainName, rootLayer, [], domainName)
+          await this.#domainStorage.setFeatureEnabled(rootLayer, true)
+          await this.#domainStorage.recomputeLogical()
+        }
+      } catch (e) {
+        console.warn('[sentinel] baseline registry record failed', e)
+      }
+
       // Stream verified files back to web
       await this.#streamFiles(port, msg.rid, domain, rootSig, manifest)
 
@@ -94,6 +124,30 @@ export class SentinelHandler {
     }
 
     port.postMessage({ type: 'result', rid: msg.rid, ok: false, error: 'No content found on any trusted domain' })
+  }
+
+  /** The package's root layer: the one no other layer in the package
+   *  references as a child. Children live in `cells` (canonical) or
+   *  `layers`/`children` (legacy) — mirrors the resolver's acceptance. */
+  async #findPackageRootLayer(domainName: string, layerSigs: string[]): Promise<string | null> {
+    if (!layerSigs.length) return null
+    const dir = await this.#store.domainLayersDir(domainName)
+    const referenced = new Set<string>()
+    for (const sig of layerSigs) {
+      const bytes = await this.#store.readFile(dir, sig)
+        ?? await this.#store.readFile(dir, `${sig}.json`)
+      if (!bytes) continue
+      try {
+        const layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
+        const kids = Array.isArray(layer?.['cells']) ? layer['cells'] as unknown[]
+          : Array.isArray(layer?.['layers']) ? layer['layers'] as unknown[]
+          : Array.isArray(layer?.['children']) ? layer['children'] as unknown[]
+          : []
+        for (const k of kids) if (typeof k === 'string') referenced.add(k.toLowerCase())
+      } catch { /* unparsable layer — skip */ }
+    }
+    const roots = layerSigs.filter(s => !referenced.has(String(s).toLowerCase()))
+    return roots[0] ?? null
   }
 
   /**

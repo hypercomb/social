@@ -76,7 +76,8 @@ export class SentinelBridge {
    */
   async install(
     installedSig?: string,
-    onProgress?: (p: { phase: string; current: number; total: number }) => void
+    onProgress?: (p: { phase: string; current: number; total: number }) => void,
+    bundledBase?: string,
   ): Promise<SentinelInstallResult | null> {
     const rid = this.#nextRid()
     this.#fileCollectors.set(rid, [])
@@ -84,7 +85,10 @@ export class SentinelBridge {
 
     return new Promise((resolve, reject) => {
       this.#pending.set(rid, { resolve, reject })
-      this.#port.postMessage({ type: 'install', rid, installedSig })
+      // bundledBase: the shell's own /content/ URL, offered to DCP as a
+      // last-resort content domain so a fresh first run completes even
+      // with no reachable trusted domain. sha256 still gates every byte.
+      this.#port.postMessage({ type: 'install', rid, installedSig, bundledBase })
     })
   }
 

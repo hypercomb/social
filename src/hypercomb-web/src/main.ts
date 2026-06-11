@@ -163,6 +163,20 @@ const bootstrap = async (): Promise<void> => {
       // welcome card remains visible with its "Starting…" state — the
       // participant watches one card until the shell reloads ready.
       try {
+        const sentinel = await getSentinel()
+        if (sentinel) {
+          // DCP-FIRST: the installer fetches + verifies + RECORDS the
+          // baseline package in its registry (so every feature is
+          // visible and toggleable in the installer from the start),
+          // offering the shell's own bundled /content/ as the
+          // last-resort content domain. The sync below then streams the
+          // recorded, enabled set into this shell's OPFS.
+          try {
+            await sentinel.install(undefined, undefined, `${location.origin}/content`)
+          } catch (err) {
+            console.warn('[main] first-run dcp install failed', err)
+          }
+        }
         await resyncAndEnforce()   // reloads on cold-install success
       } catch (err) {
         console.warn('[main] first-run sentinel install failed', err)
