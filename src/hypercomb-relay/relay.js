@@ -539,11 +539,27 @@ function tryServeContent(req, res) {
     resolved = resolve(cfg.contentDir, '.' + urlPath)
     const rootDir = resolve(cfg.contentDir)
     if (!resolved.startsWith(rootDir + sep) && resolved !== rootDir) return false
-    if (!existsSync(resolved)) return false
-    let st
-    try { st = statSync(resolved) } catch { return false }
-    if (!st.isFile()) return false
-    contentType = getContentType(resolved)
+    let typedHit = false
+    if (existsSync(resolved)) {
+      try { typedHit = statSync(resolved).isFile() } catch { typedHit = false }
+    }
+    if (typedHit) {
+      contentType = getContentType(resolved)
+    } else {
+      // Typed-shape MISS → probe the flat heap by the basename's sig.
+      // Host-sync pushes land flat at `/<sig>`, but deployed clients
+      // still running pre-flat brokers ask `/__resources__/<sig>` etc.
+      // The URL carries identity only — serve the bytes from whichever
+      // layout holds them (the mirror of resolveFlatSig's typed
+      // fallback). Non-sig paths keep falling through (landing page).
+      const base = urlPath.split('/').pop() || ''
+      const m = base.match(/^([0-9a-f]{64})(?:\.(?:js|json))?$/i)
+      if (!m) return false
+      const hit = resolveFlatSig(m[1].toLowerCase())
+      if (!hit) return false
+      resolved = hit.path
+      contentType = hit.contentType
+    }
   }
 
   try {
