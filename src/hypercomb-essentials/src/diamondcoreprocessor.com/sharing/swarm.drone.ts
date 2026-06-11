@@ -1591,6 +1591,28 @@ export class SwarmDrone extends Drone {
     if (!lastSeenBag) { lastSeenBag = new Map(); this.#peerLastSeenMsBySig.set(sig, lastSeenBag) }
     lastSeenBag.set(pubkey, Date.now())
 
+    // Domain attribution — the publisher advertised their host as a
+    // ['domain', …] tag (mirroring the broker's 30401 responses). Record it
+    // against each visual's layerSig in the broker's address graph, so an
+    // adopt-click's getKnownDomains(layerSig) answers "which host serves
+    // this tile" — that's what files the adopt under its capture-source
+    // folder (jwize.com/dolphin) and gives the installer an HTTP-direct
+    // byte path. Must run BEFORE the auto-adopt emit below, which reads the
+    // attribution synchronously. Untrusted input: it only ever adds a
+    // Tier-2 fetch candidate; sha256 still gates every byte.
+    const domainTags = (evt?.event?.tags ?? [])
+      .filter((t): t is string[] => Array.isArray(t) && String(t[0]) === 'domain' && !!String(t[1] ?? '').trim())
+      .map(t => String(t[1]).trim())
+    if (domainTags.length) {
+      const broker = this.#getBroker()
+      if (broker?.noteDomainsForSig) {
+        for (const v of cleanVisuals) {
+          const ls = String(v['layerSig'] ?? '').trim().toLowerCase()
+          if (/^[a-f0-9]{64}$/.test(ls)) broker.noteDomainsForSig(ls, domainTags)
+        }
+      }
+    }
+
     // Auto-resource-pull DISABLED for the exploration-first model.
     // Visuals carry only inert metadata (names, accents, tags, hideText),
     // which is safe to render from any peer in the swarm. Image bytes,
@@ -1932,10 +1954,15 @@ const payload: SwarmLayerPayload = myLabel
       // peer who closes their tab silently disappears from the
       // swarm within EVENT_TTL_SECS.
       const expirationSecs = Math.floor(nowMs / 1000) + EVENT_TTL_SECS
-      await mesh.publish(SWARM_LAYER_KIND, sig, payload, [
+      const tags: string[][] = [
         ['d', sig],
         ['expiration', String(expirationSecs)],
-      ])
+      ]
+      // Attribute our advertised host so receivers learn WHERE these tiles'
+      // bytes live (the adopt's capture-source folder + byte path).
+      const selfDomain = this.#readSelfDomain()
+      if (selfDomain) tags.push(['domain', selfDomain])
+      await mesh.publish(SWARM_LAYER_KIND, sig, payload, tags)
     }
 
     if (depth >= MAX_PUBLISH_DEPTH) return
@@ -2360,6 +2387,17 @@ const payload: SwarmLayerPayload = myLabel
     catch { return '' }
   }
 
+  /** The operator's advertised domain (`hc:nostrmesh:self-domain` — the same
+   *  key the broker stamps onto its 30401 responses). Rides every swarm
+   *  layer publish as a ['domain', …] tag so receivers can attribute our
+   *  tiles' layerSigs to a fetchable host — that attribution is what lets an
+   *  adopt file the tile under its capture-source folder (jwize.com/dolphin)
+   *  and HTTP-direct-fetch the bytes from us. */
+  #readSelfDomain = (): string => {
+    try { return String(localStorage.getItem('hc:nostrmesh:self-domain') ?? '').trim() }
+    catch { return '' }
+  }
+
   // ─────────────────────────────────────────────────────────────────
   // Follow — auto-adopt one participant's broadcasts
   // ─────────────────────────────────────────────────────────────────
@@ -2479,10 +2517,15 @@ const payload: SwarmLayerPayload = myLabel
       : { visuals: children }
     const expirationSecs = Math.floor(Date.now() / 1000) + EVENT_TTL_SECS
     try {
-      await mesh.publish(SWARM_LAYER_KIND, channelSig, payload, [
+      const tags: string[][] = [
         ['d', channelSig],
         ['expiration', String(expirationSecs)],
-      ])
+      ]
+      // Same domain attribution as #publishSubtree — followers adopting from
+      // our personal channel get the capture-source host too.
+      const selfDomain = this.#readSelfDomain()
+      if (selfDomain) tags.push(['domain', selfDomain])
+      await mesh.publish(SWARM_LAYER_KIND, channelSig, payload, tags)
     } catch (err) {
       console.warn('[swarm] publish to personal channel failed', { err })
     }
@@ -2936,6 +2979,7 @@ const payload: SwarmLayerPayload = myLabel
     (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.('@diamondcoreprocessor.com/ContentBrokerDrone') as {
       fetchVisualsAt?: (sig: string, timeoutMs?: number) =>
         Promise<readonly { pubkey: string; content: string; created_at: number; tags: string[][] }[] | null>
+      noteDomainsForSig?: (sig: string, domains: string[]) => void
     } | undefined
 
   #getSigner = (): SignerApi | undefined =>

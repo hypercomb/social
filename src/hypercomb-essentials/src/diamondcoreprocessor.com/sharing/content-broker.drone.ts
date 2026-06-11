@@ -602,6 +602,21 @@ export class ContentBrokerDrone extends Drone {
   }
 
   /**
+   * Record domain attributions for a specific sig — the public face of the
+   * address graph's accumulate step. The swarm calls this when a peer's
+   * layer event carries a ['domain', …] tag: each visual's layerSig gets
+   * attributed to the publisher's advertised host, so an adopt-click can
+   * answer getKnownDomains(layerSig) without waiting for a 30401 response.
+   * Attribution only — fetch candidates land in Tier 2 and sha256 still
+   * gates every byte.
+   */
+  public noteDomainsForSig = (sig: string, domains: string[]): void => {
+    const clean = String(sig ?? '').trim().toLowerCase()
+    if (!/^[a-f0-9]{64}$/.test(clean)) return
+    this.#noteDomains(clean, Array.isArray(domains) ? domains : [])
+  }
+
+  /**
    * Ask the swarm for content addressed by sig. Returns the verified
    * bytes when the first valid response arrives, or null on timeout /
    * no responder. Idempotent across concurrent callers for the same

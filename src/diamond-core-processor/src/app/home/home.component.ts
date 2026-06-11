@@ -27,25 +27,6 @@ const DOMAINS_KEY = 'dcp.domains'
  *  data plane (the hive), so it's labelled by the hive domain. */
 const LOGICAL_VIEW_NAME = 'hypercomb.io'
 
-/** The installer's OWN baseline domain(s) — the DCP application itself. Its
- *  modules (keyboard, navigation, presentation, editor, …) are the runtime /
- *  tooling, NOT adoptable content, so they are excluded from the logical view
- *  and its view-logical overlay. Otherwise an enabled installer feature like
- *  `presentation` bleeds into an unrelated adopted domain's view (e.g. showing
- *  under jwize.com/dolphin), which is never what "logically enabled here"
- *  means. Operators forking under a different canonical domain override via
- *  localStorage `dcp.installer-domains` (a JSON array of domain names). */
-const INSTALLER_BASELINE_DOMAINS = ['diamondcoreprocessor.com']
-function isInstallerBaselineDomain(domainName: string): boolean {
-  const d = String(domainName || '').replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').toLowerCase()
-  let list = INSTALLER_BASELINE_DOMAINS
-  try {
-    const raw = localStorage.getItem('dcp.installer-domains')
-    if (raw) { const parsed = JSON.parse(raw); if (Array.isArray(parsed) && parsed.length) list = parsed.map(String) }
-  } catch { /* ignore — fall back to the default */ }
-  return list.map(x => x.toLowerCase()).includes(d)
-}
-
 export interface DomainSection {
   domain: string
   domainName: string
@@ -260,12 +241,14 @@ export class HomeComponent implements OnDestroy {
    *  to toggles (a toggle bumps sections via #refreshSections, recomputing
    *  this). */
   readonly logicalViewItems = computed<TreeNode[]>(() => {
-    // every source sibling EXCEPT the synthetic logical view itself AND the
-    // installer's own baseline domain (its features are tooling, not adopted
-    // content — see INSTALLER_BASELINE_DOMAINS). The jwize.com import marker +
-    // unresolved adopt eggs contribute [] naturally.
-    const sources = this.sections().filter(s =>
-      s.domain !== '@logical' && !isInstallerBaselineDomain(s.domainName))
+    // every source sibling EXCEPT the synthetic logical view itself. EVERY
+    // library contributes its EFFECTIVELY-ENABLED content — including the
+    // default baseline package (diamondcoreprocessor.com, miro.com): the
+    // first-run install registers + enables it (sentinel #handleInstall), so
+    // whatever is active in those packages is part of what actually runs and
+    // must show here. The import marker + unresolved adopt eggs contribute []
+    // naturally.
+    const sources = this.sections().filter(s => s.domain !== '@logical')
     const enabled = sources.map(s => this.#enabledSubtree(s.items, true))
     return this.#mergeTrees(enabled)
   })
@@ -457,19 +440,19 @@ export class HomeComponent implements OnDestroy {
         try { return sourceDomainScoped ? new URL(sourceDomainScoped).hostname.toLowerCase() : '' }
         catch { return sourceDomainScoped }
       })()
-      // The adopt nests INSIDE the importing host's folder (jwize.com) — you
-      // import INTO your host at your current lineage level — so the folder is
-      // the importing host; the adopted tile (dolphin) is a child node inside
-      // it. Fall back to the source host, then the tile name, then a sig
-      // prefix when no host is configured.
+      // The folder is the CAPTURE-SOURCE host — "adopt from that host" files
+      // the content under that host (jwize.com/dolphin), the adopted tile a
+      // child node inside it. Only when the publisher advertised no domain do
+      // we fall back to the importing host (the dev bootstrap), then the tile
+      // name, then a sig prefix.
       const importHost = (devDefaultBootstrap()?.host || '').trim()
-      const displayName = importHost || sourceHost || tileName || `branch-${branchSig.slice(0, 8)}`
+      const displayName = sourceHost || importHost || tileName || `branch-${branchSig.slice(0, 8)}`
       // The cue always names the tile being adopted (the child), even though
       // the folder is the host.
       const cueName = tileName || sourceHost || displayName
 
       const branchSection: DomainSection = {
-        // The section's domain == the IMPORTING HOST (https://<displayName>,
+        // The section's domain == the FOLDER HOST (https://<displayName>,
         // e.g. https://jwize.com) so the layer bytes #fetchLayer writes land
         // in the SAME per-domain OPFS dir the lineage rebuild reads from
         // (#refreshFromLineage resolves under `https://<host>`). Aligning them
@@ -553,15 +536,24 @@ export class HomeComponent implements OnDestroy {
       // a domainless browser-only publisher.
       const ownerDomain = (params.get('domain') ?? '').trim()
 
+      // The owner advertisement arrives in any shape (wss://host,
+      // https://host, bare host). Normalize ONCE to the bare-hostname form —
+      // the folder label / sigbag key — so the opened group, the rendered
+      // section, and the lineage record all agree on the same name.
+      const ownerHost = (() => {
+        try { return ownerDomain ? new URL(this.#prependScheme(ownerDomain)).hostname.toLowerCase() : '' }
+        catch { return '' }
+      })()
+
       // Human tile name (display only — never used for resolution). Lets the
       // section header read "Adopting <name>" instead of a sig prefix.
       const tileName = (params.get('label') ?? '').trim()
 
       queueMicrotask(() => {
-        // IMPORT mode: arriving by adopt opens the IMPORTING domain (the
-        // host you're importing into) and shows the logical pane inside it —
-        // "what's here + what you're adding" — not the logical-view sibling.
-        const importHost = (ownerDomain || devDefaultBootstrap()?.host || '').trim()
+        // IMPORT mode: arriving by adopt opens the folder the content files
+        // under — the capture-source host when advertised, else the importing
+        // host — and focuses the adopted node inside it.
+        const importHost = (ownerHost || devDefaultBootstrap()?.host || '').trim()
         if (importHost) {
           this.importMode.set(true)
           this.importDomainName.set(importHost)
@@ -606,9 +598,9 @@ export class HomeComponent implements OnDestroy {
         }
         const recordInLineage = (): void => {
           try {
-            // SAVE the adopted layer's signature into the IMPORTING HOST's
+            // SAVE the adopted layer's signature into the OWNER HOST's
             // sigbag — the SAME folder the section renders under (displayName,
-            // e.g. jwize.com). You import INTO your host at your lineage level.
+            // e.g. jwize.com — the host the content came from).
             // Recording the ADDRESS is independent of fetching the bytes (the
             // egg model: known now, hatches when the bytes arrive) — so this
             // runs IMMEDIATELY, not gated on the broker walk succeeding (a
@@ -617,9 +609,9 @@ export class HomeComponent implements OnDestroy {
             // forever and nothing persisted). tileName is stored as the branch
             // entry's name so the rebuild reads the tile ("dolphin"), not the
             // layer's internal name.
-            // Same precedence as the section's displayName (importing host
-            // first), so the sigbag tile == the rendered folder.
-            const owner = (devDefaultBootstrap()?.host || ownerDomain || tileName || '').trim().toLowerCase()
+            // Same precedence as the section's displayName (capture-source
+            // host first), so the sigbag tile == the rendered folder.
+            const owner = (ownerHost || devDefaultBootstrap()?.host || tileName || '').trim().toLowerCase()
             if (!owner) return
             void this.#domainStorage.addDomainBranch(owner, branchSig, at, tileName || undefined)
               .then(() => {
