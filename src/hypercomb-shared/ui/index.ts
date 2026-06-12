@@ -20,4 +20,5 @@ export * from './notes-strip/notes-strip.component'
 export * from './notes-viewer/notes-viewer.component'
 export * from './layer-cycle-strip/layer-cycle-strip.component'
 export * from './presence-banner/presence-banner.component'
+export * from './sync-indicator/sync-indicator.component'
 

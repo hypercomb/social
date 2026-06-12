@@ -1,0 +1,103 @@
+// hypercomb-shared/ui/sync-indicator/sync-indicator.component.scss
+//
+// Header-row cell — lives INSIDE the shared .header-bar, so the host
+// contributes its inner cell directly to the bar's flex layout
+// (display: contents) and renders nothing at all while idle. Follows
+// the header-bar idiom: borderless flex children separated by the same
+// 1.5px blue hairline the mode-toggle uses.
+
+:host {
+  display: contents;
+}
+
+.sync-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  min-width: 9rem;
+  max-width: 16rem;
+  padding: 0 0.85rem;
+  border-left: 1.5px solid rgba(77, 166, 255, 0.4);
+  font-family: var(--hc-font);
+  animation: sync-fade-in 360ms ease-out;
+}
+
+.sync-line {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.sync-label {
+  font-size: 0.68rem;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  color: rgba(245, 245, 245, 0.75);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sync-cell.done .sync-label {
+  color: rgba(245, 245, 245, 0.55);
+}
+
+// Honey-amber while syncing — installer work, not swarm presence.
+.sync-dot {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #e0a93e;
+  animation: sync-pulse 1.2s ease-in-out infinite;
+}
+
+.sync-cell.done .sync-dot {
+  background: #6ec96e;
+  animation: none;
+}
+
+// ── progress bar ─────────────────────────────────────────
+// Determinate: fill width tracks current/total. Indeterminate (no
+// total announced yet): a sweeping segment until counts arrive.
+
+.sync-track {
+  position: relative;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(245, 245, 245, 0.12);
+  overflow: hidden;
+}
+
+.sync-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: #e0a93e;
+  transition: width 200ms ease-out;
+}
+
+.sync-track.indeterminate .sync-fill {
+  position: absolute;
+  width: 35%;
+  animation: sync-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes sync-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes sync-pulse {
+  0%, 100% { opacity: 1;    transform: scale(1);    }
+  50%      { opacity: 0.55; transform: scale(0.85); }
+}
+
+@keyframes sync-sweep {
+  0%   { left: -35%; }
+  100% { left: 100%; }
+}

@@ -1,0 +1,27 @@
+@if (visible()) {
+  <div class="sync-cell" [class.done]="done()" role="status" aria-live="polite">
+    <div class="sync-line">
+      <span class="sync-dot" aria-hidden="true"></span>
+      <span class="sync-label">
+        @if (done()) {
+          {{ (doneKind() === 'adopt' ? 'sync.adopted' : 'sync.done') | t }}
+        } @else if (adopting()) {
+          @if (adoptItems() > 0) {
+            {{ 'sync.adopting-progress' | t: { items: adoptItems() } }}
+          } @else {
+            {{ 'sync.adopting' | t }}
+          }
+        } @else if (hasCounts()) {
+          {{ 'sync.progress' | t: { current: current(), total: total() } }}
+        } @else {
+          {{ 'sync.synchronizing' | t }}
+        }
+      </span>
+    </div>
+    @if (!done()) {
+      <div class="sync-track" [class.indeterminate]="!hasCounts()">
+        <div class="sync-fill" [style.width.%]="hasCounts() ? percent() : null"></div>
+      </div>
+    }
+  </div>
+}

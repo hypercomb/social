@@ -216,10 +216,27 @@ const bootstrap = async (): Promise<void> => {
             // bundled fallback; a slow-but-alive install keeps streaming in
             // the background and the resync picks its results up.
             const INSTALL_TIMEOUT_MS = 180_000
-            await Promise.race([
-              sentinel.install(undefined, undefined, `${location.origin}/content`),
-              new Promise(resolve => setTimeout(resolve, INSTALL_TIMEOUT_MS)),
-            ])
+            try {
+              await Promise.race([
+                sentinel.install(
+                  undefined,
+                  // Stream install progress into the sync-indicator's
+                  // 'install' lane. Each producer gets its own lane so
+                  // the resync that follows can't wipe these counts or
+                  // end the cue while this is still streaming.
+                  ({ phase, current, total }) =>
+                    EffectBus.emit('install:sync', { active: true, source: 'install', phase, current, total }),
+                  `${location.origin}/content`,
+                ),
+                new Promise(resolve => setTimeout(resolve, INSTALL_TIMEOUT_MS)),
+              ])
+            } finally {
+              // Terminate the lane on completion AND on timeout — a
+              // timed-out install may keep streaming in the background,
+              // but the resync that follows owns the visible cue from
+              // here (its lane re-activates the indicator).
+              EffectBus.emit('install:sync', { active: false, source: 'install' })
+            }
           } catch (err) {
             console.warn('[main] first-run dcp install failed', err)
           }

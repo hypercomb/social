@@ -167,21 +167,26 @@ export const upgradeFromBundled = async (): Promise<boolean> => {
     console.warn('[upgrade-from-bundled] SignatureStore not registered')
     return false
   }
-  const bundled = await fetchBundledPackage()
-  if (!bundled) {
-    console.warn('[upgrade-from-bundled] no bundled /content/manifest.json available')
-    return false
+  EffectBus.emit('install:sync', { active: true, source: 'bundled' })
+  try {
+    const bundled = await fetchBundledPackage()
+    if (!bundled) {
+      console.warn('[upgrade-from-bundled] no bundled /content/manifest.json available')
+      return false
+    }
+    // Wipe stale artifacts before reinstall so signatures dropped from
+    // the new bundle don't linger and load on next boot.
+    const cached = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
+    if (cached) {
+      localStorage.removeItem(MANIFEST_KEY)
+      localStorage.removeItem(SYNC_SIG_KEY)
+      await purgeStaleOpfsArtifacts(store)
+    }
+    await installFromBundled(bundled, sigStore)
+    return true
+  } finally {
+    EffectBus.emit('install:sync', { active: false, source: 'bundled' })
   }
-  // Wipe stale artifacts before reinstall so signatures dropped from
-  // the new bundle don't linger and load on next boot.
-  const cached = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
-  if (cached) {
-    localStorage.removeItem(MANIFEST_KEY)
-    localStorage.removeItem(SYNC_SIG_KEY)
-    await purgeStaleOpfsArtifacts(store)
-  }
-  await installFromBundled(bundled, sigStore)
-  return true
 }
 
 // -------------------------------------------------
@@ -398,6 +403,21 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
   const store = get('@hypercomb.social/Store') as Store | undefined
   if (!store || !store.opfsAvailable) return
 
+  // Visual cue: bracket the whole pass so the sync-indicator shows while
+  // the sentinel computes the diff, streams files, and we apply them to
+  // OPFS. Every exit path (no result, no-op diff, throw) lands in the
+  // finally so the cue can never get stuck on. Own lane ('resync') so an
+  // overlapping first-run install keeps its counts and the cue stays up
+  // until BOTH lanes are quiet.
+  EffectBus.emit('install:sync', { active: true, source: 'resync' })
+  try {
+    await resyncPass(sentinel, store)
+  } finally {
+    EffectBus.emit('install:sync', { active: false, source: 'resync' })
+  }
+}
+
+const resyncPass = async (sentinel: SentinelBridge, store: Store): Promise<void> => {
   const currentSyncSig = (localStorage.getItem(SYNC_SIG_KEY) ?? '').trim() || undefined
   const result = await sentinel.sync(currentSyncSig)
   if (!result) return
@@ -426,6 +446,7 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
   const layerDir = store.layers
   await clearStaleCaches()
 
+  let appliedCount = 0
   for (const file of files) {
     switch (file.kind) {
       case 'layer':
@@ -441,6 +462,8 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
         await seedCacheEntry(`/opfs/__dependencies__/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
         break
     }
+    appliedCount++
+    EffectBus.emit('install:sync', { active: true, source: 'resync', current: appliedCount, total: files.length })
   }
 
   const sigStore = get('@hypercomb/SignatureStore') as SignatureStore | undefined

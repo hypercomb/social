@@ -192,7 +192,11 @@
   }
 
   .header-bar.input-open .mesh-header,
-  .header-bar.input-open hc-mesh-header {
+  .header-bar.input-open hc-mesh-header,
+  // sync cell too — the mobile prompt surface is ≤599px wide and the
+  // cell refuses to shrink (min-width). Host-element selector because
+  // emulated encapsulation hides the inner .sync-cell from this sheet.
+  .header-bar.input-open hc-sync-indicator {
     display: none;
   }
 
