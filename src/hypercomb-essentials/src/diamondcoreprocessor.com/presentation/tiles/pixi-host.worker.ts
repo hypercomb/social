@@ -24,7 +24,37 @@ export class PixiHostWorker extends Worker {
 
   protected override deps = { settings: '@diamondcoreprocessor.com/Settings', axial: '@diamondcoreprocessor.com/AxialService' }
   protected override listens = ['editor:mode']
-  protected override emits = ['render:host-ready']
+  protected override emits = ['render:host-ready', 'render:unsupported']
+
+  /** WebGL/WebGPU both refused → the tile scene cannot render. Replace the
+   *  (empty) canvas host with a plain-DOM explanation of what to enable.
+   *  Localized when the i18n provider is up; English otherwise. */
+  #showWebglRequired(host: HTMLDivElement): void {
+    const i18n = (window as { ioc?: { get?: (k: string) => unknown } }).ioc
+      ?.get?.('@hypercomb.social/I18n') as
+      { t: (k: string, p?: Record<string, string | number>) => string } | undefined
+    const title = i18n?.t('webgl.required') ?? 'Hardware graphics is turned off'
+    const body = i18n?.t('webgl.howto')
+      ?? 'Hypercomb draws its tiles with WebGL, which this browser is blocking. '
+      + 'Safari: turn off Lockdown Mode for this site (Settings → Privacy & Security). '
+      + 'Chrome: turn on "Use graphics acceleration when available" (Settings → System) and relaunch. '
+      + 'Then reload this page.'
+    const note = document.createElement('div')
+    note.dataset['hypercombPixi'] = 'webgl-required'
+    note.style.cssText =
+      'position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;'
+      + 'justify-content:center;gap:0.6rem;padding:2rem;text-align:center;'
+      + 'pointer-events:auto;background:#0a0a0a;color:rgba(245,245,245,0.85);'
+      + 'font-family:var(--hc-font, system-ui, sans-serif);'
+    const h = document.createElement('div')
+    h.style.cssText = 'font-size:1.1rem;font-weight:600;'
+    h.textContent = title
+    const p = document.createElement('div')
+    p.style.cssText = 'max-width:34rem;font-size:0.85rem;line-height:1.6;color:rgba(245,245,245,0.6);'
+    p.textContent = body
+    note.append(h, p)
+    host.appendChild(note)
+  }
 
   constructor() {
     super()
@@ -98,6 +128,26 @@ export class PixiHostWorker extends Worker {
     const pixiInitMs = performance.now() - tPixiInit
     console.log(`[pixi-host] Application.init() ${pixiInitMs.toFixed(0)}ms`)
     ;(window as any).__hcBoot?.(`Application.init() done (${pixiInitMs.toFixed(0)}ms)`)
+
+    // The hive's tiles are Mesh + custom shaders — pipes that exist only on
+    // the WebGL/WebGPU renderers. When the browser refuses both contexts
+    // (Safari Lockdown Mode, Chrome with hardware acceleration off),
+    // autoDetectRenderer silently falls back to the experimental canvas
+    // renderer, which has no 'mesh' pipe — the first render pass then
+    // throws "undefined (reading 'validateRenderable')" on every ticker
+    // frame forever. Detect the fallback, shut the app down cleanly, and
+    // tell the participant what to enable instead of grinding a black
+    // canvas. render:host-ready never fires, so every render drone stays
+    // dormant.
+    if ((app.renderer as unknown as { name?: string })?.name === 'canvas') {
+      console.error('[pixi-host] WebGL/WebGPU unavailable — Pixi fell back to the canvas renderer, which cannot draw the mesh-based tile scene. Halting render boot.')
+      this.emitEffect('render:unsupported', { renderer: 'canvas' })
+      try { app.ticker?.stop() } catch { /* already stopped */ }
+      try { app.destroy(true) } catch { /* canvas may not be attached yet */ }
+      this.app = null
+      this.#showWebglRequired(host)
+      return
+    }
 
     app.stage.scale.set(1.8, 1.8)
     app.stage.interactiveChildren = false

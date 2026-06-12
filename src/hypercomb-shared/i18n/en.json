@@ -284,6 +284,8 @@
   "presence.panel-label": "participants at this location",
   "presence.subscribe": "subscribe to their hive",
   "presence.follow": "follow them as they navigate",
+  "webgl.required": "Hardware graphics is turned off",
+  "webgl.howto": "Hypercomb draws its tiles with WebGL, which this browser is blocking. Safari: turn off Lockdown Mode for this site (Settings → Privacy & Security). Chrome: turn on \"Use graphics acceleration when available\" (Settings → System) and relaunch. Then reload this page.",
   "sync.synchronizing": "synchronizing…",
   "sync.progress": "synchronizing {current}/{total} files",
   "sync.done": "synchronized",

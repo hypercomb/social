@@ -260,6 +260,8 @@
   "presence.panel-label": "この場所の参加者",
   "presence.subscribe": "ハイブを購読",
   "presence.follow": "移動先を追従",
+  "webgl.required": "ハードウェアグラフィックスが無効です",
+  "webgl.howto": "HypercombはタイルをWebGLで描画しますが、このブラウザでブロックされています。Safari：このサイトのロックダウンモードをオフにしてください（設定 → プライバシーとセキュリティ）。Chrome：「グラフィック アクセラレーションが使用可能な場合は使用する」（設定 → システム）をオンにして再起動してください。その後このページを再読み込みしてください。",
   "sync.synchronizing": "同期中…",
   "sync.progress": "同期中 {current}/{total}件",
   "sync.done": "同期完了",
