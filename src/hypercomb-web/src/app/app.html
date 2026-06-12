@@ -30,9 +30,18 @@
 <div class="install-prompt" role="dialog" aria-modal="true" aria-labelledby="install-title">
   <div class="install-card">
     <h2 id="install-title">Welcome to Hypercomb</h2>
-    <button class="install-cta" type="button" (click)="startWelcome()" [disabled]="upgrading()">
-      @if (upgrading()) { Starting… } @else { Start }
-    </button>
+    @if (storageBlocked()) {
+      <p class="install-blocked">
+        Hypercomb keeps your hive in the browser's persistent storage,
+        which isn't available here. If this is a Private window, open a
+        regular one. If you're on an older Mac or Safari, update to a
+        recent version. Then reload this page.
+      </p>
+    } @else {
+      <button class="install-cta" type="button" (click)="startWelcome()" [disabled]="upgrading()">
+        @if (upgrading()) { Starting… } @else { Start }
+      </button>
+    }
   </div>
 </div>
 }

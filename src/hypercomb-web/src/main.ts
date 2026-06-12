@@ -196,6 +196,16 @@ const bootstrap = async (): Promise<void> => {
   // sha256-verified against its signature. Only when BOTH sources come
   // up empty does the card re-arm (boot:status install-needed).
   window.addEventListener('hypercomb:start-install', () => {
+    // Persistent storage is the install's substrate — without OPFS every
+    // source fails (slowly: sentinel timeout → resync no-op → bundled
+    // write failure) and the card loops Start → Starting…. Private
+    // windows and pre-16.4 Safari lack navigator.storage.getDirectory;
+    // detect that up front and explain instead of attempting.
+    if (typeof navigator.storage?.getDirectory !== 'function') {
+      console.warn('[main] persistent storage unavailable — install cannot proceed')
+      EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-storage' } as BootStatus)
+      return
+    }
     void (async () => {
       // Note: boot status stays 'install-needed' while this runs so the
       // welcome card remains visible with its "Starting…" state — the

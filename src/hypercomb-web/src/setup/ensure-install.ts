@@ -16,7 +16,7 @@ export type BootStatus =
   | { kind: 'cached' }
   | { kind: 'installing' }
   | { kind: 'installed' }
-  | { kind: 'install-needed'; reason: 'no-sentinel' | 'sentinel-empty' }
+  | { kind: 'install-needed'; reason: 'no-sentinel' | 'sentinel-empty' | 'no-storage' }
 
 const MANIFEST_KEY = 'core-adapter.installed-manifest'
 const SIG_STORE_KEY = 'hypercomb.signature-store'
@@ -50,8 +50,11 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
   await store.initialize()
 
   if (!store.opfsAvailable) {
+    // 'no-storage', not 'no-sentinel' — the welcome card renders an
+    // explanation (private window / old Safari) instead of a Start button
+    // that can only loop: every install source needs OPFS to land bytes.
     console.warn('[ensure-install] OPFS unavailable — skipping install; app will boot without persistence')
-    EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-sentinel' } as BootStatus)
+    EffectBus.emit('boot:status', { kind: 'install-needed', reason: 'no-storage' } as BootStatus)
     return
   }
 

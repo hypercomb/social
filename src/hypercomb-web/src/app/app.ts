@@ -48,6 +48,13 @@ export class App implements AfterViewInit {
   protected readonly installNeeded = computed(() =>
     this.bootStatus()?.kind === 'install-needed' && !this.dcpPortalOpen()
   )
+  /** Persistent storage (OPFS) is missing — private window, or a Safari
+   *  before 16.4. Installing is impossible, so the welcome card explains
+   *  what to change instead of offering a Start that can only loop. */
+  protected readonly storageBlocked = computed(() => {
+    const status = this.bootStatus()
+    return status?.kind === 'install-needed' && status.reason === 'no-storage'
+  })
   /** First-run "Start" — one button, zero choices. Hands off to main.ts's
    *  unattended install routine (hidden sentinel → DCP resolves from its
    *  content domains → stream → reload; bundled package as the silent

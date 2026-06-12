@@ -74,6 +74,15 @@
     white-space: nowrap;
   }
 
+  /* Storage-unavailable explanation — replaces the Start button when
+     OPFS is missing (private window / old Safari). */
+  .install-blocked {
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.55;
+    color: rgba(255, 255, 255, 0.6);
+  }
+
   .install-cta {
     flex: none;
     padding: 0.55rem 1.5rem;
