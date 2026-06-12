@@ -1490,6 +1490,7 @@ export class ShowCellDrone extends Drone {
   }
 
   private readonly renderFromSynchronize = async (): Promise<void> => {
+    ;(window as unknown as { __hcNav?: (l: string, e?: string) => void }).__hcNav?.('render:start')
     this.shader?.setHoveredIndex(-1)
     if (!this.pixiApp || !this.pixiContainer || !this.pixiRenderer) {
       this.clearMesh()
@@ -2445,6 +2446,7 @@ export class ShowCellDrone extends Drone {
     myLocationKey: string,
   ): Promise<void> => {
     this.streamActive = true
+    const hcNav = (window as unknown as { __hcNav?: (l: string, e?: string) => void }).__hcNav
 
     // Superseded before we even started (a newer renderFromSynchronize ran
     // between our void-dispatch and here). Do nothing.
@@ -2454,14 +2456,23 @@ export class ShowCellDrone extends Drone {
     const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
     const maxCells = Math.min(cellNames.length, axialMax)
     const allCells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
+    hcNav?.('stream:start', `${allCells.length} cells`)
 
     const cells: Cell[] = []
-    const BATCH = ShowCellDrone.STREAM_BATCH_SIZE
+    // GEOMETRIC batch growth: the first batch stays small (fast first
+    // paint), every subsequent batch doubles. applyGeometry rebuilds the
+    // FULL cumulative geometry each round, so fixed-size batches made
+    // streaming QUADRATIC — 15 full rebuilds (and 1,900+ label-UV
+    // lookups) for a 120-tile layer; seconds for larger ones. Doubling
+    // caps rebuilds at O(log N) and total geometry work at ~2N with the
+    // same first-paint latency.
+    let start = 0
+    let step = ShowCellDrone.STREAM_BATCH_SIZE
 
-    for (let start = 0; start < allCells.length; start += BATCH) {
+    while (start < allCells.length) {
       if (superseded()) return
 
-      const batch = allCells.slice(start, start + BATCH)
+      const batch = allCells.slice(start, start + step)
 
       // load all cells in this batch in parallel — file reads + image decodes overlap
       await this.loadCellImages(batch, dir)
@@ -2472,7 +2483,7 @@ export class ShowCellDrone extends Drone {
         this.renderedCells.set(cell.label, cell)
       }
 
-      const isLast = start + BATCH >= allCells.length
+      const isLast = start + step >= allCells.length
       await this.applyGeometry(cells, isLast)
       if (superseded()) return
 
@@ -2480,8 +2491,11 @@ export class ShowCellDrone extends Drone {
       // shows tiles immediately and the rest stream in progressively.
       if (this.layer && !this.layer.visible) {
         this.layer.visible = true
+        hcNav?.('first-batch:visible', `${cells.length} tiles`)
       }
 
+      start += step
+      step *= 2
       if (!isLast) await this.microDelay()
     }
 
@@ -2491,6 +2505,7 @@ export class ShowCellDrone extends Drone {
     if (this.layer) this.layer.visible = true
 
     this.streamActive = false
+    hcNav?.('stream:done', `${cells.length} tiles`)
     this.emitEffect('navigation:guard-end', {})
 
     // cache for instant back-navigation. Use OUR locationKey — do not
@@ -3899,12 +3914,22 @@ export class ShowCellDrone extends Drone {
     // Pass 1 — place LOCAL indexed cells first so they own their persisted
     // slots before any peer-published index gets a chance to claim them.
     // Peer tiles deferred to Pass 2 below.
+    //
+    // The per-cell index reads are independent — resolve them in ONE
+    // PARALLEL WAVE. Each read costs up to three awaited roundtrips (dir
+    // probe, location-sig hash, nurse read); doing them serially made
+    // this loop O(cells) in wall-time — measured ~275ms for a 120-tile
+    // layer, the entire pre-stream stall of a navigation. PLACEMENT
+    // stays strictly sequential in `names` order below, so collision
+    // semantics are identical to the serial version.
     const peerNames: string[] = []
+    const localNames: string[] = []
     for (const name of names) {
-      if (!localCellSet.has(name)) {
-        peerNames.push(name)
-        continue
-      }
+      if (!localCellSet.has(name)) peerNames.push(name)
+      else localNames.push(name)
+    }
+    const idxByName = new Map<string, number | undefined>()
+    await Promise.all(localNames.map(async (name) => {
       try {
         // Layer-slot read with 0000 fallback. cellDir is opportunistic
         // — the dir may not exist for layer-only tiles, in which case
@@ -3917,21 +3942,21 @@ export class ShowCellDrone extends Drone {
           : await readTilePropertiesAt(parentSegments, name).then(p =>
               typeof p['index'] === 'number' ? (p['index'] as number) : undefined,
             )
-        if (typeof idx === 'number') {
-          if (idx >= 0 && idx <= maxSlot) {
-            // collision detection: if slot is already occupied, demote to unindexed
-            if (sparse[idx] !== '') {
-              unindexed.push(name)
-            } else {
-              sparse[idx] = name
-            }
-          } else {
-            unindexed.push(name)
-          }
-        } else {
-          unindexed.push(name)
-        }
+        idxByName.set(name, typeof idx === 'number' ? idx : undefined)
       } catch {
+        idxByName.set(name, undefined)
+      }
+    }))
+    for (const name of localNames) {
+      const idx = idxByName.get(name)
+      if (typeof idx === 'number' && idx >= 0 && idx <= maxSlot) {
+        // collision detection: if slot is already occupied, demote to unindexed
+        if (sparse[idx] !== '') {
+          unindexed.push(name)
+        } else {
+          sparse[idx] = name
+        }
+      } else {
         unindexed.push(name)
       }
     }

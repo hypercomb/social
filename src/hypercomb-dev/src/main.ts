@@ -19,6 +19,20 @@
 }
 ;(window as any).__hcBoot('main.ts module evaluated')
 
+// ── navigation perf trail ────────────────────────────────────────────────────
+// Same contract as __hcBoot but per NAVIGATION: 'nav:start' resets T0, every
+// later mark logs `[nav] +Nms label`. Shared/essentials code calls
+// window.__hcNav?.('label') unconditionally; shells that don't define it
+// no-op. Lets any profile answer "which stage of THIS navigation was slow"
+// straight from the console, no external tooling.
+;(window as any).__hcNavT0 = 0
+;(window as any).__hcNav = (label: string, extra?: string) => {
+  const now = performance.now()
+  if (label === 'nav:start') (window as any).__hcNavT0 = now
+  const t0 = (window as any).__hcNavT0 || now
+  console.log(`[nav] +${(now - t0).toFixed(0)}ms ${label}${extra ? ` ${extra}` : ''}`)
+}
+
 import '@hypercomb/shared/core/ioc.web'
 import { bootstrapApplication } from '@angular/platform-browser'
 import { SignatureStore } from '@hypercomb/core'

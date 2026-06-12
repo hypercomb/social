@@ -27,6 +27,9 @@ export class Lineage extends EventTarget {
     const seg = (name ?? '').trim()
     if (!seg || seg === '.' || seg === '..') return
 
+    // perf trail: navigation T0 (no-op on shells without __hcNav)
+    ;(window as unknown as { __hcNav?: (l: string, e?: string) => void }).__hcNav?.('nav:start', seg)
+
     // do not normalize explorer names
     this.explorerPath = [...this.explorerPath, seg]
     this.invalidate()
