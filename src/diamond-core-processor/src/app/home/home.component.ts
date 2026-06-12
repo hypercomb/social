@@ -52,6 +52,11 @@ export interface DomainSection {
    *  management, but never join the logical view and never nest under a
    *  host folder. */
   kind?: 'package' | 'content'
+  /** Placement segments the adopt landed at (mirrors BranchEntryLayer.at).
+   *  Part of the section's identity: the sigbag keys branches on
+   *  (name, at), so the same tile name at two locations is TWO branches —
+   *  the section dedup/replace rules must compare at too. */
+  at?: string[]
 }
 
 export interface DomainGroup {
@@ -132,6 +137,15 @@ export class HomeComponent implements OnDestroy {
   // layer editor state
   readonly inspectLayer = signal<TreeNode | null>(null)
   readonly inspectLayerSection = signal<DomainSection | null>(null)
+
+  // Live broker-walk progress for adopted branch rows — root sig → count of
+  // resolved sigs (layers + resources). The walk discovers its frontier as
+  // it goes, so there is no total: the row shows a climbing count over an
+  // indeterminate bar. Entries linger briefly after adopt:done so the final
+  // count is readable, then clear.
+  readonly #adoptProgress = signal<Map<string, number>>(new Map())
+  #activeAdoptRoot: string | null = null
+  #adoptCueTimer: ReturnType<typeof setTimeout> | null = null
 
   // flat list of all nodes for command line suggestions
   readonly allNodes = computed(() => {
@@ -427,9 +441,23 @@ export class HomeComponent implements OnDestroy {
     // TreeResolver.resolveFromLocal until the walk completes, then
     // populates section.items. Failure after the retry budget surfaces
     // as section.error.
-    EffectBus.on<{ rootSig?: string; domains?: string[]; label?: string }>('adopt:meta', (p) => {
+    EffectBus.on<{ rootSig?: string; domains?: string[]; label?: string; at?: string[] }>('adopt:meta', (p) => {
       const branchSig = String(p?.rootSig ?? '').trim().toLowerCase()
       if (!/^[a-f0-9]{64}$/.test(branchSig)) return
+
+      // Placement — part of the branch identity (the sigbag keys on
+      // (name, at)). The broker's own adopt:meta re-announce carries no
+      // at; treat absent as root placement, same as recordInLineage.
+      const at = Array.isArray(p?.at)
+        ? p.at.map(s => String(s ?? '').trim()).filter(Boolean)
+        : []
+
+      // The broker's walk announces this root, then streams adopt:progress
+      // (which carries no root) — remember whose walk is live so the
+      // progress counts attribute to the right section row. Set BEFORE the
+      // already-adopted abort below: a re-adopt re-walks the bytes (egg
+      // recovery) and its row should still show resources resolving.
+      this.#activeAdoptRoot = branchSig
 
       const domains = Array.isArray(p?.domains)
         ? p.domains.map(d => String(d ?? '').trim()).filter(Boolean)
@@ -437,8 +465,11 @@ export class HomeComponent implements OnDestroy {
       const sourceDomainScoped = domains[0] ? this.#prependScheme(domains[0]) : ''
       const tileName = String(p?.label ?? '').trim()
 
-      // Idempotent re-adopt: existing section for this branchSig wins
-      const existing = this.sections().find(s => s.rootSig === branchSig)
+      // The signature already exists → the adopt ABORTS. A section holding
+      // this branchSig (as its live rootSig, or as originalRootSig when
+      // patches advanced it) means the content is already adopted — nothing
+      // new to render, just reveal what's there.
+      const existing = this.sections().find(s => s.rootSig === branchSig || s.originalRootSig === branchSig)
       if (existing) {
         setTimeout(() => this.#scrollSectionIntoView(existing.domain), 50)
         return
@@ -493,8 +524,25 @@ export class HomeComponent implements OnDestroy {
         // the adopt gesture imports HOST CONTENT — the only provenance the
         // logical view renders.
         kind:           'content',
+        at,
       }
-      this.sections.update(secs => [...secs, branchSection])
+      // RE-ADOPT advances the pointer — the SECTION mirror of addBranch's
+      // rule (dcp-domain-storage.service.ts): the same tile under the same
+      // host folder AT THE SAME PLACEMENT arriving with a DIFFERENT
+      // branchSig (the publisher's layer re-signed since the first adopt)
+      // REPLACES the older section instead of rendering alongside it.
+      // Without this, the lineage-rebuilt section (older sig) and the live
+      // adopt (newer sig) both render and the tile shows twice in the
+      // treeview. The sigbag keys on (name, at) — so does this: the same
+      // name adopted at a DIFFERENT location is a different branch and
+      // both sections render.
+      const sameTile = (s: DomainSection): boolean =>
+        s.kind === 'content'
+        && !!branchSection.adoptLabel
+        && s.adoptLabel === branchSection.adoptLabel
+        && s.domainName === branchSection.domainName
+        && JSON.stringify(s.at ?? []) === JSON.stringify(at)
+      this.sections.update(secs => [...secs.filter(s => !sameTile(s)), branchSection])
 
       // Resolve the branch by FETCHING it from its byte source — "send the
       // signature → fetch → fill." byteSource = the dev relay (devDefault-
@@ -506,6 +554,36 @@ export class HomeComponent implements OnDestroy {
 
       // Scroll once Angular renders the new section element.
       setTimeout(() => this.#scrollSectionIntoView(branchSection.domain), 100)
+    })
+
+    // The broker walk streams per-sig fills (layers + resources). The
+    // payload's `sig` is the item just filled, not the root — attribute the
+    // climbing count to the walk announced by the last adopt:meta so the
+    // adopted branch's row shows resources resolving live.
+    EffectBus.on<{ layers?: number; leaves?: number }>('adopt:progress', (p) => {
+      const root = this.#activeAdoptRoot
+      if (!root) return
+      const count = (p?.layers ?? 0) + (p?.leaves ?? 0)
+      this.#adoptProgress.update(m => {
+        const next = new Map(m)
+        next.set(root, count)
+        return next
+      })
+    })
+    EffectBus.on<{ root?: string; layers?: number; leaves?: number }>('adopt:done', (p) => {
+      const root = String(p?.root ?? '').trim().toLowerCase()
+      if (!/^[a-f0-9]{64}$/.test(root)) return
+      if (this.#activeAdoptRoot === root) this.#activeAdoptRoot = null
+      // Let the final count linger long enough to read, then clear the cue.
+      if (this.#adoptCueTimer) clearTimeout(this.#adoptCueTimer)
+      this.#adoptCueTimer = setTimeout(() => {
+        this.#adoptCueTimer = null
+        this.#adoptProgress.update(m => {
+          const next = new Map(m)
+          next.delete(root)
+          return next
+        })
+      }, 2500)
     })
 
     // ─── URL-hash handoff from the hive's adopt button ─────────────────
@@ -525,6 +603,16 @@ export class HomeComponent implements OnDestroy {
     // the constructor doesn't re-run. Listen for hashchange too so each
     // adopt-via-iframe gets processed even on a persistent DCP instance.
     window.addEventListener('hashchange', () => this.#processBranchHash())
+  }
+
+  /** Climbing resolved-sig count for a section's live broker walk, or null
+   *  when no walk is active for it — the template's cue that the adopted
+   *  row is filling. Matches originalRootSig too so a section whose root
+   *  advanced (patches) still attributes its walk. */
+  adoptResolvedCount(section: DomainSection): number | null {
+    const m = this.#adoptProgress()
+    const n = m.get(section.rootSig) ?? m.get(section.originalRootSig)
+    return n === undefined ? null : n
   }
 
   /** Read `#branch=<sig>&at=<segments>` from the URL hash and route it
@@ -1027,13 +1115,25 @@ export class HomeComponent implements OnDestroy {
           // recorded under the domain's own name (the manifest-install
           // shape), same inference as getRegistrySnapshot.
           if ((b.kind ?? (b.name === domain.name ? 'package' : 'content')) === 'package') continue
-          if (this.sections().some(s => s.rootSig === sig)) continue   // idempotent
-          if (fresh.some(s => s.rootSig === sig)) continue
           // The recorded tile name (e.g. "dolphin") renames the resolved root
           // so the rebuilt section reads as what was adopted, not the layer's
           // internal name. Skip a bare sig-prefix fallback (8 hex).
           const recordedName = String(b.name ?? '').trim()
           const adoptLabel = /^[a-f0-9]{8}$/.test(recordedName) ? undefined : (recordedName || undefined)
+          // Idempotent — by sig (rootSig, or originalRootSig when patches
+          // advanced it) AND by tile identity (host folder + tile name +
+          // placement, the sigbag's (name, at) key). The identity check
+          // matters because a live adopt may hold a NEWER sig than the
+          // lineage entry read here (recordInLineage replaces the entry
+          // asynchronously) — rebuilding from the stale sig would render
+          // the same tile twice. Comparing `at` keeps two same-named
+          // branches at different placements as the two sections they are.
+          const entryAt = JSON.stringify(b.at ?? [])
+          const dup = (list: DomainSection[]): boolean => list.some(s =>
+            s.rootSig === sig || s.originalRootSig === sig
+            || (s.kind === 'content' && !!adoptLabel && s.adoptLabel === adoptLabel
+                && s.domainName === domain.name && JSON.stringify(s.at ?? []) === entryAt))
+          if (dup(this.sections()) || dup(fresh)) continue
           fresh.push({
             domain: `https://${domain.name}`,
             domainName: domain.name,
@@ -1048,15 +1148,30 @@ export class HomeComponent implements OnDestroy {
             enabled: true,
             adoptLabel,
             kind: 'content',
+            at: b.at ?? [],
           })
         }
       }
       if (!fresh.length) return
-      this.sections.update(secs => [...secs, ...fresh])
+      // Push-time re-check against the CURRENT sections: the live adopt:meta
+      // path may have landed a section for the same sig/tile while this
+      // rebuild awaited OPFS (the loop's check reads pre-await state).
+      // Filtering inside the update closes that window — the race can't
+      // double-render.
+      let pushed: DomainSection[] = []
+      this.sections.update(secs => {
+        pushed = fresh.filter(f => !secs.some(s =>
+          s.rootSig === f.rootSig || s.originalRootSig === f.rootSig
+          || (s.kind === 'content' && !!f.adoptLabel && s.adoptLabel === f.adoptLabel
+              && s.domainName === f.domainName
+              && JSON.stringify(s.at ?? []) === JSON.stringify(f.at ?? []))))
+        return [...secs, ...pushed]
+      })
+      if (!pushed.length) return
       // #77-B: seed each fresh section with the visual-context nodes (the
       // already-there items from other enabled domains + default) so the
       // single tree shows incoming features landing among what's there.
-      for (const s of fresh) {
+      for (const s of pushed) {
         const ctx = await this.buildVisualContext(s.domainName)
         if (ctx.length) {
           this.sections.update(secs => secs.map(sec =>
@@ -1072,7 +1187,7 @@ export class HomeComponent implements OnDestroy {
       // bootstrap byteSource is a last resort for sections without a
       // dialable domain.
       const fallback = (devDefaultBootstrap()?.byteSource || '').trim() || undefined
-      for (const s of fresh) void this.#resolveBranchSection(s.rootSig, s.domain, s.domain || fallback)
+      for (const s of pushed) void this.#resolveBranchSection(s.rootSig, s.domain, s.domain || fallback)
     } catch (e) {
       console.warn('[home] #refreshFromLineage failed', e)
     }

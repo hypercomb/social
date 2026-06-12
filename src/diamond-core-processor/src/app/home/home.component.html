@@ -110,8 +110,18 @@
         @if (isGroupOpen(group.domainName)) {
         @for (section of group.sections; track section.rootSig) {
           <div class="package-row">
-            @if (section.loading) {
-              <div class="section-status">{{ section.installStatus ?? ('dcp.loading' | t) }}</div>
+            @if (section.loading || adoptResolvedCount(section) !== null) {
+              <div class="section-status">
+                <span class="status-line">
+                  {{ section.loading ? (section.installStatus ?? ('dcp.loading' | t)) : '' }}
+                  @if (adoptResolvedCount(section); as resolved) {
+                    <span class="resolve-count">{{ 'dcp.resolved-count' | t: { count: resolved } }}</span>
+                  }
+                </span>
+                <!-- The walk discovers its frontier as it goes — no total
+                     exists, so the bar sweeps while the count climbs. -->
+                <span class="resolve-track" aria-hidden="true"><span class="resolve-fill"></span></span>
+              </div>
             }
 
             @if (section.error) {

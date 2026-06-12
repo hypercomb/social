@@ -867,6 +867,10 @@ export class ContentBrokerDrone extends Drone {
         visited.add(r)
         const got = await this.fetchBySig(r, 'resource')
         if (got) stats.leaves++; else stats.failed++
+        // Per-resource progress, not just per-layer: a one-layer branch
+        // with many images otherwise sits silent for the whole resource
+        // phase — the UI cue must climb as resources resolve.
+        this.emitEffect('adopt:progress', { sig: r, ...stats })
       }
 
       for (const c of children) await walkLayer(c)

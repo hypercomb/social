@@ -335,6 +335,46 @@ dcp-command-line {
   color: #b00020;
 }
 
+/* Live resolve cue on an adopted branch row — climbing count + sweeping
+   bar while the broker walk fills layers/resources (no total exists: the
+   walk discovers its frontier as it goes). */
+.status-line {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+}
+
+.resolve-count {
+  font-variant-numeric: tabular-nums;
+  color: #b8860b;
+  white-space: nowrap;
+}
+
+.resolve-track {
+  position: relative;
+  display: block;
+  height: 3px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: rgba(136, 136, 136, 0.25);
+  overflow: hidden;
+}
+
+.resolve-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 35%;
+  border-radius: 999px;
+  background: #e0a93e;
+  animation: resolve-sweep 1.4s ease-in-out infinite;
+}
+
+@keyframes resolve-sweep {
+  0%   { left: -35%; }
+  100% { left: 100%; }
+}
+
 .empty {
   font-size: 13px;
   color: #999;
