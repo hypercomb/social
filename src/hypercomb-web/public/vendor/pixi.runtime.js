@@ -48770,7 +48770,7 @@ function isWebGLSupported(failIfMajorPerformanceCaveat) {
         return false;
       }
       const canvas = DOMAdapter.get().createCanvas();
-      let gl = canvas.getContext("webgl", contextOptions);
+      let gl = canvas.getContext("webgl", contextOptions) || canvas.getContext("webgl2", contextOptions);
       const success = !!gl?.getContextAttributes()?.stencil;
       if (gl) {
         const loseContext = gl.getExtension("WEBGL_lose_context");

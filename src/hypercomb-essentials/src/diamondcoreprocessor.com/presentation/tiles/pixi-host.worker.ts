@@ -28,8 +28,10 @@ export class PixiHostWorker extends Worker {
 
   /** WebGL/WebGPU both refused → the tile scene cannot render. Replace the
    *  (empty) canvas host with a plain-DOM explanation of what to enable.
-   *  Localized when the i18n provider is up; English otherwise. */
-  #showWebglRequired(host: HTMLDivElement): void {
+   *  Localized when the i18n provider is up; English otherwise. `diag` is
+   *  the context-probe summary, shown small so a screenshot of this note
+   *  carries the evidence needed to diagnose the machine. */
+  #showWebglRequired(host: HTMLDivElement, diag?: string): void {
     const i18n = (window as { ioc?: { get?: (k: string) => unknown } }).ioc
       ?.get?.('@hypercomb.social/I18n') as
       { t: (k: string, p?: Record<string, string | number>) => string } | undefined
@@ -53,6 +55,12 @@ export class PixiHostWorker extends Worker {
     p.style.cssText = 'max-width:34rem;font-size:0.85rem;line-height:1.6;color:rgba(245,245,245,0.6);'
     p.textContent = body
     note.append(h, p)
+    if (diag) {
+      const d = document.createElement('div')
+      d.style.cssText = 'font:0.65rem ui-monospace,monospace;color:rgba(245,245,245,0.3);'
+      d.textContent = diag
+      note.append(d)
+    }
     host.appendChild(note)
   }
 
@@ -140,12 +148,23 @@ export class PixiHostWorker extends Worker {
     // canvas. render:host-ready never fires, so every render drone stays
     // dormant.
     if ((app.renderer as unknown as { name?: string })?.name === 'canvas') {
-      console.error('[pixi-host] WebGL/WebGPU unavailable — Pixi fell back to the canvas renderer, which cannot draw the mesh-based tile scene. Halting render boot.')
-      this.emitEffect('render:unsupported', { renderer: 'canvas' })
+      // Probe each context family so the report (console + on-screen note)
+      // says exactly WHAT the browser refused — distinguishes "WebGL2 works
+      // but the probe was too strict" from "all GPU contexts blocked".
+      const diag = (() => {
+        try {
+          const gl1 = !!document.createElement('canvas').getContext('webgl')
+          const gl2 = !!document.createElement('canvas').getContext('webgl2')
+          const gpu = !!(navigator as Navigator & { gpu?: unknown }).gpu
+          return `webgl1=${gl1} webgl2=${gl2} webgpu=${gpu}`
+        } catch { return 'context-probe-threw' }
+      })()
+      console.error(`[pixi-host] WebGL/WebGPU unavailable (${diag}) — Pixi fell back to the canvas renderer, which cannot draw the mesh-based tile scene. Halting render boot.`)
+      this.emitEffect('render:unsupported', { renderer: 'canvas', diag })
       try { app.ticker?.stop() } catch { /* already stopped */ }
       try { app.destroy(true) } catch { /* canvas may not be attached yet */ }
       this.app = null
-      this.#showWebglRequired(host)
+      this.#showWebglRequired(host, diag)
       return
     }
 
