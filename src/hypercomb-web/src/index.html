@@ -22,6 +22,15 @@
       href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&display=block"
       rel="stylesheet"
     />
+
+    <!-- Static bootstrap import map. MUST be injected before any module
+         script so iOS Safari honours it — Safari locks the import-map
+         registry once the first module begins loading, which makes the
+         runtime-injected map in main.ts (attachImportMap) a no-op on iOS.
+         Only the build-stable externals belong here; runtime-discovered
+         drone deps are resolved from OPFS by resolveImportMap(). These two
+         entries mirror that map's fixed head. -->
+    <script type="importmap">{"imports":{"@hypercomb/core":"/hypercomb-core.runtime.js","pixi.js":"/vendor/pixi.runtime.js"}}</script>
   </head>
   <body>
     <script src="env.js"></script>
