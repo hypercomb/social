@@ -7,3 +7,4 @@ scripts/.build-state.json
 hypercomb-relay/fix-result.txt
 hypercomb-relay/add-writer-result.txt
 hypercomb-relay/dev-content/
+__webgl2-probe-test.html
