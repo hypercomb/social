@@ -120,6 +120,13 @@ export class PixiHostWorker extends Worker {
 
     ;(window as any).__hcBoot?.('PixiHostWorker.act → Application.init() starting')
     const tPixiInit = performance.now()
+    // Mobile: cap DPR at 1.5. iPhone Pro has DPR=3 → ~3M-pixel framebuffer at
+    // 60fps which pushes the iOS GPU process over its memory limit → repeated
+    // WKWebView crash → Safari "A problem repeatedly occurred". DPR=1.5 is
+    // imperceptible at mobile viewing distance. Desktop caps at 2 — above that
+    // MSAA is redundant and the gain is invisible.
+    const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)
+    const dpr = Math.min(devicePixelRatio || 1, isMobile ? 1.5 : 2)
     await app.init({
       // Size to the host element, not the window, so anything that
       // narrows the host (the history sidebar taking a column on the
@@ -129,9 +136,12 @@ export class PixiHostWorker extends Worker {
       // pixels, with hit-testing still firing through the overlay.
       resizeTo: host,
       backgroundAlpha: 0,
-      resolution: devicePixelRatio || 1,
+      resolution: dpr,
       autoDensity: true,
-      antialias: true,
+      antialias: dpr < 2,
+      // Hint iOS to use the efficiency GPU core — larger memory headroom
+      // relative to workload than the performance core.
+      powerPreference: 'low-power',
     })
     const pixiInitMs = performance.now() - tPixiInit
     console.log(`[pixi-host] Application.init() ${pixiInitMs.toFixed(0)}ms`)
@@ -171,6 +181,18 @@ export class PixiHostWorker extends Worker {
     app.stage.scale.set(1.8, 1.8)
     app.stage.interactiveChildren = false
     host.appendChild(app.canvas)
+
+    // Mobile: cap at 30fps — the tile shaders are complex and 60fps on a
+    // small screen is pure GPU waste, and a direct contributor to the GPU
+    // memory pressure behind the repeated-crash error.
+    if (isMobile) app.ticker.maxFPS = 30
+
+    // Pause the ticker when the tab is hidden — a backgrounded page burning
+    // GPU cycles is a leading cause of the iOS GPU-process kill behind
+    // Safari's "A problem repeatedly occurred".
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { app.ticker.stop() } else { app.ticker.start() }
+    })
 
     // Pixi's built-in resizeTo polling did not reliably react to CSS
     // changes that narrowed the host (the history sidebar's injected
