@@ -302,6 +302,17 @@ export class ShowCellDrone extends Drone {
    *  the bytes land. This set only prevents stacking duplicate fills for
    *  the same sig while one is in flight. */
   readonly #hostFillInFlight = new Set<string>()
+
+  /** Last resolved TileSourceRegistry entries per location key — the
+   *  fallback a render pass uses when source resolution exceeds its
+   *  budget (see the bounded resolve in the render path). */
+  readonly #sourceEntriesCache = new Map<string, readonly { name: string; kind: string; source?: { peerIndex?: number } }[]>()
+
+  /** Budget for awaited tile-source resolution per render pass. Local
+   *  sources answer in single-digit ms; anything slower (a source mid
+   *  network cascade) renders from the cached entries and catches up via
+   *  a detached re-render. */
+  static readonly SOURCE_RESOLVE_BUDGET_MS = 250
   /** For EXTERNAL (peer) labels: which publisher imageSig the cached value
    *  was derived from. The publisher's CURRENT sig is authoritative — a
    *  cache entry is only reusable while its source sig is unchanged, so a
@@ -2036,7 +2047,30 @@ export class ShowCellDrone extends Drone {
         | undefined
       if (registry?.resolve) {
         const segs = lineage?.explorerSegments?.() ?? []
-        const entries = await registry.resolve({ segments: segs, dir })
+        // BOUNDED source resolution. Sources can dial the network (config
+        // branches resolve layers/props through the broker), and awaiting
+        // them unbounded let ONE slow source stall every render pass —
+        // navigation must never wait on a tile source. Race against a
+        // short budget: in time → render the live result; over budget →
+        // render the last known entries for this location NOW and let the
+        // resolve finish detached, re-rendering if it brings anything new.
+        const srcKey = segs.join('/')
+        const live = registry.resolve({ segments: segs, dir }).then((res) => {
+          this.#sourceEntriesCache.set(srcKey, res)
+          return res
+        })
+        const raced = await Promise.race([
+          live,
+          new Promise<null>((r) => setTimeout(() => r(null), ShowCellDrone.SOURCE_RESOLVE_BUDGET_MS)),
+        ])
+        const entries = raced ?? this.#sourceEntriesCache.get(srcKey) ?? []
+        if (!raced) {
+          const usedKey = entries.map(e => `${e.kind}:${e.name}`).join('|')
+          void live.then((res) => {
+            const gotKey = res.map(e => `${e.kind}:${e.name}`).join('|')
+            if (gotKey !== usedKey) this.requestRender()
+          }).catch(() => { /* already logged by the registry */ })
+        }
 
         // Mismatch check — only mismatched peer names produce any
         // peer-aware state. If every peer name already exists in

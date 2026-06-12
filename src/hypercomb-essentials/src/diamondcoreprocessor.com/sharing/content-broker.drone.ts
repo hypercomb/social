@@ -135,6 +135,13 @@ const DEFAULT_TIMEOUT_MS = 2000
 // host's 404 (~50-250ms observed) while bounding the pathological case.
 const HTTP_PROBE_TIMEOUT_MS = 3000
 
+// How long a FULL-CASCADE miss (HTTP tiers exhausted; for layers, mesh
+// timed out too) suppresses re-dialing for that sig. Render passes ask
+// for the same missing sigs on every synchronize — without this window
+// each pass re-paid the whole cascade (for layers: up to the 2s mesh
+// wait, serially per sig). Cleared early by new domain knowledge.
+const FETCH_MISS_TTL_MS = 60_000
+
 export type ContentType = 'layer' | 'resource' | 'dependency'
 
 // Visuals-by-composedSig is the second flavor of fetch this drone
@@ -263,6 +270,10 @@ export class ContentBrokerDrone extends Drone {
   // resolving from a single response. Cleaned up when the fetch
   // settles.
   #pendingFetches = new Map<string, Promise<Uint8Array | null>>()
+
+  // Full-cascade miss window per sig (egg semantics — see fetchBySig).
+  // Cleared by new knowledge (#noteDomains / noteDomain) or lapse.
+  #fetchMissUntil = new Map<string, number>()
 
   // Same coalescing for visuals fetches — distinct map because the
   // return shape is different (CachedVisualsEntry[] vs Uint8Array).
@@ -410,6 +421,9 @@ export class ContentBrokerDrone extends Drone {
     const set = this.#knownDomainsBySig.get(sig) ?? new Set<string>()
     for (const d of domains) set.add(d)
     this.#knownDomainsBySig.set(sig, set)
+    // New address knowledge for this sig — its egg may now hatch; lift
+    // the miss window so the next ask re-dials immediately.
+    this.#fetchMissUntil.delete(sig)
   }
 
   /** §21.14 — parse a verified layer's sig-array slots and attribute the
@@ -635,7 +649,12 @@ export class ContentBrokerDrone extends Drone {
    */
   public noteDomain = (domain: string): void => {
     const host = this.#domainToHost(String(domain ?? ''))
-    if (host) this.#sessionKnownDomains.add(host)
+    if (host) {
+      this.#sessionKnownDomains.add(host)
+      // A new session-wide fetch source can satisfy ANY pending egg —
+      // clear all miss windows (rare event: adopt handoff, config).
+      this.#fetchMissUntil.clear()
+    }
   }
 
   /**
@@ -691,6 +710,20 @@ export class ContentBrokerDrone extends Drone {
       return local
     }
 
+    // MISS WINDOW (egg semantics): a sig the full cascade could not
+    // resolve recently answers null instantly instead of re-dialing
+    // HTTP (and, for layers, the mesh's multi-second wait) — render
+    // passes re-ask for the same missing sig on every synchronize, and
+    // without this window each pass re-paid the entire cascade. The
+    // window clears when new knowledge arrives (#noteDomains attribution,
+    // noteDomain session source) or simply lapses — "not yet delivered",
+    // never "failed".
+    const missUntil = this.#fetchMissUntil.get(s)
+    if (missUntil !== undefined) {
+      if (Date.now() < missUntil) return null
+      this.#fetchMissUntil.delete(s)
+    }
+
     // HTTP-direct path — try known domains' content endpoints first.
     // Per the layer-only-mesh doctrine, heavy bytes (resources, deps)
     // travel via HTTP exclusively; layers can fall back to mesh.
@@ -706,9 +739,12 @@ export class ContentBrokerDrone extends Drone {
     //    to the domains the mesh told you about."
     // Resources and dependencies have no mesh fallback. If they aren't
     // available via HTTP-direct, the asker simply doesn't get them —
-    // they'll be re-tried on the next access, by which point HTTP-
+    // they'll be re-tried after the miss window, by which point HTTP-
     // direct may have learned new domains via subsequent layer fetches.
-    if (type !== 'layer') return null
+    if (type !== 'layer') {
+      this.#fetchMissUntil.set(s, Date.now() + FETCH_MISS_TTL_MS)
+      return null
+    }
 
     // Mesh broker fallback for layers only. Used when HTTP-direct
     // returns nothing (no known domains, or every candidate 404'd /
@@ -716,7 +752,11 @@ export class ContentBrokerDrone extends Drone {
     // the mesh round-trip is cheap.
     const fetchPromise = this.#fetchOverMesh(s, type, timeoutMs)
     this.#pendingFetches.set(s, fetchPromise)
-    try { return await fetchPromise }
+    try {
+      const bytes = await fetchPromise
+      if (!bytes) this.#fetchMissUntil.set(s, Date.now() + FETCH_MISS_TTL_MS)
+      return bytes
+    }
     finally { this.#pendingFetches.delete(s) }
   }
 
