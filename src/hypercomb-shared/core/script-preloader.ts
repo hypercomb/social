@@ -4,7 +4,7 @@
 // sole caller of find() → pulse → synchronize.
 
 import { Bee, type BeeResolver, EffectBus } from '@hypercomb/core'
-import { OPFS_SYNC_ONLY } from './opfs-write.js'
+import { IS_IOS } from './opfs-write.js'
 import { Store } from './store'
 
 export interface ActionDescriptor {
@@ -487,21 +487,29 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     const tStart = performance.now()
     let tOpfs = 0, tDeps = 0, tEval = 0
 
-    // Try __bees__/{sig}.js then __bees__/{sig}
-    let handle: FileSystemFileHandle | null = null
-    try {
-      handle = await this.store.bees.getFileHandle(`${signature}.js`)
-    } catch {
+    // On iOS, store.getBee() ignores `buffer` and imports the bee from its
+    // static /content/__bees__/ URL. Skip the OPFS read entirely — getFileHandle
+    // throws on fresh/partial installs and would block loading before getBee()
+    // ever runs.
+    let buffer: ArrayBuffer
+    if (IS_IOS) {
+      buffer = new ArrayBuffer(0)
+    } else {
+      // Try __bees__/{sig}.js then __bees__/{sig}
+      let handle: FileSystemFileHandle | null = null
       try {
-        handle = await this.store.bees.getFileHandle(signature)
+        handle = await this.store.bees.getFileHandle(`${signature}.js`)
       } catch {
-        console.warn(`[script-preloader] bee ${signature} not found in OPFS`)
-        return null
+        try {
+          handle = await this.store.bees.getFileHandle(signature)
+        } catch {
+          console.warn(`[script-preloader] bee ${signature} not found in OPFS`)
+          return null
+        }
       }
+      const file = await handle.getFile()
+      buffer = await file.arrayBuffer()
     }
-
-    const file = await handle.getFile()
-    const buffer = await file.arrayBuffer()
     tOpfs = performance.now() - tStart
 
     // Ensure namespace dependencies are loaded before the bee
@@ -572,10 +580,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       try {
         console.log(`[script-preloader] loading dep ${depSig} (${alias}) for bee ${beeSig}`)
         // iOS: the runtime import map is ignored (locked before it's injected),
-        // so the bare `alias` won't resolve. Import the dep from its same-origin
-        // /opfs/ SW URL instead — the SW serves it from OPFS/cache.
-        const depSpecifier = OPFS_SYNC_ONLY
-          ? new URL(`/opfs/__dependencies__/${depSig}.js`, location.origin).toString()
+        // so the bare `alias` won't resolve. Import the dep from its static
+        // same-origin /content/ URL instead.
+        const depSpecifier = IS_IOS
+          ? `/content/__dependencies__/${depSig}.js`
           : alias
         await import(/* @vite-ignore */ depSpecifier)
         this.#loadedDeps.add(depSig)

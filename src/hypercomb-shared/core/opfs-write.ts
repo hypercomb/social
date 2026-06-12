@@ -20,6 +20,12 @@ const supportsCreateWritable =
 // same-origin /opfs/ service-worker URLs instead of blob/bare-alias.
 export const OPFS_SYNC_ONLY = !supportsCreateWritable
 
+// iOS Safari (iPhone/iPad/iPod). UA-gated to match the proven mobile-branch
+// behaviour. Gates the module-IMPORT path: on iOS a blob: module URL has an
+// opaque origin and can't resolve import-map bare specifiers, so bees/deps are
+// imported from their same-origin static /content/ URLs instead.
+export const IS_IOS = /iP(hone|ad|od)/i.test(navigator.userAgent)
+
 let worker: Worker | null = null
 let nextId = 0
 const pending = new Map<number, { resolve: () => void; reject: (e: Error) => void }>()

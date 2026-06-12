@@ -2,7 +2,7 @@
 // hypercomb-web/src/app/core/store.ts
 
 import { Bee, EffectBus, SignatureService, isSignature } from '@hypercomb/core'
-import { writeOpfsFile, OPFS_SYNC_ONLY } from './opfs-write.js'
+import { writeOpfsFile, IS_IOS } from './opfs-write.js'
 
 type BeeCtor = new () => Bee
 
@@ -214,16 +214,14 @@ export class Store extends EventTarget {
 
       let mod: Record<string, unknown> | null = null
 
-      if (OPFS_SYNC_ONLY) {
+      if (IS_IOS) {
         // iOS Safari: a blob: module has an opaque origin and cannot see the
         // page import map, so the bee's own `import '@hypercomb/core'` throws.
-        // Seed the SW cache and import from the same-origin /opfs/ URL, which
-        // DOES inherit the import map. The bee is already in OPFS (the
-        // preloader read it from there), so the SW can serve it regardless.
-        await this.cellResourceCache(signature, buffer)
-        const url =
-          new URL(`/opfs/${Store.BEES_DIRECTORY}/${signature}.js`, location.origin).toString()
-        mod = await tryImport(url)
+        // Import the bee from its same-origin STATIC /content/ URL instead —
+        // that DOES inherit the page import map, and it is always the freshly
+        // deployed bytes (no OPFS/SW dependency, no cache staleness). The
+        // passed `buffer` is ignored on this path.
+        mod = await tryImport(`/content/__bees__/${signature}.js`)
       } else {
         // Import directly from the verified buffer via blob URL.
         // This bypasses the service worker entirely — no /opfs/ round-trip,

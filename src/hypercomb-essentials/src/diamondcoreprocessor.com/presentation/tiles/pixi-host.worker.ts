@@ -187,6 +187,12 @@ export class PixiHostWorker extends Worker {
     // memory pressure behind the repeated-crash error.
     if (isMobile) app.ticker.maxFPS = 30
 
+    // Confirmation marker: proves THIS (post-fix) bee is the one running on the
+    // device. If this line is absent from the console, the new bee never
+    // reached the phone (stale OPFS / DCP not redeployed), not that the cap
+    // failed. Remove once mobile boot is confirmed stable.
+    console.log(`[pixi-host] mobile-perf-guard dpr=${dpr} isMobile=${isMobile} maxFPS=${isMobile ? 30 : 'uncapped'}`)
+
     // Pause the ticker when the tab is hidden — a backgrounded page burning
     // GPU cycles is a leading cause of the iOS GPU-process kill behind
     // Safari's "A problem repeatedly occurred".
