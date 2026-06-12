@@ -1,0 +1,80 @@
+name: Firebase Deploy (DCP Playground)
+
+on:
+  push:
+    branches: [playground-dylan, playground-jaime]
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches: [playground-dylan, playground-jaime]
+
+jobs:
+  build_and_deploy_job:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    runs-on: ubuntu-latest
+    name: Build and Deploy Job
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+          lfs: false
+
+      - name: Use Node 24.14.1
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.14.1'
+
+      - name: Install workspace root dependencies
+        working-directory: src
+        run: |
+          rm -rf node_modules package-lock.json
+          npm install
+
+      - name: Build hypercomb-core
+        working-directory: src/hypercomb-core
+        run: npm run build
+
+      - name: Build essentials modules
+        working-directory: src/hypercomb-essentials
+        run: |
+          npm run build
+          node ../node_modules/tsx/dist/cli.mjs ./scripts/build-module.ts --local
+          node ../node_modules/tsx/dist/cli.mjs ./scripts/copy-to-dcp.ts
+
+      - name: Install DCP dependencies
+        working-directory: src/diamond-core-processor
+        run: npm install
+
+      - name: Build DCP
+        working-directory: src/diamond-core-processor
+        run: npx ng build --configuration production
+
+      - name: Verify build output
+        run: |
+          set -euo pipefail
+          ROOT="src/diamond-core-processor/dist/diamond-core-processor/browser"
+          REQUIRED=(
+            "index.html"
+            "manifest.json"
+            "staticwebapp.config.json"
+          )
+          for f in "${REQUIRED[@]}"; do
+            if [ ! -f "$ROOT/$f" ]; then
+              echo "MISSING required artifact: $ROOT/$f"
+              exit 1
+            else
+              echo "OK: $ROOT/$f"
+            fi
+          done
+          for dir in __bees__ __layers__ __dependencies__; do
+            if [ ! -d "$ROOT/$dir" ] || [ -z "$(ls -A "$ROOT/$dir")" ]; then
+              echo "MISSING or empty essentials directory: $ROOT/$dir"
+              exit 1
+            else
+              echo "OK: $ROOT/$dir ($(ls "$ROOT/$dir" | wc -l) files)"
+            fi
+          done
+
+      - name: Deploy to Firebase
+        working-directory: src/diamond-core-processor
+        run: npx firebase-tools@latest deploy --only hosting --project playground-dcp --token ${{ secrets.FIREBASE_TOKEN_DCP_PLAYGROUND }}

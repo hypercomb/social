@@ -71,6 +71,25 @@
               ],
               "outputHashing": "all"
             },
+            "playground": {
+              "sourceMap": true,
+              "outputHashing": "all",
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "650kB",
+                  "maximumError": "1MB"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "15kB",
+                  "maximumError": "18kB"
+                }
+              ],
+              "define": {
+                "__DCP_ORIGIN__": "\"https://dcp.dylanpchiu.com\""
+              }
+            },
             "development": {
               "optimization": false,
               "extractLicenses": false,
