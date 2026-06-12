@@ -9,6 +9,7 @@
 // even when the sentinel hasn't pushed yet.
 
 import { EffectBus, SignatureStore } from '@hypercomb/core'
+import { writeOpfsFile } from '@hypercomb/shared/core/opfs-write'
 import { Store } from '@hypercomb/shared/core'
 import type { SentinelBridge } from './sentinel-bridge'
 
@@ -273,10 +274,7 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     await Promise.all(sigs.map(async (sig) => {
       const bytes = await fetchBytes(urlFor(sig))
       if (!bytes) return
-      const handle = await dir.getFileHandle(nameFor(sig), { create: true })
-      const writable = await handle.createWritable()
-      await writable.write(bytes)
-      await writable.close()
+      await writeOpfsFile(dir, nameFor(sig), bytes)
       written++
     }))
     return written
@@ -301,10 +299,7 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
       const indexName = String(i).padStart(4, '0')
       const bytes = await fetchBytes(`${contentPath}/${bagSig}/${indexName}`)
       if (!bytes) return
-      const handle = await bagDir.getFileHandle(indexName, { create: true })
-      const writable = await handle.createWritable()
-      await writable.write(bytes)
-      await writable.close()
+      await writeOpfsFile(bagDir, indexName, bytes)
       written++
     }))
     return written
@@ -536,10 +531,7 @@ const tryParseManifest = (json: string): InstallManifest | null => {
 }
 
 const writeBytes = async (dir: FileSystemDirectoryHandle, name: string, bytes: ArrayBuffer): Promise<void> => {
-  const handle = await dir.getFileHandle(name, { create: true })
-  const writable = await handle.createWritable()
-  await writable.write(bytes)
-  await writable.close()
+  await writeOpfsFile(dir, name, bytes)
 }
 
 const seedCacheEntry = async (path: string, bytes: ArrayBuffer, contentType: string): Promise<void> => {

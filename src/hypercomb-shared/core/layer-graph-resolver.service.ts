@@ -1,6 +1,7 @@
 // hypercomb-web/src/app/core/layer-graph-resolver.service.ts
 
 import { Store } from './store'
+import { writeOpfsFile } from './opfs-write.js'
 
 export type LayerRecord = {
   name: string
@@ -84,13 +85,7 @@ export class LayerGraphResolver {
     jsonText: string
   ): Promise<void> => {
 
-    const handle = await layersDir.getFileHandle(signature, { create: true })
-    const writable = await handle.createWritable()
-    try {
-      await writable.write(this.encoder.encode(jsonText))
-    } finally {
-      await writable.close()
-    }
+    await writeOpfsFile(layersDir, signature, this.encoder.encode(jsonText))
   }
 
   private fetchLayerJson = async (

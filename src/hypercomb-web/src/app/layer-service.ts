@@ -1,6 +1,7 @@
 // hypercomb-web/src/app/layer-service.ts
 
 import { Injectable } from '@angular/core'
+import { writeOpfsFile } from '@hypercomb/shared/core/opfs-write'
 import { type LocationParseResult } from '@hypercomb/shared/core/initializers/location-parser'
 import { Store } from '@hypercomb/shared/core'
 
@@ -96,10 +97,7 @@ export class LayerService {
   }
 
   private writeBytesFile = async (dir: FileSystemDirectoryHandle, name: string, bytes: Uint8Array<ArrayBuffer>): Promise<void> => {
-    const outHandle = await dir.getFileHandle(name, { create: true })
-    const writable = await outHandle.createWritable()
-    await writable.write(bytes)
-    await writable.close()
+    await writeOpfsFile(dir, name, bytes)
   }
 
 

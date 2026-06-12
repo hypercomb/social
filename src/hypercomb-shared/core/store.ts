@@ -2,6 +2,7 @@
 // hypercomb-web/src/app/core/store.ts
 
 import { Bee, EffectBus, SignatureService, isSignature } from '@hypercomb/core'
+import { writeOpfsFile, OPFS_SYNC_ONLY } from './opfs-write.js'
 
 type BeeCtor = new () => Bee
 
@@ -213,15 +214,27 @@ export class Store extends EventTarget {
 
       let mod: Record<string, unknown> | null = null
 
-      // Import directly from the verified buffer via blob URL.
-      // This bypasses the service worker entirely — no /opfs/ round-trip,
-      // no cache seeding, no dependency on SW controlling the page.
-      const blob = new Blob([buffer], { type: 'application/javascript' })
-      const blobUrl = URL.createObjectURL(blob)
-      try {
-        mod = await tryImport(blobUrl)
-      } finally {
-        URL.revokeObjectURL(blobUrl)
+      if (OPFS_SYNC_ONLY) {
+        // iOS Safari: a blob: module has an opaque origin and cannot see the
+        // page import map, so the bee's own `import '@hypercomb/core'` throws.
+        // Seed the SW cache and import from the same-origin /opfs/ URL, which
+        // DOES inherit the import map. The bee is already in OPFS (the
+        // preloader read it from there), so the SW can serve it regardless.
+        await this.cellResourceCache(signature, buffer)
+        const url =
+          new URL(`/opfs/${Store.BEES_DIRECTORY}/${signature}.js`, location.origin).toString()
+        mod = await tryImport(url)
+      } else {
+        // Import directly from the verified buffer via blob URL.
+        // This bypasses the service worker entirely — no /opfs/ round-trip,
+        // no cache seeding, no dependency on SW controlling the page.
+        const blob = new Blob([buffer], { type: 'application/javascript' })
+        const blobUrl = URL.createObjectURL(blob)
+        try {
+          mod = await tryImport(blobUrl)
+        } finally {
+          URL.revokeObjectURL(blobUrl)
+        }
       }
 
       if (!mod || typeof mod !== 'object') return null
@@ -305,13 +318,7 @@ export class Store extends EventTarget {
       await this.resources.getFileHandle(signature)
       return signature
     } catch { /* fall through and create */ }
-    const handle = await this.resources.getFileHandle(signature, { create: true })
-    const writable = await handle.createWritable()
-    try {
-      await writable.write(blob)
-    } finally {
-      await writable.close()
-    }
+    await writeOpfsFile(this.resources, signature, blob)
     // Mirror up to DCP. PushQueueService (in essentials) subscribes to
     // `content:wrote` and queues the bytes for sentinel intake. Going
     // through EffectBus avoids a shared→essentials import.
@@ -483,9 +490,7 @@ export class Store extends EventTarget {
       await this.optimization.getFileHandle(signature)
       return signature
     } catch { /* not present — create */ }
-    const handle = await this.optimization.getFileHandle(signature, { create: true })
-    const writable = await handle.createWritable()
-    try { await writable.write(blob) } finally { await writable.close() }
+    await writeOpfsFile(this.optimization, signature, blob)
     return signature
   }
 
@@ -730,9 +735,7 @@ export class Store extends EventTarget {
   public writeLayerBytes = async (signature: string, bytes: ArrayBuffer): Promise<void> => {
     if (!this.layers) return
     try {
-      const handle = await this.layers.getFileHandle(signature, { create: true })
-      const writable = await handle.createWritable()
-      try { await writable.write(bytes) } finally { await writable.close() }
+      await writeOpfsFile(this.layers, signature, bytes)
     } catch { /* best-effort */ }
   }
 
@@ -755,9 +758,7 @@ export class Store extends EventTarget {
   public writeOptimizedBytes = async (signature: string, bytes: ArrayBuffer): Promise<void> => {
     if (!this.optimized) return
     try {
-      const handle = await this.optimized.getFileHandle(signature, { create: true })
-      const writable = await handle.createWritable()
-      try { await writable.write(bytes) } finally { await writable.close() }
+      await writeOpfsFile(this.optimized, signature, bytes)
     } catch { /* best-effort */ }
   }
 
@@ -788,9 +789,7 @@ export class Store extends EventTarget {
   ): Promise<void> => {
     if (!this.manifests) return
     try {
-      const handle = await this.manifests.getFileHandle(parentLayerSig, { create: true })
-      const writable = await handle.createWritable()
-      try { await writable.write(JSON.stringify(manifest)) } finally { await writable.close() }
+      await writeOpfsFile(this.manifests, parentLayerSig, JSON.stringify(manifest))
     } catch { /* cache miss on next read is fine */ }
   }
 
@@ -814,14 +813,7 @@ export class Store extends EventTarget {
   public put = async (bytes: ArrayBuffer): Promise<string> => {
     const signature = await SignatureService.sign(bytes)
 
-    const handle = await this.bees.getFileHandle(signature, { create: true })
-    const writable = await handle.createWritable()
-
-    try {
-      await writable.write(bytes)
-    } finally {
-      await writable.close()
-    }
+    await writeOpfsFile(this.bees, signature, bytes)
 
     return signature
   }

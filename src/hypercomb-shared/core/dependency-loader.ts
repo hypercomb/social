@@ -1,6 +1,7 @@
 // hypercomb-web/src/app/core/dependency-loader.ts
 
 import { EffectBus } from '@hypercomb/core'
+import { OPFS_SYNC_ONLY } from './opfs-write.js'
 import { Store } from './store'
 
 export class DependencyLoader extends EventTarget {
@@ -137,7 +138,12 @@ export class DependencyLoader extends EventTarget {
   #verifyAndImport = async (sig: string, alias: string): Promise<string> => {
     const pureSig = sig.replace(/\.js$/i, '')
     console.log(`[dependency-loader] importing ${alias} (${pureSig})`)
-    const mod = await import(/* @vite-ignore */ alias)
+    // iOS: the runtime import map is ignored, so the bare `alias` won't
+    // resolve. Import from the same-origin /opfs/ SW URL instead.
+    const specifier = OPFS_SYNC_ONLY
+      ? new URL(`/opfs/__dependencies__/${pureSig}.js`, location.origin).toString()
+      : alias
+    const mod = await import(/* @vite-ignore */ specifier)
     void mod
     console.log(`[dependency-loader] imported ${alias}`)
     return sig

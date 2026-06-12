@@ -4,6 +4,7 @@
 // sole caller of find() → pulse → synchronize.
 
 import { Bee, type BeeResolver, EffectBus } from '@hypercomb/core'
+import { OPFS_SYNC_ONLY } from './opfs-write.js'
 import { Store } from './store'
 
 export interface ActionDescriptor {
@@ -570,7 +571,13 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
 
       try {
         console.log(`[script-preloader] loading dep ${depSig} (${alias}) for bee ${beeSig}`)
-        await import(/* @vite-ignore */ alias)
+        // iOS: the runtime import map is ignored (locked before it's injected),
+        // so the bare `alias` won't resolve. Import the dep from its same-origin
+        // /opfs/ SW URL instead — the SW serves it from OPFS/cache.
+        const depSpecifier = OPFS_SYNC_ONLY
+          ? new URL(`/opfs/__dependencies__/${depSig}.js`, location.origin).toString()
+          : alias
+        await import(/* @vite-ignore */ depSpecifier)
         this.#loadedDeps.add(depSig)
         console.log(`[script-preloader] dep ${depSig} loaded`)
       } catch (err) {

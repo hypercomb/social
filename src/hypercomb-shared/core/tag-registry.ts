@@ -6,6 +6,7 @@
 // persisted by writing a new resource blob and updating the root sig.
 
 import { EffectBus, SignatureService } from '@hypercomb/core'
+import { writeOpfsFile } from './opfs-write.js'
 
 type TagEntry = { color?: string; enabled?: boolean; accent?: string }
 type TagMap = Record<string, TagEntry>
@@ -156,10 +157,7 @@ export class TagRegistry extends EventTarget {
     const root = store.opfsRoot as FileSystemDirectoryHandle
     const existing = await this.#readRootProps(store)
     const merged = { ...existing, ...updates }
-    const fh = await root.getFileHandle(PROPS_FILE, { create: true })
-    const writable = await fh.createWritable()
-    await writable.write(JSON.stringify(merged))
-    await writable.close()
+    await writeOpfsFile(root, PROPS_FILE, JSON.stringify(merged))
   }
 
   #store(): any {

@@ -2,6 +2,7 @@
 
 import { type LocationParseResult } from './initializers/location-parser'
 import { Store } from './store'
+import { writeOpfsFile } from './opfs-write.js'
 
 type InstallManifest = { version: number; layers: string[]; bees: string[]; dependencies: string[]; beeDeps?: Record<string, string[]> }
 type ContentManifest = { version: number; packages: Record<string, InstallManifest> }
@@ -249,10 +250,7 @@ export class LayerInstaller {
     name: string,
     bytes: Uint8Array<ArrayBuffer>
   ): Promise<void> => {
-    const outHandle = await dir.getFileHandle(name, { create: true })
-    const writable = await outHandle.createWritable()
-    await writable.write(bytes)
-    await writable.close()
+    await writeOpfsFile(dir, name, bytes)
   }
 
   #fetchBytes = async (url: string): Promise<Uint8Array<ArrayBuffer> | null> => {
