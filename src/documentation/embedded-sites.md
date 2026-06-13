@@ -85,7 +85,7 @@ Run the skill:
 /website
 ```
 
-The skill ([src/.claude/commands/website.md](.claude/commands/website.md))
+The skill (`src/.claude/commands/website.md`, gitignored — local to each checkout)
 takes the hierarchy JSON you paste, asks about intent/style/scope, and:
 
 1. If `currentWebsiteSig` is present, unpacks the previous bundle (you
@@ -150,8 +150,8 @@ Collapsing to one decoration:
   — ancestor walk, bundle load, manifest resolve, Shadow DOM render.
 - [hypercomb-essentials/.../commands/website.queen.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/commands/website.queen.ts)
   — `/website` export / stamp / clear.
-- [.claude/commands/website.md](../.claude/commands/website.md)
-  — the Claude Code skill that authors bundles.
+- `src/.claude/commands/website.md`
+  — the Claude Code skill that authors bundles (gitignored — local to each checkout).
 - [hypercomb-web/public/hypercomb.worker.js](../hypercomb-web/public/hypercomb.worker.js)
   — `/@resource/<sig>` service-worker route.
 

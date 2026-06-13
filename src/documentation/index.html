@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Hypercomb Documentation</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Hypercomb — signature-addressed, presence-based, decentralized. The complete reference.">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify@4/lib/themes/vue.css">
+  <script>
+    // Set the theme before first paint so dark mode never flashes white.
+    const schemeQuery = matchMedia('(prefers-color-scheme: dark)')
+    const applyScheme = () => document.documentElement.dataset.theme = schemeQuery.matches ? 'dark' : 'light'
+    schemeQuery.addEventListener('change', applyScheme)
+    applyScheme()
+  </script>
+  <style>
+    /* The sidebar is index.md itself; a plugin strips everything from each
+       item except the link, so only section headings and doc links remain. */
+    .sidebar-nav > h1, .sidebar-nav > p, .sidebar-nav > hr { display: none; }
+    .sidebar-nav h2 {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: #56616d;
+      margin: 1.6em 0 .4em;
+      padding: 0 15px;
+    }
+    .sidebar-nav li a {
+      font-size: 14px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      display: block;
+    }
+    .markdown-section { max-width: 56em; }
+    .markdown-section code { word-break: break-word; }
+
+    /* ---- dark theme: hive palette, honey accent ---- */
+    [data-theme="dark"] body {
+      background-color: #16181d;
+      color: #c9cfd6;
+    }
+    [data-theme="dark"] .sidebar {
+      background-color: #1b1e24;
+      border-right: 1px solid #2a2e36;
+      color: #c9cfd6;
+    }
+    [data-theme="dark"] .sidebar a,
+    [data-theme="dark"] .sidebar-nav li a {
+      color: #aab2bb;
+    }
+    [data-theme="dark"] .sidebar-nav li a:hover,
+    [data-theme="dark"] .sidebar ul li.active > a {
+      color: #f5b942;
+      border-color: #f5b942;
+    }
+    [data-theme="dark"] .sidebar-nav h2 { color: #e9edf2; }
+    [data-theme="dark"] .app-name-link { color: #e9edf2 !important; }
+    [data-theme="dark"] .sidebar-toggle { background-color: rgba(22, 24, 29, .8); }
+    [data-theme="dark"] .sidebar-toggle span { background-color: #f5b942; }
+
+    [data-theme="dark"] .search { border-color: #2a2e36; }
+    [data-theme="dark"] .search input {
+      background: transparent;
+      color: #e9edf2;
+    }
+    [data-theme="dark"] .search input::placeholder { color: #6b7480; }
+    [data-theme="dark"] .search .matching-post { border-color: #2a2e36; }
+    [data-theme="dark"] .search h2 { color: #f5b942; }
+    [data-theme="dark"] .search p { color: #aab2bb; }
+    [data-theme="dark"] .search .search-keyword { color: #f5b942; }
+
+    [data-theme="dark"] .markdown-section h1,
+    [data-theme="dark"] .markdown-section h2,
+    [data-theme="dark"] .markdown-section h3,
+    [data-theme="dark"] .markdown-section h4,
+    [data-theme="dark"] .markdown-section h5,
+    [data-theme="dark"] .markdown-section h6,
+    [data-theme="dark"] .markdown-section strong {
+      color: #e9edf2;
+    }
+    /* heading text actually lives in a span inside the anchor link */
+    [data-theme="dark"] .markdown-section .anchor span { color: #e9edf2; }
+    [data-theme="dark"] .markdown-section .anchor:hover span { color: #f5b942; }
+    [data-theme="dark"] .markdown-section a {
+      color: #f5b942;
+    }
+    [data-theme="dark"] .markdown-section code {
+      background-color: #23272e;
+      color: #ffd07a;
+    }
+    [data-theme="dark"] .markdown-section pre {
+      background-color: #1d2026;
+    }
+    [data-theme="dark"] .markdown-section pre > code {
+      background-color: #1d2026;
+      color: #c9cfd6;
+    }
+    [data-theme="dark"] .markdown-section blockquote {
+      border-left: 4px solid #f5b942;
+      color: #aab2bb;
+    }
+    [data-theme="dark"] .markdown-section blockquote p { color: #aab2bb; }
+    [data-theme="dark"] .markdown-section hr { border-bottom: 1px solid #2a2e36; }
+    [data-theme="dark"] .markdown-section tr { border-top: 1px solid #2a2e36; }
+    [data-theme="dark"] .markdown-section th,
+    [data-theme="dark"] .markdown-section td { border: 1px solid #2a2e36; }
+    [data-theme="dark"] .markdown-section tr:nth-child(2n) { background-color: #1b1e24; }
+
+    /* code tokens that ship too dark for a dark background */
+    [data-theme="dark"] .token.punctuation { color: #8a93a0; }
+    [data-theme="dark"] .token.operator,
+    [data-theme="dark"] .token.entity,
+    [data-theme="dark"] .token.url { color: #c79760; background: none; }
+    [data-theme="dark"] .token.comment { color: #6b7480; }
+    [data-theme="dark"] .token.string,
+    [data-theme="dark"] .token.attr-value { color: #8fc88f; }
+    [data-theme="dark"] .token.keyword,
+    [data-theme="dark"] .token.atrule { color: #7fb8e6; }
+    [data-theme="dark"] .token.function { color: #f0918d; }
+    [data-theme="dark"] .docsify-copy-code-button { background: #2a2e36; color: #c9cfd6; }
+  </style>
+</head>
+<body>
+  <div id="app">loading the hive…</div>
+  <script>
+    window.$docsify = {
+      name: 'Hypercomb',
+      homepage: 'index.md',
+      loadSidebar: 'index.md',
+      subMaxLevel: 0,
+      auto2top: true,
+      maxLevel: 4,
+      themeColor: '#c98a1b',
+      search: {
+        placeholder: 'Search the docs',
+        noData: 'No matches',
+        paths: 'auto',
+        depth: 3,
+      },
+      plugins: [
+        // index.md doubles as the sidebar; drop the "— description" tails so
+        // each item is just its link.
+        (hook) => hook.doneEach(() => {
+          document.querySelectorAll('.sidebar-nav li').forEach(li => {
+            for (const node of [...li.childNodes]) {
+              if (node.nodeName !== 'A' && node.nodeName !== 'UL') node.remove()
+            }
+          })
+        }),
+      ],
+    }
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/docsify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/search.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify-copy-code@3/dist/docsify-copy-code.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-typescript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-json.min.js"></script>
+</body>
+</html>

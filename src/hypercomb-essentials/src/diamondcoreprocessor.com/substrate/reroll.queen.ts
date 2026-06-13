@@ -60,7 +60,7 @@ export class RerollQueenBee extends QueenBee {
       return
     }
 
-    const rerolled = service.rerollCells(targets)
+    const rerolled = await service.rerollCells(targets)
     if (rerolled.length === 0) {
       this.#toast('no substrate tiles in target')
       return

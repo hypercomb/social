@@ -138,7 +138,16 @@ export class HistoryCursorService extends EventTarget {
       // Background warmup: resolve every signature inside every
       // historical layer so undo/redo targets are already cached.
       // Failures are non-fatal — we just move on.
-      void this.#warmupHistoricalResources()
+      //
+      // IDLE-DEFERRED: the BFS touches hundreds of OPFS files + JSON
+      // parses + hashes on a long lineage (root = every change ever).
+      // `void` alone still runs those continuations on the main thread
+      // interleaved with an active render's awaited hops, inflating
+      // first paint. Kick it when the thread is idle instead.
+      const warm = () => { void this.#warmupHistoricalResources() }
+      const ric = (globalThis as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
+      if (typeof ric === 'function') ric(warm, { timeout: 8000 })
+      else setTimeout(warm, 2000)
     } else if (this.#position > this.#layers.length) {
       this.#position = this.#layers.length
     }
@@ -408,13 +417,18 @@ export class HistoryCursorService extends EventTarget {
 
   /**
    * True when the layer at `position` differs from the layer at
-   * `position-1` ONLY by a 1-for-1 cell sig swap — one added, one
-   * removed, no other diffs. That shape is the cascade fingerprint:
-   * a child layer's bytes changed downstream, so the parent's
-   * children slot has the old child sig replaced with the new one,
-   * but nothing else moves. Any user-initiated edit (add a tile, edit
-   * content, change a tag) produces a different diff shape on this
-   * layer.
+   * `position-1` ONLY by cell sig swaps that preserve the tile NAMES.
+   * Children sigs are versions, not identities — a downstream edit
+   * swaps a child's sig while the tile (its name, there is no rename
+   * op) stays put. That shape is the cascade fingerprint: lineage
+   * pull-up rippling into this layer. Any user-initiated edit (add a
+   * tile, remove a tile, edit a slot) changes the NAME set or another
+   * slot and produces a different diff shape on this layer.
+   *
+   * A 1-for-1 swap is accepted without name resolution (the classic
+   * single-child ripple). N-for-N swaps are cascades only when the
+   * added and removed names match exactly — multi-child ripples used
+   * to read as "remove N, add N" user actions and broke group walking.
    *
    * Returns false at position 1 (no prior to compare against) and
    * outside [1, #layers.length].
@@ -430,15 +444,44 @@ export class HistoryCursorService extends EventTarget {
     ])
     if (!currentContent || !previousContent) return false
     const diffs = diffLayers(previousContent, currentContent)
-    if (diffs.length !== 2) return false
-    let added = 0, removed = 0
+    const addedSigs: string[] = []
+    const removedSigs: string[] = []
     for (const d of diffs) {
-      if (d.kind === 'cell-added') added++
-      else if (d.kind === 'cell-removed') removed++
+      if (d.kind === 'cell-added') addedSigs.push(d.cell)
+      else if (d.kind === 'cell-removed') removedSigs.push(d.cell)
       else return false
     }
-    return added === 1 && removed === 1
+    if (addedSigs.length === 0 || addedSigs.length !== removedSigs.length) return false
+    if (addedSigs.length === 1) return true
+    const [addedNames, removedNames] = await Promise.all([
+      this.#namesForSigs(addedSigs),
+      this.#namesForSigs(removedSigs),
+    ])
+    // Any unresolved name → can't prove identity → treat as user action.
+    if (!addedNames || !removedNames) return false
+    return sameNameSet(addedNames, removedNames)
   }
+
+  /**
+   * Resolve each child layer sig to its `name`, memoized for the
+   * session (content-addressed bytes — a sig's name never changes).
+   * Returns null if any sig fails to resolve.
+   */
+  async #namesForSigs(sigs: string[]): Promise<string[] | null> {
+    const historyService = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (!historyService?.getLayerBySig) return null
+    const names = await Promise.all(sigs.map(async (sig) => {
+      if (this.#nameBySig.has(sig)) return this.#nameBySig.get(sig) ?? null
+      const layer = await historyService.getLayerBySig(sig).catch(() => null)
+      const name = layer && typeof layer.name === 'string' && layer.name ? layer.name : null
+      this.#nameBySig.set(sig, name)
+      return name
+    }))
+    return names.every((n): n is string => n !== null) ? names : null
+  }
+
+  /** Child layer sig → name memo for cascade detection. */
+  readonly #nameBySig = new Map<string, string | null>()
 
   /**
    * Group-step undo. Walk backward from the current position skipping
@@ -697,6 +740,15 @@ export class HistoryCursorService extends EventTarget {
       else localStorage.removeItem(HistoryCursorService.#GROUP_STEP_KEY)
     } catch { /* storage unavailable */ }
   }
+}
+
+/** Order-insensitive name multiset equality. */
+const sameNameSet = (a: string[], b: string[]): boolean => {
+  if (a.length !== b.length) return false
+  const sortedA = [...a].sort()
+  const sortedB = [...b].sort()
+  for (let i = 0; i < sortedA.length; i++) if (sortedA[i] !== sortedB[i]) return false
+  return true
 }
 
 const _historyCursorService = new HistoryCursorService()

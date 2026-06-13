@@ -57,6 +57,11 @@ interface TileActionPayload {
    *  multi-selected set), `labels` carries the full set and `label` is
    *  unused. Single-tile adopt continues to use `label`. */
   labels?: readonly string[]
+  /** `adopt-selected` (fired by the swarm adopt panel) carries the
+   *  participant-grouped picks. pubkey disambiguates overlapping names:
+   *  two peers publishing the same tile name are DIFFERENT adoptable
+   *  branches, and the panel says whose version the user chose. */
+  selections?: readonly { label: string; pubkey?: string }[]
   q?: number
   r?: number
   index?: number
@@ -73,21 +78,39 @@ export class SwarmAdoptDrone extends Drone {
   protected override listens: string[] = ['tile:action']
   /** adopt:started survives for diagnostic / observability hooks. The
    *  install-monitor crumb that used to consume it was retired during the
-   *  full-split refactor (the portal opening IS the visible feedback). */
-  protected override emits: string[] = ['adopt:started']
+   *  full-split refactor (the portal opening IS the visible feedback).
+   *  swarm:adopt-panel:open wakes the participant-grouped adoption panel
+   *  (hypercomb-shared/ui/swarm-adopt-panel). */
+  protected override emits: string[] = ['adopt:started', 'swarm:adopt-panel:open']
 
   constructor() {
     super()
 
     this.onEffect<TileActionPayload>('tile:action', (payload) => {
       const action = String(payload?.action ?? '')
+
+      // Panel-confirmed en-masse adopt. Each pick is (label, pubkey) so
+      // overlapping names resolve to the participant the user chose.
+      // Sequential, not parallel, so the installer iframe processes the
+      // hashchanges in pick-order rather than racing.
+      if (action === 'adopt-selected') {
+        const selections = Array.isArray(payload?.selections)
+          ? payload.selections
+              .map(s => ({ label: String(s?.label ?? '').trim(), pubkey: String(s?.pubkey ?? '').trim().toLowerCase() }))
+              .filter(s => s.label.length > 0)
+          : []
+        for (const s of selections) {
+          this.#adoptPeerTile(s.label, s.pubkey || undefined)
+        }
+        return
+      }
+
       if (action !== 'adopt' && action !== 'sync') return
 
-      // Multi-tile adopt — UI fires this from the selection vertical menu
-      // with the set of selected names. Each adopt dispatches its own
-      // portal:open so the installer iframe re-routes on hashchange to
-      // the next sig. Sequential, not parallel, so the iframe processes
-      // them in click-order rather than racing.
+      // Multi-tile adopt — legacy direct path (selection-menu Adopt All).
+      // Each adopt dispatches its own portal:open so the installer iframe
+      // re-routes on hashchange to the next sig. Sequential, not parallel,
+      // so the iframe processes them in click-order rather than racing.
       const labels = Array.isArray(payload?.labels)
         ? payload.labels.map(s => String(s ?? '').trim()).filter(Boolean)
         : []
@@ -102,6 +125,19 @@ export class SwarmAdoptDrone extends Drone {
 
       const label = String(payload?.label ?? '').trim()
       if (!label) return
+
+      // Single adopt-gesture on a peer tile → open the participant-grouped
+      // panel instead of adopting immediately. The user sees what every
+      // present participant is publishing here (grouped, overlapping names
+      // included once per publisher) and picks what to adopt en masse; the
+      // panel's confirm comes back as `adopt-selected` above. `sync` keeps
+      // the immediate single-tile handoff for programmatic callers.
+      if (action === 'adopt') {
+        if (!this.#isPeerTile(label)) return
+        this.emitEffect('swarm:adopt-panel:open', { preselect: [label] })
+        return
+      }
+
       this.#adoptPeerTile(label)
     })
   }
@@ -109,11 +145,23 @@ export class SwarmAdoptDrone extends Drone {
   protected override sense = () => true
   protected override heartbeat = async (): Promise<void> => { /* noop */ }
 
-  #adoptPeerTile = (label: string): void => {
+  /** Is this label currently surfaced as a peer tile (current-location
+   *  cache or subscribed channel)? Gate for opening the adopt panel —
+   *  other action handlers (editor for owned tiles) cover their own
+   *  kinds; we no-op so they don't double-handle. */
+  #isPeerTile = (label: string): boolean => {
+    const ioc = (window as { ioc?: { get: (k: string) => unknown } }).ioc
+    const swarm = ioc?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
+    if (!swarm?.peerTilesAtCurrentSig) return false
+    if (swarm.peerTilesAtCurrentSig().some(p => p.name === label)) return true
+    return swarm.subscribedTiles?.().some(p => p.name === label) ?? false
+  }
+
+  #adoptPeerTile = (label: string, pubkey?: string): void => {
     // Diagnostic signal — fires immediately on click. install-monitor
     // doesn't listen anymore (the portal opening is the feedback) but
     // observability hooks / future consumers can still tap this.
-    EffectBus.emit('adopt:started', { label })
+    EffectBus.emit('adopt:started', { label, ...(pubkey ? { pubkey } : {}) })
 
     const ioc = (window as { ioc?: { get: (k: string) => unknown } }).ioc
     const swarm = ioc?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
@@ -128,11 +176,21 @@ export class SwarmAdoptDrone extends Drone {
     // fall back to the subscribed channel — that's how auto-adopt-on-
     // subscribe gets the leader's tiles even though they live at the
     // leader's personal channel sig rather than our own current sig.
+    //
+    // When the caller pins a pubkey (panel pick on an overlapping name),
+    // match (name, pubkey) exactly — the same name from another publisher
+    // is a DIFFERENT branch. Name-only fallback covers the case where the
+    // pinned publisher dropped between pick and confirm.
+    const matches = (p: { name: string; peerPubkey: string }): boolean =>
+      p.name === label && (!pubkey || p.peerPubkey === pubkey)
     const peerTiles = swarm.peerTilesAtCurrentSig()
-    let peerEntry = peerTiles.find(p => p.name === label)
+    let peerEntry = peerTiles.find(matches)
     if (!peerEntry && swarm.subscribedTiles) {
-      const subTiles = swarm.subscribedTiles()
-      peerEntry = subTiles.find(p => p.name === label)
+      peerEntry = swarm.subscribedTiles().find(matches)
+    }
+    if (!peerEntry && pubkey) {
+      peerEntry = peerTiles.find(p => p.name === label)
+        ?? swarm.subscribedTiles?.().find(p => p.name === label)
     }
     if (!peerEntry) return
 

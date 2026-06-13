@@ -757,6 +757,15 @@ export class NostrMeshDrone extends Drone {
     if (type === 'NOTICE') {
       this.stats.msgNoticeIn++
       this.note('in:notice', relay, undefined, undefined, undefined, msg[1])
+      // Drop NOTICEs are the relay telling us our events are being thrown
+      // away ('rate-limited', 'message too large'). Swallowing them is how
+      // the swarm union silently went one-sided — a publisher's layer
+      // events vanished and nothing anywhere said so. Loud in the console;
+      // the note() ring above keeps the full history for diagnostics.
+      const noticeText = String(msg[1] ?? '')
+      if (/rate-limited|too large/i.test(noticeText)) {
+        console.warn(`[nostr-mesh] relay ${relay} is DROPPING our messages: "${noticeText}" — published events are not reaching peers`)
+      }
       return
     }
 

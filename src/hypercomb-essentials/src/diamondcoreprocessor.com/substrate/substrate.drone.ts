@@ -106,18 +106,23 @@ export class SubstrateDrone extends Drone {
       else this.#attachPending.delete(cell)
     })
 
-    // Apply substrate to new cells synchronously.
-    this.onEffect<{ cell: string }>('cell:added', ({ cell }) => {
+    // Apply substrate to new cells. Index entries are keyed by the cell's
+    // full-lineage sig — pass the event's segments through when present so
+    // the assignment lands on the exact hive location, not the bare name.
+    this.onEffect<{ cell: string; segments?: readonly string[] }>('cell:added', ({ cell, segments }) => {
       if (!cell) return
       if (this.#dropPending || this.#pastePending || this.#editorActive) return
       if (this.#attachPending.has(cell)) return
       const svc = this.#service()
-      if (svc?.applyToCell(cell)) EffectBus.emit('substrate:applied', { cell })
+      if (!svc) return
+      void svc.applyToCell(cell, segments).then(applied => {
+        if (applied) EffectBus.emit('substrate:applied', { cell })
+      })
     })
 
-    this.onEffect<{ cell: string }>('cell:removed', ({ cell }) => {
+    this.onEffect<{ cell: string; segments?: readonly string[] }>('cell:removed', ({ cell, segments }) => {
       if (!cell) return
-      this.#service()?.clearCell(cell)
+      void this.#service()?.clearCell(cell, segments)
     })
 
     // Fill tiles the renderer reports as blank — skip any cell currently
@@ -131,8 +136,9 @@ export class SubstrateDrone extends Drone {
         ? labels.filter(l => !this.#attachPending.has(l))
         : labels
       if (filtered.length === 0) return
-      const applied = svc.applyToAllBlanks(filtered)
-      for (const cell of applied) EffectBus.emit('substrate:applied', { cell })
+      void svc.applyToAllBlanks(filtered).then(applied => {
+        for (const cell of applied) EffectBus.emit('substrate:applied', { cell })
+      })
     })
 
     // Registry / active-source / per-hive changes → re-warm and re-sync indicator.

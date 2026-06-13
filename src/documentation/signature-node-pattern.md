@@ -8,7 +8,7 @@
 - [collapsed-compute.md](collapsed-compute.md) — Why this pattern makes compute collapse to zero at scale
 - [deterministic-computation.md](deterministic-computation.md) — Authenticity composition
 - [revision-mode.md](revision-mode.md) — The interactive revision system: undo, redo, time clock, divergence, promote
-- [data-primitive.md](data-primitive.md) — The history bag storage model underlying undo/redo
+- [history-sigbag-as-root.md](history-sigbag-as-root.md) — The history sigbag storage model underlying undo/redo
 
 ---
 

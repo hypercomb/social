@@ -10,13 +10,13 @@ read these documents in order. they establish the vocabulary and architecture
 you will work within:
 
 1. [getting-started.md](getting-started.md) -- orientation and first pointers
-2. [architecture-fundamentals.md](architecture-fundamentals.md) -- the hive metaphor, drones, effect bus, hex grid, OPFS, mesh
+2. [network-architecture.md](network-architecture.md) -- participants, hosts, the mesh, and how content flows
 3. [glossary.md](glossary.md) -- canonical terms from metaphor to mechanics
 4. [signature-system.md](signature-system.md) -- the signature-payload primitive and its expansion doctrine
 5. [byte-protocol.md](byte-protocol.md) -- the 1-byte navigation wire format
 6. [dna.md](dna.md) -- optional path capsule publishing
 7. [core-processor-architecture.md](core-processor-architecture.md) -- core primitives and paradigm significance
-8. [dependency-resolution.md](dependency-resolution.md) -- how each layer resolves its imports
+8. [dependency-signing.md](dependency-signing.md) -- one signature securing an entire package hierarchy
 
 if you don't understand the distinction between a bee and a drone, or between
 the effect bus and the nostr mesh, re-read the glossary before writing code.
@@ -413,7 +413,7 @@ documentation lives in `social/src/documentation/`.
 ### style
 
 - all lowercase. no emojis.
-- filenames use hyphens: `byte-protocol.md`, `architecture-fundamentals.md`.
+- filenames use hyphens: `byte-protocol.md`, `core-processor-architecture.md`.
 - link to sibling files with plain relative names: `[glossary.md](glossary.md)`.
 - no analytics, tracking parameters, or shortened urls in links.
 - keep the metaphor-to-mechanism mapping consistent with [glossary.md](glossary.md).

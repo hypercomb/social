@@ -7,6 +7,7 @@
 
 import { EffectBus, SignatureService, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { callAnthropic, callAnthropicBatch, getApiKey, MODELS } from '../assistant/llm-api.js'
+import { cellLocationSig, lookupTilePropsSig } from '../editor/tile-properties.js'
 
 // Translation cache: per-locale JSON files in OPFS at /translations/<locale>.json.
 // localStorage is NOT used — it doesn't scale past a few MB and doesn't belong
@@ -219,7 +220,9 @@ export class TranslationService extends EventTarget {
     )
     const catalog: Record<string, string> = {}
 
-    for (const tileName of Object.keys(propsIndex)) {
+    // Index keys are full-lineage sigs for new entries; only legacy
+    // bare-label keys are tile names usable for catalog hydration.
+    for (const tileName of Object.keys(propsIndex).filter(k => !/^[0-9a-f]{64}$/.test(k))) {
       const labelSig = await this.#cachedLabelSig(tileName, targetLocale)
       if (!labelSig) continue
       const blob = await store.getResource(labelSig)
@@ -336,9 +339,16 @@ export class TranslationService extends EventTarget {
       const propsIndex: Record<string, string> = JSON.parse(
         localStorage.getItem(PROPS_INDEX_KEY) ?? '{}',
       )
+      // The sweep enumerates the CURRENT explorer location's tiles; index
+      // entries are keyed by each tile's full-lineage sig (legacy
+      // bare-label entries remain a read fallback).
+      const sweepLineage = get('@hypercomb.social/Lineage') as
+        { explorerSegments?: () => readonly string[] } | undefined
+      const sweepSegments = sweepLineage?.explorerSegments?.() ?? []
 
       for (const tileName of plan.tileNames) {
-        const propsSig = propsIndex[tileName]
+        const tileKey = await cellLocationSig(sweepSegments, tileName)
+        const propsSig = lookupTilePropsSig(propsIndex, tileKey, tileName)
         if (!propsSig) {
           EffectBus.emit('translation:tile-done', { label: tileName })
           continue
@@ -394,7 +404,7 @@ export class TranslationService extends EventTarget {
             [JSON.stringify(props, null, 2)],
             { type: 'application/json' },
           )
-          propsIndex[tileName] = await store.putResource(updatedBlob)
+          propsIndex[tileKey || tileName] = await store.putResource(updatedBlob)
         }
 
         EffectBus.emit('translation:tile-done', { label: tileName })
@@ -432,6 +442,9 @@ export class TranslationService extends EventTarget {
     )
     // Walk lineage's explorer directory — every actual tile, not just ones with saved props.
     const tileNames = await this.#enumerateTileNames(propsIndex)
+    const planLineage = get('@hypercomb.social/Lineage') as
+      { explorerSegments?: () => readonly string[] } | undefined
+    const planSegments = planLineage?.explorerSegments?.() ?? []
 
     // Collect unique source strings: tile labels + tile contents (dereferenced via contentSig).
     const sources = new Set<string>()
@@ -439,7 +452,7 @@ export class TranslationService extends EventTarget {
 
     if (store) {
       for (const tileName of tileNames) {
-        const propsSig = propsIndex[tileName]
+        const propsSig = lookupTilePropsSig(propsIndex, await cellLocationSig(planSegments, tileName), tileName)
         if (!propsSig) continue
         const blob = await store.getResource(propsSig)
         if (!blob) continue
@@ -479,7 +492,9 @@ export class TranslationService extends EventTarget {
   }
 
   async #enumerateTileNames(propsIndex: Record<string, string>): Promise<string[]> {
-    const names = new Set<string>(Object.keys(propsIndex))
+    // Full-lineage (sig) keys aren't tile names — only legacy bare-label
+    // entries can seed the name set; the dir walk below adds the rest.
+    const names = new Set<string>(Object.keys(propsIndex).filter(k => !/^[0-9a-f]{64}$/.test(k)))
 
     const lineage = get('@hypercomb.social/Lineage') as
       { explorerDir?: () => Promise<FileSystemDirectoryHandle | null> } | undefined

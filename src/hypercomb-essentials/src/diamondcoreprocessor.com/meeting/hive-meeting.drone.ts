@@ -111,11 +111,17 @@ export class HiveMeetingDrone extends Drone {
       this.#switchSig(signature)
     })
 
-    const handleToggleAvailable = (preAcquiredStream?: MediaStream): void => {
+    const handleToggleAvailable = (preAcquiredStream?: unknown): void => {
       this.#localAvailable = !this.#localAvailable
       if (this.#localAvailable) {
-        // joining — use pre-acquired stream if provided, otherwise request camera
-        if (preAcquiredStream) {
+        // joining — use a pre-acquired stream if provided, otherwise request
+        // the camera. The instanceof check is the single chokepoint for both
+        // entry paths: the EffectBus registration passes the PAYLOAD object
+        // (e.g. `{}` from MeetingControlsWorker) as this argument, and the
+        // window-bridge below passes an unchecked `e.detail?.stream` — either
+        // one slipping a non-MediaStream through here ends as
+        // `video.srcObject = {}` (TypeError) in meeting-video's slot sync.
+        if (preAcquiredStream instanceof MediaStream) {
           this.#acceptStream(preAcquiredStream)
         } else {
           void this.#toggleCamera()

@@ -247,7 +247,7 @@ Set the clock to any timestamp. Navigate anywhere in the hive. See exactly what 
 
 ## Related documents
 
-- [data-primitive.md](data-primitive.md) — The history bag storage model (event sourcing at the file system level)
+- [history-sigbag-as-root.md](history-sigbag-as-root.md) — The history sigbag storage model (append-only markers at the file system level)
 - [signature-node-pattern.md](signature-node-pattern.md) — How features wire into history for free undo/redo
 - [signature-system.md](signature-system.md) — Why op payloads use signature references, not inline data
 - [universal-history-plan.md](universal-history-plan.md) — The full implementation plan for universal history tracking

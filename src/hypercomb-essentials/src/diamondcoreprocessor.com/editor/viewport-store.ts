@@ -87,6 +87,39 @@ const serialize = <T>(op: () => Promise<T>): Promise<T> => {
   return p
 }
 
+// ── warm cache ─────────────────────────────────────────────────────
+// In-memory mirror of the whole `__viewport__/` directory, hydrated ONCE
+// at module load (boot). Doctrine: data is warmed at boot and navigation
+// reads from cache — render must never wait on a per-location OPFS read.
+// The directory is tiny (one small JSON per visited location), so one
+// enumeration covers everything; `writeViewportAt` keeps the mirror
+// coherent afterwards. The only read that can ever wait is the very
+// first one at boot (root), and it waits on this single enumeration —
+// not a per-location fetch.
+
+const _warmCache = new Map<string, ViewportSnapshot>()
+let _warmed: Promise<void> | null = null
+const warmAll = (): Promise<void> =>
+  (_warmed ??= serialize(async () => {
+    const dir = await viewportDir()
+    if (!dir) return
+    try {
+      for await (const [name, handle] of (dir as unknown as {
+        entries: () => AsyncIterable<[string, FileSystemHandle]>
+      }).entries()) {
+        if (handle.kind !== 'file' || !/^[a-f0-9]{64}$/.test(name)) continue
+        try {
+          const file = await (handle as FileSystemFileHandle).getFile()
+          const parsed = JSON.parse(await file.text())
+          if (parsed && typeof parsed === 'object') _warmCache.set(name, parsed as ViewportSnapshot)
+        } catch { /* unreadable entry — treated as absent */ }
+      }
+    } catch { /* enumeration failed — reads fall back to empty */ }
+  }))
+
+// Hydrate at module load so the cache is warm before first navigation.
+void warmAll()
+
 // ── Public API ─────────────────────────────────────────────────────
 
 /**
@@ -96,19 +129,14 @@ const serialize = <T>(op: () => Promise<T>): Promise<T> => {
 export const readViewportAt = async (
   segments: readonly string[],
 ): Promise<ViewportSnapshot> => {
-  const dir = await viewportDir()
   const sig = await locationSig(segments)
-  if (!dir || !sig) return {}
-  const local = await serialize(async (): Promise<ViewportSnapshot> => {
-    try {
-      const fh = await dir.getFileHandle(sig)
-      const text = await (await fh.getFile()).text()
-      const parsed = JSON.parse(text)
-      return parsed && typeof parsed === 'object' ? (parsed as ViewportSnapshot) : {}
-    } catch {
-      return {}
-    }
-  })
+  if (!sig) return {}
+  // Warm-cache read. warmAll() resolved long ago for every navigation
+  // after boot — only the very first read (root, during boot) can
+  // actually wait here, and it waits on the one-time directory
+  // enumeration, never a per-location OPFS fetch.
+  await warmAll()
+  const local = _warmCache.get(sig) ?? {}
   if (Object.keys(local).length > 0) return local
 
   // FIRST-VISIT SEED: no participant-local viewport at this location yet. If
@@ -143,20 +171,20 @@ export const writeViewportAt = async (
   const sig = await locationSig(segments)
   if (!dir || !sig) return
 
+  // Ensure the warm mirror is hydrated before merging against it.
+  await warmAll()
   const merged = await serialize(async (): Promise<ViewportSnapshot | null> => {
     if (snapshot === null) {
+      _warmCache.delete(sig)
       try { await dir.removeEntry(sig) } catch { /* already absent */ }
       return null
     }
     // Merge over existing so partial writes (just pan, just zoom) don't
-    // wipe the untouched fields.
-    let existing: ViewportSnapshot = {}
-    try {
-      const fh = await dir.getFileHandle(sig)
-      const parsed = JSON.parse(await (await fh.getFile()).text())
-      if (parsed && typeof parsed === 'object') existing = parsed as ViewportSnapshot
-    } catch { /* none yet */ }
+    // wipe the untouched fields. The warm mirror IS the existing state —
+    // it was hydrated from disk at boot and every write lands here first.
+    const existing: ViewportSnapshot = _warmCache.get(sig) ?? {}
     const next: ViewportSnapshot = { ...existing, ...snapshot }
+    _warmCache.set(sig, next)
     const fh = await dir.getFileHandle(sig, { create: true })
     const writable = await fh.createWritable()
     try { await writable.write(JSON.stringify(next)) }

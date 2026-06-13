@@ -1,4 +1,4 @@
-// diamondcoreprocessor.com/input/selection/tile-selection.drone.ts
+// diamondcoreprocessor.com/selection/selection-input.drone.ts
 import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import { Application, Container, Point } from 'pixi.js'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
@@ -10,7 +10,7 @@ import type { OrderProjection } from '../history/order-projection.js'
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[] }
 type TileClickPayload = { q: number; r: number; label: string; index: number; ctrlKey: boolean; metaKey: boolean }
 
-class TileSelectionDrone extends Drone {
+class SelectionInputDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override description =
     'Translates pointer clicks and drag gestures into tile selection changes.'
@@ -207,7 +207,7 @@ class TileSelectionDrone extends Drone {
     if (this.#pendingDrag) {
       const dx = e.clientX - this.#pendingStartX
       const dy = e.clientY - this.#pendingStartY
-      if (dx * dx + dy * dy >= TileSelectionDrone.#DRAG_THRESHOLD * TileSelectionDrone.#DRAG_THRESHOLD) {
+      if (dx * dx + dy * dy >= SelectionInputDrone.#DRAG_THRESHOLD * SelectionInputDrone.#DRAG_THRESHOLD) {
         this.#pendingDrag = false
         this.#dragActive = true
         this.#touched.clear()
@@ -385,5 +385,5 @@ function axialKey(q: number, r: number): string {
   return `${q},${r}`
 }
 
-const _tileSelection = new TileSelectionDrone()
+const _tileSelection = new SelectionInputDrone()
 window.ioc.register('@diamondcoreprocessor.com/SelectionInputDrone', _tileSelection)

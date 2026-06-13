@@ -3,9 +3,6 @@
 
 <!-- breadcrumb: below header, right-aligned -->
 <div class="breadcrumb-top" [class.faded]="isMobile()">
-  @if (currentLayerSigShort()) {
-    <span class="layer-sig-crumb" title="current layer marker sig (dev only)">"{{ currentLayerSigShort() }}"</span><span class="sep-crumb">◆</span>
-  }
   @if (meshPublic()) {
     <span class="public-crumb" [style.color]="shieldColor()">{{ 'breadcrumb.public' | t }}</span><span class="sep-crumb">◆</span>
   } @else {

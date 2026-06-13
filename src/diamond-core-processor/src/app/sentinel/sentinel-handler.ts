@@ -39,6 +39,13 @@ export type SentinelResponse =
   | { type: 'sync-result'; rid: string; syncSig: string; add: { signature: string; kind: string; bytes: ArrayBuffer }[]; remove: { signature: string; kind: string }[] }
   | { type: 'intake-ack'; rid: string; ok: boolean; error?: string }
 
+// Overlap ratio at or above which a later domain's package is judged to be
+// the SAME logical package as one already collected (another deploy
+// generation or an identical mirror). Generations of one package share most
+// sigs (a deploy changes a handful of bundles); unrelated packages share
+// approximately none — the wide gap makes the threshold insensitive.
+const SAME_PACKAGE_OVERLAP = 0.5
+
 @Injectable({ providedIn: 'root' })
 export class SentinelHandler {
 
@@ -260,9 +267,9 @@ export class SentinelHandler {
    * layers. Both must pass for a bee/dep to be included.
    */
   async #computeSyncManifest(): Promise<SyncManifest> {
-    const enabledBees: string[] = []
+    const enabledBees = new Set<string>()
     const enabledDeps = new Set<string>()
-    const enabledLayers: string[] = []
+    const enabledLayers = new Set<string>()
     const allBeeDeps: Record<string, string[]> = {}
 
     const domains = this.#loadDomains()
@@ -281,26 +288,76 @@ export class SentinelHandler {
       const beeDeps: Record<string, string[]> = manifest.beeDeps ?? {}
       const visited = new Set<string>()
 
+      // Collect this domain's contribution in ISOLATION first, so a
+      // cross-domain generation skew is detectable before it pollutes
+      // the union. Two trusted domains serving different DEPLOY
+      // GENERATIONS of the same package (own origin fresh, a stored
+      // operator host stale — or vice versa) would otherwise union
+      // newGen ∪ oldGen; the shell then installs and loads BOTH
+      // bundles of every changed drone, and the duplicate instances
+      // fight over IoC keys and the canvas.
+      const domainBees: string[] = []
+      const domainDeps = new Set<string>()
+      const domainLayers: string[] = []
+      const domainBeeDeps: Record<string, string[]> = {}
+
       await this.#walkEnabled(
         rootSig,
         domain,
         domainName,
         toggles,
         beeDeps,
-        enabledBees,
-        enabledDeps,
-        enabledLayers,
-        allBeeDeps,
+        domainBees,
+        domainDeps,
+        domainLayers,
+        domainBeeDeps,
         visited,
       )
+
+      // First-source-wins across domains for the SAME logical package.
+      // There is no version field to rank recency (the build omits one
+      // deliberately), so precedence is #loadDomains() order — canonical
+      // origin first, by design. A later domain whose package mostly
+      // overlaps what's already collected is the same package at another
+      // generation (or an identical mirror), not new content: skip it
+      // whole. Genuinely different packages (community modules) share
+      // few or no sigs and merge normally.
+      const candidate = new Set([...domainBees, ...domainLayers])
+      const collectedSize = enabledBees.size + enabledLayers.size
+      if (candidate.size > 0 && collectedSize > 0) {
+        let shared = 0
+        for (const sig of candidate) {
+          if (enabledBees.has(sig) || enabledLayers.has(sig)) shared++
+        }
+        const overlap = shared / candidate.size
+        if (overlap >= SAME_PACKAGE_OVERLAP) {
+          const dropped = candidate.size - shared
+          if (dropped > 0) {
+            console.log(
+              `[sentinel] sync: skipping ${domainName} root ${rootSig.slice(0, 12)} — `
+              + `${(overlap * 100).toFixed(0)}% of its package is already provided by an earlier source; `
+              + `treating its ${dropped} differing sig(s) as another generation of the same package, not new content`,
+            )
+          }
+          continue
+        }
+      }
+
+      for (const sig of domainBees) enabledBees.add(sig)
+      for (const sig of domainDeps) enabledDeps.add(sig)
+      for (const sig of domainLayers) enabledLayers.add(sig)
+      Object.assign(allBeeDeps, domainBeeDeps)
     }
 
+    const beesList = [...enabledBees].sort()
     const depsList = [...enabledDeps].sort()
-    const allSigs = [...enabledBees.sort(), ...depsList, ...enabledLayers.sort()]
+    const layersList = [...enabledLayers].sort()
+    const allSigs = [...beesList, ...depsList, ...layersList]
     const syncSig = await SignatureService.sign(new TextEncoder().encode(allSigs.join(',')).buffer as ArrayBuffer)
 
-    return { syncSig, bees: enabledBees, dependencies: depsList, layers: enabledLayers, beeDeps: allBeeDeps }
+    return { syncSig, bees: beesList, dependencies: depsList, layers: layersList, beeDeps: allBeeDeps }
   }
+
 
   /**
    * Recursive walk: descend the layer tree, skip subtrees whose layer

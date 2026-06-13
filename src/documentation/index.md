@@ -24,15 +24,15 @@ The complete reference. Every page is also reachable through `/help` in the app 
 - [genome-primitive.md](genome-primitive.md) — Recursive Merkle root over subtrees — universal short-circuit for derived computations
 - [collapsed-compute.md](collapsed-compute.md) — Network effect: memoized signatures eliminate redundant computation
 - [deterministic-computation.md](deterministic-computation.md) — Authenticity layer: script + resource → deterministic result
-- [layer-primitives.md](layer-primitives.md) — Layers as atomic snapshots of folders, content-addressed and signature-referenced
-- [data-primitive.md](data-primitive.md) — History primitive: operation recording for shared AI systems
+- [history-sigbag-as-root.md](history-sigbag-as-root.md) — History sigbag as root: store, discovery, self-heal, and integrity
 - [llm-primitive.md](llm-primitive.md) — Hypergraph primitive connecting signatures through LLM command transforms
 
 ## Architecture
 
-- [architecture-fundamentals.md](architecture-fundamentals.md) — The runtime: hive, drones, effect bus, hex grid, OPFS, mesh
 - [core-processor-architecture.md](core-processor-architecture.md) — `@hypercomb/core`: zero-dependency foundation and build pipeline
+- [network-architecture.md](network-architecture.md) — Canonical reference: participants, hosts, installers, and content flow
 - [install-push-only.md](install-push-only.md) — Push-only install model: Hypercomb load is inert, DCP pushes updates, labels are branches
+- [drone-installer-contract.md](drone-installer-contract.md) — The contract a drone follows so the installer can disable it cleanly
 
 ## Protocols
 
@@ -41,11 +41,12 @@ The complete reference. Every page is also reachable through `/help` in the app 
 - [pheromone-protocol.md](pheromone-protocol.md) — Ambient signal annotations on content, signature-addressed
 - [pollination-protocol.md](pollination-protocol.md) — Cross-domain contributions via signed pollen packets
 - [dependency-signing.md](dependency-signing.md) — A single signature securing an entire package hierarchy
-- [dependency-resolution.md](dependency-resolution.md) — How dependencies resolve across project types and layers
+- [sync-paired-channel.md](sync-paired-channel.md) — Paired-channel sync: sharing tree branches across browsers and devices
+- [swarm-resource-streaming.md](swarm-resource-streaming.md) — Share bundles: layer payload plus transitively referenced resources
+- [swarm-scale-and-host-delegation.md](swarm-scale-and-host-delegation.md) — Root announcements, location snapshots, and host delegation
 
 ## Features
 
-- [cell-rendering.md](cell-rendering.md) — How OPFS cells become hex tiles in Pixi.js
 - [cell-localization.md](cell-localization.md) — Tile label translation via the I18nProvider
 - [tile-overlay-architecture.md](tile-overlay-architecture.md) — Contextual actions, overlays, and particle animations
 - [embedded-sites.md](embedded-sites.md) — Website bundles as cell decoration
@@ -61,7 +62,6 @@ The complete reference. Every page is also reachable through `/help` in the app 
 ## Operations
 
 - [infrastructure.md](infrastructure.md) — Decentralized design: two relays, no centralized hosting
-- [decentralized-angular-hosting.md](decentralized-angular-hosting.md) — Theoretical exploration of decentralized app hosting
 - [lets-discover-meadowverse-pipeline.md](lets-discover-meadowverse-pipeline.md) — Authoring-runtime split: hypercomb.io → meadowverse.ca
 
 ## Security & Governance

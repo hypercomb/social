@@ -215,20 +215,25 @@ const _runInitializeRuntime = async (
     // "real-time supersedes preloader"; the cache warms behind the shell,
     // first render may pay a cold miss but every subsequent navigation
     // hits the cache. Logs in the service still surface progress / errors.
-    void (async () => {
-      try {
-        // preloadAllBags' shared promise already CHAINS the root-walk
-        // (Phase 2 preloadFromRoot inside history.service.ts) — the
-        // explicit re-derivation + second preloadFromRoot call that used
-        // to follow here re-walked the entire tree (fresh visited set, no
-        // memo) right while the critical bee wave, Pixi init, and Angular
-        // bootstrap were competing for the main thread and OPFS. One
-        // await covers both phases.
-        await historyService.preloadAllBags!()
-      } catch (err) {
-        console.warn('[runtime-initializer] preload failed (non-fatal):', err)
-      }
-    })()
+    // IDLE-DEFERRED kick. Fire-and-forget was not enough: on real data
+    // the bag head-scan touches hundreds of bags / thousands of markers
+    // (measured 5.1s over 293 bags), and starting it at boot meant its
+    // OPFS reads + JSON parses + hashes ran interleaved with the first
+    // render's awaited hops — first paint queued behind the scan. The
+    // scan itself is also time-sliced inside preloadAllBags; this defer
+    // keeps even its first slice out of the boot-critical window.
+    const kickPreload = () => {
+      void (async () => {
+        try {
+          await historyService.preloadAllBags!()
+        } catch (err) {
+          console.warn('[runtime-initializer] preload failed (non-fatal):', err)
+        }
+      })()
+    }
+    const ric = (globalThis as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
+    if (typeof ric === 'function') ric(kickPreload, { timeout: 5000 })
+    else setTimeout(kickPreload, 1500)
   } else {
     console.warn('[preload] HistoryService unavailable at preload step')
   }

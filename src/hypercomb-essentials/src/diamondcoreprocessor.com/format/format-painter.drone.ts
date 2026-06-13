@@ -1,6 +1,7 @@
 // diamondcoreprocessor.com/format/format-painter.drone.ts
 import { EffectBus } from '@hypercomb/core'
 import type { FormatEntry, FormatProvider } from './format.provider.js'
+import { cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig } from '../editor/tile-properties.js'
 
 // ── built-in providers ──────────────────────────────────
 
@@ -75,9 +76,10 @@ export class FormatPainterDrone extends EventTarget {
 
     let properties: Record<string, unknown> = {}
     try {
-      const indexKey = 'hc:tile-props-index'
-      const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
-      const propsSig = index[cell]
+      const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+      const segments = lineage?.explorerSegments?.() ?? []
+      const index = readTilePropsIndex()
+      const propsSig = lookupTilePropsSig(index, await cellLocationSig(segments, cell), cell)
       if (!propsSig) throw new Error('no index entry')
       const propsBlob = await store.getResource(propsSig)
       if (!propsBlob) throw new Error('props blob missing')
@@ -166,17 +168,22 @@ export class FormatPainterDrone extends EventTarget {
     const enabled = this.#entries.filter(e => e.enabled)
     if (enabled.length === 0) return
 
-    const indexKey = 'hc:tile-props-index'
-    const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
+    const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+    const segments = lineage?.explorerSegments?.() ?? []
+    const index = readTilePropsIndex()
 
     for (const cell of selection.selected) {
       // skip source tile
       if (cell === this.#sourceCell) continue
 
+      // Index entries are keyed by full lineage (sigbag key); bare-label
+      // entries are legacy fallback on read, never written.
+      const cellKey = await cellLocationSig(segments, cell)
+
       // 1. read current props (content-addressed → legacy 0000 fallback)
       let props: Record<string, unknown> = {}
       try {
-        const propsSig = index[cell]
+        const propsSig = lookupTilePropsSig(index, cellKey, cell)
         if (!propsSig) throw new Error('no index entry')
         const propsBlob = await store.getResource(propsSig)
         if (!propsBlob) throw new Error('props blob missing')
@@ -199,14 +206,14 @@ export class FormatPainterDrone extends EventTarget {
       const propsSig = await store.putResource(blob)
 
       // 4. update index
-      index[cell] = propsSig
+      index[cellKey || cell] = propsSig
 
       // 5. notify renderer
       EffectBus.emit<{ cell: string }>('tile:saved', { cell })
     }
 
     // persist updated index
-    localStorage.setItem(indexKey, JSON.stringify(index))
+    writeTilePropsIndex(index)
   }
 
   // ── emit state ──────────────────────────────────────────

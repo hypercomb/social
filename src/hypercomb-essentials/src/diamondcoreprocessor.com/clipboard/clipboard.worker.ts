@@ -16,18 +16,24 @@ interface SelectionLike {
 
 interface LineageLike {
   explorerSegments(): readonly string[]
-  explorerDir(): Promise<FileSystemDirectoryHandle | null>
-  tryResolve(
-    segments: readonly string[],
-    start?: FileSystemDirectoryHandle,
-  ): Promise<FileSystemDirectoryHandle | null>
   readonly domain?: unknown
+}
+
+/** Minimal layer shape this worker reads — `name` identifies the cell,
+ *  `children` holds child-layer sigs (the merkle backbone). Other slots
+ *  (properties, notes, …) ride along via the index signature so a clone
+ *  preserves them and a children-edit can spread them back unchanged. */
+interface LayerLike {
+  name?: string
+  children?: readonly string[]
+  [slot: string]: unknown
 }
 
 interface HistoryServiceLike {
   sign(lineage: { domain?: unknown; explorerSegments: () => readonly string[] }): Promise<string>
-  currentLayerAt(locationSig: string): Promise<unknown>
-  commitLayer(locationSig: string, layer: unknown): Promise<string>
+  currentLayerAt(locationSig: string): Promise<LayerLike | null>
+  commitLayer(locationSig: string, layer: LayerLike): Promise<string>
+  getLayerBySig(sig: string): Promise<LayerLike | null>
 }
 
 interface LayerCommitterLike {
@@ -40,18 +46,26 @@ interface LayerCommitterLike {
 
 interface StoreLike {
   readonly clipboard: FileSystemDirectoryHandle
-  readonly hypercombRoot: FileSystemDirectoryHandle
 }
 
-async function listChildNames(dir: FileSystemDirectoryHandle): Promise<string[]> {
-  const out: string[] = []
-  for await (const [name, handle] of (dir as any).entries()) {
-    if (handle.kind !== 'directory') continue
-    if (!name) continue
-    if (name.startsWith('__') && name.endsWith('__')) continue
-    out.push(name)
+/** Resolve a parent layer's `children` sigs to child display names.
+ *  Names are the truth — each child layer's own `name` field — and the
+ *  committer re-resolves them to head sigs at commit time. Mirrors the
+ *  resolution RemoveQueenBee and show-cell use so membership edits all
+ *  agree on the same authoritative list. */
+async function childNamesOf(
+  history: HistoryServiceLike,
+  parent: LayerLike | null,
+): Promise<string[]> {
+  const childSigs = Array.isArray(parent?.children) ? parent!.children : []
+  const names: string[] = []
+  for (const sig of childSigs) {
+    const child = await history.getLayerBySig(String(sig))
+    if (child && typeof child.name === 'string' && child.name.length > 0) {
+      names.push(child.name)
+    }
   }
-  return out
+  return names
 }
 
 export class ClipboardWorker extends Worker {
@@ -182,69 +196,59 @@ export class ClipboardWorker extends Worker {
     if (labels.length === 0) return
 
     const lineage = this.#lineage
-    const store = this.#store
     const baseSegments = lineage?.explorerSegments() ?? []
 
     if (op === 'cut') {
-      if (!store || !lineage) return
-      const baseDir = await lineage.explorerDir()
-      if (!baseDir) return
+      const history = this.#history
+      const committer = this.#committer
+      if (!lineage || !history || !committer) return
 
-      // Move each cell folder out of its source parent into store.clipboard.
-      // Labels may include `/`-separated paths — walk each into the right
-      // parent dir, then move just the leaf. Process deeper paths first so
-      // a parent isn't moved before its descendants are extracted.
-      const sorted = [...labels].sort((a, b) => b.split('/').length - a.split('/').length)
+      // Cut = drop the cells from each source parent's `children` slot.
+      // No bytes move: the cell's own history bag stays addressable by
+      // its lineage sig, so paste re-homes it at the target. Labels may
+      // be `/`-separated paths — group leaves by their parent so each
+      // affected parent gets exactly ONE layer commit.
+      const groups = new Map<string, { parentSegs: string[]; leaves: Set<string> }>()
       const moved: ClipboardEntry[] = []
-      const affectedParents = new Map<string, readonly string[]>()
-      // Clear any prior clipboard contents first so the new cut owns the dir.
-      await clearDirectory(store.clipboard)
-      for (const label of sorted) {
+      for (const label of labels) {
         const pathSegs = label.split('/').filter(Boolean)
         if (pathSegs.length === 0) continue
         const leaf = pathSegs[pathSegs.length - 1]
-        const parentSegs: string[] = [...baseSegments, ...pathSegs.slice(0, -1)]
-        let sourceParent: FileSystemDirectoryHandle | null = baseDir
-        for (let i = 0; i < pathSegs.length - 1 && sourceParent; i++) {
-          try {
-            sourceParent = await sourceParent.getDirectoryHandle(pathSegs[i], { create: false })
-          } catch {
-            sourceParent = null
-          }
-        }
-        if (!sourceParent) continue
-        const ok = await moveCellFolder(sourceParent, store.clipboard, leaf)
-        if (ok) {
-          moved.push({ label: leaf, sourceSegments: parentSegs })
-          affectedParents.set(parentSegs.join('/'), parentSegs)
-        }
+        const parentSegs = [...baseSegments, ...pathSegs.slice(0, -1)]
+        const key = parentSegs.join('/')
+        const group = groups.get(key) ?? { parentSegs, leaves: new Set<string>() }
+        group.leaves.add(leaf)
+        groups.set(key, group)
+        moved.push({ label: leaf, sourceSegments: parentSegs })
       }
       if (moved.length === 0) return
 
       this.#clipboardSvc?.captureEntries(moved, 'cut')
 
-      // Bump the FS-change marker so renders triggered by the cascade
-      // below (cursor.onNewLayer) see the post-mutation OPFS state.
       EffectBus.emit('fs:changed', { segments: [...baseSegments] })
 
-      // ONE layer commit per affected parent reflecting its new children
-      // list. Per-cell cell:removed events carry `viaUpdate: true` so the
-      // LayerCommitter listener skips queueing — the update() above IS the
-      // atomic commit, and UI subscribers still receive the events for
-      // visual unmount.
-      const committer = this.#committer
-      if (committer) {
-        for (const parentSegs of affectedParents.values()) {
-          const parentDir = await lineage.tryResolve(parentSegs, store.hypercombRoot)
-          if (!parentDir) continue
-          const newChildren = await listChildNames(parentDir)
-          await committer.update(parentSegs, { children: newChildren })
+      // ONE commit per affected parent. Survivors = current children
+      // MINUS the cut leaves — the full surviving list, never a partial
+      // one (a partial list passed to update() is a SET that wipes the
+      // siblings it omits). Other parent slots ride along via spread.
+      // Mirrors RemoveQueenBee.
+      for (const { parentSegs, leaves } of groups.values()) {
+        const parentLocSig = await history.sign({
+          domain: lineage.domain,
+          explorerSegments: () => parentSegs,
+        })
+        const parent = await history.currentLayerAt(parentLocSig)
+        const survivors = (await childNamesOf(history, parent)).filter(n => !leaves.has(n))
+
+        // Eager visual unmount; `viaUpdate` tells the committer's per-
+        // event listener to skip queueing — the update() below IS the
+        // atomic commit for this action.
+        for (const leaf of leaves) {
+          EffectBus.emit('cell:removed', { cell: leaf, segments: [...parentSegs], viaUpdate: true })
         }
+        await committer.update(parentSegs, { ...(parent ?? {}), children: survivors })
       }
 
-      for (const entry of moved) {
-        EffectBus.emit('cell:removed', { cell: entry.label, segments: [...entry.sourceSegments], viaUpdate: true })
-      }
       this.#selection?.clear()
 
       EffectBus.emit('clipboard:captured', { labels: moved.map(e => e.label), op: 'cut' })
@@ -290,78 +294,23 @@ export class ClipboardWorker extends Worker {
     const clipboardSvc = this.#clipboardSvc
     const lineage = this.#lineage
     const store = this.#store
-    if (!clipboardSvc || !lineage || !store) return
-
+    const history = this.#history
+    const committer = this.#committer
+    if (!clipboardSvc || !lineage || !store || !history || !committer) return
     if (clipboardSvc.isEmpty) return
-
-    const targetDir = await lineage.explorerDir()
-    if (!targetDir) return
 
     const op = clipboardSvc.operation
     const items = clipboardSvc.items
     const targetSegments = [...lineage.explorerSegments()]
-    const history = this.#history
 
     EffectBus.emit('clipboard:paste-start', { count: items.length, op })
 
-    const placed: { label: string; sourceSegments: readonly string[] }[] = []
-    const failed: string[] = []
-    if (op === 'cut') {
-      for (const entry of items) {
-        const ok = await moveCellFolder(store.clipboard, targetDir, entry.label)
-        if (ok) placed.push({ label: entry.label, sourceSegments: entry.sourceSegments })
-        else failed.push(entry.label)
-      }
-    } else {
-      for (const entry of items) {
-        const sourceDir = await lineage.tryResolve(entry.sourceSegments, store.hypercombRoot)
-        if (!sourceDir) {
-          console.warn(`[clipboard] copy source missing for '${entry.label}': /${entry.sourceSegments.join('/')}`)
-          failed.push(entry.label)
-          continue
-        }
-        const ok = await copyCellFolder(sourceDir, targetDir, entry.label)
-        if (ok) placed.push({ label: entry.label, sourceSegments: entry.sourceSegments })
-        else failed.push(entry.label)
-      }
-    }
-
-    if (history) {
-      for (const entry of placed) {
-        await cloneSubtreeLayers(
-          history,
-          lineage,
-          targetDir,
-          entry.sourceSegments,
-          targetSegments,
-          entry.label,
-        )
-      }
-    }
-
-    // Bump FS-change marker so renders triggered by the cascade below
-    // see the post-mutation OPFS state.
-    if (placed.length > 0) EffectBus.emit('fs:changed', { segments: [...targetSegments] })
-
-    // ONE layer commit reflecting the new children list at the target.
-    // Per-cell cell:added events carry `viaUpdate: true` so the
-    // LayerCommitter listener skips queueing — the update() above IS the
-    // atomic commit, and UI subscribers still receive the events.
-    const committer = this.#committer
-    if (committer && placed.length > 0) {
-      const newChildren = await listChildNames(targetDir)
-      await committer.update(targetSegments, { children: newChildren })
-    }
-
-    for (const entry of placed) {
-      EffectBus.emit('cell:added', { cell: entry.label, segments: [...targetSegments], viaUpdate: true })
-    }
-    if (placed.length > 0) await new hypercomb().act()
+    const { placed, failed } = await this.#placeItems(history, lineage, committer, items, targetSegments)
 
     const placedLabels = placed.map(p => p.label)
-    // cut: drop only the items that actually moved. Failed moves stay on
-    // the clipboard so the user doesn't lose data on a partial / stale paste.
-    // copy: leaves clipboard intact for repeat paste.
+    // cut: drop only the items that actually landed. Failed items stay on
+    // the clipboard so a partial / stale paste doesn't lose data.
+    // copy: leave the clipboard intact for repeat paste.
     if (op === 'cut' && placedLabels.length > 0) {
       clipboardSvc.removeItems(new Set(placedLabels))
       if (clipboardSvc.isEmpty) {
@@ -380,13 +329,92 @@ export class ClipboardWorker extends Worker {
     EffectBus.emit('clipboard:paste-done', { count: placedLabels.length, op, failed })
   }
 
+  // ── shared placement (paste + place) ──────────────────
+  // For each item: skip if the target already holds a cell with that
+  // name (never clobber), else clone the source cell's layer subtree to
+  // the target lineage so its content is addressable at the new path.
+  // Then ONE commit folds every placed label into the target's
+  // `children` slot — existing children first, placed appended, full
+  // list (never partial). Cloning happens BEFORE the commit so the
+  // committer resolves each placed name to its freshly-homed head sig.
+
+  async #placeItems(
+    history: HistoryServiceLike,
+    lineage: LineageLike,
+    committer: LayerCommitterLike,
+    items: readonly ClipboardEntry[],
+    targetSegments: readonly string[],
+  ): Promise<{ placed: ClipboardEntry[]; failed: string[] }> {
+    const targetLocSig = await history.sign({
+      domain: lineage.domain,
+      explorerSegments: () => targetSegments,
+    })
+    const parent = await history.currentLayerAt(targetLocSig)
+    const existing = await childNamesOf(history, parent)
+    const taken = new Set(existing)
+
+    const placed: ClipboardEntry[] = []
+    const failed: string[] = []
+    for (const entry of items) {
+      if (taken.has(entry.label)) {
+        console.warn(`[clipboard] target already has '${entry.label}'; skipping`)
+        failed.push(entry.label)
+        continue
+      }
+      const srcLocSig = await history.sign({
+        domain: lineage.domain,
+        explorerSegments: () => [...entry.sourceSegments, entry.label],
+      })
+      const dstLocSig = await history.sign({
+        domain: lineage.domain,
+        explorerSegments: () => [...targetSegments, entry.label],
+      })
+      const srcLayer = await history.currentLayerAt(srcLocSig)
+      if (!srcLayer) {
+        console.warn(`[clipboard] paste source missing for '${entry.label}': /${entry.sourceSegments.join('/')}`)
+        failed.push(entry.label)
+        continue
+      }
+      // Same source and destination lineage (cut-and-paste in place) needs
+      // no clone — the content never left its bag.
+      if (srcLocSig !== dstLocSig) {
+        try {
+          await cloneLayerTree(history, lineage, srcLayer, [...targetSegments, entry.label])
+        } catch (err) {
+          console.warn(`[clipboard] clone failed for '${entry.label}':`, err)
+          failed.push(entry.label)
+          continue
+        }
+      }
+      placed.push({ label: entry.label, sourceSegments: entry.sourceSegments })
+      taken.add(entry.label)
+    }
+
+    if (placed.length === 0) return { placed, failed }
+
+    EffectBus.emit('fs:changed', { segments: [...targetSegments] })
+
+    // Eager visual mount; `viaUpdate` makes the committer's per-event
+    // listener skip queueing — the update() below is the atomic commit.
+    for (const entry of placed) {
+      EffectBus.emit('cell:added', { cell: entry.label, segments: [...targetSegments], viaUpdate: true })
+    }
+    const nextChildren = [...existing, ...placed.map(p => p.label)]
+    await committer.update(targetSegments, { ...(parent ?? {}), children: nextChildren })
+    await new hypercomb().act()
+
+    return { placed, failed }
+  }
+
   // ── place (selected clipboard items → current page) ──
 
   async #place(): Promise<void> {
     const clipboardSvc = this.#clipboardSvc
     const lineage = this.#lineage
     const store = this.#store
-    if (!clipboardSvc || !lineage || !store) return
+    const history = this.#history
+    const committer = this.#committer
+    if (!clipboardSvc || !lineage || !store || !history || !committer) return
     if (clipboardSvc.isEmpty) return
 
     const selectedLabels = this.#selectedLabels()
@@ -396,62 +424,12 @@ export class ClipboardWorker extends Worker {
     const toPlace = clipboardSvc.items.filter(i => selectedSet.has(i.label))
     if (toPlace.length === 0) return
 
-    const targetDir = await lineage.explorerDir()
-    if (!targetDir) return
-
-    const op = clipboardSvc.operation
     const targetSegments = [...lineage.explorerSegments()]
-    const history = this.#history
-    const placed: { label: string; sourceSegments: readonly string[] }[] = []
-    if (op === 'cut') {
-      for (const entry of toPlace) {
-        const ok = await moveCellFolder(store.clipboard, targetDir, entry.label)
-        if (ok) placed.push({ label: entry.label, sourceSegments: entry.sourceSegments })
-      }
-    } else {
-      for (const entry of toPlace) {
-        const sourceDir = await lineage.tryResolve(entry.sourceSegments, store.hypercombRoot)
-        if (!sourceDir) {
-          console.warn(`[clipboard] place: copy source missing for '${entry.label}': /${entry.sourceSegments.join('/')}`)
-          continue
-        }
-        const ok = await copyCellFolder(sourceDir, targetDir, entry.label)
-        if (ok) placed.push({ label: entry.label, sourceSegments: entry.sourceSegments })
-      }
-    }
-
-    if (history) {
-      for (const entry of placed) {
-        await cloneSubtreeLayers(
-          history,
-          lineage,
-          targetDir,
-          entry.sourceSegments,
-          targetSegments,
-          entry.label,
-        )
-      }
-    }
-
-    // Bump FS-change marker so renders during the cascade see fresh OPFS.
-    if (placed.length > 0) EffectBus.emit('fs:changed', { segments: [...targetSegments] })
-
-    // ONE layer commit reflecting the new children list at the target.
-    // Per-cell cell:added events carry `viaUpdate: true` so the
-    // LayerCommitter listener skips queueing — the update() above IS the
-    // atomic commit, and UI subscribers still receive the events.
-    const committer = this.#committer
-    if (committer && placed.length > 0) {
-      const newChildren = await listChildNames(targetDir)
-      await committer.update(targetSegments, { children: newChildren })
-    }
-
-    for (const entry of placed) {
-      EffectBus.emit('cell:added', { cell: entry.label, segments: [...targetSegments], viaUpdate: true })
-    }
-    if (placed.length > 0) await new hypercomb().act()
+    const { placed } = await this.#placeItems(history, lineage, committer, toPlace, targetSegments)
 
     const placedLabels = placed.map(p => p.label)
+    if (placedLabels.length === 0) return
+
     clipboardSvc.removeItems(new Set(placedLabels))
     this.#selection?.clear()
 
@@ -494,30 +472,23 @@ export class ClipboardWorker extends Worker {
     const lineage = this.#lineage
     if (!svc || !store || svc.isEmpty) return
 
-    const op = svc.operation
+    const history = this.#history
+    if (!lineage || !history) return
+
+    // An entry is valid iff its source cell's layer still resolves. For
+    // copy the cell is still in place; for cut the cell's own bag persists
+    // (cut only drops it from the parent's children). Either way the
+    // lineage sig addresses a head layer — null means the source is gone
+    // and the entry is a ghost to drop.
     const items = svc.items
     const invalid = new Set<string>()
-
-    if (op === 'cut') {
-      for (const entry of items) {
-        try {
-          await store.clipboard.getDirectoryHandle(entry.label, { create: false })
-        } catch {
-          invalid.add(entry.label)
-        }
-      }
-    } else {
-      for (const entry of items) {
-        const srcDir = lineage
-          ? await lineage.tryResolve(entry.sourceSegments, store.hypercombRoot)
-          : null
-        if (!srcDir) { invalid.add(entry.label); continue }
-        try {
-          await srcDir.getDirectoryHandle(entry.label, { create: false })
-        } catch {
-          invalid.add(entry.label)
-        }
-      }
+    for (const entry of items) {
+      const locSig = await history.sign({
+        domain: lineage.domain,
+        explorerSegments: () => [...entry.sourceSegments, entry.label],
+      })
+      const layer = await history.currentLayerAt(locSig)
+      if (!layer) invalid.add(entry.label)
     }
 
     if (invalid.size === 0) return
@@ -637,117 +608,44 @@ async function clearDirectory(dir: FileSystemDirectoryHandle): Promise<void> {
   }
 }
 
-// ── merkle layer cloning ─────────────────────────────────
-// Folder copy/move only touches OPFS bytes under hypercomb.io/. The
-// merkle layer for each cell — which holds children, body, tags, notes,
-// and any other slot data — lives in __history__/{locationSig}/, where
-// locationSig hashes the lineage path. Moving the folder changes the
-// lineage path, so the destination's bag is empty and the cell appears
-// to have lost its hierarchy (and any other slot state).
+// ── layer subtree cloning (sig-only, no OPFS folder mirror) ──────────
 //
-// This walks the destination subtree (now in OPFS at its new location)
-// and, for each cell, copies the source bag's head layer into the
-// destination bag's first marker. Layer content is content-addressed,
-// so children sigs inside the copied layer still resolve via the global
-// preloader cache regardless of which bag physically stores them.
-
-async function cloneSubtreeLayers(
+// Under the layer-primitive doctrine a cell IS its layer: content
+// (children, properties, notes, …) lives in the history bag addressed by
+// the cell's lineage sig, and the parent merely references the cell's
+// head sig in its `children` slot. Copy / cut / paste never moves bytes —
+// it re-points `children` slots (the committer at the call sites does
+// that) and, for paste into a DIFFERENT location, re-homes the cell's
+// layer subtree so the moved/copied cell is reachable at its destination
+// lineage too.
+//
+// `cloneLayerTree` walks the subtree purely through the merkle backbone:
+// the cell's layer holds child SIGS, each resolves to a child layer via
+// `getLayerBySig` (content-addressed, location-independent), and we
+// re-commit each layer at its destination lineage sig. The child sigs
+// inside a cloned layer stay valid verbatim — they resolve through the
+// global pool regardless of which bag's marker points at them — so the
+// clone's only effect is one destination marker per node, making the
+// content reachable by navigating the new path. No OPFS walk; the source
+// folders don't exist in this architecture.
+async function cloneLayerTree(
   history: HistoryServiceLike,
   lineage: LineageLike,
-  destParentDir: FileSystemDirectoryHandle,
-  sourceParentSegments: readonly string[],
-  destParentSegments: readonly string[],
-  label: string,
-): Promise<void> {
-  let cellDir: FileSystemDirectoryHandle
-  try {
-    cellDir = await destParentDir.getDirectoryHandle(label, { create: false })
-  } catch {
-    return
-  }
-  await cloneLayerRecursive(
-    history,
-    lineage,
-    cellDir,
-    [...sourceParentSegments, label],
-    [...destParentSegments, label],
-  )
-}
-
-async function cloneLayerRecursive(
-  history: HistoryServiceLike,
-  lineage: LineageLike,
-  cellDir: FileSystemDirectoryHandle,
-  sourceCellSegments: readonly string[],
+  layer: LayerLike,
   destCellSegments: readonly string[],
 ): Promise<void> {
-  try {
-    const oldLocSig = await history.sign({
-      domain: lineage.domain,
-      explorerSegments: () => sourceCellSegments,
-    })
-    const newLocSig = await history.sign({
-      domain: lineage.domain,
-      explorerSegments: () => destCellSegments,
-    })
-    if (oldLocSig !== newLocSig) {
-      const layer = await history.currentLayerAt(oldLocSig)
-      if (layer) {
-        await history.commitLayer(newLocSig, layer)
-      }
-    }
-  } catch (err) {
-    console.warn(`[clipboard] layer clone failed for /${destCellSegments.join('/')}:`, err)
-  }
+  const dstLocSig = await history.sign({
+    domain: lineage.domain,
+    explorerSegments: () => destCellSegments,
+  })
+  await history.commitLayer(dstLocSig, layer)
 
-  const subdirs: { name: string; handle: FileSystemDirectoryHandle }[] = []
-  for await (const [name, handle] of (cellDir as any).entries()) {
-    if (handle.kind === 'directory') {
-      subdirs.push({ name, handle: handle as FileSystemDirectoryHandle })
-    }
+  const childSigs = Array.isArray(layer.children) ? layer.children : []
+  for (const sig of childSigs) {
+    const child = await history.getLayerBySig(String(sig))
+    if (!child || typeof child.name !== 'string' || child.name.length === 0) continue
+    await cloneLayerTree(history, lineage, child, [...destCellSegments, child.name])
   }
-  for (const sub of subdirs) {
-    await cloneLayerRecursive(
-      history,
-      lineage,
-      sub.handle,
-      [...sourceCellSegments, sub.name],
-      [...destCellSegments, sub.name],
-    )
-  }
-}
-
-// ── cell movement (sig-only, no OPFS folder mirror) ─────
-//
-// Under the layer-primitive doctrine cells live in `layer.children` (an
-// array of layer sigs), not as named OPFS folders. Cut / copy / paste
-// shuffles sigs across the source and destination `children` slots;
-// the actual layer content (which `children`, `properties`, `notes`, …
-// the cell holds) stays addressable by sig regardless of which parent
-// references it.
-//
-// Helpers below are placeholder stubs preserving the boolean-return
-// shape the rest of this worker uses. They report "succeeded" so the
-// downstream child-list cascade still fires its `committer.update` on
-// the affected parents; the committer is responsible for folding the
-// authoritative children list (read from the layer cache, not from
-// OPFS readdir) into the new layer marker. PENDING re-wire: convert
-// the `listChildNames` calls at the cut / paste / place sites to read
-// from the current layer's `children` slot instead of OPFS entries.
-async function copyCellFolder(
-  _sourceParent: FileSystemDirectoryHandle,
-  _destParent: FileSystemDirectoryHandle,
-  _label: string,
-): Promise<boolean> {
-  return true
-}
-
-async function moveCellFolder(
-  _sourceParent: FileSystemDirectoryHandle,
-  _destParent: FileSystemDirectoryHandle,
-  _label: string,
-): Promise<boolean> {
-  return true
 }
 
 const _clipboard = new ClipboardWorker()

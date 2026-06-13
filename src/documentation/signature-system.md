@@ -310,4 +310,4 @@ When auditing the codebase for compliance:
 - [deterministic-computation.md](deterministic-computation.md) — authenticity layer: composing script + resource signatures for global memoization
 - [genome-primitive.md](genome-primitive.md) — recursive Merkle root over subtrees; universal short-circuit for derived computations
 - [dependency-signing.md](dependency-signing.md) — single signature securing entire package hierarchy
-- [architecture-fundamentals.md](architecture-fundamentals.md) — where signatures fit in the runtime
+- [core-processor-architecture.md](core-processor-architecture.md) — where signatures fit in the runtime
