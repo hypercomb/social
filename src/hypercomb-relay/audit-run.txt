@@ -1,0 +1,76 @@
+[07:27:52.000] [boot] mesh relay ws://localhost:7797 | dev shell http://localhost:4250/ | room sua-mqaltqd0
+[07:27:55.670] [A-console] log: [nav] +0ms render:start
+[07:27:55.670] [A-console] log: [nav] +0ms render:start
+[07:27:55.938] [A-console] log: [boot] +397ms render:host-ready emitted
+[07:27:55.938] [A-console] log: [nav] +0ms render:start
+[07:27:55.983] [A-console] log: [nav] +0ms render:start
+[07:27:56.496] [A-console] error: 
+[07:27:56.497] [A-console] warning: 0: #define SHADER_NAME batch-vertex
+1: 
+2: 
+3:         #ifdef GL_ES // This checks if it is WebGL1
+4:         #define in attribute
+5:         #define out varying
+6:         #endif
+7:         precision
+[07:27:56.498] [A-console] error: 
+[07:27:56.498] [A-console] warning: 0: #define SHADER_NAME batch-fragment
+1: 
+2: 
+3:         #ifdef GL_ES // This checks if it is WebGL1
+4:         #define in varying
+5:         #define finalColor gl_FragColor
+6:         #define texture
+[07:27:56.498] [A-console] error: PixiJS Error: Could not initialize shader.
+[07:27:56.498] [A-console] warning: WebGL: INVALID_OPERATION: useProgram: program not valid
+[07:27:56.499] [A-console] warning: WebGL: INVALID_OPERATION: drawElements: no valid shader program in use
+[07:27:56.499] [A-console] warning: [.WebGL-0x74c07116000] GL_OUT_OF_MEMORY: Error: 0x00000505, in ..\..\third_party\angle\src\libANGLE\renderer\vulkan\ContextVk.cpp, rx::ContextVk::initImageAllocation:7133. Internal Vulkan error (-2): 
+[07:27:56.499] [A-console] warning: [.WebGL-0x74c07116000] GL_CONTEXT_LOST_KHR: glFramebufferRenderbuffer: Context has been lost.
+[07:27:56.499] [A-console] warning: [.WebGL-0x74c07116000] GL_CONTEXT_LOST_KHR: glBindFramebuffer: Context has been lost.
+[07:27:56.499] [A-console] warning: WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+[07:27:56.499] [A-console] warning: WebGL: CONTEXT_LOST_WEBGL: loseContext: context lost
+[07:27:57.729] [A-console] log: [nav] +0ms render:start
+[07:27:57.763] [A-console] log: [nav] +0ms render:start
+[07:27:57.788] [A-console] log: [nav] +0ms render:start
+[07:27:57.800] [A-console] error: ERROR TypeError: Cannot read properties of null (reading 'split')
+    at logPrettyShaderError (http://localhost:4250/chunk-UGTE3SFF.js:2218:47)
+    at logProgramError (http://localhost:4250/chunk-UGTE
+[07:27:58.544] [A-console] log: [nav] +0ms render:start
+[07:27:58.573] [A-console] log: [nav] +0ms render:start
+[07:27:58.575] [A-console] log: [nav] +0ms render:start
+[07:27:58.772] [A-console] log: [nav] +0ms render:start
+[07:28:00.060] [A] authored alpha1 + shared
+[07:28:03.539] [A-console] log: [nav] +0ms render:start
+[07:28:03.552] [A-console] log: [nav] +0ms render:start
+[07:28:03.832] [A-console] log: [nav] +0ms render:start
+[07:28:03.834] [A-console] log: [nav] +0ms render:start
+[07:28:04.363] [A-console] log: [nav] +0ms render:start
+[07:28:04.366] [A-console] log: [nav] +0ms render:start
+[07:28:05.669] [B] authored bravo1 + shared (name overlap with A)
+[07:28:05.673] [A] peer union at root: ["bravo1","shared"]
+[07:28:05.673] [B] peer union at root: ["alpha1","shared"]
+[07:28:05.675] [A] canvas renders: ["alpha1","shared","bravo1"]
+[07:28:05.676] [B] canvas renders: ["alpha1","shared","bravo1"]
+[07:28:07.691] [C-console] [swarm] onEvent received: {sig: fc3645b1, kind: 30200, fromPubkey: undefined, isSelf: false}
+[07:28:07.691] [C-console] [swarm] onEvent DROPPED: no pubkey (local fanout)
+[07:28:07.701] [C-console] [swarm] onEvent received: {sig: fc3645b1, kind: 30401, fromPubkey: undefined, isSelf: false}
+[07:28:07.705] [C-console] [swarm] onEvent received: {sig: fc3645b1, kind: 30200, fromPubkey: deb86f89, isSelf: false}
+[07:28:07.705] [C-console] [swarm] onEvent CACHED {sig: fc3645b1, pubkey: deb86f89, visualCount: 2, isNewPeer: true, layerChanged: true}
+[07:28:07.705] [C-console] [swarm] onEvent received: {sig: fc3645b1, kind: 30401, fromPubkey: deb86f89, isSelf: false}
+[07:28:07.708] [C-console] [swarm] onEvent received: {sig: fc3645b1, kind: 30200, fromPubkey: 9645d576, isSelf: false}
+[07:28:07.709] [C-console] [swarm] onEvent CACHED {sig: fc3645b1, pubkey: 9645d576, visualCount: 2, isNewPeer: true, layerChanged: true}
+[07:28:07.714] [C] groups: [{"who":"Alice","tiles":["alpha1","shared"]},{"who":"deb86f89","tiles":["bravo1","shared"]}]
+[07:28:07.717] [C] swarm debug: {"lastSyncInput":{"segments":[],"room":"sua-mqaltqd0","secretLen":12,"key":"\u0000sua-mqaltqd0\u0000sec-c4v27tzw"},"currentSig":"fc3645b1a6ff","myPubkey":"8cf286e2","room":"sua-mqaltqd0","secretSet":true,"subsCount":1,"subsBySig":["fc3645b1a6ff"],"peerLayersCount":1,"peerLayersBySig":{"fc3645b1a6ff":{"peerCount":2,"peers":["deb86f89","9645d576"]}},"lastPublishedSigCount":1,"lastPublishedBySig":["fc3645b1a6ff"]}
+[07:28:08.035] [C-console] [swarm] onEvent received: {sig: fc3645b1, kind: 30401, fromPubkey: 8cf286e2, isSelf: true}
+[07:28:09.616] [C] panel after adopt gesture: {"mounted":true,"open":true,"groupCount":2,"checked":1,"confirmDisabled":false}
+[07:28:11.442] [A-console] log: [nav] +0ms render:start
+[07:28:11.445] [A-console] log: [nav] +0ms render:start
+[07:28:11.842] [C-console] [swarm] onEvent received: {sig: fc3645b1, kind: 30200, fromPubkey: 9645d576, isSelf: false}
+[07:28:11.843] [C-console] [swarm] onEvent CACHED {sig: fc3645b1, pubkey: 9645d576, visualCount: 2, isNewPeer: false, layerChanged: true}
+[07:28:11.843] [C-console] [swarm] onEvent received: {sig: fc3645b1, kind: 30200, fromPubkey: deb86f89, isSelf: false}
+[07:28:11.843] [C-console] [swarm] onEvent CACHED {sig: fc3645b1, pubkey: deb86f89, visualCount: 2, isNewPeer: false, layerChanged: true}
+[07:28:11.846] [C] panel selected "Alice"; handoffs: [{"label":"shared","sig":"0e7e608d0ce8"}]
+[07:28:13.072] [C] en-masse handoffs: [{"label":"alpha1","sig":"34cb6788b35f"},{"label":"bravo1","sig":"2371c25a73f5"},{"label":"shared","sig":"0e7e608d0ce8"}]
+
+[07:28:13.072] [FAIL] 1 assertion(s):
+  ✗ PANEL CONFIRM: branchSig 0e7e608d0ce8 is not the selected participant's current shared layerSig 282182c6dc2b
