@@ -96,6 +96,25 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
     const beeDepsOk = [...beeDepSigs].every(sig => depNames.has(`${sig}.js`))
     const allDepsOk = (cachedManifest.dependencies ?? []).every(sig => depNames.has(`${sig}.js`))
     if (beeOk && beeDepsOk && allDepsOk) {
+      // Staleness detection (restored): the OPFS install is content-complete,
+      // but a new deploy may have changed `/content/` out from under it. The
+      // web shell is served fresh over HTTP each load, so it can detect drift
+      // and reinstall the deployed build — otherwise a device boots a stale
+      // install forever (push-only never reconciles), 404ing every changed sig
+      // and, worse, running stale bees (e.g. an old un-DPR-capped pixi-host
+      // that crashes iOS). Reinstall from `/content/` and reload so the install
+      // always matches the served build.
+      try {
+        const bundled = await fetchBundledPackage()
+        if (bundled && bundledDiffersFromCached(bundled, cachedManifest)) {
+          console.warn('[ensure-install] OPFS install drifted from deployed /content/ — resyncing to deployed build')
+          const ok = await upgradeFromBundled()
+          if (ok) { location.reload(); return }
+        }
+      } catch (err) {
+        console.warn('[ensure-install] staleness check failed; continuing with cached state', err)
+      }
+
       if (sentinel) {
         try {
           await resyncFromSentinel(sentinel)
