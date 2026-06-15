@@ -114,7 +114,8 @@
 
       @if (isMobile()) {
         <!-- ═══ MOBILE: floating icons (no chrome) — Material Symbols ═══ -->
-        <!-- back · talk · camera · center · fullscreen · solo/swarm -->
+        <!-- back · talk · camera · center · fullscreen
+             (solo/swarm toggle lives in the command-line header) -->
         <div class="controls-section mobile-nav">
           <button class="ctl-btn" [class.disabled]="!canGoBack()" [disabled]="!canGoBack()"
                   (pointerdown)="onBackPointerDown($event)" (click)="onBackClick()"
@@ -138,9 +139,6 @@
           </button>
           <button class="ctl-btn" (click)="toggleFullscreen()" [attr.aria-label]="'controls.fullscreen' | t">
             <span class="mat-sym">fullscreen</span>
-          </button>
-          <button class="ctl-btn mesh-mobile-btn" [class.shield-mode]="meshPublic()" (click)="toggleMeshPublic()" [attr.aria-label]="(meshPublic() ? 'mesh.swarm' : 'mesh.solo') | t">
-            <span class="mat-sym" [class.filled]="meshPublic()">{{ meshPublic() ? 'groups' : 'person' }}</span>
           </button>
         </div>
       } @else {

@@ -5,12 +5,12 @@
     </div>
     <div class="camera-controls">
       <button type="button" class="camera-control-btn" (click)="closeCamera()">
-        <span class="hci">Q</span>
+        <span class="mat-sym">close</span>
       </button>
       <button type="button" class="camera-shutter" (click)="capturePhoto()"></button>
       @if (hasMultipleCameras) {
         <button type="button" class="camera-control-btn" (click)="switchCamera()">
-          <span class="hci" style="display:inline-block;transform:scaleX(-1)">r</span>
+          <span class="mat-sym">cameraswitch</span>
         </button>
       }
     </div>

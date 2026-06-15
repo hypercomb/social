@@ -149,6 +149,15 @@ export class TouchGestureCoordinator {
     // gate and clears the dragging effect when momentum was running)
     this.#cancelMomentum()
 
+    // Interactive DOM chrome (command-line input, controls) is layered over
+    // the full-screen canvas, so a tap on it is geometrically "inside" the
+    // canvas rect. Bail before the preventDefault below so those elements
+    // receive their native tap — otherwise tap-to-focus on the command-line
+    // input is suppressed and only an occasional long-press slips through.
+    // Panning starts on the canvas/tile divs, which don't match this selector.
+    const targetEl = e.target as HTMLElement | null
+    if (targetEl?.closest('input, textarea, select, button, a, [contenteditable], [role="textbox"], [role="button"]')) return
+
     const rect = this.#canvas.getBoundingClientRect()
     if (!this.#isInsideRect(e.clientX, e.clientY, rect)) return
 
