@@ -53,9 +53,14 @@ self.addEventListener('message', (event) => {
   }
 })
 
+// Per-fetch logging is opt-in: every asset, sig HEAD, and resource read
+// passes through here, and an active session generates hundreds of these
+// — each retained by DevTools. Flip to true only when debugging the SW.
+const SW_DEBUG = false
+
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url)
-  console.log('[SW] fetch', event.request.method, url.pathname)
+  if (SW_DEBUG) console.log('[SW] fetch', event.request.method, url.pathname)
 
   if (url.origin !== self.location.origin) return
 

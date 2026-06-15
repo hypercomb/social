@@ -18,13 +18,12 @@ import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import type { Navigation } from '../../core/navigation'
 import type { MovementService } from '../../core/movement.service'
-import { EffectBus, SignatureService, consumePointerGesture } from '@hypercomb/core'
+import { EffectBus, consumePointerGesture } from '@hypercomb/core'
 import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
 import type { InstallMonitor } from '../../core/install-monitor'
 import { VoiceInputService } from '../../core/voice-input.service'
 import { secretTag } from './secret-words'
-import { environment } from '../../environments/environment'
 
 const PILL_POS_KEY = 'hc:controls-pill-pos'
 const ENABLED_MAP_KEY = 'hc:controls-enabled-map'
@@ -511,21 +510,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     return segs.length > 0 ? segs[segs.length - 1].name : ''
   })
 
-  // Dev-only: 10-char prefix of the BAG sig (lineage path-only sha256).
-  // Identical on every peer at the same lineage, regardless of what
-  // children are currently in their layer — so "did we land at the
-  // same place?" is a quick visual check.
-  //
-  // The historical-layer-content sig (which used to drive this) lives
-  // separately in HistoryCursorService for anyone who needs it; for
-  // the breadcrumb we just want bag identity.
-  readonly isDev = !environment.production
-  readonly currentLayerSigShort = computed(() => {
-    if (!this.isDev) return ''
-    const sig = this.signedAddress()
-    return sig ? sig.slice(0, 10) : ''
-  })
-
   readonly prefixPath = computed(() => {
     const parts: string[] = []
     const space = this.spaceName()
@@ -563,21 +547,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   })
 
   /**
-   * Lineage sig used as the breadcrumb marker — depends ONLY on the
-   * navigation path. Two peers at the same lineage display the same
-   * marker regardless of their room or secret.
-   *
-   * The full FQDN (room + secret + domain) is the MESH KEY — it's
-   * what gates access to the channel. The marker is the SHAPE of the
-   * thing you're looking at; the mesh key is the gate to it.
+   * Lineage path key — depends ONLY on the navigation path, so two
+   * peers at the same lineage derive the same value regardless of
+   * their room or secret. Feeds the secret-words crumb.
    */
   readonly #lineageKey = computed(() => {
     this.#moved$()
     return this.navigation.segmentsRaw().join('/')
   })
-
-  /** SHA-256 of the lineage path — stable across browsers at same path. */
-  readonly signedAddress = signal('')
 
   readonly canGoBack = computed(() => {
     this.#moved$()
@@ -802,9 +779,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       this.#showHidden.set(active)
     })
 
-    // (Cursor-driven layer-content sig listener removed — breadcrumb
-    // now derives from `signedAddress` which is the bag/lineage sig.)
-
     this.#textOnlyUnsub = EffectBus.on<{ textOnly: boolean }>('render:set-text-only', ({ textOnly }) => {
       this.#textOnly.set(textOnly)
     })
@@ -859,17 +833,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     if (this.#fitMode() === 'global' || this.#fitPinnedPages().size > 0) {
       this.#enableFitLocked()
     }
-
-    // sign address reactively (replaces effect() which needs injection context)
-    this.#recomputeAddress()
-    window.addEventListener('synchronize', this.#recomputeAddress)
-
-  }
-
-  #recomputeAddress = (): void => {
-    const key = this.#lineageKey()
-    SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer)
-      .then(sig => this.signedAddress.set(sig))
   }
 
   ngAfterViewInit(): void {
@@ -921,7 +884,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     window.removeEventListener('keydown', this.#onPowerKeyDown)
     window.removeEventListener('keyup', this.#onPowerKeyUp)
     window.removeEventListener('blur', this.#onPowerKeyReset)
-    window.removeEventListener('synchronize', this.#recomputeAddress)
   }
 
   // ── navigation actions ────────────────────────────────

@@ -42,7 +42,12 @@ function parseArgs(argv) {
     pubkeys: null,
     memory: false,
     db: onAppService ? '/home/relay.db' : './relay.db',
-    maxEventSize: 65536,
+    // Must clear the swarm's resource pipeline: kind-30201 events inline
+    // up to MAX_RESOURCE_BYTES (256 KB) of image bytes as base64 — ≈342 KB
+    // of JSON before the envelope. At the old 64 KB cap every tile-image
+    // event was rejected with NOTICE 'message too large' (silently ignored
+    // by the mesh client), so peer tiles could never carry their images.
+    maxEventSize: 524288,
     // Content dir for HTTP file serving. Default: ./content next to the
     // script. Operators populate it however they like (symlink to their
     // dist/, rsync from elsewhere, manual copy). The relay serves only
@@ -213,6 +218,24 @@ const stmtInsert = db.prepare(
 )
 
 function insertEvent(evt) {
+  // NIP-33 parameterized replaceable events (kind 30000–39999): the relay
+  // holds exactly ONE event per (pubkey, kind, d-tag) — the newest. The
+  // whole swarm wire model assumes this (kinds 30200–30205 all publish to
+  // a replaceable slot). Without the eviction, every publish accumulated
+  // and REQ replay returned the full history newest-first — receivers
+  // applying events in arrival order ended on the publisher's OLDEST
+  // event, so a late joiner saw a peer's initial empty publish instead of
+  // their current tiles.
+  const kind = Number(evt.kind)
+  if (kind >= 30000 && kind < 40000) {
+    const d = String((evt.tags || []).find((t) => Array.isArray(t) && t[0] === 'd')?.[1] ?? '')
+    const dMatch = `EXISTS (SELECT 1 FROM json_each(tags) AS t WHERE json_extract(t.value, '$[0]') = 'd' AND json_extract(t.value, '$[1]') = ?)`
+    const newest = db.prepare(
+      `SELECT created_at FROM events WHERE pubkey = ? AND kind = ? AND ${dMatch} ORDER BY created_at DESC LIMIT 1`
+    ).get(evt.pubkey, kind, d)
+    if (newest && newest.created_at > evt.created_at) return  // stale republish — keep the newer slot
+    db.prepare(`DELETE FROM events WHERE pubkey = ? AND kind = ? AND ${dMatch}`).run(evt.pubkey, kind, d)
+  }
   stmtInsert.run(evt.id, evt.pubkey, evt.created_at, evt.kind, JSON.stringify(evt.tags), evt.content, evt.sig)
 }
 
@@ -259,7 +282,16 @@ function deleteExpired() {
 
 const rates = new Map() // ip -> { count, windowStart }
 const RATE_WINDOW = 60_000
-const RATE_LIMIT = 100
+// Per-IP message budget. An IP is NOT one participant: localhost dev runs
+// every browser through 127.0.0.1, and NAT'd households/offices share one
+// address. A single swarm publish burst is up to MAX_PUBLISH_NODES (200)
+// layer events plus personal-channel/presence/resource traffic, so two
+// peers navigating a content-rich location together can legitimately emit
+// several hundred messages inside a window. At 100 this silently dropped
+// one peer's layer events (NOTICE 'rate-limited' — the mesh client ignores
+// NOTICEs) and the swarm union went one-sided. 1200/min ≈ 20 msg/s
+// sustained still stops floods without starving co-located participants.
+const RATE_LIMIT = 1200
 
 function checkRate(ip) {
   const now = Date.now()

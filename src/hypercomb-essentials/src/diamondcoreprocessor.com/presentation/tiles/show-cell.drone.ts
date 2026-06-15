@@ -216,9 +216,18 @@ async function resolveChildNames(
     const manifest = await store.readChildrenManifest(parentLayerSig)
     if (manifest && manifest.length === content.children.length) {
       // Manifest is current iff it covers every child sig in the parent.
-      // Trust it: extract names directly, no bag walk.
+      // Trust it: extract names directly, no bag walk. ALSO seed each
+      // inlined child layer into HistoryService's parsed cache — the
+      // render path immediately follows with per-child getLayerBySig
+      // calls (branch detection), and without the seed every one of
+      // them is a cold pool read on refresh; a single missing pool
+      // entry would then join the multi-second preloadAllBags scan.
+      const seed = (history as { seedParsedLayer?: (sig: string, layer: object) => void }).seedParsedLayer
       for (const entry of manifest) {
-        if (entry?.layer?.name) out.add(entry.layer.name)
+        if (entry?.layer?.name) {
+          out.add(entry.layer.name)
+          if (seed && entry.sig) seed.call(history, entry.sig, entry.layer)
+        }
       }
       return out
     }
@@ -555,7 +564,11 @@ export class ShowCellDrone extends Drone {
   // Coalesce rapid cell:added / cell:removed events fired in the same JS turn.
   // The handlers mutate #slots synchronously; a single microtask runs one
   // applyGeometry at the end of the turn. Zero awaits in the click path.
-  #pendingAdds: string[] = []
+  // Pending incremental adds carry the SEGMENTS captured synchronously at
+  // event time — the microtask defer below plus #placePinnedCell's write
+  // must never re-read live lineage (a navigation in that window pinned
+  // the new cell's index against the WRONG location's layer).
+  #pendingAdds: { name: string; segments: readonly string[] }[] = []
   #pendingRemovals: string[] = []
   #incrementalScheduled = false
 
@@ -625,7 +638,9 @@ export class ShowCellDrone extends Drone {
         )
       }
 
-      this.#warmLabels = Object.keys(propsIndex)
+      // Full-lineage (sig) keys aren't labels — only legacy bare-label
+      // entries can seed the atlas's label slots.
+      this.#warmLabels = Object.keys(propsIndex).filter(k => !/^[0-9a-f]{64}$/.test(k))
     } catch { /* best-effort */ }
   }
 
@@ -1237,7 +1252,7 @@ export class ShowCellDrone extends Drone {
    * in one microtask per JS turn — rapid clicks in the same turn coalesce.
    * Zero awaits; the click path is never blocked on OPFS.
    */
-  readonly #queueIncremental = (change: { added?: string[]; removed?: string[] }): void => {
+  readonly #queueIncremental = (change: { added?: { name: string; segments: readonly string[] }[]; removed?: string[] }): void => {
     if (change.added) for (const n of change.added) this.#pendingAdds.push(n)
     if (change.removed) for (const n of change.removed) this.#pendingRemovals.push(n)
     if (this.#incrementalScheduled) return
@@ -1258,7 +1273,7 @@ export class ShowCellDrone extends Drone {
    * are fetched fire-and-forget and pushed via in-place buffer update when
    * ready.
    */
-  readonly #runIncrementalSync = (change: { added: string[]; removed: string[] }): void => {
+  readonly #runIncrementalSync = (change: { added: { name: string; segments: readonly string[] }[]; removed: string[] }): void => {
     const axial = this.resolve<any>('axial')
     if (!axial?.items || !this.#slots.seeded) {
       this.#layerCellsCache.delete(this.renderedLocationKey)
@@ -1272,7 +1287,7 @@ export class ShowCellDrone extends Drone {
       this.renderedCells.delete(name)
     }
 
-    for (const name of change.added) {
+    for (const { name, segments } of change.added) {
       // hasBranch defaults to false for newly-added cells (no children yet).
       // The async fill pass below will correct this if needed.
       if (this.#slots.add(name, false)) continue
@@ -1283,7 +1298,7 @@ export class ShowCellDrone extends Drone {
       // OPFS re-scan of the whole grid on every create, which both lagged the
       // click and re-rendered every existing tile. Only a genuinely full grid
       // (or missing axial) forces the slow path now.
-      if (this.#placePinnedCell(name) < 0) {
+      if (this.#placePinnedCell(name, segments) < 0) {
         this.#layerCellsCache.delete(this.renderedLocationKey)
         this.renderedCellsKey = ''
         this.requestRender()
@@ -1302,10 +1317,10 @@ export class ShowCellDrone extends Drone {
 
     const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
     const maxCells = Math.min(cellNames.length, axialMax)
-    if (maxCells <= 0) { this.clearMesh(); return }
+    if (maxCells <= 0) { this.clearMesh(`incremental: maxCells=0 (names=${cellNames.length}, axial=${axialMax})`); return }
 
     const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
-    if (cells.length === 0) { this.clearMesh(); return }
+    if (cells.length === 0) { this.clearMesh("incremental: axial yielded 0 cells"); return }
 
     // Populate cells from caches — newly-added cells have no cache entry and
     // will render blank until the async fill completes.
@@ -1367,7 +1382,7 @@ export class ShowCellDrone extends Drone {
     // Fire-and-forget: load images and branch flags for added cells, then
     // push in-place buffer updates. Never blocks the click path.
     if (change.added.length > 0) {
-      const added = change.added
+      const added = change.added.map(a => a.name)
       const lineage = this.resolve<any>('lineage')
       void Promise.resolve(lineage?.explorerDir?.()).then(async (dir) => {
         if (!dir) return
@@ -1434,10 +1449,10 @@ export class ShowCellDrone extends Drone {
 
     const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
     const maxCells = Math.min(cellNames.length, axialMax)
-    if (maxCells <= 0) { this.clearMesh(); return }
+    if (maxCells <= 0) { this.clearMesh(`changed-pass: maxCells=0 (names=${cellNames.length}, axial=${axialMax})`); return }
 
     const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
-    if (cells.length === 0) { this.clearMesh(); return }
+    if (cells.length === 0) { this.clearMesh("changed-pass: axial yielded 0 cells"); return }
 
     const touched = new Set<string>([...(change.added ?? []), ...(change.changedContent ?? [])])
     // Include cells whose cached sig is no longer in the atlas — the
@@ -1493,23 +1508,31 @@ export class ShowCellDrone extends Drone {
     ;(window as unknown as { __hcNav?: (l: string, e?: string) => void }).__hcNav?.('render:start')
     this.shader?.setHoveredIndex(-1)
     if (!this.pixiApp || !this.pixiContainer || !this.pixiRenderer) {
-      this.clearMesh()
+      this.clearMesh("synchronize: pixi not ready")
       return
     }
 
     const axial = this.resolve<any>('axial')
     if (!axial?.items) {
-      this.clearMesh()
+      this.clearMesh("synchronize: axial service unavailable")
       return
     }
 
     const lineage = this.resolve<any>('lineage')
     if (!lineage?.explorerDir || !lineage?.explorerLabel || !lineage?.changed) {
-      this.clearMesh()
+      this.clearMesh("synchronize: lineage service unavailable")
       return
     }
 
     const locationKey = String(lineage.explorerLabel?.() ?? '/')
+    // THE PASS ADDRESS — captured synchronously alongside locationKey,
+    // before the first await. Every downstream consumer that pairs cell
+    // NAMES from this pass with a location (index reads, deferred index
+    // persistence) must use THIS array, never a live re-read of lineage:
+    // the pass spans many awaits and a mid-pass navigation used to make
+    // names-from-A meet segments-from-B — the cross-layer graft vector.
+    const passSegments: readonly string[] = (lineage.explorerSegments?.() ?? [])
+      .map((s: unknown) => String(s ?? '').trim()).filter(Boolean)
 
     // fast path: skip all OPFS work when nothing has changed
     // renderedCellsKey is cleared by any invalidation event (tile:saved, orientation, clipboard, etc.)
@@ -1557,7 +1580,7 @@ export class ShowCellDrone extends Drone {
     // run finally; the implicit `return` at function end too.)
     this.#activeRenderTarget = locationKey
     try {
-      return await this.#renderFromSynchronizeInner(lineage, locationKey, axial)
+      return await this.#renderFromSynchronizeInner(lineage, locationKey, axial, passSegments)
     } finally {
       if (this.#activeRenderTarget === locationKey) this.#activeRenderTarget = null
     }
@@ -1565,12 +1588,12 @@ export class ShowCellDrone extends Drone {
 
   // The body of renderFromSynchronize, factored out so the dedup wrapper
   // above stays readable. All the existing logic lives here unchanged.
-  readonly #renderFromSynchronizeInner = async (lineage: any, locationKey: string, axial: any): Promise<void> => {
+  readonly #renderFromSynchronizeInner = async (lineage: any, locationKey: string, axial: any, passSegments: readonly string[]): Promise<void> => {
     // Re-narrow pixi handles. The outer renderFromSynchronize already
     // guarded these but TS can't carry the narrowing across the function
     // boundary. Cheap re-check.
     if (!this.pixiApp || !this.pixiContainer || !this.pixiRenderer) {
-      this.clearMesh()
+      this.clearMesh("synchronize: pixi handles lost")
       return
     }
 
@@ -1633,6 +1656,15 @@ export class ShowCellDrone extends Drone {
         // abort any stream still running for the previous layer
         ++this.#streamToken
 
+        // Hide the OUTGOING layer BEFORE the new location's viewport is
+        // applied. Without this the old tiles visibly RESIZE (the new
+        // zoom/pan lands on the still-visible old content) and then
+        // vanish when the cached cells swap in. Same ordering contract
+        // as the slow layer-change path: old level out, then viewport,
+        // then content, then reveal (:1745 below). In the all-sync case
+        // the hide/show happens within one frame — no flicker.
+        if (this.layer) this.layer.visible = false
+
         // Viewport: prefer cached snapshot (sync). If none cached AND
         // we have a dir to read from, await the OPFS read so the mesh
         // doesn't render at the previous layer's pan/zoom and snap into
@@ -1642,8 +1674,9 @@ export class ShowCellDrone extends Drone {
         let appliedSnap: ViewportSnapshot | null = null
         const vpSnap = this.#layerViewportCache.get(locationKey)
         if (vpSnap) {
-          this.#applyViewportFromSnapshot(vpSnap)
-          appliedSnap = vpSnap
+          // appliedSnap must be what was ACTUALLY applied — the sanitizer
+          // may have rejected components of the cached snapshot.
+          appliedSnap = this.#applyViewportFromSnapshot(vpSnap)
         } else {
           // Viewport is sig-keyed by lineage segments now (no OPFS dir
           // required), so always read — sub-layers without a dir restore
@@ -1827,7 +1860,7 @@ export class ShowCellDrone extends Drone {
 
       const maxCells = Math.min(cellNames.length, typeof axial.items.size === 'number' ? axial.items.size : cellNames.length)
       const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, flatSeedSet)
-      if (cells.length === 0) { this.clearMesh(); this.rendering = false; return }
+      if (cells.length === 0) { this.clearMesh(`flat-seed: axial yielded 0 cells (names=${cellNames.length})`); this.rendering = false; return }
 
       // load images (best-effort). Runs even when dir is null —
       // loadCellImages only needs the dir for tags/link reads (already
@@ -1918,12 +1951,20 @@ export class ShowCellDrone extends Drone {
 
       // Real-time supersedes preloader: cursor.load runs a bag scan +
       // warmupHistoricalResources walk that can take 600ms-1.5s on a
-      // 100-marker lineage. That is preloader work for undo/redo — render
-      // must NOT wait on it. Fire-and-forget so it warms in the
-      // background; the user only feels its cost when they actually
-      // invoke /undo or open the history viewer.
+      // 100-marker lineage — and the ROOT bag gains a marker on every
+      // change made anywhere, so at root this is the whole edit history.
+      // Fire-and-forget is NOT enough: its hundreds of OPFS reads, JSON
+      // parses, and hash continuations share the main thread and the
+      // OPFS backend with the critical render, stretching every awaited
+      // hop of first paint. Defer the kick to IDLE so the render wins
+      // the thread; the user only feels cursor cost when they invoke
+      // /undo or open the history viewer.
       if (cursorService && sig.sig) {
-        void cursorService.load(sig.sig).catch(() => {})
+        const cursorSig = sig.sig
+        const kick = () => { void cursorService.load(cursorSig).catch(() => {}) }
+        const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
+        if (typeof ric === 'function') ric(kick, { timeout: 4000 })
+        else setTimeout(kick, 1500)
       }
 
       if (cursorService) {
@@ -2248,7 +2289,7 @@ export class ShowCellDrone extends Drone {
     // may be null when no OPFS folder mirror exists for this sub-layer;
     // pass a typed sentinel so the resolver chooses its layer-only
     // strategy instead of guarding on null shape inside the resolver.
-    const cellNames = await this.#resolveCellOrder(this.#layoutMode, dir as FileSystemDirectoryHandle, union, localCellSet, lineage, peerIndices)
+    const cellNames = await this.#resolveCellOrder(this.#layoutMode, dir as FileSystemDirectoryHandle, union, localCellSet, lineage, peerIndices, passSegments)
 
     const previousLocationKey = this.renderedLocationKey
     const layerChanged = locationKey !== previousLocationKey
@@ -2275,6 +2316,15 @@ export class ShowCellDrone extends Drone {
       this.#pendingRemoves.clear()
       this.#slots.clear()  // layer change invalidates the slot state machine
 
+      // Hide the OUTGOING layer BEFORE the new location's viewport is
+      // applied. The first-visit path awaits an OPFS read below, and the
+      // new viewport (zoom/pan/meshOffset) lands on the container while
+      // the await is in flight — with the old tiles still visible, the
+      // user saw the CURRENT level visibly re-zoom/jump before the next
+      // level's children streamed in. Hiding first makes the transition
+      // clean: old level out, then viewport, then children stream in.
+      if (this.layer) this.layer.visible = false
+
       // Viewport: prefer the in-memory snapshot (sync). MUST await the
       // OPFS read on first visit — backgrounding it caused mesh to render
       // at the previous layer's pan/zoom, then snap to the saved viewport
@@ -2284,8 +2334,9 @@ export class ShowCellDrone extends Drone {
       const vpSnap = this.#layerViewportCache.get(locationKey)
       let appliedSnap: ViewportSnapshot | null = null
       if (vpSnap) {
-        this.#applyViewportFromSnapshot(vpSnap)
-        appliedSnap = vpSnap
+        // appliedSnap must be what was ACTUALLY applied — the sanitizer
+        // may have rejected components of the cached snapshot.
+        appliedSnap = this.#applyViewportFromSnapshot(vpSnap)
       } else {
         // Viewport is sig-keyed by lineage segments (no OPFS dir
         // required) — always read so dir-less sub-layers restore too.
@@ -2324,7 +2375,7 @@ export class ShowCellDrone extends Drone {
 
       if (cellNames.length === 0) {
         if (this.layer) this.layer.visible = true
-        this.clearMesh()
+        this.clearMesh("layer-change: location has no cells")
         return
       }
 
@@ -2347,8 +2398,8 @@ export class ShowCellDrone extends Drone {
         })
       }
 
-      // hide layer until streaming completes — prevents flash/jump during progressive render
-      if (this.layer) this.layer.visible = false
+      // (layer already hidden above, before the viewport apply — it stays
+      // hidden until streamCells reveals the first batch)
 
       // emit navigation guard so click handlers block during transition
       this.emitEffect('navigation:guard-start', { locationKey })
@@ -2366,7 +2417,7 @@ export class ShowCellDrone extends Drone {
 
     // note: same layer — incremental path (cell collection was fresh, images are cached)
     if (cellNames.length === 0) {
-      this.clearMesh()
+      this.clearMesh("same-layer: cellNames empty")
       return
     }
 
@@ -2375,13 +2426,13 @@ export class ShowCellDrone extends Drone {
     const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
     const maxCells = Math.min(cellNames.length, axialMax)
     if (maxCells <= 0) {
-      this.clearMesh()
+      this.clearMesh(`same-layer: maxCells=0 (names=${cellNames.length}, axial=${axialMax})`)
       return
     }
 
     const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
     if (cells.length === 0) {
-      this.clearMesh()
+      this.clearMesh("same-layer: axial yielded 0 cells")
       return
     }
 
@@ -2468,15 +2519,26 @@ export class ShowCellDrone extends Drone {
     // same first-paint latency.
     let start = 0
     let step = ShowCellDrone.STREAM_BATCH_SIZE
+    let batchNumber = 0
+
+    // Reveal policy: normal-sized layers (≤ 3 batches' worth) stay hidden
+    // until EVERY batch has landed, then show in one paint — tiles load
+    // together, never in visible waves. Only genuinely large layers keep
+    // the progressive first-batch reveal, where fast first paint beats
+    // completeness.
+    const revealProgressively = allCells.length > ShowCellDrone.STREAM_BATCH_SIZE * 3
 
     while (start < allCells.length) {
       if (superseded()) return
 
       const batch = allCells.slice(start, start + step)
+      batchNumber++
+      const tBatch = performance.now()
 
       // load all cells in this batch in parallel — file reads + image decodes overlap
       await this.loadCellImages(batch, dir)
       if (superseded()) return
+      const tImages = performance.now()
 
       for (const cell of batch) {
         cells.push(cell)
@@ -2486,10 +2548,12 @@ export class ShowCellDrone extends Drone {
       const isLast = start + step >= allCells.length
       await this.applyGeometry(cells, isLast)
       if (superseded()) return
+      hcNav?.('batch', `#${batchNumber} [${batch.map(c => c.label).join(', ')}] (${cells.length}/${allCells.length} cumulative) images ${Math.round(tImages - tBatch)}ms geometry ${Math.round(performance.now() - tImages)}ms`)
 
-      // reveal the layer as soon as the first batch is on-screen so cold start
-      // shows tiles immediately and the rest stream in progressively.
-      if (this.layer && !this.layer.visible) {
+      // Large layers only: reveal at the first batch so cold start shows
+      // tiles immediately and the rest stream in progressively. Normal
+      // layers wait for the post-loop single reveal below.
+      if (revealProgressively && this.layer && !this.layer.visible) {
         this.layer.visible = true
         hcNav?.('first-batch:visible', `${cells.length} tiles`)
       }
@@ -2501,7 +2565,11 @@ export class ShowCellDrone extends Drone {
 
     if (superseded()) return
 
-    // safety: ensure layer is visible if loop exited without rendering anything
+    // Single reveal for normal layers (all batches landed together), and
+    // the safety net for empty/odd exits either way.
+    if (this.layer && !this.layer.visible && cells.length > 0) {
+      hcNav?.('reveal:all-at-once', `${cells.length} tiles`)
+    }
     if (this.layer) this.layer.visible = true
 
     this.streamActive = false
@@ -2580,44 +2648,75 @@ export class ShowCellDrone extends Drone {
       snap = {}
     }
 
-    // populate back-nav fast-path cache
+    // Apply first (the sanitizer may reject garbage components), then
+    // cache + return what was ACTUALLY applied so revisits and the
+    // caller's recenter decision never act on rejected values.
+    const applied = this.#applyViewportFromSnapshot(snap)
     const locationKey = this.renderedLocationKey
-    if (locationKey) this.#layerViewportCache.set(locationKey, snap)
-
-    this.#applyViewportFromSnapshot(snap)
-    return snap
+    if (locationKey) this.#layerViewportCache.set(locationKey, applied)
+    return applied
   }
 
-  #applyViewportFromSnapshot = (snap: ViewportSnapshot): boolean => {
+  /** Apply a viewport snapshot (sanitized) and return what was ACTUALLY
+   *  applied — rejected components come back undefined so callers (cache,
+   *  recenter decision) never act on garbage values. */
+  #applyViewportFromSnapshot = (snap: ViewportSnapshot): ViewportSnapshot => {
     const container = this.pixiContainer
     const app = this.pixiApp
     const renderer = this.pixiRenderer
-    if (!container || !app || !renderer) return false
+    if (!container || !app || !renderer) return {}
 
     const s = renderer.screen
 
-    if (snap.zoom) {
+    // Reject garbage BEFORE applying. A persisted `__viewport__` entry
+    // written by a past broken session (duplicate zoom/pan drones
+    // fighting over the container, a crash mid-gesture) can hold
+    // non-finite or absurd values; applying one flings the freshly
+    // rendered tiles off-screen — "the children rendered and then
+    // disappeared". Each component is validated independently; an
+    // invalid one falls back to its default framing, loudly. The next
+    // user gesture overwrites the bad entry, so this self-heals.
+    const bound = 8 * Math.max(s.width, s.height, 1)
+    const sane = (v: unknown, b = bound): boolean =>
+      typeof v === 'number' && Number.isFinite(v) && Math.abs(v) <= b
+    let zoom = snap.zoom
+    if (zoom && !(sane(zoom.scale, 100) && (zoom.scale as number) > 0.01 && sane(zoom.cx) && sane(zoom.cy))) {
+      console.warn('[render] viewport restore: rejecting insane zoom snapshot', zoom)
+      zoom = undefined
+    }
+    let pan = snap.pan
+    if (pan && !(sane(pan.dx) && sane(pan.dy))) {
+      console.warn('[render] viewport restore: rejecting insane pan snapshot', pan)
+      pan = undefined
+    }
+    let meshOffset = snap.meshOffset
+    if (meshOffset && !(sane(meshOffset.x) && sane(meshOffset.y))) {
+      console.warn('[render] viewport restore: rejecting insane meshOffset snapshot', meshOffset)
+      meshOffset = undefined
+    }
+
+    if (zoom) {
       // Apply the saved scale + (cx, cy) as an approximation so the
       // initial paint isn't blank, but flag the snapshot for a refit
       // once mesh bounds are available (handled in applyGeometry).
       // Without this, a fit saved at one viewport size renders shrunk
       // and off-center after reload at a different size.
-      container.scale.set(snap.zoom.scale)
-      container.position.set(snap.zoom.cx, snap.zoom.cy)
+      container.scale.set(zoom.scale)
+      container.position.set(zoom.cx, zoom.cy)
       // Pan-respects-fit: refit ONLY when the saved pan is zero (or
       // absent). A non-zero saved pan means the user explicitly moved
       // away from the fit position; refitting (which calls
       // setPan(0,0)) would clobber their pan on every boot.
-      const panIsZero = !snap.pan || (snap.pan.dx === 0 && snap.pan.dy === 0)
-      this.#pendingFitRestore = !!snap.zoom.fit && panIsZero
+      const panIsZero = !pan || (pan.dx === 0 && pan.dy === 0)
+      this.#pendingFitRestore = !!zoom.fit && panIsZero
     } else {
       container.scale.set(1)
       container.position.set(0, 0)
       this.#pendingFitRestore = false
     }
 
-    if (snap.pan) {
-      app.stage.position.set(s.width * 0.5 + snap.pan.dx, s.height * 0.5 + snap.pan.dy)
+    if (pan) {
+      app.stage.position.set(s.width * 0.5 + pan.dx, s.height * 0.5 + pan.dy)
     } else {
       app.stage.position.set(s.width * 0.5, s.height * 0.5)
     }
@@ -2629,24 +2728,24 @@ export class ShowCellDrone extends Drone {
     // Otherwise stash the value so applyGeometry can apply + emit it
     // as soon as the mesh is created (first-time render and
     // post-clearMesh re-create both fall into the latter case).
-    if (snap.meshOffset) {
+    if (meshOffset) {
       if (this.hexMesh) {
-        this.hexMesh.position.set(snap.meshOffset.x, snap.meshOffset.y)
-        this.emitEffect('render:mesh-offset', { x: snap.meshOffset.x, y: snap.meshOffset.y })
+        this.hexMesh.position.set(meshOffset.x, meshOffset.y)
+        this.emitEffect('render:mesh-offset', { x: meshOffset.x, y: meshOffset.y })
         this.#pendingMeshOffsetRestore = null
       } else {
-        this.#pendingMeshOffsetRestore = { x: snap.meshOffset.x, y: snap.meshOffset.y }
+        this.#pendingMeshOffsetRestore = { x: meshOffset.x, y: meshOffset.y }
       }
     } else {
       this.#pendingMeshOffsetRestore = null
     }
 
-    return !!(snap.zoom || snap.pan || snap.meshOffset)
+    return { zoom, pan, meshOffset }
   }
 
   private readonly applyGeometry = async (cells: Cell[], final = true): Promise<void> => {
     if (cells.length === 0) {
-      this.clearMesh()
+      this.clearMesh("applyGeometry: called with 0 cells")
       return
     }
 
@@ -2666,7 +2765,7 @@ export class ShowCellDrone extends Drone {
     const quadH = quadHalfH * 2
 
     if (!this.atlas || !this.imageAtlas) {
-      this.clearMesh()
+      this.clearMesh("applyGeometry: atlas unavailable")
       return
     }
 
@@ -2985,7 +3084,12 @@ export class ShowCellDrone extends Drone {
       this.#pendingRemoves.delete(payload.cell)
       this.#startNewCellFade(payload.cell)
       if (this.#slots.seeded) {
-        this.#queueIncremental({ added: [payload.cell] })
+        // Capture the address NOW, synchronously with the event — the
+        // incremental placement defers via microtask and its index write
+        // must use the location where this add actually happened.
+        const lineage = this.resolve<any>('lineage')
+        const addSegments: readonly string[] = payload.segments ?? lineage?.explorerSegments?.() ?? []
+        this.#queueIncremental({ added: [{ name: payload.cell, segments: addSegments }] })
       } else {
         this.#layerCellsCache.delete(this.renderedLocationKey)
         this.renderedCellsKey = ''
@@ -3727,8 +3831,14 @@ export class ShowCellDrone extends Drone {
     this.#newCellFadeRaf = requestAnimationFrame(tick)
   }
 
-  private clearMesh = (): void => {
+  private clearMesh = (reason: string): void => {
     if (this.hexMesh && this.layer) {
+      // A live-mesh teardown must NEVER be silent. Every "tiles rendered
+      // and then vanished" bug funnels through here, and an unexplained
+      // clear is indistinguishable from a legitimate empty-layer render.
+      // The reason names the bail site so a vanish in the field is
+      // diagnosable straight from the console.
+      console.warn(`[render] clearMesh: tearing down ${this.renderedCount} rendered cell(s) — ${reason}`)
       // Capture the centering offset before destroying the mesh so the
       // next mesh (e.g. when redo brings tiles back from empty) can
       // restore it instead of starting at (0,0).
@@ -3771,7 +3881,7 @@ export class ShowCellDrone extends Drone {
   }
 
   private readonly rebuildRenderResources = (renderer: unknown): void => {
-    this.clearMesh()
+    this.clearMesh("rebuildRenderResources: context restore")
     this.shader = null
     this.atlas = new HexLabelAtlas(renderer, 128, 8, 8)
     this.attachLabelResolver(this.atlas)
@@ -3879,7 +3989,7 @@ export class ShowCellDrone extends Drone {
     localStorage.setItem(this.#layoutModeKey(locationKey), mode)
   }
 
-  async #orderByIndexPinned(dir: FileSystemDirectoryHandle, names: string[], localCellSet: Set<string>, readOnly = false, peerIndices?: Map<string, number>): Promise<string[]> {
+  async #orderByIndexPinned(dir: FileSystemDirectoryHandle, names: string[], localCellSet: Set<string>, readOnly = false, peerIndices?: Map<string, number>, passSegments?: readonly string[]): Promise<string[]> {
     const axial = this.resolve<any>('axial')
     const maxSlot = axial?.count ?? 60
     const sparse: string[] = new Array(maxSlot + 1).fill('')
@@ -3909,7 +4019,15 @@ export class ShowCellDrone extends Drone {
     // 0000.index, and the inflate tree all agree on which cell is
     // which.
     const lineage = this.resolve<any>('lineage')
-    const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+    // THE ADDRESS OF THIS PASS. Must come from the render pass that named
+    // the cells (passSegments), never re-resolved from live lineage: the
+    // index wave below spans many awaits, and a navigation mid-pass used
+    // to re-key every read against the NEW location — all misses — then
+    // fire-and-forget persist the OLD layer's every tile against the NEW
+    // location. Each of those commits cascade-attached the old cell into
+    // the new layer's children: the "whole layer copied into the next
+    // layer" graft. Names and address now bind at the same instant.
+    const parentSegments: readonly string[] = passSegments ?? lineage?.explorerSegments?.() ?? []
 
     // Pass 1 — place LOCAL indexed cells first so they own their persisted
     // slots before any peer-published index gets a chance to claim them.
@@ -4010,6 +4128,7 @@ export class ShowCellDrone extends Drone {
     // ready) — the SAME helper the pinned incremental-add path uses, so a
     // cell created via the fast path and one placed in a full render land on
     // identical slots.
+    const placedUnindexed: string[] = []
     for (const name of unindexed) {
       // Session-cache short-circuit. If this tile was already placed in a
       // prior render (local-no-index path during a persistence race, or any
@@ -4026,25 +4145,33 @@ export class ShowCellDrone extends Drone {
       }
 
       sparse[placed] = name
-      // Cache the assignment so subsequent renders skip the score
-      // recomputation. Stable across pan, viewport change, freshness rotation.
+      placedUnindexed.push(`${name}→${placed}`)
+      // TRANSIENT reindex only. The session cache keeps the placement
+      // stable across re-renders (pan, peer churn, synchronize passes)
+      // for the lifetime of the tab — but a render pass must NEVER
+      // persist an index. Score-picked slots are a display decision,
+      // not content: stamping them into the layer made accidental
+      // placements permanent, generated a commit cascade per tile on
+      // every cold render, and was the write vector behind the
+      // cross-layer graft. Durable indexes come only from deliberate
+      // actions — cell creation (#placePinnedCell), explicit
+      // place-at (#handlePlaceAt), and the move drone.
       this.#sessionSlotByLabel.set(name, placed)
-      if (!readOnly && localCellSet.has(name)) {
-        // Fire-and-forget — the session cache provides intra-render stability
-        // regardless of when persistence completes, and the cache-hit branch
-        // above retries persistence on every later render until one write
-        // succeeds (writeTilePropertiesAt is content-addressed and idempotent
-        // on identical bytes). So we don't await here; awaiting just blocks
-        // the placement loop for no synchronization benefit.
-        void writeTilePropertiesAt(parentSegments, name, { index: placed }).catch(err =>
-          console.warn('[show-cell] failed to persist index for', name, err)
-        )
-      }
     }
 
+    // Stage diagnosis: which cells came in with a persisted index vs which
+    // had to be score-filled this pass (lost/never-had index, or slot
+    // collision). A tile in the score-fill list whose slot lands past the
+    // axial map's size is the one that misses the first paint.
+    const indexedPlaced = localNames.filter(n => !unindexed.includes(n)).map(n => `${n}@${idxByName.get(n)}`)
+    console.info('[layout] indexed:', indexedPlaced.join(', ') || '(none)', '| score-filled:', placedUnindexed.join(', ') || '(none)')
 
     return sparse
   }
+
+  // #segmentsStillCurrent removed — render passes no longer persist ANY
+  // per-tile writes (score-fill reindexing is transient, session-cache
+  // only), so the stale-pass write guard has nothing left to guard.
 
   /**
    * Score every free slot in `sparse` and return the best one for a new
@@ -4121,7 +4248,7 @@ export class ShowCellDrone extends Drone {
    * (the tile never jumps). Returns the slot, or -1 when the grid is full /
    * axial isn't ready, signalling the caller to fall back to a full render.
    */
-  #placePinnedCell(name: string): number {
+  #placePinnedCell(name: string, eventSegments?: readonly string[]): number {
     const axial = this.resolve<any>('axial')
     if (!axial?.items) return -1
     const maxSlot = axial?.count ?? 60
@@ -4144,8 +4271,13 @@ export class ShowCellDrone extends Drone {
     if (!this.#slots.addAt(name, slot, false)) return -1
     this.#sessionSlotByLabel.set(name, slot)
 
+    // Persist against the EVENT's address (captured synchronously with
+    // the cell:added that triggered this placement), never a live lineage
+    // re-read — the microtask defer between event and here is a real
+    // navigation window, and a wrong-location index write cascades the
+    // cell into the wrong layer's children.
     const lineage = this.resolve<any>('lineage')
-    const parentSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
+    const parentSegments: readonly string[] = eventSegments ?? lineage?.explorerSegments?.() ?? []
     void writeTilePropertiesAt(parentSegments, name, { index: slot }).catch(err =>
       console.warn('[show-cell] failed to persist index for new cell', name, err),
     )
@@ -4182,6 +4314,7 @@ export class ShowCellDrone extends Drone {
     localCellSet: Set<string>,
     _lineage: any,
     peerIndices?: Map<string, number>,
+    passSegments?: readonly string[],
   ): Promise<string[]> {
     // Clipboard view is a preview surface — pack cells contiguously from
     // slot 0 so they render near the viewport origin regardless of whatever
@@ -4204,7 +4337,7 @@ export class ShowCellDrone extends Drone {
       // matching against each child's bag markers. Falls back to
       // live disk ordering when the past layer can't be resolved.
       const historyService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as HistoryService | undefined
-      const parentSegments = (_lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
+      const parentSegments = passSegments ?? (_lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
       const orderedNames = (content && historyService)
         ? [...await resolveChildNames(historyService, parentSegments, dir, content)]
         : []
@@ -4219,12 +4352,12 @@ export class ShowCellDrone extends Drone {
         // don't shift across undo — only membership (which slots are
         // occupied) changes between history points. readOnly: rewound
         // viewing must not mutate disk indices.
-        cellNames = await this.#orderByIndexPinned(dir, filtered, localCellSet, true, peerIndices)
+        cellNames = await this.#orderByIndexPinned(dir, filtered, localCellSet, true, peerIndices, passSegments)
       } else {
-        cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet, false, peerIndices)
+        cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet, false, peerIndices, passSegments)
       }
     } else {
-      cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet, false, peerIndices)
+      cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet, false, peerIndices, passSegments)
     }
 
     if (this.filterKeyword) {
@@ -4283,10 +4416,21 @@ export class ShowCellDrone extends Drone {
     // during move drag, use reordered names so labels map to correct indices
     const effectiveNames = this.moveNames ?? names
 
+    // Stage diagnosis: any occupied slot at or past `max` is CUT from this
+    // render entirely — those tiles only appear when a later pass renders
+    // with a bigger axial map. This is the "second stage" of a two-stage
+    // load: a score-filled tile placed past the axial size waits here.
+    const beyondMax = names.slice(max).map((l, off) => l ? `${l}@${max + off}` : '').filter(Boolean)
+    if (beyondMax.length) console.info(`[layout] axial-truncated (slots ≥ ${max}):`, beyondMax.join(', '))
+
     for (let i = 0; i < max; i++) {
       const a = axial.items.get(i) as Axial | undefined
       const label = effectiveNames[i] ?? names[i]
-      if (!a) break
+      if (!a) {
+        const dropped = names.slice(i).map((l, off) => l ? `${l}@${i + off}` : '').filter(Boolean)
+        if (dropped.length) console.info(`[layout] axial-dropped (no coords from slot ${i}):`, dropped.join(', '))
+        break
+      }
       if (!label) continue
 
       const div = this.#divergenceFutureAdds.has(label) ? 1 : this.#divergenceFutureRemoves.has(label) ? 2 : 0
@@ -4335,10 +4479,29 @@ export class ShowCellDrone extends Drone {
     }
 
     const livePropsIndex: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
-    // When cursor is rewound and we have content-state overrides, use those
-    const propsIndex = this.#cursorPropsOverride
-      ? Object.fromEntries([...Object.entries(livePropsIndex), ...this.#cursorPropsOverride])
-      : livePropsIndex
+
+    // Index entries are keyed by the tile's FULL-LINEAGE sig (the sigbag
+    // key — tile-properties.ts) so same-named tiles at different hive
+    // locations never read each other's assignment; bare-label entries
+    // remain readable as legacy fallback. The sigs are memoised inside
+    // HistoryService.sign, so this map costs one hash per (location,
+    // label) for the lifetime of the session. Cursor overrides (rewound
+    // view) are label-keyed and take precedence over the live index.
+    const renderLineage = (window as any).ioc?.get?.('@hypercomb.social/Lineage') as
+      { explorerSegments?: () => readonly string[] } | undefined
+    const renderSegments: readonly string[] = renderLineage?.explorerSegments?.() ?? []
+    const indexKeyByLabel = new Map<string, string>()
+    for (const c of cells) {
+      if (!indexKeyByLabel.has(c.label)) {
+        indexKeyByLabel.set(c.label, await cellLocationSig(renderSegments, c.label))
+      }
+    }
+    const propsSigForLabel = (label: string): string | undefined => {
+      const override = this.#cursorPropsOverride?.get(label)
+      if (override) return override
+      const key = indexKeyByLabel.get(label) ?? ''
+      return (key ? livePropsIndex[key] : undefined) ?? livePropsIndex[label]
+    }
 
     // Peer-published image sigs for tiles the user hasn't adopted yet.
     // For each peer-only tile (kind:'peer', `cell.external === true`),
@@ -4510,7 +4673,7 @@ export class ShowCellDrone extends Drone {
 
       // read tile properties from content-addressed resource
       try {
-        const propsSig = propsIndex[cell.label]
+        const propsSig = propsSigForLabel(cell.label)
         if (!propsSig) throw new Error('no props')
         // LOCAL only — a props blob not yet pulled renders label-only this
         // pass; the detached fill invalidates + re-renders when it lands.

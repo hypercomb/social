@@ -4,7 +4,7 @@
 
 import { Worker, EffectBus } from '@hypercomb/core'
 import { isImageUrl, fetchImageBlob } from './photo.js'
-import { readCellProperties, readTilePropertiesAt } from '../editor/tile-properties.js'
+import { readCellProperties, readTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig } from '../editor/tile-properties.js'
 import type { PhotoView } from './photo.view.js'
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
@@ -57,11 +57,9 @@ export class LinkOpenWorker extends Worker {
     // separate from the canonical layer slot; kept while that path
     // is migrated to writeTilePropertiesAt).
     try {
-      const index: Record<string, string> = JSON.parse(
-        localStorage.getItem('hc:tile-props-index') ?? '{}'
-      )
+      const index = readTilePropsIndex()
       const store = get('@hypercomb.social/Store') as any
-      const sig = index[label]
+      const sig = lookupTilePropsSig(index, await cellLocationSig(parentSegments, label), label)
       if (store && sig) {
         const blob = await store.getResource(sig)
         if (blob) {

@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/editor/tile-editor.drone.ts
 import { EffectBus } from '@hypercomb/core'
-import { TILE_PROPERTIES_FILE, readCellProperties, readTilePropertiesAt, writeTilePropertiesAt } from './tile-properties.js'
+import { TILE_PROPERTIES_FILE, readCellProperties, readTilePropertiesAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig } from './tile-properties.js'
 import type { TileEditorService } from './tile-editor.service.js'
 import type { ImageEditorService } from './image-editor.service.js'
 
@@ -128,9 +128,8 @@ export class TileEditorDrone {
       }
     } catch {
       try {
-        const indexKey = 'hc:tile-props-index'
-        const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
-        const propsSig = index[cell]
+        const index = readTilePropsIndex()
+        const propsSig = lookupTilePropsSig(index, await cellLocationSig(parentSegments, cell), cell)
         if (!propsSig) throw new Error('no index entry')
         const propsBlob = await store.getResource(propsSig)
         if (!propsBlob) throw new Error('props blob missing')
@@ -171,11 +170,17 @@ export class TileEditorDrone {
     if (!store || !service || !imageEditor || !settings) return
     if (service.mode !== 'editing') return
 
-    // capture cell name up front so we can emit tile:saved if save succeeds.
-    // The whole save body runs inside try/finally — without this guarantee
-    // a thrown step (image capture, OPFS write, etc.) would leave the
-    // editor open and the InputGate locked, permanently blocking zoom.
+    // capture cell name AND ADDRESS up front so we can emit tile:saved if
+    // save succeeds. The whole save body runs inside try/finally — without
+    // this guarantee a thrown step (image capture, OPFS write, etc.) would
+    // leave the editor open and the InputGate locked, permanently blocking
+    // zoom. Segments are bound HERE, at gesture time: the save spans image
+    // captures + several putResource awaits, and reading lineage at write
+    // time used to stamp the edited props against wherever the user had
+    // navigated to mid-save — a cross-layer content graft.
     const savedCell = service.cell
+    const lineageAtSave = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+    const segmentsForSave: readonly string[] = lineageAtSave?.explorerSegments?.() ?? []
     let saveSucceeded = false
 
     try {
@@ -257,11 +262,13 @@ export class TileEditorDrone {
     const blob = new Blob([json], { type: 'application/json' })
     const propsSig = await store.putResource(blob)
 
-    // persist cell → resource sig mapping
-    const indexKey = 'hc:tile-props-index'
-    const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
-    index[service.cell] = propsSig
-    localStorage.setItem(indexKey, JSON.stringify(index))
+    // persist cell → resource sig mapping, keyed by full lineage so a
+    // same-named tile at another hive location can never collide.
+    // segmentsForSave was bound at gesture start — never re-read here.
+    const indexCellKey = await cellLocationSig(segmentsForSave, service.cell)
+    const index = readTilePropsIndex()
+    index[indexCellKey || service.cell] = propsSig
+    writeTilePropsIndex(index)
 
     // CANONICAL WRITE — the edited image/link is the user's content, so it
     // must land in the tile's canonical 0000 (the layer's properties slot),
@@ -269,8 +276,7 @@ export class TileEditorDrone {
     // props, commits via the LayerCommitter cascade, and broadcasts
     // cell:0000-changed — SwarmDrone republishes with it inlined.
     try {
-      const lineageForSave = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
-      const segmentsForSave = lineageForSave?.explorerSegments?.() ?? []
+      // segmentsForSave was bound at gesture start — never re-read here.
       await writeTilePropertiesAt(segmentsForSave, service.cell, props as Record<string, unknown>)
     } catch (err) {
       console.warn('[tile-editor] canonical props write failed', err)
@@ -286,7 +292,10 @@ export class TileEditorDrone {
 
     // 7. notify via effect bus (processor owns synchronize; drones use effects)
     if (saveSucceeded) {
-      EffectBus.emit<{ cell: string }>('tile:saved', { cell: savedCell })
+      // Carry the gesture-time segments so downstream commit listeners
+      // address the layer where the edit happened, not wherever the
+      // user navigated to during the save.
+      EffectBus.emit<{ cell: string; segments: readonly string[] }>('tile:saved', { cell: savedCell, segments: segmentsForSave })
     }
   }
 

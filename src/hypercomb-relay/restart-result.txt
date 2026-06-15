@@ -1,0 +1,25 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260612002152
+Username: DESKTOP-7L5SL6A\Jaime
+RunAs User: DESKTOP-7L5SL6A\Jaime
+Configuration Name: 
+Machine: DESKTOP-7L5SL6A (Microsoft Windows NT 10.0.26200.0)
+Host Application: C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\Projects\hypercomb\social\src\hypercomb-relay\restart-relay-elevated.ps1
+Process ID: 21548
+PSVersion: 5.1.26100.8655
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.26100.8655
+BuildVersion: 10.0.26100.8655
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+service state before: Running  wrapper PID: 4444
+service state after: Running
+port 7777 now held by PID 13712 (node) started 06/12/2026 00:21:53
+**********************
+Windows PowerShell transcript end
+End time: 20260612002158
+**********************

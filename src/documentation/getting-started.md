@@ -13,13 +13,13 @@ Hypercomb is a live, presence-based workspace. A hexagonal grid of cells holds y
 ## Three things to know first
 
 1. **Everything is signature-addressed.** Same content, same identity. Share a signature to share the content. See [signature-system.md](signature-system.md).
-2. **Drones communicate through effects, never direct calls.** The effect bus is pub/sub with last-value replay. See [architecture-fundamentals.md](architecture-fundamentals.md).
+2. **Drones communicate through effects, never direct calls.** The effect bus is pub/sub with last-value replay. See [core-processor-architecture.md](core-processor-architecture.md).
 3. **The command line is the interface.** Type to create, navigate, filter, delete. Slash commands for verbs. See [command-line-reference.md](command-line-reference.md) and [slash-behaviour-reference.md](slash-behaviour-reference.md).
 
 ## Where to go next
 
 - **Using the app** — [command-line-reference.md](command-line-reference.md) · [slash-behaviour-reference.md](slash-behaviour-reference.md) · [glossary.md](glossary.md)
-- **Building a drone** — [signature-node-pattern.md](signature-node-pattern.md) · [architecture-fundamentals.md](architecture-fundamentals.md) · [core-processor-architecture.md](core-processor-architecture.md)
+- **Building a drone** — [signature-node-pattern.md](signature-node-pattern.md) · [core-processor-architecture.md](core-processor-architecture.md) · [drone-installer-contract.md](drone-installer-contract.md)
 - **Understanding the theory** — [signature-system.md](signature-system.md) · [signature-algebra.md](signature-algebra.md) · [genome-primitive.md](genome-primitive.md) · [collapsed-compute.md](collapsed-compute.md)
 - **Contributing** — [contributing.md](contributing.md) · [contributor-agreement.md](contributor-agreement.md) · [licensing.md](licensing.md)
 

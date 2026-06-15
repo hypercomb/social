@@ -1,5 +1,6 @@
 // diamondcoreprocessor.com/format/format.queen.ts
 import { QueenBee, EffectBus } from '@hypercomb/core'
+import { cellLocationSig, readTilePropsIndex, lookupTilePropsSig } from '../editor/tile-properties.js'
 
 type Store = {
   getResource: (signature: string) => Promise<Blob | null>
@@ -34,9 +35,10 @@ export class FormatQueenBee extends QueenBee {
       const store = window.ioc.get<Store>('@hypercomb.social/Store')
       if (store) {
         try {
-          const indexKey = 'hc:tile-props-index'
-          const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
-          const propsSig = index[active]
+          const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+          const segments = lineage?.explorerSegments?.() ?? []
+          const index = readTilePropsIndex()
+          const propsSig = lookupTilePropsSig(index, await cellLocationSig(segments, active), active)
           if (!propsSig) throw new Error('no index entry')
           const propsBlob = await store.getResource(propsSig)
           if (!propsBlob) throw new Error('props blob missing')

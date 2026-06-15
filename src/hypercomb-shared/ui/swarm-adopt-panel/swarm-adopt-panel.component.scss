@@ -1,0 +1,297 @@
+@use '../breakpoints' as *;
+
+:host { display: contents; }
+
+// ── backdrop ──────────────────────────────────────────
+.adopt-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+  z-index: 100000;
+  animation: adopt-backdrop-enter 200ms ease forwards;
+}
+
+// ── panel ─────────────────────────────────────────────
+.adopt-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 100001;
+  width: min(90vw, 26rem);
+  max-height: min(80vh, 36rem);
+  display: flex;
+  flex-direction: column;
+
+  background: rgba(14, 18, 24, 0.92);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.7);
+
+  color: rgba(245, 245, 245, 0.85);
+  font-family: var(--hc-mono);
+
+  animation: adopt-panel-enter 300ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+// ── header ────────────────────────────────────────────
+.adopt-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+
+  h3 {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #c8975a;
+    margin: 0;
+  }
+}
+
+.adopt-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: rgba(245, 245, 245, 0.3);
+  font-size: 1rem;
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease;
+
+  &:hover {
+    color: whitesmoke;
+    background: rgba(255, 255, 255, 0.08);
+  }
+}
+
+// ── body ──────────────────────────────────────────────
+.adopt-body {
+  padding: 0.6rem 1rem;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.adopt-subtitle {
+  font-size: 0.68rem;
+  color: rgba(245, 245, 245, 0.45);
+  margin: 0 0 0.6rem;
+}
+
+.adopt-empty {
+  font-size: 0.78rem;
+  color: rgba(245, 245, 245, 0.5);
+  margin: 0.5rem 0;
+}
+
+// ── participant group ─────────────────────────────────
+.adopt-group {
+  margin-bottom: 0.75rem;
+
+  &:last-child { margin-bottom: 0; }
+}
+
+.adopt-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 0.3rem 0.2rem;
+  cursor: pointer;
+  font-family: var(--hc-mono);
+  text-align: left;
+
+  .dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    flex: none;
+  }
+
+  .who {
+    font-size: 0.74rem;
+    font-weight: 600;
+    color: rgba(245, 245, 245, 0.85);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .count {
+    font-size: 0.64rem;
+    color: rgba(245, 245, 245, 0.35);
+  }
+
+  .select-all {
+    margin-left: auto;
+    font-size: 0.62rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: rgba(245, 245, 245, 0.4);
+    transition: color 150ms ease;
+
+    &.checked { color: #a8ffd8; }
+  }
+
+  &:hover .select-all { color: rgba(245, 245, 245, 0.75); }
+}
+
+// ── tiles ─────────────────────────────────────────────
+.adopt-tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  padding: 0.25rem 0 0 1.05rem;
+}
+
+.adopt-tile {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.28rem 0.55rem;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  font-family: var(--hc-mono);
+  font-size: 0.72rem;
+  color: rgba(245, 245, 245, 0.7);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+
+  .check {
+    width: 0.7rem;
+    color: #a8ffd8;
+    font-size: 0.66rem;
+  }
+
+  .name {
+    max-width: 11rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(245, 245, 245, 0.9);
+  }
+
+  &.selected {
+    background: rgba(168, 255, 216, 0.1);
+    border-color: rgba(168, 255, 216, 0.35);
+    color: #d8ffef;
+  }
+
+  &.disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+}
+
+// ── actions ───────────────────────────────────────────
+.adopt-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.adopt-btn {
+  font-family: var(--hc-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.4rem 0.9rem;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+
+  &.cancel {
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(245, 245, 245, 0.5);
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(245, 245, 245, 0.8);
+    }
+  }
+
+  &.confirm {
+    background: rgba(168, 255, 216, 0.12);
+    color: #a8ffd8;
+    border-color: rgba(168, 255, 216, 0.25);
+
+    &:hover:not(:disabled) {
+      background: rgba(168, 255, 216, 0.22);
+    }
+
+    &:active:not(:disabled) {
+      transform: scale(0.97);
+    }
+
+    &:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+  }
+}
+
+// ── keyframes ─────────────────────────────────────────
+@keyframes adopt-backdrop-enter {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes adopt-panel-enter {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes adopt-panel-enter-phone {
+  from { opacity: 0; transform: translateY(100%); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+// ═══════════════════════════════════════════════════════
+// RESPONSIVE
+// ═══════════════════════════════════════════════════════
+
+@include phone-only {
+  .adopt-panel {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    transform: none;
+    width: 100%;
+    max-height: 75vh;
+    border-radius: 12px 12px 0 0;
+    padding-bottom: var(--hc-safe-bottom, 0px);
+    animation: adopt-panel-enter-phone 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  .adopt-tile {
+    padding: 0.45rem 0.7rem;
+    font-size: 0.78rem;
+  }
+
+  .adopt-btn {
+    padding: 0.55rem 1.1rem;
+    font-size: 0.74rem;
+    min-height: 2.5rem;
+  }
+}

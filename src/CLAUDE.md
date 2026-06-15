@@ -119,7 +119,7 @@ src/
 │       │   │   ├── background/         # Context-aware backgrounds
 │       │   │   ├── grid/               # Hexagonal grid, coordinates, shaders, atlases
 │       │   │   └── tiles/              # Tile overlays, actions, selection highlight, move preview
-│       │   ├── selection/              # Tile selection (SelectionService, TileSelectionDrone)
+│       │   ├── selection/              # Tile selection (SelectionService, SelectionInputDrone)
 │       │   └── sharing/                # Peer-to-peer publishing via Nostr relays
 │       └── revolucionstyle.com/        # Cigar journal domain module
 │           ├── journal/                # CigarJournalDrone, JournalEntryDrone, JournalService

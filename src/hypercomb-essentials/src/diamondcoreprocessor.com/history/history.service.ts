@@ -1173,6 +1173,19 @@ export class HistoryService {
    * anywhere. Cache hit is O(1); cache miss falls back to a bag scan
    * (which then preloads the bag for future hits).
    */
+  /** Seed an already-parsed layer into the in-memory cache. Used by
+   *  readers that obtained full layer JSON through a side channel (the
+   *  children manifest inlines each child's layer) so the subsequent
+   *  per-child getLayerBySig calls on the render path are O(1) hits
+   *  instead of cold pool reads — and can never fall into the
+   *  preloadAllBags join. No disk I/O; hydration only. */
+  public readonly seedParsedLayer = (layerSig: string, layer: Partial<LayerContent>): void => {
+    if (!HistoryService.#SIG_RE.test(layerSig)) return
+    if (!layer || typeof layer !== 'object' || !layer.name) return
+    if (this.#parsedLayerCache.has(layerSig)) return
+    this.#parsedLayerCache.set(layerSig, HistoryService.#hydrateLayer(layer))
+  }
+
   public readonly getLayerBySig = async (
     layerSig: string,
   ): Promise<LayerContent | null> => {
@@ -1445,20 +1458,38 @@ export class HistoryService {
       let cachedCount = 0
       const previewSigs: string[] = []
 
+      // Cooperative time-slicing. On real data this scan covers hundreds
+      // of bags / thousands of markers (measured 5.1s over 293 bags) —
+      // its dir enumerations, file reads, JSON parses and hashes are all
+      // main-thread continuations, and run un-sliced they starve an
+      // in-flight first render of the event loop. Yield whenever a slice
+      // exceeds ~12ms so paint and input always interleave; wall-clock
+      // grows slightly, responsiveness doesn't degrade at all.
+      let sliceStart = performance.now()
+      const yieldIfDue = async (): Promise<void> => {
+        if (performance.now() - sliceStart < 12) return
+        await new Promise<void>(r => setTimeout(r, 0))
+        sliceStart = performance.now()
+      }
+
       for await (const [lineageSig, dirHandle] of (root as any).entries()) {
         if (dirHandle.kind !== 'directory') continue
         if (!HistoryService.#SIG_RE.test(lineageSig)) continue
+        await yieldIfDue()
         bagCount++
         const bag = dirHandle as FileSystemDirectoryHandle
 
         // Pass 1: filename-only enumeration to find the latest marker.
-        // No bytes read, no signing.
+        // No bytes read, no signing. Sliced too — the ROOT bag gains a
+        // marker on every change made anywhere, so a single bag can hold
+        // thousands of entries.
         let latestName = ''
         for await (const [name, fileHandle] of (bag as any).entries()) {
           if (fileHandle.kind !== 'file') continue
           if (!HistoryService.#MARKER_RE.test(name)) continue
           markerCount++
           if (name > latestName) latestName = name
+          if (markerCount % 200 === 0) await yieldIfDue()
         }
         if (!latestName) continue
 
@@ -1490,24 +1521,6 @@ export class HistoryService {
         `[preload] preloadAllBags done: ${cachedCount} heads cached / ${bagCount} bags scanned / ${markerCount} markers seen (${elapsed}ms). ` +
         `first sigs: [${previewSigs.join(', ')}${cachedCount > previewSigs.length ? ', …' : ''}]`
       )
-
-      // Phase 2: walk from root layer recursively to warm the parsed
-      // cache for every reachable descendant. After this, render
-      // queries hit the cache exclusively (the cold bag scan in
-      // getLayerBySig becomes a fallback path only). Chained into the
-      // shared `#preloadAllBagsPromise` so a single await covers both
-      // phases — callers don't need to know about the two-step.
-      try {
-        const rootLineageSig = await this.sign({ explorerSegments: () => [] })
-        const rootHeadSig = await this.latestMarkerSigFor(rootLineageSig, '/')
-        if (rootHeadSig) {
-          await this.preloadFromRoot(rootHeadSig)
-        } else {
-          console.log('[preload] preloadFromRoot skipped: no root head sig')
-        }
-      } catch (err) {
-        console.warn('[preload] preloadFromRoot failed (non-fatal):', err)
-      }
     })()
     // Belt-and-braces: if the IIFE itself rejects (e.g. OPFS handle revoked
     // mid-walk), clear the cached promise so a later call can re-attempt.
@@ -1515,6 +1528,36 @@ export class HistoryService {
     // currentLayerAt for the rest of the session.
     this.#preloadAllBagsPromise.catch(() => {
       this.#preloadAllBagsPromise = null
+    })
+
+    // Phase 2 — DETACHED + idle-deferred: walk from the root layer to
+    // warm the parsed cache for every reachable descendant. This used to
+    // be CHAINED into the shared promise, so a single cold getLayerBySig
+    // miss on the render path awaited the WHOLE serial tree walk —
+    // seconds on real data. Awaiters of preloadAllBags() only need
+    // phase-1 (#latestSigByLineage heads); the walk is pure cache
+    // warming, and "real-time supersedes preloader": it must never sit
+    // on an awaited render hop. Scheduled once (memoized promise means
+    // this .then chain attaches on first construction only).
+    void this.#preloadAllBagsPromise.then(() => {
+      const kick = () => {
+        void (async () => {
+          try {
+            const rootLineageSig = await this.sign({ explorerSegments: () => [] })
+            const rootHeadSig = await this.latestMarkerSigFor(rootLineageSig, '/')
+            if (rootHeadSig) {
+              await this.preloadFromRoot(rootHeadSig)
+            } else {
+              console.log('[preload] preloadFromRoot skipped: no root head sig')
+            }
+          } catch (err) {
+            console.warn('[preload] preloadFromRoot failed (non-fatal):', err)
+          }
+        })()
+      }
+      const ric = (globalThis as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
+      if (typeof ric === 'function') ric(kick, { timeout: 8000 })
+      else setTimeout(kick, 2000)
     })
     return this.#preloadAllBagsPromise
   }

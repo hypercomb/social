@@ -4,8 +4,6 @@
 import { Bee, EffectBus, SignatureService, isSignature } from '@hypercomb/core'
 import { writeOpfsFile, IS_IOS } from './opfs-write.js'
 
-type BeeCtor = new () => Bee
-
 /** How long a host-resolution MISS is remembered before the cascade may be
  *  re-dialed for that sig. Render passes within the window get an instant
  *  null instead of a network storm; the egg stays retryable after it. */
@@ -186,29 +184,29 @@ export class Store extends EventTarget {
       }
     }
 
-    const buildInstance = (mod: Record<string, unknown>): Bee | null => {
-      const ctors: BeeCtor[] = []
+    // Bee modules come in two shapes: processor bees (Drone/Worker
+    // subclasses with pulse) and EventTarget UI drones (command palette,
+    // toast, notes — constructor-wired, NO pulse method). Both are
+    // legitimate module products; the preloader skips pulse on entries
+    // that lack it. Pulse-having instances are preferred when one module
+    // registers several values (e.g. a service plus its drone).
+    const hasPulse = (v: unknown): boolean =>
+      !!v && typeof v === 'object' && typeof (v as any).pulse === 'function'
+    const isInstance = (v: unknown): boolean =>
+      !!v && typeof v === 'object'
 
-      for (const value of Object.values(mod)) {
-        if (typeof value !== 'function') continue
-        const proto = (value as any).prototype
-        if (!proto) continue
-        ctors.push(value as unknown as BeeCtor)
-      }
-
-      if (!ctors.length) return null
-
-      for (const Ctor of ctors) {
-        try {
-          const instance = new Ctor()
-          if (instance) return instance
-        } catch {
-          // ignore and try next export
-        }
-      }
-
-      return null
-    }
+    // Track IoC registrations that happen as side effects of THIS import.
+    // Bee modules self-register at module scope (`register(key, new X())`),
+    // so the captured instance is ground truth for "which singleton did
+    // this module produce". Class-identity scans alone break when two
+    // modules declare same-named classes, or when a module registers its
+    // instance without exporting the class at all (then `mod` has no
+    // exports to match and the old path returned null for a bee that
+    // loaded fine).
+    const captured: unknown[] = []
+    const unhook = window.ioc.onRegister?.((_key: string, value: unknown) => {
+      captured.push(value)
+    })
 
     try {
 
@@ -237,36 +235,65 @@ export class Store extends EventTarget {
 
       if (!mod || typeof mod !== 'object') return null
 
-      // Find the bee by class identity. Each bee module exports its
-      // class; its side-effect `register(key, new SomeClass())` puts an
-      // instance in IoC whose constructor === SomeClass. We scan IoC for
-      // the entry whose constructor matches one of this module's exports.
-      //
-      // This is parallel-safe (class identity is stable across imports)
-      // unlike the previous "new keys since snapshot" scan, which under
-      // concurrent loads returned the same first-registered instance to
-      // every caller.
       const exportedCtors = new Set<unknown>()
       for (const value of Object.values(mod)) {
         if (typeof value === 'function' && (value as any).prototype) {
           exportedCtors.add(value)
         }
       }
-      if (exportedCtors.size > 0) {
-        for (const key of window.ioc.list()) {
-          const candidate = window.ioc.get(key) as any
-          if (candidate == null || typeof candidate !== 'object') continue
-          if (typeof candidate.pulse !== 'function') continue
-          if (exportedCtors.has(candidate.constructor)) {
+
+      // 1) Self-registration during import. When the module exports its
+      //    class, require constructor identity so a concurrent load's
+      //    registration can't be mistaken for ours (bee loads run under
+      //    Promise.allSettled). A module with no class exports can't be
+      //    identity-checked — take the latest captured instance as best
+      //    effort. Two passes: pulse-having instances win over plain
+      //    EventTarget drones/services registered by the same module.
+      const capturedMatch = (wantPulse: boolean): Bee | null => {
+        for (let i = captured.length - 1; i >= 0; i--) {
+          const candidate = captured[i]
+          if (!isInstance(candidate)) continue
+          if (wantPulse && !hasPulse(candidate)) continue
+          if (exportedCtors.size === 0 || exportedCtors.has((candidate as any).constructor)) {
             return candidate as Bee
           }
         }
+        return null
+      }
+      const fromCapture = capturedMatch(true) ?? capturedMatch(false)
+      if (fromCapture) return fromCapture
+
+      // 2) Class-identity scan over IoC — covers a re-evaluation of a
+      //    module whose instance registered on an earlier import (the
+      //    register call is first-wins/no-op, so nothing is captured).
+      //    Pulse-less UI drones match too — same two-pass preference.
+      if (exportedCtors.size > 0) {
+        let plainMatch: Bee | null = null
+        for (const key of window.ioc.list()) {
+          const candidate = window.ioc.get(key) as any
+          if (!isInstance(candidate)) continue
+          if (!exportedCtors.has(candidate.constructor)) continue
+          if (hasPulse(candidate)) return candidate as Bee
+          plainMatch = plainMatch ?? (candidate as Bee)
+        }
+        if (plainMatch) return plainMatch
       }
 
-      // No singleton match — fall back to buildInstance (creates fresh).
-      return buildInstance(mod)
+      // 3) Nothing captured and nothing matched. DO NOT construct an
+      //    instance from the exports: bee modules self-register at module
+      //    scope, so reaching here means this bundle's registrations were
+      //    all rejected (first-wins — the logical drone is already alive
+      //    under another generation's sig, and IoC disposed this bundle's
+      //    ghost). Manufacturing a fresh instance here created a SECOND
+      //    live drone that got pulsed and fought the canonical one over
+      //    the canvas (tiles rendered, then the duplicate's pass tore
+      //    them down). Null is the truthful answer: this sig is
+      //    superseded; the preloader skips it.
+      return null
     } catch {
       return null
+    } finally {
+      unhook?.()
     }
   }
 

@@ -1,0 +1,13 @@
+[probe] listening on ws://localhost:7797 for 45s (replay since -300s + live)...
+[probe] --- 3 distinct pubkey(s) ---
+pubkey deb86f89:
+  kind=30200 x=dba39416 ×6 label= visuals=[bravo1,shared]
+  kind=30204 x=04cb8709 ×6 
+  kind=30200 x=fc3645b1 ×4 label= visuals=[bravo1,shared]
+pubkey 9645d576:
+  kind=30200 x=e09980f7 ×1 label=Alice visuals=[alpha1,shared]
+  kind=30200 x=fc3645b1 ×2 label=Alice visuals=[alpha1,shared]
+  kind=30204 x=d02beb07 ×1 
+pubkey 8cf286e2:
+  kind=30204 x=d36124a8 ×2 
+  kind=30200 x=39433f0e ×2 label= visuals=[]

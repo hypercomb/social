@@ -12,7 +12,22 @@ if (!window.ioc) {
         ? signature.key
         : signature
 
-      if (instances.has(key)) return
+      if (instances.has(key)) {
+        // First-wins: the key keeps its original instance. A REJECTED
+        // newcomer is a ghost — it was already constructed (its
+        // constructor may have wired EffectBus listeners) but will never
+        // be the canonical instance. Dispose it on the spot so those
+        // listeners unhook; otherwise two live instances of the same
+        // drone fight over the canvas (tiles render, then the ghost's
+        // pass tears them down). Happens when a superseded generation of
+        // a bee bundle evaluates alongside the current one. Re-registering
+        // the SAME instance under an alias key is a plain no-op.
+        const existing = instances.get(key)
+        if (value !== existing && typeof (value as any)?.markDisposed === 'function') {
+          try { (value as any).markDisposed() } catch { /* best-effort ghost cleanup */ }
+        }
+        return
+      }
 
       instances.set(key, value)
 

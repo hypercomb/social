@@ -96,6 +96,16 @@ const SWARM_PRESENCE_KIND = 30204
 // navigation, no broadcast involved.
 const SWARM_SUBSCRIBE_REQUEST_KIND = 30205
 
+// Debug logging — gated on the same master flag the mesh uses
+// (localStorage['hc:nostrmesh:debug'] = '1'). The publish walk logs PER
+// NODE PER PASS and passes run on every heartbeat; ungated, a session
+// accumulated 22,900+ retained console entries (DevTools pins every
+// logged object — an effective memory leak). Default: silent.
+const swarmDebugEnabled = ((): boolean => {
+  try { return localStorage.getItem('hc:nostrmesh:debug') === '1' } catch { return false }
+})()
+const slog = (...args: unknown[]): void => { if (swarmDebugEnabled) console.log(...args) }
+
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 const TILE_SOURCE_REGISTRY_KEY = '@hypercomb.social/TileSourceRegistry'
@@ -128,6 +138,17 @@ const EVENT_TTL_SECS = 90
 // expires. Half the TTL gives one full safety margin: a missed
 // heartbeat still leaves another full interval before our slot drops.
 const HEARTBEAT_INTERVAL_MS = 30_000
+
+// Unchanged-content refresh period for SUBTREE layer events — the only
+// publish that multiplies by node count (≤ MAX_PUBLISH_NODES per pass).
+// Refresh at half the TTL instead of every heartbeat tick: a node
+// republishes on the first 30s tick after 45s elapsed (worst case ~75s,
+// ≥15s before the 90s expiration), which halves steady-state layer
+// traffic per participant. Single-event publishes (presence, hide,
+// visuals channel) stay on the heartbeat cadence — they ARE the
+// liveness signal. Same TTL-fraction shape as the interest-event
+// refresh below.
+const LAYER_REFRESH_MS = (EVENT_TTL_SECS * 1000) / 2
 
 // Client-side peer freshness window. A peer whose last layer event
 // is older than this gets evicted from the in-memory cache, even if
@@ -524,6 +545,17 @@ export class SwarmDrone extends Drone {
   // can close it once the bytes arrive and land in OPFS.
   #resourceSubs = new Map<string, MeshSubLike>()
 
+  // Last-APPLIED layer-event created_at per `${sig} ${pubkey}`. Replay
+  // from a relay that doesn't honour replaceable semantics arrives
+  // newest-first; applying in arrival order would let the publisher's
+  // OLDEST event (their empty join publish) land last and clobber their
+  // real tile list. Strictly-older events drop; equal-or-newer apply.
+  // Publisher-stamped seconds compared per publisher only, so clock
+  // skew between peers never factors in. Entries are tiny and refusing
+  // ever-seen-older events stays correct across evictions, so this map
+  // is never cleared.
+  #peerLayerAppliedAtBySigPubkey = new Map<string, number>()
+
   // Resolved lazily from NostrSigner. Until it lands, incoming events
   // aren't filtered for self — which is harmless because show-cell
   // already dedupes peer entries against its OPFS-owned set, so our
@@ -909,7 +941,17 @@ export class SwarmDrone extends Drone {
     ),
     lastPublishedSigCount: this.#lastPublishedBySig.size,
     lastPublishedBySig: Array.from(this.#lastPublishedBySig.keys()).map(s => s.slice(0, 12)),
+    // Publish-walk telemetry — replaces the per-node console logging
+    // (now debug-gated). A runaway republish loop shows up here as
+    // walkNodeVisits growing far faster than wire events; check this
+    // via swarm.debug() instead of counting console lines.
+    publishStats: { ...this.#publishStats },
   })
+
+  /** Cumulative publish-walk counters since boot. nodeVisits counts
+   *  every #publishSubtree invocation (one per tree node per pass);
+   *  wireEvents counts events actually handed to mesh.publish. */
+  #publishStats = { walkNodeVisits: 0, wireEvents: 0 }
 
   /** All visuals any peer is currently publishing at #currentSig,
    *  excluding our own slot. Delegates to `peerTilesAtSig` — same
@@ -1099,6 +1141,36 @@ export class SwarmDrone extends Drone {
     return out
   }
 
+  /** Peer tiles grouped per participant at the live sig — the adoption
+   *  panel's read model. Same gates as peerTilesAtSig (self-excluded,
+   *  stale-filtered, freshness-first), but WITHOUT collapsing same-named
+   *  tiles across peers: each participant's group carries their own full
+   *  visual list, so an overlapping name appears once per publisher and
+   *  the user can pick whose version to adopt. Group order matches the
+   *  render's top-tile-wins rule — the freshest publisher is index 0, so
+   *  the first group containing a name is the one currently rendering it. */
+  public peerTilesGroupedAtCurrentSig = (): readonly {
+    pubkey: string
+    label: string
+    tiles: readonly ({ name: string; peerPubkey: string; imageSig?: string } & Record<string, unknown>)[]
+  }[] => {
+    const tiles = this.peerTilesAtSig(this.#currentSig)
+    if (tiles.length === 0) return []
+    // peerTilesAtSig walks peers freshest-first, so Map insertion order
+    // preserves that ordering for the groups.
+    const groups = new Map<string, ({ name: string; peerPubkey: string; imageSig?: string } & Record<string, unknown>)[]>()
+    for (const t of tiles) {
+      const bag = groups.get(t.peerPubkey)
+      if (bag) bag.push(t)
+      else groups.set(t.peerPubkey, [t])
+    }
+    return [...groups.entries()].map(([pubkey, peerTiles]) => ({
+      pubkey,
+      label: this.#labelByPubkey.get(pubkey) ?? '',
+      tiles: peerTiles,
+    }))
+  }
+
   #registerTileSource = (attempts: number): void => {
     const registry = this.#getRegistry()
     if (registry?.register) {
@@ -1172,7 +1244,7 @@ export class SwarmDrone extends Drone {
         }
       }
       if (evicted > 0) {
-        console.log(`[swarm] resolved myPubkey ${this.#myPubkey.slice(0, 8)}; evicted ${evicted} self-echo entr${evicted === 1 ? 'y' : 'ies'} from peer cache`)
+        slog(`[swarm] resolved myPubkey ${this.#myPubkey.slice(0, 8)}; evicted ${evicted} self-echo entr${evicted === 1 ? 'y' : 'ies'} from peer cache`)
       }
       return true
     } catch {
@@ -1221,7 +1293,7 @@ export class SwarmDrone extends Drone {
   #syncForCurrentLineage = async (): Promise<void> => {
     const lineage = this.#getLineage()
     const sigStore = this.#getSignatureStore()
-    if (!lineage || !sigStore) { console.log('[swarm] syncForCurrentLineage: missing', { lineage: !!lineage, sigStore: !!sigStore }); return }
+    if (!lineage || !sigStore) { slog('[swarm] syncForCurrentLineage: missing', { lineage: !!lineage, sigStore: !!sigStore }); return }
 
     // Privacy gate — require BOTH a room and a secret before any swarm
     // network activity. Read live from the canonical stores so we
@@ -1231,10 +1303,10 @@ export class SwarmDrone extends Drone {
     const secret = this.#getSecretStore()?.value?.trim() ?? ''
     if (!room || !secret) {
       const meshPublic = typeof localStorage !== 'undefined' ? localStorage.getItem('hc:mesh-public') : null
-      console.log('[swarm] syncForCurrentLineage: room/secret missing — broadcast skipped', { hasRoom: !!room, hasSecret: !!secret, meshPublic })
+      slog('[swarm] syncForCurrentLineage: room/secret missing — broadcast skipped', { hasRoom: !!room, hasSecret: !!secret, meshPublic })
       return
     }
-    console.log('[swarm] syncForCurrentLineage: proceeding', { roomLen: room.length, secretLen: secret.length })
+    slog('[swarm] syncForCurrentLineage: proceeding', { roomLen: room.length, secretLen: secret.length })
 
     const segsRaw = lineage.explorerSegments?.() ?? []
     // Match show-cell's lineage derivation exactly: trim, drop empty,
@@ -1479,7 +1551,7 @@ export class SwarmDrone extends Drone {
       injected++
     }
     if (injected > 0) {
-      console.log(`[swarm] late-join recovery injected ${injected} peer visual(s) at ${sig.slice(0, 8)}`)
+      slog(`[swarm] late-join recovery injected ${injected} peer visual(s) at ${sig.slice(0, 8)}`)
       this.emitEffect('swarm:peers-changed', { sig, reason: 'late-join-recovery' })
     }
   }
@@ -1491,7 +1563,7 @@ export class SwarmDrone extends Drone {
     // a peer's per-lineage hide filter. Route each to its own handler;
     // anything else (legacy 29010 paired-channel) falls through.
     const kind = Number(evt?.event?.kind ?? 0)
-    console.log('[swarm] onEvent received:', { sig: sig.slice(0, 8), kind, fromPubkey: evt?.event?.pubkey?.slice(0, 8), isSelf: this.#myPubkey && evt?.event?.pubkey === this.#myPubkey })
+    slog('[swarm] onEvent received:', { sig: sig.slice(0, 8), kind, fromPubkey: evt?.event?.pubkey?.slice(0, 8), isSelf: this.#myPubkey && evt?.event?.pubkey === this.#myPubkey })
 
     // ── Freshness gate (layer + hide only) ─────────────────────────
     // Public Nostr relays often ignore NIP-40 expiration and keep
@@ -1519,13 +1591,13 @@ export class SwarmDrone extends Drone {
       if (expirationTag) {
         const expirationSec = Number(expirationTag)
         if (Number.isFinite(expirationSec) && expirationSec <= nowSec) {
-          console.log('[swarm] onEvent DROPPED: expired', { kind, fromPubkey: evt?.event?.pubkey?.slice(0,8), expirationSec, nowSec, delta: expirationSec - nowSec })
+          slog('[swarm] onEvent DROPPED: expired', { kind, fromPubkey: evt?.event?.pubkey?.slice(0,8), expirationSec, nowSec, delta: expirationSec - nowSec })
           return
         }
       } else {
         const createdAt = Number(evt?.event?.created_at ?? 0)
         if (Number.isFinite(createdAt) && createdAt > 0 && createdAt + EVENT_TTL_SECS < nowSec) {
-          console.log('[swarm] onEvent DROPPED: stale created_at', { kind, fromPubkey: evt?.event?.pubkey?.slice(0,8), createdAt, nowSec, ageS: nowSec - createdAt })
+          slog('[swarm] onEvent DROPPED: stale created_at', { kind, fromPubkey: evt?.event?.pubkey?.slice(0,8), createdAt, nowSec, ageS: nowSec - createdAt })
           return
         }
       }
@@ -1557,16 +1629,30 @@ export class SwarmDrone extends Drone {
     // unsigned event before signing). Skip — our own publish already
     // updated #lastPublishedBySig and a self entry doesn't add value.
     const pubkey = String(evt?.event?.pubkey ?? '').trim().toLowerCase()
-    if (!pubkey) { console.log('[swarm] onEvent DROPPED: no pubkey (local fanout)'); return }
+    if (!pubkey) { slog('[swarm] onEvent DROPPED: no pubkey (local fanout)'); return }
 
     // Self-skip via relay echo. Until #myPubkey resolves this is a
     // no-op; show-cell's localCellSet dedup catches the overlap.
     if (this.#myPubkey && pubkey === this.#myPubkey) { return }
 
+    // Ordering guard — drop layer events strictly older than the newest
+    // we've already applied from this publisher at this sig. See
+    // #peerLayerAppliedAtBySigPubkey for the replay-scramble this closes.
+    const createdAtSec = Number(evt?.event?.created_at ?? 0)
+    if (createdAtSec > 0) {
+      const guardKey = `${sig} ${pubkey}`
+      const lastApplied = this.#peerLayerAppliedAtBySigPubkey.get(guardKey) ?? 0
+      if (createdAtSec < lastApplied) {
+        slog('[swarm] onEvent DROPPED: older than applied', { pubkey: pubkey.slice(0, 8), createdAtSec, lastApplied })
+        return
+      }
+      this.#peerLayerAppliedAtBySigPubkey.set(guardKey, createdAtSec)
+    }
+
     const payload = evt?.payload
-    if (!payload || typeof payload !== 'object') { console.log('[swarm] onEvent DROPPED: payload not object', { pubkey: pubkey.slice(0,8), payloadType: typeof payload }); return }
+    if (!payload || typeof payload !== 'object') { slog('[swarm] onEvent DROPPED: payload not object', { pubkey: pubkey.slice(0,8), payloadType: typeof payload }); return }
     const raw = payload as SwarmLayerPayload
-    if (!Array.isArray(raw.visuals)) { console.log('[swarm] onEvent DROPPED: visuals not array', { pubkey: pubkey.slice(0,8), visualsType: typeof raw.visuals }); return }
+    if (!Array.isArray(raw.visuals)) { slog('[swarm] onEvent DROPPED: visuals not array', { pubkey: pubkey.slice(0,8), visualsType: typeof raw.visuals }); return }
 
     // Sanitize at the trust boundary. Every peer visual is filtered
     // through the closed-shape whitelist BEFORE landing in cache —
@@ -1585,7 +1671,7 @@ export class SwarmDrone extends Drone {
       else droppedCount++
     }
     if (droppedCount > 0) {
-      console.log('[swarm] onEvent sanitized', { pubkey: pubkey.slice(0,8), kept: cleanVisuals.length, dropped: droppedCount })
+      slog('[swarm] onEvent sanitized', { pubkey: pubkey.slice(0,8), kept: cleanVisuals.length, dropped: droppedCount })
     }
     const layer: SwarmLayerPayload = { visuals: cleanVisuals }
 
@@ -1596,7 +1682,7 @@ export class SwarmDrone extends Drone {
     const layerChanged = isNewPeer ||
       JSON.stringify(previousLayer) !== JSON.stringify(layer)
     bag.set(pubkey, layer)
-    console.log('[swarm] onEvent CACHED', { sig: sig.slice(0,8), pubkey: pubkey.slice(0,8), visualCount: layer.visuals.length, isNewPeer, layerChanged })
+    slog('[swarm] onEvent CACHED', { sig: sig.slice(0,8), pubkey: pubkey.slice(0,8), visualCount: layer.visuals.length, isNewPeer, layerChanged })
 
     // Stamp this peer's last-seen time at this sig. Drives the
     // staleness sweep below — peers whose last event is older than
@@ -1745,7 +1831,7 @@ export class SwarmDrone extends Drone {
   #publishMyLayerAt = async (sig: string): Promise<void> => {
     const mesh = this.#getMesh()
     const sigStore = this.#getSignatureStore()
-    if (!mesh?.publish || !sigStore) { console.log('[swarm] publishMyLayerAt: missing mesh/sigStore', { mesh: !!mesh?.publish, sigStore: !!sigStore }); return }
+    if (!mesh?.publish || !sigStore) { slog('[swarm] publishMyLayerAt: missing mesh/sigStore', { mesh: !!mesh?.publish, sigStore: !!sigStore }); return }
 
     // Resolve the lineage's directory ourselves from Store.hypercombRoot
     // rather than calling lineage.explorerDir() — see LineageLike comment.
@@ -1756,7 +1842,7 @@ export class SwarmDrone extends Drone {
     // into child subtrees is gated downstream; null dir just stops the
     // walk at this level, which is the correct behavior.
     const dir = await this.#resolveLineageDir()
-    console.log('[swarm] publishMyLayerAt:', { sig: sig.slice(0, 8), dirName: dir?.name ?? '(no-opfs-dir)' })
+    slog('[swarm] publishMyLayerAt:', { sig: sig.slice(0, 8), dirName: dir?.name ?? '(no-opfs-dir)' })
 
     const lineage = this.#getLineage()
     const segsRaw = lineage?.explorerSegments?.() ?? []
@@ -1792,6 +1878,7 @@ export class SwarmDrone extends Drone {
     secret: string,
   ): Promise<void> => {
     if (counter.count >= MAX_PUBLISH_NODES) return
+    this.#publishStats.walkNodeVisits++
 
     // Composed sig — must match the formula in #syncForCurrentLineage
     // exactly so subscribers and publishers address the same slot.
@@ -1832,7 +1919,7 @@ export class SwarmDrone extends Drone {
         } as LineageLike)
         const layer = await history.currentLayerAt(locationSig)
         const childSigs = Array.isArray(layer?.children) ? layer.children : []
-        console.log('[swarm] publishSubtree: layer resolve', { segments, locationSig: locationSig?.slice(0, 8), layerExists: layer !== null, childSigCount: childSigs.length })
+        slog('[swarm] publishSubtree: layer resolve', { segments, locationSig: locationSig?.slice(0, 8), layerExists: layer !== null, childSigCount: childSigs.length })
         if (childSigs.length === 0 && layer == null) {
           // No layer yet — first publish at this location. Fall back to
           // OPFS so the initial commit's tiles propagate before history
@@ -1841,7 +1928,7 @@ export class SwarmDrone extends Drone {
           // literally nothing to publish at this level — empty list.
           const names = dir ? await listLocalChildren(dir) : []
           childRefs = names.map(name => ({ name }))
-          console.log('[swarm] publishSubtree: layer null → OPFS fallback', { childNames: names, hadDir: !!dir })
+          slog('[swarm] publishSubtree: layer null → OPFS fallback', { childNames: names, hadDir: !!dir })
         } else {
           // Layer exists (possibly empty children). Resolve each child
           // sig to its `name` AND preserve the sig as the merkle handle —
@@ -1858,18 +1945,18 @@ export class SwarmDrone extends Drone {
           childRefs = resolved.filter((n): n is { name: string; layerSig: string } => n !== null)
           const droppedCount = resolved.length - childRefs.length
           if (droppedCount > 0) {
-            console.log('[swarm] publishSubtree: dropped unresolved child sigs', { droppedCount, totalChildSigs: childSigs.length, resolvedNames: childRefs.map(c => c.name) })
+            slog('[swarm] publishSubtree: dropped unresolved child sigs', { droppedCount, totalChildSigs: childSigs.length, resolvedNames: childRefs.map(c => c.name) })
           }
         }
       } catch (err) {
         // History resolve failed for any reason — fall back to OPFS so
         // we don't silently stop publishing.
-        console.log('[swarm] publishSubtree: history resolve threw → OPFS fallback', { err: String(err) })
+        slog('[swarm] publishSubtree: history resolve threw → OPFS fallback', { err: String(err) })
         const names = dir ? await listLocalChildren(dir) : []
         childRefs = names.map(name => ({ name }))
       }
     } else {
-      console.log('[swarm] publishSubtree: no history service → OPFS fallback', { dirName: dir?.name ?? '(none)' })
+      slog('[swarm] publishSubtree: no history service → OPFS fallback', { dirName: dir?.name ?? '(none)' })
       const names = dir ? await listLocalChildren(dir) : []
       childRefs = names.map(name => ({ name }))
     }
@@ -1936,6 +2023,16 @@ const payload: SwarmLayerPayload = myLabel
   ? { label: myLabel, visuals: children }
   : { visuals: children }
 
+    // Empty-visual publishes only matter where they can REMOVE something
+    // (a peer may hold our earlier non-empty layer at this sig — "empty-
+    // array = wiped slot") or at the CURRENT location (depth 0), where
+    // the event doubles as presence: "I'm here, contributing nothing."
+    // A descendant level with nothing to share and nothing previously
+    // shared says nothing to anyone — and these were 78% of a content-
+    // rich navigation burst (142 of 182 layer events in a live capture),
+    // the bulk of what blew the relay's per-IP message budget.
+    if (children.length === 0 && depth > 0 && !this.#lastPublishedBySig.has(sig)) return
+
     // Dedupe — only publish if our local layer at this sig has actually
     // changed since the last publish, OR enough wall-clock time has
     // passed that our NIP-40 expiration is about to lapse. Without the
@@ -1946,9 +2043,9 @@ const payload: SwarmLayerPayload = myLabel
     const nowMs = Date.now()
     const lastTimeMs = this.#lastPublishTimeMsBySig.get(sig) ?? 0
     const elapsedSinceLast = nowMs - lastTimeMs
-    const heartbeatDue = elapsedSinceLast >= HEARTBEAT_INTERVAL_MS
+    const heartbeatDue = elapsedSinceLast >= LAYER_REFRESH_MS
     const contentChanged = this.#lastPublishedBySig.get(sig) !== serialized
-    console.log('[swarm] publishSubtree:', { sig: sig.slice(0, 8), depth, childCount: children.length, childNames, contentChanged, heartbeatDue, willPublish: contentChanged || heartbeatDue })
+    slog('[swarm] publishSubtree:', { sig: sig.slice(0, 8), depth, childCount: children.length, childNames, contentChanged, heartbeatDue, willPublish: contentChanged || heartbeatDue })
     if (contentChanged || heartbeatDue) {
       this.#lastPublishedBySig.set(sig, serialized)
       this.#lastPublishTimeMsBySig.set(sig, nowMs)
@@ -1980,6 +2077,7 @@ const payload: SwarmLayerPayload = myLabel
       // bytes live (the adopt's capture-source folder + byte path).
       const selfDomain = this.#readSelfDomain()
       if (selfDomain) tags.push(['domain', selfDomain])
+      this.#publishStats.wireEvents++
       await mesh.publish(SWARM_LAYER_KIND, sig, payload, tags)
     }
 

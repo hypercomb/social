@@ -114,13 +114,17 @@ deeper privacy layers can add encryption to presence events (the mesh supports a
 
 ## what the swarm is not
 
-the swarm is not a chat room. there are no messages. there is movement, tiles, avatars, pheromones — but no text channel. communication happens through navigation and content, not conversation.
+the swarm is not a chat room. the swarm itself carries no messages. there is movement, tiles, avatars, pheromones — but no built-in text channel. at the base layer, communication happens through navigation and content, not conversation.
 
-the swarm is not a social network. there are no followers, no feeds, no notifications. you see who is here. you see what they brought. when they leave, they're gone.
+the swarm is not a social network — or rather, not what that phrase has come to mean. there are no follower counts, no feeds, no notifications. but following is real here, and literal. to follow a bee is to go with them: you lock on, and their navigation becomes yours. you watch the swarm through their movement, the way ten thousand bees follow scouts to a home they have never seen. following is not subscribing to someone's output. it is flying in formation. you see who is here. you see what they brought. when they leave, they're gone.
+
+> **Future:** lock-on following is planned, not yet implemented.
 
 the swarm is not persistent. there is no "swarm state" saved to a server. the relay holds presence events for their ttl and then forgets. the swarm exists only in the overlap of simultaneous presence.
 
-the swarm is not curated. no algorithm decides who appears on your grid. proximity and timing are the only filters. this means some swarms will be quiet and focused. others will be chaotic and overwhelming. this is not a bug. this is what happens when real bees gather.
+the swarm is not curated — but the content is, highly. no algorithm decides who appears on your grid. proximity and timing are the only filters on presence. the tiles themselves, though, are the opposite of random: every one was authored, arranged, adopted by the bee who carries it. curation happens at the hive, by hands, before the bee ever flies. what the swarm refuses is algorithmic curation — no ranking, no recommendation, no machine deciding for you. this means some swarms will be quiet and focused. others will be chaotic and overwhelming. this is not a bug. this is what happens when real bees gather.
+
+the swarm is not closed. none of the above are walls. the mesh carries arbitrary payloads, and any participant can build any behavior for a swarm as a drone module — a chat, a game, a shared canvas, anything. what they build rides on the swarm; it does not change what the swarm is. the swarm itself provides presence, proximity, and nothing else. everything beyond that is something a bee brought.
 
 ---
 

@@ -300,29 +300,62 @@ export class HostSyncService extends EventTarget {
   /** Receipts re-verified against the live host this session (HEAD 200). */
   #verifiedOnHost = new Set<string>()
 
+  /** In-flight verification promises, keyed by sig. The closure walk
+   *  enqueues the SAME shared refs from many layers in parallel; without
+   *  promise-level dedup every concurrent caller passed the result-memo
+   *  check before any response landed and fired its own HEAD — observed
+   *  as the same sig HEAD'd 8-14× during boot, hundreds of requests
+   *  stampeding the service worker while first paint was rendering. */
+  #verifyInFlight = new Map<string, Promise<boolean>>()
+
+  /** Global cap on concurrent verification HEADs. The walk can surface
+   *  hundreds of unique sigs in one burst; verification is a freshness
+   *  check, not a render dependency — it must trickle, not stampede. */
+  #verifySlots = 0
+  static readonly #VERIFY_MAX_CONCURRENT = 4
+
+  readonly #acquireVerifySlot = async (): Promise<void> => {
+    while (this.#verifySlots >= HostSyncService.#VERIFY_MAX_CONCURRENT) {
+      await new Promise(r => setTimeout(r, 50))
+    }
+    this.#verifySlots++
+  }
+
   /** Re-check a receipted sig against the host: HEAD the flat address,
-   *  once per session. 404 → the receipt lied (host drift) → revoke it
-   *  and return false so the caller re-stages. Network trouble or any
-   *  non-404 keeps the receipt — absence must be asserted by the host,
-   *  never inferred from failure. */
-  readonly #receiptStillHonored = async (sig: string): Promise<boolean> => {
-    if (this.#verifiedOnHost.has(sig)) return true
+   *  once per session — promise-deduped and concurrency-capped. 404 →
+   *  the receipt lied (host drift) → revoke it and return false so the
+   *  caller re-stages. Network trouble or any non-404 keeps the receipt
+   *  — absence must be asserted by the host, never inferred from
+   *  failure. */
+  readonly #receiptStillHonored = (sig: string): Promise<boolean> => {
+    if (this.#verifiedOnHost.has(sig)) return Promise.resolve(true)
+    const inFlight = this.#verifyInFlight.get(sig)
+    if (inFlight) return inFlight
     const host = this.#hostBase()
-    if (!host) return true // nothing to check against — keep the receipt
-    const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
-    try {
-      const res = await fetch(`${scheme}://${host}/${sig}`, { method: 'HEAD', cache: 'no-store' })
-      if (res.ok) { this.#verifiedOnHost.add(sig); return true }
-      if (res.status === 404) {
-        try {
-          const dir = await this.#getReceiptsDir()
-          await dir?.removeEntry(sig)
-        } catch { /* already gone */ }
-        console.warn(`[host-sync] revoked stale receipt ${sig.slice(0, 12)} — host no longer serves it; re-staging`)
-        return false
+    if (!host) return Promise.resolve(true) // nothing to check against — keep the receipt
+    const run = (async (): Promise<boolean> => {
+      await this.#acquireVerifySlot()
+      try {
+        const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
+        const res = await fetch(`${scheme}://${host}/${sig}`, { method: 'HEAD', cache: 'no-store' })
+        if (res.ok) { this.#verifiedOnHost.add(sig); return true }
+        if (res.status === 404) {
+          try {
+            const dir = await this.#getReceiptsDir()
+            await dir?.removeEntry(sig)
+          } catch { /* already gone */ }
+          console.warn(`[host-sync] revoked stale receipt ${sig.slice(0, 12)} — host no longer serves it; re-staging`)
+          return false
+        }
+        return true
+      } catch { return true } // offline / CORS — keep the receipt
+      finally {
+        this.#verifySlots--
+        this.#verifyInFlight.delete(sig)
       }
-      return true
-    } catch { return true } // offline / CORS — keep the receipt
+    })()
+    this.#verifyInFlight.set(sig, run)
+    return run
   }
 
   /** True iff the host has confirmed (read-back) this sig. */

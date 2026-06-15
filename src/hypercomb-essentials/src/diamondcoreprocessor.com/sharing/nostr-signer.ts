@@ -9,6 +9,13 @@ type NostrEvent = { id?: string; pubkey?: string; created_at: number; kind: numb
 // identity — no shared fallback that makes every peer self-skip.
 const SECRET_KEY_STORAGE = 'hc:nostr:secret-key'
 
+// Diagnostic logging — same master flag as the rest of the mesh stack
+// (localStorage['hc:nostrmesh:debug'] = '1'). signEvent fires on every
+// swarm publish (heartbeats included); ungated it floods the console.
+const signerDebugEnabled = ((): boolean => {
+  try { return localStorage.getItem('hc:nostrmesh:debug') === '1' } catch { return false }
+})()
+
 export class NostrSigner {
 
   /**
@@ -38,7 +45,7 @@ export class NostrSigner {
       const sk = this.hexToBytes(secretHex)
       const pk = getPublicKey(sk as any)
       this.#cachedPubkey = pk.toLowerCase()
-      console.log('[sync] signer pubkey resolved', { pubkey: this.#cachedPubkey.slice(0, 8), instance: this.#instanceId })
+      if (signerDebugEnabled) console.log('[sync] signer pubkey resolved', { pubkey: this.#cachedPubkey.slice(0, 8), instance: this.#instanceId })
       return this.#cachedPubkey
     } catch { return null }
   }
@@ -70,7 +77,7 @@ export class NostrSigner {
     // Diagnostic: log signer identity. Helps catch "different events
     // signed with different keys" when multiple module instances or a
     // race on auto-mint produces a divergent key set.
-    console.log('[sync] signEvent', { kind: evt.kind, pubkey: signed.pubkey?.slice(0, 8), instance: this.#instanceId })
+    if (signerDebugEnabled) console.log('[sync] signEvent', { kind: evt.kind, pubkey: signed.pubkey?.slice(0, 8), instance: this.#instanceId })
 
     if (!signed.id || !signed.sig) throw new Error('nostr signer: fallback signing failed')
 

@@ -429,9 +429,13 @@ export class MoveDrone extends Drone {
       }
     }
 
-    // moved cells are gone from the current layer
+    // moved cells are gone from the SOURCE layer. Carry sourceSegments
+    // explicitly: the transfer loop above is awaited multi-step work, and
+    // a segment-less emit would intent-bind the removal to wherever the
+    // user is when it fires — removing the cells from the WRONG layer if
+    // a navigation landed mid-move.
     for (const label of movedLabels) {
-      EffectBus.emit('cell:removed', { cell: label })
+      EffectBus.emit('cell:removed', { cell: label, segments: [...sourceSegments] })
     }
 
     // clear all overlays

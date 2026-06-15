@@ -1,0 +1,14 @@
+[probe] listening on ws://localhost:7777 for 45s (replay since -300s + live)...
+[probe] --- 1 distinct pubkey(s) ---
+pubkey 3b94560c:
+  kind=30200 x=b418ce02 ×1 label= visuals=[foundational,advanced,mentor,curriculum,cohorts,assessments]
+  kind=30200 x=65cb1ccc ×1 label= visuals=[intake,pricing,outcomes,1-on-1,group,retreats,archive,calendar,playbook,summits,workshops]
+  kind=30200 x=a9752d4b ×1 label= visuals=[workshops,retreats,summits,calendar,playbook,archive]
+  kind=30200 x=b9c76727 ×1 label= visuals=[circles,practice-spaces,members,library,feedback,governance]
+  kind=30200 x=e07dbea6 ×1 label= visuals=[essays,podcasts,talks,frameworks,case-studies,publishing]
+  kind=30200 x=5ba9f049 ×1 label= visuals=[pipeline,team,legal,finances,tools,pricing-strategy,advanced,assessments,cohorts,curriculum,foundational,mentor]
+  kind=30200 x=1582b323 ×1 label= visuals=[manifesto,voice,audiences,visual]
+  kind=30200 x=e5ce4567 ×1 label= visuals=[dolphin]
+  kind=30200 x=a03ea234 ×1 label= visuals=[dolphin]
+  kind=30200 x=fddddca6 ×1 label= visuals=[coaching,certifications,live-events,community,content,operations,identity,1-on-1,group,what]
+  kind=30204 x=59959419 ×1 

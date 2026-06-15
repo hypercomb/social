@@ -102,6 +102,43 @@ type LayerSlotRegistryLike = {
 export const isSignature = (value: unknown): boolean =>
   typeof value === 'string' && /^[0-9a-f]{64}$/.test(value)
 
+// ── Participant-local props index (`hc:tile-props-index`) ────────────
+//
+// A localStorage cache of tile → props-resource sig used by the render
+// and editor fast paths (the canonical home is the layer's `properties`
+// slot). Entries are keyed by the tile's FULL-LINEAGE signature — the
+// same sigbag key the history bags use (`cellLocationSig`) — so two
+// tiles sharing a leaf name at different hive locations can never read
+// or clobber each other's assignment. Legacy entries keyed by bare
+// label still exist from before this keying; readers fall back to them
+// (shared across same-named locations, as they always were) but writers
+// and removers touch ONLY the lineage-keyed entry, so the legacy
+// cross-location blast radius is gone.
+
+export const TILE_PROPS_INDEX_KEY = 'hc:tile-props-index'
+
+export const readTilePropsIndex = (): Record<string, string> => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(TILE_PROPS_INDEX_KEY) ?? '{}')
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, string> : {}
+  } catch { return {} }
+}
+
+export const writeTilePropsIndex = (index: Record<string, string>): void =>
+  localStorage.setItem(TILE_PROPS_INDEX_KEY, JSON.stringify(index))
+
+/**
+ * Resolve a tile's props sig from the index: lineage-keyed entry first
+ * (location-scoped), bare-label legacy entry as fallback. `lineageKey`
+ * may be '' (history not registered yet) — then only the label is tried.
+ */
+export const lookupTilePropsSig = (
+  index: Record<string, string>,
+  lineageKey: string,
+  label: string,
+): string | undefined =>
+  (lineageKey ? index[lineageKey] : undefined) ?? index[label]
+
 /**
  * Lineage-signature for a single cell location.
  *

@@ -72,6 +72,8 @@ const ICONS = {
   reroll: md('M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z'),
   // sticky_note_2 — Material Icons Filled
   note: md('M19 3H4.99c-1.11 0-1.98.9-1.98 2L3 19c0 1.1.89 2 2 2h10l6-6V5c0-1.1-.9-2-2-2zM7 8h10v2H7V8zm5 6H7v-2h5v2zm2 5.5V14h5.5L14 19.5z'),
+  // sync — Material Icons Filled
+  sync: md('M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z'),
 } as const
 
 // ── Icon registry ─────────────────────────────────────────────────
@@ -85,8 +87,26 @@ export type IconRegistryEntry = {
   tintWhen?: OverlayTintFn
   /** i18n key for the short hint label (shown on sustained hover) */
   labelKey?: string
-  /** i18n key for the expanded description (shown on hint click) */
+  /** i18n key for the expanded description (shown on sustained hover) */
   descriptionKey?: string
+}
+
+// True when a live peer is broadcasting a same-named tile that carries a
+// layerSig — i.e., there is a publisher version of this locally-held tile
+// that `sync` can re-adopt. The swarm CACHE keeps every peer visual even
+// when the render pipeline dedupes it against the local cell set, so this
+// is exactly the "the publisher updated a tile I hold" detector. Stale
+// peers are already filtered out by peerTilesAtCurrentSig.
+const peerBroadcastsTile = (label: string): boolean => {
+  const swarm = window.ioc.get<{
+    peerTilesAtCurrentSig?: () => readonly ({ name: string } & Record<string, unknown>)[]
+  }>('@diamondcoreprocessor.com/SwarmDrone')
+  if (!swarm?.peerTilesAtCurrentSig) return false
+  for (const tile of swarm.peerTilesAtCurrentSig()) {
+    if (tile.name !== label) continue
+    if (/^[a-f0-9]{64}$/.test(String(tile['layerSig'] ?? ''))) return true
+  }
+  return false
 }
 
 const ICON_REGISTRY: IconRegistryEntry[] = [
@@ -109,6 +129,13 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // the correct dismissal is to delete it from your layer.
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'public-own', labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
+  // `sync` re-adopts the broadcasting peer's CURRENT version of a tile
+  // you already hold (adopted earlier, or same-named). Visible only while
+  // a live peer publishes that name. Dispatches the same sig-handoff as
+  // adopt (SwarmAdoptDrone accepts both actions) — the installer's
+  // (name, at) identity makes it idempotent: same-sig aborts, a re-signed
+  // publisher layer replaces your stale copy.
+  { name: 'sync', svgMarkup: ICONS.sync, hoverTint: 0xa8d8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => peerBroadcastsTile(ctx.label), labelKey: 'action.sync', descriptionKey: 'action.sync.description' },
   // ── public-external profile ──
   { name: 'adopt', svgMarkup: ICONS.adopt, hoverTint: 0xa8ffd8, profile: 'public-external', labelKey: 'action.adopt', descriptionKey: 'action.adopt.description' },
   // 'hide' also lives in `public-own` (your own tile in public mode);
@@ -129,8 +156,10 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   'private': ['command', 'edit', 'note', 'reroll', 'remove', 'break-apart'],
   // Your own tile in public mode — same trash-bin remove that
-  // private mode uses. Records a history op, can be undone.
-  'public-own': ['remove', 'break-apart'],
+  // private mode uses. Records a history op, can be undone. `sync`
+  // pulls the broadcasting peer's latest version of an adopted tile
+  // (only rendered while a live peer publishes the same name).
+  'public-own': ['sync', 'remove', 'break-apart'],
   // Peer-only mesh tiles. Single-click `adopt` is the explicit
   // "I want to expand on this topic" action — writes the tile to
   // your local layer AND pulls the resources it references (images
@@ -502,8 +531,8 @@ export class TileActionsDrone extends Drone {
 
   async #rerollSubstrate(label: string): Promise<void> {
     const svc = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SubstrateService') as
-      { rerollCell(label: string): boolean } | undefined
-    if (svc?.rerollCell(label)) {
+      { rerollCell(label: string): Promise<boolean> } | undefined
+    if (svc && await svc.rerollCell(label)) {
       // show-cell.drone listens for substrate:rerolled and clears its caches
       // (cellImageCache, cellSubstrateCache, #layerCellsCache, renderedCellsKey)
       // before requesting a render, so the new image shows up immediately.
@@ -517,7 +546,7 @@ export class TileActionsDrone extends Drone {
     if (!selection || selection.count === 0) return
 
     const svc = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SubstrateService') as
-      { rerollCells(labels: string[]): string[] } | undefined
+      { rerollCells(labels: string[]): Promise<string[]> } | undefined
     if (!svc) return
 
     // Filter to only substrate tiles — non-substrate tiles (user-edited) are
@@ -525,16 +554,17 @@ export class TileActionsDrone extends Drone {
     // and is authoritative regardless of which substrate pool is currently active.
     const labels = [...selection.selected].filter(l => this.#substrateLabels.has(l))
     if (labels.length === 0) return
-    const rerolled = svc.rerollCells(labels)
-    if (rerolled.length === 0) return
+    void svc.rerollCells(labels).then(rerolled => {
+      if (rerolled.length === 0) return
 
-    // Emit per-cell so show-cell's substrate:rerolled handler invalidates
-    // caches for each affected tile. requestRender is microtask-coalesced
-    // so a burst of emits collapses to a single render pass.
-    for (const cell of rerolled) {
-      EffectBus.emit('substrate:rerolled', { cell })
-    }
-    void new hypercomb().act()
+      // Emit per-cell so show-cell's substrate:rerolled handler invalidates
+      // caches for each affected tile. requestRender is microtask-coalesced
+      // so a burst of emits collapses to a single render pass.
+      for (const cell of rerolled) {
+        EffectBus.emit('substrate:rerolled', { cell })
+      }
+      void new hypercomb().act()
+    })
   }
 
   #unhide(label: string): void {

@@ -109,6 +109,20 @@ type CommitRequest = {
   delta?: CommitDelta
 }
 
+/** The CURRENT lineage segments, resolved synchronously. Used to BIND a
+ *  commit's address at INTENT time (enqueue). A commit must never be
+ *  addressed at queue-DRAIN time: the machine serialises requests, so a
+ *  navigation between event and drain would re-address the commit to
+ *  whatever location happens to be current — grafting one layer's
+ *  values into another (observed live: a child created at /hello was
+ *  appended to root's children minutes later by exactly this race). */
+const segmentsAtIntent = (): string[] | null => {
+  const lineage = get<Lineage>('@hypercomb.social/Lineage')
+  const segs = lineage?.explorerSegments?.()
+  if (!Array.isArray(segs)) return null
+  return segs.map(s => String(s ?? '').trim()).filter(Boolean)
+}
+
 class CommitMachine {
   #chain: Promise<void> = Promise.resolve()
   readonly #run: (req: CommitRequest) => Promise<void>
@@ -117,12 +131,29 @@ class CommitMachine {
     this.#run = run
   }
 
+  /** Bind the request's address NOW. `segments: null` means "where the
+   *  user is acting" — that is a fact about the present, not about
+   *  whenever the queue drains. Unresolvable address (no lineage yet)
+   *  → the request is refused loudly; committing to a guessed location
+   *  is the one thing this machine must never do. */
+  #addressed(req: CommitRequest): CommitRequest | null {
+    if (req.segments !== null) return req
+    const bound = segmentsAtIntent()
+    if (bound === null) {
+      console.warn('[LayerCommitter] commit refused — no address resolvable at intent time', req)
+      return null
+    }
+    return { ...req, segments: bound }
+  }
+
   /** Fire-and-forget enqueue. Errors are logged (so they're visible
    *  in the console) but do not break the chain — the next request
    *  still runs. */
   request(req: CommitRequest = { segments: null }): void {
-    this.#chain = this.#chain.then(() => this.#run(req)).catch(err => {
-      console.error('[LayerCommitter] cascade failed (request):', err, req)
+    const addressed = this.#addressed(req)
+    if (!addressed) return
+    this.#chain = this.#chain.then(() => this.#run(addressed)).catch(err => {
+      console.error('[LayerCommitter] cascade failed (request):', err, addressed)
     })
   }
 
@@ -133,9 +164,11 @@ class CommitMachine {
    * error so subsequent requests still proceed.
    */
   requestAndWait(req: CommitRequest = { segments: null }): Promise<void> {
-    const ran = this.#chain.then(() => this.#run(req))
+    const addressed = this.#addressed(req)
+    if (!addressed) return Promise.resolve()
+    const ran = this.#chain.then(() => this.#run(addressed))
     this.#chain = ran.catch(err => {
-      console.error('[LayerCommitter] cascade failed (requestAndWait):', err, req)
+      console.error('[LayerCommitter] cascade failed (requestAndWait):', err, addressed)
     })
     return ran
   }
@@ -387,27 +420,32 @@ export class LayerCommitter {
    * fire-and-forget and races with subscribers that read back the
    * layer state immediately.
    */
+  // NOTE: segments pass through #cleanSegments WITHOUT a `?? []` default.
+  // Defaulting malformed input to [] silently addressed ROOT — the same
+  // cross-layer-graft hazard the intent-time binding exists to prevent.
+  // A null result lets CommitMachine bind to the caller's CURRENT
+  // location at enqueue, which is what the intent actually was.
   public commitSlotSet(segments: readonly string[], slot: string, sigs: readonly string[]): Promise<void> {
     return this.#machine.requestAndWait({
-      segments: this.#cleanSegments(segments) ?? [],
+      segments: this.#cleanSegments(segments),
       delta: { kind: 'set', slot, sigs: sigs.slice() },
     })
   }
   public commitSlotAppend(segments: readonly string[], slot: string, sig: string): Promise<void> {
     return this.#machine.requestAndWait({
-      segments: this.#cleanSegments(segments) ?? [],
+      segments: this.#cleanSegments(segments),
       delta: { kind: 'sig', slot, op: 'append', sig },
     })
   }
   public commitSlotRemove(segments: readonly string[], slot: string, sig: string): Promise<void> {
     return this.#machine.requestAndWait({
-      segments: this.#cleanSegments(segments) ?? [],
+      segments: this.#cleanSegments(segments),
       delta: { kind: 'sig', slot, op: 'removeSig', sig },
     })
   }
   public commitSlotSwap(segments: readonly string[], slot: string, from: string, to: string): Promise<void> {
     return this.#machine.requestAndWait({
-      segments: this.#cleanSegments(segments) ?? [],
+      segments: this.#cleanSegments(segments),
       delta: { kind: 'sig-swap', slot, from, to },
     })
   }
@@ -439,7 +477,14 @@ export class LayerCommitter {
         slots[key] = value.map(v => String(v))
       }
     }
-    const cleaned = this.#cleanSegments(segments) ?? []
+    // Bind malformed/absent segments to the CURRENT location (intent
+    // time), never to root — `?? []` here silently re-addressed a
+    // queen's update to ROOT, grafting the full layer state across.
+    const cleaned = this.#cleanSegments(segments) ?? segmentsAtIntent()
+    if (cleaned === null) {
+      console.error('[LayerCommitter] update refused — no address resolvable', layer?.name)
+      return ''
+    }
     await this.#machine.requestAndWait({
       segments: cleaned,
       delta: { kind: 'layer', layer: slots, nameSlots },
@@ -698,8 +743,16 @@ export class LayerCommitter {
     const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!lineage || !history) return
 
-    const fallbackSegments = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
-    const segments = req.segments ?? fallbackSegments
+    // The address was BOUND at enqueue (CommitMachine.#addressed). A
+    // drain-time fallback to the current lineage is forbidden: the queue
+    // serialises across navigations, so "current" here can be a different
+    // layer than the one the user acted on — that exact fallback grafted
+    // one layer's children into another. Unaddressed = bug = refuse.
+    if (req.segments === null) {
+      console.error('[LayerCommitter] BUG: unaddressed commit reached #commit — refused', req)
+      return
+    }
+    const segments = req.segments
 
     // ───────────────────────────────────────────────────────────
     // Unified cascade — ONE path for every commit type.
@@ -825,6 +878,14 @@ export class LayerCommitter {
             }
           }
           if (!resolved) {
+            // Auto-attach is legitimate ONLY for lineage-pull (a child
+            // committed whose parent never listed it — create cascades
+            // parents into existence). It must never be silent: a
+            // mis-addressed commit reaching this append is how one
+            // layer's values get grafted into another. The intent-time
+            // address binding upstream should make that impossible;
+            // this log is the tripwire if it ever recurs.
+            console.warn(`[LayerCommitter] auto-attach: appending child "${belowName}" into ancestor at depth ${segments.length} — parent did not list it`)
             machine.apply({ slot: 'children', op: 'append', sig: belowNewSig })
           }
         }

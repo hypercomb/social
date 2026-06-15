@@ -1,6 +1,15 @@
 // diamondcoreprocessor.com/pixi/pixi-host.worker.ts
 import { Worker } from '@hypercomb/core'
 import { Application, Container } from 'pixi.js'
+import {
+  computeStageCenter,
+  computeViewportOrigin,
+  computePhysicalAnchor,
+  computePinnedStage,
+  shouldRefit,
+  type WindowMetrics,
+  type PhysicalAnchor,
+} from './stage-centering.js'
 
 export type HostReadyPayload = {
   app: Application
@@ -230,43 +239,94 @@ export class PixiHostWorker extends Worker {
     // recalculation can return stale CSS-pixel values.  window.innerWidth
     // and window.innerHeight are guaranteed correct at resize-event time.
 
-    let fullscreenTransition = false
-
     // Pixel-perfect centering: read renderer.screen (the canonical canvas
-    // size in CSS pixels — same coordinate space stage children render in),
-    // round to integer pixels, and apply pan as an offset from that exact
-    // center. When pan is (0, 0), the centered grid lands on whole pixels
-    // with zero sub-pixel drift after rotation/resize/fullscreen.
+    // size in CSS pixels — same coordinate space stage children render in)
+    // and apply `stage = roundedCenter + pan` (see stage-centering.ts).
+    // Pan is the participant's offset-from-center and survives every size
+    // change untouched; the stage absorbs the full center delta, so
+    // content stays centered relative to its current position no matter
+    // what size the screen becomes.
+    // Fullscreen must not move a PIXEL — and never rezoom. A toggle
+    // changes the viewport's physical origin asymmetrically (the top
+    // gains the browser chrome, the bottom only the taskbar), so the
+    // recenter-by-center-delta policy below would lift content by the
+    // asymmetry (~45px on a maximized 1536×695 window → 864 fullscreen:
+    // top edge rises 129px, center descends only 84px). Instead, any
+    // applyCenter that observes the fullscreenElement flip pins the
+    // content's physical screen anchor for the whole transition: the
+    // stage absorbs the full origin delta and the resulting
+    // offset-from-center is folded into pan (setPan 'auto' — in-memory
+    // only, never committed). An exit transition reverses it exactly.
+    // The refit path is also skipped for the transition so a saved fit
+    // can't rezoom.
+    const windowMetrics = (): WindowMetrics => ({
+      screenX: window.screenX,
+      screenY: window.screenY,
+      outerWidth: window.outerWidth,
+      outerHeight: window.outerHeight,
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+    })
+    let lastFullscreen = !!document.fullscreenElement
+    let lastOrigin = computeViewportOrigin(windowMetrics())
+    let pinnedAnchor: PhysicalAnchor | null = null
+    let suppressRefitUntil = 0
+
+    // The PRE-transition origin must be tracked continuously — by the
+    // time fullscreenchange/resize fire, the window already has its new
+    // geometry. The poll skips while a flip is pending (state differs
+    // from lastFullscreen) so the pre-transition value survives until
+    // applyCenter consumes it.
+    setInterval(() => {
+      if (!!document.fullscreenElement === lastFullscreen) {
+        lastOrigin = computeViewportOrigin(windowMetrics())
+      }
+    }, 1000)
+
     const applyCenter = (): void => {
-      const screenSize = app.renderer.screen
-      const cx = Math.round(screenSize.width * 0.5)
-      const cy = Math.round(screenSize.height * 0.5)
       const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
-      const pan = vp?.lastPan
-      app.stage.position.set(cx + (pan?.dx ?? 0), cy + (pan?.dy ?? 0))
+      const fullscreenNow = !!document.fullscreenElement
+      const originNow = computeViewportOrigin(windowMetrics())
+
+      if (fullscreenNow !== lastFullscreen) {
+        lastFullscreen = fullscreenNow
+        suppressRefitUntil = performance.now() + 1000
+        // capture where the content physically sits, using the
+        // pre-transition origin and the not-yet-recentered stage
+        pinnedAnchor = computePhysicalAnchor(lastOrigin, app.stage.position)
+      }
+
+      if (performance.now() < suppressRefitUntil && pinnedAnchor) {
+        // fullscreen transition: hold the anchor still on the physical
+        // screen; fold the offset-from-center into pan so the viewport
+        // model (stage = center + pan) stays coherent afterwards
+        const pinned = computePinnedStage(pinnedAnchor, originNow)
+        app.stage.position.set(pinned.x, pinned.y)
+        const c = computeStageCenter(app.renderer.screen)
+        vp?.setPan?.(pinned.x - c.x, pinned.y - c.y, 'auto')
+        lastOrigin = originNow
+        return
+      }
+      pinnedAnchor = null
+      lastOrigin = originNow
+
+      const pos = computeStageCenter(app.renderer.screen, vp?.lastPan)
+      app.stage.position.set(pos.x, pos.y)
 
       // If the saved zoom was a fit AND the user hasn't panned away
       // from it, recompute the fit for the new viewport. The fit's
       // saved (cx, cy) was derived from the previous safe area
       // (header + control pill bounding rects + window size); on
-      // resize/rotation/fullscreen those change, and applying the
-      // stale coords leaves the content shrunk and off-center. Refit
-      // against the new viewport produces a clean centered fit.
-      //
-      // Critical guard: only refit when we KNOW pan is zero. A user
-      // pan implies they explicitly moved away from the fit position,
-      // so refitting (which calls setPan(0,0)) would clobber their
-      // saved pan on every boot. When `lastPan` is undefined the
-      // VP read may still be in flight — defer to show-cell's
-      // #applyViewportFromSnapshot rather than risk a destructive
-      // refit against half-loaded state.
-      if (vp?.lastZoom?.fit) {
-        const lp = vp?.lastPan
-        const knownZeroPan = lp && lp.dx === 0 && lp.dy === 0
-        if (knownZeroPan) {
-          const zoom = (window as any).ioc?.get('@diamondcoreprocessor.com/ZoomDrone')
-          zoom?.zoomToFit?.(true)
-        }
+      // resize/rotation those change, and applying the stale coords
+      // leaves the content shrunk and off-center. Refit against the
+      // new viewport produces a clean centered fit.
+      // shouldRefit only fires on a KNOWN zero pan — a user pan means
+      // they moved away from the fit (refitting would clobber it), and
+      // an undefined pan means the VP read may still be in flight
+      // (defer to show-cell's #applyViewportFromSnapshot).
+      if (shouldRefit(vp?.lastZoom, vp?.lastPan)) {
+        const zoom = (window as any).ioc?.get('@diamondcoreprocessor.com/ZoomDrone')
+        zoom?.zoomToFit?.(true)
       }
     }
 
@@ -279,11 +339,8 @@ export class PixiHostWorker extends Worker {
     // browsers (notably mobile Safari) settle layout a frame later than the
     // resize event itself, especially on device orientation rotation.
     const center = (): void => {
-      if (fullscreenTransition) return
       requestAnimationFrame(() => {
-        if (fullscreenTransition) return
         requestAnimationFrame(() => {
-          if (fullscreenTransition) return
           applyCenter()
         })
       })
@@ -299,30 +356,15 @@ export class PixiHostWorker extends Worker {
     if (screen.orientation && typeof screen.orientation.addEventListener === 'function') {
       screen.orientation.addEventListener('change', center)
     }
-    // Fullscreen: keep tiles perfectly still — never move the stage.
-    // Capture where the stage is right now (ground truth for tile
-    // positions), block all center() calls during the transition, then
-    // once the renderer has settled at the new viewport size, derive the
-    // pan offset that keeps stage.position unchanged:
-    //   new_pan = current_stage_pos - new_viewport_center
-    // The stage itself is never touched, so zero flicker.
-    document.addEventListener('fullscreenchange', () => {
-      fullscreenTransition = true
-      const stageX = app.stage.position.x
-      const stageY = app.stage.position.y
-
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          const newCx = Math.round(app.renderer.screen.width * 0.5)
-          const newCy = Math.round(app.renderer.screen.height * 0.5)
-          const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
-          if (vp) {
-            vp.setPan(stageX - newCx, stageY - newCy)
-          }
-          fullscreenTransition = false
-        })
-      })
-    })
+    // Fullscreen goes through the same deferred path, but applyCenter
+    // detects the fullscreenElement flip and pins the content's
+    // physical screen anchor for the transition — no visible movement,
+    // no refit/rezoom. (Recentering alone is not enough: the viewport
+    // gains more height at the top than the bottom, so splitting the
+    // delta evenly lifted content by the asymmetry — about 45px on a
+    // maximized window.) F11 browser-chrome fullscreen never flips
+    // fullscreenElement and stays on the plain recenter policy.
+    document.addEventListener('fullscreenchange', center)
 
     // -------------------------------------------------
     // broadcast pixi resources to other drones via effect bus

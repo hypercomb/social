@@ -20,6 +20,8 @@
   },
   "scripts": {
     "audit-imports": "tsx scripts/audit-imports.ts",
+    "docs": "npx -y http-server documentation -p 4290 -c-1",
+    "docs:links": "node documentation/check-links.mjs",
     "build:core": "npm --prefix hypercomb-core run build",
     "build:essentials": "npm --prefix hypercomb-essentials run build && npm run build:module && npm --prefix hypercomb-web run runtime:core",
     "build:packages": "npm run build:core && npm run build:essentials",

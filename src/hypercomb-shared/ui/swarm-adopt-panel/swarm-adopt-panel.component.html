@@ -1,0 +1,49 @@
+@if (open()) {
+  <div class="adopt-backdrop" (click)="dismiss()"></div>
+  <div class="adopt-panel" role="dialog" [attr.aria-label]="'swarm-adopt.title' | t">
+    <div class="adopt-header">
+      <h3>{{ 'swarm-adopt.title' | t }}</h3>
+      <button class="adopt-close" (click)="dismiss()" [attr.aria-label]="'swarm-adopt.cancel' | t">×</button>
+    </div>
+
+    <div class="adopt-body">
+      @if (groups().length === 0) {
+        <p class="adopt-empty">{{ 'swarm-adopt.empty' | t }}</p>
+      } @else {
+        <p class="adopt-subtitle">{{ 'swarm-adopt.subtitle' | t }}</p>
+        @for (group of groups(); track group.pubkey) {
+          <div class="adopt-group">
+            <button class="adopt-group-header" (click)="toggleGroup(group)">
+              <span class="dot" [style.background]="group.color"></span>
+              <span class="who">{{ group.display }}</span>
+              <span class="count">{{ group.tiles.length }}</span>
+              <span class="select-all" [class.checked]="groupAllSelected(group)">
+                {{ 'swarm-adopt.select-all' | t }}
+              </span>
+            </button>
+            <div class="adopt-tiles">
+              @for (tile of group.tiles; track tile.key) {
+                <button
+                  class="adopt-tile"
+                  [class.selected]="isSelected(tile.key)"
+                  [class.disabled]="!tile.adoptable"
+                  [disabled]="!tile.adoptable"
+                  (click)="toggleTile(tile)">
+                  <span class="check">{{ isSelected(tile.key) ? '✓' : '' }}</span>
+                  <span class="name">{{ tile.name }}</span>
+                </button>
+              }
+            </div>
+          </div>
+        }
+      }
+    </div>
+
+    <div class="adopt-actions">
+      <button class="adopt-btn cancel" (click)="dismiss()">{{ 'swarm-adopt.cancel' | t }}</button>
+      <button class="adopt-btn confirm" [disabled]="selectedCount() === 0" (click)="adoptSelected()">
+        {{ 'swarm-adopt.adopt' | t: { count: selectedCount() } }}
+      </button>
+    </div>
+  </div>
+}

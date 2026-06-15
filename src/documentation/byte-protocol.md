@@ -297,7 +297,7 @@ a drone reads a byte, looks up a neighbor, moves, and either keeps going or stop
 
 - [architecture-critique.md](archive/architecture-critique.md) — analysis of the current hypercomb architecture
 - [core-processor-architecture.md](./core-processor-architecture.md) — core processor design
-- [dependency-resolution.md](./dependency-resolution.md) — how drones resolve dependencies
+- [dependency-signing.md](./dependency-signing.md) — how packages are secured by a single signature
 
 ## source files
 

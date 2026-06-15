@@ -49,7 +49,7 @@ export type OverlayActionDescriptor = {
   tintWhen?: OverlayTintFn
   /** i18n key for the short hint label (shown on sustained hover) */
   labelKey?: string
-  /** i18n key for the expanded description (shown on hint click) */
+  /** i18n key for the expanded description (shown on sustained hover) */
   descriptionKey?: string
 }
 
@@ -89,6 +89,7 @@ const DROP_HIGHLIGHT_TINT = 0x88ffff
 
 // ── Action hint constants ────────────────────────────────────────
 const HINT_DELAY_MS = 350       // snappy hover-to-hint — long enough to filter mouse glances, short enough to feel responsive
+const HINT_EXPAND_DELAY_MS = 1100 // sustained hover after the label appears → expanded description; clicks always fire the action
 const HINT_Y_OFFSET = 22        // below the icon row
 const HINT_FONT_SIZE = 6
 const HINT_COLOR = 0xb0c0e0
@@ -1398,6 +1399,11 @@ export class TileOverlayDrone extends Drone {
     let hoveredName: string | null = null
     for (const a of this.#actions) {
       const btn = a.button
+      // Invisible buttons keep their last laid-out position and can sit
+      // under a visible neighbour — without this skip they steal the
+      // hover (wrong or missing hint) while the click path, which does
+      // filter on visibility, fires the visible icon's action.
+      if (!btn.visible) { btn.hovered = false; continue }
       const bx = local.x - ox - btn.position.x
       const by = local.y - oy - btn.position.y
       const isHovered = btn.containsPoint(bx, by)
@@ -1448,6 +1454,12 @@ export class TileOverlayDrone extends Drone {
     this.#hintText.alpha = 0.85
     this.#overlay.addChild(this.#hintText)
     this.#hintExpanded = false
+
+    // Keep hovering → the description expands on its own. Expansion used
+    // to be click-triggered, which turned every icon into a two-stage
+    // button whenever the label was showing (first click expanded, second
+    // click acted). The timer reuses #hintTimer so #clearHint cancels it.
+    this.#hintTimer = setTimeout(() => this.#expandHint(), HINT_EXPAND_DELAY_MS)
   }
 
   #expandHint(): void {
@@ -1639,11 +1651,6 @@ export class TileOverlayDrone extends Drone {
         const by = local.y - oy - btn.position.y
 
         if (btn.containsPoint(bx, by)) {
-          // If hint is showing but not expanded, expand it on first click
-          if (this.#hintText && !this.#hintExpanded && this.#hintActionName === action.name) {
-            this.#expandHint()
-            return
-          }
           this.#clearHint()
           // break-apart: play shatter animation first, then emit action
           if (action.name === 'break-apart') {

@@ -7,7 +7,7 @@
 // the user ever opening the tile editor UI.
 
 import { EffectBus } from '@hypercomb/core'
-import { writeTilePropertiesAt } from './tile-properties.js'
+import { writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex } from './tile-properties.js'
 
 type Store = {
   putResource: (blob: Blob) => Promise<string>
@@ -23,8 +23,6 @@ type AttachPayload = {
   type: 'image' | 'youtube' | 'link' | 'document'
 }
 
-const PROPS_INDEX_KEY = 'hc:tile-props-index'
-
 export class ResourceAttachDrone {
 
   constructor() {
@@ -38,6 +36,13 @@ export class ResourceAttachDrone {
   async #attach(payload: AttachPayload): Promise<void> {
     const store = window.ioc.get<Store>('@hypercomb.social/Store')
     if (!store) return
+
+    // Bind the ADDRESS at handler entry, before any await. The attach
+    // spans a putResource write; reading lineage at write time used to
+    // stamp the image against wherever the user had navigated to in the
+    // meantime — a cross-layer content graft.
+    const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+    const segments: readonly string[] = lineage?.explorerSegments?.() ?? []
 
     // Build props exactly like the tile editor's saveAndComplete and the
     // substrate service do: one `small.image` per orientation plus the
@@ -73,9 +78,12 @@ export class ResourceAttachDrone {
     const blob = new Blob([json], { type: 'application/json' })
     const propsSig = await store.putResource(blob)
 
-    const index: Record<string, string> = JSON.parse(localStorage.getItem(PROPS_INDEX_KEY) ?? '{}')
-    index[payload.cell] = propsSig
-    localStorage.setItem(PROPS_INDEX_KEY, JSON.stringify(index))
+    // Keyed by full lineage so a same-named tile at another hive location
+    // can never collide. segments bound at handler entry.
+    const indexCellKey = await cellLocationSig(segments, payload.cell)
+    const index = readTilePropsIndex()
+    index[indexCellKey || payload.cell] = propsSig
+    writeTilePropsIndex(index)
 
     // CANONICAL WRITE — a user-supplied image is creation-time CONTENT, so
     // it must land in the tile's canonical 0000 (the layer's properties
@@ -87,14 +95,13 @@ export class ResourceAttachDrone {
     // broadcasts cell:0000-changed — which SwarmDrone already listens to,
     // so the swarm republishes with the image inlined automatically.
     try {
-      const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
-      const segments = lineage?.explorerSegments?.() ?? []
+      // segments bound at handler entry — never re-read after the awaits.
       await writeTilePropertiesAt(segments, payload.cell, props)
     } catch (err) {
       console.warn('[resource-attach] canonical props write failed', err)
     }
 
-    EffectBus.emit<{ cell: string }>('tile:saved', { cell: payload.cell })
+    EffectBus.emit<{ cell: string; segments: readonly string[] }>('tile:saved', { cell: payload.cell, segments })
 
     // Release the substrate lock — the cell is now fully described by its props.
     EffectBus.emit('cell:attach-pending', { cell: payload.cell, pending: false })

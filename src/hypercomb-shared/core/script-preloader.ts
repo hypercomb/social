@@ -119,10 +119,12 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         let evicted = false
         for (const [sig, bee] of this.#beeCache) {
           if (!enabledSet.has(sig)) {
-            console.log(`[script-preloader] evicting disabled bee ${sig} (${bee.iocKey})`)
-            const key = bee.iocKey
-            bee.markDisposed()
-            window.ioc.unregister(key)
+            // Pulse-less UI drones are plain classes — markDisposed and
+            // iocKey may not exist; dispose/unregister best-effort.
+            const key = (bee as any)?.iocKey
+            console.log(`[script-preloader] evicting disabled bee ${sig} (${key ?? '(no iocKey)'})`)
+            ;(bee as any)?.markDisposed?.()
+            if (typeof key === 'string' && key.length > 0) window.ioc.unregister(key)
             this.#beeCache.delete(sig)
             this.#bySignature.delete(sig)
             this.#warmedUp.delete(sig)
@@ -337,6 +339,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         for (const [sig, bee] of this.#beeCache) {
           if (this.#firstPulsed.has(sig)) continue
           this.#firstPulsed.add(sig)
+          // Pulse-less entries are legitimate: EventTarget UI drones
+          // (palette, toast, notes…) are constructor-wired and don't
+          // participate in the pulse cycle.
+          if (typeof (bee as any)?.pulse !== 'function') continue
           try { await bee.pulse('') } catch (err) {
             console.warn(`[script-preloader] late pulse failed for ${bee.iocKey}:`, err)
           }
@@ -393,6 +399,10 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
       for (const [sig, bee] of this.#beeCache) {
         if (this.#firstPulsed.has(sig)) continue
         this.#firstPulsed.add(sig)
+        // Pulse-less entries are legitimate: EventTarget UI drones
+        // (palette, toast, notes…) are constructor-wired and don't
+        // participate in the pulse cycle.
+        if (typeof (bee as any)?.pulse !== 'function') continue
         try { await bee.pulse('') } catch (err) {
           console.warn(`[script-preloader] late pulse failed for ${bee.iocKey}:`, err)
         }
@@ -530,11 +540,17 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     // SAME instance. So `bee` here === window.ioc.get(bee.iocKey).
     // We do NOT call markDisposed() on it — that would dispose the live
     // instance everyone else (PanningDrone, ZoomDrone, …) is pointing at.
-    // The original concern was "two instances subscribing to the same
-    // events on dev shell"; in practice the bee module's `register` call
-    // overwrites whatever was registered before, so only one instance
-    // ever ends up in IoC. The OPFS instance wins on every shell.
-    register(bee.iocKey, bee)
+    // IoC registration is FIRST-WINS, and ioc.web's register DISPOSES a
+    // rejected different instance (ghost cleanup). This alias write passes
+    // the LIVE canonical instance, so it must never reach that disposal
+    // path: only register when the computed key is free. An occupied
+    // alias (two bundles whose classes share a name) just keeps its first
+    // holder. Guard: a bee whose iocKey can't resolve (no namespace /
+    // constructor name) must not register under the literal "undefined".
+    const aliasKey = (bee as any)?.iocKey
+    if (typeof aliasKey === 'string' && aliasKey.length > 0 && window.ioc.get(aliasKey) === undefined) {
+      register(aliasKey, bee)
+    }
 
     this.#bySignature.set(signature, { signature, name: bee.name ?? signature })
     this.#beeCache.set(signature, bee)

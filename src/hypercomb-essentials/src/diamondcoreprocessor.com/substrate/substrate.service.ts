@@ -35,7 +35,7 @@ import {
   readImagesFromHandle,
   isFolderAccessSupported,
 } from './folder-handles.js'
-import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
+import { readTilePropertiesAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig } from '../editor/tile-properties.js'
 
 const PROPS_FILE = '0000'
 const HIVE_KEY = 'substrate'                 // per-hive override (path string)
@@ -345,16 +345,17 @@ export class SubstrateService extends EventTarget {
     const store = this.#store()
     if (!store) return []
     const images: string[] = []
-    const propsIndex: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
+    const propsIndex = readTilePropsIndex()
+    const pathSegments = layerPath.split('/').filter(Boolean)
     try {
       let dir: FileSystemDirectoryHandle = store.hypercombRoot
-      for (const seg of layerPath.split('/').filter(Boolean)) {
+      for (const seg of pathSegments) {
         dir = await dir.getDirectoryHandle(seg)
       }
       for await (const [name, handle] of (dir as any).entries()) {
         if (handle.kind !== 'directory') continue
         try {
-          const propsSig = propsIndex[name]
+          const propsSig = lookupTilePropsSig(propsIndex, await cellLocationSig(pathSegments, name), name)
           if (!propsSig) continue
           const blob = await store.getResource(propsSig)
           if (!blob) continue
@@ -632,30 +633,43 @@ export class SubstrateService extends EventTarget {
   }
 
   // ────────────────────── cell assignment API ──────────────────────
+  //
+  // Index entries are keyed by the tile's FULL-LINEAGE sig (the sigbag
+  // key — see tile-properties.ts). Bare-label legacy entries are read
+  // as fallback but writes and removals touch only the lineage-keyed
+  // entry, so same-named tiles at other hive locations are never mixed.
 
-  applyToCell(label: string): boolean {
+  /** Full-lineage index key for `label` at `segments` (or the current
+   *  location when omitted). '' when the history service isn't up yet —
+   *  callers then degrade to the legacy bare-label key. */
+  async #indexKeyFor(label: string, segments?: readonly string[]): Promise<string> {
+    const segs = segments ?? this.#lineage()?.explorerSegments?.() ?? []
+    return cellLocationSig([...segs], label)
+  }
+
+  async applyToCell(label: string, segments?: readonly string[]): Promise<boolean> {
     if (this.#propsPool.length === 0) return false
-    const indexKey = 'hc:tile-props-index'
-    const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
-    if (index[label]) return false
+    const key = await this.#indexKeyFor(label, segments)
+    const index = readTilePropsIndex()
+    if (lookupTilePropsSig(index, key, label)) return false
     const entry = this.#pickBalanced()
     if (!entry) return false
-    index[label] = entry.propsSig
-    localStorage.setItem(indexKey, JSON.stringify(index))
+    index[key || label] = entry.propsSig
+    writeTilePropsIndex(index)
     return true
   }
 
-  rerollCell(label: string): boolean {
+  async rerollCell(label: string, segments?: readonly string[]): Promise<boolean> {
     if (this.#propsPool.length === 0) return false
-    const indexKey = 'hc:tile-props-index'
-    const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
-    const previous = index[label]
+    const key = await this.#indexKeyFor(label, segments)
+    const index = readTilePropsIndex()
+    const previous = lookupTilePropsSig(index, key, label)
     this.#releaseUsage(previous)
-    delete index[label]
+    delete index[key || label]
     const entry = this.#pickBalanced(previous)
     if (!entry) return false
-    index[label] = entry.propsSig
-    localStorage.setItem(indexKey, JSON.stringify(index))
+    index[key || label] = entry.propsSig
+    writeTilePropsIndex(index)
     return true
   }
 
@@ -667,46 +681,52 @@ export class SubstrateService extends EventTarget {
    * Returns the labels that were actually rerolled — callers should emit
    * `substrate:rerolled` per returned label so show-cell can invalidate caches.
    */
-  rerollCells(labels: string[]): string[] {
+  async rerollCells(labels: string[], segments?: readonly string[]): Promise<string[]> {
     if (this.#propsPool.length === 0 || labels.length === 0) return []
-    const indexKey = 'hc:tile-props-index'
-    const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
+    const index = readTilePropsIndex()
     const rerolled: string[] = []
     for (const label of labels) {
-      const current = index[label]
+      const key = await this.#indexKeyFor(label, segments)
+      const current = lookupTilePropsSig(index, key, label)
       if (!current) continue
       this.#releaseUsage(current)
-      delete index[label]
+      delete index[key || label]
       const entry = this.#pickBalanced(current)
       if (!entry) break
-      index[label] = entry.propsSig
+      index[key || label] = entry.propsSig
       rerolled.push(label)
     }
-    if (rerolled.length > 0) localStorage.setItem(indexKey, JSON.stringify(index))
+    if (rerolled.length > 0) writeTilePropsIndex(index)
     return rerolled
   }
 
-  clearCell(label: string): void {
-    const indexKey = 'hc:tile-props-index'
-    const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
-    this.#releaseUsage(index[label])
-    delete index[label]
-    localStorage.setItem(indexKey, JSON.stringify(index))
+  async clearCell(label: string, segments?: readonly string[]): Promise<void> {
+    const key = await this.#indexKeyFor(label, segments)
+    const index = readTilePropsIndex()
+    if (key && index[key] === undefined) {
+      // No lineage-scoped assignment. Whatever the label resolves to is a
+      // legacy SHARED entry — same-named tiles at other locations may
+      // still render from it, so removal here must not touch it.
+      return
+    }
+    this.#releaseUsage(index[key || label])
+    delete index[key || label]
+    writeTilePropsIndex(index)
   }
 
-  applyToAllBlanks(labels: string[]): string[] {
+  async applyToAllBlanks(labels: string[], segments?: readonly string[]): Promise<string[]> {
     if (this.#propsPool.length === 0 || labels.length === 0) return []
-    const indexKey = 'hc:tile-props-index'
-    const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
+    const index = readTilePropsIndex()
     const applied: string[] = []
     for (const label of labels) {
-      if (index[label]) continue
+      const key = await this.#indexKeyFor(label, segments)
+      if (lookupTilePropsSig(index, key, label)) continue
       const entry = this.#pickBalanced()
       if (!entry) break
-      index[label] = entry.propsSig
+      index[key || label] = entry.propsSig
       applied.push(label)
     }
-    if (applied.length > 0) localStorage.setItem(indexKey, JSON.stringify(index))
+    if (applied.length > 0) writeTilePropsIndex(index)
     return applied
   }
 
@@ -719,21 +739,26 @@ export class SubstrateService extends EventTarget {
     if (rewarm) await this.warmUp()
     if (this.#propsPool.length === 0) return 0
 
-    const indexKey = 'hc:tile-props-index'
-    const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
+    const index = readTilePropsIndex()
     const substrateSigs = new Set(this.#propsPool.map(p => p.propsSig))
     let cleared = 0
     for (const label of visibleLabels) {
-      const current = index[label]
+      const key = await this.#indexKeyFor(label)
+      const current = lookupTilePropsSig(index, key, label)
       if (current && substrateSigs.has(current)) {
         this.#releaseUsage(current)
-        delete index[label]
+        // Explicit refresh rerolls the visible view: drop the scoped entry,
+        // and the legacy one too when that's where the pick lives — it's a
+        // substrate-pool (random) image by the guard above, so same-named
+        // tiles elsewhere just re-fill with a fresh random pick.
+        delete index[key || label]
+        if (index[label] === current) delete index[label]
         cleared++
       }
     }
-    if (cleared > 0) localStorage.setItem(indexKey, JSON.stringify(index))
+    if (cleared > 0) writeTilePropsIndex(index)
 
-    return this.applyToAllBlanks(visibleLabels).length
+    return (await this.applyToAllBlanks(visibleLabels)).length
   }
 
   // ───────────── canonical image stamping (reconciler) ─────────────
@@ -813,7 +838,7 @@ export class SubstrateService extends EventTarget {
           if (canonicalImg && !canonicalIsDefault) return
 
           let fromIndex: any = null
-          const propsSig = index[name]
+          const propsSig = lookupTilePropsSig(index, await cellLocationSig(segments, name), name)
           if (typeof propsSig === 'string' && /^[0-9a-f]{64}$/.test(propsSig)) {
             const blob = await store.getResource(propsSig)
             if (blob) { try { fromIndex = JSON.parse(await blob.text()) } catch { fromIndex = null } }

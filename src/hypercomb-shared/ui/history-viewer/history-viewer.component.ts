@@ -108,12 +108,13 @@ type Row = {
   summary: string
   category: Category
   filename: string
-  // A cascade row is a layer entry whose only delta is a 1-for-1 child
-  // sig swap on a single slot — the structural fingerprint of lineage
-  // pull-up (a downstream change rippling into this layer). User-
-  // originated entries are pure adds, removes, or content edits and so
-  // never produce this shape on a parent layer. Used to collapse
-  // contiguous cascade runs in the viewer.
+  // A cascade row is a layer entry whose children sigs changed but
+  // whose tile NAMES (the stable identity — there is no rename op) did
+  // not: the structural fingerprint of lineage pull-up, a downstream
+  // change rippling into this layer. User-originated entries add or
+  // remove names, or edit other slots, and so never produce this shape
+  // on a parent layer. Used to collapse contiguous cascade runs in the
+  // viewer.
   isCascade: boolean
 }
 
@@ -187,6 +188,15 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
 
   #entries = signal<readonly LayerEntry[]>([])
   #contents = signal<ReadonlyMap<string, Content>>(new Map())
+  // Child layer sig → display name. Children arrays hold child layer
+  // SIGS (versions), but a tile's identity is its NAME — there is no
+  // rename op, so the name is stable across every version of the same
+  // tile. The diff summariser maps sigs through this cache before
+  // comparing, so a downstream edit that swaps N child sigs reads as
+  // a version ripple, not "-N tiles +N tiles". Layer bytes are
+  // content-addressed, so a resolved name never changes — the cache
+  // grows monotonically and never needs invalidation.
+  #childNames = signal<ReadonlyMap<string, string>>(new Map())
   // Filename-keyed cache: `${locationSig}:${filename}` → resolved
   // marker content (parsed JSON, bytes, sig, timestamp). Markers are
   // immutable once written, so cache entries never need invalidation
@@ -283,12 +293,15 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     const contents = this.#contents()
     const position = this.#position()
 
+    const childNames = this.#childNames()
+    const nameOf = (sig: string): string | undefined => childNames.get(sig)
+
     const rows: Row[] = []
     let previousContent: Content | undefined = undefined
     entries.forEach((entry, i) => {
       const content = contents.get(entry.layerSig)
       if (!content) return
-      const { summary, category, isCascade } = summarise(previousContent, content)
+      const { summary, category, isCascade } = summarise(previousContent, content, nameOf)
       previousContent = content
       rows.push({
         index: i,
@@ -1028,8 +1041,42 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     this.#entries.set(entries)
     this.#position.set(cursor.state.position)
     this.#total.set(filenames.length)
+
+    // Phase 3: resolve child layer sigs → names so the diff summary can
+    // compare tile IDENTITY across entries instead of raw sig versions.
+    // Runs after the row signals are set — rows paint immediately with
+    // sig identity and refine when names land. Content-addressed bytes
+    // mean a sig's name never changes, so stale completions from an
+    // abandoned reload are still valid cache entries.
+    if (history.getLayerBySig) {
+      const known = this.#childNames()
+      const pending = new Set<string>()
+      for (const content of sigContents.values()) {
+        const kids = (content as Record<string, unknown>)['children']
+        if (!Array.isArray(kids)) continue
+        for (const sig of kids) {
+          if (typeof sig === 'string' && SIG_RE.test(sig) && !known.has(sig)) pending.add(sig)
+        }
+      }
+      if (pending.size > 0) {
+        const resolved = await Promise.all([...pending].map(async (sig) => {
+          try {
+            const layer = await history.getLayerBySig!(sig)
+            const name = layer && typeof layer.name === 'string' && layer.name ? layer.name : null
+            return [sig, name] as const
+          } catch {
+            return [sig, null] as const
+          }
+        }))
+        const nextNames = new Map(this.#childNames())
+        for (const [sig, name] of resolved) if (name) nextNames.set(sig, name)
+        if (nextNames.size !== this.#childNames().size) this.#childNames.set(nextNames)
+      }
+    }
   }
 }
+
+const SIG_RE = /^[0-9a-f]{64}$/
 
 // ─────────────────────────────────────────────────────────────────────
 // Inject a one-off stylesheet that reserves a 216px column on the
@@ -1158,13 +1205,23 @@ function diffLines(
 // of change between two layers so the viewer can color-code the row.
 // ─────────────────────────────────────────────────────────────────────
 
-function summarise(prev: Content | undefined, next: Content | undefined): { summary: string; category: Category; isCascade: boolean } {
+function summarise(
+  prev: Content | undefined,
+  next: Content | undefined,
+  nameOf: (sig: string) => string | undefined,
+): { summary: string; category: Category; isCascade: boolean } {
   if (!next) return { summary: '(loading)', category: 'none', isCascade: false }
 
   // Slot-agnostic diff: union of every slot present in either layer.
   // Deltas are reported per-slot. Categories use the first slot whose
   // values changed to colour the row (children → 'cells', notes →
   // 'notes', etc.; unknown slots fall through to 'system').
+  //
+  // The `children` slot is diffed by NAME, not by sig. Child sigs are
+  // versions — any downstream edit swaps the sig while the tile (its
+  // name) stays put. Diffing raw sigs turned one added tile plus a
+  // merkle ripple into "-7 tiles +8 tiles". Tiles aren't determined by
+  // sig membership against the previous layer; identity is the name.
   const slotKeys = new Set<string>([
     ...Object.keys(prev ?? {}).filter(k => k !== 'name'),
     ...Object.keys(next).filter(k => k !== 'name'),
@@ -1176,6 +1233,10 @@ function summarise(prev: Content | undefined, next: Content | undefined): { summ
   let totalAdded = 0
   let totalRemoved = 0
   let reorderCount = 0
+  // children sigs changed but no name-level delta — pure version ripple
+  let childrenRippled = false
+  // some child sig had no resolved name; identity degraded to raw sigs
+  let childrenUnresolved = false
 
   for (const key of [...slotKeys].sort()) {
     const pArr = (prev && Array.isArray((prev as Record<string, unknown>)[key]))
@@ -1184,33 +1245,57 @@ function summarise(prev: Content | undefined, next: Content | undefined): { summ
     const nArr = Array.isArray((next as Record<string, unknown>)[key])
       ? ((next as Record<string, unknown>)[key] as unknown[])
       : []
-    const added = difference(nArr, pArr)
-    const removed = difference(pArr, nArr)
-    const reordered = added.length === 0 && removed.length === 0 && !sequenceEqual(nArr, pArr)
-    if (added.length === 0 && removed.length === 0 && !reordered) continue
+
+    let pIds = pArr
+    let nIds = nArr
+    if (key === 'children') {
+      const toIdentity = (v: unknown): unknown => {
+        if (typeof v !== 'string') return v
+        const name = nameOf(v)
+        if (name === undefined) { childrenUnresolved = true; return v }
+        return name
+      }
+      pIds = pArr.map(toIdentity)
+      nIds = nArr.map(toIdentity)
+    }
+
+    const added = difference(nIds, pIds)
+    const removed = difference(pIds, nIds)
+    const reordered = added.length === 0 && removed.length === 0 && !sequenceEqual(nIds, pIds)
+    if (added.length === 0 && removed.length === 0 && !reordered) {
+      if (key === 'children' && !sequenceEqual(pArr, nArr)) childrenRippled = true
+      continue
+    }
 
     slotsChanged++
     totalAdded += added.length
     totalRemoved += removed.length
     if (reordered) reorderCount++
 
-    const noun = slotNoun(key, nArr.length || pArr.length)
-    if (added.length) parts.push(`+${added.length} ${noun}`)
-    if (removed.length) parts.push(`-${removed.length} ${noun}`)
-    if (reordered) parts.push(`reorder ${noun} (${nArr.length})`)
+    if (added.length) parts.push(`+${added.length} ${slotNoun(key, added.length)}`)
+    if (removed.length) parts.push(`-${removed.length} ${slotNoun(key, removed.length)}`)
+    if (reordered) parts.push(`reorder ${slotNoun(key, nArr.length)} (${nArr.length})`)
     if (category === 'none') category = slotCategory(key)
   }
 
-  // Cascade fingerprint: exactly one slot changed by a 1-for-1 sig swap,
-  // no reorders, no other slot deltas. That shape only emerges from
-  // lineage pull-up (a child layer's sig changed downstream); any user-
-  // initiated edit produces a different shape on this layer.
-  const isCascade = slotsChanged === 1
+  if (parts.length === 0) {
+    // No name-level change anywhere, but the children sigs swapped —
+    // lineage pull-up from a downstream edit. Hidden as a cascade row.
+    if (childrenRippled) return { summary: '(sync)', category: 'none', isCascade: true }
+    return { summary: '(no change)', category: 'none', isCascade: false }
+  }
+
+  // Legacy cascade fingerprint, only meaningful when child names could
+  // not be resolved (identity degraded to raw sigs): exactly one slot
+  // changed by a 1-for-1 sig swap, no reorders, no other slot deltas.
+  // With resolved names a cascade never reaches here — it lands in the
+  // childrenRippled branch above.
+  const isCascade = childrenUnresolved
+    && slotsChanged === 1
     && totalAdded === 1
     && totalRemoved === 1
     && reorderCount === 0
 
-  if (parts.length === 0) return { summary: '(no change)', category: 'none', isCascade: false }
   return { summary: parts.join(' · '), category, isCascade }
 }
 
