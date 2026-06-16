@@ -94,16 +94,19 @@ export class SentinelBridge {
 
   /**
    * Sync with DCP's toggle state.
-   * DCP computes what's enabled, diffs, streams files.
-   * Returns the enabled set + sync signature for web to apply.
+   * DCP computes what's enabled and streams back ONLY the files this hive is
+   * missing — `have` is the set of sigs already in our OPFS, so DCP can skip
+   * re-streaming them ("fill in if any files are missing" rather than clear +
+   * reinstall every time). The result's enabled* arrays are still the FULL
+   * enabled set so stale-GC and the cached manifest stay correct.
    */
-  async sync(currentSyncSig?: string): Promise<SentinelSyncResult | null> {
+  async sync(currentSyncSig?: string, have?: string[]): Promise<SentinelSyncResult | null> {
     const rid = this.#nextRid()
     this.#fileCollectors.set(rid, [])
 
     return new Promise((resolve, reject) => {
       this.#pending.set(rid, { resolve, reject })
-      this.#port.postMessage({ type: 'sync', rid, currentSyncSig })
+      this.#port.postMessage({ type: 'sync', rid, currentSyncSig, have })
     })
   }
 

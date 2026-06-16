@@ -186,6 +186,18 @@ dcp-command-line {
   border-left: 3px solid #5aa873;
   .domain-header { background: #e3f1e8; }
 }
+.domain-section[data-zone="default"] {
+  background: #eef8f7;                       /* bundled baseline install (default lineage) */
+  border-color: rgba(30, 140, 130, 0.20);
+  border-left: 3px solid #4bb3a8;
+  .domain-header { background: #ddf0ee; }
+}
+.domain-section[data-zone="current"] {
+  background: #f6f2fb;                       /* realtime backup pushed to hypercomb.io */
+  border-color: rgba(120, 80, 170, 0.20);
+  border-left: 3px solid #9d7bc8;
+  .domain-header { background: #ece3f6; }
+}
 .domain-section[data-zone="host"] {
   background: #fdf7ee;                       /* adopted swarm hosts (jwize.com) */
   border-color: rgba(176, 128, 30, 0.20);

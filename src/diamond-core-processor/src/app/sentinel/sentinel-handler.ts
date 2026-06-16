@@ -26,7 +26,7 @@ export type IntakeKind = 'layer' | 'bee' | 'dependency' | 'resource'
 
 export type SentinelRequest =
   | { type: 'install'; rid: string; installedSig?: string; bundledBase?: string }
-  | { type: 'sync'; rid: string; currentSyncSig?: string }
+  | { type: 'sync'; rid: string; currentSyncSig?: string; have?: string[] }
   | { type: 'fetch-content'; rid: string; signature: string; kind: 'layer' | 'bee' | 'dependency'; rootSig: string }
   | { type: 'intake'; rid: string; signature: string; kind: IntakeKind; bytes: ArrayBuffer }
 
@@ -195,15 +195,23 @@ export class SentinelHandler {
       return
     }
 
-    // Web tells us what it has via currentSyncSig — but to compute the diff
-    // we need to know what sigs web currently holds. We'll send the full enabled
-    // set and let web compute what to add/remove locally (it knows its own OPFS).
-    // Stream all enabled files, mark the sync sig for web to store.
+    // INCREMENTAL DELTA. The hive tells us which sigs it already holds in OPFS
+    // via `msg.have`; we stream ONLY the enabled files it's MISSING — not the
+    // whole enabled set on every change. Content is sig-addressed, so a sig the
+    // hive already holds is by definition the correct bytes — re-streaming it
+    // each sync was the "clear and install everytime" inefficiency. The
+    // sync-result below still reports the FULL enabled arrays, so the hive's
+    // stale-GC (removeDisabled) and cached manifest stay correct — only the
+    // BYTES are deltaed. `have` empty/absent (older hive) ⇒ stream all (the
+    // prior behavior), so this is backward compatible.
+    const have = new Set((msg.have ?? []).map(s => String(s).trim().toLowerCase()))
     const add: { signature: string; kind: string; bytes: ArrayBuffer }[] = []
+    let skipped = 0
 
     const domains = this.#loadDomains()
 
     for (const sig of syncManifest.bees) {
+      if (have.has(sig.toLowerCase())) { skipped++; continue }
       let bytes = await this.#store.readFile(this.#store.bees, `${sig}.js`)
         ?? await this.#store.readFile(this.#store.bees, sig)
       if (!bytes) bytes = await this.#fetchFromDomains(domains, sig, 'bee')
@@ -211,6 +219,7 @@ export class SentinelHandler {
     }
 
     for (const sig of syncManifest.dependencies) {
+      if (have.has(sig.toLowerCase())) { skipped++; continue }
       let bytes = await this.#store.readFile(this.#store.dependencies, `${sig}.js`)
         ?? await this.#store.readFile(this.#store.dependencies, sig)
       if (!bytes) bytes = await this.#fetchFromDomains(domains, sig, 'dependency')
@@ -218,6 +227,7 @@ export class SentinelHandler {
     }
 
     for (const sig of syncManifest.layers) {
+      if (have.has(sig.toLowerCase())) { skipped++; continue }
       let bytes: ArrayBuffer | null = null
       for (const domain of domains) {
         const domainName = new URL(domain).hostname
@@ -230,8 +240,8 @@ export class SentinelHandler {
       if (bytes) add.push({ signature: sig, kind: 'layer', bytes })
     }
 
-    // Log all resolved files with signatures
-    console.log(`[sentinel] sync resolved ${add.length} files:`)
+    // Log the delta — streamed vs skipped (already on the hive).
+    console.log(`[sentinel] sync delta: streaming ${add.length} file(s), skipped ${skipped} already-present`)
     for (const item of add) {
       console.log(`  [${item.signature}] ${item.kind}`)
     }

@@ -1,27 +1,13 @@
+<!-- Progress bar ONLY — no numbers, no text label. The bar itself is the
+     indicator: an indeterminate sweep while the frontier is unknown (adopt /
+     count-less sync), a determinate fill once a total is announced, and a
+     full green bar on completion before it fades. The status text lives in
+     the aria-label for screen readers, never on screen. -->
 @if (visible()) {
-  <div class="sync-cell" [class.done]="done()" role="status" aria-live="polite">
-    <div class="sync-line">
-      <span class="sync-dot" aria-hidden="true"></span>
-      <span class="sync-label">
-        @if (done()) {
-          {{ (doneKind() === 'adopt' ? 'sync.adopted' : 'sync.done') | t }}
-        } @else if (adopting()) {
-          @if (adoptItems() > 0) {
-            {{ 'sync.adopting-progress' | t: { items: adoptItems() } }}
-          } @else {
-            {{ 'sync.adopting' | t }}
-          }
-        } @else if (hasCounts()) {
-          {{ 'sync.progress' | t: { current: current(), total: total() } }}
-        } @else {
-          {{ 'sync.synchronizing' | t }}
-        }
-      </span>
+  <div class="sync-cell" [class.done]="done()" role="status" aria-live="polite"
+       [attr.aria-label]="(done() ? (doneKind() === 'adopt' ? 'sync.adopted' : 'sync.done') : (adopting() ? 'sync.adopting' : 'sync.synchronizing')) | t">
+    <div class="sync-track" [class.indeterminate]="!done() && !hasCounts()">
+      <div class="sync-fill" [style.width.%]="done() ? 100 : (hasCounts() ? percent() : null)"></div>
     </div>
-    @if (!done()) {
-      <div class="sync-track" [class.indeterminate]="!hasCounts()">
-        <div class="sync-fill" [style.width.%]="hasCounts() ? percent() : null"></div>
-      </div>
-    }
   </div>
 }

@@ -31,6 +31,10 @@ const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const COMMITTER_KEY = '@diamondcoreprocessor.com/LayerCommitter'
+const REGISTRY_SNAPSHOT_KEY = '@hypercomb.social/RegistrySnapshot'
+// Recoverable receipt of branches this hive has folded in — the baseline the
+// pending-diff (portal counts) and the un-fold (remove) path read from.
+const FOLDED_KEY = 'hc:last-folded'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
@@ -44,7 +48,7 @@ interface LineageLike {
 }
 
 interface BrokerLike {
-  adopt: (rootSig: string) => Promise<{ layers: number; leaves: number; failed: number }>
+  adopt: (rootSig: string, opts?: { layersOnly?: boolean }) => Promise<{ layers: number; leaves: number; failed: number }>
   noteDomainsForSig?: (sig: string, domains: string[]) => void
   getKnownDomains?: (sig: string) => string[]
 }
@@ -56,6 +60,27 @@ interface CommitterLike {
     nameSlots?: ReadonlySet<string>,
   ) => Promise<string>
 }
+
+/** The DCP installer's registry projection (control plane → data plane),
+ *  cached in shared's RegistrySnapshotStore and re-emitted on EffectBus
+ *  'registry:snapshot'. We read only the fields the fold needs. */
+interface RegistryBranchLike {
+  domain?: string
+  name?: string
+  branchSig?: string
+  at?: string[]
+  enabled?: boolean
+  kind?: 'package' | 'content'
+}
+interface RegistrySnapshotLike { branches?: RegistryBranchLike[] }
+interface RegistrySnapshotStoreLike { snapshot?: RegistrySnapshotLike | null }
+
+/** A branch this hive has folded in — the recoverable receipt persisted at
+ *  FOLDED_KEY. Drives the portal's pending-diff counts and lets a disable
+ *  un-fold the right tile. Removal is recoverable: the installer keeps the
+ *  branch record (re-enable re-folds) and history keeps the prior marker +
+ *  the content-addressed bytes, so nothing is ever lost. */
+interface FoldedEntry { sig: string; name: string; at: string[] }
 
 interface TileActionPayload {
   action: string
@@ -78,8 +103,11 @@ export class SwarmAdoptDrone extends Drone {
   public override description =
     'Adopts a peer tile by localizing its branch (ContentBroker) and folding it into the hive layer via the same update({children}) cascade as paste, on explicit user click ONLY — no snapshot bridge, no automatic installer fold.'
 
-  protected override listens: string[] = ['tile:action']
-  protected override emits: string[] = ['adopt:started', 'swarm:adopt-panel:open', 'fs:changed']
+  protected override listens: string[] = ['tile:action', 'registry:snapshot']
+  protected override emits: string[] = ['adopt:started', 'swarm:adopt-panel:open', 'fs:changed', 'fold:receipt']
+
+  // Latest installer registry projection — cached for the Done-gated fold.
+  #lastSnapshot: RegistrySnapshotLike | null = null
 
   constructor() {
     super()
@@ -124,6 +152,28 @@ export class SwarmAdoptDrone extends Drone {
 
       void this.#adoptPeerTile(label)
     })
+
+    // ── DCP installer round-trip → hive config fold (on DONE) ──────────
+    // The participant adopts/enables inside the DCP installer; when they
+    // click Done, portal-overlay posts `actions:available` (CONFIRM-only —
+    // cancel/escape never fire it). On that explicit participant action we
+    // fold the installer's enabled CONTENT config into the hive sigbag via
+    // the SAME #commitBranch / update({children}) cascade a manual adopt
+    // uses — the one way into your hive, and the symmetric counterpart to
+    // the hive→DCP content push. Gated on Done, NOT auto-folded on every
+    // snapshot (that automation was deliberately removed). Idempotent, so a
+    // stray re-fire is a safe no-op (existing children → 'exists').
+    this.onEffect<RegistrySnapshotLike>('registry:snapshot', (snap) => {
+      this.#lastSnapshot = snap
+      console.info('[swarm-adopt] registry:snapshot received —', (snap?.branches?.length ?? 0), 'branch(es)')
+    })
+    // Fold when the installer iframe CLOSES (any way: Done / cancel / escape).
+    // `dcp:embed-closed` fires on every portal close. On confirm the portal
+    // ALSO dispatches `actions:available`, so listening to both folded TWICE
+    // per Done — dcp:embed-closed alone covers every close, so it's the single
+    // trigger. By close time the adoption is already recorded in DCP's config,
+    // so closing is the "finished" signal.
+    window.addEventListener('dcp:embed-closed', this.#onDcpDone)
   }
 
   #ioc = () => (window as { ioc?: { get: (k: string) => unknown } }).ioc
@@ -218,12 +268,21 @@ export class SwarmAdoptDrone extends Drone {
     if (!broker?.adopt || !history?.getLayerBySig || !committer?.update || !lineage) return 'unavailable'
 
     try {
-      // Resolution protocol: pull the branch's whole subtree into our pool so
-      // getLayerBySig resolves it locally — "indistinguishable from authored".
+      // Resolution protocol: pull the branch's LAYER closure into our pool so
+      // getLayerBySig resolves it locally and cloneLayerTree can re-home it.
+      // layersOnly — resources are sig-refs that STREAM on demand at render
+      // (memory→OPFS→host write-through), so a content-rich adopt transfers a
+      // handful of tiny layers, not its hundreds of images.
       if (domain) broker.noteDomainsForSig?.(sig, [domain])
-      await broker.adopt(sig)
+      const adoptRes = await broker.adopt(sig, { layersOnly: true })
 
       const branchLayer = await history.getLayerBySig(sig)
+      // DIAGNOSTIC: did the HIVE resolve the branch bytes? broker.adopt fetches
+      // local→HTTP(domain)→mesh; failed>0 or resolved=false means the bytes
+      // aren't reachable from the hive (publisher offline / domainless / not on
+      // the mesh) — the content-availability edge, distinct from a wiring break.
+      console.info('[swarm-adopt] fold branch', sig.slice(0, 8),
+        'domain=', domain || '(none)', 'broker.adopt=', JSON.stringify(adoptRes), 'resolved=', !!branchLayer)
       const name = (branchLayer && typeof branchLayer.name === 'string') ? branchLayer.name.trim() : ''
       // Name rides untrusted signed peer content — reject path separators and
       // control chars (they corrupt the lineage path). Hyphens/spaces are fine.
@@ -245,6 +304,131 @@ export class SwarmAdoptDrone extends Drone {
     } catch (err) {
       console.warn('[swarm-adopt] commit failed', { sig: sig.slice(0, 8), err })
       return 'unavailable'
+    }
+  }
+
+  // ── DCP→hive config fold (Done / close-gated) ─────────────────────
+  #onDcpDone = (ev?: Event): void => {
+    console.info('[swarm-adopt] fold trigger:', ev?.type ?? 'manual')
+    void this.#foldEnabledConfig()
+  }
+
+  #folding = false
+  #foldEnabledConfig = async (): Promise<void> => {
+    if (this.#folding) return            // a fold is already running — skip re-entry
+    this.#folding = true
+    try {
+      // Prefer the persisted snapshot store (survives reloads); fall back to
+      // the last live snapshot seen this session.
+      const store = this.#ioc()?.get?.(REGISTRY_SNAPSHOT_KEY) as RegistrySnapshotStoreLike | undefined
+      const snap = store?.snapshot ?? this.#lastSnapshot
+      const branches: RegistryBranchLike[] = (snap && Array.isArray(snap.branches)) ? snap.branches : []
+
+      // DESIRED = the installer's ENABLED CONTENT branches (its current intent).
+      // Packages are functionality (refs only, never tiles); disabled = off.
+      const desired = branches.filter((b): b is RegistryBranchLike & { branchSig: string } =>
+        !!b && b.enabled !== false
+        && (b.kind ?? 'content') === 'content'
+        && typeof b.branchSig === 'string' && SIG_RE.test(b.branchSig.toLowerCase()))
+
+      // FOLDED = the recoverable receipt of what this hive last folded in.
+      const folded = this.#loadFolded()
+      const desiredSigs = new Set(desired.map(b => b.branchSig.toLowerCase()))
+      const foldedSigs = new Set(folded.map(f => f.sig))
+
+      // ADDS = desired, not yet folded.  REMOVES = folded, no longer desired.
+      const adds = desired.filter(b => !foldedSigs.has(b.branchSig.toLowerCase()))
+      const removes = folded.filter(f => !desiredSigs.has(f.sig))
+
+      console.info(`[swarm-adopt] fold: desired ${desired.length}, folded ${folded.length} → +${adds.length} −${removes.length}`)
+      if (!adds.length && !removes.length) return
+
+      // Next receipt begins as the still-desired folded entries.
+      const nextFolded: FoldedEntry[] = folded.filter(f => desiredSigs.has(f.sig))
+      let committed = 0, removed = 0, unavailable = 0
+
+      // REMOVES first — un-fold the tile from the hive membership. RECOVERABLE:
+      // the installer keeps the branch record (re-enable re-folds) and history
+      // keeps the prior marker + content-addressed bytes, so nothing is lost.
+      for (const f of removes) {
+        const ok = await this.#unfoldBranch(f.name, f.at)
+        if (ok) removed++
+        else nextFolded.push(f)   // couldn't remove → keep it in the receipt
+      }
+
+      // ADDS — fold the newly-enabled content in (layersOnly; resources stream).
+      for (const b of adds) {
+        const at = Array.isArray(b.at) ? b.at.map(s => String(s ?? '').trim()).filter(Boolean) : []
+        const res = await this.#commitBranch(b.branchSig.toLowerCase(), at, b.domain ? String(b.domain) : undefined)
+        if (res === 'committed' || res === 'exists') {
+          committed++
+          nextFolded.push({ sig: b.branchSig.toLowerCase(), name: String(b.name ?? '').trim(), at })
+        } else {
+          unavailable++   // bytes unresolved — stays a pending add for next time
+        }
+      }
+
+      // Persist the new recoverable receipt (sorted by sig — a stable list whose
+      // sha256 is the hive's installed signature the installer can verify).
+      this.#saveFolded([...nextFolded].sort((a, b) => a.sig.localeCompare(b.sig)))
+      console.info(`[swarm-adopt] DCP config fold — +${committed} −${removed} (${unavailable} unavailable)`)
+      EffectBus.emit('fold:receipt', { committed, removed, unavailable })
+    } finally {
+      this.#folding = false
+    }
+  }
+
+  // ── recoverable fold receipt (persisted) ──────────────────────────
+  #loadFolded = (): FoldedEntry[] => {
+    try {
+      const raw = localStorage.getItem(FOLDED_KEY)
+      const arr = raw ? JSON.parse(raw) : []
+      return Array.isArray(arr)
+        ? arr
+            .filter((e: unknown): e is FoldedEntry =>
+              !!e && typeof (e as FoldedEntry).sig === 'string' && typeof (e as FoldedEntry).name === 'string')
+            .map((e: FoldedEntry) => ({ sig: e.sig.toLowerCase(), name: e.name, at: Array.isArray(e.at) ? e.at : [] }))
+        : []
+    } catch { return [] }
+  }
+  #saveFolded = (entries: FoldedEntry[]): void => {
+    try { localStorage.setItem(FOLDED_KEY, JSON.stringify(entries)) } catch { /* no localStorage — diff degrades */ }
+  }
+
+  // ── un-fold (remove) a tile from the hive membership — recoverable ──
+  // Serialized through the SAME #commitLock as #commitBranch so adds/removes
+  // never race on a parent's children list.
+  #unfoldBranch = (name: string, atSegments: readonly string[]): Promise<boolean> => {
+    const run = () => this.#doUnfoldBranch(name, atSegments)
+    const next = this.#commitLock.then(run, run)
+    this.#commitLock = next.catch(() => undefined)
+    return next
+  }
+
+  #doUnfoldBranch = async (name: string, atSegments: readonly string[]): Promise<boolean> => {
+    const n = String(name ?? '').trim()
+    if (!n) return false
+    const ioc = this.#ioc()
+    const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
+    const committer = ioc?.get?.(COMMITTER_KEY) as CommitterLike | undefined
+    const lineage = ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined
+    if (!history?.sign || !history?.currentLayerAt || !committer?.update || !lineage) return false
+    try {
+      const at = (Array.isArray(atSegments) ? atSegments : []).map(s => String(s ?? '').trim()).filter(Boolean)
+      const atLoc = await history.sign({ domain: lineage.domain, explorerSegments: () => at })
+      const parent = await history.currentLayerAt(atLoc)
+      const existing = await childNamesOf(history, parent)
+      if (!existing.includes(n)) return true   // already gone — idempotent
+      // Removal = a NEW marker without this child. The prior marker (with it)
+      // and the content bytes persist (append-only + content-addressed), so a
+      // later re-enable re-folds it — "a path back to recovery, always".
+      await committer.update(at, { ...(parent ?? {}), children: existing.filter(c => c !== n) })
+      EffectBus.emit('fs:changed', { segments: at })
+      await new hypercomb().act()
+      return true
+    } catch (err) {
+      console.warn('[swarm-adopt] unfold failed', { name: n, err })
+      return false
     }
   }
 

@@ -52,6 +52,18 @@ export interface DomainSection {
    *  management, but never join the logical view and never nest under a
    *  host folder. */
   kind?: 'package' | 'content'
+  /** Finer-grained ZONE provenance, used only for the installer's color
+   *  backgrounds (groupZone). `kind` distinguishes content vs functionality;
+   *  this distinguishes WHICH functionality:
+   *    'default' — the bundled baseline install (the `default` lineage: the
+   *                initial Hypercomb files + own base), seeded by
+   *                #seedDefaultBaseline. Always-in refs, never a manual add.
+   *    'current' — tiles pushed in realtime to back up hypercomb.io (the
+   *                authored/received layers). Reserved: no section feeds it
+   *                yet (see #refreshReceivedLayers).
+   *  Absent on a `kind: 'package'` section ⇒ a manually-installed domain
+   *  (the 'package' zone). Absent on 'content' ⇒ the 'host' zone. */
+  provenance?: 'default' | 'current'
   /** Placement segments the adopt landed at (mirrors BranchEntryLayer.at).
    *  Part of the section's identity: the sigbag keys branches on
    *  (name, at), so the same tile name at two locations is TWO branches —
@@ -312,22 +324,25 @@ export class HomeComponent implements OnDestroy {
   isGroupOpen(domainName: string): boolean { return this.openGroup() === domainName }
 
   /** Provenance ZONE of a rendered group — drives the color background in the
-   *  template (`[attr.data-zone]`). The categories follow the data model the
-   *  installer actually tracks:
-   *    'logical' — the live hypercomb.io merge (the @logical sibling).
-   *    'host'    — content adopted from a SWARM (any 'content' section in the
-   *                group; 'content' is the provenance the adopt flow stamps
-   *                when a participant pulls a tile from a swarm host, e.g.
-   *                jwize.com → dolphin). This is the only kind the logical
-   *                view renders as visuals.
-   *    'package' — functionality: the default baseline install + manually
-   *                installed domains.
-   *  When 'default' (the baseline package) and 'current' (the realtime backup
-   *  push) become separable, add their branches here and a matching SCSS
-   *  `[data-zone="…"]` rule — nothing else changes. */
-  groupZone(group: DomainGroup): 'logical' | 'host' | 'package' {
+   *  template (`[attr.data-zone]`). The five categories of the installer:
+   *    'logical' — the live hypercomb.io merge (the @logical sibling): the
+   *                effective config of everything enabled.
+   *    'host'    — content adopted from a SWARM (any 'content' section; the
+   *                provenance the adopt flow stamps when a participant pulls a
+   *                tile from a swarm host, e.g. jwize.com → dolphin).
+   *    'current' — tiles pushed in realtime to back up hypercomb.io.
+   *    'default' — the bundled baseline install (the `default` lineage: the
+   *                initial Hypercomb files + own base).
+   *    'package' — manually-installed domains (functionality you added).
+   *  Priority matters for a mixed group (one host folder can carry both a
+   *  baseline package sibling and adopted content): content/swarm wins so the
+   *  folder reads as a host the moment you adopt into it. */
+  groupZone(group: DomainGroup): 'logical' | 'host' | 'current' | 'default' | 'package' {
     if (group.domain === '@logical') return 'logical'
-    if (group.sections.some(s => s.kind === 'content')) return 'host'
+    const secs = group.sections
+    if (secs.some(s => s.kind === 'content')) return 'host'
+    if (secs.some(s => s.provenance === 'current')) return 'current'
+    if (secs.some(s => s.provenance === 'default')) return 'default'
     return 'package'
   }
 
@@ -717,7 +732,7 @@ export class HomeComponent implements OnDestroy {
         // TreeResolver's namespace-lineage map); recording each dep under
         // its own domain silo is the follow-on refinement.
         type BrokerLike = {
-          adopt?: (sig: string) => Promise<unknown>
+          adopt?: (sig: string, opts?: { layersOnly?: boolean }) => Promise<unknown>
           getKnownDomains?: (sig: string) => string[]
           noteDomain?: (domain: string) => void
         }
@@ -762,7 +777,12 @@ export class HomeComponent implements OnDestroy {
             try { broker.noteDomain(ownerDomain) } catch { /* non-fatal */ }
           }
           if (broker?.adopt) {
-            void broker.adopt(branchSig)
+            // layersOnly — DCP mirrors only the LAYER closure (markers +
+            // structure), NOT the branch's resources. Resources stream on
+            // demand from the publisher domain at render time. "Only broadcast
+            // what is necessary": adopting a content-rich branch transfers a
+            // handful of tiny layers, not its hundreds of images.
+            void broker.adopt(branchSig, { layersOnly: true })
               .catch(e =>
                 console.warn('[home] broker.adopt failed for branch', branchSig.slice(0, 12), e)
               )
@@ -1866,7 +1886,7 @@ export class HomeComponent implements OnDestroy {
       domain: first.base, domainName: first.host, displayDomain: first.host,
       rootSig: first.sig, originalRootSig: first.sig, items: [],
       loading: false, error: 'default baseline did not resolve',
-      installStatus: null, patches: [], enabled: true, kind: 'package',
+      installStatus: null, patches: [], enabled: true, kind: 'package', provenance: 'default',
     }])
   }
 
@@ -1877,7 +1897,7 @@ export class HomeComponent implements OnDestroy {
       domain: base, domainName: host, displayDomain: host,
       rootSig: sig, originalRootSig: sig, items: [],
       loading: true, error: null, installStatus: `Loading ${host} baseline…`,
-      patches: [], enabled: true, kind: 'package',
+      patches: [], enabled: true, kind: 'package', provenance: 'default',
     }
     this.sections.set([...this.sections(), loading])
 
@@ -1911,6 +1931,9 @@ export class HomeComponent implements OnDestroy {
         // the baseline IS the package install — files manageable here,
         // never merged into the logical view
         kind: 'package',
+        // …but it's the BUNDLED default (the `default` lineage), not a
+        // manual add — its own zone color (teal) in the installer.
+        provenance: 'default' as const,
       })
 
       const siblings: DomainSection[] = []

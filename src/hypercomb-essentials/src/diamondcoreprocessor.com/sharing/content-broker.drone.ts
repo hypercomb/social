@@ -609,6 +609,12 @@ export class ContentBrokerDrone extends Drone {
           // discovery. sha256 still gates every byte; a non-conforming
           // host costs a 404 and the tier cascade takes over (the 1%).
           if (type === 'layer') this.#attributeClosure(bytes, host)
+          // WRITE-THROUGH: persist to the local Store so getLayerBySig, the
+          // render path, and re-serving can resolve it. The mesh path persists
+          // via #acceptResponseBytes; the HTTP path must too, or an HTTP-fetched
+          // layer is returned but never lands in the pool (adopted content
+          // silently fails to commit into the hive).
+          await this.#persistLocal(sig, type, bytes)
           return bytes
         } catch {
           // network error / CORS / cert issue / probe timeout — try next
@@ -815,7 +821,7 @@ export class ContentBrokerDrone extends Drone {
    * makes already-present sigs free. Emits `adopt:progress` as it fills
    * and `adopt:done` at the end (UI can sprout the cell as counts climb).
    */
-  public adopt = async (rootSig: string): Promise<{ layers: number; leaves: number; failed: number }> => {
+  public adopt = async (rootSig: string, opts: { layersOnly?: boolean } = {}): Promise<{ layers: number; leaves: number; failed: number }> => {
     const root = String(rootSig ?? '').toLowerCase().trim()
     const stats = { layers: 0, leaves: 0, failed: 0 }
     if (!SIG_RE.test(root)) return stats
@@ -856,21 +862,30 @@ export class ContentBrokerDrone extends Drone {
         : asSigs(parsed['layers']).length ? asSigs(parsed['layers'])
         : asSigs(parsed['children'])
       const childSet = new Set(children)
-      const bees = new Set(asSigs(parsed['bees'])) // skip — installed package content
 
-      // Every sig the layer references, recursively (covers resources
-      // nested in cell properties), minus child layers and bees.
-      const referenced = new Set<string>()
-      this.#collectSigs(parsed, referenced)
-      for (const r of referenced) {
-        if (childSet.has(r) || bees.has(r) || visited.has(r)) continue
-        visited.add(r)
-        const got = await this.fetchBySig(r, 'resource')
-        if (got) stats.leaves++; else stats.failed++
-        // Per-resource progress, not just per-layer: a one-layer branch
-        // with many images otherwise sits silent for the whole resource
-        // phase — the UI cue must climb as resources resolve.
-        this.emitEffect('adopt:progress', { sig: r, ...stats })
+      // Resource leaves — eagerly mirrored UNLESS `layersOnly`. Per the slim-
+      // mesh design (resources STREAM on demand: memory→OPFS→host write-through
+      // at render time), a fold/adopt that only needs membership pulls just the
+      // LAYER closure — a handful of tiny layer JSONs — instead of the branch's
+      // hundreds of images. Full adopt (the offline-mirror daisy-chain) still
+      // pulls every resource. This is what kept a single content adopt from
+      // fetching 350+ files into the hive.
+      if (!opts.layersOnly) {
+        const bees = new Set(asSigs(parsed['bees'])) // skip — installed package content
+        // Every sig the layer references, recursively (covers resources
+        // nested in cell properties), minus child layers and bees.
+        const referenced = new Set<string>()
+        this.#collectSigs(parsed, referenced)
+        for (const r of referenced) {
+          if (childSet.has(r) || bees.has(r) || visited.has(r)) continue
+          visited.add(r)
+          const got = await this.fetchBySig(r, 'resource')
+          if (got) stats.leaves++; else stats.failed++
+          // Per-resource progress, not just per-layer: a one-layer branch
+          // with many images otherwise sits silent for the whole resource
+          // phase — the UI cue must climb as resources resolve.
+          this.emitEffect('adopt:progress', { sig: r, ...stats })
+        }
       }
 
       for (const c of children) await walkLayer(c)
@@ -1060,6 +1075,25 @@ export class ContentBrokerDrone extends Drone {
 
     // Persist to local store so subsequent reads are cache hits and
     // we can serve this sig to future requesters.
+    await this.#persistLocal(sig, type, bytes)
+
+    this.emitEffect('broker:fetched', { sig, type, bytes: bytes.byteLength })
+    return bytes
+  }
+
+  /** Persist verified bytes to the local Store at the canonical location for
+   *  their type, so subsequent reads (getLayerBySig, the render path, and
+   *  re-serving to peers) are cache hits. Best-effort — on failure the caller
+   *  still returns the bytes.
+   *
+   *  Shared by BOTH fetch paths: the mesh response (#acceptResponseBytes) AND
+   *  the HTTP-direct path (#fetchOverHttp). The HTTP path historically skipped
+   *  persistence, so an HTTP-fetched LAYER was returned (and counted as
+   *  adopted) but never landed in the `__layers__/<sig>` pool that
+   *  getLayerBySig reads — so adopted content silently failed to commit into
+   *  the hive ("adopt allowed but not saved in solo"). The fetchBySig contract
+   *  is "bytes are written to the local Store on success"; both paths honor it. */
+  #persistLocal = async (sig: string, type: ContentType, bytes: Uint8Array): Promise<void> => {
     const store = this.#getStore()
     try {
       if (type === 'layer' && store?.writeLayerBytes) {
@@ -1072,9 +1106,6 @@ export class ContentBrokerDrone extends Drone {
     } catch (err) {
       console.warn('[content-broker] persist failed (still returning bytes)', { sig: sig.slice(0, 12), type, err })
     }
-
-    this.emitEffect('broker:fetched', { sig, type, bytes: bytes.byteLength })
-    return bytes
   }
 
   /**

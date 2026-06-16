@@ -74,6 +74,15 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   #activeUrl: string | null = null
   #activeTarget: string | null = null
 
+  /** Pending membership changes shown to the LEFT of the back/Done button:
+   *  the installer's enabled content branches vs what's actually folded into
+   *  the hive (the recoverable `hc:last-folded` receipt). adds = enabled but
+   *  not yet folded; removes = folded but now disabled. Recomputed as the
+   *  installer pushes snapshots while the portal is open; applied on close
+   *  (which folds/un-folds via SwarmAdoptDrone). */
+  pendingAdds = 0
+  pendingRemoves = 0
+
   /** Full URL of the currently-loaded iframe content, for the title-attr tooltip. */
   get activeUrl(): string | null { return this.#activeUrl }
 
@@ -154,6 +163,40 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.#activeTarget = detail?.target ?? null
     this.portalSrc = this.#sanitizer.bypassSecurityTrustResourceUrl(url)
     this.isOpen = true
+    this.#recomputeDiff()   // also calls detectChanges()
+  }
+
+  /** Recompute the pending +adds/−removes shown next to the back/Done button.
+   *  Reads the installer's enabled CONTENT branches (RegistrySnapshot, pushed
+   *  over postMessage) and the hive's recoverable folded receipt
+   *  (`hc:last-folded`, written by SwarmAdoptDrone). Pure read — never mutates. */
+  #recomputeDiff = (): void => {
+    let adds = 0, removes = 0
+    try {
+      const SIG = /^[a-f0-9]{64}$/
+      const store = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@hypercomb.social/RegistrySnapshot') as
+        { snapshot?: { branches?: { branchSig?: string; enabled?: boolean; kind?: string }[] } | null } | undefined
+      const branches = store?.snapshot?.branches ?? []
+      const desired = new Set(
+        branches
+          .filter(b => !!b && b.enabled !== false && (b.kind ?? 'content') === 'content'
+            && typeof b.branchSig === 'string' && SIG.test(b.branchSig.toLowerCase()))
+          .map(b => b.branchSig!.toLowerCase()),
+      )
+      const folded = new Set<string>()
+      try {
+        const raw = localStorage.getItem('hc:last-folded')
+        const arr = raw ? JSON.parse(raw) : []
+        if (Array.isArray(arr)) for (const e of arr) {
+          const s = String((e as { sig?: string })?.sig ?? '').toLowerCase()
+          if (s) folded.add(s)
+        }
+      } catch { /* no receipt yet — everything desired counts as an add */ }
+      for (const s of desired) if (!folded.has(s)) adds++
+      for (const s of folded) if (!desired.has(s)) removes++
+    } catch { adds = 0; removes = 0 }
+    this.pendingAdds = adds
+    this.pendingRemoves = removes
     this.#cdr.detectChanges()
   }
 
@@ -199,6 +242,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   // -------------------------------------------------
   #unsubEscape: (() => void) | null = null
   #unsubTouchDragging: (() => void) | null = null
+  #unsubDiff: (() => void) | null = null
 
   // -------------------------------------------------
   // lifecycle
@@ -212,6 +256,9 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.#unsubTouchDragging = EffectBus.on<{ active: boolean }>('touch:dragging', ({ active }) => {
       if (active && this.isOpen) this.close()
     })
+    // Installer pushed a new config while the portal is open → refresh the
+    // pending +adds/−removes next to the back/Done button.
+    this.#unsubDiff = EffectBus.on('registry:snapshot', () => this.#recomputeDiff())
   }
 
   public ngOnDestroy(): void {
@@ -219,6 +266,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     window.removeEventListener('message', this.onMessage)
     this.#unsubEscape?.()
     this.#unsubTouchDragging?.()
+    this.#unsubDiff?.()
   }
 
   // -------------------------------------------------

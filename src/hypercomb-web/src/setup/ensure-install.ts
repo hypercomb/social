@@ -422,7 +422,14 @@ export const resyncFromSentinel = async (sentinel: SentinelBridge): Promise<void
 
 const resyncPass = async (sentinel: SentinelBridge, store: Store): Promise<void> => {
   const currentSyncSig = (localStorage.getItem(SYNC_SIG_KEY) ?? '').trim() || undefined
-  const result = await sentinel.sync(currentSyncSig)
+
+  // INCREMENTAL RECONCILE: tell the sentinel which sigs we already hold so it
+  // streams ONLY the missing ones ("fill in if any files are missing"), instead
+  // of re-streaming the whole enabled set on every toggle. The enabled* arrays
+  // in the result are still the full set, so stale-GC (removeDisabled) and the
+  // cached manifest stay correct — only the BYTES are deltaed.
+  const have = await collectPresentSigs(store)
+  const result = await sentinel.sync(currentSyncSig, have)
   if (!result) return
 
   const { syncSig, enabledBees, enabledDeps, enabledLayers, beeDeps, files } = result
@@ -469,6 +476,27 @@ const resyncPass = async (sentinel: SentinelBridge, store: Store): Promise<void>
     EffectBus.emit('install:sync', { active: true, source: 'resync', current: appliedCount, total: files.length })
   }
 
+  // RECEIPT VERIFY — read-back confirm, not bare stream-ok. Synchronizing a
+  // sigbag is a normal update(layer): we only advance to the new HEAD (syncSig)
+  // once we can confirm the hive actually holds every file the current logical
+  // names. A byte dropped mid-stream (or one DCP couldn't resolve) must NOT
+  // advance syncSig — otherwise the next boot trusts a manifest whose bytes are
+  // missing and falls back to the wipe path. Re-list OPFS post-apply (the
+  // receipt) and compare against the enabled set; leave syncSig/manifest
+  // untouched on a miss so the next resync re-requests the gap.
+  const present = new Set(await collectPresentSigs(store))
+  const missing = [...enabledBees, ...enabledDeps, ...enabledLayers]
+    .filter(sig => !present.has(sig.toLowerCase()))
+  if (missing.length) {
+    console.warn(
+      `[ensure-install] sync receipt FAILED for ${syncSig.slice(0, 12)} — `
+      + `${missing.length} enabled file(s) missing after apply; NOT advancing syncSig `
+      + `(next resync re-requests the gap):`,
+      missing.slice(0, 8),
+    )
+    return
+  }
+
   const sigStore = get('@hypercomb/SignatureStore') as SignatureStore | undefined
   if (sigStore) {
     const allSigs = [...enabledBees, ...enabledDeps, ...enabledLayers]
@@ -502,7 +530,7 @@ const resyncPass = async (sentinel: SentinelBridge, store: Store): Promise<void>
     localStorage.setItem(INSTALLED_FLAG_KEY, 'true')
   }
 
-  console.log(`[ensure-install] resync complete: ${syncSig.slice(0, 12)} (${enabledBees.length} bees, ${enabledDeps.length} deps, ${enabledLayers.length} layers)`)
+  console.log(`[ensure-install] resync complete + receipt OK: ${syncSig.slice(0, 12)} (${enabledBees.length} bees, ${enabledDeps.length} deps, ${enabledLayers.length} layers synchronized)`)
 }
 
 // ----- helpers -----
@@ -611,6 +639,29 @@ const restoreSignatureStore = (sigStore: SignatureStore): void => {
   } catch {
     // non-fatal
   }
+}
+
+/** Sigs already present in OPFS (flat bee/dep/layer files), so the sentinel can
+ *  stream only the delta on resync. Bees/deps are `<sig>.js`; layers are bare
+ *  `<sig>` in the shared flat pool (user-committed layers included — harmless:
+ *  they're sigs the hive genuinely holds, and the sentinel only checks the
+ *  enabled set against this). Bag subdirectories are skipped — resyncPass writes
+ *  the flat files, so flat presence is what the delta is computed against. */
+const collectPresentSigs = async (store: Store): Promise<string[]> => {
+  const sigs = new Set<string>()
+  const addFrom = async (dir: FileSystemDirectoryHandle, ext: string): Promise<void> => {
+    try {
+      for await (const [name, handle] of dir.entries()) {
+        if (handle.kind !== 'file') continue
+        const sig = ext ? name.replace(new RegExp(`\\${ext}$`, 'i'), '') : name
+        if (/^[a-f0-9]{64}$/i.test(sig)) sigs.add(sig.toLowerCase())
+      }
+    } catch { /* dir unreadable — treat as empty (sentinel streams more, never fewer) */ }
+  }
+  await addFrom(store.bees, '.js')
+  await addFrom(store.dependencies, '.js')
+  await addFrom(store.layers, '')
+  return [...sigs]
 }
 
 /** All file names in a directory as a Set — one enumeration replaces N

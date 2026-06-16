@@ -115,6 +115,27 @@
   color: rgba(245, 245, 245, 0.7);
 }
 
+// Pending +adds / −removes, sitting just LEFT of the centered back/Done
+// button (which is absolute, left:50%). Display-only — clicks pass through
+// to the button. tabular-nums so the digits don't jitter as counts change.
+.portal-diff {
+  position: absolute;
+  bottom: 1.2rem;
+  right: calc(50% + 4.25rem);
+  height: 2.2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--hc-mono);
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.diff-add    { color: #6ec96e; }
+.diff-remove { color: #d98a8a; }
+
 // ═══════════════════════════════════════════════════════════
 // RESPONSIVE OVERRIDES
 // ═══════════════════════════════════════════════════════════
