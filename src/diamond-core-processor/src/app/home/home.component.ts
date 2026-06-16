@@ -311,6 +311,26 @@ export class HomeComponent implements OnDestroy {
   }
   isGroupOpen(domainName: string): boolean { return this.openGroup() === domainName }
 
+  /** Provenance ZONE of a rendered group — drives the color background in the
+   *  template (`[attr.data-zone]`). The categories follow the data model the
+   *  installer actually tracks:
+   *    'logical' — the live hypercomb.io merge (the @logical sibling).
+   *    'host'    — content adopted from a SWARM (any 'content' section in the
+   *                group; 'content' is the provenance the adopt flow stamps
+   *                when a participant pulls a tile from a swarm host, e.g.
+   *                jwize.com → dolphin). This is the only kind the logical
+   *                view renders as visuals.
+   *    'package' — functionality: the default baseline install + manually
+   *                installed domains.
+   *  When 'default' (the baseline package) and 'current' (the realtime backup
+   *  push) become separable, add their branches here and a matching SCSS
+   *  `[data-zone="…"]` rule — nothing else changes. */
+  groupZone(group: DomainGroup): 'logical' | 'host' | 'package' {
+    if (group.domain === '@logical') return 'logical'
+    if (group.sections.some(s => s.kind === 'content')) return 'host'
+    return 'package'
+  }
+
   /** IMPORT mode: set when you arrive via an adopt (a #branch handoff), so
    *  the installer opens the IMPORTING domain (not the logical-view sibling)
    *  and renders the logical PANE — the merged "what's here + what you're

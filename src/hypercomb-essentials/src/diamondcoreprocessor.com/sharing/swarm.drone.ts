@@ -449,7 +449,7 @@ export class SwarmDrone extends Drone {
   // resolves, we still subscribe + publish on time. The primary trigger is
   // the Lineage `change` event we wire up in the constructor below.
   protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret']
-  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'tile:action']
+  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'swarm:follow-updated']
 
   // Per-lineage subscription handle. We open one per visited sig and
   // never close (cheap — mesh dedupes by sig at the bucket layer).
@@ -488,11 +488,26 @@ export class SwarmDrone extends Drone {
   // via interestedAt(name).
   #interestByChildBySig = new Map<string, Map<string, Set<string>>>()
 
+  // Per-(sig, childName, pubkey) last-seen ms for interest/presence
+  // pings. Parallel to #interestByChildBySig, which only ever grows
+  // (it has no per-pubkey expiry). presenceGlowSnapshot() prunes against
+  // this so the presence glow reflects who is LIVE inside each child,
+  // not everyone who ever pinged it this session. Flushed with the
+  // interest cache on lineage change / teardown.
+  #interestSeenBySig = new Map<string, Map<string, Map<string, number>>>()
+
   // What we ourselves currently have interest in — per parent sig,
   // map of childName → expirationMs. Drives heartbeat-style refresh
   // so a long click-hover holds the cue alive; also drives the dedupe
   // (don't re-publish identical interest within the heartbeat window).
   #myInterestBySig = new Map<string, Map<string, number>>()
+
+  // Our own live "I'm inside <leaf>" presence pings, keyed by
+  // `${parentSig}:${leaf}`. While we sit inside a child we re-announce
+  // ourselves to the PARENT's sig on the heartbeat so peers viewing the
+  // parent see a presence glow on the tile we're exploring. Value =
+  // expirationMs; deduped so we only republish past 2/3 TTL.
+  #myParentPresenceExpMs = new Map<string, number>()
 
   // Peer label cache. Each participant can stamp a human-readable
   // label on their published payload ("Alice", "Bob's bee-keep") so
@@ -1322,11 +1337,11 @@ export class SwarmDrone extends Drone {
       // sha256(lineage + '\0' + room + '\0' + secret) — NUL separators
       // prevent any one field bleeding into another (e.g. room='a:b'
       // and secret='' colliding with room='a' and secret='b').
-      composedSig = await sigStore.signText(`${lineageKey} ${room} ${secret}`)
+      composedSig = await sigStore.signText(`${lineageKey}\0${room}\0${secret}`)
     } catch { return }
     if (!composedSig) return
 
-    this.#lastSyncInput = { segments, room, secretLen: secret.length, key: `${lineageKey} ${room} ${secret}` }
+    this.#lastSyncInput = { segments, room, secretLen: secret.length, key: `${lineageKey}\0${room}\0${secret}` }
     
     await this.#syncForSig(composedSig)
 
@@ -1342,6 +1357,11 @@ export class SwarmDrone extends Drone {
     // either, both, or neither. Subscribe is data-flow; follow is
     // navigation-sync.
     void this.#publishMyPresence(segments)
+
+    // Presence-glow publish — while we're inside a child, re-announce
+    // ourselves to the PARENT's sig so peers viewing the parent see a
+    // glow on the tile we're exploring. No-op at root. Fire-and-forget.
+    void this.#publishPresenceToParent(segments)
 
     // Initial presence emit — fires once per location after sync sets
     // up, even when nobody else is here. The UI presence banner needs
@@ -1378,7 +1398,9 @@ export class SwarmDrone extends Drone {
     this.#lastPublishedHideBySig.clear()
     this.#lastHidePublishTimeMsBySig.clear()
     this.#interestByChildBySig.clear()
+    this.#interestSeenBySig.clear()
     this.#myInterestBySig.clear()
+    this.#myParentPresenceExpMs.clear()
     // Tear down resource subs and the published-resource memo too —
     // a zone change means a different audience for our resources, so
     // we want to re-assert them in the new zone (and stop fetching
@@ -1426,6 +1448,7 @@ export class SwarmDrone extends Drone {
       this.#lastPublishTimeMsBySig.delete(prevSig)
       this.#hiddenByPubkeyBySig.delete(prevSig)
       this.#interestByChildBySig.delete(prevSig)
+      this.#interestSeenBySig.delete(prevSig)
       this.#myInterestBySig.delete(prevSig)
       this.#lastPublishedHideBySig.delete(prevSig)
       this.#lastHidePublishTimeMsBySig.delete(prevSig)
@@ -1737,29 +1760,19 @@ export class SwarmDrone extends Drone {
       this.emitEffect('swarm:label-changed', { pubkey, label: incomingLabel })
     }
 
-    // Auto-adopt: if the user has opted to follow this peer AND this
-    // event lands at OUR current location, queue adoption for any
-    // tile names they're publishing that aren't already in our local
-    // layer view. swarm-adopt drone handles the per-tile writes; we
-    // just emit one tile:action with the full set of names from
-    // their visuals (the adopt drone iterates and skips duplicates
-    // via the layer's natural idempotency at commit time).
-    //
-    // Why only at #currentSig: writeTilePropertiesAt resolves the
-    // PARENT layer by the lineage we're sitting at. Auto-adopting a
-    // peer's event from a sub-location we never visited has nowhere
-    // to commit; the user would need to navigate there first (which
-    // is exactly the exploration handshake from the lifecycle).
-    // Follow == auto-adopt. When the publisher is who we're following,
-    // queue adoption for the visuals they just published — whether
-    // they arrived via our current-location subscription or via the
-    // dedicated personal-channel subscription opened by setFollowing.
+    // Follow is DETECTION-ONLY (safety layer — nothing auto-adopts). When a
+    // peer we follow republishes, SURFACE that they have updates; never commit.
+    // Acceptance is a participant action in the installer — this only lights the
+    // signal. (Was "Follow == auto-adopt", which folded the followed peer's
+    // content into our tree on every republish with zero gesture in the moment;
+    // removed per the manual-update safety rule — same class as the dropped
+    // RegistrySnapshot auto-fold, but worse since not even a per-item click.)
     if (layerChanged && this.subscribedTo() === pubkey) {
       const names = layer.visuals
         .map(v => String((v as { name?: unknown }).name ?? '').trim())
         .filter(n => n.length > 0)
       if (names.length > 0) {
-        this.emitEffect('tile:action', { action: 'adopt', labels: names })
+        this.emitEffect('swarm:follow-updated', { pubkey, sig, names })
       }
     }
     void layerChanged  // silence unused if neither branch ran
@@ -2405,10 +2418,80 @@ const payload: SwarmLayerPayload = myLabel
     let set = bag.get(childName)
     if (!set) { set = new Set(); bag.set(childName, set) }
 
+    // Stamp the live last-seen so a re-ping keeps the presence glow alive
+    // and a peer who stops pinging (left the child) ages out of the count.
+    let seenBag = this.#interestSeenBySig.get(sig)
+    if (!seenBag) { seenBag = new Map(); this.#interestSeenBySig.set(sig, seenBag) }
+    let seenChild = seenBag.get(childName)
+    if (!seenChild) { seenChild = new Map(); seenBag.set(childName, seenChild) }
+    seenChild.set(pubkey, Date.now())
+
     const wasNew = !set.has(pubkey)
     set.add(pubkey)
     if (wasNew) {
       this.emitEffect('swarm:interest-changed', { sig, childName, pubkey, joined: true })
+    }
+  }
+
+  /** Per-child LIVE peer count at the current sig, excluding self and
+   *  peers who have aged out (no ping within PEER_STALE_MS). This is the
+   *  presence-glow read model: how many OTHER participants are currently
+   *  inside / entering each child tile here. Stronger glow = bigger crowd.
+   *  Sync map read; safe to call once per render. */
+  public presenceGlowSnapshot = (): ReadonlyMap<string, number> => {
+    const sig = this.#currentSig
+    const out = new Map<string, number>()
+    if (!sig) return out
+    const bag = this.#interestByChildBySig.get(sig)
+    if (!bag || bag.size === 0) return out
+    const seenBag = this.#interestSeenBySig.get(sig)
+    const nowMs = Date.now()
+    const me = this.#myPubkey
+    for (const [childName, pubkeys] of bag) {
+      let count = 0
+      for (const pk of pubkeys) {
+        if (me && pk === me) continue                       // exclude self
+        const lastMs = seenBag?.get(childName)?.get(pk)
+        if (lastMs !== undefined && nowMs - lastMs > PEER_STALE_MS) continue  // aged out
+        count++
+      }
+      if (count > 0) out.set(childName, count)
+    }
+    return out
+  }
+
+  /** Keep a live "I'm inside <leaf>" cue alive at the PARENT location's
+   *  sig while we sit inside a child, so peers viewing the parent see a
+   *  presence glow on the tile we're exploring (and it grows with the
+   *  crowd). Reuses the interest channel (kind 30203) the parent already
+   *  subscribes to — published at the PARENT sig, not our current child
+   *  sig, exactly like a click-through interest. Called from the
+   *  current-lineage sync (nav + heartbeat); deduped past 2/3 TTL. */
+  #publishPresenceToParent = async (segments: readonly string[]): Promise<void> => {
+    const segs = (Array.isArray(segments) ? segments : [])
+      .map(s => String(s ?? '').trim()).filter(s => s.length > 0)
+    if (segs.length === 0) return  // at root — no parent to announce to
+    const leaf = segs[segs.length - 1]
+    const parentSig = await this.composeSigForSegments(segs.slice(0, -1))
+    if (!parentSig) return
+    const mesh = this.#getMesh()
+    if (!mesh?.publish) return
+
+    const key = `${parentSig}:${leaf}`
+    const nowMs = Date.now()
+    const lastExpMs = this.#myParentPresenceExpMs.get(key) ?? 0
+    if (lastExpMs - nowMs > Math.floor(EVENT_TTL_SECS * 1000 / 3)) return  // still fresh
+
+    const expirationSecs = Math.floor(nowMs / 1000) + EVENT_TTL_SECS
+    this.#myParentPresenceExpMs.set(key, expirationSecs * 1000)
+    try {
+      await mesh.publish(SWARM_INTEREST_KIND, parentSig, { name: leaf }, [
+        ['d', key],
+        ['n', leaf],
+        ['expiration', String(expirationSecs)],
+      ])
+    } catch {
+      this.#myParentPresenceExpMs.delete(key)  // allow retry next heartbeat
     }
   }
 

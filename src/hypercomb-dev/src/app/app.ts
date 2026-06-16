@@ -28,12 +28,18 @@ export class App implements AfterViewInit {
   protected readonly title = signal('hypercomb-dev');
   readonly clipboardMode = signal(false);
   readonly moveMode = signal(false);
+  // Empty-layer swarm watermark — set when show-cell reports the current
+  // public/swarm location has zero tiles. Mirrors clipboard-mode.
+  readonly swarmEmpty = signal(false);
 
   @HostBinding('class.clipboard-mode')
   get clipboardModeClass() { return this.clipboardMode(); }
 
   @HostBinding('class.move-mode')
   get moveModeClass() { return this.moveMode(); }
+
+  @HostBinding('class.swarm-empty')
+  get swarmEmptyClass() { return this.swarmEmpty(); }
 
   // ViewMode: 'hexagons' | 'website' | (any string). Mutually exclusive
   // rendering surface — drones gate on viewMode.is(name). Pixi canvas
@@ -68,6 +74,10 @@ export class App implements AfterViewInit {
 
     EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
       this.moveMode.set(active)
+    })
+
+    EffectBus.on<{ active: boolean }>('swarm:empty-layer', ({ active }) => {
+      this.swarmEmpty.set(active)
     })
 
     // Mobile command-line reveal: long-press on empty canvas (or controls

@@ -1,6 +1,7 @@
 // diamondcoreprocessor.com/core/clipboard/clipboard.worker.ts
 import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
 import type { ClipboardService, ClipboardOp } from './clipboard.service.js'
+import { childNamesOf, childLayerOf, resolveLayerAt, cloneLayerTree } from '../history/layer-placement.js'
 
 interface ClipboardEntry {
   label: string
@@ -46,26 +47,6 @@ interface LayerCommitterLike {
 
 interface StoreLike {
   readonly clipboard: FileSystemDirectoryHandle
-}
-
-/** Resolve a parent layer's `children` sigs to child display names.
- *  Names are the truth — each child layer's own `name` field — and the
- *  committer re-resolves them to head sigs at commit time. Mirrors the
- *  resolution RemoveQueenBee and show-cell use so membership edits all
- *  agree on the same authoritative list. */
-async function childNamesOf(
-  history: HistoryServiceLike,
-  parent: LayerLike | null,
-): Promise<string[]> {
-  const childSigs = Array.isArray(parent?.children) ? parent!.children : []
-  const names: string[] = []
-  for (const sig of childSigs) {
-    const child = await history.getLayerBySig(String(sig))
-    if (child && typeof child.name === 'string' && child.name.length > 0) {
-      names.push(child.name)
-    }
-  }
-  return names
 }
 
 export class ClipboardWorker extends Worker {
@@ -185,6 +166,57 @@ export class ClipboardWorker extends Worker {
     return tsd?.selectedLabels ?? []
   }
 
+  get #cursor(): { currentLayerSig?: string; state?: { rewound?: boolean } } | undefined {
+    return get('@diamondcoreprocessor.com/HistoryCursorService') as
+      { currentLayerSig?: string; state?: { rewound?: boolean } } | undefined
+  }
+
+  /** Editing is refused while the history cursor is rewound — scrub-back is
+   *  view-only (you're looking at a past state). LayerCommitter.#commit
+   *  silently returns in that case and update() reports the unchanged head as
+   *  success, so without this guard cut/paste would capture to the clipboard
+   *  and eager-unmount the tile yet never commit — a true silent no-op the
+   *  user reads as "nothing happens" (the intended RewoundCommitDrone toast is
+   *  dead: nothing emits `history:promoted`). Surface a toast and decline
+   *  BEFORE any half-action runs. Returns true when blocked. */
+  #blockedByRewound(verb: string): boolean {
+    if (!this.#cursor?.state?.rewound) return false
+    EffectBus.emit('toast:show', {
+      type: 'info',
+      title: 'Viewing history',
+      message: `Can't ${verb} while scrubbed back — return to the latest (Restore) to edit.`,
+    })
+    return true
+  }
+
+  /** Resolve the layer at `segs` robustly enough to compute survivors / existing
+   *  children for a children-slot SET. resolveLayerAt walks currentLayerAt up
+   *  the parent chain, but currentLayerAt reads `#latestSigByLineage`, which can
+   *  be COLD even for a location that's plainly on screen: the renderer resolves
+   *  the current location through the CURSOR (currentLayerSig → getLayerBySig
+   *  from the pool), warming a different cache. When the chain misses and `segs`
+   *  is the location the user is viewing, fall back to the cursor — the exact
+   *  source that proves the tiles are rendered. Without this, a cold cache made
+   *  cut/paste silently no-op (the `if (!parent)` guard skipped the commit). */
+  async #resolveParentLayer(
+    history: HistoryServiceLike,
+    segs: readonly string[],
+    currentSegs: readonly string[],
+  ): Promise<LayerLike | null> {
+    const viaChain = await resolveLayerAt(history, this.#lineage?.domain, segs)
+    if (viaChain) return viaChain
+    const sameLocation =
+      segs.length === currentSegs.length && segs.every((s, i) => s === currentSegs[i])
+    if (sameLocation) {
+      const sig = this.#cursor?.currentLayerSig
+      if (sig) {
+        const layer = await history.getLayerBySig(sig)
+        if (layer) return layer
+      }
+    }
+    return null
+  }
+
   // ── capture ───────────────────────────────────────────
   // copy: record labels + source segments, leave folders in place.
   // cut:  move folders out of source into store.clipboard, then record
@@ -202,6 +234,11 @@ export class ClipboardWorker extends Worker {
       const history = this.#history
       const committer = this.#committer
       if (!lineage || !history || !committer) return
+
+      // Cut commits (drops the leaves from the parent). That commit is refused
+      // while the cursor is rewound, so bail with feedback before capturing —
+      // otherwise the clipboard fills and tiles eager-unmount with no commit.
+      if (this.#blockedByRewound('cut')) return
 
       // Cut = drop the cells from each source parent's `children` slot.
       // No bytes move: the cell's own history bag stays addressable by
@@ -233,11 +270,24 @@ export class ClipboardWorker extends Worker {
       // siblings it omits). Other parent slots ride along via spread.
       // Mirrors RemoveQueenBee.
       for (const { parentSegs, leaves } of groups.values()) {
-        const parentLocSig = await history.sign({
-          domain: lineage.domain,
-          explorerSegments: () => parentSegs,
-        })
-        const parent = await history.currentLayerAt(parentLocSig)
+        // Resolve the parent layer ROBUSTLY. The bare currentLayerAt reads
+        // the parent's OWN history bag, which is empty for a location never
+        // committed into (its content lives as a child sig in ITS parent,
+        // pool-addressed) — so it returns null even when the layer plainly
+        // renders. resolveLayerAt walks the parent chain to get the real
+        // children list.
+        const parent = await this.#resolveParentLayer(history, parentSegs, baseSegments)
+        // No reliable parent read → DO NOT commit. survivors would be the
+        // empty/partial list of siblings we couldn't see, and update() SETs
+        // children, so committing would WIPE every tile we missed ("cut
+        // tiles show, current tiles are gone"). Mirrors RemoveQueenBee's
+        // `if (!parent) return` guard. The entries are already on the
+        // clipboard, so nothing is lost — the cut just declines to mutate a
+        // layer it cannot read.
+        if (!parent) {
+          console.warn(`[clipboard] cut skipped — parent layer unresolved at /${parentSegs.join('/')}`)
+          continue
+        }
         const survivors = (await childNamesOf(history, parent)).filter(n => !leaves.has(n))
 
         // Eager visual unmount; `viaUpdate` tells the committer's per-
@@ -246,7 +296,7 @@ export class ClipboardWorker extends Worker {
         for (const leaf of leaves) {
           EffectBus.emit('cell:removed', { cell: leaf, segments: [...parentSegs], viaUpdate: true })
         }
-        await committer.update(parentSegs, { ...(parent ?? {}), children: survivors })
+        await committer.update(parentSegs, { ...parent, children: survivors })
       }
 
       this.#selection?.clear()
@@ -298,6 +348,8 @@ export class ClipboardWorker extends Worker {
     const committer = this.#committer
     if (!clipboardSvc || !lineage || !store || !history || !committer) return
     if (clipboardSvc.isEmpty) return
+    // Paste commits at the target; refused while rewound. Feedback, don't half-run.
+    if (this.#blockedByRewound('paste')) return
 
     const op = clipboardSvc.operation
     const items = clipboardSvc.items
@@ -345,11 +397,14 @@ export class ClipboardWorker extends Worker {
     items: readonly ClipboardEntry[],
     targetSegments: readonly string[],
   ): Promise<{ placed: ClipboardEntry[]; failed: string[] }> {
-    const targetLocSig = await history.sign({
-      domain: lineage.domain,
-      explorerSegments: () => targetSegments,
-    })
-    const parent = await history.currentLayerAt(targetLocSig)
+    // Resolve the target layer ROBUSTLY (own-bag read is empty for a never-
+    // committed sub-layer; resolveLayerAt walks the parent chain, and the
+    // cursor fallback covers a cold currentLayerAt cache on the location the
+    // user is viewing). Without this, pasting INTO such a location reads
+    // existing=[] and the SET below wipes whatever children were already
+    // there. null is fine here — a genuinely empty/new target legitimately
+    // has no existing children. targetSegments IS the current location.
+    const parent = await this.#resolveParentLayer(history, targetSegments, targetSegments)
     const existing = await childNamesOf(history, parent)
     const taken = new Set(existing)
 
@@ -369,7 +424,20 @@ export class ClipboardWorker extends Worker {
         domain: lineage.domain,
         explorerSegments: () => [...targetSegments, entry.label],
       })
-      const srcLayer = await history.currentLayerAt(srcLocSig)
+      // Resolve the source cell's layer the authoritative way: through its
+      // PARENT's children slot (pool-addressed sig → getLayerBySig). A cell
+      // never navigated into has no head in its own bag, so the old
+      // currentLayerAt(srcLocSig) returned null for it and paste silently
+      // dropped a live tile. Fall back to the own-bag head for the
+      // cut-in-place case (parent already dropped the child, but the bag
+      // persists at srcLocSig).
+      const srcParentSig = await history.sign({
+        domain: lineage.domain,
+        explorerSegments: () => [...entry.sourceSegments],
+      })
+      const srcParent = await history.currentLayerAt(srcParentSig)
+      const viaParent = await childLayerOf(history, srcParent, entry.label)
+      const srcLayer = viaParent?.layer ?? await history.currentLayerAt(srcLocSig)
       if (!srcLayer) {
         console.warn(`[clipboard] paste source missing for '${entry.label}': /${entry.sourceSegments.join('/')}`)
         failed.push(entry.label)
@@ -403,6 +471,15 @@ export class ClipboardWorker extends Worker {
     await committer.update(targetSegments, { ...(parent ?? {}), children: nextChildren })
     await new hypercomb().act()
 
+    // No forced full re-render here. `place` (the "add to current" path)
+    // exits the clipboard view AFTER this returns, and that exit render runs
+    // a same-layer rebuild against the now-committed layer — it shows the
+    // final set (existing + placed) in one clean, mesh-hidden-then-revealed
+    // paint. A post-commit fs:changed would instead clear and rebuild the
+    // already-visible mesh, re-introducing the "resize / disappear / re-render"
+    // flash and an extra full pass. The eager cell:added above keeps the
+    // incremental path covering the paste button's exit-before-commit order.
+
     return { placed, failed }
   }
 
@@ -416,6 +493,8 @@ export class ClipboardWorker extends Worker {
     const committer = this.#committer
     if (!clipboardSvc || !lineage || !store || !history || !committer) return
     if (clipboardSvc.isEmpty) return
+    // "Add to current" commits at the target; refused while rewound.
+    if (this.#blockedByRewound('add to current')) return
 
     const selectedLabels = this.#selectedLabels()
     if (selectedLabels.length === 0) return
@@ -462,9 +541,21 @@ export class ClipboardWorker extends Worker {
   }
 
   // ── validate ──────────────────────────────────────────
-  // Drop entries whose underlying folder can't be resolved, so the
-  // clipboard count never shows a tile the view can't actually render.
-  // Called from restore and from openClipboard before emitting view.
+  // Drop entries that are DEFINITIVELY gone, so the clipboard count never
+  // shows a tile that no longer exists. Called from restore and from
+  // openClipboard before emitting view.
+  //
+  // CONSERVATIVE BY DESIGN: viewing the clipboard must never lose data.
+  // Membership is resolved the authoritative way — through the source
+  // PARENT's children slot (childLayerOf), the same path the renderer and
+  // paste use. The previous check used currentLayerAt(sign(source+label)),
+  // i.e. the CELL'S OWN bag, which is empty for any cell never navigated
+  // into — so it false-flagged live tiles as ghosts, validate removed
+  // them, and openClipboard then bailed on the now-empty clipboard
+  // ("click clipboard → tile disappears, lost"). An entry is dropped ONLY
+  // when its parent layer loaded AND the cell is absent from it (and the
+  // own-bag fallback also misses). A cold/unresolvable parent is treated
+  // as "uncertain → keep", never as "gone".
 
   async validate(): Promise<void> {
     const svc = this.#clipboardSvc
@@ -475,20 +566,28 @@ export class ClipboardWorker extends Worker {
     const history = this.#history
     if (!lineage || !history) return
 
-    // An entry is valid iff its source cell's layer still resolves. For
-    // copy the cell is still in place; for cut the cell's own bag persists
-    // (cut only drops it from the parent's children). Either way the
-    // lineage sig addresses a head layer — null means the source is gone
-    // and the entry is a ghost to drop.
     const items = svc.items
     const invalid = new Set<string>()
     for (const entry of items) {
-      const locSig = await history.sign({
+      const parentSig = await history.sign({
+        domain: lineage.domain,
+        explorerSegments: () => [...entry.sourceSegments],
+      })
+      const parent = await history.currentLayerAt(parentSig)
+      // Parent didn't resolve — could just be a cold bag (user navigated
+      // away since copying). Uncertain, so KEEP the entry; never drop on a
+      // miss we can't trust.
+      if (!parent) continue
+      // Parent loaded: authoritative. Present in its children → valid.
+      if (await childLayerOf(history, parent, entry.label)) continue
+      // Absent from a loaded parent. Last chance: the cell's own bag (the
+      // cut-in-place case keeps the bag even after the parent drops it).
+      const ownSig = await history.sign({
         domain: lineage.domain,
         explorerSegments: () => [...entry.sourceSegments, entry.label],
       })
-      const layer = await history.currentLayerAt(locSig)
-      if (!layer) invalid.add(entry.label)
+      if (await history.currentLayerAt(ownSig)) continue
+      invalid.add(entry.label)
     }
 
     if (invalid.size === 0) return
@@ -605,46 +704,6 @@ async function clearDirectory(dir: FileSystemDirectoryHandle): Promise<void> {
     try {
       await dir.removeEntry(name, { recursive: true })
     } catch { /* ignore */ }
-  }
-}
-
-// ── layer subtree cloning (sig-only, no OPFS folder mirror) ──────────
-//
-// Under the layer-primitive doctrine a cell IS its layer: content
-// (children, properties, notes, …) lives in the history bag addressed by
-// the cell's lineage sig, and the parent merely references the cell's
-// head sig in its `children` slot. Copy / cut / paste never moves bytes —
-// it re-points `children` slots (the committer at the call sites does
-// that) and, for paste into a DIFFERENT location, re-homes the cell's
-// layer subtree so the moved/copied cell is reachable at its destination
-// lineage too.
-//
-// `cloneLayerTree` walks the subtree purely through the merkle backbone:
-// the cell's layer holds child SIGS, each resolves to a child layer via
-// `getLayerBySig` (content-addressed, location-independent), and we
-// re-commit each layer at its destination lineage sig. The child sigs
-// inside a cloned layer stay valid verbatim — they resolve through the
-// global pool regardless of which bag's marker points at them — so the
-// clone's only effect is one destination marker per node, making the
-// content reachable by navigating the new path. No OPFS walk; the source
-// folders don't exist in this architecture.
-async function cloneLayerTree(
-  history: HistoryServiceLike,
-  lineage: LineageLike,
-  layer: LayerLike,
-  destCellSegments: readonly string[],
-): Promise<void> {
-  const dstLocSig = await history.sign({
-    domain: lineage.domain,
-    explorerSegments: () => destCellSegments,
-  })
-  await history.commitLayer(dstLocSig, layer)
-
-  const childSigs = Array.isArray(layer.children) ? layer.children : []
-  for (const sig of childSigs) {
-    const child = await history.getLayerBySig(String(sig))
-    if (!child || typeof child.name !== 'string' || child.name.length === 0) continue
-    await cloneLayerTree(history, lineage, child, [...destCellSegments, child.name])
   }
 }
 

@@ -195,8 +195,23 @@ async function resolveChildNames(
   _parentDir: FileSystemDirectoryHandle | null,
   content: { children?: string[] } | null,
   parentLayerSig?: string,
+  // Optional out-param. The caller reads `expected` (child-sig count) vs
+  // `resolved` (sigs that produced a name) to decide whether this pass
+  // saw the COMPLETE child set. A resolution where resolved < expected is
+  // partial — the renderer must NOT paint it (the two-stage load). Counts
+  // resolved SIGS, not unique names, so duplicate child names never read
+  // as "incomplete".
+  stats?: { expected: number; resolved: number },
+  // Optional out-param: child NAMES that are branches (have their own
+  // children). Derived from each child's `children` array LENGTH — one level
+  // down, never loading grandchildren — from the SAME manifest / per-child
+  // resolution that produces names. Lets the render get name + branch-status
+  // from a single read and DELETE the separate per-child branchSet walk that
+  // re-loaded every child on every frame.
+  branchesOut?: Set<string>,
 ): Promise<Set<string>> {
   const out = new Set<string>()
+  if (stats) { stats.expected = content?.children?.length ?? 0; stats.resolved = 0 }
   if (!content?.children?.length) return out
 
   // Children manifest fast-path. When the parent's sig is known, try
@@ -207,14 +222,18 @@ async function resolveChildNames(
   // manifest after every commit so subsequent reads stay hot.
   const store = parentLayerSig
     ? (window as any).ioc?.get?.('@hypercomb.social/Store') as {
-        readChildrenManifest?: (sig: string) => Promise<Array<{ sig: string; layer: { name?: string } }> | null>
-        writeChildrenManifest?: (sig: string, m: Array<{ sig: string; layer: { name?: string } }>) => Promise<void>
+        readChildrenManifest?: (sig: string) => Promise<Array<{ sig: string; layer: { name?: string; children?: string[] } }> | null>
+        writeChildrenManifest?: (sig: string, m: Array<{ sig: string; layer: { name?: string; children?: string[] } }>) => Promise<void>
       } | undefined
     : undefined
 
   if (parentLayerSig && store?.readChildrenManifest) {
     const manifest = await store.readChildrenManifest(parentLayerSig)
+    if (manifest && manifest.length !== content.children.length) {
+      console.warn(`[diag:childres] MANIFEST STALE parent=${parentLayerSig.slice(0, 12)} manifestLen=${manifest.length} childrenLen=${content.children.length} -> falling to per-child`)
+    }
     if (manifest && manifest.length === content.children.length) {
+      console.info(`[diag:childres] MANIFEST HIT parent=${parentLayerSig.slice(0, 12)} len=${manifest.length}`)
       // Manifest is current iff it covers every child sig in the parent.
       // Trust it: extract names directly, no bag walk. ALSO seed each
       // inlined child layer into HistoryService's parsed cache — the
@@ -223,12 +242,22 @@ async function resolveChildNames(
       // them is a cold pool read on refresh; a single missing pool
       // entry would then join the multi-second preloadAllBags scan.
       const seed = (history as { seedParsedLayer?: (sig: string, layer: object) => void }).seedParsedLayer
+      let resolvedCount = 0
       for (const entry of manifest) {
         if (entry?.layer?.name) {
           out.add(entry.layer.name)
+          resolvedCount++
+          // Branch-status straight from the manifest — the child's `children`
+          // array length. No getLayerBySig, no grandchild load.
+          if (Array.isArray(entry.layer.children) && entry.layer.children.length > 0) {
+            branchesOut?.add(entry.layer.name)
+          }
           if (seed && entry.sig) seed.call(history, entry.sig, entry.layer)
         }
       }
+      // Manifest hit only reaches here when manifest.length === children
+      // length, so a fully-named manifest IS the complete set.
+      if (stats) stats.resolved = resolvedCount
       return out
     }
   }
@@ -244,34 +273,51 @@ async function resolveChildNames(
   const children = await Promise.all(
     content.children.map(sig => history.getLayerBySig(sig)),
   )
-  for (const child of children) {
-    if (child?.name) out.add(child.name)
+  const __nullSigs: string[] = []
+  let __resolvedCount = 0
+  for (let __i = 0; __i < children.length; __i++) {
+    const child = children[__i]
+    if (child?.name) {
+      out.add(child.name); __resolvedCount++
+      // Branch-status from the child we already loaded to get its name —
+      // one level, no extra load, no grandchildren.
+      if (Array.isArray(child.children) && child.children.length > 0) branchesOut?.add(child.name)
+    }
+    else __nullSigs.push((content.children[__i] || '').slice(0, 12))
+  }
+  if (stats) stats.resolved = __resolvedCount
+  if (__nullSigs.length > 0) {
+    console.warn(`[diag:childres] PERCHILD parent=${(parentLayerSig || 'EMPTY').slice(0, 12)} children=${content.children.length} resolved=${out.size} NULL=${__nullSigs.length} nullSigs=[${__nullSigs.join(', ')}]`)
+  } else {
+    console.info(`[diag:childres] PERCHILD parent=${(parentLayerSig || 'EMPTY').slice(0, 12)} children=${content.children.length} all-resolved=${out.size}`)
   }
 
   // Backfill the manifest for pre-existing layers committed before the
-  // decoration shipped (or after a manifest GC). Idle-scheduled so the
-  // current render path doesn't pay the write latency.
-  if (parentLayerSig && store?.writeChildrenManifest && content.children.length === children.length) {
+  // decoration shipped (or after a manifest GC) — but ONLY when EVERY
+  // child resolved this pass. A PARTIAL manifest (missing the children
+  // that were cold) has manifest.length < content.children.length, so the
+  // read-side guard (manifest.length === content.children.length) rejects
+  // it on the next load and drops to the per-child path AGAIN — the
+  // two-stage render perpetuates itself forever. Writing only COMPLETE
+  // manifests lets the first fully-warm pass heal the layer so every
+  // subsequent load is a single manifest read with all children present.
+  // Idle-scheduled so the current render path doesn't pay the write.
+  const allResolved = children.length === content.children.length && children.every(c => !!c?.name)
+  if (parentLayerSig && store?.writeChildrenManifest && allResolved) {
     const manifest: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> = []
     for (let i = 0; i < children.length; i++) {
-      const child = children[i]
-      if (!child) continue
-      manifest.push({ sig: content.children[i], layer: child })
+      manifest.push({ sig: content.children[i], layer: children[i]! })
     }
-    if (manifest.length > 0) {
-      const schedule = typeof (window as any).requestIdleCallback === 'function'
-        ? (cb: () => void) => (window as any).requestIdleCallback(cb, { timeout: 5_000 })
-        : (cb: () => void) => setTimeout(cb, 0)
-      schedule(() => { void store.writeChildrenManifest!(parentLayerSig, manifest) })
-    }
+    const schedule = typeof (window as any).requestIdleCallback === 'function'
+      ? (cb: () => void) => (window as any).requestIdleCallback(cb, { timeout: 5_000 })
+      : (cb: () => void) => setTimeout(cb, 0)
+    schedule(() => { void store.writeChildrenManifest!(parentLayerSig, manifest) })
   }
 
   return out
 }
 
 export class ShowCellDrone extends Drone {
-  private static readonly STREAM_BATCH_SIZE = 8
-
   readonly namespace = 'diamondcoreprocessor.com'
 
   public override description =
@@ -292,8 +338,8 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden']
-  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
@@ -351,6 +397,28 @@ export class ShowCellDrone extends Drone {
 
   private renderedCellsKey = ''
   private renderedCount = 0
+
+  // Complete child membership, memoized by the PARENT layer's content sig:
+  // names + the subset that are branches (have their own children). Only a
+  // COMPLETE resolution is stored, so a warm re-render reads the full set —
+  // names AND branch-status — with ZERO per-child lookups, and a partial can
+  // never be cached. The parent's content sig is the perfect key: the child
+  // set cannot change without the sig changing, so an entry stays valid until
+  // the layer itself does. This is the "optimize once, read until the list
+  // changes" pattern — safe only because we gate on completeness before
+  // writing here.
+  readonly #completeChildNamesByParentSig = new Map<string, { names: string[]; branches: string[] }>()
+  // Per-gate-key count of consecutive INCOMPLETE child resolutions. Bounds
+  // the completeness gate so a genuinely-absent child (corrupt / deleted /
+  // never-synced) can't hold the canvas blank forever — after the budget
+  // the render paints best-effort.
+  readonly #incompleteResolveAttempts = new Map<string, number>()
+  // Gate keys (parent content sig) that exhausted the retry budget. Once a
+  // layer is declared unresolvable it paints best-effort and stops gating,
+  // so a permanently-missing child can't thrash the render loop. A new
+  // parent sig (content changed) gates fresh.
+  readonly #resolveGateExhausted = new Set<string>()
+  static readonly #RESOLVE_GATE_MAX_ATTEMPTS = 12
 
   private lineageChangeListening = false
 
@@ -465,6 +533,23 @@ export class ShowCellDrone extends Drone {
   // mesh scoping — space + secret feed into the signature key
   #space = ''
   #secret = ''
+
+  // Public/swarm mode. When on, EVERY tile is navigable (you can drill
+  // into an empty tile to explore / invite others), unlike private mode
+  // where only branch tiles — ones that already have children — open on
+  // click. Mirrors the master privacy switch (`hc:mesh-public`) and is
+  // kept live via the `mesh:public-changed` effect.
+  #publicMode = (() => {
+    try { return localStorage.getItem('hc:mesh-public') === 'true' } catch { return false }
+  })()
+
+  // Per-tile presence glow (0..1), keyed by child name. Reflects how many
+  // peers are currently inside (or entering) each child location at the
+  // current swarm sig: a tile someone is exploring glows, and the glow
+  // gets stronger the more people are there. Folded into the SDF heat
+  // ring in buildCellsFromAxial. Rebuilt by #refreshPresenceGlow on every
+  // render and whenever swarm interest changes. Empty in private mode.
+  #presenceGlowByLabel = new Map<string, number>()
 
   // note: mesh cell state (derived on heartbeat)
   private meshSig = ''
@@ -1597,6 +1682,10 @@ export class ShowCellDrone extends Drone {
       return
     }
 
+    // Refresh peer-presence glow once per pass so any cell built below
+    // (full, streamed, or incremental) reads a current crowd count.
+    this.#refreshPresenceGlow()
+
     // note: init layer + atlases (and reset shader if renderer changes)
     if (!this.layer) {
       this.layer = new Container()
@@ -1904,13 +1993,16 @@ export class ShowCellDrone extends Drone {
       return
     }
 
-    // note: union with mesh cells (shared). localCells is empty at this
-    // point — the layer-fill below populates `union` and `localCellSet`
-    // from layer.children. Until then, only mesh-provided cells live in
-    // union, which is correct: peer tiles render whether or not the
-    // local layer has them.
+    // ATOMIC MEMBERSHIP — `union` starts EMPTY and is filled from the LAYER
+    // only (a render = the current layer's children, nothing else). The
+    // legacy meshCells seed was REMOVED here: it injected the PREVIOUS
+    // location's peers across a navigation (meshCells is repopulated async
+    // by refreshMeshCells, so on a fresh nav it still held the old sig's
+    // cells), and clearMesh never cleared it — a cross-location leak. Swarm
+    // peers now arrive solely through the TileSourceRegistry preview path
+    // below, which is location-scoped by `segments`, so a peer for /A is
+    // structurally absent from /B's resolve.
     const union = new Set<string>()
-    for (const s of this.meshCells) union.add(s)
 
     const localCellSet = new Set<string>()
 
@@ -1946,6 +2038,17 @@ export class ShowCellDrone extends Drone {
     // reconcile pendingRemoves against layer truth, so layer-only deletes
     // honored and layer-restoring undos drop stale pending entries).
     let layerAllowed: Set<string> | null = null
+    // Completeness-gate state, read after the layer block below. Default
+    // to "complete" so clipboard / empty / non-layer paths never gate —
+    // only the layer-content path flips these when a resolution is partial.
+    let childResolveComplete = true
+    let childResolveExpected = 0
+    let gateParentSig = ''
+    // Source-diagnostic: children count from the memoized currentLayer()
+    // (srcStaleLen) vs the fresh head sig (srcFreshLen). A divergence is the
+    // "stale content" two-stage path (renders the subset, then the full set).
+    let srcStaleLen = -1
+    let srcFreshLen = -1
     if (!this.#clipboardView && historyService) {
       const sig = await this.computeSignatureLocation(lineage)
 
@@ -1973,8 +2076,16 @@ export class ShowCellDrone extends Drone {
         // live layer for the current location at HEAD. The cursor path
         // is only consulted when the user has actively rewound.
         let content: LayerContent | null = null
+        // Did currentLayer() actually RESOLVE (vs throw)? A definitive
+        // "no layer here" (resolved → null) means the location owns zero
+        // tiles, and we must clear the union seed below so a freshly-
+        // navigated empty location doesn't inherit the previous one's
+        // tiles. A THROW (transient lineage hiccup) leaves state untouched
+        // so we never blank a populated location on a momentary error.
+        let layerLookupSucceeded = false
         try {
           const live = await (lineage as { currentLayer?: () => Promise<LayerContent | null> }).currentLayer?.()
+          layerLookupSucceeded = true
           if (live && typeof (live as { name?: unknown }).name === 'string') {
             content = live as LayerContent
           }
@@ -2015,18 +2126,91 @@ export class ShowCellDrone extends Drone {
           // cells render immediately via the slot machine before the next
           // computeRender re-fires from cursor.onNewLayer.
           const parentSegments = (lineage as { explorerSegments?: () => readonly string[] })?.explorerSegments?.() ?? []
-          // Prefer cursor's currentLayerSig when it's known (it points at
-          // the historical layer when rewound). Fall back to lineage's
-          // live sig — important when cursor.load hasn't completed yet,
-          // because without a parentLayerSig resolveChildNames skips its
-          // manifest fast-path and pays per-child sig resolution.
-          let parentLayerSig: string = cursorService.currentLayerSig || ''
-          if (!parentLayerSig) {
+          // parentLayerSig MUST be the parent layer's CONTENT sig — that is
+          // the key commitLayer writes the children-manifest under
+          // (__manifests__/<layerContentSig>). Prefer the cursor's
+          // currentLayerSig (already the content sig; points at the
+          // historical layer when rewound). When the cursor hasn't loaded
+          // yet — its load is deferred to idle, so this is the COMMON case
+          // on first paint — fall back to history's head sig for this
+          // location, NOT lineage.currentSig(): currentSig() returns the
+          // LOCATION/lineage sig, a DIFFERENT value. Reading the manifest
+          // under the location sig misses on every first render, dropping
+          // to the per-child path that loses not-yet-cached children — the
+          // "renders 10, then 13 a second later" bug. latestMarkerSigFor is
+          // a hot cache hit here: currentLayer() above already warmed
+          // #latestSigByLineage for this location.
+          // CROSS-LOCATION SAFETY: cursor.currentLayerSig is authoritative
+          // ONLY when REWOUND (it points at the historical layer being
+          // viewed). At HEAD its idle-deferred load LAGS a fresh navigation,
+          // still pointing at the location we came FROM — which mis-keys the
+          // memo and the manifest and renders the previous location's tiles
+          // (the cross-location leak). At HEAD, read the CURRENT location's
+          // head sig below (latestMarkerSigFor — a hot cache hit, location-
+          // correct), never the cursor sig.
+          let parentLayerSig: string = isRewound ? (cursorService.currentLayerSig || '') : ''
+          if (!parentLayerSig && historyService?.latestMarkerSigFor) {
             try {
-              parentLayerSig = await (lineage as { currentSig?: () => Promise<string> }).currentSig?.() ?? ''
+              const locSig = await (lineage as { currentSig?: () => Promise<string> }).currentSig?.() ?? ''
+              const label = String((lineage as { explorerLabel?: () => string }).explorerLabel?.() ?? '/')
+              if (locSig) parentLayerSig = await historyService.latestMarkerSigFor(locSig, label) ?? ''
             } catch { /* leave empty */ }
           }
-          layerAllowed = await resolveChildNames(historyService, parentSegments, dir, content, parentLayerSig)
+          // SOURCE DIAGNOSTIC ONLY — record the memoized currentLayer() child
+          // count. An earlier "upgrade `content` to getLayerBySig(parentLayerSig)"
+          // guard was REMOVED here: parentLayerSig prefers cursor.currentLayerSig,
+          // whose cursor.load is idle-DEFERRED, so right after a navigation it
+          // still points at the PARENT location. Reading its layer replaced the
+          // child's content with the parent's — rendering the parent's tiles at
+          // the child location, and the just-left layer's tiles after navigating
+          // back ("tiles left behind after navigate"). currentLayer() resolves
+          // currentLayerAt(currentSig()) and is LOCATION-correct; trust it. Any
+          // future stale-content fix must read the CURRENT location's head
+          // (latestMarkerSigFor(currentLocSig)), never a cross-location sig.
+          srcStaleLen = Array.isArray(content.children) ? content.children.length : 0
+          srcFreshLen = srcStaleLen
+          // Record the parent sig so the completeness gate below can key
+          // its retry budget on the LAYER (content), not the location.
+          gateParentSig = parentLayerSig
+          childResolveExpected = Array.isArray(content.children) ? content.children.length : 0
+          // Warm-path memo: a prior COMPLETE resolution under this exact
+          // parent content sig is authoritative — the child set can't have
+          // changed without the sig changing. Read the full membership —
+          // names AND branch-status — with ZERO per-child lookups. Only a
+          // partial (cold) pass ever touches resolveChildNames, and only a
+          // complete pass writes the memo.
+          const branchSetFromResolve = new Set<string>()
+          const memoRaw = parentLayerSig ? this.#completeChildNamesByParentSig.get(parentLayerSig) : undefined
+          // Defense-in-depth: a memo entry is valid only if its size matches
+          // THIS layer's child count. Guards against a mis-keyed entry (a
+          // stale cross-location sig) ever returning another location's
+          // children — the leak is then a cache miss, not wrong tiles.
+          const memo = (memoRaw && memoRaw.names.length === childResolveExpected) ? memoRaw : undefined
+          if (memo) {
+            layerAllowed = new Set(memo.names)
+            for (const b of memo.branches) branchSetFromResolve.add(b)
+            childResolveComplete = true
+          } else {
+            const stats = { expected: 0, resolved: 0 }
+            // branchSetFromResolve is filled in the SAME pass that resolves
+            // names — one read, no separate per-child branch walk.
+            layerAllowed = await resolveChildNames(historyService, parentSegments, dir, content, parentLayerSig, stats, branchSetFromResolve)
+            // Complete iff every child sig produced a name. expected===0 is
+            // a (trivially complete) empty layer.
+            childResolveComplete = stats.expected === 0 || stats.resolved >= stats.expected
+            if (childResolveComplete && parentLayerSig && stats.expected > 0) {
+              const names: string[] = []
+              for (const n of layerAllowed) if (typeof n === 'string' && n.length > 0) names.push(n)
+              // Bound: evict oldest (Map keeps insertion order) past a cap so
+              // a long session of distinct layer sigs can't grow this without
+              // limit. Each entry is keyed by an immutable content sig.
+              if (this.#completeChildNamesByParentSig.size > 256) {
+                const oldest = this.#completeChildNamesByParentSig.keys().next().value
+                if (oldest !== undefined) this.#completeChildNamesByParentSig.delete(oldest)
+              }
+              this.#completeChildNamesByParentSig.set(parentLayerSig, { names, branches: [...branchSetFromResolve] })
+            }
+          }
           // Layer is the only source of truth (project_layer_is_primitive).
           // Whatever resolveChildNames returns IS the tile membership at
           // this location — empty layer means zero owned tiles, broken
@@ -2047,26 +2231,86 @@ export class ShowCellDrone extends Drone {
           }
           layerAllowed = new Set(validNames)
 
-          // Compute branchSet from the layer's sub-layers. Each entry in
-          // content.children is a sig pointing to that child's layer; if
-          // THAT layer has a non-empty children slot, the child is a
-          // branch (clicking should drill in). Pure merkle read, no
-          // OPFS walk. Errors are skipped — a child that fails to
-          // resolve isn't a branch.
-          const childSigs = Array.isArray(content.children) ? content.children : []
-          const branchNames = new Set<string>()
-          await Promise.all(childSigs.map(async (cs: unknown) => {
-            try {
-              const childLayer = await historyService.getLayerBySig(String(cs ?? ''))
-              const subChildren = (childLayer as { children?: readonly unknown[] } | null)?.children
-              if (Array.isArray(subChildren) && subChildren.length > 0) {
-                const name = (childLayer as { name?: string } | null)?.name
-                if (typeof name === 'string' && name.length > 0) branchNames.add(name)
-              }
-            } catch { /* sublayer missing — not a branch */ }
-          }))
-          branchSet = branchNames
+          // Branch-set comes from the SAME resolution that produced names —
+          // populated by resolveChildNames from each child's `children` array
+          // length (manifest hit OR the one-time cold per-child build), and
+          // memoized alongside names. The old separate per-child
+          // getLayerBySig walk — which re-loaded every child on EVERY render,
+          // even on a manifest hit — is GONE. The render now loads the
+          // current layer + its manifest, and never a child layer at draw
+          // time.
+          branchSet = branchSetFromResolve
+        } else if (layerLookupSucceeded && !isRewound) {
+          // Layer-as-primitive: a location with no committed layer owns
+          // ZERO tiles. Clear the union seed — legacy meshCells (seeded
+          // ~line 1927) plus any carry-over — so navigating INTO an empty
+          // location starts from a clean slate instead of surfacing the
+          // PREVIOUS location's tiles. This is the common swarm path:
+          // exploring a peer's tile (or your own) that has no children
+          // yet. Without this, the `if (content)` branch above never runs
+          // and the old location's mesh cells leak in for a frame ("wrong
+          // / leftover tiles"). Peer previews for THIS location are
+          // re-added from the TileSourceRegistry block below.
+          union.clear()
+          localCellSet.clear()
+          layerAllowed = new Set<string>()
         }
+      }
+    }
+
+    // ── COMPLETENESS GATE ────────────────────────────────────────────
+    // Never paint a PARTIAL child set. If the layer's children didn't all
+    // resolve to names this pass (cold pool / sync still landing), the
+    // visible "first render" would show fewer tiles than the layer holds
+    // and then jump to the full count when the rest warm — the two-stage
+    // load. Suppress the partial: hold the current view (on a nav the
+    // OUTGOING layer is still up — we haven't reached the layer-change
+    // block that hides it; on cold boot the canvas is simply still empty),
+    // warm the missing children, and re-render. Bounded PER PARENT SIG so
+    // a genuinely-absent child can never blank the canvas forever.
+    if (!this.#clipboardView && !childResolveComplete && childResolveExpected > 0) {
+      const gateKey = gateParentSig || locationKey
+      if (!this.#resolveGateExhausted.has(gateKey)) {
+        const attempts = (this.#incompleteResolveAttempts.get(gateKey) ?? 0) + 1
+        this.#incompleteResolveAttempts.set(gateKey, attempts)
+        if (attempts <= ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS) {
+          this.#recordRenderAudit('gate', union.size, locationKey)
+          console.info(`[diag:childres] GATE hold loc=${locationKey} attempt=${attempts}/${ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS} expected=${childResolveExpected} got=${union.size} — deferring partial`)
+          // Force the next render past the fast-path skip, warm the pool,
+          // and re-render with a short backoff so the missing bytes land.
+          this.#forceNextRender = true
+          void (async () => {
+            try { await (historyService as { preloadAllBags?: () => Promise<void> } | undefined)?.preloadAllBags?.() } catch { /* best-effort */ }
+            setTimeout(() => this.requestRender(), Math.min(400, 60 * attempts))
+          })()
+          return
+        }
+        // Budget exhausted — stop gating this layer so it can't thrash the
+        // render loop, then fall through to paint what resolved.
+        this.#resolveGateExhausted.add(gateKey)
+        console.warn(`[diag:childres] GATE exhausted loc=${locationKey} after ${attempts} attempts expected=${childResolveExpected} got=${union.size} — painting best-effort`)
+      }
+    } else if (childResolveComplete && gateParentSig) {
+      // Clean resolution — reset this layer's retry budget.
+      this.#incompleteResolveAttempts.delete(gateParentSig)
+    }
+
+    // Clipboard view: the captured labels ARE the membership. The
+    // layer-fill block above is skipped in this mode (it reads the
+    // CURRENT location's children, not the clipboard) and the
+    // layer-primitive migration retired the source-dir enumeration that
+    // used to seed `union` here — so nothing populated the clipboard set.
+    // Seed it directly from the labels: resolveCellOrder's clipboard
+    // fast-path packs them from slot 0 and buildCellsFromAxial treats
+    // localCellSet members as owned tiles (local image path). Without
+    // this `union` holds only mesh cells, the clipboard filter below
+    // empties it, every label is flagged a ghost (worker clears the
+    // clipboard), and openClipboard's zoomToFit lands on the unchanged
+    // explorer view — the "zooms in but still shows the old tiles" bug.
+    if (this.#clipboardView) {
+      for (const label of this.#clipboardView.labels) {
+        union.add(label)
+        localCellSet.add(label)
       }
     }
 
@@ -2282,6 +2526,46 @@ export class ShowCellDrone extends Drone {
       }
     }
 
+    // Source breakdown for this pass — proves WHERE each tile comes from
+    // (layer vs registry vs mesh) so a stray tile (e.g. a phantom "group" in
+    // the top layer) can be attributed to the exact non-layer source that
+    // injected it. window.__hcSourceReport() summarises it; `outside` lists
+    // every rendered name NOT owned by the layer, tagged by source.
+    const outside: string[] = []
+    for (const name of union) {
+      if (localCellSet.has(name)) continue
+      const src = peerCellSet.has(name) ? 'peer'
+        : ephemeralCellSet.has(name) ? 'ephemeral'
+        : this.meshCells.includes(name) ? 'mesh'
+        : 'unknown'
+      outside.push(`${src}:${name}`)
+    }
+    // [tile-trace] when a watched tile (localStorage 'hc:trace-tile') is in
+    // this render, print WHERE it came from + a stack. Catches a swarm peer /
+    // ephemeral / mesh injection (the render path) that no commitLayer ever
+    // created locally. Gated — zero cost unless the key is set.
+    try {
+      const __t = localStorage.getItem('hc:trace-tile')
+      if (__t && union.has(__t)) {
+        const src = localCellSet.has(__t) ? 'LAYER-child'
+          : peerCellSet.has(__t) ? 'swarm-PEER (TileSourceRegistry)'
+          : ephemeralCellSet.has(__t) ? 'ephemeral-preview (TileSourceRegistry)'
+          : this.meshCells.includes(__t) ? 'legacy-mesh'
+          : 'unknown'
+        console.trace(`[tile-trace] RENDER "${__t}" at ${locationKey} — source=${src}`)
+      }
+    } catch { /* trace must never break render */ }
+    this.#recordSourceAudit(locationKey, {
+      staleContent: srcStaleLen,
+      freshHead: srcFreshLen,
+      layerLocal: localCellSet.size,
+      ephemeral: ephemeralCellSet.size,
+      peer: peerCellSet.size,
+      mesh: this.meshCells.length,
+      union: union.size,
+      outside,
+    })
+
     // read layout mode for this location
     this.#layoutMode = this.#readLayoutMode(locationKey)
 
@@ -2456,6 +2740,14 @@ export class ShowCellDrone extends Drone {
 
     await this.applyGeometry(cells)
 
+    // Reveal after the rebuild. Normally the mesh is already visible and this
+    // is a no-op; the case that matters is the clipboard-view EXIT, which
+    // hides the mesh up front so the viewport restore doesn't visibly resize
+    // the outgoing tiles. The empty/bail branches above return before here —
+    // that's fine, there's nothing to show in those, so staying hidden is
+    // correct.
+    if (this.layer) this.layer.visible = true
+
     if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer && this.#pendingRecenter) {
       // first tile on empty screen → apply 2× default ONLY when the
       // user has no saved zoom/pan for this layer. A layer with saved
@@ -2509,71 +2801,67 @@ export class ShowCellDrone extends Drone {
     const allCells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
     hcNav?.('stream:start', `${allCells.length} cells`)
 
-    const cells: Cell[] = []
-    // GEOMETRIC batch growth: the first batch stays small (fast first
-    // paint), every subsequent batch doubles. applyGeometry rebuilds the
-    // FULL cumulative geometry each round, so fixed-size batches made
-    // streaming QUADRATIC — 15 full rebuilds (and 1,900+ label-UV
-    // lookups) for a 120-tile layer; seconds for larger ones. Doubling
-    // caps rebuilds at O(log N) and total geometry work at ~2N with the
-    // same first-paint latency.
-    let start = 0
-    let step = ShowCellDrone.STREAM_BATCH_SIZE
-    let batchNumber = 0
-
-    // Reveal policy: normal-sized layers (≤ 3 batches' worth) stay hidden
-    // until EVERY batch has landed, then show in one paint — tiles load
-    // together, never in visible waves. Only genuinely large layers keep
-    // the progressive first-batch reveal, where fast first paint beats
-    // completeness.
-    const revealProgressively = allCells.length > ShowCellDrone.STREAM_BATCH_SIZE * 3
-
-    while (start < allCells.length) {
-      if (superseded()) return
-
-      const batch = allCells.slice(start, start + step)
-      batchNumber++
-      const tBatch = performance.now()
-
-      // load all cells in this batch in parallel — file reads + image decodes overlap
-      await this.loadCellImages(batch, dir)
-      if (superseded()) return
-      const tImages = performance.now()
-
-      for (const cell of batch) {
-        cells.push(cell)
-        this.renderedCells.set(cell.label, cell)
-      }
-
-      const isLast = start + step >= allCells.length
-      await this.applyGeometry(cells, isLast)
-      if (superseded()) return
-      hcNav?.('batch', `#${batchNumber} [${batch.map(c => c.label).join(', ')}] (${cells.length}/${allCells.length} cumulative) images ${Math.round(tImages - tBatch)}ms geometry ${Math.round(performance.now() - tImages)}ms`)
-
-      // Large layers only: reveal at the first batch so cold start shows
-      // tiles immediately and the rest stream in progressively. Normal
-      // layers wait for the post-loop single reveal below.
-      if (revealProgressively && this.layer && !this.layer.visible) {
-        this.layer.visible = true
-        hcNav?.('first-batch:visible', `${cells.length} tiles`)
-      }
-
-      start += step
-      step *= 2
-      if (!isLast) await this.microDelay()
+    if (allCells.length === 0) {
+      // Names resolved to ZERO renderable cells. In pinned layout the
+      // cellNames array is SPARSE — padded with '' gaps to hold slot
+      // positions — so an empty location has length > 0 (a row of '')
+      // yet builds nothing. The earlier `cellNames.length === 0` guards
+      // (e.g. the layer-change empty path) don't catch that, so a
+      // navigation into an empty location lands here. When the axial map
+      // is ready, this is a genuine empty layer: clearMesh tears down any
+      // mesh still attached from the PREVIOUS layer — without it,
+      // revealing the layer below would show the prior location's tiles,
+      // which IS the leftover-tiles bug on swarm navigation — and its
+      // cell-count([]) emit drives the empty-layer invitation watermark.
+      // (When axial isn't ready yet we keep the old reveal-and-wait
+      // behaviour so a transient unready frame doesn't flash empty.)
+      const axialReady = typeof axial?.items?.size === 'number' && axial.items.size > 0
+      if (axialReady) this.clearMesh('stream: empty location (no renderable cells)')
+      if (this.layer) this.layer.visible = true
+      this.streamActive = false
+      this.emitEffect('navigation:guard-end', {})
+      return
     }
 
+    // ── SINGLE-PASS RENDER ──────────────────────────────────────────
+    // A tile's POSITION is its axial slot — known the instant the cell
+    // list is built, with zero dependency on its image. So the ENTIRE
+    // layer is laid out in ONE applyGeometry: positions, bounds,
+    // recenter and any saved fit all settle once, from the COMPLETE set.
+    //
+    // This replaces the old geometric-batch stream, which rebuilt the
+    // GROWING geometry each round. Because bounds grew per batch, the
+    // recenter/fit ran against a partial set and then RE-RAN on the next
+    // — tiles visibly painted, then resized and shifted as the rest
+    // streamed in (and large layers revealed the first batch early so
+    // you saw every step). THAT was the "two stages." One pass kills it.
+    //
+    // Images are resolved up front too, but LOCAL-only and in parallel:
+    // loadCellImages never awaits the network — host misses self-heal
+    // off-path via fillFromHost and re-render as eggs land. warmup()
+    // preheats every tile-props blob + its image, so this is bounded by
+    // warm reads, not I/O. Result: the layer appears exactly once,
+    // complete and already in its final position. No resize, no
+    // reposition, no progressive reveal.
+    //
+    // Swarm churn (peers joining/leaving, resources arriving) is NOT
+    // staggered here. Each such event clears the render key and fires a
+    // fresh render that lands in this same single-pass path. "Constantly
+    // changing" just means that one pass runs again — never a partial.
+    this.renderedCells.clear()
+    for (const cell of allCells) this.renderedCells.set(cell.label, cell)
+
+    await this.loadCellImages(allCells, dir)
     if (superseded()) return
 
-    // Single reveal for normal layers (all batches landed together), and
-    // the safety net for empty/odd exits either way.
-    if (this.layer && !this.layer.visible && cells.length > 0) {
-      hcNav?.('reveal:all-at-once', `${cells.length} tiles`)
-    }
+    await this.applyGeometry(allCells, true)
+    if (superseded()) return
+
     if (this.layer) this.layer.visible = true
+    hcNav?.('reveal:all-at-once', `${allCells.length} tiles`)
 
     this.streamActive = false
-    hcNav?.('stream:done', `${cells.length} tiles`)
+    hcNav?.('stream:done', `${allCells.length} tiles`)
     this.emitEffect('navigation:guard-end', {})
 
     // cache for instant back-navigation. Use OUR locationKey — do not
@@ -2581,11 +2869,9 @@ export class ShowCellDrone extends Drone {
     // have repointed it at a different layer, which would store our
     // cells under the wrong cache key and make subsequent back-nav
     // resurrect them on the wrong layer.
-    if (cells.length > 0) {
-      const bset = branchSet ?? new Set<string>()
-      this.#layerCellsCache.set(myLocationKey, { cells: [...cells], cellNames, localCellSet, branchSet: bset })
-      this.#slots.seed({ names: cellNames, localCells: localCellSet, branches: bset, mode: this.#layoutMode })
-    }
+    const bset = branchSet ?? new Set<string>()
+    this.#layerCellsCache.set(myLocationKey, { cells: [...allCells], cellNames, localCellSet, branchSet: bset })
+    this.#slots.seed({ names: cellNames, localCells: localCellSet, branches: bset, mode: this.#layoutMode })
 
     this.requestRender()
   }
@@ -2886,6 +3172,7 @@ export class ShowCellDrone extends Drone {
     this.geom = geom
     this.renderedCellsKey = nextCellsKey
     this.renderedCount = cells.length
+    this.#recordRenderAudit('paint', cells.length, this.renderedLocationKey)
 
     // rebuild reverse axial lookup for O(1) tile:hover
     this.#axialToIndex.clear()
@@ -2894,6 +3181,84 @@ export class ShowCellDrone extends Drone {
     }
     this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
     this.#emitRenderTags(cells)
+  }
+
+  /**
+   * Render-pass auditor (proof instrumentation). Records every PAINT and
+   * every completeness-GATE hold to `window.__hcRenderAudit`, and exposes
+   * `window.__hcAuditReport()` which groups paints by location and flags a
+   * two-stage load (a location painted more than once with a GROWING cell
+   * count — exactly the "10 then 13" signature). A correct single-pass
+   * load shows each location with `paints: 1` and `twoStage: false`.
+   */
+  #recordRenderAudit(kind: 'paint' | 'gate', count: number, loc: string): void {
+    try {
+      const w = window as unknown as {
+        __hcRenderAudit?: { t: number; kind: string; loc: string; count: number }[]
+        __hcAuditReport?: () => unknown
+      }
+      const arr = (w.__hcRenderAudit ??= [])
+      arr.push({ t: Math.round(performance.now()), kind, loc, count })
+      if (arr.length > 600) arr.splice(0, arr.length - 600)
+      if (!w.__hcAuditReport) {
+        w.__hcAuditReport = () => {
+          const log = w.__hcRenderAudit ?? []
+          const byLoc = new Map<string, number[]>()
+          const gates = new Map<string, number>()
+          for (const r of log) {
+            if (r.kind === 'paint') {
+              const cur = byLoc.get(r.loc) ?? []
+              cur.push(r.count)
+              byLoc.set(r.loc, cur)
+            } else if (r.kind === 'gate') {
+              gates.set(r.loc, (gates.get(r.loc) ?? 0) + 1)
+            }
+          }
+          const rows: { loc: string; paints: number; counts: number[]; gateHolds: number; twoStage: boolean }[] = []
+          for (const [loc, counts] of byLoc) {
+            const distinct = new Set(counts)
+            const twoStage = counts.length > 1 && distinct.size > 1 && counts[counts.length - 1] > counts[0]
+            rows.push({ loc, paints: counts.length, counts, gateHolds: gates.get(loc) ?? 0, twoStage })
+          }
+          const anyTwoStage = rows.some(r => r.twoStage)
+          return { ok: !anyTwoStage, anyTwoStage, rows }
+        }
+      }
+    } catch { /* instrumentation must never break a render */ }
+  }
+
+  /**
+   * Per-pass SOURCE breakdown (proof instrumentation). Records, for each
+   * render pass, how many tiles each source contributed: the memoized
+   * currentLayer() child count vs the fresh head (`staleContent`/`freshHead`
+   * — a divergence is the stale-content two-stage), the layer-local set, and
+   * ephemeral/peer/mesh additions. `window.__hcSourceReport()` returns the
+   * recent passes so a two-stage count (e.g. 10 then 13) can be attributed to
+   * the exact source on real data.
+   */
+  #recordSourceAudit(loc: string, b: { staleContent: number; freshHead: number; layerLocal: number; ephemeral: number; peer: number; mesh: number; union: number; outside: string[] }): void {
+    try {
+      const w = window as unknown as {
+        __hcSourceAudit?: ({ t: number; loc: string } & typeof b)[]
+        __hcSourceReport?: () => unknown
+      }
+      const arr = (w.__hcSourceAudit ??= [])
+      arr.push({ t: Math.round(performance.now()), loc, ...b })
+      if (arr.length > 200) arr.splice(0, arr.length - 200)
+      if (!w.__hcSourceReport) {
+        w.__hcSourceReport = () => {
+          const log = w.__hcSourceAudit ?? []
+          // Flag passes where the fresh head exceeded the memoized content
+          // (stale-content) or where union > layerLocal (tiles from outside
+          // the layer — registry peer / ephemeral / mesh).
+          return log.map(r => ({
+            ...r,
+            staleContentLag: r.freshHead > r.staleContent,
+            outsideLayer: r.union - r.layerLocal,
+          }))
+        }
+      }
+    } catch { /* instrumentation must never break a render */ }
   }
 
   /** Emit render:tags with unique tag names + counts from all currently visible cells. */
@@ -2915,10 +3280,6 @@ export class ShowCellDrone extends Drone {
   async #scanTagsAcrossPages(): Promise<void> {
     // directory-based tag scanning removed
   }
-
-  // 1–3ms micro-pause to avoid main-thread blocking (legacy JsonHiveStreamLoader pattern)
-  private readonly microDelay = (): Promise<void> =>
-    new Promise(r => setTimeout(r, 1 + Math.random() * 2))
 
   /** Returns the current imageMix value, accounting for substrate fade-in animation. */
   #substrateFadeMix(): number {
@@ -2988,6 +3349,15 @@ export class ShowCellDrone extends Drone {
     // lock collapses repeats), so it's safe to fire alongside the
     // first heartbeat-driven pass.
     this.requestRender()
+
+    // registry:snapshot — the DCP installer posted an updated logical install
+    // (adopt → toggle the node on → portal close). logical-config.source mounts
+    // installed branches FROM this snapshot, so re-render to surface them
+    // without a manual refresh. The deleted auto-fold used to trigger this
+    // re-render as a side effect of writing the layer; it no longer writes the
+    // layer, so the render trigger has to be explicit. Last-value replay means
+    // a snapshot already cached fires this immediately on subscribe.
+    this.onEffect('registry:snapshot', () => this.requestRender())
 
     // viewport:persisted — VP just wrote pan/zoom/meshOffset for some
     // directory. Mirror it into our back-nav cache so navigating-out-and-
@@ -3346,7 +3716,15 @@ export class ShowCellDrone extends Drone {
         }
         this.#slots.clear()
         this.#pendingRemoves.clear()
-        if (this.layer) this.layer.visible = true
+        // HIDE during the transition, don't reveal yet. EffectBus.emit is
+        // synchronous, so this handler runs in full BEFORE the controls-bar's
+        // #restoreClipboardViewport() (which mutates container.scale/position)
+        // on the same call stack. Leaving the mesh visible let that camera
+        // change resize the OLD clipboard tiles on screen — the "tile changes
+        // size, then disappears, then re-renders" flash. Hiding here means the
+        // viewport restore lands on an invisible mesh; the same-layer render
+        // below rebuilds from layer truth and reveals it in one clean paint.
+        if (this.layer) this.layer.visible = false
       }
       this.requestRender()
     })
@@ -3444,9 +3822,12 @@ export class ShowCellDrone extends Drone {
     // listen for public/private toggle — clear mesh cells when going private so
     // external tiles disappear immediately without requiring a manual refresh
     this.onEffect<{ public: boolean }>('mesh:public-changed', ({ public: isPublic }) => {
+      this.#publicMode = !!isPublic
       if (!isPublic) {
         this.meshCells = []
         this.meshCellsRev++
+        // Leaving the swarm: presence glow is meaningless in private mode.
+        this.#presenceGlowByLabel.clear()
       }
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
@@ -3521,6 +3902,18 @@ export class ShowCellDrone extends Drone {
     // different borderColor computation per cell.
     this.onEffect<{ activePeer: string | null }>('spotlight:changed', (payload) => {
       this.#spotlightPubkey = payload?.activePeer ?? null
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // Peer presence/interest moved — someone entered (or left) one of the
+    // child tiles at this location. Recompute the presence glow and force
+    // a rebuild so the heat ring updates. Cheap: same cells, only the heat
+    // attribute changes. renderedCellsKey is cleared because buildCellsKey
+    // doesn't hash heat, so without this the pass would short-circuit.
+    this.onEffect('swarm:interest-changed', () => {
+      if (!this.#publicMode) return
+      this.#refreshPresenceGlow()
       this.renderedCellsKey = ''
       this.requestRender()
     })
@@ -3954,6 +4347,15 @@ export class ShowCellDrone extends Drone {
     linkLabels: string[]
     hiddenLabels: string[]
   } {
+    // Empty-layer invitation watermark — DISABLED for now. It should be a
+    // genuine-swarm cue, but public mode is the default in some shells, so
+    // it fired on every empty location and read as a default background
+    // rather than a swarm thing. Wiring stays (the app shells still listen
+    // for `swarm:empty-layer`); we emit `false` so the watermark never
+    // shows until it's re-gated on a real swarm session (room + secret +
+    // peers present) instead of just public mode.
+    this.emitEffect('swarm:empty-layer', { active: false })
+
     // Peer tiles get marked as branches so tile-overlay routes their
     // clicks through #navigateInto (URL changes, lineage updates, swarm
     // re-subscribes). Without this they fall through to the editor's
@@ -3962,7 +4364,14 @@ export class ShowCellDrone extends Drone {
       count: cells.length,
       labels: cells.map(c => c.label),
       coords: cells.map(c => ({ q: c.q, r: c.r })),
-      branchLabels: cells.filter(c => c.hasBranch || this.#peerCellSet.has(c.label)).map(c => c.label),
+      // In public/swarm mode EVERY tile is a branch: you can navigate into
+      // any tile to explore — even one with no children yet — which is how
+      // you enter an empty space and invite others in. In private mode only
+      // tiles that already have children (or live peer tiles) drill in;
+      // everything else opens the editor on click.
+      branchLabels: this.#publicMode
+        ? cells.map(c => c.label)
+        : cells.filter(c => c.hasBranch || this.#peerCellSet.has(c.label)).map(c => c.label),
       externalLabels: cells.filter(c => c.external).map(c => c.label),
       noImageLabels: cells.filter(c => !c.imageSig).map(c => c.label),
       substrateLabels: cells.filter(c => c.hasSubstrate).map(c => c.label),
@@ -4411,6 +4820,31 @@ export class ShowCellDrone extends Drone {
     return false
   }
 
+  // Rebuild #presenceGlowByLabel from the swarm's interest snapshot at the
+  // current sig. Each child name maps to the set of OTHER peers currently
+  // inside / entering it; we turn that count into a 0..1 glow that ramps
+  // with crowd size and saturates — one visitor is a clear cue, more
+  // people glow brighter. Cheap map walk; no network. Empty (and a fast
+  // exit) in private mode or when the swarm bee isn't loaded.
+  #refreshPresenceGlow = (): void => {
+    this.#presenceGlowByLabel.clear()
+    if (!this.#publicMode) return
+    try {
+      const swarm = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone') as
+        | { presenceGlowSnapshot?: () => ReadonlyMap<string, number> }
+        | undefined
+      const snapshot = swarm?.presenceGlowSnapshot?.()
+      if (!snapshot || snapshot.size === 0) return
+      for (const [name, count] of snapshot) {
+        if (count <= 0) continue
+        // 0.5 floor so a single explorer is plainly visible; +0.16 per
+        // extra head, saturating at full intensity for a crowd.
+        const glow = Math.min(1, 0.5 + (count - 1) * 0.16)
+        this.#presenceGlowByLabel.set(name, glow)
+      }
+    } catch { /* swarm not ready — no glow */ }
+  }
+
   private buildCellsFromAxial = (axial: any, names: string[], max: number, localCellSet: Set<string>, branchSet?: Set<string>): Cell[] => {
     const out: Cell[] = []
     // during move drag, use reordered names so labels map to correct indices
@@ -4434,7 +4868,11 @@ export class ShowCellDrone extends Drone {
       if (!label) continue
 
       const div = this.#divergenceFutureAdds.has(label) ? 1 : this.#divergenceFutureRemoves.has(label) ? 2 : 0
-      out.push({ q: a.q, r: a.r, label, external: !localCellSet.has(label), heat: this.#heatByLabel.get(label) ?? 0, hasBranch: branchSet?.has(label) ?? false, divergence: div })
+      // Heat ring = max(transient activity heat, steady peer-presence glow).
+      // The activity pulse (new-cell fade, hover) still plays on top; the
+      // presence glow keeps a tile lit while peers are exploring inside it.
+      const heat = Math.max(this.#heatByLabel.get(label) ?? 0, this.#presenceGlowByLabel.get(label) ?? 0)
+      out.push({ q: a.q, r: a.r, label, external: !localCellSet.has(label), heat, hasBranch: branchSet?.has(label) ?? false, divergence: div })
     }
 
     return out

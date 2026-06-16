@@ -174,6 +174,31 @@ dcp-command-line {
   overflow: hidden;
 }
 
+/* Provenance ZONES — subtle color background per group so you can tell at a
+   glance where a section's content comes from. Driven by [data-zone] from
+   groupZone() in the component. Each zone: a soft tinted fill, a slightly
+   stronger header bar, and a colored left edge. Kept low-saturation to fit
+   the clean gray installer. Add a new [data-zone] block here when 'default'
+   and 'current' become separable from 'package'. */
+.domain-section[data-zone="logical"] {
+  background: #f1f8f3;                       /* hypercomb.io — the live config */
+  border-color: rgba(46, 125, 80, 0.22);
+  border-left: 3px solid #5aa873;
+  .domain-header { background: #e3f1e8; }
+}
+.domain-section[data-zone="host"] {
+  background: #fdf7ee;                       /* adopted swarm hosts (jwize.com) */
+  border-color: rgba(176, 128, 30, 0.20);
+  border-left: 3px solid #d8a64a;
+  .domain-header { background: #f8eed9; }
+}
+.domain-section[data-zone="package"] {
+  background: #f2f6fc;                       /* packages / default install */
+  border-color: rgba(46, 90, 160, 0.18);
+  border-left: 3px solid #6a91c8;
+  .domain-header { background: #e6eef9; }
+}
+
 /* #74: brief highlight when the tree auto-opens to a freshly-adopted
    branch, so the participant sees WHERE they landed. Auto-cleared. */
 .domain-section.just-adopted {

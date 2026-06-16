@@ -44,6 +44,10 @@ export class App implements AfterViewInit {
   public readonly viewActive = signal(false)
   readonly clipboardMode = signal(false)
   readonly moveMode = signal(false)
+  // Empty-layer swarm watermark — set when show-cell reports the current
+  // public/swarm location has zero tiles. Drives a faint full-bleed
+  // "invite others" watermark, mirroring clipboard-mode.
+  readonly swarmEmpty = signal(false)
   protected readonly bootStatus = signal<BootStatus | null>(null)
   protected readonly dcpPortalOpen = signal(false)
   protected readonly installNeeded = computed(() =>
@@ -94,6 +98,9 @@ export class App implements AfterViewInit {
   @HostBinding('class.move-mode')
   get moveModeClass() { return this.moveMode(); }
 
+  @HostBinding('class.swarm-empty')
+  get swarmEmptyClass() { return this.swarmEmpty(); }
+
   // View-mode CSS hook. When 'website', the header-bar (and its
   // command-line) docks to the bottom of the viewport, the website-view
   // takes the upper area, and you can type /view (or future aliases) to
@@ -140,6 +147,10 @@ export class App implements AfterViewInit {
 
     EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
       this.moveMode.set(active)
+    })
+
+    EffectBus.on<{ active: boolean }>('swarm:empty-layer', ({ active }) => {
+      this.swarmEmpty.set(active)
     })
 
     // Mobile command-line reveal: when the user long-presses an empty area

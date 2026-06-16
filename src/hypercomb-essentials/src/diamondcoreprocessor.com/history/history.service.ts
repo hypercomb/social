@@ -501,6 +501,15 @@ export class HistoryService {
     locationSig: string,
     layer: LayerContent,
   ): Promise<string> => {
+    // [tile-trace] capture the caller that CREATES a watched tile. Gated on
+    // localStorage 'hc:trace-tile'; console.trace prints the full call stack
+    // so the originating code is visible. Zero cost unless the key is set.
+    try {
+      const __t = (typeof localStorage !== 'undefined') ? localStorage.getItem('hc:trace-tile') : null
+      if (__t && (layer as { name?: string })?.name === __t) {
+        console.trace(`[tile-trace] commitLayer CREATING "${__t}" at locationSig=${String(locationSig).slice(0, 12)} (children=${Array.isArray((layer as { children?: unknown[] }).children) ? (layer as { children: unknown[] }).children.length : 0})`)
+      }
+    } catch { /* trace must never break a commit */ }
     const canonical = HistoryService.canonicalizeLayer(layer)
     const json = JSON.stringify(canonical)
     const bytes = new TextEncoder().encode(json)
@@ -580,7 +589,14 @@ export class HistoryService {
             if (!child) continue
             manifest.push({ sig, layer: child })
           }
-          if (manifest.length > 0) await store.writeChildrenManifest!(layerSig, manifest)
+          // Write ONLY a COMPLETE manifest. A partial (a child didn't
+          // resolve this pass) fails the reader's length check
+          // (manifest.length === children.length) and is silently ignored
+          // on every future load, forcing the slow per-child path that
+          // drops not-yet-cached children — the two-stage render bug. A
+          // missing manifest is fine: resolveChildNames backfills a
+          // complete one once all children are warm.
+          if (manifest.length === childSigs.length) await store.writeChildrenManifest!(layerSig, manifest)
         })()
       })
     }
@@ -1255,6 +1271,8 @@ export class HistoryService {
         } catch { /* malformed */ }
       }
     }
+    const __isKnownHead = [...this.#latestSigByLineage.values()].includes(layerSig)
+    console.warn(`[diag:getLayer] NULL ${layerSig.slice(0, 12)} isCurrentHead=${__isKnownHead} preloadDone=${!!this.#preloadAllBagsPromise} (pool+preload+retry all missed)`)
     return null
   }
 
