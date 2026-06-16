@@ -29,6 +29,7 @@
 import { Drone } from '@hypercomb/core'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
+import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
 
 const SWARM_LAYER_KIND = 30200
 
@@ -341,7 +342,9 @@ function canonicaliseValue(value: unknown): unknown {
  *  forever" filter. */
 function readHiddenLineages(): ReadonlySet<string> {
   try {
-    const raw = localStorage.getItem('hc:hidden-lineages')
+    // SESSION-ONLY (see session-hide.store.ts) — must match tile-actions'
+    // write backing, or peer-hiding silently no-ops in public mode.
+    const raw = sessionHideStore.getItem('hc:hidden-lineages')
     if (!raw) return new Set()
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return new Set()

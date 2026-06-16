@@ -501,15 +501,6 @@ export class HistoryService {
     locationSig: string,
     layer: LayerContent,
   ): Promise<string> => {
-    // [tile-trace] capture the caller that CREATES a watched tile. Gated on
-    // localStorage 'hc:trace-tile'; console.trace prints the full call stack
-    // so the originating code is visible. Zero cost unless the key is set.
-    try {
-      const __t = (typeof localStorage !== 'undefined') ? localStorage.getItem('hc:trace-tile') : null
-      if (__t && (layer as { name?: string })?.name === __t) {
-        console.trace(`[tile-trace] commitLayer CREATING "${__t}" at locationSig=${String(locationSig).slice(0, 12)} (children=${Array.isArray((layer as { children?: unknown[] }).children) ? (layer as { children: unknown[] }).children.length : 0})`)
-      }
-    } catch { /* trace must never break a commit */ }
     const canonical = HistoryService.canonicalizeLayer(layer)
     const json = JSON.stringify(canonical)
     const bytes = new TextEncoder().encode(json)

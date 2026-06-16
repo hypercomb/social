@@ -10,6 +10,7 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../gr
 import { isSignature, readCellProperties, writeCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
 import { readViewportAt } from '../../editor/viewport-store.js'
 import { hideStorageKey } from './tile-actions.drone.js'
+import { sessionHideStore } from './session-hide.store.js'
 import type { HistoryService, LayerContent } from '../../history/history.service.js'
 import type { HistoryCursorService, CursorState } from '../../history/history-cursor.service.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoom/zoom.drone.js'
@@ -2489,8 +2490,10 @@ export class ShowCellDrone extends Drone {
     //      events at the current composed sig. Restores filter on
     //      refresh via relay echo with no client storage.
     // Any source hiding a name drops it from the render.
-    const localHidden: string[] = JSON.parse(localStorage.getItem(hideStorageKey(locationKey)) ?? '[]')
-    const bareHidden: string[] = JSON.parse(localStorage.getItem(`hc:hidden-tiles:${locationKey}`) ?? '[]')
+    // SESSION-ONLY hides — read from the in-memory store (see session-hide.store.ts).
+    // A refresh empties it, so a hide never persists across reloads.
+    const localHidden: string[] = JSON.parse(sessionHideStore.getItem(hideStorageKey(locationKey)) ?? '[]')
+    const bareHidden: string[] = JSON.parse(sessionHideStore.getItem(`hc:hidden-tiles:${locationKey}`) ?? '[]')
     const hiddenSet = new Set<string>([...localHidden, ...bareHidden])
     try {
       const swarm = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone') as
@@ -2540,21 +2543,6 @@ export class ShowCellDrone extends Drone {
         : 'unknown'
       outside.push(`${src}:${name}`)
     }
-    // [tile-trace] when a watched tile (localStorage 'hc:trace-tile') is in
-    // this render, print WHERE it came from + a stack. Catches a swarm peer /
-    // ephemeral / mesh injection (the render path) that no commitLayer ever
-    // created locally. Gated — zero cost unless the key is set.
-    try {
-      const __t = localStorage.getItem('hc:trace-tile')
-      if (__t && union.has(__t)) {
-        const src = localCellSet.has(__t) ? 'LAYER-child'
-          : peerCellSet.has(__t) ? 'swarm-PEER (TileSourceRegistry)'
-          : ephemeralCellSet.has(__t) ? 'ephemeral-preview (TileSourceRegistry)'
-          : this.meshCells.includes(__t) ? 'legacy-mesh'
-          : 'unknown'
-        console.trace(`[tile-trace] RENDER "${__t}" at ${locationKey} — source=${src}`)
-      }
-    } catch { /* trace must never break render */ }
     this.#recordSourceAudit(locationKey, {
       staleContent: srcStaleLen,
       freshHead: srcFreshLen,

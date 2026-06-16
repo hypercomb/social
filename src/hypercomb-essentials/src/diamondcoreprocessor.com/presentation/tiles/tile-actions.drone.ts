@@ -1,6 +1,7 @@
 // diamondcoreprocessor.com/pixi/tile-actions.drone.ts
 import { Drone, EffectBus, hypercomb, normalizeCell } from '@hypercomb/core'
 import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey, OverlayTintFn } from './tile-overlay.drone.js'
+import { sessionHideStore } from './session-hide.store.js'
 // Arrangement persistence currently disabled — `#getRootDir` returns
 // null pending the layer-slot read/write path, so the legacy
 // readCellProperties / writeCellProperties imports are no longer needed.
@@ -571,9 +572,9 @@ export class TileActionsDrone extends Drone {
     const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
     const location = lineage?.explorerLabel() ?? '/'
     const key = hideStorageKey(location)
-    const existing: string[] = JSON.parse(localStorage.getItem(key) ?? '[]')
+    const existing: string[] = JSON.parse(sessionHideStore.getItem(key) ?? '[]')
     const updated = existing.filter(l => l !== label)
-    localStorage.setItem(key, JSON.stringify(updated))
+    sessionHideStore.setItem(key, JSON.stringify(updated))
     EffectBus.emit('tile:unhidden', { cell: label, location })
 
     // Mirror to the mesh — same scope rule as hide. Publishing an
@@ -601,7 +602,7 @@ export class TileActionsDrone extends Drone {
     const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
     const location = lineage?.explorerLabel() ?? '/'
     const key = hideStorageKey(location)
-    const hidden: string[] = JSON.parse(localStorage.getItem(key) ?? '[]')
+    const hidden: string[] = JSON.parse(sessionHideStore.getItem(key) ?? '[]')
     const hiddenSet = new Set(hidden)
 
     const labels = [...selection.selected]
@@ -615,7 +616,7 @@ export class TileActionsDrone extends Drone {
       // Every selected tile is hidden → remove them from the hidden list
       const removeSet = new Set(labels)
       const updated = hidden.filter(l => !removeSet.has(l))
-      localStorage.setItem(key, JSON.stringify(updated))
+      sessionHideStore.setItem(key, JSON.stringify(updated))
       for (const label of labels) EffectBus.emit('tile:unhidden', { cell: label, location })
       // Re-emit to force show-cell cache clear and re-render without the grayed state
       EffectBus.emit('visibility:show-hidden', { active: localStorage.getItem('hc:show-hidden') === '1' })
@@ -623,7 +624,7 @@ export class TileActionsDrone extends Drone {
     } else {
       // At least one visible → add all to the hidden list
       for (const label of labels) if (!hiddenSet.has(label)) hidden.push(label)
-      localStorage.setItem(key, JSON.stringify(hidden))
+      sessionHideStore.setItem(key, JSON.stringify(hidden))
       for (const label of labels) EffectBus.emit('tile:hidden', { cell: label, location })
       // Auto-enable show-hidden so grayed tiles are visible
       localStorage.setItem('hc:show-hidden', '1')
@@ -642,12 +643,18 @@ export class TileActionsDrone extends Drone {
     // room/secret gives a fresh empty filter at the new zone instead
     // of bleeding stale hides through. Block stays device-scoped —
     // a personal/permanent signal not tied to any session.
-    const key = (storagePrefix === 'hc:hidden-tiles')
+    const isHide = storagePrefix === 'hc:hidden-tiles'
+    const key = isHide
       ? hideStorageKey(location)
       : `${storagePrefix}:${location}`
-    const existing: string[] = JSON.parse(localStorage.getItem(key) ?? '[]')
+    // HIDES are SESSION-ONLY (in-memory, gone on refresh) so a stale swarm/zone
+    // hide can't leak into a later private session. Device-scoped BLOCKS stay
+    // persistent (localStorage) — a permanent personal signal.
+    const store: { getItem(k: string): string | null; setItem(k: string, v: string): void } =
+      isHide ? sessionHideStore : localStorage
+    const existing: string[] = JSON.parse(store.getItem(key) ?? '[]')
     if (!existing.includes(label)) existing.push(label)
-    localStorage.setItem(key, JSON.stringify(existing))
+    store.setItem(key, JSON.stringify(existing))
     EffectBus.emit(effect, { cell: label, location })
 
     // Mirror hide list onto the mesh as a kind-30202 event so the
@@ -695,12 +702,12 @@ function addHiddenLineage(parentSegments: readonly string[], name: string): void
     .join('/')
   const path = locKey ? `${locKey}/${name}` : name
   try {
-    const raw = localStorage.getItem('hc:hidden-lineages')
+    const raw = sessionHideStore.getItem('hc:hidden-lineages')
     const parsed = raw ? JSON.parse(raw) : []
     const list = Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []
     if (list.includes(path)) return
     list.push(path)
-    localStorage.setItem('hc:hidden-lineages', JSON.stringify(list))
+    sessionHideStore.setItem('hc:hidden-lineages', JSON.stringify(list))
   } catch {
     // localStorage might be unavailable (private browsing edge case);
     // the hide still applies in the in-session name-keyed list.
@@ -718,12 +725,12 @@ function removeHiddenLineage(parentSegments: readonly string[], name: string): v
     .join('/')
   const path = locKey ? `${locKey}/${name}` : name
   try {
-    const raw = localStorage.getItem('hc:hidden-lineages')
+    const raw = sessionHideStore.getItem('hc:hidden-lineages')
     if (!raw) return
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return
     const next = parsed.filter((x): x is string => typeof x === 'string' && x !== path)
-    localStorage.setItem('hc:hidden-lineages', JSON.stringify(next))
+    sessionHideStore.setItem('hc:hidden-lineages', JSON.stringify(next))
   } catch { /* leave list as-is */ }
 }
 
