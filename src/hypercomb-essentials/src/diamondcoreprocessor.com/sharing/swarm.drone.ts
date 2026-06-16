@@ -1844,10 +1844,22 @@ export class SwarmDrone extends Drone {
   // Publish
   // -----------------------------------------------------------------
 
+  // Re-entry/coalesce guard for the subtree-sign publish walk. The walk is
+  // CPU-heavy (SHA-256 per node) and fires TWICE per navigation (Lineage
+  // 'change' + the per-render mesh:ensure-started heartbeat); unguarded,
+  // concurrent walks stacked up and starved the main thread — compounding the
+  // atlas GPU leak into the root↔content navigation lock-up.
+  #publishInFlight = false
+  #publishPending = false
+
   #publishMyLayerAt = async (sig: string): Promise<void> => {
     const mesh = this.#getMesh()
     const sigStore = this.#getSignatureStore()
     if (!mesh?.publish || !sigStore) { slog('[swarm] publishMyLayerAt: missing mesh/sigStore', { mesh: !!mesh?.publish, sigStore: !!sigStore }); return }
+
+    // A walk is already running — don't start a second. Mark pending so we
+    // re-run ONCE when it finishes, with fresh location/state.
+    if (this.#publishInFlight) { this.#publishPending = true; return }
 
     // Resolve the lineage's directory ourselves from Store.hypercombRoot
     // rather than calling lineage.explorerDir() — see LineageLike comment.
@@ -1879,7 +1891,19 @@ export class SwarmDrone extends Drone {
     if (!room || !secret) return
 
     const counter = { count: 0 }
-    void this.#publishSubtree(dir, segments, 0, counter, sigStore, mesh, room, secret)
+    // Hold the in-flight flag for the WHOLE walk (it's fire-and-forget, so we
+    // clear it in finally, not at method return). On completion, if another
+    // trigger arrived mid-walk, re-run exactly once with the CURRENT sig.
+    this.#publishInFlight = true
+    this.#publishSubtree(dir, segments, 0, counter, sigStore, mesh, room, secret)
+      .catch(() => undefined)
+      .finally(() => {
+        this.#publishInFlight = false
+        if (this.#publishPending) {
+          this.#publishPending = false
+          void this.#publishMyLayerAt(this.#currentSig)
+        }
+      })
     void sig  // sig recomputed inside #publishSubtree from segments+room+secret
   }
 

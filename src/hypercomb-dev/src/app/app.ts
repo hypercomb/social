@@ -60,6 +60,18 @@ export class App implements AfterViewInit {
   );
 
   constructor() {
+    // Parity with hypercomb-web (app.ts): swallow the benign "ResizeObserver
+    // loop completed with undelivered notifications" warning. It fires on
+    // routine layout frames; without this it surfaces as a red ERROR AND runs
+    // Angular's global ErrorHandler every time — a per-frame cost on dev that
+    // makes the whole app feel sluggish. stopImmediatePropagation before
+    // Angular's window 'error' listener sees it.
+    window.addEventListener('error', e => {
+      if ((e as ErrorEvent).message?.includes('ResizeObserver loop')) {
+        e.stopImmediatePropagation()
+      }
+    })
+
     EffectBus.on<{ public: boolean }>('mesh:public-changed', ({ public: pub }) => {
       this.meshPublic.set(pub)
     })

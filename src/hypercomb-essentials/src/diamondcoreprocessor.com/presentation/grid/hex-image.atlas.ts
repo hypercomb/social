@@ -195,6 +195,14 @@ export class HexImageAtlas {
     // render into atlas (keep previous images)
     this.#renderer.render({ container: sprite, target: this.#atlas, clear: false })
     sprite.destroy()
+    // The atlas RenderTexture now holds the baked pixels, so the per-image
+    // source Texture + its GPU TextureSource are no longer needed. `true`
+    // also destroys + un-uploads the TextureSource and drops the Pixi
+    // texture-cache entry. Without this, EVERY loadImage leaked one GPU
+    // texture forever — and because the 256-slot ring evicts + re-decodes
+    // images on each root↔content navigation, those orphans accumulated and
+    // exhausted GPU memory, hard-locking the hive after a few cycles.
+    texture.destroy(true)
 
     // UV bounds reference the image content within the cell (skip padding).
     // Contain-fill guarantees padding ≥ 0, so UVs stay within the cell.
@@ -220,6 +228,10 @@ export class HexImageAtlas {
       HexImageAtlas.#firstPaintMarked = true
       ;(window as any).__hcBoot?.(`first tile painted to atlas (${loadMs.toFixed(0)}ms)`)
     }
+    // Release the decoded ImageBitmap — its pixels are baked into the atlas
+    // now. Previously only the pre-downscale `raw` was closed; the final
+    // bitmap (downscaled or not) leaked on every load.
+    bitmap.close()
     return uv
   }
 
