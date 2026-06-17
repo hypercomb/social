@@ -3,8 +3,80 @@
 // Centred modal that shows a single note in full. Backdrop dims the rest
 // of the surface so the focus stays on this note. Gold accent matches the
 // note icon and the command line capture state.
+@use '../../styles/notes-shapes';
 
 $accent: #ffe14a;
+
+// ── Outline rows ────────────────────────────────────────────
+// The viewer body renders the active note as the root row (larger
+// type) followed by every descendant recursively, indented by depth.
+// Each row carries its own .hc-shape-X class so the shape glyph at
+// row-left is painted by the cascaded rules in _notes-shapes.scss.
+// Children are clickable — clicking opens a new viewer tab.
+.viewer-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  position: relative;
+
+  // Indentation guide line at depth 1+. Sits in the left padding
+  // gutter to telegraph the parent-child relationship.
+  &:not(.viewer-row-root)::before {
+    content: "";
+    position: absolute;
+    left: -2px;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: rgba(255, 255, 255, 0.12);
+    pointer-events: none;
+  }
+}
+
+// Root row — larger, no hover affordance (it's the focused note).
+.viewer-row-root {
+  padding: 0 0 8px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 8px;
+  .viewer-row-text {
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+}
+
+// Descendant rows — slightly smaller, hover affordance, click cursor.
+.viewer-row:not(.viewer-row-root) {
+  cursor: pointer;
+  .viewer-row-text {
+    font-size: 0.92rem;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.86);
+  }
+  &:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+}
+
+.viewer-row-shape {
+  width: 14px;
+  height: 14px;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+.viewer-row:not(.hc-shape-circle):not(.hc-shape-square):not(.hc-shape-triangle):not(.hc-shape-diamond):not(.hc-shape-star):not(.hc-shape-hexagon) .viewer-row-shape {
+  display: none;
+}
+
+.viewer-row-text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #f3f3f3;
+  flex: 1;
+  min-width: 0;
+}
 
 :host {
   position: fixed;
@@ -13,12 +85,15 @@ $accent: #ffe14a;
   pointer-events: none;
 }
 
+// Non-modal: the "backdrop" no longer blocks clicks. The user can keep
+// the viewer open and click another note in the strip behind it to
+// stack a new tab. Only the viewer card itself catches pointer events.
+// Closing happens via ×, ESC, or per-tab dismissal — never via a
+// click-outside.
 .viewer-backdrop {
-  pointer-events: auto;
+  pointer-events: none;
   position: absolute;
   inset: 0;
-  background: rgba(2, 2, 8, 0.55);
-  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -26,6 +101,7 @@ $accent: #ffe14a;
 }
 
 .viewer-card {
+  pointer-events: auto;
   width: min(560px, calc(100vw - 2rem));
   // Cap well short of the viewport so a long note scrolls inside
   // `.viewer-body` (flex:1 + overflow-y:auto) instead of stretching the
@@ -45,6 +121,7 @@ $accent: #ffe14a;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 0.5rem;
   padding: 0.75rem 1rem;
   border-bottom: 1px solid rgba($accent, 0.25);
 }
@@ -53,6 +130,79 @@ $accent: #ffe14a;
   font-size: 0.9rem;
   letter-spacing: 0.05em;
   color: rgba($accent, 0.95);
+}
+
+// ── tabs ─────────────────────────────────────────────────
+// Each open note gets a button-tab in the header. Active tab carries
+// the accent; inactive tabs are muted. Per-tab × peels one note off
+// without dismissing the rest.
+.viewer-tabs {
+  display: flex;
+  flex: 1;
+  gap: 4px;
+  flex-wrap: wrap;
+  align-items: center;
+  min-width: 0;
+}
+
+.viewer-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  color: rgba(255, 255, 255, 0.72);
+  font-family: inherit;
+  font-size: 0.78rem;
+  cursor: pointer;
+  max-width: 200px;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+  }
+
+  &.is-active {
+    background: rgba($accent, 0.16);
+    border-color: rgba($accent, 0.55);
+    color: $accent;
+  }
+}
+
+.viewer-tab-cell {
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.viewer-tab-preview {
+  opacity: 0.6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+}
+
+.viewer-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 3px;
+  font-size: 1rem;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.55);
+  cursor: pointer;
+  margin-left: 2px;
+
+  &:hover {
+    background: rgba(255, 255, 255, 0.12);
+    color: #fff;
+  }
 }
 
 .viewer-close {

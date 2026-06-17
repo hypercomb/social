@@ -9,5 +9,8 @@
     "src/**/*.ts",
     "../hypercomb-shared/**/*.ts"
   ],
-  "exclude": ["src/**/*.spec.ts"]
+  "exclude": [
+    "src/**/*.spec.ts",
+    "../hypercomb-shared/**/*.spec.ts"
+  ]
 }
