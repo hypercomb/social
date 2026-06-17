@@ -76,6 +76,7 @@
   "controls.close-clipboard": "クリップボードを閉じる",
   "controls.show-hidden": "非表示を表示",
   "controls.world-mode": "ワールドビュー（共有する項目を選択）",
+  "controls.neon-mode": "ネオングロー",
   "controls.text-only": "テキストのみ（画像を非表示）",
   "controls.voice": "音声入力",
   "controls.voice-hold": "長押しで話す（またはBを長押し）",

@@ -1951,62 +1951,13 @@ export class SwarmDrone extends Drone {
     // location), fall back to listLocalChildren so first-publish still
     // works before any commit lands. Subsequent commits replace this
     // path with the layer-driven list.
-    const lineage = this.#getLineage()
-    const history = this.#getHistory()
     // {name, layerSig?} — layerSig is only known on the layer-driven
     // path. OPFS-fallback children have no sig (the layer hasn't been
     // committed yet), so the wire payload omits layerSig for those.
-    // Subscribers tolerate either shape.
-    let childRefs: { name: string; layerSig?: string }[]
-    if (history?.sign && history?.currentLayerAt && history?.getLayerBySig) {
-      try {
-        const locationSig = await history.sign({
-          domain: lineage?.domain,
-          explorerSegments: () => segments,
-        } as LineageLike)
-        const layer = await history.currentLayerAt(locationSig)
-        const childSigs = Array.isArray(layer?.children) ? layer.children : []
-        slog('[swarm] publishSubtree: layer resolve', { segments, locationSig: locationSig?.slice(0, 8), layerExists: layer !== null, childSigCount: childSigs.length })
-        if (childSigs.length === 0 && layer == null) {
-          // No layer yet — first publish at this location. Fall back to
-          // OPFS so the initial commit's tiles propagate before history
-          // cascade lands. When the lineage has no OPFS dir either
-          // (sub-layer never minted a physical directory) there's
-          // literally nothing to publish at this level — empty list.
-          const names = dir ? await listLocalChildren(dir) : []
-          childRefs = names.map(name => ({ name }))
-          slog('[swarm] publishSubtree: layer null → OPFS fallback', { childNames: names, hadDir: !!dir })
-        } else {
-          // Layer exists (possibly empty children). Resolve each child
-          // sig to its `name` AND preserve the sig as the merkle handle —
-          // peers receive {name, layerSig} and can call
-          // swarm.requestSubtree(layerSig) to pull deeper via broker.
-          const resolved = await Promise.all(childSigs.map(async (cs) => {
-            try {
-              const child = await history.getLayerBySig(cs)
-              return typeof child?.name === 'string' && child.name.length > 0
-                ? { name: child.name, layerSig: cs }
-                : null
-            } catch { return null }
-          }))
-          childRefs = resolved.filter((n): n is { name: string; layerSig: string } => n !== null)
-          const droppedCount = resolved.length - childRefs.length
-          if (droppedCount > 0) {
-            slog('[swarm] publishSubtree: dropped unresolved child sigs', { droppedCount, totalChildSigs: childSigs.length, resolvedNames: childRefs.map(c => c.name) })
-          }
-        }
-      } catch (err) {
-        // History resolve failed for any reason — fall back to OPFS so
-        // we don't silently stop publishing.
-        slog('[swarm] publishSubtree: history resolve threw → OPFS fallback', { err: String(err) })
-        const names = dir ? await listLocalChildren(dir) : []
-        childRefs = names.map(name => ({ name }))
-      }
-    } else {
-      slog('[swarm] publishSubtree: no history service → OPFS fallback', { dirName: dir?.name ?? '(none)' })
-      const names = dir ? await listLocalChildren(dir) : []
-      childRefs = names.map(name => ({ name }))
-    }
+    // Subscribers tolerate either shape. Shared with the retraction walk
+    // (#wipeSubtree) so both honour the exact same source of truth.
+    let childRefs = await this.#resolveChildRefs(dir, segments)
+
     // ── PUBLIC FILTER ─────────────────────────────────────────────────
     // Broadcast ONLY the public subset. Private children (and private
     // branches) are pruned here — and because childNames (recursion) derives
@@ -2015,8 +1966,22 @@ export class SwarmDrone extends Drone {
     // and is NEVER folded into the signed layer (keeps the rendezvous sig
     // stable across peers — same invariant as `hidden`). isCellPublic is
     // branch-aware: a public-branch root covers all its descendants.
+    //
+    // Capture the PRUNED names too. A child that just flipped
+    // public→private would otherwise simply vanish from the recursion,
+    // leaving any slot we already published for its subtree lingering on
+    // the relay until its ~90s NIP-40 expiry — a peer sitting inside the
+    // branch keeps seeing our retracted tiles. We recurse into those in
+    // retraction mode (#wipeSubtree) below to replace them with empty
+    // payloads at once.
     const publicLocation = '/' + segments.join('/')
-    childRefs = childRefs.filter(c => isCellPublic(publicLocation, c.name))
+    const prunedNames: string[] = []
+    const filteredRefs: { name: string; layerSig?: string }[] = []
+    for (const c of childRefs) {
+      if (isCellPublic(publicLocation, c.name)) filteredRefs.push(c)
+      else prunedNames.push(c.name)
+    }
+    childRefs = filteredRefs
     const childNames = childRefs.map(c => c.name)  // legacy local var — still used by recursion + log
 
     // Publish one entry per child — flat: { name, ...0000_fields }.
@@ -2172,7 +2137,184 @@ const payload: SwarmLayerPayload = myLabel
         secret,
       ))
     }
+    // Retraction pass — walk children the public filter pruned. Each call
+    // self-gates on #lastPublishedBySig, so children we never shared cost a
+    // single sign and stop without a layer resolve; only a branch that was
+    // actually published (it just flipped public→private) gets an empty
+    // (wipe) payload that retracts it from peers immediately.
+    for (const prunedName of prunedNames) {
+      if (counter.count >= MAX_PUBLISH_NODES) break
+      let prunedDir: FileSystemDirectoryHandle | null = null
+      if (dir) {
+        try { prunedDir = await dir.getDirectoryHandle(prunedName, { create: false }) }
+        catch { prunedDir = null }
+      }
+      subtreeWork.push(this.#wipeSubtree(
+        prunedDir,
+        [...segments, prunedName],
+        depth + 1,
+        counter,
+        sigStore,
+        mesh,
+        room,
+        secret,
+      ))
+    }
     await Promise.all(subtreeWork)
+  }
+
+  // Resolve the children to publish at `segments`: the current layer's
+  // children list (layer-as-primitive), each child sig resolved to its
+  // name AND its layerSig (the merkle handle peers pull deeper with).
+  // Fallback: a brand-new location with no committed layer yet reads OPFS
+  // dirs so the first publish works before the history cascade lands; an
+  // OPFS-fallback child has no sig, so its layerSig is omitted. Shared by
+  // the publish walk (#publishSubtree) and the retraction walk
+  // (#wipeSubtree) so both honour the exact same source of truth.
+  #resolveChildRefs = async (
+    dir: FileSystemDirectoryHandle | null,
+    segments: readonly string[],
+  ): Promise<{ name: string; layerSig?: string }[]> => {
+    const lineage = this.#getLineage()
+    const history = this.#getHistory()
+    if (history?.sign && history?.currentLayerAt && history?.getLayerBySig) {
+      try {
+        const locationSig = await history.sign({
+          domain: lineage?.domain,
+          explorerSegments: () => segments,
+        } as LineageLike)
+        const layer = await history.currentLayerAt(locationSig)
+        const childSigs = Array.isArray(layer?.children) ? layer.children : []
+        slog('[swarm] resolveChildRefs: layer resolve', { segments, locationSig: locationSig?.slice(0, 8), layerExists: layer !== null, childSigCount: childSigs.length })
+        if (childSigs.length === 0 && layer == null) {
+          // No layer yet — first publish at this location. Fall back to
+          // OPFS so the initial commit's tiles propagate before history
+          // cascade lands. When the lineage has no OPFS dir either
+          // (sub-layer never minted a physical directory) there's
+          // literally nothing to publish at this level — empty list.
+          const names = dir ? await listLocalChildren(dir) : []
+          slog('[swarm] resolveChildRefs: layer null → OPFS fallback', { childNames: names, hadDir: !!dir })
+          return names.map(name => ({ name }))
+        }
+        // Layer exists (possibly empty children). Resolve each child sig
+        // to its `name` AND preserve the sig as the merkle handle — peers
+        // receive {name, layerSig} and can call swarm.requestSubtree(
+        // layerSig) to pull deeper via broker.
+        const resolved = await Promise.all(childSigs.map(async (cs) => {
+          try {
+            const child = await history.getLayerBySig(cs)
+            return typeof child?.name === 'string' && child.name.length > 0
+              ? { name: child.name, layerSig: cs }
+              : null
+          } catch { return null }
+        }))
+        const refs = resolved.filter((n): n is { name: string; layerSig: string } => n !== null)
+        const droppedCount = resolved.length - refs.length
+        if (droppedCount > 0) {
+          slog('[swarm] resolveChildRefs: dropped unresolved child sigs', { droppedCount, totalChildSigs: childSigs.length, resolvedNames: refs.map(c => c.name) })
+        }
+        return refs
+      } catch (err) {
+        // History resolve failed for any reason — fall back to OPFS so
+        // we don't silently stop publishing.
+        slog('[swarm] resolveChildRefs: history resolve threw → OPFS fallback', { err: String(err) })
+        const names = dir ? await listLocalChildren(dir) : []
+        return names.map(name => ({ name }))
+      }
+    }
+    slog('[swarm] resolveChildRefs: no history service → OPFS fallback', { dirName: dir?.name ?? '(none)' })
+    const names = dir ? await listLocalChildren(dir) : []
+    return names.map(name => ({ name }))
+  }
+
+  // Retract a subtree we previously published but that just became private
+  // (the parent's public filter pruned it). Walks the SAME nodes we
+  // published when the branch was public — public/private is participant-
+  // local, so the layer's child lists are unchanged — and replaces each
+  // previously-published slot with an empty payload (the agreed "wiped
+  // slot / soft leave" signal, same shape the existing depth>0 wipe guard
+  // emits). A peer sitting inside the branch (subscribed to a deeper
+  // slot's sig) drops our tiles on receipt instead of waiting out the
+  // ~90s NIP-40 expiry.
+  //
+  // Cheap by construction: a node whose sig we never published self-gates
+  // and returns before any layer resolve. And because publishing any
+  // descendant requires having published the whole path to it, a node we
+  // never published can have no published descendants either — so we stop
+  // the walk there without missing a deeper slot. This also makes a
+  // public grandchild under a now-private parent retract correctly: it was
+  // unreachable for publishing while the ancestor is private (the parent
+  // filter stops the publish walk there), so wiping its slot matches the
+  // going-public direction, which never published it.
+  #wipeSubtree = async (
+    dir: FileSystemDirectoryHandle | null,
+    segments: readonly string[],
+    depth: number,
+    counter: { count: number },
+    sigStore: SignatureStoreLike,
+    mesh: MeshApi,
+    room: string,
+    secret: string,
+  ): Promise<void> => {
+    if (counter.count >= MAX_PUBLISH_NODES) return
+    this.#publishStats.walkNodeVisits++
+
+    const key = `${segments.join("/")}\0${room}\0${secret}`
+    let sig = ''
+    try { sig = await sigStore.signText(key) } catch { return }
+    if (!sig) return
+    // Never published here → nothing of ours lingers on the relay, and
+    // nothing below was published either (a descendant publish implies a
+    // published path to it). Stop without resolving the layer.
+    if (!this.#lastPublishedBySig.has(sig)) return
+
+    // Replace our slot with the empty "wiped slot" payload. Keep our label
+    // so peers attribute the now-empty slot to us rather than treating it
+    // as a brand-new participant.
+    const myLabel = this.#readMyLabel()
+    const payload: SwarmLayerPayload = myLabel ? { label: myLabel, visuals: [] } : { visuals: [] }
+    const nowMs = Date.now()
+    const expirationSecs = Math.floor(nowMs / 1000) + EVENT_TTL_SECS
+    const tags: string[][] = [
+      ['d', sig],
+      ['expiration', String(expirationSecs)],
+    ]
+    const selfDomain = this.#readSelfDomain()
+    if (selfDomain) tags.push(['domain', selfDomain])
+    counter.count++
+    this.#publishStats.wireEvents++
+    await mesh.publish(SWARM_LAYER_KIND, sig, payload, tags)
+    // Forget the slot so the next pass self-gates here (the membership
+    // check above) and we never re-walk this now-private branch. The empty
+    // event we just sent already retracted it for live + late subscribers.
+    this.#lastPublishedBySig.delete(sig)
+    this.#lastPublishTimeMsBySig.delete(sig)
+
+    if (depth >= MAX_PUBLISH_DEPTH) return
+    // Recurse into the same children we published when this branch was
+    // public and wipe their slots too. Each self-gates, so never-published
+    // private descendants cost one sign and stop.
+    const childRefs = await this.#resolveChildRefs(dir, segments)
+    const wipeWork: Promise<void>[] = []
+    for (const { name } of childRefs) {
+      if (counter.count >= MAX_PUBLISH_NODES) break
+      let childDir: FileSystemDirectoryHandle | null = null
+      if (dir) {
+        try { childDir = await dir.getDirectoryHandle(name, { create: false }) }
+        catch { childDir = null }
+      }
+      wipeWork.push(this.#wipeSubtree(
+        childDir,
+        [...segments, name],
+        depth + 1,
+        counter,
+        sigStore,
+        mesh,
+        room,
+        secret,
+      ))
+    }
+    await Promise.all(wipeWork)
   }
 
   // -----------------------------------------------------------------

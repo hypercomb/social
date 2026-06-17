@@ -78,6 +78,7 @@
   "controls.close-clipboard": "close clipboard",
   "controls.show-hidden": "show hidden",
   "controls.world-mode": "world view (pick what to share)",
+  "controls.neon-mode": "neon glow",
   "controls.text-only": "text only (hide images)",
   "controls.voice": "voice input",
   "controls.voice-hold": "hold to speak (or hold B)",

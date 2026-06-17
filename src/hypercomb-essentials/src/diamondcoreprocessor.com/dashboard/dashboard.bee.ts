@@ -44,7 +44,7 @@ import { Worker, EffectBus } from '@hypercomb/core'
 
 const STATE_KEY = 'hc:@diamondcoreprocessor.com/DashboardBee:bags'
 const INDICATOR_KEY_PREFIX = '@diamondcoreprocessor.com/dashboard:'
-const DASHBOARD_ICON = '◆'
+const DASHBOARD_ICON = 'dashboard'
 const DASHBOARD_KIND = '@diamondcoreprocessor.com/dashboard'
 
 type LineageLike = {
@@ -128,6 +128,28 @@ export class DashboardBee extends Worker {
       explorerSegments: () => currentSegments,
     })
 
+    // Single-instance invariant: at most ONE dashboard exists across the
+    // whole hive — it is the single place every Claude question aggregates
+    // to be answered. If one already exists, RE-ANCHOR that same bag to the
+    // current location (preserving the questions it already holds) instead
+    // of minting a second. Any pill the old anchor was showing is cleared
+    // first, so there is never more than one ◆ on screen.
+    const existing = this.#currentBag()
+    if (existing) {
+      this.#clearAllIndicators()
+      this.#bags.clear()
+      const reanchored: PinnedBag = {
+        locationSig: currentLocSig,
+        bagLocSig: existing.bagLocSig,
+        bagSegments: existing.bagSegments,
+      }
+      this.#bags.set(currentLocSig, reanchored)
+      this.#persistState()
+      this.#publishToSwarm(reanchored)
+      this.#emitIndicator(reanchored)
+      return reanchored
+    }
+
     // The bag lives at a unique single-segment lineage. The segment
     // encodes (location-prefix, salt) — the location prefix keeps the
     // bag mentally tied to its anchor, the salt makes it unique. The
@@ -195,10 +217,7 @@ export class DashboardBee extends Worker {
 
     // Clear the bee's previous indicators so old pills don't linger
     // when the user navigates to a location without a pinned bag.
-    for (const key of this.#activeIndicatorKeys) {
-      EffectBus.emit('indicator:clear', { key })
-    }
-    this.#activeIndicatorKeys.clear()
+    this.#clearAllIndicators()
 
     const currentSegments = (lineage.explorerSegments?.() ?? [])
       .map(s => String(s ?? '').trim()).filter(Boolean)
@@ -242,6 +261,20 @@ export class DashboardBee extends Worker {
     })
   }
 
+  /** The single dashboard entry, if one exists. The bee holds at most one
+   *  (single-instance invariant); this is the canonical accessor. */
+  #currentBag(): PinnedBag | undefined {
+    return this.#bags.values().next().value as PinnedBag | undefined
+  }
+
+  /** Clear every pill the bee currently has on screen. */
+  #clearAllIndicators(): void {
+    for (const key of this.#activeIndicatorKeys) {
+      EffectBus.emit('indicator:clear', { key })
+    }
+    this.#activeIndicatorKeys.clear()
+  }
+
   // ─── open (navigate into the bag) ───────────────────────────────────
 
   #wireOpenHandler(): void {
@@ -279,7 +312,12 @@ export class DashboardBee extends Worker {
           bagLocSig: b.bagLocSig,
           bagSegments: b.bagSegments,
         })
+        // Single-instance: collapse any legacy multi-bag state to the first
+        // valid entry. The others remain recoverable by sig in OPFS.
+        break
       }
+      // Rewrite storage so a legacy multi-bag list is permanently collapsed.
+      this.#persistState()
     } catch { /* tolerate corrupt state */ }
   }
 

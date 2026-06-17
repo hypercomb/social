@@ -339,7 +339,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'neon:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -506,6 +506,11 @@ export class ShowCellDrone extends Drone {
   // everything stays visible, unshared ones just dim.
   #worldMode = (() => {
     try { return localStorage.getItem('hc:world-mode') === '1' } catch { return false }
+  })()
+  // Neon mode (control-bar toggle): when on, every tile's border paints an
+  // additive glow (a shader uniform — no geometry/shape change). Off by default.
+  #neonMode = (() => {
+    try { return localStorage.getItem('hc:neon-mode') === '1' } catch { return false }
   })()
   // Names of cells in the current render that came from an ephemeral
   // tile source (sync preview, not adopted to OPFS). Used by the pinned
@@ -772,7 +777,7 @@ export class ShowCellDrone extends Drone {
     }
   }
 
-  private refreshMeshCells = async (grammar: string = ''): Promise<void> => {
+  private refreshMeshCells = async (grammar: string = '', forceResnapshot = false): Promise<void> => {
     // Mesh is opt-in. Default: dormant. Joining a public session sets the
     // flag below. Without it, no relay connections, no event subscriptions,
     // no per-event secp256k1 verifications. Local-only operation.
@@ -860,7 +865,7 @@ export class ShowCellDrone extends Drone {
 
 
     // note: publish local filesystem cells for this sig when changed
-    await this.publishLocalCells(lineage, mesh, sig, grammar)
+    await this.publishLocalCells(lineage, mesh, sig, grammar, forceResnapshot)
 
     // note: get non-expired items (mesh owns ttl)
     const items = mesh.getNonExpired(sig)
@@ -889,55 +894,76 @@ export class ShowCellDrone extends Drone {
       return
     }
 
-    // note: union cells across all non-expired payloads
-    // - supports payload shapes:
-    //   1) { cells: string[] }
-    //   2) string[] (direct)
-    // - any other shape is ignored
-    const set = new Set<string>()
+    // LATEST-SNAPSHOT-WINS per publisher (was: union every non-expired
+    // payload). The old union could never RETRACT — a tile flipped private
+    // (or removed) lingered in the merged set until its original snapshot
+    // aged out of the 10-min cache. Now each publisher's membership is the
+    // cells of their NEWEST full snapshot, plus any single-cell deltas
+    // published at/after it. A fresh snapshot with the reduced set (forced
+    // on tile:public-changed) therefore drops the retracted tile at once.
+    // getNonExpired returns items newest-first, so the first full we see
+    // for a publisher is their newest; `>=` lets a same-second republish
+    // (sorted oldest-received-first within a tie) supersede correctly.
+    type PubAgg = { fullCells: string[] | null; fullAtMs: number; deltas: { cell: string; atMs: number }[] }
+    const byPublisher = new Map<string, PubAgg>()
+    const anonCells = new Set<string>()   // events with no publisher id (e.g. external tools) — unioned
+
     for (const it of items) {
+      const evt = it?.event
       const p = it?.payload
 
-      const tagPublisherId = this.readPublisherIdFromEvent(it?.event)
+      const tagPublisherId = this.readPublisherIdFromEvent(evt)
       const payloadPublisherId = String(p?.publisherId ?? p?.publisher ?? p?.clientId ?? '').trim()
-      if ((payloadPublisherId && payloadPublisherId === this.publisherId) || (tagPublisherId && tagPublisherId === this.publisherId)) {
+      const publisherId = tagPublisherId || payloadPublisherId
+      if (publisherId && publisherId === this.publisherId) continue   // our own echo
+
+      // Classify via tags: mode=snapshot/refresh → authoritative full list;
+      // mode=delta → additive single cell; mode=sync-request → not cells;
+      // grammar heartbeats (no mode) are additive too. Anything else with
+      // no mode (explicit list publish, external tooling) is a full list.
+      let mode = ''
+      let isGrammar = false
+      const tags = Array.isArray(evt?.tags) ? evt.tags : []
+      for (const t of tags) {
+        if (!Array.isArray(t) || t.length < 2) continue
+        const k = String(t[0] ?? '').trim().toLowerCase()
+        if (k === 'mode') mode = String(t[1] ?? '').trim().toLowerCase()
+        else if (k === 'source' && String(t[1] ?? '').trim() === 'show-honeycomb:grammar-heartbeat') isGrammar = true
+      }
+      if (mode === 'sync-request') continue
+
+      const cells = this.extractCellsFromEventContent(evt?.content)
+      if (cells.length === 0) continue
+
+      const atMs = Number(evt?.created_at ?? 0) > 0 ? Number(evt.created_at) * 1000 : 0
+
+      if (!publisherId) {
+        for (const cell of cells) anonCells.add(cell)
         continue
       }
 
-      const fromContent = this.extractCellsFromEventContent(it?.event?.content)
-      if (fromContent.length > 0) {
-        for (const cell of fromContent) set.add(cell)
-        continue
-      }
+      let agg = byPublisher.get(publisherId)
+      if (!agg) { agg = { fullCells: null, fullAtMs: 0, deltas: [] }; byPublisher.set(publisherId, agg) }
 
-      if (Array.isArray(p)) {
-        for (const x of p) {
-          const s = String(x ?? '').trim()
-          this.addCsvCells(set, s)
-        }
-        continue
+      const isFullList = mode === 'snapshot' || mode === 'refresh' || (!mode && !isGrammar)
+      if (isFullList) {
+        if (agg.fullCells === null || atMs >= agg.fullAtMs) { agg.fullCells = cells; agg.fullAtMs = atMs }
+      } else {
+        for (const cell of cells) agg.deltas.push({ cell, atMs })
       }
+    }
 
-      if (typeof p === 'string') {
-        const parsed = this.extractCellsFromEventContent(p)
-        if (parsed.length > 0) {
-          for (const cell of parsed) set.add(cell)
-        } else if (!this.looksStructuredContent(p)) {
-          this.addCsvCells(set, p)
-        }
-        continue
+    const set = new Set<string>(anonCells)
+    for (const agg of byPublisher.values()) {
+      if (agg.fullCells) {
+        for (const cell of agg.fullCells) set.add(cell)
+        // additions published at/after the chosen snapshot
+        for (const d of agg.deltas) if (d.atMs >= agg.fullAtMs) set.add(d.cell)
+      } else {
+        // No snapshot seen from this publisher (deltas/grammar only) — no
+        // baseline to retract against, so union what they sent.
+        for (const d of agg.deltas) set.add(d.cell)
       }
-
-      const cellsArr = p?.cells ?? p?.seeds
-      if (Array.isArray(cellsArr)) {
-        for (const x of cellsArr) {
-          const s = String(x ?? '').trim()
-          this.addCsvCells(set, s)
-        }
-      }
-
-      const singleCell = String(p?.cell ?? p?.seed ?? '').trim()
-      this.addCsvCells(set, singleCell)
     }
 
     const next = Array.from(set)
@@ -1013,7 +1039,7 @@ export class ShowCellDrone extends Drone {
   }
 
 
-  private publishLocalCells = async (lineage: any, mesh: MeshApi, sig: string, grammar: string = ''): Promise<void> => {
+  private publishLocalCells = async (lineage: any, mesh: MeshApi, sig: string, grammar: string = '', forceResnapshot = false): Promise<void> => {
     if (typeof mesh.publish !== 'function') return
 
     // Source the cell list from the current layer's children (layer-as-primitive),
@@ -1050,8 +1076,15 @@ export class ShowCellDrone extends Drone {
 
     const previousCells = this.lastLocalCellsBySig.get(sig) ?? []
 
-    // 1) one snapshot post per signature: full array of items
-    if (!this.snapshotPostedBySig.has(sig)) {
+    // A full snapshot is authoritative: the latest-snapshot-wins consumer
+    // (refreshMeshCells) treats the newest snapshot per publisher as that
+    // publisher's complete membership. Post one on first publish for this
+    // sig, or on demand (forceResnapshot) when a tile flips public→private —
+    // a fresh snapshot carrying the reduced set is the ONLY way to RETRACT
+    // on this kind-29010 path: it isn't a replaceable event, and the delta
+    // stream below is add-only. Without it, an un-shared tile lingered in
+    // the consumer's union until the original snapshot expired (~10 min).
+    if (forceResnapshot || !this.snapshotPostedBySig.has(sig)) {
       await mesh.publish(29010, sig, {
         cells: localCells,
         publisherId: this.publisherId,
@@ -1060,13 +1093,16 @@ export class ShowCellDrone extends Drone {
       }, [['publisher', this.publisherId], ['mode', 'snapshot']])
       this.snapshotPostedBySig.add(sig)
       this.#lastRefreshAtMs.set(sig, Date.now())
-    }
-
-    // 2) thereafter post only newly added single items
-    const prevSet = new Set(previousCells)
-    for (const cell of localCells) {
-      if (prevSet.has(cell)) continue
-      await mesh.publish(29010, sig, cell, [['publisher', this.publisherId], ['mode', 'delta']])
+    } else {
+      // Steady state: post only newly ADDED items as single-cell deltas so
+      // peers see additions instantly without re-sending the whole list.
+      // Removals/retractions never travel as deltas — they ride the next
+      // snapshot (forced above, or the periodic refresh below).
+      const prevSet = new Set(previousCells)
+      for (const cell of localCells) {
+        if (prevSet.has(cell)) continue
+        await mesh.publish(29010, sig, cell, [['publisher', this.publisherId], ['mode', 'delta']])
+      }
     }
 
     this.lastLocalCellsBySig.set(sig, localCells)
@@ -1144,17 +1180,6 @@ export class ShowCellDrone extends Drone {
 
     // reset refresh timer since we just published
     this.#lastRefreshAtMs.set(sig, now)
-  }
-
-  private addCsvCells = (set: Set<string>, raw: string): void => {
-    const text = String(raw ?? '').trim()
-    if (!text) return
-
-    const parts = text.split(',')
-    for (const part of parts) {
-      const cell = String(part ?? '').trim()
-      if (cell) set.add(cell)
-    }
   }
 
   private readPublisherIdFromEvent = (evt: any): string => {
@@ -3104,6 +3129,7 @@ export class ShowCellDrone extends Drone {
     }
     this.shader.setFlat(this.#flat)
     this.shader.setPivot(this.#pivot)
+    this.shader.setNeon(this.#neonMode)
     this.shader.setLabelMix(this.#labelsVisible ? 1.0 : 0.0)
     this.shader.setImageMix(this.#textOnly ? 0.0 : this.#substrateFadeMix())
 
@@ -4100,9 +4126,28 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
-    // A tile's public/private flag flipped. Only affects the render in world
-    // mode (its dim state may change) — re-render then.
+    // Neon mode toggle from the control bar — lights every tile's border with
+    // an additive glow. Pure shader uniform; the cell list is unchanged, so we
+    // only clear renderedCellsKey to defeat applyGeometry's no-op fast path and
+    // force one repaint with the new uniform.
+    this.onEffect<{ active: boolean }>('neon:mode', ({ active }) => {
+      this.#neonMode = !!active
+      this.shader?.setNeon(this.#neonMode)
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // A tile's public/private flag flipped.
     this.onEffect('tile:public-changed', () => {
+      // Re-publish the kind-29010 cell list so the flip propagates NOW. The
+      // heartbeat key (locationKey:fsRev:grammar) doesn't move on a public
+      // flip — public state is participant-local (localStorage), not the
+      // signed layer — so without this nudge the mesh wouldn't republish
+      // until the next navigation or periodic refresh. forceResnapshot posts
+      // a fresh authoritative snapshot so the latest-snapshot-wins consumer
+      // drops a now-private tile at once instead of unioning it for ~10 min.
+      void this.refreshMeshCells('', true)
+      // Render only changes in world mode (the dim state of unshared tiles).
       if (!this.#worldMode) return
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''

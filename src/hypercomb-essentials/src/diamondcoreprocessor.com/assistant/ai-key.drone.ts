@@ -9,7 +9,7 @@ import { Drone, EffectBus } from '@hypercomb/core'
 import { API_KEY_STORAGE } from './llm-api.js'
 
 const INDICATOR_KEY = 'ai-active'
-const INDICATOR_ICON = '\u2728'
+const INDICATOR_ICON = 'auto_awesome'
 const INDICATOR_LABEL = 'Claude API key active'
 
 export class AiKeyIndicatorDrone extends Drone {

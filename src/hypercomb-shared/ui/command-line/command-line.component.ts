@@ -607,14 +607,25 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       }),
     )
 
-    // Restore sticky indicators from localStorage
+    // Restore sticky indicators from localStorage. Producer-owned pills
+    // (dismissable === false — e.g. the dashboard ◆) are deliberately NOT
+    // restored: the drone that owns them re-emits the live, current pill on
+    // boot via indicator:set. Rehydrating a persisted copy only risks
+    // resurrecting an orphan whose key/label scheme has since changed —
+    // that was the "three stale dashboards" pile-up. Only genuinely sticky,
+    // user-dismissable pills survive a reload. We immediately rewrite storage
+    // with the cleaned set so any pre-existing orphans are evicted on first load.
     const saved = localStorage.getItem('hc:indicators')
     if (saved) {
       try {
-        const list = JSON.parse(saved) as { key: string; icon: string; label: string }[]
-        const m = new Map<string, { key: string; icon: string; label: string }>()
-        for (const ind of list) m.set(ind.key, ind)
+        const list = JSON.parse(saved) as { key: string; icon: string; label: string; dismissable?: boolean }[]
+        const m = new Map<string, { key: string; icon: string; label: string; dismissable?: boolean }>()
+        for (const ind of list) {
+          if (!ind?.key || ind.dismissable === false) continue
+          m.set(ind.key, ind)
+        }
         this.#indicators.set(m)
+        this.#persistIndicators()
       } catch { /* ignore corrupt data */ }
     }
 
@@ -672,7 +683,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   #persistIndicators(): void {
-    const list = [...this.#indicators().values()]
+    // Only user-dismissable pills are persisted. Producer-owned pills
+    // (dismissable === false) are re-emitted live by their drone on every
+    // boot, so keeping them out of storage is the structural guard against
+    // a stale key/label outliving the producer that created it.
+    const list = [...this.#indicators().values()].filter(ind => ind.dismissable !== false)
     if (list.length > 0) {
       localStorage.setItem('hc:indicators', JSON.stringify(list))
     } else {
@@ -1203,7 +1218,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // show move-hint indicator when tiles are selected
       this.#indicators.update(m => {
         const n = new Map(m)
-        n.set('move-hint', { key: 'move-hint', icon: '\u2725', label: 'Move mode', dismissable: false })
+        n.set('move-hint', { key: 'move-hint', icon: 'open_with', label: 'Move mode', dismissable: false })
         return n
       })
 

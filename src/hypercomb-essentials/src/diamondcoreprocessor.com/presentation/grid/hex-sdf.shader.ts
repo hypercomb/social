@@ -20,6 +20,7 @@ export class HexSdfTextureShader {
       u_hoveredIndex: { value: -1, type: 'f32' },
       u_labelMix: { value: 1.0, type: 'f32' },
       u_imageMix: { value: 1.0, type: 'f32' },
+      u_neon: { value: 0, type: 'f32' },
       u_accentColor: { value: [0.4, 0.85, 1.0], type: 'vec3<f32>' },
     }
 
@@ -55,6 +56,11 @@ export class HexSdfTextureShader {
 
   public setPivot = (pivot: boolean): void => {
     this.#ug.uniforms.u_pivot = pivot ? 1.0 : 0.0
+    this.#ug.update()
+  }
+
+  public setNeon = (on: boolean): void => {
+    this.#ug.uniforms.u_neon = on ? 1.0 : 0.0
     this.#ug.update()
   }
 
@@ -161,6 +167,7 @@ export class HexSdfTextureShader {
     uniform float u_hoveredIndex;
     uniform float u_labelMix;
     uniform float u_imageMix;
+    uniform float u_neon;
     uniform vec3 u_accentColor;
 
     uniform sampler2D u_label;
@@ -360,6 +367,23 @@ export class HexSdfTextureShader {
         color.rgb = mix(color.rgb, vec3(gray), 0.55);
         color.rgb *= 0.5;
         color.a *= 0.7;
+      }
+
+      // neon mode (control-bar toggle): every tile's border lights up with an
+      // additive glow — a wide soft bloom, a mid bloom, and a crisp core rim —
+      // mirroring the screensaver's neon edge. The hue leans from the active
+      // accent colour toward each tile's own border colour, so peer groups glow
+      // their own hue. The shape is untouched; only the rim lights up. Bloom is
+      // clipped to the hex by hexAlpha below, so it reads as an inner-edge neon.
+      if (u_neon > 0.5) {
+        float edge = abs(d);
+        float rim  = 1.0 - smoothstep(0.0, aa * 1.6,  edge);
+        float midB = 1.0 - smoothstep(0.0, aa * 4.5,  edge);
+        float wide = 1.0 - smoothstep(0.0, aa * 10.0, edge);
+        vec3 neon = mix(u_accentColor, vBorderColor, 0.45);
+        color.rgb += neon * wide * 0.10;
+        color.rgb += neon * midB * 0.22;
+        color.rgb = mix(color.rgb, neon, rim * 0.92);
       }
 
       // hover accent: simple border glow using the active accent color

@@ -55,6 +55,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   { id: 'instructions', label: 'controls.instructions', action: 'toggleInstructions', visibleWhen: 'always', instruction: 'dcp.instructions-toggle' },
   { id: 'show-hidden',  label: 'controls.show-hidden',  action: 'toggleShowHidden',   visibleWhen: 'always' },
   { id: 'world-mode',   label: 'controls.world-mode',   action: 'toggleWorldMode',    visibleWhen: 'always' },
+  { id: 'neon-mode',    label: 'controls.neon-mode',    action: 'toggleNeonMode',     visibleWhen: 'always' },
   { id: 'text-only',    label: 'controls.text-only',    action: 'toggleTextOnly',     visibleWhen: 'always' },
   { id: 'cut',          label: 'selection.cut',         action: 'cut',                visibleWhen: 'hasSelection' },
   { id: 'copy',         label: 'selection.copy',        action: 'copy',               visibleWhen: 'hasSelection' },
@@ -71,7 +72,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
 // anything in edit mode the persisted map takes over.
 const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'back': true, 'dcp': true, 'fit': true, 'zoom-out': true, 'zoom-in': true, 'lock': true, 'fullscreen': true,
-  'instructions': false, 'show-hidden': false, 'world-mode': true, 'text-only': false,
+  'instructions': false, 'show-hidden': false, 'world-mode': true, 'neon-mode': false, 'text-only': false,
   'cut': false, 'copy': false,
   'clipboard': false, 'voice': false, 'bees': false,
 }
@@ -212,6 +213,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // tiles and the tile overlay shows only the two share-toggles. Persisted so
   // a refresh keeps the mode.
   #worldMode = signal(localStorage.getItem('hc:world-mode') === '1')
+  // Neon mode — an on/off toggle. When on, the renderer lights every tile's
+  // border with an additive glow. Persisted so a refresh keeps the mode.
+  #neonMode = signal(localStorage.getItem('hc:neon-mode') === '1')
   // Fit button has three states:
   //  - 'off'    (white): regular click performs a one-shot fit; no pin
   //  - 'global' (green): every layer auto-fits on navigation
@@ -327,6 +331,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     toggleInstructions: (e) => this.toggleInstructions(e!),
     toggleShowHidden: () => this.toggleShowHidden(),
     toggleWorldMode: () => this.toggleWorldMode(),
+    toggleNeonMode: () => this.toggleNeonMode(),
     toggleTextOnly: () => this.toggleTextOnly(),
     cut: () => this.cut(),
     copy: () => this.copy(),
@@ -345,6 +350,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'fit': return this.fitLocked()
       case 'show-hidden': return this.#showHidden()
       case 'world-mode': return this.#worldMode()
+      case 'neon-mode': return this.#neonMode()
       case 'text-only': return this.#textOnly()
       case 'bees': return this.#beesVisible()
       case 'voice': return this.voiceActive()
@@ -375,6 +381,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'instructions': return 'help'
       case 'show-hidden':  return this.showHidden() ? 'visibility' : 'visibility_off'
       case 'world-mode':   return 'public'
+      case 'neon-mode':    return 'flare'
       case 'text-only':    return this.textOnly() ? 'text_fields' : 'subject'
       case 'cut':          return 'content_cut'
       case 'copy':         return 'content_copy'
@@ -834,6 +841,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // emit initial world-mode state so the renderer + overlay pick it up
     if (this.#worldMode()) {
       EffectBus.emit('world:mode', { active: true })
+    }
+
+    // emit initial neon-mode state so the renderer picks it up
+    if (this.#neonMode()) {
+      EffectBus.emit('neon:mode', { active: true })
     }
 
     // fit-locked: install the navigation listener if any fit pin exists.
@@ -1425,6 +1437,17 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#worldMode.set(next)
     localStorage.setItem('hc:world-mode', next ? '1' : '0')
     EffectBus.emit('world:mode', { active: next })
+  }
+
+  // ── neon mode (on/off) ───────────────────────────────────
+  // Lights every tile's border with an additive glow. The actual glow is
+  // painted by the renderer (hex SDF shader), which listens for 'neon:mode'.
+
+  readonly toggleNeonMode = (): void => {
+    const next = !this.#neonMode()
+    this.#neonMode.set(next)
+    localStorage.setItem('hc:neon-mode', next ? '1' : '0')
+    EffectBus.emit('neon:mode', { active: next })
   }
 
   // ── voice ────────────────────────────────────────────

@@ -158,7 +158,7 @@ export class SubstrateDrone extends Drone {
       this.#pendingPermissionHandleId = handleId
       EffectBus.emit('indicator:set', {
         key: 'substrate-reconnect',
-        icon: '◈',
+        icon: 'link_off',
         label: 'Substrate folder — click to reconnect',
       })
     })

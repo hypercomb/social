@@ -252,16 +252,21 @@ $bp-phone-max: 599px;
 }
 
 .indicator-icon {
-  font-size: 0.9em;
+  // Material Symbols ligature — the .mat-sym class on the span supplies the
+  // 'Material Symbols Outlined' font; here we only size it to sit cleanly on
+  // the command-line baseline beside the text.
+  font-size: 1.1em;
+  line-height: 1;
 }
 
 .indicator-pill.info {
   cursor: default;
   pointer-events: none;
 
+  // The dashboard ◆ is the prominent, always-on pill — render its glyph a
+  // touch larger so it reads as a primary affordance, not a status crumb.
   .indicator-icon {
-    font-family: 'hypercomb-icons', sans-serif;
-    font-size: 1.4em;
+    font-size: 1.25em;
   }
 }
 
