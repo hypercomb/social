@@ -1,44 +1,128 @@
 @if (visible()) {
   @if (multi()) {
-    <!-- Multi-selection: accordion of per-cell note lists.
-         Custom accordion (not <details>) so we can animate the panel smoothly
-         via the grid-template-rows 0fr→1fr trick and own the aria semantics. -->
-    <div class="notes-strip mode-rows" role="region" [attr.aria-label]="'notes.strip.aria' | t"
+    <!-- Multi-cell accordion mode. Drag-bar chrome is shared with single-
+         cell mode so the strip feels like one panel at two scales.
+         The full Comb v2 toolbar isn't surfaced here — bulk action across
+         cells would be ambiguous; Index is the right surface for that. -->
+    <div class="notes-strip cv2-panel mode-rows" role="region" [attr.aria-label]="'notes.strip.aria' | t"
          #panel
+         [style.transform]="panelTransform()"
          (pointerenter)="onNotesEnter()" (pointerleave)="onNotesLeave()">
-      <div class="notes-strip-header">
-        <span class="notes-strip-title">{{ 'notes.strip.title' | t }}</span>
-        <button type="button" class="notes-strip-hide" (click)="hide()"
+
+      <!-- Drag-bar header (grip · breadcrumb · exit · expand · hide) -->
+      <div class="cv2-dragbar" data-drag-grip
+           (pointerdown)="onDragStart($event)"
+           (dblclick)="resetPanelOffset()">
+        <span class="cv2-grip" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span><span></span>
+        </span>
+        <span class="cv2-dragbar-title">
+          <span class="hex-mark" aria-hidden="true"></span>
+          @if (seeAllInLayer()) {
+            <span>all cells</span>
+            <span class="cv2-dragbar-sep">·</span>
+            <span class="cv2-dragbar-faint">in layer</span>
+          } @else {
+            <span>{{ selectedCellsCount() }} cells</span>
+            <span class="cv2-dragbar-sep">·</span>
+            <span class="cv2-dragbar-faint">multi-select</span>
+          }
+        </span>
+        <span class="cv2-dragbar-spacer"></span>
+        @if (seeAllInLayer()) {
+          <!-- Labeled exit button only when in see-all mode; gives the
+               user a clear, discoverable way out of the layer-wide view
+               that wouldn't otherwise be obvious from the chrome. -->
+          <button type="button" class="cv2-exit-btn" (click)="toggleSeeAll()"
+                  title="Exit see-all (return to this cell)">
+            <span class="mat-sym" style="font-size:14px">arrow_back</span>
+            <span>exit see-all</span>
+          </button>
+        }
+        <button type="button" class="cv2-mini-btn" (click)="toggleFullscreen()"
+                [title]="isFullscreen() ? 'Exit full screen' : 'Full screen'">
+          <span class="mat-sym">{{ isFullscreen() ? 'close_fullscreen' : 'open_in_full' }}</span>
+        </button>
+        <button type="button" class="cv2-mini-btn" (click)="hide()"
                 [attr.aria-label]="'notes.hide' | t" [title]="'notes.hide' | t">
-          {{ 'notes.hide' | t }}
+          <span class="mat-sym">close</span>
         </button>
       </div>
-      @if (hasQuestions()) {
-        <div class="notes-strip-filter" role="group" aria-label="filter by kind">
-          <button type="button" class="kind-tab"
-                  [class.is-active]="kindFilter() === 'all'"
-                  (click)="setKindFilter('all')">All</button>
-          <button type="button" class="kind-tab"
-                  [class.is-active]="kindFilter() === 'q'"
-                  (click)="setKindFilter('q')">
-            <span class="kind-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><circle cx="12" cy="17" r="0.7" fill="currentColor" stroke="none"/></svg>
-            </span>
-            Questions
+
+      <!-- Selection bar — appears in multi-cell mode too when any
+           notes are checked across the accordion's groups. Same set
+           of bulk actions; each iterates per-cell internally. -->
+      @if (selectionMode()) {
+        <div class="cv2-toolbar cv2-toolbar-select">
+          <span class="cv2-select-count">
+            <span class="mat-sym filled" style="font-size:14px">check_circle</span>
+            <strong>{{ selectionCount() }}</strong> selected
+          </span>
+          <span class="cv2-sep"></span>
+          <button type="button" class="cv2-tool" (click)="deleteSelectedNotes()"
+                  title="Delete selected notes">
+            <span class="mat-sym" style="font-size:16px">delete</span>
+            <span>delete</span>
           </button>
-          <button type="button" class="kind-tab"
-                  [class.is-active]="kindFilter() === 'note'"
-                  (click)="setKindFilter('note')">
-            <span class="kind-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false"><path d="M5 4h11l4 4v12H5z"/><path d="M16 4v4h4"/><path d="M8 12h8M8 16h6"/></svg>
-            </span>
-            Notes
+          <button type="button" class="cv2-tool" (click)="copySelectedNotesText()"
+                  title="Copy selected note text to clipboard">
+            <span class="mat-sym" style="font-size:16px">content_copy</span>
+            <span>copy</span>
+          </button>
+          <button type="button" class="cv2-tool" (click)="duplicateSelectedNotes()"
+                  title="Duplicate each selected note">
+            <span class="mat-sym" style="font-size:16px">file_copy</span>
+            <span>duplicate</span>
+          </button>
+          <button type="button" class="cv2-tool" (click)="toggleSelectionKind()"
+                  title="Toggle [Q] question prefix on each selected note">
+            <span class="mat-sym" style="font-size:16px">help</span>
+            <span>mark q</span>
+          </button>
+          <button type="button" class="cv2-tool" (click)="shiftSelectedIndent(1)"
+                  title="Indent selected notes">
+            <span class="mat-sym" style="font-size:16px">format_indent_increase</span>
+          </button>
+          <button type="button" class="cv2-tool" (click)="shiftSelectedIndent(-1)"
+                  title="Outdent selected notes">
+            <span class="mat-sym" style="font-size:16px">format_indent_decrease</span>
+          </button>
+          <span class="cv2-toolbar-spacer"></span>
+          <button type="button" class="cv2-mini-btn ghost" (click)="clearNoteSelection()"
+                  title="Clear selection (Esc)">
+            <span class="mat-sym" style="font-size:14px">close</span>
           </button>
         </div>
       }
+
+      @if (hasQuestions() && !selectionMode()) {
+        <div class="cv2-filter" role="group" aria-label="filter by kind">
+          <button type="button" class="cv2-filter-chip"
+                  [class.active]="kindFilter() === 'all'"
+                  (click)="setKindFilter('all')">
+            <span class="dot all"></span>
+            all
+          </button>
+          <button type="button" class="cv2-filter-chip"
+                  [class.active]="kindFilter() === 'q'"
+                  (click)="setKindFilter('q')">
+            <span class="dot q"></span>
+            questions
+          </button>
+          <button type="button" class="cv2-filter-chip"
+                  [class.active]="kindFilter() === 'note'"
+                  (click)="setKindFilter('note')">
+            <span class="dot n"></span>
+            notes
+          </button>
+        </div>
+      }
+
       <div class="notes-strip-body notes-strip-accordion">
         @for (group of groups(); track trackByGroup($index, group)) {
-          <div class="accordion-group" [class.is-open]="group.expanded">
+          <div class="accordion-group"
+               [class.is-open]="group.expanded"
+               [attr.data-cell]="group.cell">
             <button
               type="button"
               class="accordion-head"
@@ -58,17 +142,37 @@
             <div class="accordion-panel" [id]="'notes-panel-' + group.cell" role="region" [attr.aria-hidden]="!group.expanded">
               <div class="accordion-panel-inner">
                 <ul class="strip-list strip-list-nested" role="list">
-                  @for (note of group.notes; track trackById($index, note)) {
+                  @for (note of group.notes; track trackById($index, note); let i = $index) {
+                    @if (noteDragSourceCell() === group.cell
+                         && noteDropIndex() === i
+                         && noteDragSourceId() !== note.id) {
+                      <li class="cv2-note-drop-indicator" aria-hidden="true"></li>
+                    }
                     <li class="note-row" role="listitem"
                         [class.note-row-q]="noteKind(note) === 'q'"
-                        [class.note-row-a]="noteKind(note) === 'a'">
+                        [class.note-row-a]="noteKind(note) === 'a'"
+                        [class.is-selected]="isNoteSelected(group.cell, note.id)"
+                        [class.is-dragging]="noteDragSourceId() === note.id">
+                      <span class="note-row-select"
+                            (click)="toggleNoteSelection(group.cell, note.id, $event)"
+                            [attr.aria-label]="'select ' + note.id">
+                        @if (isNoteSelected(group.cell, note.id)) {
+                          <span class="mat-sym filled" style="font-size:15px;color:var(--md-secondary)">check_box</span>
+                        } @else {
+                          <span class="mat-sym" style="font-size:15px">check_box_outline_blank</span>
+                        }
+                      </span>
+                      <span class="note-row-grip" title="drag to reorder"
+                            (pointerdown)="onNoteGripPointerDown(group.cell, note.id, $event)">
+                        <span class="mat-sym" style="font-size:13px">drag_indicator</span>
+                      </span>
                       <button class="note-open" type="button" (click)="openInGroup(group.cell, note.id)" [title]="note.text">
                         @if (noteKind(note) !== 'note') {
                           <span class="row-kind" [attr.data-kind]="noteKind(note)">
                             <span class="kind-icon" aria-hidden="true">
                               @switch (noteKind(note)) {
-                                @case ('q')  { <svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><circle cx="12" cy="17" r="0.7" fill="currentColor" stroke="none"/></svg> }
-                                @case ('a')  { <svg viewBox="0 0 24 24" focusable="false"><path d="M21 11.5a8.4 8.4 0 0 1-8.4 8.4c-1.7 0-3.3-.5-4.6-1.4L3 20l1.4-4.4A8.4 8.4 0 1 1 21 11.5z"/></svg> }
+                                @case ('q')  { <span class="mat-sym" style="font-size:13px">help</span> }
+                                @case ('a')  { <span class="mat-sym" style="font-size:13px">chat</span> }
                               }
                             </span>
                             <span class="kind-label">{{ noteKindLabel(note) }}</span>
@@ -78,8 +182,14 @@
                       </button>
                       <button class="note-delete" type="button"
                               (click)="removeInGroup(group.cell, note.id, $event)"
-                              [attr.aria-label]="'notes.delete' | t" [title]="'notes.delete' | t">×</button>
+                              [attr.aria-label]="'notes.delete' | t" [title]="'notes.delete' | t">
+                        <span class="mat-sym" style="font-size:14px">delete</span>
+                      </button>
                     </li>
+                  }
+                  @if (noteDragSourceCell() === group.cell
+                       && noteDropIndex() === group.notes.length) {
+                    <li class="cv2-note-drop-indicator" aria-hidden="true"></li>
                   }
                   <li class="add-rule-row" role="presentation">
                     <button type="button" class="add-rule-btn" (click)="captureForEmpty(group.cell)">
@@ -92,10 +202,6 @@
           </div>
         }
         @if (emptyCells().length > 0) {
-          <!-- Empty cells: selected tiles that don't have notes yet. Surfaced
-               as a flat list at the bottom so the user can see what's still
-               missing context. Clicking a pill drops the cursor into the
-               command line in capture mode for that cell. -->
           <div class="accordion-empty">
             <div class="accordion-empty-label">No notes</div>
             <ul class="accordion-empty-list" role="list">
@@ -113,109 +219,354 @@
           </div>
         }
       </div>
+
+      <!-- Multi-cell footer — mirrors the single-cell footer so the
+           user has a visible exit at the bottom of the view when
+           they're scrolled past the dragbar. -->
+      @if (seeAllInLayer()) {
+        <footer class="cv2-foot">
+          <span>{{ groups().length }} cells with notes</span>
+          <span class="cv2-foot-spacer"></span>
+          <button type="button" class="cv2-foot-link" (click)="toggleSeeAll()">
+            back to this cell
+            <span class="mat-sym" style="font-size:11px">close_fullscreen</span>
+          </button>
+        </footer>
+      }
+      <span class="cv2-resize-handle"
+            (pointerdown)="onResizeStart($event)"
+            aria-hidden="true"></span>
     </div>
   } @else {
-    <!-- Single-selection: existing flat list / chip layout -->
-    <div class="notes-strip" [class.mode-chips]="mode() === 'chips'" [class.mode-rows]="mode() === 'rows'"
+    <!-- Single-cell mode — full Comb v2 panel:
+         drag-bar · formatting toolbar (or selection bar) · filter chips ·
+         rich notes list · footer · (optionally) tool palette popover. -->
+    <div class="notes-strip cv2-panel"
+         [class.mode-chips]="mode() === 'chips'" [class.mode-rows]="mode() === 'rows'"
          #panel
          role="list" [attr.aria-label]="'notes.strip.aria' | t"
+         [style.transform]="panelTransform()"
          (pointerenter)="onNotesEnter()" (pointerleave)="onNotesLeave()">
-      <div class="notes-strip-header">
-        <span class="notes-strip-title">{{ 'notes.strip.title' | t }}</span>
-        <button type="button" class="notes-strip-hide" (click)="hide()"
+
+      <!-- Drag-bar header -->
+      <div class="cv2-dragbar" data-drag-grip
+           (pointerdown)="onDragStart($event)"
+           (dblclick)="resetPanelOffset()">
+        <span class="cv2-grip" aria-hidden="true">
+          <span></span><span></span><span></span><span></span><span></span><span></span>
+        </span>
+        <span class="cv2-dragbar-title">
+          <span class="hex-mark" aria-hidden="true"></span>
+          <span>{{ cell() }}</span>
+        </span>
+        <span class="cv2-dragbar-spacer"></span>
+        <button type="button" class="cv2-mini-btn" (click)="toggleFullscreen()"
+                [title]="isFullscreen() ? 'Exit full screen' : 'Full screen'">
+          <span class="mat-sym">{{ isFullscreen() ? 'close_fullscreen' : 'open_in_full' }}</span>
+        </button>
+        <button type="button" class="cv2-mini-btn" (click)="hide()"
                 [attr.aria-label]="'notes.hide' | t" [title]="'notes.hide' | t">
-          {{ 'notes.hide' | t }}
+          <span class="mat-sym">close</span>
         </button>
       </div>
-      @if (hasQuestions()) {
-        <div class="notes-strip-filter" role="group" aria-label="filter by kind">
-          <button type="button" class="kind-tab"
-                  [class.is-active]="kindFilter() === 'all'"
-                  (click)="setKindFilter('all')">All</button>
-          <button type="button" class="kind-tab"
-                  [class.is-active]="kindFilter() === 'q'"
-                  (click)="setKindFilter('q')">
-            <span class="kind-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><circle cx="12" cy="17" r="0.7" fill="currentColor" stroke="none"/></svg>
-            </span>
-            Questions
+
+      <!-- Formatting toolbar / selection bar -->
+      @if (selectionMode()) {
+        <div class="cv2-toolbar cv2-toolbar-select">
+          <span class="cv2-select-count">
+            <span class="mat-sym filled" style="font-size:14px">check_circle</span>
+            <strong>{{ selectionCount() }}</strong> selected
+          </span>
+          <span class="cv2-sep"></span>
+          <button type="button" class="cv2-tool" (click)="deleteSelectedNotes()"
+                  title="Delete selected notes">
+            <span class="mat-sym" style="font-size:16px">delete</span>
+            <span>delete</span>
           </button>
-          <button type="button" class="kind-tab"
-                  [class.is-active]="kindFilter() === 'note'"
-                  (click)="setKindFilter('note')">
-            <span class="kind-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" focusable="false"><path d="M5 4h11l4 4v12H5z"/><path d="M16 4v4h4"/><path d="M8 12h8M8 16h6"/></svg>
-            </span>
-            Notes
+          <button type="button" class="cv2-tool" (click)="copySelectedNotesText()"
+                  title="Copy selected note text to clipboard">
+            <span class="mat-sym" style="font-size:16px">content_copy</span>
+            <span>copy</span>
+          </button>
+          <button type="button" class="cv2-tool" (click)="duplicateSelectedNotes()"
+                  title="Duplicate each selected note">
+            <span class="mat-sym" style="font-size:16px">file_copy</span>
+            <span>duplicate</span>
+          </button>
+          <button type="button" class="cv2-tool" (click)="toggleSelectionKind()"
+                  title="Toggle [Q] question prefix on each selected note">
+            <span class="mat-sym" style="font-size:16px">help</span>
+            <span>mark q</span>
+          </button>
+          <button type="button" class="cv2-tool" (click)="shiftSelectedIndent(1)"
+                  title="Indent selected notes">
+            <span class="mat-sym" style="font-size:16px">format_indent_increase</span>
+          </button>
+          <button type="button" class="cv2-tool" (click)="shiftSelectedIndent(-1)"
+                  title="Outdent selected notes">
+            <span class="mat-sym" style="font-size:16px">format_indent_decrease</span>
+          </button>
+          <span class="cv2-toolbar-spacer"></span>
+          <button type="button" class="cv2-mini-btn ghost" (click)="clearNoteSelection()"
+                  title="Clear selection (Esc)">
+            <span class="mat-sym" style="font-size:14px">close</span>
+          </button>
+        </div>
+      } @else {
+        <!-- Shape-tag toolbar — six CSS-drawn shapes + indent / outdent
+             / clear. Every glyph is a static <span aria-hidden> carrying
+             one .hc-shape-X / .hc-tool-X literal class; no interpolation
+             inside class attributes anywhere on this toolbar. -->
+        <div class="cv2-toolbar" [class.is-readonly]="!capturing()">
+          <div class="cv2-shape-row" role="radiogroup" aria-label="Note shape">
+            <button type="button" class="cv2-shape-btn"
+                    [class.is-active]="shape() === 'circle'"
+                    [disabled]="!capturing()"
+                    (click)="setShape('circle')"
+                    aria-label="Circle" title="Circle">
+              <span class="hc-shape-glyph hc-shape-circle" aria-hidden="true"></span>
+            </button>
+            <button type="button" class="cv2-shape-btn"
+                    [class.is-active]="shape() === 'square'"
+                    [disabled]="!capturing()"
+                    (click)="setShape('square')"
+                    aria-label="Square" title="Square">
+              <span class="hc-shape-glyph hc-shape-square" aria-hidden="true"></span>
+            </button>
+            <button type="button" class="cv2-shape-btn"
+                    [class.is-active]="shape() === 'triangle'"
+                    [disabled]="!capturing()"
+                    (click)="setShape('triangle')"
+                    aria-label="Triangle" title="Triangle">
+              <span class="hc-shape-glyph hc-shape-triangle" aria-hidden="true"></span>
+            </button>
+            <button type="button" class="cv2-shape-btn"
+                    [class.is-active]="shape() === 'diamond'"
+                    [disabled]="!capturing()"
+                    (click)="setShape('diamond')"
+                    aria-label="Diamond" title="Diamond">
+              <span class="hc-shape-glyph hc-shape-diamond" aria-hidden="true"></span>
+            </button>
+            <button type="button" class="cv2-shape-btn"
+                    [class.is-active]="shape() === 'star'"
+                    [disabled]="!capturing()"
+                    (click)="setShape('star')"
+                    aria-label="Star" title="Star">
+              <span class="hc-shape-glyph hc-shape-star" aria-hidden="true"></span>
+            </button>
+            <button type="button" class="cv2-shape-btn"
+                    [class.is-active]="shape() === 'hexagon'"
+                    [disabled]="!capturing()"
+                    (click)="setShape('hexagon')"
+                    aria-label="Hexagon" title="Hexagon">
+              <span class="hc-shape-glyph hc-shape-hexagon" aria-hidden="true"></span>
+            </button>
+          </div>
+          <span class="cv2-sep"></span>
+          <button type="button" class="cv2-tool"
+                  [disabled]="!capturing()" (click)="outdent()"
+                  aria-label="Outdent" title="Outdent (Shift+Tab)">
+            <span class="hc-shape-glyph hc-tool-outdent" aria-hidden="true"></span>
+          </button>
+          <button type="button" class="cv2-tool"
+                  [disabled]="!capturing()" (click)="indent()"
+                  aria-label="Indent" title="Indent (Tab)">
+            <span class="hc-shape-glyph hc-tool-indent" aria-hidden="true"></span>
+          </button>
+          <span class="cv2-toolbar-spacer"></span>
+          <button type="button" class="cv2-tool"
+                  [disabled]="!capturing() || shape() === null"
+                  (click)="clearShape()"
+                  aria-label="Clear shape" title="Clear shape">
+            <span class="hc-shape-glyph hc-tool-clear" aria-hidden="true"></span>
           </button>
         </div>
       }
-      <div class="notes-strip-body">
-        @if (mode() === 'chips') {
-          <div class="chip-track">
-            @for (note of notes(); track trackById($index, note)) {
-              <div class="chip-wrap" role="listitem"
-                   [class.note-row-q]="noteKind(note) === 'q'"
-                   [class.note-row-a]="noteKind(note) === 'a'">
-                <button
-                  class="note-chip"
-                  type="button"
-                  (click)="open(note.id)"
-                  [title]="note.text"
-                >
-                  @if (noteKind(note) !== 'note') {
-                    <span class="row-kind chip-kind" [attr.data-kind]="noteKind(note)">
-                      <span class="kind-icon" aria-hidden="true">
-                        @switch (noteKind(note)) {
-                          @case ('q')  { <svg viewBox="0 0 24 24" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5"/><circle cx="12" cy="17" r="0.7" fill="currentColor" stroke="none"/></svg> }
-                          @case ('a')  { <svg viewBox="0 0 24 24" focusable="false"><path d="M21 11.5a8.4 8.4 0 0 1-8.4 8.4c-1.7 0-3.3-.5-4.6-1.4L3 20l1.4-4.4A8.4 8.4 0 1 1 21 11.5z"/></svg> }
-                        }
-                      </span>
-                    </span>
-                  }
-                  <span class="chip-text">{{ preview(noteDisplayText(note)) }}</span>
-                </button>
-                <button
-                  class="note-delete"
-                  type="button"
-                  (click)="remove(note.id, $event)"
-                  [attr.aria-label]="'notes.delete' | t"
-                  [title]="'notes.delete' | t"
-                >×</button>
-              </div>
+
+      <!-- Filter chips -->
+      @if (hasQuestions()) {
+        <div class="cv2-filter" [class.cv2-filter-faded]="selectionMode()" role="group" aria-label="filter by kind">
+          <button type="button" class="cv2-filter-chip"
+                  [class.active]="kindFilter() === 'all'"
+                  (click)="setKindFilter('all')">
+            <span class="dot all"></span>
+            all
+            <span>{{ notes().length }}</span>
+          </button>
+          <button type="button" class="cv2-filter-chip"
+                  [class.active]="kindFilter() === 'q'"
+                  (click)="setKindFilter('q')">
+            <span class="dot q"></span>
+            questions
+          </button>
+          <button type="button" class="cv2-filter-chip"
+                  [class.active]="kindFilter() === 'note'"
+                  (click)="setKindFilter('note')">
+            <span class="dot n"></span>
+            notes
+          </button>
+        </div>
+      }
+
+      <!-- Notes tree — recursive row template. Each row carries its
+           depth via [style.paddingLeft.px]; children render via
+           ng-template self-recursion when not collapsed. -->
+      <ng-template #rowTpl let-note="note" let-depth="depth">
+        <article class="cv2-note"
+                 [attr.data-note-id]="note.id"
+                 [style.paddingLeft.px]="depth * 18"
+                 [class.cv2-note-q]="noteKind(note) === 'q'"
+                 [class.cv2-note-a]="noteKind(note) === 'a'"
+                 [class.is-selected]="isNoteSelected(cell()!, note.id)"
+                 [class.is-editing]="editingNoteId() === note.id"
+                 [class.is-dragging]="noteDragSourceId() === note.id"
+                 [class.is-drop-into]="noteDropTargetId() === note.id && noteDropMode() === 'into'"
+                 [class.is-drop-before]="noteDropTargetId() === note.id && noteDropMode() === 'before'"
+                 [class.is-drop-after]="noteDropTargetId() === note.id && noteDropMode() === 'after'"
+                 [class.hc-shape-circle]="note.shape === 'circle'"
+                 [class.hc-shape-square]="note.shape === 'square'"
+                 [class.hc-shape-triangle]="note.shape === 'triangle'"
+                 [class.hc-shape-diamond]="note.shape === 'diamond'"
+                 [class.hc-shape-star]="note.shape === 'star'"
+                 [class.hc-shape-hexagon]="note.shape === 'hexagon'">
+          <!-- Expand/collapse chevron — only rendered when the note
+               has children. A spacer keeps the column width stable
+               for leaves so rows align across the tree. -->
+          @if (note.children.length > 0) {
+            <button type="button" class="cv2-note-chevron"
+                    [class.is-collapsed]="isCollapsed(note.id)"
+                    (click)="toggleCollapse(note.id, $event)"
+                    [attr.aria-label]="isCollapsed(note.id) ? 'Expand' : 'Collapse'">
+              <span class="cv2-chevron-mark" aria-hidden="true"></span>
+            </button>
+          } @else {
+            <span class="cv2-note-chevron-spacer" aria-hidden="true"></span>
+          }
+          <div class="cv2-note-select" (click)="toggleNoteSelection(cell()!, note.id, $event)">
+            @if (isNoteSelected(cell()!, note.id)) {
+              <span class="mat-sym filled" style="font-size:16px;color:var(--md-secondary)">check_box</span>
+            } @else {
+              <span class="mat-sym" style="font-size:16px">check_box_outline_blank</span>
             }
           </div>
-        } @else {
-          <ul class="strip-list">
-            @for (note of notes(); track trackById($index, note)) {
-              <li class="note-row" role="listitem"
-                  [class.note-row-q]="noteKind(note) === 'q'"
-                  [class.note-row-a]="noteKind(note) === 'a'">
-                <button
-                  class="note-open"
-                  type="button"
-                  (click)="open(note.id)"
-                  [title]="note.text"
-                >
-                  <span class="row-text">{{ noteDisplayText(note) }}</span>
-                </button>
-                <button
-                  class="note-delete"
-                  type="button"
-                  (click)="remove(note.id, $event)"
-                  [attr.aria-label]="'notes.delete' | t"
-                  [title]="'notes.delete' | t"
-                >×</button>
-              </li>
+          <div class="cv2-note-grip" title="drag to reorder or nest"
+               (pointerdown)="onNoteGripPointerDown(cell()!, note.id, $event)">
+            <span class="mat-sym" style="font-size:14px">drag_indicator</span>
+          </div>
+          <div class="cv2-note-body" (click)="onRowBodyClick(cell()!, note.id, $event)">
+            @if (noteKind(note) === 'q') {
+              <div class="cv2-note-kind">
+                <span class="mat-sym filled" style="font-size:12px">help</span> question
+              </div>
+            } @else if (noteKind(note) === 'a') {
+              <div class="cv2-note-kind cv2-kind-a">
+                <span class="mat-sym filled" style="font-size:12px">chat</span> answer
+              </div>
             }
-            <li class="add-rule-row" role="presentation">
-              <button type="button" class="add-rule-btn" (click)="add()">
-                {{ 'notes.addNote' | t }}
+            <!-- Shape glyph (CSS-painted via the parent's .hc-shape-X
+                 class) + plain text body. Angular's `{{ }}`
+                 interpolation escapes the content — no HTML output
+                 from the user's text. `white-space: pre-wrap` in the
+                 SCSS preserves the user's line breaks. -->
+            <span class="hc-shape-glyph cv2-note-shape" aria-hidden="true"></span>
+            <p class="cv2-note-text">{{ noteDisplayText(note) }}</p>
+          </div>
+          <!-- Kebab opens a small popover with Nest / Promote / Delete. -->
+          <button class="cv2-note-kebab" type="button"
+                  [class.is-open]="kebabOpenId() === note.id"
+                  (click)="openKebab(note.id, $event)"
+                  [attr.aria-label]="'notes.actions' | t"
+                  title="More actions">
+            <span class="mat-sym" style="font-size:14px">more_vert</span>
+          </button>
+          @if (kebabOpenId() === note.id) {
+            <div class="cv2-kebab-menu" (click)="$event.stopPropagation()">
+              <button type="button" class="cv2-kebab-item"
+                      (click)="openPicker(note.id, $event)">
+                <span class="mat-sym" style="font-size:14px">subdirectory_arrow_right</span>
+                <span>Nest under…</span>
               </button>
-            </li>
-          </ul>
+              @if (isNested(note.id)) {
+                <button type="button" class="cv2-kebab-item"
+                        (click)="promote(note.id); closeKebab()">
+                  <span class="mat-sym" style="font-size:14px">north_west</span>
+                  <span>Promote to top level</span>
+                </button>
+              }
+              <button type="button" class="cv2-kebab-item cv2-kebab-danger"
+                      (click)="remove(note.id, $event); closeKebab()">
+                <span class="mat-sym" style="font-size:14px">delete</span>
+                <span>Delete</span>
+              </button>
+            </div>
+          }
+          @if (pickerOpenForId() === note.id) {
+            <div class="cv2-nest-picker" (click)="$event.stopPropagation()"
+                 role="listbox" aria-label="Choose a parent note">
+              <div class="cv2-nest-picker-head">Nest under…</div>
+              @if (nestCandidates(note.id).length === 0) {
+                <div class="cv2-nest-picker-empty">No valid parent notes.</div>
+              } @else {
+                @for (cand of nestCandidates(note.id); track cand.id) {
+                  <button type="button" class="cv2-nest-picker-item"
+                          [style.paddingLeft.px]="8 + cand.depth * 12"
+                          (click)="nestUnder(note.id, cand.id)">
+                    <span class="hc-shape-glyph cv2-nest-picker-shape"
+                          [class.hc-shape-circle]="cand.shape === 'circle'"
+                          [class.hc-shape-square]="cand.shape === 'square'"
+                          [class.hc-shape-triangle]="cand.shape === 'triangle'"
+                          [class.hc-shape-diamond]="cand.shape === 'diamond'"
+                          [class.hc-shape-star]="cand.shape === 'star'"
+                          [class.hc-shape-hexagon]="cand.shape === 'hexagon'"
+                          aria-hidden="true"></span>
+                    <span class="cv2-nest-picker-text">{{ cand.text }}</span>
+                  </button>
+                }
+              }
+            </div>
+          }
+        </article>
+        @if (!isCollapsed(note.id) && note.children.length > 0) {
+          @for (child of note.children; track trackById($index, child)) {
+            <ng-container *ngTemplateOutlet="rowTpl; context: { note: child, depth: depth + 1 }"></ng-container>
+          }
         }
+      </ng-template>
+
+      <!-- Notes tree body. Roots render through the recursive template. -->
+      <div class="cv2-list thin-scroll notes-strip-body"
+           [class.has-root-drop]="noteDropMode() === 'root'">
+        @for (root of notes(); track trackById($index, root)) {
+          <ng-container *ngTemplateOutlet="rowTpl; context: { note: root, depth: 0 }"></ng-container>
+        }
+
+        <button type="button" class="cv2-add-row" (click)="add()">
+          <span class="mat-sym" style="font-size:14px">add</span>
+          <span>{{ 'notes.addNote' | t }}</span>
+          <span class="cv2-add-kbd">N</span>
+        </button>
       </div>
+
+      <!-- Footer -->
+      <footer class="cv2-foot">
+        @if (selectionMode()) {
+          <span><strong>{{ selectionCount() }}</strong> selected · <code>{{ cell() }}</code></span>
+          <span class="cv2-foot-spacer"></span>
+          <span class="cv2-foot-kbd">⌫</span><span>delete</span>
+          <span class="cv2-foot-kbd">esc</span><span>clear</span>
+        } @else {
+          <span>{{ notes().length }} notes in <code>{{ cell() }}</code></span>
+          <span class="cv2-foot-spacer"></span>
+          <button type="button" class="cv2-foot-link" (click)="toggleSeeAll()">
+            {{ seeAllInLayer() ? 'back to this cell' : 'see all across the hive' }}
+            <span class="mat-sym" style="font-size:11px">{{ seeAllInLayer() ? 'close_fullscreen' : 'arrow_outward' }}</span>
+          </button>
+        }
+      </footer>
+
+      <span class="cv2-resize-handle"
+            (pointerdown)="onResizeStart($event)"
+            aria-hidden="true"></span>
     </div>
   }
 }
