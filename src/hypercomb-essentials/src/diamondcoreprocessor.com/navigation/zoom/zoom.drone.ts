@@ -523,25 +523,15 @@ export class ZoomDrone extends Drone {
     // count is exact.
     const padding = this.#cellCount === 1 ? 75 : 5 // px margin from UI chrome edges
     const headerEl = document.querySelector('.header-bar') as HTMLElement | null
-    const pillEl = document.querySelector('.controls-pill') as HTMLElement | null
-    // The controls bar can dock to a side as a full-height vertical rail. In
-    // that case its rect spans the whole height, so using its .top as the
-    // safe-area bottom would collapse availH to ~0 and shrink the fit to
-    // nothing. Detect the dock state and only let a BOTTOM-docked pill pull
-    // the bottom up; a side rail instead reserves just its own narrow width on
-    // its edge (content sits beside it, vertical fit untouched).
-    const stageEl = pillEl?.closest('.pill-stage') as HTMLElement | null
-    const dockLeft = !!stageEl?.classList.contains('dock-left')
-    const dockRight = !!stageEl?.classList.contains('dock-right')
-    const pillRect = pillEl?.getBoundingClientRect()
-
+    // The controls bar FLOATS over the canvas — it must never constrain the fit
+    // area. Reserving its width/height here made it "affect the container
+    // size": a side rail shifted/shrank fits into the strip beside it, and a
+    // bottom pill pulled the fit up. Content now fits the full viewport (below
+    // the header) regardless of where the bar is docked; the bar overlays it.
     const safeTop = headerEl ? headerEl.getBoundingClientRect().bottom + padding : padding
-    const safeBottom = (pillRect && !dockLeft && !dockRight)
-      ? pillRect.top - padding
-      : window.innerHeight - padding
-
-    const safeLeft = (dockLeft && pillRect) ? pillRect.right + padding : padding
-    const safeRight = (dockRight && pillRect) ? pillRect.left - padding : window.innerWidth - padding
+    const safeBottom = window.innerHeight - padding
+    const safeLeft = padding
+    const safeRight = window.innerWidth - padding
     const availW = safeRight - safeLeft
     const availH = safeBottom - safeTop
 
