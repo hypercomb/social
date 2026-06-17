@@ -18,6 +18,7 @@
       [showOpenForSubscribersToggle]="showOpenForSubscribersToggle()"
       [openForSubscribers]="openForSubscribers()"
       [openForSubscribersLabel]="'command-line.open-for-subscribers' | t"
+      [viewToggles]="viewToggles()"
       (valueChange)="onShellValueChange($event)"
       (commit)="onShellCommit($event)"
       (completionAccepted)="onShellCompletionAccepted($event)"
@@ -25,6 +26,7 @@
       (indicatorDismiss)="onIndicatorDismiss($event)"
       (armedResourceDismiss)="onArmedResourceDismiss()"
       (openForSubscribersToggle)="onOpenForSubscribersToggle()"
+      (viewToggle)="onViewToggle($event)"
     />
 
     @if (voiceSupported && pushToTalkEnabled()) {

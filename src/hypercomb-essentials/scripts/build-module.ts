@@ -1059,6 +1059,70 @@ const main = async (): Promise<void> => {
     beesBag,
   }
 
+  // ── Closure check ────────────────────────────────────────────────
+  // Every signature a layer references (child layers in `cells`, plus
+  // `bees` and root `dependencies`) and every dep a bee declares MUST
+  // exist on disk AND be listed in the manifest. A dangling reference
+  // would publish a manifest that installs "complete" (the receiver only
+  // verifies the listed sigs — ensure-install.ts) yet renders BLANK the
+  // moment a consumer walks into the missing layer/bee: layer resolution
+  // has no host fallback on the render path, so getLayerBySig just returns
+  // null and the completeness gate exhausts. Fail the build here, before
+  // the manifest is written, so a broken package never ships.
+  {
+    const onDiskLayers = new Set(layers.keys())
+    const onDiskBees = new Set(resourceBytes.keys())
+    const onDiskDeps = new Set(dependencyBytes.keys())
+    const inManifestLayers = new Set(packageEntry.layers)
+    const inManifestBees = new Set(packageEntry.bees)
+    const inManifestDeps = new Set(packageEntry.dependencies)
+    // Layer JSON stores bees/deps WITH a `.js` suffix (rootDependencies +
+    // entry.bees use jsFileName); cells + every on-disk/manifest map use
+    // bare sigs. Normalise to bare before comparing.
+    const bare = (s: unknown): string => String(s ?? '').replace(/\.js$/i, '')
+    const errors: string[] = []
+
+    if (!onDiskLayers.has(rootLayerSig)) errors.push(`root layer ${rootLayerSig.slice(0, 12)} not written to __layers__`)
+    if (!inManifestLayers.has(rootLayerSig)) errors.push(`root layer ${rootLayerSig.slice(0, 12)} missing from manifest.layers`)
+
+    for (const [sig, json] of layers) {
+      let parsed: { name?: string; cells?: unknown[]; bees?: unknown[]; dependencies?: unknown[] }
+      try { parsed = JSON.parse(json) } catch { errors.push(`layer ${sig.slice(0, 12)} is not valid JSON`); continue }
+      const tag = `layer "${parsed.name ?? '?'}" (${sig.slice(0, 12)})`
+      for (const child of (Array.isArray(parsed.cells) ? parsed.cells : [])) {
+        const c = bare(child)
+        if (!onDiskLayers.has(c)) errors.push(`${tag} → child layer ${c.slice(0, 12)} not on disk`)
+        else if (!inManifestLayers.has(c)) errors.push(`${tag} → child layer ${c.slice(0, 12)} missing from manifest.layers`)
+      }
+      for (const beeRef of (Array.isArray(parsed.bees) ? parsed.bees : [])) {
+        const b = bare(beeRef)
+        if (!onDiskBees.has(b)) errors.push(`${tag} → bee ${b.slice(0, 12)} not on disk`)
+        else if (!inManifestBees.has(b)) errors.push(`${tag} → bee ${b.slice(0, 12)} missing from manifest.bees`)
+      }
+      for (const depRef of (Array.isArray(parsed.dependencies) ? parsed.dependencies : [])) {
+        const d = bare(depRef)
+        if (!onDiskDeps.has(d)) errors.push(`${tag} → dependency ${d.slice(0, 12)} not on disk`)
+        else if (!inManifestDeps.has(d)) errors.push(`${tag} → dependency ${d.slice(0, 12)} missing from manifest.dependencies`)
+      }
+    }
+
+    for (const [beeSig, depList] of beeDepsMap) {
+      for (const depRef of (Array.isArray(depList) ? depList : [])) {
+        const d = bare(depRef)
+        if (!onDiskDeps.has(d)) errors.push(`bee ${bare(beeSig).slice(0, 12)} declares dependency ${d.slice(0, 12)} not on disk`)
+        else if (!inManifestDeps.has(d)) errors.push(`bee ${bare(beeSig).slice(0, 12)} dependency ${d.slice(0, 12)} missing from manifest.dependencies`)
+      }
+    }
+
+    if (errors.length) {
+      console.error(`[build-module] CLOSURE CHECK FAILED — ${errors.length} dangling reference(s); manifest NOT written:`)
+      for (const e of errors.slice(0, 50)) console.error(`  - ${e}`)
+      if (errors.length > 50) console.error(`  …and ${errors.length - 50} more`)
+      throw new Error(`build-module: closure check failed (${errors.length} dangling reference(s))`)
+    }
+    console.log(`[build-module] closure OK — ${onDiskLayers.size} layers, ${onDiskBees.size} bees, ${onDiskDeps.size} deps, no dangling refs`)
+  }
+
   // Single-package manifest: always write only the current rootLayerSig.
   // Merging with prior manifest entries is a footgun — stale package keys
   // accumulate and the runtime loader picks Object.keys(packages)[0], which

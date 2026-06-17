@@ -64,6 +64,24 @@
         </div>
       }
 
+      @if (viewToggles().length) {
+        <div class="view-toggles">
+          @for (vt of viewToggles(); track vt.view) {
+            <button
+              class="view-toggle-btn"
+              [class.on]="vt.active"
+              type="button"
+              (mousedown)="$event.preventDefault(); viewToggle.emit(vt.view)"
+              [attr.aria-label]="vt.label"
+              [attr.aria-pressed]="vt.active"
+              [title]="vt.label"
+            >
+              <span class="mat-sym" aria-hidden="true">{{ vt.icon }}</span>
+            </button>
+          }
+        </div>
+      }
+
       @if (showOpenForSubscribersToggle()) {
         <button
           class="open-for-subscribers-btn"

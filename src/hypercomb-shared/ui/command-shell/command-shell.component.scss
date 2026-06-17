@@ -276,6 +276,55 @@ $bp-phone-max: 599px;
   transition: opacity 150ms ease;
 }
 
+// ── view-behavior toggles (right side, before the subscribe antenna) ──
+//
+// One stateful icon per view available at the current node (website, …).
+// Off = subdued; on = full glow, signalling "this view is active." Same
+// affordance shape as the open-for-subscribers antenna; the glyph is a
+// Material Symbols ligature (.mat-sym) declared by the view's registry entry.
+.view-toggles {
+  display: flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex-shrink: 0;
+}
+
+.view-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.8em;
+  height: 1.8em;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 50%;
+  color: rgba(var(--glow-color-rgb), 0.42);
+  cursor: pointer;
+  transition: color var(--md-dur-short) var(--md-easing-standard),
+              background var(--md-dur-short) var(--md-easing-standard),
+              box-shadow var(--md-dur-short) var(--md-easing-standard);
+  user-select: none;
+
+  .mat-sym { font-size: 1.05em; line-height: 1; }
+
+  &:hover {
+    color: rgba(var(--glow-color-rgb), 0.85);
+    background: rgba(var(--glow-color-rgb), 0.1);
+  }
+
+  &.on {
+    color: var(--glow-color);
+    background: rgba(var(--glow-color-rgb), 0.18);
+    box-shadow: 0 0 6px rgba(var(--glow-color-rgb), 0.55);
+  }
+
+  &.on:hover {
+    background: rgba(var(--glow-color-rgb), 0.28);
+  }
+}
+
 // ── open-for-subscribers toggle (floats inside command-line, right) ──
 //
 // Small antenna icon that flips swarm.setOpenForSubscribers. Off state:

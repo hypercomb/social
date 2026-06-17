@@ -626,6 +626,7 @@ window.ioc.register('@diamondcoreprocessor.com/WebsiteQueenBee', _website)
       view: 'website',
       slashCommand: '/website',
       iconName: 'website',
+      toggleIcon: 'web',
       decorationKind: 'visual:website:page',
       labelKey: 'view.website',
       descriptionKey: 'view.website.description',

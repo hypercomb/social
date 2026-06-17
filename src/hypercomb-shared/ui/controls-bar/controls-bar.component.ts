@@ -542,10 +542,19 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   })
 
   readonly secretWords = computed(() => {
-    const secret = this.#secret$()
+    // The word pair is a human-verifiable reflection of the mesh FILTER.
+    // It hashes the EXACT SAME STRING the mesh requests use today —
+    // `lineage \0 room \0 secret` (no domain) — so two peers comparing
+    // their two words confirm they share the same place AND the same
+    // secret, i.e. they're on the same channel. See SwarmDrone
+    // (#syncForCurrentLineage / composeSigForSegments), which signs this
+    // same string into the channel sig. Keep this string byte-identical
+    // to the swarm's: same trim, same NUL separators, same lineage.
+    const secret = this.#secret$().trim()
+    const room = this.#room$().trim()
     const lineage = this.#lineageKey()
-    if (!lineage && !secret) return ''
-    return secretTag(`${lineage}|${secret}`, this.#locale$())
+    if (!lineage && !room && !secret) return ''
+    return secretTag(`${lineage}\0${room}\0${secret}`, this.#locale$())
   })
 
   readonly hasSecret = computed(() => !!this.#secret$().trim())
@@ -567,13 +576,17 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   })
 
   /**
-   * Lineage path key — depends ONLY on the navigation path, so two
-   * peers at the same lineage derive the same value regardless of
-   * their room or secret. Feeds the secret-words crumb.
+   * Lineage path key — the navigation path, derived byte-identically to
+   * the swarm's lineageKey (#syncForCurrentLineage): trim each segment,
+   * drop empties, join with '/'. Two peers at the same lineage derive the
+   * same value regardless of room or secret. Feeds the secret-words crumb.
    */
   readonly #lineageKey = computed(() => {
     this.#moved$()
-    return this.navigation.segmentsRaw().join('/')
+    return this.navigation.segmentsRaw()
+      .map(s => String(s ?? '').trim())
+      .filter(s => s.length > 0)
+      .join('/')
   })
 
   readonly canGoBack = computed(() => {

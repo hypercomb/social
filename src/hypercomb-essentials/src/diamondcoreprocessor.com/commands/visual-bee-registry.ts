@@ -85,6 +85,15 @@ export type VisualBeeDescriptor = {
   readonly iconName: string
 
   /**
+   * Material Symbols ligature shown when this view is offered as a toggle
+   * on the right side of the command line (e.g. `'web'` for website).
+   * Distinct from `iconName` (which keys into IconProviderRegistry for the
+   * adoption chips). Optional — ViewBee falls back to a generic glyph when
+   * absent.
+   */
+  readonly toggleIcon?: string
+
+  /**
    * Optimization-record `kind` string written by this bee. Decoration
    * JSONs in `__optimization__` carry `{ kind, appliesTo, payload }` and
    * the renderer / adoption use this string to filter records.

@@ -31,33 +31,51 @@ No runtime registry, no alias auto-rewrite (deferred — see open items in the d
 
 ## Seed families and tags
 
-These are the **candidate** contested slots. A tag belongs here only once a *second* competing provider is plausible. Mark each as `exclusive: true` in the manifest.
+The Phase 0 competition audit (9-agent workflow over all ~90 essentials bees; enumerate → classify → adversarial verify, verdict **sound**) found **11 genuinely-contended slots**. These — and only these — get a `capability` tag (`exclusive: true` in the manifest). Each has exactly one provider today; the tag exists so a community alternative *replaces* the incumbent rather than running alongside it.
 
-| Family | Tag | Contested slot |
-|---|---|---|
-| `render` | `render:tiles` | the primary tile/cell renderer (`ShowCellDrone`-class) |
-| `render` | `render:background` | the substrate/background renderer |
-| `input` | `input:pointer` | pointer/mouse driver |
-| `input` | `input:touch` | multi-touch gesture driver |
-| `input` | `input:keyboard` | keymap / shortcut owner |
-| `nav` | `nav:zoom` | zoom arbiter (wheel/pinch) |
-| `nav` | `nav:pan` | pan driver |
-| `editor` | `editor:tile` | tile content editor |
-| `editor` | `editor:image` | image manipulation editor |
-| `clipboard` | `clipboard:core` | copy/cut/paste owner |
-| `files` | `files:dropbox` | drop-target / attachment capability |
-| `visual` | `visual:substrate` | substrate image fill |
-| `visual` | `visual:screensaver` | idle screensaver |
-| `assistant` | `assistant:bridge` | Claude bridge transport |
+| Tag | Provider today | File | Fork-likelihood |
+|---|---|---|---|
+| `render:tiles` | `ShowCellDrone` | `presentation/tiles/show-cell.drone.ts` | medium |
+| `render:host` ⚠️ | `PixiHostWorker` (Worker) | `presentation/tiles/pixi-host.worker.ts` | medium |
+| `render:background` | `BackgroundDrone` | `presentation/background/background.drone.ts` | low |
+| `visual:screensaver` | `ScreensaverDrone` | `presentation/screensaver/screensaver.drone.ts` | low |
+| `nav:zoom` | `ZoomDrone` | `navigation/zoom/zoom.drone.ts` | medium |
+| `nav:pan` | `PanningDrone` | `navigation/pan/panning.drone.ts` | medium |
+| `input:touch` | `TouchGestureCoordinator` (plain class) | `navigation/touch/touch-gesture.coordinator.ts` | low |
+| `editor:tile` | `TileEditorDrone` (plain class) | `editor/tile-editor.drone.ts` | medium |
+| `clipboard:core` | `ClipboardWorker` (Worker) | `clipboard/clipboard.worker.ts` | low |
+| `files:dropbox` | `FileDropDrone` | `files/file-drop.drone.ts` | low |
+| `assistant:bridge` | `ClaudeBridgeWorker` (Worker) | `assistant/claude-bridge.worker.ts` | high |
+
+> ⚠️ **`render:host` owns the Pixi `Application`/canvas/root container and emits `render:host-ready`**, which `BackgroundDrone`, `TileOverlayDrone`, `TileSelectionDrone`, `AvatarSwarmDrone`, and `ScreensaverDrone` all consume. It is the highest-confidence slot and was the one slot missing from the first draft of this file.
+
+### Wiring caveat — `capability` must be readable off non-Drone classes
+
+**3 of the 11 owners are not `Drone` subclasses:** `TileEditorDrone` and `TouchGestureCoordinator` are plain side-effect-registered classes, and `ClipboardWorker` / `ClaudeBridgeWorker` / `PixiHostWorker` are Workers. `Bee.base.capability` and the static build-time extractor must read the field off Workers and plain registered classes — **not only `Drone`** — or these slots silently fail to resolve.
+
+### Speculative tags — real concept, no taggable bee today (do NOT add yet)
+
+- `input:pointer` — pointer handling is distributed across `SelectionInputDrone`, `DesktopMoveInput`, `SpacebarPanInput`, `MousewheelZoomInput`; no single driver bee.
+- `input:keyboard` — owned by `keymap.service.ts` (a **service**, not a Bee).
+- `editor:image` — owned by `image-editor.service.ts` (a **service**, not a Bee).
+- `visual:substrate` — `SubstrateDrone` is single-owner *additive* (image-fill on blank tiles); leave untagged until a second substrate-fill provider appears.
+
+### Benign double-registrations (NOT contention)
+
+`@diamondcoreprocessor.com/PinchZoomInput` and `@diamondcoreprocessor.com/TouchGestureCoordinator` are each registered from two modules (their own file **and** `zoom.drone.ts:865-872`). This is a deliberate tree-shaking workaround (re-importing the plain class so esbuild keeps its `new …()` side-effect) — the **same** class, last-write-wins, not two competing providers. The resolver must not mistake these for a contest.
 
 ## Explicitly NOT tagged (run-all cohorts)
 
-These subsystems are **co-operating**, not competing. They must remain untagged so every member runs. (They keep their `genotype` cohort label for visibility, which is a different mechanism.)
+These are **co-operating**, not competing — they must stay untagged so every member runs. (They keep their coarse `genotype` cohort label for visibility, which is a different mechanism.) Confirmed by the audit:
 
-- **`sharing`** — swarm, nostr-mesh, content-broker, follow, mesh-adapter, avatar-swarm, ambient-presence, subscribe-consent, swarm-adopt (9 drones, all required).
-- **`assistant`** orchestration drones beyond the single contested transport slot.
-- **`meeting`** — meeting/queen drones (5, complementary).
-- **`movement`** — move + layout.queen + move-preview (complementary).
-- **`history`**, **`selection`**, **`format`** — single-owner subsystems with no competing alternative today.
+- **`sharing` (genotype) — 9 core drones + 3 relay-config queens, all required:** swarm, nostr-mesh, content-broker, follow, mesh-adapter, ambient-presence, subscribe-consent, swarm-adopt, **avatar-swarm** (note: `AvatarSwarmDrone` has `genotype='sharing'` — tagging it `render:avatar-swarm` would dispose its sharing siblings), plus use-live-relay / mesh-block / mesh-clear queens. (Also `SpotlightScrollInput` / `SpotlightService` — non-Bee, untaggable.)
+- **Presentation overlay/feedback stack (4)** — `TileOverlayDrone`, `TileSelectionDrone`, `MovePreviewDrone`, and the icon-providing `TileActionsDrone` paint **distinct, non-overlapping layers** on the shared `render:host` container. They co-operate; none replaces another. The base renderer slot is already `render:tiles`.
+- **Zoom/pan input feeders (5)** — mousewheel / pinch / spacebar / touch-pan delegates all feed the single `nav:zoom` / `nav:pan` state owners. The owners are the slots; the feeders are not.
+- **Editor input feeders (5)** — `image-drop`, `image-paste`, `resource-attach`, link feeders supply content into `editor:tile`. Complementary, not the editor slot.
+- **Icon providers (registry-fed)** — many drones register overlay icons into `IconProviderRegistry`/`ICON_REGISTRY`; they additively populate one action set.
+- **`movement` (4)** — move + layout.queen + move-preview + input handlers (complementary).
+- **`assistant` orchestration (7)** beyond the single `assistant:bridge` slot — conversation, atomize, structure-drop, ai-key, llm.queen, etc.
+- **`meeting` (5)** — signaling, video, controls, hive WebRTC state (complementary).
+- **`history` (6), `selection`, `format`, slash-command queens (~25), `notes`, `settings`, `dashboard`, `recording`, `computation`** — single-owner / additive, no competing alternative.
 
-If a second implementation of any of these ever appears and genuinely contends for one slot, introduce a fine-grained `capability` tag for *that specific slot only* — never tag the whole cohort.
+If a second implementation of any of these ever genuinely contends for one slot, introduce a fine-grained `capability` tag for *that specific slot only* — never tag the whole cohort.

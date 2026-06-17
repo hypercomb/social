@@ -62,6 +62,14 @@ export class CommandShellComponent implements AfterViewInit {
   readonly openForSubscribersLabel = input<string>('Allow anyone to subscribe to my hive')
 
   /**
+   * Available view-behavior toggles for the current node (e.g. website).
+   * Rendered as stateful on/off Material icons on the right side, sourced
+   * from VisualBeeRegistry via the parent's ViewBee subscription. The shell
+   * stays presentational — it never reads the registry itself.
+   */
+  readonly viewToggles = input<readonly { view: string; icon: string; label: string; active: boolean }[]>([])
+
+  /**
    * Optional armed-resource preview — when set, the chevron is replaced
    * with this thumbnail (same box, no reflow). Clicking it dismisses the arm.
    */
@@ -94,6 +102,10 @@ export class CommandShellComponent implements AfterViewInit {
   /** Emitted when the open-for-subscribers icon is clicked. Parent
    *  flips swarm.setOpenForSubscribers — the shell never touches IoC. */
   readonly openForSubscribersToggle = output<void>()
+
+  /** Emitted when a view toggle is clicked — payload is the view name
+   *  (e.g. `'website'`). Parent forwards it to ViewBee via EffectBus. */
+  readonly viewToggle = output<string>()
 
   /** Template handler for clicks on the armed-resource thumbnail. */
   onArmedGlyphMouseDown = (e: MouseEvent): void => {

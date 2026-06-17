@@ -144,7 +144,8 @@ Instead, introduce a **new, optional, fine-grained field** on `Bee.base`:
 capability?: string   // form '<family>:<noun>', e.g. 'render:tiles', 'input:pointer'
 ```
 
-- Declared **only by bees that genuinely COMPETE** for one slot (multiple tile renderers, multiple pointer drivers). This set is small — far smaller than the ~45 carrying a `genotype`.
+- Declared **only by bees that genuinely COMPETE** for one slot. The Phase 0 audit (see `capability-tags.md`) found this set is **11 slots** across ~90 bees: `render:tiles`, `render:host`, `render:background`, `visual:screensaver`, `nav:zoom`, `nav:pan`, `input:touch`, `editor:tile`, `clipboard:core`, `files:dropbox`, `assistant:bridge`. Everything else is a co-operating cohort or additive singleton and stays untagged.
+- **Wiring caveat (must-fix):** 3 of the 11 owners are **not `Drone` subclasses** — `TileEditorDrone`/`TouchGestureCoordinator` are plain side-effect-registered classes, and `ClipboardWorker`/`ClaudeBridgeWorker`/`PixiHostWorker` are Workers. So `capability` and the static extractor (§6.2) must read off **Workers and plain registered classes, not only `Drone`**, or those slots silently fail to resolve.
 - **Untagged and cohort-tagged bees run exactly as today** (IoC first-wins per `iocKey`). The resolver's default for an unrecognized/absent tag is **RUN ALL — no dedup.** This structurally protects swarm/assistant/meeting/movement subsystems.
 - Vocabulary is the same flat `<family>:<noun>` shape as decoration kinds (`files:dropbox`, `visual:website:page`), so visual-bees' existing `decorationKind` can act as a capability tag with zero code change.
 - `capability` is **code metadata extracted statically at build time** (§6), carried in the layer/manifest bytes — never read by instantiating untrusted adopted bees, never stored in the layer (layer purity preserved).
@@ -339,7 +340,7 @@ At adopt time the adopted bees are untrusted and **not instantiated**, so `capab
 
 ## 8. Phased build sequence
 
-0. **Competition audit (do this first).** Enumerate the bees that genuinely compete for one slot (multiple renderers, multiple pointer drivers, …). That set is the entire scope of the new `capability` field. Everything else stays untagged → run-all.
+0. **Competition audit — DONE** (9-agent workflow, verdict *sound*). Result: **11 contended slots** (listed in §4.1 and `capability-tags.md`), out of ~90 bees. The remainder are co-operating cohorts (sharing=9+3, presentation overlay stack=4, zoom/pan feeders=5, editor feeders=5, meeting=5, assistant orchestration=7, history=6, …) that must stay untagged. Note the only iocKey double-registrations (`PinchZoomInput`, `TouchGestureCoordinator`) are benign tree-shaking re-registrations of the same class, not contention.
 1. **Static tag extraction + manifest production (no behavior change).** Add `capability`/`exclusive` to the bee doc entry in the essentials build; add the `feature:manifest` walk at `#fillBranchSection` (cached by branch-root sig) → `writeDecoration`. Verify the sig rides the branch root's `decorations` slot. No resolver yet.
 2. **`CapResolver` (observe-only).** Singleton subscribing to `onRegister`, building `Map<tag, candidates>`. Add `window.__hcCapabilityReport()`. Verify in **hypercomb-dev (port 4250) first** that `beeSig === null` fallback resolves identically to web.
 3. **Bench lens (read-only).** `cap-bench.component.ts` rendering tag rows + worker-state badges from `CapResolver` + `activeSigSet`. Segmented control + File Explorer lens. Mount in **both** web and dev shells.

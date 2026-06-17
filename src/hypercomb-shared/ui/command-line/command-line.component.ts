@@ -529,6 +529,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   #indicatorUnsubs: (() => void)[] = []
 
+  // ── view-behavior toggles (right side) ────────────────
+  //
+  // Stateful on/off icons for the views available at the current node
+  // (e.g. website). Sourced from the essentials ViewBee over EffectBus
+  // (`view-toggles:changed`); a click routes back as `view:toggle`. The
+  // shell renders them next to the open-for-subscribers antenna.
+  readonly #viewToggles = signal<readonly { view: string; icon: string; label: string; active: boolean }[]>([])
+  readonly viewToggles = this.#viewToggles.asReadonly()
+
   // ── open-for-subscribers toggle ───────────────────────
   //
   // Floating icon inside the command-line that flips
@@ -605,6 +614,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         this.#indicators.update(m => { const n = new Map(m); n.delete(p.key); return n })
         this.#persistIndicators()
       }),
+      // View-behavior toggles, recomputed by ViewBee on every navigation.
+      // Late-subscriber replay means we get the current set immediately.
+      EffectBus.on<{ toggles?: { view: string; icon: string; label: string; active: boolean }[] }>(
+        'view-toggles:changed',
+        (p) => this.#viewToggles.set(Array.isArray(p?.toggles) ? p!.toggles : []),
+      ),
     )
 
     // Restore sticky indicators from localStorage. Producer-owned pills
@@ -674,6 +689,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (!swarm?.setOpenForSubscribers) return
     const current = !!swarm.openForSubscribers()
     swarm.setOpenForSubscribers(!current)
+  }
+
+  /** Forward a view-toggle click to ViewBee, which flips the active view. */
+  onViewToggle(view: string): void {
+    if (!view) return
+    EffectBus.emit('view:toggle', { view })
   }
 
   onIndicatorDismiss(key: string): void {
