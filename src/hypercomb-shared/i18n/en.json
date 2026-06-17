@@ -350,6 +350,7 @@
   "breadcrumb.installing": "installing",
   "breadcrumb.installed": "installed",
   "breadcrumb.installed-count": "installed ({count})",
+  "upgrade.available": "Update available — open the installer to review and upgrade",
   "breadcrumb.sync-error": "sync error",
   "keymap.escape": "Cancel / dismiss",
   "keymap.shortcuts": "Show keyboard shortcuts",

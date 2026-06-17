@@ -1,0 +1,52 @@
+// Host participates directly in the .header-bar flex row (like the other
+// header cells), so the button itself is the flex item.
+:host {
+  display: contents;
+}
+
+.upgrade-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  flex-shrink: 0;
+  padding: 0 1rem;
+  margin: 0;
+
+  border: none;
+  border-left: 1.5px solid rgba(77, 166, 255, 0.4);
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+  color: #4da6ff;
+  transition: background 0.2s ease, color 0.2s ease;
+
+  // Gentle attention pulse — an update is waiting, not an error.
+  animation: upgrade-pulse 1.8s ease-in-out infinite;
+
+  &:hover { background: rgba(77, 166, 255, 0.1); color: #7ec0ff; }
+  &:active { background: rgba(77, 166, 255, 0.16); }
+  &:focus-visible { outline: 1px solid rgba(77, 166, 255, 0.5); outline-offset: -1px; }
+
+  .mat-sym {
+    font-family: 'Material Symbols Outlined';
+    font-size: 1.3rem;
+    line-height: 1;
+  }
+
+  .upgrade-count {
+    font: 600 0.6rem/1 var(--hc-mono, ui-monospace, monospace);
+    color: #4da6ff;
+  }
+}
+
+@keyframes upgrade-pulse {
+  0%, 100% { opacity: 0.72; }
+  50%      { opacity: 1; }
+}
+
+// Hidden on phones — the header collapses there; the installer is
+// reachable via the controls bar's DCP action instead.
+@media (max-width: 599px) {
+  .upgrade-indicator { display: none; }
+}

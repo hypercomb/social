@@ -143,6 +143,29 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
 }
 
 // ─────────────────────────────────────────────────────────────────────
+// Update check (post-boot, off the critical path). The push-only boot
+// contract forbids a staleness fetch DURING boot, but once the app is
+// up we may compare the cached install against the shell's bundled
+// `/content/` package to surface an "update available" affordance. This
+// never installs anything — it only emits `update:available` so the UI
+// can show an upgrade icon that routes the user to the installer.
+// ─────────────────────────────────────────────────────────────────────
+
+export const checkForUpdate = async (): Promise<void> => {
+  const cached = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
+  // Not installed yet (cold/welcome state) — the install prompt handles that,
+  // there's no "update" to offer over an absent install.
+  if (!cached || cached.bees.length === 0) return
+  const bundled = await fetchBundledPackage()
+  // No bundled manifest (dev shell has no /content/, or offline) — stay quiet.
+  if (!bundled) return
+  const available = bundledDiffersFromCached(bundled, cached)
+  const cachedSet = new Set(cached.bees)
+  const newCount = bundled.bees.filter(sig => !cachedSet.has(sig)).length
+  EffectBus.emit('update:available', { available, newCount, packageSig: bundled.packageSig })
+}
+
+// ─────────────────────────────────────────────────────────────────────
 // User-initiated bundled upgrade. Fired explicitly by the "Upgrade
 // Hypercomb" button in the install prompt UI. Walks the same path
 // the old auto-fallback used (fetch /content/manifest.json → install

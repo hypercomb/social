@@ -324,6 +324,7 @@
   "breadcrumb.installing": "インストール中",
   "breadcrumb.installed": "インストール済み",
   "breadcrumb.installed-count": "インストール済み（{count}）",
+  "upgrade.available": "アップデートあり — インストーラーを開いて確認・更新",
   "breadcrumb.sync-error": "同期エラー",
   "keymap.escape": "キャンセル・閉じる",
   "keymap.shortcuts": "キーボードショートカットを表示",

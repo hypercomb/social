@@ -1,6 +1,6 @@
 import { AfterViewInit, Component, computed, effect, HostBinding, inject, signal } from '@angular/core'
 import { type Bee, EffectBus } from '@hypercomb/core'
-import { upgradeFromBundled, type BootStatus } from '../setup/ensure-install'
+import { upgradeFromBundled, checkForUpdate, type BootStatus } from '../setup/ensure-install'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
 import { CoreAdapter } from './core-adapter'
@@ -22,12 +22,13 @@ import { LayerCycleStripComponent } from "@hypercomb/shared/ui/layer-cycle-strip
 import { ToastComponent } from "@hypercomb/shared/ui/toast/toast.component"
 import { PresenceBannerComponent } from "@hypercomb/shared/ui/presence-banner/presence-banner.component"
 import { SyncIndicatorComponent } from "@hypercomb/shared/ui/sync-indicator/sync-indicator.component"
+import { UpgradeIndicatorComponent } from "@hypercomb/shared/ui/upgrade-indicator/upgrade-indicator.component"
 import { SwarmAdoptPanelComponent } from "@hypercomb/shared/ui/swarm-adopt-panel/swarm-adopt-panel.component"
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent, FilesViewerComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, ToastComponent, PresenceBannerComponent, SyncIndicatorComponent, SwarmAdoptPanelComponent],
+  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent, FilesViewerComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, ToastComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })
@@ -204,6 +205,14 @@ export class App implements AfterViewInit {
   public ngAfterViewInit(): void {
     void this.runtimeReady.then(() => {
       void this.startRegisteredBees()
+      // Post-boot update check — OFF the boot critical path (push-only boot
+      // still reads OPFS only). Compares the cached install against the
+      // shell's bundled package; if newer, emits `update:available` so the
+      // header's upgrade indicator appears. Re-checks on tab refocus so a
+      // long-open session notices a fresh deploy after the user returns.
+      const runCheck = (): void => { void checkForUpdate() }
+      setTimeout(runCheck, 4000)
+      window.addEventListener('focus', () => setTimeout(runCheck, 500))
     })
   }
 
