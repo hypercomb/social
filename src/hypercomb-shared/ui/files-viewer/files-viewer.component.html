@@ -1,0 +1,65 @@
+@if (visible()) {
+  <aside
+    class="files-panel"
+    (keydown)="onKey($event)"
+    tabindex="-1"
+    role="dialog"
+    [attr.aria-label]="'files.viewer.title' | t"
+  >
+    <header class="files-header">
+      <span class="files-title">{{ 'files.viewer.title' | t }}</span>
+      <span class="files-cell">{{ title() }}</span>
+      <button class="files-close" type="button" (click)="close()" [attr.aria-label]="'files.close' | t">×</button>
+    </header>
+
+    @if (types().length > 1) {
+      <div class="files-filters" role="toolbar">
+        <button
+          class="ftype-chip"
+          type="button"
+          [class.active]="activeTypes().size === 0"
+          (click)="clearTypes()"
+        >{{ 'files.all' | t }}</button>
+        @for (t of types(); track t.key) {
+          <button
+            class="ftype-chip"
+            type="button"
+            [class.active]="isActive(t.key)"
+            [style.--c]="t.color"
+            [attr.title]="t.labelKey | t"
+            (click)="toggleType(t.key)"
+          >
+            <span class="ftype-badge" [style.color]="t.color">{{ t.short }}</span>
+            <span class="ftype-count">{{ t.count }}</span>
+          </button>
+        }
+      </div>
+    }
+
+    @if (filtered().length === 0) {
+      <p class="files-empty">{{ 'files.empty' | t }}</p>
+    } @else {
+      <ul class="files-list">
+        @for (file of filtered(); track file.decorationSig) {
+          <li class="files-row">
+            <span class="ftype-badge row" [style.color]="badge(file).color">{{ badge(file).short }}</span>
+            <div class="files-meta">
+              <span class="files-name" [title]="file.name">{{ file.name }}</span>
+              <span class="files-sub">
+                @if (showSource() && file.cell) {
+                  <span class="files-source">{{ file.cell }}</span>
+                  <span class="files-dot">·</span>
+                }
+                <span class="files-size">{{ sizeLabel(file.size) }}</span>
+              </span>
+            </div>
+            <div class="files-actions">
+              <button class="files-action download" type="button" (click)="download(file)">{{ 'files.download' | t }}</button>
+              <button class="files-action remove" type="button" (click)="remove(file)" [attr.aria-label]="'files.remove' | t">×</button>
+            </div>
+          </li>
+        }
+      </ul>
+    }
+  </aside>
+}

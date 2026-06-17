@@ -9,7 +9,7 @@ import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
 import { isSignature, readCellProperties, writeCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
 import { readViewportAt } from '../../editor/viewport-store.js'
-import { hideStorageKey } from './tile-actions.drone.js'
+import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
 import type { HistoryService, LayerContent } from '../../history/history.service.js'
 import type { HistoryCursorService, CursorState } from '../../history/history-cursor.service.js'
@@ -17,7 +17,7 @@ import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoo
 
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
-type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean }
+type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean }
 
 /** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range. */
 function labelToRgb(label: string): [number, number, number] {
@@ -339,7 +339,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -425,6 +425,19 @@ export class ShowCellDrone extends Drone {
 
   // incremental rendering state — tracks what's currently painted (geometry cache)
   private readonly renderedCells = new Map<string, Cell>()
+  // When true, a takeover feature (e.g. the screensaver bounce mode) owns the
+  // screen: the hive layer is hidden and synchronize-driven renders short-
+  // circuit so nothing flips it back. Cleared via render:set-hive-visible.
+  #hiveHidden = false
+
+  /** A lightweight snapshot of the tiles currently painted at this node —
+   *  axial coords, label, image signature, and whether text is suppressed.
+   *  Used by takeover features (screensaver) that need the visible tile set,
+   *  what each tile shows, and where it sits, without reaching into render
+   *  internals. */
+  public snapshotCells(): { q: number; r: number; label: string; imageSig?: string; hideText?: boolean }[] {
+    return [...this.renderedCells.values()].map(c => ({ q: c.q, r: c.r, label: c.label, imageSig: c.imageSig, hideText: c.hideText }))
+  }
   // per-layer cache: location key → cells array (for instant back-navigation)
   #layerCellsCache = new Map<string, { cells: Cell[]; cellNames: string[]; localCellSet: Set<string>; branchSet: Set<string> }>()
   // per-layer viewport snapshot cache — skips OPFS read of `0000` on back-nav fast path.
@@ -488,6 +501,12 @@ export class ShowCellDrone extends Drone {
   #substrateFadeRaf = 0
   #showHiddenItems = false
   #currentHiddenSet = new Set<string>()
+  // World mode (control-bar toggle): when on, tiles that are NOT public
+  // render dimmed (a "what you're sharing" preview). It never removes tiles —
+  // everything stays visible, unshared ones just dim.
+  #worldMode = (() => {
+    try { return localStorage.getItem('hc:world-mode') === '1' } catch { return false }
+  })()
   // Names of cells in the current render that came from an ephemeral
   // tile source (sync preview, not adopted to OPFS). Used by the pinned
   // index writer to skip per-cell OPFS writes that would NotFound, and
@@ -1022,6 +1041,13 @@ export class ShowCellDrone extends Drone {
         localCells = resolved.filter((n): n is string => n !== null)
       } catch { /* keep empty */ }
     }
+
+    // PUBLIC FILTER — broadcast only the public subset on this mesh path too
+    // (kind 29010), mirroring swarm.drone's #publishSubtree. Private tiles
+    // must never leave the device. isCellPublic is branch-aware.
+    const publicLocation = String(lineage?.explorerLabel?.() ?? '/')
+    localCells = localCells.filter(name => isCellPublic(publicLocation, name))
+
     const previousCells = this.lastLocalCellsBySig.get(sig) ?? []
 
     // 1) one snapshot post per signature: full array of items
@@ -1592,6 +1618,9 @@ export class ShowCellDrone extends Drone {
 
   private readonly renderFromSynchronize = async (): Promise<void> => {
     ;(window as unknown as { __hcNav?: (l: string, e?: string) => void }).__hcNav?.('render:start')
+    // A takeover feature (screensaver) owns the screen — keep the hive hidden
+    // and do no work. A queued requestRender fires on restore (set-hive-visible).
+    if (this.#hiveHidden) { if (this.layer) this.layer.visible = false; return }
     this.shader?.setHoveredIndex(-1)
     if (!this.pixiApp || !this.pixiContainer || !this.pixiRenderer) {
       this.clearMesh("synchronize: pixi not ready")
@@ -2511,6 +2540,7 @@ export class ShowCellDrone extends Drone {
       }
     }
 
+
     // clipboard view: show only clipboard labels
     if (this.#clipboardView) {
       const clipLabels = this.#clipboardView.labels
@@ -3030,9 +3060,15 @@ export class ShowCellDrone extends Drone {
       return
     }
 
-    // flat-top swaps width/height bounding box
-    const hexHalfW = this.#flat ? circumRadiusPx : (Math.sqrt(3) * circumRadiusPx) / 2
-    const hexHalfH = this.#flat ? (Math.sqrt(3) * circumRadiusPx) / 2 : circumRadiusPx
+    // The SDF radius uniform receives circumRadiusPx but is treated as the
+    // apothem, so each hex is drawn with its POINTS reaching circumRadiusPx/cos30
+    // from centre — further than (√3/2)·circumRadiusPx. Size the quad's bounding
+    // box to that true point reach so the sharp tips (top/bottom for point-top,
+    // left/right for flat-top) aren't sliced flat by the quad edge. Only the
+    // transparent quad grows; hex size, spacing and the shader are untouched.
+    const pointReachPx = circumRadiusPx / 0.8660254 // centre-to-point of the drawn hex
+    const hexHalfW = this.#flat ? pointReachPx : circumRadiusPx
+    const hexHalfH = this.#flat ? circumRadiusPx : pointReachPx
     const quadHalfW = hexHalfW + padPx
     const quadHalfH = hexHalfH + padPx
     const quadW = quadHalfW * 2
@@ -3346,6 +3382,17 @@ export class ShowCellDrone extends Drone {
     // layer, so the render trigger has to be explicit. Last-value replay means
     // a snapshot already cached fires this immediately on subscribe.
     this.onEffect('registry:snapshot', () => this.requestRender())
+
+    // render:set-hive-visible — a takeover feature (screensaver bounce mode)
+    // hides the hive grid while it owns the screen, then restores it. While
+    // hidden, renderFromSynchronize short-circuits (see #hiveHidden) so a
+    // stray synchronize can't un-hide the layer mid-takeover. On restore we
+    // force a fresh paint since renders were suppressed.
+    this.onEffect<{ visible: boolean }>('render:set-hive-visible', ({ visible }) => {
+      this.#hiveHidden = !visible
+      if (this.layer) this.layer.visible = visible
+      if (visible) this.requestRender()
+    })
 
     // viewport:persisted — VP just wrote pan/zoom/meshOffset for some
     // directory. Mirror it into our back-nav cache so navigating-out-and-
@@ -4040,6 +4087,23 @@ export class ShowCellDrone extends Drone {
     // show hidden items grayed out when eye toggle is active
     this.onEffect<{ active: boolean }>('visibility:show-hidden', ({ active }) => {
       this.#showHiddenItems = active
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // World mode toggle from the command bar — dims unshared tiles (no filter).
+    this.onEffect<{ active: boolean }>('world:mode', ({ active }) => {
+      this.#worldMode = !!active
+      this.#layerCellsCache.clear()
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
+    // A tile's public/private flag flipped. Only affects the render in world
+    // mode (its dim state may change) — re-render then.
+    this.onEffect('tile:public-changed', () => {
+      if (!this.#worldMode) return
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
       this.requestRender()
@@ -4838,6 +4902,11 @@ export class ShowCellDrone extends Drone {
     // during move drag, use reordered names so labels map to correct indices
     const effectiveNames = this.moveNames ?? names
 
+    // World mode: tiles that aren't public render dimmed. Resolve the location
+    // once; isCellPublic() is branch-aware (own flag or any ancestor branch).
+    const worldMode = this.#worldMode
+    const worldLocation = worldMode ? String(this.resolve<any>('lineage')?.explorerLabel?.() ?? '/') : ''
+
     // Stage diagnosis: any occupied slot at or past `max` is CUT from this
     // render entirely — those tiles only appear when a later pass renders
     // with a bigger axial map. This is the "second stage" of a two-stage
@@ -4860,7 +4929,8 @@ export class ShowCellDrone extends Drone {
       // The activity pulse (new-cell fade, hover) still plays on top; the
       // presence glow keeps a tile lit while peers are exploring inside it.
       const heat = Math.max(this.#heatByLabel.get(label) ?? 0, this.#presenceGlowByLabel.get(label) ?? 0)
-      out.push({ q: a.q, r: a.r, label, external: !localCellSet.has(label), heat, hasBranch: branchSet?.has(label) ?? false, divergence: div })
+      const unshared = worldMode && !isCellPublic(worldLocation, label)
+      out.push({ q: a.q, r: a.r, label, external: !localCellSet.has(label), heat, hasBranch: branchSet?.has(label) ?? false, divergence: div, unshared })
     }
 
     return out
@@ -5187,8 +5257,13 @@ export class ShowCellDrone extends Drone {
     // Including the generation forces a rebuild in exactly the cases
     // where it's needed (and only those).
     const atlasGen = this.imageAtlas?.evictionGeneration ?? 0
-    let s = `p${this.#pivot ? 1 : 0}f${this.#flat ? 1 : 0}g${atlasGen}|`
-    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${c.hasBranch ? 1 : 0}:${c.divergence ?? 0}:${c.hideText ? 1 : 0}|`
+    // Same rule for the LABEL atlas: when its 64 slots wrap and a slot is
+    // reused for a different label, a cell's baked label-UV goes stale.
+    // Folding its generation in forces the rebake that re-points cells at
+    // their fresh slots (the superimposed-labels-after-screensaver bug).
+    const labelGen = this.atlas?.evictionGeneration ?? 0
+    let s = `p${this.#pivot ? 1 : 0}f${this.#flat ? 1 : 0}g${atlasGen}L${labelGen}|`
+    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${c.hasBranch ? 1 : 0}:${c.divergence ?? 0}:${c.hideText ? 1 : 0}:${c.unshared ? 1 : 0}|`
     return s
   }
 
@@ -5213,6 +5288,7 @@ export class ShowCellDrone extends Drone {
     const borderColor = new Float32Array(cells.length * 12)
     const cellIndex = new Float32Array(cells.length * 4)
     const divergence = new Float32Array(cells.length * 4)
+    const unshared = new Float32Array(cells.length * 4)
     const idx = new Uint32Array(cells.length * 6)
 
     let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, cip = 0, dp = 0, ii = 0, base = 0
@@ -5304,6 +5380,8 @@ export class ShowCellDrone extends Drone {
 
       const dv = c.divergence ?? 0
       divergence.set([dv, dv, dv, dv], dp)
+      const us = c.unshared ? 1 : 0
+      unshared.set([us, us, us, us], dp)
       dp += 4
 
       idx.set([base, base + 1, base + 2, base, base + 2, base + 3], ii)
@@ -5323,6 +5401,7 @@ export class ShowCellDrone extends Drone {
       ; (g as any).addAttribute('aBorderColor', borderColor, 3)
       ; (g as any).addAttribute('aCellIndex', cellIndex, 1)
       ; (g as any).addAttribute('aDivergence', divergence, 1)
+      ; (g as any).addAttribute('aUnshared', unshared, 1)
       ; (g as any).addIndex(idx)
 
     // save buffer references + label→index map so tile:saved can push

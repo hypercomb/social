@@ -22,6 +22,46 @@ const SVG_VIEWBOX = 24
 // so the downscale to display size stays sharp at any zoom level.
 const SVG_RENDER_SCALE = 4
 
+/**
+ * Rasterise an SVG string at high resolution into a Pixi Texture via an
+ * offscreen Image → Canvas pipeline. Shared by the hover-overlay icon
+ * buttons and the persistent per-tile badge layer so both render the same
+ * crisp, tintable (pure-white-fill) glyphs. The returned texture is owned
+ * by the caller — destroy it when done if you created it standalone.
+ */
+export async function rasteriseSvgToTexture(
+  svgMarkup: string,
+  viewBox = SVG_VIEWBOX,
+  renderScale = SVG_RENDER_SCALE,
+): Promise<Texture> {
+  const renderPx = viewBox * renderScale
+
+  // Inject higher render dimensions while keeping the viewBox
+  const hiResSvg = svgMarkup
+    .replace(`width="${viewBox}"`, `width="${renderPx}"`)
+    .replace(`height="${viewBox}"`, `height="${renderPx}"`)
+
+  // Decode SVG via Image element
+  const img = new Image(renderPx, renderPx)
+  const blob = new Blob([hiResSvg], { type: 'image/svg+xml' })
+  const url = URL.createObjectURL(blob)
+  try {
+    img.src = url
+    await img.decode()
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+
+  // Draw to canvas at exact resolution — no browser DPR ambiguity
+  const canvas = document.createElement('canvas')
+  canvas.width = renderPx
+  canvas.height = renderPx
+  const ctx = canvas.getContext('2d')!
+  ctx.drawImage(img, 0, 0, renderPx, renderPx)
+
+  return Texture.from({ resource: canvas, alphaMode: 'premultiply-alpha-on-upload' })
+}
+
 export type IconButtonConfig = {
   /** Display size in Pixi units (square) */
   size: number
@@ -124,31 +164,6 @@ export class HexIconButton extends Container {
 
   /** Rasterise SVG at high resolution via an offscreen Image → Canvas → Texture pipeline. */
   async #rasterise(svgMarkup: string): Promise<Texture> {
-    const renderPx = SVG_VIEWBOX * SVG_RENDER_SCALE   // 96
-
-    // Inject higher render dimensions while keeping the viewBox
-    const hiResSvg = svgMarkup
-      .replace(`width="${SVG_VIEWBOX}"`, `width="${renderPx}"`)
-      .replace(`height="${SVG_VIEWBOX}"`, `height="${renderPx}"`)
-
-    // Decode SVG via Image element
-    const img = new Image(renderPx, renderPx)
-    const blob = new Blob([hiResSvg], { type: 'image/svg+xml' })
-    const url = URL.createObjectURL(blob)
-    try {
-      img.src = url
-      await img.decode()
-    } finally {
-      URL.revokeObjectURL(url)
-    }
-
-    // Draw to canvas at exact resolution — no browser DPR ambiguity
-    const canvas = document.createElement('canvas')
-    canvas.width = renderPx
-    canvas.height = renderPx
-    const ctx = canvas.getContext('2d')!
-    ctx.drawImage(img, 0, 0, renderPx, renderPx)
-
-    return Texture.from({ resource: canvas, alphaMode: 'premultiply-alpha-on-upload' })
+    return rasteriseSvgToTexture(svgMarkup, SVG_VIEWBOX, SVG_RENDER_SCALE)
   }
 }

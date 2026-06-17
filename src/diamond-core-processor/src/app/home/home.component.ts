@@ -175,22 +175,35 @@ export class HomeComponent implements OnDestroy {
   // all nodes flattened for toggle lookups
   readonly toggleMap = computed(() => {
     const map = new Map<string, boolean>()
-    const walk = (nodes: TreeNode[], adopted: boolean) => {
+    const walk = (nodes: TreeNode[], adopted: boolean, isAdoptedContent: boolean) => {
       for (const n of nodes) {
-        // ADOPTED root = the MASTER SWITCH: off by default (nothing runs
-        // until the participant flips it). Its DESCENDANTS default ON, so
-        // one click on the root lights the whole subtree through the
-        // effective-enabled cascade — no per-level clicking. Outside an
-        // adopted subtree, the kind-aware default applies (own DATA reads
-        // ON, CODE OFF). `adopted` latches on the freshly-adopted root and
-        // flows to all descendants.
+        // THE ONLY THING OFF BY DEFAULT IS A FEATURE ADOPTED AT RUNTIME.
+        // Everything else — the bundled baseline, manually installed packages,
+        // the user's own data, the merged logical view — defaults ON. The
+        // preloader unions every installed bee/dep sig and RUNS it regardless
+        // of this switch (see activeSigSet), so a non-adopted switch must read
+        // ON to match reality; defaulting it OFF showed the whole running
+        // install as off (the "all code features are marked off" bug).
+        //
+        // Off-by-default is gated on the ADOPT provenance (kind === 'content',
+        // set only by the runtime adopt flow), NOT on code-vs-data kind — the
+        // kind default must never leak onto the baseline. Within an adopted
+        // branch:
+        //  - the freshly-adopted ROOT is the MASTER SWITCH: off until flipped;
+        //  - its DESCENDANTS default ON (one click on the root lights the whole
+        //    subtree through the effective-enabled cascade);
+        //  - an un-latched adopted node falls to the kind-aware default (its
+        //    DATA reads ON, its CODE OFF until enabled — where the trust gate
+        //    fires).
         const inAdopted = adopted || !!n.freshlyAdopted
-        const def = adopted ? true : (n.freshlyAdopted ? false : defaultEnabled(n.kind))
+        const def = !isAdoptedContent ? true
+          : adopted ? true
+          : (n.freshlyAdopted ? false : defaultEnabled(n.kind))
         map.set(n.id, this.#toggleState.isEnabled(n.id, def))
-        walk(n.children, inAdopted)
+        walk(n.children, inAdopted, isAdoptedContent)
       }
     }
-    for (const s of this.sections()) walk(s.items, false)
+    for (const s of this.sections()) walk(s.items, false, s.kind === 'content')
     return map
   })
 
@@ -204,6 +217,38 @@ export class HomeComponent implements OnDestroy {
     }
     for (const s of this.sections()) walk(s.items)
     return map
+  })
+
+  /**
+   * The set of signatures that ACTUALLY RUN — collapsed from every
+   * effectively-ENABLED code node across ALL sections (packages included).
+   * Activation is keyed by signature and happens once, so a sig referenced by
+   * many features appears here once. Drives the "already active" marker: a
+   * disabled script whose sig is in this set is running anyway because another
+   * active feature pulls the same signature (see isActiveElsewhere).
+   *
+   * Walk ALL sections() rather than logicalViewItems — the latter drops
+   * `kind === 'package'` sections (they don't render as tiles), but package
+   * code DOES activate at runtime (the preloader unions bee/dep sigs across
+   * the whole installed tree). Reads toggleMap(), so it recomputes on every
+   * toggle flip exactly like the rendered switches. Lowercased on insert to
+   * match the registry's sig normalization (queried lowercased too).
+   */
+  readonly activeSigSet = computed<Set<string>>(() => {
+    const map = this.toggleMap()
+    const set = new Set<string>()
+    const walk = (nodes: TreeNode[], parentEnabled: boolean) => {
+      for (const n of nodes) {
+        // toggleMap() already encodes the adopted-aware default per node, so
+        // its entry is authoritative — same source of truth as #enabledSubtree.
+        const selfOn = map.get(n.id) ?? defaultEnabled(n.kind)
+        const eff = parentEnabled && selfOn
+        if (eff && isCodeKind(n.kind) && n.signature) set.add(n.signature.toLowerCase())
+        walk(n.children ?? [], eff)
+      }
+    }
+    for (const s of this.sections()) walk(s.items, true)
+    return set
   })
 
 
@@ -1174,16 +1219,35 @@ export class HomeComponent implements OnDestroy {
             || (s.kind === 'content' && !!adoptLabel && s.adoptLabel === adoptLabel
                 && s.domainName === domain.name && JSON.stringify(s.at ?? []) === entryAt))
           if (dup(this.sections()) || dup(fresh)) continue
+
+          // ALREADY-INSTALLED FAST PATH. A branch sig is immutable content: if
+          // its layer closure is already in local OPFS (installed a prior
+          // session), there is nothing to install. Resolve it from LOCAL ONLY —
+          // the section opens already-filled, with NO loading bar, NO domain
+          // re-fetch, and NO re-walk. Only branches absent locally (genuinely
+          // new) take the fetch-with-progress path below. This is the installer
+          // mirror of the hive fold's adds/removes diff: filter what's present,
+          // show progress only for what's new. Re-fetching an immutable sig you
+          // already hold is a no-op by definition — "if dolphin was installed
+          // last time, no reason to install or log anything."
+          const localRoot = await this.#resolver
+            .resolveFromLocal(sig, `https://${domain.name}`)
+            .catch(() => null)
+          const named: TreeNode | null = localRoot
+            ? { ...localRoot, name: adoptLabel || localRoot.name, expanded: true }
+            : null
+
           fresh.push({
             domain: `https://${domain.name}`,
             domainName: domain.name,
             displayDomain: domain.name,
             rootSig: sig,
             originalRootSig: sig,
-            items: [],
-            loading: true,
+            items: named ? [named] : [],
+            // installed → not loading: no progress bar for an existing branch
+            loading: !named,
             error: null,
-            installStatus: 'Resolving adopted branch…',
+            installStatus: named ? null : 'Resolving adopted branch…',
             patches: [],
             enabled: true,
             adoptLabel,
@@ -1227,7 +1291,13 @@ export class HomeComponent implements OnDestroy {
       // bootstrap byteSource is a last resort for sections without a
       // dialable domain.
       const fallback = (devDefaultBootstrap()?.byteSource || '').trim() || undefined
-      for (const s of pushed) void this.#resolveBranchSection(s.rootSig, s.domain, s.domain || fallback)
+      // Only fetch branches NOT already resolved from local (loading still
+      // true). Installed branches were filled above — re-fetching an immutable
+      // sig would be a redundant install + progress flash for nothing.
+      for (const s of pushed) {
+        if (!s.loading) continue
+        void this.#resolveBranchSection(s.rootSig, s.domain, s.domain || fallback)
+      }
     } catch (e) {
       console.warn('[home] #refreshFromLineage failed', e)
     }

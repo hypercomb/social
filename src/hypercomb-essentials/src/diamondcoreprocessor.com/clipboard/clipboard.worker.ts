@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/core/clipboard/clipboard.worker.ts
 import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
 import type { ClipboardService, ClipboardOp } from './clipboard.service.js'
-import { childNamesOf, childLayerOf, resolveLayerAt, cloneLayerTree } from '../history/layer-placement.js'
+import { childNamesOf, childLayerOf, resolveLayerAt, flattenLayerTree } from '../history/layer-placement.js'
 
 interface ClipboardEntry {
   label: string
@@ -43,6 +43,10 @@ interface LayerCommitterLike {
     layer: { name?: string; [slot: string]: unknown },
     nameSlots?: ReadonlySet<string>,
   ): Promise<string>
+  importTree(
+    updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],
+    nameSlots?: ReadonlySet<string>,
+  ): Promise<void>
 }
 
 interface StoreLike {
@@ -410,6 +414,9 @@ export class ClipboardWorker extends Worker {
 
     const placed: ClipboardEntry[] = []
     const failed: string[] = []
+    // Re-homed subtrees, flattened into importTree updates and accumulated
+    // across every placed item so the whole paste lands in ONE shared cascade.
+    const treeUpdates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[] = []
     for (const entry of items) {
       if (taken.has(entry.label)) {
         console.warn(`[clipboard] target already has '${entry.label}'; skipping`)
@@ -425,17 +432,24 @@ export class ClipboardWorker extends Worker {
         explorerSegments: () => [...targetSegments, entry.label],
       })
       // Resolve the source cell's layer the authoritative way: through its
-      // PARENT's children slot (pool-addressed sig → getLayerBySig). A cell
-      // never navigated into has no head in its own bag, so the old
-      // currentLayerAt(srcLocSig) returned null for it and paste silently
-      // dropped a live tile. Fall back to the own-bag head for the
-      // cut-in-place case (parent already dropped the child, but the bag
-      // persists at srcLocSig).
-      const srcParentSig = await history.sign({
-        domain: lineage.domain,
-        explorerSegments: () => [...entry.sourceSegments],
-      })
-      const srcParent = await history.currentLayerAt(srcParentSig)
+      // PARENT's children slot (pool-addressed sig → getLayerBySig), which
+      // carries the cell's REAL subtree. A cell never navigated into has no
+      // head in its own bag, so the old currentLayerAt(srcLocSig) returned
+      // null for it and paste silently dropped a live tile. Fall back to the
+      // own-bag head for the cut-in-place case (parent already dropped the
+      // child, but the bag persists at srcLocSig).
+      //
+      // Resolve the source parent ROBUSTLY (resolveLayerAt walks the parent
+      // chain to root). The bare currentLayerAt(sign(sourceSegments)) reads the
+      // parent's OWN bag, which is COLD for the very location you just copied
+      // from: the renderer paints the current page through the CURSOR, warming
+      // a different cache than currentLayerAt's #latestSigByLineage. When that
+      // read missed, childLayerOf found nothing and srcLayer fell back to the
+      // copied cell's own bag — typically the auto-minted `{name}` seed with NO
+      // children — so the re-home flattened the layer and the pasted tile lost
+      // its whole hierarchy. Mirrors the target parent's #resolveParentLayer /
+      // resolveLayerAt resolution.
+      const srcParent = await resolveLayerAt(history, lineage.domain, entry.sourceSegments)
       const viaParent = await childLayerOf(history, srcParent, entry.label)
       const srcLayer = viaParent?.layer ?? await history.currentLayerAt(srcLocSig)
       if (!srcLayer) {
@@ -443,13 +457,15 @@ export class ClipboardWorker extends Worker {
         failed.push(entry.label)
         continue
       }
-      // Same source and destination lineage (cut-and-paste in place) needs
-      // no clone — the content never left its bag.
+      // Same source and destination lineage (cut-and-paste in place) needs no
+      // re-home — the content never left its bag; the parent commit below
+      // name-resolves it straight back into children. Otherwise flatten the
+      // source subtree into importTree updates rooted at the dest path.
       if (srcLocSig !== dstLocSig) {
         try {
-          await cloneLayerTree(history, lineage, srcLayer, [...targetSegments, entry.label])
+          treeUpdates.push(...await flattenLayerTree(history, srcLayer, [...targetSegments, entry.label]))
         } catch (err) {
-          console.warn(`[clipboard] clone failed for '${entry.label}':`, err)
+          console.warn(`[clipboard] flatten failed for '${entry.label}':`, err)
           failed.push(entry.label)
           continue
         }
@@ -467,8 +483,18 @@ export class ClipboardWorker extends Worker {
     for (const entry of placed) {
       EffectBus.emit('cell:added', { cell: entry.label, segments: [...targetSegments], viaUpdate: true })
     }
+    // ONE mechanical cascade: importTree commits every re-homed node plus the
+    // target parent, deepest-first, with a single shared up-cascade to root —
+    // the same primitive create and bulk-import use. The parent carries the
+    // full new children list (existing + placed, by name) so the pasted tops
+    // fold in; each subtree node carries its own children by name so the
+    // hierarchy rebuilds level by level. Cut-in-place items have no treeUpdate
+    // — the parent's name-resolution re-homes them from their persisted bag.
     const nextChildren = [...existing, ...placed.map(p => p.label)]
-    await committer.update(targetSegments, { ...(parent ?? {}), children: nextChildren })
+    await committer.importTree([
+      { segments: [...targetSegments], layer: { ...(parent ?? {}), children: nextChildren } },
+      ...treeUpdates,
+    ])
     await new hypercomb().act()
 
     // No forced full re-render here. `place` (the "add to current" path)

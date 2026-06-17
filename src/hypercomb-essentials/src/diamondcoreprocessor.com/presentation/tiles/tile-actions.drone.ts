@@ -2,6 +2,9 @@
 import { Drone, EffectBus, hypercomb, normalizeCell } from '@hypercomb/core'
 import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey, OverlayTintFn } from './tile-overlay.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
+import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
+import { FILES_ATTACHMENT_KIND } from '../../files/files-attachment.js'
+import { FILES_ICON } from '../../files/file-types.js'
 // Arrangement persistence currently disabled — `#getRootDir` returns
 // null pending the layer-slot read/write path, so the legacy
 // readCellProperties / writeCellProperties imports are no longer needed.
@@ -19,6 +22,121 @@ export function hideStorageKey(location: string): string {
   return zone
     ? `hc:hidden-tiles:${location}:z${zone}`
     : `hc:hidden-tiles:${location}`
+}
+
+// ── Per-tile public/private flag ──────────────────────────────────
+// A SELF-FACING marker: each tile is private by default; the owner can
+// flip individual tiles to public. Persistent + device-scoped (like the
+// block list), NOT zone-scoped and NOT in the layer — it's a participant-
+// local annotation, so it must never enter the signed lineage (that would
+// skew the layer signature across peers, same rule as hide/clipboard).
+// Absence from the set means private. We store only the PUBLIC exceptions.
+export function publicStorageKey(location: string): string {
+  // Normalize every location segment so the key is identical whether the
+  // location arrives as a RAW nav path (explorerLabel, e.g. "/My Folder") or
+  // a NORMALIZED descent path the publish walk builds ("/my-folder"). Without
+  // this, an individually-public tile is silently dropped from the broadcast
+  // when the publisher reaches its folder by descent. Branches already match
+  // because tilePath() normalizes; this brings the individual key in line.
+  const norm = location.split('/').map(s => s.trim()).filter(Boolean).map(s => normalizeCell(s) || s).join('/')
+  return `hc:public-tiles:/${norm}`
+}
+
+/** Public tile labels at `location`. Empty array on any parse failure. */
+export function readPublicLabels(location: string): string[] {
+  try {
+    const raw = localStorage.getItem(publicStorageKey(location))
+    const arr = raw ? JSON.parse(raw) : []
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+/** Flip a tile public/private at `location`. Returns the updated label set. */
+export function setCellPublic(location: string, label: string, makePublic: boolean): string[] {
+  const l = normalizeCell(label) || label
+  const list = readPublicLabels(location)
+  const has = list.includes(l)
+  let next = list
+  if (makePublic && !has) next = [...list, l]
+  else if (!makePublic && has) next = list.filter(x => x !== l)
+  try {
+    localStorage.setItem(publicStorageKey(location), JSON.stringify(next))
+  } catch { /* private-browsing edge case — flag won't persist */ }
+  return next
+}
+
+// ── Branch-public ─────────────────────────────────────────────────
+// "Make branch public" shares a tile AND its entire sub-tree in one click.
+// Rather than walk (and load) the whole tree at click time, we store the
+// branch ROOT's canonical path; a tile counts as public-via-branch when any
+// stored branch path is a prefix of (or equal to) the tile's own path. O(1)
+// per tile at render time, and it covers descendants that aren't loaded yet.
+const PUBLIC_BRANCHES_KEY = 'hc:public-branches'
+
+/** Canonical absolute path of a tile, with EVERY segment normalized so the
+ *  stored branch-root path and a descendant's path agree even though nav
+ *  segments are raw (Lineage keeps them un-normalized). Without normalizing
+ *  the whole path, a branch rooted at "My Folder" (stored `/my-folder`) never
+ *  matched a descendant whose location prefix carried the raw "My Folder". */
+export function tilePath(location: string, label: string): string {
+  const segs = location.split('/').map(s => s.trim()).filter(Boolean).map(s => normalizeCell(s) || s)
+  const l = normalizeCell(label) || label
+  return '/' + [...segs, l].join('/')
+}
+
+/** True when this tile is marked public INDIVIDUALLY (ignores branch cover).
+ *  The make-public icon's tint uses this so it matches what its click toggles. */
+export function isIndividuallyPublic(location: string, label: string): boolean {
+  const l = normalizeCell(label) || label
+  return readPublicLabels(location).includes(l)
+}
+
+/** Lineage paths whose whole branch is public. Empty on any parse failure. */
+export function readPublicBranches(): string[] {
+  try {
+    const raw = localStorage.getItem(PUBLIC_BRANCHES_KEY)
+    const arr = raw ? JSON.parse(raw) : []
+    return Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+/** True when this exact tile is itself a public-branch root. */
+export function isBranchPublic(location: string, label: string): boolean {
+  return readPublicBranches().includes(tilePath(location, label))
+}
+
+/** Toggle the whole branch rooted at this tile public/private. */
+export function setBranchPublic(location: string, label: string, makePublic: boolean): string[] {
+  const p = tilePath(location, label)
+  const list = readPublicBranches()
+  const has = list.includes(p)
+  let next = list
+  if (makePublic && !has) next = [...list, p]
+  else if (!makePublic && has) next = list.filter(x => x !== p)
+  try {
+    localStorage.setItem(PUBLIC_BRANCHES_KEY, JSON.stringify(next))
+  } catch { /* private-browsing edge case — flag won't persist */ }
+  return next
+}
+
+/** True when this tile is public — either marked individually, or covered by
+ *  a public branch rooted at it or any ancestor. */
+export function isCellPublic(location: string, label: string): boolean {
+  const l = normalizeCell(label) || label
+  if (readPublicLabels(location).includes(l)) return true
+  const p = tilePath(location, label)
+  return readPublicBranches().some(b => p === b || p.startsWith(b + '/'))
+}
+
+/** Current navigation location label, resolved straight from IoC so the
+ *  module-level `tintWhen` predicate (no drone `this`) can read it. */
+function currentExplorerLabel(): string {
+  const lineage = window.ioc.get<{ explorerLabel(): string }>('@hypercomb.social/Lineage')
+  return lineage?.explorerLabel?.() ?? '/'
 }
 
 type IconProviderEntry = {
@@ -75,6 +193,10 @@ const ICONS = {
   note: md('M19 3H4.99c-1.11 0-1.98.9-1.98 2L3 19c0 1.1.89 2 2 2h10l6-6V5c0-1.1-.9-2-2-2zM7 8h10v2H7V8zm5 6H7v-2h5v2zm2 5.5V14h5.5L14 19.5z'),
   // sync — Material Icons Filled
   sync: md('M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z'),
+  // public/globe — Material Icons Filled (make THIS tile public: "the world")
+  public: md('M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z'),
+  // share — Material Icons Filled (make this tile + its whole BRANCH public)
+  share: md('M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z'),
 } as const
 
 // ── Icon registry ─────────────────────────────────────────────────
@@ -121,6 +243,32 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage, labelKey: 'action.search', descriptionKey: 'action.search.description' },
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private', labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
+  // ── world profile ──
+  // Active ONLY while world mode is on (see tile-overlay #resolveProfileKey).
+  // The hover overlay then shows NOTHING but these two share-toggles — no
+  // edit/remove/etc. Each tints green when its scope is already public, dim
+  // otherwise, and click toggles it (emitting tile:public-changed → repaint).
+  //   make-public        → this tile only
+  //   make-branch-public → this tile + its entire sub-tree
+  {
+    name: 'make-public',
+    svgMarkup: ICONS.public,
+    hoverTint: 0x6fd39a,
+    profile: 'world',
+    // Individual scope — matches what the click toggles (not branch cover).
+    tintWhen: (ctx: OverlayTileContext) => isIndividuallyPublic(currentExplorerLabel(), ctx.label) ? 0x6fd39a : 0x9aa6b8,
+    labelKey: 'action.make-public',
+    descriptionKey: 'action.make-public.description',
+  },
+  {
+    name: 'make-branch-public',
+    svgMarkup: ICONS.share,
+    hoverTint: 0x6fd39a,
+    profile: 'world',
+    tintWhen: (ctx: OverlayTileContext) => isBranchPublic(currentExplorerLabel(), ctx.label) ? 0x6fd39a : 0x9aa6b8,
+    labelKey: 'action.make-branch-public',
+    descriptionKey: 'action.make-branch-public.description',
+  },
   // ── public-own profile ──
   // Your own tile in public mode. Removal is the existing trash-bin
   // delete, which routes through LayerCommitter and is recorded in
@@ -147,6 +295,14 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // immediately without needing to adopt them first.
   { name: 'hide', svgMarkup: ICONS.hide, hoverTint: 0xffd8a8, profile: 'public-external', visibleWhen: (ctx: OverlayTileContext) => !ctx.isHidden, labelKey: 'action.hide', descriptionKey: 'action.hide.description' },
   { name: 'block', svgMarkup: ICONS.block, hoverTint: 0xffc8c8, profile: 'public-external', labelKey: 'action.block', descriptionKey: 'action.block.description' },
+  // ── files (all profiles) ──
+  // The file icon appears on any tile that has at least one `files:attachment`
+  // decoration — your own (private / public-own) or a peer's (public-external,
+  // so their attached docs are downloadable). visibleWhen reads the synchronous
+  // decoration-kind index; the click is handled by FileDropDrone via tile:action.
+  { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
+  { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
+  { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, profile: 'public-external', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
 ]
 
 // Default active icons per profile (defines the fallback order).
@@ -155,12 +311,14 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 // in ICON_REGISTRY above; adopting a peer tile is handled by the
 // `public-external` profile (the tile flips kind once it's local).
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  'private': ['command', 'edit', 'note', 'reroll', 'remove', 'break-apart'],
+  'private': ['command', 'edit', 'note', 'reroll', 'remove', 'break-apart', 'files'],
+  // World mode: ONLY the two share-toggles, none of the regular icons.
+  'world': ['make-public', 'make-branch-public'],
   // Your own tile in public mode — same trash-bin remove that
   // private mode uses. Records a history op, can be undone. `sync`
   // pulls the broadcasting peer's latest version of an adopted tile
   // (only rendered while a live peer publishes the same name).
-  'public-own': ['sync', 'remove', 'break-apart'],
+  'public-own': ['sync', 'remove', 'break-apart', 'files'],
   // Peer-only mesh tiles. Single-click `adopt` is the explicit
   // "I want to expand on this topic" action — writes the tile to
   // your local layer AND pulls the resources it references (images
@@ -168,7 +326,7 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   // adopt: auto-adopt follows a participant continuously, single-
   // adopt is one tile + its resources, on demand. `hide` dismisses
   // a peer tile from view without taking ownership.
-  'public-external': ['adopt', 'hide'],
+  'public-external': ['adopt', 'hide', 'files'],
 }
 
 // ── Position computation ──────────────────────────────────────────
@@ -211,7 +369,7 @@ type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 // adopt path directly (its own tile:action listener at
 // swarm-adopt.drone.ts:63). The legacy paired-channel 'adopt' / 'import'
 // handlers were retired with the paired-channel subsystem.
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'note', 'hide', 'break-apart', 'block', 'remove', 'reroll'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'note', 'hide', 'break-apart', 'block', 'remove', 'reroll', 'make-public', 'make-branch-public'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -224,7 +382,7 @@ export class TileActionsDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'render:cell-count', 'tile:action', 'controls:action', 'overlay:icons-reordered', 'overlay:arrange-mode', 'substrate:applied', 'substrate:rerolled', 'cell:removed']
-  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'note:capture', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'cell:removed', 'visibility:show-hidden', 'substrate:rerolled']
+  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'note:capture', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'tile:public-changed', 'cell:removed', 'visibility:show-hidden', 'substrate:rerolled']
 
   #registered = false
   #effectsRegistered = false
@@ -299,7 +457,7 @@ export class TileActionsDrone extends Drone {
 
   #reregisterAll(): void {
     if (!this.#registered) return
-    for (const profile of ['private', 'public-own', 'public-external'] as OverlayProfileKey[]) {
+    for (const profile of ['private', 'public-own', 'public-external', 'world'] as OverlayProfileKey[]) {
       this.#registerProfileIcons(profile)
     }
   }
@@ -322,7 +480,7 @@ export class TileActionsDrone extends Drone {
     const descriptors: OverlayActionDescriptor[] = []
     const merged = this.#mergedEntries()
 
-    for (const profile of ['private', 'public-own', 'public-external'] as OverlayProfileKey[]) {
+    for (const profile of ['private', 'public-own', 'public-external', 'world'] as OverlayProfileKey[]) {
       const activeNames = this.#getActiveNames(profile)
       const positions = computeIconPositions(activeNames)
 
@@ -374,6 +532,10 @@ export class TileActionsDrone extends Drone {
         hoverTint: entry.hoverTint,
         profile: entry.profile,
         visibleWhen: entry.visibleWhen,
+        // Preserve tintWhen on re-registration — without it the world icons
+        // (the only tintWhen users) lose their public-state color after any
+        // IconProviderRegistry 'change' (e.g. a drone toggled on/off).
+        tintWhen: entry.tintWhen,
         labelKey: entry.labelKey,
         descriptionKey: entry.descriptionKey,
         x: positions[i].x,
@@ -404,7 +566,7 @@ export class TileActionsDrone extends Drone {
     const merged = this.#mergedEntries()
     // For each profile, compute which icons are NOT active (the pool)
     const pool: Record<string, IconRegistryEntry[]> = {}
-    for (const profile of ['private', 'public-own', 'public-external'] as OverlayProfileKey[]) {
+    for (const profile of ['private', 'public-own', 'public-external', 'world'] as OverlayProfileKey[]) {
       const activeNames = new Set(this.#getActiveNames(profile))
       pool[profile] = merged
         .filter(e => e.profile === profile && !activeNames.has(e.name))
@@ -466,6 +628,27 @@ export class TileActionsDrone extends Drone {
       case 'reroll':
         void this.#rerollSubstrate(label)
         break
+
+      case 'make-public': {
+        // World-mode: toggle THIS tile's individual public flag. tile-overlay
+        // refreshes the icon tint on tile:public-changed; show-cell re-dims.
+        const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
+        const location = lineage?.explorerLabel() ?? '/'
+        const isOn = readPublicLabels(location).includes(label)
+        setCellPublic(location, label, !isOn)
+        EffectBus.emit('tile:public-changed', { cell: label, location, public: !isOn })
+        break
+      }
+
+      case 'make-branch-public': {
+        // World-mode: toggle this tile + its entire sub-tree public.
+        const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
+        const location = lineage?.explorerLabel() ?? '/'
+        const isOn = isBranchPublic(location, label)
+        setBranchPublic(location, label, !isOn)
+        EffectBus.emit('tile:public-changed', { cell: label, location, public: !isOn, branch: true })
+        break
+      }
 
       case 'remove':
         void this.#removeTile(label)

@@ -6,6 +6,7 @@ import { EffectBus } from '@hypercomb/core'
 let editorActive = false
 let clipboardActive = false
 let notesViewerActive = false
+let filesViewerActive = false
 
 EffectBus.on<{ active: boolean }>('editor:mode', ({ active }) => {
   editorActive = active
@@ -17,6 +18,10 @@ EffectBus.on<{ active: boolean }>('clipboard:view', ({ active }) => {
 
 EffectBus.on<{ active: boolean }>('notes:viewer', ({ active }) => {
   notesViewerActive = active
+})
+
+EffectBus.on<{ active: boolean }>('files:viewer', ({ active }) => {
+  filesViewerActive = active
 })
 
 // ── cascade handler ───────────────────────────────────────────────────
@@ -40,6 +45,13 @@ EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
   // leaving the modal sitting on top of the canvas.
   if (notesViewerActive) {
     EffectBus.emit('notes:viewer-close', undefined)
+    return
+  }
+
+  // Priority 2b: close the files viewer panel — like the notes viewer, it
+  // must dismiss before Escape falls through to clearing the selection.
+  if (filesViewerActive) {
+    EffectBus.emit('files:viewer-close', undefined)
     return
   }
 

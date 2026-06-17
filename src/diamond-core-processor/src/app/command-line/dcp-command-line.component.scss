@@ -1,16 +1,15 @@
 // diamond-core-processor/src/app/command-line/dcp-command-line.component.scss
-// Light-theme command shell — matches DCP's light background.
+// Command shell — themed via the DCP token layer (light + dark).
 
 :host {
   display: block;
   width: 100%;
   overflow: hidden;
 
-  --accent: #4a6fa5;
-  --accent-rgb: 74, 111, 165;
-  --shell-bg: #fff;
-  --shell-border: rgba(0, 0, 0, 0.15);
-  --shell-border-focus: var(--accent);
+  --accent: var(--dcp-accent);
+  --shell-bg: var(--dcp-surface);
+  --shell-border: var(--dcp-line-2);
+  --shell-border-focus: var(--dcp-accent);
   --terminal-font: var(--hc-mono);
   --transition-speed: 200ms;
 }
@@ -24,7 +23,7 @@
   box-sizing: border-box;
   background: var(--shell-bg);
   border: 1px solid var(--shell-border);
-  border-radius: 2px;
+  border-radius: var(--dcp-radius-md);
   padding: 0 0.25rem;
   transition: border-color var(--transition-speed) ease, box-shadow var(--transition-speed) ease;
   user-select: none;
@@ -33,7 +32,7 @@
 
 .command-shell:focus-within {
   border-color: var(--shell-border-focus);
-  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.12);
+  box-shadow: 0 0 0 3px var(--dcp-accent-tint);
 }
 
 .command-shell:focus-within .command-row::before { opacity: 1; }
@@ -71,7 +70,8 @@
   font-family: var(--terminal-font);
   font-size: 0.85em;
   letter-spacing: 0.02em;
-  color: rgba(0, 0, 0, 0.18);
+  color: var(--dcp-ink-3);
+  opacity: 0.7;
   pointer-events: none;
   user-select: none;
   white-space: nowrap;
@@ -87,13 +87,13 @@
   font-family: var(--terminal-font);
   font-size: 0.85em;
   letter-spacing: 0.02em;
-  color: #1a1a1a;
+  color: var(--dcp-ink);
   caret-color: var(--accent);
   user-select: text;
   cursor: text;
 }
 
-.command-input::placeholder { color: rgba(0, 0, 0, 0.3); }
+.command-input::placeholder { color: var(--dcp-ink-3); }
 
 .command-results {
   position: absolute;
@@ -103,10 +103,10 @@
   margin: 0;
   padding: 0.35rem;
   list-style: none;
-  border-radius: 2px;
-  background: #fff;
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1), 0 1px 3px rgba(0, 0, 0, 0.06);
+  border-radius: var(--dcp-radius-md);
+  background: var(--dcp-surface);
+  border: 1px solid var(--dcp-line-2);
+  box-shadow: var(--dcp-shadow-2);
   max-height: 16rem;
   overflow: auto;
   font-family: var(--terminal-font);
@@ -116,26 +116,26 @@
   &::-webkit-scrollbar { width: 4px; }
   &::-webkit-scrollbar-track { background: transparent; }
   &::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.12);
-    border-radius: 2px;
-    &:hover { background: rgba(0, 0, 0, 0.2); }
+    background: var(--dcp-line-2);
+    border-radius: 999px;
+    &:hover { background: var(--dcp-ink-3); }
   }
 }
 
 .command-results li {
   display: flex;
   padding: 0.4rem 0.6rem;
-  border-radius: 2px;
+  border-radius: var(--dcp-radius-sm);
   user-select: none;
   cursor: pointer;
   transition: background var(--transition-speed) ease;
 }
 
-.command-results li:hover { background: rgba(var(--accent-rgb), 0.06); }
-.command-results li.active { background: rgba(var(--accent-rgb), 0.1); box-shadow: inset 2px 0 0 var(--accent); }
+.command-results li:hover { background: var(--dcp-hover); }
+.command-results li.active { background: var(--dcp-accent-tint); box-shadow: inset 2px 0 0 var(--accent); }
 
 .typed { color: var(--accent); }
-.rest { color: #555; opacity: 0.6; }
+.rest { color: var(--dcp-ink-2); opacity: 0.7; }
 
 // responsive: touch (iOS zoom prevention)
 @media (pointer: coarse) {

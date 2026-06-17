@@ -16,6 +16,13 @@ function humanize(name: string): string {
     .toLowerCase()
 }
 
+// Hard cap on a single layer network probe. resolveBranchFromDomain awaits
+// #fetchLayer directly with no surrounding timeout, so without this an
+// unreachable-but-stalling byteSource leaves the installer's section pinned on
+// the loading bar forever. 3s covers a healthy host's 404 while bounding the
+// pathological stall — same budget as the content-broker's HTTP probe.
+const LAYER_FETCH_TIMEOUT_MS = 3000
+
 type LayerJson = {
   version?: number
   name: string
@@ -348,9 +355,11 @@ export class TreeResolverService {
     if (cached) {
       const actual = await SignatureService.sign(cached)
       if (actual === layerSig) {
-        const parsed = JSON.parse(new TextDecoder().decode(cached)) as LayerJson
-        this.#cache.set(layerSig, parsed)
-        return parsed
+        try {
+          const parsed = JSON.parse(new TextDecoder().decode(cached)) as LayerJson
+          this.#cache.set(layerSig, parsed)
+          return parsed
+        } catch { /* cached bytes aren't a JSON layer — fall through to refetch */ }
       }
     }
 
@@ -361,8 +370,17 @@ export class TreeResolverService {
     // typed path is the legacy fallback for hosts that haven't migrated
     // (static layouts: Azure blob, ng-serve public/content).
     for (const url of [`${base}/${layerSig}`, `${base}/__layers__/${layerSig}.json`]) {
+      // Bounded probe: resolveBranchFromDomain awaits this directly, so a
+      // host that ACCEPTS the connection but stalls the body (an unreachable
+      // byteSource — e.g. a slow https://jwize.com) would otherwise wedge the
+      // await forever and pin the installer section on the loading bar ("never
+      // completes"). Aborting after LAYER_FETCH_TIMEOUT_MS lets resolution fall
+      // through to the local/mesh poll, which is what delivers a same-swarm
+      // single-tile adopt. Comfortably covers a healthy host's 404.
+      const ctrl = new AbortController()
+      const timer = setTimeout(() => ctrl.abort(), LAYER_FETCH_TIMEOUT_MS)
       try {
-        const res = await fetch(url, { cache: 'no-store' })
+        const res = await fetch(url, { cache: 'no-store', signal: ctrl.signal })
         if (!res.ok) continue
         // SPA fallback guard: sig-addressed bytes are never text/html.
         if ((res.headers.get('content-type') || '').toLowerCase().includes('text/html')) continue
@@ -379,7 +397,9 @@ export class TreeResolverService {
         this.#cache.set(layerSig, parsed)
         return parsed
       } catch {
-        // network error on this shape — try the next
+        // network error / abort timeout / non-JSON — try the next shape
+      } finally {
+        clearTimeout(timer)
       }
     }
     return null
@@ -407,35 +427,40 @@ export class TreeResolverService {
   // local-only resolution (for patched trees)
   // -------------------------------------------------
 
+  /** Parse local bytes as a layer JSON and cache by sig. Returns null when the
+   *  bytes are absent OR aren't valid JSON — a stray non-layer blob sitting at
+   *  a sig name must skip to the next source, never throw resolution out (the
+   *  poll's catch would otherwise burn a retry and ultimately surface an egg
+   *  for content that's actually fetchable from a later source). */
+  #parseLayer(layerSig: string, bytes: ArrayBuffer | null): LayerJson | null {
+    if (!bytes) return null
+    try {
+      const parsed = JSON.parse(new TextDecoder().decode(bytes)) as LayerJson
+      this.#cache.set(layerSig, parsed)
+      return parsed
+    } catch { return null }
+  }
+
   async #fetchLayerLocal(layerSig: string, domain: string): Promise<LayerJson | null> {
     if (this.#cache.has(layerSig)) return this.#cache.get(layerSig)!
 
     // check patched layers first
     const patchedDir = await this.#store.patchedLayersDir(domain)
     const patchedBytes = await this.#store.readFile(patchedDir, layerSig)
-    if (patchedBytes) {
-      const parsed = JSON.parse(new TextDecoder().decode(patchedBytes)) as LayerJson
-      this.#cache.set(layerSig, parsed)
-      return parsed
-    }
+    const fromPatched = this.#parseLayer(layerSig, patchedBytes)
+    if (fromPatched) return fromPatched
 
     // check original layers
     const domainDir = await this.#store.domainLayersDir(domain)
     const bytes = await this.#store.readFile(domainDir, layerSig)
-    if (bytes) {
-      const parsed = JSON.parse(new TextDecoder().decode(bytes)) as LayerJson
-      this.#cache.set(layerSig, parsed)
-      return parsed
-    }
+    const fromOriginal = this.#parseLayer(layerSig, bytes)
+    if (fromOriginal) return fromOriginal
 
     // check layers received from hypercomb-web
     const fromHcDir = await this.#store.fromHypercombKindDir('layer')
     const receivedBytes = await this.#store.readFile(fromHcDir, layerSig)
-    if (receivedBytes) {
-      const parsed = JSON.parse(new TextDecoder().decode(receivedBytes)) as LayerJson
-      this.#cache.set(layerSig, parsed)
-      return parsed
-    }
+    const fromReceived = this.#parseLayer(layerSig, receivedBytes)
+    if (fromReceived) return fromReceived
 
     return null
   }

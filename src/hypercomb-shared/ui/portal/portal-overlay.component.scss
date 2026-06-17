@@ -69,12 +69,23 @@
   text-overflow: ellipsis;
 }
 
-.portal-close {
+// Bottom action bar — centered row holding [diff] [back] [Done]. The bar
+// itself is click-through (pointer-events:none); each interactive child
+// re-enables pointer events so the gaps between buttons don't trap clicks.
+.portal-actions {
   position: absolute;
   bottom: 1.2rem;
-  left: 50%;
-  transform: translateX(-50%);
+  left: 0;
+  right: 0;
 
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  pointer-events: none;
+}
+
+.portal-close {
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -89,6 +100,7 @@
   color: rgba(245, 245, 245, 0.85);
   font-family: var(--hc-mono);
   cursor: pointer;
+  pointer-events: auto;
   transition: opacity 200ms ease, transform 200ms ease, background 200ms ease;
 
   &:hover {
@@ -97,7 +109,7 @@
   }
 
   &:active {
-    transform: translateX(-50%) scale(0.97);
+    transform: scale(0.97);
   }
 }
 
@@ -115,14 +127,47 @@
   color: rgba(245, 245, 245, 0.7);
 }
 
-// Pending +adds / −removes, sitting just LEFT of the centered back/Done
-// button (which is absolute, left:50%). Display-only — clicks pass through
-// to the button. tabular-nums so the digits don't jitter as counts change.
+// Primary ACCEPT — the only control that installs the pending changes.
+// Accent-gold fill so it reads as the affirmative action next to the
+// neutral, glass back button.
+.portal-apply {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1.6rem;
+
+  background: rgba(200, 151, 90, 0.92);
+  border: 1px solid rgba(200, 151, 90, 0.95);
+  border-radius: 4px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+
+  font-family: var(--hc-mono);
+  cursor: pointer;
+  pointer-events: auto;
+  transition: transform 200ms ease, background 200ms ease, border-color 200ms ease;
+
+  &:hover {
+    background: rgba(212, 164, 102, 1);
+    border-color: rgba(212, 164, 102, 1);
+  }
+
+  &:active {
+    transform: scale(0.97);
+  }
+}
+
+.apply-label {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #161616;
+}
+
+// Pending +adds / −removes, sitting at the LEFT of the action bar.
+// Display-only — clicks pass through. tabular-nums so the digits don't
+// jitter as counts change.
 .portal-diff {
-  position: absolute;
-  bottom: 1.2rem;
-  right: calc(50% + 4.25rem);
-  height: 2.2rem;
   display: flex;
   align-items: center;
   gap: 0.5rem;
@@ -142,12 +187,17 @@
 
 @include phone-only {
 
-  .portal-close {
+  .portal-actions {
     bottom: calc(1.2rem + var(--hc-safe-bottom, 0px));
+  }
+
+  .portal-close,
+  .portal-apply {
     padding: 0.7rem 1.6rem;
   }
 
-  .close-label {
+  .close-label,
+  .apply-label {
     font-size: 0.7rem;
   }
 
@@ -158,8 +208,12 @@
 
 @include tablet-only {
 
-  .portal-close {
+  .portal-actions {
     bottom: calc(1rem + var(--hc-safe-bottom, 0px));
+  }
+
+  .portal-close,
+  .portal-apply {
     padding: 0.6rem 1.5rem;
   }
 }

@@ -21,7 +21,8 @@
 import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import {
   childNamesOf,
-  cloneLayerTree,
+  flattenLayerTree,
+  resolveLayerAt,
   type PlacementHistory,
   type PlacementLineage,
 } from '../history/layer-placement.js'
@@ -59,6 +60,10 @@ interface CommitterLike {
     layer: { name?: string; [slot: string]: unknown },
     nameSlots?: ReadonlySet<string>,
   ) => Promise<string>
+  importTree: (
+    updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],
+    nameSlots?: ReadonlySet<string>,
+  ) => Promise<void>
 }
 
 /** The DCP installer's registry projection (control plane → data plane),
@@ -153,27 +158,27 @@ export class SwarmAdoptDrone extends Drone {
       void this.#adoptPeerTile(label)
     })
 
-    // ── DCP installer round-trip → hive config fold (on DONE) ──────────
-    // The participant adopts/enables inside the DCP installer; when they
-    // click Done, portal-overlay posts `actions:available` (CONFIRM-only —
-    // cancel/escape never fire it). On that explicit participant action we
-    // fold the installer's enabled CONTENT config into the hive sigbag via
-    // the SAME #commitBranch / update({children}) cascade a manual adopt
-    // uses — the one way into your hive, and the symmetric counterpart to
-    // the hive→DCP content push. Gated on Done, NOT auto-folded on every
-    // snapshot (that automation was deliberately removed). Idempotent, so a
+    // ── DCP installer round-trip → hive config fold (on ACCEPT) ────────
+    // The participant adopts/enables inside the DCP installer; their intent
+    // streams over as `registry:snapshot` while they toggle. NOTHING is
+    // folded until they EXPLICITLY ACCEPT by clicking Done — portal-overlay
+    // dispatches `actions:available` ONLY from apply(). Every passive exit
+    // (the ×/back button, the backdrop, Escape, a touch-drag) fires
+    // `dcp:embed-closed` instead and is DISCARDED here: a change must never
+    // enter your hive — and start running — before you authorize it.
+    //
+    // On accept we fold the installer's enabled CONTENT config into the hive
+    // sigbag via the SAME #commitBranch / update({children}) cascade a manual
+    // adopt uses — the one way into your hive, the symmetric counterpart to
+    // the hive→DCP content push. A discarded diff isn't lost: DCP keeps the
+    // config and the installer re-surfaces it next open. Idempotent, so a
     // stray re-fire is a safe no-op (existing children → 'exists').
     this.onEffect<RegistrySnapshotLike>('registry:snapshot', (snap) => {
       this.#lastSnapshot = snap
       console.info('[swarm-adopt] registry:snapshot received —', (snap?.branches?.length ?? 0), 'branch(es)')
     })
-    // Fold when the installer iframe CLOSES (any way: Done / cancel / escape).
-    // `dcp:embed-closed` fires on every portal close. On confirm the portal
-    // ALSO dispatches `actions:available`, so listening to both folded TWICE
-    // per Done — dcp:embed-closed alone covers every close, so it's the single
-    // trigger. By close time the adoption is already recorded in DCP's config,
-    // so closing is the "finished" signal.
-    window.addEventListener('dcp:embed-closed', this.#onDcpDone)
+    // Fold ONLY on the explicit accept signal, NEVER on a passive close.
+    window.addEventListener('actions:available', this.#onDcpDone)
   }
 
   #ioc = () => (window as { ioc?: { get: (k: string) => unknown } }).ioc
@@ -269,7 +274,7 @@ export class SwarmAdoptDrone extends Drone {
 
     try {
       // Resolution protocol: pull the branch's LAYER closure into our pool so
-      // getLayerBySig resolves it locally and cloneLayerTree can re-home it.
+      // getLayerBySig resolves it locally and flattenLayerTree can re-home it.
       // layersOnly — resources are sig-refs that STREAM on demand at render
       // (memory→OPFS→host write-through), so a content-rich adopt transfers a
       // handful of tiny layers, not its hundreds of images.
@@ -289,15 +294,27 @@ export class SwarmAdoptDrone extends Drone {
       if (!branchLayer || !name || /[\\/\x00-\x1f]/.test(name)) return 'unavailable'
 
       const at = (Array.isArray(atSegments) ? atSegments : []).map(s => String(s ?? '').trim()).filter(Boolean)
-      const atLoc = await history.sign({ domain: lineage.domain, explorerSegments: () => at })
-      const parent = await history.currentLayerAt(atLoc)
+      // Resolve the parent ROBUSTLY — resolveLayerAt walks the parent chain to
+      // root. The bare currentLayerAt(sign(at)) reads `at`'s OWN bag, which is
+      // cold for the very location the user is viewing when they adopt (the
+      // renderer paints through the cursor, warming a different cache); a null
+      // read there makes existing=[] and the children SET below WIPE the
+      // siblings it couldn't see. Mirrors clipboard paste's #resolveParentLayer.
+      const parent = await resolveLayerAt(history, lineage.domain, at)
       const existing = await childNamesOf(history, parent)
       if (existing.includes(name)) return 'exists' // already a child here — idempotent
 
-      // Re-home the subtree at [...at, name], then fold the name into the
-      // parent's children — one update(), one collection, broadcast.
-      await cloneLayerTree(history, lineage, branchLayer, [...at, name])
-      await committer.update(at, { ...(parent ?? {}), children: [...existing, name] })
+      // Re-home the subtree and fold the name into the parent's children in ONE
+      // mechanical importTree cascade — each affected ancestor commits exactly
+      // once, the same primitive create / paste / bulk-import use.
+      // flattenLayerTree re-expresses the branch subtree as importTree updates
+      // (children by name, other slots verbatim); the parent update folds in the
+      // new top.
+      const treeUpdates = await flattenLayerTree(history, branchLayer, [...at, name])
+      await committer.importTree([
+        { segments: at, layer: { ...(parent ?? {}), children: [...existing, name] } },
+        ...treeUpdates,
+      ])
       EffectBus.emit('fs:changed', { segments: at })
       await new hypercomb().act()
       return 'committed'
@@ -307,7 +324,7 @@ export class SwarmAdoptDrone extends Drone {
     }
   }
 
-  // ── DCP→hive config fold (Done / close-gated) ─────────────────────
+  // ── DCP→hive config fold (accept-gated: actions:available) ────────
   #onDcpDone = (ev?: Event): void => {
     console.info('[swarm-adopt] fold trigger:', ev?.type ?? 'manual')
     void this.#foldEnabledConfig()

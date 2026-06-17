@@ -69,7 +69,7 @@ export type OverlayTileContext = {
   hasNotes: boolean
 }
 
-export type OverlayProfileKey = 'private' | 'public-own' | 'public-external'
+export type OverlayProfileKey = 'private' | 'public-own' | 'public-external' | 'world'
 
 // ── Icon sizing ──────────────────────────────────────────────────
 const DEFAULT_ICON_SIZE = 7     // integer for pixel-perfect rendering
@@ -157,11 +157,18 @@ export class TileOverlayDrone extends Drone {
   /** Tracks the pointerId that triggered a pointerdown-navigation, so the trailing pointerup + click can be suppressed. */
   #consumedPointerId: number | null = null
   #meshPublic = false
+  // World mode (toggled on the control bar): when on, the overlay shows ONLY
+  // the two share-toggle icons (make-public / make-branch-public) — none of
+  // the regular actions. Init from localStorage so a refresh keeps the mode.
+  #worldMode = (() => { try { return localStorage.getItem('hc:world-mode') === '1' } catch { return false } })()
   #editing = false
   #editCooldown = false
   #editCooldownTimer: ReturnType<typeof setTimeout> | null = null
   #hasSelection = false
   #touchDragging = false
+  // The screensaver has taken over the screen — keep the icon overlay hidden
+  // until it ends. Enforced centrally in #updateVisibility.
+  #screensaverActive = false
 
   /** Registered descriptors from provider bees, keyed by name */
   #registeredDescriptors = new Map<string, OverlayActionDescriptor>()
@@ -206,12 +213,13 @@ export class TileOverlayDrone extends Drone {
     'render:host-ready', 'render:mesh-offset', 'render:cell-count',
     'render:set-orientation', 'render:geometry-changed',
     'navigation:guard-start', 'navigation:guard-end',
-    'mesh:public-changed', 'editor:mode', 'selection:changed',
+    'mesh:public-changed', 'world:mode', 'editor:mode', 'selection:changed',
     'overlay:register-action', 'overlay:unregister-action', 'overlay:neon-color',
     'drop:dragging', 'drop:pending',
     'overlay:arrange-mode', 'overlay:pool-icons',
     'bee:disposed', 'genotype:set-visible',
     'substrate:applied', 'cell:removed', 'tile:saved',
+    'tile:public-changed',
     'keymap:invoke',
   ]
   protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered']
@@ -415,6 +423,12 @@ export class TileOverlayDrone extends Drone {
         if (this.#overlay && this.#currentAxial) this.#updatePerTileVisibility()
       })
 
+      // The public/private flag flipped — swap the person↔globe toggle glyph
+      // on the hovered tile immediately, without waiting for a pointer move.
+      this.onEffect('tile:public-changed', () => {
+        if (this.#overlay && this.#currentAxial) this.#updatePerTileVisibility()
+      })
+
       this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
         this.#flat = payload.flat
         this.#updateHexBg()
@@ -452,10 +466,30 @@ export class TileOverlayDrone extends Drone {
         if (active && this.#overlay && !this.#arrangeMode) this.#overlay.visible = false
       })
 
+      this.onEffect<{ active?: boolean }>('screensaver:active', (payload) => {
+        this.#screensaverActive = payload?.active === true
+        if (this.#screensaverActive) {
+          if (this.#overlay) this.#overlay.visible = false
+        } else {
+          // screensaver ended — restore the overlay to its correct hover/selection state
+          this.#updateVisibility()
+          this.#updatePerTileVisibility()
+        }
+      })
+
       this.onEffect<{ public: boolean }>('mesh:public-changed', (payload) => {
         this.#meshPublic = payload.public
         this.#rebuildActiveProfile()
         this.#updateVisibility()
+      })
+
+      // World mode flips the overlay to the 'world' profile (the two share
+      // toggles only). Rebuild the active profile so the icon set swaps.
+      this.onEffect<{ active: boolean }>('world:mode', ({ active }) => {
+        this.#worldMode = !!active
+        this.#rebuildActiveProfile()
+        this.#updateVisibility()
+        this.#updatePerTileVisibility()
       })
 
       this.onEffect<{ active: boolean }>('editor:mode', (payload) => {
@@ -613,6 +647,8 @@ export class TileOverlayDrone extends Drone {
   // ── Profile resolution (now from registered descriptors) ───────────
 
   #resolveProfileKey(): OverlayProfileKey {
+    // World mode takes precedence over everything: only the share-toggles show.
+    if (this.#worldMode) return 'world'
     if (!this.#meshPublic) return 'private'
     return this.#currentTileExternal ? 'public-external' : 'public-own'
   }
@@ -1520,18 +1556,15 @@ export class TileOverlayDrone extends Drone {
   #onPointerDown = (e: PointerEvent): void => {
     // Right-button down → instant back navigation (trailing pointerup + contextmenu suppressed)
     if (e.button === 2) {
-      if (this.#arrangeMode) return
-      if (this.#navigationBlocked) return
-      if (this.#editing || this.#editCooldown) return
-      if (e.ctrlKey || e.metaKey) return
-      if (!this.#canvas || e.target !== this.#canvas) return
-      const selection = window.ioc.get<{ count: number }>('@diamondcoreprocessor.com/SelectionService')
-      if (selection && selection.count > 0) return
-      const gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate')
-      if (gate?.active) return
-      this.#consumedPointerId = e.pointerId
-      consumePointerGesture(e.pointerId)
-      this.#navigateBack()
+      this.#beginBackGesture(e)
+      return
+    }
+    // Shift + left-click → back navigation. Mac-friendly alternative to
+    // right-click, which is awkward on trackpads (two-finger tap / Ctrl-click,
+    // and Ctrl-click is reserved for selection here). Mirrors the right-button
+    // gesture: the trailing click is suppressed via #consumedPointerId.
+    if (e.button === 0 && e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      this.#beginBackGesture(e)
       return
     }
     if (e.button !== 0) return
@@ -1738,6 +1771,24 @@ export class TileOverlayDrone extends Drone {
     // Processor pulse triggered by lineage change
   }
 
+  // Shared guard + commit for the back-navigation gesture (right-click or
+  // shift+left-click). Bails on the same conditions as branch navigation, then
+  // claims the pointer so the trailing click / contextmenu is suppressed.
+  #beginBackGesture(e: PointerEvent): void {
+    if (this.#arrangeMode) return
+    if (this.#navigationBlocked) return
+    if (this.#editing || this.#editCooldown) return
+    if (e.ctrlKey || e.metaKey) return
+    if (!this.#canvas || e.target !== this.#canvas) return
+    const selection = window.ioc.get<{ count: number }>('@diamondcoreprocessor.com/SelectionService')
+    if (selection && selection.count > 0) return
+    const gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate')
+    if (gate?.active) return
+    this.#consumedPointerId = e.pointerId
+    consumePointerGesture(e.pointerId)
+    this.#navigateBack()
+  }
+
   #navigateBack(): void {
     const lineage = this.resolve<{ explorerUp(): void }>('lineage')
     if (!lineage) return
@@ -1761,6 +1812,10 @@ export class TileOverlayDrone extends Drone {
 
   #updateVisibility(): void {
     if (!this.#overlay) return
+
+    // Screensaver owns the screen — keep the icon overlay hidden regardless of
+    // hover/selection state. Released when screensaver:active goes false.
+    if (this.#screensaverActive) { this.#overlay.visible = false; return }
 
     // Arrange mode: overlay stays visible
     if (this.#arrangeMode) {

@@ -30,6 +30,7 @@ import { Drone } from '@hypercomb/core'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
+import { isCellPublic } from '../presentation/tiles/tile-actions.drone.js'
 
 const SWARM_LAYER_KIND = 30200
 
@@ -451,7 +452,7 @@ export class SwarmDrone extends Drone {
   // emits it on every render; if it fires before our lineage-change hook
   // resolves, we still subscribe + publish on time. The primary trigger is
   // the Lineage `change` event we wire up in the constructor below.
-  protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret']
+  protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'cell:0000-changed', 'cell:added', 'tile:public-changed']
   protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'swarm:follow-updated']
 
   // Per-lineage subscription handle. We open one per visited sig and
@@ -872,6 +873,12 @@ export class SwarmDrone extends Drone {
     // initial publish caught a child mid-write, the property edit that
     // follows triggers cell:0000-changed and we re-publish.
     this.onEffect('cell:added', () => this.#schedulePropsRepublish())
+    // Public/private flip — full re-sync so BOTH the broadcast layer slot
+    // (kind 30200) AND the personal subscribe channel re-publish with the new
+    // public subset. (#schedulePropsRepublish alone only refreshes the layer
+    // path, leaving followers' channel view stale.) The publish paths re-apply
+    // the filter; a tile going private shrinks the slot, going public adds it.
+    this.onEffect('tile:public-changed', () => { void this.#syncForCurrentLineage() })
 
     // Mesh-public toggle handler. Going OFF tears down state so temp
     // shared tiles disappear from the canvas. Going ON re-runs the
@@ -2000,6 +2007,16 @@ export class SwarmDrone extends Drone {
       const names = dir ? await listLocalChildren(dir) : []
       childRefs = names.map(name => ({ name }))
     }
+    // ── PUBLIC FILTER ─────────────────────────────────────────────────
+    // Broadcast ONLY the public subset. Private children (and private
+    // branches) are pruned here — and because childNames (recursion) derives
+    // from childRefs, private branches are never walked or published either,
+    // so private content never leaves the device. Public is participant-local
+    // and is NEVER folded into the signed layer (keeps the rendezvous sig
+    // stable across peers — same invariant as `hidden`). isCellPublic is
+    // branch-aware: a public-branch root covers all its descendants.
+    const publicLocation = '/' + segments.join('/')
+    childRefs = childRefs.filter(c => isCellPublic(publicLocation, c.name))
     const childNames = childRefs.map(c => c.name)  // legacy local var — still used by recursion + log
 
     // Publish one entry per child — flat: { name, ...0000_fields }.
@@ -2724,6 +2741,12 @@ const payload: SwarmLayerPayload = myLabel
         childEntries = resolved.filter((n): n is { name: string; layerSig: string } => n !== null)
       }
     } catch { /* fall through with empty children */ }
+
+    // PUBLIC FILTER — same rule as #publishSubtree: the personal subscribe
+    // channel must also carry only the public subset, or private tiles leak
+    // through this second path.
+    const publicLocation = '/' + segments.join('/')
+    childEntries = childEntries.filter(c => isCellPublic(publicLocation, c.name))
 
     type ChildEntry = { name: string; layerSig: string } & Record<string, unknown>
     const children: ChildEntry[] = await Promise.all(childEntries.map(async ({ name, layerSig }): Promise<ChildEntry> => {

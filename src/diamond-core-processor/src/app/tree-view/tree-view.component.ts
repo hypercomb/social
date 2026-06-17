@@ -2,6 +2,7 @@
 
 import { Component, input, output } from '@angular/core'
 import { TreeRowComponent } from './tree-row.component'
+import { isActiveElsewhere } from '../core/tree-node'
 import type { TreeNode } from '../core/tree-node'
 
 @Component({
@@ -15,6 +16,7 @@ import type { TreeNode } from '../core/tree-node'
           [node]="node"
           [enabled]="isEnabled(node)"
           [effectivelyEnabled]="isEffectivelyEnabled(node)"
+          [activeElsewhere]="isActiveElsewhere(node)"
           [hasChildren]="node.children.length > 0 || !node.loaded"
           (toggle)="toggle.emit($event)"
           (toggleAll)="toggleAll.emit($event)"
@@ -30,6 +32,7 @@ import type { TreeNode } from '../core/tree-node'
             [nodes]="node.children"
             [toggleState]="toggleState()"
             [nodeMap]="nodeMap()"
+            [activeSigs]="activeSigs()"
             (toggle)="toggle.emit($event)"
             (toggleAll)="toggleAll.emit($event)"
             (open)="open.emit($event)"
@@ -48,6 +51,9 @@ export class TreeViewComponent {
   nodes = input.required<TreeNode[]>()
   toggleState = input<Map<string, boolean>>(new Map())
   nodeMap = input<Map<string, TreeNode>>(new Map())
+  /** Signatures that actually RUN (collapsed from every effectively-enabled
+   *  code node) — feeds the "already active via another feature" marker. */
+  activeSigs = input<Set<string>>(new Set())
 
   toggle = output<TreeNode>()
   toggleAll = output<TreeNode>()
@@ -77,5 +83,13 @@ export class TreeViewComponent {
     if (!parent) return true
 
     return this.isEffectivelyEnabled(parent)
+  }
+
+  /** This script is OFF here, but its signature runs anyway because another
+   *  enabled feature pulls it in. Self-exclusion is per-node via the same
+   *  effective-enabled check used for the toggle, so a source never marks
+   *  itself. See isActiveElsewhere in tree-node.ts. */
+  isActiveElsewhere(node: TreeNode): boolean {
+    return isActiveElsewhere(node, this.activeSigs(), this.isEffectivelyEnabled(node))
   }
 }

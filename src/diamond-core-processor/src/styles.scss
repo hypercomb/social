@@ -1,9 +1,4 @@
-
 // Include theming for Angular Material with `mat.theme()`.
-// This Sass mixin will define CSS variables that are used for styling Angular Material
-// components according to the Material 3 design spec.
-// Learn more about theming and how to use it for your application's
-// custom components at https://material.angular.dev/guide/theming
 @use '@angular/material' as mat;
 
 html {
@@ -18,22 +13,122 @@ html {
   ));
 }
 
-body {
-  // Default the application to a light color theme. This can be changed to
-  // `dark` to enable the dark color theme, or to `light dark` to defer to the
-  // user's system settings.
+// ─────────────────────────────────────────────────────────────────────────
+// DCP design tokens — one source of truth for the installer's surfaces,
+// ink, accent, radii, elevation, and provenance zones. Custom properties
+// inherit through Angular's view-encapsulated component styles, so defining
+// them once at :root themes every component (home, tree-row, toggle,
+// command-line, panels). Light is the warm-paper default; dark is a real
+// theme, not an inversion. A future in-app switch can force either mode via
+// [data-dcp-theme]; today it follows the OS via prefers-color-scheme.
+// ─────────────────────────────────────────────────────────────────────────
+
+@mixin dcp-light {
+  --dcp-bg: #fdfdfd;
+  --dcp-surface: #ffffff;
+  --dcp-surface-2: #f4f5f6;
+  --dcp-ink: #1b1b18;
+  --dcp-ink-2: #6f6e68;
+  --dcp-ink-3: #9a9a93;
+  --dcp-line: rgba(28, 28, 24, 0.08);
+  --dcp-line-2: rgba(28, 28, 24, 0.14);
+
+  --dcp-accent: #3d5a99;
+  --dcp-accent-strong: #34508a;
+  --dcp-accent-tint: #eff3fb;
+  --dcp-on-accent: #ffffff;
+
+  --dcp-shadow-1: 0 1px 2px rgba(28, 28, 24, 0.05), 0 1px 0 rgba(28, 28, 24, 0.03);
+  --dcp-shadow-2: 0 8px 28px rgba(28, 28, 24, 0.12);
+  --dcp-hover: rgba(28, 28, 24, 0.04);
+
+  // "already active via another feature" — a quiet graphite cue, no zone color
+  --dcp-active-elsewhere: #8e8d85;
+  --dcp-active-elsewhere-soft: rgba(28, 28, 24, 0.045);
+
+  // provenance zones: a rail, a soft tint fill, a header tint, a label ink.
+  // keys mirror groupZone(): logical | default | current | host | package
+  --dcp-z-logical-rail: #2e9e75;  --dcp-z-logical-tint: #eef7f2;  --dcp-z-logical-head: #e3f1e8;  --dcp-z-logical-ink: #1f5c44;
+  --dcp-z-default-rail: #3faea2;  --dcp-z-default-tint: #ecf6f4;  --dcp-z-default-head: #ddf0ee;  --dcp-z-default-ink: #145249;
+  --dcp-z-current-rail: #7c5ac0;  --dcp-z-current-tint: #f3effb;  --dcp-z-current-head: #ece3f6;  --dcp-z-current-ink: #4a357c;
+  --dcp-z-host-rail: #c8932e;     --dcp-z-host-tint: #fbf5e9;     --dcp-z-host-head: #f8eed9;     --dcp-z-host-ink: #7a5712;
+  --dcp-z-package-rail: #3d5a99;  --dcp-z-package-tint: #f1f5fc;  --dcp-z-package-head: #eff3fb;  --dcp-z-package-ink: #2c447c;
+
+  // kind inks (bee/worker/drone/dependency/queen) — used by tree-row labels
+  --dcp-k-bee: #9c7b3f;
+  --dcp-k-worker: #a05050;
+  --dcp-k-drone: #8f8a3d;
+  --dcp-k-dependency: #3f8a78;
+  --dcp-k-queen: #7c5ac0;
+
+  --dcp-danger: #c0392b;
+}
+
+@mixin dcp-dark {
+  --dcp-bg: #1a1a17;
+  --dcp-surface: #222220;
+  --dcp-surface-2: #2a2a27;
+  --dcp-ink: #ecebe6;
+  --dcp-ink-2: #a8a79f;
+  --dcp-ink-3: #74736c;
+  --dcp-line: rgba(255, 255, 250, 0.09);
+  --dcp-line-2: rgba(255, 255, 250, 0.17);
+
+  --dcp-accent: #7e9bdc;
+  --dcp-accent-strong: #95acea;
+  --dcp-accent-tint: rgba(126, 155, 220, 0.15);
+  --dcp-on-accent: #15151a;
+
+  --dcp-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --dcp-shadow-2: 0 10px 34px rgba(0, 0, 0, 0.55);
+  --dcp-hover: rgba(255, 255, 250, 0.055);
+
+  --dcp-active-elsewhere: #8f8e85;
+  --dcp-active-elsewhere-soft: rgba(255, 255, 250, 0.05);
+
+  --dcp-z-logical-rail: #3fb488;  --dcp-z-logical-tint: rgba(46, 158, 117, 0.13);  --dcp-z-logical-head: rgba(46, 158, 117, 0.18);  --dcp-z-logical-ink: #8fe0c2;
+  --dcp-z-default-rail: #4fc2b5;  --dcp-z-default-tint: rgba(63, 186, 174, 0.13);  --dcp-z-default-head: rgba(63, 186, 174, 0.18);  --dcp-z-default-ink: #88e0d5;
+  --dcp-z-current-rail: #9e81d6;  --dcp-z-current-tint: rgba(124, 90, 192, 0.18);  --dcp-z-current-head: rgba(124, 90, 192, 0.24);  --dcp-z-current-ink: #cbb8ee;
+  --dcp-z-host-rail: #ddb05a;     --dcp-z-host-tint: rgba(200, 147, 46, 0.14);     --dcp-z-host-head: rgba(200, 147, 46, 0.20);     --dcp-z-host-ink: #ecc987;
+  --dcp-z-package-rail: #6e8fd6;  --dcp-z-package-tint: rgba(110, 143, 214, 0.15); --dcp-z-package-head: rgba(110, 143, 214, 0.22); --dcp-z-package-ink: #b6c9f0;
+
+  --dcp-k-bee: #cdab63;
+  --dcp-k-worker: #d98080;
+  --dcp-k-drone: #c5bf6a;
+  --dcp-k-dependency: #5fc2aa;
+  --dcp-k-queen: #b79ae6;
+
+  --dcp-danger: #e57368;
+}
+
+:root {
+  @include dcp-light;
   color-scheme: light;
+  // radii + motion are theme-independent
+  --dcp-radius-sm: 6px;
+  --dcp-radius-md: 10px;
+  --dcp-radius-lg: 14px;
+  --dcp-radius-xl: 16px;
+}
+// Dark is OPT-IN only — light is the default for everyone, regardless of the
+// OS setting. Set data-dcp-theme="dark" on <html> (a future in-app switch) to
+// enable the dark theme; we intentionally do NOT auto-apply it from
+// prefers-color-scheme, so a dark-OS user still gets the light installer.
+:root[data-dcp-theme='dark'] {
+  @include dcp-dark;
+  color-scheme: dark;
+}
 
-  // Set a default background, font and text colors for the application using
-  // Angular Material's system-level CSS variables. Learn more about these
-  // variables at https://material.angular.dev/guide/system-variables
-  background-color: var(--mat-sys-surface);
-  color: var(--mat-sys-on-surface);
-  font: var(--mat-sys-body-medium);
-
-  // Reset the user agent margin.
+body {
+  background-color: var(--dcp-bg);
+  color: var(--dcp-ink);
+  font-family: var(--hc-font);
+  font-size: 14px;
+  line-height: 1.5;
   margin: 0;
   height: 100%;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 /* highlight.js theme for code viewer */

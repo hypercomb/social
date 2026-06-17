@@ -282,10 +282,14 @@ export class ZoomDrone extends Drone {
     coordinator: '@diamondcoreprocessor.com/TouchGestureCoordinator',
     touchPan: '@diamondcoreprocessor.com/TouchPanInput',
   }
-  protected override listens = ['render:host-ready', 'editor:mode', 'keymap:invoke', 'render:geometry-changed']
+  protected override listens = ['render:host-ready', 'editor:mode', 'keymap:invoke', 'render:geometry-changed', 'render:cell-count']
 
   #effectsRegistered = false
   #hexGeo: HexGeometry = DEFAULT_HEX_GEOMETRY
+  // Live count of tiles in the current layer (from render:cell-count).
+  // zoomToFit reads it to give a LONE tile extra breathing room — a
+  // single tile otherwise fits edge-to-edge and looks far too big.
+  #cellCount = 0
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
@@ -301,6 +305,16 @@ export class ZoomDrone extends Drone {
 
     this.onEffect<HexGeometry>('render:geometry-changed', (geo) => {
       this.#hexGeo = geo
+    })
+
+    // Track the current layer's tile count so zoomToFit can tell a lone
+    // tile (which needs extra padding so it doesn't blow up to fill the
+    // viewport) from any larger view (one tile wide ≈ 64px in local
+    // mesh units, so a bounds-size test would be fragile — the count is
+    // exact). Last-value replay means a fit right after load still reads
+    // the real count.
+    this.onEffect<{ count: number }>('render:cell-count', ({ count }) => {
+      this.#cellCount = count
     })
 
     // lock the input gate while the editor is open so wheel/pinch zoom
@@ -499,15 +513,35 @@ export class ZoomDrone extends Drone {
     const bounds = (contentLayer ?? target).getLocalBounds()
     if (!bounds || bounds.width <= 0 || bounds.height <= 0) return
 
-    // measure UI chrome to define the safe area
-    const padding = 5 // px margin from UI chrome edges
+    // measure UI chrome to define the safe area. A view that is ONE lone
+    // tile fits edge-to-edge and blows that tile up to fill the viewport —
+    // it looks far too big — so give it 75px of breathing room. Any larger
+    // view (a wider row, multiple rows, a block) already has a bounding box
+    // big enough that the normal tight margin looks right. Keyed off the
+    // rendered tile count, not bounds size: a single tile is only ~64px in
+    // the mesh's local units, so a geometry threshold is fragile — the
+    // count is exact.
+    const padding = this.#cellCount === 1 ? 75 : 5 // px margin from UI chrome edges
     const headerEl = document.querySelector('.header-bar') as HTMLElement | null
     const pillEl = document.querySelector('.controls-pill') as HTMLElement | null
-    const safeTop = headerEl ? headerEl.getBoundingClientRect().bottom + padding : padding
-    const safeBottom = pillEl ? pillEl.getBoundingClientRect().top - padding : window.innerHeight - padding
+    // The controls bar can dock to a side as a full-height vertical rail. In
+    // that case its rect spans the whole height, so using its .top as the
+    // safe-area bottom would collapse availH to ~0 and shrink the fit to
+    // nothing. Detect the dock state and only let a BOTTOM-docked pill pull
+    // the bottom up; a side rail instead reserves just its own narrow width on
+    // its edge (content sits beside it, vertical fit untouched).
+    const stageEl = pillEl?.closest('.pill-stage') as HTMLElement | null
+    const dockLeft = !!stageEl?.classList.contains('dock-left')
+    const dockRight = !!stageEl?.classList.contains('dock-right')
+    const pillRect = pillEl?.getBoundingClientRect()
 
-    const safeLeft = padding
-    const safeRight = window.innerWidth - padding
+    const safeTop = headerEl ? headerEl.getBoundingClientRect().bottom + padding : padding
+    const safeBottom = (pillRect && !dockLeft && !dockRight)
+      ? pillRect.top - padding
+      : window.innerHeight - padding
+
+    const safeLeft = (dockLeft && pillRect) ? pillRect.right + padding : padding
+    const safeRight = (dockRight && pillRect) ? pillRect.left - padding : window.innerWidth - padding
     const availW = safeRight - safeLeft
     const availH = safeBottom - safeTop
 

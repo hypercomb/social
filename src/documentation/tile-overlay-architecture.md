@@ -333,5 +333,5 @@ Palette is persisted in `localStorage` under `hc:neon-color` and cycled via `ove
 | `tile:action` | `{ action, q, r, index, label }` | Icon clicked |
 | `tile:click` | `{ q, r, label, index, ctrlKey, metaKey }` | Tile clicked (no icon hit) |
 | `tile:navigate-in` | `{ label }` | Branch tile entered |
-| `tile:navigate-back` | `{}` | Right-click navigated back |
+| `tile:navigate-back` | `{}` | Navigated back (right-click or shift+left-click) |
 | `drop:target` | `{ q, r, occupied, label, index, hasImage }` | Drop target info during drag |

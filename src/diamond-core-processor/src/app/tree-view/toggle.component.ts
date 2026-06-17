@@ -33,13 +33,13 @@ import { Component, input, output } from '@angular/core'
       position: absolute;
       inset: 2px 0;
       height: 8px;
-      border-radius: 2px;
-      background: rgba(0,0,0,0.10);
+      border-radius: 999px;
+      background: var(--dcp-line-2);
       transition: background 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     .toggle.on .track {
-      background: rgba(74, 111, 165, 0.35);
+      background: var(--dcp-accent-tint);
     }
 
     .thumb {
@@ -49,25 +49,25 @@ import { Component, input, output } from '@angular/core'
       width: 12px;
       height: 12px;
       border-radius: 50%;
-      background: #bbb;
+      background: var(--dcp-ink-3);
       transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1),
                   background 0.25s cubic-bezier(0.4, 0, 0.2, 1),
                   box-shadow 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-      box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+      box-shadow: var(--dcp-shadow-1);
     }
 
     .toggle.on .thumb {
       transform: translateX(10px);
-      background: #4a6fa5;
-      box-shadow: 0 1px 4px rgba(74, 111, 165, 0.4);
+      background: var(--dcp-accent);
+      box-shadow: 0 1px 4px var(--dcp-accent-tint);
     }
 
     .toggle:hover .thumb {
-      box-shadow: 0 0 0 4px rgba(0,0,0,0.04), 0 1px 3px rgba(0,0,0,0.15);
+      box-shadow: 0 0 0 4px var(--dcp-hover), var(--dcp-shadow-1);
     }
 
     .toggle.on:hover .thumb {
-      box-shadow: 0 0 0 4px rgba(74, 111, 165, 0.1), 0 1px 4px rgba(74, 111, 165, 0.4);
+      box-shadow: 0 0 0 4px var(--dcp-accent-tint), 0 1px 4px var(--dcp-accent-tint);
     }
 
     .toggle.dimmed {

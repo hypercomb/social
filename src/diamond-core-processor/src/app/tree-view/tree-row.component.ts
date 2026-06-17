@@ -11,7 +11,7 @@ import type { TreeNode } from '../core/tree-node'
   imports: [ToggleComponent, DiamondIconComponent],
   template: `
     @if (visible()) {
-      <div class="row" [class.pending]="node().pending" [class.visual-context]="node().visualContext" [class.egg]="node().hatchBlocker" [class.freshly-adopted]="node().freshlyAdopted" [class.domain-tinted]="domainHue() !== null" [style.--depth]="node().depth" [style.--domain-hue]="domainHue()">
+      <div class="row" [class.pending]="node().pending" [class.visual-context]="node().visualContext" [class.egg]="node().hatchBlocker" [class.freshly-adopted]="node().freshlyAdopted" [class.active-elsewhere]="activeElsewhere() && !node().hatchBlocker" [class.domain-tinted]="domainHue() !== null" [style.--depth]="node().depth" [style.--domain-hue]="domainHue()">
         @if (!node().visualContext && !node().hatchBlocker) {
           <!-- Enable switch at EVERY level — adopt/enable from any node (the
                root you imported to, a collection, or a single behavior).
@@ -28,6 +28,15 @@ import type { TreeNode } from '../core/tree-node'
               [effectivelyEnabled]="effectivelyEnabled()"
               (toggled)="(ctrlHeld ? toggleAll : toggle).emit(node()); ctrlHeld = false" />
           </span>
+        }
+        @if (activeElsewhere() && !node().hatchBlocker) {
+          <!-- Already active via another feature: this script's toggle stays
+               (it's locally toggleable), but a quiet graphite "linked" glyph
+               signals the signature already runs because a sibling pulls it
+               in. Neutral on purpose — never a zone color — so it reads as
+               "managed elsewhere", not as a sixth provenance. -->
+          <span class="active-elsewhere-marker"
+            title="Already running — another enabled feature pulls in this same script (same signature), so it's active even though it's off here.">&#9901;</span>
         }
         @if (node().visualContext) {
           <span class="visual-marker" title="Already in the logical install (from another domain or the base) — shown for context">&#9676;</span>
@@ -48,6 +57,9 @@ import type { TreeNode } from '../core/tree-node'
             <span class="lineage">{{ lineageDisplay() }}</span>
           }
           <span class="name" [class]="node().kind">{{ node().name }}</span>
+          @if (activeElsewhere() && !node().hatchBlocker) {
+            <span class="active-elsewhere-note">active</span>
+          }
           @if (node().hatchBlocker) {
             <span class="egg-reason" [class]="node().hatchBlocker!">
               {{ node().hatchBlocker === 'undelivered' ? 'waiting for bytes' : 'waiting for community trust' }}
@@ -93,7 +105,7 @@ import type { TreeNode } from '../core/tree-node'
 
         @if (hasChildren()) {
           <button class="chevron" (click)="expandToggle.emit(node())">
-            {{ node().expanded ? '\u25BE' : '\u25B8' }}
+            {{ node().expanded ? '▾' : '▸' }}
           </button>
         }
       </div>
@@ -105,58 +117,89 @@ import type { TreeNode } from '../core/tree-node'
     :host { display: block; min-height: 1px; }
 
     .row-placeholder {
-      height: 32px;
-      padding-left: calc(10px + var(--depth, 0) * 20px);
+      height: 34px;
+      padding-left: calc(12px + var(--depth, 0) * 20px);
     }
 
     .row {
       display: flex;
       align-items: center;
-      gap: 6px;
-      padding: 5px 10px 5px 0;
-      padding-left: calc(10px + var(--depth, 0) * 20px);
-      border-bottom: 1px solid rgba(0,0,0,0.05);
+      gap: 8px;
+      padding: 7px 12px 7px 0;
+      padding-left: calc(12px + var(--depth, 0) * 20px);
+      border-bottom: 1px solid var(--dcp-line);
+      transition: background 0.12s ease;
     }
 
     .row:hover {
-      background: rgba(0,0,0,0.02);
+      background: var(--dcp-hover);
     }
 
-    /* Per-domain tint — a colored left edge + faint background keyed to the
-       node's source domain, so in the mixed logical view you can tell which
-       domain each feature belongs to. */
+    /* Per-domain tint — a colored left edge keyed to the node's source domain,
+       so in the mixed logical view you can tell which domain each feature
+       belongs to. */
     .row.domain-tinted {
-      border-left: 3px solid hsl(var(--domain-hue, 220), 58%, 60%);
-      background: hsla(var(--domain-hue, 220), 58%, 55%, 0.05);
+      border-left: 3px solid hsl(var(--domain-hue, 220), 52%, 58%);
+      background: hsla(var(--domain-hue, 220), 52%, 55%, 0.045);
     }
     .row.domain-tinted:hover {
-      background: hsla(var(--domain-hue, 220), 58%, 55%, 0.11);
+      background: hsla(var(--domain-hue, 220), 52%, 55%, 0.10);
     }
 
     /* Freshly-adopted: the tile you just adopted — persistently highlighted
        ("ready to enable") until you enable it or navigate away. */
     .row.freshly-adopted {
-      background: rgba(90, 200, 120, 0.16);
-      border-left: 3px solid rgba(60, 180, 100, 0.9);
-      box-shadow: inset 0 0 0 1px rgba(60, 180, 100, 0.25);
+      background: rgba(90, 200, 120, 0.15);
+      border-left: 3px solid rgba(60, 180, 100, 0.85);
+      box-shadow: inset 0 0 0 1px rgba(60, 180, 100, 0.22);
     }
-    .row.freshly-adopted .name { font-weight: 600; }
+    .row.freshly-adopted .name { font-weight: 500; }
 
     /* Visual-context: a read-only item already in the logical install from
-       ANOTHER domain or the base — shown so you see how this domain's
-       incoming features land among what's already there. Marked by a left
-       border + tinted background; no toggle, dimmed. */
+       ANOTHER domain or the base — marked by a left border + tinted
+       background; no toggle, dimmed. */
     .row.visual-context {
       opacity: 0.7;
       background: rgba(90, 120, 200, 0.06);
       border-left: 3px solid rgba(90, 120, 200, 0.5);
     }
     .visual-marker {
-      color: rgba(90, 120, 200, 0.8);
+      color: rgba(120, 145, 215, 0.85);
       font-size: 12px;
       width: 16px;
       text-align: center;
       flex-shrink: 0;
+    }
+
+    /* Already active via another feature: a quiet, ZONE-NEUTRAL cue. A
+       graphite inset rail (box-shadow, NOT border-left, so it never fights
+       the domain-tint border) + a graphite "linked" glyph + a muted "active"
+       label. The toggle stays — the node is locally toggleable; the cue only
+       says "its signature already runs via a sibling". The name dims to
+       secondary ink to read as "not the one in charge of this sig". */
+    .row.active-elsewhere {
+      box-shadow: inset 3px 0 0 var(--dcp-active-elsewhere);
+      background: var(--dcp-active-elsewhere-soft);
+    }
+    .row.active-elsewhere:hover {
+      background: var(--dcp-hover);
+    }
+    .row.active-elsewhere .name { color: var(--dcp-ink-2); }
+    .active-elsewhere-marker {
+      color: var(--dcp-active-elsewhere);
+      font-size: 13px;
+      width: 16px;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    .active-elsewhere-note {
+      font-size: 9.5px;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--dcp-active-elsewhere);
+      flex-shrink: 0;
+      align-self: center;
     }
 
     /* Egg: a known-but-not-hatched layer. Two causes (undelivered bytes /
@@ -171,33 +214,33 @@ import type { TreeNode } from '../core/tree-node'
     }
     .egg-reason {
       font-size: 0.58rem;
-      font-weight: 600;
+      font-weight: 500;
       letter-spacing: 0.03em;
-      padding: 1px 6px;
-      border-radius: 3px;
+      padding: 1px 7px;
+      border-radius: 999px;
       white-space: nowrap;
       flex-shrink: 0;
-      background: rgba(200, 151, 90, 0.16);
-      color: rgba(150, 100, 35, 0.95);
+      background: var(--dcp-z-host-tint);
+      color: var(--dcp-z-host-ink);
     }
     .egg-reason.untrusted {
       background: rgba(200, 90, 90, 0.16);
-      color: rgba(155, 45, 45, 0.95);
+      color: var(--dcp-danger);
     }
     .egg-hatch-btn {
       font-size: 0.6rem;
-      font-weight: 600;
+      font-weight: 500;
       letter-spacing: 0.04em;
-      padding: 2px 9px;
-      border-radius: 3px;
+      padding: 3px 11px;
+      border-radius: 999px;
       cursor: pointer;
       flex-shrink: 0;
       border: 1px solid currentColor;
       background: transparent;
     }
-    .egg-hatch-btn.untrusted { color: rgba(155, 45, 45, 0.95); }
-    .egg-hatch-btn.undelivered { color: rgba(150, 100, 35, 0.95); }
-    .egg-hatch-btn:hover { background: rgba(0,0,0,0.04); }
+    .egg-hatch-btn.untrusted { color: var(--dcp-danger); }
+    .egg-hatch-btn.undelivered { color: var(--dcp-z-host-ink); }
+    .egg-hatch-btn:hover { background: var(--dcp-hover); }
 
     /* Pending: this row is a placeholder for content still being fetched.
        Muted text, gentle pulse, no edit/toggle actions reachable until
@@ -229,101 +272,104 @@ import type { TreeNode } from '../core/tree-node'
     }
 
     .name {
-      font-size: 11px;
+      font-size: 12px;
       font-weight: 500;
-      color: #333;
+      color: var(--dcp-ink);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      letter-spacing: -0.005em;
     }
 
-    .name.bee { color: #a58b4f; }
-    .name.worker { color: #a54f4f; }
-    .name.drone { color: #a59b4f; }
-    .name.dependency { color: #4fa58b; }
+    .name.bee { color: var(--dcp-k-bee); }
+    .name.worker { color: var(--dcp-k-worker); }
+    .name.drone { color: var(--dcp-k-drone); }
+    .name.dependency { color: var(--dcp-k-dependency); }
 
     .description {
-      font-size: 10px;
-      color: #999;
+      font-size: 10.5px;
+      color: var(--dcp-ink-3);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
       width: 100%;
-      line-height: 1.2;
+      line-height: 1.25;
     }
 
     .lineage {
       font-size: 10px;
-      color: #aaa;
+      color: var(--dcp-ink-3);
       white-space: nowrap;
       flex-shrink: 0;
     }
 
     .kind-label {
-      font-size: 12px;
+      font-size: 11.5px;
       font-weight: 500;
       white-space: nowrap;
       flex-shrink: 0;
       margin-left: auto;
-      color: #a58b4f;
+      color: var(--dcp-k-bee);
     }
 
-    .kind-label.worker { color: #a54f4f; }
-    .kind-label.drone { color: #a59b4f; }
-    .kind-label.queen { color: #7b4fa5; }
-    .kind-label.dependency { color: #4fa58b; }
+    .kind-label.worker { color: var(--dcp-k-worker); }
+    .kind-label.drone { color: var(--dcp-k-drone); }
+    .kind-label.queen { color: var(--dcp-k-queen); }
+    .kind-label.dependency { color: var(--dcp-k-dependency); }
 
     .sig {
       font-family: var(--hc-mono);
       font-size: 10px;
-      color: #bbb;
+      color: var(--dcp-ink-3);
       flex-shrink: 0;
+      opacity: 0.8;
     }
 
     .audit-badge {
       font-size: 10px;
       font-weight: 500;
-      padding: 1px 6px;
-      border-radius: 2px;
+      padding: 1px 7px;
+      border-radius: 999px;
       flex-shrink: 0;
     }
 
     .audit-badge.met {
-      background: #e6f4ea;
-      color: #1e7e34;
+      background: var(--dcp-z-logical-tint);
+      color: var(--dcp-z-logical-ink);
     }
 
     .audit-badge.unmet {
-      background: #fff3e0;
-      color: #e65100;
+      background: var(--dcp-z-host-tint);
+      color: var(--dcp-z-host-ink);
     }
 
     .chevron {
       background: none;
       border: none;
       cursor: pointer;
-      font-size: 14px;
-      color: #666;
+      font-size: 13px;
+      color: var(--dcp-ink-2);
       padding: 0 4px;
       flex-shrink: 0;
+      transition: color 0.12s ease;
     }
 
     .chevron:hover {
-      color: #222;
+      color: var(--dcp-ink);
     }
 
     .edit-btn,
     .promote-btn {
       background: none;
-      border: 1px solid rgba(0,0,0,0.08);
-      border-radius: 2px;
+      border: 1px solid var(--dcp-line-2);
+      border-radius: var(--dcp-radius-sm, 6px);
       cursor: pointer;
       font-size: 12px;
-      color: #4a6fa5;
-      padding: 1px 4px;
+      color: var(--dcp-accent);
+      padding: 2px 5px;
       flex-shrink: 0;
       opacity: 0;
-      transition: opacity 0.15s;
+      transition: opacity 0.15s, background 0.12s;
     }
 
     .row:hover .edit-btn,
@@ -333,30 +379,30 @@ import type { TreeNode } from '../core/tree-node'
 
     .edit-btn:hover,
     .promote-btn:hover {
-      background: rgba(74, 111, 165, 0.08);
+      background: var(--dcp-accent-tint);
     }
 
     /* info / review-code button — opens the detail (doc, source, audit) for a
-       code item (bee/worker/drone/dependency). Visible on desktop again (was
-       hidden); mobile gets the larger tap-target below. */
+       code item (bee/worker/drone/dependency). */
     .info-btn {
       display: inline-flex;
       align-items: center;
       justify-content: center;
       background: none;
-      border: 1px solid rgba(0,0,0,0.08);
-      border-radius: 2px;
+      border: 1px solid var(--dcp-line-2);
+      border-radius: var(--dcp-radius-sm, 6px);
       cursor: pointer;
       font-size: 12px;
-      color: #4a6fa5;
-      padding: 1px 5px;
+      color: var(--dcp-accent);
+      padding: 2px 6px;
       flex-shrink: 0;
+      transition: background 0.12s;
     }
-    .info-btn:hover { background: rgba(74, 111, 165, 0.08); }
+    .info-btn:hover { background: var(--dcp-accent-tint); }
 
     @media (max-width: 600px) {
       .row {
-        padding-left: calc(8px + var(--depth, 0) * 14px);
+        padding-left: calc(10px + var(--depth, 0) * 14px);
         gap: 8px;
         padding-top: 10px;
         padding-bottom: 10px;
@@ -373,7 +419,8 @@ import type { TreeNode } from '../core/tree-node'
       .lineage,
       .kind-label,
       .sig,
-      .audit-badge {
+      .audit-badge,
+      .active-elsewhere-note {
         display: none;
       }
 
@@ -382,11 +429,11 @@ import type { TreeNode } from '../core/tree-node'
         align-items: center;
         justify-content: center;
         background: none;
-        border: 1px solid rgba(0, 0, 0, 0.08);
-        border-radius: 2px;
+        border: 1px solid var(--dcp-line-2);
+        border-radius: var(--dcp-radius-sm, 6px);
         cursor: pointer;
         font-size: 18px;
-        color: #4a6fa5;
+        color: var(--dcp-accent);
         min-width: 40px;
         min-height: 40px;
         flex-shrink: 0;
@@ -395,12 +442,12 @@ import type { TreeNode } from '../core/tree-node'
       }
 
       .info-btn:active {
-        background: rgba(74, 111, 165, 0.08);
+        background: var(--dcp-accent-tint);
       }
 
       .row-placeholder {
         height: 48px;
-        padding-left: calc(8px + var(--depth, 0) * 14px);
+        padding-left: calc(10px + var(--depth, 0) * 14px);
       }
 
       .chevron {
@@ -422,6 +469,9 @@ export class TreeRowComponent implements OnInit, OnDestroy {
   node = input.required<TreeNode>()
   enabled = input(true)
   effectivelyEnabled = input(true)
+  /** This script is off here but its signature runs via another enabled
+   *  feature — drives the quiet "already active" cue. */
+  activeElsewhere = input(false)
   hasChildren = input(false)
 
   toggle = output<TreeNode>()

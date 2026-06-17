@@ -216,8 +216,8 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     switch (data.type) {
       case 'portal:confirm':
       case 'dcp:confirm':
-        this.close()
-        window.dispatchEvent(new CustomEvent('actions:available'))
+        // Iframe-initiated accept — equivalent to clicking Done in the chrome.
+        this.apply()
         break
 
       case 'portal:cancel':
@@ -270,8 +270,13 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   }
 
   // -------------------------------------------------
-  // close portal
+  // close portal — DISMISS (never installs)
   // -------------------------------------------------
+  // Every passive exit lands here: the ×/back button, the backdrop, Escape
+  // (global:escape), and a touch-drag. It tears down the overlay and signals
+  // "closed" but DELIBERATELY never dispatches `actions:available` — so any
+  // pending installer changes are discarded, not folded into the hive. The
+  // diff isn't lost: DCP keeps the config and re-surfaces it next open.
   public close = (): void => {
     const wasDcp = this.#activeTarget === 'dcp'
     this.isOpen = false
@@ -279,6 +284,27 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.#activeUrl = null
     this.#activeTarget = null
     this.#cdr.detectChanges()
+    // Generic close signal for EVERY overlay target (installer, meadowverse,
+    // …). Symmetric counterpart to `portal:open`; lets listeners that suspend
+    // while the hive is covered (e.g. the screensaver) reliably resume on
+    // close. `dcp:embed-closed` is the "panel is gone" signal (UI state), NOT
+    // the install trigger — installs ride `actions:available` from apply().
+    window.dispatchEvent(new CustomEvent('portal:closed'))
     if (wasDcp) window.dispatchEvent(new CustomEvent('dcp:embed-closed'))
+  }
+
+  // -------------------------------------------------
+  // apply portal — ACCEPT (the only path that installs)
+  // -------------------------------------------------
+  // Fired by the explicit "Done" button (and by an iframe-initiated
+  // portal:confirm / dcp:confirm). Tears the overlay down like close(), then
+  // dispatches `actions:available` — the SOLE signal that folds the
+  // installer's enabled config into the hive (SwarmAdoptDrone) and resyncs /
+  // reloads the web shell (main.ts). Nothing installs or runs until the
+  // participant authorizes it here.
+  public apply = (): void => {
+    const wasDcp = this.#activeTarget === 'dcp'
+    this.close()
+    if (wasDcp) window.dispatchEvent(new CustomEvent('actions:available'))
   }
 }

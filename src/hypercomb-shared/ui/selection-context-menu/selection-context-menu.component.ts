@@ -38,8 +38,10 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   #posX = signal(0)
   #posY = signal(0)
   #dragging = signal(false)
+  // The screensaver has taken over the screen — hide the menu until it ends.
+  #screensaverActive = signal(false)
 
-  readonly visible = computed(() => this.#hasSelection())
+  readonly visible = computed(() => this.#hasSelection() && !this.#screensaverActive())
 
   /** True when tile selection drives visibility — render selection-specific buttons. */
   readonly selectionActive = this.#hasSelection.asReadonly()
@@ -78,6 +80,7 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   #showHiddenUnsub: (() => void) | null = null
   #moveModeUnsub: (() => void) | null = null
   #clipboardUnsub: (() => void) | null = null
+  #screensaverUnsub: (() => void) | null = null
 
   // ── lifecycle ───────────────────────────────────────────
 
@@ -104,6 +107,10 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
       this.#clipboardCount.set(payload?.items?.length ?? 0)
     })
 
+    this.#screensaverUnsub = EffectBus.on<{ active?: boolean }>('screensaver:active', (payload) => {
+      this.#screensaverActive.set(payload?.active === true)
+    })
+
     window.addEventListener('resize', this.#onResize)
   }
 
@@ -112,6 +119,7 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
     this.#showHiddenUnsub?.()
     this.#moveModeUnsub?.()
     this.#clipboardUnsub?.()
+    this.#screensaverUnsub?.()
     window.removeEventListener('resize', this.#onResize)
     window.removeEventListener('pointermove', this.#onDragMove)
     window.removeEventListener('pointerup', this.#onDragEnd)

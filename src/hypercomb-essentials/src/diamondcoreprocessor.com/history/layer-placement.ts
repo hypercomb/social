@@ -1,8 +1,12 @@
 // diamondcoreprocessor.com/history/layer-placement.ts
 //
-// The two low-level layer-placement primitives, shared by every caller
-// that re-points a parent's `children` slot to content sourced from
-// elsewhere — clipboard paste, swarm adopt, and the registry migration.
+// The low-level layer-placement primitives, shared by every caller that
+// re-points a parent's `children` slot to content sourced from elsewhere —
+// clipboard paste and swarm adopt.
+//
+// `flattenLayerTree` is the primitive both callers use: it re-expresses a
+// source subtree as `committer.importTree([...])` updates so the whole dump
+// commits deepest-first with ONE shared up-cascade to root.
 //
 // Under the layer-primitive doctrine a cell IS its layer: content
 // (children, properties, notes, …) lives in the history bag addressed by
@@ -106,29 +110,55 @@ export async function resolveLayerAt(
   return found?.layer ?? null
 }
 
-/** Re-home a layer subtree at `destCellSegments` by re-committing each
- *  node at its destination lineage sig. The child sigs inside a cloned
- *  layer stay valid verbatim — they resolve through the global pool
- *  regardless of which bag's marker points at them — so the clone's only
- *  effect is one destination marker per node, making the content
- *  reachable by navigating the new path. No OPFS walk; the source folders
- *  don't exist in this architecture. */
-export async function cloneLayerTree(
+/** Flatten a source layer subtree into a list of `importTree` updates rooted at
+ *  `destSegments` — the mechanical-cascade counterpart to cloneLayerTree.
+ *
+ *  cloneLayerTree re-homes by committing each node DIRECTLY (one raw marker per
+ *  node, no cascade), relying on the call site's trailing `update()` to fold the
+ *  top into the parent and back-cascade just that one branch. flattenLayerTree
+ *  instead RE-EXPRESSES the subtree as `{ segments, layer }` updates so the
+ *  caller can feed them — together with the target parent's children change — to
+ *  a SINGLE `committer.importTree([...])`. importTree commits the whole batch
+ *  deepest-first with one shared up-cascade to root and emits the per-level
+ *  cell:added/removed reconciliation, exactly like create and bulk-import.
+ *
+ *  Each node's `children` slot is converted from child SIGS to child NAMES so
+ *  importTree (nameSlots: ['children']) re-resolves them to the freshly-committed
+ *  dest markers — deepest-first guarantees a child is committed before its parent
+ *  resolves it, so the hierarchy rebuilds level by level. Every OTHER slot
+ *  (properties, notes, …) rides along as sigs verbatim — pool-addressed, valid at
+ *  any path. Children that don't resolve to a named layer are dropped, mirroring
+ *  cloneLayerTree. */
+export async function flattenLayerTree(
   history: PlacementHistory,
-  lineage: PlacementLineage,
   layer: PlacementLayer,
-  destCellSegments: readonly string[],
-): Promise<void> {
-  const dstLocSig = await history.sign({
-    domain: lineage.domain,
-    explorerSegments: () => destCellSegments,
-  })
-  await history.commitLayer(dstLocSig, layer)
-
+  destSegments: readonly string[],
+): Promise<{ segments: string[]; layer: { name?: string; [slot: string]: unknown } }[]> {
   const childSigs = Array.isArray(layer.children) ? layer.children : []
+  const childLayers: PlacementLayer[] = []
+  const childNames: string[] = []
   for (const sig of childSigs) {
     const child = await history.getLayerBySig(String(sig))
     if (!child || typeof child.name !== 'string' || child.name.length === 0) continue
-    await cloneLayerTree(history, lineage, child, [...destCellSegments, child.name])
+    childLayers.push(child)
+    childNames.push(child.name)
   }
+
+  // This node: every source slot verbatim, `children` swapped sigs → names.
+  const node: { name?: string; [slot: string]: unknown } = {}
+  for (const [slot, value] of Object.entries(layer)) {
+    if (slot === 'children') continue
+    node[slot] = value
+  }
+  // Bracket access: `children` rides the index signature, not the declared
+  // `name` key — the Angular build enforces noPropertyAccessFromIndexSignature.
+  node['children'] = childNames
+
+  const updates: { segments: string[]; layer: { name?: string; [slot: string]: unknown } }[] = [
+    { segments: [...destSegments], layer: node },
+  ]
+  for (const child of childLayers) {
+    updates.push(...await flattenLayerTree(history, child, [...destSegments, child.name as string]))
+  }
+  return updates
 }

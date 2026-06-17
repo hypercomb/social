@@ -20,19 +20,29 @@
       </div>
     }
 
-    <!-- Pending changes (+adds / −removes), to the LEFT of the back/Done
-         button. The back button IS the Done: clicking it closes the portal,
-         which folds the adds in and un-folds the removes (recoverable). -->
-    @if (pendingAdds || pendingRemoves) {
-      <div class="portal-diff" aria-label="pending changes">
-        @if (pendingAdds) { <span class="diff-add">+{{ pendingAdds }}</span> }
-        @if (pendingRemoves) { <span class="diff-remove">&minus;{{ pendingRemoves }}</span> }
-      </div>
-    }
+    <!-- Bottom action bar. The ×/back button DISMISSES — it never installs.
+         When there are pending changes (+adds / −removes), an explicit "Done"
+         button appears: it is the ONLY thing that folds the adds in and
+         un-folds the removes (recoverable). Dismissing discards the pending
+         diff, which DCP keeps and re-surfaces next open. -->
+    <div class="portal-actions">
+      @if (pendingAdds || pendingRemoves) {
+        <div class="portal-diff" aria-label="pending changes">
+          @if (pendingAdds) { <span class="diff-add">+{{ pendingAdds }}</span> }
+          @if (pendingRemoves) { <span class="diff-remove">&minus;{{ pendingRemoves }}</span> }
+        </div>
+      }
 
-    <button class="portal-close" (click)="close()">
-      <span class="close-icon">&times;</span>
-      <span class="close-label">{{ 'portal.back' | t }}</span>
-    </button>
+      <button class="portal-close" (click)="close()">
+        <span class="close-icon">&times;</span>
+        <span class="close-label">{{ 'portal.back' | t }}</span>
+      </button>
+
+      @if (pendingAdds || pendingRemoves) {
+        <button class="portal-apply" (click)="apply()">
+          <span class="apply-label">{{ 'portal.done' | t }}</span>
+        </button>
+      }
+    </div>
   </div>
 }

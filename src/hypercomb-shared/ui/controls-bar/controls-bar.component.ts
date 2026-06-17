@@ -54,6 +54,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   { id: 'fullscreen',   label: 'controls.fullscreen',   action: 'toggleFullscreen',   visibleWhen: 'always', instruction: 'dcp.fullscreen' },
   { id: 'instructions', label: 'controls.instructions', action: 'toggleInstructions', visibleWhen: 'always', instruction: 'dcp.instructions-toggle' },
   { id: 'show-hidden',  label: 'controls.show-hidden',  action: 'toggleShowHidden',   visibleWhen: 'always' },
+  { id: 'world-mode',   label: 'controls.world-mode',   action: 'toggleWorldMode',    visibleWhen: 'always' },
   { id: 'text-only',    label: 'controls.text-only',    action: 'toggleTextOnly',     visibleWhen: 'always' },
   { id: 'cut',          label: 'selection.cut',         action: 'cut',                visibleWhen: 'hasSelection' },
   { id: 'copy',         label: 'selection.copy',        action: 'copy',               visibleWhen: 'hasSelection' },
@@ -70,7 +71,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
 // anything in edit mode the persisted map takes over.
 const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'back': true, 'dcp': true, 'fit': true, 'zoom-out': true, 'zoom-in': true, 'lock': true, 'fullscreen': true,
-  'instructions': false, 'show-hidden': false, 'text-only': false,
+  'instructions': false, 'show-hidden': false, 'world-mode': true, 'text-only': false,
   'cut': false, 'copy': false,
   'clipboard': false, 'voice': false, 'bees': false,
 }
@@ -207,6 +208,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #roomOpen = signal(false)
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
   #showHidden = signal(localStorage.getItem('hc:show-hidden') === '1')
+  // World mode — an on/off toggle. When on, the canvas dims not-yet-shared
+  // tiles and the tile overlay shows only the two share-toggles. Persisted so
+  // a refresh keeps the mode.
+  #worldMode = signal(localStorage.getItem('hc:world-mode') === '1')
   // Fit button has three states:
   //  - 'off'    (white): regular click performs a one-shot fit; no pin
   //  - 'global' (green): every layer auto-fits on navigation
@@ -321,6 +326,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     toggleFullscreen: () => this.toggleFullscreen(),
     toggleInstructions: (e) => this.toggleInstructions(e!),
     toggleShowHidden: () => this.toggleShowHidden(),
+    toggleWorldMode: () => this.toggleWorldMode(),
     toggleTextOnly: () => this.toggleTextOnly(),
     cut: () => this.cut(),
     copy: () => this.copy(),
@@ -338,6 +344,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'lock': return this.#locked()
       case 'fit': return this.fitLocked()
       case 'show-hidden': return this.#showHidden()
+      case 'world-mode': return this.#worldMode()
       case 'text-only': return this.#textOnly()
       case 'bees': return this.#beesVisible()
       case 'voice': return this.voiceActive()
@@ -367,6 +374,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'fullscreen':   return 'fullscreen'
       case 'instructions': return 'help'
       case 'show-hidden':  return this.showHidden() ? 'visibility' : 'visibility_off'
+      case 'world-mode':   return 'public'
       case 'text-only':    return this.textOnly() ? 'text_fields' : 'subject'
       case 'cut':          return 'content_cut'
       case 'copy':         return 'content_copy'
@@ -440,6 +448,17 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly pillPos = this.#pillPos.asReadonly()
   readonly #pillDragging = signal(false)
   readonly pillDragging = this.#pillDragging.asReadonly()
+  // ── side-dock state ──────────────────────────────────────
+  // null            → free floating (horizontal pill at explicit coords)
+  // 'left' / 'right'→ locked to that edge as a vertical toolbar.
+  // Drag the grip into a side's snap zone to dock; drag back out (past a
+  // wider exit zone, for hysteresis) to detach. The default (no persisted
+  // position) is the left-edge dock; dropping a detached pill with any part
+  // offscreen resets it to that same left-dock default. Initialized to null
+  // here; #restorePillPos() applies the left default once the DOM is ready.
+  readonly #dockSide = signal<'left' | 'right' | null>(null)
+  readonly dockSide = this.#dockSide.asReadonly()
+  readonly #SNAP_ZONE = 72
   #pillDragOffsetX = 0
   #pillDragOffsetY = 0
   #pillPointerId: number | null = null
@@ -631,6 +650,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly roomOpen = this.#roomOpen.asReadonly()
   readonly beesVisible = this.#beesVisible.asReadonly()
   readonly showHidden = this.#showHidden.asReadonly()
+  readonly worldMode = this.#worldMode.asReadonly()
   readonly voiceActive = signal(false)
   readonly voiceSupported = VoiceInputService.supported()
   readonly atomizeTarget = this.#atomizeTarget.asReadonly()
@@ -811,6 +831,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       EffectBus.emit('visibility:show-hidden', { active: true })
     }
 
+    // emit initial world-mode state so the renderer + overlay pick it up
+    if (this.#worldMode()) {
+      EffectBus.emit('world:mode', { active: true })
+    }
+
     // fit-locked: install the navigation listener if any fit pin exists.
     // The listener handles suspend/resume per-page on each navigation.
     if (this.#fitMode() === 'global' || this.#fitPinnedPages().size > 0) {
@@ -819,13 +844,16 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   ngAfterViewInit(): void {
-    // Cache the stage element now that it is in the DOM, and re-clamp
-    // any position restored from localStorage against the actual pill
-    // size. Guarantees the pill is always fully on-screen even if the
-    // viewport shrank since the last session.
+    // Cache the stage element now that it is in the DOM. Re-validate any
+    // free position restored from localStorage against the actual pill
+    // size: if it no longer fully fits the viewport (it shrank since the
+    // last session), fall back to the left-dock default. Docked pills
+    // are CSS-positioned on the edge, so they need no re-validation here.
     this.#pillStageEl = this.#host.nativeElement.querySelector('.pill-stage')
-    const pos = this.#pillPos()
-    if (pos) this.#pillPos.set(this.#clampPillPos(pos.x, pos.y))
+    if (!this.#dockSide()) {
+      const pos = this.#pillPos()
+      if (pos && !this.#fitsOnScreen(pos.x, pos.y)) this.#resetToDefault()
+    }
   }
 
   ngOnDestroy(): void {
@@ -1387,6 +1415,18 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     EffectBus.emit('visibility:show-hidden', { active: next })
   }
 
+  // ── world mode (on/off) ─────────────────────────────────
+  // Dims not-yet-shared tiles and flips the tile overlay to the two
+  // share-toggle icons. The actual dim + icon swap happen in the renderer
+  // and overlay drones, which listen for 'world:mode'.
+
+  readonly toggleWorldMode = (): void => {
+    const next = !this.#worldMode()
+    this.#worldMode.set(next)
+    localStorage.setItem('hc:world-mode', next ? '1' : '0')
+    EffectBus.emit('world:mode', { active: next })
+  }
+
   // ── voice ────────────────────────────────────────────
 
   readonly toggleVoice = (): void => {
@@ -1453,16 +1493,24 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── internal ────────────────────────────────────────────
 
   #onResize = (): void => {
-    // Keep the pill anchored to the bottom of the viewport. When
-    // innerHeight changes (rotation, fullscreen, devtools, mobile
-    // address bar showing/hiding), recompute y from #pillFromBottom
-    // so the pill doesn't drift up over the tile render area.
-    const pos = this.#pillPos()
-    if (pos) {
-      const fromBottom = this.#pillFromBottom ?? (window.innerHeight - pos.y)
-      this.#pillFromBottom = fromBottom
-      const newY = window.innerHeight - fromBottom
-      this.#pillPos.set(this.#clampPillPos(pos.x, newY))
+    // A side-docked pill is CSS-centered on its edge (and height-capped with
+    // an internal scroll), so it survives any resize untouched. For a free
+    // pill, keep it anchored to the bottom of the viewport: when innerHeight
+    // changes (rotation, fullscreen, devtools, mobile address bar), recompute
+    // y from #pillFromBottom so it doesn't drift over the tile render area.
+    // If the recomputed rect no longer fully fits, reset to the left dock.
+    if (!this.#dockSide()) {
+      const pos = this.#pillPos()
+      if (pos) {
+        const fromBottom = this.#pillFromBottom ?? (window.innerHeight - pos.y)
+        this.#pillFromBottom = fromBottom
+        const newY = window.innerHeight - fromBottom
+        if (this.#fitsOnScreen(pos.x, newY)) {
+          this.#pillPos.set({ x: pos.x, y: newY })
+        } else {
+          this.#resetToDefault()
+        }
+      }
     }
     // recompute pill zoom for new viewport width
     this.#pillZoom.set(this.#computePillZoom())
@@ -1492,29 +1540,108 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   #onPillDragMove = (e: PointerEvent): void => {
     if (e.pointerId !== this.#pillPointerId) return
-    const x = e.clientX - this.#pillDragOffsetX
-    const y = e.clientY - this.#pillDragOffsetY
-    this.#pillPos.set(this.#clampPillPos(x, y))
+    const prevSide = this.#dockSide()
+    const side = this.#detectDockSide(e.clientX)
+    if (side !== prevSide) {
+      this.#dockSide.set(side)
+      if (side === null) {
+        // Undocking: re-anchor the grab point to the grip so the pill
+        // re-flows horizontally under the cursor instead of jumping.
+        this.#pillDragOffsetX = 24
+        this.#pillDragOffsetY = 18
+      }
+    }
+    if (side === null) {
+      // Free-follow the pointer. Intentionally unclamped — the pill may be
+      // dragged partly offscreen; on release an offscreen pill resets to
+      // the left-dock default (see #onPillDragEnd).
+      this.#pillPos.set({
+        x: e.clientX - this.#pillDragOffsetX,
+        y: e.clientY - this.#pillDragOffsetY,
+      })
+    }
   }
 
   #onPillDragEnd = (e: PointerEvent): void => {
     if (e.pointerId !== this.#pillPointerId) return
     this.#pillPointerId = null
     this.#pillDragging.set(false)
-    const pos = this.#pillPos()
-    if (pos) {
-      // Lock in the bottom-anchor distance now so subsequent resizes
-      // keep the pill at the same height above the viewport bottom.
-      this.#pillFromBottom = window.innerHeight - pos.y
-      try {
-        localStorage.setItem(
-          PILL_POS_KEY,
-          JSON.stringify({ x: pos.x, fromBottom: this.#pillFromBottom }),
-        )
-      } catch { /* ignore */ }
+
+    const side = this.#dockSide()
+    if (side) {
+      // Locked to an edge as a vertical toolbar.
+      this.#persistDock(side)
+    } else {
+      const pos = this.#pillPos()
+      if (pos && this.#fitsOnScreen(pos.x, pos.y)) {
+        // Free-floating, fully on-screen. Lock in the bottom-anchor distance
+        // so subsequent resizes keep it the same height above the bottom.
+        this.#pillFromBottom = window.innerHeight - pos.y
+        this.#persistFree(pos)
+      } else {
+        // Any part offscreen → snap back to the left-dock default.
+        this.#resetToDefault()
+      }
     }
+
     window.removeEventListener('pointermove', this.#onPillDragMove)
     window.removeEventListener('pointerup', this.#onPillDragEnd)
+  }
+
+  /**
+   * Which edge (if any) the pointer is currently over, for side-docking.
+   * Hysteresis: once docked you must drag past a wider `exit` band to
+   * detach, so the pill doesn't flicker between vertical/horizontal when
+   * the cursor hovers the boundary.
+   */
+  #detectDockSide(clientX: number): 'left' | 'right' | null {
+    const w = window.innerWidth
+    const enter = this.#SNAP_ZONE
+    const exit = this.#SNAP_ZONE + 48
+    const cur = this.#dockSide()
+    if (cur === 'left')  return clientX <= exit ? 'left' : (clientX >= w - enter ? 'right' : null)
+    if (cur === 'right') return clientX >= w - exit ? 'right' : (clientX <= enter ? 'left' : null)
+    if (clientX <= enter) return 'left'
+    if (clientX >= w - enter) return 'right'
+    return null
+  }
+
+  /** True when the pill at (x, y) sits fully within the viewport. */
+  #fitsOnScreen(x: number, y: number): boolean {
+    if (!this.#pillStageEl) {
+      this.#pillStageEl = this.#host.nativeElement.querySelector('.pill-stage')
+    }
+    const w = this.#pillStageEl?.offsetWidth ?? 0
+    const h = this.#pillStageEl?.offsetHeight ?? 0
+    return x >= 0 && y >= 0 && x + w <= window.innerWidth && y + h <= window.innerHeight
+  }
+
+  #persistDock(side: 'left' | 'right'): void {
+    // Docked pills are CSS-positioned; clear the free coords so the px
+    // bindings switch off and the .dock-* rules take over.
+    this.#pillPos.set(null)
+    this.#pillFromBottom = null
+    try {
+      localStorage.setItem(PILL_POS_KEY, JSON.stringify({ dock: side }))
+    } catch { /* ignore */ }
+  }
+
+  #persistFree(pos: { x: number; y: number }): void {
+    try {
+      localStorage.setItem(
+        PILL_POS_KEY,
+        JSON.stringify({ x: pos.x, fromBottom: this.#pillFromBottom }),
+      )
+    } catch { /* ignore */ }
+  }
+
+  #resetToDefault(): void {
+    // The default is the left-edge dock (a full-height rail that always fits),
+    // so reset lands there rather than the old center-bottom float.
+    this.#dockSide.set('left')
+    this.#pillPos.set(null)
+    this.#pillFromBottom = null
+    try { localStorage.removeItem(PILL_POS_KEY) } catch { /* ignore */ }
   }
 
   #clampPillPos(x: number, y: number): { x: number; y: number } {
@@ -1536,8 +1663,21 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #restorePillPos(): void {
     try {
       const raw = localStorage.getItem(PILL_POS_KEY)
-      if (!raw) return
-      const parsed = JSON.parse(raw) as { x?: number; y?: number; fromBottom?: number }
+      // No persisted position → default to the left-edge dock on desktop.
+      // The template gates dockSide on !isMobile(), so the mobile floating
+      // strip is unaffected. Once the user drags the pill anywhere, the
+      // persisted position takes over on subsequent loads.
+      if (!raw) {
+        this.#dockSide.set('left')
+        return
+      }
+      const parsed = JSON.parse(raw) as { x?: number; y?: number; fromBottom?: number; dock?: 'left' | 'right' }
+      // Docked to a side — CSS positions the vertical toolbar on the edge,
+      // so no free coords are needed.
+      if (parsed?.dock === 'left' || parsed?.dock === 'right') {
+        this.#dockSide.set(parsed.dock)
+        return
+      }
       if (typeof parsed?.x !== 'number') return
       // New format: {x, fromBottom} — recompute y against the current
       // viewport so cross-session resizes don't leave the pill stranded.

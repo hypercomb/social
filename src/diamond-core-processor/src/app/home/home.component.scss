@@ -1,11 +1,22 @@
 /* src/app/home/home.component.scss */
 
 .tree-home {
-  max-width: 640px;
+  width: 100%;
+  max-width: 660px;
   margin: 0 auto;
-  padding: 24px 20px;
+  padding: 28px 20px 40px;
   font-family: var(--hc-font);
+  color: var(--dcp-ink);
 }
+
+/* Large desktops — use the horizontal space instead of a narrow centered
+   column. Stepped so the tree stays scannable: ~27" displays get a roomier
+   column (long lineages/descriptions stop truncating), ~34"/ultrawide get
+   wider still, capped so a single row never sprawls edge-to-edge. Normal
+   laptops (<1600px) are unchanged. */
+@media (min-width: 1600px) { .tree-home { max-width: 960px; } }
+@media (min-width: 2200px) { .tree-home { max-width: 1200px; } }
+@media (min-width: 3000px) { .tree-home { max-width: 1440px; } }
 
 .install-toast {
   position: fixed;
@@ -17,32 +28,32 @@
   align-items: flex-start;
   gap: 12px;
   max-width: 480px;
-  padding: 12px 14px 12px 16px;
-  border-radius: 6px;
-  background: #1f4f8a;
-  color: #fff;
+  padding: 13px 15px 13px 17px;
+  border-radius: var(--dcp-radius-md);
+  background: var(--dcp-accent);
+  color: var(--dcp-on-accent);
   font-family: var(--hc-font);
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--dcp-shadow-2);
   animation: install-toast-in 0.18s ease-out;
 }
 
 .install-toast-body {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   font-size: 13px;
-  line-height: 1.35;
+  line-height: 1.4;
 }
 
 .install-toast-body strong {
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .install-toast-close {
   background: none;
   border: none;
-  color: #fff;
+  color: var(--dcp-on-accent);
   font-size: 18px;
   line-height: 1;
   padding: 0 2px;
@@ -63,7 +74,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 18px;
 }
 
 .top-bar-right {
@@ -73,9 +84,10 @@
 }
 
 .title {
-  font-size: 20px;
-  font-weight: 700;
-  color: #1a1a1a;
+  font-size: 21px;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  color: var(--dcp-ink);
   margin: 0;
 }
 
@@ -88,38 +100,48 @@
 
 .domain-input input {
   flex: 1;
-  padding: 8px 10px;
+  padding: 0 13px;
+  height: 38px;
   font-size: 13px;
-  border: 1px solid rgba(0,0,0,0.15);
-  border-radius: 2px;
+  font-family: var(--hc-font);
+  color: var(--dcp-ink);
+  background: var(--dcp-surface);
+  border: 1px solid var(--dcp-line-2);
+  border-radius: var(--dcp-radius-md);
   outline: none;
   cursor: text;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .domain-input input:focus {
-  border-color: #4a6fa5;
+  border-color: var(--dcp-accent);
+  box-shadow: 0 0 0 3px var(--dcp-accent-tint);
 }
 
 .btn {
-  padding: 8px 14px;
+  height: 38px;
+  padding: 0 18px;
   font-size: 13px;
-  font-weight: 600;
-  border: 1px solid rgba(0,0,0,0.15);
-  border-radius: 2px;
-  background: #f8f8f8;
+  font-weight: 500;
+  font-family: var(--hc-font);
+  color: var(--dcp-on-accent);
+  border: 1px solid var(--dcp-accent-strong);
+  border-radius: var(--dcp-radius-md);
+  background: var(--dcp-accent);
   cursor: pointer;
+  transition: filter 0.12s ease;
 }
 
 .btn:hover {
-  background: #eee;
+  filter: brightness(1.06);
 }
 
 .sample-link {
   display: block;
   font-size: 12px;
-  color: #4a6fa5;
+  color: var(--dcp-accent);
   cursor: pointer;
-  margin: -12px 0 16px 2px;
+  margin: -10px 0 16px 2px;
 }
 
 .sample-link:hover {
@@ -134,15 +156,16 @@ dcp-command-line {
 .kind-toggle {
   background: none;
   border: 1px solid transparent;
-  border-radius: 2px;
-  padding: 4px 6px;
+  border-radius: var(--dcp-radius-sm);
+  padding: 5px 6px;
   cursor: pointer;
-  transition: opacity 0.15s, filter 0.15s, border-color 0.15s, box-shadow 0.15s;
+  transition: opacity 0.15s, filter 0.15s, border-color 0.15s, background 0.15s;
   opacity: 0.5;
 }
 
 .kind-toggle:hover {
-  opacity: 0.8;
+  opacity: 0.85;
+  background: var(--dcp-hover);
 }
 
 .kind-toggle.active {
@@ -161,90 +184,85 @@ dcp-command-line {
 .filter-divider {
   width: 1px;
   height: 16px;
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--dcp-line-2);
   flex-shrink: 0;
 }
 
 /* domain sections */
 .domain-section {
-  margin-bottom: 20px;
-  border: 1px solid rgba(0,0,0,0.08);
-  border-radius: 2px;
-  background: #fafafa;
+  margin-bottom: 14px;
+  border: 1px solid var(--dcp-line);
+  border-radius: var(--dcp-radius-lg);
+  background: var(--dcp-surface);
+  box-shadow: var(--dcp-shadow-1);
   overflow: hidden;
 }
 
-/* Provenance ZONES — subtle color background per group so you can tell at a
-   glance where a section's content comes from. Driven by [data-zone] from
-   groupZone() in the component. Each zone: a soft tinted fill, a slightly
-   stronger header bar, and a colored left edge. Kept low-saturation to fit
-   the clean gray installer. Add a new [data-zone] block here when 'default'
-   and 'current' become separable from 'package'. */
+/* Provenance ZONES — a soft tint fill, a tinted header, and an inset left
+   rail per group so you can tell at a glance where a section's content comes
+   from. Driven by [data-zone] from groupZone(). The rail is an inset
+   box-shadow (not a border) so it follows the card's rounded corners cleanly
+   and never collides with the base border. All values come from theme tokens,
+   so the zones read correctly in both light and dark. */
 .domain-section[data-zone="logical"] {
-  background: #f1f8f3;                       /* hypercomb.io — the live config */
-  border-color: rgba(46, 125, 80, 0.22);
-  border-left: 3px solid #5aa873;
-  .domain-header { background: #e3f1e8; }
+  background: var(--dcp-z-logical-tint);
+  box-shadow: inset 3px 0 0 var(--dcp-z-logical-rail), var(--dcp-shadow-1);
+  .domain-header { background: var(--dcp-z-logical-head); }
 }
 .domain-section[data-zone="default"] {
-  background: #eef8f7;                       /* bundled baseline install (default lineage) */
-  border-color: rgba(30, 140, 130, 0.20);
-  border-left: 3px solid #4bb3a8;
-  .domain-header { background: #ddf0ee; }
+  background: var(--dcp-z-default-tint);
+  box-shadow: inset 3px 0 0 var(--dcp-z-default-rail), var(--dcp-shadow-1);
+  .domain-header { background: var(--dcp-z-default-head); }
 }
 .domain-section[data-zone="current"] {
-  background: #f6f2fb;                       /* realtime backup pushed to hypercomb.io */
-  border-color: rgba(120, 80, 170, 0.20);
-  border-left: 3px solid #9d7bc8;
-  .domain-header { background: #ece3f6; }
+  background: var(--dcp-z-current-tint);
+  box-shadow: inset 3px 0 0 var(--dcp-z-current-rail), var(--dcp-shadow-1);
+  .domain-header { background: var(--dcp-z-current-head); }
 }
 .domain-section[data-zone="host"] {
-  background: #fdf7ee;                       /* adopted swarm hosts (jwize.com) */
-  border-color: rgba(176, 128, 30, 0.20);
-  border-left: 3px solid #d8a64a;
-  .domain-header { background: #f8eed9; }
+  background: var(--dcp-z-host-tint);
+  box-shadow: inset 3px 0 0 var(--dcp-z-host-rail), var(--dcp-shadow-1);
+  .domain-header { background: var(--dcp-z-host-head); }
 }
 .domain-section[data-zone="package"] {
-  background: #f2f6fc;                       /* packages / default install */
-  border-color: rgba(46, 90, 160, 0.18);
-  border-left: 3px solid #6a91c8;
-  .domain-header { background: #e6eef9; }
+  background: var(--dcp-z-package-tint);
+  box-shadow: inset 3px 0 0 var(--dcp-z-package-rail), var(--dcp-shadow-1);
+  .domain-header { background: var(--dcp-z-package-head); }
 }
 
-/* #74: brief highlight when the tree auto-opens to a freshly-adopted
-   branch, so the participant sees WHERE they landed. Auto-cleared. */
+/* brief highlight when the tree auto-opens to a freshly-adopted branch, so
+   the participant sees WHERE they landed. Auto-cleared. */
 .domain-section.just-adopted {
   animation: section-just-adopted 2.2s ease-out;
 }
 @keyframes section-just-adopted {
-  0%   { box-shadow: 0 0 0 3px rgba(90, 120, 200, 0.55); background: rgba(90, 120, 200, 0.10); }
-  100% { box-shadow: 0 0 0 0 rgba(90, 120, 200, 0);     background: #fafafa; }
+  0%   { box-shadow: 0 0 0 3px var(--dcp-accent-tint), var(--dcp-shadow-2); }
+  100% { box-shadow: var(--dcp-shadow-1); }
 }
 
 .domain-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
-  background: #f0f2f5;
-  border-bottom: 1px solid rgba(0,0,0,0.06);
+  padding: 11px 14px;
+  background: var(--dcp-surface-2);
+  border-bottom: 1px solid var(--dcp-line);
   position: sticky;
   top: 0;
   z-index: 10;
   min-width: 0;
 
   // Visual state when the participant has toggled this domain hidden via
-  // the visibility eye-icon. The domain section stays in the installer
-  // (un-hidden is one click away) but signals visually that it's
-  // currently filtered out of the rendered union view.
+  // the visibility eye-icon. Stays in the installer (un-hidden is one click
+  // away) but signals it's filtered out of the rendered union view.
   &.domain-hidden {
     opacity: 0.55;
     background: repeating-linear-gradient(
       45deg,
-      #f0f2f5,
-      #f0f2f5 6px,
-      #e6e8ec 6px,
-      #e6e8ec 12px
+      var(--dcp-surface-2),
+      var(--dcp-surface-2) 6px,
+      var(--dcp-hover) 6px,
+      var(--dcp-hover) 12px
     );
   }
 }
@@ -253,14 +271,14 @@ dcp-command-line {
 .visibility-toggle {
   font-size: 13px !important;
   &.hidden-state {
-    color: #ca8b3b;
+    color: var(--dcp-z-host-rail);
   }
 }
 
 .domain-url {
-  font-size: 12px;
-  font-weight: 600;
-  color: #333;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--dcp-ink-2);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -271,24 +289,25 @@ dcp-command-line {
   gap: 6px;
   background: none;
   border: none;
-  padding: 2px 4px;
+  padding: 3px 6px;
   margin: 0;
   cursor: pointer;
   text-align: left;
-  border-radius: 4px;
+  border-radius: var(--dcp-radius-sm);
+  transition: background 0.12s ease, color 0.12s ease;
 
-  &:hover { background: rgba(0,0,0,0.04); }
-  &.open { color: #111; }
+  &:hover { background: var(--dcp-hover); }
+  &.open { color: var(--dcp-ink); }
 
   .group-chevron {
     font-size: 10px;
-    color: #999;
+    color: var(--dcp-ink-3);
     flex-shrink: 0;
   }
   .group-note {
     font-size: 10px;
     font-weight: 400;
-    color: #aaa;
+    color: var(--dcp-ink-3);
     font-style: italic;
   }
 }
@@ -297,34 +316,38 @@ dcp-command-line {
   margin-left: auto;
   font-family: var(--hc-mono);
   font-size: 9px;
-  color: #bbb;
+  color: var(--dcp-ink-3);
   white-space: nowrap;
   flex-shrink: 0;
   user-select: all;
+  opacity: 0.8;
 }
 
 .domain-action {
   background: none;
   border: none;
   cursor: pointer;
-  color: #999;
+  color: var(--dcp-ink-3);
   font-size: 14px;
-  padding: 0 4px;
+  padding: 2px 4px;
+  border-radius: var(--dcp-radius-sm);
+  transition: color 0.12s ease, background 0.12s ease;
 }
 
 .domain-action:hover {
-  color: #4a6fa5;
+  color: var(--dcp-accent);
+  background: var(--dcp-hover);
 }
 
 .versions-toggle {
   font-family: var(--hc-mono);
   font-size: 12px;
-  border-radius: 4px;
+  border-radius: var(--dcp-radius-sm);
   min-width: 28px;
   text-align: center;
 
   &.active {
-    color: #4a6fa5;
+    color: var(--dcp-accent);
   }
 }
 
@@ -332,13 +355,16 @@ dcp-command-line {
   background: none;
   border: none;
   cursor: pointer;
-  color: #999;
+  color: var(--dcp-ink-3);
   font-size: 16px;
-  padding: 0 4px;
+  padding: 2px 4px;
+  border-radius: var(--dcp-radius-sm);
+  transition: color 0.12s ease, background 0.12s ease;
 }
 
 .remove:hover {
-  color: #c00;
+  color: var(--dcp-danger);
+  background: var(--dcp-hover);
 }
 
 /* package toggle in header */
@@ -348,12 +374,12 @@ dcp-command-line {
   cursor: pointer;
   padding: 0;
   font-size: 10px;
-  color: #4a6fa5;
+  color: var(--dcp-accent);
   flex-shrink: 0;
 }
 
 .package-toggle.off {
-  color: #ccc;
+  color: var(--dcp-ink-3);
 }
 
 .toggle-indicator {
@@ -363,18 +389,18 @@ dcp-command-line {
 }
 
 .section-status {
-  padding: 10px 14px;
+  padding: 11px 14px;
   font-size: 13px;
-  color: #888;
+  color: var(--dcp-ink-2);
 }
 
 .section-status.error {
-  color: #b00020;
+  color: var(--dcp-danger);
 }
 
-/* Live resolve cue on an adopted branch row — climbing count + sweeping
-   bar while the broker walk fills layers/resources (no total exists: the
-   walk discovers its frontier as it goes). */
+/* Live resolve cue on an adopted branch row — sweeping bar while the broker
+   walk fills layers/resources (no total exists: the walk discovers its
+   frontier as it goes). */
 .status-line {
   display: flex;
   align-items: baseline;
@@ -383,7 +409,7 @@ dcp-command-line {
 
 .resolve-count {
   font-variant-numeric: tabular-nums;
-  color: #b8860b;
+  color: var(--dcp-z-host-ink);
   white-space: nowrap;
 }
 
@@ -393,7 +419,7 @@ dcp-command-line {
   height: 3px;
   margin-top: 6px;
   border-radius: 999px;
-  background: rgba(136, 136, 136, 0.25);
+  background: var(--dcp-line-2);
   overflow: hidden;
 }
 
@@ -403,7 +429,7 @@ dcp-command-line {
   bottom: 0;
   width: 35%;
   border-radius: 999px;
-  background: #e0a93e;
+  background: var(--dcp-z-host-rail);
   animation: resolve-sweep 1.4s ease-in-out infinite;
 }
 
@@ -414,16 +440,16 @@ dcp-command-line {
 
 .empty {
   font-size: 13px;
-  color: #999;
+  color: var(--dcp-ink-3);
   text-align: center;
-  padding: 32px 0;
+  padding: 36px 0;
 }
 
 /* mobile responsive */
 @media (max-width: 600px) {
   .tree-home {
     max-width: none;
-    padding: 16px 12px;
+    padding: 16px 12px 32px;
   }
 
   .title {
@@ -432,13 +458,13 @@ dcp-command-line {
 
   .domain-input input {
     font-size: 16px;
-    padding: 10px 12px;
+    height: 44px;
   }
 
   .btn {
     font-size: 14px;
-    padding: 10px 16px;
-    min-height: 44px;
+    height: 44px;
+    padding: 0 18px;
   }
 
   .sample-link {

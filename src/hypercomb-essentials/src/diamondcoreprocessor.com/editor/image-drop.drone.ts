@@ -146,6 +146,21 @@ export class ImageDropDrone extends Drone {
       }
     }
 
+    // Typed-dropbox precedence: if the current view is a dropbox that
+    // accepts this file, let FileDropDrone attach it as a document rather
+    // than treating it as the tile's display image (e.g. a dropped svg).
+    // We bow out silently — FileDropDrone handles the drop, and the
+    // capture-phase #onDropCapture still clears our dragging flag.
+    const dropbox = this.#dropbox
+    if (dropbox?.active()) {
+      const dropped = e.dataTransfer?.files
+      if (dropped) {
+        for (let i = 0; i < dropped.length; i++) {
+          if (dropped[i].type.startsWith('image/') && dropbox.accepts(dropped[i])) return
+        }
+      }
+    }
+
     // find the first image file
     const files = e.dataTransfer?.files
     if (!files) { this.#clearDragging(); return }
@@ -291,6 +306,11 @@ export class ImageDropDrone extends Drone {
 
   get #imageEditor(): ImageEditorService | undefined {
     return get('@diamondcoreprocessor.com/ImageEditorService') as ImageEditorService | undefined
+  }
+
+  get #dropbox(): { active(): boolean; accepts(file: { name: string; type?: string }): boolean } | undefined {
+    return get('@diamondcoreprocessor.com/DropboxService') as
+      { active(): boolean; accepts(file: { name: string; type?: string }): boolean } | undefined
   }
 }
 

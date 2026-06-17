@@ -104,6 +104,7 @@ export class HexSdfTextureShader {
     in vec3 aBorderColor;
     in float aCellIndex;
     in float aDivergence;
+    in float aUnshared;
 
     out vec2 vUV;
     out vec4 vLabelUV;
@@ -115,6 +116,7 @@ export class HexSdfTextureShader {
     out vec3 vBorderColor;
     out float vCellIndex;
     out float vDivergence;
+    out float vUnshared;
 
     uniform mat3 uProjectionMatrix;
     uniform mat3 uWorldTransformMatrix;
@@ -133,6 +135,7 @@ export class HexSdfTextureShader {
       vBorderColor = aBorderColor;
       vCellIndex = aCellIndex;
       vDivergence = aDivergence;
+      vUnshared = aUnshared;
     }
   `
 
@@ -149,6 +152,7 @@ export class HexSdfTextureShader {
     in vec3 vBorderColor;
     in float vCellIndex;
     in float vDivergence;
+    in float vUnshared;
 
     uniform vec2 u_quadSize;
     uniform float u_radiusPx;
@@ -347,6 +351,15 @@ export class HexSdfTextureShader {
           float strikeMask = 1.0 - smoothstep(0.0, 2.0, abs(diag - u_radiusPx * 0.3));
           color.rgb = mix(color.rgb, vec3(1.0, 0.5, 0.15), strikeMask * 0.4);
         }
+      }
+
+      // world mode: tiles not (yet) public are dimmed — desaturated + darkened
+      // + lower alpha — so the shared ones read brightly against them.
+      if (vUnshared > 0.5) {
+        float gray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+        color.rgb = mix(color.rgb, vec3(gray), 0.55);
+        color.rgb *= 0.5;
+        color.a *= 0.7;
       }
 
       // hover accent: simple border glow using the active accent color

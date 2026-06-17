@@ -25,6 +25,8 @@
 // No new schema invented; sigs walked through the standard primitives.
 
 import { EffectBus } from '@hypercomb/core'
+import { listAttachments } from '../files/files-attachment.js'
+import { isTextLike } from '../files/file-types.js'
 
 type Note = {
   id: string
@@ -32,6 +34,24 @@ type Note = {
   createdAt: number
   updatedAt?: number
   tags?: string[]
+}
+
+/** A file attached to a cell (via the typed dropbox). Text-like files are
+ *  inlined so Claude can read them at generation time; binaries are passed
+ *  as name/mime/sig for the bridge to fetch on demand. */
+type Attachment = {
+  name: string
+  mime: string
+  size: number
+  sig: string
+  text?: string
+}
+
+/** Largest inlined attachment text — guards the envelope from a huge file. */
+const MAX_INLINE_TEXT = 200_000
+
+type StoreLike = {
+  getResource(sig: string): Promise<Blob | null>
 }
 
 type LayerLike = {
@@ -56,6 +76,7 @@ type BranchNode = {
   segments: readonly string[]
   name: string
   notes: readonly Note[]
+  attachments: readonly Attachment[]
   children: readonly BranchNode[]
 }
 
@@ -143,6 +164,7 @@ export class WebsiteBuildDrone extends EventTarget {
       priorRootSig: priorRootSig?.slice(0, 12) ?? null,
       branchCells: this.#countCells(branch),
       branchNotes: this.#countNotes(branch),
+      branchAttachments: this.#countAttachments(branch),
       instructionsCells: this.#countCells(instructions),
       instructionsNotes: this.#countNotes(instructions),
     })
@@ -182,6 +204,7 @@ export class WebsiteBuildDrone extends EventTarget {
         segments: [...segments],
         name: segments[segments.length - 1] ?? '',
         notes: [],
+        attachments: [],
         children: [],
       }
     }
@@ -190,6 +213,9 @@ export class WebsiteBuildDrone extends EventTarget {
     const cellNotes = segments.length === 0
       ? []   // root has no notes slot at this version
       : await notes.getNotesAtSegments(segments)
+    const attachments = segments.length === 0
+      ? []   // root carries no attachments
+      : await this.#collectAttachments(segments)
 
     const children: BranchNode[] = []
     for (const childName of childNames) {
@@ -201,8 +227,42 @@ export class WebsiteBuildDrone extends EventTarget {
       segments: [...segments],
       name: typeof layer.name === 'string' && layer.name ? layer.name : (segments[segments.length - 1] ?? ''),
       notes: cellNotes,
+      attachments,
       children,
     }
+  }
+
+  /** Read the cell's attached files. Text-like files (md/txt/csv/json/svg…)
+   *  are decoded and inlined so Claude reads them directly; binaries
+   *  (pdf/docx…) carry name/mime/sig only — the bridge `get-resource` op
+   *  fetches their bytes on demand. */
+  async #collectAttachments(segments: readonly string[]): Promise<Attachment[]> {
+    let attached: Array<{ payload: { name: string; mime: string; size: number; sig: string } }>
+    try {
+      attached = await listAttachments(segments)
+    } catch {
+      return []
+    }
+    if (attached.length === 0) return []
+
+    const store = get<StoreLike>('@hypercomb.social/Store')
+    const out: Attachment[] = []
+    for (const { payload } of attached) {
+      const att: Attachment = { name: payload.name, mime: payload.mime, size: payload.size, sig: payload.sig }
+      if (store && isTextLike(payload.name, payload.mime)) {
+        try {
+          const blob = await store.getResource(payload.sig)
+          if (blob) {
+            const text = await blob.text()
+            att.text = text.length > MAX_INLINE_TEXT ? text.slice(0, MAX_INLINE_TEXT) : text
+          }
+        } catch {
+          /* unreadable — fall back to metadata-only */
+        }
+      }
+      out.push(att)
+    }
+    return out
   }
 
   async #resolveChildNames(
@@ -233,6 +293,11 @@ export class WebsiteBuildDrone extends EventTarget {
   #countNotes(n: BranchNode | null): number {
     if (!n) return 0
     return n.notes.length + n.children.reduce((sum, c) => sum + this.#countNotes(c), 0)
+  }
+
+  #countAttachments(n: BranchNode | null): number {
+    if (!n) return 0
+    return n.attachments.length + n.children.reduce((sum, c) => sum + this.#countAttachments(c), 0)
   }
 }
 

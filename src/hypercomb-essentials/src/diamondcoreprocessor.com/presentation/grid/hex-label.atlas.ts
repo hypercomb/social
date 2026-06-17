@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/pixi/hex-label.atlas.ts
-import { Container, RenderTexture, Text, TextStyle, Texture } from 'pixi.js'
+import { Container, Graphics, RenderTexture, Text, TextStyle, Texture } from 'pixi.js'
 
 export interface LabelUV {
   u0: number
@@ -19,6 +19,13 @@ export class HexLabelAtlas {
   private readonly slotToLabel: (string | null)[]
   private nextIndex = 0
   #pivot = false
+  // Bumped whenever a slot is REUSED for a different label. Mirrors
+  // HexImageAtlas.evictionGeneration: show-cell folds this into
+  // buildCellsKey so the fill geometry rebuilds (re-baking on-screen
+  // labels into fresh slots) whenever wrap-around evicts a slot — without
+  // it, a cell's baked UV would keep pointing at a slot whose pixels are
+  // now a different label.
+  #evictionGeneration = 0
   #labelResolver: ((directoryName: string) => string) | null = null
 
   private readonly cols: number
@@ -95,6 +102,29 @@ export class HexLabelAtlas {
     return this.atlas
   }
 
+  /** Incremented each time a slot is reused for a different label. */
+  public get evictionGeneration(): number {
+    return this.#evictionGeneration
+  }
+
+  /**
+   * Erase a single slot's pixels before a reused slot is overwritten.
+   * Labels are mostly transparent (only the glyph strokes have alpha), so
+   * a plain `clear:false` redraw leaves the PREVIOUS label's strokes
+   * showing through the new one — the superimposed-labels bug. An
+   * `erase`-blended rect wipes exactly this one cell; a global `clear:true`
+   * would wipe the other 63 live slots. (HexImageAtlas doesn't need this:
+   * its images are opaque and fully overdraw the slot.)
+   */
+  #clearSlot = (col: number, row: number): void => {
+    const eraser = new Graphics()
+      .rect(col * this.cellPx, row * this.cellPx, this.cellPx, this.cellPx)
+      .fill(0xffffff)
+    eraser.blendMode = 'erase'
+    this.renderer.render({ container: eraser, target: this.atlas, clear: false })
+    eraser.destroy()
+  }
+
   /**
    * Pre-rasterize a batch of labels into the atlas in a single render pass.
    * Idempotent — labels already in the cache are skipped. Call after
@@ -113,14 +143,20 @@ export class HexLabelAtlas {
       const slot = this.nextIndex % (this.cols * this.rows)
       this.nextIndex++
 
-      // Evict the previous occupant's map entry before overwriting
-      // its slot's pixels. Keeps map ⇔ slot content in lockstep.
       const previous = this.slotToLabel[slot]
-      if (previous !== null && previous !== label) this.map.delete(previous)
       this.slotToLabel[slot] = label
 
       const col = slot % this.cols
       const row = Math.floor(slot / this.cols)
+
+      // Reusing this slot for a different label: evict the old map entry,
+      // bump the generation (forces a geometry rebake), and ERASE the old
+      // pixels so the new label doesn't superimpose on them.
+      if (previous !== null && previous !== label) {
+        this.map.delete(previous)
+        this.#evictionGeneration++
+        this.#clearSlot(col, row)
+      }
 
       const displayText = this.#labelResolver ? this.#labelResolver(label) : label
       const text = new Text({ text: displayText, style: this.style })
@@ -156,14 +192,21 @@ export class HexLabelAtlas {
     const slot = this.nextIndex % (this.cols * this.rows)
     this.nextIndex++
 
-    // Evict the previous occupant so its map entry stops pointing at
-    // a slot whose pixels are about to become a different label.
     const previous = this.slotToLabel[slot]
-    if (previous !== null && previous !== label) this.map.delete(previous)
     this.slotToLabel[slot] = label
 
     const col = slot % this.cols
     const row = Math.floor(slot / this.cols)
+
+    // Reusing this slot for a different label: evict the old map entry,
+    // bump the generation (forces a geometry rebake so cells re-point at
+    // fresh slots), and ERASE the old pixels so the new label doesn't
+    // superimpose on the previous label's strokes.
+    if (previous !== null && previous !== label) {
+      this.map.delete(previous)
+      this.#evictionGeneration++
+      this.#clearSlot(col, row)
+    }
 
     // Resolve display text: label resolver (i18n) → raw directory name
     const displayText = this.#labelResolver ? this.#labelResolver(label) : label

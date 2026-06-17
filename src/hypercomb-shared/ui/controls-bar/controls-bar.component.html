@@ -61,20 +61,25 @@
 <div
   class="pill-stage"
   [class.faded]="!visible()"
-  [class.positioned]="!!pillPos() && !isMobile()"
+  [class.positioned]="!!pillPos() && !isMobile() && !dockSide()"
+  [class.dock-left]="dockSide() === 'left' && !isMobile()"
+  [class.dock-right]="dockSide() === 'right' && !isMobile()"
   [class.dragging]="pillDragging()"
   [class.landscape]="isLandscape()"
   [class.mobile]="isMobile()"
-  [style.left.px]="!isMobile() ? pillPos()?.x : null"
-  [style.top.px]="!isMobile() ? pillPos()?.y : null"
+  [style.left.px]="!isMobile() && !dockSide() ? pillPos()?.x : null"
+  [style.top.px]="!isMobile() && !dockSide() ? pillPos()?.y : null"
   (mouseenter)="onBarEnter()"
   (mouseleave)="onBarLeave()"
 >
-  <!-- zoomed wrapper keeps pill visuals 2× without scaling stage position -->
-  <div class="pill-scaled" [style.zoom]="pillZoom()">
+  <!-- zoomed wrapper keeps pill visuals 2× without scaling stage position.
+       The left full-height rail manages its own height, so the zoom (which
+       would scale the rail off the bottom) is dropped while docked left. -->
+  <div class="pill-scaled" [style.zoom]="dockSide() === 'left' && !isMobile() ? null : pillZoom()">
   <div
     class="controls-pill"
     [class.public-mode]="meshPublic()"
+    [class.column]="!!dockSide() && !isMobile()"
     [class.power-ctrl]="powerKey() === 'ctrl'"
     [class.power-shift]="powerKey() === 'shift'"
     [class.power-alt]="powerKey() === 'alt'"
@@ -147,6 +152,7 @@
                       [class.zoom-btn]="ctrl.id === 'zoom-in' || ctrl.id === 'zoom-out'"
                       (click)="onCtrlClick(ctrl, $event)"
                       [attr.aria-label]="ctrl.label | t"
+                      [attr.data-ctrl-id]="ctrl.id"
                       [attr.data-instruction]="ctrl.instruction ?? null">
                 <!-- Material Symbols Outlined — every desktop control
                      maps to a Symbol name via iconSymbol(). The .filled
@@ -162,15 +168,17 @@
                 }
               </button>
             }
+            <!-- edit-mode toggle (chevron) — a row sibling so CSS order can
+                 place it among the icons (after the last one) while the back
+                 button stays anchored at the very bottom of the rail. -->
+            <button class="ctl-btn expand-toggle"
+                    [class.editing]="editMode()"
+                    (click)="toggleEditMode()"
+                    [attr.aria-label]="editMode() ? ('controls.collapse' | t) : ('controls.expand' | t)">
+              <span class="expand-chevron" [class.up]="editMode()">&#x25B8;</span>
+            </button>
           </div>
         </div>
-        <!-- edit-mode toggle (chevron) -->
-        <button class="ctl-btn expand-toggle"
-                [class.editing]="editMode()"
-                (click)="toggleEditMode()"
-                [attr.aria-label]="editMode() ? ('controls.collapse' | t) : ('controls.expand' | t)">
-          <span class="expand-chevron" [class.up]="editMode()">&#x25B8;</span>
-        </button>
       }
 
     }

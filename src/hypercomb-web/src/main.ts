@@ -103,7 +103,16 @@ const bootstrap = async (): Promise<void> => {
     if (!sentinelPromise) {
       sentinelPromise = initSentinel().then(bridge => {
         if (bridge) {
-          bridge.onToggleChanged = resyncAndEnforce
+          // Per-toggle resync is DELIBERATELY not wired. Toggling a feature in
+          // DCP (embedded installer OR standalone tab — both broadcast over the
+          // same-origin dcp-toggle-state channel) must NOT pull or run anything
+          // in the live session: nothing activates before the participant is
+          // done. The host syncs DCP's FINAL enabled set only on an explicit
+          // done — the embedded "Done" button (→ actions:available, below) or
+          // closing a standalone DCP tab (onDcpClosed). First-run "Start"
+          // (hypercomb:start-install) is the cold-install equivalent. Leaving
+          // onToggleChanged unset means the sentinel still relays toggle events
+          // but the host ignores them.
           bridge.onDcpClosed = () => reloadIfDrifted('dcp tab closed')
         }
         return bridge
@@ -112,21 +121,20 @@ const bootstrap = async (): Promise<void> => {
     return sentinelPromise
   }
 
-  // Toggle-changed: keep OPFS in sync silently. Do NOT reload while
-  // hypercomb is foregrounded — the running shell continues with its
-  // currently loaded drones. Reload happens when the user leaves DCP
-  // (embed close, or standalone tab close) and we detect drift from
-  // bootSyncSig.
+  // The resync pass: pull DCP's enabled set into OPFS, then either reload
+  // (cold install) or load + run the enabled drones in place. It runs ONLY
+  // on an explicit done (accept / tab-close / first-run Start), never per
+  // toggle — the running shell keeps its currently loaded drones until the
+  // participant authorizes the change.
   //
-  // SINGLE-FLIGHT + COALESCE. DCP fires toggle-changed in BURSTS (domain
-  // load completion, per-toggle notifications — three in one frame is
-  // normal), and each event used to start a full resync + preloader pass
-  // concurrently. Two passes racing means one pass's removeDisabled/write
-  // can yank a bee file out from under another pass's getBee() — the
-  // preloader logs "returned null", that drone never registers, and the
-  // session runs without it (dead selection, missing critical sigs) until
-  // a reload. One pass runs at a time; events that arrive mid-pass
-  // coalesce into a single trailing rerun.
+  // SINGLE-FLIGHT + COALESCE. A done can still overlap an in-flight pass
+  // (e.g. accept landing while a first-run install is still streaming).
+  // Two passes racing means one pass's removeDisabled/write can yank a bee
+  // file out from under another pass's getBee() — the preloader logs
+  // "returned null", that drone never registers, and the session runs
+  // without it (dead selection, missing critical sigs) until a reload. One
+  // pass runs at a time; calls that arrive mid-pass coalesce into a single
+  // trailing rerun.
   const runResyncPass = async () => {
     const sentinel = await getSentinel()
     if (!sentinel) return
@@ -183,8 +191,13 @@ const bootstrap = async (): Promise<void> => {
   window.addEventListener('portal:open', (e) => {
     if ((e as CustomEvent).detail?.target === 'dcp') void getSentinel()
   })
-  window.addEventListener('actions:available', resyncAndEnforce)
-  window.addEventListener('dcp:embed-closed', () => reloadIfDrifted('dcp embed closed'))
+  // Install/resync ONLY on the participant's explicit accept (Done →
+  // `actions:available`). A passive installer close (× / backdrop / Escape /
+  // touch-drag) fires `dcp:embed-closed`, but that must NOT pull bytes or
+  // activate anything — nothing runs before authorization. reloadIfDrifted
+  // resyncs and reloads the shell only if the accepted change advanced the
+  // sync sig.
+  window.addEventListener('actions:available', () => reloadIfDrifted('installer accepted'))
 
   // First-run "Start" — the welcome card's single button, fully unattended.
   // Mount the hidden sentinel and pull DCP's enabled set: DCP resolves

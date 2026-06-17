@@ -20,6 +20,35 @@ export function defaultEnabled(kind: TreeNodeKind | undefined): boolean {
   return !isCodeKind(kind)
 }
 
+/**
+ * "Already active via another active feature." A SCRIPT (code kind) whose
+ * signature is in the active-signature set — the set of sigs that actually
+ * RUN, built only from effectively-ENABLED code nodes — yet THIS node is
+ * itself effectively DISABLED. Meaning: another enabled feature pulls in the
+ * same signature (activation is keyed by signature and happens once), so this
+ * script runs even though its switch here is off. Flipping it on here is
+ * redundant.
+ *
+ * Self-exclusion is load-bearing and per-node: a node that IS the (or a)
+ * source of the sig is effectively-enabled, so `!effectivelyEnabled` excludes
+ * it — it never marks itself. visualContext nodes (already a read-only
+ * "in the logical from another silo" affordance) are excluded so the two
+ * cues don't clash. One definition, shared by the view layer and any test.
+ */
+export function isActiveElsewhere(
+  node: TreeNode,
+  activeSigs: Set<string>,
+  effectivelyEnabled: boolean
+): boolean {
+  return (
+    isCodeKind(node.kind) &&
+    !node.visualContext &&
+    !!node.signature &&
+    activeSigs.has(node.signature.toLowerCase()) &&
+    !effectivelyEnabled
+  )
+}
+
 export interface AuditResult {
   signature: string
   approvedBy: string[]

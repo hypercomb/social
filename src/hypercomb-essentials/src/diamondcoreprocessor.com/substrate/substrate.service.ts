@@ -115,6 +115,16 @@ async function renderToHexBox(blob: Blob, w: number, h: number): Promise<Blob> {
   }
 }
 
+/**
+ * Strip directory + extension from a source image name, leaving a short
+ * lowercase token (e.g. `/substrate/night-rock.webp` → `night-rock`). This is
+ * the name the /backgrounds queen lists and matches against.
+ */
+function friendlyImageName(name: string): string {
+  const base = name.split('/').pop() ?? name
+  return base.replace(/\.[^.]+$/, '').trim().toLowerCase()
+}
+
 export class SubstrateService extends EventTarget {
   #loaded = false
   #registry: SubstrateRegistry = EMPTY_SUBSTRATE_REGISTRY
@@ -123,6 +133,14 @@ export class SubstrateService extends EventTarget {
   // propsSig → times currently assigned across tiles. Drives balanced picking
   // so every image gets used once before any gets used twice.
   #usageCounts: Map<string, number> = new Map()
+  // imageSig → friendly label (manifest filename / tile name / file name).
+  // Rebuilt on every warm-up so the /backgrounds queen can name the pool.
+  #imageNames: Map<string, string> = new Map()
+  // Session-only availability switches: imageSigs the participant toggled OFF
+  // this session via /backgrounds. NEVER persisted — not in the registry, the
+  // layer, or localStorage — so it resets to all-on on reload and peers never
+  // see it. The picker simply skips these images.
+  #disabledImages: Set<string> = new Set()
 
   // ───────────────────────── registry ─────────────────────────
 
@@ -361,7 +379,10 @@ export class SubstrateService extends EventTarget {
           if (!blob) continue
           const props = JSON.parse(await blob.text())
           const sig = props?.small?.image ?? props?.flat?.small?.image
-          if (typeof sig === 'string' && /^[0-9a-f]{64}$/.test(sig)) images.push(sig)
+          if (typeof sig === 'string' && /^[0-9a-f]{64}$/.test(sig)) {
+            this.#imageNames.set(sig, friendlyImageName(name))
+            images.push(sig)
+          }
         } catch { /* skip */ }
       }
     } catch { /* hive missing */ }
@@ -385,6 +406,7 @@ export class SubstrateService extends EventTarget {
         if (!r.ok) continue
         const blob = await r.blob()
         const sig = await store.putResource(blob)
+        this.#imageNames.set(sig, friendlyImageName(name))
         sigs.push(sig)
       } catch { /* skip */ }
     }
@@ -403,9 +425,10 @@ export class SubstrateService extends EventTarget {
     }
     const files = await readImagesFromHandle(entry.handle)
     const sigs: string[] = []
-    for (const { blob } of files) {
+    for (const { name, blob } of files) {
       try {
         const sig = await store.putResource(blob)
+        this.#imageNames.set(sig, friendlyImageName(name))
         sigs.push(sig)
       } catch { /* skip */ }
     }
@@ -442,6 +465,9 @@ export class SubstrateService extends EventTarget {
       return
     }
 
+    // Names are re-derived from the source each warm-up; clear stale ones so a
+    // source switch doesn't leave another source's labels in the map.
+    this.#imageNames.clear()
     const images = await this.#loadSourceImages(source)
     this.#resolved = { source, images }
 
@@ -588,13 +614,24 @@ export class SubstrateService extends EventTarget {
    * increment. Random tie-breaks among least-used entries keep output
    * unpredictable without breaking the even distribution.
    */
+  /**
+   * The pool minus images toggled off this session (see #disabledImages).
+   * Returns an empty array when every image is disabled — picks then return
+   * null and tiles stay blank, honouring an explicit all-off.
+   */
+  #enabledPool(): { imageSig: string; propsSig: string }[] {
+    if (this.#disabledImages.size === 0) return this.#propsPool
+    return this.#propsPool.filter(e => !this.#disabledImages.has(e.imageSig))
+  }
+
   #pickBalanced(excludePropsSig?: string): { imageSig: string; propsSig: string } | null {
-    if (this.#propsPool.length === 0) return null
+    const enabled = this.#enabledPool()
+    if (enabled.length === 0) return null
     // Reroll path passes the tile's previous propsSig so the picker can avoid
     // handing back the same image — but only if alternatives exist in the pool.
-    const pool = excludePropsSig && this.#propsPool.length > 1
-      ? this.#propsPool.filter(e => e.propsSig !== excludePropsSig)
-      : this.#propsPool
+    const pool = excludePropsSig && enabled.length > 1
+      ? enabled.filter(e => e.propsSig !== excludePropsSig)
+      : enabled
     let min = Infinity
     for (const entry of pool) {
       const count = this.#usageCounts.get(entry.propsSig) ?? 0
@@ -615,8 +652,9 @@ export class SubstrateService extends EventTarget {
   }
 
   pickRandomImageSync(): string | null {
-    if (this.#propsPool.length === 0) return null
-    return this.#propsPool[Math.floor(Math.random() * this.#propsPool.length)].imageSig
+    const pool = this.#enabledPool()
+    if (pool.length === 0) return null
+    return pool[Math.floor(Math.random() * pool.length)].imageSig
   }
 
   /** Deterministic per-label picker for display-time fallback rendering.
@@ -625,11 +663,79 @@ export class SubstrateService extends EventTarget {
    *  in the index but no `small.image`), without mutating the user's
    *  persistent props blob. */
   pickImageForLabel(label: string): string | null {
-    if (this.#propsPool.length === 0) return null
+    const pool = this.#enabledPool()
+    if (pool.length === 0) return null
     let hash = 5381
     for (let i = 0; i < label.length; i++) hash = ((hash << 5) + hash + label.charCodeAt(i)) | 0
-    const idx = Math.abs(hash) % this.#propsPool.length
-    return this.#propsPool[idx].imageSig
+    const idx = Math.abs(hash) % pool.length
+    return pool[idx].imageSig
+  }
+
+  // ───────────── availability (session-only toggle) ─────────────
+  //
+  // View and flip which images in the current pool are available for
+  // assignment. Lives entirely in memory (#disabledImages): never written to
+  // the registry, the layer, or localStorage, so it resets to all-on on reload
+  // and is invisible to peers. Backs the /backgrounds queen.
+
+  /** Every image in the current pool, with a friendly name and on/off state.
+   *  Deduped by image, sorted by name. */
+  listImages(): { name: string; imageSig: string; enabled: boolean }[] {
+    const seen = new Set<string>()
+    const out: { name: string; imageSig: string; enabled: boolean }[] = []
+    for (const { imageSig } of this.#propsPool) {
+      if (seen.has(imageSig)) continue
+      seen.add(imageSig)
+      out.push({
+        name: this.#imageNames.get(imageSig) ?? imageSig.slice(0, 8),
+        imageSig,
+        enabled: !this.#disabledImages.has(imageSig),
+      })
+    }
+    return out.sort((a, b) => a.name.localeCompare(b.name))
+  }
+
+  /** Resolve a user-typed token to a pooled imageSig: exact name, then name
+   *  prefix, then sig prefix. Null when nothing matches. */
+  #resolveImage(token: string): string | null {
+    const q = token.trim().toLowerCase()
+    if (!q) return null
+    const images = this.listImages()
+    return images.find(i => i.name === q)?.imageSig
+      ?? images.find(i => i.name.startsWith(q))?.imageSig
+      ?? images.find(i => i.imageSig.startsWith(q))?.imageSig
+      ?? null
+  }
+
+  /** Toggle one image's availability (session-only). Returns the resolved
+   *  name + new enabled state, or null when the token matches no pooled image. */
+  toggleImage(token: string): { name: string; enabled: boolean } | null {
+    const sig = this.#resolveImage(token)
+    if (!sig) return null
+    const wasDisabled = this.#disabledImages.has(sig)
+    if (wasDisabled) this.#disabledImages.delete(sig)
+    else this.#disabledImages.add(sig)
+    return { name: this.#imageNames.get(sig) ?? sig.slice(0, 8), enabled: wasDisabled }
+  }
+
+  /** Reroll the visible tiles currently showing an image that's now toggled
+   *  off, so a toggle-off is reflected immediately. Tiles on still-enabled
+   *  images are left untouched. Returns the labels actually rerolled — callers
+   *  should emit `substrate:rerolled` per label so show-cell invalidates caches. */
+  async rerollDisabledOnVisible(labels: string[], segments?: readonly string[]): Promise<string[]> {
+    if (this.#disabledImages.size === 0 || labels.length === 0) return []
+    const disabledProps = new Set(
+      this.#propsPool.filter(e => this.#disabledImages.has(e.imageSig)).map(e => e.propsSig),
+    )
+    if (disabledProps.size === 0) return []
+    const index = readTilePropsIndex()
+    const stale: string[] = []
+    for (const label of labels) {
+      const key = await this.#indexKeyFor(label, segments)
+      const current = lookupTilePropsSig(index, key, label)
+      if (current && disabledProps.has(current)) stale.push(label)
+    }
+    return this.rerollCells(stale, segments)
   }
 
   // ────────────────────── cell assignment API ──────────────────────

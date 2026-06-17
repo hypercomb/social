@@ -27,7 +27,10 @@ $accent: #ffe14a;
 
 .viewer-card {
   width: min(560px, calc(100vw - 2rem));
-  max-height: calc(100vh - 4rem);
+  // Cap well short of the viewport so a long note scrolls inside
+  // `.viewer-body` (flex:1 + overflow-y:auto) instead of stretching the
+  // centred card up the whole screen.
+  max-height: min(70vh, 34rem);
   display: flex;
   flex-direction: column;
   background: rgba(14, 14, 22, 0.96);
