@@ -40,7 +40,7 @@ type ViewModeLike = EventTarget & {
   is(name: string): boolean
   toggle(a?: string, b?: string): string
 }
-type LayerLike = { decorations?: unknown; [k: string]: unknown }
+type LayerLike = { decorations?: unknown; context?: unknown; [k: string]: unknown }
 type HistoryServiceLike = {
   sign(l: { domain?: () => string; explorerSegments?: () => readonly string[] }): Promise<string>
   currentLayerAt(locationSig: string): Promise<LayerLike | null>
@@ -110,10 +110,28 @@ export class ViewBee extends Worker {
     const views = (registry?.all?.() ?? []) as VisualBeeDescriptor[]
     if (!views.length || !vm) { this.#emit([]); return }
 
-    const kinds = await this.#currentNodeDecorationKinds()
+    const layer = await this.#currentNodeLayer()
+    const kinds = await this.#decorationKinds(layer)
+
+    // Legacy website pages live in the `context` slot rather than as a
+    // `visual:website:page` decoration. Mirror SiteViewDrone's fallback so
+    // the toggle appears for un-migrated sites too — i.e. the toggle shows
+    // exactly when the renderer would render a page. Computed lazily (only
+    // when a view lacks a decoration) so we don't head-sniff context
+    // resources on every navigation.
+    let contextChecked = false
+    let contextHasPage = false
+    const contextPageAvailable = async (): Promise<boolean> => {
+      if (!contextChecked) { contextChecked = true; contextHasPage = await this.#contextHasHtmlPage(layer) }
+      return contextHasPage
+    }
+
     const toggles: ViewToggle[] = []
     for (const v of views) {
-      if (!v?.decorationKind || !kinds.has(v.decorationKind)) continue
+      if (!v?.view) continue
+      let available = !!v.decorationKind && kinds.has(v.decorationKind)
+      if (!available && v.view === 'website') available = await contextPageAvailable()
+      if (!available) continue
       toggles.push({
         view: v.view,
         icon: v.toggleIcon || FALLBACK_TOGGLE_ICON,
@@ -124,32 +142,32 @@ export class ViewBee extends Worker {
     this.#emit(toggles)
   }
 
-  /** Decoration kinds on the node the user is currently sitting on.
-   *  Authoritative (reads the node's own layer) so it stays correct on a
-   *  deep-link where the decoration-kind index hasn't hydrated the node
-   *  yet. Prefers the warm cursor layer sig; falls back to signing the
-   *  path. */
-  async #currentNodeDecorationKinds(): Promise<Set<string>> {
-    const out = new Set<string>()
+  /** The node the user is currently sitting on. Reads the node's own layer
+   *  authoritatively so it stays correct on a deep-link where the
+   *  decoration-kind index hasn't hydrated yet. Prefers the warm cursor
+   *  layer sig; falls back to signing the path. */
+  async #currentNodeLayer(): Promise<LayerLike | null> {
     const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
-    if (!history) return out
-
-    let layer: LayerLike | null = null
+    if (!history) return null
     const cursorSig = get<HistoryCursorLike>('@diamondcoreprocessor.com/HistoryCursorService')?.currentLayerSig
     if (cursorSig && SIG_RE.test(cursorSig)) {
-      layer = await history.getLayerBySig(cursorSig).catch(() => null)
+      const layer = await history.getLayerBySig(cursorSig).catch(() => null)
+      if (layer) return layer
     }
-    if (!layer) {
-      const lineage = get<LineageLike>('@hypercomb.social/Lineage')
-      const segments = (lineage?.explorerSegments?.() ?? [])
-        .map(s => String(s ?? '').trim()).filter(Boolean)
-      const locSig = await history.sign({ domain: lineage?.domain, explorerSegments: () => segments }).catch(() => null)
-      if (locSig) layer = await history.currentLayerAt(locSig).catch(() => null)
-    }
+    const lineage = get<LineageLike>('@hypercomb.social/Lineage')
+    const segments = (lineage?.explorerSegments?.() ?? [])
+      .map(s => String(s ?? '').trim()).filter(Boolean)
+    const locSig = await history.sign({ domain: lineage?.domain, explorerSegments: () => segments }).catch(() => null)
+    if (!locSig) return null
+    return history.currentLayerAt(locSig).catch(() => null)
+  }
 
+  /** Decoration kinds present on the layer's `decorations` slot. The
+   *  general availability signal — works for any registered view. */
+  async #decorationKinds(layer: LayerLike | null): Promise<Set<string>> {
+    const out = new Set<string>()
     const decorations = Array.isArray(layer?.decorations) ? layer!.decorations as unknown[] : []
     if (!decorations.length) return out
-
     const store = get<StoreLike>('@hypercomb.social/Store')
     for (const sig of decorations) {
       if (typeof sig !== 'string' || !SIG_RE.test(sig)) continue
@@ -157,6 +175,26 @@ export class ViewBee extends Worker {
       if (kind) out.add(kind)
     }
     return out
+  }
+
+  /** True when the layer's legacy `context` slot holds an HTML-shaped
+   *  resource — i.e. SiteViewDrone would render a page here. Mirrors the
+   *  head probe in site-view.drone.ts #findContextPage. */
+  async #contextHasHtmlPage(layer: LayerLike | null): Promise<boolean> {
+    const context = Array.isArray(layer?.context) ? layer!.context as unknown[] : []
+    if (!context.length) return false
+    const store = get<StoreLike>('@hypercomb.social/Store')
+    if (!store?.getResource) return false
+    for (const sig of context) {
+      if (typeof sig !== 'string' || !SIG_RE.test(sig)) continue
+      try {
+        const blob = await store.getResource(sig)
+        if (!blob) continue
+        const head = await blob.slice(0, 64).text()
+        if (/^\s*(?:﻿)?(<!doctype|<html|<svg|<\?xml)/i.test(head)) return true
+      } catch { /* skip malformed */ }
+    }
+    return false
   }
 
   async #fetchKind(store: StoreLike | undefined, sig: string): Promise<string | null> {

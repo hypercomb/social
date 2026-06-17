@@ -69,7 +69,12 @@ registerBubbleStyle({
     sheen.blendMode = 'add'
     view.addChild(sheen)
 
-    addLabel(view, label, hideText, r)
+    // the cloud's visual mass leans right (trailing bubbles + down-right tail),
+    // so nudge the label slightly right of centre to read as centred in the puff
+    const labelLayer = new Container()
+    addLabel(labelLayer, label, hideText, r)
+    labelLayer.x = r * 0.08
+    view.addChild(labelLayer)
 
     // the trail: one wider bubble directly underneath, then a small circle down
     // to the right — the classic "…" of a thought bubble.

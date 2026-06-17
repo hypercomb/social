@@ -49,9 +49,11 @@ The Phase 0 competition audit (9-agent workflow over all ~90 essentials bees; en
 
 > ⚠️ **`render:host` owns the Pixi `Application`/canvas/root container and emits `render:host-ready`**, which `BackgroundDrone`, `TileOverlayDrone`, `TileSelectionDrone`, `AvatarSwarmDrone`, and `ScreensaverDrone` all consume. It is the highest-confidence slot and was the one slot missing from the first draft of this file.
 
-### Wiring caveat — `capability` must be readable off non-Drone classes
+### Wiring caveat — put `capability` on the ultimate `Bee` base
 
-**3 of the 11 owners are not `Drone` subclasses:** `TileEditorDrone` and `TouchGestureCoordinator` are plain side-effect-registered classes, and `ClipboardWorker` / `ClaudeBridgeWorker` / `PixiHostWorker` are Workers. `Bee.base.capability` and the static build-time extractor must read the field off Workers and plain registered classes — **not only `Drone`** — or these slots silently fail to resolve.
+`capability` lives on the **ultimate `Bee` base** (`hypercomb-core/src/bee.base.ts`). Every kind — `Drone`, `QueenBee`, `Worker`, `NurseBee`, and any future **view-behavior** base — `extends Bee`, so all inherit the field; the static extractor needs no per-kind special-casing.
+
+The three Worker-owned slots (`ClipboardWorker` / `ClaudeBridgeWorker` / `PixiHostWorker`) already `extends Worker → Bee` ✓. But **`TileEditorDrone` and `TouchGestureCoordinator` extend *nothing*** — plain classes that self-register in IoC despite their names, so they cannot inherit `capability`. Fix structurally: **promote them to proper `Bee` subclasses** (e.g. an editor / view-behavior base). Do not special-case the extractor to read off base-less plain classes.
 
 ### Speculative tags — real concept, no taggable bee today (do NOT add yet)
 
