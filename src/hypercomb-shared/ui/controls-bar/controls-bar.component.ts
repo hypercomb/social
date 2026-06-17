@@ -677,6 +677,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #voiceActiveUnsub: (() => void) | null = null
   #showHiddenUnsub: (() => void) | null = null
   #textOnlyUnsub: (() => void) | null = null
+  #neonModeUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
   #clipboardCloseUnsub: (() => void) | null = null
   #atomizeModeUnsub: (() => void) | null = null
@@ -803,6 +804,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       this.#textOnly.set(textOnly)
     })
 
+    // keep the neon-glow icon in sync when toggled elsewhere (the /border command)
+    this.#neonModeUnsub = EffectBus.on<{ active: boolean }>('neon:mode', ({ active }) => {
+      this.#neonMode.set(active)
+    })
+
     this.#atomizeModeUnsub = EffectBus.on<{ active: boolean; target: string; strategy: string }>(
       'atomize:mode',
       ({ active, target, strategy }) => {
@@ -894,6 +900,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#voiceActiveUnsub?.()
     this.#showHiddenUnsub?.()
     this.#textOnlyUnsub?.()
+    this.#neonModeUnsub?.()
     this.#clipboardAvailableUnsub?.()
     this.#clipboardCloseUnsub?.()
     this.#tagsUnsub?.()

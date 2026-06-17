@@ -447,6 +447,19 @@ const resyncPass = async (sentinel: SentinelBridge, store: Store): Promise<void>
 
   await removeDisabled(store.bees, enabledBeeSet, '.js', priorManifest?.beesBag)
   await removeDisabled(store.dependencies, enabledDepSet, '.js', priorManifest?.dependenciesBag)
+
+  // The dependency *bag* is the import-map's source of truth: resolveImportMap
+  // reads the bag's leaf sigs to build the alias→`/opfs/__dependencies__/<sig>`
+  // map. But resync only maintains the FLAT `<sig>.js` dep files — it writes
+  // enabledDeps and removeDisabled() above just deleted the rest. It never
+  // rebuilds the bag. So a bag carried over from the last bundled install
+  // still points at leaf sigs that no longer exist on disk, and the next
+  // boot's import map resolves aliases to files the SW 404s on — surfacing as
+  // "Failed to fetch dynamically imported module" for every dep. Evict the bag
+  // here so resolveImportMap drops to its flat-scan fallback, which derives the
+  // map straight from the `// @scope/name` first line of each flat file this
+  // pass wrote — always consistent with what's actually on disk.
+  await evictBagDirs(store.dependencies)
   // Layers live flat in `__layers__/<sig>` shared with user commits.
   // We can't blindly remove sigs not in `enabledLayerSet` here — that
   // would also delete every user-committed layer. GC for the layer
@@ -504,18 +517,20 @@ const resyncPass = async (sentinel: SentinelBridge, store: Store): Promise<void>
     localStorage.setItem(SIG_STORE_KEY, JSON.stringify(sigStore.toJSON()))
   }
 
-  // Carry forward bag sigs from the prior manifest. The sentinel sync
-  // protocol doesn't transport them yet, so absent an explicit value we
-  // assume the active bag is unchanged from the last bundled install.
-  // When sentinel push gains bag awareness, override here with the value
-  // it sends.
+  // The dependency bag was just evicted (see evictBagDirs above), so the
+  // manifest must NOT advertise one — otherwise the next boot's
+  // resolveImportMap would scan for a bag, find none, and that's fine, but
+  // recording a stale bag sig here invites future code to trust it. Null it
+  // out; resolveImportMap rebuilds the map from flat files. The bee bag is
+  // left intact: nothing on the receiver's read path consults it (bees load
+  // by sig, not by alias), so its staleness is inert.
   const syncManifest = {
     version: 2,
     layers: enabledLayers,
     bees: enabledBees,
     dependencies: enabledDeps,
     beeDeps,
-    dependenciesBag: priorManifest?.dependenciesBag,
+    dependenciesBag: undefined,
     beesBag: priorManifest?.beesBag,
   }
   localStorage.setItem(SYNC_SIG_KEY, syncSig)
@@ -617,6 +632,25 @@ const removeDisabled = async (
     if (/^[a-f0-9]{64}$/i.test(sig) && !enabledSigs.has(sig)) {
       try { await dir.removeEntry(name) } catch { /* skip */ }
     }
+  }
+}
+
+/**
+ * Remove EVERY sigbag directory from a pool. Unlike installFromBundled's
+ * evictOldBagDirs (which keeps the active bag because the bundled install
+ * writes a fresh, consistent one), resync writes no bag at all — it only
+ * maintains the flat `<sig>.js` files. Any bag left behind is therefore
+ * stale by definition, so resync drops all of them.
+ */
+const evictBagDirs = async (dir: FileSystemDirectoryHandle): Promise<void> => {
+  const stale: string[] = []
+  for await (const [name, handle] of dir.entries()) {
+    if (handle.kind !== 'directory') continue
+    if (!/^[a-f0-9]{64}$/i.test(name)) continue
+    stale.push(name)
+  }
+  for (const name of stale) {
+    try { await dir.removeEntry(name, { recursive: true }) } catch { /* skip */ }
   }
 }
 

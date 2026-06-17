@@ -18,9 +18,13 @@ const BACKDROP_STROKE_WIDTH = 0.6
 // SVG source dimensions (viewBox coordinate space)
 const SVG_VIEWBOX = 24
 
-// Render resolution multiplier — rasterise SVGs at 4× viewBox size
-// so the downscale to display size stays sharp at any zoom level.
-const SVG_RENDER_SCALE = 4
+// Render resolution multiplier — rasterise SVGs at 8× viewBox size so the
+// glyph carries enough texels to stay crisp both when minified onto the
+// tiny tile icon AND when the camera zooms in past 1:1. 4× left the icons
+// visibly soft at zoom; 8× (192px for a 24px viewBox) is the headroom that
+// reads as a sharp, professional glyph. Cost is a few hundred KB of
+// transient canvas per distinct icon — negligible.
+const SVG_RENDER_SCALE = 8
 
 /**
  * Rasterise an SVG string at high resolution into a Pixi Texture via an
@@ -59,7 +63,21 @@ export async function rasteriseSvgToTexture(
   const ctx = canvas.getContext('2d')!
   ctx.drawImage(img, 0, 0, renderPx, renderPx)
 
-  return Texture.from({ resource: canvas, alphaMode: 'premultiply-alpha-on-upload' })
+  const texture = Texture.from({
+    resource: canvas,
+    alphaMode: 'premultiply-alpha-on-upload',
+    scaleMode: 'linear',
+  })
+  // The glyph is rasterised large and drawn small. Plain bilinear
+  // minification leaves it soft and makes it shimmer as the camera moves;
+  // mipmaps give a clean, stable downscale at every zoom level — the
+  // difference between a crisp icon and a "lame" blurry one. Guarded: a
+  // texture-source shape without these knobs still returns a usable texture.
+  try {
+    texture.source.autoGenerateMipmaps = true
+    texture.source.update()
+  } catch { /* mipmaps optional — texture still renders without them */ }
+  return texture
 }
 
 export type IconButtonConfig = {

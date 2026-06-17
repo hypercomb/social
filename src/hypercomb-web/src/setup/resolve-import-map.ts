@@ -56,12 +56,18 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
   // directory whose name is a 64-hex sig is the active bag.
   let bagPathSucceeded = false
   try {
+    // One pass over `__dependencies__/`: locate the active bag dir AND record
+    // the flat `<sig>.js` leaf files present. We need both — the bag names the
+    // leaf sigs, but the SW only serves them from the flat files, so a bag
+    // entry is only usable if its flat file actually exists.
     let bagDir: FileSystemDirectoryHandle | null = null
+    const flatNames = new Set<string>()
     for await (const [name, handle] of depsDir.entries()) {
-      if (handle.kind !== 'directory') continue
-      if (!/^[a-f0-9]{64}$/i.test(name)) continue
-      bagDir = handle as FileSystemDirectoryHandle
-      break
+      if (handle.kind === 'directory') {
+        if (!bagDir && /^[a-f0-9]{64}$/i.test(name)) bagDir = handle as FileSystemDirectoryHandle
+      } else if (handle.kind === 'file') {
+        flatNames.add(name)
+      }
     }
 
     if (bagDir) {
@@ -80,13 +86,28 @@ export const resolveImportMap = async (): Promise<ResolvedImports> => {
         return alias && sig ? { alias, sig } : null
       }))
 
-      for (const entry of entries) {
-        if (!entry) continue
-        if (imports[entry.alias]) continue
-        imports[entry.alias] = `${OPFS_DEPENDENCY_BASE_PATH}/${entry.sig}`
-        aliasSource.set(entry.alias, entry.sig)
+      // Bag/flat consistency guard. A resync rewrites the flat dep files for
+      // the new enabled set but leaves the bag from the last bundled install
+      // untouched, so a bag leaf can point at a flat file that's been deleted.
+      // Building the import map from it then resolves aliases to a 404 — the
+      // "Failed to fetch dynamically imported module" the dependency-loader
+      // throws. If ANY leaf is missing its flat file the whole bag is stale:
+      // discard it and let the flat scan below rebuild the map from what's
+      // actually on disk (self-healing, no reinstall needed).
+      const valid = entries.filter((e): e is { alias: string; sig: string } => !!e)
+      const allLeavesPresent = valid.length > 0 && valid.every(e => flatNames.has(`${e.sig}.js`))
+
+      if (allLeavesPresent) {
+        for (const entry of valid) {
+          if (imports[entry.alias]) continue
+          imports[entry.alias] = `${OPFS_DEPENDENCY_BASE_PATH}/${entry.sig}`
+          aliasSource.set(entry.alias, entry.sig)
+        }
+        bagPathSucceeded = aliasSource.size > 0
+      } else {
+        console.warn('[resolveImportMap] dependency bag is stale (leaf sigs missing flat files) — falling back to flat scan')
+        bagPathSucceeded = false
       }
-      bagPathSucceeded = aliasSource.size > 0
     }
   } catch (err) {
     console.warn('[resolveImportMap] bag scan failed; falling back to flat scan', err)

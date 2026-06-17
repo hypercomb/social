@@ -4090,18 +4090,25 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
-    // substrate:rerolled — user rerolled a single tile's substrate. Same
-    // per-cell change shape as substrate:applied; same routing and same
-    // deferred-invalidation discipline.
+    // substrate:rerolled — user rerolled a tile's substrate (single click or
+    // bulk). The old in-place / incremental fast path here had the EXACT bug
+    // tile:saved already learned from: it races concurrent synchronize
+    // renders and leaves the tile showing the OLD image until a manual
+    // refresh. Use the same robust recipe as tile:saved — drop the cached
+    // derivation, evict the stale atlas slot, then run a locked full render
+    // that re-reads the freshly-written propsSig from OPFS and paints the new
+    // image immediately. Reroll is an explicit user gesture, and requestRender
+    // coalesces a bulk burst into a single pass, so the full render is cheap.
     this.onEffect<{ cell: string }>('substrate:rerolled', (payload) => {
-      if (!payload?.cell) return
-      void this.#tryInPlaceCellUpdate(payload.cell, { dir: null }).then(done => {
+      if (payload?.cell) {
+        const oldSig = this.cellImageCache.get(payload.cell)
+        this.cellImageCache.delete(payload.cell)
         this.cellSubstrateCache.delete(payload.cell)
-        if (!done && this.#slots.seeded) {
-          this.cellImageCache.delete(payload.cell)
-          void this.renderIncremental({ changedContent: [payload.cell] })
-        }
-      })
+        if (oldSig && this.imageAtlas) this.imageAtlas.invalidate(oldSig)
+      }
+      this.#layerCellsCache.delete(this.renderedLocationKey)
+      this.renderedCellsKey = ''
+      this.requestRender()
     })
 
     // toggle tile label text visibility via shader uniform

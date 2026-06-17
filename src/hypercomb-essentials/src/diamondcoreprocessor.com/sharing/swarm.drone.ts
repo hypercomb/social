@@ -26,11 +26,11 @@
 // subscription on the same sig auto-triggers that paint when an event
 // arrives, so we don't need to dispatch a render signal ourselves.
 
-import { Drone } from '@hypercomb/core'
+import { Drone, EffectBus } from '@hypercomb/core'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
-import { isCellPublic } from '../presentation/tiles/tile-actions.drone.js'
+import { isCellPublic, setCellPublic } from '../presentation/tiles/tile-actions.drone.js'
 
 const SWARM_LAYER_KIND = 30200
 
@@ -453,7 +453,7 @@ export class SwarmDrone extends Drone {
   // resolves, we still subscribe + publish on time. The primary trigger is
   // the Lineage `change` event we wire up in the constructor below.
   protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'cell:0000-changed', 'cell:added', 'tile:public-changed']
-  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'swarm:follow-updated']
+  protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'swarm:follow-updated', 'tile:public-changed']
 
   // Per-lineage subscription handle. We open one per visited sig and
   // never close (cheap — mesh dedupes by sig at the bucket layer).
@@ -872,7 +872,18 @@ export class SwarmDrone extends Drone {
     // Also covers the bare cell:added → layout cascade race; if the
     // initial publish caught a child mid-write, the property edit that
     // follows triggers cell:0000-changed and we re-publish.
-    this.onEffect('cell:added', () => this.#schedulePropsRepublish())
+    //
+    // Tiles brought into existence while in a swarm are made public by
+    // default (#autoPublishInSwarm) so the swarm can collaborate on them —
+    // without it a freshly created tile stays private (the self-facing
+    // world-mode default) and never reaches peers. cell:added fires only on
+    // create / import / tag, never on plain navigation, so browsing a swarm
+    // publishes nothing; the room+secret gate inside keeps non-swarm creates
+    // private.
+    this.onEffect<{ cell?: string; segments?: readonly string[] }>('cell:added', (payload) => {
+      this.#autoPublishInSwarm(payload)
+      this.#schedulePropsRepublish()
+    })
     // Public/private flip — full re-sync so BOTH the broadcast layer slot
     // (kind 30200) AND the personal subscribe channel re-publish with the new
     // public subset. (#schedulePropsRepublish alone only refreshes the layer
@@ -1837,6 +1848,36 @@ export class SwarmDrone extends Drone {
    *  changed in a child's 0000 (or a cell was added)." Bursts of
    *  writes coalesce into one publish at the trailing edge. */
   #propsRepublishTimer: ReturnType<typeof setTimeout> | null = null
+
+  // A tile created in a swarm is public by default so the swarm can
+  // collaborate on it. Gated on the SAME room+secret check as every other
+  // swarm network action (see #syncForCurrentLineage): outside a swarm a
+  // create leaves the tile private — the per-tile public/private flag is
+  // a self-facing world-mode marker and must stay opt-in there. The
+  // isCellPublic guard makes this idempotent: a re-emitted cell:added (e.g.
+  // tagging an already-public tile) or a tile already covered by a public
+  // branch is a no-op, so we never churn a resync for nothing.
+  #autoPublishInSwarm = (payload: { cell?: string; segments?: readonly string[] }): void => {
+    const cell = String(payload?.cell ?? '').trim()
+    if (!cell) return
+    const room = this.#getRoomStore()?.value?.trim() ?? ''
+    const secret = this.#getSecretStore()?.value?.trim() ?? ''
+    if (!room || !secret) return  // not in a swarm — stay private by default
+    const segsRaw = payload?.segments
+    const segments = (Array.isArray(segsRaw) ? segsRaw : [])
+      .map(s => String(s ?? '').trim())
+      .filter(Boolean)
+    // Same location string the publish paths feed isCellPublic (see
+    // #publishCurrentVisualsToMyChannel) so the marker and the broadcast
+    // filter agree on the key.
+    const location = '/' + segments.join('/')
+    if (isCellPublic(location, cell)) return
+    setCellPublic(location, cell, true)
+    // Reuse the world-mode make-public signal: our own listener runs a full
+    // #syncForCurrentLineage (kind 30200 layer slot + personal channel), and
+    // show-cell / tile-overlay drop the world-mode dim on the now-public tile.
+    EffectBus.emit('tile:public-changed', { cell, location, public: true })
+  }
 
   #schedulePropsRepublish = (): void => {
     if (!this.#currentSig) return

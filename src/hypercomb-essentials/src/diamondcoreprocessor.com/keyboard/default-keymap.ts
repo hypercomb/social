@@ -63,6 +63,14 @@ export const globalKeyMap: KeyMapLayer = {
       category: 'View',
       pierce: true,
     },
+    {
+      cmd: 'screensaver.show',
+      sequence: [[{ key: '7', code: 'digit7', ctrl: true, shift: true }]],
+      description: 'Show screensaver',
+      descriptionKey: 'keymap.screensaver',
+      category: 'View',
+      pierce: true,
+    },
   ],
 }
 

@@ -88,13 +88,20 @@ const DRAG_ALPHA = 0.6
 const DROP_HIGHLIGHT_TINT = 0x88ffff
 
 // ── Action hint constants ────────────────────────────────────────
-const HINT_DELAY_MS = 350       // snappy hover-to-hint — long enough to filter mouse glances, short enough to feel responsive
+const HINT_DELAY_MS = 110       // near-instant hover-to-hint — just long enough to filter a mouse glance crossing the icon
 const HINT_EXPAND_DELAY_MS = 1100 // sustained hover after the label appears → expanded description; clicks always fire the action
 const HINT_Y_OFFSET = 22        // below the icon row
 const HINT_FONT_SIZE = 6
-const HINT_COLOR = 0xb0c0e0
+const HINT_COLOR = 0xeaf0ff     // near-white — reads crisp against the dark hint pill
 const HINT_EXPANDED_FONT_SIZE = 5.5
 const HINT_MAX_WIDTH = 60
+// Tooltip pill behind the hint text — turns the bare floating glyph into a
+// clean, legible label that reads against any tile content.
+const HINT_PILL_FILL = 0x0c0c1a
+const HINT_PILL_ALPHA = 0.82
+const HINT_PILL_PAD_X = 3
+const HINT_PILL_PAD_Y = 1.5
+const HINT_PILL_RADIUS = 2
 // Hint Text rasterisation resolution. The stage is scaled 1.8× and the
 // camera can zoom further, so the renderer's default DPR alone leaves
 // the 6pt font visibly soft. Oversample at 4× DPR (min 6) so the texture
@@ -198,7 +205,9 @@ export class TileOverlayDrone extends Drone {
 
   // ── Action hint state ──────────────────────────────────────────
   #hintText: Text | null = null
+  #hintBg: Graphics | null = null
   #hintDescriptionText: Text | null = null
+  #hintDescriptionBg: Graphics | null = null
   #hintTimer: ReturnType<typeof setTimeout> | null = null
   #hintActionName: string | null = null
   #hintExpanded = false
@@ -1480,6 +1489,7 @@ export class TileOverlayDrone extends Drone {
       style: new TextStyle({
         fontFamily: hcFont || "'Source Sans Pro Light', system-ui, sans-serif",
         fontSize: HINT_FONT_SIZE,
+        fontWeight: '600',
         fill: HINT_COLOR,
         align: 'center',
       }),
@@ -1487,7 +1497,9 @@ export class TileOverlayDrone extends Drone {
     })
     this.#hintText.anchor.set(0.5, 0)
     this.#hintText.position.set(action.button.position.x, HINT_Y_OFFSET)
-    this.#hintText.alpha = 0.85
+    // Pill behind the label, added first so the text sits on top.
+    this.#hintBg = this.#makeHintPill(this.#hintText, action.button.position.x, HINT_Y_OFFSET)
+    this.#overlay.addChild(this.#hintBg)
     this.#overlay.addChild(this.#hintText)
     this.#hintExpanded = false
 
@@ -1522,9 +1534,11 @@ export class TileOverlayDrone extends Drone {
       resolution: HINT_TEXT_RESOLUTION,
     })
     this.#hintDescriptionText.anchor.set(0.5, 0)
-    const yBelow = HINT_Y_OFFSET + (this.#hintText ? this.#hintText.height + 2 : HINT_FONT_SIZE + 2)
+    const yBelow = HINT_Y_OFFSET + (this.#hintText ? this.#hintText.height + 3 : HINT_FONT_SIZE + 3)
     this.#hintDescriptionText.position.set(0, yBelow)
-    this.#hintDescriptionText.alpha = 0.7
+    this.#hintDescriptionText.alpha = 0.92
+    this.#hintDescriptionBg = this.#makeHintPill(this.#hintDescriptionText, 0, yBelow)
+    this.#overlay.addChild(this.#hintDescriptionBg)
     this.#overlay.addChild(this.#hintDescriptionText)
     this.#hintExpanded = true
   }
@@ -1539,11 +1553,32 @@ export class TileOverlayDrone extends Drone {
     this.#clearHintText()
   }
 
+  /** Rounded translucent pill sized to a hint Text (anchored 0.5,0 at
+   *  `centerX`,`topY`). Drawn behind the text for tooltip-grade legibility. */
+  #makeHintPill(text: Text, centerX: number, topY: number): Graphics {
+    const w = text.width + HINT_PILL_PAD_X * 2
+    const h = text.height + HINT_PILL_PAD_Y * 2
+    const g = new Graphics()
+    g.roundRect(centerX - w / 2, topY - HINT_PILL_PAD_Y, w, h, HINT_PILL_RADIUS)
+    g.fill({ color: HINT_PILL_FILL, alpha: HINT_PILL_ALPHA })
+    return g
+  }
+
   #clearHintText(): void {
+    if (this.#hintBg) {
+      this.#hintBg.parent?.removeChild(this.#hintBg)
+      this.#hintBg.destroy()
+      this.#hintBg = null
+    }
     if (this.#hintText) {
       this.#hintText.parent?.removeChild(this.#hintText)
       this.#hintText.destroy()
       this.#hintText = null
+    }
+    if (this.#hintDescriptionBg) {
+      this.#hintDescriptionBg.parent?.removeChild(this.#hintDescriptionBg)
+      this.#hintDescriptionBg.destroy()
+      this.#hintDescriptionBg = null
     }
     if (this.#hintDescriptionText) {
       this.#hintDescriptionText.parent?.removeChild(this.#hintDescriptionText)

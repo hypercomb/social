@@ -54,9 +54,8 @@ interface Bubble {
   rsy: number
 }
 
-// Idle time before the screensaver kicks in. TEMPORARY: 10s while testing —
-// bump back to ~60_000 (60s) for real use.
-const IDLE_MS = 10_000
+// Idle time before the screensaver kicks in.
+const IDLE_MS = 30_000
 
 // Hard cap on simultaneously-animated bubbles. Collision resolution is O(N²)
 // per frame and each bubble holds its own GPU texture, so a node with hundreds
@@ -113,7 +112,7 @@ export class ScreensaverDrone extends Drone {
     'Idle screensaver — turns the current node\'s tiles into neon bubbles (image + text) that bounce around the screen; any input dismisses it. Enabled by default, sticky on/off.'
   public override effects = ['render'] as const
 
-  protected override listens = ['render:host-ready']
+  protected override listens = ['render:host-ready', 'keymap:invoke']
   protected override emits = ['render:set-hive-visible', 'screensaver:active']
 
   #app: Application | null = null
@@ -202,6 +201,13 @@ export class ScreensaverDrone extends Drone {
     window.setTimeout(() => { if (this.#enabled && !this.#active) void this.#activate() }, 60)
   }
 
+  /** Show the screensaver right now via the keyboard shortcut, ignoring the
+   *  sticky enabled preference (and without changing it). Deferred a tick so the
+   *  triggering keystroke isn't counted as the dismissing activity. */
+  #showNow = (): void => {
+    window.setTimeout(() => { if (!this.#active) void this.#activate() }, 60)
+  }
+
   // ─────────────────────────── wiring ───────────────────────────
 
   #wire = (): void => {
@@ -215,6 +221,13 @@ export class ScreensaverDrone extends Drone {
       if (this.#app) return
       this.#app = payload.app
       this.#container = payload.container
+    })
+
+    // Keyboard shortcut (Ctrl+Shift+7) — show the screensaver right now. This is
+    // an explicit "show it" gesture (a preview), so it activates regardless of
+    // the sticky enabled preference and never flips that saved on/off.
+    this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
+      if (cmd === 'screensaver.show') this.#showNow()
     })
 
     // Mirror the grid's hex orientation so bubbles are the right hexagon shape.
