@@ -447,6 +447,41 @@ dcp-command-line {
   color: var(--dcp-danger);
 }
 
+/* Package-update review banner — sits above a section's tree when it carries
+   change-delta items awaiting opt-in. Warm amber to match the freshly-upgraded
+   row highlight; the action accepts the whole delta at once. */
+.upgrade-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 14px;
+  padding: 9px 12px;
+  border: 1px solid rgba(222, 158, 46, 0.5);
+  border-left: 3px solid rgba(222, 158, 46, 0.9);
+  border-radius: var(--dcp-radius-sm, 6px);
+  background: rgba(232, 168, 56, 0.1);
+}
+.upgrade-banner-text {
+  flex: 1;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: rgb(150, 100, 14);
+}
+.upgrade-optin-all {
+  flex-shrink: 0;
+  padding: 5px 13px;
+  border: 1px solid rgba(222, 158, 46, 0.9);
+  border-radius: 999px;
+  background: rgba(222, 158, 46, 0.16);
+  color: rgb(150, 100, 14);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+.upgrade-optin-all:hover { background: rgba(222, 158, 46, 0.28); }
+.upgrade-optin-all:active { background: rgba(222, 158, 46, 0.36); }
+
 /* Live resolve cue on an adopted branch row — sweeping bar while the broker
    walk fills layers/resources (no total exists: the walk discovers its
    frontier as it goes). */

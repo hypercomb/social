@@ -181,6 +181,16 @@ export class HomeComponent implements OnDestroy {
   #activeAdoptRoot: string | null = null
   #adoptCueTimer: ReturnType<typeof setTimeout> | null = null
 
+  // ── Package-update REVIEW state ──────────────────────────────────────
+  // The change delta the header upgrade indicator handed us via the
+  // `#upgrade=<pkg>&new=…` hash. Ephemeral + participant-local (re-derived
+  // from the hash each open); never enters any lineage. `#upgradeNewSet` is
+  // the set of changed signatures to surface OFF + highlighted; the rest is
+  // bookkeeping so re-applies and focus don't fight each other.
+  readonly #upgradeNewSet = signal<Set<string>>(new Set())
+  #upgradePackageSig: string | null = null
+  #upgradeScrolled = false
+
   // flat list of all nodes for command line suggestions
   readonly allNodes = computed(() => {
     const result: TreeNode[] = []
@@ -218,7 +228,12 @@ export class HomeComponent implements OnDestroy {
         //    DATA reads ON, its CODE OFF until enabled — where the trust gate
         //    fires).
         const inAdopted = adopted || !!n.freshlyAdopted
-        const def = !isAdoptedContent ? true
+        // A CHANGE-DELTA item from a package update reads OFF until the
+        // participant opts in — scoped to the delta only (everything else
+        // keeps its normal default), so the rest of the package stays ON and
+        // running. Takes precedence over the package/content default below.
+        const def = n.freshlyUpgraded ? false
+          : !isAdoptedContent ? true
           : adopted ? true
           : (n.freshlyAdopted ? false : defaultEnabled(n.kind))
         map.set(n.id, this.#toggleState.isEnabled(n.id, def))
@@ -709,11 +724,16 @@ export class HomeComponent implements OnDestroy {
     // broker IoC entry are both in place when we fire.
     this.#processBranchHash()
 
+    // The header upgrade indicator routes here with `#upgrade=<pkg>&new=…`
+    // (a package's change delta). Same hash channel as adopt; process it on
+    // load and on every hash swap so re-opening the indicator re-marks.
+    this.#processUpgradeHash()
+
     // Browsers do NOT reload an iframe on hash-only URL changes, so when
     // portal-overlay swaps `…#branch=A` → `…#branch=B` for a second adopt
     // the constructor doesn't re-run. Listen for hashchange too so each
     // adopt-via-iframe gets processed even on a persistent DCP instance.
-    window.addEventListener('hashchange', () => this.#processBranchHash())
+    window.addEventListener('hashchange', () => { this.#processBranchHash(); this.#processUpgradeHash() })
   }
 
   /** Climbing resolved-sig count for a section's live broker walk, or null
@@ -877,6 +897,146 @@ export class HomeComponent implements OnDestroy {
         }
       })
     } catch { /* malformed hash → silent — user can re-trigger adopt */ }
+  }
+
+  /** Read `#upgrade=<packageSig>&new=<sig,sig,…>&previous=<sig>` from the URL
+   *  hash — the header upgrade indicator's handoff — and stage the package
+   *  update for REVIEW. The hive only ROUTED us here; this is where the
+   *  participant reviews the changed items (rendered off + highlighted) and
+   *  opts in. `new` is the change delta the hive computed (bundle bees absent
+   *  from its install). Nothing installs or runs in the hive from here — the
+   *  marks are presentation + a quiet OFF gate; only an explicit opt-in below
+   *  syncs a delta bee back. */
+  #processUpgradeHash(): void {
+    try {
+      const hash = window.location.hash.replace(/^#/, '')
+      if (!hash) return
+      const params = new URLSearchParams(hash)
+      const pkg = (params.get('upgrade') ?? '').trim().toLowerCase()
+      if (!/^[a-f0-9]{64}$/.test(pkg)) return
+
+      const newSet = new Set(
+        (params.get('new') ?? '')
+          .split(',')
+          .map(s => s.trim().toLowerCase())
+          .filter(s => /^[a-f0-9]{64}$/.test(s)),
+      )
+      // Nothing concrete to mark without an explicit delta. (A future
+      // refinement can diff against `previous` to derive the delta when the
+      // explicit list was omitted for size; the hive sends it inline today.)
+      if (!newSet.size) return
+
+      this.#upgradePackageSig = pkg
+      this.#upgradeScrolled = false
+      this.#upgradeNewSet.set(newSet)
+
+      // DCP resolves its OWN origin's current (i.e. the new) version on load,
+      // so the changed bees land in the tree + OPFS — "successfully resolved
+      // what should run" == present in a resolved section, which is what makes
+      // them enable-able here. Apply now, then re-apply as that resolve
+      // settles. Idempotent, so repeated application is harmless.
+      this.#applyUpgradeMarks()
+      setTimeout(() => this.#applyUpgradeMarks(), 600)
+      setTimeout(() => this.#applyUpgradeMarks(), 2000)
+    } catch { /* malformed hash → silent — the indicator can re-open */ }
+  }
+
+  /** Mark the resolved change-delta nodes `freshlyUpgraded` (off + highlighted)
+   *  and hold each OFF for real via a QUIET explicit-false write — no resync,
+   *  so the hive stays exactly as it is until opt-in. Never overrides an
+   *  explicit participant choice: an already-enabled delta item loses the
+   *  highlight (it was opted in); an item we (or the participant) already set
+   *  is left untouched. Re-runnable: applied again as the baseline resolves. */
+  #applyUpgradeMarks(): void {
+    const newSet = this.#upgradeNewSet()
+    if (!newSet.size) return
+    const toDisable: string[] = []
+    const foundSigs = new Set<string>()
+    const walk = (nodes: TreeNode[]): void => {
+      for (const n of nodes) {
+        const sig = String(n.signature ?? '').toLowerCase()
+        const inSet = !!sig && newSet.has(sig)
+        const stored = this.#toggleState.stored(n.id)
+        const optedIn = stored === true
+        const mark = inSet && !optedIn
+        if (n.freshlyUpgraded !== mark) n.freshlyUpgraded = mark
+        if (inSet) {
+          foundSigs.add(sig)
+          // Hold it OFF for the sync gate (sentinel keys toggles by sig ===
+          // node.id) WITHOUT a broadcast — but only when never chosen, so we
+          // don't stomp an opt-in or re-disable a manual enable.
+          if (isCodeKind(n.kind) && stored === undefined) toDisable.push(n.id)
+        }
+        walk(n.children ?? [])
+      }
+    }
+    for (const s of this.sections()) walk(s.items)
+    if (toDisable.length) this.#toggleState.setManyEnabledQuiet(toDisable, false)
+    this.#refreshSections()
+    // Once any changed item is on screen, focus its package (once).
+    if (foundSigs.size > 0 && !this.#upgradeScrolled) {
+      this.#upgradeScrolled = true
+      this.#focusUpgradePackage()
+    }
+  }
+
+  /** Open + scroll to the package group that carries the changed items, so
+   *  the participant lands on what changed. Prefers the section actually
+   *  holding freshly-upgraded nodes; falls back to the bundled-default group. */
+  #focusUpgradePackage(): void {
+    let target: DomainSection | undefined
+    let best = 0
+    for (const s of this.sections()) {
+      const c = this.#countUpgraded(s.items)
+      if (c > best) { best = c; target = s }
+    }
+    if (!target) target = this.sections().find(s => s.provenance === 'default')
+    if (!target) return
+    this.importMode.set(false)
+    this.openGroup.set(target.displayDomain || target.domainName)
+    const domain = target.domain
+    setTimeout(() => this.#scrollSectionIntoView(domain, true), 120)
+  }
+
+  /** Count CHANGE-DELTA items still awaiting opt-in (off + highlighted) in a
+   *  node subtree — drives the per-section "N new" banner. */
+  #countUpgraded(nodes: TreeNode[]): number {
+    let n = 0
+    const walk = (items: TreeNode[]): void => {
+      for (const it of items) {
+        if (it.freshlyUpgraded) n++
+        walk(it.children ?? [])
+      }
+    }
+    walk(nodes)
+    return n
+  }
+
+  /** Template hook: changed-items-awaiting-opt-in count for a section. */
+  upgradeCount(section: DomainSection): number {
+    return this.#countUpgraded(section.items)
+  }
+
+  /** Opt in to ALL of this section's changed items at once: enable every
+   *  freshly-upgraded node (ONE broadcast → one web resync that streams them
+   *  in), clear their highlight, and drive the logical recompute + registry
+   *  snapshot so the hive picks them up. The per-item path is the normal
+   *  toggle; this is the bulk "accept the update" gesture. */
+  async optInAllUpgrades(section: DomainSection): Promise<void> {
+    const ids: string[] = []
+    const collect = (items: TreeNode[]): void => {
+      for (const it of items) {
+        if (it.freshlyUpgraded) { ids.push(it.id); it.freshlyUpgraded = false }
+        collect(it.children ?? [])
+      }
+    }
+    collect(section.items)
+    if (!ids.length) return
+    this.#toggleState.setManyEnabled(ids, true)   // broadcasts → web resync streams them
+    this.#refreshSections()
+    void this.#domainStorage.recomputeLogical()
+      .then(() => { this.#logicalVersion.update(v => v + 1); void this.#postRegistrySnapshot() })
+      .catch(e => console.warn('[home] opt-in-all recompute failed', e))
   }
 
   /** Poll TreeResolver.resolveFromLocal until the branch's content is
@@ -1558,6 +1718,9 @@ export class HomeComponent implements OnDestroy {
       }
       cascade(node.children)
     }
+    // Opting a change-delta item IN clears its "new — review" highlight (it
+    // has now been reviewed + enabled), mirroring the freshly-adopted rule.
+    if (node.freshlyUpgraded && nowOn) node.freshlyUpgraded = false
     this.#refreshSections()
 
     // #77: if a SECTION (adopted branch) was toggled, drive the LOGICAL

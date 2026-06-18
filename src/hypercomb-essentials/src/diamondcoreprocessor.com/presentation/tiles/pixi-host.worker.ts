@@ -181,17 +181,11 @@ export class PixiHostWorker extends Worker {
     app.stage.interactiveChildren = false
     host.appendChild(app.canvas)
 
-    // Pixi's built-in resizeTo polling did not reliably react to CSS
-    // changes that narrowed the host (the history sidebar's injected
-    // stylesheet setting #pixi-host's width via a CSS variable) —
-    // the canvas stayed at its init-time window width while the host
-    // shrunk under it, leaving the sidebar painted over live tile
-    // pixels. An explicit ResizeObserver on host calls app.resize()
-    // so the renderer picks up every host size change immediately.
-    if ('ResizeObserver' in globalThis) {
-      const ro = new ResizeObserver(() => { try { app.resize() } catch { /* app may be disposed */ } })
-      ro.observe(host)
-    }
+    // The canvas is kept glued to the host by resyncToHost(), wired up
+    // after the centering helpers are defined below (a ResizeObserver for
+    // immediacy plus a cheap interval as a guaranteed backstop). It also
+    // refuses to follow the host to 0×0 — the single rule that keeps a
+    // momentary host collapse from corrupting scale/zoom.
     app.canvas.style.pointerEvents = 'auto'
     app.canvas.style.touchAction   = 'none'
 
@@ -335,6 +329,43 @@ export class PixiHostWorker extends Worker {
 
     // Initial centering — also deferred so we wait for Pixi's first resize RAF.
     center()
+
+    // ── Keep the canvas glued to the host ────────────────────────────
+    // The host can change size for reasons that never fire a window
+    // 'resize': a side panel reserving a column via CSS, browser chrome
+    // showing/hiding, a mode that re-lays-out the shell. Pixi's resizeTo
+    // only polls on its own cadence, and a ResizeObserver can miss
+    // class-driven changes (and is throttled in a backgrounded tab), so
+    // relying on either alone let the canvas desync from the host and
+    // stay that way — the renderer reported the old size, every fit /
+    // recenter computed against it, and content drifted to a corner.
+    //
+    // resyncToHost is the single reconciler: whenever the host's box and
+    // the renderer disagree, resize the renderer to match AND recenter so
+    // content can't drift. Two triggers feed it — a ResizeObserver for
+    // immediacy and a cheap interval as a guaranteed backstop for any
+    // path the observer misses. It is idempotent: equal sizes return
+    // before doing any work, so steady state costs two integer compares.
+    //
+    // The 0×0 guard is the bulletproof rule: a collapsed host (a display
+    // toggle, a transient zero-size layout, an overlay's CSS) must NEVER
+    // be propagated to the renderer — a 0×0 canvas permanently corrupts
+    // scale/zoom and does not recover. Hold the last good size until the
+    // host is real again.
+    const resyncToHost = (): void => {
+      if (!this.host) return
+      const w = this.host.clientWidth, h = this.host.clientHeight
+      if (w <= 0 || h <= 0) return
+      if (Math.round(app.renderer.screen.width) === Math.round(w)
+        && Math.round(app.renderer.screen.height) === Math.round(h)) return
+      try { app.resize(); center() } catch { /* app may be disposed */ }
+    }
+    if ('ResizeObserver' in globalThis) {
+      const ro = new ResizeObserver(() => resyncToHost())
+      ro.observe(host)
+    }
+    setInterval(resyncToHost, 250)
+
     // Window resize covers desktop resize and most device rotations.
     window.addEventListener('resize', center)
     // orientationchange + screen.orientation.change cover the cases where

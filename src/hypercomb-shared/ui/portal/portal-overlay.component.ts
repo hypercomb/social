@@ -133,7 +133,12 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   // -------------------------------------------------
   private readonly onPortalOpen = (e: Event): void => {
     const detail = (e as CustomEvent).detail as
-      { target?: string; url?: string; branchSig?: string; at?: string; domain?: string; label?: string } | null
+      {
+        target?: string; url?: string; branchSig?: string; at?: string; domain?: string; label?: string
+        /** Header upgrade-indicator handoff: WHICH package changed + the
+         *  delta the installer marks for review. Notify-and-route only. */
+        upgrade?: { packageSig?: string | null; newBees?: string[]; previous?: string | null }
+      } | null
     let url = detail?.url ?? resolvePortalUrl(detail?.target ?? '')
     if (!url) return
 
@@ -167,6 +172,28 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
         if (detail?.label) {
           url += `&label=${encodeURIComponent(String(detail.label))}`
         }
+      }
+    }
+
+    // Upgrade handoff — the header upgrade indicator routes the changed
+    // package here so the installer lands on it and marks the changed items
+    // (off + highlighted) for review/opt-in. `upgrade=<packageSig>` says WHICH
+    // package; `new=<sig,sig,…>` is the changed-sig delta the hive computed;
+    // `previous=<sig>` is the walkback link the installer diffs against when
+    // the explicit list is absent. No bytes, no install — just where to look.
+    if (detail?.upgrade && (detail?.target ?? '') === 'dcp') {
+      const pkg = String(detail.upgrade.packageSig ?? '').trim().toLowerCase()
+      if (/^[a-f0-9]{64}$/.test(pkg)) {
+        url += (url.includes('#') ? '&' : '#') + `upgrade=${pkg}`
+        const prev = String(detail.upgrade.previous ?? '').trim().toLowerCase()
+        if (/^[a-f0-9]{64}$/.test(prev)) url += `&previous=${prev}`
+        // Cap the explicit list so the hash never grows pathological; the
+        // installer falls back to the previous-version walkback for the rest.
+        const sigs = (Array.isArray(detail.upgrade.newBees) ? detail.upgrade.newBees : [])
+          .map(s => String(s ?? '').trim().toLowerCase())
+          .filter(s => /^[a-f0-9]{64}$/.test(s))
+          .slice(0, 80)
+        if (sigs.length) url += `&new=${sigs.join(',')}`
       }
     }
 

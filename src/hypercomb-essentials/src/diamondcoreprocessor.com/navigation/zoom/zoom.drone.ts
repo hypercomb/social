@@ -522,16 +522,28 @@ export class ZoomDrone extends Drone {
     // the mesh's local units, so a geometry threshold is fragile — the
     // count is exact.
     const padding = this.#cellCount === 1 ? 75 : 5 // px margin from UI chrome edges
+    // Fit against the ACTUAL canvas (renderer.screen), never the window.
+    // The canvas is the visible drawing surface; a side panel that reserves a
+    // column narrows the host (and thus the canvas) below the window, and the
+    // canvas can sit offset from the viewport origin. Measuring against
+    // window.innerWidth/Height whenever the two diverged landed the grid
+    // shrunk and off-centre (the "a widget resized the tiles" glitch).
+    // renderer.screen is the same space the stage is centered in (applyCenter),
+    // so fit and recenter agree by construction. The controls bar FLOATS over
+    // the canvas and is intentionally NOT reserved — content fits the full
+    // canvas below the header; the bar overlays it.
+    const screen = this.renderer.screen
+    const canvasRect = this.canvas?.getBoundingClientRect() ?? null
     const headerEl = document.querySelector('.header-bar') as HTMLElement | null
-    // The controls bar FLOATS over the canvas — it must never constrain the fit
-    // area. Reserving its width/height here made it "affect the container
-    // size": a side rail shifted/shrank fits into the strip beside it, and a
-    // bottom pill pulled the fit up. Content now fits the full viewport (below
-    // the header) regardless of where the bar is docked; the bar overlays it.
-    const safeTop = headerEl ? headerEl.getBoundingClientRect().bottom + padding : padding
-    const safeBottom = window.innerHeight - padding
+    // Header bottom in canvas-local Y: the header lives in viewport space, the
+    // safe area in canvas space, so subtract the canvas's own top offset
+    // (0 normally; non-zero only if the host is inset from the viewport top).
+    const headerBottom = headerEl ? headerEl.getBoundingClientRect().bottom : 0
+    const headerBottomLocal = canvasRect ? headerBottom - canvasRect.top : headerBottom
+    const safeTop = Math.max(0, headerBottomLocal) + padding
+    const safeBottom = screen.height - padding
     const safeLeft = padding
-    const safeRight = window.innerWidth - padding
+    const safeRight = screen.width - padding
     const availW = safeRight - safeLeft
     const availH = safeBottom - safeTop
 
@@ -556,8 +568,8 @@ export class ZoomDrone extends Drone {
     // reset stage to screen center and clear pan so that the fit position
     // is not relative to a stale pan offset — this keeps content centered
     // after viewport resizes (desktop ↔ mobile, orientation, fullscreen)
-    const screenCx = window.innerWidth * 0.5
-    const screenCy = window.innerHeight * 0.5
+    const screenCx = screen.width * 0.5
+    const screenCy = screen.height * 0.5
     this.app.stage.position.set(screenCx, screenCy)
     this.vp?.setPan(0, 0, source)
 

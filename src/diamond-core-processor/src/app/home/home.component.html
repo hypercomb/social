@@ -144,6 +144,15 @@
               <div class="section-status error">{{ section.error }}</div>
             }
 
+            @if (upgradeCount(section) > 0) {
+              <div class="upgrade-banner">
+                <span class="upgrade-banner-text">{{ 'dcp.upgrade-new' | t: { count: upgradeCount(section) } }}</span>
+                <button class="upgrade-optin-all" type="button" (click)="optInAllUpgrades(section)">
+                  {{ 'dcp.upgrade-optin-all' | t }}
+                </button>
+              </div>
+            }
+
             @if (section.items.length) {
               <dcp-tree-view
                 [nodes]="section.items"
