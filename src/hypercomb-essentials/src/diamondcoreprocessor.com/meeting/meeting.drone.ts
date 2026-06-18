@@ -89,7 +89,7 @@ export class HypercombMeetingDrone extends Drone {
   override description = 'Enables video meetings on tiles tagged with meeting keywords (e.g. cascade).'
 
   protected override deps = { mesh: '@diamondcoreprocessor.com/NostrMeshDrone' }
-  protected override listens = ['tags:changed', 'render:host-ready', 'tile:action']
+  protected override listens = ['tags:changed', 'render:host-ready', 'overlay:request-register', 'tile:action']
   protected override emits = ['overlay:register-action', 'meeting:stream-ready', 'meeting:slot-assigned', 'mesh:publish', 'mesh:subscribe']
 
   #localPeerId = meetingPeerId()
@@ -98,6 +98,21 @@ export class HypercombMeetingDrone extends Drone {
   #cellTemplates: Map<string, string> = new Map() // cell → tag (e.g. 'cascade')
   #effectsRegistered = false
   #iconRegistered = false
+
+  // Shared descriptor emit — used by both the boot host-ready registration and
+  // the overlay:request-register handshake so there is ONE source of truth.
+  #registerMeetingIcon = (): void => {
+    this.emitEffect('overlay:register-action', [{
+      name: 'meeting',
+      owner: this.iocKey,
+      svgMarkup: MEETING_ICON_SVG,
+      x: -14,
+      y: -10,
+      hoverTint: 0xa8ffd8,
+      profile: 'private' as const,
+      visibleWhen: (ctx: { label: string }) => this.#meetingCells.has(ctx.label),
+    }])
+  }
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
@@ -119,16 +134,14 @@ export class HypercombMeetingDrone extends Drone {
     this.onEffect('render:host-ready', () => {
       if (this.#iconRegistered) return
       this.#iconRegistered = true
-      this.emitEffect('overlay:register-action', [{
-        name: 'meeting',
-        owner: this.iocKey,
-        svgMarkup: MEETING_ICON_SVG,
-        x: -14,
-        y: -10,
-        hoverTint: 0xa8ffd8,
-        profile: 'private' as const,
-        visibleWhen: (ctx: { label: string }) => this.#meetingCells.has(ctx.label),
-      }])
+      this.#registerMeetingIcon()
+    })
+
+    // Handshake: re-emit the 'meeting' descriptor when the overlay (re)requests
+    // registration, bypassing the once-only #iconRegistered guard.
+    this.onEffect('overlay:request-register', () => {
+      this.#iconRegistered = true
+      this.#registerMeetingIcon()
     })
 
     // 3. handle meeting icon click

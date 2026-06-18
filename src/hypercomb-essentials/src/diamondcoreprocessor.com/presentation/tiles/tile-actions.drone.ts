@@ -468,7 +468,7 @@ export class TileActionsDrone extends Drone {
     lineage: '@hypercomb.social/Lineage',
   }
 
-  protected override listens = ['render:host-ready', 'render:cell-count', 'tile:action', 'controls:action', 'overlay:icons-reordered', 'overlay:arrange-mode', 'substrate:applied', 'substrate:rerolled', 'cell:removed']
+  protected override listens = ['render:host-ready', 'overlay:request-register', 'render:cell-count', 'tile:action', 'controls:action', 'overlay:icons-reordered', 'overlay:arrange-mode', 'substrate:applied', 'substrate:rerolled', 'cell:removed']
   protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'note:capture', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'tile:public-changed', 'cell:removed', 'visibility:show-hidden', 'substrate:rerolled']
 
   #registered = false
@@ -486,6 +486,21 @@ export class TileActionsDrone extends Drone {
         if (this.#registered) return
         this.#registered = true
         void this.#loadArrangementAndRegister()
+      })
+
+      // Handshake: the overlay asks every icon provider to re-emit once it is
+      // ready. Its overlay:register-action subscription is live, but our
+      // descriptors were emitted earlier and only the LAST survives in
+      // EffectBus's single lastValue slot — so without this the overlay boots
+      // with zero icons. Respond with the full ADDITIVE batch via
+      // #buildAllDescriptors (NOT #reregisterAll, which emits an unregister
+      // per profile entry first and opens a transient empty window). This one
+      // response also carries the IconProviderRegistry-contributed icons
+      // (edit/note/contact), since they fold into #mergedEntries.
+      this.onEffect('overlay:request-register', () => {
+        if (!this.#registered) return
+        this.emitEffect('overlay:register-action', this.#buildAllDescriptors())
+        this.#emitPoolIcons()
       })
 
       // Track which tiles have substrate so bulk reroll can filter correctly.

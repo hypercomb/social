@@ -27,7 +27,7 @@ export class MeetingControlsWorker extends Worker {
     'Registers join/camera overlay buttons for hive meetings.'
   public override effects = ['network'] as const
 
-  protected override listens = ['render:host-ready', 'tile:action', 'meeting:state', 'meeting:local-camera']
+  protected override listens = ['render:host-ready', 'overlay:request-register', 'tile:action', 'meeting:state', 'meeting:local-camera']
   protected override emits = ['overlay:register-action', 'overlay:unregister-action', 'meeting:toggle-available', 'meeting:toggle-camera']
 
   #meetingState: MeetingState = 'idle'
@@ -39,6 +39,13 @@ export class MeetingControlsWorker extends Worker {
   protected override act = async (): Promise<void> => {
     // register overlay icons once pixi is ready
     this.onEffect('render:host-ready', () => {
+      this.#registerActions()
+    })
+
+    // Handshake: re-register when the overlay (re)requests it. Routes through
+    // #registerActions so stale meeting-join/meeting-camera names are
+    // unregistered first and only the icon matching the CURRENT state re-emits.
+    this.onEffect('overlay:request-register', () => {
       this.#registerActions()
     })
 

@@ -231,12 +231,20 @@ export class TileOverlayDrone extends Drone {
     'tile:public-changed',
     'keymap:invoke',
   ]
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register']
 
   #dropDragging = false
   #dropPending = false
 
   #effectsRegistered = false
+  // Handshake state: #requestedRegister makes #initOverlay emit
+  // 'overlay:request-register' exactly once so every icon provider re-emits
+  // into the now-ready overlay (fixes the boot "zero icons" replay race).
+  // #arrangeRebuildPending defers a re-register-driven rebuild that arrives
+  // mid arrange-drag (it would destroy the dragged button under the pointer);
+  // #exitArrangeMode flushes it.
+  #requestedRegister = false
+  #arrangeRebuildPending = false
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#effectsRegistered) {
@@ -310,7 +318,7 @@ export class TileOverlayDrone extends Drone {
             }
           }
         }
-        this.#rebuildActiveProfile()
+        this.#requestRebuild()
       })
 
       this.onEffect<{ name: string }>('overlay:unregister-action', ({ name }) => {
@@ -323,7 +331,7 @@ export class TileOverlayDrone extends Drone {
           }
         }
         this.#registeredDescriptors.delete(name)
-        this.#rebuildActiveProfile()
+        this.#requestRebuild()
       })
 
       // ── Bee disposal cleanup ─────────────────────────────────────
@@ -637,6 +645,28 @@ export class TileOverlayDrone extends Drone {
     }
 
     this.#rebuildActiveProfile()
+
+    // Pull registration. The overlay subscribed to overlay:register-action in
+    // heartbeat, but provider drones may have emitted their descriptors before
+    // this overlay existed — and EffectBus keeps only the LAST value per
+    // effect, so a late subscriber replays just one batch (the boot "zero
+    // icons" race). Emit a STICKY request so every provider — current and
+    // later-loading — re-emits its full descriptor set into the now-ready,
+    // already-subscribed overlay, which accumulates them. One-shot; skipped in
+    // arrange mode (a re-register rebuilds buttons and would destroy the
+    // dragged one under the pointer).
+    if (!this.#requestedRegister && !this.#arrangeMode) {
+      this.#requestedRegister = true
+      this.emitEffect('overlay:request-register', {})
+    }
+  }
+
+  /** Rebuild the active profile's buttons, unless an arrange drag is live —
+   *  destroying #actions mid-drag would orphan #dragButton. Deferred rebuilds
+   *  flush on #exitArrangeMode. */
+  #requestRebuild(): void {
+    if (this.#arrangeMode) { this.#arrangeRebuildPending = true; return }
+    this.#rebuildActiveProfile()
   }
 
   #updateHexBg(): void {
@@ -888,6 +918,13 @@ export class TileOverlayDrone extends Drone {
     for (const action of this.#actions) {
       action.button.rotation = 0
       action.button.scale.set(1, 1)
+    }
+
+    // Flush any re-register that arrived during the drag (deferred by
+    // #requestRebuild) now that tearing down buttons is safe.
+    if (this.#arrangeRebuildPending) {
+      this.#arrangeRebuildPending = false
+      this.#rebuildActiveProfile()
     }
 
     this.#updateVisibility()
