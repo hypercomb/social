@@ -1,5 +1,7 @@
 # The Tuning Garage — Installer Feature-Gating, Two-Lens Review, Capability Dedup & Recipes
 
+> **status: design — not built (as of 2026-06-18).** Installer capability-tag dedup, two-lens review, and signature-addressed tuning recipes; no code shipped yet.
+
 **Status:** design (not yet built). Supersedes the ad-hoc notes around installer defaults.
 **Owning subsystems:** DCP installer (`diamond-core-processor`), `hypercomb-essentials` sharing/capability, `hypercomb-shared` shell UI + sigbag storage.
 
@@ -22,11 +24,11 @@ These can be revisited; they are recorded so the rest of this doc is decision-co
 
 ## 0. Principles this design must not violate
 
-- **Signatures are identity + composition.** Manifests and recipes are signature-addressed `__resources__` blobs referenced by sig; consumer choice is never inline in shareable content.
+- **Signatures are identity + composition.** Manifests and recipes are signature-addressed `__resources__` blobs referenced by sig; consumer choice is never inline in shareable content. These artifacts are [DNA](dna.md) — content-addressed, merkle-versioned, immutable, composing upward to root. "DNA" is a documentation lens over the *existing* `kind` discriminant (layer / dependency / bee / resource / content): there is no `DnaService`, no `dna` field, no new OPFS folder — the signature is the only universal primitive.
 - **Layer purity.** The shared layer holds canonical primitives only. All consumer tune state lives in the participant-local settings sigbag, so the **branch lineage sig is byte-identical before and after a full tune** (the cardinal anti-skew invariant — see [`feedback_viewport_not_in_history`]).
 - **Accept-gated.** Fold/resync fire only on portal "Done" (`actions:available`). Passive close discards the pending diff.
 - **Two-store split.** Registry markers (`__content__`/`__lineages__`) and module bytes (`DcpStore`) drift independently; restore reconciles both.
-- **Minimalism.** No new state library, no new OPFS folder, no new mesh kind. Reuse `EventTarget` + EffectBus, the `decorations` slot, the settings sigbag, and IoC.
+- **Minimalism.** No new state library, no new OPFS folder, no new mesh kind. Reuse `EventTarget` + EffectBus, the `decorations` slot, the settings sigbag, and IoC. (This is the DNA guardrail in practice: feature-gating composes over the existing content-addressed artifacts; it never invents a parallel store or transport.)
 
 ---
 
@@ -153,7 +155,7 @@ capability?: string   // form '<family>:<noun>', e.g. 'render:tiles', 'input:poi
 
 ### 4.2 The feature manifest (a `DecorationRecord`, rides the existing slot)
 
-Produced at adopt time by reading each bee's statically-extracted `capability` (decision 4: cached by branch-root sig), emitted via `writeDecoration` (`decoration-manifest.ts:101-128`) → sig appended to the branch root's `decorations` slot → **rides the merkle tree for free, no new transport, no new mesh kind**:
+Produced at adopt time by reading each bee's statically-extracted `capability` (decision 4: cached by branch-root sig), emitted via `writeDecoration` (`decoration-manifest.ts:101-128`) → sig appended to the branch root's `decorations` slot → **rides the merkle tree for free, no new transport, no new mesh kind**. This is the recursive-layer-composition rung in action: structured feature data attaches via the `decorations` slot (a flat sig array) on the branch sub-layer, never by extending the layer primitive's shape — so the manifest is just more [DNA](dna.md) cascading to root:
 
 ```ts
 DecorationRecord<FeatureManifest> {
@@ -174,7 +176,7 @@ DecorationRecord<FeatureManifest> {
 
 **Publisher-write-once, consumer-read-only.** Consumer choice never enters this resource — it lives only in the settings sigbag (§1.3). This is the structural guarantee that the branch lineage sig is byte-identical before and after a full recipe apply.
 
-> Storage note: confirm records write to `__resources__` (via `putResource`). `decoration-manifest.ts` has a stale interface comment (line ~70) referencing `__optimization__`; the file header and `writeDecoration` use `__resources__`. Fix the stale comment before building on it.
+> Storage note: feature manifests are **SHAREABLE** decoration content, so `writeDecoration` writes them to `__resources__` via `putResource` (`decoration-manifest.ts:84-119`) — they ride the merkle tree and replicate through the existing resource pipeline. `__optimization__` is a **separate decoration substrate** for PERSONAL decorations (Q&A, comms) that must NOT leak across peers; it has its own bridge ops (`optimization-add`/`optimization-list`) and is never referenced from the `decorations` slot (`decoration-manifest.ts:16-32`). Do not conflate the two: public decoration content → `__resources__`; personal decoration content → `__optimization__`. (`decoration-manifest.ts` also carries a stale interface comment at line ~68 mis-stating the record is "stored in `__optimization__`" — fix that before building on it.)
 
 ### 4.3 `CapResolver` — observe, don't mutate
 

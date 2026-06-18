@@ -9,7 +9,7 @@ hypercomb is built on presence, consent, and recognition. there are no feeds or 
 - **presence = permission** -- only bees here now receive steps. in the architecture, drones must be in the `Active` state to participate; disposed drones lose all effect subscriptions immediately (see [core-processor-architecture.md](core-processor-architecture.md)).
 - **consent to link** -- you choose who can follow you. linking is always mutual and revocable.
 - **recognition over accounts** -- unique avatars, not login reputations. identity is content-addressed via `SignatureService` (sha-256 hashes), not usernames or credentials.
-- **no storage by default** -- nothing is saved unless someone explicitly publishes dna. the effect bus is stateless (last-value replay, stores nothing permanently). the nostr mesh relays encrypted frames but keeps nothing locally beyond a ttl cache.
+- **no network by default** -- nothing crosses the network unless you explicitly publish. locally, everything you author is content-addressed and durably versioned in opfs (the `__history__` marker chains, the `__layers__`/`__resources__` pools, and your `hypercomb.io` tree). the effect bus is stateless (last-value replay, stores nothing permanently). the nostr mesh relays plaintext json frames (the `x`-tag sig is visible; aead encryption is future work) and keeps nothing locally beyond a ttl cache.
 - **local first** -- safety actions are local to you; communities add rules by policy. opfs (origin private file system) keeps your meadow log on your device and never crosses the network without your explicit action.
 
 ---
@@ -18,7 +18,7 @@ hypercomb is built on presence, consent, and recognition. there are no feeds or 
 
 - **driver** -- emits 1-byte steps; chooses who can link. the driver is a drone in the `Active` state whose `heartbeat()` produces navigation effects on the effect bus.
 - **linked bees** -- co-navigate by consent; can unlink any time. unlinking calls `markDisposed()` on the linking drone, which transitions it to `Disposed` and triggers effect bus auto-cleanup -- no ghost signals persist.
-- **witnesses (optional)** -- additional bees who co-sign a published path. witness attestation is specified in the dna capsule format (see [dna.md](./dna.md)).
+- **witnesses (optional)** -- additional bees who co-sign a published path. witness attestation is specified in the trail capsule format (see [trail-capsule.md](./trail-capsule.md)).
 
 ---
 
@@ -49,19 +49,19 @@ all safety actions are local to you. they do not require consensus, moderation q
 
 ---
 
-## publishing memory (optional dna)
+## publishing a route (optional trail capsule)
 
-by default, hypercomb stores nothing. dna is the exception: a tiny path capsule that makes a route publicly reproducible.
+by default, hypercomb keeps everything local -- your authored content is content-addressed and versioned in opfs, but nothing crosses the network. a trail capsule (bee synonym: waggle capsule) is the opt-in exception: a tiny path capsule that makes a route publicly reproducible.
 
-- **path capsules** with pluggable policy:
+- **trail capsules** with pluggable policy:
   - `0` -- creator opt-in (default)
   - `1` -- creator + cohort (n-of-m co-signatures from linked participants)
   - `2` -- community threshold (community verifiers co-sign per local rules)
-- capsules are content-addressed via sha-256, the same algorithm used by `SignatureService` and `PayloadCanonical` throughout hypercomb.
-- distribution uses the nostr mesh (`NostrMeshDrone`), which routes on the capsule's commitment hash as the subscription key. events are ttl-backed and auto-expire.
+- capsules are content-addressed via sha-256. `SignatureService.sign` is the one hash primitive hypercomb signs everything with; `PayloadCanonical` is a bee-payload-only helper (`structuredClone` + `JSON.stringify`, no key sorting) and is **not** the module-artifact path.
+- distribution over the nostr mesh routing on the capsule's commitment hash as the subscription key is **aspirational -- not built as of writing**. the current broker mesh carries layer **sigs only**; bytes are fetched on demand over http-direct from operator hosts. mesh events are ttl-backed and auto-expire.
 - publication is a gift, not an obligation. opfs logs remain local unless you explicitly publish.
 
-for the full capsule format and verification flow, see [dna.md](./dna.md).
+for the full capsule format and verification flow, see [trail-capsule.md](./trail-capsule.md). for the content-addressed artifacts that compose the hive (layers, deps, bees, resources), see [dna.md](./dna.md).
 
 ---
 
@@ -83,8 +83,8 @@ communities can tighten governance without changing the protocol. these are loca
 
 - **invite-only join** -- restrict who can enter the hive session.
 - **stricter tempo guard** -- lower jitter thresholds for bot deterrence.
-- **attestation thresholds** -- require more co-signatures before dna publication (policy `1` or `2`).
-- **encryption-on by default** -- reserved in the dna capsule flags; communities can mandate encrypted instruction bytes for all published paths.
+- **attestation thresholds** -- require more co-signatures before trail capsule publication (policy `1` or `2`).
+- **encryption-on by default** -- reserved in the trail capsule flags; communities could mandate encrypted instruction bytes for all published paths. (the mesh relays plaintext json today; aead encryption is future work.)
 
 ---
 
@@ -97,8 +97,8 @@ there are no moderation logs, no report queues, no admin panels. every response 
 | unwanted follower | unlink / ignore | `markDisposed()` severs the link; ignore list uses content-addressed signatures |
 | disruptive driver | unlink; session dissolves socially | disposing the driver drone removes all its effect subscriptions; linked bees naturally disperse |
 | bot-like behavior | micro-gesture check | heartbeat cadence and tempo guard filter unreasonable timing without profiling |
-| replay attempt | nonce rotation defeats it | content-addressed session signatures rotate with each heartbeat; stale signatures resolve to nothing on the mesh |
-| harmful route | leave, do not co-sign dna | refusing attestation means the capsule cannot meet its publication policy; your local opfs is untouched |
+| replay attempt | mesh dedup + replaceable-slot guards defeat it | the mesh dedupes repeated event ids via a ring buffer (cap 2048), prefers newer events by `created_at` per replaceable slot, and prunes stale items by ttl -- replayed frames are dropped or expire |
+| harmful route | leave, do not co-sign the trail capsule | refusing attestation means the capsule cannot meet its publication policy; your local opfs is untouched |
 
 ---
 

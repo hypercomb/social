@@ -32,7 +32,7 @@ in hypercomb, the swarm is what you see when many participants share a rendezvou
 
 - **avatars in motion** — each participant is a bee flying across your grid. their icon is their avatar. they move in real time as they navigate. you see them arrive, explore, hover over cells, and leave. they are not profiles. they are presences.
 
-- **tiles carried in** — when a bee is near you (sharing the same rendezvous point), their tiles appear on your grid. not because they sent them. because proximity made them visible. their content lands on your comb the way pollen lands on a flower — carried by the bee, deposited by proximity, without negotiation.
+- **tiles carried in** — when a bee is near you (sharing the same rendezvous point), the *signatures* of their tiles appear on your grid. not because they sent them. because proximity made them visible. what travels on the breath of the mesh is featherweight: the publisher's layer event carries each child's name and its `imageSig`, not the picture itself. the image bytes are pulled from the owner's host on render (`Store.getResource` → memory → OPFS → host over HTTP at `/<sig>`, sha256-verified), or arrive as a small relay preview (a kind-30201 companion event, capped at 256 KB). their content lands on your comb the way pollen lands on a flower — deposited by proximity, without negotiation — but the heavy part of the pollen is fetched, not flown in by the avatar.
 
 - **always different** — the swarm you see at noon is not the swarm at midnight. the bees change, the tiles change, the scents change. two people at the same rendezvous will see different swarm compositions if they arrive at different moments. there is no canonical state of the swarm. there is only who is here now.
 
@@ -45,14 +45,18 @@ the swarm is built from primitives that already exist.
 **NostrMeshDrone** provides the transport. each participant's client publishes lightweight presence events to nostr relays, tagged with the signature derived from their lineage path. the signature is the rendezvous key:
 
 ```
-lineage path → SignatureService.sign() → 64-char hex → nostr tag ['x', signature]
+path segments → SignatureService.sign() → 64-char hex → nostr tag ['x', signature]
 ```
+
+note that the domain is discarded — a lineage signature names a *position* (the path segments), not content; the root signs as `sign([])` = `e3b0c442…`. that's why two participants on different domains who walk to the same segments rendezvous in the same swarm.
 
 every client subscribed to the same signature receives every other client's presence events. this is the pheromone cloud — broadcast, not addressed. the relays are stateless forwarders, not authorities. they store events temporarily (ttl-based), and old presences expire and vanish.
 
+what crosses the mesh is featherweight by design: presence, and the *signatures* of tiles (the layer event lists each child's name and `imageSig`). the heavy bytes are not in the mesh. they heal in on render — resources stream from the owner's host (memory → OPFS → host over HTTP), sha256-verified and written through, while layers, dependencies, and bees stay OPFS-only and heal only via adopt / install / sync. the one exception is the swarm-preview path, which relays image bytes inline as a small (≤256 KB) kind-30201 companion event so a peer can glimpse a tile before adopting it. (the mesh today is plaintext json — the `x`-tag signature is visible to the relay; encrypted presence is future work.)
+
 **the EffectBus** propagates swarm state locally. when the mesh drone receives presence events from the relay, it emits `'swarm:presence-updated'` carrying the current set of nearby bees. rendering drones subscribe and update the visual — avatars appear, move, and fade. tile drones subscribe and merge visiting content into the grid.
 
-**Lineage** determines which swarm you're in. your `activeDomain` and `explorerSegments` hash to a signature. change your path, change your swarm. navigate deeper, enter a sub-swarm. navigate up, rejoin the broader swarm. the swarm is not a room you enter. it is a consequence of where you are.
+**Lineage** determines which swarm you're in. your `explorerSegments` hash to a signature (the domain is dropped, so the swarm is keyed by position, not by host). change your path, change your swarm. navigate deeper, enter a sub-swarm. navigate up, rejoin the broader swarm. the swarm is not a room you enter. it is a consequence of where you are.
 
 ---
 
@@ -72,7 +76,7 @@ this is identity without accounts. recognition without databases. reputation wit
 
 when bees visit flowers, they don't just take nectar. they deposit pollen from the last flower they visited. pollination is incidental — a side effect of proximity, not an intentional act.
 
-tiles work the same way. when a bee is in your swarm, their active tiles become visible on your grid. they did not share them with you. they did not choose you as a recipient. their tiles appeared because the bee is near, and nearness makes things visible.
+tiles work the same way. when a bee is in your swarm, their active tiles become visible on your grid — as signatures first, with the image bytes streaming in behind them from the owner's host (or a small relay preview). they did not share them with you. they did not choose you as a recipient. their tiles appeared because the bee is near, and nearness makes the references visible; the bytes follow on render.
 
 this means the content of your hive is never static. when the swarm is thick — many bees at the rendezvous — your grid is rich with other people's tiles, other perspectives, other paths. when the swarm thins, your grid returns to your own content. the richness of the experience is a direct function of how many bees showed up.
 
@@ -96,7 +100,7 @@ a real swarm is temporary by nature. once the colony finds a new home, the swarm
 
 hypercomb swarms are the same. there is no membership list. there is no "swarm history." when you leave the rendezvous point — navigate away, close the tab, dispose your drones — your presence event expires on the relay and your avatar fades from everyone else's grid. the swarm you were part of continues without you, or dissolves if enough bees leave.
 
-communities in hypercomb are not containers you join. they are **patterns that form when enough bees navigate to the same place.** the pattern is real while it lasts. when it dissipates, nothing is lost, because nothing was stored. the meaning lived in the co-presence, not in a record of it.
+communities in hypercomb are not containers you join. they are **patterns that form when enough bees navigate to the same place.** the pattern is real while it lasts. when it dissipates, nothing is lost, because nothing about the *swarm* was stored — the meaning lived in the co-presence, not in a record of it. (this is about the swarm formation only. locally, everything you author is content-addressed and versioned in OPFS by default — your tiles, your history, your resources — and nothing crosses the network unless you publish. what evaporates is the gathering, not your hive.)
 
 ---
 

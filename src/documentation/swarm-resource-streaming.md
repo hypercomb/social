@@ -1,5 +1,10 @@
 # Swarm Resource Streaming
 
+> **status: design — not built (as of 2026-06-18).** The kind-30201
+> relay streaming path described here is the live swarm-preview transport;
+> the primary resource transport is HTTP-direct to operator domains, and
+> several fixes/gaps below remain unimplemented.
+
 ## What "share" means in the swarm
 
 A share is a **bundle**: the layer payload plus every resource the
@@ -16,12 +21,24 @@ Sharing makes the bytes **available**. It does not make them **run**:
   share references their signatures — drone install is a separate
   decision the host makes, not a side-effect of receiving a share.
 
-## Constraint
+## Constraint (live-preview path only)
 
-The owner exposes only a Nostr relay URL + (room, secret) credentials.
-There is **no** file server, no CDN, no out-of-band HTTP for image bytes.
-Every byte — both layer state and image bytes — rides the same
-WebSocket connection to the relay as Nostr events.
+This document describes the **live swarm-preview** transport, where the
+owner exposes a Nostr relay URL + (room, secret) credentials and image
+bytes ride the same WebSocket connection to the relay as Nostr events
+(kind 30201, base64, ≤256 KB).
+
+It is **not** the primary resource transport. The primary resource path
+is **HTTP-direct to operator domains** at `GET /<sig>`
+(`ContentBroker.#fetchOverHttp` + `Store` host fallback + `HostSync` PUT),
+sha256-verified and write-through; Cloudflare edge caching of immutable
+`/<sig>` is embraced as a scale primitive. The relay kind-30201 path
+described here remains for live preview, but resources, dependencies, and
+bees are **forbidden on the broker mesh path** — the broker mesh carries
+layer **sigs** only. On render, `Store.getResource` self-heals resources
+(memory → OPFS → host, sha256-verified, 60 s negative cache); layers,
+dependencies, and bees are OPFS-only on the render path and heal only via
+adopt / install / sync.
 
 ## Event kinds
 
@@ -41,11 +58,15 @@ defence against malicious peers publishing mismatched bytes.
 
 ## How an image gets from the publisher to the receiver
 
-A publisher's substrate-applied tile holds image refs at:
+A publisher's substrate-applied tile holds its image ref **canonically**
+in the layer's `properties` (decoration) slot — `properties[0]` is the
+propsSig. `localStorage['hc:tile-props-index'][<locationSig>] = propsSig`
+is a **derived render-side index**, not the source of truth:
+show-cell's render path and the substrate's blank-detection both read
+only this index, so adopt/fold must seed it FROM the canonical
+`properties` slot (see "Receiver side, on adopt" below).
 
-    localStorage['hc:tile-props-index'][name] = propsSig
-
-…where propsSig points to OPFS content bucket at `<propsSig>` containing:
+The propsSig points to an OPFS resource at `<propsSig>` containing:
 
     { small: { image: <smallImgSig> },
       flat:  { small: { image: <flatImgSig> } },
@@ -58,10 +79,12 @@ holding the actual ~150 KB image bytes.
 
 1. Build the layer payload — each child carries `index`, `propsSig`
    (sha256 of the child's `0000` bytes), and `imageSig`. The
-   imageSig has a three-tier source:
-   - existing substrate-shaped propsBlob from
-     `localStorage['hc:tile-props-index'][name]`, if it actually
-     contains `small.image` / `flat.small.image` refs; OR
+   imageSig has a three-tier source (canonical first, derived index
+   as a fallback lookup):
+   - the substrate-shaped propsBlob referenced by the child's
+     canonical `properties` slot (mirrored at
+     `localStorage['hc:tile-props-index'][<locationSig>]`), if it
+     actually contains `small.image` / `flat.small.image` refs; OR
    - a freshly-synthesized `{small: {image: pickedSig}, substrate: true}`
      blob built from `substrate.pickImageForLabel(name)`, written
      to OPFS via `putResource`, sig forwarded. This catches the
@@ -102,13 +125,31 @@ closes the window.
 
 ### Receiver side, on adopt
 
-1. Creates the local tile dir.
-2. Reads `Store.getResource(peer.propsSig)` — bytes already in OPFS
-   from step 3 above — and writes them into the new local `0000`.
-3. Writes `localStorage['hc:tile-props-index'][name] = peer.imageSig`.
-4. Emits `substrate:applied` → show-cell repaints.
+Adopt does **not** snapshot the peer tile into a separate store. It folds
+the peer's branch into the hive's own layer tree via the **same
+`update({ children })` cascade** that create / paste / bulk-import use
+(`swarm-adopt.drone.ts` → `committer.importTree` + parent
+`update({ children })`), on explicit user click only.
+
+1. Localize the peer's branch via `ContentBroker` (bytes already in OPFS
+   from the streaming steps above, or pulled HTTP-direct), then re-home
+   the subtree with `flattenLayerTree` so each adopted node carries the
+   publisher's `properties` sig verbatim.
+2. Seed the participant-local props index **FROM the canonical
+   `properties` slot** of each folded node — the mirror of the
+   substrate's `reconcileCanonicalImageStamps` (index → canonical), run
+   here in the OTHER direction (canonical → index). Keyed by **location
+   sig** (`cellLocationSig(parentSegs, name)`), the exact key show-cell +
+   substrate resolve with. **Fill-if-empty** for fold; `sync` overwrites
+   so the publisher's refreshed image wins. Without this seed the adopted
+   tile looks blank to both render and blank-detection, and the substrate
+   would clobber it with a random pool image.
+3. Fold the name into the parent's `children[]` via
+   `committer.update(at, { ...parent, children: [...existing, name] })` —
+   the hive sigbag is the sole membership truth; no snapshot bridge.
+4. Emits `substrate:applied` / `cell:added` → show-cell repaints.
 5. Renderer reads index → substrate propsBlob → `small.image` →
-   loads 150 KB blob from OPFS → draws.
+   loads ~150 KB blob from OPFS → draws.
 
 ## Gaps (real reasons "still no images")
 
@@ -263,6 +304,19 @@ When the user changes room or secret, `#teardownAndResync`:
 - Full-resolution images larger than 256 KB. Substrate's downsampled
   variants fit; an unprocessed multi-MB photo would need chunking
   across multiple events or a different transport entirely.
-- Encryption beyond the room/secret gate. Anyone in the zone sees
-  every event. A future per-recipient encryption layer (NIP-44) would
-  fit on top of the same kind/d-tag scheme.
+- Encryption beyond the room/secret gate. The mesh is currently
+  **plaintext JSON** — the x-tag composed sig is visible on the wire and
+  anyone in the zone sees every event. AEAD / per-recipient encryption
+  (NIP-44) is future work that would fit on top of the same kind/d-tag
+  scheme; until then the build offers no confidentiality beyond the
+  room/secret gate.
+
+## Related
+
+The resources streamed here are **Distributed Network Artifacts** — the
+content-addressed, merkle-versioned bytes (layers, dependencies, bees,
+resources, content) the signature names. They are immutable and safe to
+keep once verified; see [dna.md](./dna.md). The route/navigation stream
+that was once also called "DNA" is now the
+[trail capsule](./trail-capsule.md) (synonym: waggle capsule) — a
+distinct primitive, not a resource.

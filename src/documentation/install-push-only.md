@@ -1,15 +1,24 @@
 # Install Push-Only Model
 
+> **status: design — not built (as of 2026-06-18).** A forward-looking spec for a branch-labelled push protocol; the named on-disk shapes and IoC services below (`head.json`, `__head__/`, `PushTarget`, `readHeadJson`/`writeHeadJson`) do NOT exist in the current build. What *is* built is the push-only load posture (boot reads OPFS only) plus a sentinel-mediated install/sync path — see [§1.1](#11-what-is-actually-built-today) for the real mechanism. Named Distributed Network Artifacts (layers, deps, bees, resources, content) are content-addressed and merkle-versioned today; this doc layers branch *labels* on top of those immutable signatures. See [dna.md](./dna.md) for the artifacts and [trail-capsule.md](./trail-capsule.md) for the route stream.
+
 ## 1. Motivation
 
-Today, every Hypercomb load calls `LayerInstaller.install()` from the runtime mediator, which fetches `manifest.json` on cache miss and iterates every layer/bee/dependency to verify OPFS. Individually cheap, collectively it lives in the startup path and — more importantly — it's the window in which a stale manifest can overwrite uncommitted DCP patches.
-
-The push-only model moves update responsibility from the receiver to the publisher. Hypercomb reads whatever is already in OPFS; updates only land when DCP explicitly pushes them. This:
+The web shell **never auto-pulls essentials**. Boot reads whatever is already in OPFS and renders; it does not fetch `/content/manifest.json` on every load or iterate every layer/bee/dependency to verify the pool. The push-only model moves update responsibility from the receiver to the publisher: updates only land when DCP explicitly pushes them, or when the user clicks "Upgrade Hypercomb". This:
 
 - Removes a network round-trip from every page load.
 - Makes uncommitted working-copy state inviolate across reloads.
 - Gives the user control over *when* updates are absorbed.
 - Stays cross-domain agnostic — anyone can set up their own push transport.
+
+### 1.1 What is actually built today
+
+The verbs, on-disk shapes and IoC services in the rest of this doc (§3–§8) are a *design*. The current build implements the push-only **posture** through different machinery:
+
+- **Load is inert by skip, not by a `head.json` read.** `ensureInstall` (`hypercomb-web/src/setup/ensure-install.ts`) boots from the cached install in OPFS and emits `install-needed` if there is none. The O(1) update check is a root-sig compare: the sentinel reports the hive's `installedSig`, and DCP's `SentinelHandler` (`diamond-core-processor/src/app/sentinel/sentinel-handler.ts`) skips the whole install when `installedSig === rootSig`. There is no HTTP 304 round-trip.
+- **The push channel is the sentinel bridge, not a `PushTarget`.** DCP and the hive communicate over a `MessageChannel` established in `hypercomb-web/src/setup/sentinel-bridge.ts`; `SentinelBridge.sync(currentSyncSig, have)` sends the set of sigs already present (`have[]`) so DCP streams **only the missing files** — sync is an incremental delta, not a full re-push.
+- **Byte transport to operator hosts is `HostSyncService`** (`hypercomb-essentials/src/diamondcoreprocessor.com/sharing/host-sync.service.ts`): a signed HTTP `PUT` to `https://<host>/<sig>`, confirmed by a read-back `GET` (a bare `PUT 200` is not treated as proof).
+- **The runtime-mediator snippet in §7 is outdated.** `runtime-mediator.ts` still calls `installer.install(parsed)` (gated on an empty layer pool), but there is no `readHeadJson`/`writeHeadJson` and no `__head__/` directory. Treat §5–§7's named artifacts as proposed, not present.
 
 ## 2. Core Principles
 
@@ -33,7 +42,7 @@ Until a push lands, the working copy has no identity. There is no "current branc
 
 The commit event. Performs:
 
-1. **Pull** — read Hypercomb's current `head.json` and the patch log at `__patches__/{domain}/`.
+1. **Pull** — read Hypercomb's current head pointer and the patch log at `__patches__/{domain}/`. (Proposed: `head.json`. Today there is no `head.json`; the hive's current tip is the `rootSig` reported over the sentinel bridge, and `PatchStore` already maintains the `__patches__` log in DCP.)
 2. **Resolve** — compute the set difference between Hypercomb's patches and DCP's locally-known patches. Classify conflicts by comparing touched file signatures.
 3. **Linearize** — append DCP's new patches after Hypercomb's new ones, producing a linear extension.
 4. **Append & advance** — write the new patch records, new layer signatures, and advance the named label pointer.
@@ -52,7 +61,7 @@ Pulls `label`'s HEAD into DCP as the new working-copy base. Any uncommitted patc
 
 ## 4. Branch Model
 
-Branches are labels on signature-addressed HEADs. No central registry — a branch exists because a push landed. Consequences:
+Branches are labels on signature-addressed HEADs. The HEAD signature is immutable and the history is append-only — a *label* is mutable metadata that points at an immutable artifact, the same way a branch name points at a commit. The layer tree it names is a Distributed Network Artifact (see [dna.md](./dna.md)): immutable, content-addressed, composing upward so the root sig changes only when a child does. No central registry — a branch exists because a push landed. Consequences:
 
 - **No explicit "create branch" primitive.** Push with a new label creates it.
 - **No "current branch" before first push.** Working copy is branch-less until named.
@@ -68,6 +77,8 @@ The exact authorship scheme (Nostr pubkey, local nickname, etc.) is deployment-d
 ## 5. On-Disk Representation
 
 ### 5.1 `head.json`
+
+> **Not built.** Neither `head.json` nor the `__head__/` directory exists in the current build, and there are no `readHeadJson`/`writeHeadJson` helpers. The role this section proposes — naming a branch tip on top of an immutable layer signature — is filled today by the `rootSig`/`installedSig` compare over the sentinel bridge (see §1.1). The shape below is a design target.
 
 Written to the domain's OPFS root:
 
@@ -96,6 +107,8 @@ Hypercomb's load path reads `head.json`, resolves `labels[activeLabel]` to a lay
 Unchanged from today — `__patches__/{domain}/NNNNNNNN` files written by `PatchStore.record()`. Already content-addressable via patch record contents. Each push appends to this log; the log is the authoritative history.
 
 ## 6. Transport Interface
+
+> **Not built.** No `@hypercomb.social/PushTarget` is registered in IoC, and none of the reference implementations below (`DirectOpfsPushTarget`, `PostMessagePushTarget`, `RemotePushTarget`, `NostrPushTarget`) exist. The transport that ships today is the sentinel bridge (`MessageChannel`) for DCP↔hive sync plus `HostSyncService`'s signed HTTP `PUT /<sig>` for host backup (see §1.1). The interface below is the proposed generalization of those.
 
 The push target is resolved through IoC:
 
@@ -132,14 +145,18 @@ Community forks pick their transport by registering a different `@hypercomb.soci
 
 ## 7. Load-Side Change
 
-The minimal concrete change for this doc's load-side portion is in `runtime-mediator.ts`:
+> **Partially shipped, snippet outdated.** The push-only *load posture* already exists: `runtime-mediator.ts` gates `installer.install(parsed)` behind an empty-layer-pool check (`shouldBootstrap()`), and `ensureInstall` boots from cache with no per-load manifest fetch. But `readHeadJson`/`writeHeadJson` do not exist — the "After" block below is a design sketch, not the current code. The genesis-vs-skip decision today is "empty pool → install, else inert", not a `head.json` read.
 
-**Before:**
+The proposed load-side shape adds a head pointer to the genesis path. Sketch:
+
+**Before (and roughly what ships today):**
 ```typescript
-await installer.install(parsed)
+if (await shouldBootstrap()) {
+  await installer.install(parsed)
+}
 ```
 
-**After:**
+**Proposed (head pointer — not built):**
 ```typescript
 const head = await readHeadJson(parsed.domain)
 if (!head) {
@@ -150,7 +167,7 @@ if (!head) {
 // otherwise: do nothing. Load proceeds against current OPFS state.
 ```
 
-No manifest fetch, no per-load layer iteration, no patch clobbering.
+Either way: no manifest fetch on every boot, no per-load layer iteration, no patch clobbering.
 
 ## 8. DCP-Side Changes
 

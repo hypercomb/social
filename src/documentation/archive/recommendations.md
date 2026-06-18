@@ -1,5 +1,7 @@
 # 10 recommendations
 
+> **archive note:** in this document "DNA" refers to the *retired path-capsule sense* — a 1-byte navigation/route stream, now renamed the **trail capsule** (bee synonym: "waggle capsule"). it is **not** the canonical DNA = "Distributed Network Artifacts" (the content-addressed, merkle-versioned layers/deps/bees/resources/content that compose the hive). see [`trail-capsule.md`](../trail-capsule.md) for the renamed route format and [`dna.md`](../dna.md) for the canonical artifacts.
+
 these are the ten changes that would most reinforce hypercomb's existing architecture without adding complexity. each one makes something that already works, work better. nothing here is new scope — everything strengthens what is already built.
 
 ---
@@ -24,7 +26,7 @@ these are the ten changes that would most reinforce hypercomb's existing archite
 
 **how**: `TrailDrone` listens for `'trail:step'` effects carrying a single byte. it unpacks the byte, resolves the neighbor via `AxialService.getAdjacentCoordinates()`, emits `'trail:moved'` with the new coordinate and pheromone, and handles mode bits (end = dispose trail, branch = emit fork signal). a companion `TrailEncoderDrone` packs user input into bytes.
 
-**stability gain**: the byte protocol becomes testable end-to-end. path recording for DNA becomes trivial — just capture the byte stream. replay becomes deterministic.
+**stability gain**: the byte protocol becomes testable end-to-end. path recording for the trail capsule becomes trivial — just capture the byte stream. replay becomes deterministic.
 
 ---
 
@@ -111,15 +113,17 @@ with companion payload type exports. drones import these constants instead of us
 
 ---
 
-## 9. implement path recording for DNA
+## 9. implement path recording for the trail capsule
 
-**what**: create a `PathRecorderDrone` that captures navigation byte streams and produces sealed path capsules (the DNA format from the bee story).
+> note: this is an **unbuilt** design. neither `PathRecorderDrone` nor the `'trail:capsule-ready'` effect exists in the codebase as of writing.
 
-**why**: DNA is the only persistence mechanism that fulfills hypercomb's aspiration of voluntary, minimal, verifiable memory. the format is designed. the SignatureService exists. the byte protocol is defined. the only missing piece is a drone that records and seals.
+**what**: create a `PathRecorderDrone` that captures navigation byte streams and produces sealed trail capsules (the path-capsule format from the bee story, formerly called "DNA").
 
-**how**: `PathRecorderDrone` listens for `'trail:moved'` effects. it accumulates bytes in a buffer. on `'trail:end'`, it computes the commitment via `SignatureService.sign()`, assembles the capsule (header + bytes + seal), and emits `'dna:capsule-ready'` with the result. publishing to nostr mesh is a separate, explicit step.
+**why**: the trail capsule is the only *voluntarily-published replay* mechanism in this design — durable local memory is already covered by the content-addressed layer/marker/resource pools, so this is purely about sealing a navigation path for optional publication. it fulfills hypercomb's aspiration of voluntary, minimal, verifiable replay. the format is designed. the SignatureService exists. the byte protocol is defined. the only missing piece is a drone that records and seals.
 
-**stability gain**: the full vision becomes executable: navigate → record → seal → optionally publish. the path from live presence to durable memory is a single, verifiable pipeline. and because recording is a drone, it follows the same lifecycle as everything else — opt-in, disposable, auto-cleaned.
+**how**: `PathRecorderDrone` listens for `'trail:moved'` effects. it accumulates bytes in a buffer. on `'trail:end'`, it computes the commitment via `SignatureService.sign()`, assembles the capsule (header + bytes + seal), and emits `'trail:capsule-ready'` with the result. publishing to nostr mesh is a separate, explicit step.
+
+**stability gain**: the full vision becomes executable: navigate → record → seal → optionally publish. the path from live presence to a publishable, verifiable replay is a single pipeline. and because recording is a drone, it follows the same lifecycle as everything else — opt-in, disposable, auto-cleaned.
 
 ---
 
@@ -160,7 +164,7 @@ if these were done in sequence, the order that produces the most stability per e
 6. **implement byte protocol drone** (#2) — navigation language
 7. **enforce write barrier** (#6) — architectural principle
 8. **publish @hypercomb/shared** (#7) — tooling visibility
-9. **implement path recording** (#9) — DNA pipeline
+9. **implement path recording** (#9) — trail capsule pipeline
 10. **scope ioc to phases** (#8) — temporal coupling visibility
 
 ---

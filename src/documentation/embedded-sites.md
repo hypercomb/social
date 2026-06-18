@@ -2,64 +2,82 @@
 
 A Hypercomb tile can carry an entire website. Navigate into it — the hex
 grid hides, the site renders full-viewport, child cells become subpages.
-One decoration, one bundle, one signature. Authoring happens through a
-Claude Code skill that reads the tile hierarchy you hand it.
+Each cell carries **its own page**; the lineage IS the route. Authoring
+happens through a Claude Code skill that reads the tile hierarchy you
+hand it.
+
+> **note:** the old single-bundle `websiteSig` model described below in
+> "why per-cell instead of single-bundle" was retired. `website.queen.ts`
+> now *errors* on `/website <sig>` / `/website clear`, and the renderer
+> reads each cell's page directly. See ground-truth sections below.
 
 ## Runtime contract (tiny)
 
-A cell has **one** decoration:
+There is **no** site-wide bundle and **no** `websiteSig` decoration to
+stamp. Instead, each cell carries its own page in one of two slots,
+queried in order by the renderer (`site-view.drone.ts`):
 
-```
-websiteSig: <64-hex>
-```
+1. The cell's `decorations` slot — a `visual:website:page` decoration
+   (a signature-addressed JSON resource) whose `payload.htmlSig` points
+   at the page's HTML resource. This is the visual-bee migration target.
+2. The legacy `context` slot — raw HTML resource sigs. Existing pages
+   live here; the renderer falls back to it when no decoration is found.
 
-That signature points to a **bundle resource** in OPFS. The bundle's
-bytes are a concatenation of 64-char signatures, no delimiters:
+The HTML resource sig resolves to a resource in `__resources__/<sig>`.
+Each cell is responsible for its own surface — there is no cascade, no
+manifest, no path-table. Child cells become subpages because lineage
+navigation moves between cells, and each cell's page replaces the
+previous one. A link to `./team` navigates the lineage one level down,
+and that cell's page mounts.
 
-```
-<manifestSig><assetSig1><assetSig2>…<assetSigN>
-```
+Everything you author here is content-addressed and versioned locally in
+OPFS by default — the HTML resource, the decoration JSON, and the layer
+that references it. Nothing crosses the network unless you publish.
 
-The first 64 chars always resolve to a JSON manifest:
-
-```json
-{
-  "version": 1,
-  "title":   "My Site",
-  "pages":   { "": "<sig>", "home": "<sig>", "about/team": "<sig>" },
-  "assets":  { "style.css": "<sig>", "hero.png": "<sig>" },
-  "entry":   "<sig>"
-}
-```
-
-Nothing more. The `websiteSig` decoration cascades to descendants: a
-tile inherits the nearest ancestor's bundle. That's how child cells
-become subpages — the renderer computes `pagePath = lineagePath − siteRootPath`
-and looks up `manifest.pages[pagePath.join('/')]`.
+The `websiteSig` property name still exists in `tile-content-renderer.ts`
+(`CELL_WEBSITE_PROPERTY`) and is read only on the export side of
+`snapshot()`, so vestigial values in older user data surface in the
+export JSON for archaeology. `parseBundle` / `WebsiteManifest` in that
+file are dead — no live path calls them.
 
 ## Rendering (what the bee does)
 
+The surface is gated on `ViewMode`. In hexagons mode the bee tears down
+regardless of what's in the cell's slots; `/website` (anything that flips
+ViewMode to `'website'`) brings the page back.
+
 ```
-Lineage change
+Lineage change (or ViewMode → 'website')
   ↓
-walk root → current, find nearest ancestor with websiteSig
+ViewMode === 'website' ? continue : teardown
   ↓
-fetch bundle → parseBundle() → list of sigs
+sign(lineage segments) → location sig; currentLayerAt(locationSig) → head layer
   ↓
-fetch sigs[0] → manifest JSON
+scan layer.decorations for a visual:website:page decoration → payload.htmlSig
+  ↓ (none?)
+fall back to scanning layer.context for an HTML-shaped resource sig
   ↓
-manifest.pages[relativePath] ?? manifest.entry → page sig
+fetch page HTML from __resources__/<sig>
   ↓
-fetch page HTML
+rewrite resource:<sig> and bare-64-hex src/href refs → /@resource/<sig>
   ↓
-rewrite resource:<sig>, asset:<name>, bare-64-hex refs → /@resource/<sig>
-  ↓
-shadow DOM render, emit view:active { active: true }
+mount inline (styles/links/scripts lifted into the live document; body
+into a fixed host div), emit view:active { active: true }
 ```
 
-The resource service worker already serves `/@resource/<sig>` from
-the OPFS content bucket at `<sig>` with content-type inferred from URL tail
-or blob mime. That's the only network shape the runtime needs.
+There is no ancestor walk and no `manifest.pages[...]` lookup. The page
+resolves from the current cell's head layer; the decoration scan reads
+the website bee's declared `decorationKind` (`visual:website:page`) via
+`VisualBeeRegistry`. The renderer mounts the HTML inline in the live
+document (not a Shadow DOM): `<style>` and `<link rel="stylesheet">`
+nodes are lifted into `<head>` (tagged so unmount lifts exactly those),
+`<script>` nodes are recreated as live elements so they execute, and the
+`<body>` content is dropped into a fixed-position host div.
+
+The resource service worker (`hypercomb.worker.js`) serves
+`/@resource/<sig>` from OPFS `__resources__/<sig>`, with an HTTP host
+fallback (`GET /<sig>` against registered operator domains) on an OPFS
+miss. That's the only network shape the runtime needs.
 
 ## Authoring — design-time AI loop
 
@@ -67,101 +85,166 @@ You build the tile tree. Claude Code builds the site.
 
 ### In the Hypercomb app
 
+`/website` is two things in one command: a **render-surface toggle** (a
+single global `ViewMode` flag — not a per-cell or per-branch marker) and
+a set of **build/export** sub-commands.
+
 ```
-/website                 — snapshot the subtree hierarchy to clipboard
-/website <64-hex>        — stamp a bundleSig onto this cell
-/website clear           — remove the decoration
+/website                 — toggle hexagons ⇄ website view (global)
+/website on|web|site|view — force the website surface ON (global)
+/website off|hex|hexagons — force the website surface OFF (global)
+/website here|mark       — flag THIS cell for the next gen pass
+                           (drops a visual:website:pending decoration;
+                            re-run to unflag)
+/website list            — the gen queue: cells flagged with /website here
+/website export          — dump the current subtree as JSON (to clipboard)
+/website save|load       — portable .zip export/import of a branch
+/website upgrade|new|build — emit website:build for the codegen pipeline
 ```
 
-The export is a tiny JSON — paths + labels + any existing `websiteSig`.
-No HTML, no CSS. All the AI needs is the tree shape and whatever the
-previous bundle decoded to (if one exists).
+`/website here` does **not** flip the render surface — it drops a
+`visual:website:pending` build-intent decoration on the current cell for
+the next gen pass to turn into a page. It is signature-addressed and
+undoable, and re-running it clears the flag.
+
+The bundle-stamping forms (`/website <64-hex>`, `/website [sig][sig]…`,
+`/website clear`) were **removed**. `website.queen.ts` now returns an
+error for any of them — the messages in `parseArgs` surface the removal
+if older muscle memory invokes them.
+
+The `export` JSON is a tiny tree — paths + labels (plus any vestigial
+`websiteSig` value for archaeology). No HTML, no CSS. All the AI needs is
+the tree shape.
 
 ### In Claude Code
 
 Run the skill:
 
 ```
-/website
+/website-build
 ```
 
-The skill (`src/.claude/commands/website.md`, gitignored — local to each checkout)
-takes the hierarchy JSON you paste, asks about intent/style/scope, and:
+The skill (`.claude/skills/website-build/`, gitignored — local to each
+checkout) takes the hierarchy JSON you paste, asks about intent / style /
+scope, and:
 
-1. If `currentWebsiteSig` is present, unpacks the previous bundle (you
-   hand it the bundle string or the files on disk) so it can iterate
-   rather than regenerate.
-2. Writes page and asset files to a directory you pick.
-3. Computes SHA-256 signatures for each file.
-4. Emits a manifest JSON, signs it, builds the bundle string, signs
-   that → final `websiteSig`.
-5. Prints `websiteSig: <64-hex>`.
+1. Finds the cells flagged for generation (`visual:website:page` for
+   regen, `visual:website:pending` for first-time build) and asks which
+   to (re)generate.
+2. Gathers each cell's notes and attachments as context.
+3. Generates one standalone HTML page **per cell**.
+4. Writes each page back: `put-resource` stores the HTML and yields its
+   signature, then `decoration-add` (with `replaceKind`) attaches a
+   `visual:website:page` decoration carrying `payload.htmlSig` to the
+   cell's `decorations` slot.
 
-Paste that back into the app: `/website <64-hex>`. Stamp lands, bee
-picks up on the next Lineage tick, site renders.
+Pages are written one cell at a time over the Claude Bridge — there is no
+bundle to assemble and no `/website <sig>` stamp to paste back. The
+renderer picks up each cell's page on the next Lineage tick.
 
 ### Iteration
 
-Each `/website` invocation is non-destructive:
+Page generation is non-destructive — it leans on the same immutability
+and content-addressing every Hypercomb artifact does (see
+[dna.md](dna.md)):
 
-- Signed content never mutates. Old sigs stay valid.
-- Unchanged pages keep their signatures across runs — only edits
-  produce new sigs.
-- Remove a tile → its page sig disappears from the new sigbag but
-  the blob in the content bucket remains (GC is a future concern).
-- Add a tile → the skill generates a new default page for it.
+- Signed content never mutates. Old sigs stay valid forever.
+- Unchanged pages keep their signatures across runs — same HTML →
+  same `htmlSig` → no new write. Only edited pages produce new sigs.
+- Remove a tile → its cell (and its page decoration) leaves the layer,
+  but the HTML resource in `__resources__/<sig>` remains (GC is a
+  future concern).
+- Add a tile → flag it (`/website here`) and the skill generates a page
+  for it on the next pass.
 
 ## Asset reference forms
 
-All of these are rewritten to `/@resource/<sig>` at render time:
+Resource refs are rewritten to `/@resource/<sig>` at render time by
+`rewritePageRefs` (the render-side counterpart of the closure walk's
+`extractPageRefSigs`, so the renderer and the host-push/adopt closure
+resolve exactly the same set). There is **no** manifest-keyed
+`asset:<name>` form — per-cell pages reference resources directly by sig:
 
-| form in HTML / CSS          | resolves how                             |
-|-----------------------------|-------------------------------------------|
-| `asset:style.css`           | `manifest.assets["style.css"]`            |
-| `resource:9f2a…`            | literal 64-hex sig                        |
-| `<img src="9f2a…">`         | bare 64-hex on src/href/data-src          |
-| `<a href="about">`          | child subpage — routed through Lineage    |
-| `<a href="..">`             | parent subpage                            |
-| `<a href="/home">`          | absolute within the site                  |
-| `<a href="https://…">`      | pass through                              |
+| form in HTML / CSS                  | resolves how                            |
+|-------------------------------------|------------------------------------------|
+| `resource:9f2a…`                    | literal 64-hex sig (also in CSS `url(resource:<sig>)` and `resource:<sig>/chrome.css` links) |
+| `<img src="9f2a…">`                 | bare 64-hex on `src` / `href` / `data-src` |
+| `<a href="about">`                  | child subpage — lineage navigates down   |
+| `<a href="..">`                     | parent subpage (blocked at the site-entry floor) |
+| `<a href="/home">`                  | absolute lineage path                    |
+| `<a href="https://…">`, `#`, `mailto:`, `tel:`, `data:` | pass through |
 
-## Why single-bundle instead of cascading decorations
+## Why per-cell instead of single-bundle
 
-The first iteration of this feature used per-tile `pageSig`,
-`templateSig`, `stylesheetSigs`, `scriptSigs` that cascaded down the
-ancestor chain. Runtime was simple but authoring required stamping
-four decorations across many tiles.
+This feature went through two retired shapes before the current one:
 
-Collapsing to one decoration:
+1. **Cascading per-tile decorations** (`pageSig`, `templateSig`,
+   `stylesheetSigs`, `scriptSigs` walking the ancestor chain). Simple
+   runtime, but authoring meant stamping four decorations across many
+   tiles.
+2. **Single bundle** — one `websiteSig` decoration pointing at a
+   concatenated-sigs resource whose first chunk was a manifest with a
+   `pages[path]` table. One stamp, but a child path rendered a *blank*
+   page whenever the bundle hadn't enumerated that path — links followed
+   into nothing — and every edit reshuffled one monolithic artifact.
 
-- Runtime shrinks — no cascade walk, no template nesting, no chain
-  composition. One read, one parse, one HTML render.
-- Authoring moves entirely to design time, where an AI can produce
-  cohesive HTML/CSS in one pass rather than the user hand-composing
-  fragments across tiles.
-- Bundles are a single shippable artifact — a community member can
-  fork a site by sharing one sig.
+The current model gives each cell its **own** page and lets the lineage
+be the route. No manifest, no path table, no cascade walk: a link to
+`./team` navigates the lineage down and that cell's page mounts. This
+keeps the embedded-site feature riding the same content-addressed
+primitives as everything else (see [dna.md](dna.md)):
+
+- **Immutability + dedup.** Each page is a signed HTML resource. Same
+  bytes → same `htmlSig` → stored once, referenced anywhere. An edit
+  produces a new sig; the old one stays valid forever.
+- **Fork by sharing a sig.** A community member can adopt a page (or a
+  whole branch) by resolving its signatures against their own OPFS — the
+  decoration JSON and the HTML it points at travel as ordinary
+  content-addressed resources through the same fetch pipeline as any
+  other resource.
+- **Composition over the tree.** Pages attach to cells via the
+  `decorations` slot; the merkle layer tree already names the hierarchy,
+  so the site's structure IS the cell structure — nothing to keep in
+  sync.
 
 ## Files
 
 - [hypercomb-core/src/tile-content-renderer.ts](../hypercomb-core/src/tile-content-renderer.ts)
-  — `CELL_WEBSITE_PROPERTY`, `WebsiteManifest`, `parseBundle`, renderer primitives.
+  — `CELL_WEBSITE_PROPERTY` (read only on the export side), `RESOURCE_URL_PREFIX`,
+  `SITE_VIEW_IOC_KEY`. `WebsiteManifest` / `parseBundle` here are vestigial —
+  no live path calls them after the bundle removal.
 - [hypercomb-essentials/.../presentation/tiles/site-view.drone.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/site-view.drone.ts)
-  — ancestor walk, bundle load, manifest resolve, Shadow DOM render.
+  — the renderer: ViewMode gate, per-cell `decorations` → `visual:website:page`
+  → `payload.htmlSig` lookup (legacy `context`-slot fallback), inline mount,
+  lineage-as-routing navigation.
 - [hypercomb-essentials/.../commands/website.queen.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/commands/website.queen.ts)
-  — `/website` export / stamp / clear.
-- `src/.claude/commands/website.md`
-  — the Claude Code skill that authors bundles (gitignored — local to each checkout).
+  — `/website` global view toggle, `here`/`mark`, `list`, `export`,
+  `save`/`load`, `upgrade`/`new`/`build`. Bundle stamp/clear now error.
+- [hypercomb-essentials/.../sharing/decoration-closure.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/sharing/decoration-closure.ts)
+  — `rewritePageRefs` / `extractPageRefSigs`: the single source of truth for
+  the resource-ref forms the renderer rewrites and the closure walk carries.
+- `.claude/skills/website-build/`
+  — the Claude Code skill that authors per-cell pages (gitignored — local to
+  each checkout).
 - [hypercomb-web/public/hypercomb.worker.js](../hypercomb-web/public/hypercomb.worker.js)
-  — `/@resource/<sig>` service-worker route.
+  — `/@resource/<sig>` service-worker route, OPFS `__resources__/<sig>` +
+  HTTP host fallback.
+
+## Related
+
+- [dna.md](dna.md) — the content-addressed, merkle-versioned artifacts
+  (layers, resources, decorations) embedded sites are built from.
+- [trail-capsule.md](trail-capsule.md) — the route/navigation capsule
+  (formerly "DNA"), distinct from the artifacts above. Embedded-site
+  navigation drives the lineage, which a trail capsule can replay.
 
 ## Next steps
 
-- **Bulk resource import** helper so the skill's output files get into
-  OPFS without the user hand-calling `Store.putResource` for each one.
+- **Bulk resource import** helper so the skill's output pages get into
+  OPFS without hand-calling `Store.putResource` for each one.
 - **Context-signature panel** — read-only UI listing reachable sigs
-  (ancestor bundles, prior versions) for easy copy-paste.
-- **Bundle diff tool** so the skill can cheaply enumerate what changed
+  (a cell's current page, prior versions) for easy copy-paste.
+- **Page diff tool** so the skill can cheaply enumerate what changed
   between iterations.
-- **Iframe trust tier** for untrusted bundles (sandboxed; postMessage
+- **Iframe trust tier** for untrusted pages (sandboxed; postMessage
   bridge to Lineage navigation).

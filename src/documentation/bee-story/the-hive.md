@@ -18,9 +18,11 @@ the `AxialService` builds the hive outward from the center in concentric rings, 
 
 ## the space
 
-a real hive exists only while bees inhabit it. an abandoned hive is wax and memory — the life is gone. hypercomb works the same way. the hex grid is rendered live via pixi.js. when drones are active, the hive blooms on screen. when they dispose, the rendering clears. there is no saved state of "what the hive looked like." the hive is what is happening now.
+a real hive exists only while bees inhabit it. an abandoned hive is wax and memory — the life is gone. hypercomb works the same way. the hex grid is rendered live via pixi.js. when drones are active, the hive blooms on screen. when they dispose, the rendering clears. the *rendering* is what is happening now — it is not a stored snapshot you scroll through.
 
-this is the first principle: **presence is the hive.**
+but the wax remembers. locally, every change you author is content-addressed and immutably recorded as a merkle-versioned layer in your own OPFS — the `__history__` marker chains and the layer pools (`__layers__`, `__resources__`, `__bees__`, `__dependencies__`) persist durably by default. what clears on dispose is the live render, not the record. nothing crosses the network unless you publish.
+
+this is the first principle: **presence is the hive** — the *moment* is live, the *history* is kept.
 
 ---
 
@@ -34,9 +36,9 @@ hypercomb's hex cells work the same way. a cell is a coordinate, but what happen
 
 ## what the hive is not
 
-the hive is not a database. it is not a feed. it is not a profile page. there is no server storing what happened at coordinate (3, -1, -2) yesterday. if you want something to persist, you must choose to publish it — and that is a separate act, described in [the memory](./the-memory.md).
+the hive is not a database. it is not a feed. it is not a profile page. no *server* holds what happened at coordinate (3, -1, -2) yesterday — but your own machine does. local persistence is automatic: your hive's state is recorded by default as a merkle-versioned layer history in OPFS, addressable by signature. *publishing* is the separate act — putting those signed bytes where others can pull them — not a precondition for keeping your own work. that act, and how it differs from local persistence, is described in [the memory](./the-memory.md).
 
-the hive is a living room, not a filing cabinet.
+the hive is a living room, not a filing cabinet — but the room keeps its own diary.
 
 ---
 
