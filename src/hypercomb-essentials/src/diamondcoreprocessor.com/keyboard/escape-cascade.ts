@@ -7,6 +7,7 @@ let editorActive = false
 let clipboardActive = false
 let notesViewerActive = false
 let filesViewerActive = false
+let contactPinned = false
 
 EffectBus.on<{ active: boolean }>('editor:mode', ({ active }) => {
   editorActive = active
@@ -22,6 +23,10 @@ EffectBus.on<{ active: boolean }>('notes:viewer', ({ active }) => {
 
 EffectBus.on<{ active: boolean }>('files:viewer', ({ active }) => {
   filesViewerActive = active
+})
+
+EffectBus.on<{ active: boolean }>('contact:pinned', ({ active }) => {
+  contactPinned = active
 })
 
 // ── cascade handler ───────────────────────────────────────────────────
@@ -52,6 +57,13 @@ EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
   // must dismiss before Escape falls through to clearing the selection.
   if (filesViewerActive) {
     EffectBus.emit('files:viewer-close', undefined)
+    return
+  }
+
+  // Priority 2c: release a pinned contact panel — like the viewers above, it
+  // must dismiss before Escape falls through to clearing the selection.
+  if (contactPinned) {
+    EffectBus.emit('contact:hover-unpin', undefined)
     return
   }
 

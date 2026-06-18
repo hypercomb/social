@@ -1,0 +1,20 @@
+{
+  "humanity-centres": "fdab0f1f26586e839c0d1a48563d858fe4b54dc6c77a2f02e96bcb4cf840afcc",
+  "humanity-centres/programs/me": "b388cd3e6204bc9865ee3b3713d72c788177a1fccbebd78d49b73bdd111c0295",
+  "humanity-centres/programs/us": "ea983e50f0d7c2f1ffc61f707c59f0d7be314209eda3b43366b0fc47be9c1907",
+  "humanity-centres/programs/all-of-us": "2d133ef292d0e9b737b5a5d0bdc0363027347c6f06de635e2ed888ad2cd09bcf",
+  "humanity-centres/purse": "070992a8f5f3370b569b458254a9b0c56df00286d87cb372cdfdc21f1aceae14",
+  "humanity-centres/purse/money-from-hc-network": "8f497d11256d6a05897583106024b13e55a684d6f6b6d3439266760d536c42da",
+  "humanity-centres/purse/distribution-to-hcs": "6c81e6e88df13221578f4bc9df5b8b3a83a9f6f5a43430354edaca9a61067d7e",
+  "humanity-centres/participants/location": "76d01f2821cdbe664dbd8a9253127fa8c5d67f7a7655bd3995ec2f825f017727",
+  "humanity-centres/participants/program": "f1ce81f3a2bbeb8e35fdae8857f3ebf49879de8669e91e423ca28bba0672dc9a",
+  "humanity-centres/participants/type": "8f3d6e348a73553692d2a3890a48fcef7bf331f6527f48bc2137db9f9f2ee543",
+  "humanity-centres/participants/payment": "49be01ca83081a580e4713249aff05111280710da68541bf5160f54a369f1351",
+  "humanity-centres/places/locations/canada": "c8948665f08c39c19fad346c60659b6d2172de78592623ba94343ca4773a9384",
+  "humanity-centres/places/locations/bermuda": "88213258636128cfec7acd797c3ced55288be1841d469022293419fd3654bebd",
+  "humanity-centres/places/qualities/other-facilities": "12144d62e285c71a3cc5ff5e2652e7bf5f57e1229411abce7890f89f057c0578",
+  "humanity-centres/places/types/neighbourhood-houses": "f545054c41756cfb777dc22649616ce7fe95f556850bb273de24712edfc38cb9",
+  "humanity-centres/places/types/storefronts/circles-in-the-square": "bacc876413df8aa30bec5574044de2f56c689088c8043958f6432c9578eec806",
+  "humanity-centres/practitioners/location": "00889443b1e1954e7be160df0ed6a3fd851255f65f428c65389d429e0065b25c",
+  "humanity-centres/practitioners/location/nanaimo-bc": "51b452ff6932f0f4ac32632d81ce2f049fb291a2430db136ec7f7ee3a024b3e0"
+}

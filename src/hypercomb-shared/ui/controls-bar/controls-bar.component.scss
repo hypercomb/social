@@ -22,7 +22,7 @@
 
 .breadcrumb-top {
   position: fixed;
-  top: 3.6rem;
+  top: 3.25rem;
   right: 0.6rem;
   z-index: 59999;
 
@@ -46,7 +46,8 @@
   .unsecure-crumb { color: hsl(0, 70%, 50%); padding: 0; }
   .secret-crumb { color: rgba(218, 165, 100, 0.85); padding: 0; }
   .domain-crumb { color: rgba(210, 215, 220, 0.6); padding: 0; }
-  .branch-crumb { color: rgba(190, 140, 200, 0.85); padding: 0; font-weight: 500; }
+  .branch-crumb { color: rgba(190, 140, 200, 0.85); padding: 0; font-weight: 500; font-size: 1.12em; }
+  .branch-bracket { font-size: 1.45em; font-weight: 400; vertical-align: -0.06em; }
 
   .install-crumb {
     padding: 0;
@@ -229,7 +230,7 @@
 .pill-stage.dock-left {
   left: 0;
   right: auto;
-  top: 3.15rem;        // clears the ~3.12rem header bottom
+  top: 2.8rem;         // clears the ~2.83rem header bottom
   bottom: 0;
   transform: none;
   align-items: stretch; // let the rail fill the full height
@@ -353,12 +354,12 @@
 }
 
 // The rail's top tracks the header height: taller on touch (3.5rem header)
-// and in the 1367–2559px band (header is zoomed 1.34×).
+// and in the 1367–2559px band (header is zoomed 1.15×).
 @include touch {
   .pill-stage.dock-left { top: 3.85rem; }
 }
 @media (min-width: 1367px) and (max-width: 2559px) {
-  .pill-stage.dock-left { top: 4.2rem; }
+  .pill-stage.dock-left { top: 3.22rem; }
 }
 
 // Tooltips flip to the inner side of a docked bar so they don't spill off
@@ -669,6 +670,16 @@
     background: rgba(0, 229, 160, 0.08);
   }
 
+  // ── locked-attempt pulse ────────────────────────────────
+  // Fires when a pan/zoom is rejected because input is locked. A warm
+  // amber double-pulse reads as "denied" against the locked button's
+  // green, drawing the eye to *why* the viewport didn't move. The class
+  // is removed by the component after ~LOCK_BUMP_MS, ending the animation.
+  &.lock-bump {
+    animation: lock-bump-pulse 0.9s ease both;
+    z-index: 1;
+  }
+
   // ── fit button ──────────────────────────────────────────
   // Three-state cycle (ctrl+click on desktop, double-tap on mobile):
   //   off    (white) — plain click performs a one-shot fit; no pin
@@ -743,6 +754,19 @@
 @keyframes mic-glow {
   0%, 100% { border-color: rgba(255, 68, 68, 0.2); box-shadow: 0 0 4px rgba(255, 68, 68, 0.1); }
   50% { border-color: rgba(255, 68, 68, 0.5); box-shadow: 0 0 10px rgba(255, 68, 68, 0.25); }
+}
+
+// Header lock-button attention pulse — two amber throbs with a glow, then
+// settles back to the button's resting (locked-green) state. Colour is set
+// on the .mat-sym child via currentColor; the button animates transform +
+// text-shadow. Amber: rgb(240, 176, 92).
+@keyframes lock-bump-pulse {
+  0%   { transform: scale(1);    color: rgb(240, 176, 92); text-shadow: 0 0 10px rgba(240, 176, 92, 0.85); }
+  18%  { transform: scale(1.28); color: rgb(245, 186, 104); text-shadow: 0 0 12px rgba(245, 186, 104, 0.9); }
+  36%  { transform: scale(1.02); color: rgb(240, 176, 92); text-shadow: 0 0 6px rgba(240, 176, 92, 0.6); }
+  54%  { transform: scale(1.16); color: rgb(245, 186, 104); text-shadow: 0 0 10px rgba(245, 186, 104, 0.8); }
+  72%  { transform: scale(1);    color: rgb(240, 176, 92); text-shadow: 0 0 5px rgba(240, 176, 92, 0.5); }
+  100% { transform: scale(1);    text-shadow: none; }
 }
 
 // ── clipboard button with badge ──────────────────────────
@@ -1072,14 +1096,14 @@
 }
 
 // ── 13" laptop band (1367–2559px) ─────────────────────────
-// Header is zoomed 1.34× in this band (see `_header-bar.scss`); push the
+// Header is zoomed 1.15× in this band (see `_header-bar.scss`); push the
 // top-right breadcrumb down by the same factor so it keeps the same
 // proportional gap below the (now taller) header.
 // Pill zoom for this band lives in `#computePillZoom()` in the TS so the
 // existing viewport-derived signal stays the single source of truth.
 @media (min-width: 1367px) and (max-width: 2559px) {
   .breadcrumb-top {
-    top: 4.82rem;
+    top: 3.74rem;
   }
 }
 

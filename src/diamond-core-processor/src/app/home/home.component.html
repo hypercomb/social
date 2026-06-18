@@ -94,7 +94,7 @@
               <span class="group-note">{{ group.sections[0]?.installStatus }}</span>
             }
           </button>
-          <span class="header-sig">{{ group.sections[0]?.rootSig }}</span>
+          <span class="header-sig" [title]="group.sections[0]?.rootSig">{{ group.sections[0] ? displayLabel(group.sections[0]) : '' }}</span>
           @if (group.hiddenVersionCount > 0 || showAllVersions()) {
             <button class="domain-action versions-toggle"
               (click)="toggleShowAllVersions()"
@@ -110,6 +110,27 @@
         @if (isGroupOpen(group.domainName)) {
         @for (section of group.sections; track section.rootSig) {
           <div class="package-row">
+            @if (section.kind === 'package' && section.rootSig) {
+              <!-- Version handle: the deploy-time branch name (placeholder),
+                   click to rename locally; sig stays inspectable via title. -->
+              <div class="version-bar">
+                @if (editingLabelSig() === section.rootSig) {
+                  <input class="version-name-edit"
+                    [value]="labelOverride(section.rootSig) || section.label || ''"
+                    [attr.placeholder]="section.label || ('dcp.version-name' | t)"
+                    [attr.aria-label]="'dcp.version-name' | t"
+                    (keydown.enter)="commitLabelEdit(section, $event)"
+                    (keydown.escape)="cancelLabelEdit()"
+                    (blur)="commitLabelEdit(section, $event)" />
+                } @else {
+                  <button class="version-name" [title]="section.rootSig"
+                    (click)="startLabelEdit(section)">{{ displayLabel(section) }}</button>
+                  @if (deployedDisplay(section)) {
+                    <span class="version-time">{{ deployedDisplay(section) }}</span>
+                  }
+                }
+              </div>
+            }
             @if (section.loading || adoptResolvedCount(section) !== null) {
               <!-- Progress bar ONLY — no count, no status text. The sweeping
                    bar is the indicator; the walk discovers its frontier as it

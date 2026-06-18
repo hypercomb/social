@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 460" width="880" height="460" role="img">
+  <defs>
+    <linearGradient id="rhythm" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#eadfca"/><stop offset="1" stop-color="#d6c6a1"/>
+    </linearGradient>
+    <radialGradient id="rhythm-sun" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffe9c2" stop-opacity="0.95"/><stop offset="1" stop-color="#ffe9c2" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="0" y="0" width="880" height="460" rx="26" fill="url(#rhythm)"/>
+  
+    <g transform="translate(250 110)">
+      <rect x="0" y="0" width="240" height="200" rx="18" fill="#f6ecda"/>
+      <rect x="0" y="0" width="240" height="46" rx="18" fill="#c08a5e"/>
+      <rect x="0" y="30" width="240" height="16" fill="#c08a5e"/>
+      <circle cx="60" cy="-6" r="8" fill="#9c6b41"/><circle cx="180" cy="-6" r="8" fill="#9c6b41"/>
+      <g fill="#52715d" opacity="0.55">
+        <rect x="24" y="74" width="34" height="26" rx="5"/><rect x="74" y="74" width="34" height="26" rx="5"/><rect x="124" y="74" width="34" height="26" rx="5"/><rect x="174" y="74" width="34" height="26" rx="5"/>
+        <rect x="24" y="112" width="34" height="26" rx="5"/><rect x="74" y="112" width="34" height="26" rx="5" fill="#e8b87f" opacity="1"/><rect x="124" y="112" width="34" height="26" rx="5"/><rect x="174" y="112" width="34" height="26" rx="5"/>
+        <rect x="24" y="150" width="34" height="26" rx="5"/><rect x="74" y="150" width="34" height="26" rx="5"/><rect x="124" y="150" width="34" height="26" rx="5"/>
+      </g>
+    </g>
+    <g transform="translate(560 230)">
+      <path d="M0 0 h70 v34 a35 35 0 0 1 -35 35 h0 a35 35 0 0 1 -35 -35 z" fill="#c08a5e"/>
+      <path d="M70 8 h14 a14 14 0 0 1 0 28 h-14" fill="none" stroke="#c08a5e" stroke-width="8"/>
+      <g stroke="#f6ecda" stroke-width="5" stroke-linecap="round" opacity="0.8"><path d="M18 -18 q8 -10 0 -22"/><path d="M36 -18 q8 -10 0 -22"/></g>
+    </g>
+</svg>

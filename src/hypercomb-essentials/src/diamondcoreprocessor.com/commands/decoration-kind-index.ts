@@ -56,6 +56,22 @@ export function kindsForLabel(label: string): readonly string[] {
   return set ? [...set] : []
 }
 
+/** True iff ANY known cell carries a decoration of `kind`. A global
+ *  presence signal (not scoped to a label), used by ViewBee to decide
+ *  whether to surface a render-view toggle on the command line: the
+ *  website toggle should appear as soon as a `visual:website:page` exists
+ *  anywhere. Reflects what the index has learned so far — live mutations
+ *  (`decorations:changed`, e.g. the build pass writing pages) update it
+ *  immediately; cells from a prior session light up as they hydrate via
+ *  `render:cell-count`. O(known-labels); called only off the recompute
+ *  microtask, never per frame. */
+export function hasAnyDecorationKind(kind: string): boolean {
+  for (const set of kindsByLabel.values()) {
+    if (set.has(kind)) return true
+  }
+  return false
+}
+
 type StoreLike = {
   getResource(sig: string): Promise<Blob | null>
 }
@@ -124,6 +140,17 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
 // through the `decorations:changed` trigger and update the index live.
 
 const checkedLabels = new Set<string>()
+
+/** Forget that we've walked `label` so the next `render:cell-count` re-walks
+ *  its `decorations` slot. Called when a tile's whole layer is replaced
+ *  out-of-band — e.g. a swarm `sync` folds the publisher's branch over the
+ *  local copy, which can add decorations WITHOUT firing per-decoration
+ *  `decorations:changed` events. Additive-safe: we only clear the
+ *  checked-flag (not the kind set), so the re-walk adds any new kinds while
+ *  the existing ones keep the `features` icon stable across the refresh. */
+export function forgetDecorationLabel(label: string): void {
+  checkedLabels.delete(label)
+}
 
 type LineageLike = {
   explorerSegments?: () => readonly string[]

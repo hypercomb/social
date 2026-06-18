@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 460" width="880" height="460" role="img">
+  <defs>
+    <linearGradient id="sprout" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e9e0cb"/><stop offset="1" stop-color="#d4c8a2"/>
+    </linearGradient>
+    <radialGradient id="sprout-sun" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffe9c2" stop-opacity="0.95"/><stop offset="1" stop-color="#ffe9c2" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="0" y="0" width="880" height="460" rx="26" fill="url(#sprout)"/>
+  
+    <circle cx="440" cy="220" r="150" fill="url(#sprout-sun)"/>
+    <g transform="translate(440 250)">
+      <path d="M0 30 C0 0 0 -30 0 -60" stroke="#52715d" stroke-width="8" fill="none"/>
+      <path d="M0 -30 C-44 -40 -56 -86 -10 -78 C2 -50 0 -38 0 -30Z" fill="#6f9079"/>
+      <path d="M0 -46 C44 -56 56 -102 10 -94 C-2 -66 0 -54 0 -46Z" fill="#52715d"/>
+      <path d="M-90 40 Q-60 100 0 100 Q60 100 90 40 Q60 70 0 70 Q-60 70 -90 40Z" fill="#c08a5e"/>
+    </g>
+</svg>

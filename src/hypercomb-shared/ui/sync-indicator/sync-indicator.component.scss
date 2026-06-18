@@ -4,7 +4,7 @@
 // contributes its inner cell directly to the bar's flex layout
 // (display: contents) and renders nothing at all while idle. Follows
 // the header-bar idiom: borderless flex children separated by the same
-// 1.5px blue hairline the mode-toggle uses.
+// 1px steel hairline the mode-toggle uses.
 
 :host {
   display: contents;
@@ -20,7 +20,7 @@
   min-width: 9rem;
   max-width: 16rem;
   padding: 0 0.85rem;
-  border-left: 1.5px solid rgba(77, 166, 255, 0.4);
+  border-left: 1px solid rgba(126, 182, 214, 0.28);
   font-family: var(--hc-font);
   animation: sync-fade-in 360ms ease-out;
 }

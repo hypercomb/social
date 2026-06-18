@@ -535,6 +535,22 @@ export class ZoomDrone extends Drone {
     const availW = safeRight - safeLeft
     const availH = safeBottom - safeTop
 
+    // Degenerate safe area → don't fit. The safe-area math assumes a
+    // TOP-docked header (content starts below `headerEl.bottom`). In
+    // website mode the header-bar is pinned to the BOTTOM of the viewport
+    // (`.header-bar { bottom: 0; top: auto }`), so `safeTop` lands at
+    // ~window.innerHeight and `availH` goes negative. Fitting against a
+    // non-positive area makes `fitScale` clamp to minScale and flings the
+    // grid to "zoomed way out" — the tiny-tiles bug seen when returning to
+    // hexagons after a website session (show-cell keeps re-rendering the
+    // hidden hex surface on lineage changes and a fit:true snapshot calls
+    // zoomToFit here). Bail without touching scale/pan: the hidden hexagon
+    // surface keeps the viewport the user actually left, and a real fit
+    // runs again on the next hexagon-mode render / resize (header back on
+    // top → availH positive). Guard placed before the stage/pan reset
+    // below so an early return has zero side effects.
+    if (availW <= 0 || availH <= 0) return
+
     const stageScale = this.app.stage.scale.x || 1
 
     // reset stage to screen center and clear pan so that the fit position

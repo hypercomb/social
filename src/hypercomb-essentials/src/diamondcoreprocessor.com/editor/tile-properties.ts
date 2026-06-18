@@ -337,6 +337,39 @@ export const readTilePropertiesAt = async (
 }
 
 /**
+ * Read just the tile's CANONICAL props sig — the `properties[0]` value in the
+ * tile's head layer — without fetching/parsing the resource blob.
+ *
+ * This is the sig the participant-local index (`hc:tile-props-index`) stores.
+ * Canonical is the source of truth and travels with the layer (history/OPFS);
+ * the index is a per-device localStorage cache that show-cell + substrate read.
+ * When a tile's image arrives via the layer (adopted / synced / authored on
+ * another device, or after an index entry was cleared) the canonical slot has
+ * the sig but the local index does not. Callers use this to SEED the index
+ * from canonical so it is never missing for an imaged tile.
+ *
+ * Returns the 64-hex sig or undefined (no layer, no properties slot, history
+ * not ready). Mirrors `readTilePropertiesAt`'s resolution; signing is memoised.
+ */
+export const readTilePropsSigAt = async (
+  parentSegments: readonly string[],
+  cellName: string,
+): Promise<string | undefined> => {
+  const history = iocGet<HistoryServiceLike>(HISTORY_KEY)
+  if (!history?.sign || !history?.currentLayerAt) return undefined
+  const cellSig = await history.sign({
+    explorerSegments: () => [...parentSegments, cellName],
+  })
+  if (!cellSig) return undefined
+  const layer = await history.currentLayerAt(cellSig) as
+    | { properties?: readonly unknown[] }
+    | null
+  const slot = Array.isArray(layer?.properties) ? layer!.properties : []
+  const propSig = slot.length > 0 ? slot[0] : undefined
+  return (typeof propSig === 'string' && /^[0-9a-f]{64}$/.test(propSig)) ? propSig : undefined
+}
+
+/**
  * Write tile properties to the tile's layer.
  *
  * Reads current properties, merges `updates` over them (pass only the

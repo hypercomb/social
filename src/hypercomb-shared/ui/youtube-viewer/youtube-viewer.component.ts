@@ -20,11 +20,17 @@ function ensureViewerStyle(): void {
   if (document.getElementById(VIEWER_STYLE_ID)) return
   const style = document.createElement('style')
   style.id = VIEWER_STYLE_ID
+  // NOTE: hiding the Pixi canvas under `.viewer-open` is NOT done here. It is
+  // the shared `suppress-canvas-under('.viewer-open')` rule compiled into the
+  // shell styles.scss (visibility + canvas pointer-events). A hand-rolled
+  // `#pixi-host { visibility:hidden }` here was incomplete — it left the
+  // pointer-events:auto <canvas> eating clicks through the viewer. This style
+  // tag now only fades the chrome; the `viewer-open` body class (toggled below)
+  // triggers the shared canvas-suppress rule.
   style.textContent = `
     .header-bar, hc-controls-bar { transition: opacity 0.5s ease; }
     body.viewer-active .header-bar,
     body.viewer-active hc-controls-bar { opacity: 0; pointer-events: none; }
-    body.viewer-open #pixi-host { visibility: hidden; }
   `
   document.head.appendChild(style)
 }

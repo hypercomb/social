@@ -7,6 +7,16 @@ import { DcpInstallerService, type InstallProgress } from './dcp-installer.servi
 import { DcpStore } from './dcp-store'
 import type { AuditResult, BeeDocEntry, LayerDocs, TreeNode, TreeNodeKind } from './tree-node'
 
+/** A package entry from a host's manifest.json, with its sidecar branch
+ *  metadata. `label`/`at`/`previous` are optional — older manifests and the
+ *  genesis deploy may omit some. The `sig` is the package's rootLayerSig. */
+export interface PackageMeta {
+  sig: string
+  label?: string
+  at?: string
+  previous?: string | null
+}
+
 /** PascalCase → 'lower case words' (e.g. MeshAdapterDrone → mesh adapter drone) */
 function humanize(name: string): string {
   return name
@@ -46,9 +56,17 @@ export class TreeResolverService {
   #store = inject(DcpStore)
 
   async fetchAllRootSignatures(contentBase: string): Promise<string[]> {
+    return (await this.fetchPackages(contentBase)).map(p => p.sig)
+  }
+
+  /** Fetch the host's manifest.json and return one PackageMeta per package
+   *  entry — the root sig plus its sidecar branch metadata (label/at/previous).
+   *  Same validation/normalisation as the sig-only path; entries with an
+   *  invalid root sig are dropped. */
+  async fetchPackages(contentBase: string): Promise<PackageMeta[]> {
     const base = (contentBase ?? '').replace(/\/+$/, '')
     if (!base) return []
-    return this.#fetchAllRootSignatures(base)
+    return this.#fetchPackages(base)
   }
 
   async resolveRoot(
@@ -332,15 +350,21 @@ export class TreeResolverService {
     }
   }
 
-  async #fetchAllRootSignatures(base: string): Promise<string[]> {
+  async #fetchPackages(base: string): Promise<PackageMeta[]> {
     try {
       const res = await fetch(`${base}/manifest.json`, { cache: 'no-store' })
       if (!res.ok) return []
       const content = await res.json()
-      const sigs = Object.keys(content?.packages ?? {})
-      return sigs
-        .map(s => s.trim().toLowerCase())
-        .filter(s => /^[a-f0-9]{64}$/i.test(s))
+      const packages = (content?.packages ?? {}) as Record<string, { label?: string; at?: string; previous?: string | null }>
+      return Object.entries(packages)
+        .map(([sig, entry]) => ({ sig: sig.trim().toLowerCase(), entry }))
+        .filter(({ sig }) => /^[a-f0-9]{64}$/i.test(sig))
+        .map(({ sig, entry }) => ({
+          sig,
+          label: typeof entry?.label === 'string' ? entry.label : undefined,
+          at: typeof entry?.at === 'string' ? entry.at : undefined,
+          previous: typeof entry?.previous === 'string' ? entry.previous : undefined,
+        }))
     } catch {
       return []
     }

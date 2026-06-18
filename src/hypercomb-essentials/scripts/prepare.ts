@@ -115,6 +115,12 @@ const toCamel = (name: string) => {
   return pascal[0].toLowerCase() + pascal.slice(1)
 }
 
+// Folder name → a valid JS identifier usable as an `export * as <ns>` namespace.
+const toNamespace = (name: string) => {
+  const id = name.replace(/[^a-zA-Z0-9_$]/g, '_')
+  return /^[0-9]/.test(id) ? `_${id}` : id
+}
+
 // -------------------------------------------------
 // walking
 // -------------------------------------------------
@@ -398,27 +404,75 @@ const computeHasDeepSources = (meta: Map<string, DirMeta>) => {
 // folder index (exports subfolders + files)
 // -------------------------------------------------
 
-const writeFolderIndex = (dir: string, meta: Map<string, DirMeta>, hasDeep: (dir: string) => boolean) => {
+type BarrelResult = { lines: string[]; names: Set<string> }
+
+/** Compute a folder's barrel: the `export …` lines AND the set of names it
+ *  re-exports FLATLY (namespace-aware, recursing into sub-folders, memoised).
+ *
+ *  `export *` from two siblings that export the same name is an ambiguous
+ *  re-export (TS2308 — e.g. three sibling games each exporting Engine/Renderer).
+ *  We detect that per folder and namespace ONLY the colliding children
+ *  (`export * as <ns>`); everything else stays a flat `export *`. The flat-name
+ *  set a folder contributes upward reflects that namespacing (a namespaced child
+ *  contributes just its `<ns>` name, not its inner names), so the collision
+ *  check stays correct at every level — no special-casing of any folder. */
+const computeBarrel = (
+  dir: string,
+  meta: Map<string, DirMeta>,
+  hasDeep: (dir: string) => boolean,
+  cache: Map<string, BarrelResult>,
+): BarrelResult => {
+  const hit = cache.get(dir)
+  if (hit) return hit
+
+  const names = new Set<string>()
+  const m = meta.get(dir)
+  if (!m) { const r: BarrelResult = { lines: [], names }; cache.set(dir, r); return r }
+
+  // Loose files — always flat re-exports. (`export type *` for bees.)
+  const fileLines: string[] = []
+  const fileNames = new Set<string>()
+  for (const full of m.exportFiles.sort()) {
+    const base = basename(full).replace(extname(basename(full)), '')
+    const rel = `./${base}`
+    const exp = parseExports(full)
+    if (isBee(full)) { fileLines.push(`export type * from '${rel}'`); exp.type.forEach(n => fileNames.add(n)) }
+    else { fileLines.push(`export * from '${rel}'`); exp.value.forEach(n => fileNames.add(n)); exp.type.forEach(n => fileNames.add(n)) }
+  }
+
+  // Child sub-folders + the flat names each contributes (recursive).
+  const childInfos = m.children.sort()
+    .filter(child => hasDeep(child))
+    .map(child => ({ base: basename(child), names: computeBarrel(child, meta, hasDeep, cache).names }))
+
+  // How many barrels export each name (loose files as one group + each child).
+  const counts = new Map<string, number>()
+  fileNames.forEach(n => counts.set(n, (counts.get(n) ?? 0) + 1))
+  for (const ci of childInfos) ci.names.forEach(n => counts.set(n, (counts.get(n) ?? 0) + 1))
+
+  // Namespace a child only when one of its names is exported elsewhere too.
+  const childLines: string[] = []
+  for (const ci of childInfos) {
+    const collides = [...ci.names].some(n => (counts.get(n) ?? 0) > 1)
+    if (collides) { const ns = toNamespace(ci.base); childLines.push(`export * as ${ns} from './${ci.base}'`); names.add(ns) }
+    else { childLines.push(`export * from './${ci.base}'`); ci.names.forEach(n => names.add(n)) }
+  }
+  fileNames.forEach(n => names.add(n))
+
+  const result: BarrelResult = { lines: [...childLines, ...fileLines], names }
+  cache.set(dir, result)
+  return result
+}
+
+const writeFolderIndex = (
+  dir: string,
+  meta: Map<string, DirMeta>,
+  hasDeep: (dir: string) => boolean,
+  cache: Map<string, BarrelResult>,
+) => {
   if (!hasDeep(dir)) return
 
-  const m = meta.get(dir)
-  if (!m) return
-
-  const lines: string[] = []
-
-  for (const child of m.children.sort()) {
-    if (!hasDeep(child)) continue
-    lines.push(`export * from './${basename(child)}'`)
-  }
-
-  for (const full of m.exportFiles.sort()) {
-    const name = basename(full)
-    const base = name.replace(extname(name), '')
-    const rel = `./${base}`
-    if (isBee(full)) lines.push(`export type * from '${rel}'`)
-    else lines.push(`export * from '${rel}'`)
-  }
-
+  const { lines } = computeBarrel(dir, meta, hasDeep, cache)
   if (!lines.length) return
 
   const content = `// auto-generated
@@ -492,8 +546,9 @@ for (const domain of domains) {
 
   // generate index files only (no per-folder keys)
   const allDirs = [domainRoot, ...walkDirs(domainRoot)]
+  const barrelCache = new Map<string, BarrelResult>()
   for (const dir of allDirs) {
-    writeFolderIndex(dir, meta, hasDeep)
+    writeFolderIndex(dir, meta, hasDeep, barrelCache)
   }
 }
 

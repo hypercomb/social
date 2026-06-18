@@ -67,6 +67,7 @@
 // the canonical Store APIs.
 
 import { Drone } from '@hypercomb/core'
+import { decorationClosureSigs } from './decoration-closure.js'
 
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
@@ -885,6 +886,23 @@ export class ContentBrokerDrone extends Drone {
           // with many images otherwise sits silent for the whole resource
           // phase — the UI cue must climb as resources resolve.
           this.emitEffect('adopt:progress', { sig: r, ...stats })
+
+          // Decoration-descent: a decoration record (e.g. a website page) is a
+          // resource leaf to #collectSigs, but the content it points at — the
+          // HTML body (payload.htmlSig) and every image/stylesheet that body
+          // embeds — lives INSIDE the record, not in the layer. Pull it too so
+          // the adopted site is self-contained, not a record that 404s its
+          // assets. No-op for ordinary resources (decorationClosureSigs → []).
+          if (got) {
+            const nested = await decorationClosureSigs(got, s => this.fetchBySig(s, 'resource'))
+            for (const n of nested) {
+              if (childSet.has(n) || bees.has(n) || visited.has(n)) continue
+              visited.add(n)
+              const leaf = await this.fetchBySig(n, 'resource')
+              if (leaf) stats.leaves++; else stats.failed++
+              this.emitEffect('adopt:progress', { sig: n, ...stats })
+            }
+          }
         }
       }
 

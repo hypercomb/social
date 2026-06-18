@@ -37,6 +37,7 @@ const DOC_INDEX: DocEntry[] = [
   // Concepts & Domain Model
   { category: 'Concepts & Domain Model', title: 'Glossary', file: 'glossary.md' },
   { category: 'Concepts & Domain Model', title: 'DNA', file: 'dna.md' },
+  { category: 'Concepts & Domain Model', title: 'Trail Capsule', file: 'trail-capsule.md' },
   { category: 'Concepts & Domain Model', title: 'Layer Primitives', file: 'layer-primitives.md' },
   { category: 'Concepts & Domain Model', title: 'LLM Primitive', file: 'llm-primitive.md' },
   { category: 'Concepts & Domain Model', title: 'Emergence', file: 'emergence.md' },

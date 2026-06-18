@@ -108,7 +108,9 @@ export function addLabel(view: Container, label: string, hideText: boolean, r: n
   const text = (label ?? '').trim()
   if (!text || hideText) return
   const safeR = r * HEX_APOTHEM * (1 - TEXT_PERIMETER_MARGIN)
-  const fontSize = Math.max(9, Math.min(26, Math.round(r * 0.34)))
+  // Labels render at 75% of the bubble-derived size — smaller, less crowded.
+  const LABEL_SCALE = 0.75
+  const fontSize = Math.round(Math.max(9, Math.min(26, r * 0.34)) * LABEL_SCALE)
   const t = new Text({
     text,
     style: {

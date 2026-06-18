@@ -19,6 +19,17 @@
       [openForSubscribers]="openForSubscribers()"
       [openForSubscribersLabel]="'command-line.open-for-subscribers' | t"
       [viewToggles]="viewToggles()"
+      [showSolomonToggle]="showSolomonToggle()"
+      [solomonActive]="solomonActive()"
+      [solomonLabel]="'command-line.solomon' | t"
+      [showBubbleToggle]="showBubbleToggle()"
+      [bubbleActive]="bubbleActive()"
+      [bubbleLabel]="'command-line.bubble' | t"
+      [showArkanoidToggle]="showArkanoidToggle()"
+      [arkanoidActive]="arkanoidActive()"
+      [arkanoidLabel]="'command-line.arkanoid' | t"
+      [lockedFlash]="lockedFlash()"
+      [lockedLabel]="'command-line.locked' | t"
       (valueChange)="onShellValueChange($event)"
       (commit)="onShellCommit($event)"
       (completionAccepted)="onShellCompletionAccepted($event)"
@@ -27,6 +38,9 @@
       (armedResourceDismiss)="onArmedResourceDismiss()"
       (openForSubscribersToggle)="onOpenForSubscribersToggle()"
       (viewToggle)="onViewToggle($event)"
+      (solomonToggle)="onSolomonToggle()"
+      (bubbleToggle)="onBubbleToggle()"
+      (arkanoidToggle)="onArkanoidToggle()"
     />
 
     @if (voiceSupported && pushToTalkEnabled()) {

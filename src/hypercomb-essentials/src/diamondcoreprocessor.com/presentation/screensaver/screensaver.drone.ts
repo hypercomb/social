@@ -27,32 +27,28 @@ import { Drone } from '@hypercomb/core'
 import { Application, Container, Texture } from 'pixi.js'
 import type { HostReadyPayload } from '../tiles/pixi-host.worker.js'
 import { DEFAULT_BUBBLE_STYLE } from './styles.js'   // also registers the built-in styles
-import { getBubbleStyle } from './bubble-style.js'
+import { getBubbleStyle, bubbleStyleNames } from './bubble-style.js'
+import { DEFAULT_MOTION } from './motions.js'        // also registers the built-in motions
+import { getMotion, motionNames } from './motion.js'
+import type { Bubble, BubbleMotion, MotionContext } from './motion.js'
 
 const get = (key: string) => (window as any).ioc?.get?.(key)
 
 const ENABLED_KEY = 'hc:screensaver-enabled'
 const STYLE_KEY = 'hc:screensaver-style'
+const MOTION_KEY = 'hc:screensaver-motion'
+const RANDOM_KEY = 'hc:screensaver-random'
+
+/** A random element of `arr` (undefined if empty). */
+function pickRandom<T>(arr: readonly T[]): T | undefined {
+  return arr.length ? arr[Math.floor(Math.random() * arr.length)] : undefined
+}
 
 type TileSnap = { q: number; r: number; label: string; imageSig?: string; hideText?: boolean }
 
 type ShowCell = { snapshotCells?: () => TileSnap[] }
 type Store = { getResource: (sig: string) => Promise<Blob | null> }
 type Lineage = { explorerSegments?: () => readonly string[] }
-
-interface Bubble {
-  x: number
-  y: number
-  vx: number
-  vy: number
-  r: number
-  mass: number      // ∝ r² — heavier bubbles shove lighter ones in collisions
-  view: Container
-  homeX: number     // the tile's on-screen position — where it lifts off from and eases back to
-  homeY: number
-  rsx: number       // position captured when the return-home glide begins
-  rsy: number
-}
 
 // Idle time before the screensaver kicks in.
 const IDLE_MS = 30_000
@@ -64,8 +60,6 @@ const IDLE_MS = 30_000
 const MAX_BUBBLES = 120
 const MIN_RADIUS = 32
 const MAX_RADIUS = 78
-const MIN_SPEED = 70   // px/sec
-const MAX_SPEED = 170  // px/sec
 const MAX_DT = 1 / 30  // clamp so a backgrounded tab doesn't tunnel bubbles through walls
 
 // How long the bubbles take to glide back onto their tiles when dismissed.
@@ -109,7 +103,7 @@ export class ScreensaverDrone extends Drone {
   override genotype = 'presentation'
 
   public override description =
-    'Idle screensaver — turns the current node\'s tiles into neon bubbles (image + text) that bounce around the screen; any input dismisses it. Enabled by default, sticky on/off.'
+    'Idle screensaver — turns the current node\'s tiles into neon bubbles (image + text) that move by the chosen motion (bounce, shooting-stars…); any input dismisses it. Enabled by default, sticky on/off.'
   public override effects = ['render'] as const
 
   protected override listens = ['render:host-ready', 'keymap:invoke']
@@ -155,6 +149,17 @@ export class ScreensaverDrone extends Drone {
   // The chosen visual style (sticky). Drawn per-bubble by the matching
   // BubbleStyle from the registry. Switchable via /screensaver <name>.
   #styleName = DEFAULT_BUBBLE_STYLE
+  // The chosen motion (sticky) — how the field moves (bounce, shooting-stars…).
+  // Resolved from the motion registry. Switchable via /screensaver <name>.
+  #motionName = DEFAULT_MOTION
+  // Random mode (sticky, default ON): each activation picks a random style AND
+  // a random motion from the registries, so the screensaver surprises you with
+  // a different combination every time. Picking a specific style or motion pins
+  // it (turns random off); `/screensaver random` turns it back on.
+  #random = true
+  // The motion chosen for the CURRENT run — so the per-frame tick uses the same
+  // motion #activate spawned with (critical when random picked one at random).
+  #runMotion: BubbleMotion | null = null
 
   protected override sense = (): boolean => true
 
@@ -183,16 +188,48 @@ export class ScreensaverDrone extends Drone {
   public isActive(): boolean { return this.#active }
 
   /** Choose the visual style (sticky). Returns false if no such style is
-   *  registered. Applies live if the screensaver is currently running. */
+   *  registered. Picking a style pins it (turns random mode off). Applies live
+   *  if the screensaver is currently running. */
   public setStyle(name: string): boolean {
     if (!getBubbleStyle(name)) return false
     this.#styleName = name
+    this.#setRandom(false)
     try { localStorage.setItem(STYLE_KEY, name) } catch { /* ignore */ }
     if (this.#active) this.#restart()
     return true
   }
 
   public getStyle(): string { return this.#styleName }
+
+  /** Choose the motion (sticky) — how the field moves. Returns false if no such
+   *  motion is registered. Picking a motion pins it (turns random mode off).
+   *  Applies live if the screensaver is running. */
+  public setMotion(name: string): boolean {
+    if (!getMotion(name)) return false
+    this.#motionName = name
+    this.#setRandom(false)
+    try { localStorage.setItem(MOTION_KEY, name) } catch { /* ignore */ }
+    if (this.#active) this.#restart()
+    return true
+  }
+
+  public getMotionName(): string { return this.#motionName }
+
+  /** Turn random mode on/off (sticky). When on, each activation picks a random
+   *  style + motion. Returns the new state; applies live if running. */
+  public setRandom(on: boolean): boolean {
+    this.#setRandom(on)
+    if (this.#active) this.#restart()
+    return on
+  }
+
+  public isRandom(): boolean { return this.#random }
+
+  // Set + persist the random flag (no restart — callers decide).
+  #setRandom = (on: boolean): void => {
+    this.#random = on
+    try { localStorage.setItem(RANDOM_KEY, String(on)) } catch { /* ignore */ }
+  }
 
   /** Start the screensaver right now (for previewing without waiting for idle).
    *  Deferred a tick so the keystroke that invoked it doesn't immediately count
@@ -203,9 +240,11 @@ export class ScreensaverDrone extends Drone {
 
   /** Show the screensaver right now via the keyboard shortcut, ignoring the
    *  sticky enabled preference (and without changing it). Deferred a tick so the
-   *  triggering keystroke isn't counted as the dismissing activity. */
+   *  triggering keystroke isn't counted as the dismissing activity. This is the
+   *  "surprise me" gesture: it ALWAYS rolls a random style + motion, even if a
+   *  specific look has been pinned (random off) — so every press is different. */
   #showNow = (): void => {
-    window.setTimeout(() => { if (!this.#active) void this.#activate() }, 60)
+    window.setTimeout(() => { if (!this.#active) void this.#activate(true) }, 60)
   }
 
   // ─────────────────────────── wiring ───────────────────────────
@@ -216,6 +255,8 @@ export class ScreensaverDrone extends Drone {
 
     this.#enabled = this.#readEnabled()
     this.#styleName = this.#readStyle()
+    this.#motionName = this.#readMotion()
+    this.#random = this.#readRandom()
 
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {
       if (this.#app) return
@@ -262,6 +303,21 @@ export class ScreensaverDrone extends Drone {
       const v = localStorage.getItem(STYLE_KEY)
       return v && getBubbleStyle(v) ? v : DEFAULT_BUBBLE_STYLE
     } catch { return DEFAULT_BUBBLE_STYLE }
+  }
+
+  #readMotion = (): string => {
+    try {
+      const v = localStorage.getItem(MOTION_KEY)
+      return v && getMotion(v) ? v : DEFAULT_MOTION
+    } catch { return DEFAULT_MOTION }
+  }
+
+  // Random mode defaults ON — out of the box the screensaver varies itself.
+  #readRandom = (): boolean => {
+    try {
+      const v = localStorage.getItem(RANDOM_KEY)
+      return v === null ? true : v === 'true'
+    } catch { return true }
   }
 
   // Re-render the running screensaver (e.g. after a live style change). Hands
@@ -318,7 +374,7 @@ export class ScreensaverDrone extends Drone {
 
   // ─────────────────────────── activate / dismiss ───────────────────────────
 
-  #activate = async (): Promise<void> => {
+  #activate = async (forceRandom = false): Promise<void> => {
     const app = this.#app
     if (!app) return
     const epoch = ++this.#epoch
@@ -359,28 +415,39 @@ export class ScreensaverDrone extends Drone {
     const W = app.screen.width
     const H = app.screen.height
     const radius = this.#bubbleRadius(tiles.length, W, H)
-    const style = getBubbleStyle(this.#styleName) ?? getBubbleStyle(DEFAULT_BUBBLE_STYLE)!
+    // Random mode (or a forced "surprise me" from the keyboard shortcut) rolls a
+    // fresh style + motion for this run; otherwise use the pinned ones. The
+    // chosen motion is remembered (#runMotion) so the tick advances with the
+    // SAME motion this activation spawned with.
+    const useRandom = this.#random || forceRandom
+    const styleName = useRandom ? (pickRandom(bubbleStyleNames()) ?? this.#styleName) : this.#styleName
+    const motionName = useRandom ? (pickRandom(motionNames()) ?? this.#motionName) : this.#motionName
+    const style = getBubbleStyle(styleName) ?? getBubbleStyle(DEFAULT_BUBBLE_STYLE)!
+    const motion = getMotion(motionName) ?? getMotion(DEFAULT_MOTION)!
+    this.#runMotion = motion
+    const ctx: MotionContext = { W, H, layer }
 
     this.#bubbles = tiles.map((t, i) => {
       const color = neonColor(t.label)
       const view = style.build({ tex: texByTile[i], color, r: radius, label: t.label, hideText: t.hideText === true, flat: this.#flat })
       layer.addChild(view)
-      // Lift off from the tile's actual on-screen position, heading a random way.
+      // The tile's on-screen position — where the bubble eases back to on
+      // dismiss (and where bounce lifts off from).
       const home = this.#tileHome(t.q, t.r)
         ?? { x: radius + Math.random() * Math.max(1, W - radius * 2), y: radius + Math.random() * Math.max(1, H - radius * 2) }
-      const angle = Math.random() * Math.PI * 2
-      const speed = MIN_SPEED + Math.random() * (MAX_SPEED - MIN_SPEED)
-      view.position.set(home.x, home.y) // painted at home before the first tick moves it
-      return {
+      const b: Bubble = {
         x: home.x, y: home.y,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed,
+        vx: 0, vy: 0,
         r: radius,
         mass: radius * radius,
+        color,
         view,
         homeX: home.x, homeY: home.y,
         rsx: home.x, rsy: home.y,
       }
+      motion.spawn(b, ctx)            // motion sets the start position + velocity (+ any trail)
+      view.position.set(b.x, b.y)     // painted at its start before the first tick moves it
+      return b
     })
 
     // Hand the screen over: hide the hive grid so the tiles read as having
@@ -413,6 +480,7 @@ export class ScreensaverDrone extends Drone {
       this.#layer = null
     }
     this.#bubbles = []
+    this.#runMotion = null
     for (const tex of this.#ownedTextures) {
       try { tex.destroy(true) } catch { /* already gone */ }
     }
@@ -432,7 +500,10 @@ export class ScreensaverDrone extends Drone {
     if (!this.#active || this.#returning) return
     this.#returning = true
     this.#returnStart = Date.now()
-    for (const b of this.#bubbles) { b.rsx = b.x; b.rsy = b.y }
+    for (const b of this.#bubbles) {
+      b.rsx = b.x; b.rsy = b.y
+      if (b.trailGfx) b.trailGfx.visible = false  // hide any motion trail during the glide home
+    }
   }
 
   // The tile at axial (q,r) → its current on-screen position (screen px), via
@@ -482,53 +553,8 @@ export class ScreensaverDrone extends Drone {
     }
 
     const bubbles = this.#bubbles
-
-    // integrate + bounce off the screen edges
-    for (const b of bubbles) {
-      b.x += b.vx * dt
-      b.y += b.vy * dt
-      if (b.x - b.r < 0) { b.x = b.r; b.vx = Math.abs(b.vx) }
-      else if (b.x + b.r > W) { b.x = W - b.r; b.vx = -Math.abs(b.vx) }
-      if (b.y - b.r < 0) { b.y = b.r; b.vy = Math.abs(b.vy) }
-      else if (b.y + b.r > H) { b.y = H - b.r; b.vy = -Math.abs(b.vy) }
-    }
-
-    // pairwise elastic collisions
-    for (let i = 0; i < bubbles.length; i++) {
-      const a = bubbles[i]
-      for (let j = i + 1; j < bubbles.length; j++) {
-        const c = bubbles[j]
-        const dx = c.x - a.x
-        const dy = c.y - a.y
-        const minDist = a.r + c.r
-        const distSq = dx * dx + dy * dy
-        if (distSq >= minDist * minDist || distSq === 0) continue
-
-        const dist = Math.sqrt(distSq)
-        const nx = dx / dist
-        const ny = dy / dist
-
-        // push them apart so they don't overlap-lock
-        const overlap = minDist - dist
-        const total = a.mass + c.mass
-        a.x -= nx * overlap * (c.mass / total)
-        a.y -= ny * overlap * (c.mass / total)
-        c.x += nx * overlap * (a.mass / total)
-        c.y += ny * overlap * (a.mass / total)
-
-        // exchange velocity along the collision normal (1D elastic on the axis)
-        const va = a.vx * nx + a.vy * ny
-        const vc = c.vx * nx + c.vy * ny
-        if (va - vc <= 0) continue // already separating
-        const newVa = (va * (a.mass - c.mass) + 2 * c.mass * vc) / total
-        const newVc = (vc * (c.mass - a.mass) + 2 * a.mass * va) / total
-        a.vx += (newVa - va) * nx
-        a.vy += (newVa - va) * ny
-        c.vx += (newVc - vc) * nx
-        c.vy += (newVc - vc) * ny
-      }
-    }
-
+    const motion = this.#runMotion ?? getMotion(this.#motionName) ?? getMotion(DEFAULT_MOTION)!
+    motion.step(bubbles, dt, { W, H, layer })   // advance positions + draw any trails
     for (const b of bubbles) b.view.position.set(b.x, b.y)
   }
 

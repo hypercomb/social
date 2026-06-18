@@ -1,0 +1,779 @@
+{
+  "name": "humanity-centres",
+  "children": [
+    {
+      "name": "programs",
+      "children": [
+        {
+          "name": "me",
+          "notes": [
+            {
+              "children": [],
+              "note": "Song Circle: Singing Your Soul Alive"
+            },
+            {
+              "children": [],
+              "note": "Wheel of Consent Workshop"
+            },
+            {
+              "children": [],
+              "note": "Painting the Landscape of Your Soul"
+            },
+            {
+              "children": [],
+              "note": "Spirit Collage"
+            },
+            {
+              "children": [],
+              "note": "Wet Felting for Beginners"
+            },
+            {
+              "children": [],
+              "note": "Writing Your Memoir"
+            },
+            {
+              "children": [],
+              "note": "Unburdening Guilt: Transforming a Misunderstood Emotion"
+            }
+          ],
+          "properties": [
+            {
+              "flat": {
+                "small": {
+                  "image": {
+                    "$sig": "1a2fd7859800192032d88099e0e85067aa7a7bf6c2c1fd0add0ed62dccc7b20e",
+                    "$bytes": 164606,
+                    "$contentType": "binary"
+                  }
+                }
+              },
+              "small": {
+                "image": {
+                  "$sig": "b388cd3e6204bc9865ee3b3713d72c788177a1fccbebd78d49b73bdd111c0295",
+                  "$bytes": 153922,
+                  "$contentType": "binary"
+                }
+              },
+              "substrate": true
+            }
+          ]
+        },
+        {
+          "name": "us",
+          "notes": [
+            {
+              "children": [],
+              "note": "Family Constellation Workshop"
+            },
+            {
+              "children": [],
+              "note": "Aging in Community: A Listening Circle"
+            },
+            {
+              "children": [],
+              "note": "Dying to Live: A Sacred Conversation"
+            },
+            {
+              "children": [],
+              "note": "Integral at Home: Reflections on Sacred Spaces"
+            },
+            {
+              "children": [],
+              "note": "Spirituality: Can We Talk? **"
+            },
+            {
+              "children": [],
+              "note": "The Chrysalis Program: Transforming Women's Lives"
+            },
+            {
+              "children": [],
+              "note": "Weaving the Web: Creating Communities of Action"
+            }
+          ],
+          "properties": [
+            {
+              "flat": {
+                "small": {
+                  "image": {
+                    "$sig": "9c09f2a13ff3601161d01d1e1874d1d722a489a96d377dd554d6860f8869334d",
+                    "$bytes": 120002,
+                    "$contentType": "binary"
+                  }
+                }
+              },
+              "small": {
+                "image": {
+                  "$sig": "ea983e50f0d7c2f1ffc61f707c59f0d7be314209eda3b43366b0fc47be9c1907",
+                  "$bytes": 99462,
+                  "$contentType": "binary"
+                }
+              },
+              "substrate": true
+            }
+          ]
+        },
+        {
+          "name": "all-of-us",
+          "notes": [
+            {
+              "children": [],
+              "note": "Humanity at the Crossroads"
+            },
+            {
+              "children": [],
+              "note": "One World Dialogues"
+            },
+            {
+              "children": [],
+              "note": "Healing our Broken World"
+            },
+            {
+              "children": [],
+              "note": "What Wants to Happen"
+            },
+            {
+              "children": [],
+              "note": "Living in a Time of Dying"
+            }
+          ],
+          "properties": [
+            {
+              "flat": {
+                "small": {
+                  "image": {
+                    "$sig": "5187465a319aaf78bde6a2c9716982404948fba807f0f5a818c36a725950dcf2",
+                    "$bytes": 92900,
+                    "$contentType": "binary"
+                  }
+                }
+              },
+              "small": {
+                "image": {
+                  "$sig": "2d133ef292d0e9b737b5a5d0bdc0363027347c6f06de635e2ed888ad2cd09bcf",
+                  "$bytes": 107466,
+                  "$contentType": "binary"
+                }
+              },
+              "substrate": true
+            }
+          ]
+        }
+      ],
+      "properties": [
+        {
+          "flat": {
+            "small": {
+              "image": {
+                "$cycle": "9c09f2a13ff3601161d01d1e1874d1d722a489a96d377dd554d6860f8869334d"
+              }
+            }
+          },
+          "index": 6,
+          "small": {
+            "image": {
+              "$cycle": "ea983e50f0d7c2f1ffc61f707c59f0d7be314209eda3b43366b0fc47be9c1907"
+            }
+          },
+          "substrate": true
+        }
+      ]
+    },
+    {
+      "name": "purse",
+      "children": [
+        {
+          "name": "donations-program-fees",
+          "properties": [
+            {
+              "$cycle": "f0cf4a48fcfc6b65180fb959688a6ca30b456fd015d6ee82fd10ecfc08630912"
+            }
+          ]
+        },
+        {
+          "name": "money-from-hc-network",
+          "properties": [
+            {
+              "flat": {
+                "small": {
+                  "image": {
+                    "$sig": "388e86c063023e10eea053976f3701d5b3b0a56a7de6a7bd06ba137e4c167e46",
+                    "$bytes": 158414,
+                    "$contentType": "binary"
+                  }
+                }
+              },
+              "small": {
+                "image": {
+                  "$sig": "8f497d11256d6a05897583106024b13e55a684d6f6b6d3439266760d536c42da",
+                  "$bytes": 150548,
+                  "$contentType": "binary"
+                }
+              },
+              "substrate": true
+            }
+          ]
+        },
+        {
+          "name": "distribution-to-hcs",
+          "properties": [
+            {
+              "flat": {
+                "small": {
+                  "image": {
+                    "$sig": "6240779e823d8891728ffcd7dd28990c8197a5af263a13be2015bbdc6db31baf",
+                    "$bytes": 179578,
+                    "$contentType": "binary"
+                  }
+                }
+              },
+              "small": {
+                "image": {
+                  "$sig": "6c81e6e88df13221578f4bc9df5b8b3a83a9f6f5a43430354edaca9a61067d7e",
+                  "$bytes": 154064,
+                  "$contentType": "binary"
+                }
+              },
+              "substrate": true
+            }
+          ]
+        }
+      ],
+      "properties": [
+        {
+          "flat": {
+            "small": {
+              "image": {
+                "$sig": "39e1e5f75b813878163d936bad7b9780e6bc919178a1df1413da452769eebf47",
+                "$bytes": 196324,
+                "$contentType": "binary"
+              }
+            }
+          },
+          "index": 3,
+          "small": {
+            "image": {
+              "$sig": "070992a8f5f3370b569b458254a9b0c56df00286d87cb372cdfdc21f1aceae14",
+              "$bytes": 178272,
+              "$contentType": "binary"
+            }
+          },
+          "substrate": true
+        }
+      ]
+    },
+    {
+      "name": "participants",
+      "children": [
+        {
+          "name": "location",
+          "properties": [
+            {
+              "flat": {
+                "small": {
+                  "image": {
+                    "$sig": "33109aaeafb873990f6c348c050525f1b76c8014fe88cd984779afdbf731f2ba",
+                    "$bytes": 219990,
+                    "$contentType": "binary"
+                  }
+                }
+              },
+              "small": {
+                "image": {
+                  "$sig": "76d01f2821cdbe664dbd8a9253127fa8c5d67f7a7655bd3995ec2f825f017727",
+                  "$bytes": 207266,
+                  "$contentType": "binary"
+                }
+              },
+              "substrate": true
+            }
+          ]
+        },
+        {
+          "name": "program",
+          "properties": [
+            {
+              "flat": {
+                "small": {
+                  "image": {
+                    "$sig": "c59cead4b17e704cec61637e06a62d320f1ebeb04b525ce0302900aeaa2a7163",
+                    "$bytes": 177856,
+                    "$contentType": "binary"
+                  }
+                }
+              },
+              "small": {
+                "image": {
+                  "$sig": "f1ce81f3a2bbeb8e35fdae8857f3ebf49879de8669e91e423ca28bba0672dc9a",
+                  "$bytes": 165914,
+                  "$contentType": "binary"
+                }
+              },
+              "substrate": true
+            }
+          ]
+        },
+        {
+          "name": "type",
+          "properties": [
+            {
+              "flat": {
+                "small": {
+                  "image": {
+                    "$sig": "8e6b6f2d1d6edbfb23f85c4bd167ee2acc3fdad69688cd8ce69a9620e261b292",
+                    "$bytes": 175826,
+                    "$contentType": "binary"
+                  }
+                }
+              },
+              "small": {
+                "image": {
+                  "$sig": "8f3d6e348a73553692d2a3890a48fcef7bf331f6527f48bc2137db9f9f2ee543",
+                  "$bytes": 173490,
+                  "$contentType": "binary"
+                }
+              },
+              "substrate": true
+            }
+          ]
+        },
+        {
+          "name": "payment",
+          "properties": [
+            {
+              "flat": {
+                "small": {
+                  "image": {
+                    "$sig": "3ea64272b84aed22d74c4835ca4f520cff020df2fe715cd81f89cf49a3d52aeb",
+                    "$bytes": 153790,
+                    "$contentType": "binary"
+                  }
+                }
+              },
+              "small": {
+                "image": {
+                  "$sig": "49be01ca83081a580e4713249aff05111280710da68541bf5160f54a369f1351",
+                  "$bytes": 146138,
+                  "$contentType": "binary"
+                }
+              },
+              "substrate": true
+            }
+          ]
+        }
+      ],
+      "properties": [
+        {
+          "flat": {
+            "small": {
+              "image": {
+                "$cycle": "9c09f2a13ff3601161d01d1e1874d1d722a489a96d377dd554d6860f8869334d"
+              }
+            }
+          },
+          "index": 0,
+          "small": {
+            "image": {
+              "$cycle": "ea983e50f0d7c2f1ffc61f707c59f0d7be314209eda3b43366b0fc47be9c1907"
+            }
+          },
+          "substrate": true
+        }
+      ]
+    },
+    {
+      "name": "places",
+      "children": [
+        {
+          "name": "locations",
+          "children": [
+            {
+              "name": "canada",
+              "children": [
+                {
+                  "name": "quebec"
+                },
+                {
+                  "name": "ontario"
+                },
+                {
+                  "name": "british-columbia"
+                }
+              ],
+              "properties": [
+                {
+                  "flat": {
+                    "small": {
+                      "image": {
+                        "$sig": "e23c99aeb3c3e2447e932ab2cd25b444a16bd3f82e2c722c0569626a03e32939",
+                        "$bytes": 113508,
+                        "$contentType": "binary"
+                      }
+                    }
+                  },
+                  "small": {
+                    "image": {
+                      "$sig": "c8948665f08c39c19fad346c60659b6d2172de78592623ba94343ca4773a9384",
+                      "$bytes": 114750,
+                      "$contentType": "binary"
+                    }
+                  },
+                  "substrate": true
+                }
+              ]
+            },
+            {
+              "name": "switzerland",
+              "properties": [
+                {
+                  "$cycle": "7984b0bec64f3d3b8dd0f45b19cdd3990ea8f490ee0fe3cf22fae5f7ffee970c"
+                }
+              ]
+            },
+            {
+              "name": "bermuda",
+              "properties": [
+                {
+                  "flat": {
+                    "small": {
+                      "image": {
+                        "$sig": "882bbaf2aff20120b2d3ae85963bb4940e7ddb3e3b82635a2f07e0410edf6a9a",
+                        "$bytes": 203370,
+                        "$contentType": "binary"
+                      }
+                    }
+                  },
+                  "small": {
+                    "image": {
+                      "$sig": "88213258636128cfec7acd797c3ced55288be1841d469022293419fd3654bebd",
+                      "$bytes": 212210,
+                      "$contentType": "binary"
+                    }
+                  },
+                  "substrate": true
+                }
+              ]
+            }
+          ],
+          "properties": [
+            {
+              "$cycle": "d8576d220d0a116601a42bf381b9dd539ec50144e54925ce947d8ae43485a395"
+            }
+          ]
+        },
+        {
+          "name": "qualities",
+          "children": [
+            {
+              "name": "other-facilities",
+              "properties": [
+                {
+                  "flat": {
+                    "small": {
+                      "image": {
+                        "$sig": "e753075830ee22cdeee0f7c3530b917ae9bf72fd8f444cc4e5e90fce6f26e431",
+                        "$bytes": 160432,
+                        "$contentType": "binary"
+                      }
+                    }
+                  },
+                  "small": {
+                    "image": {
+                      "$sig": "12144d62e285c71a3cc5ff5e2652e7bf5f57e1229411abce7890f89f057c0578",
+                      "$bytes": 174504,
+                      "$contentType": "binary"
+                    }
+                  },
+                  "substrate": true
+                }
+              ]
+            },
+            {
+              "name": "room-specifications",
+              "properties": [
+                {
+                  "flat": {
+                    "small": {
+                      "image": {
+                        "$cycle": "39e1e5f75b813878163d936bad7b9780e6bc919178a1df1413da452769eebf47"
+                      }
+                    }
+                  },
+                  "small": {
+                    "image": {
+                      "$cycle": "070992a8f5f3370b569b458254a9b0c56df00286d87cb372cdfdc21f1aceae14"
+                    }
+                  },
+                  "substrate": true
+                }
+              ]
+            },
+            {
+              "name": "numbers-of-participants",
+              "properties": [
+                {
+                  "$cycle": "d3259a255d4d15f2b4b583a2d3225049ab402621bb83f0cbacfaedcb90871ac0"
+                }
+              ]
+            }
+          ],
+          "properties": [
+            {
+              "flat": {
+                "small": {
+                  "image": {
+                    "$cycle": "8e6b6f2d1d6edbfb23f85c4bd167ee2acc3fdad69688cd8ce69a9620e261b292"
+                  }
+                }
+              },
+              "index": 6,
+              "small": {
+                "image": {
+                  "$cycle": "8f3d6e348a73553692d2a3890a48fcef7bf331f6527f48bc2137db9f9f2ee543"
+                }
+              },
+              "substrate": true
+            }
+          ]
+        },
+        {
+          "name": "types",
+          "children": [
+            {
+              "name": "retreat-centres",
+              "children": [
+                {
+                  "name": "bethlehem-centre"
+                }
+              ],
+              "properties": [
+                {
+                  "$cycle": "9b8bf24c94488c872dea911db9097f1967603b86693d355a5ffe75c7a322664d"
+                }
+              ]
+            },
+            {
+              "name": "neighbourhood-houses",
+              "children": [
+                {
+                  "name": "surrey-neighbourhood-house"
+                }
+              ],
+              "properties": [
+                {
+                  "flat": {
+                    "small": {
+                      "image": {
+                        "$sig": "c9cac9d7f1220d627b08874c82410e4f1240e100d39e7da0946dac9b32d071b8",
+                        "$bytes": 176810,
+                        "$contentType": "binary"
+                      }
+                    }
+                  },
+                  "small": {
+                    "image": {
+                      "$sig": "f545054c41756cfb777dc22649616ce7fe95f556850bb273de24712edfc38cb9",
+                      "$bytes": 168796,
+                      "$contentType": "binary"
+                    }
+                  },
+                  "substrate": true
+                }
+              ]
+            },
+            {
+              "name": "storefronts",
+              "children": [
+                {
+                  "name": "circles-in-the-square",
+                  "properties": [
+                    {
+                      "flat": {
+                        "small": {
+                          "image": {
+                            "$sig": "b033cb5da933b92cb89cdf1a3b6d9ac5a30b774a19bc78bb087163073619ab8c",
+                            "$bytes": 183570,
+                            "$contentType": "binary"
+                          }
+                        }
+                      },
+                      "small": {
+                        "image": {
+                          "$sig": "bacc876413df8aa30bec5574044de2f56c689088c8043958f6432c9578eec806",
+                          "$bytes": 192788,
+                          "$contentType": "binary"
+                        }
+                      },
+                      "substrate": true
+                    }
+                  ]
+                }
+              ],
+              "properties": [
+                {
+                  "$cycle": "7b6587e65e3c134b8294071b3eda30ca14a33ade684d14475b2a35d148f6d1ff"
+                }
+              ]
+            }
+          ],
+          "properties": [
+            {
+              "flat": {
+                "small": {
+                  "image": {
+                    "$cycle": "b033cb5da933b92cb89cdf1a3b6d9ac5a30b774a19bc78bb087163073619ab8c"
+                  }
+                }
+              },
+              "index": 3,
+              "small": {
+                "image": {
+                  "$cycle": "bacc876413df8aa30bec5574044de2f56c689088c8043958f6432c9578eec806"
+                }
+              },
+              "substrate": true
+            }
+          ]
+        }
+      ],
+      "properties": [
+        {
+          "flat": {
+            "small": {
+              "image": {
+                "$cycle": "39e1e5f75b813878163d936bad7b9780e6bc919178a1df1413da452769eebf47"
+              }
+            }
+          },
+          "index": 12,
+          "small": {
+            "image": {
+              "$cycle": "070992a8f5f3370b569b458254a9b0c56df00286d87cb372cdfdc21f1aceae14"
+            }
+          },
+          "substrate": true
+        }
+      ]
+    },
+    {
+      "name": "practitioners",
+      "children": [
+        {
+          "name": "location",
+          "children": [
+            {
+              "name": "surrey-bc",
+              "properties": [
+                {
+                  "$cycle": "ad93623e4faaaa57c569a450fec78dd42fed25e7aa20f60e3f17deaf76cfb9d1"
+                }
+              ]
+            },
+            {
+              "name": "nanaimo-bc",
+              "properties": [
+                {
+                  "flat": {
+                    "small": {
+                      "image": {
+                        "$sig": "b763ebc327ef0b12984430899817d4c0023fc1f9735e40a6683aa3bcdd313456",
+                        "$bytes": 94780,
+                        "$contentType": "binary"
+                      }
+                    }
+                  },
+                  "small": {
+                    "image": {
+                      "$sig": "51b452ff6932f0f4ac32632d81ce2f049fb291a2430db136ec7f7ee3a024b3e0",
+                      "$bytes": 95690,
+                      "$contentType": "binary"
+                    }
+                  },
+                  "substrate": true
+                }
+              ]
+            },
+            {
+              "name": "south-false-creek-vancouver-bc",
+              "properties": [
+                {
+                  "$cycle": "2264d607714c79214097ab57623b995f810a47a33301462b549a9c3746cf865d"
+                }
+              ]
+            }
+          ],
+          "properties": [
+            {
+              "flat": {
+                "small": {
+                  "image": {
+                    "$sig": "3aff4cad85ca98c58044f0602a05f97fe5d272563304b81170e9a41e72b7c9b5",
+                    "$bytes": 160806,
+                    "$contentType": "binary"
+                  }
+                }
+              },
+              "small": {
+                "image": {
+                  "$sig": "00889443b1e1954e7be160df0ed6a3fd851255f65f428c65389d429e0065b25c",
+                  "$bytes": 152316,
+                  "$contentType": "binary"
+                }
+              },
+              "substrate": true
+            }
+          ]
+        }
+      ],
+      "notes": [
+        {
+          "children": [],
+          "note": "Program Level (Me, Us, All of Us)"
+        },
+        {
+          "children": [],
+          "note": "Bio Summary/Photo"
+        }
+      ],
+      "properties": [
+        {
+          "flat": {
+            "small": {
+              "image": {
+                "$cycle": "33109aaeafb873990f6c348c050525f1b76c8014fe88cd984779afdbf731f2ba"
+              }
+            }
+          },
+          "index": 18,
+          "small": {
+            "image": {
+              "$cycle": "76d01f2821cdbe664dbd8a9253127fa8c5d67f7a7655bd3995ec2f825f017727"
+            }
+          },
+          "substrate": true
+        }
+      ]
+    }
+  ],
+  "properties": [
+    {
+      "flat": {
+        "small": {
+          "image": {
+            "$sig": "425a56c279d7b80708d410c90bfe24b5e96201f6b0219ecff24ea217b48f1312",
+            "$bytes": 210928,
+            "$contentType": "binary"
+          }
+        }
+      },
+      "index": 3,
+      "small": {
+        "image": {
+          "$sig": "fdab0f1f26586e839c0d1a48563d858fe4b54dc6c77a2f02e96bcb4cf840afcc",
+          "$bytes": 215126,
+          "$contentType": "binary"
+        }
+      },
+      "substrate": true
+    }
+  ]
+}

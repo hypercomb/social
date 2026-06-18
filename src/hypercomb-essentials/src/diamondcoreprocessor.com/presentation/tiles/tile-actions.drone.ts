@@ -2,7 +2,7 @@
 import { Drone, EffectBus, hypercomb, normalizeCell } from '@hypercomb/core'
 import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey, OverlayTintFn } from './tile-overlay.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
-import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
+import { hasDecorationKind, kindsForLabel } from '../../commands/decoration-kind-index.js'
 import { FILES_ATTACHMENT_KIND } from '../../files/files-attachment.js'
 import { FILES_ICON } from '../../files/file-types.js'
 // Arrangement persistence currently disabled — `#getRootDir` returns
@@ -143,7 +143,13 @@ type IconProviderEntry = {
   name: string
   owner?: string
   svgMarkup: string
-  profile: string
+  /** A provider declares EITHER a single `profile` (legacy) OR several
+   *  `profiles` from one registration. `#mergedEntries` folds both forms by
+   *  expanding into one per-profile catalog entry. */
+  profile?: string
+  profiles?: readonly string[]
+  /** Auto-join the default arrangement for each profile (no DEFAULT_ACTIVE edit). */
+  defaultActive?: boolean
   hoverTint?: number
   visibleWhen?: (ctx: OverlayTileContext) => boolean
   tintWhen?: OverlayTintFn
@@ -181,8 +187,10 @@ const ICONS = {
   hide: md('M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z'),
   // grid_view — Material Icons Filled
   breakApart: md('M3 3v8h8V3H3zm6 6H5V5h4v4zm-6 4v8h8v-8H3zm6 6H5v-4h4v4zm4-16v8h8V3h-8zm6 6h-4V5h4v4zm-6 4v8h8v-8h-8zm6 6h-4v-4h4v4z'),
-  // add — Material Icons Filled
-  adopt: md('M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z'),
+  // cloud_download — Material Icons Filled. "Pull this peer's tile + its
+  // image into my hive" — a plain `add` (+) read as "create a blank tile"
+  // and gave no hint that the content/image comes FROM the peer.
+  adopt: md('M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM17 13l-5 5-5-5h3V9h4v4h3z'),
   // block — Material Icons Filled
   block: md('M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM4 12c0-4.42 3.58-8 8-8 1.85 0 3.55.63 4.9 1.69L5.69 16.9C4.63 15.55 4 13.85 4 12zm8 8c-1.85 0-3.55-.63-4.9-1.69L18.31 7.1C19.37 8.45 20 10.15 20 12c0 4.42-3.58 8-8 8z'),
   // delete — Material Icons Filled
@@ -193,6 +201,10 @@ const ICONS = {
   note: md('M19 3H4.99c-1.11 0-1.98.9-1.98 2L3 19c0 1.1.89 2 2 2h10l6-6V5c0-1.1-.9-2-2-2zM7 8h10v2H7V8zm5 6H7v-2h5v2zm2 5.5V14h5.5L14 19.5z'),
   // sync — Material Icons Filled
   sync: md('M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z'),
+  // extension (puzzle piece) — Material Icons Filled. "Features": opens the
+  // installer for a synced tile's branch so its scripts/packages can be
+  // turned on, separate from the visuals `sync` already folds in.
+  extension: md('M20.5 11H19V7c0-1.1-.9-2-2-2h-4V3.5C13 2.12 11.88 1 10.5 1S8 2.12 8 3.5V5H4c-1.1 0-1.99.9-1.99 2v3.8H3.5c1.49 0 2.7 1.21 2.7 2.7s-1.21 2.7-2.7 2.7H2V20c0 1.1.9 2 2 2h3.8v-1.5c0-1.49 1.21-2.7 2.7-2.7 1.49 0 2.7 1.21 2.7 2.7V22H17c1.1 0 2-.9 2-2v-4h1.5c1.38 0 2.5-1.12 2.5-2.5S21.88 11 20.5 11z'),
   // public/globe — Material Icons Filled (make THIS tile public: "the world")
   public: md('M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z'),
   // share — Material Icons Filled (make this tile + its whole BRANCH public)
@@ -206,6 +218,10 @@ export type IconRegistryEntry = {
   svgMarkup: string
   hoverTint?: number
   profile: OverlayProfileKey
+  /** Marks an entry EXPANDED from a provider that opted into the default
+   *  arrangement — `#getActiveNames` auto-joins it for its profile, so a
+   *  feature icon takes part without editing DEFAULT_ACTIVE. */
+  defaultActive?: boolean
   visibleWhen?: (ctx: OverlayTileContext) => boolean
   tintWhen?: OverlayTintFn
   /** i18n key for the short hint label (shown on sustained hover) */
@@ -232,14 +248,35 @@ const peerBroadcastsTile = (label: string): boolean => {
   return false
 }
 
+// True when this tile OBVIOUSLY carries a feature with a "scripts portion" —
+// i.e. one of its decoration kinds is owned by a registered visual bee
+// (website, dashboard, audio, …). This is the honest "has features" signal:
+// a visual bee IS the code/render-type the installer would turn on, whereas
+// plain images and pure-data decorations (contact cards, file attachments —
+// which register a layer-slot/icon, NOT a VisualBeeRegistry entry) are not.
+// Reads the same live registry the per-view adoption icons use, so new
+// community view-features participate automatically and a drone toggled off
+// in DCP drops out — no hardcoded allowlist. Synchronous: kindsForLabel is
+// the hot in-memory decoration index; byDecorationKind is a Map lookup.
+const tileHasVisualBeeFeature = (label: string): boolean => {
+  const registry = window.ioc.get<{ byDecorationKind?: (kind: string) => unknown }>(
+    '@diamondcoreprocessor.com/VisualBeeRegistry',
+  )
+  if (!registry?.byDecorationKind) return false
+  for (const kind of kindsForLabel(label)) {
+    if (registry.byDecorationKind(kind)) return true
+  }
+  return false
+}
+
 const ICON_REGISTRY: IconRegistryEntry[] = [
   // ── private profile ──
   { name: 'command', svgMarkup: ICONS.command, hoverTint: 0xa8ffd8, profile: 'private', labelKey: 'action.command', descriptionKey: 'action.command.description' },
   // 'edit' icon is provided by TileEditorDrone via IconProviderRegistry —
   // when the editor drone is toggled off it never registers, the icon
   // never appears, and the merged-available filter strips it from default
-  // arrangements. Same pattern for 'note' (NotesService) and 'reroll'
-  // (SubstrateDrone) — both registered by their owning drones.
+  // arrangements. Same pattern for 'note' (NotesService) — registered by
+  // its owning drone.
   { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage, labelKey: 'action.search', descriptionKey: 'action.search.description' },
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private', labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
@@ -285,6 +322,16 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // (name, at) identity makes it idempotent: same-sig aborts, a re-signed
   // publisher layer replaces your stale copy.
   { name: 'sync', svgMarkup: ICONS.sync, hoverTint: 0xa8d8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => peerBroadcastsTile(ctx.label), labelKey: 'action.sync', descriptionKey: 'action.sync.description' },
+  // `features` opens the installer focused on this tile's branch so the
+  // participant can VIEW the publisher's features and turn the scripts
+  // portion on. Paired with `sync` (which folds the visuals straight into
+  // the hive): sync = visuals now, features = scripts on demand. Shown ONLY
+  // when there are features to enable — the tile carries a decoration owned
+  // by a registered visual bee (tileHasVisualBeeFeature: an actual render
+  // feature with a scripts portion, NOT a plain image or pure-data card) AND
+  // a live peer is broadcasting this branch (so the installer has a sig to
+  // open). Click handled by SwarmAdoptDrone (action 'features'), like adopt/sync.
+  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => tileHasVisualBeeFeature(ctx.label) && peerBroadcastsTile(ctx.label), labelKey: 'action.features', descriptionKey: 'action.features.description' },
   // ── public-external profile ──
   { name: 'adopt', svgMarkup: ICONS.adopt, hoverTint: 0xa8ffd8, profile: 'public-external', labelKey: 'action.adopt', descriptionKey: 'action.adopt.description' },
   // 'hide' also lives in `public-own` (your own tile in public mode);
@@ -303,6 +350,12 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
   { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
   { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, profile: 'public-external', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
+  // NOTE: feature icons (e.g. `contact`) are NOT listed here. A feature
+  // contributes its overlay icon by registering ONE `IconProviderRegistry`
+  // provider declaring `profiles` + `defaultActive` + `visibleWhen` (see
+  // contact.drone.ts) — it then takes part in the overlay across profiles
+  // with no edit to this core catalog. ICON_REGISTRY is just the built-in
+  // chrome (command/search/remove/.../make-public/files).
 ]
 
 // Default active icons per profile (defines the fallback order).
@@ -311,14 +364,15 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 // in ICON_REGISTRY above; adopting a peer tile is handled by the
 // `public-external` profile (the tile flips kind once it's local).
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  'private': ['command', 'edit', 'note', 'reroll', 'remove', 'break-apart', 'files'],
+  'private': ['command', 'edit', 'note', 'remove', 'break-apart', 'files'],
   // World mode: ONLY the two share-toggles, none of the regular icons.
   'world': ['make-public', 'make-branch-public'],
   // Your own tile in public mode — same trash-bin remove that
   // private mode uses. Records a history op, can be undone. `sync`
-  // pulls the broadcasting peer's latest version of an adopted tile
-  // (only rendered while a live peer publishes the same name).
-  'public-own': ['sync', 'remove', 'break-apart', 'files'],
+  // folds the broadcasting peer's latest VISUALS into the tile in place;
+  // `features` opens the installer for that branch to turn its scripts on
+  // (both only rendered while a live peer publishes the same name).
+  'public-own': ['sync', 'features', 'remove', 'break-apart', 'files'],
   // Peer-only mesh tiles. Single-click `adopt` is the explicit
   // "I want to expand on this topic" action — writes the tile to
   // your local layer AND pulls the resources it references (images
@@ -369,7 +423,7 @@ type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 // adopt path directly (its own tile:action listener at
 // swarm-adopt.drone.ts:63). The legacy paired-channel 'adopt' / 'import'
 // handlers were retired with the paired-channel subsystem.
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'note', 'hide', 'break-apart', 'block', 'remove', 'reroll', 'make-public', 'make-branch-public'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'note', 'hide', 'break-apart', 'block', 'remove', 'make-public', 'make-branch-public'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -452,7 +506,29 @@ export class TileActionsDrone extends Drone {
   #mergedEntries(): IconRegistryEntry[] {
     const registry = window.ioc.get<IconProviderRegistryShape>('@hypercomb.social/IconProviderRegistry')
     const provided = registry?.all() ?? []
-    return [...ICON_REGISTRY, ...provided as IconRegistryEntry[]]
+    // Expand each provider into one per-profile catalog entry. A feature
+    // registers ONE provider declaring `profiles` (e.g. ['private','public-own']);
+    // expanding here is the single adapter point, so everything downstream
+    // (availability, descriptor build, arrange/pool) keeps dealing with plain
+    // single-profile entries — no name-collision, no per-feature core edits.
+    const expanded: IconRegistryEntry[] = []
+    for (const p of provided) {
+      const profiles = p.profiles ?? (p.profile ? [p.profile] : [])
+      for (const prof of profiles) {
+        expanded.push({
+          name: p.name,
+          svgMarkup: p.svgMarkup,
+          hoverTint: p.hoverTint,
+          profile: prof as OverlayProfileKey,
+          defaultActive: p.defaultActive,
+          visibleWhen: p.visibleWhen,
+          tintWhen: p.tintWhen,
+          labelKey: p.labelKey,
+          descriptionKey: p.descriptionKey,
+        })
+      }
+    }
+    return [...ICON_REGISTRY, ...expanded]
   }
 
   #reregisterAll(): void {
@@ -555,7 +631,22 @@ export class TileActionsDrone extends Drone {
     const merged = this.#mergedEntries()
     const available = new Set(merged.filter(e => e.profile === profile).map(e => e.name))
     const saved = this.#arrangement[profile]
-    const desired = (saved && saved.length > 0) ? saved : DEFAULT_ACTIVE[profile]
+    let desired: string[]
+    if (saved && saved.length > 0) {
+      desired = [...saved]
+    } else {
+      desired = [...DEFAULT_ACTIVE[profile]]
+      // Provider icons that opt into the default arrangement (defaultActive)
+      // auto-join here for their profile — so a feature's icon takes part
+      // without editing DEFAULT_ACTIVE. Insert before 'remove' so it stays the
+      // rightmost action.
+      for (const e of merged) {
+        if (!e.defaultActive || e.profile !== profile || desired.includes(e.name)) continue
+        const ri = desired.indexOf('remove')
+        if (ri >= 0) desired.splice(ri, 0, e.name)
+        else desired.push(e.name)
+      }
+    }
     // Filter out names whose providing drone is missing — covers both
     // saved arrangements with a now-uninstalled icon and defaults that
     // reference a toggled-off drone.
@@ -623,10 +714,6 @@ export class TileActionsDrone extends Drone {
 
       case 'block':
         this.#hideOrBlock(label, 'hc:blocked-tiles', 'tile:blocked')
-        break
-
-      case 'reroll':
-        void this.#rerollSubstrate(label)
         break
 
       case 'make-public': {
@@ -711,18 +798,6 @@ export class TileActionsDrone extends Drone {
     // on the next layer re-read (no worse than today's failure mode).
     EffectBus.emit('cell:removed', { cell: label, segments })
     await committer.update(segments, nextLayer)
-  }
-
-  async #rerollSubstrate(label: string): Promise<void> {
-    const svc = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SubstrateService') as
-      { rerollCell(label: string): Promise<boolean> } | undefined
-    if (svc && await svc.rerollCell(label)) {
-      // show-cell.drone listens for substrate:rerolled and clears its caches
-      // (cellImageCache, cellSubstrateCache, #layerCellsCache, renderedCellsKey)
-      // before requesting a render, so the new image shows up immediately.
-      EffectBus.emit('substrate:rerolled', { cell: label })
-      void new hypercomb().act()
-    }
   }
 
   #bulkRerollSelected(): void {

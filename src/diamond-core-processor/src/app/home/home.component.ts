@@ -23,6 +23,12 @@ import type { BeeDocEntry, TreeNode, TreeNodeKind } from '../core/tree-node'
 
 const DOMAINS_KEY = 'dcp.domains'
 
+// Per-package branch-name OVERRIDE — participant-local decoration
+// (localStorage), keyed by root sig. The deploy-time `label` is the
+// placeholder; a typed name overrides it. Same principle as domain
+// visibility: local-only, never in the lineage.
+const LABEL_KEY_PREFIX = 'dcp:label:'
+
 /** The always-first sibling: the active/logical install view — this IS the
  *  data plane (the hive), so it's labelled by the hive domain. */
 const LOGICAL_VIEW_NAME = 'hypercomb.io'
@@ -69,6 +75,14 @@ export interface DomainSection {
    *  (name, at), so the same tile name at two locations is TWO branches —
    *  the section dedup/replace rules must compare at too. */
   at?: string[]
+  /** Deploy-time branch name from the host manifest (sidecar metadata, NOT
+   *  part of rootSig). Shown as the version's handle / rename placeholder. */
+  label?: string
+  /** Deploy timestamp (ISO) from the host manifest — orders versions
+   *  chronologically so the newest is active and walkback reads in order. */
+  deployedAt?: string
+  /** Root sig of the version this one supersedes (the walkback chain link). */
+  previous?: string | null
 }
 
 export interface DomainGroup {
@@ -99,6 +113,11 @@ export class HomeComponent implements OnDestroy {
   // signal is just a reactivity trigger so the template re-renders when a
   // toggle flips. isDomainVisible() reads the service synchronously.
   readonly #visibilityVersion = signal(0)
+
+  // Reactivity trigger for per-package branch-name overrides (localStorage).
+  // displayLabel() reads localStorage synchronously; this signal makes the
+  // template re-render when a rename lands. Same pattern as visibility.
+  readonly #labelVersion = signal(0)
 
   // Reactivity trigger bumped after a logical recompute so any view reading
   // the logical (e.g. the visual-context nodes) re-renders. The logical
@@ -134,6 +153,9 @@ export class HomeComponent implements OnDestroy {
   readonly kindFilters = signal<Set<string>>(new Set())
   readonly layersCollapsed = signal(false)
   readonly showAllVersions = signal(false)
+  // The rootSig of the package whose branch name is currently being edited
+  // inline, or null when no rename input is open.
+  readonly editingLabelSig = signal<string | null>(null)
   readonly #savedExpandStates = new Map<string, boolean>()
   readonly filterKinds: { key: string, diamond: TreeNodeKind }[] = [
     { key: 'bee', diamond: 'bee' },
@@ -264,21 +286,30 @@ export class HomeComponent implements OnDestroy {
       group.sections.push(s)
     }
     const showAll = this.showAllVersions()
+    // Versions are ordered newest-first by deploy timestamp (ISO sorts
+    // chronologically); ties / missing `at` fall back to the richest tree
+    // (most items) so a resolved version beats an empty import-source marker.
+    // Manifest-sourced versions carry `deployedAt`; local promote-garbage does
+    // not, so it naturally sinks to the bottom of the chain.
+    const byRecency = (a: DomainSection, b: DomainSection): number => {
+      const at = (b.deployedAt ?? '').localeCompare(a.deployedAt ?? '')
+      if (at !== 0) return at
+      return (b.items?.length || 0) - (a.items?.length || 0)
+    }
     for (const group of groups.values()) {
-      if (!showAll && group.sections.length > 1) {
-        // Version-dedup applies to PACKAGE sections only — multiple package
-        // sections under one domain are versions of the same install, so
-        // show the best one (most items, so a resolved tree beats an empty
-        // import-source marker). CONTENT sections are adopted tiles, not
-        // versions — collapsing them into the pick hid dolphin behind the
-        // jwize.com manual-install section. They always render.
-        const packages = group.sections.filter(s => s.kind === 'package')
-        const content = group.sections.filter(s => s.kind !== 'package')
-        if (packages.length > 1) {
-          group.hiddenVersionCount = packages.length - 1
-          const best = [...packages].sort((a, b) => (b.items?.length || 0) - (a.items?.length || 0))[0]
-          group.sections = [best, ...content]
-        }
+      // Version ordering applies to PACKAGE sections only — multiple package
+      // sections under one domain are versions of the same install. CONTENT
+      // sections are adopted tiles, not versions (collapsing them hid dolphin
+      // behind the jwize.com manual-install section), so they always render.
+      const packages = group.sections.filter(s => s.kind === 'package').sort(byRecency)
+      const content = group.sections.filter(s => s.kind !== 'package')
+      if (!showAll && packages.length > 1) {
+        // Collapsed: show only the newest version; the rest hide behind +N.
+        group.hiddenVersionCount = packages.length - 1
+        group.sections = [packages[0], ...content]
+      } else {
+        // Expanded (or a single version): list every version newest-first.
+        group.sections = [...packages, ...content]
       }
     }
     // Library/source siblings, sorted alphabetically (diamondcoreprocessor.com,
@@ -1369,6 +1400,65 @@ export class HomeComponent implements OnDestroy {
     this.#toggleState.notifyChanged()
   }
 
+  /** The participant-local rename for a package (localStorage), or '' if none.
+   *  The #labelVersion() read registers the reactive dependency. */
+  labelOverride(rootSig: string): string {
+    this.#labelVersion()                        // reactive dependency
+    if (!rootSig) return ''
+    try { return localStorage.getItem(LABEL_KEY_PREFIX + rootSig) ?? '' } catch { return '' }
+  }
+
+  /** The handle shown for a version: local rename → deploy label → short sig. */
+  displayLabel(section: DomainSection): string {
+    return this.labelOverride(section.rootSig)
+      || section.label
+      || (section.rootSig ? section.rootSig.slice(0, 10) : '')
+  }
+
+  /** Persist a participant-local rename for a package. Empty clears it (falls
+   *  back to the deploy label / short sig). */
+  renameLabel(section: DomainSection, name: string): void {
+    if (!section.rootSig) return
+    const key = LABEL_KEY_PREFIX + section.rootSig
+    const trimmed = (name ?? '').trim()
+    try {
+      if (trimmed) localStorage.setItem(key, trimmed)
+      else localStorage.removeItem(key)
+    } catch { /* storage unavailable — non-fatal */ }
+    this.#labelVersion.update(v => v + 1)
+  }
+
+  // Set while cancelling an inline rename so the blur fired by removing the
+  // input from the DOM does not re-commit the discarded text.
+  #cancelLabelEdit = false
+
+  /** Open the inline rename input for a package version. */
+  startLabelEdit(section: DomainSection): void {
+    if (!section.rootSig) return
+    this.editingLabelSig.set(section.rootSig)
+  }
+
+  /** Commit an inline rename from the input element and close the editor. */
+  commitLabelEdit(section: DomainSection, event: Event): void {
+    if (this.#cancelLabelEdit) { this.#cancelLabelEdit = false; return }
+    const value = (event.target as HTMLInputElement | null)?.value ?? ''
+    this.renameLabel(section, value)
+    this.editingLabelSig.set(null)
+  }
+
+  /** Discard an in-progress rename (Escape) without committing the input. */
+  cancelLabelEdit(): void {
+    this.#cancelLabelEdit = true
+    this.editingLabelSig.set(null)
+  }
+
+  /** Deploy timestamp formatted for display (ISO → "YYYY-MM-DD HH:mm"). */
+  deployedDisplay(section: DomainSection): string {
+    const at = section.deployedAt
+    if (!at) return ''
+    return at.replace('T', ' ').slice(0, 16)
+  }
+
 
   // tree interactions
   async onExpandToggle(node: TreeNode): Promise<void> {
@@ -2043,10 +2133,10 @@ export class HomeComponent implements OnDestroy {
     for (const domain of doms) {
       const domainName = new URL(domain).hostname
 
-      // fetch all root signatures from the manifest
-      const rootSigs = await this.#resolver.fetchAllRootSignatures(domain)
+      // fetch all packages from the manifest — sig + sidecar branch metadata
+      const packages = await this.#resolver.fetchPackages(domain)
 
-      if (rootSigs.length === 0) {
+      if (packages.length === 0) {
         // no packages found — show placeholder with error
         results.push({
           domain, domainName, displayDomain: domainName, rootSig: '', originalRootSig: '', items: [],
@@ -2056,13 +2146,16 @@ export class HomeComponent implements OnDestroy {
         continue
       }
 
-      // create a section per root signature — manifest installs are
-      // package provenance (functionality), never logical-view content
-      for (const rootSig of rootSigs) {
+      // create a section per package — manifest installs are package
+      // provenance (functionality), never logical-view content. Carry the
+      // deploy-time branch name + timestamp + chain link so the installer can
+      // name and order the versions for walkback.
+      for (const pkg of packages) {
         results.push({
-          domain, domainName, displayDomain: domainName, rootSig, originalRootSig: rootSig, items: [],
+          domain, domainName, displayDomain: domainName, rootSig: pkg.sig, originalRootSig: pkg.sig, items: [],
           loading: true, error: null, installStatus: null, patches: [], enabled: true,
-          kind: 'package'
+          kind: 'package',
+          label: pkg.label, deployedAt: pkg.at, previous: pkg.previous,
         })
       }
     }

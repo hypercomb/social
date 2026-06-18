@@ -1,35 +1,44 @@
 // diamondcoreprocessor.com/commands/view.bee.ts
 //
-// ViewBee — surfaces the available "view behaviors" for the current node
-// as toggleable icons on the right side of the command line.
+// ViewBee — surfaces the available "view behaviors" for the current node as
+// toggleable icons on the right side of the command line, and flips the
+// GLOBAL render surface when one is toggled.
 //
 // A view behavior (see VisualBeeRegistry) is an alternate rendering of the
-// same branch — e.g. `/website` renders the layer tree as HTML pages
-// instead of the hex grid. Each registered view declares a Material
-// `toggleIcon`. When the node the user is sitting on carries a decoration
-// of that view's kind (i.e. the branch was built as a website), this bee
-// emits a toggle descriptor; the command line renders it as a stateful
-// on/off icon. Clicking it flips the active view.
+// tree — e.g. `/website` renders cells as HTML pages instead of the hex
+// grid. The render surface is a SINGLE GLOBAL flag (ViewModeService): one
+// `/website on` turns websites on everywhere there's a page, one `/website
+// off` turns them off, bare `/website` toggles. There is no per-branch
+// marker state any more — websites are a global view, and WHICH cells
+// actually have a page is decided entirely by the `visual:website:page`
+// decorations the build pass writes (independent, signature-addressed,
+// undoable resources living on each cell's own layer — no central map, no
+// cross-cell dependency).
 //
-// Scope (MVP): the toggle drives the GLOBAL ViewModeService (hexagons ⇄
-// <view>) — behaviorally identical to per-branch while a single view
-// branch exists, because the icon only appears INSIDE that branch. The
-// planned follow-up is per-branch "effective mode" (toggle from the
-// installed top, cascading down, peers independent): it swaps the
-// render-gate input in show-cell / site-view from the global mode to an
-// effective-mode resolver keyed by an out-of-layer per-branch marker.
-// Until then the icon is a contextual shortcut for the existing /website
-// toggle.
+// The command-line toggle appears as soon as ANY page of the view's kind
+// exists (presence via the decoration-kind index) — so the moment the build
+// skill writes pages, the toggle shows up, including at the root. Clicking
+// it flips the global ViewMode; its active state mirrors the flag. When the
+// user is standing ON a page, its own decoration payload supplies the toggle
+// glyph/label so every site keeps its distinct icon.
+//
+// `/website here` (handled in website.queen.ts) is a SEPARATE gesture: it
+// drops a `visual:website:pending` decoration on the current cell for the
+// NEXT gen pass to pick up. That marker is build-intent, not a render
+// surface — it never flips ViewMode and is not what lights this toggle.
 //
 // Mirrors DashboardBee's shape: registry-owned, lineage-driven, emits over
 // EffectBus (`view-toggles:changed`), handles clicks via `view:toggle`.
 
 import { Worker, EffectBus } from '@hypercomb/core'
 import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-registry.js'
+import { hasAnyDecorationKind } from './decoration-kind-index.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 /** Fallback glyph when a view forgets to declare a Material toggleIcon. */
 const FALLBACK_TOGGLE_ICON = 'visibility'
+/** The render surface websites toggle against. */
+const DEFAULT_SURFACE = 'hexagons'
 
 type LineageLike = EventTarget & {
   domain?: () => string
@@ -38,9 +47,15 @@ type LineageLike = EventTarget & {
 type ViewModeLike = EventTarget & {
   mode: string
   is(name: string): boolean
+  setMode(next: string): void
   toggle(a?: string, b?: string): string
 }
 type LayerLike = { decorations?: unknown; context?: unknown; [k: string]: unknown }
+/** A parsed decoration record from a cell's `decorations` slot. `payload`
+ *  is the bee-specific bag — for the website bee it carries `htmlSig` (the
+ *  generated page, read by SiteViewDrone) and optionally `icon` / `label`
+ *  (this website's distinct toggle glyph + tooltip, read here). */
+type DecorationRecord = { kind: string; payload?: Record<string, unknown> }
 type HistoryServiceLike = {
   sign(l: { domain?: () => string; explorerSegments?: () => readonly string[] }): Promise<string>
   currentLayerAt(locationSig: string): Promise<LayerLike | null>
@@ -48,7 +63,17 @@ type HistoryServiceLike = {
 }
 type HistoryCursorLike = { currentLayerSig?: string }
 type StoreLike = { getResource(sig: string): Promise<Blob | null> }
-type RegistryLike = Pick<VisualBeeRegistry, 'all'>
+type RegistryLike = Pick<VisualBeeRegistry, 'all' | 'get'>
+
+/** A `behavior: 'navigation'` view's controller (e.g. DashboardBee).
+ *  ViewBee resolves it via the descriptor's `controllerKey` and delegates
+ *  the toggle's availability, active-state, and click action — instead of
+ *  the global-ViewMode flip used for `render` behaviors. */
+type NavigationController = {
+  isAvailable(): boolean
+  isActive(): boolean
+  toggleBehavior(): void
+}
 
 export type ViewToggle = {
   readonly view: string
@@ -62,7 +87,7 @@ export class ViewBee extends Worker {
   override genotype = 'view'
 
   public override description =
-    'ViewBee — surfaces available view behaviors (e.g. website) for the current node as toggleable command-line icons.'
+    'ViewBee — surfaces available view behaviors (e.g. website) as command-line toggles and flips the global render surface.'
 
   protected override emits: string[] = ['view-toggles:changed']
 
@@ -79,15 +104,40 @@ export class ViewBee extends Worker {
     vm?.addEventListener?.('change', () => this.#schedule())
 
     // Decoration hydration + live decoration mutations can change which
-    // views are available at the current node — recompute on both.
+    // views are available — recompute on both. (When the build skill writes
+    // pages, `decorations:changed` populates the kind index, and this makes
+    // the toggle appear without a navigation.)
     EffectBus.on('render:cell-count', () => this.#schedule())
     EffectBus.on('decorations:changed', () => this.#schedule())
 
-    // Command-line click → flip the view. ViewMode's 'change' re-triggers
-    // a recompute so the toggle's active state updates.
-    EffectBus.on<{ view?: string }>('view:toggle', ({ view }) => {
+    // A navigation behavior (the dashboard) was minted / opened / closed —
+    // its toggle's availability or active-state may have changed.
+    EffectBus.on('dashboard:state', () => this.#schedule())
+
+    // Command-line click and the `/website` slash command both arrive here.
+    // A `navigation` behavior delegates to its controller (open/close a
+    // lineage); a `render` behavior flips the GLOBAL ViewMode directly. There
+    // is no marker round-trip any more — the surface is one global flag, so
+    // `setMode` sticks (no recompute reverts it).
+    //
+    //   plain click / bare `/website`        → mode 'toggle': flip hex ⇄ view
+    //   `/website on`                         → mode 'on': force the view on
+    //   cmd|long-press click / `/website off` → off / disable: back to hexagons
+    EffectBus.on<{ view?: string; mode?: 'on' | 'off' | 'toggle'; disable?: boolean }>('view:toggle', ({ view, mode, disable }) => {
       if (!view) return
-      get<ViewModeLike>('@hypercomb.social/ViewMode')?.toggle?.('hexagons', view)
+      const registry = get<RegistryLike>('@diamondcoreprocessor.com/VisualBeeRegistry')
+      const desc = registry?.get?.(view)
+      if (desc?.behavior === 'navigation') {
+        const controller = desc.controllerKey ? get<NavigationController>(desc.controllerKey) : undefined
+        controller?.toggleBehavior?.()
+        return
+      }
+      const vmNow = get<ViewModeLike>('@hypercomb.social/ViewMode')
+      if (!vmNow) return
+      if (disable || mode === 'off') vmNow.setMode(DEFAULT_SURFACE)
+      else if (mode === 'on') vmNow.setMode(view)
+      else vmNow.toggle(DEFAULT_SURFACE, view)
+      this.#schedule()
     })
 
     // First paint — without this the toggles wouldn't appear until the
@@ -111,31 +161,47 @@ export class ViewBee extends Worker {
     if (!views.length || !vm) { this.#emit([]); return }
 
     const layer = await this.#currentNodeLayer()
-    const kinds = await this.#decorationKinds(layer)
-
-    // Legacy website pages live in the `context` slot rather than as a
-    // `visual:website:page` decoration. Mirror SiteViewDrone's fallback so
-    // the toggle appears for un-migrated sites too — i.e. the toggle shows
-    // exactly when the renderer would render a page. Computed lazily (only
-    // when a view lacks a decoration) so we don't head-sniff context
-    // resources on every navigation.
-    let contextChecked = false
-    let contextHasPage = false
-    const contextPageAvailable = async (): Promise<boolean> => {
-      if (!contextChecked) { contextChecked = true; contextHasPage = await this.#contextHasHtmlPage(layer) }
-      return contextHasPage
-    }
+    const records = await this.#decorationRecords(layer)
 
     const toggles: ViewToggle[] = []
     for (const v of views) {
       if (!v?.view) continue
-      let available = !!v.decorationKind && kinds.has(v.decorationKind)
-      if (!available && v.view === 'website') available = await contextPageAvailable()
-      if (!available) continue
+
+      // Navigation behaviors (e.g. the dashboard) are not render surfaces —
+      // availability and active-state come from a controller bee, and the
+      // toggle navigates rather than switching ViewMode. Delegate and skip
+      // the decoration/ViewMode machinery entirely.
+      if (v.behavior === 'navigation') {
+        const controller = v.controllerKey ? get<NavigationController>(v.controllerKey) : undefined
+        if (!controller?.isAvailable?.()) continue
+        toggles.push({
+          view: v.view,
+          icon: v.toggleIcon || FALLBACK_TOGGLE_ICON,
+          label: v.view,
+          active: !!controller.isActive?.(),
+        })
+        continue
+      }
+
+      // Render behavior (e.g. website). The toggle is GLOBAL: it appears as
+      // soon as ANY page of this view's kind exists anywhere (presence via
+      // the decoration-kind index), so the moment the build pass writes pages
+      // the toggle shows up — including at the root. The active surface is the
+      // single global ViewMode flag; clicking flips it.
+      if (!v.decorationKind || !hasAnyDecorationKind(v.decorationKind)) continue
+
+      // Per-website toggle identity. When the user is standing ON a page of
+      // this kind, prefer that cell's own icon (and optional label tooltip)
+      // from its decoration payload, so every website carries its own glyph.
+      // Falls back to the view's static `toggleIcon` ('web'), then the
+      // generic glyph, when the user isn't on a decorated cell.
+      const payload = records.find(r => r.kind === v.decorationKind)?.payload
+      const payloadIcon = typeof payload?.['icon'] === 'string' ? (payload['icon'] as string).trim() : ''
+      const payloadLabel = typeof payload?.['label'] === 'string' ? (payload['label'] as string).trim() : ''
       toggles.push({
         view: v.view,
-        icon: v.toggleIcon || FALLBACK_TOGGLE_ICON,
-        label: v.view,
+        icon: payloadIcon || v.toggleIcon || FALLBACK_TOGGLE_ICON,
+        label: payloadLabel || v.view,
         active: vm.is(v.view),
       })
     }
@@ -162,48 +228,30 @@ export class ViewBee extends Worker {
     return history.currentLayerAt(locSig).catch(() => null)
   }
 
-  /** Decoration kinds present on the layer's `decorations` slot. The
-   *  general availability signal — works for any registered view. */
-  async #decorationKinds(layer: LayerLike | null): Promise<Set<string>> {
-    const out = new Set<string>()
+  /** Parsed decoration records on the layer's `decorations` slot. Used here
+   *  only for the per-view payload (the website's `icon` / `label`) when the
+   *  user is standing on a decorated cell. */
+  async #decorationRecords(layer: LayerLike | null): Promise<DecorationRecord[]> {
+    const out: DecorationRecord[] = []
     const decorations = Array.isArray(layer?.decorations) ? layer!.decorations as unknown[] : []
     if (!decorations.length) return out
     const store = get<StoreLike>('@hypercomb.social/Store')
     for (const sig of decorations) {
       if (typeof sig !== 'string' || !SIG_RE.test(sig)) continue
-      const kind = await this.#fetchKind(store, sig)
-      if (kind) out.add(kind)
+      const rec = await this.#fetchRecord(store, sig)
+      if (rec) out.push(rec)
     }
     return out
   }
 
-  /** True when the layer's legacy `context` slot holds an HTML-shaped
-   *  resource — i.e. SiteViewDrone would render a page here. Mirrors the
-   *  head probe in site-view.drone.ts #findContextPage. */
-  async #contextHasHtmlPage(layer: LayerLike | null): Promise<boolean> {
-    const context = Array.isArray(layer?.context) ? layer!.context as unknown[] : []
-    if (!context.length) return false
-    const store = get<StoreLike>('@hypercomb.social/Store')
-    if (!store?.getResource) return false
-    for (const sig of context) {
-      if (typeof sig !== 'string' || !SIG_RE.test(sig)) continue
-      try {
-        const blob = await store.getResource(sig)
-        if (!blob) continue
-        const head = await blob.slice(0, 64).text()
-        if (/^\s*(?:﻿)?(<!doctype|<html|<svg|<\?xml)/i.test(head)) return true
-      } catch { /* skip malformed */ }
-    }
-    return false
-  }
-
-  async #fetchKind(store: StoreLike | undefined, sig: string): Promise<string | null> {
+  async #fetchRecord(store: StoreLike | undefined, sig: string): Promise<DecorationRecord | null> {
     if (!store?.getResource) return null
     try {
       const blob = await store.getResource(sig)
       if (!blob) return null
-      const rec = JSON.parse(await blob.text()) as { kind?: string }
-      return typeof rec?.kind === 'string' ? rec.kind : null
+      const rec = JSON.parse(await blob.text()) as { kind?: string; payload?: Record<string, unknown> }
+      if (typeof rec?.kind !== 'string') return null
+      return { kind: rec.kind, payload: rec.payload }
     } catch { return null }
   }
 

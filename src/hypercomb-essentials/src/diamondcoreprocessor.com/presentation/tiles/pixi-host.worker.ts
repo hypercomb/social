@@ -297,8 +297,23 @@ export class PixiHostWorker extends Worker {
       // an undefined pan means the VP read may still be in flight
       // (defer to show-cell's #applyViewportFromSnapshot).
       if (shouldRefit(vp?.lastZoom, vp?.lastPan)) {
-        const zoom = (window as any).ioc?.get('@diamondcoreprocessor.com/ZoomDrone')
-        zoom?.zoomToFit?.(true)
+        // ...but NOT while a widget has narrowed the canvas below the window.
+        // The history viewer reserves a left column via a `#pixi-host` width
+        // rule, so `renderer.screen` is narrower than the window. zoomToFit
+        // computes the fit against window.innerWidth/Height, so refitting onto
+        // a narrowed canvas lands the grid shrunk and off-centre — the "a
+        // widget resized the tiles" glitch. The recenter above is correct on a
+        // narrowed canvas either way; only the RESCALE uses the wrong (full-
+        // window) basis, so skip just the refit while narrowed. (Closing the
+        // panel un-crops the canvas without a window 'resize', so no stale
+        // refit fires then.)
+        const screen = app.renderer.screen
+        const narrowed = screen.width < window.innerWidth - 4
+          || screen.height < window.innerHeight - 4
+        if (!narrowed) {
+          const zoom = (window as any).ioc?.get('@diamondcoreprocessor.com/ZoomDrone')
+          zoom?.zoomToFit?.(true)
+        }
       }
     }
 

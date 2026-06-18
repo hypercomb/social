@@ -44,6 +44,7 @@
 // changes take effect on the next event, no reload required.
 
 import { EffectBus } from '@hypercomb/core'
+import { decorationClosureSigs } from './decoration-closure.js'
 
 export type HostSyncKind = 'layer' | 'bee' | 'dependency' | 'resource'
 
@@ -179,6 +180,12 @@ export class HostSyncService extends EventTarget {
    *  re-runnable but pointless to repeat — layer bytes are immutable). */
   #walkedLayers = new Set<string>()
 
+  /** Decoration resources whose content-closure (website page body + the
+   *  images/stylesheets that body embeds) was already staged this session.
+   *  Dedups the descent so a chrome stylesheet shared across many pages is
+   *  parsed once, not once per page. */
+  #walkedResources = new Set<string>()
+
   /** Enqueue everything a layer references, recursively. Slot → kind:
    *  `cells`/`layers`/`children` are child LAYERS (recurse via enqueue →
    *  walk), `bees`/`dependencies` keep their kind, every other sig-array
@@ -204,9 +211,35 @@ export class HostSyncService extends EventTarget {
         if (!SIG_RE.test(ref) || ref === sig) continue
         try {
           const refBytes = await this.#readLocalBytes(ref, kind)
-          if (refBytes) await this.enqueue(ref, kind, refBytes)
+          if (refBytes) {
+            await this.enqueue(ref, kind, refBytes)
+            // Decoration-descent: a `decorations` slot ref is an opaque leaf to
+            // the slot walk, but its CONTENT (a website page's htmlSig body +
+            // the images/stylesheets that body embeds) must ALSO reach the host
+            // or a witnessing/importing peer 404s on every page asset. A no-op
+            // for ordinary resources (decorationClosureSigs returns []).
+            if (kind === 'resource') await this.#enqueueDecorationClosure(ref, refBytes)
+          }
         } catch { /* not held locally — nothing to push */ }
       }
+    }
+  }
+
+  /** Stage a decoration's content-closure to the host: the website page body
+   *  (`payload.htmlSig`) and every image / stylesheet that body embeds. Like
+   *  the rest of the push walk this reads LOCAL bytes only — it stages what we
+   *  HOLD, so it must run on the AUTHORING machine (an importing tab can't push
+   *  bytes it doesn't have). Session-deduped via #walkedResources. */
+  readonly #enqueueDecorationClosure = async (sig: string, recordBytes: ArrayBuffer): Promise<void> => {
+    if (this.#walkedResources.has(sig)) return
+    this.#walkedResources.add(sig)
+    const nested = await decorationClosureSigs(recordBytes, s => this.#readLocalBytes(s, 'resource'))
+    for (const ref of nested) {
+      if (!SIG_RE.test(ref) || ref === sig) continue
+      try {
+        const bytes = await this.#readLocalBytes(ref, 'resource')
+        if (bytes) await this.enqueue(ref, 'resource', bytes)
+      } catch { /* not held locally — nothing to push */ }
     }
   }
 

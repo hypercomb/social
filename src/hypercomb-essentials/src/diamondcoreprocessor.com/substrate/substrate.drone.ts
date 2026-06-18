@@ -13,49 +13,9 @@ import type { SubstrateService } from './substrate.service.js'
 
 const get = (key: string) => (window as any).ioc?.get?.(key)
 
-// SVG markup for the reroll tile icon. Owned by this drone so that
-// when substrate is toggled off in DCP the icon never reaches the tile
-// overlay arranger. Mirror of the editor pattern. Material Design
-// `refresh` (filled) — solid white fill so the Pixi sprite-tint
-// pipeline preserves colour; matches the rest of the tile-overlay
-// icon set in tile-actions.
-const REROLL_ICON_SVG =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>`
-
-type IconProvider = {
-  name: string
-  owner?: string
-  svgMarkup: string
-  profile: string
-  hoverTint?: number
-  visibleWhen?: (ctx: any) => boolean
-  labelKey?: string
-  descriptionKey?: string
-}
-
-type IconProviderRegistry = {
-  add(p: IconProvider): void
-  remove(name: string): void
-}
-
 export class SubstrateDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override description = 'Auto-assign substrate background images to new cells'
-
-  constructor() {
-    super()
-    const iconRegistry = get('@hypercomb.social/IconProviderRegistry') as IconProviderRegistry | undefined
-    iconRegistry?.add({
-      name: 'reroll',
-      owner: '@diamondcoreprocessor.com/SubstrateDrone',
-      svgMarkup: REROLL_ICON_SVG,
-      profile: 'private',
-      hoverTint: 0xd8c8ff,
-      visibleWhen: (ctx) => ctx.hasSubstrate,
-      labelKey: 'action.reroll',
-      descriptionKey: 'action.reroll.description',
-    })
-  }
 
   protected override listens = [
     'cell:added', 'cell:removed',

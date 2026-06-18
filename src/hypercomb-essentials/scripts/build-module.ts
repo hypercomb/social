@@ -56,6 +56,23 @@ const EMIT_DOMAIN_ROOT_NAMESPACE = false
 // content manifest (replaces latest.json — supports multiple entry points)
 const MANIFEST_FILE = 'manifest.json'
 
+// Genesis label for a freshly built package. This is a STABLE sidecar handle —
+// the current git branch (or 'genesis' outside a repo) — NOT a timestamp, so a
+// rebuild of identical content keeps manifest.json byte-identical and the
+// skip-write below still fires. The deploy step (deploy-azure.ps1) is what
+// chains "<previous>-updated-<stamp>" against the remote manifest; locally we
+// just stamp the branch. The label never enters rootLayerSig (see the manifest
+// comment below) — it is discovery metadata, not part of the package identity.
+const resolveGenesisLabel = (): string => {
+  try {
+    const r = spawnSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' })
+    const branch = (r.status === 0 ? r.stdout : '').trim()
+    return branch && branch !== 'HEAD' ? branch : 'genesis'
+  } catch {
+    return 'genesis'
+  }
+}
+
 // -------------------------------------------------
 // build cache — Merkle tree with mtime pre-filter
 // -------------------------------------------------
@@ -1046,10 +1063,15 @@ const main = async (): Promise<void> => {
   console.log(`[build-module] bags: dependencies=${dependenciesBag.slice(0, 12)} bees=${beesBag.slice(0, 12)}`)
 
   // content manifest — package entry keyed by root signature.
-  // No version field; the package's identity is its rootLayerSig and
-  // its meaning is its sig arrays. Adding a version pollutes the
-  // canonical bytes with ceremony that doesn't affect what the
-  // package IS.
+  // The package's identity is its rootLayerSig (the merkle hash of the layer
+  // tree); its meaning is its sig arrays. `label`/`previous` are SIDECAR
+  // discovery metadata — a human-readable branch name and the version this
+  // supersedes — in the same non-identity category as dependenciesBag/beesBag.
+  // They change manifest.json bytes but NOT rootLayerSig, so naming a package
+  // never redefines it. (`at`, the deploy timestamp, is intentionally NOT set
+  // here — a fresh timestamp every build would churn the local manifest and
+  // defeat the skip-write below. deploy-azure.ps1 sets `at` + chains the label
+  // against the remote manifest at deploy time.)
   const packageEntry = {
     layers: Array.from(layers.keys()).sort((a, b) => a.localeCompare(b)),
     bees: Array.from(resourceBytes.keys()).sort((a, b) => a.localeCompare(b)),
@@ -1057,6 +1079,8 @@ const main = async (): Promise<void> => {
     beeDeps: Object.fromEntries(beeDepsMap),
     dependenciesBag,
     beesBag,
+    label: resolveGenesisLabel(),
+    previous: null as string | null,
   }
 
   // ── Closure check ────────────────────────────────────────────────

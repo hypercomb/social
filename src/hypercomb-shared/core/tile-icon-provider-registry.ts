@@ -17,12 +17,33 @@ export type TileIconProvider = {
   name: string
   owner?: string
   svgMarkup: string
-  profile: string
+  /**
+   * Overlay profiles this icon participates in. Prefer `profiles` (an icon can
+   * belong to several — e.g. `['private','public-own']` — from ONE declaration,
+   * with no duplication and no name-collision). `profile` (single) is kept for
+   * back-compat and read as `[profile]`. A provider that sets neither never
+   * surfaces.
+   */
+  profiles?: readonly string[]
+  profile?: string
+  /**
+   * Join the default overlay arrangement automatically for each of its
+   * `profiles`, so a feature's icon "takes part" without anyone editing the
+   * core DEFAULT_ACTIVE list. Inserted before `remove` (kept rightmost).
+   * Defaults to false — opt in.
+   */
+  defaultActive?: boolean
   hoverTint?: number
   visibleWhen?: (ctx: any) => boolean
   tintWhen?: (ctx: any) => number | null | undefined
   labelKey?: string
   descriptionKey?: string
+}
+
+/** Normalized profile list for a provider (folds the legacy single `profile`
+ *  into the `profiles` array). The one place the two forms are reconciled. */
+export function iconProviderProfiles(p: { profile?: string; profiles?: readonly string[] }): readonly string[] {
+  return p.profiles ?? (p.profile ? [p.profile] : [])
 }
 
 export class IconProviderRegistry extends EventTarget {
@@ -48,7 +69,7 @@ export class IconProviderRegistry extends EventTarget {
   }
 
   byProfile(profile: string): TileIconProvider[] {
-    return this.all().filter(p => p.profile === profile)
+    return this.all().filter(p => iconProviderProfiles(p).includes(profile))
   }
 }
 

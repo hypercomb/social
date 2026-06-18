@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 460" width="880" height="460" role="img">
+  <defs>
+    <linearGradient id="hearth" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f3e3c6"/><stop offset="1" stop-color="#e7c9a0"/>
+    </linearGradient>
+    <radialGradient id="hearth-sun" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffe9c2" stop-opacity="0.95"/><stop offset="1" stop-color="#ffe9c2" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="0" y="0" width="880" height="460" rx="26" fill="url(#hearth)"/>
+  
+    <ellipse cx="440" cy="430" rx="520" ry="90" fill="#52715d" opacity="0.25"/>
+    <path d="M0 360 Q220 300 440 350 T880 340 V460 H0 Z" fill="#52715d" opacity="0.5"/>
+    <circle cx="440" cy="250" r="170" fill="url(#hearth-sun)"/>
+    <g>
+      <path d="M300 250 L440 150 L580 250 Z" fill="#9c6b41"/>
+      <rect x="330" y="250" width="220" height="150" rx="10" fill="#c08a5e"/>
+      <rect x="400" y="300" width="80" height="100" rx="8" fill="#e8b87f"/>
+      <path d="M440 320 c-14 -16 -38 -2 -2 26 c38 -28 14 -42 2 -26 z" fill="#9c6b41"/>
+      <rect x="350" y="278" width="44" height="40" rx="6" fill="#f6ecda" opacity="0.85"/>
+      <rect x="492" y="278" width="44" height="40" rx="6" fill="#f6ecda" opacity="0.85"/>
+    </g>
+</svg>

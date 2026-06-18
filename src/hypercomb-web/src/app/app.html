@@ -7,17 +7,24 @@
 </div>
 }
 <router-outlet></router-outlet>
-<!-- Pixi canvas hosts the hexagon surface. Hidden when ViewMode != 'hexagons'
-     so other rendering surfaces (website, future modes) take over without
-     fighting it for input. The Pixi runtime keeps running so a toggle
-     back is instant — no rebuild of textures / atlases. -->
-<div id="pixi-host" [style.display]="viewMode() === 'hexagons' ? 'block' : 'none'" style="z-index: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
+<!-- Pixi canvas hosts the hexagon surface. The pixi worker REPARENTS this node
+     to <body> (position:fixed, z-index:59989, pointer-events:none) at boot, so
+     Angular `:host > #pixi-host` CSS can't reach it. It is hidden in website
+     mode by the GLOBAL `body.hc-view-website #pixi-host{,canvas}` rule in
+     styles.scss — a body-descendant selector DOES reach the reparented node —
+     using visibility (NOT display:none, which collapses it to 0×0 and corrupts
+     scale/zoom) plus pointer-events:none on the <canvas> (whose Pixi-set
+     pointer-events:auto otherwise EATS website clicks at z 59989, one above the
+     site overlay's 59988). Single source of truth — see styles.scss. -->
+<div id="pixi-host" style="z-index: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
 <hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() ? 'hidden' : null"></hc-controls-bar>
 <hc-selection-context-menu></hc-selection-context-menu>
 <hc-history-viewer></hc-history-viewer>
 <hc-notes-strip></hc-notes-strip>
 <hc-notes-viewer></hc-notes-viewer>
 <hc-files-viewer></hc-files-viewer>
+<hc-contact-form></hc-contact-form>
+<hc-contact-hover></hc-contact-hover>
 <hc-tile-editor></hc-tile-editor>
 <hc-portal-overlay></hc-portal-overlay>
 <hc-confirm-dialog></hc-confirm-dialog>

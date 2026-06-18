@@ -1,6 +1,6 @@
 // hypercomb-shared/ui/_header-bar.scss
 // Shared header-bar styles consumed by both web and dev apps.
-// 2.8rem on desktop, 3.5rem on touch devices.
+// 2.5rem on desktop, 3.5rem on touch devices.
 // The header-bar itself is the bordered container; children are
 // borderless flex items that fill it seamlessly.
 
@@ -13,27 +13,35 @@
 }
 
 // ── layout ───────────────────────────────────────────────
+//
+// Cold, clean, professional chrome: a slim frosted-glass bar with a quiet
+// steel hairline (the 126,182,214 tuple matches the command-shell accent so
+// the frame and its contents read as one cohesive surface). No vivid blue,
+// no heavy inset — the bar recedes and lets the typed command carry the eye.
 
 .header-bar {
   display: flex;
   align-items: stretch;
-  height: 2.8rem;
+  height: 2.5rem;
   padding: 0.1rem 0.25rem;
-  background: rgba(8, 18, 28, 0.85);
-  // Resting border is dimmed to 50%; it brightens to full when the command
-  // line is active. `.input-open` is mobile-only (app.ts: inputOpen = mobile
-  // && visible), so `:focus-within` is the real "active" signal on desktop.
-  border: 1.5px solid rgba(77, 166, 255, 0.5);
-  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.4), inset 0 0 8px rgba(0, 0, 0, 0.15);
+  background: rgba(8, 16, 26, 0.72);
+  backdrop-filter: blur(10px);
+  // Resting border is a faint steel hairline; it firms up — never glares —
+  // when the command line is active. `.input-open` is mobile-only (app.ts:
+  // inputOpen = mobile && visible), so `:focus-within` is the real "active"
+  // signal on desktop.
+  border: 1px solid rgba(126, 182, 214, 0.22);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.25);
   position: relative;
   z-index: 60000;
   transition: border-color var(--md-dur-medium, 200ms) var(--md-easing-standard, ease);
 }
 
-// Command line active — focused (desktop) or revealed on mobile — full border.
+// Command line active — focused (desktop) or revealed on mobile. A restrained
+// firm-up of the steel hairline, not a bright glow.
 .header-bar:focus-within,
 .header-bar.input-open {
-  border-color: rgba(77, 166, 255, 1);
+  border-color: rgba(126, 182, 214, 0.5);
 }
 
 // ── hci icon font ────────────────────────────────────────
@@ -80,7 +88,7 @@
   flex-shrink: 0;
   padding: 0 1.2rem;
   border: none;
-  border-left: 1.5px solid rgba(77, 166, 255, 0.4);
+  border-left: 1px solid rgba(126, 182, 214, 0.28);
   border-radius: 0;
   background: transparent;
   cursor: pointer;
@@ -132,7 +140,7 @@
   min-width: 0;
   padding: 0 0.6rem;
   border: none;
-  border-left: 1.5px solid rgba(77, 166, 255, 0.4);
+  border-left: 1px solid rgba(126, 182, 214, 0.28);
   background: transparent;
   font: 600 0.6rem/1 ui-monospace, sfmono-regular, menlo, consolas, monospace;
   letter-spacing: 0.12em;
@@ -153,14 +161,15 @@
 // ═══════════════════════════════════════════════════════════
 
 // ── 13" laptop band (1367–2559px) ─────────────────────────
-// Zoom the whole header 34% so the command-line + mesh-header chips
-// read at a comfortable size on a typical laptop. `zoom` scales both
-// rendering and layout — the bar genuinely takes 34% more vertical
-// space, and the hint-bar below shifts down to match (see
-// `hint-bar.component.scss`).
+// A gentle 15% zoom so the command-line + mesh-header chips read at a
+// comfortable size on a typical laptop without the bar going chunky.
+// `zoom` scales both rendering and layout — the bar takes 15% more
+// vertical space, and the breadcrumb / dock-left rail / hint-bar below
+// shift down by the same factor to stay flush (see controls-bar and
+// hint-bar component styles, and `#computePillZoom()` for the bottom pill).
 @media (min-width: #{$bp-desktop}) and (max-width: #{$bp-desktop-wide - 1}) {
   .header-bar {
-    zoom: 1.34;
+    zoom: 1.15;
   }
 }
 

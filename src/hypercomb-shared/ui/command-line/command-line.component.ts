@@ -36,6 +36,9 @@ const MIC_LONG_PRESS_MS = 300
 /** How long the undo/redo arrows linger after the last undo/redo activity. */
 const HISTORY_NAV_HIDE_MS = 3000
 
+/** How long the lock indicator stays lit after a pan/zoom-while-locked attempt. */
+const LOCKED_FLASH_MS = 1100
+
 /** Matches label:tagName or label:tagName(#color) (plain colon syntax, no brackets). */
 const TAG_ASSIGN_RE = /^([^:]+):([^(]+)(?:\(([^)]+)\))?$/
 
@@ -538,6 +541,38 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   readonly #viewToggles = signal<readonly { view: string; icon: string; label: string; active: boolean }[]>([])
   readonly viewToggles = this.#viewToggles.asReadonly()
 
+  // ── Solomon's Key game toggle (header icon) ───────────
+  //
+  // The SolomonDrone announces availability + open/closed state over
+  // `solomon:state`. The icon appears once the game module registers and
+  // glows while the overlay is open. A click routes back as `solomon:toggle`.
+  readonly #solomonAvailable = signal(false)
+  readonly #solomonActive = signal(false)
+  readonly showSolomonToggle = this.#solomonAvailable.asReadonly()
+  readonly solomonActive = this.#solomonActive.asReadonly()
+
+  // ── Bubble Bobble game toggle (header icon) ───────────
+  //
+  // The BubbleDrone announces availability + open/closed state over
+  // `bubble:state`. Sibling of the Solomon toggle: the icon appears once the
+  // game module registers and glows while the overlay is open. A click routes
+  // back as `bubble:toggle`.
+  readonly #bubbleAvailable = signal(false)
+  readonly #bubbleActive = signal(false)
+  readonly showBubbleToggle = this.#bubbleAvailable.asReadonly()
+  readonly bubbleActive = this.#bubbleActive.asReadonly()
+
+  // ── Arkanoid game toggle (header icon) ────────────────
+  //
+  // The ArkanoidDrone announces availability + open/closed state over
+  // `arkanoid:state`. Sibling of the Solomon / Bubble toggles: the icon appears
+  // once the game module registers and glows while the overlay is open. A click
+  // routes back as `arkanoid:toggle`.
+  readonly #arkanoidAvailable = signal(false)
+  readonly #arkanoidActive = signal(false)
+  readonly showArkanoidToggle = this.#arkanoidAvailable.asReadonly()
+  readonly arkanoidActive = this.#arkanoidActive.asReadonly()
+
   // ── open-for-subscribers toggle ───────────────────────
   //
   // Floating icon inside the command-line that flips
@@ -549,6 +584,26 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   readonly #openForSubscribers = signal(true)  // matches swarm default
   readonly openForSubscribers = this.#openForSubscribers.asReadonly()
   readonly showOpenForSubscribersToggle = this.#swarmAvailable.asReadonly()
+
+  // ── locked-attempt flash ──────────────────────────────
+  //
+  // A brief lock icon that flashes to the left of the right-side icons
+  // when the user tries to pan or zoom while input is locked (the editor
+  // overlay is open). Driven by EffectBus `input:locked-attempt`, which
+  // the InputGate emits (throttled) from its claim() lock-rejection path
+  // and the wheel-zoom handler. Purely informational — auto-clears.
+  readonly #lockedFlash = signal(false)
+  readonly lockedFlash = this.#lockedFlash.asReadonly()
+  #lockedFlashTimer: ReturnType<typeof setTimeout> | null = null
+
+  #flashLocked(): void {
+    this.#lockedFlash.set(true)
+    if (this.#lockedFlashTimer) clearTimeout(this.#lockedFlashTimer)
+    this.#lockedFlashTimer = setTimeout(() => {
+      this.#lockedFlash.set(false)
+      this.#lockedFlashTimer = null
+    }, LOCKED_FLASH_MS)
+  }
 
   public constructor() {
     console.log('[command-line] initialized with url segments:', this.navigation.segments())
@@ -620,6 +675,25 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         'view-toggles:changed',
         (p) => this.#viewToggles.set(Array.isArray(p?.toggles) ? p!.toggles : []),
       ),
+      // Solomon's Key header toggle — availability + open/closed state from
+      // the SolomonDrone; late-subscriber replay seeds the current state.
+      EffectBus.on<{ available?: boolean; active?: boolean }>('solomon:state', (p) => {
+        this.#solomonAvailable.set(!!p?.available)
+        this.#solomonActive.set(!!p?.active)
+      }),
+      // Bubble Bobble header toggle — same shape as Solomon's, from BubbleDrone.
+      EffectBus.on<{ available?: boolean; active?: boolean }>('bubble:state', (p) => {
+        this.#bubbleAvailable.set(!!p?.available)
+        this.#bubbleActive.set(!!p?.active)
+      }),
+      // Arkanoid header toggle — same shape as Solomon's, from ArkanoidDrone.
+      EffectBus.on<{ available?: boolean; active?: boolean }>('arkanoid:state', (p) => {
+        this.#arkanoidAvailable.set(!!p?.available)
+        this.#arkanoidActive.set(!!p?.active)
+      }),
+      // Pan/zoom attempted while input is locked — flash the lock icon.
+      // Transient (no replay), so a fresh mount never flashes spuriously.
+      EffectBus.on('input:locked-attempt', () => this.#flashLocked()),
     )
 
     // Restore sticky indicators from localStorage. Producer-owned pills
@@ -691,10 +765,27 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     swarm.setOpenForSubscribers(!current)
   }
 
-  /** Forward a view-toggle click to ViewBee, which flips the active view. */
-  onViewToggle(view: string): void {
-    if (!view) return
-    EffectBus.emit('view:toggle', { view })
+  /** Forward a view-toggle click to ViewBee, which flips the single GLOBAL
+   *  render surface. A plain click toggles the view on/off; `disable`
+   *  (cmd/long-press) forces it off ("back to tiles"). */
+  onViewToggle(e: { view: string; disable: boolean }): void {
+    if (!e?.view) return
+    EffectBus.emit('view:toggle', { view: e.view, disable: e.disable })
+  }
+
+  /** Forward a click on the game header icon to the SolomonDrone. */
+  onSolomonToggle(): void {
+    EffectBus.emit('solomon:toggle', {})
+  }
+
+  /** Forward a click on the Bubble Bobble header icon to the BubbleDrone. */
+  onBubbleToggle(): void {
+    EffectBus.emit('bubble:toggle', {})
+  }
+
+  /** Forward a click on the Arkanoid header icon to the ArkanoidDrone. */
+  onArkanoidToggle(): void {
+    EffectBus.emit('arkanoid:toggle', {})
   }
 
   onIndicatorDismiss(key: string): void {
@@ -1472,6 +1563,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       clearTimeout(this.#historyNavHideTimer)
       this.#historyNavHideTimer = null
     }
+    if (this.#lockedFlashTimer) {
+      clearTimeout(this.#lockedFlashTimer)
+      this.#lockedFlashTimer = null
+    }
     for (const unsub of this.#indicatorUnsubs) unsub()
     window.removeEventListener('navigate', this.#onNavigate)
     window.removeEventListener('popstate', this.#onNavigate)
@@ -1555,6 +1650,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       const lastSlash = trimmed.lastIndexOf('/')
       const next = lastSlash >= 0 ? trimmed.slice(0, lastSlash + 1) : ''
       this.#setShellValue(next, true)
+      return
+    }
+
+    // Escape on an empty line → exit command-line mode entirely: blur the
+    // input so keystrokes return to the canvas. This is the "type, then get
+    // out" gesture — without it a focused-but-empty command line traps every
+    // keystroke with no way back to the hex view except the mouse.
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      this.shell?.blur()
       return
     }
 

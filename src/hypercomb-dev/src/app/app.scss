@@ -7,7 +7,11 @@
 // mounts its own iframe at #hc-site-view-host on top of everything;
 // cells without a context page show only the docked header-bar.
 :host.view-website {
-  & > *:not(.header-bar):not(router-outlet) {
+  // #pixi-host is excluded — the pixi worker reparents it to <body> at boot, so
+  // this `:host > *` sweep can't reach it anyway. It is hidden via the inline
+  // [style.visibility] binding in app.html (visibility, not display, so the
+  // canvas never resizes to 0). See app.html.
+  & > *:not(.header-bar):not(router-outlet):not(#pixi-host) {
     display: none !important;
   }
 
@@ -86,7 +90,8 @@
   100% { transform: translate(2%, -1%); }
 }
 
-:host.intro-active #pixi-host,
+// (#pixi-host omitted — reparented to <body>, so this `:host` selector can't
+// reach it; the intro-lock's max z-index already covers the canvas anyway.)
 :host.intro-active hc-controls-bar,
 :host.intro-active hc-tile-editor,
 :host.intro-active hc-portal-overlay,

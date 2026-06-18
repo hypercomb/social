@@ -88,10 +88,38 @@ export type VisualBeeDescriptor = {
    * Material Symbols ligature shown when this view is offered as a toggle
    * on the right side of the command line (e.g. `'web'` for website).
    * Distinct from `iconName` (which keys into IconProviderRegistry for the
-   * adoption chips). Optional — ViewBee falls back to a generic glyph when
+   * adoption chips).
+   *
+   * This is the DEFAULT / fallback glyph for the view as a whole. A toggle
+   * can override it PER-INSTANCE via the node's decoration: ViewBee reads
+   * `payload.icon` (and optional `payload.label`) off the node's
+   * `<decorationKind>` record and prefers it, so every website carries its
+   * own distinct glyph and the user can change it later by rewriting the
+   * decoration. `toggleIcon` is used only when the decoration doesn't set
+   * one. Optional — ViewBee falls back to a generic glyph when both are
    * absent.
    */
   readonly toggleIcon?: string
+
+  /**
+   * What kind of view this is:
+   *   - `'render'` (default when absent): an alternate RENDER of the same
+   *     branch (e.g. website). Availability comes from a decoration/page on
+   *     the node; toggling drives `ViewModeService` (hexagons ⇄ view).
+   *   - `'navigation'`: not a render surface but a place you go (e.g. the
+   *     dashboard bag). Availability, active-state, and the toggle action are
+   *     delegated to a controller bee (see `controllerKey`); toggling
+   *     navigates into / back out of a lineage instead of switching render mode.
+   */
+  readonly behavior?: 'render' | 'navigation'
+
+  /**
+   * For `behavior: 'navigation'` views only. IoC key of the bee that owns
+   * this view's navigation. ViewBee resolves it and delegates to its
+   * `isAvailable()`, `isActive()`, and `toggleBehavior()` methods — the
+   * navigation-behavior controller contract.
+   */
+  readonly controllerKey?: string
 
   /**
    * Optimization-record `kind` string written by this bee. Decoration

@@ -7,10 +7,19 @@
 <hc-notes-strip></hc-notes-strip>
 <hc-notes-viewer></hc-notes-viewer>
 <hc-files-viewer></hc-files-viewer>
+<hc-contact-form></hc-contact-form>
+<hc-contact-hover></hc-contact-hover>
 <hc-activity-log></hc-activity-log>
 <router-outlet />
-<!-- Hexagon canvas hides via [style.display] when ViewMode != 'hexagons'. -->
-<div id="pixi-host" [style.display]="viewMode() === 'hexagons' ? 'block' : 'none'" style="z-index: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
+<!-- Hexagon canvas. The pixi worker reparents this node to <body>
+     (position:fixed, z-index:59989, pointer-events:none) at boot, so Angular
+     `:host > #pixi-host` CSS can't reach it. Hidden in website mode by the
+     global `body.hc-view-website #pixi-host{,canvas}` rule in styles.scss
+     (body-descendant selector reaches the reparented node): visibility (NOT
+     display:none → 0×0 corrupts zoom) + pointer-events:none on the <canvas>
+     (its Pixi pointer-events:auto otherwise eats site clicks at z 59989, above
+     the site overlay's 59988). Single source of truth — see styles.scss. -->
+<div id="pixi-host" style="z-index: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%;"></div>
 <hc-controls-bar [meshPublic]="meshPublic()" (meshToggled)="toggleMesh()" [style.visibility]="viewActive() ? 'hidden' : null"></hc-controls-bar>
 <hc-selection-context-menu></hc-selection-context-menu>
 <hc-history-viewer></hc-history-viewer>

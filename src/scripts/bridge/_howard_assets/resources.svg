@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 460" width="880" height="460" role="img">
+  <defs>
+    <linearGradient id="lantern" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f0e2c6"/><stop offset="1" stop-color="#dcc59a"/>
+    </linearGradient>
+    <radialGradient id="lantern-sun" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffe9c2" stop-opacity="0.95"/><stop offset="1" stop-color="#ffe9c2" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="0" y="0" width="880" height="460" rx="26" fill="url(#lantern)"/>
+  
+    <circle cx="440" cy="250" r="190" fill="url(#lantern-sun)"/>
+    <g transform="translate(440 270)">
+      <path d="M-180 0 Q-90 -40 0 -16 Q90 -40 180 0 L180 70 Q90 30 0 54 Q-90 30 -180 70 Z" fill="#f6ecda"/>
+      <path d="M0 -16 V54" stroke="#9c6b41" stroke-width="4"/>
+      <g stroke="#52715d" stroke-width="3" opacity="0.5">
+        <path d="M-150 6 Q-80 -22 -16 -4"/><path d="M-150 24 Q-80 -4 -16 14"/>
+        <path d="M150 6 Q80 -22 16 -4"/><path d="M150 24 Q80 -4 16 14"/>
+      </g>
+    </g>
+</svg>

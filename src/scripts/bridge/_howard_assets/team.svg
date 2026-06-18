@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 460" width="880" height="460" role="img">
+  <defs>
+    <linearGradient id="circle" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e9ddc6"/><stop offset="1" stop-color="#d8c39d"/>
+    </linearGradient>
+    <radialGradient id="circle-sun" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffe9c2" stop-opacity="0.95"/><stop offset="1" stop-color="#ffe9c2" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="0" y="0" width="880" height="460" rx="26" fill="url(#circle)"/>
+  <circle cx="440" cy="230" r="64" fill="#c08a5e" opacity="0.35"/><circle cx="440" cy="230" r="150" fill="none" stroke="#f6ecda" stroke-opacity="0.6" stroke-width="4" stroke-dasharray="2 16" stroke-linecap="round"/><g transform="translate(440.0 80.0)">
+        <circle cx="0" cy="-10" r="14" fill="#e8b87f"/>
+        <path d="M-18 24 c2 -16 8 -22 18 -22 s16 6 18 22 z" fill="#e8b87f"/>
+      </g><g transform="translate(557.3 136.5)">
+        <circle cx="0" cy="-10" r="14" fill="#f6ecda"/>
+        <path d="M-18 24 c2 -16 8 -22 18 -22 s16 6 18 22 z" fill="#f6ecda"/>
+      </g><g transform="translate(586.2 263.4)">
+        <circle cx="0" cy="-10" r="14" fill="#f6ecda"/>
+        <path d="M-18 24 c2 -16 8 -22 18 -22 s16 6 18 22 z" fill="#f6ecda"/>
+      </g><g transform="translate(505.1 365.1)">
+        <circle cx="0" cy="-10" r="14" fill="#f6ecda"/>
+        <path d="M-18 24 c2 -16 8 -22 18 -22 s16 6 18 22 z" fill="#f6ecda"/>
+      </g><g transform="translate(374.9 365.1)">
+        <circle cx="0" cy="-10" r="14" fill="#f6ecda"/>
+        <path d="M-18 24 c2 -16 8 -22 18 -22 s16 6 18 22 z" fill="#f6ecda"/>
+      </g><g transform="translate(293.8 263.4)">
+        <circle cx="0" cy="-10" r="14" fill="#f6ecda"/>
+        <path d="M-18 24 c2 -16 8 -22 18 -22 s16 6 18 22 z" fill="#f6ecda"/>
+      </g><g transform="translate(322.7 136.5)">
+        <circle cx="0" cy="-10" r="14" fill="#f6ecda"/>
+        <path d="M-18 24 c2 -16 8 -22 18 -22 s16 6 18 22 z" fill="#f6ecda"/>
+      </g>
+</svg>

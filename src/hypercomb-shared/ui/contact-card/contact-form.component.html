@@ -1,0 +1,71 @@
+@if (visible()) {
+  <div class="contact-form-backdrop" (click)="close()"></div>
+  <section
+    class="contact-form-panel"
+    role="dialog"
+    aria-modal="true"
+    (keydown)="onKey($event)"
+    [attr.aria-label]="'contact.form.title' | t"
+  >
+    <header class="contact-form-header">
+      <span class="contact-form-title">{{ 'contact.form.title' | t }}</span>
+      <span class="contact-form-cell">{{ cellLabel() }}</span>
+      <button class="contact-form-close" type="button" (click)="close()" [attr.aria-label]="'contact.form.cancel' | t">×</button>
+    </header>
+
+    <div class="contact-form-body">
+      <!-- Name is the tile's own grammar — read-only, not an input. -->
+      <div class="contact-field contact-name-fixed">
+        <span class="contact-label">{{ 'contact.field.name' | t }}</span>
+        <span class="contact-name-value">{{ cellLabel() }}</span>
+      </div>
+
+      <div class="contact-row">
+        <label class="contact-field">
+          <span class="contact-label">{{ 'contact.field.organization' | t }}</span>
+          <input name="organization" type="text" [(ngModel)]="organization" autocomplete="off" />
+        </label>
+        <label class="contact-field">
+          <span class="contact-label">{{ 'contact.field.title' | t }}</span>
+          <input name="title" type="text" [(ngModel)]="title" autocomplete="off" />
+        </label>
+      </div>
+
+      <div class="contact-row">
+        <label class="contact-field">
+          <span class="contact-label">{{ 'contact.field.phone' | t }}</span>
+          <input name="phone" type="tel" [(ngModel)]="phone" autocomplete="off" />
+        </label>
+        <label class="contact-field">
+          <span class="contact-label">{{ 'contact.field.email' | t }}</span>
+          <input name="email" type="email" [(ngModel)]="email" autocomplete="off" />
+        </label>
+      </div>
+
+      <label class="contact-field">
+        <span class="contact-label">{{ 'contact.field.website' | t }}</span>
+        <input name="website" type="url" [(ngModel)]="website" autocomplete="off" />
+      </label>
+
+      <label class="contact-field">
+        <span class="contact-label">{{ 'contact.field.address' | t }}</span>
+        <input name="address" type="text" [(ngModel)]="address" autocomplete="off" />
+      </label>
+
+      <label class="contact-field">
+        <span class="contact-label">{{ 'contact.field.note' | t }}</span>
+        <textarea name="note" rows="2" [(ngModel)]="note"></textarea>
+      </label>
+    </div>
+
+    <footer class="contact-form-footer">
+      <label class="contact-import" [title]="'contact.form.import' | t">
+        <input type="file" accept=".vcf,text/vcard,text/x-vcard" (change)="onImport($event)" hidden />
+        <span>{{ 'contact.form.import' | t }}</span>
+      </label>
+      <span class="contact-form-spacer"></span>
+      <button class="contact-btn ghost" type="button" (click)="close()">{{ 'contact.form.cancel' | t }}</button>
+      <button class="contact-btn primary" type="button" (click)="save()" [disabled]="!canSave">{{ 'contact.form.save' | t }}</button>
+    </footer>
+  </section>
+}

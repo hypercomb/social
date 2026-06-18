@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 460" width="880" height="460" role="img">
+  <defs>
+    <linearGradient id="path" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#e6dcc8"/><stop offset="1" stop-color="#cdbf9c"/>
+    </linearGradient>
+    <radialGradient id="path-sun" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#ffe9c2" stop-opacity="0.95"/><stop offset="1" stop-color="#ffe9c2" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect x="0" y="0" width="880" height="460" rx="26" fill="url(#path)"/>
+  
+    <path d="M0 250 H880 V460 H0 Z" fill="#6f9079" opacity="0.6"/>
+    <circle cx="700" cy="200" r="56" fill="#e8b87f"/>
+    <g fill="#f6ecda">
+      <ellipse cx="160" cy="400" rx="58" ry="22"/>
+      <ellipse cx="320" cy="360" rx="50" ry="19"/>
+      <ellipse cx="470" cy="330" rx="44" ry="17"/>
+      <ellipse cx="610" cy="300" rx="38" ry="15"/>
+    </g>
+    <g stroke="#f6ecda" stroke-opacity="0.45" stroke-width="3" fill="none">
+      <path d="M120 430 H760"/>
+    </g>
+</svg>

@@ -1,0 +1,77 @@
+@for (panel of panels(); track panel.id) {
+  <aside
+    class="contact-hover-panel"
+    [class.pinned]="!panel.ephemeral"
+    [class.peek]="panel.ephemeral"
+    [style.left.px]="panel.pos.x"
+    [style.top.px]="panel.pos.y"
+    (pointerenter)="onPeekEnter(panel)"
+    (pointerleave)="onPeekLeave(panel)"
+    (pointerdown)="onPanelFocus(panel)"
+    role="dialog"
+    [attr.aria-label]="'contact.hover.title' | t"
+  >
+    <header
+      class="contact-hover-header"
+      [class.static]="panel.ephemeral"
+      (pointerdown)="onHeaderDown($event, panel)"
+    >
+      @if (!panel.ephemeral) {
+        <span class="contact-drag-grip" aria-hidden="true">⠿</span>
+      }
+      <span class="contact-hover-title">{{ 'contact.hover.title' | t }}</span>
+      <span class="contact-hover-cell">{{ panel.label }}</span>
+      @if (!panel.ephemeral) {
+        <button
+          class="contact-hover-close"
+          type="button"
+          (click)="closePanel(panel.id)"
+          (pointerdown)="$event.stopPropagation()"
+          [attr.aria-label]="'contact.hover.close' | t"
+        >×</button>
+      }
+    </header>
+
+    <div class="contact-hover-body">
+      @for (c of panel.contacts; track c.decorationSig) {
+        <article class="contact-card">
+          <div class="contact-card-head">
+            <span class="contact-name">{{ c.name }}</span>
+            @if (c.title || c.organization) {
+              <span class="contact-org">
+                {{ c.title }}@if (c.title && c.organization) { · }{{ c.organization }}
+              </span>
+            }
+          </div>
+
+          <ul class="contact-lines">
+            @if (c.phone) {
+              <li><span class="contact-key">{{ 'contact.field.phone' | t }}</span>
+                <a [href]="'tel:' + c.phone">{{ c.phone }}</a></li>
+            }
+            @if (c.email) {
+              <li><span class="contact-key">{{ 'contact.field.email' | t }}</span>
+                <a [href]="'mailto:' + c.email">{{ c.email }}</a></li>
+            }
+            @if (c.website) {
+              <li><span class="contact-key">{{ 'contact.field.website' | t }}</span>
+                <a [href]="websiteHref(c.website)" target="_blank" rel="noopener noreferrer">{{ c.website }}</a></li>
+            }
+            @if (c.address) {
+              <li><span class="contact-key">{{ 'contact.field.address' | t }}</span>
+                <span class="contact-val">{{ c.address }}</span></li>
+            }
+            @if (c.note) {
+              <li class="contact-note"><span class="contact-val">{{ c.note }}</span></li>
+            }
+          </ul>
+
+          <div class="contact-card-actions">
+            <button class="contact-mini primary" type="button" (click)="saveVCard(c)">{{ 'contact.hover.save' | t }}</button>
+            <button class="contact-mini ghost" type="button" (click)="remove(panel, c)" [attr.aria-label]="'contact.hover.remove' | t">×</button>
+          </div>
+        </article>
+      }
+    </div>
+  </aside>
+}

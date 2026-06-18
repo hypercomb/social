@@ -1,0 +1,186 @@
+// hypercomb-shared/ui/contact-card/contact-form.component.scss
+//
+// Centered "add a contact" dialog. Mint accent (#a8ffd8) matches the
+// contact overlay icon's hoverTint. Cold, clean chrome — frosted dark
+// surface, steel hairline, no flashy effects.
+
+$accent: #a8ffd8;
+
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 100004;
+  pointer-events: none;
+}
+
+.contact-form-backdrop {
+  pointer-events: auto;
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 6, 10, 0.45);
+  backdrop-filter: blur(1.5px);
+}
+
+.contact-form-panel {
+  pointer-events: auto;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(420px, calc(100vw - 2rem));
+  max-height: calc(100vh - 3rem);
+  display: flex;
+  flex-direction: column;
+  background: rgba(14, 14, 22, 0.97);
+  border: 1px solid rgba($accent, 0.45);
+  border-radius: 10px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba($accent, 0.06) inset;
+  font-family: var(--hc-mono, system-ui);
+  color: #f3f3f3;
+  outline: none;
+}
+
+.contact-form-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid rgba($accent, 0.22);
+}
+
+.contact-form-title {
+  font-size: 0.9rem;
+  letter-spacing: 0.05em;
+  color: rgba($accent, 0.95);
+}
+
+.contact-form-cell {
+  flex: 1;
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.55);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contact-form-close {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.25rem;
+
+  &:hover { color: $accent; }
+}
+
+.contact-form-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+.contact-row {
+  display: flex;
+  gap: 0.7rem;
+
+  .contact-field { flex: 1; min-width: 0; }
+}
+
+.contact-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.contact-label {
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+input,
+textarea {
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: #f3f3f3;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 5px;
+  padding: 0.45rem 0.55rem;
+  outline: none;
+  transition: border-color 150ms ease, background 150ms ease;
+
+  &:focus {
+    border-color: rgba($accent, 0.7);
+    background: rgba($accent, 0.06);
+  }
+}
+
+textarea { resize: vertical; }
+
+// Name is fixed to the tile's grammar — shown, not edited.
+.contact-name-value {
+  font-size: 1rem;
+  font-weight: 600;
+  color: #fff;
+  padding: 0.4rem 0.55rem;
+  border-radius: 5px;
+  background: rgba($accent, 0.08);
+  border: 1px solid rgba($accent, 0.22);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.contact-form-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.contact-form-spacer { flex: 1; }
+
+.contact-import {
+  cursor: pointer;
+  font-size: 0.75rem;
+  color: rgba($accent, 0.85);
+  border: 1px dashed rgba($accent, 0.4);
+  border-radius: 5px;
+  padding: 0.35rem 0.6rem;
+  transition: background 150ms ease, border-color 150ms ease;
+
+  &:hover { background: rgba($accent, 0.1); border-color: rgba($accent, 0.7); }
+}
+
+.contact-btn {
+  font-family: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border-radius: 5px;
+  padding: 0.4rem 0.85rem;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+
+  &.ghost {
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: rgba(255, 255, 255, 0.7);
+
+    &:hover { border-color: rgba(255, 255, 255, 0.4); color: #fff; }
+  }
+
+  &.primary {
+    background: rgba($accent, 0.16);
+    border: 1px solid rgba($accent, 0.6);
+    color: $accent;
+
+    &:hover:not(:disabled) { background: rgba($accent, 0.28); color: #fff; border-color: $accent; }
+    &:disabled { opacity: 0.4; cursor: not-allowed; }
+  }
+}

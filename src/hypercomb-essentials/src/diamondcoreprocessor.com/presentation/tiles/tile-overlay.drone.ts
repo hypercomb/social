@@ -410,9 +410,9 @@ export class TileOverlayDrone extends Drone {
       })
 
       // substrate:applied runs via an in-place buffer path that doesn't re-emit
-      // render:cell-count, so the reroll icon's visibleWhen=hasSubstrate check
-      // would stay false until the next full render. Track it incrementally
-      // and refresh per-tile visibility so the reroll icon appears immediately.
+      // render:cell-count, so any icon's visibleWhen=hasSubstrate check would
+      // stay false until the next full render. Track it incrementally and
+      // refresh per-tile visibility so substrate-gated icons appear immediately.
       this.onEffect<{ cell: string }>('substrate:applied', ({ cell }) => {
         if (!cell) return
         this.#substrateLabels.add(cell)
@@ -675,13 +675,29 @@ export class TileOverlayDrone extends Drone {
     const key = this.#resolveProfileKey()
     this.#activeProfileKey = key
 
-    // Collect descriptors for this profile, build buttons
-    // Sort so 'remove' is always the rightmost action
-    // Filter out actions whose genotype is currently hidden
-    const descs = [...this.#registeredDescriptors.values()]
-      .filter(d => d.profile === key)
-      .filter(d => !d.genotype || this.#genotypeVisible.get(d.genotype) !== false)
-      .sort((a, b) => (a.name === 'remove' ? 1 : 0) - (b.name === 'remove' ? 1 : 0))
+    // Build this profile's icon set from its OWN active-order list — NOT by
+    // filtering #registeredDescriptors on `desc.profile`. That map is keyed by
+    // name, so an icon declared for several profiles (e.g. `contact`, `remove`,
+    // `files`) collides: only the last-emitted profile's descriptor survives,
+    // which wrongly dropped those icons from every OTHER profile (the contact
+    // icon never appearing in solo/private was this bug). #activeOrder tracks
+    // per-profile membership correctly, and the per-profile descriptors for a
+    // given name are functionally identical (same svg / visibleWhen / tint), so
+    // resolving each name to its stored descriptor here is safe.
+    // 'remove' stays rightmost.
+    const order = this.#activeOrder.get(key) ?? []
+    const seen = new Set<string>()
+    const descs: OverlayActionDescriptor[] = []
+    for (const name of order) {
+      if (seen.has(name)) continue
+      seen.add(name)
+      const desc = this.#registeredDescriptors.get(name)
+      if (!desc) continue
+      if (desc.genotype && this.#genotypeVisible.get(desc.genotype) === false) continue
+      descs.push(desc)
+    }
+    descs.sort((a, b) => (a.name === 'remove' ? 1 : 0) - (b.name === 'remove' ? 1 : 0))
+
     for (const desc of descs) {
       const btn = new HexIconButton({
         size: DEFAULT_ICON_SIZE,
@@ -693,7 +709,7 @@ export class TileOverlayDrone extends Drone {
       this.#actions.push({
         name: desc.name,
         button: btn,
-        profile: desc.profile,
+        profile: key,
         genotype: desc.genotype,
         visibleWhen: desc.visibleWhen,
         tintWhen: desc.tintWhen,
@@ -1412,14 +1428,16 @@ export class TileOverlayDrone extends Drone {
       // Ctrl/Meta held: track position but hide overlay (selection mode, not navigation)
       if (e.ctrlKey || e.metaKey) {
         this.#overlay.visible = false
-        this.emitEffect('tile:hover', { q: axial.q, r: axial.r })
+        this.emitEffect('tile:hover', { q: axial.q, r: axial.r, label: entry?.label ?? null })
         return
       }
 
       this.#positionOverlay(axial.q, axial.r)
       this.#updateCellLabel(axial.q, axial.r)
       this.#updatePerTileVisibility()
-      this.emitEffect('tile:hover', { q: axial.q, r: axial.r })
+      // Carry the hovered tile's label so consumers (avatar swarm, contact
+      // hover panel) can react without re-deriving from the occupied map.
+      this.emitEffect('tile:hover', { q: axial.q, r: axial.r, label: entry?.label ?? null })
     }
 
     // Ctrl/Meta held but hex didn't change — still hide overlay
@@ -1888,7 +1906,7 @@ export class TileOverlayDrone extends Drone {
       this.#overlay.visible = occupied && !this.#editing
       if (this.#hexBg) this.#hexBg.hide()
       // Individual icon visibility is managed solely by #updatePerTileVisibility —
-      // icons stay active during selection so per-tile actions (reroll, edit, etc.)
+      // icons stay active during selection so per-tile actions (edit, note, etc.)
       // still work. Clicking the tile body (not an icon) falls through to tile:click.
       return
     }

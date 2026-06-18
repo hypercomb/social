@@ -35,7 +35,7 @@ import {
   readImagesFromHandle,
   isFolderAccessSupported,
 } from './folder-handles.js'
-import { readTilePropertiesAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig } from '../editor/tile-properties.js'
+import { readTilePropertiesAt, readTilePropsSigAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig } from '../editor/tile-properties.js'
 
 const PROPS_FILE = '0000'
 const HIVE_KEY = 'substrate'                 // per-hive override (path string)
@@ -473,55 +473,19 @@ export class SubstrateService extends EventTarget {
 
     await this.#preloadAtlas(images)
     await this.#fillPropsPool(images)
-    void this.#migrateLegacySubstrateProps()
-    // Reconcile the label-index image assignments into the CANONICAL props
-    // (background; idempotent) — without this the association only exists in
-    // this browser's localStorage and adopted/synced copies render imageless.
+    // Reconcile canonical <-> index BOTH ways (background; idempotent): stamp
+    // index-only images into the CANONICAL slot so they travel with the layer,
+    // AND seed the local index from canonical so an imaged tile is never
+    // missing its index entry on this device (adopted / synced / cross-device).
     void this.reconcileCanonicalImageStamps()
   }
 
-  /**
-   * One-time cleanup: existing substrate-applied tiles in localStorage point
-   * to old-format props (no `flat.small.image`). Detect and remove those
-   * entries so the next render reports them as blank and applyToAllBlanks
-   * gives them a fresh pool entry containing both orientation variants.
-   */
-  async #migrateLegacySubstrateProps(): Promise<void> {
-    const FLAG = 'hc:substrate-flat-format-v1'
-    if (localStorage.getItem(FLAG) === 'true') return
-    const store = this.#store()
-    if (!store) return
-
-    try {
-      const indexKey = 'hc:tile-props-index'
-      const index: Record<string, string> = JSON.parse(localStorage.getItem(indexKey) ?? '{}')
-      const seenSigs = new Map<string, boolean>() // propsSig → isLegacySubstrate
-      let changed = false
-
-      for (const [label, propsSig] of Object.entries(index)) {
-        if (typeof propsSig !== 'string' || !propsSig) continue
-        let legacy = seenSigs.get(propsSig)
-        if (legacy === undefined) {
-          try {
-            const blob = await store.getResource(propsSig)
-            if (!blob) { seenSigs.set(propsSig, false); continue }
-            const parsed = JSON.parse(await blob.text())
-            legacy = parsed?.substrate === true && !parsed?.flat?.small?.image
-          } catch {
-            legacy = false
-          }
-          seenSigs.set(propsSig, !!legacy)
-        }
-        if (legacy) {
-          delete index[label]
-          changed = true
-        }
-      }
-
-      if (changed) localStorage.setItem(indexKey, JSON.stringify(index))
-      localStorage.setItem(FLAG, 'true')
-    } catch { /* migration is best-effort */ }
-  }
+  // (Removed: #migrateLegacySubstrateProps — a one-time pass that DELETED
+  // legacy-format substrate index entries so applyToAllBlanks would re-pick a
+  // new random image. It violated both invariants at once: it CLEARED index
+  // entries (an imaged tile must never lack an index) and it CHANGED an image
+  // already present (re-roll). The reconciler now heals any cleared entry from
+  // canonical, and an old-format substrate pick simply stays as it is.)
 
   async #preloadAtlas(images: string[]): Promise<void> {
     if (images.length === 0) return
@@ -753,26 +717,35 @@ export class SubstrateService extends EventTarget {
     return cellLocationSig([...segs], label)
   }
 
+  /** FILL-IF-EMPTY guard against the CANONICAL store, not just the index.
+   *  The localStorage index can lose a tile's entry (cleared storage, the
+   *  legacy-format migration in #migrateLegacySubstrateProps) while the
+   *  tile's layer `properties` slot still holds a real image. Such a tile is
+   *  NOT blank — rolling a random pick over it would change an image that is
+   *  already there. Returns true when the canonical slot already carries a
+   *  small.image / flat.small.image. Cheap because callers only reach it on
+   *  the rare index-miss path. */
+  async #hasCanonicalImage(label: string, segments?: readonly string[]): Promise<boolean> {
+    const segs = segments ?? this.#lineage()?.explorerSegments?.() ?? []
+    try {
+      // `any` (not Record<string,…>) so the chained property access is allowed
+      // under the Angular build's noPropertyAccessFromIndexSignature — same
+      // shape as reconcileCanonicalImageStamps' imageOf helper.
+      const props = await readTilePropertiesAt([...segs], label) as any
+      const img = props?.small?.image ?? props?.flat?.small?.image
+      return typeof img === 'string' && /^[0-9a-f]{64}$/.test(img)
+    } catch { return false }
+  }
+
   async applyToCell(label: string, segments?: readonly string[]): Promise<boolean> {
     if (this.#propsPool.length === 0) return false
     const key = await this.#indexKeyFor(label, segments)
     const index = readTilePropsIndex()
     if (lookupTilePropsSig(index, key, label)) return false
+    // Not blank if the canonical slot already holds an image (index entry
+    // merely lost) — never re-roll a present image (e.g. revert-remove re-add).
+    if (await this.#hasCanonicalImage(label, segments)) return false
     const entry = this.#pickBalanced()
-    if (!entry) return false
-    index[key || label] = entry.propsSig
-    writeTilePropsIndex(index)
-    return true
-  }
-
-  async rerollCell(label: string, segments?: readonly string[]): Promise<boolean> {
-    if (this.#propsPool.length === 0) return false
-    const key = await this.#indexKeyFor(label, segments)
-    const index = readTilePropsIndex()
-    const previous = lookupTilePropsSig(index, key, label)
-    this.#releaseUsage(previous)
-    delete index[key || label]
-    const entry = this.#pickBalanced(previous)
     if (!entry) return false
     index[key || label] = entry.propsSig
     writeTilePropsIndex(index)
@@ -827,6 +800,8 @@ export class SubstrateService extends EventTarget {
     for (const label of labels) {
       const key = await this.#indexKeyFor(label, segments)
       if (lookupTilePropsSig(index, key, label)) continue
+      // Canonical already holds an image (index entry lost) -> not blank.
+      if (await this.#hasCanonicalImage(label, segments)) continue
       const entry = this.#pickBalanced()
       if (!entry) break
       index[key || label] = entry.propsSig
@@ -917,6 +892,10 @@ export class SubstrateService extends EventTarget {
       let stamped = 0
       let walked = 0
       let matched = 0
+      // canonical -> index seeds collected during the walk (location key ->
+      // canonical propSig), merged into a fresh index at the end so the local
+      // cache mirrors canonical for every imaged tile.
+      const seeds = new Map<string, string>()
       const imageOf = (p: any): string | undefined => {
         const img = p?.small?.image ?? p?.flat?.small?.image
         return (typeof img === 'string' && /^[0-9a-f]{64}$/.test(img)) ? img : undefined
@@ -928,6 +907,21 @@ export class SubstrateService extends EventTarget {
           const canonical = await readTilePropertiesAt(segments, name) as any
           const canonicalImg = imageOf(canonical)
           const canonicalIsDefault = canonical?.substrate === true
+
+          // CANONICAL -> INDEX heal — the index must NEVER be missing for an
+          // imaged tile. If the layer already holds an image but this device's
+          // local index has no entry, seed it from the canonical propSig.
+          // Covers cross-device / adopted / synced tiles and any entry a delete
+          // cleared. Runs BEFORE the priority-rule early-return below, which
+          // would otherwise skip exactly the tiles that need it (an untouchable
+          // intentional canonical image with no local index entry).
+          if (canonicalImg) {
+            const healKey = await cellLocationSig(segments, name)
+            if (healKey && !index[healKey] && !seeds.has(healKey)) {
+              const propSig = await readTilePropsSigAt(segments, name)
+              if (propSig) seeds.set(healKey, propSig)
+            }
+          }
 
           // PRIORITY RULE — intentional beats default, defaults never
           // overwrite anything:
@@ -1025,7 +1019,16 @@ export class SubstrateService extends EventTarget {
       // invisible. walked=0 means the tree walk found nothing (history not
       // ready or empty root); matched=0 with walked>0 means labels in the
       // tree don't match index keys.
-      console.info(`[substrate] stamp pass: index=${indexSize} walked=${walked} matched=${matched} stamped=${stamped}`)
+      // Persist the canonical -> index seeds. Re-read fresh (other writers may
+      // have run during the async walk) and add only still-missing keys, so a
+      // concurrent write is never clobbered.
+      let healed = 0
+      if (seeds.size > 0) {
+        const fresh = readTilePropsIndex()
+        for (const [k, v] of seeds) { if (!fresh[k]) { fresh[k] = v; healed++ } }
+        if (healed > 0) writeTilePropsIndex(fresh)
+      }
+      console.info(`[substrate] stamp pass: index=${indexSize} walked=${walked} matched=${matched} stamped=${stamped} index-healed=${healed}`)
       return stamped
     } catch (err) { console.warn('[substrate] stamp pass failed', err); return 0 }
     finally { this.#stampRunning = false }

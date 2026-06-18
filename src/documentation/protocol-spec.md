@@ -493,9 +493,11 @@ nnn = byte & 0b111
 
 ---
 
-## 16. DNA (Path Capsule) — Optional Persistence
+## 16. Trail Capsule (formerly "DNA") — Optional Persistence
 
-DNA captures a navigation path for voluntary publication. Live behavior is unaffected by DNA existence.
+> **Note:** "DNA" has been reassigned to mean the merkle-versioned **Distributed Network Artifacts** (layers, dependencies, bees, resources, content — see `dna.md`). The navigation-path capsule described here is now the **trail capsule** (bee-metaphor synonym: *waggle capsule*). Status: design / not yet implemented. See `trail-capsule.md`.
+
+A trail capsule captures a navigation path for voluntary publication. Live behavior is unaffected by its existence.
 
 ### 16.1 Binary Format
 

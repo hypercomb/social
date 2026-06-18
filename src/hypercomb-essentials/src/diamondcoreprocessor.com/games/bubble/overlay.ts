@@ -1,0 +1,737 @@
+// diamondcoreprocessor.com/games/bubble/overlay.ts
+//
+// The full-screen game shell. Owns the DOM (backdrop, toolbar, canvas, banners),
+// the requestAnimationFrame loop, keyboard input for play, and pointer input for
+// the level designer. It's a self-contained mini-app: it never touches the hex
+// grid or Pixi — it mounts above everything as a fixed overlay and tears itself
+// fully down on close. The BubbleDrone owns its lifecycle (open/close). The
+// canvas is drawn at device-pixel resolution (DPR transform) so the art stays
+// crisp. Keyboard input is FULLY isolated while mounted — no keystroke leaks to
+// the shell (a stray key can otherwise flip the app into website/view mode).
+
+import { Engine, TILE, type LevelDef } from './engine.js'
+import { Renderer } from './renderer.js'
+import { Designer, TOOLS, type Tool } from './designer.js'
+import { BUILTIN_LEVELS, loadCustomLevels, upsertCustomLevel, deleteCustomLevel, cloneLevel } from './levels.js'
+
+const STYLE_ID = 'bub-overlay-styles'
+const Z = 2147483000
+
+// Keys that drive PLAY. Movement + K (jump) + J (blow) + R (restart). Up no
+// longer jumps — jump is K. (All keys are isolated anyway; this set only decides
+// which ones trigger a game action.)
+const GAME_KEYS = new Set([
+  'ArrowLeft', 'ArrowRight', 'a', 'A', 'd', 'D', 'j', 'J', 'k', 'K', 'r', 'R',
+])
+
+type Mode = 'play' | 'design'
+
+// Level-clear flow (continuous play, à la the arcade original): on clearing a
+// screen we tally the level's score (+ any perfect bonus) counting up, then
+// scroll the next level UP from the bottom — no button press, you just keep
+// playing. Score + lives carry across levels; the toolbar still has prev / next
+// / restart for jumping around manually.
+const TALLY_MS = 1.7          // how long the score add-up reads
+const PAN_MS = 0.85           // how long the next level takes to slide in
+const PERFECT_BONUS = 1000    // awarded when a level is cleared without dying
+
+/** One in-flight level-clear transition: first 'tally' (count the score up),
+ *  then 'pan' (slide the cleared level off the top while the next rises from
+ *  below). `prev` is the cleared engine, kept so it can be drawn scrolling out. */
+interface Transition {
+  phase: 'tally' | 'pan'
+  t: number               // seconds into the current phase
+  levelScore: number      // points earned on the just-cleared level
+  bonus: number           // perfect-clear bonus (0 if a life was lost)
+  baseScore: number       // running total at the start of the cleared level
+  nextLevel: LevelDef     // the level rising in
+  nextIndex: number       // its index in #levels (for the toolbar label)
+  testing: boolean        // cleared a designer test (re-pans the same level)
+  prev: Engine            // the cleared engine — drawn scrolling out during 'pan'
+}
+
+/** easeInOut cubic — slow start, slow settle; reads as the screen easing up. */
+function easeInOut(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+}
+
+export class BubbleOverlay {
+  #root: HTMLDivElement | null = null
+  #canvas: HTMLCanvasElement | null = null
+  #ctx: CanvasRenderingContext2D | null = null
+  #renderer: Renderer | null = null
+  #stage: HTMLDivElement | null = null
+  #banner: HTMLDivElement | null = null
+  #status: HTMLSpanElement | null = null
+  #levelLabel: HTMLSpanElement | null = null
+  #playBar: HTMLDivElement | null = null
+  #designBar: HTMLDivElement | null = null
+  #nameInput: HTMLInputElement | null = null
+  #loadSelect: HTMLSelectElement | null = null
+  #toolButtons = new Map<Tool, HTMLButtonElement>()
+
+  #mode: Mode = 'play'
+  #engine: Engine | null = null
+  #designer = new Designer()
+
+  #levels: LevelDef[] = []
+  #levelIndex = 0
+
+  #raf = 0
+  #lastTs = 0
+  #time = 0
+  #scaleBack = 1
+  #overShown = false
+  #ro: ResizeObserver | null = null
+
+  // Continuous-play state. The engine's score is the RUNNING total (carried
+  // across levels); #levelStartScore / #levelStartLives snapshot the totals when
+  // the current level began, so the clear tally can show the level's own gain
+  // and award a perfect bonus only when no life was lost.
+  #transition: Transition | null = null
+  #levelStartScore = 0
+  #levelStartLives = 3
+  #testing = false   // playing a designer test (not part of the level list)
+
+  // designer pointer-paint state
+  #painting = false
+  #lastCell = { col: -1, row: -1 }
+  #hover: { col: number; row: number } | null = null
+
+  #onClose: () => void
+
+  constructor(onClose: () => void) {
+    this.#onClose = onClose
+  }
+
+  isMounted(): boolean { return !!this.#root }
+
+  /** Jump straight to the level designer (used by `/bubble design`). */
+  showDesigner(): void { this.#setMode('design') }
+
+  // ── lifecycle ────────────────────────────────────────────
+
+  mount(): void {
+    if (this.#root) return
+    this.#injectStyles()
+    this.#refreshLevels()
+    ;(document.activeElement as HTMLElement | null)?.blur?.()
+    this.#build()
+    this.#startPlay(this.#levels[this.#levelIndex] ?? this.#levels[0])
+    window.addEventListener('keydown', this.#onKeyDown, true)
+    window.addEventListener('keyup', this.#onKeyUp, true)
+    window.addEventListener('resize', this.#fit)
+    // Designer paint tracks via WINDOW-level pointer events (not canvas-level)
+    // so dragging a stroke past the canvas edge keeps painting to the last
+    // in-bounds cell instead of freezing until the cursor returns. pointerdown
+    // stays on the canvas — a stroke can only START on the grid.
+    window.addEventListener('pointermove', this.#onPointerMove)
+    window.addEventListener('pointerup', this.#onPointerUp)
+    // Re-fit whenever the stage's layout settles or changes — guards against
+    // mounting before the browser has laid the overlay out. Same self-sizing
+    // pattern as the Pixi host.
+    this.#ro = new ResizeObserver(() => this.#fit())
+    if (this.#stage) this.#ro.observe(this.#stage)
+    this.#lastTs = 0
+    this.#raf = requestAnimationFrame(this.#loop)
+  }
+
+  unmount(): void {
+    if (this.#raf) cancelAnimationFrame(this.#raf)
+    this.#raf = 0
+    window.removeEventListener('keydown', this.#onKeyDown, true)
+    window.removeEventListener('keyup', this.#onKeyUp, true)
+    window.removeEventListener('resize', this.#fit)
+    window.removeEventListener('pointermove', this.#onPointerMove)
+    window.removeEventListener('pointerup', this.#onPointerUp)
+    this.#ro?.disconnect()
+    this.#ro = null
+    this.#root?.remove()
+    this.#root = null
+    this.#canvas = null
+    this.#ctx = null
+    this.#renderer = null
+    this.#engine = null
+  }
+
+  // ── DOM ──────────────────────────────────────────────────
+
+  #build(): void {
+    const root = el('div', { class: 'bub-overlay' }) as HTMLDivElement
+    root.style.zIndex = String(Z)
+
+    const bar = el('div', { class: 'bub-bar' })
+    bar.appendChild(el('span', { class: 'bub-logo', text: '🫧 Bubble Bobble' }))
+
+    // tabs
+    const tabs = el('div', { class: 'bub-tabs' })
+    const playTab = el('button', { class: 'bub-tab on', text: 'Play' }) as HTMLButtonElement
+    const designTab = el('button', { class: 'bub-tab', text: 'Design' }) as HTMLButtonElement
+    playTab.onclick = () => this.#setMode('play')
+    designTab.onclick = () => this.#setMode('design')
+    tabs.append(playTab, designTab)
+    bar.appendChild(tabs)
+
+    // play controls
+    const playBar = el('div', { class: 'bub-ctl' }) as HTMLDivElement
+    const prev = el('button', { class: 'bub-btn', text: '‹' }) as HTMLButtonElement
+    const next = el('button', { class: 'bub-btn', text: '›' }) as HTMLButtonElement
+    const label = el('span', { class: 'bub-level-label' }) as HTMLSpanElement
+    const restart = el('button', { class: 'bub-btn', text: '↻ Restart' }) as HTMLButtonElement
+    prev.onclick = () => this.#cycleLevel(-1)
+    next.onclick = () => this.#cycleLevel(1)
+    restart.onclick = () => this.#startPlay(this.#levels[this.#levelIndex])
+    playBar.append(prev, label, next, restart)
+    bar.appendChild(playBar)
+    this.#playBar = playBar
+    this.#levelLabel = label
+
+    // design controls
+    const designBar = el('div', { class: 'bub-ctl bub-hidden' }) as HTMLDivElement
+    const palette = el('div', { class: 'bub-palette' })
+    for (const t of TOOLS) {
+      const b = el('button', { class: 'bub-tool', title: t.label, text: t.glyph }) as HTMLButtonElement
+      b.onclick = () => this.#setTool(t.tool)
+      this.#toolButtons.set(t.tool, b)
+      palette.appendChild(b)
+    }
+    designBar.appendChild(palette)
+    const nameInput = el('input', { class: 'bub-name', placeholder: 'level name' }) as HTMLInputElement
+    nameInput.value = this.#designer.level.name
+    designBar.appendChild(nameInput)
+    this.#nameInput = nameInput
+    const mkBtn = (txt: string, fn: () => void) => { const b = el('button', { class: 'bub-btn', text: txt }) as HTMLButtonElement; b.onclick = fn; return b }
+    designBar.appendChild(mkBtn('New', () => this.#designerNew()))
+    designBar.appendChild(mkBtn('Save', () => this.#designerSave()))
+    designBar.appendChild(mkBtn('▶ Test', () => this.#designerTest()))
+    const loadSel = el('select', { class: 'bub-select' }) as HTMLSelectElement
+    loadSel.onchange = () => this.#designerLoad(loadSel.value)
+    designBar.appendChild(loadSel)
+    this.#loadSelect = loadSel
+    designBar.appendChild(mkBtn('Delete', () => this.#designerDelete()))
+    designBar.appendChild(mkBtn('Export', () => this.#designerExport()))
+    designBar.appendChild(mkBtn('Import', () => this.#designerImport()))
+    bar.appendChild(designBar)
+    this.#designBar = designBar
+
+    const status = el('span', { class: 'bub-status' }) as HTMLSpanElement
+    bar.appendChild(status)
+    this.#status = status
+
+    const close = el('button', { class: 'bub-close', text: '✕', title: 'Close (Esc)' }) as HTMLButtonElement
+    close.onclick = () => this.#onClose()
+    bar.appendChild(close)
+    root.appendChild(bar)
+
+    // stage
+    const stage = el('div', { class: 'bub-stage' }) as HTMLDivElement
+    const canvas = el('canvas', { class: 'bub-canvas' }) as HTMLCanvasElement
+    canvas.addEventListener('pointerdown', this.#onPointerDown)
+    stage.appendChild(canvas)
+    const banner = el('div', { class: 'bub-banner bub-hidden' }) as HTMLDivElement
+    stage.appendChild(banner)
+    root.appendChild(stage)
+    this.#stage = stage
+    this.#banner = banner
+
+    const help = el('div', { class: 'bub-help' })
+    help.innerHTML = '<b>← →</b> move &nbsp;·&nbsp; <b>K</b> jump &nbsp;·&nbsp; <b>J</b> blow a bubble &nbsp;·&nbsp; jump <i>up through</i> platforms &amp; off the top to wrap around &nbsp;·&nbsp; bump a trapped foe to pop it &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> close'
+    root.appendChild(help)
+
+    document.body.appendChild(root)
+    this.#root = root
+    this.#canvas = canvas
+    this.#ctx = canvas.getContext('2d')
+    if (this.#ctx) this.#renderer = new Renderer(this.#ctx)
+    this.#refreshLoadSelect()
+  }
+
+  // ── mode + level control ─────────────────────────────────
+
+  #setMode(mode: Mode): void {
+    if (this.#mode === mode) return
+    this.#mode = mode
+    const tabs = this.#root?.querySelectorAll('.bub-tab')
+    tabs?.forEach((t, i) => t.classList.toggle('on', (i === 0) === (mode === 'play')))
+    this.#playBar?.classList.toggle('bub-hidden', mode !== 'play')
+    this.#designBar?.classList.toggle('bub-hidden', mode !== 'design')
+    this.#hideBanner()
+    if (mode === 'play') this.#startPlay(this.#levels[this.#levelIndex])
+    else { this.#fit(); this.#updateToolButtons() }
+  }
+
+  #refreshLevels(): void {
+    this.#levels = [...BUILTIN_LEVELS.map(cloneLevel), ...loadCustomLevels()]
+    if (this.#levelIndex >= this.#levels.length) this.#levelIndex = 0
+  }
+
+  #cycleLevel(dir: number): void {
+    this.#refreshLevels()
+    if (!this.#levels.length) return
+    this.#levelIndex = (this.#levelIndex + dir + this.#levels.length) % this.#levels.length
+    this.#startPlay(this.#levels[this.#levelIndex])
+  }
+
+  #startPlay(level: LevelDef | undefined): void {
+    if (!level) return
+    this.#mode = 'play'
+    this.#engine = new Engine(cloneLevel(level))
+    // Fresh run from this level: score back to 0, full lives, no carry-over.
+    this.#testing = false
+    this.#transition = null
+    this.#overShown = false
+    this.#levelStartScore = this.#engine.score
+    this.#levelStartLives = this.#engine.lives
+    this.#hideBanner()
+    this.#fit()
+    this.#updateLevelLabel(level.name, false)
+  }
+
+  // The toolbar level caption: "Name (n/total)" in play, "Name (test)" while
+  // playtesting a designer level.
+  #updateLevelLabel(name: string, testing: boolean): void {
+    if (!this.#levelLabel) return
+    this.#levelLabel.textContent = testing
+      ? `${name}  (test)`
+      : `${name}  (${this.#levelIndex + 1}/${this.#levels.length})`
+  }
+
+  /** World pixel size of whatever the canvas is currently showing. */
+  #worldDims(): { w: number; h: number } | null {
+    if (this.#mode === 'design') return { w: this.#designer.level.cols * TILE, h: this.#designer.level.rows * TILE }
+    if (this.#engine) return { w: this.#engine.width, h: this.#engine.height }
+    return null
+  }
+
+  // Crisp scaling: back the canvas with device pixels and draw the world
+  // through a single scale transform. The renderer works in world units.
+  #fit = (): void => {
+    const c = this.#canvas, s = this.#stage, dims = this.#worldDims()
+    if (!c || !s || !dims) return
+    const availW = s.clientWidth - 28
+    const availH = s.clientHeight - 28
+    if (availW <= 0 || availH <= 0) return
+    const cssScale = Math.min(availW / dims.w, availH / dims.h)
+    const dispW = dims.w * cssScale, dispH = dims.h * cssScale
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    c.width = Math.round(dispW * dpr)
+    c.height = Math.round(dispH * dpr)
+    c.style.width = `${Math.round(dispW)}px`
+    c.style.height = `${Math.round(dispH)}px`
+    this.#scaleBack = cssScale * dpr
+    if (this.#ctx) this.#ctx.imageSmoothingEnabled = true
+  }
+
+  // ── loop ─────────────────────────────────────────────────
+
+  #loop = (ts: number): void => {
+    if (!this.#root) return
+    if (!this.#lastTs) this.#lastTs = ts
+    const dt = Math.min((ts - this.#lastTs) / 1000, 1 / 30)
+    this.#lastTs = ts
+    this.#time += dt
+
+    const ctx = this.#ctx, r = this.#renderer, dims = this.#worldDims()
+    if (ctx && r && dims) {
+      ctx.setTransform(this.#scaleBack, 0, 0, this.#scaleBack, 0, 0)
+      ctx.clearRect(0, 0, dims.w, dims.h)
+      if (this.#mode === 'play' && this.#engine) {
+        if (this.#transition) {
+          // A level was cleared: the simulation is frozen while the score tallies
+          // and the next screen scrolls in.
+          this.#stepTransition(dt)
+          this.#drawTransition(ctx, r, dims)
+        } else {
+          this.#engine.update(dt)
+          r.draw(this.#engine, this.#time)
+          if (this.#engine.state === 'won') this.#beginClear()
+          else if (this.#engine.state === 'gameover' && !this.#overShown) { this.#overShown = true; this.#showGameOver() }
+        }
+      } else if (this.#mode === 'design') {
+        r.drawEditor(this.#designer.level, this.#hover, this.#time)
+      }
+    }
+    this.#raf = requestAnimationFrame(this.#loop)
+  }
+
+  // ── input: play (fully isolated) ─────────────────────────
+
+  #onKeyDown = (e: KeyboardEvent): void => {
+    if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); this.#onClose(); return }
+    // While typing a level name, let the field receive keys untouched.
+    if (document.activeElement === this.#nameInput) return
+    // Let OS/browser shortcuts (Ctrl/Cmd/Alt combos — refresh, devtools, …) pass.
+    if (e.ctrlKey || e.metaKey || e.altKey) return
+    // Otherwise FULLY isolate — stop + preventDefault every plain key so none
+    // reaches the shell (a leaked key can flip the app into website/view mode).
+    e.preventDefault(); e.stopImmediatePropagation()
+    if (this.#mode !== 'play') return
+    const eng = this.#engine
+    if (!eng || !GAME_KEYS.has(e.key)) return
+    switch (e.key) {
+      case 'ArrowLeft': case 'a': case 'A': eng.input.left = true; break
+      case 'ArrowRight': case 'd': case 'D': eng.input.right = true; break
+      case 'k': case 'K': if (!e.repeat) eng.jump(); break   // K = jump
+      case 'j': case 'J': if (!e.repeat) eng.blow(); break   // J = blow
+      case 'r': case 'R': this.#startPlay(this.#levels[this.#levelIndex]); break
+    }
+  }
+
+  #onKeyUp = (e: KeyboardEvent): void => {
+    if (document.activeElement === this.#nameInput) return
+    if (e.ctrlKey || e.metaKey || e.altKey) return
+    e.stopImmediatePropagation()
+    const eng = this.#engine
+    if (!eng || this.#mode !== 'play') return
+    switch (e.key) {
+      case 'ArrowLeft': case 'a': case 'A': eng.input.left = false; break
+      case 'ArrowRight': case 'd': case 'D': eng.input.right = false; break
+    }
+  }
+
+  // ── input: designer painting ─────────────────────────────
+
+  #cellFromEvent(e: PointerEvent): { col: number; row: number } | null {
+    const c = this.#canvas, dims = this.#worldDims()
+    if (!c || !dims) return null
+    const rect = c.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return null
+    const wx = ((e.clientX - rect.left) / rect.width) * dims.w
+    const wy = ((e.clientY - rect.top) / rect.height) * dims.h
+    return { col: Math.floor(wx / TILE), row: Math.floor(wy / TILE) }
+  }
+
+  #onPointerDown = (e: PointerEvent): void => {
+    if (this.#mode !== 'design') return
+    const cell = this.#cellFromEvent(e)
+    if (!cell) return
+    this.#painting = true
+    this.#lastCell = { col: -1, row: -1 }
+    this.#paintAt(cell)
+    this.#canvas?.setPointerCapture?.(e.pointerId)
+  }
+
+  #onPointerMove = (e: PointerEvent): void => {
+    if (this.#mode !== 'design') return
+    const cell = this.#cellFromEvent(e)
+    this.#hover = cell
+    if (this.#painting && cell) this.#paintAt(cell)
+  }
+
+  #onPointerUp = (): void => { this.#painting = false }
+
+  #paintAt(cell: { col: number; row: number }): void {
+    if (cell.col === this.#lastCell.col && cell.row === this.#lastCell.row) return
+    this.#lastCell = cell
+    this.#designer.paint(cell.col, cell.row)
+  }
+
+  // ── designer actions ─────────────────────────────────────
+
+  #setTool(tool: Tool): void { this.#designer.setTool(tool); this.#updateToolButtons() }
+
+  #updateToolButtons(): void {
+    for (const [tool, b] of this.#toolButtons) b.classList.toggle('on', tool === this.#designer.tool)
+  }
+
+  #designerNew(): void {
+    this.#designer.newLevel('My Level')
+    if (this.#nameInput) this.#nameInput.value = this.#designer.level.name
+    this.#fit()
+    this.#flash('new blank level')
+  }
+
+  #designerSave(): void {
+    const name = (this.#nameInput?.value ?? '').trim() || 'My Level'
+    const level = this.#designer.named(name)
+    upsertCustomLevel(level)
+    this.#refreshLevels()
+    this.#refreshLoadSelect(name)
+    this.#flash(`saved “${name}”`)
+  }
+
+  #designerTest(): void {
+    // Playtest the in-progress level without requiring a save.
+    this.#refreshLevels()
+    this.#mode = 'play'
+    this.#playBar?.classList.remove('bub-hidden')
+    this.#designBar?.classList.add('bub-hidden')
+    const tabs = this.#root?.querySelectorAll('.bub-tab')
+    tabs?.forEach((t, i) => t.classList.toggle('on', i === 0))
+    this.#engine = new Engine(cloneLevel(this.#designer.level))
+    this.#testing = true
+    this.#transition = null
+    this.#overShown = false
+    this.#levelStartScore = this.#engine.score
+    this.#levelStartLives = this.#engine.lives
+    this.#hideBanner()
+    this.#fit()
+    this.#updateLevelLabel(this.#designer.level.name, true)
+  }
+
+  #designerLoad(name: string): void {
+    if (!name) return
+    const lvl = loadCustomLevels().find(l => l.name === name)
+      ?? BUILTIN_LEVELS.find(l => l.name === name)
+    if (!lvl) return
+    this.#designer.setLevel(lvl)
+    if (this.#nameInput) this.#nameInput.value = lvl.name
+    this.#fit()
+    this.#flash(`editing “${name}”`)
+  }
+
+  #designerDelete(): void {
+    const name = (this.#nameInput?.value ?? '').trim()
+    deleteCustomLevel(name)
+    this.#refreshLevels()
+    this.#refreshLoadSelect()
+    this.#flash(`deleted “${name}”`)
+  }
+
+  #designerExport(): void {
+    const json = this.#designer.exportJson()
+    try {
+      void navigator.clipboard?.writeText(json)
+      this.#flash('level JSON copied to clipboard')
+    } catch { this.#flash('copy failed — see console'); console.log(json) }
+  }
+
+  #designerImport(): void {
+    const text = window.prompt('Paste level JSON:')
+    if (!text) return
+    if (this.#designer.importJson(text)) {
+      if (this.#nameInput) this.#nameInput.value = this.#designer.level.name
+      this.#fit()
+      this.#flash('level imported')
+    } else this.#flash('import failed — invalid JSON')
+  }
+
+  #refreshLoadSelect(selected?: string): void {
+    const sel = this.#loadSelect
+    if (!sel) return
+    const custom = loadCustomLevels()
+    sel.innerHTML = ''
+    sel.appendChild(opt('', custom.length ? '— load custom —' : '— no custom levels —'))
+    for (const b of BUILTIN_LEVELS) sel.appendChild(opt(b.name, `(built-in) ${b.name}`))
+    for (const l of custom) sel.appendChild(opt(l.name, l.name))
+    if (selected) sel.value = selected
+  }
+
+  // ── banners + status ─────────────────────────────────────
+
+  // ── level clear → tally → pan to next (continuous play) ──
+
+  /** Level cleared. Compute the level's score gain + any perfect bonus and open
+   *  the tally→pan transition. Levels wrap, so play never stops on a clear. */
+  #beginClear(): void {
+    const eng = this.#engine
+    if (!eng || this.#transition) return
+    const levelScore = Math.max(0, eng.score - this.#levelStartScore)
+    // lives only ever fall within a level, so "same as we started" ⇒ no deaths.
+    const bonus = eng.lives >= this.#levelStartLives ? PERFECT_BONUS : 0
+
+    const count = Math.max(1, this.#levels.length)
+    const nextIndex = this.#testing ? this.#levelIndex : (this.#levelIndex + 1) % count
+    const nextLevel = this.#testing
+      ? this.#designer.level
+      : (this.#levels[nextIndex] ?? eng.level)
+
+    this.#transition = {
+      phase: 'tally', t: 0,
+      levelScore, bonus, baseScore: this.#levelStartScore,
+      nextLevel, nextIndex, testing: this.#testing, prev: eng,
+    }
+    this.#hideBanner()
+  }
+
+  /** Advance the active transition: count the tally, then build + scroll in the
+   *  next level (carrying the running score — bonus included — and lives). */
+  #stepTransition(dt: number): void {
+    const tr = this.#transition
+    if (!tr) return
+    tr.t += dt
+    if (tr.phase === 'tally') {
+      if (tr.t < TALLY_MS) return
+      const carriedScore = tr.baseScore + tr.levelScore + tr.bonus
+      const e = new Engine(cloneLevel(tr.nextLevel))
+      e.score = carriedScore
+      e.lives = tr.prev.lives
+      this.#engine = e
+      this.#levelIndex = tr.nextIndex
+      this.#levelStartScore = e.score
+      this.#levelStartLives = e.lives
+      this.#updateLevelLabel(e.level.name, tr.testing)
+      this.#fit()
+      tr.phase = 'pan'
+      tr.t = 0
+    } else if (tr.t >= PAN_MS) {
+      this.#transition = null   // hand control back — play resumes on the new level
+    }
+  }
+
+  /** Render the transition: the frozen cleared level under the score tally, then
+   *  the cleared level sliding off the top while the next rises from the bottom. */
+  #drawTransition(ctx: CanvasRenderingContext2D, r: Renderer, dims: { w: number; h: number }): void {
+    const tr = this.#transition
+    if (!tr) return
+    if (tr.phase === 'tally') {
+      r.draw(tr.prev, this.#time)
+      this.#drawTally(ctx, dims, tr)
+    } else {
+      const p = easeInOut(Math.min(1, tr.t / PAN_MS))
+      const H = dims.h
+      ctx.save(); ctx.translate(0, -p * H); r.draw(tr.prev, this.#time); ctx.restore()
+      ctx.save(); ctx.translate(0, (1 - p) * H); r.draw(this.#engine!, this.#time); ctx.restore()
+    }
+  }
+
+  /** The score add-up overlay: level gain counts up first, then any perfect
+   *  bonus, with the running total ticking alongside. Drawn in world units so it
+   *  scales with the canvas. */
+  #drawTally(ctx: CanvasRenderingContext2D, dims: { w: number; h: number }, tr: Transition): void {
+    const { w, h } = dims
+    const cx = w / 2
+    const p = Math.min(1, tr.t / TALLY_MS)
+    // Count the level score over the first ~62%, then the bonus over the rest.
+    const levelP = Math.min(1, p / 0.62)
+    const bonusP = tr.bonus > 0 ? Math.max(0, Math.min(1, (p - 0.62) / 0.30)) : 0
+    const shownLevel = Math.round(tr.levelScore * levelP)
+    const shownBonus = Math.round(tr.bonus * bonusP)
+    const shownTotal = tr.baseScore + shownLevel + shownBonus
+    const font = (size: number, weight = 700) =>
+      `${weight} ${Math.round(size)}px "Segoe UI", system-ui, sans-serif`
+
+    ctx.save()
+    ctx.fillStyle = 'rgba(6,4,18,0.62)'
+    ctx.fillRect(0, 0, w, h)
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+
+    ctx.fillStyle = '#7ee0ff'
+    ctx.font = font(h * 0.10, 800)
+    ctx.fillText('LEVEL CLEAR', cx, h * 0.30)
+
+    ctx.fillStyle = '#ffffff'
+    ctx.font = font(h * 0.052)
+    ctx.fillText(`Level  +${shownLevel}`, cx, h * 0.46)
+
+    if (tr.bonus > 0) {
+      ctx.fillStyle = bonusP > 0 ? '#ffd76a' : 'rgba(255,215,106,0.28)'
+      ctx.fillText(`Perfect Bonus  +${shownBonus}`, cx, h * 0.555)
+    }
+
+    ctx.fillStyle = '#bfe3ff'
+    ctx.font = font(h * 0.062, 800)
+    ctx.fillText(`✦ ${shownTotal}`, cx, h * 0.69)
+    ctx.restore()
+  }
+
+  #showGameOver(): void {
+    const score = this.#engine?.score ?? 0
+    this.#showBanner('Game Over', `✦ ${score}`, [
+      { label: '↻ Retry', fn: () => this.#startPlay(this.#levels[this.#levelIndex]) },
+    ])
+  }
+
+  #showBanner(title: string, sub: string, actions: { label: string; fn: () => void }[]): void {
+    const b = this.#banner
+    if (!b) return
+    b.innerHTML = ''
+    b.appendChild(el('div', { class: 'bub-banner-title', text: title }))
+    b.appendChild(el('div', { class: 'bub-banner-sub', text: sub }))
+    const row = el('div', { class: 'bub-banner-actions' })
+    for (const a of actions) {
+      const btn = el('button', { class: 'bub-btn bub-btn-lg', text: a.label }) as HTMLButtonElement
+      btn.onclick = a.fn
+      row.appendChild(btn)
+    }
+    b.appendChild(row)
+    b.classList.remove('bub-hidden')
+  }
+
+  #hideBanner(): void { this.#banner?.classList.add('bub-hidden') }
+
+  #flashTimer = 0
+  #flash(msg: string): void {
+    if (!this.#status) return
+    this.#status.textContent = msg
+    if (this.#flashTimer) clearTimeout(this.#flashTimer)
+    this.#flashTimer = window.setTimeout(() => { if (this.#status) this.#status.textContent = '' }, 2600)
+  }
+
+  // ── styles ───────────────────────────────────────────────
+
+  #injectStyles(): void {
+    if (document.getElementById(STYLE_ID)) return
+    const style = document.createElement('style')
+    style.id = STYLE_ID
+    style.textContent = CSS
+    document.head.appendChild(style)
+  }
+}
+
+// ── tiny DOM helpers ───────────────────────────────────────
+
+function el(tag: string, props: { class?: string; text?: string; title?: string; placeholder?: string } = {}): HTMLElement {
+  const e = document.createElement(tag)
+  if (props.class) e.className = props.class
+  if (props.text != null) e.textContent = props.text
+  if (props.title) e.title = props.title
+  if (props.placeholder) (e as HTMLInputElement).placeholder = props.placeholder
+  return e
+}
+
+function opt(value: string, label: string): HTMLOptionElement {
+  const o = document.createElement('option')
+  o.value = value; o.textContent = label
+  return o
+}
+
+const CSS = `
+.bub-overlay{position:fixed;inset:0;display:flex;flex-direction:column;
+  background:radial-gradient(120% 120% at 50% 0%,#1b1450 0%,#0b0826 60%,#050314 100%);
+  font-family:'Segoe UI',system-ui,sans-serif;color:#e9e6ff;user-select:none;
+  animation:bub-in .2s ease both}
+@keyframes bub-in{from{opacity:0}to{opacity:1}}
+.bub-bar{display:flex;align-items:center;gap:.6rem;padding:.45rem .7rem;
+  background:rgba(10,8,26,.7);border-bottom:1px solid rgba(126,182,214,.25);flex-wrap:wrap}
+.bub-logo{font-weight:800;letter-spacing:.02em;color:#7ee0ff;white-space:nowrap;
+  text-shadow:0 0 14px rgba(126,224,255,.45)}
+.bub-tabs{display:flex;gap:.25rem;margin-left:.4rem}
+.bub-tab{background:transparent;border:1px solid rgba(126,182,214,.3);color:#c9c4ec;
+  padding:.2rem .7rem;border-radius:999px;cursor:pointer;font-size:.85rem}
+.bub-tab.on{background:rgba(126,224,255,.22);color:#fff;border-color:rgba(126,224,255,.6)}
+.bub-ctl{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap}
+.bub-level-label{min-width:11rem;text-align:center;font-size:.85rem;color:#cfd2ff}
+.bub-btn{background:rgba(126,182,214,.12);border:1px solid rgba(126,182,214,.3);
+  color:#dfe7ff;padding:.22rem .6rem;border-radius:7px;cursor:pointer;font-size:.82rem;
+  transition:background .15s ease}
+.bub-btn:hover{background:rgba(126,182,214,.26)}
+.bub-btn-lg{padding:.5rem 1.15rem;font-size:.95rem}
+.bub-palette{display:flex;gap:.2rem}
+.bub-tool{width:2rem;height:2rem;display:flex;align-items:center;justify-content:center;
+  background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.15);border-radius:6px;
+  color:#fff;cursor:pointer;font-size:1rem;line-height:1}
+.bub-tool.on{background:rgba(126,224,255,.3);border-color:rgba(126,224,255,.8);box-shadow:0 0 8px rgba(126,224,255,.5)}
+.bub-name{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.2);
+  color:#fff;border-radius:6px;padding:.25rem .5rem;width:9rem;font-size:.82rem}
+.bub-select{background:rgba(20,14,36,.95);border:1px solid rgba(255,255,255,.2);
+  color:#fff;border-radius:6px;padding:.22rem .4rem;font-size:.8rem;max-width:11rem}
+.bub-status{margin-left:.4rem;font-size:.8rem;color:#9ad9b0;min-height:1em}
+.bub-close{margin-left:auto;width:2rem;height:2rem;border-radius:50%;border:none;cursor:pointer;
+  background:rgba(255,80,80,.18);color:#ff9a9a;font-size:1rem}
+.bub-close:hover{background:rgba(255,80,80,.34);color:#fff}
+.bub-stage{flex:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;padding:14px}
+.bub-canvas{border-radius:12px;
+  box-shadow:0 16px 60px rgba(0,0,0,.6),0 0 0 1px rgba(126,182,214,.22),0 0 40px rgba(80,140,255,.12);
+  background:#080620;touch-action:none}
+.bub-banner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:.7rem;background:rgba(6,4,18,.72);backdrop-filter:blur(3px)}
+.bub-banner-title{font-size:2.4rem;font-weight:800;color:#7ee0ff;text-shadow:0 2px 22px rgba(120,220,255,.55)}
+.bub-banner-sub{font-size:1.1rem;color:#ffd76a}
+.bub-banner-actions{display:flex;gap:.6rem;margin-top:.4rem}
+.bub-help{padding:.45rem .8rem;text-align:center;font-size:.78rem;color:#9c98c4;
+  background:rgba(10,8,26,.6);border-top:1px solid rgba(126,182,214,.15)}
+.bub-help b{color:#dfe7ff}
+.bub-hidden{display:none!important}
+`

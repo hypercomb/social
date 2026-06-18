@@ -28,6 +28,9 @@ import { secretTag } from './secret-words'
 const PILL_POS_KEY = 'hc:controls-pill-pos'
 const ENABLED_MAP_KEY = 'hc:controls-enabled-map'
 
+/** How long the header lock button pulses after a locked pan/zoom attempt. */
+const LOCK_BUMP_MS = 900
+
 // ── control registry ──────────────────────────────────────
 //
 // Each control has an id, a localization key for its label, the action
@@ -160,6 +163,28 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     get('@diamondcoreprocessor.com/InputGate') as EventTarget | undefined,
     () => (get('@diamondcoreprocessor.com/InputGate') as { locked?: boolean } | undefined)?.locked ?? false,
   )
+
+  // ── locked-attempt pulse on the header lock button ─────
+  //
+  // When a pan or zoom gesture is rejected because input is locked, the
+  // InputGate emits `input:locked-attempt` (throttled). We pulse the lock
+  // button to tell the user *why* the viewport didn't move — most often
+  // because they locked it themselves with this very button. Covers both
+  // pan (touch/spacebar via gate.claim()) and zoom (wheel/pinch).
+  readonly #lockBump = signal(false)
+  readonly lockBump = this.#lockBump.asReadonly()
+  #lockBumpTimer: ReturnType<typeof setTimeout> | null = null
+
+  #flashLockBump = (): void => {
+    // Un-idle the pill so the pulse is actually on screen.
+    this.#onActivity()
+    this.#lockBump.set(true)
+    if (this.#lockBumpTimer) clearTimeout(this.#lockBumpTimer)
+    this.#lockBumpTimer = setTimeout(() => {
+      this.#lockBump.set(false)
+      this.#lockBumpTimer = null
+    }, LOCK_BUMP_MS)
+  }
 
   // ── power key state (ctrl / shift / alt held) ──────────
   readonly powerKey = signal<'ctrl' | 'shift' | 'alt' | null>(null)
@@ -434,7 +459,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // ── pill zoom (scales with viewport width) ────────────────
   // Baseline 1.0 at 1920px and above (large monitors stay at 1×).
   // Small screens floor at 0.9. 13" laptop band (1367–2559px) gets a
-  // 1.34× bump to match the header zoom in `_header-bar.scss` — keeps
+  // 1.15× bump to match the header zoom in `_header-bar.scss` — keeps
   // top + bottom chrome visually paired. Mobile uses a separate
   // floating-icon layout that ignores this zoom.
   readonly #pillZoom = signal(this.#computePillZoom())
@@ -444,7 +469,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     const w = window.innerWidth
     const ratio = w / 1920
     const base = Math.max(0.9, Math.min(ratio, 1))
-    const laptopBand = w >= 1367 && w <= 2559 ? 1.34 : 1
+    const laptopBand = w >= 1367 && w <= 2559 ? 1.15 : 1
     return base * laptopBand
   }
 
@@ -698,8 +723,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #atomizeStrategyUnsub: (() => void) | null = null
   #meshModalUnsub: (() => void) | null = null
   #meshJoinUnsub: (() => void) | null = null
+  #lockBumpUnsub: (() => void) | null = null
 
   ngOnInit(): void {
+    // Pulse the header lock button when a pan/zoom is rejected because
+    // input is locked. Transient (no replay) so a fresh mount never bumps.
+    this.#lockBumpUnsub = EffectBus.on('input:locked-attempt', this.#flashLockBump)
+
     this.#meshModalUnsub = EffectBus.on<{ open: boolean }>('mesh:modal-open', ({ open }) => {
       this.#roomOpen.set(!!open)
     })
@@ -923,6 +953,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#atomizeStrategyUnsub?.()
     this.#meshModalUnsub?.()
     this.#meshJoinUnsub?.()
+    this.#lockBumpUnsub?.()
+    if (this.#lockBumpTimer) clearTimeout(this.#lockBumpTimer)
     window.removeEventListener('keydown', this.#onPowerKeyDown)
     window.removeEventListener('keyup', this.#onPowerKeyUp)
     window.removeEventListener('blur', this.#onPowerKeyReset)

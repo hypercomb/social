@@ -11,12 +11,14 @@
 // content and no snapshot bridge: your layer is the one way into your hive.
 //
 // SAFETY: this drone applies content ONLY in response to an explicit user
-// click (adopt / adopt-selected / sync). It does NOT auto-fold the DCP
-// installer's projected branches (RegistrySnapshot) — that automation was
-// removed: nothing enters your tree from here without a participant action.
-// Whether an update EXISTS (detection) and surfacing installer-installed
-// content are separate MANUAL concerns — the command-line update icon opens
-// the installer; the participant pulls there.
+// click. `sync` folds a broadcasting peer's VISUALS straight into the hive
+// (replace-in-place); `features` / `adopt` hand the branch sig to the DCP
+// installer so the participant can turn its scripts on THERE. It does NOT
+// auto-fold the installer's projected branches (RegistrySnapshot) — that
+// automation was removed: nothing enters your tree without a participant
+// action. Whether an update EXISTS (detection) and surfacing installer-
+// installed content are separate MANUAL concerns — the command-line update
+// icon opens the installer; the participant pulls there.
 
 import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import {
@@ -26,6 +28,12 @@ import {
   type PlacementHistory,
   type PlacementLineage,
 } from '../history/layer-placement.js'
+import {
+  cellLocationSig,
+  readTilePropsIndex,
+  writeTilePropsIndex,
+} from '../editor/tile-properties.js'
+import { forgetDecorationLabel } from '../commands/decoration-kind-index.js'
 
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
@@ -109,7 +117,7 @@ export class SwarmAdoptDrone extends Drone {
     'Adopts a peer tile by localizing its branch (ContentBroker) and folding it into the hive layer via the same update({children}) cascade as paste, on explicit user click ONLY — no snapshot bridge, no automatic installer fold.'
 
   protected override listens: string[] = ['tile:action', 'registry:snapshot']
-  protected override emits: string[] = ['adopt:started', 'swarm:adopt-panel:open', 'fs:changed', 'fold:receipt']
+  protected override emits: string[] = ['adopt:started', 'swarm:adopt-panel:open', 'fs:changed', 'fold:receipt', 'tile:saved']
 
   // Latest installer registry projection — cached for the Done-gated fold.
   #lastSnapshot: RegistrySnapshotLike | null = null
@@ -132,9 +140,11 @@ export class SwarmAdoptDrone extends Drone {
         return
       }
 
-      if (action !== 'adopt' && action !== 'sync') return
+      if (action !== 'adopt' && action !== 'sync' && action !== 'features') return
 
-      // Multi-tile adopt (selection-menu Adopt All) — sequential.
+      // Multi-tile adopt (selection-menu Adopt All) — sequential. Only the
+      // `adopt` gesture fans out a `labels` array; `sync` / `features` are
+      // single-tile overlay clicks carrying one `label`.
       const labels = Array.isArray(payload?.labels)
         ? payload.labels.map(s => String(s ?? '').trim()).filter(Boolean)
         : []
@@ -147,15 +157,25 @@ export class SwarmAdoptDrone extends Drone {
       if (!label) return
 
       // Single adopt-gesture → open the participant-grouped panel; its
-      // confirm comes back as `adopt-selected`. `sync` keeps the immediate
-      // single-tile path for programmatic callers.
+      // confirm comes back as `adopt-selected`.
       if (action === 'adopt') {
         if (!this.#isPeerTile(label)) return
         this.emitEffect('swarm:adopt-panel:open', { preselect: [label] })
         return
       }
 
-      void this.#adoptPeerTile(label)
+      // `features` → hand the branch sig to the installer (the ONLY swarm
+      // gesture that still opens it) so the participant can view the
+      // publisher's features and turn the scripts portion on.
+      if (action === 'features') {
+        void this.#adoptPeerTile(label)
+        return
+      }
+
+      // `sync` → adopt the publisher's VISUALS straight into the hive,
+      // replacing the stale local copy in place. No installer; scripts stay
+      // off until the participant opts in via the `features` icon.
+      void this.#syncPeerTile(label)
     })
 
     // ── DCP installer round-trip → hive config fold (on ACCEPT) ────────
@@ -192,21 +212,25 @@ export class SwarmAdoptDrone extends Drone {
     return swarm.subscribedTiles?.().some(p => p.name === label) ?? false
   }
 
-  // ── adopt a peer tile → SEND THE SIG TO THE INSTALLER ──────────────
-  // Adopt does NOT fetch or commit in the hive. It hands the publisher's
-  // branch signature to the installer (portal-overlay opens DCP with
-  // #branch=<sig>&at=…); the install happens THERE when the participant
-  // toggles the node on. No in-hive broker.adopt walk (that walk's
-  // adopt:meta/progress is what lit the "adopting…" header crumb), no layer
-  // write.
-  #adoptPeerTile = async (label: string, pubkey?: string): Promise<void> => {
+  // ── resolve a peer tile → its signed branch + natural placement ────
+  // Shared by adopt/features (→ installer) and sync (→ local fold). Looks
+  // first in the current-location peer cache, then the subscribed channel
+  // (auto-adopt-on-subscribe — the leader's tiles live at THEIR channel
+  // sig). pubkey pins the publisher on overlapping names. Returns the
+  // publisher's signed branch root (mesh visuals carry layerSig via
+  // visual-sanitizer §170, validated at the trust boundary as 64-hex), the
+  // participant's CURRENT path as the placement `at` (natural placement:
+  // content lands where the participant is, regardless of where the
+  // publisher had it), and the publisher domain (if the broker learned it
+  // from the mesh) so the resolution protocol can HTTP-direct fetch bytes.
+  #resolvePeerBranch = (
+    label: string,
+    pubkey?: string,
+  ): { layerSig: string; at: string[]; domain?: string; label: string } | null => {
     const ioc = this.#ioc()
     const swarm = ioc?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
-    if (!swarm?.peerTilesAtCurrentSig) return
+    if (!swarm?.peerTilesAtCurrentSig) return null
 
-    // Look first in the current-location peer cache, then the subscribed
-    // channel (auto-adopt-on-subscribe — the leader's tiles live at THEIR
-    // channel sig). pubkey pins the publisher on overlapping names.
     const matches = (p: { name: string; peerPubkey: string }): boolean =>
       p.name === label && (!pubkey || p.peerPubkey === pubkey)
     const peerTiles = swarm.peerTilesAtCurrentSig()
@@ -215,27 +239,57 @@ export class SwarmAdoptDrone extends Drone {
     if (!peerEntry && pubkey) {
       peerEntry = peerTiles.find(p => p.name === label) ?? swarm.subscribedTiles?.().find(p => p.name === label)
     }
-    if (!peerEntry) return
+    if (!peerEntry) return null
 
-    // The publisher's signed branch root (mesh visuals carry layerSig via
-    // visual-sanitizer §170), validated at the trust boundary as 64-hex.
     const layerSig = String((peerEntry as Record<string, unknown>)['layerSig'] ?? '').trim().toLowerCase()
-    if (!SIG_RE.test(layerSig)) return
+    if (!SIG_RE.test(layerSig)) return null
 
-    // Natural placement: adopted content lands at the participant's CURRENT
-    // path, regardless of where the publisher had it.
     const lineage = ioc?.get?.(LINEAGE_KEY) as LineageLike | undefined
     const segments = lineage?.explorerSegments?.() ?? []
     const at = (Array.isArray(segments) ? segments : []).map(s => String(s ?? '').trim()).filter(Boolean)
 
-    // Publisher domain (if the broker learned it from the mesh) → so the
-    // resolution protocol can HTTP-direct fetch the branch bytes.
     const broker = ioc?.get?.(BROKER_KEY) as BrokerLike | undefined
     const ownerDomain = String(broker?.getKnownDomains?.(layerSig)?.[0] ?? '').trim()
 
+    return { layerSig, at, domain: ownerDomain || undefined, label }
+  }
+
+  // ── adopt / features → SEND THE SIG TO THE INSTALLER ───────────────
+  // Does NOT fetch or commit in the hive. Hands the publisher's branch
+  // signature to the installer (portal-overlay opens DCP with
+  // #branch=<sig>&at=…); the install happens THERE when the participant
+  // toggles the node on. No in-hive broker.adopt walk, no layer write. This
+  // is the path the `features` icon uses to let the participant view a
+  // tile's features and turn its scripts on.
+  #adoptPeerTile = async (label: string, pubkey?: string): Promise<void> => {
+    const branch = this.#resolvePeerBranch(label, pubkey)
+    if (!branch) return
     window.dispatchEvent(new CustomEvent('portal:open', {
-      detail: { target: 'dcp', branchSig: layerSig, at, domain: ownerDomain || undefined, label },
+      detail: { target: 'dcp', branchSig: branch.layerSig, at: branch.at, domain: branch.domain, label: branch.label },
     }))
+  }
+
+  // ── sync → FOLD THE PUBLISHER'S VISUALS INTO THE HIVE (replace) ─────
+  // The counterpart to adopt's installer hand-off: sync pulls the
+  // broadcasting peer's CURRENT branch layers straight into the hive via the
+  // same #commitBranch cascade, replacing the stale local copy at the SAME
+  // (name, at). Resources stream on demand at render. After the fold lands we
+  // bust the tile's per-cell visual caches (tile:saved — show-cell's
+  // single-tile invalidate + re-render chokepoint) so the publisher's
+  // refreshed image/border/tags replace the old ones; sync IS the
+  // authoritative "give me their current version" gesture.
+  #syncPeerTile = async (label: string, pubkey?: string): Promise<void> => {
+    const branch = this.#resolvePeerBranch(label, pubkey)
+    if (!branch) return
+    const res = await this.#commitBranch(branch.layerSig, branch.at, branch.domain, 'sync')
+    if (res === 'committed') {
+      // The fold may have added feature decorations to this tile WITHOUT
+      // firing per-decoration decorations:changed — forget the label so the
+      // re-render's render:cell-count re-walks its decorations slot, keeping
+      // the `features` icon's visual-bee gate honest in-session.
+      forgetDecorationLabel(branch.label)
+      EffectBus.emit('tile:saved', { cell: branch.label })
+    }
   }
 
   // ── the one primitive: localize + re-home + re-point children ──────
@@ -250,17 +304,25 @@ export class SwarmAdoptDrone extends Drone {
     branchSig: string,
     atSegments: readonly string[],
     domain?: string,
+    mode: 'fold' | 'sync' = 'fold',
   ): Promise<'committed' | 'exists' | 'unavailable'> => {
-    const run = () => this.#doCommitBranch(branchSig, atSegments, domain)
+    const run = () => this.#doCommitBranch(branchSig, atSegments, domain, mode)
     const next = this.#commitLock.then(run, run)
     this.#commitLock = next.catch(() => undefined)
     return next
   }
 
+  // mode `fold` (default, adopt / DCP-config fold): idempotent — a tile
+  // already present at (name, at) is left untouched, and the props-index
+  // seed is fill-if-empty (never disturbs an image already on a tile).
+  // mode `sync` (the sync icon): the explicit "pull their latest" gesture —
+  // re-homes the publisher's CURRENT subtree OVER the stale local copy and
+  // overwrites the props index so their refreshed image wins.
   #doCommitBranch = async (
     branchSig: string,
     atSegments: readonly string[],
     domain?: string,
+    mode: 'fold' | 'sync' = 'fold',
   ): Promise<'committed' | 'exists' | 'unavailable'> => {
     const sig = String(branchSig ?? '').toLowerCase().trim()
     if (!SIG_RE.test(sig)) return 'unavailable'
@@ -302,7 +364,11 @@ export class SwarmAdoptDrone extends Drone {
       // siblings it couldn't see. Mirrors clipboard paste's #resolveParentLayer.
       const parent = await resolveLayerAt(history, lineage.domain, at)
       const existing = await childNamesOf(history, parent)
-      if (existing.includes(name)) return 'exists' // already a child here — idempotent
+      const alreadyChild = existing.includes(name)
+      // FOLD is idempotent — a tile already present here is left untouched.
+      // SYNC deliberately falls through to re-home the publisher's CURRENT
+      // subtree over the stale local copy (the "pull their latest" gesture).
+      if (alreadyChild && mode !== 'sync') return 'exists'
 
       // Re-home the subtree and fold the name into the parent's children in ONE
       // mechanical importTree cascade — each affected ancestor commits exactly
@@ -311,8 +377,60 @@ export class SwarmAdoptDrone extends Drone {
       // (children by name, other slots verbatim); the parent update folds in the
       // new top.
       const treeUpdates = await flattenLayerTree(history, branchLayer, [...at, name])
+
+      // Seed the participant-local props index from each adopted node's
+      // CANONICAL `properties` slot — the mirror of substrate's
+      // reconcileCanonicalImageStamps (index → canonical), run here in the
+      // OTHER direction (canonical → index) for the freshly-folded subtree.
+      // flattenLayerTree carries the publisher's `properties` sig verbatim,
+      // but show-cell's render path AND the substrate's blank-detection both
+      // read ONLY the localStorage index (`hc:tile-props-index`). Without
+      // this seed the adopted tile looks blank to both: the substrate fills
+      // it with a random pool image and writes its OWN index entry,
+      // permanently displacing the publisher's real image (the
+      // "image recycled to a random one on adopt" bug). Seeding here — BEFORE
+      // importTree emits `cell:added` — makes the real image render and makes
+      // the substrate skip the tile (no longer blank). Keyed by location sig,
+      // the exact key show-cell + substrate resolve with.
+      //
+      // FILL-IF-EMPTY for FOLD; SYNC overwrites it (the explicit authoritative
+      // "pull their latest" refresh, gated on `mode` below). Fold seeds only a
+      // location with NO index entry. The existence guard (`existing.includes(name)` -> 'exists')
+      // bails for tiles already local — but it relies on childNamesOf, which
+      // silently drops a child whose layer bytes don't resolve under a cold
+      // pool, so a same-named local tile CAN slip past it. If that tile already
+      // has an image entry here, overwriting would change an image already
+      // present (the invariant we must not break). The substrate-side fix
+      // (peer/witnessed tiles excluded from substrate) stops stale random picks
+      // at their source, so there is nothing legitimate to "heal" by replacing
+      // — skip any occupied slot.
+      try {
+        const index = readTilePropsIndex()
+        let seeded = false
+        for (const u of treeUpdates) {
+          const props = (u.layer as { properties?: unknown }).properties
+          const propSig = Array.isArray(props) && typeof props[0] === 'string' ? props[0] : undefined
+          if (!propSig || !SIG_RE.test(propSig)) continue
+          const segs = u.segments
+          if (segs.length === 0) continue
+          const key = await cellLocationSig(segs.slice(0, -1), segs[segs.length - 1])
+          if (!key) continue
+          // Fold fills empty slots only; sync overwrites so the publisher's
+          // refreshed image wins (paired with the tile:saved cache-bust).
+          if (index[key] && mode !== 'sync') continue
+          index[key] = propSig
+          seeded = true
+        }
+        if (seeded) writeTilePropsIndex(index)
+      } catch (err) {
+        console.warn('[swarm-adopt] props-index seed skipped', err)
+      }
+
       await committer.importTree([
-        { segments: at, layer: { ...(parent ?? {}), children: [...existing, name] } },
+        // De-dupe on sync replace: the name is already in `existing`, so don't
+        // append a second copy — re-homing treeUpdates over [...at, name]
+        // replaces the child's layer in place. Fold appends the new top.
+        { segments: at, layer: { ...(parent ?? {}), children: alreadyChild ? [...existing] : [...existing, name] } },
         ...treeUpdates,
       ])
       EffectBus.emit('fs:changed', { segments: at })

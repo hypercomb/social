@@ -1,5 +1,6 @@
 @use '../../hypercomb-shared/fonts/fonts';
 @use '../../hypercomb-shared/styles/material-tokens';
+@use '../../hypercomb-shared/styles/canvas-suppress' as *;
 
 html,
 body {
@@ -63,4 +64,11 @@ body.hc-view-website {
   hc-youtube-viewer {
     display: none !important;
   }
+
 }
+
+// Neutralise the reparented Pixi canvas under every full-surface overlay so it
+// can't bleed over or eat the overlay's clicks. ONE source of truth — see
+// hypercomb-shared/styles/_canvas-suppress.scss for the full why.
+@include suppress-canvas-under('.hc-view-website'); // website render mode
+@include suppress-canvas-under('.viewer-open');     // youtube fullscreen viewer

@@ -1,6 +1,8 @@
 // diamondcoreprocessor.com/dashboard/dashboard.bee.ts
 //
-// DashboardBee — the sole link between a location and its dashboard.
+// DashboardBee — the sole link between a location and its dashboard, and
+// the navigation-behavior controller behind the command-line dashboard
+// toggle.
 //
 // Architecture (final form):
 //
@@ -16,24 +18,25 @@
 //
 //   • The bee owns the registry: which locations have a pinned dashboard.
 //     localStorage holds the cache; the canonical "this location is
-//     pinned" event is gossiped on the lineage's mesh filter
-//     (`hash(segments + location + secret)`). That filter is the existing
-//     `history.sign(lineage)` primitive plus secret folding (TODO hook —
+//     pinned" event is gossiped on the lineage's mesh filter (TODO hook —
 //     present as a marked seam below).
 //
-//   • Pill activation: bee subscribes to lineage change, looks up its own
-//     map, emits/clears the pill via existing `indicator:set` /
-//     `indicator:clear` EffectBus events. Indicator carries
-//     `meta.kind: '@diamondcoreprocessor.com/dashboard'` so other domain
-//     bees can publish their own pills under their own namespaces without
-//     stepping on each other.
+//   • SURFACE = a ViewBehavior TOGGLE, not a status pill. The bee registers
+//     a `behavior: 'navigation'` descriptor with VisualBeeRegistry; ViewBee
+//     (commands/view.bee.ts) is the sole producer of `view-toggles:changed`
+//     and surfaces this bee's toggle on the right side of the command line
+//     — same family as `/website`. ViewBee delegates the toggle's
+//     availability / active-state / click to the controller methods below
+//     (`isAvailable`, `isActive`, `toggleBehavior`). The bee emits
+//     `dashboard:state` whenever a dashboard is minted / opened / closed so
+//     ViewBee re-surfaces the toggle immediately.
 //
-//   • Pill click → `indicator:open` (generic, dispatched by the
-//     command-line for any action-pill) → bee filters by `meta.kind` →
-//     navigates the canvas into the bag's segments → bag's children
-//     render as real tiles → Q&A tile clicks fire `tile:action` →
-//     DashboardQOpenWorker activates because the bee says "yes, this
-//     location is one of mine".
+//   • Open  = navigate the canvas into the bag's segments (remembering where
+//     we came from). Close = navigate back to that exact prior location.
+//     Three gestures close it: re-clicking the toggle, Escape (the
+//     escape-cascade's `global:escape` fallback), and right-click on the
+//     canvas (intercepted in capture phase so it doesn't fall through to the
+//     overlay's default up-a-level back-nav).
 //
 //   • Removing the bee removes the dashboard surface entirely; the bag's
 //     bytes remain in OPFS (recoverable by sig), and the layers it
@@ -41,11 +44,12 @@
 //     not data.
 
 import { Worker, EffectBus } from '@hypercomb/core'
+import type { VisualBeeRegistry } from '../commands/visual-bee-registry.js'
 
 const STATE_KEY = 'hc:@diamondcoreprocessor.com/DashboardBee:bags'
-const INDICATOR_KEY_PREFIX = '@diamondcoreprocessor.com/dashboard:'
+const RETURN_KEY = 'hc:@diamondcoreprocessor.com/DashboardBee:return'
+/** Material Symbols ligature for the command-line toggle. */
 const DASHBOARD_ICON = 'dashboard'
-const DASHBOARD_KIND = '@diamondcoreprocessor.com/dashboard'
 
 type LineageLike = {
   domain?: () => string
@@ -65,12 +69,6 @@ type NavigationLike = {
   goRaw: (segments: readonly string[]) => void
 }
 
-type IndicatorOpenPayload = {
-  key?: string
-  sig?: string
-  meta?: { kind?: string; segments?: readonly string[] }
-}
-
 /** What the bee persists per pinned dashboard. */
 type PinnedBag = {
   /** locSig of the location this dashboard is pinned to (the "anchor"). */
@@ -87,34 +85,38 @@ export class DashboardBee extends Worker {
   override genotype = 'dashboard'
 
   public override description =
-    'DashboardBee — provides dashboards as bag-backed views. Owns its bags internally; nothing in the layer tree references them.'
+    'DashboardBee — provides the dashboard as a navigation-behavior toggle. Owns its bag internally; nothing in the layer tree references it.'
 
-  protected override emits: string[] = ['indicator:set', 'indicator:clear']
+  protected override emits: string[] = ['dashboard:state']
 
   /** locationSig → PinnedBag. The cache of the swarm-gossiped pin set. */
   readonly #bags = new Map<string, PinnedBag>()
 
-  /** Tracks which indicator keys the bee currently has on screen so a
-   *  lineage change can clear stale ones cleanly. */
-  readonly #activeIndicatorKeys = new Set<string>()
+  /** Where the participant was when they opened the dashboard. Closing
+   *  (toggle / Escape / right-click) returns here exactly. Persisted so a
+   *  reload while inside the dashboard still has a sane return target. */
+  #returnSegments: readonly string[] | null = null
+
+  /** Set on the pointerdown that closed the dashboard so the trailing
+   *  native contextmenu is swallowed (the close already happened). */
+  #suppressContextMenu = false
 
   protected override act = async (): Promise<void> => {
     this.#restoreState()
-    this.#wireLineageSync()
-    this.#wireOpenHandler()
-    // First-paint sync. Without this, the pill wouldn't appear until the
-    // first navigation event after boot.
-    void this.#syncIndicatorsForCurrentLocation()
+    this.#wireEscape()
+    this.#wireRightClick()
+    // First-paint surface. If a dashboard was restored from a prior session,
+    // this nudges ViewBee to show the toggle without waiting for a nav event.
+    EffectBus.emit('dashboard:state', {})
   }
 
   // ─── public API ─────────────────────────────────────────────────────
 
   /**
    * `/dashboard` invocation entry point. Mints a new bag, pins it to the
-   * current location, emits the pill, returns the FULL pinned-bag entry
-   * (locationSig, bagLocSig, bagSegments) so callers don't have to dig
-   * through the bags map by index — there may be other entries from
-   * prior pins at other locations.
+   * current location, surfaces the toggle, and returns the FULL pinned-bag
+   * entry (locationSig, bagLocSig, bagSegments). Does NOT navigate — the
+   * toggle icon opens the dashboard, the command only ensures it exists.
    */
   public async createDashboardForCurrentLocation(): Promise<PinnedBag | null> {
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
@@ -132,11 +134,9 @@ export class DashboardBee extends Worker {
     // whole hive — it is the single place every Claude question aggregates
     // to be answered. If one already exists, RE-ANCHOR that same bag to the
     // current location (preserving the questions it already holds) instead
-    // of minting a second. Any pill the old anchor was showing is cleared
-    // first, so there is never more than one ◆ on screen.
+    // of minting a second.
     const existing = this.#currentBag()
     if (existing) {
-      this.#clearAllIndicators()
       this.#bags.clear()
       const reanchored: PinnedBag = {
         locationSig: currentLocSig,
@@ -146,7 +146,7 @@ export class DashboardBee extends Worker {
       this.#bags.set(currentLocSig, reanchored)
       this.#persistState()
       this.#publishToSwarm(reanchored)
-      this.#emitIndicator(reanchored)
+      EffectBus.emit('dashboard:state', {})
       return reanchored
     }
 
@@ -175,15 +175,37 @@ export class DashboardBee extends Worker {
     this.#persistState()
     this.#publishToSwarm(entry)
 
-    this.#emitIndicator(entry)
+    EffectBus.emit('dashboard:state', {})
     return entry
+  }
+
+  // ─── navigation-behavior controller (consumed by ViewBee) ───────────
+
+  /** A dashboard exists → the toggle should be offered. */
+  public isAvailable(): boolean {
+    return this.#bags.size > 0
+  }
+
+  /** The participant is currently inside the dashboard bag (or its
+   *  subtree). Sync — compares the current lineage's first segment to the
+   *  bag's unique root segment. */
+  public isActive(): boolean {
+    const bag = this.#currentBag()
+    if (!bag || !bag.bagSegments.length) return false
+    const segs = this.#currentSegments()
+    return segs.length > 0 && segs[0] === bag.bagSegments[0]
+  }
+
+  /** Toggle the dashboard: open if outside, close (back to previous) if
+   *  inside. The single action ViewBee dispatches on a toggle click. */
+  public toggleBehavior(): void {
+    if (this.isActive()) this.#closeDashboard()
+    else this.#openDashboard()
   }
 
   /**
    * Gate for `DashboardQOpenWorker`. Returns true iff the user is
-   * currently sitting INSIDE one of this bee's dashboard bags (i.e.
-   * navigated to a bag via the pill). The worker uses this to decide
-   * whether a tile-click should route to the Q&A modal.
+   * currently sitting INSIDE one of this bee's dashboard bags.
    */
   public isLocationADashboard(locationSig: string): boolean {
     for (const entry of this.#bags.values()) {
@@ -200,92 +222,23 @@ export class DashboardBee extends Worker {
     return [...this.#bags.values()]
   }
 
-  // ─── lineage sync ───────────────────────────────────────────────────
+  // ─── open / close ───────────────────────────────────────────────────
 
-  #wireLineageSync(): void {
-    const lineage = get<EventTarget>('@hypercomb.social/Lineage') as EventTarget | undefined
-    if (!lineage?.addEventListener) return
-    lineage.addEventListener('change', () => {
-      void this.#syncIndicatorsForCurrentLocation()
-    })
+  /** Navigate the canvas into the bag, remembering where we came from. */
+  #openDashboard(): void {
+    const bag = this.#currentBag()
+    if (!bag) return
+    this.#returnSegments = this.#currentSegments()
+    this.#persistReturn()
+    this.#navigateInto(bag.bagSegments)
+    EffectBus.emit('dashboard:state', {})
   }
 
-  async #syncIndicatorsForCurrentLocation(): Promise<void> {
-    const lineage = get<LineageLike>('@hypercomb.social/Lineage')
-    const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
-    if (!lineage || !history) return
-
-    // Clear the bee's previous indicators so old pills don't linger
-    // when the user navigates to a location without a pinned bag.
-    this.#clearAllIndicators()
-
-    const currentSegments = (lineage.explorerSegments?.() ?? [])
-      .map(s => String(s ?? '').trim()).filter(Boolean)
-    const currentLocSig = await history.sign({
-      domain: lineage.domain,
-      explorerSegments: () => currentSegments,
-    })
-
-    // The pill appears in two cases:
-    //   (a) The user is AT a location with a pinned bag — show the
-    //       bag's pill, click opens the bag.
-    //   (b) The user is INSIDE a bag — show the pill so the user knows
-    //       they're inside a dashboard. (Future: distinguish visually.)
-    const anchoredHere = this.#bags.get(currentLocSig)
-    if (anchoredHere) {
-      this.#emitIndicator(anchoredHere)
-      return
-    }
-    for (const entry of this.#bags.values()) {
-      if (entry.bagLocSig === currentLocSig) {
-        this.#emitIndicator(entry)
-        return
-      }
-    }
-  }
-
-  #emitIndicator(entry: PinnedBag): void {
-    const key = INDICATOR_KEY_PREFIX + entry.locationSig
-    this.#activeIndicatorKeys.add(key)
-    EffectBus.emit('indicator:set', {
-      key,
-      icon: DASHBOARD_ICON,
-      label: 'dashboard',
-      dismissable: false,
-      action: 'open',
-      sig: entry.bagLocSig,
-      // `meta` is how this bee distinguishes its pills from other domain
-      // bees' pills. The command-line dispatch is generic; the bee
-      // filters incoming `indicator:open` events by `meta.kind`.
-      meta: { kind: DASHBOARD_KIND, segments: entry.bagSegments },
-    })
-  }
-
-  /** The single dashboard entry, if one exists. The bee holds at most one
-   *  (single-instance invariant); this is the canonical accessor. */
-  #currentBag(): PinnedBag | undefined {
-    return this.#bags.values().next().value as PinnedBag | undefined
-  }
-
-  /** Clear every pill the bee currently has on screen. */
-  #clearAllIndicators(): void {
-    for (const key of this.#activeIndicatorKeys) {
-      EffectBus.emit('indicator:clear', { key })
-    }
-    this.#activeIndicatorKeys.clear()
-  }
-
-  // ─── open (navigate into the bag) ───────────────────────────────────
-
-  #wireOpenHandler(): void {
-    // Generic indicator-click dispatch. The command-line emits this for
-    // ANY action pill; each domain bee subscribes and filters by kind.
-    EffectBus.on<IndicatorOpenPayload>('indicator:open', (payload) => {
-      if (payload?.meta?.kind !== DASHBOARD_KIND) return
-      const segments = payload?.meta?.segments
-      if (!Array.isArray(segments) || segments.length === 0) return
-      this.#navigateInto(segments)
-    })
+  /** Navigate back to the exact location the dashboard was opened from. */
+  #closeDashboard(): void {
+    const nav = get<NavigationLike>('@hypercomb.social/Navigation')
+    nav?.goRaw?.(this.#returnSegments ?? [])
+    EffectBus.emit('dashboard:state', {})
   }
 
   #navigateInto(segments: readonly string[]): void {
@@ -296,28 +249,87 @@ export class DashboardBee extends Worker {
     nav.goRaw(segments)
   }
 
+  // ─── close gestures: Escape + right-click ───────────────────────────
+
+  /** Escape closes the dashboard — but only as the cascade's last resort
+   *  (`global:escape`), so open editors / modals / selections clear first. */
+  #wireEscape(): void {
+    EffectBus.on('global:escape', () => {
+      if (this.isActive()) this.#closeDashboard()
+    })
+  }
+
+  /** Right-click on the canvas while inside the dashboard = close (back to
+   *  previous). Capture phase so it preempts the tile-overlay's bubble-phase
+   *  pointerdown handler, whose default is "up a level". */
+  #wireRightClick(): void {
+    document.addEventListener('pointerdown', this.#onPointerDownCapture, true)
+    document.addEventListener('contextmenu', this.#onContextMenuCapture, true)
+  }
+
+  #onPointerDownCapture = (e: PointerEvent): void => {
+    if (e.button !== 2) return
+    if (!this.isActive()) return
+    if (!(e.target instanceof HTMLCanvasElement)) return
+    e.preventDefault()
+    e.stopPropagation()
+    this.#suppressContextMenu = true
+    this.#closeDashboard()
+  }
+
+  #onContextMenuCapture = (e: MouseEvent): void => {
+    if (!this.#suppressContextMenu) return
+    this.#suppressContextMenu = false
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  // ─── helpers ────────────────────────────────────────────────────────
+
+  #currentSegments(): string[] {
+    const lineage = get<LineageLike>('@hypercomb.social/Lineage')
+    return (lineage?.explorerSegments?.() ?? [])
+      .map(s => String(s ?? '').trim()).filter(Boolean)
+  }
+
+  /** The single dashboard entry, if one exists. The bee holds at most one
+   *  (single-instance invariant); this is the canonical accessor. */
+  #currentBag(): PinnedBag | undefined {
+    return this.#bags.values().next().value as PinnedBag | undefined
+  }
+
   // ─── persistence + swarm (the registry surface) ─────────────────────
 
   #restoreState(): void {
     try {
       const raw = localStorage.getItem(STATE_KEY)
-      if (!raw) return
-      const list = JSON.parse(raw) as PinnedBag[]
-      if (!Array.isArray(list)) return
-      this.#bags.clear()
-      for (const b of list) {
-        if (!b?.locationSig || !b?.bagLocSig || !Array.isArray(b.bagSegments)) continue
-        this.#bags.set(b.locationSig, {
-          locationSig: b.locationSig,
-          bagLocSig: b.bagLocSig,
-          bagSegments: b.bagSegments,
-        })
-        // Single-instance: collapse any legacy multi-bag state to the first
-        // valid entry. The others remain recoverable by sig in OPFS.
-        break
+      if (raw) {
+        const list = JSON.parse(raw) as PinnedBag[]
+        if (Array.isArray(list)) {
+          this.#bags.clear()
+          for (const b of list) {
+            if (!b?.locationSig || !b?.bagLocSig || !Array.isArray(b.bagSegments)) continue
+            this.#bags.set(b.locationSig, {
+              locationSig: b.locationSig,
+              bagLocSig: b.bagLocSig,
+              bagSegments: b.bagSegments,
+            })
+            // Single-instance: collapse any legacy multi-bag state to the
+            // first valid entry. The others remain recoverable by sig in OPFS.
+            break
+          }
+          // Rewrite storage so a legacy multi-bag list is permanently collapsed.
+          this.#persistState()
+        }
       }
-      // Rewrite storage so a legacy multi-bag list is permanently collapsed.
-      this.#persistState()
+    } catch { /* tolerate corrupt state */ }
+
+    try {
+      const rawRet = localStorage.getItem(RETURN_KEY)
+      if (rawRet) {
+        const arr = JSON.parse(rawRet) as unknown[]
+        if (Array.isArray(arr)) this.#returnSegments = arr.map(s => String(s))
+      }
     } catch { /* tolerate corrupt state */ }
   }
 
@@ -326,12 +338,16 @@ export class DashboardBee extends Worker {
     localStorage.setItem(STATE_KEY, JSON.stringify(list))
   }
 
+  #persistReturn(): void {
+    try {
+      if (this.#returnSegments) localStorage.setItem(RETURN_KEY, JSON.stringify(this.#returnSegments))
+      else localStorage.removeItem(RETURN_KEY)
+    } catch { /* ignore */ }
+  }
+
   /**
    * Mesh-publish hook. The pin event should ride the lineage's filter
-   * signature so it propagates to participants sharing the secret. The
-   * filter sig is `hash(segments + location + secret)` — the existing
-   * `history.sign(lineage)` primitive plus secret folding (which lives
-   * in SecretStore + the swarm publish service).
+   * signature so it propagates to participants sharing the secret.
    *
    * Marked TODO because the swarm publish API needs a small bit of
    * triage to wire to from a Worker — the existing properties-publish
@@ -348,3 +364,26 @@ export class DashboardBee extends Worker {
 
 const _dashboardBee = new DashboardBee()
 window.ioc.register('@diamondcoreprocessor.com/DashboardBee', _dashboardBee)
+
+// Visual-bee registration. Declares the dashboard as a `navigation`
+// ViewBehavior so ViewBee surfaces it as a right-side command-line toggle
+// (same family as `/website`). ViewBee resolves `controllerKey` and
+// delegates the toggle's availability / active-state / click to the bee's
+// isAvailable() / isActive() / toggleBehavior(). `adoptable: false` — the
+// dashboard is participant-local and never transfers via tile adoption, so
+// the sentinel decorationKind / iconName are never consulted.
+;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<VisualBeeRegistry>(
+  '@diamondcoreprocessor.com/VisualBeeRegistry',
+  (registry) => {
+    registry.register({
+      view: 'dashboard',
+      slashCommand: '/dashboard',
+      iconName: DASHBOARD_ICON,
+      toggleIcon: DASHBOARD_ICON,
+      decorationKind: 'visual:dashboard:view',
+      behavior: 'navigation',
+      controllerKey: '@diamondcoreprocessor.com/DashboardBee',
+      adoptable: false,
+    })
+  },
+)

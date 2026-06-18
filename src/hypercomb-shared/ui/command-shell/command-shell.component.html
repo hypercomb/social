@@ -20,7 +20,7 @@
             <span class="prompt-badge">{{ b }}</span>
           }
         } @else {
-          <span class="prompt-chevron" aria-hidden="true">&gt;</span>
+          <span class="prompt-chevron mat-sym" aria-hidden="true">chevron_right</span>
         }
       </span>
 
@@ -43,6 +43,16 @@
           (input)="onInput()"
         />
       </div>
+
+      @if (lockedFlash()) {
+        <span
+          class="locked-flash mat-sym"
+          role="status"
+          aria-hidden="false"
+          [attr.aria-label]="lockedLabel()"
+          [title]="lockedLabel()"
+        >lock</span>
+      }
 
       @if (indicators().length) {
         <div class="indicators">
@@ -71,7 +81,9 @@
               class="view-toggle-btn"
               [class.on]="vt.active"
               type="button"
-              (mousedown)="$event.preventDefault(); viewToggle.emit(vt.view)"
+              (mousedown)="onViewToggleDown($event, vt.view)"
+              (mouseup)="onViewToggleUp(vt.view)"
+              (mouseleave)="onViewToggleCancel()"
               [attr.aria-label]="vt.label"
               [attr.aria-pressed]="vt.active"
               [title]="vt.label"
@@ -80,6 +92,48 @@
             </button>
           }
         </div>
+      }
+
+      @if (showSolomonToggle()) {
+        <button
+          class="solomon-btn"
+          [class.on]="solomonActive()"
+          type="button"
+          (mousedown)="$event.preventDefault(); solomonToggle.emit()"
+          [attr.aria-label]="solomonLabel()"
+          [attr.aria-pressed]="solomonActive()"
+          [title]="solomonLabel()"
+        >
+          <span class="mat-sym" aria-hidden="true">castle</span>
+        </button>
+      }
+
+      @if (showBubbleToggle()) {
+        <button
+          class="bubble-btn"
+          [class.on]="bubbleActive()"
+          type="button"
+          (mousedown)="$event.preventDefault(); bubbleToggle.emit()"
+          [attr.aria-label]="bubbleLabel()"
+          [attr.aria-pressed]="bubbleActive()"
+          [title]="bubbleLabel()"
+        >
+          <span class="mat-sym" aria-hidden="true">bubble_chart</span>
+        </button>
+      }
+
+      @if (showArkanoidToggle()) {
+        <button
+          class="arkanoid-btn"
+          [class.on]="arkanoidActive()"
+          type="button"
+          (mousedown)="$event.preventDefault(); arkanoidToggle.emit()"
+          [attr.aria-label]="arkanoidLabel()"
+          [attr.aria-pressed]="arkanoidActive()"
+          [title]="arkanoidLabel()"
+        >
+          <span class="mat-sym" aria-hidden="true">sports_tennis</span>
+        </button>
       }
 
       @if (showOpenForSubscribersToggle()) {

@@ -5,18 +5,33 @@
 // no longer stamps `websiteSig` decorations or builds bundles — the
 // renderer (site-view.drone) reads `context` directly.
 //
+// The website render surface is a SINGLE GLOBAL flag (ViewModeService) —
+// `/website on` turns it on everywhere there's a page, `/website off` turns
+// it off, bare `/website` toggles. There is no per-branch render marker.
+// `/website here` is a different thing entirely: it drops a build-intent
+// marker on the current cell (a `visual:website:pending` decoration) for the
+// NEXT gen pass / build skill to turn into a page. Independent, signature-
+// addressed, undoable — it never flips the render surface.
+//
 // Syntax:
 //
-//   /website                         — toggle hexagons ↔ website view
-//   /website on | web | site | view  — switch to website view
-//   /website off | hex | hexagons    — switch to hexagons view
+//   /website                         — toggle hexagons ↔ website view (global)
+//   /website on | web | site | view  — switch to website view (global)
+//   /website off | hex | hexagons    — switch to hexagons view (global)
+//   /website here | mark             — flag THIS cell for the next gen pass
+//                                      (drops a visual:website:pending
+//                                      decoration; re-run to unflag)
+//   /website save                    — export the current branch as a portable
+//                                      .zip (Payload Bundle) you can carry
+//   /website load                    — import a website .zip into your hive
 //   /website export                  — dump current subtree as JSON
 //                                      (copies to clipboard for Claude
 //                                      Code's /website skill)
 //   /website <name-or-path>          — export that subtree as JSON
 //   /website upgrade [* | <name>]    — emit website:build (mode=upgrade)
 //   /website new | build             — emit website:build (mode=new)
-//   /website list                    — list registered branch names
+//   /website list                    — the gen queue: cells flagged with
+//                                      /website here; clear one by × on its line
 //
 // <name-or-path> is one of:
 //   - a registered branch name (from /branch)
@@ -38,19 +53,36 @@ import {
   isSignature,
 } from '../editor/tile-properties.js'
 import type { VisualBeeRegistry } from './visual-bee-registry.js'
+import { showWebsiteListPanel } from './website-instances.js'
+// `/website save` / `/website load` — portable .zip export/import of a branch,
+// folded in from the former standalone /website-save and /website-load commands
+// so they no longer crowd the /website autocomplete.
+import { exportBranch, importArchive } from './website-archive.queen.js'
+// `/website here` writes a build-intent marker as a decoration on the
+// current cell, and toggles it off on re-run. The named imports also anchor
+// the decoration-manifest module (slot registration) against tree-shaking.
+import { writeDecoration, listDecorations, removeDecoration } from './decoration-manifest.js'
 // Side-effect imports: ensure foundational modules load at startup.
 // Some bundler configurations drop modules whose value exports aren't
 // directly imported elsewhere; the explicit imports here anchor them
 // against tree-shaking.
 //
-//   - decoration-manifest: registers the `decorations` layer slot
 //   - decoration-kind-index: maintains in-memory cell-label → kind
 //     index for visibleWhen lookups
 //   - visual-bee-icons: syncs visual-bee declarations to
 //     IconProviderRegistry; dispatches clicks to the bee's queen
-import './decoration-manifest.js'
 import './decoration-kind-index.js'
 import './visual-bee-icons.js'
+
+/**
+ * Build-intent marker kind. `/website here` drops a decoration of this kind
+ * on the current cell; the next gen pass / `website-build` skill reads them
+ * as the authoritative queue of cells to turn into pages, then replaces each
+ * with a `visual:website:page` decoration once generated. Distinct from the
+ * page kind so SiteViewDrone (which mounts `visual:website:page` + htmlSig)
+ * and ViewBee's presence check never confuse a request for a built page.
+ */
+export const WEBSITE_PENDING_KIND = 'visual:website:pending'
 
 // View-mode toggle constants. These are the args /website accepts as
 // "I want to switch rendering surface" instead of "stamp / export."
@@ -430,7 +462,7 @@ export class WebsiteQueenBee extends QueenBee {
     if (tokens.length <= 1) {
       const matches = names.filter(n => n.toLowerCase().startsWith(head))
       // Bundle ops (`<sig>`, `[sig][sig]…`, `clear`) removed.
-      const fixed = ['(toggle view)', 'export', 'upgrade', 'new', 'build', 'list']
+      const fixed = ['(toggle view)', 'here', 'save', 'load', 'export', 'upgrade', 'new', 'build', 'list']
         .filter(s => !head || s.toLowerCase().startsWith(head))
       return [...new Set([...matches, ...fixed])]
     }
@@ -463,24 +495,34 @@ export class WebsiteQueenBee extends QueenBee {
       )
     }
 
-    // Elegant view-mode toggle. /website with no arg, or with one of
-    // the mode keywords, switches the rendering surface. The original
-    // no-args behavior (subtree snapshot dump) moves to `/website export`
-    // — power-user action; the toggle is the common case.
+    // `/website here` — flag THIS cell for the next gen pass. Drops a
+    // `visual:website:pending` build-intent decoration on the current cell
+    // (re-run clears it). This is NOT a render-surface action; it never
+    // touches ViewMode. The build skill reads these markers as its queue.
+    if (trimmed === 'here' || trimmed === 'mark') {
+      return void this.#markHere()
+    }
+
+    // `/website save` / `/website load` — portable .zip export/import of the
+    // current branch (Payload Bundle protocol). Delegated to the archive
+    // module; folded in from the old standalone /website-save & /website-load.
+    if (trimmed === 'save') return void exportBranch()
+    if (trimmed === 'load') return void importArchive()
+
+    // Global view apply. /website with no arg, or with one of the mode
+    // keywords, flips the SINGLE GLOBAL render surface (ViewModeService).
+    // Routed through the same `view:toggle` event the command-line icon
+    // uses so command and icon stay in sync; ViewBee flips ViewMode directly
+    // (no marker, nothing reverts it).
+    //   no arg            → toggle hexagons ⇄ website
+    //   on/web/site/page  → force website on
+    //   off/hex/hexagons  → force website off
     if (!trimmed || VIEW_TOGGLE_KEYWORDS.has(trimmed)) {
-      const vm = get('@hypercomb.social/ViewMode') as ViewModeShape | undefined
-      if (vm) {
-        if (!trimmed) {
-          const next = vm.toggle('hexagons', 'website')
-          console.log(`[/website] view → ${next}`)
-          return
-        }
-        const target = HEXAGON_KEYWORDS.has(trimmed) ? 'hexagons' : 'website'
-        vm.setMode(target)
-        console.log(`[/website] view → ${target}`)
-        return
-      }
-      // ViewMode service not registered — fall through to legacy parsing.
+      const mode: 'on' | 'off' | 'toggle' =
+        !trimmed ? 'toggle' : HEXAGON_KEYWORDS.has(trimmed) ? 'off' : 'on'
+      EffectBus.emit('view:toggle', { view: 'website', mode })
+      console.log(`[/website] global view → website (${mode})`)
+      return
     }
 
     if (trimmed === 'export') {
@@ -591,21 +633,50 @@ export class WebsiteQueenBee extends QueenBee {
     }
   }
 
-  async #list(): Promise<void> {
-    const registry = get('@hypercomb.social/NameRegistry') as any
-    if (!registry?.ensureLoaded) { console.warn('[/website] registry not ready'); return }
-    await registry.ensureLoaded()
-    const all = registry.all as Record<string, any>
-    const names = Object.keys(all).sort()
-    console.log(`[/website] ${names.length} branch${names.length === 1 ? '' : 'es'}:`)
-    for (const name of names) {
-      const entry = all[name]
-      if (entry?.target?.kind === 'lineage') {
-        console.log(`  ${name} → /${(entry.target.path ?? []).join('/')}`)
-      } else if (entry?.target?.kind === 'signature') {
-        console.log(`  ${name} → signature ${entry.target.signature}`)
+  /**
+   * `/website here` — flag the current cell for the next gen pass by writing
+   * a `visual:website:pending` decoration on its own `decorations` slot. The
+   * marker is an independent, signature-addressed, undoable resource on the
+   * cell's layer (no central map, no cross-cell dependency) — exactly the
+   * shape the build skill reads as its queue. Idempotent and reversible: if
+   * the cell is already flagged, re-running `/website here` clears it.
+   */
+  async #markHere(): Promise<void> {
+    const lineage = get('@hypercomb.social/Lineage') as { explorerSegments?: () => readonly string[] } | undefined
+    const segments = (lineage?.explorerSegments?.() ?? [])
+      .map(s => String(s ?? '').trim()).filter(Boolean)
+    const where = segments.length ? `/${segments.join('/')}` : '/'
+
+    try {
+      // Already flagged here? Re-running is the off-switch — drop the marker.
+      const existing = await listDecorations({ kind: WEBSITE_PENDING_KIND, segments })
+      if (existing.length) {
+        for (const e of existing) removeDecoration({ sig: e.sig, segments })
+        console.log(`[/website here] unflagged ${where} (${existing.length} marker${existing.length === 1 ? '' : 's'} cleared)`)
+        toast('info', 'website', `${where} removed from the next gen pass`)
+        return
       }
+
+      await writeDecoration({
+        kind: WEBSITE_PENDING_KIND,
+        appliesTo: segments,
+        segments,
+        payload: { requestedAt: Date.now() },
+        mark: 'persistent',
+      })
+      console.log(`[/website here] flagged ${where} for the next /website build`)
+      toast('success', 'website', `${where} flagged — run /website build (or the website skill) to generate its page`)
+    } catch (err) {
+      console.warn('[/website here] failed', err)
+      toast('warning', 'website', 'could not flag this cell — see console')
     }
+  }
+
+  /** Open the gen-queue panel: the cells flagged with `/website here`
+   *  (carrying a `visual:website:pending` decoration), each clearable via its
+   *  × button and navigable by clicking its path. */
+  #list(): void {
+    void showWebsiteListPanel()
   }
 }
 

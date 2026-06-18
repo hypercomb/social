@@ -17,6 +17,10 @@ type InstallManifest = {
   bees?: string[]
   dependencies?: string[]
   beeDeps?: Record<string, string[]>
+  // Sidecar branch metadata (does not affect rootSig). Surfaced in the installer.
+  label?: string
+  at?: string
+  previous?: string | null
 }
 
 type ContentManifest = {

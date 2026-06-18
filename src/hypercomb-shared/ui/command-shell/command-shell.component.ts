@@ -6,6 +6,10 @@
 
 import { Component, computed, ElementRef, input, output, signal, ViewChild, type AfterViewInit } from '@angular/core'
 
+/** How long a view toggle must be held (no modifier) to count as a disable —
+ *  the touch-friendly equivalent of a cmd/ctrl-click. */
+const VIEW_TOGGLE_LONG_PRESS_MS = 500
+
 @Component({
   selector: 'hc-command-shell',
   standalone: true,
@@ -70,6 +74,56 @@ export class CommandShellComponent implements AfterViewInit {
   readonly viewToggles = input<readonly { view: string; icon: string; label: string; active: boolean }[]>([])
 
   /**
+   * Whether the Solomon's Key game toggle is rendered on the header. True
+   * whenever the SolomonDrone has registered (announced via `solomon:state`).
+   * Backed by the parent; the shell stays presentational.
+   */
+  readonly showSolomonToggle = input<boolean>(false)
+
+  /** Whether the game overlay is currently open (drives the on/off glow). */
+  readonly solomonActive = input<boolean>(false)
+
+  /** Aria-label / tooltip for the game toggle. */
+  readonly solomonLabel = input<string>("Solomon's Key game")
+
+  /**
+   * Whether the Bubble Bobble game toggle is rendered on the header. True
+   * whenever the BubbleDrone has registered (announced via `bubble:state`).
+   * Sibling of the Solomon toggle; the shell stays presentational.
+   */
+  readonly showBubbleToggle = input<boolean>(false)
+
+  /** Whether the Bubble Bobble overlay is currently open (drives the on/off glow). */
+  readonly bubbleActive = input<boolean>(false)
+
+  /** Aria-label / tooltip for the Bubble Bobble toggle. */
+  readonly bubbleLabel = input<string>('Bubble Bobble game')
+
+  /**
+   * Whether the Arkanoid game toggle is rendered on the header. True whenever
+   * the ArkanoidDrone has registered (announced via `arkanoid:state`). Sibling
+   * of the Solomon / Bubble toggles; the shell stays presentational.
+   */
+  readonly showArkanoidToggle = input<boolean>(false)
+
+  /** Whether the Arkanoid overlay is currently open (drives the on/off glow). */
+  readonly arkanoidActive = input<boolean>(false)
+
+  /** Aria-label / tooltip for the Arkanoid toggle. */
+  readonly arkanoidLabel = input<string>('Arkanoid game')
+
+  /**
+   * Briefly true when the user tried to pan or zoom while input is locked
+   * (the editor overlay is open). Drives a lock icon that flashes to the
+   * left of the right-side icons, then fades. Parent owns the timing; the
+   * shell just renders the current state.
+   */
+  readonly lockedFlash = input<boolean>(false)
+
+  /** Aria-label / tooltip for the locked-flash icon. */
+  readonly lockedLabel = input<string>('Locked — close the editor to pan or zoom')
+
+  /**
    * Optional armed-resource preview — when set, the chevron is replaced
    * with this thumbnail (same box, no reflow). Clicking it dismisses the arm.
    */
@@ -103,9 +157,70 @@ export class CommandShellComponent implements AfterViewInit {
    *  flips swarm.setOpenForSubscribers — the shell never touches IoC. */
   readonly openForSubscribersToggle = output<void>()
 
-  /** Emitted when a view toggle is clicked — payload is the view name
-   *  (e.g. `'website'`). Parent forwards it to ViewBee via EffectBus. */
-  readonly viewToggle = output<string>()
+  /**
+   * Emitted when a view toggle is clicked. `view` is the view name (e.g.
+   * `'website'`); `disable` is true for a cmd/ctrl-click or long-press —
+   * the "back to tiles, permanently" gesture that turns the view OFF for
+   * the tile. A plain click (`disable:false`) just enters / leaves the
+   * view while keeping the tile sticky. Parent forwards it to ViewBee.
+   */
+  readonly viewToggle = output<{ view: string; disable: boolean }>()
+
+  /** Pending long-press timer for the view toggle, and a latch so the
+   *  mouseup that follows a long-press / modifier-click doesn't ALSO emit a
+   *  plain toggle. */
+  #viewTogglePressTimer: ReturnType<typeof setTimeout> | null = null
+  #viewToggleDisabled = false
+
+  /** Pointer-down on a view toggle. A cmd/ctrl-click disables immediately; a
+   *  plain press starts the long-press timer and defers the toggle to mouseup. */
+  onViewToggleDown(e: MouseEvent, view: string): void {
+    e.preventDefault()
+    this.#viewToggleDisabled = false
+    if (e.metaKey || e.ctrlKey) {
+      this.#viewToggleDisabled = true
+      this.viewToggle.emit({ view, disable: true })
+      return
+    }
+    this.#viewTogglePressTimer = setTimeout(() => {
+      this.#viewToggleDisabled = true
+      this.#viewTogglePressTimer = null
+      this.viewToggle.emit({ view, disable: true })
+    }, VIEW_TOGGLE_LONG_PRESS_MS)
+  }
+
+  /** Pointer-up on a view toggle. Emits the plain toggle unless a long-press
+   *  or modifier-click already fired the disable. */
+  onViewToggleUp(view: string): void {
+    this.#clearViewTogglePress()
+    if (this.#viewToggleDisabled) { this.#viewToggleDisabled = false; return }
+    this.viewToggle.emit({ view, disable: false })
+  }
+
+  /** Pointer left the toggle before release — cancel the pending long-press. */
+  onViewToggleCancel(): void {
+    this.#clearViewTogglePress()
+    this.#viewToggleDisabled = false
+  }
+
+  #clearViewTogglePress(): void {
+    if (this.#viewTogglePressTimer) {
+      clearTimeout(this.#viewTogglePressTimer)
+      this.#viewTogglePressTimer = null
+    }
+  }
+
+  /** Emitted when the Solomon's Key header icon is clicked. Parent forwards
+   *  it to the SolomonDrone via EffectBus (`solomon:toggle`). */
+  readonly solomonToggle = output<void>()
+
+  /** Emitted when the Bubble Bobble header icon is clicked. Parent forwards
+   *  it to the BubbleDrone via EffectBus (`bubble:toggle`). */
+  readonly bubbleToggle = output<void>()
+
+  /** Emitted when the Arkanoid header icon is clicked. Parent forwards it to
+   *  the ArkanoidDrone via EffectBus (`arkanoid:toggle`). */
+  readonly arkanoidToggle = output<void>()
 
   /** Template handler for clicks on the armed-resource thumbnail. */
   onArmedGlyphMouseDown = (e: MouseEvent): void => {
@@ -163,6 +278,12 @@ export class CommandShellComponent implements AfterViewInit {
   /** Focus the input element. */
   focus(): void {
     this.inputElement?.focus()
+  }
+
+  /** Blur the input element — used to exit "command-line mode" (e.g. Escape
+   *  on an empty line) so keystrokes go back to the canvas. */
+  blur(): void {
+    this.inputElement?.blur()
   }
 
   /** Place caret at end of input. */

@@ -317,6 +317,53 @@ if (Test-Path -LiteralPath $localManifestPath -PathType Leaf) {
     $localManifest = Get-Content -LiteralPath $localManifestPath -Raw | ConvertFrom-Json
 
     if ($null -ne $remoteManifest.packages -and $null -ne $localManifest.packages) {
+      # set-or-add a NoteProperty on a PSCustomObject (entries from
+      # ConvertFrom-Json are PSCustomObjects; build-module already writes
+      # `label`/`previous`, so those get set; `at` gets added).
+      function set-prop($obj, $name, $value) {
+        if ($obj.PSObject.Properties[$name]) { $obj.$name = $value }
+        else { $obj | Add-Member -NotePropertyName $name -NotePropertyValue $value }
+      }
+
+      # ── Branch-name chaining ──────────────────────────────────────────
+      # build-module writes a single local package with a STABLE genesis
+      # `label` (the git branch) and `previous: null`. Here, where the remote
+      # manifest is in hand, we name this deploy "<previous>-updated-<stamp>"
+      # against the most recent remote package, and record `at` (deploy time)
+      # + `previous` (the version this supersedes) so the installer can walk
+      # the chain back by name. These are sidecar fields — they never affect
+      # the package's rootLayerSig.
+      $newProp  = $localManifest.packages.PSObject.Properties | Select-Object -First 1
+      if ($newProp) {
+      $newSig   = $newProp.Name
+      $newEntry = $newProp.Value
+      $remoteForNew = $remoteManifest.packages.PSObject.Properties[$newSig]
+      if ($remoteForNew) {
+        # identical content re-deploy: keep the label/at/previous it already
+        # had remotely — do not re-chain a package that hasn't changed.
+        $r = $remoteForNew.Value
+        if ($r.PSObject.Properties['label'])    { set-prop $newEntry 'label'    $r.label }
+        if ($r.PSObject.Properties['at'])       { set-prop $newEntry 'at'       $r.at }
+        if ($r.PSObject.Properties['previous']) { set-prop $newEntry 'previous' $r.previous }
+        write-step " manifest label: $($newEntry.label) (unchanged re-deploy)"
+      } else {
+        # most recent prior package = highest `at` (ISO sorts chronologically);
+        # falls back to first enumerated when none carry `at` (pre-feature).
+        $prevProp = $remoteManifest.packages.PSObject.Properties |
+          Sort-Object @{ Expression = { if ($_.Value.PSObject.Properties['at']) { [string]$_.Value.at } else { '' } } } -Descending |
+          Select-Object -First 1
+        $previousSig   = if ($prevProp) { $prevProp.Name } else { $null }
+        $previousLabel = if ($prevProp -and $prevProp.Value.PSObject.Properties['label']) { [string]$prevProp.Value.label } else { $null }
+        $stamp = (Get-Date).ToString('yyyy-MM-ddTHH:mm:ss')
+        $genesis = if ($newEntry.PSObject.Properties['label'] -and $newEntry.label) { [string]$newEntry.label } else { 'genesis' }
+        $newLabel = if ($previousLabel) { "$previousLabel-updated-$stamp" } else { $genesis }
+        set-prop $newEntry 'label'    $newLabel
+        set-prop $newEntry 'at'       $stamp
+        set-prop $newEntry 'previous' $previousSig
+        write-step " manifest label: $newLabel"
+      }
+      }
+
       # add remote packages that are not in the local manifest
       foreach ($property in $remoteManifest.packages.PSObject.Properties) {
         if (-not $localManifest.packages.PSObject.Properties[$property.Name]) {

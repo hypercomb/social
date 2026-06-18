@@ -34,6 +34,10 @@ type InstallManifest = {
   beeDeps?: Record<string, string[]>
   dependenciesBag?: string
   beesBag?: string
+  // Sidecar branch metadata (does not affect packageSig). Ignored at install.
+  label?: string
+  at?: string
+  previous?: string | null
 }
 
 export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<void> => {
@@ -232,6 +236,10 @@ type BundledPackage = {
   // alongside the flat leaves. Absent for older bundles.
   dependenciesBag?: string
   beesBag?: string
+  // Sidecar branch metadata (does not affect packageSig). Ignored at install.
+  label?: string
+  at?: string
+  previous?: string | null
 }
 
 const fetchBundledPackage = async (): Promise<BundledPackage | null> => {

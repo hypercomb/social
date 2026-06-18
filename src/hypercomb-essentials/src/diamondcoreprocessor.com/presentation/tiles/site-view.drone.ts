@@ -14,6 +14,7 @@
 // page mounts. No bundle, no manifest, no path-table.
 
 import { Drone, SITE_VIEW_IOC_KEY, RESOURCE_URL_PREFIX } from '@hypercomb/core'
+import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 
 type MountState = {
   host: HTMLDivElement
@@ -162,7 +163,7 @@ export class SiteViewDrone extends Drone {
       this.#navigate(segments.slice(0, -1))
       return
     }
-    this.#navigate(entry)
+    void this.#navigate(entry)
   }
 
   async #reconcile(): Promise<void> {
@@ -384,6 +385,14 @@ export class SiteViewDrone extends Drone {
     host.id = 'hc-site-view-host'
     host.style.cssText =
       'position:fixed;inset:0;z-index:59988;overflow:auto;'
+    // The site host IS the page's scroll surface. Without this opt-out the
+    // always-on hex wheel-zoom handler (MousewheelZoomInput) preventDefaults
+    // every wheel/trackpad event over the full-viewport canvas — which is only
+    // visually suppressed in website mode, still full-rect in layout — so the
+    // page can't scroll and tall pages clip. `data-consumes-wheel` makes that
+    // handler bail when the event is inside us (same hatch the history-viewer
+    // overlay uses), restoring native scroll.
+    host.setAttribute('data-consumes-wheel', '')
     document.body.appendChild(host)
 
     const body = parsed.body
@@ -427,16 +436,16 @@ export class SiteViewDrone extends Drone {
         // be ejected back to hexagons.
         const entry = this.#siteEntrySegments ?? []
         if (segments.length <= entry.length) return
-        this.#navigate(segments.slice(0, -1))
+        void this.#navigate(segments.slice(0, -1))
         return
       }
       if (href.startsWith('/')) {
         const parts = href.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean)
-        this.#navigate(parts)
+        void this.#navigate(parts)
         return
       }
       const parts = href.replace(/^\.\/+/, '').replace(/\/+$/, '').split('/').filter(Boolean)
-      this.#navigate([...segments, ...parts])
+      void this.#navigate([...segments, ...parts])
     }
     host.addEventListener('click', onAnchorClick, true)
 
@@ -468,9 +477,42 @@ export class SiteViewDrone extends Drone {
     this.emitEffect<{ active: boolean }>('view:active', { active })
   }
 
-  #navigate(path: readonly string[]): void {
+  /**
+   * True only when the cell at `segments` is DEFINITELY page-less: its layer
+   * resolves but carries no mountable page (neither a `visual:website:page`
+   * decoration nor a legacy `context` page). Returns false when we can't tell —
+   * no store/history, or the layer doesn't resolve (cold cache / not yet
+   * committed) — so a momentary cold read never blocks a valid link; only a
+   * confirmed dead-end is. Powers the #navigate guard below.
+   */
+  async #isDefinitelyPageless(segments: readonly string[]): Promise<boolean> {
+    const store = this.resolve<any>('store')
+    const history = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<{
+      sign: (l: { explorerSegments?: () => readonly string[] }) => Promise<string>
+      currentLayerAt: (sig: string) => Promise<unknown | null>
+    }>('@diamondcoreprocessor.com/HistoryService')
+    if (!store?.getResource || !history) return false
+    const locSig = await history.sign({ explorerSegments: () => segments }).catch(() => null)
+    if (!locSig) return false
+    const layer = await history.currentLayerAt(locSig).catch(() => null)
+    if (!layer) return false   // unresolved (cold/missing) — don't block
+    let pageSig = await this.#findDecorationPage(segments, store)
+    if (!pageSig) pageSig = await this.#findContextPage(segments, store)
+    return !pageSig            // layer present but no page → confirmed dead-end
+  }
+
+  async #navigate(path: readonly string[]): Promise<void> {
     const lineage = this.resolve<any>('lineage')
     if (!lineage) return
+
+    // Never strand the user on a page-less node. In website mode a cell with no
+    // page renders NOTHING — a click that lands there tears the site down to a
+    // blank "empty website mode" screen. If the destination is definitely
+    // page-less (its layer resolves but has no page), ignore the navigation and
+    // stay on the current page. Uses the same page resolution #reconcile mounts
+    // with, so the guard and the eventual mount never disagree; a cold/
+    // unresolved read is never treated as page-less, so valid links still work.
+    if (await this.#isDefinitelyPageless(path)) return
 
     // Tile selections live in `window.location.hash`. They're a hex-
     // mode feature — selecting tiles to act on. In website mode the
@@ -501,10 +543,12 @@ export class SiteViewDrone extends Drone {
 // ──────────────────────────────────────────────────────────────────────────
 
 function rewriteCellPageRefs(text: string): string {
-  let out = text.replace(/resource:([0-9a-f]{64})/g, `${RESOURCE_URL_PREFIX}$1`)
-  out = out.replace(/((?:src|href|data-src)=)(["'])([0-9a-f]{64})\2/g,
-    (_m, attr, q, sig) => `${attr}${q}${RESOURCE_URL_PREFIX}${sig}${q}`)
-  return out
+  // The rewrite shares its ref patterns with the closure walk's
+  // `extractPageRefSigs` (both in decoration-closure.ts), so the set of
+  // resources the renderer resolves can never diverge from the set the
+  // host-push / adopt closure carries — divergence would mean missing images
+  // on an imported machine.
+  return rewritePageRefs(text, RESOURCE_URL_PREFIX)
 }
 
 const _siteView = new SiteViewDrone()

@@ -22,10 +22,14 @@
   & > hc-docs-overlay,
   & > hc-mesh-header,
   & > hc-atomizer-bar,
-  & > hc-hint-bar,
-  & > #pixi-host {
+  & > hc-hint-bar {
     display: none !important;
   }
+
+  // NOTE: #pixi-host is NOT hidden here. The pixi worker reparents it to
+  // <body> at boot, so this `:host > #pixi-host` selector can't reach it — it
+  // is hidden via the inline [style.visibility] binding in app.html instead
+  // (visibility, not display, so the canvas never resizes to 0). See app.html.
 
   .header-bar {
     position: fixed !important;
@@ -119,7 +123,8 @@
   user-select: none;
 }
 
-:host.intro-active #pixi-host,
+// (#pixi-host omitted — reparented to <body>, so this `:host` selector can't
+// reach it; the intro-lock's max z-index already covers the canvas anyway.)
 :host.intro-active hc-controls-bar,
 :host.intro-active hc-tile-editor,
 :host.intro-active hc-portal-overlay,

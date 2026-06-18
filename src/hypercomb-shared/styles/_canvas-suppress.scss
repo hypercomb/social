@@ -1,0 +1,29 @@
+// hypercomb-shared/styles/_canvas-suppress.scss
+//
+// Single canonical "neutralise the Pixi canvas" rule for full-surface overlays.
+//
+// #pixi-host reparents ITSELF to <body> at boot (pixi-host.worker.ts:
+// position:fixed, z-index 59989) with a pointer-events:auto <canvas> inside. So
+// any overlay/mode that takes over the whole screen MUST neutralise it, or the
+// canvas (a) stacks ABOVE the overlay and bleeds through, and (b) intercepts the
+// overlay's clicks — the canvas's explicit pointer-events:auto overrides the
+// host's pointer-events:none.
+//
+// Neutralise with visibility + canvas pointer-events, NEVER display:none — the
+// renderer is sized to this host, so display:none collapses it to 0×0 and
+// corrupts scale/zoom (it does NOT restore on toggle-back). visibility keeps the
+// host sized; pointer-events:none on the <canvas> is what actually unblocks the
+// overlay. The body-class selector is required because the component-scoped
+// `:host > #pixi-host` cannot reach the body-reparented node.
+//
+// Add an overlay with ONE line — `@include suppress-canvas-under('.body-class')`
+// — and it inherits the complete, correct behaviour. NEVER hand-roll a per-widget
+// #pixi-host rule: an incomplete copy (visibility only, no canvas pointer-events)
+// is exactly how the youtube-viewer click-eating gap happened.
+@mixin suppress-canvas-under($trigger) {
+  body#{$trigger} #pixi-host,
+  body#{$trigger} #pixi-host canvas {
+    visibility: hidden !important;
+    pointer-events: none !important;
+  }
+}

@@ -11,7 +11,7 @@
   <span class="domain-crumb crumb-link" (click)="navigateTo([])">{{ activeDomain() }}</span>
   @for (seg of pathSegments(); track seg.target.length; let last = $last) {
     @if (last) {
-      <span class="sep-crumb">◆</span><span class="branch-crumb">{{ seg.name }}</span>
+      <span class="sep-crumb">◆</span><span class="branch-crumb"><span class="branch-bracket">[</span>{{ seg.name }}<span class="branch-bracket">]</span></span>
     } @else {
       <span class="domain-crumb crumb-link" (click)="navigateTo(seg.target)"><span class="sep-crumb">◆</span>{{ seg.name }}</span>
     }
@@ -139,6 +139,7 @@
             @for (ctrl of visibleControls(); track ctrl.id) {
               <button class="ctl-btn"
                       [class.active]="ctrl.id !== 'fit' && isActive(ctrl)"
+                      [class.lock-bump]="ctrl.id === 'lock' && lockBump()"
                       [class.muted]="!isEnabled(ctrl)"
                       [class.editing]="editMode()"
                       [class.eye-btn]="ctrl.id === 'show-hidden'"

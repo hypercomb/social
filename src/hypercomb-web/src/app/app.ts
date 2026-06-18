@@ -16,6 +16,8 @@ import { HistoryViewerComponent } from "@hypercomb/shared/ui/history-viewer/hist
 import { NotesStripComponent } from "@hypercomb/shared/ui/notes-strip/notes-strip.component"
 import { NotesViewerComponent } from "@hypercomb/shared/ui/notes-viewer/notes-viewer.component"
 import { FilesViewerComponent } from "@hypercomb/shared/ui/files-viewer/files-viewer.component"
+import { ContactFormComponent } from "@hypercomb/shared/ui/contact-card/contact-form.component"
+import { ContactHoverComponent } from "@hypercomb/shared/ui/contact-card/contact-hover.component"
 import { MeshModalComponent } from "@hypercomb/shared/ui/mesh-modal/mesh-modal.component"
 import { TrustPromptComponent } from "@hypercomb/shared/ui/trust-prompt/trust-prompt.component"
 import { LayerCycleStripComponent } from "@hypercomb/shared/ui/layer-cycle-strip/layer-cycle-strip.component"
@@ -28,7 +30,7 @@ import { SwarmAdoptPanelComponent } from "@hypercomb/shared/ui/swarm-adopt-panel
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent, FilesViewerComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, ToastComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent],
+  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent, FilesViewerComponent, ContactFormComponent, ContactHoverComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, ToastComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })

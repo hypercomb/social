@@ -110,13 +110,18 @@ export class MousewheelZoomInput {
       event.clientY < rect.top || event.clientY > rect.bottom
     ) return
 
-    // When locked, ignore the cursor pivot and zoom at the canvas centre
-    // so the viewport doesn't drift under a fixed overlay (editor) or
-    // the lock-button mode. The wheel still reaches zoomToScale /
-    // zoomByFactor, which emit `viewport:manual` and break any fit-lock.
-    const pivot = this.gate?.locked
-      ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 }
-      : { x: event.clientX, y: event.clientY }
+    // While the input gate is locked (a fixed overlay such as the editor
+    // is up), suppress wheel zoom entirely — the canvas underneath must
+    // not move beneath the overlay. Touch pinch/pan already bail in the
+    // same case via the gate's claim() guard; this keeps wheel consistent.
+    // Flash the command-line lock indicator so the user knows why the
+    // wheel did nothing.
+    if (this.gate?.locked) {
+      this.gate.notifyLockedAttempt()
+      return
+    }
+
+    const pivot = { x: event.clientX, y: event.clientY }
     const zoomIn = event.deltaY < 0
 
     if (event.ctrlKey || event.metaKey) {
