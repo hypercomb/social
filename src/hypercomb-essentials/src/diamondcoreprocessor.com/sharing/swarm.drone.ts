@@ -31,6 +31,9 @@ import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-prop
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
 import { isCellPublic, setCellPublic } from '../presentation/tiles/tile-actions.drone.js'
+import { listDecorations } from '../commands/decoration-manifest.js'
+import { kindsForLabel } from '../commands/decoration-kind-index.js'
+import { SWARM_INVITE_KIND } from './meeting-invite.js'
 
 const SWARM_LAYER_KIND = 30200
 
@@ -2074,6 +2077,17 @@ export class SwarmDrone extends Drone {
           visual = canonicaliseValue({ ...base, ...props }) as ChildEntry
         }
       } catch { /* no props yet — name-only publish */ }
+      // Surface a swarm:invite junction's bundle sig on the wire so observers
+      // can show the invite icon and switch in. Gated by the SYNC decoration
+      // index so the (cold) listDecorations read only fires for tiles that
+      // actually carry one — sig-only, like every other field here.
+      try {
+        if (kindsForLabel(name).includes(SWARM_INVITE_KIND)) {
+          const decos = await listDecorations<{ bundleSig?: string }>({ kind: SWARM_INVITE_KIND, segments: [...segments, name] })
+          const bundleSig = String(decos[0]?.record?.payload?.bundleSig ?? '').toLowerCase()
+          if (/^[0-9a-f]{64}$/.test(bundleSig)) visual = { ...visual, inviteSig: bundleSig } as ChildEntry
+        }
+      } catch { /* no invite on this tile */ }
       return visual
     }))
     // Stamp our chosen label onto the payload so participants can render

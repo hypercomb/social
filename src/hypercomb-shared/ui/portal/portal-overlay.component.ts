@@ -57,6 +57,17 @@ function resolvePortalUrl(target: string): string | undefined {
   return DEFAULT_PORTALS[target]
 }
 
+// Owner token for the InputGate lock held while the portal is open. Owner-
+// scoped so it composes with locks held by the editor / other overlays.
+const PORTAL_LOCK_OWNER = 'portal'
+
+/** Structural type for the InputGate — the shared tile-input lock. Resolved
+ *  at runtime via window.ioc (shared must never import from modules). */
+type InputGateLike = {
+  lock(owner?: string): void
+  unlock(owner?: string): void
+}
+
 @Component({
   selector: 'hc-portal-overlay',
   standalone: true,
@@ -163,6 +174,12 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.#activeTarget = detail?.target ?? null
     this.portalSrc = this.#sanitizer.bypassSecurityTrustResourceUrl(url)
     this.isOpen = true
+    // Freeze tile navigation while the portal/installer covers the canvas —
+    // per the "modals lock tiles while showing" rule no pan/pinch/wheel-zoom/
+    // drag-select may bleed through behind it. Released in close() (every
+    // passive exit funnels there) and ngOnDestroy. Resolved lazily because
+    // the gate's bee may register after this component constructs on web.
+    this.#gate()?.lock(PORTAL_LOCK_OWNER)
     this.#recomputeDiff()   // also calls detectChanges()
   }
 
@@ -267,6 +284,15 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.#unsubEscape?.()
     this.#unsubTouchDragging?.()
     this.#unsubDiff?.()
+    // Release on teardown so a portal destroyed while open never leaves the
+    // hexes locked.
+    this.#gate()?.unlock(PORTAL_LOCK_OWNER)
+  }
+
+  /** InputGate — the shared tile-input lock. Resolved at runtime (shared
+   *  must never import from modules); undefined until its bee registers. */
+  #gate(): InputGateLike | undefined {
+    return window.ioc?.get<InputGateLike>('@diamondcoreprocessor.com/InputGate')
   }
 
   // -------------------------------------------------
@@ -280,6 +306,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   public close = (): void => {
     const wasDcp = this.#activeTarget === 'dcp'
     this.isOpen = false
+    this.#gate()?.unlock(PORTAL_LOCK_OWNER)
     this.portalSrc = null
     this.#activeUrl = null
     this.#activeTarget = null

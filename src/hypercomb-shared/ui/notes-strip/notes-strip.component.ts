@@ -28,6 +28,10 @@ const NOTES_STRIP_HEIGHT_KEY = 'hc:notes-strip-height'
 // across reloads so the strip stays where the user dropped it.
 const NOTES_STRIP_OFFSET_KEY = 'hc:notes-strip-offset'
 
+// Owner token for the InputGate lock the strip holds while visible. Owner-
+// scoped so it composes with the editor's lock rather than stomping it.
+const NOTES_STRIP_LOCK_OWNER = 'notes-strip'
+
 /** Fixed shape set — six CSS-drawn glyphs. The shape is the only
  *  visual category a note carries. Names map 1:1 to .hc-shape-X
  *  classes defined in hypercomb-shared/styles/_notes-shapes.scss. */
@@ -85,6 +89,15 @@ type InputModeStackLike = {
   push(mode: InputModeLike): void
   pop(name: string): void
   remove(name: string): void
+}
+
+/** Structural type for the InputGate — the shared tile-input lock. Resolved
+ *  at runtime via window.ioc (shared must never import from modules). The
+ *  owner-scoped lock/unlock lets the strip hold its lock without stomping
+ *  locks held by the editor or the manual lock button. */
+type InputGateLike = {
+  lock(owner?: string): void
+  unlock(owner?: string): void
 }
 
 @Component({
@@ -1462,6 +1475,24 @@ export class NotesStripComponent implements OnDestroy {
       queueMicrotask(() => this.#syncPanelResize())
     })
 
+    // Lock the tile viewport while the strip is showing. The notes strip is
+    // a modal-style overlay drawn over the canvas (z-index 60001); per the
+    // "tiles are never affected by any content / modals lock tiles while
+    // showing" rule it must pin the hexes beneath it — no pan, pinch,
+    // spacebar-pan, wheel-zoom, or drag-select bleeding through, on mouse
+    // OR touch. One InputGate.lock suppresses every tile-input path at once,
+    // and the owner-scoped lock composes with the editor's lock instead of
+    // stomping it. The gate is resolved lazily because its bee may register
+    // after this component constructs on hypercomb-web; visible() is the
+    // tracked dependency, so this re-runs on every show/hide.
+    effect(() => {
+      const showing = this.visible()
+      const gate = this.#gate()
+      if (!gate) return
+      if (showing) gate.lock(NOTES_STRIP_LOCK_OWNER)
+      else gate.unlock(NOTES_STRIP_LOCK_OWNER)
+    })
+
     // Warm the decoded-set cache for every cell the strip might display
     // (active/capture cell in single mode, AND every selected cell in
     // multi mode) so groups() / emptyCells() / notes() classify accurately
@@ -1570,6 +1601,10 @@ export class NotesStripComponent implements OnDestroy {
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
     this.#selectionListener?.()
+    // Release the tile lock on teardown — the visibility effect is destroyed
+    // with the component and won't run a final unlock, so a strip torn down
+    // while visible would otherwise leave the hexes locked.
+    this.#gate()?.unlock(NOTES_STRIP_LOCK_OWNER)
     this.#resizeObserver?.disconnect()
     this.#resizeObserver = null
     this.#observingEl = null
@@ -1683,6 +1718,14 @@ export class NotesStripComponent implements OnDestroy {
 
   #stack(): InputModeStackLike | undefined {
     return window.ioc?.get<InputModeStackLike>('@diamondcoreprocessor.com/InputModeStack')
+  }
+
+  /** InputGate — the shared tile-input lock. Resolved at runtime (shared
+   *  must never import from modules); the bee may register after this
+   *  component constructs on hypercomb-web, so we look it up lazily on
+   *  each use. */
+  #gate(): InputGateLike | undefined {
+    return window.ioc?.get<InputGateLike>('@diamondcoreprocessor.com/InputGate')
   }
 
   /** Click a note row → open the viewer modal centred on this note.

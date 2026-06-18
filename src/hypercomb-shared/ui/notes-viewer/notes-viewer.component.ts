@@ -10,7 +10,7 @@
 // going through one place that knows about gold lighting and history
 // commit.
 
-import { Component, computed, signal, type OnDestroy } from '@angular/core'
+import { Component, computed, effect, signal, type OnDestroy } from '@angular/core'
 import { NgTemplateOutlet } from '@angular/common'
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -34,6 +34,18 @@ type NotesService = {
 type OpenTab = {
   readonly cellLabel: string
   readonly noteId: string
+}
+
+// Owner token for the InputGate lock held while the viewer is open. Owner-
+// scoped so it composes with the editor / notes-strip / other overlay locks
+// rather than stomping them.
+const NOTES_VIEWER_LOCK_OWNER = 'notes-viewer'
+
+/** Structural type for the InputGate — the shared tile-input lock. Resolved
+ *  at runtime via window.ioc (shared must never import from modules). */
+type InputGateLike = {
+  lock(owner?: string): void
+  unlock(owner?: string): void
 }
 
 @Component({
@@ -157,10 +169,35 @@ export class NotesViewerComponent implements OnDestroy {
         }
       }
     }))
+
+    // Freeze tile navigation while the viewer is open — it's a centred modal
+    // over the canvas, so per the "modals lock tiles while showing" rule no
+    // pan/pinch/wheel-zoom/drag-select may bleed through. visible() is the
+    // tracked dependency, so this re-runs on every open/close. The gate is
+    // resolved lazily because its bee may register after this component
+    // constructs on hypercomb-web. The [data-consumes-wheel] panel keeps the
+    // note body scrollable.
+    effect(() => {
+      const gate = this.#gate()
+      if (!gate) return
+      if (this.visible()) gate.lock(NOTES_VIEWER_LOCK_OWNER)
+      else gate.unlock(NOTES_VIEWER_LOCK_OWNER)
+    })
   }
 
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
+    // Release the tile lock on teardown — the visibility effect won't run a
+    // final unlock once destroyed, so a viewer torn down while open would
+    // otherwise leave the hexes locked.
+    this.#gate()?.unlock(NOTES_VIEWER_LOCK_OWNER)
+  }
+
+  /** InputGate — the shared tile-input lock. Resolved at runtime (shared
+   *  must never import from modules); returns undefined if its bee hasn't
+   *  registered yet. */
+  #gate(): InputGateLike | undefined {
+    return window.ioc?.get<InputGateLike>('@diamondcoreprocessor.com/InputGate')
   }
 
   /** Close the entire viewer (all tabs). */

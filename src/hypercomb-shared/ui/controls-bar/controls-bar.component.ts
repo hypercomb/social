@@ -1214,8 +1214,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   readonly toggleLock = (): void => {
-    if (this.gate?.locked) this.gate.unlock()
-    else this.gate?.lock()
+    // Track our OWN 'manual' lock rather than the gate's combined state.
+    // Reading gate.locked here would leave the button unable to release once
+    // an overlay (editor, notes strip) also holds a lock — the gate stays
+    // locked by that owner and the toggle would appear stuck. lockedBy is
+    // optional-chained so an older gate build degrades to a no-op rather
+    // than throwing.
+    if (this.gate?.lockedBy?.('manual')) this.gate.unlock('manual')
+    else this.gate?.lock('manual')
   }
 
   readonly zoomIn = (): void => {

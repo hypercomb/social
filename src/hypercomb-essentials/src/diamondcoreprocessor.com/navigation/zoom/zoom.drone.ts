@@ -321,8 +321,8 @@ export class ZoomDrone extends Drone {
     // doesn't fire underneath the editor overlay
     const gate = window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate')
     this.onEffect<{ active: boolean }>('editor:mode', ({ active }) => {
-      if (active) gate?.lock()
-      else gate?.unlock()
+      if (active) gate?.lock('editor')
+      else gate?.unlock('editor')
     })
 
     this.onEffect<HostReadyPayload>('render:host-ready', (payload) => {

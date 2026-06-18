@@ -1,6 +1,9 @@
 // hypercomb-web/src/main.ts
 /// <reference path="../../hypercomb-shared/global.d.ts" />
 import '@hypercomb/shared/core/ioc.web'
+// Capture a `/<sig>` meeting-place invite link before navigation parses the
+// URL — stashes the sig for the receive-side MeetingInviteWorker.
+import '@hypercomb/shared/core/invite-capture'
 
 import { bootstrapApplication } from '@angular/platform-browser'
 import { EffectBus } from '@hypercomb/core'

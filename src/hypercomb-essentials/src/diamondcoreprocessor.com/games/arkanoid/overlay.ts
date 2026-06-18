@@ -31,6 +31,35 @@ const GAME_KEYS = new Set([
 
 type Mode = 'play' | 'design'
 
+// Level-clear flow (continuous play — identical to the Bubble/Solomon overlays
+// so every game advances the same way): on clearing a screen we tally the
+// level's score (+ any perfect bonus) counting up, then scroll the next level UP
+// from the bottom — no button press, you just keep playing. Score + lives carry
+// across levels; the toolbar still has prev / next / restart for jumping around.
+const TALLY_MS = 1.7          // how long the score add-up reads
+const PAN_MS = 0.85           // how long the next level takes to slide in
+const PERFECT_BONUS = 1000    // awarded when a level is cleared without dying
+
+/** One in-flight level-clear transition: first 'tally' (count the score up),
+ *  then 'pan' (slide the cleared level off the top while the next rises from
+ *  below). `prev` is the cleared engine, kept so it can be drawn scrolling out. */
+interface Transition {
+  phase: 'tally' | 'pan'
+  t: number               // seconds into the current phase
+  levelScore: number      // points earned on the just-cleared level
+  bonus: number           // perfect-clear bonus (0 if a life was lost)
+  baseScore: number       // running total at the start of the cleared level
+  nextLevel: ArkanoidLevel // the level rising in
+  nextIndex: number       // its index in LEVELS (for the toolbar label)
+  testing: boolean        // cleared a designer test (re-pans the same level)
+  prev: Engine            // the cleared engine — drawn scrolling out during 'pan'
+}
+
+/** easeInOut cubic — slow start, slow settle; reads as the screen easing up. */
+function easeInOut(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+}
+
 export class ArkanoidOverlay {
   #root: HTMLDivElement | null = null
   #canvas: HTMLCanvasElement | null = null
@@ -60,9 +89,17 @@ export class ArkanoidOverlay {
   #lastTs = 0
   #time = 0
   #scaleBack = 1
-  #wonShown = false
   #overShown = false
   #ro: ResizeObserver | null = null
+
+  // Continuous-play state (see the Transition note above). The engine's score is
+  // the RUNNING total carried across levels; the snapshots below record where the
+  // current level began so a clear can show its own gain + award a perfect bonus.
+  #transition: Transition | null = null
+  #levelStartScore = 0
+  #levelStartLives = 3
+  #testing = false                       // playing a designer test (not in LEVELS)
+  #testLevel: ArkanoidLevel | null = null // the level being playtested, if any
 
   // Pointer Lock: while locked the cursor is hidden + captured by the canvas and
   // the bat tracks RELATIVE movement (movementX), so it never freezes when the
@@ -236,6 +273,8 @@ export class ArkanoidOverlay {
     const level = LEVELS[index]
     if (!level) return
     this.#levelIndex = index
+    this.#testing = false
+    this.#testLevel = null
     this.#startPlayLevel(cloneLevel(level), `${level.name}  (${index + 1}/${LEVELS.length})`)
   }
 
@@ -247,7 +286,11 @@ export class ArkanoidOverlay {
     if (this.#canvas) this.#canvas.style.cursor = 'none'
     this.#engine = new Engine(level.rows)
     this.#paddleTargetX = this.#engine.paddle.x
-    this.#wonShown = this.#overShown = false
+    // Fresh run from this level: score back to 0, full lives, no carry-over.
+    this.#transition = null
+    this.#overShown = false
+    this.#levelStartScore = this.#engine.score
+    this.#levelStartLives = this.#engine.lives
     this.#hideBanner()
     this.#fit()
     if (this.#levelLabel) this.#levelLabel.textContent = label
@@ -290,10 +333,17 @@ export class ArkanoidOverlay {
       ctx.setTransform(this.#scaleBack, 0, 0, this.#scaleBack, 0, 0)
       ctx.clearRect(0, 0, W, H)
       if (this.#mode === 'play' && this.#engine) {
-        this.#engine.update(dt)
-        r.draw(this.#engine, this.#time)
-        if (this.#engine.state === 'won' && !this.#wonShown) { this.#wonShown = true; this.#showWin() }
-        if (this.#engine.state === 'gameover' && !this.#overShown) { this.#overShown = true; this.#showGameOver() }
+        if (this.#transition) {
+          // A level was cleared: the simulation is frozen while the score tallies
+          // and the next screen scrolls in.
+          this.#stepTransition(dt)
+          this.#drawTransition(ctx, r)
+        } else {
+          this.#engine.update(dt)
+          r.draw(this.#engine, this.#time)
+          if (this.#engine.state === 'won') this.#beginClear()
+          else if (this.#engine.state === 'gameover' && !this.#overShown) { this.#overShown = true; this.#showGameOver() }
+        }
       } else if (this.#mode === 'design') {
         r.drawEditor(this.#designer.grid, this.#hover)
       }
@@ -442,7 +492,10 @@ export class ArkanoidOverlay {
 
   #designerTest(): void {
     const name = (this.#nameInput?.value ?? '').trim() || 'My Level'
-    this.#startPlayLevel(this.#designer.named(name), `${name}  (test)`)
+    const level = this.#designer.named(name)
+    this.#testing = true
+    this.#testLevel = level
+    this.#startPlayLevel(level, `${name}  (test)`)
   }
 
   #designerLoad(name: string): void {
@@ -488,18 +541,120 @@ export class ArkanoidOverlay {
     if (selected) sel.value = selected
   }
 
-  // ── banners + status ──────────────────────────────────────
-  #showWin(): void {
-    this.#exitLock()                                        // free the cursor for the banner buttons
-    const score = this.#engine?.score ?? 0
-    const hasNext = this.#levelIndex + 1 < LEVELS.length && this.#mode === 'play'
-    this.#showBanner('Level Clear!', `✦ ${score}`, [
-      ...(hasNext ? [{ label: 'Next ▶', fn: () => this.#cycleLevel(1) }] : []),
-      { label: '↻ Replay', fn: () => this.#startPlay(this.#levelIndex) },
-      { label: 'Design', fn: () => this.#setMode('design') },
-    ])
+  // ── level clear → tally → pan to next (continuous play) ──
+
+  /** Level cleared. Compute the level's score gain + any perfect bonus and open
+   *  the tally→pan transition. Levels wrap, so play never stops on a clear. The
+   *  bat keeps its pointer lock — play just continues into the next screen. */
+  #beginClear(): void {
+    const eng = this.#engine
+    if (!eng || this.#transition || this.#mode !== 'play') return
+    const levelScore = Math.max(0, eng.score - this.#levelStartScore)
+    // lives only ever fall within a level, so "same as we started" ⇒ no deaths.
+    const bonus = eng.lives >= this.#levelStartLives ? PERFECT_BONUS : 0
+
+    const count = Math.max(1, LEVELS.length)
+    const nextIndex = this.#testing ? this.#levelIndex : (this.#levelIndex + 1) % count
+    const nextLevel = this.#testing
+      ? (this.#testLevel ?? LEVELS[this.#levelIndex])
+      : (LEVELS[nextIndex] ?? LEVELS[this.#levelIndex])
+
+    this.#transition = {
+      phase: 'tally', t: 0,
+      levelScore, bonus, baseScore: this.#levelStartScore,
+      nextLevel, nextIndex, testing: this.#testing, prev: eng,
+    }
+    this.#hideBanner()
   }
 
+  /** Advance the active transition: count the tally, then build + scroll in the
+   *  next level (carrying the running score — bonus included — and lives). The
+   *  bat carries its X so it doesn't snap to centre between screens. */
+  #stepTransition(dt: number): void {
+    const tr = this.#transition
+    if (!tr) return
+    tr.t += dt
+    if (tr.phase === 'tally') {
+      if (tr.t < TALLY_MS) return
+      const carriedScore = tr.baseScore + tr.levelScore + tr.bonus
+      const e = new Engine(tr.nextLevel.rows)
+      e.score = carriedScore
+      e.lives = tr.prev.lives
+      e.paddle.x = tr.prev.paddle.x        // base width range ⊂ any expanded range, so always valid
+      this.#engine = e
+      this.#paddleTargetX = e.paddle.x
+      this.#levelIndex = tr.nextIndex
+      this.#levelStartScore = e.score
+      this.#levelStartLives = e.lives
+      if (this.#levelLabel) {
+        this.#levelLabel.textContent = tr.testing
+          ? `${tr.nextLevel.name}  (test)`
+          : `${tr.nextLevel.name}  (${tr.nextIndex + 1}/${LEVELS.length})`
+      }
+      tr.phase = 'pan'
+      tr.t = 0
+    } else if (tr.t >= PAN_MS) {
+      this.#transition = null   // hand control back — play resumes on the new level
+    }
+  }
+
+  /** Render the transition: the frozen cleared level under the score tally, then
+   *  the cleared level sliding off the top while the next rises from the bottom.
+   *  The loop has already applied the world scale transform + cleared the frame. */
+  #drawTransition(ctx: CanvasRenderingContext2D, r: Renderer): void {
+    const tr = this.#transition
+    if (!tr) return
+    if (tr.phase === 'tally') {
+      r.draw(tr.prev, this.#time)
+      this.#drawTally(ctx, tr)
+    } else {
+      const p = easeInOut(Math.min(1, tr.t / PAN_MS))
+      ctx.save(); ctx.translate(0, -p * H); r.draw(tr.prev, this.#time); ctx.restore()
+      ctx.save(); ctx.translate(0, (1 - p) * H); r.draw(this.#engine!, this.#time); ctx.restore()
+    }
+  }
+
+  /** The score add-up overlay: level gain counts up first, then any perfect
+   *  bonus, with the running total ticking alongside. Drawn in world units. */
+  #drawTally(ctx: CanvasRenderingContext2D, tr: Transition): void {
+    const w = W, h = H
+    const cx = w / 2
+    const p = Math.min(1, tr.t / TALLY_MS)
+    // Count the level score over the first ~62%, then the bonus over the rest.
+    const levelP = Math.min(1, p / 0.62)
+    const bonusP = tr.bonus > 0 ? Math.max(0, Math.min(1, (p - 0.62) / 0.30)) : 0
+    const shownLevel = Math.round(tr.levelScore * levelP)
+    const shownBonus = Math.round(tr.bonus * bonusP)
+    const shownTotal = tr.baseScore + shownLevel + shownBonus
+    const font = (size: number, weight = 700) =>
+      `${weight} ${Math.round(size)}px "Segoe UI", system-ui, sans-serif`
+
+    ctx.save()
+    ctx.fillStyle = 'rgba(6,8,18,0.66)'
+    ctx.fillRect(0, 0, w, h)
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+
+    ctx.fillStyle = '#7ee0ff'
+    ctx.font = font(h * 0.085, 800)
+    ctx.fillText('LEVEL CLEAR', cx, h * 0.30)
+
+    ctx.fillStyle = '#ffffff'
+    ctx.font = font(h * 0.045)
+    ctx.fillText(`Level  +${shownLevel}`, cx, h * 0.46)
+
+    if (tr.bonus > 0) {
+      ctx.fillStyle = bonusP > 0 ? '#ffd76a' : 'rgba(255,215,106,0.28)'
+      ctx.fillText(`Perfect Bonus  +${shownBonus}`, cx, h * 0.555)
+    }
+
+    ctx.fillStyle = '#bfe3ff'
+    ctx.font = font(h * 0.054, 800)
+    ctx.fillText(`✦ ${shownTotal}`, cx, h * 0.69)
+    ctx.restore()
+  }
+
+  // ── banners + status ──────────────────────────────────────
   #showGameOver(): void {
     this.#exitLock()                                        // free the cursor for the banner buttons
     const score = this.#engine?.score ?? 0

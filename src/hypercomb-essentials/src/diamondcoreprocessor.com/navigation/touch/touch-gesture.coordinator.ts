@@ -152,6 +152,17 @@ export class TouchGestureCoordinator {
     const rect = this.#canvas.getBoundingClientRect()
     if (!this.#isInsideRect(e.clientX, e.clientY, rect)) return
 
+    // Overlay guard: only begin a gesture when the touch landed on the
+    // canvas itself. The canvas is full-screen, so the rect check above
+    // also matches touches that started on an overlay drawn over it (notes
+    // strip, controls bar, command line). Without this, dragging an overlay
+    // would pan/pinch the hexes behind it. Pointer-events:none regions
+    // resolve e.target to the canvas underneath, so passthrough chrome
+    // still pans correctly. Mirrors selection-input.drone.ts's e.target
+    // check and the wheel-zoom [data-consumes-wheel] guard: tiles are never
+    // affected by content drawn on top of them.
+    if (e.target !== this.#canvas) return
+
     const pt: Point = { x: e.clientX, y: e.clientY }
     this.#pointers.set(e.pointerId, { start: { ...pt }, current: pt, id: e.pointerId })
 

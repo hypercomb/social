@@ -7,7 +7,7 @@
 // (one-way platforms, enemies, a single player spawn — no door/key/gem).
 
 import { EMPTY, WALL, type LevelDef, type Cell } from './engine.js'
-import { cloneLevel, emptyLevel } from './levels.js'
+import { cloneLevel, emptyLevel, sanitizeLevel } from './levels.js'
 
 export type Tool = 'wall' | 'enemy' | 'player' | 'erase'
 
@@ -86,16 +86,9 @@ export class Designer {
 
   importJson(text: string): boolean {
     try {
-      const l = JSON.parse(text) as LevelDef
-      if (typeof l.cols !== 'number' || typeof l.rows !== 'number' || !Array.isArray(l.tiles)) return false
-      if (l.tiles.length !== l.cols * l.rows) return false
-      if (!l.player) return false
-      this.level = {
-        name: typeof l.name === 'string' ? l.name : 'Imported',
-        cols: l.cols, rows: l.rows, tiles: l.tiles.map(Number),
-        player: l.player,
-        enemies: Array.isArray(l.enemies) ? l.enemies : [],
-      }
+      const lvl = sanitizeLevel(JSON.parse(text))
+      if (!lvl) return false
+      this.level = lvl
       return true
     } catch { return false }
   }

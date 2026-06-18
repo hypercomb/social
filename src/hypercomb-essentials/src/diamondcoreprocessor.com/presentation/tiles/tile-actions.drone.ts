@@ -5,6 +5,7 @@ import { sessionHideStore } from './session-hide.store.js'
 import { hasDecorationKind, kindsForLabel } from '../../commands/decoration-kind-index.js'
 import { FILES_ATTACHMENT_KIND } from '../../files/files-attachment.js'
 import { FILES_ICON } from '../../files/file-types.js'
+import { SWARM_INVITE_KIND } from '../../sharing/meeting-invite.js'
 // Arrangement persistence currently disabled — `#getRootDir` returns
 // null pending the layer-slot read/write path, so the legacy
 // readCellProperties / writeCellProperties imports are no longer needed.
@@ -269,6 +270,30 @@ const tileHasVisualBeeFeature = (label: string): boolean => {
   return false
 }
 
+// True when a tile carries a swarm invite — either a LOCAL `swarm:invite`
+// decoration (the owner's own junction) or a PEER broadcasting one over the
+// wire (its bundle sig rides as `inviteSig`; see swarm.drone publish +
+// visual-sanitizer). Synchronous + O(peers): the decoration index is the hot
+// in-memory map and the peer scan is the same cache peerBroadcastsTile reads.
+const peerTileHasInvite = (label: string): boolean => {
+  const swarm = window.ioc.get<{
+    peerTilesAtCurrentSig?: () => readonly ({ name: string } & Record<string, unknown>)[]
+  }>('@diamondcoreprocessor.com/SwarmDrone')
+  if (!swarm?.peerTilesAtCurrentSig) return false
+  for (const tile of swarm.peerTilesAtCurrentSig()) {
+    if (tile.name !== label) continue
+    if (/^[a-f0-9]{64}$/.test(String(tile['inviteSig'] ?? ''))) return true
+  }
+  return false
+}
+
+const tileHasInvite = (label: string): boolean =>
+  hasDecorationKind(label, SWARM_INVITE_KIND) || peerTileHasInvite(label)
+
+// Login-style glyph (arrow stepping through a doorway) — "step into this
+// meeting place". Material "login" path, verbatim.
+const INVITE_ICON = md('M11 7l-1.41 1.41L12.17 11H3v2h9.17l-2.58 2.59L11 17l5-5zM20 19h-8v2h8c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-8v2h8v14z')
+
 const ICON_REGISTRY: IconRegistryEntry[] = [
   // ── private profile ──
   { name: 'command', svgMarkup: ICONS.command, hoverTint: 0xa8ffd8, profile: 'private', labelKey: 'action.command', descriptionKey: 'action.command.description' },
@@ -350,6 +375,14 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
   { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
   { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, profile: 'public-external', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
+  // ── swarm invite (all profiles) ──
+  // The invite icon appears on any tile carrying a `swarm:invite` junction —
+  // your own (private / public-own) or a peer's broadcasting it (public-external).
+  // visibleWhen reads the synchronous decoration index + peer cache; the click
+  // is handled by MeetingInviteWorker via tile:action (auth-switch join).
+  { name: 'invite', svgMarkup: INVITE_ICON, hoverTint: 0xa8ffd8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => tileHasInvite(ctx.label), labelKey: 'action.invite', descriptionKey: 'action.invite.description' },
+  { name: 'invite', svgMarkup: INVITE_ICON, hoverTint: 0xa8ffd8, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => tileHasInvite(ctx.label), labelKey: 'action.invite', descriptionKey: 'action.invite.description' },
+  { name: 'invite', svgMarkup: INVITE_ICON, hoverTint: 0xa8ffd8, profile: 'public-external', visibleWhen: (ctx: OverlayTileContext) => tileHasInvite(ctx.label), labelKey: 'action.invite', descriptionKey: 'action.invite.description' },
   // NOTE: feature icons (e.g. `contact`) are NOT listed here. A feature
   // contributes its overlay icon by registering ONE `IconProviderRegistry`
   // provider declaring `profiles` + `defaultActive` + `visibleWhen` (see
@@ -364,7 +397,7 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 // in ICON_REGISTRY above; adopting a peer tile is handled by the
 // `public-external` profile (the tile flips kind once it's local).
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  'private': ['command', 'edit', 'note', 'remove', 'break-apart', 'files'],
+  'private': ['command', 'edit', 'note', 'remove', 'break-apart', 'files', 'invite'],
   // World mode: ONLY the two share-toggles, none of the regular icons.
   'world': ['make-public', 'make-branch-public'],
   // Your own tile in public mode — same trash-bin remove that
@@ -372,7 +405,7 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   // folds the broadcasting peer's latest VISUALS into the tile in place;
   // `features` opens the installer for that branch to turn its scripts on
   // (both only rendered while a live peer publishes the same name).
-  'public-own': ['sync', 'features', 'remove', 'break-apart', 'files'],
+  'public-own': ['sync', 'features', 'remove', 'break-apart', 'files', 'invite'],
   // Peer-only mesh tiles. Single-click `adopt` is the explicit
   // "I want to expand on this topic" action — writes the tile to
   // your local layer AND pulls the resources it references (images
@@ -380,7 +413,7 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   // adopt: auto-adopt follows a participant continuously, single-
   // adopt is one tile + its resources, on demand. `hide` dismisses
   // a peer tile from view without taking ownership.
-  'public-external': ['adopt', 'hide', 'files'],
+  'public-external': ['adopt', 'hide', 'files', 'invite'],
 }
 
 // ── Position computation ──────────────────────────────────────────

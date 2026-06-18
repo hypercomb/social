@@ -72,12 +72,18 @@ export function emptyLevel(name: string): ArkanoidLevel {
   return { name, rows: Array.from({ length: EDIT_ROWS }, () => '.'.repeat(EDIT_COLS)) }
 }
 
+// toGrid already clamps any imported level to EDIT_ROWS × EDIT_COLS of
+// whitelisted chars before it reaches the engine, but cap the raw shape here too
+// so a tampered store entry can't sit in memory as a giant array of long strings.
+const MAX_RAW_ROWS = 64
+const MAX_RAW_LINE = 64
+
 function isValid(l: unknown): l is ArkanoidLevel {
   if (!l || typeof l !== 'object') return false
   const d = l as Record<string, unknown>
   return typeof d['name'] === 'string'
-    && Array.isArray(d['rows'])
-    && d['rows'].every(r => typeof r === 'string')
+    && Array.isArray(d['rows']) && d['rows'].length <= MAX_RAW_ROWS
+    && d['rows'].every(r => typeof r === 'string' && r.length <= MAX_RAW_LINE)
 }
 
 export function loadCustomLevels(): ArkanoidLevel[] {

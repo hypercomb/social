@@ -6,6 +6,7 @@
          cells would be ambiguous; Index is the right surface for that. -->
     <div class="notes-strip cv2-panel mode-rows" role="region" [attr.aria-label]="'notes.strip.aria' | t"
          #panel
+         data-consumes-wheel
          [style.transform]="panelTransform()"
          (pointerenter)="onNotesEnter()" (pointerleave)="onNotesLeave()">
 
@@ -244,6 +245,7 @@
     <div class="notes-strip cv2-panel"
          [class.mode-chips]="mode() === 'chips'" [class.mode-rows]="mode() === 'rows'"
          #panel
+         data-consumes-wheel
          role="list" [attr.aria-label]="'notes.strip.aria' | t"
          [style.transform]="panelTransform()"
          (pointerenter)="onNotesEnter()" (pointerleave)="onNotesLeave()">

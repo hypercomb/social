@@ -121,13 +121,56 @@ export function cloneLevel(l: LevelDef): LevelDef {
 
 const STORE_KEY = 'hc:bubble-levels'
 
-function isValid(l: unknown): l is LevelDef {
-  if (!l || typeof l !== 'object') return false
-  const d = l as Record<string, unknown>
-  return typeof d['name'] === 'string'
-    && typeof d['cols'] === 'number' && typeof d['rows'] === 'number'
-    && Array.isArray(d['tiles']) && d['tiles'].length === (d['cols'] as number) * (d['rows'] as number)
-    && !!d['player'] && Array.isArray(d['enemies'])
+// Untrusted level data (Import JSON + this localStorage store) is the only
+// attack surface these games expose. Bound the dimensions + entity counts and
+// require in-bounds integer coordinates so a crafted level can't exhaust memory
+// (a giant grid / canvas) or stall the render loop. Single-screen levels are
+// tiny — the designer authors ~20×12 — so these caps are generous headroom.
+const MAX_DIM = 120
+const MAX_ENTITIES = MAX_DIM * MAX_DIM
+
+const isInt = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n)
+
+/** A finite, in-bounds {col,row} or null. */
+function asCell(v: unknown, cols: number, rows: number): Cell | null {
+  if (!v || typeof v !== 'object') return null
+  const { col, row } = v as Record<string, unknown>
+  if (!isInt(col) || !isInt(row) || col < 0 || col >= cols || row < 0 || row >= rows) return null
+  return { col, row }
+}
+
+/** Validate untrusted level JSON into a CLEAN LevelDef, or null if anything is
+ *  out of bounds. Used by both the importer and the localStorage loader so a
+ *  tampered store entry is held to the same limits as a pasted one. */
+export function sanitizeLevel(raw: unknown): LevelDef | null {
+  if (!raw || typeof raw !== 'object') return null
+  const d = raw as Record<string, unknown>
+  const cols = d['cols'], rows = d['rows']
+  if (!isInt(cols) || !isInt(rows) || cols < 1 || rows < 1 || cols > MAX_DIM || rows > MAX_DIM) return null
+  const n = cols * rows
+  const tilesRaw = d['tiles']
+  if (!Array.isArray(tilesRaw) || tilesRaw.length !== n) return null
+
+  const player = asCell(d['player'], cols, rows)
+  if (!player) return null
+
+  const enemiesRaw = Array.isArray(d['enemies']) ? d['enemies'] : []
+  if (enemiesRaw.length > MAX_ENTITIES) return null
+  const enemies: EnemySpawn[] = []
+  for (const e of enemiesRaw) {
+    const c = asCell(e, cols, rows); if (!c) return null
+    const es = e as EnemySpawn
+    const kind = isInt(es?.kind) ? ((es.kind % 4) + 4) % 4 : 0
+    enemies.push({ col: c.col, row: c.row, dir: es?.dir === -1 ? -1 : 1, kind })
+  }
+
+  const tiles = new Array<number>(n)
+  for (let i = 0; i < n; i++) { const t = Number(tilesRaw[i]); tiles[i] = Number.isFinite(t) ? t : 0 }
+
+  return {
+    name: typeof d['name'] === 'string' ? d['name'].slice(0, 80) : 'Imported',
+    cols, rows, tiles, player, enemies,
+  }
 }
 
 export function loadCustomLevels(): LevelDef[] {
@@ -135,7 +178,8 @@ export function loadCustomLevels(): LevelDef[] {
     const raw = localStorage.getItem(STORE_KEY)
     if (!raw) return []
     const arr = JSON.parse(raw)
-    return Array.isArray(arr) ? arr.filter(isValid) : []
+    if (!Array.isArray(arr)) return []
+    return arr.map(sanitizeLevel).filter((l): l is LevelDef => l !== null)
   } catch { return [] }
 }
 

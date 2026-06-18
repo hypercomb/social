@@ -1,6 +1,6 @@
 @if (visible()) {
 <div class="docs-backdrop" (click)="close()"></div>
-<div class="docs-overlay" [class.sidebar-collapsed]="!sidebarOpen()">
+<div class="docs-overlay" data-consumes-wheel [class.sidebar-collapsed]="!sidebarOpen()">
 
   <!-- sidebar / index -->
   <aside class="docs-sidebar" [class.open]="sidebarOpen()">

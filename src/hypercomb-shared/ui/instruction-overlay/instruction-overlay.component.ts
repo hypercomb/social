@@ -7,7 +7,7 @@
 //
 // Subscribes to InstructionDrone via fromRuntime(). Positions update via rAF loop.
 
-import { Component, computed, signal, type OnDestroy } from '@angular/core'
+import { Component, computed, effect, signal, type OnDestroy } from '@angular/core'
 import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { EffectBus } from '@hypercomb/core'
@@ -22,6 +22,19 @@ interface ResolvedAnchor {
   targetX: number
   targetY: number
   found: boolean
+}
+
+// Owner token for the InputGate lock held while the CATALOG is open. Only the
+// catalog (Ctrl+Click) is a blocking modal; the normal leader-line labels are
+// non-modal annotations the user reads while still using the canvas, so they
+// must NOT freeze tiles. Owner-scoped to compose with other overlay locks.
+const INSTRUCTION_CATALOG_LOCK_OWNER = 'instruction-catalog'
+
+/** Structural type for the InputGate — the shared tile-input lock. Resolved
+ *  at runtime via window.ioc (shared must never import from modules). */
+type InputGateLike = {
+  lock(owner?: string): void
+  unlock(owner?: string): void
 }
 
 @Component({
@@ -68,10 +81,31 @@ export class InstructionOverlayComponent implements OnDestroy {
   constructor() {
     this.#drone = get('@diamondcoreprocessor.com/InstructionDrone')
     this.#startPositionLoop()
+
+    // Freeze tile navigation ONLY while the catalog modal is open — it has a
+    // backdrop and takes over input. The leader-line labels (visible() without
+    // catalogOpen()) are deliberately NOT frozen: they annotate live UI the
+    // user keeps interacting with. The [data-consumes-wheel] catalog panel
+    // keeps its own list scrollable.
+    effect(() => {
+      const gate = this.#gate()
+      if (!gate) return
+      if (this.catalogOpen()) gate.lock(INSTRUCTION_CATALOG_LOCK_OWNER)
+      else gate.unlock(INSTRUCTION_CATALOG_LOCK_OWNER)
+    })
   }
 
   ngOnDestroy(): void {
     if (this.#rafId) cancelAnimationFrame(this.#rafId)
+    // Release on teardown so a catalog destroyed while open never leaves the
+    // hexes locked.
+    this.#gate()?.unlock(INSTRUCTION_CATALOG_LOCK_OWNER)
+  }
+
+  /** InputGate — the shared tile-input lock. Resolved at runtime (shared
+   *  must never import from modules); undefined until its bee registers. */
+  #gate(): InputGateLike | undefined {
+    return window.ioc?.get<InputGateLike>('@diamondcoreprocessor.com/InputGate')
   }
 
   isHidden(selector: string): boolean {
