@@ -74,7 +74,7 @@ optional on-chain reference to prove when a trail-capsule commitment existed.
 these terms are the most fundamental concepts in the architecture. they appear across all documents and form the shared vocabulary between metaphor and implementation.
 
 ### signature
-sha-256 hash (64 hex chars) of canonical content. the universal reference primitive — signatures name drones, layers, dependencies, history entries, and resources. created via `SignatureService.sign(bytes)`. immutable identity: same content always produces the same signature. signatures are not just identifiers — they are the composition mechanism. see [signature-system.md](signature-system.md).
+sha-256 hash (64 hex chars) of canonical content. the universal reference primitive — signatures name drones, layers, dependencies, history entries, and resources. created via `SignatureService.sign(bytes)`. immutable identity: same content always produces the same signature. signatures are not just identifiers — they are the composition mechanism. see [signature-system.md](signature-system.md). collectively, the content-addressed, merkle-versioned artifacts a signature names — layers, bees, dependencies, resources, content — are the hive's **dna** (see [dna.md](dna.md)).
 
 ### cell
 the atomic unit of content in the hierarchy. a cell is content inside a signature-addressed *layer*, not a folder — the layer holds the cell's name, the signatures of its child layers, notes, and resource references. the hierarchy is layers referencing child layers by signature (a sparse merkle tree), never nested folders. developer-facing term — see **tile** for the user-facing equivalent.
@@ -86,7 +86,7 @@ the user-facing name for a **cell**. what appears on the hex grid as an interact
 the path from root to the current cell in the hierarchy. a lineage like `domain/parent/child` is hashed via `SignatureService` to produce a **location signature** — the key used for mesh addressing, history bag storage, and opfs directory mapping. the `Lineage` service in `@hypercomb/shared` tracks the current path and provides navigation.
 
 ### layer
-a snapshot of a node's state — the atomic unit of hypercomb content distribution. layers are content-addressed by sha-256 and contain references to bees, dependencies, resources, and child layers. distributed over the nostr mesh as kind 29010 events.
+a snapshot of a node's state — the atomic unit of hypercomb content distribution. layers are content-addressed by sha-256 and contain references to bees, dependencies, resources, and child layers. layer *signatures* propagate over the nostr mesh (live swarm layer kind 30200; legacy kind 29010), while the layer *bytes* resolve HTTP-direct from operator hosts. a layer is the "gene" rung of the **dna** ladder (see [dna.md](dna.md)).
 
 ### history bag (sigbag)
 an append-only sequence of layer-metadata markers (`0000`, `0001`, ...) sitting alongside the flat `<sig>` content bucket. each marker is a tiny record `{ layer: <sig>, context?: [<sig>, ...], expiresAt?: <ms> }`. the max marker IS the current root + entrance + attestation in one — there is no separate `__history__`, `__roots__`, or `manifest.json`. per-lineage sigbags carry the same shape at every level. see [history-sigbag-as-root.md](history-sigbag-as-root.md) for the unified model.
@@ -163,7 +163,7 @@ typed key for ioc resolution. `ServiceToken<T>` wraps a string key and optional 
 sha-256 content addressing. takes an `ArrayBuffer`, produces a deterministic 64-character hex string. used to sign **bee payload v1** artifacts and **trail-capsule** commitments.
 
 ### signature store
-central allowlist of verified signatures. `SignatureStore` in `@hypercomb/core`. populated from `install.manifest.json` at install time (all known bee/dep/layer sigs) and persisted to `localStorage`. `isTrusted(sig)` skips re-hashing for known signatures. `signText(text)` memoizes repeated SHA-256 calls (e.g., lineage path → location signature computed multiple times per render cycle). `verify(bytes, expectedSig)` returns true if trusted or if hash matches (and auto-trusts for future). serializable via `toJSON()` / `restore()` for cross-session persistence.
+central allowlist of verified signatures. `SignatureStore` in `@hypercomb/core`. populated from the install `manifest.json` (keyed by `rootLayerSig`) at install time (all known bee/dep/layer sigs) and persisted to `localStorage`. `isTrusted(sig)` skips re-hashing for known signatures. `signText(text)` memoizes repeated SHA-256 calls (e.g., lineage path → location signature computed multiple times per render cycle). `verify(bytes, expectedSig)` returns true if trusted or if hash matches (and auto-trusts for future). serializable via `toJSON()` / `restore()` for cross-session persistence.
 
 ### bee payload v1
 the payload format for bee artifacts (`BeePayloadV1`). structure:

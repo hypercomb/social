@@ -2,7 +2,12 @@
 
 ## 1. Overview
 
-Hypercomb is a decentralized, presence-based navigation protocol. There is no central server. Clients connect to one or more Nostr relays to exchange ephemeral cell data. Users do not log in. Identity is visual and ephemeral. The local filesystem (OPFS) is the source of truth. Relays are stateless forwarders.
+Hypercomb is a decentralized, content-addressed hive. Identity is anchored in **domain + signature**: a domain (operator host) names *who*, a SHA-256 signature names *what* (the content-addressed, merkle-versioned artifacts — see §11 and `dna.md`). On top of that durable, content-addressed layer rides a **visual, ephemeral presence** surface — cursor, selection, who-is-here — exchanged over Nostr relays. Users do not log in.
+
+Two zones, two ownerships:
+
+- **Durable, local-by-default.** Everything you author is content-addressed and versioned in OPFS — history marker chains plus the layer/resource/bee/dependency pools and the `hypercomb.io` tree (§12). This is the source of truth, and it persists with no network involved.
+- **Ephemeral / opt-in network.** Presence, cursor, clipboard, selection, and viewport are participant-local and never enter the signed layer (so they can't skew the lineage signature). Relays are stateless forwarders; nothing crosses the network unless you publish.
 
 This document specifies the wire protocol, message formats, addressing, storage model, signing, and lifecycle.
 
@@ -20,8 +25,9 @@ Client ──── wss:// ────► Relay (stateless)
 
 - Relays follow the Nostr relay protocol (NIP-01).
 - Relays store nothing long-term. They forward frames and serve recent events per standard Nostr behavior.
-- The client maintains a configurable relay list. Default: `ws://localhost:7777` (loopback, gated behind `hc:nostrmesh:allow-loopback`). The shared bootstrap relay `wss://jwize.com` is opt-in via `localStorage['hc:nostrmesh:use-live-relay'] = '1'` — without that flag, casual visitors never touch the shared server.
-- Configuration key: `localStorage['hc:nostrmesh:relays']` (JSON array of `wss://` URLs) overrides both defaults.
+- The client maintains a configurable relay list. **Default (since 2026-06-10): real hosts seed the shared bootstrap relay `wss://jwize.com` by default** — a deployed origin must never dial loopback (nothing listens on a visitor's machine, and a public origin touching localhost trips Chrome's Local Network Access prompt). Only **local dev origins** seed `ws://localhost:7777` (loopback-only, gated behind `hc:nostrmesh:allow-loopback`), which is a known dev/prod port-collision hazard.
+- `localStorage['hc:nostrmesh:use-live-relay'] = '1'` forces `wss://jwize.com` on any origin; `'0'` opts a real host out (it then idles rather than dialing loopback).
+- Configuration key: `localStorage['hc:nostrmesh:relays']` (JSON array of `wss://` URLs) overrides the seed entirely.
 
 ### 2.2 Connection Management
 
@@ -68,11 +74,18 @@ All messages use the standard Nostr event envelope.
 
 ### 3.2 Hypercomb Event Kind
 
-| Kind  | Purpose                         |
-|-------|---------------------------------|
-| 29010 | Hypercomb cell exchange         |
+| Kind  | Purpose                                                        |
+|-------|----------------------------------------------------------------|
+| 29010 | **Legacy** cell-exchange (the §6/§7/§8 location-keyed presence path). Still live, but the swarm path below supersedes it for visual sharing. |
+| 30200 | Swarm layer (parameterized-replaceable) — the visual-share path's tile/subtree state |
+| 30201 | Swarm resource — image bytes as base64 `content`, d-tag = resource sig, capped at 256 KB (`MAX_RESOURCE_BYTES`) |
+| 30202 | Swarm hide — peer-published hidden-cell markers |
+| 30205 | Swarm subscribe-consent — request/grant for byte sharing |
+| 20400 | Content-broker fetch **request** (layer-only) — see §21.4 |
+| 30401 | Content-broker fetch **response** (parameterized-replaceable, base64 bytes) |
+| 20402 | Content-broker fetch **cancel** |
 
-Configuration key: `localStorage['hc:nostrmesh:kinds']` (JSON array of integers, or `null` for any kind).
+Configuration key: `localStorage['hc:nostrmesh:kinds']` (JSON array of integers, or `null` for any kind). Hard-coding `[29010]` silently drops the swarm kinds (30200/30201/30202), so the default accepts the full set.
 
 ### 3.3 Required Tags
 
@@ -326,17 +339,40 @@ If no signer is available:
 
 ---
 
-## 11. Content Addressing (SHA-256)
+## 11. Content Addressing (SHA-256) — the DNA anchor
 
-All content is addressed by its SHA-256 hash.
+This is the canonical anchor for content addressing across the hive. All content is addressed by its SHA-256 hash; the signature **is** the address.
 
 ```typescript
 signature = lowercase(hex(SHA-256(bytes)))
 ```
 
 - 64-character hex string.
-- Used for: location signatures, drone module signatures, layer signatures, dependency signatures.
 - Implementation: Web Crypto API (`crypto.subtle.digest('SHA-256', arrayBuffer)`).
+
+### 11.1 The five DNA kinds
+
+The content-addressed, merkle-versioned artifacts that compose the hive are collectively the **DNA** ("Distributed Network Artifacts" — see `dna.md`). They are DNA because the signature is the address, they are immutable, and they compose upward (parent = f(child sigs)) so mutations cascade to root. The genetic-ladder vocabulary is documentation-only: DNA rides the existing `kind` discriminant — there is no `dna` field, no `DnaService`, no new OPFS folder; the only universal primitive is the signature.
+
+Signatures address all five kinds:
+
+| Kind | What it is | Also: |
+|------|-----------|-------|
+| `layer` | a node in the cell tree (`{ name, cells, bees, dependencies }`); `cells[]` is the array of child layer sigs (a sparse Merkle tree) | location signatures name a *position* (§4), which resolves to a layer |
+| `bee` | a compiled drone bundle (esbuild output) | the unit of behavior (§13) |
+| `dependency` | a namespace/package bundle shared across bees | resolved via the import map |
+| `resource` | an authored content blob — image, note, byte array | self-heals on render (§21) |
+| `content` | a packaged tree — a `rootLayerSig` and its closure | the installable/shareable unit |
+
+### 11.2 Canonicalization (read before you reason about a sig)
+
+The build signs **raw bytes**, never sorted-key canonical JSON:
+
+- **Bees / dependencies** — the **raw compiled esbuild bytes** are hashed directly (`SignatureService.sign(toArrayBuffer(bytes))`).
+- **Layers** — `signJson(layer)` hashes `JSON.stringify(layer)` with keys in **insertion order** (no sorting). The object is built as `{ name, cells, bees, dependencies }` and stringified in that order.
+- `PayloadCanonical.compute` (core) is `structuredClone` + `JSON.stringify` — again **no key sorting** — and is *not* the module-artifact signing path; it computes a `BeePayloadV1` signature for the env-agnostic facade.
+
+> **Do not sort keys.** There is no sorted-key canonical JSON anywhere in the signing path. A reader who re-serializes with sorted keys computes a *different* signature, breaks deduplication, and misses every cache hit. To reproduce a sig, hash the exact bytes the build emitted.
 
 ---
 
@@ -344,7 +380,7 @@ signature = lowercase(hex(SHA-256(bytes)))
 
 The Origin Private File System is the persistent local store. No server storage exists.
 
-> **Superseded — see [history-sigbag-as-root.md](history-sigbag-as-root.md).** This section's pool-based layout (`__layers__/`, `__bees__/`, `__dependencies__/`, `__resources__/`, `__history__/`, `__manifests__/`, `__roots__/`) is the legacy model. The agreed model is a single flat content bucket at the root (one `<sig>` file per artifact) with sigbag markers (`0000`, `0001`, ...) at the root and at each lineage, where the max marker IS the current root + entrance + attestation in one. The storage and discovery model below has been retired; the wire protocol, signing, and lineage sections of this spec remain valid.
+> **Migration in progress — see [history-sigbag-as-root.md](history-sigbag-as-root.md).** The **agreed target** is a single flat content bucket at the root (one `<sig>` file per artifact) with sigbag markers (`0000`, `0001`, ...) at the root and at each lineage, where the max marker IS the current root + entrance + attestation in one. The **running build still uses** the typed pools described below (`__layers__/`, `__bees__/`, `__dependencies__/`, `__resources__/`, `__optimization__/`) plus `__history__/` marker chains, and discovery still goes through `manifest.json`. Treat the typed-pool layout as current and the flat-bucket model as the destination; the wire protocol, signing, and lineage sections of this spec hold under both.
 
 ### 12.1 Cells are layer content, not directories
 
@@ -606,8 +642,8 @@ Lookup resolves by exact signature first, then by name alias.
 
 | Key                              | Type          | Default                      | Description                        |
 |----------------------------------|---------------|------------------------------|------------------------------------|
-| `hc:nostrmesh:relays`            | JSON string[] | `["ws://localhost:7777"]` (or `["wss://jwize.com"]` when `use-live-relay`) | Nostr relay endpoints |
-| `hc:nostrmesh:use-live-relay`    | `"0"\|"1"`    | `"0"`                        | Use shared bootstrap relay `wss://jwize.com` as the default seed |
+| `hc:nostrmesh:relays`            | JSON string[] | seeded per origin: `["wss://jwize.com"]` on real hosts, `["ws://localhost:7777"]` on local dev origins | Nostr relay endpoints (override wins) |
+| `hc:nostrmesh:use-live-relay`    | `"0"\|"1"`    | (unset → origin default) | `"1"` forces `wss://jwize.com` on any origin; `"0"` opts a real host out (idles, no loopback) |
 | `hc:nostrmesh:kinds`             | JSON int[]    | `[29010]`                    | Accepted event kinds               |
 | `hc:nostrmesh:debug`             | `"0"\|"1"`    | `"0"`                        | Debug logging                      |
 | `hc:nostrmesh:allow-loopback`    | `"0"\|"1"`    | `"0"`                        | Allow localhost relay connections   |
@@ -634,7 +670,9 @@ Per the doctrine in `memory: project_public_navigation_lineage_filter.md`:
 
 > Mesh transports LAYER SIGS ONLY — layers are tiny directories; resources / deps / bees / blobs travel via direct HTTPS fetches to the domains the mesh told you about.
 
-Resources and dependencies have NO mesh fallback. If HTTP-direct can't find them, the call returns `null` and the caller retries on next access (by which point new domains may have been learned via subsequent layer fetches).
+Resources and dependencies have NO mesh **broker** fallback. If HTTP-direct can't find them, the call returns `null` and the caller retries on next access (by which point new domains may have been learned via subsequent layer fetches).
+
+> **Caveat — the broker is byte-clean, the swarm is not.** The *content-broker* mesh (kinds 20400/30401/20402) carries **layer sigs only**; resource and dependency bytes never ride it. But that is not the only mesh traffic: the separate **swarm-preview** path (§3.2) still relays image bytes inline — kind **30201** carries up to 256 KB of base64 image data on the relay so a peer can preview a shared tile before adopting it. So "no bytes on the mesh" is the broker's invariant, not the whole network's. The durable, verified transport for resource bytes remains HTTP-direct (§21.2).
 
 ### 21.2 HTTP-direct: candidate URLs
 
@@ -707,10 +745,12 @@ The operator's relay binary (`hypercomb-relay/relay.js`) serves HTTP content alo
 
 ```
 https://<domain>/<sig>            ← any content-addressed blob (§21.9 universal handler, §21.10)
-https://<domain>/__roots__/       ← discovery index (domains served)
-https://<domain>/__roots__/<dom>/ ← discovery index (attestation sigs)
+https://<domain>/__roots__/       ← DESIGN TARGET: discovery index (domains served)
+https://<domain>/__roots__/<dom>/ ← DESIGN TARGET: discovery index (attestation sigs)
 wss://<domain>/                   ← WebSocket relay endpoint
 ```
+
+> **Status: the `__roots__/` discovery routes are a DESIGN TARGET, not the current build.** The shipped relay HTTP host serves typed-path content and a `manifest.json` (keyed by `rootLayerSig`); the attestation-based `__roots__/` index has not yet replaced it. Treat every `__roots__/` reference below (§21.7–§21.13) as the agreed destination, with `manifest.json` as the live mechanism in the meantime.
 
 Build output (`hypercomb-essentials/dist/`) is copied to `hypercomb-relay/content/` by `scripts/copy-to-dcp.ts` on every build, so the operator's own machine is always serving the latest content their build produced. See `memory: project_domain_as_identity.md` for the full "host is a verb" doctrine.
 
@@ -954,6 +994,8 @@ Default is push-them-all, matching the durable-pool posture. Coalescing is opt-i
 
 ### 21.12 Write contract and authorization
 
+> **Status: DESIGN TARGET, not current build.** The `PUT /<sig>` content path and the `PUT /__roots__/<domain>/<sig>` attestation path described here specify the agreed write contract. The running build does not yet enforce this two-path model; the attestation PUT in particular depends on the `__roots__/` discovery surface (§21.7) and the domain↔key binding (§21.13), both of which are themselves design targets.
+
 §21.1–21.11 specify reading, resolving, and the *flow* of pushing. This section pins how content is actually accepted **onto** a host. There are two write paths, with different trust:
 
 ```
@@ -975,6 +1017,8 @@ So content-integrity is permissionless (the hash proves the bytes) while disk-wr
 **The write isn't done until it serves.** Per §21.11.3, the receipt is confirmed read-back, not a PUT 200. So the write contract is *accepted, stored, and serving* — a host that returns 200 but can't subsequently serve the sig has not fulfilled the write. (This is the deploy silent-drop lesson made part of the contract.)
 
 ### 21.13 Domain ↔ key binding (the trust root)
+
+> **Status: DESIGN TARGET, not current build.** The `/__keys__` domain-key publication endpoint and the attestation-verification flow below are the agreed trust-root design. The running build does not yet serve `/__keys__` or verify attestation signatures against a domain-published key set; the mesh today is **plaintext JSON** (the `x`-tag sig is visible in the clear — there is no AEAD on the wire yet). Read this section as the destination for identity verification, not a description of shipped confidentiality or signature-checking.
 
 Attestation verification (§21.8.1, §21.12) reduces to one question: *given an attestation claiming `domain: "alice.dev"` signed by key K, how does a verifier know K is legitimately alice.dev's?* The answer uses the web's existing two-factor identity — **a signature proves you hold the key; DNS + TLS proves you control the domain** — and binds them by having the domain publish its keys over its own TLS:
 

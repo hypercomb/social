@@ -1,7 +1,7 @@
 # hypercomb security policy
 
-version: 2.0
-last updated: 2026-03-02
+version: 2.1
+last updated: 2026-06-18
 
 ---
 
@@ -9,18 +9,28 @@ last updated: 2026-03-02
 
 hypercomb is presence-first. the system is designed so that being present in a
 shared space is itself the permission model. there is no user database, no
-account system, no credential store. data exists while participants are present
-and expires when they leave. the security posture follows directly from this
-constraint: what is never stored cannot be leaked.
+account system, no credential store — there is no server-side store of you to
+breach. *shared* presence is what evaporates: a participant's live presence,
+cursor, selection, and clipboard exist while they are present and leave nothing
+behind on a relay when they go.
+
+locally, though, everything you author is content-addressed and versioned in
+opfs and persists durably by default; nothing crosses the network unless you
+publish. so the security posture is two-sided: there is no remote account or
+session artifact that can be leaked from a server, while your own durable data
+lives in the origin-sandboxed opfs on your device (see the opfs section for its
+at-rest properties).
 
 core principles:
 
 - **presence = permission.** participation in a live session is the only
   authorization required. there are no tokens, no login walls, no session
   cookies.
-- **no extraction.** the system must never produce artifacts that allow
-  reconstruction of a session after the fact. no server logs, no analytics
-  payloads, no persistent identifiers.
+- **no extraction (server-side).** the network must never leave behind
+  artifacts that allow a third party to reconstruct a session after the fact.
+  no server logs, no analytics payloads, no remote persistent identifiers.
+  (this is a *network* property — locally, your authored content is durably
+  versioned in opfs by design; see the opfs section.)
 - **minimal impact.** a compromised component should not cascade. drones are
   isolated by lifecycle, effects are scoped by name, and the ioc container holds
   only ephemeral references.
@@ -109,13 +119,22 @@ verification, which uses:
 - **sha-256** event id derivation
 - nip-07 browser extension delegation when available
 
-key management is handled externally. the system does not generate, store, or
-rotate private keys itself. the `NostrSigner` resolves keys in this order:
+when a nip-07 extension is present, key management is handled externally and the
+application never sees the private key. otherwise the `NostrSigner` resolves a
+signing key in this order (as of writing):
 
-1. `window.nostr.signEvent` (nip-07 browser extension -- preferred)
-2. `window.NOSTR_SECRET_KEY` (runtime injection)
-3. `localStorage['hc:nostr:secret-key']` (developer override)
-4. hardcoded dev test key (development only -- must not ship to production)
+1. `window.nostr.signEvent` (nip-07 browser extension -- preferred; key never
+   enters the app context)
+2. `window.NOSTR_SECRET_KEY` (test / scripted runtime override)
+3. `localStorage['hc:nostr:secret-key']` (persisted per-session key)
+4. otherwise, **mint a fresh random 32-byte key**, persist it to localstorage
+   (or hold it in memory if localstorage is unavailable), and use that
+
+note there is no longer any shared, hardcoded fallback key — earlier builds
+shipped a `FALLBACK_DEV_SECRET_KEY` constant, but the signer now mints a unique
+per-session identity on a miss so two sessions never collide. a self-minted key
+is unattested: it identifies a session but proves nothing about who is behind
+it.
 
 ### what is not yet implemented
 
@@ -215,20 +234,29 @@ network attack surface.
 
 ### data exposure
 
-- all data sent to relays is visible to the relay operator and any
-  subscriber on that relay. there is currently no encryption of event
-  content.
+- the mesh is **currently plaintext json**. all data sent to relays is
+  visible to the relay operator and any subscriber on that relay. there is
+  no confidentiality on the wire today — aead encryption of event content is
+  future work (see *future work* and *what is not yet implemented*). do not
+  treat mesh traffic as private.
 - `created_at` timestamps are set from the local clock. this leaks
   approximate timing information to relays.
-- the `x` tag (content-addressed signature) is visible in plaintext. this
-  allows relay operators to observe which content hashes are being queried
+- the `x` tag (content-addressed signature) is visible in plaintext. it is a
+  sha-256 **content hash**, used for addressing and deduplication — not an
+  authentication signature — so it does not authenticate the sender, but it
+  does let relay operators observe which content hashes are being queried
   across sessions.
 
 ### connection security
 
-- relay connections use `wss://` (tls). plaintext `ws://` connections to
-  loopback addresses (`localhost`, `127.0.0.1`, `::1`) are gated behind an
-  explicit opt-in (`hc:nostrmesh:allow-loopback` in localstorage).
+- relay connections use `wss://` (tls). real (deployed) origins seed the live
+  bootstrap relay `wss://jwize.com` **by default** (since 2026-06-10); a public
+  origin must never dial loopback. local dev origins instead seed
+  `ws://localhost:7777`, which is loopback-only and a known dev/prod
+  port-collision hazard. plaintext `ws://` connections to loopback addresses
+  (`localhost`, `127.0.0.1`, `::1`) are gated behind an explicit opt-in
+  (`hc:nostrmesh:allow-loopback` in localstorage); relay selection can be
+  overridden with `hc:nostrmesh:use-live-relay` / `hc:nostrmesh:relays`.
 - exponential backoff with jitter is applied on connection failures to
   prevent reconnection storms.
 - the mesh can be stopped and all sockets torn down via `stop()`.
@@ -237,12 +265,14 @@ network attack surface.
 
 - nip-07 browser extension signing is preferred because the private key
   never enters the application's javascript context.
-- the fallback dev key (`FALLBACK_DEV_SECRET_KEY`) is a hardcoded test
-  identity. it must be removed or disabled in production builds. any event
-  signed with this key is trivially attributable.
-- `localStorage['hc:nostr:secret-key']` is accessible to any code in the
-  same origin. this is a convenience for development and must not be used
-  for real identities.
+- without an extension, the signer mints a fresh random per-session key
+  (no shared, hardcoded fallback identity remains). this key is
+  **unattested** — it gives a session a stable pubkey but proves nothing
+  about the human behind it, so a mesh signature is an integrity/origin
+  hint, not a vetted identity. treat self-minted-key events accordingly.
+- `localStorage['hc:nostr:secret-key']` (and the minted key persisted there)
+  is accessible to any code in the same origin. an attacker with same-origin
+  code execution can read or impersonate the local identity.
 
 ---
 
@@ -252,8 +282,18 @@ opfs is the only persistent storage mechanism. security properties:
 
 - **origin-sandboxed.** opfs is scoped to the browser origin. cross-origin
   access is not possible.
-- **no remote sync.** opfs data stays local unless explicitly published
-  through the nostr mesh.
+- **local-first, network opt-in.** opfs data is durable and stays on the
+  device by default; nothing crosses the network unless you publish. when you
+  do publish, the **primary resource transport is http-direct**: `Store.getResource`
+  self-heals a missing resource by fetching `GET /<sig>` from an operator domain
+  (via `ContentBroker.#fetchOverHttp`), sha-256-verifies the bytes, and writes
+  them through to opfs; `HostSync` pushes local bytes back out with `PUT /<sig>`.
+  the nostr mesh itself carries only layer **signatures** plus presence/visual
+  metadata, not the heavy content bytes — the one exception is the swarm-preview
+  path, which still relays small (`<= 256 KB`) base64 image bytes inline (kind
+  30201). layers, dependencies, and bees are opfs-only on the render path and
+  heal only via adopt / install / sync; only resources self-heal over http at
+  render time.
 - **no encryption at rest.** files stored in opfs are not encrypted. any
   code running in the same origin can read them. sensitive data should not
   be stored in opfs without application-level encryption.
@@ -276,9 +316,10 @@ opfs is the only persistent storage mechanism. security properties:
 - **do not attempt deanonymization.** the system is designed to make
   identity correlation difficult. testing must not attempt to reverse this
   property for other participants.
-- **dev keys are for dev.** the fallback nostr signing key is for local
-  development only. never use it to publish to public relays in a testing
-  context where real users might encounter the events.
+- **dev keys are for dev.** scripted overrides (`window.NOSTR_SECRET_KEY`) and
+  any persisted `hc:nostr:secret-key` are for local development only. never use
+  a shared or pinned test key to publish to public relays in a context where
+  real users might encounter the events.
 - **clean up after tests.** call `EffectBus.clear()` and `stop()` on the
   mesh drone to ensure no state leaks between test runs.
 

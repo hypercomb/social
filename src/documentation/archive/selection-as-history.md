@@ -1,5 +1,7 @@
 # Selection as History — Sketch
 
+> **status: design — not built (as of 2026-06-18), and superseded.** Selection is participant-LOCAL — like clipboard, cursor, and viewport, it is presence state that is deliberately kept OUT of the signed layer so it can never skew the lineage signature across peers. Recording selection in lineage history (as this sketch proposes) is therefore no longer the direction: doing so would fold a per-participant value into the merkle-versioned tree. The signature-addressed-snapshot idea below survives as a curiosity; the "record it in history" mechanism does not. See [feedback: clipboard is participant-local] in MEMORY and `viewport-not-in-history` for the same invariant applied to scale/pan/index.
+
 > **Goal**: Treat selection state as a first-class, undoable operation so the user can rewind not just *what tiles exist* but *what was selected at the time*. Combined with the click-to-add gesture, this gives seamless undo/redo at any level of granularity.
 
 ## Related
@@ -16,6 +18,8 @@ Proposal: a controls-bar toggle ("multi-select mode"). While active, every plain
 Why this matters for history: when selection becomes a deliberate, click-driven gesture (not just a transient pointer state), every click is a meaningful op worth recording.
 
 ## New Op Type
+
+> **Vocabulary note (predates the layer-state migration):** the "op type" framing below — a `selection-state` entry in a `HistoryOpType` union, replayed forward from zero — was written against the old event-op model. History no longer replays typed ops; a marker is a `{ layer: <sig> }` pointer and "what's here now" is read from the head layer's slots (`currentLayerAt` → `getLayerBySig` → the `children[]` slot), never op-replay. Mutations target layer *slots* via `LayerMachine` deltas (`append` / `removeSig` / `swap` / `set`), not an op-type discriminant. The signature-addressed-snapshot idea (full snapshot, signed, stored as a resource, referenced by signature) survives intact; the op-type *mechanism* in this section does not.
 
 ```typescript
 | 'selection-state'

@@ -22,7 +22,6 @@ Type `/` in the command line to access slash behaviours. These are pluggable com
 | Command | Aliases | Description |
 |---------|---------|-------------|
 | `/remove` | `/rm`, `/delete`, `/del` | Remove tiles from the current directory |
-| `/rename` | `/mv` | Rename the selected tile |
 | `/keyword` | `/kw`, `/tag` | Add or remove keywords (tags) on selected tiles |
 | `/format` | `/fmt`, `/fp` | Copy visual formatting from the active tile |
 | `/accent` | `/ac` | Set the hover accent color by name |

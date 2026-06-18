@@ -1,5 +1,7 @@
 # Pheromone Protocol
 
+> **status: design — not built (as of 2026-06-18).** Ambient, advisory signals attached to content by signature; no `PheromoneService`, OPFS folder, or aggregation exists in the live tree — the only pheromone code lives in dead `hypercomb-legacy`.
+
 **Pheromones are signals about code, attached to content by signature.** Where [pollination](pollination-protocol.md) moves *matter* between hives, pheromones move *signals* between bees. A pheromone is an ambient, advisory annotation left on a fragment — a file, a cell, a drone, a resource — that other bees can read as a cue about what to do, what to notice, or what to avoid.
 
 ## Related Documents
@@ -26,6 +28,8 @@ Pheromones and pollinations are both social signals between domains, but they so
 | **Effect if ignored** | Nothing happens | Nothing happens |
 
 Pollination is an *act*: something crosses a boundary and either takes or doesn't. Pheromones are an *atmosphere*: they accumulate, decay, and bias attention without ever forcing it. A hive can function with zero pheromones. But once they exist, they're how bees coordinate without central instruction.
+
+This "parallel space, not in the merkle tree" row is the canonical line for what is and isn't **DNA**. The merkle-resident, content-addressed, versioned artifacts that compose the hive — layers, dependencies, bees, resources, content — *are* DNA: their signature is their address and a change to any of them cascades to the root ([dna.md](dna.md)). Pheromones are deliberately **not DNA**. They are advisory annotations that reference DNA by signature but never enter the merkle tree, never cascade, and never change a fragment's signature. Emitting or decaying one touches nothing in the lineage. They ride *alongside* the genetic material, never inside it.
 
 ## Shape of a Pheromone
 
@@ -76,7 +80,9 @@ A bee emits a pheromone by publishing the pheromone resource to its own host and
 - **The emitter hosts the pheromone.** Same hosting model as pollination — contributor-owned, signature-verifiable, no central server.
 - **Nostr carries the announcement**, not the pheromone itself. Small payload, cheap to broadcast.
 - **Receiving hives subscribe by target signature**, not by emitter. If a DCP holds fragment `abc...` in its merkle tree, it watches for pheromones attached to `abc...` regardless of who emits them.
-- **Pheromones are not in the module's merkle tree.** They live in a parallel signature-addressed space (`__pheromones__/<sig>` in OPFS), indexed by target signature. Grafting a pollination does not touch pheromones; emitting a pheromone does not touch the module.
+- **Pheromones are not in the module's merkle tree.** They would live in a parallel signature-addressed space, indexed by target signature. Grafting a pollination does not touch pheromones; emitting a pheromone does not touch the module.
+
+> The `__pheromones__/<sig>` OPFS path is **proposed only — it does not exist** in the live tree (the sole pheromone code is in dead `hypercomb-legacy`). And even if built it would **not** be a DNA folder: pheromones are advisory annotations outside the merkle tree, not merkle-resident artifacts. The only universal primitive remains the signature ([signature-system.md](signature-system.md)); a pheromone is a resource that *references* a signature, it does not become part of the addressed content it marks.
 
 ## Decay
 
@@ -98,6 +104,8 @@ This is where pheromones diverge most sharply from pollinations. A pollination i
 
 There is no stigma for pheromones. They do not cross a boundary into your module — they stay in the parallel space — so there is nothing for a boundary filter to filter. What *is* pure and deterministic is the **aggregation**: given a set of pheromones attached to a target and a set of trust weights, the resulting "smell" of that fragment is a pure function of its inputs. Same inputs, same smell, forever. That aggregation participates in the signature algebra the same way a stigma verdict does.
 
+> *Design note:* the stigma-verdict comparison and the trust-weighted aggregation ("smell") above describe intended behaviour. No verdict aggregator, trust-weighting, or smell computation is built today — there is no live `PheromoneService` to host it.
+
 ## How Pheromones Surface in DCP
 
 When the owner opens a fragment in DCP — a cell, a file, a drone — the UI queries the parallel pheromone space for any pheromones attached to that fragment's signature and renders a summary:
@@ -115,7 +123,7 @@ To keep this primitive narrow, some things are explicitly out of scope:
 
 - **Not comments.** Comments are code annotations that live inside the file and travel with it in the merkle tree. Pheromones live outside and reference by signature.
 - **Not reviews.** Reviews are part of an acceptance pipeline. Pheromones have no pipeline — they are ambient. The stigma is the boundary; pheromones do not gate anything.
-- **Not votes.** Pheromones are signals, not decisions. There is no count, no threshold, no outcome derived from them. Aggregation is for presentation, not for authority.
+- **Not votes.** Pheromones are signals, not decisions. There is no count, no threshold, no outcome derived from them. Aggregation, where it is described in this spec, is for presentation, not for authority — and is itself design-only, not yet built.
 - **Not moderation.** A pheromone cannot remove, hide, or block a fragment. It can only say "I notice this." The owner of the receiving DCP decides what to do with that signal, if anything.
 - **Not in history.** Pheromones are never history operations. Emitting or decaying a pheromone does not append to any lineage. History is for content; pheromones are for atmosphere.
 

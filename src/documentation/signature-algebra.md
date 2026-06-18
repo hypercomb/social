@@ -1,5 +1,7 @@
 # signature algebra
 
+> **status: design — not built (as of 2026-06-18).** a theoretical framework over content-addressed signatures. only the jaccard set-overlap operation (#3) ships today, in `DiscoveryService.similarity`; the composition function `C()` / `authenticity`, the tag-query engine, the `MerkleRoot` helper, and the reactive pipelines are documentation-level constructs. the only universal primitive is the signature — this algebra would ride the existing `kind` discriminant and tag resource, never a new service, field, or OPFS folder.
+
 a theoretical framework for performing algebraic operations over content-addressed signatures in hypercomb. signatures are immutable SHA-256 identities — 64-character hex strings, 256-bit numbers. the algebra never modifies a signature. it operates *over* them: grouping, filtering, composing, projecting, and deriving new structures from the relationships between signatures and their metadata.
 
 this document defines the hypothesis, formalizes the theory, and explores ten high-value applications.
@@ -46,7 +48,7 @@ T("cuban") = { s₃, s₇, s₁₂ }
 T("brand") = { s₃, s₅, s₇ }
 ```
 
-tags are keywords in LayerState. they are first-class data — stored, published, and synchronized alongside the signatures they annotate.
+tags today are *not* synchronized LayerState keywords and there is no tag-query engine. the master tag list is a content-addressed resource: a sig pointer stored in the cell's `0000` properties file (`hypercomb-shared/core/tag-registry.ts` reads it under the `tags-master` key, resolves it via `Store.getResource`). the `T()` predicate below is therefore a *documentation-level* construct describing how an algebra *would* index those tag sets — it rides the existing tag resource, not a new field or service.
 
 ### lineage function
 
@@ -79,7 +81,7 @@ C: S × S → S
 C(s₁, s₂) = SHA-256(concat(s₁, s₂))
 ```
 
-this is exactly what `authenticity` does in the deterministic computation model. the composed signature is a *new identity* that represents the relationship between two existing identities.
+this is what `authenticity` *would* do in the deterministic computation model. **`authenticity` / `C()` is design — not built (as of 2026-06-18).** it appears only in the documentation set, never in shipped code; the composed signature is a *new identity* that would represent the relationship between two existing identities.
 
 ---
 
@@ -189,7 +191,7 @@ for each bee in affected_bees:
     // new_authenticity is the cache key for the recomputed result
 ```
 
-the deterministic computation model already supports this — signature algebra just gives you the graph traversal to know *where* to look.
+the deterministic computation model is itself design (see #4 / `authenticity` above) — so this `C()`-based blast-radius composition is **design, not built (as of 2026-06-18)**. signature algebra would give you the graph traversal to know *where* to look.
 
 ### 3. semantic similarity via tag overlap (jaccard on signature sets)
 
@@ -199,7 +201,7 @@ the deterministic computation model already supports this — signature algebra 
 similarity(a, b) = |T(a) ∩ T(b)| / |T(a) ∪ T(b)|
 ```
 
-this is the jaccard index — a number between 0 (no overlap) and 1 (identical sets). it's already used in the cigar discovery service for flavor recommendations. signature algebra generalizes it to *any* tagged content:
+this is the jaccard index — a number between 0 (no overlap) and 1 (identical sets). it's the **one** algebra operation actually shipped today: `DiscoveryService.similarity` (`hypercomb-essentials/src/revolucionstyle.com/discovery/discovery.service.ts`) computes `intersection / union` over flavor-profile sets for cigar recommendations. signature algebra would generalize it to *any* tagged content:
 
 - "how related are 'cuban' and 'full-bodied'?" → jaccard on their signature sets
 - "what tags are most similar to 'maduro'?" → rank all tags by jaccard similarity to T("maduro")
@@ -209,7 +211,7 @@ because this operates on sets of signatures (not the content itself), it's fast 
 
 ### 4. provenance chains (who touched what, and when)
 
-**the idea**: compose signatures along the history chain to build a verifiable provenance trail.
+**the idea**: compose signatures along the history chain to build a verifiable provenance trail. **design — not built (as of 2026-06-18):** this relies on the `C()` composition function (see above), which is not shipped.
 
 ```
 history_chain = [
@@ -251,7 +253,7 @@ because diffs are just set operations, they can be composed: "changes in cuban b
 
 ### 6. content-addressed access control (capability algebra)
 
-**the idea**: access control as set membership. a capability is a signature. having it means having access.
+**the idea**: access control as set membership. a capability is a signature. having it means having access. **design — not built (as of 2026-06-18):** there is no capability store today, and delegation below leans on the unshipped `C()`.
 
 ```
 capability_sig = SHA-256("read:" + resource_lineage + ":" + grantee_pubkey)
@@ -300,6 +302,8 @@ this is how the mesh can gossip efficiently about tagged collections — not jus
 ### 8. merkle composition trees (aggregating trust)
 
 **the idea**: compose all signatures in a set into a single merkle root — a compact, verifiable summary of the entire collection.
+
+> **note:** `MerkleRoot([...])` below is **illustrative pseudocode, not a shipped API** — there is no such helper, no `genome()` hash function, and no sorted-child formula in the build (those live only in dead `hypercomb-legacy`). what *is* real is the recursive-merkle-root *concept* that already falls out of the layer tree: each parent's `children[]` slot holds its children's current layer sigs and the parent re-signs, so the root layer signature is effectively the recursive merkle root of the subtree. that is the **genome rung** — see [genome-primitive.md](genome-primitive.md) and the [dna.md](dna.md) genome row.
 
 ```
 root = MerkleRoot([s₁, s₂, s₃, ... sₙ])
@@ -410,10 +414,10 @@ all operations are sub-second for realistic collection sizes (thousands to tens 
 | primitive | role in the algebra |
 |-----------|-------------------|
 | `SignatureService.sign()` | produces atoms (**S** elements) |
-| keywords in LayerState | produces tag sets (`T()`) |
+| tag resource (sig pointer in cell `0000` props, `tag-registry.ts`) | would produce tag sets (`T()`) — *no tag-query engine ships today* |
 | lineage | produces the hierarchical dimension (`L()`) |
 | `beeDeps` in manifest | produces the dependency graph (`D()`) |
-| `authenticity` (deterministic computation) | the composition function (`C()`) |
+| `authenticity` (deterministic computation) | the composition function (`C()`) — **design, not built** |
 | EffectBus | the reactive substrate for live pipelines |
 | Nostr mesh | the transport for publishing and subscribing to algebraic results |
 | Bloom filters (gossip) | compact algebraic summaries for efficient sync |

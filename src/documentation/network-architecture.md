@@ -15,7 +15,7 @@ The network is **four orthogonal roles** any domain can play:
 | Role | What it does | Trust level |
 |---|---|---|
 | **Installer** | Serves the DCP Angular app (the installer UI) | Single canonical build; many possible mirrors; sig-verified |
-| **Mesh** | Runs a WSS relay for swarm meetings; passes tiny meta-layer messages | Per-operator; signed events; can't forge content |
+| **Mesh** | Runs a WSS relay for swarm meetings; passes layer-sig meta plus a bounded ≤256 KB image-preview channel | Per-operator; signed events; sha256 gates every preview byte, so it can't forge durable content |
 | **Storage** | Serves `/<sig>` byte content over HTTP | Single-tenant per host; sha256 makes tampering impossible |
 | **Identity** | DNS + pubkey attestation; community-graph vertex | Per-domain; community-vouched |
 
@@ -62,21 +62,43 @@ A WSS endpoint hosting swarm meetings. Passes signed Nostr events
 between participants in the same swarm.
 
 - **Per-operator.** Each operator runs their own relay at their domain.
-- **No bytes flow through here — only meta.** Tile visuals, presence
-  signals, layer-sig announcements, peer pubkeys. The byte content of
-  any signature is fetched separately via HTTP to the storage host.
+- **Almost no bytes flow through here — meta plus the swarm-preview
+  exception.** Tile visuals, presence signals, layer-sig announcements,
+  peer pubkeys. The byte content of any signature is fetched separately
+  via HTTP to the storage host (`GET /<sig>`). The one genuine byte path
+  is the swarm-preview companion event (Nostr `kind:30201`): so a peer
+  can *see* an image before adopting, image bytes ride inline as base64,
+  capped at 256 KB (`MAX_RESOURCE_BYTES` in `swarm.drone.ts`). Anything
+  over the cap, and all non-image content, stays sig-only and is pulled
+  HTTP-direct from a host. So the mesh is layer-sigs-only by doctrine,
+  with this one bounded image-preview channel.
 - **Mesh hosts don't gatekeep adoption.** Anyone in the swarm sees the
   same visuals; adoption is the participant's choice based on what they
   see + which publisher-domain the visual identifies.
 
-**Why this matters:** keeping the mesh sig-only (no bytes) means the
-relay is cheap to operate (small messages, no disk pressure) and the
-mesh host can't tamper with content (it never holds bytes).
+**Why this matters:** keeping the mesh layer-sigs-only (modulo the
+bounded ≤256 KB image preview above) means the relay is cheap to operate
+(small messages, no disk pressure) and the mesh host can't tamper with
+durable content — sha256 still gates every preview byte on the receive
+side, and the authoritative copy is always pulled HTTP-direct from a
+host, never trusted from the relay.
 
 ### Storage (bytes)
 
 HTTP endpoints serving signature-addressed content: `GET /<sig>` returns
-the bytes whose sha256 is `<sig>`.
+the bytes whose sha256 is `<sig>`. This is the **DNA identity anchor** of
+the whole network: the signature *is* the address. Every artifact the
+hive composes from — layers, dependencies, bees, resources, content — is
+a Distributed Network Artifact named by the sha256 of its bytes,
+immutable, and deduplicated by that address. `GET /<sig>` is the wire
+form of that identity. (See `dna.md` for the artifact taxonomy and why
+content-addressing makes these artifacts "DNA".)
+
+`GET /<sig>` is the **primary, default** resource transport — HTTP-direct
+to operator domains (`ContentBroker.#fetchOverHttp`, with a `Store` host
+fallback and `HostSync` `PUT` for writes). There is no hard-coded central
+CDN default any more: `#getFallbackDomains` is empty unless an operator
+deliberately adds mirrors via `hc:fallback-domains`.
 
 - **Single-tenant per host.** The operator's own authored content lives
   at the operator's host. **Other peoples' bytes do not live at your
@@ -85,9 +107,12 @@ the bytes whose sha256 is `<sig>`.
 - **Sha256 makes integrity unforgeable.** A storage host can deny you
   bytes (DoS) but cannot poison them — modified bytes have a different
   sig, so they wouldn't match what was requested.
-- **Cloudflare-edge cacheable.** `/<sig>` is content-addressed and
-  immutable; `Cache-Control: immutable` headers let CDN edges hold every
-  byte globally on first fetch.
+- **Cloudflare-edge cacheable — embraced as a scale primitive.**
+  `/<sig>` is content-addressed and immutable; `Cache-Control: immutable`
+  headers let Cloudflare's edge hold every byte globally on first fetch.
+  Because the address *is* the hash, an edge cache can never serve the
+  wrong bytes — caching immutable `/<sig>` is free scale, not a trust
+  hole.
 
 **Why this matters:** restricting storage to single-tenant maintains a
 clean trust attribution — "alice.com bytes = alice authored them." A
@@ -143,16 +168,38 @@ verifying directly against the address.
 - Works regardless of trust state at the other layers
 - Universal: applies to every participant on every fetch
 
+The same sha256 that secures a single byte fetch also secures
+*versioning*: artifacts compose upward, so a parent layer's signature is
+a function of its children's signatures, and that cascade runs all the
+way to a `rootLayerSig` (see `genome-primitive.md`,
+`history-sigbag-as-root.md`). Trust-by-hash and version-by-merkle-root
+are the same DNA primitive seen from two angles — verifying one byte and
+verifying an entire tree are mechanically identical operations.
+
 ### Tier 2 — Per-domain (local)
 
-The participant's `__domains__/<domain>/` registry in DCP records which
-domains have been adopted from + which features within each have been
-toggled on. Trust prompts fire at toggle-on time for unfamiliar sources;
-the participant's decision is sticky in the registry.
+What ships today is a single **binary trust list**: the `TrustService`
+(`hypercomb-shared/core/trust-service.ts`) reads a localStorage key
+`hc:community:domains` — a flat array of trusted source domains. When a
+participant tries to enable an item whose source domain isn't on that
+list, the UI prompts; an `allow-always` decision appends the domain to
+`hc:community:domains` so the prompt doesn't fire again for that source.
+A second, lower-priority localStorage key `hc:fallback-domains` (read by
+`ContentBroker.#getFallbackDomains`, **empty by default**) lets an
+operator add extra last-resort byte mirrors; sha256 still gates every
+fetched byte regardless of which list a domain came from.
 
-- Per-participant — each person's registry is their own
+- Per-participant — each person's localStorage trust list is their own
 - Manual approval — requires the participant's attention per source
 - Foundation: even without communities, individual trust still works
+
+> **Design note (not built as of 2026-06-18):** the richer
+> `__domains__/<domain>/` registry described in earlier drafts — per-
+> feature toggle state stored as an OPFS directory tree, with attestation
+> feeds under `__communities__/` — is design-only. The shipped gate is
+> the flat `hc:community:domains` allow-list above. Treat any reference
+> to `__domains__/`/`__communities__` directories below as the target
+> design, not current behavior.
 
 ### Tier 3 — Pheromones (social)
 
@@ -190,16 +237,21 @@ Other pheromone types in the design (not yet implemented):
 
 ### How the three layers cascade at trust-evaluation time
 
+The cascade below is the **target shape**. Today only steps 1 and 2 are
+wired, and step 2 is the flat `hc:community:domains` allow-list (not a
+per-node toggle tree). Step 3 (`__communities__/` attestation feeds) is
+design-only as of 2026-06-18.
+
 ```
-1. Sig integrity: sha256(bytes) === sig?           ← Tier 1, always
+1. Sig integrity: sha256(bytes) === sig?           ← Tier 1, always (built)
    if no → reject. Done.
 
-2. Per-domain trust: source domain in __domains__,
-   node toggled on?                                ← Tier 2
+2. Per-domain trust: source domain in the trust
+   list (today: hc:community:domains)?             ← Tier 2 (built)
    if yes → use it.
 
 3. Community attestation: any subscribed community
-   in __communities__/ has attested?               ← Tier 3
+   in __communities__/ has attested?               ← Tier 3 (design-only)
    if yes → surface community's vouch + skip the
             manual prompt (the community already
             did the work).
@@ -294,10 +346,14 @@ ADOPTER's BROWSER OPFS  ─── verified bytes cached here
     diamondcoreprocessor.com's OPFS partition)
 ```
 
-**Bytes never traverse the swarm host or the consumer surface or the
-canonical installer.** They go straight from publisher's domain to
-adopter's browser via HTTP, with the mesh visual telling the broker
-where to look.
+**Durable bytes never traverse the swarm host or the consumer surface or
+the canonical installer.** They go straight from publisher's domain to
+adopter's browser via HTTP (`GET /<sig>`), with the mesh visual telling
+the broker where to look. The single exception is the swarm *preview*:
+small (≤256 KB) image bytes ride the mesh inline (Nostr `kind:30201`) so
+a peer can see a tile before adopting — but the authoritative copy is
+still pulled HTTP-direct from the host on adopt, sha256-verified, and the
+preview bytes are never the durable source of truth.
 
 ---
 
@@ -336,7 +392,7 @@ The canonical playbook for running an operator host (e.g. `jwize.com`,
                            │
                            ▼
 ┌──────────────────────────────────────────────────────────┐
-│ hypercomb-relay  (Node, port 7777)                       │
+│ hypercomb-relay  (Node, local port 7777 behind tunnel)   │
 │   • GET /<sig>       serves alice's authored bytes        │
 │   • PUT /<sig>       alice's HostSync pushes here         │
 │                      (NIP-98 auth — alice's pubkey only)  │
@@ -349,6 +405,18 @@ The canonical playbook for running an operator host (e.g. `jwize.com`,
 
 That's it. No installer. No multi-tenant write zone. No SPA. The relay
 is intentionally narrow.
+
+**Relay default + the port-7777 hazard.** On a real deployed origin the
+mesh resolves to the public default relay — `wss://jwize.com`, seeded by
+default since 2026-06-10 (`DEV_DEFAULT_HOST = 'jwize.com'` in
+`runtime-initializer.ts`; the `nostr-mesh.drone` loopback default lands
+on the same host). The local port **7777** is purely the loopback bind
+*behind* the Cloudflare Tunnel — public traffic arrives over `wss://`
+443, never `:7777` directly. Treat `:7777` as a known dev/prod collision
+hazard: a production relay squatting that port shadows the local dev
+relay, producing ghost replay, silent rate-limits, and dev events
+landing in the prod store. Loopback `:7777` is for the operator's own
+box only; never advertise it as the public endpoint.
 
 **To deploy:** follow `hypercomb-relay/migrate-relay-to-7777.bat`
 (Windows + NSSM) or equivalent for your OS. The recipe is the same
@@ -490,8 +558,22 @@ For future readers wondering why certain shapes weren't chosen:
   host)
 - `signature-system.md` — content-addressing semantics and resolution
   doctrine
+- `dna.md` — Distributed Network Artifacts: the content-addressed,
+  merkle-versioned artifacts (layers, deps, bees, resources, content)
+  this network moves. The trust tiers above gate *who* you accept
+  artifacts from; `dna.md` describes *what* those artifacts are
 - `history-sigbag-as-root.md` — sigbag layout and the single-bucket
-  content model on hosts
+  content model on hosts; how a lineage's `000x` sigbag's max marker
+  names the current root. The same merkle identity that gives Tier 1 its
+  sha256 guarantee gives versioning its append-only root chain
+- `genome-primitive.md` — the recursive merkle root over a subtree
+  (parent = f(child sigs), cascading to root). This is *why* a single
+  `rootLayerSig` can stand in for an entire tree's integrity; trust by
+  sha256 (Tier 1) and versioning by merkle cascade are the same primitive
+  viewed two ways
+- `trail-capsule.md` — the 1-byte navigation/route stream (formerly
+  called the "DNA"/path capsule, now the trail/waggle capsule); distinct
+  from the DNA *artifacts* above
 - `protocol-spec.md` — full wire protocol reference
 
 ---

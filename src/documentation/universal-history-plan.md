@@ -1,6 +1,8 @@
 # Universal History — The Complete Undo/Redo Plan
 
-> **Goal**: Every trackable operation within the hive is recorded as an append-only history op. Replay from zero to head produces the current state. A global time clock lets you set any timestamp and navigate the entire hierarchy seeing a perfect snapshot at that moment — an omniscient debugger, a microscope into any point in time.
+> **status: partially built (as of 2026-06-18).** The layer-marker / cascade core and the per-location cursor are shipped; the global cross-hierarchy time clock and the per-op-type universals (markers, full divergence) are **design — not built**. Section headers below mark which is which.
+
+> **Goal**: Every trackable change within the hive is captured as an append-only layer commit. The head layer's slots are the current state. A global time clock is *intended* to let you set any timestamp and navigate the entire hierarchy seeing a coherent snapshot at that moment — an omniscient debugger, a microscope into any point in time.
 
 ## Related Documents
 
@@ -8,12 +10,14 @@
 - [revision-mode.md](revision-mode.md) — Current undo/redo/clock/divergence implementation
 - [signature-node-pattern.md](signature-node-pattern.md) — Plug-and-play feature wiring
 - [signature-system.md](signature-system.md) — Why payloads must be signature-addressed
+- [dna.md](dna.md) — Distributed Network Artifacts: the content-addressed, merkle-versioned layers/deps/bees/resources/content that history commits address
+- [trail-capsule.md](trail-capsule.md) — The renamed route/navigation capsule (formerly "DNA path capsule")
 
 ---
 
 ## The Vision
 
-Nothing is ever deleted. Every operation — cell creation, marker toggle, tag assignment, content edit, drone state change, reorder, rename — appends an op to the location's history bag. The final state is always the replay of all ops:
+Nothing is ever deleted. Every operation — cell creation, marker toggle, tag assignment, content edit, drone state change, reorder — appends to the location's history. Locally, everything you author is content-addressed and versioned in OPFS; nothing crosses the network unless you publish. The final state is the head layer's slots — conceptually the replay of all ops:
 
 ```
 add marker "important"     → marker on
@@ -27,16 +31,28 @@ When you rewind the clock to any timestamp and then navigate through the hive, e
 
 ---
 
-## Current State (Fully Implemented)
+## Current State
 
-All phases of the universal history plan have been completed. The following operations are now tracked:
+### The model in production: layer-marker + cascade
+
+The implemented history is **not** per-op-type replay from zero. It is the layer-marker / cascade model (see [history-sigbag-as-root.md](history-sigbag-as-root.md)):
+
+- A **marker** is a pointer record `{ "layer": "<sig>" }` appended to the lineage's history bag at `__history__/<lineageSig>/NNNNNNNN`. The layer bytes themselves live in the `__layers__/<sig>` pool.
+- `commitLayer(locationSig, layer)` signs the **canonical layer bytes** (`SignatureService.sign` over `JSON.stringify` of the canonicalized layer) to get `layerSig`, writes the layer to the pool, then appends one marker. Identical bytes dedupe (no new marker).
+- One user action = **one layer + one marker per ancestor**. `LayerCommitter` orchestrates the cascade: walk leaf → root, calling `commitLayer` at each level with that level's freshly-assembled layer (which references its children's just-committed sigs). Cost is **O(depth)**, not O(history). The root lineage's latest layer sig IS the global merkle root.
+- "What's here now" reads the **head layer's slots** (`currentLayerAt` → `getLayerBySig`, children from the `children[]` slot) — not an op-replay from zero. Marker `00000000` is an auto-minted EMPTY `{ name }` layer.
+
+> The genetic ladder, in documentation terms: a cell's lineage bag is its **heredity**; its head layer is the expressed phenotype; the recursive merkle root over a subtree is its **genome**. These are content-addressed [Distributed Network Artifacts](dna.md) — the signature IS the address. None of this is a `dna` field or service; it rides the existing `kind` discriminant.
+
+### Legacy / secondary: per-op-type tracking
+
+The original plan modeled history as discrete typed operations (`HistoryOpType`). This vocabulary is **secondary** — the canonical store is the layer-marker model above. Where typed ops still appear they are folded into layer slots, not replayed as an event log. The historical op set:
 
 | Op Type | Trigger | Source |
 |---------|---------|--------|
 | `add` | Cell created | `cell:added` effect → HistoryRecorder |
 | `remove` | Cell deleted | `cell:removed` effect → HistoryRecorder |
 | `reorder` | Cells reordered | OrderProjection.reorder() |
-| `rename` | Cell renamed | `/rename` command → `cell:renamed` effect |
 | `instruction-state` | Instruction visibility changed | InstructionDrone.recordState() |
 | `tag-state` | Tag assignments changed | `tags:changed` effect → HistoryRecorder |
 | `content-state` | Tile content saved | `tile:saved` effect → HistoryRecorder |
@@ -46,13 +62,14 @@ All phases of the universal history plan have been completed. The following oper
 | `add-drone` | Drone added | Drone registration effect |
 | `remove-drone` | Drone removed/disposed | `bee:disposed` effect → HistoryRecorder |
 
+> **No `rename` op.** Cells are immutable atomic units — there is no rename (confirmed in `history-cursor.service.ts`: "there is no rename"). Renaming is delete + create; a same-name sig swap is a **cascade**, not a rename. Any `rename` op below is retired/vestigial.
+
 ### Clock capabilities
 
-- **Per-location cursor**: loads one bag and positions within it
-- **Global timestamp mode**: `GlobalTimeClock` synchronizes all locations to a session-wide timestamp
-- **Scope toggle**: switch between local and global time (Ctrl+Shift+G)
-- **Clock scrubbing**: range slider for continuous time navigation
+- **Per-location cursor** (solid): loads one bag and positions within it — this is the load-bearing, shipped piece.
+- **Clock scrubbing**: range slider for continuous time navigation within a location
 - **Activity log**: human-readable op description at cursor position
+- **Global timestamp mode** (partial, as of writing): a `GlobalTimeClock` service holds a session-wide timestamp and a scope toggle exists, but the **cross-bag join is not wired end-to-end** — `stepBack`/`stepForward` take an `allOpsTimestamps` array supplied by the caller rather than discovering op timestamps across all loaded bags themselves. Treat the "every location syncs to one global instant" behavior below as **design intent**, not a verified capability.
 
 ---
 
@@ -68,7 +85,7 @@ export type HistoryOpType =
   | 'add'
   | 'remove'
   | 'reorder'
-  | 'rename'
+  // | 'rename'  ← RETIRED: cells are immutable; no rename op (delete+create)
   // Drone lifecycle
   | 'add-drone'
   | 'remove-drone'
@@ -89,7 +106,7 @@ export type HistoryOpType =
 | `tag-state` | Resource signature | `{ version, cellTags: Record<cellLabel, string[]>, at }` | Previous tag assignments restored |
 | `content-state` | Resource signature | `{ version, cellLabel, propertiesSig, at }` | Previous content restored |
 | `layout-state` | Resource signature | `{ version, property, value, at }` | Previous layout restored |
-| `rename` | Resource signature | `{ version, oldName, newName, at }` | Previous name restored |
+| ~~`rename`~~ | — | — | **Retired.** No rename op — cells are immutable atomic units (delete + create; a same-name sig swap is a cascade). |
 | `hide` | Cell label | — | Cell becomes visible |
 | `unhide` | Cell label | — | Cell becomes hidden |
 | `add-drone` | Drone IoC key | — | Drone removed from location |
@@ -237,11 +254,12 @@ Walking the hierarchy with the clock set is walking through a frozen moment in t
 
 ## Implementation Order
 
-### Step 1 — Foundation (no new op types yet) ✓ DONE
+### Step 1 — Foundation (no new op types yet) — PARTIAL
 1. ✓ Create `GlobalTimeClock` service, register in IoC
-2. ✓ Wire `HistoryCursorService.seekToTime(timestamp)` 
+2. ✓ Wire `HistoryCursorService.seekToTime(timestamp)`
 3. ✓ Wire navigation to sync cursor with GlobalTimeClock on location change
 4. ✓ Update HistorySliderDrone to show global time mode (local/global scope toggle, Ctrl+Shift+G)
+5. ☐ **Not wired end-to-end**: cross-bag stepping currently relies on the caller supplying `allOpsTimestamps`. Self-discovering op timestamps across all loaded bags (so "step back across the whole hive" works without a precomputed array) is outstanding.
 
 ### Step 2 — Marker operations
 1. Define `marker-add` and `marker-remove` op types
@@ -266,10 +284,10 @@ Walking the hierarchy with the clock set is walking through a frozen moment in t
 ### Step 5 — Layout and remaining operations ✓ DONE
 1. ✓ Define `layout-state` op type
 2. ✓ Wire layout-state recording from `layout:mode`, `render:set-orientation`, `render:set-pivot`, `render:set-gap` effects
-3. ✓ `/rename` command created — copies OPFS directory, records `rename` op with signature-addressed `{ oldName, newName }`, emits `cell:renamed` effect
+3. ~~`/rename` command~~ — **RETIRED / never shipped.** No `/rename` command, `rename` op, or `cell:renamed` effect exists in the current build (verified: no such symbols in `hypercomb-essentials`). Cells are immutable; renaming is delete + create, and a same-name sig swap is a cascade.
 4. ✓ `bee:disposed` wired to record `remove-drone` ops (iocKey in cell field)
 5. ✓ Layout-state reconstruction in ShowCellDrone when rewound (orientation, pivot, gap, mode)
-6. ✓ Rename handling in OrderProjection (replaces old name with new name in order list)
+6. ~~Rename handling in OrderProjection~~ — moot; there is no rename (see item 3).
 
 ### Step 6 — Polish ✓ DONE
 1. ✓ Clock scrubbing UI — range slider beneath the clock, drag to seek any position
@@ -294,17 +312,19 @@ Unknown op types are skipped during replay. Old clients that don't understand `t
 Related operations share a `groupId`. Undo/redo treats the group as one step. Example: pasting 5 cells = 5 `add` ops with one `groupId` = one undo step.
 
 ### Timestamp is the universal key
-The `at` field on every op is `Date.now()` — millisecond epoch. The global clock uses this to seek across all bags. Operations don't need to know about each other. They just need truthful timestamps.
+The `at` field carries a millisecond epoch. The per-location cursor uses this to seek within a bag (solid, shipped). The *global* clock is designed to seek across all bags by the same key — but as noted under Clock capabilities, that cross-bag join is not yet wired end-to-end. The principle holds; the global wiring is outstanding.
 
 ### Nothing is deleted
-History bags are permanent. Cells are "removed" by appending a `remove` op, not by deleting files. The signature addresses the bag; the contents are the complete truth. This is what makes the debugger possible — you can always go back.
+History bags are permanent. Cells are "removed" by appending a remove (a new layer whose `children` slot drops the cell), not by deleting files. The signature addresses the bag; the head layer's slots are the live truth. Locally this is durable by default — OPFS `__history__` marker chains plus the `__layers__`/`__resources__` pools persist without any network round-trip. This is what makes the debugger possible — you can always go back.
 
 ---
 
 ## The Debugger Promise
 
-Set the clock to 2:34 PM last Tuesday. Navigate to `/projects/website`. See exactly which tiles existed, which markers were active, what tags were assigned, what content was written. Navigate to `/projects/api`. Same moment — see that state too. Navigate anywhere. The entire hive is frozen at that instant.
+> The cross-hierarchy promise below is **design intent**, not a shipped capability — it depends on the global cross-bag clock wiring that is still outstanding (see Clock capabilities). The single-location version of every claim here works today.
 
-Find when a marker disappeared. Find when a tag was removed. Find when content changed. Find when a drone was added. The history bags hold every answer. The clock lets you ask the question.
+Set the clock to 2:34 PM last Tuesday. Navigate to `/projects/website`. See exactly which tiles existed, which markers were active, what tags were assigned, what content was written. Navigate to `/projects/api`. Same moment — see that state too. Navigate anywhere. The entire hive frozen at that instant — that is where this is headed.
 
-This is not a feature. This is the architecture working as designed — signatures, bags, append-only ops, and a timestamp that unifies them all.
+Find when a marker disappeared. Find when a tag was removed. Find when content changed. Find when a drone was added. The history bags hold every answer; the per-location cursor already lets you ask the question at any one place, and the global clock is meant to ask it everywhere at once.
+
+This is the architecture working as designed — signatures, bags, append-only layers, and a timestamp meant to unify them all.

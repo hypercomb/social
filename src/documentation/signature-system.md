@@ -26,13 +26,15 @@ Same content always produces the same signature. Different content always produc
 content bytes  →  SHA-256  →  64-char hex signature
 ```
 
-For structured data, canonicalization ensures deterministic output:
+`SignatureService.sign(buffer)` is the one chokepoint — it hashes **raw bytes**, with no canonicalization of its own. Determinism is the caller's responsibility, and the build path does NOT sort keys:
 
-```
-object  →  structuredClone  →  JSON.stringify (sorted keys)  →  TextEncoder  →  ArrayBuffer  →  SHA-256  →  signature
-```
+- **Bee / dependency artifacts** sign the raw compiled esbuild output bytes directly (`build-module.ts`).
+- **Layers** sign `JSON.stringify(layer)` (via `signJson`) — insertion order, no key sort.
+- **`PayloadCanonical`** (the `BeePayloadV1` envelope) does `structuredClone` + `JSON.stringify` with **NO** key sorting; it is a dev/inspection envelope, not the module-artifact signing path.
 
-`SignatureService.sign(buffer)` computes the hash. `SignatureStore` memoizes known signatures to avoid redundant hashing during render cycles.
+> **Do not "canonicalize" by sorting keys.** A reader who re-serializes with sorted keys computes a *different* signature and breaks every cache hit. The bytes that were signed are the only bytes that verify. Only the few hand-sorted resource writers below (and history/layer canonicalization) sort deliberately — `SignatureService.sign` never does.
+
+`SignatureStore` memoizes known signatures to avoid redundant hashing during render cycles.
 
 ### The invariant
 
@@ -92,7 +94,7 @@ You can't retrofit composition onto inline data. You can't add caching to embedd
 
 > If a field contains content that could be shared, cached, versioned, or composed — it must be a signature reference to a resource. Never store expandable content inline.
 
-A signature is a 64-character hex string. It points to a blob in the flat content bucket addressed by `<signature>`. The blob is immutable — same content always produces the same signature. Resolution is lazy — signatures remain as lightweight string pointers until explicitly expanded via `Store.getResource(sig)`.
+A signature is a 64-character hex string. It points to a blob addressed by `<signature>` — locally in the kind's typed pool (`__resources__/<sig>` for resources), on a host in the flat sig heap. The blob is immutable — same content always produces the same signature. Resolution is lazy — signatures remain as lightweight string pointers until explicitly expanded via `Store.getResource(sig)`.
 
 ---
 
@@ -101,10 +103,15 @@ A signature is a 64-character hex string. It points to a blob in the flat conten
 ### Storage
 
 ```ts
-const json = JSON.stringify(data, Object.keys(data).sort(), 0) // deterministic key order
+// A hand-written resource writer may sort keys so two callers building the
+// same object in different insertion order converge on one signature. This
+// is a CHOICE this writer makes — it is NOT what SignatureService does, and
+// it is NOT how bee/dependency/layer artifacts are signed (those hash the
+// bytes exactly as produced; see "The pipeline" above).
+const json = JSON.stringify(data, Object.keys(data).sort(), 0)
 const sig = await Store.putResource(new Blob([json]))
 // sig = "a1b2c3d4e5f6…" (64 hex chars)
-// content now lives in the bucket at <sig>=a1b2c3d4e5f6…
+// content now lives in __resources__/<sig>=a1b2c3d4e5f6…
 ```
 
 ### Reference
@@ -123,26 +130,33 @@ const data = JSON.parse(await blob.text())
 
 ### Deterministic serialization
 
-Keys must be sorted before signing. `JSON.stringify(data, Object.keys(data).sort(), 0)` ensures that two objects with the same content but different key insertion order produce the same signature. Without this, identical logical content would produce different signatures, breaking deduplication and cache hits. See [deterministic-computation.md](deterministic-computation.md) for how this extends to computation results.
+Determinism means **the same producer always emits the same bytes** — it does NOT mean "sort the keys." `SignatureService.sign` hashes whatever bytes it's handed; the build path signs compiled bytes and `JSON.stringify(layer)` in insertion order. A *resource writer that wants two differently-ordered callers to converge* can opt into `JSON.stringify(data, Object.keys(data).sort(), 0)`, but that is a property of that one writer, not a global rule — re-sorting an already-signed artifact's keys produces a different signature and breaks the cache hit. See [deterministic-computation.md](deterministic-computation.md) *(planned)* for how this extends to computation results.
 
 ---
 
 ## Where signatures appear
 
-All artifacts share **one** flat content bucket addressed by `<sig>` — the host probes by signature, never by type prefix. The signature appears in:
+Every signed artifact is one of a fixed set of **kinds** — `layer | bee | dependency | resource | content`. This `kind` discriminant is the only universal classification (these are the **Distributed Network Artifacts** of [dna.md](dna.md) — the content-addressed, merkle-versioned artifacts that compose the hive). DNA rides the existing `kind` field; there is no `dna` field, no `DnaService`, and no separate OPFS folder for it.
 
-| context | what is signed | how the signature is used |
+The **storage layout depends on where you are**:
+
+- **On a host** — a single flat heap probed by signature: `GET /<sig>` resolves any kind, no type prefix. (The `HostSync` PUT path writes into that one heap.)
+- **Locally (OPFS)** — `Store` splits artifacts into **typed pools**: `__bees__/<sig>`, `__dependencies__/<sig>`, `__layers__/<sig>`, `__resources__/<sig>`, plus the `__optimization__/` decoration substrate. The pool a sig lives in is determined by its kind. This split is what enables the **metabolism asymmetry** below (resources self-heal from hosts on render; layers/deps/bees do not).
+
+The signature appears in:
+
+| kind / context | what is signed | how the signature is used |
 |---|---|---|
-| Bee modules | Compiled JS bundle | Loaded by signature from the content bucket |
-| Dependencies | Namespace service bundle | Loaded by signature from the content bucket |
-| Resources | Static asset (image, JSON) | Loaded by signature from the content bucket |
-| Layers | Layer JSON | Resolved by signature from the content bucket |
-| Lineage paths | UTF-8 path string | Location signature for mesh subscription |
-| Sigbag markers | Marker JSON `{ layer, context?, expiresAt? }` | The marker IS the attestation; max marker = current root |
+| Bee modules (`bee`) | Raw compiled esbuild bytes | Loaded by signature from `__bees__/` (OPFS-only on render) |
+| Dependencies (`dependency`) | Raw compiled namespace bundle bytes | Loaded by signature from `__dependencies__/` (OPFS-only on render) |
+| Resources (`resource`) | Static asset (image, JSON) | Loaded by signature; self-heals from a host on render (memory → OPFS → host) |
+| Layers (`layer`) | `JSON.stringify(layer)` | Resolved by signature from `__layers__/` (OPFS-only on render) |
+| Lineage paths | UTF-8 path **segments** (domain discarded) | Location signature for a *position* (mesh subscription); root = `sign([])` = `e3b0c442…` |
+| History markers | Marker JSON `{ "layer": "<sig>", … }` | Pointer record; the bag at `__history__/<lineageSig>/` orders revisions, layer bytes live in `__layers__/<sig>`. `00000000` is an auto-minted empty `{ name }` layer; max marker = current head |
 | Thread manifests | `contentSig` | Message content blob |
-| Layer fields | `bees[]`, `layers[]`, `dependencies[]` | Bee modules, child layers, dependency bundles |
-| Deterministic computation | `authenticity` | Composition of script-sig + resource-sig |
-| Computation results | `result-sig` | Content-addressed output blob |
+| Layer fields | `bees[]`, `cells[]` (child layer sigs), `dependencies[]` | Bee modules, child layers, dependency bundles |
+| Deterministic computation *(planned — unbuilt)* | `authenticity` | Composition of script-sig + resource-sig |
+| Computation results *(planned — unbuilt)* | `result-sig` | Content-addressed output blob |
 
 ---
 
@@ -221,16 +235,20 @@ const DEFAULT_INSTRUCTIONS = [{ selector: '…', label: '…' }, …]
 const defaultSig = await Store.putResource(new Blob([JSON.stringify(defaults)]))
 ```
 
-### 5. Non-deterministic serialization
+### 5. Non-deterministic serialization within one writer
+
+A single resource writer that builds the same logical object two different ways must converge on one signature — otherwise dedup misses:
 
 ```ts
-// BREAKS COMPOSITION — different key order → different signature → broken dedup
+// MISSES DEDUP — same writer, different key order → different signature
 JSON.stringify({ b: 2, a: 1 }) // '{"b":2,"a":1}'
 JSON.stringify({ a: 1, b: 2 }) // '{"a":1,"b":2}' — same content, different signature!
 
-// COMPOSABLE — sorted keys → deterministic output
+// CONVERGES — this writer sorts so both inputs produce identical bytes
 JSON.stringify(data, Object.keys(data).sort(), 0)
 ```
+
+This is a per-writer convergence trick, **not** a universal signing rule. Never "normalize" by re-sorting an artifact that was already signed with its keys in another order (bee/dependency/layer bytes) — you'll compute a signature that doesn't match the stored one and break the cache hit. Verification rehashes the *original* bytes, not a re-sorted copy.
 
 ---
 
@@ -265,7 +283,7 @@ This is why we call it signature algebra (see [signature-algebra.md](signature-a
 | level | storage | speed | invalidation |
 |---|---|---|---|
 | In-memory | `Map<string, T>` in the service | synchronous | service lifecycle |
-| OPFS | content bucket at `<sig>` | microseconds | never (immutable content) |
+| OPFS | the kind's typed pool at `<sig>` (`__resources__/`, `__bees__/`, …) | microseconds | never (immutable content) |
 | SignatureStore | `signText()` memo | synchronous | never (deterministic) |
 
 ### Cache hit flow
@@ -295,7 +313,7 @@ When auditing the codebase for compliance:
 1. **Data structures** — does every content field use a signature reference? Flag inline data that should be a resource.
 2. **History operations** — does every `HistoryOp` use resource signatures for complex payloads? Flag inline data in `cell` fields.
 3. **localStorage** — is configuration stored as a signature pointing to OPFS, or as inline JSON? Simple flags OK; complex configs not.
-4. **Serialization determinism** — are keys sorted before signing? Flag any `JSON.stringify` → `sign()` path without key sorting.
+4. **Serialization determinism** — does each producer emit the *same bytes* for the same logical content? Flag a resource writer that builds the same object in nondeterministic key order. Do NOT flag the absence of key-sorting in general — bee/dependency/layer signing intentionally hashes bytes as-produced and must not be "fixed" to sort.
 5. **Cache patterns** — does every service implement the three-level cache? Flag re-fetching what could be cached.
 6. **Composition completeness** — can every stateful entity be captured as a signature? Flag any state that exists only as mutable inline data.
 7. **Cell-level content addressing** — are individual cells and their metadata content-addressable? Flag mutable inline cell data.
@@ -307,7 +325,8 @@ When auditing the codebase for compliance:
 - [signature-algebra.md](signature-algebra.md) — formal algebra: set operations, projections, reactive pipelines over signatures
 - [signature-node-pattern.md](signature-node-pattern.md) — plug-and-play implementation guide; copy the template, your feature is signature-addressed
 - [collapsed-compute.md](collapsed-compute.md) — network effect: signature caching eliminates redundant computation across peers
-- [deterministic-computation.md](deterministic-computation.md) — authenticity layer: composing script + resource signatures for global memoization
-- [genome-primitive.md](genome-primitive.md) — recursive Merkle root over subtrees; universal short-circuit for derived computations
+- [deterministic-computation.md](deterministic-computation.md) *(design — unbuilt)* — authenticity layer: composing script + resource signatures for global memoization
+- [genome-primitive.md](genome-primitive.md) — recursive Merkle root over subtrees. The cascade (parent re-signs over `cells[]` child sigs) is real and live; the named `genome()` hash, sorted-child formula, tag-index, and `?:` query engine are design-only (tags today live in the cell's `0000` properties file)
+- [dna.md](dna.md) — the Distributed Network Artifacts these signatures name (layer · bee · dependency · resource · content), and how they compose upward like DNA
 - [dependency-signing.md](dependency-signing.md) — single signature securing entire package hierarchy
 - [core-processor-architecture.md](core-processor-architecture.md) — where signatures fit in the runtime

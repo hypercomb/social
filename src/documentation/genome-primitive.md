@@ -1,12 +1,17 @@
 # genome primitive
 
-> **core infrastructure.** the genome is a recursive merkle root over a subtree — a single signature that captures the complete state of a branch and all its descendants. if the genome hasn't changed, nothing underneath has changed. any derived computation cached against that genome is still valid. this is how the system short-circuits tree walks and scales infinitely.
+> **status: design — not built (as of 2026-06-18).** the named genome machinery below (GenomeService, the `genome()` hash, the sorted-child formula, the tag-index/`?:` query engine, scout pre-solving) lives only in dead `hypercomb-legacy`. the **concept** is real and already load-bearing — read the anchor below.
+
+> **proposed primitive.** the genome is a recursive merkle root over a subtree — a single signature that captures the complete state of a branch and all its descendants. if the genome hasn't changed, nothing underneath has changed. any derived computation cached against that genome is still valid. this is how the system short-circuits tree walks and scales.
+
+> **the genome is already real — it just isn't named "genome".** in the live build the recursive merkle root of a subtree IS the **head layer signature** of that subtree's root location. a layer's `children[]` slot holds its child layer sigs; the build re-signs a parent whenever a child sig changes (`JSON.stringify(layer)` via `signJson` over raw bytes), so a single descendant mutation cascades to a new root sig. **genome = the DNA-of-a-subtree**, surfaced via the existing `children[]` cascade — no separate genome hash or service required. the package identity `rootLayerSig` is exactly this root genome. see [dna.md](dna.md) for the artifact view (layers/deps/bees/resources/content as immutable, content-addressed, merkle-versioned DNA).
 
 ## related critical documents
 
 - [signature-algebra.md](signature-algebra.md) — the algebra: tag functions, set operations, lineage projections
 - [collapsed-compute.md](collapsed-compute.md) — the collapse hierarchy: genomes enable level 6 (subtree-level collapse)
 - [signature-system.md](signature-system.md) — the signature-payload pair (atoms of the genome tree) and the mandatory expansion doctrine that makes genomes work
+- [dna.md](dna.md) — Distributed Network Artifacts: the content-addressed, merkle-versioned artifacts (layers, deps, bees, resources, content) the genome cascades over; the genome is the recursive merkle root of a subtree of that DNA
 
 ---
 
@@ -20,22 +25,25 @@ the genome solves this by giving **subtrees** the same property that signatures 
 
 ## definition
 
-the genome of a cell is a recursive hash of the cell's own signature and the sorted genomes of all its children.
+> **how it actually works today.** there is no separate `genome()` hash function. a location's genome is just its **head layer signature**: the layer carries a `children[]` slot of child layer sigs in **insertion / slot order** (NOT lexicographically sorted), and the build re-signs the parent layer — `JSON.stringify(layer)` via `signJson`, hashing the raw bytes — whenever any child sig changes. that re-sign IS the cascade: a single descendant mutation walks up to a new root sig.
 
 ```
-genome(leaf)   = sign(leaf.signature)
-genome(parent) = sign(concat(parent.signature, sort([genome(child₁), genome(child₂), ...])))
+# live model (children[] cascade)
+genome(location) = sign(JSON.stringify(layer))           // layer.children[] holds child layer sigs, in slot order
+                                                          // a child's sig changing ⇒ parent's bytes change ⇒ parent re-signs
 ```
 
-- **leaf cells** (no children): genome equals their content signature
-- **parent cells**: genome is the hash of their signature concatenated with the sorted genomes of all children
-- **sorting**: children's genomes are sorted lexicographically before concatenation, so the genome is independent of directory enumeration order
+- **leaf locations** (no children): the layer's `children[]` slot is empty; the layer sig still uniquely names that state
+- **parent locations**: the layer sig folds in the child sigs via the `children[]` slot, so it changes if any child changes
+- **order**: children are stored in **slot / insertion order**, not sorted — the sig is order-sensitive by design (`children[]` is the canonical layout). do NOT sort to compute it; a reader who sorts gets a different sig and breaks cache hits.
 
-a single byte change in any descendant produces a different genome at every ancestor up to root. conversely, an identical genome guarantees that the entire subtree is unchanged — every cell, every tag, every resource, every child at every depth.
+a single byte change in any descendant produces a different layer sig at every ancestor up to root. conversely, an identical root sig guarantees that the entire subtree is unchanged — every cell, every tag, every resource, every child at every depth.
 
-### formal definition
+### formal definition (design alternative — NOT the live formula)
 
-let `G: S → S` be the genome function over signature space:
+> the explicit `G: S → S` genome function below — with **sorted** child genomes and a dedicated `genome()` hash — is a **design alternative** that exists only in dead `hypercomb-legacy`. it is recorded here for the algebra; it is not what the live build computes. the live build uses the order-sensitive `children[]` cascade above.
+
+let `G: S → S` be the (legacy/design) genome function over signature space:
 
 ```
 G(s) = sign(s)                                           if children(s) = ∅
@@ -50,6 +58,8 @@ properties:
 ---
 
 ## the genome cache
+
+> **design — not built.** `GenomePayload`, `computed[]`, the separate genome-sig→payload resource, and the `TagIndex` shape below are unbuilt (legacy-only). today the "genome" is just the head layer sig; tags live in the cell's `0000` properties file via `TagRegistry` (`hypercomb-shared/core/tag-registry.ts`), not in a genome-keyed tag index.
 
 genomes are stored as signature-addressed resources, like everything else.
 
@@ -131,7 +141,9 @@ when a child signals a change, the parent sets `genome = null` and propagates up
 
 ## tag query syntax
 
-the `?` prefix activates tag query mode in the command line. the query runs against the tag index cached under the current subtree's genome.
+> **proposed UX — not built.** the `?:` query engine and the genome-keyed tag index do not exist in the live build. today tags are stored in the cell's `0000` properties file (master list in `__resources__/`, sig pointer in OPFS root `0000`) and managed by `TagRegistry` (`hypercomb-shared/core/tag-registry.ts`); there is no `?:` command-line mode yet. the syntax below is the intended surface, not current behavior.
+
+the `?` prefix would activate tag query mode in the command line. the query would run against the tag index cached under the current subtree's genome.
 
 | syntax | meaning | algebra |
 |--------|---------|---------|
@@ -205,7 +217,9 @@ this is the standard merkle sync algorithm. it applies directly because genomes 
 
 ## implementation: genome worker
 
-the genome computation runs in a dedicated worker bee to avoid blocking the UI thread during tree walks. the worker is a service registered in IoC.
+> **design — not built.** none of the interfaces in this section exist in the live build. there is no `GenomeService`, no `@hypercomb.social/Genome` IoC registration, no `genome()` / `tagIndex()` / `buildTagIndex()` / `invalidate()` / `query()` methods, and no `TagExpression` type — they survive only in dead `hypercomb-legacy`. the live genome is the head layer sig, cascaded through `children[]`; there is no dedicated worker.
+
+the genome computation would run in a dedicated worker bee to avoid blocking the UI thread during tree walks. the worker would be a service registered in IoC.
 
 ### GenomeService
 
@@ -257,6 +271,8 @@ the worker listens to these effects:
 ---
 
 ## scout integration: pre-solving genomes
+
+> **future design — not built.** scouts, the `/scout` queen, genome pre-solving, and genome-as-computation-receipt sharing are unbuilt. the computation-receipt model and the nostr receipt kind (`29011`) it leans on **do** exist in the live build — see `ComputationService` / `computation.drone.ts` (`@diamondcoreprocessor.com/ComputationService`) — but nothing records or shares **genome** receipts today. treat this whole section as the intended pattern, not current behavior.
 
 the genome is only useful if it's already computed when you need it. waiting until query time to walk the tree defeats the purpose. this is where **scouts** come in.
 
@@ -318,7 +334,7 @@ if (receipt) {
 
 ### swarm sharing
 
-because computation receipts are signature-addressed and sharable via nostr relays (kind 29011), genome results participate in [collapsed compute](collapsed-compute.md):
+because computation receipts are signature-addressed and (once genome receipts exist) sharable via nostr relays (kind `29011`, the live computation-receipt kind), genome results would participate in [collapsed compute](collapsed-compute.md). note the mesh is currently **plaintext json** — the receipt sigs are visible on the relay; AEAD is future work, so don't assume confidentiality:
 
 ```
 peer A solves genome abc123... → records receipt → publishes to mesh

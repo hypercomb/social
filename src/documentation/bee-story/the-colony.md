@@ -91,6 +91,8 @@ hypercomb-dev            the nursery comb. the development shell.
 
 dependencies flow inward, never outward. the brood chamber does not depend on honey. core does not depend on essentials. the innermost layer is the most protected, the most stable, and the most essential.
 
+a deployed *content* package — a shared cell tree, not a code tier — has a different kind of identity. it is named by its `rootLayerSig`: the merkle root of its layer tree, where each parent layer's signature is computed over its child layer sigs (its `cells[]`). this is the genome root. change any descendant and the cascade re-signs every layer up to the root, so the root sig is the whole subtree in one address. sidecar metadata (label, previous, at) rides alongside in `manifest.json` and changes those bytes but never the signature — so update detection is an O(1) compare of the installed root sig against the published one.
+
 ---
 
 ## what the colony is not
@@ -99,7 +101,7 @@ the colony is not a company. there is no ceo bee. there is no product roadmap ph
 
 the colony is not a platform. it does not extract value from its members. it does not sell attention. it does not optimize for engagement.
 
-the colony is not a service. it does not promise uptime. it does not store your data. it does not remember you between visits unless you choose to be remembered.
+the colony is not a service. it does not promise uptime. it keeps no surveillance memory of you — no account, no profile, no cross-visit identity tracking. but make no mistake about your own work: locally, everything you author is content-addressed and versioned in OPFS by default — the `__history__` marker chains and the layer/resource/bee pools persist durably and are yours. nothing crosses the network unless you publish. the colony does not remember *you*; your hive remembers *everything you made*.
 
 the colony is a living system. it exists because its members are present and contributing. when they stop, it rests. when they return, it resumes. this is the only contract.
 

@@ -12,32 +12,33 @@ The complete reference. Every page is also reachable through `/help` in the app 
 
 ## Concepts
 
-- [dna.md](dna.md) — Path capsules: optional publishing with cryptographic commitment
 - [emergence.md](emergence.md) — Brooding and eclosion — the visual lifecycle of tiles
 - [simple-naming-initiative.md](simple-naming-initiative.md) — Verb-first, consistent, human-readable naming
 
 ## Primitives
 
+- [dna.md](dna.md) — Distributed Network Artifacts: the content-addressed, merkle-versioned substrate — layers, dependencies, bees, resources, content
 - [signature-system.md](signature-system.md) — The primitive and its expansion doctrine — every fragment is signature-addressed
 - [signature-algebra.md](signature-algebra.md) — Formal algebra: set operations, projections, reactive pipelines over signatures
 - [signature-node-pattern.md](signature-node-pattern.md) — Plug-and-play implementation template for signature-addressed features
-- [genome-primitive.md](genome-primitive.md) — Recursive Merkle root over subtrees — universal short-circuit for derived computations
+- [genome-primitive.md](genome-primitive.md) — *(design — concept only)* Recursive Merkle root over subtrees — universal short-circuit for derived computations
 - [collapsed-compute.md](collapsed-compute.md) — Network effect: memoized signatures eliminate redundant computation
 - [deterministic-computation.md](deterministic-computation.md) — Authenticity layer: script + resource → deterministic result
-- [history-sigbag-as-root.md](history-sigbag-as-root.md) — History sigbag as root: store, discovery, self-heal, and integrity
+- [history-sigbag-as-root.md](history-sigbag-as-root.md) — *(design — aspirational)* History sigbag as root: store, discovery, self-heal, and integrity
 - [llm-primitive.md](llm-primitive.md) — Hypergraph primitive connecting signatures through LLM command transforms
 
 ## Architecture
 
 - [core-processor-architecture.md](core-processor-architecture.md) — `@hypercomb/core`: zero-dependency foundation and build pipeline
 - [network-architecture.md](network-architecture.md) — Canonical reference: participants, hosts, installers, and content flow
-- [install-push-only.md](install-push-only.md) — Push-only install model: Hypercomb load is inert, DCP pushes updates, labels are branches
+- [install-push-only.md](install-push-only.md) — *(design — aspirational)* Push-only install model: Hypercomb load is inert, DCP pushes updates, labels are branches
 - [drone-installer-contract.md](drone-installer-contract.md) — The contract a drone follows so the installer can disable it cleanly
 
 ## Protocols
 
 - [protocol-spec.md](protocol-spec.md) — Decentralized presence-based navigation protocol with Nostr relay transport
 - [byte-protocol.md](byte-protocol.md) — One-byte wire format for hex grid movement
+- [trail-capsule.md](trail-capsule.md) — *(design — not built)* Replayable navigation route, optional publishing (formerly "DNA")
 - [pheromone-protocol.md](pheromone-protocol.md) — Ambient signal annotations on content, signature-addressed
 - [pollination-protocol.md](pollination-protocol.md) — Cross-domain contributions via signed pollen packets
 - [dependency-signing.md](dependency-signing.md) — A single signature securing an entire package hierarchy

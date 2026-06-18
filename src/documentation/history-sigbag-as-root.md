@@ -1,9 +1,26 @@
 # History sigbag as root — store, discovery, self-heal, and integrity
 
+> **status: design — not built (as of 2026-06-18).** The flat-root,
+> no-`__history__` sigbag layout described here is the design target;
+> durability, discovery, and self-heal "fall out" of it once built.
+
 > Status: design-affirmed 2026-06-05 (session conclusions). Not yet built —
 > see "Buildables" at the end. This doc unifies and in one place supersedes
 > parts of `domain-as-identity` and refines `history-is-the-deploy`,
 > `universal-history-plan`, `merkle-layer-model`, and `uniform-paradigm`.
+>
+> **What the current build does instead (as of 2026-06-18):** history lives
+> in per-lineage bags at `__history__/<lineageSig>/` whose markers (`{ layer:
+> <sig> }` pointers) reference layer bytes in a flat `__layers__/<sig>` pool.
+> The `00000000` marker is an auto-minted **empty** `{ name }` layer. "What's
+> here now" reads the head layer's slots (`currentLayerAt` → `getLayerBySig`,
+> children from the `children[]` slot) — **not** op-replay from zero. The
+> flat-root collapse below (no `__history__`, sigbags at the root) is the
+> direction, not today's on-disk shape. These are **Distributed Network
+> Artifacts** (the merkle-versioned, content-addressed assets — layers, deps,
+> bees, resources, content; see `dna.md`); the genetic vocabulary in this doc
+> is documentation-only and rides the existing `kind` discriminant, never a
+> `dna` field or service.
 
 ## Thesis in one line
 
@@ -37,19 +54,66 @@ self-organizing layers.
 
 ---
 
+## 1a. The DNA ladder (documentation-only framing)
+
+These artifacts are **Distributed Network Artifacts** — the content-addressed,
+merkle-versioned assets that compose the hive (layers, dependencies, bees,
+resources, content; canonical page: `dna.md`). The substrate above is exactly
+the genetic-ladder picture, and this doc is the prime anchor for its rungs:
+
+- **nucleotide = the signature.** The single immutable letter. `sig =
+  sha256(bytes)`; the address *is* the content. Every other rung is built only
+  from sigs — the signature is the only universal primitive.
+- **bond = a `children[]` reference.** A sig sitting in a parent's slot pairs
+  parent to child. Following bonds *down* unfolds the structure (§1); the
+  bonds, not any external index, *are* the hierarchy.
+- **gene = a layer.** A closed unit of bonds — one node's canonical slots
+  (`children[]`, `properties`, …). Re-sign a gene's bytes and you get a new
+  gene; the old one stays valid forever (immutability).
+- **chromosome / heredity = the lineage (sigbag).** The append-only `000x`
+  marker chain is the line of descent for one position: each new max is the
+  next generation, the prior maxes its ancestry (§2–§3).
+- **genome = the recursive merkle root over a subtree** — every gene's sig
+  rolled up via the `children[]` cascade (parent = f(child sigs)) so a mutation
+  at depth N re-signs its spine to the root (§3). The *concept* is live (the
+  cascade is real); the named `GenomeService` / `genome()` hash / `?:`-tag
+  query engine are **design-only** (they live in dead `hypercomb-legacy`).
+  Tags today live in the cell's `0000` properties file (`tag-registry.ts`).
+
+> **Strictly vocabulary.** There is no `dna` field, no `DnaService`, and no new
+> OPFS folder. The genetic ladder is a *reading* of the existing
+> signature-and-`kind` substrate, nothing more — DNA rides the existing `kind`
+> discriminant. (Not to be confused with the **trail capsule** — the renamed
+> 1-byte navigation/route stream, once mislabeled "DNA"; see
+> `trail-capsule.md`. That is a route, not an artifact.)
+
+---
+
 ## 2. The sigbag IS the root (skip `__roots__`)
 
 Every lineage keeps a linear, append-only **sigbag** — a folder of `000x`
-markers. There is **no `__history__` folder** (and no `__roots__`): history is
-not a separate place, it *is* what a sigbag is, and the sigbags sit at the
-root directly.
+markers. In the **design target**, there is **no `__history__` folder** (and
+no `__roots__`): history is not a separate place, it *is* what a sigbag is, and
+the sigbags sit at the root directly.
+
+> **Current build vs. target (as of 2026-06-18):** today the bags live under
+> `__history__/<lineageSig>/` and the layer bytes a marker points at live in a
+> flat `__layers__/<sig>` pool — the marker is a `{ layer: <sig> }` pointer,
+> not the layer itself. The flat-root collapse (sigbags at the root, no
+> `__history__`) is the direction this doc argues for; the markers'
+> position-named, append-only semantics already hold.
 
 ```
-root/
+root/                          # design target (not built)
   <lineage>/0000
   <lineage>/0001
   <lineage>/000x   <- max-x = HEAD = current root
   ...
+
+# current build
+__history__/<lineageSig>/00000000   # auto-minted EMPTY { name } layer
+__history__/<lineageSig>/000000xx   # { layer: <sig> } pointers
+__layers__/<sig>                    # the layer bytes the markers point at
 ```
 
 Each marker is a tiny record `{ layer: <sig>, ... }` pointing at the layer
@@ -159,8 +223,9 @@ is a bug.
 - **Where verification lives:** at the **edges only** —
   - *derive at save* (local authoring computes the sig from the bytes), and
   - *verify at ingress* (external bytes that *claim* a sig: the broker's
-    `#verifyBytes`/`sha256Hex`, the SW host-fallback `sha256Hex`, the relay
-    PUT check).
+    `#verifyBytes`/`sha256Hex` in `content-broker.drone.ts`, the host-fallback
+    resolve through `Store.#fetchResourceFromHost` → broker `#fetchOverHttp`
+    (sha256-verified, write-through), and the relay PUT check).
 - **No read-side checks.** Once stored, the bytes are valid by construction.
   Re-hashing on the read/render/expand path is a **redundant bug** — it
   distrusts a store the contract already guarantees, and costs a hash on the
@@ -168,9 +233,11 @@ is a bug.
   (immutability makes one check eternal).
 
 > **Audit (2026-06-05):** the client interior is clean. Verification appears
-> *only* at save (`store.ts` `SignatureService.sign`) and ingress (broker
-> `#verifyBytes`/`sha256Hex`, SW host-fallback `sha256Hex`). `show-cell`, the
-> preloader, the store read path, and the SW OPFS-serve path have **zero**
+> *only* at save (`store.ts` `SignatureService.sign`) and ingress — the
+> broker's `#verifyBytes`/`sha256Hex` in `content-broker.drone.ts`, reached on
+> a cold miss via `Store.#fetchResourceFromHost` → broker `#fetchOverHttp`
+> (the HTTP-direct `GET /<sig>` resolve), plus the relay PUT check. `show-cell`,
+> the preloader, the store read path, and the OPFS-serve path have **zero**
 > verify. One cosmetic finding: `dependency-loader#verifyAndImport` does not
 > actually verify (it just `import()`s) — rename to `#import` so the name
 > stops claiming a check it (correctly) doesn't perform.
@@ -202,7 +269,9 @@ sig and breaks every reference.
   round-trip, *nothing re-serialized en route.* "Copy, don't recompute."
 - **True for every surface:** `__layers__`, `__bees__`, `__dependencies__`,
   `__resources__` (sig-named, by-hash pools) and the per-lineage sigbags
-  (position-named `000x` bags at the root).
+  (position-named `000x` bags). *Replication* (adopt / install / sync /
+  host-push) is byte-faithful across all of them — but **self-heal on the
+  render path is not uniform** (see §7's metabolism asymmetry).
 - **Two trust gates on ingress:** content verified by hash; sigbags accepted
   by write-auth (no content check — there's no sig name to check).
 
@@ -226,6 +295,17 @@ entrance (sigbag max) -> walk the closure (via children[] sigs)
 - **"Heal what it can"** is the honest bound: **heal coverage == entrance
   coverage.** Have a graph's root sig → walk and re-acquire it. Missing it →
   its bytes may sit in the pool but are dead weight (unwalkable).
+- **Metabolism asymmetry — surfaces share DNA but not metabolism.** The
+  entrance-walk closure is an *adopt / install / sync* operation, not a
+  render-time guarantee. **On the render path, only RESOURCES self-heal**:
+  `Store.getResource` resolves memory → OPFS → host (via `ContentBroker`),
+  sha256-verifies, writes through, and negative-caches a miss for ~60s.
+  **`__layers__`, `__dependencies__`, and `__bees__` are OPFS-only on render**
+  — a missing layer/dep/bee does *not* stream in mid-render; it heals only via
+  the explicit adopt/install/sync closure-walk above. So the same
+  content-addressed artifacts (same DNA — see `dna.md`) carry a *different
+  metabolism* depending on kind: resources are reflexively self-healing,
+  structure (layers/deps/bees) is acquired deliberately.
 - The **top lineage's max** walks the *entire current tree* — the cascade
   guarantees it references every current child sig, so walking down (via the
   layers' `children[]`, not the sigbags) resolves the whole closure. The
@@ -278,6 +358,15 @@ The mesh is a **thin signal layer — tiny sigs only**; everything heavy is
 pull-based, on-demand, deduped, and coalesced. (This is the lightweight-mesh
 protocol: layer-sigs on the mesh, bytes over HTTP.)
 
+> **Scope of "sigs only" (as of 2026-06-18):** true for the **broker** mesh —
+> the federation ask/resolve flow carries layer/resource *sigs*, and bytes are
+> pulled over HTTP-direct (`GET /<sig>`). The **swarm-preview** path is the
+> exception: it still relays small image bytes inline as base64 (`swarm.drone.ts`
+> kind `30201`, capped at `MAX_RESOURCE_BYTES` = 256 KB) so peers can preview a
+> tile without a separate fetch. So "sigs only" describes the broker, not every
+> wire event. The mesh is also currently **plaintext JSON** (the x-tag sig is
+> visible); AEAD/confidentiality is future work.
+
 | Risk | Antidote |
 |---|---|
 | Cascade announces N markers per change | **Announce the root, not the cascade** — one sig per change; subscribers walk down and pull what they lack |
@@ -302,7 +391,7 @@ whole game.
 | `history-is-the-deploy` | **Unified.** The history bag IS the sigbag; max seq = HEAD = current root. This doc adds: the max is also the *entrance* and the *attestation*, so there is no separate `__roots__`. |
 | `merkle-layer-model`, `uniform-paradigm`, `one-layer-per-change` | **Refined.** Per-lineage roots, fractal; one marker per *affected lineage*; segment-count lineages per change. |
 | `universal-history-plan` | **Realized.** The global time clock is the 2D-grid back-link (sub-node + T → owning root). |
-| `flat-layer-pool`, `resource-streaming-migration`, `public-navigation-lineage-filter`, `host-sync-receipts` | **Consistent.** Flat sig pools; OPFS-as-cache with host fallback; mesh-is-layer-sigs-only; one-way push with receipts. |
+| `flat-layer-pool`, `resource-streaming-migration`, `public-navigation-lineage-filter`, `host-sync-receipts` | **Consistent.** Flat sig pools; OPFS-as-cache with host fallback (resources only — layers/deps/bees are OPFS-only on render); broker mesh is layer-sigs-only (the swarm-preview path still relays ≤256 KB image bytes, kind `30201`); one-way push with receipts. |
 
 ---
 

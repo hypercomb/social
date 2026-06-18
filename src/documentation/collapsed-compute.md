@@ -7,6 +7,8 @@
 - [signature-system.md](signature-system.md) — The primitive and the mandatory expansion doctrine: content IS identity; every fragment must be signature-addressed
 - [signature-algebra.md](signature-algebra.md) — The algebra: composing, querying, and projecting over signatures
 - [deterministic-computation.md](deterministic-computation.md) — Authenticity: script + resource → deterministic result
+- [dna.md](dna.md) — Distributed Network Artifacts: the content-addressed, merkle-versioned layers, dependencies, bees, resources, and content that get collapsed here. The signature IS the address; artifacts compose upward so mutations cascade to root.
+- [trail-capsule.md](trail-capsule.md) — The trail capsule (formerly "DNA"): the 1-byte navigation/route stream. A *different* concept — not to be confused with the artifacts above.
 
 ---
 
@@ -76,9 +78,9 @@ manifest_sig = sign(JSON.stringify(manifest))
 // They don't need to discover, collect, or assemble the parts
 ```
 
-### Level 3: Computation-level collapse
+### Level 3: Computation-level collapse *(design — not built as of 2026-06-18)*
 
-A deterministic computation (script + resource → result) produces an `authenticity` signature and a `result-sig`. The result is cached by authenticity.
+A deterministic computation (script + resource → result) produces an `authenticity` signature and a `result-sig`. The result is cached by authenticity. This authenticity→result memoization is a planned mechanism; today the build collapses Level 1 (fragments) and Level 2 (manifest compositions) only.
 
 ```
 authenticity = sign(concat(script_sig, resource_sig))
@@ -87,24 +89,40 @@ result_sig = sign(execute(script, resource))
 // Anyone with the same (script, resource) pair skips execution entirely
 ```
 
-### Level 4: Superposition-level collapse
+### Level 4: Superposition-level collapse *(design — `sort()` formula not built)*
 
 An arbitrary combination of fragments, compositions, and computation results — a "superposition" — is itself a signature.
 
 ```
+// design sketch (NOT the build's formula):
 superposition = sign(concat(sort([sig_A, sig_B, manifest_sig, result_sig])))
 // This captures the ENTIRE state of a complex multi-part system
 // Share one signature → recipient gets everything
 ```
 
+The `sort()`-then-hash formula above is an illustrative sketch, **not** how the
+system composes today. Real composition is a layer re-sign over an
+**insertion-order** `children[]` (named `cells` in the build's layer JSON) — the
+parent layer signs `JSON.stringify({ name, cells, bees, dependencies })` with the
+child sigs in their authored order, no sorting. Two trees that differ only in
+child order are *different* layers with *different* signatures. The merkle root
+that names a package is exactly this insertion-order re-sign cascaded to the top
+(`rootLayerSig`); see Level 2 and "Vertical composition" below.
+
 ### Level 5: Temporal collapse
 
-A snapshot of the system at time T is the set of all active signatures at that timestamp. This is derivable from history (replay ops up to T). The snapshot itself can be signed and shared.
+A snapshot of the system at time T is just the layer that was HEAD at that
+timestamp — and a layer already *is* a signed merkle root. History is a chain of
+markers (`{ layer: <sig> }` pointers) in `__history__/<lineageSig>/`; "what's here
+now" is **not** an op-replay from zero but a direct read of the head layer's slots
+(`currentLayerAt` → `getLayerBySig`, children from the `children[]`/`cells` slot).
+So time-travel to T is "load the layer the marker at T points at" — no replay, no
+re-aggregation.
 
 ```
-snapshot_at_T = sign(concat(sort(all_active_sigs_at_T)))
-// Anyone who receives this signature can reconstruct the exact system state at time T
-// No need to replay history — the collapsed result is the snapshot
+snapshot_at_T = the layer sig the history marker at T points to
+// Anyone who receives this signature loads that layer → exact state at T
+// (The signed layer root already subsumes its subtree; nothing to recombine.)
 ```
 
 ---
@@ -114,7 +132,9 @@ snapshot_at_T = sign(concat(sort(all_active_sigs_at_T)))
 Composed fragments are infinitely scalable because they compose on **any plane**:
 
 ### Horizontal composition (across features)
-Different features produce different signed resources. Compose them:
+Different features produce different signed resources. Compose them (the `sort()`
+below is illustrative — the build composes by re-signing an insertion-order
+`children[]`/`cells` array, never a sorted one):
 ```
 app_state = sign(concat(sort([
   instruction_settings_sig,
@@ -125,11 +145,20 @@ app_state = sign(concat(sort([
 ```
 
 ### Vertical composition (across layers)
-Layers compose into packages, packages into manifests, manifests into releases:
+Layers compose upward into a single merkle root. A leaf layer's sig folds into its
+parent's `cells[]`, the parent re-signs, and the cascade continues to the root:
 ```
-layer → package → manifest → release
-Each level is a signature that subsumes the signatures below it
+child layer sig → parent layer sig → … → rootLayerSig
+Each level re-signs over its insertion-order child sigs (no sorting)
 ```
+The **package's identity IS its `rootLayerSig`** — there is no separate "package
+sig", "manifest sig", or "release sig" tier above it. `manifest.json` is a
+*discovery* file: a `packages` map **keyed by `rootLayerSig`**, whose entry lists
+the package's layer/bee/dependency sig arrays. The `label`, `previous`, and `at`
+fields in that entry are **sidecar metadata** — they change `manifest.json` bytes
+but never `rootLayerSig`, so renaming or re-stamping a package never redefines it.
+Update detection is therefore an O(1) root-sig compare (`installedSig === rootSig`),
+not an HTTP 304 / etag round-trip.
 
 ### Temporal composition (across time)
 History ops are signatures pointing at resource signatures. A time range is a composition:
@@ -156,10 +185,10 @@ Nostr relays gossip signatures. A peer discovers new signatures and caches the r
 |------|-----------------|---------------|
 | **Module loading** | Fetch, compile, instantiate | Look up signature → already in OPFS |
 | **Layout computation** | Calculate positions for N tiles | Look up layout_sig → cached result |
-| **AI computation** | Send to LLM, wait for response | Look up authenticity → cached result |
+| **AI computation** *(design — not built)* | Send to LLM, wait for response | Look up authenticity → cached result |
 | **Instruction rendering** | Collect from all bees, build manifest | Look up manifest_sig → cached manifest |
 | **Settings application** | Parse, validate, apply | Look up settings_sig → cached settings |
-| **History replay** | Replay N operations sequentially | Look up snapshot_sig → materialized state |
+| **History replay** | Replay N operations sequentially | Read head layer's slots → state is already materialized |
 | **Sharing** | Package, serialize, transmit, deserialize | Share one signature → peer resolves it |
 | **Verification** | Re-hash and compare | Signature IS the verification |
 
@@ -187,9 +216,9 @@ For collapsed compute to work, every part of the system must follow the [Signatu
 
 1. **Every output must be signed.** If a computation produces a result, `sign()` it and store it as a resource.
 2. **Every input must be signature-referenced.** Compositions must reference parts by signature, not inline data. Otherwise the composition signature is meaningless.
-3. **Deterministic serialization.** Sort keys before signing. Same logical content must produce the same signature.
+3. **Deterministic serialization.** Sign the same canonical bytes every time. Same logical content must produce the same signature. Note: the build does **not** sort object keys — module artifacts sign their literal bytes. Bees and dependencies sign the **raw compiled esbuild output**; layers sign `JSON.stringify(layer)` via `signJson` (insertion order, no key reordering); `PayloadCanonical` does `structuredClone` + `JSON.stringify` with **no** key sorting. A reader who "helpfully" sorts keys before hashing computes a *different* signature and breaks every cache hit. The rule is byte-for-byte reproducibility, not canonical key ordering.
 4. **Lazy expansion.** Don't eagerly resolve signatures. Hold them as lightweight pointers until the content is actually needed.
-5. **Three-level cache.** In-memory → OPFS → SignatureStore. Never re-compute what's already cached.
+5. **Cascade the resource cache.** `Store.getResource` walks memory → OPFS → host (`ContentBroker.#fetchOverHttp`, sha256-verified, write-through, with a 60s negative cache). This self-healing cascade applies to **resources only** — layers, dependencies, and bees are OPFS-only on the render path and heal only via adopt/install/sync. `SignatureStore` is **not** a cache tier: it is a trust allowlist (`isTrusted(sig)`) populated at install time. Never re-compute what's already cached.
 6. **Publish results.** When a computation is done, publish the `authenticity → result-sig` mapping so others can benefit.
 
 **Breaking any of these breaks the collapse chain.** Inline data can't be looked up by signature. Non-deterministic serialization produces false cache misses. Eager expansion does unnecessary work. Missing cache levels force redundant I/O.
