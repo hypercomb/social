@@ -1017,6 +1017,17 @@ export class HomeComponent implements OnDestroy {
     return this.#countUpgraded(section.items)
   }
 
+  /** True while a package-update REVIEW is active for this group — any of its
+   *  sections still carries change-delta items awaiting opt-in. Revision
+   *  RESTORE (browsing older versions, switching the active root) is
+   *  SUPPRESSED in this state: you finish reviewing/opting into the update
+   *  first. The two are mutually exclusive — "you can restore revisions, but
+   *  not during an upgrade." Restore returns the moment the delta is cleared
+   *  (every changed item opted in or navigated away). */
+  groupHasUpgrade(group: DomainGroup): boolean {
+    return group.sections.some(s => this.#countUpgraded(s.items) > 0)
+  }
+
   /** Opt in to ALL of this section's changed items at once: enable every
    *  freshly-upgraded node (ONE broadcast → one web resync that streams them
    *  in), clear their highlight, and drive the logical recompute + registry
