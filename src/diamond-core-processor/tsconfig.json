@@ -7,7 +7,7 @@
   "compilerOptions": {
     "target": "ES2022",
     "module": "preserve",
-
+ 
     "strict": true,
     "noImplicitOverride": true,
     "noPropertyAccessFromIndexSignature": true,
