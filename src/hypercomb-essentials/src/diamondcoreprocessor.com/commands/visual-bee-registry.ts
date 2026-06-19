@@ -142,6 +142,18 @@ export type VisualBeeDescriptor = {
   readonly descriptionKey?: string
 
   /**
+   * Whether this feature CASCADES to a subtree. When a cascading feature is
+   * declared on a container, it applies to every descendant (top-down) —
+   * like the typed file dropbox. The features panel uses this to report a
+   * feature's ORIGIN on a child tile: a cascading feature found on an
+   * ancestor is shown as "cascaded from <ancestor>", whereas a feature in
+   * the tile's own slot is "direct". Default (absent / false) = node-local:
+   * an alternate render that lives only on the node it was declared on (e.g.
+   * a website page), never inherited by descendants.
+   */
+  readonly cascades?: boolean
+
+  /**
    * IoC key of the QueenBee that handles this view's slash command.
    * Used by the adoption-icon click handler to dispatch the bee for the
    * clicked cell (`queen.invoke(args)`). Optional: if absent, the icon

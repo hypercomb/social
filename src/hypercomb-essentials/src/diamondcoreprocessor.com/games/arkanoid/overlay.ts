@@ -635,7 +635,12 @@ export class ArkanoidOverlay {
   #onPointerDown = (e: PointerEvent): void => {
     e.preventDefault()
     if (this.#mode === 'play') {
-      if (e.button === 2) { this.#engine?.fireRocket(); return }   // right-click = missile
+      const eng = this.#engine
+      if (eng && eng.pinballTimer > 0) {                    // pinball: mouse buttons ARE the flippers
+        if (e.button === 2) eng.flipRight(true); else eng.flipLeft(true)
+        return
+      }
+      if (e.button === 2) { eng?.fireRocket(); return }     // right-click = missile
       this.#requestLock()                                   // capture + hide the cursor
       if (!this.#locked) {                                  // lock is async — place the bat this once
         const x = this.#worldXFromEvent(e)
@@ -652,7 +657,11 @@ export class ArkanoidOverlay {
     }
   }
 
-  #onPointerUp = (): void => { this.#painting = false }
+  #onPointerUp = (e: PointerEvent): void => {
+    this.#painting = false
+    const eng = this.#engine                                // release the flipper (safe in any mode)
+    if (eng) { if (e.button === 2) eng.flipRight(false); else eng.flipLeft(false) }
+  }
 
   #paintAt(cell: { col: number; row: number }): void {
     if (cell.col === this.#lastCell.col && cell.row === this.#lastCell.row) return

@@ -9,7 +9,11 @@
   >
     <header class="features-header">
       <span class="features-title">{{ 'features.viewer.title' | t }}</span>
-      <button class="features-clear" type="button" (click)="clearWants()">{{ 'features.clear' | t }}</button>
+      @if (likedCount() > 0) {
+        <button class="features-clear" type="button" (click)="clearLikes()">
+          {{ 'features.clear' | t }} · {{ likedCount() }}
+        </button>
+      }
       <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'features.close' | t">×</button>
     </header>
 
@@ -23,28 +27,88 @@
               <span class="fgroup-cell" [title]="group.cell">{{ group.cell }}</span>
               <button class="fgroup-remove" type="button" (click)="removeGroup(group.cell)" [attr.aria-label]="'features.remove' | t">×</button>
             </header>
-            @if (group.features.length === 0) {
-              <p class="fgroup-none">{{ 'features.none' | t }}</p>
+
+            <!-- ── On this layer: features the tile already has ── -->
+            <div class="section-head">
+              <span class="section-label">{{ 'features.section.applied' | t }}</span>
+              <span class="section-count">{{ group.applied.length }}</span>
+            </div>
+            @if (group.applied.length === 0) {
+              <p class="section-empty">{{ 'features.applied.empty' | t }}</p>
             } @else {
               <ul class="features-list">
-                @for (feat of group.features; track feat.kind) {
-                  <li class="features-row" [class.wanted]="isWanted(group, feat)">
+                @for (feat of group.applied; track feat.kind) {
+                  <li class="features-row" [class.liked]="isLiked(group, feat)">
+                    <button
+                      class="like-star"
+                      type="button"
+                      [class.on]="isLiked(group, feat)"
+                      (click)="toggleLike(group, feat)"
+                      [attr.aria-pressed]="isLiked(group, feat)"
+                      [attr.aria-label]="(isLiked(group, feat) ? 'features.liked' : 'features.like') | t"
+                      [attr.title]="(installable(feat) ? 'features.like.hint' : 'features.local.hint') | t"
+                    >{{ isLiked(group, feat) ? '★' : '☆' }}</button>
                     <div class="feature-meta">
                       <span class="feature-name">{{ feat.label }}</span>
+                      <!-- Origin: direct on the node, or cascaded from a parent. -->
+                      <span class="feature-origin" [class.cascade]="feat.origin === 'cascade'">
+                        @if (feat.origin === 'cascade') {
+                          @if (feat.originCell) {
+                            {{ 'features.origin.cascade' | t: { cell: feat.originCell } }}
+                          } @else {
+                            {{ 'features.origin.cascade.root' | t }}
+                          }
+                        } @else {
+                          {{ 'features.origin.direct' | t }}
+                          @if (feat.cascades) {
+                            <span class="origin-flow">{{ 'features.origin.cascades.down' | t }}</span>
+                          }
+                        }
+                      </span>
                       <span class="feature-kind" [title]="feat.kind">{{ feat.kind }}</span>
                       @if (feat.description) {
                         <span class="feature-desc">{{ feat.description }}</span>
                       }
                     </div>
+                  </li>
+                }
+              </ul>
+            }
+
+            <!-- ── Available to add: features this layer doesn't have yet ── -->
+            <div class="section-head">
+              <span class="section-label">{{ 'features.section.available' | t }}</span>
+              <span class="section-count">{{ group.available.length }}</span>
+            </div>
+            @if (group.available.length === 0) {
+              <p class="section-empty">{{ 'features.available.empty' | t }}</p>
+            } @else {
+              <ul class="features-list">
+                @for (feat of group.available; track feat.kind) {
+                  <li class="features-row available" [class.liked]="isLiked(group, feat)">
                     <button
-                      class="feature-want"
+                      class="like-star"
                       type="button"
-                      [class.on]="isWanted(group, feat)"
-                      [class.metaonly]="!installable(feat)"
-                      (click)="toggleWant(group, feat)"
-                      [attr.aria-pressed]="isWanted(group, feat)"
-                      [attr.title]="(installable(feat) ? 'features.want.hint' : 'features.local.hint') | t"
-                    >{{ (isWanted(group, feat) ? 'features.wanted' : 'features.want') | t }}</button>
+                      [class.on]="isLiked(group, feat)"
+                      (click)="toggleLike(group, feat)"
+                      [attr.aria-pressed]="isLiked(group, feat)"
+                      [attr.aria-label]="(isLiked(group, feat) ? 'features.liked' : 'features.like') | t"
+                      [attr.title]="'features.like.hint' | t"
+                    >{{ isLiked(group, feat) ? '★' : '☆' }}</button>
+                    <div class="feature-meta">
+                      <span class="feature-name">
+                        {{ feat.label }}
+                        @if (feat.slashCommand) {
+                          <code class="feature-cmd">{{ feat.slashCommand }}</code>
+                        }
+                        @if (feat.cascades) {
+                          <span class="avail-flow" [attr.title]="'features.origin.cascades.down' | t">⤵</span>
+                        }
+                      </span>
+                      @if (feat.description) {
+                        <span class="feature-desc">{{ feat.description }}</span>
+                      }
+                    </div>
                   </li>
                 }
               </ul>
@@ -52,7 +116,13 @@
           </section>
         }
       </div>
-      <footer class="features-foot">{{ 'features.staged.hint' | t }}</footer>
+      <footer class="features-foot">
+        @if (likedCount() > 0) {
+          {{ 'features.liked.hint' | t: { count: likedCount() } }}
+        } @else {
+          {{ 'features.staged.hint' | t }}
+        }
+      </footer>
     }
   </aside>
 }
