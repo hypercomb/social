@@ -7,7 +7,8 @@
     <div class="notes-strip cv2-panel mode-rows" role="region" [attr.aria-label]="'notes.strip.aria' | t"
          #panel
          data-consumes-wheel
-         [style.transform]="panelTransform()"
+         [class.dock-right]="dockSide() === 'right'"
+         [style.transform]="panelTransformActive()"
          (pointerenter)="onNotesEnter()" (pointerleave)="onNotesLeave()">
 
       <!-- Drag-bar header (grip · breadcrumb · exit · expand · hide) -->
@@ -234,8 +235,16 @@
           </button>
         </footer>
       }
+      <!-- Invisible edge drag-handles. The left edge is the live resize
+           edge when docked right; bottom + corner handle the floating panel. -->
+      <span class="cv2-resize-edge cv2-resize-edge-left"
+            (pointerdown)="onResizeStart($event, 'left')"
+            aria-hidden="true"></span>
+      <span class="cv2-resize-edge cv2-resize-edge-bottom"
+            (pointerdown)="onResizeStart($event, 'bottom')"
+            aria-hidden="true"></span>
       <span class="cv2-resize-handle"
-            (pointerdown)="onResizeStart($event)"
+            (pointerdown)="onResizeStart($event, 'corner')"
             aria-hidden="true"></span>
     </div>
   } @else {
@@ -244,10 +253,11 @@
          rich notes list · footer · (optionally) tool palette popover. -->
     <div class="notes-strip cv2-panel"
          [class.mode-chips]="mode() === 'chips'" [class.mode-rows]="mode() === 'rows'"
+         [class.dock-right]="dockSide() === 'right'"
          #panel
          data-consumes-wheel
          role="list" [attr.aria-label]="'notes.strip.aria' | t"
-         [style.transform]="panelTransform()"
+         [style.transform]="panelTransformActive()"
          (pointerenter)="onNotesEnter()" (pointerleave)="onNotesLeave()">
 
       <!-- Drag-bar header -->
@@ -315,74 +325,52 @@
           </button>
         </div>
       } @else {
-        <!-- Shape-tag toolbar — six CSS-drawn shapes + indent / outdent
-             / clear. Every glyph is a static <span aria-hidden> carrying
-             one .hc-shape-X / .hc-tool-X literal class; no interpolation
-             inside class attributes anywhere on this toolbar. -->
-        <div class="cv2-toolbar" [class.is-readonly]="!capturing()">
-          <div class="cv2-shape-row" role="radiogroup" aria-label="Note shape">
-            <button type="button" class="cv2-shape-btn"
-                    [class.is-active]="shape() === 'circle'"
-                    [disabled]="!capturing()"
-                    (click)="setShape('circle')"
-                    aria-label="Circle" title="Circle">
-              <span class="hc-shape-glyph hc-shape-circle" aria-hidden="true"></span>
-            </button>
-            <button type="button" class="cv2-shape-btn"
-                    [class.is-active]="shape() === 'square'"
-                    [disabled]="!capturing()"
-                    (click)="setShape('square')"
-                    aria-label="Square" title="Square">
-              <span class="hc-shape-glyph hc-shape-square" aria-hidden="true"></span>
-            </button>
-            <button type="button" class="cv2-shape-btn"
-                    [class.is-active]="shape() === 'triangle'"
-                    [disabled]="!capturing()"
-                    (click)="setShape('triangle')"
-                    aria-label="Triangle" title="Triangle">
-              <span class="hc-shape-glyph hc-shape-triangle" aria-hidden="true"></span>
-            </button>
-            <button type="button" class="cv2-shape-btn"
-                    [class.is-active]="shape() === 'diamond'"
-                    [disabled]="!capturing()"
-                    (click)="setShape('diamond')"
-                    aria-label="Diamond" title="Diamond">
-              <span class="hc-shape-glyph hc-shape-diamond" aria-hidden="true"></span>
-            </button>
-            <button type="button" class="cv2-shape-btn"
-                    [class.is-active]="shape() === 'star'"
-                    [disabled]="!capturing()"
-                    (click)="setShape('star')"
-                    aria-label="Star" title="Star">
-              <span class="hc-shape-glyph hc-shape-star" aria-hidden="true"></span>
-            </button>
-            <button type="button" class="cv2-shape-btn"
-                    [class.is-active]="shape() === 'hexagon'"
-                    [disabled]="!capturing()"
-                    (click)="setShape('hexagon')"
-                    aria-label="Hexagon" title="Hexagon">
-              <span class="hc-shape-glyph hc-shape-hexagon" aria-hidden="true"></span>
+        <!-- Embedded note form — the single authoring surface. Add mode by
+             default; clicking a note row loads it here for editing. The
+             leading kind pill flips the entry between note and question;
+             placeholder, accent, and submit label follow it. Enter commits,
+             Shift+Enter newlines, Esc cancels. -->
+        <form class="cv2-form" [class.is-question]="draftKind() === 'q'"
+              (submit)="$event.preventDefault(); commitForm()">
+          <div class="cv2-form-input-row">
+            <div class="cv2-input-wrap">
+              <textarea #formInput
+                        class="cv2-form-input"
+                        rows="1"
+                        [value]="draftText()"
+                        (input)="onFormInput($event)"
+                        (keydown)="onFormKeydown($event)"
+                        [attr.placeholder]="(draftKind() === 'q' ? 'notes.capturePlaceholderQ' : 'notes.capturePlaceholder') | t"
+                        [attr.aria-label]="editingNoteId() ? ('notes.edit' | t) : ('notes.add' | t)"></textarea>
+              <!-- In-input kind toggle — small chip pinned to the bottom-left
+                   corner of the textarea. One click flips note ↔ question;
+                   styled subtly (not like the primary submit) so it reads as
+                   an accessory of the field, not a second action button. -->
+              <button type="button" class="cv2-kind-toggle"
+                      [class.is-question]="draftKind() === 'q'"
+                      (click)="toggleDraftKind()"
+                      [attr.aria-label]="'notes.kindLabel' | t"
+                      [attr.aria-pressed]="draftKind() === 'q'"
+                      [title]="(draftKind() === 'q' ? 'notes.kindQuestion' : 'notes.kindNote') | t">
+                <span class="dot" [class.q]="draftKind() === 'q'" [class.n]="draftKind() === 'note'"></span>
+                <span class="cv2-kind-toggle-label">{{ (draftKind() === 'q' ? 'notes.kindQuestion' : 'notes.kindNote') | t }}</span>
+              </button>
+            </div>
+            <button type="submit" class="cv2-form-submit" [disabled]="!draftText().trim()">
+              {{ editingNoteId() ? ('notes.save' | t) : ((draftKind() === 'q' ? 'notes.formAsk' : 'notes.formAdd') | t) }}
             </button>
           </div>
-          <span class="cv2-sep"></span>
-          <button type="button" class="cv2-tool"
-                  [disabled]="!capturing()" (click)="outdent()"
-                  aria-label="Outdent" title="Outdent (Shift+Tab)">
-            <span class="hc-shape-glyph hc-tool-outdent" aria-hidden="true"></span>
-          </button>
-          <button type="button" class="cv2-tool"
-                  [disabled]="!capturing()" (click)="indent()"
-                  aria-label="Indent" title="Indent (Tab)">
-            <span class="hc-shape-glyph hc-tool-indent" aria-hidden="true"></span>
-          </button>
-          <span class="cv2-toolbar-spacer"></span>
-          <button type="button" class="cv2-tool"
-                  [disabled]="!capturing() || shape() === null"
-                  (click)="clearShape()"
-                  aria-label="Clear shape" title="Clear shape">
-            <span class="hc-shape-glyph hc-tool-clear" aria-hidden="true"></span>
-          </button>
-        </div>
+          @if (editingNoteId()) {
+            <div class="cv2-form-tools">
+              <span class="cv2-toolbar-spacer"></span>
+              <button type="button" class="cv2-form-cancel" (click)="cancelEdit()"
+                      [title]="'notes.close' | t">
+                <span class="mat-sym" style="font-size:14px">close</span>
+                <span>{{ 'notes.cancel' | t }}</span>
+              </button>
+            </div>
+          }
+        </form>
       }
 
       <!-- Filter chips -->
@@ -542,11 +530,6 @@
           <ng-container *ngTemplateOutlet="rowTpl; context: { note: root, depth: 0 }"></ng-container>
         }
 
-        <button type="button" class="cv2-add-row" (click)="add()">
-          <span class="mat-sym" style="font-size:14px">add</span>
-          <span>{{ 'notes.addNote' | t }}</span>
-          <span class="cv2-add-kbd">N</span>
-        </button>
       </div>
 
       <!-- Footer -->
@@ -566,8 +549,16 @@
         }
       </footer>
 
+      <!-- Invisible edge drag-handles. The left edge is the live resize
+           edge when docked right; bottom + corner handle the floating panel. -->
+      <span class="cv2-resize-edge cv2-resize-edge-left"
+            (pointerdown)="onResizeStart($event, 'left')"
+            aria-hidden="true"></span>
+      <span class="cv2-resize-edge cv2-resize-edge-bottom"
+            (pointerdown)="onResizeStart($event, 'bottom')"
+            aria-hidden="true"></span>
       <span class="cv2-resize-handle"
-            (pointerdown)="onResizeStart($event)"
+            (pointerdown)="onResizeStart($event, 'corner')"
             aria-hidden="true"></span>
     </div>
   }
