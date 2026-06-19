@@ -475,7 +475,20 @@ export class TileActionsDrone extends Drone {
   #effectsRegistered = false
   #arrangement: IconArrangement = {}
   #substrateLabels = new Set<string>()
-  #onRegistryChange = (): void => { this.#reregisterAll() }
+  #registryChangeTimer: ReturnType<typeof setTimeout> | null = null
+  // Icon providers (edit, note, contact, view:website) self-register in the
+  // IconProviderRegistry one at a time during boot. Reacting to each 'change'
+  // immediately runs #reregisterAll's unregister-then-reregister churn, which
+  // races the overlay's accumulate and leaves a partial/invisible icon set.
+  // Coalesce to a SINGLE pass once the providers settle so the COMPLETE set
+  // re-registers cleanly (exactly what a manual re-trigger does).
+  #onRegistryChange = (): void => {
+    if (this.#registryChangeTimer) clearTimeout(this.#registryChangeTimer)
+    this.#registryChangeTimer = setTimeout(() => {
+      this.#registryChangeTimer = null
+      this.#reregisterAll()
+    }, 250)
+  }
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#effectsRegistered) {

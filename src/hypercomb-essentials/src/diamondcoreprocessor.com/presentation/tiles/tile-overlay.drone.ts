@@ -658,6 +658,13 @@ export class TileOverlayDrone extends Drone {
     if (!this.#requestedRegister && !this.#arrangeMode) {
       this.#requestedRegister = true
       this.emitEffect('overlay:request-register', {})
+      // Icon providers (edit/note/contact/…) self-register asynchronously
+      // during boot, so a single early pull can land before they exist. Re-pull
+      // once after they settle — providers respond idempotently and the overlay
+      // accumulates, so the late ones fill in without churn.
+      setTimeout(() => {
+        if (!this.#arrangeMode) this.emitEffect('overlay:request-register', {})
+      }, 800)
     }
   }
 
