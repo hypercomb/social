@@ -1,0 +1,58 @@
+@if (visible()) {
+  <aside
+    class="features-panel"
+    data-consumes-wheel
+    (keydown)="onKey($event)"
+    tabindex="-1"
+    role="dialog"
+    [attr.aria-label]="'features.viewer.title' | t"
+  >
+    <header class="features-header">
+      <span class="features-title">{{ 'features.viewer.title' | t }}</span>
+      <button class="features-clear" type="button" (click)="clearWants()">{{ 'features.clear' | t }}</button>
+      <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'features.close' | t">×</button>
+    </header>
+
+    @if (groups().length === 0) {
+      <p class="features-empty">{{ 'features.empty' | t }}</p>
+    } @else {
+      <div class="features-scroll">
+        @for (group of groups(); track group.cell) {
+          <section class="features-group">
+            <header class="fgroup-header">
+              <span class="fgroup-cell" [title]="group.cell">{{ group.cell }}</span>
+              <button class="fgroup-remove" type="button" (click)="removeGroup(group.cell)" [attr.aria-label]="'features.remove' | t">×</button>
+            </header>
+            @if (group.features.length === 0) {
+              <p class="fgroup-none">{{ 'features.none' | t }}</p>
+            } @else {
+              <ul class="features-list">
+                @for (feat of group.features; track feat.kind) {
+                  <li class="features-row" [class.wanted]="isWanted(group, feat)">
+                    <div class="feature-meta">
+                      <span class="feature-name">{{ feat.label }}</span>
+                      <span class="feature-kind" [title]="feat.kind">{{ feat.kind }}</span>
+                      @if (feat.description) {
+                        <span class="feature-desc">{{ feat.description }}</span>
+                      }
+                    </div>
+                    <button
+                      class="feature-want"
+                      type="button"
+                      [class.on]="isWanted(group, feat)"
+                      [class.metaonly]="!installable(feat)"
+                      (click)="toggleWant(group, feat)"
+                      [attr.aria-pressed]="isWanted(group, feat)"
+                      [attr.title]="(installable(feat) ? 'features.want.hint' : 'features.local.hint') | t"
+                    >{{ (isWanted(group, feat) ? 'features.wanted' : 'features.want') | t }}</button>
+                  </li>
+                }
+              </ul>
+            }
+          </section>
+        }
+      </div>
+      <footer class="features-foot">{{ 'features.staged.hint' | t }}</footer>
+    }
+  </aside>
+}

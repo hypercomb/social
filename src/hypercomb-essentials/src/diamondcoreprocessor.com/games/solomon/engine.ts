@@ -103,6 +103,10 @@ export class Engine {
   // Transient flash timers the renderer reads (seconds remaining).
   conjureFlash = 0
   hurtFlash = 0
+  // Head-butt: a rising-edge flash + the cell that just shattered, so the overlay
+  // can spray stone debris at the broken brick (not the wand's foot-level target).
+  smashFlash = 0
+  smashCell: Cell | null = null
 
   // Held input — the overlay writes these from key events. `down` is the
   // crouch key; jump + fireball are edge-triggered methods, not held flags.
@@ -160,6 +164,8 @@ export class Engine {
     this.state = 'playing'
     this.conjureFlash = 0
     this.hurtFlash = 0
+    this.smashFlash = 0
+    this.smashCell = null
   }
 
   // ── tile helpers ─────────────────────────────────────────
@@ -264,6 +270,7 @@ export class Engine {
   update(dt: number): void {
     if (this.conjureFlash > 0) this.conjureFlash = Math.max(0, this.conjureFlash - dt)
     if (this.hurtFlash > 0) this.hurtFlash = Math.max(0, this.hurtFlash - dt)
+    if (this.smashFlash > 0) this.smashFlash = Math.max(0, this.smashFlash - dt)
     if (this.state !== 'playing') return
 
     this.#stepPlayer(dt)
@@ -406,11 +413,35 @@ export class Engine {
       remaining -= move
       const ny = p.y + step * move
       if (!this.rectSolid(p.x, ny, p.w, p.h)) { p.y = ny; continue }
+      // Rising into the ceiling: a BRICK directly overhead shatters from the
+      // head-butt (the classic "break bricks with your head") and Dana keeps his
+      // upward momentum, punching on through; a permanent WALL stops him cold.
+      if (step < 0 && this.#headButt(p, ny)) { p.y = ny; continue }
       if (step > 0) this.onGround = true
       p.vy = 0
       break
     }
     if (step > 0 && !this.onGround) this.#groundCheck(p)
+  }
+
+  /** Smash any BRICK tiles the head overlaps at the proposed top edge `ny`.
+   *  Returns true only when the path is clear afterwards (so the rise continues);
+   *  an immovable WALL sharing the head row can't break and still blocks Dana. */
+  #headButt(p: Body, ny: number): boolean {
+    const headRow = Math.floor(ny / TILE)
+    const c0 = Math.floor(p.x / TILE)
+    const c1 = Math.floor((p.x + p.w - 1) / TILE)
+    let smashed = false
+    for (let c = c0; c <= c1; c++) {
+      if (this.tileAt(c, headRow) === BRICK) {
+        this.setTile(c, headRow, EMPTY)
+        this.smashCell = { col: c, row: headRow }
+        smashed = true
+      }
+    }
+    if (!smashed) return false
+    this.smashFlash = 0.18
+    return !this.rectSolid(p.x, ny, p.w, p.h)
   }
 
   #groundCheck(p: Body): void {

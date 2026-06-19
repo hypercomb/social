@@ -1,0 +1,37 @@
+// hypercomb-shared/styles/_header-size.scss
+//
+// Switchable header-size presets. One global knob — `--hc-header-zoom` —
+// scales the whole header bar: height, padding, and every child font/icon
+// (the command-line + mesh-header type is `em`-based, the status icons are
+// `rem`-based; `zoom` magnifies them all proportionally). The SAME factor
+// feeds the header-anchored fixed offsets below the bar (breadcrumb,
+// dock-left rail, hint-bar, notes-strip, history-viewer, format-painter)
+// via `calc(<base> * var(--hc-header-zoom))`, so they stay flush at any size.
+//
+// Three presets, switched by a `data-header-size` attribute on <html>.
+// The COMPACT size is the default (the original slim chrome — boots here
+// when no attribute is set):
+//   (none) / '1' → 1.00  compact  (default — slim, the original look)
+//   '2'          → 1.15  medium   (+15%)
+//   '3'          → 1.45  large    (+45%)
+//
+// Switch live from the console (updates instantly, no reload):
+//   document.documentElement.dataset.headerSize = '2'   // or '3'; clear for default
+//
+// The 13" laptop width band keeps its gentle 1.15× comfort bump; it's folded
+// directly into each preset there (so `zoom` only ever sees a bare `var()` —
+// no calc() in `zoom`, which keeps it robust across browsers). At the default
+// size this matches the original chrome exactly: 1.0 base, 1.15 in the band.
+
+:root                        { --hc-header-zoom: 1.0;  }  // size 1 / compact (default — slim)
+:root[data-header-size='1']  { --hc-header-zoom: 1.0;  }  // compact (= default)
+:root[data-header-size='2']  { --hc-header-zoom: 1.15; }  // medium (+15%)
+:root[data-header-size='3']  { --hc-header-zoom: 1.45; }  // large  (+45%)
+
+// 13" laptop band (1367–2559px): each size carries the 1.15× comfort bump.
+@media (min-width: 1367px) and (max-width: 2559px) {
+  :root                       { --hc-header-zoom: 1.15;   }  // 1.0  × 1.15 (default)
+  :root[data-header-size='1'] { --hc-header-zoom: 1.15;   }  // 1.0  × 1.15
+  :root[data-header-size='2'] { --hc-header-zoom: 1.3225; }  // 1.15 × 1.15
+  :root[data-header-size='3'] { --hc-header-zoom: 1.668;  }  // 1.45 × 1.15
+}

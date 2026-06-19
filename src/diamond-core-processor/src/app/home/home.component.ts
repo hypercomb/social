@@ -191,6 +191,15 @@ export class HomeComponent implements OnDestroy {
   #upgradePackageSig: string | null = null
   #upgradeScrolled = false
 
+  // ── Feature-STAGING pre-tick ──────────────────────────────────────────
+  // The hive's "show features" panel lets the participant stage features as
+  // they run through tiles (benign — nothing activates). When the installer
+  // opens, portal-overlay hands the staged branch sigs over via `#stage=…`.
+  // We pre-TICK (enable ON, QUIET — no resync) the matching resolved nodes so
+  // the wanted features are selected by default; the real fold still gates on
+  // Done. Ephemeral + participant-local, re-derived from the hash each open.
+  readonly #stageSet = signal<Set<string>>(new Set())
+
   // flat list of all nodes for command line suggestions
   readonly allNodes = computed(() => {
     const result: TreeNode[] = []
@@ -729,11 +738,15 @@ export class HomeComponent implements OnDestroy {
     // load and on every hash swap so re-opening the indicator re-marks.
     this.#processUpgradeHash()
 
+    // The hive's "show features" panel routes here with `#stage=<sig,…>` —
+    // wanted features' branch sigs to pre-tick ON (benign, no resync).
+    this.#processStageHash()
+
     // Browsers do NOT reload an iframe on hash-only URL changes, so when
     // portal-overlay swaps `…#branch=A` → `…#branch=B` for a second adopt
     // the constructor doesn't re-run. Listen for hashchange too so each
     // adopt-via-iframe gets processed even on a persistent DCP instance.
-    window.addEventListener('hashchange', () => { this.#processBranchHash(); this.#processUpgradeHash() })
+    window.addEventListener('hashchange', () => { this.#processBranchHash(); this.#processUpgradeHash(); this.#processStageHash() })
   }
 
   /** Climbing resolved-sig count for a section's live broker walk, or null
@@ -939,6 +952,60 @@ export class HomeComponent implements OnDestroy {
       setTimeout(() => this.#applyUpgradeMarks(), 600)
       setTimeout(() => this.#applyUpgradeMarks(), 2000)
     } catch { /* malformed hash → silent — the indicator can re-open */ }
+  }
+
+  /** Read `#stage=<sig,sig,…>` from the URL hash — the hive's "show features"
+   *  panel's BENIGN staging hand-off. Each sig is a wanted feature's branch
+   *  signature. Pre-TICK the matching resolved nodes ON so they're selected by
+   *  default; nothing folds until the participant accepts (Done). Re-applied
+   *  as the tree resolves (a staged branch may still be materializing),
+   *  idempotent. NOTE: only ticks branches DCP has actually resolved into the
+   *  tree, and matches by node signature — a content branch root is already ON
+   *  by default, so the pre-tick is most meaningful once a feature's CODE
+   *  signature is what gets staged (a future hive-side refinement; the channel
+   *  is ready). */
+  #processStageHash(): void {
+    try {
+      const hash = window.location.hash.replace(/^#/, '')
+      if (!hash) return
+      const params = new URLSearchParams(hash)
+      const set = new Set(
+        (params.get('stage') ?? '')
+          .split(',')
+          .map(s => s.trim().toLowerCase())
+          .filter(s => /^[a-f0-9]{64}$/.test(s)),
+      )
+      if (!set.size) return
+      this.#stageSet.set(set)
+      this.#applyStageMarks()
+      setTimeout(() => this.#applyStageMarks(), 600)
+      setTimeout(() => this.#applyStageMarks(), 2000)
+    } catch { /* malformed hash → silent — the panel can re-open */ }
+  }
+
+  /** Enable (ON, QUIET — no broadcast/resync) every resolved node whose
+   *  signature is in the staged set, but only when the participant has NEVER
+   *  explicitly toggled it (never stomp a manual choice). Quiet so the hive
+   *  stays exactly as it is until Done; the tick is purely the pre-selected
+   *  checkbox state. Re-runnable as the baseline resolves. */
+  #applyStageMarks(): void {
+    const set = this.#stageSet()
+    if (!set.size) return
+    const toEnable: string[] = []
+    const walk = (nodes: TreeNode[]): void => {
+      for (const n of nodes) {
+        const sig = String(n.signature ?? '').toLowerCase()
+        if (sig && set.has(sig) && this.#toggleState.stored(n.id) === undefined) {
+          toEnable.push(n.id)
+        }
+        walk(n.children ?? [])
+      }
+    }
+    for (const s of this.sections()) walk(s.items)
+    if (toEnable.length) {
+      this.#toggleState.setManyEnabledQuiet(toEnable, true)
+      this.#refreshSections()
+    }
   }
 
   /** Mark the resolved change-delta nodes `freshlyUpgraded` (off + highlighted)

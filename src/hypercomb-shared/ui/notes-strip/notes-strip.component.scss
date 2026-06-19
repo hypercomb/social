@@ -22,7 +22,8 @@
   // so the footer is always anchored to the viewport bottom (above
   // the pill). Header is ~50px; the pill floats with bottom: 0.6rem
   // and is ~3rem tall, so we reserve 5rem at the bottom to clear it.
-  top: calc(var(--hc-header-height, 3rem) + 14px);
+  // Top tracks the header size: ~3rem intrinsic × the active header zoom.
+  top: calc(3rem * var(--hc-header-zoom, 1.0) + 14px);
   bottom: 5rem;
   left: 0;
   right: 0;
@@ -39,7 +40,7 @@
 // toolbar at the bottom IS covered intentionally — users asked for
 // "everything except the command line".
 :host.is-fullscreen {
-  top: var(--hc-header-height, 3rem);
+  top: calc(3rem * var(--hc-header-zoom, 1.0));
   bottom: 0;
   padding: 0;
 }

@@ -2,6 +2,7 @@ import { ChangeDetectorRef, Component, inject, type OnInit, type OnDestroy } fro
 import { DomSanitizer, type SafeResourceUrl } from "@angular/platform-browser"
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { stagedSigs } from '../features-viewer/feature-staging'
 
 const DEFAULT_PORTALS: Record<string, string> = {
   meadowverse: 'https://meadowverse.com',
@@ -195,6 +196,17 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
           .slice(0, 80)
         if (sigs.length) url += `&new=${sigs.join(',')}`
       }
+    }
+
+    // Benign feature staging → installer pre-tick. The "show features" panel
+    // records wanted features' branch sigs (feature-staging.ts) as the
+    // participant runs through tiles. When the installer opens, hand them over
+    // as `#stage=<sig,…>`; DCP's #processStageHash ticks the matching nodes ON
+    // by default. Nothing folds until Done — this only sets checkbox state.
+    // Capped so the hash never grows pathological (DCP falls back gracefully).
+    if ((detail?.target ?? '') === 'dcp') {
+      const sigs = stagedSigs().slice(0, 80)
+      if (sigs.length) url += (url.includes('#') ? '&' : '#') + `stage=${sigs.join(',')}`
     }
 
     this.#activeUrl = url

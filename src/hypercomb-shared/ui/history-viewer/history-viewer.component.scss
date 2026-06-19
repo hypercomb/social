@@ -8,10 +8,10 @@
 .history-viewer {
   position: fixed;
   // Leave room for the command-line / header-bar above. Matches the
-  // notes-strip offset (`--hc-header-height + 14px`) so both side
-  // panels sit on the same horizontal line below the command line
-  // and never overlap it on either desktop or narrow viewports.
-  top: calc(var(--hc-header-height, 3rem) + 14px);
+  // notes-strip offset (`3rem * --hc-header-zoom + 14px`) so both side
+  // panels sit on the same horizontal line below the command line —
+  // tracking the active header size — and never overlap it.
+  top: calc(3rem * var(--hc-header-zoom, 1.0) + 14px);
   left: 0;
   bottom: 0;
   width: max-content;
@@ -23,7 +23,11 @@
   // when set since inline styles beat stylesheet max-width — this
   // only affects the "never resized yet" default path.
   max-width: 80vw;
-  background: rgba(12, 14, 20, 0.92);
+  // Opaque (not translucent): the panel now floats ABOVE the full-bleed
+  // canvas instead of sitting in a carved-out column, so a translucent
+  // bg would let live tiles bleed through and re-blur every frame. Solid
+  // bg = no paint-under, no per-frame backdrop-filter cost.
+  background: #0b0d13;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 6px;
   display: flex;
@@ -31,8 +35,9 @@
   color: rgba(235, 240, 250, 0.85);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
-  z-index: 50000;
-  backdrop-filter: blur(6px);
+  // Above the sealed canvas (#pixi-host z 59989) so the panel renders on
+  // top and takes its own clicks; still below the header-bar (z 60000).
+  z-index: 59990;
   pointer-events: auto;
   isolation: isolate;
 }

@@ -12,13 +12,15 @@
 //
 // SAFETY: this drone applies content ONLY in response to an explicit user
 // click. `sync` folds a broadcasting peer's VISUALS straight into the hive
-// (replace-in-place); `features` / `adopt` hand the branch sig to the DCP
-// installer so the participant can turn its scripts on THERE. It does NOT
-// auto-fold the installer's projected branches (RegistrySnapshot) — that
-// automation was removed: nothing enters your tree without a participant
-// action. Whether an update EXISTS (detection) and surfacing installer-
-// installed content are separate MANUAL concerns — the command-line update
-// icon opens the installer; the participant pulls there.
+// (replace-in-place); `adopt` hands the branch sig to the DCP installer so
+// the participant can turn its scripts on THERE. (`features` no longer routes
+// here — it's now "show features", handled by ShowFeaturesDrone, which opens a
+// read-only panel and stays in the hive.) It does NOT auto-fold the
+// installer's projected branches (RegistrySnapshot) — that automation was
+// removed: nothing enters your tree without a participant action. Whether an
+// update EXISTS (detection) and surfacing installer-installed content are
+// separate MANUAL concerns — the command-line update icon opens the
+// installer; the participant pulls there.
 
 import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import {
@@ -140,11 +142,11 @@ export class SwarmAdoptDrone extends Drone {
         return
       }
 
-      if (action !== 'adopt' && action !== 'sync' && action !== 'features') return
+      if (action !== 'adopt' && action !== 'sync') return
 
       // Multi-tile adopt (selection-menu Adopt All) — sequential. Only the
-      // `adopt` gesture fans out a `labels` array; `sync` / `features` are
-      // single-tile overlay clicks carrying one `label`.
+      // `adopt` gesture fans out a `labels` array; `sync` is a single-tile
+      // overlay click carrying one `label`.
       const labels = Array.isArray(payload?.labels)
         ? payload.labels.map(s => String(s ?? '').trim()).filter(Boolean)
         : []
@@ -164,13 +166,13 @@ export class SwarmAdoptDrone extends Drone {
         return
       }
 
-      // `features` → hand the branch sig to the installer (the ONLY swarm
-      // gesture that still opens it) so the participant can view the
-      // publisher's features and turn the scripts portion on.
-      if (action === 'features') {
-        void this.#adoptPeerTile(label)
-        return
-      }
+      // NOTE: `features` no longer routes here. The puzzle-piece icon is now
+      // "show features" — ShowFeaturesDrone gathers the tile's bee metadata
+      // and opens the right-docked panel (read-only, stays in the hive). The
+      // installer hand-off survives only as the panel's BENIGN staging: a
+      // wanted feature's branch sig is pre-ticked when the installer is opened
+      // later (portal-overlay #stage handoff). `#adoptPeerTile` is kept — it
+      // still backs the registry-snapshot fold and any future installer route.
 
       // `sync` → adopt the publisher's VISUALS straight into the hive,
       // replacing the stale local copy in place. No installer; scripts stay

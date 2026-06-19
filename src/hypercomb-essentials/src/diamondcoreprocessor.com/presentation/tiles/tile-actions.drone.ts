@@ -347,16 +347,19 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // (name, at) identity makes it idempotent: same-sig aborts, a re-signed
   // publisher layer replaces your stale copy.
   { name: 'sync', svgMarkup: ICONS.sync, hoverTint: 0xa8d8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => peerBroadcastsTile(ctx.label), labelKey: 'action.sync', descriptionKey: 'action.sync.description' },
-  // `features` opens the installer focused on this tile's branch so the
-  // participant can VIEW the publisher's features and turn the scripts
-  // portion on. Paired with `sync` (which folds the visuals straight into
-  // the hive): sync = visuals now, features = scripts on demand. Shown ONLY
-  // when there are features to enable — the tile carries a decoration owned
-  // by a registered visual bee (tileHasVisualBeeFeature: an actual render
-  // feature with a scripts portion, NOT a plain image or pure-data card) AND
-  // a live peer is broadcasting this branch (so the installer has a sig to
-  // open). Click handled by SwarmAdoptDrone (action 'features'), like adopt/sync.
-  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => tileHasVisualBeeFeature(ctx.label) && peerBroadcastsTile(ctx.label), labelKey: 'action.features', descriptionKey: 'action.features.description' },
+  // `features` (the puzzle-piece) is now "SHOW FEATURES": click it and
+  // ShowFeaturesDrone gathers the META details (no code) of the bee features
+  // this tile uses and opens the right-docked features panel — you stay in
+  // the hive. Clicking another tile's icon ADDS its features to the same
+  // list. Shown on any tile that carries a registered visual bee
+  // (tileHasVisualBeeFeature: a real render-feature, NOT a plain image or
+  // pure-data card) — the peer-broadcast requirement is gone, because viewing
+  // metadata needs no publisher branch. Registered on `private` (browsing
+  // your own hive) and `public-own` (your tile in public mode). Click handled
+  // by ShowFeaturesDrone (action 'features'); turning a feature on from the
+  // panel is BENIGN staging that only pre-ticks the installer later.
+  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => tileHasVisualBeeFeature(ctx.label), labelKey: 'action.features', descriptionKey: 'action.features.description' },
+  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => tileHasVisualBeeFeature(ctx.label), labelKey: 'action.features', descriptionKey: 'action.features.description' },
   // ── public-external profile ──
   { name: 'adopt', svgMarkup: ICONS.adopt, hoverTint: 0xa8ffd8, profile: 'public-external', labelKey: 'action.adopt', descriptionKey: 'action.adopt.description' },
   // 'hide' also lives in `public-own` (your own tile in public mode);
@@ -397,14 +400,16 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 // in ICON_REGISTRY above; adopting a peer tile is handled by the
 // `public-external` profile (the tile flips kind once it's local).
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  'private': ['command', 'edit', 'note', 'remove', 'break-apart', 'files', 'invite'],
+  'private': ['command', 'edit', 'note', 'features', 'remove', 'break-apart', 'files', 'invite'],
   // World mode: ONLY the two share-toggles, none of the regular icons.
   'world': ['make-public', 'make-branch-public'],
   // Your own tile in public mode — same trash-bin remove that
   // private mode uses. Records a history op, can be undone. `sync`
-  // folds the broadcasting peer's latest VISUALS into the tile in place;
-  // `features` opens the installer for that branch to turn its scripts on
-  // (both only rendered while a live peer publishes the same name).
+  // folds the broadcasting peer's latest VISUALS into the tile in place
+  // and is rendered ONLY while a live peer publishes the same name.
+  // `features` (puzzle-piece) opens the read-only SHOW FEATURES panel for
+  // any tile carrying a registered visual bee — it stays in the hive and
+  // has NO peer-broadcast requirement.
   'public-own': ['sync', 'features', 'remove', 'break-apart', 'files', 'invite'],
   // Peer-only mesh tiles. Single-click `adopt` is the explicit
   // "I want to expand on this topic" action — writes the tile to

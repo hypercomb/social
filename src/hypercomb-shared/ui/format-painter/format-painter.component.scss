@@ -6,7 +6,8 @@
 
 .fp-panel {
   position: fixed;
-  top: 3.5rem;
+  // clears the header at any size: 3.5rem × the active header zoom
+  top: calc(3.5rem * var(--hc-header-zoom, 1.0));
   right: 0.75rem;
   z-index: 10000;
   width: 14rem;

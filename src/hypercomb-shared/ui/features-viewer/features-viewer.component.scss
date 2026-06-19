@@ -1,0 +1,234 @@
+// hypercomb-shared/ui/features-viewer/features-viewer.component.scss
+//
+// Right-docked "Show features" panel. Not a dimming modal — the hive stays
+// visible and interactive behind it. Violet accent matches the puzzle-piece
+// overlay icon (hoverTint 0xc8b8ff).
+
+@use '../breakpoints' as *;
+
+$accent: #c8b8ff;
+
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 100002;
+  pointer-events: none;
+}
+
+.features-panel {
+  pointer-events: auto;
+  position: absolute;
+  // Dock flush BELOW the header bar (the right-side analog of the
+  // controls-bar `dock-left` rail) and track the active header size:
+  // 2.8rem clears the ~2.83rem header bottom, × `--hc-header-zoom` so it
+  // stays flush across the small/medium/large presets (and the 13" band
+  // bump folded into the same variable). `bottom: 0` carries the panel to
+  // the viewport floor without recomputing a height per size.
+  top: calc(2.8rem * var(--hc-header-zoom, 1.0));
+  right: 0;
+  bottom: 0;
+  width: min(360px, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  background: rgba(14, 14, 22, 0.96);
+  border-left: 1px solid rgba($accent, 0.5);
+  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba($accent, 0.06) inset;
+  font-family: var(--hc-mono, system-ui);
+  color: #f3f3f3;
+  outline: none;
+}
+
+.features-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid rgba($accent, 0.25);
+}
+
+.features-title {
+  flex: 1;
+  font-size: 0.9rem;
+  letter-spacing: 0.05em;
+  color: rgba($accent, 0.95);
+}
+
+.features-clear {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.5);
+  font-family: inherit;
+  font-size: 0.74rem;
+  cursor: pointer;
+  padding: 0 0.25rem;
+
+  &:hover { color: $accent; }
+}
+
+.features-close {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.25rem;
+
+  &:hover { color: $accent; }
+}
+
+.features-empty {
+  margin: 0;
+  padding: 1.5rem 1rem;
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.features-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.25rem 0 0.5rem;
+}
+
+// ── per-tile group ────────────────────────────────────────────────
+.features-group {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.fgroup-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1rem 0.3rem;
+}
+
+.fgroup-cell {
+  flex: 1;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba($accent, 0.8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fgroup-remove {
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.35);
+  font-size: 1.05rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+
+  &:hover { color: #ffc8c8; }
+}
+
+.fgroup-none {
+  margin: 0;
+  padding: 0 1rem 0.5rem;
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.features-list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0.35rem;
+}
+
+.features-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.5rem 1rem;
+
+  &:hover { background: rgba($accent, 0.06); }
+  &.wanted { background: rgba($accent, 0.1); }
+}
+
+.feature-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.18rem;
+}
+
+.feature-name {
+  font-size: 0.86rem;
+  color: #f3f3f3;
+}
+
+.feature-kind {
+  font-size: 0.68rem;
+  font-family: var(--hc-mono, monospace);
+  color: rgba(255, 255, 255, 0.4);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.feature-desc {
+  font-size: 0.74rem;
+  line-height: 1.35;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+// ── benign "want" toggle ──────────────────────────────────────────
+.feature-want {
+  flex: 0 0 auto;
+  align-self: center;
+  font-family: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+  padding: 0.26rem 0.6rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba($accent, 0.4);
+  color: rgba($accent, 0.95);
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+
+  &:hover { background: rgba($accent, 0.16); color: #fff; }
+
+  &.on {
+    background: rgba($accent, 0.28);
+    border-color: $accent;
+    color: #fff;
+  }
+
+  // Metadata-only (no installer-resolvable branch): still toggleable, but
+  // muted so it's clear staging it won't pre-tick anything in the installer.
+  &.metaonly {
+    border-color: rgba(255, 255, 255, 0.18);
+    color: rgba(255, 255, 255, 0.55);
+
+    &.on { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.35); }
+  }
+}
+
+.features-foot {
+  flex: 0 0 auto;
+  padding: 0.6rem 1rem 0.8rem;
+  border-top: 1px solid rgba($accent, 0.2);
+  font-size: 0.72rem;
+  line-height: 1.4;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+// ── responsive: stay flush below the header at every header height ──
+// On touch the bar's intrinsic height is 3.5rem (vs 2.5rem desktop), so the
+// touch base offset differs; it still scales by the active header zoom. The
+// 13" laptop-band bump rides folded into `--hc-header-zoom` (see
+// `styles/_header-size.scss`), so no per-band override is needed.
+@include touch {
+  .features-panel { top: calc(3.85rem * var(--hc-header-zoom, 1.0)); }
+}
+
+// On phones (≤599px) the header bar is hidden by default (see
+// `_header-bar.scss`), so there's no header to clear — let the panel run the
+// full height instead of leaving a gap where the bar would have been.
+@include phone-only {
+  .features-panel { top: 0; }
+}

@@ -19,6 +19,10 @@ const CAMERA_OFF_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 
 // ── Icon position (in overlay-local coordinates) ────────────────
 const ICON_Y = -12 // above the label row, in the upper hex area
 
+// Temporarily hide the "start video" (join) overlay icon. Flip back to true
+// to restore the meeting-join button on tiles.
+const SHOW_JOIN_ICON = false
+
 export class MeetingControlsWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'meeting'
@@ -93,7 +97,7 @@ export class MeetingControlsWorker extends Worker {
     const available = state !== 'idle'
 
     // Join button — visible when not yet joined (idle state)
-    if (!available) {
+    if (!available && SHOW_JOIN_ICON) {
       actions.push({
         name: 'meeting-join',
         owner: this.iocKey,

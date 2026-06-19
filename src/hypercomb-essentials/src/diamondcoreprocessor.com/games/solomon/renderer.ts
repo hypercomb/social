@@ -10,6 +10,10 @@ import { Engine, TILE, WALL, BRICK, type LevelDef, type Fireball } from './engin
 
 export class Renderer {
   #ctx: CanvasRenderingContext2D
+  // Baked block faces. Procedural textures are expensive per-pixel, so we paint
+  // each block type ONCE into an offscreen canvas and blit it every frame.
+  #brickTex: HTMLCanvasElement | null = null
+  #wallTex: HTMLCanvasElement | null = null
 
   constructor(ctx: CanvasRenderingContext2D) {
     this.#ctx = ctx
@@ -92,36 +96,106 @@ export class Renderer {
   }
 
   #wall(c: number, r: number): void {
-    const ctx = this.#ctx, x = c * TILE, y = r * TILE
-    ctx.fillStyle = '#3a3550'
-    ctx.fillRect(x, y, TILE, TILE)
-    ctx.fillStyle = '#4b4668'
-    ctx.fillRect(x + 2, y + 2, TILE - 4, 3)
-    ctx.fillStyle = '#211e30'
-    ctx.fillRect(x, y + TILE - 4, TILE, 4)
-    ctx.strokeStyle = 'rgba(0,0,0,0.35)'
-    ctx.lineWidth = 1
-    ctx.strokeRect(x + .5, y + .5, TILE - 1, TILE - 1)
+    if (!this.#wallTex) this.#wallTex = this.#buildWall()
+    this.#ctx.drawImage(this.#wallTex, c * TILE, r * TILE)
   }
 
   #brick(c: number, r: number): void {
-    const ctx = this.#ctx, x = c * TILE, y = r * TILE
-    ctx.fillStyle = '#b9772f'
-    ctx.fillRect(x, y, TILE, TILE)
-    // bevel
-    ctx.fillStyle = '#d99b52'
-    ctx.fillRect(x + 1, y + 1, TILE - 2, 4)
-    ctx.fillStyle = '#8a5320'
-    ctx.fillRect(x + 1, y + TILE - 5, TILE - 2, 4)
-    // mortar lines
-    ctx.strokeStyle = 'rgba(60,30,10,0.55)'
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.moveTo(x, y + TILE / 2 + .5); ctx.lineTo(x + TILE, y + TILE / 2 + .5)
-    ctx.moveTo(x + TILE / 2 + .5, y); ctx.lineTo(x + TILE / 2 + .5, y + TILE / 2)
-    ctx.moveTo(x + TILE / 4 + .5, y + TILE / 2); ctx.lineTo(x + TILE / 4 + .5, y + TILE)
-    ctx.moveTo(x + 3 * TILE / 4 + .5, y + TILE / 2); ctx.lineTo(x + 3 * TILE / 4 + .5, y + TILE)
-    ctx.stroke()
+    if (!this.#brickTex) this.#brickTex = this.#buildBrick()
+    this.#ctx.drawImage(this.#brickTex, c * TILE, r * TILE)
+  }
+
+  // ── procedural block textures (baked once) ───────────────
+
+  // Enchanted-gold magic brick: running-bond courses, each sub-brick chiselled
+  // with its own bevel and surface grain, lit by a warm inner glow and framed by
+  // an extruded cube edge. This is the conjurable BRICK — the star block.
+  #buildBrick(): HTMLCanvasElement {
+    const s = TILE
+    const cv = document.createElement('canvas'); cv.width = s; cv.height = s
+    const x = cv.getContext('2d')!
+    const rnd = this.#noise(0x5b1c)
+    x.fillStyle = '#2a1606'; x.fillRect(0, 0, s, s) // deep mortar backing
+    const rowH = 8, bw = 16, m = 1
+    let course = 0
+    for (let by = 0; by < s; by += rowH, course++) {
+      const off = (course % 2) * (bw / 2) // half-brick offset → running bond
+      for (let bx = -bw; bx < s; bx += bw) {
+        const rx = Math.round(bx + off) + m, ry = by + m
+        const rw = bw - m * 2, rh = rowH - m * 2
+        const v = rnd() // per-brick warm-gold variation
+        x.fillStyle = `rgb(${(150 + v * 78) | 0},${(92 + v * 60) | 0},${(28 + v * 34) | 0})`
+        x.fillRect(rx, ry, rw, rh)
+        for (let i = (rw * rh) >> 2; i > 0; i--) { // surface grain
+          const d = rnd() - 0.45
+          x.fillStyle = d > 0 ? `rgba(255,228,165,${d * 0.5})` : `rgba(50,22,4,${-d * 0.5})`
+          x.fillRect(rx + ((rnd() * rw) | 0), ry + ((rnd() * rh) | 0), 1, 1)
+        }
+        x.fillStyle = 'rgba(255,232,170,0.55)' // chiselled top-left highlight
+        x.fillRect(rx, ry, rw, 1); x.fillRect(rx, ry, 1, rh)
+        x.fillStyle = 'rgba(40,16,2,0.5)' // bottom-right shadow
+        x.fillRect(rx, ry + rh - 1, rw, 1); x.fillRect(rx + rw - 1, ry, 1, rh)
+      }
+    }
+    const gl = x.createRadialGradient(s * 0.42, s * 0.36, 1, s * 0.5, s * 0.5, s * 0.72)
+    gl.addColorStop(0, 'rgba(255,222,150,0.28)'); gl.addColorStop(1, 'rgba(255,170,60,0)')
+    x.fillStyle = gl; x.fillRect(0, 0, s, s) // enchanted inner glow
+    x.fillStyle = 'rgba(255,244,200,0.22)' // extruded cube edge
+    x.fillRect(0, 0, s, 2); x.fillRect(0, 0, 2, s)
+    x.fillStyle = 'rgba(0,0,0,0.42)'
+    x.fillRect(0, s - 2, s, 2); x.fillRect(s - 2, 0, 2, s)
+    this.#vignette(x, s, 0.28)
+    return cv
+  }
+
+  // Ancient stone block: cool cobble grain, a few cracks, beveled cube edges.
+  // Static and earthy so the glowing bricks pop against it.
+  #buildWall(): HTMLCanvasElement {
+    const s = TILE
+    const cv = document.createElement('canvas'); cv.width = s; cv.height = s
+    const x = cv.getContext('2d')!
+    const rnd = this.#noise(0x2a17)
+    const g = x.createLinearGradient(0, 0, 0, s)
+    g.addColorStop(0, '#454063'); g.addColorStop(1, '#272338')
+    x.fillStyle = g; x.fillRect(0, 0, s, s)
+    for (let yy = 0; yy < s; yy += 2) { // 2px cobble texels
+      for (let xx = 0; xx < s; xx += 2) {
+        const d = rnd() - 0.5
+        x.fillStyle = d > 0 ? `rgba(190,200,255,${d * 0.5})` : `rgba(0,0,0,${-d * 0.55})`
+        x.fillRect(xx, yy, 2, 2)
+      }
+    }
+    x.strokeStyle = 'rgba(0,0,0,0.4)'; x.lineWidth = 1 // hairline cracks
+    for (let i = 0; i < 3; i++) {
+      let px = (rnd() * s) | 0, py = (rnd() * s) | 0
+      x.beginPath(); x.moveTo(px, py)
+      for (let k = 0; k < 3; k++) { px += (rnd() - 0.5) * 12; py += (rnd() - 0.5) * 12; x.lineTo(px, py) }
+      x.stroke()
+    }
+    x.fillStyle = 'rgba(255,255,255,0.13)' // beveled cube edges
+    x.fillRect(0, 0, s, 2); x.fillRect(0, 0, 2, s)
+    x.fillStyle = 'rgba(0,0,0,0.45)'
+    x.fillRect(0, s - 3, s, 3); x.fillRect(s - 2, 0, 2, s)
+    this.#vignette(x, s, 0.36)
+    return cv
+  }
+
+  #vignette(x: CanvasRenderingContext2D, s: number, strength: number): void {
+    const ao = x.createRadialGradient(s / 2, s / 2, s * 0.32, s / 2, s / 2, s * 0.8)
+    ao.addColorStop(0, 'rgba(0,0,0,0)'); ao.addColorStop(1, `rgba(0,0,0,${strength})`)
+    x.fillStyle = ao; x.fillRect(0, 0, s, s)
+  }
+
+  // Deterministic 0..1 noise (mulberry32) so baked textures are stable per build.
+  #noise(seed: number): () => number {
+    let t = seed >>> 0
+    return () => {
+      t = (t + 0x6d2b79f5) >>> 0
+      let x = t
+      x = Math.imul(x ^ (x >>> 15), x | 1)
+      x ^= x + Math.imul(x ^ (x >>> 7), x | 61)
+      return ((x ^ (x >>> 14)) >>> 0) / 4294967296
+    }
   }
 
   #dana(e: Engine, time: number): void {

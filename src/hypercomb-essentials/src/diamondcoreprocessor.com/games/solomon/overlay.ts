@@ -10,6 +10,7 @@ import { Engine, TILE, type LevelDef } from './engine.js'
 import { Renderer } from './renderer.js'
 import { Designer, TOOLS, type Tool } from './designer.js'
 import { BUILTIN_LEVELS, loadCustomLevels, upsertCustomLevel, deleteCustomLevel, cloneLevel } from './levels.js'
+import { Shaker, ParticleField, easeOutBack, ARCADE } from '../juice.js'
 
 const STYLE_ID = 'sol-overlay-styles'
 const Z = 2147483000
@@ -76,6 +77,19 @@ export class SolomonOverlay {
   #lastTs = 0
   #time = 0
   #overShown = false
+
+  // juice: trauma screen-shake + a short additive particle field + a level-intro
+  // title card — the shared "modern vector arcade" kit, mirroring the Bubble
+  // overlay. Solomon is pixel-crisp (no scale transform, smoothing OFF), so the
+  // shaker runs SMALL and its offset is ROUNDED into the frame each draw. Shake
+  // is driven purely by score/lives/conjure deltas read after engine.update().
+  #shaker = new Shaker(7, 1.8)
+  #field = new ParticleField()
+  #prevScore = 0
+  #prevLives = 3
+  #prevConjure = 0
+  #prevSmash = 0
+  #intro: { t: number; title: string; sub: string } | null = null
 
   // Continuous-play state (see the Transition note above). The engine's score is
   // the RUNNING total carried across levels; the snapshots below record where the
@@ -222,7 +236,7 @@ export class SolomonOverlay {
 
     // ── help ──
     const help = el('div', { class: 'sol-help' })
-    help.innerHTML = '<b>← →</b> move &nbsp;·&nbsp; <b>↑</b> jump &nbsp;·&nbsp; <b>↓</b> duck &nbsp;·&nbsp; <b>J</b> conjure / dispel block &nbsp;·&nbsp; <b>K</b> fireball &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> close'
+    help.innerHTML = '<b>← →</b> move &nbsp;·&nbsp; <b>↑</b> jump (head-butt blocks) &nbsp;·&nbsp; <b>↓</b> duck &nbsp;·&nbsp; <b>J</b> conjure / dispel block &nbsp;·&nbsp; <b>K</b> fireball &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> close'
     root.appendChild(help)
 
     document.body.appendChild(root)
@@ -269,12 +283,14 @@ export class SolomonOverlay {
     this.#overShown = false
     this.#levelStartScore = this.#engine.score
     this.#levelStartLives = this.#engine.lives
+    this.#syncJuice(this.#engine)
     this.#hideBanner()
     this.#sizeCanvasTo(level)
     if (this.#levelLabel) {
       const n = this.#levelIndex + 1, total = this.#levels.length
       this.#levelLabel.textContent = `${level.name}  (${n}/${total})`
     }
+    this.#beginIntro(level.name, 'LEVEL ' + (this.#levelIndex + 1))
   }
 
   #sizeCanvasTo(level: { cols: number; rows: number }): void {
@@ -305,22 +321,142 @@ export class SolomonOverlay {
     this.#lastTs = ts
     this.#time += dt
 
-    if (this.#mode === 'play' && this.#engine && this.#renderer) {
+    const ctx = this.#ctx, r = this.#renderer
+    if (!ctx || !r) { this.#raf = requestAnimationFrame(this.#loop); return }
+
+    // The canvas is sized in world pixels (no scale transform; smoothing OFF), so
+    // screen shake is just a small translate folded into the frame. Clear the WHOLE
+    // canvas first so a shake offset can never smear the trailing edge, then draw
+    // the frame inside a save/translate(rounded shake)/restore — rounding keeps the
+    // pixel art crisp. Shake stays at rest in the designer (never advanced/added).
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+
+    if (this.#mode === 'play' && this.#engine) {
+      this.#shaker.update(dt)
+      const sh = this.#shaker.offset()
+      ctx.save()
+      ctx.translate(Math.round(sh.x), Math.round(sh.y))
       if (this.#transition) {
         // A level was cleared: the simulation is frozen while the score tallies
         // and the next screen scrolls in.
         this.#stepTransition(dt)
-        this.#drawTransition(this.#renderer)
+        this.#drawTransition(r)
       } else {
         this.#engine.update(dt)
-        this.#renderer.draw(this.#engine, this.#time)
+        this.#senseJuice(dt)
+        r.draw(this.#engine, this.#time)
+        this.#field.update(dt)
+        this.#field.draw(ctx)
+        this.#drawIntro(ctx, { w: this.#engine.width, h: this.#engine.height }, dt)
         if (this.#engine.state === 'won') this.#beginClear()
         else if (this.#engine.state === 'gameover' && !this.#overShown) { this.#overShown = true; this.#showGameOver() }
       }
-    } else if (this.#mode === 'design' && this.#renderer) {
-      this.#renderer.drawEditor(this.#designer.level, this.#hover, this.#time)
+      ctx.restore()
+    } else if (this.#mode === 'design') {
+      r.drawEditor(this.#designer.level, this.#hover, this.#time)
     }
     this.#raf = requestAnimationFrame(this.#loop)
+  }
+
+  // ── juice: shake + particles + level intro ───────────────
+
+  /** Read the post-update engine state and convert meaningful changes into shake
+   *  and particle bursts. Pure inference (score / lives / conjure deltas) keeps
+   *  the engine free of any view concerns. Called inside the shaken frame, so the
+   *  bursts it spawns land in world units under the same translate. */
+  #senseJuice(_dt: number): void {
+    const e = this.#engine
+    if (!e) return
+
+    // Life lost — big kick + a spray of sparks at Dana's centre.
+    if (e.lives < this.#prevLives) {
+      this.#shaker.add(0.9)
+      const px = e.player.x + e.player.w / 2
+      const py = e.player.y + e.player.h / 2
+      this.#field.burst(px, py, {
+        count: 22, speed: 140, gravity: 260, life: 0.6,
+        size: 2.6, color: [...ARCADE.spark],
+      })
+    }
+
+    // Conjure / dispel / fireball muzzle — engine sets conjureFlash on its rising
+    // edge. A small nudge + a short upward stone-dust puff at the target cell.
+    if (e.conjureFlash > this.#prevConjure + 1e-4) {
+      this.#shaker.add(0.18)
+      const cell = e.targetCell()
+      const cx = cell.col * TILE + TILE / 2
+      const cy = cell.row * TILE + TILE / 2
+      this.#field.burst(cx, cy, {
+        count: 10, speed: 90, gravity: 120, life: 0.45,
+        size: 2.2, color: [...ARCADE.ember], angle: -Math.PI / 2, arc: 1.6,
+      })
+    }
+
+    // Head-butt — a BRICK shattered overhead. A sharp kick plus stone debris
+    // bursting from the broken cell and tumbling down under gravity.
+    if (e.smashFlash > this.#prevSmash + 1e-4 && e.smashCell) {
+      this.#shaker.add(0.34)
+      const sx = e.smashCell.col * TILE + TILE / 2
+      const sy = e.smashCell.row * TILE + TILE / 2
+      this.#field.burst(sx, sy, {
+        count: 16, speed: 130, gravity: 340, life: 0.5,
+        size: 2.6, color: [...ARCADE.ember],
+      })
+    }
+
+    // Any score gain (kill / gem / key / door) — a small proportional shake. We
+    // don't have exact positions for most of these, so a kick alone is enough.
+    const ds = e.score - this.#prevScore
+    if (ds > 0) this.#shaker.add(Math.min(0.5, 0.12 + ds / 1500))
+
+    this.#prevScore = e.score
+    this.#prevLives = e.lives
+    this.#prevConjure = e.conjureFlash
+    this.#prevSmash = e.smashFlash
+  }
+
+  /** Snap the juice baselines to an engine without firing shake (level swaps),
+   *  and reset the shaker + particle field so nothing carries across a level. */
+  #syncJuice(e: Engine): void {
+    this.#prevScore = e.score
+    this.#prevLives = e.lives
+    this.#prevConjure = e.conjureFlash
+    this.#prevSmash = e.smashFlash
+    this.#shaker = new Shaker(7, 1.8)
+    this.#field.clear()
+  }
+
+  #beginIntro(title: string, sub: string): void { this.#intro = { t: 0, title, sub } }
+
+  /** A short, non-blocking title card that pops in (overshoot), holds, then fades.
+   *  Drawn in the canvas's world pixels over the live game so play never stalls.
+   *  Cyan title + gold sub to match the arcade suite. */
+  #drawIntro(ctx: CanvasRenderingContext2D, dims: { w: number; h: number }, dt: number): void {
+    const intro = this.#intro
+    if (!intro) return
+    intro.t += dt
+    const DUR = 1.7
+    if (intro.t >= DUR) { this.#intro = null; return }
+    const p = intro.t / DUR
+    const appear = easeOutBack(Math.min(1, p / 0.22))
+    const fade = p > 0.72 ? Math.max(0, 1 - (p - 0.72) / 0.28) : 1
+    const { w, h } = dims
+    ctx.save()
+    ctx.globalAlpha = fade
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.translate(w / 2, h * 0.36)
+    ctx.scale(0.62 + 0.38 * appear, 0.62 + 0.38 * appear)
+    ctx.shadowColor = 'rgba(126,224,255,0.55)'
+    ctx.shadowBlur = 18
+    ctx.fillStyle = ARCADE.cyan
+    ctx.font = '800 ' + Math.round(h * 0.085) + 'px "Segoe UI", system-ui, sans-serif'
+    ctx.fillText(intro.title, 0, 0)
+    ctx.shadowBlur = 0
+    ctx.fillStyle = ARCADE.gold
+    ctx.font = '600 ' + Math.round(h * 0.04) + 'px "Segoe UI", system-ui, sans-serif'
+    ctx.fillText(intro.sub, 0, h * 0.08)
+    ctx.restore()
   }
 
   // ── input: play ──────────────────────────────────────────
@@ -433,11 +569,13 @@ export class SolomonOverlay {
     this.#overShown = false
     this.#levelStartScore = this.#engine.score
     this.#levelStartLives = this.#engine.lives
+    this.#syncJuice(this.#engine)
     this.#hideBanner()
     this.#sizeCanvasTo(this.#designer.level)
     const tabs = this.#root?.querySelectorAll('.sol-tab')
     tabs?.forEach((t, i) => t.classList.toggle('on', i === 0))
     if (this.#levelLabel) this.#levelLabel.textContent = `${this.#designer.level.name}  (test)`
+    this.#beginIntro(this.#designer.level.name, 'TEST')
   }
 
   #designerLoad(name: string): void {
@@ -529,6 +667,7 @@ export class SolomonOverlay {
       this.#levelIndex = tr.nextIndex
       this.#levelStartScore = e.score
       this.#levelStartLives = e.lives
+      this.#syncJuice(e)
       this.#sizeCanvasTo(e.level)
       if (this.#levelLabel) {
         this.#levelLabel.textContent = tr.testing
@@ -539,6 +678,10 @@ export class SolomonOverlay {
       tr.t = 0
     } else if (tr.t >= PAN_MS) {
       this.#transition = null   // hand control back — play resumes on the new level
+      const e = this.#engine
+      if (e) {
+        this.#beginIntro(e.level.name, tr.testing ? 'TEST' : 'LEVEL ' + (this.#levelIndex + 1))
+      }
     }
   }
 
@@ -556,7 +699,7 @@ export class SolomonOverlay {
     } else {
       const p = easeInOut(Math.min(1, tr.t / PAN_MS))
       const H = this.#engine!.height
-      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+      // The loop already cleared the full canvas before this translated frame.
       ctx.save(); ctx.translate(0, -p * H); r.draw(tr.prev, this.#time); ctx.restore()
       ctx.save(); ctx.translate(0, (1 - p) * H); r.draw(this.#engine!, this.#time); ctx.restore()
     }

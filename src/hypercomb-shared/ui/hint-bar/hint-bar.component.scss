@@ -11,7 +11,8 @@
 
 .hint-bar {
   position: fixed;
-  top: 4.25rem;
+  // tracks the header size: 4.25rem × the active header zoom
+  top: calc(4.25rem * var(--hc-header-zoom, 1.0));
   left: 0.6rem;
   z-index: 59999;
 
@@ -100,11 +101,6 @@
 }
 
 // ── 13" laptop band (1367–2559px) ─────────────────────────
-// Header is zoomed 1.15x in this band (see `_header-bar.scss`); shift the
-// hint-bar down by the same factor so it keeps the same proportional gap
-// below the (now taller) header.
-@media (min-width: 1367px) and (max-width: 2559px) {
-  .hint-bar {
-    top: 4.89rem;
-  }
-}
+// The hint-bar's 13" laptop-band shift is folded into `--hc-header-zoom`,
+// read by its `top` calc above (see `styles/_header-size.scss`), so no
+// per-band override is needed.
