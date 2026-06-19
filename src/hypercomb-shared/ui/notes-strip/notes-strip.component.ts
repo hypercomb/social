@@ -22,11 +22,21 @@ const MAX_VISIBLE_SELECTIONS = 10
 // pixel strings; missing/non-numeric values fall back to the CSS defaults
 // (28rem wide, content-height tall).
 const NOTES_STRIP_WIDTH_KEY = 'hc:notes-strip-width'
-const NOTES_STRIP_HEIGHT_KEY = 'hc:notes-strip-height'
 
 // Translate delta from the panel's natural (centered) position. Persisted
 // across reloads so the strip stays where the user dropped it.
 const NOTES_STRIP_OFFSET_KEY = 'hc:notes-strip-offset'
+
+// Dock side — 'right' snaps the strip to a full-height rail on the right
+// edge (so it never fights the left-docked control bar); 'float' is the
+// free, draggable, centred-baseline mode. Persisted across reloads.
+const NOTES_STRIP_DOCK_KEY = 'hc:notes-strip-dock'
+
+// Right-edge snap thresholds (mirror the controls-bar hysteresis): enter
+// the dock within SNAP_ZONE of the right edge; only leave it once the
+// cursor pulls back past SNAP_EXIT, so the dock doesn't flicker on/off.
+const SNAP_ZONE = 72
+const SNAP_EXIT = 120
 
 /** Fixed shape set — six CSS-drawn glyphs. The shape is the only
  *  visual category a note carries. Names map 1:1 to .hc-shape-X
@@ -206,10 +216,20 @@ export class NotesStripComponent implements OnDestroy {
    *  the selection-bar variant and per-row checkboxes pin visible. */
   readonly selectionMode = computed<boolean>(() => this.selectionCount() > 0)
 
-  /** Which note currently shows the editing caret in the v2 panel.
-   *  Visual indicator only — wiring the actual rich-text editor is a
-   *  follow-up. */
+  /** Which note the embedded form is currently editing. Null = the form
+   *  is in "add" mode (a fresh note); a note id = "edit" mode (the form
+   *  is prefilled with that note and commit replaces it). */
   readonly editingNoteId = signal<string | null>(null)
+
+  /** The embedded note-form's working text. Committed via `note:commit`
+   *  (with `editId` when editing). This is the single authoring surface —
+   *  the command-line capture path is reserved for a future quick-note
+   *  syntax and no longer drives the tile note button. */
+  readonly draftText = signal('')
+
+  /** The form's textarea, focused when the panel opens via the tile note
+   *  button or an add/edit affordance. */
+  readonly formInput = viewChild<ElementRef<HTMLTextAreaElement>>('formInput')
 
   /** Shape ids exposed to the template for the picker row. Static. */
   readonly shapeIds: readonly ShapeId[] = SHAPE_IDS
@@ -373,7 +393,9 @@ export class NotesStripComponent implements OnDestroy {
    *  signal AND broadcasts on `notes:active-shape` so the drone reads
    *  the latest value when it handles `note:commit`. */
   setShape(id: ShapeId): void {
-    if (this.shape() === id) return
+    // Click the active shape again to clear it (toggle) — removes the need
+    // for a separate clear-shape button in the form.
+    if (this.shape() === id) { this.clearShape(); return }
     this.shape.set(id)
     EffectBus.emit('notes:active-shape', { shape: id })
   }
@@ -608,6 +630,28 @@ export class NotesStripComponent implements OnDestroy {
     return `translate(${x}px, ${y}px)`
   })
 
+  /** Dock side — 'right' = snapped to the right-edge rail, null = floating.
+   *  Defaults to the right rail (notes belong opposite the left control
+   *  bar). Restored from / persisted to localStorage. */
+  readonly dockSide = signal<'right' | null>(((): 'right' | null => {
+    try {
+      const raw = localStorage.getItem(NOTES_STRIP_DOCK_KEY)
+      if (raw === 'float') return null
+      if (raw === 'right') return 'right'
+    } catch { /* corrupt entry — fall through */ }
+    return 'right'
+  })())
+
+  /** Transform binding — suppressed while docked (the rail is laid out by
+   *  CSS, not the float offset). */
+  readonly panelTransformActive = computed<string | null>(() =>
+    this.dockSide() ? null : this.panelTransform()
+  )
+
+  #persistDock(): void {
+    try { localStorage.setItem(NOTES_STRIP_DOCK_KEY, this.dockSide() ?? 'float') } catch { /* ignore */ }
+  }
+
   // Drag bookkeeping — pointerId guards against a second finger
   // hijacking the active drag; #dragStart captures the pixel offset
   // between cursor and panel-baseline so the delta math is stable
@@ -658,6 +702,30 @@ export class NotesStripComponent implements OnDestroy {
     if (event.pointerId !== this.#dragPointerId) return
     const start = this.#dragStart
     if (!start) return
+    const vw = window.innerWidth
+    const docked = this.dockSide() === 'right'
+
+    // Right-edge snap with hysteresis.
+    if (event.clientX >= vw - SNAP_ZONE) {
+      if (!docked) this.dockSide.set('right')
+      return                                   // docked layout is CSS-driven
+    }
+    if (docked && event.clientX > vw - SNAP_EXIT) return   // hysteresis band
+
+    if (docked) {
+      // Leaving the rail → float. Re-baseline so the panel keeps its
+      // current right-flush position instead of jumping to the stale float
+      // offset, then tracks the cursor from here.
+      const rebaseX = this.#rightDockOffsetX()
+      this.dockSide.set(null)
+      this.panelOffset.set({ x: rebaseX, y: 0 })
+      start.px = event.clientX
+      start.py = event.clientY
+      start.ox = rebaseX
+      start.oy = 0
+      return
+    }
+
     // Compute the candidate offset, then clamp it against the current
     // viewport BEFORE writing the signal. Clamping live (vs. on release)
     // is what prevents the panel from flying off-screen mid-drag.
@@ -666,6 +734,21 @@ export class NotesStripComponent implements OnDestroy {
       y: start.oy + (event.clientY - start.py),
     }
     this.panelOffset.set(this.#clampOffsetCandidate(candidate))
+  }
+
+  /** Float-offset X that reproduces the docked (right-flush) position — used
+   *  to hand off smoothly from rail → float. The host centres the panel, so
+   *  flush-right sits (hostContentWidth - panelWidth)/2 right of centre. */
+  #rightDockOffsetX(): number {
+    const host = this.#host.nativeElement
+    const el = this.panel()?.nativeElement
+    if (!el) return 0
+    const cs = getComputedStyle(host)
+    const padL = parseFloat(cs.paddingLeft) || 0
+    const padR = parseFloat(cs.paddingRight) || 0
+    const hostContentW = host.clientWidth - padL - padR
+    const panelW = el.getBoundingClientRect().width
+    return Math.max(0, (hostContentW - panelW) / 2)
   }
 
   #onDragEnd = (event: PointerEvent): void => {
@@ -679,11 +762,12 @@ export class NotesStripComponent implements OnDestroy {
       this.#stack()?.pop(this.#notesDragMode.name)
       this.#dragModeActive = false
     }
-    // Persist final position. Already clamped during the drag.
+    // Persist final position + dock side. Offset already clamped during drag.
     const off = this.panelOffset()
     try {
       localStorage.setItem(NOTES_STRIP_OFFSET_KEY, JSON.stringify(off))
     } catch { /* ignore */ }
+    this.#persistDock()
   }
 
   /** Given a candidate offset, return the closest offset that keeps the
@@ -712,27 +796,24 @@ export class NotesStripComponent implements OnDestroy {
     const newLeft = naturalLeft + candidate.x
     const newTop  = naturalTop  + candidate.y
 
-    const vw = window.innerWidth
-    const vh = window.innerHeight
+    // Clamp within the HOST's box, not the raw viewport. The host already
+    // starts below the header bar and ends above the controls pill, so
+    // confining the panel to it stops a float-drag from sliding up into the
+    // header / command line or down into the controls. maxX/Y are floored at
+    // minX/Y so an oversized panel pins to the top-left instead of inverting.
+    const host = this.#host.nativeElement.getBoundingClientRect()
     const margin = 8
 
-    // Clamp each axis. If the panel fits in that axis, hold it inside;
-    // otherwise, anchor to the leading edge (top / left) and let the
-    // trailing edge overflow — the body's overflow-y handles the rest.
-    let allowedLeft: number
-    if (panelWidth <= vw - 2 * margin) {
-      const maxLeft = vw - margin - panelWidth
-      allowedLeft = Math.max(margin, Math.min(maxLeft, newLeft))
-    } else {
-      allowedLeft = Math.min(margin, newLeft)
-    }
-    let allowedTop: number
-    if (panelHeight <= vh - 2 * margin) {
-      const maxTop = vh - margin - panelHeight
-      allowedTop = Math.max(margin, Math.min(maxTop, newTop))
-    } else {
-      allowedTop = Math.min(margin, newTop)
-    }
+    const minLeft = host.left + margin
+    const maxLeft = Math.max(minLeft, host.right - margin - panelWidth)
+    const allowedLeft = Math.max(minLeft, Math.min(maxLeft, newLeft))
+
+    // No top/bottom margin: the host already clears the header (top) and the
+    // controls pill (bottom), so the float panel should reach flush against
+    // the command line and the bottom, matching the docked rail's extent.
+    const minTop = host.top
+    const maxTop = Math.max(minTop, host.bottom - panelHeight)
+    const allowedTop = Math.max(minTop, Math.min(maxTop, newTop))
 
     return {
       x: candidate.x + (allowedLeft - newLeft),
@@ -754,8 +835,12 @@ export class NotesStripComponent implements OnDestroy {
   // ResizeObserver path.
   #resizePointerId: number | null = null
   #resizeStart: { px: number; py: number; w: number; h: number } | null = null
+  // Which edge the active resize was started from. 'corner' = bottom-right
+  // (w+h), 'left' = width only (the live edge when docked right), 'bottom'
+  // = height only.
+  #resizeEdge: 'corner' | 'left' | 'bottom' = 'corner'
 
-  onResizeStart(event: PointerEvent): void {
+  onResizeStart(event: PointerEvent, edge: 'corner' | 'left' | 'bottom' = 'corner'): void {
     if (event.button !== 0) return
     if (this.#dragPointerId !== null || this.#noteDragPointerId !== null) return
     if (this.isFullscreen()) return  // size is forced; no-op
@@ -765,6 +850,7 @@ export class NotesStripComponent implements OnDestroy {
     if (!el) return
     const rect = el.getBoundingClientRect()
     this.#resizePointerId = event.pointerId
+    this.#resizeEdge = edge
     this.#resizeStart = {
       px: event.clientX,
       py: event.clientY,
@@ -785,14 +871,21 @@ export class NotesStripComponent implements OnDestroy {
     // the strip past its dock bounds.
     const host = this.#host.nativeElement
     const hostRect = host.getBoundingClientRect()
-    const minW = 256  // ~16rem
+    const minW = 256  // ~16rem — matches the .notes-strip CSS min-width floor
     const minH = 80   // ~5rem
     const maxW = Math.max(minW, hostRect.width - 16)
     const maxH = Math.max(minH, hostRect.height - 4)
-    const w = Math.max(minW, Math.min(maxW, start.w + (event.clientX - start.px)))
-    const h = Math.max(minH, Math.min(maxH, start.h + (event.clientY - start.py)))
-    el.style.width = `${Math.round(w)}px`
-    el.style.height = `${Math.round(h)}px`
+    const dx = event.clientX - start.px
+    const dy = event.clientY - start.py
+    const edge = this.#resizeEdge
+    // 'left' grows width as the cursor moves left (toward the panel's
+    // interior the right edge is pinned when docked, so only the left moves).
+    let w = edge === 'left' ? start.w - dx : start.w + dx
+    let h = start.h + dy
+    w = Math.max(minW, Math.min(maxW, w))
+    h = Math.max(minH, Math.min(maxH, h))
+    if (edge !== 'bottom') el.style.width = `${Math.round(w)}px`
+    if (edge !== 'left') el.style.height = `${Math.round(h)}px`
   }
 
   #onResizeEnd = (event: PointerEvent): void => {
@@ -950,9 +1043,23 @@ export class NotesStripComponent implements OnDestroy {
       EffectBus.emit('note:unnest', { cellLabel: sourceCell, sourceId })
       return
     }
-    // 'before' / 'after' in tree mode aren't yet wired to a reorder
-    // event (which assumes a flat array of top-level sigs). For now,
-    // only handle top-level reorder via the multi-cell fall-through.
+    // 'before' / 'after' in tree mode → reorder among the cell's TOP-LEVEL
+    // notes (the slot the drone's note:reorder permutes). Compute the insert
+    // index against the array with the source removed, so dropping just
+    // above/below the target lands exactly there. Nested source/target fall
+    // through to a no-op (the drone ignores a sig not in the top-level slot);
+    // sibling-within-parent reorder would need a dedicated drone op.
+    if ((mode === 'before' || mode === 'after') && targetId) {
+      const top = (this.#notesByCell().get(sourceCell) ?? []).map(n => n.id)
+      const sourcePos = top.indexOf(sourceId)
+      const targetPos = top.indexOf(targetId)
+      if (sourcePos !== -1 && targetPos !== -1) {
+        const withoutTargetIdx = targetPos > sourcePos ? targetPos - 1 : targetPos
+        const targetIndex = mode === 'after' ? withoutTargetIdx + 1 : withoutTargetIdx
+        EffectBus.emit('note:reorder', { cellLabel: sourceCell, sourceId, targetIndex })
+      }
+      return
+    }
 
     // Legacy flat reorder (multi-cell accordion mode).
     if (this.multi() && flatIndex !== null) {
@@ -1364,7 +1471,6 @@ export class NotesStripComponent implements OnDestroy {
       this.cell()  // sole dependency — re-fires on cell change only
       untracked(() => {
         if (this.selectionCount() > 0) this.selectedNotes.set(new Map())
-        if (this.editingNoteId() !== null) this.editingNoteId.set(null)
         if (this.kebabOpenId() !== null) this.kebabOpenId.set(null)
         if (this.pickerOpenForId() !== null) this.pickerOpenForId.set(null)
         // See-all is layer-scoped: clicking into a specific cell
@@ -1375,6 +1481,37 @@ export class NotesStripComponent implements OnDestroy {
           this.seeAllInLayer.set(false)
           this.#layerCellLabels.set([])
         }
+      })
+    })
+
+    // Focus the form's textarea once it has rendered, whenever a focus is
+    // requested (#openForm / cancelEdit). Reading formInput() makes the
+    // effect re-run when the viewChild resolves post-render, so the first
+    // open focuses even though the textarea isn't in the DOM at call time.
+    effect(() => {
+      this.#focusTick()
+      const el = this.formInput()?.nativeElement
+      if (!el) return
+      untracked(() => {
+        if (this.#focusTick() === 0) return
+        el.focus()
+        const end = el.value.length
+        el.setSelectionRange(end, end)
+      })
+    })
+
+    // Navigating to a DIFFERENT real tile closes any open form and clears
+    // its transient state. Tracks #activeCell (not cell(), which the form's
+    // own capture target perturbs) so opening / editing in the form never
+    // trips this reset. Null active cell is left alone — the form may be
+    // open against a capture target with no live selection.
+    effect(() => {
+      const ac = this.#activeCell()
+      untracked(() => {
+        if (!ac) return
+        if (this.#capturingFor() && this.#capturingFor() !== ac) this.#capturingFor.set(null)
+        if (this.editingNoteId() !== null) this.editingNoteId.set(null)
+        if (this.draftText() !== '') this.draftText.set('')
       })
     })
 
@@ -1441,6 +1578,18 @@ export class NotesStripComponent implements OnDestroy {
       this.#capturingFor.set(null)
       this.shape.set(null)
       EffectBus.emit('notes:active-shape', { shape: null })
+    }))
+
+    // The tile note button (and other external add affordances) emit
+    // `note:capture`. The strip now OWNS this: open the in-panel form for
+    // that cell instead of routing into the command line. The notes drone
+    // no longer turns note:capture into a command-line capture — the command
+    // line stays free for a future quick-note syntax.
+    this.#cleanups.push(EffectBus.on<{ cellLabel: string; prefill?: string; editId?: string; shape?: unknown }>('note:capture', (p) => {
+      if (!p?.cellLabel) return
+      if (p.editId) { this.editNote(p.editId, p.cellLabel); return }
+      const sh = (typeof p.shape === 'string' && SHAPE_IDS.includes(p.shape as ShapeId)) ? p.shape as ShapeId : null
+      this.#openForm(p.cellLabel, { prefill: p.prefill, shape: sh })
     }))
 
     // Stale legacy localStorage key — the user's pinned-tools list no
@@ -1620,17 +1769,17 @@ export class NotesStripComponent implements OnDestroy {
   }
 
   #applyStoredDimensions(el: HTMLElement): void {
+    // Width only. Height is intentionally NOT restored: the float panel is
+    // content-height (so it stays freely draggable) and the docked rail is
+    // full height — a persisted height (which, before, captured the docked
+    // full height) would force the float full and lock it to a horizontal
+    // drag line.
     let width: string | null = null
-    let height: string | null = null
     try {
       width = localStorage.getItem(NOTES_STRIP_WIDTH_KEY)
-      height = localStorage.getItem(NOTES_STRIP_HEIGHT_KEY)
     } catch { /* private mode / quota — ignore, fall back to CSS defaults */ }
-    // Suppress the observer's first-callback so the restoration itself
-    // doesn't get re-written to storage.
     this.#applyingDimensions = true
     if (width && /^\d+$/.test(width)) el.style.width = `${width}px`
-    if (height && /^\d+$/.test(height)) el.style.height = `${height}px`
     queueMicrotask(() => { this.#applyingDimensions = false })
   }
 
@@ -1649,10 +1798,10 @@ export class NotesStripComponent implements OnDestroy {
         const entry = entries[entries.length - 1]
         if (!entry) return
         const w = Math.round(entry.contentRect.width)
-        const h = Math.round(entry.contentRect.height)
+        // Width only — see #applyStoredDimensions for why height is not
+        // persisted (it would lock the float panel to a full-height box).
         try {
           localStorage.setItem(NOTES_STRIP_WIDTH_KEY, String(w))
-          localStorage.setItem(NOTES_STRIP_HEIGHT_KEY, String(h))
         } catch { /* ignore */ }
       })
     })
@@ -1699,32 +1848,118 @@ export class NotesStripComponent implements OnDestroy {
    *  or when the strip stays open from cached notes after a tile
    *  deselect. Falls back to `cell()` for callers that don't pass one. */
   open(noteId: string, cellLabel?: string): void {
+    // Back-compat alias — reading now happens inline in the panel form.
+    this.editNote(noteId, cellLabel)
+  }
+
+  /** Open a note for editing in the embedded form. Plain notes load into
+   *  the form (prefilled with their RAW text + shape so any legacy
+   *  [Q]/[A:] marker round-trips); questions still route to the tile
+   *  editor, where Claude's Q/A flow lives. Cell-aware for multi-cell. */
+  editNote(noteId: string, cellLabel?: string): void {
     const cell = cellLabel ?? this.cell()
     if (!cell) return
-    // Walk the cell's tree so the note resolves even when it lives
-    // inside a parent's `children` (clicked from a nested row).
-    const tree = this.#notesByCell().get(cell) ?? []
-    const findInTree = (nodes: readonly Note[]): Note | undefined => {
+    const note = this.#findNote(cell, noteId)
+    if (!note) return
+    if (this.noteKind(note) === 'q') {
+      EffectBus.emit('tile:action', { action: 'edit', label: cell, q: 0, r: 0, index: 0 })
+      return
+    }
+    this.#openForm(cell, { editId: noteId, prefill: note.text, shape: note.shape })
+  }
+
+  /** Walk a cell's note tree (top-level or nested) to resolve a note id. */
+  #findNote(cell: string, noteId: string): Note | undefined {
+    const walk = (nodes: readonly Note[]): Note | undefined => {
       for (const n of nodes) {
         if (n.id === noteId) return n
-        const found = findInTree(n.children)
+        const found = walk(n.children)
         if (found) return found
       }
       return undefined
     }
-    const note = findInTree(tree)
-    if (note && this.noteKind(note) === 'q') {
-      EffectBus.emit('tile:action', { action: 'edit', label: cell, q: 0, r: 0, index: 0 })
-      return
-    }
-    EffectBus.emit('notes:open', { cellLabel: cell, noteId })
+    return walk(this.#notesByCell().get(cell) ?? [])
   }
 
-  /** Plus button → enter capture mode in the command line. */
+  // ── Embedded note form ────────────────────────────────────
+  // The form lives at the top of the panel. Opening it sets the capture
+  // target (so the panel shows even for a cell with no notes yet) and
+  // focuses the textarea. Commit routes through the same `note:commit`
+  // event the drone already handles — no new write path.
+
+  /** Open / focus the form for `cell`. `editId` set ⇒ edit mode. */
+  #openForm(cell: string, opts?: { editId?: string | null; prefill?: string; shape?: ShapeId | null }): void {
+    if (!cell) return
+    this.#capturingFor.set(cell)
+    this.#hiddenContext.set(null)             // a fresh open un-hides the strip
+    this.editingNoteId.set(opts?.editId ?? null)
+    this.draftText.set(opts?.prefill ?? '')
+    const sh = opts?.shape ?? null
+    this.shape.set(sh)
+    EffectBus.emit('notes:active-shape', { shape: sh })
+    this.#focusForm()
+  }
+
+  /** Bump to request focusing the form input. An effect (constructor) does
+   *  the actual focus once the textarea has rendered — so the first open,
+   *  when the form isn't in the DOM yet at call time, still focuses. */
+  readonly #focusTick = signal(0)
+  #focusForm(): void { this.#focusTick.update(v => v + 1) }
+
+  /** Textarea input → mirror into the draft signal. */
+  onFormInput(event: Event): void {
+    this.draftText.set((event.target as HTMLTextAreaElement).value)
+  }
+
+  /** Enter (no shift) commits; Esc cancels an edit or clears the draft,
+   *  otherwise falls through to the panel's escape cascade. */
+  onFormKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault()
+      this.commitForm()
+      return
+    }
+    if (event.key === 'Escape') {
+      if (this.editingNoteId()) {
+        event.preventDefault(); event.stopPropagation()
+        this.cancelEdit()
+      } else if (this.draftText().trim()) {
+        event.preventDefault(); event.stopPropagation()
+        this.draftText.set('')
+      }
+    }
+  }
+
+  /** Commit the form — append (add mode) or replace (edit mode) via the
+   *  drone's `note:commit` handler, carrying the staged shape. Keeps the
+   *  panel open and refocuses so the user can keep adding. */
+  commitForm(): void {
+    const cell = this.cell()
+    if (!cell) return
+    const text = this.draftText().trim()
+    if (!text) { this.cancelEdit(); return }
+    const editId = this.editingNoteId()
+    EffectBus.emit('notes:active-shape', { shape: this.shape() })
+    EffectBus.emit('note:commit', { cellLabel: cell, text, shape: this.shape(), editId: editId ?? undefined })
+    this.draftText.set('')
+    this.editingNoteId.set(null)           // editing is one-shot → back to add
+    this.#focusForm()
+  }
+
+  /** Drop out of edit mode back to a blank add form. */
+  cancelEdit(): void {
+    this.editingNoteId.set(null)
+    this.draftText.set('')
+    this.shape.set(null)
+    EffectBus.emit('notes:active-shape', { shape: null })
+    this.#focusForm()
+  }
+
+  /** Add affordance → focus a fresh add form for the active cell. */
   add(): void {
     const cell = this.cell()
     if (!cell) return
-    EffectBus.emit('note:capture', { cellLabel: cell })
+    this.#openForm(cell)
   }
 
   /** Flip between chips and rows layout; persists the choice. */
@@ -1745,9 +1980,11 @@ export class NotesStripComponent implements OnDestroy {
    *  Also cancels any in-progress capture; otherwise the capture-trumps-
    *  hide rule in `visible()` would keep the strip open while authoring. */
   hide(): void {
-    if (this.#capturingFor()) {
-      EffectBus.emit('notes:cancel', {})
-    }
+    // Close any open form locally (the command line is no longer involved)
+    // before recording the hidden context, so `visible()` settles to false.
+    this.#capturingFor.set(null)
+    this.draftText.set('')
+    this.editingNoteId.set(null)
     this.#hiddenContext.set(this.#contextKey())
   }
 
@@ -1811,7 +2048,7 @@ export class NotesStripComponent implements OnDestroy {
     }
     this.#userClosed.set(false)
     this.#openGroup.set(cell)
-    EffectBus.emit('note:capture', { cellLabel: cell })
+    this.#openForm(cell)
   }
 
   /**
@@ -1820,17 +2057,12 @@ export class NotesStripComponent implements OnDestroy {
    * committed.
    */
   captureForEmpty(cell: string): void {
-    EffectBus.emit('note:capture', { cellLabel: cell })
+    this.#openForm(cell)
   }
 
-  /** Open a specific note from within an accordion group. */
+  /** Open a specific note from within an accordion group → edit in form. */
   openInGroup(cell: string, noteId: string): void {
-    const note = this.#notesByCell().get(cell)?.find(n => n.id === noteId)
-    if (note && this.noteKind(note) === 'q') {
-      EffectBus.emit('tile:action', { action: 'edit', label: cell, q: 0, r: 0, index: 0 })
-      return
-    }
-    EffectBus.emit('notes:open', { cellLabel: cell, noteId })
+    this.editNote(noteId, cell)
   }
 
   /** Delete a note from within an accordion group. */

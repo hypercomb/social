@@ -36,7 +36,6 @@ const NOTE_ICON_SVG =
 const NOTE_ACCENT = 0xffe14a
 const NOTES_TRIGGER = 'notes:changed'
 const NOTES_SLOT = 'notes'
-const CAPTURE_MODE = 'note-capture' as const
 
 const SIG_REGEX = /^[a-f0-9]{64}$/
 
@@ -191,16 +190,11 @@ export class NotesService {
 
     // ── EffectBus wiring ──────────────────────────────────────────────
 
-    EffectBus.on<{ cellLabel: string; prefill?: string; editId?: string; shape?: unknown }>('note:capture', (payload) => {
-      if (!payload?.cellLabel) return
-      EffectBus.emit('command:enter-mode', {
-        mode: CAPTURE_MODE,
-        target: payload.cellLabel,
-        prefill: payload.prefill ?? '',
-        editId: payload.editId ?? '',
-        shape: normalizeShape(payload.shape),
-      })
-    })
+    // `note:capture` is now handled entirely by the notes-strip: it opens
+    // the in-panel form for the target cell. The drone no longer bridges it
+    // into a command-line capture — the command line stays free for a future
+    // explicit quick-note syntax (which can emit `command:enter-mode` with
+    // mode 'note-capture' directly).
 
     // The strip emits this whenever the user picks / clears a shape
     // in the toolbar, OR when capture mode opens (so we get the

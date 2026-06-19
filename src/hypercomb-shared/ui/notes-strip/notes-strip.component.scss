@@ -22,13 +22,17 @@
   // so the footer is always anchored to the viewport bottom (above
   // the pill). Header is ~50px; the pill floats with bottom: 0.6rem
   // and is ~3rem tall, so we reserve 5rem at the bottom to clear it.
-  top: calc(var(--hc-header-height, 3rem) + 14px);
+  top: calc(var(--hc-header-height, 3rem) + 4px);
   bottom: 5rem;
   left: 0;
   right: 0;
   z-index: 60001;
   display: flex;
   justify-content: center;
+  // flex-start (not the default stretch) so a floating panel takes its own
+  // content height and can be dragged freely up/down. The docked rail
+  // (position:fixed) and fullscreen force full height via their own rules.
+  align-items: flex-start;
   pointer-events: none;
   padding: 0 16px;
 }
@@ -78,10 +82,36 @@
   // localStorage; max-height: 100% prevents the user from dragging
   // the strip past the host's bounds.
   width: 500px;
-  height: 100%;
+  // Float height is content-driven (capped at the host), so a short note
+  // list is a small box you can freely reposition in 2D — a full-height
+  // float would have no vertical slack and "lock" to a horizontal line.
+  // The docked rail and fullscreen force full height via their own rules.
+  height: auto;
+  // Floor matches the corner-resize clamp (#onResizeMove minW=256) so the
+  // stored/restored-dimension path can never render the strip narrower.
+  min-width: 256px;
   max-width: calc(100% - 32px);
   max-height: 100%;
   overflow: visible; // palette overhangs below the strip
+}
+
+// ── Right-edge rail (docked) ──────────────────────────────
+// Mirrors the control bar's dock: fixed to the VIEWPORT edge (right:0), not
+// the host's padded content box — so it snaps crisply flush to the screen
+// like the left rail instead of floating 16px in. Full height between the
+// header and the viewport bottom. The float offset is suppressed (transform
+// bound to null while docked); width stays the user's resized inline width
+// (the left edge is the live resize edge), and height is forced full so a
+// prior float-resize height can't leave a gap.
+.notes-strip.dock-right {
+  position: fixed;
+  right: 0;
+  top: calc(var(--hc-header-height, 3rem) + 4px);
+  bottom: 0;
+  margin: 0;
+  height: auto !important;
+  max-height: none !important;
+  border-radius: 12px 0 0 12px;
 }
 
 // ── Header (shared) ────────────────────────────────────
@@ -317,6 +347,31 @@
 }
 .cv2-resize-handle:hover::before { opacity: 1; }
 :host.is-fullscreen .cv2-resize-handle { display: none; }
+
+// Invisible edge resize handles — transparent hit strips along the panel
+// edges (no glyph; the cursor signals affordance). The left edge is the live
+// resize edge when docked right; bottom for the floating panel's height.
+.cv2-resize-edge {
+  position: absolute;
+  z-index: 5;
+  user-select: none;
+  touch-action: none;
+}
+.cv2-resize-edge-left {
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 8px;
+  cursor: ew-resize;
+}
+.cv2-resize-edge-bottom {
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 8px;
+  cursor: ns-resize;
+}
+:host.is-fullscreen .cv2-resize-edge { display: none; }
 
 .strip-list {
   list-style: none;
@@ -990,6 +1045,97 @@
 
 .cv2-toolbar-spacer { flex: 1; }
 
+// ── Embedded note form ────────────────────────────────────
+// The single authoring surface, docked at the top of the panel. Textarea
+// + commit button on one row; the shape picker (.cv2-shape-row) and clear
+// / cancel controls below. Enter commits, Shift+Enter newlines.
+.cv2-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--md-surface-c-low) 80%, transparent);
+  border-bottom: 1px solid var(--md-outline-variant);
+  flex-shrink: 0;
+}
+
+.cv2-form-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.cv2-form-input {
+  flex: 1;
+  min-width: 0;
+  min-height: 38px;
+  max-height: 40vh;
+  resize: none;
+  padding: 9px 10px;
+  background: var(--md-surface-c);
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 8px;
+  color: var(--md-on-surface);
+  font-family: var(--md-font-display, Inter, system-ui);
+  font-size: 14px;
+  line-height: 1.4;
+  outline: none;
+  transition: border-color var(--md-dur-short) var(--md-easing-standard),
+              box-shadow var(--md-dur-short) var(--md-easing-standard);
+
+  &::placeholder { color: var(--md-on-surface-faint); }
+
+  &:focus {
+    border-color: color-mix(in srgb, var(--md-secondary) 55%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--md-secondary) 12%, transparent);
+  }
+}
+
+.cv2-form-submit {
+  flex-shrink: 0;
+  height: 38px;
+  padding: 0 16px;
+  background: var(--md-secondary);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--md-on-secondary, #15151c);
+  font-family: var(--md-font-ui, Inter, system-ui);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity var(--md-dur-short) var(--md-easing-standard),
+              filter var(--md-dur-short) var(--md-easing-standard);
+
+  &:hover:not(:disabled) { filter: brightness(1.08); }
+  &:disabled { opacity: 0.4; cursor: default; }
+}
+
+.cv2-form-tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.cv2-form-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 26px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 5px;
+  color: var(--md-on-surface-faint);
+  font-family: var(--md-font-ui);
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--md-on-surface);
+    border-color: var(--md-on-surface-faint);
+  }
+}
+
 // Shape picker row — six CSS-drawn glyph buttons. Each button's glyph
 // is delivered by a literal .hc-shape-X class on a static <span>;
 // nothing on the data side influences its appearance.
@@ -1202,11 +1348,13 @@
 
 .cv2-note {
   display: grid;
-  // chevron (16px) · select (22px) · grip (16px) · body (1fr) · kebab (22px)
-  grid-template-columns: 16px 22px 16px 1fr 22px;
-  gap: 6px;
+  // chevron (16px) · select (20px) · grip (16px) · body (1fr) · kebab (20px)
+  grid-template-columns: 16px 20px 16px 1fr 20px;
+  gap: 5px;
   align-items: start;
-  padding: 8px;
+  // Trim the right inset so the note text claims more render area toward
+  // the right edge (left stays at 8px to keep the chevron off the border).
+  padding: 8px 6px 8px 8px;
   position: relative;  // anchor for kebab + nest-picker popovers
   background: color-mix(in srgb, var(--md-on-surface) 2.5%, transparent);
   border: 1px solid transparent;
@@ -1242,10 +1390,12 @@
 .cv2-note-select,
 .cv2-note-grip {
   display: flex;
-  align-items: flex-start;
+  // Center the glyph against the note text's first line box (14px × 1.5 =
+  // 21px) instead of pinning it to the top with a baseline nudge.
+  align-items: center;
   justify-content: center;
+  min-height: 21px;
   color: var(--md-on-surface-faint);
-  padding-top: 1px;
   cursor: pointer;
 }
 

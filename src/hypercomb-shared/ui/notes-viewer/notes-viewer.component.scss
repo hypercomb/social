@@ -78,11 +78,13 @@ $accent: #ffe14a;
   min-width: 0;
 }
 
+// display:contents — the host generates no box, so nothing blankets the
+// hex canvas when the viewer is closed. The full-surface fixed layer lives
+// on .viewer-backdrop, which only renders inside the open-state @if. Same
+// convention as youtube-viewer / docs-overlay; see _canvas-suppress.scss for
+// the why behind never letting an idle overlay sit over #pixi-host.
 :host {
-  position: fixed;
-  inset: 0;
-  z-index: 100002;
-  pointer-events: none;
+  display: contents;
 }
 
 // Non-modal: the "backdrop" no longer blocks clicks. The user can keep
@@ -92,8 +94,9 @@ $accent: #ffe14a;
 // click-outside.
 .viewer-backdrop {
   pointer-events: none;
-  position: absolute;
+  position: fixed;
   inset: 0;
+  z-index: 100002;
   display: flex;
   align-items: center;
   justify-content: center;
