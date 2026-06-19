@@ -5,6 +5,7 @@ import { sessionHideStore } from './session-hide.store.js'
 import { hasDecorationKind, kindsForLabel } from '../../commands/decoration-kind-index.js'
 import { FILES_ATTACHMENT_KIND } from '../../files/files-attachment.js'
 import { FILES_ICON } from '../../files/file-types.js'
+import { SWARM_INVITE_KIND } from '../../sharing/meeting-invite.js'
 // Arrangement persistence currently disabled — `#getRootDir` returns
 // null pending the layer-slot read/write path, so the legacy
 // readCellProperties / writeCellProperties imports are no longer needed.
@@ -269,6 +270,30 @@ const tileHasVisualBeeFeature = (label: string): boolean => {
   return false
 }
 
+// True when a tile carries a swarm invite — either a LOCAL `swarm:invite`
+// decoration (the owner's own junction) or a PEER broadcasting one over the
+// wire (its bundle sig rides as `inviteSig`; see swarm.drone publish +
+// visual-sanitizer). Synchronous + O(peers): the decoration index is the hot
+// in-memory map and the peer scan is the same cache peerBroadcastsTile reads.
+const peerTileHasInvite = (label: string): boolean => {
+  const swarm = window.ioc.get<{
+    peerTilesAtCurrentSig?: () => readonly ({ name: string } & Record<string, unknown>)[]
+  }>('@diamondcoreprocessor.com/SwarmDrone')
+  if (!swarm?.peerTilesAtCurrentSig) return false
+  for (const tile of swarm.peerTilesAtCurrentSig()) {
+    if (tile.name !== label) continue
+    if (/^[a-f0-9]{64}$/.test(String(tile['inviteSig'] ?? ''))) return true
+  }
+  return false
+}
+
+const tileHasInvite = (label: string): boolean =>
+  hasDecorationKind(label, SWARM_INVITE_KIND) || peerTileHasInvite(label)
+
+// Login-style glyph (arrow stepping through a doorway) — "step into this
+// meeting place". Material "login" path, verbatim.
+const INVITE_ICON = md('M11 7l-1.41 1.41L12.17 11H3v2h9.17l-2.58 2.59L11 17l5-5zM20 19h-8v2h8c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-8v2h8v14z')
+
 const ICON_REGISTRY: IconRegistryEntry[] = [
   // ── private profile ──
   { name: 'command', svgMarkup: ICONS.command, hoverTint: 0xa8ffd8, profile: 'private', labelKey: 'action.command', descriptionKey: 'action.command.description' },
@@ -322,16 +347,19 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // (name, at) identity makes it idempotent: same-sig aborts, a re-signed
   // publisher layer replaces your stale copy.
   { name: 'sync', svgMarkup: ICONS.sync, hoverTint: 0xa8d8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => peerBroadcastsTile(ctx.label), labelKey: 'action.sync', descriptionKey: 'action.sync.description' },
-  // `features` opens the installer focused on this tile's branch so the
-  // participant can VIEW the publisher's features and turn the scripts
-  // portion on. Paired with `sync` (which folds the visuals straight into
-  // the hive): sync = visuals now, features = scripts on demand. Shown ONLY
-  // when there are features to enable — the tile carries a decoration owned
-  // by a registered visual bee (tileHasVisualBeeFeature: an actual render
-  // feature with a scripts portion, NOT a plain image or pure-data card) AND
-  // a live peer is broadcasting this branch (so the installer has a sig to
-  // open). Click handled by SwarmAdoptDrone (action 'features'), like adopt/sync.
-  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => tileHasVisualBeeFeature(ctx.label) && peerBroadcastsTile(ctx.label), labelKey: 'action.features', descriptionKey: 'action.features.description' },
+  // `features` (the puzzle-piece) is now "SHOW FEATURES": click it and
+  // ShowFeaturesDrone gathers the META details (no code) of the bee features
+  // this tile uses and opens the right-docked features panel — you stay in
+  // the hive. Clicking another tile's icon ADDS its features to the same
+  // list. Shown on any tile that carries a registered visual bee
+  // (tileHasVisualBeeFeature: a real render-feature, NOT a plain image or
+  // pure-data card) — the peer-broadcast requirement is gone, because viewing
+  // metadata needs no publisher branch. Registered on `private` (browsing
+  // your own hive) and `public-own` (your tile in public mode). Click handled
+  // by ShowFeaturesDrone (action 'features'); turning a feature on from the
+  // panel is BENIGN staging that only pre-ticks the installer later.
+  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => tileHasVisualBeeFeature(ctx.label), labelKey: 'action.features', descriptionKey: 'action.features.description' },
+  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => tileHasVisualBeeFeature(ctx.label), labelKey: 'action.features', descriptionKey: 'action.features.description' },
   // ── public-external profile ──
   { name: 'adopt', svgMarkup: ICONS.adopt, hoverTint: 0xa8ffd8, profile: 'public-external', labelKey: 'action.adopt', descriptionKey: 'action.adopt.description' },
   // 'hide' also lives in `public-own` (your own tile in public mode);
@@ -350,6 +378,14 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
   { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
   { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, profile: 'public-external', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
+  // ── swarm invite (all profiles) ──
+  // The invite icon appears on any tile carrying a `swarm:invite` junction —
+  // your own (private / public-own) or a peer's broadcasting it (public-external).
+  // visibleWhen reads the synchronous decoration index + peer cache; the click
+  // is handled by MeetingInviteWorker via tile:action (auth-switch join).
+  { name: 'invite', svgMarkup: INVITE_ICON, hoverTint: 0xa8ffd8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => tileHasInvite(ctx.label), labelKey: 'action.invite', descriptionKey: 'action.invite.description' },
+  { name: 'invite', svgMarkup: INVITE_ICON, hoverTint: 0xa8ffd8, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => tileHasInvite(ctx.label), labelKey: 'action.invite', descriptionKey: 'action.invite.description' },
+  { name: 'invite', svgMarkup: INVITE_ICON, hoverTint: 0xa8ffd8, profile: 'public-external', visibleWhen: (ctx: OverlayTileContext) => tileHasInvite(ctx.label), labelKey: 'action.invite', descriptionKey: 'action.invite.description' },
   // NOTE: feature icons (e.g. `contact`) are NOT listed here. A feature
   // contributes its overlay icon by registering ONE `IconProviderRegistry`
   // provider declaring `profiles` + `defaultActive` + `visibleWhen` (see
@@ -364,15 +400,17 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 // in ICON_REGISTRY above; adopting a peer tile is handled by the
 // `public-external` profile (the tile flips kind once it's local).
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  'private': ['command', 'edit', 'note', 'remove', 'break-apart', 'files'],
+  'private': ['command', 'edit', 'note', 'features', 'remove', 'break-apart', 'files', 'invite'],
   // World mode: ONLY the two share-toggles, none of the regular icons.
   'world': ['make-public', 'make-branch-public'],
   // Your own tile in public mode — same trash-bin remove that
   // private mode uses. Records a history op, can be undone. `sync`
-  // folds the broadcasting peer's latest VISUALS into the tile in place;
-  // `features` opens the installer for that branch to turn its scripts on
-  // (both only rendered while a live peer publishes the same name).
-  'public-own': ['sync', 'features', 'remove', 'break-apart', 'files'],
+  // folds the broadcasting peer's latest VISUALS into the tile in place
+  // and is rendered ONLY while a live peer publishes the same name.
+  // `features` (puzzle-piece) opens the read-only SHOW FEATURES panel for
+  // any tile carrying a registered visual bee — it stays in the hive and
+  // has NO peer-broadcast requirement.
+  'public-own': ['sync', 'features', 'remove', 'break-apart', 'files', 'invite'],
   // Peer-only mesh tiles. Single-click `adopt` is the explicit
   // "I want to expand on this topic" action — writes the tile to
   // your local layer AND pulls the resources it references (images
@@ -380,7 +418,7 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   // adopt: auto-adopt follows a participant continuously, single-
   // adopt is one tile + its resources, on demand. `hide` dismisses
   // a peer tile from view without taking ownership.
-  'public-external': ['adopt', 'hide', 'files'],
+  'public-external': ['adopt', 'hide', 'files', 'invite'],
 }
 
 // ── Position computation ──────────────────────────────────────────
@@ -435,14 +473,27 @@ export class TileActionsDrone extends Drone {
     lineage: '@hypercomb.social/Lineage',
   }
 
-  protected override listens = ['render:host-ready', 'render:cell-count', 'tile:action', 'controls:action', 'overlay:icons-reordered', 'overlay:arrange-mode', 'substrate:applied', 'substrate:rerolled', 'cell:removed']
+  protected override listens = ['render:host-ready', 'overlay:request-register', 'render:cell-count', 'tile:action', 'controls:action', 'overlay:icons-reordered', 'overlay:arrange-mode', 'substrate:applied', 'substrate:rerolled', 'cell:removed']
   protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'note:capture', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'tile:public-changed', 'cell:removed', 'visibility:show-hidden', 'substrate:rerolled']
 
   #registered = false
   #effectsRegistered = false
   #arrangement: IconArrangement = {}
   #substrateLabels = new Set<string>()
-  #onRegistryChange = (): void => { this.#reregisterAll() }
+  #registryChangeTimer: ReturnType<typeof setTimeout> | null = null
+  // Icon providers (edit, note, contact, view:website) self-register in the
+  // IconProviderRegistry one at a time during boot. Reacting to each 'change'
+  // immediately runs #reregisterAll's unregister-then-reregister churn, which
+  // races the overlay's accumulate and leaves a partial/invisible icon set.
+  // Coalesce to a SINGLE pass once the providers settle so the COMPLETE set
+  // re-registers cleanly (exactly what a manual re-trigger does).
+  #onRegistryChange = (): void => {
+    if (this.#registryChangeTimer) clearTimeout(this.#registryChangeTimer)
+    this.#registryChangeTimer = setTimeout(() => {
+      this.#registryChangeTimer = null
+      this.#reregisterAll()
+    }, 250)
+  }
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#effectsRegistered) {
@@ -453,6 +504,21 @@ export class TileActionsDrone extends Drone {
         if (this.#registered) return
         this.#registered = true
         void this.#loadArrangementAndRegister()
+      })
+
+      // Handshake: the overlay asks every icon provider to re-emit once it is
+      // ready. Its overlay:register-action subscription is live, but our
+      // descriptors were emitted earlier and only the LAST survives in
+      // EffectBus's single lastValue slot — so without this the overlay boots
+      // with zero icons. Respond with the full ADDITIVE batch via
+      // #buildAllDescriptors (NOT #reregisterAll, which emits an unregister
+      // per profile entry first and opens a transient empty window). This one
+      // response also carries the IconProviderRegistry-contributed icons
+      // (edit/note/contact), since they fold into #mergedEntries.
+      this.onEffect('overlay:request-register', () => {
+        if (!this.#registered) return
+        this.emitEffect('overlay:register-action', this.#buildAllDescriptors())
+        this.#emitPoolIcons()
       })
 
       // Track which tiles have substrate so bulk reroll can filter correctly.
@@ -586,10 +652,13 @@ export class TileActionsDrone extends Drone {
   #registerProfileIcons(profile: OverlayProfileKey): void {
     const merged = this.#mergedEntries()
 
-    // Unregister existing icons for this profile
+    // Unregister existing icons for this profile. Carry the profile so the
+    // overlay removes the name from THIS profile's order only — names shared
+    // across profiles (remove/files/invite/break-apart/contact) would otherwise
+    // be spliced out of the wrong profile (the bug that collapsed the set).
     const profileEntries = merged.filter(e => e.profile === profile)
     for (const entry of profileEntries) {
-      EffectBus.emit('overlay:unregister-action', { name: entry.name })
+      EffectBus.emit('overlay:unregister-action', { name: entry.name, profile })
     }
 
     // Re-register with new positions

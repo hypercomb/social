@@ -41,6 +41,19 @@ export class ToggleStateService {
     this.#broadcastChange()
   }
 
+  /** Persist explicit states WITHOUT broadcasting — no resync is triggered.
+   *  Used to hold a package update's CHANGED items OFF when the upgrade view
+   *  opens: the hive must stay exactly as it is (still running what it runs)
+   *  until the participant explicitly opts in. A broadcast here would fire a
+   *  resync that recomputes the enabled set against DCP's freshly-resolved new
+   *  version — exactly the disturbance we are deferring. The opt-in path uses
+   *  the broadcasting setEnabled/setManyEnabled, which is what actually syncs. */
+  setManyEnabledQuiet(nodeIds: Iterable<string>, value: boolean): void {
+    let wrote = false
+    for (const id of nodeIds) { this.#state.set(id, value); wrote = true }
+    if (wrote) this.#persist()
+  }
+
   /**
    * Public hook for non-toggle events that should still trigger a web
    * resync — e.g. a freshly installed domain on DCP. The sentinel

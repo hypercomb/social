@@ -95,7 +95,7 @@
             }
           </button>
           <span class="header-sig" [title]="group.sections[0]?.rootSig">{{ group.sections[0] ? displayLabel(group.sections[0]) : '' }}</span>
-          @if (group.hiddenVersionCount > 0 || showAllVersions()) {
+          @if ((group.hiddenVersionCount > 0 || showAllVersions()) && !groupHasUpgrade(group)) {
             <button class="domain-action versions-toggle"
               (click)="toggleShowAllVersions()"
               [class.active]="showAllVersions()"
@@ -144,6 +144,15 @@
               <div class="section-status error">{{ section.error }}</div>
             }
 
+            @if (upgradeCount(section) > 0) {
+              <div class="upgrade-banner">
+                <span class="upgrade-banner-text">{{ 'dcp.upgrade-new' | t: { count: upgradeCount(section) } }}</span>
+                <button class="upgrade-optin-all" type="button" (click)="optInAllUpgrades(section)">
+                  {{ 'dcp.upgrade-optin-all' | t }}
+                </button>
+              </div>
+            }
+
             @if (section.items.length) {
               <dcp-tree-view
                 [nodes]="section.items"
@@ -160,11 +169,17 @@
                 (hatch)="onHatchEgg($event)" />
             }
 
-            <dcp-patch-list
-              [patches]="section.patches"
-              [activeRootSig]="section.rootSig"
-              [originalRootSig]="section.originalRootSig"
-              (switchRoot)="onSwitchRoot(section, $event)" />
+            <!-- Revision restore (switch active root among patches/versions)
+                 is hidden while a package update is under review for this
+                 group — you finish the upgrade first. Returns once the delta
+                 is cleared. -->
+            @if (!groupHasUpgrade(group)) {
+              <dcp-patch-list
+                [patches]="section.patches"
+                [activeRootSig]="section.rootSig"
+                [originalRootSig]="section.originalRootSig"
+                (switchRoot)="onSwitchRoot(section, $event)" />
+            }
           </div>
         }
         }

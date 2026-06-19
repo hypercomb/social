@@ -128,4 +128,15 @@ export interface TreeNode {
    * ready to enable" — until you enable it or navigate away. Optional/false.
    */
   freshlyAdopted?: boolean
+
+  /**
+   * True for a node that is part of the CHANGE DELTA of a package update —
+   * an item the new package version added/changed relative to the version the
+   * hive is running. Like {@link freshlyAdopted} but for upgrades: rendered
+   * OFF by default and persistently highlighted as "new — review and enable",
+   * until the participant opts in. The off-default is scoped to these delta
+   * nodes only; the rest of the package keeps its normal (on) default. Set by
+   * the installer's upgrade-hash handoff; optional/false.
+   */
+  freshlyUpgraded?: boolean
 }

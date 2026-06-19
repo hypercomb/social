@@ -23,6 +23,15 @@
   display: flex;
   align-items: stretch;
   height: 2.5rem;
+  // Switchable size: `--hc-header-zoom` (1.0 / 1.15 / 1.45, see
+  // `styles/_header-size.scss`) scales the box AND every child
+  // proportionally — height, padding, the command-line/mesh-header fonts
+  // (all `em`-based) and the rem-based status icons alike — so the bar
+  // grows with type to match in one lever. The 13" laptop comfort bump is
+  // folded into the same variable. The header-anchored fixed offsets below
+  // (breadcrumb, dock-left rail, hint-bar, notes-strip, history-viewer,
+  // format-painter) read the same factor so they stay flush at any size.
+  zoom: var(--hc-header-zoom, 1.0);
   padding: 0.1rem 0.25rem;
   background: rgba(8, 16, 26, 0.72);
   backdrop-filter: blur(10px);
@@ -161,17 +170,11 @@
 // ═══════════════════════════════════════════════════════════
 
 // ── 13" laptop band (1367–2559px) ─────────────────────────
-// A gentle 15% zoom so the command-line + mesh-header chips read at a
-// comfortable size on a typical laptop without the bar going chunky.
-// `zoom` scales both rendering and layout — the bar takes 15% more
-// vertical space, and the breadcrumb / dock-left rail / hint-bar below
-// shift down by the same factor to stay flush (see controls-bar and
-// hint-bar component styles, and `#computePillZoom()` for the bottom pill).
-@media (min-width: #{$bp-desktop}) and (max-width: #{$bp-desktop-wide - 1}) {
-  .header-bar {
-    zoom: 1.15;
-  }
-}
+// The gentle laptop-comfort bump is folded into `--hc-header-zoom` for this
+// band (see `styles/_header-size.scss`), so the bar's `zoom` above and every
+// header-anchored offset pick it up automatically — no per-element band
+// override needed here. `#computePillZoom()` still mirrors it for the
+// bottom pill.
 
 // ── touch behavioral (all touch devices) ──────────────────
 @include touch {

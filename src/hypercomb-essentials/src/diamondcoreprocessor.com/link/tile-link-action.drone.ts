@@ -29,7 +29,7 @@ export class TileLinkActionDrone extends Drone {
   override genotype = 'linking'
   override description = 'link action icon — opens content viewer for tile links'
 
-  protected override listens = ['render:host-ready', 'tile:action']
+  protected override listens = ['render:host-ready', 'overlay:request-register', 'tile:action']
   protected override emits = ['overlay:register-action']
 
   #registered = false
@@ -41,6 +41,14 @@ export class TileLinkActionDrone extends Drone {
 
     this.onEffect('render:host-ready', () => {
       if (this.#registered) return
+      this.#registered = true
+      this.emitEffect('overlay:register-action', LINK_ICON)
+    })
+
+    // Handshake: re-emit LINK_ICON when the overlay (re)requests registration,
+    // bypassing the once-only #registered guard — the descriptor is static and
+    // the overlay consumer is idempotent (name-keyed), so a repeat is a no-op.
+    this.onEffect('overlay:request-register', () => {
       this.#registered = true
       this.emitEffect('overlay:register-action', LINK_ICON)
     })

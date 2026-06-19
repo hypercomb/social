@@ -165,8 +165,20 @@ export const checkForUpdate = async (): Promise<void> => {
   if (!bundled) return
   const available = bundledDiffersFromCached(bundled, cached)
   const cachedSet = new Set(cached.bees)
-  const newCount = bundled.bees.filter(sig => !cachedSet.has(sig)).length
-  EffectBus.emit('update:available', { available, newCount, packageSig: bundled.packageSig })
+  // The DELTA — bees present in the new bundle but not in the cached install.
+  // The header indicator is a notify-and-route affordance only: it hands this
+  // changed-sig list (not just a count) to the DCP installer, which is where
+  // the participant reviews the changed items and opts in. Nothing installs or
+  // runs in the hive from here — only an enable in DCP syncs a delta bee back.
+  const newBees = bundled.bees.filter(sig => !cachedSet.has(sig))
+  EffectBus.emit('update:available', {
+    available,
+    newCount: newBees.length,
+    newBees,
+    packageSig: bundled.packageSig,
+    previous: bundled.previous ?? null,
+    label: bundled.label,
+  })
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -246,7 +258,7 @@ const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
   try {
     const res = await fetch('/content/manifest.json', { cache: 'no-store' })
     if (!res.ok) return null
-    const content = await res.json() as { packages?: Record<string, { bees?: string[]; dependencies?: string[]; layers?: string[]; beeDeps?: Record<string, string[]>; dependenciesBag?: string; beesBag?: string }> }
+    const content = await res.json() as { packages?: Record<string, { bees?: string[]; dependencies?: string[]; layers?: string[]; beeDeps?: Record<string, string[]>; dependenciesBag?: string; beesBag?: string; label?: string; at?: string; previous?: string | null }> }
     const sig = Object.keys(content.packages ?? {})[0]
     if (!sig) return null
     const pkg = content.packages![sig]
@@ -258,6 +270,11 @@ const fetchBundledPackage = async (): Promise<BundledPackage | null> => {
       beeDeps: pkg.beeDeps,
       dependenciesBag: pkg.dependenciesBag,
       beesBag: pkg.beesBag,
+      // Sidecar branch metadata — carried through so the post-boot update
+      // check can hand the installer the version's walkback link + label.
+      label: pkg.label,
+      at: pkg.at,
+      previous: pkg.previous ?? null,
     }
   } catch {
     return null

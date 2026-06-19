@@ -11,7 +11,7 @@ import type { TreeNode } from '../core/tree-node'
   imports: [ToggleComponent, DiamondIconComponent],
   template: `
     @if (visible()) {
-      <div class="row" [class.pending]="node().pending" [class.visual-context]="node().visualContext" [class.egg]="node().hatchBlocker" [class.freshly-adopted]="node().freshlyAdopted" [class.active-elsewhere]="activeElsewhere() && !node().hatchBlocker" [class.domain-tinted]="domainHue() !== null" [style.--depth]="node().depth" [style.--domain-hue]="domainHue()">
+      <div class="row" [class.pending]="node().pending" [class.visual-context]="node().visualContext" [class.egg]="node().hatchBlocker" [class.freshly-adopted]="node().freshlyAdopted" [class.freshly-upgraded]="node().freshlyUpgraded && !node().hatchBlocker" [class.active-elsewhere]="activeElsewhere() && !node().hatchBlocker" [class.domain-tinted]="domainHue() !== null" [style.--depth]="node().depth" [style.--domain-hue]="domainHue()">
         @if (!node().visualContext && !node().hatchBlocker) {
           <!-- Enable switch at EVERY level — adopt/enable from any node (the
                root you imported to, a collection, or a single behavior).
@@ -57,6 +57,9 @@ import type { TreeNode } from '../core/tree-node'
             <span class="lineage">{{ lineageDisplay() }}</span>
           }
           <span class="name" [class]="node().kind">{{ node().name }}</span>
+          @if (node().freshlyUpgraded && !node().hatchBlocker) {
+            <span class="upgraded-note">new</span>
+          }
           @if (activeElsewhere() && !node().hatchBlocker) {
             <span class="active-elsewhere-note">active</span>
           }
@@ -154,6 +157,29 @@ import type { TreeNode } from '../core/tree-node'
       box-shadow: inset 0 0 0 1px rgba(60, 180, 100, 0.22);
     }
     .row.freshly-adopted .name { font-weight: 500; }
+
+    /* Freshly-upgraded: a CHANGE-DELTA item from a package update — off by
+       default, persistently highlighted as "new — review and enable" until
+       the participant opts in. A warm amber to distinguish it from the green
+       adopt highlight (different gesture: review an update vs. adopt a tile). */
+    .row.freshly-upgraded {
+      background: rgba(232, 168, 56, 0.14);
+      border-left: 3px solid rgba(222, 158, 46, 0.9);
+      box-shadow: inset 0 0 0 1px rgba(222, 158, 46, 0.22);
+    }
+    .row.freshly-upgraded .name { font-weight: 500; }
+    .upgraded-note {
+      font-size: 9.5px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      padding: 1px 7px;
+      border-radius: 999px;
+      background: rgba(222, 158, 46, 0.2);
+      color: rgb(176, 118, 18);
+      flex-shrink: 0;
+      align-self: center;
+    }
 
     /* Visual-context: a read-only item already in the logical install from
        ANOTHER domain or the base — marked by a left border + tinted
@@ -420,7 +446,8 @@ import type { TreeNode } from '../core/tree-node'
       .kind-label,
       .sig,
       .audit-badge,
-      .active-elsewhere-note {
+      .active-elsewhere-note,
+      .upgraded-note {
         display: none;
       }
 

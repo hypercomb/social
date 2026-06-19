@@ -34,6 +34,12 @@
 }
 
 import '@hypercomb/shared/core/ioc.web'
+// Capture a `/<sig>` meeting-place invite link before navigation parses the
+// URL — stashes the sig for the receive-side MeetingInviteWorker.
+import '@hypercomb/shared/core/invite-capture'
+// Restore the persisted header-size preset before first paint + register the
+// `/header` slash command (auto-wires via ioc.onRegister).
+import '@hypercomb/shared/core/header-size'
 import { bootstrapApplication } from '@angular/platform-browser'
 import { SignatureStore } from '@hypercomb/core'
 import { Store } from '@hypercomb/shared'

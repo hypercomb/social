@@ -10,6 +10,7 @@ import { Engine, TILE, type LevelDef } from './engine.js'
 import { Renderer } from './renderer.js'
 import { Designer, TOOLS, type Tool } from './designer.js'
 import { BUILTIN_LEVELS, loadCustomLevels, upsertCustomLevel, deleteCustomLevel, cloneLevel } from './levels.js'
+import { Shaker, ParticleField, easeOutBack, ARCADE } from '../juice.js'
 
 const STYLE_ID = 'sol-overlay-styles'
 const Z = 2147483000
@@ -20,6 +21,35 @@ const GAME_KEYS = new Set([
 ])
 
 type Mode = 'play' | 'design'
+
+// Level-clear flow (continuous play — identical to the Bubble overlay so every
+// game advances the same way): on clearing a screen we tally the level's score
+// (+ any perfect bonus) counting up, then scroll the next level UP from the
+// bottom — no button press, you just keep playing. Score + lives carry across
+// levels; the toolbar still has prev / next / restart for jumping around.
+const TALLY_MS = 1.7          // how long the score add-up reads
+const PAN_MS = 0.85           // how long the next level takes to slide in
+const PERFECT_BONUS = 1000    // awarded when a level is cleared without dying
+
+/** One in-flight level-clear transition: first 'tally' (count the score up),
+ *  then 'pan' (slide the cleared level off the top while the next rises from
+ *  below). `prev` is the cleared engine, kept so it can be drawn scrolling out. */
+interface Transition {
+  phase: 'tally' | 'pan'
+  t: number               // seconds into the current phase
+  levelScore: number      // points earned on the just-cleared level
+  bonus: number           // perfect-clear bonus (0 if a life was lost)
+  baseScore: number       // running total at the start of the cleared level
+  nextLevel: LevelDef     // the level rising in
+  nextIndex: number       // its index in #levels (for the toolbar label)
+  testing: boolean        // cleared a designer test (re-pans the same level)
+  prev: Engine            // the cleared engine — drawn scrolling out during 'pan'
+}
+
+/** easeInOut cubic — slow start, slow settle; reads as the screen easing up. */
+function easeInOut(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+}
 
 export class SolomonOverlay {
   #root: HTMLDivElement | null = null
@@ -46,8 +76,28 @@ export class SolomonOverlay {
   #raf = 0
   #lastTs = 0
   #time = 0
-  #wonShown = false
   #overShown = false
+
+  // juice: trauma screen-shake + a short additive particle field + a level-intro
+  // title card — the shared "modern vector arcade" kit, mirroring the Bubble
+  // overlay. Solomon is pixel-crisp (no scale transform, smoothing OFF), so the
+  // shaker runs SMALL and its offset is ROUNDED into the frame each draw. Shake
+  // is driven purely by score/lives/conjure deltas read after engine.update().
+  #shaker = new Shaker(7, 1.8)
+  #field = new ParticleField()
+  #prevScore = 0
+  #prevLives = 3
+  #prevConjure = 0
+  #prevSmash = 0
+  #intro: { t: number; title: string; sub: string } | null = null
+
+  // Continuous-play state (see the Transition note above). The engine's score is
+  // the RUNNING total carried across levels; the snapshots below record where the
+  // current level began so a clear can show its own gain + award a perfect bonus.
+  #transition: Transition | null = null
+  #levelStartScore = 0
+  #levelStartLives = 3
+  #testing = false   // playing a designer test (not part of the level list)
 
   // designer pointer paint state
   #painting = false
@@ -186,7 +236,7 @@ export class SolomonOverlay {
 
     // ── help ──
     const help = el('div', { class: 'sol-help' })
-    help.innerHTML = '<b>← →</b> move &nbsp;·&nbsp; <b>↑</b> jump &nbsp;·&nbsp; <b>↓</b> duck &nbsp;·&nbsp; <b>J</b> conjure / dispel block &nbsp;·&nbsp; <b>K</b> fireball &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> close'
+    help.innerHTML = '<b>← →</b> move &nbsp;·&nbsp; <b>↑</b> jump (head-butt blocks) &nbsp;·&nbsp; <b>↓</b> duck &nbsp;·&nbsp; <b>J</b> conjure / dispel block &nbsp;·&nbsp; <b>K</b> fireball &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> close'
     root.appendChild(help)
 
     document.body.appendChild(root)
@@ -227,13 +277,20 @@ export class SolomonOverlay {
     if (!level) return
     this.#mode = 'play'
     this.#engine = new Engine(cloneLevel(level))
-    this.#wonShown = this.#overShown = false
+    // Fresh run from this level: score back to 0, full lives, no carry-over.
+    this.#testing = false
+    this.#transition = null
+    this.#overShown = false
+    this.#levelStartScore = this.#engine.score
+    this.#levelStartLives = this.#engine.lives
+    this.#syncJuice(this.#engine)
     this.#hideBanner()
     this.#sizeCanvasTo(level)
     if (this.#levelLabel) {
       const n = this.#levelIndex + 1, total = this.#levels.length
       this.#levelLabel.textContent = `${level.name}  (${n}/${total})`
     }
+    this.#beginIntro(level.name, 'LEVEL ' + (this.#levelIndex + 1))
   }
 
   #sizeCanvasTo(level: { cols: number; rows: number }): void {
@@ -264,15 +321,142 @@ export class SolomonOverlay {
     this.#lastTs = ts
     this.#time += dt
 
-    if (this.#mode === 'play' && this.#engine && this.#renderer) {
-      this.#engine.update(dt)
-      this.#renderer.draw(this.#engine, this.#time)
-      if (this.#engine.state === 'won' && !this.#wonShown) { this.#wonShown = true; this.#showWin() }
-      if (this.#engine.state === 'gameover' && !this.#overShown) { this.#overShown = true; this.#showGameOver() }
-    } else if (this.#mode === 'design' && this.#renderer) {
-      this.#renderer.drawEditor(this.#designer.level, this.#hover, this.#time)
+    const ctx = this.#ctx, r = this.#renderer
+    if (!ctx || !r) { this.#raf = requestAnimationFrame(this.#loop); return }
+
+    // The canvas is sized in world pixels (no scale transform; smoothing OFF), so
+    // screen shake is just a small translate folded into the frame. Clear the WHOLE
+    // canvas first so a shake offset can never smear the trailing edge, then draw
+    // the frame inside a save/translate(rounded shake)/restore — rounding keeps the
+    // pixel art crisp. Shake stays at rest in the designer (never advanced/added).
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+
+    if (this.#mode === 'play' && this.#engine) {
+      this.#shaker.update(dt)
+      const sh = this.#shaker.offset()
+      ctx.save()
+      ctx.translate(Math.round(sh.x), Math.round(sh.y))
+      if (this.#transition) {
+        // A level was cleared: the simulation is frozen while the score tallies
+        // and the next screen scrolls in.
+        this.#stepTransition(dt)
+        this.#drawTransition(r)
+      } else {
+        this.#engine.update(dt)
+        this.#senseJuice(dt)
+        r.draw(this.#engine, this.#time)
+        this.#field.update(dt)
+        this.#field.draw(ctx)
+        this.#drawIntro(ctx, { w: this.#engine.width, h: this.#engine.height }, dt)
+        if (this.#engine.state === 'won') this.#beginClear()
+        else if (this.#engine.state === 'gameover' && !this.#overShown) { this.#overShown = true; this.#showGameOver() }
+      }
+      ctx.restore()
+    } else if (this.#mode === 'design') {
+      r.drawEditor(this.#designer.level, this.#hover, this.#time)
     }
     this.#raf = requestAnimationFrame(this.#loop)
+  }
+
+  // ── juice: shake + particles + level intro ───────────────
+
+  /** Read the post-update engine state and convert meaningful changes into shake
+   *  and particle bursts. Pure inference (score / lives / conjure deltas) keeps
+   *  the engine free of any view concerns. Called inside the shaken frame, so the
+   *  bursts it spawns land in world units under the same translate. */
+  #senseJuice(_dt: number): void {
+    const e = this.#engine
+    if (!e) return
+
+    // Life lost — big kick + a spray of sparks at Dana's centre.
+    if (e.lives < this.#prevLives) {
+      this.#shaker.add(0.9)
+      const px = e.player.x + e.player.w / 2
+      const py = e.player.y + e.player.h / 2
+      this.#field.burst(px, py, {
+        count: 22, speed: 140, gravity: 260, life: 0.6,
+        size: 2.6, color: [...ARCADE.spark],
+      })
+    }
+
+    // Conjure / dispel / fireball muzzle — engine sets conjureFlash on its rising
+    // edge. A small nudge + a short upward stone-dust puff at the target cell.
+    if (e.conjureFlash > this.#prevConjure + 1e-4) {
+      this.#shaker.add(0.18)
+      const cell = e.targetCell()
+      const cx = cell.col * TILE + TILE / 2
+      const cy = cell.row * TILE + TILE / 2
+      this.#field.burst(cx, cy, {
+        count: 10, speed: 90, gravity: 120, life: 0.45,
+        size: 2.2, color: [...ARCADE.ember], angle: -Math.PI / 2, arc: 1.6,
+      })
+    }
+
+    // Head-butt — a BRICK shattered overhead. A sharp kick plus stone debris
+    // bursting from the broken cell and tumbling down under gravity.
+    if (e.smashFlash > this.#prevSmash + 1e-4 && e.smashCell) {
+      this.#shaker.add(0.34)
+      const sx = e.smashCell.col * TILE + TILE / 2
+      const sy = e.smashCell.row * TILE + TILE / 2
+      this.#field.burst(sx, sy, {
+        count: 16, speed: 130, gravity: 340, life: 0.5,
+        size: 2.6, color: [...ARCADE.ember],
+      })
+    }
+
+    // Any score gain (kill / gem / key / door) — a small proportional shake. We
+    // don't have exact positions for most of these, so a kick alone is enough.
+    const ds = e.score - this.#prevScore
+    if (ds > 0) this.#shaker.add(Math.min(0.5, 0.12 + ds / 1500))
+
+    this.#prevScore = e.score
+    this.#prevLives = e.lives
+    this.#prevConjure = e.conjureFlash
+    this.#prevSmash = e.smashFlash
+  }
+
+  /** Snap the juice baselines to an engine without firing shake (level swaps),
+   *  and reset the shaker + particle field so nothing carries across a level. */
+  #syncJuice(e: Engine): void {
+    this.#prevScore = e.score
+    this.#prevLives = e.lives
+    this.#prevConjure = e.conjureFlash
+    this.#prevSmash = e.smashFlash
+    this.#shaker = new Shaker(7, 1.8)
+    this.#field.clear()
+  }
+
+  #beginIntro(title: string, sub: string): void { this.#intro = { t: 0, title, sub } }
+
+  /** A short, non-blocking title card that pops in (overshoot), holds, then fades.
+   *  Drawn in the canvas's world pixels over the live game so play never stalls.
+   *  Cyan title + gold sub to match the arcade suite. */
+  #drawIntro(ctx: CanvasRenderingContext2D, dims: { w: number; h: number }, dt: number): void {
+    const intro = this.#intro
+    if (!intro) return
+    intro.t += dt
+    const DUR = 1.7
+    if (intro.t >= DUR) { this.#intro = null; return }
+    const p = intro.t / DUR
+    const appear = easeOutBack(Math.min(1, p / 0.22))
+    const fade = p > 0.72 ? Math.max(0, 1 - (p - 0.72) / 0.28) : 1
+    const { w, h } = dims
+    ctx.save()
+    ctx.globalAlpha = fade
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.translate(w / 2, h * 0.36)
+    ctx.scale(0.62 + 0.38 * appear, 0.62 + 0.38 * appear)
+    ctx.shadowColor = 'rgba(126,224,255,0.55)'
+    ctx.shadowBlur = 18
+    ctx.fillStyle = ARCADE.cyan
+    ctx.font = '800 ' + Math.round(h * 0.085) + 'px "Segoe UI", system-ui, sans-serif'
+    ctx.fillText(intro.title, 0, 0)
+    ctx.shadowBlur = 0
+    ctx.fillStyle = ARCADE.gold
+    ctx.font = '600 ' + Math.round(h * 0.04) + 'px "Segoe UI", system-ui, sans-serif'
+    ctx.fillText(intro.sub, 0, h * 0.08)
+    ctx.restore()
   }
 
   // ── input: play ──────────────────────────────────────────
@@ -281,10 +465,15 @@ export class SolomonOverlay {
     if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); this.#onClose(); return }
     // While typing in the designer's name field, let the field have its keys.
     if (document.activeElement === this.#nameInput) return
-    if (!GAME_KEYS.has(e.key)) return
+    // Let OS/browser shortcuts (Ctrl/Cmd/Alt combos) pass.
+    if (e.ctrlKey || e.metaKey || e.altKey) return
+    // Otherwise FULLY isolate — stop + preventDefault every plain key so none
+    // leaks to the shell beneath this full-screen overlay (a stray key can
+    // otherwise flip the app into website/view mode). Matches Bubble + Arkanoid.
     e.preventDefault(); e.stopImmediatePropagation()
     if (this.#mode !== 'play' || !this.#engine) return
     const eng = this.#engine
+    if (!GAME_KEYS.has(e.key)) return
     switch (e.key) {
       case 'ArrowLeft': case 'a': case 'A': eng.input.left = true; break
       case 'ArrowRight': case 'd': case 'D': eng.input.right = true; break
@@ -299,7 +488,7 @@ export class SolomonOverlay {
 
   #onKeyUp = (e: KeyboardEvent): void => {
     if (document.activeElement === this.#nameInput) return
-    if (!GAME_KEYS.has(e.key)) return
+    if (e.ctrlKey || e.metaKey || e.altKey) return
     e.stopImmediatePropagation()
     if (!this.#engine) return
     switch (e.key) {
@@ -375,12 +564,18 @@ export class SolomonOverlay {
     this.#levels = [...BUILTIN_LEVELS.map(cloneLevel), ...loadCustomLevels()]
     this.#setMode('play')
     this.#engine = new Engine(cloneLevel(this.#designer.level))
-    this.#wonShown = this.#overShown = false
+    this.#testing = true
+    this.#transition = null
+    this.#overShown = false
+    this.#levelStartScore = this.#engine.score
+    this.#levelStartLives = this.#engine.lives
+    this.#syncJuice(this.#engine)
     this.#hideBanner()
     this.#sizeCanvasTo(this.#designer.level)
     const tabs = this.#root?.querySelectorAll('.sol-tab')
     tabs?.forEach((t, i) => t.classList.toggle('on', i === 0))
     if (this.#levelLabel) this.#levelLabel.textContent = `${this.#designer.level.name}  (test)`
+    this.#beginIntro(this.#designer.level.name, 'TEST')
   }
 
   #designerLoad(name: string): void {
@@ -431,17 +626,126 @@ export class SolomonOverlay {
     if (selected) sel.value = selected
   }
 
-  // ── banners + status ─────────────────────────────────────
+  // ── level clear → tally → pan to next (continuous play) ──
 
-  #showWin(): void {
-    const score = this.#engine?.score ?? 0
-    const hasNext = this.#levelIndex + 1 < this.#levels.length
-    this.#showBanner('Level Complete!', `✦ ${score}`, [
-      ...(hasNext ? [{ label: 'Next ▶', fn: () => this.#cycleLevel(1) }] : []),
-      { label: '↻ Replay', fn: () => this.#startPlay(this.#levels[this.#levelIndex]) },
-      { label: 'Design', fn: () => this.#setMode('design') },
-    ])
+  /** Level cleared. Compute the level's score gain + any perfect bonus and open
+   *  the tally→pan transition. Levels wrap, so play never stops on a clear. */
+  #beginClear(): void {
+    const eng = this.#engine
+    if (!eng || this.#transition) return
+    const levelScore = Math.max(0, eng.score - this.#levelStartScore)
+    // lives only ever fall within a level, so "same as we started" ⇒ no deaths.
+    const bonus = eng.lives >= this.#levelStartLives ? PERFECT_BONUS : 0
+
+    const count = Math.max(1, this.#levels.length)
+    const nextIndex = this.#testing ? this.#levelIndex : (this.#levelIndex + 1) % count
+    const nextLevel = this.#testing
+      ? this.#designer.level
+      : (this.#levels[nextIndex] ?? eng.level)
+
+    this.#transition = {
+      phase: 'tally', t: 0,
+      levelScore, bonus, baseScore: this.#levelStartScore,
+      nextLevel, nextIndex, testing: this.#testing, prev: eng,
+    }
+    this.#hideBanner()
   }
+
+  /** Advance the active transition: count the tally, then build + scroll in the
+   *  next level (carrying the running score — bonus included — and lives). */
+  #stepTransition(dt: number): void {
+    const tr = this.#transition
+    if (!tr) return
+    tr.t += dt
+    if (tr.phase === 'tally') {
+      if (tr.t < TALLY_MS) return
+      const carriedScore = tr.baseScore + tr.levelScore + tr.bonus
+      const e = new Engine(cloneLevel(tr.nextLevel))
+      e.score = carriedScore
+      e.lives = tr.prev.lives
+      this.#engine = e
+      this.#levelIndex = tr.nextIndex
+      this.#levelStartScore = e.score
+      this.#levelStartLives = e.lives
+      this.#syncJuice(e)
+      this.#sizeCanvasTo(e.level)
+      if (this.#levelLabel) {
+        this.#levelLabel.textContent = tr.testing
+          ? `${e.level.name}  (test)`
+          : `${e.level.name}  (${this.#levelIndex + 1}/${this.#levels.length})`
+      }
+      tr.phase = 'pan'
+      tr.t = 0
+    } else if (tr.t >= PAN_MS) {
+      this.#transition = null   // hand control back — play resumes on the new level
+      const e = this.#engine
+      if (e) {
+        this.#beginIntro(e.level.name, tr.testing ? 'TEST' : 'LEVEL ' + (this.#levelIndex + 1))
+      }
+    }
+  }
+
+  /** Render the transition: the frozen cleared level under the score tally, then
+   *  the cleared level sliding off the top while the next rises from the bottom.
+   *  The canvas is sized in world pixels (no scale transform), so we translate in
+   *  world units directly. */
+  #drawTransition(r: Renderer): void {
+    const tr = this.#transition
+    const ctx = this.#ctx
+    if (!tr || !ctx) return
+    if (tr.phase === 'tally') {
+      r.draw(tr.prev, this.#time)
+      this.#drawTally(ctx, { w: tr.prev.width, h: tr.prev.height }, tr)
+    } else {
+      const p = easeInOut(Math.min(1, tr.t / PAN_MS))
+      const H = this.#engine!.height
+      // The loop already cleared the full canvas before this translated frame.
+      ctx.save(); ctx.translate(0, -p * H); r.draw(tr.prev, this.#time); ctx.restore()
+      ctx.save(); ctx.translate(0, (1 - p) * H); r.draw(this.#engine!, this.#time); ctx.restore()
+    }
+  }
+
+  /** The score add-up overlay: level gain counts up first, then any perfect
+   *  bonus, with the running total ticking alongside. Drawn in world units. */
+  #drawTally(ctx: CanvasRenderingContext2D, dims: { w: number; h: number }, tr: Transition): void {
+    const { w, h } = dims
+    const cx = w / 2
+    const p = Math.min(1, tr.t / TALLY_MS)
+    // Count the level score over the first ~62%, then the bonus over the rest.
+    const levelP = Math.min(1, p / 0.62)
+    const bonusP = tr.bonus > 0 ? Math.max(0, Math.min(1, (p - 0.62) / 0.30)) : 0
+    const shownLevel = Math.round(tr.levelScore * levelP)
+    const shownBonus = Math.round(tr.bonus * bonusP)
+    const shownTotal = tr.baseScore + shownLevel + shownBonus
+    const font = (size: number, weight = 700) =>
+      `${weight} ${Math.round(size)}px "Segoe UI", system-ui, sans-serif`
+
+    ctx.save()
+    ctx.fillStyle = 'rgba(6,4,14,0.62)'
+    ctx.fillRect(0, 0, w, h)
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+
+    ctx.fillStyle = '#ffd24d'
+    ctx.font = font(h * 0.10, 800)
+    ctx.fillText('LEVEL CLEAR', cx, h * 0.30)
+
+    ctx.fillStyle = '#ffffff'
+    ctx.font = font(h * 0.052)
+    ctx.fillText(`Level  +${shownLevel}`, cx, h * 0.46)
+
+    if (tr.bonus > 0) {
+      ctx.fillStyle = bonusP > 0 ? '#ffd76a' : 'rgba(255,215,106,0.28)'
+      ctx.fillText(`Perfect Bonus  +${shownBonus}`, cx, h * 0.555)
+    }
+
+    ctx.fillStyle = '#cfd2ff'
+    ctx.font = font(h * 0.062, 800)
+    ctx.fillText(`✦ ${shownTotal}`, cx, h * 0.69)
+    ctx.restore()
+  }
+
+  // ── banners + status ─────────────────────────────────────
 
   #showGameOver(): void {
     const score = this.#engine?.score ?? 0

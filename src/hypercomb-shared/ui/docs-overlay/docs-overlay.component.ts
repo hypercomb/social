@@ -4,9 +4,20 @@
 // renders to HTML with a lightweight parser, and displays in a clean overlay.
 // Activated via `/docs` slash behaviour (listens to EffectBus 'docs:open').
 
-import { Component, signal, computed, type OnDestroy } from '@angular/core'
+import { Component, signal, computed, effect, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe.js'
+
+// Owner token for the InputGate lock held while the docs browser is open.
+// Owner-scoped so it composes with locks held by the editor / other overlays.
+const DOCS_OVERLAY_LOCK_OWNER = 'docs-overlay'
+
+/** Structural type for the InputGate — the shared tile-input lock. Resolved
+ *  at runtime via window.ioc (shared must never import from modules). */
+type InputGateLike = {
+  lock(owner?: string): void
+  unlock(owner?: string): void
+}
 
 interface DocEntry {
   title: string
@@ -133,11 +144,34 @@ export class DocsOverlayComponent implements OnDestroy {
     this.#cleanupClose = EffectBus.on('docs:close', () => {
       this.visible.set(false)
     })
+
+    // Freeze tile navigation while the docs browser is open — it's a full-
+    // viewport overlay, so per the "modals lock tiles while showing" rule no
+    // pan/pinch/wheel-zoom/drag-select may bleed through to the canvas. The
+    // gate is resolved lazily (its bee may register after this component
+    // constructs on hypercomb-web); the [data-consumes-wheel] overlay keeps
+    // the sidebar/article scrollable.
+    effect(() => {
+      const gate = this.#gate()
+      if (!gate) return
+      if (this.visible()) gate.lock(DOCS_OVERLAY_LOCK_OWNER)
+      else gate.unlock(DOCS_OVERLAY_LOCK_OWNER)
+    })
   }
 
   ngOnDestroy(): void {
     this.#cleanupOpen?.()
     this.#cleanupClose?.()
+    // Release on teardown — the visibility effect won't run a final unlock
+    // once destroyed, so an overlay torn down while open would leave the
+    // hexes locked.
+    this.#gate()?.unlock(DOCS_OVERLAY_LOCK_OWNER)
+  }
+
+  /** InputGate — the shared tile-input lock. Resolved at runtime (shared
+   *  must never import from modules); undefined until its bee registers. */
+  #gate(): InputGateLike | undefined {
+    return window.ioc?.get<InputGateLike>('@diamondcoreprocessor.com/InputGate')
   }
 
   close(): void {

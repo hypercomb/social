@@ -21,26 +21,42 @@ const LOCKED_NOTIFY_THROTTLE_MS = 500
 
 export class InputGate extends EventTarget {
   #owner: string | null = null
-  #locked = false
+  // Persistent locks are reference-counted by named owner so independent
+  // overlays/modals (editor, notes strip, manual lock button, …) can each
+  // hold a lock without stomping one another. `locked` is true while ANY
+  // owner holds — closing one modal must NOT unlock the tiles behind another
+  // modal that's still open. A single boolean here was a latent bug: the
+  // last unlock() always won regardless of who else was still locking.
+  #lockOwners = new Set<string>()
   #lastLockedNotifyAt = 0
 
-  get active(): boolean { return this.#locked || this.#owner !== null }
-  get locked(): boolean { return this.#locked }
+  get active(): boolean { return this.locked || this.#owner !== null }
+  get locked(): boolean { return this.#lockOwners.size > 0 }
   get owner(): string | null { return this.#owner }
 
-  lock = (): void => {
-    if (this.#locked) return
-    this.#locked = true
+  /** Is a specific owner currently holding a lock? Lets a UI control (e.g.
+   *  the manual lock button) track and toggle its OWN lock independently of
+   *  locks held by other overlays. */
+  lockedBy = (owner: string): boolean => this.#lockOwners.has(owner)
+
+  /** Acquire a tile-input lock under `owner`. Idempotent per owner. While
+   *  any lock is held, claim() is rejected and wheel zoom bails — tiles
+   *  can't pan/zoom/select. Default owner keeps legacy no-arg callers
+   *  working, but distinct overlays should pass distinct owners so their
+   *  locks compose (see the reference-counting note above). */
+  lock = (owner: string = 'default'): void => {
+    if (this.#lockOwners.has(owner)) return
+    this.#lockOwners.add(owner)
     this.dispatchEvent(new CustomEvent('change'))
   }
-  unlock = (): void => {
-    if (!this.#locked) return
-    this.#locked = false
+  /** Release `owner`'s lock. Locks held by other owners stay in effect. */
+  unlock = (owner: string = 'default'): void => {
+    if (!this.#lockOwners.delete(owner)) return
     this.dispatchEvent(new CustomEvent('change'))
   }
 
   claim = (source: string): boolean => {
-    if (this.#locked) {
+    if (this.locked) {
       // A pan/pinch gesture tried to take the gate while it's locked
       // (e.g. behind the open editor overlay). Surface it so the UI can
       // tell the user why nothing moved.
@@ -61,7 +77,7 @@ export class InputGate extends EventTarget {
    *  wheel-zoom path calls it directly since it reads `.locked` without
    *  claiming. No-op when unlocked. */
   notifyLockedAttempt = (): void => {
-    if (!this.#locked) return
+    if (!this.locked) return
     const now = performance.now()
     if (now - this.#lastLockedNotifyAt < LOCKED_NOTIFY_THROTTLE_MS) return
     this.#lastLockedNotifyAt = now
@@ -78,8 +94,8 @@ export class InputGate extends EventTarget {
    *  Wired to the Escape cascade as a last-resort recovery so a leaked
    *  claim or unmatched lock can never permanently block input. */
   clear = (): void => {
-    if (!this.#locked && this.#owner === null) return
-    this.#locked = false
+    if (this.#lockOwners.size === 0 && this.#owner === null) return
+    this.#lockOwners.clear()
     this.#owner = null
     this.dispatchEvent(new CustomEvent('change'))
   }

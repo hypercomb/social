@@ -17,10 +17,11 @@
 // freezes even when the mouse would leave the browser window entirely. Esc
 // releases the lock; ending the game or opening the designer releases it too.
 
-import { Engine, W, H, BRICK_W, BRICK_H, BRICK_TOP } from './engine.js'
-import { Renderer } from './renderer.js'
+import { Engine, W, H, BRICK_W, BRICK_H, BRICK_TOP, BRICK_X0, POWER_META, POWER_ORDER, type Brick } from './engine.js'
+import { Renderer, brickColor } from './renderer.js'
 import { LEVELS, cloneLevel, loadCustomLevels, upsertCustomLevel, deleteCustomLevel, type ArkanoidLevel } from './levels.js'
 import { Designer, TOOLS, type Tool } from './designer.js'
+import { Shaker, ParticleField, easeOutBack, ARCADE } from '../juice.js'
 
 const STYLE_ID = 'ark-overlay-styles'
 const Z = 2147483000
@@ -31,6 +32,35 @@ const GAME_KEYS = new Set([
 
 type Mode = 'play' | 'design'
 
+// Level-clear flow (continuous play — identical to the Bubble/Solomon overlays
+// so every game advances the same way): on clearing a screen we tally the
+// level's score (+ any perfect bonus) counting up, then scroll the next level UP
+// from the bottom — no button press, you just keep playing. Score + lives carry
+// across levels; the toolbar still has prev / next / restart for jumping around.
+const TALLY_MS = 1.7          // how long the score add-up reads
+const PAN_MS = 0.85           // how long the next level takes to slide in
+const PERFECT_BONUS = 1000    // awarded when a level is cleared without dying
+
+/** One in-flight level-clear transition: first 'tally' (count the score up),
+ *  then 'pan' (slide the cleared level off the top while the next rises from
+ *  below). `prev` is the cleared engine, kept so it can be drawn scrolling out. */
+interface Transition {
+  phase: 'tally' | 'pan'
+  t: number               // seconds into the current phase
+  levelScore: number      // points earned on the just-cleared level
+  bonus: number           // perfect-clear bonus (0 if a life was lost)
+  baseScore: number       // running total at the start of the cleared level
+  nextLevel: ArkanoidLevel // the level rising in
+  nextIndex: number       // its index in LEVELS (for the toolbar label)
+  testing: boolean        // cleared a designer test (re-pans the same level)
+  prev: Engine            // the cleared engine — drawn scrolling out during 'pan'
+}
+
+/** easeInOut cubic — slow start, slow settle; reads as the screen easing up. */
+function easeInOut(t: number): number {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+}
+
 export class ArkanoidOverlay {
   #root: HTMLDivElement | null = null
   #canvas: HTMLCanvasElement | null = null
@@ -38,6 +68,8 @@ export class ArkanoidOverlay {
   #renderer: Renderer | null = null
   #stage: HTMLDivElement | null = null
   #banner: HTMLDivElement | null = null
+  #flyout: HTMLDivElement | null = null
+  #flyoutOpen = false
   #status: HTMLSpanElement | null = null
   #levelLabel: HTMLSpanElement | null = null
   #playBar: HTMLDivElement | null = null
@@ -60,9 +92,28 @@ export class ArkanoidOverlay {
   #lastTs = 0
   #time = 0
   #scaleBack = 1
-  #wonShown = false
   #overShown = false
   #ro: ResizeObserver | null = null
+
+  // Continuous-play state (see the Transition note above). The engine's score is
+  // the RUNNING total carried across levels; the snapshots below record where the
+  // current level began so a clear can show its own gain + award a perfect bonus.
+  #transition: Transition | null = null
+  #levelStartScore = 0
+  #levelStartLives = 3
+  #testing = false                       // playing a designer test (not in LEVELS)
+  #testLevel: ArkanoidLevel | null = null // the level being playtested, if any
+
+  // juice: trauma screen-shake, a spark particle field, and a level-intro title
+  // card. Shake + bursts are driven by score/lives deltas and a per-frame brick
+  // snapshot diff read AFTER each engine.update() so the engine stays pure (no
+  // particle/event system of its own). #intro pops in like the Bubble overlay.
+  #shaker = new Shaker()
+  #field = new ParticleField()
+  #prevScore = 0
+  #prevLives = 3
+  #brickAlive: boolean[] = []            // snapshot of which bricks were alive last frame
+  #intro: { t: number; title: string; sub: string } | null = null
 
   // Pointer Lock: while locked the cursor is hidden + captured by the canvas and
   // the bat tracks RELATIVE movement (movementX), so it never freezes when the
@@ -85,7 +136,7 @@ export class ArkanoidOverlay {
     this.#injectStyles()
     ;(document.activeElement as HTMLElement | null)?.blur?.()
     this.#build()
-    this.#startPlay(this.#levelIndex)
+    this.#startPlay(this.#randomLevelIndex())   // random level from the very start
     window.addEventListener('keydown', this.#onKeyDown, true)
     window.addEventListener('keyup', this.#onKeyUp, true)
     window.addEventListener('resize', this.#fit)
@@ -116,6 +167,8 @@ export class ArkanoidOverlay {
     this.#ctx = null
     this.#renderer = null
     this.#engine = null
+    this.#flyout = null
+    this.#flyoutOpen = false
   }
 
   // ── DOM ──────────────────────────────────────────────────
@@ -189,15 +242,19 @@ export class ArkanoidOverlay {
     const stage = el('div', { class: 'ark-stage' }) as HTMLDivElement
     const canvas = el('canvas', { class: 'ark-canvas' }) as HTMLCanvasElement
     canvas.addEventListener('pointerdown', this.#onPointerDown)
+    canvas.addEventListener('contextmenu', e => e.preventDefault())   // right-click fires the missile, not a menu
     stage.appendChild(canvas)
     const banner = el('div', { class: 'ark-banner ark-hidden' }) as HTMLDivElement
     stage.appendChild(banner)
+    const flyout = this.#buildFlyout()
+    stage.appendChild(flyout)
     root.appendChild(stage)
     this.#stage = stage
     this.#banner = banner
+    this.#flyout = flyout
 
     const help = el('div', { class: 'ark-help' })
-    help.innerHTML = '<b>← →</b> / <b>mouse</b> move the bat &nbsp;·&nbsp; <b>Space</b> / click: launch &amp; fire &nbsp;·&nbsp; click captures the mouse &nbsp;·&nbsp; pills: <b>O</b>scillate <b>B</b>reak <b>L</b>aser <b>E</b>xpand <b>G</b>un &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> release / close'
+    help.innerHTML = '<b>← →</b> / <b>mouse</b> move the bat &nbsp;·&nbsp; <b>Space</b> / left-click: launch &amp; fire &nbsp;·&nbsp; <b>right-click</b>: missile &nbsp;·&nbsp; pills: <b>O</b>scillate <b>B</b>reak <b>L</b>aser <b>E</b>xpand <b>G</b>un <b>M</b>agnet <b>↑</b>Rocket <b>×</b>Multiplier <b>∗</b>Burst <b>P</b>inball <b>I</b>Beam &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> release / close'
     root.appendChild(help)
 
     document.body.appendChild(root)
@@ -207,6 +264,51 @@ export class ArkanoidOverlay {
     if (this.#ctx) this.#renderer = new Renderer(this.#ctx)
     this.#refreshLoadSelect()
     this.#updateToolButtons()
+  }
+
+  // ── power-up flyout (left rail) ──────────────────────────
+  // A slide-out reference for every pill, built once from POWER_META so the
+  // legend can never drift from what the engine actually does.
+  #buildFlyout(): HTMLDivElement {
+    const fly = el('div', { class: 'ark-flyout' }) as HTMLDivElement
+    const tab = el('button', { class: 'ark-flyout-tab', title: 'Power-up guide' }) as HTMLButtonElement
+    tab.innerHTML = '<span class="ark-tab-label">PILLS</span><span class="ark-tab-chev">▸</span>'
+    tab.onclick = () => this.#toggleFlyout()
+
+    const panel = el('div', { class: 'ark-flyout-panel' }) as HTMLDivElement
+    panel.appendChild(el('div', { class: 'ark-fly-head', text: 'Power-ups' }))
+    for (const kind of POWER_ORDER) {
+      const meta = POWER_META[kind]
+      const row = el('div', { class: 'ark-pill-row' })
+      const badge = el('div', { class: 'ark-pill-badge', text: meta.letter })
+      badge.style.background = meta.color
+      badge.style.boxShadow = `0 0 10px ${meta.color}aa`
+      const txt = el('div', { class: 'ark-pill-text' })
+      const nm = el('div', { class: 'ark-pill-name', text: meta.name.charAt(0).toUpperCase() + meta.name.slice(1) })
+      nm.style.color = meta.color
+      txt.append(nm, el('div', { class: 'ark-pill-desc', text: meta.desc }))
+      row.append(badge, txt)
+      panel.appendChild(row)
+    }
+    panel.appendChild(el('div', { class: 'ark-fly-head', text: 'Good to know' }))
+    const basics: [string, string][] = [
+      ['White ball = life', 'The white ball is your life; coloured balls are ammo. Lose the white one and you lose a life.'],
+      ['The hunter', 'Dawdle too long and a hunter chases your white ball; a hit whacks your ball away fast (no instant loss). 3 hits — from the ball, ammo, lasers, or a rocket — destroy it.'],
+      ['Sparkle bricks', 'Every 5 hits you land on the hunter, a sparkling brick appears and blooms into a big one. Five hits shatter it into shards — one hides a multiplier.'],
+      ['Controls', '← → or mouse to move · Space / left-click to launch & fire · right-click to fire the missile · R restart · Esc to close.'],
+    ]
+    for (const [t, d] of basics) {
+      const row = el('div', { class: 'ark-info-row' })
+      row.append(el('div', { class: 'ark-info-title', text: t }), el('div', { class: 'ark-pill-desc', text: d }))
+      panel.appendChild(row)
+    }
+    fly.append(panel, tab)
+    return fly
+  }
+
+  #toggleFlyout(): void {
+    this.#flyoutOpen = !this.#flyoutOpen
+    this.#flyout?.classList.toggle('open', this.#flyoutOpen)
   }
 
   // ── mode + level control ──────────────────────────────────
@@ -232,14 +334,26 @@ export class ArkanoidOverlay {
     tabs?.forEach((t, i) => t.classList.toggle('on', (i === 0) === (this.#mode === 'play')))
   }
 
+  /** A random level index, optionally avoiding an immediate repeat. Auto-play
+   *  (initial start + every level clear) picks at random; prev/next still walk
+   *  LEVELS in order for manual jumping. */
+  #randomLevelIndex(exclude = -1): number {
+    if (LEVELS.length <= 1) return 0
+    let n = exclude
+    while (n === exclude) n = Math.floor(Math.random() * LEVELS.length)
+    return n
+  }
+
   #startPlay(index: number): void {
     const level = LEVELS[index]
     if (!level) return
     this.#levelIndex = index
-    this.#startPlayLevel(cloneLevel(level), `${level.name}  (${index + 1}/${LEVELS.length})`)
+    this.#testing = false
+    this.#testLevel = null
+    this.#startPlayLevel(cloneLevel(level), `${level.name}  (${index + 1}/${LEVELS.length})`, level.name, `LEVEL ${index + 1}`)
   }
 
-  #startPlayLevel(level: ArkanoidLevel, label: string): void {
+  #startPlayLevel(level: ArkanoidLevel, label: string, introTitle: string, introSub: string): void {
     this.#mode = 'play'
     this.#syncTabs()
     this.#playBar?.classList.remove('ark-hidden')
@@ -247,15 +361,115 @@ export class ArkanoidOverlay {
     if (this.#canvas) this.#canvas.style.cursor = 'none'
     this.#engine = new Engine(level.rows)
     this.#paddleTargetX = this.#engine.paddle.x
-    this.#wonShown = this.#overShown = false
+    // Fresh run from this level: score back to 0, full lives, no carry-over.
+    this.#transition = null
+    this.#overShown = false
+    this.#levelStartScore = this.#engine.score
+    this.#levelStartLives = this.#engine.lives
+    this.#syncJuice(this.#engine)
     this.#hideBanner()
     this.#fit()
     if (this.#levelLabel) this.#levelLabel.textContent = label
+    this.#beginIntro(introTitle, introSub)
   }
 
   #cycleLevel(dir: number): void {
     const n = (this.#levelIndex + dir + LEVELS.length) % LEVELS.length
     this.#startPlay(n)
+  }
+
+  // ── juice: shake + spark bursts + level intro ────────────
+  // The engine is pure (no particle/event system), so the overlay infers events:
+  // a per-frame brick snapshot diff drives break sparks, and score/lives deltas
+  // drive shake + a death burst — all read AFTER engine.update().
+
+  /** Remember which bricks are alive going into this frame's update. */
+  #snapshotBricks(e: Engine): void {
+    const arr = this.#brickAlive
+    arr.length = e.bricks.length
+    for (let i = 0; i < e.bricks.length; i++) arr[i] = e.bricks[i].alive
+  }
+
+  /** Any brick that went alive→dead since the snapshot bursts sparks at its
+   *  centre, tinted to its colour. A rocket wiping a cluster naturally fires many
+   *  bursts at once → a big shower + cumulative shake, no special-casing. */
+  #diffBricks(e: Engine): void {
+    const arr = this.#brickAlive
+    let broke = 0
+    const n = Math.min(arr.length, e.bricks.length)
+    for (let i = 0; i < n; i++) {
+      const b: Brick = e.bricks[i]
+      // `covered` bricks were silently consumed under a blooming mega, NOT hit by
+      // the player — no sparks / shake for those.
+      if (arr[i] && !b.alive && !b.covered) {
+        broke++
+        this.#field.burst(b.x + b.w / 2, b.y + b.h / 2, {
+          count: 14, speed: 130, size: 2.3, life: 0.5, gravity: 340, drag: 1.7,
+          color: [brickColor(b.max), ...ARCADE.spark],
+        })
+      }
+    }
+    if (broke > 0) this.#shaker.add(0.16 + Math.min(0.5, (broke - 1) * 0.07))
+  }
+
+  /** Read the post-update engine and turn meaningful changes into shake/sparks.
+   *  Pure inference (score/lives deltas) keeps the engine free of view concerns. */
+  #senseJuice(): void {
+    const e = this.#engine
+    if (!e) return
+    if (e.lives < this.#prevLives) {
+      // A life lost — the biggest kick + an ember shower at the floor (where the
+      // white ball was lost), under the bat.
+      this.#shaker.add(0.95)
+      this.#field.burst(e.paddle.x, H - 6, {
+        count: 22, speed: 180, size: 2.6, life: 0.7, gravity: 120, drag: 1.4,
+        color: [...ARCADE.ember], angle: -Math.PI / 2, arc: Math.PI * 1.2,
+      })
+    }
+    this.#prevScore = e.score
+    this.#prevLives = e.lives
+  }
+
+  /** Snap the juice baselines to an engine without firing shake (level swaps /
+   *  starts): reset deltas, the brick snapshot, the shaker, and clear sparks. */
+  #syncJuice(e: Engine): void {
+    this.#prevScore = e.score
+    this.#prevLives = e.lives
+    this.#brickAlive = e.bricks.map(b => b.alive)
+    this.#shaker = new Shaker()
+    this.#field.clear()
+  }
+
+  #beginIntro(title: string, sub: string): void { this.#intro = { t: 0, title, sub } }
+
+  /** A short, non-blocking title card that pops in (overshoot), holds, then fades
+   *  — identical in spirit to the Bubble overlay. Drawn in world units over the
+   *  live game so play never stalls behind it. */
+  #drawIntro(ctx: CanvasRenderingContext2D, dt: number): void {
+    const intro = this.#intro
+    if (!intro) return
+    intro.t += dt
+    const DUR = 1.7
+    if (intro.t >= DUR) { this.#intro = null; return }
+    const p = intro.t / DUR
+    const appear = easeOutBack(Math.min(1, p / 0.22))
+    const fade = p > 0.72 ? Math.max(0, 1 - (p - 0.72) / 0.28) : 1
+    ctx.save()
+    ctx.globalAlpha = fade
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.translate(W / 2, H * 0.36)
+    ctx.scale(0.62 + 0.38 * appear, 0.62 + 0.38 * appear)
+    ctx.shadowColor = 'rgba(126,224,255,0.6)'
+    ctx.shadowBlur = 20
+    ctx.fillStyle = ARCADE.cyan
+    ctx.font = '800 ' + Math.round(H * 0.085) + 'px "Segoe UI", system-ui, sans-serif'
+    ctx.fillText(intro.title, 0, 0)
+    ctx.shadowBlur = 0
+    ctx.fillStyle = ARCADE.gold
+    ctx.font = '600 ' + Math.round(H * 0.04) + 'px "Segoe UI", system-ui, sans-serif'
+    ctx.fillText(intro.sub, 0, H * 0.08)
+    ctx.restore()
   }
 
   // Crisp scaling: back the canvas with device pixels and draw the world
@@ -287,13 +501,36 @@ export class ArkanoidOverlay {
 
     const ctx = this.#ctx, r = this.#renderer
     if (ctx && r) {
-      ctx.setTransform(this.#scaleBack, 0, 0, this.#scaleBack, 0, 0)
-      ctx.clearRect(0, 0, W, H)
+      this.#shaker.update(dt)
+      const sh = this.#shaker.offset()
+      // Clear the whole backing buffer in DEVICE space first so a shake translate
+      // can never smear the trailing edge; then draw the world through the scale
+      // transform with the shake folded into its translation (same model as the
+      // Bubble overlay).
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+      ctx.setTransform(this.#scaleBack, 0, 0, this.#scaleBack, sh.x * this.#scaleBack, sh.y * this.#scaleBack)
       if (this.#mode === 'play' && this.#engine) {
-        this.#engine.update(dt)
-        r.draw(this.#engine, this.#time)
-        if (this.#engine.state === 'won' && !this.#wonShown) { this.#wonShown = true; this.#showWin() }
-        if (this.#engine.state === 'gameover' && !this.#overShown) { this.#overShown = true; this.#showGameOver() }
+        if (this.#transition) {
+          // A level was cleared: the simulation is frozen while the score tallies
+          // and the next screen scrolls in.
+          this.#stepTransition(dt)
+          this.#drawTransition(ctx, r)
+        } else {
+          // Snapshot brick life BEFORE update, diff AFTER, so any brick that died
+          // this frame (ball, laser, or a rocket wiping a cluster) bursts sparks
+          // at its centre — the engine needs no particle/event system.
+          this.#snapshotBricks(this.#engine)
+          this.#engine.update(dt)
+          this.#senseJuice()
+          this.#diffBricks(this.#engine)
+          r.draw(this.#engine, this.#time)
+          this.#field.update(dt)
+          this.#field.draw(ctx)
+          this.#drawIntro(ctx, dt)
+          if (this.#engine.state === 'won') this.#beginClear()
+          else if (this.#engine.state === 'gameover' && !this.#overShown) { this.#overShown = true; this.#showGameOver() }
+        }
       } else if (this.#mode === 'design') {
         r.drawEditor(this.#designer.grid, this.#hover)
       }
@@ -345,10 +582,12 @@ export class ArkanoidOverlay {
     if (rect.width <= 0 || rect.height <= 0) return null
     const wx = ((e.clientX - rect.left) / rect.width) * W
     const wy = ((e.clientY - rect.top) / rect.height) * H
-    return { col: Math.floor(wx / BRICK_W), row: Math.floor((wy - BRICK_TOP) / BRICK_H) }
+    return { col: Math.floor((wx - BRICK_X0) / BRICK_W), row: Math.floor((wy - BRICK_TOP) / BRICK_H) }
   }
 
   #onPointerMove = (e: PointerEvent): void => {
+    // Don't steer the bat while the mouse is reading the open power-up flyout.
+    if (this.#flyoutOpen && this.#flyout && e.target instanceof Node && this.#flyout.contains(e.target)) return
     if (this.#mode === 'play') {
       if (this.#locked) {
         // Relative: accumulate captured motion (clientX is meaningless under lock).
@@ -396,6 +635,7 @@ export class ArkanoidOverlay {
   #onPointerDown = (e: PointerEvent): void => {
     e.preventDefault()
     if (this.#mode === 'play') {
+      if (e.button === 2) { this.#engine?.fireRocket(); return }   // right-click = missile
       this.#requestLock()                                   // capture + hide the cursor
       if (!this.#locked) {                                  // lock is async — place the bat this once
         const x = this.#worldXFromEvent(e)
@@ -442,7 +682,10 @@ export class ArkanoidOverlay {
 
   #designerTest(): void {
     const name = (this.#nameInput?.value ?? '').trim() || 'My Level'
-    this.#startPlayLevel(this.#designer.named(name), `${name}  (test)`)
+    const level = this.#designer.named(name)
+    this.#testing = true
+    this.#testLevel = level
+    this.#startPlayLevel(level, `${name}  (test)`, name, 'TEST')
   }
 
   #designerLoad(name: string): void {
@@ -488,24 +731,143 @@ export class ArkanoidOverlay {
     if (selected) sel.value = selected
   }
 
-  // ── banners + status ──────────────────────────────────────
-  #showWin(): void {
-    this.#exitLock()                                        // free the cursor for the banner buttons
-    const score = this.#engine?.score ?? 0
-    const hasNext = this.#levelIndex + 1 < LEVELS.length && this.#mode === 'play'
-    this.#showBanner('Level Clear!', `✦ ${score}`, [
-      ...(hasNext ? [{ label: 'Next ▶', fn: () => this.#cycleLevel(1) }] : []),
-      { label: '↻ Replay', fn: () => this.#startPlay(this.#levelIndex) },
-      { label: 'Design', fn: () => this.#setMode('design') },
-    ])
+  // ── level clear → tally → pan to next (continuous play) ──
+
+  /** Level cleared. Compute the level's score gain + any perfect bonus and open
+   *  the tally→pan transition. Levels wrap, so play never stops on a clear. The
+   *  bat keeps its pointer lock — play just continues into the next screen. */
+  #beginClear(): void {
+    const eng = this.#engine
+    if (!eng || this.#transition || this.#mode !== 'play') return
+    const levelScore = Math.max(0, eng.score - this.#levelStartScore)
+    // lives only ever fall within a level, so "same as we started" ⇒ no deaths.
+    const bonus = eng.lives >= this.#levelStartLives ? PERFECT_BONUS : 0
+
+    // Continuous play advances to a RANDOM next level (no immediate repeat);
+    // a designer test re-pans the same level.
+    const nextIndex = this.#testing ? this.#levelIndex : this.#randomLevelIndex(this.#levelIndex)
+    const nextLevel = this.#testing
+      ? (this.#testLevel ?? LEVELS[this.#levelIndex])
+      : (LEVELS[nextIndex] ?? LEVELS[this.#levelIndex])
+
+    this.#transition = {
+      phase: 'tally', t: 0,
+      levelScore, bonus, baseScore: this.#levelStartScore,
+      nextLevel, nextIndex, testing: this.#testing, prev: eng,
+    }
+    this.#hideBanner()
   }
 
+  /** Advance the active transition: count the tally, then build + scroll in the
+   *  next level (carrying the running score — bonus included — and lives). The
+   *  bat carries its X so it doesn't snap to centre between screens. */
+  #stepTransition(dt: number): void {
+    const tr = this.#transition
+    if (!tr) return
+    tr.t += dt
+    if (tr.phase === 'tally') {
+      if (tr.t < TALLY_MS) return
+      const carriedScore = tr.baseScore + tr.levelScore + tr.bonus
+      const e = new Engine(tr.nextLevel.rows)
+      e.score = carriedScore
+      e.lives = tr.prev.lives
+      e.paddle.x = tr.prev.paddle.x        // base width range ⊂ any expanded range, so always valid
+      this.#engine = e
+      this.#paddleTargetX = e.paddle.x
+      this.#levelIndex = tr.nextIndex
+      this.#levelStartScore = e.score
+      this.#levelStartLives = e.lives
+      // Snap the juice baselines to the new engine so the score/lives carry-over
+      // doesn't fire a spurious shake and the brick snapshot starts fresh.
+      this.#syncJuice(e)
+      if (this.#levelLabel) {
+        this.#levelLabel.textContent = tr.testing
+          ? `${tr.nextLevel.name}  (test)`
+          : `${tr.nextLevel.name}  (${tr.nextIndex + 1}/${LEVELS.length})`
+      }
+      tr.phase = 'pan'
+      tr.t = 0
+    } else if (tr.t >= PAN_MS) {
+      this.#transition = null   // hand control back — play resumes on the new level
+      // Pop the level-intro card the moment play resumes (same as Bubble).
+      this.#beginIntro(tr.nextLevel.name, tr.testing ? 'TEST' : `LEVEL ${tr.nextIndex + 1}`)
+    }
+  }
+
+  /** Render the transition: the frozen cleared level under the score tally, then
+   *  the cleared level sliding off the top while the next rises from the bottom.
+   *  The loop has already applied the world scale transform + cleared the frame. */
+  #drawTransition(ctx: CanvasRenderingContext2D, r: Renderer): void {
+    const tr = this.#transition
+    if (!tr) return
+    if (tr.phase === 'tally') {
+      r.draw(tr.prev, this.#time)
+      this.#drawTally(ctx, tr)
+    } else {
+      const p = easeInOut(Math.min(1, tr.t / PAN_MS))
+      ctx.save(); ctx.translate(0, -p * H); r.draw(tr.prev, this.#time); ctx.restore()
+      ctx.save(); ctx.translate(0, (1 - p) * H); r.draw(this.#engine!, this.#time); ctx.restore()
+    }
+  }
+
+  /** The score add-up overlay: level gain counts up first, then any perfect
+   *  bonus, with the running total ticking alongside. Drawn in world units. */
+  #drawTally(ctx: CanvasRenderingContext2D, tr: Transition): void {
+    const w = W, h = H
+    const cx = w / 2
+    const p = Math.min(1, tr.t / TALLY_MS)
+    // Count the level score over the first ~62%, then the bonus over the rest.
+    const levelP = Math.min(1, p / 0.62)
+    const bonusP = tr.bonus > 0 ? Math.max(0, Math.min(1, (p - 0.62) / 0.30)) : 0
+    const shownLevel = Math.round(tr.levelScore * levelP)
+    const shownBonus = Math.round(tr.bonus * bonusP)
+    const shownTotal = tr.baseScore + shownLevel + shownBonus
+    const font = (size: number, weight = 700) =>
+      `${weight} ${Math.round(size)}px "Segoe UI", system-ui, sans-serif`
+
+    ctx.save()
+    ctx.fillStyle = 'rgba(6,8,18,0.66)'
+    ctx.fillRect(0, 0, w, h)
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+
+    ctx.fillStyle = '#7ee0ff'
+    ctx.font = font(h * 0.085, 800)
+    ctx.fillText('LEVEL CLEAR', cx, h * 0.30)
+
+    ctx.fillStyle = '#ffffff'
+    ctx.font = font(h * 0.045)
+    ctx.fillText(`Level  +${shownLevel}`, cx, h * 0.46)
+
+    if (tr.bonus > 0) {
+      ctx.fillStyle = bonusP > 0 ? '#ffd76a' : 'rgba(255,215,106,0.28)'
+      ctx.fillText(`Perfect Bonus  +${shownBonus}`, cx, h * 0.555)
+    }
+
+    ctx.fillStyle = '#bfe3ff'
+    ctx.font = font(h * 0.054, 800)
+    ctx.fillText(`✦ ${shownTotal}`, cx, h * 0.69)
+    ctx.restore()
+  }
+
+  // ── banners + status ──────────────────────────────────────
   #showGameOver(): void {
     this.#exitLock()                                        // free the cursor for the banner buttons
     const score = this.#engine?.score ?? 0
     this.#showBanner('Game Over', `✦ ${score}`, [
-      { label: '↻ Retry', fn: () => this.#startPlay(this.#levelIndex) },
+      { label: '▶ Continue', fn: () => this.#continue() },          // keep score, fresh lives, same level
+      { label: '↻ Restart', fn: () => this.#startPlay(this.#levelIndex) },
     ])
+  }
+
+  /** Resume the run after a game over — refill lives, keep the score and the
+   *  bricks still standing, and hand control straight back so you play through. */
+  #continue(): void {
+    const eng = this.#engine
+    if (!eng) return
+    eng.continueGame()
+    this.#overShown = false
+    this.#hideBanner()
   }
 
   #showBanner(title: string, sub: string, actions: { label: string; fn: () => void }[]): void {
@@ -607,5 +969,33 @@ const CSS = `
 .ark-help{padding:.45rem .8rem;text-align:center;font-size:.78rem;color:#9aa0c8;
   background:rgba(8,12,26,.6);border-top:1px solid rgba(126,182,214,.15)}
 .ark-help b{color:#dfe7ff}
+.ark-flyout{position:absolute;left:0;top:0;bottom:0;z-index:7;pointer-events:none}
+.ark-flyout-panel{position:absolute;left:0;top:0;bottom:0;width:238px;box-sizing:border-box;
+  padding:14px 14px 20px;overflow-y:auto;pointer-events:auto;
+  background:linear-gradient(180deg,rgba(10,16,34,.97),rgba(8,12,26,.95));
+  border-right:1px solid rgba(126,182,214,.3);backdrop-filter:blur(6px);
+  box-shadow:6px 0 26px rgba(0,0,0,.5);transform:translateX(-100%);transition:transform .26s ease}
+.ark-flyout.open .ark-flyout-panel{transform:translateX(0)}
+.ark-flyout-tab{position:absolute;left:0;top:18px;display:flex;flex-direction:column;align-items:center;gap:7px;
+  pointer-events:auto;cursor:pointer;color:#cfe3ff;
+  background:rgba(14,22,46,.92);border:1px solid rgba(126,182,214,.34);border-left:none;
+  border-radius:0 10px 10px 0;padding:11px 6px;transition:transform .26s ease,background .15s ease;
+  box-shadow:3px 0 14px rgba(0,0,0,.4)}
+.ark-flyout.open .ark-flyout-tab{transform:translateX(238px)}
+.ark-flyout-tab:hover{background:rgba(30,46,86,.96);color:#fff}
+.ark-tab-label{writing-mode:vertical-rl;text-orientation:upright;font-weight:800;font-size:.6rem;letter-spacing:.16em;color:#7ee0ff}
+.ark-tab-chev{font-size:.72rem;line-height:1;transition:transform .26s ease}
+.ark-flyout.open .ark-tab-chev{transform:rotate(180deg)}
+.ark-fly-head{font-weight:800;color:#7ee0ff;font-size:.72rem;letter-spacing:.08em;margin:2px 0 6px;
+  text-transform:uppercase;text-shadow:0 0 12px rgba(126,224,255,.4)}
+.ark-fly-head:not(:first-child){margin-top:14px;padding-top:11px;border-top:1px solid rgba(126,182,214,.18)}
+.ark-pill-row{display:flex;gap:9px;align-items:flex-start;margin:9px 0}
+.ark-pill-badge{flex:0 0 auto;width:26px;height:26px;border-radius:7px;display:flex;align-items:center;
+  justify-content:center;font-weight:800;font-size:.92rem;color:#0a0c1a;line-height:1}
+.ark-pill-text{display:flex;flex-direction:column;gap:1px;min-width:0}
+.ark-pill-name{font-weight:700;font-size:.8rem;line-height:1.15}
+.ark-pill-desc{font-size:.72rem;line-height:1.32;color:#aeb6d8}
+.ark-info-row{margin:9px 0}
+.ark-info-title{font-weight:700;font-size:.78rem;color:#dfe7ff;margin-bottom:1px}
 .ark-hidden{display:none!important}
 `

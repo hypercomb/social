@@ -352,7 +352,6 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
   #unsub: (() => void) | null = null
   #loadSeq = 0
   readonly #el: ElementRef<HTMLElement> = inject(ElementRef)
-  #resizeObserver: ResizeObserver | null = null
 
   // User-chosen width in px, sticky across locations. Null = auto (panel
   // grows to fit content on first open). Persisted in localStorage so
@@ -405,32 +404,6 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
       })
     })
 
-    // Keep the --hc-history-column-width CSS variable in lockstep
-    // with the panel's actual rendered width so #pixi-host narrows
-    // (and the canvas re-sizes via its ResizeObserver) to match the
-    // sidebar exactly. The aside lives inside `@if (visible())` —
-    // it's torn down and re-created on every show/hide — so the
-    // observer is reattached here every time visibility flips true.
-    // queueMicrotask defers past the DOM commit for this tick.
-    effect(() => {
-      if (!this.visible()) return
-      queueMicrotask(() => {
-        const host = this.#el.nativeElement as HTMLElement
-        const aside = host.querySelector('.history-viewer') as HTMLElement | null
-        if (!aside) return
-        this.#resizeObserver?.disconnect()
-        if ('ResizeObserver' in window) {
-          this.#resizeObserver = new ResizeObserver(() => {
-            const w = Math.max(aside.offsetWidth, 0)
-            document.body.style.setProperty('--hc-history-column-width', `${w}px`)
-          })
-          this.#resizeObserver.observe(aside)
-        }
-        // Prime the variable immediately so the canvas shift lands
-        // on the first paint, not one ResizeObserver tick later.
-        document.body.style.setProperty('--hc-history-column-width', `${aside.offsetWidth}px`)
-      })
-    })
   }
 
   ngAfterViewInit(): void {
@@ -444,11 +417,6 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     if (host && host.parentNode !== document.body) {
       document.body.appendChild(host)
     }
-    // Inject the one-off stylesheet that gives the viewer its own
-    // column by shifting the canvas and main UI rightward while
-    // history mode is active. Everything stays fully interactive —
-    // we're reshaping the layout, not intercepting events.
-    installHistoryColumnStylesheet()
   }
 
   ngOnInit(): void {
@@ -474,8 +442,6 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
 
   ngOnDestroy(): void {
     this.#unsub?.()
-    this.#resizeObserver?.disconnect()
-    this.#resizeObserver = null
     // Best-effort: if the host was portaled, remove it from body so we
     // don't leave a dangling node behind after the component tears down.
     const host = this.#el.nativeElement
@@ -1079,35 +1045,19 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
 const SIG_RE = /^[0-9a-f]{64}$/
 
 // ─────────────────────────────────────────────────────────────────────
-// Inject a one-off stylesheet that reserves a 216px column on the
-// left for the history viewer while `body.hc-history-mode` is set,
-// and shifts the Pixi stage + main UI bars out of its way. The viewer
-// itself stays position:fixed in that column — this just keeps the
-// rest of the app from overlapping it.
+// Minimum panel width (px) for the drag-resize clamp.
+//
+// The history viewer floats OPAQUE *above* the full-bleed canvas — it
+// never resizes or moves #pixi-host. The canvas is sealed: only its
+// owner (the pixi worker) may size it, so no panel can collapse or
+// shift it. Tiles stay visible beside the panel because the canvas
+// renders full-width underneath and the panel only covers its left
+// edge. (Previously this injected a `body.hc-history-mode #pixi-host`
+// rule that reserved a column by resizing the canvas — the single
+// source of the "a widget moved/collapsed the canvas" class of bug.)
 // ─────────────────────────────────────────────────────────────────────
 
 const HISTORY_COLUMN_MIN = 240
-let columnStyleInjected = false
-function installHistoryColumnStylesheet(): void {
-  if (columnStyleInjected) return
-  columnStyleInjected = true
-  const style = document.createElement('style')
-  style.setAttribute('data-hc-history-column', '')
-  style.textContent = `
-    body {
-      --hc-history-column-width: ${HISTORY_COLUMN_MIN}px;
-    }
-    body.hc-history-mode #pixi-host {
-      left: var(--hc-history-column-width) !important;
-      width: calc(100% - var(--hc-history-column-width)) !important;
-    }
-    /* header-bar intentionally NOT shifted — it lives above the
-       sidebar (which starts below it via top: 3.2rem), so the
-       command line stays full-width at the top left instead of
-       getting pushed right by the sidebar column. */
-  `
-  document.head.appendChild(style)
-}
 
 // ─────────────────────────────────────────────────────────────────────
 // Line-level diff for the slice inspector.

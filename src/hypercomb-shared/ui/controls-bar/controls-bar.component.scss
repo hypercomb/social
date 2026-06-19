@@ -22,7 +22,8 @@
 
 .breadcrumb-top {
   position: fixed;
-  top: 3.25rem;
+  // tracks the header size: 3.25rem × the active header zoom
+  top: calc(3.25rem * var(--hc-header-zoom, 1.0));
   right: 0.6rem;
   z-index: 59999;
 
@@ -230,7 +231,8 @@
 .pill-stage.dock-left {
   left: 0;
   right: auto;
-  top: 2.8rem;         // clears the ~2.83rem header bottom
+  // clears the header bottom at any size: 2.8rem × the active header zoom
+  top: calc(2.8rem * var(--hc-header-zoom, 1.0));
   bottom: 0;
   transform: none;
   align-items: stretch; // let the rail fill the full height
@@ -353,13 +355,13 @@
   }
 }
 
-// The rail's top tracks the header height: taller on touch (3.5rem header)
-// and in the 1367–2559px band (header is zoomed 1.15×).
+// The rail's top tracks the header height. On touch the bar's intrinsic
+// height is 3.5rem (vs 2.5rem desktop), so the touch base offset differs;
+// both scale by the active header zoom. The 13" band bump now rides
+// folded into `--hc-header-zoom` (see `styles/_header-size.scss`), so no
+// per-band override is needed here.
 @include touch {
-  .pill-stage.dock-left { top: 3.85rem; }
-}
-@media (min-width: 1367px) and (max-width: 2559px) {
-  .pill-stage.dock-left { top: 3.22rem; }
+  .pill-stage.dock-left { top: calc(3.85rem * var(--hc-header-zoom, 1.0)); }
 }
 
 // Tooltips flip to the inner side of a docked bar so they don't spill off
@@ -1095,17 +1097,10 @@
   .tag-float { max-width: 28rem; }
 }
 
-// ── 13" laptop band (1367–2559px) ─────────────────────────
-// Header is zoomed 1.15× in this band (see `_header-bar.scss`); push the
-// top-right breadcrumb down by the same factor so it keeps the same
-// proportional gap below the (now taller) header.
-// Pill zoom for this band lives in `#computePillZoom()` in the TS so the
-// existing viewport-derived signal stays the single source of truth.
-@media (min-width: 1367px) and (max-width: 2559px) {
-  .breadcrumb-top {
-    top: 3.74rem;
-  }
-}
+// The breadcrumb's 13" laptop-band shift is folded into `--hc-header-zoom`,
+// read by its `top` calc above (see `styles/_header-size.scss`), so no
+// per-band override is needed. Pill zoom for this band still lives in
+// `#computePillZoom()` in the TS as the single source of truth.
 
 // ── 34" ultrawide (3440px+) ──────────────────────────────
 @include desktop-ultrawide {

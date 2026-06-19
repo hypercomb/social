@@ -27,6 +27,10 @@ const NOTES_STRIP_WIDTH_KEY = 'hc:notes-strip-width'
 // across reloads so the strip stays where the user dropped it.
 const NOTES_STRIP_OFFSET_KEY = 'hc:notes-strip-offset'
 
+// Owner token for the InputGate lock the strip holds while visible. Owner-
+// scoped so it composes with the editor's lock rather than stomping it.
+const NOTES_STRIP_LOCK_OWNER = 'notes-strip'
+
 // Dock side — 'right' snaps the strip to a full-height rail on the right
 // edge (so it never fights the left-docked control bar); 'float' is the
 // free, draggable, centred-baseline mode. Persisted across reloads.
@@ -93,6 +97,15 @@ type InputModeStackLike = {
   push(mode: InputModeLike): void
   pop(name: string): void
   remove(name: string): void
+}
+
+/** Structural type for the InputGate — the shared tile-input lock. Resolved
+ *  at runtime via window.ioc (shared must never import from modules). The
+ *  owner-scoped lock/unlock lets the strip hold its lock without stomping
+ *  locks held by the editor or the manual lock button. */
+type InputGateLike = {
+  lock(owner?: string): void
+  unlock(owner?: string): void
 }
 
 @Component({
@@ -1352,11 +1365,6 @@ export class NotesStripComponent implements OnDestroy {
   #observingEl: HTMLElement | null = null
   #applyingDimensions = false
 
-  // Header-height tracking — see #startHeaderHeightTracking.
-  #headerObserver: ResizeObserver | null = null
-  #headerBarEl: HTMLElement | null = null
-  #onWindowResizeHeader = (): void => this.#measureHeaderHeight()
-
   // Input-mode stack participation. When the user hovers the notes strip,
   // we push a 'notes-hover' mode that mechanically unmounts the hex grid's
   // wheel-zoom listener — so scrolling the notes never bleeds into zooming
@@ -1580,9 +1588,21 @@ export class NotesStripComponent implements OnDestroy {
       queueMicrotask(() => this.#syncPanelResize())
     })
 
-    // Keep --hc-header-height in lockstep with the real header bar so the
-    // strip docks flush below the command line at every viewport width.
-    this.#startHeaderHeightTracking()
+    // Lock the tile viewport while the strip is showing. The notes strip is
+    // a modal-style overlay drawn over the canvas (z-index 60001); per the
+    // "modals lock tiles while showing" rule it must pin the hexes beneath
+    // it — no pan, pinch, spacebar-pan, wheel-zoom, or drag-select bleeding
+    // through. The owner-scoped lock composes with the editor's lock instead
+    // of stomping it. The gate is resolved lazily because its bee may
+    // register after this component constructs on hypercomb-web; visible()
+    // is the tracked dependency, so this re-runs on every show/hide.
+    effect(() => {
+      const showing = this.visible()
+      const gate = this.#gate()
+      if (!gate) return
+      if (showing) gate.lock(NOTES_STRIP_LOCK_OWNER)
+      else gate.unlock(NOTES_STRIP_LOCK_OWNER)
+    })
 
     // Warm the decoded-set cache for every cell the strip might display
     // (active/capture cell in single mode, AND every selected cell in
@@ -1692,13 +1712,13 @@ export class NotesStripComponent implements OnDestroy {
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
     this.#selectionListener?.()
+    // Release the tile lock on teardown — the visibility effect is destroyed
+    // with the component and won't run a final unlock, so a strip torn down
+    // while visible would otherwise leave the hexes locked.
+    this.#gate()?.unlock(NOTES_STRIP_LOCK_OWNER)
     this.#resizeObserver?.disconnect()
     this.#resizeObserver = null
     this.#observingEl = null
-    this.#headerObserver?.disconnect()
-    this.#headerObserver = null
-    this.#headerBarEl = null
-    window.removeEventListener('resize', this.#onWindowResizeHeader)
     // Safety: ensure we never leave a 'notes-hover' mode pushed on the
     // stack if the component is destroyed mid-hover (e.g. selection
     // change triggers re-render while cursor is over the strip).
@@ -1718,45 +1738,12 @@ export class NotesStripComponent implements OnDestroy {
     }
   }
 
-  // ── header-height sync ────────────────────────────────────
-  // The header bar's rendered height is NOT constant: 2.5rem at base,
-  // 3.5rem on touch, and carries a `zoom: 1.15` in the 1367–2559px width
-  // band (see _header-bar.scss). The strip (and history-viewer) pin their
-  // top edge to `--hc-header-height` — which nothing else sets, so it fell
-  // back to a hardcoded 3rem and drifted out of sync with the real header
-  // whenever the viewport entered the zoom band, leaving a gap below the
-  // command line that the drag clamp (minTop = host.top) inherited. Measure
-  // the live header and publish its bottom edge to :root so every consumer
-  // tracks it exactly. The ResizeObserver catches height changes (touch /
-  // wrap); the window resize listener catches the zoom band toggling as the
-  // viewport width crosses 1367px / 2560px.
-  #startHeaderHeightTracking(): void {
-    this.#headerBarEl = document.querySelector<HTMLElement>('.header-bar')
-    if (typeof ResizeObserver !== 'undefined') {
-      this.#headerObserver = new ResizeObserver(() => this.#measureHeaderHeight())
-      if (this.#headerBarEl) this.#headerObserver.observe(this.#headerBarEl)
-    }
-    window.addEventListener('resize', this.#onWindowResizeHeader)
-    // The header div is an earlier sibling in app.html, but may not be in
-    // the DOM yet when this component constructs — re-resolve after the
-    // first frame, then take the initial measurement.
-    requestAnimationFrame(() => {
-      if (!this.#headerBarEl) {
-        this.#headerBarEl = document.querySelector<HTMLElement>('.header-bar')
-        if (this.#headerBarEl) this.#headerObserver?.observe(this.#headerBarEl)
-      }
-      this.#measureHeaderHeight()
-    })
-  }
-
-  #measureHeaderHeight(): void {
-    const el = this.#headerBarEl ?? (this.#headerBarEl = document.querySelector<HTMLElement>('.header-bar'))
-    const root = document.documentElement
-    // No header, or it's hidden (phones: display:none) → drop the override
-    // so the CSS 3rem fallback applies and the strip doesn't pin to the top.
-    const bottom = el ? el.getBoundingClientRect().bottom : 0
-    if (bottom <= 0) { root.style.removeProperty('--hc-header-height'); return }
-    root.style.setProperty('--hc-header-height', `${Math.round(bottom)}px`)
+  /** InputGate — the shared tile-input lock. Resolved at runtime (shared
+   *  must never import from modules); the bee may register after this
+   *  component constructs on hypercomb-web, so we look it up lazily on
+   *  each use. */
+  #gate(): InputGateLike | undefined {
+    return window.ioc?.get<InputGateLike>('@diamondcoreprocessor.com/InputGate')
   }
 
   // ── resize wiring ─────────────────────────────────────────

@@ -13,9 +13,16 @@ import { Engine, TILE, type LevelDef } from './engine.js'
 import { Renderer } from './renderer.js'
 import { Designer, TOOLS, type Tool } from './designer.js'
 import { BUILTIN_LEVELS, loadCustomLevels, upsertCustomLevel, deleteCustomLevel, cloneLevel } from './levels.js'
+import { Shaker, easeOutBack, ARCADE } from '../juice.js'
 
 const STYLE_ID = 'bub-overlay-styles'
 const Z = 2147483000
+
+// On-screen zoom. The canvas auto-fits the level to the stage, so the tile size
+// is invisible (it cancels in the fit) — THIS is the real lever for how big the
+// whole game (player + bubbles + platforms, together) renders. < 1 zooms out:
+// everything daintier, sitting on more of the dark backdrop. 1 = fill the stage.
+const ZOOM = 0.8
 
 // Keys that drive PLAY. Movement + K (jump) + J (blow) + R (restart). Up no
 // longer jumps — jump is K. (All keys are isolated anyway; this set only decides
@@ -83,6 +90,13 @@ export class BubbleOverlay {
   #scaleBack = 1
   #overShown = false
   #ro: ResizeObserver | null = null
+
+  // juice: trauma screen-shake + a short level-intro title card. Shake is driven
+  // by score/lives deltas read after each engine.update() so the engine stays pure.
+  #shaker = new Shaker()
+  #prevScore = 0
+  #prevLives = 3
+  #intro: { t: number; title: string; sub: string } | null = null
 
   // Continuous-play state. The engine's score is the RUNNING total (carried
   // across levels); #levelStartScore / #levelStartLives snapshot the totals when
@@ -235,7 +249,7 @@ export class BubbleOverlay {
     this.#banner = banner
 
     const help = el('div', { class: 'bub-help' })
-    help.innerHTML = '<b>← →</b> move &nbsp;·&nbsp; <b>K</b> jump &nbsp;·&nbsp; <b>J</b> blow a bubble &nbsp;·&nbsp; jump <i>up through</i> platforms &amp; off the top to wrap around &nbsp;·&nbsp; bump a trapped foe to pop it &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> close'
+    help.innerHTML = '<b>← →</b> move &nbsp;·&nbsp; <b>K</b> jump &nbsp;·&nbsp; <b>J</b> blow a bubble &nbsp;·&nbsp; jump <i>up through</i> platforms &amp; off the top to wrap around &nbsp;·&nbsp; bump a trapped foe to pop it &nbsp;·&nbsp; <i>chain</i> pops &amp; bubble-bounces with no &gt;1s pause to double your points (×2 at 5, ×4 at 10) &nbsp;·&nbsp; clear the screen, then sweep up the fruit before the bar bleeds out — each one buys more time &nbsp;·&nbsp; grab dropped <i>candy</i>: 👟 <span style="color:#4aa3ff">blue shoe</span> (speed, lasts the level) · 👟 <span style="color:#ff5a5a">red shoe</span> (speed, until you die) · 🍬 rapid-fire · 🍭 big · 🫧 mini bubbles — perks last until you lose a life &nbsp;·&nbsp; once you hold the red shoe, blue ones come as 💎 point-bonus treasures instead &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> close'
     root.appendChild(help)
 
     document.body.appendChild(root)
@@ -282,9 +296,11 @@ export class BubbleOverlay {
     this.#overShown = false
     this.#levelStartScore = this.#engine.score
     this.#levelStartLives = this.#engine.lives
+    this.#syncJuice(this.#engine)
     this.#hideBanner()
     this.#fit()
     this.#updateLevelLabel(level.name, false)
+    this.#beginIntro(level.name, 'LEVEL ' + (this.#levelIndex + 1))
   }
 
   // The toolbar level caption: "Name (n/total)" in play, "Name (test)" while
@@ -311,7 +327,10 @@ export class BubbleOverlay {
     const availW = s.clientWidth - 28
     const availH = s.clientHeight - 28
     if (availW <= 0 || availH <= 0) return
-    const cssScale = Math.min(availW / dims.w, availH / dims.h)
+    // Zoom-out is a PLAY aesthetic only — the designer fills the stage at full
+    // size so cells stay big enough to edit precisely.
+    const zoom = this.#mode === 'play' ? ZOOM : 1
+    const cssScale = Math.min(availW / dims.w, availH / dims.h) * zoom
     const dispW = dims.w * cssScale, dispH = dims.h * cssScale
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
     c.width = Math.round(dispW * dpr)
@@ -333,8 +352,14 @@ export class BubbleOverlay {
 
     const ctx = this.#ctx, r = this.#renderer, dims = this.#worldDims()
     if (ctx && r && dims) {
-      ctx.setTransform(this.#scaleBack, 0, 0, this.#scaleBack, 0, 0)
-      ctx.clearRect(0, 0, dims.w, dims.h)
+      this.#shaker.update(dt)
+      const sh = this.#shaker.offset()
+      // Clear the whole backing buffer in device space first so a shake translate
+      // can never smear the trailing edge; then draw the world through the scale
+      // transform with the shake folded into its translation.
+      ctx.setTransform(1, 0, 0, 1, 0, 0)
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
+      ctx.setTransform(this.#scaleBack, 0, 0, this.#scaleBack, sh.x * this.#scaleBack, sh.y * this.#scaleBack)
       if (this.#mode === 'play' && this.#engine) {
         if (this.#transition) {
           // A level was cleared: the simulation is frozen while the score tallies
@@ -343,7 +368,9 @@ export class BubbleOverlay {
           this.#drawTransition(ctx, r, dims)
         } else {
           this.#engine.update(dt)
+          this.#senseJuice()
           r.draw(this.#engine, this.#time)
+          this.#drawIntro(ctx, dims, dt)
           if (this.#engine.state === 'won') this.#beginClear()
           else if (this.#engine.state === 'gameover' && !this.#overShown) { this.#overShown = true; this.#showGameOver() }
         }
@@ -352,6 +379,59 @@ export class BubbleOverlay {
       }
     }
     this.#raf = requestAnimationFrame(this.#loop)
+  }
+
+  // ── juice: shake + level intro ───────────────────────────
+
+  /** Read the post-update engine state and convert meaningful changes into shake.
+   *  Pure inference (score/lives deltas) keeps the engine free of view concerns. */
+  #senseJuice(): void {
+    const e = this.#engine
+    if (!e) return
+    if (e.lives < this.#prevLives) this.#shaker.add(0.8)               // a life lost — big kick
+    const ds = e.score - this.#prevScore
+    if (ds > 0) this.#shaker.add(Math.min(0.5, 0.1 + ds / 3500))       // pop / capture / fruit
+    this.#prevScore = e.score
+    this.#prevLives = e.lives
+  }
+
+  /** Snap the juice baselines to an engine without firing shake (level swaps). */
+  #syncJuice(e: Engine): void {
+    this.#prevScore = e.score
+    this.#prevLives = e.lives
+    this.#shaker = new Shaker()
+  }
+
+  #beginIntro(title: string, sub: string): void { this.#intro = { t: 0, title, sub } }
+
+  /** A short, non-blocking title card that pops in (overshoot), holds, then fades.
+   *  Drawn in world units over the live game so play never stalls behind it. */
+  #drawIntro(ctx: CanvasRenderingContext2D, dims: { w: number; h: number }, dt: number): void {
+    const intro = this.#intro
+    if (!intro) return
+    intro.t += dt
+    const DUR = 1.7
+    if (intro.t >= DUR) { this.#intro = null; return }
+    const p = intro.t / DUR
+    const appear = easeOutBack(Math.min(1, p / 0.22))
+    const fade = p > 0.72 ? Math.max(0, 1 - (p - 0.72) / 0.28) : 1
+    const { w, h } = dims
+    ctx.save()
+    ctx.globalAlpha = fade
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.translate(w / 2, h * 0.36)
+    ctx.scale(0.62 + 0.38 * appear, 0.62 + 0.38 * appear)
+    ctx.shadowColor = 'rgba(126,224,255,0.6)'
+    ctx.shadowBlur = 20
+    ctx.fillStyle = ARCADE.cyan
+    ctx.font = '800 ' + Math.round(h * 0.085) + 'px "Segoe UI", system-ui, sans-serif'
+    ctx.fillText(intro.title, 0, 0)
+    ctx.shadowBlur = 0
+    ctx.fillStyle = '#eef4ff'
+    ctx.font = '600 ' + Math.round(h * 0.04) + 'px "Segoe UI", system-ui, sans-serif'
+    ctx.fillText(intro.sub, 0, h * 0.08)
+    ctx.restore()
   }
 
   // ── input: play (fully isolated) ─────────────────────────
@@ -451,6 +531,9 @@ export class BubbleOverlay {
   }
 
   #designerTest(): void {
+    // A level with no enemies can never be cleared — don't drop into an
+    // unwinnable playtest; nudge the author to place a foe first.
+    if (this.#designer.level.enemies.length === 0) { this.#flash('place an enemy before testing'); return }
     // Playtest the in-progress level without requiring a save.
     this.#refreshLevels()
     this.#mode = 'play'
@@ -464,9 +547,11 @@ export class BubbleOverlay {
     this.#overShown = false
     this.#levelStartScore = this.#engine.score
     this.#levelStartLives = this.#engine.lives
+    this.#syncJuice(this.#engine)
     this.#hideBanner()
     this.#fit()
     this.#updateLevelLabel(this.#designer.level.name, true)
+    this.#beginIntro(this.#designer.level.name, 'TEST')
   }
 
   #designerLoad(name: string): void {
@@ -556,16 +641,19 @@ export class BubbleOverlay {
       const e = new Engine(cloneLevel(tr.nextLevel))
       e.score = carriedScore
       e.lives = tr.prev.lives
+      e.carryLifePowersFrom(tr.prev)   // red shoe / rapid / bubble size survive the clear; blue shoe ends with the level
       this.#engine = e
       this.#levelIndex = tr.nextIndex
       this.#levelStartScore = e.score
       this.#levelStartLives = e.lives
+      this.#syncJuice(e)
       this.#updateLevelLabel(e.level.name, tr.testing)
       this.#fit()
       tr.phase = 'pan'
       tr.t = 0
     } else if (tr.t >= PAN_MS) {
       this.#transition = null   // hand control back — play resumes on the new level
+      this.#beginIntro(this.#engine?.level.name ?? '', 'LEVEL ' + (this.#levelIndex + 1))
     }
   }
 
@@ -578,11 +666,29 @@ export class BubbleOverlay {
       r.draw(tr.prev, this.#time)
       this.#drawTally(ctx, dims, tr)
     } else {
+      // Pan: the outgoing level scrolls up and off while the next rises from
+      // below. Each is drawn through its OWN fit transform (not the shared one)
+      // so a pan between DIFFERENT-sized levels — e.g. a 20×12 screen handing
+      // off to a 28×18 one — stays correctly scaled and fully scrolls clear.
       const p = easeInOut(Math.min(1, tr.t / PAN_MS))
-      const H = dims.h
-      ctx.save(); ctx.translate(0, -p * H); r.draw(tr.prev, this.#time); ctx.restore()
-      ctx.save(); ctx.translate(0, (1 - p) * H); r.draw(this.#engine!, this.#time); ctx.restore()
+      const ch = ctx.canvas.height
+      this.#drawLevelFitted(r, tr.prev, -p * ch)             // outgoing → off the top
+      this.#drawLevelFitted(r, this.#engine!, (1 - p) * ch)  // incoming ← up from below
     }
+  }
+
+  /** Draw one level fit + centred into the current backing buffer, shifted
+   *  vertically by `dyDevice` device pixels. Sets its own transform so each
+   *  level in a pan uses its own scale, independent of #scaleBack. */
+  #drawLevelFitted(r: Renderer, eng: Engine, dyDevice: number): void {
+    const ctx = this.#ctx
+    if (!ctx) return
+    const cw = ctx.canvas.width, chh = ctx.canvas.height
+    const scale = Math.min(cw / eng.width, chh / eng.height)
+    const ox = (cw - eng.width * scale) / 2
+    const oy = (chh - eng.height * scale) / 2 + dyDevice
+    ctx.setTransform(scale, 0, 0, scale, ox, oy)
+    r.draw(eng, this.#time)
   }
 
   /** The score add-up overlay: level gain counts up first, then any perfect

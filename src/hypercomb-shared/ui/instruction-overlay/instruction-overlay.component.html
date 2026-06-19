@@ -36,7 +36,7 @@
 
 @if (catalogOpen()) {
   <div class="catalog-backdrop" (click)="closeCatalog()"></div>
-  <div class="instruction-catalog">
+  <div class="instruction-catalog" data-consumes-wheel>
     <div class="catalog-header">
       <h2>{{ 'instruction.catalog-title' | t }}</h2>
       <button class="catalog-close" (click)="closeCatalog()">&#215;</button>

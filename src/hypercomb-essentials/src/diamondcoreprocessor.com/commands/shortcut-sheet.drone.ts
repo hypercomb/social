@@ -5,6 +5,7 @@
 // the sheet never drifts from the code.
 import { EffectBus, type KeyBinding } from '@hypercomb/core'
 import type { SlashBehaviour } from './slash-behaviour.provider.js'
+import type { InputGate } from '../navigation/input-gate.service.js'
 
 export interface ShortcutGroup {
   category: string
@@ -88,13 +89,23 @@ export class ShortcutSheetDrone extends EventTarget {
     this.#commandLineOps = this.#buildCommandLineOps()
     this.#shortcutGroups = this.#buildShortcutGroups()
     EffectBus.emit('keymap:suppress', { reason: 'shortcut-sheet' })
+    // Freeze canvas navigation while the sheet is up — wheel/pinch/pan must
+    // not move the tiles beneath the overlay (the editor locks the gate the
+    // same way). The panel itself is [data-consumes-wheel] so scrolling its
+    // content still works; only canvas-bound gestures are suppressed.
+    this.#gate()?.lock('shortcut-sheet')
     this.#emit()
   }
 
   #close(): void {
     this.#open = false
     EffectBus.emit('keymap:unsuppress', { reason: 'shortcut-sheet' })
+    this.#gate()?.unlock('shortcut-sheet')
     this.#emit()
+  }
+
+  #gate(): InputGate | undefined {
+    return window.ioc.get<InputGate>('@diamondcoreprocessor.com/InputGate')
   }
 
   #buildSlashCommands(): SlashCommandEntry[] {

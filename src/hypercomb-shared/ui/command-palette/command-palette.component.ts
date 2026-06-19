@@ -7,6 +7,7 @@
 import {
   Component,
   computed,
+  effect,
   ElementRef,
   ViewChild,
   type AfterViewChecked,
@@ -19,6 +20,17 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 
 import type { CommandPaletteState, PaletteItem } from
   '@hypercomb/essentials/diamondcoreprocessor.com/commands/command-palette.drone'
+
+// Owner token for the InputGate lock held while the palette is open. Owner-
+// scoped so it composes with locks held by the editor / other overlays.
+const COMMAND_PALETTE_LOCK_OWNER = 'command-palette'
+
+/** Structural type for the InputGate — the shared tile-input lock. Resolved
+ *  at runtime via window.ioc (shared must never import from modules). */
+type InputGateLike = {
+  lock(owner?: string): void
+  unlock(owner?: string): void
+}
 
 @Component({
   selector: 'hc-command-palette',
@@ -44,6 +56,21 @@ export class CommandPaletteComponent implements OnInit, AfterViewChecked, OnDest
   readonly groups = computed(() => this.state$().groups)
   readonly activeIndex = computed(() => this.state$().activeIndex)
   readonly totalCount = computed(() => this.state$().totalCount)
+
+  constructor() {
+    // Freeze tile navigation while the palette is open — it's a centred modal
+    // over the canvas, so per the "modals lock tiles while showing" rule no
+    // pan/pinch/wheel-zoom/drag-select may bleed through. open() (derived from
+    // drone state) is the tracked dependency; the gate is resolved lazily (its
+    // bee may register after this component constructs on hypercomb-web). The
+    // [data-consumes-wheel] panel keeps the results list scrollable.
+    effect(() => {
+      const gate = this.#gate()
+      if (!gate) return
+      if (this.open()) gate.lock(COMMAND_PALETTE_LOCK_OWNER)
+      else gate.unlock(COMMAND_PALETTE_LOCK_OWNER)
+    })
+  }
 
   readonly close = (): void => {
     EffectBus.emit('command-palette:close', undefined)
@@ -135,5 +162,15 @@ export class CommandPaletteComponent implements OnInit, AfterViewChecked, OnDest
   ngOnDestroy(): void {
     this.#drone = undefined
     this.#unsub?.()
+    // Release on teardown — the visibility effect won't run a final unlock
+    // once destroyed, so a palette torn down while open would leave the hexes
+    // locked.
+    this.#gate()?.unlock(COMMAND_PALETTE_LOCK_OWNER)
+  }
+
+  /** InputGate — the shared tile-input lock. Resolved at runtime (shared
+   *  must never import from modules); undefined until its bee registers. */
+  #gate(): InputGateLike | undefined {
+    return window.ioc?.get<InputGateLike>('@diamondcoreprocessor.com/InputGate')
   }
 }

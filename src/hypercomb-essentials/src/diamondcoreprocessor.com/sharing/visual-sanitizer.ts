@@ -170,6 +170,11 @@ export function sanitizeVisualProperties(
   const layerSig = asSig(input['layerSig'])
   if (layerSig) out['layerSig'] = layerSig
 
+  // Swarm invite junction — bundle sig of a `swarm:invite` decoration on the
+  // publisher's tile. Inert pointer; observers fetch + confirm only on click.
+  const inviteSig = asSig(input['inviteSig'])
+  if (inviteSig) out['inviteSig'] = inviteSig
+
   return out
 }
 

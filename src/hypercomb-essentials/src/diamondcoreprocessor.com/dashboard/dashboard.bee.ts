@@ -383,6 +383,11 @@ window.ioc.register('@diamondcoreprocessor.com/DashboardBee', _dashboardBee)
       decorationKind: 'visual:dashboard:view',
       behavior: 'navigation',
       controllerKey: '@diamondcoreprocessor.com/DashboardBee',
+      // Label + description so the "show features" panel (and any other
+      // descriptor consumer) renders meaningful meta details, not a bare
+      // view name with an empty description.
+      labelKey: 'view.dashboard',
+      descriptionKey: 'view.dashboard.description',
       adoptable: false,
     })
   },

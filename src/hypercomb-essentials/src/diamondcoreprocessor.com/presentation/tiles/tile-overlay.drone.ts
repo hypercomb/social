@@ -231,12 +231,20 @@ export class TileOverlayDrone extends Drone {
     'tile:public-changed',
     'keymap:invoke',
   ]
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register']
 
   #dropDragging = false
   #dropPending = false
 
   #effectsRegistered = false
+  // Handshake state: #requestedRegister makes #initOverlay emit
+  // 'overlay:request-register' exactly once so every icon provider re-emits
+  // into the now-ready overlay (fixes the boot "zero icons" replay race).
+  // #arrangeRebuildPending defers a re-register-driven rebuild that arrives
+  // mid arrange-drag (it would destroy the dragged button under the pointer);
+  // #exitArrangeMode flushes it.
+  #requestedRegister = false
+  #arrangeRebuildPending = false
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#effectsRegistered) {
@@ -310,20 +318,29 @@ export class TileOverlayDrone extends Drone {
             }
           }
         }
-        this.#rebuildActiveProfile()
+        this.#requestRebuild()
       })
 
-      this.onEffect<{ name: string }>('overlay:unregister-action', ({ name }) => {
-        const desc = this.#registeredDescriptors.get(name)
-        if (desc) {
-          const order = this.#activeOrder.get(desc.profile)
-          if (order) {
-            const idx = order.indexOf(name)
-            if (idx >= 0) order.splice(idx, 1)
-          }
+      this.onEffect<{ name: string; profile?: OverlayProfileKey }>('overlay:unregister-action', ({ name, profile }) => {
+        // PROFILE-AWARE removal. #registeredDescriptors is keyed by NAME, but a
+        // name (remove/files/invite/break-apart/contact) lives in several
+        // profiles, so resolving the profile from the (last-written) descriptor
+        // splices the WRONG profile's order — which is exactly how the full set
+        // collapsed to the 2 non-shared survivors (link/meeting). Use the
+        // payload's profile; if absent (legacy single-profile emitters whose
+        // names are profile-unique, e.g. meeting-join/meeting-camera) clear the
+        // name from every profile that lists it. Do NOT delete the shared
+        // descriptor — another profile may still reference it and
+        // #rebuildActiveProfile needs it to resolve; owner-scoped cleanup is
+        // bee:disposed's job.
+        const targets: OverlayProfileKey[] = profile ? [profile] : [...this.#activeOrder.keys()] as OverlayProfileKey[]
+        for (const p of targets) {
+          const order = this.#activeOrder.get(p)
+          if (!order) continue
+          const idx = order.indexOf(name)
+          if (idx >= 0) order.splice(idx, 1)
         }
-        this.#registeredDescriptors.delete(name)
-        this.#rebuildActiveProfile()
+        this.#requestRebuild()
       })
 
       // ── Bee disposal cleanup ─────────────────────────────────────
@@ -637,6 +654,35 @@ export class TileOverlayDrone extends Drone {
     }
 
     this.#rebuildActiveProfile()
+
+    // Pull registration. The overlay subscribed to overlay:register-action in
+    // heartbeat, but provider drones may have emitted their descriptors before
+    // this overlay existed — and EffectBus keeps only the LAST value per
+    // effect, so a late subscriber replays just one batch (the boot "zero
+    // icons" race). Emit a STICKY request so every provider — current and
+    // later-loading — re-emits its full descriptor set into the now-ready,
+    // already-subscribed overlay, which accumulates them. One-shot; skipped in
+    // arrange mode (a re-register rebuilds buttons and would destroy the
+    // dragged one under the pointer).
+    if (!this.#requestedRegister && !this.#arrangeMode) {
+      this.#requestedRegister = true
+      this.emitEffect('overlay:request-register', {})
+      // Icon providers (edit/note/contact/…) self-register asynchronously
+      // during boot, so a single early pull can land before they exist. Re-pull
+      // once after they settle — providers respond idempotently and the overlay
+      // accumulates, so the late ones fill in without churn.
+      setTimeout(() => {
+        if (!this.#arrangeMode) this.emitEffect('overlay:request-register', {})
+      }, 800)
+    }
+  }
+
+  /** Rebuild the active profile's buttons, unless an arrange drag is live —
+   *  destroying #actions mid-drag would orphan #dragButton. Deferred rebuilds
+   *  flush on #exitArrangeMode. */
+  #requestRebuild(): void {
+    if (this.#arrangeMode) { this.#arrangeRebuildPending = true; return }
+    this.#rebuildActiveProfile()
   }
 
   #updateHexBg(): void {
@@ -888,6 +934,13 @@ export class TileOverlayDrone extends Drone {
     for (const action of this.#actions) {
       action.button.rotation = 0
       action.button.scale.set(1, 1)
+    }
+
+    // Flush any re-register that arrived during the drag (deferred by
+    // #requestRebuild) now that tearing down buttons is safe.
+    if (this.#arrangeRebuildPending) {
+      this.#arrangeRebuildPending = false
+      this.#rebuildActiveProfile()
     }
 
     this.#updateVisibility()

@@ -2,6 +2,7 @@ import { ChangeDetectorRef, Component, inject, type OnInit, type OnDestroy } fro
 import { DomSanitizer, type SafeResourceUrl } from "@angular/platform-browser"
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { stagedSigs } from '../features-viewer/feature-staging'
 
 const DEFAULT_PORTALS: Record<string, string> = {
   meadowverse: 'https://meadowverse.com',
@@ -55,6 +56,17 @@ function resolvePortalUrl(target: string): string | undefined {
   if (override) return override
   if (target === 'dcp') return resolveDcpUrl()
   return DEFAULT_PORTALS[target]
+}
+
+// Owner token for the InputGate lock held while the portal is open. Owner-
+// scoped so it composes with locks held by the editor / other overlays.
+const PORTAL_LOCK_OWNER = 'portal'
+
+/** Structural type for the InputGate — the shared tile-input lock. Resolved
+ *  at runtime via window.ioc (shared must never import from modules). */
+type InputGateLike = {
+  lock(owner?: string): void
+  unlock(owner?: string): void
 }
 
 @Component({
@@ -122,7 +134,12 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   // -------------------------------------------------
   private readonly onPortalOpen = (e: Event): void => {
     const detail = (e as CustomEvent).detail as
-      { target?: string; url?: string; branchSig?: string; at?: string; domain?: string; label?: string } | null
+      {
+        target?: string; url?: string; branchSig?: string; at?: string; domain?: string; label?: string
+        /** Header upgrade-indicator handoff: WHICH package changed + the
+         *  delta the installer marks for review. Notify-and-route only. */
+        upgrade?: { packageSig?: string | null; newBees?: string[]; previous?: string | null }
+      } | null
     let url = detail?.url ?? resolvePortalUrl(detail?.target ?? '')
     if (!url) return
 
@@ -159,10 +176,49 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
       }
     }
 
+    // Upgrade handoff — the header upgrade indicator routes the changed
+    // package here so the installer lands on it and marks the changed items
+    // (off + highlighted) for review/opt-in. `upgrade=<packageSig>` says WHICH
+    // package; `new=<sig,sig,…>` is the changed-sig delta the hive computed;
+    // `previous=<sig>` is the walkback link the installer diffs against when
+    // the explicit list is absent. No bytes, no install — just where to look.
+    if (detail?.upgrade && (detail?.target ?? '') === 'dcp') {
+      const pkg = String(detail.upgrade.packageSig ?? '').trim().toLowerCase()
+      if (/^[a-f0-9]{64}$/.test(pkg)) {
+        url += (url.includes('#') ? '&' : '#') + `upgrade=${pkg}`
+        const prev = String(detail.upgrade.previous ?? '').trim().toLowerCase()
+        if (/^[a-f0-9]{64}$/.test(prev)) url += `&previous=${prev}`
+        // Cap the explicit list so the hash never grows pathological; the
+        // installer falls back to the previous-version walkback for the rest.
+        const sigs = (Array.isArray(detail.upgrade.newBees) ? detail.upgrade.newBees : [])
+          .map(s => String(s ?? '').trim().toLowerCase())
+          .filter(s => /^[a-f0-9]{64}$/.test(s))
+          .slice(0, 80)
+        if (sigs.length) url += `&new=${sigs.join(',')}`
+      }
+    }
+
+    // Benign feature staging → installer pre-tick. The "show features" panel
+    // records wanted features' branch sigs (feature-staging.ts) as the
+    // participant runs through tiles. When the installer opens, hand them over
+    // as `#stage=<sig,…>`; DCP's #processStageHash ticks the matching nodes ON
+    // by default. Nothing folds until Done — this only sets checkbox state.
+    // Capped so the hash never grows pathological (DCP falls back gracefully).
+    if ((detail?.target ?? '') === 'dcp') {
+      const sigs = stagedSigs().slice(0, 80)
+      if (sigs.length) url += (url.includes('#') ? '&' : '#') + `stage=${sigs.join(',')}`
+    }
+
     this.#activeUrl = url
     this.#activeTarget = detail?.target ?? null
     this.portalSrc = this.#sanitizer.bypassSecurityTrustResourceUrl(url)
     this.isOpen = true
+    // Freeze tile navigation while the portal/installer covers the canvas —
+    // per the "modals lock tiles while showing" rule no pan/pinch/wheel-zoom/
+    // drag-select may bleed through behind it. Released in close() (every
+    // passive exit funnels there) and ngOnDestroy. Resolved lazily because
+    // the gate's bee may register after this component constructs on web.
+    this.#gate()?.lock(PORTAL_LOCK_OWNER)
     this.#recomputeDiff()   // also calls detectChanges()
   }
 
@@ -267,6 +323,15 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.#unsubEscape?.()
     this.#unsubTouchDragging?.()
     this.#unsubDiff?.()
+    // Release on teardown so a portal destroyed while open never leaves the
+    // hexes locked.
+    this.#gate()?.unlock(PORTAL_LOCK_OWNER)
+  }
+
+  /** InputGate — the shared tile-input lock. Resolved at runtime (shared
+   *  must never import from modules); undefined until its bee registers. */
+  #gate(): InputGateLike | undefined {
+    return window.ioc?.get<InputGateLike>('@diamondcoreprocessor.com/InputGate')
   }
 
   // -------------------------------------------------
@@ -280,6 +345,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   public close = (): void => {
     const wasDcp = this.#activeTarget === 'dcp'
     this.isOpen = false
+    this.#gate()?.unlock(PORTAL_LOCK_OWNER)
     this.portalSrc = null
     this.#activeUrl = null
     this.#activeTarget = null

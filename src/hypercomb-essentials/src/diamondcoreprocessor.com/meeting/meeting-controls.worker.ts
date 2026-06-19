@@ -19,6 +19,10 @@ const CAMERA_OFF_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 
 // ── Icon position (in overlay-local coordinates) ────────────────
 const ICON_Y = -12 // above the label row, in the upper hex area
 
+// Temporarily hide the "start video" (join) overlay icon. Flip back to true
+// to restore the meeting-join button on tiles.
+const SHOW_JOIN_ICON = false
+
 export class MeetingControlsWorker extends Worker {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'meeting'
@@ -27,7 +31,7 @@ export class MeetingControlsWorker extends Worker {
     'Registers join/camera overlay buttons for hive meetings.'
   public override effects = ['network'] as const
 
-  protected override listens = ['render:host-ready', 'tile:action', 'meeting:state', 'meeting:local-camera']
+  protected override listens = ['render:host-ready', 'overlay:request-register', 'tile:action', 'meeting:state', 'meeting:local-camera']
   protected override emits = ['overlay:register-action', 'overlay:unregister-action', 'meeting:toggle-available', 'meeting:toggle-camera']
 
   #meetingState: MeetingState = 'idle'
@@ -39,6 +43,13 @@ export class MeetingControlsWorker extends Worker {
   protected override act = async (): Promise<void> => {
     // register overlay icons once pixi is ready
     this.onEffect('render:host-ready', () => {
+      this.#registerActions()
+    })
+
+    // Handshake: re-register when the overlay (re)requests it. Routes through
+    // #registerActions so stale meeting-join/meeting-camera names are
+    // unregistered first and only the icon matching the CURRENT state re-emits.
+    this.onEffect('overlay:request-register', () => {
       this.#registerActions()
     })
 
@@ -86,7 +97,7 @@ export class MeetingControlsWorker extends Worker {
     const available = state !== 'idle'
 
     // Join button — visible when not yet joined (idle state)
-    if (!available) {
+    if (!available && SHOW_JOIN_ICON) {
       actions.push({
         name: 'meeting-join',
         owner: this.iocKey,

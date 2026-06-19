@@ -6,7 +6,7 @@
 // engine for a playtest.
 
 import { EMPTY, WALL, BRICK, type LevelDef, type Cell } from './engine.js'
-import { cloneLevel, emptyLevel } from './levels.js'
+import { cloneLevel, emptyLevel, sanitizeLevel } from './levels.js'
 
 export type Tool = 'erase' | 'wall' | 'brick' | 'player' | 'door' | 'key' | 'gem' | 'enemy'
 
@@ -114,18 +114,9 @@ export class Designer {
 
   importJson(text: string): boolean {
     try {
-      const l = JSON.parse(text) as LevelDef
-      if (typeof l.cols !== 'number' || typeof l.rows !== 'number' || !Array.isArray(l.tiles)) return false
-      if (l.tiles.length !== l.cols * l.rows) return false
-      if (!l.player || !l.door) return false
-      this.level = {
-        name: typeof l.name === 'string' ? l.name : 'Imported',
-        cols: l.cols, rows: l.rows, tiles: l.tiles.map(Number),
-        player: l.player, door: l.door,
-        key: l.key ?? null,
-        gems: Array.isArray(l.gems) ? l.gems : [],
-        enemies: Array.isArray(l.enemies) ? l.enemies : [],
-      }
+      const lvl = sanitizeLevel(JSON.parse(text))
+      if (!lvl) return false
+      this.level = lvl
       return true
     } catch { return false }
   }
