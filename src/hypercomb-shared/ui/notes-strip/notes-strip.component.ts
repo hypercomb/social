@@ -43,8 +43,6 @@ const SNAP_EXIT = 120
  *  classes defined in hypercomb-shared/styles/_notes-shapes.scss. */
 export type ShapeId = 'circle' | 'square' | 'triangle' | 'diamond' | 'star' | 'hexagon'
 
-const SHAPE_IDS: readonly ShapeId[] = ['circle', 'square', 'triangle', 'diamond', 'star', 'hexagon']
-
 type Note = {
   id: string
   text: string
@@ -231,15 +229,18 @@ export class NotesStripComponent implements OnDestroy {
    *  button or an add/edit affordance. */
   readonly formInput = viewChild<ElementRef<HTMLTextAreaElement>>('formInput')
 
-  /** Shape ids exposed to the template for the picker row. Static. */
-  readonly shapeIds: readonly ShapeId[] = SHAPE_IDS
+  /** Kind of the note currently being authored in the form — `note`
+   *  (default) or `q` (question). On commit, `q` prepends the `[Q] `
+   *  marker the rest of the strip already understands (noteKind, kind
+   *  filter, question styling). Resets to `note` each time the form
+   *  opens for a fresh add or an edit. */
+  readonly draftKind = signal<'note' | 'q'>('note')
 
-  /** Currently-staged shape for the in-progress note. Set by clicking
-   *  a shape button in the toolbar (`setShape`) or cleared via
-   *  `clearShape`. On capture mode entry it pre-fills from the note
-   *  being edited; on exit it resets to null. Mirrored to the drone
-   *  via `notes:active-shape` so the next `note:commit` carries it. */
-  readonly shape = signal<ShapeId | null>(null)
+  /** Flip the in-progress entry between note and question (the leading
+   *  pill in the form input row). */
+  toggleDraftKind(): void {
+    this.draftKind.update(k => (k === 'q' ? 'note' : 'q'))
+  }
 
   /** Set of note ids whose subtree is currently collapsed. State is
    *  in-memory only — resets on reload. Keys are note ids, not paths,
@@ -388,24 +389,6 @@ export class NotesStripComponent implements OnDestroy {
     this.clearNoteSelection()
   }
 
-  /** Pick a shape for the in-progress note. The shape becomes the
-   *  category tag — written into the layer at commit. Updates the
-   *  signal AND broadcasts on `notes:active-shape` so the drone reads
-   *  the latest value when it handles `note:commit`. */
-  setShape(id: ShapeId): void {
-    // Click the active shape again to clear it (toggle) — removes the need
-    // for a separate clear-shape button in the form.
-    if (this.shape() === id) { this.clearShape(); return }
-    this.shape.set(id)
-    EffectBus.emit('notes:active-shape', { shape: id })
-  }
-
-  /** Remove the shape tag from the in-progress note (revert to plain). */
-  clearShape(): void {
-    if (this.shape() === null) return
-    this.shape.set(null)
-    EffectBus.emit('notes:active-shape', { shape: null })
-  }
 
   /** Indent the current capture-input line one level (two spaces). */
   indent(): void {
@@ -1369,6 +1352,11 @@ export class NotesStripComponent implements OnDestroy {
   #observingEl: HTMLElement | null = null
   #applyingDimensions = false
 
+  // Header-height tracking — see #startHeaderHeightTracking.
+  #headerObserver: ResizeObserver | null = null
+  #headerBarEl: HTMLElement | null = null
+  #onWindowResizeHeader = (): void => this.#measureHeaderHeight()
+
   // Input-mode stack participation. When the user hovers the notes strip,
   // we push a 'notes-hover' mode that mechanically unmounts the hex grid's
   // wheel-zoom listener — so scrolling the notes never bleeds into zooming
@@ -1552,32 +1540,14 @@ export class NotesStripComponent implements OnDestroy {
     }))
 
     // Track command-line capture state so the strip pops in for the target
-    // tile while authoring — even when that tile has no notes yet. Also
-    // synchronise the staged shape with the note being edited (or reset
-    // to null for fresh capture) and broadcast on `notes:active-shape`
-    // so the drone has the right shape to write at commit time.
-    this.#cleanups.push(EffectBus.on<{ mode: string; target: string; editId?: string; shape?: unknown }>('command:enter-mode', (p) => {
+    // tile while authoring — even when that tile has no notes yet.
+    this.#cleanups.push(EffectBus.on<{ mode: string; target: string; editId?: string }>('command:enter-mode', (p) => {
       if (p?.mode !== 'note-capture' || !p.target) return
       this.#capturingFor.set(p.target)
-      // Prefer an explicitly-passed shape (e.g. from notes-viewer's edit())
-      // so we can stage the correct shape even when the source cell's
-      // notes haven't warmed in this strip yet. Fall back to looking up
-      // the existing note by editId. Null for fresh capture.
-      let nextShape: ShapeId | null = null
-      if (typeof p.shape === 'string' && SHAPE_IDS.includes(p.shape as ShapeId)) {
-        nextShape = p.shape as ShapeId
-      } else if (p.editId) {
-        const existing = this.#notesByCell().get(p.target)?.find(n => n.id === p.editId)
-        nextShape = existing?.shape ?? null
-      }
-      this.shape.set(nextShape)
-      EffectBus.emit('notes:active-shape', { shape: nextShape })
     }))
     this.#cleanups.push(EffectBus.on<{ mode: string }>('command:exit-mode', (p) => {
       if (p?.mode !== 'note-capture') return
       this.#capturingFor.set(null)
-      this.shape.set(null)
-      EffectBus.emit('notes:active-shape', { shape: null })
     }))
 
     // The tile note button (and other external add affordances) emit
@@ -1585,11 +1555,10 @@ export class NotesStripComponent implements OnDestroy {
     // that cell instead of routing into the command line. The notes drone
     // no longer turns note:capture into a command-line capture — the command
     // line stays free for a future quick-note syntax.
-    this.#cleanups.push(EffectBus.on<{ cellLabel: string; prefill?: string; editId?: string; shape?: unknown }>('note:capture', (p) => {
+    this.#cleanups.push(EffectBus.on<{ cellLabel: string; prefill?: string; editId?: string }>('note:capture', (p) => {
       if (!p?.cellLabel) return
       if (p.editId) { this.editNote(p.editId, p.cellLabel); return }
-      const sh = (typeof p.shape === 'string' && SHAPE_IDS.includes(p.shape as ShapeId)) ? p.shape as ShapeId : null
-      this.#openForm(p.cellLabel, { prefill: p.prefill, shape: sh })
+      this.#openForm(p.cellLabel, { prefill: p.prefill })
     }))
 
     // Stale legacy localStorage key — the user's pinned-tools list no
@@ -1610,6 +1579,10 @@ export class NotesStripComponent implements OnDestroy {
       // (mode-chips/mode-rows) before we inspect classList.
       queueMicrotask(() => this.#syncPanelResize())
     })
+
+    // Keep --hc-header-height in lockstep with the real header bar so the
+    // strip docks flush below the command line at every viewport width.
+    this.#startHeaderHeightTracking()
 
     // Warm the decoded-set cache for every cell the strip might display
     // (active/capture cell in single mode, AND every selected cell in
@@ -1722,6 +1695,10 @@ export class NotesStripComponent implements OnDestroy {
     this.#resizeObserver?.disconnect()
     this.#resizeObserver = null
     this.#observingEl = null
+    this.#headerObserver?.disconnect()
+    this.#headerObserver = null
+    this.#headerBarEl = null
+    window.removeEventListener('resize', this.#onWindowResizeHeader)
     // Safety: ensure we never leave a 'notes-hover' mode pushed on the
     // stack if the component is destroyed mid-hover (e.g. selection
     // change triggers re-render while cursor is over the strip).
@@ -1739,6 +1716,47 @@ export class NotesStripComponent implements OnDestroy {
       this.#stack()?.pop(this.#notesDragMode.name)
       this.#dragModeActive = false
     }
+  }
+
+  // ── header-height sync ────────────────────────────────────
+  // The header bar's rendered height is NOT constant: 2.5rem at base,
+  // 3.5rem on touch, and carries a `zoom: 1.15` in the 1367–2559px width
+  // band (see _header-bar.scss). The strip (and history-viewer) pin their
+  // top edge to `--hc-header-height` — which nothing else sets, so it fell
+  // back to a hardcoded 3rem and drifted out of sync with the real header
+  // whenever the viewport entered the zoom band, leaving a gap below the
+  // command line that the drag clamp (minTop = host.top) inherited. Measure
+  // the live header and publish its bottom edge to :root so every consumer
+  // tracks it exactly. The ResizeObserver catches height changes (touch /
+  // wrap); the window resize listener catches the zoom band toggling as the
+  // viewport width crosses 1367px / 2560px.
+  #startHeaderHeightTracking(): void {
+    this.#headerBarEl = document.querySelector<HTMLElement>('.header-bar')
+    if (typeof ResizeObserver !== 'undefined') {
+      this.#headerObserver = new ResizeObserver(() => this.#measureHeaderHeight())
+      if (this.#headerBarEl) this.#headerObserver.observe(this.#headerBarEl)
+    }
+    window.addEventListener('resize', this.#onWindowResizeHeader)
+    // The header div is an earlier sibling in app.html, but may not be in
+    // the DOM yet when this component constructs — re-resolve after the
+    // first frame, then take the initial measurement.
+    requestAnimationFrame(() => {
+      if (!this.#headerBarEl) {
+        this.#headerBarEl = document.querySelector<HTMLElement>('.header-bar')
+        if (this.#headerBarEl) this.#headerObserver?.observe(this.#headerBarEl)
+      }
+      this.#measureHeaderHeight()
+    })
+  }
+
+  #measureHeaderHeight(): void {
+    const el = this.#headerBarEl ?? (this.#headerBarEl = document.querySelector<HTMLElement>('.header-bar'))
+    const root = document.documentElement
+    // No header, or it's hidden (phones: display:none) → drop the override
+    // so the CSS 3rem fallback applies and the strip doesn't pin to the top.
+    const bottom = el ? el.getBoundingClientRect().bottom : 0
+    if (bottom <= 0) { root.style.removeProperty('--hc-header-height'); return }
+    root.style.setProperty('--hc-header-height', `${Math.round(bottom)}px`)
   }
 
   // ── resize wiring ─────────────────────────────────────────
@@ -1853,9 +1871,9 @@ export class NotesStripComponent implements OnDestroy {
   }
 
   /** Open a note for editing in the embedded form. Plain notes load into
-   *  the form (prefilled with their RAW text + shape so any legacy
-   *  [Q]/[A:] marker round-trips); questions still route to the tile
-   *  editor, where Claude's Q/A flow lives. Cell-aware for multi-cell. */
+   *  the form (prefilled with their RAW text so any legacy [A:] marker
+   *  round-trips); questions still route to the tile editor, where
+   *  Claude's Q/A flow lives. Cell-aware for multi-cell. */
   editNote(noteId: string, cellLabel?: string): void {
     const cell = cellLabel ?? this.cell()
     if (!cell) return
@@ -1865,7 +1883,7 @@ export class NotesStripComponent implements OnDestroy {
       EffectBus.emit('tile:action', { action: 'edit', label: cell, q: 0, r: 0, index: 0 })
       return
     }
-    this.#openForm(cell, { editId: noteId, prefill: note.text, shape: note.shape })
+    this.#openForm(cell, { editId: noteId, prefill: note.text })
   }
 
   /** Walk a cell's note tree (top-level or nested) to resolve a note id. */
@@ -1888,15 +1906,13 @@ export class NotesStripComponent implements OnDestroy {
   // event the drone already handles — no new write path.
 
   /** Open / focus the form for `cell`. `editId` set ⇒ edit mode. */
-  #openForm(cell: string, opts?: { editId?: string | null; prefill?: string; shape?: ShapeId | null }): void {
+  #openForm(cell: string, opts?: { editId?: string | null; prefill?: string }): void {
     if (!cell) return
     this.#capturingFor.set(cell)
     this.#hiddenContext.set(null)             // a fresh open un-hides the strip
     this.editingNoteId.set(opts?.editId ?? null)
     this.draftText.set(opts?.prefill ?? '')
-    const sh = opts?.shape ?? null
-    this.shape.set(sh)
-    EffectBus.emit('notes:active-shape', { shape: sh })
+    this.draftKind.set('note')
     this.#focusForm()
   }
 
@@ -1939,8 +1955,12 @@ export class NotesStripComponent implements OnDestroy {
     const text = this.draftText().trim()
     if (!text) { this.cancelEdit(); return }
     const editId = this.editingNoteId()
-    EffectBus.emit('notes:active-shape', { shape: this.shape() })
-    EffectBus.emit('note:commit', { cellLabel: cell, text, shape: this.shape(), editId: editId ?? undefined })
+    // A question is just a note carrying the `[Q] ` marker the rest of the
+    // strip already keys off (noteKind, kind filter, question styling).
+    const finalText = this.draftKind() === 'q' && !/^\[Q\]\s/i.test(text)
+      ? `[Q] ${text}`
+      : text
+    EffectBus.emit('note:commit', { cellLabel: cell, text: finalText, editId: editId ?? undefined })
     this.draftText.set('')
     this.editingNoteId.set(null)           // editing is one-shot → back to add
     this.#focusForm()
@@ -1950,8 +1970,7 @@ export class NotesStripComponent implements OnDestroy {
   cancelEdit(): void {
     this.editingNoteId.set(null)
     this.draftText.set('')
-    this.shape.set(null)
-    EffectBus.emit('notes:active-shape', { shape: null })
+    this.draftKind.set('note')
     this.#focusForm()
   }
 

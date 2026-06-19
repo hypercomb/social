@@ -325,64 +325,49 @@
       } @else {
         <!-- Embedded note form — the single authoring surface. Add mode by
              default; clicking a note row loads it here for editing. The
-             shape picker lives in the form now (was a separate readonly
-             toolbar). Enter commits, Shift+Enter newlines, Esc cancels. -->
-        <form class="cv2-form" (submit)="$event.preventDefault(); commitForm()">
+             leading kind pill flips the entry between note and question;
+             placeholder, accent, and submit label follow it. Enter commits,
+             Shift+Enter newlines, Esc cancels. -->
+        <form class="cv2-form" [class.is-question]="draftKind() === 'q'"
+              (submit)="$event.preventDefault(); commitForm()">
           <div class="cv2-form-input-row">
-            <textarea #formInput
-                      class="cv2-form-input"
-                      rows="1"
-                      [value]="draftText()"
-                      (input)="onFormInput($event)"
-                      (keydown)="onFormKeydown($event)"
-                      [attr.placeholder]="'notes.capturePlaceholder' | t"
-                      [attr.aria-label]="editingNoteId() ? ('notes.edit' | t) : ('notes.add' | t)"></textarea>
-            <button type="submit" class="cv2-form-submit" [disabled]="!draftText().trim()">
-              {{ editingNoteId() ? ('notes.save' | t) : ('notes.formAdd' | t) }}
-            </button>
-          </div>
-          <div class="cv2-form-tools">
-            <div class="cv2-shape-row" role="radiogroup" aria-label="Note shape">
-              <button type="button" class="cv2-shape-btn"
-                      [class.is-active]="shape() === 'circle'"
-                      (click)="setShape('circle')" aria-label="Circle" title="Circle">
-                <span class="hc-shape-glyph hc-shape-circle" aria-hidden="true"></span>
-              </button>
-              <button type="button" class="cv2-shape-btn"
-                      [class.is-active]="shape() === 'square'"
-                      (click)="setShape('square')" aria-label="Square" title="Square">
-                <span class="hc-shape-glyph hc-shape-square" aria-hidden="true"></span>
-              </button>
-              <button type="button" class="cv2-shape-btn"
-                      [class.is-active]="shape() === 'triangle'"
-                      (click)="setShape('triangle')" aria-label="Triangle" title="Triangle">
-                <span class="hc-shape-glyph hc-shape-triangle" aria-hidden="true"></span>
-              </button>
-              <button type="button" class="cv2-shape-btn"
-                      [class.is-active]="shape() === 'diamond'"
-                      (click)="setShape('diamond')" aria-label="Diamond" title="Diamond">
-                <span class="hc-shape-glyph hc-shape-diamond" aria-hidden="true"></span>
-              </button>
-              <button type="button" class="cv2-shape-btn"
-                      [class.is-active]="shape() === 'star'"
-                      (click)="setShape('star')" aria-label="Star" title="Star">
-                <span class="hc-shape-glyph hc-shape-star" aria-hidden="true"></span>
-              </button>
-              <button type="button" class="cv2-shape-btn"
-                      [class.is-active]="shape() === 'hexagon'"
-                      (click)="setShape('hexagon')" aria-label="Hexagon" title="Hexagon">
-                <span class="hc-shape-glyph hc-shape-hexagon" aria-hidden="true"></span>
+            <div class="cv2-input-wrap">
+              <textarea #formInput
+                        class="cv2-form-input"
+                        rows="1"
+                        [value]="draftText()"
+                        (input)="onFormInput($event)"
+                        (keydown)="onFormKeydown($event)"
+                        [attr.placeholder]="(draftKind() === 'q' ? 'notes.capturePlaceholderQ' : 'notes.capturePlaceholder') | t"
+                        [attr.aria-label]="editingNoteId() ? ('notes.edit' | t) : ('notes.add' | t)"></textarea>
+              <!-- In-input kind toggle — small chip pinned to the bottom-left
+                   corner of the textarea. One click flips note ↔ question;
+                   styled subtly (not like the primary submit) so it reads as
+                   an accessory of the field, not a second action button. -->
+              <button type="button" class="cv2-kind-toggle"
+                      [class.is-question]="draftKind() === 'q'"
+                      (click)="toggleDraftKind()"
+                      [attr.aria-label]="'notes.kindLabel' | t"
+                      [attr.aria-pressed]="draftKind() === 'q'"
+                      [title]="(draftKind() === 'q' ? 'notes.kindQuestion' : 'notes.kindNote') | t">
+                <span class="dot" [class.q]="draftKind() === 'q'" [class.n]="draftKind() === 'note'"></span>
+                <span class="cv2-kind-toggle-label">{{ (draftKind() === 'q' ? 'notes.kindQuestion' : 'notes.kindNote') | t }}</span>
               </button>
             </div>
-            <span class="cv2-toolbar-spacer"></span>
-            @if (editingNoteId()) {
+            <button type="submit" class="cv2-form-submit" [disabled]="!draftText().trim()">
+              {{ editingNoteId() ? ('notes.save' | t) : ((draftKind() === 'q' ? 'notes.formAsk' : 'notes.formAdd') | t) }}
+            </button>
+          </div>
+          @if (editingNoteId()) {
+            <div class="cv2-form-tools">
+              <span class="cv2-toolbar-spacer"></span>
               <button type="button" class="cv2-form-cancel" (click)="cancelEdit()"
                       [title]="'notes.close' | t">
                 <span class="mat-sym" style="font-size:14px">close</span>
                 <span>{{ 'notes.cancel' | t }}</span>
               </button>
-            }
-          </div>
+            </div>
+          }
         </form>
       }
 
