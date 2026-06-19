@@ -647,10 +647,13 @@ export class TileActionsDrone extends Drone {
   #registerProfileIcons(profile: OverlayProfileKey): void {
     const merged = this.#mergedEntries()
 
-    // Unregister existing icons for this profile
+    // Unregister existing icons for this profile. Carry the profile so the
+    // overlay removes the name from THIS profile's order only — names shared
+    // across profiles (remove/files/invite/break-apart/contact) would otherwise
+    // be spliced out of the wrong profile (the bug that collapsed the set).
     const profileEntries = merged.filter(e => e.profile === profile)
     for (const entry of profileEntries) {
-      EffectBus.emit('overlay:unregister-action', { name: entry.name })
+      EffectBus.emit('overlay:unregister-action', { name: entry.name, profile })
     }
 
     // Re-register with new positions

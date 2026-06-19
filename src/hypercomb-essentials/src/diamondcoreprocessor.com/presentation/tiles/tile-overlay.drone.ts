@@ -321,16 +321,25 @@ export class TileOverlayDrone extends Drone {
         this.#requestRebuild()
       })
 
-      this.onEffect<{ name: string }>('overlay:unregister-action', ({ name }) => {
-        const desc = this.#registeredDescriptors.get(name)
-        if (desc) {
-          const order = this.#activeOrder.get(desc.profile)
-          if (order) {
-            const idx = order.indexOf(name)
-            if (idx >= 0) order.splice(idx, 1)
-          }
+      this.onEffect<{ name: string; profile?: OverlayProfileKey }>('overlay:unregister-action', ({ name, profile }) => {
+        // PROFILE-AWARE removal. #registeredDescriptors is keyed by NAME, but a
+        // name (remove/files/invite/break-apart/contact) lives in several
+        // profiles, so resolving the profile from the (last-written) descriptor
+        // splices the WRONG profile's order — which is exactly how the full set
+        // collapsed to the 2 non-shared survivors (link/meeting). Use the
+        // payload's profile; if absent (legacy single-profile emitters whose
+        // names are profile-unique, e.g. meeting-join/meeting-camera) clear the
+        // name from every profile that lists it. Do NOT delete the shared
+        // descriptor — another profile may still reference it and
+        // #rebuildActiveProfile needs it to resolve; owner-scoped cleanup is
+        // bee:disposed's job.
+        const targets: OverlayProfileKey[] = profile ? [profile] : [...this.#activeOrder.keys()] as OverlayProfileKey[]
+        for (const p of targets) {
+          const order = this.#activeOrder.get(p)
+          if (!order) continue
+          const idx = order.indexOf(name)
+          if (idx >= 0) order.splice(idx, 1)
         }
-        this.#registeredDescriptors.delete(name)
         this.#requestRebuild()
       })
 
