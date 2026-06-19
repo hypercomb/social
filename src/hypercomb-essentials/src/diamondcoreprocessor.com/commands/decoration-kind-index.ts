@@ -56,22 +56,6 @@ export function kindsForLabel(label: string): readonly string[] {
   return set ? [...set] : []
 }
 
-/** True iff ANY known cell carries a decoration of `kind`. A global
- *  presence signal (not scoped to a label), used by ViewBee to decide
- *  whether to surface a render-view toggle on the command line: the
- *  website toggle should appear as soon as a `visual:website:page` exists
- *  anywhere. Reflects what the index has learned so far — live mutations
- *  (`decorations:changed`, e.g. the build pass writing pages) update it
- *  immediately; cells from a prior session light up as they hydrate via
- *  `render:cell-count`. O(known-labels); called only off the recompute
- *  microtask, never per frame. */
-export function hasAnyDecorationKind(kind: string): boolean {
-  for (const set of kindsByLabel.values()) {
-    if (set.has(kind)) return true
-  }
-  return false
-}
-
 type StoreLike = {
   getResource(sig: string): Promise<Blob | null>
 }

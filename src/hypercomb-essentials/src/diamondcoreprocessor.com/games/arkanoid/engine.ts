@@ -44,7 +44,7 @@
 // bricks but never save you.
 
 export type GameState = 'playing' | 'won' | 'gameover'
-export type PowerKind = 'oscillate' | 'break' | 'laser' | 'expand' | 'gun' | 'magnet' | 'rocket' | 'multiplier' | 'burst' | 'pinball' | 'beam'
+export type PowerKind = 'oscillate' | 'break' | 'laser' | 'expand' | 'gun' | 'magnet' | 'rocket' | 'multiplier' | 'burst' | 'pinball' | 'beam' | 'clock' | 'ballchain' | 'extralife'
 
 export interface Brick {
   x: number; y: number; w: number; h: number; hp: number; max: number; alive: boolean
@@ -54,15 +54,21 @@ export interface Brick {
   megaCols?: number; megaRows?: number    // a mega's footprint size, in cells
   covered?: boolean                       // silently consumed under a mega (not a player kill — skip death FX)
   drop?: PowerKind                        // forced power-up drop when destroyed (e.g. a multiplier shard)
+  turret?: boolean                        // pinball: a tile a bumper hit lit up; fires at the player
+  mult?: number                           // a points-multiplier tile (×1/×2/×3, or the hidden rare ×5)
+  hidden?: boolean                        // a mult tile that looks like a normal brick until broken (the rare ×5)
 }
 export interface Ball { x: number; y: number; vx: number; vy: number; r: number; stuck: boolean; wobble: number; primary: boolean; color: string }
 export interface Capsule { x: number; y: number; kind: PowerKind }
 export interface Laser { x: number; y: number }
+export interface TurretShot { x: number; y: number; vx: number; vy: number }   // a turret tile's shot at the player
 export interface Rocket { x: number; y: number; vy: number }
 export interface Explosion { x: number; y: number; t: number }
-export interface Enemy { x: number; y: number; hp: number }
+export interface Enemy { x: number; y: number; hp: number; variant: number }   // variant 0-9 = one of ten looks
+export interface Tnt { x: number; y: number; t: number; fuse: number; lit: boolean }   // centre dynamite; a ball hit lights the fuse
 export interface Bumper { x: number; y: number; r: number; flash: number }
-export interface Alien { x: number; y: number; vx: number; frame: number }
+export interface Alien { x: number; y: number; vx: number; frame: number; extraLife?: boolean }   // carrier = one-pass +1UP
+export interface Pacman { x: number; y: number; dir: number; hp: number; mouth: number; eaten: number; eatCd: number; leaving: boolean }
 export interface ComboPop { x: number; y: number; n: number; t: number }
 export interface Pickup { x: number; y: number; kind: PowerKind; t: number }   // a caught-bonus flash
 
@@ -79,8 +85,11 @@ export const POWER_META: Record<PowerKind, PowerMeta> = {
   burst: { letter: '∗', color: '#3dd7ff', name: 'burst', desc: 'For 8 seconds every brick dies in one hit — tough ones included.' },
   pinball: { letter: 'P', color: '#8c9eff', name: 'pinball', desc: 'Flipper mode: two field bumpers bounce balls around and the white ball doubles in size and damage. Timed.' },
   beam: { letter: 'I', color: '#9d5cff', name: 'beam', desc: 'A purple magic mushroom. 4 shots, no timer: charges ~1.2–1.5s then fires a laser up the middle, damaging that whole column. Grab more to power up — level 3 clears the line.' },
+  clock: { letter: 'T', color: '#7ee0ff', name: 'time clock', desc: 'Caught from the alien with at least one colour ball in play: freezes your white ball(s) and every hazard for a few seconds while colour balls keep clearing.' },
+  ballchain: { letter: '&', color: '#cfd3da', name: 'ball & chain', desc: 'A spiked wrecking ball swings from the white ball — kills the hunter and smashes falling pills. Smash 10 pills before it ends for a 100,000 bonus.' },
+  extralife: { letter: '+1', color: '#5fe08a', name: 'extra life', desc: 'A 1-UP. Dropped only by the rare extra-life alien — shoot it on its single pass to catch this and gain a life.' },
 }
-export const POWER_ORDER: PowerKind[] = ['oscillate', 'break', 'laser', 'expand', 'gun', 'magnet', 'rocket', 'multiplier', 'burst', 'pinball', 'beam']
+export const POWER_ORDER: PowerKind[] = ['oscillate', 'break', 'laser', 'expand', 'gun', 'magnet', 'rocket', 'multiplier', 'burst', 'pinball', 'beam', 'clock', 'ballchain']
 
 // ── World geometry (units; the overlay scales to fit) ──────────────
 // The playfield is 20% wider than the base and bricks are 80% size, kept
@@ -118,7 +127,10 @@ const ALIEN_Y = 24
 export const ALIEN_W = 30
 export const ALIEN_H = 20
 const ALIEN_SPEED = 80               // px/s march
-const SHIP_RESPAWN = 1.3             // seconds before the next ship flies in
+const SHIP_RESPAWN = 6               // seconds before the next ship flies in (was 1.3 — far less spammy)
+const ALIEN_EXTRALIFE_CHANCE = 0.12  // chance a fresh spawn is a one-pass extra-life carrier (only if lives < 5)
+const ALIEN_SLOW = 0.6               // the extra-life carrier crawls at 60% speed for a fair shot
+const MAX_LIVES = 5
 
 // Combo: bricks killed since the last paddle bounce. The combo count IS a score
 // MULTIPLIER on each chained kill (×N), strung together; every COMBO_MILESTONE
@@ -134,6 +146,8 @@ const POWER_WEIGHTS: Record<PowerKind, number> = {
   oscillate: 10, expand: 10, magnet: 8,
   laser: 7, break: 6, gun: 6, multiplier: 6,
   rocket: 3, burst: 3, beam: 3, pinball: 3,
+  clock: 4, ballchain: 2,
+  extralife: 0,                        // never an ambient drop — only the carrier alien gives it
 }
 
 const LASER_SPEED = 640
@@ -218,6 +232,75 @@ const PINBALL_DURATIONS = [10, 12, 15]   // seconds (picked at random on pickup)
 const BUMPER_R = 20
 const BUMPER_KICK = 90               // speed added per bump (capped at BALL_SPEED_MAX)
 const BUMPER_Y = H * 0.6             // bumpers sit below every brick row — the "non-tile" zone
+// Pinball flippers: in pinball mode the bat becomes two REAL flippers, flicked up
+// by the LEFT / RIGHT mouse buttons, that launch the ball back into play. They
+// pivot near the bottom with a small central drain gap between the resting tips.
+export const FLIP_LEN = 64
+const FLIP_THICK = 5
+export const FLIP_PIVOT_DX = 82      // pivots sit at W/2 ± this
+export const FLIP_Y_OFF = 2          // pivot height above PADDLE_Y baseline
+export const FLIP_REST = 0.38        // resting angle (rad) of the LEFT flipper (tip down toward centre)
+export const FLIP_UP = -0.56         // flipped-up angle of the LEFT flipper
+const FLIP_RAISE_SPEED = 12          // how fast a flipper snaps up / down (per second)
+const PINBALL_LAUNCH = 480           // launch speed imparted by an active flip
+// Turret: in pinball mode, each bumper hit toggles a random tile into a turret
+// that fires aimed shots at the paddle; the next hit morphs it back (on/off).
+const TURRET_FIRE_INTERVAL = 1.1     // seconds between a lit turret's shots
+const TURRET_SHOT_SPEED = 210        // px/s, aimed at the paddle's position at fire time
+const TURRET_SHOT_R = 4              // shot radius for the paddle hit-test
+const PADDLE_HIT_FLASH = 0.3         // seconds the paddle flashes red after taking a shot
+
+// Dynamite (TNT): periodically a crate appears in the middle for TNT_LIFETIME
+// seconds; a ball hit lights the fuse, and TNT_FUSE seconds later it detonates,
+// dealing a random 1..TNT_DMG_MAX to EVERY tile within TNT_RADIUS. While a crate
+// is on screen the balls carry a fire aspect.
+const TNT_LIFETIME = 30              // seconds a crate lingers before it fizzles
+const TNT_FUSE = 1.6                 // seconds from "lit" to the blast (telegraphs the big blast)
+const TNT_RADIUS = 150               // blast radius — a genuinely board-shaking blast (was 92)
+const TNT_R = 15                     // crate half-size for the ball hit-test
+const TNT_FIRST = 14                 // seconds into a level before the (single) crate
+const TNT_DMG_MAX = 3               // a tile caught in the blast takes a random 1..3
+const TNT_PER_LEVEL = 0.2            // ~ one level in five is a TNT level (exactly one crate)
+const ENEMY_VARIANTS = 10            // distinct hunter looks, picked at random on spawn
+// Special multiplier tiles: three tiles per board show ×1/×2/×3 and grant that
+// score multiplier when broken; rarely (~every 5 boards) a hidden ×5 lurks in a
+// normal-looking brick.
+const MULT_TILE_5X_CHANCE = 0.2      // ~ one in five boards hides the rare ×5
+
+// Pill waves: ambient power-ups arrive in a deliberate ebb-and-flow instead of a
+// per-kill firehose. QUIET (no drops) → WAVE (a trickle of PILLS_PER_WAVE) → QUIET.
+const PILL_QUIET = 9                 // seconds of calm between waves
+const PILL_WAVE = 5                  // seconds the wave window stays open
+const PILLS_PER_WAVE = 3             // ambient pills released per wave (the cap)
+const PILL_DROP_OFFSETS = [0.4, 2.2, 3.8]   // jittered release points within the wave
+
+// Encounter director: at most ONE major hazard at a time, with a guaranteed calm
+// between them. The ordinary wave-alien is NOT a major hazard (it is pill delivery).
+const HAZARD_COOLDOWN = 8            // seconds of calm after a major hazard resolves
+
+// Pac-Man: a comedic ammo-economy rival — eats only COLOUR balls (never the white
+// one), immune to colour balls, destroyed by the white ball / weapons.
+const PAC_R = 14
+const PACMAN_SPEED = 95              // px/s (slower than the hunter so the white ball can run it down)
+const PACMAN_HP = 3
+const PAC_EAT_CD = 0.8              // seconds between bites (so it can't vacuum a cluster)
+const PAC_EAT_CAP = 4               // colour balls eaten before it leaves, full
+const PAC_COLOR_MIN = 2             // colour balls needed on screen to summon it
+const PAC_SUMMON_HOLD = 1.5        // …held for this long first
+
+// Clock: caught from the alien (needs ≥1 colour ball), it freezes the white
+// ball(s) + every hazard while colour balls keep clearing.
+const CLOCK_DURATION = 6
+// Ball & chain: a spiked wrecking ball swings from the white ball, killing the
+// hunter and smashing falling pills. 10 pill-smashes in the window = a jackpot.
+const BALLCHAIN_DURATION = 16
+const CHAIN_LEN = 48                 // chain length: white ball → wrecking ball
+const WRECK_R = 9                    // wrecking-ball radius for its hits
+const CHAIN_K = 13                   // pendulum restoring force toward straight-down
+const CHAIN_DAMP = 0.6               // swing damping
+const CHAIN_DRIVE = 0.018            // how strongly the ball's motion swings the flail
+const CHAIN_BONUS_PILLS = 10         // pills to smash for the jackpot
+const CHAIN_BONUS = 100000           // the jackpot
 
 // Beam (the purple mushroom): auto-charges and releases a single laser straight
 // up from the paddle's middle, doing 1 damage to every brick in that column.
@@ -245,7 +328,13 @@ export class Engine {
   explosions: Explosion[] = []
   enemy: Enemy | null = null
   bumpers: Bumper[] = []              // pinball-mode field bumpers (empty otherwise)
+  flipLeftRaise = 0                   // 0 = resting, 1 = fully flipped (left flipper, pinball mode)
+  flipRightRaise = 0                  // 0 = resting, 1 = fully flipped (right flipper)
+  turretShots: TurretShot[] = []      // shots fired at the player by lit turret tiles
+  paddleHitFlash = 0                  // seconds left of the red flash after a turret shot lands
+  tnt: Tnt | null = null              // the centre dynamite crate (null = none on screen)
   alien: Alien | null = null         // the top ship dispenser (respawns when shot)
+  pacman: Pacman | null = null       // the colour-ball-eating rival (null = none)
   combo = 0                          // bricks killed since the last paddle bounce
   comboPops: ComboPop[] = []         // floating combo counters (transient, for the renderer)
   pickups: Pickup[] = []             // caught-bonus flashes (transient, for the renderer)
@@ -269,6 +358,15 @@ export class Engine {
   oscillateStacks = 0
   // Score multiplier from the multiplier pill (1 = none, 2 or 3 while active).
   scoreMul = 1
+  // Pills-eaten multiplier: every caught pill adds +0.1 to this, permanently for
+  // the life. Folds into every score alongside scoreMul + oscillate.
+  pillMul = 1
+  // Clock freeze: while > 0, white ball(s) + every hazard are frozen.
+  freezeTimer = 0
+  // Ball & chain: a swinging spiked wrecking ball hanging off the white ball.
+  ballchainTimer = 0
+  chainBall: { x: number; y: number } | null = null   // the wrecking ball (render + hits)
+  ballchainKills = 0                                   // pills smashed this window (10 → jackpot)
   // Rocket charges available to fire (a rocket in flight lives in `rockets`).
   rocketAmmo = 0
   // The gun is ammo-based, not timed: shots left in the loader (0 = no gun).
@@ -290,6 +388,25 @@ export class Engine {
   #levelClock = 0                     // seconds on this screen — drives the enemy spawn
   #levelRows = 0                      // rows in the current level (mega footprint clamp)
   #pinballDur = 0                     // the picked pinball duration (for the HUD bar)
+  #turretFireCd = 0                   // countdown to the active turret's next shot
+  #tntTimer = TNT_FIRST               // seconds until the next dynamite crate appears
+  #chainAngle = 0                     // wrecking-ball pendulum angle (0 = straight down)
+  #chainAngVel = 0                    // pendulum angular velocity
+  #chainBonusPaid = false             // the 100k jackpot pays once per window
+  #flipLDown = false                  // left mouse held (left flipper up)
+  #flipRDown = false                  // right mouse held (right flipper up)
+  #flipLVel = 0                       // left flipper raise delta this frame (>0 = rising → kick)
+  #flipRVel = 0                       // right flipper raise delta this frame
+  // Encounter director: one major hazard at a time + a calm between them.
+  #activeHazard: 'none' | 'hunter' | 'pacman' | 'tnt' | 'carrier' = 'none'
+  #hazardCooldown = 0                 // seconds of guaranteed calm before the next major hazard
+  // Pill waves (the only ambient pill source).
+  #pillPhase: 'quiet' | 'wave' = 'quiet'
+  #pillClock = 0
+  #waveBudget = 0
+  #waveDropTimes: number[] = []
+  #colorBallTimer = 0                 // how long ≥ PAC_COLOR_MIN colour balls have been up (summons Pac-Man)
+  #tntArmedThisLevel = false          // rolled once per level: is there a crate this board?
   #enemyHits = 0                      // cumulative hits on the hunter — every 5 earns a mega
   #shipRespawn = 0                    // seconds until the next alien ship flies in (when destroyed)
 
@@ -311,16 +428,43 @@ export class Engine {
         this.bricks.push({ x: BRICK_X0 + c * BRICK_W, y: BRICK_TOP + r * BRICK_H, w: BRICK_W, h: BRICK_H, hp, max: hp, alive: true, col: c, row: r })
       }
     }
-    this.#spawnShip()
+    this.#placeMultTiles()
+    this.#tntArmedThisLevel = Math.random() < TNT_PER_LEVEL   // ~1 level in 5 gets a (single) crate
+    this.#spawnShip(false)                                    // the level's first ship is never a carrier
   }
 
-  #spawnShip(): void {
+  /** A major hazard may begin only when the slot is free AND the calm has elapsed. */
+  #hazardFree(): boolean { return this.#activeHazard === 'none' && this.#hazardCooldown <= 0 }
+  /** A major hazard resolved — start the guaranteed calm before the next one. */
+  #endHazard(): void { this.#activeHazard = 'none'; this.#hazardCooldown = HAZARD_COOLDOWN }
+
+  /** Tag three random tiles as ×1/×2/×3 score-multiplier tiles, and ~every fifth
+   *  board hide a rare ×5 inside an ordinary-looking brick (revealed only when broken). */
+  #placeMultTiles(): void {
+    const pool = this.bricks.filter(b => b.alive && !b.mega && !b.seed)
+    const pick = (): Brick | null => {
+      if (!pool.length) return null
+      return pool.splice(Math.floor(Math.random() * pool.length), 1)[0]   // distinct each time
+    }
+    for (const m of [1, 2, 3]) { const b = pick(); if (b) b.mult = m }
+    if (Math.random() < MULT_TILE_5X_CHANCE) { const b = pick(); if (b) { b.mult = 5; b.hidden = true } }
+  }
+
+  #spawnShip(allowCarrier = true): void {
     const dir = Math.random() < 0.5 ? 1 : -1
-    this.alien = { x: dir > 0 ? ALIEN_W / 2 : W - ALIEN_W / 2, y: ALIEN_Y, vx: ALIEN_SPEED * dir, frame: 0 }
+    // Occasionally a one-pass extra-life carrier — but never the level's first ship,
+    // only when it would help (lives < max), and only when the slot is free.
+    const carrier = allowCarrier && this.lives < MAX_LIVES && this.#hazardFree() && Math.random() < ALIEN_EXTRALIFE_CHANCE
+    const speed = ALIEN_SPEED * (carrier ? ALIEN_SLOW : 1)
+    this.alien = { x: dir > 0 ? ALIEN_W / 2 : W - ALIEN_W / 2, y: ALIEN_Y, vx: speed * dir, frame: 0, extraLife: carrier }
+    if (carrier) this.#activeHazard = 'carrier'
   }
 
-  /** March the alien ship; when none is up, fly the next one in after a beat. */
+  /** March the alien ship; when none is up, fly the next one in after a beat. A
+   *  normal ship bounces wall-to-wall; the extra-life carrier makes ONE pass and
+   *  glides off the far side (miss it and it's gone). */
   #stepAlien(dt: number): void {
+    if (this.freezeTimer > 0) return                  // clock: ship frozen
     const a = this.alien
     if (!a) {
       this.#shipRespawn -= dt
@@ -328,18 +472,27 @@ export class Engine {
       return
     }
     a.x += a.vx * dt
-    if (a.x < ALIEN_W / 2) { a.x = ALIEN_W / 2; a.vx = Math.abs(a.vx) }
-    else if (a.x > W - ALIEN_W / 2) { a.x = W - ALIEN_W / 2; a.vx = -Math.abs(a.vx) }
+    if (a.extraLife) {
+      if (a.x < -ALIEN_W || a.x > W + ALIEN_W) { this.alien = null; this.#shipRespawn = SHIP_RESPAWN; this.#endHazard() }   // exited — no drop
+    } else {
+      if (a.x < ALIEN_W / 2) { a.x = ALIEN_W / 2; a.vx = Math.abs(a.vx) }
+      else if (a.x > W - ALIEN_W / 2) { a.x = W - ALIEN_W / 2; a.vx = -Math.abs(a.vx) }
+    }
     a.frame += dt
   }
 
-  /** Shoot the ship down: explode, drop ONE power-up, and queue the next ship. */
+  /** Shoot the ship down: explode, feed the combo, score. Ambient pills now come
+   *  from the wave clock, NOT per-kill — only the extra-life carrier drops a 1-UP. */
   #destroyShip(): void {
     const a = this.alien
     if (!a) return
     this.explosions.push({ x: a.x, y: a.y, t: 0 })
-    this.capsules.push({ x: a.x, y: a.y + ALIEN_H / 2, kind: this.#randomPower() })
-    this.#addScore(100)
+    if (a.extraLife) {                                       // shot the carrier on its pass → 1-UP
+      this.capsules.push({ x: a.x, y: a.y + ALIEN_H / 2, kind: 'extralife' })
+      this.#endHazard()
+    }
+    const cm = this.#bumpCombo(a.x, a.y)                    // the bonus ship feeds the combo multiplier
+    this.#addScore(100 * cm)                                // its points ride the chain, like a brick kill
     this.alien = null
     this.#shipRespawn = SHIP_RESPAWN
   }
@@ -377,6 +530,8 @@ export class Engine {
   /** Count a hit on the hunter; every MEGA_HIT_INTERVAL hits earns a mega seed. */
   #countEnemyHit(): void {
     this.#enemyHits++
+    const e = this.enemy
+    this.#bumpCombo(e?.x ?? W / 2, e?.y ?? BRICK_TOP * 0.5)   // hitting the hunter feeds the combo too
     if (this.#enemyHits % MEGA_HIT_INTERVAL === 0) this.#seedMega()
   }
 
@@ -473,6 +628,28 @@ export class Engine {
     this.explosions = []
     this.enemy = null
     this.bumpers = []
+    this.flipLeftRaise = this.flipRightRaise = 0
+    this.#flipLDown = this.#flipRDown = false
+    this.#flipLVel = this.#flipRVel = 0
+    this.#clearTurrets()
+    this.paddleHitFlash = 0
+    this.tnt = null
+    this.#tntTimer = TNT_FIRST
+    this.pacman = null
+    this.#activeHazard = 'none'
+    this.#hazardCooldown = 0
+    this.#colorBallTimer = 0
+    this.#pillPhase = 'quiet'
+    this.#pillClock = 0
+    this.#waveBudget = 0
+    this.#waveDropTimes = []
+    this.pillMul = 1
+    this.freezeTimer = 0
+    this.ballchainTimer = 0
+    this.chainBall = null
+    this.ballchainKills = 0
+    this.#chainBonusPaid = false
+    this.#chainAngle = this.#chainAngVel = 0
     this.combo = 0
     this.comboPops = []
     this.pickups = []
@@ -509,6 +686,8 @@ export class Engine {
     addTimed('multiplier', this.multTimer, MULT_DURATION)
     addTimed('burst', this.burstTimer, BURST_DURATION)
     addTimed('pinball', this.pinballTimer, this.#pinballDur || 15)
+    addTimed('clock', this.freezeTimer, CLOCK_DURATION)
+    if (this.ballchainTimer > 0) out.push({ kind: 'ballchain', frac: clamp(this.ballchainTimer / BALLCHAIN_DURATION, 0, 1), label: `${this.ballchainKills}/${CHAIN_BONUS_PILLS}` })
     if (this.beamShots > 0) {
       const lvl = this.beamLevel >= 2 ? `L${this.beamLevel}` : ''
       out.push({ kind: 'beam', frac: clamp(this.beamShots / BEAM_LOADER, 0, 1), label: `${lvl}×${this.beamShots}` })
@@ -525,6 +704,8 @@ export class Engine {
   get beamChargeFrac(): number { return this.beamShots > 0 ? clamp(this.beamCharge / this.beamTarget, 0, 1) : 0 }
   /** 0..1 fade of the beam's release flash, for the renderer. */
   get beamFlashFrac(): number { return clamp(this.beamFlash / BEAM_FLASH, 0, 1) }
+  /** 0..1 fade of the paddle's red flash after a turret shot lands, for the renderer. */
+  get paddleHitFlashFrac(): number { return clamp(this.paddleHitFlash / PADDLE_HIT_FLASH, 0, 1) }
 
   // ── input ────────────────────────────────────────────────
   movePaddleTo(worldX: number): void { this.#pointerX = worldX }
@@ -577,7 +758,9 @@ export class Engine {
       this.enemy = null
       this.#levelClock = 0
       this.#addScore(150)
+      this.#endHazard()
     }
+    if (this.pacman && Math.hypot(this.pacman.x - rk.x, this.pacman.y - rk.y) <= ROCKET_RADIUS) this.#killPacman()
     if (this.bricksLeft === 0) this.state = 'won'
   }
 
@@ -630,11 +813,13 @@ export class Engine {
     if (this.state !== 'playing') return
     this.#tickPowers(dt)
     this.#movePaddle(dt)
+    this.#stepFlippers(dt)
     if (this.#laserCd > 0) this.#laserCd = Math.max(0, this.#laserCd - dt)
     if (this.#gunCd > 0) this.#gunCd = Math.max(0, this.#gunCd - dt)
 
     for (const b of this.balls) {
       if (b.stuck) { b.x = this.paddle.x; b.y = this.paddle.y - b.r - 1; continue }
+      if (this.freezeTimer > 0 && b.primary) continue   // clock: white ball frozen in place
       // Sub-step so a fast ball can't tunnel through a brick or the paddle.
       const dist = Math.hypot(b.vx, b.vy) * dt
       const steps = Math.max(1, Math.ceil(dist / (b.r * 0.9)))
@@ -649,11 +834,16 @@ export class Engine {
     this.balls = this.balls.filter(b => b.y - b.r <= H)
     if (!this.balls.some(b => b.primary)) { this.#loseLife(); return }
 
+    this.#stepPillWaves(dt)
     this.#stepCapsules(dt)
     this.#stepLasers(dt)
+    this.#stepTurrets(dt)
+    this.#stepTnt(dt)
     this.#stepRockets(dt)
     this.#stepExplosions(dt)
     this.#stepEnemy(dt)
+    this.#stepPacman(dt)
+    this.#stepBallChain(dt)
     this.#stepBricks(dt)
     this.#stepAlien(dt)
     if (this.comboPops.length) { for (const p of this.comboPops) p.t += dt; this.comboPops = this.comboPops.filter(p => p.t < COMBO_POP_DUR) }
@@ -662,16 +852,20 @@ export class Engine {
   }
 
   #spawnEnemy(): void {
-    this.enemy = { x: W * (0.2 + Math.random() * 0.6), y: BRICK_TOP * 0.5, hp: ENEMY_HP }
+    this.enemy = { x: W * (0.2 + Math.random() * 0.6), y: BRICK_TOP * 0.5, hp: ENEMY_HP, variant: Math.floor(Math.random() * ENEMY_VARIANTS) }
+    this.#activeHazard = 'hunter'
   }
 
   /** The hunter: appears once you've dawdled and homes the white ball. A hit on
    *  the white ball whacks it away at TOP SPEED (no life lost — the fast ball is
    *  just on screen a shorter time); coloured ammo / lasers chip the hunter. */
   #stepEnemy(dt: number): void {
+    if (this.freezeTimer > 0) return                  // clock: hunter frozen
     if (!this.enemy) {
       this.#levelClock += dt
-      if (this.#levelClock >= ENEMY_SPAWN_DELAY && this.bricksLeft > 0) this.#spawnEnemy()
+      // dawdle timer keeps ticking, but the hunter only materialises when the
+      // encounter slot is free (hold-don't-drop — never two major hazards at once)
+      if (this.#levelClock >= ENEMY_SPAWN_DELAY && this.bricksLeft > 0 && this.#hazardFree()) this.#spawnEnemy()
       return
     }
     const e = this.enemy
@@ -725,9 +919,157 @@ export class Engine {
       this.enemy = null
       this.#levelClock = 0
       this.#addScore(150)
+      this.#endHazard()
       return true
     }
     return false
+  }
+
+  /** Ambient pills arrive ONLY in scheduled waves: QUIET → WAVE (a readable trickle
+   *  of PILLS_PER_WAVE) → QUIET. Paused while frozen or once the board is cleared.
+   *  This is the only ambient pill source (the alien no longer drops on every kill). */
+  #stepPillWaves(dt: number): void {
+    if (this.freezeTimer > 0 || this.bricksLeft === 0) return
+    this.#pillClock += dt
+    if (this.#pillPhase === 'quiet') {
+      if (this.#pillClock >= PILL_QUIET) {
+        this.#pillPhase = 'wave'
+        this.#pillClock = 0
+        this.#waveBudget = PILLS_PER_WAVE
+        this.#waveDropTimes = PILL_DROP_OFFSETS.map(o => Math.max(0, o + (Math.random() - 0.5) * 0.8))   // ±0.4s jitter
+      }
+      return
+    }
+    while (this.#waveDropTimes.length && this.#pillClock >= this.#waveDropTimes[0] && this.#waveBudget > 0) {
+      this.#waveDropTimes.shift()
+      this.#waveBudget--
+      const x = this.alien ? this.alien.x : 60 + Math.random() * (W - 120)   // reads as "the ship dropped it"
+      this.capsules.push({ x, y: ALIEN_Y + ALIEN_H, kind: this.#randomPower() })
+    }
+    if (this.#pillClock >= PILL_WAVE || this.#waveBudget <= 0) { this.#pillPhase = 'quiet'; this.#pillClock = 0 }
+  }
+
+  /** True in the last ~1.2s before a wave opens — the renderer can telegraph it. */
+  get pillWaveArming(): boolean { return this.#pillPhase === 'quiet' && this.#pillClock >= PILL_QUIET - 1.2 }
+
+  /** Pac-Man: a comedic ammo-economy rival. Summoned when colour balls linger; it
+   *  homes and EATS only colour balls (never the white one), is immune to colour
+   *  balls, and is killed by the white ball / weapons. A director-gated hazard. */
+  #stepPacman(dt: number): void {
+    if (this.freezeTimer > 0) return
+    const colours = this.balls.filter(b => !b.primary && !b.stuck)
+    if (!this.pacman) {
+      this.#colorBallTimer = colours.length >= PAC_COLOR_MIN ? this.#colorBallTimer + dt : 0
+      if (this.#colorBallTimer >= PAC_SUMMON_HOLD && this.#hazardFree()) {
+        const fromLeft = Math.random() < 0.5
+        this.pacman = { x: fromLeft ? -PAC_R : W + PAC_R, y: H * 0.30, dir: fromLeft ? 1 : -1, hp: PACMAN_HP, mouth: 0, eaten: 0, eatCd: 0, leaving: false }
+        this.#activeHazard = 'pacman'
+        this.#colorBallTimer = 0
+      }
+      return
+    }
+    const p = this.pacman
+    p.mouth = (p.mouth + dt * 8) % (Math.PI * 2)
+    if (p.eatCd > 0) p.eatCd = Math.max(0, p.eatCd - dt)
+    if (p.leaving) {                                        // slide off the nearest edge, then despawn
+      p.x += p.dir * PACMAN_SPEED * dt
+      if (p.x < -PAC_R * 2 || p.x > W + PAC_R * 2) { this.pacman = null; this.#endHazard() }
+      return
+    }
+    if (colours.length === 0 || p.eaten >= PAC_EAT_CAP) { p.leaving = true; p.dir = p.x < W / 2 ? -1 : 1; return }
+    // home the nearest colour ball
+    let tgt: Ball | null = null, best = Infinity
+    for (const b of colours) { const d = Math.hypot(b.x - p.x, b.y - p.y); if (d < best) { best = d; tgt = b } }
+    if (tgt) {
+      const dx = tgt.x - p.x, dy = tgt.y - p.y, d = Math.hypot(dx, dy) || 1
+      p.x += (dx / d) * PACMAN_SPEED * dt; p.y += (dy / d) * PACMAN_SPEED * dt
+      p.dir = dx >= 0 ? 1 : -1
+    }
+    // EAT one colour ball on contact (cooldown-gated so it can't vacuum a cluster)
+    if (p.eatCd <= 0) {
+      for (const b of colours) {
+        if (Math.hypot(b.x - p.x, b.y - p.y) <= PAC_R + b.r) {
+          this.balls = this.balls.filter(x => x !== b)     // eaten — no score, it's food
+          this.explosions.push({ x: b.x, y: b.y, t: 0 })
+          p.eaten++; p.eatCd = PAC_EAT_CD
+          break
+        }
+      }
+    }
+    // the WHITE ball is NOT food: it chips Pac-Man and ricochets away (no life lost)
+    for (const b of this.balls) {
+      if (!b.primary || b.stuck) continue
+      const dx = b.x - p.x, dy = b.y - p.y, d = Math.hypot(dx, dy)
+      if (d > PAC_R + b.r) continue
+      const nd = d || 1, sp = Math.hypot(b.vx, b.vy) || BALL_SPEED
+      b.vx = (dx / nd) * sp; b.vy = (dy / nd) * sp
+      b.x = p.x + (dx / nd) * (PAC_R + b.r + 1); b.y = p.y + (dy / nd) * (PAC_R + b.r + 1)
+      this.#hurtPacman(1)
+      break
+    }
+  }
+
+  /** Chip Pac-Man (white ball / laser / beam). It dies at 0 hp. */
+  #hurtPacman(dmg: number): void {
+    const p = this.pacman
+    if (!p || p.leaving) return
+    p.hp -= dmg
+    this.#addScore(20)
+    if (p.hp <= 0) this.#killPacman()
+  }
+
+  /** Pac-Man destroyed: explosion, a combo-strung bounty, and one wave-exempt pill. */
+  #killPacman(): void {
+    const p = this.pacman
+    if (!p) return
+    this.explosions.push({ x: p.x, y: p.y, t: 0 })
+    const cm = this.#bumpCombo(p.x, p.y)
+    this.#addScore(250 * cm)
+    this.capsules.push({ x: p.x, y: p.y, kind: this.#randomPower() })   // a wave-exempt bonus pill
+    this.pacman = null
+    this.#endHazard()
+  }
+
+  /** Swing the wrecking ball off the white ball (a driven pendulum), then smash
+   *  whatever it sweeps — the hunter, the ship, and falling pills. Smash
+   *  CHAIN_BONUS_PILLS pills inside the window for the 100,000 jackpot. */
+  #stepBallChain(dt: number): void {
+    if (this.ballchainTimer <= 0 || this.freezeTimer > 0) return
+    const p = this.balls.find(b => b.primary)
+    if (!p) return
+    // pendulum: restoring force toward straight-down + a drive from the ball's motion
+    const drive = (p.stuck ? 0 : p.vx) * CHAIN_DRIVE
+    this.#chainAngVel += (-CHAIN_K * Math.sin(this.#chainAngle) - drive) * dt
+    this.#chainAngVel *= (1 - CHAIN_DAMP * dt)
+    this.#chainAngle += this.#chainAngVel * dt
+    const cx = p.x + Math.sin(this.#chainAngle) * CHAIN_LEN
+    const cy = p.y + Math.cos(this.#chainAngle) * CHAIN_LEN
+    this.chainBall = { x: cx, y: cy }
+    // the hunter — killed outright on contact
+    if (this.enemy && Math.hypot(this.enemy.x - cx, this.enemy.y - cy) <= ENEMY_R + WRECK_R) {
+      this.#countEnemyHit()
+      this.explosions.push({ x: this.enemy.x, y: this.enemy.y, t: 0 })
+      this.enemy = null; this.#levelClock = 0; this.#addScore(150); this.#endHazard()
+    }
+    // the ship — popped on contact
+    if (this.alien && Math.hypot(this.alien.x - cx, this.alien.y - cy) <= ALIEN_W / 2 + WRECK_R) this.#destroyShip()
+    // falling pills — smashed on contact, each counting toward the jackpot
+    if (this.capsules.length) {
+      const keep: Capsule[] = []
+      for (const cap of this.capsules) {
+        if (Math.hypot(cap.x - cx, cap.y - cy) <= WRECK_R + CAPSULE_W / 2) {
+          this.ballchainKills++
+          this.#addScore(200)
+          this.explosions.push({ x: cap.x, y: cap.y, t: 0 })
+          if (!this.#chainBonusPaid && this.ballchainKills >= CHAIN_BONUS_PILLS) {
+            this.#chainBonusPaid = true
+            this.#addScore(CHAIN_BONUS)
+            for (let i = 0; i < 6; i++) this.explosions.push({ x: cx + Math.cos(i) * 22, y: cy + Math.sin(i) * 22, t: 0 })
+          }
+        } else keep.push(cap)
+      }
+      this.capsules = keep
+    }
   }
 
   #stepRockets(dt: number): void {
@@ -773,7 +1115,7 @@ export class Engine {
     }
     if (this.pinballTimer > 0) {
       this.pinballTimer = Math.max(0, this.pinballTimer - dt)
-      if (this.pinballTimer === 0) { this.bumpers = []; this.#setPrimaryRadius(BALL_R) }   // pinball over
+      if (this.pinballTimer === 0) { this.bumpers = []; this.#setPrimaryRadius(BALL_R); this.#clearTurrets() }   // pinball over
     }
     if (this.beamShots > 0) {
       this.beamCharge += dt
@@ -785,6 +1127,12 @@ export class Engine {
     }
     if (this.beamFlash > 0) this.beamFlash = Math.max(0, this.beamFlash - dt)
     for (const bm of this.bumpers) if (bm.flash > 0) bm.flash = Math.max(0, bm.flash - dt * 5)
+    if (this.freezeTimer > 0) this.freezeTimer = Math.max(0, this.freezeTimer - dt)   // clock
+    else if (this.#hazardCooldown > 0) this.#hazardCooldown = Math.max(0, this.#hazardCooldown - dt)   // director calm (paused while frozen)
+    if (this.ballchainTimer > 0) {
+      this.ballchainTimer = Math.max(0, this.ballchainTimer - dt)
+      if (this.ballchainTimer === 0) this.chainBall = null                            // window closed
+    }
   }
 
   /** Release one beam shot: a single laser straight up from the paddle's middle.
@@ -802,6 +1150,7 @@ export class Engine {
     }
     const a = this.alien                                // the beam also shoots a ship in its column
     if (a && bx >= a.x - ALIEN_W / 2 && bx <= a.x + ALIEN_W / 2) this.#destroyShip()
+    if (this.pacman && Math.abs(this.pacman.x - bx) <= PAC_R + 4) this.#hurtPacman(this.beamLevel >= 3 ? 99 : this.beamLevel)   // beam zaps Pac-Man in its column
     if (this.beamShots === 0) this.beamCharge = 0
   }
 
@@ -858,8 +1207,10 @@ export class Engine {
     if (b.y - b.r < 0) { b.y = b.r; b.vy = Math.abs(b.vy) }
 
     if (this.bumpers.length) this.#bumperBounce(b)        // pinball bumpers
+    if (this.tnt) this.#tntBounce(b)                      // light the dynamite's fuse
     if (this.alien) this.#alienBounce(b)                  // bonk the top dispenser
-    this.#paddleBounce(b)
+    if (this.pinballTimer > 0) this.#flipperBounce(b)     // pinball: real flippers (L/R mouse)
+    else this.#paddleBounce(b)                            // normal: the sliding bat
     this.#brickHits(b)
 
     // Anti-stuck: never let the ball run too horizontal (it would loop between
@@ -928,7 +1279,7 @@ export class Engine {
   /** Add points through the active multipliers — the multiplier pill (1×/2×/3×)
    *  and a 1.6× bonus while the green oscillate mushroom is in effect. */
   #addScore(n: number): void {
-    const mul = this.scoreMul * (this.oscillateStacks > 0 ? 1.6 : 1)
+    const mul = this.scoreMul * (this.oscillateStacks > 0 ? 1.6 : 1) * this.pillMul
     this.score += Math.round(n * mul)
   }
 
@@ -942,14 +1293,10 @@ export class Engine {
     // Combo: each brick killed since the last paddle bounce raises the chain. The
     // combo IS a score MULTIPLIER (×N) on the kill, strung together; milestones
     // earn a reward.
-    this.combo++
-    const cm = this.combo
-    if (cm >= COMBO_MIN) {
-      this.comboPops.push({ x: brick.x + brick.w / 2, y: brick.y + brick.h / 2, n: cm, t: 0 })
-      if (cm % COMBO_MILESTONE === 0) this.#comboReward(cm)
-    }
+    const cm = this.#bumpCombo(brick.x + brick.w / 2, brick.y + brick.h / 2)
     if (brick.mega) { this.#breakMega(brick); return } // shatter into shards, no normal drop
     this.#addScore(20 * cm)                             // kill points strung up by the combo
+    if (brick.mult) this.#grantMultTile(brick)          // ×1/×2/×3 tile (or the hidden ×5) pays out
     if (brick.drop) {
       this.capsules.push({ x: brick.x + brick.w / 2, y: brick.y + brick.h / 2, kind: brick.drop })
     } else if (Math.random() < DROP_CHANCE) {
@@ -964,6 +1311,29 @@ export class Engine {
     let r = Math.random() * total
     for (const k of POWER_ORDER) { r -= POWER_WEIGHTS[k]; if (r < 0) return k }
     return POWER_ORDER[0]
+  }
+
+  /** Raise the combo chain by one and flag a floating ×N at (x,y); milestones earn
+   *  a reward. The combo IS the score multiplier — shared by brick kills, the bonus
+   *  ship, and enemy hits, so every chained kill (not just bricks) strings together. */
+  #bumpCombo(x: number, y: number): number {
+    this.combo++
+    const cm = this.combo
+    if (cm >= COMBO_MIN) {
+      this.comboPops.push({ x, y, n: cm, t: 0 })
+      if (cm % COMBO_MILESTONE === 0) this.#comboReward(cm)
+    }
+    return cm
+  }
+
+  /** Breaking a ×N multiplier tile lifts the score multiplier to at least N for the
+   *  multiplier window, pays a bonus, and pops a big ×N. The hidden ×5 reveals here. */
+  #grantMultTile(brick: Brick): void {
+    const n = brick.mult ?? 1
+    this.scoreMul = Math.max(this.scoreMul, n)
+    this.multTimer = MULT_DURATION
+    this.#addScore(n * 50)
+    this.comboPops.push({ x: brick.x + brick.w / 2, y: brick.y + brick.h / 2, n, t: 0 })
   }
 
   /** Combo milestone (×5, ×10, …): a free power-up, a fat score bonus, and an
@@ -987,7 +1357,9 @@ export class Engine {
         && cap.x >= p.x - p.w / 2 - CAPSULE_W / 2
         && cap.x <= p.x + p.w / 2 + CAPSULE_W / 2
       if (caught) {
-        this.#applyPower(cap.kind); this.#addScore(120)
+        this.#applyPower(cap.kind)
+        this.pillMul += 0.1                                              // every pill eaten = +0.1 points multiplier
+        this.#addScore(100)                                             // each pill is worth 100 (through the multipliers)
         this.pickups.push({ x: cap.x, y: cap.y, kind: cap.kind, t: 0 })   // flash where it was grabbed
       } else survive.push(cap)
     }
@@ -1001,6 +1373,7 @@ export class Engine {
       l.y -= LASER_SPEED * dt
       if (l.y < 0) continue
       if (this.#shipHitAt(l.x, l.y)) { this.#destroyShip(); continue }   // a laser shoots the ship
+      if (this.pacman && Math.hypot(this.pacman.x - l.x, this.pacman.y - l.y) <= PAC_R) { this.#hurtPacman(1); continue }
       let hit: Brick | null = null
       let lowest = -Infinity
       for (const brick of this.bricks) {
@@ -1092,6 +1465,23 @@ export class Engine {
         this.beamCharge = 0                           // charges up before the first release
         this.beamTarget = BEAM_CHARGE_MIN + Math.random() * (BEAM_CHARGE_MAX - BEAM_CHARGE_MIN)
         break
+      case 'clock':
+        // Only with at least one colour ball in play: freeze the white ball(s) +
+        // every hazard while colour balls keep clearing.
+        if (this.balls.some(b => !b.primary)) this.freezeTimer = CLOCK_DURATION
+        break
+      case 'ballchain': {
+        this.ballchainTimer = BALLCHAIN_DURATION
+        this.ballchainKills = 0
+        this.#chainBonusPaid = false
+        this.#chainAngle = 0; this.#chainAngVel = 0
+        const p = this.balls.find(b => b.primary) ?? this.balls[0]
+        this.chainBall = p ? { x: p.x, y: p.y + CHAIN_LEN } : { x: W / 2, y: H / 2 }
+        break
+      }
+      case 'extralife':
+        if (this.lives < MAX_LIVES) this.lives++       // the 1-UP from the carrier alien
+        break
     }
   }
 
@@ -1101,6 +1491,62 @@ export class Engine {
       { x: W * 0.3, y: BUMPER_Y, r: BUMPER_R, flash: 0 },
       { x: W * 0.7, y: BUMPER_Y, r: BUMPER_R, flash: 0 },
     ]
+  }
+
+  /** Left / right mouse buttons flick the flippers (pinball mode only). */
+  flipLeft(down: boolean): void { this.#flipLDown = down }
+  flipRight(down: boolean): void { this.#flipRDown = down }
+
+  /** Animate each flipper toward its target (up while its button is held). */
+  #stepFlippers(dt: number): void {
+    const step = FLIP_RAISE_SPEED * dt
+    const approach = (cur: number, target: number) => target > cur ? Math.min(target, cur + step) : Math.max(target, cur - step)
+    const pl = this.flipLeftRaise, pr = this.flipRightRaise
+    this.flipLeftRaise = approach(this.flipLeftRaise, this.#flipLDown ? 1 : 0)
+    this.flipRightRaise = approach(this.flipRightRaise, this.#flipRDown ? 1 : 0)
+    this.#flipLVel = this.flipLeftRaise - pl                 // >0 this frame = swinging up → kick
+    this.#flipRVel = this.flipRightRaise - pr
+  }
+
+  /** The two flippers as segments: pivot (px,py) → tip at the lerped angle. The
+   *  right flipper mirrors the left about the centre line. */
+  #flippers(): { px: number; py: number; ang: number; vel: number }[] {
+    const fy = PADDLE_Y + FLIP_Y_OFF
+    const la = FLIP_REST + (FLIP_UP - FLIP_REST) * this.flipLeftRaise
+    const ra = (Math.PI - FLIP_REST) + ((Math.PI - FLIP_UP) - (Math.PI - FLIP_REST)) * this.flipRightRaise
+    return [
+      { px: W / 2 - FLIP_PIVOT_DX, py: fy, ang: la, vel: this.#flipLVel },
+      { px: W / 2 + FLIP_PIVOT_DX, py: fy, ang: ra, vel: this.#flipRVel },
+    ]
+  }
+
+  /** Bounce the ball off the flippers (pinball mode). An actively-rising flipper
+   *  launches the ball back up into play; a resting one is a passive wall. The
+   *  central gap between the resting tips is the drain. */
+  #flipperBounce(b: Ball): void {
+    for (const f of this.#flippers()) {
+      const tx = f.px + Math.cos(f.ang) * FLIP_LEN, ty = f.py + Math.sin(f.ang) * FLIP_LEN
+      const ex = tx - f.px, ey = ty - f.py
+      const t = clamp(((b.x - f.px) * ex + (b.y - f.py) * ey) / (ex * ex + ey * ey || 1), 0, 1)
+      const cx = f.px + ex * t, cy = f.py + ey * t
+      let nx = b.x - cx, ny = b.y - cy
+      const d = Math.hypot(nx, ny) || 1
+      if (d > b.r + FLIP_THICK) continue
+      nx /= d; ny /= d
+      b.x = cx + nx * (b.r + FLIP_THICK); b.y = cy + ny * (b.r + FLIP_THICK)
+      const vn = b.vx * nx + b.vy * ny
+      if (vn < 0) { b.vx -= 2 * vn * nx; b.vy -= 2 * vn * ny }
+      if (f.vel > 0.001) {                                   // active flip → strong launch toward centre/up
+        const horiz = -Math.sign(b.x - W / 2) * PINBALL_LAUNCH * 0.35
+        b.vx = horiz
+        b.vy = -Math.sqrt(Math.max(0, PINBALL_LAUNCH * PINBALL_LAUNCH - horiz * horiz))
+      } else {                                               // passive bounce — keep pinball-lively speed
+        const s = Math.hypot(b.vx, b.vy) || 1
+        const ns = clamp(s, BALL_SPEED, BALL_SPEED_MAX)
+        b.vx = (b.vx / s) * ns; b.vy = (b.vy / s) * ns
+      }
+      return
+    }
   }
 
   /** Pinball bumper: push the ball out, reflect it, and add a speed kick. */
@@ -1119,7 +1565,120 @@ export class Engine {
       b.vx = (b.vx / cur) * sp; b.vy = (b.vy / cur) * sp          // pinball kick
       bm.flash = 1
       this.#addScore(10)
+      this.#toggleTurret()                                       // each bumper hit flips a tile turret on/off
     }
+  }
+
+  /** Each bumper hit toggles a single turret: if one is already lit, morph it back
+   *  to a plain tile; otherwise light a random live tile so it starts firing. */
+  #toggleTurret(): void {
+    const lit = this.bricks.find(b => b.turret && b.alive)
+    if (lit) { lit.turret = false; return }                      // morph back to a tile
+    const cands = this.bricks.filter(b => b.alive && !b.turret && !b.mega && !b.seed && !b.covered)
+    if (!cands.length) return
+    cands[Math.floor(Math.random() * cands.length)].turret = true
+    this.#turretFireCd = TURRET_FIRE_INTERVAL * 0.5              // first shot comes a touch sooner
+  }
+
+  /** Fire the lit turret at the paddle on a cadence, then advance every shot;
+   *  a shot that lands on the paddle breaks the combo chain and flashes it red. */
+  #stepTurrets(dt: number): void {
+    if (this.freezeTimer > 0) return                  // clock: turrets + shots frozen
+    const turret = this.pinballTimer > 0 ? this.bricks.find(b => b.turret && b.alive) : null
+    if (turret) {
+      this.#turretFireCd -= dt
+      if (this.#turretFireCd <= 0) {
+        this.#turretFireCd = TURRET_FIRE_INTERVAL
+        const ox = turret.x + turret.w / 2, oy = turret.y + turret.h
+        const dx = this.paddle.x - ox, dy = this.paddle.y - oy
+        const d = Math.hypot(dx, dy) || 1
+        this.turretShots.push({ x: ox, y: oy, vx: (dx / d) * TURRET_SHOT_SPEED, vy: (dy / d) * TURRET_SHOT_SPEED })
+      }
+    }
+    if (this.paddleHitFlash > 0) this.paddleHitFlash = Math.max(0, this.paddleHitFlash - dt)
+    if (!this.turretShots.length) return
+    const p = this.paddle
+    const survive: TurretShot[] = []
+    for (const s of this.turretShots) {
+      s.x += s.vx * dt; s.y += s.vy * dt
+      if (s.y - TURRET_SHOT_R > H) continue                       // fell off the bottom
+      const hit = s.y + TURRET_SHOT_R >= p.y && s.y - TURRET_SHOT_R <= p.y + p.h &&
+        s.x >= p.x - p.w / 2 - TURRET_SHOT_R && s.x <= p.x + p.w / 2 + TURRET_SHOT_R
+      if (hit) { this.combo = 0; this.paddleHitFlash = PADDLE_HIT_FLASH; continue }   // chain broken, no life lost
+      survive.push(s)
+    }
+    this.turretShots = survive
+  }
+
+  /** Pinball ended (timed out or a life lost): morph every turret back to a tile
+   *  and clear any shots in flight. */
+  #clearTurrets(): void {
+    for (const b of this.bricks) if (b.turret) b.turret = false
+    this.turretShots = []
+    this.#turretFireCd = 0
+  }
+
+  /** Tick the centre dynamite: spawn one on a cadence, burn a lit fuse down to the
+   *  blast, or let an untouched crate fizzle after TNT_LIFETIME. */
+  #stepTnt(dt: number): void {
+    if (this.freezeTimer > 0) return                  // clock: dynamite frozen (fuse paused)
+    if (!this.tnt) {
+      if (!this.#tntArmedThisLevel) return            // no crate this level (~4 in 5 levels)
+      this.#tntTimer -= dt
+      // place the single crate once its timer elapses AND the encounter slot is free
+      if (this.#tntTimer <= 0 && this.bricksLeft > 0 && this.#hazardFree()) {
+        this.tnt = { x: W / 2, y: H * 0.42, t: 0, fuse: TNT_FUSE, lit: false }
+        this.#activeHazard = 'tnt'
+      }
+      return
+    }
+    const t = this.tnt
+    t.t += dt
+    if (t.lit) { t.fuse -= dt; if (t.fuse <= 0) this.#detonateTnt() }
+    else if (t.t >= TNT_LIFETIME) { this.tnt = null; this.#tntArmedThisLevel = false; this.#endHazard() }   // fizzled — no re-arm
+  }
+
+  /** A ball touching the crate bounces off it (AABB) and lights the fuse once. */
+  #tntBounce(b: Ball): void {
+    const t = this.tnt
+    if (!t) return
+    const cx = clamp(b.x, t.x - TNT_R, t.x + TNT_R)
+    const cy = clamp(b.y, t.y - TNT_R, t.y + TNT_R)
+    const dx = b.x - cx, dy = b.y - cy
+    if (dx * dx + dy * dy > b.r * b.r) return
+    const ox = b.r - Math.abs(dx), oy = b.r - Math.abs(dy)
+    if (ox < oy) { b.vx = dx >= 0 ? Math.abs(b.vx) : -Math.abs(b.vx); b.x += dx >= 0 ? ox : -ox }
+    else { b.vy = dy >= 0 ? Math.abs(b.vy) : -Math.abs(b.vy); b.y += dy >= 0 ? oy : -oy }
+    if (!t.lit) { t.lit = true; t.fuse = TNT_FUSE }
+  }
+
+  /** Detonate: a big blast that deals a random 1..TNT_DMG_MAX to EVERY tile within
+   *  TNT_RADIUS (plus the hunter/ship if caught) and scatters a cluster of fireballs. */
+  #detonateTnt(): void {
+    const t = this.tnt
+    if (!t) return
+    const cx = t.x, cy = t.y
+    this.explosions.push({ x: cx, y: cy, t: 0 })           // two rings of puffs fill the big 150-radius blast
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2
+      this.explosions.push({ x: cx + Math.cos(a) * TNT_RADIUS * 0.45, y: cy + Math.sin(a) * TNT_RADIUS * 0.45, t: 0 })
+      this.explosions.push({ x: cx + Math.cos(a + 0.4) * TNT_RADIUS * 0.8, y: cy + Math.sin(a + 0.4) * TNT_RADIUS * 0.8, t: 0 })
+    }
+    for (const brick of [...this.bricks]) {                // snapshot: #damage may shatter a mega
+      if (!brick.alive || brick.seed) continue
+      const bxc = brick.x + brick.w / 2, byc = brick.y + brick.h / 2
+      if (Math.hypot(bxc - cx, byc - cy) > TNT_RADIUS) continue
+      this.#damage(brick, 1 + Math.floor(Math.random() * TNT_DMG_MAX))   // random 1..3 impacts per tile
+    }
+    if (this.alien && Math.hypot(this.alien.x - cx, this.alien.y - cy) <= TNT_RADIUS) this.#destroyShip()
+    if (this.enemy && Math.hypot(this.enemy.x - cx, this.enemy.y - cy) <= TNT_RADIUS) {
+      this.#countEnemyHit(); this.explosions.push({ x: this.enemy.x, y: this.enemy.y, t: 0 }); this.enemy = null; this.#levelClock = 0
+    }
+    if (this.pacman && Math.hypot(this.pacman.x - cx, this.pacman.y - cy) <= TNT_RADIUS) this.#killPacman()
+    this.tnt = null
+    this.#tntArmedThisLevel = false                        // one crate per level, no re-arm
+    this.#endHazard()
+    if (this.bricksLeft === 0) this.state = 'won'
   }
 
   #loseLife(): void {

@@ -15,12 +15,17 @@
 // undoable resources living on each cell's own layer — no central map, no
 // cross-cell dependency).
 //
-// The command-line toggle appears as soon as ANY page of the view's kind
-// exists (presence via the decoration-kind index) — so the moment the build
-// skill writes pages, the toggle shows up, including at the root. Clicking
-// it flips the global ViewMode; its active state mirrors the flag. When the
-// user is standing ON a page, its own decoration payload supplies the toggle
-// glyph/label so every site keeps its distinct icon.
+// The command-line toggle is PER-NODE: it appears only on a cell that
+// actually HAS a page of the view's kind — i.e. the build pass has written a
+// `visual:website:page` decoration on the cell the user is standing on. It is
+// deliberately NOT global presence: one page somewhere must not light the
+// toggle everywhere, because clicking it on a page-less cell would flip the
+// global view to a blank "empty website" screen. This is the same decoration
+// SiteViewDrone reads to mount the page, so the toggle shows up exactly where
+// the renderer would draw a page and never on a dead end. Clicking it flips
+// the global ViewMode; its active state mirrors the flag. The cell's own
+// decoration payload supplies the toggle glyph/label so every site keeps its
+// distinct icon.
 //
 // `/website here` (handled in website.queen.ts) is a SEPARATE gesture: it
 // drops a `visual:website:pending` decoration on the current cell for the
@@ -32,7 +37,6 @@
 
 import { Worker, EffectBus } from '@hypercomb/core'
 import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-registry.js'
-import { hasAnyDecorationKind } from './decoration-kind-index.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 /** Fallback glyph when a view forgets to declare a Material toggleIcon. */
@@ -183,19 +187,24 @@ export class ViewBee extends Worker {
         continue
       }
 
-      // Render behavior (e.g. website). The toggle is GLOBAL: it appears as
-      // soon as ANY page of this view's kind exists anywhere (presence via
-      // the decoration-kind index), so the moment the build pass writes pages
-      // the toggle shows up — including at the root. The active surface is the
-      // single global ViewMode flag; clicking flips it.
-      if (!v.decorationKind || !hasAnyDecorationKind(v.decorationKind)) continue
+      // Render behavior (e.g. website). The toggle is PER-NODE: surface it
+      // only when THIS cell carries a page of the view's kind — the same
+      // `visual:website:page` decoration SiteViewDrone resolves to mount the
+      // page. Gating on the cell's OWN decoration (not global presence) means
+      // the toggle shows exactly where flipping the view mounts a real page;
+      // a page-less cell never offers the toggle, so a click can't drop the
+      // user onto a blank "empty website" screen. The `/website` slash command
+      // remains the escape hatch to turn the global view off from anywhere.
+      if (!v.decorationKind) continue
+      const record = records.find(r => r.kind === v.decorationKind)
+      if (!record) continue
 
-      // Per-website toggle identity. When the user is standing ON a page of
-      // this kind, prefer that cell's own icon (and optional label tooltip)
-      // from its decoration payload, so every website carries its own glyph.
-      // Falls back to the view's static `toggleIcon` ('web'), then the
-      // generic glyph, when the user isn't on a decorated cell.
-      const payload = records.find(r => r.kind === v.decorationKind)?.payload
+      // Per-website toggle identity. This cell's own decoration payload
+      // supplies its distinct icon (and optional label tooltip), so every
+      // website carries its own glyph. Falls back to the view's static
+      // `toggleIcon` ('web'), then the generic glyph, when the payload omits
+      // them.
+      const payload = record.payload
       const payloadIcon = typeof payload?.['icon'] === 'string' ? (payload['icon'] as string).trim() : ''
       const payloadLabel = typeof payload?.['label'] === 'string' ? (payload['label'] as string).trim() : ''
       toggles.push({

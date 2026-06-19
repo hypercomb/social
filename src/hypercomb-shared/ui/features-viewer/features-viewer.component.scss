@@ -125,11 +125,48 @@ $accent: #c8b8ff;
   &:hover { color: #ffc8c8; }
 }
 
-.fgroup-none {
+// ── section header (On this layer / Available to add) ─────────────
+.section-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.45rem 1rem 0.25rem;
+
+  &::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.07);
+  }
+}
+
+.section-label {
+  flex: 0 0 auto;
+  font-size: 0.6rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.section-count {
+  flex: 0 0 auto;
+  min-width: 1.1rem;
+  padding: 0.02rem 0.3rem;
+  border-radius: 999px;
+  text-align: center;
+  font-size: 0.6rem;
+  font-family: var(--hc-mono, monospace);
+  color: rgba($accent, 0.85);
+  background: rgba($accent, 0.12);
+}
+
+.section-empty {
   margin: 0;
-  padding: 0 1rem 0.5rem;
-  font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.35);
+  padding: 0.1rem 1rem 0.5rem;
+  font-size: 0.72rem;
+  color: rgba(255, 255, 255, 0.3);
+  font-style: italic;
 }
 
 .features-list {
@@ -141,11 +178,49 @@ $accent: #c8b8ff;
 .features-row {
   display: flex;
   align-items: flex-start;
-  gap: 0.6rem;
-  padding: 0.5rem 1rem;
+  gap: 0.5rem;
+  padding: 0.4rem 1rem;
+  transition: background 120ms ease;
 
   &:hover { background: rgba($accent, 0.06); }
-  &.wanted { background: rgba($accent, 0.1); }
+  &.liked { background: rgba($accent, 0.1); }
+
+  // Available rows recede until hovered/liked — they're the "could add",
+  // not the "have", so they sit quieter than the applied rows above.
+  &.available .feature-name { color: rgba(245, 245, 245, 0.82); }
+  &.available:not(:hover):not(.liked) { opacity: 0.82; }
+}
+
+// ── like star ─────────────────────────────────────────────────────
+// One affordance for both sections: ☆ outline → ★ filled accent. Liking is
+// benign — it stages the feature so the installer can focus / pre-tick it.
+.like-star {
+  flex: 0 0 auto;
+  align-self: flex-start;
+  margin-top: 0.05rem;
+  width: 1.5rem;
+  height: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  color: rgba(255, 255, 255, 0.35);
+  transition: color 150ms ease, background 150ms ease, transform 120ms ease;
+
+  &:hover { color: rgba($accent, 0.9); background: rgba($accent, 0.12); }
+  &:active { transform: scale(0.88); }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
+
+  &.on {
+    color: $accent;
+    text-shadow: 0 0 8px rgba($accent, 0.5);
+  }
 }
 
 .feature-meta {
@@ -176,36 +251,61 @@ $accent: #c8b8ff;
   color: rgba(255, 255, 255, 0.62);
 }
 
-// ── benign "want" toggle ──────────────────────────────────────────
-.feature-want {
-  flex: 0 0 auto;
-  align-self: center;
-  font-family: inherit;
+// ── origin badge ──────────────────────────────────────────────────
+// Where the feature applies to the tile FROM. `direct` is muted (it lives
+// on this node); `cascade` is accented (it flows in from an ancestor — the
+// interesting case the panel exists to surface).
+.feature-origin {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.05rem;
+  padding: 0.04rem 0.42rem;
+  border-radius: 3px;
+  font-size: 0.62rem;
+  font-family: var(--hc-mono, monospace);
+  letter-spacing: 0.02em;
+  color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+
+  &.cascade {
+    color: rgba($accent, 0.95);
+    background: rgba($accent, 0.12);
+    border-color: rgba($accent, 0.4);
+  }
+}
+
+// Secondary note on a directly-attached cascading capability: it lives here
+// AND flows down to this tile's own subtree.
+.origin-flow {
+  padding-left: 0.3rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.15);
+  color: rgba($accent, 0.7);
+}
+
+// ── slash-command chip (Available rows) ───────────────────────────
+// Shows HOW to add the feature — the command the participant would run.
+.feature-cmd {
+  margin-left: 0.4rem;
+  padding: 0.02rem 0.36rem;
+  border-radius: 3px;
+  font-family: var(--hc-mono, monospace);
+  font-size: 0.66rem;
+  color: rgba($accent, 0.85);
+  background: rgba($accent, 0.1);
+  border: 1px solid rgba($accent, 0.22);
+  white-space: nowrap;
+}
+
+// Hint glyph on an available cascading capability: adding it would flow to
+// the subtree.
+.avail-flow {
+  margin-left: 0.3rem;
   font-size: 0.72rem;
-  cursor: pointer;
-  padding: 0.26rem 0.6rem;
-  border-radius: 4px;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba($accent, 0.4);
-  color: rgba($accent, 0.95);
-  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
-
-  &:hover { background: rgba($accent, 0.16); color: #fff; }
-
-  &.on {
-    background: rgba($accent, 0.28);
-    border-color: $accent;
-    color: #fff;
-  }
-
-  // Metadata-only (no installer-resolvable branch): still toggleable, but
-  // muted so it's clear staging it won't pre-tick anything in the installer.
-  &.metaonly {
-    border-color: rgba(255, 255, 255, 0.18);
-    color: rgba(255, 255, 255, 0.55);
-
-    &.on { background: rgba(255, 255, 255, 0.12); border-color: rgba(255, 255, 255, 0.35); }
-  }
+  color: rgba($accent, 0.6);
+  cursor: help;
 }
 
 .features-foot {

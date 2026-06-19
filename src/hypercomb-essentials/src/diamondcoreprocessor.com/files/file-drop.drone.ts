@@ -4,12 +4,15 @@
 // / download / detach them behind the tile's file icon — for a single
 // tile, a selection of tiles, or the whole view.
 //
-//   DROP   — when the current view is a dropbox (DropboxService.active())
-//            and the dropped file matches its accept filter, save the bytes
-//            as a resource (Store.putResource) and attach them to the tile
-//            under the cursor (writeAttachment → `files:attachment`
-//            decoration). image-drop.drone.ts defers files the dropbox
-//            accepts, so e.g. an svg attaches as a document.
+//   DROP   — drop a document anywhere on the hive (no `/dropbox` needed).
+//            On an existing tile it attaches as a `files:attachment`
+//            decoration. On empty space a single file ARMS the command-line
+//            with a default dropbox background (image-before-text flow): name
+//            it, press Enter, and the tile is created with that background +
+//            the file attached. Several files at once auto-create one tile
+//            each. A typed `/dropbox` still constrains which files are taken
+//            via its accept filter; images keep flowing to image-drop.drone.ts
+//            as the tile's display picture.
 //
 //   CLICK  — the file icon emits `tile:action {action:'files'}`; we answer
 //            with `files:open` carrying that tile's file list.
@@ -25,6 +28,14 @@
 import { Drone, EffectBus, normalizeCell } from '@hypercomb/core'
 import { writeAttachment, listAttachments, removeAttachment, FILES_ATTACHMENT_KIND, type AttachmentPayload } from './files-attachment.js'
 import { hasDecorationKind } from '../commands/decoration-kind-index.js'
+import { armImageBlob, storeImageResources } from '../editor/arm-resource.js'
+import { dropboxBackgroundBlob } from './dropbox-background.js'
+import { extOf } from './file-types.js'
+
+/** mime / extension that image-drop.drone.ts owns as a tile DISPLAY image. */
+const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'avif', 'heic'])
+const isImageFile = (f: { name: string; type?: string }): boolean =>
+  (f.type ?? '').startsWith('image/') || IMAGE_EXTS.has(extOf(f.name))
 
 type DropTarget = {
   q: number
@@ -52,7 +63,7 @@ export class FileDropDrone extends Drone {
     'Attaches dropped documents to tiles in a dropbox subtree and serves the file list (tile / selection / all) for the viewer panel.'
 
   protected override emits = ['files:open']
-  protected override listens = ['drop:target', 'render:cell-count', 'tile:action', 'files:open-scope', 'files:remove', 'files:viewer', 'decorations:changed']
+  protected override listens = ['drop:target', 'render:cell-count', 'tile:action', 'files:open-scope', 'files:remove', 'files:viewer', 'decorations:changed', 'cell:attach-resource']
 
   /** Last hex position reported by TileOverlayDrone during drag. */
   #lastTarget: DropTarget | null = null
@@ -115,70 +126,133 @@ export class FileDropDrone extends Drone {
       if (!open || !p?.segments) return
       if (open.labels.includes(lastOf(p.segments))) void this.#listAndEmit()
     })
+
+    // Enter on an armed file drop: the command-line created the cell (and
+    // ResourceAttachDrone wrote the dropbox background as its picture) and
+    // re-emitted our pending attachment. Write it onto the new cell. Bind
+    // the location at handler entry — same lineage the picture landed at.
+    this.onEffect<{ cell: string; attachment?: AttachmentPayload | null }>('cell:attach-resource', (p) => {
+      if (!p?.cell || !p.attachment) return
+      const segments = [...this.#parentSegments(), p.cell]
+      void writeAttachment(segments, p.attachment)
+    })
   }
 
   // ── drop handling ─────────────────────────────────────────────
 
   #onDragOver = (e: DragEvent): void => {
-    if (!this.#dropbox?.active()) return
     const el = document.activeElement
     if (el && (el as HTMLElement).matches?.('input, textarea, select, [contenteditable]')) return
     const types = e.dataTransfer?.types ?? []
     if (!types.includes('Files')) return
+    // Allow file drops anywhere on the hive — no `/dropbox` required.
     e.preventDefault()
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
   }
 
   #onDrop = (e: DragEvent): void => {
-    const dropbox = this.#dropbox
-    if (!dropbox?.active()) return
-
     const el = document.activeElement
     if (el && (el as HTMLElement).matches?.('input, textarea, select, [contenteditable]')) return
 
     const list = e.dataTransfer?.files
     if (!list || list.length === 0) return
 
+    // Which dropped files are ours? When a typed dropbox is active, respect
+    // its accept filter (it may claim svgs etc.). Otherwise we take any
+    // NON-image document — images keep flowing through image-drop.drone.ts
+    // as the tile's display picture.
+    const dropbox = this.#dropbox
+    const active = dropbox?.active() ?? false
     const accepted: File[] = []
     for (let i = 0; i < list.length; i++) {
-      if (dropbox.accepts(list[i])) accepted.push(list[i])
+      const f = list[i]
+      if (active ? dropbox!.accepts(f) : !isImageFile(f)) accepted.push(f)
     }
     if (accepted.length === 0) return  // not for us — image-drop may take it
 
     e.preventDefault()
     const target = this.#lastTarget
     if (target?.occupied && target.label) {
-      // dropped on an existing tile → attach to it
+      // dropped on an existing tile → attach the file(s) as resources
       const segments = [...this.#parentSegments(), target.label]
       void this.#attachAll(accepted, target.label, segments)
+    } else if (accepted.length === 1) {
+      // dropped on empty space, one file → arm the command-line with a
+      // dropbox background; the user names it and Enter creates the tile
+      // (image-before-text flow), with the file attached as a resource.
+      void this.#armFileDrop(accepted[0])
     } else {
-      // dropped on empty space → make a tile per file and attach to it
+      // dropped on empty space, several files → auto-name a tile per file
       void this.#createAndAttach(accepted)
     }
   }
 
-  /** Empty-space drop: create a new tile named from each file and attach
-   *  the file to it — so dropping works even on a blank hive. */
-  async #createAndAttach(files: File[]): Promise<void> {
+  /** Build the `files:attachment` payload for a dropped file (stores bytes). */
+  async #toAttachment(file: File): Promise<AttachmentPayload | null> {
     const store = this.#store
-    if (!store) return
+    if (!store) return null
+    const blob = new Blob([await file.arrayBuffer()], { type: file.type || 'application/octet-stream' })
+    const sig = await store.putResource(blob)
+    return {
+      name: file.name || 'file',
+      mime: file.type || 'application/octet-stream',
+      size: file.size,
+      sig,
+    }
+  }
+
+  /** Empty-space single drop: arm the command-line with the default dropbox
+   *  background as the tile picture and hold the file as a pending
+   *  attachment. The command-line re-emits it on `cell:attach-resource`
+   *  (Enter), which our heartbeat listener writes onto the new cell. */
+  async #armFileDrop(file: File): Promise<void> {
+    try {
+      const attachment = await this.#toAttachment(file)
+      if (!attachment) return
+      const bg = await dropboxBackgroundBlob(file.name)
+      await armImageBlob(bg, { type: 'document', attachment })
+    } catch (err) {
+      console.warn('[file-drop] arm failed', file?.name, err)
+    }
+  }
+
+  /** Empty-space multi-file drop: create a tile named from each file, give it
+   *  the default dropbox background as its picture, and attach the file as a
+   *  resource — so dropping works even on a blank hive. */
+  async #createAndAttach(files: File[]): Promise<void> {
     const parent = this.#parentSegments()
     const made: string[] = []
     for (const file of files) {
       const base = (file.name || 'file').replace(/\.[^./\\]+$/, '')
       const name = normalizeCell(base) || normalizeCell(file.name) || 'file'
       try {
-        // Create the tile (committer commits membership; show-cell renders + places it).
+        const attachment = await this.#toAttachment(file)
+        if (!attachment) continue
+
+        // Lock substrate out until the dropbox picture is written, then create
+        // the tile (committer commits membership; show-cell renders + places it).
+        EffectBus.emit('cell:attach-pending', { cell: name, pending: true })
         EffectBus.emit('cell:added', { cell: name, segments: parent.slice() })
-        const blob = new Blob([await file.arrayBuffer()], { type: file.type || 'application/octet-stream' })
-        const sig = await store.putResource(blob)
-        const payload: AttachmentPayload = {
-          name: file.name || 'file',
-          mime: file.type || 'application/octet-stream',
-          size: file.size,
-          sig,
+        await writeAttachment([...parent, name], attachment)
+
+        // Stamp the default dropbox background the same way the armed
+        // single-file flow does — ResourceAttachDrone writes the canonical
+        // tile properties and releases the substrate lock.
+        const bg = await storeImageResources(await dropboxBackgroundBlob(file.name))
+        if (bg) {
+          EffectBus.emit('cell:attach-resource', {
+            cell: name,
+            largeSig: bg.largeSig,
+            smallPointSig: bg.smallPointSig,
+            smallFlatSig: bg.smallFlatSig,
+            url: null,
+            type: 'document',
+            attachment: null,
+          })
+          try { URL.revokeObjectURL(bg.previewUrl) } catch { /* ignore */ }
+        } else {
+          EffectBus.emit('cell:attach-pending', { cell: name, pending: false })
         }
-        await writeAttachment([...parent, name], payload)
         made.push(name)
       } catch (err) {
         console.warn('[file-drop] create+attach failed', file?.name, err)

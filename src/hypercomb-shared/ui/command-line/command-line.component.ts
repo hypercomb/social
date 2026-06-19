@@ -1409,6 +1409,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       smallFlatSig: string | null
       url: string | null
       type: 'image' | 'youtube' | 'link' | 'document'
+      attachment?: { name: string; mime: string; size: number; sig: string } | null
     }>('command:arm-resource', (payload) => {
       if (!payload || (!payload.largeSig && !payload.url)) return
       const prev = this.armedResource()
@@ -1441,6 +1442,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     smallFlatSig: string | null
     url: string | null
     type: 'image' | 'youtube' | 'link' | 'document'
+    /** A document to attach to the cell on Enter (file-drop dropbox flow). */
+    attachment?: { name: string; mime: string; size: number; sig: string } | null
   } | null>(null)
   #armResourceUnsub?: () => void
   /** True when the command-line should be collapsed on mobile (toggle off). */
@@ -1911,6 +1914,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         smallFlatSig: armed.smallFlatSig,
         url: armed.url,
         type: armed.type,
+        attachment: armed.attachment ?? null,
       })
       this.onArmedResourceDismiss()
     }
