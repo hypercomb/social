@@ -6,6 +6,8 @@ Revision mode is the time-travel interface for Hypercomb. It lets you step backw
 
 The system is non-destructive: moving through time never mutates history. The cursor moves; the operations stay.
 
+**What is here now** is answered by reading the head layer directly — `HistoryService.currentLayerAt(locationSig)` resolves the latest marker's sig and `getLayerBySig(sig)` returns its content, whose `children[]` slot IS the present membership. This is a single layer read, not a replay from zero. The op sequence and `OrderProjection` below are a derived ordering helper layered on top, not the source of truth for what exists.
+
 ### Entry points
 
 | Action | Effect |
@@ -87,11 +89,13 @@ type HistoryOp = {
 }
 
 type HistoryOpType =
-  | 'add' | 'remove' | 'reorder' | 'rename'
+  | 'add' | 'remove' | 'reorder' | 'rename'   // 'rename' is retired/vestigial — see below
   | 'add-drone' | 'remove-drone'
   | 'instruction-state' | 'tag-state' | 'content-state' | 'layout-state'
   | 'hide' | 'unhide'
 ```
+
+> **note:** `rename` is **retired/vestigial**. Cells are immutable atomic units; there is no rename op. To change a cell you delete it and create a new one, and a same-name sig swap is read as a cascade (a child's version changing), never a rename. The type member lingers for backward compatibility but is not emitted.
 
 ### Operation types
 
@@ -100,7 +104,7 @@ type HistoryOpType =
 | `add` | Cell label | A cell was added at this location |
 | `remove` | Cell label | A cell was removed |
 | `reorder` | Resource signature | Display order changed; signature resolves to JSON array of cell labels |
-| `rename` | Resource signature | Cell renamed; resolves to `{ version, oldName, newName, at }` |
+| `rename` | Resource signature | **Retired/vestigial.** No rename op exists — cells are immutable; use delete + create. Historically resolved to `{ version, oldName, newName, at }` |
 | `instruction-state` | Resource signature | Instruction visibility changed; resolves to InstructionSettings |
 | `tag-state` | Resource signature | Tag assignments changed; resolves to `{ version, cellTags, at }` |
 | `content-state` | Resource signature | Tile content saved; resolves to `{ version, cellLabel, propertiesSig, at }` |
@@ -115,14 +119,14 @@ type HistoryOpType =
 Operations are stored as numbered markers inside per-lineage sigbags at the OPFS content root:
 
 ```
-{locationSig}/            ← SHA-256 of lineage path
-  0000                    ← visuals (broadcast in witness mode)
-  0001                    ← { layer: <sig>, context?: [<sig>...], at: 1672531200000 }
-  0002                    ← { layer: <sig>, ... }
+{locationSig}/            ← SHA-256 of lineage path; domain is discarded, root = sign([]) = e3b0c442…
+  00000000                ← the auto-minted EMPTY layer — just { name }, planted on the bag's first touch
+  00000001                ← { layer: <sig> } — pointer to the first user-event commit's layer
+  00000002                ← { layer: <sig> } — pointer
   000x                    ← max marker = current root + entrance + attestation
 ```
 
-Layer bytes live in the flat `<sig>` content bucket alongside the sigbags. The max marker addresses the current state; older markers form the history.
+Each marker is a **pointer record** — `{ layer: <sig> }` — naming which layer this revision points at. The layer bytes themselves live in the flat `__layers__/<sig>` pool alongside the sigbags. The max marker addresses the current state; older markers form the history. (Legacy markers stored the full layer JSON inline; readers still handle both shapes.)
 
 File names are 8-digit zero-padded sequential indices. The sequence is the total order.
 
@@ -209,7 +213,7 @@ After promote, the past state becomes the present. All original operations remai
 
 ## Order Projection
 
-`OrderProjection` derives the display order of cells from history operations. It walks the operation sequence:
+Membership at a location is read from the head layer's `children[]` slot (`currentLayerAt` → `getLayerBySig`) — not derived by walking ops. `OrderProjection` is a **derived ordering helper** on top of that: it computes the *display order* of cells from history operations by walking the operation sequence:
 
 - `add` → append cell to the end of the order list (if not already present)
 - `remove` → remove cell from the order list

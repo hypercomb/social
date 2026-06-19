@@ -22,7 +22,7 @@ The brood phase gathers everything the mesh will need before any vertices are wr
 
 `renderFromSynchronize()` in `ShowCellDrone` is the entry point, triggered by the `synchronize` window event (dispatched solely by the processor).
 
-- Resolves the current location's layer (by computed signature) and reads its child-layer signatures — each child is one cell
+- Resolves the current location's layer (by computed signature) and reads its child-layer signatures — each child is one cell. This is where the DNA story meets the screen: the children read here are the **child layer sigs** held in the head layer's `children[]` slot (see [dna.md](./dna.md) for what these signature-addressed artifacts are). Resolution reads the head layer's slots (`currentLayerAt` → `getLayerBySig`), not an op-replay from zero.
 - Unions with mesh cells (Nostr relay items)
 - Filters out deleted cells via history
 - Orders by `OrderProjection` or persisted index
@@ -55,9 +55,13 @@ Two texture atlases are prepared:
 | Atlas | Class | Purpose |
 |-------|-------|---------|
 | **Label** | `HexLabelAtlas` | Renders cell names as text into a shared texture |
-| **Image** | `HexImageAtlas` | Loads cell thumbnail blobs from the content bucket by signature into a shared texture |
+| **Image** | `HexImageAtlas` | Loads cell thumbnail blobs from the `__resources__/` resource store by signature into a shared texture |
 
-`loadCellImages()` reads each cell's `0000` properties file, extracts the image signature, and loads the blob into the image atlas. Signatures that are already in the atlas are skipped.
+`loadCellImages()` extracts each cell's image signature from the **dual-store** props index — the `hc:tile-props-index` entry in `localStorage`, keyed by the tile's full-lineage sig with a bare-label fallback — not the layer's `0000` properties file on the hot path. (The `0000` file is the canonical store; the localStorage index is the render-time fast read. The two are kept in sync by the property-write path; see the tile-properties dual-store note.)
+
+The signature then resolves the image blob as a **resource** — `getResourceLocal(sig)` first (memory → OPFS, local-first), and on a local miss `fillFromHost` self-heals the bytes via `Store.getResource` (memory → OPFS → host through `ContentBroker`, sha256-verified, write-through, with a ~60s negative cache) and re-renders when the egg lands. Render never awaits the network. Signatures already in the atlas are skipped.
+
+This atlas step is the other place the DNA story meets the screen: the image sig is a [DNA artifact](./dna.md) (a resource), and resources are the one artifact class that self-heals from hosts on the render path — layers, dependencies, and bees are OPFS-only at render time and heal only via adopt/install/sync.
 
 ---
 

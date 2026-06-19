@@ -1,5 +1,9 @@
 # Paired-Channel Sync — Design Spec
 
+> **status: design — not built (as of 2026-06-18).** A receiver-centric, single-event sync protocol for sharing branches of a hypercomb tree; the §Status section below still admits "substrate implementation pending."
+
+> **What actually ships today:** the swarm transport in `sharing/swarm.drone.ts` uses the multi-kind `3020x` model — `30200` layer slots, `30201` resource bytes (≤256 KB base64, `MAX_RESOURCE_BYTES`), `30202` hide, `30203` interest, `30204` presence, `30205` subscribe-request. The single kind `29010` used throughout this spec is the **legacy** paired-channel/show-cell kind (the swarm code's own comments call it "legacy 29010"); it survives only in the mesh allowlist for back-compat. This document's one-kind/verb-vocabulary design has not replaced that shipped model.
+
 > A swarm-shaped sync protocol for sharing branches of a hypercomb tree across browsers and devices. One event kind, one verb vocabulary, receiver-centric trust, beehive metaphor end-to-end.
 
 ## TL;DR
@@ -142,6 +146,8 @@ The first toggler becomes host automatically — see role determination logic in
 
 **Symmetric** — host follows the same flow for their own shares. Self-approval is one click in the modal; the event pair (request + share) is still emitted, so the audit trail is uniform.
 
+**Branch = layer signature is the DNA anchor.** A share is keyed by its `branchSig` — the merkle root of the shared subtree's layer tree — and replicates as `layer` events keyed by each layer's own signature (steps 1–3 above). This is deliberate and load-bearing: layers, dependencies, bees, and resources are the hive's [Distributed Network Artifacts](./dna.md) — content-addressed, immutable, composing upward so a parent signature is a function of its child sigs. Because identity *is* the signature, the same branch deduplicates across receivers and any peer can verify a pulled layer against the sig it asked for. The mesh distributes layer *sigs*; bytes follow by signature (today via the swarm `30200`/`30201` path, per the banner above). The route/navigation stream is a separate concern — see the [trail capsule](./trail-capsule.md).
+
 ---
 
 ## Nodes (curated bundles)
@@ -279,7 +285,7 @@ When a receiver materializes a `brood` node:
    - `brood → active`: drops `facade: true`, starts pulling layer events, tiles hatch in UI.
    - `* → revoked`: surfaces danger overlay, blocks navigation into subtree.
 
-`facade: true` is a bootstrap-skeleton field — see [tile-properties.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/editor/tile-properties.ts). `show-cell.drone.ts` checks the flag at render time and applies the capped-cell overlay.
+`facade: true` is a *proposed* bootstrap-skeleton field. **Not built as of 2026-06-18** — neither [tile-properties.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/editor/tile-properties.ts) nor [show-cell.drone.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/show-cell.drone.ts) currently carries or reads a `facade` flag (the only `facade` occurrences in essentials live in the build `scripts/prepare.ts`). The intent is that the property store grow a skeleton flag and the renderer apply the capped-cell overlay when it is set; both still need to be wired.
 
 ---
 

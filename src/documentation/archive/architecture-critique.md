@@ -54,6 +54,8 @@ Fowler's writing on **Event-Driven Architecture** distinguishes between:
 
 Hypercomb's Effect system appears to operate primarily at level 1 (notification), which is the simplest and most decoupled form.
 
+> **archive note (2026-06-18):** the event-sourcing rung the critique reads as missing was added — but as *durable state*, not an effect log. Every user action commits exactly one layer marker into a per-lineage sigbag (`__history__/<lineageSig>/`), and "what's here now" reads the head layer's slots (`currentLayerAt → getLayerBySig`), not a replay of effects from zero. The merkle layer/marker chain IS the full history of what happened — addressable by signature and time-travelable. See `history-sigbag-as-root.md`.
+
 **What Fowler would commend:**
 - Decoupling drones via effects means adding a new drone doesn't require modifying existing ones. This is the **Open-Closed Principle** in practice.
 - The `GrammarHint` concept suggests a structured vocabulary for effects, which prevents the "stringly-typed" anti-pattern where events are just arbitrary strings.
@@ -86,7 +88,7 @@ The `SignatureService` in `@hypercomb/core` is architecturally significant. By p
 Fowler hasn't written extensively about decentralized identity, but his principles on **Cross-Cutting Concerns** apply. Authentication and authorization typically belong in infrastructure, not business logic. Hypercomb gets this right.
 
 **What Fowler would commend:**
-- The lineage path model (`domain/path/cell` → signature) creates a **natural key** system that is content-addressable. This is sound — identifiers derive from the thing they identify.
+- The lineage path model creates a **natural key** system that is content-addressable. This is sound — identifiers derive from the thing they identify. (Precise: the domain is *discarded*; the location signature is `sign(path segments)`, and the root bag is `sign([])` = `e3b0c442…`. A location signature names a *position*, not content.)
 - Signatures are computed in the drone layer (essentials) but the signing mechanism lives in core. This separation means the cryptographic implementation can be swapped without touching any drone code.
 
 **What Fowler would challenge:**

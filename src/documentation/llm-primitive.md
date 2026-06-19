@@ -15,7 +15,7 @@ In Hypercomb:
 /select[tile-a, tile-b, tile-c]/opus('[lineage1, sig2, sig3]')
 ```
 
-This single command is a hyperedge connecting **six vertices**: three context sources (input) and three target tiles (output). The result — a new signature stored in the content bucket — becomes a seventh vertex, immediately available as input to future hyperedges.
+This single command is a hyperedge connecting **six vertices**: three context sources (input) and three target tiles (output). The result — a new signature stored in the resource store (`__resources__/<sig>`) — becomes a seventh vertex, immediately available as input to future hyperedges.
 
 A traditional graph edge is binary: A → B. A hyperedge is N-ary: {A, B, C} → {D, E, F}. This is what makes it a **hyper**comb, not just a comb.
 
@@ -27,7 +27,7 @@ A traditional graph edge is binary: A → B. A hyperedge is N-ary: {A, B, C} →
          └─────────────┘
                 │
                 ▼
-         <sig> = SHA-256(response)  in the content bucket
+         <sig> = SHA-256(response)  in __resources__/<sig>
          (new vertex in the hypergraph)
 ```
 
@@ -65,10 +65,12 @@ The system:
 
 1. **Gathers context** from the referenced lineages (folder trees) and signatures (content-addressed blobs)
 2. **Sends** the assembled context to the chosen Claude model via the Anthropic Messages API
-3. **Stores the response** as a content-addressed blob: `<sig> = SHA-256(response)` in the content bucket
+3. **Stores the response** as a content-addressed resource via `Store.putResource(blob)`: `<sig> = SHA-256(response)` lands in `__resources__/<sig>` and fires a `content:wrote` effect with `kind: 'resource'`
 4. **Writes the response signature** into each selected tile's properties
 
 The response is now a first-class vertex in the hypergraph.
+
+The LLM output is, in DNA terms, just another **resource artifact** — a `kind:resource` member of the [Distributed Network Artifacts](dna.md) family, indistinguishable from any other content-addressed blob the hive stores. The signature IS its address; it is immutable; and because tile properties point at it by signature, it composes upward through the [genome](genome-primitive.md) like every other artifact. An intelligence transform doesn't mint a new category of thing — it just deposits one more resource into the same content-addressed pool.
 
 ## Recursive Composition
 
@@ -124,5 +126,7 @@ localStorage.setItem('hc:anthropic-api-key', 'sk-ant-...')
 | `/opus` | `/o` | `claude-opus-4-6` | Deep reasoning, complex synthesis |
 | `/sonnet` | `/s` | `claude-sonnet-4-6` | Balanced intelligence and speed |
 | `/haiku` | `/h` | `claude-haiku-4-5-20251001` | Fast, lightweight transforms |
+
+The model IDs above are the source-of-truth `MODELS` map in `hypercomb-essentials/src/diamondcoreprocessor.com/assistant/llm-api.ts` (verified current as of 2026-06-18); if that map changes, this table drifts — treat the code as canonical.
 
 The model choice is a property of the hyperedge — the same input and output vertices can be connected through different transforms depending on the depth of intelligence required.

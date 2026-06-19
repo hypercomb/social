@@ -84,8 +84,13 @@ its cache key, its verification hash, and its identity across the network.
 
 ```typescript
 class SignatureService {
+  static readonly SIGNATURE_LENGTH = 64
   static async sign(bytes: ArrayBuffer): Promise<string>
 }
+
+type Signature = string                                    // semantic alias
+const isSignature = (v: unknown): v is string =>           // signature-predicate.ts
+  typeof v === 'string' && /^[0-9a-f]{64}$/.test(v)
 ```
 
 Every artifact in the system -- bees, dependencies, layers, payloads -- is
@@ -100,9 +105,11 @@ mechanisms.
 - **Verification** -- fetch by signature, hash on arrival, reject if mismatched.
 - **Immutability** -- a signature is a permanent reference. The content at a
   given signature never changes.
-- **Global memoization** -- the combination of a script signature and a payload
-  signature uniquely identifies a computation. If the result is already known,
-  the code doesn't need to run again.
+- **Global memoization** *(vision — not built)* -- the combination of a script
+  signature and a payload signature would uniquely identify a computation, so a
+  known result need not be recomputed. See the vision note in
+  [Deterministic Computation & Global Memoization](#deterministic-computation--global-memoization)
+  below.
 
 ### IoC Container
 
@@ -132,8 +139,10 @@ without import coupling.
 ### SignatureStore
 
 A trusted-signature allowlist that eliminates redundant SHA-256 hashing at
-runtime. Populated from `install.manifest.json` during installation and
-persisted to `localStorage` across sessions.
+runtime. Populated from the discovery `manifest.json` during installation and
+persisted to `localStorage` across sessions. (The discovery file is a
+`manifest.json` keyed by package `rootLayerSig` — not a flat
+`file-path -> hash` install map.)
 
 ```typescript
 class SignatureStore extends EventTarget {
@@ -187,20 +196,28 @@ inspecting its code.
 
 ### PayloadCanonical
 
-The canonical format for a bee's source code and metadata, used for signing
-and transmission:
+A helper format for a bee's source code and metadata, used by the DCP authoring
+tool for signing and transmission:
 
 ```typescript
-type DronePayloadV1 = {
+type BeePayloadV1 = {
   version: 1
-  drone: { name, description?, grammar?, links?, effect? }
+  bee: { name, description?, grammar?, links?, effect? }
   source: { entry: string, files: Record<string, string> }
 }
 ```
 
-`PayloadCanonical.compute(payload)` serializes the payload to canonical JSON
-and signs it. This produces a single signature that identifies the exact bee
-implementation -- its code, its metadata, everything.
+`PayloadCanonical.compute(payload)` does a `structuredClone` then
+`JSON.stringify` (with **no key sorting**) and signs the resulting bytes. This
+produces a single signature that identifies the exact bee implementation -- its
+code, its metadata, everything.
+
+**Important:** `PayloadCanonical` is **not** the module-artifact build path. The
+production build signs **raw bytes** directly — the raw compiled esbuild output
+for bees and dependencies, and `JSON.stringify(layer)` (via `signJson`) for
+layers. There is no sorted-key canonicalization anywhere in the signing path; a
+reader who sorts keys before hashing would compute a different signature and
+break every cache hit. See [dna.md](dna.md) for the artifact identity model.
 
 ### DcpResourceMessage
 
@@ -264,7 +281,9 @@ A cell is a named directory inside the current lineage path. The URL
 each one is a position in the hexagonal grid that can contain:
 
 - **Child cells** (subdirectories) -- forming the tree's branches
-- **Properties** (zero-signature file) -- JSON identity and configuration
+- **Properties** (the `0000` properties file of the cell's sigbag, mirrored to a
+  `localStorage` dual-store index for fast render reads) -- JSON identity and
+  configuration. Tags also live here (see `tag-registry.ts`).
 - **Mesh state** (shared cells from the Nostr relay mesh) -- external
   contributions from other nodes
 
@@ -428,8 +447,13 @@ This means:
   Angular app.
 - **Behaviors are portable.** A signed bee artifact can be fetched from any
   trusted domain and verified by its hash.
-- **Multi-tenant isolation** is structural. Each domain gets its own OPFS
-  subdirectory for bees, dependencies, and layers.
+- **Content-addressed install is flat.** The runtime installer writes flat,
+  signature-keyed pools (`__bees__/<sig>`, `__dependencies__/<sig>`,
+  `__layers__/<sig>` — no extension, no domain prefix); because the signature is
+  the content, identical artifacts dedup regardless of which domain served them.
+  Per-domain folders exist only on the **DCP installer** side
+  (`dcp/domain.com/`), which tracks adoption per domain; the web shell's runtime
+  pools are not partitioned by tenant.
 
 ### The Tree as Runtime
 
@@ -464,12 +488,17 @@ framework), the storage layer (OPFS -> IndexedDB), or the delivery mechanism
 
 ### Deterministic Computation & Global Memoization
 
+> **status: design — not built (as of 2026-06-18).** The authenticity token,
+> two-file memoization store, and community auditing layer below are a vision
+> built on the content-addressing primitives that exist today; no
+> authenticity-token service ships in the current build.
+
 Because every script has a signature and every payload has a signature, the
 combination `sign(scriptSig + payloadSig)` -- called the **authenticity token**
--- uniquely identifies a computation. A two-file storage model (marker + result)
-bridges computation identity to result identity, enabling bypass of re-execution
-when the result is already known. A community authenticity layer provides
-volunteer-driven auditing of script signatures before installation.
+-- would uniquely identify a computation. A two-file storage model (marker +
+result) bridges computation identity to result identity, enabling bypass of
+re-execution when the result is already known. A community authenticity layer
+provides volunteer-driven auditing of script signatures before installation.
 
 See [deterministic-computation.md](deterministic-computation.md) for the full
 specification: signature composition, two-file storage model, resource
@@ -481,12 +510,12 @@ verification, discovery properties, and use cases.
 
 The Diamond Core Processor (DCP) is a separate Angular application that serves
 as the bee development and compilation tool. It uses `esbuild-wasm` to compile
-TypeScript bee source code in the browser, producing the `DronePayloadV1`
+TypeScript bee source code in the browser, producing the `BeePayloadV1`
 artifacts that get signed and stored.
 
 **Key components:**
 - `EsbuildService` -- wraps `esbuild-wasm` for TypeScript-to-ESM transformation
-- `compilePayload()` -- takes a `DronePayloadV1`, decodes its Base64 source,
+- `compilePayload()` -- takes a `BeePayloadV1`, decodes its Base64 source,
   sends it to a web worker for compilation, and returns the compiled JavaScript
 - `dcp-worker.ts` -- a web worker that isolates esbuild compilation from the
   main thread
@@ -522,6 +551,7 @@ These constraints are intentional and load-bearing:
 
 ## Related Critical Documents
 
+- [dna.md](dna.md) — Distributed Network Artifacts: the content-addressed, merkle-versioned artifacts (layers, dependencies, bees, resources, content) that compose the hive. DNA rides the existing `kind` discriminant — there is no `DnaService`, `dna` field, or new OPFS folder. (The old "DNA = navigation path capsule" is renamed the [trail-capsule.md](trail-capsule.md).)
 - [signature-system.md](signature-system.md) — The signature-payload pair that underpins all content addressing, and the mandatory expansion doctrine: every data structure must use signature references, not inline data. Without this, composition and caching break.
 - [collapsed-compute.md](collapsed-compute.md) — How signature-addressed fragments eliminate redundant computation. The processor's deterministic pulse cycle is what makes collapsed compute possible — same inputs, same pulse order, same outputs, same signatures.
 - [signature-algebra.md](signature-algebra.md) — The formal algebra over signatures. The processor's `synchronize` event is the commit point where algebraic operations materialize.

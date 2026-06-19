@@ -68,9 +68,13 @@ The room has a deterministic, content-addressed identity:
 roomSig = sha256(cell + '/meeting')
 ```
 
-See `deriveRoomSig()` in [meeting.drone.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/meeting.drone.ts).
+See `deriveRoomSig()` in [meeting.drone.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/meeting.drone.ts) — it encodes `cell + '/meeting'` as UTF-8 and runs one `crypto.subtle.digest('SHA-256', …)`.
+
+This is a clean, self-contained illustration of the Hypercomb [content-addressing model](dna.md): the address **is** a SHA-256 hash of the canonical content, so identity is derived, never assigned. The room signature is not stored in a registry and handed out — it is *computed* from the only input that matters (the cell name plus the `/meeting` discriminant), and any two participants feeding the same input get bit-for-bit the same 64-hex address.
 
 Because the signature is derived from the cell name, **every participant who opens the same tile computes the same room signature independently**. No server, no registration, no invite link — the cell name is the invite. Two people landing on tile `agenda` both compute the same sig and start listening on the same Nostr mesh topic.
+
+The meeting room is a lightweight example of the broader doctrine: a signature names a thing by *being* a hash of its content. The durable artifacts that compose the hive — layers, dependencies, bees, and resources — follow the same rule at scale, composing upward so that a parent signature is a function of its children's signatures. See [dna.md](dna.md) for the full content-addressed artifact model. (The room *signature* here is a derived topic key, not one of those stored artifacts — the live A/V session is not persisted; see the "Leaving a meeting" section below.)
 
 ### 3. Subscribe to the mesh
 
@@ -163,9 +167,11 @@ If a meeting needs to grow, the host (or anyone) can re-tag the tile `cascade:19
 2. **Closes all peer connections** — calls `pc.close()` on every `RTCPeerConnection` and clears the slot map.
 3. **Stops local media** — stops every track on the local `MediaStream`, which releases the camera and microphone. The browser's hardware indicator turns off.
 
-Meetings leave no trace. There is no persisted participant list, no room history, no recording. When the last person leaves, the room signature falls silent on the mesh and the room effectively stops existing. Re-tagging the cell later creates a new, empty room with the same signature — peers who happen to be listening will just hear silence until someone new joins.
+The **live A/V session** leaves no trace. There is no persisted participant list, no call history, no recording. When the last person leaves, the room signature falls silent on the mesh and the session effectively stops existing. Re-tagging the cell later opens a new, empty session with the same signature — peers who happen to be listening will just hear silence until someone new joins.
 
-This is consistent with the Hypercomb [security model](security.md): presence-first, data expires when participants leave.
+What *does* persist is the **meeting tag itself**: the `cascade` value written by `/meeting` is merged into the `tags` array of the cell's `0000` props file in OPFS (see `writeProps()` in [meeting.queen.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/meeting/meeting.queen.ts)). That write is durable and local by default — the tile stays a meeting room across reloads. So the *capability* (this tile hosts a room) is persisted content addressed in the cell's props; the *ephemeral A/V presence* (who is on camera right now, slots, ICE state) is not — like presence, cursor, clipboard, and selection, it is kept out of the signed layer so it never skews the lineage signature.
+
+This is consistent with the Hypercomb [security model](security.md): presence-first, the live session expires when participants leave, while authored state is content-addressed and versioned locally.
 
 ---
 

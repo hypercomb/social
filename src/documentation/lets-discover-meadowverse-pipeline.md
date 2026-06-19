@@ -22,7 +22,7 @@ the breakthrough is that these two environments share the same core — `@hyperc
 
 today, if you want to build a 3D experience, you build the whole thing at once. the editor, the renderer, the asset pipeline, the debugging tools — they're all one monolith. you can't test a single piece in isolation without loading the entire application.
 
-the hypercomb architecture already solved this problem for 2D. bees are self-contained. they declare their own dependencies, their own grammar, their own effects. `ScriptPreloader` discovers them from the install manifest. `hypercomb.act()` pulses them. they don't know or care what application hosts them.
+the hypercomb architecture already solved this problem for 2D. bees are self-contained. they declare their own dependencies, their own grammar, their own effects. `ScriptPreloader` discovers them from `manifest.json`. `hypercomb.act()` pulses them. they don't know or care what application hosts them.
 
 extend this to 3D and something remarkable happens: you can build a single scene element — a particle system, a terrain shader, a character controller — as one bee, install it on meadowverse, and pulse it in total isolation. no scene graph to untangle. no framework to boot. just your bee, a canvas, and Three.js.
 
@@ -40,12 +40,14 @@ the infrastructure connecting these two environments is not hypothetical. it is 
 | `LayerInstaller` | downloads + verifies + writes artifacts to OPFS | `hypercomb-shared/core/layer-installer.ts` |
 | `ScriptPreloader` | discovers bees from install manifest, verifies signatures, loads from OPFS | `hypercomb-shared/core/script-preloader.ts` |
 | `DependencyLoader` | resolves namespace dependencies via import map | `hypercomb-shared/core/dependency-loader.ts` |
-| `resolveImportMap()` | scans the OPFS content bucket for dependency aliases, builds dynamic import map | `hypercomb-shared` |
+| `resolveImportMap()` | scans the `__dependencies__` pool in OPFS for dependency aliases, builds dynamic import map | `hypercomb-shared` |
 | service worker | intercepts `/opfs/` requests, serves from OPFS with correct MIME types | per-app `public/` |
-| `install.manifest.json` | lists all bees, deps, layers by signature + `beeDeps` for lazy loading | build output |
+| `manifest.json` | discovery file keyed by `rootLayerSig`; each package entry lists all bees, deps, layers by signature + `beeDeps` for lazy loading | build output |
 | `EffectBus` | pub/sub with last-value replay — bees coordinate without coupling | `@hypercomb/core` |
 
 none of these depend on Angular. none depend on Pixi.js. they are platform-agnostic plumbing. meadowverse would use the exact same `LayerInstaller`, the same `ScriptPreloader`, the same signature verification pipeline. the only difference is what sits on top: Three.js instead of Pixi.js.
+
+**same dna, different metabolism.** every artifact — layer, dependency, bee, resource — is one of the [distributed network artifacts](dna.md): signature-addressed, immutable, merkle-composed. but they don't all heal the same way at runtime. on the render path, **resources** self-heal: `Store.getResource` resolves memory → OPFS → host (via `ContentBroker.#fetchOverHttp`), sha256-verifies the bytes, writes them through to OPFS, and negative-caches a miss for ~60s. **layers, dependencies, and bees** are OPFS-only on the render path — they heal only through adopt / install / sync, never by streaming mid-render. so the same content-addressed primitive has two metabolisms depending on its kind, and meadowverse inherits both unchanged.
 
 ---
 
@@ -113,7 +115,7 @@ that URL tells `ensureInstall()` to fetch exactly one manifest — the one conta
 
 now add a second bee — a terrain. new signature, new manifest (or an updated one that includes both). refresh. two bees pulse. the particle field drifts above the terrain. you didn't write integration code. they both resolved `meadowverse:scene` from IoC and added their geometry independently.
 
-this is composition without coupling. each bee is debugged in isolation, then composed by co-installing them. the install manifest is the composition document — it lists which bees are present, and the processor pulses all of them.
+this is composition without coupling. each bee is debugged in isolation, then composed by co-installing them. the package's `manifest.json` is the composition document — it lists which bees are present (under the package's `rootLayerSig`), and the processor pulses all of them.
 
 ---
 
@@ -124,18 +126,18 @@ here's the workflow, step by step:
 ```
 1. AUTHOR    hypercomb.io → Diamond Core Processor
              write TypeScript bee, target Three.js
-             esbuild-wasm compiles in browser → DronePayloadV1
+             esbuild-wasm compiles in browser → BeePayloadV1
              sign payload → SHA-256 signature
 
 2. PUBLISH   signed bytes → OPFS on hypercomb.io (postMessage from DCP iframe)
-             or: build via CLI → install.manifest.json → Azure blob / local
+             or: build via CLI → manifest.json (keyed by rootLayerSig) → host / local
 
 3. INSTALL   meadowverse.ca loads
              ensureInstall() fetches manifest by signature
              LayerInstaller downloads bee + deps → OPFS
              signature verified at every step
 
-4. RESOLVE   resolveImportMap() scans the OPFS content bucket
+4. RESOLVE   resolveImportMap() scans the __dependencies__ pool in OPFS
              injects <script type="importmap">
              Three.js mapped to /vendor/three.runtime.js
 
@@ -153,7 +155,7 @@ here's the workflow, step by step:
              no cache invalidation. no version bumps. just new bytes, new hash.
 ```
 
-the key insight at step 7: because identity is content-addressed, there is no "update" operation. there is only "install different content." the old bee and the new bee are different signatures. there is no confusion about which version is running. if the bytes are different, the signature is different. if the signature matches, the bytes are verified. the system is append-only in its identity model.
+the key insight at step 7: because identity is content-addressed, there is no "update" operation. there is only "install different content." the old bee and the new bee are different signatures. there is no confusion about which version is running. if the bytes are different, the signature is different. if the signature matches, the bytes are verified. the system is append-only in its identity model. at the package level this makes update detection an O(1) compare — `installedSig === rootLayerSig` — not an HTTP cache negotiation.
 
 ---
 
@@ -224,13 +226,13 @@ the economy doc describes the moment a completed hive "departs" — avatars lift
 
 what does departure actually mean in technical terms?
 
-1. **the hive is complete** — every tile has been built, every bee compiled, every dependency resolved. the install manifest lists everything.
-2. **the manifest is signed** — the root signature represents the entire experience: all bees, all deps, all layers, all resources.
+1. **the hive is complete** — every tile has been built, every bee compiled, every dependency resolved. `manifest.json` lists everything, keyed by the package's `rootLayerSig`.
+2. **the package has identity** — the `rootLayerSig` (the merkle root of the layer tree, whose `cells[]` are child layer sigs) *is* the package identity. it represents the entire experience: all bees, all deps, all layers, all resources. (`label`/`previous`/`at` are sidecar metadata — they change `manifest.json` bytes but never the signature.)
 3. **meadowverse receives the signature** — via URL parameter, via mesh relay, via QR code, via any channel that can transmit 64 hex characters.
 4. **meadowverse installs** — `LayerInstaller` downloads everything, verifies everything, writes to OPFS.
 5. **meadowverse pulses** — `hypercomb.act()` finds all bees, pulses them. the 3D experience comes alive.
 
-the departure is a signature handoff. 64 characters cross from one domain to another. everything else follows deterministically.
+the departure is a signature handoff. 64 characters cross from one domain to another. everything else follows deterministically — but "follows" means *resolution*, not a single fat payload over the wire. the broker mesh carries layer **sigs**, not bytes; the receiver walks the layer tree by signature and pulls the actual bee, dependency, and resource bytes **HTTP-direct** from operator domains (`GET /<sig>`, sha256-verified, Cloudflare-edge-cacheable because every `/<sig>` is immutable). the signature names the whole experience; the bytes stream in afterward, content-addressed and verifiable, from wherever holds them.
 
 and because the signature is content-addressed, the experience is immutable. the meadowverse instance running signature `a1b2c3...` will always render the same scene, with the same bees, producing the same result. it is a permanent artifact. the bees who built it have flown — and what they built endures.
 
@@ -248,8 +250,8 @@ these components exist today and would transfer directly to meadowverse:
 - `SignatureStore` — trusted-signature allowlist, localStorage persistence
 - `ensureInstall()` — signature resolution, incremental manifest diffing, resumable installs
 - service worker pattern — OPFS-backed cache-first module serving
-- `build-module.ts` — discover, bundle, sign, layer tree, install manifest with `beeDeps`
-- `PayloadCanonical` — bee serialization + signing for DCP-authored bees
+- `build-module.ts` — discover, bundle, sign, layer tree, `manifest.json` (keyed by `rootLayerSig`) with `beeDeps`. note: the CLI/build path signs **raw bytes** — the raw compiled esbuild output for bees and deps, and `JSON.stringify(layer)` (via `signJson`) for layers. no key sorting anywhere.
+- `PayloadCanonical` — produces `BeePayloadV1` (`{ version:1, bee:{…}, source:{entry,files} }`) and signs it for DCP **in-browser** authoring only. it does `structuredClone` + `JSON.stringify` with **no key sorting** — it is not the CLI module-artifact path. (a reader who sorts keys would compute a different signature and break cache hits.)
 
 ---
 

@@ -1,5 +1,9 @@
 # byte protocol
 
+> **status: design — not built (as of 2026-06-18).** a one-byte-per-step wire format for replayable hex-grid navigation. `packByte`/`unpackByte`/`walkTrail` and the `trail:fork` effect do not exist in the build. live navigation today does not use this byte stream — it resolves clicks and tile positions through `axialToPixel` / `pixelToAxial` at `spacing = 38` (see `hex-detector.ts` in `@hypercomb/essentials`).
+
+> **vocabulary.** the trail / waggle vocabulary used here has its canonical home in [trail-capsule.md](trail-capsule.md) — a published, replayable *route*. byte-protocol trails are replayable navigation, **not** merkle-versioned DNA; the content-addressed, merkle-versioned artifacts (layers, dependencies, bees, resources, content) are documented separately in [dna.md](dna.md).
+
 ## the idea
 
 a bee doesn't carry a map. it carries a direction, a scent, and enough memory to know whether it's still going or done. that's the byte protocol: one byte per navigation step. no headers, no schemas, no negotiation. just 8 bits that tell a drone where to fly next on the hex grid.
@@ -295,6 +299,8 @@ a drone reads a byte, looks up a neighbor, moves, and either keeps going or stop
 
 ## related documents
 
+- [trail-capsule.md](./trail-capsule.md) — the canonical home of the trail / waggle vocabulary: a published, replayable *route* built from these bytes. replayable navigation, not merkle-versioned DNA.
+- [dna.md](./dna.md) — the content-addressed, merkle-versioned artifacts (layers, dependencies, bees, resources, content). the byte protocol's trails are **not** DNA.
 - [architecture-critique.md](archive/architecture-critique.md) — analysis of the current hypercomb architecture
 - [core-processor-architecture.md](./core-processor-architecture.md) — core processor design
 - [dependency-signing.md](./dependency-signing.md) — how packages are secured by a single signature

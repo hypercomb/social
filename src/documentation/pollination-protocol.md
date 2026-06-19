@@ -1,9 +1,12 @@
 # Pollination Protocol
 
-**Pollination is how contributions cross between domains in Hypercomb.** A contributor carries content from their own domain to another domain's module, hosts it themselves, and announces it. The receiving hive decides whether it grafts.
+> **status: design — not built (as of 2026-06-18).** the contribution/graft flow, the pollen-packet manifest, and the stigma admission predicate are a spec; no `PollinationStigma` drone or pollination pipeline ships in the build yet.
+
+**Pollination is how contributions cross between domains in Hypercomb.** It is how **DNA moves between domains** — a contributor carries content (the content-addressed, merkle-versioned [DNA](dna.md) of their own domain) to another domain's module, hosts it themselves, and announces it. The receiving hive decides whether it **grafts**: adopting that foreign DNA into its own merkle tree so it inherits and cascades like any other layer.
 
 ## Related Documents
 
+- [dna.md](dna.md) — What pollination moves: the content-addressed, merkle-versioned artifacts (layers, dependencies, bees, resources, content) that compose the hive. Grafting = adopting another domain's DNA into your merkle tree
 - [pheromone-protocol.md](pheromone-protocol.md) — The signal counterpart: ambient annotations attached to content by signature
 - [signature-system.md](signature-system.md) — Every artifact in a pollen packet is a signature-addressed fragment
 - [dependency-signing.md](dependency-signing.md) — Bundles are signature-addressed modules; the same rules apply to pollen manifests
@@ -73,6 +76,8 @@ The manifest URL is announced over the existing Nostr sharing channel used by [d
 
 When a DCP instance receives a pollination announcement for a `(marker, domain)` it cares about, it does not immediately show it to the owner. Every pollination has to cross a **stigma** — the receptive boundary of the receiving hive.
 
+> **Design note.** The stigma is real as a *primitive idea* — every pollen manifest, every referenced resource, and every verdict input is already signature-addressable today. But the claim that "the stigma participates in the signature algebra" — verdict triples, memoized verdict signatures, a shipped stigma drone — is **design-spec, not built**. No `PollinationStigma` drone exists in the build as of writing; treat the verdict-as-signature machinery below as the intended shape, not current behaviour.
+
 The stigma is a **pure admission predicate**: a deterministic function `(pollen-manifest-sig, current-state-sig) → {admit, reject, reason}`. It is not a judge. It does not weigh, evaluate, or form opinions. Same inputs produce the same verdict, forever — and that is what makes the verdict itself signature-addressable. A verdict is a fact about the inputs, not a decision about them.
 
 The pipeline:
@@ -116,7 +121,7 @@ When the owner next connects DCP and opens the affected `(marker, domain)`, they
 - The contributor's intent description
 - A single action: **Graft**
 
-Grafting pulls the resources out of the contributor's host and into the owner's OPFS content bucket, then appends a new sigbag marker to the module's lineage that references the pollen manifest signature. That marker is the permanent record of the graft — auditable, reversible, shareable.
+Grafting is **adopting another domain's DNA into your own merkle tree.** It pulls the resources out of the contributor's host and into the owner's OPFS pools, then appends a new sigbag marker to the module's lineage that references the pollen manifest signature. Once grafted, the foreign artifacts inherit and cascade exactly like locally authored DNA: the parent re-signs, the new layer cascades to the root one marker per ancestor, and the contribution becomes a permanent rung in the owner's lineage. That marker is the permanent record of the graft — auditable, reversible, shareable.
 
 Shedding the pollination simply drops it. Because it was never merged into the owner's tree, nothing needs cleanup.
 
@@ -136,9 +141,9 @@ A contributor who discovers a flaw in their own pollination can publish a **wilt
 - **No new primitives.** A pollen packet is a manifest, which is a signature-addressed resource, which is already the universal composition mechanism
 - **No central storage.** The contributor hosts; the owner mirrors on graft; Nostr carries the announcement
 - **No trust in the host.** Signature verification makes tampering detectable
-- **The stigma is part of the signature algebra.** A pure predicate over signatures produces signature-addressable verdicts; nothing sits outside the merkle tree
+- **The stigma is designed to be part of the signature algebra.** A pure predicate over signatures is intended to produce signature-addressable verdicts so nothing sits outside the merkle tree — design-spec, not yet built (no stigma drone ships today)
 - **Composes with history.** A grafted pollination is just another history operation pointing at a manifest signature — it participates in undo, time-travel, and sharing like any other op
-- **Deduplication falls out for free.** If a pollen packet contains files identical to what the owner already has, the signatures match and nothing is downloaded twice
+- **Deduplication falls out for free.** If a pollen packet contains files identical to what the owner already has, the signatures match and nothing is downloaded twice — the same property that lets DNA replicate across domains without duplication. Identical artifacts share one address whether they were authored locally or grafted from another domain
 
 ## Scope: DCP Only
 

@@ -224,7 +224,7 @@ When implementing a new feature, copy the node template and check:
 
 - [ ] **Data shape defined** with `readonly` fields and `version: 1`
 - [ ] **Content referenced by signature**, never inline (use the litmus test from [signature-system.md](signature-system.md))
-- [ ] **Deterministic serialization** with sorted keys
+- [ ] **Deterministic serialization** — sign the exact bytes you emit (the build hashes **raw bytes** / insertion-order JSON via `signJson`, **not** sorted keys; re-serializing with sorted keys computes a different signature and breaks dedup)
 - [ ] **`capture()`** stores blob in OPFS and caches in memory
 - [ ] **`resolve()`** checks memory → OPFS → returns null
 - [ ] **History wired** — state changes recorded as ops with resource signatures

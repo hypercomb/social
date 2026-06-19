@@ -14,7 +14,7 @@ you will work within:
 3. [glossary.md](glossary.md) -- canonical terms from metaphor to mechanics
 4. [signature-system.md](signature-system.md) -- the signature-payload primitive and its expansion doctrine
 5. [byte-protocol.md](byte-protocol.md) -- the 1-byte navigation wire format
-6. [dna.md](dna.md) -- optional path capsule publishing
+6. [dna.md](dna.md) -- distributed network artifacts: the merkle-versioned content-addressed assets (the old path-capsule meaning is now [trail-capsule.md](trail-capsule.md))
 7. [core-processor-architecture.md](core-processor-architecture.md) -- core primitives and paradigm significance
 8. [dependency-signing.md](dependency-signing.md) -- one signature securing an entire package hierarchy
 

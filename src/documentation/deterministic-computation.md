@@ -1,5 +1,13 @@
 # deterministic computation & authenticity layer
 
+> **status: design — not built (as of 2026-06-18).** the memoization layer
+> described here is a proposal: there is no authenticity-marker store, no
+> result-pointer file, no `execute()` bypass, and no `verification` token in
+> the codebase today. the signature primitives it composes (`SignatureService.sign`,
+> `SignatureStore`) and the install/verification path it leans on (DCP) are
+> real; this document specifies how they would extend into deterministic
+> compute caching.
+
 extends hypercomb's content-addressing into deterministic computation memoization
 with a community authenticity layer. builds on the primitives defined in
 [core-processor-architecture.md](core-processor-architecture.md) and the
@@ -147,7 +155,19 @@ payloads before they execute.
 - the auditor layer is advisory — participants choose their own trust threshold.
 
 this is complementary to the existing `AuditorService` in the diamond core
-processor, which already fetches approval lists from configurable endpoints.
+processor (`diamond-core-processor/src/app/core/auditor.service.ts`), which
+already fetches approval lists from configurable endpoints, verifies each list's
+own signature against its url filename, and audits a script-sig against a
+participant-set threshold of subscribed auditors.
+
+the auditor layer is advisory. the load-bearing gate that actually decides
+whether bytes run is the verify-then-trust path: dcp's `SentinelHandler`
+orchestrates the install, `DcpInstallerService` downloads and sha256-verifies
+every file, and the resulting sigs are recorded in `SignatureStore` (core).
+`SignatureStore.isTrusted(sig)` is then the runtime allowlist check — a sig in
+the store is allowed to run without re-hashing. the trusted set is seeded from
+install/sync manifests (`trustAll`) and persisted/restored through localStorage,
+so the gate survives reloads.
 
 ### installation flow (diamondcoreprocessor.com)
 
@@ -161,19 +181,28 @@ inside hypercomb.
 5. hypercomb loads from the local copy at runtime, re-verifying on every load
    (three-layer verification: install, bee load, dep load).
 
-### manifest caching
+### manifest freshness (O(1) root-sig compare)
 
-when hypercomb.io starts, it pings dcp for a manifest. the request includes the
-signature of the previously cached manifest. if the signatures match, no update
-is needed — a single comparison, no transfer.
+update detection is a single signature comparison, not an HTTP conditional
+request. a package's identity is its `rootLayerSig` — the merkle root of its
+layer tree. dcp fetches `manifest.json` (keyed by root signature under
+`packages[rootSig]`) and compares the freshly-discovered root against the one
+already installed:
 
 ```
-client: GET /manifest?cached=<previous-manifest-sig>
-server: 304 (match) or 200 + new manifest (mismatch)
+installedSig === rootSig  → already current, nothing to install
+installedSig !== rootSig  → a new generation exists, install the delta
 ```
 
-dcp can cache manifests on its side, making this exchange trivially cheap for
-both parties.
+this is exactly the short-circuit in `SentinelHandler.#handleInstall`: if the
+caller passes `installedSig` and it equals the discovered `rootSig`, dcp
+replies `install-done` immediately with zero file transfer. because the root
+signature is a merkle root, one comparison settles the whole tree — any change
+anywhere below the root produces a different `rootSig`. (the same pattern drives
+`sync`, which short-circuits on `syncSig`, and the `SignatureStore.storeSig`
+freshness check for the trusted allowlist.) the `manifest.json` bytes can still
+change without changing the signature — sidecar fields like `label`, `at`, and
+`previous` are deploy metadata that ride alongside but do not feed the root.
 
 ---
 
@@ -181,10 +210,12 @@ both parties.
 
 | primitive | defined in | role here |
 |-----------|-----------|-----------|
-| `SignatureService.sign()` | `@hypercomb/core/signature.service.ts` | all hashing — script, resource, result, marker, verification |
-| `SignatureStore` | `@hypercomb/core/signature-store.ts` | caches trusted signatures to skip redundant hashing |
-| `AuditorService` | `diamond-core-processor/auditor.service.ts` | community authenticity — fetches approval lists |
-| `LayerInstaller` | `hypercomb-shared/core/layer-installer.ts` | install-time verification of downloaded bytes |
+| `SignatureService.sign()` | `hypercomb-core/src/core/signature.service.ts` | all hashing — script, resource, result, marker, verification |
+| `SignatureStore` | `hypercomb-core/src/core/signature-store.ts` | the runtime trust allowlist — `isTrusted(sig)` gates whether bytes run; `trustAll` seeds it from manifests; `storeSig` is its O(1) freshness token |
+| `AuditorService` | `diamond-core-processor/src/app/core/auditor.service.ts` | advisory community authenticity — fetches + self-verifies approval lists, audits a sig against a subscribed-auditor threshold |
+| `SentinelHandler` | `diamond-core-processor/src/app/sentinel/sentinel-handler.ts` | orchestrates install/sync; short-circuits on the O(1) `installedSig === rootSig` compare |
+| `DcpInstallerService` | `diamond-core-processor/src/app/core/dcp-installer.service.ts` | install-time download + sha256 verification of every layer/bee/dep |
+| `LayerInstaller` | `hypercomb-shared/core/layer-installer.ts` | hive-side install-time verification of downloaded bytes |
 | `ScriptPreloader` | `hypercomb-shared/core/script-preloader.ts` | bee load-time verification from opfs |
 | `DependencyLoader` | `hypercomb-shared/core/dependency-loader.ts` | dep load-time verification from opfs |
 
