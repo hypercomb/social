@@ -59,16 +59,6 @@ const attachImportMap = async (): Promise<void> => {
 }
 
 const bootstrap = async (): Promise<void> => {
-  // Pre-launch posture: default the public mesh ON so peer sharing / adopt is
-  // available out of the box. Only an UNSET flag is defaulted — an explicit
-  // user off-toggle still wins. Set here, before any drone/adapter reads it.
-  try {
-    if (localStorage.getItem('hc:mesh-public') === null) {
-      localStorage.setItem('hc:mesh-public', 'true')
-      localStorage.setItem('hc:nostrmesh:network', '1')
-    }
-  } catch { /* private-mode storage — drones fall back to their own defaults */ }
-
   await ensureSwControl()
 
   // Hand the service worker the host domains (self + community) so an
