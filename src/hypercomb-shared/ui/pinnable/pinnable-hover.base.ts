@@ -24,11 +24,11 @@
 //   `${ns}:hover-unpin` → close the front-most pinned panel (Escape cascade)
 //   emits `${ns}:pinned` { active } so the host Escape cascade knows.
 //
-// Shell UI — must NOT import essentials. Abstract `getter`s (not fields) carry
-// `ns`/`posKey` so they resolve during base construction, before subclass
-// field initializers run.
+// Shell UI — must NOT import essentials. `ns`/`posKey`/`panelWidth` are abstract
+// getters the subclass overrides; the EffectBus wiring lives in ngOnInit (not the
+// constructor) so those getters resolve only after the subclass is fully built.
 
-import { signal, Directive, type OnDestroy } from '@angular/core'
+import { signal, Directive, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 
 export interface PinnablePanel<T> {
@@ -45,7 +45,7 @@ const CASCADE_STEP = 26   // px each fresh pin is offset to fan out
 const PEEK_ID = 0         // reserved id for the lone hover peek
 
 @Directive()
-export abstract class PinnableHoverBase<T> implements OnDestroy {
+export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
 
   /** EffectBus event namespace (e.g. 'contact', 'files:teaser'). */
   protected abstract get ns(): string
@@ -63,13 +63,13 @@ export abstract class PinnableHoverBase<T> implements OnDestroy {
   #cleanups: (() => void)[] = []
   #hideTimer: ReturnType<typeof setTimeout> | null = null
   #peekInside = false
-  #savedPos: Record<string, { x: number; y: number }>
+  #savedPos: Record<string, { x: number; y: number }> = {}
   #nextId = 1
   #pinnedAnnounced = false
   #dragId: number | null = null
   #dragOffset = { x: 0, y: 0 }
 
-  constructor() {
+  ngOnInit(): void {
     this.#savedPos = this.#loadPos()
     const ns = this.ns
 
