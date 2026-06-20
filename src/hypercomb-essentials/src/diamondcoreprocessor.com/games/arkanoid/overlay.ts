@@ -82,6 +82,7 @@ export class ArkanoidOverlay {
   #engine: Engine | null = null
   #designer = new Designer()
   #levelIndex = 0
+  #launchOffset: number | null = null   // the ball's on-paddle position set once (first start), reused all game
 
   // designer pointer paint state
   #painting = false
@@ -109,6 +110,7 @@ export class ArkanoidOverlay {
   // snapshot diff read AFTER each engine.update() so the engine stays pure (no
   // particle/event system of its own). #intro pops in like the Bubble overlay.
   #shaker = new Shaker()
+  #wasFrantic = false                 // rising-edge detector for the frenzy-start shake
   #field = new ParticleField()
   #prevScore = 0
   #prevLives = 3
@@ -360,6 +362,7 @@ export class ArkanoidOverlay {
     this.#designBar?.classList.add('ark-hidden')
     if (this.#canvas) this.#canvas.style.cursor = 'none'
     this.#engine = new Engine(level.rows)
+    if (this.#launchOffset !== null) this.#engine.pinLaunchOffset(this.#launchOffset)   // reuse the on-paddle position; aim only the first time
     this.#paddleTargetX = this.#engine.paddle.x
     // Fresh run from this level: score back to 0, full lives, no carry-over.
     this.#transition = null
@@ -477,7 +480,7 @@ export class ArkanoidOverlay {
   #fit = (): void => {
     const c = this.#canvas, s = this.#stage
     if (!c || !s) return
-    const availW = s.clientWidth - 28
+    const availW = (s.clientWidth - 28) * 0.9    // narrow the screen to 90% of the stage width (margins each side)
     const availH = s.clientHeight - 28
     if (availW <= 0 || availH <= 0) return
     const cssScale = Math.min(availW / W, availH / H)
@@ -522,6 +525,8 @@ export class ArkanoidOverlay {
           // at its centre — the engine needs no particle/event system.
           this.#snapshotBricks(this.#engine)
           this.#engine.update(dt)
+          if (this.#engine.frantic && !this.#wasFrantic) this.#shaker.add(1.1)   // frenzy start → hard screen shake
+          this.#wasFrantic = this.#engine.frantic
           this.#senseJuice()
           this.#diffBricks(this.#engine)
           r.draw(this.#engine, this.#time)
@@ -636,6 +641,11 @@ export class ArkanoidOverlay {
     e.preventDefault()
     if (this.#mode === 'play') {
       const eng = this.#engine
+      if (eng && eng.aiming) {                              // one-time aim: this click sets the on-paddle spot + frees the paddle (launch any time)
+        eng.aimClick()
+        if (!eng.aiming) this.#launchOffset = eng.launchOffset   // set → remember the on-paddle position all game
+        return
+      }
       if (eng && eng.pinballTimer > 0) {                    // pinball: mouse buttons ARE the flippers
         if (e.button === 2) eng.flipRight(true); else eng.flipLeft(true)
         return
@@ -780,7 +790,8 @@ export class ArkanoidOverlay {
       const e = new Engine(tr.nextLevel.rows)
       e.score = carriedScore
       e.lives = tr.prev.lives
-      e.paddle.x = tr.prev.paddle.x        // base width range ⊂ any expanded range, so always valid
+      e.paddle.x = tr.prev.paddle.x        // carry the paddle position; base range ⊂ any expanded range
+      if (this.#launchOffset !== null) e.pinLaunchOffset(this.#launchOffset)   // ball rides the set on-paddle offset; no re-aim
       this.#engine = e
       this.#paddleTargetX = e.paddle.x
       this.#levelIndex = tr.nextIndex

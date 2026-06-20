@@ -7,12 +7,12 @@
 // display size. The renderer is stateless beyond its ctx and reads the engine's
 // public state each frame.
 
-import { Engine, TILE, WALL, POWER_META, BONUS_KINDS, type Enemy, type Bubble, type Fruit, type Candy, type Bonus, type FloatText, type Particle, type PowerKind, type LevelDef } from './engine.js'
+import { Engine, TILE, WALL, DOOR, POWER_META, BONUS_KINDS, enemyKind, indexDoors, type DoorIndex, type Enemy, type Bubble, type Fruit, type Candy, type Bonus, type FloatText, type Particle, type PowerKind, type LevelDef } from './engine.js'
 
-// Four enemy kinds in the dream palette: pink, violet, muted amber, teal. The
-// amber was a screaming neon (#ffac3b) that broke cohesion — toned down so the
-// foes read as one threat, not a Skittles ad.
-const ENEMY_TINTS = ['#ff5d8f', '#7c5cff', '#e3a356', '#2fd3a0'] as const
+// Enemy tints now live with their species in ENEMY_KINDS (engine.ts) — the
+// renderer reads enemyKind(kind).tint so behaviour + colour never drift apart.
+// Door pairs are tinted by pair index so linked tunnels read as a matched set.
+const DOOR_TINTS = ['#7ee0ff', '#ff9ad5', '#9b7cff', '#9af5c0', '#ffd76a'] as const
 // Fixed bokeh tints (r,g,b) for the dreamy background orbs — cyan, violet, pink.
 const BOKEH_TINTS = ['126,224,255', '155,124,255', '255,150,200'] as const
 // A few close blue-stone shades for the brick faces — subtle per-brick variation
@@ -30,6 +30,7 @@ export class Renderer {
     const ctx = this.#ctx
     this.#background(e.width, e.height, time)
     this.#platforms(e)
+    this.#doors(e.doorInfo, e.cols, time)
     const cleanupUrgent = e.state === 'cleanup' && e.cleanupTimer < 1
     for (const f of e.fruits) this.#fruit(f, time, cleanupUrgent)
     for (const c of e.candies) this.#candy(c, time)
@@ -104,6 +105,59 @@ export class Renderer {
     }
   }
 
+  // ── doors (tunnelling portals) ───────────────────────────
+
+  /** Draw every door, tinted by its pair so linked tunnels read as a set. */
+  #doors(info: DoorIndex, cols: number, time: number): void {
+    for (const idx of info.cells) {
+      this.#door((idx % cols) * TILE, ((idx / cols) | 0) * TILE, info.pairOf.get(idx) ?? 0, time)
+    }
+  }
+
+  /** A tunnelling door: a softly-glowing oval portal in a stone frame (matching
+   *  the brick platforms), tinted by its pair. A slow swirl + one orbiting mote
+   *  give it just enough life to say "step in" — restrained, not neon. */
+  #door(x: number, y: number, pair: number, time: number): void {
+    const ctx = this.#ctx
+    const cx = x + TILE / 2, cy = y + TILE / 2
+    const rx = TILE * 0.3, ry = TILE * 0.42
+    const tint = DOOR_TINTS[pair % DOOR_TINTS.length]
+
+    ctx.save()
+    // stone arch behind the portal
+    ctx.fillStyle = 'rgba(20,26,54,0.9)'
+    ctx.strokeStyle = 'rgba(150,180,255,0.32)'
+    ctx.lineWidth = 2
+    this.#roundRect(cx - rx - 3, cy - ry - 3, (rx + 3) * 2, (ry + 3) * 2, 9)
+    ctx.fill(); ctx.stroke()
+
+    // portal well — a dark centre with a tinted halo
+    const g = ctx.createRadialGradient(cx, cy, 1, cx, cy, rx * 1.7)
+    g.addColorStop(0, this.#hexA(tint, 0.92))
+    g.addColorStop(0.4, this.#hexA(tint, 0.32))
+    g.addColorStop(1, 'rgba(6,4,20,0.95)')
+    ctx.fillStyle = g
+    ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.fill()
+
+    // two slow swirl arcs
+    ctx.strokeStyle = this.#hexA(tint, 0.7)
+    ctx.lineWidth = 1.6
+    for (let i = 0; i < 2; i++) {
+      ctx.beginPath()
+      ctx.ellipse(cx, cy, rx * 0.6, ry * 0.6, time * 1.3 + i * Math.PI, 0.2, Math.PI * 1.15)
+      ctx.stroke()
+    }
+    // bright rim
+    ctx.strokeStyle = this.#hexA(tint, 0.9)
+    ctx.lineWidth = 2
+    ctx.beginPath(); ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2); ctx.stroke()
+    ctx.restore()
+
+    // an orbiting mote for sparkle
+    const oa = time * 2 + pair
+    this.#twinkle(cx + Math.cos(oa) * rx * 0.8, cy + Math.sin(oa) * ry * 0.7, TILE * 0.11, time * 4 + pair, this.#hexA(tint, 0.95))
+  }
+
   // ── designer view ────────────────────────────────────────
 
   drawEditor(level: LevelDef, hover: { col: number; row: number } | null, time: number): void {
@@ -111,6 +165,7 @@ export class Renderer {
     const w = level.cols * TILE, h = level.rows * TILE
     this.#background(w, h, time)
     this.#platformRuns((c, r) => level.tiles[r * level.cols + c] ?? 0, level.cols, level.rows)
+    this.#doors(indexDoors(i => level.tiles[i] ?? 0, level.cols, level.rows), level.cols, time)
     for (const e of level.enemies) {
       this.#enemy(e.col * TILE + TILE / 2, e.row * TILE + TILE / 2, TILE * 0.72,
         { dir: e.dir ?? 1, angry: false, kind: e.kind ?? 0, captured: true, bob: 0 } as never, time)
@@ -286,10 +341,28 @@ export class Renderer {
       ctx.beginPath(); ctx.arc(ex + f * w * 0.03, eyeY - h * 0.02, w * 0.02, 0, Math.PI * 2); ctx.fill()
     }
 
-    // mouth — round "O" + a forming bubble while blowing, else a small smile
+    // mouth — round "O" + a forming bubble (swelling while charging, popping on
+    // blow), else a small smile
     const mouthX = cx + f * w * 0.2
     const mouthY = topY + h * 0.52
-    if (e.blowFlash > 0) {
+    if (e.blowCharge > 0) {
+      // charging: open mouth + a bubble swelling with the hold (greenish + pulsing at full)
+      const full = e.blowCharge >= 1
+      const cr = 4 + e.blowCharge * (w * 0.55)
+      const bx = mouthX + f * (6 + cr * 0.7)
+      ctx.fillStyle = '#7a1530'
+      ctx.beginPath(); ctx.ellipse(mouthX, mouthY, w * 0.1, h * 0.1, 0, 0, Math.PI * 2); ctx.fill()
+      ctx.save()
+      ctx.globalAlpha = 0.6
+      ctx.strokeStyle = full ? '#bfffd0' : '#bfefff'
+      ctx.lineWidth = 2
+      ctx.beginPath(); ctx.arc(bx, mouthY, cr, 0, Math.PI * 2); ctx.stroke()
+      if (full) {
+        ctx.globalAlpha = 0.3 + 0.25 * Math.sin(time * 18)
+        ctx.beginPath(); ctx.arc(bx, mouthY, cr + 2.5, 0, Math.PI * 2); ctx.stroke()
+      }
+      ctx.restore()
+    } else if (e.blowFlash > 0) {
       const t = 1 - e.blowFlash / 0.2
       ctx.fillStyle = '#7a1530'
       ctx.beginPath(); ctx.ellipse(mouthX, mouthY, w * 0.1, h * 0.1, 0, 0, Math.PI * 2); ctx.fill()
@@ -307,6 +380,13 @@ export class Renderer {
       ctx.stroke()
     }
 
+    // shield aura — a soft pulsing ring while the shield is up
+    if (e.shield) {
+      ctx.strokeStyle = `rgba(134,240,176,${0.45 + 0.25 * Math.sin(time * 6)})`
+      ctx.lineWidth = 2.5
+      ctx.beginPath(); ctx.ellipse(cx, midY, w * 0.66, h * 0.6, 0, 0, Math.PI * 2); ctx.stroke()
+    }
+
     ctx.restore()
   }
 
@@ -316,19 +396,36 @@ export class Renderer {
     const ctx = this.#ctx
     const r = size * 0.5
     const wob = Math.sin(en.bob + time * 2) * size * 0.04
-    const base = en.angry ? '#ff3b3b' : ENEMY_TINTS[en.kind % ENEMY_TINTS.length]
+    const kind = enemyKind(en.kind)
+    const flies = kind.behavior === 'fly' || kind.behavior === 'ghost'
+    const ghost = kind.behavior === 'ghost'
+    const base = en.angry ? '#ff3b3b' : kind.tint
     const f = en.dir
 
-    // shadow (only for free enemies sitting on ground — cheap + grounding)
-    if (!en.captured) {
+    // ground shadow — only for grounded species (fliers cast none)
+    if (!en.captured && !flies) {
       ctx.fillStyle = 'rgba(0,0,0,0.22)'
       ctx.beginPath(); ctx.ellipse(cx, cy + r + 2, r * 0.85, 3.5, 0, 0, Math.PI * 2); ctx.fill()
     }
 
-    // feet
-    ctx.fillStyle = this.#shade(base, -0.3)
-    ctx.beginPath(); ctx.ellipse(cx - r * 0.42, cy + r * 0.8, r * 0.3, r * 0.18, 0, 0, Math.PI * 2); ctx.fill()
-    ctx.beginPath(); ctx.ellipse(cx + r * 0.42, cy + r * 0.8, r * 0.3, r * 0.18, 0, 0, Math.PI * 2); ctx.fill()
+    if (flies) {
+      // beating wings behind the body
+      const beat = Math.sin(time * 12 + en.bob) * 0.5 + 0.5
+      ctx.fillStyle = this.#hexA(base, 0.5)
+      for (const d of [-1, 1]) {
+        ctx.beginPath()
+        ctx.ellipse(cx + d * r * 0.92, cy + wob - r * 0.1, r * 0.5, r * (0.32 + beat * 0.16), d * 0.5, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    } else {
+      // feet (ground species)
+      ctx.fillStyle = this.#shade(base, -0.3)
+      ctx.beginPath(); ctx.ellipse(cx - r * 0.42, cy + r * 0.8, r * 0.3, r * 0.18, 0, 0, Math.PI * 2); ctx.fill()
+      ctx.beginPath(); ctx.ellipse(cx + r * 0.42, cy + r * 0.8, r * 0.3, r * 0.18, 0, 0, Math.PI * 2); ctx.fill()
+    }
+
+    ctx.save()
+    if (ghost) ctx.globalAlpha = 0.82          // a hunter spectre — faintly translucent
 
     // body
     const bg = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3 + wob, r * 0.2, cx, cy + wob, r)
@@ -336,12 +433,17 @@ export class Renderer {
     bg.addColorStop(0.7, base)
     bg.addColorStop(1, this.#shade(base, -0.28))
     ctx.fillStyle = bg
-    ctx.beginPath(); ctx.arc(cx, cy + wob, r, 0, Math.PI * 2); ctx.fill()
-
-    // little horns
-    ctx.fillStyle = this.#shade(base, -0.35)
-    ctx.beginPath(); ctx.moveTo(cx - r * 0.5, cy - r * 0.7 + wob); ctx.lineTo(cx - r * 0.66, cy - r * 1.05 + wob); ctx.lineTo(cx - r * 0.28, cy - r * 0.82 + wob); ctx.fill()
-    ctx.beginPath(); ctx.moveTo(cx + r * 0.5, cy - r * 0.7 + wob); ctx.lineTo(cx + r * 0.66, cy - r * 1.05 + wob); ctx.lineTo(cx + r * 0.28, cy - r * 0.82 + wob); ctx.fill()
+    if (ghost) {
+      this.#ghostBody(cx, cy + wob, r)         // domed top + a wavy skirt
+    } else {
+      ctx.beginPath(); ctx.arc(cx, cy + wob, r, 0, Math.PI * 2); ctx.fill()
+      // little horns — ground species only (fliers read cleaner wing-only)
+      if (!flies) {
+        ctx.fillStyle = this.#shade(base, -0.35)
+        ctx.beginPath(); ctx.moveTo(cx - r * 0.5, cy - r * 0.7 + wob); ctx.lineTo(cx - r * 0.66, cy - r * 1.05 + wob); ctx.lineTo(cx - r * 0.28, cy - r * 0.82 + wob); ctx.fill()
+        ctx.beginPath(); ctx.moveTo(cx + r * 0.5, cy - r * 0.7 + wob); ctx.lineTo(cx + r * 0.66, cy - r * 1.05 + wob); ctx.lineTo(cx + r * 0.28, cy - r * 0.82 + wob); ctx.fill()
+      }
+    }
 
     // eyes
     const ey = cy - r * 0.12 + wob
@@ -352,9 +454,9 @@ export class Renderer {
       ctx.fillStyle = '#14121f'
       ctx.beginPath(); ctx.arc(ex + f * r * 0.1, ey, r * 0.13, 0, Math.PI * 2); ctx.fill()
     }
-    // angry brows
-    if (en.angry) {
-      ctx.strokeStyle = '#3a0000'; ctx.lineWidth = 2.4
+    // brows — angry (red) or a permanently fierce charger
+    if (en.angry || kind.behavior === 'charge') {
+      ctx.strokeStyle = en.angry ? '#3a0000' : this.#shade(base, -0.45); ctx.lineWidth = 2.4
       ctx.beginPath(); ctx.moveTo(cx - r * 0.55, ey - r * 0.42); ctx.lineTo(cx - r * 0.12, ey - r * 0.18); ctx.stroke()
       ctx.beginPath(); ctx.moveTo(cx + r * 0.55, ey - r * 0.42); ctx.lineTo(cx + r * 0.12, ey - r * 0.18); ctx.stroke()
     }
@@ -364,6 +466,25 @@ export class Renderer {
     if (en.angry) ctx.arc(cx, cy + r * 0.5 + wob, r * 0.26, 1.15 * Math.PI, 1.85 * Math.PI)
     else ctx.arc(cx, cy + r * 0.34 + wob, r * 0.26, 0.15 * Math.PI, 0.85 * Math.PI)
     ctx.stroke()
+    ctx.restore()
+  }
+
+  /** A ghost's body: a round dome capped by a three-lobed wavy skirt. Fills with
+   *  the current style (the body gradient), so the caller sets the fill. */
+  #ghostBody(cx: number, cy: number, r: number): void {
+    const ctx = this.#ctx
+    const baseY = cy + r * 0.95
+    ctx.beginPath()
+    ctx.arc(cx, cy, r, Math.PI, 0)             // top dome (left → right over the top)
+    ctx.lineTo(cx + r, baseY)                  // down the right edge
+    const lobes = 3, w = (2 * r) / lobes
+    for (let i = 0; i < lobes; i++) {
+      const x = cx + r - i * w
+      ctx.quadraticCurveTo(x - w / 2, baseY - r * 0.4, x - w, baseY)   // scalloped hem
+    }
+    ctx.lineTo(cx - r, cy)                      // up the left edge back to the dome
+    ctx.closePath()
+    ctx.fill()
   }
 
   // ── bubbles ──────────────────────────────────────────────
@@ -433,6 +554,18 @@ export class Renderer {
     // shine
     ctx.fillStyle = 'rgba(255,255,255,0.8)'
     ctx.beginPath(); ctx.ellipse(cx - r * 0.32, cy - r * 0.34, r * 0.18, r * 0.1, -0.6, 0, Math.PI * 2); ctx.fill()
+    // chain-multiplier badge — chained fruit is worth ×N
+    if (f.mult > 1) {
+      ctx.save()
+      ctx.font = '800 11px "Segoe UI", system-ui, sans-serif'
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      const tx = cx + r * 0.7, ty = cy - r - 5
+      ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(6,4,18,0.9)'
+      ctx.strokeText('×' + f.mult, tx, ty)
+      ctx.fillStyle = '#ffd76a'
+      ctx.fillText('×' + f.mult, tx, ty)
+      ctx.restore()
+    }
   }
 
   // ── power-up candies (glossy gem + white emblem) ─────────
@@ -501,11 +634,21 @@ export class Renderer {
       // a bold ring — the "big bubble"
       ctx.lineWidth = r * 0.17
       ctx.beginPath(); ctx.arc(cx, cy, s * 0.72, 0, Math.PI * 2); ctx.stroke()
+    } else if (kind === 'triple') {
+      // three stacked rings — the spread shot
+      ctx.lineWidth = r * 0.12
+      for (const o of [-1, 0, 1]) { ctx.beginPath(); ctx.arc(cx, cy + o * s * 0.52, s * 0.26, 0, Math.PI * 2); ctx.stroke() }
     } else {
-      // small: a little cluster of tiny bubbles
-      ctx.beginPath(); ctx.arc(cx, cy - s * 0.22, s * 0.32, 0, Math.PI * 2); ctx.fill()
-      ctx.beginPath(); ctx.arc(cx - s * 0.44, cy + s * 0.34, s * 0.24, 0, Math.PI * 2); ctx.fill()
-      ctx.beginPath(); ctx.arc(cx + s * 0.44, cy + s * 0.34, s * 0.24, 0, Math.PI * 2); ctx.fill()
+      // shield: a crest (rounded shoulders, pointed base)
+      ctx.beginPath()
+      ctx.moveTo(cx, cy - s * 0.82)
+      ctx.lineTo(cx + s * 0.7, cy - s * 0.46)
+      ctx.lineTo(cx + s * 0.54, cy + s * 0.34)
+      ctx.quadraticCurveTo(cx + s * 0.22, cy + s * 0.84, cx, cy + s * 0.9)
+      ctx.quadraticCurveTo(cx - s * 0.22, cy + s * 0.84, cx - s * 0.54, cy + s * 0.34)
+      ctx.lineTo(cx - s * 0.7, cy - s * 0.46)
+      ctx.closePath()
+      ctx.fill()
     }
     ctx.restore()
   }
@@ -810,5 +953,11 @@ export class Renderer {
     g = Math.round((t - g) * p + g)
     b = Math.round((t - b) * p + b)
     return `rgb(${r},${g},${b})`
+  }
+
+  /** A #rrggbb hex as an rgba() string at alpha `a` (for tinted portal glows). */
+  #hexA(hex: string, a: number): string {
+    const n = parseInt(hex.slice(1), 16)
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`
   }
 }

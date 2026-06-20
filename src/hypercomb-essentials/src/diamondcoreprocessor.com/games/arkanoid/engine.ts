@@ -44,7 +44,7 @@
 // bricks but never save you.
 
 export type GameState = 'playing' | 'won' | 'gameover'
-export type PowerKind = 'oscillate' | 'break' | 'laser' | 'expand' | 'gun' | 'magnet' | 'rocket' | 'multiplier' | 'burst' | 'pinball' | 'beam' | 'clock' | 'ballchain' | 'extralife'
+export type PowerKind = 'oscillate' | 'break' | 'laser' | 'expand' | 'gun' | 'magnet' | 'rocket' | 'multiplier' | 'burst' | 'pinball' | 'beam' | 'clock' | 'ballchain' | 'extralife' | 'crane' | 'pierce'
 
 export interface Brick {
   x: number; y: number; w: number; h: number; hp: number; max: number; alive: boolean
@@ -57,19 +57,45 @@ export interface Brick {
   turret?: boolean                        // pinball: a tile a bumper hit lit up; fires at the player
   mult?: number                           // a points-multiplier tile (×1/×2/×3, or the hidden rare ×5)
   hidden?: boolean                        // a mult tile that looks like a normal brick until broken (the rare ×5)
+  gold?: boolean                          // THE gold brick (centre mega): break it before its timer or it's frantic mode
 }
-export interface Ball { x: number; y: number; vx: number; vy: number; r: number; stuck: boolean; wobble: number; primary: boolean; color: string }
+export interface Ball { x: number; y: number; vx: number; vy: number; r: number; stuck: boolean; wobble: number; primary: boolean; color: string; pierced?: Set<Brick> }
 export interface Capsule { x: number; y: number; kind: PowerKind; delay?: number }   // delay = hover seconds before it starts falling
 export interface Laser { x: number; y: number }
 export interface TurretShot { x: number; y: number; vx: number; vy: number }   // a turret tile's shot at the player
 export interface Rocket { x: number; y: number; vy: number }
 export interface Explosion { x: number; y: number; t: number }
-export interface Enemy { x: number; y: number; hp: number; variant: number }   // variant 0-9 = one of ten looks
+// Ten DISTINCT enemies — each its own movement, tactic AND look (see ENEMY_KINDS).
+export type EnemyKind = 'hunter' | 'bomber' | 'splitter' | 'leech' | 'mirror' | 'orbit' | 'dart' | 'blink' | 'polarity' | 'queen'
+export interface Enemy {
+  x: number; y: number; hp: number; variant: number; kind: EnemyKind
+  vx?: number; vy?: number                                   // velocity (strafe/drift/dive/march)
+  t?: number; cd?: number                                    // phase clock / cooldown (fire, flip, blink, birth, re-anchor)
+  ax?: number; ay?: number                                   // anchor (orbit) / figure-8 centre (leech) / blink destination / lane
+  phase?: 'patrol' | 'dive' | 'retreat' | 'idle' | 'out' | 'in'
+  flash?: number                                             // visual flash (leech gold / polarity flip / queen birth / blink land)
+  polarity?: 'blue' | 'red'                                  // polarity knight's active armour
+  eaten?: number                                             // leech: pills swallowed
+  brood?: { x: number; y: number; vx: number; vy: number }[] // queen broodlings
+  ghostX?: number; ghostY?: number                           // blink after-image
+  split?: number                                             // splitter: 0 whole → 1 cracked
+}
 export interface Tnt { x: number; y: number; t: number; fuse: number; lit: boolean }   // centre dynamite; a ball hit lights the fuse
 export interface Bumper { x: number; y: number; r: number; flash: number }
-export interface Alien { x: number; y: number; vx: number; frame: number; extraLife?: boolean }   // carrier = one-pass +1UP
+// 20 tasteful pinball props; a random handful spawn each time the P pill is caught.
+export type PinballKind =
+  | 'jet' | 'pop' | 'mushroom' | 'tunnel' | 'jackpot' | 'teleport' | 'multiplier' | 'extraball' | 'orbit'   // discs
+  | 'drop' | 'standup' | 'bank'                                                                              // targets
+  | 'slingL' | 'slingR'                                                                                      // slingshots
+  | 'magnet' | 'fan' | 'kicker'                                                                              // field forces
+  | 'spinner' | 'rollover' | 'gate'                                                                          // bars
+export interface PinballProp { kind: PinballKind; x: number; y: number; r: number; hp: number; flash: number; spin: number; lit: boolean; cd: number; partner: number }
+export interface Alien { x: number; y: number; vx: number; frame: number }
+// The extra-life carrier: a beautiful winged heart (NOT the alien) that sweeps to
+// one side, back, then leaves. Shoot it for a 1-UP.
+export interface ExtraLife { x: number; y: number; vx: number; t: number; bounced: boolean }
 export interface Pacman { x: number; y: number; dir: number; hp: number; mouth: number; eaten: number; eatCd: number; leaving: boolean }
-export interface ComboPop { x: number; y: number; n: number; t: number }
+export interface ComboPop { x: number; y: number; n: number; t: number; pts?: number }
 export interface Pickup { x: number; y: number; kind: PowerKind; t: number }   // a caught-bonus flash
 
 export interface PowerMeta { letter: string; color: string; name: string; desc: string }
@@ -86,10 +112,12 @@ export const POWER_META: Record<PowerKind, PowerMeta> = {
   pinball: { letter: 'P', color: '#8c9eff', name: 'pinball', desc: 'Flipper mode: two field bumpers bounce balls around and the white ball doubles in size and damage. Timed.' },
   beam: { letter: 'I', color: '#9d5cff', name: 'beam', desc: 'A purple magic mushroom. 4 shots, no timer: charges ~1.2–1.5s then fires a laser up the middle, damaging that whole column. Grab more to power up — level 3 clears the line.' },
   clock: { letter: 'T', color: '#7ee0ff', name: 'time clock', desc: 'Caught from the alien with at least one colour ball in play: freezes your white ball(s) and every hazard for a few seconds while colour balls keep clearing.' },
-  ballchain: { letter: '&', color: '#cfd3da', name: 'ball & chain', desc: 'A spiked wrecking ball swings from the white ball — kills the hunter and smashes falling pills. Smash 10 pills before it ends for a 100,000 bonus.' },
+  ballchain: { letter: '&', color: '#cfd3da', name: 'ball & chain', desc: 'A spiked wrecking ball swings from the white ball — kills the hunter and smashes falling pills. Smash 5 pills before it ends and a gold paper crane flutters down — catch it for the 100,000 jackpot.' },
   extralife: { letter: '+1', color: '#5fe08a', name: 'extra life', desc: 'A 1-UP. Dropped only by the rare extra-life alien — shoot it on its single pass to catch this and gain a life.' },
+  crane: { letter: '☆', color: '#ffd24a', name: 'paper crane', desc: 'The gold paper-crane prize from a ball & chain run. Catch it for a 100,000 jackpot.' },
+  pierce: { letter: '»', color: '#d8e6ff', name: 'pierce', desc: 'The white ball phases THROUGH tiles — one damage each as it passes, no bounce — carving a tunnel. Colour balls do not pierce. Timed.' },
 }
-export const POWER_ORDER: PowerKind[] = ['oscillate', 'break', 'laser', 'expand', 'gun', 'magnet', 'rocket', 'multiplier', 'burst', 'pinball', 'beam', 'clock', 'ballchain']
+export const POWER_ORDER: PowerKind[] = ['oscillate', 'break', 'laser', 'expand', 'gun', 'magnet', 'rocket', 'multiplier', 'burst', 'pinball', 'beam', 'clock', 'ballchain', 'pierce']
 
 // ── World geometry (units; the overlay scales to fit) ──────────────
 // The playfield is 20% wider than the base and bricks are 80% size, kept
@@ -106,12 +134,16 @@ export const BRICK_TOP = 56           // first brick row's y (shared with the de
 const PADDLE_W = 84
 const PADDLE_EXPAND_W = 134
 const PADDLE_H = 13
+const AIM_RANGE = PADDLE_W * 0.25    // one-time aim: the ball sits within ±25% of paddle width of centre
+const AIM_ANCHOR = W / 2             // the ball hangs still here while you slide the paddle under it
 const PADDLE_Y = H - 34
 const PADDLE_SPEED = 620              // px/s for keyboard control
 const BALL_R = 7
-const BALL_SPEED = 320                // px/s, base magnitude
+const BALL_SPEED = 450                // px/s, base magnitude (faster start)
+const BALL_SPEED_MIN = BALL_SPEED / 2   // never let a ball crawl below half the start speed
+const LAUNCH_MAX_ANGLE = 0.7          // rad — the on-paddle offset sets the launch angle (centre pivot = straight up)
 const BALL_SPEEDUP = 1.03            // each paddle hit nudges speed up
-const BALL_SPEED_MAX = 560
+const BALL_SPEED_MAX = 640            // headroom for the faster start + frantic ×1.5 + pinball ×2
 const MIN_VY_RATIO = 0.3             // keep ≥30% of speed vertical so a ball can't loop horizontally
 const START_LIVES = 3
 const MAX_BALLS = 9
@@ -130,8 +162,10 @@ export const ALIEN_W = 30
 export const ALIEN_H = 20
 const ALIEN_SPEED = 80               // px/s march
 const SHIP_RESPAWN = 6               // seconds before the next ship flies in (was 1.3 — far less spammy)
-const ALIEN_EXTRALIFE_CHANCE = 0.12  // chance a fresh spawn is a one-pass extra-life carrier (only if lives < 5)
-const ALIEN_SLOW = 0.6               // the extra-life carrier crawls at 60% speed for a fair shot
+const EXTRALIFE_CHANCE = 0.12        // chance a fresh ship spawn also releases an extra-life carrier (lives < 5)
+const EXTRALIFE_SPEED = 50           // slow, for a fair shot
+const EXTRALIFE_R = 14               // the winged heart's radius
+const EXTRALIFE_Y = H * 0.2          // sweeps across the upper play area
 const MAX_LIVES = 5
 
 // Combo: bricks killed since the last paddle bounce. The combo count IS a score
@@ -149,7 +183,9 @@ const POWER_WEIGHTS: Record<PowerKind, number> = {
   laser: 7, break: 6, gun: 6, multiplier: 6,
   rocket: 3, burst: 3, beam: 3, pinball: 3,
   clock: 4, ballchain: 2,
+  pierce: 3,
   extralife: 0,                        // never an ambient drop — only the carrier alien gives it
+  crane: 0,                            // never an ambient drop — only earned from a ball & chain run
 }
 
 const LASER_SPEED = 640
@@ -204,11 +240,18 @@ const ROCKET_MAX = 1                 // hold at most one
 export const EXPLOSION_DUR = 0.45    // seconds the blast ring lingers (visual)
 
 // Multiplier: a 2× or 3× score multiplier (one per pickup) for a while.
-const MULT_DURATION = 12
-const MULT_CAP = 9                    // bonus multipliers stack up to this
+// Multiplier system — two capped axes whose product is the score multiplier:
+//   POINTS × (skill: combo + the unified gold bonus)   PILLS × (collection: pills eaten)
+// Oscillate keeps its ×1.6 as a separate booster riding on top of the two-axis product.
+const GOLD_WINDOW = 12               // the unified gold-bonus window (gold pill + ×N tiles + pinball disc)
+const GOLD_BONUS_CAP = 2             // max additive gold bonus into the points multiplier
+const POINTS_CAP = 6                 // skill-axis ceiling (1 + combo·0.2 + goldBonus)
+const PILLS_CAP = 3                  // collection-axis ceiling (1 + 0.1 per pill)
+const TOTAL_CAP = 18                 // ceiling on the two-axis product (oscillate ×1.6 rides on top)
 
 // Burst: for a few seconds every brick is one-hit, tough bricks included.
 const BURST_DURATION = 8
+const PIERCE_DURATION = 9             // the white ball phases through tiles (1 dmg each) for a while
 
 // Enemy: dawdle on a level and a hunter spawns to chase your white ball. A hit
 // on the WHITE ball whacks it away at top speed instead of stealing it — no life
@@ -218,6 +261,10 @@ const BURST_DURATION = 8
 const ENEMY_SPAWN_DELAY = 22         // seconds of "taking too long" before it appears
 const ENEMY_SPEED = 105              // px/s homing toward the white ball
 const ENEMY_HP = 3
+// The ten enemy kinds (picked at random on spawn) and their hp ladder — Blink is a
+// 1-hp twitch, the Queen is a 5-hp boss.
+const ENEMY_KINDS: EnemyKind[] = ['hunter', 'bomber', 'splitter', 'leech', 'mirror', 'orbit', 'dart', 'blink', 'polarity', 'queen']
+const ENEMY_HP_BY_KIND: Record<EnemyKind, number> = { hunter: 3, bomber: 2, splitter: 2, leech: 2, mirror: 2, orbit: 3, dart: 2, blink: 1, polarity: 3, queen: 5 }
 export const ENEMY_R = 15
 
 // Mega brick: some bricks sparkle and bloom into one big brick spanning a block
@@ -226,13 +273,26 @@ export const ENEMY_R = 15
 const MEGA_COLS = 3                  // footprint width in cells  (the "spots" it takes)
 const MEGA_ROWS = 2                  // footprint height in cells (3×2 = 6 spots)
 const MEGA_HP = 5                    // hits to break the big brick
+const FRANTIC_DELAY = 15             // seconds to break the gold brick before frantic mode kicks in
+const FRANTIC_SPEEDUP = 1.5          // every ball jumps to 1.5× speed when frantic starts
+const FRANTIC_FLASH = 0.7            // seconds of the frenzy-start lightning/shake burst
 
 // Pinball: a timed flipper mode. Two field bumpers bounce balls around and the
 // white ball doubles in size + damage. The duration is randomly one of these.
-const PINBALL_DURATIONS = [10, 12, 15]   // seconds (picked at random on pickup)
+const PINBALL_DURATION = 30          // seconds of pinball flipper mode per pickup
 const BUMPER_R = 20
-const BUMPER_KICK = 90               // speed added per bump (capped at BALL_SPEED_MAX)
 const BUMPER_Y = H * 0.6             // bumpers sit below every brick row — the "non-tile" zone
+// Pinball props: a random subset (kept small so it never clutters) drops into the
+// open zone below the bricks each time pinball mode is activated.
+const PINBALL_PROPS_MIN = 1          // only a couple props per activation
+const PINBALL_PROPS_MAX = 2
+const PINBALL_SHAPE: Record<PinballKind, 'disc' | 'target' | 'sling' | 'field' | 'bar'> = {
+  jet: 'disc', pop: 'disc', mushroom: 'disc', tunnel: 'disc', jackpot: 'disc', teleport: 'disc', multiplier: 'disc', extraball: 'disc', orbit: 'disc',
+  drop: 'target', standup: 'target', bank: 'target',
+  slingL: 'sling', slingR: 'sling',
+  magnet: 'field', fan: 'field', kicker: 'field',
+  spinner: 'bar', rollover: 'bar', gate: 'bar',
+}
 // Pinball flippers: in pinball mode the bat becomes two REAL flippers, flicked up
 // by the LEFT / RIGHT mouse buttons, that launch the ball back into play. They
 // pivot near the bottom with a small central drain gap between the resting tips.
@@ -299,7 +359,7 @@ const WRECK_R = 9                    // wrecking-ball radius for its hits
 const CHAIN_K = 13                   // pendulum restoring force toward straight-down
 const CHAIN_DAMP = 0.6               // swing damping
 const CHAIN_DRIVE = 0.018            // how strongly the ball's motion swings the flail
-const CHAIN_BONUS_PILLS = 10         // pills to smash for the jackpot
+const CHAIN_BONUS_PILLS = 5          // pills to smash before the gold paper crane drops
 const CHAIN_BONUS = 100000           // the jackpot
 
 // Beam (the purple mushroom): auto-charges and releases a single laser straight
@@ -321,6 +381,7 @@ export class Engine {
 
   bricks: Brick[] = []
   paddle = { x: W / 2, y: PADDLE_Y, w: PADDLE_W, h: PADDLE_H }
+  aiming = true                       // one-time launch-point aim (first start of a game); see aimClick()
   balls: Ball[] = []
   capsules: Capsule[] = []
   lasers: Laser[] = []
@@ -328,12 +389,14 @@ export class Engine {
   explosions: Explosion[] = []
   enemy: Enemy | null = null
   bumpers: Bumper[] = []              // pinball-mode field bumpers (empty otherwise)
+  pinballProps: PinballProp[] = []    // a random handful of pinball props (pinball mode only)
   flipLeftRaise = 0                   // 0 = resting, 1 = fully flipped (left flipper, pinball mode)
   flipRightRaise = 0                  // 0 = resting, 1 = fully flipped (right flipper)
   turretShots: TurretShot[] = []      // shots fired at the player by lit turret tiles
   paddleHitFlash = 0                  // seconds left of the red flash after a turret shot lands
   tnt: Tnt | null = null              // the centre dynamite crate (null = none on screen)
   alien: Alien | null = null         // the top ship dispenser (respawns when shot)
+  extraLife: ExtraLife | null = null // the winged-heart 1-UP carrier (null = none)
   pacman: Pacman | null = null       // the colour-ball-eating rival (null = none)
   combo = 0                          // bricks killed since the last paddle bounce
   comboPops: ComboPop[] = []         // floating combo counters (transient, for the renderer)
@@ -343,9 +406,9 @@ export class Engine {
   laserTimer = 0
   expandTimer = 0
   magnetTimer = 0
-  multTimer = 0
   burstTimer = 0
   pinballTimer = 0
+  pierceTimer = 0                     // white ball phases through tiles while > 0
   // Beam (purple mushroom): ammo-based (no timer) with a power level 1-3.
   beamShots = 0                      // shots left in the loader (0 = no beam)
   beamLevel = 0                      // 1 = chip, 2 = ×2 damage, 3 = clears the whole line
@@ -356,11 +419,15 @@ export class Engine {
   // Oscillate is permanent for the round and stacks (0 = off). Each pickup
   // widens the weave (doubling) and bumps ball speed.
   oscillateStacks = 0
-  // Score multiplier from the multiplier pill (1 = none, 2 or 3 while active).
-  scoreMul = 1
-  // Pills-eaten multiplier: every caught pill adds +0.1 to this, permanently for
-  // the life. Folds into every score alongside scoreMul + oscillate.
+  // POINTS axis — the unified gold bonus (0..GOLD_BONUS_CAP) fed by the gold pill,
+  // the ×N tiles AND the pinball multiplier disc, holding for one GOLD_WINDOW.
+  goldBonus = 0
+  goldTimer = 0
+  // PILLS axis — every caught pill adds +0.1 (capped at PILLS_CAP); halves on death.
   pillMul = 1
+  // Milestone celebration (combo ×5/×10/…): a transient eruption + a score flash.
+  milestoneFx: { n: number; t: number; life: boolean } | null = null
+  scoreFlash = 0
   // Clock freeze: while > 0, white ball(s) + every hazard are frozen.
   freezeTimer = 0
   // Ball & chain: a swinging spiked wrecking ball hanging off the white ball.
@@ -384,6 +451,7 @@ export class Engine {
   #laserCd = 0
   #gunCd = 0
   #prevPaddleX = W / 2
+  #launchOffset = 0                   // the ball's position ON the paddle (offset from centre) — reused all game
   #colorIdx = 0                       // cycles BALL_COLORS so each ammo ball differs
   #levelClock = 0                     // seconds on this screen — drives the enemy spawn
   #levelRows = 0                      // rows in the current level (mega footprint clamp)
@@ -409,6 +477,9 @@ export class Engine {
   #tntArmedThisLevel = false          // rolled once per level: is there a crate this board?
   #enemiesKilled = 0                  // hunters destroyed this match — the 2nd kill blooms the gold brick
   #megaSpawned = false                // the big gold brick blooms once per match
+  frantic = false                     // frantic mode: didn't break the gold brick in time
+  franticTimer = 0                    // countdown while the gold brick is alive (> 0 = armed)
+  franticFlash = 0                    // seconds left of the frenzy-start lightning/shake burst
   #shipRespawn = 0                    // seconds until the next alien ship flies in (when destroyed)
 
   constructor(level: readonly string[]) {
@@ -453,17 +524,22 @@ export class Engine {
 
   #spawnShip(allowCarrier = true): void {
     const dir = Math.random() < 0.5 ? 1 : -1
-    // Occasionally a one-pass extra-life carrier — but never the level's first ship,
-    // only when it would help (lives < max), and only when the slot is free.
-    const carrier = allowCarrier && this.lives < MAX_LIVES && this.#hazardFree() && Math.random() < ALIEN_EXTRALIFE_CHANCE
-    const speed = ALIEN_SPEED * (carrier ? ALIEN_SLOW : 1)
-    this.alien = { x: dir > 0 ? ALIEN_W / 2 : W - ALIEN_W / 2, y: ALIEN_Y, vx: speed * dir, frame: 0, extraLife: carrier }
-    if (carrier) this.#activeHazard = 'carrier'
+    this.alien = { x: dir > 0 ? ALIEN_W / 2 : W - ALIEN_W / 2, y: ALIEN_Y, vx: ALIEN_SPEED * dir, frame: 0 }
+    // Occasionally release a separate extra-life carrier (a winged heart) — never on
+    // the level's first ship, only when it helps (lives < max) and the slot is free.
+    if (allowCarrier && !this.extraLife && this.lives < MAX_LIVES && this.#hazardFree() && Math.random() < EXTRALIFE_CHANCE) {
+      this.#spawnExtraLife()
+    }
   }
 
-  /** March the alien ship; when none is up, fly the next one in after a beat. A
-   *  normal ship bounces wall-to-wall; the extra-life carrier makes ONE pass and
-   *  glides off the far side (miss it and it's gone). */
+  /** Release the winged-heart 1-UP carrier from one edge, heading across. */
+  #spawnExtraLife(): void {
+    const fromLeft = Math.random() < 0.5
+    this.extraLife = { x: fromLeft ? EXTRALIFE_R : W - EXTRALIFE_R, y: EXTRALIFE_Y, vx: (fromLeft ? 1 : -1) * EXTRALIFE_SPEED, t: 0, bounced: false }
+    this.#activeHazard = 'carrier'
+  }
+
+  /** March the alien ship; when none is up, fly the next one in after a beat. */
   #stepAlien(dt: number): void {
     if (this.freezeTimer > 0) return                  // clock: ship frozen
     const a = this.alien
@@ -473,30 +549,60 @@ export class Engine {
       return
     }
     a.x += a.vx * dt
-    if (a.extraLife) {
-      if (a.x < -ALIEN_W || a.x > W + ALIEN_W) { this.alien = null; this.#shipRespawn = SHIP_RESPAWN; this.#endHazard() }   // exited — no drop
-    } else {
-      if (a.x < ALIEN_W / 2) { a.x = ALIEN_W / 2; a.vx = Math.abs(a.vx) }
-      else if (a.x > W - ALIEN_W / 2) { a.x = W - ALIEN_W / 2; a.vx = -Math.abs(a.vx) }
-    }
+    if (a.x < ALIEN_W / 2) { a.x = ALIEN_W / 2; a.vx = Math.abs(a.vx) }
+    else if (a.x > W - ALIEN_W / 2) { a.x = W - ALIEN_W / 2; a.vx = -Math.abs(a.vx) }
     a.frame += dt
   }
 
+  /** Sweep the carrier to the FAR side, bounce once, return, and leave on the near
+   *  side if it was never shot (travel to one side and back before leaving). */
+  #stepExtraLife(dt: number): void {
+    if (this.freezeTimer > 0) return
+    const c = this.extraLife
+    if (!c) return
+    c.t += dt
+    c.x += c.vx * dt
+    if (!c.bounced) {
+      if (c.x <= EXTRALIFE_R || c.x >= W - EXTRALIFE_R) {     // reached the far side → turn back
+        c.vx = -c.vx; c.bounced = true; c.x = clamp(c.x, EXTRALIFE_R, W - EXTRALIFE_R)
+      }
+    } else if (c.x < -EXTRALIFE_R * 2 || c.x > W + EXTRALIFE_R * 2) {   // returned and left — missed
+      this.extraLife = null; this.#endHazard()
+    }
+  }
+
+  /** Shoot the carrier → drop a 1-UP. */
+  #hitExtraLife(): void {
+    const c = this.extraLife
+    if (!c) return
+    this.explosions.push({ x: c.x, y: c.y, t: 0 })
+    this.#dropPill(c.x, c.y + EXTRALIFE_R, 'extralife')
+    this.#addScore(150)
+    this.extraLife = null
+    this.#endHazard()
+  }
+
+  /** A ball touching the carrier pops it (and bounces down). */
+  #extraLifeBounce(b: Ball): void {
+    const c = this.extraLife
+    if (!c) return
+    const dx = b.x - c.x, dy = b.y - c.y
+    if (dx * dx + dy * dy > (EXTRALIFE_R + b.r) * (EXTRALIFE_R + b.r)) return
+    b.vy = Math.abs(b.vy); b.y = c.y + EXTRALIFE_R + b.r + 1
+    this.#hitExtraLife()
+  }
+
   /** Shoot the ship down: explode, feed the combo, score, and DROP A PILL when hit
-   *  (the alien is the dispenser) — but only while the wave budget has one loaded.
-   *  The carrier instead drops a 1-UP. */
+   *  (the alien is the dispenser) — but only while the wave budget has one loaded. */
   #destroyShip(): void {
     const a = this.alien
     if (!a) return
     this.explosions.push({ x: a.x, y: a.y, t: 0 })
-    if (a.extraLife) {                                       // shot the carrier on its pass → 1-UP
-      this.#dropPill(a.x, a.y + ALIEN_H / 2, 'extralife')
-      this.#endHazard()
-    } else if (this.#waveBudget > 0 && this.#dropPill(a.x, a.y + ALIEN_H / 2, this.#randomPower())) {
+    if (this.#waveBudget > 0 && this.#dropPill(a.x, a.y + ALIEN_H / 2, this.#randomPower())) {
       this.#waveBudget--                                     // the alien dispenses a wave pill ONLY when hit
     }
-    const cm = this.#bumpCombo(a.x, a.y)                    // the bonus ship feeds the combo multiplier
-    this.#addScore(100 * cm)                                // its points ride the chain, like a brick kill
+    this.#bumpCombo(a.x, a.y)                               // the bonus ship feeds the combo (chain → points ×)
+    this.#addScore(100)                                     // combo is expressed once, via pointsMul (no double-count)
     this.alien = null
     this.#shipRespawn = SHIP_RESPAWN
   }
@@ -533,11 +639,14 @@ export class Engine {
     if (this.#enemiesKilled === 2 && !this.#megaSpawned) { this.#megaSpawned = true; this.#spawnCenterMega() }
   }
 
-  /** Spawn the big gold brick centred over the tile area (it floats over any tiles). */
+  /** Spawn the big gold brick centred over the tile area (it floats over any tiles).
+   *  It's a RACE: break it within FRANTIC_DELAY or frantic mode kicks in. */
   #spawnCenterMega(): void {
     const c0 = clamp(Math.floor((COLS - MEGA_COLS) / 2), 0, Math.max(0, COLS - MEGA_COLS))
     const r0 = clamp(Math.floor((this.#levelRows - MEGA_ROWS) / 2), 0, Math.max(0, this.#levelRows - MEGA_ROWS))
-    this.#createMega(c0, r0)
+    const mega = this.#createMega(c0, r0)
+    mega.gold = true
+    this.franticTimer = FRANTIC_DELAY      // arm the gold-brick race
   }
 
   /** Tick seed bloom timers; a ripe seed blooms into a mega brick. */
@@ -560,7 +669,7 @@ export class Engine {
   /** Build the big gold brick over the MEGA_COLS×MEGA_ROWS block at (c0,r0),
    *  covering (consuming) any bricks inside the footprint and ejecting any ball
    *  caught within it. */
-  #createMega(c0: number, r0: number): void {
+  #createMega(c0: number, r0: number): Brick {
     const cols = MEGA_COLS, rows = MEGA_ROWS
     for (const b of this.bricks) {
       if (!b.alive || b.mega) continue
@@ -573,11 +682,12 @@ export class Engine {
     }
     const mx = BRICK_X0 + c0 * BRICK_W, my = BRICK_TOP + r0 * BRICK_H
     const mw = cols * BRICK_W, mh = rows * BRICK_H
-    this.bricks.push({
+    const mega: Brick = {
       x: mx, y: my, w: mw, h: mh,
       hp: MEGA_HP, max: MEGA_HP, alive: true,
       mega: true, col: c0, row: r0, megaCols: cols, megaRows: rows,
-    })
+    }
+    this.bricks.push(mega)
     // Never let the mega be born on top of a live ball — eject any whose centre
     // lands inside the new block out to its nearest edge (avoids deep-penetration
     // that #brickHits can't cleanly resolve).
@@ -590,12 +700,31 @@ export class Engine {
       else if (m === dtop) { b.y = my - b.r; b.vy = -Math.abs(b.vy) }
       else { b.y = my + mh + b.r; b.vy = Math.abs(b.vy) }
     }
+    return mega
+  }
+
+  /** Frenzy! Failed to break the gold brick in time — every ball jumps to FRANTIC
+   *  speed and any ball heading DOWN is flipped to head up. Fires a lightning/shake
+   *  burst (see franticFlash). Persists (faster floor) until the gold brick falls. */
+  #triggerFrantic(): void {
+    this.frantic = true
+    this.franticTimer = 0
+    this.franticFlash = FRANTIC_FLASH
+    for (const b of this.balls) {
+      if (b.stuck) continue
+      let vy = b.vy
+      if (vy > 0) vy = -vy                                 // invert any downward ball at the start
+      const sp = Math.hypot(b.vx, vy) || BALL_SPEED
+      const ns = Math.min(BALL_SPEED_MAX, sp * FRANTIC_SPEEDUP)
+      b.vx = (b.vx / sp) * ns; b.vy = (vy / sp) * ns
+    }
   }
 
   /** Shatter a destroyed mega into 1-hit shards filling its footprint; EVERY shard
    *  is a guaranteed power-up tile — each drops a (weighted-random) power-up when
    *  broken, so cracking the big block rains a bonanza of pills. */
   #breakMega(mega: Brick): void {
+    if (mega.gold) { this.frantic = false; this.franticTimer = 0 }   // gold brick down — win the race / calm the frenzy
     const c0 = mega.col ?? 0, r0 = mega.row ?? 0
     const cc = mega.megaCols ?? MEGA_COLS, rr = mega.megaRows ?? MEGA_ROWS
     const shards: Brick[] = []
@@ -631,6 +760,8 @@ export class Engine {
   #resetForLife(): void {
     this.#paddleBaseW = PADDLE_W
     this.paddle.w = PADDLE_W
+    // The ball re-sticks at its set position ON the paddle (#launchOffset), handled by
+    // the stuck-ball step; the paddle itself just stays put, clamped to the screen.
     this.paddle.x = clamp(this.paddle.x, PADDLE_W / 2, W - PADDLE_W / 2)
     this.#prevPaddleX = this.paddle.x
     this.balls = [this.#stuckBall()]
@@ -639,7 +770,9 @@ export class Engine {
     this.rockets = []
     this.explosions = []
     this.enemy = null
+    this.extraLife = null
     this.bumpers = []
+    this.pinballProps = []
     this.flipLeftRaise = this.flipRightRaise = 0
     this.#flipLDown = this.#flipRDown = false
     this.#flipLVel = this.#flipRVel = 0
@@ -654,7 +787,7 @@ export class Engine {
     this.#pillPhase = 'quiet'
     this.#pillClock = 0
     this.#waveBudget = 0
-    this.pillMul = 1
+    this.pillMul = Math.max(1, this.pillMul / 2)   // PILLS axis: a death HALVES your collection (no-op on a fresh load)
     this.freezeTimer = 0
     this.ballchainTimer = 0
     this.chainBall = null
@@ -665,10 +798,11 @@ export class Engine {
     this.comboPops = []
     this.pickups = []
     this.#levelClock = 0
-    this.laserTimer = this.expandTimer = this.magnetTimer = this.multTimer = this.burstTimer = this.pinballTimer = 0
+    this.laserTimer = this.expandTimer = this.magnetTimer = this.burstTimer = this.pinballTimer = this.pierceTimer = 0
     this.beamShots = this.beamLevel = this.beamCharge = this.beamFlash = 0
     this.oscillateStacks = 0
-    this.scoreMul = 1
+    this.goldBonus = this.goldTimer = 0
+    this.milestoneFx = null; this.scoreFlash = 0
     this.gunAmmo = this.gunLevel = this.rocketAmmo = 0
     this.#laserCd = this.#gunCd = 0
     this.aimAngle = GUN_AIM_CENTER
@@ -689,15 +823,15 @@ export class Engine {
     const addTimed = (kind: PowerKind, t: number, dur: number) => {
       if (t > 0) out.push({ kind, frac: clamp(t / dur, 0, 1), label: `${Math.ceil(t)}s` })
     }
-    // Oscillate is permanent (no countdown): show its stack count, full bar.
-    if (this.oscillateStacks > 0) out.push({ kind: 'oscillate', frac: 1, label: `×${this.oscillateStacks}` })
+    // Oscillate is permanent (no countdown): its score effect is a flat ×1.6 booster.
+    if (this.oscillateStacks > 0) out.push({ kind: 'oscillate', frac: 1, label: '×1.6' })
     addTimed('laser', this.laserTimer, LASER_DURATION)
     addTimed('expand', this.expandTimer, EXPAND_DURATION)
     addTimed('magnet', this.magnetTimer, MAGNET_DURATION)
-    addTimed('multiplier', this.multTimer, MULT_DURATION)
     addTimed('burst', this.burstTimer, BURST_DURATION)
-    addTimed('pinball', this.pinballTimer, this.#pinballDur || 15)
+    addTimed('pinball', this.pinballTimer, this.#pinballDur || PINBALL_DURATION)
     addTimed('clock', this.freezeTimer, CLOCK_DURATION)
+    addTimed('pierce', this.pierceTimer, PIERCE_DURATION)
     if (this.ballchainTimer > 0) out.push({ kind: 'ballchain', frac: clamp(this.ballchainTimer / BALLCHAIN_DURATION, 0, 1), label: `${this.ballchainKills}/${CHAIN_BONUS_PILLS}` })
     if (this.beamShots > 0) {
       const lvl = this.beamLevel >= 2 ? `L${this.beamLevel}` : ''
@@ -721,10 +855,34 @@ export class Engine {
   // ── input ────────────────────────────────────────────────
   movePaddleTo(worldX: number): void { this.#pointerX = worldX }
 
+  /** The ball's set position ON the paddle — offset from paddle centre (for overlay reuse). */
+  get launchOffset(): number { return this.#launchOffset }
+  /** The still-ball anchor + slide range for the aim hint. */
+  get aimAnchorX(): number { return AIM_ANCHOR }
+  get aimRange(): number { return AIM_RANGE }
+
+  /** One-time aim (the very first start of a game): the ball hangs still at centre
+   *  while you slide the PADDLE under it (±25% of paddle width) to choose where on the
+   *  paddle the ball sits. The FIRST click SETS that on-paddle spot and UNLOCKS the
+   *  paddle (full range) — the ball stays stuck, so you can move around and then LAUNCH
+   *  (shoot) whenever you want. The offset is reused for the whole game. */
+  aimClick(): void {
+    if (!this.aiming || this.state !== 'playing') return
+    this.#launchOffset = clamp(AIM_ANCHOR - this.paddle.x, -AIM_RANGE, AIM_RANGE)   // set the ball position on the paddle
+    this.aiming = false                                                            // unlock the paddle; ball stays stuck — launch any time
+  }
+
+  /** Pin the on-paddle position set by the first aim — skips aim on later levels/restarts. */
+  pinLaunchOffset(offset: number): void {
+    this.#launchOffset = clamp(offset, -AIM_RANGE, AIM_RANGE)
+    this.aiming = false
+    for (const b of this.balls) if (b.stuck) { b.x = this.paddle.x + this.#launchOffset; b.y = this.paddle.y - b.r - 1 }
+  }
+
   /** Space / left-click: launch stuck balls, else fire gun + laser if armed.
    *  (The missile is on right-click — see fireRocket.) */
   shoot(): void {
-    if (this.state !== 'playing') return
+    if (this.state !== 'playing' || this.aiming) return
     let launched = false
     for (const b of this.balls) {
       if (!b.stuck) continue
@@ -762,6 +920,7 @@ export class Engine {
     }
     // A rocket caught in the blast also blows the ship out of the sky.
     if (this.alien && Math.hypot(this.alien.x - rk.x, this.alien.y - rk.y) <= ROCKET_RADIUS) this.#destroyShip()
+    if (this.extraLife && Math.hypot(this.extraLife.x - rk.x, this.extraLife.y - rk.y) <= ROCKET_RADIUS) this.#hitExtraLife()
     // A rocket caught in the blast vaporises the hunter outright (and counts as a hit).
     if (this.enemy && Math.hypot(this.enemy.x - rk.x, this.enemy.y - rk.y) <= ROCKET_RADIUS) {
       this.#countEnemyHit()
@@ -778,7 +937,9 @@ export class Engine {
 
   #launchBall(b: Ball): void {
     b.stuck = false
-    const theta = Math.random() * 0.5 - 0.25      // ±0.25 rad from straight up
+    // The ball's set position ON the paddle sets the launch angle — centre is the
+    // pivot (straight up); the further off-centre it sits, the more it angles that way.
+    const theta = clamp(this.#launchOffset / AIM_RANGE, -1, 1) * LAUNCH_MAX_ANGLE
     b.vx = BALL_SPEED * Math.sin(theta)
     b.vy = -BALL_SPEED * Math.cos(theta)
   }
@@ -834,7 +995,7 @@ export class Engine {
     if (this.#gunCd > 0) this.#gunCd = Math.max(0, this.#gunCd - dt)
 
     for (const b of this.balls) {
-      if (b.stuck) { b.x = this.paddle.x; b.y = this.paddle.y - b.r - 1; continue }
+      if (b.stuck) { b.x = this.aiming ? AIM_ANCHOR : this.paddle.x + this.#launchOffset; b.y = this.paddle.y - b.r - 1; continue }
       if (this.freezeTimer > 0 && b.primary) continue   // clock: white ball frozen in place
       // Sub-step so a fast ball can't tunnel through a brick or the paddle.
       const dist = Math.hypot(b.vx, b.vy) * dt
@@ -854,6 +1015,7 @@ export class Engine {
     this.#stepCapsules(dt)
     this.#stepLasers(dt)
     this.#stepTurrets(dt)
+    this.#stepPinballProps(dt)
     this.#stepTnt(dt)
     this.#stepRockets(dt)
     this.#stepExplosions(dt)
@@ -862,58 +1024,181 @@ export class Engine {
     this.#stepBallChain(dt)
     this.#stepBricks(dt)
     this.#stepAlien(dt)
+    this.#stepExtraLife(dt)
     if (this.comboPops.length) { for (const p of this.comboPops) p.t += dt; this.comboPops = this.comboPops.filter(p => p.t < COMBO_POP_DUR) }
+    if (this.milestoneFx) { this.milestoneFx.t += dt; if (this.milestoneFx.t > 1.1) this.milestoneFx = null }   // milestone eruption runs ~1.1s
+    if (this.scoreFlash > 0) this.scoreFlash = Math.max(0, this.scoreFlash - dt)
+    if (this.franticTimer > 0 && this.freezeTimer <= 0) {                // gold-brick race (paused while the clock freezes time)
+      if (this.bricks.some(b => b.gold && b.alive)) { this.franticTimer = Math.max(0, this.franticTimer - dt); if (this.franticTimer === 0) this.#triggerFrantic() }
+      else this.franticTimer = 0                                        // gold brick already broken — race won
+    }
+    if (this.franticFlash > 0) this.franticFlash = Math.max(0, this.franticFlash - dt)
     if (this.pickups.length) { for (const p of this.pickups) p.t += dt; this.pickups = this.pickups.filter(p => p.t < PICKUP_DUR) }
     if (this.bricksLeft === 0) this.state = 'won'
   }
 
   #spawnEnemy(): void {
-    this.enemy = { x: W * (0.2 + Math.random() * 0.6), y: BRICK_TOP * 0.5, hp: ENEMY_HP, variant: Math.floor(Math.random() * ENEMY_VARIANTS) }
-    this.#activeHazard = 'hunter'
+    const kind = ENEMY_KINDS[Math.floor(Math.random() * ENEMY_KINDS.length)]
+    const e: Enemy = { x: W * (0.25 + Math.random() * 0.5), y: BRICK_TOP * 0.7, hp: ENEMY_HP_BY_KIND[kind], variant: ENEMY_KINDS.indexOf(kind), kind }
+    const sgn = () => (Math.random() < 0.5 ? -1 : 1)
+    switch (kind) {
+      case 'bomber': e.vx = sgn(); e.cd = 1.8; e.y = BRICK_TOP * 0.8; break
+      case 'mirror': e.cd = 2.2; e.y = BRICK_TOP; break
+      case 'splitter': e.vx = sgn() * 60; e.vy = sgn() * 42; e.split = 0; break
+      case 'leech': e.t = 0; e.ax = W / 2; e.ay = BRICK_TOP + 60; e.eaten = 0; break
+      case 'orbit': e.t = 0; e.ax = e.x; e.ay = e.y; e.cd = 0; break
+      case 'dart': e.phase = 'patrol'; e.vx = sgn() * 70; e.vy = 0; e.cd = 2.5 + Math.random() * 1.5; e.ay = e.y; break
+      case 'blink': e.phase = 'idle'; e.cd = 1.4; e.ghostX = e.x; e.ghostY = e.y; e.flash = 0; break
+      case 'polarity': e.polarity = sgn() < 0 ? 'blue' : 'red'; e.cd = 3; e.vx = sgn(); e.flash = 0; e.y = BRICK_TOP * 0.9; break
+      case 'queen': e.cd = 4; e.brood = []; break
+    }
+    this.enemy = e
+    this.#activeHazard = 'hunter'                            // reuses the single hazard slot
   }
 
-  /** The hunter: appears once you've dawdled and homes the white ball. A hit on
-   *  the white ball whacks it away at TOP SPEED (no life lost — the fast ball is
-   *  just on screen a shorter time); coloured ammo / lasers chip the hunter. */
+  /** Ten enemies, each its own motion + threat. Spawns after a dawdle; only one at a
+   *  time. Per-kind movement, then a shared per-kind contact pass. */
   #stepEnemy(dt: number): void {
-    if (this.freezeTimer > 0) return                  // clock: hunter frozen
+    if (this.freezeTimer > 0) return                  // clock: enemy frozen
     if (!this.enemy) {
       this.#levelClock += dt
-      // dawdle timer keeps ticking, but the hunter only materialises when the
-      // encounter slot is free (hold-don't-drop — never two major hazards at once)
       if (this.#levelClock >= ENEMY_SPAWN_DELAY && this.bricksLeft > 0 && this.#hazardFree()) this.#spawnEnemy()
       return
     }
     const e = this.enemy
-    const target = this.balls.find(b => b.primary && !b.stuck)
-    if (target) {
-      const dx = target.x - e.x, dy = target.y - e.y
-      const d = Math.hypot(dx, dy) || 1
-      e.x += (dx / d) * ENEMY_SPEED * dt
-      e.y += (dy / d) * ENEMY_SPEED * dt
+    this.#enemyMove(e, dt)
+    this.#enemyContact(e)
+  }
+
+  /** Per-kind movement + special (bombs, brood, pill-theft, dive, teleport, flip). */
+  #enemyMove(e: Enemy, dt: number): void {
+    const white = this.balls.find(b => b.primary && !b.stuck)
+    if (e.flash && e.flash > 0) e.flash = Math.max(0, e.flash - dt * 3)
+    switch (e.kind) {
+      case 'hunter': case 'queen': {
+        const spd = e.kind === 'queen' ? 70 : ENEMY_SPEED
+        if (white) { const dx = white.x - e.x, dy = white.y - e.y, d = Math.hypot(dx, dy) || 1; e.x += (dx / d) * spd * dt; e.y += (dy / d) * spd * dt }
+        if (e.kind === 'queen') {
+          e.cd = (e.cd ?? 4) - dt
+          if (e.cd <= 0 && (e.brood?.length ?? 0) < 2) { e.cd = 4; e.flash = 1; (e.brood ??= []).push({ x: e.x, y: e.y + 12, vx: (Math.random() - 0.5) * 130, vy: 120 }) }
+          if (e.brood) {
+            for (const m of e.brood) { m.x += m.vx * dt; m.y += m.vy * dt }
+            e.brood = e.brood.filter(m => m.y <= H + 20 && !this.balls.some(b => !b.stuck && Math.hypot(b.x - m.x, b.y - m.y) < b.r + 5))   // ball pops a broodling
+          }
+        }
+        break
+      }
+      case 'bomber': {
+        e.x += (e.vx ?? 1) * 70 * dt
+        if (e.x < ENEMY_R + 30) { e.x = ENEMY_R + 30; e.vx = 1 } else if (e.x > W - ENEMY_R - 30) { e.x = W - ENEMY_R - 30; e.vx = -1 }
+        e.cd = (e.cd ?? 1.8) - dt
+        if (e.cd <= 0) { e.cd = 1.8; const dx = clamp(this.paddle.x - e.x, -160, 160); this.turretShots.push({ x: e.x, y: e.y + 10, vx: dx * 0.7, vy: 180 }) }
+        break
+      }
+      case 'mirror': {
+        e.x += clamp((W - this.paddle.x) - e.x, -200 * dt, 200 * dt)             // mirrors the bat (lagged)
+        e.cd = (e.cd ?? 2.2) - dt
+        if (e.cd <= 0) { e.cd = 2.2; e.flash = 1; this.turretShots.push({ x: e.x, y: e.y + 8, vx: 0, vy: 280 }) }
+        break
+      }
+      case 'splitter': {
+        e.x += (e.vx ?? 0) * dt; e.y += (e.vy ?? 0) * dt                         // DVD drift
+        if (e.x < ENEMY_R + 20 || e.x > W - ENEMY_R - 20) { e.vx = -(e.vx ?? 0); e.x = clamp(e.x, ENEMY_R + 20, W - ENEMY_R - 20) }
+        const lo = BRICK_TOP * 0.4, hi = H * 0.55
+        if (e.y < lo || e.y > hi) { e.vy = -(e.vy ?? 0); e.y = clamp(e.y, lo, hi) }
+        break
+      }
+      case 'leech': {
+        e.t = (e.t ?? 0) + dt                                                    // figure-eight swoop
+        e.x = clamp((e.ax ?? W / 2) + Math.sin(e.t * 1.2) * 120, ENEMY_R, W - ENEMY_R)
+        e.y = clamp((e.ay ?? BRICK_TOP + 60) + Math.sin(e.t * 2.4) * 70, BRICK_TOP * 0.3, H * 0.6)
+        for (let i = this.capsules.length - 1; i >= 0; i--) {                    // swallow a falling pill
+          const c = this.capsules[i]
+          if ((c.delay ?? 0) > 0) continue
+          if (Math.hypot(c.x - e.x, c.y - e.y) < ENEMY_R + 8) { this.capsules.splice(i, 1); e.eaten = (e.eaten ?? 0) + 1; e.flash = 1; break }
+        }
+        break
+      }
+      case 'orbit': {
+        e.t = (e.t ?? 0) + dt
+        e.cd = (e.cd ?? 0) - dt
+        if (e.cd <= 0) { const live = this.bricks.filter(b => b.alive && !b.seed); const pick = live.length ? live[Math.floor(Math.random() * live.length)] : null; if (pick) { e.ax = pick.x + pick.w / 2; e.ay = pick.y + pick.h / 2 } e.cd = 5 }
+        e.x = (e.ax ?? e.x) + Math.cos(e.t * 2) * 14
+        e.y = (e.ay ?? e.y) + Math.sin(e.t * 2) * 14
+        break
+      }
+      case 'dart': {
+        if (e.phase === 'patrol') {
+          e.x += (e.vx ?? 70) * dt
+          if (e.x < ENEMY_R + 24 || e.x > W - ENEMY_R - 24) { e.vx = -(e.vx ?? 0); e.x = clamp(e.x, ENEMY_R + 24, W - ENEMY_R - 24) }
+          e.cd = (e.cd ?? 2.5) - dt
+          if (e.cd <= 0) { e.phase = 'dive'; e.vy = 260; e.vx = clamp((white?.x ?? e.x) - e.x, -180, 180) }   // commit to the ball's CURRENT x
+        } else if (e.phase === 'dive') {
+          e.x += (e.vx ?? 0) * dt; e.y += (e.vy ?? 0) * dt
+          if (e.y > H * 0.7) { e.phase = 'retreat'; e.vy = -200 }
+        } else {
+          e.y += (e.vy ?? -200) * dt
+          if (e.y <= (e.ay ?? BRICK_TOP)) { e.y = e.ay ?? BRICK_TOP; e.phase = 'patrol'; e.vx = (Math.random() < 0.5 ? -1 : 1) * 70; e.cd = 2.5 + Math.random() * 1.5 }
+        }
+        break
+      }
+      case 'blink': {
+        e.cd = (e.cd ?? 1.4) - dt
+        if (e.phase === 'idle') {
+          if (e.cd <= 0.3 && e.ax === undefined) {                              // telegraph the destination
+            const bias = white ? 0.6 : 0
+            e.ax = clamp(white ? e.x + (white.x - e.x) * bias : Math.random() * W, ENEMY_R, W - ENEMY_R)
+            e.ay = clamp(BRICK_TOP + Math.random() * H * 0.35, BRICK_TOP * 0.3, H * 0.45)
+          }
+          if (e.cd <= 0) { e.phase = 'out'; e.cd = 0.3 }
+        } else if (e.phase === 'out') {
+          if (e.cd <= 0) {
+            e.ghostX = e.x; e.ghostY = e.y
+            e.x = e.ax ?? e.x; e.y = e.ay ?? e.y; e.ax = undefined; e.ay = undefined
+            e.phase = 'in'; e.cd = 0.3; e.flash = 1
+            if (white && Math.hypot(white.x - e.x, white.y - e.y) < 44) {        // landed on the ball → whack it
+              const dx = white.x - e.x, dy = white.y - e.y, d = Math.hypot(dx, dy) || 1
+              white.vx = (dx / d) * BALL_SPEED_MAX; white.vy = (dy / d) * BALL_SPEED_MAX
+            }
+          }
+        } else if (e.cd <= 0) { e.phase = 'idle'; e.cd = 1.4 }
+        break
+      }
+      case 'polarity': {
+        e.x += (e.vx ?? 1) * 55 * dt                                             // invader march
+        if (e.x < ENEMY_R + 20 || e.x > W - ENEMY_R - 20) { e.vx = -(e.vx ?? 1); e.x = clamp(e.x, ENEMY_R + 20, W - ENEMY_R - 20); e.y += BRICK_H * 0.5 }
+        e.cd = (e.cd ?? 3) - dt
+        if (e.cd <= 0) { e.cd = 3; e.polarity = e.polarity === 'blue' ? 'red' : 'blue'; e.flash = 1 }   // flip armour
+        break
+      }
     }
-    // Ball contact: the WHITE ball is whacked away at top speed (no life lost —
-    // the danger is the fast ball is on screen a shorter time) AND it chips the
-    // hunter, so 3 ball hits destroy it. Coloured ammo ricochets and hurts too.
+  }
+
+  /** Per-kind contact: melee kinds whack the white ball; the rest bounce it like a
+   *  bumper. Polarity is TYPE-GATED (white hurts only RED, colour only BLUE); mirror
+   *  denies (bounce, no chip). Colour ammo ricochets + chips; lasers always chip. */
+  #enemyContact(e: Enemy): void {
+    const melee = e.kind === 'hunter' || e.kind === 'queen' || (e.kind === 'dart' && e.phase === 'dive')
     for (const b of this.balls) {
       if (b.stuck) continue
-      const dx = b.x - e.x, dy = b.y - e.y
-      const d = Math.hypot(dx, dy)
+      const dx = b.x - e.x, dy = b.y - e.y, d = Math.hypot(dx, dy)
       if (d > ENEMY_R + b.r) continue
-      if (b.primary) {
-        const ndp = d || 1
-        b.vx = (dx / ndp) * BALL_SPEED_MAX; b.vy = (dy / ndp) * BALL_SPEED_MAX     // whacked away, fast
-        b.x = e.x + (dx / ndp) * (ENEMY_R + b.r + 1); b.y = e.y + (dy / ndp) * (ENEMY_R + b.r + 1)
-        if (this.#hurtEnemy()) return                                             // 1 of 3 hits — no life lost
+      const nd = d || 1
+      if (b.primary && melee) {
+        b.vx = (dx / nd) * BALL_SPEED_MAX; b.vy = (dy / nd) * BALL_SPEED_MAX     // whacked away, fast
+        b.x = e.x + (dx / nd) * (ENEMY_R + b.r + 1); b.y = e.y + (dy / nd) * (ENEMY_R + b.r + 1)
+        if (this.#hurtEnemy()) return
         continue
       }
-      const nd = d || 1, sp = Math.hypot(b.vx, b.vy) || BALL_SPEED
-      b.vx = (dx / nd) * sp; b.vy = (dy / nd) * sp                 // ricochet away from the hunter
+      const sp = Math.hypot(b.vx, b.vy) || BALL_SPEED                            // otherwise it BOUNCES (bumper)
+      b.vx = (dx / nd) * sp; b.vy = (dy / nd) * sp
       b.x = e.x + (dx / nd) * (ENEMY_R + b.r + 1); b.y = e.y + (dy / nd) * (ENEMY_R + b.r + 1)
-      if (this.#hurtEnemy()) return
+      if (e.kind === 'splitter' && (e.split ?? 0) < 1) e.split = 1              // first hit cracks the pod
+      let chip = e.kind !== 'mirror'                                            // mirror is a pure deny-wall (no chip)
+      if (e.kind === 'polarity') chip = b.primary ? e.polarity === 'red' : e.polarity === 'blue'   // wrong type wasted
+      if (chip && this.#hurtEnemy()) return
     }
-    // Lasers zap it too.
-    if (this.lasers.length) {
+    if (this.lasers.length) {                               // lasers are a universal key (work on any kind)
       const survive: Laser[] = []
       for (const l of this.lasers) {
         if (Math.hypot(l.x - e.x, l.y - e.y) <= ENEMY_R) { if (this.#hurtEnemy()) return; continue }
@@ -923,7 +1208,7 @@ export class Engine {
     }
   }
 
-  /** Damage the hunter; returns true once it dies (blast + bounty + reset clock). */
+  /** Damage the enemy; returns true once it dies. The Leech coughs up a pill it ate. */
   #hurtEnemy(): boolean {
     const e = this.enemy
     if (!e) return false
@@ -932,6 +1217,7 @@ export class Engine {
     this.#addScore(15)
     if (e.hp <= 0) {
       this.explosions.push({ x: e.x, y: e.y, t: 0 })
+      if (e.kind === 'leech' && (e.eaten ?? 0) > 0) this.capsules.push({ x: e.x, y: e.y, kind: this.#randomPower() })   // regurgitate loot
       this.enemy = null
       this.#levelClock = 0
       this.#addScore(150)
@@ -1039,8 +1325,8 @@ export class Engine {
     const p = this.pacman
     if (!p) return
     this.explosions.push({ x: p.x, y: p.y, t: 0 })
-    const cm = this.#bumpCombo(p.x, p.y)
-    this.#addScore(250 * cm)
+    this.#bumpCombo(p.x, p.y)
+    this.#addScore(250)
     this.#dropPill(p.x, p.y, this.#randomPower())                        // a wave-exempt bonus pill
     this.pacman = null
     this.#endHazard()
@@ -1079,7 +1365,8 @@ export class Engine {
           this.explosions.push({ x: cap.x, y: cap.y, t: 0 })
           if (!this.#chainBonusPaid && this.ballchainKills >= CHAIN_BONUS_PILLS) {
             this.#chainBonusPaid = true
-            this.#addScore(CHAIN_BONUS)
+            // The prize is a GOLD PAPER CRANE that flutters down — catch it for the jackpot.
+            keep.push({ x: cx, y: Math.max(cy, 70), kind: 'crane' })   // into `keep` (survives the reassign below); bypasses the pill cap
             for (let i = 0; i < 6; i++) this.explosions.push({ x: cx + Math.cos(i) * 22, y: cy + Math.sin(i) * 22, t: 0 })
           }
         } else keep.push(cap)
@@ -1116,39 +1403,46 @@ export class Engine {
   }
 
   #tickPowers(dt: number): void {
-    // (oscillate has no timer — it's permanent for the round; the gun depletes
-    //  by firing, not the clock)
-    if (this.laserTimer > 0) this.laserTimer = Math.max(0, this.laserTimer - dt)
-    if (this.magnetTimer > 0) this.magnetTimer = Math.max(0, this.magnetTimer - dt)
-    if (this.burstTimer > 0) this.burstTimer = Math.max(0, this.burstTimer - dt)
-    if (this.multTimer > 0) {
-      this.multTimer = Math.max(0, this.multTimer - dt)
-      if (this.multTimer === 0) this.scoreMul = 1            // multiplier ran out
-    }
-    if (this.expandTimer > 0) {
-      this.expandTimer = Math.max(0, this.expandTimer - dt)
-      if (this.expandTimer === 0) { this.paddle.w = this.#paddleBaseW; this.paddle.x = clamp(this.paddle.x, this.paddle.w / 2, W - this.paddle.w / 2) }   // restore the oscillate-grown base
-    }
-    if (this.pinballTimer > 0) {
-      this.pinballTimer = Math.max(0, this.pinballTimer - dt)
-      if (this.pinballTimer === 0) { this.bumpers = []; this.#setPrimaryRadius(BALL_R); this.#clearTurrets() }   // pinball over
-    }
-    if (this.beamShots > 0) {
-      this.beamCharge += dt
-      if (this.beamCharge >= this.beamTarget) {            // charge → release, then re-roll the charge time
-        this.#fireBeam()
-        this.beamCharge = 0
-        this.beamTarget = BEAM_CHARGE_MIN + Math.random() * (BEAM_CHARGE_MAX - BEAM_CHARGE_MIN)
+    // The CLOCK stops time: while a freeze is active your own ability timers PAUSE —
+    // only the clock itself (and cosmetic flashes) keep counting. (oscillate is
+    // permanent; the gun/beam ammo deplete by firing, not by a timer.)
+    if (this.freezeTimer <= 0) {
+      if (this.laserTimer > 0) this.laserTimer = Math.max(0, this.laserTimer - dt)
+      if (this.magnetTimer > 0) this.magnetTimer = Math.max(0, this.magnetTimer - dt)
+      if (this.burstTimer > 0) this.burstTimer = Math.max(0, this.burstTimer - dt)
+      if (this.pierceTimer > 0) {
+        this.pierceTimer = Math.max(0, this.pierceTimer - dt)
+        if (this.pierceTimer === 0) for (const b of this.balls) b.pierced = undefined   // clear pass-through tracking
+      }
+      if (this.goldTimer > 0) {
+        this.goldTimer = Math.max(0, this.goldTimer - dt)
+        if (this.goldTimer === 0) this.goldBonus = 0           // gold window closed — bonus clears in one step
+      }
+      if (this.expandTimer > 0) {
+        this.expandTimer = Math.max(0, this.expandTimer - dt)
+        if (this.expandTimer === 0) { this.paddle.w = this.#paddleBaseW; this.paddle.x = clamp(this.paddle.x, this.paddle.w / 2, W - this.paddle.w / 2) }   // restore the oscillate-grown base
+      }
+      if (this.pinballTimer > 0) {
+        this.pinballTimer = Math.max(0, this.pinballTimer - dt)
+        if (this.pinballTimer === 0) { this.bumpers = []; this.pinballProps = []; this.#setPrimaryRadius(BALL_R); this.#clearTurrets() }   // pinball over
+      }
+      if (this.beamShots > 0) {
+        this.beamCharge += dt
+        if (this.beamCharge >= this.beamTarget) {            // charge → release, then re-roll the charge time
+          this.#fireBeam()
+          this.beamCharge = 0
+          this.beamTarget = BEAM_CHARGE_MIN + Math.random() * (BEAM_CHARGE_MAX - BEAM_CHARGE_MIN)
+        }
+      }
+      if (this.ballchainTimer > 0) {
+        this.ballchainTimer = Math.max(0, this.ballchainTimer - dt)
+        if (this.ballchainTimer === 0) this.chainBall = null                            // window closed
       }
     }
-    if (this.beamFlash > 0) this.beamFlash = Math.max(0, this.beamFlash - dt)
+    if (this.beamFlash > 0) this.beamFlash = Math.max(0, this.beamFlash - dt)            // cosmetic, keeps running
     for (const bm of this.bumpers) if (bm.flash > 0) bm.flash = Math.max(0, bm.flash - dt * 5)
-    if (this.freezeTimer > 0) this.freezeTimer = Math.max(0, this.freezeTimer - dt)   // clock
+    if (this.freezeTimer > 0) this.freezeTimer = Math.max(0, this.freezeTimer - dt)     // the clock itself keeps ticking down
     else if (this.#hazardCooldown > 0) this.#hazardCooldown = Math.max(0, this.#hazardCooldown - dt)   // director calm (paused while frozen)
-    if (this.ballchainTimer > 0) {
-      this.ballchainTimer = Math.max(0, this.ballchainTimer - dt)
-      if (this.ballchainTimer === 0) this.chainBall = null                            // window closed
-    }
   }
 
   /** Release one beam shot: a single laser straight up from the paddle's middle.
@@ -1166,6 +1460,7 @@ export class Engine {
     }
     const a = this.alien                                // the beam also shoots a ship in its column
     if (a && bx >= a.x - ALIEN_W / 2 && bx <= a.x + ALIEN_W / 2) this.#destroyShip()
+    if (this.extraLife && Math.abs(this.extraLife.x - bx) <= EXTRALIFE_R + 4) this.#hitExtraLife()   // beam zaps the carrier
     if (this.pacman && Math.abs(this.pacman.x - bx) <= PAC_R + 4) this.#hurtPacman(this.beamLevel >= 3 ? 99 : this.beamLevel)   // beam zaps Pac-Man in its column
     if (this.beamShots === 0) this.beamCharge = 0
   }
@@ -1184,7 +1479,11 @@ export class Engine {
     } else if (this.#pointerX !== null) {
       this.paddle.x = this.#pointerX
     }
-    this.paddle.x = clamp(this.paddle.x, half, W - half)
+    // During aim the paddle slides ±25% of paddle width under the still ball, so the
+    // ball ends up at that offset ON the paddle. In play it uses the full screen.
+    const lo = this.aiming ? AIM_ANCHOR - AIM_RANGE : half
+    const hi = this.aiming ? AIM_ANCHOR + AIM_RANGE : W - half
+    this.paddle.x = clamp(this.paddle.x, lo, hi)
     // The gun aim sweeps with paddle travel, clamped to a short 120° fan
     // balanced facing up: slide left/right to swing the barrel between the stops.
     if (this.gunAmmo > 0) {
@@ -1223,17 +1522,28 @@ export class Engine {
     if (b.y - b.r < 0) { b.y = b.r; b.vy = Math.abs(b.vy) }
 
     if (this.bumpers.length) this.#bumperBounce(b)        // pinball bumpers
+    if (this.pinballProps.length) this.#pinballPropBounce(b, dt)   // pinball props
     if (this.tnt) this.#tntBounce(b)                      // light the dynamite's fuse
     if (this.alien) this.#alienBounce(b)                  // bonk the top dispenser
+    if (this.extraLife) this.#extraLifeBounce(b)          // pop the winged-heart 1-UP carrier
     if (this.pinballTimer > 0) this.#flipperBounce(b)     // pinball: real flippers (L/R mouse)
     else this.#paddleBounce(b)                            // normal: the sliding bat
     this.#brickHits(b)
+
+    // Minimum speed: never crawl below half the start speed — and while FRANTIC,
+    // never below the full start speed (keeps the frenzy fast).
+    const floor = this.frantic ? BALL_SPEED : BALL_SPEED_MIN
+    let sp = Math.hypot(b.vx, b.vy)
+    if (sp > 0 && sp < floor) {
+      const k = floor / sp
+      b.vx *= k; b.vy *= k
+      sp = floor
+    }
 
     // Anti-stuck: never let the ball run too horizontal (it would loop between
     // the side walls forever). Keep at least MIN_VY_RATIO of its speed vertical,
     // preserving direction — and steering DOWN if it's dead flat, so it heads to
     // the bat. Speed is unchanged; we just rotate the velocity steeper.
-    const sp = Math.hypot(b.vx, b.vy)
     if (sp > 0) {
       const minVy = sp * MIN_VY_RATIO
       if (Math.abs(b.vy) < minVy) {
@@ -1271,6 +1581,25 @@ export class Engine {
   }
 
   #brickHits(b: Ball): void {
+    // Pierce: the WHITE ball phases through tiles (no bounce), one damage each as it
+    // passes. Colour balls never pierce. Each brick is damaged once per pass — the
+    // `pierced` set holds bricks still being overlapped, pruned as the ball moves on.
+    const pierce = this.pierceTimer > 0 && b.primary
+    if (pierce) {
+      if (b.pierced) for (const br of b.pierced) {           // prune bricks the ball has left (or that died)
+        const px = clamp(b.x, br.x, br.x + br.w), py = clamp(b.y, br.y, br.y + br.h)
+        if (!br.alive || (b.x - px) ** 2 + (b.y - py) ** 2 > b.r * b.r) b.pierced.delete(br)
+      }
+      for (const brick of [...this.bricks]) {               // snapshot: #damage may shatter a mega (shards must not be re-hit this pass)
+        if (!brick.alive) continue
+        const cx = clamp(b.x, brick.x, brick.x + brick.w), cy = clamp(b.y, brick.y, brick.y + brick.h)
+        if ((b.x - cx) ** 2 + (b.y - cy) ** 2 > b.r * b.r) continue
+        if (b.pierced?.has(brick)) continue                 // already damaged on this pass
+        ;(b.pierced ??= new Set()).add(brick)
+        this.#damage(brick, 1)                              // one damage, no bounce, keep going
+      }
+      return
+    }
     for (const brick of this.bricks) {
       if (!brick.alive) continue
       const cx = clamp(b.x, brick.x, brick.x + brick.w)
@@ -1292,11 +1621,17 @@ export class Engine {
     }
   }
 
-  /** Add points through the active multipliers — the multiplier pill (1×/2×/3×)
-   *  and a 1.6× bonus while the green oscillate mushroom is in effect. */
+  /** POINTS axis (skill): the combo chain + the unified gold bonus, capped. A getter
+   *  so it can never desync from combo/gold. */
+  get pointsMul(): number {
+    return Math.min(POINTS_CAP, 1 + Math.min(this.combo, 25) * 0.2 + this.goldBonus)
+  }
+
+  /** Add points through the two-axis multiplier — POINTS × × PILLS × (capped at
+   *  TOTAL_CAP) with oscillate's ×1.6 riding on top while the green mushroom is up. */
   #addScore(n: number): void {
-    const mul = this.scoreMul * (this.oscillateStacks > 0 ? 1.6 : 1) * this.pillMul
-    this.score += Math.round(n * mul)
+    const total = Math.min(TOTAL_CAP, this.pointsMul * this.pillMul) * (this.oscillateStacks > 0 ? 1.6 : 1)
+    this.score += Math.round(n * total)
   }
 
   #damage(brick: Brick, dmg = 1): void {
@@ -1311,7 +1646,10 @@ export class Engine {
     // earn a reward.
     const cm = this.#bumpCombo(brick.x + brick.w / 2, brick.y + brick.h / 2)
     if (brick.mega) { this.#breakMega(brick); return } // shatter into shards, no normal drop
-    this.#addScore(20 * cm)                             // kill points strung up by the combo
+    const before = this.score
+    this.#addScore(20)                                  // combo expressed once, via pointsMul (no double-count)
+    // Float the ACTUAL points earned on this tile (combo × all multipliers at work).
+    this.comboPops.push({ x: brick.x + brick.w / 2, y: brick.y + brick.h / 2 - 14, n: cm, pts: this.score - before, t: 0 })
     if (brick.mult) this.#grantMultTile(brick)          // ×1/×2/×3 tile (or the hidden ×5) pays out
     if (brick.drop) {
       this.#dropPill(brick.x + brick.w / 2, brick.y + brick.h / 2, brick.drop)
@@ -1320,12 +1658,16 @@ export class Engine {
     }
   }
 
-  /** Weighted pick — staples common, rares seldom (see POWER_WEIGHTS). */
+  /** Weighted pick — staples common, rares seldom (see POWER_WEIGHTS). The clock is
+   *  excluded unless a colour ball is on screen (it only freezes things while colour
+   *  balls keep clearing — releasing it otherwise would be a dead pill). */
   #randomPower(): PowerKind {
+    const colourUp = this.balls.some(b => !b.primary && !b.stuck)
+    const allow = (k: PowerKind): boolean => k !== 'clock' || colourUp
     let total = 0
-    for (const k of POWER_ORDER) total += POWER_WEIGHTS[k]
+    for (const k of POWER_ORDER) if (allow(k)) total += POWER_WEIGHTS[k]
     let r = Math.random() * total
-    for (const k of POWER_ORDER) { r -= POWER_WEIGHTS[k]; if (r < 0) return k }
+    for (const k of POWER_ORDER) { if (!allow(k)) continue; r -= POWER_WEIGHTS[k]; if (r < 0) return k }
     return POWER_ORDER[0]
   }
 
@@ -1342,22 +1684,35 @@ export class Engine {
     return cm
   }
 
-  /** Breaking a ×N multiplier tile lifts the score multiplier to at least N for the
-   *  multiplier window, pays a bonus, and pops a big ×N. The hidden ×5 reveals here. */
+  /** Breaking a ×N multiplier tile ADDS to the unified gold bonus (same pool + window
+   *  as the gold pill and pinball disc — no more replace-vs-stack), pays a bonus, pops
+   *  a big ×N. The hidden ×5 simply adds more toward the cap. */
   #grantMultTile(brick: Brick): void {
     const n = brick.mult ?? 1
-    this.scoreMul = Math.max(this.scoreMul, n)
-    this.multTimer = MULT_DURATION
+    this.goldBonus = Math.min(GOLD_BONUS_CAP, this.goldBonus + n * 0.4)
+    this.goldTimer = Math.min(GOLD_WINDOW * 4, this.goldTimer + GOLD_WINDOW)   // extend (never clobber) the window, like the pill/disc
     this.#addScore(n * 50)
     this.comboPops.push({ x: brick.x + brick.w / 2, y: brick.y + brick.h / 2, n, t: 0 })
   }
 
-  /** Combo milestone (×5, ×10, …): a fat score bonus + an extra life at ×15. No
-   *  free pill — pills only fall from the alien when you hit it (no sky drops). */
+  /** Combo milestone (×5, ×10, …): a fat score bonus, +1 life at ×15, and a CELEBRATION
+   *  — an escalating tier-coloured burst plus a stream of the bonus points raining up
+   *  into the score counter. (No free pill — pills only fall from the alien when hit.) */
   #comboReward(n: number): void {
+    const before = this.score
     this.#addScore(n * 30)
-    if (n % 15 === 0 && this.lives < MAX_LIVES) this.lives++
+    const reward = this.score - before
+    const gotLife = n % 15 === 0 && this.lives < MAX_LIVES
+    if (gotLife) this.lives++
+    this.milestoneFx = { n, t: 0, life: gotLife }           // renderer draws the burst + 'COMBO ×N' (+ '+1 LIFE' only if granted)
+    this.scoreFlash = 0.45                                  // the ✦ score pulses as the points land
+    this.explosions.push({ x: W / 2, y: H * 0.42, t: 0 })
     this.comboPops.push({ x: W / 2, y: H * 0.42, n, t: 0 })
+    // Rain the bonus as a staggered stream of +pts (negative t = a brief delay each).
+    const beads = Math.min(n, 12), share = Math.max(1, Math.round(reward / beads))
+    for (let i = 0; i < beads; i++) {
+      this.comboPops.push({ x: W / 2 + (Math.random() - 0.5) * 64, y: H * 0.40, n: 0, pts: share, t: -i * 0.05 })
+    }
   }
 
   /** Spawn a falling pill — enforces the on-screen cap (≤ MAX_CAPSULES) and gives it
@@ -1382,7 +1737,7 @@ export class Engine {
         && cap.x <= p.x + p.w / 2 + CAPSULE_W / 2
       if (caught) {
         this.#applyPower(cap.kind)
-        this.pillMul += 0.1                                              // every pill eaten = +0.1 points multiplier
+        this.pillMul = Math.min(PILLS_CAP, this.pillMul + 0.1)           // PILLS axis: +0.1 per pill, capped
         this.#addScore(100)                                             // each pill is worth 100 (through the multipliers)
         this.pickups.push({ x: cap.x, y: cap.y, kind: cap.kind, t: 0 })   // flash where it was grabbed
       } else survive.push(cap)
@@ -1397,6 +1752,7 @@ export class Engine {
       l.y -= LASER_SPEED * dt
       if (l.y < 0) continue
       if (this.#shipHitAt(l.x, l.y)) { this.#destroyShip(); continue }   // a laser shoots the ship
+      if (this.extraLife && Math.hypot(this.extraLife.x - l.x, this.extraLife.y - l.y) <= EXTRALIFE_R) { this.#hitExtraLife(); continue }
       if (this.pacman && Math.hypot(this.pacman.x - l.x, this.pacman.y - l.y) <= PAC_R) { this.#hurtPacman(1); continue }
       let hit: Brick | null = null
       let lowest = -Infinity
@@ -1472,17 +1828,22 @@ export class Engine {
         this.rocketAmmo = Math.min(ROCKET_MAX, this.rocketAmmo + ROCKET_LOADER)
         break
       case 'multiplier':
-        // Bonus multipliers STACK: each pill adds 2 or 3 (capped) and extends the timer.
-        this.scoreMul = Math.min(MULT_CAP, this.scoreMul + (Math.random() < 0.5 ? 2 : 3))
-        this.multTimer = Math.min(MULT_DURATION * 4, this.multTimer + MULT_DURATION)
+        // The gold pill ADDS to the unified gold bonus (same pool as the ×N tiles and
+        // the pinball disc) and refreshes the window. Stacks toward the cap.
+        this.goldBonus = Math.min(GOLD_BONUS_CAP, this.goldBonus + 0.5)
+        this.goldTimer = Math.min(GOLD_WINDOW * 4, this.goldTimer + GOLD_WINDOW)
         break
       case 'burst':
         this.burstTimer = Math.min(BURST_DURATION * 4, this.burstTimer + BURST_DURATION)   // time stacks
         break
+      case 'pierce':
+        this.pierceTimer = Math.min(PIERCE_DURATION * 4, this.pierceTimer + PIERCE_DURATION)   // time stacks
+        break
       case 'pinball':
-        this.#pinballDur = PINBALL_DURATIONS[Math.floor(Math.random() * PINBALL_DURATIONS.length)]
-        this.pinballTimer = Math.min(this.#pinballDur * 3, this.pinballTimer + this.#pinballDur)   // time stacks
+        this.#pinballDur = PINBALL_DURATION
+        this.pinballTimer = Math.min(PINBALL_DURATION * 3, this.pinballTimer + PINBALL_DURATION)   // time stacks
         this.#spawnBumpers()
+        this.#spawnPinballProps()                     // a fresh random handful of props each activation
         this.#setPrimaryRadius(BALL_R * 2)            // white ball doubles in size
         break
       case 'beam':
@@ -1510,6 +1871,12 @@ export class Engine {
       case 'extralife':
         if (this.lives < MAX_LIVES) this.lives++       // the 1-UP from the carrier alien
         break
+      case 'crane': {                                  // caught the gold paper crane → jackpot
+        this.#addScore(CHAIN_BONUS)
+        this.comboPops.push({ x: this.paddle.x, y: this.paddle.y - 26, n: 0, pts: CHAIN_BONUS, t: 0 })
+        for (let i = 0; i < 10; i++) this.explosions.push({ x: this.paddle.x + Math.cos(i) * 26, y: this.paddle.y - 20 + Math.sin(i) * 16, t: 0 })
+        break
+      }
     }
   }
 
@@ -1569,10 +1936,13 @@ export class Engine {
       b.x = cx + nx * (b.r + FLIP_THICK); b.y = cy + ny * (b.r + FLIP_THICK)
       const vn = b.vx * nx + b.vy * ny
       if (vn < 0) { b.vx -= 2 * vn * nx; b.vy -= 2 * vn * ny }
-      if (f.vel > 0.001) {                                   // active flip → strong launch toward centre/up
-        const horiz = -Math.sign(b.x - W / 2) * PINBALL_LAUNCH * 0.35
+      if (f.vel > 0.001) {                                   // active flip → ACCELERATE, hardest at the tip (sweet spot)
+        const sweet = t                                       // 0 at the pivot → 1 at the tip (fastest part, like a real flipper)
+        const cur = Math.hypot(b.vx, b.vy) || BALL_SPEED
+        const launch = Math.min(BALL_SPEED_MAX, Math.max(PINBALL_LAUNCH, cur) * (1.2 + 0.7 * sweet))   // +20% at the base, up to +90% on the sweet spot
+        const horiz = -Math.sign(b.x - W / 2) * launch * 0.4
         b.vx = horiz
-        b.vy = -Math.sqrt(Math.max(0, PINBALL_LAUNCH * PINBALL_LAUNCH - horiz * horiz))
+        b.vy = -Math.sqrt(Math.max(0, launch * launch - horiz * horiz))
       } else {                                               // passive bounce — keep pinball-lively speed
         const s = Math.hypot(b.vx, b.vy) || 1
         const ns = clamp(s, BALL_SPEED, BALL_SPEED_MAX)
@@ -1594,12 +1964,133 @@ export class Engine {
       const vdot = b.vx * nx + b.vy * ny
       if (vdot < 0) { b.vx -= 2 * vdot * nx; b.vy -= 2 * vdot * ny }   // reflect about the normal
       const cur = Math.hypot(b.vx, b.vy) || 1
-      const sp = Math.min(BALL_SPEED_MAX, cur + BUMPER_KICK)
+      const sp = Math.min(BALL_SPEED_MAX, cur * 2)               // a pinball hit DOUBLES the speed (capped)
       b.vx = (b.vx / cur) * sp; b.vy = (b.vy / cur) * sp          // pinball kick
       bm.flash = 1
       this.#addScore(10)
       this.#toggleTurret()                                       // each bumper hit flips a tile turret on/off
     }
+  }
+
+  /** Drop a random handful of pinball props into the open zone below the bricks. */
+  #spawnPinballProps(): void {
+    const pool = (Object.keys(PINBALL_SHAPE) as PinballKind[]).slice()
+    for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[pool[i], pool[j]] = [pool[j], pool[i]] }
+    const n = PINBALL_PROPS_MIN + Math.floor(Math.random() * (PINBALL_PROPS_MAX - PINBALL_PROPS_MIN + 1))
+    const props: PinballProp[] = []
+    const place = (kind: PinballKind, x: number, y: number): PinballProp => {
+      const sh = PINBALL_SHAPE[kind]
+      const r = sh === 'field' ? 34 : sh === 'bar' ? 26 : sh === 'target' ? 16 : 15
+      const hp = kind === 'bank' ? 3 : (kind === 'drop' || kind === 'extraball') ? 1 : 0
+      const p: PinballProp = { kind, x: clamp(x, 60, W - 60), y, r, hp, flash: 0, spin: 0, lit: kind === 'jackpot', cd: 0, partner: -1 }
+      props.push(p); return p
+    }
+    const ys = [H * 0.40, H * 0.50, H * 0.60]
+    let slot = 0
+    for (const kind of pool.slice(0, n)) {
+      const x = 80 + (slot % 3) * (W - 160) / 2 + (Math.random() - 0.5) * 28
+      const y = ys[Math.floor(slot / 3) % ys.length] + (Math.random() - 0.5) * 18
+      const p = place(kind, x, y)
+      if (kind === 'teleport') { const q = place('teleport', W - x, y + 36); p.partner = props.indexOf(q); q.partner = props.indexOf(p) }   // linked pair
+      slot++
+    }
+    this.pinballProps = props
+  }
+
+  /** Per-frame prop upkeep: flash/cooldown decay + jackpot relight. */
+  #stepPinballProps(dt: number): void {
+    for (const p of this.pinballProps) {
+      if (p.flash > 0) p.flash = Math.max(0, p.flash - dt * 3)
+      if (p.cd > 0) p.cd = Math.max(0, p.cd - dt)
+      if (p.kind === 'jackpot' && !p.lit && p.cd <= 0) p.lit = true
+    }
+  }
+
+  /** Collide one ball with every pinball prop, by shape. */
+  #pinballPropBounce(b: Ball, dt: number): void {
+    for (const p of this.pinballProps) {
+      const sh = PINBALL_SHAPE[p.kind]
+      if (sh === 'disc') this.#discProp(b, p)
+      else if (sh === 'target') this.#targetProp(b, p)
+      else if (sh === 'sling') this.#slingProp(b, p)
+      else if (sh === 'field') this.#fieldProp(b, p, dt)
+      else this.#barProp(b, p)
+    }
+  }
+
+  #discProp(b: Ball, p: PinballProp): void {
+    const dx = b.x - p.x, dy = b.y - p.y, d = Math.hypot(dx, dy), rr = p.r + b.r
+    if (d >= rr || d === 0) return
+    const nx = dx / d, ny = dy / d
+    const pass = p.kind === 'tunnel' || p.kind === 'teleport'
+    if (!pass) {
+      b.x = p.x + nx * rr; b.y = p.y + ny * rr
+      const vdot = b.vx * nx + b.vy * ny
+      if (vdot < 0) { b.vx -= 2 * vdot * nx; b.vy -= 2 * vdot * ny }
+    }
+    const mul = p.kind === 'jet' ? 2 : p.kind === 'pop' ? 1.35 : p.kind === 'tunnel' ? 1.6 : p.kind === 'orbit' ? 1.2 : 1
+    if (mul !== 1) { const cur = Math.hypot(b.vx, b.vy) || 1; const sp = Math.min(BALL_SPEED_MAX, cur * mul); b.vx = (b.vx / cur) * sp; b.vy = (b.vy / cur) * sp }
+    if (p.cd > 0) return
+    p.flash = 1; p.cd = 0.12
+    switch (p.kind) {
+      case 'jet': this.#addScore(50); break
+      case 'pop': this.#addScore(30); break
+      case 'mushroom': this.#addScore(20); break
+      case 'orbit': this.#addScore(40); break
+      case 'tunnel': this.#addScore(15); break
+      case 'jackpot': if (p.lit) { this.#addScore(1000); p.lit = false; p.cd = 6; this.explosions.push({ x: p.x, y: p.y, t: 0 }) } else this.#addScore(20); break
+      case 'multiplier': this.goldBonus = Math.min(GOLD_BONUS_CAP, this.goldBonus + 0.5); this.goldTimer = Math.min(GOLD_WINDOW * 4, this.goldTimer + GOLD_WINDOW); p.cd = 2; this.#addScore(10); break
+      case 'teleport': { const q = this.pinballProps[p.partner]; if (q) { b.x = q.x; b.y = q.y + q.r + b.r + 2; q.cd = p.cd = 0.5; q.flash = 1 } this.#addScore(25); break }
+      case 'extraball': if (p.hp > 0 && this.balls.length < MAX_BALLS) { p.hp = 0; this.balls.push(this.#newBall(p.x, p.y + p.r + b.r + 2, (Math.random() < 0.5 ? -1 : 1) * BALL_SPEED * 0.5, BALL_SPEED * 0.7, false, false)); this.#addScore(50) } break
+    }
+  }
+
+  #targetProp(b: Ball, p: PinballProp): void {
+    if ((p.kind === 'drop' || p.kind === 'bank') && p.hp <= 0) return     // cleared
+    const hw = p.r, hh = 7
+    const cx = clamp(b.x, p.x - hw, p.x + hw), cy = clamp(b.y, p.y - hh, p.y + hh)
+    const dx = b.x - cx, dy = b.y - cy
+    if (dx * dx + dy * dy > b.r * b.r) return
+    const ox = b.r - Math.abs(dx), oy = b.r - Math.abs(dy)
+    if (ox < oy) { b.vx = dx >= 0 ? Math.abs(b.vx) : -Math.abs(b.vx); b.x += dx >= 0 ? ox : -ox }
+    else { b.vy = dy >= 0 ? Math.abs(b.vy) : -Math.abs(b.vy); b.y += dy >= 0 ? oy : -oy }
+    if (p.cd > 0) return
+    p.flash = 1; p.cd = 0.12
+    if (p.kind === 'drop') { p.hp = 0; this.#addScore(100) }
+    else if (p.kind === 'bank') { p.hp--; this.#addScore(60) }
+    else this.#addScore(40)
+  }
+
+  #slingProp(b: Ball, p: PinballProp): void {
+    const dx = b.x - p.x, dy = b.y - p.y, d = Math.hypot(dx, dy), rr = p.r + b.r
+    if (d >= rr || d === 0) return
+    const dir = p.kind === 'slingL' ? 1 : -1
+    const sp = Math.min(BALL_SPEED_MAX, Math.max(BALL_SPEED, Math.hypot(b.vx, b.vy) * 1.3))
+    const vx = dir * sp * 0.55
+    b.vx = vx; b.vy = -Math.sqrt(Math.max(0, sp * sp - vx * vx))
+    b.x = p.x + (dx / d) * rr; b.y = p.y + (dy / d) * rr
+    if (p.cd > 0) return
+    p.flash = 1; p.cd = 0.1; this.#addScore(25)
+  }
+
+  #fieldProp(b: Ball, p: PinballProp, dt: number): void {
+    const dx = b.x - p.x, dy = b.y - p.y, d = Math.hypot(dx, dy)
+    if (d > p.r) return
+    const cap = () => { const sp = Math.hypot(b.vx, b.vy); if (sp > BALL_SPEED_MAX) { b.vx = b.vx / sp * BALL_SPEED_MAX; b.vy = b.vy / sp * BALL_SPEED_MAX } }
+    if (p.kind === 'magnet') { b.vx += Math.sign(W / 2 - b.x) * 260 * dt; cap() }
+    else if (p.kind === 'fan') { b.vy -= 320 * dt; cap() }
+    else if (b.vy > 0 && p.cd <= 0) {   // kicker — punt a falling ball back up
+      const sp = Math.min(BALL_SPEED_MAX, Math.max(BALL_SPEED, Math.hypot(b.vx, b.vy)))
+      b.vy = -sp * 0.9; b.vx = (Math.random() - 0.5) * sp * 0.4
+      p.cd = 1.5; p.flash = 1; this.#addScore(15)
+    }
+  }
+
+  #barProp(b: Ball, p: PinballProp): void {
+    if (b.x < p.x - p.r || b.x > p.x + p.r || Math.abs(b.y - p.y) > b.r + 4) return
+    if (p.kind === 'spinner') { if (p.cd <= 0) { p.spin++; this.#addScore(5); p.cd = 0.08; p.flash = 1 } }
+    else if (p.kind === 'rollover') { if (!p.lit) { p.lit = true; p.flash = 1; this.#addScore(25) } }
+    else if (b.vy > 0 && p.cd <= 0) { b.vy = -Math.abs(b.vy); b.y = p.y - b.r - 4; p.cd = 0.2; p.flash = 1; this.#addScore(10) }   // gate: one-way up
   }
 
   /** Each bumper hit toggles a single turret: if one is already lit, morph it back
@@ -1717,7 +2208,11 @@ export class Engine {
 
   #loseLife(): void {
     this.lives--
-    if (this.lives <= 0) { this.lives = 0; this.state = 'gameover'; return }
+    if (this.lives <= 0) {                                  // game over: clear transient FX so nothing freezes behind the banner
+      this.lives = 0; this.state = 'gameover'
+      this.milestoneFx = null; this.scoreFlash = 0; this.comboPops = []; this.franticFlash = 0
+      return
+    }
     this.#resetForLife()
   }
 

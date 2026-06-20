@@ -216,6 +216,7 @@
   "selection.remove": "remove",
   "selection.paste": "paste",
   "selection.reroll": "reroll",
+  "selection.documents": "view documents",
   "history.title": "browser history",
   "history.back": "back",
   "history.forward": "forward",

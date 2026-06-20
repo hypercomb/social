@@ -17,7 +17,8 @@ const Z = 2147483000
 
 const GAME_KEYS = new Set([
   'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'Spacebar',
-  'a', 'A', 'd', 'D', 'w', 'W', 's', 'S', 'j', 'J', 'k', 'K', 'r', 'R',
+  'a', 'A', 'd', 'D', 'w', 'W', 's', 'S',
+  'j', 'J', 'k', 'K', 'z', 'Z', 'x', 'X', 'r', 'R',
 ])
 
 type Mode = 'play' | 'design'
@@ -38,6 +39,7 @@ interface Transition {
   phase: 'tally' | 'pan'
   t: number               // seconds into the current phase
   levelScore: number      // points earned on the just-cleared level
+  timeBonus: number       // remaining life-meter converted to score (NES time bonus)
   bonus: number           // perfect-clear bonus (0 if a life was lost)
   baseScore: number       // running total at the start of the cleared level
   nextLevel: LevelDef     // the level rising in
@@ -236,7 +238,7 @@ export class SolomonOverlay {
 
     // ── help ──
     const help = el('div', { class: 'sol-help' })
-    help.innerHTML = '<b>← →</b> move &nbsp;·&nbsp; <b>↑</b> jump (head-butt blocks) &nbsp;·&nbsp; <b>↓</b> duck &nbsp;·&nbsp; <b>J</b> conjure / dispel block &nbsp;·&nbsp; <b>K</b> fireball &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> close'
+    help.innerHTML = '<b>← →</b> move &nbsp;·&nbsp; <b>↑</b> jump (head-butt bricks) &nbsp;·&nbsp; <b>↓</b> duck &nbsp;·&nbsp; <b>Z</b> conjure / dispel a block &nbsp;·&nbsp; <b>X</b> fireball <i>(needs a jar)</i> &nbsp;·&nbsp; drop foes off ledges, grab the key, beat the timer &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> close'
     root.appendChild(help)
 
     document.body.appendChild(root)
@@ -480,8 +482,8 @@ export class SolomonOverlay {
       case 'ArrowUp': case 'w': case 'W': case ' ': case 'Spacebar':
         if (!e.repeat) eng.jump(); break
       case 'ArrowDown': case 's': case 'S': eng.input.down = true; break
-      case 'j': case 'J': if (!e.repeat) eng.cast(); break    // conjure / dispel a block
-      case 'k': case 'K': if (!e.repeat) eng.fireball(); break // ranged attack
+      case 'j': case 'J': case 'z': case 'Z': if (!e.repeat) eng.cast(); break    // conjure / dispel a block
+      case 'k': case 'K': case 'x': case 'X': if (!e.repeat) eng.fireball(); break // fireball (needs ammo)
       case 'r': case 'R': this.#startPlay(this.#levels[this.#levelIndex]); break
     }
   }
@@ -634,6 +636,9 @@ export class SolomonOverlay {
     const eng = this.#engine
     if (!eng || this.#transition) return
     const levelScore = Math.max(0, eng.score - this.#levelStartScore)
+    // The life meter that's left when you reach the door becomes a time bonus —
+    // the NES rewards beating the clock with margin to spare.
+    const timeBonus = Math.round(eng.life)
     // lives only ever fall within a level, so "same as we started" ⇒ no deaths.
     const bonus = eng.lives >= this.#levelStartLives ? PERFECT_BONUS : 0
 
@@ -645,7 +650,7 @@ export class SolomonOverlay {
 
     this.#transition = {
       phase: 'tally', t: 0,
-      levelScore, bonus, baseScore: this.#levelStartScore,
+      levelScore, timeBonus, bonus, baseScore: this.#levelStartScore,
       nextLevel, nextIndex, testing: this.#testing, prev: eng,
     }
     this.#hideBanner()
@@ -659,7 +664,7 @@ export class SolomonOverlay {
     tr.t += dt
     if (tr.phase === 'tally') {
       if (tr.t < TALLY_MS) return
-      const carriedScore = tr.baseScore + tr.levelScore + tr.bonus
+      const carriedScore = tr.baseScore + tr.levelScore + tr.timeBonus + tr.bonus
       const e = new Engine(cloneLevel(tr.nextLevel))
       e.score = carriedScore
       e.lives = tr.prev.lives

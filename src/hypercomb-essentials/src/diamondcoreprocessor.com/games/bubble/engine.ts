@@ -21,13 +21,71 @@
 // match, so movement still reads identically in TILE units.
 export const TILE = 30
 
-// Tile codes. EMPTY is passable; WALL is a one-way platform (solid from above).
+// Tile codes. EMPTY is passable; WALL is a one-way platform (solid from above);
+// DOOR is a passable TUNNEL tile — step your CENTRE onto one and you warp out of
+// its partner door (and so do enemies). Doors are NOT solid: you pass through,
+// stand on whatever platform sits under them, and the warp fires on entry.
 export const EMPTY = 0
 export const WALL = 1
-export type TileCode = 0 | 1
+export const DOOR = 2
+export type TileCode = 0 | 1 | 2
 
 export interface Cell { col: number; row: number }
 export interface EnemySpawn extends Cell { dir?: 1 | -1; kind?: number }
+
+// ── doors (tunnelling warp tiles) ────────────────────────────
+// Doors link in PAIRS: scanning the grid row-major, the 1st door tunnels to the
+// 2nd, the 3rd to the 4th, and so on. A lone, unpaired door is inert (it links
+// to itself — a no-op). `partner` maps a door's grid index to its exit; `pairOf`
+// maps it to its pair number so the renderer can tint linked doors alike.
+export interface DoorIndex {
+  cells: number[]
+  partner: Map<number, number>
+  pairOf: Map<number, number>
+}
+
+/** Index every DOOR tile and pair them two-by-two in scan order. Pure: works on
+ *  any tile accessor, so the engine (its live grid) and the designer preview (a
+ *  LevelDef's tiles) share one source of truth for pairing + colour. */
+export function indexDoors(at: (i: number) => number, cols: number, rows: number): DoorIndex {
+  const cells: number[] = []
+  const n = cols * rows
+  for (let i = 0; i < n; i++) if (at(i) === DOOR) cells.push(i)
+  const partner = new Map<number, number>()
+  const pairOf = new Map<number, number>()
+  for (let k = 0; k < cells.length; k += 2) {
+    const a = cells[k]
+    const b = cells[k + 1] ?? a            // odd one out → links to itself (inert)
+    partner.set(a, b); partner.set(b, a)
+    pairOf.set(a, k >> 1); pairOf.set(b, k >> 1)
+  }
+  return { cells, partner, pairOf }
+}
+
+// ── enemy species ────────────────────────────────────────────
+// Each foe `kind` is a SPECIES — its own behaviour AND tint, not just a colour
+// swatch. Five archetypes for the one-way-platform, screen-wrapping field:
+//   walker  — classic ground patrol; reverses at a ledge.
+//   hopper  — patrols + springs up on a timer (pops up through one-way ledges).
+//   charger — patrols, then dashes when Bub lines up ahead on its row.
+//   flyer   — ignores gravity; drifts + weaves, loosely homing on your row.
+//   ghost   — a hunter: flies straight at Bub (the fastest — bubble it to stop it).
+// All are trapped + popped by bubbles the same way; `angry` (escaped a bubble)
+// still multiplies their speed whatever the species.
+export type EnemyBehavior = 'walk' | 'hop' | 'charge' | 'fly' | 'ghost'
+export interface EnemyKind { name: string; tint: string; behavior: EnemyBehavior; speed: number }
+export const ENEMY_KINDS: EnemyKind[] = [
+  { name: 'walker',  tint: '#ff5d8f', behavior: 'walk',   speed: 44 },
+  { name: 'hopper',  tint: '#7c5cff', behavior: 'hop',    speed: 40 },
+  { name: 'charger', tint: '#e3a356', behavior: 'charge', speed: 46 },
+  { name: 'flyer',   tint: '#2fd3a0', behavior: 'fly',    speed: 40 },
+  { name: 'ghost',   tint: '#bfe3ff', behavior: 'ghost',  speed: 52 },
+]
+export const ENEMY_KIND_COUNT = ENEMY_KINDS.length
+/** Resolve a (possibly out-of-range or negative) kind index to its species. */
+export function enemyKind(kind: number): EnemyKind {
+  return ENEMY_KINDS[((kind % ENEMY_KIND_COUNT) + ENEMY_KIND_COUNT) % ENEMY_KIND_COUNT]
+}
 
 export interface LevelDef {
   name: string
@@ -51,9 +109,12 @@ export interface Enemy extends Body {
   alive: boolean
   captured: boolean      // held inside a bubble (AI suspended, follows the bubble)
   angry: boolean         // escaped a bubble once — faster + redder
-  kind: number           // visual variant
+  kind: number           // species index into ENEMY_KINDS (behaviour + tint)
   grace: number          // post-release seconds during which it can't kill Bub
   bob: number            // idle animation phase (renderer reads it)
+  onDoor: boolean        // armed-off while standing on a door (prevents warp ping-pong)
+  aiTimer: number        // per-species clock: hop countdown / charge phase / fly-roam + perch
+  flying: boolean        // flyers/ghosts: airborne (true) vs descending+perched (false)
 }
 
 export interface Bubble {
@@ -63,13 +124,15 @@ export interface Bubble {
   age: number            // seconds alive (drives wobble + rim hue)
   life: number           // seconds remaining before it pops on its own
   r: number
+  riseV: number          // float-up speed (charged bubbles rise faster)
+  shootTime: number      // how long the forward shoot phase lasts (long bubbles fly farther)
   enemy: Enemy | null    // a trapped foe, or null for an empty bubble
   popped: boolean        // marked for removal this frame
 }
 
 export type FruitKind = 0 | 1 | 2 | 3
 
-export interface Fruit extends Body { kind: FruitKind; life: number; taken: boolean; rest: boolean }
+export interface Fruit extends Body { kind: FruitKind; life: number; taken: boolean; rest: boolean; mult: number }
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; max: number; hue: number; r: number }
 
@@ -83,9 +146,12 @@ export interface Particle { x: number; y: number; vx: number; vy: number; life: 
 //   👟 shoe-red  — run faster · lasts until you lose a life
 //   🍬 rapid     — blow bubbles rapid-fire · until you lose a life
 //   🍭 big       — huge bubbles, wide trap · until you lose a life
-//   🫧 small     — tiny fast bubbles · until you lose a life
-// big/small are mutually exclusive (one bubble size at a time).
-export type PowerKind = 'shoe-blue' | 'shoe-red' | 'rapid' | 'big' | 'small'
+//   ⠿  triple    — blow a 3-bubble spread · lasts the level · drops OFTEN
+//   🛡 shield     — absorb one hit · lasts the level · drops OFTEN
+// Bubbles are SMALL by default (the standard size), so 'big' is the only size
+// power. The 'level'-duration perks (blue shoe, triple, shield) are weighted to
+// drop often, so a screen usually yields one or two of them.
+export type PowerKind = 'shoe-blue' | 'shoe-red' | 'rapid' | 'big' | 'triple' | 'shield'
 
 export interface PowerMeta { name: string; color: string; hue: number; duration: 'level' | 'life'; weight: number; desc: string }
 export const POWER_META: Record<PowerKind, PowerMeta> = {
@@ -93,9 +159,10 @@ export const POWER_META: Record<PowerKind, PowerMeta> = {
   'shoe-red':  { name: 'red shoe',    color: '#ff5a5a', hue: 0,   duration: 'life',  weight: 1, desc: 'Run faster — until you lose a life' },
   rapid:       { name: 'rapid candy', color: '#ff5d8f', hue: 335, duration: 'life',  weight: 2, desc: 'Blow bubbles rapid-fire' },
   big:         { name: 'big bubbles', color: '#ffd76a', hue: 45,  duration: 'life',  weight: 2, desc: 'Huge bubbles, wide trap' },
-  small:       { name: 'mini bubbles',color: '#9b7cff', hue: 262, duration: 'life',  weight: 2, desc: 'Tiny fast bubbles' },
+  triple:      { name: 'triple shot', color: '#5fe0ff', hue: 190, duration: 'level', weight: 4, desc: 'Blow a 3-bubble spread — lasts the level' },
+  shield:      { name: 'shield',      color: '#86f0b0', hue: 150, duration: 'level', weight: 3, desc: 'Absorb one hit — lasts the level' },
 }
-export const POWER_ORDER: PowerKind[] = ['shoe-blue', 'shoe-red', 'rapid', 'big', 'small']
+export const POWER_ORDER: PowerKind[] = ['shoe-blue', 'shoe-red', 'rapid', 'big', 'triple', 'shield']
 /** Drop pool weighted by POWER_META.weight (blue shoes come up often, red rarely). */
 const CANDY_POOL: PowerKind[] = POWER_ORDER.flatMap(k => Array<PowerKind>(POWER_META[k].weight).fill(k))
 
@@ -132,16 +199,37 @@ const JUMP_V = 435                    // clears ~2.4 tiles
 const COYOTE = 0.09                   // brief grounded grace after leaving a ledge
 const LAND_EPS = 2                    // slack (px) for one-way platform landing
 
-const ENEMY_SPEED = 44
-const ENEMY_ANGRY_SPEED = 78
+// Per-species base speeds live in ENEMY_KINDS; ANGRY_MULT scales whichever one a
+// foe carries once it's escaped a bubble (faster + red).
+const ANGRY_MULT = 1.7
 const ENEMY_W = TILE * 0.72
 const ENEMY_H = TILE * 0.72
 const ENEMY_RELEASE_GRACE = 0.5
 
+// Species AI tuning.
+const ENEMY_HOP_V = 360                // hopper spring impulse (clears ~1.5 tiles)
+const ENEMY_HOP_MIN = 1.1              // …on a random 1.1–2.4 s cadence
+const ENEMY_HOP_MAX = 2.4
+const CHARGE_SIGHT = TILE * 6          // charger fires when Bub is this close, ahead, on its row
+const CHARGE_TIME = 0.6                // dash duration
+const CHARGE_COOLDOWN = 1.2            // rest before it can dash again
+const CHARGE_MULT = 2.4                // dash speed over the species base
+const HUNT_TURN = 1.7                  // ghost velocity-steer responsiveness
+// Flyers + ghosts ROAM the room, then come down and PERCH on a platform for a
+// beat before taking off again — so they always land somewhere, never float forever.
+const FLY_DUR_MIN = 2.5                // seconds airborne before seeking a perch
+const FLY_DUR_MAX = 4.5
+const PERCH_MIN = 1.2                  // seconds resting on a platform before lift-off
+const PERCH_MAX = 2.6
+const FLY_TAKEOFF = 300                // upward kick when leaving a perch
+
+// Doors: the spark hue for the tunnelling puff (a portal violet).
+const WARP_HUE = 280
+
 // Bubbles: blow rate, shoot phase, drift, lifespan, trapped-escape window.
 const BLOW_COOLDOWN = 0.26
 const MAX_BUBBLES = 16
-const BUBBLE_R = TILE * 0.52           // proportional to Bub (on-screen scale comes from the fit zoom, not here)
+const BUBBLE_R = TILE * 0.30           // small by default (the standard size); 'big' candy + charge grow it
 const BUBBLE_SHOOT_SPEED = 270
 const BUBBLE_SHOOT_TIME = 0.36         // shoot reach ≈ 3.2 tiles (trimmed from 3.8 — was overshooting)
 const BUBBLE_RISE = 48                 // float-up speed — bubbles pass through terrain
@@ -149,6 +237,17 @@ const BUBBLE_SWAY = 12                 // horizontal drift amplitude while float
 const BUBBLE_LIFE = 11
 const BUBBLE_TRAP_LIFE = 7             // a trapped enemy gets this long before escaping
 const BUBBLE_BOUNCE_V = 323           // upward kick when Bub rides a bubble's crown
+
+// Hold-to-charge: holding the blow key swells the bubble — at full charge it is
+// bigger AND rises faster, an express elevator you can hop onto and ride up. A
+// quick tap fires a normal bubble (charge ≈ 0).
+const BUBBLE_CHARGE_TIME = 1.0        // hold ~1s for a full-power bubble
+const BUBBLE_CHARGE_SIZE = 0.55       // +55% radius at full charge
+const BUBBLE_CHARGE_RISE = 1.9        // float-rise ×1.9 at full charge
+// The L key blows a long-distance bubble (no perk needed): a long flat shot that
+// crosses the screen before drifting up.
+const BUBBLE_LONG_SHOOT_TIME = 0.95   // extended shoot phase (≈8 tiles of reach)
+const BUBBLE_LONG_SHOOT_SPEED = 1.15  // …and a touch faster out of the mouth
 
 // Scoring + combos. Two contiguous-action combos, each reset after a >1s gap:
 //   • bounce combo  — riding empty-bubble crowns  (BOUNCE_BASE pts each)
@@ -181,10 +280,8 @@ const CANDY_SCORE = 200                 // bonus for grabbing one
 const BONUS_LIFE = 9                    // seconds a point-bonus treasure lingers
 const SHOE_MULT = 1.6                   // run 60% faster
 const RAPID_MULT = 0.42                 // blow at 42% of the base cooldown (~2.4× rate)
-const BIG_MULT = 1.5                    // bubble radius ×1.5 (wider trap reach)
-const SMALL_MULT = 0.56                 // bubble radius ×0.56 (trap up close)
+const BIG_MULT = 2.6                    // 'big' candy radius vs the small base (≈ the old big bubble)
 const BIG_SHOOT_MULT = 0.78            // big bubbles lumber out
-const SMALL_SHOOT_MULT = 1.5           // tiny bubbles zip out fast
 
 export class Engine {
   level: LevelDef
@@ -196,9 +293,16 @@ export class Engine {
   onGround = false
   walking = false
   blowFlash = 0          // mouth-open animation timer the renderer reads
+  blowCharge = 0         // 0..1 hold-to-charge level (renderer draws the swelling bubble)
+  #charging = false      // is the blow key currently held?
   invuln = 0             // post-respawn invulnerability (also a blink cue)
   #coyote = 0
   #blowCooldown = 0
+
+  // Doors (warp tiles) indexed at spawn from the live grid. #playerOnDoor arms
+  // off the warp while Bub stands on a door so he can't immediately tunnel back.
+  #doorInfo: DoorIndex = { cells: [], partner: new Map(), pairOf: new Map() }
+  #playerOnDoor = false
 
   enemies: Enemy[] = []
   bubbles: Bubble[] = []
@@ -214,7 +318,9 @@ export class Engine {
   shoeBlue = false
   shoeRed = false
   rapid = false
-  bubbleSize: 'normal' | 'big' | 'small' = 'normal'
+  bubbleSize: 'normal' | 'big' = 'normal'   // 'normal' = the small default; 'big' candy grows it
+  triple = false         // blow a 3-bubble spread (level-duration)
+  shield = false         // absorb one hit (level-duration)
 
   lives = 3
   score = 0
@@ -247,6 +353,9 @@ export class Engine {
   get width(): number { return this.cols * TILE }
   get height(): number { return this.rows * TILE }
 
+  /** Door pairing for the current grid (the renderer reads this to draw portals). */
+  get doorInfo(): DoorIndex { return this.#doorInfo }
+
   /** True while the player is in control — normal play OR the post-clear sweep. */
   get #live(): boolean { return this.state === 'playing' || this.state === 'cleanup' }
 
@@ -254,14 +363,10 @@ export class Engine {
   get #moveSpeed(): number { return this.shoeBlue || this.shoeRed ? MOVE_SPEED * SHOE_MULT : MOVE_SPEED }
   get #blowDelay(): number { return this.rapid ? BLOW_COOLDOWN * RAPID_MULT : BLOW_COOLDOWN }
   get #bubbleR(): number {
-    if (this.bubbleSize === 'big') return BUBBLE_R * BIG_MULT
-    if (this.bubbleSize === 'small') return BUBBLE_R * SMALL_MULT
-    return BUBBLE_R
+    return this.bubbleSize === 'big' ? BUBBLE_R * BIG_MULT : BUBBLE_R
   }
   get #bubbleShoot(): number {
-    if (this.bubbleSize === 'big') return BUBBLE_SHOOT_SPEED * BIG_SHOOT_MULT
-    if (this.bubbleSize === 'small') return BUBBLE_SHOOT_SPEED * SMALL_SHOOT_MULT
-    return BUBBLE_SHOOT_SPEED
+    return this.bubbleSize === 'big' ? BUBBLE_SHOOT_SPEED * BIG_SHOOT_MULT : BUBBLE_SHOOT_SPEED
   }
 
   /** Active powers for the HUD badge row. No timers — a power is simply on or off. */
@@ -271,6 +376,8 @@ export class Engine {
     if (this.shoeRed) out.push('shoe-red')
     if (this.rapid) out.push('rapid')
     if (this.bubbleSize !== 'normal') out.push(this.bubbleSize)
+    if (this.triple) out.push('triple')
+    if (this.shield) out.push('shield')
     return out
   }
 
@@ -292,6 +399,8 @@ export class Engine {
   /** Reset Bub, enemies, bubbles + fruit to the level start. Keeps lives + score. */
   spawn(): void {
     this.grid = Uint8Array.from(this.level.tiles.slice(0, this.cols * this.rows))
+    this.#doorInfo = indexDoors(i => this.grid[i], this.cols, this.rows)
+    this.#playerOnDoor = false
     const p = this.level.player
     this.player.w = PLAYER_W
     this.player.h = PLAYER_H
@@ -304,6 +413,8 @@ export class Engine {
     this.#coyote = 0
     this.#blowCooldown = 0
     this.blowFlash = 0
+    this.blowCharge = 0
+    this.#charging = false
     this.invuln = 1.4
     this.input.left = this.input.right = false
     this.bubbles = []
@@ -317,6 +428,8 @@ export class Engine {
     this.shoeRed = false
     this.rapid = false
     this.bubbleSize = 'normal'
+    this.triple = false
+    this.shield = false
     this.chain = 0
     this.#chainTimer = 0
     this.jumpCombo = 0
@@ -325,13 +438,25 @@ export class Engine {
     this.cleanupMax = 0
     this.cleanupElapsed = 0
     this.hurtFlash = 0
-    this.enemies = this.level.enemies.map(e => ({
-      x: e.col * TILE + (TILE - ENEMY_W) / 2,
-      y: e.row * TILE + (TILE - ENEMY_H),
-      w: ENEMY_W, h: ENEMY_H, vx: 0, vy: 0,
-      dir: e.dir ?? 1, alive: true, captured: false, angry: false,
-      kind: e.kind ?? 0, grace: 0, bob: Math.PI * (e.col + e.row),
-    }))
+    this.enemies = this.level.enemies.map(e => {
+      const beh = enemyKind(e.kind ?? 0).behavior
+      const fly = beh === 'fly' || beh === 'ghost'
+      return {
+        x: e.col * TILE + (TILE - ENEMY_W) / 2,
+        y: e.row * TILE + (TILE - ENEMY_H),
+        w: ENEMY_W, h: ENEMY_H, vx: 0, vy: 0,
+        dir: e.dir ?? 1, alive: true, captured: false, angry: false,
+        kind: e.kind ?? 0, grace: 0, bob: Math.PI * (e.col + e.row),
+        onDoor: false, flying: fly,
+        // hoppers get a randomised first-hop delay so they don't jump in unison;
+        // chargers start past their cooldown so they can dash the moment Bub lines up;
+        // fliers start airborne on a roam timer before seeking their first perch.
+        aiTimer: beh === 'hop' ? ENEMY_HOP_MIN + Math.random() * (ENEMY_HOP_MAX - ENEMY_HOP_MIN)
+          : beh === 'charge' ? -CHARGE_COOLDOWN
+          : fly ? FLY_DUR_MIN + Math.random() * (FLY_DUR_MAX - FLY_DUR_MIN)
+          : 0,
+      }
+    })
     this.state = 'playing'
   }
 
@@ -420,22 +545,54 @@ export class Engine {
     this.#coyote = 0
   }
 
-  /** Blow a bubble in the facing direction (rate-limited, capped). */
-  blow(): void {
+  /** Emit one bubble in the facing direction (rate-limited, capped). The size,
+   *  rise speed, shoot speed + shoot reach are passed in so a normal tap, a
+   *  charged hold, and a long-distance shot all share this one chokepoint. */
+  #emitBubble(r: number, riseV: number, shootSpeed: number, shootTime: number): void {
     if (!this.#live) return
     if (this.#blowCooldown > 0) return
     if (this.bubbles.length >= MAX_BUBBLES) return
     this.#blowCooldown = this.#blowDelay
     this.blowFlash = 0.2
     const p = this.player
-    const r = this.#bubbleR
     const mouthY = p.y + p.h * 0.4
     const x = p.facing > 0 ? p.x + p.w + r * 0.5 : p.x - r * 0.5
-    this.bubbles.push({
-      x, y: mouthY, vx: p.facing * this.#bubbleShoot,
-      phase: 'shoot', age: 0, life: BUBBLE_LIFE, r,
-      enemy: null, popped: false,
-    })
+    // triple-shot fans the blow into three stacked bubbles; otherwise just one.
+    const offsets = this.triple ? [-1, 0, 1] : [0]
+    for (const o of offsets) {
+      if (this.bubbles.length >= MAX_BUBBLES) break
+      this.bubbles.push({
+        x, y: mouthY + o * r * 1.15, vx: p.facing * shootSpeed,
+        phase: 'shoot', age: 0, life: BUBBLE_LIFE, r,
+        riseV, shootTime,
+        enemy: null, popped: false,
+      })
+    }
+  }
+
+  /** Begin charging a bubble (blow key pressed). Held charge swells the bubble;
+   *  release with releaseBlow(). A quick tap charges ≈ 0 → a normal bubble. */
+  startBlow(): void {
+    if (!this.#live) return
+    this.#charging = true
+    this.blowCharge = 0
+  }
+
+  /** Release the charge → blow a bubble sized by how long it was held. At full
+   *  charge it is bigger and rises faster (ride it up). */
+  releaseBlow(): void {
+    const c = this.#charging ? this.blowCharge : 0
+    this.#charging = false
+    this.blowCharge = 0
+    const r = this.#bubbleR * (1 + c * BUBBLE_CHARGE_SIZE)
+    const riseV = BUBBLE_RISE * (1 + c * (BUBBLE_CHARGE_RISE - 1))
+    this.#emitBubble(r, riseV, this.#bubbleShoot, BUBBLE_SHOOT_TIME)
+  }
+
+  /** Blow a long-distance bubble (L key, no perk): a long flat shot that crosses
+   *  the screen before drifting up. */
+  blowLong(): void {
+    this.#emitBubble(this.#bubbleR, BUBBLE_RISE, this.#bubbleShoot * BUBBLE_LONG_SHOOT_SPEED, BUBBLE_LONG_SHOOT_TIME)
   }
 
   // ── simulation ───────────────────────────────────────────
@@ -491,6 +648,7 @@ export class Engine {
 
   #stepPlayer(dt: number): void {
     const p = this.player
+    if (this.#charging) this.blowCharge = Math.min(1, this.blowCharge + dt / BUBBLE_CHARGE_TIME)
     const held = (this.input.left ? -1 : 0) + (this.input.right ? 1 : 0)
     if (held !== 0) p.facing = held as 1 | -1
     this.walking = held !== 0 && this.onGround
@@ -513,6 +671,7 @@ export class Engine {
     }
 
     this.#wrap(p)
+    this.#playerOnDoor = this.#stepWarp(p, this.#playerOnDoor)
 
     // coyote-time: keep a brief jump grace just after leaving a ledge
     if (this.onGround) this.#coyote = COYOTE
@@ -559,22 +718,151 @@ export class Engine {
       if (!e.alive || e.captured) continue
       e.bob += dt * 6
       if (e.grace > 0) e.grace = Math.max(0, e.grace - dt)
-      const speed = e.angry ? ENEMY_ANGRY_SPEED : ENEMY_SPEED
+      const kind = enemyKind(e.kind)
+      if (kind.behavior === 'fly' || kind.behavior === 'ghost') this.#flyEnemy(e, kind, dt)
+      else this.#groundEnemy(e, kind, dt)
+      e.onDoor = this.#stepWarp(e, e.onDoor)   // enemies tunnel through doors too
+    }
+  }
 
+  /** Ground species (walk / hop / charge): gravity + one-way platforms, patrolling
+   *  and reversing at ledge edges. Hoppers spring on a timer; chargers dash when
+   *  Bub lines up ahead on their row. */
+  #groundEnemy(e: Enemy, kind: EnemyKind, dt: number): void {
+    let speed = kind.speed * (e.angry ? ANGRY_MULT : 1)
+
+    // charger: arm a dash when Bub is ahead, close, and on roughly this row.
+    if (kind.behavior === 'charge') {
+      e.aiTimer -= dt
+      if (e.aiTimer <= -CHARGE_COOLDOWN && e.grace <= 0) {
+        const dx = this.#wrapDelta(this.#cx(this.player) - this.#cx(e), this.width)
+        const dy = (this.player.y + this.player.h / 2) - (e.y + e.h / 2)
+        if (Math.abs(dy) < TILE * 0.8 && Math.sign(dx) === e.dir && Math.abs(dx) < CHARGE_SIGHT) e.aiTimer = CHARGE_TIME
+      }
+      if (e.aiTimer > 0) speed *= CHARGE_MULT   // mid-dash
+    }
+    const charging = kind.behavior === 'charge' && e.aiTimer > 0
+
+    // vertical: gravity, with hoppers able to rise UP through one-way platforms.
+    e.vy = Math.min(e.vy + GRAVITY * dt, MAX_FALL)
+    let grounded: boolean
+    if (e.vy < 0) { e.y += e.vy * dt; grounded = false }
+    else grounded = this.#descend(e, e.vy * dt) || this.#onPlatform(e)
+
+    // hopper: spring when grounded and the timer elapses.
+    if (kind.behavior === 'hop') {
+      e.aiTimer -= dt
+      if (grounded && e.aiTimer <= 0) {
+        e.vy = -ENEMY_HOP_V
+        e.aiTimer = ENEMY_HOP_MIN + Math.random() * (ENEMY_HOP_MAX - ENEMY_HOP_MIN)
+        grounded = false
+      }
+    }
+
+    // patrol: reverse at a ledge edge so it won't walk off (a ledge also ends a dash).
+    if (grounded) {
+      const aheadX = e.dir > 0 ? e.x + e.w + 2 : e.x - 2
+      const footRow = Math.floor((e.y + e.h + 2) / TILE)
+      if (!this.#platformRow(aheadX, 1, footRow)) {
+        e.dir = e.dir === 1 ? -1 : 1
+        if (charging) e.aiTimer = 0
+      }
+    }
+
+    e.x += e.dir * speed * dt
+    this.#wrap(e)
+  }
+
+  /** Flying species (flyer / ghost): no gravity, no platforms — they cross open
+   *  air and wrap. A flyer drifts + weaves, loosely homing on Bub's row; a ghost
+   *  is a hunter that steers straight at him (and is the only thing a bubble stops). */
+  #flyEnemy(e: Enemy, kind: EnemyKind, dt: number): void {
+    const speed = kind.speed * (e.angry ? ANGRY_MULT : 1)
+
+    if (e.flying) {
+      // ── airborne: roam the room toward Bub, then time out and come down to perch ──
+      e.aiTimer -= dt
+      // DIRECT deltas (not the toroidal short-path) so fliers actually cross the
+      // room toward Bub instead of hugging an edge and wrapping over the top.
+      const dx = (this.player.x + this.player.w / 2) - this.#cx(e)
+      const dy = (this.player.y + this.player.h / 2) - (e.y + e.h / 2)
+      if (kind.behavior === 'ghost') {
+        // ghost: steer the velocity vector straight at Bub, eased + capped at `speed`.
+        const d = Math.hypot(dx, dy) || 1
+        const k = Math.min(1, dt * HUNT_TURN)
+        e.vx += ((dx / d) * speed - e.vx) * k
+        e.vy += ((dy / d) * speed - e.vy) * k
+      } else {
+        // flyer: horizontal drift (wraps around the room) + vertical homing toward
+        // Bub's row with a weave — wavy roaming that crosses the room, not a laser.
+        e.vx = e.dir * speed
+        e.vy = Math.sign(dy) * speed * 0.5 + Math.sin(e.bob * 0.8) * speed * 0.55
+      }
+      e.x += e.vx * dt
+      e.y += e.vy * dt
+      this.#wrap(e)
+      if (Math.abs(e.vx) > 1) e.dir = e.vx < 0 ? -1 : 1   // face the way it moves (eyes track)
+      if (e.aiTimer <= 0) { e.flying = false; e.aiTimer = PERCH_MIN + Math.random() * (PERCH_MAX - PERCH_MIN) }
+    } else {
+      // ── descend under gravity, land on a platform, perch + amble, then lift off ──
       e.vy = Math.min(e.vy + GRAVITY * dt, MAX_FALL)
       const grounded = this.#descend(e, e.vy * dt) || this.#onPlatform(e)
-
-      // Patrol: reverse at a ledge edge (won't walk off platforms). With no
-      // body-height walls, ledge-edges are the only thing that turns them.
       if (grounded) {
+        e.aiTimer -= dt   // the perch clock only runs once it has actually landed
         const aheadX = e.dir > 0 ? e.x + e.w + 2 : e.x - 2
         const footRow = Math.floor((e.y + e.h + 2) / TILE)
-        if (!this.#platformRow(aheadX, 1, footRow)) e.dir = (e.dir === 1 ? -1 : 1)
+        if (!this.#platformRow(aheadX, 1, footRow)) e.dir = e.dir === 1 ? -1 : 1   // amble, turn at ledges
+        e.x += e.dir * speed * 0.6 * dt
+        this.#wrap(e)
+        if (e.aiTimer <= 0) {
+          e.flying = true
+          e.vy = -FLY_TAKEOFF
+          e.aiTimer = FLY_DUR_MIN + Math.random() * (FLY_DUR_MAX - FLY_DUR_MIN)
+        }
+      } else {
+        e.x += e.dir * speed * 0.5 * dt   // a little forward drift while falling
+        this.#wrap(e)
       }
-
-      e.x += e.dir * speed * dt
-      this.#wrap(e)
     }
+  }
+
+  // ── doors (tunnelling warp) ──────────────────────────────
+
+  #cx(b: Body): number { return b.x + b.w / 2 }
+
+  /** Shortest signed delta on a wrapped axis of length `span`, so homing + line of
+   *  sight take the short way around the toroidal field. */
+  #wrapDelta(d: number, span: number): number {
+    const h = span / 2
+    return d > h ? d - span : d < -h ? d + span : d
+  }
+
+  /** Grid index of the cell under a body's centre (the body is already wrapped
+   *  in-bounds; clamp just guards the seam). */
+  #centerCell(b: Body): number {
+    const col = Math.min(this.cols - 1, Math.max(0, Math.floor((b.x + b.w / 2) / TILE)))
+    const row = Math.min(this.rows - 1, Math.max(0, Math.floor((b.y + b.h / 2) / TILE)))
+    return row * this.cols + col
+  }
+
+  /** Tunnel a body to its door's partner the FRAME it enters a new door cell.
+   *  Returns the body's new on-a-door state: it stays `true` right after a warp
+   *  (the body now sits on the exit door) so it must step off and re-enter to
+   *  warp again — no ping-pong. Velocity is preserved, so momentum carries. */
+  #stepWarp(b: Body, wasOnDoor: boolean): boolean {
+    const idx = this.#centerCell(b)
+    const onDoorNow = this.grid[idx] === DOOR
+    if (onDoorNow && !wasOnDoor) {
+      const exit = this.#doorInfo.partner.get(idx)
+      if (exit != null && exit !== idx) {
+        this.#spawnPop(b.x + b.w / 2, b.y + b.h / 2, 200, 10, WARP_HUE)
+        b.x = (exit % this.cols) * TILE + (TILE - b.w) / 2
+        b.y = ((exit / this.cols) | 0) * TILE + (TILE - b.h) / 2
+        this.#spawnPop(b.x + b.w / 2, b.y + b.h / 2, 220, 12, WARP_HUE)
+        return true
+      }
+    }
+    return onDoorNow
   }
 
   #stepBubbles(dt: number): void {
@@ -588,10 +876,10 @@ export class Engine {
         b.x += b.vx * dt
         if (b.x < b.r) { b.x = b.r; b.phase = 'float' }
         else if (b.x > this.width - b.r) { b.x = this.width - b.r; b.phase = 'float' }
-        if (b.age >= BUBBLE_SHOOT_TIME) b.phase = 'float'
+        if (b.age >= b.shootTime) b.phase = 'float'
       } else {
         // Drift UP through everything; collect just under the top of the screen.
-        b.y -= BUBBLE_RISE * dt
+        b.y -= b.riseV * dt
         b.x += Math.sin(b.age * 2.2) * BUBBLE_SWAY * dt
         if (b.y < b.r) b.y = b.r
         if (b.x < b.r) b.x = b.r
@@ -650,7 +938,7 @@ export class Engine {
       this.#chainTimer = COMBO_WINDOW
       this.score += POP_BASE * this.#comboTier(this.chain)
       this.#spawnPop(b.x, b.y, 320, 14)
-      this.#spawnFruit(b.x, b.y, (Math.max(0, Math.min(this.chain - 1, 3))) as FruitKind)
+      this.#spawnFruit(b.x, b.y, (Math.max(0, Math.min(this.chain - 1, 3))) as FruitKind, this.chain)
       if (Math.random() < CANDY_DROP_CHANCE) this.#spawnCandy(b.x, b.y)
     } else {
       this.#spawnPop(b.x, b.y, 180, 6)
@@ -658,11 +946,12 @@ export class Engine {
     this.bubbles = this.bubbles.filter(x => !x.popped)
   }
 
-  /** Drop a fruit (it lingers FRUIT_LIFE seconds during play). */
-  #spawnFruit(x: number, y: number, kind: FruitKind): void {
+  /** Drop a fruit (it lingers FRUIT_LIFE seconds during play). `mult` is the chain
+   *  length at the pop — chained pops drop fruit worth that many times its value. */
+  #spawnFruit(x: number, y: number, kind: FruitKind, mult: number): void {
     this.fruits.push({
       x: x - TILE * 0.3, y: y - TILE * 0.3, w: TILE * 0.6, h: TILE * 0.6,
-      vx: 0, vy: -45, kind, life: FRUIT_LIFE, taken: false, rest: false,
+      vx: 0, vy: -45, kind, mult, life: FRUIT_LIFE, taken: false, rest: false,
     })
   }
 
@@ -683,12 +972,16 @@ export class Engine {
       if (!cleaning) { f.life -= dt; if (f.life <= 0) { f.taken = true; continue } }
       if (p.x < f.x + f.w && p.x + p.w > f.x && p.y < f.y + f.h && p.y + p.h > f.y) {
         f.taken = true
-        this.score += FRUIT_SCORE[f.kind]
+        const value = FRUIT_SCORE[f.kind] * f.mult
+        this.score += value
         if (cleaning) {
           this.cleanupTimer = Math.min(CLEANUP_MAX, this.cleanupTimer + FRUIT_TIME_BONUS)
           this.cleanupMax = Math.max(this.cleanupMax, this.cleanupTimer)
         }
-        this.#spawnPop(f.x + f.w / 2, f.y + f.h / 2, 220, 8, 48)
+        const fcx = f.x + f.w / 2, fcy = f.y + f.h / 2
+        this.#spawnPop(fcx, fcy, 220, 8, 48)
+        // chained fruit is worth a multiple — show the boosted value rising off it.
+        if (f.mult > 1) this.#spawnFloat(fcx, fcy - TILE * 0.3, '+' + value, '#ffd76a')
       }
     }
     this.fruits = this.fruits.filter(f => !f.taken)
@@ -796,7 +1089,8 @@ export class Engine {
       case 'shoe-red':  this.shoeRed = true;   break
       case 'rapid':     this.rapid = true;     break
       case 'big':       this.bubbleSize = 'big';   break
-      case 'small':     this.bubbleSize = 'small'; break
+      case 'triple':    this.triple = true;        break
+      case 'shield':    this.shield = true;        break
     }
   }
 
@@ -815,7 +1109,15 @@ export class Engine {
     for (const e of this.enemies) {
       if (!e.alive || e.captured || e.grace > 0) continue
       if (p.x < e.x + e.w && p.x + p.w > e.x && p.y < e.y + e.h && p.y + p.h > e.y) {
-        this.#die()
+        if (this.shield) {
+          // shield absorbs the hit: spend it, flash, and grant a breather.
+          this.shield = false
+          this.invuln = 1.0
+          this.hurtFlash = 0.35
+          this.#spawnPop(p.x + p.w / 2, p.y + p.h / 2, 260, 14, 150)
+        } else {
+          this.#die()
+        }
         return
       }
     }

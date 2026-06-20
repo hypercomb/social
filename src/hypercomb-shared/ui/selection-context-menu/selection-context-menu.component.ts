@@ -35,6 +35,8 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   #allHidden = signal(false)
   #moveMode = signal(false)
   #clipboardCount = signal(0)
+  /** True when at least one selected tile has documents — gates the button. */
+  #hasDocuments = signal(false)
   #posX = signal(0)
   #posY = signal(0)
   #dragging = signal(false)
@@ -63,6 +65,7 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   readonly allHidden = this.#allHidden.asReadonly()
   readonly moveMode = this.#moveMode.asReadonly()
   readonly clipboardCount = this.#clipboardCount.asReadonly()
+  readonly hasDocuments = this.#hasDocuments.asReadonly()
   readonly posX = this.#posX.asReadonly()
   readonly posY = this.#posY.asReadonly()
   readonly dragging = this.#dragging.asReadonly()
@@ -80,6 +83,7 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   #showHiddenUnsub: (() => void) | null = null
   #moveModeUnsub: (() => void) | null = null
   #clipboardUnsub: (() => void) | null = null
+  #hasDocumentsUnsub: (() => void) | null = null
   #screensaverUnsub: (() => void) | null = null
 
   // ── lifecycle ───────────────────────────────────────────
@@ -107,6 +111,12 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
       this.#clipboardCount.set(payload?.items?.length ?? 0)
     })
 
+    // FileDropDrone publishes whether the current selection has any documents
+    // (last-value replay keeps this correct on late mount).
+    this.#hasDocumentsUnsub = EffectBus.on<{ value?: boolean }>('selection:has-documents', (payload) => {
+      this.#hasDocuments.set(payload?.value === true)
+    })
+
     this.#screensaverUnsub = EffectBus.on<{ active?: boolean }>('screensaver:active', (payload) => {
       this.#screensaverActive.set(payload?.active === true)
     })
@@ -119,6 +129,7 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
     this.#showHiddenUnsub?.()
     this.#moveModeUnsub?.()
     this.#clipboardUnsub?.()
+    this.#hasDocumentsUnsub?.()
     this.#screensaverUnsub?.()
     window.removeEventListener('resize', this.#onResize)
     window.removeEventListener('pointermove', this.#onDragMove)
@@ -153,6 +164,10 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
 
   readonly reroll = (): void => {
     EffectBus.emit('controls:action', { action: 'reroll' })
+  }
+
+  readonly viewDocuments = (): void => {
+    EffectBus.emit('controls:action', { action: 'view-documents' })
   }
 
   // ── hidden-state check ──────────────────────────────────

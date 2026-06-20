@@ -14,14 +14,20 @@ hand it.
 ## Runtime contract (tiny)
 
 There is **no** site-wide bundle and **no** `websiteSig` decoration to
-stamp. Instead, each cell carries its own page in one of two slots,
+stamp. Instead, each cell carries its own page in one of three slots,
 queried in order by the renderer (`site-view.drone.ts`):
 
-1. The cell's `decorations` slot — a `visual:website:page` decoration
+1. The cell's `website` slot — the explicit, first-class page slot: a
+   flat array of HTML resource sigs (newest = current page), with no
+   decoration envelope. The migration target. Authored with the generic
+   slot-write op: `{ op: 'bag-set', segments, slot: 'website',
+   cells: [htmlSig] }`.
+2. The cell's `decorations` slot — a `visual:website:page` decoration
    (a signature-addressed JSON resource) whose `payload.htmlSig` points
-   at the page's HTML resource. This is the visual-bee migration target.
-2. The legacy `context` slot — raw HTML resource sigs. Existing pages
-   live here; the renderer falls back to it when no decoration is found.
+   at the page's HTML resource. The prior visual-bee home; read-through
+   so already-built sites keep rendering.
+3. The legacy `context` slot — raw HTML resource sigs. Existing pages
+   live here; the renderer falls back to it when neither above is found.
 
 The HTML resource sig resolves to a resource in `__resources__/<sig>`.
 Each cell is responsible for its own surface — there is no cascade, no
@@ -53,6 +59,8 @@ ViewMode === 'website' ? continue : teardown
   ↓
 sign(lineage segments) → location sig; currentLayerAt(locationSig) → head layer
   ↓
+read layer.website (explicit page slot) → newest HTML sig
+  ↓ (none?)
 scan layer.decorations for a visual:website:page decoration → payload.htmlSig
   ↓ (none?)
 fall back to scanning layer.context for an HTML-shaped resource sig
@@ -214,9 +222,12 @@ primitives as everything else (see [dna.md](dna.md)):
   `SITE_VIEW_IOC_KEY`. `WebsiteManifest` / `parseBundle` here are vestigial —
   no live path calls them after the bundle removal.
 - [hypercomb-essentials/.../presentation/tiles/site-view.drone.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/site-view.drone.ts)
-  — the renderer: ViewMode gate, per-cell `decorations` → `visual:website:page`
-  → `payload.htmlSig` lookup (legacy `context`-slot fallback), inline mount,
-  lineage-as-routing navigation.
+  — the renderer: ViewMode gate, per-cell `website` slot lookup
+  (then `decorations` → `visual:website:page` → `payload.htmlSig`, then
+  legacy `context` fallback), inline mount, lineage-as-routing navigation.
+- [hypercomb-essentials/.../commands/website-slot.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/commands/website-slot.ts)
+  — `WEBSITE_SLOT` constant + passive `LayerSlotRegistry`
+  registration for the explicit `website` page slot.
 - [hypercomb-essentials/.../commands/website.queen.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/commands/website.queen.ts)
   — `/website` global view toggle, `here`/`mark`, `list`, `export`,
   `save`/`load`, `upgrade`/`new`/`build`. Bundle stamp/clear now error.

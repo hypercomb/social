@@ -88,8 +88,8 @@ export class ImageDropDrone extends Drone {
 
   #onDragOver = (e: DragEvent): void => {
     // don't claim if over form inputs
-    const el = document.activeElement
-    if (el && (el as HTMLElement).matches?.('input, textarea, select, [contenteditable]')) return
+    const tgt = e.target as HTMLElement | null
+    if (tgt?.closest?.('input, textarea, select, [contenteditable]')) return
 
     // only claim if it looks like files (not a link-only drag)
     const types = e.dataTransfer?.types ?? []
@@ -129,8 +129,8 @@ export class ImageDropDrone extends Drone {
 
   #onDrop = (e: DragEvent): void => {
     // don't steal drops from inputs
-    const el = document.activeElement
-    if (el && (el as HTMLElement).matches?.('input, textarea, select, [contenteditable]')) return
+    const tgt = e.target as HTMLElement | null
+    if (tgt?.closest?.('input, textarea, select, [contenteditable]')) return
 
     // don't steal non-file drops (those go to LinkDropWorker)
     const types = e.dataTransfer?.types ?? []

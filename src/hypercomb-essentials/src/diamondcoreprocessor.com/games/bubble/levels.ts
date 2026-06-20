@@ -7,13 +7,15 @@
 // participant-local class as Solomon's — never in the layer (that would skew the
 // lineage signature across peers).
 
-import { EMPTY, WALL, type LevelDef, type Cell, type EnemySpawn } from './engine.js'
+import { EMPTY, WALL, DOOR, ENEMY_KIND_COUNT, type LevelDef, type Cell, type EnemySpawn } from './engine.js'
 
 // ASCII legend:
-//   '#' WALL   '.'/' ' EMPTY
-//   'P' player spawn   'e' enemy faces right   'E' enemy faces left
-//   digit 0-3 after an enemy is ignored here; kind is assigned round-robin.
-const CHAR_TILE: Record<string, number> = { '#': WALL }
+//   '#' WALL   'D' DOOR (tunnel; place in pairs)   '.'/' ' EMPTY
+//   'P' player spawn
+//   'e' / 'E' an assorted foe facing right / left — cycles through every species
+//   explicit species (lower = right, upper = left):
+//     'h'/'H' hopper   'c'/'C' charger   'f'/'F' flyer   'g'/'G' ghost
+const CHAR_TILE: Record<string, number> = { '#': WALL, 'D': DOOR }
 
 /** Parse an ASCII level. Entity glyphs leave their cell EMPTY and record a
  *  placement. Rows are padded / truncated to `cols` so authoring is forgiving. */
@@ -32,8 +34,18 @@ export function fromAscii(name: string, art: string[]): LevelDef {
       const i = r * cols + c
       switch (ch) {
         case 'P': player = { col: c, row: r }; break
-        case 'e': enemies.push({ col: c, row: r, dir: 1, kind: kind++ % 4 }); break
-        case 'E': enemies.push({ col: c, row: r, dir: -1, kind: kind++ % 4 }); break
+        // e/E: an assorted foe, cycling through every species in turn.
+        case 'e': enemies.push({ col: c, row: r, dir: 1,  kind: kind++ % ENEMY_KIND_COUNT }); break
+        case 'E': enemies.push({ col: c, row: r, dir: -1, kind: kind++ % ENEMY_KIND_COUNT }); break
+        // explicit species (lower = faces right, upper = faces left):
+        case 'h': enemies.push({ col: c, row: r, dir: 1,  kind: 1 }); break   // hopper
+        case 'H': enemies.push({ col: c, row: r, dir: -1, kind: 1 }); break
+        case 'c': enemies.push({ col: c, row: r, dir: 1,  kind: 2 }); break   // charger
+        case 'C': enemies.push({ col: c, row: r, dir: -1, kind: 2 }); break
+        case 'f': enemies.push({ col: c, row: r, dir: 1,  kind: 3 }); break   // flyer
+        case 'F': enemies.push({ col: c, row: r, dir: -1, kind: 3 }); break
+        case 'g': enemies.push({ col: c, row: r, dir: 1,  kind: 4 }); break   // ghost
+        case 'G': enemies.push({ col: c, row: r, dir: -1, kind: 4 }); break
         default: tiles[i] = CHAR_TILE[ch] ?? EMPTY
       }
     }
@@ -100,6 +112,22 @@ export const BUILTIN_LEVELS: LevelDef[] = [
     '....................',
     '....................',
     '.P..................',
+    '####################',
+  ]),
+  // Doors + every species on one screen: two warp pairs (top corners, mid-floor),
+  // flyers & a ghost crossing the open air, chargers + hoppers working the ledges.
+  fromAscii('Tunnel Vaults', [
+    '....................',
+    '..D..............D..',
+    '..##............##..',
+    '....f........F......',
+    '....................',
+    '.....c........C.....',
+    '...######..######...',
+    '....................',
+    '.......D....D.......',
+    '.......##..##.......',
+    '.P..h........H.g....',
     '####################',
   ]),
   // ── detailed screens (finer 28-wide grid) ──────────────────
@@ -204,12 +232,14 @@ export function sanitizeLevel(raw: unknown): LevelDef | null {
   for (const e of enemiesRaw) {
     const c = asCell(e, cols, rows); if (!c) return null
     const es = e as EnemySpawn
-    const kind = isInt(es?.kind) ? ((es.kind % 4) + 4) % 4 : 0
+    const kind = isInt(es?.kind) ? ((es.kind % ENEMY_KIND_COUNT) + ENEMY_KIND_COUNT) % ENEMY_KIND_COUNT : 0
     enemies.push({ col: c.col, row: c.row, dir: es?.dir === -1 ? -1 : 1, kind })
   }
 
+  // Only the known tile codes survive — an unrecognised code collapses to EMPTY
+  // so a tampered store can't smuggle in solid/odd geometry.
   const tiles = new Array<number>(n)
-  for (let i = 0; i < n; i++) { const t = Number(tilesRaw[i]); tiles[i] = Number.isFinite(t) ? t : 0 }
+  for (let i = 0; i < n; i++) { const t = Number(tilesRaw[i]); tiles[i] = (t === WALL || t === DOOR) ? t : EMPTY }
 
   return {
     name: typeof d['name'] === 'string' ? d['name'].slice(0, 80) : 'Imported',

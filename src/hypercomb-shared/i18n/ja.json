@@ -337,6 +337,7 @@
   "mesh.solo": "ソロモード",
   "mesh.swarm": "スワームモード",
   "selection.reroll": "リロール",
+  "selection.documents": "ドキュメントを表示",
   "selection.hide": "非表示",
   "controls.toggle-input": "コマンドラインを表示",
   "slash.reroll": "タイルのサブストレート背景画像をリロール",

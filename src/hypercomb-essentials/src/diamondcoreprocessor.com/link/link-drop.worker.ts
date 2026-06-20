@@ -34,8 +34,8 @@ export class LinkDropWorker extends Worker {
 
   #onDragOver = (e: DragEvent): void => {
     // allow drops on the surface — but not when over form inputs
-    const el = document.activeElement
-    if (el && (el as HTMLElement).matches?.('input, textarea, select, [contenteditable]')) return
+    const tgt = e.target as HTMLElement | null
+    if (tgt?.closest?.('input, textarea, select, [contenteditable]')) return
 
     // only claim the drag if it looks like a link (not a file)
     const types = e.dataTransfer?.types ?? []
@@ -48,8 +48,8 @@ export class LinkDropWorker extends Worker {
 
   #onDrop = (e: DragEvent): void => {
     // don't steal drops from inputs
-    const el = document.activeElement
-    if (el && (el as HTMLElement).matches?.('input, textarea, select, [contenteditable]')) return
+    const tgt = e.target as HTMLElement | null
+    if (tgt?.closest?.('input, textarea, select, [contenteditable]')) return
 
     // don't steal file drops (those go to ImageDropDrone / ImagePasteWorker)
     const hasFiles = (e.dataTransfer?.types ?? []).includes('Files')

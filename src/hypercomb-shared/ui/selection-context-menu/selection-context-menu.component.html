@@ -33,6 +33,13 @@
         <span class="reroll-icon"></span>
       </button>
 
+      @if (hasDocuments()) {
+        <div class="ctx-divider"></div>
+        <button class="ctx-btn" (click)="viewDocuments()" [attr.aria-label]="'selection.documents' | t">
+          <span class="mat-sym">description</span>
+        </button>
+      }
+
       @if (clipboardCount() > 0) {
         <div class="ctx-divider"></div>
         <button class="ctx-btn" (click)="paste()" [attr.aria-label]="'selection.paste' | t">

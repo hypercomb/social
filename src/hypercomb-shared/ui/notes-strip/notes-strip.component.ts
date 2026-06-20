@@ -121,6 +121,8 @@ export class NotesStripComponent implements OnDestroy {
   readonly #selectedCells = signal<readonly string[]>([])
   readonly #capturingFor = signal<string | null>(null)
   readonly #version = signal(0)
+  // Monotonic id source for optimistic (not-yet-persisted) note rows.
+  #pendingSeq = 0
   // Which group's section is currently expanded. The two-signal split lets
   // us distinguish three states cleanly: untouched (auto-open the first
   // group with notes on first multi-select), explicitly opened (#openGroup
@@ -1948,9 +1950,39 @@ export class NotesStripComponent implements OnDestroy {
       ? `[Q] ${text}`
       : text
     EffectBus.emit('note:commit', { cellLabel: cell, text: finalText, editId: editId ?? undefined })
+    // Paint immediately — don't make the user wait for the resource write +
+    // leaf→root layer cascade + the notes:changed re-read. The authoritative
+    // reconcile lands moments later and replaces this with the persisted note.
+    this.#paintOptimistic(cell, finalText, editId ?? null)
     this.draftText.set('')
     this.editingNoteId.set(null)           // editing is one-shot → back to add
     this.#focusForm()
+  }
+
+  /** Optimistically reflect a just-committed note in the local display so the
+   *  strip paints the instant the user hits Enter — instead of waiting for the
+   *  resource write + leaf→root layer cascade + the `notes:changed` re-read.
+   *  Persistence is untouched (the drone still runs the real commit); the
+   *  authoritative `notes:changed` handler replaces this entry with the
+   *  persisted note a moment later — same text + position, so the swap is
+   *  seamless. On edit we mutate text in place (keeping id/children) so the
+   *  row doesn't flicker. */
+  #paintOptimistic(cell: string, text: string, editId: string | null): void {
+    this.#notesByCell.update(prev => {
+      const next = new Map(prev)
+      const current = next.get(cell) ?? []
+      if (editId) {
+        next.set(cell, current.map(n => (n.id === editId ? { ...n, text } : n)))
+      } else {
+        const pending: Note = { id: `pending-${++this.#pendingSeq}`, text, shape: null, children: [] }
+        next.set(cell, [...current, pending])
+      }
+      return next
+    })
+    // The cell now has content — mark it warmed so the empty-state classifier
+    // doesn't briefly flag it, and bump #version like the reconcile path does.
+    this.#warmed.update(prev => { if (prev.has(cell)) return prev; const n = new Set(prev); n.add(cell); return n })
+    this.#version.update(v => v + 1)
   }
 
   /** Drop out of edit mode back to a blank add form. */

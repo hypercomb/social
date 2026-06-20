@@ -5,7 +5,7 @@
 // draw — no state.
 
 import {
-  type Engine, type Brick, type Ball, type Capsule, type Laser, type TurretShot, type Rocket, type Explosion, type Enemy, type Tnt, type Bumper, type Alien, type Pacman, type ComboPop, type Pickup,
+  type Engine, type Brick, type Ball, type Capsule, type Laser, type TurretShot, type Rocket, type Explosion, type Enemy, type Tnt, type Bumper, type PinballProp, type Alien, type ExtraLife, type Pacman, type ComboPop, type Pickup,
   POWER_META, W, H, BRICK_W, BRICK_H, BRICK_TOP, BRICK_X0, GUN_AIM_MIN, GUN_AIM_MAX, GUN_DIAG_SPREAD,
   ROCKET_RADIUS, EXPLOSION_DUR, ENEMY_R, ALIEN_W, ALIEN_H,
   FLIP_LEN, FLIP_PIVOT_DX, FLIP_Y_OFF, FLIP_REST, FLIP_UP,
@@ -82,22 +82,37 @@ function rngFrom(seed: number): () => number {
   return () => { s = (s * 48271) % 2147483647; return s / 2147483647 }
 }
 
+// Per-kind look for the 20 pinball props: colour + draw shape + optional glyph.
+const PROP_STYLE: Record<string, { c: string; shape: string; label?: string }> = {
+  jet: { c: '#ff7043', shape: 'disc', label: 'J' }, pop: { c: '#5b9bff', shape: 'disc' }, mushroom: { c: '#5fe08a', shape: 'disc' },
+  tunnel: { c: '#3dd7ff', shape: 'ring' }, jackpot: { c: '#ffd24a', shape: 'disc', label: '$' }, teleport: { c: '#b07bff', shape: 'ring' },
+  multiplier: { c: '#ffd24a', shape: 'disc', label: '×' }, extraball: { c: '#eaffff', shape: 'disc', label: '+' }, orbit: { c: '#5fe6dc', shape: 'disc' },
+  drop: { c: '#ff5b8a', shape: 'target' }, standup: { c: '#ffae4a', shape: 'target' }, bank: { c: '#b07bff', shape: 'target' },
+  slingL: { c: '#aeb9ff', shape: 'slingL' }, slingR: { c: '#aeb9ff', shape: 'slingR' },
+  magnet: { c: '#7ec8ff', shape: 'field' }, fan: { c: '#a8fff0', shape: 'field' }, kicker: { c: '#ffd24a', shape: 'field' },
+  spinner: { c: '#d8c2ff', shape: 'spinner' }, rollover: { c: '#5fe08a', shape: 'bar' }, gate: { c: '#ff8f8f', shape: 'gate' },
+}
+
 export class Renderer {
   #ctx: CanvasRenderingContext2D
   constructor(ctx: CanvasRenderingContext2D) { this.#ctx = ctx }
 
   draw(engine: Engine, time: number): void {
+    this.#background(time)
     this.#bricks(engine.bricks, time)
     this.#bumpers(engine.bumpers, time)
+    if (engine.pinballProps.length) this.#pinballProps(engine.pinballProps, time)
     this.#lasers(engine.lasers)
     this.#turretShots(engine.turretShots, time)
     this.#gunAim(engine, time)
     this.#paddle(engine)
     this.#beam(engine)
     if (engine.alien) this.#alien(engine.alien, time)
+    if (engine.extraLife) this.#extraLife(engine.extraLife, time)
     if (engine.tnt) this.#tnt(engine.tnt, time)
     const fiery = engine.tnt !== null                       // dynamite on screen → balls catch fire
-    for (const b of engine.balls) this.#ball(b, time, fiery)
+    const piercing = engine.pierceTimer > 0                  // white ball phases through tiles
+    for (const b of engine.balls) this.#ball(b, time, fiery, piercing && b.primary)
     if (engine.chainBall) this.#ballChain(engine, time)     // the swinging wrecking ball
     if (engine.freezeTimer > 0) this.#freeze(engine, time)  // clock freeze overlay + frost
     this.#capsules(engine.capsules, time)
@@ -107,6 +122,9 @@ export class Renderer {
     this.#explosions(engine.explosions)
     this.#pickups(engine.pickups)
     this.#comboPops(engine.comboPops)
+    if (engine.milestoneFx) this.#milestone(engine.milestoneFx.n, engine.milestoneFx.t, engine.milestoneFx.life)
+    if (engine.franticFlash > 0) this.#frenzy(engine.franticFlash, time)
+    if (engine.aiming) this.#aimHint(engine, time)
     this.#hud(engine)
   }
 
@@ -539,6 +557,62 @@ export class Renderer {
     }
   }
 
+  #darken(hex: string): string {
+    const n = parseInt(hex.slice(1), 16)
+    return `rgb(${Math.floor(((n >> 16) & 255) * 0.45)},${Math.floor(((n >> 8) & 255) * 0.45)},${Math.floor((n & 255) * 0.45)})`
+  }
+
+  /** Draw the random handful of pinball props — discs, targets, slings, fields, bars. */
+  #pinballProps(props: readonly PinballProp[], time: number): void {
+    const ctx = this.#ctx
+    for (const p of props) {
+      const s = PROP_STYLE[p.kind]; if (!s) continue
+      const fl = p.flash
+      ctx.save()
+      ctx.shadowColor = s.c; ctx.shadowBlur = 6 + 12 * fl
+      if (s.shape === 'disc') {
+        const g = ctx.createRadialGradient(p.x - 3, p.y - 3, 1, p.x, p.y, p.r)
+        g.addColorStop(0, '#ffffff'); g.addColorStop(0.45, s.c); g.addColorStop(1, this.#darken(s.c))
+        ctx.fillStyle = (p.kind === 'jackpot' && !p.lit) ? 'rgba(110,100,40,0.7)' : g
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (1 + 0.12 * fl), 0, Math.PI * 2); ctx.fill()
+        ctx.shadowBlur = 0; ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1.5; ctx.stroke()
+        if (p.kind === 'extraball' && p.hp <= 0) { /* used — still a faint puck */ }
+        if (s.label) { ctx.fillStyle = '#10131f'; ctx.font = '800 11px system-ui,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(s.label, p.x, p.y + 0.5) }
+      } else if (s.shape === 'ring') {
+        ctx.strokeStyle = s.c; ctx.lineWidth = 3 + 2 * fl
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.stroke()
+        ctx.globalAlpha = 0.3; ctx.beginPath(); ctx.arc(p.x, p.y, p.r * (0.5 + 0.3 * Math.sin(time * 4)), 0, Math.PI * 2); ctx.stroke()
+      } else if (s.shape === 'target') {
+        if ((p.kind === 'drop' || p.kind === 'bank') && p.hp <= 0) { ctx.restore(); continue }
+        this.#roundRect(p.x - p.r, p.y - 7, p.r * 2, 14, 4)
+        const g = ctx.createLinearGradient(p.x, p.y - 7, p.x, p.y + 7); g.addColorStop(0, fl > 0.3 ? '#fff' : s.c); g.addColorStop(1, this.#darken(s.c))
+        ctx.fillStyle = g; ctx.fill()
+        if (p.kind === 'bank') { ctx.shadowBlur = 0; for (let i = 0; i < 3; i++) { ctx.fillStyle = i < p.hp ? '#10131f' : 'rgba(255,255,255,0.4)'; ctx.beginPath(); ctx.arc(p.x - 8 + i * 8, p.y, 1.6, 0, Math.PI * 2); ctx.fill() } }
+      } else if (s.shape === 'slingL' || s.shape === 'slingR') {
+        const dir = s.shape === 'slingL' ? 1 : -1
+        ctx.fillStyle = fl > 0.3 ? '#fff' : s.c
+        ctx.beginPath(); ctx.moveTo(p.x - dir * p.r, p.y + p.r); ctx.lineTo(p.x + dir * p.r, p.y); ctx.lineTo(p.x - dir * p.r, p.y - p.r); ctx.closePath(); ctx.fill()
+      } else if (s.shape === 'field') {
+        ctx.globalAlpha = 0.16 + 0.22 * fl
+        const g = ctx.createRadialGradient(p.x, p.y, 2, p.x, p.y, p.r); g.addColorStop(0, s.c); g.addColorStop(1, s.c + '00')
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill()
+        ctx.globalAlpha = 0.8; ctx.fillStyle = s.c; ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill()
+      } else if (s.shape === 'spinner') {
+        const a = time * (2 + 12 * fl)
+        ctx.strokeStyle = s.c; ctx.lineWidth = 3; ctx.lineCap = 'round'
+        ctx.beginPath(); ctx.moveTo(p.x - Math.cos(a) * p.r, p.y - Math.sin(a) * 4); ctx.lineTo(p.x + Math.cos(a) * p.r, p.y + Math.sin(a) * 4); ctx.stroke()
+      } else if (s.shape === 'gate') {
+        ctx.strokeStyle = s.c; ctx.lineWidth = 3
+        ctx.beginPath(); ctx.moveTo(p.x - p.r, p.y); ctx.lineTo(p.x + p.r, p.y); ctx.stroke()
+        ctx.fillStyle = s.c; ctx.beginPath(); ctx.moveTo(p.x, p.y - 6); ctx.lineTo(p.x - 4, p.y - 1); ctx.lineTo(p.x + 4, p.y - 1); ctx.closePath(); ctx.fill()
+      } else {   // bar / rollover
+        ctx.strokeStyle = p.lit ? '#fff' : s.c; ctx.lineWidth = p.lit ? 4 : 2.5; ctx.globalAlpha = p.lit ? 1 : 0.6
+        ctx.beginPath(); ctx.moveTo(p.x - p.r, p.y); ctx.lineTo(p.x + p.r, p.y); ctx.stroke()
+      }
+      ctx.restore()
+    }
+  }
+
   #bumpers(bumpers: readonly Bumper[], time: number): void {
     if (!bumpers.length) return
     const ctx = this.#ctx
@@ -563,15 +637,16 @@ export class Renderer {
     }
   }
 
-  #ball(ball: Ball, time: number, fiery = false): void {
+  #ball(ball: Ball, time: number, fiery = false, pierce = false): void {
     const ctx = this.#ctx
     if (fiery) this.#ballFire(ball, time)                    // dynamite live: flames lick off the ball
+    if (pierce) this.#ballPhase(ball, time)                  // pierce active: ghostly phasing aura + trail
     ctx.save()
     const pulse = 0.85 + 0.15 * Math.sin(time * 6)
     if (ball.primary) {
       // The white ball — the one you must keep alive.
-      ctx.shadowColor = `rgba(255,255,255,${0.7 * pulse})`
-      ctx.shadowBlur = 14
+      ctx.shadowColor = pierce ? `rgba(216,230,255,${0.85 * pulse})` : `rgba(255,255,255,${0.7 * pulse})`
+      ctx.shadowBlur = pierce ? 18 : 14
     } else {
       // Coloured ammo fired by the gun / spawned by Break — expendable.
       ctx.shadowColor = ball.color
@@ -579,8 +654,27 @@ export class Renderer {
     }
     ctx.beginPath()
     ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2)
-    ctx.fillStyle = ball.color
+    ctx.fillStyle = pierce ? '#eef4ff' : ball.color
     ctx.fill()
+    ctx.restore()
+  }
+
+  /** Pierce active: a ghostly icy halo with two offset afterimages, reading as the
+   *  ball phasing THROUGH matter. */
+  #ballPhase(ball: Ball, time: number): void {
+    const ctx = this.#ctx
+    ctx.save()
+    ctx.globalCompositeOperation = 'lighter'
+    const dir = Math.atan2(ball.vy, ball.vx)
+    for (let i = 1; i <= 2; i++) {                            // afterimages trailing behind the motion
+      const bx = ball.x - Math.cos(dir) * i * ball.r * 1.1, by = ball.y - Math.sin(dir) * i * ball.r * 1.1
+      ctx.globalAlpha = 0.28 / i
+      ctx.fillStyle = '#bcd4ff'
+      ctx.beginPath(); ctx.arc(bx, by, ball.r * (1 - i * 0.12), 0, Math.PI * 2); ctx.fill()
+    }
+    ctx.globalAlpha = 0.5 + 0.3 * Math.sin(time * 10)        // shimmering ring
+    ctx.strokeStyle = '#d8e6ff'; ctx.lineWidth = 1.5
+    ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r + 3, 0, Math.PI * 2); ctx.stroke()
     ctx.restore()
   }
 
@@ -680,6 +774,35 @@ export class Renderer {
     ctx.restore()
   }
 
+  /** The gold paper-crane jackpot prize — a folded origami crane that flutters down. */
+  #paperCrane(x: number, y: number, time: number): void {
+    const ctx = this.#ctx
+    const flap = Math.sin(time * 7)                    // wing flap
+    ctx.save()
+    ctx.translate(x, y)
+    ctx.rotate(Math.sin(time * 2.2) * 0.12)            // gentle sway as it falls
+    ctx.shadowColor = '#ffcf3a'; ctx.shadowBlur = 16
+    const gold = ctx.createLinearGradient(-18, -14, 18, 14)
+    gold.addColorStop(0, '#fff3b0'); gold.addColorStop(0.5, '#ffd24a'); gold.addColorStop(1, '#e0a516')
+    ctx.fillStyle = '#e0a516'                          // far wing (behind)
+    ctx.beginPath(); ctx.moveTo(-2, -1); ctx.lineTo(-20, -10 - 6 * flap); ctx.lineTo(-4, 4); ctx.closePath(); ctx.fill()
+    ctx.fillStyle = gold                               // tail
+    ctx.beginPath(); ctx.moveTo(-2, 0); ctx.lineTo(-16, -2); ctx.lineTo(-6, 6); ctx.closePath(); ctx.fill()
+    ctx.beginPath(); ctx.moveTo(-4, 0); ctx.lineTo(2, -5); ctx.lineTo(8, 1); ctx.lineTo(1, 6); ctx.closePath(); ctx.fill()   // body diamond
+    ctx.strokeStyle = '#ffd24a'; ctx.lineWidth = 2.4; ctx.lineCap = 'round'    // neck
+    ctx.beginPath(); ctx.moveTo(5, -2); ctx.lineTo(15, -12); ctx.stroke()
+    ctx.fillStyle = '#ffe98a'                          // head / beak
+    ctx.beginPath(); ctx.moveTo(15, -12); ctx.lineTo(21, -12); ctx.lineTo(15, -8); ctx.closePath(); ctx.fill()
+    ctx.fillStyle = gold                               // near wing (flapping)
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(18, -12 - 8 * flap); ctx.lineTo(6, 4); ctx.closePath(); ctx.fill()
+    ctx.strokeStyle = 'rgba(140,90,10,0.5)'; ctx.lineWidth = 1                 // a fold crease
+    ctx.beginPath(); ctx.moveTo(0, 0); ctx.lineTo(12, -8 - 5 * flap); ctx.stroke()
+    ctx.restore()
+    const sp = 0.5 + 0.5 * Math.sin(time * 5)          // a sparkle
+    ctx.save(); ctx.globalAlpha = sp; ctx.fillStyle = '#fffbe0'
+    ctx.beginPath(); ctx.arc(x + 16, y - 12, 1.6 + sp, 0, Math.PI * 2); ctx.fill(); ctx.restore()
+  }
+
   #capsules(capsules: readonly Capsule[], time: number): void {
     const ctx = this.#ctx
     for (const cap of capsules) {
@@ -694,6 +817,7 @@ export class Renderer {
       ctx.restore()
       if (cap.kind === 'oscillate' || cap.kind === 'beam') { this.#mushroom(cap.x, cap.y, meta.color); continue }   // magic mushrooms
       if (cap.kind === 'clock') { this.#clockCapsule(cap.x, cap.y, time); continue }                                // the time clock
+      if (cap.kind === 'crane') { this.#paperCrane(cap.x, cap.y, time); continue }                                  // the gold paper-crane jackpot
       const w = 30, h = 15
       const x = cap.x - w / 2, y = cap.y - h / 2
       ctx.save()
@@ -769,7 +893,56 @@ export class Renderer {
   /** The hunter: a detailed mechanical-organic sentinel. Pulsing aura, scanning
    *  antennae, a rotating armoured carapace whose 3 plates break as HP drops,
    *  reaching pincers, and a glowing slit eye that tracks the white ball. */
+  /** An immaculate backdrop: a deep refined gradient, a soft top-light, a slow drifting
+   *  aurora, a faint diamond lattice and a focusing vignette. Subtle by design — it
+   *  sets a polished stage without competing with the play. */
+  #background(time: number): void {
+    const ctx = this.#ctx
+    // 1 ── base vertical gradient (deep indigo → near-black)
+    const g = ctx.createLinearGradient(0, 0, 0, H)
+    g.addColorStop(0, '#0c1228'); g.addColorStop(0.55, '#080c1a'); g.addColorStop(1, '#05070f')
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H)
+    // 2 ── soft top-centre stage light
+    const glow = ctx.createRadialGradient(W / 2, -40, 20, W / 2, -40, H)
+    glow.addColorStop(0, 'rgba(96,134,214,0.16)'); glow.addColorStop(1, 'rgba(96,134,214,0)')
+    ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H)
+    // 3 ── a slow drifting aurora band (a breath of life, very faint)
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'
+    const ay = H * 0.46 + Math.sin(time * 0.13) * 34
+    const aur = ctx.createLinearGradient(0, ay - 80, 0, ay + 80)
+    aur.addColorStop(0, 'rgba(64,128,184,0)'); aur.addColorStop(0.5, 'rgba(74,150,196,0.055)'); aur.addColorStop(1, 'rgba(64,128,184,0)')
+    ctx.fillStyle = aur; ctx.fillRect(0, ay - 80, W, 160)
+    ctx.restore()
+    // 4 ── faint diamond lattice (staggered dots) for quiet structure
+    ctx.fillStyle = 'rgba(150,180,232,0.035)'
+    let row = 0
+    for (let yy = 26; yy < H; yy += 34, row++) for (let xx = (row % 2 ? 34 : 17); xx < W; xx += 34) {
+      ctx.beginPath(); ctx.arc(xx, yy, 0.9, 0, Math.PI * 2); ctx.fill()
+    }
+    // 5 ── focusing vignette
+    const vg = ctx.createRadialGradient(W / 2, H * 0.46, H * 0.34, W / 2, H * 0.5, H * 0.78)
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.46)')
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H)
+  }
+
+  /** Dispatch the enemy draw by kind — ten distinct silhouettes. */
   #enemy(enemy: Enemy, target: { x: number; y: number } | null, time: number): void {
+    switch (enemy.kind) {
+      case 'bomber': return this.#enemyBomber(enemy, time)
+      case 'splitter': return this.#enemySplitter(enemy, time)
+      case 'leech': return this.#enemyLeech(enemy, time)
+      case 'mirror': return this.#enemyMirror(enemy, time)
+      case 'orbit': return this.#enemyOrbit(enemy, time)
+      case 'dart': return this.#enemyDart(enemy, time)
+      case 'blink': return this.#enemyBlink(enemy, time)
+      case 'polarity': return this.#enemyPolarity(enemy, time)
+      case 'queen': return this.#enemyQueen(enemy, time)
+      default: return this.#enemyHunter(enemy, target, time)
+    }
+  }
+
+  /** Hunter (variant 0): the spiked homing bug — the archetype the others vary from. */
+  #enemyHunter(enemy: Enemy, target: { x: number; y: number } | null, time: number): void {
     const ctx = this.#ctx
     const { x, y, hp } = enemy
     const V = ENEMY_LOOKS[((enemy.variant % ENEMY_LOOKS.length) + ENEMY_LOOKS.length) % ENEMY_LOOKS.length]
@@ -872,6 +1045,180 @@ export class Renderer {
     ctx.restore()
   }
 
+  /** Shared soft aura behind the simpler enemy silhouettes. */
+  #enemyAura(x: number, y: number, rgb: string, time: number, k = 2.2): void {
+    const ctx = this.#ctx, p = 0.5 + 0.5 * Math.sin(time * 3)
+    const g = ctx.createRadialGradient(x, y, ENEMY_R * 0.5, x, y, ENEMY_R * k)
+    g.addColorStop(0, `rgba(${rgb},${0.18 + 0.12 * p})`); g.addColorStop(1, `rgba(${rgb},0)`)
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x, y, ENEMY_R * k, 0, Math.PI * 2); ctx.fill()
+  }
+
+  #diamond(x: number, y: number, r: number): void {
+    const ctx = this.#ctx
+    ctx.beginPath(); ctx.moveTo(x, y - r); ctx.lineTo(x + r * 0.8, y); ctx.lineTo(x, y + r); ctx.lineTo(x - r * 0.8, y); ctx.closePath()
+  }
+
+  /** Bombardier — an amber mortar dome that strafes a high lane and drops bombs. */
+  #enemyBomber(e: Enemy, time: number): void {
+    const ctx = this.#ctx, x = e.x, y = e.y
+    const fuse = 1 - Math.min(1, (e.cd ?? 1.8) / 1.8)
+    this.#enemyAura(x, y, '255,150,40', time)
+    ctx.save()
+    ctx.fillStyle = '#7a3a0f'
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(x + s * 14, y - 4); ctx.lineTo(x + s * 22, y - 9); ctx.lineTo(x + s * 16, y + 3); ctx.closePath(); ctx.fill() }
+    ctx.shadowColor = '#e2731a'; ctx.shadowBlur = 10
+    const g = ctx.createLinearGradient(x, y - 12, x, y + 12)
+    g.addColorStop(0, '#ffa64d'); g.addColorStop(0.5, '#e2731a'); g.addColorStop(1, '#7a3a0f')
+    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(x, y, 17, 11, 0, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0
+    ctx.fillStyle = '#5a2a0c'; for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.arc(x + i * 6, y - 5, 1, 0, Math.PI * 2); ctx.fill() }
+    ctx.fillStyle = `rgba(255,180,60,${0.35 + 0.6 * fuse})`; ctx.shadowColor = '#ffb43c'; ctx.shadowBlur = 4 + 10 * fuse
+    ctx.beginPath(); ctx.arc(x, y + 9, 4 + 1.5 * fuse, 0, Math.PI * 2); ctx.fill()
+    ctx.restore()
+  }
+
+  /** Mitosis Pod — a blue-green dividing cell that drifts and splits when hit. */
+  #enemySplitter(e: Enemy, time: number): void {
+    const ctx = this.#ctx, sep = (e.split ?? 0) > 0 ? 6 : 1.5
+    const seam = 0.5 + 0.5 * Math.sin(time * 5)
+    this.#enemyAura(e.x, e.y, '70,200,140', time, 1.9)
+    ctx.save()
+    for (const s of [-1, 1]) {
+      const cx = e.x + s * sep
+      const g = ctx.createRadialGradient(cx - 2, e.y - 3, 1, cx, e.y, 12)
+      g.addColorStop(0, '#7fe6ac'); g.addColorStop(0.6, '#3a9d6e'); g.addColorStop(1, '#0f5a3e')
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, e.y, 11, 0, Math.PI * 2); ctx.fill()
+    }
+    ctx.strokeStyle = `rgba(180,255,210,${0.4 + 0.5 * seam})`; ctx.lineWidth = 1.6; ctx.shadowColor = '#bfffd8'; ctx.shadowBlur = 6
+    ctx.beginPath(); ctx.moveTo(e.x, e.y - 11); ctx.lineTo(e.x, e.y + 11); ctx.stroke()
+    ctx.restore()
+  }
+
+  /** Leech Swooper — a magenta winged stingray that vacuums falling pills. */
+  #enemyLeech(e: Enemy, time: number): void {
+    const ctx = this.#ctx, x = e.x, y = e.y
+    const flap = Math.sin((e.t ?? 0) * 6), gold = (e.flash ?? 0) > 0
+    this.#enemyAura(x, y, gold ? '255,210,74' : '255,90,200', time, 1.8)
+    ctx.save()
+    ctx.fillStyle = gold ? '#ffd24a' : '#ff5bbf'; ctx.shadowColor = gold ? '#ffd24a' : '#ff5bbf'; ctx.shadowBlur = 8
+    for (const s of [-1, 1]) {
+      ctx.beginPath(); ctx.moveTo(x, y)
+      ctx.quadraticCurveTo(x + s * 16, y - 10 - 6 * flap, x + s * 24, y + 2)
+      ctx.quadraticCurveTo(x + s * 14, y + 4, x, y + 3); ctx.closePath(); ctx.fill()
+    }
+    ctx.shadowBlur = 0
+    ctx.fillStyle = gold ? '#fff0b0' : '#ffaee0'
+    ctx.beginPath(); ctx.ellipse(x, y, 5, 9, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.strokeStyle = gold ? '#fff0b0' : '#ffaee0'; ctx.lineWidth = 1.4
+    ctx.beginPath(); ctx.moveTo(x, y + 8); ctx.lineTo(x + flap * 3, y + 16); ctx.stroke()
+    ctx.restore()
+  }
+
+  /** Mirror Sentinel — a chrome obelisk that mirrors the bat and beams its column. */
+  #enemyMirror(e: Enemy, time: number): void {
+    const ctx = this.#ctx, x = e.x, y = e.y, w = 11, h = 22
+    const fire = e.flash ?? 0
+    this.#enemyAura(x, y, '192,198,214', time, 1.6)
+    ctx.save()
+    ctx.shadowColor = '#dfe7ff'; ctx.shadowBlur = 8
+    const g = ctx.createLinearGradient(x - w, y, x + w, y)
+    g.addColorStop(0, '#5a6072'); g.addColorStop(0.5, '#e8ecf6'); g.addColorStop(1, '#5a6072')
+    this.#roundRect(x - w / 2, y - h / 2, w, h, 3); ctx.fillStyle = g; ctx.fill(); ctx.shadowBlur = 0
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1
+    ctx.beginPath(); ctx.moveTo(x - 1, y - h / 2 + 2); ctx.lineTo(x - 1, y + h / 2 - 2); ctx.stroke()
+    const ey = y + Math.sin(time * 3) * (h / 2 - 4)
+    ctx.fillStyle = `rgba(120,220,255,${0.6 + 0.4 * fire})`; ctx.shadowColor = '#7ee0ff'; ctx.shadowBlur = 6
+    this.#roundRect(x - w / 2 + 1, ey - 1.5, w - 2, 3, 1.5); ctx.fill()
+    ctx.restore()
+  }
+
+  /** Orbit Sentinel — a green core with two orbiting satellites that deflect shots. */
+  #enemyOrbit(e: Enemy, time: number): void {
+    const ctx = this.#ctx, x = e.x, y = e.y, t = e.t ?? 0
+    this.#enemyAura(x, y, '200,255,74', time, 1.8)
+    ctx.save()
+    ctx.strokeStyle = 'rgba(200,255,74,0.25)'; ctx.lineWidth = 1
+    ctx.beginPath(); ctx.arc(x, y, 14, 0, Math.PI * 2); ctx.stroke()
+    const g = ctx.createRadialGradient(x - 2, y - 2, 1, x, y, 10)
+    g.addColorStop(0, '#f4ff9a'); g.addColorStop(1, '#6e8a0f')
+    ctx.fillStyle = g; ctx.shadowColor = '#cfff4a'; ctx.shadowBlur = 8
+    ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0
+    ctx.fillStyle = '#eaffb0'
+    for (const k of [0, 1]) { const a = t * 2 + k * Math.PI; ctx.beginPath(); ctx.arc(x + Math.cos(a) * 14, y + Math.sin(a) * 14, 3.5, 0, Math.PI * 2); ctx.fill() }
+    ctx.restore()
+  }
+
+  /** Dart Diver — a red delta that patrols then commits a straight plunge. */
+  #enemyDart(e: Enemy, time: number): void {
+    const ctx = this.#ctx, x = e.x, y = e.y
+    const tilt = e.phase === 'patrol' && (e.cd ?? 1) < 0.4 ? 0.18 : 0
+    this.#enemyAura(x, y, '255,90,60', time, 1.7)
+    ctx.save(); ctx.translate(x, y); ctx.rotate(tilt)
+    ctx.shadowColor = '#ff5b3a'; ctx.shadowBlur = 8
+    const g = ctx.createLinearGradient(0, -14, 0, 12)
+    g.addColorStop(0, '#ffb04d'); g.addColorStop(0.5, '#ff5b3a'); g.addColorStop(1, '#7a1808')
+    ctx.fillStyle = g
+    ctx.beginPath(); ctx.moveTo(0, 14); ctx.lineTo(-11, -12); ctx.lineTo(0, -6); ctx.lineTo(11, -12); ctx.closePath(); ctx.fill()
+    ctx.shadowBlur = 0
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, 12, 2, 0, Math.PI * 2); ctx.fill()
+    ctx.restore()
+  }
+
+  /** Blink Imp — a violet tetrahedron that teleport-stalks with a glitch halo. */
+  #enemyBlink(e: Enemy, time: number): void {
+    const ctx = this.#ctx, x = e.x, y = e.y
+    const charge = e.phase === 'idle' ? 1 - Math.min(1, (e.cd ?? 1.4) / 1.4) : 0
+    if (e.ghostX !== undefined && (e.flash ?? 0) > 0) {
+      ctx.save(); ctx.globalAlpha = (e.flash ?? 0) * 0.4; ctx.fillStyle = '#a86bff'
+      this.#diamond(e.ghostX, e.ghostY ?? y, 12); ctx.fill(); ctx.restore()
+    }
+    if (e.phase === 'out') return
+    this.#enemyAura(x, y, '168,107,255', time, 1.6)
+    ctx.save()
+    ctx.strokeStyle = `rgba(200,150,255,${0.4 + 0.5 * charge})`; ctx.lineWidth = 2; ctx.shadowColor = '#a86bff'; ctx.shadowBlur = 8 + 10 * charge
+    ctx.beginPath(); ctx.arc(x, y, 18 - 8 * charge, 0, Math.PI * 2); ctx.stroke(); ctx.shadowBlur = 0
+    const g = ctx.createLinearGradient(x, y - 12, x, y + 12); g.addColorStop(0, '#c89bff'); g.addColorStop(1, '#5a2ea8')
+    ctx.fillStyle = g; this.#diamond(x, y, 13); ctx.fill()
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x, y, 2.4, 0, Math.PI * 2); ctx.fill()
+    ctx.restore()
+  }
+
+  /** Polarity Knight — a hex split blue|red; only the matching damage type hurts it. */
+  #enemyPolarity(e: Enemy, time: number): void {
+    const ctx = this.#ctx, x = e.x, y = e.y, r = 15, red = e.polarity === 'red'
+    this.#enemyAura(x, y, red ? '255,74,74' : '58,125,255', time, 1.7)
+    ctx.save()
+    const hexPath = () => { ctx.beginPath(); for (let i = 0; i <= 6; i++) { const a = -Math.PI / 2 + i * Math.PI / 3; const px = x + Math.cos(a) * r, py = y + Math.sin(a) * r; i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py) } ctx.closePath() }
+    hexPath(); ctx.save(); ctx.clip()
+    ctx.fillStyle = '#3a7dff'; ctx.fillRect(x - r, y - r, r, r * 2)
+    ctx.fillStyle = '#ff4a4a'; ctx.fillRect(x, y - r, r, r * 2)
+    ctx.restore()
+    hexPath(); ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1; ctx.stroke()
+    ctx.fillStyle = red ? '#ff4a4a' : '#3a7dff'; ctx.shadowColor = red ? '#ff4a4a' : '#3a7dff'; ctx.shadowBlur = 10
+    this.#diamond(x, y, 5); ctx.fill(); ctx.shadowBlur = 0
+    if ((e.flash ?? 0) > 0) { ctx.strokeStyle = `rgba(255,255,255,${e.flash})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r + 3, 0, Math.PI * 2); ctx.stroke() }
+    ctx.restore()
+  }
+
+  /** Hive Queen — the bloated boss-mother; her egg-sac glows before each broodling. */
+  #enemyQueen(e: Enemy, time: number): void {
+    const ctx = this.#ctx, x = e.x, y = e.y, r = 22
+    const birth = 1 - Math.min(1, (e.cd ?? 4) / 4)
+    if (e.brood) { ctx.save(); ctx.fillStyle = '#ff5b6e'; for (const m of e.brood) { ctx.beginPath(); ctx.moveTo(m.x, m.y - 4); ctx.lineTo(m.x + 3, m.y + 3); ctx.lineTo(m.x - 3, m.y + 3); ctx.closePath(); ctx.fill() } ctx.restore() }
+    this.#enemyAura(x, y, '255,40,60', time, 2.4)
+    ctx.save()
+    ctx.strokeStyle = '#7a0f1e'; ctx.lineWidth = 2; ctx.lineCap = 'round'
+    for (const s of [-1, 1]) for (const k of [0, 1]) { const a = Math.PI / 2 + s * (0.5 + k * 0.4); ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r * 0.7, y + Math.sin(a) * r * 0.7); ctx.lineTo(x + Math.cos(a) * (r + 7), y + Math.sin(a) * (r + 7) + Math.sin(time * 6 + k) * 2); ctx.stroke() }
+    ctx.shadowColor = '#c41e3a'; ctx.shadowBlur = 12
+    const g = ctx.createRadialGradient(x - 4, y - 6, 2, x, y + 4, r)
+    g.addColorStop(0, '#e2455e'); g.addColorStop(0.6, '#c41e3a'); g.addColorStop(1, '#6e0f1e')
+    ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(x, y + 3, r * 0.8, r, 0, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0
+    ctx.fillStyle = `rgba(255,200,80,${0.3 + 0.6 * birth})`; ctx.shadowColor = '#ffd24a'; ctx.shadowBlur = 4 + 14 * birth
+    ctx.beginPath(); ctx.arc(x, y + 10, 7 + 2 * birth, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0
+    ctx.fillStyle = '#8a1226'; ctx.beginPath(); ctx.arc(x, y - r * 0.6, 8, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = '#ffd24a'; for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(x + s * 3, y - r * 0.6, 1.6, 0, Math.PI * 2); ctx.fill() }
+    ctx.restore()
+  }
+
   /** Pac-Man — a chomping yellow rival that eats your colour balls. Faces its
    *  travel direction; HP pips float above; turns translucent as it leaves, full. */
   #pacman(p: Pacman, time: number): void {
@@ -931,18 +1278,66 @@ export class Renderer {
       ctx.fillStyle = `rgba(255,210,74,${0.4 + 0.6 * on})`
       ctx.beginPath(); ctx.arc(lx, y + ALIEN_H * 0.32, 1.4, 0, Math.PI * 2); ctx.fill()
     }
-    if (a.extraLife) {                                       // the one-pass extra-life carrier
-      const pl = 0.5 + 0.5 * Math.sin(time * 6)
-      ctx.shadowColor = '#5fe08a'; ctx.shadowBlur = 14 + 8 * pl
-      ctx.strokeStyle = `rgba(95,224,138,${0.6 + 0.3 * pl})`; ctx.lineWidth = 2
-      ctx.beginPath(); ctx.ellipse(x, y + 1, hw + 5, ALIEN_H * 0.5 + 4, 0, 0, Math.PI * 2); ctx.stroke()
-      ctx.shadowBlur = 0
-      ctx.fillStyle = '#5fe08a'                              // a little green heart riding the dome
-      const hy = y - 9
-      ctx.beginPath(); ctx.arc(x - 2.2, hy, 2.4, 0, Math.PI * 2); ctx.fill()
-      ctx.beginPath(); ctx.arc(x + 2.2, hy, 2.4, 0, Math.PI * 2); ctx.fill()
-      ctx.beginPath(); ctx.moveTo(x - 4.3, hy + 0.9); ctx.lineTo(x + 4.3, hy + 0.9); ctx.lineTo(x, hy + 6); ctx.closePath(); ctx.fill()
+    ctx.restore()
+  }
+
+  /** The extra-life carrier — a beautiful winged heart trailing sparkles and a soft
+   *  golden aura, gently bobbing as it sweeps across. */
+  #extraLife(c: ExtraLife, time: number): void {
+    const ctx = this.#ctx
+    const x = c.x, y = c.y + Math.sin(time * 3) * 3            // gentle bob
+    const flap = Math.sin(time * 9)                            // wing beat
+    ctx.save()
+    // soft golden aura
+    const aura = ctx.createRadialGradient(x, y, 2, x, y, 30)
+    aura.addColorStop(0, 'rgba(255,224,120,0.45)'); aura.addColorStop(1, 'rgba(255,224,120,0)')
+    ctx.fillStyle = aura
+    ctx.beginPath(); ctx.arc(x, y, 30, 0, Math.PI * 2); ctx.fill()
+    // trailing sparkles
+    for (let i = 0; i < 5; i++) {
+      const a = time * 2 + i * 1.3, rr = 16 + 6 * Math.sin(time * 4 + i)
+      const sx = x - Math.sign(c.vx || 1) * (10 + i * 5), sy = y + Math.sin(a) * 6
+      ctx.globalAlpha = 0.5 - i * 0.08
+      ctx.fillStyle = '#fff6c8'
+      ctx.beginPath(); ctx.arc(sx, sy, 1.6, 0, Math.PI * 2); ctx.fill()
     }
+    ctx.globalAlpha = 1
+    // feathered wings (flap), behind the heart
+    for (const s of [-1, 1]) {
+      ctx.save()
+      ctx.translate(x + s * 9, y - 2)
+      ctx.rotate(s * (-0.5 + 0.35 * flap))
+      ctx.shadowColor = 'rgba(255,255,255,0.7)'; ctx.shadowBlur = 8
+      const wg = ctx.createLinearGradient(0, 0, s * 18, -4)
+      wg.addColorStop(0, '#ffffff'); wg.addColorStop(1, '#cfe2ff')
+      ctx.fillStyle = wg
+      ctx.beginPath()
+      ctx.moveTo(0, 4)
+      ctx.quadraticCurveTo(s * 14, -6, s * 20, -2)
+      ctx.quadraticCurveTo(s * 13, 2, s * 16, 8)
+      ctx.quadraticCurveTo(s * 9, 5, s * 10, 11)
+      ctx.quadraticCurveTo(s * 5, 7, 0, 4)
+      ctx.closePath(); ctx.fill()
+      ctx.restore()
+    }
+    // the heart — glossy red→pink, with a highlight
+    const beat = 1 + 0.06 * Math.sin(time * 6)
+    ctx.shadowColor = '#ff5b8a'; ctx.shadowBlur = 12
+    const hg = ctx.createRadialGradient(x - 3, y - 4, 1, x, y, 12)
+    hg.addColorStop(0, '#ffd0e0'); hg.addColorStop(0.5, '#ff5b8a'); hg.addColorStop(1, '#c81e5a')
+    ctx.fillStyle = hg
+    const R = 11 * beat
+    ctx.beginPath()
+    ctx.moveTo(x, y + R * 0.85)
+    ctx.bezierCurveTo(x - R * 1.3, y - R * 0.25, x - R * 0.55, y - R * 0.95, x, y - R * 0.35)
+    ctx.bezierCurveTo(x + R * 0.55, y - R * 0.95, x + R * 1.3, y - R * 0.25, x, y + R * 0.85)
+    ctx.closePath(); ctx.fill()
+    ctx.shadowBlur = 0
+    ctx.fillStyle = 'rgba(255,255,255,0.8)'                    // gloss
+    ctx.beginPath(); ctx.ellipse(x - 3.5, y - 3, 2.4, 1.6, -0.5, 0, Math.PI * 2); ctx.fill()
+    // a tiny "1UP" tag
+    ctx.fillStyle = '#fff'; ctx.font = '800 7px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    ctx.fillText('1UP', x, y + R + 7)
     ctx.restore()
   }
 
@@ -973,21 +1368,101 @@ export class Renderer {
   }
 
   /** Floating combo counters rising from each chained kill (×N). */
+  /** Floating combo counters (×N) only — the point NUMBERS no longer clutter the
+   *  playfield (the score lives in the corner HUD). */
   #comboPops(pops: readonly ComboPop[]): void {
     if (!pops.length) return
     const ctx = this.#ctx
     for (const p of pops) {
+      if (p.t < 0) continue                                // staggered milestone bead — not started yet
+      if (p.pts !== undefined) continue                    // points removed from the screen — combo ×N only
       const k = Math.min(1, p.t / 0.9)
-      const big = p.n >= 6
       ctx.save()
       ctx.globalAlpha = Math.max(0, 1 - k)
-      ctx.font = `800 ${13 + Math.min(11, p.n)}px "Segoe UI", system-ui, sans-serif`
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      const big = p.n >= 6
+      ctx.font = `800 ${13 + Math.min(11, p.n)}px "Segoe UI", system-ui, sans-serif`
       ctx.fillStyle = big ? '#ffd24a' : '#ffffff'
       ctx.shadowColor = big ? '#ff7043' : 'rgba(126,224,255,0.85)'; ctx.shadowBlur = 8
       ctx.fillText(`×${p.n}`, p.x, p.y - k * 30)
       ctx.restore()
     }
+  }
+
+  /** The milestone eruption (combo ×5/×10/×15/×20+): an escalating tier-coloured burst
+   *  with a 'COMBO ×N' headline. Deterministic in time (no Math.random in render). */
+  #milestone(n: number, t: number, life = false): void {
+    const ctx = this.#ctx
+    const cx = W / 2, cy = H * 0.40
+    const tier = n >= 20 ? 3 : n >= 15 ? 2 : n >= 10 ? 1 : 0
+    const col = ['#7ee0ff', '#5fe08a', '#ffd24a', '#ff7043'][tier]
+    const rings = tier + 1                                  // 1..4 concentric rings escalate with the tier
+    const fade = t > 0.8 ? Math.max(0, 1 - (t - 0.8) / 0.3) : 1
+    ctx.save()
+    // tier vignette / brief screen flash
+    if (tier >= 1 && t < 0.5) { ctx.globalAlpha = (tier >= 3 ? 0.12 : 0.06) * (1 - t / 0.5); ctx.fillStyle = col; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1 }
+    // expanding burst ring(s)
+    ctx.shadowColor = col; ctx.shadowBlur = 10
+    for (let i = 0; i < rings; i++) {
+      const rp = Math.min(1, Math.max(0, (t - i * 0.06) / 1.0))
+      if (rp <= 0) continue
+      ctx.globalAlpha = (1 - rp) * 0.9
+      ctx.strokeStyle = col; ctx.lineWidth = 6 - rp * 5
+      ctx.beginPath(); ctx.arc(cx, cy, 10 + rp * 120, 0, Math.PI * 2); ctx.stroke()
+    }
+    ctx.shadowBlur = 0
+    // 'COMBO ×N' headline — quick overshoot, fading the last 0.3s
+    const pop = 1 + 0.4 * Math.sin(Math.min(1, t / 0.18) * Math.PI)
+    ctx.globalAlpha = fade
+    ctx.save()
+    ctx.translate(cx, cy); ctx.scale(pop, pop)
+    ctx.fillStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 18
+    ctx.font = `800 ${28 + Math.min(28, n)}px "Segoe UI", system-ui, sans-serif`
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    ctx.fillText(`COMBO ×${n}`, 0, 0)
+    ctx.restore()
+    if (life) {                                            // only when a life was actually granted (not at max lives)
+      ctx.globalAlpha = fade
+      ctx.fillStyle = '#ffffff'; ctx.shadowColor = col; ctx.shadowBlur = 8
+      ctx.font = '800 16px "Segoe UI", system-ui, sans-serif'
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.fillText('+1 LIFE', cx, cy - 42 - Math.min(28, n) / 2)
+    }
+    ctx.restore()
+  }
+
+  /** Frenzy start: a red screen flash + jagged lightning bolts + a "FRENZY!" shout —
+   *  the gold brick wasn't broken in time. Deterministic in time (no Math.random). */
+  #frenzy(flash: number, time: number): void {
+    const ctx = this.#ctx
+    const f = Math.min(1, flash / 0.7)                     // 1 at the start → 0 as it fades
+    ctx.save()
+    ctx.fillStyle = `rgba(255,48,48,${0.20 * f})`          // red wash
+    ctx.fillRect(0, 0, W, H)
+    // a few jagged lightning bolts top→bottom, flickering with time
+    ctx.globalCompositeOperation = 'lighter'
+    for (let i = 0; i < 4; i++) {
+      const baseX = W * (0.18 + 0.21 * i) + Math.sin(time * 30 + i) * 10
+      ctx.strokeStyle = `rgba(${i % 2 ? 200 : 255},${230},255,${(0.55 + 0.35 * Math.sin(time * 50 + i * 2)) * f})`
+      ctx.lineWidth = 2.2; ctx.shadowColor = '#bfe3ff'; ctx.shadowBlur = 12
+      ctx.beginPath(); ctx.moveTo(baseX, 0)
+      for (let y = 0; y <= H; y += 40) {
+        const jx = baseX + Math.sin(y * 0.09 + i * 3 + time * 40) * 22 + Math.cos(y * 0.21 + time * 60) * 9
+        ctx.lineTo(jx, y)
+      }
+      ctx.stroke()
+    }
+    ctx.globalCompositeOperation = 'source-over'; ctx.shadowBlur = 0
+    // FRENZY! shout, jittering
+    const pop = 1 + 0.12 * Math.sin(time * 40)
+    ctx.save()
+    ctx.translate(W / 2 + Math.sin(time * 53) * 4, H * 0.3); ctx.scale(pop, pop)
+    ctx.globalAlpha = f
+    ctx.fillStyle = '#fff'; ctx.shadowColor = '#ff3b3b'; ctx.shadowBlur = 16
+    ctx.font = '900 40px "Segoe UI", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    ctx.fillText('FRENZY!', 0, 0)
+    ctx.restore()
+    ctx.restore()
   }
 
   #explosions(explosions: readonly Explosion[]): void {
@@ -1008,24 +1483,58 @@ export class Renderer {
     }
   }
 
+  /** One-time aim hint: the ±25% movable band + a lock/launch prompt. */
+  #aimHint(engine: Engine, time: number): void {
+    const ctx = this.#ctx
+    const p = engine.paddle
+    const anchor = engine.aimAnchorX, range = engine.aimRange
+    const lo = anchor - range, hi = anchor + range          // the paddle's slide range under the still ball
+    ctx.save()
+    ctx.strokeStyle = 'rgba(126,224,255,0.35)'; ctx.lineWidth = 2; ctx.setLineDash([5, 5])
+    ctx.beginPath(); ctx.moveTo(lo, p.y + p.h / 2); ctx.lineTo(hi, p.y + p.h / 2); ctx.stroke()
+    ctx.setLineDash([])
+    for (const x of [lo, hi]) { ctx.beginPath(); ctx.moveTo(x, p.y - 6); ctx.lineTo(x, p.y + p.h + 6); ctx.stroke() }
+    // a gold tick on the paddle marking where on it the ball will sit (the contact point)
+    ctx.strokeStyle = 'rgba(255,210,74,0.9)'; ctx.lineWidth = 2
+    ctx.beginPath(); ctx.moveTo(anchor, p.y - p.h / 2 - 2); ctx.lineTo(anchor, p.y + p.h / 2 + 2); ctx.stroke()
+    const pulse = 0.5 + 0.5 * Math.sin(time * 6)            // the still ball, hovering at the anchor
+    ctx.strokeStyle = `rgba(255,255,255,${0.4 + 0.4 * pulse})`; ctx.lineWidth = 1.5
+    ctx.beginPath(); ctx.arc(anchor, p.y - 15, 12 + 3 * pulse, 0, Math.PI * 2); ctx.stroke()
+    ctx.fillStyle = '#bfe3ff'; ctx.font = '600 13px "Segoe UI", system-ui, sans-serif'; ctx.textAlign = 'center'
+    ctx.fillText('slide the paddle to set the ball’s spot · click to set, then launch any time', anchor, p.y - 30)
+    ctx.restore()
+  }
+
   #hud(engine: Engine): void {
     const ctx = this.#ctx
     ctx.save()
-    ctx.fillStyle = 'rgba(223,231,255,0.9)'
-    ctx.font = '600 18px "Segoe UI", system-ui, sans-serif'
     ctx.textBaseline = 'top'
     ctx.textAlign = 'left'
-    ctx.fillText(`✦ ${engine.score}`, 8, 8)
-    // Combo meter under the score — grows + warms as the chain builds.
-    if (engine.combo >= 2) {
-      const cn = engine.combo
-      const hot = Math.min(1, (cn - 2) / 8)
-      ctx.font = `800 ${14 + Math.min(8, cn)}px "Segoe UI", system-ui, sans-serif`
-      ctx.fillStyle = hot > 0.5 ? '#ffd24a' : '#7ee0ff'
-      ctx.shadowColor = hot > 0.5 ? 'rgba(255,112,67,0.8)' : 'rgba(126,224,255,0.7)'; ctx.shadowBlur = 8
-      ctx.fillText(`combo ×${cn}`, 8, 30)
-      ctx.shadowBlur = 0
+    // Score — pops with a scale pulse when a milestone bonus lands.
+    const sf = engine.scoreFlash > 0 ? 1 + 0.3 * (engine.scoreFlash / 0.45) : 1
+    ctx.save()
+    ctx.translate(8, 8); ctx.scale(sf, sf)
+    ctx.fillStyle = 'rgba(223,231,255,0.95)'
+    ctx.font = '600 18px "Segoe UI", system-ui, sans-serif'
+    ctx.fillText(`✦ ${engine.score}`, 0, 0)
+    ctx.restore()
+    // Unified multiplier block in the LEFT MARGIN (bricks start at x≈92): the grand
+    // TOTAL, then the two axes that multiply into it. (Oscillate's ×1.6 rides on top.)
+    const pts = engine.pointsMul, pil = engine.pillMul, total = pts * pil
+    const tcol = total >= 12 ? '#ff7043' : total >= 6 ? '#ffd24a' : '#7ee0ff'
+    ctx.font = `800 ${16 + Math.min(10, total)}px "Segoe UI", system-ui, sans-serif`
+    ctx.fillStyle = tcol; ctx.shadowColor = tcol; ctx.shadowBlur = 4 + Math.min(12, total)
+    ctx.fillText(`×${total.toFixed(1)}`, 8, 30)
+    ctx.shadowBlur = 0
+    const chip = (label: string, col: string, frac: number, y: number) => {
+      ctx.font = '700 11px "Segoe UI", system-ui, sans-serif'
+      ctx.fillStyle = col
+      ctx.fillText(label, 8, y)
+      ctx.fillStyle = 'rgba(255,255,255,0.18)'; this.#roundRect(8, y + 13, 72, 3, 1.5); ctx.fill()
+      ctx.fillStyle = col; this.#roundRect(8, y + 13, 72 * Math.max(0, Math.min(1, frac)), 3, 1.5); ctx.fill()
     }
+    chip(`points ×${pts.toFixed(1)}`, pts >= 5.5 ? '#ffd24a' : '#7ee0ff', pts / 6, 54)
+    chip(`pills ×${pil.toFixed(1)}`, pil >= 3 ? '#ffd24a' : '#3fd6c0', (pil - 1) / 2, 74)
     // Lives as small balls, top-right.
     for (let i = 0; i < engine.lives; i++) {
       ctx.beginPath()
@@ -1043,8 +1552,7 @@ export class Renderer {
       let bx = (W - (powers.length * bw + (powers.length - 1) * gap)) / 2
       for (const pw of powers) {
         const meta = POWER_META[pw.kind]
-        // The multiplier badge shows its live value (2× / 3×) instead of 'X'.
-        const glyph = pw.kind === 'multiplier' ? `${engine.scoreMul}×` : meta.letter
+        const glyph = meta.letter
         this.#roundRect(bx, 6, bw, 18, 5)
         ctx.fillStyle = 'rgba(10,14,30,0.66)'
         ctx.fill()

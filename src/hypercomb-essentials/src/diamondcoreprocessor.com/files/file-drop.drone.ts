@@ -62,8 +62,8 @@ export class FileDropDrone extends Drone {
   public override description =
     'Attaches dropped documents to tiles in a dropbox subtree and serves the file list (tile / selection / all) for the viewer panel.'
 
-  protected override emits = ['files:open']
-  protected override listens = ['drop:target', 'render:cell-count', 'tile:action', 'files:open-scope', 'files:remove', 'files:viewer', 'decorations:changed', 'cell:attach-resource']
+  protected override emits = ['files:open', 'selection:has-documents']
+  protected override listens = ['drop:target', 'render:cell-count', 'tile:action', 'files:open-scope', 'files:remove', 'files:viewer', 'decorations:changed', 'cell:attach-resource', 'selection:changed', 'controls:action']
 
   /** Last hex position reported by TileOverlayDrone during drag. */
   #lastTarget: DropTarget | null = null
@@ -136,13 +136,33 @@ export class FileDropDrone extends Drone {
       const segments = [...this.#parentSegments(), p.cell]
       void writeAttachment(segments, p.attachment)
     })
+
+    // Multi-select → "view documents". Tell the selection menu whether any
+    // selected tile has documents (gates its button), and open the aggregated
+    // files view when the button fires `controls:action {view-documents}`.
+    this.onEffect<{ selected?: string[] }>('selection:changed', (p) => {
+      const labels = Array.isArray(p?.selected) ? p!.selected!.map(String) : []
+      const hasDocs = labels.some(l => hasDecorationKind(l, FILES_ATTACHMENT_KIND))
+      EffectBus.emit('selection:has-documents', { value: hasDocs })
+    })
+
+    this.onEffect<{ action?: string }>('controls:action', (p) => {
+      if (p?.action !== 'view-documents') return
+      const selection = get('@diamondcoreprocessor.com/SelectionService') as { selected?: ReadonlySet<string> } | undefined
+      const labels = [...(selection?.selected ?? [])].map(String).filter(Boolean)
+      if (!labels.length) return
+      this.#open = { scope: 'selection', labels, title: `${labels.length} selected` }
+      void this.#listAndEmit()
+    })
   }
 
   // ── drop handling ─────────────────────────────────────────────
 
   #onDragOver = (e: DragEvent): void => {
-    const el = document.activeElement
-    if (el && (el as HTMLElement).matches?.('input, textarea, select, [contenteditable]')) return
+    // bail only when the drop lands ON a form input (so you can drop into a
+    // field) — never just because the command line happens to be focused.
+    const tgt = e.target as HTMLElement | null
+    if (tgt?.closest?.('input, textarea, select, [contenteditable]')) return
     const types = e.dataTransfer?.types ?? []
     if (!types.includes('Files')) return
     // Allow file drops anywhere on the hive — no `/dropbox` required.
@@ -151,8 +171,10 @@ export class FileDropDrone extends Drone {
   }
 
   #onDrop = (e: DragEvent): void => {
-    const el = document.activeElement
-    if (el && (el as HTMLElement).matches?.('input, textarea, select, [contenteditable]')) return
+    // bail only when the drop lands ON a form input (so you can drop into a
+    // field) — never just because the command line happens to be focused.
+    const tgt = e.target as HTMLElement | null
+    if (tgt?.closest?.('input, textarea, select, [contenteditable]')) return
 
     const list = e.dataTransfer?.files
     if (!list || list.length === 0) return

@@ -6,14 +6,15 @@
 // playtest. Sibling of the Solomon designer, adapted to Bubble Bobble's model
 // (one-way platforms, enemies, a single player spawn — no door/key/gem).
 
-import { EMPTY, WALL, type LevelDef, type Cell } from './engine.js'
+import { EMPTY, WALL, DOOR, ENEMY_KIND_COUNT, type LevelDef, type Cell } from './engine.js'
 import { cloneLevel, emptyLevel, sanitizeLevel } from './levels.js'
 
-export type Tool = 'wall' | 'enemy' | 'player' | 'erase'
+export type Tool = 'wall' | 'door' | 'enemy' | 'player' | 'erase'
 
 export const TOOLS: { tool: Tool; label: string; glyph: string }[] = [
   { tool: 'wall', label: 'Platform', glyph: '▬' },
-  { tool: 'enemy', label: 'Enemy', glyph: '👾' },
+  { tool: 'door', label: 'Door — tunnel; place in pairs', glyph: '◍' },
+  { tool: 'enemy', label: 'Enemy — click again to change species', glyph: '👾' },
   { tool: 'player', label: 'Start', glyph: 'P' },
   { tool: 'erase', label: 'Erase', glyph: '⌫' },
 ]
@@ -57,6 +58,11 @@ export class Designer {
         L.tiles[this.#idx(col, row)] = WALL
         this.#clearEnemies(col, row)
         return true
+      case 'door':
+        if (onPlayer) return false
+        L.tiles[this.#idx(col, row)] = DOOR
+        this.#clearEnemies(col, row)
+        return true
       case 'player':
         L.tiles[this.#idx(col, row)] = EMPTY
         this.#clearEnemies(col, row)
@@ -65,9 +71,15 @@ export class Designer {
       case 'enemy': {
         if (onPlayer) return false
         const i = L.enemies.findIndex(e => this.#sameCell(e, col, row))
-        if (i >= 0) { L.enemies.splice(i, 1); return true } // toggle off
+        if (i >= 0) {
+          // click an existing foe to cycle its species; past the last → remove.
+          const next = (L.enemies[i].kind ?? 0) + 1
+          if (next >= ENEMY_KIND_COUNT) L.enemies.splice(i, 1)
+          else L.enemies[i] = { ...L.enemies[i], kind: next }
+          return true
+        }
         L.tiles[this.#idx(col, row)] = EMPTY
-        L.enemies.push({ col, row, dir: 1, kind: L.enemies.length % 4 })
+        L.enemies.push({ col, row, dir: 1, kind: 0 })
         return true
       }
     }

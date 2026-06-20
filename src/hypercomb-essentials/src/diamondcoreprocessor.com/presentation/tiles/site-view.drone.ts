@@ -15,6 +15,7 @@
 
 import { Drone, SITE_VIEW_IOC_KEY, RESOURCE_URL_PREFIX } from '@hypercomb/core'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
+import { WEBSITE_SLOT } from '../../commands/website-slot.js'
 
 type MountState = {
   host: HTMLDivElement
@@ -193,15 +194,22 @@ export class SiteViewDrone extends Drone {
 
     const segments: string[] = [...(lineage.explorerSegments?.() ?? [])]
 
-    // The cell's page lives in one of two places, queried in order:
-    //   1. The `decorations` slot — sigs into `__optimization__` of
-    //      shape `{ kind: 'visual:website:page', payload: { htmlSig } }`.
-    //      This is the visual-bee migration target.
-    //   2. The legacy `context` slot — raw HTML resource sigs. Existing
-    //      data lives here; falls back when no decoration is present.
+    // The cell's page lives in one of three places, queried in order:
+    //   1. The `website` slot — the explicit, first-class page slot: a
+    //      flat array of HTML resource sigs (newest = current), no
+    //      decoration envelope. The migration target.
+    //   2. The `decorations` slot — sigs into `__resources__` of shape
+    //      `{ kind: 'visual:website:page', payload: { htmlSig } }`. The
+    //      prior visual-bee home; read-through so already-built sites
+    //      keep rendering.
+    //   3. The legacy `context` slot — raw HTML resource sigs. Oldest
+    //      data lives here; falls back when neither above is present.
     // Each cell carries its own; lineage navigation drives page changes.
     // No bundle, no manifest, no path table — the lineage IS the route.
-    let cellPageSig = await this.#findDecorationPage(segments, store)
+    let cellPageSig = await this.#findWebsitePage(segments)
+    if (!cellPageSig) {
+      cellPageSig = await this.#findDecorationPage(segments, store)
+    }
     if (!cellPageSig) {
       cellPageSig = await this.#findContextPage(segments, store)
     }
@@ -214,6 +222,39 @@ export class SiteViewDrone extends Drone {
     // ancestor's bundle is the legacy behavior; with per-cell pages
     // every cell is responsible for its own surface.
     this.#teardown()
+  }
+
+  /** First-class page lookup: the cell's `website` slot holds the page's
+   *  HTML resource signature DIRECTLY (no decoration envelope). The
+   *  newest entry is the current page. Checked BEFORE the decoration and
+   *  context scans so a migrated cell renders from its explicit slot,
+   *  while un-migrated cells fall through unchanged.
+   *
+   *  The slot is page-only by contract, so the sig is trusted and handed
+   *  straight to #mountCellPage (which fetches + mounts it). Returns null
+   *  when the slot is absent or empty — the caller then tries the legacy
+   *  decoration and context paths, so nothing built before this slot
+   *  existed goes dark. */
+  async #findWebsitePage(segments: readonly string[]): Promise<string | null> {
+    const ioc = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+    const history = ioc?.get<{
+      sign: (lineage: { explorerSegments?: () => readonly string[] }) => Promise<string>
+      currentLayerAt: (locationSig: string) => Promise<Record<string, unknown> | null>
+    }>('@diamondcoreprocessor.com/HistoryService')
+    if (!history) return null
+
+    try {
+      const locationSig = await history.sign({ explorerSegments: () => segments })
+      const layer = await history.currentLayerAt(locationSig)
+      if (!layer) return null
+      const slot = layer[WEBSITE_SLOT]
+      const sigs: string[] = Array.isArray(slot)
+        ? slot.map((s: unknown) => String(s)).filter(s => /^[0-9a-f]{64}$/.test(s))
+        : []
+      return sigs.length ? sigs[sigs.length - 1] : null
+    } catch {
+      return null
+    }
   }
 
   /** Decoration-based page lookup (the visual-bee migration target).
