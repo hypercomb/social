@@ -13,7 +13,7 @@
 import { Component } from '@angular/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { PinnableHoverBase } from '../pinnable/pinnable-hover.base'
-import { TYPE_META, type FileTypeKey } from '../files-viewer/file-icons'
+import { TYPE_META, TYPE_ORDER, categorize, type FileTypeKey } from '../files-viewer/file-icons'
 
 export interface FileTeaserData {
   segments: string[]
@@ -39,10 +39,18 @@ export class FileTeaserHoverComponent extends PinnableHoverBase<FileTeaserData> 
   readonly meta = TYPE_META
 
   protected toPanel(payload: unknown): { key: string; data: FileTeaserData } | null {
-    const d = payload as Partial<FileTeaserData> | undefined
-    if (!d || !Array.isArray(d.counts)) return null
+    // The drone (essentials) can't import the shared taxonomy, so it sends raw
+    // files and we categorize + tally here, where `file-icons` lives.
+    const d = payload as { segments?: unknown; label?: unknown; files?: unknown } | undefined
+    if (!d || !Array.isArray(d.files)) return null
     const segments = Array.isArray(d.segments) ? d.segments.map(String) : []
-    const counts = d.counts.filter(c => c && typeof c.count === 'number' && c.count > 0)
+    const tally = new Map<FileTypeKey, number>()
+    for (const f of d.files as Array<{ name?: unknown; mime?: unknown }>) {
+      if (!f || typeof f.name !== 'string') continue
+      const t = categorize(f.name, typeof f.mime === 'string' ? f.mime : undefined)
+      tally.set(t, (tally.get(t) ?? 0) + 1)
+    }
+    const counts = TYPE_ORDER.filter(t => tally.has(t)).map(t => ({ type: t, count: tally.get(t)! }))
     return {
       // Key by location path so pinning the teaser at different breadcrumbs
       // stacks one panel per place — that's the comparison.
@@ -51,7 +59,7 @@ export class FileTeaserHoverComponent extends PinnableHoverBase<FileTeaserData> 
         segments,
         label: (typeof d.label === 'string' && d.label.trim()) ? d.label : (segments[segments.length - 1] ?? '/'),
         counts,
-        total: typeof d.total === 'number' ? d.total : counts.reduce((a, c) => a + c.count, 0),
+        total: counts.reduce((a, c) => a + c.count, 0),
       },
     }
   }
