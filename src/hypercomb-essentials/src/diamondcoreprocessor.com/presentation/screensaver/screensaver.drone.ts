@@ -51,7 +51,7 @@ type Store = { getResource: (sig: string) => Promise<Blob | null> }
 type Lineage = { explorerSegments?: () => readonly string[] }
 
 // Idle time before the screensaver kicks in.
-const IDLE_MS = 30_000
+const IDLE_MS = 120_000
 
 // Hard cap on simultaneously-animated bubbles. Collision resolution is O(N²)
 // per frame and each bubble holds its own GPU texture, so a node with hundreds
