@@ -60,7 +60,7 @@ export interface Brick {
   gold?: boolean                          // THE gold brick (centre mega): break it before its timer or it's frantic mode
 }
 export interface Ball { x: number; y: number; vx: number; vy: number; r: number; stuck: boolean; wobble: number; primary: boolean; color: string; pierced?: Set<Brick> }
-export interface Capsule { x: number; y: number; kind: PowerKind; delay?: number }   // delay = hover seconds before it starts falling
+export interface Capsule { x: number; y: number; kind: PowerKind; delay?: number; dir?: number }   // delay = hover seconds before it starts falling
 /** A Street-Fighter-style fireball launched by the charge cannon. Stats are
  *  snapshotted at launch so a later level-up never retro-buffs an orb in flight. */
 export interface Fireball {
@@ -179,6 +179,9 @@ const MAX_BALLS = 9
 const CAPSULE_W = 30
 const CAPSULE_H = 15
 const CAPSULE_SPEED = 135
+const INVADER_MARCH = 150            // px/s sideways march on invader levels
+const INVADER_STEP = 18              // px the pill drops each time it hits a wall
+const INVADER_FALL = 55              // px/s slow descent so it still works its way down
 const DROP_CHANCE = 0                 // bricks no longer drop — the alien is the dispenser
 const MAX_CAPSULES = 5                // never more than this many pills on screen at once
 const PILL_STAGGER = 0.25             // each pill hovers this long at spawn before it starts falling
@@ -491,6 +494,7 @@ export class Engine {
   laserMuzzleFlash = 0               // seconds left of the launch kick-flash at the bat
   // The active difficulty mode (Rookie = current). The overlay sets this on a fresh run.
   difficulty: DifficultyProfile = DIFFICULTY[0]
+  invaderPills = false                // SPACE-INVADER pill march (set by the overlay on invader levels)
   // Timed power state (seconds remaining; 0 = inactive).
   expandTimer = 0
   magnetTimer = 0
@@ -1930,7 +1934,16 @@ export class Engine {
     const survive: Capsule[] = []
     for (const cap of this.capsules) {
       if (cap.delay && cap.delay > 0) { cap.delay -= dt; survive.push(cap); continue }   // hover, then fall
-      cap.y += CAPSULE_SPEED * dt
+      if (this.invaderPills) {
+        // SPACE-INVADER march: step sideways, reverse + drop a row at each wall, slow descent.
+        cap.dir ??= cap.x < W / 2 ? 1 : -1
+        cap.x += INVADER_MARCH * cap.dir * dt
+        if (cap.x < CAPSULE_W) { cap.x = CAPSULE_W; cap.dir = 1; cap.y += INVADER_STEP }
+        else if (cap.x > W - CAPSULE_W) { cap.x = W - CAPSULE_W; cap.dir = -1; cap.y += INVADER_STEP }
+        cap.y += INVADER_FALL * dt
+      } else {
+        cap.y += CAPSULE_SPEED * dt
+      }
       if (cap.y - CAPSULE_H / 2 > H) continue
       const caught = cap.y + CAPSULE_H / 2 >= p.y - 2
         && cap.y - CAPSULE_H / 2 <= p.y + p.h + 2
@@ -2495,3 +2508,4 @@ export class Engine {
     this.#resetForLife()
   }
 }
+

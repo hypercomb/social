@@ -381,6 +381,7 @@ export class ArkanoidOverlay {
     if (this.#canvas) this.#canvas.style.cursor = 'none'
     this.#engine = new Engine(level.rows)
     this.#engine.levelIndex = this.#levelIndex          // level → enemy-swarm size
+    this.#engine.invaderPills = /invader/i.test(level.name)   // pills march like Space Invaders here
     this.#engine.difficulty = DIFFICULTY[this.#difficulty]   // the selected mode tunes the run
     this.#engine.lives = DIFFICULTY[this.#difficulty].lives  // fresh run starts on the mode's lives
     if (this.#launchOffset !== null) this.#engine.pinLaunchOffset(this.#launchOffset)   // reuse the on-paddle position; aim only the first time
@@ -846,6 +847,7 @@ export class ArkanoidOverlay {
       const carriedScore = tr.baseScore + tr.levelScore + tr.bonus
       const e = new Engine(tr.nextLevel.rows)
       e.levelIndex = tr.nextIndex          // level → enemy-swarm size
+      e.invaderPills = /invader/i.test(tr.nextLevel.name)
       e.difficulty = DIFFICULTY[this.#difficulty]   // same mode carries into the next level
       e.score = carriedScore
       e.lives = tr.prev.lives              // lives carry over mid-run (don't reset to the mode default)
