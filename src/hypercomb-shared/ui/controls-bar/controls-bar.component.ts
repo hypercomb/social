@@ -495,6 +495,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #pillDragOffsetY = 0
   #pillPointerId: number | null = null
   #pillStageEl: HTMLElement | null = null
+  // Live header-height probe. Header-anchored offsets (the breadcrumb, etc.)
+  // dock at a static `calc(<base> * --hc-header-zoom)`, which assumes the bar
+  // renders exactly `~2.83rem × zoom` tall. On some devices (high-DPI / narrow
+  // viewports like the Surface) the header renders TALLER than that, so the
+  // static offset lets the breadcrumb ride up under the bar. We measure the
+  // real header bottom into `--hc-header-bottom`; the CSS docks at
+  // `max(static, measured)` so this can only push offsets DOWN, never up.
+  #headerObserver: ResizeObserver | null = null
   // Pill stays anchored to the bottom of the viewport. We track the
   // distance from the top of the pill to the bottom of the viewport
   // (`fromBottom`) and recompute y on every window resize so the pill
@@ -915,11 +923,29 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       const pos = this.#pillPos()
       if (pos && !this.#fitsOnScreen(pos.x, pos.y)) this.#resetToDefault()
     }
+    this.#observeHeaderHeight()
+  }
+
+  /** Publish the live header-bar bottom edge into `--hc-header-bottom` so the
+   *  breadcrumb (and any other header-anchored offset) can dock at
+   *  `max(static, measured)` and never ride up under a taller-than-expected
+   *  header. `.header-bar` is a shell sibling (app.html), shared by web + dev. */
+  #observeHeaderHeight(): void {
+    const header = document.querySelector('.header-bar') as HTMLElement | null
+    if (!header || typeof ResizeObserver === 'undefined') return
+    const measure = (): void => {
+      const h = header.offsetHeight
+      if (h > 0) document.documentElement.style.setProperty('--hc-header-bottom', `${h}px`)
+    }
+    measure()
+    this.#headerObserver = new ResizeObserver(measure)
+    this.#headerObserver.observe(header)
   }
 
   ngOnDestroy(): void {
     this.#mobileQuery?.removeEventListener('change', this.#mobileHandler)
     this.#landscapeQuery?.removeEventListener('change', this.#landscapeHandler)
+    this.#headerObserver?.disconnect()
     window.removeEventListener('resize', this.#onResize)
     window.removeEventListener('pointermove', this.#onActivity)
     window.removeEventListener('pointerdown', this.#onActivity)

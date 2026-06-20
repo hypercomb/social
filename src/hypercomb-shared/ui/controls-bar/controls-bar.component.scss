@@ -22,8 +22,16 @@
 
 .breadcrumb-top {
   position: fixed;
-  // tracks the header size: 3.25rem × the active header zoom
-  top: calc(3.25rem * var(--hc-header-zoom, 1.0));
+  // Dock below the header. The static term tracks the header size
+  // (3.25rem × the active header zoom); the measured term (`--hc-header-bottom`,
+  // the live bar bottom set by ControlsBar's ResizeObserver) wins only when the
+  // header renders TALLER than the static assumption (high-DPI / narrow devices
+  // like the Surface). `max()` can only push down, so well-behaved devices are
+  // unchanged and the breadcrumb never rides up under the bar.
+  top: max(
+    calc(3.25rem * var(--hc-header-zoom, 1.0)),
+    calc(var(--hc-header-bottom, 0px) + 0.35rem)
+  );
   right: 0.6rem;
   z-index: 59999;
 
