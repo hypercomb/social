@@ -143,6 +143,15 @@ const HTTP_PROBE_TIMEOUT_MS = 3000
 // wait, serially per sig). Cleared early by new domain knowledge.
 const FETCH_MISS_TTL_MS = 60_000
 
+// A sig that keeps missing the FULL cascade backs off exponentially from
+// FETCH_MISS_TTL_MS up to this ceiling. So a sig no reachable host has (never
+// pushed anywhere, or an orphaned ref) goes QUIET instead of re-dialing — and
+// re-logging a console 404 — on every synchronize forever. The egg still
+// hatches the instant new domain knowledge arrives (#noteDomains / noteDomain)
+// or the bytes turn up locally, both of which reset the backoff. Auto-healing
+// when it can; silent and non-blocking when it can't.
+const MAX_MISS_TTL_MS = 30 * 60_000
+
 export type ContentType = 'layer' | 'resource' | 'dependency'
 
 // Visuals-by-composedSig is the second flavor of fetch this drone
@@ -275,6 +284,12 @@ export class ContentBrokerDrone extends Drone {
   // Full-cascade miss window per sig (egg semantics — see fetchBySig).
   // Cleared by new knowledge (#noteDomains / noteDomain) or lapse.
   #fetchMissUntil = new Map<string, number>()
+
+  // Per-sig backoff: the LAST miss-window length granted, doubled on each
+  // consecutive full-cascade miss (capped at MAX_MISS_TTL_MS). Persists across
+  // lapses so repeated misses escalate; reset on a local hit or new knowledge.
+  // This is the whole "stop re-dialing a dead sig" mechanism.
+  #missBackoff = new Map<string, number>()
 
   // Same coalescing for visuals fetches — distinct map because the
   // return shape is different (CachedVisualsEntry[] vs Uint8Array).
@@ -423,8 +438,22 @@ export class ContentBrokerDrone extends Drone {
     for (const d of domains) set.add(d)
     this.#knownDomainsBySig.set(sig, set)
     // New address knowledge for this sig — its egg may now hatch; lift
-    // the miss window so the next ask re-dials immediately.
+    // the miss window AND reset the backoff so the next ask re-dials
+    // immediately (not on the backed-off schedule).
     this.#fetchMissUntil.delete(sig)
+    this.#missBackoff.delete(sig)
+  }
+
+  /** Record a full-cascade miss for `s` with exponential backoff: first miss
+   *  suppresses re-dialing for FETCH_MISS_TTL_MS, each consecutive miss doubles
+   *  the window up to MAX_MISS_TTL_MS. A sig no reachable host has stops
+   *  re-dialing (and re-logging a 404) within a few passes; a transient miss
+   *  still recovers quickly. Reset by a local hit or new domain knowledge. */
+  #noteFetchMiss = (s: string): void => {
+    const prev = this.#missBackoff.get(s)
+    const ttl = prev ? Math.min(prev * 2, MAX_MISS_TTL_MS) : FETCH_MISS_TTL_MS
+    this.#missBackoff.set(s, ttl)
+    this.#fetchMissUntil.set(s, Date.now() + ttl)
   }
 
   /** §21.14 — parse a verified layer's sig-array slots and attribute the
@@ -658,8 +687,9 @@ export class ContentBrokerDrone extends Drone {
     if (host) {
       this.#sessionKnownDomains.add(host)
       // A new session-wide fetch source can satisfy ANY pending egg —
-      // clear all miss windows (rare event: adopt handoff, config).
+      // clear all miss windows + backoff (rare event: adopt handoff, config).
       this.#fetchMissUntil.clear()
+      this.#missBackoff.clear()
     }
   }
 
@@ -713,6 +743,7 @@ export class ContentBrokerDrone extends Drone {
       // byte-path — the mesh carries layer sigs only). Routed through
       // HostSyncService: signed, queued, receipted, self-domain only.
       this.#stageToHost(s, type, local)
+      this.#missBackoff.delete(s)   // resolved — reset any prior backoff
       return local
     }
 
@@ -748,7 +779,7 @@ export class ContentBrokerDrone extends Drone {
     // they'll be re-tried after the miss window, by which point HTTP-
     // direct may have learned new domains via subsequent layer fetches.
     if (type !== 'layer') {
-      this.#fetchMissUntil.set(s, Date.now() + FETCH_MISS_TTL_MS)
+      this.#noteFetchMiss(s)
       return null
     }
 
@@ -760,7 +791,7 @@ export class ContentBrokerDrone extends Drone {
     this.#pendingFetches.set(s, fetchPromise)
     try {
       const bytes = await fetchPromise
-      if (!bytes) this.#fetchMissUntil.set(s, Date.now() + FETCH_MISS_TTL_MS)
+      if (!bytes) this.#noteFetchMiss(s)
       return bytes
     }
     finally { this.#pendingFetches.delete(s) }
