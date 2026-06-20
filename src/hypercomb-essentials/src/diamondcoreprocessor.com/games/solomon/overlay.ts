@@ -9,7 +9,10 @@
 import { Engine, TILE, type LevelDef } from './engine.js'
 import { Renderer } from './renderer.js'
 import { Designer, TOOLS, type Tool } from './designer.js'
-import { BUILTIN_LEVELS, loadCustomLevels, upsertCustomLevel, deleteCustomLevel, cloneLevel } from './levels.js'
+import {
+  BUILTIN_LEVELS, BONUS_ROOM, SEAL_TOTAL, decideNext,
+  loadCustomLevels, upsertCustomLevel, deleteCustomLevel, cloneLevel,
+} from './levels.js'
 import { Shaker, ParticleField, easeOutBack, ARCADE } from '../juice.js'
 
 const STYLE_ID = 'sol-overlay-styles'
@@ -46,6 +49,9 @@ interface Transition {
   nextIndex: number       // its index in #levels (for the toolbar label)
   testing: boolean        // cleared a designer test (re-pans the same level)
   prev: Engine            // the cleared engine — drawn scrolling out during 'pan'
+  ending: boolean         // the final room cleared → show the victory banner, no pan
+  enterBonus: boolean     // the next room is the fairy bonus room (zodiac detour)
+  bonusResume: number     // #levels index to resume at once the bonus room clears
 }
 
 /** easeInOut cubic — slow start, slow settle; reads as the screen easing up. */
@@ -101,6 +107,11 @@ export class SolomonOverlay {
   #levelStartScore = 0
   #levelStartLives = 3
   #testing = false   // playing a designer test (not part of the level list)
+  // Meta-progression flow: a constellation panel detours through the fairy bonus
+  // room; clearing the final room shows the victory banner (and freezes play).
+  #inBonus = false
+  #bonusResumeIndex = 0
+  #ended = false
 
   // designer pointer paint state
   #painting = false
@@ -283,6 +294,8 @@ export class SolomonOverlay {
     // Fresh run from this level: score back to 0, full lives, no carry-over.
     this.#testing = false
     this.#transition = null
+    this.#inBonus = false
+    this.#ended = false
     this.#overShown = false
     this.#levelStartScore = this.#engine.score
     this.#levelStartLives = this.#engine.lives
@@ -351,7 +364,7 @@ export class SolomonOverlay {
         this.#field.update(dt)
         this.#field.draw(ctx)
         this.#drawIntro(ctx, { w: this.#engine.width, h: this.#engine.height }, dt)
-        if (this.#engine.state === 'won') this.#beginClear()
+        if (this.#engine.state === 'won' && !this.#ended) this.#beginClear()
         else if (this.#engine.state === 'gameover' && !this.#overShown) { this.#overShown = true; this.#showGameOver() }
       }
       ctx.restore()
@@ -648,7 +661,7 @@ export class SolomonOverlay {
    *  the tally→pan transition. Levels wrap, so play never stops on a clear. */
   #beginClear(): void {
     const eng = this.#engine
-    if (!eng || this.#transition) return
+    if (!eng || this.#transition || this.#ended) return
     const levelScore = Math.max(0, eng.score - this.#levelStartScore)
     // The life meter that's left when you reach the door becomes a time bonus —
     // the NES rewards beating the clock with margin to spare.
@@ -656,16 +669,32 @@ export class SolomonOverlay {
     // lives only ever fall within a level, so "same as we started" ⇒ no deaths.
     const bonus = eng.lives >= this.#levelStartLives ? PERFECT_BONUS : 0
 
-    const count = Math.max(1, this.#levels.length)
-    const nextIndex = this.#testing ? this.#levelIndex : (this.#levelIndex + 1) % count
-    const nextLevel = this.#testing
-      ? this.#designer.level
-      : (this.#levels[nextIndex] ?? eng.level)
+    let nextLevel: LevelDef
+    let nextIndex = this.#levelIndex
+    let ending = false, enterBonus = false, bonusResume = 0
+
+    if (this.#testing) {
+      nextLevel = this.#designer.level   // a designer test just re-pans the same level
+    } else {
+      const dec = decideNext({
+        levelIndex: this.#levelIndex,
+        builtinCount: BUILTIN_LEVELS.length,
+        totalCount: this.#levels.length,
+        zodiacHeld: eng.zodiacHeld,
+        wingsHeld: eng.wingsHeld,
+        inBonus: this.#inBonus,
+        bonusResumeIndex: this.#bonusResumeIndex,
+      })
+      if (dec.kind === 'ending') { ending = true; nextLevel = eng.level }
+      else if (dec.kind === 'bonus') { enterBonus = true; bonusResume = dec.index; nextLevel = BONUS_ROOM }
+      else { nextIndex = dec.index; nextLevel = this.#levels[dec.index] ?? eng.level }
+    }
 
     this.#transition = {
       phase: 'tally', t: 0,
       levelScore, timeBonus, bonus, baseScore: this.#levelStartScore,
       nextLevel, nextIndex, testing: this.#testing, prev: eng,
+      ending, enterBonus, bonusResume,
     }
     this.#hideBanner()
   }
@@ -678,19 +707,30 @@ export class SolomonOverlay {
     tr.t += dt
     if (tr.phase === 'tally') {
       if (tr.t < TALLY_MS) return
+      // Final room cleared → the game is won. Freeze on the victory banner.
+      if (tr.ending) {
+        this.#transition = null
+        this.#ended = true
+        this.#showEnding(tr.prev)
+        return
+      }
       const carriedScore = tr.baseScore + tr.levelScore + tr.timeBonus + tr.bonus
       const e = new Engine(cloneLevel(tr.nextLevel))
       e.score = carriedScore
       e.lives = tr.prev.lives
+      e.fairyCount = tr.prev.fairyCount   // carry the fairy tally across rooms
+      e.sealCount = tr.prev.sealCount     // and the permanent seal count
       this.#engine = e
-      this.#levelIndex = tr.nextIndex
+      this.#inBonus = tr.enterBonus
+      if (tr.enterBonus) this.#bonusResumeIndex = tr.bonusResume
+      else this.#levelIndex = tr.nextIndex
       this.#levelStartScore = e.score
       this.#levelStartLives = e.lives
       this.#syncJuice(e)
       this.#sizeCanvasTo(e.level)
       if (this.#levelLabel) {
-        this.#levelLabel.textContent = tr.testing
-          ? `${e.level.name}  (test)`
+        this.#levelLabel.textContent = tr.testing ? `${e.level.name}  (test)`
+          : this.#inBonus ? `${e.level.name}  (bonus)`
           : `${e.level.name}  (${this.#levelIndex + 1}/${this.#levels.length})`
       }
       tr.phase = 'pan'
@@ -699,7 +739,7 @@ export class SolomonOverlay {
       this.#transition = null   // hand control back — play resumes on the new level
       const e = this.#engine
       if (e) {
-        this.#beginIntro(e.level.name, tr.testing ? 'TEST' : 'LEVEL ' + (this.#levelIndex + 1))
+        this.#beginIntro(e.level.name, tr.testing ? 'TEST' : this.#inBonus ? 'BONUS' : 'LEVEL ' + (this.#levelIndex + 1))
       }
     }
   }
