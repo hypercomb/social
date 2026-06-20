@@ -48,6 +48,9 @@ const CHAR_ITEM: Record<string, { kind: ItemKind; value?: number }> = {
   '@': { kind: 'seal' },
   Z: { kind: 'zodiac' },
   W: { kind: 'wings' },
+  T: { kind: 'pageTime' },
+  Y: { kind: 'pageSpace' },
+  R: { kind: 'princess' },
 }
 
 interface AsciiOpts { hidden?: ItemSpawn[]; lifeStart?: number }
@@ -89,6 +92,67 @@ export function fromAscii(name: string, art: string[], opts: AsciiOpts = {}): Le
   }
 
   return { name, cols, rows, tiles, player, door, enemies, items, mirrors, lifeStart: opts.lifeStart }
+}
+
+/** A large, scrolling, IRREGULAR cavern — bigger than the screen and not a box
+ *  (unlike Solomon's Key's fixed single rooms). A wavy rock rim gives an organic
+ *  outline; ledges climb toward the key; a guaranteed 2-tall ground corridor keeps
+ *  the player + door connected. `kind` picks horizontal vs vertical scroll. Math.sin
+ *  keeps it deterministic (stable every load). Dana's wand makes anything reachable. */
+function largeCave(name: string, cols: number, rows: number, kind: 'wide' | 'tall', hidden: ItemSpawn[] = []): LevelDef {
+  const tiles = new Array<number>(cols * rows).fill(EMPTY)
+  const set = (c: number, r: number, v: number) => { if (c >= 0 && c < cols && r >= 0 && r < rows) tiles[r * cols + c] = v }
+  const plat = (c: number, r: number, len: number) => { for (let i = 0; i < len; i++) set(c + i, r, BRICK) }
+
+  // wavy rock rim (1..3 tiles) → an organic, non-rectangular cave silhouette
+  for (let c = 0; c < cols; c++) {
+    const top = 1 + Math.round((Math.sin(c * 0.55) + 1) * 1.1)
+    const bot = 1 + Math.round((Math.sin(c * 0.43 + 2.1) + 1) * 0.7)
+    for (let t = 0; t < top; t++) set(c, t, WALL)
+    for (let b = 0; b < bot; b++) set(c, rows - 1 - b, WALL)
+  }
+  for (let r = 0; r < rows; r++) {
+    const lft = 1 + Math.round((Math.sin(r * 0.6) + 1) * 0.9)
+    const rgt = 1 + Math.round((Math.sin(r * 0.5 + 1.3) + 1) * 0.9)
+    for (let t = 0; t < lft; t++) set(t, r, WALL)
+    for (let b = 0; b < rgt; b++) set(cols - 1 - b, r, WALL)
+  }
+
+  const floor = rows - 2
+  for (let c = 1; c < cols - 1; c++) { set(c, floor, EMPTY); set(c, floor - 1, EMPTY); set(c, rows - 1, WALL) }
+
+  const enemies: EnemySpawn[] = []
+  const items: ItemSpawn[] = []
+  const player: Cell = { col: 2, row: floor }
+  const door: Cell = { col: cols - 3, row: floor }
+  let key: Cell
+
+  if (kind === 'wide') {
+    for (let c = 5; c < cols - 5; c += 5) plat(c, floor - 2 - ((c / 5) % 3), 3) // stepping ledges
+    key = { col: (cols >> 1) - 1, row: Math.max(3, floor - 6) }
+    plat(key.col - 1, key.row + 1, 4)
+    enemies.push(
+      { col: 7, row: floor, kind: 'gargoil', dir: 1 },
+      { col: cols - 8, row: floor, kind: 'gargoil', dir: -1 },
+      { col: cols >> 1, row: 5, kind: 'ghost', dir: 1 },
+    )
+  } else {
+    let left = true
+    for (let r = floor - 2; r > 3; r -= 3) { plat(left ? 3 : cols - 7, r, 4); left = !left } // zigzag climb
+    key = { col: (cols >> 1) - 1, row: 2 }
+    plat(key.col - 1, key.row + 1, 4)
+    for (let r = floor - 4; r > 4; r -= 5) enemies.push({ col: cols >> 1, row: r, kind: r % 2 ? 'ghost' : 'gargoil', dir: 1 })
+  }
+  items.push({ col: key.col, row: key.row, kind: 'key' })
+
+  for (const h of hidden) { items.push({ ...h, hidden: true }); if (tiles[h.row * cols + h.col] === EMPTY) set(h.col, h.row, BRICK) }
+
+  // keep the singletons + key clear and grounded
+  set(player.col, player.row, EMPTY); set(player.col, rows - 1, WALL)
+  set(door.col, door.row, EMPTY); set(door.col, rows - 1, WALL)
+  set(key.col, key.row, EMPTY)
+
+  return { name, cols, rows, tiles, player, door, enemies, items, mirrors: [], lifeStart: kind === 'tall' ? 16000 : 12000 }
 }
 
 export const BUILTIN_LEVELS: LevelDef[] = [
@@ -306,6 +370,35 @@ export const BUILTIN_LEVELS: LevelDef[] = [
     '#.P..............D.#',
     '####################',
   ], { hidden: [{ col: 9, row: 6, kind: 'superjar' }] }),
+
+  // ── Shrine of Cancer (rooms 13–15) — the road to the Princess ──
+  // Room 13 — Tide Pools. Sparkballs + a Neul harry the climb; the PAGE OF SPACE
+  // hides behind the lower-left ledge (one of two pages the true ending needs).
+  fromAscii('Tide Pools', [
+    '####################',
+    '#..................#',
+    '#...k.........k....#',
+    '#..................#',
+    '#.......l..........#',
+    '#..................#',
+    '#........K.........#',
+    '#.......BBB........#',
+    '#..r...........r...#',
+    '#.BBB........BBBB..#',
+    '#..................#',
+    '#.P..............D.#',
+    '####################',
+  ], { hidden: [{ col: 3, row: 8, kind: 'pageSpace' }] }),
+
+  // Room 14 — Crystal Cavern. A WIDE cave (30 tiles) that scrolls horizontally —
+  // bigger than the screen and not a box. Build up to the high key, then trek to
+  // the door as the camera follows you.
+  largeCave('Crystal Cavern', 30, 13, 'wide'),
+
+  // Room 15 — The Long Ascent. A TALL cave (24 tiles) that scrolls vertically:
+  // climb the zigzag ledges to the key near the ceiling, then descend to the door.
+  // The PAGE OF TIME hides on the way up.
+  largeCave('The Long Ascent', 18, 24, 'tall', [{ col: 12, row: 9, kind: 'pageTime' }]),
 ]
 
 /** The fairy bonus room reached by clearing a room while holding a constellation
@@ -327,6 +420,25 @@ export const BONUS_ROOM: LevelDef = fromAscii('Fairy Glade', [
   '####################',
 ], { lifeStart: LIFE_HALF })
 
+/** The Princess Room — the destination of the true ending (reached when every
+ *  Solomon's Seal has been collected). The caged fairy Princess waits on a high
+ *  pedestal beside the exit; climb to her to rescue her. No foes, a calm timer. */
+export const PRINCESS_ROOM: LevelDef = fromAscii('Princess Room', [
+  '####################',
+  '#..................#',
+  '#........RD........#',
+  '#.......BBBB.......#',
+  '#..................#',
+  '#....b........b....#',
+  '#..................#',
+  '#...j....j....j....#',
+  '#..................#',
+  '#..b....j....b.....#',
+  '#..................#',
+  '#.P................#',
+  '####################',
+])
+
 /** How many Solomon's Seals exist across the built-in game (all 3 needed for the
  *  best ending). */
 export const SEAL_TOTAL = BUILTIN_LEVELS.reduce((n, l) => n + l.items.filter(i => i.kind === 'seal').length, 0)
@@ -338,26 +450,30 @@ export const WARP_ROOMS = 3
 
 export interface NextDecision {
   /** 'next' → play room `index`; 'bonus' → the fairy room, then resume `index`;
-   *  'ending' → the game is complete. */
-  kind: 'next' | 'bonus' | 'ending'
+   *  'princess' → the Princess Room (true ending earned by all seals); 'ending' →
+   *  the game is complete (the plain ending). */
+  kind: 'next' | 'bonus' | 'princess' | 'ending'
   index: number
 }
 
 /** Pure decision: given the just-cleared room + flags, what plays next? Kept
- *  pure (no DOM) so the warp / bonus / ending branches are unit-testable. */
+ *  pure (no DOM) so the warp / bonus / princess / ending branches are
+ *  unit-testable. Finishing the run with every seal opens the Princess Room. */
 export function decideNext(p: {
   levelIndex: number
   builtinCount: number
   totalCount: number
   zodiacHeld: boolean
   wingsHeld: boolean
+  allSeals: boolean
   inBonus: boolean
   bonusResumeIndex: number
 }): NextDecision {
+  const finish = (): NextDecision => ({ kind: p.allSeals ? 'princess' : 'ending', index: 0 })
   // Finishing the fairy bonus room → resume where the zodiac room left off.
   if (p.inBonus) {
     const idx = p.bonusResumeIndex
-    if (idx >= p.builtinCount && p.totalCount === p.builtinCount) return { kind: 'ending', index: 0 }
+    if (idx >= p.builtinCount && p.totalCount === p.builtinCount) return finish()
     return { kind: 'next', index: idx % p.totalCount }
   }
   // Cleared holding a constellation panel → detour through the bonus room.
@@ -365,7 +481,7 @@ export function decideNext(p: {
   // Golden Wings warp ahead; otherwise the next room.
   const target = p.wingsHeld ? p.levelIndex + WARP_ROOMS : p.levelIndex + 1
   // Past the last built-in with no custom levels appended → the game is won.
-  if (target >= p.builtinCount && p.totalCount === p.builtinCount) return { kind: 'ending', index: 0 }
+  if (target >= p.builtinCount && p.totalCount === p.builtinCount) return finish()
   return { kind: 'next', index: target % p.totalCount }
 }
 

@@ -37,6 +37,43 @@ const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'avif', 
 const isImageFile = (f: { name: string; type?: string }): boolean =>
   (f.type ?? '').startsWith('image/') || IMAGE_EXTS.has(extOf(f.name))
 
+/** Documents glyph (Material "description") for the drop-confirmation pop. */
+const DOC_POP_SVG =
+  '<svg viewBox="0 0 24 24" width="100%" height="100%" fill="currentColor" aria-hidden="true">' +
+  '<path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/>' +
+  '</svg>'
+
+/** Transient squash-and-stretch "pop" of the documents icon at screen (x,y)
+ *  so a drop visibly registers — expands wide, squishes tall (a warped-mirror
+ *  bounce), settles, fades. DOM + Web Animations API: no Pixi, no CSS file,
+ *  self-removing. pointer-events:none so it never blocks the canvas. */
+const showDropPop = (x: number, y: number): void => {
+  try {
+    const el = document.createElement('div')
+    el.setAttribute('aria-hidden', 'true')
+    el.style.cssText =
+      `position:fixed;left:${x}px;top:${y}px;width:46px;height:46px;margin:-23px 0 0 -23px;` +
+      'z-index:2147483600;pointer-events:none;color:#a8c8ff;' +
+      'filter:drop-shadow(0 2px 5px rgba(0,0,0,0.45));will-change:transform,opacity;'
+    el.innerHTML = DOC_POP_SVG
+    document.body.appendChild(el)
+    const anim = el.animate(
+      [
+        { transform: 'scale(0.2, 0.2)', opacity: 0, offset: 0 },
+        { transform: 'scale(1.35, 0.78)', opacity: 1, offset: 0.30 },  // expand — warped wide
+        { transform: 'scale(0.76, 1.30)', opacity: 1, offset: 0.55 },  // squish in — warped tall
+        { transform: 'scale(1.08, 0.94)', opacity: 1, offset: 0.74 },
+        { transform: 'scale(1, 1)', opacity: 0.95, offset: 0.88 },
+        { transform: 'scale(1, 1)', opacity: 0, offset: 1 },
+      ],
+      { duration: 720, easing: 'cubic-bezier(0.34, 1.4, 0.5, 1)' },
+    )
+    const done = (): void => { try { el.remove() } catch { /* ignore */ } }
+    anim.onfinish = done
+    anim.oncancel = done
+  } catch { /* confirmation pop is best-effort */ }
+}
+
 type DropTarget = {
   q: number
   r: number
@@ -196,15 +233,18 @@ export class FileDropDrone extends Drone {
     const target = this.#lastTarget
     if (target?.occupied && target.label) {
       // dropped on an existing tile → attach the file(s) as resources
+      showDropPop(e.clientX, e.clientY)
       const segments = [...this.#parentSegments(), target.label]
       void this.#attachAll(accepted, target.label, segments)
     } else if (accepted.length === 1) {
-      // dropped on empty space, one file → arm the command-line with a
-      // dropbox background; the user names it and Enter creates the tile
-      // (image-before-text flow), with the file attached as a resource.
+      // dropped on empty space, one file → confirm the drop, then arm the
+      // command-line with a dropbox background; name it + Enter creates the
+      // tile (image-before-text flow), file attached as a resource.
+      showDropPop(e.clientX, e.clientY)
       void this.#armFileDrop(accepted[0])
     } else {
       // dropped on empty space, several files → auto-name a tile per file
+      showDropPop(e.clientX, e.clientY)
       void this.#createAndAttach(accepted)
     }
   }

@@ -30,7 +30,7 @@
             [attr.title]="t.labelKey | t"
             (click)="toggleType(t.key)"
           >
-            <span class="ftype-badge" [style.color]="t.color">{{ t.short }}</span>
+            <span class="ftype-icon mat-sym" [style.color]="t.color" aria-hidden="true">{{ t.icon }}</span>
             <span class="ftype-count">{{ t.count }}</span>
           </button>
         }
@@ -43,7 +43,7 @@
       <ul class="files-list">
         @for (file of filtered(); track file.decorationSig) {
           <li class="files-row">
-            <span class="ftype-badge row" [style.color]="badge(file).color">{{ badge(file).short }}</span>
+            <span class="ftype-icon row mat-sym" [style.color]="badge(file).color" [attr.aria-label]="badge(file).labelKey | t">{{ badge(file).icon }}</span>
             <div class="files-meta">
               <span class="files-name" [title]="file.name">{{ file.name }}</span>
               <span class="files-sub">

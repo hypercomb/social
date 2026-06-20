@@ -17,7 +17,7 @@
 // freezes even when the mouse would leave the browser window entirely. Esc
 // releases the lock; ending the game or opening the designer releases it too.
 
-import { Engine, W, H, BRICK_W, BRICK_H, BRICK_TOP, BRICK_X0, POWER_META, POWER_ORDER, type Brick } from './engine.js'
+import { Engine, W, H, BRICK_W, BRICK_H, BRICK_TOP, BRICK_X0, POWER_META, POWER_ORDER, DIFFICULTY, type Brick } from './engine.js'
 import { Renderer, brickColor } from './renderer.js'
 import { LEVELS, cloneLevel, loadCustomLevels, upsertCustomLevel, deleteCustomLevel, type ArkanoidLevel } from './levels.js'
 import { Designer, TOOLS, type Tool } from './designer.js'
@@ -31,6 +31,16 @@ const GAME_KEYS = new Set([
 ])
 
 type Mode = 'play' | 'design'
+
+// Difficulty is a participant-local UI preference (like clipboard/selection), so it
+// lives in localStorage — never in the layer/lineage, so it can't skew a signature.
+const DIFFICULTY_KEY = 'ark:difficulty'
+function loadDifficulty(): number {
+  try { const n = parseInt(localStorage.getItem(DIFFICULTY_KEY) ?? '', 10); return n >= 0 && n < DIFFICULTY.length ? n : 0 } catch { return 0 }
+}
+function saveDifficulty(i: number): void {
+  try { localStorage.setItem(DIFFICULTY_KEY, String(i)) } catch { /* private mode / quota — non-fatal */ }
+}
 
 // Level-clear flow (continuous play — identical to the Bubble/Solomon overlays
 // so every game advances the same way): on clearing a screen we tally the
@@ -83,6 +93,9 @@ export class ArkanoidOverlay {
   #designer = new Designer()
   #levelIndex = 0
   #launchOffset: number | null = null   // the ball's on-paddle position set once (first start), reused all game
+  #fireHeld = false                     // latch so keydown auto-repeat doesn't restart the fireball charge
+  #difficulty = loadDifficulty()        // 0..4 (Rookie..Gangster), persisted in localStorage
+  #modeBtn: HTMLButtonElement | null = null
 
   // designer pointer paint state
   #painting = false
@@ -191,17 +204,21 @@ export class ArkanoidOverlay {
 
     // play controls
     const playBar = el('div', { class: 'ark-ctl' }) as HTMLDivElement
+    const modeBtn = el('button', { class: 'ark-btn ark-mode-btn' }) as HTMLButtonElement   // difficulty: Rookie → Gangster
     const prev = el('button', { class: 'ark-btn', text: '‹' }) as HTMLButtonElement
     const next = el('button', { class: 'ark-btn', text: '›' }) as HTMLButtonElement
     const label = el('span', { class: 'ark-level-label' }) as HTMLSpanElement
     const restart = el('button', { class: 'ark-btn', text: '↻ Restart' }) as HTMLButtonElement
+    modeBtn.onclick = () => this.#cycleMode()
     prev.onclick = () => this.#cycleLevel(-1)
     next.onclick = () => this.#cycleLevel(1)
     restart.onclick = () => this.#startPlay(this.#levelIndex)
-    playBar.append(prev, label, next, restart)
+    playBar.append(modeBtn, prev, label, next, restart)
     bar.appendChild(playBar)
     this.#playBar = playBar
     this.#levelLabel = label
+    this.#modeBtn = modeBtn
+    this.#syncModeBtn()
 
     // design controls
     const designBar = el('div', { class: 'ark-ctl ark-hidden' }) as HTMLDivElement
@@ -256,7 +273,7 @@ export class ArkanoidOverlay {
     this.#flyout = flyout
 
     const help = el('div', { class: 'ark-help' })
-    help.innerHTML = '<b>← →</b> / <b>mouse</b> move the bat &nbsp;·&nbsp; <b>Space</b> / left-click: launch &amp; fire &nbsp;·&nbsp; <b>right-click</b>: missile &nbsp;·&nbsp; pills: <b>O</b>scillate <b>B</b>reak <b>L</b>aser <b>E</b>xpand <b>G</b>un <b>M</b>agnet <b>↑</b>Rocket <b>×</b>Multiplier <b>∗</b>Burst <b>P</b>inball <b>I</b>Beam &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> release / close'
+    help.innerHTML = '<b>← →</b> / <b>mouse</b> move the bat &nbsp;·&nbsp; <b>Space</b> / left-click: launch — or <b>HOLD</b> to charge a <b>Laser</b> fireball, release to fire &nbsp;·&nbsp; <b>right-click</b>: missile &nbsp;·&nbsp; pills: <b>O</b>scillate <b>B</b>reak <b>L</b>aser <b>E</b>xpand <b>G</b>un <b>M</b>agnet <b>↑</b>Rocket <b>×</b>Multiplier <b>∗</b>Burst <b>P</b>inball <b>I</b>Beam &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> release / close'
     root.appendChild(help)
 
     document.body.appendChild(root)
@@ -297,7 +314,7 @@ export class ArkanoidOverlay {
       ['White ball = life', 'The white ball is your life; coloured balls are ammo. Lose the white one and you lose a life.'],
       ['The hunter', 'Dawdle too long and a hunter chases your white ball; a hit whacks your ball away fast (no instant loss). 3 hits — from the ball, ammo, lasers, or a rocket — destroy it.'],
       ['Sparkle bricks', 'Every 5 hits you land on the hunter, a sparkling brick appears and blooms into a big one. Five hits shatter it into shards — one hides a multiplier.'],
-      ['Controls', '← → or mouse to move · Space / left-click to launch & fire · right-click to fire the missile · R restart · Esc to close.'],
+      ['Controls', '← → or mouse to move · Space / left-click to launch — or HOLD to charge a Laser fireball and release to fire · right-click to fire the missile · R restart · Esc to close.'],
     ]
     for (const [t, d] of basics) {
       const row = el('div', { class: 'ark-info-row' })
@@ -324,6 +341,7 @@ export class ArkanoidOverlay {
     if (this.#canvas) this.#canvas.style.cursor = mode === 'design' ? 'crosshair' : 'none'
     if (mode === 'play') { this.#startPlay(this.#levelIndex) }
     else {
+      this.#fireHeld = false; this.#engine?.releaseLaser()   // don't strand a held fireball charge on mode switch
       this.#exitLock()
       if (this.#nameInput) this.#nameInput.value = this.#designer.name
       this.#refreshLoadSelect()
@@ -362,7 +380,9 @@ export class ArkanoidOverlay {
     this.#designBar?.classList.add('ark-hidden')
     if (this.#canvas) this.#canvas.style.cursor = 'none'
     this.#engine = new Engine(level.rows)
-    this.#engine.levelIndex = this.#levelIndex          // difficulty → enemy-swarm size
+    this.#engine.levelIndex = this.#levelIndex          // level → enemy-swarm size
+    this.#engine.difficulty = DIFFICULTY[this.#difficulty]   // the selected mode tunes the run
+    this.#engine.lives = DIFFICULTY[this.#difficulty].lives  // fresh run starts on the mode's lives
     if (this.#launchOffset !== null) this.#engine.pinLaunchOffset(this.#launchOffset)   // reuse the on-paddle position; aim only the first time
     this.#paddleTargetX = this.#engine.paddle.x
     // Fresh run from this level: score back to 0, full lives, no carry-over.
@@ -380,6 +400,31 @@ export class ArkanoidOverlay {
   #cycleLevel(dir: number): void {
     const n = (this.#levelIndex + dir + LEVELS.length) % LEVELS.length
     this.#startPlay(n)
+  }
+
+  /** Advance the difficulty (Rookie → Hustler → Made → Kingpin → Gangster → Rookie),
+   *  persist it, flash the swaggering tagline, and restart so the mode takes effect. */
+  #cycleMode(): void {
+    this.#difficulty = (this.#difficulty + 1) % DIFFICULTY.length
+    saveDifficulty(this.#difficulty)
+    this.#syncModeBtn()
+    this.#flash(DIFFICULTY[this.#difficulty].tagline)
+    this.#startPlay(this.#levelIndex)          // a mode change restarts the level (never mutates a live ball)
+  }
+
+  /** Label + colour-code the mode chip — calm steel for Rookie escalating to hot red
+   *  for Gangster (one accent var; the chrome stays slim and cold-clean). */
+  #syncModeBtn(): void {
+    const btn = this.#modeBtn
+    if (!btn) return
+    const d = DIFFICULTY[this.#difficulty]
+    btn.textContent = `◆ ${d.name}`
+    btn.title = d.tagline
+    const heat = this.#difficulty / (DIFFICULTY.length - 1)   // 0 = Rookie, 1 = Gangster
+    const accent = `hsl(${Math.round(200 - heat * 200)}, ${Math.round(55 + heat * 35)}%, ${Math.round(62 - heat * 8)}%)`
+    btn.style.setProperty('--mode-accent', accent)
+    btn.style.color = accent
+    btn.style.borderColor = accent
   }
 
   // ── juice: shake + spark bursts + level intro ────────────
@@ -556,7 +601,13 @@ export class ArkanoidOverlay {
     switch (e.key) {
       case 'ArrowLeft': case 'a': case 'A': eng.input.left = true; break
       case 'ArrowRight': case 'd': case 'D': eng.input.right = true; break
-      case ' ': case 'ArrowUp': eng.shoot(); break
+      case ' ': case 'ArrowUp': {
+        if (e.repeat || this.#fireHeld) break                 // OS key-repeat: ignore — only the first edge counts
+        this.#fireHeld = true
+        if (eng.laserShots > 0 && !eng.aiming) eng.startLaserCharge()   // armed: HOLD charges the fireball
+        else eng.shoot()                                      // otherwise: launch the ball / fire the gun
+        break
+      }
       case 'r': case 'R': this.#startPlay(this.#levelIndex); break
     }
   }
@@ -570,6 +621,7 @@ export class ArkanoidOverlay {
     switch (e.key) {
       case 'ArrowLeft': case 'a': case 'A': eng.input.left = false; break
       case 'ArrowRight': case 'd': case 'D': eng.input.right = false; break
+      case ' ': case 'ArrowUp': { this.#fireHeld = false; if (eng.laserCharging) eng.releaseLaser(); break }   // RELEASE launches the fireball
     }
   }
 
@@ -657,7 +709,8 @@ export class ArkanoidOverlay {
         const x = this.#worldXFromEvent(e)
         if (x !== null) this.#engine?.movePaddleTo(x)
       }
-      this.#engine?.shoot()
+      if (eng && eng.laserShots > 0 && !eng.aiming) eng.startLaserCharge()   // armed: HOLD left-click charges the fireball
+      else this.#engine?.shoot()
     } else {
       const cell = this.#cellFromEvent(e)
       if (!cell) return
@@ -671,7 +724,10 @@ export class ArkanoidOverlay {
   #onPointerUp = (e: PointerEvent): void => {
     this.#painting = false
     const eng = this.#engine                                // release the flipper (safe in any mode)
-    if (eng) { if (e.button === 2) eng.flipRight(false); else eng.flipLeft(false) }
+    if (eng) {
+      if (e.button === 2) eng.flipRight(false)
+      else { eng.flipLeft(false); if (eng.laserCharging) eng.releaseLaser() }   // left-button release launches the fireball
+    }
   }
 
   #paintAt(cell: { col: number; row: number }): void {
@@ -789,9 +845,10 @@ export class ArkanoidOverlay {
       if (tr.t < TALLY_MS) return
       const carriedScore = tr.baseScore + tr.levelScore + tr.bonus
       const e = new Engine(tr.nextLevel.rows)
-      e.levelIndex = tr.nextIndex          // difficulty → enemy-swarm size
+      e.levelIndex = tr.nextIndex          // level → enemy-swarm size
+      e.difficulty = DIFFICULTY[this.#difficulty]   // same mode carries into the next level
       e.score = carriedScore
-      e.lives = tr.prev.lives
+      e.lives = tr.prev.lives              // lives carry over mid-run (don't reset to the mode default)
       e.paddle.x = tr.prev.paddle.x        // carry the paddle position; base range ⊂ any expanded range
       if (this.#launchOffset !== null) e.pinLaunchOffset(this.#launchOffset)   // ball rides the set on-paddle offset; no re-aim
       this.#engine = e
@@ -946,24 +1003,25 @@ function opt(value: string, label: string): HTMLOptionElement {
 
 const CSS = `
 .ark-overlay{position:fixed;inset:0;display:flex;flex-direction:column;
-  background:radial-gradient(120% 120% at 50% 0%,#10204a 0%,#0a1230 60%,#04060f 100%);
-  font-family:'Segoe UI',system-ui,sans-serif;color:#e9eeff;user-select:none;
+  background:radial-gradient(120% 120% at 50% 0%,#bfe9ff 0%,#9fd9f5 55%,#c9f0d8 100%);
+  font-family:'Segoe UI',system-ui,sans-serif;color:#143052;user-select:none;
   animation:ark-in .2s ease both}
 @keyframes ark-in{from{opacity:0}to{opacity:1}}
 .ark-bar{display:flex;align-items:center;gap:.5rem;padding:.45rem .7rem;
-  background:rgba(8,12,26,.7);border-bottom:1px solid rgba(126,182,214,.25);flex-wrap:wrap}
-.ark-logo{font-weight:800;letter-spacing:.02em;color:#7ee0ff;white-space:nowrap;
-  text-shadow:0 0 14px rgba(126,224,255,.45)}
+  background:linear-gradient(180deg,#fffdf5,#ffeec2);
+  border-bottom:3px solid #ffb938;box-shadow:0 2px 0 rgba(255,184,56,.35);flex-wrap:wrap}
+.ark-logo{font-weight:800;letter-spacing:.02em;color:#1f7ed8;white-space:nowrap;
+  text-shadow:0 1px 0 #fff,0 0 10px rgba(120,200,255,.5)}
 .ark-tabs{display:flex;gap:.25rem;margin-left:.3rem}
-.ark-tab{background:transparent;border:1px solid rgba(126,182,214,.3);color:#c9d4ec;
-  padding:.2rem .7rem;border-radius:999px;cursor:pointer;font-size:.85rem}
-.ark-tab.on{background:rgba(126,224,255,.2);color:#fff;border-color:rgba(126,224,255,.6)}
+.ark-tab{background:#fff;border:2px solid #ffcf6b;color:#3a5a82;
+  padding:.2rem .7rem;border-radius:999px;cursor:pointer;font-size:.85rem;font-weight:600}
+.ark-tab.on{background:#34a4f0;color:#fff;border-color:#1f7ed8;box-shadow:0 2px 6px rgba(52,164,240,.4)}
 .ark-ctl{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap}
-.ark-level-label{min-width:10rem;text-align:center;font-size:.85rem;color:#cfd2ff}
-.ark-btn{background:rgba(126,182,214,.12);border:1px solid rgba(126,182,214,.3);
-  color:#dfe7ff;padding:.22rem .6rem;border-radius:7px;cursor:pointer;font-size:.82rem;
-  transition:background .15s ease}
-.ark-btn:hover{background:rgba(126,182,214,.26)}
+.ark-level-label{min-width:10rem;text-align:center;font-size:.85rem;color:#3a5a82}
+.ark-btn{background:#fff;border:2px solid #cfe2f0;
+  color:#244a72;padding:.22rem .6rem;border-radius:9px;cursor:pointer;font-size:.82rem;font-weight:600;
+  transition:background .15s ease,transform .1s ease}
+.ark-btn:hover{background:#eaf6ff;border-color:#34a4f0;transform:translateY(-1px)}
 .ark-btn-lg{padding:.5rem 1.15rem;font-size:.95rem}
 .ark-palette{display:flex;gap:.2rem}
 .ark-tool{width:2rem;height:2rem;display:flex;align-items:center;justify-content:center;
@@ -975,22 +1033,22 @@ const CSS = `
   color:#fff;border-radius:6px;padding:.25rem .5rem;width:8rem;font-size:.82rem}
 .ark-select{background:rgba(14,20,40,.96);border:1px solid rgba(255,255,255,.2);
   color:#fff;border-radius:6px;padding:.22rem .4rem;font-size:.8rem;max-width:11rem}
-.ark-status{margin-left:auto;font-size:.8rem;color:#9ad9b0;min-height:1em}
+.ark-status{margin-left:auto;font-size:.8rem;color:#1f9d57;min-height:1em}
 .ark-close{width:2rem;height:2rem;border-radius:50%;border:none;cursor:pointer;
   background:rgba(255,80,80,.18);color:#ff9a9a;font-size:1rem}
 .ark-close:hover{background:rgba(255,80,80,.34);color:#fff}
 .ark-stage{flex:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;padding:14px}
-.ark-canvas{border-radius:12px;
-  box-shadow:0 16px 60px rgba(0,0,0,.6),0 0 0 1px rgba(126,182,214,.22),0 0 40px rgba(80,140,255,.12);
-  background:#060a18;touch-action:none;cursor:none}
+.ark-canvas{border-radius:18px;
+  box-shadow:0 14px 38px rgba(40,90,150,.28),0 0 0 4px #ffffff,0 0 0 7px #34a4f0,0 0 26px rgba(52,164,240,.3);
+  background:#9fd9f5;touch-action:none;cursor:none}
 .ark-banner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;gap:.7rem;background:rgba(6,8,18,.72);backdrop-filter:blur(3px)}
-.ark-banner-title{font-size:2.4rem;font-weight:800;color:#7ee0ff;text-shadow:0 2px 22px rgba(120,220,255,.55)}
-.ark-banner-sub{font-size:1.1rem;color:#ffd76a}
+  justify-content:center;gap:.7rem;background:rgba(190,230,255,.74);backdrop-filter:blur(3px)}
+.ark-banner-title{font-size:2.4rem;font-weight:800;color:#1f7ed8;text-shadow:0 2px 0 #fff,0 3px 14px rgba(120,200,255,.6)}
+.ark-banner-sub{font-size:1.1rem;color:#e8780a;font-weight:600}
 .ark-banner-actions{display:flex;gap:.6rem;margin-top:.4rem}
-.ark-help{padding:.45rem .8rem;text-align:center;font-size:.78rem;color:#9aa0c8;
-  background:rgba(8,12,26,.6);border-top:1px solid rgba(126,182,214,.15)}
-.ark-help b{color:#dfe7ff}
+.ark-help{padding:.45rem .8rem;text-align:center;font-size:.78rem;color:#5a6a88;
+  background:linear-gradient(180deg,#ffeec2,#fffdf5);border-top:2px solid #ffcf6b}
+.ark-help b{color:#244a72}
 .ark-flyout{position:absolute;left:0;top:0;bottom:0;z-index:7;pointer-events:none}
 .ark-flyout-panel{position:absolute;left:0;top:0;bottom:0;width:238px;box-sizing:border-box;
   padding:14px 14px 20px;overflow-y:auto;pointer-events:auto;

@@ -5,10 +5,11 @@
 // draw — no state.
 
 import {
-  type Engine, type Brick, type Ball, type Capsule, type Laser, type TurretShot, type Rocket, type Explosion, type Enemy, type Tnt, type Bumper, type PinballProp, type Alien, type ExtraLife, type Pacman, type ComboPop, type Pickup,
+  type Engine, type Brick, type Ball, type Capsule, type Fireball, type TurretShot, type Rocket, type Explosion, type Enemy, type Tnt, type Bumper, type PinballProp, type Alien, type ExtraLife, type Pacman, type ComboPop, type Pickup,
   POWER_META, W, H, BRICK_W, BRICK_H, BRICK_TOP, BRICK_X0, GUN_AIM_MIN, GUN_AIM_MAX, GUN_DIAG_SPREAD,
-  ROCKET_RADIUS, EXPLOSION_DUR, ENEMY_R, ALIEN_W, ALIEN_H,
+  ROCKET_RADIUS, EXPLOSION_DUR, ENEMY_R, ALIEN_W, ALIEN_H, ALIEN_Y,
   FLIP_LEN, FLIP_PIVOT_DX, FLIP_Y_OFF, FLIP_REST, FLIP_UP,
+  FROG_HOP_PERIOD, FROG_AIR_FRAC, BEE_WIGGLE_HZ, SCUTTLE_PERIOD, GHOST_BOB_PERIOD, CHICK_BOB_PERIOD,
 } from './engine.js'
 import { EDIT_COLS, EDIT_ROWS } from './levels.js'
 
@@ -19,13 +20,33 @@ import { EDIT_COLS, EDIT_ROWS } from './levels.js'
 // cool field instead of the whole board being confetti. At runtime a '4' and a
 // '*' brick both collapse to max 4 and read GOLD; the editor, where the chars
 // are still distinct, shows '4' in amber and '*' in gold (see drawEditor).
+// Vivid arcade palette — bright, saturated, high-contrast so the tiles POP off the
+// dark board (kept clearly distinct: mint → cyan → indigo → hot orange → gold).
 const BRICK_COLORS: Record<number, string> = {
-  1: '#3fd6c0',   // teal
-  2: '#46b6f0',   // aqua
-  3: '#3d83e6',   // ocean blue
-  4: '#ffae4a',   // warm accent — a clearly tougher brick
+  1: '#26f0c8',   // bright mint-teal
+  2: '#16ccff',   // electric cyan
+  3: '#5a72ff',   // vivid indigo
+  4: '#ff8f2e',   // hot orange — a clearly tougher brick
 }
-const TOUGH_COLOR = '#ffd24a'   // gold — the * 4-hp tough brick, the toughest read
+const TOUGH_COLOR = '#ffd233'   // vivid gold — the * 4-hp tough brick, the toughest read
+// Cartoon frog (the hopping top dispenser) — bright candy greens + a dark-green ink contour.
+const FROG_BODY_TOP = '#7CF05A'   // bright lime crown
+const FROG_BODY_MID = '#3FD13A'   // saturated grass green
+const FROG_BODY_BOT = '#1E9E2E'   // deep green base
+const FROG_BELLY = '#E9FFD0'      // pale glossy belly
+const FROG_INK = '#0E5A1E'        // dark-green ink contour (never #000)
+// Bumblebee
+const BEE_BODY_TOP = '#FFD23A', BEE_BODY_MID = '#FFB81F', BEE_BODY_BOT = '#E8870C'
+const BEE_STRIPE = '#241A0A', BEE_INK = '#5A3A0E', BEE_WING = '210,235,255'
+// Crab
+const CRAB_SHELL_TOP = '#FF7A4D', CRAB_SHELL_MID = '#F2452E', CRAB_SHELL_BOT = '#B81E22'
+const CRAB_LIMB = '#FF9166', CRAB_BELLY = '#FFE0C2', CRAB_INK = '#7A1410'
+// Ghost
+const GHOST_BODY_TOP = '#FFFFFF', GHOST_BODY_MID = '#F2ECFF', GHOST_BODY_BOT = '#D9C8FF'
+const GHOST_BELLY = '#FBF7FF', GHOST_INK = '#6A4FA8', GHOST_CHEEK = '#FFA7D0'
+// Baby chick
+const CHICK_BODY_TOP = '#FFE86B', CHICK_BODY_MID = '#FFD23B', CHICK_BODY_BOT = '#F2A521'
+const CHICK_BELLY = '#FFF6C8', CHICK_BEAK = '#FF8A2B', CHICK_INK = '#9A5410'
 
 // Ten hunter looks, chosen by enemy.variant on spawn — a colour theme + spike
 // count each, so a run shows a varied bestiary rather than one recoloured bug.
@@ -102,10 +123,11 @@ export class Renderer {
     this.#bricks(engine.bricks, time)
     this.#bumpers(engine.bumpers, time)
     if (engine.pinballProps.length) this.#pinballProps(engine.pinballProps, time)
-    this.#lasers(engine.lasers)
     this.#turretShots(engine.turretShots, time)
     this.#gunAim(engine, time)
     this.#paddle(engine, time)
+    this.#chargeOrb(engine, time)                            // charging fireball at the bat muzzle
+    this.#fireballs(engine.fireballs, time)                  // in-flight Hadoukens (on top of the bat)
     this.#beam(engine)
     if (engine.alien) this.#alien(engine.alien, time)
     if (engine.extraLife) this.#extraLife(engine.extraLife, time)
@@ -124,8 +146,60 @@ export class Renderer {
     this.#comboPops(engine.comboPops)
     if (engine.milestoneFx) this.#milestone(engine.milestoneFx.n, engine.milestoneFx.t, engine.milestoneFx.life)
     if (engine.franticFlash > 0) this.#frenzy(engine.franticFlash, time)
+    if (engine.nearClearFrac > 0) this.#nearClear(engine.nearClearFrac, engine, time)   // last-few-bricks BERSERK alert
     if (engine.aiming) this.#aimHint(engine, time)
     this.#hud(engine)
+  }
+
+  /** Near-clear ALERT: with only the last few bricks left the swarm goes berserk —
+   *  a pulsing red-alert edge vignette, enemy speed-lines + after-images, and an
+   *  "ALERT" klaxon flicker. Layered on top, cheap, deterministic. nc = 0..1. */
+  #nearClear(nc: number, engine: Engine, time: number): void {
+    const ctx = this.#ctx
+    const hz = 3.5 + 4.5 * nc
+    const pulse = 0.5 + 0.5 * Math.sin(time * hz)
+    const intensity = nc * (0.55 + 0.45 * pulse)
+    // 1 ── red-alert vignette (edge-only, so it can't fight the central gold #frenzy)
+    ctx.save()
+    const vg = ctx.createRadialGradient(W / 2, H * 0.5, H * 0.30, W / 2, H * 0.5, H * 0.74)
+    vg.addColorStop(0, 'rgba(255,40,48,0)'); vg.addColorStop(1, `rgba(255,36,44,${0.34 * intensity})`)
+    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H)
+    ctx.restore()
+    // 2 ── enemy speed-lines + after-images (the "they got fast" read)
+    if (engine.enemies.length) {
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'
+      for (const e of engine.enemies) {
+        const vx = e.vx ?? 0, vy = e.vy ?? 0
+        const sp = Math.hypot(vx, vy)
+        const dx = sp > 0.01 ? vx / sp : 0, dy = sp > 0.01 ? vy / sp : 1
+        for (let i = 1; i <= 2; i++) {
+          const gx = e.x - dx * i * ENEMY_R * 0.8, gy = e.y - dy * i * ENEMY_R * 0.8
+          ctx.globalAlpha = 0.20 * intensity / i; ctx.fillStyle = 'rgba(255,90,90,1)'
+          ctx.beginPath(); ctx.arc(gx, gy, ENEMY_R * (0.9 - i * 0.18), 0, Math.PI * 2); ctx.fill()
+        }
+        ctx.globalAlpha = 0.5 * intensity
+        ctx.strokeStyle = 'rgba(255,170,170,0.9)'; ctx.lineWidth = 1.4; ctx.lineCap = 'round'
+        const nx = -dy, ny = dx
+        for (let k = -1; k <= 1; k++) {
+          const ox = nx * k * ENEMY_R * 0.5, oy = ny * k * ENEMY_R * 0.5, len = ENEMY_R * (1.4 + 1.0 * pulse)
+          ctx.beginPath()
+          ctx.moveTo(e.x + ox - dx * ENEMY_R * 0.9, e.y + oy - dy * ENEMY_R * 0.9)
+          ctx.lineTo(e.x + ox - dx * (ENEMY_R * 0.9 + len), e.y + oy - dy * (ENEMY_R * 0.9 + len))
+          ctx.stroke()
+        }
+      }
+      ctx.restore()
+    }
+    // 3 ── "ALERT" klaxon flicker, top-centre, strobing on the beat
+    if (pulse > 0.6) {
+      ctx.save()
+      ctx.globalAlpha = (pulse - 0.6) / 0.4 * intensity
+      ctx.translate(W / 2, 40 + Math.sin(time * 40) * 1.5)
+      ctx.font = '900 22px "Segoe UI", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+      ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(60,0,4,0.9)'; ctx.strokeText('⚠ ALERT', 0, 0)
+      ctx.fillStyle = '#ff5b5b'; ctx.shadowColor = '#ff2b2b'; ctx.shadowBlur = 14; ctx.fillText('⚠ ALERT', 0, 0)
+      ctx.restore()
+    }
   }
 
   // ── designer view ────────────────────────────────────────
@@ -346,31 +420,57 @@ export class Renderer {
     const dmg = 1 - Math.max(0, Math.min(1, wear))
     const toward = dmg * dmg
     const body = mix(fresh, BRICK_CHARRED, toward * 0.82)
-    const shade = darken(body, 0.62)                  // bottom of the gradient
+    const top = mix(body, { r: 255, g: 255, b: 255 }, 0.45)   // bright glossy top of the gradient
+    const shade = darken(body, 0.5)                           // rich (not muddy) bottom
     const rx = x + 1.5, ry = y + 1.5, rw = w - 3, rh = h - 3
 
     ctx.globalAlpha = 1
-    // body — a top-lit vertical gradient so it reads as a beveled tile
+    // body — a vivid top-lit gradient (bright crown → saturated body → rich base)
     this.#roundRect(rx, ry, rw, rh, 4)
     const g = ctx.createLinearGradient(rx, ry, rx, ry + rh)
-    g.addColorStop(0, rgbStr(body.r, body.g, body.b))
+    g.addColorStop(0, rgbStr(top.r, top.g, top.b))
+    g.addColorStop(0.42, rgbStr(body.r, body.g, body.b))
     g.addColorStop(1, rgbStr(shade.r, shade.g, shade.b))
     ctx.fillStyle = g
     ctx.fill()
 
-    // crisp darker edge so the shape stays solid even when charred
-    const edge = darken(body, 0.42)
-    ctx.lineWidth = 1
-    ctx.strokeStyle = rgbStr(edge.r, edge.g, edge.b)
-    this.#roundRect(rx + 0.5, ry + 0.5, rw - 1, rh - 1, 3.5)
+    // bright lit shine-edge along the top + left (the arcade "this tile glows" cue)
+    ctx.globalAlpha = 0.55 * (0.4 + 0.6 * wear)
+    ctx.strokeStyle = rgbStr(Math.min(255, top.r + 28), Math.min(255, top.g + 28), Math.min(255, top.b + 28))
+    ctx.lineWidth = 1.3; ctx.lineCap = 'round'
+    ctx.beginPath()
+    ctx.moveTo(rx + 4, ry + 0.8); ctx.lineTo(rx + rw - 4, ry + 0.8)
+    ctx.moveTo(rx + 0.8, ry + 4); ctx.lineTo(rx + 0.8, ry + rh - 4)
     ctx.stroke()
+    ctx.globalAlpha = 1
 
-    // top highlight — kept crisp (fades only slightly with wear), the strongest
-    // "this is a fresh solid tile" cue
-    ctx.globalAlpha = 0.4 * (0.45 + 0.55 * wear)
-    ctx.fillStyle = '#ffffff'
-    this.#roundRect(rx + 1, ry + 1, rw - 2, rh * 0.4, 3)
+    // tinted ink contour — the cartoon outline that unifies the look (never #000)
+    const ink = darken(body, 0.22)
+    ctx.globalAlpha = 0.55 + 0.45 * wear
+    this.#roundRect(rx + 0.5, ry + 0.5, rw - 1, rh - 1, 3.5)
+    this.#inkContour(rgbStr(ink.r, ink.g, ink.b), 1.6)
+    ctx.globalAlpha = 1
+
+    // ONE hard-edged cel shadow band across the lower ~42% (cel-shading read)
+    if (rw >= 6 && rh >= 6) {
+      ctx.save()
+      this.#roundRect(rx, ry, rw, rh, 4); ctx.clip()
+      const band = darken(body, 0.62)
+      ctx.globalAlpha = 0.32; ctx.fillStyle = rgbStr(band.r, band.g, band.b)
+      ctx.fillRect(rx, ry + rh * 0.58, rw, rh * 0.42)
+      ctx.restore()
+    }
+
+    // GLOSS — a candy specular sweep across the top + a plastic hotspot
+    ctx.globalAlpha = 0.5 * (0.45 + 0.55 * wear)
+    const gloss = ctx.createLinearGradient(rx, ry, rx, ry + rh * 0.55)
+    gloss.addColorStop(0, 'rgba(255,255,255,0.92)'); gloss.addColorStop(1, 'rgba(255,255,255,0)')
+    ctx.fillStyle = gloss
+    this.#roundRect(rx + 2, ry + 1.2, rw - 4, rh * 0.42, 3)
     ctx.fill()
+    ctx.globalAlpha = 0.5 * wear
+    ctx.fillStyle = '#ffffff'
+    ctx.beginPath(); ctx.ellipse(rx + rw * 0.26, ry + rh * 0.34, rw * 0.15, rh * 0.2, -0.35, 0, Math.PI * 2); ctx.fill()
     ctx.globalAlpha = 1
 
     // Branching fracture network that grows as the brick disintegrates.
@@ -490,31 +590,42 @@ export class Renderer {
     const ctx = this.#ctx
     const p = engine.paddle
     const x = p.x - p.w / 2
-    // ── paddle health bar (just above the bat) ──
-    const hpFrac = engine.paddleHpFrac
-    const by = p.y - 9
-    ctx.save()
-    this.#roundRect(x, by, p.w, 3.6, 1.8); ctx.fillStyle = 'rgba(8,12,26,0.78)'; ctx.fill()
-    if (hpFrac > 0) {
-      const hcol = hpFrac > 0.5 ? '#5fe08a' : hpFrac > 0.25 ? '#ffd24a' : '#ff5b5b'
-      this.#roundRect(x, by, p.w * hpFrac, 3.6, 1.8); ctx.fillStyle = hcol; ctx.shadowColor = hcol; ctx.shadowBlur = 6; ctx.fill()
-    }
-    ctx.restore()
-    // ── shield / healing-shield dome over the bat ──
+    // health is shown by the bat itself (below) — no separate floating gauge
+    // ── glossy cartoon bubble shield dome over the bat ──
     if (engine.shielded) {
       const heal = engine.regenTimer > 0
-      const col = heal ? '#3fe0a8' : '#5b9bff'
+      const frac = engine.shieldHpFrac                                   // 1 fresh, 0 about to break
+      const flash = engine.shieldFlash
+      const base = hexRgb(heal ? '#43e0a8' : '#5bc8ff')
+      const stress = Math.min(1, (1 - frac) * 0.85 + flash * 0.6)
+      const c = mix(base, { r: 255, g: 90, b: 70 }, stress)             // reddens under stress
+      const rim = mix(c, { r: 255, g: 255, b: 255 }, 0.45)              // bright rim highlight
+      const col = rgbStr(c.r, c.g, c.b), rimCol = rgbStr(rim.r, rim.g, rim.b)
       const pulse = 0.5 + 0.5 * Math.sin(time * 6)
-      ctx.save()
-      ctx.strokeStyle = col; ctx.shadowColor = col
-      ctx.lineWidth = 2 + engine.shieldFlash * 2.5; ctx.shadowBlur = 10 + 12 * engine.shieldFlash
-      ctx.globalAlpha = 0.45 + 0.3 * pulse + 0.5 * engine.shieldFlash
-      ctx.beginPath(); ctx.ellipse(p.x, p.y + p.h / 2, p.w / 2 + 14, p.h + 16, 0, Math.PI, Math.PI * 2); ctx.stroke()
-      ctx.globalAlpha = 0.07 + 0.05 * pulse
-      ctx.fillStyle = col; ctx.fill()
-      if (heal) {                                // healing shield: rising sparkles
-        ctx.globalAlpha = 0.6; ctx.fillStyle = '#bfffe0'
-        for (let i = 0; i < 3; i++) { const sx = p.x + Math.sin(time * 2 + i * 2) * p.w * 0.4; const sy = p.y - ((time * 30 + i * 14) % 24); ctx.beginPath(); ctx.arc(sx, sy, 1.4, 0, Math.PI * 2); ctx.fill() }
+      const cy = p.y + p.h / 2
+      const rx = p.w / 2 + 16, ry = (p.h + 22) * (0.45 + 0.55 * frac)   // dome shrinks toward the bat as it weakens
+      ctx.save(); ctx.lineCap = 'round'
+      // translucent glossy fill, brighter at the crown
+      ctx.beginPath(); ctx.ellipse(p.x, cy, rx, ry, 0, Math.PI, Math.PI * 2)
+      const bg = ctx.createLinearGradient(p.x, cy - ry, p.x, cy)
+      bg.addColorStop(0, `rgba(${Math.round(rim.r)},${Math.round(rim.g)},${Math.round(rim.b)},${0.34 * (0.5 + 0.5 * frac)})`)
+      bg.addColorStop(1, `rgba(${Math.round(c.r)},${Math.round(c.g)},${Math.round(c.b)},${0.10 * frac})`)
+      ctx.fillStyle = bg; ctx.shadowColor = col; ctx.shadowBlur = 8 + 16 * flash; ctx.fill()
+      // bright rim, glowing; flares on a hit
+      ctx.beginPath(); ctx.ellipse(p.x, cy, rx, ry, 0, Math.PI, Math.PI * 2)
+      ctx.strokeStyle = rimCol; ctx.lineWidth = 2 + 1.4 * pulse + flash * 4
+      ctx.globalAlpha = Math.min(1, 0.55 + 0.3 * frac + 0.5 * flash); ctx.shadowBlur = 10 + 18 * flash
+      ctx.stroke(); ctx.globalAlpha = 1; ctx.shadowBlur = 0
+      // upper-left bubble shine crescent
+      ctx.beginPath(); ctx.ellipse(p.x, cy, rx * 0.78, ry * 0.78, 0, Math.PI * 1.12, Math.PI * 1.42)
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 2.2; ctx.globalAlpha = 0.5 + 0.4 * frac; ctx.stroke(); ctx.globalAlpha = 1
+      // depletion meter — a bright top arc that narrows toward centre as the shield is chipped
+      ctx.beginPath(); ctx.ellipse(p.x, cy, rx, ry, 0, 1.5 * Math.PI - 0.5 * Math.PI * frac, 1.5 * Math.PI + 0.5 * Math.PI * frac)
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.6 + flash * 3
+      ctx.globalAlpha = Math.min(1, 0.6 + 0.3 * pulse + 0.5 * flash); ctx.shadowColor = rimCol; ctx.shadowBlur = 8 + 12 * flash; ctx.stroke()
+      if (heal) {                                // healing shield: rising mint sparkles (fade as it weakens)
+        ctx.shadowBlur = 0; ctx.globalAlpha = 0.7 * frac; ctx.fillStyle = '#caffe8'
+        for (let i = 0; i < 3; i++) { const sx = p.x + Math.sin(time * 2 + i * 2) * p.w * 0.4; const sy = cy - ((time * 30 + i * 14) % (ry + 8)); ctx.beginPath(); ctx.arc(sx, sy, 1.6, 0, Math.PI * 2); ctx.fill() }
       }
       ctx.restore()
     }
@@ -524,14 +635,41 @@ export class Renderer {
       ctx.restore()
       return
     }
-    ctx.shadowColor = 'rgba(126,224,255,0.65)'
-    ctx.shadowBlur = 12
-    this.#roundRect(x, p.y, p.w, p.h, p.h / 2)
+    // ── the bat IS the power bar: a glossy segmented capsule that fills from
+    //    the left with HP colour (its own blue while healthy → amber → red)
+    //    over a dark track. One bar, no floating gauge. ──
+    const r0 = p.h / 2
+    const hpFrac = Math.max(0, Math.min(1, engine.paddleHpFrac))
+    const band = hpFrac > 0.5 ? { top: '#dff6ff', mid: '#46c4ff', bot: '#2e7ff0' }
+      : hpFrac > 0.25 ? { top: '#ffe9a0', mid: '#ffc233', bot: '#e08a1f' }
+        : { top: '#ffc7c7', mid: '#ff5b5b', bot: '#c62f2f' }
+    // dark empty track
+    this.#roundRect(x, p.y, p.w, p.h, r0)
+    ctx.shadowColor = 'rgba(0,0,0,0.5)'; ctx.shadowBlur = 10; ctx.shadowOffsetY = 2
+    ctx.fillStyle = 'rgba(14,20,40,0.92)'; ctx.fill()
+    ctx.shadowBlur = 0; ctx.shadowOffsetY = 0
+    // HP fill from the left, clipped to the capsule
+    const fw = Math.max(p.h, p.w * hpFrac)
+    this.#roundRect(x, p.y, p.w, p.h, r0); ctx.save(); ctx.clip()
     const g = ctx.createLinearGradient(x, p.y, x, p.y + p.h)
-    g.addColorStop(0, '#bfe9ff')
-    g.addColorStop(1, '#5aa9ff')
-    ctx.fillStyle = g
-    ctx.fill()
+    g.addColorStop(0, band.top); g.addColorStop(0.45, band.mid); g.addColorStop(1, band.bot)
+    this.#roundRect(x, p.y, fw, p.h, r0); ctx.fillStyle = g
+    ctx.shadowColor = band.mid; ctx.shadowBlur = 12; ctx.fill(); ctx.shadowBlur = 0
+    // segment ticks across the filled portion
+    const SEG = 6
+    ctx.fillStyle = 'rgba(10,16,30,0.5)'
+    for (let i = 1; i < SEG; i++) { const nx = x + (p.w * i) / SEG; if (nx < x + fw - 1) ctx.fillRect(nx - 0.75, p.y + 2, 1.5, p.h - 4) }
+    ctx.restore()
+    // glossy top sweep — a bright plastic shine across the bat
+    ctx.save(); ctx.shadowBlur = 0; ctx.globalAlpha = 0.7
+    const sweep = ctx.createLinearGradient(x, p.y, x, p.y + p.h * 0.6)
+    sweep.addColorStop(0, 'rgba(255,255,255,0.85)'); sweep.addColorStop(1, 'rgba(255,255,255,0)')
+    ctx.fillStyle = sweep
+    this.#roundRect(x + 3, p.y + 1, p.w - 6, p.h * 0.42, p.h / 3); ctx.fill()
+    ctx.restore()
+    // tinted ink contour around the bat (a dark of the bat blue, never #000)
+    this.#roundRect(x, p.y, p.w, p.h, p.h / 2)
+    this.#inkContour('#1c3a66', 1.5)
     // Took a turret shot: a red wash over the bat that fades out.
     const hf = engine.paddleHitFlashFrac
     if (hf > 0) {
@@ -544,12 +682,6 @@ export class Renderer {
       ctx.restore()
     }
     ctx.restore()
-    // Laser cannons on the bat ends while armed.
-    if (engine.laserTimer > 0) {
-      ctx.fillStyle = '#ff8f8f'
-      ctx.fillRect(x + 4, p.y - 5, 4, 6)
-      ctx.fillRect(x + p.w - 8, p.y - 5, 4, 6)
-    }
   }
 
   /** Draw the two pinball flippers from the engine's raise state, sliding with the bat. */
@@ -702,6 +834,14 @@ export class Renderer {
     if (fiery) this.#ballFire(ball, time)                    // dynamite live: flames lick off the ball
     if (pierce) this.#ballPhase(ball, time)                  // pierce active: ghostly phasing aura + trail
     ctx.save()
+    // squash/stretch along velocity — a base-speed (450) ball is round; only fast /
+    // pinball balls stretch. Capped at 0.22 so it reads as juice, not a needle.
+    const speed = Math.hypot(ball.vx, ball.vy)
+    const sq = Math.max(0, Math.min(0.22, (speed / 450 - 1) * 0.18))
+    if (sq > 0.001) {
+      const dir = Math.atan2(ball.vy, ball.vx)
+      ctx.translate(ball.x, ball.y); ctx.rotate(dir); ctx.scale(1 + sq, 1 - sq * 0.7); ctx.translate(-ball.x, -ball.y)
+    }
     const pulse = 0.85 + 0.15 * Math.sin(time * 6)
     if (ball.primary) {
       // The white ball — the one you must keep alive.
@@ -712,10 +852,19 @@ export class Renderer {
       ctx.shadowColor = ball.color
       ctx.shadowBlur = 12 * pulse
     }
-    ctx.beginPath()
-    ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2)
-    ctx.fillStyle = pierce ? '#eef4ff' : ball.color
-    ctx.fill()
+    // glossy sphere — radial shading from a bright top-left hotspot to a rich rim
+    const base = pierce ? '#eef4ff' : ball.color
+    const sg = ctx.createRadialGradient(ball.x - ball.r * 0.35, ball.y - ball.r * 0.4, ball.r * 0.1, ball.x, ball.y, ball.r)
+    sg.addColorStop(0, '#ffffff'); sg.addColorStop(0.38, base); sg.addColorStop(1, this.#darken(base))
+    ctx.fillStyle = sg
+    ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2); ctx.fill()
+    // soft cartoon contour — light grey on the white hero ball (a dark ring reads as a
+    // hole), tinted-dark on coloured ammo. Before the specular so the hotspot stays last.
+    ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2)
+    this.#inkContour(ball.primary ? 'rgba(200,210,230,0.5)' : this.#darken(base), 1.4)
+    // crisp specular dot
+    ctx.shadowBlur = 0; ctx.fillStyle = 'rgba(255,255,255,0.95)'
+    ctx.beginPath(); ctx.arc(ball.x - ball.r * 0.32, ball.y - ball.r * 0.36, ball.r * 0.22, 0, Math.PI * 2); ctx.fill()
     ctx.restore()
   }
 
@@ -875,63 +1024,236 @@ export class Renderer {
       ctx.fillStyle = aura
       ctx.beginPath(); ctx.arc(cap.x, cap.y, 15 + 4 * pulse, 0, Math.PI * 2); ctx.fill()
       ctx.restore()
-      if (cap.kind === 'oscillate' || cap.kind === 'beam') { this.#mushroom(cap.x, cap.y, meta.color); continue }   // magic mushrooms
+      // gentle falling wobble — a slow side bob + tiny vertical bob + lazy tilt (the soft aura above does NOT wobble)
+      const wob = Math.sin(time * 3.2 + cap.x * 0.12)
+      const tilt = wob * 0.10
+      const dx = cap.x + wob * 2.2, dy = cap.y + Math.sin(time * 4.6 + cap.x * 0.12) * 1.3
+      if (cap.kind === 'oscillate' || cap.kind === 'beam') { this.#mushroom(dx, dy, meta.color, tilt); continue }   // magic mushrooms
       if (cap.kind === 'clock') { this.#clockCapsule(cap.x, cap.y, time); continue }                                // the time clock
       if (cap.kind === 'crane') { this.#paperCrane(cap.x, cap.y, time); continue }                                  // the gold paper-crane jackpot
-      const w = 30, h = 15
-      const x = cap.x - w / 2, y = cap.y - h / 2
-      ctx.save()
-      ctx.shadowColor = meta.color
-      ctx.shadowBlur = 12
-      this.#roundRect(x, y, w, h, h / 2)
-      const g = ctx.createLinearGradient(x, y, x, y + h)
-      g.addColorStop(0, '#ffffff')
-      g.addColorStop(0.25, meta.color)
-      g.addColorStop(1, meta.color)
-      ctx.fillStyle = g
-      ctx.fill()
+      if (cap.kind === 'extralife') { this.#lifeCapsule(dx, dy, tilt, time); continue }                             // the 1UP heart
+      // generic glossy candy capsule — chunky body, ink outline, gloss highlight, bold glyph
+      const w = 32, h = 17, r = h / 2
+      ctx.save(); ctx.translate(dx, dy); ctx.rotate(tilt)
+      const lx = -w / 2, ly = -h / 2
+      const cbase = hexRgb(meta.color)
+      const lite = mix(cbase, { r: 255, g: 255, b: 255 }, 0.55)
+      const deep = darken(cbase, 0.62)
+      const ink = this.#darken(meta.color)
+      ctx.shadowColor = meta.color; ctx.shadowBlur = 14
+      this.#roundRect(lx, ly, w, h, r)
+      const g = ctx.createLinearGradient(0, ly, 0, ly + h)
+      g.addColorStop(0, rgbStr(lite.r, lite.g, lite.b)); g.addColorStop(0.45, rgbStr(cbase.r, cbase.g, cbase.b)); g.addColorStop(1, rgbStr(deep.r, deep.g, deep.b))
+      ctx.fillStyle = g; ctx.fill(); ctx.shadowBlur = 0
+      this.#roundRect(lx + 0.5, ly + 0.5, w - 1, h - 1, r - 0.5); this.#inkContour(ink, 2)
+      ctx.beginPath(); ctx.ellipse(0, ly + h * 0.30, w * 0.36, h * 0.24, 0, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fill()
+      ctx.beginPath(); ctx.arc(-w * 0.26, ly + h * 0.28, 1.5, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.fill()
+      ctx.font = '800 12px "Segoe UI", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round'
+      ctx.strokeStyle = ink; ctx.lineWidth = 3; ctx.strokeText(meta.letter, 0, 1)
+      ctx.fillStyle = '#ffffff'; ctx.fillText(meta.letter, 0, 1)
       ctx.restore()
-      ctx.fillStyle = 'rgba(10,12,26,0.92)'
-      ctx.font = '700 11px "Segoe UI", system-ui, sans-serif'
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-      ctx.fillText(meta.letter, cap.x, cap.y + 0.5)
     }
     void time
   }
 
   /** The oscillate pickup, drawn as a magic mushroom: a spotted dome cap in the
    *  power colour over a cream stem. */
-  #mushroom(cx: number, cy: number, color: string): void {
+  #mushroom(cx: number, cy: number, color: string, tilt = 0): void {
     const ctx = this.#ctx
+    const base = hexRgb(color)
+    const lite = mix(base, { r: 255, g: 255, b: 255 }, 0.5)
+    const deep = darken(base, 0.55)
+    const ink = this.#darken(color)
+    const squash = 1 + tilt * 0.6                                    // breathes ±6% as it falls
     ctx.save()
-    ctx.shadowColor = color; ctx.shadowBlur = 11
-    // stem (cream) — drawn first so the cap overlaps its top
-    ctx.fillStyle = '#fbe7c6'
-    this.#roundRect(cx - 5, cy - 1, 10, 12, 3); ctx.fill()
+    ctx.translate(cx, cy)
+    ctx.rotate(tilt * 0.5)                                           // mushrooms feel heavier — half the lozenge tilt
+    ctx.shadowColor = color; ctx.shadowBlur = 12
+    // --- STEM (creamy, beveled) ---
+    const sg = ctx.createLinearGradient(-5, 0, 5, 0)
+    sg.addColorStop(0, '#fff6e2'); sg.addColorStop(0.5, '#fbe7c6'); sg.addColorStop(1, '#e7c79a')
+    this.#roundRect(-5, -1, 10, 13, 4); ctx.fillStyle = sg; ctx.fill()
     ctx.shadowBlur = 0
-    ctx.fillStyle = 'rgba(150,120,80,0.3)'
-    this.#roundRect(cx + 1.5, cy - 1, 3.5, 12, 2); ctx.fill()        // stem shading
-    // cap dome in the power colour
-    ctx.fillStyle = color
-    ctx.beginPath(); ctx.ellipse(cx, cy, 13, 11, 0, Math.PI, 2 * Math.PI); ctx.closePath(); ctx.fill()
-    ctx.fillStyle = 'rgba(0,0,0,0.18)'                               // darker rim under the cap
-    this.#roundRect(cx - 12, cy - 2.5, 24, 3, 1.5); ctx.fill()
-    // white spots
-    ctx.fillStyle = '#fffaf0'
-    for (const [sx, sy, sr] of [[-6, -6, 2.3], [4, -7, 1.9], [9, -3, 1.5], [-1, -3.5, 2.1]] as const) {
-      ctx.beginPath(); ctx.arc(cx + sx, cy + sy, sr, 0, Math.PI * 2); ctx.fill()
+    this.#roundRect(-5, -1, 10, 13, 4); this.#inkContour(ink, 1.6)
+    this.#roundRect(-3.6, 0.5, 2.2, 10, 1.1); ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fill()
+    // --- CAP (rounder glossy dome) ---
+    ctx.shadowColor = color; ctx.shadowBlur = 12
+    ctx.beginPath(); ctx.ellipse(0, 0, 14, 12 * squash, 0, Math.PI, 2 * Math.PI); ctx.closePath()
+    const dg = ctx.createLinearGradient(0, -12 * squash, 0, 0)
+    dg.addColorStop(0, rgbStr(lite.r, lite.g, lite.b)); dg.addColorStop(0.5, rgbStr(base.r, base.g, base.b)); dg.addColorStop(1, rgbStr(deep.r, deep.g, deep.b))
+    ctx.fillStyle = dg; ctx.fill()
+    ctx.shadowBlur = 0
+    ctx.beginPath(); ctx.ellipse(0, 0, 14, 12 * squash, 0, Math.PI, 2 * Math.PI); ctx.closePath(); this.#inkContour(ink, 2)
+    // broad glossy sheen across the cap
+    ctx.beginPath(); ctx.ellipse(-2, -7 * squash, 7, 3.4, -0.25, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.fill()
+    // dark rim band under the cap so it reads separate from the stem
+    this.#roundRect(-13, -2.5, 26, 3, 1.5); ctx.fillStyle = rgbStr(deep.r, deep.g, deep.b); ctx.globalAlpha = 0.5; ctx.fill(); ctx.globalAlpha = 1
+    // --- GLOSSY RAISED SPOTS (creamy disc + faint outline + gloss dot) ---
+    for (const [sx, sy, sr] of [[-7, -6, 2.6], [4, -7.5, 2.1], [9, -3, 1.6], [-1, -3, 2.3], [6, -1.5, 1.3]] as const) {
+      ctx.beginPath(); ctx.arc(sx, sy, sr, 0, Math.PI * 2); ctx.fillStyle = '#fffaf0'; ctx.fill()
+      this.#inkContour('rgba(120,90,50,0.45)', 0.8)
+      ctx.beginPath(); ctx.arc(sx - sr * 0.35, sy - sr * 0.35, sr * 0.4, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.fill()
     }
     ctx.restore()
   }
 
-  #lasers(lasers: readonly Laser[]): void {
+  /** The 1-UP / extra-life pill: a glossy green cartoon heart reading "1UP". */
+  #lifeCapsule(cx: number, cy: number, tilt: number, time: number): void {
     const ctx = this.#ctx
-    ctx.save()
-    ctx.shadowColor = 'rgba(255,90,90,0.9)'
-    ctx.shadowBlur = 8
-    ctx.fillStyle = '#ff6b6b'
-    for (const l of lasers) ctx.fillRect(l.x - 1.5, l.y, 3, 12)
+    const green = hexRgb('#5fe08a')
+    const lite = mix(green, { r: 255, g: 255, b: 255 }, 0.5)
+    const deep = darken(green, 0.55)
+    const ink = this.#darken('#2f9e5a')
+    const beat = 1 + 0.06 * Math.sin(time * 6)                       // a tiny heartbeat pulse
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(tilt)
+    const drawHeart = (s: number) => {
+      const yo = -3
+      ctx.beginPath()
+      ctx.moveTo(0, yo + 9 * s)
+      ctx.bezierCurveTo(-11 * s, yo - 1 * s, -10 * s, yo - 11 * s, 0, yo - 4 * s)
+      ctx.bezierCurveTo(10 * s, yo - 11 * s, 11 * s, yo - 1 * s, 0, yo + 9 * s)
+      ctx.closePath()
+    }
+    // glossy green fill
+    ctx.shadowColor = '#5fe08a'; ctx.shadowBlur = 14
+    drawHeart(beat)
+    const g = ctx.createLinearGradient(0, -14, 0, 10)
+    g.addColorStop(0, rgbStr(lite.r, lite.g, lite.b)); g.addColorStop(0.5, rgbStr(green.r, green.g, green.b)); g.addColorStop(1, rgbStr(deep.r, deep.g, deep.b))
+    ctx.fillStyle = g; ctx.fill(); ctx.shadowBlur = 0
+    // bold ink outline
+    drawHeart(beat); this.#inkContour(ink, 2.2)
+    // glossy highlights
+    ctx.beginPath(); ctx.ellipse(-4.5 * beat, -7 * beat, 3.6, 2.4, -0.5, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fill()
+    ctx.beginPath(); ctx.arc(4 * beat, -6 * beat, 1.3, 0, Math.PI * 2); ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.fill()
+    // warm-pink "1UP" banner across the heart's lower middle
+    ctx.rotate(-tilt * 0.3)                                          // keep the text near-upright vs the heart tilt
+    const bw = 26, bh = 11, bx = -bw / 2, by = 1
+    this.#roundRect(bx, by, bw, bh, bh / 2)
+    const bg = ctx.createLinearGradient(0, by, 0, by + bh)
+    bg.addColorStop(0, '#ffd0e0'); bg.addColorStop(0.5, '#ff7eb0'); bg.addColorStop(1, '#e0457f')
+    ctx.fillStyle = bg; ctx.fill()
+    this.#roundRect(bx, by, bw, bh, bh / 2); this.#inkContour(this.#darken('#c83a72'), 1.6)
+    this.#roundRect(bx + 2, by + 1.4, bw - 4, bh * 0.34, bh / 4); ctx.fillStyle = 'rgba(255,255,255,0.55)'; ctx.fill()
+    // "1UP" text — white with a dark-pink ink halo
+    ctx.font = '900 9px "Segoe UI", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round'
+    ctx.strokeStyle = this.#darken('#c83a72'); ctx.lineWidth = 2.5; ctx.strokeText('1UP', 0, by + bh / 2 + 0.5)
+    ctx.fillStyle = '#ffffff'; ctx.fillText('1UP', 0, by + bh / 2 + 0.5)
     ctx.restore()
+  }
+
+  /** The growing plasma orb at the bat muzzle while the fire input is HELD, plus the
+   *  white launch-kick ring on release. Colour escalates with the charge tier. */
+  #chargeOrb(engine: Engine, time: number): void {
+    const ctx = this.#ctx
+    const mx = engine.paddle.x, my = engine.paddle.y - 8
+    const f = engine.laserChargeFrac
+    if (engine.laserCharging && engine.laserShots > 0 && f > 0.001) {
+      const tier = engine.laserTier
+      const baseHex = tier >= 3 ? '#ff6bd5' : tier >= 2 ? '#ffb14e' : '#7ec8ff'
+      const base = hexRgb(baseHex)
+      const R = (4 + 11 * f) * (1 + 0.12 * Math.sin(time * 22))
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'
+      // outer aura
+      ctx.shadowColor = baseHex; ctx.shadowBlur = 10 + 26 * f
+      const g = ctx.createRadialGradient(mx, my, 0, mx, my, R * 2.2)
+      g.addColorStop(0, `rgba(255,255,255,${0.4 + 0.5 * f})`)
+      g.addColorStop(0.35, rgbStr(base.r, base.g, base.b))
+      g.addColorStop(1, `rgba(${Math.round(base.r)},${Math.round(base.g)},${Math.round(base.b)},0)`)
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(mx, my, R * 2.2, 0, Math.PI * 2); ctx.fill()
+      // white-hot core
+      ctx.shadowBlur = 0; ctx.fillStyle = `rgba(255,255,255,${0.6 + 0.4 * f})`
+      ctx.beginPath(); ctx.arc(mx, my, R * 0.55, 0, Math.PI * 2); ctx.fill()
+      // crackling energy arcs that intensify with charge (deterministic jitter)
+      const bolts = 3 + Math.round(f * 4)
+      ctx.strokeStyle = rgbStr(Math.min(255, base.r + 60), Math.min(255, base.g + 60), Math.min(255, base.b + 60)); ctx.lineWidth = 1.2
+      for (let k = 0; k < bolts; k++) {
+        const a = -Math.PI / 2 + (k / bolts - 0.5) * Math.PI * 1.1 + Math.sin(time * 18 + k) * 0.3
+        const len = R * (1.4 + 1.2 * f) * (0.6 + 0.4 * Math.abs(Math.sin(time * 30 + k * 2)))
+        ctx.beginPath(); ctx.moveTo(mx, my)
+        for (let s = 1; s <= 3; s++) {
+          const t2 = s / 3
+          ctx.lineTo(mx + Math.cos(a) * len * t2 + Math.sin(time * 50 + k + s) * 3 * f, my + Math.sin(a) * len * t2 + Math.cos(time * 47 + k + s) * 3 * f)
+        }
+        ctx.stroke()
+      }
+      // gathering particles spiralling INTO the orb as it nears full
+      if (f > 0.5) {
+        ctx.globalAlpha = (f - 0.5) * 2; ctx.fillStyle = 'rgba(255,255,255,0.7)'
+        for (let k = 0; k < 6; k++) {
+          const a = time * 6 + k * Math.PI / 3, rr = R * (2.4 - 1.8 * ((time * 1.5 + k) % 1))
+          ctx.beginPath(); ctx.arc(mx + Math.cos(a) * rr, my + Math.sin(a) * rr, 1.4, 0, Math.PI * 2); ctx.fill()
+        }
+        ctx.globalAlpha = 1
+      }
+      ctx.restore()
+    }
+    // launch kick — a quick white ring expanding off the muzzle on release
+    const mf = engine.laserMuzzleFrac
+    if (mf > 0) {
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'; ctx.globalAlpha = mf
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2 + 3 * mf
+      ctx.beginPath(); ctx.arc(mx, my, 6 + 22 * (1 - mf), 0, Math.PI * 2); ctx.stroke()
+      ctx.restore()
+    }
+  }
+
+  /** Each in-flight fireball: a comet tail + motion streaks + a spinning white-hot
+   *  plasma orb with swirl arms and crackling energy bolts. The Hadouken. */
+  #fireballs(fbs: readonly Fireball[], time: number): void {
+    if (!fbs.length) return
+    const ctx = this.#ctx
+    for (const fb of fbs) {
+      const tier = fb.tier
+      const baseHex = tier >= 3 ? '#ff6bd5' : tier >= 2 ? '#ffb14e' : '#7ec8ff'
+      const rimHex = tier >= 3 ? '#5fd0e0' : tier >= 2 ? '#ffe24e' : '#bfe3ff'
+      const base = hexRgb(baseHex), rim = hexRgb(rimHex)
+      const x = fb.x, y = fb.y, R = fb.r, tailLen = fb.tail
+      ctx.save(); ctx.globalCompositeOperation = 'lighter'
+      // comet tail (down, opposite travel)
+      const tg = ctx.createLinearGradient(x, y, x, y + tailLen)
+      tg.addColorStop(0, rgbStr(base.r, base.g, base.b))
+      tg.addColorStop(0.5, `rgba(${Math.round(base.r)},${Math.round(base.g)},${Math.round(base.b)},0.35)`)
+      tg.addColorStop(1, `rgba(${Math.round(base.r)},${Math.round(base.g)},${Math.round(base.b)},0)`)
+      ctx.fillStyle = tg
+      ctx.beginPath(); ctx.moveTo(x - R * 0.7, y); ctx.quadraticCurveTo(x, y + tailLen * 0.6, x, y + tailLen); ctx.quadraticCurveTo(x, y + tailLen * 0.6, x + R * 0.7, y); ctx.closePath(); ctx.fill()
+      // flickering inner tail wisps
+      ctx.strokeStyle = rgbStr(rim.r, rim.g, rim.b); ctx.lineWidth = 1
+      for (let k = 0; k < 3; k++) {
+        const off = Math.sin(time * 40 + k * 2 + fb.t * 30) * R * 0.5
+        ctx.globalAlpha = 0.4
+        ctx.beginPath(); ctx.moveTo(x + off, y); ctx.lineTo(x + off * 0.3, y + tailLen * (0.5 + 0.2 * k)); ctx.stroke()
+      }
+      ctx.globalAlpha = 1
+      // motion streaks behind, sells the speed
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1.5
+      ctx.beginPath(); ctx.moveTo(x - R * 0.5, y + 2); ctx.lineTo(x - R * 0.5, y + tailLen * 0.4); ctx.moveTo(x + R * 0.5, y + 2); ctx.lineTo(x + R * 0.5, y + tailLen * 0.4); ctx.stroke()
+      // spinning plasma orb — white-hot core → rim → base
+      ctx.shadowColor = baseHex; ctx.shadowBlur = 14 + tier * 6
+      const og = ctx.createRadialGradient(x, y, 0, x, y, R * 1.4)
+      og.addColorStop(0, '#ffffff'); og.addColorStop(0.3, '#ffffff')
+      og.addColorStop(0.55, rgbStr(rim.r, rim.g, rim.b)); og.addColorStop(0.8, rgbStr(base.r, base.g, base.b))
+      og.addColorStop(1, `rgba(${Math.round(base.r)},${Math.round(base.g)},${Math.round(base.b)},0)`)
+      ctx.fillStyle = og; ctx.beginPath(); ctx.arc(x, y, R * 1.4, 0, Math.PI * 2); ctx.fill()
+      // rotating swirl arms (the Hadouken spin)
+      ctx.save(); ctx.translate(x, y); ctx.rotate(fb.spin)
+      ctx.strokeStyle = rgbStr(Math.min(255, rim.r + 40), Math.min(255, rim.g + 40), Math.min(255, rim.b + 40)); ctx.lineWidth = R * 0.35; ctx.globalAlpha = 0.6
+      for (let a = 0; a < 2; a++) { ctx.beginPath(); ctx.arc(0, 0, R * 0.7, a * Math.PI, a * Math.PI + Math.PI * 0.7); ctx.stroke() }
+      ctx.restore(); ctx.globalAlpha = 1
+      // crackling energy bolts off the rim, denser at higher tiers
+      const bolts = 2 + tier * 2
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1
+      for (let k = 0; k < bolts; k++) {
+        const a = fb.spin * 2 + k * (Math.PI * 2 / bolts)
+        const len = R * (0.8 + 0.6 * Math.abs(Math.sin(time * 35 + k)))
+        ctx.globalAlpha = 0.7
+        ctx.beginPath()
+        ctx.moveTo(Math.cos(a) * R * 0.9 + x, Math.sin(a) * R * 0.9 + y)
+        ctx.lineTo(Math.cos(a) * (R * 0.9 + len) + x + Math.sin(time * 60 + k * 3) * 3, Math.sin(a) * (R * 0.9 + len) + y + Math.cos(time * 57 + k * 3) * 3)
+        ctx.stroke()
+      }
+      ctx.globalAlpha = 1
+      ctx.restore()
+    }
   }
 
   #rockets(rockets: readonly Rocket[]): void {
@@ -958,30 +1280,53 @@ export class Renderer {
    *  sets a polished stage without competing with the play. */
   #background(time: number): void {
     const ctx = this.#ctx
-    // 1 ── base vertical gradient (deep indigo → near-black)
+    // 1 ── bright sky: warm-blue crown → soft cyan → pale meadow near the horizon
     const g = ctx.createLinearGradient(0, 0, 0, H)
-    g.addColorStop(0, '#0c1228'); g.addColorStop(0.55, '#080c1a'); g.addColorStop(1, '#05070f')
+    g.addColorStop(0, '#5fc4f0'); g.addColorStop(0.45, '#8fd9f5'); g.addColorStop(0.72, '#bfeef0'); g.addColorStop(1, '#d6f3d0')
     ctx.fillStyle = g; ctx.fillRect(0, 0, W, H)
-    // 2 ── soft top-centre stage light
-    const glow = ctx.createRadialGradient(W / 2, -40, 20, W / 2, -40, H)
-    glow.addColorStop(0, 'rgba(96,134,214,0.16)'); glow.addColorStop(1, 'rgba(96,134,214,0)')
-    ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H)
-    // 3 ── a slow drifting aurora band (a breath of life, very faint)
-    ctx.save(); ctx.globalCompositeOperation = 'lighter'
-    const ay = H * 0.46 + Math.sin(time * 0.13) * 34
-    const aur = ctx.createLinearGradient(0, ay - 80, 0, ay + 80)
-    aur.addColorStop(0, 'rgba(64,128,184,0)'); aur.addColorStop(0.5, 'rgba(74,150,196,0.055)'); aur.addColorStop(1, 'rgba(64,128,184,0)')
-    ctx.fillStyle = aur; ctx.fillRect(0, ay - 80, W, 160)
-    ctx.restore()
-    // 4 ── faint diamond lattice (staggered dots) for quiet structure
-    ctx.fillStyle = 'rgba(150,180,232,0.035)'
-    let row = 0
-    for (let yy = 26; yy < H; yy += 34, row++) for (let xx = (row % 2 ? 34 : 17); xx < W; xx += 34) {
-      ctx.beginPath(); ctx.arc(xx, yy, 0.9, 0, Math.PI * 2); ctx.fill()
+    // 2 ── soft warm sun glow, top-right (a light source, never a wash-out)
+    const sx = W * 0.78, sy = H * 0.12
+    const sun = ctx.createRadialGradient(sx, sy, 6, sx, sy, H * 0.62)
+    sun.addColorStop(0, 'rgba(255,250,220,0.85)'); sun.addColorStop(0.18, 'rgba(255,243,190,0.45)'); sun.addColorStop(1, 'rgba(255,243,190,0)')
+    ctx.fillStyle = sun; ctx.beginPath(); ctx.arc(sx, sy, H * 0.62, 0, Math.PI * 2); ctx.fill()
+    // 3 ── drifting cartoon clouds (puffy lobed blobs, slow parallax) — kept out of the brick band
+    const cloud = (cx: number, cy: number, s: number, alpha: number) => {
+      ctx.fillStyle = `rgba(255,255,255,${alpha})`
+      ctx.beginPath()
+      ctx.arc(cx, cy, 14 * s, 0, Math.PI * 2)
+      ctx.arc(cx + 16 * s, cy + 3 * s, 18 * s, 0, Math.PI * 2)
+      ctx.arc(cx + 36 * s, cy, 13 * s, 0, Math.PI * 2)
+      ctx.arc(cx + 18 * s, cy - 8 * s, 12 * s, 0, Math.PI * 2)
+      ctx.fill()
     }
-    // 5 ── focusing vignette
-    const vg = ctx.createRadialGradient(W / 2, H * 0.46, H * 0.34, W / 2, H * 0.5, H * 0.78)
-    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.46)')
+    const driftA = (time * 9) % (W + 140) - 70
+    const driftB = (time * 5.5) % (W + 140) - 70
+    const driftC = (time * 13) % (W + 140) - 70
+    cloud(driftA, H * 0.14, 1.15, 0.92)
+    cloud(driftB + W * 0.25, H * 0.26, 0.85, 0.78)
+    cloud(driftC + W * 0.55, H * 0.08, 1.0, 0.85)
+    // 4 ── chunky rolling-hill meadow across the bottom (two layered sage hills)
+    const hill = (baseY: number, amp: number, fill: string, phase: number) => {
+      ctx.fillStyle = fill
+      ctx.beginPath(); ctx.moveTo(0, H); ctx.lineTo(0, baseY)
+      for (let xx = 0; xx <= W; xx += 8) {
+        const yy = baseY + Math.sin(xx * 0.012 + phase) * amp + Math.sin(xx * 0.031 + phase) * (amp * 0.4)
+        ctx.lineTo(xx, yy)
+      }
+      ctx.lineTo(W, H); ctx.closePath(); ctx.fill()
+    }
+    hill(H * 0.86, 10, '#9fd98a', 0.6)
+    hill(H * 0.92, 8, '#7ec46a', 2.1)
+    // 5 ── lazy warm sun-motes drifting up — very faint
+    ctx.fillStyle = 'rgba(255,250,210,0.18)'
+    for (let i = 0; i < 9; i++) {
+      const bx = (i * 53 + time * 6) % W
+      const by = (H * 0.7) - ((i * 71 + time * 11) % (H * 0.6))
+      ctx.beginPath(); ctx.arc(bx, by, 2.2 + (i % 3), 0, Math.PI * 2); ctx.fill()
+    }
+    // 6 ── gentle LIGHT vignette (never dark): white wash at top, soft blue seat at the bottom
+    const vg = ctx.createLinearGradient(0, 0, 0, H)
+    vg.addColorStop(0, 'rgba(255,255,255,0.10)'); vg.addColorStop(0.5, 'rgba(255,255,255,0)'); vg.addColorStop(1, 'rgba(70,140,190,0.12)')
     ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H)
   }
 
@@ -1102,6 +1447,11 @@ export class Renderer {
     ctx.beginPath(); ctx.ellipse(pxe, pye, er * 0.22, er * 0.62, 0, 0, Math.PI * 2); ctx.fill()
     ctx.fillStyle = 'rgba(255,255,255,0.9)'
     ctx.beginPath(); ctx.arc(pxe - er * 0.17, pye - er * 0.28, er * 0.14, 0, Math.PI * 2); ctx.fill()
+    // angry V-brow over the eye, anchored to (and turning with) its gaze
+    ctx.shadowBlur = 0
+    const bx = x + lx * er * 0.32, by = y + ly * er * 0.32 - er * 0.9
+    ctx.strokeStyle = V.dark; ctx.lineWidth = 2; ctx.lineCap = 'round'
+    ctx.beginPath(); ctx.moveTo(bx - er * 0.5, by - er * 0.18); ctx.lineTo(bx, by + er * 0.12); ctx.lineTo(bx + er * 0.5, by - er * 0.18); ctx.stroke()
     ctx.restore()
   }
 
@@ -1171,6 +1521,10 @@ export class Renderer {
       ctx.strokeStyle = 'rgba(200,255,224,0.5)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, e.y, r - 1.5, -2.2, 0.4); ctx.stroke()
       ctx.fillStyle = `rgba(190,255,212,${0.5 + 0.4 * seam})`; ctx.shadowColor = '#bfffd8'; ctx.shadowBlur = 6
       ctx.beginPath(); ctx.arc(cx + s * 1.5, e.y, 2.6, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0
+      // googly eye that looks AWAY from its twin — pupils drift apart as the pod divides
+      const lean = s * (0.6 + 0.18 * sep)
+      ctx.fillStyle = '#f2fff8'; ctx.beginPath(); ctx.arc(cx, e.y, 3, 0, Math.PI * 2); ctx.fill()
+      ctx.fillStyle = '#0d2e1e'; ctx.beginPath(); ctx.arc(cx + lean, e.y - 0.4, 1.5, 0, Math.PI * 2); ctx.fill()
     }
     // dividing seam
     ctx.strokeStyle = `rgba(180,255,210,${0.4 + 0.5 * seam})`; ctx.lineWidth = 1.6; ctx.shadowColor = '#bfffd8'; ctx.shadowBlur = 6
@@ -1230,6 +1584,11 @@ export class Renderer {
     const ey = y + Math.sin(time * 3) * (h / 2 - 4)
     ctx.fillStyle = `rgba(120,220,255,${0.6 + 0.4 * fire})`; ctx.shadowColor = '#7ee0ff'; ctx.shadowBlur = 6
     this.#roundRect(x - w / 2 + 1, ey - 1.5, w - 2, 3, 1.5); ctx.fill()
+    // lone cyclops eye on the band — a slit pupil that scans side to side
+    ctx.shadowBlur = 0
+    const scan = Math.sin(time * 1.6) * (w * 0.18)
+    ctx.fillStyle = '#eaf6ff'; ctx.beginPath(); ctx.arc(x, ey, 2.6, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = '#16202e'; ctx.beginPath(); ctx.ellipse(x + scan, ey, 0.9, 2.0, 0, 0, Math.PI * 2); ctx.fill()
     // beam-charge glow at the muzzle just before firing
     if (fire > 0) { ctx.fillStyle = `rgba(150,230,255,${fire})`; ctx.shadowColor = '#7ee0ff'; ctx.shadowBlur = 10 * fire; ctx.beginPath(); ctx.arc(x, y + h / 2, 3 * fire, 0, Math.PI * 2); ctx.fill() }
     ctx.restore()
@@ -1408,38 +1767,624 @@ export class Renderer {
 
   /** The alien SHIP — a glowing UFO saucer with a glass dome and underside
    *  lights. Shoot it (ball/laser/beam/rocket) and it drops a power-up. */
+  /** The top pill-dispenser — one of a rotating cast of cartoon critters. */
   #alien(a: Alien, time: number): void {
+    switch (a.kind) {
+      case 'bee': return this.#dispBee(a, time)
+      case 'crab': return this.#dispCrab(a, time)
+      case 'ghost': return this.#dispGhost(a, time)
+      case 'chick': return this.#dispChick(a, time)
+      default: return this.#dispFrog(a, time)
+    }
+  }
+
+  /** The hopping FROG — hop phase from a.frame; squashes flat on landing, stretches
+   *  tall at apex. Unified ink-contour cartoon. */
+  #dispFrog(a: Alien, time: number): void {
+    void time
     const ctx = this.#ctx
     const x = a.x, y = a.y, hw = ALIEN_W / 2
+    // reconstruct the hop phase to drive squash/stretch (matches the engine's math)
+    const ph = (a.frame % FROG_HOP_PERIOD) / FROG_HOP_PERIOD
+    const airborne = ph < FROG_AIR_FRAC
+    const lift = airborne ? Math.sin((ph / FROG_AIR_FRAC) * Math.PI) : 0      // 0 ground .. 1 apex
+    const land = airborne ? 0 : 1 - (ph - FROG_AIR_FRAC) / (1 - FROG_AIR_FRAC) // 1 at touchdown → 0
+    const sx = 1 + 0.22 * land - 0.12 * lift                                   // squash flat on landing
+    const sy = 1 - 0.20 * land + 0.14 * lift                                   // stretch tall at apex
+    const dir = Math.sign(a.vx) || 1
+    const bw = 24, bh = 22
     ctx.save()
-    // underside tractor glow
-    const glow = ctx.createRadialGradient(x, y + 4, 1, x, y + 4, hw)
-    glow.addColorStop(0, 'rgba(110,240,122,0.4)'); glow.addColorStop(1, 'rgba(110,240,122,0)')
-    ctx.fillStyle = glow
-    ctx.beginPath(); ctx.ellipse(x, y + 5, hw, ALIEN_H * 0.5, 0, 0, Math.PI * 2); ctx.fill()
-    // saucer hull (metallic ellipse, top-lit)
-    ctx.shadowColor = 'rgba(57,217,87,0.5)'; ctx.shadowBlur = 10
-    const hull = ctx.createLinearGradient(x, y - 4, x, y + 5)
-    hull.addColorStop(0, '#cfe8d6'); hull.addColorStop(0.5, '#7fb98f'); hull.addColorStop(1, '#2f6b40')
-    ctx.fillStyle = hull
-    ctx.beginPath(); ctx.ellipse(x, y + 2, hw, ALIEN_H * 0.34, 0, 0, Math.PI * 2); ctx.fill()
-    ctx.shadowBlur = 0
-    // glass dome
-    const dome = ctx.createRadialGradient(x - 2, y - 4, 1, x, y - 1, hw * 0.5)
-    dome.addColorStop(0, '#eafff4'); dome.addColorStop(0.6, '#5fd0e0'); dome.addColorStop(1, '#2a7a9a')
-    ctx.fillStyle = dome
-    ctx.beginPath(); ctx.ellipse(x, y - 1, hw * 0.5, ALIEN_H * 0.42, 0, Math.PI, 2 * Math.PI); ctx.fill()
-    ctx.fillStyle = 'rgba(20,40,30,0.5)'                  // dome base seam
-    ctx.fillRect(x - hw * 0.5, y - 1, hw, 1.5)
-    // blinking underside lights
-    for (let i = 0; i < 5; i++) {
-      const lx = x - hw * 0.7 + (i / 4) * hw * 1.4
-      const on = 0.5 + 0.5 * Math.sin(time * 7 + i * 1.3)
-      ctx.fillStyle = `rgba(255,210,74,${0.4 + 0.6 * on})`
-      ctx.beginPath(); ctx.arc(lx, y + ALIEN_H * 0.32, 1.4, 0, Math.PI * 2); ctx.fill()
+    // ground shadow pinned at the baseline, shrinking as the frog rises
+    const groundY = 33                                                         // ALIEN_Y(24) + 9
+    ctx.fillStyle = `rgba(10,30,12,${0.30 * (1 - 0.6 * lift)})`
+    ctx.beginPath(); ctx.ellipse(x, groundY, hw * (1 - 0.35 * lift), 3.2 * (1 - 0.35 * lift), 0, 0, Math.PI * 2); ctx.fill()
+    ctx.translate(x, y); ctx.scale(sx, sy)
+    // ── BACK LEGS (tucked grounded, extended airborne) — behind the body ──
+    const legExt = lift
+    ctx.fillStyle = FROG_BODY_MID
+    for (const s of [-1, 1]) {
+      const hipX = s * bw * 0.42, hipY = bh * 0.30
+      const footX = hipX + s * (3 + 9 * legExt), footY = hipY + (5 + 9 * legExt)
+      const leg = () => {
+        ctx.beginPath()
+        ctx.moveTo(hipX, hipY - 3)
+        ctx.quadraticCurveTo(hipX + s * 7, hipY + 2, footX, footY)
+        ctx.quadraticCurveTo(footX + s * 5, footY + 1, footX + s * 8, footY - 1)
+        ctx.quadraticCurveTo(footX + s * 4, footY + 3, footX, footY + 2)
+        ctx.quadraticCurveTo(hipX + s * 4, hipY + 5, hipX, hipY + 2)
+        ctx.closePath()
+      }
+      leg(); ctx.fillStyle = FROG_BODY_MID; ctx.fill()
+      leg(); this.#inkContour(FROG_INK, 1.4)
     }
+    // ── BODY — round green blob, top-lit ──
+    ctx.shadowColor = 'rgba(63,209,58,0.5)'; ctx.shadowBlur = 9
+    const body = ctx.createLinearGradient(0, -bh * 0.5, 0, bh * 0.5)
+    body.addColorStop(0, FROG_BODY_TOP); body.addColorStop(0.5, FROG_BODY_MID); body.addColorStop(1, FROG_BODY_BOT)
+    ctx.fillStyle = body
+    ctx.beginPath(); ctx.ellipse(0, 0, bw * 0.5, bh * 0.5, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.shadowBlur = 0
+    // glossy pale belly + a specular hotspot
+    ctx.fillStyle = FROG_BELLY
+    ctx.beginPath(); ctx.ellipse(0, bh * 0.16, bw * 0.30, bh * 0.26, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.globalAlpha = 0.55; ctx.fillStyle = '#ffffff'
+    ctx.beginPath(); ctx.ellipse(-bw * 0.18, -bh * 0.20, bw * 0.12, bh * 0.10, -0.4, 0, Math.PI * 2); ctx.fill()
+    ctx.globalAlpha = 1
+    // body ink contour
+    ctx.beginPath(); ctx.ellipse(0, 0, bw * 0.5, bh * 0.5, 0, 0, Math.PI * 2); this.#inkContour(FROG_INK, 1.7)
+    // ── EYES — two big googly domes on top ──
+    const eyeY = -bh * 0.42, eyeDX = bw * 0.26, eyeR = 5.2
+    for (const s of [-1, 1]) {
+      const ex = s * eyeDX
+      ctx.fillStyle = FROG_BODY_MID
+      ctx.beginPath(); ctx.ellipse(ex, eyeY + 2, eyeR + 1, eyeR + 1, 0, 0, Math.PI * 2); ctx.fill()
+      ctx.fillStyle = '#ffffff'
+      ctx.beginPath(); ctx.arc(ex, eyeY, eyeR, 0, Math.PI * 2); ctx.fill()
+      ctx.beginPath(); ctx.arc(ex, eyeY, eyeR, 0, Math.PI * 2); this.#inkContour(FROG_INK, 1.3)
+      const pdx = dir * 1.6
+      ctx.fillStyle = '#0c1410'
+      ctx.beginPath(); ctx.arc(ex + pdx, eyeY + 1, 2.2, 0, Math.PI * 2); ctx.fill()
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'
+      ctx.beginPath(); ctx.arc(ex + pdx - 0.8, eyeY + 0.2, 0.8, 0, Math.PI * 2); ctx.fill()
+    }
+    // ── MOUTH — wide friendly smile, opens at apex ──
+    const open = 0.5 + 0.5 * lift
+    ctx.strokeStyle = FROG_INK; ctx.lineWidth = 1.8; ctx.lineCap = 'round'
+    ctx.beginPath(); ctx.moveTo(-bw * 0.30, bh * 0.02); ctx.quadraticCurveTo(0, bh * (0.14 + 0.10 * open), bw * 0.30, bh * 0.02); ctx.stroke()
+    ctx.fillStyle = FROG_INK
+    ctx.beginPath(); ctx.arc(-bw * 0.07, -bh * 0.06, 0.9, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.arc(bw * 0.07, -bh * 0.06, 0.9, 0, Math.PI * 2); ctx.fill()
+    // rosy cheeks
+    ctx.globalAlpha = 0.5; ctx.fillStyle = '#ff8fb0'
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(s * bw * 0.30, bh * 0.06, 2.4, 1.6, 0, 0, Math.PI * 2); ctx.fill() }
+    ctx.globalAlpha = 1
     ctx.restore()
   }
+
+  /** The buzzing BUMBLEBEE — an alternate top pill-dispenser. The wiggle phase comes
+ *  from a.frame (matching the engine); wings flutter on `time` for a fast blur, the
+ *  body banks slightly into its travel, and a faint air-shadow tracks it. Unified
+ *  ink-contour cartoon to match the frog. */
+#dispBee(a: Alien, time: number): void {
+  const ctx = this.#ctx
+  const x = a.x, y = a.y, hw = ALIEN_W / 2
+  const dir = Math.sign(a.vx) || 1
+  // reconstruct the wiggle phase to drive a tiny body bank + leg sway (matches engine)
+  const w = a.frame * BEE_WIGGLE_HZ * Math.PI * 2
+  const wob = Math.sin(w)                                   // -1..1 current wiggle
+  const bank = dir * 0.14 + wob * 0.10                      // lean into travel + buzz
+  // fast wing flutter (independent of travel speed — pure visual buzz)
+  const flap = Math.sin(time * 42)                          // ~6-7 Hz visual beat
+  const bw = 26, bh = 18                                    // wide round striped barrel
+  ctx.save()
+  // ── soft air-shadow on the baseline, offset under the floating bee ──
+  const groundY = ALIEN_Y + 16
+  ctx.fillStyle = `rgba(20,16,6,${0.22 - 0.06 * wob})`
+  ctx.beginPath(); ctx.ellipse(x, groundY, hw * 0.7, 2.6, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.translate(x, y); ctx.rotate(bank)
+  // ── WINGS — two big translucent blur-discs, fluttering fast, BEHIND the body ──
+  ctx.save()
+  for (const s of [-1, 1]) {
+    const open = 0.62 + 0.38 * Math.abs(flap)              // wing-area pulse
+    const wx = s * bw * 0.20, wyTop = -bh * 0.78
+    ctx.save()
+    ctx.translate(wx, wyTop)
+    ctx.rotate(s * (0.5 - 0.32 * Math.abs(flap)))          // sweep up/down on the beat
+    ctx.scale(1, open)
+    // soft outer haze
+    ctx.fillStyle = `rgba(${BEE_WING},0.18)`
+    ctx.beginPath(); ctx.ellipse(0, 0, bw * 0.42, bh * 0.62, 0, 0, Math.PI * 2); ctx.fill()
+    // brighter inner membrane + a thin ink rim
+    ctx.fillStyle = `rgba(${BEE_WING},0.34)`
+    ctx.beginPath(); ctx.ellipse(0, 0, bw * 0.30, bh * 0.46, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.ellipse(0, 0, bw * 0.42, bh * 0.62, 0, 0, Math.PI * 2)
+    this.#inkContour('rgba(140,170,200,0.55)', 1)
+    // motion-blur ghost trailing the beat
+    ctx.globalAlpha = 0.22 * Math.abs(flap)
+    ctx.fillStyle = `rgba(${BEE_WING},0.5)`
+    ctx.beginPath(); ctx.ellipse(0, bh * 0.12 * flap, bw * 0.34, bh * 0.5, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.globalAlpha = 1
+    ctx.restore()
+  }
+  ctx.restore()
+  // ── TINY LEGS — three dangling pairs swaying under the body ──
+  ctx.strokeStyle = BEE_INK; ctx.lineWidth = 1.5; ctx.lineCap = 'round'
+  for (let i = -1; i <= 1; i++) {
+    const lx = i * bw * 0.26, ly = bh * 0.44
+    const sway = wob * 1.4 + i * 0.4
+    ctx.beginPath(); ctx.moveTo(lx, ly)
+    ctx.quadraticCurveTo(lx + sway, ly + 4, lx + sway * 1.6 - dir * 1, ly + 6.5); ctx.stroke()
+  }
+  // ── STINGER — stubby cone at the tail (trailing edge) ──
+  const tailX = -dir * bw * 0.52
+  ctx.fillStyle = BEE_INK
+  ctx.beginPath()
+  ctx.moveTo(tailX, -2.5); ctx.lineTo(tailX, 2.5)
+  ctx.lineTo(tailX - dir * 6, 0); ctx.closePath(); ctx.fill()
+  // ── BODY — wide round fuzzy barrel, top-lit, with a warm buzz glow ──
+  ctx.shadowColor = 'rgba(255,184,31,0.5)'; ctx.shadowBlur = 9
+  const body = ctx.createLinearGradient(0, -bh * 0.5, 0, bh * 0.5)
+  body.addColorStop(0, BEE_BODY_TOP); body.addColorStop(0.5, BEE_BODY_MID); body.addColorStop(1, BEE_BODY_BOT)
+  ctx.fillStyle = body
+  ctx.beginPath(); ctx.ellipse(0, 0, bw * 0.5, bh * 0.5, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.shadowBlur = 0
+  // ── BLACK FUZZ STRIPES — clipped to the body so they hug the curve ──
+  ctx.save()
+  ctx.beginPath(); ctx.ellipse(0, 0, bw * 0.5, bh * 0.5, 0, 0, Math.PI * 2); ctx.clip()
+  ctx.fillStyle = BEE_STRIPE
+  for (const cx of [-bw * 0.14, bw * 0.16]) {              // two body stripes, angled
+    ctx.save(); ctx.translate(cx, 0); ctx.rotate(-0.12 + dir * 0.04)
+    ctx.beginPath(); ctx.ellipse(0, 0, bw * 0.085, bh * 0.6, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.restore()
+  }
+  ctx.restore()
+  // fuzzy top rim — a row of faint hairs along the crown
+  ctx.strokeStyle = 'rgba(255,228,120,0.7)'; ctx.lineWidth = 1
+  for (let i = -3; i <= 3; i++) {
+    const hx = i * bw * 0.12, hy = -Math.sqrt(Math.max(0, 1 - (hx / (bw * 0.5)) ** 2)) * bh * 0.5
+    ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx + dir * 0.6, hy - 2.4); ctx.stroke()
+  }
+  // glossy specular hotspot
+  ctx.globalAlpha = 0.5; ctx.fillStyle = '#ffffff'
+  ctx.beginPath(); ctx.ellipse(-bw * 0.16, -bh * 0.22, bw * 0.11, bh * 0.12, -0.4, 0, Math.PI * 2); ctx.fill()
+  ctx.globalAlpha = 1
+  // body ink contour (re-issue the body path, then stroke)
+  ctx.beginPath(); ctx.ellipse(0, 0, bw * 0.5, bh * 0.5, 0, 0, Math.PI * 2); this.#inkContour(BEE_INK, 1.7)
+  // ── FACE pod at the leading edge — small lighter dome the eyes sit on ──
+  const faceX = dir * bw * 0.42
+  ctx.fillStyle = BEE_BODY_TOP
+  ctx.beginPath(); ctx.ellipse(faceX, -bh * 0.06, bw * 0.18, bh * 0.34, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.beginPath(); ctx.ellipse(faceX, -bh * 0.06, bw * 0.18, bh * 0.34, 0, 0, Math.PI * 2); this.#inkContour(BEE_INK, 1.4)
+  // ── EYES — two big googly domes on the leading face ──
+  const eyeR = 4.6
+  for (const s of [-1, 1]) {
+    const ex = faceX + dir * 1.0, ey = -bh * 0.20 + s * 4.4
+    ctx.fillStyle = '#ffffff'
+    ctx.beginPath(); ctx.arc(ex, ey, eyeR, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.arc(ex, ey, eyeR, 0, Math.PI * 2); this.#inkContour(BEE_INK, 1.3)
+    const pdx = dir * 1.5, pdy = wob * 0.8                 // pupils dart with the buzz
+    ctx.fillStyle = '#160f06'
+    ctx.beginPath(); ctx.arc(ex + pdx, ey + pdy, 2.1, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = 'rgba(255,255,255,0.9)'
+    ctx.beginPath(); ctx.arc(ex + pdx - 0.7, ey + pdy - 0.7, 0.8, 0, Math.PI * 2); ctx.fill()
+  }
+  // ── ANTENNAE — two springy stalks with bobble tips, jiggling on the buzz ──
+  ctx.strokeStyle = BEE_INK; ctx.lineWidth = 1.4; ctx.lineCap = 'round'
+  for (const s of [-1, 1]) {
+    const ax = faceX + dir * 2, ay = -bh * 0.44
+    const tipX = ax + dir * 4 + wob * 1.6, tipY = ay - 6 - s * 1.2
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.quadraticCurveTo(ax + dir * 4, ay - 5, tipX, tipY); ctx.stroke()
+    ctx.fillStyle = BEE_STRIPE
+    ctx.beginPath(); ctx.arc(tipX, tipY, 1.6, 0, Math.PI * 2); ctx.fill()
+  }
+  // ── little smile under the face ──
+  ctx.strokeStyle = BEE_INK; ctx.lineWidth = 1.4
+  ctx.beginPath()
+  ctx.moveTo(faceX - 2.4, bh * 0.12)
+  ctx.quadraticCurveTo(faceX + dir * 1.2, bh * 0.22, faceX + 2.4, bh * 0.12); ctx.stroke()
+  ctx.restore()
+}
+
+  /** The scuttling CRAB — an alternate top pill-dispenser. Skitter phase comes
+   *  from a.frame; legs pump, claws snap, stalk-eyes wobble. Faces its travel
+   *  direction. Unified ink-contour cartoon, matching the frog's quality. */
+  #dispCrab(a: Alien, time: number): void {
+    const ctx = this.#ctx
+    const x = a.x, y = a.y, hw = ALIEN_W / 2
+    const dir = Math.sign(a.vx) || 1
+    // reconstruct the scuttle phase (matches the engine's SCUTTLE_PERIOD math)
+    const ph = (a.frame % SCUTTLE_PERIOD) / SCUTTLE_PERIOD
+    const bob = Math.abs(Math.sin(ph * Math.PI * 2))                 // 0 ground .. 1 mid-step (height)
+    const step = Math.sin(ph * Math.PI * 2)                          // ±1 leg-pump phase
+    const lean = dir * 0.10 * Math.cos(ph * Math.PI * 2)             // tiny scuttle body-tilt into travel
+    const snap = 0.5 + 0.5 * Math.sin(ph * Math.PI * 4 + 0.6)        // claws open/close twice per cycle
+    const bw = 26, bh = 15                                           // wide & low — a crab silhouette
+    ctx.save()
+    // ── GROUND SHADOW — pinned at the baseline, shrinks as the crab pops up ──
+    const groundY = 34
+    ctx.fillStyle = `rgba(60,12,10,${0.30 * (1 - 0.5 * bob)})`
+    ctx.beginPath(); ctx.ellipse(x, groundY, hw * (1 - 0.25 * bob), 3.0 * (1 - 0.25 * bob), 0, 0, Math.PI * 2); ctx.fill()
+    ctx.translate(x, y); ctx.rotate(lean)
+    // ── LEGS — three per side, pumping in a scuttling gait (behind the shell) ──
+    ctx.strokeStyle = CRAB_LIMB; ctx.lineWidth = 2.2; ctx.lineCap = 'round'
+    for (const s of [-1, 1]) {
+      for (let i = 0; i < 3; i++) {
+        const gait = Math.sin(ph * Math.PI * 2 + i * 1.1 + (s > 0 ? Math.PI : 0))   // legs out of phase
+        const hipX = s * (bw * 0.30 + i * 4.5), hipY = bh * 0.18
+        const kneeX = hipX + s * (5 + 1.5 * gait), kneeY = hipY + 4
+        const footX = kneeX + s * 3, footY = hipY + 9 + 1.5 * gait                  // foot pumps up/down
+        ctx.beginPath()
+        ctx.moveTo(hipX, hipY)
+        ctx.quadraticCurveTo(kneeX, kneeY, footX, footY)
+        ctx.strokeStyle = CRAB_LIMB; ctx.stroke()
+        ctx.strokeStyle = CRAB_INK; ctx.lineWidth = 1.0; ctx.stroke(); ctx.lineWidth = 2.2  // thin ink pass
+      }
+    }
+    // ── CLAWS — two big pincers out front (leading side bigger), opening/closing ──
+    for (const s of [-1, 1]) {
+      const lead = s === dir                                          // the claw facing travel leads
+      const armX = s * bw * 0.46, armY = -bh * 0.05
+      const cx = armX + s * (7 + 2 * (lead ? 1 : 0)), cy = armY - 3 - 2 * bob       // claw centre
+      const cs = lead ? 5.6 : 4.4                                     // claw size
+      // upper arm
+      ctx.strokeStyle = CRAB_LIMB; ctx.lineWidth = 3.2; ctx.lineCap = 'round'
+      ctx.beginPath(); ctx.moveTo(armX, armY); ctx.quadraticCurveTo(armX + s * 4, armY - 4, cx, cy); ctx.stroke()
+      ctx.strokeStyle = CRAB_INK; ctx.lineWidth = 1.0
+      ctx.beginPath(); ctx.moveTo(armX, armY); ctx.quadraticCurveTo(armX + s * 4, armY - 4, cx, cy); ctx.stroke()
+      // pincer: a fixed lower jaw + a hinged upper jaw that snaps
+      const gap = (lead ? 0.9 : 0.6) * snap                          // how far the upper jaw lifts
+      ctx.fillStyle = CRAB_LIMB
+      // lower jaw (fixed)
+      ctx.beginPath()
+      ctx.moveTo(cx, cy)
+      ctx.quadraticCurveTo(cx + s * cs, cy + cs * 0.5, cx + s * cs * 1.5, cy + cs * 0.2)
+      ctx.quadraticCurveTo(cx + s * cs, cy + cs * 0.9, cx, cy + cs * 0.3)
+      ctx.closePath(); ctx.fill()
+      ctx.beginPath()
+      ctx.moveTo(cx, cy)
+      ctx.quadraticCurveTo(cx + s * cs, cy + cs * 0.5, cx + s * cs * 1.5, cy + cs * 0.2)
+      ctx.quadraticCurveTo(cx + s * cs, cy + cs * 0.9, cx, cy + cs * 0.3)
+      ctx.closePath(); this.#inkContour(CRAB_INK, 1.3)
+      // upper jaw (snaps open by `gap`)
+      ctx.save(); ctx.translate(cx, cy); ctx.rotate(-s * gap)
+      ctx.fillStyle = CRAB_LIMB
+      ctx.beginPath()
+      ctx.moveTo(0, 0)
+      ctx.quadraticCurveTo(s * cs, -cs * 0.5, s * cs * 1.5, -cs * 0.2)
+      ctx.quadraticCurveTo(s * cs, -cs * 0.9, 0, -cs * 0.3)
+      ctx.closePath(); ctx.fill()
+      ctx.beginPath()
+      ctx.moveTo(0, 0)
+      ctx.quadraticCurveTo(s * cs, -cs * 0.5, s * cs * 1.5, -cs * 0.2)
+      ctx.quadraticCurveTo(s * cs, -cs * 0.9, 0, -cs * 0.3)
+      ctx.closePath(); this.#inkContour(CRAB_INK, 1.3)
+      ctx.restore()
+    }
+    // ── SHELL — wide top-lit dome ──
+    ctx.shadowColor = 'rgba(242,69,46,0.5)'; ctx.shadowBlur = 9
+    const shell = ctx.createLinearGradient(0, -bh * 0.7, 0, bh * 0.7)
+    shell.addColorStop(0, CRAB_SHELL_TOP); shell.addColorStop(0.5, CRAB_SHELL_MID); shell.addColorStop(1, CRAB_SHELL_BOT)
+    ctx.fillStyle = shell
+    ctx.beginPath(); ctx.ellipse(0, 0, bw * 0.5, bh * 0.62, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.shadowBlur = 0
+    // pale peach underside lip
+    ctx.fillStyle = CRAB_BELLY
+    ctx.beginPath(); ctx.ellipse(0, bh * 0.30, bw * 0.40, bh * 0.22, 0, 0, Math.PI * 2); ctx.fill()
+    // specular hotspot on the dome
+    ctx.globalAlpha = 0.55; ctx.fillStyle = '#ffffff'
+    ctx.beginPath(); ctx.ellipse(-bw * 0.16, -bh * 0.30, bw * 0.13, bh * 0.16, -0.4, 0, Math.PI * 2); ctx.fill()
+    ctx.globalAlpha = 1
+    // a couple of darker shell bumps for texture
+    ctx.fillStyle = this.#darken(CRAB_SHELL_MID); ctx.globalAlpha = 0.35
+    for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(s * bw * 0.24, -bh * 0.05, 1.8, 0, Math.PI * 2); ctx.fill() }
+    ctx.beginPath(); ctx.arc(0, bh * 0.10, 1.8, 0, Math.PI * 2); ctx.fill()
+    ctx.globalAlpha = 1
+    // shell ink contour
+    ctx.beginPath(); ctx.ellipse(0, 0, bw * 0.5, bh * 0.62, 0, 0, Math.PI * 2); this.#inkContour(CRAB_INK, 1.7)
+    // ── STALK EYES — two googly domes on wobbling stalks atop the shell ──
+    const wob = Math.sin(time * 11) * 0.9                            // free eye-stalk wobble
+    const eyeBaseY = -bh * 0.55, eyeDX = bw * 0.22, stalkH = 8, eyeR = 3.6
+    for (const s of [-1, 1]) {
+      const baseX = s * eyeDX
+      const tipX = baseX + dir * 1.2 + s * wob, tipY = eyeBaseY - stalkH
+      // stalk
+      ctx.strokeStyle = CRAB_LIMB; ctx.lineWidth = 2.4; ctx.lineCap = 'round'
+      ctx.beginPath(); ctx.moveTo(baseX, eyeBaseY); ctx.quadraticCurveTo(baseX + s * wob * 0.4, eyeBaseY - stalkH * 0.5, tipX, tipY); ctx.stroke()
+      ctx.strokeStyle = CRAB_INK; ctx.lineWidth = 1.0
+      ctx.beginPath(); ctx.moveTo(baseX, eyeBaseY); ctx.quadraticCurveTo(baseX + s * wob * 0.4, eyeBaseY - stalkH * 0.5, tipX, tipY); ctx.stroke()
+      // eyeball
+      ctx.fillStyle = '#ffffff'
+      ctx.beginPath(); ctx.arc(tipX, tipY, eyeR, 0, Math.PI * 2); ctx.fill()
+      ctx.beginPath(); ctx.arc(tipX, tipY, eyeR, 0, Math.PI * 2); this.#inkContour(CRAB_INK, 1.2)
+      // pupil looks toward travel; jiggles with the bounce
+      const pdx = dir * 1.4, pdy = 0.6 * step
+      ctx.fillStyle = '#1a0606'
+      ctx.beginPath(); ctx.arc(tipX + pdx, tipY + pdy, 1.7, 0, Math.PI * 2); ctx.fill()
+      ctx.fillStyle = 'rgba(255,255,255,0.9)'
+      ctx.beginPath(); ctx.arc(tipX + pdx - 0.6, tipY + pdy - 0.6, 0.7, 0, Math.PI * 2); ctx.fill()
+    }
+    // ── MOUTH — small bubbly grin under the dome, with two foam bubbles ──
+    ctx.strokeStyle = CRAB_INK; ctx.lineWidth = 1.6; ctx.lineCap = 'round'
+    ctx.beginPath(); ctx.moveTo(-bw * 0.18, bh * 0.20); ctx.quadraticCurveTo(0, bh * (0.30 + 0.06 * snap), bw * 0.18, bh * 0.20); ctx.stroke()
+    ctx.fillStyle = 'rgba(255,255,255,0.7)'
+    ctx.beginPath(); ctx.arc(-bw * 0.10 + dir, bh * 0.34, 1.0 * snap, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.arc(bw * 0.06 + dir, bh * 0.40, 0.8 * snap, 0, Math.PI * 2); ctx.fill()
+    ctx.restore()
+  }
+
+  /** The floating GHOST — an alternate top pill-dispenser. Float phase comes from
+   *  a.frame; a slow sine bob drives a soft vertical drift and a tilt, and the
+   *  scalloped tail-hem ripples. Slightly translucent with a faint lilac glow.
+   *  Unified ink-contour cartoon, matching the frog. */
+  #dispGhost(a: Alien, time: number): void {
+    const ctx = this.#ctx
+    const x = a.x, y = a.y, hw = ALIEN_W / 2
+    // Reconstruct the float phase to drive the lean + hem ripple (matches the engine).
+    const ph = (a.frame / GHOST_BOB_PERIOD) * Math.PI * 2
+    const bob = Math.sin(ph)                                  // -1 .. 1 (also where a.y came from)
+    const dir = Math.sign(a.vx) || 1
+    const bw = 24, bh = 26
+    const lean = -dir * 0.10 + 0.05 * Math.sin(ph * 1.5)      // drifts/leans into travel
+    const rise = (bob + 1) * 0.5                              // 0 low .. 1 high (shadow shrinks high)
+
+    ctx.save()
+    // Ground shadow far below — a ghost floats, so the shadow is small, soft, and
+    // fades as it rises. Drawn BEFORE the body alpha so it stays opaque.
+    ctx.fillStyle = `rgba(40,24,70,${0.20 * (1 - 0.5 * rise)})`
+    ctx.beginPath()
+    ctx.ellipse(x, 40, hw * (0.85 - 0.30 * rise), 2.8 * (0.85 - 0.30 * rise), 0, 0, Math.PI * 2)
+    ctx.fill()
+
+    ctx.translate(x, y)
+    ctx.rotate(lean)
+    ctx.globalAlpha = 0.85                                    // the whole spook is gently translucent
+
+    // ── BODY SILHOUETTE — domed top + straight sides + a rippling scalloped hem ──
+    // Build one closed path: half-circle dome, down the sides, then a wavy bottom.
+    const top = -bh * 0.5, bottom = bh * 0.5, hwx = bw * 0.5
+    const buildBody = () => {
+      ctx.beginPath()
+      ctx.moveTo(-hwx, bottom * 0.1)
+      // left shoulder up and over the dome to the right shoulder
+      ctx.arc(0, top + hwx, hwx, Math.PI, 0, false)          // semicircle crown
+      ctx.lineTo(hwx, bottom * 0.1)
+      // scalloped tail-hem: 4 bumps, each phase-shifted so the hem RIPPLES over time
+      const bumps = 4, span = (hwx * 2) / bumps
+      for (let i = 0; i < bumps; i++) {
+        const x0 = hwx - i * span
+        const x1 = x0 - span
+        const dip = 5 + 2.2 * Math.sin(time * 5 + i * 1.5 + ph)   // each scallop wobbles
+        ctx.quadraticCurveTo((x0 + x1) / 2, bottom * 0.1 + dip, x1, bottom * 0.1)
+      }
+      ctx.closePath()
+    }
+
+    // soft lilac glow behind the body
+    ctx.shadowColor = `rgba(201,182,255,0.85)`               // GHOST_GLOW, soft
+    ctx.shadowBlur = 12
+    const body = ctx.createLinearGradient(0, top, 0, bottom)
+    body.addColorStop(0, GHOST_BODY_TOP)
+    body.addColorStop(0.45, GHOST_BODY_MID)
+    body.addColorStop(1, GHOST_BODY_BOT)
+    buildBody(); ctx.fillStyle = body; ctx.fill()
+    ctx.shadowBlur = 0
+
+    // faint cool-white belly sheen, offset toward the lit side
+    ctx.globalAlpha = 0.85 * 0.5
+    ctx.fillStyle = GHOST_BELLY
+    ctx.beginPath()
+    ctx.ellipse(-bw * 0.10, bh * 0.04, bw * 0.30, bh * 0.30, 0, 0, Math.PI * 2)
+    ctx.fill()
+    // crisp white specular hotspot up top
+    ctx.globalAlpha = 0.85 * 0.7
+    ctx.fillStyle = '#ffffff'
+    ctx.beginPath()
+    ctx.ellipse(-bw * 0.18, -bh * 0.28, bw * 0.13, bh * 0.11, -0.4, 0, Math.PI * 2)
+    ctx.fill()
+    ctx.globalAlpha = 0.85
+
+    // ── BODY INK CONTOUR — re-issue the same body path, then stroke it once ──
+    buildBody(); this.#inkContour(GHOST_INK, 1.7)
+
+    // ── EYES — two big innocent googly ovals, pupils lean with travel + a slow drift ──
+    const eyeY = -bh * 0.16, eyeDX = bw * 0.22, eyeRX = 4.2, eyeRY = 5.4
+    const look = dir * 1.5 + 0.6 * Math.sin(time * 2)         // dreamy wandering gaze
+    for (const s of [-1, 1]) {
+      const ex = s * eyeDX
+      ctx.fillStyle = '#ffffff'
+      ctx.beginPath(); ctx.ellipse(ex, eyeY, eyeRX, eyeRY, 0, 0, Math.PI * 2); ctx.fill()
+      ctx.beginPath(); ctx.ellipse(ex, eyeY, eyeRX, eyeRY, 0, 0, Math.PI * 2)
+      this.#inkContour(GHOST_INK, 1.2)
+      // big dark pupil
+      ctx.fillStyle = '#2A1E45'
+      ctx.beginPath(); ctx.arc(ex + look, eyeY + 1.4, 2.4, 0, Math.PI * 2); ctx.fill()
+      // glossy catch-light
+      ctx.fillStyle = 'rgba(255,255,255,0.95)'
+      ctx.beginPath(); ctx.arc(ex + look - 0.9, eyeY + 0.4, 0.9, 0, Math.PI * 2); ctx.fill()
+    }
+
+    // ── MOUTH — a little round "oooo", breathing wider on the up-bob ──
+    const oo = 2.6 + 1.4 * (rise)                             // wider at the top of the float
+    ctx.fillStyle = GHOST_INK
+    ctx.beginPath(); ctx.ellipse(0, bh * 0.20, oo * 0.75, oo, 0, 0, Math.PI * 2); ctx.fill()
+    // inner dark of the mouth so it reads open, not a dot
+    ctx.fillStyle = '#3A2A5E'
+    ctx.beginPath(); ctx.ellipse(0, bh * 0.21, oo * 0.5, oo * 0.7, 0, 0, Math.PI * 2); ctx.fill()
+
+    // ── ROSY CHEEKS ──
+    ctx.globalAlpha = 0.85 * 0.55
+    ctx.fillStyle = GHOST_CHEEK
+    for (const s of [-1, 1]) {
+      ctx.beginPath(); ctx.ellipse(s * bw * 0.30, bh * 0.06, 2.6, 1.7, 0, 0, Math.PI * 2); ctx.fill()
+    }
+
+    ctx.globalAlpha = 1
+    ctx.restore()
+  }
+
+  /** The flappy baby CHICK — top pill-dispenser. Wing-beat phase comes from a.frame;
+ *  wings sweep down as the body rises. Unified ink-cartoon look. */
+#dispChick(a: Alien, time: number): void {
+  const ctx = this.#ctx
+  const x = a.x, y = a.y, hw = ALIEN_W / 2
+  // Reconstruct the engine's wing-beat phase from a.frame (matches #stepAlien).
+  const beat = (a.frame % CHICK_BOB_PERIOD) / CHICK_BOB_PERIOD          // 0..1 across one beat
+  // Wing down-stroke fraction: 0 (wings up/high) .. 1 (wings swept fully down) — peaks with the rise.
+  const flap = -Math.cos(beat * Math.PI * 2) * 0.5 + 0.5               // 0 .. 1, =1 at beat 0.5 (chick highest)
+  const dir = Math.sign(a.vx) || 1
+  // Squash: chick puffs round at the top of the bob (down-flap), stretches a touch on the up-beat.
+  const sx = 1 + 0.06 * flap
+  const sy = 1 - 0.06 * flap + 0.03 * Math.sin(time * 9)               // tiny idle breathing
+  const bw = 23, bh = 21
+  ctx.save()
+  // ── AIR SHADOW — soft ground hint at the baseline, fading as the chick climbs ──
+  const climb = (ALIEN_Y - y) / 12                                     // ~0 low .. ~1 high
+  const sh = Math.max(0, Math.min(1, climb))
+  ctx.fillStyle = `rgba(40,30,8,${0.26 * (1 - 0.55 * sh)})`
+  ctx.beginPath()
+  ctx.ellipse(x, 35, hw * (1 - 0.30 * sh), 3 * (1 - 0.30 * sh), 0, 0, Math.PI * 2)
+  ctx.fill()
+  ctx.translate(x, y); ctx.scale(sx, sy)
+
+  // ── TAIL FEATHERS — a little three-feather fan at the back, opposite travel ──
+  const tailX = -dir * bw * 0.46
+  ctx.fillStyle = CHICK_BODY_BOT
+  for (const k of [-1, 0, 1]) {
+    const ang = k * 0.42 - 0.10 * dir
+    const tx = tailX - dir * 6 * Math.cos(ang), ty = -bh * 0.06 + 7 * Math.sin(ang)
+    const tail = () => {
+      ctx.beginPath()
+      ctx.moveTo(tailX, -bh * 0.04)
+      ctx.quadraticCurveTo(tailX - dir * 3, ty - 2, tx, ty)
+      ctx.quadraticCurveTo(tailX - dir * 2, ty + 2, tailX, bh * 0.06)
+      ctx.closePath()
+    }
+    tail(); ctx.fillStyle = CHICK_BODY_BOT; ctx.fill()
+    tail(); this.#inkContour(CHICK_INK, 1.2)
+  }
+
+  // ── FAR WING (behind the body) — sweeps with the beat, dimmer ──
+  const wingAng = (0.55 - 1.15 * flap)                                 // up at beat 0, swept DOWN at beat 0.5
+  const drawWing = (side: number, shade: string) => {
+    ctx.save()
+    ctx.translate(side * bw * 0.40, -bh * 0.06)
+    ctx.rotate(side * wingAng)
+    ctx.fillStyle = shade
+    ctx.beginPath()
+    ctx.moveTo(0, 0)
+    ctx.quadraticCurveTo(side * 6, -9, side * 15, -3)
+    ctx.quadraticCurveTo(side * 18, 2, side * 13, 6)
+    ctx.quadraticCurveTo(side * 6, 7, 0, 4)
+    ctx.closePath()
+    ctx.fill()
+    // re-issue the wing path for the single ink pass
+    ctx.beginPath()
+    ctx.moveTo(0, 0)
+    ctx.quadraticCurveTo(side * 6, -9, side * 15, -3)
+    ctx.quadraticCurveTo(side * 18, 2, side * 13, 6)
+    ctx.quadraticCurveTo(side * 6, 7, 0, 4)
+    ctx.closePath()
+    this.#inkContour(CHICK_INK, 1.3)
+    // two feather creases
+    ctx.strokeStyle = CHICK_INK; ctx.lineWidth = 0.8; ctx.globalAlpha = 0.5
+    ctx.beginPath(); ctx.moveTo(side * 4, 0); ctx.quadraticCurveTo(side * 9, -1, side * 12, 1); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(side * 4, 3); ctx.quadraticCurveTo(side * 8, 3, side * 11, 4); ctx.stroke()
+    ctx.globalAlpha = 1
+    ctx.restore()
+  }
+  drawWing(-dir, CHICK_BODY_BOT)                                       // far wing first, darker
+
+  // ── HEAD TUFT — three little feathers, jiggle with the flap ──
+  const tuftJ = Math.sin(time * 11) * 0.10 + (flap - 0.5) * 0.18
+  ctx.fillStyle = CHICK_BODY_MID
+  for (const k of [-1, 0, 1]) {
+    const ang = k * 0.46 + tuftJ
+    const px = Math.sin(ang) * 8, py = -bh * 0.5 - 6 - Math.cos(ang) * 4
+    const tuft = () => {
+      ctx.beginPath()
+      ctx.moveTo(k * 2.2, -bh * 0.5 + 2)
+      ctx.quadraticCurveTo(px * 0.5, py + 4, px, py)
+      ctx.quadraticCurveTo(px + 1.2, py + 2.5, k * 2.2 + 1.4, -bh * 0.5 + 3)
+      ctx.closePath()
+    }
+    tuft(); ctx.fillStyle = CHICK_BODY_MID; ctx.fill()
+    tuft(); this.#inkContour(CHICK_INK, 1.1)
+  }
+
+  // ── FEET — two little orange danglers, tuck up on the down-flap (climbing) ──
+  const tuck = flap                                                    // legs tuck as it rises
+  ctx.strokeStyle = CHICK_BEAK; ctx.lineWidth = 2.2; ctx.lineCap = 'round'
+  for (const s of [-1, 1]) {
+    const lx = s * bw * 0.16, ly = bh * 0.46
+    const fy = ly + 6 - 4 * tuck
+    ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(lx + s * 1.5, fy); ctx.stroke()
+    // three toes
+    ctx.lineWidth = 1.6
+    for (const t of [-1, 0, 1]) { ctx.beginPath(); ctx.moveTo(lx + s * 1.5, fy); ctx.lineTo(lx + s * 1.5 + t * 2.4, fy + 2.4); ctx.stroke() }
+    ctx.lineWidth = 2.2
+  }
+
+  // ── BODY — round fluffy yellow ball, top-lit ──
+  ctx.shadowColor = 'rgba(255,210,59,0.5)'; ctx.shadowBlur = 9
+  const body = ctx.createLinearGradient(0, -bh * 0.5, 0, bh * 0.5)
+  body.addColorStop(0, CHICK_BODY_TOP); body.addColorStop(0.5, CHICK_BODY_MID); body.addColorStop(1, CHICK_BODY_BOT)
+  ctx.fillStyle = body
+  ctx.beginPath(); ctx.ellipse(0, 0, bw * 0.5, bh * 0.5, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.shadowBlur = 0
+  // glossy pale belly + a specular hotspot
+  ctx.fillStyle = CHICK_BELLY
+  ctx.beginPath(); ctx.ellipse(0, bh * 0.20, bw * 0.32, bh * 0.26, 0, 0, Math.PI * 2); ctx.fill()
+  ctx.globalAlpha = 0.6; ctx.fillStyle = '#ffffff'
+  ctx.beginPath(); ctx.ellipse(-bw * 0.18, -bh * 0.22, bw * 0.13, bh * 0.10, -0.4, 0, Math.PI * 2); ctx.fill()
+  ctx.globalAlpha = 1
+  // soft fluff scallops along the lower edge (cheap: short arcs)
+  ctx.strokeStyle = this.#darken(CHICK_BODY_MID); ctx.lineWidth = 0.9; ctx.globalAlpha = 0.35
+  for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.arc(i * bw * 0.16, bh * 0.42, 2.2, Math.PI * 0.15, Math.PI * 0.85); ctx.stroke() }
+  ctx.globalAlpha = 1
+  // body ink contour (re-issue path, then one ink pass)
+  ctx.beginPath(); ctx.ellipse(0, 0, bw * 0.5, bh * 0.5, 0, 0, Math.PI * 2); this.#inkContour(CHICK_INK, 1.7)
+
+  // ── EYES — two big googly domes, pupils lead the travel direction ──
+  const eyeY = -bh * 0.16, eyeDX = bw * 0.22, eyeR = 5
+  for (const s of [-1, 1]) {
+    const ex = s * eyeDX
+    ctx.fillStyle = '#ffffff'
+    ctx.beginPath(); ctx.arc(ex, eyeY, eyeR, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.arc(ex, eyeY, eyeR, 0, Math.PI * 2); this.#inkContour(CHICK_INK, 1.3)
+    const pdx = dir * 1.7, pdy = -0.6 + 1.2 * flap                     // pupils bounce a touch with the beat
+    ctx.fillStyle = '#1a1206'
+    ctx.beginPath(); ctx.arc(ex + pdx, eyeY + pdy, 2.2, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = 'rgba(255,255,255,0.95)'
+    ctx.beginPath(); ctx.arc(ex + pdx - 0.8, eyeY + pdy - 0.9, 0.85, 0, Math.PI * 2); ctx.fill()
+  }
+
+  // ── BEAK — little orange diamond between the eyes, opens a hair on the up-beat ──
+  const gape = (1 - flap) * 1.4                                        // mouth wider mid-up-stroke
+  const bkX = dir * 1.5, bkY = bh * 0.04
+  ctx.fillStyle = CHICK_BEAK
+  const beak = () => {
+    ctx.beginPath()
+    ctx.moveTo(bkX - 4, bkY)
+    ctx.lineTo(bkX + 4, bkY - 1)
+    ctx.lineTo(bkX + 1, bkY + 2.6 + gape)
+    ctx.closePath()
+  }
+  beak(); ctx.fillStyle = CHICK_BEAK; ctx.fill()
+  beak(); this.#inkContour(this.#darken(CHICK_BEAK), 1.2)
+  // lower beak half on the gape
+  if (gape > 0.3) {
+    ctx.fillStyle = '#d96a14'
+    ctx.beginPath(); ctx.moveTo(bkX - 3, bkY + 1.2); ctx.lineTo(bkX + 3, bkY + 0.6); ctx.lineTo(bkX + 1, bkY + 2.6 + gape); ctx.closePath(); ctx.fill()
+  }
+  // rosy cheeks
+  ctx.globalAlpha = 0.5; ctx.fillStyle = '#ff9a7a'
+  for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(s * bw * 0.34, bh * 0.04, 2.4, 1.6, 0, 0, Math.PI * 2); ctx.fill() }
+  ctx.globalAlpha = 1
+
+  // ── NEAR WING (in front of the body) — same beat, brighter ──
+  drawWing(dir, CHICK_BODY_MID)
+  ctx.restore()
+}
 
   /** The extra-life carrier — a beautiful winged heart trailing sparkles and a soft
    *  golden aura, gently bobbing as it sweeps across. */
@@ -1631,13 +2576,16 @@ export class Renderer {
     for (const e of explosions) {
       const p = Math.min(1, e.t / EXPLOSION_DUR)        // 0 → 1 over the blast life
       const r = 8 + p * ROCKET_RADIUS
+      const plasma = e.hue === 'plasma'                  // fireball detonation = white-hot cyan, not TNT orange
+      const core = plasma ? '#7ec8ff' : '#ff7043'
+      const ring = plasma ? '#bfe3ff' : '#ffcf5e'
       ctx.save()
-      ctx.shadowColor = '#ff7043'; ctx.shadowBlur = 14
+      ctx.shadowColor = core; ctx.shadowBlur = 14
       ctx.globalAlpha = (1 - p) * 0.5
-      ctx.fillStyle = '#ff7043'
+      ctx.fillStyle = plasma ? '#ffffff' : core
       ctx.beginPath(); ctx.arc(e.x, e.y, r * 0.6, 0, Math.PI * 2); ctx.fill()
       ctx.globalAlpha = 1 - p
-      ctx.strokeStyle = '#ffcf5e'; ctx.lineWidth = 3 + (1 - p) * 4
+      ctx.strokeStyle = ring; ctx.lineWidth = 3 + (1 - p) * 4
       ctx.beginPath(); ctx.arc(e.x, e.y, r, 0, Math.PI * 2); ctx.stroke()
       ctx.restore()
     }
@@ -1695,12 +2643,21 @@ export class Renderer {
     }
     chip(`points ×${pts.toFixed(1)}`, pts >= 5.5 ? '#ffd24a' : '#7ee0ff', pts / 6, 54)
     chip(`pills ×${pil.toFixed(1)}`, pil >= 3 ? '#ffd24a' : '#3fd6c0', (pil - 1) / 2, 74)
-    // Lives as small balls, top-right.
-    for (let i = 0; i < engine.lives; i++) {
+    // Reserve balls, top-right — the one in PLAY isn't counted, so on your last
+    // life the reserve reads empty. We draw the full reserve capacity as hollow
+    // sockets and fill the ones you still hold, so "down to your last" is visible.
+    const reserve = Math.max(0, engine.lives - 1)
+    const sockets = Math.max(reserve, 4)   // MAX_LIVES(5) - 1 reserve sockets
+    for (let i = 0; i < sockets; i++) {
+      const cx = W - 12 - i * 16
       ctx.beginPath()
-      ctx.arc(W - 12 - i * 16, 16, 5, 0, Math.PI * 2)
-      ctx.fillStyle = '#ffffff'
-      ctx.fill()
+      ctx.arc(cx, 16, 5, 0, Math.PI * 2)
+      if (i < reserve) {
+        ctx.fillStyle = '#ffffff'; ctx.fill()
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.fill()
+        ctx.lineWidth = 1; ctx.strokeStyle = reserve === 0 ? 'rgba(255,90,90,0.7)' : 'rgba(255,255,255,0.3)'; ctx.stroke()
+      }
     }
     // Gun magazine: G (+ stack level) and a row of ball pips — filled = loaded,
     // hollow = spent — so you can see your shots deplete as you fire.
@@ -1769,5 +2726,18 @@ export class Renderer {
     ctx.arcTo(x, y + h, x, y, rr)
     ctx.arcTo(x, y, x + w, y, rr)
     ctx.closePath()
+  }
+
+  /** Stroke the CURRENT path as a tinted-dark ink contour — the one unifying
+   *  cartoon cue. The caller re-issues the same #roundRect/arc path on the line
+   *  before. Always a darken()/#darken tint of the body (or soft grey for the
+   *  white ball), NEVER #000. Resets shadowBlur so a leftover body glow can't
+   *  bleed into the crisp line. A named stroke, not a path-builder. */
+  #inkContour(stroke: string, lineWidth: number): void {
+    const ctx = this.#ctx
+    ctx.shadowBlur = 0
+    ctx.lineWidth = lineWidth
+    ctx.strokeStyle = stroke
+    ctx.stroke()
   }
 }

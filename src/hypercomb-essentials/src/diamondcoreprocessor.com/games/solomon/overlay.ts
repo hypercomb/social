@@ -10,21 +10,33 @@ import { Engine, TILE, type LevelDef } from './engine.js'
 import { Renderer } from './renderer.js'
 import { Designer, TOOLS, type Tool } from './designer.js'
 import {
-  BUILTIN_LEVELS, BONUS_ROOM, SEAL_TOTAL, decideNext,
+  BUILTIN_LEVELS, PRINCESS_ROOM, SEAL_TOTAL,
   loadCustomLevels, upsertCustomLevel, deleteCustomLevel, cloneLevel,
 } from './levels.js'
+import { Overworld, OverworldView, type NodeDef } from './overworld.js'
 import { Shaker, ParticleField, easeOutBack, ARCADE } from '../juice.js'
 
 const STYLE_ID = 'sol-overlay-styles'
 const Z = 2147483000
 
 const GAME_KEYS = new Set([
-  'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'Spacebar',
+  'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', ' ', 'Spacebar', 'Enter',
   'a', 'A', 'd', 'D', 'w', 'W', 's', 'S',
-  'j', 'J', 'k', 'K', 'z', 'Z', 'x', 'X', 'r', 'R',
+  'j', 'J', 'k', 'K', 'z', 'Z', 'x', 'X', 'm', 'M', 'r', 'R',
 ])
 
-type Mode = 'play' | 'design'
+type Mode = 'play' | 'design' | 'overworld'
+
+// Sentinel "level index" for the Princess Room (not a BUILTIN_LEVELS index), and
+// the overworld camera viewport size in px.
+const PRINCESS_INDEX = 1000
+const OVIEW_W = 720
+const OVIEW_H = 452
+// Cavern viewport (tiles). Caverns can now be ANY size: bigger than this scroll
+// (a camera follows Dana); smaller ones fit + centre. Standard 20×13 rooms are
+// unchanged (the cap only kicks in above it).
+const VIEW_COLS = 22
+const VIEW_ROWS = 14
 
 // Level-clear flow (continuous play — identical to the Bubble overlay so every
 // game advances the same way): on clearing a screen we tally the level's score
@@ -32,31 +44,19 @@ type Mode = 'play' | 'design'
 // bottom — no button press, you just keep playing. Score + lives carry across
 // levels; the toolbar still has prev / next / restart for jumping around.
 const TALLY_MS = 1.7          // how long the score add-up reads
-const PAN_MS = 0.85           // how long the next level takes to slide in
-const PERFECT_BONUS = 1000    // awarded when a level is cleared without dying
+const PERFECT_BONUS = 1000    // awarded when a cavern is cleared without dying
 
-/** One in-flight level-clear transition: first 'tally' (count the score up),
- *  then 'pan' (slide the cleared level off the top while the next rises from
- *  below). `prev` is the cleared engine, kept so it can be drawn scrolling out. */
+/** A cavern-clear interlude: count the score up, then act — surface to the
+ *  overworld map, replay a designer test, or roll the Princess true ending. */
 interface Transition {
-  phase: 'tally' | 'pan'
-  t: number               // seconds into the current phase
-  levelScore: number      // points earned on the just-cleared level
+  t: number
+  levelScore: number      // points earned in the just-cleared cavern
   timeBonus: number       // remaining life-meter converted to score (NES time bonus)
   bonus: number           // perfect-clear bonus (0 if a life was lost)
-  baseScore: number       // running total at the start of the cleared level
-  nextLevel: LevelDef     // the level rising in
-  nextIndex: number       // its index in #levels (for the toolbar label)
-  testing: boolean        // cleared a designer test (re-pans the same level)
-  prev: Engine            // the cleared engine — drawn scrolling out during 'pan'
-  ending: boolean         // the final room cleared → show the victory banner, no pan
-  enterBonus: boolean     // the next room is the fairy bonus room (zodiac detour)
-  bonusResume: number     // #levels index to resume at once the bonus room clears
-}
-
-/** easeInOut cubic — slow start, slow settle; reads as the screen easing up. */
-function easeInOut(t: number): number {
-  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2
+  baseScore: number       // running total at the start of the cavern
+  prev: Engine            // the cleared engine, drawn under the tally
+  princess: boolean       // after the tally → the Princess true ending
+  testing: boolean        // after the tally → replay the designer test level
 }
 
 export class SolomonOverlay {
@@ -80,6 +80,14 @@ export class SolomonOverlay {
 
   #levels: LevelDef[] = []
   #levelIndex = 0
+
+  // The Zelda-like overworld + the running journey carried cavern → cavern. Each
+  // cavern is a fresh attempt (3 lives); score, fairies, seals and pages persist.
+  #overworld: Overworld | null = null
+  #owView: OverworldView | null = null
+  #currentCavern = 0
+  #journey = { score: 0, fairyCount: 0, sealCount: 0, pageTime: false, pageSpace: false }
+  #mapBtn: HTMLButtonElement | null = null
 
   #raf = 0
   #lastTs = 0
@@ -110,6 +118,7 @@ export class SolomonOverlay {
   // Meta-progression flow: a constellation panel detours through the fairy bonus
   // room; clearing the final room shows the victory banner (and freezes play).
   #inBonus = false
+  #inPrincess = false
   #bonusResumeIndex = 0
   #ended = false
 
@@ -137,7 +146,8 @@ export class SolomonOverlay {
     this.#refreshLevels()
     ;(document.activeElement as HTMLElement | null)?.blur?.()
     this.#build()
-    this.#startPlay(this.#levels[this.#levelIndex] ?? this.#levels[0])
+    this.#setupOverworld()
+    this.#enterOverworld()
     window.addEventListener('keydown', this.#onKeyDown, true)
     window.addEventListener('keyup', this.#onKeyUp, true)
     window.addEventListener('resize', this.#fit)
@@ -191,10 +201,13 @@ export class SolomonOverlay {
     const next = el('button', { class: 'sol-btn', text: '›' }) as HTMLButtonElement
     const label = el('span', { class: 'sol-level-label' }) as HTMLSpanElement
     const restart = el('button', { class: 'sol-btn', text: '↻ Restart' }) as HTMLButtonElement
-    prev.onclick = () => this.#cycleLevel(-1)
-    next.onclick = () => this.#cycleLevel(1)
-    restart.onclick = () => this.#startPlay(this.#levels[this.#levelIndex])
-    playBar.append(prev, label, next, restart)
+    const mapBtn = el('button', { class: 'sol-btn', text: '🗺 Map' }) as HTMLButtonElement
+    prev.onclick = () => this.#cycleCavern(-1)
+    next.onclick = () => this.#cycleCavern(1)
+    restart.onclick = () => this.#restartCurrent()
+    mapBtn.onclick = () => this.#enterOverworld()
+    playBar.append(prev, label, next, restart, mapBtn)
+    this.#mapBtn = mapBtn
     bar.appendChild(playBar)
     this.#playBar = playBar
     this.#levelLabel = label
@@ -250,29 +263,48 @@ export class SolomonOverlay {
 
     // ── help ──
     const help = el('div', { class: 'sol-help' })
-    help.innerHTML = '<b>← →</b> move &nbsp;·&nbsp; <b>↑</b> jump (head-butt bricks) &nbsp;·&nbsp; <b>↓</b> duck &nbsp;·&nbsp; <b>Z</b> conjure / dispel a block &nbsp;·&nbsp; <b>X</b> fireball <i>(needs a jar)</i> &nbsp;·&nbsp; drop foes off ledges, grab the key, beat the timer &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> close'
+    help.innerHTML = '<b>Map:</b> <b>← → ↑ ↓</b> walk · <b>↵ / Z</b> enter a cavern &nbsp;&nbsp;|&nbsp;&nbsp; <b>Cavern:</b> <b>← →</b> move · <b>↑</b> jump · <b>↓</b> duck · <b>Z</b> conjure/dispel · <b>X</b> fireball <i>(needs a jar)</i> · <b>M</b> map · <b>R</b> restart · <b>Esc</b> close'
     root.appendChild(help)
 
     document.body.appendChild(root)
     this.#root = root
     this.#canvas = canvas
     this.#ctx = canvas.getContext('2d')
-    if (this.#ctx) { this.#ctx.imageSmoothingEnabled = false; this.#renderer = new Renderer(this.#ctx) }
+    if (this.#ctx) { this.#ctx.imageSmoothingEnabled = false; this.#renderer = new Renderer(this.#ctx); this.#owView = new OverworldView(this.#ctx) }
     this.#refreshLoadSelect()
   }
 
   // ── mode + level control ─────────────────────────────────
 
   #setMode(mode: Mode): void {
-    if (this.#mode === mode) return
-    this.#mode = mode
-    const tabs = this.#root?.querySelectorAll('.sol-tab')
-    tabs?.forEach((t, i) => t.classList.toggle('on', (i === 0) === (mode === 'play')))
-    this.#playBar?.classList.toggle('sol-hidden', mode !== 'play')
-    this.#designBar?.classList.toggle('sol-hidden', mode !== 'design')
-    this.#hideBanner()
-    if (mode === 'play') this.#startPlay(this.#levels[this.#levelIndex])
-    else { this.#sizeCanvasTo(this.#designer.level); this.#updateToolButtons() }
+    if (mode === 'design') {
+      if (this.#mode === 'design') return
+      this.#mode = 'design'
+      this.#engine = null
+      this.#transition = null
+      this.#hideBanner()
+      this.#sizeCanvasTo(this.#designer.level)
+      this.#updateToolButtons()
+      this.#updateModeUI()
+    } else {
+      this.#enterOverworld() // the "Play" tab is the overworld hub
+    }
+  }
+
+  /** Sync the top-bar chrome to the current mode (tabs, button visibility, label). */
+  #updateModeUI(): void {
+    const onPlay = this.#mode !== 'design'
+    this.#root?.querySelectorAll('.sol-tab').forEach((t, i) => t.classList.toggle('on', (i === 0) === onPlay))
+    this.#playBar?.classList.toggle('sol-hidden', !onPlay)
+    this.#designBar?.classList.toggle('sol-hidden', this.#mode !== 'design')
+    this.#mapBtn?.classList.toggle('sol-hidden', this.#mode !== 'play') // "to map" only inside a cavern
+    if (this.#levelLabel) {
+      this.#levelLabel.textContent = this.#mode === 'overworld'
+        ? '🗺 Overworld — walk into a cavern'
+        : this.#mode === 'design' ? this.#designer.level.name
+          : this.#currentCavern === PRINCESS_INDEX ? '👑 Princess Room'
+            : `Cavern ${this.#currentCavern + 1} — ${BUILTIN_LEVELS[this.#currentCavern]?.name ?? ''}`
+    }
   }
 
   #refreshLevels(): void {
@@ -280,33 +312,88 @@ export class SolomonOverlay {
     if (this.#levelIndex >= this.#levels.length) this.#levelIndex = 0
   }
 
-  #cycleLevel(dir: number): void {
-    this.#refreshLevels()
-    if (!this.#levels.length) return
-    this.#levelIndex = (this.#levelIndex + dir + this.#levels.length) % this.#levels.length
-    this.#startPlay(this.#levels[this.#levelIndex])
+  // ── the overworld journey ────────────────────────────────
+
+  #setupOverworld(): void {
+    const defs: NodeDef[] = BUILTIN_LEVELS.map((l, i) => ({ levelIndex: i, name: l.name, label: i + 1 }))
+    defs.push({ levelIndex: PRINCESS_INDEX, name: 'Princess Room', label: 0 })
+    this.#overworld = new Overworld(defs)
+    this.#overworld.unlock(0) // the first cavern is always open
+    this.#owView?.reset()
+    this.#journey = { score: 0, fairyCount: 0, sealCount: 0, pageTime: false, pageSpace: false }
+    this.#currentCavern = 0
   }
 
-  #startPlay(level: LevelDef | undefined): void {
-    if (!level) return
-    this.#mode = 'play'
-    this.#engine = new Engine(cloneLevel(level))
-    // Fresh run from this level: score back to 0, full lives, no carry-over.
+  #restartJourney(): void { this.#setupOverworld(); this.#enterOverworld() }
+
+  #enterOverworld(): void {
+    if (!this.#overworld) this.#setupOverworld()
+    this.#mode = 'overworld'
+    this.#engine = null
     this.#testing = false
     this.#transition = null
-    this.#inBonus = false
+    this.#ended = false
+    this.#intro = null
+    this.#hideBanner()
+    if (this.#canvas) {
+      this.#canvas.width = OVIEW_W
+      this.#canvas.height = OVIEW_H
+      if (this.#ctx) this.#ctx.imageSmoothingEnabled = false
+      this.#fit()
+    }
+    this.#updateModeUI()
+  }
+
+  /** Drop into a cavern from the map (or jump there directly via prev/next). */
+  #enterCavern(levelIndex: number): void {
+    const def = levelIndex === PRINCESS_INDEX ? PRINCESS_ROOM : (BUILTIN_LEVELS[levelIndex] ?? BUILTIN_LEVELS[0])
+    if (!def) return
+    this.#currentCavern = levelIndex
+    this.#inPrincess = levelIndex === PRINCESS_INDEX
+    this.#mode = 'play'
+    this.#engine = new Engine(cloneLevel(def))
+    const e = this.#engine
+    e.score = this.#journey.score          // score + meta carry across the journey…
+    e.fairyCount = this.#journey.fairyCount
+    e.sealCount = this.#journey.sealCount
+    e.pageTime = this.#journey.pageTime
+    e.pageSpace = this.#journey.pageSpace
+    // …lives are a fresh 3 per cavern (the engine default).
+    this.#testing = false
+    this.#transition = null
     this.#ended = false
     this.#overShown = false
-    this.#levelStartScore = this.#engine.score
-    this.#levelStartLives = this.#engine.lives
-    this.#syncJuice(this.#engine)
+    this.#levelStartScore = e.score
+    this.#levelStartLives = e.lives
+    this.#syncJuice(e)
     this.#hideBanner()
-    this.#sizeCanvasTo(level)
-    if (this.#levelLabel) {
-      const n = this.#levelIndex + 1, total = this.#levels.length
-      this.#levelLabel.textContent = `${level.name}  (${n}/${total})`
+    this.#sizeCanvasToView(def)
+    this.#updateModeUI()
+    this.#beginIntro(def.name, this.#inPrincess ? 'RESCUE!' : 'CAVERN ' + (levelIndex + 1))
+  }
+
+  /** prev/next cavern — direct nav, ignoring locks (a convenience). */
+  #cycleCavern(dir: number): void {
+    const base = this.#currentCavern === PRINCESS_INDEX ? BUILTIN_LEVELS.length - 1 : this.#currentCavern
+    this.#enterCavern((base + dir + BUILTIN_LEVELS.length) % BUILTIN_LEVELS.length)
+  }
+
+  /** A cavern was cleared: bank the journey gains, mark it on the map, unlock the
+   *  way forward, and surface back onto the overworld at its mouth. */
+  #afterCavernClear(prev: Engine): void {
+    this.#journey.score = prev.score
+    this.#journey.fairyCount = prev.fairyCount
+    this.#journey.sealCount = prev.sealCount
+    this.#journey.pageTime = prev.pageTime
+    this.#journey.pageSpace = prev.pageSpace
+    const ow = this.#overworld
+    if (ow) {
+      ow.markCleared(this.#currentCavern)
+      if (this.#currentCavern !== PRINCESS_INDEX && this.#currentCavern + 1 < BUILTIN_LEVELS.length) ow.unlock(this.#currentCavern + 1)
+      if (BUILTIN_LEVELS.every((_, i) => ow.cleared.has(i))) ow.unlock(PRINCESS_INDEX) // all cleared → Princess opens
+      ow.spawnAt(this.#currentCavern)
     }
-    this.#beginIntro(level.name, 'LEVEL ' + (this.#levelIndex + 1))
+    this.#enterOverworld()
   }
 
   #sizeCanvasTo(level: { cols: number; rows: number }): void {
@@ -315,6 +402,27 @@ export class SolomonOverlay {
     this.#canvas.height = level.rows * TILE
     if (this.#ctx) this.#ctx.imageSmoothingEnabled = false
     this.#fit()
+  }
+
+  /** Size the canvas to the CAVERN viewport — capped so big caverns scroll while
+   *  small ones still fit exactly (no letterbox). */
+  #sizeCanvasToView(level: { cols: number; rows: number }): void {
+    if (!this.#canvas) return
+    this.#canvas.width = Math.min(level.cols, VIEW_COLS) * TILE
+    this.#canvas.height = Math.min(level.rows, VIEW_ROWS) * TILE
+    if (this.#ctx) this.#ctx.imageSmoothingEnabled = false
+    this.#fit()
+  }
+
+  /** Camera offset for a cavern: follow Dana, clamped to the level; centre any
+   *  axis where the level is smaller than the viewport. */
+  #cavernCamera(e: Engine): { x: number; y: number } {
+    const vw = this.#canvas?.width ?? e.width, vh = this.#canvas?.height ?? e.height
+    const cx = e.player.x + e.player.w / 2 - vw / 2
+    const cy = e.player.y + e.player.h / 2 - vh / 2
+    const x = e.width <= vw ? (e.width - vw) / 2 : Math.max(0, Math.min(cx, e.width - vw))
+    const y = e.height <= vh ? (e.height - vh) / 2 : Math.max(0, Math.min(cy, e.height - vh))
+    return { x: Math.round(x), y: Math.round(y) }
   }
 
   #fit = (): void => {
@@ -347,27 +455,34 @@ export class SolomonOverlay {
     // pixel art crisp. Shake stays at rest in the designer (never advanced/added).
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
 
-    if (this.#mode === 'play' && this.#engine) {
+    if (this.#mode === 'overworld' && this.#overworld && this.#owView) {
+      this.#overworld.update(dt)
+      this.#owView.draw(this.#overworld, ctx.canvas.width, ctx.canvas.height, this.#time)
+    } else if (this.#mode === 'play' && this.#engine) {
       this.#shaker.update(dt)
       const sh = this.#shaker.offset()
-      ctx.save()
-      ctx.translate(Math.round(sh.x), Math.round(sh.y))
+      const view = { w: ctx.canvas.width, h: ctx.canvas.height }
       if (this.#transition) {
-        // A level was cleared: the simulation is frozen while the score tallies
-        // and the next screen scrolls in.
+        // Cavern cleared: the sim is frozen while the score tallies, then we surface.
         this.#stepTransition(dt)
-        this.#drawTransition(r)
+        this.#drawTransition(r, view)
       } else {
         this.#engine.update(dt)
         this.#senseJuice(dt)
-        r.draw(this.#engine, this.#time)
+        // Camera follows Dana (caverns may exceed the viewport); the shake folds
+        // into the same world translate. The HUD + intro stay screen-space.
+        const cam = this.#cavernCamera(this.#engine)
+        ctx.save()
+        ctx.translate(Math.round(-cam.x + sh.x), Math.round(-cam.y + sh.y))
+        r.drawWorld(this.#engine, this.#time)
         this.#field.update(dt)
         this.#field.draw(ctx)
-        this.#drawIntro(ctx, { w: this.#engine.width, h: this.#engine.height }, dt)
+        ctx.restore()
+        r.drawHud(this.#engine, this.#time, view.w, view.h)
+        this.#drawIntro(ctx, view, dt)
         if (this.#engine.state === 'won' && !this.#ended) this.#beginClear()
         else if (this.#engine.state === 'gameover' && !this.#overShown) { this.#overShown = true; this.#showGameOver() }
       }
-      ctx.restore()
     } else if (this.#mode === 'design') {
       r.drawEditor(this.#designer.level, this.#hover, this.#time)
     }
@@ -500,6 +615,23 @@ export class SolomonOverlay {
     // leaks to the shell beneath this full-screen overlay (a stray key can
     // otherwise flip the app into website/view mode). Matches Bubble + Arkanoid.
     e.preventDefault(); e.stopImmediatePropagation()
+
+    // Overworld: top-down walking + walk-into-a-mouth to enter that cavern.
+    if (this.#mode === 'overworld') {
+      const ow = this.#overworld
+      if (!ow) return
+      switch (e.key) {
+        case 'ArrowLeft': case 'a': case 'A': ow.input.left = true; break
+        case 'ArrowRight': case 'd': case 'D': ow.input.right = true; break
+        case 'ArrowUp': case 'w': case 'W': ow.input.up = true; break
+        case 'ArrowDown': case 's': case 'S': ow.input.down = true; break
+        case 'Enter': case ' ': case 'Spacebar': case 'z': case 'Z': case 'x': case 'X':
+          if (!e.repeat) { const n = ow.entranceUnder(); if (n) this.#enterCavern(n.levelIndex) }
+          break
+      }
+      return
+    }
+
     if (this.#mode !== 'play' || !this.#engine) return
     const eng = this.#engine
     if (!GAME_KEYS.has(e.key)) return
@@ -511,7 +643,8 @@ export class SolomonOverlay {
       case 'ArrowDown': case 's': case 'S': eng.input.down = true; break
       case 'j': case 'J': case 'z': case 'Z': if (!e.repeat) eng.cast(); break    // conjure / dispel a block
       case 'k': case 'K': case 'x': case 'X': if (!e.repeat) eng.fireball(); break // fireball (needs ammo)
-      case 'r': case 'R': this.#startPlay(this.#levels[this.#levelIndex]); break
+      case 'm': case 'M': this.#enterOverworld(); break                            // back to the map
+      case 'r': case 'R': this.#restartCurrent(); break                            // restart this cavern
     }
   }
 
@@ -519,6 +652,17 @@ export class SolomonOverlay {
     if (document.activeElement === this.#nameInput) return
     if (e.ctrlKey || e.metaKey || e.altKey) return
     e.stopImmediatePropagation()
+    if (this.#mode === 'overworld') {
+      const ow = this.#overworld
+      if (!ow) return
+      switch (e.key) {
+        case 'ArrowLeft': case 'a': case 'A': ow.input.left = false; break
+        case 'ArrowRight': case 'd': case 'D': ow.input.right = false; break
+        case 'ArrowUp': case 'w': case 'W': ow.input.up = false; break
+        case 'ArrowDown': case 's': case 'S': ow.input.down = false; break
+      }
+      return
+    }
     if (!this.#engine) return
     switch (e.key) {
       case 'ArrowLeft': case 'a': case 'A': this.#engine.input.left = false; break
@@ -589,22 +733,34 @@ export class SolomonOverlay {
   }
 
   #designerTest(): void {
-    // Playtest the in-progress level without requiring a save.
-    this.#levels = [...BUILTIN_LEVELS.map(cloneLevel), ...loadCustomLevels()]
-    this.#setMode('play')
+    // Playtest the in-progress level without requiring a save (a one-off cavern,
+    // not part of the overworld journey).
+    this.#mode = 'play'
     this.#engine = new Engine(cloneLevel(this.#designer.level))
     this.#testing = true
+    this.#inPrincess = false
     this.#transition = null
+    this.#ended = false
     this.#overShown = false
     this.#levelStartScore = this.#engine.score
     this.#levelStartLives = this.#engine.lives
     this.#syncJuice(this.#engine)
     this.#hideBanner()
-    this.#sizeCanvasTo(this.#designer.level)
-    const tabs = this.#root?.querySelectorAll('.sol-tab')
-    tabs?.forEach((t, i) => t.classList.toggle('on', i === 0))
+    this.#sizeCanvasToView(this.#designer.level)
+    this.#playBar?.classList.remove('sol-hidden')
+    this.#designBar?.classList.add('sol-hidden')
+    this.#mapBtn?.classList.add('sol-hidden') // no "to map" while testing a draft
+    this.#root?.querySelectorAll('.sol-tab').forEach((t, i) => t.classList.toggle('on', i === 0))
     if (this.#levelLabel) this.#levelLabel.textContent = `${this.#designer.level.name}  (test)`
     this.#beginIntro(this.#designer.level.name, 'TEST')
+  }
+
+  /** Restart whatever we're in: the journey (on the map), the test (in a draft),
+   *  or the current cavern. Used by the Restart button + the R key. */
+  #restartCurrent(): void {
+    if (this.#mode === 'overworld') this.#restartJourney()
+    else if (this.#testing) this.#designerTest()
+    else this.#enterCavern(this.#currentCavern)
   }
 
   #designerLoad(name: string): void {
@@ -657,111 +813,43 @@ export class SolomonOverlay {
 
   // ── level clear → tally → pan to next (continuous play) ──
 
-  /** Level cleared. Compute the level's score gain + any perfect bonus and open
-   *  the tally→pan transition. Levels wrap, so play never stops on a clear. */
+  /** Cavern cleared. Compute the score gain + bonuses and open the tally
+   *  interlude. The Princess Room rolls the true ending; every other cavern
+   *  surfaces back to the overworld. */
   #beginClear(): void {
     const eng = this.#engine
     if (!eng || this.#transition || this.#ended) return
     const levelScore = Math.max(0, eng.score - this.#levelStartScore)
-    // The life meter that's left when you reach the door becomes a time bonus —
-    // the NES rewards beating the clock with margin to spare.
-    const timeBonus = Math.round(eng.life)
-    // lives only ever fall within a level, so "same as we started" ⇒ no deaths.
+    const timeBonus = Math.round(eng.life) // life left at the door → time bonus
     const bonus = eng.lives >= this.#levelStartLives ? PERFECT_BONUS : 0
-
-    let nextLevel: LevelDef
-    let nextIndex = this.#levelIndex
-    let ending = false, enterBonus = false, bonusResume = 0
-
-    if (this.#testing) {
-      nextLevel = this.#designer.level   // a designer test just re-pans the same level
-    } else {
-      const dec = decideNext({
-        levelIndex: this.#levelIndex,
-        builtinCount: BUILTIN_LEVELS.length,
-        totalCount: this.#levels.length,
-        zodiacHeld: eng.zodiacHeld,
-        wingsHeld: eng.wingsHeld,
-        inBonus: this.#inBonus,
-        bonusResumeIndex: this.#bonusResumeIndex,
-      })
-      if (dec.kind === 'ending') { ending = true; nextLevel = eng.level }
-      else if (dec.kind === 'bonus') { enterBonus = true; bonusResume = dec.index; nextLevel = BONUS_ROOM }
-      else { nextIndex = dec.index; nextLevel = this.#levels[dec.index] ?? eng.level }
-    }
-
     this.#transition = {
-      phase: 'tally', t: 0,
-      levelScore, timeBonus, bonus, baseScore: this.#levelStartScore,
-      nextLevel, nextIndex, testing: this.#testing, prev: eng,
-      ending, enterBonus, bonusResume,
+      t: 0, levelScore, timeBonus, bonus, baseScore: this.#levelStartScore,
+      prev: eng, princess: this.#inPrincess, testing: this.#testing,
     }
     this.#hideBanner()
   }
 
-  /** Advance the active transition: count the tally, then build + scroll in the
-   *  next level (carrying the running score — bonus included — and lives). */
+  /** Count the tally up; when it finishes, act on what was cleared. */
   #stepTransition(dt: number): void {
     const tr = this.#transition
     if (!tr) return
     tr.t += dt
-    if (tr.phase === 'tally') {
-      if (tr.t < TALLY_MS) return
-      // Final room cleared → the game is won. Freeze on the victory banner.
-      if (tr.ending) {
-        this.#transition = null
-        this.#ended = true
-        this.#showEnding(tr.prev)
-        return
-      }
-      const carriedScore = tr.baseScore + tr.levelScore + tr.timeBonus + tr.bonus
-      const e = new Engine(cloneLevel(tr.nextLevel))
-      e.score = carriedScore
-      e.lives = tr.prev.lives
-      e.fairyCount = tr.prev.fairyCount   // carry the fairy tally across rooms
-      e.sealCount = tr.prev.sealCount     // and the permanent seal count
-      this.#engine = e
-      this.#inBonus = tr.enterBonus
-      if (tr.enterBonus) this.#bonusResumeIndex = tr.bonusResume
-      else this.#levelIndex = tr.nextIndex
-      this.#levelStartScore = e.score
-      this.#levelStartLives = e.lives
-      this.#syncJuice(e)
-      this.#sizeCanvasTo(e.level)
-      if (this.#levelLabel) {
-        this.#levelLabel.textContent = tr.testing ? `${e.level.name}  (test)`
-          : this.#inBonus ? `${e.level.name}  (bonus)`
-          : `${e.level.name}  (${this.#levelIndex + 1}/${this.#levels.length})`
-      }
-      tr.phase = 'pan'
-      tr.t = 0
-    } else if (tr.t >= PAN_MS) {
-      this.#transition = null   // hand control back — play resumes on the new level
-      const e = this.#engine
-      if (e) {
-        this.#beginIntro(e.level.name, tr.testing ? 'TEST' : this.#inBonus ? 'BONUS' : 'LEVEL ' + (this.#levelIndex + 1))
-      }
-    }
+    if (tr.t < TALLY_MS) return
+    this.#transition = null
+    if (tr.princess) { this.#ended = true; this.#showEnding(tr.prev, true); return } // true ending
+    if (tr.testing) { this.#designerTest(); return }                                 // replay the test
+    this.#afterCavernClear(tr.prev)                                                  // surface to the map
   }
 
-  /** Render the transition: the frozen cleared level under the score tally, then
-   *  the cleared level sliding off the top while the next rises from the bottom.
-   *  The canvas is sized in world pixels (no scale transform), so we translate in
-   *  world units directly. */
-  #drawTransition(r: Renderer): void {
+  /** Draw the cleared cavern (camera-framed) under the score tally. */
+  #drawTransition(r: Renderer, view: { w: number; h: number }): void {
     const tr = this.#transition
     const ctx = this.#ctx
     if (!tr || !ctx) return
-    if (tr.phase === 'tally') {
-      r.draw(tr.prev, this.#time)
-      this.#drawTally(ctx, { w: tr.prev.width, h: tr.prev.height }, tr)
-    } else {
-      const p = easeInOut(Math.min(1, tr.t / PAN_MS))
-      const H = this.#engine!.height
-      // The loop already cleared the full canvas before this translated frame.
-      ctx.save(); ctx.translate(0, -p * H); r.draw(tr.prev, this.#time); ctx.restore()
-      ctx.save(); ctx.translate(0, (1 - p) * H); r.draw(this.#engine!, this.#time); ctx.restore()
-    }
+    const cam = this.#cavernCamera(tr.prev)
+    ctx.save(); ctx.translate(-cam.x, -cam.y); r.drawWorld(tr.prev, this.#time); ctx.restore()
+    r.drawHud(tr.prev, this.#time, view.w, view.h)
+    this.#drawTally(ctx, { w: view.w, h: view.h }, tr)
   }
 
   /** The score add-up overlay: level gain counts up first, then any perfect
@@ -816,21 +904,29 @@ export class SolomonOverlay {
   #showGameOver(): void {
     const score = this.#engine?.score ?? 0
     this.#showBanner('Game Over', `✦ ${score}`, [
-      { label: '↻ Retry', fn: () => this.#startPlay(this.#levels[this.#levelIndex]) },
+      { label: '↻ Retry cavern', fn: () => this.#enterCavern(this.#currentCavern) },
+      { label: '🗺 Map', fn: () => this.#enterOverworld() },
     ])
   }
 
   /** The final room is cleared — show the victory banner. Collecting every
    *  Solomon's Seal along the way earns the best ending (the Princess rescue). */
-  #showEnding(eng: Engine): void {
+  #showEnding(eng: Engine, princess: boolean): void {
     this.#overShown = true // keep the game-over path from firing underneath
-    const best = SEAL_TOTAL > 0 && eng.sealCount >= SEAL_TOTAL
-    const title = best ? '✦ You rescued the Princess! ✦' : "You cleared Solomon's Key!"
-    const sub = best
-      ? `All ${SEAL_TOTAL} seals found — the true ending · ✦ ${eng.score}`
-      : `✦ ${eng.score}  ·  seals ${eng.sealCount}/${SEAL_TOTAL}`
+    const pages = eng.pageTime && eng.pageSpace
+    let title: string, sub: string
+    if (princess && pages) {
+      title = "✦ You restored Solomon's Key! ✦"
+      sub = `Both Pages + all ${SEAL_TOTAL} seals — the true ending  ·  ✦ ${eng.score}`
+    } else if (princess) {
+      title = '✦ You rescued Princess Lihita! ✦'
+      sub = `All ${SEAL_TOTAL} seals  ·  find both Pages for the true ending  ·  ✦ ${eng.score}`
+    } else {
+      title = "You cleared Solomon's Key!"
+      sub = `✦ ${eng.score}  ·  seals ${eng.sealCount}/${SEAL_TOTAL}`
+    }
     this.#showBanner(title, sub, [
-      { label: '↻ Play again', fn: () => { this.#levelIndex = 0; this.#startPlay(this.#levels[0]) } },
+      { label: '↻ Play again', fn: () => this.#restartJourney() },
     ])
   }
 

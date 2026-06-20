@@ -13,14 +13,15 @@
 // gargoils, pale ghosts, red demonheads, and a status bar with the draining
 // life/time meter and the fireball scroll.
 
-import { Engine, TILE, WALL, BRICK, CRACKED, type LevelDef, type Fireball, type Shot } from './engine.js'
+import { Engine, TILE, EMPTY, WALL, BRICK, CRACKED, type LevelDef, type Fireball, type Shot } from './engine.js'
 
 const HUD_H = 24
 
-// NES-ish accent palette.
+// NES-ish accent palette. WALL is now cavern rock (warm-grey stone) so the
+// chambers read as caves; the conjurable orange BRICK still pops against it.
 const C = {
   orange: '#e8902c', orangeLite: '#ffc56b', orangeDark: '#8a4a12',
-  stone: '#5b5f86', stoneLite: '#9aa0c8', stoneDark: '#2e3150',
+  rock: '#4a4252', rockLite: '#7c7088', rockDark: '#241f30', rockWarm: '#3a3142',
   gold: '#ffd24d', danaRobe: '#3a6ee0', danaRobeDark: '#2247a8',
   face: '#f4c9a0', hat: '#7b46d6', hatDark: '#4f2a96',
   goblin: '#56b365', goblinDark: '#2f7d3e',
@@ -39,8 +40,9 @@ export class Renderer {
 
   // ── play view ────────────────────────────────────────────
 
-  draw(e: Engine, time: number): void {
-    const ctx = this.#ctx
+  /** Draw the cavern WORLD only (no HUD/flash). The caller applies the camera +
+   *  shake translate, so caverns can be larger than the viewport and scroll. */
+  drawWorld(e: Engine, time: number): void {
     this.#background(e.width, e.height, time)
     this.#tiles(e.grid, e.cols, e.rows)
     for (const m of e.mirrors) this.#mirror(m.col, m.row, time)
@@ -55,10 +57,15 @@ export class Renderer {
     for (const f of e.fireballs) this.#fireball(f)
     for (const s of e.shots) this.#shot(s)
     this.#wandTarget(e)
-    this.#hud(e, time)
+  }
+
+  /** Screen-space HUD + hurt flash (drawn after the world, no camera translate),
+   *  spanning the VIEWPORT rather than the (possibly larger) level. */
+  drawHud(e: Engine, time: number, viewW: number, viewH: number): void {
+    this.#hud(e, time, viewW)
     if (e.hurtFlash > 0) {
-      ctx.fillStyle = `rgba(255,40,40,${0.35 * (e.hurtFlash / 0.5)})`
-      ctx.fillRect(0, 0, e.width, e.height)
+      this.#ctx.fillStyle = `rgba(255,40,40,${0.35 * (e.hurtFlash / 0.5)})`
+      this.#ctx.fillRect(0, 0, viewW, viewH)
     }
   }
 
@@ -90,15 +97,17 @@ export class Renderer {
 
   #background(w: number, h: number, time: number): void {
     const ctx = this.#ctx
-    // Near-black NES room; the permanent stone border supplies the "frame".
+    // A deep cave: near-black with a faint warm glow rising from the depths and a
+    // scatter of mineral glimmers that twinkle in place.
     const g = ctx.createLinearGradient(0, 0, 0, h)
-    g.addColorStop(0, '#0a0a1c'); g.addColorStop(1, '#05050f')
+    g.addColorStop(0, '#0b0810'); g.addColorStop(0.7, '#0a0712'); g.addColorStop(1, '#170d0a')
     ctx.fillStyle = g
     ctx.fillRect(0, 0, w, h)
-    ctx.fillStyle = 'rgba(150,150,210,0.16)'
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 26; i++) {
       const x = (i * 97.13) % w
-      const y = (i * 53.7 + time * 5) % h
+      const y = (i * 57.3) % h
+      const tw = 0.08 + (Math.sin(time * 2 + i) + 1) * 0.11
+      ctx.fillStyle = `rgba(150,170,220,${tw})`
       ctx.fillRect(x | 0, y | 0, 2, 2)
     }
   }
@@ -111,6 +120,46 @@ export class Renderer {
         else if (t === BRICK) this.#brick(c, r, this.#brickTexture())
         else if (t === CRACKED) this.#brick(c, r, this.#crackTexture())
       }
+    }
+    this.#cavernRim(grid, cols, rows)
+  }
+
+  // Organic rock teeth (stalactites / stalagmites / nubs) jutting from every
+  // rock→open boundary so the chambers read as caverns, not boxes. Decorative
+  // only (no collision); deterministic per cell, so it never flickers.
+  #cavernRim(grid: ArrayLike<number>, cols: number, rows: number): void {
+    const at = (c: number, r: number) => (c < 0 || c >= cols || r < 0 || r >= rows) ? WALL : grid[r * cols + c]
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (at(c, r) !== WALL) continue
+        const x = c * TILE, y = r * TILE
+        const rnd = this.#noise(((c + 1) * 73856093) ^ ((r + 1) * 19349663))
+        if (at(c, r + 1) === EMPTY) this.#teeth(x, y + TILE, TILE, true, 1, rnd)   // stalactites
+        if (at(c, r - 1) === EMPTY) this.#teeth(x, y, TILE, true, -1, rnd)         // stalagmites
+        if (at(c - 1, r) === EMPTY) this.#teeth(y, x, TILE, false, -1, rnd)        // left nubs
+        if (at(c + 1, r) === EMPTY) this.#teeth(y, x + TILE, TILE, false, 1, rnd)  // right nubs
+      }
+    }
+  }
+
+  /** Two rock teeth along an edge. `horiz` true → teeth point vertically (dir ±1);
+   *  false → the axes swap so they point horizontally. `a` is the along-edge start. */
+  #teeth(a: number, edge: number, span: number, horiz: boolean, dir: number, rnd: () => number): void {
+    const ctx = this.#ctx
+    for (let i = 0; i < 2; i++) {
+      const p = a + (i + 0.2 + rnd() * 0.5) * (span / 2)
+      const len = TILE * (horiz ? 0.16 + rnd() * 0.22 : 0.1 + rnd() * 0.14)
+      const half = 2 + rnd() * 2.4
+      ctx.fillStyle = C.rockDark
+      ctx.beginPath()
+      if (horiz) { ctx.moveTo(p - half, edge); ctx.lineTo(p + half, edge); ctx.lineTo(p, edge + dir * len) }
+      else { ctx.moveTo(edge, p - half); ctx.lineTo(edge, p + half); ctx.lineTo(edge + dir * len, p) }
+      ctx.closePath(); ctx.fill()
+      ctx.fillStyle = 'rgba(124,112,136,0.45)'
+      ctx.beginPath()
+      if (horiz) { ctx.moveTo(p - half, edge); ctx.lineTo(p - half + 1.5, edge); ctx.lineTo(p, edge + dir * len * 0.6) }
+      else { ctx.moveTo(edge, p - half); ctx.lineTo(edge, p - half + 1.5); ctx.lineTo(edge + dir * len * 0.6, p) }
+      ctx.closePath(); ctx.fill()
     }
   }
 
@@ -153,25 +202,33 @@ export class Renderer {
     return cv
   }
 
-  // Grey permanent stone block: cool cobble grain, beveled cube edges. Static and
-  // earthy so the glowing orange bricks pop against it.
+  // Cavern rock: warm-grey stone with mottled grain and dark crevices — the wall
+  // the chambers are carved from. #cavernRim adds organic teeth at its edges so
+  // the border never reads as a clean box.
   #buildWall(): HTMLCanvasElement {
     const s = TILE
     const cv = document.createElement('canvas'); cv.width = s; cv.height = s
     const x = cv.getContext('2d')!
     const rnd = this.#noise(0x2a17)
     const g = x.createLinearGradient(0, 0, 0, s)
-    g.addColorStop(0, C.stone); g.addColorStop(1, C.stoneDark)
+    g.addColorStop(0, C.rock); g.addColorStop(1, C.rockDark)
     x.fillStyle = g; x.fillRect(0, 0, s, s)
     for (let yy = 0; yy < s; yy += 2) {
       for (let xx = 0; xx < s; xx += 2) {
         const d = rnd() - 0.5
-        x.fillStyle = d > 0 ? `rgba(190,200,255,${d * 0.45})` : `rgba(0,0,0,${-d * 0.5})`
+        x.fillStyle = d > 0 ? `rgba(160,150,190,${d * 0.4})` : `rgba(0,0,0,${-d * 0.45})`
         x.fillRect(xx, yy, 2, 2)
       }
     }
-    x.fillStyle = C.stoneLite; x.globalAlpha = 0.5; x.fillRect(0, 0, s, 2); x.fillRect(0, 0, 2, s); x.globalAlpha = 1
-    x.fillStyle = 'rgba(0,0,0,0.5)'; x.fillRect(0, s - 3, s, 3); x.fillRect(s - 2, 0, 2, s)
+    x.strokeStyle = 'rgba(0,0,0,0.4)'; x.lineWidth = 1 // crevices
+    for (let i = 0; i < 2; i++) {
+      let px = (rnd() * s) | 0, py = (rnd() * s) | 0
+      x.beginPath(); x.moveTo(px, py)
+      for (let k = 0; k < 3; k++) { px += (rnd() - 0.5) * 14; py += (rnd() - 0.5) * 14; x.lineTo(px, py) }
+      x.stroke()
+    }
+    x.fillStyle = 'rgba(124,112,136,0.3)'; x.fillRect(0, 0, s, 2)
+    x.fillStyle = 'rgba(0,0,0,0.42)'; x.fillRect(0, s - 2, s, 2)
     return cv
   }
 
@@ -485,6 +542,9 @@ export class Renderer {
       case 'seal': this.#seal(cx, cy, time); break
       case 'zodiac': this.#zodiac(cx, cy, time); break
       case 'wings': this.#wings(cx, cy, time); break
+      case 'pageTime': this.#page(cx, cy, time, true); break
+      case 'pageSpace': this.#page(cx, cy, time, false); break
+      case 'princess': this.#princess(cx, cy, time); break
     }
     ctx.restore()
   }
@@ -641,6 +701,51 @@ export class Renderer {
     ctx.restore()
   }
 
+  // A lost Page — an ancient parchment with a glowing emblem: a clock (Page of
+  // Time) or an orbit of stars (Page of Space).
+  #page(cx: number, cy: number, time: number, isTime: boolean): void {
+    const ctx = this.#ctx
+    ctx.save(); ctx.shadowColor = isTime ? 'rgba(120,220,255,0.8)' : 'rgba(200,160,255,0.8)'; ctx.shadowBlur = 9
+    ctx.fillStyle = '#efe2c0'
+    this.#path(() => this.#roundRect(cx - 6, cy - 8, 12, 16, 2)); ctx.fill()
+    ctx.strokeStyle = '#bda87a'; ctx.lineWidth = 1; this.#path(() => this.#roundRect(cx - 6, cy - 8, 12, 16, 2)); ctx.stroke()
+    if (isTime) {
+      ctx.strokeStyle = '#2a7ad0'; ctx.lineWidth = 1.5
+      ctx.beginPath(); ctx.arc(cx, cy, 4, 0, Math.PI * 2); ctx.stroke()
+      const a = time * 1.5
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * 3, cy + Math.sin(a) * 3); ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a * 0.2) * 2, cy + Math.sin(a * 0.2) * 2); ctx.stroke()
+    } else {
+      ctx.fillStyle = '#7a4fd0'; ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI * 2); ctx.fill()
+      ctx.strokeStyle = '#9b7cff'; ctx.lineWidth = 1; ctx.beginPath(); ctx.ellipse(cx, cy, 5, 2.4, time * 0.6, 0, Math.PI * 2); ctx.stroke()
+      const sa = time * 1.2
+      ctx.fillStyle = '#fff7d0'; ctx.beginPath(); ctx.arc(cx + Math.cos(sa) * 5, cy + Math.sin(sa) * 2.4, 1.2, 0, Math.PI * 2); ctx.fill()
+    }
+    ctx.restore()
+  }
+
+  // The caged fairy Princess — a small crowned figure with gossamer wings, the
+  // goal of the true ending.
+  #princess(cx: number, cy: number, time: number): void {
+    const ctx = this.#ctx
+    const glow = 0.6 + Math.sin(time * 3) * 0.25
+    ctx.save(); ctx.shadowColor = `rgba(255,190,240,${glow})`; ctx.shadowBlur = 12
+    // wings
+    ctx.fillStyle = 'rgba(220,200,255,0.8)'
+    ctx.beginPath(); ctx.ellipse(cx - 6, cy, 4, 8, -0.4, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.ellipse(cx + 6, cy, 4, 8, 0.4, 0, Math.PI * 2); ctx.fill()
+    // gown
+    ctx.fillStyle = '#ff9ed6'
+    ctx.beginPath(); ctx.moveTo(cx, cy - 4); ctx.lineTo(cx - 6, cy + 10); ctx.lineTo(cx + 6, cy + 10); ctx.closePath(); ctx.fill()
+    // head
+    ctx.fillStyle = '#ffe0c0'; ctx.beginPath(); ctx.arc(cx, cy - 7, 4, 0, Math.PI * 2); ctx.fill()
+    // crown
+    ctx.fillStyle = '#ffd24d'
+    ctx.beginPath(); ctx.moveTo(cx - 4, cy - 9); ctx.lineTo(cx - 4, cy - 12); ctx.lineTo(cx - 1, cy - 10)
+    ctx.lineTo(cx, cy - 13); ctx.lineTo(cx + 1, cy - 10); ctx.lineTo(cx + 4, cy - 12); ctx.lineTo(cx + 4, cy - 9); ctx.closePath(); ctx.fill()
+    ctx.restore()
+  }
+
   // ── projectiles ──────────────────────────────────────────
 
   #fireball(f: Fireball): void {
@@ -740,13 +845,13 @@ export class Renderer {
 
   // ── HUD: NES status bar ──────────────────────────────────
 
-  #hud(e: Engine, time: number): void {
+  #hud(e: Engine, time: number, viewW: number): void {
     const ctx = this.#ctx
     ctx.save()
     ctx.fillStyle = 'rgba(6,6,18,0.82)'
-    ctx.fillRect(0, 0, e.width, HUD_H)
+    ctx.fillRect(0, 0, viewW, HUD_H)
     ctx.fillStyle = 'rgba(126,182,214,0.4)'
-    ctx.fillRect(0, HUD_H - 1, e.width, 1)
+    ctx.fillRect(0, HUD_H - 1, viewW, 1)
     ctx.font = '11px "Courier New", monospace'
     ctx.textBaseline = 'middle'
     const midY = HUD_H / 2
@@ -762,13 +867,13 @@ export class Renderer {
     const t = Math.ceil(e.life / 10) * 10
     ctx.textAlign = 'center'
     ctx.font = '11px "Courier New", monospace'
-    ctx.fillStyle = '#cbb06a'; ctx.fillText('TIME', e.width / 2 - 30, midY)
+    ctx.fillStyle = '#cbb06a'; ctx.fillText('TIME', viewW / 2 - 30, midY)
     ctx.font = 'bold 12px "Courier New", monospace'
     ctx.fillStyle = low ? (Math.sin(time * 12) > 0 ? '#ff5a5a' : '#ffd24d') : '#ffe39a'
-    ctx.fillText(String(t).padStart(5, '0'), e.width / 2 + 16, midY)
+    ctx.fillText(String(t).padStart(5, '0'), viewW / 2 + 16, midY)
 
     // right cluster: fairies · lives · fireball scroll
-    let rx = e.width - 6
+    let rx = viewW - 6
     ctx.textAlign = 'right'
     // fireball scroll — up to MAX_AMMO slots (blue normal, orange super)
     for (let i = e.ammo.length - 1; i >= 0; i--) {

@@ -1,0 +1,123 @@
+// Feature-tease panel — compact, cold/clean, frosted. Matches the files-viewer
+// type chips (mat-sym icon + count) so the teaser and the full panel read the
+// same. Fixed-positioned; the base component drives left/top + drag.
+
+:host {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;   // only the panels capture pointer events
+  z-index: 60000;
+}
+
+.teaser-panel {
+  position: fixed;
+  width: 230px;
+  pointer-events: auto;
+  background: rgba(18, 22, 28, 0.72);
+  backdrop-filter: blur(14px) saturate(120%);
+  -webkit-backdrop-filter: blur(14px) saturate(120%);
+  border: 1px solid rgba(126, 182, 214, 0.22);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.36);
+  color: #e8edf2;
+  font-size: 12px;
+  overflow: hidden;
+  animation: teaser-in 120ms ease-out;
+
+  &.pinned {
+    border-color: rgba(126, 182, 214, 0.4);
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.46);
+  }
+}
+
+@keyframes teaser-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.teaser-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px 7px 10px;
+  border-bottom: 1px solid rgba(126, 182, 214, 0.14);
+
+  .pinned & { cursor: grab; }
+  .pinned &:active { cursor: grabbing; }
+}
+
+.teaser-label {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: #cfe0ec;
+}
+
+.teaser-total {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  color: #8aa3b4;
+  background: rgba(126, 182, 214, 0.12);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+
+.teaser-close {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #8aa3b4;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover { background: rgba(255, 120, 120, 0.16); color: #ff9b9b; }
+}
+
+.teaser-empty {
+  margin: 0;
+  padding: 12px 10px;
+  color: #7d8b98;
+  font-style: italic;
+}
+
+.teaser-types {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.teaser-type {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px 4px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c, #9aa0b0) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--c, #9aa0b0) 34%, transparent);
+}
+
+.ftype-icon.mat-sym {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.teaser-badge {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: 11px;
+  color: #e8edf2;
+}

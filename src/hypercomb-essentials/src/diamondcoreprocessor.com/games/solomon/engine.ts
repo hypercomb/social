@@ -54,6 +54,7 @@ export interface EnemySpawn extends Cell { kind?: EnemyKind; dir?: 1 | -1 }
 export type ItemKind =
   | 'key' | 'jewel' | 'treasure' | 'bell' | 'jar' | 'superjar' | 'scroll'
   | 'hourglass' | 'hourglassHalf' | 'fairy' | 'life' | 'seal' | 'zodiac' | 'wings'
+  | 'pageTime' | 'pageSpace' | 'princess'
 export interface ItemSpawn extends Cell { kind: ItemKind; hidden?: boolean; value?: number }
 
 // A demon mirror — a generator that emits a steady stream of one foe kind.
@@ -200,6 +201,10 @@ export class Engine {
   #collectedSeals = new Set<string>()
   zodiacHeld = false
   wingsHeld = false
+  // The two lost Pages persist across deaths (like seals); reaching the caged
+  // Princess in her room is the true-ending goal.
+  pageTime = false
+  pageSpace = false
 
   life = LIFE_FULL
   lives = 3
@@ -241,6 +246,8 @@ export class Engine {
     this.fairyCount = 0
     this.sealCount = 0
     this.#collectedSeals.clear()
+    this.pageTime = false
+    this.pageSpace = false
     this.spawn()
   }
 
@@ -273,6 +280,8 @@ export class Engine {
     this.items = this.level.items.map(it => ({ ...it, taken: false, reveal: 0 }))
     // Seals already collected this game don't reappear.
     for (const it of this.items) if (it.kind === 'seal' && this.#collectedSeals.has(this.#sealKey(it))) it.taken = true
+    // Pages collected this game don't reappear either.
+    for (const it of this.items) if ((it.kind === 'pageTime' && this.pageTime) || (it.kind === 'pageSpace' && this.pageSpace)) it.taken = true
     this.enemies = this.level.enemies.map(e => this.#makeEnemy(e.kind ?? 'goblin', e.col, e.row, e.dir ?? 1))
     this.mirrors = this.level.mirrors.map(m => ({ col: m.col, row: m.row, kind: m.kind ?? 'demonhead', cd: MIRROR_INTERVAL * 0.6 }))
 
@@ -821,6 +830,9 @@ export class Engine {
       case 'seal':          this.#collectedSeals.add(this.#sealKey(it)); this.sealCount += 1; this.score += 1000; break
       case 'zodiac':        this.zodiacHeld = true; this.score += 5000; break
       case 'wings':         this.wingsHeld = true; this.score += 500; break
+      case 'pageTime':      this.pageTime = true; this.score += 3000; break
+      case 'pageSpace':     this.pageSpace = true; this.score += 3000; break
+      case 'princess':      this.score += 10000; this.state = 'won'; break  // reaching her clears the room
     }
   }
 

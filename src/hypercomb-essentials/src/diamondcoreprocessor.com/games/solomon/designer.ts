@@ -13,6 +13,7 @@ import { cloneLevel, emptyLevel, sanitizeLevel } from './levels.js'
 const ITEM_TOOLS = {
   key: 'key', bell: 'bell', jewel: 'jewel', treasure: 'treasure', jar: 'jar', scroll: 'scroll',
   hourglass: 'hourglass', life: 'life', seal: 'seal', zodiac: 'zodiac', wings: 'wings',
+  pageTime: 'pageTime', pageSpace: 'pageSpace', princess: 'princess',
 } as const
 const ENEMY_TOOLS = {
   goblin: 'goblin', gargoil: 'gargoil', dragon: 'dragon', saramandor: 'saramandor', ghost: 'ghost',
@@ -39,6 +40,9 @@ export const TOOLS: { tool: Tool; label: string; glyph: string }[] = [
   { tool: 'seal', label: "Solomon's Seal", glyph: '✡' },
   { tool: 'zodiac', label: 'Constellation panel (→ bonus room)', glyph: '♈' },
   { tool: 'wings', label: 'Golden Wings (→ warp)', glyph: '🪽' },
+  { tool: 'pageTime', label: 'Page of Time', glyph: '🕰' },
+  { tool: 'pageSpace', label: 'Page of Space', glyph: '🌌' },
+  { tool: 'princess', label: 'Princess (true-ending goal)', glyph: '👸' },
   { tool: 'goblin', label: 'Goblin (chaser)', glyph: '👺' },
   { tool: 'gargoil', label: 'Gargoil (spits fire)', glyph: '🦅' },
   { tool: 'dragon', label: 'Dragon', glyph: '🐉' },

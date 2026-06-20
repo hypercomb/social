@@ -1,0 +1,34 @@
+@for (panel of panels(); track panel.id) {
+  <aside
+    class="teaser-panel"
+    [class.pinned]="!panel.ephemeral"
+    [style.left.px]="panel.pos.x"
+    [style.top.px]="panel.pos.y"
+    [style.z-index]="panel.ephemeral ? 1 : 2"
+    data-consumes-wheel
+    (pointerdown)="onPanelFocus(panel)"
+    (mouseenter)="onPeekEnter(panel)"
+    (mouseleave)="onPeekLeave(panel)"
+  >
+    <header class="teaser-head" (pointerdown)="onHeaderDown($event, panel)">
+      <span class="teaser-label" [title]="panel.data.label">{{ panel.data.label }}</span>
+      <span class="teaser-total">{{ panel.data.total }}</span>
+      @if (!panel.ephemeral) {
+        <button class="teaser-close" type="button" (click)="closePanel(panel.id)" [attr.aria-label]="'files.close' | t">×</button>
+      }
+    </header>
+
+    @if (panel.data.counts.length === 0) {
+      <p class="teaser-empty">{{ 'files.empty' | t }}</p>
+    } @else {
+      <ul class="teaser-types" role="list">
+        @for (c of panel.data.counts; track c.type) {
+          <li class="teaser-type" [style.--c]="meta[c.type].color" [attr.title]="meta[c.type].labelKey | t">
+            <span class="ftype-icon mat-sym" [style.color]="meta[c.type].color" aria-hidden="true">{{ meta[c.type].icon }}</span>
+            <span class="teaser-badge">{{ c.count }}</span>
+          </li>
+        }
+      </ul>
+    }
+  </aside>
+}

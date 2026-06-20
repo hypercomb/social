@@ -13,7 +13,7 @@
 import { Component, computed, signal, type OnDestroy } from '@angular/core'
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
-import { categorize, typeMeta, TYPE_META, TYPE_ORDER, type FileTypeKey } from './file-icons'
+import { categorize, typeMeta, TYPE_META, TYPE_ORDER, type FileTypeKey, type FileTypeMeta } from './file-icons'
 
 type FileItem = {
   name: string
@@ -124,7 +124,7 @@ export class FilesViewerComponent implements OnDestroy {
     return this.activeTypes().has(key)
   }
 
-  badge(file: FileItem): { short: string; color: string } {
+  badge(file: FileItem): FileTypeMeta {
     return typeMeta(file.name, file.mime)
   }
 
