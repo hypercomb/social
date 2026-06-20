@@ -252,8 +252,11 @@ export class Renderer {
     }
     switch (en.kind) {
       case 'ghost': this.#ghost(x, y, w, h, en.dir, time); break
+      case 'neul': this.#neul(x, y, w, h, time); break
+      case 'sparkball': this.#sparkball(x, y, w, h, en.anim); break
       case 'demonhead': this.#demonhead(x, y, w, h, time); break
       case 'gargoil': this.#gargoil(x, y, w, h, en.dir, en.alive); break
+      case 'saramandor': this.#saramandor(x, y, w, h, en.dir, en.alive); break
       case 'dragon': this.#dragon(x, y, w, h, en.dir, en.alive); break
       case 'panel': this.#panel(x, y, w, h, en.dir); break
       default: this.#goblin(x, y, w, h, en.dir, en.alive, en.anim); break
@@ -381,10 +384,75 @@ export class Renderer {
     ctx.fillRect(Math.round(dir > 0 ? x + w * 0.55 : x + w * 0.2), Math.round(y + h * 0.62), Math.round(w * 0.25), Math.round(h * 0.16))
   }
 
+  // Neul: a half-ghost / half-bat vertical flyer — pale violet, ragged wings,
+  // one staring eye. Smashes blocks, fireball-only.
+  #neul(x: number, y: number, w: number, h: number, time: number): void {
+    const ctx = this.#ctx
+    const flap = Math.sin(time * 12) * 3
+    ctx.save()
+    ctx.shadowColor = 'rgba(180,150,255,0.6)'; ctx.shadowBlur = 7
+    ctx.fillStyle = '#a98fe0'
+    // wings
+    ctx.beginPath(); ctx.moveTo(x + w * 0.5, y + h * 0.5)
+    ctx.lineTo(x - w * 0.1, y + h * 0.2 - flap); ctx.lineTo(x - w * 0.05, y + h * 0.7); ctx.lineTo(x + w * 0.5, y + h * 0.6); ctx.fill()
+    ctx.beginPath(); ctx.moveTo(x + w * 0.5, y + h * 0.5)
+    ctx.lineTo(x + w * 1.1, y + h * 0.2 - flap); ctx.lineTo(x + w * 1.05, y + h * 0.7); ctx.lineTo(x + w * 0.5, y + h * 0.6); ctx.fill()
+    // body
+    ctx.fillStyle = '#cdb6f5'
+    ctx.beginPath(); ctx.arc(x + w / 2, y + h * 0.5, w * 0.3, 0, Math.PI * 2); ctx.fill()
+    ctx.shadowBlur = 0
+    ctx.fillStyle = '#2a1a4a'; ctx.fillRect(Math.round(x + w * 0.42), Math.round(y + h * 0.42), 4, 4)
+    ctx.restore()
+  }
+
+  // Sparkball: a crackling ball of electricity — white-hot core, jagged yellow
+  // arcs that jitter each frame. Fireball-only.
+  #sparkball(x: number, y: number, w: number, h: number, anim: number): void {
+    const ctx = this.#ctx
+    const cx = x + w / 2, cy = y + h / 2, r = w * 0.4
+    ctx.save()
+    ctx.shadowColor = 'rgba(255,240,120,0.9)'; ctx.shadowBlur = 10
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 1.4)
+    g.addColorStop(0, '#ffffff'); g.addColorStop(0.5, '#ffe14a'); g.addColorStop(1, 'rgba(255,150,0,0.1)')
+    ctx.fillStyle = g
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill()
+    // electric arcs
+    ctx.strokeStyle = '#fff7c0'; ctx.lineWidth = 1.5
+    for (let i = 0; i < 4; i++) {
+      const a = anim * 0.3 + i * Math.PI / 2
+      ctx.beginPath(); ctx.moveTo(cx, cy)
+      ctx.lineTo(cx + Math.cos(a) * r * 1.5, cy + Math.sin(a) * r * 1.5)
+      ctx.lineTo(cx + Math.cos(a + 0.5) * r * 1.2, cy + Math.sin(a + 0.5) * r * 1.2)
+      ctx.stroke()
+    }
+    ctx.restore()
+  }
+
+  // Saramandor: a small fire-lizard demon — orange body, flame crest, breathing
+  // embers in its facing direction. Drop / crush / fireball.
+  #saramandor(x: number, y: number, w: number, h: number, dir: number, alive: boolean): void {
+    const ctx = this.#ctx
+    ctx.fillStyle = alive ? '#ff7a2a' : '#8a4118'
+    this.#path(() => this.#roundRect(x, y + h * 0.35, w, h * 0.65, 5)); ctx.fill()
+    // head
+    const hx = dir > 0 ? x + w * 0.82 : x + w * 0.18
+    ctx.beginPath(); ctx.arc(hx, y + h * 0.42, w * 0.22, 0, Math.PI * 2); ctx.fill()
+    // flame crest
+    if (alive) {
+      ctx.fillStyle = '#ffd24a'
+      for (let i = 0; i < 3; i++) {
+        const sx = x + w * (0.32 + i * 0.2)
+        ctx.beginPath(); ctx.moveTo(sx, y + h * 0.36); ctx.lineTo(sx - 3, y + h * 0.08); ctx.lineTo(sx + 3, y + h * 0.36); ctx.fill()
+      }
+      ctx.fillStyle = '#2a0a04'; ctx.fillRect(Math.round(dir > 0 ? hx : hx - 2), Math.round(y + h * 0.4), 2, 2)
+    }
+  }
+
   #enemyMarker(kind: string, col: number, row: number, dir: number, time: number): void {
     const d: Record<string, { w: number; h: number }> = {
       goblin: { w: 0.72, h: 0.84 }, gargoil: { w: 0.78, h: 0.82 }, dragon: { w: 0.86, h: 0.78 },
-      ghost: { w: 0.74, h: 0.74 }, demonhead: { w: 0.6, h: 0.6 }, panel: { w: 0.9, h: 0.9 },
+      saramandor: { w: 0.7, h: 0.74 }, ghost: { w: 0.74, h: 0.74 }, neul: { w: 0.66, h: 0.66 },
+      sparkball: { w: 0.58, h: 0.58 }, demonhead: { w: 0.6, h: 0.6 }, panel: { w: 0.9, h: 0.9 },
     }
     const m = d[kind] ?? d['goblin']
     const w = TILE * m.w, h = TILE * m.h
@@ -406,12 +474,17 @@ export class Renderer {
       case 'key': this.#key(cx, cy); break
       case 'bell': this.#bell(cx, cy); break
       case 'jewel': this.#jewel(cx, cy, '#5fd6ff'); break
+      case 'treasure': this.#treasure(cx, cy); break
       case 'jar': this.#jar(cx, cy, '#3a86ff', '#bfe0ff'); break
       case 'superjar': this.#jar(cx, cy, '#ff7a2a', '#ffd08a'); break
+      case 'scroll': this.#scroll(cx, cy); break
       case 'hourglass': this.#hourglass(cx, cy, '#5fd6ff'); break
       case 'hourglassHalf': this.#hourglass(cx, cy, '#ffb24d'); break
       case 'fairy': this.#fairy(cx, cy, time); break
       case 'life': this.#life(cx, cy); break
+      case 'seal': this.#seal(cx, cy, time); break
+      case 'zodiac': this.#zodiac(cx, cy, time); break
+      case 'wings': this.#wings(cx, cy, time); break
     }
     ctx.restore()
   }
@@ -495,6 +568,76 @@ export class Renderer {
     ctx.beginPath(); ctx.moveTo(cx, cy - 7); ctx.lineTo(cx - 6, cy - 1); ctx.lineTo(cx + 6, cy - 1); ctx.closePath(); ctx.fill()
     ctx.fillStyle = C.face; ctx.beginPath(); ctx.arc(cx, cy + 2, 4, 0, Math.PI * 2); ctx.fill()
     ctx.fillStyle = C.danaRobe; ctx.fillRect(Math.round(cx - 3), Math.round(cy + 3), 6, 4)
+    ctx.restore()
+  }
+
+  #treasure(cx: number, cy: number): void {
+    const ctx = this.#ctx
+    ctx.save(); ctx.shadowColor = 'rgba(255,210,90,0.7)'; ctx.shadowBlur = 7
+    ctx.fillStyle = '#b07a2a' // sack
+    ctx.beginPath(); ctx.moveTo(cx, cy - 6); ctx.quadraticCurveTo(cx + 8, cy - 2, cx + 6, cy + 7); ctx.lineTo(cx - 6, cy + 7); ctx.quadraticCurveTo(cx - 8, cy - 2, cx, cy - 6); ctx.fill()
+    ctx.fillStyle = '#7a5018'; ctx.fillRect(Math.round(cx - 5), Math.round(cy - 6), 10, 2) // tie
+    ctx.fillStyle = '#ffd24d'; ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    ctx.fillText('$', cx, cy + 2)
+    ctx.restore()
+  }
+
+  #scroll(cx: number, cy: number): void {
+    const ctx = this.#ctx
+    ctx.save(); ctx.shadowColor = 'rgba(255,240,200,0.6)'; ctx.shadowBlur = 5
+    ctx.fillStyle = '#efe2c0'; this.#path(() => this.#roundRect(cx - 7, cy - 4, 14, 8, 2)); ctx.fill()
+    ctx.fillStyle = '#cdbf95'; ctx.fillRect(Math.round(cx - 7), Math.round(cy - 4), 2, 8); ctx.fillRect(Math.round(cx + 5), Math.round(cy - 4), 2, 8) // rollers
+    ctx.strokeStyle = '#9a8a5a'; ctx.lineWidth = 1
+    ctx.beginPath(); ctx.moveTo(cx - 3, cy - 1); ctx.lineTo(cx + 3, cy - 1); ctx.moveTo(cx - 3, cy + 1); ctx.lineTo(cx + 3, cy + 1); ctx.stroke()
+    ctx.restore()
+  }
+
+  // Solomon's Seal — a glowing six-pointed star (two interlocked triangles).
+  #seal(cx: number, cy: number, time: number): void {
+    const ctx = this.#ctx
+    const r = 7 + Math.sin(time * 4) * 0.6
+    ctx.save(); ctx.shadowColor = 'rgba(120,180,255,0.9)'; ctx.shadowBlur = 10
+    ctx.strokeStyle = '#bfe0ff'; ctx.lineWidth = 2; ctx.fillStyle = 'rgba(90,140,255,0.25)'
+    for (const flip of [0, Math.PI]) {
+      ctx.beginPath()
+      for (let i = 0; i < 3; i++) {
+        const a = flip + i * (Math.PI * 2 / 3) - Math.PI / 2
+        const px = cx + Math.cos(a) * r, py = cy + Math.sin(a) * r
+        i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py)
+      }
+      ctx.closePath(); ctx.fill(); ctx.stroke()
+    }
+    ctx.restore()
+  }
+
+  // Constellation panel — a dark tablet with linked stars (a zodiac sign).
+  #zodiac(cx: number, cy: number, time: number): void {
+    const ctx = this.#ctx
+    ctx.save()
+    ctx.shadowColor = 'rgba(255,225,120,0.7)'; ctx.shadowBlur = 8
+    ctx.fillStyle = '#1b1740'; this.#path(() => this.#roundRect(cx - 9, cy - 8, 18, 16, 3)); ctx.fill()
+    ctx.strokeStyle = '#ffd76a'; ctx.lineWidth = 1.5; this.#path(() => this.#roundRect(cx - 9, cy - 8, 18, 16, 3)); ctx.stroke()
+    const stars = [[-5, -3], [0, -5], [4, 1], [-2, 4], [6, 5]]
+    ctx.strokeStyle = 'rgba(255,235,160,0.7)'; ctx.lineWidth = 1; ctx.beginPath()
+    stars.forEach(([sx, sy], i) => { i === 0 ? ctx.moveTo(cx + sx, cy + sy) : ctx.lineTo(cx + sx, cy + sy) }); ctx.stroke()
+    ctx.fillStyle = '#fff7d0'
+    for (const [sx, sy] of stars) { const tw = 1 + (Math.sin(time * 5 + sx) + 1) * 0.6; ctx.beginPath(); ctx.arc(cx + sx, cy + sy, tw, 0, Math.PI * 2); ctx.fill() }
+    ctx.restore()
+  }
+
+  // Golden Wings — a pair of spread wings (warp ahead).
+  #wings(cx: number, cy: number, time: number): void {
+    const ctx = this.#ctx
+    const flap = Math.sin(time * 8) * 2
+    ctx.save(); ctx.shadowColor = 'rgba(255,215,90,0.8)'; ctx.shadowBlur = 9
+    ctx.fillStyle = '#ffd24d'
+    for (const s of [-1, 1]) {
+      ctx.beginPath(); ctx.moveTo(cx, cy)
+      ctx.quadraticCurveTo(cx + s * 12, cy - 6 - flap, cx + s * 11, cy + 4)
+      ctx.quadraticCurveTo(cx + s * 7, cy + 1, cx, cy + 3)
+      ctx.closePath(); ctx.fill()
+    }
+    ctx.fillStyle = '#fff3c0'; ctx.beginPath(); ctx.arc(cx, cy, 2, 0, Math.PI * 2); ctx.fill()
     ctx.restore()
   }
 
@@ -645,9 +788,18 @@ export class Renderer {
       rx -= 14
     }
     rx -= 2
-    // fairy tally
-    ctx.fillStyle = '#ffd6f0'; ctx.font = 'bold 11px "Courier New", monospace'
+    // fairy + seal tallies, then any held meta items (zodiac / wings)
+    ctx.font = 'bold 11px "Courier New", monospace'
+    ctx.fillStyle = '#ffd6f0'
     ctx.fillText(`✦${e.fairyCount}`, rx, midY)
+    rx -= ctx.measureText(`✦${e.fairyCount}`).width + 6
+    if (e.sealCount > 0) {
+      ctx.fillStyle = '#bfe0ff'
+      ctx.fillText(`✡${e.sealCount}`, rx, midY)
+      rx -= ctx.measureText(`✡${e.sealCount}`).width + 6
+    }
+    if (e.zodiacHeld) { ctx.fillStyle = '#ffd76a'; ctx.fillText('★', rx, midY); rx -= 14 }
+    if (e.wingsHeld) { ctx.fillStyle = '#ffe39a'; ctx.fillText('≫', rx, midY); rx -= 14 }
     ctx.restore()
   }
 

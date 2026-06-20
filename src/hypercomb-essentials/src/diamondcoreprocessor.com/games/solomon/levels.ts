@@ -2,54 +2,58 @@
 //
 // Built-in rooms (authored as readable ASCII) + the participant-local store for
 // designer-made levels. The built-ins recreate the FEEL and content of the NES
-// original's opening rooms — a safe tutorial, the demon-mirror room, a turret/
-// flyer chamber, a constellation climb, a gargoyle ascent, a ghost corridor —
-// translated onto our grid. (Tecmo's exact block maps are screenshots, not data,
-// so geometry is authored to make each room's documented solution work, with the
-// real item placements: key, bells, hidden jars.)
+// original's opening rooms across the first three zodiac "shrines" — a safe
+// tutorial, the demon-mirror room, a turret/flyer vault, constellation panels
+// that open a fairy bonus room, gargoyle climbs, ghost corridors, spark cells,
+// a dragon lair, a gauntlet, and Solomon's Gate before the ending. (Tecmo's
+// exact block maps are screenshots, not data, so geometry is authored to make
+// each room's documented solution work, with faithful item placements.)
 //
-// Custom levels live in localStorage — the same class of participant-local UI
-// data as screensaver prefs / accent colour, NOT layer state (a level in the
-// layer would skew the lineage signature across peers, the same rule that keeps
-// viewport + clipboard out of history).
+// Custom levels live in localStorage — participant-local UI data, NOT layer
+// state (a level in the layer would skew the lineage signature across peers).
 
 import {
-  EMPTY, WALL, BRICK, LIFE_FULL,
-  type LevelDef, type Cell, type EnemySpawn, type EnemyKind, type ItemSpawn, type ItemKind,
+  EMPTY, WALL, BRICK, LIFE_FULL, LIFE_HALF,
+  type LevelDef, type Cell, type EnemySpawn, type EnemyKind,
+  type ItemSpawn, type ItemKind, type MirrorSpawn,
 } from './engine.js'
 
 const STORE_KEY = 'hc:solomon-levels'
 
 // ASCII legend (one char per cell):
-//   '#' grey WALL (permanent)   'B' orange BRICK (breakable)   '.'/' ' EMPTY
-//   'P' player start   'D' door
-//   items:  K key · b bell · j jewel(500) · J jewel(5000) · f jar(fireball) ·
-//           F super-jar · t hourglass(full) · u hourglass(half) · + extra life
-//   foes:   g goblin · r gargoil · h ghost · a dragon · o demonhead · n panel
-//   'M' demon mirror (spawns demonheads)
+//   '#' grey WALL · 'B' orange BRICK · '.'/' ' EMPTY · 'P' player · 'D' door
+//   items:  K key · b bell · j jewel(500) · J jewel(5000) · $ treasure(2000) ·
+//           f jar · F super-jar · / scroll · t hourglass · u half-hourglass ·
+//           + extra life · @ Solomon's Seal · Z constellation panel · W Golden Wings
+//   foes:   g goblin · r gargoil · a dragon · s saramandor · h ghost ·
+//           l neul · k sparkball · o demonhead · n panel monster
+//   mirrors: M demonhead mirror · m saramandor mirror
 const CHAR_TILE: Record<string, number> = { '#': WALL, 'B': BRICK }
 const CHAR_ENEMY: Record<string, EnemyKind> = {
-  g: 'goblin', r: 'gargoil', h: 'ghost', a: 'dragon', o: 'demonhead', n: 'panel',
+  g: 'goblin', r: 'gargoil', a: 'dragon', s: 'saramandor', h: 'ghost',
+  l: 'neul', k: 'sparkball', o: 'demonhead', n: 'panel',
 }
 const CHAR_ITEM: Record<string, { kind: ItemKind; value?: number }> = {
   K: { kind: 'key' },
   b: { kind: 'bell' },
   j: { kind: 'jewel', value: 500 },
   J: { kind: 'jewel', value: 5000 },
+  $: { kind: 'treasure', value: 2000 },
   f: { kind: 'jar' },
   F: { kind: 'superjar' },
+  '/': { kind: 'scroll' },
   t: { kind: 'hourglass' },
   u: { kind: 'hourglassHalf' },
   '+': { kind: 'life' },
+  '@': { kind: 'seal' },
+  Z: { kind: 'zodiac' },
+  W: { kind: 'wings' },
 }
 
-/** Author options: hidden items (revealed by destroying their covering brick)
- *  carry their own coordinates; everything else is in the ASCII art. */
 interface AsciiOpts { hidden?: ItemSpawn[]; lifeStart?: number }
 
 /** Parse an ASCII room. Entity glyphs leave their cell EMPTY and record a
- *  placement; rows are padded / truncated to `cols` so authoring is forgiving.
- *  Enemies face inward (toward room centre) by default. */
+ *  placement; rows are padded / truncated to `cols`. Enemies face inward. */
 export function fromAscii(name: string, art: string[], opts: AsciiOpts = {}): LevelDef {
   const rows = art.length
   const cols = art.reduce((m, r) => Math.max(m, r.length), 0)
@@ -58,7 +62,7 @@ export function fromAscii(name: string, art: string[], opts: AsciiOpts = {}): Le
   let door: Cell = { col: cols - 2, row: rows - 2 }
   const items: ItemSpawn[] = []
   const enemies: EnemySpawn[] = []
-  const mirrors: Cell[] = []
+  const mirrors: MirrorSpawn[] = []
   const inward = (c: number): 1 | -1 => (c < cols / 2 ? 1 : -1)
 
   for (let r = 0; r < rows; r++) {
@@ -68,7 +72,8 @@ export function fromAscii(name: string, art: string[], opts: AsciiOpts = {}): Le
       const i = r * cols + c
       if (ch === 'P') { player = { col: c, row: r }; continue }
       if (ch === 'D') { door = { col: c, row: r }; continue }
-      if (ch === 'M') { mirrors.push({ col: c, row: r }); continue }
+      if (ch === 'M') { mirrors.push({ col: c, row: r, kind: 'demonhead' }); continue }
+      if (ch === 'm') { mirrors.push({ col: c, row: r, kind: 'saramandor' }); continue }
       const en = CHAR_ENEMY[ch]
       if (en) { enemies.push({ col: c, row: r, kind: en, dir: inward(c) }); continue }
       const it = CHAR_ITEM[ch]
@@ -77,8 +82,6 @@ export function fromAscii(name: string, art: string[], opts: AsciiOpts = {}): Le
     }
   }
 
-  // Hidden items need a breakable cover so they can be revealed — drop a brick
-  // over any hidden coord that isn't already solid.
   for (const h of opts.hidden ?? []) {
     items.push({ ...h, hidden: true })
     const i = h.row * cols + h.col
@@ -89,9 +92,9 @@ export function fromAscii(name: string, art: string[], opts: AsciiOpts = {}): Le
 }
 
 export const BUILTIN_LEVELS: LevelDef[] = [
-  // Room 1 — Awakening. The tutorial room: a lone goblin (crush it by conjuring a
-  // block in its face, or just slip past), a bell + key up on a ledge to build
-  // stairs to, and a fireball jar hidden in the ledge.
+  // ── Shrine of Aries (rooms 1–4) ──
+  // Room 1 — Awakening. Tutorial: a lone goblin, a bell + key up a ledge, a
+  // fireball jar hidden in the ledge.
   fromAscii('Awakening', [
     '####################',
     '#..................#',
@@ -108,8 +111,8 @@ export const BUILTIN_LEVELS: LevelDef[] = [
     '####################',
   ], { hidden: [{ col: 10, row: 5, kind: 'jar' }] }),
 
-  // Room 2 — Hall of Mirrors. Two demon mirrors rain endless demonheads; shelter
-  // low-left, then build up to the bell + key. A super-jar hides in the mid ledge.
+  // Room 2 — Hall of Mirrors. Two demon mirrors rain demonheads; shelter low,
+  // build up to the bell + key. Super-jar hidden in the mid ledge.
   fromAscii('Hall of Mirrors', [
     '####################',
     '#...M..........M...#',
@@ -126,9 +129,8 @@ export const BUILTIN_LEVELS: LevelDef[] = [
     '####################',
   ], { hidden: [{ col: 9, row: 7, kind: 'superjar' }] }),
 
-  // Room 3 — The Vault. A panel-monster turret on the left wall, a ghost cruising
-  // the middle, a gargoil and a goblin below. An extra Dana waits on the top-right
-  // ledge; the key sits mid-right. Time the turret, wall off the ghost.
+  // Room 3 — The Vault. Panel-monster turret, a ghost, a gargoil + goblin. An
+  // extra Dana on the top-right ledge; the key mid-right.
   fromAscii('The Vault', [
     '####################',
     '#..............+...#',
@@ -145,12 +147,11 @@ export const BUILTIN_LEVELS: LevelDef[] = [
     '####################',
   ], { hidden: [{ col: 7, row: 6, kind: 'jar' }, { col: 11, row: 9, kind: 'jewel', value: 2000 }] }),
 
-  // Room 4 — Constellation of Aries. A vertical room: key and a high-value zodiac
-  // jewel stacked in the centre column, gargoils on side ledges, goblins prowling
-  // the floor. Climb the middle, drop the gargoils.
+  // Room 4 — Constellation of Aries. The 4th room holds the ZODIAC PANEL — clear
+  // the room holding it to drop into the fairy bonus room.
   fromAscii('Constellation', [
     '####################',
-    '#........J.........#',
+    '#........Z.........#',
     '#.......BBB........#',
     '#..................#',
     '#........K.........#',
@@ -164,9 +165,8 @@ export const BUILTIN_LEVELS: LevelDef[] = [
     '####################',
   ], { hidden: [{ col: 4, row: 10, kind: 'bell' }, { col: 15, row: 10, kind: 'bell' }] }),
 
-  // Room 5 — Gargoyle Climb. An ascent past gargoils perched on alternating
-  // ledges — drop each one as you build up to the key. Blue jewels reward the
-  // bottom corners; a top gargoil guards a hidden fairy bell.
+  // ── Shrine of Taurus (rooms 5–8) ──
+  // Room 5 — Gargoyle Climb. Drop gargoils as you build up to the key.
   fromAscii('Gargoyle Climb', [
     '####################',
     '#...............r..#',
@@ -183,9 +183,7 @@ export const BUILTIN_LEVELS: LevelDef[] = [
     '####################',
   ], { hidden: [{ col: 16, row: 2, kind: 'bell' }] }),
 
-  // Room 6 — Ghost Corridor. Ghosts stacked across corridor floors smash any
-  // bridge they cross — grab the super-jar up top to sweep a whole row, or turn
-  // them with blocks while you squeeze past. A goblin charges from below.
+  // Room 6 — Ghost Corridor. Ghosts smash bridges; grab the super-jar to sweep.
   fromAscii('Ghost Corridor', [
     '####################',
     '#..K......F........#',
@@ -201,23 +199,186 @@ export const BUILTIN_LEVELS: LevelDef[] = [
     '#.P..............D.#',
     '####################',
   ], { hidden: [{ col: 15, row: 1, kind: 'jewel', value: 2000 }] }),
+
+  // Room 7 — Sky Tower. A Neul homes on your height as you climb to the GOLDEN
+  // WINGS (clear holding them to warp ahead). A Solomon's Seal waits mid-tower.
+  fromAscii('Sky Tower', [
+    '####################',
+    '#........W.........#',
+    '#.......BBB........#',
+    '#.l................#',
+    '#..................#',
+    '#........@.........#',
+    '#.......BBB........#',
+    '#..................#',
+    '#..r...........r...#',
+    '#.BBB........BBBB..#',
+    '#..................#',
+    '#.P..............D.#',
+    '####################',
+  ], { hidden: [{ col: 3, row: 10, kind: 'scroll' }] }),
+
+  // Room 8 — Constellation of Taurus. Second ZODIAC PANEL, guarded by ghosts.
+  fromAscii('Constellation II', [
+    '####################',
+    '#........Z.........#',
+    '#.......BBB........#',
+    '#..h............h..#',
+    '#..................#',
+    '#........K.........#',
+    '#.......BBB........#',
+    '#..................#',
+    '#..r...........r...#',
+    '#.BBB........BBBB..#',
+    '#.....g......g.....#',
+    '#.P..............D.#',
+    '####################',
+  ], { hidden: [{ col: 9, row: 7, kind: 'superjar' }] }),
+
+  // ── Shrine of Gemini (rooms 9–12) ──
+  // Room 9 — Spark Cells. Relentless sparkballs ricochet — wall them off or
+  // fireball them. A Solomon's Seal hides top-left; a scroll widens your stock.
+  fromAscii('Spark Cells', [
+    '####################',
+    '#..@...............#',
+    '#.BBB..............#',
+    '#..................#',
+    '#....k........k....#',
+    '#..................#',
+    '#........K.........#',
+    '#.......BBB........#',
+    '#..................#',
+    '#....k........k....#',
+    '#..................#',
+    '#.P..............D.#',
+    '####################',
+  ], { hidden: [{ col: 3, row: 7, kind: 'scroll' }] }),
+
+  // Room 10 — Dragon's Lair. A pink Dragon hunts while Saramandors spit fire.
+  fromAscii("Dragon's Lair", [
+    '####################',
+    '#..................#',
+    '#....a.............#',
+    '#...BBBB...........#',
+    '#..................#',
+    '#..........s.......#',
+    '#........BBBB......#',
+    '#..................#',
+    '#..s...........K...#',
+    '#.BBBB.......BBBB..#',
+    '#..................#',
+    '#.P..............D.#',
+    '####################',
+  ], { hidden: [{ col: 5, row: 7, kind: 'jar' }, { col: 14, row: 5, kind: 'jar' }] }),
+
+  // Room 11 — The Gauntlet. A saramandor mirror, a panel turret, a ghost, a
+  // sparkball and gargoils — and a Solomon's Seal behind the left ledge.
+  fromAscii('The Gauntlet', [
+    '####################',
+    '#.@....m.......h...#',
+    '#.BBB..............#',
+    '#..................#',
+    '#......n...........#',
+    '#..................#',
+    '#........K.........#',
+    '#.......BBB........#',
+    '#..r...........r...#',
+    '#.BBB........BBBB..#',
+    '#.....g.....k......#',
+    '#.P..............D.#',
+    '####################',
+  ], { hidden: [{ col: 15, row: 6, kind: 'treasure', value: 5000 }] }),
+
+  // Room 12 — Solomon's Gate. The third ZODIAC PANEL crowns a foe-storm: two
+  // demon mirrors, ghosts, gargoils and dragons. An hourglass keeps you alive.
+  fromAscii("Solomon's Gate", [
+    '####################',
+    '#........Z.........#',
+    '#.......BBB........#',
+    '#..h....t....h.....#',
+    '#..................#',
+    '#....M........M....#',
+    '#..................#',
+    '#........K.........#',
+    '#.......BBB........#',
+    '#..r..a.....a..r...#',
+    '#.BBBB......BBBBB..#',
+    '#.P..............D.#',
+    '####################',
+  ], { hidden: [{ col: 9, row: 6, kind: 'superjar' }] }),
 ]
+
+/** The fairy bonus room reached by clearing a room while holding a constellation
+ *  panel — no enemies, the door is open from the start, a short timer, and a
+ *  glade full of bells, fairies and treasure. */
+export const BONUS_ROOM: LevelDef = fromAscii('Fairy Glade', [
+  '####################',
+  '#..b...b....b...b..#',
+  '#..................#',
+  '#....j...$....j....#',
+  '#..................#',
+  '#..b...BBBBBB...b..#',
+  '#......BBBBBB......#',
+  '#..................#',
+  '#...j....b....j....#',
+  '#..................#',
+  '#..................#',
+  '#.P..............D.#',
+  '####################',
+], { lifeStart: LIFE_HALF })
+
+/** How many Solomon's Seals exist across the built-in game (all 3 needed for the
+ *  best ending). */
+export const SEAL_TOTAL = BUILTIN_LEVELS.reduce((n, l) => n + l.items.filter(i => i.kind === 'seal').length, 0)
+
+// ── progression: where clearing a room sends you ─────────────
+
+/** How many rooms the Golden Wings skip ahead. */
+export const WARP_ROOMS = 3
+
+export interface NextDecision {
+  /** 'next' → play room `index`; 'bonus' → the fairy room, then resume `index`;
+   *  'ending' → the game is complete. */
+  kind: 'next' | 'bonus' | 'ending'
+  index: number
+}
+
+/** Pure decision: given the just-cleared room + flags, what plays next? Kept
+ *  pure (no DOM) so the warp / bonus / ending branches are unit-testable. */
+export function decideNext(p: {
+  levelIndex: number
+  builtinCount: number
+  totalCount: number
+  zodiacHeld: boolean
+  wingsHeld: boolean
+  inBonus: boolean
+  bonusResumeIndex: number
+}): NextDecision {
+  // Finishing the fairy bonus room → resume where the zodiac room left off.
+  if (p.inBonus) {
+    const idx = p.bonusResumeIndex
+    if (idx >= p.builtinCount && p.totalCount === p.builtinCount) return { kind: 'ending', index: 0 }
+    return { kind: 'next', index: idx % p.totalCount }
+  }
+  // Cleared holding a constellation panel → detour through the bonus room.
+  if (p.zodiacHeld) return { kind: 'bonus', index: p.levelIndex + 1 }
+  // Golden Wings warp ahead; otherwise the next room.
+  const target = p.wingsHeld ? p.levelIndex + WARP_ROOMS : p.levelIndex + 1
+  // Past the last built-in with no custom levels appended → the game is won.
+  if (target >= p.builtinCount && p.totalCount === p.builtinCount) return { kind: 'ending', index: 0 }
+  return { kind: 'next', index: target % p.totalCount }
+}
 
 // ── custom level store (localStorage) ────────────────────────
 
-// Untrusted level data (Import JSON + this localStorage store) is the only attack
-// surface these games expose. Bound the dimensions + entity counts and require
-// in-bounds integer coordinates so a crafted level can't exhaust memory (a giant
-// grid / canvas) or stall the render loop. Single-screen rooms are tiny — the
-// designer authors ~20×13 — so these caps are generous headroom.
 const MAX_DIM = 120
 const MAX_ENTITIES = MAX_DIM * MAX_DIM
-const ENEMY_KINDS = new Set<EnemyKind>(['goblin', 'gargoil', 'ghost', 'demonhead', 'dragon', 'panel'])
-const ITEM_KINDS = new Set<ItemKind>(['key', 'jewel', 'bell', 'jar', 'superjar', 'hourglass', 'hourglassHalf', 'fairy', 'life'])
+const ENEMY_KINDS = new Set<EnemyKind>(['goblin', 'gargoil', 'ghost', 'demonhead', 'dragon', 'panel', 'neul', 'saramandor', 'sparkball'])
+const ITEM_KINDS = new Set<ItemKind>(['key', 'jewel', 'treasure', 'bell', 'jar', 'superjar', 'scroll', 'hourglass', 'hourglassHalf', 'fairy', 'life', 'seal', 'zodiac', 'wings'])
+const MIRROR_KINDS = new Set(['demonhead', 'saramandor'])
 
 const isInt = (n: unknown): n is number => typeof n === 'number' && Number.isInteger(n)
 
-/** A finite, in-bounds {col,row} or null. */
 function asCell(v: unknown, cols: number, rows: number): Cell | null {
   if (!v || typeof v !== 'object') return null
   const { col, row } = v as Record<string, unknown>
@@ -225,10 +386,9 @@ function asCell(v: unknown, cols: number, rows: number): Cell | null {
   return { col, row }
 }
 
-/** Validate untrusted level JSON into a CLEAN LevelDef, or null if anything is
- *  out of bounds. Accepts BOTH the current shape (items[]/typed enemies/mirrors)
- *  and the legacy shape (key:Cell + gems[] + plain enemies) so levels saved by an
- *  older build still load. Held to the same limits as a pasted level. */
+/** Validate untrusted level JSON into a CLEAN LevelDef, or null. Accepts BOTH the
+ *  current shape (items[]/typed enemies/mirrors) and the legacy shape (key + gems)
+ *  so older saved levels still load. Held to the same limits as a pasted level. */
 export function sanitizeLevel(raw: unknown): LevelDef | null {
   if (!raw || typeof raw !== 'object') return null
   const d = raw as Record<string, unknown>
@@ -242,7 +402,6 @@ export function sanitizeLevel(raw: unknown): LevelDef | null {
   const door = asCell(d['door'], cols, rows)
   if (!player || !door) return null
 
-  // Items: prefer the new items[] array; fall back to legacy key + gems.
   const items: ItemSpawn[] = []
   if (Array.isArray(d['items'])) {
     if (d['items'].length > MAX_ENTITIES) return null
@@ -274,8 +433,12 @@ export function sanitizeLevel(raw: unknown): LevelDef | null {
 
   const mirrorsRaw = Array.isArray(d['mirrors']) ? d['mirrors'] : []
   if (mirrorsRaw.length > MAX_ENTITIES) return null
-  const mirrors: Cell[] = []
-  for (const m of mirrorsRaw) { const c = asCell(m, cols, rows); if (!c) return null; mirrors.push(c) }
+  const mirrors: MirrorSpawn[] = []
+  for (const m of mirrorsRaw) {
+    const c = asCell(m, cols, rows); if (!c) return null
+    const k = (m as MirrorSpawn)?.kind
+    mirrors.push({ col: c.col, row: c.row, kind: MIRROR_KINDS.has(k as string) ? k : 'demonhead' })
+  }
 
   const tiles = new Array<number>(n)
   for (let i = 0; i < n; i++) { const t = Number(tilesRaw[i]); tiles[i] = Number.isFinite(t) && t >= 0 && t <= 3 ? t : 0 }
@@ -302,7 +465,6 @@ export function saveCustomLevels(levels: LevelDef[]): void {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(levels)) } catch { /* quota / disabled */ }
 }
 
-/** Insert or replace a custom level by name. Returns the new list. */
 export function upsertCustomLevel(level: LevelDef): LevelDef[] {
   const levels = loadCustomLevels()
   const i = levels.findIndex(l => l.name === level.name)

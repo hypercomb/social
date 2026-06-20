@@ -4,16 +4,23 @@
 // overlay owns the DOM toolbar + canvas events and calls in here. Kept separate
 // from rendering so the same LevelDef can be handed straight to the engine for a
 // playtest. Tools cover the full NES vocabulary — grey/orange blocks, the player
-// + door singletons, the item pickups, every foe kind, and the demon mirror.
+// + door singletons, every item pickup (incl. seals / constellation panels /
+// wings), every foe kind, and both demon-mirror flavours.
 
-import { EMPTY, WALL, BRICK, type LevelDef, type Cell, type EnemyKind, type ItemKind } from './engine.js'
+import { EMPTY, WALL, BRICK, type LevelDef, type Cell, type EnemyKind, type ItemKind, type MirrorKind } from './engine.js'
 import { cloneLevel, emptyLevel, sanitizeLevel } from './levels.js'
 
-const ITEM_TOOLS = { key: 'key', bell: 'bell', jewel: 'jewel', jar: 'jar', hourglass: 'hourglass', life: 'life' } as const
-const ENEMY_TOOLS = { goblin: 'goblin', gargoil: 'gargoil', ghost: 'ghost', dragon: 'dragon', demonhead: 'demonhead', panel: 'panel' } as const
+const ITEM_TOOLS = {
+  key: 'key', bell: 'bell', jewel: 'jewel', treasure: 'treasure', jar: 'jar', scroll: 'scroll',
+  hourglass: 'hourglass', life: 'life', seal: 'seal', zodiac: 'zodiac', wings: 'wings',
+} as const
+const ENEMY_TOOLS = {
+  goblin: 'goblin', gargoil: 'gargoil', dragon: 'dragon', saramandor: 'saramandor', ghost: 'ghost',
+  neul: 'neul', sparkball: 'sparkball', demonhead: 'demonhead', panel: 'panel',
+} as const
 
 export type Tool =
-  | 'erase' | 'wall' | 'brick' | 'player' | 'door' | 'mirror'
+  | 'erase' | 'wall' | 'brick' | 'player' | 'door' | 'mirror' | 'firemirror'
   | keyof typeof ITEM_TOOLS | keyof typeof ENEMY_TOOLS
 
 export const TOOLS: { tool: Tool; label: string; glyph: string }[] = [
@@ -24,16 +31,25 @@ export const TOOLS: { tool: Tool; label: string; glyph: string }[] = [
   { tool: 'key', label: 'Key', glyph: '🔑' },
   { tool: 'bell', label: 'Bell (frees a fairy)', glyph: '🔔' },
   { tool: 'jewel', label: 'Jewel', glyph: '◆' },
+  { tool: 'treasure', label: 'Treasure', glyph: '💰' },
   { tool: 'jar', label: 'Fireball jar', glyph: '🔥' },
+  { tool: 'scroll', label: 'Scroll (wider fireball stock)', glyph: '📜' },
   { tool: 'hourglass', label: 'Hourglass (refill time)', glyph: '⌛' },
   { tool: 'life', label: 'Extra Dana', glyph: '★' },
+  { tool: 'seal', label: "Solomon's Seal", glyph: '✡' },
+  { tool: 'zodiac', label: 'Constellation panel (→ bonus room)', glyph: '♈' },
+  { tool: 'wings', label: 'Golden Wings (→ warp)', glyph: '🪽' },
   { tool: 'goblin', label: 'Goblin (chaser)', glyph: '👺' },
-  { tool: 'gargoil', label: 'Gargoil (spits fire)', glyph: '🦇' },
-  { tool: 'ghost', label: 'Ghost (flyer)', glyph: '👻' },
+  { tool: 'gargoil', label: 'Gargoil (spits fire)', glyph: '🦅' },
   { tool: 'dragon', label: 'Dragon', glyph: '🐉' },
+  { tool: 'saramandor', label: 'Saramandor (fire-walker)', glyph: '🦎' },
+  { tool: 'ghost', label: 'Ghost (horizontal flyer)', glyph: '👻' },
+  { tool: 'neul', label: 'Neul (vertical flyer)', glyph: '🦇' },
+  { tool: 'sparkball', label: 'Sparkball (bouncer)', glyph: '⚡' },
   { tool: 'demonhead', label: 'Demonhead', glyph: '💀' },
   { tool: 'panel', label: 'Panel monster (turret)', glyph: '🗿' },
-  { tool: 'mirror', label: 'Demon mirror (spawner)', glyph: '🪞' },
+  { tool: 'mirror', label: 'Demon mirror (spawns demonheads)', glyph: '🪞' },
+  { tool: 'firemirror', label: 'Fire mirror (spawns saramandors)', glyph: '🌋' },
   { tool: 'erase', label: 'Erase', glyph: '⌫' },
 ]
 
@@ -81,11 +97,12 @@ export class Designer {
       this.#clearCell(col, row)
       return true
     }
-    if (tool === 'mirror') {
-      const had = L.mirrors.some(m => this.#same(m, col, row))
+    if (tool === 'mirror' || tool === 'firemirror') {
+      const kind: MirrorKind = tool === 'firemirror' ? 'saramandor' : 'demonhead'
+      const had = L.mirrors.some(m => this.#same(m, col, row) && m.kind === kind)
       this.#clearCell(col, row)
       L.tiles[this.#idx(col, row)] = EMPTY
-      if (!had) L.mirrors.push({ col, row })
+      if (!had) L.mirrors.push({ col, row, kind })
       return true
     }
     if (tool in ENEMY_TOOLS) {
@@ -102,7 +119,7 @@ export class Designer {
       this.#clearCell(col, row)
       L.tiles[this.#idx(col, row)] = EMPTY
       if (!(existing && existing.kind === kind)) {
-        L.items.push({ col, row, kind, value: kind === 'jewel' ? 500 : undefined })
+        L.items.push({ col, row, kind, value: kind === 'jewel' ? 500 : kind === 'treasure' ? 2000 : undefined })
       }
       return true
     }
