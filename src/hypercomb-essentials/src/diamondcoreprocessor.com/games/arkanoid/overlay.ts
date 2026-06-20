@@ -458,7 +458,7 @@ export class ArkanoidOverlay {
         })
       }
     }
-    if (broke > 0) this.#shaker.add(0.16 + Math.min(0.5, (broke - 1) * 0.07))
+    if (broke > 0) { this.#shaker.add(0.16 + Math.min(0.5, (broke - 1) * 0.07)); this.#renderer?.spike(0.35 + Math.min(0.9, broke * 0.18)) }   // the whole keep flares on the break
   }
 
   /** Read the post-update engine and turn meaningful changes into shake/sparks.
@@ -571,7 +571,7 @@ export class ArkanoidOverlay {
           // at its centre — the engine needs no particle/event system.
           this.#snapshotBricks(this.#engine)
           this.#engine.update(dt)
-          if (this.#engine.frantic && !this.#wasFrantic) this.#shaker.add(1.1)   // frenzy start → hard screen shake
+          if (this.#engine.frantic && !this.#wasFrantic) { this.#shaker.add(1.1); this.#renderer?.spike(2.0) }   // frenzy start → hard shake + board-wide neon flare
           this.#wasFrantic = this.#engine.frantic
           this.#senseJuice()
           this.#diffBricks(this.#engine)
@@ -1003,79 +1003,102 @@ function opt(value: string, label: string): HTMLOptionElement {
 
 const CSS = `
 .ark-overlay{position:fixed;inset:0;display:flex;flex-direction:column;
-  background:radial-gradient(120% 120% at 50% 0%,#bfe9ff 0%,#9fd9f5 55%,#c9f0d8 100%);
-  font-family:'Segoe UI',system-ui,sans-serif;color:#143052;user-select:none;
-  animation:ark-in .2s ease both}
+  background:radial-gradient(130% 120% at 50% -8%,#1a0e33 0%,#120a22 46%,#0a0814 78%,#05030c 100%);
+  font-family:'Segoe UI',system-ui,sans-serif;color:#e8e0ff;user-select:none;
+  animation:ark-in .22s ease both}
 @keyframes ark-in{from{opacity:0}to{opacity:1}}
+@keyframes ark-candle{0%,100%{opacity:.78}45%{opacity:1}62%{opacity:.7}80%{opacity:.95}}
 .ark-bar{display:flex;align-items:center;gap:.5rem;padding:.45rem .7rem;
-  background:linear-gradient(180deg,#fffdf5,#ffeec2);
-  border-bottom:3px solid #ffb938;box-shadow:0 2px 0 rgba(255,184,56,.35);flex-wrap:wrap}
-.ark-logo{font-weight:800;letter-spacing:.02em;color:#1f7ed8;white-space:nowrap;
-  text-shadow:0 1px 0 #fff,0 0 10px rgba(120,200,255,.5)}
+  background:linear-gradient(180deg,rgba(18,10,34,.92),rgba(10,8,20,.86));
+  border-bottom:1px solid rgba(122,60,255,.34);
+  box-shadow:0 1px 0 rgba(57,255,106,.10),0 10px 30px rgba(0,0,0,.5);flex-wrap:wrap}
+.ark-logo{font-weight:800;letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;
+  color:#39ff6a;text-shadow:0 0 6px rgba(57,255,106,.9),0 0 18px rgba(57,255,106,.5),0 0 2px #2be36b;
+  animation:ark-candle 3.4s ease-in-out infinite}
 .ark-tabs{display:flex;gap:.25rem;margin-left:.3rem}
-.ark-tab{background:#fff;border:2px solid #ffcf6b;color:#3a5a82;
-  padding:.2rem .7rem;border-radius:999px;cursor:pointer;font-size:.85rem;font-weight:600}
-.ark-tab.on{background:#34a4f0;color:#fff;border-color:#1f7ed8;box-shadow:0 2px 6px rgba(52,164,240,.4)}
+.ark-tab{background:transparent;border:1px solid rgba(182,92,255,.34);color:#cbb6ff;
+  padding:.2rem .7rem;border-radius:999px;cursor:pointer;font-size:.85rem;transition:all .15s ease}
+.ark-tab:hover{border-color:rgba(182,92,255,.6);color:#e8e0ff}
+.ark-tab.on{background:rgba(122,60,255,.26);color:#fff;border-color:rgba(182,92,255,.85);
+  box-shadow:0 0 10px rgba(182,92,255,.55),inset 0 0 8px rgba(182,92,255,.2)}
 .ark-ctl{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap}
-.ark-level-label{min-width:10rem;text-align:center;font-size:.85rem;color:#3a5a82}
-.ark-btn{background:#fff;border:2px solid #cfe2f0;
-  color:#244a72;padding:.22rem .6rem;border-radius:9px;cursor:pointer;font-size:.82rem;font-weight:600;
-  transition:background .15s ease,transform .1s ease}
-.ark-btn:hover{background:#eaf6ff;border-color:#34a4f0;transform:translateY(-1px)}
-.ark-btn-lg{padding:.5rem 1.15rem;font-size:.95rem}
+.ark-level-label{min-width:10rem;text-align:center;font-size:.85rem;color:#c8bdf0}
+.ark-btn{background:rgba(122,60,255,.14);border:1px solid rgba(182,92,255,.32);
+  color:#e8e0ff;padding:.22rem .6rem;border-radius:7px;cursor:pointer;font-size:.82rem;
+  transition:background .15s ease,box-shadow .15s ease,border-color .15s ease}
+.ark-btn:hover{background:rgba(122,60,255,.28);border-color:rgba(57,255,106,.5);
+  box-shadow:0 0 12px rgba(57,255,106,.3)}
+.ark-btn-lg{padding:.5rem 1.15rem;font-size:.95rem;border-color:rgba(57,255,106,.5);
+  background:rgba(57,255,106,.12);color:#d8ffe2;
+  box-shadow:0 0 16px rgba(57,255,106,.28),inset 0 0 10px rgba(57,255,106,.12)}
+.ark-btn-lg:hover{background:rgba(57,255,106,.22);box-shadow:0 0 24px rgba(57,255,106,.45)}
 .ark-palette{display:flex;gap:.2rem}
 .ark-tool{width:2rem;height:2rem;display:flex;align-items:center;justify-content:center;
-  background:rgba(255,255,255,.05);border:2px solid var(--tool-color,rgba(255,255,255,.2));
-  border-radius:6px;color:var(--tool-color,#fff);cursor:pointer;font-size:.95rem;font-weight:700;line-height:1}
-.ark-tool.on{background:color-mix(in srgb,var(--tool-color) 30%,transparent);
-  box-shadow:0 0 8px var(--tool-color);color:#fff}
-.ark-name{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.2);
+  background:rgba(232,224,255,.04);border:2px solid var(--tool-color,rgba(232,224,255,.2));
+  border-radius:6px;color:var(--tool-color,#e8e0ff);cursor:pointer;font-size:.95rem;font-weight:700;line-height:1}
+.ark-tool.on{background:color-mix(in srgb,var(--tool-color) 32%,transparent);
+  box-shadow:0 0 10px var(--tool-color);color:#fff}
+.ark-name{background:rgba(232,224,255,.05);border:1px solid rgba(182,92,255,.3);
   color:#fff;border-radius:6px;padding:.25rem .5rem;width:8rem;font-size:.82rem}
-.ark-select{background:rgba(14,20,40,.96);border:1px solid rgba(255,255,255,.2);
+.ark-name:focus{outline:none;border-color:rgba(57,255,106,.6);box-shadow:0 0 8px rgba(57,255,106,.3)}
+.ark-select{background:rgba(16,10,30,.96);border:1px solid rgba(182,92,255,.3);
   color:#fff;border-radius:6px;padding:.22rem .4rem;font-size:.8rem;max-width:11rem}
-.ark-status{margin-left:auto;font-size:.8rem;color:#1f9d57;min-height:1em}
+.ark-status{margin-left:auto;font-size:.8rem;color:#7bf09e;min-height:1em;
+  text-shadow:0 0 8px rgba(57,255,106,.4)}
 .ark-close{width:2rem;height:2rem;border-radius:50%;border:none;cursor:pointer;
-  background:rgba(255,80,80,.18);color:#ff9a9a;font-size:1rem}
-.ark-close:hover{background:rgba(255,80,80,.34);color:#fff}
+  background:rgba(122,60,255,.22);color:#d8c2ff;font-size:1rem;transition:all .15s ease}
+.ark-close:hover{background:rgba(255,80,120,.34);color:#fff;box-shadow:0 0 12px rgba(255,80,120,.5)}
 .ark-stage{flex:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;padding:14px}
-.ark-canvas{border-radius:18px;
-  box-shadow:0 14px 38px rgba(40,90,150,.28),0 0 0 4px #ffffff,0 0 0 7px #34a4f0,0 0 26px rgba(52,164,240,.3);
-  background:#9fd9f5;touch-action:none;cursor:none}
+.ark-canvas{border-radius:12px;
+  box-shadow:0 18px 64px rgba(0,0,0,.7),
+    0 0 0 1px rgba(57,255,106,.4),
+    0 0 22px rgba(57,255,106,.22),
+    0 0 46px rgba(122,60,255,.28),
+    inset 0 0 0 1px rgba(182,92,255,.18);
+  background:#06040c;touch-action:none;cursor:none}
 .ark-banner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;gap:.7rem;background:rgba(190,230,255,.74);backdrop-filter:blur(3px)}
-.ark-banner-title{font-size:2.4rem;font-weight:800;color:#1f7ed8;text-shadow:0 2px 0 #fff,0 3px 14px rgba(120,200,255,.6)}
-.ark-banner-sub{font-size:1.1rem;color:#e8780a;font-weight:600}
+  justify-content:center;gap:.7rem;background:rgba(7,4,14,.74);backdrop-filter:blur(3px)}
+.ark-banner-title{font-size:2.5rem;font-weight:800;letter-spacing:.04em;color:#39ff6a;
+  text-shadow:0 0 10px rgba(57,255,106,.9),0 0 30px rgba(57,255,106,.5),0 2px 2px #06040c;
+  animation:ark-candle 3.4s ease-in-out infinite}
+.ark-banner-sub{font-size:1.1rem;color:#ffb23a;text-shadow:0 0 12px rgba(255,178,58,.55)}
 .ark-banner-actions{display:flex;gap:.6rem;margin-top:.4rem}
-.ark-help{padding:.45rem .8rem;text-align:center;font-size:.78rem;color:#5a6a88;
-  background:linear-gradient(180deg,#ffeec2,#fffdf5);border-top:2px solid #ffcf6b}
-.ark-help b{color:#244a72}
+.ark-help{padding:.45rem .8rem;text-align:center;font-size:.78rem;color:#9c92c4;
+  background:linear-gradient(0deg,rgba(10,8,20,.8),rgba(18,10,34,.5));
+  border-top:1px solid rgba(122,60,255,.2)}
+.ark-help b{color:#39ff6a;text-shadow:0 0 6px rgba(57,255,106,.5)}
 .ark-flyout{position:absolute;left:0;top:0;bottom:0;z-index:7;pointer-events:none}
 .ark-flyout-panel{position:absolute;left:0;top:0;bottom:0;width:238px;box-sizing:border-box;
   padding:14px 14px 20px;overflow-y:auto;pointer-events:auto;
-  background:linear-gradient(180deg,rgba(10,16,34,.97),rgba(8,12,26,.95));
-  border-right:1px solid rgba(126,182,214,.3);backdrop-filter:blur(6px);
-  box-shadow:6px 0 26px rgba(0,0,0,.5);transform:translateX(-100%);transition:transform .26s ease}
+  background:linear-gradient(180deg,rgba(18,10,34,.97),rgba(10,8,20,.96));
+  border-right:1px solid rgba(122,60,255,.4);backdrop-filter:blur(6px);
+  box-shadow:6px 0 30px rgba(0,0,0,.6),inset -1px 0 0 rgba(57,255,106,.12);
+  transform:translateX(-100%);transition:transform .26s ease}
 .ark-flyout.open .ark-flyout-panel{transform:translateX(0)}
 .ark-flyout-tab{position:absolute;left:0;top:18px;display:flex;flex-direction:column;align-items:center;gap:7px;
-  pointer-events:auto;cursor:pointer;color:#cfe3ff;
-  background:rgba(14,22,46,.92);border:1px solid rgba(126,182,214,.34);border-left:none;
+  pointer-events:auto;cursor:pointer;color:#d8c2ff;
+  background:linear-gradient(180deg,rgba(24,14,44,.94),rgba(14,8,26,.92));
+  border:1px solid rgba(122,60,255,.4);border-left:none;
   border-radius:0 10px 10px 0;padding:11px 6px;transition:transform .26s ease,background .15s ease;
-  box-shadow:3px 0 14px rgba(0,0,0,.4)}
+  box-shadow:3px 0 16px rgba(0,0,0,.5),0 0 12px rgba(122,60,255,.2)}
 .ark-flyout.open .ark-flyout-tab{transform:translateX(238px)}
-.ark-flyout-tab:hover{background:rgba(30,46,86,.96);color:#fff}
-.ark-tab-label{writing-mode:vertical-rl;text-orientation:upright;font-weight:800;font-size:.6rem;letter-spacing:.16em;color:#7ee0ff}
-.ark-tab-chev{font-size:.72rem;line-height:1;transition:transform .26s ease}
+.ark-flyout-tab:hover{background:linear-gradient(180deg,rgba(40,22,72,.96),rgba(24,14,44,.94));color:#fff;
+  box-shadow:3px 0 18px rgba(57,255,106,.3)}
+.ark-tab-label{writing-mode:vertical-rl;text-orientation:upright;font-weight:800;font-size:.6rem;
+  letter-spacing:.16em;color:#39ff6a;text-shadow:0 0 8px rgba(57,255,106,.5)}
+.ark-tab-chev{font-size:.72rem;line-height:1;transition:transform .26s ease;color:#b65cff}
 .ark-flyout.open .ark-tab-chev{transform:rotate(180deg)}
-.ark-fly-head{font-weight:800;color:#7ee0ff;font-size:.72rem;letter-spacing:.08em;margin:2px 0 6px;
-  text-transform:uppercase;text-shadow:0 0 12px rgba(126,224,255,.4)}
-.ark-fly-head:not(:first-child){margin-top:14px;padding-top:11px;border-top:1px solid rgba(126,182,214,.18)}
+.ark-fly-head{font-weight:800;color:#39ff6a;font-size:.72rem;letter-spacing:.1em;margin:2px 0 6px;
+  text-transform:uppercase;text-shadow:0 0 10px rgba(57,255,106,.5)}
+.ark-fly-head:not(:first-child){margin-top:14px;padding-top:11px;border-top:1px solid rgba(122,60,255,.24)}
 .ark-pill-row{display:flex;gap:9px;align-items:flex-start;margin:9px 0}
 .ark-pill-badge{flex:0 0 auto;width:26px;height:26px;border-radius:7px;display:flex;align-items:center;
-  justify-content:center;font-weight:800;font-size:.92rem;color:#0a0c1a;line-height:1}
+  justify-content:center;font-weight:800;font-size:.92rem;color:#06040c;line-height:1;
+  box-shadow:0 0 8px rgba(0,0,0,.4)}
 .ark-pill-text{display:flex;flex-direction:column;gap:1px;min-width:0}
-.ark-pill-name{font-weight:700;font-size:.8rem;line-height:1.15}
-.ark-pill-desc{font-size:.72rem;line-height:1.32;color:#aeb6d8}
+.ark-pill-name{font-weight:700;font-size:.8rem;line-height:1.15;color:#e8e0ff}
+.ark-pill-desc{font-size:.72rem;line-height:1.32;color:#a99fce}
 .ark-info-row{margin:9px 0}
-.ark-info-title{font-weight:700;font-size:.78rem;color:#dfe7ff;margin-bottom:1px}
+.ark-info-title{font-weight:700;font-size:.78rem;color:#d8ffe2;margin-bottom:1px}
 .ark-hidden{display:none!important}
 `

@@ -1726,8 +1726,8 @@ export class Engine {
     this.#brickHits(b)
 
     // Minimum speed: never crawl below half the start speed — and while FRANTIC,
-    // hold it at DOUBLE TIME (1.35× the start speed floor) so the frenzy never relaxes.
-    const floor = this.frantic ? BALL_SPEED * 1.35 : BALL_SPEED_MIN
+    // hold it near DOUBLE speed (1.85× floor, 2× ceiling) so the frenzy stays doubled.
+    const floor = this.frantic ? BALL_SPEED * 1.85 : BALL_SPEED_MIN
     let sp = Math.hypot(b.vx, b.vy)
     if (sp > 0 && sp < floor) {
       const k = floor / sp
