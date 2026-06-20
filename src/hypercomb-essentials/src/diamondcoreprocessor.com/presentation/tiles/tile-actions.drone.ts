@@ -300,8 +300,7 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // 'edit' icon is provided by TileEditorDrone via IconProviderRegistry —
   // when the editor drone is toggled off it never registers, the icon
   // never appears, and the merged-available filter strips it from default
-  // arrangements. Same pattern for 'note' (NotesService) — registered by
-  // its owning drone.
+  // arrangements.
   { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage, labelKey: 'action.search', descriptionKey: 'action.search.description' },
   { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private', labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
@@ -400,7 +399,7 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 // in ICON_REGISTRY above; adopting a peer tile is handled by the
 // `public-external` profile (the tile flips kind once it's local).
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  'private': ['command', 'edit', 'note', 'features', 'remove', 'break-apart', 'files', 'invite'],
+  'private': ['command', 'edit', 'features', 'remove', 'break-apart', 'files', 'invite'],
   // World mode: ONLY the two share-toggles, none of the regular icons.
   'world': ['make-public', 'make-branch-public'],
   // Your own tile in public mode — same trash-bin remove that
@@ -461,7 +460,7 @@ type IconArrangement = Partial<Record<OverlayProfileKey, string[]>>
 // adopt path directly (its own tile:action listener at
 // swarm-adopt.drone.ts:63). The legacy paired-channel 'adopt' / 'import'
 // handlers were retired with the paired-channel subsystem.
-const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'note', 'hide', 'break-apart', 'block', 'remove', 'make-public', 'make-branch-public'])
+const HANDLED_ACTIONS = new Set(['edit', 'search', 'command', 'hide', 'break-apart', 'block', 'remove', 'make-public', 'make-branch-public'])
 
 type TileActionPayload = { action: string; label: string; q: number; r: number; index: number }
 
@@ -474,7 +473,7 @@ export class TileActionsDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'overlay:request-register', 'render:cell-count', 'tile:action', 'controls:action', 'overlay:icons-reordered', 'overlay:arrange-mode', 'substrate:applied', 'substrate:rerolled', 'cell:removed']
-  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'note:capture', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'tile:public-changed', 'cell:removed', 'visibility:show-hidden', 'substrate:rerolled']
+  protected override emits = ['overlay:register-action', 'overlay:pool-icons', 'search:prefill', 'command:focus', 'tile:hidden', 'tile:unhidden', 'tile:blocked', 'tile:public-changed', 'cell:removed', 'visibility:show-hidden', 'substrate:rerolled']
 
   #registered = false
   #effectsRegistered = false
@@ -762,16 +761,6 @@ export class TileActionsDrone extends Drone {
       case 'command':
         EffectBus.emit('command:focus', { cell: label })
         break
-
-      case 'note': {
-        // Note targeting is resolved by lineage in NotesService — the
-        // cellLabel rides on the event and is enough on its own. Don't
-        // drive SelectionService here: a full selection highlight is
-        // too loud for capture intent. The command-line `note-intent`
-        // glow plus the icon's `hasNotes` tint are the subtle cues.
-        EffectBus.emit('note:capture', { cellLabel: label })
-        break
-      }
 
       case 'hide':
         this.#hideOrBlock(label, 'hc:hidden-tiles', 'tile:hidden')

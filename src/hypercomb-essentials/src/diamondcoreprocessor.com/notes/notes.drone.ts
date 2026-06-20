@@ -30,30 +30,10 @@
 
 import { EffectBus } from '@hypercomb/core'
 
-const NOTE_ICON_SVG =
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="white"><path d="M19 3H4.99c-1.11 0-1.98.9-1.98 2L3 19c0 1.1.89 2 2 2h10l6-6V5c0-1.1-.9-2-2-2zM7 8h10v2H7V8zm5 6H7v-2h5v2zm2 5.5V14h5.5L14 19.5z"/></svg>`
-
-const NOTE_ACCENT = 0xffe14a
 const NOTES_TRIGGER = 'notes:changed'
 const NOTES_SLOT = 'notes'
 
 const SIG_REGEX = /^[a-f0-9]{64}$/
-
-type IconProvider = {
-  name: string
-  owner?: string
-  svgMarkup: string
-  profile: string
-  hoverTint?: number
-  tintWhen?: (ctx: { hasNotes?: boolean }) => number | null | undefined
-  labelKey?: string
-  descriptionKey?: string
-}
-
-type IconProviderRegistry = {
-  add(p: IconProvider): void
-  remove(name: string): void
-}
 
 type Lineage = {
   explorerSegments?: () => readonly string[]
@@ -174,19 +154,9 @@ export class NotesService {
     const lineage = get<EventTarget>('@hypercomb.social/Lineage') as unknown as EventTarget | undefined
     lineage?.addEventListener?.('change', () => this.#cellLocSigCache.clear())
 
-    // Tile icon. Toggle this drone off in DCP → constructor never runs
-    // → icon never reaches the arranger → never appears on the hex.
-    const iconRegistry = get<IconProviderRegistry>('@hypercomb.social/IconProviderRegistry')
-    iconRegistry?.add({
-      name: 'note',
-      owner: '@diamondcoreprocessor.com/NotesService',
-      svgMarkup: NOTE_ICON_SVG,
-      profile: 'private',
-      hoverTint: NOTE_ACCENT,
-      tintWhen: (ctx) => ctx.hasNotes ? NOTE_ACCENT : null,
-      labelKey: 'action.note',
-      descriptionKey: 'action.note.description',
-    })
+    // (The per-tile "note" overlay icon was removed — superseded by the
+    // notes-strip, which owns `note:capture`. There is no longer a
+    // tile-overlay affordance for adding a note.)
 
     // ── EffectBus wiring ──────────────────────────────────────────────
 
