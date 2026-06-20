@@ -457,15 +457,14 @@ export class ContentBrokerDrone extends Drone {
       .trim()
   }
 
-  // Standard URL path for each content type on a host's HTTP endpoint.
-  // Matches the layout served by hypercomb-relay's HTTP file handler.
-  #httpPathForType = (sig: string, type: ContentType): string => {
-    switch (type) {
-      case 'layer':      return `/__layers__/${sig}.json`
-      case 'resource':   return `/__resources__/${sig}`
-      case 'dependency': return `/__dependencies__/${sig}.js`
-      default:           return ''
-    }
+  // Flat root sig-pool — ONE type-agnostic route. The typed dirs
+  // (__layers__ / __resources__ / __dependencies__) are phased out: sigs pool
+  // at the root of their scope (sigbag-structured), and the relay serves ANY
+  // sig at /@resource/<sig>. `type` stays on the signature for the caller but
+  // no longer maps to a directory — the bytes are content-addressed and
+  // sha256-verified after fetch, so the route needs no type or extension.
+  #httpPathForType = (sig: string, _type: ContentType): string => {
+    return `/@resource/${sig}`
   }
 
   // Verify bytes hash to the claimed sig. Defense against any host
