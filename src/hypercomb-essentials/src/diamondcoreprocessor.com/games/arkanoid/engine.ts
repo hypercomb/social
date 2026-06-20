@@ -44,7 +44,7 @@
 // bricks but never save you.
 
 export type GameState = 'playing' | 'won' | 'gameover'
-export type PowerKind = 'oscillate' | 'break' | 'laser' | 'expand' | 'gun' | 'magnet' | 'rocket' | 'multiplier' | 'burst' | 'pinball' | 'beam' | 'clock' | 'ballchain' | 'extralife' | 'crane' | 'pierce'
+export type PowerKind = 'oscillate' | 'break' | 'laser' | 'expand' | 'gun' | 'magnet' | 'rocket' | 'multiplier' | 'burst' | 'pinball' | 'beam' | 'clock' | 'ballchain' | 'extralife' | 'crane' | 'pierce' | 'heal' | 'shield' | 'regen'
 
 export interface Brick {
   x: number; y: number; w: number; h: number; hp: number; max: number; alive: boolean
@@ -116,8 +116,11 @@ export const POWER_META: Record<PowerKind, PowerMeta> = {
   extralife: { letter: '+1', color: '#5fe08a', name: 'extra life', desc: 'A 1-UP. Dropped only by the rare extra-life alien — shoot it on its single pass to catch this and gain a life.' },
   crane: { letter: '☆', color: '#ffd24a', name: 'paper crane', desc: 'The gold paper-crane prize from a ball & chain run. Catch it for a 100,000 jackpot.' },
   pierce: { letter: '»', color: '#d8e6ff', name: 'pierce', desc: 'The white ball phases THROUGH tiles — one damage each as it passes, no bounce — carving a tunnel. Colour balls do not pierce. Timed.' },
+  heal: { letter: '♥', color: '#5fe08a', name: 'repair', desc: 'Repairs the paddle — restores a chunk of bat health.' },
+  shield: { letter: '⛨', color: '#5b9bff', name: 'shield', desc: 'A force shield over the bat: it takes no damage and DEFLECTS enemy fire back up. Timed.' },
+  regen: { letter: '✚', color: '#3fe0a8', name: 'healing shield', desc: 'A shield that also REGENERATES bat health while it lasts — defend and heal at once. Timed.' },
 }
-export const POWER_ORDER: PowerKind[] = ['oscillate', 'break', 'laser', 'expand', 'gun', 'magnet', 'rocket', 'multiplier', 'burst', 'pinball', 'beam', 'clock', 'ballchain', 'pierce']
+export const POWER_ORDER: PowerKind[] = ['oscillate', 'break', 'laser', 'expand', 'gun', 'magnet', 'rocket', 'multiplier', 'burst', 'pinball', 'beam', 'clock', 'ballchain', 'pierce', 'heal', 'shield', 'regen']
 
 // ── World geometry (units; the overlay scales to fit) ──────────────
 // The playfield is 20% wider than the base and bricks are 80% size, kept
@@ -184,6 +187,7 @@ const POWER_WEIGHTS: Record<PowerKind, number> = {
   rocket: 3, burst: 3, beam: 3, pinball: 3,
   clock: 4, ballchain: 2,
   pierce: 3,
+  heal: 5, shield: 5, regen: 3,        // defensive drops — more common when the bat is hurt (see #randomPower)
   extralife: 0,                        // never an ambient drop — only the carrier alien gives it
   crane: 0,                            // never an ambient drop — only earned from a ball & chain run
 }
@@ -258,7 +262,8 @@ const PIERCE_DURATION = 9             // the white ball phases through tiles (1 
 // lost, but the fast ball is on screen a shorter time and easy to drop. It has 3
 // hp: ball hits, coloured ammo, lasers and rockets all chip it, so 3 hits destroy
 // the hunter. Killing it (or dying) resets the dawdle timer.
-const ENEMY_SPAWN_DELAY = 22         // seconds of "taking too long" before it appears
+const ENEMY_SPAWN_DELAY = 22         // seconds of "taking too long" before the first one appears
+const ENEMY_REFILL_GAP = 6           // gap before the swarm spawns its next member (up to the level cap)
 const ENEMY_SPEED = 105              // px/s homing toward the white ball
 const ENEMY_HP = 3
 // The ten enemy kinds (picked at random on spawn) and their hp ladder — Blink is a
@@ -310,6 +315,13 @@ const TURRET_FIRE_INTERVAL = 1.1     // seconds between a lit turret's shots
 const TURRET_SHOT_SPEED = 210        // px/s, aimed at the paddle's position at fire time
 const TURRET_SHOT_R = 4              // shot radius for the paddle hit-test
 const PADDLE_HIT_FLASH = 0.3         // seconds the paddle flashes red after taking a shot
+// Paddle health: enemy fire chips the bat's HP; deplete it and you lose a life.
+const PADDLE_MAX_HP = 100
+const TURRET_DMG = 24                // damage from a turret shot / bomb that lands on the bat
+const HEAL_AMOUNT = 45               // ♥ heal pill
+const SHIELD_DURATION = 10           // ⛨ shield: bat is immune + deflects fire
+const REGEN_DURATION = 12            // ✚ healing shield: shield + HP regen
+const REGEN_RATE = 14               // HP per second while the healing shield is up
 
 // Dynamite (TNT): periodically a crate appears in the middle for TNT_LIFETIME
 // seconds; a ball hit lights the fuse, and TNT_FUSE seconds later it detonates,
@@ -387,13 +399,18 @@ export class Engine {
   lasers: Laser[] = []
   rockets: Rocket[] = []
   explosions: Explosion[] = []
-  enemy: Enemy | null = null
+  enemies: Enemy[] = []               // the enemy swarm — its size cap grows with the level
+  levelIndex = 0                      // difficulty slot (set by the overlay) — more enemies on harder levels
   bumpers: Bumper[] = []              // pinball-mode field bumpers (empty otherwise)
   pinballProps: PinballProp[] = []    // a random handful of pinball props (pinball mode only)
   flipLeftRaise = 0                   // 0 = resting, 1 = fully flipped (left flipper, pinball mode)
   flipRightRaise = 0                  // 0 = resting, 1 = fully flipped (right flipper)
   turretShots: TurretShot[] = []      // shots fired at the player by lit turret tiles
   paddleHitFlash = 0                  // seconds left of the red flash after a turret shot lands
+  paddleHp = PADDLE_MAX_HP            // bat health — enemy fire chips it; 0 → lose a life
+  shieldTimer = 0                     // ⛨ shield active (immune + deflects fire)
+  regenTimer = 0                      // ✚ healing shield active (shield + HP regen)
+  shieldFlash = 0                     // brief flash when the shield deflects a shot
   tnt: Tnt | null = null              // the centre dynamite crate (null = none on screen)
   alien: Alien | null = null         // the top ship dispenser (respawns when shot)
   extraLife: ExtraLife | null = null // the winged-heart 1-UP carrier (null = none)
@@ -626,10 +643,9 @@ export class Engine {
     this.#destroyShip()
   }
 
-  /** A hit on the hunter feeds the combo. */
-  #countEnemyHit(): void {
-    const e = this.enemy
-    this.#bumpCombo(e?.x ?? W / 2, e?.y ?? BRICK_TOP * 0.5)   // hitting the hunter feeds the combo too
+  /** A hit on an enemy feeds the combo. */
+  #countEnemyHit(x = W / 2, y = BRICK_TOP * 0.5): void {
+    this.#bumpCombo(x, y)                              // hitting an enemy feeds the combo too
   }
 
   /** Count a hunter KILL. The big gold brick blooms ONCE per match — at the centre
@@ -769,7 +785,7 @@ export class Engine {
     this.lasers = []
     this.rockets = []
     this.explosions = []
-    this.enemy = null
+    this.enemies = []
     this.extraLife = null
     this.bumpers = []
     this.pinballProps = []
@@ -778,6 +794,8 @@ export class Engine {
     this.#flipLVel = this.#flipRVel = 0
     this.#clearTurrets()
     this.paddleHitFlash = 0
+    this.paddleHp = PADDLE_MAX_HP                  // a fresh bat at full health
+    this.shieldTimer = this.regenTimer = this.shieldFlash = 0
     this.tnt = null
     this.#tntTimer = TNT_FIRST
     this.pacman = null
@@ -832,6 +850,8 @@ export class Engine {
     addTimed('pinball', this.pinballTimer, this.#pinballDur || PINBALL_DURATION)
     addTimed('clock', this.freezeTimer, CLOCK_DURATION)
     addTimed('pierce', this.pierceTimer, PIERCE_DURATION)
+    addTimed('shield', this.shieldTimer, SHIELD_DURATION)
+    addTimed('regen', this.regenTimer, REGEN_DURATION)
     if (this.ballchainTimer > 0) out.push({ kind: 'ballchain', frac: clamp(this.ballchainTimer / BALLCHAIN_DURATION, 0, 1), label: `${this.ballchainKills}/${CHAIN_BONUS_PILLS}` })
     if (this.beamShots > 0) {
       const lvl = this.beamLevel >= 2 ? `L${this.beamLevel}` : ''
@@ -845,6 +865,10 @@ export class Engine {
 
   get gunActive(): boolean { return this.gunAmmo > 0 }
   get gunLoaderSize(): number { return GUN_LOADER }
+  /** Shielded while a plain or healing shield is up (bat is immune + deflects fire). */
+  get shielded(): boolean { return this.shieldTimer > 0 || this.regenTimer > 0 }
+  /** 0..1 paddle health (for the bar). */
+  get paddleHpFrac(): number { return clamp(this.paddleHp / PADDLE_MAX_HP, 0, 1) }
   /** 0..1 charge progress of the beam (purple mushroom), for the renderer. */
   get beamChargeFrac(): number { return this.beamShots > 0 ? clamp(this.beamCharge / this.beamTarget, 0, 1) : 0 }
   /** 0..1 fade of the beam's release flash, for the renderer. */
@@ -921,16 +945,7 @@ export class Engine {
     // A rocket caught in the blast also blows the ship out of the sky.
     if (this.alien && Math.hypot(this.alien.x - rk.x, this.alien.y - rk.y) <= ROCKET_RADIUS) this.#destroyShip()
     if (this.extraLife && Math.hypot(this.extraLife.x - rk.x, this.extraLife.y - rk.y) <= ROCKET_RADIUS) this.#hitExtraLife()
-    // A rocket caught in the blast vaporises the hunter outright (and counts as a hit).
-    if (this.enemy && Math.hypot(this.enemy.x - rk.x, this.enemy.y - rk.y) <= ROCKET_RADIUS) {
-      this.#countEnemyHit()
-      this.explosions.push({ x: this.enemy.x, y: this.enemy.y, t: 0 })
-      this.enemy = null
-      this.#levelClock = 0
-      this.#addScore(150)
-      this.#onEnemyKilled()
-      this.#endHazard()
-    }
+    this.#blastEnemies(rk.x, rk.y, ROCKET_RADIUS)     // the rocket vaporises any enemies in the blast
     if (this.pacman && Math.hypot(this.pacman.x - rk.x, this.pacman.y - rk.y) <= ROCKET_RADIUS) this.#killPacman()
     if (this.bricksLeft === 0) this.state = 'won'
   }
@@ -1052,22 +1067,25 @@ export class Engine {
       case 'polarity': e.polarity = sgn() < 0 ? 'blue' : 'red'; e.cd = 3; e.vx = sgn(); e.flash = 0; e.y = BRICK_TOP * 0.9; break
       case 'queen': e.cd = 4; e.brood = []; break
     }
-    this.enemy = e
-    this.#activeHazard = 'hunter'                            // reuses the single hazard slot
+    this.enemies.push(e)                                    // a swarm member (no longer a single hazard slot)
   }
 
-  /** Ten enemies, each its own motion + threat. Spawns after a dawdle; only one at a
-   *  time. Per-kind movement, then a shared per-kind contact pass. */
+  /** Swarm size cap by level: 1 early, 2 by level ~30, 3 by ~60. Harder = more enemies. */
+  #enemyCap(): number { return 1 + (this.levelIndex >= 30 ? 1 : 0) + (this.levelIndex >= 60 ? 1 : 0) }
+
+  /** Ten enemy kinds, each its own motion + threat. The swarm fills to its level cap —
+   *  the first after a long dawdle, refills on a short gap. Per-kind move + contact. */
   #stepEnemy(dt: number): void {
-    if (this.freezeTimer > 0) return                  // clock: enemy frozen
-    if (!this.enemy) {
+    if (this.freezeTimer > 0) return                  // clock: enemies frozen
+    if (this.enemies.length < this.#enemyCap() && this.bricksLeft > 0) {
       this.#levelClock += dt
-      if (this.#levelClock >= ENEMY_SPAWN_DELAY && this.bricksLeft > 0 && this.#hazardFree()) this.#spawnEnemy()
-      return
+      const delay = this.enemies.length === 0 ? ENEMY_SPAWN_DELAY : ENEMY_REFILL_GAP
+      if (this.#levelClock >= delay) { this.#spawnEnemy(); this.#levelClock = 0 }
     }
-    const e = this.enemy
-    this.#enemyMove(e, dt)
-    this.#enemyContact(e)
+    for (const e of [...this.enemies]) {              // snapshot: a contact can remove an enemy mid-pass
+      this.#enemyMove(e, dt)
+      this.#enemyContact(e)
+    }
   }
 
   /** Per-kind movement + special (bombs, brood, pill-theft, dive, teleport, flip). */
@@ -1187,7 +1205,7 @@ export class Engine {
       if (b.primary && melee) {
         b.vx = (dx / nd) * BALL_SPEED_MAX; b.vy = (dy / nd) * BALL_SPEED_MAX     // whacked away, fast
         b.x = e.x + (dx / nd) * (ENEMY_R + b.r + 1); b.y = e.y + (dy / nd) * (ENEMY_R + b.r + 1)
-        if (this.#hurtEnemy()) return
+        if (this.#hurtEnemy(e)) return
         continue
       }
       const sp = Math.hypot(b.vx, b.vy) || BALL_SPEED                            // otherwise it BOUNCES (bumper)
@@ -1196,12 +1214,12 @@ export class Engine {
       if (e.kind === 'splitter' && (e.split ?? 0) < 1) e.split = 1              // first hit cracks the pod
       let chip = e.kind !== 'mirror'                                            // mirror is a pure deny-wall (no chip)
       if (e.kind === 'polarity') chip = b.primary ? e.polarity === 'red' : e.polarity === 'blue'   // wrong type wasted
-      if (chip && this.#hurtEnemy()) return
+      if (chip && this.#hurtEnemy(e)) return
     }
     if (this.lasers.length) {                               // lasers are a universal key (work on any kind)
       const survive: Laser[] = []
       for (const l of this.lasers) {
-        if (Math.hypot(l.x - e.x, l.y - e.y) <= ENEMY_R) { if (this.#hurtEnemy()) return; continue }
+        if (Math.hypot(l.x - e.x, l.y - e.y) <= ENEMY_R) { if (this.#hurtEnemy(e)) return; continue }
         survive.push(l)
       }
       this.lasers = survive
@@ -1209,23 +1227,34 @@ export class Engine {
   }
 
   /** Damage the enemy; returns true once it dies. The Leech coughs up a pill it ate. */
-  #hurtEnemy(): boolean {
-    const e = this.enemy
-    if (!e) return false
-    this.#countEnemyHit()                             // every 5th hit earns a mega seed
+  #hurtEnemy(e: Enemy): boolean {
+    this.#countEnemyHit(e.x, e.y)                     // every 5th hit earns a mega seed; feeds the combo at e
     e.hp--
     this.#addScore(15)
-    if (e.hp <= 0) {
-      this.explosions.push({ x: e.x, y: e.y, t: 0 })
-      if (e.kind === 'leech' && (e.eaten ?? 0) > 0) this.capsules.push({ x: e.x, y: e.y, kind: this.#randomPower() })   // regurgitate loot
-      this.enemy = null
-      this.#levelClock = 0
-      this.#addScore(150)
-      this.#onEnemyKilled()
-      this.#endHazard()
-      return true
-    }
+    if (e.hp <= 0) { this.#killEnemy(e); return true }
     return false
+  }
+
+  /** Remove one enemy from the swarm with its death FX + bounty (the Leech coughs up
+   *  a pill it ate). Used by ball/laser kills and by AoE (rocket / ball-chain / TNT). */
+  #killEnemy(e: Enemy): void {
+    const i = this.enemies.indexOf(e)
+    if (i < 0) return                                 // already gone (e.g. two AoE sources same frame)
+    this.enemies.splice(i, 1)
+    this.explosions.push({ x: e.x, y: e.y, t: 0 })
+    if (e.kind === 'leech' && (e.eaten ?? 0) > 0) this.capsules.push({ x: e.x, y: e.y, kind: this.#randomPower() })   // regurgitate loot
+    this.#levelClock = 0                              // pace the next swarm member
+    this.#addScore(150)
+    this.#onEnemyKilled()
+  }
+
+  /** AoE: kill every enemy within `r` of (x,y). Returns true if any died. */
+  #blastEnemies(x: number, y: number, r: number): boolean {
+    let any = false
+    for (const e of [...this.enemies]) {
+      if (Math.hypot(e.x - x, e.y - y) <= r) { this.#countEnemyHit(e.x, e.y); this.#killEnemy(e); any = true }
+    }
+    return any
   }
 
   /** The pill-wave clock no longer drops pills itself — it just RELOADS the alien's
@@ -1347,12 +1376,7 @@ export class Engine {
     const cx = p.x + Math.sin(this.#chainAngle) * CHAIN_LEN
     const cy = p.y + Math.cos(this.#chainAngle) * CHAIN_LEN
     this.chainBall = { x: cx, y: cy }
-    // the hunter — killed outright on contact
-    if (this.enemy && Math.hypot(this.enemy.x - cx, this.enemy.y - cy) <= ENEMY_R + WRECK_R) {
-      this.#countEnemyHit()
-      this.explosions.push({ x: this.enemy.x, y: this.enemy.y, t: 0 })
-      this.enemy = null; this.#levelClock = 0; this.#addScore(150); this.#onEnemyKilled(); this.#endHazard()
-    }
+    this.#blastEnemies(cx, cy, ENEMY_R + WRECK_R)     // the wrecking ball kills enemies it sweeps
     // the ship — popped on contact
     if (this.alien && Math.hypot(this.alien.x - cx, this.alien.y - cy) <= ALIEN_W / 2 + WRECK_R) this.#destroyShip()
     // falling pills — smashed on contact, each counting toward the jackpot
@@ -1386,8 +1410,8 @@ export class Engine {
         if (!brick.alive) continue
         if (rk.x >= brick.x && rk.x <= brick.x + brick.w && rk.y - 9 <= brick.y + brick.h && rk.y >= brick.y) { hit = true; break }
       }
-      // Also explode on contact with the hunter or the alien ship.
-      if (!hit && this.enemy && Math.hypot(this.enemy.x - rk.x, this.enemy.y - rk.y) <= ENEMY_R + 4) hit = true
+      // Also explode on contact with any enemy or the alien ship.
+      if (!hit && this.enemies.some(e => Math.hypot(e.x - rk.x, e.y - rk.y) <= ENEMY_R + 4)) hit = true
       if (!hit && this.#shipHitAt(rk.x, rk.y)) hit = true
       if (hit) { this.#detonateRocket(rk); continue }
       survive.push(rk)
@@ -1418,6 +1442,11 @@ export class Engine {
         this.goldTimer = Math.max(0, this.goldTimer - dt)
         if (this.goldTimer === 0) this.goldBonus = 0           // gold window closed — bonus clears in one step
       }
+      if (this.shieldTimer > 0) this.shieldTimer = Math.max(0, this.shieldTimer - dt)
+      if (this.regenTimer > 0) {
+        this.regenTimer = Math.max(0, this.regenTimer - dt)
+        this.paddleHp = Math.min(PADDLE_MAX_HP, this.paddleHp + REGEN_RATE * dt)   // healing shield regenerates HP
+      }
       if (this.expandTimer > 0) {
         this.expandTimer = Math.max(0, this.expandTimer - dt)
         if (this.expandTimer === 0) { this.paddle.w = this.#paddleBaseW; this.paddle.x = clamp(this.paddle.x, this.paddle.w / 2, W - this.paddle.w / 2) }   // restore the oscillate-grown base
@@ -1440,6 +1469,7 @@ export class Engine {
       }
     }
     if (this.beamFlash > 0) this.beamFlash = Math.max(0, this.beamFlash - dt)            // cosmetic, keeps running
+    if (this.shieldFlash > 0) this.shieldFlash = Math.max(0, this.shieldFlash - dt * 3)
     for (const bm of this.bumpers) if (bm.flash > 0) bm.flash = Math.max(0, bm.flash - dt * 5)
     if (this.freezeTimer > 0) this.freezeTimer = Math.max(0, this.freezeTimer - dt)     // the clock itself keeps ticking down
     else if (this.#hazardCooldown > 0) this.#hazardCooldown = Math.max(0, this.#hazardCooldown - dt)   // director calm (paused while frozen)
@@ -1839,6 +1869,15 @@ export class Engine {
       case 'pierce':
         this.pierceTimer = Math.min(PIERCE_DURATION * 4, this.pierceTimer + PIERCE_DURATION)   // time stacks
         break
+      case 'heal':
+        this.paddleHp = Math.min(PADDLE_MAX_HP, this.paddleHp + HEAL_AMOUNT)
+        break
+      case 'shield':
+        this.shieldTimer = Math.min(SHIELD_DURATION * 3, this.shieldTimer + SHIELD_DURATION)   // time stacks
+        break
+      case 'regen':
+        this.regenTimer = Math.min(REGEN_DURATION * 3, this.regenTimer + REGEN_DURATION)        // healing shield
+        break
       case 'pinball':
         this.#pinballDur = PINBALL_DURATION
         this.pinballTimer = Math.min(PINBALL_DURATION * 3, this.pinballTimer + PINBALL_DURATION)   // time stacks
@@ -2128,7 +2167,14 @@ export class Engine {
       if (s.y - TURRET_SHOT_R > H) continue                       // fell off the bottom
       const hit = s.y + TURRET_SHOT_R >= p.y && s.y - TURRET_SHOT_R <= p.y + p.h &&
         s.x >= p.x - p.w / 2 - TURRET_SHOT_R && s.x <= p.x + p.w / 2 + TURRET_SHOT_R
-      if (hit) { this.combo = 0; this.paddleHitFlash = PADDLE_HIT_FLASH; continue }   // chain broken, no life lost
+      if (hit) {
+        this.combo = 0                                            // chain broken
+        if (this.shielded) { s.vy = -Math.abs(s.vy) * 1.1; s.y = p.y - TURRET_SHOT_R - 2; this.shieldFlash = 1; survive.push(s); continue }   // shield DEFLECTS the shot back up
+        this.paddleHitFlash = PADDLE_HIT_FLASH
+        this.paddleHp -= TURRET_DMG
+        if (this.paddleHp <= 0) { this.paddleHp = 0; this.turretShots = []; this.#loseLife(); return }   // bat destroyed → lose a life
+        continue
+      }
       survive.push(s)
     }
     this.turretShots = survive
@@ -2196,9 +2242,7 @@ export class Engine {
       this.#damage(brick, 1 + Math.floor(Math.random() * TNT_DMG_MAX))   // random 1..3 impacts per tile
     }
     if (this.alien && Math.hypot(this.alien.x - cx, this.alien.y - cy) <= TNT_RADIUS) this.#destroyShip()
-    if (this.enemy && Math.hypot(this.enemy.x - cx, this.enemy.y - cy) <= TNT_RADIUS) {
-      this.#countEnemyHit(); this.explosions.push({ x: this.enemy.x, y: this.enemy.y, t: 0 }); this.enemy = null; this.#levelClock = 0; this.#onEnemyKilled()
-    }
+    this.#blastEnemies(cx, cy, TNT_RADIUS)            // the TNT blast kills enemies in range
     if (this.pacman && Math.hypot(this.pacman.x - cx, this.pacman.y - cy) <= TNT_RADIUS) this.#killPacman()
     this.tnt = null
     this.#tntArmedThisLevel = false                        // one crate per level, no re-arm

@@ -91,6 +91,7 @@ export class SolomonOverlay {
   #prevLives = 3
   #prevConjure = 0
   #prevSmash = 0
+  #prevPickup = 0
   #intro: { t: number; title: string; sub: string } | null = null
 
   // Continuous-play state (see the Transition note above). The engine's score is
@@ -406,7 +407,18 @@ export class SolomonOverlay {
       })
     }
 
-    // Any score gain (kill / gem / key / door) — a small proportional shake. We
+    // Item grabbed — a quick bright sparkle at the pickup cell (the engine bumps
+    // pickupFlash on its rising edge and records the cell).
+    if (e.pickupFlash > this.#prevPickup && e.pickupCell) {
+      const cx = e.pickupCell.col * TILE + TILE / 2
+      const cy = e.pickupCell.row * TILE + TILE / 2
+      this.#field.burst(cx, cy, {
+        count: 12, speed: 80, gravity: 30, life: 0.5,
+        size: 2.2, color: [...ARCADE.spark],
+      })
+    }
+
+    // Any score gain (kill / jewel / key / door) — a small proportional shake. We
     // don't have exact positions for most of these, so a kick alone is enough.
     const ds = e.score - this.#prevScore
     if (ds > 0) this.#shaker.add(Math.min(0.5, 0.12 + ds / 1500))
@@ -415,6 +427,7 @@ export class SolomonOverlay {
     this.#prevLives = e.lives
     this.#prevConjure = e.conjureFlash
     this.#prevSmash = e.smashFlash
+    this.#prevPickup = e.pickupFlash
   }
 
   /** Snap the juice baselines to an engine without firing shake (level swaps),
@@ -424,6 +437,7 @@ export class SolomonOverlay {
     this.#prevLives = e.lives
     this.#prevConjure = e.conjureFlash
     this.#prevSmash = e.smashFlash
+    this.#prevPickup = e.pickupFlash
     this.#shaker = new Shaker(7, 1.8)
     this.#field.clear()
   }
@@ -716,12 +730,16 @@ export class SolomonOverlay {
     const { w, h } = dims
     const cx = w / 2
     const p = Math.min(1, tr.t / TALLY_MS)
-    // Count the level score over the first ~62%, then the bonus over the rest.
-    const levelP = Math.min(1, p / 0.62)
-    const bonusP = tr.bonus > 0 ? Math.max(0, Math.min(1, (p - 0.62) / 0.30)) : 0
+    // Count the lines in sequence: level score, then the time bonus, then any
+    // perfect-clear bonus — each ticking up as its window opens.
+    const clamp = (a: number, b: number) => Math.max(0, Math.min(1, (p - a) / b))
+    const levelP = clamp(0, 0.40)
+    const timeP = clamp(0.36, 0.30)
+    const bonusP = tr.bonus > 0 ? clamp(0.68, 0.26) : 0
     const shownLevel = Math.round(tr.levelScore * levelP)
+    const shownTime = Math.round(tr.timeBonus * timeP)
     const shownBonus = Math.round(tr.bonus * bonusP)
-    const shownTotal = tr.baseScore + shownLevel + shownBonus
+    const shownTotal = tr.baseScore + shownLevel + shownTime + shownBonus
     const font = (size: number, weight = 700) =>
       `${weight} ${Math.round(size)}px "Segoe UI", system-ui, sans-serif`
 
@@ -733,20 +751,23 @@ export class SolomonOverlay {
 
     ctx.fillStyle = '#ffd24d'
     ctx.font = font(h * 0.10, 800)
-    ctx.fillText('LEVEL CLEAR', cx, h * 0.30)
+    ctx.fillText('ROOM CLEAR', cx, h * 0.26)
 
     ctx.fillStyle = '#ffffff'
-    ctx.font = font(h * 0.052)
-    ctx.fillText(`Level  +${shownLevel}`, cx, h * 0.46)
+    ctx.font = font(h * 0.05)
+    ctx.fillText(`Score  +${shownLevel}`, cx, h * 0.42)
+
+    ctx.fillStyle = timeP > 0 ? '#9ee0ff' : 'rgba(158,224,255,0.28)'
+    ctx.fillText(`Time Bonus  +${shownTime}`, cx, h * 0.52)
 
     if (tr.bonus > 0) {
       ctx.fillStyle = bonusP > 0 ? '#ffd76a' : 'rgba(255,215,106,0.28)'
-      ctx.fillText(`Perfect Bonus  +${shownBonus}`, cx, h * 0.555)
+      ctx.fillText(`Perfect Bonus  +${shownBonus}`, cx, h * 0.62)
     }
 
     ctx.fillStyle = '#cfd2ff'
-    ctx.font = font(h * 0.062, 800)
-    ctx.fillText(`✦ ${shownTotal}`, cx, h * 0.69)
+    ctx.font = font(h * 0.06, 800)
+    ctx.fillText(`✦ ${shownTotal}`, cx, h * 0.74)
     ctx.restore()
   }
 

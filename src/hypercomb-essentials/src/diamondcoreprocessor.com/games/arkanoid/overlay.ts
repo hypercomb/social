@@ -362,6 +362,7 @@ export class ArkanoidOverlay {
     this.#designBar?.classList.add('ark-hidden')
     if (this.#canvas) this.#canvas.style.cursor = 'none'
     this.#engine = new Engine(level.rows)
+    this.#engine.levelIndex = this.#levelIndex          // difficulty → enemy-swarm size
     if (this.#launchOffset !== null) this.#engine.pinLaunchOffset(this.#launchOffset)   // reuse the on-paddle position; aim only the first time
     this.#paddleTargetX = this.#engine.paddle.x
     // Fresh run from this level: score back to 0, full lives, no carry-over.
@@ -788,6 +789,7 @@ export class ArkanoidOverlay {
       if (tr.t < TALLY_MS) return
       const carriedScore = tr.baseScore + tr.levelScore + tr.bonus
       const e = new Engine(tr.nextLevel.rows)
+      e.levelIndex = tr.nextIndex          // difficulty → enemy-swarm size
       e.score = carriedScore
       e.lives = tr.prev.lives
       e.paddle.x = tr.prev.paddle.x        // carry the paddle position; base range ⊂ any expanded range

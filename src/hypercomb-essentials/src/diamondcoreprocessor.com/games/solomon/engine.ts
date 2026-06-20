@@ -16,20 +16,20 @@
 //   • Dana has NO default ranged attack. He kills by DROPPING enemies (dispel
 //     the block under a foe so it falls to its death) or CRUSHING them (conjure
 //     a block in their cell). Fireballs are limited ammo, gained only from items.
-//   • Faithful foes: Goblin (relentless chaser, punches through your bricks),
-//     Gargoil (walks, spits a block-breaking fireball), Ghost (horizontal flyer
-//     that smashes blocks — fireball-only), Demonhead (endless mirror-spawned
-//     bouncers that self-expire), Panel Monster (a fixed fireball turret).
+//   • Faithful foes: Goblin (chaser), Gargoil + Dragon + Saramandor (fire-spitters),
+//     Ghost (horizontal flyer), Neul (vertical flyer), Sparkball (bouncer),
+//     Demonhead (endless mirror spawns), Panel Monster (fixed turret).
 //   • The key opens the door; reach the open door to clear the room. Bells free
-//     fairies; ten fairies grant an extra Dana. Hourglasses refill the meter.
+//     fairies (ten = an extra Dana); hourglasses refill the meter; jars load the
+//     fireball scroll. Solomon's Seals, constellation panels (→ a fairy bonus
+//     room) and Golden Wings (→ a warp) drive the meta-progression.
 
 export const TILE = 32
 
 // Tile codes. EMPTY is passable. WALL is the permanent grey stone (immovable —
 // the wand can't touch it). BRICK is the breakable orange block the wand creates
-// and destroys (level-authored bricks behave identically). CRACKED is a brick
-// that's taken one head-butt — a second head-hit finishes it (the wand still
-// clears either in a single cast).
+// and destroys. CRACKED is a brick that's taken one head-butt — a second head-hit
+// finishes it (the wand still clears either in a single cast).
 export const EMPTY = 0
 export const WALL = 1
 export const BRICK = 2
@@ -38,18 +38,27 @@ export type TileCode = 0 | 1 | 2 | 3
 
 export interface Cell { col: number; row: number }
 
-// The faithful NES foes. Each archetype has a distinct movement + kill rule;
-// the renderer draws each kind, and the designer can place them.
-export type EnemyKind = 'goblin' | 'gargoil' | 'ghost' | 'demonhead' | 'dragon' | 'panel'
+// The faithful NES foes. Each archetype has a distinct movement + kill rule.
+export type EnemyKind =
+  | 'goblin' | 'gargoil' | 'ghost' | 'demonhead' | 'dragon' | 'panel'
+  | 'neul' | 'saramandor' | 'sparkball'
 export interface EnemySpawn extends Cell { kind?: EnemyKind; dir?: 1 | -1 }
 
-// Pickups. `key` opens the door; `jewel` is pure score; `bell` frees a fairy;
-// `jar` / `superjar` load the fireball scroll; `hourglass` / `hourglassHalf`
-// reset the life meter; `fairy` counts toward an extra life; `life` is a 1-up.
+// Pickups. `key` opens the door; `jewel` / `treasure` are pure score; `bell`
+// frees a fairy; `jar` / `superjar` load the fireball scroll; `scroll` widens it;
+// `hourglass` / `hourglassHalf` reset the life meter; `fairy` counts toward an
+// extra life; `life` is a 1-up. The meta items: `seal` (a Solomon's Seal, kept
+// permanently), `zodiac` (a constellation panel — clear the room holding it to
+// reach a bonus room), `wings` (Golden Wings — clear holding it to warp ahead).
 // A `hidden` item sits inside a brick — destroy the covering block to reveal it.
 export type ItemKind =
-  | 'key' | 'jewel' | 'bell' | 'jar' | 'superjar' | 'hourglass' | 'hourglassHalf' | 'fairy' | 'life'
+  | 'key' | 'jewel' | 'treasure' | 'bell' | 'jar' | 'superjar' | 'scroll'
+  | 'hourglass' | 'hourglassHalf' | 'fairy' | 'life' | 'seal' | 'zodiac' | 'wings'
 export interface ItemSpawn extends Cell { kind: ItemKind; hidden?: boolean; value?: number }
+
+// A demon mirror — a generator that emits a steady stream of one foe kind.
+export type MirrorKind = 'demonhead' | 'saramandor'
+export interface MirrorSpawn extends Cell { kind?: MirrorKind }
 
 export interface LevelDef {
   name: string
@@ -61,8 +70,7 @@ export interface LevelDef {
   door: Cell
   enemies: EnemySpawn[]
   items: ItemSpawn[]
-  /** Demon mirrors — generators that emit a steady stream of Demonheads. */
-  mirrors: Cell[]
+  mirrors: MirrorSpawn[]
   /** Starting life-meter value (defaults to LIFE_FULL). */
   lifeStart?: number
 }
@@ -77,7 +85,7 @@ interface Enemy extends Body {
   alive: boolean
   squash: number          // death flatten timer (seconds remaining)
   anim: number            // animation phase, advances while moving
-  fireCd: number          // gargoil / dragon / panel shot cadence
+  fireCd: number          // gargoil / dragon / saramandor / panel shot cadence
   smashCd: number         // goblin chewing through a brick ahead
   ttl: number             // demonhead self-expire countdown (0 = immortal)
   airY: number | null     // y at the moment it left the ground (for drop-death)
@@ -88,18 +96,17 @@ interface Item extends ItemSpawn { taken: boolean; reveal: number }
 /** A released fairy — bobs where it was freed until Dana collects it. */
 interface Fairy { x: number; y: number; phase: number; taken: boolean }
 
-interface Mirror extends Cell { cd: number }
+interface Mirror extends Cell { cd: number; kind: MirrorKind }
 
 /** Dana's fireball — a horizontal projectile. A normal bolt dies on the first
  *  enemy it hits; a SUPER bolt plows through every enemy in its path. */
 export interface Fireball { x: number; y: number; vx: number; life: number; super: boolean }
 
-/** An enemy projectile (gargoil / dragon / panel). Breaks bricks, kills Dana. */
+/** An enemy projectile (gargoil / dragon / saramandor / panel). Breaks bricks,
+ *  kills Dana. */
 export interface Shot { x: number; y: number; vx: number; life: number }
 
-// Tuning — pixels, pixels/second, pixels/second². Calibrated to the original's
-// feel: low gravity gives Dana that signature floaty hang time, and walking is
-// deliberate (it's a puzzle platformer, not a runner).
+// Tuning — pixels, pixels/second, pixels/second².
 const GRAVITY = 900
 const MOVE_SPEED = 105
 const CROUCH_SPEED = 58
@@ -117,9 +124,10 @@ export const LIFE_FULL = 10000
 export const LIFE_HALF = 5000
 const LIFE_DRAIN = 100
 
-// Fireball: the scroll holds at most MAX_AMMO bolts (Dana starts EMPTY — there
-// is no default ranged attack). Items push bolts on; B fires the oldest.
+// Fireball scroll: at most MAX_AMMO bolts by default (a Scroll of Lyra widens it
+// up to SCROLL_CAP). Dana starts EMPTY — there is no default ranged attack.
 export const MAX_AMMO = 3
+export const SCROLL_CAP = 8
 const FIRE_SPEED = 320
 const FIRE_R = 6
 const FIRE_COOLDOWN = 0.28
@@ -132,22 +140,31 @@ const FAIRIES_PER_LIFE = 10
 
 // Per-kind hitbox + score. Scores follow the NES treasure tiers loosely.
 const E = {
-  goblin:    { w: TILE * 0.72, h: TILE * 0.84, speed: 62, score: 200 },
-  gargoil:   { w: TILE * 0.78, h: TILE * 0.82, speed: 44, score: 500 },
-  dragon:    { w: TILE * 0.86, h: TILE * 0.78, speed: 40, score: 1000 },
-  ghost:     { w: TILE * 0.74, h: TILE * 0.74, speed: 74, score: 500 },
-  demonhead: { w: TILE * 0.6,  h: TILE * 0.6,  speed: 86, score: 100 },
-  panel:     { w: TILE * 0.9,  h: TILE * 0.9,  speed: 0,  score: 0 },
+  goblin:     { w: TILE * 0.72, h: TILE * 0.84, speed: 62, score: 200 },
+  gargoil:    { w: TILE * 0.78, h: TILE * 0.82, speed: 44, score: 500 },
+  dragon:     { w: TILE * 0.86, h: TILE * 0.78, speed: 40, score: 1000 },
+  saramandor: { w: TILE * 0.7,  h: TILE * 0.74, speed: 50, score: 400 },
+  ghost:      { w: TILE * 0.74, h: TILE * 0.74, speed: 74, score: 500 },
+  neul:       { w: TILE * 0.66, h: TILE * 0.66, speed: 58, score: 600 },
+  sparkball:  { w: TILE * 0.58, h: TILE * 0.58, speed: 78, score: 700 },
+  demonhead:  { w: TILE * 0.6,  h: TILE * 0.6,  speed: 86, score: 100 },
+  panel:      { w: TILE * 0.9,  h: TILE * 0.9,  speed: 0,  score: 0 },
 } as const satisfies Record<EnemyKind, { w: number; h: number; speed: number; score: number }>
 
-const MIRROR_INTERVAL = 2.4   // seconds between Demonhead spawns
-const MIRROR_CAP = 3          // live Demonheads a single mirror sustains
+const MIRROR_INTERVAL = 2.4   // seconds between spawns
+const MIRROR_CAP = 3          // live spawned foes a single mirror sustains
 const DEMONHEAD_TTL = 7       // a Demonhead fades after this long
 const GARGOIL_FIRE_CD = 1.8
 const PANEL_FIRE_CD = 2.2
 const DRAGON_FIRE_CD = 1.5
+const SARAMANDOR_FIRE_CD = 1.6
 const SHOT_SPEED = 150
 const SHOT_LIFE = 3
+
+const WALKERS = new Set<EnemyKind>(['goblin', 'gargoil', 'dragon', 'saramandor'])
+const SHOOTERS = new Set<EnemyKind>(['gargoil', 'dragon', 'saramandor'])
+const PATROLLERS = new Set<EnemyKind>(['gargoil', 'saramandor']) // turn at walls/ledges
+const HUNTERS = new Set<EnemyKind>(['goblin', 'dragon'])         // steer toward Dana
 
 export class Engine {
   level: LevelDef
@@ -170,10 +187,19 @@ export class Engine {
   #fireCooldown = 0
 
   /** The fireball scroll: each slot is a stored bolt, `true` = a super bolt.
-   *  Fired oldest-first (shift the front). Capped at MAX_AMMO. */
+   *  Fired oldest-first (shift the front). Capped at `ammoCap`. */
   ammo: boolean[] = []
+  ammoCap = MAX_AMMO
   fairyCount = 0
   doorOpen = false
+
+  // Meta-progression. sealCount + collected seals persist across deaths (and the
+  // overlay carries them across rooms); zodiac / wings are held only for the
+  // current room (lost on death — you must re-grab them).
+  sealCount = 0
+  #collectedSeals = new Set<string>()
+  zodiacHeld = false
+  wingsHeld = false
 
   life = LIFE_FULL
   lives = 3
@@ -183,17 +209,13 @@ export class Engine {
   // Transient flash timers the renderer / overlay read (seconds remaining).
   conjureFlash = 0
   hurtFlash = 0
-  // Head-butt: a rising-edge flash + the cell that just shattered, so the overlay
-  // can spray stone debris at the broken brick (not the wand's foot-level target).
   smashFlash = 0
   smashCell: Cell | null = null
-  // Rising-edge counters the overlay turns into juice without engine view-coupling.
   fireFlash = 0       // bumps when Dana looses a fireball
   pickupFlash = 0     // bumps when Dana grabs any item
   pickupCell: Cell | null = null
 
-  // Held input — the overlay writes these from key events. `down` is the crouch
-  // key; jump + fireball are edge-triggered methods, not held flags.
+  // Held input — the overlay writes these from key events.
   input = { left: false, right: false, down: false }
 
   constructor(level: LevelDef) {
@@ -207,7 +229,8 @@ export class Engine {
   get width(): number { return this.cols * TILE }
   get height(): number { return this.rows * TILE }
 
-  /** (Re)load a level from its definition, resetting all dynamic state. */
+  /** (Re)load a level from its definition, resetting ALL dynamic state including
+   *  the persistent seal tally (a brand-new game). */
   load(level: LevelDef): void {
     this.level = level
     this.cols = level.cols
@@ -216,13 +239,14 @@ export class Engine {
     this.score = 0
     this.lives = 3
     this.fairyCount = 0
+    this.sealCount = 0
+    this.#collectedSeals.clear()
     this.spawn()
   }
 
   /** Reset Dana, foes, items and the meter to the level's start — keeps lives,
-   *  score and fairy count (used after a death). */
+   *  score, fairy count and the seal tally (used after a death + between rooms). */
   spawn(): void {
-    // Restore the authored brick layout (conjured / dispelled bricks revert).
     this.grid = Uint8Array.from(this.level.tiles.slice(0, this.cols * this.rows))
     const p = this.level.player
     this.player.w = PLAYER_W
@@ -238,33 +262,42 @@ export class Engine {
     this.shots = []
     this.fairies = []
     this.ammo = []
+    this.ammoCap = MAX_AMMO
     this.#fireCooldown = 0
     this.input.left = this.input.right = this.input.down = false
     this.doorOpen = false
+    this.zodiacHeld = false
+    this.wingsHeld = false
     this.life = this.level.lifeStart ?? LIFE_FULL
 
     this.items = this.level.items.map(it => ({ ...it, taken: false, reveal: 0 }))
-    this.enemies = this.level.enemies.map(e => this.#makeEnemy(e.kind ?? 'goblin', e.col, e.row, e.dir ?? 1, false))
-    this.mirrors = this.level.mirrors.map(m => ({ ...m, cd: MIRROR_INTERVAL * 0.6 }))
+    // Seals already collected this game don't reappear.
+    for (const it of this.items) if (it.kind === 'seal' && this.#collectedSeals.has(this.#sealKey(it))) it.taken = true
+    this.enemies = this.level.enemies.map(e => this.#makeEnemy(e.kind ?? 'goblin', e.col, e.row, e.dir ?? 1))
+    this.mirrors = this.level.mirrors.map(m => ({ col: m.col, row: m.row, kind: m.kind ?? 'demonhead', cd: MIRROR_INTERVAL * 0.6 }))
 
     this.state = 'playing'
     this.conjureFlash = this.hurtFlash = this.smashFlash = this.fireFlash = this.pickupFlash = 0
     this.smashCell = this.pickupCell = null
   }
 
-  #makeEnemy(kind: EnemyKind, col: number, row: number, dir: 1 | -1, spawned: boolean): Enemy {
+  #makeEnemy(kind: EnemyKind, col: number, row: number, dir: 1 | -1): Enemy {
     const d = E[kind]
-    return {
+    const e: Enemy = {
       kind, dir, alive: true, squash: 0, anim: 0,
       x: col * TILE + (TILE - d.w) / 2,
       y: row * TILE + (TILE - d.h),
       w: d.w, h: d.h, vx: 0, vy: 0,
       fireCd: kind === 'panel' ? PANEL_FIRE_CD : 1.2,
       smashCd: 0,
-      ttl: kind === 'demonhead' ? (spawned ? DEMONHEAD_TTL : 0) : 0,
+      ttl: kind === 'demonhead' ? DEMONHEAD_TTL : 0,
       airY: null,
     }
+    if (kind === 'sparkball') { e.vx = dir * E.sparkball.speed; e.vy = E.sparkball.speed * 0.6 }
+    return e
   }
+
+  #sealKey(c: Cell): string { return `${c.col},${c.row}` }
 
   // ── tile helpers ─────────────────────────────────────────
 
@@ -273,7 +306,7 @@ export class Engine {
   }
 
   tileAt(col: number, row: number): number {
-    if (!this.inBounds(col, row)) return WALL // out-of-bounds reads as solid wall
+    if (!this.inBounds(col, row)) return WALL
     return this.grid[row * this.cols + col]
   }
 
@@ -292,7 +325,6 @@ export class Engine {
     return t === BRICK || t === CRACKED
   }
 
-  /** True if the rect [x,y,w,h] overlaps any solid tile. */
   rectSolid(x: number, y: number, w: number, h: number): boolean {
     const c0 = Math.floor(x / TILE)
     const c1 = Math.floor((x + w - 1) / TILE)
@@ -306,17 +338,14 @@ export class Engine {
 
   // ── the wand: conjure / dispel a brick in front of Dana ──
 
-  /** The cell the wand targets: the column Dana faces. Standing aims at his foot
-   *  row (body level — the classic stair-step); crouching aims one row LOWER, so
-   *  a duck conjures down in front (fill a pit, build a descending step). */
+  /** The cell the wand targets: the column Dana faces, at his foot row standing
+   *  (body level — the classic stair-step) or one row LOWER crouched. */
   targetCell(): Cell {
     const footRow = Math.floor((this.player.y + this.player.h - 1) / TILE)
     const centerCol = Math.floor((this.player.x + this.player.w / 2) / TILE)
     return { col: centerCol + this.facing, row: footRow + (this.ducking ? 1 : 0) }
   }
 
-  /** Fire the wand. Empty target → conjure a brick (crushing any foe there);
-   *  brick / cracked target → dispel it. Grey walls are immovable. */
   cast(): 'conjure' | 'dispel' | 'blocked' {
     if (this.state !== 'playing') return 'blocked'
     const { col, row } = this.targetCell()
@@ -329,14 +358,9 @@ export class Engine {
       this.conjureFlash = 0.18
       return 'dispel'
     }
-    // EMPTY → conjure. You can never be "in the way" of a brick: if Dana's box
-    // slightly intrudes into the target cell, shove him back out so he ends flush
-    // against it, then conjure. Only a genuine sandwich (a solid right behind him,
-    // nowhere to eject to) still blocks.
     if (!this.#ejectFromCell(col, row)) return 'blocked'
     this.setTile(col, row, BRICK)
     this.conjureFlash = 0.18
-    // Crush any foe standing in the freshly-filled cell.
     for (const e of this.enemies) {
       if (e.alive && e.kind !== 'panel' && this.rectOverlapsCell(e, col, row)) this.#killEnemy(e, true)
     }
@@ -348,9 +372,6 @@ export class Engine {
     return b.x < cx + TILE && b.x + b.w > cx && b.y < cy + TILE && b.y + b.h > cy
   }
 
-  /** If Dana's box intrudes into cell (col,row), push him horizontally out of it
-   *  (opposite his facing — the brick is always conjured in front). Returns false
-   *  only if there's no room to back up. No-op (true) when he isn't intruding. */
   #ejectFromCell(col: number, row: number): boolean {
     const p = this.player
     if (!this.rectOverlapsCell(p, col, row)) return true
@@ -363,14 +384,12 @@ export class Engine {
 
   // ── simulation ───────────────────────────────────────────
 
-  /** Advance one frame. dt in seconds (clamped by the caller). */
   update(dt: number): void {
     if (this.conjureFlash > 0) this.conjureFlash = Math.max(0, this.conjureFlash - dt)
     if (this.hurtFlash > 0) this.hurtFlash = Math.max(0, this.hurtFlash - dt)
     if (this.smashFlash > 0) this.smashFlash = Math.max(0, this.smashFlash - dt)
     if (this.state !== 'playing') return
 
-    // The life meter is the clock — it never stops while playing. Empty = death.
     this.life -= LIFE_DRAIN * dt
     if (this.life <= 0) { this.life = 0; this.#die(); return }
 
@@ -384,8 +403,6 @@ export class Engine {
     this.#hazardContact()
   }
 
-  /** Jump — a fixed-height hop, only from the ground and only while standing
-   *  (you can't spring out of a crouch). Edge-triggered by the overlay. */
   jump(): void {
     if (this.state !== 'playing') return
     if (!this.onGround || this.ducking) return
@@ -393,34 +410,27 @@ export class Engine {
     this.onGround = false
   }
 
-  /** Loose a fireball in the facing direction — but ONLY if the scroll holds a
-   *  bolt. The oldest bolt fires; a super bolt plows through everything. */
   fireball(): void {
     if (this.state !== 'playing') return
     if (this.#fireCooldown > 0 || this.ammo.length === 0) return
     const isSuper = this.ammo.shift() === true
     this.#fireCooldown = FIRE_COOLDOWN
     const p = this.player
-    // Anchor to the FEET: Dana stands taller than a ground foe, so a head-relative
-    // shot sails over them. A touch lower while ducked.
     const fy = (p.y + p.h) - TILE * (this.ducking ? 0.3 : 0.5)
     const fx = this.facing > 0 ? p.x + p.w : p.x - FIRE_R
     this.fireballs.push({ x: fx, y: fy, vx: this.facing * FIRE_SPEED, life: FIRE_LIFE, super: isSuper })
     this.fireFlash += 1
-    this.conjureFlash = 0.12 // brief muzzle spark at the wand
+    this.conjureFlash = 0.12
   }
 
   /** Push a bolt onto the scroll (drops if full). `super` = a piercing bolt. */
   addAmmo(isSuper: boolean): void {
-    if (this.ammo.length >= MAX_AMMO) return
+    if (this.ammo.length >= this.ammoCap) return
     this.ammo.push(isSuper)
   }
 
   #stepPlayer(dt: number): void {
     const p = this.player
-
-    // Crouch: engage on the ground when Down is held; stand the moment it's
-    // released (blocked by a low ceiling overhead).
     if (this.input.down && this.onGround && !this.ducking) this.#engageDuck()
     else if (!this.input.down && this.ducking) this.#tryStand()
 
@@ -433,7 +443,6 @@ export class Engine {
     this.#moveX(p, p.vx * dt)
     this.#moveYPlayer(p, p.vy * dt)
 
-    // Fell out the bottom of the world (open pit) — lose a Dana.
     if (p.y > this.height + TILE) this.#die()
   }
 
@@ -449,7 +458,7 @@ export class Engine {
     const p = this.player
     const footY = p.y + p.h
     const ny = footY - PLAYER_H
-    if (this.rectSolid(p.x, ny, p.w, PLAYER_H)) return // low ceiling — stay crouched
+    if (this.rectSolid(p.x, ny, p.w, PLAYER_H)) return
     p.y = ny
     p.h = PLAYER_H
     this.ducking = false
@@ -471,7 +480,7 @@ export class Engine {
         if (!e.alive || e.kind === 'panel') continue
         if (f.x > e.x && f.x < e.x + e.w && f.y > e.y && f.y < e.y + e.h) {
           this.#killEnemy(e, false)
-          if (!f.super) { consumed = true; break } // super bolts plow on through
+          if (!f.super) { consumed = true; break }
         }
       }
       if (!consumed) survive.push(f)
@@ -479,7 +488,7 @@ export class Engine {
     this.fireballs = survive
   }
 
-  // ── enemy projectiles (gargoil / dragon / panel) ─────────
+  // ── enemy projectiles ────────────────────────────────────
 
   #stepShots(dt: number): void {
     if (this.shots.length === 0) return
@@ -490,8 +499,8 @@ export class Engine {
       const col = Math.floor(s.x / TILE), row = Math.floor(s.y / TILE)
       if (s.life <= 0 || s.x < 0 || s.x > this.width) continue
       const t = this.tileAt(col, row)
-      if (t === WALL) continue                    // soak into permanent stone
-      if (t === BRICK || t === CRACKED) {          // shatter a brick and die
+      if (t === WALL) continue
+      if (t === BRICK || t === CRACKED) {
         this.setTile(col, row, EMPTY)
         this.#revealAt(col, row)
         this.smashCell = { col, row }
@@ -509,7 +518,6 @@ export class Engine {
 
   // ── movement primitives ──────────────────────────────────
 
-  // Horizontal move with a one-tile climb assist when grounded.
   #moveX(p: Body, dx: number): void {
     if (dx === 0) return
     const step = Math.sign(dx)
@@ -541,9 +549,6 @@ export class Engine {
       remaining -= move
       const ny = p.y + step * move
       if (!this.rectSolid(p.x, ny, p.w, p.h)) { p.y = ny; continue }
-      // Rising into the ceiling: a BRICK overhead cracks then shatters from the
-      // head-butt (two hits, like the original); a CRACKED brick breaks on the
-      // second; a permanent WALL stops Dana cold.
       if (step < 0 && this.#headButt(p, ny)) { p.y = ny; continue }
       if (step > 0) this.onGround = true
       p.vy = 0
@@ -552,9 +557,6 @@ export class Engine {
     if (step > 0 && !this.onGround) this.#groundCheck(p)
   }
 
-  /** Head-butt the brick(s) at the proposed top edge `ny`. First hit cracks a
-   *  brick, second breaks it (revealing any hidden item). Returns true only when
-   *  the path is clear afterwards, so the rise continues. */
   #headButt(p: Body, ny: number): boolean {
     const headRow = Math.floor(ny / TILE)
     const c0 = Math.floor(p.x / TILE)
@@ -588,12 +590,13 @@ export class Engine {
       if (!e.alive) { if (e.squash > 0) e.squash = Math.max(0, e.squash - dt); continue }
       switch (e.kind) {
         case 'ghost': this.#stepGhost(e, dt); break
+        case 'neul': this.#stepNeul(e, dt); break
+        case 'sparkball': this.#stepSparkball(e, dt); break
         case 'demonhead': this.#stepDemonhead(e, dt); break
         case 'panel': this.#stepPanel(e, dt); break
-        default: this.#stepWalker(e, dt); break   // goblin, gargoil, dragon
+        default: this.#stepWalker(e, dt); break   // goblin, gargoil, dragon, saramandor
       }
     }
-    // Reap fully-faded corpses so lists don't grow unbounded across a long room.
     this.enemies = this.enemies.filter(e => e.alive || e.squash > 0)
   }
 
@@ -601,28 +604,23 @@ export class Engine {
   #stepWalker(e: Enemy, dt: number): void {
     e.vy = Math.min(e.vy + GRAVITY * dt, MAX_FALL)
     const before = e.y
-    const wasAir = !this.#grounded(e)
-    if (wasAir && e.airY === null) e.airY = before
+    if (!this.#grounded(e) && e.airY === null) e.airY = before
     this.#moveYSimple(e, e.vy * dt)
     const grounded = this.#grounded(e)
     if (grounded && e.airY !== null) {
-      // Landed: a long fall is fatal — the "drop him to ruin him" kill.
       if (e.y - e.airY > DROP_KILL) { this.#killEnemy(e, false); return }
       e.airY = null
     }
-    if (e.y > this.height + TILE) { this.#killEnemy(e, false); return } // fell off
+    if (e.y > this.height + TILE) { this.#killEnemy(e, false); return }
 
     const speed = E[e.kind].speed
     e.anim += dt * speed
     if (e.smashCd > 0) e.smashCd -= dt
     if (e.fireCd > 0) e.fireCd -= dt
 
-    // Aim: goblins + dragons HUNT Dana; gargoils patrol and turn at walls/ledges.
-    if (grounded) {
-      if (e.kind === 'goblin' || e.kind === 'dragon') {
-        const dx = this.player.x - e.x
-        if (Math.abs(dx) > 2) e.dir = (dx > 0 ? 1 : -1)
-      }
+    if (grounded && HUNTERS.has(e.kind)) {
+      const dx = this.player.x - e.x
+      if (Math.abs(dx) > 2) e.dir = (dx > 0 ? 1 : -1)
     }
 
     const aheadX = e.dir > 0 ? e.x + e.w + 1 : e.x - 1
@@ -645,19 +643,17 @@ export class Engine {
       return
     }
 
-    // Gargoils + dragons spit a block-breaking fireball when Dana is ahead at a
-    // similar height. Gargoils turn back at walls / ledges; hunters press on.
-    if ((e.kind === 'gargoil' || e.kind === 'dragon') && e.fireCd <= 0) {
+    // Fire-spitters loose a block-breaking bolt when Dana is ahead at a similar height.
+    if (SHOOTERS.has(e.kind) && e.fireCd <= 0) {
       const facingDana = Math.sign(this.player.x - e.x) === e.dir
       const sameRow = Math.abs((this.player.y + this.player.h) - (e.y + e.h)) < TILE * 1.2
       if (facingDana && sameRow) {
-        const sy = e.y + e.h * 0.45
-        this.#fireShot(e.dir > 0 ? e.x + e.w : e.x, sy, e.dir)
-        e.fireCd = e.kind === 'dragon' ? DRAGON_FIRE_CD : GARGOIL_FIRE_CD
+        this.#fireShot(e.dir > 0 ? e.x + e.w : e.x, e.y + e.h * 0.45, e.dir)
+        e.fireCd = e.kind === 'dragon' ? DRAGON_FIRE_CD : e.kind === 'saramandor' ? SARAMANDOR_FIRE_CD : GARGOIL_FIRE_CD
       }
     }
 
-    if (grounded && e.kind === 'gargoil' && (wallAhead || !groundAhead)) { e.dir = -e.dir as 1 | -1; return }
+    if (grounded && PATROLLERS.has(e.kind) && (wallAhead || !groundAhead)) { e.dir = -e.dir as 1 | -1; return }
 
     const nx = e.x + e.dir * speed * dt
     if (!this.rectSolid(nx, e.y, e.w, e.h)) e.x = nx
@@ -665,7 +661,7 @@ export class Engine {
   }
 
   /** Ghost: a horizontal flyer (no gravity). Bounces off grey walls and SMASHES
-   *  any brick it touches — it wrecks your bridges. Fireball-only kill. */
+   *  any brick it touches. Fireball-only kill. */
   #stepGhost(e: Enemy, dt: number): void {
     e.anim += dt * E.ghost.speed
     const nx = e.x + e.dir * E.ghost.speed * dt
@@ -677,8 +673,44 @@ export class Engine {
     e.x = nx
   }
 
+  /** Neul: a vertical flyer that homes on Dana's height (and drifts toward his
+   *  column), smashing bricks in its path. Fireball-only kill. */
+  #stepNeul(e: Enemy, dt: number): void {
+    e.anim += dt * E.neul.speed
+    const sp = E.neul.speed
+    // vertical homing
+    const dy = (this.player.y + this.player.h / 2) - (e.y + e.h / 2)
+    const stepY = Math.sign(dy) * Math.min(Math.abs(dy), sp * dt)
+    const ny = e.y + stepY
+    const colY = Math.floor((e.x + e.w / 2) / TILE)
+    const rowY = Math.floor((stepY > 0 ? ny + e.h : ny) / TILE)
+    const tY = this.tileAt(colY, rowY)
+    if (tY === BRICK || tY === CRACKED) { this.setTile(colY, rowY, EMPTY); this.#revealAt(colY, rowY) }
+    if (!this.rectSolid(e.x, ny, e.w, e.h)) e.y = ny
+    // slow horizontal drift toward Dana's column
+    const dx = (this.player.x + this.player.w / 2) - (e.x + e.w / 2)
+    const stepX = Math.sign(dx) * Math.min(Math.abs(dx), sp * 0.5 * dt)
+    const nx = e.x + stepX
+    const colX = Math.floor((stepX > 0 ? nx + e.w : nx) / TILE)
+    const rowX = Math.floor((e.y + e.h / 2) / TILE)
+    const tX = this.tileAt(colX, rowX)
+    if (tX === BRICK || tX === CRACKED) { this.setTile(colX, rowX, EMPTY); this.#revealAt(colX, rowX) }
+    if (!this.rectSolid(nx, e.y, e.w, e.h)) e.x = nx
+  }
+
+  /** Sparkball: a relentless 2D bouncer (no gravity) that ricochets off any solid.
+   *  Doesn't expire and doesn't smash blocks — wall it off or fireball it. */
+  #stepSparkball(e: Enemy, dt: number): void {
+    e.anim += dt * E.sparkball.speed
+    const nx = e.x + e.vx * dt
+    if (this.rectSolid(nx, e.y, e.w, e.h)) e.vx = -e.vx; else e.x = nx
+    const ny = e.y + e.vy * dt
+    if (this.rectSolid(e.x, ny, e.w, e.h)) e.vy = -e.vy; else e.y = ny
+    e.dir = (e.vx >= 0 ? 1 : -1)
+  }
+
   /** Demonhead: mirror-spawned bouncer. Drifts with a vertical bob, reverses at
-   *  any solid, and self-expires after its ttl. Fireball / contact kills early. */
+   *  any solid, and self-expires after its ttl. */
   #stepDemonhead(e: Enemy, dt: number): void {
     e.anim += dt * E.demonhead.speed
     if (e.ttl > 0) { e.ttl -= dt; if (e.ttl <= 0) { this.#killEnemy(e, false); return } }
@@ -690,8 +722,7 @@ export class Engine {
     e.y += Math.sin(e.anim * 0.06) * 14 * dt
   }
 
-  /** Panel Monster: a fixed turret embedded in the wall. It only spits a
-   *  block-breaking fireball on a cadence — you avoid it, you don't kill it. */
+  /** Panel Monster: a fixed turret embedded in the wall. */
   #stepPanel(e: Enemy, dt: number): void {
     if (e.fireCd > 0) { e.fireCd -= dt; return }
     e.fireCd = PANEL_FIRE_CD
@@ -703,10 +734,10 @@ export class Engine {
       m.cd -= dt
       if (m.cd > 0) continue
       m.cd = MIRROR_INTERVAL
-      const live = this.enemies.filter(e => e.alive && e.kind === 'demonhead').length
+      const live = this.enemies.filter(e => e.alive && e.kind === m.kind).length
       if (live >= MIRROR_CAP) continue
       const dir: 1 | -1 = m.col < this.cols / 2 ? 1 : -1
-      this.enemies.push(this.#makeEnemy('demonhead', m.col, m.row, dir, true))
+      this.enemies.push(this.#makeEnemy(m.kind, m.col, m.row, dir))
     }
   }
 
@@ -743,7 +774,6 @@ export class Engine {
 
   // ── items, fairies, the door ─────────────────────────────
 
-  /** Reveal any hidden item whose covering brick at (col,row) was just cleared. */
   #revealAt(col: number, row: number): void {
     for (const it of this.items) {
       if (!it.taken && it.hidden && it.col === col && it.row === row) { it.hidden = false; it.reveal = 0.4 }
@@ -763,7 +793,6 @@ export class Engine {
         this.#gainFairy()
       }
     }
-    // A keyless room opens from the start.
     if (!this.items.some(i => i.kind === 'key')) this.doorOpen = true
 
     const d = this.level.door
@@ -780,17 +809,21 @@ export class Engine {
     switch (it.kind) {
       case 'key':           this.doorOpen = true; this.score += 1000; break
       case 'jewel':         this.score += it.value ?? 500; break
+      case 'treasure':      this.score += it.value ?? 2000; break
       case 'bell':          this.score += 100; this.#freeFairy(); break
       case 'jar':           this.addAmmo(false); this.score += 200; break
       case 'superjar':      this.addAmmo(true); this.score += 500; break
+      case 'scroll':        this.ammoCap = Math.min(SCROLL_CAP, this.ammoCap + 1); this.score += 200; break
       case 'hourglass':     this.life = LIFE_FULL; this.score += 500; break
       case 'hourglassHalf': this.life = LIFE_HALF; this.score += 100; break
       case 'fairy':         this.#gainFairy(); break
       case 'life':          this.lives += 1; this.score += 1000; break
+      case 'seal':          this.#collectedSeals.add(this.#sealKey(it)); this.sealCount += 1; this.score += 1000; break
+      case 'zodiac':        this.zodiacHeld = true; this.score += 5000; break
+      case 'wings':         this.wingsHeld = true; this.score += 500; break
     }
   }
 
-  /** A bell frees a fairy from the door — it bobs there until Dana grabs it. */
   #freeFairy(): void {
     const d = this.level.door
     this.fairies.push({ x: d.col * TILE + TILE / 2, y: d.row * TILE + TILE / 2, phase: 0, taken: false })

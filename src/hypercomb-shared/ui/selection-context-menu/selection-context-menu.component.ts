@@ -37,6 +37,8 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   #clipboardCount = signal(0)
   /** True when at least one selected tile has documents — gates the button. */
   #hasDocuments = signal(false)
+  /** True when at least one selected tile carries a feature — gates the button. */
+  #hasFeatures = signal(false)
   #posX = signal(0)
   #posY = signal(0)
   #dragging = signal(false)
@@ -66,6 +68,7 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   readonly moveMode = this.#moveMode.asReadonly()
   readonly clipboardCount = this.#clipboardCount.asReadonly()
   readonly hasDocuments = this.#hasDocuments.asReadonly()
+  readonly hasFeatures = this.#hasFeatures.asReadonly()
   readonly posX = this.#posX.asReadonly()
   readonly posY = this.#posY.asReadonly()
   readonly dragging = this.#dragging.asReadonly()
@@ -84,6 +87,7 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   #moveModeUnsub: (() => void) | null = null
   #clipboardUnsub: (() => void) | null = null
   #hasDocumentsUnsub: (() => void) | null = null
+  #hasFeaturesUnsub: (() => void) | null = null
   #screensaverUnsub: (() => void) | null = null
 
   // ── lifecycle ───────────────────────────────────────────
@@ -117,6 +121,12 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
       this.#hasDocuments.set(payload?.value === true)
     })
 
+    // ShowFeaturesDrone publishes whether the current selection has any tile
+    // carrying a feature (last-value replay keeps this correct on late mount).
+    this.#hasFeaturesUnsub = EffectBus.on<{ value?: boolean }>('selection:has-features', (payload) => {
+      this.#hasFeatures.set(payload?.value === true)
+    })
+
     this.#screensaverUnsub = EffectBus.on<{ active?: boolean }>('screensaver:active', (payload) => {
       this.#screensaverActive.set(payload?.active === true)
     })
@@ -130,6 +140,7 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
     this.#moveModeUnsub?.()
     this.#clipboardUnsub?.()
     this.#hasDocumentsUnsub?.()
+    this.#hasFeaturesUnsub?.()
     this.#screensaverUnsub?.()
     window.removeEventListener('resize', this.#onResize)
     window.removeEventListener('pointermove', this.#onDragMove)
@@ -168,6 +179,10 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
 
   readonly viewDocuments = (): void => {
     EffectBus.emit('controls:action', { action: 'view-documents' })
+  }
+
+  readonly features = (): void => {
+    EffectBus.emit('controls:action', { action: 'features' })
   }
 
   // ── hidden-state check ──────────────────────────────────

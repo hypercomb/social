@@ -64,6 +64,7 @@ const LINEAGE_KEY = '@hypercomb.social/Lineage'
 const I18N_KEY = '@hypercomb.social/I18n'
 const STORE_KEY = '@hypercomb.social/Store'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
+const SELECTION_KEY = '@diamondcoreprocessor.com/SelectionService'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
@@ -142,6 +143,10 @@ interface SwarmDroneLike {
   peerTilesAtCurrentSig?: () => readonly ({ name: string } & Record<string, unknown>)[]
 }
 
+interface SelectionLike {
+  selected?: ReadonlySet<string>
+}
+
 interface LineageLike {
   explorerSegments?: () => readonly string[]
 }
@@ -174,8 +179,8 @@ export class ShowFeaturesDrone extends Drone {
   public override description =
     'Gathers the bee-feature metadata (no code) of a clicked tile — both render features and cascading capabilities — and emits features:open so the shell panel lists them, tagging each with its origin (direct on the tile, or cascaded from an ancestor). Read-only — staging the features is benign and handled panel-side.'
 
-  protected override listens: string[] = ['tile:action']
-  protected override emits: string[] = ['features:open']
+  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action']
+  protected override emits: string[] = ['features:open', 'selection:has-features']
 
   constructor() {
     super()
@@ -185,9 +190,46 @@ export class ShowFeaturesDrone extends Drone {
       if (!label) return
       void this.#open(label)
     })
+
+    // The selection context menu mirrors the per-tile puzzle-piece: when the
+    // selection includes a tile that carries a feature, its "features" button
+    // appears. Publish that gate on every selection change — last-value replay
+    // keeps a late-mounting menu correct. Same shape FileDropDrone uses for
+    // `selection:has-documents`.
+    this.onEffect<{ selected?: string[] }>('selection:changed', (payload) => {
+      const labels = Array.isArray(payload?.selected) ? payload!.selected!.map(String) : []
+      const value = labels.some(l => this.#labelHasFeature(l))
+      this.emitEffect('selection:has-features', { value })
+    })
+
+    // The menu's features button fires `controls:action {features}` — it has no
+    // single label, so read the selection here and open the panel for each
+    // selected tile that actually carries a feature. The viewer upserts one
+    // group per tile, so the whole selection shows at once.
+    this.onEffect<{ action?: string }>('controls:action', (payload) => {
+      if (String(payload?.action ?? '') !== 'features') return
+      const selection = this.#ioc()?.get<SelectionLike>(SELECTION_KEY)
+      const labels = [...(selection?.selected ?? [])].map(String).filter(Boolean)
+      for (const label of labels) {
+        if (this.#labelHasFeature(label)) void this.#open(label)
+      }
+    })
   }
 
   #ioc = () => (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+
+  /** True when this label carries a registered visual-bee feature — the same
+   *  honest "has features" signal the per-tile puzzle-piece uses (tile-actions'
+   *  tileHasVisualBeeFeature). Synchronous: kindsForLabel is the hot decoration
+   *  index and byDecorationKind is a Map walk. */
+  #labelHasFeature(label: string): boolean {
+    const registry = this.#ioc()?.get<VisualBeeRegistry>(VISUAL_BEE_REGISTRY_KEY)
+    if (!registry?.byDecorationKind) return false
+    for (const kind of kindsForLabel(label)) {
+      if (registry.byDecorationKind(kind)) return true
+    }
+    return false
+  }
 
   async #open(label: string): Promise<void> {
     const ioc = this.#ioc()

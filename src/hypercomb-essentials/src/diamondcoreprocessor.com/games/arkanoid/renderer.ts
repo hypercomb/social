@@ -105,7 +105,7 @@ export class Renderer {
     this.#lasers(engine.lasers)
     this.#turretShots(engine.turretShots, time)
     this.#gunAim(engine, time)
-    this.#paddle(engine)
+    this.#paddle(engine, time)
     this.#beam(engine)
     if (engine.alien) this.#alien(engine.alien, time)
     if (engine.extraLife) this.#extraLife(engine.extraLife, time)
@@ -116,7 +116,7 @@ export class Renderer {
     if (engine.chainBall) this.#ballChain(engine, time)     // the swinging wrecking ball
     if (engine.freezeTimer > 0) this.#freeze(engine, time)  // clock freeze overlay + frost
     this.#capsules(engine.capsules, time)
-    if (engine.enemy) this.#enemy(engine.enemy, engine.balls.find(b => b.primary) ?? null, time)
+    if (engine.enemies.length) { const white = engine.balls.find(b => b.primary) ?? null; for (const e of engine.enemies) this.#enemy(e, white, time) }
     if (engine.pacman) this.#pacman(engine.pacman, time)
     this.#rockets(engine.rockets)
     this.#explosions(engine.explosions)
@@ -454,10 +454,38 @@ export class Renderer {
     ctx.restore()
   }
 
-  #paddle(engine: Engine): void {
+  #paddle(engine: Engine, time = 0): void {
     const ctx = this.#ctx
     const p = engine.paddle
     const x = p.x - p.w / 2
+    // ── paddle health bar (just above the bat) ──
+    const hpFrac = engine.paddleHpFrac
+    const by = p.y - 9
+    ctx.save()
+    this.#roundRect(x, by, p.w, 3.6, 1.8); ctx.fillStyle = 'rgba(8,12,26,0.78)'; ctx.fill()
+    if (hpFrac > 0) {
+      const hcol = hpFrac > 0.5 ? '#5fe08a' : hpFrac > 0.25 ? '#ffd24a' : '#ff5b5b'
+      this.#roundRect(x, by, p.w * hpFrac, 3.6, 1.8); ctx.fillStyle = hcol; ctx.shadowColor = hcol; ctx.shadowBlur = 6; ctx.fill()
+    }
+    ctx.restore()
+    // ── shield / healing-shield dome over the bat ──
+    if (engine.shielded) {
+      const heal = engine.regenTimer > 0
+      const col = heal ? '#3fe0a8' : '#5b9bff'
+      const pulse = 0.5 + 0.5 * Math.sin(time * 6)
+      ctx.save()
+      ctx.strokeStyle = col; ctx.shadowColor = col
+      ctx.lineWidth = 2 + engine.shieldFlash * 2.5; ctx.shadowBlur = 10 + 12 * engine.shieldFlash
+      ctx.globalAlpha = 0.45 + 0.3 * pulse + 0.5 * engine.shieldFlash
+      ctx.beginPath(); ctx.ellipse(p.x, p.y + p.h / 2, p.w / 2 + 14, p.h + 16, 0, Math.PI, Math.PI * 2); ctx.stroke()
+      ctx.globalAlpha = 0.07 + 0.05 * pulse
+      ctx.fillStyle = col; ctx.fill()
+      if (heal) {                                // healing shield: rising sparkles
+        ctx.globalAlpha = 0.6; ctx.fillStyle = '#bfffe0'
+        for (let i = 0; i < 3; i++) { const sx = p.x + Math.sin(time * 2 + i * 2) * p.w * 0.4; const sy = p.y - ((time * 30 + i * 14) % 24); ctx.beginPath(); ctx.arc(sx, sy, 1.4, 0, Math.PI * 2); ctx.fill() }
+      }
+      ctx.restore()
+    }
     ctx.save()
     if (engine.pinballTimer > 0) {
       this.#flippers(engine)                   // real flippers replace the bat (+ its attachments)
