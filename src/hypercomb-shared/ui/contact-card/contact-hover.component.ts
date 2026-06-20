@@ -38,7 +38,7 @@ interface Panel {
 
 const POS_KEY = 'hc:contact-pins-pos'   // { [label]: { x, y } }
 const HIDE_DELAY_MS = 260
-const PANEL_W = 300
+const PANEL_W = 360
 const CASCADE_STEP = 26                  // px each fresh pin is offset to fan out
 const PEEK_ID = 0                        // reserved id for the lone hover peek
 

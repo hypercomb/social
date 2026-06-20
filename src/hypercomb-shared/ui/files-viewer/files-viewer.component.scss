@@ -16,9 +16,11 @@ $accent: #a8c8ff;
 .files-panel {
   pointer-events: auto;
   position: absolute;
-  top: 0;
+  // Dock flush BELOW the header bar — mirror features-viewer so the two
+  // right-docked panels align (2.8rem ≈ header bottom × the header-zoom var).
+  top: calc(2.8rem * var(--hc-header-zoom, 1.0));
   right: 0;
-  height: 100%;
+  bottom: 0;
   width: min(340px, calc(100vw - 2rem));
   display: flex;
   flex-direction: column;

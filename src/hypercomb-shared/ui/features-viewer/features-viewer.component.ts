@@ -102,6 +102,9 @@ export class FeaturesViewerComponent implements OnDestroy {
   constructor() {
     this.#cleanups.push(EffectBus.on<FeaturesOpenPayload>('features:open', (p) => {
       if (!p?.cell) return
+      // Mutually exclusive with the Files panel — they share the right-side
+      // dock, so opening Features closes Files.
+      EffectBus.emit('files:viewer-close', {})
       const group: FeatureGroup = {
         cell: p.cell,
         segments: Array.isArray(p.segments) ? p.segments : [],
