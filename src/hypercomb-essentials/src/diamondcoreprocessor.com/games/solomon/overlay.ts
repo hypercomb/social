@@ -820,6 +820,20 @@ export class SolomonOverlay {
     ])
   }
 
+  /** The final room is cleared — show the victory banner. Collecting every
+   *  Solomon's Seal along the way earns the best ending (the Princess rescue). */
+  #showEnding(eng: Engine): void {
+    this.#overShown = true // keep the game-over path from firing underneath
+    const best = SEAL_TOTAL > 0 && eng.sealCount >= SEAL_TOTAL
+    const title = best ? '✦ You rescued the Princess! ✦' : "You cleared Solomon's Key!"
+    const sub = best
+      ? `All ${SEAL_TOTAL} seals found — the true ending · ✦ ${eng.score}`
+      : `✦ ${eng.score}  ·  seals ${eng.sealCount}/${SEAL_TOTAL}`
+    this.#showBanner(title, sub, [
+      { label: '↻ Play again', fn: () => { this.#levelIndex = 0; this.#startPlay(this.#levels[0]) } },
+    ])
+  }
+
   #showBanner(title: string, sub: string, actions: { label: string; fn: () => void }[]): void {
     const b = this.#banner
     if (!b) return
