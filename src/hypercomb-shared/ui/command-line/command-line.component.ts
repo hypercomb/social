@@ -541,6 +541,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   readonly #viewToggles = signal<readonly { view: string; icon: string; label: string; active: boolean }[]>([])
   readonly viewToggles = this.#viewToggles.asReadonly()
 
+  /**
+   * The website's view-toggle while website mode is the active render
+   * surface, else null. When set (and {@link viewActive} is true) the
+   * command line is hidden and this single icon floats in the bottom-right
+   * corner as the only chrome — the lone way back to tiles. Photo / qa-modal
+   * overlays also raise `view:active`, but they don't flip ViewMode, so the
+   * website toggle never reads `active` during them — keeping this strictly
+   * the website case and never a stray icon over a photo or modal.
+   */
+  readonly activeViewToggle = computed(
+    () => this.viewToggles().find(v => v.view === 'website' && v.active) ?? null,
+  )
+
   // ── Solomon's Key game toggle (header icon) ───────────
   //
   // The SolomonDrone announces availability + open/closed state over

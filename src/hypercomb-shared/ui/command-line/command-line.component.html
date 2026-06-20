@@ -83,6 +83,24 @@
   </div>
 }
 
+<!-- Active-view exit toggle — when a full-viewport view (website) takes
+     over, the command line is hidden; this lone icon hovers in the
+     bottom-right corner and drops back to tiles when clicked. Sibling of
+     the wrapper (not inside it) so the wrapper's visibility:hidden in
+     website mode never hides it too. -->
+@if (viewActive() && activeViewToggle(); as vt) {
+  <button
+    class="site-view-exit"
+    type="button"
+    (click)="onViewToggle({ view: vt.view, disable: false })"
+    [attr.aria-label]="vt.label"
+    [attr.aria-pressed]="true"
+    [title]="vt.label"
+  >
+    <span class="mat-sym" aria-hidden="true">{{ vt.icon }}</span>
+  </button>
+}
+
 <hc-hint-bar
   [items]="hintItems()"
   [filter]="hintFilter()"

@@ -474,13 +474,14 @@ export class Renderer {
     }
   }
 
-  /** Draw the two pinball flippers from the engine's raise state. */
+  /** Draw the two pinball flippers from the engine's raise state, sliding with the bat. */
   #flippers(engine: Engine): void {
     const fy = engine.paddle.y + FLIP_Y_OFF
+    const cxp = engine.flipperCenterX
     const la = FLIP_REST + (FLIP_UP - FLIP_REST) * engine.flipLeftRaise
     const ra = (Math.PI - FLIP_REST) + ((Math.PI - FLIP_UP) - (Math.PI - FLIP_REST)) * engine.flipRightRaise
-    this.#flipper(W / 2 - FLIP_PIVOT_DX, fy, la, engine.flipLeftRaise)
-    this.#flipper(W / 2 + FLIP_PIVOT_DX, fy, ra, engine.flipRightRaise)
+    this.#flipper(cxp - FLIP_PIVOT_DX, fy, la, engine.flipLeftRaise)
+    this.#flipper(cxp + FLIP_PIVOT_DX, fy, ra, engine.flipRightRaise)
   }
 
   /** One chrome flipper: a tapered bar from pivot to tip, glowing when raised. */
