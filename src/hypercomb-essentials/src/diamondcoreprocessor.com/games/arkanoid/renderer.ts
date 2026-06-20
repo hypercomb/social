@@ -270,14 +270,46 @@ export class Renderer {
     ctx.save()
     for (const s of shots) {
       const len = Math.hypot(s.vx, s.vy) || 1
-      const tx = s.x - (s.vx / len) * 9, ty = s.y - (s.vy / len) * 9   // tail points back along travel
-      ctx.strokeStyle = 'rgba(255,90,80,0.5)'; ctx.lineWidth = 2
-      ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(s.x, s.y); ctx.stroke()
-      ctx.shadowColor = '#ff3b3b'; ctx.shadowBlur = 8
-      const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, 4)
-      g.addColorStop(0, '#fff0e0'); g.addColorStop(0.5, '#ff5a45'); g.addColorStop(1, 'rgba(255,60,40,0)')
-      ctx.fillStyle = g
-      ctx.beginPath(); ctx.arc(s.x, s.y, 3.5, 0, Math.PI * 2); ctx.fill()
+      const dx = s.vx / len, dy = s.vy / len
+      if (s.kind === 'bomb') {                               // lobbed bomb: dark sphere + pulsing fuse + fins
+        const pulse = 0.5 + 0.5 * Math.sin((s.t ?? 0) * 12)
+        ctx.save()
+        ctx.fillStyle = '#4a2410'
+        for (const f of [-1, 1]) { ctx.beginPath(); ctx.moveTo(s.x, s.y - 4); ctx.lineTo(s.x + f * 5, s.y - 8); ctx.lineTo(s.x + f * 2, s.y - 2); ctx.closePath(); ctx.fill() }
+        const g = ctx.createRadialGradient(s.x - 1.6, s.y - 1.6, 1, s.x, s.y, 6)
+        g.addColorStop(0, '#7a4a2a'); g.addColorStop(1, '#231007')
+        ctx.fillStyle = g; ctx.shadowColor = '#ffb43c'; ctx.shadowBlur = 4 + 8 * pulse
+        ctx.beginPath(); ctx.arc(s.x, s.y, 5.5, 0, Math.PI * 2); ctx.fill()
+        ctx.fillStyle = `rgba(255,200,80,${0.6 + 0.4 * pulse})`
+        ctx.beginPath(); ctx.arc(s.x, s.y - 8, 1.4 + pulse, 0, Math.PI * 2); ctx.fill()
+        ctx.restore()
+      } else if (s.kind === 'bolt') {                        // mirror's fast energy bolt
+        ctx.save()
+        ctx.strokeStyle = 'rgba(150,220,255,0.55)'; ctx.lineWidth = 4; ctx.shadowColor = '#7ee0ff'; ctx.shadowBlur = 11; ctx.lineCap = 'round'
+        ctx.beginPath(); ctx.moveTo(s.x - dx * 17, s.y - dy * 17); ctx.lineTo(s.x, s.y); ctx.stroke()
+        ctx.strokeStyle = '#eaffff'; ctx.lineWidth = 1.8
+        ctx.beginPath(); ctx.moveTo(s.x - dx * 8, s.y - dy * 8); ctx.lineTo(s.x, s.y); ctx.stroke()
+        ctx.restore()
+      } else if (s.kind === 'seeker') {                      // homing missile + flame trail
+        ctx.save()
+        ctx.globalCompositeOperation = 'lighter'
+        for (let i = 1; i <= 3; i++) { ctx.globalAlpha = 0.45 / i; ctx.fillStyle = i === 1 ? '#ffd24a' : '#ff7043'; ctx.beginPath(); ctx.arc(s.x - dx * i * 5, s.y - dy * i * 5, 3 - i * 0.6, 0, Math.PI * 2); ctx.fill() }
+        ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1
+        ctx.translate(s.x, s.y); ctx.rotate(Math.atan2(dy, dx))
+        ctx.fillStyle = '#dbe3ee'; ctx.shadowColor = '#ff5b3a'; ctx.shadowBlur = 6
+        ctx.beginPath(); ctx.moveTo(6, 0); ctx.lineTo(-3, -3.2); ctx.lineTo(-3, 3.2); ctx.closePath(); ctx.fill()
+        ctx.fillStyle = '#ff5b3a'; ctx.fillRect(-4.5, -2, 2.2, 4)
+        ctx.restore()
+      } else {                                               // basic round bolt (shot / spread)
+        const tx = s.x - dx * 9, ty = s.y - dy * 9
+        ctx.strokeStyle = 'rgba(255,90,80,0.5)'; ctx.lineWidth = 2
+        ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(s.x, s.y); ctx.stroke()
+        ctx.shadowColor = '#ff3b3b'; ctx.shadowBlur = 8
+        const g = ctx.createRadialGradient(s.x, s.y, 0, s.x, s.y, 4)
+        g.addColorStop(0, '#fff0e0'); g.addColorStop(0.5, '#ff5a45'); g.addColorStop(1, 'rgba(255,60,40,0)')
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(s.x, s.y, 3.5, 0, Math.PI * 2); ctx.fill()
+        ctx.shadowBlur = 0
+      }
     }
     ctx.restore()
   }
@@ -1088,34 +1120,59 @@ export class Renderer {
 
   /** Bombardier — an amber mortar dome that strafes a high lane and drops bombs. */
   #enemyBomber(e: Enemy, time: number): void {
-    const ctx = this.#ctx, x = e.x, y = e.y
+    const ctx = this.#ctx, x = e.x, y = e.y + Math.sin(time * 2 + x * 0.1) * 1.5   // gentle hover bob
     const fuse = 1 - Math.min(1, (e.cd ?? 1.8) / 1.8)
     this.#enemyAura(x, y, '255,150,40', time)
     ctx.save()
-    ctx.fillStyle = '#7a3a0f'
-    for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(x + s * 14, y - 4); ctx.lineTo(x + s * 22, y - 9); ctx.lineTo(x + s * 16, y + 3); ctx.closePath(); ctx.fill() }
+    // fins + twin thruster glows
+    for (const s of [-1, 1]) {
+      ctx.fillStyle = '#7a3a0f'; ctx.beginPath(); ctx.moveTo(x + s * 14, y - 4); ctx.lineTo(x + s * 22, y - 9); ctx.lineTo(x + s * 16, y + 3); ctx.closePath(); ctx.fill()
+      ctx.fillStyle = `rgba(255,150,60,${0.5 + 0.4 * fuse})`; ctx.shadowColor = '#ff9f43'; ctx.shadowBlur = 6
+      ctx.beginPath(); ctx.arc(x + s * 19, y - 5, 1.6, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0
+    }
+    // riveted dome with a top-lit gradient
     ctx.shadowColor = '#e2731a'; ctx.shadowBlur = 10
     const g = ctx.createLinearGradient(x, y - 12, x, y + 12)
-    g.addColorStop(0, '#ffa64d'); g.addColorStop(0.5, '#e2731a'); g.addColorStop(1, '#7a3a0f')
+    g.addColorStop(0, '#ffd29a'); g.addColorStop(0.4, '#e2731a'); g.addColorStop(1, '#6e3410')
     ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(x, y, 17, 11, 0, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0
+    // hull bands + rivets
+    ctx.strokeStyle = 'rgba(90,42,12,0.6)'; ctx.lineWidth = 1
+    ctx.beginPath(); ctx.ellipse(x, y, 12, 7.5, 0, 0, Math.PI * 2); ctx.stroke()
     ctx.fillStyle = '#5a2a0c'; for (let i = -2; i <= 2; i++) { ctx.beginPath(); ctx.arc(x + i * 6, y - 5, 1, 0, Math.PI * 2); ctx.fill() }
-    ctx.fillStyle = `rgba(255,180,60,${0.35 + 0.6 * fuse})`; ctx.shadowColor = '#ffb43c'; ctx.shadowBlur = 4 + 10 * fuse
-    ctx.beginPath(); ctx.arc(x, y + 9, 4 + 1.5 * fuse, 0, Math.PI * 2); ctx.fill()
+    // glowing cockpit eye, tracking the bottom
+    const eg = ctx.createRadialGradient(x, y - 1, 0.5, x, y - 1, 4.5)
+    eg.addColorStop(0, '#fff6d8'); eg.addColorStop(0.6, '#ffb43c'); eg.addColorStop(1, '#7a3a0f')
+    ctx.fillStyle = eg; ctx.shadowColor = '#ffd24a'; ctx.shadowBlur = 6
+    ctx.beginPath(); ctx.arc(x, y - 1, 4, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = '#3a1808'; ctx.beginPath(); ctx.arc(x, y + 0.5, 1.5, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0
+    // belly hatch glowing brighter as the fuse nears
+    ctx.fillStyle = `rgba(255,180,60,${0.35 + 0.6 * fuse})`; ctx.shadowColor = '#ffb43c'; ctx.shadowBlur = 4 + 12 * fuse
+    ctx.beginPath(); ctx.arc(x, y + 9, 4 + 1.8 * fuse, 0, Math.PI * 2); ctx.fill()
     ctx.restore()
   }
 
   /** Mitosis Pod — a blue-green dividing cell that drifts and splits when hit. */
   #enemySplitter(e: Enemy, time: number): void {
     const ctx = this.#ctx, sep = (e.split ?? 0) > 0 ? 6 : 1.5
-    const seam = 0.5 + 0.5 * Math.sin(time * 5)
+    const seam = 0.5 + 0.5 * Math.sin(time * 5), breathe = 1 + 0.05 * Math.sin(time * 3)
     this.#enemyAura(e.x, e.y, '70,200,140', time, 1.9)
     ctx.save()
     for (const s of [-1, 1]) {
-      const cx = e.x + s * sep
-      const g = ctx.createRadialGradient(cx - 2, e.y - 3, 1, cx, e.y, 12)
-      g.addColorStop(0, '#7fe6ac'); g.addColorStop(0.6, '#3a9d6e'); g.addColorStop(1, '#0f5a3e')
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, e.y, 11, 0, Math.PI * 2); ctx.fill()
+      const cx = e.x + s * sep, r = 11 * breathe
+      // wiggling cilia around the membrane
+      ctx.strokeStyle = 'rgba(120,224,170,0.55)'; ctx.lineWidth = 1
+      for (let i = 0; i < 9; i++) { const a = (i / 9) * Math.PI * 2 + time * 0.6; const wob = 2 + Math.sin(time * 5 + i) * 1.5; ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * r, e.y + Math.sin(a) * r); ctx.lineTo(cx + Math.cos(a) * (r + wob), e.y + Math.sin(a) * (r + wob)); ctx.stroke() }
+      // gelatinous body
+      const g = ctx.createRadialGradient(cx - 3, e.y - 4, 1, cx, e.y, r)
+      g.addColorStop(0, '#9ff2c2'); g.addColorStop(0.55, '#3a9d6e'); g.addColorStop(1, '#0d4e35')
+      ctx.fillStyle = g; ctx.shadowColor = 'rgba(95,224,138,0.5)'; ctx.shadowBlur = 8
+      ctx.beginPath(); ctx.arc(cx, e.y, r, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0
+      // membrane rim highlight + glowing nucleus
+      ctx.strokeStyle = 'rgba(200,255,224,0.5)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.arc(cx, e.y, r - 1.5, -2.2, 0.4); ctx.stroke()
+      ctx.fillStyle = `rgba(190,255,212,${0.5 + 0.4 * seam})`; ctx.shadowColor = '#bfffd8'; ctx.shadowBlur = 6
+      ctx.beginPath(); ctx.arc(cx + s * 1.5, e.y, 2.6, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0
     }
+    // dividing seam
     ctx.strokeStyle = `rgba(180,255,210,${0.4 + 0.5 * seam})`; ctx.lineWidth = 1.6; ctx.shadowColor = '#bfffd8'; ctx.shadowBlur = 6
     ctx.beginPath(); ctx.moveTo(e.x, e.y - 11); ctx.lineTo(e.x, e.y + 11); ctx.stroke()
     ctx.restore()
@@ -1125,19 +1182,30 @@ export class Renderer {
   #enemyLeech(e: Enemy, time: number): void {
     const ctx = this.#ctx, x = e.x, y = e.y
     const flap = Math.sin((e.t ?? 0) * 6), gold = (e.flash ?? 0) > 0
+    const main = gold ? '#ffd24a' : '#ff5bbf', lite = gold ? '#fff0b0' : '#ffaee0'
     this.#enemyAura(x, y, gold ? '255,210,74' : '255,90,200', time, 1.8)
     ctx.save()
-    ctx.fillStyle = gold ? '#ffd24a' : '#ff5bbf'; ctx.shadowColor = gold ? '#ffd24a' : '#ff5bbf'; ctx.shadowBlur = 8
     for (const s of [-1, 1]) {
+      // wing with a soft gradient
+      const tipY = y - 10 - 6 * flap
+      const wg = ctx.createLinearGradient(x, y, x + s * 24, tipY)
+      wg.addColorStop(0, main); wg.addColorStop(1, gold ? '#ffe98a' : '#ff8fd6')
+      ctx.fillStyle = wg; ctx.shadowColor = main; ctx.shadowBlur = 8
       ctx.beginPath(); ctx.moveTo(x, y)
-      ctx.quadraticCurveTo(x + s * 16, y - 10 - 6 * flap, x + s * 24, y + 2)
-      ctx.quadraticCurveTo(x + s * 14, y + 4, x, y + 3); ctx.closePath(); ctx.fill()
+      ctx.quadraticCurveTo(x + s * 16, tipY, x + s * 24, y + 2)
+      ctx.quadraticCurveTo(x + s * 14, y + 4, x, y + 3); ctx.closePath(); ctx.fill(); ctx.shadowBlur = 0
+      // membrane veins
+      ctx.strokeStyle = gold ? 'rgba(255,255,255,0.5)' : 'rgba(255,200,235,0.55)'; ctx.lineWidth = 0.8
+      for (const f of [0.4, 0.7]) { ctx.beginPath(); ctx.moveTo(x, y + 1); ctx.quadraticCurveTo(x + s * 14 * f, (tipY + y) / 2, x + s * 22 * f, y + 1); ctx.stroke() }
     }
-    ctx.shadowBlur = 0
-    ctx.fillStyle = gold ? '#fff0b0' : '#ffaee0'
-    ctx.beginPath(); ctx.ellipse(x, y, 5, 9, 0, 0, Math.PI * 2); ctx.fill()
-    ctx.strokeStyle = gold ? '#fff0b0' : '#ffaee0'; ctx.lineWidth = 1.4
-    ctx.beginPath(); ctx.moveTo(x, y + 8); ctx.lineTo(x + flap * 3, y + 16); ctx.stroke()
+    // body + glowing eye
+    ctx.fillStyle = lite; ctx.beginPath(); ctx.ellipse(x, y, 5, 9, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = gold ? '#a06a10' : '#7a1050'; ctx.beginPath(); ctx.arc(x, y - 3, 2, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x - 0.6, y - 3.6, 0.8, 0, Math.PI * 2); ctx.fill()
+    // segmented trailing tail-barb
+    ctx.strokeStyle = lite; ctx.lineWidth = 1.4; ctx.lineCap = 'round'
+    ctx.beginPath(); ctx.moveTo(x, y + 8); ctx.quadraticCurveTo(x + flap * 4, y + 13, x + flap * 6, y + 18); ctx.stroke()
+    ctx.fillStyle = main; ctx.beginPath(); ctx.arc(x + flap * 6, y + 18, 1.6, 0, Math.PI * 2); ctx.fill()
     ctx.restore()
   }
 
@@ -1147,15 +1215,23 @@ export class Renderer {
     const fire = e.flash ?? 0
     this.#enemyAura(x, y, '192,198,214', time, 1.6)
     ctx.save()
+    // chrome body with a faceted vertical gradient
     ctx.shadowColor = '#dfe7ff'; ctx.shadowBlur = 8
     const g = ctx.createLinearGradient(x - w, y, x + w, y)
-    g.addColorStop(0, '#5a6072'); g.addColorStop(0.5, '#e8ecf6'); g.addColorStop(1, '#5a6072')
+    g.addColorStop(0, '#474d5e'); g.addColorStop(0.35, '#cfd6e6'); g.addColorStop(0.5, '#f6f9ff'); g.addColorStop(0.65, '#cfd6e6'); g.addColorStop(1, '#474d5e')
     this.#roundRect(x - w / 2, y - h / 2, w, h, 3); ctx.fillStyle = g; ctx.fill(); ctx.shadowBlur = 0
-    ctx.strokeStyle = 'rgba(255,255,255,0.9)'; ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(x - 1, y - h / 2 + 2); ctx.lineTo(x - 1, y + h / 2 - 2); ctx.stroke()
+    // bevelled end-caps
+    ctx.fillStyle = '#aeb6c8'; this.#roundRect(x - w / 2, y - h / 2, w, 3, 1.5); ctx.fill(); this.#roundRect(x - w / 2, y + h / 2 - 3, w, 3, 1.5); ctx.fill()
+    // specular stripe + a faint second facet line
+    ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 1
+    ctx.beginPath(); ctx.moveTo(x - 1.5, y - h / 2 + 3); ctx.lineTo(x - 1.5, y + h / 2 - 3); ctx.stroke()
+    ctx.strokeStyle = 'rgba(120,140,180,0.5)'; ctx.beginPath(); ctx.moveTo(x + 2.5, y - h / 2 + 3); ctx.lineTo(x + 2.5, y + h / 2 - 3); ctx.stroke()
+    // scanning eye-band
     const ey = y + Math.sin(time * 3) * (h / 2 - 4)
     ctx.fillStyle = `rgba(120,220,255,${0.6 + 0.4 * fire})`; ctx.shadowColor = '#7ee0ff'; ctx.shadowBlur = 6
     this.#roundRect(x - w / 2 + 1, ey - 1.5, w - 2, 3, 1.5); ctx.fill()
+    // beam-charge glow at the muzzle just before firing
+    if (fire > 0) { ctx.fillStyle = `rgba(150,230,255,${fire})`; ctx.shadowColor = '#7ee0ff'; ctx.shadowBlur = 10 * fire; ctx.beginPath(); ctx.arc(x, y + h / 2, 3 * fire, 0, Math.PI * 2); ctx.fill() }
     ctx.restore()
   }
 
@@ -1164,14 +1240,23 @@ export class Renderer {
     const ctx = this.#ctx, x = e.x, y = e.y, t = e.t ?? 0
     this.#enemyAura(x, y, '200,255,74', time, 1.8)
     ctx.save()
-    ctx.strokeStyle = 'rgba(200,255,74,0.25)'; ctx.lineWidth = 1
+    // orbit trail rings
+    ctx.strokeStyle = 'rgba(200,255,74,0.22)'; ctx.lineWidth = 1
     ctx.beginPath(); ctx.arc(x, y, 14, 0, Math.PI * 2); ctx.stroke()
-    const g = ctx.createRadialGradient(x - 2, y - 2, 1, x, y, 10)
-    g.addColorStop(0, '#f4ff9a'); g.addColorStop(1, '#6e8a0f')
-    ctx.fillStyle = g; ctx.shadowColor = '#cfff4a'; ctx.shadowBlur = 8
-    ctx.beginPath(); ctx.arc(x, y, 9, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0
-    ctx.fillStyle = '#eaffb0'
-    for (const k of [0, 1]) { const a = t * 2 + k * Math.PI; ctx.beginPath(); ctx.arc(x + Math.cos(a) * 14, y + Math.sin(a) * 14, 3.5, 0, Math.PI * 2); ctx.fill() }
+    ctx.strokeStyle = 'rgba(200,255,74,0.12)'; ctx.beginPath(); ctx.ellipse(x, y, 14, 6, t, 0, Math.PI * 2); ctx.stroke()
+    // pulsing core
+    const beat = 1 + 0.12 * Math.sin(time * 5)
+    const g = ctx.createRadialGradient(x - 2, y - 2, 1, x, y, 10 * beat)
+    g.addColorStop(0, '#fbffd0'); g.addColorStop(0.6, '#cfff4a'); g.addColorStop(1, '#5a7008')
+    ctx.fillStyle = g; ctx.shadowColor = '#cfff4a'; ctx.shadowBlur = 10
+    ctx.beginPath(); ctx.arc(x, y, 9 * beat, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0
+    // satellites with tethers + glows
+    for (const k of [0, 1]) {
+      const a = t * 2 + k * Math.PI, sx = x + Math.cos(a) * 14, sy = y + Math.sin(a) * 14
+      ctx.strokeStyle = 'rgba(220,255,140,0.4)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(sx, sy); ctx.stroke()
+      ctx.fillStyle = '#f4ffc0'; ctx.shadowColor = '#cfff4a'; ctx.shadowBlur = 7
+      ctx.beginPath(); ctx.arc(sx, sy, 3.6, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0
+    }
     ctx.restore()
   }
 
@@ -1179,15 +1264,26 @@ export class Renderer {
   #enemyDart(e: Enemy, time: number): void {
     const ctx = this.#ctx, x = e.x, y = e.y
     const tilt = e.phase === 'patrol' && (e.cd ?? 1) < 0.4 ? 0.18 : 0
+    const diving = e.phase === 'dive'
     this.#enemyAura(x, y, '255,90,60', time, 1.7)
     ctx.save(); ctx.translate(x, y); ctx.rotate(tilt)
+    // afterburner flames out the back (top), roaring during a dive
+    const fl = (diving ? 1 : 0.4) * (0.7 + 0.3 * Math.sin(time * 30))
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'
+    for (let i = 0; i < 3; i++) { ctx.globalAlpha = (0.5 - i * 0.13) * fl; ctx.fillStyle = i === 0 ? '#fff0c0' : '#ff7043'; ctx.beginPath(); ctx.ellipse(0, -12 - i * (4 + 8 * fl), 3 - i * 0.7, 5 + i * 5 * fl, 0, 0, Math.PI * 2); ctx.fill() }
+    ctx.restore()
+    // glossy delta hull
     ctx.shadowColor = '#ff5b3a'; ctx.shadowBlur = 8
     const g = ctx.createLinearGradient(0, -14, 0, 12)
-    g.addColorStop(0, '#ffb04d'); g.addColorStop(0.5, '#ff5b3a'); g.addColorStop(1, '#7a1808')
+    g.addColorStop(0, '#ffd08a'); g.addColorStop(0.5, '#ff5b3a'); g.addColorStop(1, '#6e1606')
     ctx.fillStyle = g
     ctx.beginPath(); ctx.moveTo(0, 14); ctx.lineTo(-11, -12); ctx.lineTo(0, -6); ctx.lineTo(11, -12); ctx.closePath(); ctx.fill()
     ctx.shadowBlur = 0
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(0, 12, 2, 0, Math.PI * 2); ctx.fill()
+    // edge highlights down the leading edges
+    ctx.strokeStyle = 'rgba(255,220,180,0.7)'; ctx.lineWidth = 1
+    ctx.beginPath(); ctx.moveTo(0, 14); ctx.lineTo(-11, -12); ctx.moveTo(0, 14); ctx.lineTo(11, -12); ctx.stroke()
+    // hot white nose
+    ctx.fillStyle = '#fff'; ctx.shadowColor = '#fff'; ctx.shadowBlur = 6; ctx.beginPath(); ctx.arc(0, 12, 2.2, 0, Math.PI * 2); ctx.fill()
     ctx.restore()
   }
 
@@ -1202,28 +1298,47 @@ export class Renderer {
     if (e.phase === 'out') return
     this.#enemyAura(x, y, '168,107,255', time, 1.6)
     ctx.save()
-    ctx.strokeStyle = `rgba(200,150,255,${0.4 + 0.5 * charge})`; ctx.lineWidth = 2; ctx.shadowColor = '#a86bff'; ctx.shadowBlur = 8 + 10 * charge
+    // glitch fragment shards orbiting, jittered by time
+    ctx.fillStyle = 'rgba(200,150,255,0.5)'
+    for (let i = 0; i < 5; i++) { const a = time * 4 + i * 1.3, rr = 16 + Math.sin(time * 9 + i) * 4; const fx = x + Math.cos(a) * rr, fy = y + Math.sin(a) * rr; ctx.fillRect(fx - 1.4, fy - 1.4, 2.8, 2.8) }
+    // contracting halo
+    ctx.strokeStyle = `rgba(200,150,255,${0.4 + 0.5 * charge})`; ctx.lineWidth = 2; ctx.shadowColor = '#a86bff'; ctx.shadowBlur = 8 + 12 * charge
     ctx.beginPath(); ctx.arc(x, y, 18 - 8 * charge, 0, Math.PI * 2); ctx.stroke(); ctx.shadowBlur = 0
-    const g = ctx.createLinearGradient(x, y - 12, x, y + 12); g.addColorStop(0, '#c89bff'); g.addColorStop(1, '#5a2ea8')
+    // chromatic split ghosts (red/cyan offsets) — the unstable look
+    const off = 1.5 + Math.sin(time * 11) * 0.8
+    ctx.globalAlpha = 0.5; ctx.fillStyle = '#ff5bd0'; this.#diamond(x - off, y, 13); ctx.fill()
+    ctx.fillStyle = '#5bd0ff'; this.#diamond(x + off, y, 13); ctx.fill(); ctx.globalAlpha = 1
+    // the tetrahedron body + a dark void core
+    const g = ctx.createLinearGradient(x, y - 12, x, y + 12); g.addColorStop(0, '#d2a8ff'); g.addColorStop(1, '#4a2390')
     ctx.fillStyle = g; this.#diamond(x, y, 13); ctx.fill()
-    ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(x, y, 2.4, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = '#1a0a30'; this.#diamond(x, y, 5); ctx.fill()
+    ctx.fillStyle = '#fff'; ctx.shadowColor = '#e0c8ff'; ctx.shadowBlur = 6; ctx.beginPath(); ctx.arc(x, y, 1.8, 0, Math.PI * 2); ctx.fill()
     ctx.restore()
   }
 
   /** Polarity Knight — a hex split blue|red; only the matching damage type hurts it. */
   #enemyPolarity(e: Enemy, time: number): void {
     const ctx = this.#ctx, x = e.x, y = e.y, r = 15, red = e.polarity === 'red'
+    const acc = red ? '#ff4a4a' : '#3a7dff'
     this.#enemyAura(x, y, red ? '255,74,74' : '58,125,255', time, 1.7)
     ctx.save()
     const hexPath = () => { ctx.beginPath(); for (let i = 0; i <= 6; i++) { const a = -Math.PI / 2 + i * Math.PI / 3; const px = x + Math.cos(a) * r, py = y + Math.sin(a) * r; i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py) } ctx.closePath() }
     hexPath(); ctx.save(); ctx.clip()
-    ctx.fillStyle = '#3a7dff'; ctx.fillRect(x - r, y - r, r, r * 2)
-    ctx.fillStyle = '#ff4a4a'; ctx.fillRect(x, y - r, r, r * 2)
+    // the two armour halves, the ACTIVE one brighter
+    ctx.fillStyle = red ? '#1f4488' : '#3a7dff'; ctx.fillRect(x - r, y - r, r, r * 2)
+    ctx.fillStyle = red ? '#ff4a4a' : '#882a2a'; ctx.fillRect(x, y - r, r, r * 2)
+    // energy crackle down the split seam
+    ctx.strokeStyle = `rgba(255,255,255,${0.5 + 0.4 * Math.sin(time * 20)})`; ctx.lineWidth = 1.2; ctx.shadowColor = acc; ctx.shadowBlur = 6
+    ctx.beginPath(); ctx.moveTo(x, y - r)
+    for (let yy = -r + 3; yy < r; yy += 4) ctx.lineTo(x + Math.sin(yy * 1.7 + time * 18) * 2, y + yy)
+    ctx.stroke(); ctx.shadowBlur = 0
     ctx.restore()
-    hexPath(); ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1; ctx.stroke()
-    ctx.fillStyle = red ? '#ff4a4a' : '#3a7dff'; ctx.shadowColor = red ? '#ff4a4a' : '#3a7dff'; ctx.shadowBlur = 10
-    this.#diamond(x, y, 5); ctx.fill(); ctx.shadowBlur = 0
-    if ((e.flash ?? 0) > 0) { ctx.strokeStyle = `rgba(255,255,255,${e.flash})`; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r + 3, 0, Math.PI * 2); ctx.stroke() }
+    hexPath(); ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 1.2; ctx.stroke()
+    // spinning diamond core glowing the active polarity
+    ctx.save(); ctx.translate(x, y); ctx.rotate(time * 1.5)
+    ctx.fillStyle = acc; ctx.shadowColor = acc; ctx.shadowBlur = 12; this.#diamond(0, 0, 5); ctx.fill()
+    ctx.restore(); ctx.shadowBlur = 0
+    if ((e.flash ?? 0) > 0) { ctx.strokeStyle = `rgba(255,255,255,${e.flash})`; ctx.lineWidth = 2; ctx.shadowColor = '#fff'; ctx.shadowBlur = 8 * (e.flash ?? 0); ctx.beginPath(); ctx.arc(x, y, r + 3, 0, Math.PI * 2); ctx.stroke() }
     ctx.restore()
   }
 
@@ -1231,19 +1346,36 @@ export class Renderer {
   #enemyQueen(e: Enemy, time: number): void {
     const ctx = this.#ctx, x = e.x, y = e.y, r = 22
     const birth = 1 - Math.min(1, (e.cd ?? 4) / 4)
-    if (e.brood) { ctx.save(); ctx.fillStyle = '#ff5b6e'; for (const m of e.brood) { ctx.beginPath(); ctx.moveTo(m.x, m.y - 4); ctx.lineTo(m.x + 3, m.y + 3); ctx.lineTo(m.x - 3, m.y + 3); ctx.closePath(); ctx.fill() } ctx.restore() }
+    if (e.brood) { ctx.save(); ctx.fillStyle = '#ff5b6e'; ctx.shadowColor = '#ff5b6e'; ctx.shadowBlur = 5; for (const m of e.brood) { ctx.beginPath(); ctx.moveTo(m.x, m.y - 4); ctx.lineTo(m.x + 3, m.y + 3); ctx.lineTo(m.x - 3, m.y + 3); ctx.closePath(); ctx.fill() } ctx.restore() }
     this.#enemyAura(x, y, '255,40,60', time, 2.4)
     ctx.save()
-    ctx.strokeStyle = '#7a0f1e'; ctx.lineWidth = 2; ctx.lineCap = 'round'
-    for (const s of [-1, 1]) for (const k of [0, 1]) { const a = Math.PI / 2 + s * (0.5 + k * 0.4); ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r * 0.7, y + Math.sin(a) * r * 0.7); ctx.lineTo(x + Math.cos(a) * (r + 7), y + Math.sin(a) * (r + 7) + Math.sin(time * 6 + k) * 2); ctx.stroke() }
+    // six articulated legs (3 pairs), twitching
+    ctx.strokeStyle = '#7a0f1e'; ctx.lineWidth = 2.2; ctx.lineCap = 'round'
+    for (const s of [-1, 1]) for (const k of [0, 1, 2]) {
+      const a = Math.PI / 2 + s * (0.35 + k * 0.42), tw = Math.sin(time * 6 + k + (s > 0 ? 1.5 : 0)) * 3
+      const kx = x + Math.cos(a) * (r * 0.7 + 5), ky = y + Math.sin(a) * (r * 0.5 + 4)         // knee
+      ctx.beginPath(); ctx.moveTo(x + Math.cos(a) * r * 0.6, y + Math.sin(a) * r * 0.6); ctx.lineTo(kx, ky); ctx.lineTo(kx + Math.cos(a) * 8, ky + Math.sin(a) * 8 + tw); ctx.stroke()
+    }
+    // abdomen with a top-lit gradient
     ctx.shadowColor = '#c41e3a'; ctx.shadowBlur = 12
     const g = ctx.createRadialGradient(x - 4, y - 6, 2, x, y + 4, r)
-    g.addColorStop(0, '#e2455e'); g.addColorStop(0.6, '#c41e3a'); g.addColorStop(1, '#6e0f1e')
+    g.addColorStop(0, '#f06078'); g.addColorStop(0.55, '#c41e3a'); g.addColorStop(1, '#600d1a')
     ctx.fillStyle = g; ctx.beginPath(); ctx.ellipse(x, y + 3, r * 0.8, r, 0, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0
-    ctx.fillStyle = `rgba(255,200,80,${0.3 + 0.6 * birth})`; ctx.shadowColor = '#ffd24a'; ctx.shadowBlur = 4 + 14 * birth
-    ctx.beginPath(); ctx.arc(x, y + 10, 7 + 2 * birth, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0
+    // abdomen segment ridges
+    ctx.strokeStyle = 'rgba(110,15,26,0.6)'; ctx.lineWidth = 1
+    for (const f of [0.35, 0.62, 0.85]) { ctx.beginPath(); ctx.ellipse(x, y + 3, r * 0.8 * (1 - f * 0.15), r * f, 0, 0.5, Math.PI - 0.5); ctx.stroke() }
+    // glowing egg-sac with eggs inside, swelling before a birth
+    const sg = ctx.createRadialGradient(x, y + 10, 1, x, y + 10, 9 + 2 * birth)
+    sg.addColorStop(0, `rgba(255,235,160,${0.5 + 0.5 * birth})`); sg.addColorStop(1, 'rgba(255,180,60,0)')
+    ctx.fillStyle = sg; ctx.shadowColor = '#ffd24a'; ctx.shadowBlur = 4 + 14 * birth
+    ctx.beginPath(); ctx.arc(x, y + 10, 8 + 2 * birth, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0
+    ctx.fillStyle = `rgba(255,210,120,${0.6 + 0.4 * birth})`
+    for (const o of [[-3, 8], [3, 9], [0, 12], [-2, 13]]) { ctx.beginPath(); ctx.arc(x + o[0], y + o[1], 1.5, 0, Math.PI * 2); ctx.fill() }
+    // head, eyes + mandibles that open with the birth
     ctx.fillStyle = '#8a1226'; ctx.beginPath(); ctx.arc(x, y - r * 0.6, 8, 0, Math.PI * 2); ctx.fill()
-    ctx.fillStyle = '#ffd24a'; for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(x + s * 3, y - r * 0.6, 1.6, 0, Math.PI * 2); ctx.fill() }
+    ctx.strokeStyle = '#5a0a16'; ctx.lineWidth = 2; ctx.lineCap = 'round'
+    for (const s of [-1, 1]) { const m = 0.3 + birth * 0.4; ctx.beginPath(); ctx.moveTo(x + s * 5, y - r * 0.6 + 4); ctx.quadraticCurveTo(x + s * (9 + m * 4), y - r * 0.6 + 8, x + s * (5 + m * 6), y - r * 0.6 + 12); ctx.stroke() }
+    ctx.fillStyle = '#ffd24a'; ctx.shadowColor = '#ffd24a'; ctx.shadowBlur = 5; for (const s of [-1, 1]) { ctx.beginPath(); ctx.arc(x + s * 3.2, y - r * 0.6, 1.8, 0, Math.PI * 2); ctx.fill() }
     ctx.restore()
   }
 

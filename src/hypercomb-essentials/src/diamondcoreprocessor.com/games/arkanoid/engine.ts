@@ -62,7 +62,8 @@ export interface Brick {
 export interface Ball { x: number; y: number; vx: number; vy: number; r: number; stuck: boolean; wobble: number; primary: boolean; color: string; pierced?: Set<Brick> }
 export interface Capsule { x: number; y: number; kind: PowerKind; delay?: number }   // delay = hover seconds before it starts falling
 export interface Laser { x: number; y: number }
-export interface TurretShot { x: number; y: number; vx: number; vy: number }   // a turret tile's shot at the player
+export type ProjKind = 'shot' | 'bomb' | 'bolt' | 'seeker' | 'spread'   // enemy projectile flavours
+export interface TurretShot { x: number; y: number; vx: number; vy: number; kind?: ProjKind; t?: number }
 export interface Rocket { x: number; y: number; vy: number }
 export interface Explosion { x: number; y: number; t: number }
 // Ten DISTINCT enemies — each its own movement, tactic AND look (see ENEMY_KINDS).
@@ -1110,13 +1111,17 @@ export class Engine {
         e.x += (e.vx ?? 1) * 70 * dt
         if (e.x < ENEMY_R + 30) { e.x = ENEMY_R + 30; e.vx = 1 } else if (e.x > W - ENEMY_R - 30) { e.x = W - ENEMY_R - 30; e.vx = -1 }
         e.cd = (e.cd ?? 1.8) - dt
-        if (e.cd <= 0) { e.cd = 1.8; const dx = clamp(this.paddle.x - e.x, -160, 160); this.turretShots.push({ x: e.x, y: e.y + 10, vx: dx * 0.7, vy: 180 }) }
+        if (e.cd <= 0) {
+          e.cd = 1.8
+          if (Math.random() < 0.3) this.turretShots.push({ x: e.x, y: e.y + 10, vx: 0, vy: 110, kind: 'seeker', t: 0 })   // a homing seeker
+          else { const dx = clamp(this.paddle.x - e.x, -160, 160); this.turretShots.push({ x: e.x, y: e.y + 10, vx: dx * 0.45, vy: 130, kind: 'bomb', t: 0 }) }   // a lobbed bomb
+        }
         break
       }
       case 'mirror': {
         e.x += clamp((W - this.paddle.x) - e.x, -200 * dt, 200 * dt)             // mirrors the bat (lagged)
         e.cd = (e.cd ?? 2.2) - dt
-        if (e.cd <= 0) { e.cd = 2.2; e.flash = 1; this.turretShots.push({ x: e.x, y: e.y + 8, vx: 0, vy: 280 }) }
+        if (e.cd <= 0) { e.cd = 2.2; e.flash = 1; this.turretShots.push({ x: e.x, y: e.y + 8, vx: 0, vy: 340, kind: 'bolt', t: 0 }) }   // a fast energy bolt
         break
       }
       case 'splitter': {
@@ -2153,9 +2158,10 @@ export class Engine {
       if (this.#turretFireCd <= 0) {
         this.#turretFireCd = TURRET_FIRE_INTERVAL
         const ox = turret.x + turret.w / 2, oy = turret.y + turret.h
-        const dx = this.paddle.x - ox, dy = this.paddle.y - oy
-        const d = Math.hypot(dx, dy) || 1
-        this.turretShots.push({ x: ox, y: oy, vx: (dx / d) * TURRET_SHOT_SPEED, vy: (dy / d) * TURRET_SHOT_SPEED })
+        const base = Math.atan2(this.paddle.y - oy, this.paddle.x - ox)
+        for (const a of [-0.32, 0, 0.32]) {                          // a 3-way spread fan
+          this.turretShots.push({ x: ox, y: oy, vx: Math.cos(base + a) * TURRET_SHOT_SPEED, vy: Math.sin(base + a) * TURRET_SHOT_SPEED, kind: 'spread', t: 0 })
+        }
       }
     }
     if (this.paddleHitFlash > 0) this.paddleHitFlash = Math.max(0, this.paddleHitFlash - dt)
@@ -2163,13 +2169,20 @@ export class Engine {
     const p = this.paddle
     const survive: TurretShot[] = []
     for (const s of this.turretShots) {
+      s.t = (s.t ?? 0) + dt
+      if (s.kind === 'bomb') s.vy += 230 * dt                     // lobbed arc (gravity)
+      else if (s.kind === 'seeker') {                             // homing missile — steers toward the bat
+        const dx = this.paddle.x - s.x, dy = this.paddle.y - s.y, d = Math.hypot(dx, dy) || 1
+        s.vx += (dx / d) * 220 * dt; s.vy += (dy / d) * 220 * dt
+        const ns = Math.hypot(s.vx, s.vy); if (ns > 195) { s.vx = s.vx / ns * 195; s.vy = s.vy / ns * 195 }
+      }
       s.x += s.vx * dt; s.y += s.vy * dt
-      if (s.y - TURRET_SHOT_R > H) continue                       // fell off the bottom
+      if (s.y - TURRET_SHOT_R > H || s.x < -20 || s.x > W + 20) continue   // off-screen
       const hit = s.y + TURRET_SHOT_R >= p.y && s.y - TURRET_SHOT_R <= p.y + p.h &&
         s.x >= p.x - p.w / 2 - TURRET_SHOT_R && s.x <= p.x + p.w / 2 + TURRET_SHOT_R
       if (hit) {
         this.combo = 0                                            // chain broken
-        if (this.shielded) { s.vy = -Math.abs(s.vy) * 1.1; s.y = p.y - TURRET_SHOT_R - 2; this.shieldFlash = 1; survive.push(s); continue }   // shield DEFLECTS the shot back up
+        if (this.shielded) { s.vy = -Math.abs(s.vy) * 1.1; s.y = p.y - TURRET_SHOT_R - 2; s.kind = 'shot'; this.shieldFlash = 1; survive.push(s); continue }   // shield DEFLECTS it back up (and dumbs a seeker)
         this.paddleHitFlash = PADDLE_HIT_FLASH
         this.paddleHp -= TURRET_DMG
         if (this.paddleHp <= 0) { this.paddleHp = 0; this.turretShots = []; this.#loseLife(); return }   // bat destroyed → lose a life
