@@ -15,7 +15,7 @@
 import {
   EMPTY, WALL, BRICK, LIFE_FULL, LIFE_HALF,
   type LevelDef, type Cell, type EnemySpawn, type EnemyKind,
-  type ItemSpawn, type ItemKind, type MirrorSpawn,
+  type ItemSpawn, type ItemKind, type MirrorSpawn, type MirrorKind,
 } from './engine.js'
 
 const STORE_KEY = 'hc:solomon-levels'
@@ -155,249 +155,249 @@ function largeCave(name: string, cols: number, rows: number, kind: 'wide' | 'tal
   return { name, cols, rows, tiles, player, door, enemies, items, mirrors: [], lifeStart: kind === 'tall' ? 16000 : 12000 }
 }
 
+// The room archetypes. Each shapes the interior architecture of a large room; the
+// foes / mirrors / items are then scattered onto the ledges that architecture made.
+type RoomKind = 'cavern' | 'tower' | 'gallery' | 'throne' | 'depths'
+
+/** A room's contents, scattered onto the generated ledges (so one compact call
+ *  describes a whole large room). `items` ride the upper ledges; `hidden` items
+ *  are buried in brick at precise cells; `secret` items sit invisible in EMPTY cells
+ *  and are found only by waving the wand over them; `foes` split by behaviour
+ *  (walkers on the floor, panels in wall slots, flyers in mid-air). */
+interface Roster {
+  foes?: Partial<Record<EnemyKind, number>>
+  mirrors?: Partial<Record<MirrorKind, number>>
+  items?: ItemKind[]
+  hidden?: ItemSpawn[]
+  secret?: ItemSpawn[]
+  lifeStart?: number
+}
+
+const WALKER_KINDS = new Set<EnemyKind>(['goblin', 'gargoil', 'dragon', 'saramandor'])
+
+/** THE room generator. Every cavern is now a large, smooth-scrolling, NON-square
+ *  warm-stone castle chamber — this is the Zelda-style replacement for Solomon's
+ *  Key's fixed single-screen squares. Because the room is bigger than the viewport,
+ *  the camera always follows Dana. A wavy rock rim gives an organic outline; `kind`
+ *  shapes the interior (open cavern · vertical tower · colonnade gallery · throne
+ *  dais · broken-floor vault); the `roster` is scattered onto the ledges that
+ *  architecture made. Deterministic (Math.sin, no RNG); a clear 2-tall ground
+ *  corridor, an always-grounded key, and Dana's wand keep every room solvable. */
+function bigRoom(name: string, cols: number, rows: number, kind: RoomKind, roster: Roster = {}): LevelDef {
+  const tiles = new Array<number>(cols * rows).fill(EMPTY)
+  const inB = (c: number, r: number) => c >= 0 && c < cols && r >= 0 && r < rows
+  const set = (c: number, r: number, v: number) => { if (inB(c, r)) tiles[r * cols + c] = v }
+  const plat = (c: number, r: number, len: number, v = BRICK) => { for (let i = 0; i < len; i++) set(c + i, r, v) }
+  const column = (c: number, r0: number, r1: number, v = WALL) => { for (let r = r0; r <= r1; r++) set(c, r, v) }
+  const solid = (c: number, r: number) => { const t = inB(c, r) ? tiles[r * cols + c] : WALL; return t === WALL || t === BRICK }
+
+  // irregular warm-rock rim → a non-square silhouette
+  for (let c = 0; c < cols; c++) {
+    const top = 1 + Math.round((Math.sin(c * 0.5) + 1) * 1.0)
+    const bot = 1 + Math.round((Math.sin(c * 0.4 + 2.1) + 1) * 0.55)
+    for (let t = 0; t < top; t++) set(c, t, WALL)
+    for (let b = 0; b < bot; b++) set(c, rows - 1 - b, WALL)
+  }
+  for (let r = 0; r < rows; r++) {
+    const lft = 1 + Math.round((Math.sin(r * 0.55) + 1) * 0.9)
+    const rgt = 1 + Math.round((Math.sin(r * 0.48 + 1.3) + 1) * 0.9)
+    for (let t = 0; t < lft; t++) set(t, r, WALL)
+    for (let b = 0; b < rgt; b++) set(cols - 1 - b, r, WALL)
+  }
+
+  const floor = rows - 2
+  const mid = cols >> 1
+  for (let c = 1; c < cols - 1; c++) { set(c, floor, EMPTY); set(c, floor - 1, EMPTY); set(c, rows - 1, WALL) }
+
+  const anchors: Cell[] = []   // EMPTY standing cells sitting on a platform top
+  const niches: Cell[] = []    // wall slots for panel turrets
+  const ledge = (c: number, r: number, len: number) => { plat(c, r, len); for (let i = 0; i < len; i += 2) if (inB(c + i, r - 1)) anchors.push({ col: c + i, row: r - 1 }) }
+  let key: Cell = { col: mid, row: 3 }
+
+  switch (kind) {
+    case 'cavern': {
+      // sparse shelves at staggered heights across an open cave
+      for (let i = 0; i < 6; i++) {
+        const c = 4 + Math.round((i / 5) * (cols - 10))
+        const r = floor - 3 - (i % 3) * 3 - (i % 2)
+        ledge(Math.max(2, Math.min(cols - 6, c)), Math.max(3, r), 4)
+      }
+      if (anchors.length) key = { ...anchors[anchors.length >> 1] }
+      break
+    }
+    case 'tower': {
+      // zigzag battlement ledges with arrow-slit turret slots in the side walls
+      let left = true
+      for (let r = floor - 2; r > 3; r -= 3) { ledge(left ? 3 : cols - 8, r, 5); left = !left }
+      niches.push({ col: 2, row: floor - 7 }, { col: cols - 3, row: floor - 13 })
+      key = { col: mid, row: 3 }
+      break
+    }
+    case 'gallery': {
+      // a long colonnade: a broken upper gallery over hanging columns (they stop
+      // above head height, so the floor stays a walkable arcade)
+      const gal = 3
+      for (let c = 3; c < cols - 3; c++) if (c % 7 < 5) set(c, gal, BRICK)
+      for (let c = 5; c < cols - 4; c += 6) { column(c, gal + 1, floor - 3, WALL); ledge(c - 1, floor - 4, 3) }
+      for (let c = 4; c < cols - 4; c += 5) if (solid(c, gal) && !solid(c, gal - 1)) anchors.push({ col: c, row: gal - 1 })
+      plat(mid - 1, gal, 3, BRICK)
+      key = { col: mid, row: gal - 1 }
+      break
+    }
+    case 'throne': {
+      // a grand hall around a stepped throne dais (the key crowns it), flanked by
+      // colonnade pillars
+      for (let h = 0; h < 5; h++) plat(mid - (4 - h), floor - h, (4 - h) * 2 + 1, WALL)
+      for (const c of [6, cols - 7]) { column(c, 4, floor - 3, WALL); ledge(c - 1, floor - 4, 3) }
+      key = { col: mid, row: floor - 6 }
+      break
+    }
+    case 'depths': {
+      // broken vault floors split the room into stacked chambers joined by gaps
+      for (const fr of [Math.round(rows * 0.36), Math.round(rows * 0.63)]) {
+        for (let c = 2; c < cols - 2; c++) if ((c + fr) % 6 > 1) set(c, fr, BRICK)
+        for (let c = 3; c < cols - 3; c += 4) if (solid(c, fr) && !solid(c, fr - 1)) anchors.push({ col: c, row: fr - 1 })
+      }
+      ledge(3, 5, 4)
+      key = { col: 4, row: 4 }
+      break
+    }
+  }
+
+  // Open floor only (never under the throne dais), and kept clear of the player's
+  // start (col 2) by a ~5-tile buffer so a foe — goblins HUNT — never spawns right
+  // on top of Dana. The first spot a walker takes is therefore ≥ col 7.
+  const floorSpots: Cell[] = []
+  for (let c = 7; c < cols - 4; c += 3) if (!solid(c, floor)) floorSpots.push({ col: c, row: floor })
+
+  const enemies: EnemySpawn[] = []
+  const items: ItemSpawn[] = []
+  const mirrors: MirrorSpawn[] = []
+  const player: Cell = { col: 2, row: floor }
+  const door: Cell = { col: cols - 3, row: floor }
+
+  // sequential allocators so scattered things spread out (the key anchor is reserved)
+  const high = anchors.filter(a => !(a.col === key.col && a.row === key.row))
+  let hp = 0, fp = 0
+  const nextHigh = (): Cell => high.length ? high[hp++ % high.length] : nextFloor()
+  const nextFloor = (): Cell => floorSpots.length ? floorSpots[fp++ % floorSpots.length] : { col: mid, row: floor }
+
+  items.push({ col: key.col, row: key.row, kind: 'key' })
+  for (const k of roster.items ?? []) {
+    const a = nextHigh()
+    items.push({ col: a.col, row: a.row, kind: k, value: k === 'jewel' ? 2000 : k === 'treasure' ? 5000 : undefined })
+  }
+
+  for (const [k, n] of Object.entries(roster.foes ?? {}) as [EnemyKind, number][]) {
+    for (let j = 0; j < n; j++) {
+      let pos: Cell
+      if (k === 'panel') pos = niches.length ? niches[j % niches.length] : { col: 2, row: Math.max(3, floor - 5) }
+      else if (WALKER_KINDS.has(k)) pos = nextFloor()
+      else { const a = nextHigh(); pos = { col: a.col, row: Math.max(3, a.row - 2) } }
+      enemies.push({ col: pos.col, row: pos.row, kind: k, dir: pos.col < mid ? 1 : -1 })
+    }
+  }
+
+  let mc = 0
+  for (const [k, n] of Object.entries(roster.mirrors ?? {}) as [MirrorKind, number][]) {
+    for (let j = 0; j < n; j++) { mirrors.push({ col: 4 + ((mc * 2 + 1) * 5) % Math.max(1, cols - 8), row: 3, kind: k }); mc++ }
+  }
+
+  for (const h of roster.hidden ?? []) { items.push({ ...h, hidden: true }); if (inB(h.col, h.row) && tiles[h.row * cols + h.col] === EMPTY) set(h.col, h.row, BRICK) }
+  // Secrets sit invisible in an EMPTY cell (clear any brick so the wand can reach them).
+  for (const sc of roster.secret ?? []) { items.push({ ...sc, hidden: true, secret: true }); if (inB(sc.col, sc.row) && tiles[sc.row * cols + sc.col] === BRICK) set(sc.col, sc.row, EMPTY) }
+
+  // Safety net: key supported + cleared, singletons clear, nothing embedded in stone.
+  if (!solid(key.col, key.row + 1)) plat(key.col - 1, key.row + 1, 3, BRICK)
+  set(key.col, key.row, EMPTY)
+  for (const e of enemies) set(e.col, e.row, EMPTY)
+  for (const m of mirrors) set(m.col, m.row, EMPTY)
+  for (const it of items) if (!it.hidden) set(it.col, it.row, EMPTY)
+  set(player.col, player.row, EMPTY); set(player.col, player.row - 1, EMPTY); set(player.col, rows - 1, WALL)
+  set(door.col, door.row, EMPTY); set(door.col, door.row - 1, EMPTY); set(door.col, rows - 1, WALL)
+
+  return { name, cols, rows, tiles, player, door, enemies, items, mirrors, lifeStart: roster.lifeStart ?? 13000 }
+}
+
 export const BUILTIN_LEVELS: LevelDef[] = [
-  // ── Shrine of Aries (rooms 1–4) ──
-  // Room 1 — Awakening. Tutorial: a lone goblin, a bell + key up a ledge, a
-  // fireball jar hidden in the ledge.
-  fromAscii('Awakening', [
-    '####################',
-    '#..................#',
-    '#........b.........#',
-    '#..................#',
-    '#.........K........#',
-    '#.......BBBBB......#',
-    '#..................#',
-    '#..................#',
-    '#..................#',
-    '#..................#',
-    '#.......g..........#',
-    '#.P..............D.#',
-    '####################',
-  ], { hidden: [{ col: 10, row: 5, kind: 'jar' }] }),
+  // Every cavern below is a large, smooth-scrolling warm-stone castle room built by
+  // bigRoom (no fixed single-screen squares). Each keeps its identity — foes, items,
+  // zodiac panels, seals, wings, pages — scattered into a roomy `kind` of chamber.
 
-  // Room 2 — Hall of Mirrors. Two demon mirrors rain demonheads; shelter low,
-  // build up to the bell + key. Super-jar hidden in the mid ledge.
-  fromAscii('Hall of Mirrors', [
-    '####################',
-    '#...M..........M...#',
-    '#..................#',
-    '#.......b....K.....#',
-    '#....BBB....BBB....#',
-    '#..................#',
-    '#..................#',
-    '#........BBB.......#',
-    '#..................#',
-    '#..................#',
-    '#..................#',
-    '#.P..............D.#',
-    '####################',
-  ], { hidden: [{ col: 9, row: 7, kind: 'superjar' }] }),
+  // ── Shrine of Aries ──
+  // Awakening. Tutorial cavern: a lone goblin, a bell up on a shelf, a buried jar.
+  bigRoom('Awakening', 26, 16, 'cavern', { foes: { goblin: 1 }, items: ['bell'], hidden: [{ col: 8, row: 13, kind: 'jar' }], secret: [{ col: 13, row: 14, kind: 'jewel', value: 2000 }], lifeStart: 12000 }),
 
-  // Room 3 — The Vault. Panel-monster turret, a ghost, a gargoil + goblin. An
-  // extra Dana on the top-right ledge; the key mid-right.
-  fromAscii('The Vault', [
-    '####################',
-    '#..............+...#',
-    '#.............BBB..#',
-    '#n.................#',
-    '#BBBB.............h#',
-    '#..................#',
-    '#......BBBB........#',
-    '#..................#',
-    '#...........K......#',
-    '#.........BBBB.....#',
-    '#....r.............#',
-    '#.P..............D.#',
-    '####################',
-  ], { hidden: [{ col: 7, row: 6, kind: 'jar' }, { col: 11, row: 9, kind: 'jewel', value: 2000 }] }),
+  // Hall of Mirrors. Two demon mirrors rain demonheads across an open cave; build up
+  // to the bell + key. Super-jar buried low.
+  bigRoom('Hall of Mirrors', 28, 16, 'cavern', { mirrors: { demonhead: 2 }, items: ['bell'], hidden: [{ col: 10, row: 13, kind: 'superjar' }], lifeStart: 13000 }),
 
-  // Room 4 — Constellation of Aries. The 4th room holds the ZODIAC PANEL — clear
-  // the room holding it to drop into the fairy bonus room.
-  fromAscii('Constellation', [
-    '####################',
-    '#........Z.........#',
-    '#.......BBB........#',
-    '#..................#',
-    '#........K.........#',
-    '#.......BBB........#',
-    '#..................#',
-    '#..r...........r...#',
-    '#.BBB........BBBB..#',
-    '#..................#',
-    '#.....g......g.....#',
-    '#.P..............D.#',
-    '####################',
-  ], { hidden: [{ col: 4, row: 10, kind: 'bell' }, { col: 15, row: 10, kind: 'bell' }] }),
+  // The Vault. A broken-floor vault: panel turret, a ghost, a gargoil — plus an extra
+  // Dana and a buried jar + jewel among the stacked chambers.
+  bigRoom('The Vault', 28, 18, 'depths', { foes: { panel: 1, ghost: 1, gargoil: 1 }, items: ['life'], hidden: [{ col: 8, row: 15, kind: 'jar' }, { col: 18, row: 15, kind: 'jewel', value: 2000 }], secret: [{ col: 21, row: 16, kind: 'treasure', value: 5000 }], lifeStart: 13000 }),
 
-  // ── Shrine of Taurus (rooms 5–8) ──
-  // Room 5 — Gargoyle Climb. Drop gargoils as you build up to the key.
-  fromAscii('Gargoyle Climb', [
-    '####################',
-    '#...............r..#',
-    '#............BBBB..#',
-    '#..r..............#',
-    '#BBBB.............#',
-    '#..................#',
-    '#........K.........#',
-    '#.......BBB........#',
-    '#..................#',
-    '#...r..........r...#',
-    '#..BBB.j....j.BBB..#',
-    '#.P..............D.#',
-    '####################',
-  ], { hidden: [{ col: 16, row: 2, kind: 'bell' }] }),
+  // Sunken Gallery. A long colonnade hall — hanging columns over a walkable arcade,
+  // the key high on the broken upper gallery. Scrolls well past the screen.
+  bigRoom('Sunken Gallery', 34, 15, 'gallery', { foes: { gargoil: 2, ghost: 1 }, items: ['hourglass', 'jewel', 'jewel', 'bell'], hidden: [{ col: 4, row: 12, kind: 'jar' }], secret: [{ col: 25, row: 13, kind: 'life' }], lifeStart: 14000 }),
 
-  // Room 6 — Ghost Corridor. Ghosts smash bridges; grab the super-jar to sweep.
-  fromAscii('Ghost Corridor', [
-    '####################',
-    '#..K......F........#',
-    '#..BBB....BB.......#',
-    '#.........h........#',
-    '#BBBBBBBB..........#',
-    '#.........h........#',
-    '#.......BBBBBBB....#',
-    '#....h.............#',
-    '#BBBBBBB...........#',
-    '#..............h...#',
-    '#.........g........#',
-    '#.P..............D.#',
-    '####################',
-  ], { hidden: [{ col: 15, row: 1, kind: 'jewel', value: 2000 }] }),
+  // Constellation of Aries. Holds the ZODIAC PANEL — clear the room holding it to
+  // drop into the fairy bonus room. Gargoils + goblins guard a wide cave.
+  bigRoom('Constellation', 28, 16, 'cavern', { foes: { gargoil: 2, goblin: 2 }, items: ['zodiac'], hidden: [{ col: 6, row: 13, kind: 'bell' }, { col: 20, row: 13, kind: 'bell' }], lifeStart: 13000 }),
 
-  // Room 7 — Sky Tower. A Neul homes on your height as you climb to the GOLDEN
-  // WINGS (clear holding them to warp ahead). A Solomon's Seal waits mid-tower.
-  fromAscii('Sky Tower', [
-    '####################',
-    '#........W.........#',
-    '#.......BBB........#',
-    '#.l................#',
-    '#..................#',
-    '#........@.........#',
-    '#.......BBB........#',
-    '#..................#',
-    '#..r...........r...#',
-    '#.BBB........BBBB..#',
-    '#..................#',
-    '#.P..............D.#',
-    '####################',
-  ], { hidden: [{ col: 3, row: 10, kind: 'scroll' }] }),
+  // ── Shrine of Taurus ──
+  // Gargoyle Climb. A vertical tower — drop gargoils off the battlements as you climb.
+  bigRoom('Gargoyle Climb', 20, 24, 'tower', { foes: { gargoil: 4 }, items: ['jewel', 'jewel'], hidden: [{ col: 10, row: 21, kind: 'bell' }], lifeStart: 16000 }),
 
-  // Room 8 — Constellation of Taurus. Second ZODIAC PANEL, guarded by ghosts.
-  fromAscii('Constellation II', [
-    '####################',
-    '#........Z.........#',
-    '#.......BBB........#',
-    '#..h............h..#',
-    '#..................#',
-    '#........K.........#',
-    '#.......BBB........#',
-    '#..................#',
-    '#..r...........r...#',
-    '#.BBB........BBBB..#',
-    '#.....g......g.....#',
-    '#.P..............D.#',
-    '####################',
-  ], { hidden: [{ col: 9, row: 7, kind: 'superjar' }] }),
+  // Ghost Corridor. A long colonnade the ghosts sweep, smashing bridges; grab the
+  // super-jar to clear a path.
+  bigRoom('Ghost Corridor', 32, 15, 'gallery', { foes: { ghost: 4 }, items: ['superjar'], hidden: [{ col: 15, row: 12, kind: 'jewel', value: 2000 }], lifeStart: 14000 }),
 
-  // ── Shrine of Gemini (rooms 9–12) ──
-  // Room 9 — Spark Cells. Relentless sparkballs ricochet — wall them off or
-  // fireball them. A Solomon's Seal hides top-left; a scroll widens your stock.
-  fromAscii('Spark Cells', [
-    '####################',
-    '#..@...............#',
-    '#.BBB..............#',
-    '#..................#',
-    '#....k........k....#',
-    '#..................#',
-    '#........K.........#',
-    '#.......BBB........#',
-    '#..................#',
-    '#....k........k....#',
-    '#..................#',
-    '#.P..............D.#',
-    '####################',
-  ], { hidden: [{ col: 3, row: 7, kind: 'scroll' }] }),
+  // The Ramparts. A tall keep climb — zigzag battlements with arrow-slit turrets in
+  // the walls. The camera follows you up to the crowning key.
+  bigRoom('The Ramparts', 18, 26, 'tower', { foes: { panel: 2, gargoil: 1, ghost: 1 }, items: ['bell', 'treasure', 'hourglass'], hidden: [{ col: 5, row: 23, kind: 'jar' }], lifeStart: 17000 }),
 
-  // Room 10 — Dragon's Lair. A pink Dragon hunts while Saramandors spit fire.
-  fromAscii("Dragon's Lair", [
-    '####################',
-    '#..................#',
-    '#....a.............#',
-    '#...BBBB...........#',
-    '#..................#',
-    '#..........s.......#',
-    '#........BBBB......#',
-    '#..................#',
-    '#..s...........K...#',
-    '#.BBBB.......BBBB..#',
-    '#..................#',
-    '#.P..............D.#',
-    '####################',
-  ], { hidden: [{ col: 5, row: 7, kind: 'jar' }, { col: 14, row: 5, kind: 'jar' }] }),
+  // Sky Tower. A Neul homes on your height as you climb to the GOLDEN WINGS (clear
+  // holding them to warp ahead). A Solomon's Seal waits mid-tower.
+  bigRoom('Sky Tower', 20, 26, 'tower', { foes: { neul: 1, gargoil: 2 }, items: ['wings', 'seal'], hidden: [{ col: 4, row: 23, kind: 'scroll' }], lifeStart: 17000 }),
 
-  // Room 11 — The Gauntlet. A saramandor mirror, a panel turret, a ghost, a
-  // sparkball and gargoils — and a Solomon's Seal behind the left ledge.
-  fromAscii('The Gauntlet', [
-    '####################',
-    '#.@....m.......h...#',
-    '#.BBB..............#',
-    '#..................#',
-    '#......n...........#',
-    '#..................#',
-    '#........K.........#',
-    '#.......BBB........#',
-    '#..r...........r...#',
-    '#.BBB........BBBB..#',
-    '#.....g.....k......#',
-    '#.P..............D.#',
-    '####################',
-  ], { hidden: [{ col: 15, row: 6, kind: 'treasure', value: 5000 }] }),
+  // Constellation of Taurus. Second ZODIAC PANEL, ghosts + gargoils across a cave.
+  bigRoom('Constellation II', 28, 16, 'cavern', { foes: { ghost: 2, gargoil: 2, goblin: 2 }, items: ['zodiac'], hidden: [{ col: 14, row: 13, kind: 'superjar' }], lifeStart: 13000 }),
 
-  // Room 12 — Solomon's Gate. The third ZODIAC PANEL crowns a foe-storm: two
-  // demon mirrors, ghosts, gargoils and dragons. An hourglass keeps you alive.
-  fromAscii("Solomon's Gate", [
-    '####################',
-    '#........Z.........#',
-    '#.......BBB........#',
-    '#..h....t....h.....#',
-    '#..................#',
-    '#....M........M....#',
-    '#..................#',
-    '#........K.........#',
-    '#.......BBB........#',
-    '#..r..a.....a..r...#',
-    '#.BBBB......BBBBB..#',
-    '#.P..............D.#',
-    '####################',
-  ], { hidden: [{ col: 9, row: 6, kind: 'superjar' }] }),
+  // ── Shrine of Gemini ──
+  // Spark Cells. Relentless sparkballs ricochet through a broken-floor vault — wall
+  // them off or fireball them. A Solomon's Seal + a scroll reward the climb.
+  bigRoom('Spark Cells', 28, 18, 'depths', { foes: { sparkball: 4 }, items: ['seal'], hidden: [{ col: 20, row: 15, kind: 'scroll' }], secret: [{ col: 10, row: 16, kind: 'jewel', value: 3000 }], lifeStart: 14000 }),
 
-  // ── Shrine of Cancer (rooms 13–15) — the road to the Princess ──
-  // Room 13 — Tide Pools. Sparkballs + a Neul harry the climb; the PAGE OF SPACE
-  // hides behind the lower-left ledge (one of two pages the true ending needs).
-  fromAscii('Tide Pools', [
-    '####################',
-    '#..................#',
-    '#...k.........k....#',
-    '#..................#',
-    '#.......l..........#',
-    '#..................#',
-    '#........K.........#',
-    '#.......BBB........#',
-    '#..r...........r...#',
-    '#.BBB........BBBB..#',
-    '#..................#',
-    '#.P..............D.#',
-    '####################',
-  ], { hidden: [{ col: 3, row: 8, kind: 'pageSpace' }] }),
+  // Dragon's Lair. A pink Dragon hunts the throne hall while Saramandors spit fire.
+  bigRoom("Dragon's Lair", 30, 16, 'throne', { foes: { dragon: 1, saramandor: 2 }, items: ['jewel'], hidden: [{ col: 8, row: 13, kind: 'jar' }, { col: 21, row: 13, kind: 'jar' }], lifeStart: 14000 }),
 
-  // Room 14 — Crystal Cavern. A WIDE cave (30 tiles) that scrolls horizontally —
-  // bigger than the screen and not a box. Build up to the high key, then trek to
-  // the door as the camera follows you.
+  // Throne Antechamber. A wide grand hall around a stepped throne dais (the key
+  // crowns it), a demon mirror brooding overhead, a dragon prowling the floor.
+  bigRoom('Throne Antechamber', 36, 15, 'throne', { foes: { dragon: 1, saramandor: 2 }, mirrors: { demonhead: 1 }, items: ['treasure', 'jewel', 'hourglass'], hidden: [{ col: 8, row: 12, kind: 'superjar' }], lifeStart: 15000 }),
+
+  // The Gauntlet. A saramandor mirror, a panel turret, ghosts, a sparkball and
+  // gargoils across a vault — and a Solomon's Seal among the chambers.
+  bigRoom('The Gauntlet', 30, 18, 'depths', { foes: { ghost: 1, sparkball: 1, gargoil: 2, goblin: 1, panel: 1 }, mirrors: { saramandor: 1 }, items: ['seal'], hidden: [{ col: 15, row: 15, kind: 'treasure', value: 5000 }], lifeStart: 15000 }),
+
+  // Solomon's Gate. The third ZODIAC PANEL crowns a foe-storm: two demon mirrors,
+  // ghosts, gargoils and dragons. An hourglass keeps you alive.
+  bigRoom("Solomon's Gate", 34, 16, 'throne', { foes: { dragon: 2, gargoil: 2, ghost: 2 }, mirrors: { demonhead: 2 }, items: ['zodiac', 'hourglass'], hidden: [{ col: 9, row: 13, kind: 'superjar' }], lifeStart: 15000 }),
+
+  // ── Shrine of Cancer — the road to the Princess ──
+  // Tide Pools. Sparkballs + a Neul harry a wide cave; the PAGE OF SPACE hides buried
+  // low (one of the two pages the true ending needs).
+  bigRoom('Tide Pools', 28, 18, 'cavern', { foes: { sparkball: 2, neul: 1, gargoil: 2 }, hidden: [{ col: 6, row: 15, kind: 'pageSpace' }], lifeStart: 14000 }),
+
+  // The Castle Depths. A big sprawling vault that scrolls in BOTH axes — broken
+  // floors stack the chambers. The grandest castle hall before the end.
+  bigRoom('The Castle Depths', 28, 20, 'depths', { foes: { gargoil: 1, ghost: 1, neul: 1, sparkball: 1 }, hidden: [{ col: 14, row: 17, kind: 'jewel', value: 3000 }], secret: [{ col: 9, row: 18, kind: 'treasure', value: 5000 }], lifeStart: 16000 }),
+
+  // Crystal Cavern. A WIDE natural cave (30 tiles) that scrolls horizontally — build
+  // up to the high key, then trek to the door as the camera follows you.
   largeCave('Crystal Cavern', 30, 13, 'wide'),
 
-  // Room 15 — The Long Ascent. A TALL cave (24 tiles) that scrolls vertically:
-  // climb the zigzag ledges to the key near the ceiling, then descend to the door.
-  // The PAGE OF TIME hides on the way up.
+  // The Long Ascent. A TALL natural cave (24 tiles) that scrolls vertically: climb
+  // the zigzag ledges to the key near the ceiling, then descend. PAGE OF TIME hides up.
   largeCave('The Long Ascent', 18, 24, 'tall', [{ col: 12, row: 9, kind: 'pageTime' }]),
 ]
 
@@ -405,38 +405,43 @@ export const BUILTIN_LEVELS: LevelDef[] = [
  *  panel — no enemies, the door is open from the start, a short timer, and a
  *  glade full of bells, fairies and treasure. */
 export const BONUS_ROOM: LevelDef = fromAscii('Fairy Glade', [
-  '####################',
-  '#..b...b....b...b..#',
-  '#..................#',
-  '#....j...$....j....#',
-  '#..................#',
-  '#..b...BBBBBB...b..#',
-  '#......BBBBBB......#',
-  '#..................#',
-  '#...j....b....j....#',
-  '#..................#',
-  '#..................#',
-  '#.P..............D.#',
-  '####################',
+  '##############################',
+  '#..b.....b.....b.....b....b..#',
+  '#............................#',
+  '#....j.....j..$......j.......#',
+  '#............................#',
+  '#..b.......BBBBBBBB.......b..#',
+  '#..........BBBBBBBB..........#',
+  '#............................#',
+  '#....j........b........j.....#',
+  '#............................#',
+  '#...b.........j..........b...#',
+  '#............................#',
+  '#............................#',
+  '#............................#',
+  '#.P........................D.#',
+  '##############################',
 ], { lifeStart: LIFE_HALF })
 
 /** The Princess Room — the destination of the true ending (reached when every
  *  Solomon's Seal has been collected). The caged fairy Princess waits on a high
  *  pedestal beside the exit; climb to her to rescue her. No foes, a calm timer. */
 export const PRINCESS_ROOM: LevelDef = fromAscii('Princess Room', [
-  '####################',
-  '#..................#',
-  '#........RD........#',
-  '#.......BBBB.......#',
-  '#..................#',
-  '#....b........b....#',
-  '#..................#',
-  '#...j....j....j....#',
-  '#..................#',
-  '#..b....j....b.....#',
-  '#..................#',
-  '#.P................#',
-  '####################',
+  '##########################',
+  '#........................#',
+  '#..........RD............#',
+  '#.........BBBB...........#',
+  '#........................#',
+  '#.....b............b.....#',
+  '#........................#',
+  '#....j......j......j.....#',
+  '#........................#',
+  '#...b.......j......b.....#',
+  '#........................#',
+  '#........................#',
+  '#........................#',
+  '#.P......................#',
+  '##########################',
 ])
 
 /** How many Solomon's Seals exist across the built-in game (all 3 needed for the

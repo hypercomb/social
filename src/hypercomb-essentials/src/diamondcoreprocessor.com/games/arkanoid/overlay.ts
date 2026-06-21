@@ -22,6 +22,8 @@ import { Renderer, brickColor } from './renderer.js'
 import { LEVELS, cloneLevel, loadCustomLevels, upsertCustomLevel, deleteCustomLevel, type ArkanoidLevel } from './levels.js'
 import { Designer, TOOLS, type Tool } from './designer.js'
 import { Shaker, ParticleField, easeOutBack, ARCADE } from '../juice.js'
+import { arkanoidThemes } from './theme.js'
+import './themes/index.js'   // side-effect: load + register the built-in scene themes
 
 const STYLE_ID = 'ark-overlay-styles'
 const Z = 2147483000
@@ -96,6 +98,7 @@ export class ArkanoidOverlay {
   #fireHeld = false                     // latch so keydown auto-repeat doesn't restart the fireball charge
   #difficulty = loadDifficulty()        // 0..4 (Rookie..Gangster), persisted in localStorage
   #modeBtn: HTMLButtonElement | null = null
+  #themeSel: HTMLSelectElement | null = null
 
   // designer pointer paint state
   #painting = false
@@ -158,6 +161,7 @@ export class ArkanoidOverlay {
     window.addEventListener('pointermove', this.#onPointerMove)
     window.addEventListener('pointerup', this.#onPointerUp)
     document.addEventListener('pointerlockchange', this.#onLockChange)
+    arkanoidThemes.addEventListener('change', this.#syncThemeSelect)   // a later-loaded theme appears in the picker
     this.#ro = new ResizeObserver(() => this.#fit())
     if (this.#stage) this.#ro.observe(this.#stage)
     this.#lastTs = 0
@@ -173,6 +177,7 @@ export class ArkanoidOverlay {
     window.removeEventListener('pointermove', this.#onPointerMove)
     window.removeEventListener('pointerup', this.#onPointerUp)
     document.removeEventListener('pointerlockchange', this.#onLockChange)
+    arkanoidThemes.removeEventListener('change', this.#syncThemeSelect)
     this.#exitLock()
     this.#ro?.disconnect()
     this.#ro = null
@@ -213,12 +218,16 @@ export class ArkanoidOverlay {
     prev.onclick = () => this.#cycleLevel(-1)
     next.onclick = () => this.#cycleLevel(1)
     restart.onclick = () => this.#startPlay(this.#levelIndex)
-    playBar.append(modeBtn, prev, label, next, restart)
+    const themeSel = el('select', { class: 'ark-select ark-theme-sel', title: 'Scene theme — community-swappable' }) as HTMLSelectElement
+    themeSel.onchange = () => arkanoidThemes.setActive(themeSel.value)   // renderer reads the active theme each frame → swaps live
+    playBar.append(modeBtn, prev, label, next, restart, themeSel)
     bar.appendChild(playBar)
     this.#playBar = playBar
     this.#levelLabel = label
     this.#modeBtn = modeBtn
+    this.#themeSel = themeSel
     this.#syncModeBtn()
+    this.#syncThemeSelect()
 
     // design controls
     const designBar = el('div', { class: 'ark-ctl ark-hidden' }) as HTMLDivElement
@@ -426,6 +435,18 @@ export class ArkanoidOverlay {
     btn.style.setProperty('--mode-accent', accent)
     btn.style.color = accent
     btn.style.borderColor = accent
+  }
+
+  /** Repopulate the scene-theme picker from the registry (built-ins + any community
+   *  themes that have registered) and reflect the active pick. Re-run on registry
+   *  'change' so a theme module loaded later still shows up. */
+  #syncThemeSelect = (): void => {
+    const sel = this.#themeSel
+    if (!sel) return
+    const active = arkanoidThemes.activeId()
+    sel.innerHTML = ''
+    for (const t of arkanoidThemes.list()) sel.appendChild(opt(t.id, `✦ ${t.name}`))
+    if (active) sel.value = active
   }
 
   // ── juice: shake + spark bursts + level intro ────────────
@@ -1005,7 +1026,7 @@ function opt(value: string, label: string): HTMLOptionElement {
 
 const CSS = `
 .ark-overlay{position:fixed;inset:0;display:flex;flex-direction:column;
-  background:radial-gradient(130% 120% at 50% -8%,#1a0e33 0%,#120a22 46%,#0a0814 78%,#05030c 100%);
+  background:radial-gradient(130% 120% at 50% -8%,#3a2a8f 0%,#241a66 44%,#140f3e 78%,#0a0826 100%);
   font-family:'Segoe UI',system-ui,sans-serif;color:#e8e0ff;user-select:none;
   animation:ark-in .22s ease both}
 @keyframes ark-in{from{opacity:0}to{opacity:1}}
@@ -1052,12 +1073,12 @@ const CSS = `
 .ark-close:hover{background:rgba(255,80,120,.34);color:#fff;box-shadow:0 0 12px rgba(255,80,120,.5)}
 .ark-stage{flex:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;padding:14px}
 .ark-canvas{border-radius:12px;
-  box-shadow:0 18px 64px rgba(0,0,0,.7),
-    0 0 0 1px rgba(57,255,106,.4),
-    0 0 22px rgba(57,255,106,.22),
-    0 0 46px rgba(122,60,255,.28),
-    inset 0 0 0 1px rgba(182,92,255,.18);
-  background:#06040c;touch-action:none;cursor:none}
+  box-shadow:0 18px 64px rgba(0,0,0,.6),
+    0 0 0 1px rgba(61,240,255,.45),
+    0 0 22px rgba(61,240,255,.25),
+    0 0 46px rgba(255,91,208,.3),
+    inset 0 0 0 1px rgba(255,255,255,.12);
+  background:#10204f;touch-action:none;cursor:none}
 .ark-banner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
   justify-content:center;gap:.7rem;background:rgba(7,4,14,.74);backdrop-filter:blur(3px)}
 .ark-banner-title{font-size:2.5rem;font-weight:800;letter-spacing:.04em;color:#39ff6a;

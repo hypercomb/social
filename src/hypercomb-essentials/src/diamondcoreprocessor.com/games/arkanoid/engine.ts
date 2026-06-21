@@ -44,7 +44,7 @@
 // bricks but never save you.
 
 export type GameState = 'playing' | 'won' | 'gameover'
-export type PowerKind = 'oscillate' | 'break' | 'laser' | 'expand' | 'gun' | 'magnet' | 'rocket' | 'multiplier' | 'burst' | 'pinball' | 'beam' | 'clock' | 'ballchain' | 'extralife' | 'crane' | 'pierce' | 'heal' | 'shield' | 'regen'
+export type PowerKind = 'oscillate' | 'break' | 'laser' | 'expand' | 'gun' | 'magnet' | 'rocket' | 'multiplier' | 'burst' | 'pinball' | 'beam' | 'clock' | 'ballchain' | 'extralife' | 'crane' | 'pierce' | 'heal' | 'shield' | 'regen' | 'scramble'
 
 export interface Brick {
   x: number; y: number; w: number; h: number; hp: number; max: number; alive: boolean
@@ -141,11 +141,12 @@ export const POWER_META: Record<PowerKind, PowerMeta> = {
   extralife: { letter: '1UP', color: '#5fe08a', name: 'extra life', desc: 'A 1-UP! Catch this pill to gain a life. Spat out by the hopping dispenser, or by shooting the rare winged-heart carrier on its single pass.' },
   crane: { letter: '☆', color: '#ffd24a', name: 'paper crane', desc: 'The gold paper-crane prize from a ball & chain run. Catch it for a 100,000 jackpot.' },
   pierce: { letter: '»', color: '#d8e6ff', name: 'pierce', desc: 'The white ball phases THROUGH tiles — one damage each as it passes, no bounce — carving a tunnel. Colour balls do not pierce. Timed.' },
+  scramble: { letter: '?', color: '#ff3df0', name: 'scramble', desc: 'Scrambles EVERY ball — including your white one — into random, ever-shifting colours, so you can no longer tell yours apart by colour and must FOLLOW it by eye. Snaps back to normal (yours back to white) when it ends. Grab more to hold it longer (1 → 3 → 5s).' },
   heal: { letter: '♥', color: '#5fe08a', name: 'repair', desc: 'Repairs the paddle — restores a chunk of bat health.' },
   shield: { letter: '⛨', color: '#5b9bff', name: 'shield', desc: 'A force shield over the bat: it takes no damage and DEFLECTS enemy fire back up. Timed.' },
   regen: { letter: '✚', color: '#3fe0a8', name: 'healing shield', desc: 'A shield that also REGENERATES bat health while it lasts — defend and heal at once. Timed.' },
 }
-export const POWER_ORDER: PowerKind[] = ['oscillate', 'break', 'laser', 'expand', 'gun', 'magnet', 'rocket', 'multiplier', 'burst', 'pinball', 'beam', 'clock', 'ballchain', 'pierce', 'heal', 'shield', 'regen']
+export const POWER_ORDER: PowerKind[] = ['oscillate', 'break', 'laser', 'expand', 'gun', 'magnet', 'rocket', 'multiplier', 'burst', 'pinball', 'beam', 'clock', 'ballchain', 'pierce', 'scramble', 'heal', 'shield', 'regen']
 
 // ── World geometry (units; the overlay scales to fit) ──────────────
 // The playfield is 20% wider than the base and bricks are 80% size, kept
@@ -235,7 +236,7 @@ const POWER_WEIGHTS: Record<PowerKind, number> = {
   laser: 7, break: 6, gun: 6, multiplier: 6,
   rocket: 3, burst: 3, beam: 3, pinball: 3,
   clock: 4, ballchain: 2,
-  pierce: 3,
+  pierce: 3, scramble: 4,
   heal: 5, shield: 5, regen: 3,        // defensive drops — more common when the bat is hurt (see #randomPower)
   extralife: 0,                        // never an ambient drop — only the carrier alien gives it
   crane: 0,                            // never an ambient drop — only earned from a ball & chain run
@@ -318,6 +319,7 @@ const TOTAL_CAP = 18                 // ceiling on the two-axis product (oscilla
 // Burst: for a few seconds every brick is one-hit, tough bricks included.
 const BURST_DURATION = 8
 const PIERCE_DURATION = 9             // the white ball phases through tiles (1 dmg each) for a while
+const SCRAMBLE_DURS = [1, 3, 5]      // ? scramble: stacked hold-time of the random-colour shuffle (1 → 3 → 5s)
 
 // Enemy: dawdle on a level and a hunter spawns to chase your white ball. A hit
 // on the WHITE ball whacks it away at top speed instead of stealing it — no life
@@ -501,6 +503,11 @@ export class Engine {
   burstTimer = 0
   pinballTimer = 0
   pierceTimer = 0                     // white ball phases through tiles while > 0
+  // Scramble (?): while > 0, EVERY ball renders in random, ever-shifting colours
+  // (the hero loses its white too) so you must follow yours by eye; reverts to
+  // normal when it ends. Purely a render concern — the engine just owns the clock.
+  scrambleTimer = 0
+  scrambleLevel = 0                  // 0..2 → index into SCRAMBLE_DURS (steps up on re-grab)
   // Beam (purple mushroom): ammo-based (no timer) with a power level 1-3.
   beamShots = 0                      // shots left in the loader (0 = no beam)
   beamLevel = 0                      // 1 = chip, 2 = ×2 damage, 3 = clears the whole line
@@ -935,6 +942,7 @@ export class Engine {
     this.pickups = []
     this.#levelClock = 0
     this.expandTimer = this.magnetTimer = this.burstTimer = this.pinballTimer = this.pierceTimer = 0
+    this.scrambleTimer = this.scrambleLevel = 0
     this.beamShots = this.beamLevel = this.beamCharge = this.beamFlash = 0
     this.laserShots = this.laserLevel = this.laserCharge = this.laserMuzzleFlash = 0; this.laserCharging = false; this.fireballs = []
     this.oscillateStacks = 0
@@ -974,6 +982,7 @@ export class Engine {
     addTimed('pinball', this.pinballTimer, this.#pinballDur || PINBALL_DURATION)
     addTimed('clock', this.freezeTimer, CLOCK_DURATION)
     addTimed('pierce', this.pierceTimer, PIERCE_DURATION)
+    if (this.scrambleTimer > 0) out.push({ kind: 'scramble', frac: clamp(this.scrambleTimer / SCRAMBLE_DURS[this.scrambleLevel], 0, 1), label: `${Math.ceil(this.scrambleTimer)}s` })
     addTimed('shield', this.shieldTimer, SHIELD_DURATION)
     addTimed('regen', this.regenTimer, REGEN_DURATION)
     if (this.ballchainTimer > 0) out.push({ kind: 'ballchain', frac: clamp(this.ballchainTimer / BALLCHAIN_DURATION, 0, 1), label: `${this.ballchainKills}/${CHAIN_BONUS_PILLS}` })
@@ -1605,6 +1614,10 @@ export class Engine {
         this.pierceTimer = Math.max(0, this.pierceTimer - dt)
         if (this.pierceTimer === 0) for (const b of this.balls) b.pierced = undefined   // clear pass-through tracking
       }
+      if (this.scrambleTimer > 0) {
+        this.scrambleTimer = Math.max(0, this.scrambleTimer - dt)
+        if (this.scrambleTimer === 0) this.scrambleLevel = 0   // shuffle over — balls revert to normal colours
+      }
       if (this.goldTimer > 0) {
         this.goldTimer = Math.max(0, this.goldTimer - dt)
         if (this.goldTimer === 0) this.goldBonus = 0           // gold window closed — bonus clears in one step
@@ -2091,6 +2104,13 @@ export class Engine {
         break
       case 'pierce':
         this.pierceTimer = Math.min(PIERCE_DURATION * 4, this.pierceTimer + PIERCE_DURATION)   // time stacks
+        break
+      case 'scramble':
+        // Scramble every ball into random colours so you must follow yours, then it
+        // reverts. Re-grab while it's lit to step the hold-time up (1 → 3 → 5s); each
+        // grab refreshes it.
+        this.scrambleLevel = this.scrambleTimer > 0 ? Math.min(SCRAMBLE_DURS.length - 1, this.scrambleLevel + 1) : 0
+        this.scrambleTimer = SCRAMBLE_DURS[this.scrambleLevel]
         break
       case 'heal':
         this.paddleHp = Math.min(PADDLE_MAX_HP, this.paddleHp + HEAL_AMOUNT)

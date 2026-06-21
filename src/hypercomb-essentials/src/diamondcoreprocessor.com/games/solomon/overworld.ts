@@ -35,8 +35,10 @@ export interface NodeDef { levelIndex: number; name: string; label: number }
 type Facing = 'up' | 'down' | 'left' | 'right'
 
 // Map shape: a boustrophedon ("snake") of node bands so the journey winds back
-// and forth across the cave like a real route. 4 bands × 4 nodes = 16 stops.
-const BANDS = 4
+// and forth across the cave like a real route. 5 bands × 4 nodes = 20 stops —
+// enough for the 19 built-in caverns plus the Princess Room. (Trailing slots
+// stay un-placed if there are fewer nodes; raise BANDS if the roster grows past 20.)
+const BANDS = 5
 const PER_BAND = 4
 const MARGIN = 5
 const BAND_GAP = 8

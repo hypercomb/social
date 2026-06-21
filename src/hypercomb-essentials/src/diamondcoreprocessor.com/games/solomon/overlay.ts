@@ -37,6 +37,9 @@ const OVIEW_H = 452
 // unchanged (the cap only kicks in above it).
 const VIEW_COLS = 22
 const VIEW_ROWS = 14
+// Seconds the room camera takes to slide one full screen when Dana crosses into the
+// next room (the Zelda flip-scroll). Small partial-room shifts take proportionally less.
+const ROOM_SLIDE = 0.32
 
 // Level-clear flow (continuous play — identical to the Bubble overlay so every
 // game advances the same way): on clearing a screen we tally the level's score
@@ -93,6 +96,20 @@ export class SolomonOverlay {
   #lastTs = 0
   #time = 0
   #overShown = false
+
+  // Zelda room camera: the sliding origin (#cam), the room indices Dana occupies
+  // (#room, for hysteresis), and a flag to snap to the starting room on entry.
+  #cam = { x: 0, y: 0 }
+  #room = { x: 0, y: 0 }
+  #camInit = false
+
+  // Smooth high-res render (matching the Bubble/Arkanoid pipeline): the world is
+  // drawn in logical viewport units (#logicalW/H, world px) through a single
+  // device-space scale (#scaleBack = cssScale × dpr) with smoothing ON, so curves
+  // and gradients render crisp instead of chunky-pixelated.
+  #logicalW = 1
+  #logicalH = 1
+  #scaleBack = 1
 
   // juice: trauma screen-shake + a short additive particle field + a level-intro
   // title card — the shared "modern vector arcade" kit, mirroring the Bubble
@@ -270,7 +287,7 @@ export class SolomonOverlay {
     this.#root = root
     this.#canvas = canvas
     this.#ctx = canvas.getContext('2d')
-    if (this.#ctx) { this.#ctx.imageSmoothingEnabled = false; this.#renderer = new Renderer(this.#ctx); this.#owView = new OverworldView(this.#ctx) }
+    if (this.#ctx) { this.#ctx.imageSmoothingEnabled = true; this.#renderer = new Renderer(this.#ctx); this.#owView = new OverworldView(this.#ctx) }
     this.#refreshLoadSelect()
   }
 
@@ -335,12 +352,9 @@ export class SolomonOverlay {
     this.#ended = false
     this.#intro = null
     this.#hideBanner()
-    if (this.#canvas) {
-      this.#canvas.width = OVIEW_W
-      this.#canvas.height = OVIEW_H
-      if (this.#ctx) this.#ctx.imageSmoothingEnabled = false
-      this.#fit()
-    }
+    this.#logicalW = OVIEW_W
+    this.#logicalH = OVIEW_H
+    this.#fit()
     this.#updateModeUI()
   }
 
@@ -366,6 +380,7 @@ export class SolomonOverlay {
     this.#levelStartScore = e.score
     this.#levelStartLives = e.lives
     this.#syncJuice(e)
+    this.#camInit = false   // snap the room camera to the starting room
     this.#hideBanner()
     this.#sizeCanvasToView(def)
     this.#updateModeUI()
@@ -397,43 +412,75 @@ export class SolomonOverlay {
   }
 
   #sizeCanvasTo(level: { cols: number; rows: number }): void {
-    if (!this.#canvas) return
-    this.#canvas.width = level.cols * TILE
-    this.#canvas.height = level.rows * TILE
-    if (this.#ctx) this.#ctx.imageSmoothingEnabled = false
+    this.#logicalW = level.cols * TILE
+    this.#logicalH = level.rows * TILE
     this.#fit()
   }
 
-  /** Size the canvas to the CAVERN viewport — capped so big caverns scroll while
-   *  small ones still fit exactly (no letterbox). */
+  /** Size the LOGICAL viewport to the CAVERN viewport — capped so big caverns scroll
+   *  while small ones still fit exactly (no letterbox). The backing store is sized in
+   *  #fit (logical × cssScale × dpr) for a crisp high-res render. */
   #sizeCanvasToView(level: { cols: number; rows: number }): void {
-    if (!this.#canvas) return
-    this.#canvas.width = Math.min(level.cols, VIEW_COLS) * TILE
-    this.#canvas.height = Math.min(level.rows, VIEW_ROWS) * TILE
-    if (this.#ctx) this.#ctx.imageSmoothingEnabled = false
+    this.#logicalW = Math.min(level.cols, VIEW_COLS) * TILE
+    this.#logicalH = Math.min(level.rows, VIEW_ROWS) * TILE
     this.#fit()
   }
 
-  /** Camera offset for a cavern: follow Dana, clamped to the level; centre any
-   *  axis where the level is smaller than the viewport. */
-  #cavernCamera(e: Engine): { x: number; y: number } {
-    const vw = this.#canvas?.width ?? e.width, vh = this.#canvas?.height ?? e.height
-    const cx = e.player.x + e.player.w / 2 - vw / 2
-    const cy = e.player.y + e.player.h / 2 - vh / 2
-    const x = e.width <= vw ? (e.width - vw) / 2 : Math.max(0, Math.min(cx, e.width - vw))
-    const y = e.height <= vh ? (e.height - vh) / 2 : Math.max(0, Math.min(cy, e.height - vh))
-    return { x: Math.round(x), y: Math.round(y) }
+  /** ZELDA-STYLE ROOM CAMERA. The view locks to the screen-sized "room" Dana stands
+   *  in and SLIDES to the next room when he crosses a boundary (instead of following
+   *  him continuously). Big caverns are a grid of rooms; on an axis that only just
+   *  exceeds the viewport (<4 tiles of slack) it falls back to a gentle clamp-follow
+   *  so the tiny shift never reads as a jarring half-room snap. Updates #cam toward
+   *  the room origin at a constant slide speed; teleports (death-respawn) snap. */
+  #roomCamera(e: Engine, dt: number): { x: number; y: number } {
+    const vw = this.#logicalW || e.width, vh = this.#logicalH || e.height
+    const init = !this.#camInit
+    const tx = this.#axisCam('x', e.player.x + e.player.w / 2, vw, Math.max(0, e.width - vw), e.width, init)
+    const ty = this.#axisCam('y', e.player.y + e.player.h / 2, vh, Math.max(0, e.height - vh), e.height, init)
+    if (init) { this.#cam.x = tx; this.#cam.y = ty; this.#camInit = true }
+    else {
+      // a multi-room jump (respawn) snaps; a single-room cross slides at constant speed
+      if (Math.abs(tx - this.#cam.x) > vw * 1.05) this.#cam.x = tx
+      else this.#cam.x += Math.max(-(vw / ROOM_SLIDE) * dt, Math.min(tx - this.#cam.x, (vw / ROOM_SLIDE) * dt))
+      if (Math.abs(ty - this.#cam.y) > vh * 1.05) this.#cam.y = ty
+      else this.#cam.y += Math.max(-(vh / ROOM_SLIDE) * dt, Math.min(ty - this.#cam.y, (vh / ROOM_SLIDE) * dt))
+    }
+    return { x: this.#cam.x, y: this.#cam.y }   // float → smooth sub-pixel slide
   }
 
+  /** Per-axis room-origin target. `maxO` = max camera offset (level − viewport). With
+   *  hysteresis (a margin past the boundary) so wiggling on a seam never jitters. */
+  #axisCam(axis: 'x' | 'y', p: number, view: number, maxO: number, levelDim: number, reset: boolean): number {
+    if (maxO <= 0) return 0                                            // level fits this axis
+    if (maxO < TILE * 4) return Math.max(0, Math.min(p - view / 2, maxO)) // tiny slack → smooth clamp-follow
+    const rooms = Math.ceil(levelDim / view)
+    const band = levelDim / rooms                                      // one room's width in world px
+    const m = TILE * 0.8                                               // hysteresis margin
+    let idx = reset ? Math.max(0, Math.min(rooms - 1, Math.floor(p / band))) : this.#room[axis]
+    while (idx > 0 && p < idx * band - m) idx--
+    while (idx < rooms - 1 && p > (idx + 1) * band + m) idx++
+    this.#room[axis] = idx
+    return Math.round(idx * (maxO / (rooms - 1)))
+  }
+
+  /** Fit the LOGICAL viewport into the stage, then size the backing store to the
+   *  displayed pixels × dpr (capped at 2) for a crisp, smoothed high-res render.
+   *  #scaleBack maps world units → device pixels in the loop's setTransform. */
   #fit = (): void => {
     const c = this.#canvas, s = this.#stage
-    if (!c || !s) return
-    const availW = s.clientWidth - 24
-    const availH = s.clientHeight - 24
-    if (availW <= 0 || availH <= 0) return
-    const scale = Math.max(1, Math.floor(Math.min(availW / c.width, availH / c.height) * 100) / 100)
-    c.style.width = `${c.width * scale}px`
-    c.style.height = `${c.height * scale}px`
+    if (!c || this.#logicalW <= 0 || this.#logicalH <= 0) return
+    const availW = (s?.clientWidth ?? 0) - 24
+    const availH = (s?.clientHeight ?? 0) - 24
+    // Before the stage has laid out (avail ≤ 0) fall back to a 1:1 fit so the canvas
+    // is never 0×0; a later #fit (resize / mode change) refines it.
+    const cssScale = availW > 0 && availH > 0 ? Math.min(availW / this.#logicalW, availH / this.#logicalH) : 1
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    c.width = Math.round(this.#logicalW * cssScale * dpr)
+    c.height = Math.round(this.#logicalH * cssScale * dpr)
+    c.style.width = `${Math.round(this.#logicalW * cssScale)}px`
+    c.style.height = `${Math.round(this.#logicalH * cssScale)}px`
+    this.#scaleBack = cssScale * dpr
+    if (this.#ctx) this.#ctx.imageSmoothingEnabled = true
   }
 
   // ── the loop ─────────────────────────────────────────────
@@ -448,44 +495,50 @@ export class SolomonOverlay {
     const ctx = this.#ctx, r = this.#renderer
     if (!ctx || !r) { this.#raf = requestAnimationFrame(this.#loop); return }
 
-    // The canvas is sized in world pixels (no scale transform; smoothing OFF), so
-    // screen shake is just a small translate folded into the frame. Clear the WHOLE
-    // canvas first so a shake offset can never smear the trailing edge, then draw
-    // the frame inside a save/translate(rounded shake)/restore — rounding keeps the
-    // pixel art crisp. Shake stays at rest in the designer (never advanced/added).
+    // Everything is drawn in LOGICAL world units through #scaleBack (cssScale × dpr)
+    // for a crisp, smoothed high-res render. Clear the whole backing buffer in device
+    // space first (so a shake/camera translate can never smear the trailing edge),
+    // then set the world transform per pass: WORLD passes fold in the camera + shake,
+    // SCREEN passes (HUD / intro / overworld / designer) use the bare scale.
+    const SB = this.#scaleBack
+    const view = { w: this.#logicalW, h: this.#logicalH }
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height)
 
     if (this.#mode === 'overworld' && this.#overworld && this.#owView) {
       this.#overworld.update(dt)
-      this.#owView.draw(this.#overworld, ctx.canvas.width, ctx.canvas.height, this.#time)
+      ctx.setTransform(SB, 0, 0, SB, 0, 0)
+      this.#owView.draw(this.#overworld, view.w, view.h, this.#time)
     } else if (this.#mode === 'play' && this.#engine) {
       this.#shaker.update(dt)
       const sh = this.#shaker.offset()
-      const view = { w: ctx.canvas.width, h: ctx.canvas.height }
       if (this.#transition) {
         // Cavern cleared: the sim is frozen while the score tallies, then we surface.
+        ctx.setTransform(SB, 0, 0, SB, 0, 0)
         this.#stepTransition(dt)
         this.#drawTransition(r, view)
       } else {
         this.#engine.update(dt)
         this.#senseJuice(dt)
-        // Camera follows Dana (caverns may exceed the viewport); the shake folds
-        // into the same world translate. The HUD + intro stay screen-space.
-        const cam = this.#cavernCamera(this.#engine)
-        ctx.save()
-        ctx.translate(Math.round(-cam.x + sh.x), Math.round(-cam.y + sh.y))
+        // The room camera locks to Dana's screen and slides between rooms (Zelda);
+        // the shake folds into the same world translate.
+        const cam = this.#roomCamera(this.#engine, dt)
+        ctx.setTransform(SB, 0, 0, SB, (-cam.x + sh.x) * SB, (-cam.y + sh.y) * SB)
         r.drawWorld(this.#engine, this.#time)
         this.#field.update(dt)
         this.#field.draw(ctx)
-        ctx.restore()
+        // HUD + intro are screen-fixed (no camera, no shake)
+        ctx.setTransform(SB, 0, 0, SB, 0, 0)
         r.drawHud(this.#engine, this.#time, view.w, view.h)
         this.#drawIntro(ctx, view, dt)
         if (this.#engine.state === 'won' && !this.#ended) this.#beginClear()
         else if (this.#engine.state === 'gameover' && !this.#overShown) { this.#overShown = true; this.#showGameOver() }
       }
     } else if (this.#mode === 'design') {
+      ctx.setTransform(SB, 0, 0, SB, 0, 0)
       r.drawEditor(this.#designer.level, this.#hover, this.#time)
     }
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
     this.#raf = requestAnimationFrame(this.#loop)
   }
 
@@ -677,9 +730,10 @@ export class SolomonOverlay {
     const c = this.#canvas
     if (!c) return null
     const rect = c.getBoundingClientRect()
-    const sx = c.width / rect.width, sy = c.height / rect.height
-    const col = Math.floor(((e.clientX - rect.left) * sx) / TILE)
-    const row = Math.floor(((e.clientY - rect.top) * sy) / TILE)
+    if (rect.width <= 0 || rect.height <= 0) return null
+    // CSS px → logical world px (the displayed element spans #logicalW × #logicalH).
+    const col = Math.floor((e.clientX - rect.left) / rect.width * this.#logicalW / TILE)
+    const row = Math.floor((e.clientY - rect.top) / rect.height * this.#logicalH / TILE)
     return { col, row }
   }
 
@@ -745,6 +799,7 @@ export class SolomonOverlay {
     this.#levelStartScore = this.#engine.score
     this.#levelStartLives = this.#engine.lives
     this.#syncJuice(this.#engine)
+    this.#camInit = false   // snap the room camera to the starting room
     this.#hideBanner()
     this.#sizeCanvasToView(this.#designer.level)
     this.#playBar?.classList.remove('sol-hidden')
@@ -846,8 +901,9 @@ export class SolomonOverlay {
     const tr = this.#transition
     const ctx = this.#ctx
     if (!tr || !ctx) return
-    const cam = this.#cavernCamera(tr.prev)
-    ctx.save(); ctx.translate(-cam.x, -cam.y); r.drawWorld(tr.prev, this.#time); ctx.restore()
+    // hold on the room Dana cleared in (the camera is already settled there). The
+    // loop set the base scale transform; we compose the camera translate on top.
+    ctx.save(); ctx.translate(-this.#cam.x, -this.#cam.y); r.drawWorld(tr.prev, this.#time); ctx.restore()
     r.drawHud(tr.prev, this.#time, view.w, view.h)
     this.#drawTally(ctx, { w: view.w, h: view.h }, tr)
   }
@@ -1017,7 +1073,7 @@ const CSS = `
   background:rgba(255,80,80,.18);color:#ff9a9a;font-size:1rem}
 .sol-close:hover{background:rgba(255,80,80,.34);color:#fff}
 .sol-stage{flex:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;padding:12px}
-.sol-canvas{image-rendering:pixelated;border-radius:8px;
+.sol-canvas{image-rendering:auto;border-radius:8px;
   box-shadow:0 12px 48px rgba(0,0,0,.6),0 0 0 1px rgba(126,182,214,.2);background:#070512}
 .sol-banner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
   justify-content:center;gap:.7rem;background:rgba(6,4,14,.78);backdrop-filter:blur(2px)}

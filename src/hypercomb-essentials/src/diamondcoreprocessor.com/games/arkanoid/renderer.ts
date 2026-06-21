@@ -12,6 +12,7 @@ import {
   FROG_HOP_PERIOD, FROG_AIR_FRAC, BEE_WIGGLE_HZ, SCUTTLE_PERIOD, GHOST_BOB_PERIOD, CHICK_BOB_PERIOD,
 } from './engine.js'
 import { EDIT_COLS, EDIT_ROWS } from './levels.js'
+import { type ThemeEnv, bandFor, arkanoidThemes } from './theme.js'
 
 // Brick colour by max hit-points. A disciplined two-hue scheme for "modern
 // vector arcade" clarity: the 1–3 hp bricks share a COOL body family (teal →
@@ -69,23 +70,11 @@ const ENEMY_LOOKS: EnemyLook[] = [
 // the shape stays solid.
 const BRICK_CHARRED = { r: 58, g: 50, b: 46 }
 
-// ── THE HAUNTED KEEP — neon cores over deep night ──
-const NEON_GREEN = '#39FF6A'    // spectral green — will-o-wisp / crypts
-const NEON_VIOLET = '#B65CFF'   // haunting violet
-const NEON_AMBER = '#FFB23A'    // candle amber — the TOUGH read
-const BONE = '#E8E0FF'          // mist/bone white
-// One floor palette per ascent band; levelIndex climbs the keep (green crypts →
-// violet halls → crimson belfry → gold spire) then cycles. Every neon read
-// (bg, atmosphere, title-card) pulls its dominant hue from here per floor.
-interface Floor { name: string; neon: string; neonRgb: string; accent: string; accentRgb: string; sky: [string, string, string]; mist: string }
-const FLOORS: Floor[] = [
-  { name: 'THE GREEN CRYPTS',   neon: '#39FF6A', neonRgb: '57,255,106',  accent: '#B65CFF', accentRgb: '182,92,255', sky: ['#0A0814', '#08110C', '#05070F'], mist: '57,255,106' },
-  { name: 'THE VIOLET HALLS',   neon: '#B65CFF', neonRgb: '182,92,255',  accent: '#39FF6A', accentRgb: '57,255,106', sky: ['#120A22', '#0C0818', '#05060F'], mist: '122,60,255' },
-  { name: 'THE CRIMSON BELFRY', neon: '#FF3A6E', neonRgb: '255,58,110',  accent: '#FFB23A', accentRgb: '255,178,58', sky: ['#1A0814', '#12060E', '#08040A'], mist: '255,58,110' },
-  { name: 'THE GOLDEN SPIRE',   neon: '#FFB23A', neonRgb: '255,178,58',  accent: '#B65CFF', accentRgb: '182,92,255', sky: ['#170F08', '#100A14', '#06060F'], mist: '255,178,58' },
-]
-const floorFor = (levelIndex: number): Floor => FLOORS[Math.floor(levelIndex / 4) % FLOORS.length]
-void NEON_VIOLET; void NEON_AMBER; void BONE
+// ? scramble: every ball flickers through these vivid hues (re-rolled a few times a
+// second, distinct per ball) so the hero loses its white and you must follow it by eye.
+const SCRAMBLE_PALETTE = ['#ff5b5b', '#ffb03a', '#ffe24a', '#5fe08a', '#3dd7ff', '#5b9bff', '#b07bff', '#ff5bd0', '#ff7043', '#39ff6a']
+// The whole SCENE (sky, scenery, atmosphere) is a pluggable theme — see theme.ts and
+// themes/. The renderer just resolves the active theme each frame and delegates.
 
 /** The fresh body colour for a brick of the given max-hp — exported so the
  *  overlay can tint a brick-break particle burst to the brick that just died
@@ -174,9 +163,17 @@ export class Renderer {
     const dt = Math.min(0.05, Math.max(0, time - this.#lastT)); this.#lastT = time
     this.#spike = Math.max(0, this.#spike - dt * 3.2)            // event energy bleeds off in ~0.7s
     this.#computePulse(time)
-    const floor = floorFor(engine.levelIndex)                   // which floor of the keep we're on
-    this.#background(time, floor, this.#pulse)
-    this.#atmosphere(time, this.#pulse, floor)                  // bats, wisps, lightning, candle flicker
+    // The scene is a pluggable theme: resolve the active one each frame (so a live
+    // swap takes effect) and hand it the per-frame env. Gameplay never changes.
+    const theme = arkanoidThemes.active()
+    if (theme) {
+      const band = bandFor(theme, engine.levelIndex)
+      const env: ThemeEnv = { W, H, time, pulse: this.#pulse, band, levelIndex: engine.levelIndex }
+      theme.background(this.#ctx, env)
+      theme.atmosphere(this.#ctx, env)
+    } else {
+      this.#ctx.fillStyle = '#06040c'; this.#ctx.fillRect(0, 0, W, H)   // no theme registered → plain backdrop
+    }
     this.#bricks(engine.bricks, time)
     this.#bumpers(engine.bumpers, time)
     if (engine.pinballProps.length) this.#pinballProps(engine.pinballProps, time)
@@ -191,7 +188,9 @@ export class Renderer {
     if (engine.tnt) this.#tnt(engine.tnt, time)
     const fiery = engine.tnt !== null                       // dynamite on screen → balls catch fire
     const piercing = engine.pierceTimer > 0                  // white ball phases through tiles
-    for (const b of engine.balls) this.#ball(b, time, fiery, piercing && b.primary, engine.frantic)
+    const scrambled = engine.scrambleTimer > 0              // ? every ball flickers a random colour (hero loses its white)
+    let ballIx = 0
+    for (const b of engine.balls) this.#ball(b, time, fiery, piercing && b.primary, engine.frantic, scrambled, ballIx++)
     if (engine.chainBall) this.#ballChain(engine, time)     // the swinging wrecking ball
     if (engine.freezeTimer > 0) this.#freeze(engine, time)  // clock freeze overlay + frost
     this.#capsules(engine.capsules, time)
@@ -894,7 +893,7 @@ export class Renderer {
     }
   }
 
-  #ball(ball: Ball, time: number, fiery = false, pierce = false, frantic = false): void {
+  #ball(ball: Ball, time: number, fiery = false, pierce = false, frantic = false, scramble = false, index = 0): void {
     const ctx = this.#ctx
     if (fiery) this.#ballFire(ball, time)                    // dynamite live: flames lick off the ball
     if (pierce) this.#ballPhase(ball, time)                  // pierce active: ghostly phasing aura + trail
@@ -908,20 +907,33 @@ export class Renderer {
       const dir = Math.atan2(ball.vy, ball.vx)
       ctx.translate(ball.x, ball.y); ctx.rotate(dir); ctx.scale(1 + sq, 1 - sq * 0.7); ctx.translate(-ball.x, -ball.y)
     }
+    // ? scramble: every ball (hero included) takes a random hue that re-rolls a few
+    // times a second, so colour can't tell yours apart — render it like ammo in that
+    // hue, dropping the white-hero special-case until the shuffle ends.
+    const scrambleCol = scramble ? this.#scrambleColor(index, time) : null
     let base: string
-    if (ball.primary) {
-      // The will-o-wisp — a spectral green-white spirit you must keep alight; glows on the candle pulse.
-      this.#neon(NEON_GREEN, 10, 8)
-      ctx.shadowColor = pierce ? 'rgba(216,230,255,0.95)' : NEON_GREEN
+    if (scrambleCol) {
+      this.#neon(scrambleCol, 6, 7)
+    } else if (ball.primary) {
+      // The hero ball — kept pure white so it always reads as YOUR ball, distinct
+      // from the coloured ammo and any green crypt glow; pulses on the candlelight.
+      this.#neon('#FFFFFF', 10, 8)
+      ctx.shadowColor = pierce ? 'rgba(216,230,255,0.95)' : 'rgba(255,255,255,0.95)'
     } else {
       // Coloured ammo fired by the gun / spawned by Break — expendable.
       this.#neon(ball.color, 6, 7)
     }
-    // glowing orb — the primary is a green-white wisp core; ammo keeps its colour
-    if (ball.primary && !pierce) {
+    // glowing orb — scramble paints every ball in its random hue; else the primary is
+    // a bright white core and ammo keeps its colour.
+    if (scrambleCol) {
+      base = scrambleCol
+      const sg = ctx.createRadialGradient(ball.x - ball.r * 0.35, ball.y - ball.r * 0.4, ball.r * 0.1, ball.x, ball.y, ball.r)
+      sg.addColorStop(0, '#ffffff'); sg.addColorStop(0.38, base); sg.addColorStop(1, this.#darken(base))
+      ctx.fillStyle = sg
+    } else if (ball.primary && !pierce) {
       const g = ctx.createRadialGradient(ball.x - 1, ball.y - 1, 0.5, ball.x, ball.y, ball.r)
-      g.addColorStop(0, '#F4FFEA'); g.addColorStop(0.55, '#9BFFB8'); g.addColorStop(1, '#2BE36B')
-      ctx.fillStyle = g; base = NEON_GREEN
+      g.addColorStop(0, '#FFFFFF'); g.addColorStop(0.55, '#F2F6FF'); g.addColorStop(1, '#CBD6E8')
+      ctx.fillStyle = g; base = '#FFFFFF'
     } else {
       base = pierce ? '#eef4ff' : ball.color
       const sg = ctx.createRadialGradient(ball.x - ball.r * 0.35, ball.y - ball.r * 0.4, ball.r * 0.1, ball.x, ball.y, ball.r)
@@ -930,13 +942,22 @@ export class Renderer {
     }
     ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2); ctx.fill()
     // soft cartoon contour — light grey on the white hero ball (a dark ring reads as a
-    // hole), tinted-dark on coloured ammo. Before the specular so the hotspot stays last.
+    // hole), tinted-dark on coloured ammo / scramble. Before the specular so the hotspot stays last.
     ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2)
-    this.#inkContour(ball.primary ? 'rgba(200,210,230,0.5)' : this.#darken(base), 1.4)
+    this.#inkContour(ball.primary && !scrambleCol ? 'rgba(200,210,230,0.5)' : this.#darken(base), 1.4)
     // crisp specular dot
     ctx.shadowBlur = 0; ctx.fillStyle = 'rgba(255,255,255,0.95)'
     ctx.beginPath(); ctx.arc(ball.x - ball.r * 0.32, ball.y - ball.r * 0.36, ball.r * 0.22, 0, Math.PI * 2); ctx.fill()
     ctx.restore()
+  }
+
+  /** ? scramble: a vivid palette hue for ball `index`, re-rolled ~5×/second (the
+   *  `bucket`) and decorrelated per ball via a sin-hash — so every ball keeps
+   *  flickering through random colours and you can't pick yours out by colour. */
+  #scrambleColor(index: number, time: number): string {
+    const bucket = Math.floor(time * 5)                       // a fresh roll every 0.2s
+    const hash = Math.abs(Math.sin(index * 12.9898 + bucket * 78.233)) * 43758.5453
+    return SCRAMBLE_PALETTE[Math.floor(hash) % SCRAMBLE_PALETTE.length]
   }
 
   /** Pierce active: a ghostly icy halo with two offset afterimages, reading as the
@@ -1373,146 +1394,9 @@ export class Renderer {
     }
   }
 
-  /** The hunter: a detailed mechanical-organic sentinel. Pulsing aura, scanning
-   *  antennae, a rotating armoured carapace whose 3 plates break as HP drops,
-   *  reaching pincers, and a glowing slit eye that tracks the white ball. */
-  /** An immaculate backdrop: a deep refined gradient, a soft top-light, a slow drifting
-   *  aurora, a faint diamond lattice and a focusing vignette. Subtle by design — it
-   *  sets a polished stage without competing with the play. */
-  /** The Haunted Keep: deep moonlit night over a castle silhouette, per-floor sky,
-   *  the candle stage-light breathing on the shared pulse. Stays DARK so neon bricks
-   *  POP, keeps bright stuff out of the brick band (y 56-248). */
-  #background(time: number, floor: Floor, pulse: number): void {
-    const ctx = this.#ctx
-    // 1 ── deep-night vertical gradient (per-floor sky)
-    const g = ctx.createLinearGradient(0, 0, 0, H)
-    g.addColorStop(0, floor.sky[0]); g.addColorStop(0.55, floor.sky[1]); g.addColorStop(1, floor.sky[2])
-    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H)
-    // 2 ── bone-white moon, low and cold, top-right
-    const mx = W * 0.78, my = H * 0.12, mr = 26
-    const moon = ctx.createRadialGradient(mx, my, 2, mx, my, mr * 3.2)
-    moon.addColorStop(0, 'rgba(232,224,255,0.30)'); moon.addColorStop(0.18, 'rgba(232,224,255,0.10)'); moon.addColorStop(1, 'rgba(232,224,255,0)')
-    ctx.fillStyle = moon; ctx.fillRect(0, 0, W, H)
-    ctx.fillStyle = 'rgba(232,224,255,0.92)'; ctx.shadowColor = 'rgba(232,224,255,0.6)'; ctx.shadowBlur = 22
-    ctx.beginPath(); ctx.arc(mx, my, mr, 0, Math.PI * 2); ctx.fill(); ctx.shadowBlur = 0
-    // 3 ── candle stage-light in the floor's hue, breathing on the shared pulse
-    const lit = 0.10 + 0.07 * pulse
-    const glow = ctx.createRadialGradient(W / 2, -40, 20, W / 2, -40, H)
-    glow.addColorStop(0, `rgba(${floor.mist},${lit})`); glow.addColorStop(1, `rgba(${floor.mist},0)`)
-    ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H)
-    // 4 ── the keep silhouette: crenellated towers + a ragged ridge, neon rim-lit
-    this.#keepSilhouette(floor)
-    // 5 ── faint neon dust motes drifting up
-    ctx.fillStyle = `rgba(${floor.neonRgb},0.05)`
-    let row = 0
-    for (let yy = 26; yy < H; yy += 38, row++) {
-      const drift = Math.sin(time * 0.2 + row) * 6
-      for (let xx = (row % 2 ? 38 : 19); xx < W; xx += 38) {
-        ctx.beginPath(); ctx.arc(xx + drift, yy - (time * 4 % 38), 0.9, 0, Math.PI * 2); ctx.fill()
-      }
-    }
-    // 6 ── focusing vignette — deeper night
-    const vg = ctx.createRadialGradient(W / 2, H * 0.46, H * 0.30, W / 2, H * 0.5, H * 0.82)
-    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.58)')
-    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H)
-  }
+  // ── The SCENE (sky, scenery, atmosphere) is a pluggable THEME now — see theme.ts +
+  //    themes/. draw() resolves the active theme and delegates background + atmosphere. ──
 
-  /** The keep's flat castle silhouette across the bottom third: a battlement ridge
-   *  with two crenellated towers, near-black with a 1px neon rim + lit windows. */
-  #keepSilhouette(floor: Floor): void {
-    const ctx = this.#ctx
-    const base = H * 0.86, ridge = H * 0.78
-    ctx.save()
-    ctx.beginPath()
-    ctx.moveTo(0, H); ctx.lineTo(0, ridge)
-    const merlon = 18
-    for (let x = 0, i = 0; x <= W; x += merlon, i++) {
-      const up = i % 2 === 0 ? 0 : 7
-      ctx.lineTo(x, ridge - up); ctx.lineTo(x + merlon, ridge - up)
-    }
-    for (const tx of [W * 0.18, W * 0.74]) {
-      const tw = 46, ty = H * 0.58
-      ctx.lineTo(tx - tw / 2, ridge); ctx.lineTo(tx - tw / 2, ty)
-      for (let x = tx - tw / 2, j = 0; x < tx + tw / 2; x += 11, j++) { const up = j % 2 ? 0 : 6; ctx.lineTo(x, ty - up); ctx.lineTo(x + 11, ty - up) }
-      ctx.lineTo(tx + tw / 2, ty); ctx.lineTo(tx + tw / 2, ridge)
-    }
-    ctx.lineTo(W, ridge); ctx.lineTo(W, H); ctx.closePath()
-    ctx.fillStyle = '#05040A'; ctx.fill()
-    ctx.lineWidth = 1; ctx.strokeStyle = `rgba(${floor.neonRgb},0.30)`; ctx.shadowColor = floor.neon; ctx.shadowBlur = 6; ctx.stroke()
-    ctx.shadowBlur = 8; ctx.shadowColor = floor.accent
-    ctx.fillStyle = `rgba(${floor.accentRgb},0.8)`
-    for (const wx of [W * 0.18, W * 0.74]) { ctx.fillRect(wx - 3, base - 60, 6, 9); ctx.fillRect(wx - 3, base - 40, 6, 9) }
-    ctx.restore()
-  }
-
-  /** Ambient keep life under the play field: drifting bats, floating spectral wisps,
-   *  an occasional lightning flash, and a candle flicker — all on the shared pulse,
-   *  deterministic off time (no per-frame randomness). */
-  #atmosphere(time: number, pulse: number, floor: Floor): void {
-    const ctx = this.#ctx
-    ctx.save()
-    // 1 ── LIGHTNING: a rare double-strike on a 14s cycle, flooding the keep cold-white
-    const cyc = (time % 14) / 14
-    const strike = cyc < 0.022 ? 1 : (cyc > 0.030 && cyc < 0.045) ? 0.7 : 0
-    if (strike > 0) {
-      ctx.fillStyle = `rgba(232,224,255,${0.22 * strike})`; ctx.fillRect(0, 0, W, H)
-      const bx = W * (0.3 + 0.4 * ((Math.floor(time / 14) * 0.61803) % 1))
-      ctx.globalCompositeOperation = 'lighter'
-      ctx.strokeStyle = `rgba(255,255,255,${0.9 * strike})`; ctx.lineWidth = 2; ctx.shadowColor = '#E8E0FF'; ctx.shadowBlur = 16
-      ctx.beginPath(); ctx.moveTo(bx, 0)
-      for (let y = 0; y <= H * 0.5; y += 26) ctx.lineTo(bx + Math.sin(y * 0.13 + time) * 18, y)
-      ctx.stroke(); ctx.globalCompositeOperation = 'source-over'; ctx.shadowBlur = 0
-    }
-    // 2 ── BATS: silhouettes flapping across looping lanes
-    const flap = Math.sin(time * 9)
-    for (let i = 0; i < 4; i++) {
-      const lane = H * (0.14 + 0.13 * i)
-      const speed = 38 + i * 9
-      const bx = ((time * speed + i * 260) % (W + 120)) - 60
-      const by = lane + Math.sin(time * 1.4 + i) * 16
-      const s = 0.7 + 0.18 * i
-      this.#bat(bx, by, s, flap * (i % 2 ? -1 : 1), floor)
-    }
-    // 3 ── WISPS: floating will-o-wisp orbs in the floor hue, twinkling on the pulse
-    ctx.globalCompositeOperation = 'lighter'
-    for (let i = 0; i < 6; i++) {
-      const wx = W * (0.08 + 0.16 * i) + Math.sin(time * 0.5 + i * 1.7) * 26
-      const wy = H - ((time * (14 + i * 3) + i * 130) % (H + 60))
-      const tw = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(time * 3 + i + pulse))
-      const hue = i % 3 === 0 ? floor.accentRgb : floor.neonRgb
-      const r = 2.4 + 1.6 * tw
-      const g = ctx.createRadialGradient(wx, wy, 0, wx, wy, r * 3.2)
-      g.addColorStop(0, `rgba(${hue},${0.55 * tw})`); g.addColorStop(0.4, `rgba(${hue},${0.22 * tw})`); g.addColorStop(1, `rgba(${hue},0)`)
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(wx, wy, r * 3.2, 0, Math.PI * 2); ctx.fill()
-      ctx.fillStyle = `rgba(232,224,255,${0.5 * tw})`; ctx.beginPath(); ctx.arc(wx, wy, 1, 0, Math.PI * 2); ctx.fill()
-    }
-    ctx.globalCompositeOperation = 'source-over'
-    // 4 ── CANDLE FLICKER: a soft warm vignette breathing on the candle pulse
-    const cand = 0.04 + 0.05 * pulse
-    const cg = ctx.createRadialGradient(W / 2, H * 0.55, H * 0.2, W / 2, H * 0.55, H * 0.75)
-    cg.addColorStop(0, `rgba(255,178,58,${cand})`); cg.addColorStop(1, 'rgba(255,178,58,0)')
-    ctx.fillStyle = cg; ctx.fillRect(0, 0, W, H)
-    ctx.restore()
-  }
-
-  /** One bat silhouette: a two-arc winged body; flap (-1..1) raises/drops the tips. */
-  #bat(x: number, y: number, s: number, flap: number, floor: Floor): void {
-    const ctx = this.#ctx
-    ctx.save(); ctx.translate(x, y); ctx.scale(s, s)
-    ctx.fillStyle = '#040308'; ctx.strokeStyle = `rgba(${floor.neonRgb},0.22)`; ctx.lineWidth = 0.6
-    const lift = flap * 6
-    ctx.beginPath()
-    ctx.moveTo(0, 0)
-    ctx.quadraticCurveTo(-7, -4 - lift, -16, -1 - lift * 0.4)
-    ctx.quadraticCurveTo(-10, 1, -5, 3)
-    ctx.lineTo(0, 1)
-    ctx.lineTo(5, 3)
-    ctx.quadraticCurveTo(10, 1, 16, -1 - lift * 0.4)
-    ctx.quadraticCurveTo(7, -4 - lift, 0, 0)
-    ctx.closePath(); ctx.fill(); ctx.stroke()
-    ctx.fillStyle = '#040308'; ctx.beginPath(); ctx.ellipse(0, 0, 2, 3, 0, 0, Math.PI * 2); ctx.fill()
-    ctx.restore()
-  }
 
   /** Dispatch the enemy draw by kind — ten distinct silhouettes. */
   #enemy(enemy: Enemy, target: { x: number; y: number } | null, time: number): void {

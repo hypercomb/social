@@ -8,7 +8,7 @@
 // reads the engine's public state each frame. The same painters draw the
 // designer's edit view so play + edit look identical.
 //
-// NES palette cues: near-black rooms framed by bluish-grey permanent stone,
+// Palette cues: torch-warm rooms framed by warm castle stone (sandstone / granite),
 // glowing ORANGE breakable blocks, a small blue-robed Dana, green goblins, stone
 // gargoils, pale ghosts, red demonheads, and a status bar with the draining
 // life/time meter and the fireball scroll.
@@ -17,16 +17,26 @@ import { Engine, TILE, EMPTY, WALL, BRICK, CRACKED, type LevelDef, type Fireball
 
 const HUD_H = 24
 
-// NES-ish accent palette. WALL is now cavern rock (warm-grey stone) so the
-// chambers read as caves; the conjurable orange BRICK still pops against it.
+// Baked stone textures are rendered at TEX× their world size so they stay crisp
+// when the smoothed high-res pipeline upscales them (drawn back at world TILE size).
+const TEX = 3
+
+// Accent palette. WALL is warm CASTLE STONE — torch-lit sandstone/granite — so the
+// chambers read as a cavernous keep rather than a cold cave; the conjurable orange
+// BRICK still pops against the warm rock.
 const C = {
   orange: '#e8902c', orangeLite: '#ffc56b', orangeDark: '#8a4a12',
-  rock: '#4a4252', rockLite: '#7c7088', rockDark: '#241f30', rockWarm: '#3a3142',
+  rock: '#544236', rockLite: '#8a6f52', rockDark: '#221913', rockWarm: '#3e2f23',
+  mortar: '#191109', stoneLite: '#b39069', // ashlar masonry + torchlight
+  torch: '#ffb24a', flame: '#ffe1a6',
   gold: '#ffd24d', danaRobe: '#3a6ee0', danaRobeDark: '#2247a8',
   face: '#f4c9a0', hat: '#7b46d6', hatDark: '#4f2a96',
   goblin: '#56b365', goblinDark: '#2f7d3e',
   ghost: '#cfe0ff', demon: '#e2433f',
 }
+
+// Enemy kinds that stand on the ground (so they get a contact shadow).
+const GROUNDED = new Set(['goblin', 'gargoil', 'dragon', 'saramandor'])
 
 export class Renderer {
   #ctx: CanvasRenderingContext2D
@@ -35,6 +45,7 @@ export class Renderer {
   #brickTex: HTMLCanvasElement | null = null
   #crackTex: HTMLCanvasElement | null = null
   #wallTex: HTMLCanvasElement | null = null
+  #glowTex: HTMLCanvasElement | null = null   // baked torch light-pool
 
   constructor(ctx: CanvasRenderingContext2D) { this.#ctx = ctx }
 
@@ -44,11 +55,15 @@ export class Renderer {
    *  shake translate, so caverns can be larger than the viewport and scroll. */
   drawWorld(e: Engine, time: number): void {
     this.#background(e.width, e.height, time)
+    const torches = this.#torchCells(e.grid, e.cols, e.rows)
+    this.#torchGlow(torches, time)      // warm light pools, under the scene
     this.#tiles(e.grid, e.cols, e.rows)
+    this.#torchFlames(torches, time)    // the fixtures + flames, on the walls
     for (const m of e.mirrors) this.#mirror(m.col, m.row, time)
     this.#door(e.level.door.col, e.level.door.row, e.doorOpen, time)
     for (const it of e.items) {
-      if (it.taken || it.hidden) continue
+      if (it.taken) continue
+      if (it.hidden) { if (it.secret) this.#secretHint(it.col, it.row, time); continue }
       this.#item(it.kind, it.col, it.row, time, it.reveal)
     }
     for (const f of e.fairies) if (!f.taken) this.#fairy(f.x, f.y, time)
@@ -62,6 +77,10 @@ export class Renderer {
   /** Screen-space HUD + hurt flash (drawn after the world, no camera translate),
    *  spanning the VIEWPORT rather than the (possibly larger) level. */
   drawHud(e: Engine, time: number, viewW: number, viewH: number): void {
+    // a warm vignette frames the viewport (screen-space, behind the HUD bar)
+    const vg = this.#ctx.createRadialGradient(viewW / 2, viewH * 0.5, viewH * 0.36, viewW / 2, viewH * 0.5, viewH * 0.82)
+    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(8,4,0,0.5)')
+    this.#ctx.fillStyle = vg; this.#ctx.fillRect(0, 0, viewW, viewH)
     this.#hud(e, time, viewW)
     if (e.hurtFlash > 0) {
       this.#ctx.fillStyle = `rgba(255,40,40,${0.35 * (e.hurtFlash / 0.5)})`
@@ -75,7 +94,10 @@ export class Renderer {
     const ctx = this.#ctx
     const w = level.cols * TILE, h = level.rows * TILE
     this.#background(w, h, time)
+    const torches = this.#torchCells(level.tiles, level.cols, level.rows)
+    this.#torchGlow(torches, time)
     this.#tiles(level.tiles, level.cols, level.rows)
+    this.#torchFlames(torches, time)
     for (const m of level.mirrors) this.#mirror(m.col, m.row, time)
     this.#door(level.door.col, level.door.row, false, time)
     for (const it of level.items) this.#item(it.kind, it.col, it.row, time, it.hidden ? 0 : 1, it.hidden)
@@ -97,17 +119,17 @@ export class Renderer {
 
   #background(w: number, h: number, time: number): void {
     const ctx = this.#ctx
-    // A deep cave: near-black with a faint warm glow rising from the depths and a
-    // scatter of mineral glimmers that twinkle in place.
+    // A torch-lit castle vault: deep warm browns with an amber glow rising from the
+    // depths and a slow drift of dust motes catching the firelight in place.
     const g = ctx.createLinearGradient(0, 0, 0, h)
-    g.addColorStop(0, '#0b0810'); g.addColorStop(0.7, '#0a0712'); g.addColorStop(1, '#170d0a')
+    g.addColorStop(0, '#0c0805'); g.addColorStop(0.65, '#120b06'); g.addColorStop(1, '#241308')
     ctx.fillStyle = g
     ctx.fillRect(0, 0, w, h)
     for (let i = 0; i < 26; i++) {
       const x = (i * 97.13) % w
       const y = (i * 57.3) % h
-      const tw = 0.08 + (Math.sin(time * 2 + i) + 1) * 0.11
-      ctx.fillStyle = `rgba(150,170,220,${tw})`
+      const tw = 0.06 + (Math.sin(time * 1.6 + i) + 1) * 0.08
+      ctx.fillStyle = `rgba(255,196,120,${tw})`
       ctx.fillRect(x | 0, y | 0, 2, 2)
     }
   }
@@ -155,7 +177,7 @@ export class Renderer {
       if (horiz) { ctx.moveTo(p - half, edge); ctx.lineTo(p + half, edge); ctx.lineTo(p, edge + dir * len) }
       else { ctx.moveTo(edge, p - half); ctx.lineTo(edge, p + half); ctx.lineTo(edge + dir * len, p) }
       ctx.closePath(); ctx.fill()
-      ctx.fillStyle = 'rgba(124,112,136,0.45)'
+      ctx.fillStyle = 'rgba(150,120,86,0.45)'
       ctx.beginPath()
       if (horiz) { ctx.moveTo(p - half, edge); ctx.lineTo(p - half + 1.5, edge); ctx.lineTo(p, edge + dir * len * 0.6) }
       else { ctx.moveTo(edge, p - half); ctx.lineTo(edge, p - half + 1.5); ctx.lineTo(edge + dir * len * 0.6, p) }
@@ -165,36 +187,44 @@ export class Renderer {
 
   #wall(c: number, r: number): void {
     if (!this.#wallTex) this.#wallTex = this.#buildWall()
-    this.#ctx.drawImage(this.#wallTex, c * TILE, r * TILE)
+    this.#ctx.drawImage(this.#wallTex, c * TILE, r * TILE, TILE, TILE)
   }
 
-  #brick(c: number, r: number, tex: HTMLCanvasElement): void { this.#ctx.drawImage(tex, c * TILE, r * TILE) }
+  #brick(c: number, r: number, tex: HTMLCanvasElement): void { this.#ctx.drawImage(tex, c * TILE, r * TILE, TILE, TILE) }
   #brickTexture(): HTMLCanvasElement { return (this.#brickTex ??= this.#buildBrick(false)) }
   #crackTexture(): HTMLCanvasElement { return (this.#crackTex ??= this.#buildBrick(true)) }
 
-  // Orange NES breakable block: chunky brick courses, lit top-left bevel, dark
-  // mortar + extruded cube edges. `cracked` adds fracture lines (one head-hit).
+  // Solomon's Key breakable block: ONE carved, framed panel-block per tile (NOT a
+  // running-bond brick wall — adjacent tiles read as a row of distinct blocks). A
+  // warm extruded face, a proud cube bevel, an inset frame groove + sheen, and four
+  // forged corner rivets. `cracked` adds fracture lines (one head-hit).
   #buildBrick(cracked: boolean): HTMLCanvasElement {
     const s = TILE
-    const cv = document.createElement('canvas'); cv.width = s; cv.height = s
+    const cv = document.createElement('canvas'); cv.width = s * TEX; cv.height = s * TEX
     const x = cv.getContext('2d')!
-    x.fillStyle = C.orangeDark; x.fillRect(0, 0, s, s) // mortar backing
-    const rowH = 8, bw = 16, m = 1
-    let course = 0
-    for (let by = 0; by < s; by += rowH, course++) {
-      const off = (course % 2) * (bw / 2)
-      for (let bx = -bw; bx < s; bx += bw) {
-        const rx = Math.round(bx + off) + m, ry = by + m
-        const rw = bw - m * 2, rh = rowH - m * 2
-        x.fillStyle = C.orange; x.fillRect(rx, ry, rw, rh)
-        x.fillStyle = C.orangeLite; x.fillRect(rx, ry, rw, 1); x.fillRect(rx, ry, 1, rh) // bevel
-        x.fillStyle = 'rgba(80,38,4,0.6)'; x.fillRect(rx, ry + rh - 1, rw, 1); x.fillRect(rx + rw - 1, ry, 1, rh)
-      }
+    x.scale(TEX, TEX)                                  // bake the world-unit art at TEX× res
+    // extruded block face — warm gradient, lit top-left → dark bottom-right
+    const face = x.createLinearGradient(0, 0, s, s)
+    face.addColorStop(0, C.orangeLite); face.addColorStop(0.55, C.orange); face.addColorStop(1, C.orangeDark)
+    x.fillStyle = face; x.fillRect(0, 0, s, s)
+    // outer cube bevel — the block stands proud of the wall
+    x.fillStyle = 'rgba(255,228,158,0.6)'; x.fillRect(0, 0, s, 2); x.fillRect(0, 0, 2, s)
+    x.fillStyle = 'rgba(54,24,2,0.6)'; x.fillRect(0, s - 2, s, 2); x.fillRect(s - 2, 0, 2, s)
+    // inset frame groove → the panelled "tile" look (a carved square channel)
+    const f = 4.5
+    x.strokeStyle = 'rgba(70,30,4,0.75)'; x.lineWidth = 1; x.strokeRect(f, f, s - 2 * f, s - 2 * f)
+    x.strokeStyle = 'rgba(255,214,148,0.35)'; x.lineWidth = 1; x.strokeRect(f + 1, f + 1, s - 2 * f - 2, s - 2 * f - 2)
+    // soft sheen on the inner panel (top-left light)
+    const sheen = x.createRadialGradient(s * 0.38, s * 0.34, 1, s * 0.5, s * 0.5, s * 0.62)
+    sheen.addColorStop(0, 'rgba(255,224,152,0.32)'); sheen.addColorStop(1, 'rgba(255,180,90,0)')
+    x.fillStyle = sheen; x.fillRect(f + 1, f + 1, s - 2 * f - 2, s - 2 * f - 2)
+    // four forged corner rivets
+    x.fillStyle = 'rgba(58,26,2,0.6)'
+    for (const [cx, cy] of [[f + 2, f + 2], [s - f - 2, f + 2], [f + 2, s - f - 2], [s - f - 2, s - f - 2]]) {
+      x.beginPath(); x.arc(cx, cy, 1, 0, Math.PI * 2); x.fill()
     }
-    x.fillStyle = 'rgba(255,220,150,0.22)'; x.fillRect(0, 0, s, 2); x.fillRect(0, 0, 2, s) // cube edge
-    x.fillStyle = 'rgba(0,0,0,0.4)'; x.fillRect(0, s - 2, s, 2); x.fillRect(s - 2, 0, 2, s)
     if (cracked) {
-      x.strokeStyle = 'rgba(20,8,0,0.85)'; x.lineWidth = 2
+      x.strokeStyle = 'rgba(40,16,0,0.85)'; x.lineWidth = 1.6
       x.beginPath(); x.moveTo(s * 0.5, 2); x.lineTo(s * 0.42, s * 0.4); x.lineTo(s * 0.6, s * 0.6); x.lineTo(s * 0.5, s - 2); x.stroke()
       x.beginPath(); x.moveTo(s * 0.42, s * 0.4); x.lineTo(s * 0.18, s * 0.5); x.stroke()
       x.beginPath(); x.moveTo(s * 0.6, s * 0.6); x.lineTo(s * 0.84, s * 0.52); x.stroke()
@@ -202,34 +232,119 @@ export class Renderer {
     return cv
   }
 
-  // Cavern rock: warm-grey stone with mottled grain and dark crevices — the wall
-  // the chambers are carved from. #cavernRim adds organic teeth at its edges so
+  // Castle stone: warm sandstone/granite cut as RUNNING-BOND ASHLAR — two courses of
+  // blocks, the lower offset half a stone, each beveled (lit top-left, shadowed
+  // bottom-right) over a dark mortar bed, with mottled grain + the odd hairline crack.
+  // Tiles seamlessly into a keep wall; #cavernRim adds organic teeth at its edges so
   // the border never reads as a clean box.
   #buildWall(): HTMLCanvasElement {
     const s = TILE
-    const cv = document.createElement('canvas'); cv.width = s; cv.height = s
+    const cv = document.createElement('canvas'); cv.width = s * TEX; cv.height = s * TEX
     const x = cv.getContext('2d')!
+    x.scale(TEX, TEX)                               // bake the world-unit art at TEX× res
     const rnd = this.#noise(0x2a17)
-    const g = x.createLinearGradient(0, 0, 0, s)
-    g.addColorStop(0, C.rock); g.addColorStop(1, C.rockDark)
-    x.fillStyle = g; x.fillRect(0, 0, s, s)
-    for (let yy = 0; yy < s; yy += 2) {
-      for (let xx = 0; xx < s; xx += 2) {
-        const d = rnd() - 0.5
-        x.fillStyle = d > 0 ? `rgba(160,150,190,${d * 0.4})` : `rgba(0,0,0,${-d * 0.45})`
-        x.fillRect(xx, yy, 2, 2)
+    x.fillStyle = C.mortar; x.fillRect(0, 0, s, s) // mortar bed
+    const ch = s / 2, sw = s / 2, m = 1.5
+    for (let course = 0; course < 2; course++) {
+      const oy = course * ch
+      for (let sx = course === 1 ? -sw / 2 : 0; sx < s; sx += sw) {
+        const rx = sx + m, ry = oy + m, rw = sw - m * 2, rh = ch - m * 2
+        const g = x.createLinearGradient(0, ry, 0, ry + rh)
+        g.addColorStop(0, C.rockLite); g.addColorStop(1, C.rock)
+        x.fillStyle = g; x.fillRect(rx, ry, rw, rh)
+        for (let k = (rw * rh) >> 4; k > 0; k--) { // mottled grain
+          const d = rnd() - 0.5
+          x.fillStyle = d > 0 ? `rgba(214,176,124,${d * 0.3})` : `rgba(0,0,0,${-d * 0.4})`
+          x.fillRect(rx + (rnd() * rw | 0), ry + (rnd() * rh | 0), 2, 2)
+        }
+        x.fillStyle = C.stoneLite; x.fillRect(rx, ry, rw, 1); x.fillRect(rx, ry, 1, rh)       // lit bevel
+        x.fillStyle = 'rgba(0,0,0,0.5)'; x.fillRect(rx, ry + rh - 1, rw, 1); x.fillRect(rx + rw - 1, ry, 1, rh) // shadow bevel
+        if (rnd() < 0.4) { // a hairline crack
+          x.strokeStyle = 'rgba(0,0,0,0.45)'; x.lineWidth = 1
+          let px = rx + rnd() * rw, py = ry + 2
+          x.beginPath(); x.moveTo(px, py)
+          for (let q = 0; q < 2; q++) { px += (rnd() - 0.5) * 6; py += rh * 0.4; x.lineTo(px, py) }
+          x.stroke()
+        }
       }
     }
-    x.strokeStyle = 'rgba(0,0,0,0.4)'; x.lineWidth = 1 // crevices
-    for (let i = 0; i < 2; i++) {
-      let px = (rnd() * s) | 0, py = (rnd() * s) | 0
-      x.beginPath(); x.moveTo(px, py)
-      for (let k = 0; k < 3; k++) { px += (rnd() - 0.5) * 14; py += (rnd() - 0.5) * 14; x.lineTo(px, py) }
-      x.stroke()
-    }
-    x.fillStyle = 'rgba(124,112,136,0.3)'; x.fillRect(0, 0, s, 2)
-    x.fillStyle = 'rgba(0,0,0,0.42)'; x.fillRect(0, s - 2, s, 2)
     return cv
+  }
+
+  // ── torchlight: warm light pools that fill the big scrolling castle rooms ──
+
+  /** Wall cells that carry a torch — deterministic (stable, no flicker of position):
+   *  a sparse subset of WALL cells that face open space to the left or right, mounted
+   *  in the upper-middle band. Returns the flame anchor (in the open cell) + facing. */
+  #torchCells(grid: ArrayLike<number>, cols: number, rows: number): { x: number; y: number; dir: number }[] {
+    const at = (c: number, r: number) => (c < 0 || c >= cols || r < 0 || r >= rows) ? WALL : grid[r * cols + c]
+    const out: { x: number; y: number; dir: number }[] = []
+    for (let r = 2; r < rows - 2; r++) {
+      for (let c = 1; c < cols - 1; c++) {
+        if (at(c, r) !== WALL) continue
+        const openR = at(c + 1, r) === EMPTY, openL = at(c - 1, r) === EMPTY
+        if (!openR && !openL) continue
+        if ((c * 7 + r * 5) % 6 !== 0) continue                 // sparse, deterministic
+        const dir = openR ? 1 : -1
+        out.push({ x: dir > 0 ? (c + 1) * TILE + TILE * 0.16 : c * TILE - TILE * 0.16, y: r * TILE + TILE * 0.42, dir })
+      }
+    }
+    return out
+  }
+
+  #glowTexture(): HTMLCanvasElement {
+    if (this.#glowTex) return this.#glowTex
+    const s = 192
+    const cv = document.createElement('canvas'); cv.width = s; cv.height = s
+    const x = cv.getContext('2d')!
+    const g = x.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2)
+    g.addColorStop(0, 'rgba(255,180,92,0.55)'); g.addColorStop(0.4, 'rgba(255,140,60,0.2)'); g.addColorStop(1, 'rgba(255,120,40,0)')
+    x.fillStyle = g; x.fillRect(0, 0, s, s)
+    return this.#glowTex = cv
+  }
+
+  /** Additive warm light pools at each torch — the big visual lift for dark rooms. */
+  #torchGlow(torches: { x: number; y: number; dir: number }[], time: number): void {
+    if (!torches.length) return
+    const ctx = this.#ctx, tex = this.#glowTexture()
+    ctx.save(); ctx.globalCompositeOperation = 'lighter'
+    for (const t of torches) {
+      const flick = 0.82 + Math.sin(time * 9 + t.x * 0.7) * 0.12 + Math.sin(time * 23 + t.y) * 0.05
+      const R = TILE * 4.2 * flick
+      ctx.globalAlpha = 0.5 * flick
+      ctx.drawImage(tex, t.x - R, t.y - R, R * 2, R * 2)
+    }
+    ctx.restore()
+  }
+
+  /** The bracket + flickering flame mounted on the wall (drawn over the tiles). */
+  #torchFlames(torches: { x: number; y: number; dir: number }[], time: number): void {
+    const ctx = this.#ctx
+    for (const t of torches) {
+      ctx.fillStyle = '#3a2a18' // iron bracket on the wall face
+      ctx.fillRect(Math.round(t.dir > 0 ? t.x - TILE * 0.18 : t.x + TILE * 0.18 - 3), Math.round(t.y + 2), 3, 6)
+      const flick = Math.sin(time * 12 + t.x) * 1.4 + Math.sin(time * 7 + t.y) * 0.8
+      const fx = t.x, fy = t.y - 2
+      ctx.save()
+      ctx.shadowColor = 'rgba(255,150,50,0.8)'; ctx.shadowBlur = 6
+      ctx.fillStyle = C.torch
+      ctx.beginPath(); ctx.ellipse(fx, fy, 3.2, 6 + flick, 0, 0, Math.PI * 2); ctx.fill()
+      ctx.shadowBlur = 0
+      ctx.fillStyle = C.flame
+      ctx.beginPath(); ctx.ellipse(fx, fy + 1, 1.6, 3.4 + flick * 0.6, 0, 0, Math.PI * 2); ctx.fill()
+      ctx.fillStyle = '#fff7e0'
+      ctx.beginPath(); ctx.arc(fx, fy + 2, 1.1, 0, Math.PI * 2); ctx.fill()
+      ctx.restore()
+    }
+  }
+
+  /** A soft contact shadow on the ground under a character (grounds the sprite). */
+  #shadow(cx: number, footY: number, w: number): void {
+    const ctx = this.#ctx
+    ctx.save()
+    ctx.fillStyle = 'rgba(0,0,0,0.3)'
+    ctx.beginPath(); ctx.ellipse(cx, footY, w * 0.55, 3, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.restore()
   }
 
   // Deterministic 0..1 noise (mulberry32) so baked textures are stable per build.
@@ -254,6 +369,7 @@ export class Renderer {
     const top = Math.round(p.y + bob)
     const w = p.w, h = p.h
     const f = e.facing
+    this.#shadow(cx, p.y + p.h, p.w)
     ctx.save()
     // robe (a tapered body)
     ctx.fillStyle = C.danaRobe
@@ -306,6 +422,8 @@ export class Renderer {
       const k = en.squash / 0.4
       const nh = h * Math.max(0.15, k)
       y += h - nh; h = nh
+    } else if (GROUNDED.has(en.kind)) {
+      this.#shadow(x + w / 2, y + h, w)
     }
     switch (en.kind) {
       case 'ghost': this.#ghost(x, y, w, h, en.dir, time); break
@@ -798,6 +916,23 @@ export class Renderer {
     ctx.fillStyle = 'rgba(0,0,0,0.6)'
     ctx.beginPath(); ctx.arc(x + TILE * 0.38, y + TILE * 0.42, 2.4, 0, Math.PI * 2); ctx.fill()
     ctx.beginPath(); ctx.arc(x + TILE * 0.62, y + TILE * 0.42, 2.4, 0, Math.PI * 2); ctx.fill()
+  }
+
+  // A faint, slow violet twinkle over an un-revealed SECRET cell — a sharp eye
+  // catches a shimmer that says "wave the wand here", but it's no blatant beacon.
+  #secretHint(col: number, row: number, time: number): void {
+    const ctx = this.#ctx
+    const cx = col * TILE + TILE / 2, cy = row * TILE + TILE / 2
+    const tw = Math.max(0, Math.sin(time * 1.5 + col * 1.7 + row))   // 0..1, mostly low
+    const a = 0.05 + tw * tw * 0.16
+    ctx.save()
+    ctx.fillStyle = `rgba(206,184,255,${a})`
+    ctx.beginPath(); ctx.arc(cx, cy, 1.5 + tw * 1.3, 0, Math.PI * 2); ctx.fill()
+    if (tw > 0.86) { // a brief cross-sparkle at the peak
+      ctx.strokeStyle = `rgba(232,222,255,${a})`; ctx.lineWidth = 0.6
+      ctx.beginPath(); ctx.moveTo(cx - 3, cy); ctx.lineTo(cx + 3, cy); ctx.moveTo(cx, cy - 3); ctx.lineTo(cx, cy + 3); ctx.stroke()
+    }
+    ctx.restore()
   }
 
   #door(col: number, row: number, open: boolean, time: number): void {

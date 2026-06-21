@@ -55,7 +55,10 @@ export type ItemKind =
   | 'key' | 'jewel' | 'treasure' | 'bell' | 'jar' | 'superjar' | 'scroll'
   | 'hourglass' | 'hourglassHalf' | 'fairy' | 'life' | 'seal' | 'zodiac' | 'wings'
   | 'pageTime' | 'pageSpace' | 'princess'
-export interface ItemSpawn extends Cell { kind: ItemKind; hidden?: boolean; value?: number }
+// `hidden` items sit inside a brick (break it to reveal). `secret` items sit in an
+// EMPTY cell, invisible, and materialise only when Dana waves his wand over them —
+// the signature Solomon's Key reveal. A secret is also `hidden` until found.
+export interface ItemSpawn extends Cell { kind: ItemKind; hidden?: boolean; secret?: boolean; value?: number }
 
 // A demon mirror — a generator that emits a steady stream of one foe kind.
 export type MirrorKind = 'demonhead' | 'saramandor'
@@ -367,6 +370,8 @@ export class Engine {
       this.conjureFlash = 0.18
       return 'dispel'
     }
+    // A SECRET hides in an empty cell — the wand uncovers it instead of conjuring.
+    if (this.#revealSecret(col, row)) { this.conjureFlash = 0.18; return 'conjure' }
     if (!this.#ejectFromCell(col, row)) return 'blocked'
     this.setTile(col, row, BRICK)
     this.conjureFlash = 0.18
@@ -787,6 +792,17 @@ export class Engine {
     for (const it of this.items) {
       if (!it.taken && it.hidden && it.col === col && it.row === row) { it.hidden = false; it.reveal = 0.4 }
     }
+  }
+
+  /** Uncover a SECRET (a hidden item in an empty cell) when the wand targets it.
+   *  Returns true if anything was revealed (so the cast counts as a reveal, not a
+   *  conjure). Secrets are the cast-to-find Solomon's Key reward. */
+  #revealSecret(col: number, row: number): boolean {
+    let found = false
+    for (const it of this.items) {
+      if (!it.taken && it.hidden && it.secret && it.col === col && it.row === row) { it.hidden = false; it.reveal = 0.4; found = true }
+    }
+    return found
   }
 
   #collectibles(): void {
