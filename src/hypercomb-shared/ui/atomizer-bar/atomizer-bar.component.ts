@@ -14,13 +14,14 @@ import {
 import { EffectBus } from '@hypercomb/core'
 import type { Atomizer } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
 
 const get = (key: string) => (globalThis as any).ioc?.get(key)
 
 @Component({
   selector: 'hc-atomizer-bar',
   standalone: true,
-  imports: [TranslatePipe],
+  imports: [TranslatePipe, HcWidgetDirective],
   templateUrl: './atomizer-bar.component.html',
   styleUrls: ['./atomizer-bar.component.scss'],
 })

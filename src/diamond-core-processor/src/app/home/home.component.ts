@@ -1,6 +1,6 @@
 // diamond-core-processor/src/app/home/home.component.ts
 
-import { Component, computed, effect, inject, OnDestroy, signal } from '@angular/core'
+import { Component, computed, effect, ElementRef, inject, OnDestroy, signal, viewChild } from '@angular/core'
 import { TreeResolverService } from '../core/tree-resolver.service'
 import { ToggleStateService } from '../core/toggle-state.service'
 import { DcpDomainStorage, normalizeDomainKey } from '../core/dcp-domain-storage.service'
@@ -14,6 +14,7 @@ import { DiamondIconComponent } from '../tree-view/diamond-icon.component'
 import { PatchListComponent } from '../patch-list/patch-list.component'
 import { DcpCommandLineComponent } from '../command-line/dcp-command-line.component'
 import { LayerEditorComponent } from '../layer-editor/layer-editor.component'
+import { RevisionListComponent, type RevisionRow } from '../revision-list/revision-list.component'
 import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
 import { defaultHostOrigin, devDefaultBootstrap } from '../core/default-host'
 import { EffectBus } from '@hypercomb/core'
@@ -89,13 +90,18 @@ export interface DomainGroup {
   domain: string
   domainName: string
   sections: DomainSection[]
-  hiddenVersionCount: number
+  /** The package's deploy-version chain, newest-first, offered as switchable
+   *  revisions. One renders as the active section; the rest live in the
+   *  revision switcher. Empty for groups with ≤1 version. */
+  revisions: RevisionRow[]
+  /** Root sig of the active revision (active.json pick, else newest). */
+  activeRootSig: string
 }
 
 @Component({
   selector: 'app-home',
   standalone: true,
-  imports: [TreeViewComponent, AuditorSettingsComponent, RelayPanelComponent, BeeInspectorComponent, DiamondIconComponent, PatchListComponent, DcpCommandLineComponent, LayerEditorComponent, DcpTranslatePipe],
+  imports: [TreeViewComponent, AuditorSettingsComponent, RelayPanelComponent, BeeInspectorComponent, DiamondIconComponent, PatchListComponent, RevisionListComponent, DcpCommandLineComponent, LayerEditorComponent, DcpTranslatePipe],
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.scss']
 })
@@ -152,10 +158,21 @@ export class HomeComponent implements OnDestroy {
   readonly inspectKind = signal<TreeNodeKind>('bee')
   readonly kindFilters = signal<Set<string>>(new Set())
   readonly layersCollapsed = signal(false)
-  readonly showAllVersions = signal(false)
+  // The active deploy revision per package domain (from active.json), keyed by
+  // domainName. domainGrouped reads it to pick which version renders as the
+  // active section; absent/'' ⇒ fall back to newest. Populated on load + on
+  // an explicit revision switch.
+  readonly #activeRootByDomain = signal<Map<string, string>>(new Map())
   // The rootSig of the package whose branch name is currently being edited
   // inline, or null when no rename input is open.
   readonly editingLabelSig = signal<string | null>(null)
+  // The open rename input (only one renders at a time — the @if keys on a
+  // single editingLabelSig). An effect focuses + selects it on appearance.
+  readonly labelInput = viewChild<ElementRef<HTMLInputElement>>('labelInput')
+  // When true, committing a rename keeps the typed name even if another
+  // version under the same domain already uses it. Default (false)
+  // auto-increments a colliding name with a numeric suffix. Reset per edit.
+  readonly overwriteLabel = signal(false)
   readonly #savedExpandStates = new Map<string, boolean>()
   readonly filterKinds: { key: string, diamond: TreeNodeKind }[] = [
     { key: 'bee', diamond: 'bee' },
@@ -304,12 +321,12 @@ export class HomeComponent implements OnDestroy {
       const key = s.displayDomain
       let group = groups.get(key)
       if (!group) {
-        group = { domain: s.domain, domainName: s.displayDomain, sections: [], hiddenVersionCount: 0 }
+        group = { domain: s.domain, domainName: s.displayDomain, sections: [], revisions: [], activeRootSig: '' }
         groups.set(key, group)
       }
       group.sections.push(s)
     }
-    const showAll = this.showAllVersions()
+    const activeByDomain = this.#activeRootByDomain()
     // Versions are ordered newest-first by deploy timestamp (ISO sorts
     // chronologically); ties / missing `at` fall back to the richest tree
     // (most items) so a resolved version beats an empty import-source marker.
@@ -321,19 +338,25 @@ export class HomeComponent implements OnDestroy {
       return (b.items?.length || 0) - (a.items?.length || 0)
     }
     for (const group of groups.values()) {
-      // Version ordering applies to PACKAGE sections only — multiple package
-      // sections under one domain are versions of the same install. CONTENT
-      // sections are adopted tiles, not versions (collapsing them hid dolphin
-      // behind the jwize.com manual-install section), so they always render.
+      // PACKAGE sections under one domain are deploy versions of the same
+      // install; exactly ONE renders (the active revision) and the chain is
+      // offered through the revision switcher. CONTENT sections are adopted
+      // tiles, not versions (collapsing them hid dolphin behind the jwize.com
+      // manual-install section), so they always render.
       const packages = group.sections.filter(s => s.kind === 'package').sort(byRecency)
       const content = group.sections.filter(s => s.kind !== 'package')
-      if (!showAll && packages.length > 1) {
-        // Collapsed: show only the newest version; the rest hide behind +N.
-        group.hiddenVersionCount = packages.length - 1
-        group.sections = [packages[0], ...content]
+      if (packages.length) {
+        // Active revision: the active.json pick if it names one of these
+        // versions, else the newest. Only the active one renders.
+        const activeSig = activeByDomain.get(packages[0].domainName) || ''
+        const active = packages.find(s => s.rootSig === activeSig) ?? packages[0]
+        group.revisions = packages.map(s => ({ rootSig: s.rootSig, label: this.displayLabel(s), deployedAt: s.deployedAt }))
+        group.activeRootSig = active.rootSig
+        group.sections = [active, ...content]
       } else {
-        // Expanded (or a single version): list every version newest-first.
-        group.sections = [...packages, ...content]
+        group.revisions = []
+        group.activeRootSig = ''
+        group.sections = [...content]
       }
     }
     // Library/source siblings, sorted alphabetically (diamondcoreprocessor.com,
@@ -345,7 +368,7 @@ export class HomeComponent implements OnDestroy {
     // of all enabled libraries, combined into one root-level hierarchy (no
     // .coms; same-named folders fold together). Prepended as the first sibling.
     const logicalGroup: DomainGroup = {
-      domain: '@logical', domainName: LOGICAL_VIEW_NAME, hiddenVersionCount: 0,
+      domain: '@logical', domainName: LOGICAL_VIEW_NAME, revisions: [], activeRootSig: '',
       sections: [{
         domain: '@logical', domainName: LOGICAL_VIEW_NAME, displayDomain: LOGICAL_VIEW_NAME,
         rootSig: '', originalRootSig: '', items: this.logicalViewItems(),
@@ -506,6 +529,14 @@ export class HomeComponent implements OnDestroy {
     effect(() => {
       const doms = this.domains()
       if (doms.length) this.#loadAllDomains(doms)
+    })
+
+    // When the inline rename input opens, focus it and select all text so the
+    // author types over the default name (deploy-naming UX: the name is the
+    // author's to set; the field offers the current handle pre-selected).
+    effect(() => {
+      const el = this.labelInput()?.nativeElement
+      if (el) { el.focus(); el.select() }
     })
 
     // Warm the settings sigbag into the in-memory cache so visibility reads
@@ -1416,9 +1447,44 @@ export class HomeComponent implements OnDestroy {
     this.#refreshSections()
   }
 
-  toggleShowAllVersions(): void {
-    this.showAllVersions.set(!this.showAllVersions())
+  // ─── Package Adopt / Save / Discard ─────────────────────────────────
+  // The three-way lifecycle for a package (named via the version editor;
+  // its versions switchable via the revision list). ADOPT = installed +
+  // ENABLED (live in the logical view). SAVE = installed but OFF — a named,
+  // saved revision you "change to" / enable later. DISCARD = uninstall.
+  // Adopt/Save reuse the participant-local feature-enable flag; the package's
+  // bytes are already local, so this is the activation decision, not a
+  // re-fetch. (Package-scoped for now — generalizing to other installer
+  // types is a separate, deliberate step.)
+
+  /** 'adopted' = enabled (live), else 'saved' (installed, off). The
+   *  #logicalVersion read registers the reactive dependency so the control
+   *  re-renders when an enable flips. */
+  packageState(section: DomainSection): 'adopted' | 'saved' {
+    this.#logicalVersion()
+    return this.#domainStorage.isFeatureEnabled(section.rootSig) ? 'adopted' : 'saved'
   }
+
+  #setPackageEnabled(section: DomainSection, enabled: boolean): void {
+    if (!/^[a-f0-9]{64}$/.test(section.rootSig)) return
+    void this.#domainStorage.setFeatureEnabled(section.rootSig, enabled)
+      .then(() => this.#domainStorage.recomputeLogical())
+      .then(() => { this.#logicalVersion.update(v => v + 1); void this.#postRegistrySnapshot() })
+      .catch(e => console.warn('[home] package adopt/save failed', e))
+    // Tell any connected hive to resync — the next sync sig reflects the new
+    // enabled set (resyncFromSentinel adds/removes the package's files).
+    this.#toggleState.notifyChanged()
+  }
+
+  /** Adopt: install + enable (live in the logical view now). */
+  adoptPackage(section: DomainSection): void { this.#setPackageEnabled(section, true) }
+
+  /** Save: keep installed but OFF — a saved revision to enable / change to later. */
+  savePackage(section: DomainSection): void { this.#setPackageEnabled(section, false) }
+
+  /** Discard: uninstall the package (same removal the × performs). */
+  discardPackage(section: DomainSection): void { this.removeDomain(section.domain) }
+
 
   // ─── Per-domain visibility toggle (sticky, OPFS-persisted) ──────────
   // Master switch per domain. When toggled OFF, the domain's contribution
@@ -1670,18 +1736,51 @@ export class HomeComponent implements OnDestroy {
   // input from the DOM does not re-commit the discarded text.
   #cancelLabelEdit = false
 
-  /** Open the inline rename input for a package version. */
+  /** Open the inline rename input for a package version. Overwrite resets to
+   *  off so each edit starts from "increment if the name is taken". */
   startLabelEdit(section: DomainSection): void {
     if (!section.rootSig) return
+    this.overwriteLabel.set(false)
     this.editingLabelSig.set(section.rootSig)
   }
 
-  /** Commit an inline rename from the input element and close the editor. */
+  /** Commit an inline rename from the input element and close the editor.
+   *  A non-empty name that collides with another version under the same
+   *  domain auto-increments (name-2, name-3…) unless overwrite is on. */
   commitLabelEdit(section: DomainSection, event: Event): void {
     if (this.#cancelLabelEdit) { this.#cancelLabelEdit = false; return }
-    const value = (event.target as HTMLInputElement | null)?.value ?? ''
-    this.renameLabel(section, value)
+    const raw = ((event.target as HTMLInputElement | null)?.value ?? '').trim()
+    const name = raw ? this.#uniqueLabel(section, raw, this.overwriteLabel()) : ''
+    this.renameLabel(section, name)
     this.editingLabelSig.set(null)
+  }
+
+  /** Resolve a non-colliding handle for a version. Gathers the display names
+   *  of the OTHER versions under the same domain (the full set, including
+   *  versions collapsed behind +N); if `desired` is taken and `overwrite` is
+   *  false, appends the lowest free numeric suffix. Collision is
+   *  case-insensitive since handles are user-facing. */
+  #uniqueLabel(section: DomainSection, desired: string, overwrite: boolean): string {
+    if (overwrite) return desired
+    const taken = new Set<string>()
+    for (const s of this.sections()) {
+      if (s.rootSig === section.rootSig) continue
+      if (s.displayDomain !== section.displayDomain) continue
+      const handle = this.displayLabel(s)
+      if (handle) taken.add(handle.toLowerCase())
+    }
+    if (!taken.has(desired.toLowerCase())) return desired
+    for (let i = 2; ; i++) {
+      const candidate = `${desired}-${i}`
+      if (!taken.has(candidate.toLowerCase())) return candidate
+    }
+  }
+
+  /** Toggle the overwrite flag without stealing focus from the rename input
+   *  (the button uses mousedown-preventDefault so the input keeps focus and
+   *  Enter still commits with the chosen flag). */
+  toggleOverwrite(): void {
+    this.overwriteLabel.update(v => !v)
   }
 
   /** Discard an in-progress rename (Escape) without committing the input. */
@@ -2064,6 +2163,30 @@ export class HomeComponent implements OnDestroy {
     await this.#switchSectionRoot(section, rootSig)
   }
 
+  /** Switch which DEPLOY revision of a package is active. The chosen version
+   *  is already a resolved sibling section, so this persists the pick to
+   *  active.json, points #activeRootByDomain at it (domainGrouped then renders
+   *  it), resolves its tree if it was never loaded, and broadcasts so the
+   *  running hive resyncs to the newly-active root. */
+  async onSwitchRevision(section: DomainSection, rootSig: string): Promise<void> {
+    if (!rootSig || rootSig === section.rootSig) return
+    await this.#patchStore.setActiveRoot(section.domainName, rootSig)
+    this.#activeRootByDomain.update(m => {
+      const next = new Map(m)
+      next.set(section.domainName, rootSig)
+      return next
+    })
+    const target = this.sections().find(s =>
+      s.kind === 'package' && s.domainName === section.domainName && s.rootSig === rootSig)
+    if (target && !target.items.length) {
+      // Never resolved (e.g. an older version that was offscreen) — load it.
+      await this.#switchSectionRoot(target, rootSig)
+    } else {
+      this.#refreshSections()
+    }
+    this.#toggleState.notifyChanged()
+  }
+
   async downloadPackage(section: DomainSection): Promise<void> {
     await this.#exporter.exportPackage(section.rootSig, section.domainName)
   }
@@ -2414,6 +2537,18 @@ export class HomeComponent implements OnDestroy {
       ...results,
     ])
 
+    // Deploy-version sigs per domain. A revision switch sets active.json to
+    // one of these; domainGrouped selects it — it must NOT be hot-swapped onto
+    // every sibling section (that collapses their identities into one root).
+    // Only a PATCH root (a sig that is NOT a deploy version) triggers the
+    // per-section tree hot-swap below.
+    const versionSigsByDomain = new Map<string, Set<string>>()
+    for (const s of results) {
+      if (s.kind !== 'package' || !s.rootSig) continue
+      if (!versionSigsByDomain.has(s.domainName)) versionSigsByDomain.set(s.domainName, new Set())
+      versionSigsByDomain.get(s.domainName)!.add(s.rootSig)
+    }
+
     // load each section in parallel
     for (const section of results) {
       if (!section.rootSig) continue
@@ -2430,11 +2565,21 @@ export class HomeComponent implements OnDestroy {
           section.items = flat.items
           if (flat.displayDomain) section.displayDomain = flat.displayDomain
 
-          // load patches and check for active patched root
+          // load patches and check for active root
           section.patches = await this.#patchStore.list(section.domainName)
           const activeRoot = await this.#patchStore.activeRoot(section.domainName)
-          if (activeRoot && activeRoot !== section.rootSig) {
-            // hot-swap to the active patched root
+          // Record the active revision so domainGrouped renders the right
+          // version (and the revision switcher marks it). '' ⇒ newest wins.
+          this.#activeRootByDomain.update(m => {
+            const next = new Map(m)
+            next.set(section.domainName, activeRoot ?? '')
+            return next
+          })
+          const isVersion = versionSigsByDomain.get(section.domainName)?.has(activeRoot ?? '')
+          if (activeRoot && activeRoot !== section.rootSig && !isVersion) {
+            // hot-swap to the active PATCHED root (a non-version sig). When the
+            // active root is a deploy version, leave this section alone —
+            // domainGrouped picks the matching version section instead.
             const patched = await this.#resolver.resolveFromLocal(activeRoot, section.domainName)
             if (patched) {
               section.rootSig = patched.signature ?? activeRoot

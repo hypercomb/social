@@ -37,9 +37,11 @@ const OVIEW_H = 452
 // unchanged (the cap only kicks in above it).
 const VIEW_COLS = 22
 const VIEW_ROWS = 14
-// Seconds the room camera takes to slide one full screen when Dana crosses into the
-// next room (the Zelda flip-scroll). Small partial-room shifts take proportionally less.
+// Camera feel. HORIZONTAL is a smooth Ghosts 'n Goblins follow — X_FOLLOW is the ease
+// rate (higher = tighter tracking). VERTICAL still flip-scrolls room-to-room (ROOM_SLIDE
+// seconds per screen) from Dana's grounded position, so a jump never bobs the view.
 const ROOM_SLIDE = 0.32
+const X_FOLLOW = 9
 
 // Level-clear flow (continuous play — identical to the Bubble overlay so every
 // game advances the same way): on clearing a screen we tally the level's score
@@ -101,6 +103,7 @@ export class SolomonOverlay {
   // (#room, for hysteresis), and a flag to snap to the starting room on entry.
   #cam = { x: 0, y: 0 }
   #room = { x: 0, y: 0 }
+  #anchor = { x: 0, y: 0 }   // Dana's last grounded centre — jumps don't move the room
   #camInit = false
 
   // Smooth high-res render (matching the Bubble/Arkanoid pipeline): the world is
@@ -426,33 +429,41 @@ export class SolomonOverlay {
     this.#fit()
   }
 
-  /** ZELDA-STYLE ROOM CAMERA. The view locks to the screen-sized "room" Dana stands
-   *  in and SLIDES to the next room when he crosses a boundary (instead of following
-   *  him continuously). Big caverns are a grid of rooms; on an axis that only just
-   *  exceeds the viewport (<4 tiles of slack) it falls back to a gentle clamp-follow
-   *  so the tiny shift never reads as a jarring half-room snap. Updates #cam toward
-   *  the room origin at a constant slide speed; teleports (death-respawn) snap. */
+  /** GHOSTS 'N GOBLINS CAMERA. HORIZONTAL is a smooth follow — the screen glides
+   *  sideways to keep Dana framed as he traverses the terrain. VERTICAL flip-scrolls
+   *  room-to-room from Dana's GROUNDED position: a jump is a transient hop back to the
+   *  same ground, so it never bobs the view; only landing in a new vertical band shifts
+   *  it. A big airborne fall drags the vertical anchor so he can't drift off-screen;
+   *  death-respawn snaps both axes. */
   #roomCamera(e: Engine, dt: number): { x: number; y: number } {
     const vw = this.#logicalW || e.width, vh = this.#logicalH || e.height
     const init = !this.#camInit
-    const tx = this.#axisCam('x', e.player.x + e.player.w / 2, vw, Math.max(0, e.width - vw), e.width, init)
-    const ty = this.#axisCam('y', e.player.y + e.player.h / 2, vh, Math.max(0, e.height - vh), e.height, init)
+    const px = e.player.x + e.player.w / 2, py = e.player.y + e.player.h / 2
+    // Vertical anchor: hold at Dana's grounded centre; catch up on a long fall/leap.
+    if (init || e.onGround) this.#anchor.y = py
+    else if (Math.abs(py - this.#anchor.y) > vh * 0.55) this.#anchor.y = py
+
+    const maxX = Math.max(0, e.width - vw), maxY = Math.max(0, e.height - vh)
+    const tx = maxX <= 0 ? 0 : Math.max(0, Math.min(px - vw / 2, maxX))   // smooth horizontal follow
+    const ty = this.#axisCam('y', this.#anchor.y, vh, maxY, e.height, init) // discrete vertical room-shift
+
     if (init) { this.#cam.x = tx; this.#cam.y = ty; this.#camInit = true }
     else {
-      // a multi-room jump (respawn) snaps; a single-room cross slides at constant speed
+      // X eases toward the live target (tight, smooth G'nG scroll); a respawn snaps.
       if (Math.abs(tx - this.#cam.x) > vw * 1.05) this.#cam.x = tx
-      else this.#cam.x += Math.max(-(vw / ROOM_SLIDE) * dt, Math.min(tx - this.#cam.x, (vw / ROOM_SLIDE) * dt))
+      else this.#cam.x += (tx - this.#cam.x) * Math.min(1, dt * X_FOLLOW)
+      // Y flip-scrolls at the room-slide speed; a multi-room jump (respawn) snaps.
       if (Math.abs(ty - this.#cam.y) > vh * 1.05) this.#cam.y = ty
       else this.#cam.y += Math.max(-(vh / ROOM_SLIDE) * dt, Math.min(ty - this.#cam.y, (vh / ROOM_SLIDE) * dt))
     }
-    return { x: this.#cam.x, y: this.#cam.y }   // float → smooth sub-pixel slide
+    return { x: this.#cam.x, y: this.#cam.y }
   }
 
-  /** Per-axis room-origin target. `maxO` = max camera offset (level − viewport). With
-   *  hysteresis (a margin past the boundary) so wiggling on a seam never jitters. */
+  /** Per-axis room-origin target — ALWAYS discrete (no smooth follow). `maxO` = max
+   *  camera offset (level − viewport). Hysteresis (a margin past the boundary) keeps a
+   *  seam from jittering. `p` is the grounded anchor, so jumps don't change the band. */
   #axisCam(axis: 'x' | 'y', p: number, view: number, maxO: number, levelDim: number, reset: boolean): number {
     if (maxO <= 0) return 0                                            // level fits this axis
-    if (maxO < TILE * 4) return Math.max(0, Math.min(p - view / 2, maxO)) // tiny slack → smooth clamp-follow
     const rooms = Math.ceil(levelDim / view)
     const band = levelDim / rooms                                      // one room's width in world px
     const m = TILE * 0.8                                               // hysteresis margin

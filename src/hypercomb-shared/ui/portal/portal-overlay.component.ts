@@ -2,6 +2,7 @@ import { ChangeDetectorRef, Component, inject, type OnInit, type OnDestroy } fro
 import { DomSanitizer, type SafeResourceUrl } from "@angular/platform-browser"
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
 import { stagedSigs } from '../features-viewer/feature-staging'
 
 const DEFAULT_PORTALS: Record<string, string> = {
@@ -72,7 +73,7 @@ type InputGateLike = {
 @Component({
   selector: 'hc-portal-overlay',
   standalone: true,
-  imports: [TranslatePipe],
+  imports: [TranslatePipe, HcWidgetDirective],
   templateUrl: './portal-overlay.component.html',
   styleUrls: ['./portal-overlay.component.scss']
 })

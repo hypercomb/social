@@ -51,6 +51,15 @@ export class AtomizeDrone extends Drone {
     if (this.#busy) return
     this.#busy = true
 
+    // Capture the invocation location NOW — the LLM call below spans
+    // seconds, and a navigation in that window must not re-home the
+    // generated parts onto the wrong page. The eager `cell:added` events
+    // carry these segments so the renderer mounts the parts at the page the
+    // user expanded from, immediately, regardless of where they navigated.
+    const lineage = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@hypercomb.social/Lineage') as
+      { explorerSegments?: () => readonly string[] } | undefined
+    const segments: readonly string[] = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+
     try {
       const apiKey = getApiKey()
       if (!apiKey) {
@@ -80,7 +89,7 @@ export class AtomizeDrone extends Drone {
       for (const item of parts) {
         const name = normalizeCell(item.name)
         if (!name) continue
-        EffectBus.emit('cell:added', { cell: name })
+        EffectBus.emit('cell:added', { cell: name, segments: [...segments] })
       }
 
       console.log(`[expand] ${label} → ${parts.length} parts`)

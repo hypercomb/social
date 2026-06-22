@@ -14,6 +14,7 @@ import { Component, computed, effect, signal, type OnDestroy } from '@angular/co
 import { NgTemplateOutlet } from '@angular/common'
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
 
 type ShapeId = 'circle' | 'square' | 'triangle' | 'diamond' | 'star' | 'hexagon'
 
@@ -51,7 +52,7 @@ type InputGateLike = {
 @Component({
   selector: 'hc-notes-viewer',
   standalone: true,
-  imports: [TranslatePipe, NgTemplateOutlet],
+  imports: [TranslatePipe, NgTemplateOutlet, HcWidgetDirective],
   templateUrl: './notes-viewer.component.html',
   styleUrls: ['./notes-viewer.component.scss'],
 })

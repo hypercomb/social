@@ -135,6 +135,17 @@ export type VisualBeeDescriptor = {
    */
   readonly decorationKind: string
 
+  /**
+   * For `behavior: 'render'` views whose content is a FIRST-CLASS LAYER
+   * SLOT (not a decoration): the slot name on the layer JSON (e.g.
+   * `'tutor'`). When set, ViewBee surfaces the per-node toggle whenever
+   * this cell's slot is a non-empty signature array — no `decorations`
+   * dual-write needed. The decoration path still works for views that use
+   * it (website), so a view may declare a slot, a decorationKind, or both;
+   * ViewBee shows the toggle if EITHER is present on the cell.
+   */
+  readonly slot?: string
+
   /** i18n key for the view's label (tooltips, palette entries). */
   readonly labelKey?: string
 

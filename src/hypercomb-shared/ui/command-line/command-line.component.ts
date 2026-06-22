@@ -1264,7 +1264,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     })
 
     this.#commandFocusUnsub = EffectBus.on<{ cell: string }>('command:focus', ({ cell }) => {
-      this.#setShellValue(cell, false)
+      // Prefill the cell name (the grammar) followed by a trailing `/` so the
+      // caret lands ready to continue the path/command. `#setShellValue` calls
+      // placeCaretAtEnd(), so the cursor sits right after the slash.
+      this.#setShellValue(cell ? `${cell}/` : cell, false)
       this.shell?.focus()
     })
 

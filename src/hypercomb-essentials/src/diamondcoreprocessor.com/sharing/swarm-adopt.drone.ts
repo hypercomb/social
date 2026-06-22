@@ -36,6 +36,7 @@ import {
   writeTilePropsIndex,
 } from '../editor/tile-properties.js'
 import { forgetDecorationLabel } from '../commands/decoration-kind-index.js'
+import { markAdoptedRoot } from './adopted-roots.js'
 
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
@@ -435,6 +436,10 @@ export class SwarmAdoptDrone extends Drone {
         { segments: at, layer: { ...(parent ?? {}), children: alreadyChild ? [...existing] : [...existing, name] } },
         ...treeUpdates,
       ])
+      // Remember this branch root so the first visit to it (and to any page
+      // beneath it) fits-to-content instead of opening at an arbitrary scale.
+      // Participant-local — never folded into the layer (see adopted-roots.ts).
+      markAdoptedRoot([...at, name])
       EffectBus.emit('fs:changed', { segments: at })
       await new hypercomb().act()
       return 'committed'

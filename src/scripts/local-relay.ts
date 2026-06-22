@@ -4,7 +4,7 @@
 
 import { WebSocketServer, WebSocket } from 'ws'
 import { createServer } from 'node:http'
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, stat } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -19,6 +19,11 @@ const PORT = 7777
 // authenticates every write, so an open relay is still content-safe.
 const CONTENT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '.dev-relay-content')
 const POOL_RE = /^\/(__layers__|__resources__|__bees__|__dependencies__)\/([a-f0-9]{64})(\.json|\.js)?$/i
+// Canonical flat endpoint: `/<sig>` — extensionless, type-agnostic (§21.10),
+// mirroring hypercomb-relay/relay.js. The dev relay used to be typed-only, so
+// the client's flat PUT/GET 404'd and pushed content never landed here — the
+// gap that stranded website resources (chrome.css) on the authoring machine.
+const SIG_PATH_RE = /^\/([a-f0-9]{64})$/i
 
 // Auto-expire window for ephemeral-range (20000-29999) events. Long
 // enough that a receiver who reloads / joins shortly after a publisher
@@ -117,6 +122,26 @@ function send(ws: WebSocket, msg: unknown[]): void {
   }
 }
 
+// Flat sig resolution (mirrors hypercomb-relay/relay.js resolveFlatSig): a bare
+// `/<sig>` resolves to whichever pool holds it — flat heap first (canonical:
+// CONTENT_DIR/<sig>, no extension), then the legacy typed pools as fallback.
+// The pool supplies the Content-Type; the SW re-wraps bytes by guessed type on
+// the page side, so octet-stream from the flat heap is fine. Returns
+// { filePath, contentType } or null (→ 404).
+async function resolveFlatSig(sig: string): Promise<{ filePath: string; contentType: string } | null> {
+  const probes: Array<[string, string]> = [
+    [join(CONTENT_DIR, sig), 'application/octet-stream'],
+    [join(CONTENT_DIR, '__layers__', sig + '.json'), 'application/json; charset=utf-8'],
+    [join(CONTENT_DIR, '__bees__', sig + '.js'), 'application/javascript; charset=utf-8'],
+    [join(CONTENT_DIR, '__dependencies__', sig + '.js'), 'application/javascript; charset=utf-8'],
+    [join(CONTENT_DIR, '__resources__', sig), 'application/octet-stream'],
+  ]
+  for (const [p, ct] of probes) {
+    try { if ((await stat(p)).isFile()) return { filePath: p, contentType: ct } } catch { /* not in this pool */ }
+  }
+  return null
+}
+
 // HTTP content server (GET/PUT) + WS mesh share ONE port: the installer and
 // witnessing tabs fetch bytes over HTTP, the mesh rides the same port as an
 // upgrade. Without the HTTP half a witness gets the visuals but never the
@@ -137,6 +162,38 @@ const httpServer = createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json')
     res.writeHead(200); res.end('{"packages":{}}'); return
   }
+
+  // Flat sig endpoint — canonical `host/<sig>`. New writes land flat at
+  // CONTENT_DIR/<sig>; reads probe the flat heap first, then typed pools.
+  const flat = path.match(SIG_PATH_RE)
+  if (flat) {
+    const sig = flat[1].toLowerCase()
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      const hit = await resolveFlatSig(sig)
+      if (!hit) { res.writeHead(404); res.end('sig not held'); return }
+      try {
+        const bytes = await readFile(hit.filePath)
+        res.setHeader('Content-Type', hit.contentType)
+        res.setHeader('Cache-Control', 'immutable, max-age=31536000')
+        res.writeHead(200)
+        res.end(req.method === 'HEAD' ? undefined : bytes)
+      } catch { res.writeHead(404); res.end('not found') }
+      return
+    }
+    if (req.method === 'PUT') {
+      const chunks: Buffer[] = []
+      for await (const c of req) chunks.push(c as Buffer)
+      const body = Buffer.concat(chunks)
+      const actual = createHash('sha256').update(body).digest('hex')
+      if (actual !== sig) { res.writeHead(422); res.end('sig mismatch'); return }
+      await mkdir(CONTENT_DIR, { recursive: true })
+      await writeFile(join(CONTENT_DIR, sig), body)
+      res.writeHead(201); res.end('stored ' + actual)
+      return
+    }
+    res.writeHead(405); res.end('method not allowed'); return
+  }
+
   const m = path.match(POOL_RE)
   if (!m) { res.writeHead(404); res.end('not found'); return }
   const filePath = join(CONTENT_DIR, m[1], m[2].toLowerCase() + (m[3] || ''))
@@ -146,7 +203,22 @@ const httpServer = createServer(async (req, res) => {
       res.setHeader('Cache-Control', 'immutable, max-age=31536000')
       res.writeHead(200)
       res.end(req.method === 'HEAD' ? undefined : bytes)
-    } catch { res.writeHead(404); res.end('not found') }
+    } catch {
+      // Typed-shape MISS → probe the flat heap by sig: clients that PUT flat
+      // (`/<sig>`) but ask typed (`/__resources__/<sig>`) still resolve.
+      const hit = await resolveFlatSig(m[2].toLowerCase())
+      if (hit) {
+        try {
+          const bytes = await readFile(hit.filePath)
+          res.setHeader('Content-Type', hit.contentType)
+          res.setHeader('Cache-Control', 'immutable, max-age=31536000')
+          res.writeHead(200)
+          res.end(req.method === 'HEAD' ? undefined : bytes)
+          return
+        } catch { /* fall through to 404 */ }
+      }
+      res.writeHead(404); res.end('not found')
+    }
     return
   }
   if (req.method === 'PUT') {

@@ -184,34 +184,6 @@
 
     }
 
-    @case ('clipboard') {
-      @if (clipboardAvailable()) {
-        <div class="controls-section clipboard-mode">
-          <span class="mode-label">{{ 'controls.clipboard' | t }}</span>
-          @if (clipboardCount() > 0) {
-            <span class="clipboard-count">{{ clipboardCount() }}</span>
-          } @else {
-            <span class="clipboard-empty">{{ 'controls.clipboard-empty' | t }}</span>
-          }
-        </div>
-        <div class="controls-divider"></div>
-        @if (clipboardCount() > 0) {
-          <button class="ctl-btn" (click)="place()" [attr.aria-label]="'controls.place-selected' | t">
-            <span class="mat-sym" [style.color]="hasSelection() ? '#4caf50' : ''">place_item</span>
-          </button>
-          <button class="ctl-btn" (click)="paste()" [attr.aria-label]="'controls.paste-clipboard' | t">
-            <span class="mat-sym" style="color:#4caf50">content_paste</span>
-          </button>
-        }
-        <button class="ctl-btn" (click)="clearClipboard()" [attr.aria-label]="'controls.clear-clipboard' | t">
-          <span class="mat-sym">delete</span>
-        </button>
-        <button class="ctl-btn" (click)="closeClipboard()" [attr.aria-label]="'controls.close-clipboard' | t">
-          <span class="mat-sym">close</span>
-        </button>
-      }
-    }
-
     @case ('atomize') {
       <div class="controls-section atomize-mode">
         <span class="mode-label">{{ 'controls.atomize' | t }}</span>

@@ -10,6 +10,7 @@
 import { Component, computed, effect, signal, type OnDestroy } from '@angular/core'
 import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
 import { EffectBus } from '@hypercomb/core'
 import type { InstructionAnchor } from '@hypercomb/core'
 import type { InstructionState } from
@@ -40,7 +41,7 @@ type InputGateLike = {
 @Component({
   selector: 'hc-instruction-overlay',
   standalone: true,
-  imports: [TranslatePipe],
+  imports: [TranslatePipe, HcWidgetDirective],
   templateUrl: './instruction-overlay.component.html',
   styleUrls: ['./instruction-overlay.component.scss'],
 })

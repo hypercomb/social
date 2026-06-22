@@ -8,7 +8,8 @@ import { HexImageAtlas } from '../grid/hex-image.atlas.js'
 import { HexSdfTextureShader } from '../grid/hex-sdf.shader.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../grid/hex-geometry.js'
 import { isSignature, readCellProperties, writeCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
-import { readViewportAt } from '../../editor/viewport-store.js'
+import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
+import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
 import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
 import type { HistoryService, LayerContent } from '../../history/history.service.js'
@@ -581,8 +582,6 @@ export class ShowCellDrone extends Drone {
   private meshCellsRev = 0
   private meshCells: string[] = []
 
-  // clipboard view override — when set, render from this dir instead of explorer
-  #clipboardView: { labels: Set<string>; sourceSegments: string[]; op: 'cut' | 'copy' } | null = null
   #lastCursorPosition = -1
   #lastCursorRewound = false
   #lastCursorLocationSig = ''
@@ -655,11 +654,15 @@ export class ShowCellDrone extends Drone {
   #pendingFitRestore = false
   #layoutMode: 'dense' | 'pinned' = 'dense'
 
-  // First-visit fit: when navigating to a layer that has no saved viewport
-  // snapshot, defer layer reveal until all cells have streamed in, then run
-  // zoom-to-fit so the page opens sized to its content. The fitted viewport
-  // is persisted, so subsequent visits restore it (or the user's later
-  // pan/zoom edits) instead of fitting again.
+  // First-visit fit (adopted content): the first time the participant opens a
+  // location inside a branch they adopted — the adopted root or any page
+  // beneath it, with no saved viewport yet — frame it to its own content. The
+  // fit runs in applyGeometry BEFORE the layer is revealed, so tiles appear
+  // already sized (no render-then-resize "creep"), and it persists with
+  // source 'user' so it fires exactly once: subsequent visits restore the
+  // saved viewport like any normal sticky location (or the user's later
+  // pan/zoom edits).
+  #pendingFirstVisitFit = false
 
   // cached render context for fast move:preview path (avoids full OPFS re-read)
   private cachedCellNames: string[] | null = null
@@ -1682,7 +1685,6 @@ export class ShowCellDrone extends Drone {
       !this.#forceNextRender
       && locationKey === this.renderedLocationKey
       && this.renderedCellsKey !== ''
-      && !this.#clipboardView
     ) {
       return
     }
@@ -1706,10 +1708,8 @@ export class ShowCellDrone extends Drone {
     //       outer renderFromSynchronize returns but while streamCells is
     //       still running async.
     if (
-      !this.#clipboardView && (
-        this.#activeRenderTarget === locationKey ||
-        (this.streamActive && locationKey === this.renderedLocationKey)
-      )
+      this.#activeRenderTarget === locationKey ||
+      (this.streamActive && locationKey === this.renderedLocationKey)
     ) {
       return
     }
@@ -1775,7 +1775,6 @@ export class ShowCellDrone extends Drone {
     // produced new state.
     if (
       locationKey !== this.renderedLocationKey
-      && !this.#clipboardView
       && !(this.#tagFlattenResults && this.#tagFlattenResults.length > 0)
     ) {
       const cached = this.#layerCellsCache.get(locationKey)
@@ -1949,31 +1948,14 @@ export class ShowCellDrone extends Drone {
       return currentKey !== locationKey || currentRev !== fsRev || currentMeshRev !== meshRev
     }
 
-    // Clipboard view renders from the clipboard surface, not the current
-    // explorer dir. Cut tiles live in store.clipboard; copy tiles are still
-    // at their sourceSegments. Fall back to explorer dir otherwise.
-    let dir: FileSystemDirectoryHandle | null
-    if (this.#clipboardView) {
-      const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
-        { clipboard?: FileSystemDirectoryHandle; hypercombRoot?: FileSystemDirectoryHandle } | undefined
-      if (this.#clipboardView.op === 'cut' && store?.clipboard) {
-        dir = store.clipboard
-      } else if (store?.hypercombRoot && lineage.tryResolve) {
-        dir = await lineage.tryResolve(this.#clipboardView.sourceSegments, store.hypercombRoot)
-        if (!dir) dir = await lineage.explorerDir()
-      } else {
-        dir = await lineage.explorerDir()
-      }
-    } else {
-      // Read-only explorer dir lookup. Layer-as-primitive — hierarchy
-      // lives in layer.children, not in `hypercomb.io/<path>/` folders.
-      // The renderer no longer mints folders to hold viewport state;
-      // viewport persistence lives keyed by lineageSig (flat), not by
-      // a parallel folder tree. A null dir is the new normal for any
-      // sub-layer location.
-      dir = await lineage.explorerDir()
-    }
-    if (!this.#clipboardView && isStale()) {
+    // Read-only explorer dir lookup. Layer-as-primitive — hierarchy
+    // lives in layer.children, not in `hypercomb.io/<path>/` folders.
+    // The renderer no longer mints folders to hold viewport state;
+    // viewport persistence lives keyed by lineageSig (flat), not by
+    // a parallel folder tree. A null dir is the new normal for any
+    // sub-layer location.
+    const dir: FileSystemDirectoryHandle | null = await lineage.explorerDir()
+    if (isStale()) {
       this.renderQueued = true
       return
     }
@@ -2043,7 +2025,7 @@ export class ShowCellDrone extends Drone {
     // identifier kept so the rest of the render path (which uses it as
     // "what's owned here") doesn't need to be rewritten.
     const localCells: string[] = []
-    if (!this.#clipboardView && isStale()) {
+    if (isStale()) {
       this.renderQueued = true
       return
     }
@@ -2104,7 +2086,7 @@ export class ShowCellDrone extends Drone {
     // "stale content" two-stage path (renders the subset, then the full set).
     let srcStaleLen = -1
     let srcFreshLen = -1
-    if (!this.#clipboardView && historyService) {
+    if (historyService) {
       const sig = await this.computeSignatureLocation(lineage)
 
       // Real-time supersedes preloader: cursor.load runs a bag scan +
@@ -2323,7 +2305,7 @@ export class ShowCellDrone extends Drone {
     // block that hides it; on cold boot the canvas is simply still empty),
     // warm the missing children, and re-render. Bounded PER PARENT SIG so
     // a genuinely-absent child can never blank the canvas forever.
-    if (!this.#clipboardView && !childResolveComplete && childResolveExpected > 0) {
+    if (!childResolveComplete && childResolveExpected > 0) {
       const gateKey = gateParentSig || locationKey
       if (!this.#resolveGateExhausted.has(gateKey)) {
         const attempts = (this.#incompleteResolveAttempts.get(gateKey) ?? 0) + 1
@@ -2348,25 +2330,6 @@ export class ShowCellDrone extends Drone {
     } else if (childResolveComplete && gateParentSig) {
       // Clean resolution — reset this layer's retry budget.
       this.#incompleteResolveAttempts.delete(gateParentSig)
-    }
-
-    // Clipboard view: the captured labels ARE the membership. The
-    // layer-fill block above is skipped in this mode (it reads the
-    // CURRENT location's children, not the clipboard) and the
-    // layer-primitive migration retired the source-dir enumeration that
-    // used to seed `union` here — so nothing populated the clipboard set.
-    // Seed it directly from the labels: resolveCellOrder's clipboard
-    // fast-path packs them from slot 0 and buildCellsFromAxial treats
-    // localCellSet members as owned tiles (local image path). Without
-    // this `union` holds only mesh cells, the clipboard filter below
-    // empties it, every label is flagged a ghost (worker clears the
-    // clipboard), and openClipboard's zoomToFit lands on the unchanged
-    // explorer view — the "zooms in but still shows the old tiles" bug.
-    if (this.#clipboardView) {
-      for (const label of this.#clipboardView.labels) {
-        union.add(label)
-        localCellSet.add(label)
-      }
     }
 
     // Now that localCellSet reflects layer-truth (or OPFS truth when no
@@ -2494,22 +2457,20 @@ export class ShowCellDrone extends Drone {
     //   - in layer.children ⇒ pendingRemove is stale (undo restored it,
     //     paste landed, etc.) → drop the entry, let cell render
     //   - not in layer.children ⇒ honor the remove
-    // When no layer is available (fresh lineage, clipboard view), fall
-    // back to OPFS-truth — the same semantics this code shipped with.
-    if (!this.#clipboardView) {
-      const reconciled: string[] = []
-      for (const cell of this.#pendingRemoves) {
-        const presentInTruth = layerAllowed
-          ? layerAllowed.has(cell)
-          : localCellSet.has(cell)
-        if (presentInTruth) {
-          reconciled.push(cell)
-        } else {
-          union.delete(cell)
-        }
+    // When no layer is available (fresh lineage), fall back to OPFS-truth
+    // — the same semantics this code shipped with.
+    const reconciled: string[] = []
+    for (const cell of this.#pendingRemoves) {
+      const presentInTruth = layerAllowed
+        ? layerAllowed.has(cell)
+        : localCellSet.has(cell)
+      if (presentInTruth) {
+        reconciled.push(cell)
+      } else {
+        union.delete(cell)
       }
-      for (const cell of reconciled) this.#pendingRemoves.delete(cell)
     }
+    for (const cell of reconciled) this.#pendingRemoves.delete(cell)
 
     // filter out blocked external tiles and hidden local tiles before ordering
     const blockedSet = new Set<string>(JSON.parse(localStorage.getItem(`hc:blocked-tiles:${locationKey}`) ?? '[]'))
@@ -2581,23 +2542,6 @@ export class ShowCellDrone extends Drone {
     }
 
 
-    // clipboard view: show only clipboard labels
-    if (this.#clipboardView) {
-      const clipLabels = this.#clipboardView.labels
-      for (const cell of union) {
-        if (!clipLabels.has(cell)) union.delete(cell)
-      }
-      // Any clipboard label that didn't show up in the resolved dir is a
-      // ghost — the service thinks it has a tile the filesystem can't back.
-      // Emit so the worker drops it; never let the count outlive reality.
-      const missing: string[] = []
-      for (const label of clipLabels) {
-        if (!union.has(label)) missing.push(label)
-      }
-      if (missing.length > 0) {
-        this.emitEffect('clipboard:ghost-detected', { labels: missing })
-      }
-    }
 
     // Source breakdown for this pass — proves WHERE each tile comes from
     // (layer vs registry vs mesh) so a stray tile (e.g. a phantom "group" in
@@ -2703,6 +2647,16 @@ export class ShowCellDrone extends Drone {
         this.emitEffect('render:mesh-offset', { x: 0, y: 0 })
       }
 
+      // First visit to adopted content → fit-to-content once, persisted so it
+      // sticks (see #pendingFirstVisitFit). isWithinAdoptedRoot covers the
+      // adopted root AND every page beneath it; hasPersistedViewportAt is false
+      // ONLY on a genuine first visit (no local __viewport__ entry yet — the
+      // fit writes one, so this never re-fires). The fit itself is run by
+      // applyGeometry, before the reveal below.
+      const fvSegments = lineage.explorerSegments?.() ?? []
+      this.#pendingFirstVisitFit =
+        isWithinAdoptedRoot(fvSegments) && !(await hasPersistedViewportAt(fvSegments))
+
       // If the stream token bumped while we were awaiting the viewport
       // read, abandon — newer renderFromSynchronize is now the source
       // of truth for this layer's render.
@@ -2783,7 +2737,7 @@ export class ShowCellDrone extends Drone {
     // only feeds tags/link reads) and EXTERNAL (peer) tiles resolve
     // images from streamed sigs + __resources__ without any local dir.
     await this.loadCellImages(cells, dir)
-    if (!this.#clipboardView && isStale()) {
+    if (isStale()) {
       this.renderQueued = true
       return
     }
@@ -3228,10 +3182,15 @@ export class ShowCellDrone extends Drone {
     // content centered and not "shrunk" after a resize-then-reload.
     // Gated on `final` so partial-batch bounds don't produce a fit
     // that's too tight (would zoom in then out as more cells stream).
-    if (final && this.#pendingFitRestore && this.hexMesh?.getLocalBounds) {
+    if (final && (this.#pendingFitRestore || this.#pendingFirstVisitFit) && this.hexMesh?.getLocalBounds) {
+      const firstVisit = this.#pendingFirstVisitFit
       this.#pendingFitRestore = false
-      const zoom = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ZoomDrone') as { zoomToFit?: (snap?: boolean) => void } | undefined
-      zoom?.zoomToFit?.(true)
+      this.#pendingFirstVisitFit = false
+      const zoom = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ZoomDrone') as { zoomToFit?: (snap?: boolean, source?: 'user' | 'auto') => void } | undefined
+      // First-visit adopted fit persists (source 'user') so it sticks like a
+      // normal viewport and never re-fits; a restored fit re-frames visually
+      // only (source 'auto') and must never re-commit on every entry.
+      zoom?.zoomToFit?.(true, firstVisit ? 'user' : 'auto')
     }
 
     this.geom = geom
@@ -3757,53 +3716,10 @@ export class ShowCellDrone extends Drone {
       }
     })
 
-    // clipboard:view effect — filter visible cells to clipboard contents
-    this.onEffect<{ active: boolean; labels?: string[]; sourceSegments?: string[]; op?: 'cut' | 'copy' }>('clipboard:view', (payload) => {
-      const wasActive = this.#clipboardView
-      if (payload?.active && payload.labels) {
-        this.#clipboardView = {
-          labels: new Set(payload.labels),
-          sourceSegments: payload.sourceSegments ?? [],
-          op: payload.op ?? 'copy',
-        }
-        // Entering clipboard view: make sure the mesh layer is visible.
-        // A prior cancelled stream may have left it hidden — clipboard view
-        // doesn't go through the layer-change branch that normally restores
-        // visibility, so we do it explicitly here.
-        if (this.layer) this.layer.visible = true
-      } else {
-        this.#clipboardView = null
-      }
-      this.renderedCellsKey = '' // force full geometry rebuild on enter/exit
-
-      // Exiting clipboard view: drop caches for the clipboard labels (they
-      // were populated from store.clipboard / sourceSegments and may not
-      // match the real explorer layer), and reset the transient slot + pending
-      // remove state so the next explorer render rebuilds cleanly without
-      // inheriting clipboard-era layout or ghost-remove entries.
-      if (wasActive && !payload?.active) {
-        for (const label of wasActive.labels) {
-          this.cellImageCache.delete(label)
-          this.cellBorderColorCache.delete(label)
-          this.cellTagsCache.delete(label)
-          this.cellLinkCache.delete(label)
-          this.cellSubstrateCache.delete(label)
-          this.cellHideTextCache.delete(label)
-        }
-        this.#slots.clear()
-        this.#pendingRemoves.clear()
-        // HIDE during the transition, don't reveal yet. EffectBus.emit is
-        // synchronous, so this handler runs in full BEFORE the controls-bar's
-        // #restoreClipboardViewport() (which mutates container.scale/position)
-        // on the same call stack. Leaving the mesh visible let that camera
-        // change resize the OLD clipboard tiles on screen — the "tile changes
-        // size, then disappears, then re-renders" flash. Hiding here means the
-        // viewport restore lands on an invisible mesh; the same-layer render
-        // below rebuilds from layer truth and reveals it in one clean paint.
-        if (this.layer) this.layer.visible = false
-      }
-      this.requestRender()
-    })
+    // clipboard:view page-replacement REMOVED — the clipboard is now a
+    // non-navigating side panel (hc-clipboard-panel) that never takes over
+    // the page render. The old listener, the `#clipboardView` field, and all
+    // its render-path guards are gone.
 
     // clipboard:captured — brief visual flash on copied tiles. Heat-only
     // change → in-place buffer update, no full re-render.
@@ -4883,13 +4799,6 @@ export class ShowCellDrone extends Drone {
     peerIndices?: Map<string, number>,
     passSegments?: readonly string[],
   ): Promise<string[]> {
-    // Clipboard view is a preview surface — pack cells contiguously from
-    // slot 0 so they render near the viewport origin regardless of whatever
-    // slot index they happened to hold in their source layer.
-    if (this.#clipboardView) {
-      return [...union].sort((a, b) => a.localeCompare(b))
-    }
-
     // When cursor is rewound, use cursor-aware ordering so deletions
     // that happened later don't leave stale slot indices in OPFS
     // overlapping the rewound cell set.

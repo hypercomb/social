@@ -294,6 +294,38 @@ export class TileOverlayDrone extends Drone {
         })
       })
 
+      // ── Delete the hovered tile ─────────────────────────────────
+      // The trash icon was pulled off the hover overlay (too easy to click by
+      // accident), so deletion is now an explicit gesture: the vertical
+      // selection menu, OR Delete/Backspace over the tile under the cursor.
+      // `selection.remove` (delete/backspace) is already owned by
+      // RemoveQueenBee for the WHEN-SELECTED case — we handle only the
+      // complementary nothing-selected case here, so the two never both fire.
+      this.onEffect<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
+        if (cmd !== 'selection.remove') return
+        if (this.#hasSelection) return            // RemoveQueenBee owns the selection path
+        if (this.#editing || this.#editCooldown) return
+        if (this.#arrangeMode) return
+        if (this.#meshPublic) return              // public mode: delete via select + menu only
+        if (this.#dropDragging || this.#dropPending) return
+        if (this.#currentTileExternal) return     // can't delete a peer's tile from your layer
+        if (!this.#currentAxial) return
+        const entry = this.#occupiedByAxial.get(
+          TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r),
+        )
+        if (!entry?.label) return
+        // Same payload + downstream path as the old trash icon's click —
+        // TileActionsDrone handles 'remove' via #removeTile (LayerCommitter,
+        // recorded in history, undoable).
+        this.emitEffect('tile:action', {
+          action: 'remove',
+          q: this.#currentAxial.q,
+          r: this.#currentAxial.r,
+          index: entry.index,
+          label: entry.label,
+        })
+      })
+
       // ── External action registration ─────────────────────────────
       this.onEffect<OverlayActionDescriptor | OverlayActionDescriptor[]>('overlay:register-action', (payload) => {
         const descs = Array.isArray(payload) ? payload : [payload]

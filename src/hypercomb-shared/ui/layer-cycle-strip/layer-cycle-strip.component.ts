@@ -19,6 +19,7 @@ import {
   type OnDestroy,
 } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
+import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
 
 const SPOTLIGHT_KEY = '@diamondcoreprocessor.com/SpotlightService'
 const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
@@ -73,7 +74,7 @@ interface PeerEntry {
 @Component({
   selector: 'hc-layer-cycle-strip',
   standalone: true,
-  imports: [],
+  imports: [HcWidgetDirective],
   templateUrl: './layer-cycle-strip.component.html',
   styleUrls: ['./layer-cycle-strip.component.scss'],
 })

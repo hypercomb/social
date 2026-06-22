@@ -1,21 +1,21 @@
 // diamondcoreprocessor.com/games/bubble/levels.ts
 //
-// Built-in single-screen levels, authored as readable ASCII. Bubble Bobble is
-// one screen per level — walled border, a floor, and a few floating platforms
-// for the bubbles to carry foes up to. Levels are static built-ins (no designer
-// yet); should custom levels arrive they'd live in localStorage, the same
-// participant-local class as Solomon's — never in the layer (that would skew the
-// lineage signature across peers).
+// Built-in single-screen rooms, authored as readable ASCII. Bubble Bobble is one
+// enclosed screen per round — a solid floor and a few floating one-way ledges for
+// the bubbles to carry foes up to. The side walls + ceiling are the screen edges
+// themselves (the engine bounds the box; no border tiles needed). Levels are
+// static built-ins; should custom levels arrive they'd live in localStorage, the
+// same participant-local class as Solomon's — never in the layer (that would skew
+// the lineage signature across peers).
 
-import { EMPTY, WALL, DOOR, ENEMY_KIND_COUNT, type LevelDef, type Cell, type EnemySpawn } from './engine.js'
+import { EMPTY, WALL, ENEMY_KIND_COUNT, type LevelDef, type Cell, type EnemySpawn } from './engine.js'
 
 // ASCII legend:
-//   '#' WALL   'D' DOOR (tunnel; place in pairs)   '.'/' ' EMPTY
-//   'P' player spawn
-//   'e' / 'E' an assorted foe facing right / left — cycles through every species
-//   explicit species (lower = right, upper = left):
-//     'h'/'H' hopper   'c'/'C' charger   'f'/'F' flyer   'g'/'G' ghost
-const CHAR_TILE: Record<string, number> = { '#': WALL, 'D': DOOR }
+//   '#' WALL (one-way platform)   '.'/' ' EMPTY   'P' player spawn
+//   'e'/'E' an assorted foe facing right / left — cycles through every species
+//   explicit species (lower = faces right, upper = faces left):
+//     'z'/'Z' zen-chan   'm'/'M' mighta   'b'/'B' banebou   'o'/'O' monsta
+const CHAR_TILE: Record<string, number> = { '#': WALL }
 
 /** Parse an ASCII level. Entity glyphs leave their cell EMPTY and record a
  *  placement. Rows are padded / truncated to `cols` so authoring is forgiving. */
@@ -38,14 +38,14 @@ export function fromAscii(name: string, art: string[]): LevelDef {
         case 'e': enemies.push({ col: c, row: r, dir: 1,  kind: kind++ % ENEMY_KIND_COUNT }); break
         case 'E': enemies.push({ col: c, row: r, dir: -1, kind: kind++ % ENEMY_KIND_COUNT }); break
         // explicit species (lower = faces right, upper = faces left):
-        case 'h': enemies.push({ col: c, row: r, dir: 1,  kind: 1 }); break   // hopper
-        case 'H': enemies.push({ col: c, row: r, dir: -1, kind: 1 }); break
-        case 'c': enemies.push({ col: c, row: r, dir: 1,  kind: 2 }); break   // charger
-        case 'C': enemies.push({ col: c, row: r, dir: -1, kind: 2 }); break
-        case 'f': enemies.push({ col: c, row: r, dir: 1,  kind: 3 }); break   // flyer
-        case 'F': enemies.push({ col: c, row: r, dir: -1, kind: 3 }); break
-        case 'g': enemies.push({ col: c, row: r, dir: 1,  kind: 4 }); break   // ghost
-        case 'G': enemies.push({ col: c, row: r, dir: -1, kind: 4 }); break
+        case 'z': enemies.push({ col: c, row: r, dir: 1,  kind: 0 }); break   // zen-chan
+        case 'Z': enemies.push({ col: c, row: r, dir: -1, kind: 0 }); break
+        case 'm': enemies.push({ col: c, row: r, dir: 1,  kind: 1 }); break   // mighta
+        case 'M': enemies.push({ col: c, row: r, dir: -1, kind: 1 }); break
+        case 'b': enemies.push({ col: c, row: r, dir: 1,  kind: 2 }); break   // banebou
+        case 'B': enemies.push({ col: c, row: r, dir: -1, kind: 2 }); break
+        case 'o': enemies.push({ col: c, row: r, dir: 1,  kind: 3 }); break   // monsta
+        case 'O': enemies.push({ col: c, row: r, dir: -1, kind: 3 }); break
         default: tiles[i] = CHAR_TILE[ch] ?? EMPTY
       }
     }
@@ -54,125 +54,86 @@ export function fromAscii(name: string, art: string[]): LevelDef {
 }
 
 export const BUILTIN_LEVELS: LevelDef[] = [
-  // Bubble Bobble screens: OPEN edges (the screen wraps on every side) with
-  // floating one-way ledges and a full-width floor. No side / ceiling walls —
-  // you jump up through ledges and off the top to wrap around. Every row is
-  // exactly 20 columns so the field stays square.
-  fromAscii('First Bubbles', [
+  // Round 1 — the classic symmetric bowl: two side ledges, a wide centre shelf,
+  // two more side ledges, and a full floor. Start bottom-left, like Bub.
+  fromAscii('Insect Cave', [
+    '....................',
+    '...z...........Z....',
+    '..######....######..',
+    '....................',
+    '......z....Z........',
+    '.....##########.....',
     '....................',
     '....................',
-    '......e......E......',
-    '....##########......',
-    '....................',
-    '..####......####....',
-    '....................',
-    '......########......',
-    '....................',
-    '....................',
-    '.P..................',
-    '####################',
-  ]),
-  fromAscii('Stepping Stones', [
-    '....................',
-    '..e..............E..',
-    '.#####........#####.',
-    '....................',
-    '......######........',
-    '....e........E......',
     '..######....######..',
     '....................',
     '....................',
+    '.P..................',
+    '####################',
+  ]),
+  // Round 2 — stepped ledges with a couple of bouncers worked in.
+  fromAscii('Stepping Stones', [
+    '....................',
+    '..z...............M.',
+    '..########..######..',
+    '....................',
+    '......b......b......',
+    '....######..######..',
+    '....................',
+    '..m..............z..',
+    '..######....######..',
+    '....................',
     '....................',
     '.P..................',
     '####################',
   ]),
-  fromAscii('Crossfire', [
+  // Round 3 — open air with a Monsta (flyer) crossing it; ledges to bounce up to.
+  fromAscii('Cross Winds', [
     '....................',
-    '...e..........E.....',
-    '..######..######....',
+    '....o...........O...',
+    '...######..######...',
     '....................',
-    '.....E......e.......',
+    '........z..Z........',
+    '.......########.....',
+    '....................',
+    '....o...........O...',
     '...######..######...',
     '....................',
     '....................',
-    '.........e..........',
+    '.P..................',
+    '####################',
+  ]),
+  // Round 4 — a tall pillar room: narrow shelves up the sides, ride bubbles high.
+  fromAscii('Twin Towers', [
+    '....................',
+    '..z..............Z..',
+    '..####........####..',
+    '..............b.....',
+    '..####........####..',
+    '.....m......m.......',
+    '..####........####..',
+    '....................',
+    '......########......',
+    '........e...........',
     '....................',
     '.P..................',
     '####################',
   ]),
-  fromAscii('Sky Garden', [
+  // Round 5 — a full mixed cast on a layered arena.
+  fromAscii('Monster Hall', [
     '....................',
     '..e....E....e....E..',
     '.####.####.####.####',
     '....................',
-    '.......e....E.......',
-    '....##########......',
+    '....o..........O....',
     '....................',
+    '...b....m..M....b...',
+    '..##############.##..',
     '....................',
-    '....................',
-    '....................',
+    '......z....Z........',
+    '.....##########.....',
     '.P..................',
     '####################',
-  ]),
-  // Doors + every species on one screen: two warp pairs (top corners, mid-floor),
-  // flyers & a ghost crossing the open air, chargers + hoppers working the ledges.
-  fromAscii('Tunnel Vaults', [
-    '....................',
-    '..D..............D..',
-    '..##............##..',
-    '....f........F......',
-    '....................',
-    '.....c........C.....',
-    '...######..######...',
-    '....................',
-    '.......D....D.......',
-    '.......##..##.......',
-    '.P..h........H.g....',
-    '####################',
-  ]),
-  // ── detailed screens (finer 28-wide grid) ──────────────────
-  // These lean into the smaller tile: tall symmetric structures with many tiers,
-  // ride bubbles up to reach the higher galleries. Enemies sit on the ledges; the
-  // screen still wraps on every edge.
-  fromAscii('Grand Cathedral', [
-    '............................',
-    '.##......................##.',
-    '.##......................##.',
-    '.##...####........####...##.',
-    '.##.e..................E.##.',
-    '...########......########...',
-    '............................',
-    '.....####..........####.....',
-    '...e....................E...',
-    '..########........########..',
-    '............................',
-    '.......####....####.........',
-    '......e..............E......',
-    '..##########....##########..',
-    '............................',
-    '............................',
-    '.P....e..........E..........',
-    '############################',
-  ]),
-  fromAscii('Coral Cavern', [
-    '............................',
-    '..####................####..',
-    '..#..#................#..#..',
-    '............................',
-    '....e..................E....',
-    '...######..........######...',
-    '.........e........E.........',
-    '.........##########.........',
-    '............................',
-    '............................',
-    '....e..................E....',
-    '..########........########..',
-    '............................',
-    '............e..E............',
-    '..........########..........',
-    '............................',
-    '.P....e.....................',
-    '############################',
   ]),
 ]
 
@@ -193,11 +154,11 @@ export function cloneLevel(l: LevelDef): LevelDef {
 
 const STORE_KEY = 'hc:bubble-levels'
 
-// Untrusted level data (Import JSON + this localStorage store) is the only
-// attack surface these games expose. Bound the dimensions + entity counts and
-// require in-bounds integer coordinates so a crafted level can't exhaust memory
-// (a giant grid / canvas) or stall the render loop. Single-screen levels are
-// tiny — the designer authors ~20×12 — so these caps are generous headroom.
+// Untrusted level data (Import JSON + this localStorage store) is the only attack
+// surface these games expose. Bound the dimensions + entity counts and require
+// in-bounds integer coordinates so a crafted level can't exhaust memory (a giant
+// grid / canvas) or stall the render loop. Single-screen levels are tiny — the
+// designer authors ~20×13 — so these caps are generous headroom.
 const MAX_DIM = 120
 const MAX_ENTITIES = MAX_DIM * MAX_DIM
 
@@ -236,10 +197,10 @@ export function sanitizeLevel(raw: unknown): LevelDef | null {
     enemies.push({ col: c.col, row: c.row, dir: es?.dir === -1 ? -1 : 1, kind })
   }
 
-  // Only the known tile codes survive — an unrecognised code collapses to EMPTY
-  // so a tampered store can't smuggle in solid/odd geometry.
+  // Only WALL survives — an unrecognised code collapses to EMPTY so a tampered
+  // store can't smuggle in odd geometry.
   const tiles = new Array<number>(n)
-  for (let i = 0; i < n; i++) { const t = Number(tilesRaw[i]); tiles[i] = (t === WALL || t === DOOR) ? t : EMPTY }
+  for (let i = 0; i < n; i++) { const t = Number(tilesRaw[i]); tiles[i] = t === WALL ? WALL : EMPTY }
 
   return {
     name: typeof d['name'] === 'string' ? d['name'].slice(0, 80) : 'Imported',
@@ -277,10 +238,9 @@ export function deleteCustomLevel(name: string): LevelDef[] {
   return levels
 }
 
-/** A blank canvas for the designer — open screen with just a full-width floor
- *  and a player spawn (Bubble Bobble levels have no border walls; the screen
- *  wraps). */
-export function emptyLevel(name: string, cols = 20, rows = 12): LevelDef {
+/** A blank canvas for the designer — an enclosed screen with just a full-width
+ *  floor and a player spawn (the side walls + ceiling are the screen edges). */
+export function emptyLevel(name: string, cols = 20, rows = 13): LevelDef {
   const tiles = new Array<number>(cols * rows).fill(EMPTY)
   for (let c = 0; c < cols; c++) tiles[(rows - 1) * cols + c] = WALL
   return {

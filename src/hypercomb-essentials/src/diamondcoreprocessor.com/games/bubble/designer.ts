@@ -6,14 +6,13 @@
 // playtest. Sibling of the Solomon designer, adapted to Bubble Bobble's model
 // (one-way platforms, enemies, a single player spawn — no door/key/gem).
 
-import { EMPTY, WALL, DOOR, ENEMY_KIND_COUNT, type LevelDef, type Cell } from './engine.js'
+import { EMPTY, WALL, ENEMY_KIND_COUNT, type LevelDef, type Cell } from './engine.js'
 import { cloneLevel, emptyLevel, sanitizeLevel } from './levels.js'
 
-export type Tool = 'wall' | 'door' | 'enemy' | 'player' | 'erase'
+export type Tool = 'wall' | 'enemy' | 'player' | 'erase'
 
 export const TOOLS: { tool: Tool; label: string; glyph: string }[] = [
   { tool: 'wall', label: 'Platform', glyph: '▬' },
-  { tool: 'door', label: 'Door — tunnel; place in pairs', glyph: '◍' },
   { tool: 'enemy', label: 'Enemy — click again to change species', glyph: '👾' },
   { tool: 'player', label: 'Start', glyph: 'P' },
   { tool: 'erase', label: 'Erase', glyph: '⌫' },
@@ -56,11 +55,6 @@ export class Designer {
       case 'wall':
         if (onPlayer) return false
         L.tiles[this.#idx(col, row)] = WALL
-        this.#clearEnemies(col, row)
-        return true
-      case 'door':
-        if (onPlayer) return false
-        L.tiles[this.#idx(col, row)] = DOOR
         this.#clearEnemies(col, row)
         return true
       case 'player':

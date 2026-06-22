@@ -13,6 +13,7 @@ import { EffectBus, IconRef, type IconRef as IconRefType } from '@hypercomb/core
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { HistoryMenuPack } from '../selection-context-menu/history-menu-pack'
 import { IconComponent } from '../icon/icon.component'
+import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 
 type CursorState = {
   locationSig: string
@@ -180,7 +181,7 @@ function saveCustomWidth(width: number | null): void {
 @Component({
   selector: 'hc-history-viewer',
   standalone: true,
-  imports: [TranslatePipe, IconComponent],
+  imports: [TranslatePipe, IconComponent, DockInsetDirective],
   templateUrl: './history-viewer.component.html',
   styleUrls: ['./history-viewer.component.scss'],
 })

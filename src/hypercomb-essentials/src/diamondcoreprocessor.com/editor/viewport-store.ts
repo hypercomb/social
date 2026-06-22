@@ -156,6 +156,25 @@ export const readViewportAt = async (
 }
 
 /**
+ * True when a PARTICIPANT-LOCAL viewport entry already exists for this
+ * location — i.e. the participant has framed/visited it before.
+ *
+ * Distinct from readViewportAt, which on a first visit also returns the
+ * publisher's seed stamp: this looks ONLY at the local store, so callers can
+ * detect a *genuine* first visit. Used to fire the adopt first-visit fit
+ * exactly once (after which the persisted fit makes this return true).
+ */
+export const hasPersistedViewportAt = async (
+  segments: readonly string[],
+): Promise<boolean> => {
+  const sig = await locationSig(segments)
+  if (!sig) return false
+  await warmAll()
+  const local = _warmCache.get(sig)
+  return !!local && Object.keys(local).length > 0
+}
+
+/**
  * Write the viewport snapshot for the layer at `segments` (empty = root).
  * Merge-by-field: pass only the parts you want to update. Pass `null`
  * to clear the whole viewport for that location.

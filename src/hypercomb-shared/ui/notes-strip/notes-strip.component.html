@@ -7,6 +7,8 @@
     <div class="notes-strip cv2-panel mode-rows" role="region" [attr.aria-label]="'notes.strip.aria' | t"
          #panel
          data-consumes-wheel
+         hcDockInset="right"
+         [hcDockInsetActive]="dockSide() === 'right'"
          [class.dock-right]="dockSide() === 'right'"
          [style.transform]="panelTransformActive()"
          (pointerenter)="onNotesEnter()" (pointerleave)="onNotesLeave()">
@@ -256,6 +258,8 @@
          [class.dock-right]="dockSide() === 'right'"
          #panel
          data-consumes-wheel
+         hcDockInset="right"
+         [hcDockInsetActive]="dockSide() === 'right'"
          role="list" [attr.aria-label]="'notes.strip.aria' | t"
          [style.transform]="panelTransformActive()"
          (pointerenter)="onNotesEnter()" (pointerleave)="onNotesLeave()">

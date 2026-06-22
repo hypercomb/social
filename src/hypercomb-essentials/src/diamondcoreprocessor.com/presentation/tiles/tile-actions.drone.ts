@@ -1,5 +1,6 @@
 // diamondcoreprocessor.com/pixi/tile-actions.drone.ts
 import { Drone, EffectBus, hypercomb, normalizeCell } from '@hypercomb/core'
+import { confirmRemoval } from '../../commands/remove-confirm.js'
 import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey, OverlayTintFn } from './tile-overlay.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
 import { hasDecorationKind, kindsForLabel } from '../../commands/decoration-kind-index.js'
@@ -302,7 +303,12 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // never appears, and the merged-available filter strips it from default
   // arrangements.
   { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage, labelKey: 'action.search', descriptionKey: 'action.search.description' },
-  { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'private', labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
+  // NOTE: the trash-bin `remove` icon is intentionally NOT on the hover
+  // overlay — it sat next to edit and was too easy to click by accident.
+  // Deletion is now an explicit gesture only: the vertical selection menu
+  // (select a tile → trash), or Delete/Backspace over the tile under the
+  // cursor (handled in tile-overlay.drone.ts). The `remove` action handler,
+  // HANDLED_ACTIONS entry, and #removeTile below still back BOTH paths.
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   // ── world profile ──
   // Active ONLY while world mode is on (see tile-overlay #resolveProfileKey).
@@ -331,13 +337,11 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
     descriptionKey: 'action.make-branch-public.description',
   },
   // ── public-own profile ──
-  // Your own tile in public mode. Removal is the existing trash-bin
-  // delete, which routes through LayerCommitter and is recorded in
-  // history (so it can be undone, time-travelled to, and is part of
-  // the lineage's canonical state). Hide doesn't belong here — hide
-  // is a session-scoped per-view filter, but you OWN this tile and
-  // the correct dismissal is to delete it from your layer.
-  { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xffc8c8, profile: 'public-own', labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
+  // Your own tile in public mode. Like the private profile, the trash-bin
+  // `remove` icon is deliberately absent (too easy to misclick) — delete via
+  // the vertical selection menu or Delete/Backspace over the tile. Hide
+  // doesn't belong here either: hide is a session-scoped per-view filter, but
+  // you OWN this tile and the correct dismissal is to delete it from your layer.
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   // `sync` re-adopts the broadcasting peer's CURRENT version of a tile
   // you already hold (adopted earlier, or same-named). Visible only while
@@ -399,17 +403,20 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 // in ICON_REGISTRY above; adopting a peer tile is handled by the
 // `public-external` profile (the tile flips kind once it's local).
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  'private': ['command', 'edit', 'features', 'remove', 'break-apart', 'files', 'invite'],
+  // No `remove` here — deletion is intentionally off the hover overlay (it was
+  // misclick-prone). Delete via the vertical selection menu or Delete/Backspace
+  // over the tile under the cursor.
+  'private': ['command', 'edit', 'features', 'break-apart', 'files', 'invite'],
   // World mode: ONLY the two share-toggles, none of the regular icons.
   'world': ['make-public', 'make-branch-public'],
-  // Your own tile in public mode — same trash-bin remove that
-  // private mode uses. Records a history op, can be undone. `sync`
-  // folds the broadcasting peer's latest VISUALS into the tile in place
-  // and is rendered ONLY while a live peer publishes the same name.
-  // `features` (puzzle-piece) opens the read-only SHOW FEATURES panel for
-  // any tile carrying a registered visual bee — it stays in the hive and
-  // has NO peer-broadcast requirement.
-  'public-own': ['sync', 'features', 'remove', 'break-apart', 'files', 'invite'],
+  // Your own tile in public mode. No `remove` icon (same misclick reason as
+  // private) — delete via the vertical selection menu or Delete/Backspace
+  // over the tile. `sync` folds the broadcasting peer's latest VISUALS into
+  // the tile in place and is rendered ONLY while a live peer publishes the
+  // same name. `features` (puzzle-piece) opens the read-only SHOW FEATURES
+  // panel for any tile carrying a registered visual bee — it stays in the
+  // hive and has NO peer-broadcast requirement.
+  'public-own': ['sync', 'features', 'break-apart', 'files', 'invite'],
   // Peer-only mesh tiles. Single-click `adopt` is the explicit
   // "I want to expand on this topic" action — writes the tile to
   // your local layer AND pulls the resources it references (images
@@ -809,7 +816,7 @@ export class TileActionsDrone extends Drone {
     type HistoryServiceLike = {
       sign(l: LineageLike): Promise<string>
       currentLayerAt(s: string): Promise<{ children?: readonly string[]; [k: string]: unknown } | null>
-      getLayerBySig(s: string): Promise<{ name?: string } | null>
+      getLayerBySig(s: string): Promise<{ name?: string; children?: readonly string[] } | null>
     }
     type LayerCommitterLike = {
       update(
@@ -833,6 +840,10 @@ export class TileActionsDrone extends Drone {
     })
     const parent = await history.currentLayerAt(parentLocSig)
     if (!parent) return
+
+    // Deleting a tile takes its whole branch with it. Count what's nested and
+    // confirm (the dialog is skipped when nothing is nested — see helper).
+    if (!(await confirmRemoval(history, parent, [label]))) return
 
     // Names are the truth. Resolve each child sig to its layer's `name`,
     // drop the target, and pass the surviving names back. The committer

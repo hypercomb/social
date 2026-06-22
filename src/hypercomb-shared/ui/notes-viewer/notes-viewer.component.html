@@ -8,7 +8,7 @@
     aria-modal="true"
     [attr.aria-label]="'notes.viewer.aria' | t"
   >
-    <div class="viewer-card" data-consumes-wheel>
+    <div class="viewer-card" data-consumes-wheel hcWidget="notes-viewer" anchor="center">
       <header class="viewer-header">
         @if (openTabs().length > 1) {
           <!-- Tab strip — one button per open note. Active tab is

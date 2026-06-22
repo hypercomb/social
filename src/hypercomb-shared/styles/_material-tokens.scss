@@ -146,13 +146,13 @@
   :root:not([data-theme]) { @include md-dark-tokens; }
 }
 
-// ── temporary: force dark as default ──────────────────────────────────
-// The theme queen bee that switched themes is gone. Until theming is
-// rebuilt, the shell defaults to dark regardless of OS preference or
-// data-theme attribute. Remove this block when the theme switcher is
-// reintroduced — the light defaults above + dark override above are
-// already shaped to take over.
-:root { @include md-dark-tokens; }
+// Theming is driven at runtime by ThemeService (@hypercomb.social/Theme) +
+// the /theme queen. It reflects the participant's choice onto `<html
+// data-theme>`; the selectors above do the rest. 'system' (no attribute) falls
+// back to the prefers-color-scheme query. The shell boots dark by default — a
+// pre-paint snippet in each shell's index.html sets `data-theme="dark"` when no
+// preference is stored, so there is no flash before ThemeService takes over.
+// Light is `:root`; `data-theme="light"` forces it even on a dark-OS machine.
 
 // ── Material Symbols icon class ────────────────────────────────────────
 //

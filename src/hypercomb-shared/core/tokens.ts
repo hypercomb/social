@@ -16,6 +16,7 @@ import { ResourceCompletionService } from './resource-completion.service'
 import { ResourceMessageHandler } from './resource-message-handler'
 import { ScriptPreloader } from './script-preloader'
 import { CellSuggestionProvider } from './cell-suggestion.provider'
+import { ThemeService } from './theme.service'
 
 // -------------------------------------------------
 // token type (lightweight, no core dependency)
@@ -43,6 +44,7 @@ export const RESOURCE_COMPLETION = token<ResourceCompletionService>('@hypercomb.
 export const RESOURCE_MSG_HANDLER = token<ResourceMessageHandler>('@hypercomb.social/ResourceMessageHandler', ResourceMessageHandler)
 export const SCRIPT_PRELOADER = token<ScriptPreloader>('@hypercomb.social/ScriptPreloader', ScriptPreloader)
 export const CELL_SUGGESTION = token<CellSuggestionProvider>('@hypercomb.social/CellSuggestionProvider', CellSuggestionProvider)
+export const THEME = token<ThemeService>('@hypercomb.social/Theme', ThemeService)
 
 // -------------------------------------------------
 // Angular bridge helper

@@ -11,6 +11,7 @@ import { Component, signal, type OnDestroy } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
 import { fromVCard } from './vcard'
 
 type ContactPayload = {
@@ -27,7 +28,7 @@ type ContactPayload = {
 @Component({
   selector: 'hc-contact-form',
   standalone: true,
-  imports: [TranslatePipe, FormsModule],
+  imports: [TranslatePipe, FormsModule, HcWidgetDirective],
   templateUrl: './contact-form.component.html',
   styleUrls: ['./contact-form.component.scss'],
 })

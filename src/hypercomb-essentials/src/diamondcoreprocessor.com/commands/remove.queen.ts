@@ -1,6 +1,7 @@
 // diamondcoreprocessor.com/commands/remove.queen.ts
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
+import { confirmRemoval } from './remove-confirm.js'
 
 type LineageLike = {
   domain?: () => string
@@ -43,13 +44,15 @@ export class RemoveQueenBee extends QueenBee {
   protected async execute(args: string): Promise<void> {
     const targets = parseRemoveArgs(args)
 
-    // No args → operate on current selection
+    // No args → operate on current selection. Hold the clear until AFTER the
+    // confirm passes so cancelling keeps the selection intact.
+    let selectionToClear: { clear: () => void } | null = null
     if (targets.length === 0) {
       const selection = get('@diamondcoreprocessor.com/SelectionService') as
         { selected: ReadonlySet<string>; clear: () => void } | undefined
       if (selection && selection.selected.size > 0) {
         targets.push(...Array.from(selection.selected))
-        selection.clear()
+        selectionToClear = selection
       }
     }
 
@@ -69,6 +72,11 @@ export class RemoveQueenBee extends QueenBee {
     })
     const parent = await history.currentLayerAt(parentLocSig)
     if (!parent) return
+
+    // Deleting a tile takes its whole branch with it. Count what's nested and
+    // confirm (the dialog is skipped when nothing is nested — see helper).
+    if (!(await confirmRemoval(history, parent, targets))) return
+    selectionToClear?.clear()
 
     // Names are the truth. Resolve each child sig to its layer's `name`,
     // drop the targets, and pass the surviving names back. The committer

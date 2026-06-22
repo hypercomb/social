@@ -365,11 +365,68 @@ dcp-command-line {
   min-width: 22ch;
 }
 
+.version-overwrite {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  color: var(--dcp-ink-3);
+  background: none;
+  border: 1px solid var(--dcp-line);
+  border-radius: var(--dcp-radius-sm);
+  padding: 1px 6px;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+
+  &:hover { color: var(--dcp-ink-2); border-color: var(--dcp-ink-3); }
+
+  &.active {
+    color: var(--dcp-surface);
+    background: var(--dcp-accent);
+    border-color: var(--dcp-accent);
+  }
+}
+
 .version-time {
   font-family: var(--hc-mono);
   font-size: 9px;
   color: var(--dcp-ink-3);
   white-space: nowrap;
+}
+
+.adopt-control {
+  display: inline-flex;
+  margin-left: auto;          // right-align within the version-bar
+  align-self: center;
+  border: 1px solid var(--dcp-line);
+  border-radius: var(--dcp-radius-sm);
+  overflow: hidden;
+}
+
+.adopt-seg {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  cursor: pointer;
+  color: var(--dcp-ink-3);
+  background: none;
+  border: none;
+  border-left: 1px solid var(--dcp-line);
+  padding: 2px 8px;
+  transition: color 0.12s ease, background 0.12s ease;
+
+  &:first-child { border-left: none; }
+  &:hover { color: var(--dcp-ink); background: var(--dcp-hover, rgba(126,182,214,0.08)); }
+
+  // Highlight the segment that reflects the package's current state.
+  &.on {
+    color: var(--dcp-surface);
+    background: var(--dcp-accent);
+  }
+
+  // Discard is destructive — reads as a warning on hover, never "on".
+  &.discard:hover { color: #fff; background: var(--dcp-danger, #c0473b); }
 }
 
 .domain-action {

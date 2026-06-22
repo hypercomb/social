@@ -32,8 +32,18 @@ export class PixiHostWorker extends Worker {
   public container!: Container
 
   protected override deps = { settings: '@diamondcoreprocessor.com/Settings', axial: '@diamondcoreprocessor.com/AxialService' }
-  protected override listens = ['editor:mode']
+  protected override listens = ['editor:mode', 'viewport:inset']
   protected override emits = ['render:host-ready', 'render:unsupported']
+
+  // ── Toolwindow inset (common dock system) ──
+  // Docked panels broadcast how much screen edge they reserve via
+  // `viewport:inset` (DockInsetDirective in shared/ui). The canvas OWNER (this
+  // worker) is the only thing allowed to size #pixi-host, so we shrink the host
+  // box to the area the panels leave free. Because the app is `resizeTo: host`,
+  // that resizes the canvas; resyncToHost then recenters + refits, so the tiles
+  // scale to fit beside the panel — and expand back when it closes or the
+  // window grows, all through the existing resize→fit path.
+  #insets = new Map<string, { side: 'left' | 'right' | 'top' | 'bottom'; size: number }>()
 
   /** WebGL/WebGPU both refused → the tile scene cannot render. Replace the
    *  (empty) canvas host with a plain-DOM explanation of what to enable.
@@ -83,6 +93,39 @@ export class PixiHostWorker extends Worker {
       if (!this.host) return
       this.host.style.visibility = active ? 'hidden' : 'visible'
     })
+    this.onEffect<{ owner: string; side: 'left' | 'right' | 'top' | 'bottom'; size: number }>(
+      'viewport:inset',
+      (p) => {
+        if (!p?.owner) return
+        if (p.size > 0) this.#insets.set(p.owner, { side: p.side, size: p.size })
+        else this.#insets.delete(p.owner)
+        this.#applyHostInset()
+      },
+    )
+  }
+
+  /** Shrink #pixi-host to the area the open toolwindows leave free (max
+   *  reservation per edge). Changing the host box drives Pixi's resizeTo →
+   *  resyncToHost → recenter + refit, so the canvas resize does the scaling. */
+  #applyHostInset(): void {
+    const host = this.host
+    if (!host) return
+    const agg = { left: 0, right: 0, top: 0, bottom: 0 }
+    for (const { side, size } of this.#insets.values()) {
+      if (size > agg[side]) agg[side] = size
+    }
+    // The host ships with inline width/height:100% (app.html), which would win
+    // over left/right/top/bottom and keep the box full-size. Clear them so the
+    // inset edges govern the box — and the browser recomputes the box on window
+    // resize for free (right:340px is viewport-relative), which is what makes
+    // the canvas grow back when the window enlarges. inset 0 with auto size
+    // still fills the viewport, so the no-panel case is unchanged.
+    host.style.width = ''
+    host.style.height = ''
+    host.style.left = agg.left ? `${agg.left}px` : '0'
+    host.style.right = agg.right ? `${agg.right}px` : '0'
+    host.style.top = agg.top ? `${agg.top}px` : '0'
+    host.style.bottom = agg.bottom ? `${agg.bottom}px` : '0'
   }
 
   protected override ready = async (): Promise<boolean> => {
@@ -120,6 +163,10 @@ export class PixiHostWorker extends Worker {
     host.style.pointerEvents = 'none'
 
     document.body.appendChild(host)
+
+    // Apply any toolwindow inset that arrived before the host existed (the
+    // subscription in the constructor only updates the map until now).
+    this.#applyHostInset()
 
     // -------------------------------------------------
     // pixi app
@@ -291,23 +338,16 @@ export class PixiHostWorker extends Worker {
       // an undefined pan means the VP read may still be in flight
       // (defer to show-cell's #applyViewportFromSnapshot).
       if (shouldRefit(vp?.lastZoom, vp?.lastPan)) {
-        // ...but NOT while a widget has narrowed the canvas below the window.
-        // The history viewer reserves a left column via a `#pixi-host` width
-        // rule, so `renderer.screen` is narrower than the window. zoomToFit
-        // computes the fit against window.innerWidth/Height, so refitting onto
-        // a narrowed canvas lands the grid shrunk and off-centre — the "a
-        // widget resized the tiles" glitch. The recenter above is correct on a
-        // narrowed canvas either way; only the RESCALE uses the wrong (full-
-        // window) basis, so skip just the refit while narrowed. (Closing the
-        // panel un-crops the canvas without a window 'resize', so no stale
-        // refit fires then.)
-        const screen = app.renderer.screen
-        const narrowed = screen.width < window.innerWidth - 4
-          || screen.height < window.innerHeight - 4
-        if (!narrowed) {
-          const zoom = (window as any).ioc?.get('@diamondcoreprocessor.com/ZoomDrone')
-          zoom?.zoomToFit?.(true)
-        }
+        // Refit against the CURRENT canvas. A docked toolwindow now shrinks
+        // #pixi-host itself (worker viewport:inset → host-box resize), so
+        // `renderer.screen` IS the area left free beside the panel — and
+        // zoomToFit measures against `renderer.screen` (not the window), so
+        // refitting onto the narrowed canvas scales the tiles to fit beside the
+        // panel, and expands them back when it closes or the window grows. The
+        // old "skip refit while narrowed" guard is gone: it dated to when
+        // zoomToFit used window metrics, which it no longer does.
+        const zoom = (window as any).ioc?.get('@diamondcoreprocessor.com/ZoomDrone')
+        zoom?.zoomToFit?.(true)
       }
     }
 

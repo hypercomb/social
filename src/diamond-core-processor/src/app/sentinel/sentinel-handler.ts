@@ -9,6 +9,7 @@ import { SignatureService } from '@hypercomb/core'
 import { DcpDomainStorage } from '../core/dcp-domain-storage.service'
 import { DcpInstallerService } from '../core/dcp-installer.service'
 import { DcpStore } from '../core/dcp-store'
+import { PatchStore } from '../core/patch-store'
 import { ToggleStateService } from '../core/toggle-state.service'
 
 const DOMAINS_KEY = 'dcp.domains'
@@ -51,6 +52,7 @@ export class SentinelHandler {
 
   #installer = inject(DcpInstallerService)
   #store = inject(DcpStore)
+  #patchStore = inject(PatchStore)
   #toggleState = inject(ToggleStateService)
   #domainStorage = inject(DcpDomainStorage)
 
@@ -700,9 +702,21 @@ export class SentinelHandler {
       const res = await fetch(`${base}/manifest.json`, { cache: 'no-store' })
       if (!res.ok) return null
       const content = await res.json()
-      const sigs = Object.keys(content?.packages ?? {})
-      const sig = sigs[0]?.replace(/\uFEFF/g, '').trim()
-      return sig && /^[a-f0-9]{64}$/i.test(sig) ? sig.toLowerCase() : null
+      const clean = (s: string) => s?.replace(/\uFEFF/g, '').trim().toLowerCase()
+      const valid = (s: string | null | undefined): s is string => !!s && /^[a-f0-9]{64}$/i.test(s)
+      const sigs = Object.keys(content?.packages ?? {}).map(clean).filter(valid)
+      if (!sigs.length) return null
+
+      // Honor the chosen revision: when active.json names a DEPLOYED package
+      // (present in this manifest), sync THAT root instead of the default \u2014
+      // this is what makes "move between revisions" reach the running hive,
+      // not just the installer's display. A patch root (local-only, not in
+      // the manifest) or an absent/invalid pick falls back to the default
+      // package, so existing single-version / no-pick flows are unchanged.
+      const active = clean(await this.#patchStore.activeRoot(new URL(base).hostname) ?? '')
+      if (valid(active) && sigs.includes(active)) return active
+
+      return sigs[0]
     } catch {
       return null
     }

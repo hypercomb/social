@@ -2,7 +2,7 @@
 @if (isOpen) {
   <div class="backdrop" (click)="close()"></div>
 
-  <div class="panel" role="dialog" data-consumes-wheel>
+  <div class="panel" role="dialog" data-consumes-wheel hcWidget="portal" anchor="center">
     <iframe
       class="portal-frame"
       [src]="portalSrc"

@@ -1,6 +1,7 @@
 // auto-generated
 // do not edit manually
 
+export * from './adopted-roots'
 export type * from './ambient-presence.worker'
 export type * from './content-broker.drone'
 export * from './decoration-closure'

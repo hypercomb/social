@@ -5,7 +5,7 @@ import { RouterOutlet } from '@angular/router';
 import { CommandLineComponent } from '@hypercomb/shared';
 import { MeshHeaderComponent } from '@hypercomb/shared/ui';
 import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
-import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent, HistoryViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent, FilesViewerComponent, FeaturesViewerComponent, ContactFormComponent, ContactHoverComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent } from '@hypercomb/shared/ui';
+import { ControlsBarComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent, HistoryViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent, FilesViewerComponent, FeaturesViewerComponent, ClipboardPanelComponent, ContactFormComponent, ContactHoverComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent } from '@hypercomb/shared/ui';
 import { FormatPainterComponent } from '@hypercomb/shared/ui/format-painter/format-painter.component'
 import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
 import { SensitivityBarComponent } from '@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component'
@@ -20,20 +20,16 @@ import '@hypercomb/essentials/side-effects'
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, HistoryViewerComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent, FilesViewerComponent, FeaturesViewerComponent, ContactFormComponent, ContactHoverComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent],
+  imports: [ControlsBarComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, HistoryViewerComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, InstructionOverlayComponent, DocsOverlayComponent, NotesStripComponent, NotesViewerComponent, FilesViewerComponent, FeaturesViewerComponent, ClipboardPanelComponent, ContactFormComponent, ContactHoverComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
 export class App implements AfterViewInit {
   protected readonly title = signal('hypercomb-dev');
-  readonly clipboardMode = signal(false);
   readonly moveMode = signal(false);
   // Empty-layer swarm watermark — set when show-cell reports the current
-  // public/swarm location has zero tiles. Mirrors clipboard-mode.
+  // public/swarm location has zero tiles.
   readonly swarmEmpty = signal(false);
-
-  @HostBinding('class.clipboard-mode')
-  get clipboardModeClass() { return this.clipboardMode(); }
 
   @HostBinding('class.move-mode')
   get moveModeClass() { return this.moveMode(); }
@@ -78,10 +74,6 @@ export class App implements AfterViewInit {
 
     EffectBus.on<{ active: boolean }>('view:active', ({ active }) => {
       this.viewActive.set(active)
-    })
-
-    EffectBus.on<{ active: boolean }>('clipboard:view', ({ active }) => {
-      this.clipboardMode.set(active)
     })
 
     EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {

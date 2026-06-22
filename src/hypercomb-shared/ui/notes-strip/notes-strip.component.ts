@@ -9,6 +9,7 @@ import { Component, ElementRef, HostBinding, HostListener, computed, effect, inj
 import { NgTemplateOutlet } from '@angular/common'
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 
 
 /**
@@ -111,7 +112,7 @@ type InputGateLike = {
 @Component({
   selector: 'hc-notes-strip',
   standalone: true,
-  imports: [TranslatePipe, NgTemplateOutlet],
+  imports: [TranslatePipe, NgTemplateOutlet, DockInsetDirective],
   templateUrl: './notes-strip.component.html',
   styleUrls: ['./notes-strip.component.scss'],
 })

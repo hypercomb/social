@@ -1,6 +1,6 @@
 @if (open()) {
   <div class="sheet-backdrop" (click)="close()"></div>
-  <div class="sheet-panel" role="dialog" data-consumes-wheel [attr.aria-label]="'shortcuts.title' | t">
+  <div class="sheet-panel" role="dialog" data-consumes-wheel hcWidget="shortcut-sheet" anchor="center" [attr.aria-label]="'shortcuts.title' | t">
 
     <header class="sheet-header">
       <h3>{{ 'shortcuts.title' | t }}</h3>

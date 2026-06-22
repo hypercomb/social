@@ -82,7 +82,6 @@ export class ClipboardWorker extends Worker {
         case 'copy': void this.#capture('copy'); break
         case 'cut': void this.#capture('cut'); break
         case 'paste': void this.#paste(); break
-        case 'place': void this.#place(); break
         case 'clear-clipboard': void this.#clearClipboard(); break
       }
     })
@@ -96,27 +95,14 @@ export class ClipboardWorker extends Worker {
       }
     })
 
-    // Render-side ghost detection: the view couldn't resolve these labels
-    // to actual cells in the dir, so drop them from the service. Keeps the
-    // clipboard count honest end-to-end.
-    EffectBus.on<{ labels: string[] }>('clipboard:ghost-detected', (payload) => {
-      const svc = this.#clipboardSvc
-      if (!svc || !payload?.labels?.length) return
-      svc.removeItems(new Set(payload.labels))
-      const store = this.#store
-      if (svc.isEmpty) {
-        if (store) void clearDirectory(store.clipboard)
-        EffectBus.emit('clipboard:view', { active: false })
-      } else if (store) {
-        void writeMeta(store.clipboard, {
-          op: svc.operation,
-          items: svc.items.map(i => ({
-            label: i.label,
-            sourceSegments: [...i.sourceSegments],
-          })),
-        })
-      }
+    // Place specific clipboard tiles at the current location — the
+    // non-navigating side panel's per-item "place" button. Same placement
+    // primitive as paste, scoped to the requested labels.
+    EffectBus.on<{ labels?: string[] }>('clipboard:place-items', (payload) => {
+      const labels = Array.isArray(payload?.labels) ? payload!.labels! : []
+      if (labels.length > 0) void this.#placeLabels(labels)
     })
+
 
     // Restore clipboard from OPFS once Store is initialized
     const tryRestore = (): void => {
@@ -346,17 +332,30 @@ export class ClipboardWorker extends Worker {
 
   async #paste(): Promise<void> {
     const clipboardSvc = this.#clipboardSvc
+    if (!clipboardSvc || clipboardSvc.isEmpty) return
+    // Paste = place EVERY clipboard tile at the current location.
+    await this.#placeLabels(clipboardSvc.items.map(i => i.label))
+  }
+
+  // Place the named clipboard tiles at the current location. Shared by
+  // `#paste` (all labels) and the side panel's per-item place
+  // (`clipboard:place-items`). Mirrors paste's consume semantics: cut drops
+  // the items that landed; copy keeps them for repeat placement.
+  async #placeLabels(labels: readonly string[]): Promise<void> {
+    const clipboardSvc = this.#clipboardSvc
     const lineage = this.#lineage
     const store = this.#store
     const history = this.#history
     const committer = this.#committer
     if (!clipboardSvc || !lineage || !store || !history || !committer) return
-    if (clipboardSvc.isEmpty) return
-    // Paste commits at the target; refused while rewound. Feedback, don't half-run.
+    if (clipboardSvc.isEmpty || labels.length === 0) return
+    // Commits at the target; refused while rewound. Feedback, don't half-run.
     if (this.#blockedByRewound('paste')) return
 
     const op = clipboardSvc.operation
-    const items = clipboardSvc.items
+    const wanted = new Set(labels)
+    const items = clipboardSvc.items.filter(i => wanted.has(i.label))
+    if (items.length === 0) return
     const targetSegments = [...lineage.explorerSegments()]
 
     EffectBus.emit('clipboard:paste-start', { count: items.length, op })
@@ -507,55 +506,6 @@ export class ClipboardWorker extends Worker {
     // incremental path covering the paste button's exit-before-commit order.
 
     return { placed, failed }
-  }
-
-  // ── place (selected clipboard items → current page) ──
-
-  async #place(): Promise<void> {
-    const clipboardSvc = this.#clipboardSvc
-    const lineage = this.#lineage
-    const store = this.#store
-    const history = this.#history
-    const committer = this.#committer
-    if (!clipboardSvc || !lineage || !store || !history || !committer) return
-    if (clipboardSvc.isEmpty) return
-    // "Add to current" commits at the target; refused while rewound.
-    if (this.#blockedByRewound('add to current')) return
-
-    const selectedLabels = this.#selectedLabels()
-    if (selectedLabels.length === 0) return
-
-    const selectedSet = new Set(selectedLabels)
-    const toPlace = clipboardSvc.items.filter(i => selectedSet.has(i.label))
-    if (toPlace.length === 0) return
-
-    const targetSegments = [...lineage.explorerSegments()]
-    const { placed } = await this.#placeItems(history, lineage, committer, toPlace, targetSegments)
-
-    const placedLabels = placed.map(p => p.label)
-    if (placedLabels.length === 0) return
-
-    clipboardSvc.removeItems(new Set(placedLabels))
-    this.#selection?.clear()
-
-    if (clipboardSvc.isEmpty) {
-      await clearDirectory(store.clipboard)
-      EffectBus.emit('clipboard:view', { active: false })
-    } else {
-      await writeMeta(store.clipboard, {
-        op: clipboardSvc.operation,
-        items: clipboardSvc.items.map(i => ({
-          label: i.label,
-          sourceSegments: [...i.sourceSegments],
-        })),
-      })
-      EffectBus.emit('clipboard:view', {
-        active: true,
-        op: clipboardSvc.operation,
-        labels: clipboardSvc.items.map(i => i.label),
-        sourceSegments: [...(clipboardSvc.items[0]?.sourceSegments ?? [])],
-      })
-    }
   }
 
   // ── clear ─────────────────────────────────────────────

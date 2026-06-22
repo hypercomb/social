@@ -1,6 +1,6 @@
 @if (open()) {
   <div class="mesh-modal-backdrop" (click)="dismiss()"></div>
-  <div class="mesh-modal-panel" role="dialog" [attr.aria-label]="'mesh-modal.title' | t">
+  <div class="mesh-modal-panel" role="dialog" hcWidget="mesh-modal" anchor="center" [attr.aria-label]="'mesh-modal.title' | t">
 
     <header class="mesh-modal-header">
       <h3>{{ 'mesh-modal.title' | t }}</h3>

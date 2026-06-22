@@ -111,7 +111,10 @@ export interface Fireball { x: number; y: number; vx: number; life: number; supe
 export interface Shot { x: number; y: number; vx: number; life: number }
 
 // Tuning — pixels, pixels/second, pixels/second².
-const GRAVITY = 900
+const GRAVITY = 900          // enemies + projectiles fall at this
+// Dana falls LIGHTER than everything else — the signature Solomon's Key floaty hop.
+// It hangs at the apex long enough to conjure a block underneath and land on it.
+const PLAYER_GRAVITY = 660
 const MOVE_SPEED = 105
 const CROUCH_SPEED = 58
 const MAX_FALL = 560
@@ -119,7 +122,7 @@ const PLAYER_W = TILE * 0.7
 const PLAYER_H = TILE
 const DUCK_H = TILE * 0.7
 const STEP_UP = TILE
-const JUMP_V = 360
+const JUMP_V = 308   // tuned with PLAYER_GRAVITY for a ~2.25-tile hop with extra hang
 
 // Life meter. Drains continuously; empty = a lost Dana. Full hourglass restores
 // LIFE_FULL, half restores LIFE_HALF. Remaining life becomes the room's time
@@ -452,7 +455,7 @@ export class Engine {
     if (held !== 0) this.facing = held as 1 | -1
     this.walking = held !== 0
     p.vx = held * (this.ducking ? CROUCH_SPEED : MOVE_SPEED)
-    p.vy = Math.min(p.vy + GRAVITY * dt, MAX_FALL)
+    p.vy = Math.min(p.vy + PLAYER_GRAVITY * dt, MAX_FALL)   // Dana floats; enemies use GRAVITY
 
     this.#moveX(p, p.vx * dt)
     this.#moveYPlayer(p, p.vy * dt)

@@ -17,6 +17,7 @@ import {
 import { EffectBus, formatChord, type KeyBinding } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
 
 import type {
   CommandLineOperationEntry,
@@ -28,7 +29,7 @@ import type {
 @Component({
   selector: 'hc-shortcut-sheet',
   standalone: true,
-  imports: [TranslatePipe],
+  imports: [TranslatePipe, HcWidgetDirective],
   templateUrl: './shortcut-sheet.component.html',
   styleUrls: ['./shortcut-sheet.component.scss'],
 })

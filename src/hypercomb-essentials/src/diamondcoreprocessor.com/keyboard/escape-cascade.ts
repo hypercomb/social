@@ -13,8 +13,11 @@ EffectBus.on<{ active: boolean }>('editor:mode', ({ active }) => {
   editorActive = active
 })
 
-EffectBus.on<{ active: boolean }>('clipboard:view', ({ active }) => {
-  clipboardActive = active
+// The clipboard side panel announces its open/close state here so Escape
+// (priority 4 below) and right-click still close it. Replaces the old
+// `clipboard:view` page-replacement signal, which is gone.
+EffectBus.on<{ open: boolean }>('clipboard:open', ({ open }) => {
+  clipboardActive = open
 })
 
 EffectBus.on<{ active: boolean }>('notes:viewer', ({ active }) => {

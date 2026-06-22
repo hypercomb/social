@@ -7,6 +7,7 @@ import { Component, signal, computed, type OnInit, type OnDestroy } from '@angul
 import { EffectBus } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
 import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
 import type { SecretStrengthProvider } from '../../core/secret-strength'
@@ -30,7 +31,7 @@ function normalizeHost(raw: string): string {
 @Component({
   selector: 'hc-mesh-modal',
   standalone: true,
-  imports: [TranslatePipe],
+  imports: [TranslatePipe, HcWidgetDirective],
   templateUrl: './mesh-modal.component.html',
   styleUrls: ['./mesh-modal.component.scss'],
 })

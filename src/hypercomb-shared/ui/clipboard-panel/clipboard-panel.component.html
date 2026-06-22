@@ -1,0 +1,60 @@
+@if (visible()) {
+  <aside
+    class="clipboard-panel"
+    data-consumes-wheel
+    (keydown)="$event.key === 'Escape' && close()"
+    tabindex="-1"
+    role="dialog"
+    [attr.aria-label]="'clipboard.title' | t"
+  >
+    <header class="clipboard-header">
+      <span class="clipboard-title">{{ 'clipboard.title' | t }}</span>
+      <span class="clipboard-op" [class.cut]="op() === 'cut'">
+        {{ (op() === 'cut' ? 'clipboard.op.cut' : 'clipboard.op.copy') | t }}
+      </span>
+      <button
+        class="clipboard-close"
+        type="button"
+        (click)="close()"
+        [attr.aria-label]="'clipboard.close' | t"
+      >×</button>
+    </header>
+
+    @if (items().length === 0) {
+      <p class="clipboard-empty">{{ 'clipboard.empty' | t }}</p>
+    } @else {
+      <div class="clipboard-scroll">
+        <ul class="clipboard-items">
+          @for (item of items(); track trackByLabel($index, item)) {
+            <li class="clipboard-item">
+              @if (thumbs()[item.label]; as url) {
+                <span class="item-thumb"><img [src]="url" [alt]="item.label" draggable="false" /></span>
+              } @else {
+                <span class="item-glyph" aria-hidden="true">⬢</span>
+              }
+              <span class="item-label" [title]="item.label">{{ item.label }}</span>
+              <button
+                class="item-place"
+                type="button"
+                (click)="placeOne(item.label)"
+                [attr.aria-label]="'clipboard.place' | t"
+                [title]="'clipboard.place' | t"
+              >
+                <span class="mat-sym">add</span>
+              </button>
+            </li>
+          }
+        </ul>
+      </div>
+
+      <footer class="clipboard-foot">
+        <button class="place-all" type="button" (click)="placeAll()">
+          {{ 'clipboard.placeAll' | t }} · {{ items().length }}
+        </button>
+        <button class="clear-all" type="button" (click)="clearAll()">
+          {{ 'clipboard.clear' | t }}
+        </button>
+      </footer>
+    }
+  </aside>
+}

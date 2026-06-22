@@ -1,6 +1,6 @@
 @if (open()) {
   <div class="adopt-backdrop" (click)="dismiss()"></div>
-  <div class="adopt-panel" role="dialog" data-consumes-wheel [attr.aria-label]="'swarm-adopt.title' | t">
+  <div class="adopt-panel" role="dialog" data-consumes-wheel hcWidget="swarm-adopt" anchor="center" [attr.aria-label]="'swarm-adopt.title' | t">
     <div class="adopt-header">
       <h3>{{ 'swarm-adopt.title' | t }}</h3>
       <button class="adopt-close" (click)="dismiss()" [attr.aria-label]="'swarm-adopt.cancel' | t">×</button>

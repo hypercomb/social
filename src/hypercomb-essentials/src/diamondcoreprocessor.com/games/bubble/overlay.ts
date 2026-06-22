@@ -24,12 +24,11 @@ const Z = 2147483000
 // everything daintier, sitting on more of the dark backdrop. 1 = fill the stage.
 const ZOOM = 0.8
 
-// Keys that drive PLAY. Movement + K (jump) + J (blow; HOLD to charge a bigger,
-// faster-rising bubble) + L (long-distance bubble) + R (restart). Up no longer
-// jumps — jump is K. (All keys are isolated anyway; this set only decides which
-// ones trigger a game action.)
+// Keys that drive PLAY. Movement + K (jump) + J (blow a bubble) + R (restart).
+// Up no longer jumps — jump is K. (All keys are isolated anyway; this set only
+// decides which ones trigger a game action.)
 const GAME_KEYS = new Set([
-  'ArrowLeft', 'ArrowRight', 'a', 'A', 'd', 'D', 'j', 'J', 'k', 'K', 'l', 'L', 'r', 'R',
+  'ArrowLeft', 'ArrowRight', 'a', 'A', 'd', 'D', 'j', 'J', 'k', 'K', 'r', 'R',
 ])
 
 type Mode = 'play' | 'design'
@@ -250,7 +249,7 @@ export class BubbleOverlay {
     this.#banner = banner
 
     const help = el('div', { class: 'bub-help' })
-    help.innerHTML = '<b>← →</b> move &nbsp;·&nbsp; <b>K</b> jump &nbsp;·&nbsp; <b>J</b> blow a bubble (<i>hold</i> to charge a bigger one that rises faster — ride it up) &nbsp;·&nbsp; <b>L</b> long-distance bubble &nbsp;·&nbsp; jump <i>up through</i> platforms &amp; off the top to wrap around &nbsp;·&nbsp; step into a <i>door</i> to tunnel out its twin — enemies tunnel too &nbsp;·&nbsp; foes come as walkers, hoppers, chargers, flyers &amp; <i>ghost</i> hunters &nbsp;·&nbsp; bump a trapped foe to pop it &nbsp;·&nbsp; <i>chain</i> pops &amp; bubble-bounces with no &gt;1s pause to double your points (×2 at 5, ×4 at 10) — and each chained pop drops fruit worth <b>×the chain</b> &nbsp;·&nbsp; clear the screen, then sweep up the fruit before the bar bleeds out — each one buys more time &nbsp;·&nbsp; grab dropped <i>candy</i>: 👟 <span style="color:#4aa3ff">blue shoe</span> (speed, lasts the level) · 👟 <span style="color:#ff5a5a">red shoe</span> (speed, until you die) · 🍬 rapid-fire · 🍭 big bubbles — perks last until you lose a life &nbsp;·&nbsp; ⠿ <span style="color:#5fe0ff">triple shot</span> &amp; 🛡 <span style="color:#86f0b0">shield</span> (absorb a hit) drop often &amp; last the level &nbsp;·&nbsp; once you hold the red shoe, blue ones come as 💎 point-bonus treasures instead &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> close'
+    help.innerHTML = '<b>← →</b> move &nbsp;·&nbsp; <b>K</b> jump &nbsp;·&nbsp; <b>J</b> blow a bubble &nbsp;·&nbsp; trap a foe in a bubble, then <i>bump it to pop it</i> — it bursts into fruit you grab for points &nbsp;·&nbsp; jump <i>up through</i> the platforms &amp; ride empty bubbles upward &nbsp;·&nbsp; pop foes in quick succession to <i>chain</i> them for bigger fruit &nbsp;·&nbsp; the cast: <span style="color:#4aa3ff">Zen-Chan</span>, <span style="color:#ff8a3d">Mighta</span>, <span style="color:#6fe06a">Banebou</span> &amp; the flying <span style="color:#ff9ad5">Monsta</span> &nbsp;·&nbsp; clear every foe to advance — but dawdle and they turn <span style="color:#ff5a5a">angry</span> &nbsp;·&nbsp; grab dropped sweets: 👟 <span style="color:#4aa3ff">shoes</span> (run faster) · 🍬 <span style="color:#ff5d8f">candy</span> (blow faster) — until you lose a life &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> close'
     root.appendChild(help)
 
     document.body.appendChild(root)
@@ -453,8 +452,7 @@ export class BubbleOverlay {
       case 'ArrowLeft': case 'a': case 'A': eng.input.left = true; break
       case 'ArrowRight': case 'd': case 'D': eng.input.right = true; break
       case 'k': case 'K': if (!e.repeat) eng.jump(); break        // K = jump
-      case 'j': case 'J': if (!e.repeat) eng.startBlow(); break   // J = blow (hold to charge)
-      case 'l': case 'L': if (!e.repeat) eng.blowLong(); break    // L = long-distance bubble
+      case 'j': case 'J': if (!e.repeat) eng.blow(); break        // J = blow a bubble
       case 'r': case 'R': this.#startPlay(this.#levels[this.#levelIndex]); break
     }
   }
@@ -468,7 +466,6 @@ export class BubbleOverlay {
     switch (e.key) {
       case 'ArrowLeft': case 'a': case 'A': eng.input.left = false; break
       case 'ArrowRight': case 'd': case 'D': eng.input.right = false; break
-      case 'j': case 'J': eng.releaseBlow(); break   // release the charged bubble
     }
   }
 
@@ -644,7 +641,7 @@ export class BubbleOverlay {
       const e = new Engine(cloneLevel(tr.nextLevel))
       e.score = carriedScore
       e.lives = tr.prev.lives
-      e.carryLifePowersFrom(tr.prev)   // red shoe / rapid / bubble size survive the clear; blue shoe ends with the level
+      e.carryLifePowersFrom(tr.prev)   // sweets (shoes / candy) persist across screens, lost only on death
       this.#engine = e
       this.#levelIndex = tr.nextIndex
       this.#levelStartScore = e.score

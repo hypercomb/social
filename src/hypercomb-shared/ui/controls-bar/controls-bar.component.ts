@@ -229,7 +229,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   }
   #utility = signal(localStorage.getItem('hc:utility-expanded') !== 'false')
   #moveMode = signal(false)
-  #mode = signal<'browsing' | 'clipboard' | 'atomize'>('browsing')
+  #mode = signal<'browsing' | 'atomize'>('browsing')
   #clipboardItems = signal<string[]>([])
   #roomOpen = signal(false)
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
@@ -293,7 +293,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.navigation.segmentsRaw().join('/')
   }
   #clipboardAvailable = signal(false)
-  #clipboardViewportSnapshot: { scale: number; px: number; py: number; sx: number; sy: number } | null = null
   #hasSelection = signal(false)
   #textOnly = signal(false)
   #layoutPinned = signal(false)
@@ -725,7 +724,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #textOnlyUnsub: (() => void) | null = null
   #neonModeUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
-  #clipboardCloseUnsub: (() => void) | null = null
   #atomizeModeUnsub: (() => void) | null = null
   #atomizeAtomsUnsub: (() => void) | null = null
   #atomizeStrategyUnsub: (() => void) | null = null
@@ -788,27 +786,18 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     })
 
     this.#clipboardAvailableUnsub = EffectBus.on<{ available: boolean }>('clipboard:available', (payload) => {
-      const available = payload?.available ?? false
-      this.#clipboardAvailable.set(available)
-      if (!available && this.#mode() === 'clipboard') {
-        this.closeClipboard()
-      }
-    })
-
-    this.#clipboardCloseUnsub = EffectBus.on('clipboard:close', () => {
-      if (this.#mode() === 'clipboard') this.closeClipboard()
+      this.#clipboardAvailable.set(payload?.available ?? false)
     })
 
     this.#selectionUnsub = EffectBus.on<{ selected?: string[] }>('selection:changed', (payload) => {
       this.#hasSelection.set((payload?.selected?.length ?? 0) > 0)
     })
 
+    // Clipboard contents drive only the toolbar badge count now — the
+    // side panel (hc-clipboard-panel) owns its own open/close lifecycle.
     this.#clipboardUnsub = EffectBus.on<{ items?: { label: string }[] }>('clipboard:changed', (payload) => {
       const items = payload?.items ?? []
       this.#clipboardItems.set(items.map(item => item.label))
-      if (items.length === 0 && this.#mode() === 'clipboard') {
-        this.closeClipboard()
-      }
     })
 
     this.#moveModeUnsub = EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
@@ -971,7 +960,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#textOnlyUnsub?.()
     this.#neonModeUnsub?.()
     this.#clipboardAvailableUnsub?.()
-    this.#clipboardCloseUnsub?.()
     this.#tagsUnsub?.()
     this.#hoverTagsUnsub?.()
     this.#atomizeModeUnsub?.()
@@ -1396,84 +1384,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       { items?: { label: string; sourceSegments: readonly string[] }[]; operation?: 'cut' | 'copy'; isEmpty?: boolean } | undefined
     if (clipSvc?.isEmpty) return
 
-    // save current viewport so we can restore it when exiting clipboard mode
-    const container = this.pixiHost?.container
-    const app = this.pixiHost?.app
-    if (container && app) {
-      this.#clipboardViewportSnapshot = {
-        scale: container.scale?.x ?? 1,
-        px: container.position?.x ?? 0,
-        py: container.position?.y ?? 0,
-        sx: app.stage.position?.x ?? 0,
-        sy: app.stage.position?.y ?? 0,
-      }
-    }
-
-    this.#mode.set('clipboard')
-    const items = clipSvc?.items ?? []
-    EffectBus.emit('clipboard:view', {
-      active: true,
-      op: clipSvc?.operation ?? 'copy',
-      labels: items.map(i => i.label),
-      sourceSegments: [...(items[0]?.sourceSegments ?? [])],
-    })
-
-    // fit-to-center whenever clipboard opens. First trigger wins; retries
-    // catch cases where render:cell-count is late or the render pipeline
-    // is slow to settle.
-    let unsub: () => void = () => {}
-    let fired = false
-    const fit = (): void => {
-      if (fired) return
-      fired = true
-      unsub()
-      requestAnimationFrame(() => this.zoom?.zoomToFit?.())
-    }
-    unsub = EffectBus.on('render:cell-count', fit)
-    setTimeout(fit, 120)
-    setTimeout(fit, 400)
-    setTimeout(fit, 800)
-  }
-
-  readonly closeClipboard = (): void => {
-    this.#mode.set('browsing')
-    EffectBus.emit('clipboard:view', { active: false })
-    this.#restoreClipboardViewport()
-  }
-
-  readonly place = (): void => {
-    EffectBus.emit('controls:action', { action: 'place' })
-  }
-
-  readonly paste = (): void => {
-    EffectBus.emit('clipboard:view', { active: false })
-    this.#mode.set('browsing')
-    this.#restoreClipboardViewport()
-    EffectBus.emit('controls:action', { action: 'paste' })
-  }
-
-  readonly clearClipboard = (): void => {
-    EffectBus.emit('controls:action', { action: 'clear-clipboard' })
-    EffectBus.emit('clipboard:view', { active: false })
-    this.#mode.set('browsing')
-    this.#restoreClipboardViewport()
-  }
-
-  #restoreClipboardViewport(): void {
-    const snap = this.#clipboardViewportSnapshot
-    if (!snap) return
-    this.#clipboardViewportSnapshot = null
-
-    const container = this.pixiHost?.container
-    const app = this.pixiHost?.app
-    if (!container || !app) return
-
-    container.scale.set(snap.scale)
-    container.position.set(snap.px, snap.py)
-    app.stage.position.set(snap.sx, snap.sy)
-
-    const vp = (window as any).ioc?.get('@diamondcoreprocessor.com/ViewportPersistence')
-    vp?.setZoom?.(snap.scale, snap.px, snap.py)
+    // Open the non-navigating clipboard SIDE PANEL. The current page stays
+    // fully rendered and interactive behind it — no `'clipboard'` mode, no
+    // `clipboard:view` page-replacement, no viewport snapshot/restore dance.
+    // The panel (hc-clipboard-panel) lists the captured tiles and places
+    // them onto THIS page in place.
+    EffectBus.emit('clipboard:panel', { visible: true })
   }
 
   // ── atomize ──────────────────────────────────────────

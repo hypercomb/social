@@ -187,26 +187,37 @@ export class ViewBee extends Worker {
         continue
       }
 
-      // Render behavior (e.g. website). The toggle is PER-NODE: surface it
-      // only when THIS cell carries a page of the view's kind — the same
-      // `visual:website:page` decoration SiteViewDrone resolves to mount the
-      // page. Gating on the cell's OWN decoration (not global presence) means
-      // the toggle shows exactly where flipping the view mounts a real page;
-      // a page-less cell never offers the toggle, so a click can't drop the
-      // user onto a blank "empty website" screen. The `/website` slash command
-      // remains the escape hatch to turn the global view off from anywhere.
-      if (!v.decorationKind) continue
-      const record = records.find(r => r.kind === v.decorationKind)
-      if (!record) continue
+      // Render behavior. The toggle is PER-NODE: surface it only when THIS
+      // cell actually carries the view's content, so flipping the global
+      // surface always mounts something (never a blank "empty view" screen).
+      // The `/website`-style slash command stays the escape hatch to turn the
+      // global view off from anywhere. A cell "has" the content via either:
+      //   • a FIRST-CLASS SLOT (v.slot) holding a non-empty signature array —
+      //     the doctrine-pure home (tutor's deck items live here), OR
+      //   • a `visual:*:page`-style decoration of v.decorationKind — the
+      //     legacy/website path, which also supplies a per-instance icon/label.
+      let present = false
+      let payloadIcon = ''
+      let payloadLabel = ''
 
-      // Per-website toggle identity. This cell's own decoration payload
-      // supplies its distinct icon (and optional label tooltip), so every
-      // website carries its own glyph. Falls back to the view's static
-      // `toggleIcon` ('web'), then the generic glyph, when the payload omits
-      // them.
-      const payload = record.payload
-      const payloadIcon = typeof payload?.['icon'] === 'string' ? (payload['icon'] as string).trim() : ''
-      const payloadLabel = typeof payload?.['label'] === 'string' ? (payload['label'] as string).trim() : ''
+      if (v.slot) {
+        const slotVal = layer ? (layer as Record<string, unknown>)[v.slot] : undefined
+        if (Array.isArray(slotVal) && slotVal.some(s => typeof s === 'string' && SIG_RE.test(s))) present = true
+      }
+      if (!present && v.decorationKind) {
+        const record = records.find(r => r.kind === v.decorationKind)
+        if (record) {
+          present = true
+          // This cell's own decoration payload supplies its distinct icon /
+          // label tooltip (every website keeps its own glyph). Falls back to
+          // the view's static `toggleIcon`, then the generic glyph.
+          const payload = record.payload
+          payloadIcon = typeof payload?.['icon'] === 'string' ? (payload['icon'] as string).trim() : ''
+          payloadLabel = typeof payload?.['label'] === 'string' ? (payload['label'] as string).trim() : ''
+        }
+      }
+      if (!present) continue
+
       toggles.push({
         view: v.view,
         icon: payloadIcon || v.toggleIcon || FALLBACK_TOGGLE_ICON,
