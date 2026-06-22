@@ -54,6 +54,13 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
   /** Panel width (px) — clamp + dock geometry. Override per feature. */
   protected get panelWidth(): number { return 300 }
 
+  /** Opt in to surviving a refresh. When true, pinned panels are persisted
+   *  (key + data + pos) participant-local and RE-OPENED on the next mount —
+   *  the "keep it always showing even after I come back" behaviour. Default
+   *  off: most hover features are transient (a peek you pin to compare, then
+   *  drop). Contact-card / notes-style windows override to true. */
+  protected get persistent(): boolean { return false }
+
   /** Map a raw EffectBus payload to a panel identity + data, or null to ignore. */
   protected abstract toPanel(payload: unknown): { key: string; data: T } | null
 
@@ -91,6 +98,9 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
       const list = this.panels()
       for (let i = list.length - 1; i >= 0; i--) if (!list[i].ephemeral) { this.closePanel(list[i].id); return }
     }))
+
+    // Re-open pins parked in a previous session (persistent features only).
+    this.#restoreOpen()
   }
 
   ngOnDestroy(): void {
@@ -123,8 +133,9 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
     const panel: PinnablePanel<T> = { id: this.#nextId++, ephemeral: false, key, data, pos: this.#nextPinPos(key) }
     this.panels.update(l => [...l, panel])
     this.#announce()
+    this.#saveOpen()
   }
-  closePanel(id: number): void { this.panels.update(l => l.filter(x => x.id !== id)); this.#announce() }
+  closePanel(id: number): void { this.panels.update(l => l.filter(x => x.id !== id)); this.#announce(); this.#saveOpen() }
   onPanelFocus(p: PinnablePanel<T>): void { if (!p.ephemeral) this.#bringToFront(p.id) }
 
   #bringToFront(id: number): void {
@@ -134,7 +145,12 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
       const c = l.slice(); const [x] = c.splice(i, 1); c.push(x); return c
     })
   }
-  #update(id: number, data: T): void { this.panels.update(l => l.map(x => x.id === id ? { ...x, data } : x)) }
+  /** Replace a pinned panel's data in place — subclass hook for in-panel
+   *  mutations (e.g. removing one card from a multi-card panel). */
+  protected updateData(id: number, data: T): void { this.#update(id, data) }
+  /** Dismiss the transient hover peek — subclass hook for the same. */
+  protected dismissPeek(): void { this.#hidePeek() }
+  #update(id: number, data: T): void { this.panels.update(l => l.map(x => x.id === id ? { ...x, data } : x)); this.#saveOpen() }
 
   /** Tell the host Escape cascade whether any pinned panel is up. */
   #announce(): void {
@@ -164,7 +180,7 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
   #onDragEnd = (): void => {
     if (this.#dragId === null) return
     const panel = this.panels().find(x => x.id === this.#dragId)
-    if (panel) { this.#savedPos[panel.key] = panel.pos; this.#savePos() }
+    if (panel) { this.#savedPos[panel.key] = panel.pos; this.#savePos(); this.#saveOpen() }
     this.#dragId = null
     this.#detachDrag()
   }
@@ -198,4 +214,43 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
     return {}
   }
   #savePos(): void { try { localStorage.setItem(this.posKey, JSON.stringify(this.#savedPos)) } catch { /* ignore */ } }
+
+  // ── open-pin persistence (survive refresh; persistent subclasses only) ──
+  // Positions are already kept by key in `#savedPos`; this additionally records
+  // WHICH pins are open (with a snapshot of their data) so they can be rebuilt
+  // on the next mount. No-op unless the subclass opts in via `persistent`.
+  #openKey(): string { return `${this.posKey}:open` }
+
+  #saveOpen(): void {
+    if (!this.persistent) return
+    try {
+      const open = this.panels()
+        .filter(p => !p.ephemeral)
+        .map(p => ({ key: p.key, data: p.data, pos: p.pos }))
+      if (open.length) localStorage.setItem(this.#openKey(), JSON.stringify(open))
+      else localStorage.removeItem(this.#openKey())
+    } catch { /* ignore */ }
+  }
+
+  #restoreOpen(): void {
+    if (!this.persistent) return
+    try {
+      const raw = localStorage.getItem(this.#openKey())
+      if (!raw) return
+      const arr = JSON.parse(raw)
+      if (!Array.isArray(arr)) return
+      const restored: PinnablePanel<T>[] = arr
+        .filter((e: unknown): e is { key: string; data: T; pos?: { x: number; y: number } } =>
+          !!e && typeof (e as { key?: unknown }).key === 'string')
+        .map((e) => ({
+          id: this.#nextId++,
+          ephemeral: false,
+          key: e.key,
+          data: e.data,
+          // Data snapshot is last-known; the next hover refreshes it in place.
+          pos: this.#clamp(e.pos?.x ?? this.#basePos().x, e.pos?.y ?? this.#basePos().y),
+        }))
+      if (restored.length) { this.panels.set(restored); this.#announce() }
+    } catch { /* ignore */ }
+  }
 }

@@ -1,9 +1,10 @@
 // diamondcoreprocessor.com/bridge/claude-bridge.worker.ts
-import { Worker, EffectBus, normalizeCell, hypercomb, isSignature } from '@hypercomb/core'
+import { Worker, EffectBus, normalizeCell, hypercomb, isSignature, SignatureService } from '@hypercomb/core'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import type { HistoryService } from '../history/history.service.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 import { inflate } from '../history/inflate.js'
+import { extractPageRefSigs } from '../sharing/decoration-closure.js'
 
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
@@ -189,6 +190,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'note-add':     return this.#noteAdd(req)
       case 'note-list':    return this.#noteList(req)
       case 'note-delete':  return this.#noteDelete(req)
+      case 'notes-digest': return this.#notesDigest(req)
       case 'list-at':      return this.#listAt(req)
       case 'inflate':      return this.#inflate(req)
       case 'layer-at':     return this.#layerAt(req)
@@ -383,6 +385,28 @@ export class ClaudeBridgeWorker extends Worker {
     // 1. Mint the decoration record.
     const record: Record<string, unknown> = { kind, appliesTo, payload }
     if (mark) record['mark'] = mark
+
+    // Record the page's resource CLOSURE explicitly. Lineage doctrine: an
+    // artifact declares its signature dependencies so the merkle/closure walk
+    // carries them — never discovers them late. When the payload names an HTML
+    // body, read it NOW (it is local — the caller put-resourced it moments ago)
+    // and capture `htmlSig` plus every resource the body embeds (chrome.css,
+    // images) as a flat `refs` array. host-sync / adopt then carry the page via
+    // the deterministic forward-`refs` path (decoration-closure.ts), closing
+    // the "incomplete-closure" hole where an embedded stylesheet was silently
+    // dropped when the body wasn't readable at push time — the exact reason a
+    // travelled page rendered unstyled (htmlSig carried, chromeSig lost).
+    const htmlSig = String((payload as Record<string, unknown>)['htmlSig'] ?? '').toLowerCase()
+    if (/^[0-9a-f]{64}$/.test(htmlSig) && store.getResource) {
+      try {
+        const body = await store.getResource(htmlSig)
+        if (body) {
+          const refs = [...new Set([htmlSig, ...extractPageRefSigs(await body.text())])]
+          if (refs.length) record['refs'] = refs
+        }
+      } catch { /* body unreadable now → push-time body parse still applies */ }
+    }
+
     const recordBytes = new TextEncoder().encode(JSON.stringify(record))
     const newSig = await store.putResource(new Blob([recordBytes as BlobPart]))
 
@@ -637,6 +661,58 @@ export class ClaudeBridgeWorker extends Worker {
     }
     const cells = await this.#listCellFolders(dir)
     return { id: req.id, ok: true, data: cells }
+  }
+
+  // Compute ONE deterministic signature over every note id in the whole
+  // tree — a "notes digest". Walks every cell folder from the content root
+  // (reusing #listCellFolders), reads each cell's notes via
+  // NotesService.getNotesAtSegments, collects every note id (recursing
+  // through note children), sorts them, and signs the canonical JSON.
+  // Because note ids ARE content sigs, any note add / edit / delete changes
+  // the set → changes the digest. The feedback-loop routine stores the
+  // prior digest and re-fires the loop when it differs. Read-only.
+  async #notesDigest(req: BridgeRequest): Promise<BridgeResponse> {
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    if (!history) return { id: req.id, ok: false, error: 'HistoryService not available' }
+
+    // Walk the LAYER tree — cells are layer sigs in each layer's `children`
+    // slot (the sigbag model stores no nested cell folders), resolved one hop
+    // at a time via getLayerBySig (same resolver the `inflate` op uses). At
+    // every layer collect its `notes` slot entries: each is a note-layer sig,
+    // i.e. the note's stable content-addressed id. Because ids ARE content
+    // sigs, any add / edit / delete — including a nested sub-note, whose new
+    // sig cascades up into its parent note's id — changes the set, hence the
+    // digest. Children recursion is cycle-guarded by layer sig.
+    const noteIds = new Set<string>()
+    const visited = new Set<string>()
+
+    const collectNotes = (layer: { notes?: unknown } | null): void => {
+      const notes = layer?.notes
+      if (Array.isArray(notes)) {
+        for (const s of notes) if (typeof s === 'string' && isSignature(s)) noteIds.add(s)
+      }
+    }
+
+    const walk = async (layer: { notes?: unknown; children?: unknown } | null): Promise<void> => {
+      if (!layer) return
+      collectNotes(layer)
+      const children = Array.isArray(layer.children) ? layer.children : []
+      for (const childSig of children) {
+        if (typeof childSig !== 'string' || !isSignature(childSig) || visited.has(childSig)) continue
+        visited.add(childSig)
+        const child = await history.getLayerBySig(childSig)
+        await walk(child as { notes?: unknown; children?: unknown } | null)
+      }
+    }
+
+    const rootSig = await history.sign({ explorerSegments: () => [] })
+    const root = await history.currentLayerAt(rootSig)
+    await walk(root as { notes?: unknown; children?: unknown } | null)
+
+    const sorted = [...noteIds].sort()
+    const canonical = JSON.stringify(sorted)
+    const digest = await SignatureService.sign(new TextEncoder().encode(canonical).buffer as ArrayBuffer)
+    return { id: req.id, ok: true, data: { digest, noteCount: sorted.length, noteIds: sorted } }
   }
 
   // Append a note to a cell at explicit segments. Calls

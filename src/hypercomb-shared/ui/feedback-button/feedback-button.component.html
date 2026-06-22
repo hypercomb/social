@@ -1,0 +1,69 @@
+<!-- fixed bottom-right affordance — always present -->
+<button
+  class="feedback-fab"
+  type="button"
+  (click)="toggle()"
+  [class.active]="open()"
+  [attr.aria-label]="'feedback.button' | t"
+  [attr.aria-expanded]="open()"
+>
+  <span class="mat-sym">forum</span>
+</button>
+
+@if (open()) {
+  <div class="feedback-backdrop" (click)="onBackdrop($event)"></div>
+  <section
+    class="feedback-panel"
+    role="dialog"
+    aria-modal="true"
+    hcWidget="feedback"
+    anchor="bottom-right"
+    (keydown)="onKey($event)"
+    [attr.aria-label]="'feedback.title' | t"
+  >
+    <header class="feedback-header">
+      <div class="feedback-heading">
+        <span class="feedback-title">{{ 'feedback.title' | t }}</span>
+        <span class="feedback-subtitle">{{ 'feedback.subtitle' | t }}</span>
+      </div>
+      <button class="feedback-close" type="button" (click)="close()" [attr.aria-label]="'feedback.cancel' | t">×</button>
+    </header>
+
+    <div class="feedback-body">
+      <div class="feedback-segmented" role="tablist" [attr.aria-label]="'feedback.category.label' | t">
+        <button
+          type="button"
+          role="tab"
+          class="seg-btn"
+          [class.active]="category() === 'idea'"
+          [attr.aria-selected]="category() === 'idea'"
+          (click)="setCategory('idea')"
+        >
+          <span class="mat-sym">lightbulb</span>{{ 'feedback.category.idea' | t }}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="seg-btn"
+          [class.active]="category() === 'issue'"
+          [attr.aria-selected]="category() === 'issue'"
+          (click)="setCategory('issue')"
+        >
+          <span class="mat-sym">bug_report</span>{{ 'feedback.category.issue' | t }}
+        </button>
+      </div>
+
+      <textarea
+        class="feedback-text"
+        rows="5"
+        [(ngModel)]="text"
+        [placeholder]="'feedback.placeholder' | t"
+      ></textarea>
+    </div>
+
+    <footer class="feedback-footer">
+      <button class="feedback-btn ghost" type="button" (click)="close()">{{ 'feedback.cancel' | t }}</button>
+      <button class="feedback-btn primary" type="button" (click)="submit()" [disabled]="!canSend">{{ 'feedback.send' | t }}</button>
+    </footer>
+  </section>
+}

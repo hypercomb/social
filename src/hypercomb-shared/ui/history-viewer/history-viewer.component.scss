@@ -34,7 +34,13 @@
   flex-direction: column;
   color: rgba(235, 240, 250, 0.85);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  // Content-shrink: the drag-resized width drives `--hc-panel-scale` (set
+  // inline, clamped ≤1). Root font scales by it and the docked content below
+  // is sized in `em`, so rows/header shrink to fit a narrowed panel instead of
+  // truncating. Geometry (top/width/min/max/resizer) stays in px so docking
+  // and the resize math are unaffected; the centered slice/merge modals are
+  // SIBLINGS of this aside, so they keep their own fixed px sizing.
+  font-size: calc(12px * var(--hc-panel-scale, 1));
   // Above the sealed canvas (#pixi-host z 59989) so the panel renders on
   // top and takes its own clicks; still below the header-bar (z 60000).
   z-index: 59990;
@@ -45,8 +51,8 @@
 .history-viewer-header {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 0.667em;
+  padding: 0.667em 0.833em;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
@@ -65,10 +71,10 @@
   background: transparent;
   border: none;
   color: rgba(200, 210, 230, 0.65);
-  font-size: 18px;
+  font-size: 1.5em;
   line-height: 1;
   cursor: pointer;
-  padding: 0 4px;
+  padding: 0 0.333em;
   border-radius: 3px;
   transition: color 80ms linear, background 80ms linear;
   // Header sits above the resizer so the close button is never
@@ -86,10 +92,10 @@
   background: transparent;
   border: 1px solid transparent;
   color: rgba(200, 210, 230, 0.45);
-  font-size: 14px;
+  font-size: 1.167em;
   line-height: 1;
   cursor: pointer;
-  padding: 2px 6px;
+  padding: 0.167em 0.5em;
   border-radius: 3px;
   transition: color 80ms linear, background 80ms linear, border-color 80ms linear, opacity 80ms linear;
   position: relative;
@@ -153,7 +159,7 @@
 
 .rows {
   list-style: none;
-  padding: 4px 0;
+  padding: 0.333em 0;
   margin: 0;
   overflow-y: scroll;
   flex: 1;
@@ -180,11 +186,11 @@
 .row {
   display: grid;
   // icon | idx | summary | make-head | when | delete
-  grid-template-columns: 14px auto 1fr auto auto auto;
+  grid-template-columns: 1.167em auto 1fr auto auto auto;
   align-items: center;
-  padding: 4px 10px 4px 6px;
+  padding: 0.333em 0.833em 0.333em 0.5em;
   cursor: pointer;
-  gap: 6px;
+  gap: 0.5em;
   border-left: 2px solid transparent;
   transition: background 80ms linear;
   user-select: none;  // prevent text selection on dbl-click
@@ -201,10 +207,10 @@
   background: transparent;
   border: none;
   color: rgba(200, 210, 230, 0.55);
-  font-size: 14px;
+  font-size: 1.167em;
   line-height: 1;
   cursor: pointer;
-  padding: 0 4px;
+  padding: 0 0.333em;
   border-radius: 3px;
   opacity: 0.35;
   transition: opacity 80ms linear, color 80ms linear, background 80ms linear;
@@ -439,16 +445,16 @@
 }
 
 .row .indicator {
-  width: 8px;
-  height: 8px;
+  width: 0.667em;
+  height: 0.667em;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.18);
   display: inline-block;
 }
 
 .row .row-icon {
-  width: 14px;
-  height: 14px;
+  width: 1.167em;
+  height: 1.167em;
   color: rgba(255, 255, 255, 0.55);
 }
 
@@ -470,8 +476,8 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 2px;
-  padding: 4px 6px;
+  gap: 0.167em;
+  padding: 0.333em 0.5em;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.02);
 }
@@ -480,20 +486,20 @@
   background: transparent;
   border: 1px solid transparent;
   border-radius: 4px;
-  padding: 3px;
+  padding: 0.25em;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 2em;
+  height: 2em;
   opacity: 0.35;
   transition: opacity 80ms linear, background 80ms linear, border-color 80ms linear;
 }
 
 .filter-toggle hc-icon {
-  width: 14px;
-  height: 14px;
+  width: 1.167em;
+  height: 1.167em;
 }
 
 .filter-toggle:hover {
@@ -528,9 +534,9 @@
 
 .selection-count {
   align-self: center;
-  font-size: 10px;
+  font-size: 0.833em;
   color: rgba(200, 210, 230, 0.65);
-  padding: 0 2px;
+  padding: 0 0.167em;
   font-variant-numeric: tabular-nums;
 }
 
@@ -538,11 +544,11 @@
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 4px;
-  padding: 3px 8px;
+  padding: 0.25em 0.667em;
   cursor: pointer;
   color: rgba(210, 220, 240, 0.85);
   font-family: inherit;
-  font-size: 11px;
+  font-size: 0.917em;
   font-weight: 500;
   letter-spacing: 0.04em;
   line-height: 1;
@@ -552,7 +558,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 22px;
+  height: 1.833em;
 }
 
 .selection-action.save-as-head {
@@ -600,7 +606,7 @@
 .row .idx {
   font-variant-numeric: tabular-nums;
   color: rgba(200, 210, 230, 0.85);
-  min-width: 28px;
+  min-width: 2.333em;
 }
 
 .row .summary {
@@ -617,7 +623,7 @@
 
 .row .when {
   color: rgba(160, 170, 190, 0.7);
-  font-size: 10px;
+  font-size: 0.833em;
   font-variant-numeric: tabular-nums;
 }
 
@@ -631,7 +637,7 @@
   // Anchors only have indicator + idx + summary — collapse back to
   // the original 3-column layout so they don't grow tracks for the
   // interactive row's action buttons.
-  grid-template-columns: 14px auto 1fr;
+  grid-template-columns: 1.167em auto 1fr;
   cursor: default;
   pointer-events: none;
   opacity: 0.35;
@@ -664,7 +670,7 @@
 
 .row.anchor .summary {
   text-transform: uppercase;
-  font-size: 10px;
+  font-size: 0.833em;
   letter-spacing: 0.4px;
   color: rgba(170, 180, 200, 0.55);
 }

@@ -4,6 +4,15 @@
 // visible and interactive behind it. Cold/clean chrome: slim, steel hairline
 // (rgb 126,182,214), frosted glass — matching the header/command-line
 // aesthetic, not a vivid chunky panel.
+//
+// Content-shrink: the drag-resized width drives `--hc-panel-scale` (set inline
+// by the component, clamped). The panel's ROOT font-size is that scale, and all
+// inner text / spacing / thumbnails are sized in `em`, so the content shrinks
+// as the panel narrows and grows as it widens — never clipping. We scale via a
+// calc multiplier on font-size, NOT `zoom`, which would soften glyphs against
+// this panel's backdrop-filter (see documentation/zoomable-widgets.md). Panel
+// GEOMETRY (top / width / min / max / grip) stays in rem/px so docking and the
+// resize math are unaffected by the scale.
 
 @use '../breakpoints' as *;
 
@@ -24,7 +33,12 @@ $steel: rgb(126, 182, 214);
   top: calc(2.8rem * var(--hc-header-zoom, 1.0));
   right: 0;
   bottom: 0;
-  width: min(320px, calc(100vw - 2rem));
+  // The inline [style.width] (drag-resized, persisted) drives the actual
+  // width; these are guardrails so a stale/large stored value can't overflow
+  // a narrow viewport and a too-small one can't crush the panel.
+  width: 320px;
+  min-width: 260px;
+  max-width: calc(100vw - 1.5rem);
   display: flex;
   flex-direction: column;
   background: rgba(14, 16, 22, 0.92);
@@ -33,30 +47,68 @@ $steel: rgb(126, 182, 214);
   border-left: 1px solid rgba($steel, 0.45);
   box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba($steel, 0.05) inset;
   font-family: var(--hc-mono, system-ui);
+  // Content scale — see file header. 1rem * scale is the panel's root font;
+  // inner em sizes follow it. Defaults to 1 before the component binds.
+  font-size: calc(1rem * var(--hc-panel-scale, 1));
   color: #f1f3f5;
   outline: none;
+
+  &.resizing {
+    user-select: none;
+    // Keep the resize cursor through the whole drag, even as the pointer
+    // tracks over the hive canvas to the left.
+    cursor: ew-resize;
+  }
+}
+
+// Drag handle hugging the docked (left) edge. Invisible until hovered/active,
+// then a steel hairline brightens to signal the grab target — matching the
+// cold/clean chrome aesthetic rather than a chunky visible bar. Geometry in px
+// (a fixed grab target), so it deliberately does NOT scale with content.
+.resize-grip {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 9px;
+  cursor: ew-resize;
+  z-index: 3;
+  touch-action: none;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 2px;
+    background: transparent;
+    transition: background 0.12s ease;
+  }
+
+  &:hover::after { background: rgba($steel, 0.6); }
+}
+
+.clipboard-panel.resizing .resize-grip::after {
+  background: rgba($steel, 0.85);
 }
 
 .clipboard-header {
   display: flex;
   align-items: baseline;
-  gap: 0.5rem;
-  padding: 0.8rem 1rem;
+  gap: 0.5em;
+  padding: 0.8em 1em;
   border-bottom: 1px solid rgba($steel, 0.22);
 }
 
 .clipboard-title {
   flex: 1;
-  font-size: 0.88rem;
+  font-size: 0.88em;
   letter-spacing: 0.06em;
   color: rgba($steel, 0.95);
 }
 
 .clipboard-op {
-  font-size: 0.62rem;
+  font-size: 0.62em;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  padding: 0.1rem 0.45rem;
+  padding: 0.1em 0.45em;
   border-radius: 999px;
   border: 1px solid rgba($steel, 0.4);
   color: rgba($steel, 0.85);
@@ -71,25 +123,25 @@ $steel: rgb(126, 182, 214);
   background: transparent;
   border: none;
   color: rgba(255, 255, 255, 0.7);
-  font-size: 1.35rem;
+  font-size: 1.35em;
   line-height: 1;
   cursor: pointer;
-  padding: 0 0.25rem;
+  padding: 0 0.25em;
 
   &:hover { color: $steel; }
 }
 
 .clipboard-empty {
   margin: 0;
-  padding: 1.5rem 1rem;
-  font-size: 0.82rem;
+  padding: 1.5em 1em;
+  font-size: 0.82em;
   color: rgba(255, 255, 255, 0.4);
 }
 
 .clipboard-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 0.4rem 0;
+  padding: 0.4em 0;
 }
 
 .clipboard-items {
@@ -101,8 +153,8 @@ $steel: rgb(126, 182, 214);
 .clipboard-item {
   display: flex;
   align-items: center;
-  gap: 0.6rem;
-  padding: 0.45rem 0.85rem;
+  gap: 0.6em;
+  padding: 0.45em 0.85em;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 
   &:hover { background: rgba($steel, 0.07); }
@@ -110,10 +162,10 @@ $steel: rgb(126, 182, 214);
 
 .item-glyph {
   color: rgba($steel, 0.7);
-  font-size: 1.5rem;
+  font-size: 1.5em;
   line-height: 1;
   flex: 0 0 auto;
-  width: 2rem;
+  width: 2em;
   text-align: center;
 }
 
@@ -121,8 +173,8 @@ $steel: rgb(126, 182, 214);
 // pointed-top hex the canvas renders, at a glance size.
 .item-thumb {
   flex: 0 0 auto;
-  width: 2rem;
-  height: 2.2rem;
+  width: 2em;
+  height: 2.2em;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -139,7 +191,7 @@ $steel: rgb(126, 182, 214);
 
 .item-label {
   flex: 1;
-  font-size: 0.82rem;
+  font-size: 0.82em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -150,8 +202,8 @@ $steel: rgb(126, 182, 214);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.7rem;
-  height: 1.7rem;
+  width: 1.7em;
+  height: 1.7em;
   background: transparent;
   border: 1px solid rgba($steel, 0.35);
   border-radius: 6px;
@@ -161,7 +213,7 @@ $steel: rgb(126, 182, 214);
 
   .mat-sym {
     font-family: 'Material Symbols Rounded', 'Material Symbols Outlined', sans-serif;
-    font-size: 1.05rem;
+    font-size: 1.05em;
     line-height: 1;
   }
 
@@ -174,20 +226,20 @@ $steel: rgb(126, 182, 214);
 .clipboard-foot {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.7rem 0.85rem;
+  gap: 0.5em;
+  padding: 0.7em 0.85em;
   border-top: 1px solid rgba($steel, 0.2);
 }
 
 .place-all {
   flex: 1;
-  padding: 0.55rem 0.75rem;
+  padding: 0.55em 0.75em;
   background: rgba($steel, 0.16);
   border: 1px solid rgba($steel, 0.5);
   border-radius: 7px;
   color: #eaf4fb;
   font-family: inherit;
-  font-size: 0.8rem;
+  font-size: 0.8em;
   letter-spacing: 0.02em;
   cursor: pointer;
   transition: background 0.12s ease;
@@ -200,9 +252,9 @@ $steel: rgb(126, 182, 214);
   border: none;
   color: rgba(255, 255, 255, 0.45);
   font-family: inherit;
-  font-size: 0.74rem;
+  font-size: 0.74em;
   cursor: pointer;
-  padding: 0 0.4rem;
+  padding: 0 0.4em;
 
   &:hover { color: rgba(255, 140, 140, 0.9); }
 }

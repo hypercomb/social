@@ -276,6 +276,19 @@
           <span>{{ cell() }}</span>
         </span>
         <span class="cv2-dragbar-spacer"></span>
+        <!-- Delete THIS tile (the context tile whose notes are shown). Hidden
+             until you HOLD ALT to toggle it on (in-memory only — a refresh
+             returns it to hidden). Then two-step confirm so it can't be
+             misclicked — first click arms (icon turns solid red), second click
+             within 3s commits. Placed leftmost, away from the close (×). -->
+        @if (showDeleteTile()) {
+          <button type="button" class="cv2-mini-btn cv2-mini-danger"
+                  [class.confirming]="confirmDeleteTile()"
+                  (click)="onDeleteTileClick()"
+                  [title]="confirmDeleteTile() ? 'Click again to delete this tile' : 'Delete this tile'">
+            <span class="mat-sym">{{ confirmDeleteTile() ? 'delete_forever' : 'delete' }}</span>
+          </button>
+        }
         <button type="button" class="cv2-mini-btn" (click)="toggleFullscreen()"
                 [title]="isFullscreen() ? 'Exit full screen' : 'Full screen'">
           <span class="mat-sym">{{ isFullscreen() ? 'close_fullscreen' : 'open_in_full' }}</span>

@@ -118,9 +118,9 @@
 
 // ── Header (shared) ────────────────────────────────────
 // Compact strip header carrying a panel label on the left and a hide
-// affordance on the right. The hide button dismisses the strip for the
-// current selection only — selecting a different tile re-shows it
-// automatically (see #contextKey in the component).
+// affordance on the right. The hide button turns the strip off; it stays
+// off until the user re-opens it via the control-bar Notes toggle (the
+// strip no longer auto-shows on selection).
 .notes-strip-header {
   display: flex;
   align-items: center;
@@ -1007,6 +1007,20 @@
   }
 
   &.ghost { color: var(--md-on-surface-faint); }
+
+  // "Delete this tile" — quiet until hovered, then reads danger. Once armed
+  // (first click) it goes solid red so the commit click is unmistakable.
+  &.cv2-mini-danger {
+    &:hover {
+      color: #ff8080;
+      background: color-mix(in srgb, #ff8080 12%, transparent);
+    }
+    &.confirming {
+      color: #fff;
+      background: #c0392b;
+      &:hover { background: #d0422f; }
+    }
+  }
 }
 
 // Labeled exit pill — sits in the dragbar when see-all mode is on.

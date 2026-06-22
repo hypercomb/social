@@ -113,15 +113,16 @@ export class CommandShellComponent implements AfterViewInit {
   readonly arkanoidLabel = input<string>('Arkanoid game')
 
   /**
-   * Briefly true when the user tried to pan or zoom while input is locked
-   * (the editor overlay is open). Drives a lock icon that flashes to the
-   * left of the right-side icons, then fades. Parent owns the timing; the
-   * shell just renders the current state.
+   * Briefly true when the user tried to pan or zoom while the view is held
+   * in place (the pin toggle is on, or an overlay like the editor is open).
+   * Drives a pin icon that flashes to the left of the right-side icons,
+   * then fades. Parent owns the timing; the shell just renders the current
+   * state.
    */
   readonly lockedFlash = input<boolean>(false)
 
   /** Aria-label / tooltip for the locked-flash icon. */
-  readonly lockedLabel = input<string>('Locked — close the editor to pan or zoom')
+  readonly lockedLabel = input<string>('Pinned — unpin to pan or zoom')
 
   /**
    * Optional armed-resource preview — when set, the chevron is replaced

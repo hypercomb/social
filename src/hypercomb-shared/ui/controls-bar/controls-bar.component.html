@@ -135,11 +135,25 @@
              end of the row toggles edit mode — while editing, every click
              flips an item's enabled state instead of running its action. -->
         <div class="controls-rows" [class.editing]="editMode()">
+          <!-- HOME ("comb") — pinned to the TOP of the left-docked rail; jumps
+               to the domain root (hypercomb.io home), same target as the
+               leading domain crumb. Only shown on the left dock, where the rail
+               is a full-height vertical strip with a scrollable middle. -->
+          @if (dockSide() === 'left') {
+            <button class="ctl-btn rail-home"
+                    (click)="goHome()"
+                    [attr.aria-label]="'controls.home' | t">
+              <span class="mat-sym">home</span>
+            </button>
+          }
+          <!-- SCROLLABLE icon list — every control except back. As the set
+               grows the rail scrolls here while home (top) and the footer
+               (bottom) stay pinned and reachable. -->
           <div class="controls-row">
-            @for (ctrl of visibleControls(); track ctrl.id) {
+            @for (ctrl of railControls(); track ctrl.id) {
               <button class="ctl-btn"
                       [class.active]="ctrl.id !== 'fit' && isActive(ctrl)"
-                      [class.lock-bump]="ctrl.id === 'lock' && lockBump()"
+                      [class.lock-bump]="ctrl.id === 'pin' && lockBump()"
                       [class.muted]="!isEnabled(ctrl)"
                       [class.editing]="editMode()"
                       [class.eye-btn]="ctrl.id === 'show-hidden'"
@@ -169,14 +183,27 @@
                 }
               </button>
             }
-            <!-- edit-mode toggle (chevron) — a row sibling so CSS order can
-                 place it among the icons (after the last one) while the back
-                 button stays anchored at the very bottom of the rail. -->
+          </div>
+          <!-- FOOTER — pinned to the BOTTOM of the rail. The edit-mode chevron
+               sits at the bottom of the list so it stays reachable even when
+               the icons overflow and scroll; back is anchored below it as the
+               very-bottom rail action. In the horizontal pill this zone
+               collapses (display:contents) and CSS order keeps back leftmost /
+               chevron rightmost, exactly as before. -->
+          <div class="rail-footer">
             <button class="ctl-btn expand-toggle"
                     [class.editing]="editMode()"
                     (click)="toggleEditMode()"
                     [attr.aria-label]="editMode() ? ('controls.collapse' | t) : ('controls.expand' | t)">
               <span class="expand-chevron" [class.up]="editMode()">&#x25B8;</span>
+            </button>
+            <button class="ctl-btn rail-back"
+                    data-ctrl-id="back"
+                    [class.disabled]="!canGoBack()"
+                    [disabled]="!canGoBack()"
+                    (click)="goBack()"
+                    [attr.aria-label]="'controls.go-back' | t">
+              <span class="mat-sym">arrow_back</span>
             </button>
           </div>
         </div>

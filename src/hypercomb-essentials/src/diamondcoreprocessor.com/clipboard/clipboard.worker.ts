@@ -518,8 +518,8 @@ export class ClipboardWorker extends Worker {
 
   // ── validate ──────────────────────────────────────────
   // Drop entries that are DEFINITIVELY gone, so the clipboard count never
-  // shows a tile that no longer exists. Called from restore and from
-  // openClipboard before emitting view.
+  // shows a tile that no longer exists. Called from restore and from the
+  // controls-bar toggleClipboard before opening the panel.
   //
   // CONSERVATIVE BY DESIGN: viewing the clipboard must never lose data.
   // Membership is resolved the authoritative way — through the source
@@ -527,7 +527,7 @@ export class ClipboardWorker extends Worker {
   // paste use. The previous check used currentLayerAt(sign(source+label)),
   // i.e. the CELL'S OWN bag, which is empty for any cell never navigated
   // into — so it false-flagged live tiles as ghosts, validate removed
-  // them, and openClipboard then bailed on the now-empty clipboard
+  // them, and toggleClipboard then bailed on the now-empty clipboard
   // ("click clipboard → tile disappears, lost"). An entry is dropped ONLY
   // when its parent layer loaded AND the cell is absent from it (and the
   // own-bag fallback also misses). A cold/unresolvable parent is treated

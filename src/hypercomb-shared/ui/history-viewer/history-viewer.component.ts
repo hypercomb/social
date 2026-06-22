@@ -363,6 +363,17 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
   readonly customWidth = this.#customWidth.asReadonly()
   #resizing: { startX: number; startWidth: number } | null = null
 
+  // Content scale: as the user drags the panel narrower, the rows/header
+  // shrink (em-based, driven by `--hc-panel-scale`) to fit instead of just
+  // truncating. Null width (never resized) → full size. Capped at 1 — history
+  // gains nothing from growing, only from shrinking when cramped. The centered
+  // slice/merge modals are SIBLINGS of `.history-viewer`, so they're unaffected.
+  readonly contentScale = computed(() => {
+    const w = this.#customWidth()
+    if (w == null) return 1
+    return Math.min(1, Math.max(0.72, w / 420))
+  })
+
   constructor() {
     // When the panel becomes visible, refresh entries + contents. Done
     // as an effect rather than a simple ngOnInit call so the panel

@@ -3,6 +3,7 @@
          hcDockInset="left"
          [attr.data-consumes-wheel]="''"
          [style.width.px]="customWidth()"
+         [style.--hc-panel-scale]="contentScale()"
          [style.max-width]="customWidth() !== null ? 'none' : null"
          [attr.aria-label]="'history.viewer-title' | t">
     <div class="history-viewer-resizer"

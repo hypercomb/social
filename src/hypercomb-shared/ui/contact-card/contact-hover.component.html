@@ -20,7 +20,7 @@
         <span class="contact-drag-grip" aria-hidden="true">⠿</span>
       }
       <span class="contact-hover-title">{{ 'contact.hover.title' | t }}</span>
-      <span class="contact-hover-cell">{{ panel.label }}</span>
+      <span class="contact-hover-cell">{{ panel.data.label }}</span>
       @if (!panel.ephemeral) {
         <button
           class="contact-hover-close"
@@ -33,7 +33,7 @@
     </header>
 
     <div class="contact-hover-body">
-      @for (c of panel.contacts; track c.decorationSig) {
+      @for (c of panel.data.contacts; track c.decorationSig) {
         <article class="contact-card">
           <div class="contact-card-head">
             <span class="contact-name">{{ c.name }}</span>

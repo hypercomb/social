@@ -259,6 +259,10 @@
     // content-box adds the padding on top and shoves the bottom (the back
     // button) below the viewport fold.
     box-sizing: border-box;
+    // The rail itself never scrolls — only the inner icon list (.controls-row)
+    // does — so home (top) and the footer (bottom) stay pinned to the rail's
+    // edges while the icon set in between scrolls.
+    overflow: hidden;
     height: 100%;
     max-height: none;
     width: 3.4rem;             // a calm, even rail width
@@ -276,23 +280,54 @@
     );
   }
 
-  // Controls fill the height between grip and bottom edge, so the back button
-  // can rest at the very bottom while everything else flows up under the grip.
-  .controls-rows { flex: 1; width: 100%; }
-  .controls-row  { flex: 1; }
+  // The rail is three stacked zones: home (top, fixed), the scrollable icon
+  // list (middle, grows + scrolls), and the footer (bottom, fixed). controls-rows
+  // fills the height between grip and bottom edge; only the middle scrolls.
+  .controls-rows { flex: 1; width: 100%; min-height: 0; }
 
-  // back (registry-first) is ordered last and pushed to the very bottom; the
-  // auto margin absorbs the slack so the rest pack up at the top. It reads as
-  // an anchored footer action — a hairline separates it from the empty rail
-  // above and it gets a touch more height so it feels grounded.
-  .controls-row .ctl-btn:first-child {
-    order: 99;
-    margin-top: auto;
-    padding: 0.65rem 0 0.48rem;
-    border-top: 1px solid color-mix(in srgb, var(--md-outline-variant) 50%, transparent);
+  // Scrollable middle. A thin scrollbar appears only when the icon set
+  // outgrows the rail, so the whole list stays reachable as it lengthens.
+  .controls-row {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--md-outline-variant) 85%, transparent) transparent;
+    &::-webkit-scrollbar { width: 6px; }
+    &::-webkit-scrollbar-thumb {
+      background: color-mix(in srgb, var(--md-outline-variant) 85%, transparent);
+      border-radius: 3px;
+    }
+    &::-webkit-scrollbar-track { background: transparent; }
+
+    // Keep icons at their natural height so the list overflows (and scrolls)
+    // rather than squashing every icon to fit.
+    > .ctl-btn { flex-shrink: 0; }
+  }
+
+  // Home pinned at the very top under the grip, a hairline below it.
+  .rail-home {
+    flex-shrink: 0;
+    padding: 0.5rem 0 0.55rem;
+    border-bottom: 1px solid color-mix(in srgb, var(--md-outline-variant) 50%, transparent);
     color: var(--md-on-surface);
-
     &:hover { color: whitesmoke; }
+  }
+
+  // Footer pinned at the bottom: the edit-toggle chevron sits at the bottom of
+  // the list (always reachable, even when the icons scroll), with back anchored
+  // beneath it as a grounded footer action separated by a hairline. Slightly
+  // taller so it feels like a footer, not just another icon.
+  .rail-footer {
+    border-top: 1px solid color-mix(in srgb, var(--md-outline-variant) 50%, transparent);
+  }
+  .rail-back {
+    padding: 0.6rem 0 0.48rem;
+    color: var(--md-on-surface);
+    &:hover { color: whitesmoke; }
+    &.disabled,
+    &:disabled { opacity: 0.35; cursor: default; }
   }
 
   // ── classier chrome ──────────────────────────────────────
@@ -401,17 +436,16 @@
 
 // Explicit rail icon order (top → bottom). Mostly registry order, but the two
 // magnifiers are flipped so the +(zoom-in) stays ABOVE the −(zoom-out). Any
-// enabled extra (default order 50) falls below the named set; the edit-mode
-// triangle sits right after the icons (order 90), and back (order 99, via
-// :first-child above) stays anchored alone at the very bottom.
+// enabled extra (default order 50) falls below the named set. The edit-mode
+// chevron and back now live in the pinned footer (a separate zone), so they're
+// no longer ordered here.
 .pill-stage.dock-left .controls-row {
   .ctl-btn                             { order: 50; }
-  .ctl-btn.expand-toggle               { order: 90; }
   .ctl-btn[data-ctrl-id='dcp']         { order: 1; }
   .ctl-btn[data-ctrl-id='fit']         { order: 2; }
   .ctl-btn[data-ctrl-id='zoom-in']     { order: 3; }
   .ctl-btn[data-ctrl-id='zoom-out']    { order: 4; }
-  .ctl-btn[data-ctrl-id='lock']        { order: 5; }
+  .ctl-btn[data-ctrl-id='pin']         { order: 5; }
   .ctl-btn[data-ctrl-id='fullscreen']  { order: 6; }
 
   // Horizontal separator setting the world-mode (sharing) toggle apart from
@@ -533,6 +567,26 @@
   gap: 0.15rem;
   min-height: 2rem;
   border-radius: 3px;
+}
+
+// ── rail zones: home (top) · scrollable list (middle) · footer (bottom) ──
+// In the vertical docks these become real flex zones (see .controls-pill.column
+// and .pill-stage.dock-left) that bracket a scrollable icon list. In the
+// horizontal floating pill the footer collapses (display:contents) so chevron +
+// back sit inline on the single row, and CSS order keeps back leftmost /
+// chevron rightmost — exactly the previous layout.
+.rail-footer { display: contents; }
+
+.controls-pill:not(.column) {
+  .controls-rows { flex-direction: row; align-items: center; }
+  .rail-back     { order: -1; }   // leftmost, as before
+  .controls-row  { order: 0; }
+  .expand-toggle { order: 1; }    // rightmost, as before
+}
+
+.controls-pill.column {
+  .rail-home   { flex-shrink: 0; }
+  .rail-footer { display: flex; flex-direction: column; flex-shrink: 0; }
 }
 
 // Muted (user-disabled) controls: completely hidden in normal mode so

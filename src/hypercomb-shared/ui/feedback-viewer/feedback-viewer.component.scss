@@ -1,0 +1,173 @@
+// hypercomb-shared/ui/feedback-viewer/feedback-viewer.component.scss
+//
+// Right-docked "Feedback" review panel. Not a dimming modal — the hive stays
+// visible behind it (host pointer-events:none; panel auto). Steel accent
+// matches the feedback button. Cold, clean chrome.
+
+@use '../breakpoints' as *;
+
+$steel: rgb(126, 182, 214);
+
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 100002;
+  pointer-events: none;
+}
+
+.feedback-viewer-panel {
+  pointer-events: auto;
+  position: absolute;
+  // Dock flush below the header bar, tracking the active header size (the
+  // right-side analog of the Features panel). `bottom: 0` runs to the floor.
+  top: calc(2.8rem * var(--hc-header-zoom, 1.0));
+  right: 0;
+  bottom: 0;
+  width: min(360px, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  background: rgba(14, 17, 24, 0.96);
+  backdrop-filter: blur(18px);
+  border-left: 1px solid rgba($steel, 0.5);
+  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba($steel, 0.06) inset;
+  font-family: var(--hc-mono, system-ui);
+  color: #eef3f8;
+  outline: none;
+}
+
+.fv-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.9rem 1rem 0.7rem;
+  border-bottom: 1px solid rgba($steel, 0.22);
+}
+
+.fv-heading { display: flex; flex-direction: column; gap: 0.2rem; }
+
+.fv-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: rgba(206, 224, 240, 0.96);
+}
+
+.fv-subtitle {
+  font-size: 0.68rem;
+  color: rgba(206, 224, 240, 0.5);
+}
+
+.fv-close {
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  color: rgba(226, 235, 244, 0.6);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  transition: color 150ms ease;
+  &:hover { color: #fff; }
+}
+
+.fv-empty {
+  margin: 0;
+  padding: 1.5rem 1rem;
+  font-size: 0.82rem;
+  color: rgba(226, 235, 244, 0.45);
+}
+
+.fv-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem 0 0.6rem;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.fv-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  transition: background 120ms ease;
+
+  &:hover { background: rgba($steel, 0.06); }
+}
+
+.fv-icon {
+  flex: 0 0 auto;
+  margin-top: 0.1rem;
+  font-family: 'Material Symbols Outlined';
+  font-size: 1.1rem;
+  line-height: 1;
+  color: rgba($steel, 0.8);
+
+  // bug reports read in a warmer "needs attention" tone
+  .fv-row.issue & { color: rgba(240, 176, 92, 0.9); }
+}
+
+.fv-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.fv-text {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: #eef3f8;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.fv-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.64rem;
+  font-family: var(--hc-mono, monospace);
+  color: rgba(226, 235, 244, 0.4);
+}
+
+.fv-route {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 12rem;
+  color: rgba($steel, 0.7);
+}
+
+.fv-resolve {
+  flex: 0 0 auto;
+  align-self: center;
+  font-family: inherit;
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  padding: 0.28rem 0.55rem;
+  border-radius: 5px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: rgba(226, 235, 244, 0.65);
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+
+  &:hover {
+    color: #fff;
+    background: rgba($steel, 0.16);
+    border-color: rgba($steel, 0.55);
+  }
+}
+
+// ── responsive header clearance (mirror Features panel) ──
+@include touch {
+  .feedback-viewer-panel { top: calc(3.85rem * var(--hc-header-zoom, 1.0)); }
+}
+@include phone-only {
+  .feedback-viewer-panel { top: 0; width: 100%; }
+}

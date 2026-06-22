@@ -28,7 +28,7 @@ import { secretTag } from './secret-words'
 const PILL_POS_KEY = 'hc:controls-pill-pos'
 const ENABLED_MAP_KEY = 'hc:controls-enabled-map'
 
-/** How long the header lock button pulses after a locked pan/zoom attempt. */
+/** How long the pin button pulses after a pan/zoom attempt on a pinned view. */
 const LOCK_BUMP_MS = 900
 
 // ── control registry ──────────────────────────────────────
@@ -53,31 +53,33 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   { id: 'fit',          label: 'controls.fit-content',  action: 'fitOrCenter',        visibleWhen: 'always', instruction: 'dcp.fit-content' },
   { id: 'zoom-out',     label: 'controls.zoom-out',     action: 'zoomOut',            visibleWhen: 'always', instruction: 'dcp.zoom-out' },
   { id: 'zoom-in',      label: 'controls.zoom-in',      action: 'zoomIn',             visibleWhen: 'always', instruction: 'dcp.zoom-in' },
-  { id: 'lock',         label: 'controls.lock',         action: 'toggleLock',         visibleWhen: 'always', instruction: 'dcp.lock' },
+  { id: 'pin',          label: 'controls.pin',          action: 'togglePin',          visibleWhen: 'always', instruction: 'dcp.pin' },
   { id: 'fullscreen',   label: 'controls.fullscreen',   action: 'toggleFullscreen',   visibleWhen: 'always', instruction: 'dcp.fullscreen' },
   { id: 'instructions', label: 'controls.instructions', action: 'toggleInstructions', visibleWhen: 'always', instruction: 'dcp.instructions-toggle' },
   { id: 'show-hidden',  label: 'controls.show-hidden',  action: 'toggleShowHidden',   visibleWhen: 'always' },
   { id: 'world-mode',   label: 'controls.world-mode',   action: 'toggleWorldMode',    visibleWhen: 'always' },
   { id: 'neon-mode',    label: 'controls.neon-mode',    action: 'toggleNeonMode',     visibleWhen: 'always' },
   { id: 'text-only',    label: 'controls.text-only',    action: 'toggleTextOnly',     visibleWhen: 'always' },
+  { id: 'notes',        label: 'controls.notes',        action: 'toggleNotes',        visibleWhen: 'always' },
   { id: 'cut',          label: 'selection.cut',         action: 'cut',                visibleWhen: 'hasSelection' },
   { id: 'copy',         label: 'selection.copy',        action: 'copy',               visibleWhen: 'hasSelection' },
-  { id: 'clipboard',    label: 'controls.clipboard',    action: 'openClipboard',      visibleWhen: 'clipboardHasItems' },
   { id: 'voice',        label: 'controls.voice',        action: 'toggleVoice',        visibleWhen: 'voiceSupported' },
   // 'room' (the location icon) is gone from the bar — the location dialog now
   // pops as the JOIN step when the participant flips solo → public (see
   // toggleMeshPublic below): configure where, press start, you're in the swarm.
   { id: 'bees',         label: 'controls.toggle-bees',  action: 'toggleBees',         visibleWhen: 'public' },
+  { id: 'feedback',     label: 'controls.feedback',     action: 'toggleFeedback',     visibleWhen: 'always' },
 ]
 
 // First-time defaults: items the previous primary-row had on stay enabled,
 // items the previous expand-row had become muted (grayed). Once a user toggles
 // anything in edit mode the persisted map takes over.
 const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
-  'back': true, 'dcp': true, 'fit': true, 'zoom-out': true, 'zoom-in': true, 'lock': true, 'fullscreen': true,
+  'back': true, 'dcp': true, 'fit': true, 'zoom-out': true, 'zoom-in': true, 'pin': true, 'fullscreen': true,
   'instructions': false, 'show-hidden': false, 'world-mode': true, 'neon-mode': false, 'text-only': false,
+  'notes': true,
   'cut': false, 'copy': false,
-  'clipboard': false, 'voice': false, 'bees': false,
+  'clipboard': false, 'voice': false, 'bees': false, 'feedback': false,
 }
 
 @Component({
@@ -164,12 +166,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     () => (get('@diamondcoreprocessor.com/InputGate') as { locked?: boolean } | undefined)?.locked ?? false,
   )
 
-  // ── locked-attempt pulse on the header lock button ─────
+  // ── locked-attempt pulse on the pin button ─────────────
   //
   // When a pan or zoom gesture is rejected because input is locked, the
-  // InputGate emits `input:locked-attempt` (throttled). We pulse the lock
+  // InputGate emits `input:locked-attempt` (throttled). We pulse the pin
   // button to tell the user *why* the viewport didn't move — most often
-  // because they locked it themselves with this very button. Covers both
+  // because they pinned it themselves with this very button. Covers both
   // pan (touch/spacebar via gate.claim()) and zoom (wheel/pinch).
   readonly #lockBump = signal(false)
   readonly lockBump = this.#lockBump.asReadonly()
@@ -293,6 +295,18 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     return this.navigation.segmentsRaw().join('/')
   }
   #clipboardAvailable = signal(false)
+  // Whether the side panel is currently open. Mirrors the panel's own
+  // `clipboard:open` state event so the toolbar button can both toggle it
+  // and light up while it's showing.
+  #clipboardPanelOpen = signal(false)
+  // Whether the notes strip is currently open. Mirrors the strip's own
+  // `notes:panel-state` event so the Notes button toggles it and lights up
+  // while it's showing. The strip no longer auto-opens on selection — this
+  // toggle is the sole on/off control.
+  #notesPanelOpen = signal(false)
+  // Mirrors the feedback review panel's `feedback:viewer-open` broadcast so the
+  // controls-bar button lights up while the panel is showing.
+  #feedbackPanelOpen = signal(false)
   #hasSelection = signal(false)
   #textOnly = signal(false)
   #layoutPinned = signal(false)
@@ -317,6 +331,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   /** Flat list of every visible control, in registry order. */
   readonly visibleControls = computed((): ControlItem[] =>
     CONTROL_REGISTRY.filter(ctrl => this.#isControlVisible(ctrl))
+  )
+
+  /** The scrollable icon set: every visible control EXCEPT back. Back is a
+   *  structural footer action (rendered separately, pinned to the bottom of
+   *  the rail) so it stays reachable no matter how long the icon list grows
+   *  and is never user-mutable in edit mode. */
+  readonly railControls = computed((): ControlItem[] =>
+    this.visibleControls().filter(ctrl => ctrl.id !== 'back')
   )
 
   readonly editMode = this.#editMode.asReadonly()
@@ -350,18 +372,20 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     fitOrCenter: (e) => this.fitOrCenter(e!),
     zoomOut: () => this.zoomOut(),
     zoomIn: () => this.zoomIn(),
-    toggleLock: () => this.toggleLock(),
+    togglePin: () => this.togglePin(),
     toggleFullscreen: () => this.toggleFullscreen(),
     toggleInstructions: (e) => this.toggleInstructions(e!),
     toggleShowHidden: () => this.toggleShowHidden(),
     toggleWorldMode: () => this.toggleWorldMode(),
     toggleNeonMode: () => this.toggleNeonMode(),
     toggleTextOnly: () => this.toggleTextOnly(),
+    toggleNotes: () => this.toggleNotes(),
     cut: () => this.cut(),
     copy: () => this.copy(),
-    openClipboard: () => this.openClipboard(),
+    toggleClipboard: () => this.toggleClipboard(),
     toggleVoice: () => this.toggleVoice(),
     toggleBees: () => this.toggleBees(),
+    toggleFeedback: () => EffectBus.emit('feedback:viewer-toggle', {}),
   }
 
   readonly runAction = (action: string, event: MouseEvent): void => {
@@ -370,7 +394,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly isActive = (ctrl: ControlItem): boolean => {
     switch (ctrl.id) {
-      case 'lock': return this.#locked()
+      case 'clipboard': return this.#clipboardPanelOpen()
+      case 'notes': return this.#notesPanelOpen()
+      case 'pin': return this.#locked()
       case 'fit': return this.fitLocked()
       case 'show-hidden': return this.#showHidden()
       case 'world-mode': return this.#worldMode()
@@ -378,14 +404,16 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'text-only': return this.#textOnly()
       case 'bees': return this.#beesVisible()
       case 'voice': return this.voiceActive()
+      case 'feedback': return this.#feedbackPanelOpen()
       default: return false
     }
   }
 
   /** Material Symbols name for each control id. Used by the desktop
    *  control row to render Material Symbols instead of the custom
-   *  'hypercomb-icons' font glyphs. Stateful controls (lock, show-hidden,
-   *  text-only, voice, bees) return different symbols based on state.
+   *  'hypercomb-icons' font glyphs. Stateful controls (pin, show-hidden,
+   *  text-only, voice, bees) read distinctly via the FILL axis (.filled)
+   *  rather than a separate glyph.
    *  Returns an empty string for unknown ids so the template falls back
    *  to the legacy glyph rendering. */
   readonly iconSymbol = (ctrl: ControlItem): string => {
@@ -400,18 +428,20 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       // it so the lens lands roughly on the button's geometric centre.
       case 'zoom-out':     return 'zoom_out'
       case 'zoom-in':      return 'zoom_in'
-      case 'lock':         return this.#locked() ? 'lock' : 'lock_open'
+      case 'pin':          return 'push_pin'
       case 'fullscreen':   return 'fullscreen'
       case 'instructions': return 'help'
       case 'show-hidden':  return this.showHidden() ? 'visibility' : 'visibility_off'
       case 'world-mode':   return 'public'
       case 'neon-mode':    return 'flare'
       case 'text-only':    return this.textOnly() ? 'text_fields' : 'subject'
+      case 'notes':        return 'sticky_note_2'
       case 'cut':          return 'content_cut'
       case 'copy':         return 'content_copy'
       case 'clipboard':    return 'content_paste'
       case 'voice':        return 'mic'
       case 'bees':         return 'hub'
+      case 'feedback':     return 'rate_review'
       default:             return ''
     }
   }
@@ -724,6 +754,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #textOnlyUnsub: (() => void) | null = null
   #neonModeUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
+  #clipboardOpenUnsub: (() => void) | null = null
+  #notesOpenUnsub: (() => void) | null = null
+  #feedbackOpenUnsub: (() => void) | null = null
   #atomizeModeUnsub: (() => void) | null = null
   #atomizeAtomsUnsub: (() => void) | null = null
   #atomizeStrategyUnsub: (() => void) | null = null
@@ -732,8 +765,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #lockBumpUnsub: (() => void) | null = null
 
   ngOnInit(): void {
-    // Pulse the header lock button when a pan/zoom is rejected because
-    // input is locked. Transient (no replay) so a fresh mount never bumps.
+    // Pulse the pin button when a pan/zoom is rejected because input is
+    // locked. Transient (no replay) so a fresh mount never bumps.
     this.#lockBumpUnsub = EffectBus.on('input:locked-attempt', this.#flashLockBump)
 
     this.#meshModalUnsub = EffectBus.on<{ open: boolean }>('mesh:modal-open', ({ open }) => {
@@ -798,6 +831,26 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#clipboardUnsub = EffectBus.on<{ items?: { label: string }[] }>('clipboard:changed', (payload) => {
       const items = payload?.items ?? []
       this.#clipboardItems.set(items.map(item => item.label))
+    })
+
+    // Mirror the panel's open state (it emits `clipboard:open` from its
+    // single visibility chokepoint) so the toolbar button toggles correctly
+    // and shows an active highlight while the panel is open. Last-value
+    // replayed, so a late mount reflects the current panel state.
+    this.#clipboardOpenUnsub = EffectBus.on<{ open?: boolean }>('clipboard:open', ({ open }) => {
+      this.#clipboardPanelOpen.set(!!open)
+    })
+
+    // Mirror the notes strip's open state (it emits `notes:panel-state` from
+    // its toggle chokepoint) so the Notes button toggles correctly and lights
+    // up while the strip is showing. Last-value replayed, so a late mount
+    // reflects the current strip state.
+    this.#notesOpenUnsub = EffectBus.on<{ open?: boolean }>('notes:panel-state', ({ open }) => {
+      this.#notesPanelOpen.set(!!open)
+    })
+
+    this.#feedbackOpenUnsub = EffectBus.on<{ open?: boolean }>('feedback:viewer-open', ({ open }) => {
+      this.#feedbackPanelOpen.set(!!open)
     })
 
     this.#moveModeUnsub = EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
@@ -960,6 +1013,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#textOnlyUnsub?.()
     this.#neonModeUnsub?.()
     this.#clipboardAvailableUnsub?.()
+    this.#clipboardOpenUnsub?.()
+    this.#notesOpenUnsub?.()
+    this.#feedbackOpenUnsub?.()
     this.#tagsUnsub?.()
     this.#hoverTagsUnsub?.()
     this.#atomizeModeUnsub?.()
@@ -1009,6 +1065,13 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly navigateTo = (segments: string[]): void => {
     this.navigation.goRaw(segments)
+  }
+
+  /** Home: jump to the root of the tree (empty segment path) — the domain
+   *  root, i.e. hypercomb.io's home. Same target as clicking the leading
+   *  domain crumb. Pinned to the top of the left-docked rail. */
+  readonly goHome = (): void => {
+    this.navigateTo([])
   }
 
   // ── view actions ──────────────────────────────────────
@@ -1227,15 +1290,16 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     vp?.setPan?.(snap.dx, snap.dy)
   }
 
-  readonly toggleLock = (): void => {
-    // Track our OWN 'manual' lock rather than the gate's combined state.
-    // Reading gate.locked here would leave the button unable to release once
-    // an overlay (editor, notes strip) also holds a lock — the gate stays
-    // locked by that owner and the toggle would appear stuck. lockedBy is
-    // optional-chained so an older gate build degrades to a no-op rather
-    // than throwing.
-    if (this.gate?.lockedBy?.('manual')) this.gate.unlock('manual')
-    else this.gate?.lock('manual')
+  readonly togglePin = (): void => {
+    // Pinning the viewport holds it in place — it locks the shared InputGate
+    // under our OWN 'pin' owner rather than reading the gate's combined
+    // state. Reading gate.locked here would leave the button unable to
+    // release once an overlay (editor, notes strip) also holds a lock — the
+    // gate stays locked by that owner and the toggle would appear stuck.
+    // lockedBy is optional-chained so an older gate build degrades to a
+    // no-op rather than throwing.
+    if (this.gate?.lockedBy?.('pin')) this.gate.unlock('pin')
+    else this.gate?.lock('pin')
   }
 
   readonly zoomIn = (): void => {
@@ -1370,8 +1434,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.meshToggled.emit()
   }
 
-  readonly openClipboard = async (): Promise<void> => {
+  readonly toggleClipboard = async (): Promise<void> => {
     if (!this.#clipboardAvailable()) return
+
+    // Already open → just close it. No validate/isEmpty dance needed to
+    // hide the panel, and skipping it keeps the close instant.
+    if (this.#clipboardPanelOpen()) {
+      EffectBus.emit('clipboard:panel', { visible: false })
+      return
+    }
 
     // Drop any ghost entries before opening — ensures the clipboard view
     // never shows a tile that has no underlying folder, and the count
@@ -1390,6 +1461,14 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // The panel (hc-clipboard-panel) lists the captured tiles and places
     // them onto THIS page in place.
     EffectBus.emit('clipboard:panel', { visible: true })
+  }
+
+  /** Notes button — toggles the notes strip open/closed. The strip no longer
+   *  auto-opens on selection, so this is the sole on/off control. The strip
+   *  broadcasts its state back via `notes:panel-state`, keeping
+   *  #notesPanelOpen (and the button's lit highlight) in sync. */
+  readonly toggleNotes = (): void => {
+    EffectBus.emit('notes:panel', { visible: !this.#notesPanelOpen() })
   }
 
   // ── atomize ──────────────────────────────────────────

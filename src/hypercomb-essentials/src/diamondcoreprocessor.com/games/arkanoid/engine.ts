@@ -9,7 +9,10 @@
 // Bricks drop power-up "pills" the paddle can catch:
 //   O oscillate — balls weave on a sine path. PERMANENT for the round (no
 //                 timeout): each O doubles the weave width and nudges ball
-//                 speed up a notch. Stacks until you die / clear the level.
+//                 speed up a notch. Stacks until you die / clear the level. A
+//                 coloured weave halo signals the stack state (cool teal → hot
+//                 magenta); harder difficulties weave more AGGRESSIVELY (wider,
+//                 faster) — peaking at Gangster.
 //   B break     — every ball splits into three of its own kind (white → white,
 //                 colour → colour) — multi-ball, and more lives if you split white
 //   L laser     — Space fires upward beams (countdown-timed)
@@ -31,8 +34,8 @@
 //                 doubles/triples the points everything scores while active.
 //   * burst     — for 8s EVERY brick is one-hit: a single touch destroys it,
 //                 tough bricks included.
-//   P pinball   — timed flipper mode (10/12/15s): two field bumpers bounce balls
-//                 around and the white ball doubles in size and damage.
+//   P pinball   — timed flipper mode: two field bumpers bounce balls around and
+//                 the white ball doubles in SIZE but does only a quarter damage.
 //   I beam      — a PURPLE magic mushroom. 5 shots (no timer): auto-charges
 //                 ~1.2s then releases a laser up the paddle's middle, damaging
 //                 the whole column. Grab more to power up 1→2→3 (level 3 clears
@@ -75,13 +78,16 @@ export interface Fireball {
 export interface DifficultyProfile {
   name: string; tagline: string; lives: number; ballSpeedMul: number; enemyCapBonus: number
   enemyFireMul: number; enemyRefillMul: number; franticDelayMul: number; turretDmgMul: number; hazardCooldownMul: number
+  oscAggroMul: number   // oscillate aggression: scales weave width, weave frequency AND the per-stack speed bump (1 = base, Gangster = wildest)
+  supportMul: number    // defensive-drop flood: scales heal/shield/regen weights (1 = base, Gangster = drowning in support)
+  mayhemMul: number     // action intensity: quickens the pill waves AND the cadence of the recurring frenzy storms (1 = no storms recur, Gangster = relentless)
 }
 export const DIFFICULTY: readonly DifficultyProfile[] = [
-  { name: 'Rookie',   tagline: 'Fresh off the block — the streets are still smiling at you.',                  lives: 3, ballSpeedMul: 1,    enemyCapBonus: 0, enemyFireMul: 1,    enemyRefillMul: 1,    franticDelayMul: 1,    turretDmgMul: 1,    hazardCooldownMul: 1 },
-  { name: 'Hustler',  tagline: "You've got a corner now — and the corner's got eyes on you.",                  lives: 3, ballSpeedMul: 1.08, enemyCapBonus: 0, enemyFireMul: 0.9,  enemyRefillMul: 0.85, franticDelayMul: 0.85, turretDmgMul: 1.15, hazardCooldownMul: 0.88 },
-  { name: 'Made',     tagline: "You got your button — respect's real now, and so are the targets on your back.", lives: 3, ballSpeedMul: 1.16, enemyCapBonus: 1, enemyFireMul: 0.8,  enemyRefillMul: 0.72, franticDelayMul: 0.72, turretDmgMul: 1.3,  hazardCooldownMul: 0.78 },
-  { name: 'Kingpin',  tagline: 'Half the city runs on your say-so — the other half wants you in the river.',   lives: 2, ballSpeedMul: 1.24, enemyCapBonus: 2, enemyFireMul: 0.68, enemyRefillMul: 0.6,  franticDelayMul: 0.6,  turretDmgMul: 1.45, hazardCooldownMul: 0.68 },
-  { name: 'Gangster', tagline: "No rank above you, no mercy below — everybody's gunning for the throne.",       lives: 1, ballSpeedMul: 1.32, enemyCapBonus: 2, enemyFireMul: 0.58, enemyRefillMul: 0.5,  franticDelayMul: 0.5,  turretDmgMul: 1.6,  hazardCooldownMul: 0.6 },
+  { name: 'Rookie',   tagline: 'Fresh off the block — the streets are still smiling at you.',                  lives: 3, ballSpeedMul: 1,    enemyCapBonus: 0, enemyFireMul: 1,    enemyRefillMul: 1,    franticDelayMul: 1,    turretDmgMul: 1,    hazardCooldownMul: 1,    oscAggroMul: 1,    supportMul: 1,   mayhemMul: 1   },
+  { name: 'Hustler',  tagline: "You've got a corner now — and the corner's got eyes on you.",                  lives: 3, ballSpeedMul: 1.08, enemyCapBonus: 0, enemyFireMul: 0.9,  enemyRefillMul: 0.85, franticDelayMul: 0.85, turretDmgMul: 1.15, hazardCooldownMul: 0.88, oscAggroMul: 1.15, supportMul: 1.3, mayhemMul: 1.2 },
+  { name: 'Made',     tagline: "You got your button — respect's real now, and so are the targets on your back.", lives: 3, ballSpeedMul: 1.16, enemyCapBonus: 1, enemyFireMul: 0.8,  enemyRefillMul: 0.72, franticDelayMul: 0.72, turretDmgMul: 1.3,  hazardCooldownMul: 0.78, oscAggroMul: 1.3,  supportMul: 1.7, mayhemMul: 1.4 },
+  { name: 'Kingpin',  tagline: 'Half the city runs on your say-so — the other half wants you in the river.',   lives: 2, ballSpeedMul: 1.24, enemyCapBonus: 2, enemyFireMul: 0.68, enemyRefillMul: 0.6,  franticDelayMul: 0.6,  turretDmgMul: 1.45, hazardCooldownMul: 0.68, oscAggroMul: 1.5,  supportMul: 2.2, mayhemMul: 1.7 },
+  { name: 'Gangster', tagline: "No rank above you, no mercy below — everybody's gunning for the throne.",       lives: 1, ballSpeedMul: 1.32, enemyCapBonus: 2, enemyFireMul: 0.58, enemyRefillMul: 0.5,  franticDelayMul: 0.5,  turretDmgMul: 1.6,  hazardCooldownMul: 0.6,  oscAggroMul: 1.8,  supportMul: 3.2, mayhemMul: 2.2 },
 ]
 export type ProjKind = 'shot' | 'bomb' | 'bolt' | 'seeker' | 'spread'   // enemy projectile flavours
 export interface TurretShot { x: number; y: number; vx: number; vy: number; kind?: ProjKind; t?: number }
@@ -134,7 +140,7 @@ export const POWER_META: Record<PowerKind, PowerMeta> = {
   rocket: { letter: '↑', color: '#ff7043', name: 'rocket', desc: 'Right-click to launch your one missile. It explodes on the first thing it hits, blasting bricks in range.' },
   multiplier: { letter: '×', color: '#ffd24a', name: 'multiplier', desc: '2× or 3× score for everything while it lasts.' },
   burst: { letter: '∗', color: '#3dd7ff', name: 'burst', desc: 'For 8 seconds every brick dies in one hit — tough ones included.' },
-  pinball: { letter: 'P', color: '#8c9eff', name: 'pinball', desc: 'Flipper mode: two field bumpers bounce balls around and the white ball doubles in size and damage. Timed.' },
+  pinball: { letter: 'P', color: '#8c9eff', name: 'pinball', desc: 'Flipper mode: two field bumpers bounce balls around and the white ball doubles in size but does only a quarter of the damage. Timed.' },
   beam: { letter: 'I', color: '#9d5cff', name: 'beam', desc: 'A purple magic mushroom. 4 shots, no timer: charges ~1.2–1.5s then fires a laser up the middle, damaging that whole column. Grab more to power up — level 3 clears the line.' },
   clock: { letter: 'T', color: '#7ee0ff', name: 'time clock', desc: 'Caught from the alien with at least one colour ball in play: freezes your white ball(s) and every hazard for a few seconds while colour balls keep clearing.' },
   ballchain: { letter: '&', color: '#cfd3da', name: 'ball & chain', desc: 'A spiked wrecking ball swings from the white ball — kills the hunter and smashes falling pills. Smash 5 pills before it ends and a gold paper crane flutters down — catch it for the 100,000 jackpot.' },
@@ -241,6 +247,9 @@ const POWER_WEIGHTS: Record<PowerKind, number> = {
   extralife: 0,                        // never an ambient drop — only the carrier alien gives it
   crane: 0,                            // never an ambient drop — only earned from a ball & chain run
 }
+// Defensive (survival) drops — their weight is FLOODED by the difficulty's supportMul
+// and again by live danger (low bat HP / on the brink / mid-frenzy). See #randomPower.
+const DEFENSIVE = new Set<PowerKind>(['heal', 'shield', 'regen'])
 
 // Laser → charge-and-release FIREBALL cannon: 4 shots (no timer); hold to charge,
 // release to launch a Street-Fighter fireball. Longer hold = bigger tier.
@@ -291,11 +300,14 @@ const EXPAND_DURATION = 13
 // Oscillation is PERMANENT for the round and stacks: each O pickup doubles the
 // weave width (capped so it can't tunnel) and nudges ball speed up a notch. The
 // displacement is applied per sub-step with collisions re-checked each step, so
-// per-step travel stays a couple of px even at the widest weave.
+// per-step travel stays a couple of px even at the widest weave. The active
+// difficulty's `oscAggroMul` scales the width, the frequency AND the speed bump,
+// so harder modes weave more aggressively (Gangster is the wildest); the sub-step
+// count below folds in the weave's lateral speed so a wide/fast weave can't tunnel.
 const WOBBLE_BASE_AMP = 18            // px of lateral weave at 1 stack (doubled initial value)
-const WOBBLE_AMP_MAX = 36             // px cap (keeps the wide weave from tunnelling)
-const WOBBLE_FREQ = 8                 // rad/s
-const OSC_SPEEDUP = 1.08             // ball-speed bump per O pickup (permanent)
+const WOBBLE_AMP_MAX = 36             // px cap at base aggression (scaled up by oscAggroMul)
+const WOBBLE_FREQ = 8                 // rad/s at base aggression (scaled up by oscAggroMul)
+const OSC_SPEEDUP = 1.08             // ball-speed bump per O pickup at base aggression (permanent)
 
 // Rocket: right-click launches one missile straight up; it explodes on the first
 // thing it hits (brick, hunter, or ceiling), blasting every brick in the radius.
@@ -347,10 +359,16 @@ const FRANTIC_DELAY = 15             // seconds to break the gold brick before f
 const FRANTIC_SPEEDUP = 2.0          // DOUBLE TIME: every ball jumps to 2× speed when frantic starts
 const FRANTIC_MAX = BALL_SPEED * FRANTIC_SPEEDUP   // frenzy gets its OWN ceiling (900) above the normal cap so 2× is genuinely reachable
 const FRANTIC_FLASH = 0.7            // seconds of the frenzy-start lightning/shake burst
+// Recurring frenzy "storm": in the harder modes the gold throne keeps returning after
+// it falls. The gap between storms is STORM_PERIOD / mayhemMul (Rookie's mayhemMul of 1
+// never re-arms, so it keeps the single once-per-board gold race).
+const STORM_PERIOD = 20             // base seconds between recurring storms (scaled down by mayhemMul)
 
 // Pinball: a timed flipper mode. Two field bumpers bounce balls around and the
-// white ball doubles in size + damage. The duration is randomly one of these.
+// white ball doubles in SIZE — but does only a QUARTER of the damage, so it's
+// bouncy chaos, not a board-melter. The duration is randomly one of these.
 const PINBALL_DURATION = 30          // seconds of pinball flipper mode per pickup
+const PINBALL_DAMAGE = 0.25          // the giant pinball ball does only 25% of a normal hit's damage
 const BUMPER_R = 20
 const BUMPER_Y = H * 0.6             // bumpers sit below every brick row — the "non-tile" zone
 // Pinball props: a random subset (kept small so it never clutters) drops into the
@@ -579,6 +597,7 @@ export class Engine {
   frantic = false                     // frantic mode: didn't break the gold brick in time
   franticTimer = 0                    // countdown while the gold brick is alive (> 0 = armed)
   franticFlash = 0                    // seconds left of the frenzy-start lightning/shake burst
+  #stormTimer = 0                     // recurring-storm clock (> 0 = a fresh gold throne is incoming); 0 = disarmed
   #shipRespawn = 0                    // seconds until the next alien ship flies in (when destroyed)
   #dispenserSeq = Math.floor(Math.random() * DISPENSER_KINDS.length)   // rotates the critter cast (random start)
 
@@ -780,15 +799,20 @@ export class Engine {
     if (this.#enemiesKilled === 2 && !this.#megaSpawned) { this.#megaSpawned = true; this.#spawnCenterMega() }
   }
 
-  /** Spawn the big gold brick centred over the tile area (it floats over any tiles).
-   *  It's a RACE: break it within FRANTIC_DELAY or frantic mode kicks in. */
-  #spawnCenterMega(): void {
+  /** Bloom THE gold throne, centred over the tile area (it floats over any tiles).
+   *  With `arm` it's a RACE — break it within FRANTIC_DELAY or the frenzy kicks in;
+   *  without `arm` it's a pure quell target (used when a frenzy is already raging and
+   *  needs a throne to smash). Only ever one throne stands at a time. */
+  #spawnFrenzyCore(arm: boolean): void {
+    if (this.bricks.some(b => b.gold && b.alive)) return                  // one throne at a time
     const c0 = clamp(Math.floor((COLS - MEGA_COLS) / 2), 0, Math.max(0, COLS - MEGA_COLS))
     const r0 = clamp(Math.floor((this.#levelRows - MEGA_ROWS) / 2), 0, Math.max(0, this.#levelRows - MEGA_ROWS))
     const mega = this.#createMega(c0, r0)
     mega.gold = true
-    this.franticTimer = FRANTIC_DELAY * this.difficulty.franticDelayMul   // arm the gold-brick race (harder = less time)
+    if (arm) this.franticTimer = FRANTIC_DELAY * this.difficulty.franticDelayMul   // arm the race (harder = less time)
   }
+  /** The first throne of the board (the 2nd-hunter bloom): always an armed race. */
+  #spawnCenterMega(): void { this.#spawnFrenzyCore(true) }
 
   /** Tick seed bloom timers; a ripe seed blooms into a mega brick. */
   #stepBricks(dt: number): void {
@@ -865,7 +889,10 @@ export class Engine {
    *  is a guaranteed power-up tile — each drops a (weighted-random) power-up when
    *  broken, so cracking the big block rains a bonanza of pills. */
   #breakMega(mega: Brick): void {
-    if (mega.gold) { this.frantic = false; this.franticTimer = 0 }   // gold brick down — win the race / calm the frenzy
+    if (mega.gold) {
+      this.frantic = false; this.franticTimer = 0                    // throne down — win the race / calm the frenzy
+      if (this.difficulty.mayhemMul > 1) this.#stormTimer = STORM_PERIOD / this.difficulty.mayhemMul   // …but in the harder modes another storm is already brewing
+    }
     const c0 = mega.col ?? 0, r0 = mega.row ?? 0
     const cc = mega.megaCols ?? MEGA_COLS, rr = mega.megaRows ?? MEGA_ROWS
     const shards: Brick[] = []
@@ -923,6 +950,7 @@ export class Engine {
     this.shieldTimer = this.regenTimer = this.shieldHp = this.shieldFlash = 0
     this.tnt = null
     this.#tntTimer = TNT_FIRST
+    this.#stormTimer = 0                           // a death buys a breather — storms re-arm only once a fresh throne falls
     this.pacman = null
     this.#activeHazard = 'none'
     this.#hazardCooldown = 0
@@ -1187,8 +1215,11 @@ export class Engine {
     for (const b of this.balls) {
       if (b.stuck) { b.x = this.aiming ? AIM_ANCHOR : this.paddle.x + this.#launchOffset; b.y = this.paddle.y - b.r - 1; continue }
       if (this.freezeTimer > 0 && b.primary) continue   // clock: white ball frozen in place
-      // Sub-step so a fast ball can't tunnel through a brick or the paddle.
-      const dist = Math.hypot(b.vx, b.vy) * dt
+      // Sub-step so a fast ball can't tunnel through a brick or the paddle. Fold
+      // in the weave's peak lateral speed (amp × freq) so a wide/aggressive
+      // oscillation also gets enough sub-steps to stay collision-safe.
+      const weaveV = this.oscillateStacks > 0 ? this.#wobbleAmp() * WOBBLE_FREQ * this.difficulty.oscAggroMul : 0
+      const dist = (Math.hypot(b.vx, b.vy) + weaveV) * dt
       const steps = Math.max(1, Math.ceil(dist / (b.r * 0.9)))
       const sdt = dt / steps
       for (let i = 0; i < steps && this.state === 'playing'; i++) this.#step(b, sdt)
@@ -1222,6 +1253,18 @@ export class Engine {
       if (this.bricks.some(b => b.gold && b.alive)) { this.franticTimer = Math.max(0, this.franticTimer - dt); if (this.franticTimer === 0) this.#triggerFrantic() }
       else this.franticTimer = 0                                        // gold brick already broken — race won
     }
+    // Recurring storm (harder modes): the throne keeps coming back. Re-bloom it on a
+    // cadence that quickens with mayhemMul — relentless pressure, always with a target.
+    if (this.#stormTimer > 0 && this.freezeTimer <= 0) {
+      this.#stormTimer = Math.max(0, this.#stormTimer - dt)
+      if (this.#stormTimer === 0) {
+        if (this.bricksLeft > 0 && !this.aiming && !this.bricks.some(b => b.gold && b.alive)) this.#spawnFrenzyCore(true)
+        else this.#stormTimer = 3                                       // board not ready (mid-aim / a throne still stands) — retry shortly
+      }
+    }
+    // Counterplay invariant (ALL modes): a live frenzy ALWAYS has a throne to smash. If
+    // one is somehow missing, bloom an unarmed quell target so the storm is never unstoppable.
+    if (this.frantic && this.bricksLeft > 0 && !this.aiming && !this.bricks.some(b => b.gold && b.alive)) this.#spawnFrenzyCore(false)
     if (this.franticFlash > 0) this.franticFlash = Math.max(0, this.franticFlash - dt)
     if (this.pickups.length) { for (const p of this.pickups) p.t += dt; this.pickups = this.pickups.filter(p => p.t < PICKUP_DUR) }
     if (this.bricksLeft === 0) this.state = 'won'
@@ -1440,14 +1483,19 @@ export class Engine {
     if (this.freezeTimer > 0 || this.bricksLeft === 0) return
     this.#pillClock += dt
     if (this.#pillPhase === 'quiet') {
-      if (this.#pillClock >= PILL_QUIET) { this.#pillPhase = 'wave'; this.#pillClock = 0; this.#waveBudget = PILLS_PER_WAVE }   // reload
+      if (this.#pillClock >= this.#pillQuiet) {   // mayhem shortens the calm AND fattens the wave
+        this.#pillPhase = 'wave'; this.#pillClock = 0; this.#waveBudget = Math.round(PILLS_PER_WAVE * this.difficulty.mayhemMul)
+      }
     } else if (this.#pillClock >= PILL_WAVE) {
       this.#pillPhase = 'quiet'; this.#pillClock = 0
     }
   }
 
+  /** Seconds of calm between pill waves — shortened by the difficulty's mayhem. */
+  get #pillQuiet(): number { return PILL_QUIET / this.difficulty.mayhemMul }
+
   /** True in the last ~1.2s before a wave opens — the renderer can telegraph it. */
-  get pillWaveArming(): boolean { return this.#pillPhase === 'quiet' && this.#pillClock >= PILL_QUIET - 1.2 }
+  get pillWaveArming(): boolean { return this.#pillPhase === 'quiet' && this.#pillClock >= this.#pillQuiet - 1.2 }
 
   /** Pac-Man: a comedic ammo-economy rival. Summoned when colour balls linger; it
    *  homes and EATS only colour balls (never the white one), is immune to colour
@@ -1704,6 +1752,12 @@ export class Engine {
     this.#prevPaddleX = this.paddle.x
   }
 
+  /** Current lateral weave amplitude (px): the stacking double-up, clamped to the
+   *  cap, then scaled by the active difficulty's oscillate-aggression. */
+  #wobbleAmp(): number {
+    return Math.min(WOBBLE_AMP_MAX, WOBBLE_BASE_AMP * Math.pow(2, this.oscillateStacks - 1)) * this.difficulty.oscAggroMul
+  }
+
   #step(b: Ball, dt: number): void {
     // Magnet only reels the ball in while it's above the halfway line. Below it
     // the pull releases, so after a paddle hit the ball must climb back over H/2
@@ -1718,11 +1772,12 @@ export class Engine {
     // stacking — each O doubles the width up to the cap. Applies to EVERY
     // non-stuck ball; each carries its own phase in `b.wobble`.
     if (this.oscillateStacks > 0) {
-      const amp = Math.min(WOBBLE_AMP_MAX, WOBBLE_BASE_AMP * Math.pow(2, this.oscillateStacks - 1))
+      const amp = this.#wobbleAmp()
+      const freq = WOBBLE_FREQ * this.difficulty.oscAggroMul   // harder modes weave faster too
       const sp = Math.hypot(b.vx, b.vy) || 1
       const px = -b.vy / sp, py = b.vx / sp
       const oldW = amp * Math.sin(b.wobble)
-      b.wobble += WOBBLE_FREQ * dt
+      b.wobble += freq * dt
       const dW = amp * Math.sin(b.wobble) - oldW
       b.x += px * dW
       b.y += py * dW
@@ -1827,8 +1882,8 @@ export class Engine {
         b.vy = dy >= 0 ? Math.abs(b.vy) : -Math.abs(b.vy)
         b.y += dy >= 0 ? overlapY : -overlapY
       }
-      // The white ball does double damage in pinball mode.
-      this.#damage(brick, this.pinballTimer > 0 && b.primary ? 2 : 1)
+      // The white pinball ball does only a quarter of a normal hit (bouncy chaos, not a board-melter).
+      this.#damage(brick, this.pinballTimer > 0 && b.primary ? PINBALL_DAMAGE : 1)
       return                                               // one brick per sub-step
     }
   }
@@ -1848,7 +1903,7 @@ export class Engine {
 
   #damage(brick: Brick, dmg = 1): void {
     if (brick.seed) return                            // a sparkle seed is invincible until it blooms
-    if (this.burstTimer > 0) brick.hp = 1             // burst: one touch destroys any brick
+    if (this.burstTimer > 0) brick.hp = Math.min(brick.hp, dmg)   // burst: one touch destroys any brick (even the quarter-damage pinball hit)
     brick.hp -= dmg
     this.#addScore(5)
     if (brick.hp > 0) return
@@ -1882,10 +1937,17 @@ export class Engine {
   #randomPower(): PowerKind {
     const colourUp = this.balls.some(b => !b.primary && !b.stuck)
     const allow = (k: PowerKind): boolean => k !== 'clock' || colourUp
+    // Defensive flood: the harder the mode (supportMul) the more heal/shield/regen rain
+    // down — and ANY mode floods them harder under live danger (hurt bat, ≤1 life, or a
+    // raging frenzy). So Gangster drowns you in support while the action stays brutal.
+    const hurt = 1 - clamp(this.paddleHp / PADDLE_MAX_HP, 0, 1)
+    const need = 1 + 1.6 * hurt + (this.frantic ? 1.2 : 0) + (this.lives <= 1 ? 0.8 : 0)
+    const defBoost = this.difficulty.supportMul * need
+    const wt = (k: PowerKind): number => POWER_WEIGHTS[k] * (DEFENSIVE.has(k) ? defBoost : 1)
     let total = 0
-    for (const k of POWER_ORDER) if (allow(k)) total += POWER_WEIGHTS[k]
+    for (const k of POWER_ORDER) if (allow(k)) total += wt(k)
     let r = Math.random() * total
-    for (const k of POWER_ORDER) { if (!allow(k)) continue; r -= POWER_WEIGHTS[k]; if (r < 0) return k }
+    for (const k of POWER_ORDER) { if (!allow(k)) continue; r -= wt(k); if (r < 0) return k }
     return POWER_ORDER[0]
   }
 
@@ -2040,12 +2102,15 @@ export class Engine {
         this.#paddleBaseW = Math.min(W * 0.6, this.#paddleBaseW * 1.25)
         if (this.expandTimer <= 0) this.paddle.w = this.#paddleBaseW
         this.paddle.x = clamp(this.paddle.x, this.paddle.w / 2, W - this.paddle.w / 2)
-        for (const b of this.balls) {
-          if (b.stuck) continue
-          const sp = Math.hypot(b.vx, b.vy) || 1
-          const ns = Math.min(BALL_SPEED_MAX, sp * OSC_SPEEDUP)
-          b.vx = (b.vx / sp) * ns
-          b.vy = (b.vy / sp) * ns
+        {
+          const speedup = 1 + (OSC_SPEEDUP - 1) * this.difficulty.oscAggroMul   // harder modes kick speed harder per stack
+          for (const b of this.balls) {
+            if (b.stuck) continue
+            const sp = Math.hypot(b.vx, b.vy) || 1
+            const ns = Math.min(BALL_SPEED_MAX, sp * speedup)
+            b.vx = (b.vx / sp) * ns
+            b.vy = (b.vy / sp) * ns
+          }
         }
         break
       case 'break': {

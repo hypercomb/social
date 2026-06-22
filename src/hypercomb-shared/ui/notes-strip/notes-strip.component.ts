@@ -122,6 +122,16 @@ export class NotesStripComponent implements OnDestroy {
   readonly #selectedCells = signal<readonly string[]>([])
   readonly #capturingFor = signal<string | null>(null)
   readonly #version = signal(0)
+  // Header "delete this tile" affordance. Hidden by default; holding Alt
+  // toggles it (see the keydown listener in the constructor). This is an
+  // IN-MEMORY signal only — never persisted — so a page refresh always returns
+  // to hidden ("not sticking after refresh").
+  readonly showDeleteTile = signal(false)
+  // Two-step confirm once the button is shown — first click arms (icon turns
+  // solid red, auto-disarms after 3s); second click commits. Public — read by
+  // the template.
+  readonly confirmDeleteTile = signal(false)
+  #confirmDeleteTimer: ReturnType<typeof setTimeout> | null = null
   // Monotonic id source for optimistic (not-yet-persisted) note rows.
   #pendingSeq = 0
   // Which group's section is currently expanded. The two-signal split lets
@@ -166,12 +176,13 @@ export class NotesStripComponent implements OnDestroy {
   // sees the answer-note on its next walk and updates its model.
   readonly #qaByCell = signal<ReadonlyMap<string, readonly QaItem[]>>(new Map())
 
-  // Context key captured at the moment the user clicked "hide notes".
-  // The strip stays hidden only while the current context still matches —
-  // change selection and the equality check fails, so the strip reappears
-  // naturally without any explicit reset. Capture mode trumps hide
-  // (see `visible`) so authoring always shows the strip.
-  readonly #hiddenContext = signal<string | null>(null)
+  // Master open/closed state for the strip. The strip NEVER auto-opens on
+  // selection anymore — it shows only when the user explicitly turns it on
+  // via the control-bar Notes toggle (which messages `notes:panel`) or when
+  // authoring a note (capture mode, which also flips this on). Session-only:
+  // defaults closed on every load and is not persisted, so a refresh never
+  // brings the strip back on its own. Mirrors the clipboard side panel.
+  readonly #open = signal<boolean>(false)
 
   /**
    * Display mode — `chips` is the horizontal scrolling chip row, `rows` is
@@ -324,6 +335,26 @@ export class NotesStripComponent implements OnDestroy {
       }
     }
     this.clearNoteSelection()
+  }
+
+  /** Header "delete this tile" — acts on the CONTEXT tile (the cell whose
+   *  notes the strip is showing), not on selection or a hex click. Two-step:
+   *  first click arms the confirm, second click within 3s commits. Routes
+   *  through the same undoable `tile:action`/'remove' path as everything else
+   *  (TileActionsDrone#removeTile drops the cell from the parent layer; q/r/
+   *  index are unused by that path, so they're filled with 0). */
+  onDeleteTileClick(): void {
+    if (!this.confirmDeleteTile()) {
+      this.confirmDeleteTile.set(true)
+      if (this.#confirmDeleteTimer) clearTimeout(this.#confirmDeleteTimer)
+      this.#confirmDeleteTimer = setTimeout(() => this.confirmDeleteTile.set(false), 3000)
+      return
+    }
+    if (this.#confirmDeleteTimer) { clearTimeout(this.#confirmDeleteTimer); this.#confirmDeleteTimer = null }
+    this.confirmDeleteTile.set(false)
+    const label = this.cell()
+    if (!label) return
+    EffectBus.emit('tile:action', { action: 'remove', label, q: 0, r: 0, index: 0 })
   }
 
   /** Toggle the `[Q]` question prefix on every currently selected note.
@@ -1311,43 +1342,17 @@ export class NotesStripComponent implements OnDestroy {
   readonly cell = computed<string | null>(() => this.#capturingFor() ?? this.#activeCell())
 
   /**
-   * Selection identity that "hide notes" is scoped to. The user-clicked-hide
-   * signal stores this key; the visible computed compares it against the
-   * current key to decide whether hide is still in effect. When selection
-   * changes, the key changes and the hidden state lapses automatically.
-   */
-  readonly #contextKey = computed<string>(() => {
-    const cells = this.#selectedCells()
-    if (cells.length > 1) return 'multi:' + [...cells].sort().join('|')
-    return 'single:' + (this.cell() ?? '')
-  })
-
-  /**
-   * Visible whenever the active cell has notes, or the user is actively
-   * authoring one, OR multi-selection has any cells with notes — unless
-   * the user has explicitly hidden the strip for the current selection
-   * via the header hide button. Capture mode always trumps hide.
+   * Visible only when the strip is explicitly open (via the control-bar Notes
+   * toggle) or the user is authoring a note (capture mode) — AND there is an
+   * active cell to show notes for. The strip NEVER opens on its own just
+   * because the selected tile happens to have notes: passive auto-open was
+   * removed so the Notes toggle is the sole on/off control. With no cell
+   * selected there's nothing to show, so an "open" strip stays hidden until
+   * the user picks a tile (the toggle's intent persists either way).
    */
   readonly visible = computed<boolean>(() => {
-    if (this.#capturingFor()) return true
-    const hidden = this.#hiddenContext()
-    if (hidden && hidden === this.#contextKey()) return false
-    if (this.multi()) {
-      // Show whenever any selected cell has notes — emptyCells is only ever
-      // shown alongside a populated accordion, never on its own.
-      return this.groups().length > 0
-    }
-    // Single-cell mode: show as soon as the cell has either confirmed-loaded
-    // notes OR is still loading (warmup hasn't resolved yet). Without this
-    // mid-warmup gate the strip flashes hidden→visible the instant the user
-    // clicks a tile that does have notes, because notesFor() returns [] sync
-    // before getNotes() completes. Only hide once we've confirmed the cell
-    // truly has zero notes.
-    const c = this.cell()
-    if (!c) return false
-    const warmed = this.#warmed().has(c)
-    if (!warmed) return true   // give warmup a chance — strip stays open
-    return this.notes().length > 0 || !!this.#capturingFor()
+    if (!this.#open() && !this.#capturingFor()) return false
+    return !!this.cell()
   })
 
   /** True when the strip is shown specifically because a note is being authored. */
@@ -1402,6 +1407,26 @@ export class NotesStripComponent implements OnDestroy {
       lineage.addEventListener('change', onLineage)
       this.#cleanups.push(() => lineage.removeEventListener('change', onLineage))
     }
+
+    // Hold Alt to toggle the header "delete this tile" button. Bare Alt only
+    // (no other modifier), and only while the strip is actually visible so a
+    // stray Alt press elsewhere can't arm a panel the user can't see. The
+    // visibility lives in an in-memory signal (never localStorage), so a
+    // refresh always resets it to hidden. Toggling it off also disarms any
+    // pending confirm.
+    const onAltToggle = (e: KeyboardEvent): void => {
+      if (e.key !== 'Alt' || e.repeat) return
+      if (e.ctrlKey || e.metaKey || e.shiftKey) return
+      if (!this.visible()) return
+      const next = !this.showDeleteTile()
+      this.showDeleteTile.set(next)
+      if (!next) {
+        this.confirmDeleteTile.set(false)
+        if (this.#confirmDeleteTimer) { clearTimeout(this.#confirmDeleteTimer); this.#confirmDeleteTimer = null }
+      }
+    }
+    window.addEventListener('keydown', onAltToggle)
+    this.#cleanups.push(() => window.removeEventListener('keydown', onAltToggle))
 
     // SelectionService lives in a bee bundle that loads AFTER this Angular
     // component's constructor on hypercomb-web. Synchronous get() returns
@@ -1555,6 +1580,7 @@ export class NotesStripComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on<{ mode: string; target: string; editId?: string }>('command:enter-mode', (p) => {
       if (p?.mode !== 'note-capture' || !p.target) return
       this.#capturingFor.set(p.target)
+      this.#open.set(true)   // authoring turns the strip on (and lights the toggle)
     }))
     this.#cleanups.push(EffectBus.on<{ mode: string }>('command:exit-mode', (p) => {
       if (p?.mode !== 'note-capture') return
@@ -1570,6 +1596,22 @@ export class NotesStripComponent implements OnDestroy {
       if (!p?.cellLabel) return
       if (p.editId) { this.editNote(p.editId, p.cellLabel); return }
       this.#openForm(p.cellLabel, { prefill: p.prefill })
+    }))
+
+    // Control-bar Notes toggle drives the strip's open state. The button
+    // messages `notes:panel { visible }`; we mirror it into #open. This is
+    // the SOLE on/off control now that passive auto-open is gone. Mirrors
+    // the clipboard side panel's `clipboard:panel` command channel.
+    this.#cleanups.push(EffectBus.on<{ visible?: boolean }>('notes:panel', (p) => {
+      const next = !!p?.visible
+      if (!next) {
+        // Closing must also drop any in-progress capture, or the
+        // capture-keeps-it-open rule in visible() would override the close.
+        this.#capturingFor.set(null)
+        this.draftText.set('')
+        this.editingNoteId.set(null)
+      }
+      this.#open.set(next)
     }))
 
     // Stale legacy localStorage key — the user's pinned-tools list no
@@ -1605,6 +1647,15 @@ export class NotesStripComponent implements OnDestroy {
       if (!gate) return
       if (showing) gate.lock(NOTES_STRIP_LOCK_OWNER)
       else gate.unlock(NOTES_STRIP_LOCK_OWNER)
+    })
+
+    // Broadcast the toggle's open state so the control-bar Notes button can
+    // light up and toggle correctly. Tracks #open (the intent) rather than
+    // visible() so the button stays lit while notes mode is on even when no
+    // tile is selected. Last-value replayed by EffectBus, so a late-mounting
+    // control bar reflects the current state. Mirrors `clipboard:open`.
+    effect(() => {
+      EffectBus.emit('notes:panel-state', { open: this.#open() })
     })
 
     // Warm the decoded-set cache for every cell the strip might display
@@ -1714,6 +1765,7 @@ export class NotesStripComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
+    if (this.#confirmDeleteTimer) { clearTimeout(this.#confirmDeleteTimer); this.#confirmDeleteTimer = null }
     this.#selectionListener?.()
     // Release the tile lock on teardown — the visibility effect is destroyed
     // with the component and won't run a final unlock, so a strip torn down
@@ -1899,7 +1951,7 @@ export class NotesStripComponent implements OnDestroy {
   #openForm(cell: string, opts?: { editId?: string | null; prefill?: string }): void {
     if (!cell) return
     this.#capturingFor.set(cell)
-    this.#hiddenContext.set(null)             // a fresh open un-hides the strip
+    this.#open.set(true)                       // authoring turns the strip on
     this.editingNoteId.set(opts?.editId ?? null)
     this.draftText.set(opts?.prefill ?? '')
     this.draftKind.set('note')
@@ -2013,18 +2065,17 @@ export class NotesStripComponent implements OnDestroy {
     EffectBus.emit('notes:cancel', {})
   }
 
-  /** Header "hide" button — collapse the strip for the current selection.
-   *  Re-shows automatically when the user selects a different tile (the
-   *  context key changes and the saved hidden context no longer matches).
-   *  Also cancels any in-progress capture; otherwise the capture-trumps-
-   *  hide rule in `visible()` would keep the strip open while authoring. */
+  /** Header "hide" button — turns the strip off. Stays off until the user
+   *  explicitly re-opens it via the control-bar Notes toggle (or starts
+   *  authoring a note); selecting another tile no longer reopens it. Also
+   *  cancels any in-progress capture so `visible()` settles to false. */
   hide(): void {
     // Close any open form locally (the command line is no longer involved)
-    // before recording the hidden context, so `visible()` settles to false.
+    // so capture mode doesn't keep the strip open after it's turned off.
     this.#capturingFor.set(null)
     this.draftText.set('')
     this.editingNoteId.set(null)
-    this.#hiddenContext.set(this.#contextKey())
+    this.#open.set(false)
   }
 
   /** Delete a single note from the active cell's list. */

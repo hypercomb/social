@@ -73,6 +73,11 @@ const BRICK_CHARRED = { r: 58, g: 50, b: 46 }
 // ? scramble: every ball flickers through these vivid hues (re-rolled a few times a
 // second, distinct per ball) so the hero loses its white and you must follow it by eye.
 const SCRAMBLE_PALETTE = ['#ff5b5b', '#ffb03a', '#ffe24a', '#5fe08a', '#3dd7ff', '#5b9bff', '#b07bff', '#ff5bd0', '#ff7043', '#39ff6a']
+
+// O oscillate: the weave-halo hue escalates with the stack count — cool teal at one
+// stack heating to hot magenta — so the oscillation state reads at a glance. Index by
+// (stacks - 1), clamped to the last entry (the hottest = wildest weave).
+const OSC_STACK_PALETTE = ['#5fe0c0', '#5fe08a', '#ffe24a', '#ffb03a', '#ff7043', '#ff5b5b', '#ff3df0']
 // The whole SCENE (sky, scenery, atmosphere) is a pluggable theme — see theme.ts and
 // themes/. The renderer just resolves the active theme each frame and delegates.
 
@@ -189,8 +194,15 @@ export class Renderer {
     const fiery = engine.tnt !== null                       // dynamite on screen → balls catch fire
     const piercing = engine.pierceTimer > 0                  // white ball phases through tiles
     const scrambled = engine.scrambleTimer > 0              // ? every ball flickers a random colour (hero loses its white)
+    // O oscillate: a stack-coloured weave halo on every live ball (hero stays white) —
+    // the hue escalates per stack so the oscillation state is legible at a glance.
+    const oscStacks = engine.oscillateStacks
+    const oscCol = oscStacks > 0 ? OSC_STACK_PALETTE[Math.min(oscStacks - 1, OSC_STACK_PALETTE.length - 1)] : null
     let ballIx = 0
-    for (const b of engine.balls) this.#ball(b, time, fiery, piercing && b.primary, engine.frantic, scrambled, ballIx++)
+    for (const b of engine.balls) {
+      if (oscCol && !b.stuck) this.#oscillationAura(b, oscStacks, oscCol, time)
+      this.#ball(b, time, fiery, piercing && b.primary, engine.frantic, scrambled, ballIx++)
+    }
     if (engine.chainBall) this.#ballChain(engine, time)     // the swinging wrecking ball
     if (engine.freezeTimer > 0) this.#freeze(engine, time)  // clock freeze overlay + frost
     this.#capsules(engine.capsules, time)
@@ -891,6 +903,37 @@ export class Renderer {
       }
       ctx.restore()
     }
+  }
+
+  /** O oscillate readout: a pulsing weave halo + a short afterimage trail (tracing
+   *  the sine path) around a ball, in the stack-coded `color`. The hue escalates with
+   *  the stack count and the glow/trail grow brighter and longer, so each new stack
+   *  visibly changes state — while the hero ball keeps its white core. Additive, so it
+   *  reads as energy riding the weave, not a recolour of the ball. */
+  #oscillationAura(ball: Ball, stacks: number, color: string, time: number): void {
+    const ctx = this.#ctx
+    const sp = Math.hypot(ball.vx, ball.vy)
+    const intensity = Math.min(1, 0.32 + stacks * 0.13)          // brighter with each stack (capped)
+    ctx.save()
+    ctx.globalCompositeOperation = 'lighter'
+    // afterimage trail along the recent motion — longer as it stacks, revealing the weave
+    if (sp > 1) {
+      const dx = ball.vx / sp, dy = ball.vy / sp
+      const tail = Math.min(6, 2 + stacks)
+      ctx.fillStyle = color
+      for (let i = 1; i <= tail; i++) {
+        const bx = ball.x - dx * i * ball.r * 1.15, by = ball.y - dy * i * ball.r * 1.15
+        ctx.globalAlpha = (intensity * 0.5) / i
+        ctx.beginPath(); ctx.arc(bx, by, ball.r * Math.max(0.2, 1 - i * 0.12), 0, Math.PI * 2); ctx.fill()
+      }
+    }
+    // pulsing halo ring in the stack hue (pulse quickens a touch with the stacks)
+    const pulse = 0.5 + 0.5 * Math.sin(time * (5 + Math.min(stacks, 4) * 1.2))
+    ctx.globalAlpha = intensity * (0.45 + 0.35 * pulse)
+    ctx.shadowColor = color; ctx.shadowBlur = 6 + stacks * 2
+    ctx.strokeStyle = color; ctx.lineWidth = 1.4 + stacks * 0.4
+    ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r + 2.5 + stacks * 0.6 + pulse * 1.5, 0, Math.PI * 2); ctx.stroke()
+    ctx.restore()
   }
 
   #ball(ball: Ball, time: number, fiery = false, pierce = false, frantic = false, scramble = false, index = 0): void {

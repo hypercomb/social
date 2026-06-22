@@ -1,0 +1,39 @@
+@if (visible()) {
+  <section
+    class="feedback-viewer-panel"
+    role="dialog"
+    [attr.aria-label]="'feedback.viewer.title' | t"
+    tabindex="0"
+    (keydown)="onKey($event)"
+  >
+    <header class="fv-header">
+      <div class="fv-heading">
+        <span class="fv-title">{{ 'feedback.viewer.title' | t }}</span>
+        <span class="fv-subtitle">{{ 'feedback.viewer.subtitle' | t }}</span>
+      </div>
+      <button class="fv-close" type="button" (click)="close()" [attr.aria-label]="'feedback.viewer.close' | t">×</button>
+    </header>
+
+    @if (items().length === 0) {
+      <p class="fv-empty">{{ 'feedback.viewer.empty' | t }}</p>
+    } @else {
+      <ul class="fv-list">
+        @for (item of items(); track trackBySig($index, item)) {
+          <li class="fv-row" [class.issue]="item.category === 'issue'">
+            <span class="fv-icon mat-sym">{{ icon(item.category) }}</span>
+            <div class="fv-body">
+              <p class="fv-text">{{ item.text }}</p>
+              <div class="fv-meta">
+                @if (item.route) { <span class="fv-route">{{ item.route }}</span> }
+                <span class="fv-time">{{ relativeTime(item.at) }}</span>
+              </div>
+            </div>
+            <button class="fv-resolve" type="button" (click)="resolve(item)" [attr.aria-label]="'feedback.viewer.resolve' | t">
+              {{ 'feedback.viewer.resolve' | t }}
+            </button>
+          </li>
+        }
+      </ul>
+    }
+  </section>
+}

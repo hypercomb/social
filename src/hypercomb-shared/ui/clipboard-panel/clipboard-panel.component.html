@@ -1,12 +1,24 @@
 @if (visible()) {
   <aside
     class="clipboard-panel"
+    [class.resizing]="resizing()"
+    [style.width.px]="width()"
+    [style.--hc-panel-scale]="contentScale()"
     data-consumes-wheel
     (keydown)="$event.key === 'Escape' && close()"
     tabindex="-1"
     role="dialog"
     [attr.aria-label]="'clipboard.title' | t"
   >
+    <div
+      class="resize-grip"
+      (pointerdown)="startResize($event)"
+      role="separator"
+      aria-orientation="vertical"
+      [attr.aria-label]="'clipboard.resize' | t"
+      [title]="'clipboard.resize' | t"
+    ></div>
+
     <header class="clipboard-header">
       <span class="clipboard-title">{{ 'clipboard.title' | t }}</span>
       <span class="clipboard-op" [class.cut]="op() === 'cut'">
