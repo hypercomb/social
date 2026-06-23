@@ -369,6 +369,45 @@ export const readTilePropsSigAt = async (
   return (typeof propSig === 'string' && /^[0-9a-f]{64}$/.test(propSig)) ? propSig : undefined
 }
 
+// ── Per-tile write serialization ─────────────────────────────────────
+//
+// `index`, `imageSig`, `tags`, `accent`, substrate images and the rest
+// all share ONE `properties` blob in ONE slot, and `commitSlotSet`
+// replaces that slot wholesale. `writeTilePropertiesAt` is a
+// read-merge-commit: it snapshots the current properties, merges
+// `updates`, then commits. The read→commit window spans several awaits.
+//
+// Two overlapping writers on the SAME tile — e.g. a move persisting
+// `index` while substrate persists an image — each build their merged
+// blob from a snapshot taken BEFORE the other committed. The later
+// commit then overwrites the slot with a blob that never saw the
+// earlier writer's field. The dropped field is usually `index`, so an
+// organized tile silently loses (or reverts) its position and scrambles
+// on the next cold render.
+//
+// The fix: serialize the WHOLE read-merge-commit per tile. Each write
+// chains onto the previous write for the same lineage key, so the read
+// always sees the prior write's committed head. Different tiles never
+// block each other. The chain entry is dropped once it's the tail, so
+// the map stays bounded.
+const tileWriteChains = new Map<string, Promise<unknown>>()
+
+const withTileWriteLock = async <T>(key: string, task: () => Promise<T>): Promise<T> => {
+  const prior = tileWriteChains.get(key) ?? Promise.resolve()
+  // Run after the prior write settles, regardless of whether it
+  // resolved or rejected — one failed write must not wedge the tile.
+  const result = prior.then(task, task)
+  // A non-rejecting tail so the next chainer can `await` it without an
+  // unhandled rejection, and so a thrown task can't break the chain.
+  const tail = result.catch(() => {})
+  tileWriteChains.set(key, tail)
+  void tail.then(() => {
+    // Drop the entry only if no newer write has chained on since.
+    if (tileWriteChains.get(key) === tail) tileWriteChains.delete(key)
+  })
+  return result
+}
+
 /**
  * Write tile properties to the tile's layer.
  *
@@ -402,42 +441,59 @@ export const writeTilePropertiesAt = async (
   const committer = iocGet<LayerCommitterLike>(COMMITTER_KEY)
   if (!history?.sign || !store?.putResource || !committer?.commitSlotSet) return
 
-  // No pre-normalization. Segments + cellName go raw into the canonical
-  // signing site (`history.sign`, reached via `readTilePropertiesAt`
-  // → `cellLocationSig`, and via the cascade's own sigbag computation
-  // in `LayerCommitter`/`HistoryService`). Anything we trim/filter
-  // here would be a parallel canonicalization that drifts from the
-  // single source of truth the moment `history.sign` changes.
-  const existing = await readTilePropertiesAt(parentSegments, cellName)
-  const merged: Record<string, unknown> = { ...existing, ...updates }
+  // Lock on the cell's lineage sig — the same key the nurses cache and
+  // the cascade signs under, so every writer to this tile serializes on
+  // one key. If history isn't ready yet `cellLocationSig` returns '' (in
+  // which case the commit below would also no-op); fall back to a
+  // path-derived key so two such early writes still serialize.
+  const lockKey =
+    (await cellLocationSig(parentSegments, cellName)) ||
+    `path ${parentSegments.join(' ')} ${cellName}`
 
-  // Drop keys whose value is `undefined` — JSON.stringify would skip
-  // them anyway, but dropping here keeps the merged object iterable
-  // for downstream consumers that may inspect it before serialisation.
-  for (const k of Object.keys(merged)) {
-    if (merged[k] === undefined) delete merged[k]
-  }
+  return withTileWriteLock(lockKey, async () => {
+    // READ INSIDE THE LOCK. The merge must build on the latest committed
+    // head, never a snapshot taken before a concurrent writer committed —
+    // that stale-snapshot merge is exactly the lost update this lock
+    // closes. Segments + cellName go raw into the canonical signing site
+    // (`history.sign`, reached via `readTilePropertiesAt` → `cellLocationSig`,
+    // and via the cascade's own sigbag computation in `LayerCommitter`/
+    // `HistoryService`). Anything we trim/filter here would be a parallel
+    // canonicalization that drifts from the single source of truth the
+    // moment `history.sign` changes.
+    const existing = await readTilePropertiesAt(parentSegments, cellName)
+    const merged: Record<string, unknown> = { ...existing, ...updates }
 
-  // Serialise + content-address. Deterministic key order so the same
-  // logical properties yield the same sig across callers — same
-  // canonicalization rule, applied to the JSON-object form: sorted
-  // keys, then `JSON.stringify`. This produces the bytes that
-  // `Store.putResource` hashes via `SignatureService.sign`.
-  const sortedKeys = Object.keys(merged).sort()
-  const canonical: Record<string, unknown> = {}
-  for (const k of sortedKeys) canonical[k] = merged[k]
-  const blob = new Blob([JSON.stringify(canonical)], { type: 'application/json' })
-  const propSig = await store.putResource(blob)
+    // Drop keys whose value is `undefined` — JSON.stringify would skip
+    // them anyway, but dropping here keeps the merged object iterable
+    // for downstream consumers that may inspect it before serialisation.
+    for (const k of Object.keys(merged)) {
+      if (merged[k] === undefined) delete merged[k]
+    }
 
-  // commitSlotSet → committer.update → history.commitLayer → history.sign
-  // — the same canonical signing path the readers use, so this write
-  // lands in the same bag the next read will find.
-  const cellSegments = [...parentSegments, cellName]
-  await committer.commitSlotSet(cellSegments, TILE_PROPERTIES_SLOT, [propSig])
+    // Serialise + content-address. Deterministic key order so the same
+    // logical properties yield the same sig across callers — same
+    // canonicalization rule, applied to the JSON-object form: sorted
+    // keys, then `JSON.stringify`. This produces the bytes that
+    // `Store.putResource` hashes via `SignatureService.sign`.
+    const sortedKeys = Object.keys(merged).sort()
+    const canonical: Record<string, unknown> = {}
+    for (const k of sortedKeys) canonical[k] = merged[k]
+    const blob = new Blob([JSON.stringify(canonical)], { type: 'application/json' })
+    // `store`/`committer` were guarded non-null above; the guard's
+    // narrowing doesn't survive into this closure, so re-assert. Called
+    // on the object so the methods keep their `this`.
+    const propSig = await store!.putResource!(blob)
 
-  EffectBus.emit('cell:0000-changed', {
-    cacheKey: await cellLocationSig(parentSegments, cellName),
-    keys: Object.keys(updates),
+    // commitSlotSet → committer.update → history.commitLayer → history.sign
+    // — the same canonical signing path the readers use, so this write
+    // lands in the same bag the next read will find.
+    const cellSegments = [...parentSegments, cellName]
+    await committer!.commitSlotSet!(cellSegments, TILE_PROPERTIES_SLOT, [propSig])
+
+    EffectBus.emit('cell:0000-changed', {
+      cacheKey: lockKey,
+      keys: Object.keys(updates),
+    })
   })
 }
 
