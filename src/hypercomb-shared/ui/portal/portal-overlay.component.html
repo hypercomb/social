@@ -38,7 +38,7 @@
         <span class="close-label">{{ 'portal.back' | t }}</span>
       </button>
 
-      @if (pendingAdds || pendingRemoves) {
+      @if (hasPendingCommit) {
         <button class="portal-apply" (click)="apply()">
           <span class="apply-label">{{ 'portal.done' | t }}</span>
         </button>

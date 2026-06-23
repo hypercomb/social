@@ -96,8 +96,30 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   pendingAdds = 0
   pendingRemoves = 0
 
+  /** Pending PACKAGE / code change. The +adds/−removes above only track
+   *  `kind:'content'` adoptions, so a pure functionality opt-in — enabling new
+   *  bees/workers/drones inside a `kind:'package'` branch, which is exactly what
+   *  the header "New features" upgrade flow routes here to do — produced NO
+   *  content diff, so the Done button never appeared and the change could not be
+   *  committed (only BACK = discard). We detect it by baselining the installer's
+   *  `logicalRootSig` when the portal opens and flagging when a later projection
+   *  differs. Same value-space on both sides (logicalRootSig vs logicalRootSig),
+   *  so there are no cross-namespace false positives. Drives Done alongside the
+   *  content diff; apply() → `actions:available` already resyncs the package. */
+  pendingPackageChange = false
+  #openLogicalBaseline: string | null = null
+
   /** Full URL of the currently-loaded iframe content, for the title-attr tooltip. */
   get activeUrl(): string | null { return this.#activeUrl }
+
+  /** Show the explicit Done button when there is ANYTHING to commit — content
+   *  adoptions/removals OR a package/code change. Done is the only affordance
+   *  that dispatches `actions:available` (fold + resync + reload); BACK always
+   *  discards. Gating it on the package change too is what makes a feature
+   *  update installable from the embedded installer. */
+  get hasPendingCommit(): boolean {
+    return !!(this.pendingAdds || this.pendingRemoves || this.pendingPackageChange)
+  }
 
   /** Human-friendly host label for the address breadcrumb. Shows the host
    *  + first 6 of branchSig + the placement path so the participant always
@@ -212,6 +234,10 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
 
     this.#activeUrl = url
     this.#activeTarget = detail?.target ?? null
+    // Baseline the installer's logical config at open so a package/code opt-in
+    // made while the portal is up surfaces a Done button (see pendingPackageChange).
+    this.#openLogicalBaseline = this.#snapshotLogicalRootSig()
+    this.pendingPackageChange = false
     this.portalSrc = this.#sanitizer.bypassSecurityTrustResourceUrl(url)
     this.isOpen = true
     // Freeze tile navigation while the portal/installer covers the canvas —
@@ -254,7 +280,26 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     } catch { adds = 0; removes = 0 }
     this.pendingAdds = adds
     this.pendingRemoves = removes
+    // Package/code drift: compare the installer's current logicalRootSig to the
+    // baseline captured on open. The first non-null projection after open
+    // becomes the baseline (so the initial render is never a false "change"),
+    // and only a SUBSEQUENT, different projection — the participant enabling a
+    // new bee/worker/drone — flags a pending commit.
+    const cur = this.#snapshotLogicalRootSig()
+    if (this.#openLogicalBaseline === null && cur !== null) this.#openLogicalBaseline = cur
+    this.pendingPackageChange =
+      this.#openLogicalBaseline !== null && cur !== null && cur !== this.#openLogicalBaseline
     this.#cdr.detectChanges()
+  }
+
+  /** The installer's current logical-config root signature (lowercased), or
+   *  null if no snapshot has been projected yet. Resolved lazily via window.ioc
+   *  (shared must never import from modules). */
+  #snapshotLogicalRootSig(): string | null {
+    const store = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@hypercomb.social/RegistrySnapshot') as
+      { snapshot?: { logicalRootSig?: string | null } | null } | undefined
+    const sig = store?.snapshot?.logicalRootSig
+    return typeof sig === 'string' && sig ? sig.toLowerCase() : null
   }
 
   // -------------------------------------------------
@@ -350,6 +395,8 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.portalSrc = null
     this.#activeUrl = null
     this.#activeTarget = null
+    this.pendingPackageChange = false
+    this.#openLogicalBaseline = null
     this.#cdr.detectChanges()
     // Generic close signal for EVERY overlay target (installer, meadowverse,
     // …). Symmetric counterpart to `portal:open`; lets listeners that suspend

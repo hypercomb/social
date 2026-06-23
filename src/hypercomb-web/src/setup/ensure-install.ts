@@ -38,6 +38,13 @@ type InstallManifest = {
   label?: string
   at?: string
   previous?: string | null
+  // Provenance of THIS install — which source produced it. 'bundled' = the
+  // shell's `/content/` package (so the bundle IS the update authority);
+  // 'sentinel' = a DCP logical union (DCP is the authority, the bundle is not).
+  // checkForUpdate gates on this so a DCP-sourced install never raises a phantom
+  // "New features" by diffing against the shell's (possibly older/divergent)
+  // bundle. Absent on pre-provenance manifests → inferred from the bee sets.
+  source?: 'bundled' | 'sentinel'
 }
 
 export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<void> => {
@@ -163,6 +170,37 @@ export const checkForUpdate = async (): Promise<void> => {
   const bundled = await fetchBundledPackage()
   // No bundled manifest (dev shell has no /content/, or offline) — stay quiet.
   if (!bundled) return
+
+  // ── Update-authority gate ────────────────────────────────────────────
+  // The shell's bundled `/content/` is the update reference ONLY for installs
+  // that came FROM the bundle. A DCP/sentinel-sourced install is a logical
+  // UNION of enabled branches whose source of truth is DCP — DCP surfaces its
+  // own updates. Diffing such an install against the single bundled package
+  // raised phantom "New features" the moment the two drifted (a newer DCP
+  // build, or the union enabling content the shell never bundled), and routing
+  // the participant to DCP for those phantom sigs is a dead end: DCP can't show
+  // bees it doesn't serve, and the resulting installer view has nothing to
+  // commit. Provenance is now stamped on every manifest write; for legacy
+  // manifests (no `source`) we INFER it — an install holding bees the bundle
+  // lacks has diverged from the bundle lineage, so the bundle is not its
+  // authority. When the bundle is not the authority, emit a definitive
+  // available:false so any stale indicator clears.
+  const bundledBeeSet = new Set(bundled.bees)
+  const divergedFromBundle = cached.bees.some(sig => !bundledBeeSet.has(sig))
+  const bundleIsAuthority = cached.source === 'bundled'
+    || (cached.source !== 'sentinel' && !divergedFromBundle)
+  if (!bundleIsAuthority) {
+    EffectBus.emit('update:available', {
+      available: false,
+      newCount: 0,
+      newBees: [],
+      packageSig: bundled.packageSig,
+      previous: bundled.previous ?? null,
+      label: bundled.label,
+    })
+    return
+  }
+
   const available = bundledDiffersFromCached(bundled, cached)
   const cachedSet = new Set(cached.bees)
   // The DELTA — bees present in the new bundle but not in the cached install.
@@ -406,6 +444,9 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     beeDeps: bundled.beeDeps,
     dependenciesBag: bundled.dependenciesBag,
     beesBag: bundled.beesBag,
+    // Came from the shell's bundled package → the bundle IS this install's
+    // update authority (checkForUpdate compares against it).
+    source: 'bundled' as const,
   }
   localStorage.setItem(MANIFEST_KEY, JSON.stringify(manifest))
   localStorage.setItem(SYNC_SIG_KEY, bundled.packageSig)
@@ -580,6 +621,9 @@ const resyncPass = async (sentinel: SentinelBridge, store: Store): Promise<void>
     beeDeps,
     dependenciesBag: undefined,
     beesBag: priorManifest?.beesBag,
+    // DCP logical union → DCP is this install's update authority, NOT the shell
+    // bundle. checkForUpdate uses this to suppress phantom bundle-drift updates.
+    source: 'sentinel' as const,
   }
   localStorage.setItem(SYNC_SIG_KEY, syncSig)
   localStorage.setItem(MANIFEST_KEY, JSON.stringify(syncManifest))
@@ -620,6 +664,7 @@ const tryParseManifest = (json: string): InstallManifest | null => {
       beeDeps: parsed.beeDeps && typeof parsed.beeDeps === 'object' ? parsed.beeDeps : undefined,
       dependenciesBag: typeof parsed.dependenciesBag === 'string' ? parsed.dependenciesBag : undefined,
       beesBag: typeof parsed.beesBag === 'string' ? parsed.beesBag : undefined,
+      source: parsed.source === 'bundled' || parsed.source === 'sentinel' ? parsed.source : undefined,
     }
   } catch {
     return null
