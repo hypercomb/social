@@ -54,7 +54,7 @@
                 class="item-hex"
                 type="button"
                 (click)="drillInto(item)"
-                [class.has-children]="(counts()[item.label] ?? 0) > 0"
+                [class.has-children]="counts()[item.label] > 0"
                 [attr.aria-label]="'clipboard.drillIn' | t"
                 [title]="'clipboard.drillIn' | t"
               >
