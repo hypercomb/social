@@ -6,9 +6,29 @@
 import { Drone } from '@hypercomb/core'
 import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import { BeeSwarmShader } from './bee-swarm.shader.js'
+import { BeeAbShader } from './bee-ab.shader.js'
+import { bakeBeeAtlas, type BeeAtlas } from './bee-ab-atlas.js'
 import { noise2D } from '../grid/simplex-noise.js'
 import type { HostReadyPayload } from '../tiles/pixi-host.worker.js'
 import type { HexGeometry } from '../grid/hex-geometry.js'
+
+/** Either swarm shader — both expose the same time/scale surface so the drone
+ *  can render textured AB (preferred) or fall back to the procedural SDF. */
+type SwarmShaderLike = { shader: unknown; setTime: (t: number) => void; setScale: (s: number) => void }
+
+/** A transient "operation in progress" bee — not tied to a peer. Free-roams
+ *  near the view while a long op (install/sync) runs, then fades out. Reuses
+ *  the same slot pool + buffers as peer bees, so it costs nothing extra. */
+interface OpBee {
+  x: number
+  y: number
+  seed: number
+  phase: number
+  facing: number
+  alpha: number
+  fadeTarget: number
+  slot: number
+}
 
 type MeshEvt = { relay: string; sig: string; event: any; payload: any }
 type MeshSub = { close: () => void }
@@ -90,16 +110,26 @@ export class AvatarSwarmDrone extends Drone {
     lineage: '@hypercomb.social/Lineage',
   }
 
-  protected override listens = ['render:host-ready', 'render:geometry-changed', 'mesh:ensure-started']
+  protected override listens = ['render:host-ready', 'render:geometry-changed', 'mesh:ensure-started', 'install:sync']
   protected override emits = ['swarm:peer-count']
 
   #app: Application | null = null
   #container: Container | null = null
   #layer: Container | null = null
   #mesh: any | null = null
-  #shader: BeeSwarmShader | null = null
+  #shader: SwarmShaderLike | null = null
   #geom: Geometry | null = null
   #tickerBound = false
+
+  // baked AB texture atlas (warmup); null until baked or if canvas unavailable
+  #atlas: BeeAtlas | null = null
+  #atlasPromise: Promise<BeeAtlas | null> | null = null
+
+  // operation-cue bees (install:sync) — separate from peers, share the slot pool
+  #opBees: OpBee[] = []
+  #opLanes = new Set<string>()  // active install:sync lanes ('bundled' | 'resync' | …)
+  #opIntensity = 0.5            // 0..1 from current/total — scales the swarm size
+  #userVisible = false          // Ctrl+Shift+B master toggle (independent of ops)
 
   // per-instance buffers (4 verts per bee × MAX_BEES)
   #posBuf = new Float32Array(MAX_BEES * 8)   // aPosition (quad corners relative)
@@ -189,6 +219,14 @@ export class AvatarSwarmDrone extends Drone {
     }
   }
 
+  // Pre-bake the AB flap atlas once, off the render path, before the first
+  // pulse. #initRendering awaits the same promise, so a missed/slow warmup is
+  // harmless — it just bakes lazily on host-ready instead.
+  public override async warmup(): Promise<void> {
+    this.#atlasPromise ??= bakeBeeAtlas()
+    this.#atlas = await this.#atlasPromise
+  }
+
   protected override sense = (): boolean => true
 
   protected override heartbeat = async (): Promise<void> => {
@@ -210,7 +248,7 @@ export class AvatarSwarmDrone extends Drone {
       if (this.#app) return
       this.#app = payload.app
       this.#container = payload.container
-      this.#initRendering()
+      void this.#initRendering()
     })
 
     this.onEffect<HexGeometry>('render:geometry-changed', (geo) => {
@@ -223,35 +261,102 @@ export class AvatarSwarmDrone extends Drone {
       this.#viewingQ = q
       this.#viewingR = r
     })
+
+    // operation cue: bees swarm while a long install/sync runs. Lanes are
+    // tracked so overlapping producers (bundled + resync) don't end the swarm
+    // early; intensity (current/total) scales the swarm size.
+    this.onEffect<{ active?: boolean; source?: string; current?: number; total?: number }>('install:sync', (p) => {
+      const lane = String(p?.source ?? 'sync')
+      if (p?.active === true) {
+        this.#opLanes.add(lane)
+        const total = p?.total ?? 0
+        const current = p?.current ?? 0
+        this.#opIntensity = total > 0 ? Math.max(0, Math.min(1, current / total)) : 0.5
+        this.#ensureOpBees()
+        this.#applyVisibility()
+      } else {
+        this.#opLanes.delete(lane)
+        if (this.#opLanes.size === 0) {
+          for (const b of this.#opBees) b.fadeTarget = 0 // tick reclaims them as they fade
+        }
+      }
+    })
   }
 
-  #initRendering = (): void => {
+  #initRendering = async (): Promise<void> => {
+    if (!this.#app || !this.#container) return
+    if (this.#mesh) return // already initialised (host-ready can replay)
+
+    // Prefer the textured AB atlas; fall back to the procedural SDF if the bake
+    // failed (e.g. no 2D canvas). Await the warmup bake if it's still running.
+    const atlas = this.#atlas ?? await (this.#atlasPromise ??= bakeBeeAtlas())
+    this.#atlas = atlas
+    this.#shader = atlas ? new BeeAbShader(atlas.texture, atlas.frames) : new BeeSwarmShader()
+
+    // host may have torn down while we awaited the bake
     if (!this.#app || !this.#container) return
 
-    this.#shader = new BeeSwarmShader()
     this.#layer = new Container()
     this.#layer.zIndex = 10 // above honeycomb, below overlays
-    this.#layer.visible = false // hidden by default — Ctrl+Shift+B to toggle
+    this.#layer.visible = false // shown only by a user toggle or an active operation
 
-    // listen for bee visibility toggle
+    // master visibility toggle (Ctrl+Shift+B) — independent of the operation cue
     this.onEffect<{ visible: boolean }>('render:set-bees-visible', ({ visible }) => {
-      if (this.#layer) this.#layer.visible = visible
+      this.#userVisible = visible
+      this.#applyVisibility()
     })
 
     this.#buildGeometry()
 
     const MeshCtor = Mesh as any
-    this.#mesh = new MeshCtor({ geometry: this.#geom, shader: this.#shader.shader, texture: Texture.WHITE })
+    this.#mesh = new MeshCtor({ geometry: this.#geom, shader: this.#shader!.shader, texture: atlas?.texture ?? Texture.WHITE })
     this.#mesh.blendMode = 'pre-multiply'
 
     this.#layer.addChild(this.#mesh)
     this.#container.addChild(this.#layer)
+    this.#applyVisibility()
 
     // start ticker for per-frame animation
     if (!this.#tickerBound) {
       this.#tickerBound = true
       this.#app.ticker.add(this.#onTick)
     }
+  }
+
+  /** Layer is visible if the user toggled it OR an operation cue is running. */
+  #applyVisibility = (): void => {
+    if (this.#layer) this.#layer.visible = this.#userVisible || this.#opLanes.size > 0 || this.#opBees.length > 0
+  }
+
+  /** Spawn operation-cue bees up to a size scaled by progress intensity. They
+   *  roam freely near the view origin and fade out when the operation ends.
+   *  NOTE (tuning): anchored at container origin with a spread — if the user has
+   *  panned far, revisit to anchor on the live viewport. Count/spread/positions
+   *  are first-pass defaults to confirm visually after merge. */
+  #ensureOpBees = (): void => {
+    const target = Math.round(6 + this.#opIntensity * 12) // ~6–18 bees
+    const anchor = this.#axialToPixel(this.#viewingQ, this.#viewingR)
+    while (this.#opBees.length < target && this.#freeSlots.length > 0) {
+      const slot = this.#freeSlots.pop()!
+      const phase = (slot * 2.399 + 0.7) % 6.28
+      const bee: OpBee = {
+        x: anchor.x + (Math.random() - 0.5) * 360,
+        y: anchor.y + (Math.random() - 0.5) * 280,
+        seed: Math.random() * 1000,
+        phase,
+        facing: 1,
+        alpha: 0,
+        fadeTarget: 1,
+        slot,
+      }
+      this.#opBees.push(bee)
+      this.#writeSlotPhase(slot, phase)
+      this.#writeSlotPosition(slot, bee.x, bee.y)
+      this.#writeSlotAlpha(slot, 0)
+      this.#writeSlotFacing(slot, 1)
+    }
+    const g = this.#geom as any
+    g?.getBuffer('aBeePhase')?.update(this.#phaseBuf)
   }
 
   #buildGeometry = (): void => {
@@ -271,13 +376,37 @@ export class AvatarSwarmDrone extends Drone {
   // ─── per-frame tick ──────────────────────────────────────────
 
   #onTick = (): void => {
-    if (!this.#shader || !this.#geom || this.#peers.size === 0) return
+    if (!this.#shader || !this.#geom || (this.#peers.size === 0 && this.#opBees.length === 0)) return
 
     const dt = this.#app!.ticker.deltaMS / 1000
     this.#time += dt
     this.#shader.setTime(this.#time)
 
     let dirty = false
+
+    // operation-cue bees — free wander + fade; reclaim slot when fully faded
+    for (let i = this.#opBees.length - 1; i >= 0; i--) {
+      const b = this.#opBees[i]
+      const wx = noise2D(this.#time * 0.35 + b.seed, b.seed) * 26
+      const wy = noise2D(b.seed, this.#time * 0.35 + b.seed) * 22
+      b.x += wx * dt
+      b.y += wy * dt
+      b.facing = wx >= 0 ? 1 : -1
+
+      b.alpha += (b.fadeTarget - b.alpha) * FADE_SPEED * (dt * 60)
+      if (b.alpha < 0.005 && b.fadeTarget === 0) {
+        this.#clearSlot(b.slot)
+        this.#freeSlots.push(b.slot)
+        this.#opBees.splice(i, 1)
+        if (this.#opBees.length === 0) this.#applyVisibility()
+        continue
+      }
+
+      this.#writeSlotPosition(b.slot, b.x, b.y)
+      this.#writeSlotAlpha(b.slot, b.alpha)
+      this.#writeSlotFacing(b.slot, b.facing)
+      dirty = true
+    }
 
     for (const peer of this.#peers.values()) {
       // lerp toward target
