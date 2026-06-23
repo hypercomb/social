@@ -110,14 +110,63 @@ export class QaModalView extends EventTarget {
     closeBtn.addEventListener('click', () => this.close())
     dialog.appendChild(closeBtn)
 
-    const source = document.createElement('div')
-    source.textContent = binding.qPath.length === 0 ? '/' : '/' + binding.qPath.join('/')
-    Object.assign(source.style, {
+    // Source row: the tile this question belongs to, plus quick-nav icons so a
+    // host reviewing the question can jump straight to that tile's layer (or
+    // open it in a new window) for context without losing the dashboard.
+    const sourceRow = document.createElement('div')
+    Object.assign(sourceRow.style, {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.45rem',
       fontSize: '0.78rem',
       opacity: '0.7',
       letterSpacing: '0.04em',
     } as CSSStyleDeclaration)
-    dialog.appendChild(source)
+    const sourceLabel = document.createElement('span')
+    sourceLabel.textContent = binding.qPath.length === 0 ? '/' : '/' + binding.qPath.join('/')
+    Object.assign(sourceLabel.style, {
+      flex: '1',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis',
+      whiteSpace: 'nowrap',
+    } as CSSStyleDeclaration)
+    sourceRow.appendChild(sourceLabel)
+
+    const routeOf = (segs: readonly string[]): string =>
+      location.origin + '/' + segs.map(s => encodeURIComponent(String(s))).join('/')
+    const mkNav = (label: string, title: string, onClick: () => void): HTMLButtonElement => {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.textContent = label
+      b.title = title
+      Object.assign(b.style, {
+        flex: '0 0 auto',
+        border: '1px solid rgba(255,255,255,0.16)',
+        background: 'rgba(255,255,255,0.04)',
+        color: '#eaeaea',
+        borderRadius: '5px',
+        padding: '0.14rem 0.45rem',
+        fontSize: '0.82rem',
+        lineHeight: '1',
+        cursor: 'pointer',
+        opacity: '0.85',
+      } as CSSStyleDeclaration)
+      b.addEventListener('mouseenter', () => { b.style.opacity = '1'; b.style.background = 'rgba(110,180,255,0.18)' })
+      b.addEventListener('mouseleave', () => { b.style.opacity = '0.85'; b.style.background = 'rgba(255,255,255,0.04)' })
+      b.addEventListener('click', (e) => { e.stopPropagation(); onClick() })
+      return b
+    }
+    if (binding.qPath.length > 0) {
+      sourceRow.appendChild(mkNav('→ tile', 'Go to this tile', () => {
+        const nav = get<{ goRaw?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
+        nav?.goRaw?.(binding.qPath)
+        this.close()
+      }))
+      sourceRow.appendChild(mkNav('↗', 'Open this tile in a new window', () => {
+        window.open(routeOf(binding.qPath), '_blank', 'noopener')
+      }))
+    }
+    dialog.appendChild(sourceRow)
 
     const question = document.createElement('div')
     question.textContent = binding.question
