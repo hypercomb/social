@@ -30,6 +30,9 @@
     </header>
 
     <div class="feedback-body">
+      @if (needsPermission) {
+        <p class="feedback-permission-hint">{{ 'feedback.permission.hint' | t }}</p>
+      }
       <div class="feedback-segmented" role="tablist" [attr.aria-label]="'feedback.category.label' | t">
         <button
           type="button"
@@ -63,7 +66,7 @@
 
     <footer class="feedback-footer">
       <button class="feedback-btn ghost" type="button" (click)="close()">{{ 'feedback.cancel' | t }}</button>
-      <button class="feedback-btn primary" type="button" (click)="submit()" [disabled]="!canSend">{{ 'feedback.send' | t }}</button>
+      <button class="feedback-btn primary" type="button" (click)="submit()" [disabled]="!canSubmit">{{ (needsPermission ? 'feedback.request.send' : 'feedback.send') | t }}</button>
     </footer>
   </section>
 }

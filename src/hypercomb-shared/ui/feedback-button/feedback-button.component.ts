@@ -28,7 +28,12 @@ type StoreLike = { putOptimization?: (blob: Blob) => Promise<string> }
 type NavigationLike = { segmentsRaw?: () => readonly string[] }
 /** Minimal structural view of the i18n provider. */
 type I18nLike = { t?: (key: string, params?: Record<string, unknown>) => string }
+/** Swarm: who (if anyone) we're a visitor of. */
+type SwarmLike = { subscribedTo?: () => string | null }
+/** Feedback handshake drone: has the host granted us posting rights? */
+type FeedbackSwarmLike = { isGrantedBy?: (host: string) => boolean }
 
+const HEX64 = /^[0-9a-f]{64}$/
 type FeedbackCategory = 'idea' | 'issue'
 
 @Component({
@@ -46,6 +51,33 @@ export class FeedbackButtonComponent {
   /** Bound to the textarea via ngModel. */
   text = ''
 
+  // ── swarm context (remote feedback) ─────────────────────
+  /** When viewing someone else's hive over the swarm, the host's pubkey;
+   *  null on your own hive (where feedback is written locally). */
+  readonly host = signal<string | null>(null)
+  /** The host has approved this participant to post feedback. */
+  readonly granted = signal(false)
+  /** A permission request has been sent and is awaiting the host's decision. */
+  readonly requested = signal(false)
+
+  /** Visitor on another hive who hasn't been granted yet → the panel asks
+   *  for permission instead of posting. */
+  get needsPermission(): boolean {
+    return this.host() !== null && !this.granted()
+  }
+
+  constructor() {
+    // Activate the form the moment the host approves us.
+    EffectBus.on<{ host?: string }>('feedback:access-granted', (p) => {
+      const h = String(p?.host ?? '').trim().toLowerCase()
+      if (h && h === this.host()) {
+        this.granted.set(true)
+        this.requested.set(false)
+        this.#toast('success', 'feedback.granted.title', 'feedback.granted.message')
+      }
+    })
+  }
+
   // ── open / close ────────────────────────────────────────
 
   readonly toggle = (): void => {
@@ -54,11 +86,27 @@ export class FeedbackButtonComponent {
   }
 
   readonly showPanel = (): void => {
+    this.#refreshContext()
     this.open.set(true)
     // Focus the message field once the panel is in the DOM.
     queueMicrotask(() => {
       document.querySelector<HTMLTextAreaElement>('.feedback-panel textarea')?.focus()
     })
+  }
+
+  /** Resolve whether we're a visitor (and on whose hive) + our grant state.
+   *  Both swarm drones are essentials, resolved at runtime via window.ioc. */
+  #refreshContext(): void {
+    const swarm = get('@diamondcoreprocessor.com/SwarmDrone') as SwarmLike | undefined
+    const h = String(swarm?.subscribedTo?.() ?? '').trim().toLowerCase()
+    const host = HEX64.test(h) ? h : null
+    this.host.set(host)
+    if (host) {
+      const fs = get('@diamondcoreprocessor.com/FeedbackSwarmDrone') as FeedbackSwarmLike | undefined
+      this.granted.set(!!fs?.isGrantedBy?.(host))
+    } else {
+      this.granted.set(false)
+    }
   }
 
   readonly close = (): void => {
@@ -73,37 +121,44 @@ export class FeedbackButtonComponent {
     return this.text.trim().length > 0 && !this.sending()
   }
 
+  /** Drives the primary button's enabled state across both modes. */
+  get canSubmit(): boolean {
+    if (this.needsPermission) return !this.requested() && !this.sending()
+    return this.canSend
+  }
+
   // ── submit ──────────────────────────────────────────────
 
   async submit(): Promise<void> {
+    // Ungranted visitor → ask the host's permission instead of posting.
+    if (this.needsPermission) { this.requestAccess(); return }
     if (!this.canSend) return
-    const store = get('@hypercomb.social/Store') as StoreLike | undefined
-    if (!store?.putOptimization) {
-      this.#toast('error', 'feedback.error.title', 'feedback.error.message')
-      return
-    }
     this.sending.set(true)
     try {
       const nav = get('@hypercomb.social/Navigation') as NavigationLike | undefined
       const segments = (nav?.segmentsRaw?.() ?? []).map(String)
-      // Same record shape the Q&A modal mints (kind/appliesTo/payload/mark),
-      // with kind 'feedback' so the loop's optimization-list picks it up.
-      const record = {
-        kind: 'feedback',
-        appliesTo: segments,
-        payload: {
-          id: `fb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-          category: this.category(),
-          text: this.text.trim(),
-          route: segments.join('/'),
-          at: Date.now(),
-        },
-        mark: 'persistent',
+      // Same payload the loop reads (id/category/text/route/at).
+      const payload = {
+        id: `fb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+        category: this.category(),
+        text: this.text.trim(),
+        route: segments.join('/'),
+        at: Date.now(),
       }
-      const blob = new Blob([new TextEncoder().encode(JSON.stringify(record)) as BlobPart])
-      await store.putOptimization(blob)
-      // Let an open review panel refresh itself with the new item.
-      EffectBus.emit('feedback:submitted', {})
+      const host = this.host()
+      if (host && this.granted()) {
+        // Granted visitor → post over the swarm to the host's inbox; the
+        // FeedbackSwarmDrone publishes it and the host ingests it.
+        EffectBus.emit('feedback:remote-post', { host, payload: { ...payload, appliesTo: segments } })
+      } else {
+        // Own hive → write straight to the local optimization inbox, the
+        // exact same record shape the Q&A modal mints.
+        const store = get('@hypercomb.social/Store') as StoreLike | undefined
+        if (!store?.putOptimization) { this.#toast('error', 'feedback.error.title', 'feedback.error.message'); return }
+        const record = { kind: 'feedback', appliesTo: segments, payload, mark: 'persistent' }
+        await store.putOptimization(new Blob([new TextEncoder().encode(JSON.stringify(record)) as BlobPart]))
+        EffectBus.emit('feedback:submitted', {})
+      }
       this.#toast('success', 'feedback.sent.title', 'feedback.sent.message')
       this.text = ''
       this.category.set('idea')
@@ -114,6 +169,18 @@ export class FeedbackButtonComponent {
     } finally {
       this.sending.set(false)
     }
+  }
+
+  /** Visitor: ask the host for permission to share feedback. The
+   *  FeedbackSwarmDrone publishes the request over the swarm; the host sees a
+   *  consent toast and, on approval, our `feedback:access-granted` fires. */
+  requestAccess(): void {
+    const host = this.host()
+    if (!host || this.requested()) return
+    EffectBus.emit('feedback:request-access', { host })
+    this.requested.set(true)
+    this.#toast('success', 'feedback.request.title', 'feedback.request.message')
+    this.close()
   }
 
   onKey(event: KeyboardEvent): void {
@@ -136,6 +203,10 @@ export class FeedbackButtonComponent {
       'feedback.sent.message': 'Your feedback is on its way.',
       'feedback.error.title': 'Could not send',
       'feedback.error.message': 'Please try again in a moment.',
+      'feedback.request.title': 'Request sent',
+      'feedback.request.message': "Waiting for the host to allow you to share feedback.",
+      'feedback.granted.title': "You're in",
+      'feedback.granted.message': 'The host approved you — share away.',
     }
     EffectBus.emit('toast:show', {
       type,

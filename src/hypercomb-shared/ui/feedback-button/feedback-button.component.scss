@@ -129,6 +129,18 @@ $steel: rgb(126, 182, 214);
   padding: 0.9rem 1rem;
 }
 
+// ── permission hint (visitor on another hive, not yet granted) ──
+.feedback-permission-hint {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: rgba(206, 224, 240, 0.85);
+  background: rgba($steel, 0.1);
+  border: 1px solid rgba($steel, 0.28);
+  border-radius: 7px;
+}
+
 // ── segmented category control ───────────────────────────
 .feedback-segmented {
   display: flex;
