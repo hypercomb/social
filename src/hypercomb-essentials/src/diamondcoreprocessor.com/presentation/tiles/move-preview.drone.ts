@@ -18,6 +18,12 @@ type DropIntoCommitPayload = {
   dragged?: string[]
 } | null
 
+type CopyDragPayload = {
+  dragged?: string[]
+  q?: number
+  r?: number
+} | null
+
 // swap target indicators
 const SWAP_FILL = 0xff8844
 const SWAP_FILL_ALPHA = 0.2
@@ -77,7 +83,7 @@ export class MovePreviewDrone extends Drone {
   protected override deps = {
     axial: '@diamondcoreprocessor.com/AxialService',
   }
-  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'move:preview', 'move:drop-into', 'move:drop-into-commit']
+  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'move:preview', 'move:drop-into', 'move:drop-into-commit', 'move:copy-drag']
   protected override emits: string[] = []
 
   #effectsRegistered = false
@@ -116,6 +122,20 @@ export class MovePreviewDrone extends Drone {
 
     this.onEffect<DropIntoCommitPayload>('move:drop-into-commit', (payload) => {
       if (payload) this.#startSuckIn(payload.label)
+    })
+
+    // Ctrl-drag COPY: the exact dragged tiles float at the hovered SLOT (q,r),
+    // ready to drop as siblings. Same held-cluster renderer drop-into uses, but
+    // positioned by grid coordinate (the slot may be empty) and with NO landing
+    // ring — a copy lands beside, not into.
+    this.onEffect<CopyDragPayload>('move:copy-drag', (payload) => {
+      if (this.#suckIn) return
+      if (payload && Array.isArray(payload.dragged) && payload.dragged.length > 0
+        && typeof payload.q === 'number' && typeof payload.r === 'number') {
+        this.#showHeldAt(this.#axialCenter(payload.q, payload.r), payload.dragged)
+      } else {
+        this.#hideHeld()
+      }
     })
   }
 
@@ -222,7 +242,13 @@ export class MovePreviewDrone extends Drone {
   // ── held cluster (shrunken copies hovering over the target) ──
 
   #showHeld(targetLabel: string, dragged: string[]): void {
-    const center = this.#cellCenter(targetLabel)
+    this.#showHeldAt(this.#cellCenter(targetLabel), dragged)
+  }
+
+  /** Show the held exact-tile cluster at a container-space center. Shared by
+   *  drop-into (centered on the target tile) and copy-drag (centered on the
+   *  hovered slot, which may be empty). */
+  #showHeldAt(center: { x: number; y: number } | null, dragged: string[]): void {
     if (!center || dragged.length === 0) { this.#hideHeld(); return }
 
     const key = dragged.join('')
@@ -435,10 +461,16 @@ export class MovePreviewDrone extends Drone {
     if (idx < 0) return null
     const coord = this.#cellCoords[idx]
     if (!coord) return null
+    return this.#axialCenter(coord.q, coord.r)
+  }
+
+  /** Container-space center of a grid slot by axial coordinate (works for an
+   *  empty slot — used by the copy-drag ghost which lands beside, not on, a tile). */
+  #axialCenter(q: number, r: number): { x: number; y: number } | null {
     const axialSvc = this.resolve<any>('axial')
     if (!axialSvc?.items) return null
     for (const [, item] of axialSvc.items) {
-      if (item.q === coord.q && item.r === coord.r) {
+      if (item.q === q && item.r === r) {
         return { x: item.Location.x + this.#meshOffset.x, y: item.Location.y + this.#meshOffset.y }
       }
     }

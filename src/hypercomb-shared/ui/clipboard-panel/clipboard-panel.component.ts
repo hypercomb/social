@@ -83,6 +83,11 @@ export class ClipboardPanelComponent implements OnDestroy {
    *  off the render path; absent/0 => no badge. Foreshadows the drill-down:
    *  the hex is your handle into that subtree. */
   readonly counts = signal<Record<string, number>>({})
+  /** label -> the tile's current index (its spiral slot) — the DEFAULT paste
+   *  target, resolved best-effort. */
+  readonly indexes = signal<Record<string, number>>({})
+  /** label -> user-chosen paste target index, overriding the default. */
+  readonly targets = signal<Record<string, number>>({})
 
   // ── drill-down ─────────────────────────────────────────────────────
   // The clipboard is just another hierarchy: clicking a tile's hex descends
@@ -116,6 +121,8 @@ export class ClipboardPanelComponent implements OnDestroy {
   #thumbToken = 0
   // Same guard for the (separate) child-count resolution.
   #countToken = 0
+  // …and the default-index resolution.
+  #indexToken = 0
   // Guards the auto-open: EffectBus replays the LAST `clipboard:captured`
   // to a late subscriber, which would pop the panel open on every mount.
   // We only auto-open for captures that arrive AFTER the initial sync.
@@ -237,10 +244,57 @@ export class ClipboardPanelComponent implements OnDestroy {
     try { return await worker.childrenAt(segments) } catch { return [] }
   }
 
-  /** Resolve thumbnails + counts for whichever set is on screen. */
+  /** Resolve thumbnails + counts + default indexes for the on-screen set. */
   #syncDisplay(items: readonly ClipboardItem[]): void {
     void this.#syncThumbs(items).catch(() => { /* best-effort thumbnails */ })
     void this.#syncCounts(items).catch(() => { /* best-effort child counts */ })
+    void this.#syncIndexes(items).catch(() => { /* best-effort indexes */ })
+  }
+
+  // ── paste targets (hover number) ───────────────────────────────────
+  // Each item's DEFAULT target is its current index (resolved best-effort from
+  // the worker, off the render path). The user can override per item; on paste
+  // we hand the overrides to the worker, which sets each placed tile's `index`.
+
+  async #syncIndexes(items: readonly ClipboardItem[]): Promise<void> {
+    const token = ++this.#indexToken
+    const ioc = (window as { ioc?: { get?: (k: string) => unknown } }).ioc
+    const worker = ioc?.get?.(CLIPBOARD_WORKER_KEY) as
+      { indexAt?: (segments: readonly string[]) => Promise<number | null> } | undefined
+    if (!worker?.indexAt) { this.indexes.set({}); return }
+    const out: Record<string, number> = {}
+    for (let i = 0; i < items.length; i += COUNT_BATCH) {
+      if (token !== this.#indexToken) return
+      const batch = items.slice(i, i + COUNT_BATCH)
+      await Promise.all(batch.map(async (item) => {
+        try {
+          const n = await worker.indexAt!([...item.sourceSegments, item.label])
+          if (n != null) out[item.label] = n
+        } catch { /* best-effort */ }
+      }))
+      if (token === this.#indexToken) this.indexes.set({ ...out })
+    }
+  }
+
+  /** Effective paste target for a label: the user's override, else the default
+   *  index, else null (auto). */
+  targetFor(label: string): number | null {
+    const t = this.targets()[label]
+    if (typeof t === 'number') return t
+    const d = this.indexes()[label]
+    return typeof d === 'number' ? d : null
+  }
+
+  /** Set / clear the user's target from the editable field. Empty = back to
+   *  the default. */
+  setTarget(label: string, raw: string): void {
+    const n = parseInt(raw, 10)
+    this.targets.update(t => {
+      const next = { ...t }
+      if (Number.isFinite(n)) next[label] = n
+      else delete next[label]
+      return next
+    })
   }
 
   // ── resize (left grip) ─────────────────────────────────────────────
@@ -306,16 +360,16 @@ export class ClipboardPanelComponent implements OnDestroy {
     this.close()
   }
 
-  /** Place every clipboard tile onto the CURRENT page. Copy keeps the
-   *  items (repeatable); cut consumes them (and the panel auto-closes when
-   *  the clipboard empties via `clipboard:changed`). */
+  /** Place every clipboard tile onto the CURRENT page, honouring any hover
+   *  target indexes. Copy keeps the items (repeatable); cut consumes them (and
+   *  the panel auto-closes when the clipboard empties via `clipboard:changed`). */
   placeAll(): void {
-    EffectBus.emit('controls:action', { action: 'paste' })
+    EffectBus.emit('clipboard:place-items', { labels: this.items().map(i => i.label), targets: this.targets() })
   }
 
-  /** Place a single clipboard tile onto the current page. */
+  /** Place a single clipboard tile onto the current page (with its target). */
   placeOne(label: string): void {
-    EffectBus.emit('clipboard:place-items', { labels: [label] })
+    EffectBus.emit('clipboard:place-items', { labels: [label], targets: this.targets() })
   }
 
   /** Drop a single tile from the clipboard WITHOUT placing it. The worker
@@ -408,7 +462,14 @@ export class ClipboardPanelComponent implements OnDestroy {
     if (history?.sign) {
       try { locSig = await history.sign({ explorerSegments: () => [...sourceSegments, label] }) } catch { /* cold */ }
     }
-    const propsSig = this.#lookupPropsSig(locSig, label)
+    let propsSig = this.#lookupPropsSig(locSig, label)
+    if (!propsSig) {
+      // Render-index miss — the tile was never rendered with this image (a cut
+      // tile, or a freshly generated image). Fall back to the CANONICAL props
+      // sig from the tile's layer, resolved the warm way by the worker, so the
+      // thumbnail shows WITHOUT a render and a generated image is never lost.
+      propsSig = (await this.#canonicalPropsSig([...sourceSegments, label])) ?? undefined
+    }
     if (!propsSig) return null
 
     const propsBlob = await store.getResource(propsSig)
@@ -429,6 +490,16 @@ export class ClipboardPanelComponent implements OnDestroy {
       const v = (locSig && idx[locSig]) ?? idx[label]
       return (typeof v === 'string' && SIG_RE.test(v)) ? v : undefined
     } catch { return undefined }
+  }
+
+  /** Canonical props sig from the tile's LAYER (via the worker's warm path),
+   *  used only when the localStorage render-index has no entry. Best-effort. */
+  async #canonicalPropsSig(segments: readonly string[]): Promise<string | undefined> {
+    const ioc = (window as { ioc?: { get?: (k: string) => unknown } }).ioc
+    const worker = ioc?.get?.(CLIPBOARD_WORKER_KEY) as
+      { propsSigAt?: (s: readonly string[]) => Promise<string | null> } | undefined
+    if (!worker?.propsSigAt) return undefined
+    try { return (await worker.propsSigAt(segments)) ?? undefined } catch { return undefined }
   }
 
   #imageSigOf(props: Record<string, unknown>): string | undefined {

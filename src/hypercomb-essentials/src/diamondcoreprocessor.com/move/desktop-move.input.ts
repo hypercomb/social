@@ -1,5 +1,6 @@
 // diamondcoreprocessor.com/input/move/desktop-move.input.ts
 import { Point } from 'pixi.js'
+import { EffectBus } from '@hypercomb/core'
 import type { Axial } from '../navigation/hex-detector.js'
 import type { MoveDroneApi } from './move.drone.js'
 
@@ -28,6 +29,10 @@ export class DesktopMoveInput {
   #dragging = false
   #spaceHeld = false
   #ctrlHeld = false
+  // Ctrl/Meta held at the moment the drag is grabbed → COPY this drag (vs
+  // drop-into, which is Ctrl pressed AFTER the drag begins). Captured at
+  // pointerdown so a release before drop still commits the copy the user started.
+  #copyAtBegin = false
 
   attach = (drone: MoveDroneApi, refs: MoveRefs): void => {
     if (this.#enabled) return
@@ -86,14 +91,17 @@ export class DesktopMoveInput {
     const axial = this.#clientToAxial(e.clientX, e.clientY)
     if (!axial) return
 
-    // Ctrl/Meta at pointerdown is reserved for selection paint — never start a move.
-    if (e.ctrlKey || e.metaKey) return
-
-    // Move only engages on an already-selected tile.
+    // Move only engages on an already-selected tile. Ctrl/Meta on an
+    // UNSELECTED tile stays with SelectionInputDrone (paint); on an ALREADY-
+    // SELECTED tile it means "Ctrl-drag this selection to COPY it" — the
+    // selection drone defers to us for any press on a selected tile.
     const label = this.#drone?.labelAtAxial(axial) ?? null
     if (!label) return
     const selection = window.ioc.get<{ selected: ReadonlySet<string> }>('@diamondcoreprocessor.com/SelectionService')
     if (!selection?.selected.has(label)) return
+
+    // Capture copy intent at the grab: Ctrl/Meta held now → this drag copies.
+    this.#copyAtBegin = e.ctrlKey || e.metaKey
 
     this.#downPos = { x: e.clientX, y: e.clientY }
     this.#downAxial = axial
@@ -118,9 +126,11 @@ export class DesktopMoveInput {
         return
       }
       this.#dragging = true
-      this.#setCursor('grabbing')
-      // propagate any Ctrl state already held when the drag started
-      if (this.#ctrlHeld) this.#drone.setDropIntoActive(true)
+      this.#setCursor(this.#copyAtBegin ? 'copy' : 'grabbing')
+      // Copy (Ctrl at grab) and drop-into (Ctrl pressed mid-drag) are mutually
+      // exclusive. Copy wins when it was latched at the grab.
+      if (this.#copyAtBegin) this.#drone.setCopyMode(true)
+      else if (this.#ctrlHeld) this.#drone.setDropIntoActive(true)
     }
 
     const axial = this.#clientToAxial(e.clientX, e.clientY)
@@ -135,9 +145,14 @@ export class DesktopMoveInput {
     if (e.pointerType === 'touch') return
 
     if (this.#dragging && this.#drone) {
+      // A real drag happened — suppress the trailing native click so it can't
+      // re-toggle the source tile's selection (the click fires after this).
+      EffectBus.emit('move:drag-end', {})
       const axial = this.#clientToAxial(e.clientX, e.clientY) ?? this.#lastAxial
       if (axial) {
-        if (this.#ctrlHeld) {
+        if (this.#copyAtBegin) {
+          void this.#drone.commitCopyAt(axial, this.#source)
+        } else if (this.#ctrlHeld) {
           void this.#drone.commitDropInto(axial, this.#source)
         } else {
           void this.#drone.commitMoveAt(axial, this.#source)
@@ -155,8 +170,9 @@ export class DesktopMoveInput {
     if (e.key === 'Control') {
       if (!this.#ctrlHeld) {
         this.#ctrlHeld = true
-        // mid-drag: flip the drone into drop-into preview mode
-        if (this.#dragging && this.#drone) {
+        // mid-drag: flip the drone into drop-into preview mode — but NOT when
+        // this drag was grabbed as a copy (copy was latched at the grab).
+        if (this.#dragging && this.#drone && !this.#copyAtBegin) {
           this.#drone.setDropIntoActive(true)
         }
       }
@@ -202,6 +218,7 @@ export class DesktopMoveInput {
     this.#downAxial = null
     this.#lastAxial = null
     this.#dragging = false
+    this.#copyAtBegin = false
     this.#setCursor('')
   }
 

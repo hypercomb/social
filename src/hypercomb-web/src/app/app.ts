@@ -175,6 +175,14 @@ export class App implements AfterViewInit {
     })
     window.addEventListener('dcp:embed-closed', () => this.dcpPortalOpen.set(false))
 
+    // "New features" indicator → just apply. We're in alpha; the eggs
+    // (negative-cache + render guards) protect the canvas, so a deployed
+    // package update installs straight away — no DCP review/opt-in gate.
+    // The mesh only announces WHICH features changed; the bytes are fetched
+    // by THIS origin from its own bundled `/content/` (upgradeFromBundled),
+    // then the shell reloads so the freshly-installed bees take over.
+    window.addEventListener('hypercomb:apply-update', () => void this.upgradeFromBundledClicked())
+
     // ViewMode subscription — drives Pixi-canvas visibility via app.html.
     // Self-registered in shared/core/view-mode.service.ts at module load.
     const wireViewMode = (svc: { mode: string } & EventTarget): void => {

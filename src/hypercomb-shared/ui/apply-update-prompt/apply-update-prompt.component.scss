@@ -1,0 +1,218 @@
+@use '../breakpoints' as *;
+
+:host { display: contents; }
+
+// ── backdrop ──────────────────────────────────────────
+.au-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(4px);
+  z-index: 100000;
+  animation: au-backdrop-enter 200ms ease forwards;
+}
+
+// ── panel ─────────────────────────────────────────────
+.au-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 100001;
+  width: min(90vw, 23rem);
+  display: flex;
+  flex-direction: column;
+
+  background: rgba(14, 18, 24, 0.92);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.7);
+
+  color: rgba(245, 245, 245, 0.85);
+  font-family: var(--hc-mono);
+
+  animation: au-panel-enter 300ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+// ── header ────────────────────────────────────────────
+.au-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem 0.5rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+
+  h3 {
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: #c8975a;
+    margin: 0;
+  }
+}
+
+.au-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  background: none;
+  border: none;
+  border-radius: 3px;
+  color: rgba(245, 245, 245, 0.3);
+  font-size: 1rem;
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease;
+
+  &:hover { color: whitesmoke; background: rgba(255, 255, 255, 0.08); }
+}
+
+// ── body ──────────────────────────────────────────────
+.au-body {
+  padding: 0.85rem 1rem;
+  text-align: center;
+}
+
+// honeycomb visualization
+.au-comb {
+  display: flex;
+  justify-content: center;
+  margin: 0.15rem 0 0.35rem;
+}
+
+.au-comb-svg {
+  width: min(60%, 7.5rem);
+  height: auto;
+}
+
+.au-hex {
+  fill: rgba(224, 169, 62, 0.85);   // honey-amber — the system's operation color
+  opacity: 0;
+  animation: au-hex-fill 220ms ease forwards;
+  animation-delay: calc(var(--i) * 40ms);
+}
+
+.au-count {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: rgba(245, 245, 245, 0.9);
+  margin: 0.5rem 0 0.15rem;
+}
+
+.au-version {
+  font-size: 0.66rem;
+  color: rgba(245, 245, 245, 0.45);
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+
+.au-changes {
+  font-size: 0.72rem;
+  color: rgba(245, 245, 245, 0.7);
+  line-height: 1.5;
+  margin: 0.35rem 0 0;
+}
+
+// ── actions ───────────────────────────────────────────
+.au-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem 0.75rem;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.au-btn {
+  font-family: var(--hc-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0.4rem 0.9rem;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+
+  &.cancel {
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(245, 245, 245, 0.5);
+
+    &:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: rgba(245, 245, 245, 0.8);
+    }
+  }
+
+  // Amber affirmative — Apply is a confident "yes, install", not a destructive
+  // warning, so it carries the honey-amber operation color, not danger red.
+  &.apply {
+    background: rgba(224, 169, 62, 0.14);
+    color: #e0a93e;
+    border-color: rgba(224, 169, 62, 0.32);
+
+    &:hover {
+      background: rgba(224, 169, 62, 0.24);
+      color: #eab559;
+    }
+
+    &:active { transform: scale(0.97); }
+    &:focus-visible { outline: 1px solid rgba(224, 169, 62, 0.5); outline-offset: 1px; }
+  }
+}
+
+// ── keyframes ─────────────────────────────────────────
+@keyframes au-backdrop-enter {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes au-panel-enter {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.96); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+
+@keyframes au-panel-enter-phone {
+  from { opacity: 0; transform: translateY(100%); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+// Opacity-only stagger — the comb visibly fills in, then RESTS. No looping
+// pulse, no scale, no glow (honors the hard "no flashy effects" rule).
+@keyframes au-hex-fill {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+// Respect reduced-motion: show the comb filled immediately, skip the stagger.
+@media (prefers-reduced-motion: reduce) {
+  .au-hex { animation: none; opacity: 1; }
+  .au-backdrop, .au-panel { animation-duration: 1ms; }
+}
+
+// ═══════════════════════════════════════════════════════
+// RESPONSIVE — phone bottom-sheet (matches confirm-dialog)
+// ═══════════════════════════════════════════════════════
+@include phone-only {
+  .au-panel {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    transform: none;
+    width: 100%;
+    border-radius: 12px 12px 0 0;
+    padding-bottom: var(--hc-safe-bottom, 0px);
+    animation: au-panel-enter-phone 250ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  }
+
+  .au-close { width: 2.5rem; height: 2.5rem; font-size: 1.1rem; }
+  .au-comb-svg { width: min(55%, 8.5rem); }
+  .au-count { font-size: 0.86rem; }
+  .au-changes { font-size: 0.78rem; }
+  .au-actions { padding: 0.6rem 1rem 0.85rem; }
+  .au-btn { padding: 0.55rem 1.1rem; font-size: 0.74rem; min-height: 2.5rem; }
+}

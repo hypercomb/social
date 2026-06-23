@@ -61,7 +61,7 @@ class SelectionInputDrone extends Drone {
     selection: '@diamondcoreprocessor.com/SelectionService',
   }
 
-  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:set-orientation', 'tile:click', 'navigation:guard-start', 'navigation:guard-end', 'move:mode']
+  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'render:set-orientation', 'tile:click', 'navigation:guard-start', 'navigation:guard-end', 'move:mode', 'move:drag-end']
   protected override emits: string[] = []
 
   protected override heartbeat = async (): Promise<void> => {
@@ -132,6 +132,14 @@ class SelectionInputDrone extends Drone {
       this.#moveMode = !!payload?.active
     })
 
+    // A pointer drag-to-move/copy just ended — the trailing native click
+    // would otherwise re-toggle the dragged tile's selection. Suppress the
+    // next tile:click, the same guard our own drag-select uses (#endDrag).
+    this.onEffect('move:drag-end', () => {
+      this.#justDragged = true
+      requestAnimationFrame(() => { this.#justDragged = false })
+    })
+
     this.onEffect('navigation:guard-end', () => {
       this.#navigationBlocked = false
       if (this.#navigationGuardTimer) { clearTimeout(this.#navigationGuardTimer); this.#navigationGuardTimer = null }
@@ -180,13 +188,17 @@ class SelectionInputDrone extends Drone {
 
     if (!this.#gate?.claim('tile-selection')) return
 
-    // plain click on selected tile — let DesktopMoveInput handle drag-to-move
-    if (!e.ctrlKey && !e.metaKey && selection.isSelected(label)) {
+    // Press on an already-selected tile — hand off to DesktopMoveInput, which
+    // owns drag-to-move (plain) AND Ctrl-drag-to-COPY. This now fires for Ctrl
+    // too: Ctrl-drag a selected tile = copy, not paint. A Ctrl-CLICK (no drag)
+    // to toggle/deselect is still delivered via tile:click on pointerup, and a
+    // real drag suppresses that click (move:drag-end → #justDragged).
+    if (selection.isSelected(label)) {
       this.#gate?.release('tile-selection')
       return
     }
 
-    // ctrl+drag: immediate paint (original behavior)
+    // ctrl+drag on an UNSELECTED tile: immediate paint (original behavior)
     if (e.ctrlKey || e.metaKey) {
       this.#activePointerId = e.pointerId
       this.#dragActive = true

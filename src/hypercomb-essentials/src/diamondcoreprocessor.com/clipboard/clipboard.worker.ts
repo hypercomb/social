@@ -51,6 +51,8 @@ interface LayerCommitterLike {
 
 interface StoreLike {
   readonly clipboard: FileSystemDirectoryHandle
+  getResource?: (sig: string) => Promise<Blob | null>
+  putResource?: (blob: Blob) => Promise<string>
 }
 
 export class ClipboardWorker extends Worker {
@@ -98,9 +100,10 @@ export class ClipboardWorker extends Worker {
     // Place specific clipboard tiles at the current location — the
     // non-navigating side panel's per-item "place" button. Same placement
     // primitive as paste, scoped to the requested labels.
-    EffectBus.on<{ labels?: string[] }>('clipboard:place-items', (payload) => {
+    EffectBus.on<{ labels?: string[]; targets?: Record<string, number> }>('clipboard:place-items', (payload) => {
       const labels = Array.isArray(payload?.labels) ? payload!.labels! : []
-      if (labels.length > 0) void this.#placeLabels(labels)
+      const targets = (payload?.targets && typeof payload.targets === 'object') ? payload.targets : undefined
+      if (labels.length > 0) void this.#placeLabels(labels, targets)
     })
 
     // Drop specific clipboard tiles WITHOUT placing them — the side panel's
@@ -349,7 +352,7 @@ export class ClipboardWorker extends Worker {
   // `#paste` (all labels) and the side panel's per-item place
   // (`clipboard:place-items`). Mirrors paste's consume semantics: cut drops
   // the items that landed; copy keeps them for repeat placement.
-  async #placeLabels(labels: readonly string[]): Promise<void> {
+  async #placeLabels(labels: readonly string[], targets?: Record<string, number>): Promise<void> {
     const clipboardSvc = this.#clipboardSvc
     const lineage = this.#lineage
     const store = this.#store
@@ -368,13 +371,18 @@ export class ClipboardWorker extends Worker {
 
     EffectBus.emit('clipboard:paste-start', { count: items.length, op })
 
-    const { placed, failed } = await this.#placeItems(history, lineage, committer, items, targetSegments)
+    // Hover-number paste targets are applied INSIDE #placeItems — folded into
+    // the re-home cascade so the index lands in the same commit (a post-place
+    // write raced the cascade and didn't stick).
+    const { placed, failed } = await this.#placeItems(history, lineage, committer, items, targetSegments, targets)
 
     const placedLabels = placed.map(p => p.label)
-    // cut: drop only the items that actually landed. Failed items stay on
-    // the clipboard so a partial / stale paste doesn't lose data.
-    // copy: leave the clipboard intact for repeat paste.
-    if (op === 'cut' && placedLabels.length > 0) {
+    // Placing CONSUMES the placed items by default — copy AND cut. Otherwise the
+    // clipboard would accumulate everything you ever pasted and you'd have to
+    // hand-clear it (a bad experience). Only the items that actually landed are
+    // dropped; failed items stay so a partial / stale paste loses nothing.
+    // (A future "keep for repeat" mode can opt OUT of this for copy.)
+    if (placedLabels.length > 0) {
       clipboardSvc.removeItems(new Set(placedLabels))
       if (clipboardSvc.isEmpty) {
         await clearDirectory(store.clipboard)
@@ -407,6 +415,7 @@ export class ClipboardWorker extends Worker {
     committer: LayerCommitterLike,
     items: readonly ClipboardEntry[],
     targetSegments: readonly string[],
+    targets?: Record<string, number>,
   ): Promise<{ placed: ClipboardEntry[]; failed: string[] }> {
     // Resolve the target layer ROBUSTLY (own-bag read is empty for a never-
     // committed sub-layer; resolveLayerAt walks the parent chain, and the
@@ -470,7 +479,21 @@ export class ClipboardWorker extends Worker {
       // source subtree into importTree updates rooted at the dest path.
       if (srcLocSig !== dstLocSig) {
         try {
-          treeUpdates.push(...await flattenLayerTree(history, srcLayer, [...targetSegments, entry.label]))
+          const entryUpdates = await flattenLayerTree(history, srcLayer, [...targetSegments, entry.label])
+          // Hover-number paste target: rewrite the placed TOP tile's `index`
+          // (its spiral slot) inside this same re-home cascade, so it lands in
+          // ONE commit. Only the top node is retargeted; the subtree keeps its
+          // own indexes. No target → unchanged (source index = the default).
+          const target = targets?.[entry.label]
+          if (typeof target === 'number' && Number.isFinite(target)) {
+            const topKey = [...targetSegments, entry.label].join('/')
+            const top = entryUpdates.find(u => u.segments.join('/') === topKey)
+            if (top) {
+              const sig = await this.#propsWithIndex(top.layer, Math.trunc(target))
+              if (sig) top.layer = { ...top.layer, properties: [sig] }
+            }
+          }
+          treeUpdates.push(...entryUpdates)
         } catch (err) {
           console.warn(`[clipboard] flatten failed for '${entry.label}':`, err)
           failed.push(entry.label)
@@ -514,6 +537,30 @@ export class ClipboardWorker extends Worker {
     // incremental path covering the paste button's exit-before-commit order.
 
     return { placed, failed }
+  }
+
+  // Build a new props resource = the tile's existing properties with `index`
+  // overridden, content-addressed the SAME way writeTilePropertiesAt does
+  // (sorted keys → JSON) so the sig is consistent. Used by the paste-target
+  // override to set a placed tile's spiral slot inside the re-home cascade.
+  async #propsWithIndex(layer: unknown, index: number): Promise<string | null> {
+    const store = this.#store
+    if (!store?.putResource) return null
+    const slot = (layer as { properties?: readonly unknown[] } | null | undefined)?.properties
+    const existingSig = Array.isArray(slot) && slot.length > 0 ? slot[0] : undefined
+    let props: Record<string, unknown> = {}
+    if (typeof existingSig === 'string' && store.getResource) {
+      try {
+        const blob = await store.getResource(existingSig)
+        if (blob) { const parsed = JSON.parse(await blob.text()); if (parsed && typeof parsed === 'object') props = parsed }
+      } catch { /* fresh props */ }
+    }
+    const merged: Record<string, unknown> = { ...props, index }
+    const canonical: Record<string, unknown> = {}
+    for (const k of Object.keys(merged).sort()) canonical[k] = merged[k]
+    try {
+      return await store.putResource(new Blob([JSON.stringify(canonical)], { type: 'application/json' }))
+    } catch { return null }
   }
 
   // ── clear ─────────────────────────────────────────────
@@ -618,6 +665,45 @@ export class ClipboardWorker extends Worker {
     if (!history) return []
     const layer = await resolveLayerAt(history, this.#lineage?.domain, segments)
     return childNamesOf(history, layer)
+  }
+
+  // Canonical props-resource sig for the cell at `segments` — `properties[0]`
+  // in the cell's head layer (see editor/tile-properties.ts). The side panel
+  // falls back to this when the participant-local render-index has NO entry —
+  // a cut tile, or a generated image on a tile that was never re-rendered — so
+  // the clipboard thumbnail shows WITHOUT needing a render, and never loses a
+  // generated image. Resolution mirrors validate(): the warm PARENT-slot path
+  // first (copy tiles, where the parent still lists the cell), then the cell's
+  // OWN bag (cut tiles — the cut leaves a non-empty bag in place, so this is
+  // NOT the cold empty-bag read that triggers preloadAllBags). Best-effort.
+  async propsSigAt(segments: readonly string[]): Promise<string | null> {
+    const history = this.#history
+    const lineage = this.#lineage
+    if (!history || segments.length === 0) return null
+    const label = segments[segments.length - 1]
+    const parent = await resolveLayerAt(history, lineage?.domain, segments.slice(0, -1))
+    let layer: unknown = (await childLayerOf(history, parent, label))?.layer ?? null
+    if (!layer) {
+      const ownSig = await history.sign({ domain: lineage?.domain, explorerSegments: () => segments })
+      layer = await history.currentLayerAt(ownSig)
+    }
+    const slot = (layer as { properties?: readonly unknown[] } | null | undefined)?.properties
+    const sig = Array.isArray(slot) && slot.length > 0 ? slot[0] : undefined
+    return (typeof sig === 'string' && /^[0-9a-f]{64}$/.test(sig)) ? sig : null
+  }
+
+  // The cell's current `index` (its spiral/pinned-layout slot) — the side
+  // panel's DEFAULT paste target. Read from the canonical props (propsSigAt →
+  // resource → `index`). Null when there are no properties / no index yet.
+  async indexAt(segments: readonly string[]): Promise<number | null> {
+    const propsSig = await this.propsSigAt(segments)
+    if (!propsSig) return null
+    const blob = await this.#store?.getResource?.(propsSig)
+    if (!blob) return null
+    try {
+      const props = JSON.parse(await blob.text()) as { index?: unknown }
+      return typeof props.index === 'number' && Number.isFinite(props.index) ? props.index : null
+    } catch { return null }
   }
 
   // ── discard (drop without placing) ────────────────────

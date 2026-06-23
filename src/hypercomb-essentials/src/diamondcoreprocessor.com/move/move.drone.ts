@@ -5,6 +5,21 @@ import type { Axial } from '../navigation/hex-detector.js'
 import type { LayerTransferService } from './layer-transfer.service.js'
 import type { OrderProjection } from '../history/order-projection.js'
 import { cellLocationSig, writeTilePropertiesAt } from '../editor/tile-properties.js'
+import { childNamesOf, childLayerOf, resolveLayerAt, flattenLayerTree } from '../history/layer-placement.js'
+import type { PlacementHistory, PlacementLayer } from '../history/layer-placement.js'
+
+// Committer/store shapes for the Ctrl-drag COPY path — it re-homes a dragged
+// cell's whole subtree under a fresh sibling name using the SAME signature-
+// preserving primitive paste/adopt use (flattenLayerTree + importTree), so the
+// copy is byte-for-byte exact and dedup'd. History/layer use the placement types.
+interface CopyTreeUpdate { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }
+interface CopyCommitterLike {
+  importTree(updates: CopyTreeUpdate[], nameSlots?: ReadonlySet<string>): Promise<void>
+}
+interface CopyStoreLike {
+  getResource?: (sig: string) => Promise<Blob | null>
+  putResource?: (blob: Blob) => Promise<string>
+}
 
 type CellCountPayload = { count: number; labels: string[]; coords?: Axial[]; branchLabels?: string[] }
 type MoveRefs = {
@@ -23,6 +38,9 @@ export type MoveDroneApi = {
   setDropIntoActive: (active: boolean) => void
   commitDropInto: (axial: Axial, source: string) => Promise<void>
   readonly dropIntoActive: boolean
+  setCopyMode: (active: boolean) => void
+  commitCopyAt: (axial: Axial, source: string) => Promise<void>
+  readonly copyModeActive: boolean
   labelAtAxial: (axial: Axial) => string | null
 }
 
@@ -67,8 +85,15 @@ export class MoveDrone extends Drone {
   #dropIntoLabel: string | null = null
   #lastHoverAxial: Axial | null = null
 
+  // ── copy-drag state (Ctrl held when the drag STARTS) ─────
+  // Distinct from drop-into (Ctrl pressed mid-drag): copy duplicates the
+  // dragged tiles as siblings at the current level on drop. No window — the
+  // release IS the act.
+  #copyMode = false
+
   get moveActive(): boolean { return this.#moveActive }
   get dropIntoActive(): boolean { return this.#dropIntoActive }
+  get copyModeActive(): boolean { return this.#copyMode }
 
   labelAtAxial = (axial: Axial): string | null => {
     // During a drag, prefer the snapshot so hover detection stays
@@ -95,7 +120,7 @@ export class MoveDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'controls:action']
-  protected override emits = ['move:preview', 'move:committed', 'move:mode', 'cell:reorder', 'move:drop-into', 'move:drop-into-commit']
+  protected override emits = ['move:preview', 'move:committed', 'move:mode', 'cell:reorder', 'move:drop-into', 'move:drop-into-commit', 'move:copy-drag', 'cell:added']
 
   #effectsRegistered = false
 
@@ -166,7 +191,9 @@ export class MoveDrone extends Drone {
         this.#dropIntoLabel = null
         this.emitEffect('move:drop-into', null)
       }
+      if (this.#copyMode) this.emitEffect('move:copy-drag', null)
       this.#dropIntoActive = false
+      this.#copyMode = false
       this.#lastHoverAxial = null
       this.#reset(this.#activeSource)
     }
@@ -291,6 +318,15 @@ export class MoveDrone extends Drone {
 
     this.#lastHoverAxial = hoverAxial
 
+    if (this.#copyMode) {
+      // Copy preview: the exact dragged tiles float at the hovered slot,
+      // ready to drop. Originals stay put (no swap), and it's a sibling
+      // (no drop-into ring). The held cluster IS the "visualize the copy".
+      this.emitEffect('move:preview', null)
+      this.emitEffect('move:copy-drag', { dragged: [...this.#movedGroup.keys()], q: hoverAxial.q, r: hoverAxial.r })
+      return
+    }
+
     if (this.#dropIntoActive) {
       const label = this.labelAtAxial(hoverAxial)
       const valid = !!label && !this.#movedGroup.has(label)
@@ -338,6 +374,29 @@ export class MoveDrone extends Drone {
         this.#dropIntoLabel = null
         this.emitEffect('move:drop-into', null)
       }
+    }
+  }
+
+  // Ctrl held when the drag STARTED → copy mode. Mirrors setDropIntoActive,
+  // but the two intents are mutually exclusive: entering copy clears any
+  // drop-into overlay, and the drop commits a sibling duplicate (not a re-home
+  // into a child). Toggled by DesktopMoveInput at threshold-cross.
+  setCopyMode = (active: boolean): void => {
+    if (!this.#activeSource) return
+    if (this.#copyMode === active) return
+    this.#copyMode = active
+    if (active) {
+      // mutual exclusion with drop-into
+      this.#dropIntoActive = false
+      if (this.#dropIntoLabel !== null) {
+        this.#dropIntoLabel = null
+        this.emitEffect('move:drop-into', null)
+      }
+    } else {
+      this.emitEffect('move:copy-drag', null)
+    }
+    if (this.#lastHoverAxial && this.#anchorAxial) {
+      this.updateMove(this.#lastHoverAxial, this.#activeSource)
     }
   }
 
@@ -475,6 +534,175 @@ export class MoveDrone extends Drone {
     void new hypercomb().act()
   }
 
+  /**
+   * Commit a Ctrl-drag COPY: duplicate the dragged tile(s) as siblings at the
+   * CURRENT level, landing at the hovered spiral slot. Exact copy — content
+   * sigs preserved via flattenLayerTree, only the cell name is fresh (no-rename:
+   * a copy is a new immutable name over the same content). Originals are
+   * untouched, the viewport does not move (no explorerEnter), and there is no
+   * confirmation: letting go fired this. ONE importTree cascade = one marker
+   * per affected ancestor.
+   */
+  commitCopyAt = async (finalAxial: Axial, source: string): Promise<void> => {
+    if (this.#activeSource !== source) return
+    if (!this.#anchorAxial) { this.#reset(source); return }
+
+    let didCommit = false
+    try {
+      didCommit = await this.#commitCopyUnsafe(finalAxial)
+    } catch (err) {
+      console.warn('[move] commitCopyAt failed:', err)
+      this.emitEffect('move:preview', null)
+      this.emitEffect('move:copy-drag', null)
+    } finally {
+      this.#copyMode = false
+      this.#lastHoverAxial = null
+      this.#reset(source)
+    }
+    if (didCommit) void new hypercomb().act()
+  }
+
+  async #commitCopyUnsafe(finalAxial: Axial): Promise<boolean> {
+    const anchor = this.#anchorAxial
+    if (!anchor) return false
+    const movedLabels = [...this.#movedGroup.keys()]
+    if (movedLabels.length === 0) { this.emitEffect('move:copy-drag', null); return false }
+
+    const history = window.ioc.get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
+    const committer = window.ioc.get<CopyCommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
+    const lineage = this.resolve<any>('lineage')
+    if (!history || !committer || !lineage) { this.emitEffect('move:copy-drag', null); return false }
+
+    // Copy commits at the current parent; refused while the history cursor is
+    // rewound (scrub-back is view-only). Feedback, then decline — never half-run.
+    const cursor = window.ioc.get<{ state?: { rewound?: boolean } }>('@diamondcoreprocessor.com/HistoryCursorService')
+    if (cursor?.state?.rewound) {
+      EffectBus.emit('toast:show', {
+        type: 'info',
+        title: 'Viewing history',
+        message: 'Can’t copy while scrubbed back — return to the latest (Restore) to edit.',
+      })
+      this.emitEffect('move:copy-drag', null)
+      return false
+    }
+
+    const parentSegments: readonly string[] = lineage.explorerSegments?.() ?? []
+    const parentLayer = await this.#resolveCurrentParent(history, lineage, parentSegments)
+    const existing = await childNamesOf(history, parentLayer)
+    const taken = new Set(existing)
+
+    // Target grid slot per dragged label — the drag delta carries the group
+    // to where the user dropped, preserving its internal layout.
+    const diff: Axial = { q: finalAxial.q - anchor.q, r: finalAxial.r - anchor.r }
+    const placements = this.#computePlacements(diff)
+
+    const treeUpdates: CopyTreeUpdate[] = []
+    const freshNames: string[] = []
+
+    for (const label of movedLabels) {
+      // Resolve the source subtree the authoritative way — through the current
+      // parent's children slot (warm; the dragged tile is on screen). Fall back
+      // to the cell's own bag for safety.
+      const viaParent = await childLayerOf(history, parentLayer, label)
+      let srcLayer = viaParent?.layer ?? null
+      if (!srcLayer) {
+        const ownSig = await history.sign({ domain: lineage.domain, explorerSegments: () => [...parentSegments, label] })
+        srcLayer = await history.currentLayerAt(ownSig)
+      }
+      if (!srcLayer) { console.warn('[move] copy source missing for', label); continue }
+
+      const fresh = this.#uniqueCopyName(label, taken)
+      taken.add(fresh)
+
+      const entryUpdates = await flattenLayerTree(history, srcLayer, [...parentSegments, fresh])
+
+      // Land the copy at the hovered spiral slot — fold its `index` into the
+      // SAME re-home cascade (a post-commit write races the cascade). Only the
+      // top node is retargeted; the subtree keeps its own indexes.
+      const target = placements.get(label)
+      const gridIndex = target ? this.#keyToIndex.get(axialKey(target.q, target.r)) : undefined
+      if (gridIndex !== undefined) {
+        const topKey = [...parentSegments, fresh].join('/')
+        const top = entryUpdates.find(u => u.segments.join('/') === topKey)
+        if (top) {
+          const sig = await this.#propsWithIndex(top.layer, gridIndex)
+          if (sig) top.layer = { ...top.layer, properties: [sig] }
+        }
+      }
+      treeUpdates.push(...entryUpdates)
+      freshNames.push(fresh)
+    }
+
+    if (freshNames.length === 0) { this.emitEffect('move:copy-drag', null); return false }
+
+    EffectBus.emit('fs:changed', { segments: [...parentSegments] })
+    // Eager visual mount; viaUpdate tells the committer's per-event listener to
+    // skip queueing — the importTree below IS the atomic commit.
+    for (const fresh of freshNames) {
+      EffectBus.emit('cell:added', { cell: fresh, segments: [...parentSegments], viaUpdate: true })
+    }
+
+    // ONE cascade: the parent carries the full new children list (existing +
+    // copies by name); each subtree node carries its own children by name.
+    const nextChildren = [...existing, ...freshNames]
+    await committer.importTree([
+      { segments: [...parentSegments], layer: { ...(parentLayer ?? {}), children: nextChildren } },
+      ...treeUpdates,
+    ])
+
+    this.emitEffect('move:copy-drag', null)
+    this.emitEffect('move:preview', null)
+    this.emitEffect('move:committed', { order: [] })
+    return true
+  }
+
+  /** A fresh, collision-free sibling name for a copy. "<label> copy", then
+   *  "<label> copy 2", … against the parent's existing child names. The copy is
+   *  a NEW immutable cell (no-rename) carrying the SAME content sigs. */
+  #uniqueCopyName(base: string, taken: ReadonlySet<string>): string {
+    const first = `${base} copy`
+    if (!taken.has(first)) return first
+    let n = 2
+    while (taken.has(`${base} copy ${n}`)) n++
+    return `${base} copy ${n}`
+  }
+
+  /** Resolve the current parent layer robustly — resolveLayerAt walks the parent
+   *  chain; the cursor fallback covers a cold currentLayerAt on the location the
+   *  user is viewing (which IS the copy target). Mirrors clipboard's resolution. */
+  async #resolveCurrentParent(history: PlacementHistory, lineage: { domain?: unknown }, segs: readonly string[]): Promise<PlacementLayer | null> {
+    const viaChain = await resolveLayerAt(history, lineage.domain, segs)
+    if (viaChain) return viaChain
+    const cursor = window.ioc.get<{ currentLayerSig?: string }>('@diamondcoreprocessor.com/HistoryCursorService')
+    const sig = cursor?.currentLayerSig
+    if (sig) return await history.getLayerBySig(sig)
+    return null
+  }
+
+  /** Build a props resource = the source tile's properties with `index`
+   *  overridden, content-addressed the same way writeTilePropertiesAt does
+   *  (sorted keys → JSON). Mirrors ClipboardWorker.#propsWithIndex so the
+   *  copy's spiral slot lands inside the re-home cascade. */
+  async #propsWithIndex(layer: unknown, index: number): Promise<string | null> {
+    const store = window.ioc.get<CopyStoreLike>('@hypercomb.social/Store')
+    if (!store?.putResource) return null
+    const slot = (layer as { properties?: readonly unknown[] } | null | undefined)?.properties
+    const existingSig = Array.isArray(slot) && slot.length > 0 ? slot[0] : undefined
+    let props: Record<string, unknown> = {}
+    if (typeof existingSig === 'string' && store.getResource) {
+      try {
+        const blob = await store.getResource(existingSig)
+        if (blob) { const parsed = JSON.parse(await blob.text()); if (parsed && typeof parsed === 'object') props = parsed }
+      } catch { /* fresh props */ }
+    }
+    const merged: Record<string, unknown> = { ...props, index }
+    const canonical: Record<string, unknown> = {}
+    for (const k of Object.keys(merged).sort()) canonical[k] = merged[k]
+    try {
+      return await store.putResource(new Blob([JSON.stringify(canonical)], { type: 'application/json' }))
+    } catch { return null }
+  }
+
   cancelMove = (source: string): void => {
     if (this.#activeSource !== source) return
     this.emitEffect('move:preview', null)
@@ -482,7 +710,9 @@ export class MoveDrone extends Drone {
       this.#dropIntoLabel = null
       this.emitEffect('move:drop-into', null)
     }
+    if (this.#copyMode) this.emitEffect('move:copy-drag', null)
     this.#dropIntoActive = false
+    this.#copyMode = false
     this.#lastHoverAxial = null
     this.#reset(source)
   }
@@ -800,6 +1030,7 @@ export class MoveDrone extends Drone {
     this.#keyToIndex.clear()
     this.#dragLabels = []
     this.#dragCoords = []
+    this.#copyMode = false
     this.#end(source)
   }
 }

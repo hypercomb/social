@@ -257,6 +257,50 @@ $steel: rgb(126, 182, 214);
   border: 1px solid rgba($steel, 0.3);
 }
 
+// Per-item paste target — the tile's index (spiral slot) it'll land in. Quiet
+// by default, brightening on row hover / focus (the "hover number"). Edit it to
+// aim the paste; leave it to fall to the tile's default index.
+.item-index {
+  flex: 0 0 auto;
+  width: 2.6em;
+  padding: 0.1em 0.25em;
+  background: rgba($steel, 0.06);
+  border: 1px solid rgba($steel, 0.18);
+  border-radius: 5px;
+  color: rgba($steel, 0.85);
+  font-family: inherit;
+  font-size: 0.72em;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  opacity: 0.4;
+  transition: opacity 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+  -moz-appearance: textfield;
+  appearance: textfield;
+
+  &::-webkit-outer-spin-button,
+  &::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+  &:hover, &:focus {
+    opacity: 1;
+    border-color: rgba($steel, 0.5);
+    background: rgba($steel, 0.12);
+    outline: none;
+  }
+}
+
+.clipboard-item:hover .item-index { opacity: 0.85; }
+
+// Hovering the tile's icon (or its count badge) HIGHLIGHTS that row's target
+// slot — so before you set it you can see exactly which slot the icon's tile
+// will land in. The index sits after both in the DOM, so the general-sibling
+// combinator reaches it. Clean steel emphasis (no glow) per the chrome aesthetic.
+.item-hex:hover ~ .item-index,
+.item-count:hover ~ .item-index {
+  opacity: 1;
+  border-color: rgba($steel, 0.6);
+  background: rgba($steel, 0.16);
+}
+
 .item-place {
   flex: 0 0 auto;
   display: inline-flex;
