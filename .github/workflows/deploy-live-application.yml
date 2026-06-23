@@ -23,6 +23,30 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24.14.1'
+          # Cache the npm download cache (~/.npm), keyed on the committed
+          # lockfile. This skips network fetches during the workspace
+          # `npm install` below WITHOUT changing the install itself — the
+          # `rm -rf node_modules package-lock.json && npm install` step is
+          # deliberate (npm 11 + workspace members break `npm ci`), so we
+          # only accelerate the tarball fetches, not the resolution logic.
+          cache: 'npm'
+          cache-dependency-path: src/package-lock.json
+
+      # Incremental build caches, persisted across runs. All three are
+      # content-validated by their own tooling (the essentials Merkle cache
+      # re-hashes file contents; Angular hashes inputs), so a stale restore
+      # only triggers a rebuild of what changed — never wrong output. Keyed
+      # per-commit with a prefix restore so each run warms the next.
+      - name: Cache incremental build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            src/hypercomb-essentials/.build-cache.json
+            src/hypercomb-essentials/dist/.cache
+            src/hypercomb-web/.angular/cache
+          key: hc-build-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            hc-build-${{ runner.os }}-
 
       - name: Install workspace root dependencies
         working-directory: src

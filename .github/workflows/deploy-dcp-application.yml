@@ -31,6 +31,25 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24.14.1'
+          # Cache the npm download cache (~/.npm), keyed on the committed
+          # lockfile — skips network fetches during `npm install` below
+          # without changing the deliberate install logic.
+          cache: 'npm'
+          cache-dependency-path: src/package-lock.json
+      # Incremental build caches, persisted across runs. Content-validated
+      # by their own tooling, so a stale restore only triggers a rebuild of
+      # what changed — never wrong output. This deploy builds
+      # diamond-core-processor, so its Angular cache lives there.
+      - name: Cache incremental build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            src/hypercomb-essentials/.build-cache.json
+            src/hypercomb-essentials/dist/.cache
+            src/diamond-core-processor/.angular/cache
+          key: hc-build-dcp-${{ runner.os }}-${{ github.sha }}
+          restore-keys: |
+            hc-build-dcp-${{ runner.os }}-
       - name: Install workspace root dependencies
         working-directory: src
         run: |
