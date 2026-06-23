@@ -43,7 +43,7 @@
 // Toggle live via the public enable()/disable() methods; localStorage
 // changes take effect on the next event, no reload required.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, SignatureService } from '@hypercomb/core'
 import { decorationClosureSigs } from './decoration-closure.js'
 
 export type HostSyncKind = 'layer' | 'bee' | 'dependency' | 'resource'
@@ -82,6 +82,11 @@ export class HostSyncService extends EventTarget {
 
   /** One-time "no signer" console warning latch (see #pushAndReceipt). */
   #warnedNoSigner = false
+
+  /** Sigs whose local bytes failed the sha256===sig precheck — warned once
+   *  each, then dropped from the queue. A mismatch is permanent for the
+   *  bytes we hold, so re-warning every retry tick is just noise. */
+  #warnedCorrupt = new Set<string>()
 
   constructor() {
     super()
@@ -315,6 +320,24 @@ export class HostSyncService extends EventTarget {
             EffectBus.emit('sync:state', { host, pending: entries.length, status: 'unauthorized' })
             return
           }
+          if (ok === 'corrupt') {
+            // Local bytes for this sig don't hash to it — the host would (or
+            // did) 422. Retrying identical bytes can never succeed, so drop
+            // the entry and warn ONCE per sig, naming sig + kind so the
+            // upstream source of the bad bytes can be traced. Unlike the 401
+            // case this is per-entry, not a whole-queue gap — keep draining.
+            await this.#removeEntry(entry.fileName)
+            if (!this.#warnedCorrupt.has(entry.sig)) {
+              this.#warnedCorrupt.add(entry.sig)
+              console.warn(
+                `[host-sync] dropped ${entry.kind} ${entry.sig.slice(0, 12)}… from backup queue — ` +
+                `local bytes do not hash to this sig (would 422). The source store holds ` +
+                `non-canonical bytes for it; that sig is now unreachable for witnessing peers ` +
+                `until it is re-authored.`
+              )
+            }
+            continue
+          }
           if (!ok) continue // leave entry; retry timer handles offline/host-down
           await this.#removeEntry(entry.fileName)
           progressed = true
@@ -416,7 +439,7 @@ export class HostSyncService extends EventTarget {
   // transport — signed HTTP PUT + confirmed read-back
   // -------------------------------------------------
 
-  readonly #pushAndReceipt = async (host: string, entry: { sig: string; kind: HostSyncKind; fileName: string }): Promise<boolean | 'unauthorized'> => {
+  readonly #pushAndReceipt = async (host: string, entry: { sig: string; kind: HostSyncKind; fileName: string }): Promise<boolean | 'unauthorized' | 'corrupt'> => {
     let bytes: ArrayBuffer
     try {
       const dir = await this.#getQueueDir()
@@ -424,6 +447,16 @@ export class HostSyncService extends EventTarget {
       const handle = await dir.getFileHandle(entry.fileName, { create: false })
       bytes = await (await handle.getFile()).arrayBuffer()
     } catch { return false }
+
+    // Content-integrity precheck — the host rejects (422) any PUT whose body
+    // doesn't hash to the URL sig (relay §21.12: sha256(body) === sig). We
+    // run the SAME check here, before the network call, because a mismatch
+    // can NEVER heal by retrying: the bytes we hold address different content
+    // than the sig names. Without this, one corrupt/non-canonical local entry
+    // 422s the host on every 30s drain forever, spamming the console. Catch
+    // it client-side and let drain drop it — a permanent per-entry condition.
+    const actual = await SignatureService.sign(bytes)
+    if (actual !== entry.sig) return 'corrupt'
 
     const path = this.#pathFor(entry.sig)
     // Loopback hosts use plain http (content-side analog of allow-loopback);
@@ -450,6 +483,11 @@ export class HostSyncService extends EventTarget {
       // caller stops the whole drain pass instead of 401-spamming one PUT
       // per entry every retry tick.
       if (put.status === 401 || put.status === 403) return 'unauthorized'
+      // 422 = the host's own sha256(body)===sig check failed. The precheck
+      // above normally catches this first; this covers the rare case where
+      // the host canonicalizes differently than we do. Either way the bytes
+      // can never satisfy this sig, so it's permanent — not a retry.
+      if (put.status === 422) return 'corrupt'
       if (!put.ok) return false
       // Confirmed read-back: a fresh GET (cache-bypassing) must show the
       // host actually serving the sig. A bare PUT 200 is NOT proof — the

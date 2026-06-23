@@ -185,8 +185,8 @@
 
 .row {
   display: grid;
-  // icon | idx | summary | make-head | when | delete
-  grid-template-columns: 1.167em auto 1fr auto auto auto;
+  // icon | idx | summary | mark | make-head | when | delete
+  grid-template-columns: 1.167em auto 1fr auto auto auto auto;
   align-items: center;
   padding: 0.333em 0.833em 0.333em 0.5em;
   cursor: pointer;
@@ -566,41 +566,9 @@
   color: rgba(255, 200, 120, 0.95);
 }
 
-.selection-action.merge-to-head {
-  border-color: rgba(120, 180, 255, 0.45);
-  color: rgba(160, 200, 255, 0.95);
-}
-
 .selection-action:hover {
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 1);
-}
-
-// Merge preview modal — reuses the slice-modal layout. Commit button
-// uses the secondary accent so it reads as the positive forward action.
-.merge-preview-modal .merge-commit {
-  background: color-mix(in srgb, rgba(255, 170, 60, 1) 18%, transparent);
-  border: 1px solid rgba(255, 170, 60, 0.45);
-  border-radius: 4px;
-  padding: 3px 10px;
-  color: rgba(255, 200, 120, 0.95);
-  font-family: inherit;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: lowercase;
-  cursor: pointer;
-  transition: background 80ms linear, color 80ms linear;
-}
-
-.merge-preview-modal .merge-commit:hover:not(:disabled) {
-  background: color-mix(in srgb, rgba(255, 170, 60, 1) 32%, transparent);
-  color: rgba(255, 255, 255, 1);
-}
-
-.merge-preview-modal .merge-commit:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 
 .row .idx {
@@ -673,4 +641,126 @@
   font-size: 0.833em;
   letter-spacing: 0.4px;
   color: rgba(170, 180, 200, 0.55);
+}
+
+// ── marks + names ────────────────────────────────────────────────────
+
+// Header ★ toggle — mirrors the group-step toggle but in the amber mark
+// accent so "marked places" reads as its own mode.
+.history-viewer-header .marked-toggle {
+  background: transparent;
+  border: 1px solid transparent;
+  color: rgba(200, 210, 230, 0.45);
+  font-size: 1.05em;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.167em 0.5em;
+  border-radius: 3px;
+  transition: color 80ms linear, background 80ms linear, border-color 80ms linear, opacity 80ms linear;
+  position: relative;
+  z-index: 2;
+  opacity: 0.6;
+}
+.history-viewer-header .marked-toggle:hover {
+  color: rgba(255, 210, 130, 1);
+  background: rgba(255, 190, 90, 0.08);
+  opacity: 1;
+}
+.history-viewer-header .marked-toggle.active {
+  color: rgba(255, 200, 110, 1);
+  background: rgba(255, 190, 90, 0.14);
+  border-color: rgba(255, 190, 90, 0.4);
+  opacity: 1;
+}
+
+// Marked timeline row — amber left rail so flagged points stand out
+// in the scrollback even when not selected/active.
+.row.marked {
+  border-left-color: rgba(255, 190, 90, 0.7);
+}
+
+// Per-row ★ button. Hollow ☆ baseline; lit amber ★ when marked. Sits in
+// the row-action group, so it inherits the hover/opacity treatment.
+.row .row-mark.on {
+  opacity: 1;
+  color: rgba(255, 200, 110, 1);
+}
+.row:hover .row-mark.on {
+  opacity: 1;
+}
+
+// Saved name shown in place of the auto summary — slightly brighter and
+// roman (not the dim grey summary) so a named point reads as deliberate.
+.row .summary.mark-name {
+  color: rgba(255, 224, 170, 0.95);
+  font-style: normal;
+}
+
+// Inline rename input — borderless, sits in the summary column.
+.row .row-rename {
+  min-width: 0;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(255, 190, 90, 0.45);
+  border-radius: 3px;
+  color: rgba(255, 235, 200, 0.98);
+  font: inherit;
+  font-size: 0.92em;
+  padding: 0.1em 0.4em;
+  outline: none;
+}
+.row .row-rename::placeholder {
+  color: rgba(200, 190, 170, 0.45);
+}
+
+// ── marked-places list (cross-tree) ──────────────────────────────────
+
+.marked-list {
+  list-style: none;
+  padding: 0.333em 0;
+  margin: 0;
+}
+
+.marked-empty {
+  padding: 1em 0.833em;
+  font-size: 0.917em;
+  color: rgba(180, 190, 210, 0.6);
+}
+
+.marked-row {
+  display: grid;
+  grid-template-columns: 1.2em 1fr auto;
+  grid-template-areas:
+    "star name when"
+    "star path path";
+  align-items: center;
+  gap: 0.15em 0.5em;
+  padding: 0.5em 0.833em;
+  cursor: pointer;
+  border-left: 2px solid rgba(255, 190, 90, 0.5);
+  transition: background 80ms linear;
+}
+.marked-row:hover {
+  background: rgba(255, 190, 90, 0.08);
+}
+.marked-row .marked-star {
+  grid-area: star;
+  color: rgba(255, 200, 110, 1);
+}
+.marked-row .marked-name {
+  grid-area: name;
+  color: rgba(255, 224, 170, 0.95);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.marked-row .marked-path {
+  grid-area: path;
+  font-size: 0.8em;
+  color: rgba(160, 170, 190, 0.7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.marked-row .when {
+  grid-area: when;
 }

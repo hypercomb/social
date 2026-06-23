@@ -12,12 +12,6 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 
 
-/**
- * Cap on how many selected tiles the multi-select accordion will surface
- * at once. Large selections would otherwise flood the strip; the user's
- * most recent N picks are always the most relevant to current work.
- */
-const MAX_VISIBLE_SELECTIONS = 10
 
 // localStorage keys for the slide-resizable panel. Persisted as integer
 // pixel strings; missing/non-numeric values fall back to the CSS defaults
@@ -119,28 +113,10 @@ type InputGateLike = {
 export class NotesStripComponent implements OnDestroy {
 
   readonly #activeCell = signal<string | null>(null)
-  readonly #selectedCells = signal<readonly string[]>([])
   readonly #capturingFor = signal<string | null>(null)
   readonly #version = signal(0)
-  // Header "delete this tile" affordance. Hidden by default; holding Alt
-  // toggles it (see the keydown listener in the constructor). This is an
-  // IN-MEMORY signal only — never persisted — so a page refresh always returns
-  // to hidden ("not sticking after refresh").
-  readonly showDeleteTile = signal(false)
-  // Two-step confirm once the button is shown — first click arms (icon turns
-  // solid red, auto-disarms after 3s); second click commits. Public — read by
-  // the template.
-  readonly confirmDeleteTile = signal(false)
-  #confirmDeleteTimer: ReturnType<typeof setTimeout> | null = null
   // Monotonic id source for optimistic (not-yet-persisted) note rows.
   #pendingSeq = 0
-  // Which group's section is currently expanded. The two-signal split lets
-  // us distinguish three states cleanly: untouched (auto-open the first
-  // group with notes on first multi-select), explicitly opened (#openGroup
-  // holds the cell name), and explicitly closed (#userClosed = true,
-  // suppresses the auto-fallback so all sections stay collapsed).
-  readonly #openGroup = signal<string | null>(null)
-  readonly #userClosed = signal<boolean>(false)
   // Cells whose decoded-set cache has been confirmed populated. Without
   // this, cells whose set resource hasn't been parsed yet return [] from
   // notesFor() and would race into the empty-cells footer before their
@@ -287,9 +263,6 @@ export class NotesStripComponent implements OnDestroy {
    *  as the kebab (ESC, click-outside). */
   readonly pickerOpenForId = signal<string | null>(null)
 
-  /** Selected cell count — public mirror of the private #selectedCells for
-   *  the drag-bar's "N cells" label in multi-cell mode. */
-  readonly selectedCellsCount = computed<number>(() => this.#selectedCells().length)
 
   // ── Comb v2 actions ──────────────────────────────────────
 
@@ -335,26 +308,6 @@ export class NotesStripComponent implements OnDestroy {
       }
     }
     this.clearNoteSelection()
-  }
-
-  /** Header "delete this tile" — acts on the CONTEXT tile (the cell whose
-   *  notes the strip is showing), not on selection or a hex click. Two-step:
-   *  first click arms the confirm, second click within 3s commits. Routes
-   *  through the same undoable `tile:action`/'remove' path as everything else
-   *  (TileActionsDrone#removeTile drops the cell from the parent layer; q/r/
-   *  index are unused by that path, so they're filled with 0). */
-  onDeleteTileClick(): void {
-    if (!this.confirmDeleteTile()) {
-      this.confirmDeleteTile.set(true)
-      if (this.#confirmDeleteTimer) clearTimeout(this.#confirmDeleteTimer)
-      this.#confirmDeleteTimer = setTimeout(() => this.confirmDeleteTile.set(false), 3000)
-      return
-    }
-    if (this.#confirmDeleteTimer) { clearTimeout(this.#confirmDeleteTimer); this.#confirmDeleteTimer = null }
-    this.confirmDeleteTile.set(false)
-    const label = this.cell()
-    if (!label) return
-    EffectBus.emit('tile:action', { action: 'remove', label, q: 0, r: 0, index: 0 })
   }
 
   /** Toggle the `[Q]` question prefix on every currently selected note.
@@ -578,51 +531,20 @@ export class NotesStripComponent implements OnDestroy {
     EffectBus.emit('notes:expand-to-index', { cellLabel: this.cell(), fullscreen: this.isFullscreen() })
   }
 
-  /** "See all across the hive" — per the design concept, this should
-   *  show notes from every cell in the current layer. We achieve that
-   *  by enumerating cell labels via CellSuggestionProvider, treating
-   *  them as a virtual multi-cell selection, and rendering through
-   *  the existing accordion path. Also activates fullscreen since
-   *  there's now more content to display. */
-  readonly seeAllInLayer = signal<boolean>(false)
+  // Every tile in the current layer, sourced from CellSuggestionProvider (the
+  // same list the command-line autocomplete uses). Drives the always-on tile
+  // navigator — maintained continuously (boot + lineage change + synchronize),
+  // no longer gated behind a see-all toggle.
   readonly #layerCellLabels = signal<readonly string[]>([])
 
-  toggleSeeAll(): void {
-    const next = !this.seeAllInLayer()
-    this.seeAllInLayer.set(next)
-    if (next) {
-      this.#refreshLayerCellLabels()
-    } else {
-      this.#layerCellLabels.set([])
-    }
-    // NOTE: fullscreen is an independent toggle now. Coupling them
-    // caused two regressions — drag stopped working in see-all
-    // (fullscreen's transform: none override killed panel-offset)
-    // and the panel position visibly shifted between modes. The user
-    // can expand to fullscreen via the expand button if they want
-    // the larger surface; see-all alone keeps the docked layout.
-  }
-
-  /** Pull the current layer's cell labels from CellSuggestionProvider
-   *  (the same source the command-line autocomplete uses). The provider
-   *  refreshes on `synchronize` / `lineage:change`, so we re-poll on
-   *  those events while see-all is active. */
+  /** Re-poll the current layer's cell labels. Called on construct, on lineage
+   *  change, and on `synchronize` so the navigator always reflects the tiles
+   *  actually present in this layer (added / removed / renamed). */
   #refreshLayerCellLabels(): void {
     const provider = get<{ suggestions(): readonly string[] }>(
       '@hypercomb.social/CellSuggestionProvider'
     )
-    if (!provider) {
-      this.#layerCellLabels.set([])
-      return
-    }
-    const labels = provider.suggestions()
-    this.#layerCellLabels.set([...labels])
-  }
-
-  /** Legacy alias kept for any external callers; routes to the
-   *  fullscreen toggle. */
-  expandToIndex(): void {
-    this.toggleFullscreen()
+    this.#layerCellLabels.set(provider ? [...provider.suggestions()] : [])
   }
 
   /** Click a row's body — in select mode it toggles selection,
@@ -973,26 +895,7 @@ export class NotesStripComponent implements OnDestroy {
     const sourceCell = this.noteDragSourceCell()
     if (!sourceCell) return
 
-    // Multi-cell accordion mode — keep the legacy flat-index logic.
-    // Trees only show in single-cell mode for now.
-    if (this.multi()) {
-      const root = this.#host.nativeElement
-      const group = root.querySelector(`[data-cell="${CSS.escape(sourceCell)}"]`)
-      const rows = group
-        ? (Array.from(group.querySelectorAll('.note-row')) as HTMLElement[])
-        : []
-      if (rows.length === 0) return
-      const y = event.clientY
-      let idx = rows.length
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i].getBoundingClientRect()
-        if (y < r.top + r.height / 2) { idx = i; break }
-      }
-      this.noteDropIndex.set(idx)
-      return
-    }
-
-    // Single-cell tree mode — detect hovered row + zone (upper third =
+    // Tree mode — detect hovered row + zone (upper third =
     // before, middle = into, lower = after). Pointer below all rows =
     // root drop (promote to top level).
     const root = this.#host.nativeElement
@@ -1049,7 +952,6 @@ export class NotesStripComponent implements OnDestroy {
     if (event.pointerId !== this.#noteDragPointerId) return
     const sourceId = this.noteDragSourceId()
     const sourceCell = this.noteDragSourceCell()
-    const flatIndex = this.noteDropIndex()
     const targetId = this.noteDropTargetId()
     const mode = this.noteDropMode()
     this.#noteDragPointerId = null
@@ -1091,10 +993,6 @@ export class NotesStripComponent implements OnDestroy {
       return
     }
 
-    // Legacy flat reorder (multi-cell accordion mode).
-    if (this.multi() && flatIndex !== null) {
-      EffectBus.emit('note:reorder', { cellLabel: sourceCell, sourceId, targetIndex: flatIndex })
-    }
   }
 
   // ── ESC cascade + click-outside dismissal ────────────────
@@ -1130,12 +1028,6 @@ export class NotesStripComponent implements OnDestroy {
       event.preventDefault()
       return
     }
-    if (this.seeAllInLayer()) {
-      this.toggleSeeAll()  // also clears layer cells signal
-      event.stopPropagation()
-      event.preventDefault()
-      return
-    }
     if (this.selectionMode()) {
       this.clearNoteSelection()
       event.stopPropagation()
@@ -1167,21 +1059,10 @@ export class NotesStripComponent implements OnDestroy {
    * entirely; "All" and "Notes" would be identical tabs otherwise.
    */
   readonly hasQuestions = computed<boolean>(() => {
-    const byCell = this.#notesByCell()
-    const byQa = this.#qaByCell()
-    const cells: string[] = []
-    if (this.multi()) {
-      cells.push(...this.#effectiveCells().slice(-MAX_VISIBLE_SELECTIONS))
-    } else {
-      const c = this.cell()
-      if (c) cells.push(c)
-    }
-    for (const c of cells) {
-      if ((byQa.get(c)?.length ?? 0) > 0) return true
-      const notes = byCell.get(c) ?? []
-      if (notes.some(n => this.noteKind(n) === 'q')) return true
-    }
-    return false
+    const c = this.cell()
+    if (!c) return false
+    if ((this.#qaByCell().get(c)?.length ?? 0) > 0) return true
+    return (this.#notesByCell().get(c) ?? []).some(n => this.noteKind(n) === 'q')
   })
 
   /** Effective filter: a saved `'q'` preference falls through to `'all'`
@@ -1253,107 +1134,73 @@ export class NotesStripComponent implements OnDestroy {
     return [...synthetic, ...filtered]
   }
 
-  /**
-   * Multi-selection mode: more than one tile is selected. Switches the
-   * strip into accordion layout — one expandable section per selected
-   * cell with its own notes. Stays active even while authoring (capture
-   * mode) so the user can click a tab, drop the cursor into the command
-   * line, and type a new note without losing the multi-cell view.
-   */
-  /** Cells the strip should currently display as a multi-cell accordion.
-   *  When `seeAllInLayer` is on, we substitute the lineage's full cell
-   *  list (via CellSuggestionProvider) — that's the design's
-   *  "see all across the hive" behaviour. */
-  readonly #effectiveCells = computed<readonly string[]>(() => {
-    if (this.seeAllInLayer()) return this.#layerCellLabels()
-    return this.#selectedCells()
-  })
+  // ── filter (find a tile by name or note text) ─────────────
+  // Free-text filter over the always-on tile navigator at the bottom of the
+  // panel. Matches a cell's NAME or the text of any of its notes/questions, so
+  // a tile can be found either by what it's called or by what's written in it.
+  // Empty filter = every tile in the layer.
+  readonly filterText = signal('')
 
-  readonly multi = computed<boolean>(() => this.#effectiveCells().length > 1)
+  setFilter(event: Event): void {
+    this.filterText.set((event.target as HTMLInputElement).value)
+  }
+  clearFilter(): void { this.filterText.set('') }
 
-  /**
-   * Per-cell note groups for the accordion — ONLY cells that actually have
-   * notes. Reads notes synchronously from NotesService — getNotes warmup at
-   * boot already populated the cache; selection signals trigger #version
-   * bumps via the notes:changed effect.
-   */
-  readonly groups = computed<readonly { cell: string; notes: readonly Note[]; expanded: boolean }[]>(() => {
-    const cells = this.#effectiveCells()
-    if (cells.length <= 1) return []
-    const byCell = this.#notesByCell()
-    const byQa = this.#qaByCell()
-    // Only the most-recent N selections show in the menu — large
-    // selections would otherwise flood the strip and bury the cells the
-    // user is actually working with.
-    const recent = cells.slice(-MAX_VISIBLE_SELECTIONS)
-    // Resolve the merged (qa + notes) list per cell once; reuse below
-    // for the "has anything" filter and for the rendered groups.
-    const mergedByCell = new Map<string, readonly Note[]>()
-    for (const c of recent) {
-      const merged = this.#mergeQaWithNotes(byQa.get(c) ?? [], byCell.get(c) ?? [])
-      mergedByCell.set(c, merged.filter(n => this.#passesFilter(this.noteKind(n))))
-    }
-    const withContent = recent.filter(c => (mergedByCell.get(c)?.length ?? 0) > 0)
-    const open = this.#openGroup()
-    const closed = this.#userClosed()
-    // Resolution order:
-    //   1. If user explicitly collapsed everything, honour that — none open.
-    //   2. If a specific group was opened and is still in the list, use it.
-    //   3. Otherwise auto-pick the first group with content so first-time
-    //      multi-select shows something instead of an all-closed wall.
-    const expanded = closed
-      ? null
-      : (open && withContent.includes(open))
-        ? open
-        : withContent[0] ?? null
-    return withContent.map(c => ({
-      cell: c,
-      notes: mergedByCell.get(c) ?? [],
-      expanded: c === expanded,
-    }))
-  })
+  /** Does `cell` match the current filter (by name or any note/question text)? */
+  #matchesFilter(cell: string): boolean {
+    const q = this.filterText().trim().toLowerCase()
+    if (!q) return true
+    if (cell.toLowerCase().includes(q)) return true
+    const walk = (ns: readonly Note[]): boolean =>
+      ns.some(n => this.noteDisplayText(n).toLowerCase().includes(q) || walk(n.children))
+    if (walk(this.#notesByCell().get(cell) ?? [])) return true
+    return (this.#qaByCell().get(cell) ?? []).some(item => item.question.toLowerCase().includes(q))
+  }
+
+  /** Count of a cell's notes + open questions, for the navigator badge. */
+  #cellCount(cell: string): number {
+    return this.#mergeQaWithNotes(
+      this.#qaByCell().get(cell) ?? [],
+      this.#notesByCell().get(cell) ?? [],
+    ).length
+  }
+
+  /** Always-on tile navigator: every tile in the current layer, filtered by
+   *  the find box. Clicking a row makes that tile active (its notes open in
+   *  the editor above); clicking the tile on the canvas activates it here too.
+   *  Layer order is preserved (CellSuggestionProvider order). */
+  readonly tileList = computed<readonly { cell: string; count: number }[]>(() =>
+    this.#layerCellLabels()
+      .filter(cell => this.#matchesFilter(cell))
+      .map(cell => ({ cell, count: this.#cellCount(cell) })),
+  )
+
+  /** Make `cell` the active tile — its notes open in the editor above the
+   *  list. Clears any in-progress edit so switching tiles starts clean. The
+   *  list-click counterpart to clicking the tile on the canvas. */
+  activateCell(cell: string): void {
+    if (!cell) return
+    this.#capturingFor.set(null)
+    this.editingNoteId.set(null)
+    this.draftText.set('')
+    this.#activeCell.set(cell)
+  }
 
   /**
-   * Selected cells that DON'T have any notes — surfaced as a small bottom
-   * list so the user can see at a glance which tiles in their selection
-   * still need context. Only includes cells we've confirmed warmed (via
-   * #warmed) so an unparsed cache doesn't briefly mis-classify a populated
-   * cell as empty during the initial warmup window.
-   */
-  readonly emptyCells = computed<readonly string[]>(() => {
-    const cells = this.#effectiveCells()
-    if (cells.length <= 1) return []
-    const warmed = this.#warmed()
-    const byCell = this.#notesByCell()
-    const byQa = this.#qaByCell()
-    const recent = cells.slice(-MAX_VISIBLE_SELECTIONS)
-    // A cell is "empty" only if BOTH sources are empty — a qa-only cell
-    // still has Claude-side content the user might want to answer.
-    return recent.filter(c => warmed.has(c)
-      && (byCell.get(c)?.length ?? 0) === 0
-      && (byQa.get(c)?.length ?? 0) === 0)
-  })
-
-  /**
-   * The cell whose notes the strip is showing in single-tile mode — capture
-   * target wins so the user always sees the strip for the tile they're
-   * authoring against, even if they navigate selection away mid-capture.
+   * The active cell whose notes the editor shows — the capture target wins
+   * (so authoring always targets the right tile), else the cell the user last
+   * activated by clicking it on the canvas or in the tile list.
    */
   readonly cell = computed<string | null>(() => this.#capturingFor() ?? this.#activeCell())
 
   /**
-   * Visible only when the strip is explicitly open (via the control-bar Notes
-   * toggle) or the user is authoring a note (capture mode) — AND there is an
-   * active cell to show notes for. The strip NEVER opens on its own just
-   * because the selected tile happens to have notes: passive auto-open was
-   * removed so the Notes toggle is the sole on/off control. With no cell
-   * selected there's nothing to show, so an "open" strip stays hidden until
-   * the user picks a tile (the toggle's intent persists either way).
+   * Visible whenever the strip is explicitly open (via the control-bar Notes
+   * toggle) or the user is authoring a note (capture mode). It NEVER opens on
+   * its own from selection — passive auto-open was removed; the Notes toggle is
+   * the sole on/off control. When open with no active tile, the panel still
+   * shows so the always-on tile list is available to find and pick one.
    */
-  readonly visible = computed<boolean>(() => {
-    if (!this.#open() && !this.#capturingFor()) return false
-    return !!this.cell()
-  })
+  readonly visible = computed<boolean>(() => this.#open() || !!this.#capturingFor())
 
   /** True when the strip is shown specifically because a note is being authored. */
   readonly capturing = computed<boolean>(() => !!this.#capturingFor())
@@ -1399,34 +1246,21 @@ export class NotesStripComponent implements OnDestroy {
         this.#notesByCell.set(new Map())
         this.#qaByCell.set(new Map())
         this.#version.update(v => v + 1)
-        // Refresh the layer's cell list if see-all is currently active —
-        // the user navigated into a new layer and the displayed set of
-        // cells just changed.
-        if (this.seeAllInLayer()) this.#refreshLayerCellLabels()
+        // Re-poll the layer's tile list — navigation changed which cells exist.
+        this.#refreshLayerCellLabels()
       }
       lineage.addEventListener('change', onLineage)
       this.#cleanups.push(() => lineage.removeEventListener('change', onLineage))
     }
 
-    // Hold Alt to toggle the header "delete this tile" button. Bare Alt only
-    // (no other modifier), and only while the strip is actually visible so a
-    // stray Alt press elsewhere can't arm a panel the user can't see. The
-    // visibility lives in an in-memory signal (never localStorage), so a
-    // refresh always resets it to hidden. Toggling it off also disarms any
-    // pending confirm.
-    const onAltToggle = (e: KeyboardEvent): void => {
-      if (e.key !== 'Alt' || e.repeat) return
-      if (e.ctrlKey || e.metaKey || e.shiftKey) return
-      if (!this.visible()) return
-      const next = !this.showDeleteTile()
-      this.showDeleteTile.set(next)
-      if (!next) {
-        this.confirmDeleteTile.set(false)
-        if (this.#confirmDeleteTimer) { clearTimeout(this.#confirmDeleteTimer); this.#confirmDeleteTimer = null }
-      }
-    }
-    window.addEventListener('keydown', onAltToggle)
-    this.#cleanups.push(() => window.removeEventListener('keydown', onAltToggle))
+    // The tile navigator lists every cell in the current layer. Poll once now,
+    // then re-poll on `synchronize` (the processor's coalesced post-update tick)
+    // so cells added/removed within a layer keep the list current. Lineage
+    // 'change' (above) covers navigation between layers.
+    this.#refreshLayerCellLabels()
+    const onSync = (): void => this.#refreshLayerCellLabels()
+    window.addEventListener('synchronize', onSync)
+    this.#cleanups.push(() => window.removeEventListener('synchronize', onSync))
 
     // SelectionService lives in a bee bundle that loads AFTER this Angular
     // component's constructor on hypercomb-web. Synchronous get() returns
@@ -1436,25 +1270,11 @@ export class NotesStripComponent implements OnDestroy {
     // window.ioc.whenReady so the wire-up happens whenever the service
     // arrives, before-or-after construction.
     const wireSelection = (selection: SelectionService): void => {
-      const sync = (): void => {
-        // String signal: primitive equality dedups automatically.
-        this.#activeCell.set(selection.active)
-
-        // Array signal: reference equality, so spread-on-every-event would
-        // count as a change even when contents are identical, re-triggering
-        // every dependent signal/effect on every selection event. Compare
-        // contents and only set when actually different.
-        //
-        // Insertion order is preserved (no sort) so the last-N slice in
-        // groups() / emptyCells() reflects the most recently selected
-        // tiles — Set iteration follows insertion order in JS.
-        const next = [...selection.selected]
-        const prev = this.#selectedCells()
-        const changed =
-          prev.length !== next.length ||
-          prev.some((v, i) => v !== next[i])
-        if (changed) this.#selectedCells.set(next)
-      }
+      // Selection no longer drives WHAT the strip shows — the list is the whole
+      // layer now. A tile click just marks that tile active so its notes open
+      // in the editor above the list (the auxiliary "click the tile on screen"
+      // path; hidden tiles aren't clickable, so the filter is the primary way).
+      const sync = (): void => { this.#activeCell.set(selection.active) }
       sync()
       selection.addEventListener('change', sync)
       this.#selectionListener = () => selection.removeEventListener('change', sync)
@@ -1497,14 +1317,6 @@ export class NotesStripComponent implements OnDestroy {
         if (this.selectionCount() > 0) this.selectedNotes.set(new Map())
         if (this.kebabOpenId() !== null) this.kebabOpenId.set(null)
         if (this.pickerOpenForId() !== null) this.pickerOpenForId.set(null)
-        // See-all is layer-scoped: clicking into a specific cell
-        // implies the user wants to focus on that cell, so we
-        // collapse out of see-all. Fullscreen is a separate
-        // user-controlled toggle and persists across cell changes.
-        if (this.seeAllInLayer()) {
-          this.seeAllInLayer.set(false)
-          this.#layerCellLabels.set([])
-        }
       })
     })
 
@@ -1620,12 +1432,11 @@ export class NotesStripComponent implements OnDestroy {
     try { localStorage.removeItem('hc:notes-strip-pinned-tools') } catch { /* ignore */ }
 
     // Mount/teardown the resize observer whenever the panel element appears
-    // or its mode changes. Reads `visible/multi/mode` so the effect re-runs
+    // or its mode changes. Reads `visible/mode` so the effect re-runs
     // on every transition — chips mode tears the observer down and clears
     // any inline dimensions, rows mode restores stored dims and observes.
     effect(() => {
       this.visible()
-      this.multi()
       this.mode()
       this.panel()
       // Defer one microtask so Angular has applied the latest classes
@@ -1658,10 +1469,9 @@ export class NotesStripComponent implements OnDestroy {
       EffectBus.emit('notes:panel-state', { open: this.#open() })
     })
 
-    // Warm the decoded-set cache for every cell the strip might display
-    // (active/capture cell in single mode, AND every selected cell in
-    // multi mode) so groups() / emptyCells() / notes() classify accurately
-    // on first paint.
+    // Warm the decoded-set cache for the active cell AND every tile in the
+    // layer (the navigator lists them all) so notes(), the navigator counts,
+    // and the name-or-text filter classify accurately on first paint.
     //
     // Why this matters: NotesService.notesFor() is synchronous and reads
     // through #cellLocSigCache, which is only populated by the ASYNC
@@ -1670,8 +1480,7 @@ export class NotesStripComponent implements OnDestroy {
     // of how many notes actually exist. This warmup eagerly resolves the
     // cell-loc cache for every cell we're about to display, then bumps
     // #version so the strip's computed signals re-read with the now-warm
-    // sync cache and add the cell to #warmed so emptyCells() can trust
-    // its empty classification.
+    // sync cache and add the cell to #warmed.
     //
     // Per-cell promise tracking (vs Promise.all) so each cell flips into
     // #warmed independently — fast cells don't have to wait on slow ones.
@@ -1686,11 +1495,9 @@ export class NotesStripComponent implements OnDestroy {
       const targets = new Set<string>()
       const c = this.cell()
       if (c) targets.add(c)
-      // Match the last-N cap that groups() / emptyCells() apply — no
-      // point pre-warming cells the strip will never display. Reads
-      // through #effectiveCells so see-all-in-layer also warms the
-      // lineage's cells, not just the user's selection.
-      for (const cell of this.#effectiveCells().slice(-MAX_VISIBLE_SELECTIONS)) targets.add(cell)
+      // Warm every tile in the layer so the navigator's note counts and the
+      // name-or-text filter are accurate, and any tile is instant when activated.
+      for (const cell of this.#layerCellLabels()) targets.add(cell)
       if (targets.size === 0) return
       for (const target of targets) {
         if (this.#warmed().has(target)) continue
@@ -1765,7 +1572,6 @@ export class NotesStripComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
-    if (this.#confirmDeleteTimer) { clearTimeout(this.#confirmDeleteTimer); this.#confirmDeleteTimer = null }
     this.#selectionListener?.()
     // Release the tile lock on teardown — the visibility effect is destroyed
     // with the component and won't run a final unlock, so a strip torn down
@@ -2119,47 +1925,6 @@ export class NotesStripComponent implements OnDestroy {
   }
 
   trackById = (_i: number, n: Note): string => n.id
-  trackByGroup = (_i: number, g: { cell: string }): string => g.cell
-
-  /**
-   * Click an accordion tab → open that cell's section (closing any other)
-   * and drop the cursor into the command line in note-capture mode for
-   * that cell, so the user can immediately type a new note. Click the
-   * already-open tab again to collapse all sections (no capture).
-   */
-  toggleGroup(cell: string): void {
-    const isCurrentlyOpen = this.groups().find(g => g.cell === cell)?.expanded ?? false
-    if (isCurrentlyOpen) {
-      // Explicit collapse — suppress the auto-fallback so the closed state
-      // sticks until the user opens something.
-      this.#userClosed.set(true)
-      this.#openGroup.set(null)
-      return
-    }
-    this.#userClosed.set(false)
-    this.#openGroup.set(cell)
-    this.#openForm(cell)
-  }
-
-  /**
-   * Click an empty-cell pill → start capture for that cell so the user can
-   * author the first note. The cell will appear as a tab once the note is
-   * committed.
-   */
-  captureForEmpty(cell: string): void {
-    this.#openForm(cell)
-  }
-
-  /** Open a specific note from within an accordion group → edit in form. */
-  openInGroup(cell: string, noteId: string): void {
-    this.editNote(noteId, cell)
-  }
-
-  /** Delete a note from within an accordion group. */
-  removeInGroup(cell: string, noteId: string, event: Event): void {
-    event.stopPropagation()
-    EffectBus.emit('note:delete', { cellLabel: cell, noteId })
-  }
 
   // ── service resolution ──────────────────────────────────
 

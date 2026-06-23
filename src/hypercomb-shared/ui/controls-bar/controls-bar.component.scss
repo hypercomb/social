@@ -447,14 +447,6 @@
   .ctl-btn[data-ctrl-id='zoom-out']    { order: 4; }
   .ctl-btn[data-ctrl-id='pin']         { order: 5; }
   .ctl-btn[data-ctrl-id='fullscreen']  { order: 6; }
-
-  // Horizontal separator setting the world-mode (sharing) toggle apart from
-  // the view controls above it.
-  .ctl-btn[data-ctrl-id='world-mode'] {
-    margin-top: 0.3rem;
-    padding-top: 0.6rem;
-    border-top: 1px solid color-mix(in srgb, var(--md-outline-variant) 55%, transparent);
-  }
 }
 
 // ── pill-scaled: inner zoom wrapper (just the pill) ────

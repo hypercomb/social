@@ -1007,20 +1007,6 @@
   }
 
   &.ghost { color: var(--md-on-surface-faint); }
-
-  // "Delete this tile" — quiet until hovered, then reads danger. Once armed
-  // (first click) it goes solid red so the commit click is unmistakable.
-  &.cv2-mini-danger {
-    &:hover {
-      color: #ff8080;
-      background: color-mix(in srgb, #ff8080 12%, transparent);
-    }
-    &.confirming {
-      color: #fff;
-      background: #c0392b;
-      &:hover { background: #d0422f; }
-    }
-  }
 }
 
 // Labeled exit pill — sits in the dragbar when see-all mode is on.
@@ -1831,5 +1817,112 @@
   letter-spacing: inherit;
   cursor: pointer;
   padding: 0;
+}
+
+// ── Tile navigator (always-on, filterable) ───────────────
+// Bottom-of-panel list of every tile in the current layer. A find box
+// (matches tile name OR note text) sits above a scrollable row list. The
+// active tile (set by clicking it on the canvas or here) is highlighted.
+.cv2-tilelist {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;          // let the row list shrink + scroll within the panel
+  border-top: 1px solid color-mix(in srgb, var(--md-on-surface) 10%, transparent);
+}
+.cv2-tilelist-filter {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.6rem;
+
+  .mat-sym { color: color-mix(in srgb, var(--md-on-surface) 55%, transparent); }
+}
+.cv2-tilelist-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--md-on-surface);
+  font-family: inherit;
+  font-size: 0.8rem;
+
+  &::placeholder { color: color-mix(in srgb, var(--md-on-surface) 45%, transparent); }
+}
+.cv2-tilelist-clear {
+  display: inline-flex;
+  align-items: center;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
+  padding: 0;
+  &:hover { color: var(--md-on-surface); }
+}
+.cv2-tilelist-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0 0.35rem 0.4rem;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.cv2-tilelist-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 7px;
+  padding: 0.3rem 0.5rem;
+  color: color-mix(in srgb, var(--md-on-surface) 82%, transparent);
+  font-family: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: background var(--md-dur-short) var(--md-easing-standard),
+              color var(--md-dur-short) var(--md-easing-standard);
+
+  &:hover {
+    background: color-mix(in srgb, var(--md-on-surface) 7%, transparent);
+    color: var(--md-on-surface);
+  }
+  &.is-active {
+    background: color-mix(in srgb, var(--md-secondary) 18%, transparent);
+    color: var(--md-on-surface-strong, var(--md-on-surface));
+  }
+}
+.cv2-tilelist-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cv2-tilelist-count {
+  flex: 0 0 auto;
+  min-width: 1.2em;
+  text-align: center;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--md-on-surface) 60%, transparent);
+  background: color-mix(in srgb, var(--md-on-surface) 9%, transparent);
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
+}
+.cv2-tilelist-empty {
+  list-style: none;
+  padding: 0.6rem 0.7rem;
+  color: color-mix(in srgb, var(--md-on-surface) 50%, transparent);
+  font-size: 0.78rem;
+  font-style: italic;
+}
+
+// Prompt shown in place of the editor when no tile is active yet.
+.cv2-empty-hint {
+  padding: 0.7rem 0.8rem;
+  color: color-mix(in srgb, var(--md-on-surface) 60%, transparent);
+  font-size: 0.8rem;
 }
 

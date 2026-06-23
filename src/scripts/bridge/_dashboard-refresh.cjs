@@ -114,8 +114,17 @@ const TOGGLE_SCRIPT = `
 //      `Store.removeOptimization` so the open question disappears
 //      from the dashboard's next refresh and from any other surface
 //      that reads the optimization substrate.
-//   4. Marks the card answered in the UI (button → "answered ✓", inputs
-//      disabled, card dimmed) — no full reload required.
+//   4. Collapses the card to a "thank you" line (question + composer fold
+//      away, source path + confirmation remain) — the answered question
+//      visibly leaves the open-questions flow, no full reload required.
+//
+// On every mount the script ALSO reconciles the static snapshot against
+// the live `__optimization__` substrate: any card whose `qa-answer`
+// already exists is collapsed to its thank-you state up front. The
+// dashboard HTML is a content-addressed snapshot minted by the last
+// refresh, so without this an answered question reappears empty after a
+// reload (the bug this closes) until the routine re-renders. Cache
+// (HTML) reconciles to truth (substrate) on load.
 //
 // Notes are NOT written here. The user's raw answer is decoration,
 // not canonical content. The next codegen pass reads `qa-answer`
@@ -138,6 +147,24 @@ const ANSWER_SCRIPT = `
       var input = card.querySelector('.dash-q-input');
       if (input) setTimeout(function(){ try { input.focus(); } catch(_){} }, 100);
     }
+  }
+  // Collapse a card to a compact "thank you" line. The question text and
+  // composer hide, leaving just the source path + a confirmation — the
+  // card visibly leaves the open-questions flow without vanishing
+  // entirely. Used both when the user clicks Done AND on page load for
+  // any card whose answer already lives in the optimization substrate
+  // (see reconcileAnswered below) — so an answered question stays
+  // answered across a refresh, even though the dashboard HTML is a
+  // static snapshot minted before the answer existed.
+  function markThanked(card, msg){
+    if (!card) return;
+    card.classList.remove('is-open');
+    card.classList.add('dash-q-answered', 'dash-q-thanked');
+    var btn = card.querySelector('.dash-q-done');
+    var input = card.querySelector('.dash-q-input');
+    if (btn) { btn.disabled = true; btn.textContent = 'answered ✓'; }
+    if (input) { input.disabled = true; }
+    setStatus(card, msg || 'Thank you — recorded ✓');
   }
   // Toggle-on-click: each card starts collapsed (just path + question
   // preview). Clicking the card body (anywhere outside the composer or
@@ -232,15 +259,53 @@ const ANSWER_SCRIPT = `
         if (sig && typeof store.removeOptimization === 'function') {
           try { await store.removeOptimization(sig); } catch(_) {}
         }
-        card.classList.add('dash-q-answered');
-        btn.textContent = 'answered ✓';
-        setStatus(card, '');
+        markThanked(card, 'Thank you — your answer was recorded.');
       } catch (err) {
         btn.disabled = false; input.disabled = false;
         setStatus(card, 'failed: ' + (err && err.message ? err.message : 'unknown'), true);
       }
     });
   });
+
+  // Reconcile this static snapshot against the LIVE optimization
+  // substrate on every mount. The dashboard HTML is content-addressed —
+  // it was minted by the last _dashboard-refresh run and lists whatever
+  // was open THEN, with empty composers. The source of truth for "has
+  // this been answered" is the __optimization__ store: answering writes
+  // a kind:'qa-answer' record (and removes the kind:'qa'). So on load we
+  // read every qa-answer and collapse any matching card to its thank-you
+  // state. Result: an answer survives a refresh even before the routine
+  // re-renders the dashboard — the reported "answered, refreshed, empty
+  // again" hole is closed. Cache (HTML) reconciles to truth (substrate).
+  (async function reconcileAnswered(){
+    try {
+      var store = getSvc('@hypercomb.social/Store');
+      if (!store || typeof store.listOptimizations !== 'function' || typeof store.getOptimization !== 'function') return;
+      var sigs = await store.listOptimizations();
+      var answeredById = {}, answeredByKey = {};
+      for (var i = 0; i < sigs.length; i++) {
+        var blob = await store.getOptimization(sigs[i]);
+        if (!blob) continue;
+        var rec; try { rec = JSON.parse(await blob.text()); } catch(_) { continue; }
+        if (!rec || rec.kind !== 'qa-answer' || !rec.payload) continue;
+        if (rec.payload.qId) answeredById[rec.payload.qId] = true;
+        var aKey = (Array.isArray(rec.appliesTo) ? rec.appliesTo.join('/') : '') + '\\n' + (rec.payload.question || '');
+        answeredByKey[aKey] = true;
+      }
+      document.querySelectorAll('.dash-q-card').forEach(function(card){
+        if (card.classList.contains('dash-q-answered')) return;
+        var qId = card.dataset.qId || '';
+        var question = card.dataset.qQuestion || '';
+        var path; try { path = JSON.parse(card.dataset.qPath || '[]'); } catch(_) { path = []; }
+        var cKey = (Array.isArray(path) ? path.join('/') : '') + '\\n' + question;
+        if ((qId && answeredById[qId]) || answeredByKey[cKey]) {
+          markThanked(card, 'Thank you — already answered ✓');
+        }
+      });
+    } catch (err) {
+      console.warn('[dashboard] reconcile failed', err);
+    }
+  })();
 })();
 `.trim()
 
@@ -377,6 +442,15 @@ function renderDashboard({ openItems, answeredCount, totalCount, manifestSigPrev
 .dash-q-status.is-err { color: #ff9b9b; opacity: 1; }
 .dash-q-answered { opacity: 0.55; }
 .dash-q-answered .dash-q-compose { background: rgba(110, 180, 255, 0.14); }
+/* Thanked = answered + collapsed. The question + composer fold away so the
+ * card drops out of the open-questions flow, leaving a slim source-path +
+ * "thank you" confirmation. Applied on Done and on reload-reconcile. */
+.dash-q-card.dash-q-thanked { opacity: 0.5; cursor: default; }
+.dash-q-card.dash-q-thanked:hover { transform: none; }
+.dash-q-card.dash-q-thanked .md-tile-number,
+.dash-q-card.dash-q-thanked .md-tile-blurb,
+.dash-q-card.dash-q-thanked .dash-q-compose { display: none; }
+.dash-q-card.dash-q-thanked .dash-q-status { color: #7fd1a6; opacity: 0.95; font-weight: 600; }
 </style>
 </head>
 <body>

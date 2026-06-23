@@ -1,5 +1,6 @@
-import { Component, EventEmitter, Input, Output, computed, signal, type OnInit, type OnDestroy } from '@angular/core'
+import { Component, EventEmitter, Input, Output, computed, signal, type OnInit, type OnDestroy, type OnChanges } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
+import { TranslatePipe } from '../../core/i18n.pipe'
 import { fromRuntime } from '../../core/from-runtime'
 import type { SecretStore } from '../../core/secret-store'
 import type { SecretStrengthProvider } from '../../core/secret-strength'
@@ -7,14 +8,36 @@ import type { SecretStrengthProvider } from '../../core/secret-strength'
 @Component({
   selector: 'hc-mesh-header',
   standalone: true,
-  imports: [],
+  imports: [TranslatePipe],
   templateUrl: './mesh-header.component.html',
   styleUrls: ['./mesh-header.component.scss'],
 })
-export class MeshHeaderComponent implements OnInit, OnDestroy {
+export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
 
   @Input() meshPublic: boolean | null = false
   @Output() readonly meshToggled = new EventEmitter<void>()
+
+  // World view (pick what to share) — an on/off toggle that lives beside the
+  // solo/swarm icon and only appears in swarm mode. When on, the renderer dims
+  // not-yet-shared tiles and the tile overlay shows the two share-toggle icons
+  // (the actual dim + icon swap happen in the renderer/overlay drones, which
+  // listen for 'world:mode'). The preference persists, but the *effective*
+  // mode is gated on swarm: going solo forces it off (dimming unshared tiles is
+  // meaningless solo) and re-entering swarm restores the preference — so the
+  // hidden-in-solo button can never strand the canvas in a dimmed state.
+  readonly #worldMode = signal(localStorage.getItem('hc:world-mode') === '1')
+  readonly worldMode = this.#worldMode.asReadonly()
+
+  #emitWorldMode(): void {
+    EffectBus.emit('world:mode', { active: !!this.meshPublic && this.#worldMode() })
+  }
+
+  readonly toggleWorldMode = (): void => {
+    const next = !this.#worldMode()
+    this.#worldMode.set(next)
+    localStorage.setItem('hc:world-mode', next ? '1' : '0')
+    this.#emitWorldMode()
+  }
 
   #secret$ = fromRuntime(
     get('@hypercomb.social/SecretStore') as EventTarget | undefined,
@@ -41,6 +64,15 @@ export class MeshHeaderComponent implements OnInit, OnDestroy {
     this.#unsubDraft = EffectBus.on<{ secret: string | null }>('mesh:secret-draft', ({ secret }) => {
       this.#draft.set(secret)
     })
+    // Publish the initial effective world mode so the renderer/overlay drones
+    // pick it up (solo boot → off, regardless of the persisted preference).
+    this.#emitWorldMode()
+  }
+
+  ngOnChanges(): void {
+    // meshPublic flipped solo↔swarm — re-evaluate the effective world mode so
+    // leaving the swarm drops the dim and returning restores it.
+    this.#emitWorldMode()
   }
 
   ngOnDestroy(): void {

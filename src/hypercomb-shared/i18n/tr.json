@@ -118,7 +118,7 @@
   "action.reroll": "değiştir",
   "action.reroll.description": "Bu kutucuğun arka plan görüntüsünü rastgele değiştir",
   "action.remove": "sil",
-  "action.remove.description": "Bu kutucuğu kalıcı olarak sil",
+  "action.remove.description": "Bu kutucuğu sil — geçmişten tekrar bulabilirsin",
   "action.break-apart": "geri yükle",
   "action.break-apart.description": "Bu gizli kutucuğu tekrar görünür yap",
   "action.hide": "gizle",

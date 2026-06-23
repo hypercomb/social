@@ -211,6 +211,9 @@ const ICONS = {
   public: md('M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z'),
   // share — Material Icons Filled (make this tile + its whole BRANCH public)
   share: md('M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z'),
+  // more_vert (⋮) — Material Icons Filled. The overlay's "more" toggle: tapping
+  // it reveals the danger row (delete) instead of firing a tile action.
+  more: md('M12 8c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm0 2c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm0 6c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z'),
 } as const
 
 // ── Icon registry ─────────────────────────────────────────────────
@@ -224,6 +227,10 @@ export type IconRegistryEntry = {
    *  arrangement — `#getActiveNames` auto-joins it for its profile, so a
    *  feature icon takes part without editing DEFAULT_ACTIVE. */
   defaultActive?: boolean
+  /** Lives in the hidden "danger" row revealed by tapping the overlay's ⋮
+   *  (more) icon — used for destructive actions (delete) so they're never a
+   *  one-tap default. */
+  dangerRow?: boolean
   visibleWhen?: (ctx: OverlayTileContext) => boolean
   tintWhen?: OverlayTintFn
   /** i18n key for the short hint label (shown on sustained hover) */
@@ -303,12 +310,15 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // never appears, and the merged-available filter strips it from default
   // arrangements.
   { name: 'search', svgMarkup: ICONS.search, hoverTint: 0xc8ffc8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.noImage, labelKey: 'action.search', descriptionKey: 'action.search.description' },
-  // NOTE: the trash-bin `remove` icon is intentionally NOT on the hover
-  // overlay — it sat next to edit and was too easy to click by accident.
-  // Deletion is now an explicit gesture only: the vertical selection menu
-  // (select a tile → trash), or Delete/Backspace over the tile under the
-  // cursor (handled in tile-overlay.drone.ts). The `remove` action handler,
-  // HANDLED_ACTIONS entry, and #removeTile below still back BOTH paths.
+  // The trash-bin `remove` icon stays OFF the always-visible row (too easy to
+  // misclick). It lives in the hidden DANGER ROW (`dangerRow: true`) that the
+  // overlay's ⋮ (more) toggle reveals on tap — see tile-overlay.drone.ts. The
+  // selection menu and Delete/Backspace remain as the other deletion paths.
+  { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xff8a8a, profile: 'private', dangerRow: true, labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
+  // ⋮ overflow toggle — handled specially in the overlay (toggles the danger
+  // row); it never emits a tile action. Registered on profiles that own a
+  // hidden row (private / public-own).
+  { name: 'more', svgMarkup: ICONS.more, hoverTint: 0xc8d4ff, profile: 'private' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   // ── world profile ──
   // Active ONLY while world mode is on (see tile-overlay #resolveProfileKey).
@@ -337,11 +347,12 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
     descriptionKey: 'action.make-branch-public.description',
   },
   // ── public-own profile ──
-  // Your own tile in public mode. Like the private profile, the trash-bin
-  // `remove` icon is deliberately absent (too easy to misclick) — delete via
-  // the vertical selection menu or Delete/Backspace over the tile. Hide
-  // doesn't belong here either: hide is a session-scoped per-view filter, but
-  // you OWN this tile and the correct dismissal is to delete it from your layer.
+  // Your own tile in public mode. Like the private profile, `remove` lives in
+  // the hidden DANGER ROW revealed by the ⋮ toggle — never an always-visible
+  // misclick risk. Hide doesn't belong here: it's a session-scoped per-view
+  // filter, but you OWN this tile and the correct dismissal is to delete it.
+  { name: 'remove', svgMarkup: ICONS.remove, hoverTint: 0xff8a8a, profile: 'public-own', dangerRow: true, labelKey: 'action.remove', descriptionKey: 'action.remove.description' },
+  { name: 'more', svgMarkup: ICONS.more, hoverTint: 0xc8d4ff, profile: 'public-own' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   // `sync` re-adopts the broadcasting peer's CURRENT version of a tile
   // you already hold (adopted earlier, or same-named). Visible only while
@@ -403,20 +414,20 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
 // in ICON_REGISTRY above; adopting a peer tile is handled by the
 // `public-external` profile (the tile flips kind once it's local).
 const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
-  // No `remove` here — deletion is intentionally off the hover overlay (it was
-  // misclick-prone). Delete via the vertical selection menu or Delete/Backspace
-  // over the tile under the cursor.
-  'private': ['command', 'edit', 'features', 'break-apart', 'files', 'invite'],
+  // `more` (⋮) + `remove` are last. The overlay routes `remove` (dangerRow)
+  // into the hidden danger row and treats `more` as its reveal toggle, so
+  // delete is never an always-visible one-tap. `more` only renders when there
+  // IS something hidden to reveal (handled in the overlay layout).
+  'private': ['command', 'edit', 'features', 'break-apart', 'files', 'invite', 'more', 'remove'],
   // World mode: ONLY the two share-toggles, none of the regular icons.
   'world': ['make-public', 'make-branch-public'],
-  // Your own tile in public mode. No `remove` icon (same misclick reason as
-  // private) — delete via the vertical selection menu or Delete/Backspace
-  // over the tile. `sync` folds the broadcasting peer's latest VISUALS into
+  // Your own tile in public mode. `more` + `remove` ride the same danger-row
+  // reveal as private. `sync` folds the broadcasting peer's latest VISUALS into
   // the tile in place and is rendered ONLY while a live peer publishes the
   // same name. `features` (puzzle-piece) opens the read-only SHOW FEATURES
   // panel for any tile carrying a registered visual bee — it stays in the
   // hive and has NO peer-broadcast requirement.
-  'public-own': ['sync', 'features', 'break-apart', 'files', 'invite'],
+  'public-own': ['sync', 'features', 'break-apart', 'files', 'invite', 'more', 'remove'],
   // Peer-only mesh tiles. Single-click `adopt` is the explicit
   // "I want to expand on this topic" action — writes the tile to
   // your local layer AND pulls the resources it references (images
@@ -642,6 +653,7 @@ export class TileActionsDrone extends Drone {
           svgMarkup: entry.svgMarkup,
           hoverTint: entry.hoverTint,
           profile: entry.profile,
+          dangerRow: entry.dangerRow,
           visibleWhen: entry.visibleWhen,
           tintWhen: entry.tintWhen,
           labelKey: entry.labelKey,
@@ -682,6 +694,7 @@ export class TileActionsDrone extends Drone {
         svgMarkup: entry.svgMarkup,
         hoverTint: entry.hoverTint,
         profile: entry.profile,
+        dangerRow: entry.dangerRow,
         visibleWhen: entry.visibleWhen,
         // Preserve tintWhen on re-registration — without it the world icons
         // (the only tintWhen users) lose their public-state color after any

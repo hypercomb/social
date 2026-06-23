@@ -2,6 +2,11 @@
   <aside
     class="features-panel"
     hcDockInset="right"
+    hcDockedPanel="features-viewer"
+    dockSide="right"
+    [minWidth]="280"
+    [maxWidth]="680"
+    [defaultWidth]="360"
     data-consumes-wheel
     (keydown)="onKey($event)"
     tabindex="-1"

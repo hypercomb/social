@@ -95,7 +95,7 @@ export class MoveDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'controls:action']
-  protected override emits = ['move:preview', 'move:committed', 'move:mode', 'cell:reorder', 'move:drop-into']
+  protected override emits = ['move:preview', 'move:committed', 'move:mode', 'cell:reorder', 'move:drop-into', 'move:drop-into-commit']
 
   #effectsRegistered = false
 
@@ -297,7 +297,11 @@ export class MoveDrone extends Drone {
       const next = valid ? label : null
       if (this.#dropIntoLabel !== next) {
         this.#dropIntoLabel = next
-        this.emitEffect('move:drop-into', next ? { label: next } : null)
+        // Carry the dragged labels so the preview can render shrunken
+        // copies of THOSE tiles hovering over the target. The set is
+        // constant for the drag, so the preview rebuilds its cluster only
+        // when this list changes (never mid-drag) — repositioning is free.
+        this.emitEffect('move:drop-into', next ? { label: next, dragged: [...this.#movedGroup.keys()] } : null)
       }
       // suppress swap preview while drop-into is the active intent
       this.emitEffect('move:preview', null)
@@ -397,6 +401,13 @@ export class MoveDrone extends Drone {
 
     const movedLabels = [...this.#movedGroup.keys()]
     if (movedLabels.length === 0) { this.cancelMove(source); return }
+
+    // Fire the suck-into-tile animation BEFORE the awaited transfer +
+    // navigation. The preview converts its held cluster into a shrink-and-
+    // vanish at the target; the navigation that follows reveals the target's
+    // level underneath, so the tiles read as dropping THROUGH onto the next
+    // layer. Purely visual — the data move below is the authoritative change.
+    this.emitEffect('move:drop-into-commit', { label: targetLabel, dragged: [...movedLabels] })
 
     const lineage = this.resolve<any>('lineage')
     const transfer = this.resolve<LayerTransferService>('transfer')

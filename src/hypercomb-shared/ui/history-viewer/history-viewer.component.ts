@@ -65,6 +65,12 @@ type HistoryService = {
   mergeEntries?(locationSig: string, filenames: string[]): Promise<string | null>
   /** Compute the projected merged layer for preview without writing. */
   projectMerge?(locationSig: string, filenames: string[]): Promise<Content | null>
+  /** Read a marker's label/mark annotation. */
+  readMarkerMeta?(locationSig: string, filename: string): Promise<{ label?: string; marked?: boolean } | null>
+  /** Set/clear a marker's label/mark (rewrites the marker in place). */
+  setMarkerMeta?(locationSig: string, filename: string, meta: { label?: string; marked?: boolean; path?: readonly string[] }): Promise<void>
+  /** Every marked point across the whole tree (the "marked places" list). */
+  listMarkedPoints?(): Promise<Array<{ locationSig: string; filename: string; label: string | null; path: string[] | null; at: number }>>
   pruneExpiredDeletes?(locationSig: string): Promise<number>
 }
 type CursorService = {
@@ -81,6 +87,10 @@ type CursorService = {
 }
 type Store = {
   getResource(sig: string): Promise<Blob | null>
+}
+type NavigationService = {
+  segmentsRaw(): string[]
+  goRaw(segments: readonly string[]): void
 }
 
 type Category = 'cells' | 'content' | 'tags' | 'notes' | 'visibility' | 'system' | 'none'
@@ -117,6 +127,12 @@ type Row = {
   // on a parent layer. Used to collapse contiguous cascade runs in the
   // viewer.
   isCascade: boolean
+  // Marker annotation (participant timeline metadata, stored on the
+  // marker record). `marked` lights the ★; `markLabel` (when set) is the
+  // user's name for this point, shown in place of the auto summary and
+  // editable inline.
+  marked: boolean
+  markLabel: string | null
 }
 
 // Category taxonomy, decorated with an optional IconRef. Adding a new
@@ -211,6 +227,10 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     at: number
     rawText: string
   } | null>>(new Map())
+  // Per-filename marker annotation (marked / label), parsed from each
+  // marker's rawText during reload. Kept separate from the layer content
+  // because it lives on the marker record, not the layer.
+  #meta = signal<ReadonlyMap<string, { marked: boolean; label: string | null }>>(new Map())
   #position = signal(0)
   #total = signal(0)
   #locationSig = signal('')
@@ -297,6 +317,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     const childNames = this.#childNames()
     const nameOf = (sig: string): string | undefined => childNames.get(sig)
 
+    const meta = this.#meta()
     const rows: Row[] = []
     let previousContent: Content | undefined = undefined
     entries.forEach((entry, i) => {
@@ -304,6 +325,7 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
       if (!content) return
       const { summary, category, isCascade } = summarise(previousContent, content, nameOf)
       previousContent = content
+      const m = meta.get(entry.filename)
       rows.push({
         index: i,
         at: entry.at,
@@ -314,6 +336,8 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
         category,
         filename: entry.filename,
         isCascade,
+        marked: m?.marked ?? false,
+        markLabel: m?.label ?? null,
       })
     })
     return rows
@@ -390,6 +414,9 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
         // which violates the "perfect reflection" contract. Always
         // start from "show every marker."
         this.#disabledFilters.set(new Set())
+        // Land on the timeline (not the marked-places list) every open.
+        this.#markedMode.set(false)
+        this.#editing.set(null)
         // Clear any stale localStorage key from older builds that
         // persisted filters across sessions. One-time cleanup; the
         // current code never writes this key. Wrap in try because
@@ -539,66 +566,6 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     this.#lastSelectionAnchor = null
     await this.#reload()
     cursor.seek(this.#total())
-  }
-
-  // Merge preview state — populated by openMergePreview, cleared by
-  // closeMergePreview / commitMergePreview. While non-null the modal
-  // renders. `sourceCount` lets the modal label "X selected".
-  #mergePreview = signal<{
-    lines: ReadonlyArray<{ text: string; status: 'add' }>
-    sourceCount: number
-  } | null>(null)
-  readonly mergePreview = this.#mergePreview.asReadonly()
-  /** True while the merge commit is in flight — disables the button. */
-  readonly mergeCommitting = signal(false)
-
-  /**
-   * Compute the projected merged layer for the current selection and
-   * open the preview modal. Triggered from the header when N ≥ 2 rows
-   * are selected. Read-only — no marker is written until the user
-   * clicks commit.
-   */
-  readonly openMergePreview = async (): Promise<void> => {
-    const history = this.#history()
-    const cursor = this.#cursor()
-    if (!history?.projectMerge || !cursor) return
-    const sel = this.#selected()
-    if (sel.size < 2) return
-    const projected = await history.projectMerge(cursor.state.locationSig, [...sel])
-    if (!projected) return
-    const lines = layerToDiffableLines(projected).map(text => ({ text, status: 'add' as const }))
-    this.#mergePreview.set({ lines, sourceCount: sel.size })
-  }
-
-  readonly closeMergePreview = (): void => {
-    this.#mergePreview.set(null)
-    this.mergeCommitting.set(false)
-  }
-
-  /**
-   * Commit the projected merge. Calls mergeEntries to write the unioned
-   * layer as a fresh head marker (sources are preserved — cherry-pick
-   * semantics). Closes the preview, clears selection, and seeks the
-   * cursor to the new head so the canvas reflects the merged state.
-   */
-  readonly commitMergePreview = async (): Promise<void> => {
-    const history = this.#history()
-    const cursor = this.#cursor()
-    if (!history?.mergeEntries || !cursor) return
-    const sel = this.#selected()
-    if (sel.size < 2) return
-    this.mergeCommitting.set(true)
-    try {
-      await history.mergeEntries(cursor.state.locationSig, [...sel])
-      await this.#refreshCursor(cursor)
-      this.#selected.set(new Set())
-      this.#lastSelectionAnchor = null
-      this.#mergePreview.set(null)
-      await this.#reload()
-      cursor.seek(this.#total())
-    } finally {
-      this.mergeCommitting.set(false)
-    }
   }
 
   readonly openSlice = (index: number, event: Event): void => {
@@ -914,6 +881,118 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     if (cursor.state.position > nextTotal) cursor.seek(nextTotal)
   }
 
+  // ── marker marks + names ────────────────────────────────────────────
+  //
+  // A ★ on a row flags the point and reveals an inline name field; the
+  // name + mark live on the marker record (via setMarkerMeta), and the
+  // current path is stamped alongside so the marked-places list can jump
+  // back to this exact location from anywhere in the tree.
+
+  // Filename currently being renamed (its row shows a text input).
+  #editing = signal<string | null>(null)
+  readonly isEditing = (filename: string): boolean => this.#editing() === filename
+  // Pending marked-places jump — set just before navigating to another
+  // location, consumed by #reload once that bag has loaded.
+  #pendingJump: { locationSig: string; filename: string } | null = null
+
+  /** Drop one marker's filename-keyed content cache so the next reload
+   *  re-reads its (now-rewritten) bytes — the immutable-marker assumption
+   *  only breaks for the marker we just annotated. */
+  #invalidateMarker(locationSig: string, filename: string): void {
+    const key = `${locationSig}:${filename}`
+    const next = new Map(this.#contentByFilename())
+    if (next.delete(key)) this.#contentByFilename.set(next)
+  }
+
+  /** Toggle the ★ on a row. Marking stamps the current path so the
+   *  marked-places list can navigate back; marking also drops the row
+   *  straight into rename so the user can name the point. */
+  readonly toggleMark = async (row: Row, event: Event): Promise<void> => {
+    event.stopPropagation()
+    const history = this.#history()
+    const cursor = this.#cursor()
+    const nav = this.#nav()
+    if (!history?.setMarkerMeta || !cursor) return
+    const locationSig = cursor.state.locationSig
+    const next = !row.marked
+    await history.setMarkerMeta(locationSig, row.filename, next
+      ? { marked: true, path: nav ? nav.segmentsRaw() : undefined }
+      : { marked: false })
+    this.#invalidateMarker(locationSig, row.filename)
+    await this.#reload()
+    if (next) this.#editing.set(row.filename)
+  }
+
+  readonly startRename = (row: Row, event: Event): void => {
+    event.stopPropagation()
+    this.#editing.set(row.filename)
+  }
+  readonly cancelRename = (): void => { this.#editing.set(null) }
+
+  /** Commit an inline name edit. Naming a point implies marking it (and
+   *  stamps the path), so a named row is always returnable. */
+  readonly commitRename = async (filename: string, value: string): Promise<void> => {
+    this.#editing.set(null)
+    const history = this.#history()
+    const cursor = this.#cursor()
+    const nav = this.#nav()
+    if (!history?.setMarkerMeta || !cursor) return
+    const locationSig = cursor.state.locationSig
+    await history.setMarkerMeta(locationSig, filename, {
+      label: value,
+      marked: true,
+      path: nav ? nav.segmentsRaw() : undefined,
+    })
+    this.#invalidateMarker(locationSig, filename)
+    await this.#reload()
+  }
+
+  // ── marked places (cross-tree) ──────────────────────────────────────
+
+  #markedMode = signal(false)
+  readonly markedMode = this.#markedMode.asReadonly()
+  #markedPoints = signal<readonly {
+    locationSig: string; filename: string; path: string[] | null
+    display: string; pathLabel: string; when: string
+  }[]>([])
+  readonly markedPoints = this.#markedPoints.asReadonly()
+
+  readonly toggleMarkedMode = async (): Promise<void> => {
+    const next = !this.#markedMode()
+    this.#markedMode.set(next)
+    if (next) await this.#loadMarkedPoints()
+  }
+
+  async #loadMarkedPoints(): Promise<void> {
+    const history = this.#history()
+    if (!history?.listMarkedPoints) { this.#markedPoints.set([]); return }
+    const pts = await history.listMarkedPoints()
+    this.#markedPoints.set(pts.map(p => ({
+      locationSig: p.locationSig,
+      filename: p.filename,
+      path: p.path,
+      display: p.label ?? `#${parseInt(p.filename, 10) || 0}`,
+      pathLabel: (p.path && p.path.length > 0) ? p.path.join(' / ') : '/',
+      when: new Date(p.at).toLocaleString(),
+    })))
+  }
+
+  /** Jump to a marked point. Same location → seek directly; otherwise
+   *  navigate to its stored path and let #reload land the seek. */
+  readonly jumpToMarked = (point: { locationSig: string; filename: string; path: string[] | null }): void => {
+    const nav = this.#nav()
+    const cursor = this.#cursor()
+    this.#markedMode.set(false)
+    if (cursor && cursor.state.locationSig === point.locationSig) {
+      const idx = this.#entries().findIndex(e => e.filename === point.filename)
+      if (idx >= 0) cursor.seek(idx + 1)
+      return
+    }
+    if (!nav || !point.path) return
+    this.#pendingJump = { locationSig: point.locationSig, filename: point.filename }
+    nav.goRaw(point.path)
+  }
+
   #cursor(): CursorService | null {
     return window.ioc.get<CursorService>('@diamondcoreprocessor.com/HistoryCursorService') ?? null
   }
@@ -931,6 +1010,9 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
   }
   #store(): Store | null {
     return window.ioc.get<Store>('@hypercomb.social/Store') ?? null
+  }
+  #nav(): NavigationService | null {
+    return window.ioc.get<NavigationService>('@hypercomb.social/Navigation') ?? null
   }
 
   /**
@@ -1014,11 +1096,36 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
       }
     })
 
+    // Parse marker annotation (marked / label) from each marker's rawText.
+    // It lives on the marker record (`{layer, marked?, label?}`), not the
+    // layer, so we read it straight off the cached bytes — no extra disk.
+    const meta = new Map<string, { marked: boolean; label: string | null }>()
+    filenames.forEach((name) => {
+      const m = nextByFilename.get(`${locationSig}:${name}`)
+      if (!m) return
+      try {
+        const parsed = JSON.parse(m.rawText)
+        const marked = parsed?.marked === true
+        const label = typeof parsed?.label === 'string' && parsed.label ? parsed.label : null
+        if (marked || label) meta.set(name, { marked, label })
+      } catch { /* not a JSON marker record — no annotation */ }
+    })
+
     this.#contentByFilename.set(nextByFilename)
     this.#contents.set(sigContents)
     this.#entries.set(entries)
+    this.#meta.set(meta)
     this.#position.set(cursor.state.position)
     this.#total.set(filenames.length)
+
+    // Pending jump from the marked-places list: once the bag we navigated
+    // to has loaded, seek to the marked marker so the canvas lands on it.
+    const pj = this.#pendingJump
+    if (pj && pj.locationSig === locationSig) {
+      const idx = entries.findIndex(e => e.filename === pj.filename)
+      this.#pendingJump = null
+      if (idx >= 0) cursor.seek(idx + 1)
+    }
 
     // Phase 3: resolve child layer sigs → names so the diff summary can
     // compare tile IDENTITY across entries instead of raw sig versions.

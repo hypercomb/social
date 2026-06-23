@@ -118,7 +118,7 @@
   "action.reroll": "changer",
   "action.reroll.description": "Changer aléatoirement l'image de fond de ce tile",
   "action.remove": "supprimer",
-  "action.remove.description": "Supprimer définitivement ce tile",
+  "action.remove.description": "Supprimer ce tile — vous pourrez le retrouver dans l'historique",
   "action.break-apart": "restaurer",
   "action.break-apart.description": "Restaurer la visibilité de ce tile masqué",
   "action.hide": "masquer",

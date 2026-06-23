@@ -118,7 +118,7 @@
   "action.reroll": "neu würfeln",
   "action.reroll.description": "Hintergrundbild dieser Kachel zufällig ändern",
   "action.remove": "entfernen",
-  "action.remove.description": "Diese Kachel dauerhaft löschen",
+  "action.remove.description": "Diese Kachel löschen — du findest sie später im Verlauf wieder",
   "action.break-apart": "wiederherstellen",
   "action.break-apart.description": "Diese versteckte Kachel wieder sichtbar machen",
   "action.hide": "verstecken",

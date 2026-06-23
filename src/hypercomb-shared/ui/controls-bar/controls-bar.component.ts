@@ -57,12 +57,18 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   { id: 'fullscreen',   label: 'controls.fullscreen',   action: 'toggleFullscreen',   visibleWhen: 'always', instruction: 'dcp.fullscreen' },
   { id: 'instructions', label: 'controls.instructions', action: 'toggleInstructions', visibleWhen: 'always', instruction: 'dcp.instructions-toggle' },
   { id: 'show-hidden',  label: 'controls.show-hidden',  action: 'toggleShowHidden',   visibleWhen: 'always' },
-  { id: 'world-mode',   label: 'controls.world-mode',   action: 'toggleWorldMode',    visibleWhen: 'always' },
+  // 'world-mode' (the world-view share toggle) moved to the header's
+  // mesh-header — it now lives beside the solo/swarm icon and only shows in
+  // swarm mode (see MeshHeaderComponent).
   { id: 'neon-mode',    label: 'controls.neon-mode',    action: 'toggleNeonMode',     visibleWhen: 'always' },
   { id: 'text-only',    label: 'controls.text-only',    action: 'toggleTextOnly',     visibleWhen: 'always' },
   { id: 'notes',        label: 'controls.notes',        action: 'toggleNotes',        visibleWhen: 'always' },
   { id: 'cut',          label: 'selection.cut',         action: 'cut',                visibleWhen: 'hasSelection' },
   { id: 'copy',         label: 'selection.copy',        action: 'copy',               visibleWhen: 'hasSelection' },
+  // The clipboard icon is the way back into the side panel once it's been
+  // closed — it appears whenever the clipboard holds something and toggles the
+  // panel. (Auto-open on copy/cut alone left no way to reopen.)
+  { id: 'clipboard',    label: 'controls.clipboard',    action: 'toggleClipboard',    visibleWhen: 'clipboardHasItems' },
   { id: 'voice',        label: 'controls.voice',        action: 'toggleVoice',        visibleWhen: 'voiceSupported' },
   // 'room' (the location icon) is gone from the bar — the location dialog now
   // pops as the JOIN step when the participant flips solo → public (see
@@ -76,10 +82,10 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
 // anything in edit mode the persisted map takes over.
 const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'back': true, 'dcp': true, 'fit': true, 'zoom-out': true, 'zoom-in': true, 'pin': true, 'fullscreen': true,
-  'instructions': false, 'show-hidden': false, 'world-mode': true, 'neon-mode': false, 'text-only': false,
+  'instructions': false, 'show-hidden': false, 'neon-mode': false, 'text-only': false,
   'notes': true,
   'cut': false, 'copy': false,
-  'clipboard': false, 'voice': false, 'bees': false, 'feedback': false,
+  'clipboard': true, 'voice': false, 'bees': false, 'feedback': false,
 }
 
 @Component({
@@ -236,10 +242,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #roomOpen = signal(false)
   #beesVisible = signal(localStorage.getItem('hc:bees-visible') === 'true')
   #showHidden = signal(localStorage.getItem('hc:show-hidden') === '1')
-  // World mode — an on/off toggle. When on, the canvas dims not-yet-shared
-  // tiles and the tile overlay shows only the two share-toggles. Persisted so
-  // a refresh keeps the mode.
-  #worldMode = signal(localStorage.getItem('hc:world-mode') === '1')
   // Neon mode — an on/off toggle. When on, the renderer lights every tile's
   // border with an additive glow. Persisted so a refresh keeps the mode.
   #neonMode = signal(localStorage.getItem('hc:neon-mode') === '1')
@@ -376,7 +378,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     toggleFullscreen: () => this.toggleFullscreen(),
     toggleInstructions: (e) => this.toggleInstructions(e!),
     toggleShowHidden: () => this.toggleShowHidden(),
-    toggleWorldMode: () => this.toggleWorldMode(),
     toggleNeonMode: () => this.toggleNeonMode(),
     toggleTextOnly: () => this.toggleTextOnly(),
     toggleNotes: () => this.toggleNotes(),
@@ -399,7 +400,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'pin': return this.#locked()
       case 'fit': return this.fitLocked()
       case 'show-hidden': return this.#showHidden()
-      case 'world-mode': return this.#worldMode()
       case 'neon-mode': return this.#neonMode()
       case 'text-only': return this.#textOnly()
       case 'bees': return this.#beesVisible()
@@ -432,7 +432,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'fullscreen':   return 'fullscreen'
       case 'instructions': return 'help'
       case 'show-hidden':  return this.showHidden() ? 'visibility' : 'visibility_off'
-      case 'world-mode':   return 'public'
       case 'neon-mode':    return 'flare'
       case 'text-only':    return this.textOnly() ? 'text_fields' : 'subject'
       case 'notes':        return 'sticky_note_2'
@@ -732,7 +731,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly roomOpen = this.#roomOpen.asReadonly()
   readonly beesVisible = this.#beesVisible.asReadonly()
   readonly showHidden = this.#showHidden.asReadonly()
-  readonly worldMode = this.#worldMode.asReadonly()
   readonly voiceActive = signal(false)
   readonly voiceSupported = VoiceInputService.supported()
   readonly atomizeTarget = this.#atomizeTarget.asReadonly()
@@ -935,11 +933,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // emit initial show-hidden state so drones pick it up
     if (this.#showHidden()) {
       EffectBus.emit('visibility:show-hidden', { active: true })
-    }
-
-    // emit initial world-mode state so the renderer + overlay pick it up
-    if (this.#worldMode()) {
-      EffectBus.emit('world:mode', { active: true })
     }
 
     // emit initial neon-mode state so the renderer picks it up
@@ -1444,13 +1437,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       return
     }
 
-    // Drop any ghost entries before opening — ensures the clipboard view
-    // never shows a tile that has no underlying folder, and the count
-    // indicator reflects what can actually be rendered.
-    const worker = get('@diamondcoreprocessor.com/ClipboardWorker') as
-      { validate?: () => Promise<void> } | undefined
-    await worker?.validate?.()
-
+    // Opening must NEVER mutate the clipboard — viewing your items can't lose
+    // them. (The old `validate()` ghost-sweep on open could drop live entries
+    // on a cold read; ghost cleanup now happens only on restore.) Just bail if
+    // there's genuinely nothing to show.
     const clipSvc = get('@diamondcoreprocessor.com/ClipboardService') as
       { items?: { label: string; sourceSegments: readonly string[] }[]; operation?: 'cut' | 'copy'; isEmpty?: boolean } | undefined
     if (clipSvc?.isEmpty) return
@@ -1504,18 +1494,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#showHidden.set(next)
     localStorage.setItem('hc:show-hidden', next ? '1' : '0')
     EffectBus.emit('visibility:show-hidden', { active: next })
-  }
-
-  // ── world mode (on/off) ─────────────────────────────────
-  // Dims not-yet-shared tiles and flips the tile overlay to the two
-  // share-toggle icons. The actual dim + icon swap happen in the renderer
-  // and overlay drones, which listen for 'world:mode'.
-
-  readonly toggleWorldMode = (): void => {
-    const next = !this.#worldMode()
-    this.#worldMode.set(next)
-    localStorage.setItem('hc:world-mode', next ? '1' : '0')
-    EffectBus.emit('world:mode', { active: next })
   }
 
   // ── neon mode (on/off) ───────────────────────────────────

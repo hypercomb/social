@@ -23,7 +23,11 @@ $steel: rgb(126, 182, 214);
   top: calc(2.8rem * var(--hc-header-zoom, 1.0));
   right: 0;
   bottom: 0;
-  width: min(360px, calc(100vw - 2rem));
+  // Width + --hc-panel-scale come from hcDockedPanel (inline). These are
+  // guardrails for a narrow viewport / the pre-bind default.
+  width: 360px;
+  min-width: 280px;
+  max-width: calc(100vw - 1.5rem);
   display: flex;
   flex-direction: column;
   background: rgba(14, 17, 24, 0.96);
@@ -31,6 +35,8 @@ $steel: rgb(126, 182, 214);
   border-left: 1px solid rgba($steel, 0.5);
   box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba($steel, 0.06) inset;
   font-family: var(--hc-mono, system-ui);
+  // Content scale — inner sizes follow this root font (see hcDockedPanel).
+  font-size: calc(1rem * var(--hc-panel-scale, 1));
   color: #eef3f8;
   outline: none;
 }
@@ -169,5 +175,7 @@ $steel: rgb(126, 182, 214);
   .feedback-viewer-panel { top: calc(3.85rem * var(--hc-header-zoom, 1.0)); }
 }
 @include phone-only {
-  .feedback-viewer-panel { top: 0; width: 100%; }
+  // No header to clear on phone; the directive's clamp keeps the inline width
+  // on-screen (innerWidth − gutter), so no width override is needed here.
+  .feedback-viewer-panel { top: 0; }
 }

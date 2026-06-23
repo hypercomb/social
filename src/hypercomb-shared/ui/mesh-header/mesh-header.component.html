@@ -1,4 +1,14 @@
 <div class="mesh-header">
+  @if (meshPublic) {
+    <button class="mode-toggle world-toggle"
+      [class.active]="worldMode()"
+      type="button"
+      [title]="'controls.world-mode' | t"
+      [attr.aria-label]="'controls.world-mode' | t"
+      (click)="toggleWorldMode()">
+      <span class="mat-sym" [class.filled]="worldMode()">public</span>
+    </button>
+  }
   <button class="mode-toggle"
     [class.solo-mode]="!meshPublic"
     [class.shield-mode]="!!meshPublic"

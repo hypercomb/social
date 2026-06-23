@@ -8,6 +8,12 @@ import { Bee, EffectBus, SignatureService, isSignature } from '@hypercomb/core'
  *  null instead of a network storm; the egg stays retryable after it. */
 const HOST_MISS_TTL_MS = 60_000
 
+// SHA-256 of zero bytes — the ONLY signature whose valid content is empty.
+// Any OTHER sig stored as a 0-byte file is a corrupt/interrupted write
+// (see putResource): the read path treats it as a miss so the host fetch
+// can heal it instead of serving emptiness forever.
+const EMPTY_CONTENT_SIG = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+
 export type DevManifest = {
   dependencies: Record<string, string>
   imports: Record<string, string>
@@ -329,8 +335,21 @@ export class Store extends EventTarget {
     // the tile renders blank with no indication why. Skipping the
     // rewrite keeps cached Blobs valid for their lifetime.
     try {
-      await this.resources.getFileHandle(signature)
-      return signature
+      const existing = await this.resources.getFileHandle(signature)
+      // "Exists" must also mean "complete". getFileHandle({create:true})
+      // below creates a 0-byte target BEFORE the write; if the write/close
+      // is interrupted (reload, crash, navigation — the lingering .crswap
+      // swap files are the fingerprint) the file stays empty. The old
+      // early-return then locked that corruption in forever: every retry
+      // saw the file "exists" and skipped the rewrite, so the store served
+      // 0 bytes for this sig to render AND to host-sync (which PUT empty
+      // bytes → 422 on every drain). A content-addressed file whose size
+      // differs from the incoming bytes is definitively corrupt — a valid
+      // file's bytes hash to this exact sig — so overwriting is safe, and
+      // it cannot invalidate a live cached Blob (none was ever derived from
+      // a short file). Matching size ⇒ complete: keep the cached-Blob-safe
+      // skip the comment below describes.
+      if ((await existing.getFile()).size === bytes.byteLength) return signature
     } catch { /* fall through and create */ }
     const handle = await this.resources.getFileHandle(signature, { create: true })
     const writable = await handle.createWritable()
@@ -668,6 +687,15 @@ export class Store extends EventTarget {
       try {
         const handle = await this.resources.getFileHandle(signature)
         const file = await handle.getFile()
+        // A 0-byte file under a non-empty sig is a corrupt/interrupted
+        // write (see putResource — getFileHandle({create:true}) lands a
+        // 0-byte target before the write completes). A raw Blob of size 0
+        // is truthy, so returning it makes getResource short-circuit BEFORE
+        // the host fallback — the bytes never re-fetch and render serves
+        // emptiness forever. Treat it as a MISS so getResource falls
+        // through to the host, whose write-through heals the file. Only the
+        // empty-content sig may legitimately be 0 bytes.
+        if (file.size === 0 && signature !== EMPTY_CONTENT_SIG) return null
         // Detach from the OPFS backing file by copying bytes into
         // memory and wrapping a fresh Blob. A raw File returned from
         // handle.getFile() keeps a live reference to the OPFS storage;

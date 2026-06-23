@@ -118,7 +118,7 @@
   "action.reroll": "acak",
   "action.reroll.description": "Acak gambar latar belakang ubin ini",
   "action.remove": "hapus",
-  "action.remove.description": "Hapus ubin ini secara permanen",
+  "action.remove.description": "Hapus ubin ini — bisa ditemukan lagi di riwayat",
   "action.break-apart": "pulihkan",
   "action.break-apart.description": "Pulihkan visibilitas ubin yang tersembunyi",
   "action.hide": "sembunyikan",

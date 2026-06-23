@@ -1,5 +1,38 @@
 // hypercomb-web/src/main.ts
 /// <reference path="../../hypercomb-shared/global.d.ts" />
+
+// ── boot perf trail ──────────────────────────────────────────────────────────
+// Mirror of hypercomb-dev/src/main.ts. T0 = earliest point in the module graph.
+// Any shared/essentials code that calls window.__hcBoot('label') gets a
+// `[boot] +Nms label` console line + a push into window.__hcBootMarks (also
+// persisted to localStorage['hc:perf-boot-marks'] so the trail survives the
+// reload it measures). Web previously never defined __hcBoot, so every mark in
+// shared/essentials was a silent no-op here and production boot was unmeasurable.
+;(window as any).__hcBootT0 = performance.now()
+;(window as any).__hcBootMarks = [] as string[]
+;(window as any).__hcBoot = (label: string, extra?: string) => {
+  const t0 = (window as any).__hcBootT0
+  if (typeof t0 !== 'number') return
+  const t = performance.now() - t0
+  const msg = `+${t.toFixed(0)}ms ${label}${extra ? ` ${extra}` : ''}`
+  console.log(`[boot] ${msg}`)
+  ;(window as any).__hcBootMarks.push(msg)
+  try { localStorage.setItem('hc:perf-boot-marks', JSON.stringify((window as any).__hcBootMarks)) } catch {}
+}
+;(window as any).__hcBoot('main.ts module evaluated')
+
+// ── navigation perf trail ────────────────────────────────────────────────────
+// Same contract as __hcBoot but per NAVIGATION: 'nav:start' resets T0, every
+// later mark logs `[nav] +Nms label`. Shared/essentials call __hcNav?.('label')
+// unconditionally; shells that don't define it no-op.
+;(window as any).__hcNavT0 = 0
+;(window as any).__hcNav = (label: string, extra?: string) => {
+  const now = performance.now()
+  if (label === 'nav:start') (window as any).__hcNavT0 = now
+  const t0 = (window as any).__hcNavT0 || now
+  console.log(`[nav] +${(now - t0).toFixed(0)}ms ${label}${extra ? ` ${extra}` : ''}`)
+}
+
 import '@hypercomb/shared/core/ioc.web'
 // Capture a `/<sig>` meeting-place invite link before navigation parses the
 // URL — stashes the sig for the receive-side MeetingInviteWorker.
@@ -59,12 +92,14 @@ const attachImportMap = async (): Promise<void> => {
 }
 
 const bootstrap = async (): Promise<void> => {
+  ;(window as any).__hcBoot('bootstrap() started')
   await ensureSwControl()
 
   // Hand the service worker the host domains (self + community) so an
   // embedded-site /@resource/<sig> request can stream from a host on an OPFS
   // miss. The SW has no localStorage/IoC, so the page must post them.
   await postCommunityDomainsToServiceWorker()
+  ;(window as any).__hcBoot('ensureSwControl + sw-domains done')
 
   // Capture install state BEFORE ensureInstall so the cold-install path
   // is detectable. ensureInstall flips this flag when the first sync
@@ -77,7 +112,9 @@ const bootstrap = async (): Promise<void> => {
   // explicit user action that needs DCP — opening the installer from
   // the menu, the install-needed prompt, or the in-app DCP portal.
   await ensureInstall(null)
+  ;(window as any).__hcBoot('ensureInstall done')
   await attachImportMap()
+  ;(window as any).__hcBoot('attachImportMap (resolveImportMap) done')
 
   // Snapshot the sync signature applied at boot. Anything that drifts
   // from this (toggles in DCP, intake from web→DCP, etc.) means the
@@ -88,6 +125,7 @@ const bootstrap = async (): Promise<void> => {
   // Load dependency namespaces so services self-register before Angular renders
   const loader = get('@hypercomb.social/DependencyLoader') as DependencyLoader | undefined
   await loader?.load?.()
+  ;(window as any).__hcBoot('DependencyLoader.load done')
 
   // Run runtime init (i18n catalogs, layer materialization, etc.) BEFORE
   // bootstrapApplication. Without this, bootstrap fires Angular's first
@@ -98,8 +136,10 @@ const bootstrap = async (): Promise<void> => {
   // boot. Dev shell already does this (see hypercomb-dev/src/main.ts);
   // web didn't, which is why the error showed on 4200 but not 4250.
   await initializeRuntime({ logOpfs: false })
+  ;(window as any).__hcBoot('initializeRuntime done')
 
   const appRef = await bootstrapApplication(App, appConfig)
+  ;(window as any).__hcBoot('bootstrapApplication done (Angular first paint)')
 
   // Lazy sentinel: no iframe until the user explicitly opens DCP. The
   // first call to getSentinel() mounts the hidden iframe at /sentinel

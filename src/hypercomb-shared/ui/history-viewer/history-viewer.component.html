@@ -23,16 +23,15 @@
                   (click)="makeHeadSelection()">
             {{ 'history.save-as' | t }}
           </button>
-        } @else {
-          <button type="button"
-                  class="selection-action merge-to-head"
-                  [attr.aria-label]="'history.selection-merge' | t"
-                  [title]="'history.selection-merge' | t"
-                  (click)="openMergePreview()">
-            {{ 'history.selection-merge' | t }}
-          </button>
         }
       }
+      <button type="button"
+              class="marked-toggle"
+              [class.active]="markedMode()"
+              [attr.aria-pressed]="markedMode()"
+              [attr.aria-label]="'history.marked-places' | t"
+              [title]="'history.marked-places' | t"
+              (click)="toggleMarkedMode()">★</button>
       <button type="button"
               class="group-step-toggle"
               [class.active]="groupStepEnabled()"
@@ -62,47 +61,84 @@
         }
       </div>
     }
-    <ul class="rows" (wheel)="$event.stopPropagation()">
-      <li class="row anchor anchor-head" aria-hidden="true">
-        <span class="indicator"></span>
-        <span class="idx">—</span>
-        <span class="summary">{{ 'history.anchor-head' | t }}</span>
-      </li>
-      @for (row of rows(); track row.index) {
-        <li class="row"
-            [class.active]="row.active"
-            [class.selected]="isRowSelected(row.filename)"
-            [attr.data-category]="row.category"
-            (click)="onRowClick(row, $event)"
-            (dblclick)="openSlice(row.index, $event)">
-          @if (categoryDef(row.category).icon; as icon) {
-            <hc-icon class="row-icon" [ref]="icon"></hc-icon>
-          } @else {
-            <span class="indicator"></span>
-          }
-          <span class="idx">{{ row.label }}</span>
-          <span class="summary">{{ row.summary }}</span>
-          <button type="button"
-                  class="row-action row-make-head"
-                  [attr.aria-label]="'history.make-head' | t"
-                  [title]="'history.make-head' | t"
-                  (click)="promoteRow(row.index, $event)">^</button>
-          <span class="when">{{ row.when }}</span>
-          <button type="button"
-                  class="row-action row-delete"
-                  [attr.aria-label]="'history.delete-entry' | t"
-                  [title]="'history.delete-entry' | t"
-                  (click)="deleteRow(row.index, $event)">×</button>
+    @if (markedMode()) {
+      <ul class="rows marked-list" (wheel)="$event.stopPropagation()">
+        @if (markedPoints().length === 0) {
+          <li class="marked-empty">{{ 'history.marked-empty' | t }}</li>
+        }
+        @for (p of markedPoints(); track p.locationSig + ':' + p.filename) {
+          <li class="marked-row" (click)="jumpToMarked(p)">
+            <span class="marked-star">★</span>
+            <span class="marked-name">{{ p.display }}</span>
+            <span class="marked-path">{{ p.pathLabel }}</span>
+            <span class="when">{{ p.when }}</span>
+          </li>
+        }
+      </ul>
+    } @else {
+      <ul class="rows" (wheel)="$event.stopPropagation()">
+        <li class="row anchor anchor-head" aria-hidden="true">
+          <span class="indicator"></span>
+          <span class="idx">—</span>
+          <span class="summary">{{ 'history.anchor-head' | t }}</span>
         </li>
-      }
-      <li class="row anchor anchor-start"
-          [class.active]="position() === 0"
-          (click)="seek(-1)">
-        <span class="indicator"></span>
-        <span class="idx">—</span>
-        <span class="summary">{{ 'history.anchor-start' | t }}</span>
-      </li>
-    </ul>
+        @for (row of rows(); track row.index) {
+          <li class="row"
+              [class.active]="row.active"
+              [class.selected]="isRowSelected(row.filename)"
+              [class.marked]="row.marked"
+              [attr.data-category]="row.category"
+              (click)="onRowClick(row, $event)"
+              (dblclick)="openSlice(row.index, $event)">
+            @if (categoryDef(row.category).icon; as icon) {
+              <hc-icon class="row-icon" [ref]="icon"></hc-icon>
+            } @else {
+              <span class="indicator"></span>
+            }
+            <span class="idx">{{ row.label }}</span>
+            @if (isEditing(row.filename)) {
+              <input class="row-rename"
+                     type="text"
+                     autofocus
+                     [value]="row.markLabel ?? ''"
+                     [attr.placeholder]="'history.mark-rename' | t"
+                     (click)="$event.stopPropagation()"
+                     (keydown.enter)="commitRename(row.filename, $any($event.target).value)"
+                     (keydown.escape)="cancelRename()"
+                     (blur)="commitRename(row.filename, $any($event.target).value)" />
+            } @else if (row.markLabel) {
+              <span class="summary mark-name" (dblclick)="startRename(row, $event)">{{ row.markLabel }}</span>
+            } @else {
+              <span class="summary">{{ row.summary }}</span>
+            }
+            <button type="button"
+                    class="row-action row-mark"
+                    [class.on]="row.marked"
+                    [attr.aria-label]="'history.mark-toggle' | t"
+                    [title]="'history.mark-toggle' | t"
+                    (click)="toggleMark(row, $event)">{{ row.marked ? '★' : '☆' }}</button>
+            <button type="button"
+                    class="row-action row-make-head"
+                    [attr.aria-label]="'history.make-head' | t"
+                    [title]="'history.make-head' | t"
+                    (click)="promoteRow(row.index, $event)">^</button>
+            <span class="when">{{ row.when }}</span>
+            <button type="button"
+                    class="row-action row-delete"
+                    [attr.aria-label]="'history.delete-entry' | t"
+                    [title]="'history.delete-entry' | t"
+                    (click)="deleteRow(row.index, $event)">×</button>
+          </li>
+        }
+        <li class="row anchor anchor-start"
+            [class.active]="position() === 0"
+            (click)="seek(-1)">
+          <span class="indicator"></span>
+          <span class="idx">—</span>
+          <span class="summary">{{ 'history.anchor-start' | t }}</span>
+        </li>
+      </ul>
+    }
   </aside>
 
   @if (sliceCurrent(); as slice) {
@@ -136,27 +172,6 @@
           <pre class="slice-json slice-props">{{ props }}</pre>
         </div>
       }
-    </div>
-  }
-
-  @if (mergePreview(); as preview) {
-    <div class="slice-backdrop" (click)="closeMergePreview()"></div>
-    <div class="slice-modal merge-preview-modal" role="dialog" aria-modal="true">
-      <header>
-        <span class="slice-label">{{ 'history.merge-preview-title' | t }} · {{ preview.sourceCount }}</span>
-        <button type="button"
-                class="merge-commit"
-                [disabled]="mergeCommitting()"
-                [attr.aria-label]="'history.merge-preview-commit' | t"
-                (click)="commitMergePreview()">{{ 'history.merge-preview-commit' | t }}</button>
-        <button type="button"
-                class="slice-close"
-                [attr.aria-label]="'history.merge-preview-cancel' | t"
-                (click)="closeMergePreview()">×</button>
-      </header>
-      <pre class="slice-json">@for (line of preview.lines; track $index) {@if (lineSig(line.text); as sig) {<span class="slice-line slice-sig" [attr.data-status]="line.status" [attr.data-sig]="sig" (click)="drillIntoSig(sig)" role="button" tabindex="0">{{ line.text }}</span>
-} @else {<span class="slice-line" [attr.data-status]="line.status">{{ line.text }}</span>
-}}</pre>
     </div>
   }
 }

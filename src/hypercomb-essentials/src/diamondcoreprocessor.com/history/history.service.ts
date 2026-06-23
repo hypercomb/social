@@ -159,6 +159,25 @@ export class HistoryService {
   // history is the same until the next record()/updateLayer() append.
   readonly #replayCache = new Map<string, HistoryOp[]>()
 
+  constructor() {
+    // Warm-start. Restore the persisted per-lineage head index BEFORE the
+    // first paint so currentLayerAt resolves heads from cache instead of
+    // enumerating every history bag (the multi-second preloadAllBags
+    // rebuild — measured 13.6s over 603 bags / 8006 markers). The full
+    // scan still runs, but demoted to an idle reconciliation tail that
+    // refreshes + re-persists the index. See #restoreHeadIndex /
+    // #scheduleHeadPersist.
+    this.#restoreHeadIndex()
+    try {
+      // Flush the latest head snapshot when the tab is hidden/closed so the
+      // next boot starts warm even if the debounce timer hadn't fired.
+      window.addEventListener('pagehide', this.#flushHeadIndex)
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') this.#flushHeadIndex()
+      })
+    } catch { /* non-DOM context — head persistence is a main-thread-only optimization */ }
+  }
+
   private get historyRoot(): FileSystemDirectoryHandle {
     const store = get<{ history: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
     return store!.history
@@ -606,6 +625,7 @@ export class HistoryService {
     this.#preloaderCache.set(layerSig, bytes.buffer as ArrayBuffer)
     this.#parsedLayerCache.set(layerSig, canonical)
     this.#latestSigByLineage.set(locationSig, layerSig)
+    this.#scheduleHeadPersist()
 
     // Mirror up to DCP. PushQueueService listens on EffectBus and
     // enqueues the bytes for sentinel intake; the queue survives
@@ -1131,6 +1151,57 @@ export class HistoryService {
   readonly #latestSigByLineage = new Map<string, string>()
 
   /**
+   * Persisted snapshot of #latestSigByLineage. The map is a pure
+   * derivation of on-disk state (each bag's max marker), but re-deriving
+   * it from scratch means enumerating every bag × every marker — the
+   * 13.6s preloadAllBags rebuild that ran on every reload. Caching the
+   * derivation (canonical = the bag's max marker; cache = this localStorage
+   * index) makes a warm boot a single localStorage read, so first paint
+   * never waits on a bag scan. Same dual-store pattern as tile properties.
+   * Participant-local (it's a cache, not part of the signed layer tree).
+   */
+  static readonly #HEAD_INDEX_KEY = 'hc:history:head-index'
+  #headPersistTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** Load the persisted head index into #latestSigByLineage. Synchronous
+   *  (localStorage) so it's ready before the first currentLayerAt. Bad/stale
+   *  entries are self-correcting: currentLayerAt re-derives any head whose
+   *  bytes don't resolve, and the reconciliation tail overwrites the file. */
+  readonly #restoreHeadIndex = (): void => {
+    try {
+      const raw = localStorage.getItem(HistoryService.#HEAD_INDEX_KEY)
+      if (!raw) return
+      const obj = JSON.parse(raw) as Record<string, string>
+      let n = 0
+      for (const [lineageSig, layerSig] of Object.entries(obj)) {
+        if (HistoryService.#SIG_RE.test(lineageSig) && HistoryService.#SIG_RE.test(layerSig)) {
+          this.#latestSigByLineage.set(lineageSig, layerSig)
+          n++
+        }
+      }
+      if (n) console.log(`[preload] head index restored from cache: ${n} lineages (first paint skips the bag scan)`)
+    } catch { /* corrupt/unavailable cache — fall back to derivation, no harm */ }
+  }
+
+  /** Debounced persist. Cheap to call from every head mutation; coalesces
+   *  bursts (a cascade touches many lineages) into one write. */
+  readonly #scheduleHeadPersist = (): void => {
+    if (this.#headPersistTimer) return
+    this.#headPersistTimer = setTimeout(this.#flushHeadIndex, 1500)
+  }
+
+  /** Write the current head index now. Called by the debounce and on
+   *  tab-hide so the next boot starts warm. */
+  readonly #flushHeadIndex = (): void => {
+    if (this.#headPersistTimer) { clearTimeout(this.#headPersistTimer); this.#headPersistTimer = null }
+    try {
+      const obj: Record<string, string> = {}
+      for (const [lineageSig, layerSig] of this.#latestSigByLineage) obj[lineageSig] = layerSig
+      localStorage.setItem(HistoryService.#HEAD_INDEX_KEY, JSON.stringify(obj))
+    } catch { /* quota / unavailable — non-fatal, only costs a cold next boot */ }
+  }
+
+  /**
    * Per-lineage marker list — the in-memory mirror of what listLayers
    * reads off disk. Without it, EVERY commit re-enumerated the bag and
    * re-read EVERY marker file (cursor.onNewLayer → listLayers), making
@@ -1193,7 +1264,15 @@ export class HistoryService {
     this.#parsedLayerCache.set(layerSig, HistoryService.#hydrateLayer(layer))
   }
 
-  public readonly getLayerBySig = async (
+  /**
+   * Local-only layer resolution: parsed cache → preloader cache →
+   * canonical layer pool. Returns null on miss WITHOUT triggering the
+   * global preloadAllBags. This is the warm path: getLayerBySig adds the
+   * cold-miss preload on top, while currentLayerAt's head-cache hit calls
+   * this directly so a restored / stale head can never drag the 13s scan
+   * back onto the first-paint path.
+   */
+  readonly #resolveLayerLocal = async (
     layerSig: string,
   ): Promise<LayerContent | null> => {
     if (!HistoryService.#SIG_RE.test(layerSig)) return null
@@ -1203,11 +1282,12 @@ export class HistoryService {
     if (cached) {
       try {
         const parsed = JSON.parse(new TextDecoder().decode(cached)) as Partial<LayerContent>
-        if (!parsed.name) return null
-        const hydrated = HistoryService.#hydrateLayer(parsed)
-        this.#parsedLayerCache.set(layerSig, hydrated)
-        return hydrated
-      } catch { /* fall through to disk */ }
+        if (parsed.name) {
+          const hydrated = HistoryService.#hydrateLayer(parsed)
+          this.#parsedLayerCache.set(layerSig, hydrated)
+          return hydrated
+        }
+      } catch { /* fall through to pool */ }
     }
 
     // Sig-direct lookup through the canonical layer pool. Markers in
@@ -1230,6 +1310,18 @@ export class HistoryService {
         } catch { /* malformed pool file — fall through */ }
       }
     }
+    return null
+  }
+
+  public readonly getLayerBySig = async (
+    layerSig: string,
+  ): Promise<LayerContent | null> => {
+    if (!HistoryService.#SIG_RE.test(layerSig)) return null
+    const local = await this.#resolveLayerLocal(layerSig)
+    if (local) return local
+    const store = get<{
+      getLayerPoolBytes?: (sig: string) => Promise<Uint8Array | null>
+    }>('@hypercomb.social/Store')
 
     // Cold miss: trigger the global preload (idempotent — runs once per
     // session) so this and every future getLayerBySig hits the cache.
@@ -1285,17 +1377,26 @@ export class HistoryService {
   ): Promise<LayerContent | null> => {
     if (!HistoryService.#SIG_RE.test(locationSig)) return null
     const cached = this.#latestSigByLineage.get(locationSig)
-    if (cached) return this.getLayerBySig(cached)
+    if (cached) {
+      // Warm path. The head may have come from a previous session via the
+      // restored head index — resolve it LOCALLY (parsed/preloader/pool),
+      // never through getLayerBySig, whose cold-miss fallback would drag
+      // the whole 13s preloadAllBags onto this first-paint hop.
+      const hit = await this.#resolveLayerLocal(cached)
+      if (hit) return hit
+      // Stale head (cross-session drift, or its bytes aren't in the pool):
+      // drop it and re-derive from disk rather than returning a wrong null.
+      this.#latestSigByLineage.delete(locationSig)
+      this.#scheduleHeadPersist()
+    }
     // SINGLE-LINEAGE cold path — first paint must be linear in "this
-    // layer + its tiles", never in tree size. Joining preloadAllBags here
-    // made the first tile read wait for EVERY bag's head scan PLUS the
-    // chained whole-tree preloadFromRoot walk (the shared promise covers
-    // both phases). Instead: warm just THIS lineage's head (one dir
-    // listing + one marker read) and kick the full preload passively so
-    // later navigations stay warm. Fall back to the full preload only
-    // when the history root isn't ready yet (Store still initializing —
-    // preloadAllBags owns the readiness polling).
-    void this.preloadAllBags()
+    // layer + its tiles", never in tree size. Warm just THIS lineage's
+    // head (one dir listing + one marker read). Do NOT kick the full
+    // preloadAllBags here: on real data it's a multi-second tail that
+    // would steal the main thread from this very first paint. The
+    // idle-deferred reconciliation (runtime-initializer's requestIdleCallback)
+    // owns the full pass. Fall back to it only when the history root isn't
+    // ready yet (Store still initializing — preloadAllBags owns that poll).
     try {
       await this.#warmLineageHead(locationSig)
     } catch {
@@ -1336,6 +1437,7 @@ export class HistoryService {
       const { layerSig, isPointer } = await extractLayerSigFromMarker(bytes)
       if (!isPointer) this.#preloaderCache.set(layerSig, bytes)
       this.#latestSigByLineage.set(lineageSig, layerSig)
+      this.#scheduleHeadPersist()
     } catch { /* unreadable head — stay cold; the passive preload may resolve it */ }
   }
 
@@ -1525,6 +1627,10 @@ export class HistoryService {
         } catch { /* skip unreadable */ }
       }
 
+      // Reconciliation complete — persist the freshly-derived head index so
+      // the NEXT boot warm-starts from it instead of re-running this scan.
+      this.#flushHeadIndex()
+
       const elapsed = Math.round(performance.now() - startMs)
       console.log(
         `[preload] preloadAllBags done: ${cachedCount} heads cached / ${bagCount} bags scanned / ${markerCount} markers seen (${elapsed}ms). ` +
@@ -1631,6 +1737,7 @@ export class HistoryService {
   public readonly refreshLineageCache = async (lineageSig: string): Promise<void> => {
     this.#latestSigByLineage.delete(lineageSig)
     this.#layerListCache.delete(lineageSig)
+    this.#scheduleHeadPersist()
     let bag: FileSystemDirectoryHandle
     try {
       bag = await this.historyRoot.getDirectoryHandle(lineageSig, { create: false })
@@ -1651,7 +1758,7 @@ export class HistoryService {
         if (name > latestName) { latestName = name; latestSig = layerSig }
       } catch { /* skip */ }
     }
-    if (latestSig) this.#latestSigByLineage.set(lineageSig, latestSig)
+    if (latestSig) { this.#latestSigByLineage.set(lineageSig, latestSig); this.#scheduleHeadPersist() }
   }
 
   /**
@@ -1811,6 +1918,7 @@ export class HistoryService {
     if (removed > 0) {
       this.#latestSigByLineage.delete(locationSig)
       this.#layerListCache.delete(locationSig)
+      this.#scheduleHeadPersist()
     }
     return removed
   }
@@ -1856,6 +1964,7 @@ export class HistoryService {
     if (archived > 0) {
       this.#latestSigByLineage.delete(locationSig)
       this.#layerListCache.delete(locationSig)
+      this.#scheduleHeadPersist()
     }
     return archived
   }
@@ -1952,6 +2061,138 @@ export class HistoryService {
       (merged as Record<string, unknown>)[key] = values
     }
     return merged
+  }
+
+  // -------------------------------------------------
+  // marker labels + marks (participant timeline metadata)
+  // -------------------------------------------------
+  //
+  // A marked / named history point is annotation on the MARKER, not the
+  // layer: the marker record gains `label` / `marked` fields alongside
+  // `layer`. The layer sig is unchanged (it's hashed from the layer
+  // bytes in the pool, independent of the marker), so labeling a past
+  // point does NOT cascade to root — and it travels with the bag when
+  // history is shared/deployed. Marker bytes change, so callers that
+  // cache marker content by filename must drop that key on edit.
+
+  /**
+   * Read the label/mark annotation on a single marker. Returns
+   * `{ label, marked }` (both optional) or null if the marker is
+   * missing / unparseable.
+   */
+  public readonly readMarkerMeta = async (
+    locationSig: string,
+    filename: string,
+  ): Promise<{ label?: string; marked?: boolean } | null> => {
+    const m = await this.readMarker(locationSig, filename)
+    if (!m) return null
+    try {
+      const parsed = JSON.parse(m.rawText)
+      const out: { label?: string; marked?: boolean } = {}
+      if (typeof parsed?.label === 'string') out.label = parsed.label
+      if (typeof parsed?.marked === 'boolean') out.marked = parsed.marked
+      return out
+    } catch {
+      return {}
+    }
+  }
+
+  /**
+   * Set (or clear) a marker's label / mark. Rewrites the marker file in
+   * place, preserving its `layer` pointer and any other fields. Passing
+   * `label: ''` or `marked: false` clears that annotation (the field is
+   * dropped from the record). No-op when the marker can't be read.
+   */
+  public readonly setMarkerMeta = async (
+    locationSig: string,
+    filename: string,
+    meta: { label?: string; marked?: boolean; path?: readonly string[] },
+  ): Promise<void> => {
+    if (!HistoryService.#MARKER_RE.test(filename)) return
+    let bag: FileSystemDirectoryHandle
+    try {
+      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+    } catch { return }
+    let handle: FileSystemFileHandle
+    try {
+      handle = await bag.getFileHandle(filename, { create: false })
+    } catch { return }
+
+    // Resolve the layer sig so the rewritten marker stays a valid pointer
+    // record even if the original was a legacy inline-layer marker.
+    let record: Record<string, unknown>
+    try {
+      const bytes = await (await handle.getFile()).arrayBuffer()
+      const { layerSig } = await extractLayerSigFromMarker(bytes)
+      try {
+        const parsed = JSON.parse(new TextDecoder().decode(bytes))
+        record = (parsed && typeof parsed === 'object' && typeof parsed.layer === 'string')
+          ? parsed as Record<string, unknown>
+          : { layer: layerSig }
+      } catch {
+        record = { layer: layerSig }
+      }
+    } catch { return }
+
+    if (meta.label !== undefined) {
+      if (meta.label.trim().length > 0) record['label'] = meta.label.trim()
+      else delete record['label']
+    }
+    if (meta.marked !== undefined) {
+      if (meta.marked) record['marked'] = true
+      else delete record['marked']
+    }
+    if (meta.path !== undefined) {
+      const clean = meta.path.map(s => String(s ?? '').trim()).filter(Boolean)
+      if (clean.length > 0) record['path'] = clean
+      else delete record['path']
+    }
+
+    const out = new TextEncoder().encode(JSON.stringify(record))
+    const writable = await handle.createWritable()
+    try { await writable.write(out.buffer as ArrayBuffer) } finally { await writable.close() }
+  }
+
+  /**
+   * Scan every bag for marked markers — the "marked places" list. Returns
+   * one entry per marked marker with its location bag, filename, optional
+   * label, and timestamp. Used by the viewer's marked-places view to jump
+   * back to any point the user flagged, anywhere in the tree.
+   */
+  public readonly listMarkedPoints = async (): Promise<Array<{
+    locationSig: string
+    filename: string
+    label: string | null
+    path: string[] | null
+    at: number
+  }>> => {
+    const root = this.historyRoot
+    const out: Array<{ locationSig: string; filename: string; label: string | null; path: string[] | null; at: number }> = []
+    for await (const [lineageSig, dirHandle] of (root as any).entries()) {
+      if (dirHandle.kind !== 'directory') continue
+      if (!HistoryService.#SIG_RE.test(lineageSig)) continue
+      const bag = dirHandle as FileSystemDirectoryHandle
+      for await (const [name, handle] of (bag as any).entries()) {
+        if (handle.kind !== 'file') continue
+        if (!HistoryService.#MARKER_RE.test(name)) continue
+        try {
+          const file = await (handle as FileSystemFileHandle).getFile()
+          const text = await file.text()
+          if (!text.includes('"marked"')) continue
+          const parsed = JSON.parse(text)
+          if (parsed?.marked !== true) continue
+          out.push({
+            locationSig: lineageSig,
+            filename: name,
+            label: typeof parsed.label === 'string' ? parsed.label : null,
+            path: Array.isArray(parsed.path) ? parsed.path.map((s: unknown) => String(s)) : null,
+            at: file.lastModified,
+          })
+        } catch { /* skip unreadable */ }
+      }
+    }
+    out.sort((a, b) => b.at - a.at)
+    return out
   }
 
   // -------------------------------------------------

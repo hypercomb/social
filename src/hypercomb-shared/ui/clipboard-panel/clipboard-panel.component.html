@@ -20,10 +20,21 @@
     ></div>
 
     <header class="clipboard-header">
-      <span class="clipboard-title">{{ 'clipboard.title' | t }}</span>
-      <span class="clipboard-op" [class.cut]="op() === 'cut'">
-        {{ (op() === 'cut' ? 'clipboard.op.cut' : 'clipboard.op.copy') | t }}
-      </span>
+      @if (drilled()) {
+        <button
+          class="clipboard-back"
+          type="button"
+          (click)="drillBack()"
+          [attr.aria-label]="'clipboard.back' | t"
+          [title]="'clipboard.back' | t"
+        >‹</button>
+        <span class="clipboard-crumb" [title]="drillCrumb()">{{ drillCrumb() }}</span>
+      } @else {
+        <span class="clipboard-title">{{ 'clipboard.title' | t }}</span>
+        <span class="clipboard-op" [class.cut]="op() === 'cut'">
+          {{ (op() === 'cut' ? 'clipboard.op.cut' : 'clipboard.op.copy') | t }}
+        </span>
+      }
       <button
         class="clipboard-close"
         type="button"
@@ -32,41 +43,64 @@
       >×</button>
     </header>
 
-    @if (items().length === 0) {
-      <p class="clipboard-empty">{{ 'clipboard.empty' | t }}</p>
+    @if (displayItems().length === 0) {
+      <p class="clipboard-empty">{{ (drilled() ? 'clipboard.noChildren' : 'clipboard.empty') | t }}</p>
     } @else {
       <div class="clipboard-scroll">
         <ul class="clipboard-items">
-          @for (item of items(); track trackByLabel($index, item)) {
+          @for (item of displayItems(); track trackByLabel($index, item)) {
             <li class="clipboard-item">
-              @if (thumbs()[item.label]; as url) {
-                <span class="item-thumb"><img [src]="url" [alt]="item.label" draggable="false" /></span>
-              } @else {
-                <span class="item-glyph" aria-hidden="true">⬢</span>
-              }
-              <span class="item-label" [title]="item.label">{{ item.label }}</span>
               <button
-                class="item-place"
+                class="item-hex"
                 type="button"
-                (click)="placeOne(item.label)"
-                [attr.aria-label]="'clipboard.place' | t"
-                [title]="'clipboard.place' | t"
+                (click)="drillInto(item)"
+                [class.has-children]="(counts()[item.label] ?? 0) > 0"
+                [attr.aria-label]="'clipboard.drillIn' | t"
+                [title]="'clipboard.drillIn' | t"
               >
-                <span class="mat-sym">add</span>
+                @if (thumbs()[item.label]; as url) {
+                  <span class="item-thumb"><img [src]="url" [alt]="item.label" draggable="false" /></span>
+                } @else {
+                  <span class="item-glyph" aria-hidden="true">⬢</span>
+                }
               </button>
+              <span class="item-label" [title]="item.label">{{ item.label }}</span>
+              @if (counts()[item.label]; as n) {
+                <span class="item-count" [attr.aria-label]="'clipboard.children' | t: { count: n }" [title]="'clipboard.children' | t: { count: n }">{{ n }}</span>
+              }
+              @if (!drilled()) {
+                <button
+                  class="item-place"
+                  type="button"
+                  (click)="placeOne(item.label)"
+                  [attr.aria-label]="'clipboard.place' | t"
+                  [title]="'clipboard.place' | t"
+                >
+                  <span class="mat-sym">add</span>
+                </button>
+                <button
+                  class="item-discard"
+                  type="button"
+                  (click)="discardOne(item.label)"
+                  [attr.aria-label]="'clipboard.discard' | t"
+                  [title]="'clipboard.discard' | t"
+                >×</button>
+              }
             </li>
           }
         </ul>
       </div>
 
-      <footer class="clipboard-foot">
+      @if (!drilled()) {
+        <footer class="clipboard-foot">
         <button class="place-all" type="button" (click)="placeAll()">
           {{ 'clipboard.placeAll' | t }} · {{ items().length }}
         </button>
         <button class="clear-all" type="button" (click)="clearAll()">
           {{ 'clipboard.clear' | t }}
         </button>
-      </footer>
+        </footer>
+      }
     }
   </aside>
 }

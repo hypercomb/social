@@ -118,7 +118,7 @@
   "action.reroll": "تغيير",
   "action.reroll.description": "تغيير صورة الخلفية عشوائياً",
   "action.remove": "حذف",
-  "action.remove.description": "حذف هذا البلاط نهائياً",
+  "action.remove.description": "حذف هذا البلاط — يمكنك العثور عليه لاحقاً في السجل",
   "action.break-apart": "استعادة",
   "action.break-apart.description": "إعادة إظهار هذا البلاط المخفي",
   "action.hide": "إخفاء",

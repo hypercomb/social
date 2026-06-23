@@ -1,6 +1,13 @@
 @if (visible()) {
   <section
     class="feedback-viewer-panel"
+    hcDockInset="right"
+    hcDockedPanel="feedback-viewer"
+    dockSide="right"
+    [minWidth]="280"
+    [maxWidth]="680"
+    [defaultWidth]="360"
+    data-consumes-wheel
     role="dialog"
     [attr.aria-label]="'feedback.viewer.title' | t"
     tabindex="0"

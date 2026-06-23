@@ -103,6 +103,14 @@ export class ClipboardWorker extends Worker {
       if (labels.length > 0) void this.#placeLabels(labels)
     })
 
+    // Drop specific clipboard tiles WITHOUT placing them — the side panel's
+    // per-item "×" discard. Persists like validate() so a discarded item
+    // doesn't return on the next OPFS restore.
+    EffectBus.on<{ labels?: string[] }>('clipboard:discard-items', (payload) => {
+      const labels = Array.isArray(payload?.labels) ? payload!.labels! : []
+      if (labels.length > 0) void this.#discardLabels(labels)
+    })
+
 
     // Restore clipboard from OPFS once Store is initialized
     const tryRestore = (): void => {
@@ -579,6 +587,54 @@ export class ClipboardWorker extends Worker {
           label: i.label,
           sourceSegments: [...i.sourceSegments],
         })),
+      })
+    }
+  }
+
+  // ── hierarchy: child count at a location ──────────────
+  // How many children the cell at `segments` (= [...sourceSegments, label])
+  // has — for the side panel's per-item count badge + the drill-down. Resolved
+  // via the PARENT's children slot (childLayerOf), the warm/authoritative path
+  // validate() uses, NOT the cell's own bag (cold for any cell never navigated
+  // into — that read is what once hung a 30-item clipboard). Best-effort: any
+  // miss returns 0. Callers MUST keep this off the render path (capped, async).
+  async childCountAt(segments: readonly string[]): Promise<number> {
+    const history = this.#history
+    if (!history || segments.length === 0) return 0
+    const parent = await resolveLayerAt(history, this.#lineage?.domain, segments.slice(0, -1))
+    const found = await childLayerOf(history, parent, segments[segments.length - 1])
+    const children = found?.layer?.children
+    return Array.isArray(children) ? children.length : 0
+  }
+
+  // The child NAMES at a location — for the drill-down. Clicking a clipboard
+  // tile's hex shows ITS children (segments = [...sourceSegments, label]); each
+  // child's own segments are [...segments, name]. resolveLayerAt resolves the
+  // drilled tile via the warm parent-slot fallback; childNamesOf reads only
+  // that tile's child sigs. Best-effort: a miss returns []. One drill at a
+  // time — never call this for every item eagerly.
+  async childrenAt(segments: readonly string[]): Promise<string[]> {
+    const history = this.#history
+    if (!history) return []
+    const layer = await resolveLayerAt(history, this.#lineage?.domain, segments)
+    return childNamesOf(history, layer)
+  }
+
+  // ── discard (drop without placing) ────────────────────
+  // Remove the named entries from the clipboard and re-persist, so the panel's
+  // per-item "×" drops a pointer for good. Same persistence shape as validate.
+  async #discardLabels(labels: readonly string[]): Promise<void> {
+    const svc = this.#clipboardSvc
+    if (!svc) return
+    svc.removeItems(new Set(labels))
+    const store = this.#store
+    if (!store) return
+    if (svc.isEmpty) {
+      await clearDirectory(store.clipboard)
+    } else {
+      await writeMeta(store.clipboard, {
+        op: svc.operation,
+        items: svc.items.map(i => ({ label: i.label, sourceSegments: [...i.sourceSegments] })),
       })
     }
   }

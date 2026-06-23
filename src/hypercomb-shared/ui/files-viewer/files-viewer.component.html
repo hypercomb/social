@@ -2,6 +2,11 @@
   <aside
     class="files-panel"
     hcDockInset="right"
+    hcDockedPanel="files-viewer"
+    dockSide="right"
+    [minWidth]="280"
+    [maxWidth]="640"
+    [defaultWidth]="340"
     data-consumes-wheel
     (keydown)="onKey($event)"
     tabindex="-1"

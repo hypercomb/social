@@ -14,6 +14,8 @@
 import { Component, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
+import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 
 /** Runtime service locator (shared must never import essentials). */
 const get = (key: string): any => (globalThis as { ioc?: { get(k: string): unknown } }).ioc?.get(key)
@@ -35,7 +37,7 @@ interface FeedbackItem {
 @Component({
   selector: 'hc-feedback-viewer',
   standalone: true,
-  imports: [TranslatePipe],
+  imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
   templateUrl: './feedback-viewer.component.html',
   styleUrls: ['./feedback-viewer.component.scss'],
 })

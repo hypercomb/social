@@ -118,7 +118,7 @@
   "action.reroll": "बदलें",
   "action.reroll.description": "इस टाइल की पृष्ठभूमि छवि यादृच्छिक रूप से बदलें",
   "action.remove": "हटाएँ",
-  "action.remove.description": "इस टाइल को स्थायी रूप से हटाएँ",
+  "action.remove.description": "इस टाइल को हटाएँ — इसे बाद में इतिहास में फिर से पा सकते हैं",
   "action.break-apart": "पुनर्स्थापित करें",
   "action.break-apart.description": "इस छिपे हुए टाइल को फिर से दिखाएँ",
   "action.hide": "छिपाएँ",

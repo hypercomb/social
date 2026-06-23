@@ -46,6 +46,10 @@ const SIG_RE = /^[0-9a-f]{64}$/i
 const TILE_PROPS_INDEX_KEY = 'hc:tile-props-index'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const STORE_KEY = '@hypercomb.social/Store'
+const CLIPBOARD_WORKER_KEY = '@diamondcoreprocessor.com/ClipboardWorker'
+// Resolve child counts in small batches so a many-item clipboard can't fire a
+// burst of (possibly cold) layer reads at once — keeps it off the render path.
+const COUNT_BATCH = 4
 
 // Drag-to-resize width, persisted participant-locally so the panel reopens at
 // the size the user last left it (clipboard state never touches the layer —
@@ -75,6 +79,24 @@ export class ClipboardPanelComponent implements OnDestroy {
   readonly op = signal<'copy' | 'cut'>('copy')
   /** label -> thumbnail object-URL, for the template. Empty entry => glyph. */
   readonly thumbs = signal<Record<string, string>>({})
+  /** label -> number of children at that source location. Best-effort, resolved
+   *  off the render path; absent/0 => no badge. Foreshadows the drill-down:
+   *  the hex is your handle into that subtree. */
+  readonly counts = signal<Record<string, number>>({})
+
+  // ── drill-down ─────────────────────────────────────────────────────
+  // The clipboard is just another hierarchy: clicking a tile's hex descends
+  // into its children (resolved from the live SOURCE tree it points at), with a
+  // back button. Each stack entry is a level we've entered; empty = top-level
+  // clipboard items.
+  readonly #drillStack = signal<{ label: string; segments: readonly string[] }[]>([])
+  readonly #drillChildren = signal<ClipboardItem[]>([])
+  /** True while drilled below the top-level clipboard list. */
+  readonly drilled = computed(() => this.#drillStack().length > 0)
+  /** Breadcrumb of the current drill path (tile names, top → current). */
+  readonly drillCrumb = computed(() => this.#drillStack().map(d => d.label).join(' / '))
+  /** What the list renders: the drilled level, or the clipboard at the top. */
+  readonly displayItems = computed(() => this.drilled() ? this.#drillChildren() : this.items())
   /** Drag-resized panel width (px), restored from localStorage on construct. */
   readonly width = signal<number>(this.#restoreWidth())
   /** True while a left-grip drag is in progress (drives cursor/handle style). */
@@ -92,6 +114,8 @@ export class ClipboardPanelComponent implements OnDestroy {
   // Monotonic token so a stale async thumbnail resolve can't overwrite a
   // newer clipboard state (rapid copy/clear races).
   #thumbToken = 0
+  // Same guard for the (separate) child-count resolution.
+  #countToken = 0
   // Guards the auto-open: EffectBus replays the LAST `clipboard:captured`
   // to a late subscriber, which would pop the panel open on every mount.
   // We only auto-open for captures that arrive AFTER the initial sync.
@@ -112,7 +136,10 @@ export class ClipboardPanelComponent implements OnDestroy {
       // An emptied clipboard (e.g. a cut fully consumed by a place) closes
       // the panel — there is nothing left to show.
       if (next.length === 0) this.#setVisible(false)
-      void this.#syncThumbs(next).catch(() => { /* best-effort thumbnails */ })
+      // Clipboard membership changed — drop back to the top level.
+      this.#drillStack.set([])
+      this.#drillChildren.set([])
+      this.#syncDisplay(next)
     }))
 
     // A fresh copy/cut opens the panel. Ignored during the initial
@@ -155,12 +182,65 @@ export class ClipboardPanelComponent implements OnDestroy {
    *  announcing every open/close via `clipboard:open`. */
   #setVisible(v: boolean): void {
     if (this.visible() === v) return
+    // Every fresh OPEN starts at the top-level clipboard list — never a stale
+    // drill level left over from a previous open (which would show the wrong
+    // children, or none, and read as "my items vanished").
+    if (v) { this.#drillStack.set([]); this.#drillChildren.set([]) }
     this.visible.set(v)
     EffectBus.emit('clipboard:open', { open: v })
   }
 
   close(): void {
+    this.#drillStack.set([])
+    this.#drillChildren.set([])
     this.#setVisible(false)
+  }
+
+  // ── drill navigation ───────────────────────────────────────────────
+  // Descend into a tile's children (the hex click). Resolves the SOURCE tree's
+  // children at that location; no-op if there are none. Thumbnails + counts run
+  // on the new level for free (same per-item resolution as the top list).
+  async drillInto(item: ClipboardItem): Promise<void> {
+    const segments = [...item.sourceSegments, item.label]
+    const names = await this.#resolveChildren(segments)
+    if (names.length === 0) return
+    this.#drillStack.update(s => [...s, { label: item.label, segments }])
+    this.#showChildren(names, segments)
+  }
+
+  /** Pop one drill level (the header back button). */
+  drillBack(): void {
+    const stack = this.#drillStack()
+    if (stack.length === 0) return
+    const next = stack.slice(0, -1)
+    this.#drillStack.set(next)
+    if (next.length === 0) {
+      this.#drillChildren.set([])
+      this.#syncDisplay(this.items())
+    } else {
+      const top = next[next.length - 1]
+      void this.#resolveChildren(top.segments).then(names => this.#showChildren(names, top.segments))
+    }
+  }
+
+  #showChildren(names: readonly string[], segments: readonly string[]): void {
+    const children = names.map(name => ({ label: name, sourceSegments: segments }))
+    this.#drillChildren.set(children)
+    this.#syncDisplay(children)
+  }
+
+  async #resolveChildren(segments: readonly string[]): Promise<string[]> {
+    const ioc = (window as { ioc?: { get?: (k: string) => unknown } }).ioc
+    const worker = ioc?.get?.(CLIPBOARD_WORKER_KEY) as
+      { childrenAt?: (s: readonly string[]) => Promise<string[]> } | undefined
+    if (!worker?.childrenAt) return []
+    try { return await worker.childrenAt(segments) } catch { return [] }
+  }
+
+  /** Resolve thumbnails + counts for whichever set is on screen. */
+  #syncDisplay(items: readonly ClipboardItem[]): void {
+    void this.#syncThumbs(items).catch(() => { /* best-effort thumbnails */ })
+    void this.#syncCounts(items).catch(() => { /* best-effort child counts */ })
   }
 
   // ── resize (left grip) ─────────────────────────────────────────────
@@ -236,6 +316,39 @@ export class ClipboardPanelComponent implements OnDestroy {
   /** Place a single clipboard tile onto the current page. */
   placeOne(label: string): void {
     EffectBus.emit('clipboard:place-items', { labels: [label] })
+  }
+
+  /** Drop a single tile from the clipboard WITHOUT placing it. The worker
+   *  re-persists, so it stays gone after a reload. */
+  discardOne(label: string): void {
+    EffectBus.emit('clipboard:discard-items', { labels: [label] })
+  }
+
+  // ── child counts ───────────────────────────────────────────────────
+  // Best-effort, OFF the render path: ask the worker (which resolves via the
+  // warm parent-children slot, not the cold own-bag) how many children each
+  // item has, in small batches so a many-item clipboard can't burst layer
+  // reads. A miss stays absent — no badge, never a hang.
+  async #syncCounts(items: readonly ClipboardItem[]): Promise<void> {
+    const token = ++this.#countToken
+    const ioc = (window as { ioc?: { get?: (k: string) => unknown } }).ioc
+    const worker = ioc?.get?.(CLIPBOARD_WORKER_KEY) as
+      { childCountAt?: (segments: readonly string[]) => Promise<number> } | undefined
+    if (!worker?.childCountAt) { this.counts.set({}); return }
+
+    const out: Record<string, number> = {}
+    for (let i = 0; i < items.length; i += COUNT_BATCH) {
+      if (token !== this.#countToken) return
+      const batch = items.slice(i, i + COUNT_BATCH)
+      await Promise.all(batch.map(async (item) => {
+        try {
+          const n = await worker.childCountAt!([...item.sourceSegments, item.label])
+          if (n > 0) out[item.label] = n
+        } catch { /* best-effort */ }
+      }))
+      // Publish progressively so badges appear as they resolve.
+      if (token === this.#countToken) this.counts.set({ ...out })
+    }
   }
 
   trackByLabel(_i: number, item: ClipboardItem): string {

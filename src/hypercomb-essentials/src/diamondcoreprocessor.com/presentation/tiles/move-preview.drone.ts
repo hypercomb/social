@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/pixi/move-preview.drone.ts
 import { Drone } from '@hypercomb/core'
-import { Container, Graphics } from 'pixi.js'
+import { Container, Graphics, Sprite, Text, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 
 type MovePreviewPayload = {
@@ -10,6 +10,12 @@ type MovePreviewPayload = {
 
 type DropIntoPayload = {
   label: string
+  dragged?: string[]
+} | null
+
+type DropIntoCommitPayload = {
+  label: string
+  dragged?: string[]
 } | null
 
 // swap target indicators
@@ -19,21 +25,34 @@ const SWAP_STROKE = 0xff8844
 const SWAP_STROKE_ALPHA = 0.5
 const STROKE_WIDTH = 0.5
 
-// drop-into indicators (Ctrl held — tile becomes a parent of the dragged set)
+// drop-into landing-zone ring (Ctrl held — tile becomes a parent of the set)
 const DROP_FILL = 0x2299aa
-const DROP_FILL_ALPHA = 0.35
+const DROP_FILL_ALPHA = 0.22
 const DROP_STROKE = 0x33bbcc
 const DROP_STROKE_ALPHA = 0.85
 const DROP_STROKE_WIDTH = 2
-const DROP_INSET_FACTOR = 0.55     // inner hex radius as fraction of outer
-const DROP_INSET_FILL_ALPHA = 0.55
-const DROP_CHEVRON_WIDTH = 2.5
+
+// ── held-cluster look (the shrunken copies hovering over the target) ──
+const TILE_FILL = 0x0e1018
+const TILE_FILL_ALPHA = 0.92
+const TILE_BORDER = 0x7eb6d6        // steel hairline (matches chrome)
+const TILE_BORDER_ALPHA = 0.92
+const TILE_BORDER_WIDTH = 1.2
+const TILE_LABEL_FILL = 0xdceaf5
+const SHADOW_COLOR = 0x000000
+
+const HELD_TILE_R_FACTOR = 0.50     // single held copy radius as fraction of hex radius
+const HELD_LIFT_FACTOR = 0.34       // how far above the target the cluster floats
+const SHADOW_DROP_FACTOR = 0.12     // shadow offset below the cluster
+const MAX_HELD_NODES = 6            // cap on rendered copies (data still moves all)
+const SUCK_MS = 230                 // suck-into-tile duration
+const HELD_Z = 7002
 
 export class MovePreviewDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'movement'
   override description =
-    'Draws swap-indicator overlays showing where tiles will land during a move.'
+    'Draws swap-indicator overlays, and the Ctrl drop-into preview — shrunken copies of the dragged tiles hovering over the target with a drop shadow, then a suck-into-tile animation on release.'
 
   #renderContainer: Container | null = null
   #layer: Graphics | null = null
@@ -43,10 +62,22 @@ export class MovePreviewDrone extends Drone {
   #cellCoords: { q: number; r: number }[] = []
   #cellCount = 0
 
+  // ── held cluster state ────────────────────────────────────
+  #held: Container | null = null        // shadow + tiles, positioned at the target center
+  #heldTiles: Container | null = null    // the fanned copies (bob + suck-in apply here)
+  #heldShadow: Graphics | null = null
+  #heldTextures: Texture[] = []          // image textures WE created — destroyed by us
+  #heldKey: string | null = null         // dragged-set identity; rebuild only when it changes
+  #heldCenter: { x: number; y: number } | null = null
+  #lift = 0
+  #buildToken = 0                        // invalidates in-flight async builds
+  #suckIn: { start: number } | null = null
+  #raf = 0
+
   protected override deps = {
     axial: '@diamondcoreprocessor.com/AxialService',
   }
-  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'move:preview', 'move:drop-into']
+  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'move:preview', 'move:drop-into', 'move:drop-into-commit']
   protected override emits: string[] = []
 
   #effectsRegistered = false
@@ -76,10 +107,21 @@ export class MovePreviewDrone extends Drone {
 
     this.onEffect<DropIntoPayload>('move:drop-into', (payload) => {
       this.#redrawDropInto(payload)
+      // While the suck-in is playing, ignore clears/repositions — the
+      // animation owns the cluster until it finishes.
+      if (this.#suckIn) return
+      if (payload) this.#showHeld(payload.label, payload.dragged ?? [])
+      else this.#hideHeld()
+    })
+
+    this.onEffect<DropIntoCommitPayload>('move:drop-into-commit', (payload) => {
+      if (payload) this.#startSuckIn(payload.label)
     })
   }
 
   protected override dispose(): void {
+    this.#destroyHeld()
+    if (this.#raf) { cancelAnimationFrame(this.#raf); this.#raf = 0 }
     if (this.#dropIntoLayer) {
       this.#dropIntoLayer.parent?.removeChild(this.#dropIntoLayer)
       this.#dropIntoLayer.destroy()
@@ -109,6 +151,13 @@ export class MovePreviewDrone extends Drone {
 
     if (!payload) return
 
+    // A non-null swap preview means a normal (non-Ctrl) drag is in progress —
+    // the move drone suppresses swap previews while drop-into is active, so
+    // reaching here guarantees we've left drop-into. Tear down any held
+    // cluster so it can never linger over a swap drag (#hideHeld defers to an
+    // in-flight suck-in, which never coexists with a non-null swap preview).
+    this.#hideHeld()
+
     const { names, movedLabels } = payload
     const axialSvc = this.resolve<any>('axial')
     if (!axialSvc?.items) return
@@ -133,8 +182,7 @@ export class MovePreviewDrone extends Drone {
   #drawSwapHex(cx: number, cy: number): void {
     if (!this.#layer) return
 
-    const settings = window.ioc.get<any>('@diamondcoreprocessor.com/Settings')
-    const r = settings?.hexagonDimensions?.circumRadius ?? 32
+    const r = this.#hexRadius()
 
     const verts: number[] = []
     for (let i = 0; i < 6; i++) {
@@ -150,83 +198,283 @@ export class MovePreviewDrone extends Drone {
     this.#layer.stroke({ color: SWAP_STROKE, alpha: SWAP_STROKE_ALPHA, width: STROKE_WIDTH })
   }
 
-  // ── drop-into hex (Ctrl-modifier preview) ─────────────────
+  // ── drop-into landing ring (Ctrl-modifier preview) ────────
 
   #redrawDropInto(payload: DropIntoPayload): void {
     if (!this.#dropIntoLayer) return
     this.#dropIntoLayer.clear()
-
     if (!payload) return
 
-    const { label } = payload
+    const center = this.#cellCenter(payload.label)
+    if (!center) return
 
-    const idx = this.#originalNames.indexOf(label)
-    if (idx < 0) return
-
-    const axialSvc = this.resolve<any>('axial')
-    if (!axialSvc?.items) return
-
-    const coord = this.#cellCoords[idx]
-    if (!coord) return
-
-    let px = 0
-    let py = 0
-    for (const [, item] of axialSvc.items) {
-      if (item.q === coord.q && item.r === coord.r) {
-        px = item.Location.x
-        py = item.Location.y
-        break
-      }
-    }
-
-    const ox = this.#meshOffset.x
-    const oy = this.#meshOffset.y
-    this.#drawDropIntoHex(px + ox, py + oy)
+    // A single ring marking the tile the set will drop into. The held
+    // cluster + shadow (drawn separately) communicate the "going in" depth,
+    // so the ring stays minimal — no inset hex / chevron fighting the copies.
+    const r = this.#hexRadius()
+    const verts = this.#hexVerts(center.x, center.y, r)
+    this.#dropIntoLayer.poly(verts, true)
+    this.#dropIntoLayer.fill({ color: DROP_FILL, alpha: DROP_FILL_ALPHA })
+    this.#dropIntoLayer.poly(verts, true)
+    this.#dropIntoLayer.stroke({ color: DROP_STROKE, alpha: DROP_STROKE_ALPHA, width: DROP_STROKE_WIDTH })
   }
 
-  /**
-   * Visualise "drop these tiles into this tile's children": a thick outer
-   * hex highlighting the target, an inset hex suggesting nesting/depth, and
-   * a downward chevron at center reading as "going in".
-   */
-  #drawDropIntoHex(cx: number, cy: number): void {
-    if (!this.#dropIntoLayer) return
+  // ── held cluster (shrunken copies hovering over the target) ──
 
-    const settings = window.ioc.get<any>('@diamondcoreprocessor.com/Settings')
-    const r = settings?.hexagonDimensions?.circumRadius ?? 32
+  #showHeld(targetLabel: string, dragged: string[]): void {
+    const center = this.#cellCenter(targetLabel)
+    if (!center || dragged.length === 0) { this.#hideHeld(); return }
 
-    const buildHexVerts = (radius: number): number[] => {
-      const verts: number[] = []
-      for (let i = 0; i < 6; i++) {
-        const angle = (Math.PI / 3) * i - Math.PI / 2
-        verts.push(cx + radius * Math.cos(angle))
-        verts.push(cy + radius * Math.sin(angle))
+    const key = dragged.join('')
+    if (this.#heldKey !== key) {
+      this.#destroyHeld()                 // bumps #buildToken, clears state
+      this.#heldKey = key
+      const token = this.#buildToken
+      void this.#buildHeld(dragged, token)
+    }
+    this.#heldCenter = center
+    this.#ensureRaf()
+  }
+
+  #hideHeld(): void {
+    if (this.#suckIn) return              // animation finishes on its own
+    this.#destroyHeld()
+  }
+
+  async #buildHeld(dragged: string[], token: number): Promise<void> {
+    if (!this.#renderContainer) return
+
+    const r = this.#hexRadius()
+    const lift = r * HELD_LIFT_FACTOR
+    const n = Math.min(dragged.length, MAX_HELD_NODES)
+    const tileR = r * (HELD_TILE_R_FACTOR - Math.min(n - 1, 4) * 0.045)
+
+    // Resolve each dragged tile's bootstrap image and decode it once.
+    // Falls back to a labelled hex when a tile has no image.
+    const sigs = this.#imageSigs(dragged)
+    const textures: (Texture | null)[] = []
+    for (let i = 0; i < n; i++) {
+      const sig = sigs.get(dragged[i])
+      textures.push(sig ? await this.#loadTexture(sig) : null)
+      if (token !== this.#buildToken) {   // superseded mid-decode — bail
+        for (const t of textures) if (t) { try { t.destroy(true) } catch { /* ok */ } }
+        return
       }
-      return verts
     }
 
-    // outer hex — fill + stroke
-    const outer = buildHexVerts(r)
-    this.#dropIntoLayer.poly(outer, true)
-    this.#dropIntoLayer.fill({ color: DROP_FILL, alpha: DROP_FILL_ALPHA })
-    this.#dropIntoLayer.poly(outer, true)
-    this.#dropIntoLayer.stroke({ color: DROP_STROKE, alpha: DROP_STROKE_ALPHA, width: DROP_STROKE_WIDTH })
+    if (token !== this.#buildToken || !this.#renderContainer) {
+      for (const t of textures) if (t) { try { t.destroy(true) } catch { /* ok */ } }
+      return
+    }
 
-    // inset hex — suggests "interior" / children container
-    const inset = buildHexVerts(r * DROP_INSET_FACTOR)
-    this.#dropIntoLayer.poly(inset, true)
-    this.#dropIntoLayer.fill({ color: DROP_FILL, alpha: DROP_INSET_FILL_ALPHA })
-    this.#dropIntoLayer.poly(inset, true)
-    this.#dropIntoLayer.stroke({ color: DROP_STROKE, alpha: DROP_STROKE_ALPHA, width: 1 })
+    const held = new Container()
+    held.zIndex = HELD_Z
 
-    // downward chevron — reads as "going in"
-    const cw = r * 0.32  // half-width of chevron
-    const ch = r * 0.18  // chevron vertical extent
-    const cyOffset = r * 0.05
-    this.#dropIntoLayer.moveTo(cx - cw, cy - ch + cyOffset)
-    this.#dropIntoLayer.lineTo(cx, cy + ch + cyOffset)
-    this.#dropIntoLayer.lineTo(cx + cw, cy - ch + cyOffset)
-    this.#dropIntoLayer.stroke({ color: DROP_STROKE, alpha: 1, width: DROP_CHEVRON_WIDTH })
+    // soft drop shadow — two stacked hexes for a cheap blur
+    const shadow = new Graphics()
+    const sr = tileR * (n > 1 ? 1.4 : 1.05)
+    shadow.poly(this.#hexVerts(0, 0, sr * 1.18), true)
+    shadow.fill({ color: SHADOW_COLOR, alpha: 0.10 })
+    shadow.poly(this.#hexVerts(0, 0, sr), true)
+    shadow.fill({ color: SHADOW_COLOR, alpha: 0.24 })
+    shadow.position.set(0, r * SHADOW_DROP_FACTOR)
+    held.addChild(shadow)
+
+    const tiles = new Container()
+    tiles.position.set(0, -lift)
+    held.addChild(tiles)
+
+    // Build outermost copies first so the center copy renders on top.
+    const order = [...Array(n).keys()].sort(
+      (a, b) => Math.abs(b - (n - 1) / 2) - Math.abs(a - (n - 1) / 2),
+    )
+    for (const i of order) {
+      const t = n > 1 ? i / (n - 1) - 0.5 : 0   // -0.5..0.5 across the fan
+      const node = this.#buildTileNode(tileR, textures[i], dragged[i])
+      node.position.set(t * r * 0.55, -Math.abs(t) * r * 0.06)
+      node.rotation = t * 0.30
+      tiles.addChild(node)
+    }
+
+    for (const tex of textures) if (tex) this.#heldTextures.push(tex)
+
+    this.#renderContainer.addChild(held)
+    this.#held = held
+    this.#heldTiles = tiles
+    this.#heldShadow = shadow
+    this.#lift = lift
+    this.#ensureRaf()
+  }
+
+  #buildTileNode(tileR: number, tex: Texture | null, label: string): Container {
+    const node = new Container()
+
+    const body = new Graphics()
+    const verts = this.#hexVerts(0, 0, tileR)
+    body.poly(verts, true)
+    body.fill({ color: TILE_FILL, alpha: TILE_FILL_ALPHA })
+    body.poly(verts, true)
+    body.stroke({ color: TILE_BORDER, alpha: TILE_BORDER_ALPHA, width: TILE_BORDER_WIDTH })
+    node.addChild(body)
+
+    if (tex) {
+      const sprite = new Sprite(tex)
+      sprite.anchor.set(0.5)
+      const side = tileR * 1.5
+      const s = Math.min(side / (tex.width || side), side / (tex.height || side))
+      sprite.scale.set(s)
+      const mask = new Graphics()
+      mask.poly(this.#hexVerts(0, 0, tileR * 0.97), true)
+      mask.fill({ color: 0xffffff })
+      node.addChild(sprite)
+      node.addChild(mask)
+      sprite.mask = mask
+    } else {
+      const text = new Text({
+        text: this.#shortLabel(label),
+        style: {
+          fontFamily: 'system-ui, -apple-system, sans-serif',
+          fontSize: Math.max(7, tileR * 0.46),
+          fontWeight: '600',
+          fill: TILE_LABEL_FILL,
+          align: 'center',
+        },
+      })
+      text.anchor.set(0.5)
+      node.addChild(text)
+    }
+
+    return node
+  }
+
+  #startSuckIn(targetLabel: string): void {
+    // Only animate if a cluster is actually built (a very fast Ctrl-release
+    // can beat the async decode — navigation still happens, just no anim).
+    if (!this.#held || !this.#heldTiles) return
+    const center = this.#cellCenter(targetLabel)
+    if (center) this.#heldCenter = center
+    this.#suckIn = { start: performance.now() }
+    this.#ensureRaf()
+  }
+
+  // ── animation loop ────────────────────────────────────────
+
+  #ensureRaf(): void {
+    if (!this.#raf) this.#raf = requestAnimationFrame(this.#tick)
+  }
+
+  #tick = (): void => {
+    this.#raf = 0
+    const held = this.#held
+    const tiles = this.#heldTiles
+
+    if (held && tiles && this.#heldCenter) {
+      held.position.set(this.#heldCenter.x, this.#heldCenter.y)
+      const now = performance.now()
+
+      if (this.#suckIn) {
+        const p = Math.min(1, (now - this.#suckIn.start) / SUCK_MS)
+        const e = p * p                                   // ease-in — accelerate inward
+        tiles.scale.set(1 + (0.06 - 1) * e)               // shrink toward a point
+        tiles.position.set(0, -this.#lift * (1 - e))      // drop into the tile center
+        tiles.alpha = p < 0.55 ? 1 : 1 - (p - 0.55) / 0.45
+        if (this.#heldShadow) this.#heldShadow.alpha = 1 - e
+        if (p >= 1) {
+          this.#suckIn = null
+          this.#destroyHeld()                             // RAF self-stops below
+          return
+        }
+      } else {
+        // gentle hover bob — reads as "held, about to drop"
+        const bob = Math.sin(now / 320)
+        tiles.position.set(0, -this.#lift + bob * 1.6)
+        tiles.scale.set(1 + bob * 0.018)
+      }
+    }
+
+    if (this.#held || this.#suckIn) this.#raf = requestAnimationFrame(this.#tick)
+  }
+
+  #destroyHeld(): void {
+    this.#buildToken++          // invalidate any in-flight #buildHeld
+    this.#heldKey = null
+    this.#heldCenter = null
+    this.#suckIn = null
+    if (this.#held) {
+      this.#held.parent?.removeChild(this.#held)
+      this.#held.destroy({ children: true })   // textures destroyed below (not shared-safe to auto)
+      this.#held = null
+    }
+    this.#heldTiles = null
+    this.#heldShadow = null
+    for (const t of this.#heldTextures) { try { t.destroy(true) } catch { /* already gone */ } }
+    this.#heldTextures = []
+  }
+
+  // ── helpers ───────────────────────────────────────────────
+
+  #hexRadius(): number {
+    const settings = window.ioc.get<any>('@diamondcoreprocessor.com/Settings')
+    return settings?.hexagonDimensions?.circumRadius ?? 32
+  }
+
+  /** Pointy-top hex vertices about (cx, cy) — matches the drop-into ring. */
+  #hexVerts(cx: number, cy: number, radius: number): number[] {
+    const verts: number[] = []
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i - Math.PI / 2
+      verts.push(cx + radius * Math.cos(angle))
+      verts.push(cy + radius * Math.sin(angle))
+    }
+    return verts
+  }
+
+  /** Container-space center of the tile with this label, or null. */
+  #cellCenter(label: string): { x: number; y: number } | null {
+    const idx = this.#originalNames.indexOf(label)
+    if (idx < 0) return null
+    const coord = this.#cellCoords[idx]
+    if (!coord) return null
+    const axialSvc = this.resolve<any>('axial')
+    if (!axialSvc?.items) return null
+    for (const [, item] of axialSvc.items) {
+      if (item.q === coord.q && item.r === coord.r) {
+        return { x: item.Location.x + this.#meshOffset.x, y: item.Location.y + this.#meshOffset.y }
+      }
+    }
+    return null
+  }
+
+  /** label → bootstrap image signature, from the live render snapshot. */
+  #imageSigs(labels: string[]): Map<string, string> {
+    const out = new Map<string, string>()
+    const show = window.ioc.get<{ snapshotCells?: () => { label: string; imageSig?: string }[] }>(
+      '@diamondcoreprocessor.com/ShowCellDrone',
+    )
+    const snap = show?.snapshotCells?.()
+    if (!snap) return out
+    const want = new Set(labels)
+    for (const c of snap) {
+      if (c.imageSig && want.has(c.label) && !out.has(c.label)) out.set(c.label, c.imageSig)
+    }
+    return out
+  }
+
+  async #loadTexture(sig: string): Promise<Texture | null> {
+    try {
+      const store = window.ioc.get<{ getResource?: (s: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
+      const blob = await store?.getResource?.(sig)
+      if (!blob) return null
+      const bitmap = await createImageBitmap(blob)
+      return Texture.from(bitmap)
+    } catch {
+      return null
+    }
+  }
+
+  #shortLabel(label: string): string {
+    const first = (label.split(/\s+/)[0] ?? label).slice(0, 6)
+    return first || label.slice(0, 6)
   }
 }
 

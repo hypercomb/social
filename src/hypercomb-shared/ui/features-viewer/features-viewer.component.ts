@@ -24,6 +24,7 @@ import { Component, computed, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
+import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { featureKey, isStaged, toggleStaged, clearStaged, type StagedFeature } from './feature-staging'
 
 /** A feature already applied to the layer. */
@@ -74,7 +75,7 @@ interface FeaturesOpenPayload {
 @Component({
   selector: 'hc-features-viewer',
   standalone: true,
-  imports: [TranslatePipe, DockInsetDirective],
+  imports: [TranslatePipe, DockInsetDirective, HcDockedPanelDirective],
   templateUrl: './features-viewer.component.html',
   styleUrls: ['./features-viewer.component.scss'],
 })

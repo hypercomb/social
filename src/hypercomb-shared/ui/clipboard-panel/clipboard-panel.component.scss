@@ -131,6 +131,30 @@ $steel: rgb(126, 182, 214);
   &:hover { color: $steel; }
 }
 
+// Drill-down header: a back chevron + the breadcrumb of where you are.
+.clipboard-back {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: rgba($steel, 0.9);
+  font-size: 1.4em;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.3em 0 0;
+
+  &:hover { color: $steel; }
+}
+
+.clipboard-crumb {
+  flex: 1;
+  font-size: 0.82em;
+  letter-spacing: 0.04em;
+  color: rgba($steel, 0.95);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .clipboard-empty {
   margin: 0;
   padding: 1.5em 1em;
@@ -158,6 +182,26 @@ $steel: rgb(126, 182, 214);
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 
   &:hover { background: rgba($steel, 0.07); }
+}
+
+// The hex is the drill handle: a bare button wrapping the thumb/glyph. It
+// only reads as clickable when the tile actually has children.
+.item-hex {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: default;
+  transition: background 0.12s ease;
+
+  &.has-children {
+    cursor: pointer;
+    &:hover { background: rgba($steel, 0.16); }
+  }
 }
 
 .item-glyph {
@@ -197,6 +241,22 @@ $steel: rgb(126, 182, 214);
   white-space: nowrap;
 }
 
+// Child-count badge — how many children this tile's subtree holds. A quiet
+// steel pill; it doubles as the cue that the hex is a handle into that subtree
+// (the drill-down target).
+.item-count {
+  flex: 0 0 auto;
+  min-width: 1.4em;
+  padding: 0.05em 0.4em;
+  border-radius: 999px;
+  font-size: 0.62em;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  color: rgba($steel, 0.9);
+  background: rgba($steel, 0.14);
+  border: 1px solid rgba($steel, 0.3);
+}
+
 .item-place {
   flex: 0 0 auto;
   display: inline-flex;
@@ -221,6 +281,26 @@ $steel: rgb(126, 182, 214);
     background: rgba($steel, 0.18);
     border-color: rgba($steel, 0.7);
   }
+}
+
+// Per-item discard — drop one pointer without placing it. Quiet by default
+// (secondary to the place button), warms red on hover like the clear-all.
+.item-discard {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4em;
+  height: 1.7em;
+  background: transparent;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 1.15em;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.12s ease;
+
+  &:hover { color: rgba(255, 140, 140, 0.9); }
 }
 
 .clipboard-foot {

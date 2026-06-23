@@ -118,7 +118,7 @@
   "action.reroll": "重新生成",
   "action.reroll.description": "随机更换此磁贴的背景图片",
   "action.remove": "删除",
-  "action.remove.description": "永久删除此磁贴",
+  "action.remove.description": "删除此磁贴 — 之后可在历史记录中重新找到",
   "action.break-apart": "恢复",
   "action.break-apart.description": "恢复此隐藏磁贴的可见性",
   "action.hide": "隐藏",

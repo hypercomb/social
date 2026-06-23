@@ -118,7 +118,7 @@
   "action.reroll": "cambia",
   "action.reroll.description": "Cambia casualmente l'immagine di sfondo di questa tessera",
   "action.remove": "rimuovi",
-  "action.remove.description": "Rimuovi questa tessera in modo permanente",
+  "action.remove.description": "Elimina questa tessera — potrai ritrovarla nella cronologia",
   "action.break-apart": "ripristina",
   "action.break-apart.description": "Ripristina la visibilità di questa tessera nascosta",
   "action.hide": "nascondi",

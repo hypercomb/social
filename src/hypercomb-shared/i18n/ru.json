@@ -118,7 +118,7 @@
   "action.reroll": "обновить",
   "action.reroll.description": "Случайно сменить фоновое изображение",
   "action.remove": "удалить",
-  "action.remove.description": "Навсегда удалить эту плитку",
+  "action.remove.description": "Удалить эту плитку — её можно снова найти в истории",
   "action.break-apart": "восстановить",
   "action.break-apart.description": "Восстановить видимость скрытой плитки",
   "action.hide": "скрыть",

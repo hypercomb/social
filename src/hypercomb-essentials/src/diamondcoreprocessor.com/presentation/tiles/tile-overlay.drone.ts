@@ -17,6 +17,8 @@ type OverlayAction = {
   button: HexIconButton
   profile: OverlayProfileKey
   genotype?: string
+  /** Lives in the hidden danger row (delete) — revealed by tapping ⋮ (more). */
+  dangerRow?: boolean
   /** If provided, called to determine per-tile visibility */
   visibleWhen?: OverlayVisibilityFn
   /** If provided, called to compute per-tile tint */
@@ -39,6 +41,8 @@ export type OverlayActionDescriptor = {
   y: number
   hoverTint?: number
   profile: OverlayProfileKey
+  /** Route into the hidden danger row (delete), revealed by the ⋮ toggle. */
+  dangerRow?: boolean
   visibleWhen?: OverlayVisibilityFn
   /**
    * Per-tile dynamic tint. Returns the colour the icon should show when the
@@ -73,6 +77,14 @@ export type OverlayProfileKey = 'private' | 'public-own' | 'public-external' | '
 
 // ── Icon sizing ──────────────────────────────────────────────────
 const DEFAULT_ICON_SIZE = 7     // integer for pixel-perfect rendering
+
+// ── Two-row layout + danger reveal ───────────────────────────────
+// The hover row holds at most MAX_ROW_ICONS icons. A ⋮ (more) toggle appends
+// when there are hidden icons (delete + any overflow); tapping it reveals them,
+// wrapping to a second row ROW_GAP below when the first row is already full.
+// #dangerRevealed is in-memory only, so it resets on tile change / refresh.
+const MAX_ROW_ICONS = 5
+const ROW_GAP = 11              // vertical center-to-center between wrapped rows
 
 // ── Arrange mode constants ────────────────────────────────────────
 
@@ -130,6 +142,9 @@ export class TileOverlayDrone extends Drone {
   #hexBg: HexOverlayMesh | null = null
   #buttonTray: Graphics | null = null
   #actions: OverlayAction[] = []
+  // Danger row (delete) revealed by tapping the ⋮ toggle. In-memory only —
+  // resets when the hovered tile changes (see #onPointerMove) and on refresh.
+  #dangerRevealed = false
   #animTime = 0
   #animTickBound: ((ticker: any) => void) | null = null
   #meshOffset = { x: 0, y: 0 }
@@ -789,6 +804,7 @@ export class TileOverlayDrone extends Drone {
         button: btn,
         profile: key,
         genotype: desc.genotype,
+        dangerRow: desc.dangerRow,
         visibleWhen: desc.visibleWhen,
         tintWhen: desc.tintWhen,
         labelKey: desc.labelKey,
@@ -801,36 +817,63 @@ export class TileOverlayDrone extends Drone {
     this.#updatePerTileVisibility()
   }
 
-  // ── Icon row layout (centered, inline) ──────────────────────────────
+  // ── Icon row layout (wraps at MAX_ROW_ICONS; ⋮ reveals the danger row) ──
+  // `base` = icons that passed their per-tile visibleWhen (set upstream by
+  // #updatePerTileVisibility). We split them into the normal `main` icons, the
+  // `more` (⋮) toggle, and the `danger` icons (delete). Collapsed shows the
+  // capped main row + ⋮; revealed appends the overflow + danger icons, wrapping
+  // to a second row when the first is full.
 
   #layoutIconRow(): void {
-    const visible = this.#actions.filter(a => a.button.visible)
-    const count = visible.length
-    if (count === 0) return
+    const base = this.#actions.filter(a => a.button.visible)
+    const more = base.find(a => a.name === 'more') ?? null
+    const main = base.filter(a => a.name !== 'more' && !a.dangerRow)
+    const danger = base.filter(a => a.dangerRow)
+    const hasHidden = main.length > MAX_ROW_ICONS || danger.length > 0
 
-    const spacing = ICON_SPACING
-    const startX = Math.round(-(count - 1) * spacing / 2)
+    const seq: OverlayAction[] = this.#dangerRevealed
+      ? [...main, ...danger]
+      : main.slice(0, MAX_ROW_ICONS)
+    // The ⋮ toggle trails the icons only when there's something to reveal.
+    if (more && hasHidden) seq.push(more)
 
-    for (let i = 0; i < count; i++) {
-      visible[i].button.position.set(Math.round(startX + i * spacing), ICON_Y)
+    // Only the laid-out sequence is shown — hide collapsed danger/overflow and
+    // the ⋮ when nothing is hidden, so hover/click hit-testing matches the view.
+    const inSeq = new Set(seq)
+    for (const a of this.#actions) a.button.visible = inSeq.has(a)
+
+    // Hex horizontal bound (mirrors computeIconPositions) — rows compress to fit.
+    const available = (27.7 - 3) * 2
+    let maxRowWidth = 0
+    const rows = Math.ceil(seq.length / MAX_ROW_ICONS)
+    for (let r = 0; r * MAX_ROW_ICONS < seq.length; r++) {
+      const row = seq.slice(r * MAX_ROW_ICONS, r * MAX_ROW_ICONS + MAX_ROW_ICONS)
+      let spacing = ICON_SPACING
+      if (row.length > 1 && (row.length - 1) * spacing > available) {
+        spacing = available / (row.length - 1)
+      }
+      const startX = Math.round(-(row.length - 1) * spacing / 2)
+      const y = ICON_Y + r * ROW_GAP
+      row.forEach((a, j) => a.button.position.set(Math.round(startX + j * spacing), y))
+      maxRowWidth = Math.max(maxRowWidth, (row.length - 1) * spacing + DEFAULT_ICON_SIZE)
     }
 
-    this.#drawButtonTray(count, spacing)
+    this.#drawButtonTray(maxRowWidth, rows)
   }
 
-  #drawButtonTray(iconCount: number, spacing: number): void {
+  /** Translucent tray behind every laid-out row. */
+  #drawButtonTray(contentWidth: number, rows: number): void {
     if (!this.#buttonTray) return
-
     this.#buttonTray.clear()
+    if (rows === 0) return
 
     const halfIcon = DEFAULT_ICON_SIZE / 2
     const pad = 3
-    const totalWidth = (iconCount - 1) * spacing + DEFAULT_ICON_SIZE + pad * 2
-    const trayHeight = DEFAULT_ICON_SIZE + pad * 2
-    const x = -(totalWidth / 2)
-    const y = ICON_Y - halfIcon - pad
+    const totalWidth = contentWidth + pad * 2
+    const top = ICON_Y - halfIcon - pad
+    const bottom = ICON_Y + (rows - 1) * ROW_GAP + halfIcon + pad
 
-    this.#buttonTray.roundRect(x, y, totalWidth, trayHeight, 2)
+    this.#buttonTray.roundRect(-(totalWidth / 2), top, totalWidth, bottom - top, 2)
     this.#buttonTray.fill({ color: 0x0c0c1a, alpha: 0.6 })
   }
 
@@ -1501,6 +1544,8 @@ export class TileOverlayDrone extends Drone {
       this.#currentAxial = axial
       this.#currentIndex = this.#lookupIndex(axial.q, axial.r)
       this.#clearHint()
+      // Moving to a new tile collapses any revealed danger row.
+      this.#dangerRevealed = false
 
       const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
       this.#currentTileExternal = !!(entry?.label && this.#externalLabels.has(entry.label))
@@ -1823,6 +1868,12 @@ export class TileOverlayDrone extends Drone {
 
         if (btn.containsPoint(bx, by)) {
           this.#clearHint()
+          // ⋮ toggle — reveal/hide the danger row in place; never a tile action.
+          if (action.name === 'more') {
+            this.#dangerRevealed = !this.#dangerRevealed
+            this.#updatePerTileVisibility()
+            return
+          }
           // break-apart: play shatter animation first, then emit action
           if (action.name === 'break-apart') {
             this.playShatterAnimation(

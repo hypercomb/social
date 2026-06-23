@@ -137,6 +137,28 @@
   &.shield-mode {
     color: var(--shield-color, rgba(245, 245, 245, 0.45));
   }
+
+  // ── world view (pick what to share) ──
+  // Sits to the LEFT of the solo/swarm icon and only renders in swarm mode.
+  // Muted steel by default; lifts to the command-shell accent when active so
+  // it reads as "on" against the cold chrome without glaring.
+  &.world-toggle {
+    color: rgba(245, 245, 245, 0.45);
+
+    &:hover {
+      color: rgba(245, 245, 245, 0.7);
+    }
+
+    &.active {
+      color: rgba(126, 182, 214, 0.95);
+    }
+  }
+
+  // No hairline between adjacent toggles — the world-view + solo/swarm pair
+  // reads as one group, with the single separator on the group's left edge.
+  & + & {
+    border-left: none;
+  }
 }
 
 // ── secured label (clickable, centered in header) ────────

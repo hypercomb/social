@@ -3,6 +3,12 @@
 // Right-docked "Show features" panel. Not a dimming modal — the hive stays
 // visible and interactive behind it. Violet accent matches the puzzle-piece
 // overlay icon (hoverTint 0xc8b8ff).
+//
+// Drag-resize + content-shrink are provided by the shared `hcDockedPanel`
+// directive: it sets the inline width and `--hc-panel-scale`. The panel's root
+// font scales by that var and the content below is sized in `em`, so it shrinks
+// as the panel narrows / grows as it widens — never clipping. Dock GEOMETRY
+// (top offset) stays in rem so the panel's position is unaffected by the scale.
 
 @use '../breakpoints' as *;
 
@@ -27,13 +33,19 @@ $accent: #c8b8ff;
   top: calc(2.8rem * var(--hc-header-zoom, 1.0));
   right: 0;
   bottom: 0;
-  width: min(360px, calc(100vw - 2rem));
+  // Width + --hc-panel-scale come from hcDockedPanel (inline). These are
+  // guardrails for a narrow viewport / the pre-bind default.
+  width: 360px;
+  min-width: 280px;
+  max-width: calc(100vw - 1.5rem);
   display: flex;
   flex-direction: column;
   background: rgba(14, 14, 22, 0.96);
   border-left: 1px solid rgba($accent, 0.5);
   box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba($accent, 0.06) inset;
   font-family: var(--hc-mono, system-ui);
+  // Content scale — see file header. Inner em sizes follow this root font.
+  font-size: calc(1rem * var(--hc-panel-scale, 1));
   color: #f3f3f3;
   outline: none;
 }
@@ -41,14 +53,14 @@ $accent: #c8b8ff;
 .features-header {
   display: flex;
   align-items: baseline;
-  gap: 0.5rem;
-  padding: 0.85rem 1rem;
+  gap: 0.5em;
+  padding: 0.85em 1em;
   border-bottom: 1px solid rgba($accent, 0.25);
 }
 
 .features-title {
   flex: 1;
-  font-size: 0.9rem;
+  font-size: 0.9em;
   letter-spacing: 0.05em;
   color: rgba($accent, 0.95);
 }
@@ -58,9 +70,9 @@ $accent: #c8b8ff;
   border: none;
   color: rgba(255, 255, 255, 0.5);
   font-family: inherit;
-  font-size: 0.74rem;
+  font-size: 0.74em;
   cursor: pointer;
-  padding: 0 0.25rem;
+  padding: 0 0.25em;
 
   &:hover { color: $accent; }
 }
@@ -69,25 +81,25 @@ $accent: #c8b8ff;
   background: transparent;
   border: none;
   color: rgba(255, 255, 255, 0.7);
-  font-size: 1.4rem;
+  font-size: 1.4em;
   line-height: 1;
   cursor: pointer;
-  padding: 0 0.25rem;
+  padding: 0 0.25em;
 
   &:hover { color: $accent; }
 }
 
 .features-empty {
   margin: 0;
-  padding: 1.5rem 1rem;
-  font-size: 0.85rem;
+  padding: 1.5em 1em;
+  font-size: 0.85em;
   color: rgba(255, 255, 255, 0.45);
 }
 
 .features-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 0.25rem 0 0.5rem;
+  padding: 0.25em 0 0.5em;
 }
 
 // ── per-tile group ────────────────────────────────────────────────
@@ -98,13 +110,13 @@ $accent: #c8b8ff;
 .fgroup-header {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.55rem 1rem 0.3rem;
+  gap: 0.5em;
+  padding: 0.55em 1em 0.3em;
 }
 
 .fgroup-cell {
   flex: 1;
-  font-size: 0.78rem;
+  font-size: 0.78em;
   font-weight: 600;
   letter-spacing: 0.02em;
   color: rgba($accent, 0.8);
@@ -117,10 +129,10 @@ $accent: #c8b8ff;
   background: transparent;
   border: none;
   color: rgba(255, 255, 255, 0.35);
-  font-size: 1.05rem;
+  font-size: 1.05em;
   line-height: 1;
   cursor: pointer;
-  padding: 0 0.2rem;
+  padding: 0 0.2em;
 
   &:hover { color: #ffc8c8; }
 }
@@ -129,8 +141,8 @@ $accent: #c8b8ff;
 .section-head {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.45rem 1rem 0.25rem;
+  gap: 0.5em;
+  padding: 0.45em 1em 0.25em;
 
   &::after {
     content: '';
@@ -142,7 +154,7 @@ $accent: #c8b8ff;
 
 .section-label {
   flex: 0 0 auto;
-  font-size: 0.6rem;
+  font-size: 0.6em;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -151,11 +163,11 @@ $accent: #c8b8ff;
 
 .section-count {
   flex: 0 0 auto;
-  min-width: 1.1rem;
-  padding: 0.02rem 0.3rem;
+  min-width: 1.1em;
+  padding: 0.02em 0.3em;
   border-radius: 999px;
   text-align: center;
-  font-size: 0.6rem;
+  font-size: 0.6em;
   font-family: var(--hc-mono, monospace);
   color: rgba($accent, 0.85);
   background: rgba($accent, 0.12);
@@ -163,8 +175,8 @@ $accent: #c8b8ff;
 
 .section-empty {
   margin: 0;
-  padding: 0.1rem 1rem 0.5rem;
-  font-size: 0.72rem;
+  padding: 0.1em 1em 0.5em;
+  font-size: 0.72em;
   color: rgba(255, 255, 255, 0.3);
   font-style: italic;
 }
@@ -172,14 +184,14 @@ $accent: #c8b8ff;
 .features-list {
   list-style: none;
   margin: 0;
-  padding: 0 0 0.35rem;
+  padding: 0 0 0.35em;
 }
 
 .features-row {
   display: flex;
   align-items: flex-start;
-  gap: 0.5rem;
-  padding: 0.4rem 1rem;
+  gap: 0.5em;
+  padding: 0.4em 1em;
   transition: background 120ms ease;
 
   &:hover { background: rgba($accent, 0.06); }
@@ -197,9 +209,9 @@ $accent: #c8b8ff;
 .like-star {
   flex: 0 0 auto;
   align-self: flex-start;
-  margin-top: 0.05rem;
-  width: 1.5rem;
-  height: 1.5rem;
+  margin-top: 0.05em;
+  width: 1.5em;
+  height: 1.5em;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -207,7 +219,7 @@ $accent: #c8b8ff;
   border: none;
   border-radius: 5px;
   background: transparent;
-  font-size: 1rem;
+  font-size: 1em;
   line-height: 1;
   cursor: pointer;
   color: rgba(255, 255, 255, 0.35);
@@ -228,16 +240,16 @@ $accent: #c8b8ff;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.18rem;
+  gap: 0.18em;
 }
 
 .feature-name {
-  font-size: 0.86rem;
+  font-size: 0.86em;
   color: #f3f3f3;
 }
 
 .feature-kind {
-  font-size: 0.68rem;
+  font-size: 0.68em;
   font-family: var(--hc-mono, monospace);
   color: rgba(255, 255, 255, 0.4);
   overflow: hidden;
@@ -246,7 +258,7 @@ $accent: #c8b8ff;
 }
 
 .feature-desc {
-  font-size: 0.74rem;
+  font-size: 0.74em;
   line-height: 1.35;
   color: rgba(255, 255, 255, 0.62);
 }
@@ -259,11 +271,11 @@ $accent: #c8b8ff;
   align-self: flex-start;
   display: inline-flex;
   align-items: center;
-  gap: 0.3rem;
-  margin-top: 0.05rem;
-  padding: 0.04rem 0.42rem;
+  gap: 0.3em;
+  margin-top: 0.05em;
+  padding: 0.04em 0.42em;
   border-radius: 3px;
-  font-size: 0.62rem;
+  font-size: 0.62em;
   font-family: var(--hc-mono, monospace);
   letter-spacing: 0.02em;
   color: rgba(255, 255, 255, 0.4);
@@ -280,7 +292,7 @@ $accent: #c8b8ff;
 // Secondary note on a directly-attached cascading capability: it lives here
 // AND flows down to this tile's own subtree.
 .origin-flow {
-  padding-left: 0.3rem;
+  padding-left: 0.3em;
   border-left: 1px solid rgba(255, 255, 255, 0.15);
   color: rgba($accent, 0.7);
 }
@@ -288,11 +300,11 @@ $accent: #c8b8ff;
 // ── slash-command chip (Available rows) ───────────────────────────
 // Shows HOW to add the feature — the command the participant would run.
 .feature-cmd {
-  margin-left: 0.4rem;
-  padding: 0.02rem 0.36rem;
+  margin-left: 0.4em;
+  padding: 0.02em 0.36em;
   border-radius: 3px;
   font-family: var(--hc-mono, monospace);
-  font-size: 0.66rem;
+  font-size: 0.66em;
   color: rgba($accent, 0.85);
   background: rgba($accent, 0.1);
   border: 1px solid rgba($accent, 0.22);
@@ -302,17 +314,17 @@ $accent: #c8b8ff;
 // Hint glyph on an available cascading capability: adding it would flow to
 // the subtree.
 .avail-flow {
-  margin-left: 0.3rem;
-  font-size: 0.72rem;
+  margin-left: 0.3em;
+  font-size: 0.72em;
   color: rgba($accent, 0.6);
   cursor: help;
 }
 
 .features-foot {
   flex: 0 0 auto;
-  padding: 0.6rem 1rem 0.8rem;
+  padding: 0.6em 1em 0.8em;
   border-top: 1px solid rgba($accent, 0.2);
-  font-size: 0.72rem;
+  font-size: 0.72em;
   line-height: 1.4;
   color: rgba(255, 255, 255, 0.5);
 }
