@@ -30,6 +30,11 @@ export type SentinelRequest =
   | { type: 'sync'; rid: string; currentSyncSig?: string; have?: string[] }
   | { type: 'fetch-content'; rid: string; signature: string; kind: 'layer' | 'bee' | 'dependency'; rootSig: string }
   | { type: 'intake'; rid: string; signature: string; kind: IntakeKind; bytes: ArrayBuffer }
+  | { type: 'save-branch'; rid: string; name?: string }
+  // Adopt-by-signature resolution: the installer is the MESSENGER — give it a
+  // signature, get back the domain(s) that can serve it. The hive then
+  // interprets the location (`<domain>/<sig>`) and does the fetch itself.
+  | { type: 'domains-for'; rid: string; signature?: string }
 
 export type SentinelResponse =
   | { type: 'result'; rid: string; ok: true; data: ArrayBuffer | string | object }
@@ -39,6 +44,8 @@ export type SentinelResponse =
   | { type: 'install-done'; rid: string; manifest: object; rootSig: string; beeDeps?: Record<string, string[]> }
   | { type: 'sync-result'; rid: string; syncSig: string; add: { signature: string; kind: string; bytes: ArrayBuffer }[]; remove: { signature: string; kind: string }[] }
   | { type: 'intake-ack'; rid: string; ok: boolean; error?: string }
+  | { type: 'save-branch-result'; rid: string; ok: boolean; rootSig?: string | null; error?: string }
+  | { type: 'domains-result'; rid: string; ok: boolean; domains: string[]; error?: string }
 
 // Overlap ratio at or above which a later domain's package is judged to be
 // the SAME logical package as one already collected (another deploy
@@ -62,6 +69,44 @@ export class SentinelHandler {
       case 'sync': return this.#handleSync(msg, port)
       case 'fetch-content': return this.#handleFetchContent(msg, port)
       case 'intake': return this.#handleIntake(msg, port)
+      case 'save-branch': return this.#handleSaveBranch(msg, port)
+      case 'domains-for': return this.#handleDomainsFor(msg, port)
+    }
+  }
+
+  /**
+   * Resolve the domain(s) that can serve a signature — the "installer as
+   * messenger" half of adopt-by-signature. We return the participant's trusted
+   * domain source-order (own origin first, then stored hosts); the hive then
+   * interprets the location (`<domain>/<sig>` flat, or the typed fallback) and
+   * fetches the bytes itself, sha256-gating every one. Returning the candidate
+   * list (not a single resolved host) lets the hive try them in order and fall
+   * through on a miss, exactly like #fetchFromDomains does internally.
+   */
+  async #handleDomainsFor(msg: SentinelRequest & { type: 'domains-for' }, port: MessagePort): Promise<void> {
+    try {
+      const domains = this.#loadDomains()
+      port.postMessage({ type: 'domains-result', rid: msg.rid, ok: true, domains })
+    } catch (e) {
+      port.postMessage({ type: 'domains-result', rid: msg.rid, ok: false, domains: [], error: String((e as { message?: string })?.message ?? e) })
+    }
+  }
+
+  /**
+   * Freeze the current logical HEAD as a named branch revision in the
+   * home history — the "Save" action from the hive's controls bar. By
+   * the time this fires the web side has drained its push queue, so
+   * every leaf the frozen root references is already present in DCP and
+   * the branch will dereference cleanly for peers. Replies with the new
+   * home root sig, or ok:false on failure.
+   */
+  async #handleSaveBranch(msg: SentinelRequest & { type: 'save-branch' }, port: MessagePort): Promise<void> {
+    try {
+      const rootSig = await this.#domainStorage.saveBranch((msg.name ?? '').toString())
+      port.postMessage({ type: 'save-branch-result', rid: msg.rid, ok: !!rootSig, rootSig: rootSig ?? null })
+    } catch (e) {
+      console.warn('[sentinel] save-branch failed', e)
+      port.postMessage({ type: 'save-branch-result', rid: msg.rid, ok: false, error: String((e as { message?: string })?.message ?? e) })
     }
   }
 

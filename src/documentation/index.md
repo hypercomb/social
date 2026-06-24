@@ -12,6 +12,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 
 ## Concepts
 
+- [concepts.md](concepts.md) — The hive is a computer: junction-as-computer, the byte-sandwich dataflow, six-pile radix scheduling, geometry-as-processor, and nested exponential reach
 - [emergence.md](emergence.md) — Brooding and eclosion — the visual lifecycle of tiles
 - [simple-naming-initiative.md](simple-naming-initiative.md) — Verb-first, consistent, human-readable naming
 

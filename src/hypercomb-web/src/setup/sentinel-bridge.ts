@@ -152,6 +152,53 @@ export class SentinelBridge {
     })
   }
 
+  /**
+   * Ask DCP to freeze the current logical HEAD as a named branch
+   * revision — the "Save" action. Returns the new home root sig on
+   * success, or null on failure. The caller is expected to have drained
+   * the push queue first (every leaf received by DCP) so the frozen
+   * branch never dereferences into bytes peers can't fetch.
+   */
+  async saveBranch(name: string): Promise<string | null> {
+    const rid = this.#nextRid()
+
+    return new Promise((resolve) => {
+      // DCP replies with { type:'save-branch-result', rid, ok, rootSig }.
+      this.#pending.set(rid, {
+        resolve: (v: string | null) => resolve(v ?? null),
+        reject: () => resolve(null),
+      })
+      try {
+        this.#port.postMessage({ type: 'save-branch', rid, name })
+      } catch {
+        this.#pending.delete(rid)
+        resolve(null)
+      }
+    })
+  }
+
+  /**
+   * Adopt-by-signature: ask DCP which domain(s) can serve a signature. The
+   * installer is only the messenger — it returns the trusted domain source-
+   * order; THIS origin then interprets the location (`<domain>/<sig>`) and
+   * fetches the bytes itself. Resolves to the (possibly empty) domain list.
+   */
+  async domainsFor(signature?: string): Promise<string[]> {
+    const rid = this.#nextRid()
+    return new Promise((resolve) => {
+      this.#pending.set(rid, {
+        resolve: (v: string[]) => resolve(Array.isArray(v) ? v : []),
+        reject: () => resolve([]),
+      })
+      try {
+        this.#port.postMessage({ type: 'domains-for', rid, signature })
+      } catch {
+        this.#pending.delete(rid)
+        resolve([])
+      }
+    })
+  }
+
   #onMessage(msg: any): void {
     if (!msg) return
 
@@ -234,6 +281,20 @@ export class SentinelBridge {
         const pending = this.#pending.get(rid)
         this.#pending.delete(rid)
         pending?.resolve(msg.ok === true)
+        break
+      }
+
+      case 'save-branch-result': {
+        const pending = this.#pending.get(rid)
+        this.#pending.delete(rid)
+        pending?.resolve(msg.ok === true ? (msg.rootSig ?? null) : null)
+        break
+      }
+
+      case 'domains-result': {
+        const pending = this.#pending.get(rid)
+        this.#pending.delete(rid)
+        pending?.resolve(msg.ok === true ? (msg.domains ?? []) : [])
         break
       }
     }

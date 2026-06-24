@@ -185,6 +185,11 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
     EffectBus.emit('controls:action', { action: 'features' })
   }
 
+  /** Promote the whole selection UP one level into the parent location. */
+  readonly promoteToParent = (): void => {
+    EffectBus.emit('controls:action', { action: 'promote-to-parent' })
+  }
+
   // ── hidden-state check ──────────────────────────────────
 
   #updateAllHidden(selected: string[]): void {

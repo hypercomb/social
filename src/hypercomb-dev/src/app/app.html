@@ -1,4 +1,4 @@
-<div class="header-bar" [class.input-open]="inputOpen()" [style.visibility]="viewActive() ? 'hidden' : null">
+<div class="header-bar" [class.input-open]="inputOpen()" [style.visibility]="(viewActive() || viewMode() === 'website') ? 'hidden' : null">
   <hc-command-line></hc-command-line>
   <hc-upgrade-indicator></hc-upgrade-indicator>
   <hc-sync-indicator></hc-sync-indicator>
@@ -11,8 +11,11 @@
 <hc-clipboard-panel></hc-clipboard-panel>
 <hc-contact-form></hc-contact-form>
 <hc-contact-hover></hc-contact-hover>
+<hc-edit-actions [style.visibility]="viewActive() ? 'hidden' : null"></hc-edit-actions>
 <hc-feedback-button></hc-feedback-button>
 <hc-feedback-viewer></hc-feedback-viewer>
+<hc-website-nav></hc-website-nav>
+<hc-website-strip></hc-website-strip>
 <hc-activity-log></hc-activity-log>
 <router-outlet />
 <!-- Hexagon canvas. The pixi worker reparents this node to <body>

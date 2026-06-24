@@ -172,19 +172,25 @@ export const checkForUpdate = async (): Promise<void> => {
   if (!bundled) return
 
   // ── Update-authority gate ────────────────────────────────────────────
-  // The bundled `/content/` package THIS origin serves is the update
-  // authority for any install that did not come from the sentinel/DCP union.
-  // A DCP/sentinel-sourced install is a logical UNION of enabled branches
-  // whose source of truth is DCP — DCP surfaces its own updates, so diffing
-  // it against the single bundled package raises phantom "New features".
-  // Provenance is stamped on every manifest write, so we defer to DCP ONLY
-  // when the install is explicitly `source:'sentinel'`. A legacy install with
-  // no `source` predates stamping and, on the canonical shell, came FROM the
-  // bundle — so it is bundle-authority and must surface real updates.
-  // (The previous `!divergedFromBundle` guard was wrong: a normal version
-  // bump DROPS bees, which is not evidence of a DCP union, yet it suppressed
-  // every legitimate update for legacy installs — the deploy-and-stuck bug.)
-  const bundleIsAuthority = cached.source !== 'sentinel'
+  // The shell's bundled `/content/` is the update reference ONLY for installs
+  // that came FROM the bundle. A DCP/sentinel-sourced install is a logical
+  // UNION of enabled branches whose source of truth is DCP — DCP surfaces its
+  // own updates. Diffing such an install against the single bundled package
+  // raised phantom "New features" the moment the two drifted (a newer DCP
+  // build, or the union enabling content the shell never bundled), and routing
+  // the participant to DCP for those phantom sigs is a dead end: DCP can't show
+  // bees it doesn't serve, and the resulting installer view has nothing to
+  // commit. Provenance is now stamped on every manifest write; for legacy
+  // manifests (no `source`) we INFER it — an install holding bees the bundle
+  // lacks has diverged from the bundle lineage, so the bundle is not its
+  // authority. When the bundle is not the authority, emit a definitive
+  // available:false so any stale indicator clears. (A legacy BUNDLE install
+  // whose update merely DROPPED bees is misclassified sentinel once; it self-
+  // heals on the next upgradeFromBundled, which stamps source:'bundled'.)
+  const bundledBeeSet = new Set(bundled.bees)
+  const divergedFromBundle = cached.bees.some(sig => !bundledBeeSet.has(sig))
+  const bundleIsAuthority = cached.source === 'bundled'
+    || (cached.source !== 'sentinel' && !divergedFromBundle)
   if (!bundleIsAuthority) {
     EffectBus.emit('update:available', {
       available: false,

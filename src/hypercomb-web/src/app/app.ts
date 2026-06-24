@@ -6,6 +6,7 @@ import { Header } from './header/header'
 import { CoreAdapter } from './core-adapter'
 import { TileEditorComponent } from "@hypercomb/shared/ui/tile-editor/tile-editor.component"
 import { ControlsBarComponent } from "@hypercomb/shared/ui/controls-bar/controls-bar.component"
+import { EditActionsComponent } from "@hypercomb/shared/ui/edit-actions/edit-actions.component"
 import { MeshHeaderComponent } from "@hypercomb/shared/ui/mesh-header/mesh-header.component"
 import { PortalOverlayComponent } from "@hypercomb/shared/ui/portal/portal-overlay.component"
 import { SensitivityBarComponent } from "@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component"
@@ -22,6 +23,8 @@ import { ContactFormComponent } from "@hypercomb/shared/ui/contact-card/contact-
 import { ContactHoverComponent } from "@hypercomb/shared/ui/contact-card/contact-hover.component"
 import { FeedbackButtonComponent } from "@hypercomb/shared/ui/feedback-button/feedback-button.component"
 import { FeedbackViewerComponent } from "@hypercomb/shared/ui/feedback-viewer/feedback-viewer.component"
+import { WebsiteNavComponent } from "@hypercomb/shared/ui/website-nav/website-nav.component"
+import { WebsiteStripComponent } from "@hypercomb/shared/ui/website-strip/website-strip.component"
 import { MeshModalComponent } from "@hypercomb/shared/ui/mesh-modal/mesh-modal.component"
 import { TrustPromptComponent } from "@hypercomb/shared/ui/trust-prompt/trust-prompt.component"
 import { LayerCycleStripComponent } from "@hypercomb/shared/ui/layer-cycle-strip/layer-cycle-strip.component"
@@ -34,7 +37,7 @@ import { SwarmAdoptPanelComponent } from "@hypercomb/shared/ui/swarm-adopt-panel
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent, FilesViewerComponent, FeaturesViewerComponent, ClipboardPanelComponent, ContactFormComponent, ContactHoverComponent, FeedbackButtonComponent, FeedbackViewerComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, ToastComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent],
+  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, EditActionsComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent, FilesViewerComponent, FeaturesViewerComponent, ClipboardPanelComponent, ContactFormComponent, ContactHoverComponent, FeedbackButtonComponent, FeedbackViewerComponent, WebsiteNavComponent, WebsiteStripComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, ToastComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })

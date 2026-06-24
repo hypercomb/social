@@ -2,6 +2,8 @@
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
 import { confirmRemoval } from './remove-confirm.js'
+import { resolveCurrentLayer } from '../history/layer-placement.js'
+import type { PlacementHistory } from '../history/layer-placement.js'
 
 type LineageLike = {
   domain?: () => string
@@ -66,11 +68,22 @@ export class RemoveQueenBee extends QueenBee {
     const segments = (lineage.explorerSegments?.() ?? [])
       .map(s => String(s ?? '').trim())
       .filter(Boolean)
-    const parentLocSig = await history.sign({
-      domain: lineage.domain,
-      explorerSegments: () => segments,
-    })
-    const parent = await history.currentLayerAt(parentLocSig)
+    // Resolve the parent layer ROBUSTLY. The bare currentLayerAt(sign(segments))
+    // reads the location's OWN history bag, which is COLD/empty for any location
+    // never committed into (its content lives as a child sig in its parent,
+    // pool-addressed) or simply not yet warmed after a reload — so it returns
+    // null even when the layer plainly renders, and the old `if (!parent) return`
+    // made delete a silent no-op ("tile never disappears"). resolveCurrentLayer
+    // walks the parent chain, then falls back to the cursor (the source the
+    // renderer warms for the current location). Mirrors the clipboard worker's
+    // #resolveParentLayer and the move drone's #resolveCurrentParent.
+    const cursor = get('@diamondcoreprocessor.com/HistoryCursorService') as { currentLayerSig?: string } | undefined
+    const parent = await resolveCurrentLayer(
+      history as unknown as PlacementHistory,
+      lineage.domain,
+      segments,
+      cursor?.currentLayerSig,
+    )
     if (!parent) return
 
     // Deleting a tile takes its whole branch with it. Count what's nested and

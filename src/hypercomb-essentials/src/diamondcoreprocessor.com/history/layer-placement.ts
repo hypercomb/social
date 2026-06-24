@@ -110,6 +110,35 @@ export async function resolveLayerAt(
   return found?.layer ?? null
 }
 
+/** Resolve the layer at the CURRENT location robustly: the parent-chain walk
+ *  (resolveLayerAt), then the history CURSOR as a last resort.
+ *
+ *  The renderer warms the current location through the cursor
+ *  (currentLayerSig → getLayerBySig), NOT through currentLayerAt's own-bag
+ *  cache. So for a location whose own bag is cold — never committed into, or
+ *  simply not yet warmed after a reload — resolveLayerAt can still return null
+ *  while the cursor holds the layer the user is plainly looking at.
+ *
+ *  Mutation paths that compute a full new `children` list for the CURRENT
+ *  location and SET it (delete survivors, cut, paste) MUST use this. The bare
+ *  `currentLayerAt(sign(segments))` read returns null on a cold location and
+ *  the usual `if (!parent) return` guard turns the whole op into a silent
+ *  no-op — the exact "tile never disappears on delete" failure. Mirrors the
+ *  clipboard worker's #resolveParentLayer and the move drone's
+ *  #resolveCurrentParent; pass `currentLayerSig` only for the location the
+ *  user is actually viewing (the cursor describes the current location). */
+export async function resolveCurrentLayer(
+  history: PlacementHistory,
+  domain: unknown,
+  segments: readonly string[],
+  currentLayerSig: string | undefined | null,
+): Promise<PlacementLayer | null> {
+  const viaChain = await resolveLayerAt(history, domain, segments)
+  if (viaChain) return viaChain
+  if (currentLayerSig) return await history.getLayerBySig(currentLayerSig)
+  return null
+}
+
 /** Flatten a source layer subtree into a list of `importTree` updates rooted at
  *  `destSegments` — the mechanical-cascade counterpart to cloneLayerTree.
  *

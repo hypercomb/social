@@ -1,0 +1,18 @@
+<!-- hypercomb-shared/ui/website-strip/website-strip.component.html -->
+<!-- Top-of-screen site launcher. Present in both modes; hidden when there are
+     no sites. Each icon jumps to that site's root + renders it. -->
+@if (sites().length) {
+  <nav class="ws-strip" [attr.aria-label]="'website-strip.label' | t">
+    @for (s of sites(); track s.key) {
+      <button
+        class="ws-icon"
+        type="button"
+        (click)="open(s)"
+        [title]="s.label"
+        [attr.aria-label]="s.label"
+      >
+        <span class="mat-sym" aria-hidden="true">{{ s.icon }}</span>
+      </button>
+    }
+  </nav>
+}

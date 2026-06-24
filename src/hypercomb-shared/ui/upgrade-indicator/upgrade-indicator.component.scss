@@ -1,32 +1,28 @@
 // Host participates directly in the .header-bar flex row (like the other
-// header cells), so the button itself is the flex item.
+// header cells), so the control itself is the flex item.
 :host {
   display: contents;
 }
 
+// The whole control: meta (icon + label + count) followed by the three
+// inline actions. Slim, cold-clean chrome — a steel/blue hairline, no chunk.
 .upgrade-indicator {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 0.25rem;
+  gap: 0.4rem;
   flex-shrink: 0;
-  padding: 0 1rem;
+  padding: 0 0.75rem;
   margin: 0;
-
-  border: none;
   border-left: 1.5px solid rgba(77, 166, 255, 0.4);
-  border-radius: 0;
-  background: transparent;
-  cursor: pointer;
   color: #4da6ff;
-  transition: background 0.2s ease, color 0.2s ease;
+}
 
-  // Gentle attention pulse — an update is waiting, not an error.
+.upgrade-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  // Gentle attention pulse on the meta only — an update is waiting, not an error.
   animation: upgrade-pulse 1.8s ease-in-out infinite;
-
-  &:hover { background: rgba(77, 166, 255, 0.1); color: #7ec0ff; }
-  &:active { background: rgba(77, 166, 255, 0.16); }
-  &:focus-visible { outline: 1px solid rgba(77, 166, 255, 0.5); outline-offset: -1px; }
 
   .mat-sym {
     font-family: 'Material Symbols Outlined';
@@ -34,7 +30,6 @@
     line-height: 1;
   }
 
-  // Visible label — "there are new things to review", not a bare glyph.
   .upgrade-label {
     font: 600 0.72rem/1 var(--hc-ui-font, system-ui, sans-serif);
     letter-spacing: 0.01em;
@@ -55,13 +50,46 @@
   }
 }
 
+// The three inline actions. Adopt is the confident affirmative (accent);
+// Save / Discard are subdued so they don't compete.
+.upgrade-act {
+  font: 600 0.66rem/1 var(--hc-ui-font, system-ui, sans-serif);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.3rem 0.55rem;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+
+  &.adopt {
+    color: #4da6ff;
+    border-color: rgba(77, 166, 255, 0.4);
+    background: rgba(77, 166, 255, 0.12);
+
+    &:hover { background: rgba(77, 166, 255, 0.22); color: #7ec0ff; }
+    &:active { transform: scale(0.97); }
+  }
+
+  &.save,
+  &.discard {
+    color: rgba(220, 234, 245, 0.5);
+
+    &:hover { color: rgba(220, 234, 245, 0.85); background: rgba(255, 255, 255, 0.06); }
+  }
+
+  &:focus-visible { outline: 1px solid rgba(77, 166, 255, 0.5); outline-offset: 1px; }
+}
+
 @keyframes upgrade-pulse {
   0%, 100% { opacity: 0.72; }
   50%      { opacity: 1; }
 }
 
-// Hidden on phones — the header collapses there; the installer is
-// reachable via the controls bar's DCP action instead.
+// Hidden on phones — the header collapses there; updates are reachable from
+// the controls bar's DCP action instead.
 @media (max-width: 599px) {
   .upgrade-indicator { display: none; }
 }

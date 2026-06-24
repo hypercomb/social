@@ -1,0 +1,55 @@
+<!-- hypercomb-shared/ui/website-nav/website-nav.component.html -->
+
+<!-- The website-mode EXIT lives outside Angular now: SiteViewDrone mounts a
+     raw-DOM button (#hc-site-exit) for the whole duration of website mode, so
+     it can never be lost to a component load-order race. This component only
+     owns the hexagon-side "return to the site" cue below. -->
+
+<!-- HIVE, AFTER AN INDIRECT ENTRY: a persistent way back to the site you
+     arrived through, plus a one-time bee cue that points it out. -->
+@if (canReturn()) {
+  <button
+    class="wn-fab wn-return"
+    [class.cueing]="showCue()"
+    type="button"
+    (click)="returnToSite()"
+    [attr.aria-label]="'website-nav.return-to-site' | t"
+    [title]="'website-nav.return-to-site' | t"
+  >
+    <span class="mat-sym" aria-hidden="true">web</span>
+  </button>
+
+  @if (showCue()) {
+    <div class="wn-cue" (click)="dismissCue()">
+      <div class="wn-cue-bubble">
+        <span class="wn-cue-text">{{ 'website-nav.return-hint' | t }}</span>
+        <svg class="wn-cue-arrow" viewBox="0 0 24 30" aria-hidden="true">
+          <path d="M12 1 V22 M12 22 L5 15 M12 22 L19 15"
+            fill="none" stroke="currentColor" stroke-width="2.4"
+            stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </div>
+
+      <!-- A small swarm — the same idle "bees" motif as the sync waggle, sized
+           down to chrome scale and flown in DOM (a handful, not the GPU swarm). -->
+      <div class="wn-bees" aria-hidden="true">
+        @for (b of [1, 2, 3]; track b) {
+          <span class="wn-bee" [class]="'wn-bee-' + b">
+            <svg viewBox="0 0 38 28">
+              <g class="wn-bee-wings">
+                <ellipse cx="15" cy="9" rx="7.5" ry="4.4" />
+                <ellipse cx="23" cy="9" rx="7.5" ry="4.4" />
+              </g>
+              <g class="wn-bee-body">
+                <ellipse cx="19" cy="16" rx="10.5" ry="7" />
+                <rect class="wn-bee-stripe" x="15.5" y="9.5" width="3" height="13" rx="1.5" />
+                <rect class="wn-bee-stripe" x="21" y="9.5" width="3" height="13" rx="1.5" />
+                <circle class="wn-bee-head" cx="30" cy="16" r="3.4" />
+              </g>
+            </svg>
+          </span>
+        }
+      </div>
+    </div>
+  }
+}

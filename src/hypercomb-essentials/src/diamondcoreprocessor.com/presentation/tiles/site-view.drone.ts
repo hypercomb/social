@@ -27,6 +27,20 @@ type MountState = {
   unmount: () => void
 }
 
+/** Inline style for the raw-DOM exit overlay. A near-max z-index keeps it
+ *  above any embedded-page content; the Material Symbols family renders the
+ *  glyph set as the button's textContent. No external stylesheet, so a site's
+ *  CSS can't reach it. */
+const EXIT_OVERLAY_CSS = [
+  'position:fixed', 'right:1.4rem', 'bottom:1.5rem', 'z-index:2147483600',
+  'width:3.3rem', 'height:3.3rem', 'display:flex', 'align-items:center', 'justify-content:center',
+  'background:rgba(18,22,28,.86)', 'backdrop-filter:blur(12px)', '-webkit-backdrop-filter:blur(12px)',
+  'border:1px solid rgba(126,182,214,.55)', 'border-radius:50%',
+  'box-shadow:0 8px 26px rgba(0,0,0,.5)', 'color:rgba(232,240,248,.92)', 'cursor:pointer',
+  "font-family:'Material Symbols Outlined'", 'font-size:1.62rem', 'line-height:1', 'padding:0',
+  'pointer-events:auto', 'transition:color .16s ease,border-color .16s ease',
+].join(';')
+
 export class SiteViewDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'presentation'
@@ -49,6 +63,23 @@ export class SiteViewDrone extends Drone {
    * hexagon hierarchy. Null while not in a website session.
    */
   #siteEntrySegments: readonly string[] | null = null
+
+  /**
+   * Raw-DOM exit overlay — the GUARANTEED way out of website mode. It is
+   * created outside Angular by the renderer itself (the one piece of code that
+   * is provably running whenever a site is on screen), appended straight to
+   * <body> at a near-max z-index, and shown for the entire duration of website
+   * mode — even on a page-less dead-end. No component, no signal binding, no
+   * load-order failure mode: if a site can show, this button is there. Clicking
+   * it resolves ViewMode fresh and drops back to the hive.
+   */
+  #exitOverlay: HTMLButtonElement | null = null
+  #exitTogglesBound = false
+  /** The current site's toggle identity, mirrored from ViewBee's
+   *  `view-toggles:changed` so the exit wears the site's own glyph + label;
+   *  falls back to a generic "back to tiles" glyph on a cell with no page. */
+  #siteIcon = ''
+  #siteLabel = ''
 
   protected override deps = {
     lineage: '@hypercomb.social/Lineage',
@@ -85,6 +116,18 @@ export class SiteViewDrone extends Drone {
       window.addEventListener('contextmenu', this.#onGlobalContextMenu, true)
       this.#globalContextMenuBound = true
     }
+    if (!this.#exitTogglesBound) {
+      // Mirror the site's own icon/label onto the exit overlay from the same
+      // ViewBee broadcast the command-line toggle uses (late-replay seeds it).
+      this.onEffect<{ toggles?: Array<{ view: string; icon: string; label: string }> }>('view-toggles:changed', (p) => {
+        const list = p?.toggles
+        const w = Array.isArray(list) ? list.find(t => t?.view === 'website') : undefined
+        this.#siteIcon = (w?.icon ?? '').trim()
+        this.#siteLabel = (w?.label ?? '').trim()
+        this.#refreshExitOverlay()
+      })
+      this.#exitTogglesBound = true
+    }
     // Boot-time entry capture. If ViewMode persisted as 'website'
     // across a reload, no 'change' event will fire — record the
     // current lineage as this session's site root once on boot.
@@ -107,6 +150,7 @@ export class SiteViewDrone extends Drone {
     if (this.#globalContextMenuBound) {
       window.removeEventListener('contextmenu', this.#onGlobalContextMenu, true)
     }
+    this.#removeExitOverlay()
     this.#teardown()
   }
 
@@ -180,9 +224,13 @@ export class SiteViewDrone extends Drone {
     // page exists.
     const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<{ mode: string }>('@hypercomb.social/ViewMode')
     if (vm && vm.mode !== 'website') {
+      this.#removeExitOverlay()
       this.#teardown()
       return
     }
+    // In website mode the raw-DOM exit overlay is ALWAYS present — even on a
+    // page-less cell — so there is always a guaranteed way back to the hive.
+    if (vm?.mode === 'website') this.#ensureExitOverlay()
 
     // Strip any stale tile-selection hash so the address bar reads
     // cleanly while in website mode (where selection has no consumer).
@@ -398,6 +446,21 @@ export class SiteViewDrone extends Drone {
 
     this.#teardown()
 
+    // Snapshot the live <html>/<body> inline background BEFORE the page's
+    // scripts run. A site theme-stamps by writing a background straight onto
+    // <html>/<body> — an inline mutation that removing its <style> nodes can't
+    // undo — so without this the stamped background bleeds into the hive when
+    // you leave website mode. Restored on unmount → exiting a site returns to
+    // the hive's own theme background (dark by default). Only background props
+    // are touched; other inline styles / CSS vars on those elements are left
+    // alone (e.g. --hc-header-bottom the chrome sets on <html>).
+    const htmlStyle = document.documentElement.style
+    const bodyStyle = document.body.style
+    const prevBg = {
+      hBg: htmlStyle.background, hColor: htmlStyle.backgroundColor, hImg: htmlStyle.backgroundImage,
+      bBg: bodyStyle.background, bColor: bodyStyle.backgroundColor, bImg: bodyStyle.backgroundImage,
+    }
+
     const parsed = new DOMParser().parseFromString(rewriteCellPageRefs(rawHtml), 'text/html')
 
     // Lift <style> from parsed head into the live document head, tagged
@@ -461,7 +524,9 @@ export class SiteViewDrone extends Drone {
 
     // Internal-anchor click → lineage navigate. Bubbling listener on
     // the host catches every click on an inflated <a>; external,
-    // hash, and resource: URLs pass through.
+    // hash, and resource: URLs pass through. Resolution is
+    // hierarchy-aware (see #resolveAndNavigate): an href is read against the
+    // site's OWN position in the tree, not blindly from the hive root.
     const onAnchorClick = (e: Event): void => {
       const target = e.target as Element | null
       const a = target?.closest?.('a')
@@ -470,23 +535,7 @@ export class SiteViewDrone extends Drone {
       if (!href || /^(https?:|mailto:|tel:|data:|\/\/|#)/i.test(href)) return
       if (href.startsWith(RESOURCE_URL_PREFIX)) return
       e.preventDefault()
-      if (href === '..' || href === '../') {
-        // Same site-entry floor as right-click — clicking `..` at or
-        // below the site root is a no-op. We don't exit website mode
-        // here; the user only asked to block nav past root, not to
-        // be ejected back to hexagons.
-        const entry = this.#siteEntrySegments ?? []
-        if (segments.length <= entry.length) return
-        void this.#navigate(segments.slice(0, -1))
-        return
-      }
-      if (href.startsWith('/')) {
-        const parts = href.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean)
-        void this.#navigate(parts)
-        return
-      }
-      const parts = href.replace(/^\.\/+/, '').replace(/\/+$/, '').split('/').filter(Boolean)
-      void this.#navigate([...segments, ...parts])
+      void this.#resolveAndNavigate(href, segments)
     }
     host.addEventListener('click', onAnchorClick, true)
 
@@ -499,7 +548,55 @@ export class SiteViewDrone extends Drone {
         for (const node of styleNodes) node.remove()
         for (const node of linkNodes) node.remove()
         for (const node of scriptNodes) node.remove()
+        // Revert any background a page script stamped onto <html>/<body> so the
+        // hive's own theme background (or dark default) shows again on exit.
+        htmlStyle.background = prevBg.hBg
+        htmlStyle.backgroundColor = prevBg.hColor
+        htmlStyle.backgroundImage = prevBg.hImg
+        bodyStyle.background = prevBg.bBg
+        bodyStyle.backgroundColor = prevBg.bColor
+        bodyStyle.backgroundImage = prevBg.bImg
       },
+    }
+  }
+
+  // ── raw-DOM exit overlay ───────────────────────────────────────────────
+
+  /** Ensure the exit button exists in <body> and reflects the current site's
+   *  glyph/label. Idempotent — safe to call on every reconcile. */
+  #ensureExitOverlay(): void {
+    if (!this.#exitOverlay) {
+      const btn = document.createElement('button')
+      btn.id = 'hc-site-exit'
+      btn.type = 'button'
+      btn.style.cssText = EXIT_OVERLAY_CSS
+      btn.addEventListener('click', () => {
+        const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+          ?.get<{ setMode(m: string): void }>('@hypercomb.social/ViewMode')
+        vm?.setMode('hexagons')
+      })
+      // Hover affordance without a stylesheet — cheap inline listeners.
+      btn.addEventListener('pointerenter', () => { btn.style.color = '#fff'; btn.style.borderColor = 'rgba(126,182,214,.85)' })
+      btn.addEventListener('pointerleave', () => { btn.style.color = 'rgba(232,240,248,.92)'; btn.style.borderColor = 'rgba(126,182,214,.55)' })
+      document.body.appendChild(btn)
+      this.#exitOverlay = btn
+    }
+    this.#refreshExitOverlay()
+  }
+
+  #refreshExitOverlay(): void {
+    const btn = this.#exitOverlay
+    if (!btn) return
+    btn.textContent = this.#siteIcon || 'grid_view'
+    const label = this.#siteLabel || 'Back to tiles'
+    btn.title = label
+    btn.setAttribute('aria-label', label)
+  }
+
+  #removeExitOverlay(): void {
+    if (this.#exitOverlay) {
+      this.#exitOverlay.remove()
+      this.#exitOverlay = null
     }
   }
 
@@ -540,6 +637,84 @@ export class SiteViewDrone extends Drone {
     let pageSig = await this.#findDecorationPage(segments, store)
     if (!pageSig) pageSig = await this.#findContextPage(segments, store)
     return !pageSig            // layer present but no page → confirmed dead-end
+  }
+
+  /**
+   * Does the cell at `segments` have a mountable page in any slot? The
+   * positive counterpart to {@link #isDefinitelyPageless}, used to pick the
+   * right reading of an ambiguous link. Cold / unresolved layers report false
+   * (we can't confirm a page), so a momentarily-cold candidate is simply not
+   * preferred over a warm one — never a false positive.
+   */
+  async #hasPage(segments: readonly string[]): Promise<boolean> {
+    const store = this.resolve<any>('store')
+    if (!store?.getResource) return false
+    let sig = await this.#findWebsitePage(segments)
+    if (!sig) sig = await this.#findDecorationPage(segments, store)
+    if (!sig) sig = await this.#findContextPage(segments, store)
+    return !!sig
+  }
+
+  /**
+   * Resolve an internal href against the site's OWN place in the hive, then
+   * navigate. This is the fix for links that ignore their position in the
+   * hierarchy: the gen skill is *supposed* to emit full absolute paths
+   * (`/dolphin/about`), but pages routinely carry site-relative links
+   * (`/about`, `/`) or bare child names — and a path read blindly from the
+   * hive root lands on a cell that doesn't exist and renders a blank "new
+   * place." We build a few hierarchy-aware candidates and take the FIRST that
+   * actually has a page; the literal reading stays the head candidate so
+   * well-formed full-path links never regress, and the fallback at the end
+   * keeps a click from being silently swallowed.
+   *
+   *   `..`        → up one level, never above the site-entry floor.
+   *   `/a/b`      → [a,b] from the hive root (documented wire form), else
+   *                 [...siteRoot, a, b] (site-relative: `/about` → the site's
+   *                 own about page; `/` → the site home, not the hive root).
+   *   `a/b` `./x` → [...here, a, b] (child), else [...parent, a, b] (sibling),
+   *                 else [...siteRoot, a, b] (site-relative).
+   */
+  async #resolveAndNavigate(href: string, segments: readonly string[]): Promise<void> {
+    const entry = this.#siteEntrySegments ?? []
+
+    if (href === '..' || href === '../') {
+      // Same site-entry floor as right-click — `..` at or below the site root
+      // is a no-op (we don't eject back to hexagons, only block nav past root).
+      if (segments.length <= entry.length) return
+      await this.#navigate(segments.slice(0, -1))
+      return
+    }
+
+    let candidates: string[][]
+    if (href.startsWith('/')) {
+      const parts = href.replace(/^\/+|\/+$/g, '').split('/').filter(Boolean)
+      candidates = [
+        parts,                  // absolute from the hive root (documented form)
+        [...entry, ...parts],   // site-relative: under the site's own root
+      ]
+    } else {
+      const parts = href.replace(/^\.\/+/, '').replace(/\/+$/, '').split('/').filter(Boolean)
+      candidates = [
+        [...segments, ...parts],               // child (documented relative form)
+        [...segments.slice(0, -1), ...parts],  // sibling
+        [...entry, ...parts],                  // site-relative
+      ]
+    }
+
+    // De-dupe (entry === [] collapses site-relative onto absolute, etc.), then
+    // take the first candidate that DEFINITELY has a page.
+    const seen = new Set<string>()
+    const uniq = candidates.filter(c => {
+      const k = c.join(' ')
+      if (seen.has(k)) return false
+      seen.add(k); return true
+    })
+    for (const c of uniq) {
+      if (await this.#hasPage(c)) { await this.#navigate(c); return }
+    }
+    // Nothing resolves to a page — navigate the literal reading. #navigate's
+    // own dead-end guard still keeps us off a confirmed page-less cell.
+    if (uniq[0]) await this.#navigate(uniq[0])
   }
 
   async #navigate(path: readonly string[]): Promise<void> {

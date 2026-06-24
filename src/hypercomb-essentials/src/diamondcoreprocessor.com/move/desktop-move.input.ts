@@ -91,17 +91,25 @@ export class DesktopMoveInput {
     const axial = this.#clientToAxial(e.clientX, e.clientY)
     if (!axial) return
 
-    // Move only engages on an already-selected tile. Ctrl/Meta on an
-    // UNSELECTED tile stays with SelectionInputDrone (paint); on an ALREADY-
-    // SELECTED tile it means "Ctrl-drag this selection to COPY it" — the
-    // selection drone defers to us for any press on a selected tile.
+    // Move engages ONLY on an already-selected tile — select first (Ctrl-click),
+    // then drag to move. A press on an UNSELECTED tile is left to the selection
+    // drone so Ctrl-click-to-select is never hijacked by the drag. (One-gesture
+    // grab-and-drag of an unselected tile was reverted: on a trackpad the jitter
+    // in a Ctrl-CLICK crossed the drag threshold, fired move:drag-end, and
+    // suppressed the tile:click — breaking selection entirely.)
     const label = this.#drone?.labelAtAxial(axial) ?? null
     if (!label) return
     const selection = window.ioc.get<{ selected: ReadonlySet<string> }>('@diamondcoreprocessor.com/SelectionService')
     if (!selection?.selected.has(label)) return
 
-    // Capture copy intent at the grab: Ctrl/Meta held now → this drag copies.
-    this.#copyAtBegin = e.ctrlKey || e.metaKey
+    // Ctrl-drag COPY is disabled for now. A copy would mint a same-content tile
+    // with an auto-generated "<label> copy" name — but in Hypercomb the NAME is
+    // the immutable identity, so a duplicate is only meaningful if you choose the
+    // new name UP FRONT (drop the tile's icon into the command line like an image
+    // drop and type the name). Until that flow exists a drag only ever moves, and
+    // Ctrl now always means drop-into. Restore `= e.ctrlKey || e.metaKey` to bring
+    // copy-on-drag back once the named-duplicate flow lands.
+    this.#copyAtBegin = false
 
     this.#downPos = { x: e.clientX, y: e.clientY }
     this.#downAxial = axial
@@ -126,11 +134,23 @@ export class DesktopMoveInput {
         return
       }
       this.#dragging = true
-      this.#setCursor(this.#copyAtBegin ? 'copy' : 'grabbing')
-      // Copy (Ctrl at grab) and drop-into (Ctrl pressed mid-drag) are mutually
-      // exclusive. Copy wins when it was latched at the grab.
-      if (this.#copyAtBegin) this.#drone.setCopyMode(true)
-      else if (this.#ctrlHeld) this.#drone.setDropIntoActive(true)
+      this.#setCursor('grabbing')
+      // Seed drop-into from the LIVE modifier on the pointer event at the grab —
+      // NOT the keydown-tracked #ctrlHeld, which can lag a one-gesture Cmd-grab
+      // (the key event may not have registered before the drag threshold), so a
+      // grab-and-drag of an unselected tile would wrongly REORDER (leaving the
+      // tile at the dragged slot) instead of dropping it into the target.
+      this.#ctrlHeld = e.ctrlKey || e.metaKey
+      if (this.#ctrlHeld) this.#drone.setDropIntoActive(true)
+    }
+
+    // Keep drop-into synced to the live modifier on every move — robust to a
+    // press/release mid-drag and to a missed keydown/keyup (Mac's Cmd keyup is
+    // flaky). Idempotent with the keydown/keyup handlers.
+    const mod = e.ctrlKey || e.metaKey
+    if (mod !== this.#ctrlHeld) {
+      this.#ctrlHeld = mod
+      this.#drone.setDropIntoActive(mod)
     }
 
     const axial = this.#clientToAxial(e.clientX, e.clientY)
@@ -150,9 +170,9 @@ export class DesktopMoveInput {
       EffectBus.emit('move:drag-end', {})
       const axial = this.#clientToAxial(e.clientX, e.clientY) ?? this.#lastAxial
       if (axial) {
-        if (this.#copyAtBegin) {
-          void this.#drone.commitCopyAt(axial, this.#source)
-        } else if (this.#ctrlHeld) {
+        // Decide drop-into vs reorder from the LIVE modifier at release — robust
+        // to a missed key event on a one-gesture Cmd-grab.
+        if (e.ctrlKey || e.metaKey) {
           void this.#drone.commitDropInto(axial, this.#source)
         } else {
           void this.#drone.commitMoveAt(axial, this.#source)
@@ -167,7 +187,9 @@ export class DesktopMoveInput {
 
   #onKeyDown = (e: KeyboardEvent): void => {
     if (e.key === ' ') this.#spaceHeld = true
-    if (e.key === 'Control') {
+    // Ctrl (Windows/Linux) OR Cmd/Meta (Mac) is the drop-into modifier — Jaime
+    // works on Mac and says "cmd drag", so Meta must arm drop-into the same way.
+    if (e.key === 'Control' || e.key === 'Meta') {
       if (!this.#ctrlHeld) {
         this.#ctrlHeld = true
         // mid-drag: flip the drone into drop-into preview mode — but NOT when
@@ -185,7 +207,7 @@ export class DesktopMoveInput {
 
   #onKeyUp = (e: KeyboardEvent): void => {
     if (e.key === ' ') this.#spaceHeld = false
-    if (e.key === 'Control') {
+    if (e.key === 'Control' || e.key === 'Meta') {
       if (this.#ctrlHeld) {
         this.#ctrlHeld = false
         // mid-drag: revert to normal swap preview

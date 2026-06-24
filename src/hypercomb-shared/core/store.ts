@@ -349,7 +349,12 @@ export class Store extends EventTarget {
       // it cannot invalidate a live cached Blob (none was ever derived from
       // a short file). Matching size ⇒ complete: keep the cached-Blob-safe
       // skip the comment below describes.
-      if ((await existing.getFile()).size === bytes.byteLength) return signature
+      if ((await existing.getFile()).size === bytes.byteLength) {
+        // Complete file already on disk. Seed the memory cache too (see
+        // below) so a reader right after this put never pays an OPFS hop.
+        this.#resourceCache.set(signature, new Blob([bytes], { type: blob.type }))
+        return signature
+      }
     } catch { /* fall through and create */ }
     const handle = await this.resources.getFileHandle(signature, { create: true })
     const writable = await handle.createWritable()
@@ -358,6 +363,17 @@ export class Store extends EventTarget {
     } finally {
       await writable.close()
     }
+    // Seed the in-memory cache with a DETACHED copy of the bytes we just
+    // wrote. The layer commit path already hot-caches its bytes; the
+    // resource path did not, so every read of a freshly-put resource fell
+    // through to an OPFS round-trip — the just-committed props blob a move
+    // writes is read back on the very next render, and that read-after-
+    // write hop widened the window for the nurse in-flight-read race. A
+    // memory hit makes the read instant and timing-independent. Detached
+    // (own ArrayBuffer, not the input blob) so it can't be invalidated by
+    // a later writable against the same sig (see the cached-Blob caveat
+    // above in this method).
+    this.#resourceCache.set(signature, new Blob([bytes], { type: blob.type }))
     // Mirror up to DCP. PushQueueService (in essentials) subscribes to
     // `content:wrote` and queues the bytes for sentinel intake. Going
     // through EffectBus avoids a shared→essentials import.

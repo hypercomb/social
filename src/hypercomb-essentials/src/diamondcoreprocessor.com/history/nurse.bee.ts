@@ -67,6 +67,33 @@ export abstract class NurseBee<T = unknown> extends Bee {
 
   readonly #cache = new Map<string, CacheEntry<T>>()
 
+  // ── invalidation epochs (in-flight-read guard) ─────────────────────
+  //
+  // A read is async: it snapshots the cell's layer, awaits the resource
+  // blob, parses the attribute, THEN writes the cache. If a write to
+  // this cell COMMITS while that read is in flight — a move persisting a
+  // new `index` is the canonical case — the write's `cell:0000-changed`
+  // broadcast calls `invalidate()` and clears the entry. But the
+  // in-flight read still holds the PRE-write value and, on completion,
+  // writes it straight back over the invalidation. The cache is now
+  // poisoned with the stale value until the next explicit invalidation;
+  // the renderer reads the cell's OLD slot and the tile snaps back to
+  // where it started. (Repeating the move works because the second
+  // commit has no overlapping in-flight read.)
+  //
+  // The per-tile WRITE lock in tile-properties.ts can't see this: it
+  // serialises writers, but this is a READER racing a writer. The fix is
+  // an epoch stamped at read-start: `invalidate` bumps the key's epoch,
+  // and a read only publishes its result if the epoch is unchanged when
+  // it finishes. A read that straddled an invalidation drops its result
+  // (returning it to its own caller, which is re-rendering anyway) and
+  // leaves the cache empty so the NEXT read re-fetches the committed
+  // head. `#globalEpoch` does the same for the whole-cache wipes
+  // (`clear` / `invalidatePrefix`) where per-key bumps can't reach a key
+  // that isn't in the cache yet.
+  readonly #keyEpoch = new Map<string, number>()
+  #globalEpoch = 0
+
   /**
    * Read the value for a cell.
    *
@@ -96,6 +123,12 @@ export abstract class NurseBee<T = unknown> extends Bee {
     const cached = this.#cache.get(key)
     if (cached) return cached.value
 
+    // Stamp the epochs BEFORE any await. An invalidation that lands while
+    // we're reading advances one of these, and we must not cache a value
+    // that predates it (see the #keyEpoch doc above).
+    const startKeyEpoch = this.#keyEpoch.get(key) ?? 0
+    const startGlobalEpoch = this.#globalEpoch
+
     // Primary path: layer slot.
     const layerProps = await readTilePropertiesAt(parentSegments, cellName)
     let value = this.parse(layerProps[this.attribute])
@@ -107,7 +140,14 @@ export abstract class NurseBee<T = unknown> extends Bee {
       value = this.parse(fileProps[this.attribute])
     }
 
-    this.#cache.set(key, { value, layerSig: '' })
+    // Publish only if no invalidation occurred during the read. A
+    // mismatch means a writer committed mid-read (e.g. a move wrote this
+    // tile's new index): drop the result so the next read re-fetches the
+    // fresh head, but still return what we read to this caller — it is
+    // re-rendering and will read again.
+    if ((this.#keyEpoch.get(key) ?? 0) === startKeyEpoch && this.#globalEpoch === startGlobalEpoch) {
+      this.#cache.set(key, { value, layerSig: '' })
+    }
     return value
   }
 
@@ -128,15 +168,23 @@ export abstract class NurseBee<T = unknown> extends Bee {
     this.#cache.set(cacheKey, { value: existing.value, layerSig })
   }
 
-  /** Drop one cell's entry. */
+  /** Drop one cell's entry. Bumping the key's epoch also voids any read
+   *  for this cell that is in flight right now, so it can't write the
+   *  pre-invalidation value back over us. */
   invalidate(cacheKey: string): void {
     this.#cache.delete(cacheKey)
+    this.#keyEpoch.set(cacheKey, (this.#keyEpoch.get(cacheKey) ?? 0) + 1)
   }
 
   /** Drop all entries whose key starts with the given prefix. Used by
    *  inheriting nurses when an ancestor write should invalidate every
    *  descendant's composition. */
   invalidatePrefix(prefix: string): void {
+    // Bump the global epoch: a prefixed wipe can target a key whose read
+    // hasn't reached the cache yet, so a per-key bump can't reach it. The
+    // global stamp voids every in-flight read — coarse, but prefix wipes
+    // are rare (ancestor writes) so the extra re-reads are negligible.
+    this.#globalEpoch++
     if (prefix.length === 0) {
       this.#cache.clear()
       return
@@ -148,9 +196,11 @@ export abstract class NurseBee<T = unknown> extends Bee {
   }
 
   /** Clear the entire cache. Used on lineage-wide invalidations
-   *  (folder-tree wipes, install reset). */
+   *  (folder-tree wipes, install reset). Bumps the global epoch so any
+   *  in-flight read is voided rather than re-seeding the cache it wiped. */
   clear(): void {
     this.#cache.clear()
+    this.#globalEpoch++
   }
 
   // ── construction ───────────────────────────────────────────────────

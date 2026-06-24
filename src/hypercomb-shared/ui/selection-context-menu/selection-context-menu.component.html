@@ -33,6 +33,11 @@
         <span class="reroll-icon"></span>
       </button>
 
+      <div class="ctx-divider"></div>
+      <button class="ctx-btn" (click)="promoteToParent()" [attr.aria-label]="'selection.promote-to-parent' | t">
+        <span class="mat-sym">arrow_upward</span>
+      </button>
+
       @if (hasFeatures()) {
         <div class="ctx-divider"></div>
         <button class="ctx-btn" (click)="features()" [attr.aria-label]="'selection.features' | t">

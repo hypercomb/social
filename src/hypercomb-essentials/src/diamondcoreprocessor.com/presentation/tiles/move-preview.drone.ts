@@ -68,6 +68,12 @@ export class MovePreviewDrone extends Drone {
   #cellCoords: { q: number; r: number }[] = []
   #cellCount = 0
 
+  // Render-space geometry mirrored from the grid renderer (render:geometry-changed
+  // / render:set-orientation), so overlay centers land on the MESH (spacing≈38) and
+  // NOT at AxialService's 200-scale Location. Same pattern tile-overlay/screensaver use.
+  #spacing = 38
+  #flat = false
+
   // ── held cluster state ────────────────────────────────────
   #held: Container | null = null        // shadow + tiles, positioned at the target center
   #heldTiles: Container | null = null    // the fanned copies (bob + suck-in apply here)
@@ -83,7 +89,7 @@ export class MovePreviewDrone extends Drone {
   protected override deps = {
     axial: '@diamondcoreprocessor.com/AxialService',
   }
-  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'move:preview', 'move:drop-into', 'move:drop-into-commit', 'move:copy-drag']
+  protected override listens = ['render:host-ready', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:set-orientation', 'move:preview', 'move:drop-into', 'move:drop-into-commit', 'move:copy-drag']
   protected override emits: string[] = []
 
   #effectsRegistered = false
@@ -106,6 +112,10 @@ export class MovePreviewDrone extends Drone {
       this.#cellCoords = payload.coords ?? []
       this.#cellCount = payload.count
     })
+
+    // Mirror the grid's render-space geometry so overlay centers match the mesh.
+    this.onEffect<{ spacing?: number }>('render:geometry-changed', (geo) => { if (geo?.spacing) this.#spacing = geo.spacing })
+    this.onEffect<{ flat?: boolean }>('render:set-orientation', (p) => { this.#flat = !!p?.flat })
 
     this.onEffect<MovePreviewPayload>('move:preview', (payload) => {
       this.#redraw(payload)
@@ -179,8 +189,6 @@ export class MovePreviewDrone extends Drone {
     this.#hideHeld()
 
     const { names, movedLabels } = payload
-    const axialSvc = this.resolve<any>('axial')
-    if (!axialSvc?.items) return
 
     const ox = this.#meshOffset.x
     const oy = this.#meshOffset.y
@@ -192,10 +200,13 @@ export class MovePreviewDrone extends Drone {
       if (movedLabels.has(label)) continue
       if (label === this.#originalNames[i]) continue // not displaced
 
-      const coord = axialSvc.items.get(i)
+      // Render-space slot center from the cell-count coords — NOT axialSvc's
+      // 200-scale Location (the same dual-scale fix as #cellCenter).
+      const coord = this.#cellCoords[i]
       if (!coord) break
 
-      this.#drawSwapHex(coord.Location.x + ox, coord.Location.y + oy)
+      const p = this.#axialToPixel(coord.q, coord.r)
+      this.#drawSwapHex(p.x + ox, p.y + oy)
     }
   }
 
@@ -455,26 +466,30 @@ export class MovePreviewDrone extends Drone {
     return verts
   }
 
-  /** Container-space center of the tile with this label, or null. */
+  /** Render-space pixel for an axial (q,r), matching the MESH spacing (≈38) — NOT
+   *  AxialService's 200-scale Location. Identical transform to tile-overlay.drone.ts,
+   *  so overlays land on the tiles at EVERY (q,r), not just the origin. */
+  #axialToPixel(q: number, r: number): { x: number; y: number } {
+    return this.#flat
+      ? { x: 1.5 * this.#spacing * q, y: Math.sqrt(3) * this.#spacing * (r + q / 2) }
+      : { x: Math.sqrt(3) * this.#spacing * (q + r / 2), y: this.#spacing * 1.5 * r }
+  }
+
+  /** Container-space (render-space) center of the tile with this label, or null. */
   #cellCenter(label: string): { x: number; y: number } | null {
     const idx = this.#originalNames.indexOf(label)
     if (idx < 0) return null
     const coord = this.#cellCoords[idx]
     if (!coord) return null
-    return this.#axialCenter(coord.q, coord.r)
+    const p = this.#axialToPixel(coord.q, coord.r)
+    return { x: p.x + this.#meshOffset.x, y: p.y + this.#meshOffset.y }
   }
 
-  /** Container-space center of a grid slot by axial coordinate (works for an
-   *  empty slot — used by the copy-drag ghost which lands beside, not on, a tile). */
+  /** Container-space center of a grid slot by axial coordinate (works for an empty
+   *  slot — used by the copy-drag ghost which lands beside, not on, a tile). */
   #axialCenter(q: number, r: number): { x: number; y: number } | null {
-    const axialSvc = this.resolve<any>('axial')
-    if (!axialSvc?.items) return null
-    for (const [, item] of axialSvc.items) {
-      if (item.q === q && item.r === r) {
-        return { x: item.Location.x + this.#meshOffset.x, y: item.Location.y + this.#meshOffset.y }
-      }
-    }
-    return null
+    const p = this.#axialToPixel(q, r)
+    return { x: p.x + this.#meshOffset.x, y: p.y + this.#meshOffset.y }
   }
 
   /** label → bootstrap image signature, from the live render snapshot. */

@@ -1,0 +1,39 @@
+<!-- Fixed bottom-right cluster: Undo · Redo, plus the word "save" that
+     appears only once you've rewound (the merge — choose what to move
+     forward with). Sits just left of the round feedback FAB. -->
+<div class="edit-actions" role="group" [attr.aria-label]="'controls.edit-actions' | t">
+  <button
+    class="ea-btn"
+    type="button"
+    (click)="undo()"
+    [disabled]="!canUndo()"
+    [attr.aria-label]="'controls.undo' | t"
+    [title]="'controls.undo' | t"
+  >
+    <span class="mat-sym">undo</span>
+  </button>
+
+  @if (canRedo()) {
+    <button
+      class="ea-btn"
+      type="button"
+      (click)="redo()"
+      [attr.aria-label]="'controls.redo' | t"
+      [title]="'controls.redo' | t"
+    >
+      <span class="mat-sym">redo</span>
+    </button>
+  }
+
+  @if (rewound()) {
+    <span class="ea-divider" aria-hidden="true"></span>
+    <button
+      class="ea-save"
+      type="button"
+      (click)="save()"
+      [disabled]="saving()"
+      [attr.aria-label]="'controls.save' | t"
+      [title]="'controls.save' | t"
+    >{{ 'controls.save' | t }}</button>
+  }
+</div>

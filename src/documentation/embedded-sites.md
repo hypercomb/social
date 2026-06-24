@@ -177,10 +177,23 @@ resolve exactly the same set). There is **no** manifest-keyed
 |-------------------------------------|------------------------------------------|
 | `resource:9f2a…`                    | literal 64-hex sig (also in CSS `url(resource:<sig>)` and `resource:<sig>/chrome.css` links) |
 | `<img src="9f2a…">`                 | bare 64-hex on `src` / `href` / `data-src` |
-| `<a href="about">`                  | child subpage — lineage navigates down   |
+| `<a href="about">`                  | child subpage; falls back to a **sibling**, then the **site-relative** page, if no child matches |
 | `<a href="..">`                     | parent subpage (blocked at the site-entry floor) |
-| `<a href="/home">`                  | absolute lineage path                    |
+| `<a href="/home">`                  | the hive path `/home` **if it has a page**, else the **site-relative** path under the site's own root — so `/about` finds *this* site's about page and `/` the site home, never a blank hive-root path |
 | `<a href="https://…">`, `#`, `mailto:`, `tel:`, `data:` | pass through |
+
+### Hierarchy-aware link resolution
+
+The wire form the gen skill emits is a **full absolute path** (`/dolphin/about`)
+— and that still resolves first, so well-formed sites are unaffected. But pages
+routinely carry site-relative links (`/about`, `/`) or bare names that ignore
+the site's position in the hive tree; read literally from the hive root those
+land on a cell that doesn't exist and render a blank "new place." So
+`site-view.drone.ts` (`#resolveAndNavigate`) tries a few hierarchy-aware
+readings of each href and navigates to the **first candidate that actually has
+a page** — the literal reading is the head candidate (no regression), the
+site-rooted reading is the fallback. The site's own root is the cell where the
+website session was entered (`#siteEntrySegments`).
 
 ## Why per-cell instead of single-bundle
 

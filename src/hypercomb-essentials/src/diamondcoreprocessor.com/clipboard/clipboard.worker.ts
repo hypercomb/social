@@ -2,6 +2,7 @@
 import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
 import type { ClipboardService, ClipboardOp } from './clipboard.service.js'
 import { childNamesOf, childLayerOf, resolveLayerAt, flattenLayerTree } from '../history/layer-placement.js'
+import { readTilePropsIndex, writeTilePropsIndex, cellLocationSig } from '../editor/tile-properties.js'
 
 interface ClipboardEntry {
   label: string
@@ -521,6 +522,35 @@ export class ClipboardWorker extends Worker {
     // hierarchy rebuilds level by level. Cut-in-place items have no treeUpdate
     // — the parent's name-resolution re-homes them from their persisted bag.
     const nextChildren = [...existing, ...placed.map(p => p.label)]
+
+    // Seed the participant-local render index (hc:tile-props-index) for every
+    // re-homed node at its NEW destination lineage. show-cell resolves a LOCAL
+    // tile's image ONLY through this index (keyed by cellLocationSig) with no
+    // canonical fallback — a freshly pasted tile has no entry at its new
+    // location, so it renders BLANK until an unrelated reload heals it. Mirrors
+    // swarm-adopt's seed for the identical flattenLayerTree/importTree re-home.
+    // FILL-IF-EMPTY: never disturb an image already on a destination tile (the
+    // image-stable invariant). Runs AFTER the paste-target props rewrite, so the
+    // final props sig (index override included) is what lands in the index.
+    try {
+      const index = readTilePropsIndex()
+      let seeded = false
+      for (const u of treeUpdates) {
+        const props = (u.layer as { properties?: unknown }).properties
+        const propSig = Array.isArray(props) && typeof props[0] === 'string' ? props[0] : undefined
+        if (!propSig || !/^[0-9a-f]{64}$/.test(propSig)) continue
+        const segs = u.segments
+        if (segs.length === 0) continue
+        const key = await cellLocationSig(segs.slice(0, -1), segs[segs.length - 1])
+        if (!key || index[key]) continue
+        index[key] = propSig
+        seeded = true
+      }
+      if (seeded) writeTilePropsIndex(index)
+    } catch (err) {
+      console.warn('[clipboard] props-index seed skipped', err)
+    }
+
     await committer.importTree([
       { segments: [...targetSegments], layer: { ...(parent ?? {}), children: nextChildren } },
       ...treeUpdates,

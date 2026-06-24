@@ -2,9 +2,8 @@
 import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import type { Axial } from '../navigation/hex-detector.js'
-import type { LayerTransferService } from './layer-transfer.service.js'
 import type { OrderProjection } from '../history/order-projection.js'
-import { cellLocationSig, writeTilePropertiesAt } from '../editor/tile-properties.js'
+import { writeTilePropertiesAt, readTilePropsIndex, writeTilePropsIndex, cellLocationSig } from '../editor/tile-properties.js'
 import { childNamesOf, childLayerOf, resolveLayerAt, flattenLayerTree } from '../history/layer-placement.js'
 import type { PlacementHistory, PlacementLayer } from '../history/layer-placement.js'
 
@@ -116,10 +115,9 @@ export class MoveDrone extends Drone {
     axial: '@diamondcoreprocessor.com/AxialService',
     lineage: '@hypercomb.social/Lineage',
     selection: '@diamondcoreprocessor.com/SelectionService',
-    transfer: '@diamondcoreprocessor.com/LayerTransferService',
   }
 
-  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'controls:action']
+  protected override listens = ['render:host-ready', 'render:cell-count', 'render:mesh-offset', 'controls:action', 'tile:action']
   protected override emits = ['move:preview', 'move:committed', 'move:mode', 'cell:reorder', 'move:drop-into', 'move:drop-into-commit', 'move:copy-drag', 'cell:added']
 
   #effectsRegistered = false
@@ -169,6 +167,19 @@ export class MoveDrone extends Drone {
     this.onEffect<{ action: string }>('controls:action', (payload) => {
       if (!ready) return
       if (payload.action === 'move') this.#toggleMode()
+      else if (payload.action === 'promote-to-parent') {
+        const selection = this.resolve<any>('selection')
+        const labels = selection?.selected ? [...selection.selected] : []
+        if (labels.length > 0) void this.commitPromoteToParent(labels)
+      }
+    })
+    // Kebab promote owns its tile:action directly (like swarm-adopt's 'adopt', so
+    // it stays out of tile-actions HANDLED_ACTIONS) — promotes the ONE clicked tile.
+    this.onEffect<{ action: string; label?: string }>('tile:action', (payload) => {
+      if (!ready) return
+      if (payload.action === 'promote-to-parent' && payload.label) {
+        void this.commitPromoteToParent([payload.label])
+      }
     })
     ready = true
   }
@@ -461,77 +472,271 @@ export class MoveDrone extends Drone {
     const movedLabels = [...this.#movedGroup.keys()]
     if (movedLabels.length === 0) { this.cancelMove(source); return }
 
-    // Fire the suck-into-tile animation BEFORE the awaited transfer +
-    // navigation. The preview converts its held cluster into a shrink-and-
-    // vanish at the target; the navigation that follows reveals the target's
-    // level underneath, so the tiles read as dropping THROUGH onto the next
-    // layer. Purely visual — the data move below is the authoritative change.
-    this.emitEffect('move:drop-into-commit', { label: targetLabel, dragged: [...movedLabels] })
-
+    const history = window.ioc.get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
+    const committer = window.ioc.get<CopyCommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
     const lineage = this.resolve<any>('lineage')
-    const transfer = this.resolve<LayerTransferService>('transfer')
+    if (!history || !committer || !lineage) { this.cancelMove(source); return }
 
-    if (!transfer) { this.cancelMove(source); return }
-
-    // Drop-into-cell: moves each label out of the source layer's
-    // children slot and into the target's children slot. Under the
-    // layer-primitive doctrine the target layer doesn't need a
-    // physical parent dir minted — the slot write at the target's
-    // segments path is the authoritative state change.
-    const sourceSegments: readonly string[] = lineage?.explorerSegments?.() ?? []
-    const targetParentSegments = [...sourceSegments, targetLabel]
-
-    // PENDING re-wire: nextIndex used to scan target children's
-    // existing index props from OPFS; the legacy folder walk is
-    // retired. The committer-side children-slot write is responsible
-    // for ordering / index assignment from the layer state.
-    let nextIndex = 0
-
-    for (const label of movedLabels) {
-      try {
-        await transfer.transfer(null as unknown as FileSystemDirectoryHandle, null as unknown as FileSystemDirectoryHandle, label)
-        const cacheKey = await cellLocationSig(targetParentSegments, label)
-        await writeTilePropertiesAt(targetParentSegments, label, { index: nextIndex })
-        void cacheKey
-        nextIndex++
-      } catch (err) {
-        console.warn('[move] drop-into transfer failed for', label, err)
-      }
+    // Refuse while the history cursor is rewound (scrub-back is view-only) — the
+    // same guard copy/reorder use. Feedback, then decline; never half-run.
+    const cursor = window.ioc.get<{ state?: { rewound?: boolean } }>('@diamondcoreprocessor.com/HistoryCursorService')
+    if (cursor?.state?.rewound) {
+      EffectBus.emit('toast:show', {
+        type: 'info',
+        title: 'Viewing history',
+        message: 'Can’t move while scrubbed back — return to the latest (Restore) to edit.',
+      })
+      this.cancelMove(source)
+      return
     }
 
-    // moved cells are gone from the SOURCE layer. Carry sourceSegments
-    // explicitly: the transfer loop above is awaited multi-step work, and
-    // a segment-less emit would intent-bind the removal to wherever the
-    // user is when it fires — removing the cells from the WRONG layer if
-    // a navigation landed mid-move.
+    const sourceSegments: readonly string[] = lineage.explorerSegments?.() ?? []
+    const sourceParent = await this.#resolveCurrentParent(history, lineage, sourceSegments)
+    const sourceChildren = await childNamesOf(history, sourceParent)
+
+    // SAFETY: a MOVE removes the dragged names from the source parent's children
+    // list — so we must only commit when that parent resolved AND actually holds
+    // every dragged tile. A cold / partial resolve here would otherwise write an
+    // EMPTY children list and wipe the whole level. Abort (no data loss) instead.
+    if (!sourceParent || !movedLabels.every(l => sourceChildren.includes(l))) {
+      console.warn('[move] drop-into aborted — source parent/children unresolved', { movedLabels, sourceChildren })
+      this.cancelMove(source)
+      return
+    }
+
+    // The target tile becomes a parent: resolve its layer (warm, via the source
+    // parent's slot) and its existing children so we APPEND, never clobber.
+    const targetViaParent = await childLayerOf(history, sourceParent, targetLabel)
+    const targetLayer = targetViaParent?.layer ?? null
+    const targetChildren = await childNamesOf(history, targetLayer)
+    const targetParentSegments = [...sourceSegments, targetLabel]
+
+    // Suck-into-tile animation up front (purely visual); the importTree below is
+    // the authoritative MOVE.
+    this.emitEffect('move:drop-into-commit', { label: targetLabel, dragged: [...movedLabels] })
+
+    // Re-home each dragged subtree UNDER the target, keeping its own name — this
+    // is a MOVE, not a copy (no fresh name). flattenLayerTree preserves every
+    // content sig; the SAME primitive copy / adopt / clipboard-paste use.
+    const treeUpdates: CopyTreeUpdate[] = []
+    const landed: string[] = []
+    let nextIndex = targetChildren.length
+
     for (const label of movedLabels) {
+      const viaParent = await childLayerOf(history, sourceParent, label)
+      let srcLayer = viaParent?.layer ?? null
+      if (!srcLayer) {
+        const ownSig = await history.sign({ domain: lineage.domain, explorerSegments: () => [...sourceSegments, label] })
+        srcLayer = await history.currentLayerAt(ownSig)
+      }
+      if (!srcLayer) { console.warn('[move] drop-into source missing for', label); continue }
+
+      const entryUpdates = await flattenLayerTree(history, srcLayer, [...targetParentSegments, label])
+
+      // Land after the target's existing children — fold the index into the SAME
+      // cascade (a post-commit write races it; see the clipboard paste-target fix).
+      const topKey = [...targetParentSegments, label].join('/')
+      const top = entryUpdates.find(u => u.segments.join('/') === topKey)
+      if (top) {
+        const sig = await this.#propsWithIndex(top.layer, nextIndex)
+        if (sig) top.layer = { ...top.layer, properties: [sig] }
+      }
+      treeUpdates.push(...entryUpdates)
+      landed.push(label)
+      nextIndex++
+    }
+
+    if (landed.length === 0) { this.cancelMove(source); return }
+
+    const landedSet = new Set(landed)
+    const newSourceChildren = sourceChildren.filter(c => !landedSet.has(c))
+    const newTargetChildren = [...targetChildren, ...landed]
+
+    EffectBus.emit('fs:changed', { segments: [...sourceSegments] })
+
+    // Seed the participant-local render index (hc:tile-props-index) for the moved
+    // tiles at their NEW location under the target. show-cell resolves a local
+    // tile's image ONLY through this index — without the seed a re-homed tile
+    // renders BLANK until a reload heals it. Same gap + fix as clipboard paste
+    // and swarm-adopt. FILL-IF-EMPTY (never disturb an existing image).
+    try {
+      const index = readTilePropsIndex()
+      let seeded = false
+      for (const u of treeUpdates) {
+        const props = (u.layer as { properties?: unknown }).properties
+        const propSig = Array.isArray(props) && typeof props[0] === 'string' ? props[0] : undefined
+        if (!propSig || !/^[0-9a-f]{64}$/.test(propSig)) continue
+        const segs = u.segments
+        if (segs.length === 0) continue
+        const key = await cellLocationSig(segs.slice(0, -1), segs[segs.length - 1])
+        if (!key || index[key]) continue
+        index[key] = propSig
+        seeded = true
+      }
+      if (seeded) writeTilePropsIndex(index)
+    } catch (err) {
+      console.warn('[move] props-index seed skipped', err)
+    }
+
+    // ONE atomic cascade: the source parent DROPS the moved names from its
+    // children, the target GAINS them, and each subtree is re-homed under the
+    // target. Because the source parent's new children list excludes the moved
+    // names, this is a true MOVE — the tiles can never linger as copies.
+    await committer.importTree([
+      { segments: [...sourceSegments], layer: { ...sourceParent, children: newSourceChildren } },
+      { segments: [...targetParentSegments], layer: { ...(targetLayer ?? {}), children: newTargetChildren } },
+      ...treeUpdates,
+    ])
+
+    // The moved cells leave THIS level (now children of the target). Carry the
+    // source segments explicitly — the awaited commit means a segment-less emit
+    // could bind the removal to wherever the user navigated mid-commit.
+    for (const label of landed) {
       EffectBus.emit('cell:removed', { cell: label, segments: [...sourceSegments] })
     }
 
-    // clear all overlays
+    // Stay at the current level — the moved tiles simply vanish into the target
+    // ("you won't see them anymore"). No navigation; clear the now-gone tiles
+    // from the selection.
+    const selection = this.resolve<any>('selection')
+    selection?.clear?.()
+
     this.emitEffect('move:preview', null)
     this.emitEffect('move:drop-into', null)
     this.emitEffect('move:committed', { order: [] })
 
-    // reset move state
     this.#dropIntoActive = false
     this.#dropIntoLabel = null
     this.#lastHoverAxial = null
     this.#reset(source)
 
-    // re-seed selection at the next level — the labels exist in the
-    // target's children dir now, so when the new layer renders they
-    // will be drawn as already selected
-    const selection = this.resolve<any>('selection')
-    if (selection?.clear && selection?.add) {
-      selection.clear()
-      for (const label of movedLabels) selection.add(label)
+    void new hypercomb().act()
+  }
+
+  /**
+   * Promote tiles UP one level — re-home them from the CURRENT location into its
+   * PARENT, as siblings of the current location's own tile (the inverse of
+   * drop-into). No-op at the root (no parent). ONE atomic importTree, the same
+   * re-home primitive as drop-into / clipboard paste, and it seeds the render
+   * index so the promoted tiles aren't blank at their new location. Driven from
+   * the selection menu (whole selection) and the tile kebab (one label).
+   */
+  commitPromoteToParent = async (labels: readonly string[]): Promise<void> => {
+    const moved = [...new Set(labels)].filter(Boolean)
+    if (moved.length === 0) return
+
+    const history = window.ioc.get<PlacementHistory>('@diamondcoreprocessor.com/HistoryService')
+    const committer = window.ioc.get<CopyCommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
+    const lineage = this.resolve<any>('lineage')
+    if (!history || !committer || !lineage) return
+
+    const sourceSegments: readonly string[] = lineage.explorerSegments?.() ?? []
+    if (sourceSegments.length === 0) {
+      EffectBus.emit('toast:show', { type: 'info', title: 'Already at the top', message: 'These tiles are at the root — there is no parent to promote to.' })
+      return
+    }
+    const parentSegments = sourceSegments.slice(0, -1)
+
+    const cursor = window.ioc.get<{ state?: { rewound?: boolean } }>('@diamondcoreprocessor.com/HistoryCursorService')
+    if (cursor?.state?.rewound) {
+      EffectBus.emit('toast:show', { type: 'info', title: 'Viewing history', message: 'Can’t move while scrubbed back — return to the latest (Restore) to edit.' })
+      return
     }
 
-    // navigate into the target — its children now include the moved tiles
-    lineage?.explorerEnter?.(targetLabel)
+    try {
+      const sourceParent = await this.#resolveCurrentParent(history, lineage, sourceSegments)
+      const sourceChildren = await childNamesOf(history, sourceParent)
+      // SAFETY: a MOVE removes the names from the source — only commit when the
+      // source resolved AND actually holds the tiles (a cold resolve would
+      // otherwise write an empty children list and wipe the level).
+      if (!sourceParent || !moved.every(l => sourceChildren.includes(l))) {
+        console.warn('[move] promote aborted — source unresolved', { moved, sourceChildren })
+        return
+      }
 
-    void new hypercomb().act()
+      const destParent = await resolveLayerAt(history, lineage.domain, parentSegments)
+      const destChildren = await childNamesOf(history, destParent)
+      const destTaken = new Set(destChildren)
+
+      const treeUpdates: CopyTreeUpdate[] = []
+      const landed: string[] = []
+      let nextIndex = destChildren.length
+
+      for (const label of moved) {
+        // Names are immutable identity — never collide a promoted tile with an
+        // existing sibling at the parent. Skip (don't clobber) on a name clash.
+        if (destTaken.has(label)) { console.warn('[move] promote skipped — name exists at parent', label); continue }
+        const viaParent = await childLayerOf(history, sourceParent, label)
+        let srcLayer = viaParent?.layer ?? null
+        if (!srcLayer) {
+          const ownSig = await history.sign({ domain: lineage.domain, explorerSegments: () => [...sourceSegments, label] })
+          srcLayer = await history.currentLayerAt(ownSig)
+        }
+        if (!srcLayer) { console.warn('[move] promote source missing for', label); continue }
+
+        const entryUpdates = await flattenLayerTree(history, srcLayer, [...parentSegments, label])
+        const topKey = [...parentSegments, label].join('/')
+        const top = entryUpdates.find(u => u.segments.join('/') === topKey)
+        if (top) {
+          const sig = await this.#propsWithIndex(top.layer, nextIndex)
+          if (sig) top.layer = { ...top.layer, properties: [sig] }
+        }
+        treeUpdates.push(...entryUpdates)
+        landed.push(label)
+        destTaken.add(label)
+        nextIndex++
+      }
+
+      if (landed.length === 0) return
+
+      const landedSet = new Set(landed)
+      const newSourceChildren = sourceChildren.filter(c => !landedSet.has(c))
+      const newDestChildren = [...destChildren, ...landed]
+
+      EffectBus.emit('fs:changed', { segments: [...sourceSegments] })
+
+      // Seed the render index for the promoted tiles at their NEW (parent)
+      // location — same gap/fix as drop-into and clipboard paste.
+      try {
+        const index = readTilePropsIndex()
+        let seeded = false
+        for (const u of treeUpdates) {
+          const props = (u.layer as { properties?: unknown }).properties
+          const propSig = Array.isArray(props) && typeof props[0] === 'string' ? props[0] : undefined
+          if (!propSig || !/^[0-9a-f]{64}$/.test(propSig)) continue
+          const segs = u.segments
+          if (segs.length === 0) continue
+          const key = await cellLocationSig(segs.slice(0, -1), segs[segs.length - 1])
+          if (!key || index[key]) continue
+          index[key] = propSig
+          seeded = true
+        }
+        if (seeded) writeTilePropsIndex(index)
+      } catch (err) {
+        console.warn('[move] promote props-index seed skipped', err)
+      }
+
+      // ONE atomic cascade: the current location DROPS the promoted names, the
+      // parent GAINS them, and each subtree is re-homed under the parent.
+      await committer.importTree([
+        { segments: [...sourceSegments], layer: { ...sourceParent, children: newSourceChildren } },
+        { segments: [...parentSegments], layer: { ...(destParent ?? {}), children: newDestChildren } },
+        ...treeUpdates,
+      ])
+
+      // The promoted cells leave THIS level (they're at the parent now). Carry
+      // the source segments explicitly.
+      for (const label of landed) {
+        EffectBus.emit('cell:removed', { cell: label, segments: [...sourceSegments] })
+      }
+
+      const selection = this.resolve<any>('selection')
+      selection?.clear?.()
+      this.emitEffect('move:committed', { order: [] })
+      void new hypercomb().act()
+    } catch (err) {
+      console.warn('[move] commitPromoteToParent failed:', err)
+    }
   }
 
   /**
@@ -543,23 +748,17 @@ export class MoveDrone extends Drone {
    * confirmation: letting go fired this. ONE importTree cascade = one marker
    * per affected ancestor.
    */
-  commitCopyAt = async (finalAxial: Axial, source: string): Promise<void> => {
-    if (this.#activeSource !== source) return
-    if (!this.#anchorAxial) { this.#reset(source); return }
-
-    let didCommit = false
-    try {
-      didCommit = await this.#commitCopyUnsafe(finalAxial)
-    } catch (err) {
-      console.warn('[move] commitCopyAt failed:', err)
-      this.emitEffect('move:preview', null)
-      this.emitEffect('move:copy-drag', null)
-    } finally {
-      this.#copyMode = false
-      this.#lastHoverAxial = null
-      this.#reset(source)
-    }
-    if (didCommit) void new hypercomb().act()
+  commitCopyAt = async (_finalAxial: Axial, source: string): Promise<void> => {
+    // Copy-on-drag is REMOVED. A duplicate would mint a same-content tile with an
+    // auto-generated name, but in Hypercomb the NAME is the immutable identity —
+    // a copy is only meaningful if you choose the new name up front (drop the
+    // icon into the command line like an image drop and type it). The drag
+    // gesture is MOVE / drop-into ONLY. This path must NEVER produce a copy: if
+    // anything ever reaches it, surface an error and cancel — no silent duplicate.
+    // (#commitCopyUnsafe is kept, unused, as the reference for the future
+    // named-duplicate flow.)
+    console.error('[move] commitCopyAt reached but copy-on-drag is removed — cancelled, no copy made')
+    this.cancelMove(source)
   }
 
   async #commitCopyUnsafe(finalAxial: Axial): Promise<boolean> {

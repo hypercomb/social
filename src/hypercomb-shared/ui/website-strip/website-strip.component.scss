@@ -1,0 +1,73 @@
+// hypercomb-shared/ui/website-strip/website-strip.component.scss
+//
+// Top-center site launcher. Cold/clean/frosted to match the chrome family
+// (steel hairline 126,182,214). Sits in the chrome band, above the Pixi canvas
+// AND the site-view host, so it's reachable while reading a site too.
+
+@use '../breakpoints' as *;
+
+$steel: rgb(126, 182, 214);
+
+:host { display: contents; }
+
+.ws-strip {
+  position: fixed;
+  top: 0.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 59996;
+
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  max-width: min(70vw, 44rem);
+  overflow-x: auto;
+  padding: 0.28rem 0.4rem;
+
+  background: color-mix(in srgb, var(--md-surface-c-low, #12161c) 80%, transparent);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba($steel, 0.32);
+  border-radius: 999px;
+  box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4);
+
+  // thin, unobtrusive scrollbar when there are many sites
+  scrollbar-width: thin;
+  scrollbar-color: rgba($steel, 0.4) transparent;
+  &::-webkit-scrollbar { height: 4px; }
+  &::-webkit-scrollbar-thumb { background: rgba($steel, 0.4); border-radius: 4px; }
+}
+
+.ws-icon {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  color: rgba(226, 235, 244, 0.82);
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease, transform 150ms ease;
+
+  .mat-sym {
+    font-family: 'Material Symbols Outlined';
+    font-size: 1.2rem;
+    line-height: 1;
+  }
+
+  &:hover {
+    color: #fff;
+    background: rgba($steel, 0.14);
+    border-color: rgba($steel, 0.5);
+  }
+  &:active { transform: scale(0.92); }
+  &:focus-visible { outline: 1px solid rgba($steel, 0.6); outline-offset: 2px; }
+}
+
+@include phone-only {
+  .ws-strip { top: 0.35rem; max-width: calc(100vw - 1.2rem); }
+  .ws-icon { width: 1.85rem; height: 1.85rem; .mat-sym { font-size: 1.1rem; } }
+}
