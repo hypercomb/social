@@ -371,6 +371,94 @@ function send(ws, msg) {
   if (ws.readyState === 1) try { ws.send(JSON.stringify(msg)) } catch {}
 }
 
+// ── swarm lifecycle last-will (server-side LWT) ───────────────────────────────
+//
+// The swarm's presence protocol publishes a parameterized-replaceable
+// "lifecycle" event (kind 30206) on a shared per-zone channel:
+//   { alive: true }  — a periodic liveness beacon (NIP-40 expiry)
+//   { left:  true }  — an explicit tombstone on graceful leave
+// Receivers drop ALL of a participant's witnessed tiles on {left:true}.
+//
+// A tab that crashes / is killed can't send its own tombstone (a WebSocket
+// send during unload usually doesn't flush). This is the classic MQTT
+// Last-Will case, and the fix is the same: the SERVER emits the tombstone
+// when the socket dies. We remember the last {alive} beacon each connection
+// published (x-tag = zone channel sig, d-tag = pubkey) and, on disconnect,
+// synthesize + store + broadcast a {left:true} tombstone with created_at =
+// now — guaranteed newer than the beacon, so NIP-33 eviction replaces it
+// and every member drops the departed peer instantly instead of waiting out
+// the ~90s beacon expiry.
+//
+// The synthesized event is UNSIGNED: the relay can't sign as the user, and a
+// fresh created_at is required for correct eviction (a pre-signed will would
+// carry a stale timestamp and lose to its own newer beacon). The swarm mesh
+// client trusts relay delivery and does not re-verify; a lifecycle tombstone
+// can only REMOVE a peer's tiles (never inject content), and a relay can
+// already drop a peer's events, so this grants it no new power. If a client
+// is ever hardened to verify signatures on receive, switch to a client-
+// registered pre-signed WILL that is re-signed on every beacon.
+const LIFECYCLE_KIND = 30206
+const LIFECYCLE_WILL_TTL = 300  // seconds the synthesized tombstone lingers for late joiners
+
+function lifecycleInfo(evt) {
+  const tags = Array.isArray(evt.tags) ? evt.tags : []
+  const x = tags.find((t) => Array.isArray(t) && t[0] === 'x')?.[1]
+  const d = tags.find((t) => Array.isArray(t) && t[0] === 'd')?.[1]
+  if (!x || !d) return null
+  let left = false
+  try { const c = JSON.parse(evt.content || '{}'); left = !!(c && c.left === true) } catch {}
+  return { x: String(x), d: String(d), pubkey: String(evt.pubkey || ''), left }
+}
+
+// Arm (or disarm) a connection's last-will from its lifecycle events.
+// {alive} arms the will; an explicit {left} disarms it (the client left
+// gracefully — no need for the server to fire a duplicate on close).
+function trackLifecycle(client, evt) {
+  const info = lifecycleInfo(evt)
+  if (!info || !info.pubkey) return
+  const key = info.x + '\0' + info.d
+  if (info.left) { client.lifecycle.delete(key); return }
+  client.lifecycle.set(key, { x: info.x, d: info.d, pubkey: info.pubkey })
+}
+
+function computeEventId(evt) {
+  // NIP-01 id: sha256 of the canonical serialization.
+  const serial = JSON.stringify([0, evt.pubkey, evt.created_at, evt.kind, evt.tags, evt.content])
+  return sha256Hex(Buffer.from(serial, 'utf8'))
+}
+
+function synthTombstone(xSig, dTag, pubkey, nowSec) {
+  const tags = [['x', xSig], ['d', dTag], ['expiration', String(nowSec + LIFECYCLE_WILL_TTL)]]
+  const content = JSON.stringify({ left: true })
+  const evt = { pubkey, created_at: nowSec, kind: LIFECYCLE_KIND, tags, content }
+  evt.id = computeEventId(evt)
+  evt.sig = ''  // relay-synthesized last-will (see comment above)
+  return evt
+}
+
+// Fire a connection's last-will on disconnect: one tombstone per zone the
+// connection beaconed in. The closing socket is excluded from broadcast()
+// (readyState check + sourceWs skip), so only the remaining members get it.
+function fireWills(client) {
+  if (!client.lifecycle || client.lifecycle.size === 0) return
+  const nowSec = Math.floor(Date.now() / 1000)
+  for (const { x, d, pubkey } of client.lifecycle.values()) {
+    const tomb = synthTombstone(x, d, pubkey, nowSec)
+    try { insertEvent(tomb) } catch {}
+    broadcast(tomb, client.ws)
+  }
+  client.lifecycle.clear()
+}
+
+// One disconnect path for both 'close' and 'error' — guarded so the will
+// fires at most once.
+function handleDisconnect(client) {
+  if (client.closed) return
+  client.closed = true
+  try { fireWills(client) } catch {}
+  clients.delete(client)
+}
+
 function handleMessage(client, raw) {
   if (typeof raw !== 'string') return
   if (Buffer.byteLength(raw, 'utf8') > cfg.maxEventSize) {
@@ -415,6 +503,10 @@ function handleMessage(client, raw) {
     insertEvent(evt)
     send(client.ws, ['OK', evt.id, true, ''])
     broadcast(evt, client.ws)
+    // Arm/disarm this connection's last-will from lifecycle beacons so we
+    // can tombstone it server-side if the socket dies without a graceful
+    // {left} (tab crash / kill — see fireWills).
+    if (Number(evt.kind) === LIFECYCLE_KIND) trackLifecycle(client, evt)
     return
   }
 
@@ -841,7 +933,7 @@ const wss = new WebSocketServer({ server })
 
 wss.on('connection', (ws, req) => {
   const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown'
-  const client = { ws, ip, authed: !authRequired, pubkey: null, challenge: null, subs: new Map() }
+  const client = { ws, ip, authed: !authRequired, pubkey: null, challenge: null, subs: new Map(), lifecycle: new Map(), closed: false }
 
   if (authRequired) {
     client.challenge = makeChallenge()
@@ -851,8 +943,8 @@ wss.on('connection', (ws, req) => {
   clients.add(client)
 
   ws.on('message', (data) => handleMessage(client, String(data)))
-  ws.on('close', () => clients.delete(client))
-  ws.on('error', () => clients.delete(client))
+  ws.on('close', () => handleDisconnect(client))
+  ws.on('error', () => handleDisconnect(client))
 })
 
 // periodic cleanup

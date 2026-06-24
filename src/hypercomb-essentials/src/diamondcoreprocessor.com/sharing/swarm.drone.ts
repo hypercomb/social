@@ -101,6 +101,31 @@ const SWARM_PRESENCE_KIND = 30204
 // navigation, no broadcast involved.
 const SWARM_SUBSCRIBE_REQUEST_KIND = 30205
 
+// Swarm lifecycle (presence roster) event. ONE shared channel per zone
+// (sha256(`lifecycle\0room\0secret`)) that EVERY participant subscribes
+// to — so a single broadcast reaches the whole swarm regardless of which
+// location each member is currently viewing. Two payload shapes, both
+// replaceable per (pubkey, kind, d-tag=pubkey):
+//
+//   { alive: true, label? }  — a periodic liveness beacon. Identity-level
+//       presence DECOUPLED from location: a participant who navigates
+//       deep keeps beaconing here, so their tiles at shallower locations
+//       they already contributed to stay live (the per-location heartbeat
+//       can't do this — it only refreshes the location you're sitting at).
+//       Carries an `expiration` tag (EVENT_TTL_SECS) so a crashed peer's
+//       beacon lapses and the identity-level staleness sweep evicts them.
+//
+//   { left: true }           — a one-shot tombstone published on GRACEFUL
+//       leave (mesh-public off, zone change, tab close). Receivers run
+//       evictPubkey() → every tile that participant contributed, at every
+//       location, drops at once. This is the instant path; the beacon
+//       expiry is only the fallback for the death you can't announce.
+//
+// Removal is therefore EVENT-DRIVEN (tombstone) with a single timer as a
+// dead-man's-switch (beacon expiry) — never the navigation-coupled flush
+// that made a peer's tiles vanish when YOU moved.
+const SWARM_LIFECYCLE_KIND = 30206
+
 // Debug logging — gated on the same master flag the mesh uses
 // (localStorage['hc:nostrmesh:debug'] = '1'). The publish walk logs PER
 // NODE PER PASS and passes run on every heartbeat; ungated, a session
@@ -472,13 +497,32 @@ export class SwarmDrone extends Drone {
   #peerLayersBySig = new Map<string, Map<string, SwarmLayerPayload>>()
 
   // Wall-clock time (ms) we last saw an event from each peer at each
-  // sig. Drives the staleness eviction below — a peer that hasn't
-  // republished within PEER_STALE_MS is assumed offline and gets
-  // evicted from the cache + the renderer is told to repaint without
-  // their tiles. Mirrors the relay's NIP-40 expiration on the client
-  // side so we don't keep showing a peer's tiles after their event
-  // has lapsed in the relay's cache.
+  // sig. Retained for freshest-first ORDERING in peerTilesAtSig. Liveness
+  // (whether a peer's tiles render at all, and when they're swept) is now
+  // identity-level via #participantAliveMs below — a peer who navigated
+  // away from this location is still alive globally, so their tiles here
+  // must not be filtered just because this per-location stamp went cold.
   #peerLastSeenMsBySig = new Map<string, Map<string, number>>()
+
+  // Identity-level liveness (pubkey -> last-seen ms), DECOUPLED from
+  // location. Fed by the shared lifecycle-channel alive beacon (and any
+  // other event from the peer). A participant is "present" — and all the
+  // tiles they've contributed anywhere stay live — as long as this stamp
+  // is fresh. Cleared for a pubkey on their tombstone or staleness sweep,
+  // and wholesale on zone change / going private. This is the single
+  // source of truth for "is this peer still here?", replacing the
+  // per-location staleness that made tiles vanish when a peer moved deep.
+  #participantAliveMs = new Map<string, number>()
+
+  // Subscription to the shared per-zone lifecycle channel + the channel's
+  // composed sig (cached so leave/teardown can publish a tombstone to the
+  // SAME sig even after the zone credentials are about to change).
+  #lifecycleSub: { close: () => void } | null = null
+  #lifecycleSig = ''
+  // Wall-clock (ms) of our last alive beacon. Throttles the beacon to the
+  // NIP-40 refresh cadence instead of firing on every navigation — the
+  // heartbeat keeps it alive; nav-time calls within the window no-op.
+  #lastBeaconMs = 0
 
   // Per-pubkey-per-lineage hidden-tile names. Populated from kind-
   // 30202 events (SWARM_HIDE_KIND). The publisher's own hide event
@@ -678,22 +722,37 @@ export class SwarmDrone extends Drone {
   // actual peers.
   #sweepStalePeers = (): void => {
     const nowMs = Date.now()
-    for (const [sig, bag] of this.#peerLayersBySig) {
-      const lastSeenBag = this.#peerLastSeenMsBySig.get(sig)
-      if (!lastSeenBag) continue
-      let evicted = false
-      for (const [pubkey] of bag) {
-        const lastMs = lastSeenBag.get(pubkey)
-        if (lastMs === undefined) continue
-        if (nowMs - lastMs > PEER_STALE_MS) {
-          bag.delete(pubkey)
-          lastSeenBag.delete(pubkey)
-          evicted = true
-        }
+    // IDENTITY-LEVEL staleness — the crash backstop for a peer who left
+    // without a tombstone (tab kill / lost connection). A peer is gone
+    // only when NOTHING has been heard from them anywhere — neither a
+    // lifecycle beacon nor a per-location event — within PEER_STALE_MS.
+    // We take the freshest signal across both so a peer who is quietly
+    // sitting deep in their own tree (still beaconing) is never swept.
+    const freshest = new Map<string, number>()
+    const note = (pk: string, ms: number | undefined): void => {
+      if (ms === undefined) return
+      const cur = freshest.get(pk)
+      if (cur === undefined || ms > cur) freshest.set(pk, ms)
+    }
+    for (const [pk, ms] of this.#participantAliveMs) note(pk, ms)
+    for (const lastSeenBag of this.#peerLastSeenMsBySig.values()) {
+      for (const [pk, ms] of lastSeenBag) note(pk, ms)
+    }
+    // A cached peer we somehow have no timestamp for (e.g. injected by
+    // late-joiner recovery before any stamp landed) gets a grace stamp
+    // now — a full window before eviction rather than an instant drop.
+    for (const bag of this.#peerLayersBySig.values()) {
+      for (const pk of bag.keys()) {
+        if (!freshest.has(pk)) { this.#participantAliveMs.set(pk, nowMs); freshest.set(pk, nowMs) }
       }
-      if (evicted) {
-        this.#schedulePeersChangedEmit({ sig, pubkey: '', reason: 'stale-peer-evicted' })
-      }
+    }
+    for (const [pk, ms] of freshest) {
+      if (nowMs - ms <= PEER_STALE_MS) continue
+      this.#participantAliveMs.delete(pk)
+      this.#segmentsByPubkey.delete(pk)
+      // evictPubkey drops every tile this peer contributed at every
+      // location and emits swarm:peers-changed per affected sig.
+      this.evictPubkey(pk)
     }
   }
 
@@ -793,6 +852,7 @@ export class SwarmDrone extends Drone {
     const affectedSigs = [...this.#peerLayersBySig.keys()]
     this.#peerLayersBySig.clear()
     this.#peerLastSeenMsBySig.clear()
+    this.#participantAliveMs.clear()
     this.#lastPublishedBySig.clear()
     this.#lastPublishTimeMsBySig.clear()
     for (const sig of affectedSigs) {
@@ -812,6 +872,9 @@ export class SwarmDrone extends Drone {
   // drop the published-resource memo so a re-mount re-asserts.
   // Effect subscriptions are auto-cleaned by the base.
   protected override dispose(): void {
+    // Best-effort graceful leave on teardown.
+    void this.#publishLeave()
+    if (this.#lifecycleSub) { try { this.#lifecycleSub.close() } catch { /* ignore */ } this.#lifecycleSub = null }
     if (this.#heartbeatTimer) {
       clearInterval(this.#heartbeatTimer)
       this.#heartbeatTimer = null
@@ -832,6 +895,14 @@ export class SwarmDrone extends Drone {
   protected override heartbeat = async (): Promise<void> => {
     if (this.#initialized) return
     this.#initialized = true
+
+    // Best-effort graceful leave when the tab/page goes away. A WebSocket
+    // publish during unload often doesn't flush (the lifecycle beacon's
+    // NIP-40 expiry is the reliable backstop), but when it does land,
+    // peers drop our tiles instantly instead of waiting out the window.
+    if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+      window.addEventListener('pagehide', () => { void this.#publishLeave() })
+    }
 
     // Backup trigger — if show-cell happens to be running its render
     // loop, ride its emit. The primary trigger is lineage `change`
@@ -921,12 +992,19 @@ export class SwarmDrone extends Drone {
       }
 
       if (payload?.public === false) {
+        // Graceful leave — tell the whole swarm we're gone in one shot so
+        // peers drop our tiles immediately instead of waiting on beacon
+        // expiry. Fire-and-forget; the beacon expiry is the backstop.
+        void this.#publishLeave()
+        if (this.#lifecycleSub) { try { this.#lifecycleSub.close() } catch { /* ignore */ } this.#lifecycleSub = null }
+        this.#lifecycleSig = ''
         for (const sub of this.#subsBySig.values()) {
           try { sub.close() } catch { /* ignore */ }
         }
         this.#subsBySig.clear()
         this.#peerLayersBySig.clear()
         this.#peerLastSeenMsBySig.clear()
+        this.#participantAliveMs.clear()
         this.#lastPublishedBySig.clear()
         this.#lastPublishTimeMsBySig.clear()
         // Resource subs ride the same mesh socket as layer subs; tear
@@ -1068,7 +1146,7 @@ export class SwarmDrone extends Drone {
     // 30210/30211/30212 = the feedback handshake (request / grant / post),
     // owned by FeedbackSwarmDrone. Same rule as above: omit them and the
     // relay filter drops the events as a silent miss.
-    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND, 20400, 30401, 30210, 30211, 30212], true)
+    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND, SWARM_LIFECYCLE_KIND, 20400, 30401, 30210, 30211, 30212], true)
   }
 
   /**
@@ -1142,13 +1220,15 @@ export class SwarmDrone extends Drone {
     const sigRe = /^[0-9a-f]{64}$/
     for (const [pubkey, layer] of sortedPeers) {
       if (this.#myPubkey && pubkey === this.#myPubkey) continue
-      // Stale-peer filter — skip any peer whose last event is older
-      // than PEER_STALE_MS. Same threshold the sweep uses for hard
-      // eviction; doing the check here too means a peer that's gone
-      // stale between sweeps still doesn't leak through to the
-      // renderer.
-      const lastMs = lastSeenBag.get(pubkey)
-      if (lastMs !== undefined && nowMs - lastMs > PEER_STALE_MS) continue
+      // Stale-peer filter — IDENTITY-LEVEL, not per-location. A peer who
+      // navigated deep is still present globally (their lifecycle beacon
+      // keeps #participantAliveMs fresh), so their tiles at this location
+      // must NOT be filtered just because this per-location stamp went
+      // cold. Same PEER_STALE_MS threshold the sweep uses; a peer only
+      // drops when nothing has been heard from them ANYWHERE in that
+      // window (or a tombstone arrived).
+      const aliveMs = this.#participantAliveMs.get(pubkey)
+      if (aliveMs !== undefined && nowMs - aliveMs > PEER_STALE_MS) continue
       const visuals = Array.isArray(layer?.visuals) ? layer.visuals : []
       for (const v of visuals) {
         if (!v || typeof v !== 'object' || Array.isArray(v)) continue
@@ -1385,6 +1465,11 @@ export class SwarmDrone extends Drone {
     // navigation-sync.
     void this.#publishMyPresence(segments)
 
+    // Shared lifecycle channel — subscribe once + beacon our presence on
+    // the per-zone roster sig, so every member learns when we leave
+    // regardless of where they are. Identity-level liveness lives here.
+    void this.#ensureLifecycle()
+
     // Presence-glow publish — while we're inside a child, re-announce
     // ourselves to the PARENT's sig so peers viewing the parent see a
     // glow on the tile we're exploring. No-op at root. Fire-and-forget.
@@ -1413,6 +1498,15 @@ export class SwarmDrone extends Drone {
   // swarm:peers-changed so show-cell repaints without the now-orphaned
   // peer entries from the previous credential pair.
   #teardownAndResync = (reason: string): void => {
+    // Leaving this zone — tombstone ourselves on the OLD lifecycle channel
+    // before the credentials change, so members of the zone we're leaving
+    // drop our tiles at once. Capture the sig first; #ensureLifecycle will
+    // recompute + resubscribe for the new zone via #syncForCurrentLineage.
+    const leavingLifecycleSig = this.#lifecycleSig
+    if (leavingLifecycleSig) void this.#publishLeave(leavingLifecycleSig)
+    if (this.#lifecycleSub) { try { this.#lifecycleSub.close() } catch { /* ignore */ } this.#lifecycleSub = null }
+    this.#lifecycleSig = ''
+    this.#participantAliveMs.clear()
     for (const sub of this.#subsBySig.values()) {
       try { sub.close() } catch { /* ignore */ }
     }
@@ -1452,16 +1546,22 @@ export class SwarmDrone extends Drone {
   #syncForSig = async (sig: string): Promise<void> => {
     if (!sig) return
 
-    // Flush state from the OUTGOING lineage when navigation moves us to
-    // a different sig. Without this, every visited lineage accumulates a
-    // permanent subscription + peer cache, and peer events received at
-    // an earlier lineage stay subscribed forever — paying relay
-    // bandwidth + memory for state the user can no longer see, and
-    // (more visibly) keeping stale tiles in peerLayersBySig for old
-    // composed sigs that show-cell's lineage-keyed render cache may
-    // surface on a quick nav back. Location change must mean: stop
-    // listening here, drop peer state here, then pick up at the new
-    // location.
+    // Leaving a lineage closes our live subscription there (bandwidth —
+    // stop listening at locations we can no longer see) but RETAINS the
+    // peer state we witnessed. Peer tiles at a filter location are
+    // STICKY: per the lineage-filter doctrine ("empty layer = removal"),
+    // a participant's tiles vanish only when THAT participant posts an
+    // empty layer there (explicit retract, applied in #onEvent) or their
+    // session goes stale (#sweepStalePeers + the read-time filter in
+    // peerTilesAtSig, both keyed on PEER_STALE_MS). The user's OWN
+    // navigation must never remove them — deleting #peerLayersBySig here
+    // was the "go into a tile and back and the participant's tiles are
+    // gone" bug. Only our own per-sig publish/interest bookkeeping is
+    // cleared for the outgoing sig; the witnessed peer state persists.
+    //
+    // No cross-location leak: the TileSourceRegistry source resolves peer
+    // tiles by the RENDERED location's sig (composeSigForSegments), not
+    // #currentSig, so retained state for other sigs never surfaces here.
     const prevSig = this.#currentSig
     if (prevSig && prevSig !== sig) {
       const prevSub = this.#subsBySig.get(prevSig)
@@ -1469,24 +1569,17 @@ export class SwarmDrone extends Drone {
         try { prevSub.close() } catch { /* ignore */ }
         this.#subsBySig.delete(prevSig)
       }
-      this.#peerLayersBySig.delete(prevSig)
-      this.#peerLastSeenMsBySig.delete(prevSig)
+      // RETAINED across navigation (deliberately NOT deleted):
+      //   #peerLayersBySig, #peerLastSeenMsBySig, #hiddenByPubkeyBySig
+      // — the witnessed peer tiles + their freshness stamps + peer hide
+      // filters, which must persist until the peer retracts or goes stale.
       this.#lastPublishedBySig.delete(prevSig)
       this.#lastPublishTimeMsBySig.delete(prevSig)
-      this.#hiddenByPubkeyBySig.delete(prevSig)
       this.#interestByChildBySig.delete(prevSig)
       this.#interestSeenBySig.delete(prevSig)
       this.#myInterestBySig.delete(prevSig)
       this.#lastPublishedHideBySig.delete(prevSig)
       this.#lastHidePublishTimeMsBySig.delete(prevSig)
-      // Tell show-cell to drop any peer tiles it surfaced for the OLD
-      // sig so the render that follows the lineage change starts from
-      // a clean peer slate. Without this emit, a render that lands
-      // before the new sig's subscription returns events would still
-      // see the previous lineage's peer tiles in show-cell's tracked
-      // peerCellSet (cleared on next pass but a single stale frame is
-      // enough to be visible during fast navigation).
-      this.emitEffect('swarm:peers-changed', { sig: prevSig, reason: 'lineage-change-flush' })
     }
 
     this.#currentSig = sig
@@ -1744,6 +1837,11 @@ export class SwarmDrone extends Drone {
     let lastSeenBag = this.#peerLastSeenMsBySig.get(sig)
     if (!lastSeenBag) { lastSeenBag = new Map(); this.#peerLastSeenMsBySig.set(sig, lastSeenBag) }
     lastSeenBag.set(pubkey, Date.now())
+    // Also feed identity-level liveness — a layer event is proof of life
+    // regardless of which location it came from. The lifecycle beacon is
+    // the primary signal, but stamping here keeps pre-beacon / legacy
+    // peers alive while their tiles are on screen.
+    this.#participantAliveMs.set(pubkey, Date.now())
 
     // Domain attribution — the publisher advertised their host as a
     // ['domain', …] tag (mirroring the broker's 30401 responses). Record it
@@ -3265,6 +3363,122 @@ const payload: SwarmLayerPayload = myLabel
     if (changed) {
       this.emitEffect('swarm:leader-moved', { pubkey, segments })
     }
+  }
+
+  // ─────────────────────────────────────────────────────────────────
+  // Swarm lifecycle channel — shared per-zone presence roster
+  // ─────────────────────────────────────────────────────────────────
+  //
+  // One sig per (room, secret) that EVERY participant subscribes to, so a
+  // single broadcast reaches the whole swarm regardless of location. See
+  // SWARM_LIFECYCLE_KIND for the wire shape. This is what makes removal
+  // event-driven + identity-scoped instead of navigation-coupled.
+
+  #computeLifecycleSig = async (): Promise<string> => {
+    const sigStore = this.#getSignatureStore()
+    if (!sigStore?.signText) return ''
+    const room = this.#getRoomStore()?.value?.trim() ?? ''
+    const secret = this.#getSecretStore()?.value?.trim() ?? ''
+    if (!room || !secret) return ''
+    try { return await sigStore.signText(`lifecycle\0${room}\0${secret}`) }
+    catch { return '' }
+  }
+
+  // Subscribe to the current zone's lifecycle channel (once) and beacon
+  // our presence. Idempotent — safe on every sync + heartbeat. Re-points
+  // the subscription if the zone sig changed.
+  #ensureLifecycle = async (): Promise<void> => {
+    const mesh = this.#getMesh()
+    if (!mesh?.subscribe) return
+    const sig = await this.#computeLifecycleSig()
+    if (!sig) return
+    if (sig !== this.#lifecycleSig) {
+      if (this.#lifecycleSub) { try { this.#lifecycleSub.close() } catch { /* ignore */ } this.#lifecycleSub = null }
+      this.#lifecycleSig = sig
+      this.#lastBeaconMs = 0  // new zone — beacon immediately
+    }
+    if (!this.#lifecycleSub) {
+      this.#lifecycleSub = mesh.subscribe(sig, (evt) => this.#onLifecycleEvent(evt))
+    }
+    void this.#publishAlive()
+  }
+
+  // Liveness beacon — replaceable per (pubkey, kind, d-tag=pubkey) with a
+  // NIP-40 expiration so a crashed peer's presence lapses on its own.
+  #publishAlive = async (): Promise<void> => {
+    const mesh = this.#getMesh()
+    if (!mesh?.publish) return
+    const myPubkey = this.#myPubkey
+    if (!myPubkey) return
+    const sig = this.#lifecycleSig || await this.#computeLifecycleSig()
+    if (!sig) return
+    // Throttle to the NIP-40 refresh cadence — no point re-beaconing on
+    // every navigation when the slot is still comfortably alive.
+    const nowMs = Date.now()
+    if (nowMs - this.#lastBeaconMs < LAYER_REFRESH_MS) return
+    this.#lastBeaconMs = nowMs
+    const expirationSecs = Math.floor(nowMs / 1000) + EVENT_TTL_SECS
+    try {
+      await mesh.publish(SWARM_LIFECYCLE_KIND, sig, { alive: true }, [
+        ['d', myPubkey],
+        ['expiration', String(expirationSecs)],
+      ])
+    } catch (err) { console.warn('[swarm] publishAlive failed', err) }
+  }
+
+  // One-shot tombstone on graceful leave — replaces our beacon slot with
+  // { left: true }; every receiver evicts all our tiles at once. Reliable
+  // on explicit leave (toggle off / zone change / dispose); best-effort on
+  // tab close (a WebSocket send during unload may not flush — beacon
+  // expiry is the backstop). `explicitSig` lets teardown tombstone the OLD
+  // zone before its credentials change.
+  #publishLeave = async (explicitSig?: string): Promise<void> => {
+    const mesh = this.#getMesh()
+    if (!mesh?.publish) return
+    const myPubkey = this.#myPubkey
+    if (!myPubkey) return
+    const sig = explicitSig || this.#lifecycleSig || await this.#computeLifecycleSig()
+    if (!sig) return
+    try {
+      await mesh.publish(SWARM_LIFECYCLE_KIND, sig, { left: true }, [
+        ['d', myPubkey],
+        ['expiration', String(Math.floor(Date.now() / 1000) + EVENT_TTL_SECS)],
+      ])
+    } catch (err) { console.warn('[swarm] publishLeave failed', err) }
+  }
+
+  #onLifecycleEvent = (evt: MeshEvtLike): void => {
+    if (Number(evt.event?.kind) !== SWARM_LIFECYCLE_KIND) return
+    const pubkey = String(evt.event?.pubkey ?? '').trim().toLowerCase()
+    if (!pubkey) return
+    if (this.#myPubkey && pubkey === this.#myPubkey) return  // our own echo
+
+    const payload = evt.payload
+    const left = !!(payload && typeof payload === 'object' && (payload as { left?: unknown }).left === true)
+
+    if (left) {
+      // Tombstone — drop everything this participant contributed, at every
+      // location, in one shot (evictPubkey walks all sigs + repaints).
+      this.#participantAliveMs.delete(pubkey)
+      this.#segmentsByPubkey.delete(pubkey)
+      const res = this.evictPubkey(pubkey)
+      slog('[swarm] lifecycle tombstone', { pubkey: pubkey.slice(0, 8), ...res })
+      return
+    }
+
+    // Alive beacon — refresh identity-level liveness. Drop a beacon that's
+    // already past its own expiration / TTL so a stale relay replay can't
+    // resurrect a departed peer.
+    const nowSec = Math.floor(Date.now() / 1000)
+    const expTag = (evt.event?.tags ?? []).find(t => t[0] === 'expiration')?.[1]
+    if (expTag) {
+      const exp = Number(expTag)
+      if (Number.isFinite(exp) && exp <= nowSec) return
+    } else {
+      const createdAt = Number(evt.event?.created_at ?? 0)
+      if (createdAt > 0 && createdAt + EVENT_TTL_SECS < nowSec) return
+    }
+    this.#participantAliveMs.set(pubkey, Date.now())
   }
 
   /** Start following a participant's NAVIGATION — your view literally
