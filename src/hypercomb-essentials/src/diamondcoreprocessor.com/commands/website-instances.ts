@@ -14,10 +14,15 @@
 // already-generated page (that's a `visual:website:page` decoration, a
 // different kind).
 
+import { I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { removeDecoration } from './decoration-manifest.js'
 import { WEBSITE_PENDING_KIND } from './website.queen.js'
 
 const STYLE_ID = 'wl-overlay-styles'
+function t(key: string, params?: Record<string, string | number>): string {
+  const i18n = (window as any).ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined
+  return i18n?.t(key, params) ?? key
+}
 const SIG_RE = /^[0-9a-f]{64}$/
 /** Depth guard for the queue walk — matches the build drone's MAX_DEPTH. */
 const MAX_DEPTH = 24
@@ -159,18 +164,18 @@ export async function showWebsiteListPanel(): Promise<void> {
   header.className = 'wl-header'
   const title = document.createElement('span')
   title.className = 'wl-title'
-  title.textContent = 'Website build queue'
+  title.textContent = t('website.queue.title')
   const x = document.createElement('button')
   x.className = 'wl-close'
   x.textContent = '✕'
-  x.title = 'Close (Esc)'
+  x.title = t('website.queue.close-title')
   x.onclick = close
   header.append(title, x)
   panel.appendChild(header)
 
   const list = document.createElement('div')
   list.className = 'wl-list'
-  list.textContent = 'Loading…'
+  list.textContent = t('website.queue.loading')
   panel.appendChild(list)
 
   const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') { e.stopPropagation(); close() } }
@@ -187,12 +192,12 @@ export async function showWebsiteListPanel(): Promise<void> {
 }
 
 function render(list: HTMLDivElement, title: HTMLSpanElement, instances: WebsiteInstance[], close: () => void): void {
-  title.textContent = `Website build queue (${instances.length})`
+  title.textContent = t('website.queue.title-count', { count: instances.length })
   list.innerHTML = ''
   if (instances.length === 0) {
     const empty = document.createElement('div')
     empty.className = 'wl-empty'
-    empty.textContent = 'Nothing queued — use /website here on a cell to flag it for the next build'
+    empty.textContent = t('website.queue.empty')
     list.appendChild(empty)
     return
   }
@@ -203,7 +208,7 @@ function render(list: HTMLDivElement, title: HTMLSpanElement, instances: Website
 
     const link = document.createElement('button')
     link.className = 'wl-path'
-    link.title = 'Go to this cell'
+    link.title = t('website.queue.goto')
     const lead = document.createElement('span'); lead.className = 'wl-glyph'; lead.textContent = '◆'
     const text = document.createElement('span'); text.textContent = pathLabel(inst.segments)
     link.append(lead, text)
@@ -216,7 +221,7 @@ function render(list: HTMLDivElement, title: HTMLSpanElement, instances: Website
     const del = document.createElement('button')
     del.className = 'wl-x'
     del.textContent = '✕'
-    del.title = 'Remove from the build queue'
+    del.title = t('website.queue.remove')
     del.onclick = async (): Promise<void> => {
       del.disabled = true
       row.classList.add('wl-removing')
@@ -224,11 +229,11 @@ function render(list: HTMLDivElement, title: HTMLSpanElement, instances: Website
         await deleteWebsiteInstance(inst)
         row.remove()
         const remaining = list.querySelectorAll('.wl-row').length
-        title.textContent = `Website build queue (${remaining})`
+        title.textContent = t('website.queue.title-count', { count: remaining })
         if (remaining === 0) {
           const empty = document.createElement('div')
           empty.className = 'wl-empty'
-          empty.textContent = 'Queue empty'
+          empty.textContent = t('website.queue.empty-short')
           list.appendChild(empty)
         }
       } catch (err) {

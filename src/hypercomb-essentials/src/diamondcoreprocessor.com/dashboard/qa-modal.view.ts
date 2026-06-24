@@ -22,7 +22,7 @@
 // majority of the time — that's why the inline `/dashboard` HTML
 // cards can't be the only answer surface.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 
 export type QaBindingPayload = {
   qId: string
@@ -183,7 +183,8 @@ export class QaModalView extends EventTarget {
     dialog.appendChild(question)
 
     const input = document.createElement('textarea')
-    input.placeholder = 'type your answer…'
+    const i18n = (window as any).ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined
+    input.placeholder = i18n?.t('dashboard.answer.placeholder') ?? 'type your answer…'
     input.rows = 4
     Object.assign(input.style, {
       width: '100%',
@@ -215,7 +216,7 @@ export class QaModalView extends EventTarget {
     } as CSSStyleDeclaration)
     const doneBtn = document.createElement('button')
     doneBtn.type = 'button'
-    doneBtn.textContent = 'Done'
+    doneBtn.textContent = i18n?.t('dashboard.done') ?? 'Done'
     Object.assign(doneBtn.style, {
       padding: '0.45rem 1.2rem',
       background: 'rgba(110, 180, 255, 0.22)',

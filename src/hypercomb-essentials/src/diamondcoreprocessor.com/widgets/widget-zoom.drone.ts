@@ -194,7 +194,8 @@ export class WidgetZoomDrone {
     range.max = String(MAX)
     range.step = String(STEP)
     range.value = '1'
-    range.title = 'Drag to scale · double-click to reset'
+    const i18n = (window as any).ioc?.get?.('@hypercomb.social/I18n') as import('@hypercomb/core').I18nProvider | undefined
+    range.title = i18n?.t('widgets.zoom.title') ?? 'Drag to scale · double-click to reset'
     range.style.cssText = 'width: 120px; accent-color: rgba(126, 182, 214, 0.9); cursor: pointer;'
     range.addEventListener('input', () => {
       if (!this.#active) return

@@ -17,7 +17,7 @@
 // services have registered) rather than a warmup() hook because the link sig
 // may not be resolvable until Store + the credential stores exist.
 
-import { Worker, get } from '@hypercomb/core'
+import { Worker, get, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
   PENDING_INVITE_KEY,
   SWARM_INVITE_KIND,
@@ -93,7 +93,8 @@ export class MeetingInviteWorker extends Worker {
   #joinFromLink = async (sig: string): Promise<void> => {
     const bundle = await loadInviteBundle(sig)
     if (!bundle) {
-      this.emitEffect('toast:show', { type: 'error', title: 'Invite link', message: 'This invite link is invalid or could not be reached.' })
+      const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
+      this.emitEffect('toast:show', { type: 'error', title: i18n?.t('invite.link.title') ?? 'Invite link', message: i18n?.t('invite.error.invalid') ?? 'This invite link is invalid or could not be reached.' })
       return
     }
     await joinMeetingPlace(bundle)
@@ -102,12 +103,14 @@ export class MeetingInviteWorker extends Worker {
   #joinFromTile = async (label: string): Promise<void> => {
     const bundleSig = this.#peerInviteSig(label) ?? await this.#localInviteSig(label)
     if (!bundleSig) {
-      this.emitEffect('toast:show', { type: 'tip', title: 'Invite', message: 'This tile has no swarm invite.' })
+      const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
+      this.emitEffect('toast:show', { type: 'tip', title: i18n?.t('invite.title') ?? 'Invite', message: i18n?.t('invite.error.no-tile') ?? 'This tile has no swarm invite.' })
       return
     }
     const bundle = await loadInviteBundle(bundleSig)
     if (!bundle) {
-      this.emitEffect('toast:show', { type: 'error', title: 'Invite', message: 'The invite could not be loaded.' })
+      const i18nLoad = get(I18N_IOC_KEY) as I18nProvider | undefined
+      this.emitEffect('toast:show', { type: 'error', title: i18nLoad?.t('invite.title') ?? 'Invite', message: i18nLoad?.t('invite.error.load') ?? 'The invite could not be loaded.' })
       return
     }
     await joinMeetingPlace(bundle)

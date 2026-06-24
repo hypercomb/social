@@ -23,6 +23,7 @@ import './scramble/scramble.game.js'                 // self-registers a game
 import './hangman/hangman.game.js'                   // self-registers a game
 import { TutorScheduler } from './scheduler.js'
 import { Shaker, ParticleField } from '../juice.js'
+import { I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import type { StudyItem, Grade } from './deck.types.js'
 import type { GameContext, TutorGame, TutorGameDescriptor } from './game-registry.js'
 
@@ -35,6 +36,11 @@ interface RegistryLike {
 }
 
 const STYLE_ID = 'hc-tutor-shell-styles'
+
+function t(key: string, params?: Record<string, string | number>): string {
+  const i18n = (window as any).ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined
+  return i18n?.t(key, params) ?? key
+}
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, opts: { class?: string; text?: string; title?: string } = {}): HTMLElementTagNameMap[K] {
   const n = document.createElement(tag)
@@ -127,7 +133,7 @@ export class TutorShell {
     host.replaceChildren()
 
     const toolbar = el('div', { class: 'hc-tutor-bar' })
-    toolbar.appendChild(el('span', { class: 'hc-tutor-logo', text: '🎓 Study' }))
+    toolbar.appendChild(el('span', { class: 'hc-tutor-logo', text: `🎓 ${t('tutor.logo')}` }))
     const progress = el('span', { class: 'hc-tutor-progress' })
     toolbar.appendChild(progress)
     this.#progressLabel = progress
@@ -136,7 +142,7 @@ export class TutorShell {
     toolbar.appendChild(chips)
     this.#chips = chips
 
-    const exit = el('button', { class: 'hc-tutor-exit', text: '✕', title: 'Exit study (Esc)' })
+    const exit = el('button', { class: 'hc-tutor-exit', text: '✕', title: t('tutor.exit.title') })
     exit.onclick = () => this.#onExit()
     toolbar.appendChild(exit)
     host.appendChild(toolbar)
@@ -157,7 +163,7 @@ export class TutorShell {
     chips.replaceChildren()
     const games = this.#registry?.all() ?? []
     // "Auto" clears the pin and returns to scheduler-driven game choice.
-    const auto = el('button', { class: `hc-tutor-chip${this.#pinnedGameId == null ? ' on' : ''}`, text: 'Auto', title: 'Let the tutor choose the game' })
+    const auto = el('button', { class: `hc-tutor-chip${this.#pinnedGameId == null ? ' on' : ''}`, text: 'Auto', title: t('tutor.auto.title') })
     auto.onclick = () => { this.#pinnedGameId = null; this.#renderChips(); this.#restartRound() }
     chips.appendChild(auto)
     for (const g of games) {
@@ -172,7 +178,7 @@ export class TutorShell {
   #updateProgress(): void {
     if (!this.#progressLabel) return
     const s = this.#scheduler.stats()
-    this.#progressLabel.textContent = `${s.learned}/${s.total} learned · ${s.due} due`
+    this.#progressLabel.textContent = t('tutor.progress', { learned: s.learned, total: s.total, due: s.due })
   }
 
   // ── round loop ─────────────────────────────────────────────
@@ -254,14 +260,14 @@ export class TutorShell {
     this.#item = null
     const s = this.#scheduler.stats()
     const panel = el('div', { class: 'hc-tutor-complete' })
-    panel.appendChild(el('div', { class: 'hc-tutor-complete-title', text: this.#scheduler.complete ? '✓ Deck cleared for today' : '✓ Caught up' }))
-    panel.appendChild(el('div', { class: 'hc-tutor-complete-stat', text: `${s.learned} of ${s.total} learned` }))
+    panel.appendChild(el('div', { class: 'hc-tutor-complete-title', text: this.#scheduler.complete ? `✓ ${t('tutor.complete.cleared')}` : `✓ ${t('tutor.complete.caught-up')}` }))
+    panel.appendChild(el('div', { class: 'hc-tutor-complete-stat', text: t('tutor.complete.stat', { learned: s.learned, total: s.total }) }))
     const row = el('div', { class: 'hc-tutor-complete-row' })
-    const again = el('button', { class: 'hc-tutor-btn', text: 'Study again' })
+    const again = el('button', { class: 'hc-tutor-btn', text: t('tutor.again') })
     again.onclick = () => { this.#scheduler.reset(); this.#dismissComplete() }
-    const drill = el('button', { class: 'hc-tutor-btn', text: 'Keep drilling' })
+    const drill = el('button', { class: 'hc-tutor-btn', text: t('tutor.drill') })
     drill.onclick = () => { this.#scheduler.enableDrill(); this.#dismissComplete() }
-    const exit = el('button', { class: 'hc-tutor-btn primary', text: 'Done' })
+    const exit = el('button', { class: 'hc-tutor-btn primary', text: t('tutor.done') })
     exit.onclick = () => this.#onExit()
     row.append(again, drill, exit)
     panel.appendChild(row)

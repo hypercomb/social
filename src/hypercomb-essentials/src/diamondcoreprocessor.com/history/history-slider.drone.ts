@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/core/history-slider.drone.ts
-import { EffectBus, type KeyMapLayer } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, type I18nProvider, type KeyMapLayer } from '@hypercomb/core'
 import type { HistoryCursorService, CursorState } from './history-cursor.service.js'
 import type { GlobalTimeClock } from './global-time-clock.service.js'
 
@@ -226,9 +226,10 @@ export class HistorySliderDrone {
     `
     scopeLabel.addEventListener('click', () => this.#toggleScope())
 
+    const i18n = (window as any).ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined
     const restoreBtn = document.createElement('span')
-    restoreBtn.textContent = 'Restore'
-    restoreBtn.title = 'Promote this state to head'
+    restoreBtn.textContent = i18n?.t('history.slider.restore') ?? 'Restore'
+    restoreBtn.title = i18n?.t('history.slider.restore-title') ?? 'Promote this state to head'
     restoreBtn.style.cssText = `
       display: none;
       cursor: pointer;
@@ -245,8 +246,8 @@ export class HistorySliderDrone {
     restoreBtn.addEventListener('click', () => this.#promote())
 
     const latestBtn = document.createElement('span')
-    latestBtn.textContent = 'Jump to latest'
-    latestBtn.title = 'Discard undo and jump to current head'
+    latestBtn.textContent = i18n?.t('history.slider.latest') ?? 'Jump to latest'
+    latestBtn.title = i18n?.t('history.slider.latest-title') ?? 'Discard undo and jump to current head'
     latestBtn.style.cssText = `
       display: none;
       cursor: pointer;

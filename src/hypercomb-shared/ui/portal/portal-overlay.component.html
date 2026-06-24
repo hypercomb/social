@@ -27,7 +27,7 @@
          diff, which DCP keeps and re-surfaces next open. -->
     <div class="portal-actions">
       @if (pendingAdds || pendingRemoves) {
-        <div class="portal-diff" aria-label="pending changes">
+        <div class="portal-diff" [attr.aria-label]="'portal.pending-changes' | t">
           @if (pendingAdds) { <span class="diff-add">+{{ pendingAdds }}</span> }
           @if (pendingRemoves) { <span class="diff-remove">&minus;{{ pendingRemoves }}</span> }
         </div>

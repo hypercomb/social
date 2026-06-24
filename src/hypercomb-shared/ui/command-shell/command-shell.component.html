@@ -7,7 +7,7 @@
       <span
         class="prompt-glyph"
         [class.armed]="!!armedResource()"
-        [attr.aria-label]="armedResource() ? 'armed resource — click to dismiss' : null"
+        [attr.aria-label]="armedResource() ? ('command-shell.armed-resource' | t) : null"
         (mousedown)="onArmedGlyphMouseDown($event)"
       >
         @if (armedResource(); as armed) {

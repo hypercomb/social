@@ -12,11 +12,15 @@
 //   activity:log               → toast messages
 //   (service methods also emit substrate:changed which feeds back in)
 
-import { EffectBus, type SubstrateSource } from '@hypercomb/core'
+import { EffectBus, I18N_IOC_KEY, type I18nProvider, type SubstrateSource } from '@hypercomb/core'
 import type { SubstrateService } from './substrate.service.js'
 import { isFolderAccessSupported } from './folder-handles.js'
 
 const get = (key: string) => (window as any).ioc?.get?.(key)
+function t(key: string, params?: Record<string, string | number>): string {
+  const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
+  return i18n?.t(key, params) ?? key
+}
 
 const MAX_THUMBS = 30
 
@@ -93,12 +97,12 @@ export class SubstrateOrganizerDrone {
       border-bottom: 1px solid rgba(140, 170, 220, 0.12);
     `
     const title = document.createElement('div')
-    title.textContent = '◈ Substrate'
+    title.textContent = `◈ ${t('substrate.organizer.title')}`
     title.style.cssText = 'font-size: 13px; font-weight: 600; letter-spacing: 0.5px;'
 
     const closeBtn = document.createElement('button')
     closeBtn.textContent = '×'
-    closeBtn.title = 'Close (Esc)'
+    closeBtn.title = t('substrate.organizer.close-title')
     closeBtn.style.cssText = `
       background: none; border: none; color: rgba(220, 230, 240, 0.6);
       font-size: 20px; line-height: 1; cursor: pointer; padding: 0 4px;
@@ -313,7 +317,7 @@ export class SubstrateOrganizerDrone {
     }
     if (sources.length === 0) {
       const empty = document.createElement('div')
-      empty.textContent = 'no substrate sources yet'
+      empty.textContent = t('substrate.organizer.empty')
       empty.style.cssText = 'padding: 24px; font-size: 11px; color: rgba(180, 200, 220, 0.4);'
       this.#listEl.appendChild(empty)
     }
@@ -323,28 +327,28 @@ export class SubstrateOrganizerDrone {
     // Footer buttons
     this.#footerEl.innerHTML = ''
     if (isFolderAccessSupported()) {
-      this.#footerEl.appendChild(this.#button('+ Link folder', async () => {
+      this.#footerEl.appendChild(this.#button(t('substrate.organizer.link-folder'), async () => {
         const source = await svc.linkLocalFolder()
         if (source) {
           EffectBus.emit('activity:log', { message: `linked ${source.label}`, icon: '◈' })
         }
       }))
     }
-    this.#footerEl.appendChild(this.#button('+ Use current hive', async () => {
+    this.#footerEl.appendChild(this.#button(t('substrate.organizer.use-hive'), async () => {
       const lineage = get('@hypercomb.social/Lineage') as { explorerSegments: () => readonly string[] } | undefined
       const segments = lineage?.explorerSegments() ?? []
       if (segments.length === 0) {
-        EffectBus.emit('activity:log', { message: 'navigate into a hive first', icon: '◈' })
+        EffectBus.emit('activity:log', { message: t('substrate.organizer.navigate-first'), icon: '◈' })
         return
       }
       const path = segments.join('/')
       await svc.addHiveSource(path)
     }))
-    this.#footerEl.appendChild(this.#button('↻ Refresh', async () => {
+    this.#footerEl.appendChild(this.#button(`↻ ${t('substrate.organizer.refresh')}`, async () => {
       await svc.warmUp()
       await this.#render()
     }))
-    this.#footerEl.appendChild(this.#button('Off', async () => {
+    this.#footerEl.appendChild(this.#button(t('substrate.organizer.turn-off'), async () => {
       await svc.setActive(null)
     }))
 
@@ -509,11 +513,11 @@ export class SubstrateOrganizerDrone {
     this.#disposeThumbs()
 
     if (!active || !svc) {
-      this.#previewLabel.textContent = 'no active substrate'
+      this.#previewLabel.textContent = t('substrate.organizer.no-active')
       return
     }
 
-    this.#previewLabel.textContent = `preview — ${active.label}`
+    this.#previewLabel.textContent = t('substrate.organizer.preview', { label: active.label })
 
     const store = get('@hypercomb.social/Store') as { getResource: (sig: string) => Promise<Blob | null> } | undefined
     if (!store) return
