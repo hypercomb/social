@@ -54,11 +54,6 @@ type NotesService = {
   getNotes(cellLabel: string): Promise<Note[]>
 }
 
-type SelectionService = EventTarget & {
-  active: string | null
-  selected: ReadonlySet<string>
-  count: number
-}
 
 /** Single open question — Claude's side of the comm channel.
  *  Lives in the cell's `qa` layer slot (or in `__optimization__/` with
@@ -190,6 +185,28 @@ export class NotesStripComponent implements OnDestroy {
   // Notes themselves carry no selection — a note is just text. (Bulk
   // multi-note selection was removed; tile selection lives on the bottom
   // navigator as `selectedCells`, a separate concern.)
+
+  readonly multiCellMode = computed<boolean>(() => this.selectedCells().size > 0)
+
+  clearTileSelection(): void {
+    this.clearCellSelection()
+  }
+
+  readonly selectedTileNotes = computed<readonly { cell: string; notes: readonly Note[] }[]>(() => {
+    this.#version()
+    return [...this.selectedCells()].map(cell => {
+      const stored = this.#notesByCell().get(cell) ?? []
+      const qa = this.#qaByCell().get(cell) ?? []
+      const merged = this.#mergeQaWithNotes(qa, stored)
+      return { cell, notes: merged.filter(n => this.#passesFilter(this.noteKind(n))) }
+    })
+  })
+
+  onMultiCellNoteClick(cellLabel: string, noteId: string): void {
+    this.clearTileSelection()
+    this.activateCell(cellLabel)
+    this.editNote(noteId, cellLabel)
+  }
 
   /** Which note the embedded form is currently editing. Null = the form
    *  is in "add" mode (a fresh note); a note id = "edit" mode (the form
@@ -1055,7 +1072,6 @@ export class NotesStripComponent implements OnDestroy {
   readonly visible = computed<boolean>(() => this.#open() || !!this.#capturingFor())
 
   #cleanups: (() => void)[] = []
-  #selectionListener: (() => void) | null = null
 
   // ── slide-resizable panel state ───────────────────────────
   // The panel exposes the browser's native bottom-right resize grip
@@ -1094,8 +1110,6 @@ export class NotesStripComponent implements OnDestroy {
         this.#warmed.set(new Set())
         this.#notesByCell.set(new Map())
         this.#qaByCell.set(new Map())
-        // The navigator's checked set names tiles in the layer we just left;
-        // those labels are meaningless in the new layer, so drop the selection.
         this.selectedCells.set(new Set())
         this.#version.update(v => v + 1)
         // Re-poll the layer's tile list — navigation changed which cells exist.
@@ -1114,35 +1128,15 @@ export class NotesStripComponent implements OnDestroy {
     window.addEventListener('synchronize', onSync)
     this.#cleanups.push(() => window.removeEventListener('synchronize', onSync))
 
-    // SelectionService lives in a bee bundle that loads AFTER this Angular
-    // component's constructor on hypercomb-web. Synchronous get() returns
-    // undefined at construction time, so we'd silently never register the
-    // change listener and #activeCell would remain null forever — that's
-    // the actual cause of "notes don't show on selection on web". Use
-    // window.ioc.whenReady so the wire-up happens whenever the service
-    // arrives, before-or-after construction.
-    const wireSelection = (selection: SelectionService): void => {
-      // Selection no longer drives WHAT the strip shows — the list is the whole
-      // layer now. A tile click just marks that tile active so its notes open
-      // in the editor above the list (the auxiliary "click the tile on screen"
-      // path; hidden tiles aren't clickable, so the filter is the primary way).
-      const sync = (): void => { this.#activeCell.set(selection.active) }
-      sync()
-      selection.addEventListener('change', sync)
-      this.#selectionListener = () => selection.removeEventListener('change', sync)
-    }
-
-    const synchronouslyResolved = this.#selection
-    if (synchronouslyResolved) {
-      wireSelection(synchronouslyResolved)
-    } else {
-      // Wait for the bee to register. whenReady fires synchronously if the
-      // service is already there (covers a race where the bee registers
-      // between our constructor's two reads), else queues the callback.
-      window.ioc.whenReady<SelectionService>(
-        '@diamondcoreprocessor.com/SelectionService',
-        wireSelection,
-      )
+    // CellSuggestionProvider does an async initial refresh and emits 'change'
+    // when it completes. Without this subscription the tile list stays empty
+    // until the next synchronize (processor action) fires — which may never
+    // happen if the user opens Notes before interacting with the canvas.
+    const suggestionProvider = get<EventTarget>('@hypercomb.social/CellSuggestionProvider')
+    if (suggestionProvider) {
+      const onSuggestionChange = (): void => this.#refreshLayerCellLabels()
+      suggestionProvider.addEventListener('change', onSuggestionChange)
+      this.#cleanups.push(() => suggestionProvider.removeEventListener('change', onSuggestionChange))
     }
 
     // Track NotesService availability so the warmup effect re-runs the
@@ -1422,7 +1416,6 @@ export class NotesStripComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
-    this.#selectionListener?.()
     // Release the tile lock on teardown — the visibility effect is destroyed
     // with the component and won't run a final unlock, so a strip torn down
     // while visible would otherwise leave the hexes locked.
@@ -1755,10 +1748,6 @@ export class NotesStripComponent implements OnDestroy {
 
   get #notes(): NotesService | undefined {
     return get('@diamondcoreprocessor.com/NotesService') as NotesService | undefined
-  }
-
-  get #selection(): SelectionService | undefined {
-    return get('@diamondcoreprocessor.com/SelectionService') as SelectionService | undefined
   }
 
   get i18n(): I18nProvider | undefined {

@@ -37,10 +37,67 @@
       </button>
     </div>
 
+    <!-- Multi-tile view: per-tile accordion for each checked tile.
+         Shown instead of the single-tile editor when tiles are selected
+         in the tile navigator below. Clicking a note enters single-tile
+         mode for that note's tile. -->
+    @if (multiCellMode()) {
+      <div class="cv2-multitile cv2-list thin-scroll">
+        @for (section of selectedTileNotes(); track section.cell) {
+          <div class="accordion-group is-open">
+            <button class="accordion-head" type="button"
+                    (click)="clearTileSelection(); activateCell(section.cell)">
+              <span class="accordion-cell">{{ section.cell }}</span>
+              @if (section.notes.length > 0) {
+                <span class="accordion-count">{{ section.notes.length }}</span>
+              }
+            </button>
+            @if (section.notes.length === 0) {
+              <div class="cv2-empty-hint" style="padding:0.5rem 0.8rem">No notes</div>
+            } @else {
+              <div class="accordion-panel-inner" style="padding:6px 8px;display:flex;flex-direction:column;gap:4px">
+                @for (note of section.notes; track note.id) {
+                  <div class="cv2-note-preview"
+                       [class.cv2-note-q]="noteKind(note) === 'q'"
+                       [class.cv2-note-a]="noteKind(note) === 'a'"
+                       [class.hc-shape-circle]="note.shape === 'circle'"
+                       [class.hc-shape-square]="note.shape === 'square'"
+                       [class.hc-shape-triangle]="note.shape === 'triangle'"
+                       [class.hc-shape-diamond]="note.shape === 'diamond'"
+                       [class.hc-shape-star]="note.shape === 'star'"
+                       [class.hc-shape-hexagon]="note.shape === 'hexagon'"
+                       (click)="onMultiCellNoteClick(section.cell, note.id)">
+                    @if (noteKind(note) === 'q') {
+                      <div class="cv2-note-kind">
+                        <span class="mat-sym filled" style="font-size:12px">help</span> question
+                      </div>
+                    } @else if (noteKind(note) === 'a') {
+                      <div class="cv2-note-kind cv2-kind-a">
+                        <span class="mat-sym filled" style="font-size:12px">chat</span> answer
+                      </div>
+                    }
+                    <span class="hc-shape-glyph cv2-note-shape" aria-hidden="true"></span>
+                    <p class="cv2-note-text">{{ noteDisplayText(note) }}</p>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+        }
+      </div>
+      <footer class="cv2-foot">
+        <span><strong>{{ selectedTileNotes().length }}</strong> tiles selected</span>
+        <span class="cv2-foot-spacer"></span>
+        <button type="button" class="cv2-foot-link" (click)="clearTileSelection()">
+          <span class="mat-sym" style="font-size:13px">close</span> clear
+        </button>
+      </footer>
+    }
+
     <!-- Active-tile editor — only present when a tile is active (selected on
          the canvas or picked from the list below). Without one, the list alone
          shows so the user can find and pick a tile. -->
-    @if (cell()) {
+    @else if (cell()) {
       <!-- Embedded note form — the single authoring surface. Add mode by
            default; clicking a note row loads it here for editing. The
            leading kind pill flips the entry between note and question;
@@ -242,7 +299,7 @@
       <footer class="cv2-foot">
         <span>{{ 'notes.footerCount' | t: { count: notes().length } }} <code>{{ cell() }}</code></span>
       </footer>
-    } @else {
+    } @else if (!multiCellMode()) {
       <!-- No active tile — prompt the user to find one in the list below. -->
       <div class="cv2-empty-hint">{{ 'notes.pickTile' | t }}</div>
     }

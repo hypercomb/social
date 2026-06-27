@@ -739,8 +739,8 @@
 
 .cv2-note {
   display: grid;
-  // chevron (16px) · select (20px) · grip (16px) · body (1fr) · kebab (20px)
-  grid-template-columns: 16px 20px 16px 1fr 20px;
+  // chevron (16px) · grip (16px) · body (1fr) · kebab (20px)
+  grid-template-columns: 16px 16px 1fr 20px;
   gap: 5px;
   align-items: start;
   // Trim the right inset so the note text claims more render area toward
@@ -1132,6 +1132,30 @@
   }
 }
 
+.cv2-foot-spacer { flex: 1 1 auto; }
+
+.cv2-foot-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: transparent;
+  border: none;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: color-mix(in srgb, var(--md-on-surface) 50%, transparent);
+  font-family: var(--md-font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  transition: background var(--md-dur-short) var(--md-easing-standard),
+              color var(--md-dur-short) var(--md-easing-standard);
+
+  &:hover {
+    background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+    color: var(--md-on-surface);
+  }
+}
+
 // ── Tile navigator (always-on, filterable) ───────────────
 // Bottom-of-panel list of every tile in the current layer. A find box
 // (matches tile name OR note text) sits above a scrollable row list. The
@@ -1283,5 +1307,95 @@
   padding: 0.7rem 0.8rem;
   color: color-mix(in srgb, var(--md-on-surface) 60%, transparent);
   font-size: 0.8rem;
+}
+
+// ── Multi-tile accordion view ────────────────────────────
+// Scrollable container for the per-tile sections shown when tiles
+// are checked in the navigator.
+.cv2-multitile {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  overflow-y: auto;
+}
+
+.accordion-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.accordion-head {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  width: 100%;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  color: color-mix(in srgb, var(--md-on-surface) 60%, transparent);
+  font-family: var(--md-font-mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  text-align: left;
+  transition: color var(--md-dur-short) var(--md-easing-standard);
+
+  &:hover { color: var(--md-secondary); }
+}
+
+.accordion-cell {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accordion-count {
+  flex: 0 0 auto;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 400;
+  color: color-mix(in srgb, var(--md-on-surface) 55%, transparent);
+  background: color-mix(in srgb, var(--md-on-surface) 9%, transparent);
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
+  min-width: 1.2em;
+  text-align: center;
+}
+
+// Simplified note row for the multi-tile read-only view. No grid,
+// no drag handles — just text + kind chip. Clicking enters single-
+// tile mode for that note's tile.
+.cv2-note-preview {
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--md-on-surface) 2.5%, transparent);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background var(--md-dur-short) var(--md-easing-standard),
+              border-color var(--md-dur-short) var(--md-easing-standard);
+
+  &:hover {
+    background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
+    border-color: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
+  }
+
+  &.cv2-note-q {
+    background: color-mix(in srgb, var(--md-secondary) 8%, transparent);
+    &:hover { background: color-mix(in srgb, var(--md-secondary) 14%, transparent); }
+  }
+
+  &.cv2-note-a {
+    background: color-mix(in srgb, var(--md-primary) 8%, transparent);
+    &:hover { background: color-mix(in srgb, var(--md-primary) 14%, transparent); }
+  }
 }
 

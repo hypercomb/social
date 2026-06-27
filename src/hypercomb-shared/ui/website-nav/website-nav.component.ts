@@ -31,7 +31,6 @@
 
 import { Component, OnDestroy, computed, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
-import { TranslatePipe } from '../../core/i18n.pipe'
 
 /** Runtime service locator — shared must never statically import essentials,
  *  so cross-service resolution goes through window.ioc at call time. */
@@ -59,7 +58,7 @@ const CUE_MS = 7000
 @Component({
   selector: 'hc-website-nav',
   standalone: true,
-  imports: [TranslatePipe],
+  imports: [],
   templateUrl: './website-nav.component.html',
   styleUrls: ['./website-nav.component.scss'],
 })
