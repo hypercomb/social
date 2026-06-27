@@ -4325,7 +4325,7 @@ export class ShowCellDrone extends Drone {
   private readonly rebuildRenderResources = (renderer: unknown): void => {
     this.clearMesh("rebuildRenderResources: context restore")
     this.shader = null
-    this.atlas = new HexLabelAtlas(renderer, 128, 8, 8)
+    this.atlas = new HexLabelAtlas(renderer, 128, 16, 16) // 256 slots (match imageAtlas) so >64-tile hives don't wrap & thrash the render cache
     this.attachLabelResolver(this.atlas)
     this.imageAtlas = new HexImageAtlas(renderer, 256, 16, 16)
     this.cellImageCache.clear()
