@@ -41,6 +41,29 @@ const kindsByLabel = new Map<string, Set<string>>()
  *  index on `removeSig` without re-fetching the decoration. */
 const kindBySig = new Map<string, string>()
 
+// ── Tag sub-index ─────────────────────────────────────────────────────
+//
+// Tags ride the SAME decoration primitive (kind `tag`, payload `{ name }`),
+// so they hydrate through the exact same `decorations:changed` /
+// `render:cell-count` paths as every other decoration — no second OPFS walk.
+// The kind-index alone can't answer "which tag names does this cell carry"
+// (it only tracks kind PRESENCE), so we keep a parallel name index plus a
+// name→sig map the remove path uses to drop a single tag without a re-scan.
+
+/** Decoration kind that marks a tag application. */
+export const TAG_DECORATION_KIND = 'tag'
+
+/** Map<cellLabel, Set<tagName>> — every tag name applied to a cell. */
+const tagsByLabel = new Map<string, Set<string>>()
+
+/** Map<cellLabel, Map<tagName, decorationSig>> — lets the remove path find
+ *  the exact decoration sig to splice from a cell's slot by tag name. */
+const sigByLabelTag = new Map<string, Map<string, string>>()
+
+/** Reverse cache: decoration sig → { label, name }. Subtract a tag on
+ *  `removeSig` without re-fetching the (possibly shared) record. */
+const tagBySig = new Map<string, { label: string; name: string }>()
+
 /** Public lookup. Returns true iff the cell at `label` has at least
  *  one decoration of `kind` in its `decorations` slot.
  *
@@ -56,20 +79,77 @@ export function kindsForLabel(label: string): readonly string[] {
   return set ? [...set] : []
 }
 
+/** Every tag name applied to a cell, from the in-memory index. Synchronous
+ *  and O(1) — the badge renderer and show-cell's tag aggregation read this
+ *  per visible cell. Returns [] for an unknown / untagged cell. */
+export function tagsForLabel(label: string): readonly string[] {
+  const set = tagsByLabel.get(label)
+  return set ? [...set] : []
+}
+
+/** The decoration sig of a specific tag on a cell, or undefined if the index
+ *  hasn't seen it. The remove path uses this to splice one tag from the cell's
+ *  slot; callers fall back to `listDecorations` when the index is cold. */
+export function tagSigFor(label: string, name: string): string | undefined {
+  return sigByLabelTag.get(label)?.get(name)
+}
+
 type StoreLike = {
   getResource(sig: string): Promise<Blob | null>
 }
 
-async function fetchDecorationKind(sig: string): Promise<string | null> {
+type DecorationShape = { kind?: string; payload?: unknown }
+
+async function fetchDecorationRecord(sig: string): Promise<DecorationShape | null> {
   const store = window.ioc.get<StoreLike>('@hypercomb.social/Store')
   if (!store?.getResource) return null
   try {
     const blob = await store.getResource(sig)
     if (!blob) return null
-    const record = JSON.parse(await blob.text()) as { kind?: string }
-    return typeof record?.kind === 'string' ? record.kind : null
+    const record = JSON.parse(await blob.text()) as DecorationShape
+    return record && typeof record === 'object' ? record : null
   } catch {
     return null
+  }
+}
+
+/** Pull a tag name out of a decoration record's `{ name }` payload. */
+function tagNameOf(record: DecorationShape): string | null {
+  const payload = record.payload
+  const name = payload && typeof payload === 'object'
+    ? (payload as { name?: unknown }).name
+    : undefined
+  return typeof name === 'string' && name.length > 0 ? name : null
+}
+
+function addTag(label: string, name: string, sig: string): void {
+  let set = tagsByLabel.get(label)
+  if (!set) { set = new Set<string>(); tagsByLabel.set(label, set) }
+  set.add(name)
+  let bySig = sigByLabelTag.get(label)
+  if (!bySig) { bySig = new Map<string, string>(); sigByLabelTag.set(label, bySig) }
+  bySig.set(name, sig)
+  tagBySig.set(sig, { label, name })
+}
+
+function removeTag(label: string, name: string): void {
+  const set = tagsByLabel.get(label)
+  if (set) { set.delete(name); if (set.size === 0) tagsByLabel.delete(label) }
+  const bySig = sigByLabelTag.get(label)
+  if (bySig) { bySig.delete(name); if (bySig.size === 0) sigByLabelTag.delete(label) }
+}
+
+/** Fold a freshly-fetched decoration record into the indices: always the
+ *  kind index, plus the tag sub-index when it's a `tag`. Shared by the live
+ *  `decorations:changed` path and the navigation hydration walk. */
+function indexRecord(label: string, sig: string, record: DecorationShape): void {
+  const kind = typeof record.kind === 'string' ? record.kind : null
+  if (!kind) return
+  addKind(label, kind)
+  kindBySig.set(sig, kind)
+  if (kind === TAG_DECORATION_KIND) {
+    const name = tagNameOf(record)
+    if (name) addTag(label, name, sig)
   }
 }
 
@@ -105,15 +185,29 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
   if (!label) return
 
   if (payload.op === 'append') {
-    const kind = await fetchDecorationKind(sig)
-    if (!kind) return
-    addKind(label, kind)
-    kindBySig.set(sig, kind)
+    const record = await fetchDecorationRecord(sig)
+    if (!record) return
+    indexRecord(label, sig, record)
+    // This append landed ASYNCHRONOUSLY (the record fetch above), AFTER the
+    // synchronous `tags:changed` → show-cell `render:tags` re-aggregation that
+    // a tag write triggers. Without a nudge, the last cell of a multi-cell tag
+    // op is indexed too late to be counted, so pills/badges undercount by one.
+    // Re-signal so show-cell recomputes with this cell now in the index — the
+    // same hook the navigation-hydration walk uses.
+    if (record.kind === TAG_DECORATION_KIND) EffectBus.emit('tags:indexed', { labels: [label] })
   } else if (payload.op === 'removeSig') {
     const kind = kindBySig.get(sig)
-    if (!kind) return
-    removeKind(label, kind)
-    kindBySig.delete(sig)
+    if (kind) {
+      removeKind(label, kind)
+      kindBySig.delete(sig)
+    }
+    // A tag's resource is content-addressed and shared across cells, so the
+    // reverse cache pins which (label, name) THIS slot ref stood for.
+    const tag = tagBySig.get(sig)
+    if (tag) {
+      removeTag(tag.label, tag.name)
+      tagBySig.delete(sig)
+    }
   }
 })
 
@@ -149,30 +243,31 @@ async function hydrateLabel(
   label: string,
   parentSegments: readonly string[],
   history: HistoryServiceLike,
-): Promise<void> {
-  if (checkedLabels.has(label)) return
+): Promise<boolean> {
+  if (checkedLabels.has(label)) return false
   checkedLabels.add(label)
 
   try {
     const segments = [...parentSegments, label]
     const locationSig = await history.sign({ explorerSegments: () => segments })
     const layer = await history.currentLayerAt(locationSig) as { decorations?: unknown } | null
-    if (!layer) return
+    if (!layer) return false
     const decorations = layer.decorations
-    if (!Array.isArray(decorations)) return
+    if (!Array.isArray(decorations)) return false
     for (const decorationSig of decorations) {
       if (typeof decorationSig !== 'string' || !/^[0-9a-f]{64}$/.test(decorationSig)) continue
-      const kind = await fetchDecorationKind(decorationSig)
-      if (!kind) continue
-      addKind(label, kind)
-      kindBySig.set(decorationSig, kind)
+      const record = await fetchDecorationRecord(decorationSig)
+      if (!record) continue
+      indexRecord(label, decorationSig, record)
     }
+    return tagsByLabel.has(label)
   } catch {
     // Layer unavailable or fetch error — skip this label; another render
     // pass will retry (checkedLabels is set BEFORE the await, so a
     // failed walk doesn't replay forever; remove from checked to retry
     // on next event).
     checkedLabels.delete(label)
+    return false
   }
 }
 
@@ -187,6 +282,13 @@ EffectBus.on('render:cell-count', (payload: RenderCellCountPayload | undefined) 
   const history = window.ioc.get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
   if (!history) return
   const parentSegments = lineage?.explorerSegments?.() ?? []
-  // Walk each label in parallel — independent layer fetches.
+  // Walk each label in parallel — independent layer fetches. When a first-time
+  // walk discovers tags on a cell, signal `tags:indexed` so the tag renderers
+  // (controls-bar aggregation, on-tile badge) repaint without waiting for the
+  // next user action — the index hydrates AFTER render:cell-count fires.
   void Promise.all(labels.map(label => hydrateLabel(label, parentSegments, history)))
+    .then(results => {
+      const tagged = labels.filter((_, i) => results[i])
+      if (tagged.length) EffectBus.emit('tags:indexed', { labels: tagged })
+    })
 })

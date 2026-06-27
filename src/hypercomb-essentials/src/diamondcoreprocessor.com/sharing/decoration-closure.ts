@@ -64,6 +64,59 @@ function looksLikeJsonObject(bytes: Bytes): boolean {
   return false
 }
 
+/** Recursively collect every distinct 64-hex signature reachable inside a
+ *  value (strings, array elements, object values). Lowercased, deduped,
+ *  order-independent. Two callers:
+ *    - `writeDecoration` auto-declares a decoration's `refs` from its payload,
+ *      so attachment/sequence/invite records carry their nested sig without a
+ *      per-writer change (the forward `refs` path in `decorationClosureSigs`).
+ *    - the host-push closure (`nestedResourceSigs`) descends into a tile's
+ *      `properties` resource for its nested image sig — the form the slot walk
+ *      treats as an opaque leaf. */
+export function collectSigsDeep(value: unknown): string[] {
+  const out = new Set<string>()
+  const walk = (v: unknown): void => {
+    if (typeof v === 'string') {
+      // Match every 64-hex RUN, not just an exact-equal string — a sig often
+      // rides INSIDE a value: a tile `link` of "/@resource/<sig>", a gallery
+      // image entry, a CSS `url("resource:<sig>")`. Anchored-only matching
+      // (the original) silently dropped all of these. A stray non-resource hex
+      // run is harmless on the push side (the walk only enqueues sigs it holds
+      // locally as a resource; an unknown sig is a no-op).
+      const m = v.toLowerCase().match(/[0-9a-f]{64}/g)
+      if (m) for (const s of m) out.add(s)
+      return
+    }
+    if (Array.isArray(v)) { for (const x of v) walk(x); return }
+    if (v && typeof v === 'object') for (const x of Object.values(v as Record<string, unknown>)) walk(x)
+  }
+  walk(value)
+  return [...out]
+}
+
+/** Nested resource sigs inside a NON-decoration JSON resource — e.g. a tile's
+ *  `properties` blob, whose image lives in a nested `imageSig` / `small.image`
+ *  field the layer-slot walk never descends into (it only follows sig-ARRAY
+ *  slots, and treats the properties resource itself as an opaque leaf). The
+ *  render side already resolves these nested sigs (`resolveResourceSignatures`),
+ *  so without this the host is missing exactly the bytes render will ask for →
+ *  a fresh adopter 404s on every tile image.
+ *
+ *  Returns [] for non-JSON and for DECORATION records (any record with a string
+ *  `kind`): those declare their own closure via `refs` / `payload.htmlSig` and
+ *  are handled by `decorationClosureSigs`, so this never double-harvests them.
+ *  Scoped to data resources keeps it targeted — NOT a blind harvest of every
+ *  resource — and on the push side a stray non-resource hex is inert anyway
+ *  (the walk only enqueues sigs it holds locally as a resource). */
+export function nestedResourceSigs(recordBytes: Bytes): string[] {
+  if (!looksLikeJsonObject(recordBytes)) return []
+  let record: unknown
+  try { record = JSON.parse(decode(recordBytes)) } catch { return [] }
+  if (!record || typeof record !== 'object') return []
+  if (typeof (record as Record<string, unknown>)['kind'] === 'string') return []
+  return collectSigsDeep(record)
+}
+
 /** Every resource signature a page's HTML embeds — both `resource:<sig>` forms
  *  (incl. CSS `url()` and `/chrome.css` links) and bare-sig src/href/data-src
  *  attributes. Deduped, lowercased. The single source of truth shared with

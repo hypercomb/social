@@ -1,0 +1,166 @@
+// hypercomb-shared/ui/tags-viewer/tags-viewer.component.scss
+//
+// Right-docked "Tags" management panel. Not a dimming modal — the hive stays
+// visible behind it. Cold steel chrome (126,182,214) to match the rest of the
+// app's hairlines; no glow, no flash. Drag-resize + content-scale come from the
+// shared `hcDockedPanel` directive (inline width + `--hc-panel-scale`), same as
+// the features panel.
+
+$steel: #7eb6d6;
+
+:host {
+  position: fixed;
+  inset: 0;
+  z-index: 100002;
+  pointer-events: none;
+}
+
+.tags-panel {
+  pointer-events: auto;
+  position: absolute;
+  top: calc(2.8rem * var(--hc-header-zoom, 1.0));
+  right: 0;
+  bottom: 0;
+  width: 320px;
+  min-width: 260px;
+  max-width: calc(100vw - 1.5rem);
+  display: flex;
+  flex-direction: column;
+  background: rgba(14, 14, 22, 0.96);
+  border-left: 1px solid rgba($steel, 0.5);
+  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba($steel, 0.06) inset;
+  font-family: var(--hc-mono, system-ui);
+  font-size: calc(1rem * var(--hc-panel-scale, 1));
+  color: #eaf0f4;
+  outline: none;
+}
+
+.tags-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+  padding: 0.85em 1em;
+  border-bottom: 1px solid rgba($steel, 0.25);
+}
+
+.tags-title {
+  font-size: 0.95em;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.tags-total {
+  font-size: 0.75em;
+  color: rgba($steel, 0.85);
+  background: rgba($steel, 0.12);
+  border-radius: 999px;
+  padding: 0.05em 0.55em;
+}
+
+.tags-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: #9fb3c2;
+  font-size: 1.2em;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2em;
+
+  &:hover { color: #eaf0f4; }
+}
+
+.tags-empty {
+  padding: 1.4em 1.2em;
+  color: #8ea2b0;
+  font-size: 0.85em;
+  line-height: 1.5;
+}
+
+.tags-list {
+  list-style: none;
+  margin: 0;
+  padding: 0.4em 0;
+  overflow-y: auto;
+  flex: 1 1 auto;
+}
+
+.tags-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  padding: 0.4em 1em;
+  border-bottom: 1px solid rgba($steel, 0.07);
+
+  &:hover { background: rgba($steel, 0.06); }
+  &.filtered { background: rgba($steel, 0.14); }
+}
+
+.tag-swatch {
+  flex: 0 0 auto;
+  width: 1.1em;
+  height: 1.1em;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4) inset;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+
+  input[type="color"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    border: none;
+    padding: 0;
+  }
+}
+
+.tag-name {
+  flex: 1 1 auto;
+  text-align: left;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0.1em 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  &:hover { color: #fff; }
+  &[aria-pressed="true"] { color: $steel; font-weight: 600; }
+}
+
+.tag-count {
+  flex: 0 0 auto;
+  font-size: 0.78em;
+  color: #8ea2b0;
+  min-width: 1.4em;
+  text-align: right;
+}
+
+.tag-remove {
+  flex: 0 0 auto;
+  background: none;
+  border: none;
+  color: #6e8290;
+  font-size: 1em;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2em;
+  opacity: 0;
+  transition: opacity 0.12s ease, color 0.12s ease;
+
+  .tags-row:hover & { opacity: 1; }
+  &:hover { color: #e06b6b; }
+}
+
+.tags-foot {
+  padding: 0.7em 1em;
+  border-top: 1px solid rgba($steel, 0.18);
+  color: #8ea2b0;
+  font-size: 0.74em;
+  line-height: 1.4;
+}

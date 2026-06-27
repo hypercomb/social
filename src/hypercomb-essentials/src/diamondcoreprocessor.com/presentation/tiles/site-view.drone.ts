@@ -16,6 +16,7 @@
 import { Drone, SITE_VIEW_IOC_KEY, RESOURCE_URL_PREFIX } from '@hypercomb/core'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
+import { featureNeedsReview } from '../../sharing/feature-availability.js'
 
 type MountState = {
   host: HTMLDivElement
@@ -41,6 +42,17 @@ const EXIT_OVERLAY_CSS = [
   'box-shadow:0 8px 26px rgba(0,0,0,.5)', 'color:#0c1118', 'cursor:pointer',
   "font-family:'Material Symbols Outlined'", 'font-size:1.5rem', 'line-height:1', 'padding:0',
   'pointer-events:auto', 'transition:filter .16s ease',
+].join(';')
+
+/** Raw-DOM review-gate card. Same out-of-Angular, near-max-z-index discipline
+ *  as the exit overlay: shown over a FOREIGN, unverified page INSTEAD of
+ *  mounting it, so nothing of the page renders, runs, or fetches until the
+ *  participant reviews and enables it. Cold steel chrome, no external CSS. */
+const REVIEW_GATE_CSS = [
+  'position:fixed', 'inset:0', 'z-index:2147483600',
+  'display:flex', 'flex-direction:column', 'align-items:center', 'justify-content:center', 'gap:1rem',
+  'background:#0c1118', 'color:#cfe2ee', 'padding:2rem', 'text-align:center',
+  "font-family:system-ui,-apple-system,'Segoe UI',sans-serif",
 ].join(';')
 
 export class SiteViewDrone extends Drone {
@@ -77,6 +89,12 @@ export class SiteViewDrone extends Drone {
    */
   #exitOverlay: HTMLButtonElement | null = null
   #exitTogglesBound = false
+  /** Raw-DOM review gate — shown over a FOREIGN, unverified page in place of
+   *  mounting it. While present, the page is NOT in the document: no scripts
+   *  run, no resources stream. Cleared once the feature is verified (or on
+   *  exit / a switch to a local page). */
+  #reviewOverlay: HTMLDivElement | null = null
+  #featureVerifiedBound = false
   /** The current site's toggle identity, mirrored from ViewBee's
    *  `view-toggles:changed` so the exit wears the site's own glyph + label;
    *  falls back to a generic "back to tiles" glyph on a cell with no page. */
@@ -117,6 +135,12 @@ export class SiteViewDrone extends Drone {
       // click bindings (which already do the same thing in that mode).
       window.addEventListener('contextmenu', this.#onGlobalContextMenu, true)
       this.#globalContextMenuBound = true
+    }
+    if (!this.#featureVerifiedBound) {
+      // A review→accept (or bypass) in the features panel flips a foreign
+      // website from quarantined to verified; re-reconcile so it mounts now.
+      this.onEffect('feature:verified', () => { void this.#reconcile() })
+      this.#featureVerifiedBound = true
     }
     if (!this.#exitTogglesBound) {
       // Mirror the site's own icon/label onto the exit overlay from the same
@@ -227,6 +251,7 @@ export class SiteViewDrone extends Drone {
     const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc?.get<{ mode: string }>('@hypercomb.social/ViewMode')
     if (vm && vm.mode !== 'website') {
       this.#removeExitOverlay()
+      this.#removeReviewGate()
       this.#teardown()
       return
     }
@@ -264,6 +289,19 @@ export class SiteViewDrone extends Drone {
       cellPageSig = await this.#findContextPage(segments, store)
     }
     if (cellPageSig) {
+      // Verification gate. A FOREIGN page — adopted into the hive, or published
+      // by a domain that isn't yours — must NOT activate (mount, run its
+      // scripts, stream its resources) until it is VERIFIED: reviewed-and-
+      // accepted, bypassed, or from a trusted/community domain. Your own
+      // authoring is never gated. Showing the review gate INSTEAD of mounting
+      // is what keeps an un-adopted feature's heavy payload off the wire.
+      const publisher = this.#pagePublisherDomain(cellPageSig)
+      if (featureNeedsReview(segments, cellPageSig, publisher)) {
+        this.#teardown()
+        this.#showReviewGate(segments, cellPageSig)
+        return
+      }
+      this.#removeReviewGate()
       await this.#mountCellPage(segments, cellPageSig, store)
       return
     }
@@ -615,6 +653,64 @@ export class SiteViewDrone extends Drone {
     if (this.#exitOverlay) {
       this.#exitOverlay.remove()
       this.#exitOverlay = null
+    }
+  }
+
+  // ── feature-verification gate ──────────────────────────────────────────
+
+  /** The publisher domain attributed to a page sig (learned from the mesh /
+   *  adopt hand-off via the broker's address graph). Empty when unknown —
+   *  which, for adopted content, the gate treats as "not trusted" (fail-closed:
+   *  unknown-origin foreign code stays inert until reviewed). */
+  #pagePublisherDomain(sig: string): string {
+    try {
+      const broker = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+        ?.get<{ getKnownDomains?: (s: string) => string[] }>('@diamondcoreprocessor.com/ContentBrokerDrone')
+      return broker?.getKnownDomains?.(sig)?.[0] ?? ''
+    } catch { return '' }
+  }
+
+  /** Show the review gate over a foreign, unverified page INSTEAD of mounting
+   *  it. The page never enters the document, so its scripts don't run and its
+   *  resources don't stream. The "Review & enable" action hands the page sig to
+   *  the features panel (`feature:review:open`), where the participant reviews
+   *  the code and accepts — which writes the verified sig and re-reconciles. */
+  #showReviewGate(segments: readonly string[], sig: string): void {
+    this.#ensureExitOverlay()   // keep the guaranteed way back to the hive
+    let card = this.#reviewOverlay
+    if (!card) {
+      card = document.createElement('div')
+      card.id = 'hc-feature-review'
+      card.style.cssText = REVIEW_GATE_CSS
+      const title = document.createElement('div')
+      title.style.cssText = 'font-size:1.25rem;font-weight:600;color:#eaf3f9'
+      title.textContent = 'Feature not enabled'
+      const body = document.createElement('div')
+      body.style.cssText = 'max-width:34rem;line-height:1.5;opacity:.85'
+      body.textContent = 'This page comes from another participant and has not been reviewed. Review its code, then enable it — nothing runs until you do.'
+      const review = document.createElement('button')
+      review.type = 'button'
+      review.className = 'hc-review-btn'
+      review.textContent = 'Review & enable'
+      review.style.cssText = 'margin-top:.5rem;padding:.6rem 1.2rem;border:1px solid rgba(126,182,214,.6);border-radius:.4rem;background:rgba(126,182,214,.16);color:#eaf3f9;cursor:pointer;font-size:.95rem'
+      card.append(title, body, review)
+      document.body.appendChild(card)
+      this.#reviewOverlay = card
+    }
+    const btn = card.querySelector('.hc-review-btn') as HTMLButtonElement | null
+    if (btn) btn.onclick = () => this.emitEffect('feature:review:open', {
+      cell: segments[segments.length - 1] ?? '',
+      segments: [...segments],
+      sig,
+      kind: 'website',
+      label: this.#siteLabel || 'Website',
+    })
+  }
+
+  #removeReviewGate(): void {
+    if (this.#reviewOverlay) {
+      this.#reviewOverlay.remove()
+      this.#reviewOverlay = null
     }
   }
 

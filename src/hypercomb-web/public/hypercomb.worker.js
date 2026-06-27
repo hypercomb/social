@@ -200,7 +200,16 @@ async function handleSiteResourceRequest(request) {
     if (!fetched) return new Response('resource not found', { status: 404 })
     void writeResourceToOpfs(sig, fetched.buf)
     const headers = new Headers()
-    headers.set('content-type', fetched.contentType || guessResourceContentType(rest, new Blob([fetched.buf])))
+    // The host stores resources by bare signature (no extension) and serves
+    // them as application/octet-stream. Browsers enforce strict MIME checking
+    // for <link rel="stylesheet"> (and images), so an octet-stream chrome.css
+    // is REFUSED — a fresh adopter's page renders UNSTYLED until the resource
+    // is warm in OPFS (where the OPFS branch's URL-tail guess sets text/css).
+    // The URL tail (`/chrome.css`) is the authoritative type here, so prefer it
+    // over the host's generic type; fall back to the host type only when the
+    // tail/sniff can't pin a specific one (e.g. an extensionless image sig).
+    const guessed = guessResourceContentType(rest, new Blob([fetched.buf]))
+    headers.set('content-type', guessed !== 'application/octet-stream' ? guessed : (fetched.contentType || guessed))
     headers.set('cache-control', 'public, max-age=31536000, immutable')
     const response = new Response(fetched.buf, { status: 200, headers })
     await cachePut(request, response)

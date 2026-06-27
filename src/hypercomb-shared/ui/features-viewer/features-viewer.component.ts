@@ -26,6 +26,7 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { featureKey, isStaged, toggleStaged, clearStaged, type StagedFeature } from './feature-staging'
+import { markVerified } from './feature-verified'
 
 /** A feature already applied to the layer. */
 interface FeatureRow {
@@ -87,6 +88,14 @@ export class FeaturesViewerComponent implements OnDestroy {
   readonly visible = signal(false)
   readonly groups = signal<FeatureGroup[]>([])
 
+  /** A foreign feature the participant has been asked to REVIEW before enabling.
+   *  Set from `feature:review:open` (emitted by the website gate when it blocks
+   *  an unverified page). Shows the feature's actual code; Accept / Bypass write
+   *  the verified sig and re-activate it. Null = no review in progress. */
+  readonly reviewTarget = signal<{
+    cell: string; segments: string[]; sig: string; kind: string; label: string; code: string
+  } | null>(null)
+
   /** Reactivity trigger for staged state (read synchronously from
    *  localStorage, mirroring DCP's domain-visibility pattern). */
   readonly stagingVersion = signal(0)
@@ -133,6 +142,57 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.#cleanups.push(EffectBus.on('features:viewer-close', () => {
       if (this.visible()) this.close()
     }))
+
+    // The website gate blocked a foreign, unverified page and handed it here to
+    // be reviewed. Load its code and surface the review panel.
+    this.#cleanups.push(EffectBus.on<{ cell: string; segments: string[]; sig: string; kind: string; label: string }>(
+      'feature:review:open',
+      (p) => {
+        if (!p?.sig) return
+        void this.#fetchCode(p.sig).then(code => {
+          this.reviewTarget.set({
+            cell: p.cell ?? '',
+            segments: Array.isArray(p.segments) ? p.segments : [],
+            sig: p.sig,
+            kind: p.kind ?? '',
+            label: p.label ?? 'Feature',
+            code,
+          })
+          if (!this.visible()) this.visible.set(true)
+        })
+      },
+    ))
+  }
+
+  /** Read a feature resource's bytes as text for review. Capped so a huge page
+   *  can't lock the panel — the participant is reviewing the shape and any
+   *  scripts, not diffing every byte. */
+  async #fetchCode(sig: string): Promise<string> {
+    try {
+      const store = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+        ?.get<{ getResource?: (s: string) => Promise<Blob | null> }>('@hypercomb.social/Store')
+      const blob = await store?.getResource?.(sig)
+      if (!blob) return '(could not load feature code)'
+      const text = await blob.text()
+      return text.length > 200_000 ? text.slice(0, 200_000) + '\n… (truncated for review)' : text
+    } catch {
+      return '(could not load feature code)'
+    }
+  }
+
+  /** Accept the reviewed feature (or BYPASS the review as an explicit override).
+   *  Writes the verified sig and emits `feature:verified` so the gate
+   *  re-reconciles and the page activates. */
+  acceptReview(bypassed: boolean): void {
+    const t = this.reviewTarget()
+    if (!t) return
+    markVerified({ sig: t.sig, cell: t.cell, kind: t.kind, label: t.label, bypassed })
+    EffectBus.emit('feature:verified', { sig: t.sig })
+    this.reviewTarget.set(null)
+  }
+
+  cancelReview(): void {
+    this.reviewTarget.set(null)
   }
 
   ngOnDestroy(): void {
@@ -179,6 +239,22 @@ export class FeaturesViewerComponent implements OnDestroy {
     return typeof row.branchSig === 'string' && /^[a-f0-9]{64}$/.test(row.branchSig)
   }
 
+  /** True when this tile is offered by a peer — at least one applied feature
+   *  carries an installer-resolvable branch sig. Only then is there a branch to
+   *  adopt. */
+  adoptable(group: FeatureGroup): boolean {
+    return group.applied.some(r => this.installable(r))
+  }
+
+  /** Lead into the adopt process for this peer-offered tile. Emits the canonical
+   *  adopt verb — SwarmAdoptDrone re-resolves the branch from the live peer cache
+   *  and routes into the same install/enable flow used everywhere. NOT a benign
+   *  stage: this is "adopt", reached from the features window, the way the
+   *  features icon is the one surface in both solo and swarm. */
+  adopt(group: FeatureGroup): void {
+    EffectBus.emit('tile:action', { action: 'adopt-selected', selections: [{ label: group.cell }] })
+  }
+
   toggleLike(group: FeatureGroup, row: StageableRow): void {
     const staged: StagedFeature = {
       key: this.#keyFor(group, row),
@@ -198,6 +274,10 @@ export class FeaturesViewerComponent implements OnDestroy {
   }
 
   onKey(event: KeyboardEvent): void {
-    if (event.key === 'Escape') { event.preventDefault(); this.close() }
+    if (event.key !== 'Escape') return
+    event.preventDefault()
+    // Escape backs out of an in-progress review first, then closes the panel.
+    if (this.reviewTarget()) { this.cancelReview(); return }
+    this.close()
   }
 }

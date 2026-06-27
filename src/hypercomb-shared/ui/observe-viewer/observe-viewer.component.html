@@ -1,0 +1,74 @@
+@if (visible()) {
+  <aside
+    class="observe-panel"
+    hcDockInset="right"
+    hcDockedPanel="observe-viewer"
+    dockSide="right"
+    [minWidth]="280"
+    [maxWidth]="620"
+    [defaultWidth]="340"
+    data-consumes-wheel
+    (keydown)="onKey($event)"
+    tabindex="-1"
+    role="dialog"
+    [attr.aria-label]="'observe.title' | t"
+  >
+    <header class="observe-header">
+      <span class="observe-title">{{ 'observe.title' | t }}</span>
+      <button
+        class="observe-chip"
+        type="button"
+        (click)="toggleNames()"
+        [attr.aria-pressed]="showNames()"
+        [attr.title]="(showNames() ? 'observe.names.hide' : 'observe.names.show') | t"
+      >{{ (showNames() ? 'observe.names.on' : 'observe.names.off') | t }}</button>
+      <button
+        class="observe-chip"
+        type="button"
+        (click)="cycleGroupBy()"
+        [attr.title]="'observe.group.hint' | t"
+      >{{ ('observe.group.' + groupBy()) | t }}</button>
+      <button class="observe-close" type="button" (click)="close()" [attr.aria-label]="'observe.close' | t">×</button>
+    </header>
+
+    @if (!hasPoints()) {
+      <p class="observe-empty">{{ 'observe.empty' | t }}</p>
+    } @else {
+      <div class="observe-scroll">
+        @for (group of groups(); track group.key) {
+          <section class="observe-group">
+            @if (group.label) {
+              <header class="ogroup-header">
+                <span class="ogroup-label" [title]="group.label">{{ group.label }}</span>
+                <span class="ogroup-count">{{ group.points.length }}</span>
+              </header>
+            }
+            <ul class="observe-list">
+              @for (point of group.points; track point.participant.pubkey + ':' + point.name) {
+                <li class="observe-row" [class.is-changed]="point.changed">
+                  @if (point.changed) {
+                    <span class="change-dot" [attr.title]="'observe.changed' | t" aria-hidden="true"></span>
+                  }
+                  <div class="point-meta">
+                    <span class="point-name" [title]="point.name">{{ point.name }}</span>
+                    <span class="point-by">
+                      {{ 'observe.by' | t: { who: identify(point.participant) } }}
+                      @if (point.participant.domain) {
+                        <span class="point-domain">{{ point.participant.domain }}</span>
+                      }
+                    </span>
+                  </div>
+                  @if (point.interestCount > 0) {
+                    <span class="interest-pill" [attr.title]="'observe.interest' | t: { count: point.interestCount }">
+                      {{ point.interestCount }}
+                    </span>
+                  }
+                </li>
+              }
+            </ul>
+          </section>
+        }
+      </div>
+    }
+  </aside>
+}

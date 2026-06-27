@@ -430,6 +430,18 @@ class DomainProvider implements SlashBehaviourProvider {
   }
 }
 
+class ObserveProvider implements SlashBehaviourProvider {
+  readonly name = 'observe-provider'
+  readonly priority = 100
+  readonly behaviours: SlashBehaviour[] = [
+    { name: 'observe', description: 'Observe the swarm — who is here and what they share', descriptionKey: 'slash.observe' }
+  ]
+
+  execute(): void {
+    EffectBus.emit('observe:toggle', {})
+  }
+}
+
 // ── registration ────────────────────────────────────────
 
 const _slashBehaviours = new SlashBehaviourDrone()
@@ -449,6 +461,7 @@ _slashBehaviours.addProvider(new InstructionsProvider())
 _slashBehaviours.addProvider(new AtomizeUiProvider())
 _slashBehaviours.addProvider(new DocsProvider())
 _slashBehaviours.addProvider(new DomainProvider())
+_slashBehaviours.addProvider(new ObserveProvider())
 
 // ── auto-discovery of QueenBees ─────────────────────────
 //

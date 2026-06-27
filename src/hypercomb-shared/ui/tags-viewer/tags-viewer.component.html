@@ -1,0 +1,52 @@
+@if (visible()) {
+  <aside
+    class="tags-panel"
+    hcDockInset="right"
+    hcDockedPanel="tags-viewer"
+    dockSide="right"
+    [minWidth]="260"
+    [maxWidth]="560"
+    [defaultWidth]="320"
+    data-consumes-wheel
+    (keydown)="onKey($event)"
+    tabindex="-1"
+    role="dialog"
+    [attr.aria-label]="'tags.viewer.title' | t"
+  >
+    <header class="tags-header">
+      <span class="tags-title">{{ 'tags.viewer.title' | t }}</span>
+      <span class="tags-total">{{ totalTags() }}</span>
+      <button class="tags-close" type="button" (click)="close()" [attr.aria-label]="'tags.close' | t">×</button>
+    </header>
+
+    @if (rows().length === 0) {
+      <p class="tags-empty">{{ 'tags.empty' | t }}</p>
+    } @else {
+      <ul class="tags-list">
+        @for (row of rows(); track row.name) {
+          <li class="tags-row" [class.filtered]="isFiltered(row.name)">
+            <label class="tag-swatch" [style.background]="row.color" [attr.title]="'tags.recolor' | t">
+              <input type="color" [value]="row.color" (change)="recolor(row.name, $event)" />
+            </label>
+            <button
+              class="tag-name"
+              type="button"
+              (click)="toggleFilter(row.name)"
+              [attr.aria-pressed]="isFiltered(row.name)"
+              [attr.title]="'tags.filter.hint' | t"
+            >{{ row.name }}</button>
+            <span class="tag-count" [attr.title]="'tags.count.hint' | t">{{ row.count }}</span>
+            <button
+              class="tag-remove"
+              type="button"
+              (click)="remove(row.name)"
+              [attr.aria-label]="'tags.remove' | t: { tag: row.name }"
+              [attr.title]="'tags.remove.hint' | t"
+            >×</button>
+          </li>
+        }
+      </ul>
+      <footer class="tags-foot">{{ 'tags.foot.hint' | t }}</footer>
+    }
+  </aside>
+}

@@ -23,6 +23,23 @@
       <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'features.close' | t">×</button>
     </header>
 
+    <!-- ── Review gate: a foreign feature handed here by the website gate ── -->
+    @if (reviewTarget(); as rt) {
+      <div class="feature-review">
+        <div class="review-head">
+          <span class="review-title">{{ 'features.review.title' | t: { label: rt.label } }}</span>
+          <span class="review-kind" [title]="rt.sig">{{ rt.kind }}</span>
+        </div>
+        <p class="review-note">{{ 'features.review.note' | t }}</p>
+        <pre class="review-code">{{ rt.code }}</pre>
+        <div class="review-actions">
+          <button type="button" class="review-accept" (click)="acceptReview(false)">{{ 'features.review.accept' | t }}</button>
+          <button type="button" class="review-bypass" (click)="acceptReview(true)" [attr.title]="'features.review.bypass.hint' | t">{{ 'features.review.bypass' | t }}</button>
+          <button type="button" class="review-cancel" (click)="cancelReview()">{{ 'features.review.cancel' | t }}</button>
+        </div>
+      </div>
+    }
+
     @if (groups().length === 0) {
       <p class="features-empty">{{ 'features.empty' | t }}</p>
     } @else {
@@ -31,6 +48,9 @@
           <section class="features-group">
             <header class="fgroup-header">
               <span class="fgroup-cell" [title]="group.cell">{{ group.cell }}</span>
+              @if (adoptable(group)) {
+                <button class="fgroup-adopt" type="button" (click)="adopt(group)" [attr.title]="'features.adopt.hint' | t">{{ 'features.adopt' | t }}</button>
+              }
               <button class="fgroup-remove" type="button" (click)="removeGroup(group.cell)" [attr.aria-label]="'features.remove' | t">×</button>
             </header>
 

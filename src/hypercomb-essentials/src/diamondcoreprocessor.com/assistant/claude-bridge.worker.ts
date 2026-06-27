@@ -4,7 +4,7 @@ import { readTilePropertiesAt, writeTilePropertiesAt, readTilePropsSigAt, cellLo
 import type { HistoryService } from '../history/history.service.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 import { inflate } from '../history/inflate.js'
-import { extractPageRefSigs } from '../sharing/decoration-closure.js'
+import { extractPageRefSigs, collectSigsDeep } from '../sharing/decoration-closure.js'
 
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
@@ -386,14 +386,20 @@ export class ClaudeBridgeWorker extends Worker {
     const record: Record<string, unknown> = { kind, appliesTo, payload }
     if (mark) record['mark'] = mark
 
-    // Record the page's resource CLOSURE explicitly. Lineage doctrine: an
+    // Record the decoration's resource CLOSURE explicitly. Lineage doctrine: an
     // artifact declares its signature dependencies so the merkle/closure walk
-    // carries them — never discovers them late. When the payload names an HTML
-    // body, read it NOW (it is local — the caller put-resourced it moments ago)
-    // and capture `htmlSig` plus every resource the body embeds (chrome.css,
-    // images) as a flat `refs` array. host-sync / adopt then carry the page via
-    // the deterministic forward-`refs` path (decoration-closure.ts), closing
-    // the "incomplete-closure" hole where an embedded stylesheet was silently
+    // carries them — never discovers them late.
+    const refs = new Set<string>()
+    // (a) Every resource sig nested ANYWHERE in the payload — covers a lightbox
+    // gallery's `payload.images[]`, an attachment's `payload.sig`, and any
+    // future kind that points straight at resources. Without this the
+    // decoration JSON travels but its referenced bytes (the diagram SVGs) 404
+    // for a fresh adopter.
+    for (const s of collectSigsDeep(payload)) refs.add(s)
+    // (b) When the payload names an HTML body, read it NOW (it is local — the
+    // caller put-resourced it moments ago) and capture `htmlSig` plus every
+    // resource the body embeds (chrome.css, images). This closes the
+    // "incomplete-closure" hole where an embedded stylesheet was silently
     // dropped when the body wasn't readable at push time — the exact reason a
     // travelled page rendered unstyled (htmlSig carried, chromeSig lost).
     const htmlSig = String((payload as Record<string, unknown>)['htmlSig'] ?? '').toLowerCase()
@@ -401,11 +407,12 @@ export class ClaudeBridgeWorker extends Worker {
       try {
         const body = await store.getResource(htmlSig)
         if (body) {
-          const refs = [...new Set([htmlSig, ...extractPageRefSigs(await body.text())])]
-          if (refs.length) record['refs'] = refs
+          refs.add(htmlSig)
+          for (const s of extractPageRefSigs(await body.text())) refs.add(s)
         }
       } catch { /* body unreadable now → push-time body parse still applies */ }
     }
+    if (refs.size) record['refs'] = [...refs]
 
     const recordBytes = new TextEncoder().encode(JSON.stringify(record))
     const newSig = await store.putResource(new Blob([recordBytes as BlobPart]))

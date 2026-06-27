@@ -44,7 +44,7 @@
 // changes take effect on the next event, no reload required.
 
 import { EffectBus, SignatureService } from '@hypercomb/core'
-import { decorationClosureSigs } from './decoration-closure.js'
+import { decorationClosureSigs, nestedResourceSigs } from './decoration-closure.js'
 
 export type HostSyncKind = 'layer' | 'bee' | 'dependency' | 'resource'
 
@@ -218,27 +218,38 @@ export class HostSyncService extends EventTarget {
           const refBytes = await this.#readLocalBytes(ref, kind)
           if (refBytes) {
             await this.enqueue(ref, kind, refBytes)
-            // Decoration-descent: a `decorations` slot ref is an opaque leaf to
-            // the slot walk, but its CONTENT (a website page's htmlSig body +
-            // the images/stylesheets that body embeds) must ALSO reach the host
-            // or a witnessing/importing peer 404s on every page asset. A no-op
-            // for ordinary resources (decorationClosureSigs returns []).
-            if (kind === 'resource') await this.#enqueueDecorationClosure(ref, refBytes)
+            // Resource-content descent: a resource ref is an opaque leaf to the
+            // slot walk, but its bytes can hold FURTHER resource sigs that must
+            // ALSO reach the host or a witnessing/importing peer 404s on them —
+            // a website page's htmlSig body + embedded assets (decoration
+            // records), OR a tile's nested image sig inside its `properties`
+            // blob (data resources). Covers both; a no-op for plain leaves.
+            if (kind === 'resource') await this.#enqueueResourceClosure(ref, refBytes)
           }
         } catch { /* not held locally — nothing to push */ }
       }
     }
   }
 
-  /** Stage a decoration's content-closure to the host: the website page body
-   *  (`payload.htmlSig`) and every image / stylesheet that body embeds. Like
-   *  the rest of the push walk this reads LOCAL bytes only — it stages what we
-   *  HOLD, so it must run on the AUTHORING machine (an importing tab can't push
-   *  bytes it doesn't have). Session-deduped via #walkedResources. */
-  readonly #enqueueDecorationClosure = async (sig: string, recordBytes: ArrayBuffer): Promise<void> => {
+  /** Stage a resource's nested content-closure to the host. Two mutually
+   *  exclusive cases, both reading LOCAL bytes only (we stage what we HOLD, so
+   *  this must run on the AUTHORING machine — an importing tab can't push bytes
+   *  it doesn't have):
+   *    - DECORATION record (has `kind`): the website page body (`payload.htmlSig`)
+   *      + every image/stylesheet it embeds, plus any `refs` closure (an
+   *      attachment's blob, a sequence set, an invite bundle).
+   *    - DATA resource (no `kind`): a tile's `properties` blob, whose image is a
+   *      nested `imageSig`/`small.image` the slot walk never reaches. Without
+   *      this the host holds the properties JSON but 404s the image render asks
+   *      for — the "adopted tile renders blank" bug.
+   *  Session-deduped via #walkedResources. */
+  readonly #enqueueResourceClosure = async (sig: string, recordBytes: ArrayBuffer): Promise<void> => {
     if (this.#walkedResources.has(sig)) return
     this.#walkedResources.add(sig)
-    const nested = await decorationClosureSigs(recordBytes, s => this.#readLocalBytes(s, 'resource'))
+    const nested = [
+      ...await decorationClosureSigs(recordBytes, s => this.#readLocalBytes(s, 'resource')),
+      ...nestedResourceSigs(recordBytes),
+    ]
     for (const ref of nested) {
       if (!SIG_RE.test(ref) || ref === sig) continue
       try {

@@ -50,6 +50,7 @@
 
 import { EffectBus } from '@hypercomb/core'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
+import { collectSigsDeep } from '../sharing/decoration-closure.js'
 
 /**
  * Slot name on the layer JSON. Constant so consumers don't repeat the
@@ -73,6 +74,14 @@ export interface DecorationRecord<TPayload = unknown> {
   readonly appliesTo: readonly string[]
   readonly payload: TPayload
   readonly mark?: 'persistent'
+  /** Flat closure of every resource sig this decoration depends on — the
+   *  forward path `decorationClosureSigs` reads so host-sync / adopt carry the
+   *  decoration's bytes (a file attachment's blob, a sequence set, an invite
+   *  bundle) and a fresh adopter doesn't 404 on them. Auto-derived from the
+   *  payload at write time (see `writeDecoration`). Omitted when the payload
+   *  references no resources (dropbox, contact-enabled markers). Website pages
+   *  set `refs` themselves (htmlSig + embedded assets) via the bridge path. */
+  readonly refs?: readonly string[]
 }
 
 type StoreLike = {
@@ -109,11 +118,17 @@ export async function writeDecoration<TPayload>(opts: {
   if (!store?.putResource) {
     throw new Error('[decoration-manifest] Store / putResource not available')
   }
+  // Auto-declare the payload's resource closure so the push/adopt walk carries
+  // the decoration's bytes — every 64-hex sig nested in the payload (a file
+  // attachment's blob, a sequence set, an invite bundle). Empty for marker
+  // decorations (dropbox accept-list, contact-enabled) → field omitted.
+  const refs = collectSigsDeep(opts.payload)
   const record: DecorationRecord<TPayload> = {
     kind: opts.kind,
     appliesTo: opts.appliesTo,
     payload: opts.payload,
     ...(opts.mark ? { mark: opts.mark } : {}),
+    ...(refs.length ? { refs } : {}),
   }
   const blob = new Blob([JSON.stringify(record)], { type: 'application/json' })
   const sig = await store.putResource(blob)

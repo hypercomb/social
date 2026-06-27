@@ -46,73 +46,49 @@ const TAG_ASSIGN_RE = /^([^:]+):([^(]+)(?:\(([^)]+)\))?$/
 const BRACKET_TAG_RE = /^([^\[\/!#~]+):\[(.+?)\](.*)$/
 
 /**
- * Brackets `[...]` are the selection grouping primitive. `[a,b]/cut` selects
- * the group then cuts. Bare `[a,b]` (no op) is interpreted by
- * `BracketBehavior` as create/delete/tag at the current level — so the
- * Enter handler routes that case through to the behavior rather than calling
- * `executeSelectCommand`. `/format[abc]` is a legacy shorthand for
- * `[abc]/format`, and `/select[...]` is preserved for backward compat — both
- * normalise to canonical `/select[...]`.
+ * Brackets `[…]` are THE selection grouping primitive — the one canonical form.
+ * `[a,b]` selects; `[a,b]/cut` selects then cuts; `~[a,b]` removes; `[a,b]:tag`
+ * tags. Legacy `/select[…]`, `/format[…]`, `/fmt[…]`, `/fp[…]` are still accepted
+ * as INPUT (old URLs, muscle memory) but are rewritten to the bare bracket and
+ * are never echoed or suggested back.
  */
 const BRACKET_CMD_RE = /^\/(select|format|fmt|fp)\[/i
-/** Normalise any bracket-primitive input to canonical `/select[...` form. */
+/** Normalise any selection-input form to the canonical bare-bracket `[…]`. */
 function normalizeSelectInput(v: string): string {
-  if (v.match(/^\/select\[/)) return v
+  // Already canonical.
+  if (v.startsWith('[')) return v
 
-  // Bracket-first syntax: brackets are the selection grouping primitive.
-  if (v.startsWith('[')) {
-    const close = v.indexOf(']')
-    // Open bracket — still typing the selection group
-    if (close < 0) return '/select' + v
+  // Legacy `/select[…]` → drop the prefix, keep the bracket + any tail.
+  const sel = v.match(/^\/select(\[.*)$/i)
+  if (sel) return sel[1]
 
-    if (v[close + 1] === '/') {
-      const afterSlash = v.slice(close + 2)
-      const nextSlash = afterSlash.indexOf('/')
-      const firstSeg = (nextSlash === -1 ? afterSlash : afterSlash.slice(0, nextSlash)).toLowerCase().replace(/\(.*$/, '')
-      const items = v.slice(1, close)
-      const tail = firstSeg === 'select'
-        ? (nextSlash === -1 ? '' : afterSlash.slice(nextSlash))
-        : '/' + afterSlash
-      return '/select[' + items + ']' + tail
-    }
-
-    // Closed bracket, no op — bare grouping (BracketBehavior will
-    // act on Enter, but the live context still gets select treatment so
-    // existing tile names highlight as the user types).
-    return '/select' + v
-  }
-
+  // Legacy `/format[…]` | `/fmt[…]` | `/fp[…]` → `[items]/format`.
   const m = v.match(/^\/(format|fmt|fp)\[/i)
   if (!m) return v
-  const op = m[1].toLowerCase()
   const rest = v.slice(m[0].length) // everything after the opening bracket
   const bracketClose = rest.indexOf(']')
-  if (bracketClose < 0) {
-    // bracket still open: /format[abc → /select[abc
-    return '/select[' + rest
-  }
-  // bracket closed: /format[abc] → /select[abc]/format
-  return '/select[' + rest.slice(0, bracketClose) + ']/' + (op === 'fmt' || op === 'fp' ? 'format' : op) + rest.slice(bracketClose + 1)
+  if (bracketClose < 0) return '[' + rest // bracket still open
+  return '[' + rest.slice(0, bracketClose) + ']/format' + rest.slice(bracketClose + 1)
 }
 
-/** Any `[`-prefixed (or `/select[`-prefixed) input is a select context. */
+/** Any `[`-prefixed (or legacy `/select[` / `/format[`) input is a select context. */
 function isSelectInput(v: string): boolean {
-  if (BRACKET_CMD_RE.test(v)) return true
-  if (!v.startsWith('[')) return false
-  const close = v.indexOf(']')
-  // Reject literal `[]` — degenerate case
-  if (close === 1) return false
-  return true
+  if (v.startsWith('[')) {
+    const close = v.indexOf(']')
+    return close !== 1 // reject the degenerate `[]`
+  }
+  return BRACKET_CMD_RE.test(v)
 }
 
-/** True when the input is a bracket-primitive that should EXECUTE on Enter
- *  through `executeSelectCommand` (vs. being routed to BracketBehavior). */
+/** True when the input should EXECUTE on Enter through the bracket dispatcher
+ *  (vs. a bare `[a,b]` selection routed to BracketBehavior). */
 function isSelectExecution(v: string): boolean {
-  if (/^\/select\[/.test(v)) return true
+  if (/^\/select\[/i.test(v)) return true
   if (!v.startsWith('[')) return BRACKET_CMD_RE.test(v)
   const close = v.indexOf(']')
-  // Bare `[a,b]` (closed, no op) — BracketBehavior owns the Enter
-  return close > 1 && v[close + 1] === '/'
+  // Bare `[a,b]` (closed, no op) — BracketBehavior owns the Enter. A trailing
+  // `/op` or `:tag` makes it an executing command.
+  return close > 1 && (v[close + 1] === '/' || v[close + 1] === ':')
 }
 
 const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
@@ -1775,12 +1751,27 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       this.value.set(cleaned)
     }
 
-    const v = cleaned
+    let v = cleaned
 
     // If only tag ops with nothing left, just clear and return
     if (!v.trim()) {
       this.clear()
       return
+    }
+
+    // Per-item bracket operators: `+name` creates, `~name` removes (the rest
+    // select). Apply those side-effects, then reduce the value to the remaining
+    // selection (+ any trailing op) so the normal routing below handles it.
+    // No-op (returns the value unchanged) unless a `+`/`~` item is present, so
+    // pure `[a,b]` selection and `[a,b]/op` paths are untouched.
+    if (isSelectInput(v)) {
+      const reduced = await this.#applyBracketItemOps(v)
+      if (reduced !== v) {
+        if (!reduced.trim()) { this.clear(); return }
+        this.shell?.setValue(reduced)
+        this.value.set(reduced)
+        v = reduced
+      }
     }
 
     // bracket-primitive execution: `[a,b]/op`, `/select[…]`, or `/format[…]`.
@@ -1804,7 +1795,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // Create a synthetic Enter event for match()
       const synth = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })
       if (behavior.match(synth, raw)) {
-        void Promise.resolve(behavior.execute(raw)).then(() => this.clear())
+        void Promise.resolve(behavior.execute(raw)).then(() => {
+          // A bare-bracket selection (`[a, b]`) leaves the tiles selected — echo
+          // the active selection in the bar (so it matches click-select and you
+          // can chain an op) rather than clearing to empty. Other behaviors clear.
+          if (behavior.name === 'bracket') {
+            const sel = get('@diamondcoreprocessor.com/SelectionService') as
+              { count?: number; selected?: ReadonlySet<string> } | undefined
+            if (sel?.count && sel.selected) { this.#collapseToSelect([...sel.selected]); return }
+          }
+          this.clear()
+        })
         return
       }
     }
@@ -1972,6 +1973,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
     this.#syncDirection = 'idle'
 
+    // `[a,b]:tag` / `[a,b]:[t1, ~t2]` — tag the whole selection. The tag spec
+    // after the colon is handed straight to KeywordQueenBee (it understands
+    // `tag`, `~tag`, and the `[t1, ~t2]` batch form).
+    if (afterBracket.startsWith(':')) {
+      const tagSpec = afterBracket.slice(1).trim()
+      if (tagSpec) {
+        const queen = get('@diamondcoreprocessor.com/KeywordQueenBee') as any
+        if (queen?.invoke) await queen.invoke(tagSpec)
+      }
+      this.#collapseToSelect(labels)
+      return
+    }
+
     if (op === 'cut') {
       // Use existing ClipboardWorker via controls:action effect
       EffectBus.emit('controls:action', { action: 'cut' })
@@ -2037,33 +2051,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     if (op === 'remove' || op === 'rm' || op === 'delete' || op === 'del') {
-      const lineage = this.lineage
-      const dir = await lineage.explorerDir()
-      if (dir) {
-        // Sort by path depth descending so nested cells are removed before
-        // their ancestors — otherwise removing the parent renders the
-        // descendant path unresolvable.
-        const sorted = [...labels].sort((a, b) => b.split('/').length - a.split('/').length)
-        for (const label of sorted) {
-          const segments = label.split('/').filter(Boolean)
-          const leaf = segments[segments.length - 1]
-          let parent: FileSystemDirectoryHandle | null = dir
-          for (let i = 0; i < segments.length - 1 && parent; i++) {
-            try {
-              parent = await parent.getDirectoryHandle(segments[i], { create: false })
-            } catch {
-              parent = null
-            }
-          }
-          if (!parent) continue
-          try {
-            await parent.removeEntry(leaf, { recursive: true })
-            EffectBus.emit('cell:removed', { cell: leaf })
-          } catch { /* skip */ }
-        }
-      }
+      const dir = await this.lineage.explorerDir()
+      await this.#removeLabels(labels)
       selection.clear()
-      await new hypercomb().act()
       this.clear()
 
       // if all cells removed, navigate to parent
@@ -2104,6 +2094,115 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // No operation — just /select[tiles] → select and show in bar
     this.#collapseToSelect(labels)
+  }
+
+  // -------------------------------------------------
+  // per-item bracket operators  ( +create  ~remove )
+  // -------------------------------------------------
+
+  /**
+   * Apply `+name` (create) and `~name` (remove) per-item operators inside a
+   * leading bracket, then return the value reduced to the remaining selection
+   * (plus any trailing op). Bare items (no prefix) and the trailing op are left
+   * intact for the normal select/op routing. Returns the input UNCHANGED when no
+   * `+`/`~` item is present, so pure `[a,b]` selection and `[a,b]/op` are never
+   * disturbed. Returns `''` when only creates/removes were requested (nothing
+   * left to select). Whole-group `~[…]` is left to RemoveCellBehavior.
+   */
+  async #applyBracketItemOps(v: string): Promise<string> {
+    if (!v.startsWith('[')) {
+      if (!BRACKET_CMD_RE.test(v)) return v
+      v = normalizeSelectInput(v) // legacy /select[…] | /format[…] → bare
+    }
+    const open = v.indexOf('[')
+    const close = v.indexOf(']')
+    if (open !== 0 || close < 0) return v // not a leading, closed bracket
+
+    const inner = v.slice(open + 1, close)
+    const trailing = v.slice(close + 1)
+
+    const creates: string[][] = []
+    const removes: string[] = []
+    const keeps: string[] = []
+    for (const itemRaw of inner.split(',')) {
+      const t = itemRaw.trim()
+      if (!t) continue
+      if (t.startsWith('+')) {
+        const segs = t.slice(1).split('/').map(s => this.completions.normalize(s.trim())).filter(Boolean)
+        if (segs.length) creates.push(segs)
+      } else if (t.startsWith('~')) {
+        const path = t.slice(1).split('/').map(s => this.completions.normalize(s.trim())).filter(Boolean).join('/')
+        if (path) removes.push(path)
+      } else {
+        keeps.push(t)
+      }
+    }
+
+    // Nothing to do — let the normal select/op routing handle it untouched.
+    if (creates.length === 0 && removes.length === 0) return v
+
+    await this.#createPaths(creates)
+    await this.#removeLabels(removes)
+
+    // Freshly created leaves join the selection.
+    const remaining = [...keeps, ...creates.map(segs => segs.join('/'))]
+    if (remaining.length === 0) return ''
+    return '[' + remaining.join(',') + ']' + trailing
+  }
+
+  /** Create each path (already-normalized segment arrays) under the current
+   *  location via one atomic `importTree` cascade — same primitive as plain
+   *  cell creation, so nested `+a/b` mints `a` then `a/b` with one marker each. */
+  async #createPaths(paths: readonly string[][]): Promise<void> {
+    const valid = paths.filter(p => p.length > 0)
+    if (valid.length === 0) return
+    const baseSegments = (this.lineage as unknown as { explorerSegments?: () => string[] })?.explorerSegments?.() ?? []
+    const committer = get('@diamondcoreprocessor.com/LayerCommitter') as {
+      importTree?: (updates: { segments: readonly string[]; layer: { name?: string } }[]) => Promise<void>
+    } | undefined
+
+    const updates: { segments: readonly string[]; layer: { name?: string } }[] = []
+    const seen = new Set<string>()
+    for (const segs of valid) {
+      const acc = [...baseSegments]
+      for (const part of segs) {
+        const full = [...acc, part]
+        const key = full.join('/')
+        if (!seen.has(key)) {
+          seen.add(key)
+          EffectBus.emit('cell:added', { cell: part, segments: acc.slice(), viaUpdate: true })
+          updates.push({ segments: full, layer: { name: part } })
+        }
+        acc.push(part)
+      }
+    }
+    if (committer?.importTree && updates.length > 0) await committer.importTree(updates)
+    this.requestSynchronize()
+  }
+
+  /** Remove each label (a `/`-separated path) under the current location.
+   *  Deepest paths first so a child is gone before its ancestor. Shared by the
+   *  `[…]/remove` op and the `~name` per-item operator. */
+  async #removeLabels(labels: readonly string[]): Promise<void> {
+    if (labels.length === 0) return
+    const dir = await this.lineage.explorerDir()
+    if (!dir) return
+    const sorted = [...labels].sort((a, b) => b.split('/').length - a.split('/').length)
+    for (const label of sorted) {
+      const segments = label.split('/').filter(Boolean)
+      const leaf = segments[segments.length - 1]
+      let parent: FileSystemDirectoryHandle | null = dir
+      for (let i = 0; i < segments.length - 1 && parent; i++) {
+        try { parent = await parent.getDirectoryHandle(segments[i], { create: false }) }
+        catch { parent = null }
+      }
+      if (!parent) continue
+      try {
+        await parent.removeEntry(leaf, { recursive: true })
+        EffectBus.emit('cell:removed', { cell: leaf })
+      } catch { /* already gone — skip */ }
+    }
+    await new hypercomb().act()
   }
 
   /**
@@ -2202,9 +2301,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return input
     }
 
-    // ── Pattern 2: bracket command syntax (/select[, /format[, etc.) ──
+    // ── Pattern 2: bracket selection syntax `[a, b:tag, c]` (canonical;
+    //    legacy `/select[…]` / `/format[…]` normalise to it first). ──
     const normalizedInput = normalizeSelectInput(input)
-    const selectMatch = normalizedInput.match(/^(\/select\[)(.+?)(\].*)$/)
+    const selectMatch = normalizedInput.match(/^(\[)(.+?)(\].*)$/)
     if (selectMatch) {
       const items = selectMatch[2].split(',')
       const cleanedItems: string[] = []
@@ -2236,7 +2336,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       if (ops.length > 0) {
         await this.#persistTagOps(ops)
         const cleaned = selectMatch[1] + cleanedItems.join(',') + selectMatch[3]
-        return cleaned.replace(/^\/select\[\s*\].*$/, '').trim()
+        return cleaned.replace(/^\[\s*\].*$/, '').trim()
       }
       return input
     }
@@ -2269,21 +2369,48 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Folder-based tag persistence retired. Layer is the only source of
-   * truth for tag state; the on-disk `<cell>/0000` files this used to
-   * touch are not a write path the render pipeline observes. Pending
-   * layer-slot tag write API, tag ops collected by command-line
-   * behaviours are dropped here.
+   * Persist collected tag ops onto each cell's layer via the decoration
+   * primitive. A tag is a decoration of kind `tag` (payload `{ name }`)
+   * written through the essentials DecorationService, resolved at runtime
+   * via IoC (shared can't import essentials). Colour/name go to the global
+   * TagRegistry. `tags:changed` refreshes show-cell's cache + the controls bar.
    */
-  async #persistTagOps(_ops: TagOp[]): Promise<void> {
-    return
+  async #persistTagOps(ops: TagOp[]): Promise<void> {
+    if (ops.length === 0) return
+    const decorations = get('@diamondcoreprocessor.com/DecorationService') as {
+      addTag(segments: readonly string[], name: string): Promise<string>
+      removeTag(segments: readonly string[], name: string): Promise<void>
+    } | undefined
+    if (!decorations) return
+    const registry = get('@hypercomb.social/TagRegistry') as {
+      ensureLoaded(): Promise<void>; add(name: string, color?: string): Promise<void>
+    } | undefined
+    const lineage = get('@hypercomb.social/Lineage') as
+      { explorerSegments?: () => readonly string[] } | undefined
+    const parentSegments = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? ''))
+
+    const updates: { cell: string; tag: string; color?: string }[] = []
+    for (const op of ops) {
+      const segments = [...parentSegments, op.label]
+      try {
+        if (op.remove) {
+          await decorations.removeTag(segments, op.tag)
+        } else {
+          await decorations.addTag(segments, op.tag)
+          if (registry) { await registry.ensureLoaded(); await registry.add(op.tag, op.color) }
+        }
+        updates.push({ cell: op.label, tag: op.tag, color: op.color })
+      } catch (err) { console.warn('[command-line] tag op failed for', op.label, err) }
+    }
+    if (updates.length > 0) EffectBus.emit('tags:changed', { updates })
   }
 
-  /** After an operation completes, collapse the command line to /select[remaining-tiles] */
+  /** Echo an active selection as the canonical bare bracket `[a, b, c]`
+   *  (truncated when long/unfocused). Never the legacy `/select[…]`. */
   #buildSelectValue(labels: readonly string[], truncate: boolean): string {
-    if (!truncate) return '/select[' + labels.join(',') + ']'
+    if (!truncate) return '[' + labels.join(',') + ']'
     const mapped = labels.map(l => l.length <= 4 ? l : l.slice(0, 3) + '.')
-    return '/select[' + mapped.join(',') + ']'
+    return '[' + mapped.join(',') + ']'
   }
 
   /** Whether to truncate: 4+ items or bracket content > 64 chars, and input is unfocused */
@@ -2480,9 +2607,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       if (phase === 'selection') {
         const lastSep = Math.max(raw.lastIndexOf(','), raw.lastIndexOf('['))
         const before = raw.slice(0, lastSep + 1)
+        // Preserve a leading per-item operator (`+`/`~`) on the fragment being
+        // completed so accepting a suggestion keeps the create/remove intent.
+        const fragment = raw.slice(lastSep + 1).trimStart()
+        const op = (fragment.startsWith('+') || fragment.startsWith('~')) ? fragment[0] : ''
         const spacer = raw.lastIndexOf(',') >= 0 ? ' ' : ''
         this.#syncDirection = 'command'
-        this.#setShellValue(before + spacer + best, false)
+        this.#setShellValue(before + spacer + op + best, false)
         this.#syncDirection = 'idle'
         return
       }
@@ -2653,7 +2784,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    *  matches a cell name. Each label may be a `/`-separated path. */
   #selectLabels = computed<readonly string[]>(() => {
     const v = normalizeSelectInput(this.value())
-    if (!v.match(/^\/select\[/)) return []
+    if (!v.startsWith('[')) return []
     const bracketOpen = v.indexOf('[')
     const bracketClose = v.indexOf(']')
     // Bracket closed — parse full list
@@ -2678,7 +2809,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   /** Excluded items derived from value — computed */
   #selectExcluded = computed<ReadonlySet<string>>(() => {
     const v = normalizeSelectInput(this.value())
-    if (!v.match(/^\/select\[/)) return new Set<string>()
+    if (!v.startsWith('[')) return new Set<string>()
     const bracketClose = v.indexOf(']')
     if (bracketClose >= 0) return new Set<string>() // brackets closed, no exclusion needed
     const body = v.slice(v.indexOf('[') + 1)
@@ -2739,7 +2870,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (phase === 'selection') {
       const body = v.slice(bracketOpen + 1)
       const lastSep = Math.max(body.lastIndexOf(','), -1)
-      const raw = lastSep === -1 ? body : body.slice(lastSep + 1).trimStart()
+      let raw = lastSep === -1 ? body : body.slice(lastSep + 1).trimStart()
+      // Strip a leading per-item operator (`+`create / `~`remove) so cell
+      // suggestions match the name being typed; the operator stays in `head`.
+      if (raw.startsWith('+') || raw.startsWith('~')) raw = raw.slice(1)
       const head = v.slice(0, v.length - raw.length)
       const normalized = this.completions.normalize(raw)
 

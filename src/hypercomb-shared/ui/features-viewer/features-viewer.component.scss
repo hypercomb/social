@@ -125,6 +125,27 @@ $accent: #c8b8ff;
   white-space: nowrap;
 }
 
+// Adopt — leads into the adopt process for a peer-offered tile. The real verb
+// (not the benign like-star), so it reads as an action chip, accent-filled.
+.fgroup-adopt {
+  flex: 0 0 auto;
+  background: rgba($accent, 0.16);
+  border: 1px solid rgba($accent, 0.45);
+  border-radius: 5px;
+  color: #f3f3f3;
+  font-family: inherit;
+  font-size: 0.62em;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.22em 0.6em;
+  cursor: pointer;
+  transition: background 120ms ease, transform 120ms ease;
+
+  &:hover { background: rgba($accent, 0.3); }
+  &:active { transform: scale(0.94); }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
+}
+
 .fgroup-remove {
   background: transparent;
   border: none;
@@ -354,4 +375,91 @@ $accent: #c8b8ff;
 // full height instead of leaving a gap where the bar would have been.
 @include phone-only {
   .features-panel { top: 0; }
+}
+
+// ── Review gate ─────────────────────────────────────────────────────────────
+// A foreign feature handed here by the website gate. The participant reads its
+// code before enabling — Accept (reviewed) or Bypass (override), nothing runs
+// until then.
+.feature-review {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6em;
+  padding: 0.85em 1em;
+  border-bottom: 1px solid rgba($accent, 0.25);
+  background: rgba(20, 18, 30, 0.6);
+}
+
+.review-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5em;
+}
+
+.review-title {
+  flex: 1;
+  font-size: 0.86em;
+  letter-spacing: 0.03em;
+  color: rgba($accent, 0.95);
+}
+
+.review-kind {
+  font-size: 0.7em;
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.review-note {
+  margin: 0;
+  font-size: 0.78em;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+.review-code {
+  margin: 0;
+  max-height: 40vh;
+  overflow: auto;
+  padding: 0.7em 0.8em;
+  background: rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba($accent, 0.18);
+  border-radius: 0.35em;
+  font-family: var(--hc-mono, ui-monospace, monospace);
+  font-size: 0.7em;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: rgba(220, 230, 240, 0.92);
+}
+
+.review-actions {
+  display: flex;
+  gap: 0.5em;
+  flex-wrap: wrap;
+}
+
+.review-actions button {
+  font-family: inherit;
+  font-size: 0.78em;
+  padding: 0.45em 0.9em;
+  border-radius: 0.35em;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.review-accept {
+  background: rgba($accent, 0.18);
+  border-color: rgba($accent, 0.6);
+  color: #f3f3f3;
+}
+
+.review-bypass {
+  background: transparent;
+  border-color: rgba(255, 180, 120, 0.45);
+  color: rgba(255, 200, 150, 0.9);
+}
+
+.review-cancel {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.2);
+  color: rgba(255, 255, 255, 0.6);
 }

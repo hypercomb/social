@@ -1,10 +1,15 @@
 // diamondcoreprocessor.com/commands/keyword.queen.ts
 
 import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
-import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 
 /**
  * /keyword — add or remove keywords (tags) on selected tiles.
+ *
+ * Tags ride the decoration primitive: each is a decoration of kind `tag`
+ * (payload `{ name }`) written via DecorationService, so a tag travels on the
+ * cell's `decorations` slot like every other shareable decoration. Colour lives
+ * in the global TagRegistry keyed by name. `tags:changed` is still emitted so
+ * show-cell invalidates its tag cache and the controls bar refreshes.
  *
  * Syntax:
  *   /keyword tagName              — add tag (to selected tiles if any, else global registry only)
@@ -13,6 +18,11 @@ import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-prop
  *   /keyword [tag1, ~tag2, tag3]  — batch add/remove
  *   [a,b]/keyword tagName         — chained: select then tag
  */
+type DecorationServiceLike = {
+  addTag(segments: readonly string[], name: string): Promise<string>
+  removeTag(segments: readonly string[], name: string): Promise<void>
+}
+
 export class KeywordQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'keyword'
@@ -26,56 +36,36 @@ export class KeywordQueenBee extends QueenBee {
     const selection = get('@diamondcoreprocessor.com/SelectionService') as
       { selected: ReadonlySet<string> } | undefined
     const lineage = get('@hypercomb.social/Lineage') as
-      { explorerDir: () => Promise<FileSystemDirectoryHandle | null> } | undefined
+      { explorerSegments?: () => readonly string[] } | undefined
     const registry = get('@hypercomb.social/TagRegistry') as
       { add: (n: string, c?: string) => Promise<void>; ensureLoaded: () => Promise<void> } | undefined
+    const decorations = get('@diamondcoreprocessor.com/DecorationService') as DecorationServiceLike | undefined
 
     const selectedLabels = selection ? Array.from(selection.selected) : []
 
-    if (selectedLabels.length > 0 && lineage) {
-      // Apply to all selected tiles via the layer-slot tile-properties
-      // API. No OPFS dir consulted or minted — tags travel in the tile's
-      // layer's properties slot.
-      const parentSegments = (lineage as { explorerSegments?: () => readonly string[] }).explorerSegments?.() ?? []
-      {
-        const updates: { cell: string; tag: string; color?: string }[] = []
+    if (selectedLabels.length > 0 && decorations) {
+      const parentSegments = lineage?.explorerSegments?.() ?? []
+      const updates: { cell: string; tag: string; color?: string }[] = []
 
-        for (const label of selectedLabels) {
-          for (const op of parsed) {
-            try {
-              const props = await readTilePropertiesAt(parentSegments, label)
-              const tags: string[] = Array.isArray(props['tags']) ? [...props['tags'] as string[]] : []
-
-              if (op.remove) {
-                const idx = tags.indexOf(op.tag)
-                if (idx >= 0) {
-                  tags.splice(idx, 1)
-                  await writeTilePropertiesAt(parentSegments, label, { tags })
-                }
-              } else {
-                if (!tags.includes(op.tag)) {
-                  tags.push(op.tag)
-                  await writeTilePropertiesAt(parentSegments, label, { tags })
-                }
-              }
-              updates.push({ cell: label, tag: op.tag, color: op.color })
-            } catch (err) { console.warn('[keyword] update failed for', label, err) }
-          }
-        }
-
-        if (updates.length > 0) {
-          EffectBus.emit('tags:changed', { updates })
+      for (const label of selectedLabels) {
+        const segments = [...parentSegments, label]
+        for (const op of parsed) {
+          try {
+            if (op.remove) await decorations.removeTag(segments, op.tag)
+            else await decorations.addTag(segments, op.tag)
+            updates.push({ cell: label, tag: op.tag, color: op.color })
+          } catch (err) { console.warn('[keyword] update failed for', label, err) }
         }
       }
+
+      if (updates.length > 0) EffectBus.emit('tags:changed', { updates })
     }
 
-    // Always update global registry for non-remove ops
+    // Always update global registry for non-remove ops (colour + intellisense).
     if (registry) {
       await registry.ensureLoaded()
       for (const op of parsed) {
-        if (!op.remove) {
-          await registry.add(op.tag, op.color)
-        }
+        if (!op.remove) await registry.add(op.tag, op.color)
       }
     }
 
@@ -126,29 +116,6 @@ function parseKeywordArgs(args: string): { tag: string; color?: string; remove: 
   }
 
   return []
-}
-
-// ── OPFS 0000 props helpers (self-contained, no shared import) ──
-
-const PROPS_FILE = '0000'
-
-async function readProps(cellDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
-  try {
-    const fh = await cellDir.getFileHandle(PROPS_FILE)
-    const file = await fh.getFile()
-    return JSON.parse(await file.text())
-  } catch {
-    return {}
-  }
-}
-
-async function writeProps(cellDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
-  const existing = await readProps(cellDir)
-  const merged = { ...existing, ...updates }
-  const fh = await cellDir.getFileHandle(PROPS_FILE, { create: true })
-  const writable = await fh.createWritable()
-  await writable.write(JSON.stringify(merged))
-  await writable.close()
 }
 
 // ── registration ────────────────────────────────────────

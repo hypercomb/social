@@ -10,6 +10,7 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../gr
 import { isSignature, readCellProperties, writeCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
+import { tagsForLabel } from '../../commands/decoration-kind-index.js'
 import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
 import type { HistoryService, LayerContent } from '../../history/history.service.js'
@@ -340,8 +341,8 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'neon:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden']
-  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'neon:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'render:cell-tags', 'tile:hover-tags', 'swarm:empty-layer']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
@@ -616,8 +617,10 @@ export class ShowCellDrone extends Drone {
 
   private filterKeyword = ''
   private filterTags = new Set<string>()
-  /** Flat list of {label, dir} from cross-page tag scan. null = normal mode. */
-  #tagFlattenResults: { label: string; dir: FileSystemDirectoryHandle }[] | null = null
+  /** Flat list of {label, dir} from cross-page tag scan. null = normal mode.
+   *  `dir` is null under the layer model (sub-locations have no on-disk folder);
+   *  the consume path only reads `label`. */
+  #tagFlattenResults: { label: string; dir: FileSystemDirectoryHandle | null }[] | null = null
   /** Saved lineage segments before entering tag filter — restored when filter clears. */
   #preFilterSegments: string[] | null = null
   private moveNames: string[] | null = null
@@ -1990,6 +1993,7 @@ export class ShowCellDrone extends Drone {
 
     // ── tag flatten override ──────────────────────────────
     // When tag filter is active, use pre-scanned cross-page results instead of explorer
+    console.log('[flt-dbg] render reached flatten-check; tagFlattenResults=', this.#tagFlattenResults?.map(r => r.label) ?? null)
     if (this.#tagFlattenResults && this.#tagFlattenResults.length > 0) {
       const flatResults = this.#tagFlattenResults
       const cellNames = flatResults.map(r => r.label)
@@ -3299,24 +3303,125 @@ export class ShowCellDrone extends Drone {
     } catch { /* instrumentation must never break a render */ }
   }
 
-  /** Emit render:tags with unique tag names + counts from all currently visible cells. */
+  /** Tags applied to a cell: the union of the decoration index (canonical, tags
+   *  ride the `tag` decoration kind) and the legacy `properties.tags` cache
+   *  (back-compat for cells tagged before the decoration migration). */
+  #tagsFor(label: string): string[] {
+    const out = new Set<string>(this.cellTagsCache.get(label) ?? [])
+    for (const t of tagsForLabel(label)) out.add(t)
+    return [...out]
+  }
+
+  /** Emit render:tags (name+count for the controls bar) and render:cell-tags
+   *  (per-cell tag names for the on-tile badge) from all visible cells. */
   #emitRenderTags(cells: Cell[]): void {
     const counts = new Map<string, number>()
+    const byLabel: Record<string, string[]> = {}
     for (const cell of cells) {
-      const tags = this.cellTagsCache.get(cell.label)
-      if (tags) {
-        for (const tag of tags) {
-          counts.set(tag, (counts.get(tag) ?? 0) + 1)
-        }
+      const tags = this.#tagsFor(cell.label)
+      if (tags.length) byLabel[cell.label] = tags
+      for (const tag of tags) {
+        counts.set(tag, (counts.get(tag) ?? 0) + 1)
       }
     }
     const tags = [...counts.entries()].map(([name, count]) => ({ name, count }))
     this.emitEffect('render:tags', { tags })
+    this.emitEffect('render:cell-tags', { byLabel })
   }
 
-  /** Tag scanning across directory tree removed — no-op. */
+  /** Walk the whole layer tree from the hive root and collect every cell whose
+   *  tag set intersects the active `filterTags`, populating `#tagFlattenResults`
+   *  for the flatten render override. Tags are read per cell from BOTH the `tag`
+   *  decoration kind (canonical) and legacy `properties.tags` — the same union
+   *  the controls-bar pills use — so old and new tags both filter. Mirrors the
+   *  `walkLayer` pattern (website.queen / flattenLayerTree): sign each path,
+   *  read its layer, recurse its `children`. One-shot on filter activation. */
   async #scanTagsAcrossPages(): Promise<void> {
-    // directory-based tag scanning removed
+    const active = this.filterTags
+    if (active.size === 0) { this.#tagFlattenResults = null; return }
+
+    const history = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as {
+      sign: (l: { explorerSegments?: () => readonly string[] }) => Promise<string>
+      currentLayerAt: (sig: string) => Promise<Record<string, unknown> | null>
+      getLayerBySig: (sig: string) => Promise<{ name?: string } | null>
+    } | undefined
+    const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as {
+      getResource: (sig: string) => Promise<Blob | null>
+    } | undefined
+    if (!history?.sign || !history?.currentLayerAt || !store?.getResource) {
+      this.#tagFlattenResults = null
+      return
+    }
+
+    const SIG_RE = /^[0-9a-f]{64}$/
+    const results: { label: string; dir: FileSystemDirectoryHandle | null }[] = []
+    const seen = new Set<string>()
+    const MAX_DEPTH = 32
+
+    // Tag names on a single layer: tag-kind decorations ∪ legacy properties.tags.
+    const tagNamesOf = async (layer: Record<string, unknown>): Promise<Set<string>> => {
+      const names = new Set<string>()
+      const decorations = Array.isArray(layer['decorations']) ? layer['decorations'] as unknown[] : []
+      for (const sig of decorations) {
+        if (typeof sig !== 'string' || !SIG_RE.test(sig)) continue
+        try {
+          const blob = await store.getResource(sig)
+          if (!blob) continue
+          const rec = JSON.parse(await blob.text()) as { kind?: string; payload?: { name?: unknown } }
+          if (rec?.kind === 'tag' && typeof rec.payload?.name === 'string') names.add(rec.payload.name)
+        } catch { /* malformed — skip */ }
+      }
+      const props = Array.isArray(layer['properties']) ? layer['properties'] as unknown[] : []
+      const propSig = props[0]
+      if (typeof propSig === 'string' && SIG_RE.test(propSig)) {
+        try {
+          const blob = await store.getResource(propSig)
+          if (blob) {
+            const p = JSON.parse(await blob.text()) as { tags?: unknown }
+            if (Array.isArray(p?.tags)) for (const t of p.tags) if (typeof t === 'string') names.add(t)
+          }
+        } catch { /* malformed — skip */ }
+      }
+      return names
+    }
+
+    const walk = async (path: string[], depth: number): Promise<void> => {
+      if (depth > MAX_DEPTH) return
+      let layer: Record<string, unknown> | null
+      try {
+        const locSig = await history.sign({ explorerSegments: () => path })
+        layer = await history.currentLayerAt(locSig)
+      } catch { return }
+      if (!layer) return
+
+      if (path.length > 0) {
+        const label = path[path.length - 1]
+        if (!seen.has(label)) {
+          const names = await tagNamesOf(layer)
+          for (const t of active) {
+            if (names.has(t)) { seen.add(label); results.push({ label, dir: null }); break }
+          }
+        }
+      }
+
+      const rawChildren = Array.isArray(layer['children']) ? layer['children'] as unknown[] : []
+      for (const entry of rawChildren) {
+        const s = String(entry ?? '').trim()
+        if (!s) continue
+        let childName = s
+        if (SIG_RE.test(s)) {
+          try {
+            const child = await history.getLayerBySig(s)
+            if (!child?.name) continue
+            childName = String(child.name)
+          } catch { continue }
+        }
+        await walk([...path, childName], depth + 1)
+      }
+    }
+
+    await walk([], 0)
+    this.#tagFlattenResults = results
   }
 
   /** Returns the current imageMix value, accounting for substrate fade-in animation. */
@@ -3472,6 +3577,16 @@ export class ShowCellDrone extends Drone {
         this.renderedCellsKey = ''
         this.requestRender()
       }
+    })
+
+    // tags:indexed — the decoration index finished hydrating tags for cells
+    // that were already on screen (the index walks AFTER render:cell-count).
+    // Re-aggregate so decoration-backed tags appear in the controls-bar pills
+    // without waiting for the next interaction. Cheap: no geometry I/O.
+    this.onEffect<{ labels: string[] }>('tags:indexed', (payload) => {
+      if (!Array.isArray(payload?.labels) || payload.labels.length === 0) return
+      if (this.renderedCells.size === 0) return
+      this.#emitRenderTags([...this.renderedCells.values()])
     })
 
     // fs:changed — bulk OPFS mutation marker. Workers fire this BEFORE
@@ -3666,7 +3781,15 @@ export class ShowCellDrone extends Drone {
           const lineage = this.resolve<any>('lineage')
           this.#preFilterSegments = lineage?.explorerSegments?.() ? [...lineage.explorerSegments()] : []
         }
-        void this.#scanTagsAcrossPages()
+        // Scan the whole tree, THEN render — the flatten override reads the
+        // freshly-populated #tagFlattenResults. Clear the render key so the
+        // flatten geometry rebuilds rather than reusing the prior page.
+        void (async () => {
+          await this.#scanTagsAcrossPages()
+          if (this.filterTags.size === 0) return // filter cleared mid-scan
+          this.renderedCellsKey = ''
+          this.requestRender()
+        })()
       } else {
         this.#tagFlattenResults = null
         this.renderedCellsKey = ''
@@ -4137,7 +4260,7 @@ export class ShowCellDrone extends Drone {
       let hoverTags: string[] = []
       for (const [label, cell] of this.renderedCells) {
         if (cell.q === payload.q && cell.r === payload.r) {
-          hoverTags = this.cellTagsCache.get(label) ?? []
+          hoverTags = this.#tagsFor(label)
           break
         }
       }
