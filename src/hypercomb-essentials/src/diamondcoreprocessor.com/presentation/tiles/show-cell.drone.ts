@@ -1993,7 +1993,6 @@ export class ShowCellDrone extends Drone {
 
     // ── tag flatten override ──────────────────────────────
     // When tag filter is active, use pre-scanned cross-page results instead of explorer
-    console.log('[flt-dbg] render reached flatten-check; tagFlattenResults=', this.#tagFlattenResults?.map(r => r.label) ?? null)
     if (this.#tagFlattenResults && this.#tagFlattenResults.length > 0) {
       const flatResults = this.#tagFlattenResults
       const cellNames = flatResults.map(r => r.label)

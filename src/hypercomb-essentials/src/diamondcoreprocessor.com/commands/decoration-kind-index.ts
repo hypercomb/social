@@ -60,9 +60,13 @@ const tagsByLabel = new Map<string, Set<string>>()
  *  the exact decoration sig to splice from a cell's slot by tag name. */
 const sigByLabelTag = new Map<string, Map<string, string>>()
 
-/** Reverse cache: decoration sig → { label, name }. Subtract a tag on
- *  `removeSig` without re-fetching the (possibly shared) record. */
-const tagBySig = new Map<string, { label: string; name: string }>()
+/** Reverse cache: decoration sig → tag name. A tag's sig is content-addressed,
+ *  so the SAME sig is shared by every cell carrying that tag name — the name is
+ *  constant for the sig, the cell is NOT. So we map sig → name only; on a
+ *  `removeSig` we subtract `(payloadLabel, name)` using the cell from the event,
+ *  never a stored label (which would strip the tag from the wrong cell). The
+ *  entry is never deleted on remove — other cells still share the sig. */
+const nameBySig = new Map<string, string>()
 
 /** Public lookup. Returns true iff the cell at `label` has at least
  *  one decoration of `kind` in its `decorations` slot.
@@ -129,7 +133,7 @@ function addTag(label: string, name: string, sig: string): void {
   let bySig = sigByLabelTag.get(label)
   if (!bySig) { bySig = new Map<string, string>(); sigByLabelTag.set(label, bySig) }
   bySig.set(name, sig)
-  tagBySig.set(sig, { label, name })
+  nameBySig.set(sig, name)
 }
 
 function removeTag(label: string, name: string): void {
@@ -201,13 +205,11 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
       removeKind(label, kind)
       kindBySig.delete(sig)
     }
-    // A tag's resource is content-addressed and shared across cells, so the
-    // reverse cache pins which (label, name) THIS slot ref stood for.
-    const tag = tagBySig.get(sig)
-    if (tag) {
-      removeTag(tag.label, tag.name)
-      tagBySig.delete(sig)
-    }
+    // A tag's resource is content-addressed and shared across cells, so subtract
+    // it from the cell named in THIS event (`label`), using the sig's constant
+    // tag name. Never delete `nameBySig[sig]` — other cells still share it.
+    const name = nameBySig.get(sig)
+    if (name) removeTag(label, name)
   }
 })
 
