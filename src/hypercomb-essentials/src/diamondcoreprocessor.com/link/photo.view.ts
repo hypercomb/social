@@ -58,6 +58,14 @@ export class PhotoView extends EventTarget {
     frame.appendChild(img)
     overlay.appendChild(frame)
     overlay.addEventListener('click', () => this.close())
+    // Right-click anywhere — including on the image — collapses the view
+    // rather than surfacing the browser's image context menu. The lightbox
+    // is a pure viewer; saving the image is the dropbox's concern, not this
+    // overlay's.
+    overlay.addEventListener('contextmenu', (e) => {
+      e.preventDefault()
+      this.close()
+    })
     document.body.appendChild(overlay)
     this.#overlay = overlay
 
