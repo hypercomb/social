@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800">
+  <defs>
+    <pattern id="hcw-hex" width="90" height="51.96" patternUnits="userSpaceOnUse">
+      <g fill="none" stroke="#7eb6d6" stroke-width="1.2" stroke-opacity="0.16">
+        <polygon points="75,25.98 60,51.96 30,51.96 15,25.98 30,0 60,0"/>
+        <polygon points="30,0 15,25.98 -15,25.98 -30,0 -15,-25.98 15,-25.98"/>
+        <polygon points="120,0 105,25.98 75,25.98 60,0 75,-25.98 105,-25.98"/>
+        <polygon points="30,51.96 15,77.94 -15,77.94 -30,51.96 -15,25.98 15,25.98"/>
+        <polygon points="120,51.96 105,77.94 75,77.94 60,51.96 75,25.98 105,25.98"/>
+      </g>
+    </pattern>
+    <radialGradient id="hcw-glow" cx="50%" cy="10%" r="80%">
+      <stop offset="0%" stop-color="#7eb6d6" stop-opacity="0.10"/>
+      <stop offset="55%" stop-color="#7eb6d6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="hcw-vig" cx="50%" cy="46%" r="80%">
+      <stop offset="48%" stop-color="#05080c" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#05080c" stop-opacity="0.55"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="800" fill="#0e161c"/>
+  <rect width="1200" height="800" fill="url(#hcw-hex)"/>
+  <rect width="1200" height="800" fill="url(#hcw-glow)"/>
+  <rect width="1200" height="800" fill="url(#hcw-vig)"/>
+</svg>

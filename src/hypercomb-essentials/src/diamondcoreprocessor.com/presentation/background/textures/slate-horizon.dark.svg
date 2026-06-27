@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800">
+  <defs>
+    <linearGradient id="sh-base" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1d2c39"/>
+      <stop offset="48%" stop-color="#121d27"/>
+      <stop offset="100%" stop-color="#090f16"/>
+    </linearGradient>
+    <radialGradient id="sh-glow" cx="50%" cy="20%" r="60%">
+      <stop offset="0%" stop-color="#7eb6d6" stop-opacity="0.09"/>
+      <stop offset="65%" stop-color="#7eb6d6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="sh-vig" cx="50%" cy="42%" r="82%">
+      <stop offset="58%" stop-color="#05080c" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#05080c" stop-opacity="0.4"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="800" fill="url(#sh-base)"/>
+  <rect width="1200" height="800" fill="url(#sh-glow)"/>
+  <rect width="1200" height="800" fill="url(#sh-vig)"/>
+</svg>

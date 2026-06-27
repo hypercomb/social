@@ -339,9 +339,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  structural footer action (rendered separately, pinned to the bottom of
    *  the rail) so it stays reachable no matter how long the icon list grows
    *  and is never user-mutable in edit mode. */
-  readonly railControls = computed((): ControlItem[] =>
-    this.visibleControls().filter(ctrl => ctrl.id !== 'back')
-  )
+  readonly railControls = computed((): ControlItem[] => {
+    // On the left dock, pin is lifted out of the scrollable list and rendered
+    // as a fixed action at the very top (above home) — drop it here so it
+    // isn't duplicated. Every other dock/layout keeps pin inline in the list.
+    const onLeftRail = this.#dockSide() === 'left' && !this.isMobile()
+    return this.visibleControls().filter(ctrl =>
+      ctrl.id !== 'back' && !(onLeftRail && ctrl.id === 'pin'),
+    )
+  })
 
   readonly editMode = this.#editMode.asReadonly()
 

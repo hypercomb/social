@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800">
+  <defs>
+    <pattern id="hd-dots" width="90" height="51.96" patternUnits="userSpaceOnUse">
+      <g fill="#7eb6d6" fill-opacity="0.18">
+        <circle cx="0" cy="0" r="1.8"/>
+        <circle cx="90" cy="0" r="1.8"/>
+        <circle cx="0" cy="51.96" r="1.8"/>
+        <circle cx="90" cy="51.96" r="1.8"/>
+        <circle cx="45" cy="25.98" r="1.8"/>
+      </g>
+    </pattern>
+    <radialGradient id="hd-glow" cx="50%" cy="10%" r="80%">
+      <stop offset="0%" stop-color="#7eb6d6" stop-opacity="0.08"/>
+      <stop offset="55%" stop-color="#7eb6d6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="hd-vig" cx="50%" cy="46%" r="80%">
+      <stop offset="50%" stop-color="#05080c" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#05080c" stop-opacity="0.55"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="800" fill="#0e161c"/>
+  <rect width="1200" height="800" fill="url(#hd-dots)"/>
+  <rect width="1200" height="800" fill="url(#hd-glow)"/>
+  <rect width="1200" height="800" fill="url(#hd-vig)"/>
+</svg>

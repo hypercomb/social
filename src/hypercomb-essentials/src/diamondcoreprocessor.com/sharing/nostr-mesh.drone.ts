@@ -317,6 +317,32 @@ export class NostrMeshDrone extends Drone {
     return sorted.map(i => ({ relay: i.relay, sig: i.sig, event: i.event, payload: i.payload }))
   }
 
+  // note: one-shot READ-BACK query.
+  // Forces a fresh REQ for `sig` on a TRANSIENT subId so relays replay their
+  // STORED matching events — including our OWN, which a relay does not echo
+  // back live to the sender (relay.js broadcast excludes the sending socket),
+  // so a long-lived subscription never re-sees what it published. Waits briefly
+  // for the replay, closes the transient sub, and returns the cached items —
+  // each tagged with the `relay` it arrived from ('local' = our own unconfirmed
+  // fanout). A caller treats any item from a NON-'local' relay as a confirmed
+  // read-back: the same "never trust a bare send-ok" discipline HostSyncService
+  // uses for HTTP backup. Leaves the keyed subscription untouched (separate
+  // subId, no cbs) so it never perturbs live delivery to subscribers.
+  public query = async (sig: string, timeoutMs = 1800): Promise<MeshEvt[]> => {
+    this.ensureStartedNow()
+    const s = String(sig ?? '').trim()
+    if (!s) return []
+    if (!this.networkEnabled) return this.getNonExpired(s)
+    const bucket: Bucket = { sig: s, subId: this.makeSubId(), cbs: new Set<MeshCb>() }
+    this.bucketsBySubId.set(bucket.subId, bucket)
+    this.sendReqToAll(bucket)
+    const t = Math.max(200, Math.min(Number(timeoutMs) || 1800, 8000))
+    await new Promise<void>(r => setTimeout(r, t))
+    this.sendCloseToAll(bucket.subId)
+    this.bucketsBySubId.delete(bucket.subId)
+    return this.getNonExpired(s)
+  }
+
   // note: await initial cache readiness for a signature
   // resolves when first matching event arrives, relay sends EOSE, or timeout elapses
   public awaitReadyForSig = async (sig: string, timeoutMs = 900): Promise<void> => {

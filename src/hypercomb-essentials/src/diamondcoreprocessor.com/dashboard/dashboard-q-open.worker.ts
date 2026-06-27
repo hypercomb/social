@@ -51,10 +51,14 @@ export class DashboardQOpenWorker extends Worker {
   async #handleOpen(label: string): Promise<void> {
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
     const segments = lineage?.explorerSegments?.() ?? []
-    // Only intervene when we're sitting inside /dashboard — the binding
-    // lookup is keyed by ['dashboard', label] so anywhere else this
-    // worker has nothing to do.
-    if (segments[0] !== 'dashboard') return
+    // Only intervene when we're sitting inside a dashboard. Two shapes:
+    //   • literal ['dashboard', …] — the legacy node-script render target, and
+    //   • the participant-local hidden bag DashboardBee navigates the toggle
+    //     into (bindings there are keyed by [...bagSegments, label]).
+    // DashboardProducerDrone writes bindings whose appliesTo matches whichever
+    // location holds the open-question tiles, so #findBinding resolves both.
+    const inBag = get<{ isActive?: () => boolean }>('@diamondcoreprocessor.com/DashboardBee')?.isActive?.() === true
+    if (segments[0] !== 'dashboard' && !inBag) return
 
     const targetPath = [...segments, label]
     const binding = await this.#findBinding(targetPath)

@@ -135,11 +135,25 @@
              end of the row toggles edit mode — while editing, every click
              flips an item's enabled state instead of running its action. -->
         <div class="controls-rows" [class.editing]="editMode()">
-          <!-- HOME ("comb") — pinned to the TOP of the left-docked rail; jumps
-               to the domain root (hypercomb.io home), same target as the
-               leading domain crumb. Only shown on the left dock, where the rail
-               is a full-height vertical strip with a scrollable middle. -->
+          <!-- PIN + HOME — the two fixed actions at the very TOP of the
+               left-docked rail. PIN sits ABOVE home so the view-lock toggle is
+               the first thing reachable. Its active (view-locked) cue is pure
+               CSS — accent colour + a solid chip — because macOS/Safari does
+               not reliably repaint the Material Symbols FILL axis when it is
+               toggled, so the .filled glyph alone leaves the locked state
+               invisible there. Both are shown only on the left dock, where the
+               rail is a full-height vertical strip with a scrollable middle. -->
           @if (dockSide() === 'left') {
+            <button class="ctl-btn rail-pin"
+                    [class.active]="locked()"
+                    [class.lock-bump]="lockBump()"
+                    (click)="togglePin()"
+                    [attr.aria-label]="'controls.pin' | t"
+                    data-ctrl-id="pin">
+              <span class="mat-sym" [class.filled]="locked()">push_pin</span>
+            </button>
+            <!-- HOME ("comb") — jumps to the domain root (hypercomb.io home),
+                 same target as the leading domain crumb. -->
             <button class="ctl-btn rail-home"
                     (click)="goHome()"
                     [attr.aria-label]="'controls.home' | t">

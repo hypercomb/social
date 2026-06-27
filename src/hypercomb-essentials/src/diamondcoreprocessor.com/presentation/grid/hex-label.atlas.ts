@@ -42,10 +42,20 @@ export class HexLabelAtlas {
     this.rows = Math.max(1, rows)
     this.slotToLabel = new Array(this.cols * this.rows).fill(null)
 
+    // resolution 2 (NOT 8). At resolution 8 this becomes an 8192×8192
+    // physical render target (1024 logical × 8). Edge's ANGLE/D3D11 backend
+    // mis-samples that target's transparent texels as bright/garbage — the
+    // shader's label-mix (`mix(color, white, labelAlpha)`) then washes every
+    // tile pearlescent-white. Proven via the Claude driver in real Edge:
+    // swapping this exact RenderTexture to resolution 2 (2048×2048) made the
+    // wash vanish while labels stayed crisp. Keep this in lockstep with the
+    // known-good HexImageAtlas, which renders fine in Edge at resolution 2.
+    // resolution 2 still gives 256 physical px per 128px label cell — far more
+    // than a 9px font needs.
     this.atlas = RenderTexture.create({
       width: this.cols * this.cellPx,
       height: this.rows * this.cellPx,
-      resolution: 8,
+      resolution: 2,
     })
 
     // clear once so sampling starts transparent
@@ -108,15 +118,50 @@ export class HexLabelAtlas {
   }
 
   /**
-   * Erase a single slot's pixels before a reused slot is overwritten.
+   * Zero a single slot's pixels before a reused slot is overwritten.
    * Labels are mostly transparent (only the glyph strokes have alpha), so
    * a plain `clear:false` redraw leaves the PREVIOUS label's strokes
-   * showing through the new one — the superimposed-labels bug. An
-   * `erase`-blended rect wipes exactly this one cell; a global `clear:true`
-   * would wipe the other 63 live slots. (HexImageAtlas doesn't need this:
-   * its images are opaque and fully overdraw the slot.)
+   * showing through the new one — the superimposed-labels bug. We must wipe
+   * exactly this one cell; a global `clear:true` would wipe the other 63
+   * live slots. (HexImageAtlas doesn't need this: its images are opaque and
+   * fully overdraw the slot.)
+   *
+   * THE EDGE WHITE-OVERLAY BUG (root cause): this used to draw a white rect
+   * with `blendMode = 'erase'`. Edge's ANGLE/D3D11 backend does NOT honor the
+   * `erase` blend mode when rendering into a RenderTexture — the white eraser
+   * composites as OPAQUE WHITE instead of zeroing alpha. Every evicted slot
+   * then turns solid white, and the SDF shader's label-mix
+   * (`mix(color, white, labelAlpha)`) washes the whole tile pearlescent-white.
+   * This only triggers once the atlas wraps (>64 labels), which is why small
+   * hives (root) render fine while large ones (e.g. a 79-tile hive) wash —
+   * and why it "sticks": the bogus white never clears, so it accumulates
+   * across slots on every re-bake. Proven via the Claude driver in real Edge:
+   * forcing 16 evictions left exactly 16/64 slots opaque white.
+   *
+   * A scissored `gl.clear` zeroes the slot's texels directly, bypassing blend
+   * modes entirely — works identically in Chrome and Edge. The `erase` path is
+   * kept only as a WebGPU fallback (no `gl` context; `erase` is fine there).
    */
   #clearSlot = (col: number, row: number): void => {
+    const renderer = this.renderer
+    const gl: WebGL2RenderingContext | WebGLRenderingContext | undefined = renderer.gl
+
+    if (gl && renderer.renderTarget && typeof renderer.renderTarget.bind === 'function') {
+      const resolution = this.atlas.source?.resolution ?? 1
+      const phys = this.cellPx * resolution
+      const physHeight = this.rows * this.cellPx * resolution
+      // Bind the atlas framebuffer WITHOUT clearing the whole target.
+      renderer.renderTarget.bind(this.atlas, false)
+      gl.enable(gl.SCISSOR_TEST)
+      gl.clearColor(0, 0, 0, 0)
+      // WebGL framebuffer origin is bottom-left → flip the row.
+      gl.scissor(col * phys, physHeight - (row + 1) * phys, phys, phys)
+      gl.clear(gl.COLOR_BUFFER_BIT)
+      gl.disable(gl.SCISSOR_TEST)
+      return
+    }
+
+    // Fallback (WebGPU / no GL context): the original erase-blend wipe.
     const eraser = new Graphics()
       .rect(col * this.cellPx, row * this.cellPx, this.cellPx, this.cellPx)
       .fill(0xffffff)
@@ -160,7 +205,7 @@ export class HexLabelAtlas {
 
       const displayText = this.#labelResolver ? this.#labelResolver(label) : label
       const text = new Text({ text: displayText, style: this.style })
-      text.resolution = 8
+      text.resolution = 2
       text.anchor.set(0.5)
       text.position.set(
         col * this.cellPx + this.cellPx * 0.5,
@@ -212,7 +257,7 @@ export class HexLabelAtlas {
     const displayText = this.#labelResolver ? this.#labelResolver(label) : label
 
     const text = new Text({ text: displayText, style: this.style })
-    text.resolution = 8
+    text.resolution = 2 // match the atlas RenderTexture resolution (see constructor) and seed(); baking at 8 wasted 16× the glyph pixels per label on the re-bake-heavy path
 
     text.anchor.set(0.5)
     text.position.set(

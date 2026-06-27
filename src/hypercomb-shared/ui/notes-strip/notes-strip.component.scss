@@ -284,17 +284,6 @@
   overflow-y: auto;
 }
 
-.notes-strip-body.notes-strip-accordion {
-  gap: 0.4rem;
-}
-
-.notes-strip.mode-chips .notes-strip-body {
-  flex-direction: row;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.4rem 0.75rem;
-}
-
 // ── Rows mode ──────────────────────────────────────────
 // `resize: both` exposes the browser's native bottom-right drag grip,
 // giving the panel a slide-to-adjust affordance. Min bounds keep the
@@ -375,511 +364,6 @@
 }
 :host.is-fullscreen .cv2-resize-edge { display: none; }
 
-.strip-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  overflow-y: auto;
-  // Reset the rule counter on each list scope (single-cell list AND each
-  // nested accordion list). Counter increments live on plain-note rows
-  // only, so questions/answers don't consume rule numbers.
-  counter-reset: rule;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--md-secondary) 40%, transparent) transparent;
-
-  &::-webkit-scrollbar { width: 4px; }
-  &::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, var(--md-secondary) 40%, transparent);
-    border-radius: var(--md-shape-xs);
-  }
-}
-
-// Plain-note rows are the "rules" — they advance the counter and render
-// a "1. ", "2. ", … prefix on the text. Question / answer rows are skipped
-// so the rule numbering reads cleanly even when a Q/A interleaves.
-.note-row:not(.note-row-q):not(.note-row-a) {
-  counter-increment: rule;
-}
-.note-row:not(.note-row-q):not(.note-row-a) .row-text {
-  position: relative;
-  padding-left: 1.9em;
-}
-.note-row:not(.note-row-q):not(.note-row-a) .row-text::before {
-  content: counter(rule) ".";
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: 1.55em;
-  color: var(--md-on-surface-faint);
-  font-variant-numeric: tabular-nums;
-  font-weight: 500;
-}
-
-.note-row {
-  display: flex;
-  align-items: stretch;
-  gap: 0.3rem;
-  position: relative;
-
-  &.is-selected {
-    background: color-mix(in srgb, var(--md-secondary) 12%, transparent);
-    border-radius: 6px;
-  }
-  &.is-dragging {
-    opacity: 0.4;
-  }
-}
-
-// Checkbox + grip affordances inside multi-cell rows — match the
-// single-cell .cv2-note-select / .cv2-note-grip behaviour: hidden by
-// default, visible on row-hover or while selected.
-.note-row-select,
-.note-row-grip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  width: 18px;
-  color: var(--md-on-surface-faint);
-  opacity: 0;
-  cursor: pointer;
-  transition: opacity var(--md-dur-short) var(--md-easing-standard);
-
-  .note-row:hover &,
-  .note-row.is-selected & { opacity: 1; }
-}
-.note-row-grip {
-  cursor: grab;
-  user-select: none;
-  touch-action: none;
-  &:active { cursor: grabbing; }
-}
-
-// Question rows — warm yellow card, matches the editor's qa-question
-// styling so the same "this is a question" affordance reads the same
-// in both the strip and the editor panel. The accent left border
-// gives the row a distinctive silhouette when scanning a long list.
-.note-row.note-row-q .note-open,
-.chip-wrap.note-row-q .note-chip {
-  background: color-mix(in srgb, var(--md-secondary) 14%, transparent);
-  border-left: 3px solid color-mix(in srgb, var(--md-secondary) 55%, transparent);
-  color: var(--md-on-surface-strong, var(--md-on-surface));
-}
-
-.note-row.note-row-q .note-open:hover,
-.chip-wrap.note-row-q .note-chip:hover {
-  background: color-mix(in srgb, var(--md-secondary) 22%, transparent);
-}
-
-// Answer rows — cool blue card, mirroring the editor's qa-answer
-// accent. Q and A read as a conversation pair when they sit
-// adjacent in the strip.
-.note-row.note-row-a .note-open,
-.chip-wrap.note-row-a .note-chip {
-  background: rgba(110, 180, 255, 0.10);
-  border-left: 3px solid rgba(110, 180, 255, 0.45);
-  color: var(--md-on-surface);
-}
-
-.note-row.note-row-a .note-open:hover,
-.chip-wrap.note-row-a .note-chip:hover {
-  background: rgba(110, 180, 255, 0.18);
-}
-
-.note-open {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 0.3rem;
-  text-align: left;
-  padding: 0.55rem 0.75rem;
-  background: color-mix(in srgb, var(--md-on-surface) 3%, transparent);
-  border: none;
-  border-radius: var(--md-shape-xs);
-  color: var(--md-on-surface);
-  font-family: inherit;
-  font-size: 0.95rem;
-  line-height: 1.5;
-  cursor: pointer;
-  transition: background var(--md-dur-short) var(--md-easing-standard),
-              color var(--md-dur-short) var(--md-easing-standard);
-
-  &:hover {
-    background: color-mix(in srgb, var(--md-on-surface) calc(var(--md-state-hover) * 100%), transparent);
-    color: var(--md-on-surface-strong);
-  }
-
-  &:focus-visible {
-    outline: 1px solid var(--md-secondary);
-    outline-offset: 2px;
-  }
-}
-
-.note-delete {
-  flex-shrink: 0;
-  width: 1.5rem;
-  align-self: stretch;
-  padding: 0;
-  background: transparent;
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--md-shape-xs);
-  color: var(--md-on-surface-faint);
-  font-family: inherit;
-  font-size: 0.95rem;
-  line-height: 1;
-  cursor: pointer;
-  transition: background var(--md-dur-short) var(--md-easing-standard),
-              color var(--md-dur-short) var(--md-easing-standard),
-              border-color var(--md-dur-short) var(--md-easing-standard);
-
-  &:hover {
-    background: rgba(255, 120, 120, 0.15);
-    color: #ff8080;
-    border-color: rgba(255, 120, 120, 0.6);
-  }
-}
-
-.row-text {
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.row-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-}
-
-.row-tag {
-  font-size: 0.7rem;
-  color: color-mix(in srgb, var(--md-secondary) 90%, transparent);
-}
-
-// ── Inline add-rule row ─────────────────────────────────
-// Persistent "+ add a rule" affordance at the bottom of every rules list
-// (single-cell and each accordion panel). Dashed border keeps it visually
-// distinct from real rules but in the same flow, so the user sees the
-// list end with an obvious "next slot" they can drop content into.
-.add-rule-row {
-  list-style: none;
-  margin: 0.15rem 0 0;
-  padding: 0;
-}
-
-.add-rule-btn {
-  display: block;
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  background: transparent;
-  border: 1px dashed var(--md-outline-variant);
-  border-radius: var(--md-shape-xs);
-  color: var(--md-on-surface-faint);
-  font-family: inherit;
-  font-size: 0.85rem;
-  line-height: 1.4;
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--md-dur-short) var(--md-easing-standard),
-              color var(--md-dur-short) var(--md-easing-standard),
-              border-color var(--md-dur-short) var(--md-easing-standard);
-
-  &:hover {
-    background: color-mix(in srgb, var(--md-secondary) 8%, transparent);
-    color: var(--md-on-surface);
-    border-color: color-mix(in srgb, var(--md-secondary) 40%, transparent);
-  }
-
-  &:focus-visible {
-    outline: 1px solid var(--md-secondary);
-    outline-offset: 2px;
-  }
-}
-
-// ── Chips mode ─────────────────────────────────────────
-// Outer card stretches to fill the strip slot; the horizontal chip
-// layout itself lives on `.notes-strip-body` (above) so the header
-// stays stacked on top instead of fighting the row direction.
-.notes-strip.mode-chips {
-  flex: 1;
-}
-
-.chip-track {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  flex: 1;
-  overflow-x: auto;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--md-secondary) 40%, transparent) transparent;
-
-  &::-webkit-scrollbar { height: 4px; }
-  &::-webkit-scrollbar-thumb {
-    background: color-mix(in srgb, var(--md-secondary) 40%, transparent);
-    border-radius: var(--md-shape-xs);
-  }
-}
-
-.chip-wrap {
-  display: inline-flex;
-  align-items: stretch;
-  gap: 0.2rem;
-  flex-shrink: 0;
-}
-
-.note-chip {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  max-width: 22rem;
-  padding: 0.3rem 0.65rem;
-  background: color-mix(in srgb, var(--md-on-surface) 4%, transparent);
-  border: none;
-  border-radius: var(--md-shape-s);
-  color: var(--md-on-surface);
-  font-family: inherit;
-  font-size: 0.85rem;
-  cursor: pointer;
-  transition: background var(--md-dur-short) var(--md-easing-standard),
-              color var(--md-dur-short) var(--md-easing-standard);
-
-  &:hover {
-    background: color-mix(in srgb, var(--md-on-surface) 10%, transparent);
-    color: var(--md-on-surface-strong);
-  }
-
-  &:focus-visible {
-    outline: 1px solid var(--md-secondary);
-    outline-offset: 2px;
-  }
-}
-
-.chip-text {
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.chip-tags {
-  display: inline-flex;
-  gap: 0.25rem;
-}
-
-.chip-tag {
-  font-size: 0.7rem;
-  color: color-mix(in srgb, var(--md-secondary) 90%, transparent);
-  opacity: 0.9;
-}
-
-// ── multi-selection accordion ─────────────────────────────
-// Custom accordion (not <details>) so we can animate the panel smoothly
-// via the grid-template-rows 0fr→1fr trick and own all interaction state.
-// One expandable section per selected cell; closed sections collapse to
-// a compact header so the user can compare context across selected tiles
-// without losing track of the set.
-.notes-strip-accordion {
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-}
-
-.accordion-group {
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--md-shape-s);
-  background: color-mix(in srgb, var(--md-on-surface) 2%, transparent);
-  overflow: hidden;
-  transition: border-color var(--md-dur-medium) var(--md-easing-standard),
-              background var(--md-dur-medium) var(--md-easing-standard);
-
-  &.is-open {
-    border-color: color-mix(in srgb, var(--md-secondary) 32%, transparent);
-    background: color-mix(in srgb, var(--md-secondary) 4.5%, transparent);
-  }
-}
-
-.accordion-head {
-  display: flex;
-  align-items: center;
-  gap: 0.55rem;
-  width: 100%;
-  padding: 0.45rem 0.65rem;
-  background: transparent;
-  border: 0;
-  color: inherit;
-  font-family: inherit;
-  font-size: 0.85rem;
-  text-align: left;
-  cursor: pointer;
-  user-select: none;
-  transition: background var(--md-dur-short) var(--md-easing-standard);
-
-  &:hover {
-    background: color-mix(in srgb, var(--md-on-surface) 4%, transparent);
-  }
-
-  &:active {
-    background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
-  }
-
-  &:focus-visible {
-    outline: 1px solid var(--md-secondary);
-    outline-offset: -1px;
-  }
-}
-
-.accordion-chevron {
-  flex-shrink: 0;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 12px;
-  height: 12px;
-  color: var(--md-on-surface-faint);
-  transform: rotate(-90deg);
-  transition: transform var(--md-dur-medium) var(--md-easing-emphasized),
-              color var(--md-dur-medium) var(--md-easing-standard);
-}
-
-.accordion-group.is-open .accordion-chevron {
-  transform: rotate(0);
-  color: color-mix(in srgb, var(--md-secondary) 85%, transparent);
-}
-
-.accordion-cell {
-  flex: 1;
-  min-width: 0;
-  color: var(--md-on-surface);
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  transition: color var(--md-dur-short) var(--md-easing-standard);
-}
-
-.accordion-group.is-open .accordion-cell {
-  color: var(--md-secondary);
-}
-
-.accordion-count {
-  flex-shrink: 0;
-  min-width: 1.5rem;
-  padding: 0.05rem 0.45rem;
-  background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
-  border-radius: var(--md-shape-full);
-  color: var(--md-on-surface-var);
-  font-size: 0.7rem;
-  font-variant-numeric: tabular-nums;
-  text-align: center;
-  line-height: 1.4;
-  transition: background 150ms ease, color 150ms ease;
-}
-
-.accordion-group.is-open .accordion-count {
-  background: color-mix(in srgb, var(--md-secondary) 15%, transparent);
-  color: color-mix(in srgb, var(--md-secondary) 95%, transparent);
-}
-
-// ── animated panel ─────────────────────────────────────
-// The grid-template-rows trick lets us animate from collapsed (0fr) to
-// natural content height (1fr) without measuring or using JS. The inner
-// wrapper carries overflow:hidden and min-height:0 so children clip cleanly.
-.accordion-panel {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 220ms cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-.accordion-group.is-open .accordion-panel {
-  grid-template-rows: 1fr;
-}
-
-.accordion-panel-inner {
-  min-height: 0;
-  overflow: hidden;
-}
-
-.accordion-group.is-open .accordion-panel-inner {
-  border-top: 1px solid color-mix(in srgb, var(--md-secondary) 14%, transparent);
-}
-
-.strip-list-nested {
-  margin: 0;
-  padding: 0.4rem 0.5rem 0.5rem;
-  list-style: none;
-  display: flex;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-
-// ── empty-cells footer ─────────────────────────────────
-// Selected cells with no notes yet — shown as a compact, dimmed list at
-// the bottom so the user knows what's still missing context.
-.accordion-empty {
-  margin-top: 0.15rem;
-  padding: 0.45rem 0.65rem 0.5rem;
-  border: 1px dashed var(--md-outline-variant);
-  border-radius: var(--md-shape-s);
-  background: transparent;
-}
-
-.accordion-empty-label {
-  margin-bottom: 0.3rem;
-  font-size: 0.65rem;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--md-on-surface-faint);
-}
-
-.accordion-empty-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.3rem;
-}
-
-.accordion-empty-item-wrap {
-  display: inline-flex;
-}
-
-.accordion-empty-item {
-  padding: 0.15rem 0.55rem;
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--md-shape-full);
-  background: color-mix(in srgb, var(--md-on-surface) 4%, transparent);
-  color: var(--md-on-surface-var);
-  font-family: inherit;
-  font-size: 0.72rem;
-  line-height: 1.3;
-  white-space: nowrap;
-  max-width: 12rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  cursor: pointer;
-  transition: background var(--md-dur-short) var(--md-easing-standard),
-              color var(--md-dur-short) var(--md-easing-standard),
-              border-color var(--md-dur-short) var(--md-easing-standard);
-
-  &:hover {
-    background: color-mix(in srgb, var(--md-secondary) 10%, transparent);
-    color: color-mix(in srgb, var(--md-secondary) 95%, transparent);
-    border-color: color-mix(in srgb, var(--md-secondary) 30%, transparent);
-  }
-
-  &:focus-visible {
-    outline: 1px solid var(--md-secondary);
-    outline-offset: 2px;
-  }
-}
-
 // ── accessibility helpers ──────────────────────────────
 .visually-hidden {
   position: absolute;
@@ -891,17 +375,6 @@
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .accordion-group,
-  .accordion-head,
-  .accordion-chevron,
-  .accordion-cell,
-  .accordion-count,
-  .accordion-panel {
-    transition: none;
-  }
 }
 
 // ── Comb v2 (Concept 06) styles ────────────────────────────
@@ -1032,17 +505,6 @@
     background: color-mix(in srgb, var(--md-secondary) 26%, transparent);
     color: var(--md-on-surface-strong);
   }
-}
-
-// ── formatting toolbar ───────────────────────────────────
-.cv2-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 6px 8px;
-  background: color-mix(in srgb, var(--md-surface-c-low) 80%, transparent);
-  border-bottom: 1px solid var(--md-outline-variant);
-  flex-shrink: 0;
 }
 
 .cv2-toolbar-spacer { flex: 1; }
@@ -1211,109 +673,6 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--md-secondary) 14%, transparent);
 }
 
-.cv2-tool {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  height: 26px;
-  min-width: 28px;
-  padding: 0 6px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  color: var(--md-on-surface);
-  font-family: var(--md-font-ui);
-  font-size: 12px;
-  cursor: pointer;
-
-  &:hover:not(:disabled) {
-    background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
-  }
-
-  &:disabled {
-    cursor: default;
-    color: var(--md-on-surface-faint);
-  }
-
-  &.active {
-    background: color-mix(in srgb, var(--md-secondary) 18%, transparent);
-    color: var(--md-on-surface-strong);
-    border-color: color-mix(in srgb, var(--md-secondary) 30%, transparent);
-  }
-}
-
-// Toolbar variants — readonly (no capture mode) dims the disabled
-// buttons.
-.cv2-toolbar.is-readonly {
-  .cv2-tool:disabled { opacity: 0.45; }
-}
-
-.cv2-sep {
-  display: inline-block;
-  width: 1px;
-  height: 18px;
-  background: var(--md-outline-variant);
-  margin: 0 4px;
-}
-
-// selection-bar variant — same row, recolored chrome
-.cv2-toolbar-select {
-  background: color-mix(in srgb, var(--md-secondary) 10%, var(--md-surface-c-low));
-  border-bottom-color: color-mix(in srgb, var(--md-secondary) 28%, transparent);
-  // Allow wrapping so the action buttons reflow to a second row
-  // when the strip is narrow. Each button takes its natural size;
-  // the trailing buttons spill below rather than getting squished.
-  flex-wrap: wrap;
-  row-gap: 4px;
-}
-
-.cv2-select-count {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 6px 0 4px;
-  font-family: var(--md-font-mono);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  color: var(--md-on-surface);
-  flex-shrink: 0;
-
-  strong {
-    color: var(--md-secondary);
-    font-family: var(--md-font-mono);
-    font-weight: 500;
-  }
-}
-
-.cv2-toolbar-select .cv2-tool {
-  // Keep the icon visible even when the label hides; prevent buttons
-  // from collapsing below their icon size.
-  flex-shrink: 0;
-}
-// Label spans only — never the .mat-sym icon spans, which need to
-// keep the Material Symbols font for their ligature glyphs.
-.cv2-toolbar-select .cv2-tool span:not(.mat-sym) {
-  font-family: var(--md-font-mono);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-}
-
-// At narrow widths, drop the verbose action labels — keep the icons
-// only. The button tooltips still carry the full action name. The
-// container query targets the strip itself (set container-type below)
-// so we react to the panel's actual width, not the viewport's.
-.notes-strip {
-  container-type: inline-size;
-  container-name: notesstrip;
-}
-@container notesstrip (max-width: 460px) {
-  .cv2-toolbar-select .cv2-tool > span:not(.mat-sym) {
-    display: none;
-  }
-}
-
 // ── filter strip ────────────────────────────────────────
 .cv2-filter {
   display: flex;
@@ -1321,11 +680,6 @@
   padding: 7px 10px;
   border-bottom: 1px solid var(--md-outline-variant);
   flex-shrink: 0;
-
-  &-faded {
-    opacity: 0.4;
-    pointer-events: none;
-  }
 }
 
 .cv2-filter-chip {
@@ -1424,7 +778,6 @@
   }
 }
 
-.cv2-note-select,
 .cv2-note-grip {
   display: flex;
   // Center the glyph against the note text's first line box (14px × 1.5 =
@@ -1434,14 +787,6 @@
   min-height: 21px;
   color: var(--md-on-surface-faint);
   cursor: pointer;
-}
-
-.cv2-note-select {
-  opacity: 0;
-  transition: opacity var(--md-dur-short) var(--md-easing-standard);
-
-  .cv2-note:hover &,
-  .cv2-note.is-selected & { opacity: 1; }
 }
 
 .cv2-note-grip {
@@ -1455,17 +800,9 @@
 }
 
 // ── note drag-reorder visuals ────────────────────────────
-// Source row dims while being dragged; the drop indicator is a thin
-// secondary-accent line drawn between rows where the drop would land.
+// Source row dims while being dragged.
 .cv2-note.is-dragging {
   opacity: 0.4;
-}
-.cv2-note-drop-indicator {
-  height: 2px;
-  margin: 2px 0;
-  background: var(--md-secondary);
-  border-radius: 2px;
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--md-secondary) 25%, transparent);
 }
 
 .cv2-note-body {
@@ -1795,30 +1132,6 @@
   }
 }
 
-.cv2-foot-spacer { flex: 1; }
-
-.cv2-foot-kbd {
-  padding: 1px 5px;
-  background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
-  border: 1px solid var(--md-outline-variant);
-  border-radius: 3px;
-  color: var(--md-on-surface-var);
-}
-
-.cv2-foot-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: transparent;
-  border: 0;
-  color: var(--md-secondary);
-  font-family: inherit;
-  font-size: inherit;
-  letter-spacing: inherit;
-  cursor: pointer;
-  padding: 0;
-}
-
 // ── Tile navigator (always-on, filterable) ───────────────
 // Bottom-of-panel list of every tile in the current layer. A find box
 // (matches tile name OR note text) sits above a scrollable row list. The
@@ -1859,6 +1172,21 @@
   padding: 0;
   &:hover { color: var(--md-on-surface); }
 }
+// Selection status bar — count of checked tiles + clear-all. Sits between
+// the find box and the row list, only when ≥1 tile is checked.
+.cv2-tilelist-selbar {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  font-size: 0.74rem;
+  color: color-mix(in srgb, var(--md-on-surface) 70%, transparent);
+  background: color-mix(in srgb, var(--md-secondary) 9%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--md-on-surface) 8%, transparent);
+
+  strong { color: var(--md-on-surface); font-variant-numeric: tabular-nums; }
+}
+.cv2-tilelist-selbar-spacer { flex: 1 1 auto; }
 .cv2-tilelist-rows {
   list-style: none;
   margin: 0;
@@ -1867,11 +1195,35 @@
   flex: 1 1 auto;
   min-height: 0;
 }
+// Row wrapper — holds the select checkbox alongside the activate button so
+// checking a tile (working set) is independent of clicking it (switch active).
+.cv2-tilelist-item {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  border-radius: 7px;
+  transition: background var(--md-dur-short) var(--md-easing-standard);
+
+  &.is-selected { background: color-mix(in srgb, var(--md-secondary) 10%, transparent); }
+  &.is-active   { background: color-mix(in srgb, var(--md-secondary) 18%, transparent); }
+  &.is-selected.is-active { background: color-mix(in srgb, var(--md-secondary) 24%, transparent); }
+}
+.cv2-tilelist-check {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.1rem 0.25rem 0.35rem;
+  cursor: pointer;
+  color: color-mix(in srgb, var(--md-on-surface) 50%, transparent);
+
+  &:hover { color: var(--md-on-surface); }
+}
 .cv2-tilelist-row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   text-align: left;
   background: transparent;
   border: none;
@@ -1881,17 +1233,13 @@
   font-family: inherit;
   font-size: 0.8rem;
   cursor: pointer;
-  transition: background var(--md-dur-short) var(--md-easing-standard),
-              color var(--md-dur-short) var(--md-easing-standard);
+  transition: color var(--md-dur-short) var(--md-easing-standard);
 
-  &:hover {
-    background: color-mix(in srgb, var(--md-on-surface) 7%, transparent);
-    color: var(--md-on-surface);
-  }
-  &.is-active {
-    background: color-mix(in srgb, var(--md-secondary) 18%, transparent);
-    color: var(--md-on-surface-strong, var(--md-on-surface));
-  }
+  &:hover { color: var(--md-on-surface); }
+  &.is-active { color: var(--md-on-surface-strong, var(--md-on-surface)); }
+}
+.cv2-tilelist-item:hover:not(.is-active):not(.is-selected) {
+  background: color-mix(in srgb, var(--md-on-surface) 7%, transparent);
 }
 .cv2-tilelist-name {
   flex: 1 1 auto;
@@ -1899,6 +1247,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+// Small "active" pill on the row whose notes are open in the editor above.
+.cv2-tilelist-active {
+  flex: 0 0 auto;
+  font-size: 0.62rem;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+  color: var(--md-secondary);
+  background: color-mix(in srgb, var(--md-secondary) 16%, transparent);
+  border-radius: 999px;
+  padding: 0.05rem 0.4rem;
 }
 .cv2-tilelist-count {
   flex: 0 0 auto;

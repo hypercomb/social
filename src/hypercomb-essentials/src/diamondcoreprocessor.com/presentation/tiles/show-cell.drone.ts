@@ -1746,7 +1746,14 @@ export class ShowCellDrone extends Drone {
       this.layer = new Container()
       this.pixiContainer.addChild(this.layer)
 
-      this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
+      // 16×16 = 256 slots — MUST be >= the imageAtlas slot count (and >= the
+      // realistic on-screen tile count) so hives larger than 64 tiles do NOT
+      // wrap the label atlas. Wrapping bumps evictionGeneration, which is folded
+      // into buildCellsKey, so every wrap invalidates the cells-key → applyGeometry's
+      // early-return (cells-key unchanged) NEVER holds → the whole grid re-bakes
+      // its labels on EVERY render pass (O(tiles) thrash). At 64 slots a 79-tile
+      // hive thrashed continuously; at 256 it builds once and the cache holds.
+      this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 16, 16)
       this.attachLabelResolver(this.atlas)
       this.atlas.setPivot(this.#pivot)
       if (this.#warmLabels.length) this.atlas.seed(this.#warmLabels)
@@ -1755,7 +1762,14 @@ export class ShowCellDrone extends Drone {
       this.atlasRenderer = this.pixiRenderer
       this.shader = null
     } else if (!this.atlas || this.atlasRenderer !== this.pixiRenderer) {
-      this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 8, 8)
+      // 16×16 = 256 slots — MUST be >= the imageAtlas slot count (and >= the
+      // realistic on-screen tile count) so hives larger than 64 tiles do NOT
+      // wrap the label atlas. Wrapping bumps evictionGeneration, which is folded
+      // into buildCellsKey, so every wrap invalidates the cells-key → applyGeometry's
+      // early-return (cells-key unchanged) NEVER holds → the whole grid re-bakes
+      // its labels on EVERY render pass (O(tiles) thrash). At 64 slots a 79-tile
+      // hive thrashed continuously; at 256 it builds once and the cache holds.
+      this.atlas = new HexLabelAtlas(this.pixiRenderer, 128, 16, 16)
       this.attachLabelResolver(this.atlas)
       this.atlas.setPivot(this.#pivot)
       if (this.#warmLabels.length) this.atlas.seed(this.#warmLabels)

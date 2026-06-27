@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800">
+  <defs>
+    <linearGradient id="ss-base" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b141a"/>
+      <stop offset="100%" stop-color="#15242f"/>
+    </linearGradient>
+    <linearGradient id="ss-band" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="30%" stop-color="#7eb6d6" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#7eb6d6" stop-opacity="0.11"/>
+      <stop offset="70%" stop-color="#7eb6d6" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="ss-vig" cx="50%" cy="45%" r="80%">
+      <stop offset="55%" stop-color="#05080c" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#05080c" stop-opacity="0.45"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="800" fill="url(#ss-base)"/>
+  <rect width="1200" height="800" fill="url(#ss-band)"/>
+  <rect width="1200" height="800" fill="url(#ss-vig)"/>
+</svg>

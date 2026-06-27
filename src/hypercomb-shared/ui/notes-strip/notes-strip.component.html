@@ -28,7 +28,7 @@
       </span>
       <span class="cv2-dragbar-spacer"></span>
       <button type="button" class="cv2-mini-btn" (click)="toggleFullscreen()"
-              [title]="isFullscreen() ? 'Exit full screen' : 'Full screen'">
+              [title]="(isFullscreen() ? 'notes.exitFullscreen' : 'notes.fullscreen') | t">
         <span class="mat-sym">{{ isFullscreen() ? 'close_fullscreen' : 'open_in_full' }}</span>
       </button>
       <button type="button" class="cv2-mini-btn" (click)="hide()"
@@ -41,118 +41,74 @@
          the canvas or picked from the list below). Without one, the list alone
          shows so the user can find and pick a tile. -->
     @if (cell()) {
-      <!-- Formatting toolbar / selection bar -->
-      @if (selectionMode()) {
-        <div class="cv2-toolbar cv2-toolbar-select">
-          <span class="cv2-select-count">
-            <span class="mat-sym filled" style="font-size:14px">check_circle</span>
-            <strong>{{ selectionCount() }}</strong> selected
-          </span>
-          <span class="cv2-sep"></span>
-          <button type="button" class="cv2-tool" (click)="deleteSelectedNotes()"
-                  title="Delete selected notes">
-            <span class="mat-sym" style="font-size:16px">delete</span>
-            <span>delete</span>
-          </button>
-          <button type="button" class="cv2-tool" (click)="copySelectedNotesText()"
-                  title="Copy selected note text to clipboard">
-            <span class="mat-sym" style="font-size:16px">content_copy</span>
-            <span>copy</span>
-          </button>
-          <button type="button" class="cv2-tool" (click)="duplicateSelectedNotes()"
-                  title="Duplicate each selected note">
-            <span class="mat-sym" style="font-size:16px">file_copy</span>
-            <span>duplicate</span>
-          </button>
-          <button type="button" class="cv2-tool" (click)="toggleSelectionKind()"
-                  title="Toggle [Q] question prefix on each selected note">
-            <span class="mat-sym" style="font-size:16px">help</span>
-            <span>mark q</span>
-          </button>
-          <button type="button" class="cv2-tool" (click)="shiftSelectedIndent(1)"
-                  title="Indent selected notes">
-            <span class="mat-sym" style="font-size:16px">format_indent_increase</span>
-          </button>
-          <button type="button" class="cv2-tool" (click)="shiftSelectedIndent(-1)"
-                  title="Outdent selected notes">
-            <span class="mat-sym" style="font-size:16px">format_indent_decrease</span>
-          </button>
-          <span class="cv2-toolbar-spacer"></span>
-          <button type="button" class="cv2-mini-btn ghost" (click)="clearNoteSelection()"
-                  title="Clear selection (Esc)">
-            <span class="mat-sym" style="font-size:14px">close</span>
-          </button>
-        </div>
-      } @else {
-        <!-- Embedded note form — the single authoring surface. Add mode by
-             default; clicking a note row loads it here for editing. The
-             leading kind pill flips the entry between note and question;
-             placeholder, accent, and submit label follow it. Enter commits,
-             Shift+Enter newlines, Esc cancels. -->
-        <form class="cv2-form" [class.is-question]="draftKind() === 'q'"
-              (submit)="$event.preventDefault(); commitForm()">
-          <div class="cv2-form-input-row">
-            <div class="cv2-input-wrap">
-              <textarea #formInput
-                        class="cv2-form-input"
-                        rows="1"
-                        [value]="draftText()"
-                        (input)="onFormInput($event)"
-                        (keydown)="onFormKeydown($event)"
-                        [attr.placeholder]="(draftKind() === 'q' ? 'notes.capturePlaceholderQ' : 'notes.capturePlaceholder') | t"
-                        [attr.aria-label]="editingNoteId() ? ('notes.edit' | t) : ('notes.add' | t)"></textarea>
-              <!-- In-input kind toggle — small chip pinned to the bottom-left
-                   corner of the textarea. One click flips note ↔ question;
-                   styled subtly (not like the primary submit) so it reads as
-                   an accessory of the field, not a second action button. -->
-              <button type="button" class="cv2-kind-toggle"
-                      [class.is-question]="draftKind() === 'q'"
-                      (click)="toggleDraftKind()"
-                      [attr.aria-label]="'notes.kindLabel' | t"
-                      [attr.aria-pressed]="draftKind() === 'q'"
-                      [title]="(draftKind() === 'q' ? 'notes.kindQuestion' : 'notes.kindNote') | t">
-                <span class="dot" [class.q]="draftKind() === 'q'" [class.n]="draftKind() === 'note'"></span>
-                <span class="cv2-kind-toggle-label">{{ (draftKind() === 'q' ? 'notes.kindQuestion' : 'notes.kindNote') | t }}</span>
-              </button>
-            </div>
-            <button type="submit" class="cv2-form-submit" [disabled]="!draftText().trim()">
-              {{ editingNoteId() ? ('notes.save' | t) : ((draftKind() === 'q' ? 'notes.formAsk' : 'notes.formAdd') | t) }}
+      <!-- Embedded note form — the single authoring surface. Add mode by
+           default; clicking a note row loads it here for editing. The
+           leading kind pill flips the entry between note and question;
+           placeholder, accent, and submit label follow it. Enter commits,
+           Shift+Enter newlines, Esc cancels. -->
+      <form class="cv2-form" [class.is-question]="draftKind() === 'q'"
+            (submit)="$event.preventDefault(); commitForm()">
+        <div class="cv2-form-input-row">
+          <div class="cv2-input-wrap">
+            <textarea #formInput
+                      class="cv2-form-input"
+                      rows="1"
+                      [value]="draftText()"
+                      (input)="onFormInput($event)"
+                      (keydown)="onFormKeydown($event)"
+                      [attr.placeholder]="(draftKind() === 'q' ? 'notes.capturePlaceholderQ' : 'notes.capturePlaceholder') | t"
+                      [attr.aria-label]="editingNoteId() ? ('notes.edit' | t) : ('notes.add' | t)"></textarea>
+            <!-- In-input kind toggle — small chip pinned to the bottom-left
+                 corner of the textarea. One click flips note ↔ question;
+                 styled subtly (not like the primary submit) so it reads as
+                 an accessory of the field, not a second action button. -->
+            <button type="button" class="cv2-kind-toggle"
+                    [class.is-question]="draftKind() === 'q'"
+                    (click)="toggleDraftKind()"
+                    [attr.aria-label]="'notes.kindLabel' | t"
+                    [attr.aria-pressed]="draftKind() === 'q'"
+                    [title]="(draftKind() === 'q' ? 'notes.kindQuestion' : 'notes.kindNote') | t">
+              <span class="dot" [class.q]="draftKind() === 'q'" [class.n]="draftKind() === 'note'"></span>
+              <span class="cv2-kind-toggle-label">{{ (draftKind() === 'q' ? 'notes.kindQuestion' : 'notes.kindNote') | t }}</span>
             </button>
           </div>
-          @if (editingNoteId()) {
-            <div class="cv2-form-tools">
-              <span class="cv2-toolbar-spacer"></span>
-              <button type="button" class="cv2-form-cancel" (click)="cancelEdit()"
-                      [title]="'notes.close' | t">
-                <span class="mat-sym" style="font-size:14px">close</span>
-                <span>{{ 'notes.cancel' | t }}</span>
-              </button>
-            </div>
-          }
-        </form>
-      }
+          <button type="submit" class="cv2-form-submit" [disabled]="!draftText().trim()">
+            {{ editingNoteId() ? ('notes.save' | t) : ((draftKind() === 'q' ? 'notes.formAsk' : 'notes.formAdd') | t) }}
+          </button>
+        </div>
+        @if (editingNoteId()) {
+          <div class="cv2-form-tools">
+            <span class="cv2-toolbar-spacer"></span>
+            <button type="button" class="cv2-form-cancel" (click)="cancelEdit()"
+                    [title]="'notes.close' | t">
+              <span class="mat-sym" style="font-size:14px">close</span>
+              <span>{{ 'notes.cancel' | t }}</span>
+            </button>
+          </div>
+        }
+      </form>
 
       <!-- Filter chips -->
       @if (hasQuestions()) {
-        <div class="cv2-filter" [class.cv2-filter-faded]="selectionMode()" role="group" aria-label="filter by kind">
+        <div class="cv2-filter" role="group" [attr.aria-label]="'notes.kindLabel' | t">
           <button type="button" class="cv2-filter-chip"
                   [class.active]="kindFilter() === 'all'"
                   (click)="setKindFilter('all')">
             <span class="dot all"></span>
-            all
+            {{ 'notes.filterAll' | t }}
             <span>{{ notes().length }}</span>
           </button>
           <button type="button" class="cv2-filter-chip"
                   [class.active]="kindFilter() === 'q'"
                   (click)="setKindFilter('q')">
             <span class="dot q"></span>
-            questions
+            {{ 'notes.filterQuestions' | t }}
           </button>
           <button type="button" class="cv2-filter-chip"
                   [class.active]="kindFilter() === 'note'"
                   (click)="setKindFilter('note')">
             <span class="dot n"></span>
-            notes
+            {{ 'notes.filterNotes' | t }}
           </button>
         </div>
       }
@@ -166,7 +122,6 @@
                  [style.paddingLeft.px]="depth * 18"
                  [class.cv2-note-q]="noteKind(note) === 'q'"
                  [class.cv2-note-a]="noteKind(note) === 'a'"
-                 [class.is-selected]="isNoteSelected(cell()!, note.id)"
                  [class.is-editing]="editingNoteId() === note.id"
                  [class.is-dragging]="noteDragSourceId() === note.id"
                  [class.is-drop-into]="noteDropTargetId() === note.id && noteDropMode() === 'into'"
@@ -185,31 +140,24 @@
             <button type="button" class="cv2-note-chevron"
                     [class.is-collapsed]="isCollapsed(note.id)"
                     (click)="toggleCollapse(note.id, $event)"
-                    [attr.aria-label]="isCollapsed(note.id) ? 'Expand' : 'Collapse'">
+                    [attr.aria-label]="(isCollapsed(note.id) ? 'notes.expand' : 'notes.collapse') | t">
               <span class="cv2-chevron-mark" aria-hidden="true"></span>
             </button>
           } @else {
             <span class="cv2-note-chevron-spacer" aria-hidden="true"></span>
           }
-          <div class="cv2-note-select" (click)="toggleNoteSelection(cell()!, note.id, $event)">
-            @if (isNoteSelected(cell()!, note.id)) {
-              <span class="mat-sym filled" style="font-size:16px;color:var(--md-secondary)">check_box</span>
-            } @else {
-              <span class="mat-sym" style="font-size:16px">check_box_outline_blank</span>
-            }
-          </div>
-          <div class="cv2-note-grip" title="drag to reorder or nest"
+          <div class="cv2-note-grip" [title]="'notes.dragToReorder' | t"
                (pointerdown)="onNoteGripPointerDown(cell()!, note.id, $event)">
             <span class="mat-sym" style="font-size:14px">drag_indicator</span>
           </div>
           <div class="cv2-note-body" (click)="onRowBodyClick(cell()!, note.id, $event)">
             @if (noteKind(note) === 'q') {
               <div class="cv2-note-kind">
-                <span class="mat-sym filled" style="font-size:12px">help</span> question
+                <span class="mat-sym filled" style="font-size:12px">help</span> {{ 'notes.noteKindQuestion' | t }}
               </div>
             } @else if (noteKind(note) === 'a') {
               <div class="cv2-note-kind cv2-kind-a">
-                <span class="mat-sym filled" style="font-size:12px">chat</span> answer
+                <span class="mat-sym filled" style="font-size:12px">chat</span> {{ 'notes.noteKindAnswer' | t }}
               </div>
             }
             <!-- Shape glyph (CSS-painted via the parent's .hc-shape-X
@@ -225,7 +173,7 @@
                   [class.is-open]="kebabOpenId() === note.id"
                   (click)="openKebab(note.id, $event)"
                   [attr.aria-label]="'notes.actions' | t"
-                  title="More actions">
+                  [title]="'notes.moreActions' | t">
             <span class="mat-sym" style="font-size:14px">more_vert</span>
           </button>
           @if (kebabOpenId() === note.id) {
@@ -233,28 +181,28 @@
               <button type="button" class="cv2-kebab-item"
                       (click)="openPicker(note.id, $event)">
                 <span class="mat-sym" style="font-size:14px">subdirectory_arrow_right</span>
-                <span>Nest under…</span>
+                <span>{{ 'notes.nestUnder' | t }}</span>
               </button>
               @if (isNested(note.id)) {
                 <button type="button" class="cv2-kebab-item"
                         (click)="promote(note.id); closeKebab()">
                   <span class="mat-sym" style="font-size:14px">north_west</span>
-                  <span>Promote to top level</span>
+                  <span>{{ 'notes.promoteToTopLevel' | t }}</span>
                 </button>
               }
               <button type="button" class="cv2-kebab-item cv2-kebab-danger"
                       (click)="remove(note.id, $event); closeKebab()">
                 <span class="mat-sym" style="font-size:14px">delete</span>
-                <span>Delete</span>
+                <span>{{ 'notes.delete' | t }}</span>
               </button>
             </div>
           }
           @if (pickerOpenForId() === note.id) {
             <div class="cv2-nest-picker" (click)="$event.stopPropagation()"
-                 role="listbox" aria-label="Choose a parent note">
-              <div class="cv2-nest-picker-head">Nest under…</div>
+                 role="listbox" [attr.aria-label]="'notes.nestUnder' | t">
+              <div class="cv2-nest-picker-head">{{ 'notes.nestUnder' | t }}</div>
               @if (nestCandidates(note.id).length === 0) {
-                <div class="cv2-nest-picker-empty">No valid parent notes.</div>
+                <div class="cv2-nest-picker-empty">{{ 'notes.noValidParents' | t }}</div>
               } @else {
                 @for (cand of nestCandidates(note.id); track cand.id) {
                   <button type="button" class="cv2-nest-picker-item"
@@ -292,14 +240,7 @@
 
       <!-- Editor footer — note count for the active tile. -->
       <footer class="cv2-foot">
-        @if (selectionMode()) {
-          <span><strong>{{ selectionCount() }}</strong> selected · <code>{{ cell() }}</code></span>
-          <span class="cv2-foot-spacer"></span>
-          <span class="cv2-foot-kbd">⌫</span><span>delete</span>
-          <span class="cv2-foot-kbd">esc</span><span>clear</span>
-        } @else {
-          <span>{{ notes().length }} notes in <code>{{ cell() }}</code></span>
-        }
+        <span>{{ 'notes.footerCount' | t: { count: notes().length } }} <code>{{ cell() }}</code></span>
       </footer>
     } @else {
       <!-- No active tile — prompt the user to find one in the list below. -->
@@ -321,18 +262,50 @@
                [attr.aria-label]="'notes.filterPlaceholder' | t" />
         @if (filterText()) {
           <button type="button" class="cv2-tilelist-clear" (click)="clearFilter()"
-                  [attr.aria-label]="'notes.cancel' | t" title="clear">
+                  [attr.aria-label]="'notes.clearFilter' | t" [title]="'notes.clearFilter' | t">
             <span class="mat-sym" style="font-size:14px">close</span>
           </button>
         }
       </div>
+      <!-- Selection status — appears once at least one tile is checked.
+           Mirrors the note selection bar: count + a clear-all. The set is a
+           working group you switch between by clicking rows; clearing it
+           leaves the active tile's notes open above. -->
+      @if (selectedCellCount() > 0) {
+        <div class="cv2-tilelist-selbar">
+          <span class="mat-sym filled" style="font-size:13px;color:var(--md-secondary)">check_circle</span>
+          <strong>{{ selectedCellCount() }}</strong>
+          <span>{{ 'notes.tilesSelected' | t }}</span>
+          <span class="cv2-tilelist-selbar-spacer"></span>
+          <button type="button" class="cv2-mini-btn ghost" (click)="clearCellSelection()"
+                  [title]="'notes.clearSelection' | t">
+            <span class="mat-sym" style="font-size:13px">close</span>
+          </button>
+        </div>
+      }
       <ul class="cv2-tilelist-rows thin-scroll" role="list">
         @for (t of tileList(); track t.cell) {
-          <li role="listitem">
+          <li role="listitem" class="cv2-tilelist-item"
+              [class.is-selected]="t.selected"
+              [class.is-active]="t.cell === cell()">
+            <span class="cv2-tilelist-check"
+                  role="checkbox"
+                  [attr.aria-checked]="t.selected"
+                  [attr.aria-label]="t.cell"
+                  (click)="toggleCellSelection(t.cell, $event)">
+              @if (t.selected) {
+                <span class="mat-sym filled" style="font-size:16px;color:var(--md-secondary)">check_box</span>
+              } @else {
+                <span class="mat-sym" style="font-size:16px">check_box_outline_blank</span>
+              }
+            </span>
             <button type="button" class="cv2-tilelist-row"
                     [class.is-active]="t.cell === cell()"
                     (click)="activateCell(t.cell)" [title]="t.cell">
               <span class="cv2-tilelist-name">{{ t.cell }}</span>
+              @if (t.cell === cell()) {
+                <span class="cv2-tilelist-active">{{ 'notes.active' | t }}</span>
+              }
               @if (t.count > 0) {
                 <span class="cv2-tilelist-count" aria-hidden="true">{{ t.count }}</span>
               }

@@ -51,27 +51,6 @@
   }
 }
 
-// ── install prompt (shown when no resources installed) ─
-.install-prompt {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  padding: 0 0.75rem;
-  font-size: 1em;
-  color: color-mix(in srgb, var(--md-primary) 80%, transparent);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  text-decoration: none;
-  transition: color var(--md-dur-medium) var(--md-easing-standard),
-              background var(--md-dur-medium) var(--md-easing-standard);
-
-  &:hover {
-    color: var(--md-primary);
-    background: color-mix(in srgb, var(--md-primary) 6%, transparent);
-  }
-}
-
 // ── mic button (right edge, flush inside header-bar) ──────
 
 .mic-btn {

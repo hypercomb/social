@@ -1,0 +1,96 @@
+<svg viewBox="0 0 880 610" width="880" height="610" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="lpT lpD">
+  <title id="lpT">Adding a website — the participant and Claude round-trip loop</title>
+  <desc id="lpD">A loop across the Claude Bridge. The participant, in the hive, adds notes and attachments to a tile and flags tiles with /website here, which becomes a build queue sent across the bridge. Claude enumerates the flags and asks which tiles and style, reads each tile's notes, image, children and files, generates one HTML page per tile plus a shared stylesheet, and writes them back with put-resource and decoration-add. The pages mount when the participant flips /website, they walk the site, then review and revise — editing notes, adding tiles, or answering dashboard questions — which loops back to flagging.</desc>
+
+  <style>
+    svg{ --ink:#e2eefa; --muted:#9fb6c6; --steel:#7eb6d6; --steel-fill:rgba(126,182,214,0.13);
+      --honey:#e6b45a; --honey-fill:rgba(230,180,90,0.15); --line:#6f8ea3;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    @media (prefers-color-scheme: light){ svg{ --ink:#163850; --muted:#4a6376; --steel:#3f7ea6;
+      --steel-fill:rgba(63,126,166,0.12); --honey:#b9852b; --honey-fill:rgba(185,133,43,0.16); --line:#7fa0b4; } }
+    .ttl{ fill:var(--ink); font-size:16px; font-weight:700; }
+    .leg{ fill:var(--muted); font-size:10.5px; }
+    .lane{ fill:var(--muted); font-size:11.5px; font-weight:700; letter-spacing:.12em; }
+    .bt{ fill:var(--ink); font-size:12.5px; font-weight:600; }
+    .bd{ fill:var(--muted); font-size:9.6px; }
+    .seam{ stroke:var(--line); stroke-width:1.3; stroke-dasharray:4 5; opacity:.7; }
+    .seamlab{ fill:var(--muted); font-size:10px; font-weight:600; letter-spacing:.14em; }
+    .p rect{ fill:var(--honey-fill); stroke:var(--honey); stroke-width:1.4; }
+    .c rect{ fill:var(--steel-fill); stroke:var(--steel); stroke-width:1.4; }
+    .ah{ stroke:var(--honey); stroke-width:1.8; fill:none; marker-end:url(#lH); }
+    .as{ stroke:var(--steel); stroke-width:1.8; fill:none; marker-end:url(#lS); }
+    .xr{ stroke:var(--honey); stroke-width:2; fill:none; marker-end:url(#lH); }
+    .xl{ stroke:var(--steel); stroke-width:2; fill:none; marker-end:url(#lS); }
+    .loop{ stroke:var(--honey); stroke-width:1.8; fill:none; stroke-dasharray:6 4; marker-end:url(#lH); }
+    .clab{ fill:var(--ink); font-size:10px; font-weight:600; }
+    #lH path{ fill:var(--honey); } #lS path{ fill:var(--steel); }
+    .callout{ fill:var(--honey-fill); stroke:var(--honey); stroke-width:1.2; }
+    .ct{ fill:var(--ink); font-size:11px; }
+  </style>
+  <defs>
+    <marker id="lH" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6.5,3 L0,6 Z"/></marker>
+    <marker id="lS" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6.5,3 L0,6 Z"/></marker>
+  </defs>
+
+  <text class="ttl" x="440" y="26" text-anchor="middle">Adding a Website — the Participant ⇄ Claude Loop</text>
+  <rect x="262" y="40" width="10" height="10" rx="2" fill="var(--honey-fill)" stroke="var(--honey)"/>
+  <text class="leg" x="277" y="49">participant · in the hive</text>
+  <rect x="452" y="40" width="10" height="10" rx="2" fill="var(--steel-fill)" stroke="var(--steel)"/>
+  <text class="leg" x="467" y="49">Claude · over the bridge</text>
+
+  <text class="lane" x="210" y="72" text-anchor="middle">PARTICIPANT</text>
+  <text class="lane" x="670" y="72" text-anchor="middle">CLAUDE</text>
+
+  <!-- bridge seam -->
+  <line class="seam" x1="440" y1="92" x2="440" y2="512"/>
+  <text class="seamlab" transform="rotate(-90 426 302)" x="426" y="302" text-anchor="middle">THE CLAUDE BRIDGE · ws://localhost:2401</text>
+
+  <!-- PARTICIPANT boxes -->
+  <g class="p"><rect x="80" y="84"  width="260" height="52" rx="10"/></g>
+  <g class="p"><rect x="80" y="164" width="260" height="52" rx="10"/></g>
+  <g class="p"><rect x="80" y="374" width="260" height="52" rx="10"/></g>
+  <g class="p"><rect x="80" y="454" width="260" height="52" rx="10"/></g>
+  <text class="bt" x="98" y="106">Add notes + attachments</text>
+  <text class="bd" x="98" y="122">to a tile — your raw material</text>
+  <text class="bt" x="98" y="186">/website here</text>
+  <text class="bd" x="98" y="202">flag tiles → the build queue</text>
+  <text class="bt" x="98" y="396">/website → pages mount</text>
+  <text class="bd" x="98" y="412">walk the site · lineage = route</text>
+  <text class="bt" x="98" y="476">Review → revise</text>
+  <text class="bd" x="98" y="492">edit notes · add tiles · dashboard Q&amp;A</text>
+
+  <!-- CLAUDE boxes -->
+  <g class="c"><rect x="540" y="174" width="260" height="52" rx="10"/></g>
+  <g class="c"><rect x="540" y="254" width="260" height="52" rx="10"/></g>
+  <g class="c"><rect x="540" y="334" width="260" height="52" rx="10"/></g>
+  <g class="c"><rect x="540" y="414" width="260" height="52" rx="10"/></g>
+  <text class="bt" x="558" y="196">Enumerate + ask</text>
+  <text class="bd" x="558" y="212">which tiles · icon · style</text>
+  <text class="bt" x="558" y="276">Read context</text>
+  <text class="bd" x="558" y="292">notes · image · children · files</text>
+  <text class="bt" x="558" y="356">Generate pages</text>
+  <text class="bd" x="558" y="372">1 HTML / tile · chrome.css once</text>
+  <text class="bt" x="558" y="436">Write back + verify</text>
+  <text class="bd" x="558" y="452">put-resource + decoration-add</text>
+
+  <!-- down arrows -->
+  <line class="ah" x1="210" y1="136" x2="210" y2="162"/>
+  <line class="ah" x1="210" y1="426" x2="210" y2="452"/>
+  <line class="as" x1="670" y1="226" x2="670" y2="252"/>
+  <line class="as" x1="670" y1="306" x2="670" y2="332"/>
+  <line class="as" x1="670" y1="386" x2="670" y2="412"/>
+
+  <!-- crossings through the bridge -->
+  <path class="xr" d="M340,196 L540,200"/>
+  <text class="clab" x="440" y="180" text-anchor="middle">build request →</text>
+  <path class="xl" d="M540,440 L340,404"/>
+  <text class="clab" x="440" y="470" text-anchor="middle">← pages on the layer</text>
+
+  <!-- iterate loop -->
+  <path class="loop" d="M80,480 L44,480 L44,190 L78,190"/>
+  <text class="clab" transform="rotate(-90 30 335)" x="30" y="335" text-anchor="middle" fill="var(--honey)">ITERATE</text>
+
+  <rect class="callout" x="150" y="548" width="580" height="44" rx="9"/>
+  <text class="ct" x="440" y="566" text-anchor="middle">One round trip, then it loops: you author → Claude builds → pages mount → you revise.</text>
+  <text class="ct" x="440" y="581" text-anchor="middle">Content-addressed, so each re-run only touches what changed.</text>
+</svg>

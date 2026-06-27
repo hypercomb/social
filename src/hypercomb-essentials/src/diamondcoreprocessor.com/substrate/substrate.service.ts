@@ -44,15 +44,36 @@ const REGISTRY_KEY = 'substrate-registry'    // root OPFS 0000 property
 const LEGACY_GLOBAL_KEY = 'substrate-global' // migrated into registry on load
 const LEGACY_LS_GLOBAL = 'hc:substrate-global'
 
-// Default bundled URL source shipped with the app. Seeded on first load.
-// Origin-absolute path so deep navigation paths don't break relative fetch.
-const BUILTIN_DEFAULTS: SubstrateSource = {
-  type: 'url',
-  id: 'builtin:defaults',
-  baseUrl: '/substrate/',
-  label: 'Hypercomb defaults',
-  builtin: true,
-}
+// Built-in TILE background sets shipped with the app, seeded on first load.
+// Each set is a url source whose baseUrl hosts manifest.json + PNGs:
+//   • Photos   — the original photo bundle (the flat /substrate/ collection),
+//                kept under its ORIGINAL id so existing registries resolve. The
+//                default tile fill.
+//   • Minimal / Geometric / Abstract / Nature — themed per-tile artwork; switch
+//                with `/substrate set <name>`.
+// (The steel/daylight/indigo/teal/ember gradient sets are CANVAS backgrounds
+// now — see CanvasBackgroundService + /canvas — not tile sources.) Origin-
+// absolute baseUrls so deep navigation paths don't break relative fetch.
+// DEFAULT_SET_ID is the LEGACY id of the brief v2 tile default (Steel) — kept
+// only so the one-time v3 migration can move those users back to Photos.
+const DEFAULT_SET_ID = 'builtin:steel'
+const PHOTOS_SET_ID = 'builtin:defaults'
+// One-time migration marker: bumps when the shipped built-in set list changes
+// in a way that should advance an unconfigured (ship-default) active source.
+// v3: the themed sets moved to being CANVAS (screen) backgrounds — tiles default
+// back to the Photos collection; per-tile themed backgrounds are a separate
+// feature. The themed sets stay registered (selectable via /substrate set) but
+// are no longer the tile default.
+const SETS_VERSION_LS = 'hc:substrate-sets-v'
+const SETS_VERSION = '3'
+
+const BUILTIN_SETS: SubstrateSource[] = [
+  { type: 'url', id: PHOTOS_SET_ID,             baseUrl: '/substrate/',                  label: 'Photos',    builtin: true },
+  { type: 'url', id: 'builtin:theme-minimal',   baseUrl: '/substrate/theme-minimal/',    label: 'Minimal',   builtin: true },
+  { type: 'url', id: 'builtin:theme-geometric', baseUrl: '/substrate/theme-geometric/',  label: 'Geometric', builtin: true },
+  { type: 'url', id: 'builtin:theme-abstract',  baseUrl: '/substrate/theme-abstract/',   label: 'Abstract',  builtin: true },
+  { type: 'url', id: 'builtin:theme-nature',    baseUrl: '/substrate/theme-nature/',     label: 'Nature',    builtin: true },
+]
 
 const get = (key: string) => (window as any).ioc?.get?.(key)
 
@@ -170,8 +191,9 @@ export class SubstrateService extends EventTarget {
     } catch { /* no root props */ }
 
     if (!registry) {
-      // First-ever load — seed with builtin defaults (active).
-      registry = { sources: [BUILTIN_DEFAULTS], activeId: BUILTIN_DEFAULTS.id }
+      // First-ever load — seed with all built-in sets, Photos active (the
+      // themed sets are now canvas backgrounds, not the tile default).
+      registry = { sources: [...BUILTIN_SETS], activeId: PHOTOS_SET_ID }
 
       // Migrate legacy substrate-global if present.
       try {
@@ -184,20 +206,59 @@ export class SubstrateService extends EventTarget {
             path: legacy,
             label: legacy,
           }
-          registry = { sources: [BUILTIN_DEFAULTS, hiveSource], activeId: hiveSource.id }
+          registry = { sources: [...BUILTIN_SETS, hiveSource], activeId: hiveSource.id }
         }
       } catch { /* ignore */ }
 
+      try { localStorage.setItem(SETS_VERSION_LS, SETS_VERSION) } catch { /* ignore */ }
       await this.#saveRegistry(registry)
     } else {
-      // Ensure builtin defaults are always present (forward compat).
-      if (!registry.sources.some(s => s.id === BUILTIN_DEFAULTS.id)) {
-        registry = { sources: [BUILTIN_DEFAULTS, ...registry.sources], activeId: registry.activeId }
-        await this.#saveRegistry(registry)
-      }
+      registry = await this.#mergeBuiltinSets(registry)
     }
 
     this.#registry = registry
+  }
+
+  /**
+   * Reconcile an existing registry with the current built-in set list:
+   * ensure every built-in set is present with its canonical label/baseUrl,
+   * preserve user-added sources, and one-time reset an UNCONFIGURED active
+   * source back to the Photos default — undoing the brief v2 ship that made the
+   * Steel themed-set the tile default before those designs became canvas
+   * backgrounds. A deliberate later choice is left untouched because the
+   * version marker only fires once. Persists only when something changed.
+   */
+  async #mergeBuiltinSets(registry: SubstrateRegistry): Promise<SubstrateRegistry> {
+    const userSources = registry.sources.filter(s => !s.builtin)
+    const sources = [...BUILTIN_SETS, ...userSources]
+
+    let activeId = registry.activeId
+    let migrated = false
+    try {
+      if (localStorage.getItem(SETS_VERSION_LS) !== SETS_VERSION) {
+        if (activeId === DEFAULT_SET_ID || activeId === null) activeId = PHOTOS_SET_ID
+        localStorage.setItem(SETS_VERSION_LS, SETS_VERSION)
+        migrated = true
+      }
+    } catch { /* localStorage unavailable — skip the one-time reset */ }
+
+    // Heal a dangling active source — e.g. a retired gradient set that's no
+    // longer a built-in and was never a user source. Substrate must always
+    // resolve, so fall back to the Photos default.
+    let healed = false
+    if (activeId && !sources.some(s => s.id === activeId)) { activeId = PHOTOS_SET_ID; healed = true }
+
+    const builtinsChanged = registry.sources.length !== sources.length
+      || BUILTIN_SETS.some(b => {
+        const ex = registry.sources.find(s => s.id === b.id)
+        return !ex
+          || ex.label !== b.label
+          || (ex.type === 'url' && b.type === 'url' && ex.baseUrl !== b.baseUrl)
+      })
+
+    const next: SubstrateRegistry = { sources, activeId }
+    if (migrated || builtinsChanged || healed) await this.#saveRegistry(next)
+    return next
   }
 
   async #saveRegistry(next: SubstrateRegistry): Promise<void> {

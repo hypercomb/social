@@ -110,6 +110,10 @@ interface FeatureItem {
   origin: Origin
   /** When `cascade`: the ancestor it flows from (absent = the hive root). */
   originCell?: string
+  /** Full hive path of WHERE this feature is attached — the tile itself for
+   *  `direct`, or the declaring ancestor for `cascade`. Empty/absent = the hive
+   *  root. Surfaced on hover in the panel so you can see the exact location. */
+  originSegments?: string[]
 }
 
 /** A feature AVAILABLE to add — registered in the app but not yet on this
@@ -253,7 +257,7 @@ export class ShowFeaturesDrone extends Drone {
       const feature = this.#recognize(kind, registry)
       if (!feature || appliedViews.has(feature.view)) continue
       appliedViews.add(feature.view)
-      applied.push(this.#describe(feature, kind, i18n, 'direct', undefined, branchSig))
+      applied.push(this.#describe(feature, kind, i18n, 'direct', undefined, branchSig, segments))
     }
 
     // ── 2. CASCADED — cascading features on an ANCESTOR, nearest → root ──
@@ -267,7 +271,7 @@ export class ShowFeaturesDrone extends Drone {
         const feature = this.#recognize(kind, registry)
         if (!feature || !feature.cascades || appliedViews.has(feature.view)) continue
         appliedViews.add(feature.view)
-        applied.push(this.#describe(feature, kind, i18n, 'cascade', from, undefined))
+        applied.push(this.#describe(feature, kind, i18n, 'cascade', from, undefined, ancestor))
       }
     }
 
@@ -363,6 +367,7 @@ export class ShowFeaturesDrone extends Drone {
     origin: Origin,
     originCell: string | undefined,
     branchSig: string | undefined,
+    originSegments: readonly string[] | undefined,
   ): FeatureItem {
     return {
       view: feature.view,
@@ -374,6 +379,7 @@ export class ShowFeaturesDrone extends Drone {
       cascades: feature.cascades,
       origin,
       ...(originCell ? { originCell } : {}),
+      ...(originSegments && originSegments.length ? { originSegments: [...originSegments] } : {}),
       ...(branchSig ? { branchSig } : {}),
     }
   }

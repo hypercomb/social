@@ -68,34 +68,32 @@
               @if (counts()[item.label]; as n) {
                 <span class="item-count" [attr.aria-label]="'clipboard.children' | t: { count: n }" [title]="'clipboard.children' | t: { count: n }">{{ n }}</span>
               }
-              @if (!drilled()) {
-                <input
-                  class="item-index"
-                  type="number"
-                  inputmode="numeric"
-                  [value]="targetFor(item.label)"
-                  (change)="setTarget(item.label, $any($event.target).value)"
-                  (click)="$event.stopPropagation()"
-                  [attr.aria-label]="'clipboard.target' | t"
-                  [title]="'clipboard.target' | t"
-                />
-                <button
-                  class="item-place"
-                  type="button"
-                  (click)="placeOne(item.label)"
-                  [attr.aria-label]="'clipboard.place' | t"
-                  [title]="'clipboard.place' | t"
-                >
-                  <span class="mat-sym">add</span>
-                </button>
-                <button
-                  class="item-discard"
-                  type="button"
-                  (click)="discardOne(item.label)"
-                  [attr.aria-label]="'clipboard.discard' | t"
-                  [title]="'clipboard.discard' | t"
-                >×</button>
-              }
+              <input
+                class="item-index"
+                type="number"
+                inputmode="numeric"
+                [value]="targetFor(item.label)"
+                (change)="setTarget(item.label, $any($event.target).value)"
+                (click)="$event.stopPropagation()"
+                [attr.aria-label]="'clipboard.target' | t"
+                [title]="'clipboard.target' | t"
+              />
+              <button
+                class="item-place"
+                type="button"
+                (click)="placeOne(item)"
+                [attr.aria-label]="'clipboard.place' | t"
+                [title]="'clipboard.place' | t"
+              >
+                <span class="mat-sym">add</span>
+              </button>
+              <button
+                class="item-discard"
+                type="button"
+                (click)="discardOne(item)"
+                [attr.aria-label]="'clipboard.discard' | t"
+                [title]="'clipboard.discard' | t"
+              >×</button>
             </li>
           }
         </ul>

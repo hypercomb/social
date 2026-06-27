@@ -42,6 +42,9 @@ interface FeatureRow {
    *  from an ancestor (named by `originCell`, absent = the hive root). */
   origin?: 'direct' | 'cascade'
   originCell?: string
+  /** Full hive path of where the feature is attached (tile for direct, the
+   *  declaring ancestor for cascade). Empty/absent = the hive root. */
+  originSegments?: string[]
 }
 
 /** A feature the app knows but this layer doesn't have yet. */
@@ -145,6 +148,17 @@ export class FeaturesViewerComponent implements OnDestroy {
   removeGroup(cell: string): void {
     this.groups.update(list => list.filter(g => g.cell !== cell))
     if (this.groups().length === 0) this.close()
+  }
+
+  /** Human-readable hive path of where an applied feature is attached — the
+   *  tile itself for direct features, the declaring ancestor for cascaded ones.
+   *  Surfaced on hover so the location an inherited feature flows from is
+   *  explicit (e.g. `/website` cascading from a parent). */
+  attachedAt(group: FeatureGroup, feat: FeatureRow): string {
+    const segs = feat.originSegments?.length
+      ? feat.originSegments
+      : (feat.origin === 'cascade' ? [] : group.segments)
+    return segs.length ? segs.join(' / ') : '/'
   }
 
   // ── benign "like" staging ─────────────────────────────────

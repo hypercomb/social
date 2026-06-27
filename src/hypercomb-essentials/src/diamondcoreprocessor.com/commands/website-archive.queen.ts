@@ -32,7 +32,7 @@
 // swarm-adopt uses (including the tile-props-index seed, without which the
 // substrate clobbers each imported image).
 
-import { EffectBus, hypercomb } from '@hypercomb/core'
+import { EffectBus, hypercomb, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { buildStoreZip, readStoreZip } from './store-zip.js'
 import { decorationClosureSigs } from '../sharing/decoration-closure.js'
 import {
@@ -81,6 +81,8 @@ interface CursorLike { state?: { rewound?: boolean } }
 function ioc<T>(key: string): T | undefined {
   return (window as unknown as { ioc?: { get?: <U>(k: string) => U | undefined } }).ioc?.get?.<T>(key)
 }
+
+function i18n(): I18nProvider | undefined { return ioc<I18nProvider>(I18N_IOC_KEY) }
 
 function toast(type: 'success' | 'error' | 'warn' | 'info', title: string, message: string): void {
   try { EffectBus.emit('toast:show', { type, title, message }) } catch { /* noop */ }
@@ -132,19 +134,19 @@ export async function exportBranch(): Promise<void> {
   const history = ioc<PlacementHistory>(HISTORY_KEY)
   const lineage = ioc<LineageLike>(LINEAGE_KEY)
   if (!store?.getLayerPoolBytes || !history?.getLayerBySig || !lineage) {
-    toast('error', 'Save failed', 'Core services unavailable'); return
+    toast('error', i18n()?.t('website-archive.save-failed.title') ?? 'Save failed', i18n()?.t('website-archive.save-failed.message') ?? 'Core services unavailable'); return
   }
 
   const segs = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
   if (segs.length === 0) {
     // Refuse to archive the whole hive — /website save is branch-scoped.
-    toast('warn', 'Pick a branch', 'Navigate into the website you want to save, then run /website save'); return
+    toast('warn', i18n()?.t('website-archive.pick-branch.title') ?? 'Pick a branch', i18n()?.t('website-archive.pick-branch.message') ?? 'Navigate into the website you want to save, then run /website save'); return
   }
 
   const name = segs[segs.length - 1]
   const parent = await resolveLayerAt(history, lineage.domain, segs.slice(0, -1))
   const root = await childLayerOf(history, parent, name)
-  if (!root) { toast('warn', 'Nothing to save', `No branch named "${name}" at this location`); return }
+  if (!root) { toast('warn', i18n()?.t('website-archive.pick-branch.title') ?? 'Nothing to save', i18n()?.t('website-archive.nothing-to-save', { name }) ?? `No branch named "${name}" at this location`); return }
 
   const files: { path: string; bytes: Uint8Array }[] = []
   const layers: string[] = [], resources: string[] = [], bees: string[] = [], deps: string[] = []
@@ -245,12 +247,12 @@ export async function exportBranch(): Promise<void> {
   files.push({ path: 'manifest.json', bytes: new TextEncoder().encode(JSON.stringify(manifest, null, 2)) })
 
   if (missing.length) {
-    toast('warn', 'Incomplete archive', `${missing.length} asset(s) not held locally were skipped`)
+    toast('warn', i18n()?.t('website-archive.incomplete.title') ?? 'Incomplete archive', i18n()?.t('website-archive.incomplete.message', { count: missing.length }) ?? `${missing.length} asset(s) not held locally were skipped`)
   }
 
   const zip = buildStoreZip(files)
   downloadBlob(new Blob([zip as BlobPart], { type: 'application/zip' }), `${safeFileName(name)}-${root.sig.slice(0, 12)}.zip`)
-  toast('success', 'Website saved', `${name} — ${layers.length} layers, ${resources.length} assets, ${(zip.length / 1024).toFixed(0)} KB`)
+  toast('success', i18n()?.t('website-archive.saved.title') ?? 'Website saved', i18n()?.t('website-archive.saved.message', { name, layers: layers.length, resources: resources.length, size: (zip.length / 1024).toFixed(0) }) ?? `${name} — ${layers.length} layers, ${resources.length} assets, ${(zip.length / 1024).toFixed(0)} KB`)
 }
 
 function safeFileName(s: string): string {
@@ -279,22 +281,22 @@ export async function importArchive(): Promise<void> {
 
   let entries: { path: string; bytes: Uint8Array }[]
   try { entries = readStoreZip(new Uint8Array(buf)) }
-  catch (err) { toast('error', 'Unreadable archive', String((err as Error)?.message ?? err)); return }
+  catch (err) { toast('error', i18n()?.t('website-archive.unreadable') ?? 'Unreadable archive', String((err as Error)?.message ?? err)); return }
 
   const manifestEntry = entries.find(e => e.path === 'manifest.json')
-  if (!manifestEntry) { toast('error', 'Not a website archive', 'No manifest.json inside the .zip'); return }
+  if (!manifestEntry) { toast('error', i18n()?.t('website-archive.unreadable') ?? 'Not a website archive', i18n()?.t('website-archive.no-manifest') ?? 'No manifest.json inside the .zip'); return }
   let manifest: { rootSig?: string }
   try { manifest = JSON.parse(decode(manifestEntry.bytes)) as { rootSig?: string } }
-  catch { toast('error', 'Bad archive', 'manifest.json is not valid JSON'); return }
+  catch { toast('error', i18n()?.t('website-archive.unreadable') ?? 'Bad archive', i18n()?.t('website-archive.bad-json') ?? 'manifest.json is not valid JSON'); return }
   const rootSig = String(manifest.rootSig ?? '').toLowerCase()
-  if (!SIG_RE.test(rootSig)) { toast('error', 'Bad archive', 'manifest.rootSig is missing or invalid'); return }
+  if (!SIG_RE.test(rootSig)) { toast('error', i18n()?.t('website-archive.unreadable') ?? 'Bad archive', i18n()?.t('website-archive.bad-root-sig') ?? 'manifest.rootSig is missing or invalid'); return }
 
   const store = ioc<StoreLike>(STORE_KEY)
   const history = ioc<PlacementHistory>(HISTORY_KEY)
   const committer = ioc<CommitterLike>(COMMITTER_KEY)
   const lineage = ioc<LineageLike>(LINEAGE_KEY)
   if (!store?.writeLayerBytes || !history?.getLayerBySig || !committer?.importTree || !lineage) {
-    toast('error', 'Import failed', 'Core services unavailable'); return
+    toast('error', i18n()?.t('website-archive.import-failed.title') ?? 'Import failed', i18n()?.t('website-archive.import-failed.message') ?? 'Core services unavailable'); return
   }
 
   // Refuse while the history cursor is rewound (scrubbed back): committer
@@ -304,7 +306,7 @@ export async function importArchive(): Promise<void> {
   // up-front refuse the clipboard worker uses (#blockedByRewound).
   const cursor = ioc<CursorLike>(CURSOR_KEY)
   if (cursor?.state?.rewound) {
-    toast('info', 'Viewing history', 'Return to the latest revision before importing a website'); return
+    toast('info', i18n()?.t('move.promote.rewound.title') ?? 'Viewing history', i18n()?.t('website-archive.rewound') ?? 'Return to the latest revision before importing a website'); return
   }
 
   // Resolve the fold destination + current siblings ONCE — stable across the
@@ -316,7 +318,7 @@ export async function importArchive(): Promise<void> {
   const existing = await childNamesOf(history, parent)
   const manifestName = String((manifest as { name?: unknown }).name ?? '').trim()
   if (manifestName && existing.includes(manifestName)) {
-    toast('info', 'Already here', `"${manifestName}" already exists at this location`); return
+    toast('info', i18n()?.t('website-archive.already-here.title') ?? 'Already here', i18n()?.t('website-archive.already-here.message', { name: manifestName }) ?? `"${manifestName}" already exists at this location`); return
   }
 
   // PASS 1 — VERIFY every sig-named entry before landing ANY of them, so a
@@ -328,7 +330,7 @@ export async function importArchive(): Promise<void> {
     const m = ENTRY_RE.exec(e.path)
     if (!m) continue
     if ((await sha256Hex(e.bytes)) !== m[2]) {
-      toast('error', 'Tampered archive', `${e.path} failed signature verification — nothing imported`); return
+      toast('error', i18n()?.t('website-archive.tampered.title') ?? 'Tampered archive', i18n()?.t('website-archive.tampered.message', { path: e.path }) ?? `${e.path} failed signature verification — nothing imported`); return
     }
     toLand.push({ dir: m[1], sig: m[2], bytes: e.bytes })
   }
@@ -350,10 +352,10 @@ export async function importArchive(): Promise<void> {
   const name = (branchLayer && typeof branchLayer.name === 'string') ? branchLayer.name.trim() : ''
   // Name rides untrusted bytes — reject path separators / control chars.
   if (!branchLayer || !name || /[\\/\x00-\x1f]/.test(name)) {
-    toast('error', 'Bad archive', 'Branch root has no usable name'); return
+    toast('error', i18n()?.t('website-archive.unreadable') ?? 'Bad archive', i18n()?.t('website-archive.bad-name') ?? 'Branch root has no usable name'); return
   }
   if (existing.includes(name)) {
-    toast('info', 'Already here', `"${name}" already exists at this location`); return
+    toast('info', i18n()?.t('website-archive.already-here.title') ?? 'Already here', i18n()?.t('website-archive.already-here.message', { name }) ?? `"${name}" already exists at this location`); return
   }
 
   const treeUpdates = await flattenLayerTree(history, branchLayer, [...at, name])
@@ -385,7 +387,7 @@ export async function importArchive(): Promise<void> {
   ])
   EffectBus.emit('fs:changed', { segments: at })
   await new hypercomb().act()
-  toast('success', 'Website imported', `${name} — ${toLand.length} files, open it to view`)
+  toast('success', i18n()?.t('website-archive.imported.title') ?? 'Website imported', i18n()?.t('website-archive.imported.message', { name, count: toLand.length }) ?? `${name} — ${toLand.length} files, open it to view`)
 }
 
 function pickZip(): Promise<ArrayBuffer | null> {

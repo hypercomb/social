@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800">
+  <defs>
+    <radialGradient id="mi-glow" cx="50%" cy="8%" r="80%">
+      <stop offset="0%" stop-color="#7b8be0" stop-opacity="0.16"/>
+      <stop offset="58%" stop-color="#7b8be0" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="mi-bloom" cx="82%" cy="86%" r="62%">
+      <stop offset="0%" stop-color="#243079" stop-opacity="0.42"/>
+      <stop offset="70%" stop-color="#243079" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="mi-vig" cx="50%" cy="44%" r="80%">
+      <stop offset="52%" stop-color="#04060f" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#04060f" stop-opacity="0.5"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="800" fill="#0d1226"/>
+  <rect width="1200" height="800" fill="url(#mi-bloom)"/>
+  <rect width="1200" height="800" fill="url(#mi-glow)"/>
+  <rect width="1200" height="800" fill="url(#mi-vig)"/>
+</svg>

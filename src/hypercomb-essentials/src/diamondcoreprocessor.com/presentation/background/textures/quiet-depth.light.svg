@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800">
+  <defs>
+    <radialGradient id="qdl-glow" cx="50%" cy="6%" r="82%">
+      <stop offset="0%" stop-color="#fdf7ea" stop-opacity="0.6"/>
+      <stop offset="55%" stop-color="#fdf7ea" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="qdl-vig" cx="50%" cy="42%" r="78%">
+      <stop offset="52%" stop-color="#1f4376" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#1f4376" stop-opacity="0.07"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="800" fill="#f5ede0"/>
+  <rect width="1200" height="800" fill="url(#qdl-glow)"/>
+  <rect width="1200" height="800" fill="url(#qdl-vig)"/>
+</svg>

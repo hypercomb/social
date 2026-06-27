@@ -1144,9 +1144,10 @@ export class SwarmDrone extends Drone {
     // broker subscription registers but never receives events, so
     // swarm.requestSubtree() always times out with "no responder."
     // 30210/30211/30212 = the feedback handshake (request / grant / post),
-    // owned by FeedbackSwarmDrone. Same rule as above: omit them and the
+    // owned by FeedbackSwarmDrone. 30213 = the durable feedback-loop channel
+    // item (FeedbackChannelDrone). Same rule as above: omit them and the
     // relay filter drops the events as a silent miss.
-    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND, SWARM_LIFECYCLE_KIND, 20400, 30401, 30210, 30211, 30212], true)
+    mesh.configureKinds([29010, SWARM_LAYER_KIND, SWARM_RESOURCE_KIND, SWARM_HIDE_KIND, SWARM_INTEREST_KIND, SWARM_PRESENCE_KIND, SWARM_SUBSCRIBE_REQUEST_KIND, SWARM_LIFECYCLE_KIND, 20400, 30401, 30210, 30211, 30212, 30213], true)
   }
 
   /**

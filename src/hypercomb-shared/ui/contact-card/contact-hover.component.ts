@@ -43,6 +43,17 @@ export class ContactHoverComponent extends PinnableHoverBase<ContactData> {
   protected override get panelWidth(): number { return 360 }
   // Contact cards are a "keep it on screen" feature — pins come back on reload.
   protected override get persistent(): boolean { return true }
+  // …and they belong to the page they were pinned on: hide on navigate-away,
+  // re-show on return (per-page persistence across refresh too).
+  protected override get pageScoped(): boolean { return true }
+
+  /** Current explorer location, joined — the page a pinned card belongs to.
+   *  Mirrors ContactDrone's `#parentSegments()` so a card pinned while viewing
+   *  this location re-appears at exactly the same location. */
+  protected override currentPageKey(): string {
+    const lineage = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@hypercomb.social/Lineage') as { explorerSegments?: () => readonly string[] } | undefined
+    return (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean).join('/')
+  }
 
   protected toPanel(payload: unknown): { key: string; data: ContactData } | null {
     const p = payload as HoverPayload | undefined

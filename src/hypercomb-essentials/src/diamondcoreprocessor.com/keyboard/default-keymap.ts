@@ -135,6 +135,22 @@ export const defaultKeyMap: KeyMapLayer = {
       category: 'Clipboard',
     },
 
+    // Arrange — apply / cycle tile target sequences over existing tiles
+    {
+      cmd: 'sequence.cycle',
+      sequence: [[{ key: 'a', shift: false }]],
+      description: 'Arrange tiles by the next sequence',
+      descriptionKey: 'keymap.arrange',
+      category: 'View',
+    },
+    {
+      cmd: 'sequence.cyclePrev',
+      sequence: [[{ key: 'a', shift: true }]],
+      description: 'Arrange tiles by the previous sequence',
+      descriptionKey: 'keymap.arrangePrev',
+      category: 'View',
+    },
+
     // Selection
     {
       cmd: 'selection.toggleLeader',

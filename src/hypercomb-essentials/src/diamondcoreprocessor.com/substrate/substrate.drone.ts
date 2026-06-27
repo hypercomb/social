@@ -8,7 +8,7 @@
 //   • Prompts for folder re-grant when a linked folder needs permission
 //   • Re-scans linked folders on tab focus so new images appear live
 
-import { Drone, EffectBus } from '@hypercomb/core'
+import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import type { SubstrateService } from './substrate.service.js'
 
 const get = (key: string) => (window as any).ioc?.get?.(key)
@@ -134,9 +134,11 @@ export class SubstrateDrone extends Drone {
           this.#pendingPermissionHandleId = null
           await svc.warmUp()
           this.#syncIndicator()
-          EffectBus.emit('activity:log', { message: 'substrate folder reconnected', icon: '◈' })
+          const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
+          EffectBus.emit('activity:log', { message: i18n?.t('substrate.folder-reconnected') ?? 'substrate folder reconnected', icon: '◈' })
         } else {
-          EffectBus.emit('activity:log', { message: 'substrate folder access denied', icon: '◈' })
+          const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
+          EffectBus.emit('activity:log', { message: i18n?.t('substrate.folder-access-denied') ?? 'substrate folder access denied', icon: '◈' })
         }
         return
       }

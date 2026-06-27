@@ -537,7 +537,7 @@ export class Store extends EventTarget {
   // wrappers around base objects read from here at access time; the
   // layer-commit primitive never sees this directory.
 
-  public putOptimization = async (blob: Blob): Promise<string> => {
+  public putOptimization = async (blob: Blob, options?: { emit?: boolean }): Promise<string> => {
     if (!this.optimization) throw new Error('optimization dir not initialized')
     const bytes = await blob.arrayBuffer()
     const signature = await SignatureService.sign(bytes)
@@ -548,7 +548,29 @@ export class Store extends EventTarget {
     const handle = await this.optimization.getFileHandle(signature, { create: true })
     const writable = await handle.createWritable()
     try { await writable.write(blob) } finally { await writable.close() }
+    // Mirror the loop's cross-OPFS records onto the durable feedback channel.
+    // FeedbackChannelDrone (essentials) subscribes to `optimization:wrote`;
+    // routing through EffectBus avoids a shared→essentials import — the same
+    // pattern putResource uses for `content:wrote`. Only feedback/qa/qa-answer
+    // cross to a routine in another OPFS; routine-local bookkeeping
+    // (feedback-seen, notes-digest) stays put. Suppressed (emit:false) for
+    // channel INGEST writes so a pulled item never echoes straight back out.
+    if (options?.emit !== false && Store.#isSyncableOptimization(bytes)) {
+      EffectBus.emit('optimization:wrote', { sig: signature, bytes })
+    }
     return signature
+  }
+
+  /** Optimization kinds that must reach a feedback-loop routine in another
+   *  OPFS (see documentation/feedback-channel.md). Bookkeeping kinds
+   *  (feedback-seen, notes-digest) belong to whoever owns them and never
+   *  publish. */
+  static readonly #SYNCABLE_OPTIMIZATION_KINDS = new Set(['feedback', 'qa', 'qa-answer'])
+  static readonly #isSyncableOptimization = (bytes: ArrayBuffer): boolean => {
+    try {
+      const rec = JSON.parse(new TextDecoder().decode(bytes)) as { kind?: unknown }
+      return typeof rec?.kind === 'string' && Store.#SYNCABLE_OPTIMIZATION_KINDS.has(rec.kind)
+    } catch { return false }
   }
 
   public getOptimization = async (signature: string): Promise<Blob | null> => {

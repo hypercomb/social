@@ -820,10 +820,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
   }
 
-  public readonly openDcp = (): void => {
-    window.dispatchEvent(new CustomEvent('portal:open', { detail: { target: 'dcp' } }))
-  }
-
   // -------------------------------------------------
   // completion context
   // -------------------------------------------------
@@ -1279,28 +1275,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       if (this.#captureMode()) this.clear()
     })
 
-    // Notes-strip Comb v2 toolbar buttons message the command-line via
-    // these events so the toolbar can edit the active capture input
-    // without reaching across components. Each handler is a no-op when
-    // we're not in note-capture mode — the strip already gates emission
-    // on `capturing()`, but the listener defends in depth.
-    this.#noteCaptureWrapUnsub = EffectBus.on<{ marker: string }>('note-capture:wrap', ({ marker }) => {
-      if (!this.#captureMode() || typeof marker !== 'string') return
-      this.shell?.wrapSelection(marker)
-    })
-    this.#noteCapturePrefixLineUnsub = EffectBus.on<{ prefix: string }>('note-capture:prefix-line', ({ prefix }) => {
-      if (!this.#captureMode() || typeof prefix !== 'string') return
-      this.shell?.prefixLine(prefix)
-    })
-    this.#noteCaptureInsertUnsub = EffectBus.on<{ text: string }>('note-capture:insert', ({ text }) => {
-      if (!this.#captureMode() || typeof text !== 'string') return
-      this.shell?.insertAtCaret(text)
-    })
-    this.#noteCaptureIndentUnsub = EffectBus.on<{ delta: number }>('note-capture:indent', ({ delta }) => {
-      if (!this.#captureMode() || typeof delta !== 'number') return
-      this.shell?.indentLine(delta)
-    })
-
     type EnterModePayload = {
       mode: string
       target: string
@@ -1473,10 +1447,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #commandFocusUnsub?: () => void
   #enterModeUnsub?: () => void
   #notesCancelUnsub?: () => void
-  #noteCaptureWrapUnsub?: () => void
-  #noteCapturePrefixLineUnsub?: () => void
-  #noteCaptureInsertUnsub?: () => void
-  #noteCaptureIndentUnsub?: () => void
   #commandLineToggleUnsub?: () => void
   #touchDraggingUnsub?: () => void
   #viewActiveUnsub?: () => void
@@ -1586,10 +1556,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.#commandFocusUnsub?.()
     this.#enterModeUnsub?.()
     this.#notesCancelUnsub?.()
-    this.#noteCaptureWrapUnsub?.()
-    this.#noteCapturePrefixLineUnsub?.()
-    this.#noteCaptureInsertUnsub?.()
-    this.#noteCaptureIndentUnsub?.()
     this.#commandLineToggleUnsub?.()
     this.#touchDraggingUnsub?.()
     this.#viewActiveUnsub?.()

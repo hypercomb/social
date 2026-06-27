@@ -1,0 +1,68 @@
+diff --git a/hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/site-view.drone.ts b/hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/site-view.drone.ts
+index 388451d3..0c9e72d4 100644
+--- a/hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/site-view.drone.ts
++++ b/hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/site-view.drone.ts
+@@ -32,13 +32,15 @@ type MountState = {
+  *  glyph set as the button's textContent. No external stylesheet, so a site's
+  *  CSS can't reach it. */
+ const EXIT_OVERLAY_CSS = [
+-  'position:fixed', 'right:1.4rem', 'bottom:1.5rem', 'z-index:2147483600',
+-  'width:3.3rem', 'height:3.3rem', 'display:flex', 'align-items:center', 'justify-content:center',
+-  'background:rgba(18,22,28,.86)', 'backdrop-filter:blur(12px)', '-webkit-backdrop-filter:blur(12px)',
+-  'border:1px solid rgba(126,182,214,.55)', 'border-radius:50%',
+-  'box-shadow:0 8px 26px rgba(0,0,0,.5)', 'color:rgba(232,240,248,.92)', 'cursor:pointer',
+-  "font-family:'Material Symbols Outlined'", 'font-size:1.62rem', 'line-height:1', 'padding:0',
+-  'pointer-events:auto', 'transition:color .16s ease,border-color .16s ease',
++  'position:fixed', 'right:1.4rem', 'bottom:1.4rem', 'z-index:2147483600',
++  // a round button — the website-mode "back to hexagon view" toggle reads
++  // cleaner as a circle than the hive hexagon when laid over a live page
++  'width:3rem', 'height:3rem', 'display:flex', 'align-items:center', 'justify-content:center',
++  'border-radius:50%',
++  'background:rgba(126,182,214,.92)',
++  'box-shadow:0 8px 26px rgba(0,0,0,.5)', 'color:#0c1118', 'cursor:pointer',
++  "font-family:'Material Symbols Outlined'", 'font-size:1.5rem', 'line-height:1', 'padding:0',
++  'pointer-events:auto', 'transition:filter .16s ease',
+ ].join(';')
+ 
+ export class SiteViewDrone extends Drone {
+@@ -461,6 +463,17 @@ export class SiteViewDrone extends Drone {
+       bBg: bodyStyle.background, bColor: bodyStyle.backgroundColor, bImg: bodyStyle.backgroundImage,
+     }
+ 
++    // Snapshot the hive's own theme attribute too. A site carries its own
++    // light/dark choice and stamps it straight onto <html data-theme> — the
++    // SAME attribute the hive's --md-* tokens key off — via a pre-paint script
++    // (`document.documentElement.setAttribute('data-theme', …)`) plus an in-page
++    // toggle. Removing the page's <style> nodes can't undo an attribute write,
++    // so without this the site's theme (e.g. light) leaks into the hive chrome
++    // when you switch back to hexagon mode. Captured before the page scripts run
++    // and restored on unmount. null = the hive default (system / unset), so it
++    // restores by REMOVING the attribute rather than writing an empty string.
++    const prevTheme = document.documentElement.getAttribute('data-theme')
++
+     const parsed = new DOMParser().parseFromString(rewriteCellPageRefs(rawHtml), 'text/html')
+ 
+     // Lift <style> from parsed head into the live document head, tagged
+@@ -556,6 +569,11 @@ export class SiteViewDrone extends Drone {
+         bodyStyle.background = prevBg.bBg
+         bodyStyle.backgroundColor = prevBg.bColor
+         bodyStyle.backgroundImage = prevBg.bImg
++        // Restore the hive's own theme — a site stamps its light/dark choice
++        // onto <html data-theme>, which otherwise persists into hexagon mode and
++        // shows the site's light styles where the hive should be dark.
++        if (prevTheme === null) document.documentElement.removeAttribute('data-theme')
++        else document.documentElement.setAttribute('data-theme', prevTheme)
+       },
+     }
+   }
+@@ -576,8 +594,8 @@ export class SiteViewDrone extends Drone {
+         vm?.setMode('hexagons')
+       })
+       // Hover affordance without a stylesheet — cheap inline listeners.
+-      btn.addEventListener('pointerenter', () => { btn.style.color = '#fff'; btn.style.borderColor = 'rgba(126,182,214,.85)' })
+-      btn.addEventListener('pointerleave', () => { btn.style.color = 'rgba(232,240,248,.92)'; btn.style.borderColor = 'rgba(126,182,214,.55)' })
++      btn.addEventListener('pointerenter', () => { btn.style.filter = 'brightness(1.12)' })
++      btn.addEventListener('pointerleave', () => { btn.style.filter = 'none' })
+       document.body.appendChild(btn)
+       this.#exitOverlay = btn
+     }

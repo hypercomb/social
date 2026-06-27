@@ -1,0 +1,118 @@
+<svg viewBox="0 0 900 470" width="900" height="470" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="lcTitle lcDesc">
+  <title id="lcTitle">The Hypercomb runtime lifecycle as it runs today</title>
+  <desc id="lcDesc">A boot sequence that runs once per load — shell loads, install to OPFS, load bees via import map, warmup — flows into a pulse loop that runs on every intent: intent to grammar, act, resolve bees, pulse (sense then heartbeat), commit one marker that cascades to the merkle root on change, and synchronize into one render pass, then loop. A separate strip shows each bee's lifecycle: Created, Registered, Active, Disposed.</desc>
+
+  <style>
+    svg{
+      --ink:#e2eefa; --muted:#9fb6c6; --steel:#7eb6d6; --steel-fill:rgba(126,182,214,0.10);
+      --honey:#e6b45a; --honey-fill:rgba(230,180,90,0.12);
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    @media (prefers-color-scheme: light){
+      svg{ --ink:#163850; --muted:#4a6376; --steel:#3f7ea6; --steel-fill:rgba(63,126,166,0.10);
+        --honey:#b9852b; --honey-fill:rgba(185,133,43,0.14); }
+    }
+    .ttl{ fill:var(--ink); font-size:16px; font-weight:700; }
+    .leg{ fill:var(--muted); font-size:11.5px; }
+    .sec{ fill:var(--muted); font-size:11.5px; font-weight:600; letter-spacing:.16em; }
+    .bt{ fill:var(--ink); font-size:13px; font-weight:600; }
+    .bd{ fill:var(--muted); font-size:10px; }
+    .ch{ fill:var(--ink); font-size:12.5px; font-weight:600; }
+    .nt{ fill:var(--muted); font-size:11.5px; }
+    .tag{ fill:var(--honey); font-size:9.5px; font-weight:600; letter-spacing:.04em; }
+    .boot rect{ fill:var(--steel-fill); stroke:var(--steel); stroke-width:1.3; }
+    .pulse rect{ fill:var(--honey-fill); stroke:var(--honey); stroke-width:1.4; }
+    .bee rect{ fill:var(--steel-fill); stroke:var(--steel); stroke-width:1.3; }
+    .arr-s{ stroke:var(--steel); stroke-width:1.6; fill:none; marker-end:url(#ahS); }
+    .arr-h{ stroke:var(--honey); stroke-width:1.7; fill:none; marker-end:url(#ahH); }
+    #ahS path{ fill:var(--steel); } #ahH path{ fill:var(--honey); }
+  </style>
+
+  <defs>
+    <marker id="ahS" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6.5,3 L0,6 Z"/></marker>
+    <marker id="ahH" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6.5,3 L0,6 Z"/></marker>
+  </defs>
+
+  <text class="ttl" x="450" y="26" text-anchor="middle">The Hypercomb Lifecycle — as it runs today</text>
+  <rect x="330" y="40" width="11" height="11" rx="2" fill="var(--steel-fill)" stroke="var(--steel)"/>
+  <text class="leg" x="347" y="49">once at boot</text>
+  <rect x="455" y="40" width="11" height="11" rx="2" fill="var(--honey-fill)" stroke="var(--honey)"/>
+  <text class="leg" x="472" y="49">every intent · the pulse</text>
+
+  <!-- BOOT -->
+  <text class="sec" x="114" y="74">BOOT · ONCE PER LOAD</text>
+  <g class="boot">
+    <rect x="114" y="84" width="150" height="52" rx="10"/>
+    <rect x="288" y="84" width="150" height="52" rx="10"/>
+    <rect x="462" y="84" width="150" height="52" rx="10"/>
+    <rect x="636" y="84" width="150" height="52" rx="10"/>
+  </g>
+  <text class="bt" x="189" y="106" text-anchor="middle">Shell loads</text>
+  <text class="bd" x="189" y="122" text-anchor="middle">Angular bootstraps</text>
+  <text class="bt" x="363" y="106" text-anchor="middle">Install</text>
+  <text class="bd" x="363" y="122" text-anchor="middle">ensureInstall → OPFS</text>
+  <text class="bt" x="537" y="106" text-anchor="middle">Load bees</text>
+  <text class="bd" x="537" y="122" text-anchor="middle">import map · self-register</text>
+  <text class="bt" x="711" y="106" text-anchor="middle">Warmup</text>
+  <text class="bd" x="711" y="122" text-anchor="middle">walk layer tree</text>
+
+  <line class="arr-s" x1="264" y1="110" x2="286" y2="110"/>
+  <line class="arr-s" x1="438" y1="110" x2="460" y2="110"/>
+  <line class="arr-s" x1="612" y1="110" x2="634" y2="110"/>
+
+  <!-- connector -->
+  <line class="arr-s" x1="450" y1="136" x2="450" y2="202"/>
+  <text class="bd" x="460" y="172">ready</text>
+
+  <!-- PULSE -->
+  <text class="sec" x="69" y="196">PULSE · EVERY INTENT</text>
+  <g class="pulse">
+    <rect x="69" y="206" width="112" height="60" rx="10"/>
+    <rect x="199" y="206" width="112" height="60" rx="10"/>
+    <rect x="329" y="206" width="112" height="60" rx="10"/>
+    <rect x="459" y="206" width="112" height="60" rx="10"/>
+    <rect x="589" y="206" width="112" height="60" rx="10"/>
+    <rect x="719" y="206" width="112" height="60" rx="10"/>
+  </g>
+  <text class="bt" x="125" y="231" text-anchor="middle">Intent</text>
+  <text class="bd" x="125" y="249" text-anchor="middle">→ grammar</text>
+  <text class="bt" x="255" y="231" text-anchor="middle">act()</text>
+  <text class="bd" x="255" y="249" text-anchor="middle">processor broadcasts</text>
+  <text class="bt" x="385" y="231" text-anchor="middle">resolve</text>
+  <text class="bd" x="385" y="249" text-anchor="middle">find matching bees</text>
+  <text class="bt" x="515" y="231" text-anchor="middle">pulse</text>
+  <text class="bd" x="515" y="249" text-anchor="middle">sense → heartbeat</text>
+  <text class="bt" x="645" y="231" text-anchor="middle">commit</text>
+  <text class="bd" x="645" y="249" text-anchor="middle">1 marker → cascade</text>
+  <text class="tag" x="645" y="200" text-anchor="middle">on change</text>
+  <text class="bt" x="775" y="231" text-anchor="middle">synchronize</text>
+  <text class="bd" x="775" y="249" text-anchor="middle">one render pass</text>
+
+  <line class="arr-h" x1="181" y1="236" x2="197" y2="236"/>
+  <line class="arr-h" x1="311" y1="236" x2="327" y2="236"/>
+  <line class="arr-h" x1="441" y1="236" x2="457" y2="236"/>
+  <line class="arr-h" x1="571" y1="236" x2="587" y2="236"/>
+  <line class="arr-h" x1="701" y1="236" x2="717" y2="236"/>
+
+  <!-- return loop -->
+  <path class="arr-h" d="M775,266 L775,300 L125,300 L125,268"/>
+  <text class="nt" x="450" y="295" text-anchor="middle" fill="var(--honey)">loops on every intent — synchronize fires only from the processor, coalescing one render</text>
+
+  <!-- BEE LIFECYCLE -->
+  <text class="sec" x="450" y="350" text-anchor="middle">EACH BEE · LIFECYCLE STATE</text>
+  <g class="bee">
+    <rect x="165" y="366" width="120" height="40" rx="9"/>
+    <rect x="315" y="366" width="120" height="40" rx="9"/>
+    <rect x="465" y="366" width="120" height="40" rx="9"/>
+    <rect x="615" y="366" width="120" height="40" rx="9"/>
+  </g>
+  <text class="ch" x="225" y="391" text-anchor="middle">Created</text>
+  <text class="ch" x="375" y="391" text-anchor="middle">Registered</text>
+  <text class="ch" x="525" y="391" text-anchor="middle">Active</text>
+  <text class="ch" x="675" y="391" text-anchor="middle">Disposed</text>
+  <line class="arr-s" x1="285" y1="386" x2="313" y2="386"/>
+  <line class="arr-s" x1="435" y1="386" x2="463" y2="386"/>
+  <line class="arr-s" x1="585" y1="386" x2="613" y2="386"/>
+
+  <text class="nt" x="450" y="436" text-anchor="middle">Goes Active on the first pulse it senses · Disposed when removed — no separate init phase</text>
+</svg>

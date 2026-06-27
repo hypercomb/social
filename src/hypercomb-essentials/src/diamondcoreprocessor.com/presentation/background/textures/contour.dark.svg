@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 800" width="1200" height="800">
+  <defs>
+    <radialGradient id="ct-glow" cx="50%" cy="44%" r="62%">
+      <stop offset="0%" stop-color="#7eb6d6" stop-opacity="0.07"/>
+      <stop offset="70%" stop-color="#7eb6d6" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="ct-vig" cx="50%" cy="46%" r="80%">
+      <stop offset="52%" stop-color="#05080c" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#05080c" stop-opacity="0.55"/>
+    </radialGradient>
+  </defs>
+  <rect width="1200" height="800" fill="#0e161c"/>
+  <rect width="1200" height="800" fill="url(#ct-glow)"/>
+  <g fill="none" stroke="#7eb6d6" stroke-opacity="0.10" stroke-width="1.3">
+    <ellipse cx="600" cy="430" rx="110" ry="86"/>
+    <ellipse cx="600" cy="430" rx="205" ry="160"/>
+    <ellipse cx="600" cy="430" rx="300" ry="234"/>
+    <ellipse cx="600" cy="430" rx="395" ry="308"/>
+    <ellipse cx="600" cy="430" rx="490" ry="382"/>
+    <ellipse cx="600" cy="430" rx="585" ry="456"/>
+    <ellipse cx="600" cy="430" rx="680" ry="530"/>
+    <ellipse cx="600" cy="430" rx="775" ry="604"/>
+    <ellipse cx="600" cy="430" rx="870" ry="678"/>
+  </g>
+  <rect width="1200" height="800" fill="url(#ct-vig)"/>
+</svg>

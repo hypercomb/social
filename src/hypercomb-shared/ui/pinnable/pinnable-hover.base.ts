@@ -40,6 +40,10 @@ export interface PinnablePanel<T> {
   pos: { x: number; y: number }
 }
 
+/** A persisted open-pin: identity + last-known data + position (position may
+ *  be absent in older/corrupt entries — restore falls back to the base spot). */
+type OpenSnap<T> = { key: string; data: T; pos?: { x: number; y: number } }
+
 const HIDE_DELAY_MS = 260
 const CASCADE_STEP = 26   // px each fresh pin is offset to fan out
 const PEEK_ID = 0         // reserved id for the lone hover peek
@@ -61,6 +65,20 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
    *  drop). Contact-card / notes-style windows override to true. */
   protected get persistent(): boolean { return false }
 
+  /** Opt in to PAGE-SCOPED pins. When true, pinned panels belong to the
+   *  navigation page (location) they were pinned on: they HIDE when the user
+   *  navigates away and RE-SHOW when the user returns. With `persistent` also
+   *  on, the open set is saved per page so a refresh restores only the page you
+   *  land on. Default off: pins are global and show on every page. Contact
+   *  cards override to true — "stay pinned for that page". */
+  protected get pageScoped(): boolean { return false }
+
+  /** Identity of the current navigation page — re-read on every Lineage
+   *  `change` while `pageScoped`. Subclasses override to return the active
+   *  location key (e.g. the parent segments joined). Opaque to the base: it
+   *  only compares keys for equality, so any stable per-page string works. */
+  protected currentPageKey(): string { return '' }
+
   /** Map a raw EffectBus payload to a panel identity + data, or null to ignore. */
   protected abstract toPanel(payload: unknown): { key: string; data: T } | null
 
@@ -73,6 +91,11 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
   #savedPos: Record<string, { x: number; y: number }> = {}
   #nextId = 1
   #pinnedAnnounced = false
+  // Page-scoped pins: pinned panels for pages OTHER than the visible one are
+  // parked here (hidden), keyed by page; `panels` holds only the current
+  // page's pins (+ the peek). Unused when `pageScoped` is false.
+  #parkedByPage = new Map<string, PinnablePanel<T>[]>()
+  #currentPage = ''
   #dragId: number | null = null
   #dragOffset = { x: 0, y: 0 }
 
@@ -98,6 +121,19 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
       const list = this.panels()
       for (let i = list.length - 1; i >= 0; i--) if (!list[i].ephemeral) { this.closePanel(list[i].id); return }
     }))
+
+    // Page-scoped pins: track the active page and swap the visible pin set as
+    // the user navigates. Resolve Lineage lazily (shared core); when it's
+    // absent (tests) the feature degrades to global pins.
+    if (this.pageScoped) {
+      this.#currentPage = this.currentPageKey()
+      const lineage = (window as { ioc?: { get?: (k: string) => unknown } }).ioc?.get?.('@hypercomb.social/Lineage') as EventTarget | undefined
+      if (lineage?.addEventListener) {
+        const onNav = (): void => this.#onPageChange()
+        lineage.addEventListener('change', onNav)
+        this.#cleanups.push(() => lineage.removeEventListener('change', onNav))
+      }
+    }
 
     // Re-open pins parked in a previous session (persistent features only).
     this.#restoreOpen()
@@ -158,6 +194,24 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
     if (active === this.#pinnedAnnounced) return
     this.#pinnedAnnounced = active
     EffectBus.emit(`${this.ns}:pinned`, { active })
+  }
+
+  /** Navigation changed (pageScoped only): park the visible page's pins and
+   *  bring the new page's pins (if any) back into view. The transient peek is
+   *  dropped. Only pins on the CURRENT page are ever in `panels`, so parking
+   *  the whole visible set under the old page key is correct. */
+  #onPageChange(): void {
+    if (!this.pageScoped) return
+    const next = this.currentPageKey()
+    if (next === this.#currentPage) return
+    const leaving = this.panels().filter(p => !p.ephemeral)
+    if (leaving.length) this.#parkedByPage.set(this.#currentPage, leaving)
+    else this.#parkedByPage.delete(this.#currentPage)
+    this.#currentPage = next
+    const arriving = this.#parkedByPage.get(next) ?? []
+    this.#parkedByPage.delete(next)
+    this.panels.set(arriving)
+    this.#announce()
   }
 
   // ── drag (pinned panels only) ─────────────────────────
@@ -221,13 +275,48 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
   // on the next mount. No-op unless the subclass opts in via `persistent`.
   #openKey(): string { return `${this.posKey}:open` }
 
+  /** One open-pin snapshot: identity + last-known data + position. */
+  #snapshot(p: PinnablePanel<T>): OpenSnap<T> {
+    return { key: p.key, data: p.data, pos: p.pos }
+  }
+
+  /** Rebuild panels from persisted snapshots (fresh ids, clamped positions). */
+  #snapsToPanels(arr: unknown): PinnablePanel<T>[] {
+    if (!Array.isArray(arr)) return []
+    return arr
+      .filter((e: unknown): e is OpenSnap<T> =>
+        !!e && typeof (e as { key?: unknown }).key === 'string')
+      .map((e) => ({
+        id: this.#nextId++,
+        ephemeral: false,
+        key: e.key,
+        data: e.data,
+        // Data snapshot is last-known; the next hover refreshes it in place.
+        pos: this.#clamp(e.pos?.x ?? this.#basePos().x, e.pos?.y ?? this.#basePos().y),
+      }))
+  }
+
   #saveOpen(): void {
     if (!this.persistent) return
     try {
-      const open = this.panels()
-        .filter(p => !p.ephemeral)
-        .map(p => ({ key: p.key, data: p.data, pos: p.pos }))
-      if (open.length) localStorage.setItem(this.#openKey(), JSON.stringify(open))
+      const visible = this.panels().filter(p => !p.ephemeral).map(p => this.#snapshot(p))
+
+      // Global (non-pageScoped): a flat array, as before.
+      if (!this.pageScoped) {
+        if (visible.length) localStorage.setItem(this.#openKey(), JSON.stringify(visible))
+        else localStorage.removeItem(this.#openKey())
+        return
+      }
+
+      // Page-scoped: a { [page]: snapshot[] } map — every parked page plus the
+      // currently-visible page — so a refresh restores only the page you land on.
+      const map: Record<string, OpenSnap<T>[]> = {}
+      for (const [page, list] of this.#parkedByPage) {
+        if (list.length) map[page] = list.map(p => this.#snapshot(p))
+      }
+      if (visible.length) map[this.#currentPage] = visible
+      else delete map[this.#currentPage]
+      if (Object.keys(map).length) localStorage.setItem(this.#openKey(), JSON.stringify(map))
       else localStorage.removeItem(this.#openKey())
     } catch { /* ignore */ }
   }
@@ -237,20 +326,26 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
     try {
       const raw = localStorage.getItem(this.#openKey())
       if (!raw) return
-      const arr = JSON.parse(raw)
-      if (!Array.isArray(arr)) return
-      const restored: PinnablePanel<T>[] = arr
-        .filter((e: unknown): e is { key: string; data: T; pos?: { x: number; y: number } } =>
-          !!e && typeof (e as { key?: unknown }).key === 'string')
-        .map((e) => ({
-          id: this.#nextId++,
-          ephemeral: false,
-          key: e.key,
-          data: e.data,
-          // Data snapshot is last-known; the next hover refreshes it in place.
-          pos: this.#clamp(e.pos?.x ?? this.#basePos().x, e.pos?.y ?? this.#basePos().y),
-        }))
-      if (restored.length) { this.panels.set(restored); this.#announce() }
+      const parsed = JSON.parse(raw)
+
+      // Global (non-pageScoped): a flat array.
+      if (!this.pageScoped) {
+        const restored = this.#snapsToPanels(parsed)
+        if (restored.length) { this.panels.set(restored); this.#announce() }
+        return
+      }
+
+      // Page-scoped: a { [page]: snapshot[] } map. Show the current page's pins
+      // now; park every other page so they re-appear on return. (A legacy flat
+      // array from before page-scoping is ignored — pins re-pin on next click.)
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return
+      for (const [page, list] of Object.entries(parsed as Record<string, unknown>)) {
+        const panels = this.#snapsToPanels(list)
+        if (!panels.length) continue
+        if (page === this.#currentPage) this.panels.set(panels)
+        else this.#parkedByPage.set(page, panels)
+      }
+      if (this.panels().some(p => !p.ephemeral)) this.#announce()
     } catch { /* ignore */ }
   }
 }

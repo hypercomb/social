@@ -1,62 +1,58 @@
 <!-- hypercomb-shared/ui/command-line/command-line.component.html -->
 
 <div class="command-line-wrapper" [style.visibility]="touchDragging() || viewActive() ? 'hidden' : null">
-  @if (locked()) {
-    <a class="install-prompt" (click)="openDcp()">{{ 'command-line.install-prompt' | t }}</a>
-  } @else {
-    <hc-command-shell
-      #shell
-      [suggestions]="suggestions()"
-      [placeholder]="placeholder()"
-      [ghostValue]="ghostValue()"
-      [showSuggestions]="showCompletions()"
-      [typedPrefix]="completionTypedPrefix()"
-      [descriptionMap]="slashDescriptionMap()"
-      [colorMap]="accentColorMap()"
-      [indicators]="activeIndicators()"
-      [armedResource]="armedResource()"
-      [showOpenForSubscribersToggle]="showOpenForSubscribersToggle()"
-      [openForSubscribers]="openForSubscribers()"
-      [openForSubscribersLabel]="'command-line.open-for-subscribers' | t"
-      [viewToggles]="viewToggles()"
-      [showSolomonToggle]="showSolomonToggle()"
-      [solomonActive]="solomonActive()"
-      [solomonLabel]="'command-line.solomon' | t"
-      [showBubbleToggle]="showBubbleToggle()"
-      [bubbleActive]="bubbleActive()"
-      [bubbleLabel]="'command-line.bubble' | t"
-      [showArkanoidToggle]="showArkanoidToggle()"
-      [arkanoidActive]="arkanoidActive()"
-      [arkanoidLabel]="'command-line.arkanoid' | t"
-      [lockedFlash]="lockedFlash()"
-      [lockedLabel]="'command-line.pinned' | t"
-      (valueChange)="onShellValueChange($event)"
-      (commit)="onShellCommit($event)"
-      (completionAccepted)="onShellCompletionAccepted($event)"
-      (shellKeydown)="onShellKeydown($event)"
-      (indicatorDismiss)="onIndicatorDismiss($event)"
-      (armedResourceDismiss)="onArmedResourceDismiss()"
-      (openForSubscribersToggle)="onOpenForSubscribersToggle()"
-      (viewToggle)="onViewToggle($event)"
-      (solomonToggle)="onSolomonToggle()"
-      (bubbleToggle)="onBubbleToggle()"
-      (arkanoidToggle)="onArkanoidToggle()"
-    />
+  <hc-command-shell
+    #shell
+    [suggestions]="suggestions()"
+    [placeholder]="placeholder()"
+    [ghostValue]="ghostValue()"
+    [showSuggestions]="showCompletions()"
+    [typedPrefix]="completionTypedPrefix()"
+    [descriptionMap]="slashDescriptionMap()"
+    [colorMap]="accentColorMap()"
+    [indicators]="activeIndicators()"
+    [armedResource]="armedResource()"
+    [showOpenForSubscribersToggle]="showOpenForSubscribersToggle()"
+    [openForSubscribers]="openForSubscribers()"
+    [openForSubscribersLabel]="'command-line.open-for-subscribers' | t"
+    [viewToggles]="viewToggles()"
+    [showSolomonToggle]="showSolomonToggle()"
+    [solomonActive]="solomonActive()"
+    [solomonLabel]="'command-line.solomon' | t"
+    [showBubbleToggle]="showBubbleToggle()"
+    [bubbleActive]="bubbleActive()"
+    [bubbleLabel]="'command-line.bubble' | t"
+    [showArkanoidToggle]="showArkanoidToggle()"
+    [arkanoidActive]="arkanoidActive()"
+    [arkanoidLabel]="'command-line.arkanoid' | t"
+    [lockedFlash]="lockedFlash()"
+    [lockedLabel]="'command-line.pinned' | t"
+    (valueChange)="onShellValueChange($event)"
+    (commit)="onShellCommit($event)"
+    (completionAccepted)="onShellCompletionAccepted($event)"
+    (shellKeydown)="onShellKeydown($event)"
+    (indicatorDismiss)="onIndicatorDismiss($event)"
+    (armedResourceDismiss)="onArmedResourceDismiss()"
+    (openForSubscribersToggle)="onOpenForSubscribersToggle()"
+    (viewToggle)="onViewToggle($event)"
+    (solomonToggle)="onSolomonToggle()"
+    (bubbleToggle)="onBubbleToggle()"
+    (arkanoidToggle)="onArkanoidToggle()"
+  />
 
-    @if (voiceSupported && pushToTalkEnabled()) {
-      <button class="mic-btn" [class.recording]="voiceActive()"
-        (pointerdown)="startVoice($event)" (pointerup)="stopVoice()" (pointerleave)="stopVoice()"
-        [attr.aria-label]="'controls.voice' | t" [title]="'controls.voice-hold' | t">
-        <span class="mic-dot">{{ voiceActive() ? '●' : '○' }}</span>
-      </button>
-    }
-    <!-- mobile-only GO/submit button: commits text (creating a tile) if any,
-         otherwise just collapses the command-line back to hidden. -->
-    <button class="mobile-go-btn" type="button" (click)="closeMobileInput()"
-      [attr.aria-label]="'command-line.go' | t">
-      {{ 'command-line.go' | t }}
+  @if (voiceSupported && pushToTalkEnabled()) {
+    <button class="mic-btn" [class.recording]="voiceActive()"
+      (pointerdown)="startVoice($event)" (pointerup)="stopVoice()" (pointerleave)="stopVoice()"
+      [attr.aria-label]="'controls.voice' | t" [title]="'controls.voice-hold' | t">
+      <span class="mic-dot">{{ voiceActive() ? '●' : '○' }}</span>
     </button>
   }
+  <!-- mobile-only GO/submit button: commits text (creating a tile) if any,
+       otherwise just collapses the command-line back to hidden. -->
+  <button class="mobile-go-btn" type="button" (click)="closeMobileInput()"
+    [attr.aria-label]="'command-line.go' | t">
+    {{ 'command-line.go' | t }}
+  </button>
 </div>
 
 <!-- Undo / redo cluster — floats at the bottom-right of the viewport.

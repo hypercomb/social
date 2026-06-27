@@ -75,6 +75,10 @@
                       @if (feat.description) {
                         <span class="feature-desc">{{ feat.description }}</span>
                       }
+                      <!-- Location where the feature is attached — last line, always
+                           visible (the tile itself for direct features, the declaring
+                           ancestor for cascaded ones). -->
+                      <span class="feature-attached">{{ 'features.attached' | t: { path: attachedAt(group, feat) } }}</span>
                     </div>
                   </li>
                 }

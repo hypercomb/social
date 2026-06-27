@@ -1,0 +1,91 @@
+<svg viewBox="0 0 820 662" width="820" height="662" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="wsT wsD">
+  <title id="wsT">Website creation and deployment pipeline</title>
+  <desc id="wsD">A vertical pipeline. Create phase: build the tile tree, /website here flags cells, /website export dumps subtree JSON, the Claude Code /website-build skill generates one HTML page per cell, writes them back via put-resource and decoration-add, and a commit puts the page signature on the layer. Render and publish phase: /website mounts each page inline with lineage as the route, and optional publishing shares signatures over mesh or host. It is data, not code — no essentials rebuild.</desc>
+
+  <style>
+    svg{ --ink:#e2eefa; --muted:#9fb6c6; --steel:#7eb6d6; --steel-fill:rgba(126,182,214,0.12);
+      --honey:#e6b45a; --honey-fill:rgba(230,180,90,0.14); --line:#6f8ea3; --zone:rgba(126,182,214,0.05);
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    @media (prefers-color-scheme: light){ svg{ --ink:#163850; --muted:#4a6376; --steel:#3f7ea6;
+      --steel-fill:rgba(63,126,166,0.12); --honey:#b9852b; --honey-fill:rgba(185,133,43,0.16); --line:#7fa0b4; } }
+    .ttl{ fill:var(--ink); font-size:16px; font-weight:700; }
+    .leg{ fill:var(--muted); font-size:10.5px; }
+    .ph{ fill:var(--muted); font-size:11px; font-weight:700; letter-spacing:.18em; }
+    .bt{ fill:var(--ink); font-size:12.5px; font-weight:600; }
+    .bd{ fill:var(--muted); font-size:9.6px; }
+    .art{ fill:var(--muted); font-size:9px; font-style:italic; }
+    .h rect{ fill:var(--honey-fill); stroke:var(--honey); stroke-width:1.4; }
+    .s rect{ fill:var(--steel-fill); stroke:var(--steel); stroke-width:1.4; }
+    .sd rect{ fill:var(--steel-fill); stroke:var(--steel); stroke-width:1.4; stroke-dasharray:5 3; }
+    .ar{ stroke:var(--line); stroke-width:1.7; fill:none; marker-end:url(#wA); }
+    #wA path{ fill:var(--line); }
+    .div{ stroke:var(--line); stroke-width:1; stroke-dasharray:3 4; opacity:.6; }
+    .callout{ fill:var(--honey-fill); stroke:var(--honey); stroke-width:1.2; }
+    .ct{ fill:var(--ink); font-size:11px; }
+  </style>
+  <defs><marker id="wA" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6.5,3 L0,6 Z"/></marker></defs>
+
+  <text class="ttl" x="410" y="26" text-anchor="middle">Website — Creation &amp; Deployment</text>
+  <rect x="232" y="40" width="10" height="10" rx="2" fill="var(--honey-fill)" stroke="var(--honey)"/>
+  <text class="leg" x="247" y="49">in the hive</text>
+  <rect x="330" y="40" width="10" height="10" rx="2" fill="var(--steel-fill)" stroke="var(--steel)"/>
+  <text class="leg" x="345" y="49">Claude Code / network</text>
+  <text class="leg" x="500" y="49">· DATA — no essentials rebuild</text>
+
+  <text class="ph" transform="rotate(-90 34 268)" x="34" y="268" text-anchor="middle">CREATE</text>
+  <text class="ph" transform="rotate(-90 34 526)" x="34" y="526" text-anchor="middle">RENDER · PUBLISH</text>
+
+  <g class="h"><rect x="180" y="86"  width="460" height="48" rx="10"/></g>
+  <g class="h"><rect x="180" y="150" width="460" height="48" rx="10"/></g>
+  <g class="h"><rect x="180" y="214" width="460" height="48" rx="10"/></g>
+  <g class="s"><rect x="180" y="278" width="460" height="48" rx="10"/></g>
+  <g class="s"><rect x="180" y="342" width="460" height="48" rx="10"/></g>
+  <g class="h"><rect x="180" y="406" width="460" height="48" rx="10"/></g>
+  <g class="h"><rect x="180" y="470" width="460" height="48" rx="10"/></g>
+  <g class="sd"><rect x="180" y="534" width="460" height="48" rx="10"/></g>
+
+  <text class="bt" x="200" y="106" >Build the tile tree</text>
+  <text class="bd" x="200" y="122" >cells — each cell is a page</text>
+  <text class="art" x="660" y="113" >merkle layer tree</text>
+
+  <text class="bt" x="200" y="170" >/website here</text>
+  <text class="bd" x="200" y="186" >flag cells for the next gen pass</text>
+  <text class="art" x="660" y="177" >visual:website:pending</text>
+
+  <text class="bt" x="200" y="234" >/website export</text>
+  <text class="bd" x="200" y="250" >subtree JSON → clipboard</text>
+  <text class="art" x="660" y="241" >paths + labels only</text>
+
+  <text class="bt" x="200" y="298" >/website-build · Claude Code</text>
+  <text class="bd" x="200" y="314" >notes + style → 1 HTML page / cell</text>
+  <text class="art" x="660" y="305" >standalone HTML</text>
+
+  <text class="bt" x="200" y="362" >Write back over the Bridge</text>
+  <text class="bd" x="200" y="378" >put-resource + decoration-add</text>
+  <text class="art" x="660" y="369" >htmlSig on the cell</text>
+
+  <text class="bt" x="200" y="426" >Commit</text>
+  <text class="bd" x="200" y="442" >page sig joins the layer</text>
+  <text class="art" x="660" y="433" >content-addressed · undoable</text>
+
+  <text class="bt" x="200" y="490" >/website → render</text>
+  <text class="bd" x="200" y="506" >site-view mounts the page inline</text>
+  <text class="art" x="660" y="497" >lineage = the route</text>
+
+  <text class="bt" x="200" y="554" >Publish (optional)</text>
+  <text class="bd" x="200" y="570" >save .zip · mesh adopt · host GET /&lt;sig&gt;</text>
+  <text class="art" x="660" y="561" >local OPFS until you publish</text>
+
+  <line class="ar" x1="410" y1="134" x2="410" y2="148"/>
+  <line class="ar" x1="410" y1="198" x2="410" y2="212"/>
+  <line class="ar" x1="410" y1="262" x2="410" y2="276"/>
+  <line class="ar" x1="410" y1="326" x2="410" y2="340"/>
+  <line class="ar" x1="410" y1="390" x2="410" y2="404"/>
+  <line class="ar" x1="410" y1="454" x2="410" y2="468"/>
+  <line class="ar" x1="410" y1="518" x2="410" y2="532"/>
+  <line class="div" x1="120" y1="462" x2="700" y2="462"/>
+
+  <rect class="callout" x="120" y="606" width="580" height="42" rx="9"/>
+  <text class="ct" x="410" y="624" text-anchor="middle">It's <tspan font-weight="700">DATA, not code</tspan> — a signed page resource on the layer.</text>
+  <text class="ct" x="410" y="639" text-anchor="middle">No rebuild, no install. History is the deploy.</text>
+</svg>

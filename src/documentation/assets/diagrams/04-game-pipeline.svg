@@ -1,0 +1,85 @@
+<svg viewBox="0 0 820 600" width="820" height="600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="gmT gmD">
+  <title id="gmT">Game creation and deployment pipeline</title>
+  <desc id="gmD">A vertical pipeline. Create phase: author the five game files (engine, renderer, overlay, drone, queen) and add a side-effect import so the queen and drone self-register. Deploy phase: build:essentials compiles and signs the drone into bees, ships locally via copy-to-web or to Azure for production, ensureInstall downloads into OPFS, and the import map plus ScriptPreloader register the modules in IoC. Play phase: a slash command launches the overlay. It is code, externalized as a signed drone module.</desc>
+
+  <style>
+    svg{ --ink:#e2eefa; --muted:#9fb6c6; --steel:#7eb6d6; --steel-fill:rgba(126,182,214,0.12);
+      --honey:#e6b45a; --honey-fill:rgba(230,180,90,0.14); --line:#6f8ea3;
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    @media (prefers-color-scheme: light){ svg{ --ink:#163850; --muted:#4a6376; --steel:#3f7ea6;
+      --steel-fill:rgba(63,126,166,0.12); --honey:#b9852b; --honey-fill:rgba(185,133,43,0.16); --line:#7fa0b4; } }
+    .ttl{ fill:var(--ink); font-size:16px; font-weight:700; }
+    .leg{ fill:var(--muted); font-size:10.5px; }
+    .ph{ fill:var(--muted); font-size:11px; font-weight:700; letter-spacing:.18em; }
+    .bt{ fill:var(--ink); font-size:12.5px; font-weight:600; }
+    .bd{ fill:var(--muted); font-size:9.6px; }
+    .art{ fill:var(--muted); font-size:9px; font-style:italic; }
+    .h rect{ fill:var(--honey-fill); stroke:var(--honey); stroke-width:1.4; }
+    .s rect{ fill:var(--steel-fill); stroke:var(--steel); stroke-width:1.4; }
+    .ar{ stroke:var(--line); stroke-width:1.7; fill:none; marker-end:url(#gA); }
+    #gA path{ fill:var(--line); }
+    .div{ stroke:var(--line); stroke-width:1; stroke-dasharray:3 4; opacity:.6; }
+    .callout{ fill:var(--steel-fill); stroke:var(--steel); stroke-width:1.2; }
+    .ct{ fill:var(--ink); font-size:11px; }
+  </style>
+  <defs><marker id="gA" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6.5,3 L0,6 Z"/></marker></defs>
+
+  <text class="ttl" x="410" y="26" text-anchor="middle">Game — Creation &amp; Deployment</text>
+  <rect x="250" y="40" width="10" height="10" rx="2" fill="var(--steel-fill)" stroke="var(--steel)"/>
+  <text class="leg" x="265" y="49">build / runtime (module pipeline)</text>
+  <rect x="470" y="40" width="10" height="10" rx="2" fill="var(--honey-fill)" stroke="var(--honey)"/>
+  <text class="leg" x="485" y="49">in the hive · CODE — signed drone module</text>
+
+  <text class="ph" transform="rotate(-90 34 142)" x="34" y="142" text-anchor="middle">CREATE</text>
+  <text class="ph" transform="rotate(-90 34 334)" x="34" y="334" text-anchor="middle">DEPLOY</text>
+  <text class="ph" transform="rotate(-90 34 494)" x="34" y="494" text-anchor="middle">PLAY</text>
+
+  <g class="s"><rect x="180" y="86"  width="460" height="48" rx="10"/></g>
+  <g class="s"><rect x="180" y="150" width="460" height="48" rx="10"/></g>
+  <g class="s"><rect x="180" y="214" width="460" height="48" rx="10"/></g>
+  <g class="s"><rect x="180" y="278" width="460" height="48" rx="10"/></g>
+  <g class="s"><rect x="180" y="342" width="460" height="48" rx="10"/></g>
+  <g class="s"><rect x="180" y="406" width="460" height="48" rx="10"/></g>
+  <g class="h"><rect x="180" y="470" width="460" height="48" rx="10"/></g>
+
+  <text class="bt" x="200" y="106" >Author the 5 files</text>
+  <text class="bd" x="200" y="122" >engine · renderer · overlay · drone · queen</text>
+  <text class="art" x="660" y="113" >+ shared juice.ts</text>
+
+  <text class="bt" x="200" y="170" >Side-effect import</text>
+  <text class="bd" x="200" y="186" >index barrels → side-effects.ts</text>
+  <text class="art" x="660" y="177" >queen + drone self-register</text>
+
+  <text class="bt" x="200" y="234" >build:essentials</text>
+  <text class="bd" x="200" y="250" >esbuild → __bees__/&lt;sig&gt; · sign raw bytes</text>
+  <text class="art" x="660" y="241" >manifest.json</text>
+
+  <text class="bt" x="200" y="298" >Ship</text>
+  <text class="bd" x="200" y="314" >local: copy-to-web · prod: deploy → Azure</text>
+  <text class="art" x="660" y="305" >blob + manifest</text>
+
+  <text class="bt" x="200" y="362" >ensureInstall · runtime</text>
+  <text class="bd" x="200" y="378" >manifest lookup → download → OPFS</text>
+  <text class="art" x="660" y="369" >skips if installed</text>
+
+  <text class="bt" x="200" y="426" >Import map + ScriptPreloader</text>
+  <text class="bd" x="200" y="442" >import() bees → register in IoC</text>
+  <text class="art" x="660" y="433" >drone senses · queen ready</text>
+
+  <text class="bt" x="200" y="490" >/bubble — launch</text>
+  <text class="bd" x="200" y="506" >queen → drone.open() → overlay</text>
+  <text class="art" x="660" y="497" >renderer + engine + juice</text>
+
+  <line class="ar" x1="410" y1="134" x2="410" y2="148"/>
+  <line class="ar" x1="410" y1="198" x2="410" y2="212"/>
+  <line class="ar" x1="410" y1="262" x2="410" y2="276"/>
+  <line class="ar" x1="410" y1="326" x2="410" y2="340"/>
+  <line class="ar" x1="410" y1="390" x2="410" y2="404"/>
+  <line class="ar" x1="410" y1="454" x2="410" y2="468"/>
+  <line class="div" x1="120" y1="206" x2="700" y2="206"/>
+  <line class="div" x1="120" y1="462" x2="700" y2="462"/>
+
+  <rect class="callout" x="120" y="542" width="580" height="42" rx="9"/>
+  <text class="ct" x="410" y="560" text-anchor="middle">It's <tspan font-weight="700">CODE, not data</tspan> — a signed drone module.</text>
+  <text class="ct" x="410" y="575" text-anchor="middle">Author → build → sign → install → import map → register → slash.</text>
+</svg>

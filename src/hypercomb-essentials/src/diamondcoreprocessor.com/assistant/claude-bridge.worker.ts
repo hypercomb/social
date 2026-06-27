@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/bridge/claude-bridge.worker.ts
 import { Worker, EffectBus, normalizeCell, hypercomb, isSignature, SignatureService } from '@hypercomb/core'
-import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
+import { readTilePropertiesAt, writeTilePropertiesAt, readTilePropsSigAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex } from '../editor/tile-properties.js'
 import type { HistoryService } from '../history/history.service.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 import { inflate } from '../history/inflate.js'
@@ -574,6 +574,26 @@ export class ClaudeBridgeWorker extends Worker {
       if (v === null || ['string', 'number', 'boolean'].includes(typeof v)) updates[k] = v
     }
     await writeTilePropertiesAt(parentSegments, cellName, updates)
+
+    // writeTilePropertiesAt updates CANONICAL only. The render + substrate
+    // read tile props from the participant-local `hc:tile-props-index`, so
+    // without syncing it here a bridge-set property (e.g. a `link`) lands in
+    // the layer but stays invisible to the render — no click-to-open, no
+    // thumbnail. Mirror resource-attach: point the lineage-keyed index entry
+    // at the freshly-committed props sig, then nudge the renderer.
+    try {
+      const propsSig = await readTilePropsSigAt(parentSegments, cellName)
+      if (propsSig) {
+        const indexCellKey = await cellLocationSig(parentSegments, cellName)
+        const index = readTilePropsIndex()
+        index[indexCellKey || cellName] = propsSig
+        writeTilePropsIndex(index)
+      }
+    } catch (err) {
+      console.warn('[bridge] tile-props index sync failed', err)
+    }
+    EffectBus.emit<{ cell: string; segments: readonly string[] }>('tile:saved', { cell: cellName, segments: parentSegments })
+
     return { id: req.id, ok: true, data: { keys: Object.keys(updates) } }
   }
 

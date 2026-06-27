@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/input/move/move.drone.ts
-import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
+import { Drone, EffectBus, hypercomb, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js'
 import type { Axial } from '../navigation/hex-detector.js'
 import type { OrderProjection } from '../history/order-projection.js'
@@ -632,14 +632,16 @@ export class MoveDrone extends Drone {
 
     const sourceSegments: readonly string[] = lineage.explorerSegments?.() ?? []
     if (sourceSegments.length === 0) {
-      EffectBus.emit('toast:show', { type: 'info', title: 'Already at the top', message: 'These tiles are at the root — there is no parent to promote to.' })
+      const i18n0 = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
+      EffectBus.emit('toast:show', { type: 'info', title: i18n0?.t('move.promote.at-root.title') ?? 'Already at the top', message: i18n0?.t('move.promote.at-root.message') ?? 'These tiles are at the root — there is no parent to promote to.' })
       return
     }
     const parentSegments = sourceSegments.slice(0, -1)
 
     const cursor = window.ioc.get<{ state?: { rewound?: boolean } }>('@diamondcoreprocessor.com/HistoryCursorService')
     if (cursor?.state?.rewound) {
-      EffectBus.emit('toast:show', { type: 'info', title: 'Viewing history', message: 'Can’t move while scrubbed back — return to the latest (Restore) to edit.' })
+      const i18n1 = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
+      EffectBus.emit('toast:show', { type: 'info', title: i18n1?.t('move.promote.rewound.title') ?? 'Viewing history', message: i18n1?.t('move.promote.rewound.message') ?? "Can't move while scrubbed back — return to the latest (Restore) to edit." })
       return
     }
 

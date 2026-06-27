@@ -26,13 +26,21 @@ export type ViewMode = string
 const STORAGE_KEY = 'hc:view-mode'
 const DEFAULT_MODE: ViewMode = 'hexagons'
 
+// Transient surfaces hide the Pixi canvas, so they must NEVER be restored on
+// boot: a stale one strands the hive on a blank, body-coloured screen with no
+// page mounted (the "white overlay over all tiles" regression). They are only
+// ever entered live, and fall back to the hexagon canvas across a reload.
+const TRANSIENT_MODES = new Set<ViewMode>(['website'])
+
 export class ViewModeService extends EventTarget {
   #mode: ViewMode
 
   constructor() {
     super()
-    const stored = (typeof localStorage !== 'undefined') ? localStorage.getItem(STORAGE_KEY) : null
-    this.#mode = (stored && stored.trim()) ? stored : DEFAULT_MODE
+    const stored = (typeof localStorage !== 'undefined') ? (localStorage.getItem(STORAGE_KEY)?.trim() ?? '') : ''
+    // Restore a persisted mode, but never a transient (canvas-hiding) one —
+    // booting into a stale 'website' with no page mounted is the white-screen bug.
+    this.#mode = (stored && !TRANSIENT_MODES.has(stored)) ? stored : DEFAULT_MODE
   }
 
   get mode(): ViewMode {
@@ -56,7 +64,10 @@ export class ViewModeService extends EventTarget {
     if (this.#mode === cleaned) return
     this.#mode = cleaned
     try {
-      localStorage.setItem(STORAGE_KEY, cleaned)
+      // Never persist a transient (canvas-hiding) mode — it must not survive a
+      // reload, or the hive boots into a blank, body-coloured screen.
+      if (TRANSIENT_MODES.has(cleaned)) localStorage.removeItem(STORAGE_KEY)
+      else localStorage.setItem(STORAGE_KEY, cleaned)
     } catch { /* private mode / storage full — non-fatal */ }
     this.dispatchEvent(new CustomEvent('change', { detail: { mode: cleaned } }))
   }

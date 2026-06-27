@@ -44,6 +44,10 @@ interface ClipboardChangedPayload {
 
 const SIG_RE = /^[0-9a-f]{64}$/i
 const TILE_PROPS_INDEX_KEY = 'hc:tile-props-index'
+// Participant-local set of absolute source paths a nested-discard has dropped.
+// Shared verbatim with the clipboard worker, which prunes these branches on
+// paste. localStorage, never the layer — clipboard state is participant-local.
+const EXCLUSIONS_KEY = 'hc:clipboard-exclusions'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const STORE_KEY = '@hypercomb.social/Store'
 const CLIPBOARD_WORKER_KEY = '@diamondcoreprocessor.com/ClipboardWorker'
@@ -96,6 +100,9 @@ export class ClipboardPanelComponent implements OnDestroy {
   // clipboard items.
   readonly #drillStack = signal<{ label: string; segments: readonly string[] }[]>([])
   readonly #drillChildren = signal<ClipboardItem[]>([])
+  /** Absolute source paths the user has discarded while drilled — kept out of
+   *  the drill view AND skipped on paste (the worker reads the same key). */
+  readonly #exclusions = signal<Set<string>>(this.#restoreExclusions())
   /** True while drilled below the top-level clipboard list. */
   readonly drilled = computed(() => this.#drillStack().length > 0)
   /** Breadcrumb of the current drill path (tile names, top → current). */
@@ -143,7 +150,10 @@ export class ClipboardPanelComponent implements OnDestroy {
       // An emptied clipboard (e.g. a cut fully consumed by a place) closes
       // the panel — there is nothing left to show.
       if (next.length === 0) this.#setVisible(false)
-      // Clipboard membership changed — drop back to the top level.
+      // Clipboard membership changed (capture / place / clear) — the worker
+      // resets exclusions on a fresh capture, so re-read them, and drop back to
+      // the top level.
+      this.#exclusions.set(this.#restoreExclusions())
       this.#drillStack.set([])
       this.#drillChildren.set([])
       this.#syncDisplay(next)
@@ -241,7 +251,12 @@ export class ClipboardPanelComponent implements OnDestroy {
     const worker = ioc?.get?.(CLIPBOARD_WORKER_KEY) as
       { childrenAt?: (s: readonly string[]) => Promise<string[]> } | undefined
     if (!worker?.childrenAt) return []
-    try { return await worker.childrenAt(segments) } catch { return [] }
+    let names: string[]
+    try { names = await worker.childrenAt(segments) } catch { return [] }
+    // Hide anything the user has discarded at this (or a deeper) level — the
+    // exclusion is keyed by absolute source path, so re-drilling never resurrects it.
+    const excl = this.#exclusions()
+    return excl.size === 0 ? names : names.filter(name => !excl.has([...segments, name].join('/')))
   }
 
   /** Resolve thumbnails + counts + default indexes for the on-screen set. */
@@ -367,15 +382,57 @@ export class ClipboardPanelComponent implements OnDestroy {
     EffectBus.emit('clipboard:place-items', { labels: this.items().map(i => i.label), targets: this.targets() })
   }
 
-  /** Place a single clipboard tile onto the current page (with its target). */
-  placeOne(label: string): void {
-    EffectBus.emit('clipboard:place-items', { labels: [label], targets: this.targets() })
+  /** Place a single tile onto the current page (with its target). A top-level
+   *  item places + consumes via its label; a DRILLED child isn't a clipboard
+   *  entry, so it places by its full source path and consumes nothing. */
+  placeOne(item: ClipboardItem): void {
+    if (this.drilled()) {
+      EffectBus.emit('clipboard:place-entries', {
+        entries: [{ label: item.label, sourceSegments: [...item.sourceSegments] }],
+        targets: this.targets(),
+      })
+    } else {
+      EffectBus.emit('clipboard:place-items', { labels: [item.label], targets: this.targets() })
+    }
   }
 
-  /** Drop a single tile from the clipboard WITHOUT placing it. The worker
-   *  re-persists, so it stays gone after a reload. */
-  discardOne(label: string): void {
-    EffectBus.emit('clipboard:discard-items', { labels: [label] })
+  /** Drop a single tile from the clipboard WITHOUT placing it. At the top level
+   *  this removes the clipboard entry (worker re-persists, stays gone after a
+   *  reload). While DRILLED, the row is a child of a clipboard tile, not an
+   *  entry — so record its absolute source path as an exclusion: it leaves the
+   *  view now, never returns on re-drill, and is pruned when its parent pastes. */
+  discardOne(item: ClipboardItem): void {
+    if (this.drilled()) { this.#excludeNested(item); return }
+    EffectBus.emit('clipboard:discard-items', { labels: [item.label] })
+  }
+
+  /** Add a drilled child's source path to the exclusion set, persist it (shared
+   *  with the worker), and remove it from the current drill view immediately. */
+  #excludeNested(item: ClipboardItem): void {
+    const path = [...item.sourceSegments, item.label].join('/')
+    const next = new Set(this.#exclusions())
+    next.add(path)
+    this.#exclusions.set(next)
+    this.#persistExclusions(next)
+    const remaining = this.#drillChildren()
+      .filter(c => [...c.sourceSegments, c.label].join('/') !== path)
+    this.#drillChildren.set(remaining)
+    this.#syncDisplay(remaining)
+  }
+
+  #restoreExclusions(): Set<string> {
+    try {
+      const raw = localStorage.getItem(EXCLUSIONS_KEY)
+      const arr = raw ? JSON.parse(raw) : []
+      return new Set(Array.isArray(arr) ? arr.filter((x: unknown): x is string => typeof x === 'string') : [])
+    } catch { return new Set() }
+  }
+
+  #persistExclusions(set: ReadonlySet<string>): void {
+    try {
+      if (set.size === 0) localStorage.removeItem(EXCLUSIONS_KEY)
+      else localStorage.setItem(EXCLUSIONS_KEY, JSON.stringify([...set]))
+    } catch { /* ignore */ }
   }
 
   // ── child counts ───────────────────────────────────────────────────

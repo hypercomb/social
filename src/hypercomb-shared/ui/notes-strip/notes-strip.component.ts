@@ -187,35 +187,9 @@ export class NotesStripComponent implements OnDestroy {
   }
 
   // ── Comb v2 editor state ─────────────────────────────────
-  // Note ids currently checked for bulk action. Scoped to the active
-  // cell — clears when the cell changes. Drives the toolbar's morph
-  // between edit (formatting) and select (bulk-action) modes.
-  // Per-cell selection — Map<cellLabel, Set<noteId>>. Tracking which
-  // CELL each selected note lives in (instead of a flat note-id set)
-  // makes cross-cell selection in see-all / multi-cell mode safe: bulk
-  // actions iterate per cell and route each emit to the right
-  // cellLabel instead of all going to the single active cell.
-  readonly selectedNotes = signal<ReadonlyMap<string, ReadonlySet<string>>>(new Map())
-
-  /** Total count of selected notes across all cells. */
-  readonly selectionCount = computed<number>(() => {
-    let sum = 0
-    for (const ids of this.selectedNotes().values()) sum += ids.size
-    return sum
-  })
-
-  /** Set of selected note ids in the currently-active cell. Kept for
-   *  the single-cell template's existing API surface; multi-cell rows
-   *  pass their group.cell explicitly. */
-  readonly selectedNoteIds = computed<ReadonlySet<string>>(() => {
-    const cell = this.cell()
-    if (!cell) return new Set<string>()
-    return this.selectedNotes().get(cell) ?? new Set<string>()
-  })
-
-  /** True when there's at least one note selected — toolbar swaps to
-   *  the selection-bar variant and per-row checkboxes pin visible. */
-  readonly selectionMode = computed<boolean>(() => this.selectionCount() > 0)
+  // Notes themselves carry no selection — a note is just text. (Bulk
+  // multi-note selection was removed; tile selection lives on the bottom
+  // navigator as `selectedCells`, a separate concern.)
 
   /** Which note the embedded form is currently editing. Null = the form
    *  is in "add" mode (a fresh note); a note id = "edit" mode (the form
@@ -263,144 +237,6 @@ export class NotesStripComponent implements OnDestroy {
    *  as the kebab (ESC, click-outside). */
   readonly pickerOpenForId = signal<string | null>(null)
 
-
-  // ── Comb v2 actions ──────────────────────────────────────
-
-  /** Is the given (cell, noteId) pair currently selected? Cell-aware
-   *  so the same note id in two different cells doesn't collide. */
-  isNoteSelected(cellLabel: string, noteId: string): boolean {
-    return this.selectedNotes().get(cellLabel)?.has(noteId) ?? false
-  }
-
-  toggleNoteSelection(cellLabel: string, noteId: string, event?: Event): void {
-    event?.stopPropagation()
-    this.selectedNotes.update(prev => {
-      const next = new Map(prev)
-      const existing = new Set(next.get(cellLabel) ?? [])
-      if (existing.has(noteId)) existing.delete(noteId)
-      else existing.add(noteId)
-      if (existing.size === 0) next.delete(cellLabel)
-      else next.set(cellLabel, existing)
-      return next
-    })
-  }
-
-  clearNoteSelection(): void {
-    this.selectedNotes.set(new Map())
-  }
-
-  /** Resolve a (cellLabel, noteId) pair to its current Note record by
-   *  reading from #notesByCell + qa-merge, exactly like notes() does.
-   *  Used by bulk actions so they can operate on cells the user has
-   *  selected via the multi-cell accordion (not just the active cell). */
-  #resolveSelectedNote(cellLabel: string, noteId: string): Note | undefined {
-    const stored = this.#notesByCell().get(cellLabel) ?? []
-    const qa = this.#qaByCell().get(cellLabel) ?? []
-    return this.#mergeQaWithNotes(qa, stored).find(n => n.id === noteId)
-  }
-
-  /** Bulk-delete every currently selected note, regardless of cell. */
-  deleteSelectedNotes(): void {
-    const map = this.selectedNotes()
-    for (const [cellLabel, ids] of map) {
-      for (const id of ids) {
-        EffectBus.emit('note:delete', { cellLabel, noteId: id })
-      }
-    }
-    this.clearNoteSelection()
-  }
-
-  /** Toggle the `[Q]` question prefix on every currently selected note.
-   *  Note ↔ Question. Answer notes (`[A:qId] …`) are skipped — they're
-   *  paired with a question and toggling them would orphan the link. */
-  toggleSelectionKind(): void {
-    for (const [cellLabel, ids] of this.selectedNotes()) {
-      for (const id of ids) {
-        const note = this.#resolveSelectedNote(cellLabel, id)
-        if (!note) continue
-        const kind = this.noteKind(note)
-        if (kind === 'a') continue
-        const trimmed = note.text.replace(/^\s+/, '')
-        const stripped = kind === 'q'
-          ? trimmed.replace(/^\[Q\]\s?/, '')
-          : '[Q] ' + trimmed
-        EffectBus.emit('note:commit', { cellLabel, text: stripped, editId: id })
-      }
-    }
-    this.clearNoteSelection()
-  }
-
-  /** Copy the text of every selected note to the clipboard, one per
-   *  line. Iterates across all cells in the selection so see-all mode
-   *  exports notes from every cell the user has checked. */
-  async copySelectedNotesText(): Promise<void> {
-    if (this.selectionCount() === 0) return
-    const lines: string[] = []
-    for (const [cellLabel, ids] of this.selectedNotes()) {
-      for (const id of ids) {
-        const note = this.#resolveSelectedNote(cellLabel, id)
-        if (!note) continue
-        // noteDisplayText strips [Q]/[A:qId]. Notes are plain text
-        // (no line markers anymore), so no further plainification.
-        lines.push(this.noteDisplayText(note))
-      }
-    }
-    try {
-      await navigator.clipboard.writeText(lines.join('\n\n'))
-    } catch { /* permission denied / insecure context — no-op */ }
-    this.clearNoteSelection()
-  }
-
-  /** Duplicate each selected note in its own cell — emits a fresh
-   *  `note:commit` with the same text (no editId), which appends a
-   *  new sig to that cell's notes slot. */
-  duplicateSelectedNotes(): void {
-    for (const [cellLabel, ids] of this.selectedNotes()) {
-      for (const id of ids) {
-        const note = this.#resolveSelectedNote(cellLabel, id)
-        if (!note) continue
-        EffectBus.emit('note:commit', { cellLabel, text: note.text })
-      }
-    }
-    this.clearNoteSelection()
-  }
-
-  /** Shift indentation on every selected note's text by the given
-   *  delta (positive indents, negative outdents). Operates on the
-   *  whole stored text — every line shifts together. */
-  shiftSelectedIndent(delta: number): void {
-    const UNIT = 2
-    for (const [cellLabel, ids] of this.selectedNotes()) {
-      for (const id of ids) {
-        const note = this.#resolveSelectedNote(cellLabel, id)
-        if (!note) continue
-        const shifted = note.text.split(/\r?\n/).map(line => {
-          const m = /^([ \t]*)(.*)$/.exec(line)
-          const lead = (m?.[1] ?? '').replace(/\t/g, '  ')
-          const rest = m?.[2] ?? line
-          const units = Math.floor(lead.length / UNIT)
-          const next = Math.max(0, units + delta)
-          return ' '.repeat(next * UNIT) + rest
-        }).join('\n')
-        if (shifted === note.text) continue
-        EffectBus.emit('note:commit', { cellLabel, text: shifted, editId: id })
-      }
-    }
-    this.clearNoteSelection()
-  }
-
-
-  /** Indent the current capture-input line one level (two spaces). */
-  indent(): void {
-    if (!this.capturing()) return
-    EffectBus.emit('note-capture:indent', { delta: 1 })
-  }
-
-  /** Outdent the current capture-input line one level. */
-  outdent(): void {
-    if (!this.capturing()) return
-    EffectBus.emit('note-capture:indent', { delta: -1 })
-  }
 
   // ── Tree (children) — collapse / kebab / picker / nest / promote ──
 
@@ -547,14 +383,8 @@ export class NotesStripComponent implements OnDestroy {
     this.#layerCellLabels.set(provider ? [...provider.suggestions()] : [])
   }
 
-  /** Click a row's body — in select mode it toggles selection,
-   *  otherwise it opens the viewer. Cell-aware so see-all rows
-   *  add to the right per-cell bucket. */
-  onRowBodyClick(cellLabel: string, noteId: string, event: Event): void {
-    if (this.selectionMode()) {
-      this.toggleNoteSelection(cellLabel, noteId, event)
-      return
-    }
+  /** Click a row's body — opens the note in the embedded editor. */
+  onRowBodyClick(cellLabel: string, noteId: string, _event: Event): void {
     this.open(noteId, cellLabel)
   }
 
@@ -858,9 +688,7 @@ export class NotesStripComponent implements OnDestroy {
 
   readonly noteDragSourceId = signal<string | null>(null)
   readonly noteDragSourceCell = signal<string | null>(null)
-  // Legacy: multi-cell accordion mode still uses an insertion index.
-  // Single-cell tree mode uses noteDropTargetId + noteDropMode.
-  readonly noteDropIndex = signal<number | null>(null)
+  // Tree drag uses noteDropTargetId + noteDropMode (hovered row + zone).
   readonly noteDropTargetId = signal<string | null>(null)
   readonly noteDropMode = signal<'before' | 'into' | 'after' | 'root' | null>(null)
   #noteDragPointerId: number | null = null
@@ -875,14 +703,6 @@ export class NotesStripComponent implements OnDestroy {
     this.#noteDragPointerId = event.pointerId
     this.noteDragSourceId.set(noteId)
     this.noteDragSourceCell.set(cellLabel)
-    // Multi-cell mode still uses the flat index. Find the row's
-    // starting index within its OWN cell — see-all accordion may show
-    // many cells; the reorder is always per-cell.
-    const cellNotes = this.#mergeQaWithNotes(
-      this.#qaByCell().get(cellLabel) ?? [],
-      this.#notesByCell().get(cellLabel) ?? [],
-    )
-    this.noteDropIndex.set(cellNotes.findIndex(n => n.id === noteId))
     this.noteDropTargetId.set(null)
     this.noteDropMode.set(null)
     window.addEventListener('pointermove', this.#onNoteDragMove)
@@ -957,7 +777,6 @@ export class NotesStripComponent implements OnDestroy {
     this.#noteDragPointerId = null
     this.noteDragSourceId.set(null)
     this.noteDragSourceCell.set(null)
-    this.noteDropIndex.set(null)
     this.noteDropTargetId.set(null)
     this.noteDropMode.set(null)
     window.removeEventListener('pointermove', this.#onNoteDragMove)
@@ -1028,8 +847,8 @@ export class NotesStripComponent implements OnDestroy {
       event.preventDefault()
       return
     }
-    if (this.selectionMode()) {
-      this.clearNoteSelection()
+    if (this.selectedCells().size > 0) {
+      this.clearCellSelection()
       event.stopPropagation()
       event.preventDefault()
       return
@@ -1094,17 +913,6 @@ export class NotesStripComponent implements OnDestroy {
     return merged.filter(n => this.#passesFilter(this.noteKind(n)))
   })
 
-  /** Display label for a row's kind affordance — shown in a small header
-   *  chip alongside the kind icon at the top of each row. Plain English
-   *  for now; i18n keys can layer on later without touching the consumers. */
-  noteKindLabel(note: Note): string {
-    switch (this.noteKind(note)) {
-      case 'q': return 'Question'
-      case 'a': return 'Answer'
-      default:  return 'Note'
-    }
-  }
-
   /** Merge open qa-slot questions with the cell's notes into a single
    *  display list. Logic:
    *   - qa items appear FIRST as synthetic notes (`id = 'qa:<qId>'`,
@@ -1165,15 +973,59 @@ export class NotesStripComponent implements OnDestroy {
     ).length
   }
 
+  // ── Tile navigator multi-select ──────────────────────────
+  // The bottom navigator is multi-selectable: check several tiles to build a
+  // working set you can switch between quickly. Selection is participant-
+  // local and session-only — it's view state, never persisted to the layer
+  // (the clipboard/selection-locality rule: anything that would skew the
+  // lineage signature across peers stays out of the layer). This picks TILES,
+  // not notes — notes themselves carry no selection. The active tile (shown in
+  // the editor above) is independent — you can switch the active tile without
+  // changing the checked set, and clearing the set leaves the active tile open.
+  readonly selectedCells = signal<ReadonlySet<string>>(new Set())
+
+  /** How many tiles are checked in the navigator — drives the navigator's
+   *  selection status line ("N tiles selected · click to switch"). */
+  readonly selectedCellCount = computed<number>(() => this.selectedCells().size)
+
+  /** Is this tile checked in the navigator's working set? */
+  isCellSelected(cell: string): boolean {
+    return this.selectedCells().has(cell)
+  }
+
+  /** Toggle a tile's membership in the navigator's selected set. Stops
+   *  propagation so the checkbox click doesn't also fire the row's activate. */
+  toggleCellSelection(cell: string, event?: Event): void {
+    event?.stopPropagation()
+    if (!cell) return
+    this.selectedCells.update(prev => {
+      const next = new Set(prev)
+      if (next.has(cell)) next.delete(cell)
+      else next.add(cell)
+      return next
+    })
+  }
+
+  /** Clear the navigator's tile selection. The active tile is untouched —
+   *  its notes stay open in the editor above. */
+  clearCellSelection(): void {
+    if (this.selectedCells().size > 0) this.selectedCells.set(new Set())
+  }
+
   /** Always-on tile navigator: every tile in the current layer, filtered by
    *  the find box. Clicking a row makes that tile active (its notes open in
    *  the editor above); clicking the tile on the canvas activates it here too.
-   *  Layer order is preserved (CellSuggestionProvider order). */
-  readonly tileList = computed<readonly { cell: string; count: number }[]>(() =>
-    this.#layerCellLabels()
+   *  Checked tiles float to the top so the selected working set is grouped and
+   *  easy to switch between; layer order (CellSuggestionProvider order) is
+   *  preserved within the checked and unchecked groups. */
+  readonly tileList = computed<readonly { cell: string; count: number; selected: boolean }[]>(() => {
+    const sel = this.selectedCells()
+    const rows = this.#layerCellLabels()
       .filter(cell => this.#matchesFilter(cell))
-      .map(cell => ({ cell, count: this.#cellCount(cell) })),
-  )
+      .map(cell => ({ cell, count: this.#cellCount(cell), selected: sel.has(cell) }))
+    // Stable sort: checked tiles first, original order kept within each group.
+    return rows.sort((a, b) => (a.selected === b.selected ? 0 : a.selected ? -1 : 1))
+  })
 
   /** Make `cell` the active tile — its notes open in the editor above the
    *  list. Clears any in-progress edit so switching tiles starts clean. The
@@ -1201,9 +1053,6 @@ export class NotesStripComponent implements OnDestroy {
    * shows so the always-on tile list is available to find and pick one.
    */
   readonly visible = computed<boolean>(() => this.#open() || !!this.#capturingFor())
-
-  /** True when the strip is shown specifically because a note is being authored. */
-  readonly capturing = computed<boolean>(() => !!this.#capturingFor())
 
   #cleanups: (() => void)[] = []
   #selectionListener: (() => void) | null = null
@@ -1245,6 +1094,9 @@ export class NotesStripComponent implements OnDestroy {
         this.#warmed.set(new Set())
         this.#notesByCell.set(new Map())
         this.#qaByCell.set(new Map())
+        // The navigator's checked set names tiles in the layer we just left;
+        // those labels are meaningless in the new layer, so drop the selection.
+        this.selectedCells.set(new Set())
         this.#version.update(v => v + 1)
         // Re-poll the layer's tile list — navigation changed which cells exist.
         this.#refreshLayerCellLabels()
@@ -1304,9 +1156,8 @@ export class NotesStripComponent implements OnDestroy {
     }
 
     // Reset Comb v2 transient state whenever the active cell switches.
-    // Selection / popovers / editing-caret are all cell-scoped — letting
-    // them persist across navigation would surface stale ids and confuse
-    // the bulk-action paths.
+    // The popovers are cell-scoped — letting them persist across navigation
+    // would surface stale note ids.
     //
     // Reads must be untracked: if the effect tracks these signals it
     // re-runs every time the popovers open and immediately closes them
@@ -1314,7 +1165,6 @@ export class NotesStripComponent implements OnDestroy {
     effect(() => {
       this.cell()  // sole dependency — re-fires on cell change only
       untracked(() => {
-        if (this.selectionCount() > 0) this.selectedNotes.set(new Map())
         if (this.kebabOpenId() !== null) this.kebabOpenId.set(null)
         if (this.pickerOpenForId() !== null) this.pickerOpenForId.set(null)
       })
@@ -1852,25 +1702,6 @@ export class NotesStripComponent implements OnDestroy {
     this.#focusForm()
   }
 
-  /** Add affordance → focus a fresh add form for the active cell. */
-  add(): void {
-    const cell = this.cell()
-    if (!cell) return
-    this.#openForm(cell)
-  }
-
-  /** Flip between chips and rows layout; persists the choice. */
-  toggleMode(): void {
-    const next = this.mode() === 'chips' ? 'rows' : 'chips'
-    this.mode.set(next)
-    localStorage.setItem('hc:notes-strip-mode', next)
-  }
-
-  /** Explicit exit button while the user is authoring a note. */
-  cancelCapture(): void {
-    EffectBus.emit('notes:cancel', {})
-  }
-
   /** Header "hide" button — turns the strip off. Stays off until the user
    *  explicitly re-opens it via the control-bar Notes toggle (or starts
    *  authoring a note); selecting another tile no longer reopens it. Also
@@ -1890,12 +1721,6 @@ export class NotesStripComponent implements OnDestroy {
     const cell = this.cell()
     if (!cell || !noteId) return
     EffectBus.emit('note:delete', { cellLabel: cell, noteId })
-  }
-
-  /** Truncate a note for display in the strip. */
-  preview(text: string): string {
-    const trimmed = text.replace(/\s+/g, ' ').trim()
-    return trimmed.length > 64 ? trimmed.slice(0, 61) + '…' : trimmed
   }
 
   /** Classify a note by its legacy text prefix. `[Q] …` is a question

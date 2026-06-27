@@ -57,10 +57,15 @@ export class FeedbackViewerComponent implements OnDestroy {
     }))
     // Explicit close (e.g. global escape cascade).
     this.#cleanups.push(EffectBus.on('feedback:viewer-close', () => this.close()))
-    // Live-refresh while open when a new item is submitted.
-    this.#cleanups.push(EffectBus.on('feedback:submitted', () => {
-      if (this.visible()) void this.reload()
-    }))
+    // Live-refresh while open on every inbound path. `feedback:submitted`
+    // covers local submits and live swarm posts; `feedback:channel-ingested`
+    // covers feedback that arrives over the durable feedback channel from
+    // another OPFS / device / cloud (FeedbackChannelDrone writes with
+    // emit:false, so this is its only signal to the open panel). reload() is
+    // idempotent + dedup-safe, so subscribing to both is harmless.
+    const liveRefresh = (): void => { if (this.visible()) void this.reload() }
+    this.#cleanups.push(EffectBus.on('feedback:submitted', liveRefresh))
+    this.#cleanups.push(EffectBus.on('feedback:channel-ingested', liveRefresh))
   }
 
   ngOnDestroy(): void {

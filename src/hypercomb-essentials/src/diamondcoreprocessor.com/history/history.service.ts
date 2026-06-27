@@ -1645,34 +1645,40 @@ export class HistoryService {
       this.#preloadAllBagsPromise = null
     })
 
-    // Phase 2 — DETACHED + idle-deferred: walk from the root layer to
-    // warm the parsed cache for every reachable descendant. This used to
-    // be CHAINED into the shared promise, so a single cold getLayerBySig
-    // miss on the render path awaited the WHOLE serial tree walk —
-    // seconds on real data. Awaiters of preloadAllBags() only need
-    // phase-1 (#latestSigByLineage heads); the walk is pure cache
-    // warming, and "real-time supersedes preloader": it must never sit
-    // on an awaited render hop. Scheduled once (memoized promise means
-    // this .then chain attaches on first construction only).
+    // Phase 2 — DETACHED but PROMPT: walk from the root layer to warm the
+    // parsed cache for every reachable descendant. This used to be CHAINED
+    // into the shared promise, so a single cold getLayerBySig miss on the
+    // render path awaited the WHOLE serial tree walk — seconds on real
+    // data. Awaiters of preloadAllBags() only need phase-1
+    // (#latestSigByLineage heads); the walk is pure cache warming, and
+    // "real-time supersedes preloader": it must never sit on an awaited
+    // render hop. Scheduled once (memoized promise means this .then chain
+    // attaches on first construction only).
+    //
+    // It is NOT idle-deferred. It used to wait behind requestIdleCallback
+    // ({timeout: 8000}) ON TOP of phase-1's own 5s idle defer — so for the
+    // first ~10-15s of a session the descendant parsed cache stayed cold,
+    // and the user's first navigation into a big tile (many children) beat
+    // the warm to the punch: resolveChildNames paid N cold pool reads
+    // (0.5-1s), instant only on the SECOND visit. Phase-1 has already
+    // completed by the time this .then fires (seconds in — first paint is
+    // long done), so there is nothing left to protect by deferring. The
+    // walk is now parallel + cooperatively sliced (preloadFromRoot yields
+    // every ~12ms), so starting it eagerly cannot starve paint or input.
     void this.#preloadAllBagsPromise.then(() => {
-      const kick = () => {
-        void (async () => {
-          try {
-            const rootLineageSig = await this.sign({ explorerSegments: () => [] })
-            const rootHeadSig = await this.latestMarkerSigFor(rootLineageSig, '/')
-            if (rootHeadSig) {
-              await this.preloadFromRoot(rootHeadSig)
-            } else {
-              console.log('[preload] preloadFromRoot skipped: no root head sig')
-            }
-          } catch (err) {
-            console.warn('[preload] preloadFromRoot failed (non-fatal):', err)
+      void (async () => {
+        try {
+          const rootLineageSig = await this.sign({ explorerSegments: () => [] })
+          const rootHeadSig = await this.latestMarkerSigFor(rootLineageSig, '/')
+          if (rootHeadSig) {
+            await this.preloadFromRoot(rootHeadSig)
+          } else {
+            console.log('[preload] preloadFromRoot skipped: no root head sig')
           }
-        })()
-      }
-      const ric = (globalThis as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
-      if (typeof ric === 'function') ric(kick, { timeout: 8000 })
-      else setTimeout(kick, 2000)
+        } catch (err) {
+          console.warn('[preload] preloadFromRoot failed (non-fatal):', err)
+        }
+      })()
     })
     return this.#preloadAllBagsPromise
   }
@@ -1685,38 +1691,76 @@ export class HistoryService {
    * returns, the render path can navigate to any reachable sub-layer
    * and hit the cache exclusively — no further walks.
    *
+   * BREADTH-FIRST + BOUNDED-PARALLEL. The walk used to be a serial DFS:
+   * one `await getLayerBySig` at a time, so on a tree of hundreds of
+   * layers the warm took many seconds to reach any given branch — the
+   * user routinely navigated into a big tile before the walk got there,
+   * paying cold per-child pool reads on first visit. Each layer fetch is
+   * an independent OPFS read; running them through a fixed worker pool
+   * (level by level) warms the whole tree in a fraction of the wall-clock
+   * while a ~12ms slice budget yields the main thread back to paint and
+   * input between batches. Breadth-first so the SHALLOW tiles a user is
+   * most likely to open next warm first.
+   *
    * Logs progress every 50 layers so a long boot doesn't look frozen,
    * and emits a summary at the end with depth-binned counts.
    */
   public readonly preloadFromRoot = async (rootSig: string): Promise<void> => {
     if (!HistoryService.#SIG_RE.test(rootSig)) return
     const startMs = performance.now()
-    const visited = new Set<string>()
+    const visited = new Set<string>([rootSig])
     const depthHistogram = new Map<number, number>()
     let cacheHits = 0
     let walked = 0
 
-    const walk = async (sig: string, depth: number): Promise<void> => {
-      if (visited.has(sig)) return
-      visited.add(sig)
-      const wasCached = this.#parsedLayerCache.has(sig) || this.#preloaderCache.has(sig)
-      const layer = await this.getLayerBySig(sig)
-      if (!layer) return
-      walked++
-      depthHistogram.set(depth, (depthHistogram.get(depth) ?? 0) + 1)
-      if (wasCached) cacheHits++
-      if (walked > 0 && walked % 50 === 0) {
-        console.log(`[preload] preloadFromRoot progress: ${walked} layers walked (depth ≤ ${Math.max(...depthHistogram.keys())})`)
-      }
-      const children = Array.isArray(layer.children) ? layer.children : []
-      for (const childSig of children) {
-        if (HistoryService.#SIG_RE.test(childSig)) {
-          await walk(childSig, depth + 1)
-        }
-      }
+    // Cooperative slicing — mirror preloadAllBags: yield whenever a slice
+    // exceeds ~12ms so an in-flight render keeps the event loop.
+    let sliceStart = performance.now()
+    const yieldIfDue = async (): Promise<void> => {
+      if (performance.now() - sliceStart < 12) return
+      await new Promise<void>(r => setTimeout(r, 0))
+      sliceStart = performance.now()
     }
 
-    await walk(rootSig, 0)
+    const CONCURRENCY = 12
+    let frontier: string[] = [rootSig]
+    let depth = 0
+
+    while (frontier.length) {
+      const nextFrontier = new Set<string>()
+      // Bounded worker pool over this depth level. A shared cursor hands
+      // each idle worker the next sig; visited is pre-seeded so no sig is
+      // fetched twice even when several parents reference the same child.
+      let cursor = 0
+      const drainLevel = frontier
+      const worker = async (): Promise<void> => {
+        while (cursor < drainLevel.length) {
+          const sig = drainLevel[cursor++]
+          const wasCached = this.#parsedLayerCache.has(sig) || this.#preloaderCache.has(sig)
+          const layer = await this.getLayerBySig(sig)
+          await yieldIfDue()
+          if (!layer) continue
+          walked++
+          depthHistogram.set(depth, (depthHistogram.get(depth) ?? 0) + 1)
+          if (wasCached) cacheHits++
+          if (walked % 50 === 0) {
+            console.log(`[preload] preloadFromRoot progress: ${walked} layers walked (depth ≤ ${depth})`)
+          }
+          const children = Array.isArray(layer.children) ? layer.children : []
+          for (const childSig of children) {
+            if (HistoryService.#SIG_RE.test(childSig) && !visited.has(childSig)) {
+              visited.add(childSig)
+              nextFrontier.add(childSig)
+            }
+          }
+        }
+      }
+      await Promise.all(
+        Array.from({ length: Math.min(CONCURRENCY, frontier.length) }, () => worker()),
+      )
+      frontier = [...nextFrontier]
+      depth++
+    }
     const elapsed = Math.round(performance.now() - startMs)
     const depthSummary = [...depthHistogram.entries()]
       .sort(([a], [b]) => a - b)

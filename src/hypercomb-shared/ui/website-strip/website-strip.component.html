@@ -1,6 +1,7 @@
 <!-- hypercomb-shared/ui/website-strip/website-strip.component.html -->
-<!-- Top-of-screen site launcher. Present in both modes; hidden when there are
-     no sites. Each icon jumps to that site's root + renders it. -->
+<!-- Bottom-right site launcher, stacked one row above the corner affordance.
+     Present in both modes; hidden when there are no sites. Each icon jumps to
+     that site's root + renders it. -->
 @if (sites().length) {
   <nav class="ws-strip" [attr.aria-label]="'website-strip.label' | t">
     @for (s of sites(); track s.key) {

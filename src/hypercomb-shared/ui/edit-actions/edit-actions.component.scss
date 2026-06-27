@@ -19,7 +19,13 @@ $steel: rgb(126, 182, 214);
   bottom: 1.5rem;
   z-index: 59995;
 
+  // row-reverse pins UNDO (first child) at the fixed right edge, so it never
+  // moves. redo/save appear by growing the cluster LEFTWARD — away from the
+  // cursor — instead of materialising under it. (Right-anchored + normal row
+  // would put SAVE exactly where undo just was, inviting an accidental save on
+  // a rapid second click.) DOM order stays undo→redo→save for tab/reading order.
   display: flex;
+  flex-direction: row-reverse;
   align-items: center;
   gap: 0.1rem;
   height: 2.9rem;

@@ -289,6 +289,17 @@ $accent: #c8b8ff;
   }
 }
 
+// Full hive path of where a cascaded feature is attached — the exact location
+// it flows from. The whole row also carries this in its hover tooltip.
+.feature-attached {
+  align-self: flex-start;
+  font-size: 0.64em;
+  font-family: var(--hc-mono, monospace);
+  color: rgba($accent, 0.72);
+  word-break: break-all;
+  line-height: 1.3;
+}
+
 // Secondary note on a directly-attached cascading capability: it lives here
 // AND flows down to this tile's own subtree.
 .origin-flow {

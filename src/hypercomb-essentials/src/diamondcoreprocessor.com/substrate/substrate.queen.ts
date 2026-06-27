@@ -5,18 +5,23 @@
 //
 // Syntax:
 //   /substrate                  — open the substrate organizer
+//   /substrate sets             — list the built-in themed sets + active marker
+//   /substrate set <name>       — switch the active themed set (steel, daylight, …)
 //   /substrate here             — use current hive as substrate source
 //   /substrate link             — link a local folder (File System Access API)
 //   /substrate off              — deactivate substrate
 //   /substrate on               — reactivate (picks last active or defaults)
-//   /substrate reset            — restore bundled defaults as active
+//   /substrate reset            — restore the default set (Steel) as active
 //   /substrate list             — log all known sources to the activity log
 
 import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
 import type { SubstrateService } from './substrate.service.js'
 
 const get = (key: string) => (window as any).ioc?.get?.(key)
-const BUILTIN_DEFAULTS_ID = 'builtin:defaults'
+// Tile-substrate default is the Photos collection. The themed sets (steel,
+// daylight, …) are still selectable here via `set`, but they're primarily
+// canvas/screen backgrounds now (see /canvas), not the tile default.
+const PHOTOS_SET_ID = 'builtin:defaults'
 
 export class SubstrateQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -27,8 +32,18 @@ export class SubstrateQueenBee extends QueenBee {
 
   override slashComplete(args: string): readonly string[] {
     const q = args.toLowerCase().trim()
-    if (!q) return ['here']
-    return ['here'].filter(s => s.startsWith(q))
+    const verbs = ['set', 'sets', 'here', 'link', 'on', 'off', 'reset', 'list']
+    // "set <partial>" → suggest the built-in set names.
+    if (q === 'set' || q.startsWith('set ')) {
+      const service = get('@diamondcoreprocessor.com/SubstrateService') as SubstrateService | undefined
+      const names = (service?.listSources() ?? [])
+        .filter(s => s.builtin)
+        .map(s => (s.label || s.id).toLowerCase())
+      const partial = q.replace(/^set\s*/, '')
+      const matches = partial ? names.filter(n => n.startsWith(partial)) : names
+      return matches.map(n => `set ${n}`)
+    }
+    return q ? verbs.filter(v => v.startsWith(q)) : verbs
   }
 
   protected async execute(args: string): Promise<void> {
@@ -37,6 +52,32 @@ export class SubstrateQueenBee extends QueenBee {
     await service.ensureLoaded()
 
     const trimmed = args.trim().toLowerCase()
+    const [verb, ...rest] = trimmed.split(/\s+/)
+    const setArg = rest.join(' ').trim()
+
+    // ── themed-set switching ───────────────────────────────────────────
+    if (verb === 'sets') {
+      const builtins = service.listSources().filter(s => s.builtin)
+      if (builtins.length === 0) { this.#toast('no built-in sets'); return }
+      for (const s of builtins) {
+        const active = s.id === service.registry.activeId ? '●' : '○'
+        this.#toast(`${active} ${s.label}`)
+      }
+      return
+    }
+
+    if (verb === 'set') {
+      if (!setArg) { this.#toast('usage: /substrate set <name>'); return }
+      const sources = service.listSources()
+      const match = sources.find(s => (s.label || '').toLowerCase() === setArg)
+        ?? sources.find(s => s.id.toLowerCase() === setArg || s.id.toLowerCase() === `builtin:${setArg}`)
+        ?? sources.find(s => (s.label || '').toLowerCase().startsWith(setArg))
+      if (!match) { this.#toast(`no set "${setArg}"`); return }
+      await service.setActive(match.id)
+      await this.#refreshVisible(service)
+      this.#toast(`backgrounds → ${match.label}`)
+      return
+    }
 
     switch (trimmed) {
       case '':
@@ -73,7 +114,7 @@ export class SubstrateQueenBee extends QueenBee {
         const registry = service.registry
         const target = registry.sources.find(s => s.id === registry.activeId)
                     ?? registry.sources.find(s => !s.builtin)
-                    ?? registry.sources.find(s => s.id === BUILTIN_DEFAULTS_ID)
+                    ?? registry.sources.find(s => s.id === PHOTOS_SET_ID)
         if (!target) { this.#toast('no substrate sources'); return }
         await service.setActive(target.id)
         await this.#refreshVisible(service)
@@ -84,9 +125,9 @@ export class SubstrateQueenBee extends QueenBee {
       case 'reset':
       case 'defaults': {
         await service.clearHive()
-        await service.setActive(BUILTIN_DEFAULTS_ID)
+        await service.setActive(PHOTOS_SET_ID)
         await this.#refreshVisible(service)
-        this.#toast('substrate reset to defaults')
+        this.#toast('substrate reset to Photos')
         return
       }
 

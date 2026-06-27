@@ -115,6 +115,24 @@ export class ClipboardWorker extends Worker {
       if (labels.length > 0) void this.#discardLabels(labels)
     })
 
+    // Place explicit (label + sourceSegments) entries at the current location —
+    // the side panel's per-item place from a DRILLED level, where each row is a
+    // child of a clipboard tile (a live source-tree pointer), not a top-level
+    // clipboard entry. The label alone can't be matched against the clipboard,
+    // so the panel hands the full source path. Placing a drilled child never
+    // consumes anything from the clipboard.
+    EffectBus.on<{ entries?: { label?: string; sourceSegments?: string[] }[]; targets?: Record<string, number> }>(
+      'clipboard:place-entries',
+      (payload) => {
+        const raw = Array.isArray(payload?.entries) ? payload!.entries! : []
+        const entries: ClipboardEntry[] = raw
+          .filter((e): e is { label: string; sourceSegments?: string[] } => !!e && typeof e.label === 'string')
+          .map(e => ({ label: e.label, sourceSegments: Array.isArray(e.sourceSegments) ? [...e.sourceSegments] : [] }))
+        const targets = (payload?.targets && typeof payload.targets === 'object') ? payload.targets : undefined
+        if (entries.length > 0) void this.#placeEntries(entries, targets)
+      },
+    )
+
 
     // Restore clipboard from OPFS once Store is initialized
     const tryRestore = (): void => {
@@ -228,6 +246,11 @@ export class ClipboardWorker extends Worker {
   async #capture(op: ClipboardOp): Promise<void> {
     const labels = this.#selectedLabels()
     if (labels.length === 0) return
+
+    // A fresh capture replaces the clipboard wholesale — any nested-discard
+    // exclusions from the previous contents are now meaningless, so reset them
+    // before the new entries land (the panel re-reads them on clipboard:changed).
+    clearExclusions()
 
     const lineage = this.#lineage
     const baseSegments = lineage?.explorerSegments() ?? []
@@ -349,6 +372,28 @@ export class ClipboardWorker extends Worker {
     await this.#placeLabels(clipboardSvc.items.map(i => i.label))
   }
 
+  // Place explicit (label + sourceSegments) entries at the current location.
+  // Unlike #placeLabels these are NOT top-level clipboard items — they're the
+  // children surfaced when the side panel drills into a clipboard tile, so
+  // there is nothing to consume. The placement primitive (#placeItems) is the
+  // same: clone each source subtree to the target lineage and fold the placed
+  // names into the target's children in one cascade. Nested-discard exclusions
+  // inside each placed subtree are honoured there.
+  async #placeEntries(entries: readonly ClipboardEntry[], targets?: Record<string, number>): Promise<void> {
+    const lineage = this.#lineage
+    const store = this.#store
+    const history = this.#history
+    const committer = this.#committer
+    if (!lineage || !store || !history || !committer || entries.length === 0) return
+    // Commits at the target; refused while rewound. Feedback, don't half-run.
+    if (this.#blockedByRewound('paste')) return
+
+    const targetSegments = [...lineage.explorerSegments()]
+    EffectBus.emit('clipboard:paste-start', { count: entries.length, op: 'copy' })
+    const { placed, failed } = await this.#placeItems(history, lineage, committer, entries, targetSegments, targets)
+    EffectBus.emit('clipboard:paste-done', { count: placed.length, op: 'copy', failed })
+  }
+
   // Place the named clipboard tiles at the current location. Shared by
   // `#paste` (all labels) and the side panel's per-item place
   // (`clipboard:place-items`). Mirrors paste's consume semantics: cut drops
@@ -429,6 +474,10 @@ export class ClipboardWorker extends Worker {
     const existing = await childNamesOf(history, parent)
     const taken = new Set(existing)
 
+    // Participant-local nested-discard exclusions (absolute source paths). Read
+    // once; each placed subtree is pruned against it below.
+    const excluded = readExclusions()
+
     const placed: ClipboardEntry[] = []
     const failed: string[] = []
     // Re-homed subtrees, flattened into importTree updates and accumulated
@@ -480,7 +529,13 @@ export class ClipboardWorker extends Worker {
       // source subtree into importTree updates rooted at the dest path.
       if (srcLocSig !== dstLocSig) {
         try {
-          const entryUpdates = await flattenLayerTree(history, srcLayer, [...targetSegments, entry.label])
+          let entryUpdates = await flattenLayerTree(history, srcLayer, [...targetSegments, entry.label])
+          // Honour clipboard-local nested discards (the side panel's per-item ×
+          // while drilled): drop every excluded source descendant AND its whole
+          // subtree from this paste, and strip its name from its parent's
+          // children list. Keyed by absolute source path, so it prunes only the
+          // intended branch; the source hive is never touched.
+          entryUpdates = pruneExcludedUpdates(entryUpdates, targetSegments, entry.sourceSegments, excluded)
           // Hover-number paste target: rewrite the placed TOP tile's `index`
           // (its spiral slot) inside this same re-home cascade, so it lands in
           // ONE commit. Only the top node is retargeted; the subtree keeps its
@@ -597,6 +652,7 @@ export class ClipboardWorker extends Worker {
 
   async #clearClipboard(): Promise<void> {
     this.#clipboardSvc?.clear()
+    clearExclusions()
     const store = this.#store
     if (store) await clearDirectory(store.clipboard)
   }
@@ -853,6 +909,78 @@ async function clearDirectory(dir: FileSystemDirectoryHandle): Promise<void> {
       await dir.removeEntry(name, { recursive: true })
     } catch { /* ignore */ }
   }
+}
+
+// ── nested-discard exclusions ─────────────────────────────
+// When the side panel drills into a clipboard tile and discards one of its
+// CHILDREN, that child isn't a top-level clipboard entry — it's a live pointer
+// into the source tree. We can't drop it from the clipboard list and we must
+// never edit the source hive (clipboard is participant-local). So the panel
+// records the child's ABSOLUTE source path here and paste honours it by pruning
+// that branch. localStorage (not OPFS) because both the panel (shared shell) and
+// this worker (essentials) read/write it directly, same as hc:tile-props-index.
+
+const EXCLUSIONS_KEY = 'hc:clipboard-exclusions'
+
+function readExclusions(): ReadonlySet<string> {
+  try {
+    const raw = localStorage.getItem(EXCLUSIONS_KEY)
+    const arr = raw ? JSON.parse(raw) : []
+    return new Set(Array.isArray(arr) ? arr.filter((x): x is string => typeof x === 'string') : [])
+  } catch { return new Set() }
+}
+
+function clearExclusions(): void {
+  try { localStorage.removeItem(EXCLUSIONS_KEY) } catch { /* ignore */ }
+}
+
+// Prune a flattened source subtree (importTree updates rooted at
+// `[...targetSegments, entry.label]`) of every node whose ABSOLUTE source path
+// is excluded — and of that node's whole subtree — then strip the excluded leaf
+// names from their surviving parent's children list. `sourceBase` is the placed
+// entry's sourceSegments; a flattened node at dest `segments` maps back to the
+// source path `[...sourceBase, ...segments.slice(targetSegments.length)]`.
+function pruneExcludedUpdates(
+  updates: { segments: string[]; layer: { name?: string; [slot: string]: unknown } }[],
+  targetSegments: readonly string[],
+  sourceBase: readonly string[],
+  excluded: ReadonlySet<string>,
+): typeof updates {
+  if (excluded.size === 0) return updates
+  const tlen = targetSegments.length
+  const srcPathOf = (segs: readonly string[]): string =>
+    [...sourceBase, ...segs.slice(tlen)].join('/')
+
+  // Dest-segment keys of nodes whose source path is excluded.
+  const excludedKeys: string[] = []
+  for (const u of updates) {
+    if (excluded.has(srcPathOf(u.segments))) excludedKeys.push(u.segments.join('/'))
+  }
+  if (excludedKeys.length === 0) return updates
+
+  const underExcluded = (key: string): boolean =>
+    excludedKeys.some(p => key === p || key.startsWith(p + '/'))
+
+  // Excluded leaf name → its parent dest-key, so survivors can drop it.
+  const namesByParent = new Map<string, Set<string>>()
+  for (const key of excludedKeys) {
+    const segs = key.split('/')
+    const name = segs[segs.length - 1]
+    const parentKey = segs.slice(0, -1).join('/')
+    const set = namesByParent.get(parentKey) ?? new Set<string>()
+    set.add(name)
+    namesByParent.set(parentKey, set)
+  }
+
+  return updates
+    .filter(u => !underExcluded(u.segments.join('/')))
+    .map(u => {
+      const drop = namesByParent.get(u.segments.join('/'))
+      if (!drop) return u
+      const children = u.layer['children']
+      if (!Array.isArray(children)) return u
+      return { segments: u.segments, layer: { ...u.layer, children: children.filter((c: unknown) => !drop.has(String(c))) } }
+    })
 }
 
 const _clipboard = new ClipboardWorker()

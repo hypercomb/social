@@ -10,7 +10,7 @@
 // `mesh:join`. On cancel, the snapshot is restored so a declined invite
 // leaves the participant exactly where they were.
 
-import { EffectBus, get, requestConfirm } from '@hypercomb/core'
+import { EffectBus, get, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { validateInviteBundle, type MeetingInviteBundle } from './meeting-invite.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
@@ -84,7 +84,8 @@ export async function joinMeetingPlace(bundle: MeetingInviteBundle): Promise<boo
     secret.value === bundle.secret &&
     sameSegments(nav.segments(), bundle.segments)
   ) {
-    toast('tip', 'Meeting place', `You're already in "${label}".`)
+    const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
+    toast('tip', i18n?.t('invite.join.title') ?? 'Meeting place', i18n?.t('invite.already-here', { label }) ?? `You're already in "${label}".`)
     return false
   }
 
@@ -92,11 +93,12 @@ export async function joinMeetingPlace(bundle: MeetingInviteBundle): Promise<boo
   // restores them exactly. All live writes are deferred to the accept path,
   // so cancel is non-destructive by construction; this is the explicit belt.
   const prev = { room: room.value, secret: secret.value }
+  const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
   const confirmed = await requestConfirm({
-    title: 'Join meeting place',
-    message: `Join "${label}"? Your current room and secret will be switched to this swarm.`,
-    confirmLabel: 'Join',
-    cancelLabel: 'Stay',
+    title: i18n?.t('invite.join.title') ?? 'Join meeting place',
+    message: i18n?.t('invite.join.message', { label }) ?? `Join "${label}"? Your current room and secret will be switched to this swarm.`,
+    confirmLabel: i18n?.t('invite.join.confirm') ?? 'Join',
+    cancelLabel: i18n?.t('invite.join.cancel') ?? 'Stay',
   })
   if (!confirmed) {
     room.set(prev.room)
@@ -113,6 +115,6 @@ export async function joinMeetingPlace(bundle: MeetingInviteBundle): Promise<boo
   EffectBus.emit('mesh:room', { room: bundle.room })
   EffectBus.emit('mesh:secret', { secret: bundle.secret })
   EffectBus.emit('mesh:join', {})
-  toast('success', 'Joined meeting place', label)
+  toast('success', i18n?.t('invite.join.success') ?? 'Joined meeting place', label)
   return true
 }

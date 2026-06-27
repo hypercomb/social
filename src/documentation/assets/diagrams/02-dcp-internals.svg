@@ -1,0 +1,158 @@
+<svg viewBox="0 0 980 730" width="980" height="730" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="dcpT dcpD">
+  <title id="dcpT">Diamond Core Processor internals — architecture flowchart</title>
+  <desc id="dcpD">A central runtime spine (Intent to grammar, hypercomb.act, BeeResolver.find, bee.pulse, commit, synchronize, render) runs between two rails: primitives on the left (IoC container, EffectBus, Signatures) and state and content on the right (Lineage cell tree, Store/OPFS pools with import map, HistoryService merkle layers). A module-delivery pipeline across the top authors, compiles, signs, installs and loads bees into OPFS and the IoC container.</desc>
+
+  <style>
+    svg{
+      --ink:#e2eefa; --muted:#9fb6c6; --steel:#7eb6d6; --steel-fill:rgba(126,182,214,0.10);
+      --honey:#e6b45a; --honey-fill:rgba(230,180,90,0.13); --zone:rgba(126,182,214,0.045); --zedge:rgba(126,182,214,0.16);
+      font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    @media (prefers-color-scheme: light){
+      svg{ --ink:#163850; --muted:#4a6376; --steel:#3f7ea6; --steel-fill:rgba(63,126,166,0.10);
+        --honey:#b9852b; --honey-fill:rgba(185,133,43,0.15); --zone:rgba(63,126,166,0.05); --zedge:rgba(63,126,166,0.18); }
+    }
+    .ttl{ fill:var(--ink); font-size:16px; font-weight:700; }
+    .leg{ fill:var(--muted); font-size:10.5px; }
+    .zone{ fill:var(--zone); stroke:var(--zedge); stroke-width:1; rx:12; }
+    .zlab{ fill:var(--muted); font-size:10.5px; font-weight:600; letter-spacing:.16em; }
+    .bt{ fill:var(--ink); font-size:12.5px; font-weight:600; }
+    .bd{ fill:var(--muted); font-size:9.3px; }
+    .sp rect{ fill:var(--honey-fill); stroke:var(--honey); stroke-width:1.4; }
+    .rail rect, .dlv rect{ fill:var(--steel-fill); stroke:var(--steel); stroke-width:1.3; }
+    .ah{ stroke:var(--honey); stroke-width:1.8; fill:none; marker-end:url(#mH); }
+    .as{ stroke:var(--steel); stroke-width:1.5; fill:none; marker-end:url(#mS); }
+    .asd{ stroke:var(--steel); stroke-width:1.4; fill:none; stroke-dasharray:4 3; marker-end:url(#mS); }
+    .asd2{ stroke:var(--steel); stroke-width:1.4; fill:none; stroke-dasharray:4 3; marker-end:url(#mS); marker-start:url(#mSs); }
+    #mH path{ fill:var(--honey); } #mS path,#mSs path{ fill:var(--steel); }
+    .clab{ fill:var(--muted); font-size:9px; }
+    .tag{ fill:var(--honey); font-size:9px; font-weight:600; }
+  </style>
+  <defs>
+    <marker id="mH" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6.5,3 L0,6 Z"/></marker>
+    <marker id="mS" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6.5,3 L0,6 Z"/></marker>
+    <marker id="mSs" markerWidth="8" markerHeight="8" refX="0.5" refY="3" orient="auto"><path d="M6.5,0 L0,3 L6.5,6 Z"/></marker>
+  </defs>
+
+  <text class="ttl" x="490" y="26" text-anchor="middle">Diamond Core Processor — Internals</text>
+  <rect x="300" y="40" width="10" height="10" rx="2" fill="var(--honey-fill)" stroke="var(--honey)"/>
+  <text class="leg" x="315" y="49">control flow</text>
+  <text class="leg" x="412" y="49">⇢ read / resolve</text>
+  <text class="leg" x="520" y="49">→ write / commit</text>
+  <text class="leg" x="640" y="49">honey = live runtime · steel = the rails</text>
+
+  <!-- ZONES -->
+  <rect class="zone" x="40" y="74" width="900" height="64"/>
+  <rect class="zone" x="40" y="205" width="214" height="360"/>
+  <rect class="zone" x="300" y="170" width="380" height="492"/>
+  <rect class="zone" x="726" y="205" width="214" height="360"/>
+  <text class="zlab" x="52" y="92">MODULE DELIVERY · how a bee gets in</text>
+  <text class="zlab" x="52" y="223">PRIMITIVES</text>
+  <text class="zlab" x="312" y="188">THE PROCESSOR · runtime pulse</text>
+  <text class="zlab" x="738" y="223">STATE &amp; CONTENT</text>
+
+  <!-- DELIVERY -->
+  <g class="dlv">
+    <rect x="101" y="98" width="118" height="38" rx="9"/>
+    <rect x="233" y="98" width="118" height="38" rx="9"/>
+    <rect x="365" y="98" width="118" height="38" rx="9"/>
+    <rect x="497" y="98" width="118" height="38" rx="9"/>
+    <rect x="629" y="98" width="118" height="38" rx="9"/>
+    <rect x="761" y="98" width="118" height="38" rx="9"/>
+  </g>
+  <text class="bt" x="160" y="114" text-anchor="middle" font-size="11.5">Author</text>
+  <text class="bd" x="160" y="128" text-anchor="middle">.ts source</text>
+  <text class="bt" x="292" y="114" text-anchor="middle" font-size="11.5">Compile</text>
+  <text class="bd" x="292" y="128" text-anchor="middle">esbuild-wasm</text>
+  <text class="bt" x="424" y="114" text-anchor="middle" font-size="11.5">Payload</text>
+  <text class="bd" x="424" y="128" text-anchor="middle">BeePayloadV1</text>
+  <text class="bt" x="556" y="114" text-anchor="middle" font-size="11.5">Sign</text>
+  <text class="bd" x="556" y="128" text-anchor="middle">→ signature</text>
+  <text class="bt" x="688" y="114" text-anchor="middle" font-size="11.5">Install</text>
+  <text class="bd" x="688" y="128" text-anchor="middle">→ OPFS pools</text>
+  <text class="bt" x="820" y="114" text-anchor="middle" font-size="11.5">Load</text>
+  <text class="bd" x="820" y="128" text-anchor="middle">import map · IoC</text>
+  <line class="as" x1="219" y1="117" x2="231" y2="117"/>
+  <line class="as" x1="351" y1="117" x2="363" y2="117"/>
+  <line class="as" x1="483" y1="117" x2="495" y2="117"/>
+  <line class="as" x1="615" y1="117" x2="627" y2="117"/>
+  <line class="as" x1="747" y1="117" x2="759" y2="117"/>
+
+  <!-- SPINE -->
+  <g class="sp">
+    <rect x="410" y="188" width="160" height="48" rx="10"/>
+    <rect x="410" y="256" width="160" height="48" rx="10"/>
+    <rect x="410" y="324" width="160" height="48" rx="10"/>
+    <rect x="410" y="392" width="160" height="48" rx="10"/>
+    <rect x="410" y="460" width="160" height="48" rx="10"/>
+    <rect x="410" y="528" width="160" height="48" rx="10"/>
+    <rect x="410" y="596" width="160" height="48" rx="10"/>
+  </g>
+  <text class="bt" x="490" y="208" text-anchor="middle">Intent → grammar</text>
+  <text class="bd" x="490" y="223" text-anchor="middle">input · gesture · nav</text>
+  <text class="bt" x="490" y="276" text-anchor="middle">hypercomb.act()</text>
+  <text class="bd" x="490" y="291" text-anchor="middle">broadcast to bees</text>
+  <text class="bt" x="490" y="344" text-anchor="middle">BeeResolver.find()</text>
+  <text class="bd" x="490" y="359" text-anchor="middle">match relevant bees</text>
+  <text class="bt" x="490" y="412" text-anchor="middle">bee.pulse()</text>
+  <text class="bd" x="490" y="427" text-anchor="middle">sense/ready → act</text>
+  <text class="bt" x="490" y="480" text-anchor="middle">commit</text>
+  <text class="bd" x="490" y="495" text-anchor="middle">queen → committer.update</text>
+  <text class="tag" x="582" y="466">on change</text>
+  <text class="bt" x="490" y="548" text-anchor="middle">synchronize</text>
+  <text class="bd" x="490" y="563" text-anchor="middle">from processor · finally</text>
+  <text class="bt" x="490" y="616" text-anchor="middle">render</text>
+  <text class="bd" x="490" y="631" text-anchor="middle">one coalesced pass</text>
+  <line class="ah" x1="490" y1="236" x2="490" y2="254"/>
+  <line class="ah" x1="490" y1="304" x2="490" y2="322"/>
+  <line class="ah" x1="490" y1="372" x2="490" y2="390"/>
+  <line class="ah" x1="490" y1="440" x2="490" y2="458"/>
+  <line class="ah" x1="490" y1="508" x2="490" y2="526"/>
+  <line class="ah" x1="490" y1="576" x2="490" y2="594"/>
+  <text class="clab" x="490" y="658" text-anchor="middle" fill="var(--honey)">↻ then waits for the next intent</text>
+
+  <!-- LEFT RAIL -->
+  <g class="rail">
+    <rect x="55" y="234" width="184" height="58" rx="10"/>
+    <rect x="55" y="362" width="184" height="58" rx="10"/>
+    <rect x="55" y="490" width="184" height="58" rx="10"/>
+  </g>
+  <text class="bt" x="147" y="258" text-anchor="middle">IoC container</text>
+  <text class="bd" x="147" y="274" text-anchor="middle">register · get — the seam</text>
+  <text class="bt" x="147" y="386" text-anchor="middle">EffectBus</text>
+  <text class="bd" x="147" y="402" text-anchor="middle">emitEffect · onEffect · replay</text>
+  <text class="bt" x="147" y="514" text-anchor="middle">Signatures</text>
+  <text class="bd" x="147" y="530" text-anchor="middle">SignatureService + Store</text>
+
+  <!-- RIGHT RAIL -->
+  <g class="rail">
+    <rect x="741" y="234" width="184" height="58" rx="10"/>
+    <rect x="741" y="362" width="184" height="58" rx="10"/>
+    <rect x="741" y="490" width="184" height="58" rx="10"/>
+  </g>
+  <text class="bt" x="833" y="258" text-anchor="middle">Lineage · cell tree</text>
+  <text class="bd" x="833" y="274" text-anchor="middle">current position (OPFS)</text>
+  <text class="bt" x="833" y="382" text-anchor="middle">Store → OPFS</text>
+  <text class="bd" x="833" y="396" text-anchor="middle">bees·deps·layers·resources</text>
+  <text class="bd" x="833" y="408" text-anchor="middle">+ import map</text>
+  <text class="bt" x="833" y="514" text-anchor="middle">HistoryService</text>
+  <text class="bd" x="833" y="530" text-anchor="middle">merkle layers · commit → root</text>
+
+  <!-- CONNECTORS · left -->
+  <line class="asd" x1="408" y1="346" x2="241" y2="270"/>
+  <text class="clab" x="300" y="300" text-anchor="middle">resolve</text>
+  <line class="asd2" x1="408" y1="416" x2="241" y2="392"/>
+  <text class="clab" x="305" y="420" text-anchor="middle">emit / on</text>
+  <line class="asd" x1="241" y1="512" x2="408" y2="486"/>
+  <text class="clab" x="312" y="512" text-anchor="middle">sign / verify</text>
+
+  <!-- CONNECTORS · right -->
+  <line class="asd" x1="572" y1="416" x2="739" y2="272"/>
+  <text class="clab" x="668" y="332" text-anchor="middle">read cell</text>
+  <line class="as" x1="572" y1="484" x2="739" y2="512"/>
+  <text class="clab" x="660" y="486" text-anchor="middle">1 marker → cascade</text>
+  <line class="asd" x1="739" y1="510" x2="572" y2="612"/>
+  <text class="clab" x="664" y="582" text-anchor="middle">head layer</text>
+  <line class="as" x1="820" y1="138" x2="833" y2="360"/>
+  <text class="clab" x="852" y="250" text-anchor="middle">to runtime</text>
+</svg>

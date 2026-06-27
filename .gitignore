@@ -50,3 +50,9 @@ src/hypercomb-relay/relay.out.log
 src/hypercomb-relay/relay.err.log
 src/hypercomb-relay/relay.out-*
 src/hypercomb-relay/relay.err-*
+
+# Browser user-data dirs created by the ai-inside test drivers. The scripts now
+# launch with --user-data-dir under the OS temp dir, but any stray hidden dir
+# here (legacy .edge-*/.test-profile* profiles, or a future script that forgets)
+# is pure browser scratch — never source/content. Real scripts are not dotfiles.
+src/scripts/ai-inside/.*/
