@@ -192,9 +192,14 @@ class CellSlots {
  * Sigs that don't resolve are dropped silently (the layer was never
  * registered in the cache and isn't on disk anywhere).
  */
+// Memo: child head sig → does that head have children. A child's head sig
+// only changes when the child (or its own children) change, so a stable
+// subtree costs one head-index lookup per render, never a layer reparse.
+const branchByHeadSig = new Map<string, boolean>()
+
 async function resolveChildNames(
   history: HistoryService,
-  _parentSegments: readonly string[],
+  parentSegments: readonly string[],
   _parentDir: FileSystemDirectoryHandle | null,
   content: { children?: string[] } | null,
   parentLayerSig?: string,
@@ -216,6 +221,31 @@ async function resolveChildNames(
   const out = new Set<string>()
   if (stats) { stats.expected = content?.children?.length ?? 0; stats.resolved = 0 }
   if (!content?.children?.length) return out
+
+  // Branch-status (does a child have its OWN children?) must come from the
+  // child's CURRENT head, not the parent's stored child sig — per-page
+  // history leaves that sig stale, so a child that gained grandchildren since
+  // the parent last committed would otherwise show no branch dot. Path-address
+  // each child by name and read its head's children length. branchesOut only
+  // gets fresh adds now; the stale parent-sig derivation is gone.
+  const freshenBranches = async (names: Iterable<string>): Promise<void> => {
+    if (!branchesOut) return
+    await Promise.all([...names].map(async (name) => {
+      try {
+        const childLocSig = await history.sign({ explorerSegments: () => [...parentSegments, name] })
+        const headSig = await history.latestMarkerSigFor(childLocSig, name)
+        if (!headSig) return
+        let hasChildren = branchByHeadSig.get(headSig)
+        if (hasChildren === undefined) {
+          const head = await history.getLayerBySig(headSig)
+          const kids = (head as { children?: unknown } | null)?.children
+          hasChildren = Array.isArray(kids) && kids.length > 0
+          branchByHeadSig.set(headSig, hasChildren)
+        }
+        if (hasChildren) branchesOut.add(name)
+      } catch { /* best-effort — leave the dot off on resolve failure */ }
+    }))
+  }
 
   // Children manifest fast-path. When the parent's sig is known, try
   // __manifests__/<parentSig> — a single file read returns the resolved
@@ -250,17 +280,13 @@ async function resolveChildNames(
         if (entry?.layer?.name) {
           out.add(entry.layer.name)
           resolvedCount++
-          // Branch-status straight from the manifest — the child's `children`
-          // array length. No getLayerBySig, no grandchild load.
-          if (Array.isArray(entry.layer.children) && entry.layer.children.length > 0) {
-            branchesOut?.add(entry.layer.name)
-          }
           if (seed && entry.sig) seed.call(history, entry.sig, entry.layer)
         }
       }
       // Manifest hit only reaches here when manifest.length === children
       // length, so a fully-named manifest IS the complete set.
       if (stats) stats.resolved = resolvedCount
+      await freshenBranches(out)
       return out
     }
   }
@@ -282,9 +308,6 @@ async function resolveChildNames(
     const child = children[__i]
     if (child?.name) {
       out.add(child.name); __resolvedCount++
-      // Branch-status from the child we already loaded to get its name —
-      // one level, no extra load, no grandchildren.
-      if (Array.isArray(child.children) && child.children.length > 0) branchesOut?.add(child.name)
     }
     else __nullSigs.push((content.children[__i] || '').slice(0, 12))
   }
@@ -317,6 +340,7 @@ async function resolveChildNames(
     schedule(() => { void store.writeChildrenManifest!(parentLayerSig, manifest) })
   }
 
+  await freshenBranches(out)
   return out
 }
 

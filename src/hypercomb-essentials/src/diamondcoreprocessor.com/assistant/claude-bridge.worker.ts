@@ -702,14 +702,16 @@ export class ClaudeBridgeWorker extends Worker {
     const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!history) return { id: req.id, ok: false, error: 'HistoryService not available' }
 
-    // Walk the LAYER tree — cells are layer sigs in each layer's `children`
-    // slot (the sigbag model stores no nested cell folders), resolved one hop
-    // at a time via getLayerBySig (same resolver the `inflate` op uses). At
-    // every layer collect its `notes` slot entries: each is a note-layer sig,
-    // i.e. the note's stable content-addressed id. Because ids ARE content
-    // sigs, any add / edit / delete — including a nested sub-note, whose new
-    // sig cascades up into its parent note's id — changes the set, hence the
-    // digest. Children recursion is cycle-guarded by layer sig.
+    // Walk the LAYER tree PATH-ADDRESSED — start at root segments [] and
+    // recurse by child NAME, reading each location's OWN current head via
+    // currentLayerAt. Per-page history retired the leaf→root cascade, so a
+    // parent's stored child sig is a STALE hint: descending by re-resolving
+    // those sigs (getLayerBySig) would read each child's OLD version and miss
+    // deep note edits. Names are immutable, so we resolve the name from the
+    // (possibly stale) sig, then re-sign the child's path for a fresh read.
+    // At every layer collect its `notes` slot entries: each is a note-layer
+    // sig, i.e. the note's stable content-addressed id. Because ids ARE
+    // content sigs, any add / edit / delete changes the set, hence the digest.
     const noteIds = new Set<string>()
     const visited = new Set<string>()
 
@@ -720,21 +722,28 @@ export class ClaudeBridgeWorker extends Worker {
       }
     }
 
-    const walk = async (layer: { notes?: unknown; children?: unknown } | null): Promise<void> => {
+    const walk = async (segments: readonly string[]): Promise<void> => {
+      const locSig = await history.sign({ explorerSegments: () => [...segments] })
+      const layer = await history.currentLayerAt(locSig) as
+        { notes?: unknown; children?: unknown } | null
       if (!layer) return
       collectNotes(layer)
       const children = Array.isArray(layer.children) ? layer.children : []
       for (const childSig of children) {
-        if (typeof childSig !== 'string' || !isSignature(childSig) || visited.has(childSig)) continue
-        visited.add(childSig)
-        const child = await history.getLayerBySig(childSig)
-        await walk(child as { notes?: unknown; children?: unknown } | null)
+        if (typeof childSig !== 'string' || !isSignature(childSig)) continue
+        // Name from the (maybe stale) sig is still correct — names never change.
+        const childLayer = await history.getLayerBySig(childSig)
+        const childName = typeof childLayer?.name === 'string' ? childLayer.name.trim() : ''
+        if (!childName) continue
+        const childPath = [...segments, childName]
+        const key = childPath.join(' ')
+        if (visited.has(key)) continue
+        visited.add(key)
+        await walk(childPath)
       }
     }
 
-    const rootSig = await history.sign({ explorerSegments: () => [] })
-    const root = await history.currentLayerAt(rootSig)
-    await walk(root as { notes?: unknown; children?: unknown } | null)
+    await walk([])
 
     const sorted = [...noteIds].sort()
     const canonical = JSON.stringify(sorted)

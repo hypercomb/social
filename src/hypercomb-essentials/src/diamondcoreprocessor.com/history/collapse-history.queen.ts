@@ -1,9 +1,15 @@
 // diamondcoreprocessor.com/history/collapse-history.queen.ts
 //
 // /collapse-history — dev utility that walks every lineage bag under
-// __history__/ and keeps only the chronologically newest layer entry,
-// soft-deleting the rest into __temporary__/. Also clears persisted
-// cursor positions so every bag snaps to head on the next load.
+// __history__/ and reduces it to THREE canonical states: empty (genesis),
+// unused (the state just before head), and active (head) — soft-deleting
+// everything between into __temporary__/. Also clears persisted cursor
+// positions so every bag snaps to head on the next load.
+//
+// This is the one-time "fresh slate" after the per-page (no-cascade)
+// migration: it strips the accumulated cascade markers the retired
+// leaf→root cascade used to write. Surviving markers keep their original
+// sequence numbers (the chain is reduced, not renumbered).
 //
 // Operates on the current bag-root layout: layer files live directly
 // at __history__/{lineageSig}/{sig}, ordered by file.lastModified.
@@ -24,7 +30,7 @@ export class CollapseHistoryQueenBee extends QueenBee {
   readonly command = 'collapse-history'
   override readonly aliases = ['collapse-histories', 'squash-history']
 
-  override description = 'Delete all non-head history entries across every location (dev utility)'
+  override description = 'Reduce every location history to 3 states — empty/unused/active (dev utility)'
   // Destructive dev utility — keep it out of autocomplete so it can't
   // be triggered by an accidental tab-complete on `/co…`. Still
   // invokable when typed in full.
@@ -52,10 +58,18 @@ export class CollapseHistoryQueenBee extends QueenBee {
       // bag-pollution cleanup before returning, so by the time we
       // see the rows the bag is well-formed.
       const entries = await history.listLayers(lineageSig)
-      if (entries.length <= 1) continue
-      const keep = entries[entries.length - 1]   // newest by mtime
+      if (entries.length <= 3) continue
+      // Keep three canonical states per bag: genesis/empty (oldest),
+      // unused (the state just before head), and active (head). Archive
+      // everything between. Filenames are preserved so the surviving order
+      // (oldest < previous < head) stays intact — we reduce, not renumber.
+      const keep = new Set<string>([
+        entries[0].filename,                     // empty  — genesis
+        entries[entries.length - 2].filename,    // unused — state before head
+        entries[entries.length - 1].filename,    // active — head
+      ])
       const toDelete = entries
-        .filter(e => e.filename !== keep.filename)
+        .filter(e => !keep.has(e.filename))
         .map(e => e.filename)
       removed += await history.archiveEntries(lineageSig, toDelete)
     }
@@ -64,7 +78,7 @@ export class CollapseHistoryQueenBee extends QueenBee {
     let cleared = 0
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const key = localStorage.key(i)
-      if (key?.startsWith('hc:cursor-position:')) {
+      if (key?.startsWith('hc:history-cursor:')) {
         localStorage.removeItem(key)
         cleared++
       }

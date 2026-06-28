@@ -2,10 +2,12 @@
 //
 // Single commit site for history. Listens to user-event triggers
 // (cell:added, cell:removed, slot triggers via LayerSlotRegistry) and
-// runs the unified cascade: per ancestor depth, read the previous
-// head's children, apply a child delta if any, fold every registered
-// slot's value, commit a new marker, propagate the prevSig→newSig
-// swap up to root.
+// commits PER-PAGE: read the leaf bag's current head, apply the request's
+// slot delta, fold the registered slot values, commit one new marker at
+// the leaf. Ancestors are NOT re-committed — the eager leaf→root cascade
+// is retired (see per-page history). A parent's stored child sig is a
+// stale hint; child liveness is resolved on demand from the child's own
+// bag head.
 //
 // One commit path. No disk enumeration. The merkle tree is the source
 // of truth; folders on disk are incidental. Deduplication is automatic
@@ -194,9 +196,7 @@ export class LayerCommitter {
   // dedup then absorbs any redundant identical content. Together
   // they guarantee one commit per distinct state change, no more.
   //
-  // Leaf + ancestors still commit as one atomic #commit() call
-  // inside the machine's #run — each ancestor is a merkle-chain
-  // update cascading up from the leaf.
+  // #commit writes exactly one marker, at the leaf — no ancestor walk.
   readonly #machine = new CommitMachine(req => this.#commit(req))
 
   constructor() {
@@ -507,18 +507,16 @@ export class LayerCommitter {
   }
 
   /**
-   * Multi-position layer-tree commit. Takes many `(segments, layer)` updates
-   * and applies them with a SINGLE shared up-cascade — each affected ancestor
-   * is committed exactly once with the union of changes from its descendants.
+   * Multi-position layer-tree commit — the bulk import / paste / adopt
+   * primitive. Takes many `(segments, layer)` updates and commits each node
+   * plus its DIRECT parent (so a pasted/adopted node lands in its parent's
+   * children slot), deepest-first.
    *
-   * Compared to N individual `update()` calls (each with its own cascade-up-
-   * to-root):
-   *   - root commits once, not N times
-   *   - every shared ancestor commits once
-   *   - total layer files written = |affected paths|, not |updates × depth|
-   *
-   * This is the bulk-import / compaction primitive. The boot-time preloader
-   * walk scales with this count, so collapsing it is the perf-critical fix.
+   * PER-PAGE: like #commit, this does NOT cascade up to root. Ancestors above
+   * the paste/adopt target keep their stale child sigs (resolved live). A deep
+   * paste touches the pasted subtree + the target parent only — root is left
+   * alone, exactly as a normal deep edit is.
+   *   - total layer files written = |updates ∪ their direct parents|
    */
   public importTree = async (
     updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],
@@ -544,12 +542,17 @@ export class LayerCommitter {
       updateByPath.set(encode(segs), { segments: segs, layer: u.layer })
     }
 
-    // Affected paths = every update path AND every ancestor up to root.
+    // Affected paths = every update path AND its DIRECT parent only — never
+    // every ancestor up to root. Linking a pasted/adopted node commits its
+    // immediate parent (whose children slot gains it); the parent's own
+    // ancestors are NOT re-committed (per-page — the leaf→root cascade is
+    // retired). Nodes deeper in the imported subtree already have their
+    // parents in the update set; the shallowest update's direct parent is
+    // the paste/adopt target.
     const affected = new Set<string>()
     for (const u of updateByPath.values()) {
-      for (let d = u.segments.length; d >= 0; d--) {
-        affected.add(encode(u.segments.slice(0, d)))
-      }
+      affected.add(encode(u.segments))
+      if (u.segments.length > 0) affected.add(encode(u.segments.slice(0, -1)))
     }
 
     // Build parent → direct-child paths index for ancestor swap pass.
@@ -755,31 +758,28 @@ export class LayerCommitter {
     const segments = req.segments
 
     // ───────────────────────────────────────────────────────────
-    // Unified cascade — ONE path for every commit type.
+    // Per-page commit — LEAF ONLY. No cascade.
     //
-    // The layer is the source of truth. At each ancestor depth we:
-    //   1. Hydrate a LayerMachine from the bag's current head.
-    //   2. Apply ONE delta:
-    //         LEAF:    the request's slot delta (sig or name-resolved)
-    //         ANCESTOR: swap children sig of the level below (prev →
-    //                   freshly-committed). If the sig isn't found,
-    //                   resolve by name; if still not found, append
-    //                   (orphan auto-attach for legacy cascade gaps).
-    //   3. Output the layer JSON and commit. commitLayer dedups
-    //      identical bytes against the bag's current head — bare
-    //      re-snapshots that change nothing produce no marker.
-    //   4. Track prevSig → newSig for the next ancestor's swap.
+    // We commit exactly the location where the change happened. Ancestors
+    // are NOT re-committed: a parent's stored child sig is left as a stale
+    // hint. The child's NAME stays valid (immutable; there is no rename
+    // op), and any liveness/branch-status is resolved on demand from the
+    // child's OWN bag head — never from the parent's stale sig. This
+    // retires the eager leaf→root cascade (see per-page history): cost is
+    // now one marker at the leaf, not segment-count markers up the spine.
     //
-    // The cascade is slot-agnostic. `children` is just the slot used to
-    // hold the merkle backbone; LayerMachine doesn't know its name.
+    //   1. Hydrate a LayerMachine from the leaf bag's current head.
+    //   2. Apply the request's slot delta (sig or name-resolved).
+    //   3. Output the layer JSON and commit. commitLayer dedups identical
+    //      bytes — a bare re-snapshot that changes nothing writes no marker.
     // ───────────────────────────────────────────────────────────
 
-    let belowOldSig: string | null = null
-    let belowNewSig: string | null = null
-    let belowName: string | null = null
-
-    for (let depth = segments.length; depth >= 0; depth--) {
-      const sub = segments.slice(0, depth)
+    // Single leaf commit. `depth`/`sub` retain the cascade-era names so the
+    // delta + reconcile guards below read unchanged; both are simply the
+    // full leaf path now.
+    {
+      const depth = segments.length
+      const sub = segments
       const ancestorName = depth === 0 ? ROOT_NAME : sub[sub.length - 1]
       const ancestorLocSig = await history.sign({
         domain: lineage.domain,
@@ -790,8 +790,8 @@ export class LayerCommitter {
       const prevLayer = await history.getLayerBySig(prevSig)
       const machine = LayerMachine.fromLayer(prevLayer, ancestorName, sub)
 
-      if (depth === segments.length && req.delta) {
-        // LEAF: apply the request's delta.
+      if (req.delta) {
+        // Apply the request's slot delta at the leaf.
         const d = req.delta
         if (d.kind === 'sig') {
           if (d.op === 'append') {
@@ -856,44 +856,11 @@ export class LayerCommitter {
             machine.apply({ slot, op: 'set', sigs })
           }
         }
-      } else if (belowOldSig !== null && belowNewSig !== null) {
-        // ANCESTOR: swap children sig of the level below.
-        const swapResult = machine.apply({
-          slot: 'children',
-          op: 'swap',
-          from: belowOldSig,
-          to: belowNewSig,
-        })
-        if (!swapResult.changed && belowName) {
-          // sig miss — resolve by name, then retry. If still absent,
-          // auto-attach (the child layer exists, we just committed it).
-          const prevChildren = machine.getSlot('children') as readonly string[]
-          let resolved = false
-          for (const sig of prevChildren) {
-            const child = await history.getLayerBySig(sig)
-            if (child?.name === belowName) {
-              machine.apply({ slot: 'children', op: 'swap', from: sig, to: belowNewSig })
-              resolved = true
-              break
-            }
-          }
-          if (!resolved) {
-            // Auto-attach is legitimate ONLY for lineage-pull (a child
-            // committed whose parent never listed it — create cascades
-            // parents into existence). It must never be silent: a
-            // mis-addressed commit reaching this append is how one
-            // layer's values get grafted into another. The intent-time
-            // address binding upstream should make that impossible;
-            // this log is the tripwire if it ever recurs.
-            console.warn(`[LayerCommitter] auto-attach: appending child "${belowName}" into ancestor at depth ${segments.length} — parent did not list it`)
-            machine.apply({ slot: 'children', op: 'append', sig: belowNewSig })
-          }
-        }
       }
 
-      const newSig = await history.commitLayer(ancestorLocSig, machine.output())
+      await history.commitLayer(ancestorLocSig, machine.output())
 
-      // Slot-machine reconciliation at LEAF depth only. When a commit
+      // Slot-machine reconciliation. When a commit
       // replaces the children slot (e.g. via 'set' or 'layer' deltas,
       // or even when 'name' ops add/remove a child the slot-machine
       // listener didn't already know about), every other tab's
@@ -909,11 +876,7 @@ export class LayerCommitter {
       // fromCascade flag set so the committer's OWN listeners don't
       // re-queue them. Other listeners (show-cell, activity log, the
       // notes pane) process them normally and update their state.
-      //
-      // Done at the LEAF only to keep cascade ancestors quiet — the
-      // ancestor levels are just bumping a single child sig, they
-      // don't carry user-meaningful name changes.
-      if (depth === segments.length && req.delta && (
+      if (req.delta && (
         req.delta.kind === 'set' || req.delta.kind === 'layer' || req.delta.kind === 'name'
       )) {
         try {
@@ -948,9 +911,6 @@ export class LayerCommitter {
         }
       }
 
-      belowOldSig = prevSig
-      belowNewSig = newSig
-      belowName = ancestorName
     }
 
     const cursorAfter = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
