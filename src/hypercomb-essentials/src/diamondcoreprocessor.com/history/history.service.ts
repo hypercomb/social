@@ -178,14 +178,149 @@ export class HistoryService {
     } catch { /* non-DOM context — head persistence is a main-thread-only optimization */ }
   }
 
-  private get historyRoot(): FileSystemDirectoryHandle {
-    const store = get<{ history: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
-    return store!.history
+  /** Legacy `__history__` pool handle, or undefined once it has been GC'd
+   *  (or for a fresh participant). Phase-2 reads fall back to it via
+   *  `bagForRead`; writes promote out of it via `getBag`. */
+  private get historyRoot(): FileSystemDirectoryHandle | undefined {
+    const store = get<{ history?: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
+    return store?.history
   }
 
+  /** Hive root (`__hive__`) — the Phase-2 destination for lineage sigbags.
+   *  Bags relocate here from the legacy `__history__/<lineageSig>/` pool so
+   *  the participant tree is one set of sig-keyed pools at a single root:
+   *  content sig FILES and lineage sigbag DIRS side by side, both 64-hex,
+   *  discriminated by kind (a lineageSig and a content sig never collide —
+   *  different preimages). */
+  private get hiveRoot(): FileSystemDirectoryHandle {
+    const store = get<{ hypercombRoot: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
+    return store!.hypercombRoot
+  }
+
+  /** Resolve a lineage bag for WRITING, Phase-2 **promote-on-write**. The hive
+   *  root is the destination: if the bag is already there, append to it; if it
+   *  still lives in the legacy `__history__` pool, copy the WHOLE bag up first
+   *  (so the ordered NNNN sequence is never split across two locations) and
+   *  append to the hive copy; otherwise create a fresh bag at the hive root.
+   *  Commits are serialized, so no two writers race the same bag, and the copy
+   *  is idempotent (skips entries already present). */
   private readonly getBag = async (signature: string): Promise<FileSystemDirectoryHandle> => {
-    const root = this.historyRoot
-    return await root.getDirectoryHandle(signature, { create: true })
+    try {
+      return await this.hiveRoot.getDirectoryHandle(signature, { create: false })
+    } catch { /* not yet at the hive root */ }
+    let legacy: FileSystemDirectoryHandle | null = null
+    try { legacy = (await this.historyRoot?.getDirectoryHandle(signature, { create: false })) ?? null } catch { /* fresh lineage */ }
+    const hive = await this.hiveRoot.getDirectoryHandle(signature, { create: true })
+    if (legacy) await HistoryService.#copyDirInto(legacy, hive)
+    return hive
+  }
+
+  /** Resolve a lineage bag for READING, Phase-2 root-first: the hive-root
+   *  pool (`__hive__/<lineageSig>`) then the legacy `__history__/<lineageSig>`.
+   *  Promote-on-write keeps every written bag whole in the hive root, so a
+   *  hive hit is always at least as fresh as legacy — no merge needed. Throws
+   *  (like getDirectoryHandle) when the bag is absent in both, so every
+   *  existing try/catch read site is unchanged. */
+  private readonly bagForRead = async (lineageSig: string): Promise<FileSystemDirectoryHandle> => {
+    try {
+      return await this.hiveRoot.getDirectoryHandle(lineageSig, { create: false })
+    } catch {
+      const legacy = this.historyRoot
+      if (!legacy) throw new Error('history bag not found')
+      return await legacy.getDirectoryHandle(lineageSig, { create: false })
+    }
+  }
+
+  /** Recursively copy every file (and subdir, e.g. a bag's `__temporary__`
+   *  archive) from `src` into `dst`, skipping entries already present. Marker
+   *  files (`NNNN`) within one lineage bag are positional and identical
+   *  between the two copies; archived layers are sig-named. So "already
+   *  present" means "identical bytes", making the copy idempotent and safe to
+   *  re-run — it never overwrites a fresher hive marker with an older one. */
+  static readonly #copyDirInto = async (
+    src: FileSystemDirectoryHandle,
+    dst: FileSystemDirectoryHandle,
+  ): Promise<void> => {
+    for await (const [name, handle] of (src as any).entries()) {
+      if (handle.kind === 'directory') {
+        const subDst = await dst.getDirectoryHandle(name, { create: true })
+        await HistoryService.#copyDirInto(handle as FileSystemDirectoryHandle, subDst)
+        continue
+      }
+      try { await dst.getFileHandle(name, { create: false }); continue } catch { /* absent — copy it */ }
+      try {
+        const bytes = await (await (handle as FileSystemFileHandle).getFile()).arrayBuffer()
+        const out = await dst.getFileHandle(name, { create: true })
+        const w = await out.createWritable()
+        try { await w.write(bytes) } finally { await w.close() }
+      } catch { /* best-effort per entry */ }
+    }
+  }
+
+  /** Every lineage bag across both pools, hive root preferred. A promoted bag
+   *  exists in both; the hive copy is authoritative (promote-on-write keeps it
+   *  current), so it's yielded once. At the hive root only 64-hex DIRECTORIES
+   *  are bags — Phase-1 content sig FILES are skipped. */
+  private readonly enumerateBags = async (): Promise<Map<string, FileSystemDirectoryHandle>> => {
+    const bags = new Map<string, FileSystemDirectoryHandle>()
+    const scan = async (root: FileSystemDirectoryHandle | undefined): Promise<void> => {
+      if (!root) return
+      try {
+        for await (const [name, handle] of (root as any).entries()) {
+          if (handle.kind !== 'directory') continue
+          if (!HistoryService.#SIG_RE.test(name)) continue
+          if (!bags.has(name)) bags.set(name, handle as FileSystemDirectoryHandle)
+        }
+      } catch { /* root unreadable — skip */ }
+    }
+    await scan(this.hiveRoot)       // authoritative for promoted bags
+    await scan(this.historyRoot)    // legacy fallback for not-yet-promoted bags
+    return bags
+  }
+
+  /** MANUAL Phase-2 GC — the single destructive step on NEVER-WIPE history.
+   *  Copies every remaining legacy `__history__/<lineageSig>` bag WHOLE into
+   *  the hive root (idempotent; promote-on-write has already moved the active
+   *  ones), and only once EVERY legacy bag is confirmed shadowed at the hive
+   *  root does it remove `__history__` entirely. Never auto-runs — invoked
+   *  explicitly (e.g. via a slash command / bridge). Returns a report; leaves
+   *  `__history__` in place on any copy failure or unverified bag. */
+  public readonly gcLegacyHistory = async (): Promise<{ bags: number; copied: number; removed: boolean }> => {
+    const legacyRoot = this.historyRoot
+    if (!legacyRoot) return { bags: 0, copied: 0, removed: true }  // already gone (or fresh participant)
+    const legacySigs: string[] = []
+    let copied = 0
+    try {
+      for await (const [name, handle] of (legacyRoot as any).entries()) {
+        if (handle.kind !== 'directory') continue
+        if (!HistoryService.#SIG_RE.test(name)) continue
+        legacySigs.push(name)
+        const hive = await this.hiveRoot.getDirectoryHandle(name, { create: true })
+        await HistoryService.#copyDirInto(handle as FileSystemDirectoryHandle, hive)
+        copied++
+      }
+    } catch (err) {
+      console.warn('[history] gcLegacyHistory: scan/copy failed — __history__ left in place', err)
+      return { bags: legacySigs.length, copied, removed: false }
+    }
+    // Gate: every legacy bag must be present at the hive root before removal.
+    for (const sig of legacySigs) {
+      try { await this.hiveRoot.getDirectoryHandle(sig, { create: false }) }
+      catch {
+        console.warn(`[history] gcLegacyHistory: bag ${sig.slice(0, 12)} not shadowed — __history__ retained`)
+        return { bags: legacySigs.length, copied, removed: false }
+      }
+    }
+    const store = get<{ opfsRoot?: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
+    if (!store?.opfsRoot) return { bags: legacySigs.length, copied, removed: false }
+    try {
+      await store.opfsRoot.removeEntry('__history__', { recursive: true })
+      console.log(`[history] gcLegacyHistory: ${legacySigs.length} bags shadowed at hive root — __history__ removed`)
+      return { bags: legacySigs.length, copied, removed: true }
+    } catch (err) {
+      console.warn('[history] gcLegacyHistory: removeEntry(__history__) failed — left in place', err)
+      return { bags: legacySigs.length, copied, removed: false }
+    }
   }
 
   /**
@@ -258,11 +393,9 @@ export class HistoryService {
       if (cached) return cached
     }
 
-    const root = this.historyRoot
-
     let bag: FileSystemDirectoryHandle
     try {
-      bag = await root.getDirectoryHandle(signature, { create: false })
+      bag = await this.bagForRead(signature)
     } catch {
       if (upTo === undefined) this.#replayCache.set(signature, [])
       return []
@@ -297,21 +430,18 @@ export class HistoryService {
   }
 
   /**
-   * List all signature bags in __history__/.
+   * List all lineage bags (hive root + legacy `__history__`, deduped).
    */
   public readonly list = async (): Promise<{ signature: string; count: number }[]> => {
-    const root = this.historyRoot
     const result: { signature: string; count: number }[] = []
+    const bags = await this.enumerateBags()
 
-    for await (const [name, handle] of root.entries()) {
-      if (handle.kind !== 'directory') continue
-
+    for (const [signature, handle] of bags) {
       let count = 0
-      for await (const [, child] of (handle as FileSystemDirectoryHandle).entries()) {
+      for await (const [, child] of (handle as any).entries()) {
         if (child.kind === 'file') count++
       }
-
-      result.push({ signature: name, count })
+      result.push({ signature, count })
     }
 
     return result
@@ -321,11 +451,9 @@ export class HistoryService {
    * Return the latest operation index and contents for a given bag.
    */
   public readonly head = async (signature: string): Promise<{ index: number; op: HistoryOp } | null> => {
-    const root = this.historyRoot
-
     let bag: FileSystemDirectoryHandle
     try {
-      bag = await root.getDirectoryHandle(signature, { create: false })
+      bag = await this.bagForRead(signature)
     } catch {
       return null
     }
@@ -361,7 +489,7 @@ export class HistoryService {
 
   public readonly getLayer = async (signature: string): Promise<LayerState> => {
     try {
-      const bag = await this.historyRoot.getDirectoryHandle(signature, { create: false })
+      const bag = await this.bagForRead(signature)
       const handle = await bag.getFileHandle(HistoryService.#LAYER_FILE)
       const file = await handle.getFile()
       const text = await file.text()
@@ -714,7 +842,7 @@ export class HistoryService {
     if (cached && this.#preloaderCache.has(cached)) return cached
 
     // Ensure a bag exists so we always have a real `00000000` to hash.
-    const bag = await this.historyRoot.getDirectoryHandle(lineageSig, { create: true })
+    const bag = await this.getBag(lineageSig)
 
     let latestName = ''
     for await (const [entryName, handle] of (bag as any).entries()) {
@@ -845,7 +973,7 @@ export class HistoryService {
   ): Promise<readonly string[]> => {
     let bag: FileSystemDirectoryHandle
     try {
-      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+      bag = await this.bagForRead(locationSig)
     } catch {
       return []
     }
@@ -873,7 +1001,7 @@ export class HistoryService {
   ): Promise<{ bytes: ArrayBuffer; parsed: LayerContent | null; layerSig: string; at: number; rawText: string } | null> => {
     let bag: FileSystemDirectoryHandle
     try {
-      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+      bag = await this.bagForRead(locationSig)
     } catch {
       return null
     }
@@ -937,7 +1065,7 @@ export class HistoryService {
     // which calls #quarantineNonLayerFiles via a dedicated path.
     let bag: FileSystemDirectoryHandle
     try {
-      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+      bag = await this.bagForRead(locationSig)
     } catch {
       return []
     }
@@ -1060,7 +1188,7 @@ export class HistoryService {
     //    against a pointer record's layer-hash by accident.
     let bag: FileSystemDirectoryHandle
     try {
-      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+      bag = await this.bagForRead(locationSig)
     } catch { return null }
 
     const cacheMap = this.#markerBytesCache.get(locationSig)
@@ -1408,10 +1536,9 @@ export class HistoryService {
    * THROWS so the caller can fall back to the store-ready-polling preload.
    */
   readonly #warmLineageHead = async (lineageSig: string): Promise<void> => {
-    const root = this.historyRoot
     let bag: FileSystemDirectoryHandle
     try {
-      bag = await root.getDirectoryHandle(lineageSig, { create: false })
+      bag = await this.bagForRead(lineageSig)
     } catch { return }
     let latestName = ''
     for await (const [name, handle] of (bag as any).entries()) {
@@ -1521,7 +1648,7 @@ export class HistoryService {
     // a session running without persistent storage).
     this.#preloadAllBagsPromise = (async () => {
       const rootStore = get<{
-        history?: FileSystemDirectoryHandle
+        hypercombRoot?: FileSystemDirectoryHandle
         initialize?: () => Promise<void>
         opfsAvailable?: boolean
       }>('@hypercomb.social/Store')
@@ -1532,23 +1659,27 @@ export class HistoryService {
       // briefly and retry — bounded so we don't spin forever.
       let store = rootStore
       let polls = 0
-      while ((!store?.initialize || !store?.history) && polls < 50) {
+      // Readiness keys off `hypercombRoot` (always create:true), NOT
+      // `history` — the legacy `__history__` pool is now optional (Phase-2)
+      // and absent for fresh participants / after gcLegacyHistory, but the
+      // hive root is the OPFS-ready signal and the bag scan spans both pools.
+      while ((!store?.initialize || !store?.hypercombRoot) && polls < 50) {
         if (store?.initialize) await store.initialize()
-        if (store?.history) break
+        if (store?.hypercombRoot) break
         await new Promise(r => setTimeout(r, 100))
         store = get<{
-          history?: FileSystemDirectoryHandle
+          hypercombRoot?: FileSystemDirectoryHandle
           initialize?: () => Promise<void>
           opfsAvailable?: boolean
         }>('@hypercomb.social/Store')
         polls++
       }
-      const root = store?.history
+      const root = store?.hypercombRoot
       if (!root) {
         // OPFS unavailable for the whole session (Store gave up). Leave
         // the preloader cache empty — currentLayerAt returns null for
         // every location, which is correct for a no-persistence run.
-        console.warn('[preload] preloadAllBags: Store.history never became ready; running with empty cache')
+        console.warn('[preload] preloadAllBags: Store never became ready; running with empty cache')
         return
       }
 
@@ -1572,9 +1703,11 @@ export class HistoryService {
         sliceStart = performance.now()
       }
 
-      for await (const [lineageSig, dirHandle] of (root as any).entries()) {
-        if (dirHandle.kind !== 'directory') continue
-        if (!HistoryService.#SIG_RE.test(lineageSig)) continue
+      // Union of hive-root bags (promoted) and legacy `__history__` bags,
+      // deduped (hive authoritative). `root` was only needed to gate on Store
+      // readiness above; the scan itself spans both pools.
+      const bags = await this.enumerateBags()
+      for (const [lineageSig, dirHandle] of bags) {
         await yieldIfDue()
         bagCount++
         const bag = dirHandle as FileSystemDirectoryHandle
@@ -1773,7 +1906,7 @@ export class HistoryService {
     this.#scheduleHeadPersist()
     let bag: FileSystemDirectoryHandle
     try {
-      bag = await this.historyRoot.getDirectoryHandle(lineageSig, { create: false })
+      bag = await this.bagForRead(lineageSig)
     } catch { return }
     let latestName = ''
     let latestSig = ''
@@ -1838,7 +1971,7 @@ export class HistoryService {
   ): Promise<void> => {
     let bag: FileSystemDirectoryHandle
     try {
-      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+      bag = await this.bagForRead(locationSig)
     } catch { return }
 
     const drop: string[] = []
@@ -1934,7 +2067,7 @@ export class HistoryService {
     if (filenames.length === 0) return 0
     let bag: FileSystemDirectoryHandle
     try {
-      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+      bag = await this.bagForRead(locationSig)
     } catch { return 0 }
 
     let removed = 0
@@ -1977,7 +2110,7 @@ export class HistoryService {
     if (filenames.length === 0) return 0
     let bag: FileSystemDirectoryHandle
     try {
-      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+      bag = await this.bagForRead(locationSig)
     } catch { return 0 }
 
     const archive = await bag.getDirectoryHandle('__temporary__', { create: true })
@@ -2155,7 +2288,7 @@ export class HistoryService {
     if (!HistoryService.#MARKER_RE.test(filename)) return
     let bag: FileSystemDirectoryHandle
     try {
-      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+      bag = await this.bagForRead(locationSig)
     } catch { return }
     let handle: FileSystemFileHandle
     try {
@@ -2210,11 +2343,9 @@ export class HistoryService {
     path: string[] | null
     at: number
   }>> => {
-    const root = this.historyRoot
     const out: Array<{ locationSig: string; filename: string; label: string | null; path: string[] | null; at: number }> = []
-    for await (const [lineageSig, dirHandle] of (root as any).entries()) {
-      if (dirHandle.kind !== 'directory') continue
-      if (!HistoryService.#SIG_RE.test(lineageSig)) continue
+    const bags = await this.enumerateBags()
+    for (const [lineageSig, dirHandle] of bags) {
       const bag = dirHandle as FileSystemDirectoryHandle
       for await (const [name, handle] of (bag as any).entries()) {
         if (handle.kind !== 'file') continue
@@ -2315,7 +2446,7 @@ export class HistoryService {
   ): Promise<Array<{ sig: string; at: number; filename: string }>> => {
     let bag: FileSystemDirectoryHandle
     try {
-      bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+      bag = await this.bagForRead(locationSig)
     } catch {
       return []
     }
@@ -2349,7 +2480,7 @@ export class HistoryService {
     sig: string,
   ): Promise<DeltaRecord | null> => {
     try {
-      const bag = await this.historyRoot.getDirectoryHandle(locationSig, { create: false })
+      const bag = await this.bagForRead(locationSig)
       const handle = await bag.getFileHandle(sig, { create: false })
       const file = await handle.getFile()
       const text = await file.text()

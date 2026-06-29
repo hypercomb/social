@@ -78,10 +78,27 @@ export class Store extends EventTarget {
   public hypercombRoot!: FileSystemDirectoryHandle
   public bees!: FileSystemDirectoryHandle
   public dependencies!: FileSystemDirectoryHandle
-  public layers!: FileSystemDirectoryHandle
-  public resources!: FileSystemDirectoryHandle
+  /** Legacy layer pool — Phase-1b migration SOURCE only, same lifecycle as
+   *  `resources` below. Participant commits and the install/sentinel path
+   *  now write layer bytes to the flat hive root (`__hive__/<sig>`); opened
+   *  WITHOUT `create` so it stays gone after the relocation GC. May retain
+   *  stale per-domain subdirs that defer its GC until a reinstall purges
+   *  them. Undefined post-migration / for fresh participants. */
+  public layers?: FileSystemDirectoryHandle
+  /** Legacy resource pool — Phase-1b migration SOURCE only. New resource
+   *  bytes write to the flat hive root (`__hive__/<sig>`); this is opened
+   *  WITHOUT `create` so that once the relocation GC removes it, it stays
+   *  gone instead of reappearing empty each boot. Undefined post-migration
+   *  (and for fresh participants) — readers skip it (see `#readContentFile`). */
+  public resources?: FileSystemDirectoryHandle
   public clipboard!: FileSystemDirectoryHandle
-  public history!: FileSystemDirectoryHandle
+  /** Legacy history pool — Phase-2 migration SOURCE only. Lineage sigbags now
+   *  live at the hive root (`__hive__/<lineageSig>/`); this is opened WITHOUT
+   *  create so that once `gcLegacyHistory` relocates the remaining bags and
+   *  removes it, it stays gone. Undefined post-migration / for fresh
+   *  participants — history reads fall through to the hive root, and the
+   *  preload readiness gate keys off `hypercombRoot`, not this. */
+  public history?: FileSystemDirectoryHandle
   public threads!: FileSystemDirectoryHandle
   public computation!: FileSystemDirectoryHandle
   public optimized!: FileSystemDirectoryHandle
@@ -126,10 +143,7 @@ export class Store extends EventTarget {
         this.hypercombRoot,
         this.bees,
         this.dependencies,
-        this.layers,
-        this.resources,
         this.clipboard,
-        this.history,
         this.threads,
         this.computation,
         this.optimized,
@@ -147,20 +161,44 @@ export class Store extends EventTarget {
         dir(Store.HIVE_DIRECTORY),
         dir(Store.BEES_DIRECTORY),
         dir(Store.DEPENDENCIES_DIRECTORY),
-        dir(Store.LAYERS_DIRECTORY),
-        dir(Store.RESOURCES_DIRECTORY),
         dir(Store.CLIPBOARD_DIRECTORY),
-        dir(Store.HISTORY_DIRECTORY),
         dir(Store.THREADS_DIRECTORY),
         dir(Store.COMPUTATION_DIRECTORY),
         dir(Store.OPTIMIZED_DIRECTORY),
         dir(Store.MANIFESTS_DIRECTORY),
         dir(Store.OPTIMIZATION_DIRECTORY),
       ])
+      // `__layers__`, `__resources__` (Phase-1b) and `__history__` (Phase-2)
+      // are migration SOURCES — opened WITHOUT create so that once their
+      // contents relocate to the hive root and the GC removes them, they stay
+      // gone (a create:true here would resurrect them empty every boot).
+      // Absent → undefined; the content resolver/mover, the history
+      // dual-resolver, and the install path all tolerate that. Each gets its
+      // own try/catch so an expected-absent miss never trips the outer "init
+      // failed" path above.
+      try {
+        this.layers = await this.opfsRoot.getDirectoryHandle(Store.LAYERS_DIRECTORY)
+      } catch {
+        this.layers = undefined
+      }
+      try {
+        this.resources = await this.opfsRoot.getDirectoryHandle(Store.RESOURCES_DIRECTORY)
+      } catch {
+        this.resources = undefined
+      }
+      try {
+        this.history = await this.opfsRoot.getDirectoryHandle(Store.HISTORY_DIRECTORY)
+      } catch {
+        this.history = undefined
+      }
     } catch (err) {
       console.warn('[store] OPFS subdirectory init failed — running without persistent storage', err)
       this.#opfsAvailable = false
     }
+    // Fire-and-forget content-pool relocation (root migration). Idempotent
+    // and resumable; never blocks boot — reads stay correct via the legacy
+    // fallback (see `#readContentFile`) the whole time it runs.
+    if (this.#opfsAvailable) void this.migrateContentPoolToRoot()
   }
 
   // `domainLayersDirectory` removed: `__layers__/` has no subdirectories.
@@ -335,7 +373,11 @@ export class Store extends EventTarget {
     // the tile renders blank with no indication why. Skipping the
     // rewrite keeps cached Blobs valid for their lifetime.
     try {
-      const existing = await this.resources.getFileHandle(signature)
+      // Phase-1b: resources write to the flat hive root (`__hive__/<sig>`),
+      // not the legacy `__resources__` pool. The existence/complete check
+      // below targets the same root file we'll write, so the cached-Blob and
+      // 0-byte-corruption guarantees still hold for the canonical location.
+      const existing = await this.hypercombRoot.getFileHandle(signature)
       // "Exists" must also mean "complete". getFileHandle({create:true})
       // below creates a 0-byte target BEFORE the write; if the write/close
       // is interrupted (reload, crash, navigation — the lingering .crswap
@@ -356,7 +398,7 @@ export class Store extends EventTarget {
         return signature
       }
     } catch { /* fall through and create */ }
-    const handle = await this.resources.getFileHandle(signature, { create: true })
+    const handle = await this.hypercombRoot.getFileHandle(signature, { create: true })
     const writable = await handle.createWritable()
     try {
       await writable.write(blob)
@@ -718,13 +760,42 @@ export class Store extends EventTarget {
     return out
   }
 
+  /** Resolve a content signature to its File, trying the flat root pool
+   *  (`__hive__/<sig>`) first, then the legacy typed dir. Phase 1 of the
+   *  content-pool-to-root migration: new bytes land at the hive root, and
+   *  the relocation pass moves pre-migration bytes up before the typed dir
+   *  is GC'd — until then they still resolve from there. Content-addressed,
+   *  so a root hit is provably the same bytes as the legacy entry: the
+   *  order is pure preference, never correctness. A sig is a 64-hex file
+   *  name; scope subfolders are named by path, so a sig never collides with
+   *  (or is shadowed by) a directory at the root. Returns null if absent in
+   *  both. */
+  #readContentFile = async (
+    signature: string,
+    legacy: FileSystemDirectoryHandle | undefined,
+  ): Promise<File | null> => {
+    if (this.hypercombRoot) {
+      try {
+        const handle = await this.hypercombRoot.getFileHandle(signature, { create: false })
+        return await handle.getFile()
+      } catch { /* not relocated to the root yet — fall back to the typed pool */ }
+    }
+    if (legacy) {
+      try {
+        const handle = await legacy.getFileHandle(signature, { create: false })
+        return await handle.getFile()
+      } catch { /* miss in the legacy pool too */ }
+    }
+    return null
+  }
+
   #loadResource = (signature: string): Promise<Blob | null> => {
     const existing = this.#resourcePending.get(signature)
     if (existing) return existing
     const promise = (async () => {
       try {
-        const handle = await this.resources.getFileHandle(signature)
-        const file = await handle.getFile()
+        const file = await this.#readContentFile(signature, this.resources)
+        if (!file) return null
         // A 0-byte file under a non-empty sig is a corrupt/interrupted
         // write (see putResource — getFileHandle({create:true}) lands a
         // 0-byte target before the write completes). A raw Blob of size 0
@@ -796,16 +867,16 @@ export class Store extends EventTarget {
     }
   }
 
-  /** Read bytes from the sig-keyed layer pool at `__layers__/<sig>`.
-   *  Single direct file read; absent → null. The pool is content-
-   *  addressed: sig === hash(bytes), so an entry can never be stale,
-   *  only present or absent. Markers in `__history__/<lineage>/<NNNN>`
-   *  reference into this pool. */
+  /** Read layer bytes by signature, root-first: the flat hive-root pool
+   *  (`__hive__/<sig>`) then the legacy `__layers__/<sig>` pool (see
+   *  `#readContentFile`). Absent in both → null. Content-addressed:
+   *  sig === hash(bytes), so an entry can never be stale, only present or
+   *  absent, and which pool serves it is immaterial. Markers in
+   *  `__history__/<lineage>/<NNNN>` reference into this content. */
   public getLayerPoolBytes = async (signature: string): Promise<Uint8Array | null> => {
-    if (!this.layers) return null
     try {
-      const handle = await this.layers.getFileHandle(signature, { create: false })
-      const file = await handle.getFile()
+      const file = await this.#readContentFile(signature, this.layers)
+      if (!file) return null
       const bytes = new Uint8Array(await file.arrayBuffer())
       // The warmup/preloader reads layers through the pool directly (not via
       // getLayerBytes), so without this the author only pushed the branches it
@@ -821,12 +892,103 @@ export class Store extends EventTarget {
    *  identical bytes). Best-effort; the marker is the canonical
    *  reference, the pool entry is its resolved content. */
   public writeLayerBytes = async (signature: string, bytes: ArrayBuffer): Promise<void> => {
-    if (!this.layers) return
+    // Phase-1b: participant-authored layer commits write to the flat hive
+    // root (`__hive__/<sig>`). The install/sentinel path still writes the
+    // legacy `__layers__` pool, so that pool's GC defers until it too is
+    // redirected — both locations resolve (root-first) in the meantime.
+    if (!this.hypercombRoot) return
     try {
-      const handle = await this.layers.getFileHandle(signature, { create: true })
+      const handle = await this.hypercombRoot.getFileHandle(signature, { create: true })
       const writable = await handle.createWritable()
       try { await writable.write(bytes) } finally { await writable.close() }
     } catch { /* best-effort */ }
+  }
+
+  /** Phase-1b relocation: copy every sig-named file from the legacy typed
+   *  content pools (`__resources__`, `__layers__`) up to the flat hive root
+   *  (`__hive__/<sig>`), then GC a source pool once every sig it holds is
+   *  confirmed at the root AND it holds nothing else. Idempotent and
+   *  resumable: a sig already at the root is skipped (content-addressed —
+   *  identical bytes), so a re-run just finishes a partial pass. NEVER
+   *  deletes a source entry individually and NEVER removes a pool that still
+   *  holds an un-shadowed or non-relocatable entry — the only safe gate on
+   *  user data. `__layers__` keeps a live install/sync writer plus per-domain
+   *  manifest subdirs, so its GC legitimately defers; the copy still runs so
+   *  reads resolve root-first. Best-effort throughout — never throws
+   *  (invoked fire-and-forget from `#doInit`). */
+  public migrateContentPoolToRoot = async (): Promise<void> => {
+    if (!this.hypercombRoot) return
+    try {
+      if (await this.#relocatePool(this.resources, Store.RESOURCES_DIRECTORY)) {
+        // Pool removed — drop the stale handle so this session can't write
+        // through it and resurrect the dir.
+        this.resources = undefined
+      }
+      if (await this.#relocatePool(this.layers, Store.LAYERS_DIRECTORY)) {
+        this.layers = undefined
+      }
+    } catch (err) {
+      console.warn('[store] content-pool relocation aborted', err)
+    }
+  }
+
+  /** Copy one legacy pool's sig files to the hive root; GC the pool when it
+   *  is fully shadowed and otherwise empty. Returns true iff removed. */
+  #relocatePool = async (
+    source: FileSystemDirectoryHandle | undefined,
+    poolName: string,
+  ): Promise<boolean> => {
+    if (!source || !this.hypercombRoot) return false
+    let sigTotal = 0
+    let shadowed = 0
+    let copied = 0
+    let unrelocatable = 0
+    try {
+      for await (const [name, handle] of (source as any).entries()) {
+        // Skip subdirectories (bag dirs, per-domain manifests) and any
+        // non-sig file (.crswap temp, stray artifacts): not ours to move,
+        // and their presence defers the pool's GC.
+        if (handle.kind !== 'file' || !isSignature(name)) { unrelocatable++; continue }
+        sigTotal++
+        try {
+          await this.hypercombRoot.getFileHandle(name, { create: false })
+          shadowed++
+          continue  // already at root — identical bytes by construction
+        } catch { /* not at root yet — copy it up */ }
+        try {
+          const file = await (handle as FileSystemFileHandle).getFile()
+          const bytes = await file.arrayBuffer()
+          const dest = await this.hypercombRoot.getFileHandle(name, { create: true })
+          const writable = await dest.createWritable()
+          try { await writable.write(bytes) } finally { await writable.close() }
+          shadowed++
+          copied++
+        } catch (err) {
+          console.warn(`[store] relocate ${poolName}/${name.slice(0, 12)} → root failed`, err)
+        }
+      }
+    } catch (err) {
+      console.warn(`[store] relocate scan of ${poolName} failed — pool left in place`, err)
+      return false
+    }
+    // Gated GC: remove the pool ONLY when every sig it holds is now at the
+    // root and it holds no non-sig entries. A single un-shadowed or
+    // unrelocatable entry defers deletion to a later boot — never ahead of
+    // confirmation. This is the never-wipe guard for the content pools.
+    if (sigTotal > 0 && shadowed === sigTotal && unrelocatable === 0) {
+      try {
+        await this.opfsRoot.removeEntry(poolName, { recursive: true })
+        console.log(`[store] ${poolName}: ${sigTotal} sigs relocated to hive root — pool removed`)
+        return true
+      } catch (err) {
+        console.warn(`[store] ${poolName} GC failed — pool left in place`, err)
+        return false
+      }
+    }
+    if (sigTotal > 0 || copied > 0) {
+      console.log(`[store] ${poolName}: ${shadowed}/${sigTotal} at root (${copied} copied this pass), ${unrelocatable} non-sig retained — pool kept`)
+    }
+    return false
   }
 
   /** Legacy alias for `getLayerPoolBytes` against `__optimized__/<sig>`.

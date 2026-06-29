@@ -30,7 +30,7 @@ content-addressing alone gives you a bag of hashed blobs. it is the **merkle ver
 | gene / strand | a **layer** (functional unit) | layer references bees, deps, resources, child layers by sig |
 | **genome** | recursive **merkle root** over a subtree | the root lineage's head layer sig — see [genome-primitive.md](genome-primitive.md) |
 | mutation | content change → new signature | immutability doctrine |
-| inheritance / lineage | the lineage-pull **cascade** | `LayerCommitter` re-signs ancestors, one new layer+marker per level, O(depth) |
+| inheritance / lineage | merkle composition, resolved lazily | a subtree's root is `f(child sigs)`. commit is **leaf-only** — `LayerCommitter` writes one marker at the edited node, not one per ancestor; ancestor roots recompute on read (the eager O(depth) leaf→root commit cascade is retired) |
 | replication | content-addressed **dedup** + mesh distribution | identical subtree → identical sig → stored once, shared by reference |
 
 the genome is dna-of-a-subtree: because each parent's `children[]` slot holds its children's current layer signatures and the parent re-signs, the root layer signature is effectively the recursive merkle root of the whole tree. *same genome = same subtree = nothing underneath changed.*
@@ -69,7 +69,7 @@ dna is signed with **SHA-256 over raw bytes**. the live build does **not** use s
 ## merkle composition & the cascade
 
 - a parent layer's `children[]` (the `cells` array in DCP package layers) holds child **layer signatures in insertion / slot order** — **not** lexicographically sorted.
-- on any change, the parent re-signs; the new layer+marker cascades to the root, **one per ancestor** (`LayerCommitter` walks depth `segments..0`, O(depth)).
+- on any change, **commit is leaf-only**: `LayerCommitter` writes one marker at the edited node and does **not** re-commit ancestors. a parent's stored child sig is left as a stale hint; a lineage's current root is resolved on demand from its **own** bag head. the merkle relationship still holds — a subtree's root is `f(child sigs)` — but it is recomputed **lazily on read**, not materialized eagerly up the spine. (the earlier eager leaf→root commit cascade — `O(depth)` markers per change, `LayerCommitter` walking `segments..0` — is retired; its handlers survive only to migrate pre-existing history.)
 - a **package**'s identity is its **`rootLayerSig`** — the merkle root of its layer tree. the `label` / `previous` / `at` fields are **sidecar metadata** that change `manifest.json`'s bytes but are *not* part of the package signature.
 - update detection between two versions is therefore an **O(1) root-sig compare**, not a tree walk.
 

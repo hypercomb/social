@@ -35,10 +35,12 @@ export class LayerGraphResolver {
 
     if (!this.isSignature(signature)) return null
 
-    // Single flat layer pool — domain has no effect on storage location.
-    // `domain` parameter kept for caller-API back-compat but unused here.
+    // Single flat layer pool at the hive root (Phase-1b) — domain has no
+    // effect on storage location. `domain` kept for caller-API back-compat
+    // but unused here. A not-yet-relocated legacy layer simply re-fetches
+    // from `location` and caches to the root (see fetchLayerJson).
     void domain
-    const layersDir = this.store.layers
+    const layersDir = this.store.hypercombRoot
 
     const result = await this.getLayerJsonText(layersDir, location, signature)
     if (!result.content) return null

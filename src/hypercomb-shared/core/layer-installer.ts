@@ -17,11 +17,12 @@ export class LayerInstaller {
 
     const store = get('@hypercomb.social/Store') as Store
 
-    // Layers go directly into the canonical `__layers__/<sig>` pool — no
-    // per-domain partition. The install pipeline is literally xcopy: the
-    // host serves flat sig-keyed files; the installer copies them flat
-    // into OPFS. Resume is by pool presence (no install-cache file).
-    const layersDir = store.layers
+    // Layers go directly into the flat hive-root pool (`__hive__/<sig>`,
+    // Phase-1b) — no per-domain partition, no legacy `__layers__` dir. The
+    // install pipeline is literally xcopy: the host serves flat sig-keyed
+    // files; the installer copies them flat into OPFS. Resume is by pool
+    // presence (no install-cache file).
+    const layersDir = store.hypercombRoot
 
     // 1) fetch content manifest and resolve the package by signature
     const manifest = await this.#fetchPackage(baseUrl, packageSig)

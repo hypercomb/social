@@ -448,8 +448,9 @@ This means:
 - **Behaviors are portable.** A signed bee artifact can be fetched from any
   trusted domain and verified by its hash.
 - **Content-addressed install is flat.** The runtime installer writes flat,
-  signature-keyed pools (`__bees__/<sig>`, `__dependencies__/<sig>`,
-  `__layers__/<sig>` — no extension, no domain prefix); because the signature is
+  signature-keyed content — layers to the hive root (`__hive__/<sig>`), modules
+  to `__bees__/<sig>` and `__dependencies__/<sig>` (no extension, no domain
+  prefix); because the signature is
   the content, identical artifacts dedup regardless of which domain served them.
   Per-domain folders exist only on the **DCP installer** side
   (`dcp/domain.com/`), which tracks adoption per domain; the web shell's runtime

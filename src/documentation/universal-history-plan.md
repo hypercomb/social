@@ -1,6 +1,6 @@
 # Universal History — The Complete Undo/Redo Plan
 
-> **status: partially built (as of 2026-06-18).** The layer-marker / cascade core and the per-location cursor are shipped; the global cross-hierarchy time clock and the per-op-type universals (markers, full divergence) are **design — not built**. Section headers below mark which is which.
+> **status: partially built (as of 2026-06-18).** The layer-marker core (per-page **leaf-only** commit) and the per-location cursor are shipped; the global cross-hierarchy time clock and the per-op-type universals (markers, full divergence) are **design — not built**. Section headers below mark which is which.
 
 > **Goal**: Every trackable change within the hive is captured as an append-only layer commit. The head layer's slots are the current state. A global time clock is *intended* to let you set any timestamp and navigate the entire hierarchy seeing a coherent snapshot at that moment — an omniscient debugger, a microscope into any point in time.
 
@@ -33,13 +33,13 @@ When you rewind the clock to any timestamp and then navigate through the hive, e
 
 ## Current State
 
-### The model in production: layer-marker + cascade
+### The model in production: layer-marker + per-page (leaf-only) commit
 
-The implemented history is **not** per-op-type replay from zero. It is the layer-marker / cascade model (see [history-sigbag-as-root.md](history-sigbag-as-root.md)):
+The implemented history is **not** per-op-type replay from zero. It is the layer-marker model with **per-page, leaf-only** commit (see [history-sigbag-as-root.md](history-sigbag-as-root.md)):
 
-- A **marker** is a pointer record `{ "layer": "<sig>" }` appended to the lineage's history bag at `__history__/<lineageSig>/NNNNNNNN`. The layer bytes themselves live in the `__layers__/<sig>` pool.
+- A **marker** is a pointer record `{ "layer": "<sig>" }` appended to the lineage's history bag at `__history__/<lineageSig>/NNNNNNNN`. The layer bytes themselves live at the hive root (`__hive__/<sig>`; legacy `__layers__/<sig>` while it drains).
 - `commitLayer(locationSig, layer)` signs the **canonical layer bytes** (`SignatureService.sign` over `JSON.stringify` of the canonicalized layer) to get `layerSig`, writes the layer to the pool, then appends one marker. Identical bytes dedupe (no new marker).
-- One user action = **one layer + one marker per ancestor**. `LayerCommitter` orchestrates the cascade: walk leaf → root, calling `commitLayer` at each level with that level's freshly-assembled layer (which references its children's just-committed sigs). Cost is **O(depth)**, not O(history). The root lineage's latest layer sig IS the global merkle root.
+- One user action = **one layer + one marker at the edited leaf**. Per-page commit is **leaf-only**: `LayerCommitter` commits exactly where the change happened and does **not** re-commit ancestors — a parent's stored child sig is left as a stale hint, and a lineage's liveness/current root is resolved on demand from its **own** bag head, never from a parent's stale pointer. Cost is **one marker**, not O(depth) up the spine. The merkle relationship still holds — a subtree's root is `f(child sigs)` — but it is resolved **lazily on read**, not materialized eagerly at commit. (This retired the earlier eager leaf→root commit cascade, which wrote one marker per ancestor on every change; its handlers survive only for graceful migration of pre-existing history.)
 - "What's here now" reads the **head layer's slots** (`currentLayerAt` → `getLayerBySig`, children from the `children[]` slot) — not an op-replay from zero. Marker `00000000` is an auto-minted EMPTY `{ name }` layer.
 
 > The genetic ladder, in documentation terms: a cell's lineage bag is its **heredity**; its head layer is the expressed phenotype; the recursive merkle root over a subtree is its **genome**. These are content-addressed [Distributed Network Artifacts](dna.md) — the signature IS the address. None of this is a `dna` field or service; it rides the existing `kind` discriminant.

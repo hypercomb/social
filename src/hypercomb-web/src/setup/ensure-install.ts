@@ -339,7 +339,10 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   // content-addressed storage means there's no "install-scope" to
   // partition by; everything that lives at sig X is, by definition,
   // the bytes that hash to X.
-  const layerDir = store.layers
+  // Phase-1b: bundled layers write to the flat hive root (`__hive__/<sig>`),
+  // the canonical content pool — not the retired `__layers__` dir. Reads
+  // resolve root-first (see Store.#readContentFile).
+  const layerDir = store.hypercombRoot
 
   const fetchBytes = async (path: string): Promise<ArrayBuffer | null> => {
     try {
@@ -479,8 +482,12 @@ const purgeStaleOpfsArtifacts = async (store: Store): Promise<void> => {
   }
   await Promise.all([purgeDir(store.bees), purgeDir(store.dependencies)])
   try {
-    for await (const [, handle] of store.layers.entries()) {
-      if (handle.kind === 'directory') await purgeDir(handle as FileSystemDirectoryHandle)
+    // `__layers__` may be absent post-migration (retired to the hive root);
+    // only legacy installs still have stale subdirs to purge here.
+    if (store.layers) {
+      for await (const [, handle] of store.layers.entries()) {
+        if (handle.kind === 'directory') await purgeDir(handle as FileSystemDirectoryHandle)
+      }
     }
   } catch { /* skip */ }
   // Also drop the SW module cache so refetches aren't served from a stale entry.
@@ -551,13 +558,13 @@ const resyncPass = async (sentinel: SentinelBridge, store: Store): Promise<void>
   // map straight from the `// @scope/name` first line of each flat file this
   // pass wrote — always consistent with what's actually on disk.
   await evictBagDirs(store.dependencies)
-  // Layers live flat in `__layers__/<sig>` shared with user commits.
-  // We can't blindly remove sigs not in `enabledLayerSet` here — that
-  // would also delete every user-committed layer. GC for the layer
-  // pool requires a separate reachability sweep (mark-and-sweep over
+  // Layers live flat at the hive root (`__hive__/<sig>`, Phase-1b) shared
+  // with user commits. We can't blindly remove sigs not in `enabledLayerSet`
+  // here — that would also delete every user-committed layer. GC for the
+  // layer pool requires a separate reachability sweep (mark-and-sweep over
   // history markers + install set). For now, layers grow monotonically;
   // a future `/sweep` command cleans unreachable sigs.
-  const layerDir = store.layers
+  const layerDir = store.hypercombRoot
   await clearStaleCaches()
 
   let appliedCount = 0
@@ -778,7 +785,8 @@ const restoreSignatureStore = (sigStore: SignatureStore): void => {
  *  the flat files, so flat presence is what the delta is computed against. */
 const collectPresentSigs = async (store: Store): Promise<string[]> => {
   const sigs = new Set<string>()
-  const addFrom = async (dir: FileSystemDirectoryHandle, ext: string): Promise<void> => {
+  const addFrom = async (dir: FileSystemDirectoryHandle | undefined, ext: string): Promise<void> => {
+    if (!dir) return
     try {
       for await (const [name, handle] of dir.entries()) {
         if (handle.kind !== 'file') continue
@@ -789,6 +797,12 @@ const collectPresentSigs = async (store: Store): Promise<string[]> => {
   }
   await addFrom(store.bees, '.js')
   await addFrom(store.dependencies, '.js')
+  // Layers now live at the flat hive root (Phase-1b); the legacy `__layers__`
+  // pool is scanned too while it drains. Both are flat sig files — the 64-hex
+  // filter ignores history markers (NNNN) and scope subdirs. The resource sigs
+  // the root also holds are a harmless superset (the sentinel only checks its
+  // enabled set against this — more, never fewer).
+  await addFrom(store.hypercombRoot, '')
   await addFrom(store.layers, '')
   return [...sigs]
 }

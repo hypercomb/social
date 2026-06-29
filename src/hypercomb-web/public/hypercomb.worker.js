@@ -150,6 +150,20 @@ async function handleLayerRequest(request) {
   const cached = await tryCacheMatch(request)
   if (cached) return toHeadIfNeeded(request, cached)
 
+  // Flat hive-root pool first (`__hive__/<sig>` — the migration
+  // destination), legacy `__layers__/<sig>.json` pool as fallback until
+  // the relocation pass moves the bytes up. Content-addressed, so either
+  // location serves identical bytes.
+  const rootFile = await tryReadHiveFile(sig)
+  if (rootFile) {
+    const headers = new Headers()
+    headers.set('content-type', 'application/json; charset=utf-8')
+    headers.set('cache-control', 'no-store')
+    const response = new Response(rootFile, { status: 200, headers })
+    await cachePut(request, response)
+    return toHeadIfNeeded(request, response.clone())
+  }
+
   const opfs = await tryReadFromOpfs('__layers__', `${sig}.json`)
   if (opfs) {
     await cachePut(request, opfs)
@@ -176,6 +190,18 @@ async function handleSiteResourceRequest(request) {
 
   const cached = await tryCacheMatch(request)
   if (cached) return toHeadIfNeeded(request, cached)
+
+  // Flat hive-root pool first (`__hive__/<sig>` — the migration
+  // destination), legacy `__resources__/<sig>` pool next, host stream last.
+  const rootFile = await tryReadHiveFile(sig)
+  if (rootFile) {
+    const headers = new Headers()
+    headers.set('content-type', guessResourceContentType(rest, rootFile))
+    headers.set('cache-control', 'public, max-age=31536000, immutable')
+    const response = new Response(rootFile, { status: 200, headers })
+    await cachePut(request, response)
+    return toHeadIfNeeded(request, response.clone())
+  }
 
   try {
     const root = await self.navigator.storage.getDirectory()
@@ -374,6 +400,21 @@ async function tryReadFromOpfs(dirName, fileName) {
   }
 }
 
+// Read a sig-named file from the flat hive-root pool (`__hive__/<sig>`),
+// the destination of the content-pool-to-root migration. Returns the File
+// (caller sets content-type — layers are JSON, site resources sniff by
+// tail) or null when not yet present at the root.
+async function tryReadHiveFile(sig) {
+  try {
+    const root = await self.navigator.storage.getDirectory()
+    const dir = await root.getDirectoryHandle('__hive__')
+    const handle = await dir.getFileHandle(sig)
+    return await handle.getFile()
+  } catch {
+    return null
+  }
+}
+
 async function readFromDir(rootDir, dirName, fileName) {
   try {
     const dir = await rootDir.getDirectoryHandle(dirName)
@@ -452,11 +493,14 @@ async function fetchResourceFromHosts(sig) {
 
 // Write-through to OPFS. Skip if already present — re-writing an existing
 // content-addressed file invalidates any Blob already handed out for that sig
-// (NotReadableError), the hazard Store.putResource documents.
+// (NotReadableError), the hazard Store.putResource documents. Phase-1b: the
+// write-through lands in the flat hive root (`__hive__/<sig>`) — the canonical
+// content pool — not the legacy `__resources__` dir, so the SW is no longer a
+// writer that would resurrect that dir after the Store relocates and GCs it.
 async function writeResourceToOpfs(sig, buffer) {
   try {
     const root = await self.navigator.storage.getDirectory()
-    const dir = await root.getDirectoryHandle('__resources__', { create: true })
+    const dir = await root.getDirectoryHandle('__hive__', { create: true })
     try { await dir.getFileHandle(sig); return } catch { /* not present — create */ }
     const handle = await dir.getFileHandle(sig, { create: true })
     const writable = await handle.createWritable()

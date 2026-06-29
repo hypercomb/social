@@ -126,7 +126,7 @@ Operations are stored as numbered markers inside per-lineage sigbags at the OPFS
   000x                    ← max marker = current root + entrance + attestation
 ```
 
-Each marker is a **pointer record** — `{ layer: <sig> }` — naming which layer this revision points at. The layer bytes themselves live in the flat `__layers__/<sig>` pool alongside the sigbags. The max marker addresses the current state; older markers form the history. (Legacy markers stored the full layer JSON inline; readers still handle both shapes.)
+Each marker is a **pointer record** — `{ layer: <sig> }` — naming which layer this revision points at. The layer bytes themselves live at the flat hive root (`__hive__/<sig>`; legacy `__layers__/<sig>` while it drains) alongside the sigbags. The max marker addresses the current state; older markers form the history. (Legacy markers stored the full layer JSON inline; readers still handle both shapes.)
 
 File names are 8-digit zero-padded sequential indices. The sequence is the total order.
 

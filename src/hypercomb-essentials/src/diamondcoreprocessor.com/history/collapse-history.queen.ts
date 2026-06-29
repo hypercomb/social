@@ -1,28 +1,26 @@
 // diamondcoreprocessor.com/history/collapse-history.queen.ts
 //
-// /collapse-history — dev utility that walks every lineage bag under
-// __history__/ and reduces it to THREE canonical states: empty (genesis),
-// unused (the state just before head), and active (head) — soft-deleting
-// everything between into __temporary__/. Also clears persisted cursor
-// positions so every bag snaps to head on the next load.
+// /collapse-history — dev utility that walks every lineage bag (via
+// HistoryService.list(), which unions the hive-root pool with any legacy
+// __history__ stragglers) and reduces it to THREE canonical states: empty
+// (genesis), unused (the state just before head), and active (head) —
+// soft-deleting everything between into the bag's __temporary__/. Also clears
+// persisted cursor positions so every bag snaps to head on the next load.
 //
 // This is the one-time "fresh slate" after the per-page (no-cascade)
 // migration: it strips the accumulated cascade markers the retired
 // leaf→root cascade used to write. Surviving markers keep their original
 // sequence numbers (the chain is reduced, not renumbered).
 //
-// Operates on the current bag-root layout: layer files live directly
-// at __history__/{lineageSig}/{sig}, ordered by file.lastModified.
-// No inner `layers/` subdir — that path was removed in the bag-root
-// refactor; the migrator in HistoryService cleans up legacy bags
-// lazily on first listLayers call.
+// Operates on the Phase-2 bag-root layout: layer files live directly at
+// <root>/{lineageSig}/{sig} (the hive root `__hive__/`, or legacy
+// `__history__/` until /consolidate-history relocates it), ordered by
+// file.lastModified. No inner `layers/` subdir — that path was removed in
+// the bag-root refactor; the migrator in HistoryService cleans up legacy
+// bags lazily on first listLayers call.
 
 import { QueenBee } from '@hypercomb/core'
 import type { HistoryService } from './history.service.js'
-
-type HistoryStore = {
-  history: FileSystemDirectoryHandle
-}
 
 export class CollapseHistoryQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -41,18 +39,20 @@ export class CollapseHistoryQueenBee extends QueenBee {
   }
 
   async #collapse(): Promise<void> {
-    const store = get<HistoryStore>('@hypercomb.social/Store')
     const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
-    if (!store?.history || !history) {
-      console.warn('[/collapse-history] Store or HistoryService not available')
+    if (!history) {
+      console.warn('[/collapse-history] HistoryService not available')
       return
     }
 
     let bags = 0
     let removed = 0
 
-    for await (const [lineageSig, bag] of store.history.entries()) {
-      if (bag.kind !== 'directory') continue
+    // Enumerate via HistoryService.list(), which unions the hive-root pool
+    // (where lineage bags live post-Phase-2) with any legacy __history__
+    // stragglers. Iterating store.history directly would miss every
+    // promoted/new bag — and it's absent entirely once consolidated.
+    for (const { signature: lineageSig } of await history.list()) {
       bags++
       // listLayers handles the legacy-`layers/` migrator and the
       // bag-pollution cleanup before returning, so by the time we
