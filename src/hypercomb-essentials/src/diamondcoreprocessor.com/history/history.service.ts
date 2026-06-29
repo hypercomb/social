@@ -446,8 +446,8 @@ export class HistoryService {
   // hash of its bytes — same state collapses to the same file (natural
   // dedupe). Ordering comes from `file.lastModified`. Promotion ("make
   // head") rewrites the file to bump its lastModified; soft-delete
-  // moves it into `__temporary__/{sig}` keeping the same name so a
-  // restore can move it straight back without rewriting bytes.
+  // pools it into `__temporary__/{sig}` keyed by its layer sig, so
+  // identical archived states dedup to one entry (signature pool).
   //
   // DCP, by contrast, splits the model: `__layers__/{sig}` holds layer
   // content shared across lineages, and `__history__/{lineageSig}/NNNNNNNN`
@@ -986,12 +986,10 @@ export class HistoryService {
 
   /**
    * Allocate the next sequential marker name for this bag. Format is
-   * 8-digit zero-padded starting at 00000001. Scans existing markers
-   * AND the __temporary__ archive (if present) for the current max so
-   * a re-issued name can never collide with an archived entry — that
-   * matters after /flatten, which archives every existing marker and
-   * then commits a fresh one. Without this scan the new marker would
-   * be named 00000001 and shadow the archived 00000001.
+   * 8-digit zero-padded starting at 00000001 — max live marker + 1.
+   * The __temporary__ archive is a SIGNATURE pool now (sig-named, not
+   * sequence-numbered), so there are no archived numbers to collide with;
+   * the old archive scan is gone.
    */
   readonly #nextMarkerName = async (
     bag: FileSystemDirectoryHandle,
@@ -1003,15 +1001,6 @@ export class HistoryService {
       const n = parseInt(name, 10)
       if (!isNaN(n) && n > max) max = n
     }
-    try {
-      const archive = await bag.getDirectoryHandle('__temporary__', { create: false })
-      for await (const [name, handle] of (archive as any).entries()) {
-        if (handle.kind !== 'file') continue
-        if (!HistoryService.#MARKER_RE.test(name)) continue
-        const n = parseInt(name, 10)
-        if (!isNaN(n) && n > max) max = n
-      }
-    } catch { /* no archive yet — nothing to merge */ }
     return String(max + 1).padStart(8, '0')
   }
 
@@ -1968,12 +1957,13 @@ export class HistoryService {
   }
 
   /**
-   * Soft-delete: copy each marker file into `__temporary__/{filename}`
-   * inside the same bag, then remove the original from the bag root.
-   * Bytes are preserved; restoration is a flat move back. Same filename
-   * is reused so a future restore lands on the original index — and
-   * `#nextMarkerName` scans the archive too, so newly committed markers
-   * cannot collide with an archived one.
+   * Soft-delete into the `__temporary__` SIGNATURE POOL: each archived
+   * marker is keyed by the layer sig it points at — `__temporary__/{sig}` —
+   * so identical archived states dedup to one entry (sign(MEANING) = the
+   * layer content). Matches the documented bag layout above. The marker
+   * bytes are preserved under the sig key; restore = re-commit a marker
+   * pointing at that sig. Markers whose sig can't be resolved fall back to
+   * their positional filename.
    *
    * USED ONLY BY /collapse-history AND /flatten. These are the rare
    * paths that wipe non-head markers in bulk; everywhere else
@@ -1998,9 +1988,19 @@ export class HistoryService {
         const srcHandle = await bag.getFileHandle(filename, { create: false })
         const file = await srcHandle.getFile()
         const bytes = await file.arrayBuffer()
-        const dstHandle = await archive.getFileHandle(filename, { create: true })
-        const writable = await dstHandle.createWritable()
-        try { await writable.write(bytes) } finally { await writable.close() }
+        // Pool key = the layer sig this marker points at (sign(MEANING)),
+        // so identical archived states collapse to one file. Fall back to
+        // the positional filename only if the sig can't be resolved.
+        const { layerSig } = await extractLayerSigFromMarker(bytes)
+        const poolName = HistoryService.#SIG_RE.test(layerSig) ? layerSig : filename
+        // Dedup: only write if this meaning isn't already pooled.
+        let pooled = true
+        try { await archive.getFileHandle(poolName, { create: false }) } catch { pooled = false }
+        if (!pooled) {
+          const dstHandle = await archive.getFileHandle(poolName, { create: true })
+          const writable = await dstHandle.createWritable()
+          try { await writable.write(bytes) } finally { await writable.close() }
+        }
         await bag.removeEntry(filename)
         archived++
       } catch { /* already gone or unreadable — skip */ }
