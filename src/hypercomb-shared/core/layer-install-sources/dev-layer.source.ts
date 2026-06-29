@@ -22,7 +22,8 @@ export class DevLayerSource implements LayerInstallSource {
 
   private tryFetchLayer = async (url: string, signature: string): Promise<LayerInstallFile | null> => {
     try {
-      const res = await fetch(url, { cache: 'no-store' })
+      // sig-addressed layer; content is immutable, let the cache serve it
+      const res = await fetch(url)
       if (!res.ok) return null
 
       const parsed = (await res.json()) as any

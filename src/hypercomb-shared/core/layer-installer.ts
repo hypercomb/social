@@ -258,7 +258,8 @@ export class LayerInstaller {
 
   #fetchBytes = async (url: string): Promise<Uint8Array<ArrayBuffer> | null> => {
     try {
-      const res = await fetch(url, { cache: 'no-store' })
+      // sig-addressed bytes are immutable; trust the server's immutable cache header
+      const res = await fetch(url)
       if (!res.ok) return null
       // SPA fallback guard: an extension-less /<sig> on a dev-server origin
       // returns index.html with 200. Sig-addressed bytes are never text/html.

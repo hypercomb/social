@@ -342,17 +342,18 @@ export class Store extends EventTarget {
       const cache = await caches.open(Store.CACHE_NAME)
       const existing = await cache.match(opfsUrl)
       if (!existing) {
-        await cache.put(opfsUrl, new Response(buffer, { headers: this.jsNoStoreHeaders() }))
+        await cache.put(opfsUrl, new Response(buffer, { headers: this.jsImmutableHeaders() }))
       }
     } catch {
       // ignore
     }
   }
 
-  private jsNoStoreHeaders = (): Headers => {
+  private jsImmutableHeaders = (): Headers => {
     const h = new Headers()
     h.set('content-type', 'application/javascript')
-    h.set('cache-control', 'no-store')
+    // sig-addressed bee: content can never change under this signature
+    h.set('cache-control', 'public, max-age=31536000, immutable')
     return h
   }
 
