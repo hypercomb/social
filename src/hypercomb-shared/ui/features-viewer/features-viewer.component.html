@@ -20,6 +20,15 @@
           {{ 'features.clear' | t }} · {{ likedCount() }}
         </button>
       }
+      @if (hiddenCount() > 0) {
+        <button
+          class="features-hidden-toggle"
+          type="button"
+          [class.on]="showHidden()"
+          (click)="toggleShowHidden()"
+          [attr.aria-pressed]="showHidden()"
+        >{{ (showHidden() ? 'features.hidden.hide' : 'features.hidden.show') | t }} · {{ hiddenCount() }}</button>
+      }
       <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'features.close' | t">×</button>
     </header>
 
@@ -54,22 +63,28 @@
               <button class="fgroup-remove" type="button" (click)="removeGroup(group.cell)" [attr.aria-label]="'features.remove' | t">×</button>
             </header>
 
+            @if (!showHidden()) {
             <!-- ── On this layer: features the tile already has ── -->
             <div class="section-head">
               <span class="section-label">{{ 'features.section.applied' | t }}</span>
-              <span class="section-count">{{ group.applied.length }}</span>
+              <span class="section-count">{{ visibleApplied(group).length }}</span>
             </div>
-            @if (group.applied.length === 0) {
+            @if (visibleApplied(group).length === 0) {
               <p class="section-empty">{{ 'features.applied.empty' | t }}</p>
             } @else {
               <ul class="features-list">
-                @for (feat of group.applied; track feat.kind) {
-                  <li class="features-row" [class.liked]="isLiked(group, feat)">
+                @for (feat of visibleApplied(group); track feat.kind) {
+                  <li
+                    class="features-row"
+                    [class.liked]="isLiked(group, feat)"
+                    [class.selected]="isSelected(group, feat)"
+                    (click)="selectRow(group, feat)"
+                  >
                     <button
                       class="like-star"
                       type="button"
                       [class.on]="isLiked(group, feat)"
-                      (click)="toggleLike(group, feat)"
+                      (click)="toggleLike(group, feat); $event.stopPropagation()"
                       [attr.aria-pressed]="isLiked(group, feat)"
                       [attr.aria-label]="(isLiked(group, feat) ? 'features.liked' : 'features.like') | t"
                       [attr.title]="(installable(feat) ? 'features.like.hint' : 'features.local.hint') | t"
@@ -100,6 +115,13 @@
                            ancestor for cascaded ones). -->
                       <span class="feature-attached">{{ 'features.attached' | t: { path: attachedAt(group, feat) } }}</span>
                     </div>
+                    <button
+                      class="hide-btn"
+                      type="button"
+                      (click)="hide(group, feat); $event.stopPropagation()"
+                      [attr.aria-label]="'features.hide' | t"
+                      [attr.title]="'features.hide.hint' | t"
+                    >⊘</button>
                   </li>
                 }
               </ul>
@@ -142,6 +164,34 @@
                   </li>
                 }
               </ul>
+            }
+            } @else {
+            <!-- ── Hidden: turned off but retained, restorable ── -->
+            <div class="section-head">
+              <span class="section-label">{{ 'features.section.hidden' | t }}</span>
+              <span class="section-count">{{ hiddenFor(group).length }}</span>
+            </div>
+            @if (hiddenFor(group).length === 0) {
+              <p class="section-empty">{{ 'features.hidden.empty' | t }}</p>
+            } @else {
+              <ul class="features-list">
+                @for (rec of hiddenFor(group); track rec.recordSig) {
+                  <li class="features-row is-hidden">
+                    <div class="feature-meta">
+                      <span class="feature-name">{{ rec.label }}</span>
+                      <span class="feature-kind" [title]="rec.featKind">{{ rec.featKind }}</span>
+                    </div>
+                    <button
+                      class="restore-btn"
+                      type="button"
+                      (click)="restore(rec)"
+                      [attr.aria-label]="'features.restore' | t"
+                      [attr.title]="'features.restore.hint' | t"
+                    >{{ 'features.restore' | t }}</button>
+                  </li>
+                }
+              </ul>
+            }
             }
           </section>
         }

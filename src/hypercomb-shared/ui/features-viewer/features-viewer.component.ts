@@ -27,6 +27,7 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { featureKey, isStaged, toggleStaged, clearStaged, type StagedFeature } from './feature-staging'
 import { markVerified } from './feature-verified'
+import { hideFeature, restoreFeature, loadHidden, hiddenKey, type HiddenFeature } from './feature-hidden'
 
 /** A feature already applied to the layer. */
 interface FeatureRow {
@@ -100,6 +101,33 @@ export class FeaturesViewerComponent implements OnDestroy {
    *  localStorage, mirroring DCP's domain-visibility pattern). */
   readonly stagingVersion = signal(0)
 
+  /** Hidden pool members, loaded from the signature pool. Drives two things:
+   *  filtering hidden features OUT of the active lists, and the "show hidden"
+   *  view (where each carries a Restore affordance). */
+  readonly hidden = signal<HiddenFeature[]>([])
+
+  /** When true the panel reveals HIDDEN features (with restore) instead of
+   *  hiding them. The hidden set is scoped per location (per group). */
+  readonly showHidden = signal(false)
+
+  /** Row the participant has highlighted — purely a selection affordance so it
+   *  reads as actionable (hover highlights, click pins the highlight). */
+  readonly selectedKey = signal<string | null>(null)
+
+  /** Fast membership: the hide keys currently in the pool. */
+  readonly #hiddenKeys = computed(() => {
+    const s = new Set<string>()
+    for (const d of this.hidden()) s.add(hiddenKey(d.featKind, d.appliesTo))
+    return s
+  })
+
+  /** Total hidden features across the open groups' locations — drives the
+   *  header toggle's count. */
+  readonly hiddenCount = computed(() => {
+    const locs = new Set(this.groups().map(g => g.segments.join('/')))
+    return this.hidden().filter(d => locs.has(d.appliesTo.join('/'))).length
+  })
+
   /** Total liked features across all groups — drives the footer hint. */
   readonly likedCount = computed(() => {
     this.stagingVersion()   // establish reactive dependency
@@ -137,6 +165,9 @@ export class FeaturesViewerComponent implements OnDestroy {
         return [...list, group]
       })
       if (!this.visible()) this.visible.set(true)
+      // Refresh the hidden pool so the new group's features are filtered /
+      // its hidden ones become restorable.
+      void this.#refreshHidden()
     }))
 
     this.#cleanups.push(EffectBus.on('features:viewer-close', () => {
@@ -202,6 +233,8 @@ export class FeaturesViewerComponent implements OnDestroy {
   close(): void {
     this.visible.set(false)
     this.groups.set([])
+    this.showHidden.set(false)
+    this.selectedKey.set(null)
   }
 
   /** Drop one tile's sections from the view (does not clear its staging). */
@@ -219,6 +252,74 @@ export class FeaturesViewerComponent implements OnDestroy {
       ? feat.originSegments
       : (feat.origin === 'cascade' ? [] : group.segments)
     return segs.length ? segs.join(' / ') : '/'
+  }
+
+  // ── hidden pool (turn off, retain, restore) ───────────────
+
+  /** The location an applied feature is attached at — its declaring ancestor
+   *  for a cascaded feature, else the tile itself. This is the hide scope. */
+  #segmentsFor(group: FeatureGroup, feat: FeatureRow): string[] {
+    return feat.originSegments?.length ? [...feat.originSegments] : [...group.segments]
+  }
+
+  /** Stable per-row key (feature kind @ scope) — used for both the hide pool
+   *  membership and the selection highlight. */
+  rowKey(group: FeatureGroup, feat: FeatureRow): string {
+    return hiddenKey(feat.kind, this.#segmentsFor(group, feat))
+  }
+
+  isSelected(group: FeatureGroup, feat: FeatureRow): boolean {
+    return this.selectedKey() === this.rowKey(group, feat)
+  }
+
+  /** Click a row to pin/unpin its highlight (the "this is actionable" cue). */
+  selectRow(group: FeatureGroup, feat: FeatureRow): void {
+    const k = this.rowKey(group, feat)
+    this.selectedKey.update(cur => (cur === k ? null : k))
+  }
+
+  isHidden(group: FeatureGroup, feat: FeatureRow): boolean {
+    return this.#hiddenKeys().has(this.rowKey(group, feat))
+  }
+
+  /** Applied features still active at this tile — hidden ones removed unless
+   *  the participant is explicitly viewing hidden. */
+  visibleApplied(group: FeatureGroup): FeatureRow[] {
+    if (this.showHidden()) return []
+    return group.applied.filter(f => !this.isHidden(group, f))
+  }
+
+  /** Hidden features attached at this tile's location — the "show hidden" view,
+   *  each restorable. */
+  hiddenFor(group: FeatureGroup): HiddenFeature[] {
+    const loc = group.segments.join('/')
+    return this.hidden().filter(d => d.appliesTo.join('/') === loc)
+  }
+
+  /** Hide an applied feature: write it into the pool (turn off, retained) and
+   *  re-reconcile its render via `feature:hidden`. */
+  async hide(group: FeatureGroup, feat: FeatureRow): Promise<void> {
+    const segments = this.#segmentsFor(group, feat)
+    const sig = await hideFeature({ featKind: feat.kind, view: feat.view, label: feat.label, segments })
+    if (!sig) return
+    EffectBus.emit('feature:hidden', { featKind: feat.kind, segments })
+    await this.#refreshHidden()
+  }
+
+  /** Restore a hidden feature — remove its pool member; the gate re-mounts. */
+  async restore(rec: HiddenFeature): Promise<void> {
+    const ok = await restoreFeature(rec.recordSig)
+    if (!ok) return
+    EffectBus.emit('feature:restored', { featKind: rec.featKind, segments: rec.appliesTo })
+    await this.#refreshHidden()
+  }
+
+  toggleShowHidden(): void {
+    this.showHidden.update(v => !v)
+  }
+
+  async #refreshHidden(): Promise<void> {
+    this.hidden.set(await loadHidden())
   }
 
   // ── benign "like" staging ─────────────────────────────────

@@ -3612,6 +3612,14 @@ export class ShowCellDrone extends Drone {
       this.#emitRenderTags([...this.renderedCells.values()])
     })
 
+    // feature:hidden / feature:restored — the participant hid or restored a
+    // feature. The decoration-kind index now filters hidden kinds out of its
+    // read functions (the one place draw-from-tiles consumers funnel through),
+    // so re-render to re-evaluate overlay `visibleWhen` and make the feature's
+    // icon disappear / reappear at once. Cheap: a render request, no I/O.
+    this.onEffect('feature:hidden', () => this.requestRender())
+    this.onEffect('feature:restored', () => this.requestRender())
+
     // fs:changed — bulk OPFS mutation marker. Workers fire this BEFORE
     // committing layer state so that any render triggered by the cascade
     // (cursor.onNewLayer) sees post-mutation OPFS. We use it here to

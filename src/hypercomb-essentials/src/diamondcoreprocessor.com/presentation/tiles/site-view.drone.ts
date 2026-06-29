@@ -17,6 +17,7 @@ import { Drone, SITE_VIEW_IOC_KEY, RESOURCE_URL_PREFIX } from '@hypercomb/core'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
+import { isFeatureHidden } from '../../sharing/feature-hidden.js'
 
 type MountState = {
   host: HTMLDivElement
@@ -140,6 +141,9 @@ export class SiteViewDrone extends Drone {
       // A review→accept (or bypass) in the features panel flips a foreign
       // website from quarantined to verified; re-reconcile so it mounts now.
       this.onEffect('feature:verified', () => { void this.#reconcile() })
+      // Hide / restore in the features panel turns this page off / back on.
+      this.onEffect('feature:hidden', () => { void this.#reconcile() })
+      this.onEffect('feature:restored', () => { void this.#reconcile() })
       this.#featureVerifiedBound = true
     }
     if (!this.#exitTogglesBound) {
@@ -295,6 +299,20 @@ export class SiteViewDrone extends Drone {
       // accepted, bypassed, or from a trusted/community domain. Your own
       // authoring is never gated. Showing the review gate INSTEAD of mounting
       // is what keeps an un-adopted feature's heavy payload off the wire.
+      // Hidden gate (takes precedence — it's the retainable "off"). If the
+      // participant has HIDDEN this cell's website feature, it stays inert:
+      // no mount, no scripts, no fetch. Restoring it from the features panel
+      // re-reconciles and brings it back. The feature's identity is the website
+      // bee's decoration kind — the same kind the panel writes the hide for.
+      const websiteKind = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+        ?.get<{ get: (view: string) => { decorationKind?: string } | undefined }>('@diamondcoreprocessor.com/VisualBeeRegistry')
+        ?.get('website')?.decorationKind
+      if (websiteKind && await isFeatureHidden(segments, websiteKind)) {
+        this.#removeReviewGate()
+        this.#teardown()
+        return
+      }
+
       const publisher = this.#pagePublisherDomain(cellPageSig)
       if (featureNeedsReview(segments, cellPageSig, publisher)) {
         this.#teardown()

@@ -32,10 +32,31 @@
 // subtracts (subtraction happens on explicit `removeSig` events).
 
 import { EffectBus } from '@hypercomb/core'
+import { hiddenKeysSync, hiddenKey } from '../sharing/feature-hidden.js'
 
 /** Map<cellLabel, Set<decorationKind>>. Mutates in place — exported
  *  read function captures by reference. */
 const kindsByLabel = new Map<string, Set<string>>()
+
+/** Map<cellLabel, segments> — the full lineage path each label was indexed at.
+ *  The hidden pool keys by (decorationKind, segments), so the index needs the
+ *  location to ask "is this kind hidden HERE?". Captured wherever a label is
+ *  indexed (the live `decorations:changed` event and the navigation walk both
+ *  carry segments). This is what lets the ONE filter live here: the index is
+ *  the read-model every draw-from-tiles consumer funnels through, so subtracting
+ *  hidden once at its read functions filters overlay icons, the features-panel
+ *  feed, and capability checks alike. */
+const segmentsByLabel = new Map<string, readonly string[]>()
+
+/** Is `kind` HIDDEN at this label's location? Reads the synchronous hidden-key
+ *  snapshot (the participant-local pool the site-view gate also reads), so the
+ *  filter is derived from one source however it's consumed. Unknown location →
+ *  not hidden (fail-open: never suppress a feature we can't place). */
+function isKindHidden(label: string, kind: string): boolean {
+  const segs = segmentsByLabel.get(label)
+  if (!segs) return false
+  return hiddenKeysSync().has(hiddenKey(kind, segs))
+}
 
 /** Reverse cache: decoration sig → kind. Lets us subtract from the
  *  index on `removeSig` without re-fetching the decoration. */
@@ -73,14 +94,15 @@ const nameBySig = new Map<string, string>()
  *
  *  Designed for `visibleWhen` — must remain synchronous and O(1). */
 export function hasDecorationKind(label: string, kind: string): boolean {
-  return kindsByLabel.get(label)?.has(kind) ?? false
+  return (kindsByLabel.get(label)?.has(kind) ?? false) && !isKindHidden(label, kind)
 }
 
 /** Iterate every decoration kind known for a cell. Useful for
  *  introspection / debug; not part of the visibleWhen hot path. */
 export function kindsForLabel(label: string): readonly string[] {
   const set = kindsByLabel.get(label)
-  return set ? [...set] : []
+  if (!set) return []
+  return [...set].filter(kind => !isKindHidden(label, kind))
 }
 
 /** Every tag name applied to a cell, from the in-memory index. Synchronous
@@ -187,6 +209,9 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
   const sig = payload.sig
   const label = segments[segments.length - 1]
   if (!label) return
+  // Remember where this label lives so the hidden filter can ask the pool
+  // "is this kind hidden HERE?" (the pool keys by kind + location).
+  segmentsByLabel.set(label, segments)
 
   if (payload.op === 'append') {
     const record = await fetchDecorationRecord(sig)
@@ -251,6 +276,7 @@ async function hydrateLabel(
 
   try {
     const segments = [...parentSegments, label]
+    segmentsByLabel.set(label, segments)
     const locationSig = await history.sign({ explorerSegments: () => segments })
     const layer = await history.currentLayerAt(locationSig) as { decorations?: unknown } | null
     if (!layer) return false
