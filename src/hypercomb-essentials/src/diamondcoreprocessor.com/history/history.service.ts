@@ -1440,39 +1440,30 @@ export class HistoryService {
       getLayerPoolBytes?: (sig: string) => Promise<Uint8Array | null>
     }>('@hypercomb.social/Store')
 
-    // Cold miss: trigger the global preload (idempotent — runs once per
-    // session) so this and every future getLayerBySig hits the cache.
-    await this.preloadAllBags()
-    const refreshed = this.#preloaderCache.get(layerSig)
-    if (refreshed) {
-      try {
-        const parsed = JSON.parse(new TextDecoder().decode(refreshed)) as Partial<LayerContent>
-        if (!parsed.name) return null
-        const hydrated = HistoryService.#hydrateLayer(parsed)
-        this.#parsedLayerCache.set(layerSig, hydrated)
-        return hydrated
-      } catch { return null }
-    }
-    // After preload, pointer markers don't populate #preloaderCache —
-    // the layer bytes live in the pool. Retry the pool lookup one more
-    // time (might have been migrated by another reader since the first
-    // pool check above).
+    // On-demand, content-addressed resolution — NEVER a brute-force scan.
+    // #resolveLayerLocal already tried memory + a direct pool read; do ONE
+    // more direct read by signature in case the bytes were written/relocated
+    // by another reader since that check. A layer is found by its sig in O(1),
+    // or it is a genuine miss. We do NOT fall back to preloadAllBags (a full-
+    // hive enumeration) on a render hop: that turns one tile resolution into
+    // an O(N) scan and drags the whole hive onto first paint. A genuine miss
+    // returns null; the caller re-renders as the neighbourhood warms (the
+    // manifest fast-path and the bounded passive warmer fill the cache), and
+    // the full marker history is only ever read when working with history.
     if (store?.getLayerPoolBytes) {
-      const retry = await store.getLayerPoolBytes(layerSig)
-      if (retry) {
+      const bytes = await store.getLayerPoolBytes(layerSig)
+      if (bytes) {
         try {
-          const parsed = JSON.parse(new TextDecoder().decode(retry)) as Partial<LayerContent>
+          const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<LayerContent>
           if (parsed.name) {
             const hydrated = HistoryService.#hydrateLayer(parsed)
             this.#parsedLayerCache.set(layerSig, hydrated)
-            this.#preloaderCache.set(layerSig, retry.buffer as ArrayBuffer)
+            this.#preloaderCache.set(layerSig, bytes.buffer as ArrayBuffer)
             return hydrated
           }
-        } catch { /* malformed */ }
+        } catch { /* malformed pool file */ }
       }
     }
-    const __isKnownHead = [...this.#latestSigByLineage.values()].includes(layerSig)
-    console.warn(`[diag:getLayer] NULL ${layerSig.slice(0, 12)} isCurrentHead=${__isKnownHead} preloadDone=${!!this.#preloadAllBagsPromise} (pool+preload+retry all missed)`)
     return null
   }
 
@@ -1517,7 +1508,10 @@ export class HistoryService {
     try {
       await this.#warmLineageHead(locationSig)
     } catch {
-      await this.preloadAllBags()
+      // History root not ready yet (Store still initializing). Do NOT
+      // brute-force preloadAllBags — return null and let the caller re-render
+      // once the single-lineage head warm can run.
+      return null
     }
     const refreshed = this.#latestSigByLineage.get(locationSig)
     if (!refreshed) return null

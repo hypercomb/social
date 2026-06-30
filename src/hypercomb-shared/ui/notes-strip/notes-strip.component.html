@@ -230,11 +230,33 @@
         }
       </ng-template>
 
-      <!-- Notes tree body. Roots render through the recursive template. -->
+      <!-- Notes search — filters the tree below to notes (and their
+           ancestors) whose text matches. The list stays a tree. -->
+      <div class="cv2-notes-search">
+        <span class="mat-sym" style="font-size:15px" aria-hidden="true">search</span>
+        <input type="text" class="cv2-notes-search-input"
+               [value]="noteQuery()"
+               (input)="setNoteQuery($event)"
+               [attr.placeholder]="'notes.searchPlaceholder' | t"
+               [attr.aria-label]="'notes.searchPlaceholder' | t" />
+        @if (noteQuery()) {
+          <button type="button" class="cv2-tilelist-clear" (click)="clearNoteQuery()"
+                  [attr.aria-label]="'notes.clearFilter' | t" [title]="'notes.clearFilter' | t">
+            <span class="mat-sym" style="font-size:14px">close</span>
+          </button>
+        }
+      </div>
+
+      <!-- Notes tree body. Roots render through the recursive template,
+           filtered by the search above. -->
       <div class="cv2-list thin-scroll notes-strip-body"
            [class.has-root-drop]="noteDropMode() === 'root'">
-        @for (root of notes(); track trackById($index, root)) {
+        @for (root of visibleNotes(); track trackById($index, root)) {
           <ng-container *ngTemplateOutlet="rowTpl; context: { note: root, depth: 0 }"></ng-container>
+        } @empty {
+          @if (noteQuery()) {
+            <div class="cv2-cloud-empty">{{ 'notes.noteNoMatch' | t }}</div>
+          }
         }
       </div>
 
@@ -247,11 +269,11 @@
       <div class="cv2-empty-hint">{{ 'notes.pickTile' | t }}</div>
     }
 
-    <!-- Tile navigator — always on. Every tile in this layer, filterable by
-         name OR note text. Click a row to make that tile active above; the
-         active tile (also set by clicking the tile on the canvas) is
-         highlighted. Hidden tiles can't be clicked on the canvas but are
-         still listed here, so the filter reaches them. -->
+    <!-- Tile navigator — always on. A one-of list of every tile in this
+         layer, filterable by name OR note text. Click a row to make that
+         tile active above (single selection); the active tile (also set by
+         clicking the tile on the canvas) is highlighted. Hidden tiles can't
+         be clicked on the canvas but are still listed here. -->
     <div class="cv2-tilelist">
       <div class="cv2-tilelist-filter">
         <span class="mat-sym" style="font-size:15px" aria-hidden="true">search</span>
@@ -267,56 +289,30 @@
           </button>
         }
       </div>
-      <!-- Selection status — appears once at least one tile is checked.
-           Mirrors the note selection bar: count + a clear-all. The set is a
-           working group you switch between by clicking rows; clearing it
-           leaves the active tile's notes open above. -->
-      @if (selectedCellCount() > 0) {
-        <div class="cv2-tilelist-selbar">
-          <span class="mat-sym filled" style="font-size:13px;color:var(--md-secondary)">check_circle</span>
-          <strong>{{ selectedCellCount() }}</strong>
-          <span>{{ 'notes.tilesSelected' | t }}</span>
-          <span class="cv2-tilelist-selbar-spacer"></span>
-          <button type="button" class="cv2-mini-btn ghost" (click)="clearCellSelection()"
-                  [title]="'notes.clearSelection' | t">
-            <span class="mat-sym" style="font-size:13px">close</span>
-          </button>
-        </div>
-      }
-      <ul class="cv2-tilelist-rows thin-scroll" role="list">
+      <!-- Tile tag cloud — one chip per tile, wrapping to fill the panel
+           width. Single-select ("one of"): clicking a chip makes that tile
+           active and its notes list opens above. The active chip is
+           highlighted; a count badge shows how many notes each tile holds. -->
+      <div class="cv2-tilecloud thin-scroll" role="listbox"
+           [attr.aria-label]="'notes.filterPlaceholder' | t">
         @for (t of tileList(); track t.cell) {
-          <li role="listitem" class="cv2-tilelist-item"
-              [class.is-selected]="t.selected"
-              [class.is-active]="t.cell === cell()">
-            <span class="cv2-tilelist-check"
-                  role="checkbox"
-                  [attr.aria-checked]="t.selected"
-                  [attr.aria-label]="t.cell"
-                  (click)="toggleCellSelection(t.cell, $event)">
-              @if (t.selected) {
-                <span class="mat-sym filled" style="font-size:16px;color:var(--md-secondary)">check_box</span>
-              } @else {
-                <span class="mat-sym" style="font-size:16px">check_box_outline_blank</span>
-              }
-            </span>
-            <button type="button" class="cv2-tilelist-row"
-                    [class.is-active]="t.cell === cell()"
-                    (click)="activateCell(t.cell)" [title]="t.cell">
-              <span class="cv2-tilelist-name">{{ t.cell }}</span>
-              @if (t.cell === cell()) {
-                <span class="cv2-tilelist-active">{{ 'notes.active' | t }}</span>
-              }
-              @if (t.count > 0) {
-                <span class="cv2-tilelist-count" aria-hidden="true">{{ t.count }}</span>
-              }
-            </button>
-          </li>
+          <button type="button" class="cv2-tilechip"
+                  role="option"
+                  [attr.aria-selected]="t.cell === cell()"
+                  [class.is-active]="t.cell === cell()"
+                  [style.fontSize.rem]="t.size"
+                  (click)="activateCell(t.cell)" [title]="t.cell">
+            <span class="cv2-tilechip-name">{{ t.cell }}</span>
+            @if (t.count > 0) {
+              <span class="cv2-tilechip-count" aria-hidden="true">{{ t.count }}</span>
+            }
+          </button>
         } @empty {
-          <li class="cv2-tilelist-empty" role="listitem">
+          <div class="cv2-tilelist-empty">
             {{ filterText() ? ('notes.filterNoMatch' | t) : ('notes.noTiles' | t) }}
-          </li>
+          </div>
         }
-      </ul>
+      </div>
     </div>
 
     <!-- Invisible edge drag-handles. The left edge is the live resize

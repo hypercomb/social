@@ -206,38 +206,16 @@ const _runInitializeRuntime = async (
     sign: typeof historyService?.sign,
     latestMarkerSigFor: typeof historyService?.latestMarkerSigFor,
   })
-  if (historyService?.preloadAllBags) {
-    // Preloader is a background warming pass — never block boot/render on it.
-    // Awaiting these here previously hung Angular bootstrap when
-    // `preloadFromRoot`'s recursive walk encountered a non-resolving
-    // `getLayerBySig` for one descendant: the entire shell never rendered
-    // (blank page on the bg color). Fire-and-forget per the design rule
-    // "real-time supersedes preloader"; the cache warms behind the shell,
-    // first render may pay a cold miss but every subsequent navigation
-    // hits the cache. Logs in the service still surface progress / errors.
-    // IDLE-DEFERRED kick. Fire-and-forget was not enough: on real data
-    // the bag head-scan touches hundreds of bags / thousands of markers
-    // (measured 5.1s over 293 bags), and starting it at boot meant its
-    // OPFS reads + JSON parses + hashes ran interleaved with the first
-    // render's awaited hops — first paint queued behind the scan. The
-    // scan itself is also time-sliced inside preloadAllBags; this defer
-    // keeps even its first slice out of the boot-critical window.
-    const kickPreload = () => {
-      void (async () => {
-        try {
-          await historyService.preloadAllBags!()
-        } catch (err) {
-          console.warn('[runtime-initializer] preload failed (non-fatal):', err)
-        }
-      })()
-    }
-    const ric = (globalThis as unknown as { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback
-    if (typeof ric === 'function') ric(kickPreload, { timeout: 5000 })
-    else setTimeout(kickPreload, 1500)
-  } else {
-    console.warn('[preload] HistoryService unavailable at preload step')
-  }
-  ;(window as any).__hcBoot?.('history preload done')
+  // NO global preload. The old idle-deferred `preloadAllBags()` enumerated
+  // every bag + every marker (O(hive): ~30s on a 1200-bag hive) and its OPFS
+  // churn starved the first render's own reads. Heads are now resolved ON
+  // DEMAND, one bag at a time (`currentLayerAt` → `#warmLineageHead`: one dir
+  // listing + one marker read), and the head index grows incrementally as
+  // lineages are touched. A bounded, passive warmer can drip the current
+  // neighbourhood's heads behind the shell; the full marker history is read
+  // only when working with history. There is no brute-force pass on boot.
+  void historyService
+  ;(window as any).__hcBoot?.('history preload skipped (on-demand head resolution)')
 
   const navigation = get('@hypercomb.social/Navigation') as Navigation | undefined
   navigation?.listen?.()

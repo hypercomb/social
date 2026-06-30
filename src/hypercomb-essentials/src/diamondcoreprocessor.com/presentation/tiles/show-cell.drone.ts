@@ -366,7 +366,7 @@ export class ShowCellDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'neon:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden']
-  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'render:cell-tags', 'tile:hover-tags', 'swarm:empty-layer']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
@@ -641,6 +641,9 @@ export class ShowCellDrone extends Drone {
 
   private filterKeyword = ''
   private filterTags = new Set<string>()
+  /** How wide a tag filter reaches: 'local' = current page only, 'children' =
+   *  the current subtree, 'global' = the whole hive. Defaults to 'local'. */
+  #filterScope: 'local' | 'children' | 'global' = 'local'
   /** Flat list of {label, dir} from cross-page tag scan. null = normal mode.
    *  `dir` is null under the layer model (sub-locations have no on-disk folder);
    *  the consume path only reads `label`. */
@@ -2016,6 +2019,20 @@ export class ShowCellDrone extends Drone {
     }
 
     // ── tag flatten override ──────────────────────────────
+    // An active filter that matched nothing in scope shows an EMPTY mesh — not
+    // a silent fall-through to the unfiltered page. We deliberately skip
+    // #emitRenderTags here so the last tag list (with the active filter pill)
+    // stays on screen, leaving a way to clear the filter.
+    if (this.filterTags.size > 0 && this.#tagFlattenResults && this.#tagFlattenResults.length === 0) {
+      this.clearMesh('tag-filter: no matches in scope')
+      this.renderedCellsKey = `tag-flatten:${this.#filterScope}:` + [...this.filterTags].sort().join(',')
+      this.renderedLocationKey = locationKey
+      this.renderedCells.clear()
+      this.emitEffect('render:cell-count', this.#buildCellCountPayload([]))
+      this.rendering = false
+      return
+    }
+
     // When tag filter is active, use pre-scanned cross-page results instead of explorer
     if (this.#tagFlattenResults && this.#tagFlattenResults.length > 0) {
       const flatResults = this.#tagFlattenResults
@@ -2040,7 +2057,7 @@ export class ShowCellDrone extends Drone {
       this.cachedCellNames = cellNames
       this.cachedLocalCellSet = flatSeedSet
       this.cachedBranchSet = new Set()
-      this.renderedCellsKey = 'tag-flatten:' + [...this.filterTags].sort().join(',')
+      this.renderedCellsKey = `tag-flatten:${this.#filterScope}:` + [...this.filterTags].sort().join(',')
       this.renderedLocationKey = locationKey
 
       this.renderedCells.clear()
@@ -2354,13 +2371,14 @@ export class ShowCellDrone extends Drone {
         if (attempts <= ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS) {
           this.#recordRenderAudit('gate', union.size, locationKey)
           console.info(`[diag:childres] GATE hold loc=${locationKey} attempt=${attempts}/${ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS} expected=${childResolveExpected} got=${union.size} — deferring partial`)
-          // Force the next render past the fast-path skip, warm the pool,
-          // and re-render with a short backoff so the missing bytes land.
+          // Force the next render past the fast-path skip and re-render with a
+          // short backoff so the missing bytes land. Missing children resolve
+          // ON DEMAND by signature (direct pool reads) — we do NOT brute-force
+          // preloadAllBags here; a full-hive scan on a partial render is the
+          // O(N) trap we removed. The retry re-attempts the direct reads as the
+          // neighbourhood warms.
           this.#forceNextRender = true
-          void (async () => {
-            try { await (historyService as { preloadAllBags?: () => Promise<void> } | undefined)?.preloadAllBags?.() } catch { /* best-effort */ }
-            setTimeout(() => this.requestRender(), Math.min(400, 60 * attempts))
-          })()
+          setTimeout(() => this.requestRender(), Math.min(400, 60 * attempts))
           return
         }
         // Budget exhausted — stop gating this layer so it can't thrash the
@@ -3335,21 +3353,18 @@ export class ShowCellDrone extends Drone {
     return [...out]
   }
 
-  /** Emit render:tags (name+count for the controls bar) and render:cell-tags
-   *  (per-cell tag names for the on-tile badge) from all visible cells. */
+  /** Emit render:tags (name+count) for the controls-bar tag list — the tags
+   *  defining the current page. There is no on-tile tag icon; the bottom tag
+   *  list lights up per-tile on hover (tile:hover-tags). */
   #emitRenderTags(cells: Cell[]): void {
     const counts = new Map<string, number>()
-    const byLabel: Record<string, string[]> = {}
     for (const cell of cells) {
-      const tags = this.#tagsFor(cell.label)
-      if (tags.length) byLabel[cell.label] = tags
-      for (const tag of tags) {
+      for (const tag of this.#tagsFor(cell.label)) {
         counts.set(tag, (counts.get(tag) ?? 0) + 1)
       }
     }
     const tags = [...counts.entries()].map(([name, count]) => ({ name, count }))
     this.emitEffect('render:tags', { tags })
-    this.emitEffect('render:cell-tags', { byLabel })
   }
 
   /** Walk the whole layer tree from the hive root and collect every cell whose
@@ -3381,6 +3396,16 @@ export class ShowCellDrone extends Drone {
     const seen = new Set<string>()
     const MAX_DEPTH = 32
 
+    // Scope decides where the walk starts and how deep it reaches:
+    //  • global   — the whole hive from the root, unbounded depth
+    //  • children — the current subtree, unbounded depth
+    //  • local    — the current page only (its immediate cells; depth 1)
+    const lineage = this.resolve<any>('lineage')
+    const rootPath: string[] = this.#filterScope === 'global'
+      ? []
+      : (lineage?.explorerSegments?.() ? [...lineage.explorerSegments()] : [])
+    const maxRelDepth = this.#filterScope === 'local' ? 1 : MAX_DEPTH
+
     // Tag names on a single layer: tag-kind decorations ∪ legacy properties.tags.
     const tagNamesOf = async (layer: Record<string, unknown>): Promise<Set<string>> => {
       const names = new Set<string>()
@@ -3408,8 +3433,10 @@ export class ShowCellDrone extends Drone {
       return names
     }
 
-    const walk = async (path: string[], depth: number): Promise<void> => {
-      if (depth > MAX_DEPTH) return
+    // relDepth is measured from the scope root: 0 is the root itself (a page
+    // container — never a result), 1 is its immediate cells, and so on.
+    const walk = async (path: string[], relDepth: number): Promise<void> => {
+      if (relDepth > maxRelDepth) return
       let layer: Record<string, unknown> | null
       try {
         const locSig = await history.sign({ explorerSegments: () => path })
@@ -3417,7 +3444,7 @@ export class ShowCellDrone extends Drone {
       } catch { return }
       if (!layer) return
 
-      if (path.length > 0) {
+      if (relDepth >= 1) {
         const label = path[path.length - 1]
         if (!seen.has(label)) {
           const names = await tagNamesOf(layer)
@@ -3426,6 +3453,8 @@ export class ShowCellDrone extends Drone {
           }
         }
       }
+
+      if (relDepth >= maxRelDepth) return
 
       const rawChildren = Array.isArray(layer['children']) ? layer['children'] as unknown[] : []
       for (const entry of rawChildren) {
@@ -3439,11 +3468,11 @@ export class ShowCellDrone extends Drone {
             childName = String(child.name)
           } catch { continue }
         }
-        await walk([...path, childName], depth + 1)
+        await walk([...path, childName], relDepth + 1)
       }
     }
 
-    await walk([], 0)
+    await walk(rootPath, 0)
     this.#tagFlattenResults = results
   }
 
@@ -3802,9 +3831,10 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
-    // tags:filter effect — cross-page tag flatten
-    this.onEffect<{ active: string[] }>('tags:filter', ({ active }) => {
+    // tags:filter effect — tag flatten, scoped to page / children / global
+    this.onEffect<{ active: string[]; scope?: 'local' | 'children' | 'global' }>('tags:filter', ({ active, scope }) => {
       const wasFiltering = this.filterTags.size > 0
+      this.#filterScope = scope ?? 'local'
       this.filterTags = new Set(active)
       if (this.filterTags.size > 0) {
         // Save location before entering filter mode

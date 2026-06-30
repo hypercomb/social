@@ -255,6 +255,73 @@ is a bug.
   whose `layer` field points *into* the content-verified pool. The pointer is
   yours-by-authorization; the target is valid-by-hash.
 
+### Strict at the folder level — every folder is signature-addressed; the two kinds are meaning-pool and location-protocol
+
+The rule is **strict and absolute: no folder may exist that isn't
+signature-addressed.** No label/underscore folders, no typed dirs, no
+exceptions — that's the PERIOD (`sign-meaning-pool-migration-plan`,
+`visuals-pool-of-meaning-plan`, `tag-pools`). What is *not* strict is reading
+"signature folder" as "dedup pool." A signature folder comes in **two kinds**,
+and only one of them is a meaning-pool:
+
+| | **Meaning-pool (WHAT)** | **Location-protocol (WHERE)** |
+|---|---|---|
+| Folder addressed by | `sign(meaning)` — a hash | `sign(path)` / lineage — a hash |
+| Members named by | `sign(content)` — a hash | position / sequence index (`000x`) |
+| Zone (§5) | A — content, safe-by-hash | B — sigbag marker, safe-by-ownership |
+| Dedup'd? | **Yes** — same bytes, one member | **No** — positions are unique, order is load-bearing |
+| Examples | layer bytes, the `tags` target, decorations, resources, bees, deps | the `000x` markers, their order, the entry pointer |
+| Role | the instruction / the thing itself | the index that says *where* and *which is current* |
+
+**Both folders are signature folders — strictness holds.** The lineage folder
+is `sign(path)`; the meaning pool is `sign(meaning)`. The difference is how the
+*members inside* are named (position vs content hash) and whether they dedup —
+**not** whether a non-signature folder is allowed. None ever is. A
+location-protocol folder is signature-addressed *and* not a dedup pool; those
+are not in tension.
+
+Why the location folder must not be collapsed into a dedup pool — two concrete
+failure modes:
+
+- **Dedup destroys order.** Two positions with byte-identical marker contents
+  are still *different positions*. Collapse them by hash and you lose the
+  sequence — exactly the **positional-graveyard** trap `__temporary__` fell
+  into before it was rebuilt as a real `sign(MEANING)` pool.
+- **Content-addressing forbids the back-pointer.** An entrance/order cannot be
+  a content hash, because a parent's sig is a hash *of* its children — a
+  position naming its place would be circular (§4). The "where am I / which is
+  current" question is structurally un-dedup'able; it lives as a *value you
+  already store* (the sigbag max), named by position, not by hash.
+
+**Metadata is "just instructions" — and it is readable, not private.** The
+marker is a thin envelope of pointers: a positional, owned record whose every
+field is a sig *into* a meaning pool (`layer`, `tags`, decorations, context,
+receipts — the open `MarkerRecord` `[field: string]: unknown` shape). It
+carries no shareable meaning of its own; it points *at* meaning. But "not a
+dedup pool" does **not** mean opaque or local-only: **the mesh reads the
+metadata.** The sigbags replicate byte-faithfully (§6), and the entrance-walk
+reads them for discovery, history, and self-heal (§7) — the max marker *is* the
+published current root. So the metadata travels and is consumed; it is simply
+trusted **by ownership** (write-auth, §5 Zone B) and named **by position**,
+rather than verified by hash and dedup'd by content.
+
+**The tradeoffs, made explicit:**
+
+- *Meaning-pool* → dedup, instant cache hits (hold the sig, load the blob — no
+  query), immutability, free undo/time-travel/share. Cost: cannot express order
+  or "current"; needs an external entry pointer; reshaping one byte breaks every
+  reference (§6).
+- *Location-protocol* → order, identity-by-position, an entrance, and write-auth
+  ownership for free; still a signature folder, still mesh-readable and
+  replicated. Cost: no dedup (each position stored once regardless of content),
+  not verifiable by hash (trust = ownership, §5 Zone B) — you replicate the bag
+  byte-faithfully (§6), you don't collapse it.
+
+**Both are okay because they are not the same kind of folder** — one a
+meaning-pool, one a location-protocol — but **both are signature folders.** The
+sigbag is the index above the pools; an index is not the thing it indexes, yet
+it lives under the same strict no-non-signature-folder rule.
+
 ---
 
 ## 6. Replication: byte-faithful, all surfaces

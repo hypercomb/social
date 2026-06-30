@@ -166,7 +166,11 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   }
 
   readonly paste = (): void => {
-    EffectBus.emit('controls:action', { action: 'paste' })
+    // Bind the paste to where the menu was opened, read synchronously now — so
+    // the worker writes exactly here and never drifts to a later nav location.
+    const lineage = window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+    const targetSegments = [...(lineage?.explorerSegments?.() ?? [])]
+    EffectBus.emit('controls:action', { action: 'paste', targetSegments })
   }
 
   readonly hide = (): void => {

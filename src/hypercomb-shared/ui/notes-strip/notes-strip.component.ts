@@ -847,12 +847,6 @@ export class NotesStripComponent implements OnDestroy {
       event.preventDefault()
       return
     }
-    if (this.selectedCells().size > 0) {
-      this.clearCellSelection()
-      event.stopPropagation()
-      event.preventDefault()
-      return
-    }
     // Otherwise: leave the event alone so the surrounding escape-
     // cascade (notes-viewer dismissal, command-line clear, etc.)
     // keeps running. We're a non-modal panel — escape is shared.
@@ -911,6 +905,36 @@ export class NotesStripComponent implements OnDestroy {
     const qa = this.#qaByCell().get(cell) ?? []
     const merged = this.#mergeQaWithNotes(qa, stored)
     return merged.filter(n => this.#passesFilter(this.noteKind(n)))
+  })
+
+  // ── Notes search (within the active tile) ─────────────────
+  // Free-text filter over the active tile's notes. The list stays a TREE —
+  // a node survives if it matches OR any descendant matches, so matches keep
+  // their ancestors for context. Empty query = the full tree.
+  readonly noteQuery = signal('')
+
+  setNoteQuery(event: Event): void {
+    this.noteQuery.set((event.target as HTMLInputElement).value)
+  }
+  clearNoteQuery(): void { this.noteQuery.set('') }
+
+  /** The active tile's note tree, pruned to the search query. Each surviving
+   *  node is a shallow copy with its children likewise pruned, so the recursive
+   *  row template renders the filtered tree without mutating the source. */
+  readonly visibleNotes = computed<readonly Note[]>(() => {
+    const q = this.noteQuery().trim().toLowerCase()
+    const all = this.notes()
+    if (!q) return all
+    const prune = (nodes: readonly Note[]): Note[] => {
+      const out: Note[] = []
+      for (const n of nodes) {
+        const kids = prune(n.children)
+        const selfMatch = this.noteDisplayText(n).toLowerCase().includes(q)
+        if (selfMatch || kids.length > 0) out.push({ ...n, children: kids })
+      }
+      return out
+    }
+    return prune(all)
   })
 
   /** Merge open qa-slot questions with the cell's notes into a single
@@ -973,59 +997,34 @@ export class NotesStripComponent implements OnDestroy {
     ).length
   }
 
-  // ── Tile navigator multi-select ──────────────────────────
-  // The bottom navigator is multi-selectable: check several tiles to build a
-  // working set you can switch between quickly. Selection is participant-
-  // local and session-only — it's view state, never persisted to the layer
-  // (the clipboard/selection-locality rule: anything that would skew the
-  // lineage signature across peers stays out of the layer). This picks TILES,
-  // not notes — notes themselves carry no selection. The active tile (shown in
-  // the editor above) is independent — you can switch the active tile without
-  // changing the checked set, and clearing the set leaves the active tile open.
-  readonly selectedCells = signal<ReadonlySet<string>>(new Set())
-
-  /** How many tiles are checked in the navigator — drives the navigator's
-   *  selection status line ("N tiles selected · click to switch"). */
-  readonly selectedCellCount = computed<number>(() => this.selectedCells().size)
-
-  /** Is this tile checked in the navigator's working set? */
-  isCellSelected(cell: string): boolean {
-    return this.selectedCells().has(cell)
-  }
-
-  /** Toggle a tile's membership in the navigator's selected set. Stops
-   *  propagation so the checkbox click doesn't also fire the row's activate. */
-  toggleCellSelection(cell: string, event?: Event): void {
-    event?.stopPropagation()
-    if (!cell) return
-    this.selectedCells.update(prev => {
-      const next = new Set(prev)
-      if (next.has(cell)) next.delete(cell)
-      else next.add(cell)
-      return next
-    })
-  }
-
-  /** Clear the navigator's tile selection. The active tile is untouched —
-   *  its notes stay open in the editor above. */
-  clearCellSelection(): void {
-    if (this.selectedCells().size > 0) this.selectedCells.set(new Set())
-  }
+  // ── Tile navigator (one-of) ───────────────────────────────
+  // The bottom navigator is a single-selection ("one of") list: clicking a
+  // row makes that tile the active one whose notes the editor above manages.
+  // There is no multi-tile working set — picking a tile here is equivalent to
+  // clicking it on the canvas.
 
   /** Always-on tile navigator: every tile in the current layer, filtered by
-   *  the find box. Clicking a row makes that tile active (its notes open in
-   *  the editor above); clicking the tile on the canvas activates it here too.
-   *  Checked tiles float to the top so the selected working set is grouped and
-   *  easy to switch between; layer order (CellSuggestionProvider order) is
-   *  preserved within the checked and unchecked groups. */
-  readonly tileList = computed<readonly { cell: string; count: number; selected: boolean }[]>(() => {
-    const sel = this.selectedCells()
+   *  the find box, in layer order (CellSuggestionProvider order). Clicking a
+   *  chip makes that tile active (its notes open in the editor above). Each
+   *  chip carries a `size` (rem) weighted by note count — the tag-cloud look
+   *  where busier tiles render larger. */
+  readonly tileList = computed<readonly { cell: string; count: number; size: number }[]>(() => {
     const rows = this.#layerCellLabels()
       .filter(cell => this.#matchesFilter(cell))
-      .map(cell => ({ cell, count: this.#cellCount(cell), selected: sel.has(cell) }))
-    // Stable sort: checked tiles first, original order kept within each group.
-    return rows.sort((a, b) => (a.selected === b.selected ? 0 : a.selected ? -1 : 1))
+      .map(cell => ({ cell, count: this.#cellCount(cell) }))
+    const max = rows.reduce((m, r) => Math.max(m, r.count), 0)
+    return rows.map(r => ({ ...r, size: this.#chipSize(r.count, max) }))
   })
+
+  /** Tag-cloud weighting: map a tile's note count to a chip font-size (rem).
+   *  Sqrt scale so the busiest tiles read as larger without dwarfing the rest;
+   *  tiles with no notes sit at the floor. */
+  #chipSize(count: number, max: number): number {
+    const MIN = 0.78, MAX = 1.32
+    if (max <= 0 || count <= 0) return MIN
+    const t = Math.sqrt(count) / Math.sqrt(max)
+    return +(MIN + (MAX - MIN) * t).toFixed(3)
+  }
 
   /** Make `cell` the active tile — its notes open in the editor above the
    *  list. Clears any in-progress edit so switching tiles starts clean. The
@@ -1094,9 +1093,6 @@ export class NotesStripComponent implements OnDestroy {
         this.#warmed.set(new Set())
         this.#notesByCell.set(new Map())
         this.#qaByCell.set(new Map())
-        // The navigator's checked set names tiles in the layer we just left;
-        // those labels are meaningless in the new layer, so drop the selection.
-        this.selectedCells.set(new Set())
         this.#version.update(v => v + 1)
         // Re-poll the layer's tile list — navigation changed which cells exist.
         this.#refreshLayerCellLabels()

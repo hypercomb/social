@@ -138,26 +138,46 @@
   opacity: 1 !important;
 }
 
+// When the cursor rolls over a tile, the tags that define it light up here —
+// the bottom tag list IS the per-tile tag indicator (there is no on-tile icon).
+// Each active pill tints with its own tag colour (currentColor) and brightens.
 .tag-hovered {
   opacity: 1 !important;
   filter: brightness(1.4);
+  background: color-mix(in srgb, currentColor 18%, transparent) !important;
 }
 
 .tag-crumb:not(.tag-active):not(.tag-hovered) {
   opacity: 0.6;
 }
 
-.tag-global {
-  opacity: 0.25 !important;
-  border-style: dashed !important;
-}
-
-.tag-separator {
-  width: 1px;
-  height: 0.7rem;
-  background: var(--md-outline-variant);
-  margin: 0 0.15rem;
+// Three-stage filter-scope cycle button (page → children → global). Steel
+// accent, separate from the tag colours. Fill intensity rises with reach so the
+// stage reads at a glance: hollow = page, tinted = children, filled = global.
+.tag-scope {
+  font-size: 0.5rem;
+  white-space: nowrap;
+  padding: 0.05rem 0.4rem;
+  border-radius: var(--md-shape-xs);
+  border: 0.5px solid rgba(126, 182, 214, 0.55);
+  background: none;
+  color: rgba(126, 182, 214, 0.85);
+  cursor: pointer;
+  font-family: var(--hc-mono);
   flex-shrink: 0;
+  transition: background var(--md-dur-short) var(--md-easing-standard),
+              color var(--md-dur-short) var(--md-easing-standard),
+              border-color var(--md-dur-short) var(--md-easing-standard);
+
+  &[data-scope='children'] {
+    background: rgba(126, 182, 214, 0.16);
+    color: #acd6ee;
+  }
+  &[data-scope='global'] {
+    background: rgba(126, 182, 214, 0.34);
+    border-color: rgba(126, 182, 214, 0.85);
+    color: #eaf5fb;
+  }
 }
 
 // ── pill stage (positioning wrapper) ──────────────────────

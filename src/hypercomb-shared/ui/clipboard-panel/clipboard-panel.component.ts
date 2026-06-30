@@ -375,24 +375,40 @@ export class ClipboardPanelComponent implements OnDestroy {
     this.close()
   }
 
+  /** The location this panel is acting over — the page on screen behind it —
+   *  read synchronously at click time so the paste is BOUND to where the user
+   *  is, not re-derived by the worker after any navigation. The worker writes
+   *  exactly here and refuses if it can't resolve it (never guesses). */
+  #targetSegments(): string[] {
+    const lineage = (window as { ioc?: { get?: (k: string) => unknown } }).ioc
+      ?.get?.('@hypercomb.social/Lineage') as { explorerSegments?: () => readonly string[] } | undefined
+    return [...(lineage?.explorerSegments?.() ?? [])]
+  }
+
   /** Place every clipboard tile onto the CURRENT page, honouring any hover
    *  target indexes. Copy keeps the items (repeatable); cut consumes them (and
    *  the panel auto-closes when the clipboard empties via `clipboard:changed`). */
   placeAll(): void {
-    EffectBus.emit('clipboard:place-items', { labels: this.items().map(i => i.label), targets: this.targets() })
+    EffectBus.emit('clipboard:place-items', {
+      labels: this.items().map(i => i.label),
+      targets: this.targets(),
+      targetSegments: this.#targetSegments(),
+    })
   }
 
   /** Place a single tile onto the current page (with its target). A top-level
    *  item places + consumes via its label; a DRILLED child isn't a clipboard
    *  entry, so it places by its full source path and consumes nothing. */
   placeOne(item: ClipboardItem): void {
+    const targetSegments = this.#targetSegments()
     if (this.drilled()) {
       EffectBus.emit('clipboard:place-entries', {
         entries: [{ label: item.label, sourceSegments: [...item.sourceSegments] }],
         targets: this.targets(),
+        targetSegments,
       })
     } else {
-      EffectBus.emit('clipboard:place-items', { labels: [item.label], targets: this.targets() })
+      EffectBus.emit('clipboard:place-items', { labels: [item.label], targets: this.targets(), targetSegments })
     }
   }
 

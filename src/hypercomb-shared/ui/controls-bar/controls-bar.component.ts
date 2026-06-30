@@ -315,6 +315,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #tags = signal<{ name: string; count: number }[]>([])
   #tagPanelOpen = signal(false)
   #activeTagFilters = signal<Set<string>>(new Set())
+  // Filter scope — how wide a tag filter reaches. Non-sticky: resets to 'local'
+  // every session (never persisted), so filtering defaults to the current page.
+  #tagScope = signal<'local' | 'children' | 'global'>('local')
   #hoveredTags = signal<Set<string>>(new Set())
   readonly addressHover = signal(false)
   #atomizeTarget = signal('')
@@ -685,18 +688,28 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly tags = this.#tags.asReadonly()
   readonly tagPanelOpen = this.#tagPanelOpen.asReadonly()
 
-  /** Global tags not present on the current page. */
-  readonly globalOnlyTags = computed(() => {
-    const pageTagNames = new Set(this.#tags().map(t => t.name))
-    const registry = get('@hypercomb.social/TagRegistry') as { names: string[] } | undefined
-    const allNames = registry?.names ?? []
-    return allNames
-      .filter(n => !pageTagNames.has(n))
-      .sort((a, b) => a.localeCompare(b))
+  readonly tagScope = this.#tagScope.asReadonly()
+
+  /** Short label for the scope cycle button — page / children / global. */
+  readonly tagScopeLabel = computed(() => {
+    switch (this.#tagScope()) {
+      case 'children': return 'children'
+      case 'global': return 'global'
+      default: return 'page'
+    }
   })
 
   readonly toggleTagPanel = (): void => {
     this.#tagPanelOpen.update(v => !v)
+  }
+
+  /** Cycle the filter scope local → children → global → local. When a filter is
+   *  already active, re-apply it immediately so the new reach takes effect. */
+  readonly cycleTagScope = (): void => {
+    const order = ['local', 'children', 'global'] as const
+    this.#tagScope.update(s => order[(order.indexOf(s) + 1) % order.length])
+    const active = [...this.#activeTagFilters()]
+    if (active.length) EffectBus.emit('tags:filter', { active, scope: this.#tagScope() })
   }
 
   readonly isTagFilterActive = (name: string): boolean => {
@@ -711,8 +724,8 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       } else {
         next.add(name)
       }
-      // Emit filter to ShowHoneycombWorker
-      EffectBus.emit('tags:filter', { active: [...next] })
+      // Emit filter to ShowHoneycombWorker — scope decides page/children/global reach
+      EffectBus.emit('tags:filter', { active: [...next], scope: this.#tagScope() })
       return next
     })
   }

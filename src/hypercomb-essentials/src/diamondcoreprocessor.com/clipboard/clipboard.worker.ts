@@ -79,32 +79,33 @@ export class ClipboardWorker extends Worker {
   constructor() {
     super()
 
-    EffectBus.on<{ action: string }>('controls:action', (payload) => {
+    EffectBus.on<{ action: string; targetSegments?: string[] }>('controls:action', (payload) => {
       if (!payload?.action) return
       switch (payload.action) {
         case 'copy': void this.#capture('copy'); break
         case 'cut': void this.#capture('cut'); break
-        case 'paste': void this.#paste(); break
+        case 'paste': void this.#paste(this.#boundTarget(payload.targetSegments)); break
         case 'clear-clipboard': void this.#clearClipboard(); break
       }
     })
 
-    EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
+    EffectBus.on<{ cmd: string; targetSegments?: string[] }>('keymap:invoke', (payload) => {
       if (!payload?.cmd) return
       switch (payload.cmd) {
         case 'clipboard.copy': void this.#capture('copy'); break
         case 'layout.cutCells': void this.#capture('cut'); break
-        case 'clipboard.paste': void this.#paste(); break
+        case 'clipboard.paste': void this.#paste(this.#boundTarget(payload.targetSegments)); break
       }
     })
 
-    // Place specific clipboard tiles at the current location — the
-    // non-navigating side panel's per-item "place" button. Same placement
-    // primitive as paste, scoped to the requested labels.
-    EffectBus.on<{ labels?: string[]; targets?: Record<string, number> }>('clipboard:place-items', (payload) => {
+    // Place specific clipboard tiles at a BOUND location — the non-navigating
+    // side panel's per-item "place" button. The panel passes the location it is
+    // docked over as `targetSegments`, captured at click time; the placement
+    // primitive (#placeItems) writes there and nowhere else.
+    EffectBus.on<{ labels?: string[]; targets?: Record<string, number>; targetSegments?: string[] }>('clipboard:place-items', (payload) => {
       const labels = Array.isArray(payload?.labels) ? payload!.labels! : []
       const targets = (payload?.targets && typeof payload.targets === 'object') ? payload.targets : undefined
-      if (labels.length > 0) void this.#placeLabels(labels, targets)
+      if (labels.length > 0) void this.#placeLabels(labels, targets, this.#boundTarget(payload?.targetSegments))
     })
 
     // Drop specific clipboard tiles WITHOUT placing them — the side panel's
@@ -121,7 +122,7 @@ export class ClipboardWorker extends Worker {
     // clipboard entry. The label alone can't be matched against the clipboard,
     // so the panel hands the full source path. Placing a drilled child never
     // consumes anything from the clipboard.
-    EffectBus.on<{ entries?: { label?: string; sourceSegments?: string[] }[]; targets?: Record<string, number> }>(
+    EffectBus.on<{ entries?: { label?: string; sourceSegments?: string[] }[]; targets?: Record<string, number>; targetSegments?: string[] }>(
       'clipboard:place-entries',
       (payload) => {
         const raw = Array.isArray(payload?.entries) ? payload!.entries! : []
@@ -129,7 +130,7 @@ export class ClipboardWorker extends Worker {
           .filter((e): e is { label: string; sourceSegments?: string[] } => !!e && typeof e.label === 'string')
           .map(e => ({ label: e.label, sourceSegments: Array.isArray(e.sourceSegments) ? [...e.sourceSegments] : [] }))
         const targets = (payload?.targets && typeof payload.targets === 'object') ? payload.targets : undefined
-        if (entries.length > 0) void this.#placeEntries(entries, targets)
+        if (entries.length > 0) void this.#placeEntries(entries, targets, this.#boundTarget(payload?.targetSegments))
       },
     )
 
@@ -184,6 +185,22 @@ export class ClipboardWorker extends Worker {
     const tsd = get('@diamondcoreprocessor.com/TileSelectionDrone') as
       { selectedLabels?: string[] } | undefined
     return tsd?.selectedLabels ?? []
+  }
+
+  /** The BOUND paste/place target: the location captured at the moment of
+   *  intent. The shell (clipboard panel, context menu) passes the location it
+   *  was acting over as `targetSegments`; for keyboard/command paste we snapshot
+   *  the live explorer path HERE, at synchronous handler entry (keypress time IS
+   *  intent time). Either way the result is frozen before any `await`, so a
+   *  paste can never drift to wherever navigation happens to be when the async
+   *  placement finally runs. */
+  #boundTarget(explicit?: readonly string[]): string[] {
+    if (Array.isArray(explicit)) return [...explicit]
+    return [...(this.#lineage?.explorerSegments() ?? [])]
+  }
+
+  #sameSegments(a: readonly string[], b: readonly string[]): boolean {
+    return a.length === b.length && a.every((s, i) => s === b[i])
   }
 
   get #cursor(): { currentLayerSig?: string; state?: { rewound?: boolean } } | undefined {
@@ -365,11 +382,12 @@ export class ClipboardWorker extends Worker {
   // cut:  move folders from store.clipboard back to current explorer dir.
   // copy: copy folders from sourceSegments to current explorer dir.
 
-  async #paste(): Promise<void> {
+  async #paste(boundTarget: readonly string[]): Promise<void> {
     const clipboardSvc = this.#clipboardSvc
     if (!clipboardSvc || clipboardSvc.isEmpty) return
-    // Paste = place EVERY clipboard tile at the current location.
-    await this.#placeLabels(clipboardSvc.items.map(i => i.label))
+    // Paste = place EVERY clipboard tile at the BOUND location (captured at
+    // intent, not re-read here).
+    await this.#placeLabels(clipboardSvc.items.map(i => i.label), undefined, boundTarget)
   }
 
   // Place explicit (label + sourceSegments) entries at the current location.
@@ -379,7 +397,7 @@ export class ClipboardWorker extends Worker {
   // same: clone each source subtree to the target lineage and fold the placed
   // names into the target's children in one cascade. Nested-discard exclusions
   // inside each placed subtree are honoured there.
-  async #placeEntries(entries: readonly ClipboardEntry[], targets?: Record<string, number>): Promise<void> {
+  async #placeEntries(entries: readonly ClipboardEntry[], targets?: Record<string, number>, boundTarget?: readonly string[]): Promise<void> {
     const lineage = this.#lineage
     const store = this.#store
     const history = this.#history
@@ -388,7 +406,7 @@ export class ClipboardWorker extends Worker {
     // Commits at the target; refused while rewound. Feedback, don't half-run.
     if (this.#blockedByRewound('paste')) return
 
-    const targetSegments = [...lineage.explorerSegments()]
+    const targetSegments = boundTarget ? [...boundTarget] : [...lineage.explorerSegments()]
     EffectBus.emit('clipboard:paste-start', { count: entries.length, op: 'copy' })
     const { placed, failed } = await this.#placeItems(history, lineage, committer, entries, targetSegments, targets)
     EffectBus.emit('clipboard:paste-done', { count: placed.length, op: 'copy', failed })
@@ -398,7 +416,7 @@ export class ClipboardWorker extends Worker {
   // `#paste` (all labels) and the side panel's per-item place
   // (`clipboard:place-items`). Mirrors paste's consume semantics: cut drops
   // the items that landed; copy keeps them for repeat placement.
-  async #placeLabels(labels: readonly string[], targets?: Record<string, number>): Promise<void> {
+  async #placeLabels(labels: readonly string[], targets?: Record<string, number>, boundTarget?: readonly string[]): Promise<void> {
     const clipboardSvc = this.#clipboardSvc
     const lineage = this.#lineage
     const store = this.#store
@@ -413,7 +431,7 @@ export class ClipboardWorker extends Worker {
     const wanted = new Set(labels)
     const items = clipboardSvc.items.filter(i => wanted.has(i.label))
     if (items.length === 0) return
-    const targetSegments = [...lineage.explorerSegments()]
+    const targetSegments = boundTarget ? [...boundTarget] : [...lineage.explorerSegments()]
 
     EffectBus.emit('clipboard:paste-start', { count: items.length, op })
 
@@ -463,14 +481,33 @@ export class ClipboardWorker extends Worker {
     targetSegments: readonly string[],
     targets?: Record<string, number>,
   ): Promise<{ placed: ClipboardEntry[]; failed: string[] }> {
-    // Resolve the target layer ROBUSTLY (own-bag read is empty for a never-
-    // committed sub-layer; resolveLayerAt walks the parent chain, and the
-    // cursor fallback covers a cold currentLayerAt cache on the location the
-    // user is viewing). Without this, pasting INTO such a location reads
-    // existing=[] and the SET below wipes whatever children were already
-    // there. null is fine here — a genuinely empty/new target legitimately
-    // has no existing children. targetSegments IS the current location.
-    const parent = await this.#resolveParentLayer(history, targetSegments, targetSegments)
+    // Resolve the BOUND target layer authoritatively by its segments
+    // (resolveLayerAt walks the parent chain). The cursor fallback inside
+    // #resolveParentLayer is gated on the bound target being the page CURRENTLY
+    // on screen — so it heals a cold cache for a normal in-place paste, but can
+    // never redirect a paste to wherever the view has drifted. `liveCurrent` is
+    // the only live read in this method, and it's used SOLELY for that gate; the
+    // target itself (`targetSegments`) was frozen at intent.
+    const liveCurrent = [...lineage.explorerSegments()]
+    const onScreen = this.#sameSegments(targetSegments, liveCurrent)
+    const parent = await this.#resolveParentLayer(history, targetSegments, liveCurrent)
+
+    // Refuse rather than guess: a non-root bound target that neither resolves up
+    // the chain NOR is the page on screen cannot be written safely — committing
+    // here would SET an empty/partial children list and wipe whatever lives at a
+    // location we can't actually read. Leave the clipboard intact (nothing lost)
+    // and tell the user to navigate there and place again. (Root / a genuinely
+    // empty on-screen target keeps existing=[] — that's correct, not a guess.)
+    if (!parent && targetSegments.length > 0 && !onScreen) {
+      console.warn(`[clipboard] paste refused — bound target unresolved & off-screen at /${targetSegments.join('/')}`)
+      EffectBus.emit('toast:show', {
+        type: 'info',
+        title: 'Paste deferred',
+        message: `Couldn't resolve the paste target — navigate to /${targetSegments.join('/')} and place again.`,
+      })
+      return { placed: [], failed: items.map(i => i.label) }
+    }
+
     const existing = await childNamesOf(history, parent)
     const taken = new Set(existing)
 
@@ -497,29 +534,47 @@ export class ClipboardWorker extends Worker {
         domain: lineage.domain,
         explorerSegments: () => [...targetSegments, entry.label],
       })
+
+      // Self / descendant guard: never place a cell into itself or its own
+      // subtree (e.g. dropping `/a/X` at `/a/X/sub`) — that would recurse the
+      // re-home and duplicate the tree. Skip with a failed mark. Cut-in-place
+      // (src === dst, same location) is NOT this case and is allowed.
+      const srcPath = [...entry.sourceSegments, entry.label]
+      const dstPath = [...targetSegments, entry.label]
+      if (srcLocSig !== dstLocSig &&
+          dstPath.length >= srcPath.length &&
+          srcPath.every((s, i) => s === dstPath[i])) {
+        console.warn(`[clipboard] skipped self/descendant paste of '${entry.label}' → /${targetSegments.join('/')}`)
+        failed.push(entry.label)
+        continue
+      }
+
       // Resolve the source cell's layer the authoritative way: through its
       // PARENT's children slot (pool-addressed sig → getLayerBySig), which
-      // carries the cell's REAL subtree. A cell never navigated into has no
-      // head in its own bag, so the old currentLayerAt(srcLocSig) returned
-      // null for it and paste silently dropped a live tile. Fall back to the
-      // own-bag head for the cut-in-place case (parent already dropped the
-      // child, but the bag persists at srcLocSig).
-      //
-      // Resolve the source parent ROBUSTLY (resolveLayerAt walks the parent
-      // chain to root). The bare currentLayerAt(sign(sourceSegments)) reads the
-      // parent's OWN bag, which is COLD for the very location you just copied
-      // from: the renderer paints the current page through the CURSOR, warming
-      // a different cache than currentLayerAt's #latestSigByLineage. When that
-      // read missed, childLayerOf found nothing and srcLayer fell back to the
-      // copied cell's own bag — typically the auto-minted `{name}` seed with NO
-      // children — so the re-home flattened the layer and the pasted tile lost
-      // its whole hierarchy. Mirrors the target parent's #resolveParentLayer /
-      // resolveLayerAt resolution.
+      // carries the cell's REAL subtree. resolveLayerAt walks the parent chain
+      // to root, so a cell never navigated into still resolves (its own bag is
+      // cold). The own-bag read (currentLayerAt(srcLocSig)) is used ONLY for the
+      // cut-in-place case (src === dst: the parent already dropped the child but
+      // its bag persists). For a real copy/move to a different location we
+      // DELIBERATELY do not fall back to the own bag: that read can return an
+      // unrelated/auto-minted seed and `flattenLayerTree` would dump a whole
+      // layer's children under the pasted name ("all the tiles pasted"). A miss
+      // fails the item cleanly instead.
       const srcParent = await resolveLayerAt(history, lineage.domain, entry.sourceSegments)
       const viaParent = await childLayerOf(history, srcParent, entry.label)
-      const srcLayer = viaParent?.layer ?? await history.currentLayerAt(srcLocSig)
+      const srcLayer = viaParent?.layer
+        ?? (srcLocSig === dstLocSig ? await history.currentLayerAt(srcLocSig) : null)
       if (!srcLayer) {
         console.warn(`[clipboard] paste source missing for '${entry.label}': /${entry.sourceSegments.join('/')}`)
+        failed.push(entry.label)
+        continue
+      }
+      // Name assertion: the resolved layer MUST be the cell we intend to place.
+      // If resolution drifted to a parent/sibling, refuse this item rather than
+      // flatten the wrong subtree in. (Layers carry their own `name`; a missing
+      // name is tolerated — older bags — and falls through to placement.)
+      if (typeof srcLayer.name === 'string' && srcLayer.name !== entry.label) {
+        console.warn(`[clipboard] source mismatch for '${entry.label}': resolved '${srcLayer.name}'; skipping`)
         failed.push(entry.label)
         continue
       }

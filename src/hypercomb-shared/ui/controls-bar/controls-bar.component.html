@@ -37,8 +37,14 @@
   }
 </div>
 
-@if (tags().length > 0 || globalOnlyTags().length > 0) {
+@if (tags().length > 0) {
   <div class="tag-float" [class.tag-expanded]="tagPanelOpen()">
+    <!-- three-stage filter scope — page → children → global. Defaults to page
+         (local) and is non-sticky; sits at the left of the tag list. -->
+    <button class="tag-scope" [attr.data-scope]="tagScope()"
+            (click)="cycleTagScope()"
+            [attr.aria-label]="'tags.scope-' + tagScope() | t"
+            [title]="('tags.scope-' + tagScope()) | t">{{ tagScopeLabel() }}</button>
     <span class="tag-lead-icon hci" (click)="toggleTagPanel()">X</span>
     @for (tag of tags(); track tag.name) {
       <button class="tag-crumb"
@@ -47,13 +53,6 @@
               [style.color]="tagColor(tag.name)"
               [style.borderColor]="tagColor(tag.name)"
               (click)="toggleTagFilter(tag.name)">{{ tag.name }}</button>
-    }
-    @if (globalOnlyTags().length > 0 && tags().length > 0) {
-      <span class="tag-separator"></span>
-    }
-    @for (name of globalOnlyTags(); track name) {
-      <button class="tag-crumb tag-global"
-              (click)="toggleTagFilter(name)">{{ name }}</button>
     }
   </div>
 }

@@ -195,10 +195,19 @@ export class Store extends EventTarget {
       console.warn('[store] OPFS subdirectory init failed — running without persistent storage', err)
       this.#opfsAvailable = false
     }
-    // Fire-and-forget content-pool relocation (root migration). Idempotent
-    // and resumable; never blocks boot — reads stay correct via the legacy
-    // fallback (see `#readContentFile`) the whole time it runs.
-    if (this.#opfsAvailable) void this.migrateContentPoolToRoot()
+    // The content-pool relocation does NOT run here. A whole-pool
+    // enumerate-and-copy on boot hammers single-threaded OPFS (multi-second
+    // stall before first paint) and races the render: a relocation copy
+    // lands a 0-byte target at the root BEFORE its bytes are written, and a
+    // concurrent read would resolve that empty file as a wiped layer. The
+    // hive must never scan or relocate its own content at runtime — that
+    // belongs at adopt/proxy time, not here. Relocation is an explicit,
+    // offline maintenance step (`/consolidate-content` → the queen calls
+    // `migrateContentPoolToRoot`), mirroring `/consolidate-history`. Steady
+    // state needs no sweep: new bytes already write to the hive root, and
+    // reads resolve root-first then fall back to the legacy pool (see
+    // `#readContentFile`), so pre-migration content keeps resolving locally
+    // — never demoted into a runtime host-fetch — until the step is run.
   }
 
   // `domainLayersDirectory` removed: `__layers__/` has no subdirectories.
@@ -775,16 +784,30 @@ export class Store extends EventTarget {
     signature: string,
     legacy: FileSystemDirectoryHandle | undefined,
   ): Promise<File | null> => {
+    // A 0-byte file under a non-empty sig is an INCOMPLETE write, not real
+    // content: `getFileHandle({create:true})` (a relocation copy, or
+    // putResource/writeLayerBytes) lands a 0-byte target before its bytes are
+    // written. Returning it would resolve a layer as wiped / let a resource
+    // short-circuit the host heal. Treat it as not-here and keep looking, so
+    // the read lands on wherever the COMPLETE bytes currently live — the
+    // legacy pool while a relocation is mid-flight — instead of a local miss
+    // that demotes to a runtime host fetch. Content-addressed, so this is
+    // provably safe: the only sig whose valid content is 0 bytes is the
+    // empty-content sig, which both pools represent identically.
+    const complete = (file: File): File | null =>
+      file.size > 0 || signature === EMPTY_CONTENT_SIG ? file : null
     if (this.hypercombRoot) {
       try {
         const handle = await this.hypercombRoot.getFileHandle(signature, { create: false })
-        return await handle.getFile()
+        const file = complete(await handle.getFile())
+        if (file) return file
       } catch { /* not relocated to the root yet — fall back to the typed pool */ }
     }
     if (legacy) {
       try {
         const handle = await legacy.getFileHandle(signature, { create: false })
-        return await handle.getFile()
+        const file = complete(await handle.getFile())
+        if (file) return file
       } catch { /* miss in the legacy pool too */ }
     }
     return null
@@ -795,17 +818,13 @@ export class Store extends EventTarget {
     if (existing) return existing
     const promise = (async () => {
       try {
+        // `#readContentFile` already drops an incomplete 0-byte file under a
+        // non-empty sig — falling through to wherever the complete bytes live
+        // (the legacy pool mid-move) rather than serving emptiness — so a
+        // returned file is real content; only the empty-content sig is
+        // legitimately 0 bytes. No size guard needed here.
         const file = await this.#readContentFile(signature, this.resources)
         if (!file) return null
-        // A 0-byte file under a non-empty sig is a corrupt/interrupted
-        // write (see putResource — getFileHandle({create:true}) lands a
-        // 0-byte target before the write completes). A raw Blob of size 0
-        // is truthy, so returning it makes getResource short-circuit BEFORE
-        // the host fallback — the bytes never re-fetch and render serves
-        // emptiness forever. Treat it as a MISS so getResource falls
-        // through to the host, whose write-through heals the file. Only the
-        // empty-content sig may legitimately be 0 bytes.
-        if (file.size === 0 && signature !== EMPTY_CONTENT_SIG) return null
         // Detach from the OPFS backing file by copying bytes into
         // memory and wrapping a fresh Blob. A raw File returned from
         // handle.getFile() keeps a live reference to the OPFS storage;
@@ -915,8 +934,13 @@ export class Store extends EventTarget {
    *  holds an un-shadowed or non-relocatable entry — the only safe gate on
    *  user data. `__layers__` keeps a live install/sync writer plus per-domain
    *  manifest subdirs, so its GC legitimately defers; the copy still runs so
-   *  reads resolve root-first. Best-effort throughout — never throws
-   *  (invoked fire-and-forget from `#doInit`). */
+   *  reads resolve root-first. Best-effort throughout — never throws.
+   *
+   *  MANUAL, explicit invocation ONLY (the `/consolidate-content` queen) —
+   *  never on boot. A whole-pool enumerate-and-copy at init stalls first
+   *  paint and races the render (see `#doInit`); the hive must not relocate
+   *  its own content at runtime. Mirrors `gcLegacyHistory` on the history
+   *  side. Idempotent and resumable, so a later run finishes a partial pass. */
   public migrateContentPoolToRoot = async (): Promise<void> => {
     if (!this.hypercombRoot) return
     try {
