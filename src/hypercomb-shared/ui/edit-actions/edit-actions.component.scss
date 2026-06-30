@@ -24,69 +24,60 @@ $steel: rgb(126, 182, 214);
   // cursor — instead of materialising under it. (Right-anchored + normal row
   // would put SAVE exactly where undo just was, inviting an accidental save on
   // a rapid second click.) DOM order stays undo→redo→save for tab/reading order.
+  // No container chrome — the undo/redo icons stand bare and quiet, matching the
+  // tag list. Grouping comes from proximity, not a frosted box.
   display: flex;
   flex-direction: row-reverse;
   align-items: center;
-  gap: 0.1rem;
-  height: 2.9rem;
-  padding: 0 0.3rem;
-
-  background: color-mix(in srgb, var(--md-surface-c-low, #12161c) 82%, transparent);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba($steel, 0.35);
-  border-radius: 1.55rem;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  gap: 0.3rem;
+  height: 2.32rem;
 }
 
 .ea-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.4rem;
-  height: 2.4rem;
+  width: 1.9rem;
+  height: 1.9rem;
   padding: 0;
 
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 50%;
-  color: rgba(226, 235, 244, 0.85);
+  background: none;
+  border: none;
+  color: rgba(206, 224, 240, 0.5);
   cursor: pointer;
-  transition: color 150ms ease, border-color 150ms ease, background 150ms ease, transform 120ms ease;
+  transition: color 150ms ease, transform 120ms ease;
 
   .mat-sym {
     font-family: 'Material Symbols Outlined';
-    font-size: 1.3rem;
+    font-size: 1.25rem;
     line-height: 1;
   }
 
-  &:hover:not(:disabled) {
-    color: #fff;
-    border-color: rgba($steel, 0.6);
-    background: color-mix(in srgb, var(--md-surface-c-low, #12161c) 92%, transparent);
-  }
-  &:active:not(:disabled) { transform: scale(0.92); }
-  &:focus-visible { outline: 1px solid rgba($steel, 0.6); outline-offset: 2px; }
-  &:disabled { opacity: 0.3; cursor: default; }
+  &:hover:not(:disabled) { color: #eaf5fb; }
+  &:active:not(:disabled) { transform: scale(0.9); }
+  &:focus-visible { outline: 1px solid rgba($steel, 0.6); outline-offset: 2px; border-radius: 6px; }
+  &:disabled { opacity: 0.25; cursor: default; }
 }
 
 .ea-divider {
   width: 1px;
-  height: 1.5rem;
-  margin: 0 0.2rem;
-  background: rgba($steel, 0.25);
+  height: 1.2rem;
+  margin: 0 0.1rem;
+  background: rgba($steel, 0.22);
 }
 
 // Save = the merge. A text pill (the word, not an icon) that only appears
-// while rewound. Steel-tinted so it reads as the primary commit action.
+// while rewound. Steel-tinted so it reads as the primary commit action — the
+// one piece of chrome in the cluster, since it's the consequential action.
 .ea-save {
   display: flex;
   align-items: center;
   justify-content: center;
-  height: 2.4rem;
-  padding: 0 0.95rem;
+  height: 1.9rem;
+  padding: 0 0.85rem;
 
   font-family: inherit;
-  font-size: 0.82rem;
+  font-size: 0.74rem;
   letter-spacing: 0.04em;
   color: rgba(206, 224, 240, 0.95);
 
@@ -108,11 +99,11 @@ $steel: rgb(126, 182, 214);
 
 // ── phone: keep the cluster, shift to clear the smaller FAB inset ──
 @include phone-only {
-  .edit-actions { right: 4.4rem; bottom: 1.1rem; height: 2.6rem; padding: 0 0.2rem; }
+  .edit-actions { right: 4.4rem; bottom: 1.1rem; height: 2.1rem; }
   .ea-btn {
-    width: 2.1rem;
-    height: 2.1rem;
+    width: 1.85rem;
+    height: 1.85rem;
     .mat-sym { font-size: 1.15rem; }
   }
-  .ea-save { height: 2.1rem; padding: 0 0.75rem; font-size: 0.76rem; }
+  .ea-save { height: 1.85rem; padding: 0 0.7rem; font-size: 0.72rem; }
 }

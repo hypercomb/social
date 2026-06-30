@@ -24,17 +24,18 @@ $steel: rgb(126, 182, 214);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 2.9rem;
-  height: 2.9rem;
+  width: 2.32rem;   // 80% of the former 2.9rem — quieter corner footprint
+  height: 2.32rem;
 
-  background: color-mix(in srgb, var(--md-surface-c-low, #12161c) 82%, transparent);
-  backdrop-filter: blur(12px);
-  border: 1px solid rgba($steel, 0.35);
+  // The circle (frosted disc + steel hairline) is hover-only — at rest only the
+  // bare icon shows. It also returns while the panel is open (.active).
+  background: transparent;
+  border: 1px solid transparent;
   border-radius: 50%;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  box-shadow: none;
   color: rgba(226, 235, 244, 0.85);
   cursor: pointer;
-  transition: color 160ms ease, border-color 160ms ease, background 160ms ease, transform 160ms ease;
+  transition: color 160ms ease, border-color 160ms ease, background 160ms ease, box-shadow 160ms ease, transform 160ms ease;
 
   .mat-sym {
     font-family: 'Material Symbols Outlined';
@@ -42,13 +43,16 @@ $steel: rgb(126, 182, 214);
     line-height: 1;
   }
 
-  &:hover {
+  &:hover,
+  &.active {
     color: #fff;
     border-color: rgba($steel, 0.7);
     background: color-mix(in srgb, var(--md-surface-c-low, #12161c) 92%, transparent);
+    backdrop-filter: blur(12px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
   }
+  &.active { border-color: rgba($steel, 0.85); }
   &:active { transform: scale(0.94); }
-  &.active { color: #fff; border-color: rgba($steel, 0.85); }
   &:focus-visible { outline: 1px solid rgba($steel, 0.6); outline-offset: 2px; }
 }
 

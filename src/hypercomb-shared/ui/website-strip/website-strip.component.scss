@@ -1,13 +1,11 @@
 // hypercomb-shared/ui/website-strip/website-strip.component.scss
 //
-// Bottom-right website launcher BAR — a small frosted bar holding every site
+// Bottom-LEFT website launcher BAR — a small frosted bar holding every site
 // as a hexagon tile (the hive motif, not circles). Present in both modes; each
-// hex opens its site on click. Sits one row ABOVE the corner affordance
-// (feedback FAB + undo·redo·save cluster in hexagon mode, the raw-DOM exit in
-// website mode), right-aligned to it, so the bottom-right reads as one clean
-// stacked cluster. It must stack rather than sit beside the corner: the
-// undo·redo·save cluster also lives left of the FAB and is variable-width
-// (it grows when rewound), so any same-row strip would overlap it.
+// hex opens its site on click. Anchored to the bottom-left, just right of the
+// vertical (left-docked) menu rail, so site selection lives next to the menu and
+// stays clear of the bottom-right undo·redo·save cluster + feedback FAB (which
+// is variable-width when rewound — a shared-corner strip would overlap it).
 
 @use '../breakpoints' as *;
 
@@ -17,8 +15,9 @@ $steel: rgb(126, 182, 214);
 
 .ws-strip {
   position: fixed;
-  right: 1.4rem;           // right-aligned to the corner affordance below it
-  bottom: 5.2rem;          // one row up — clears the FAB / undo·redo·save / exit hexagon
+  left: 3.8rem;            // just right of the left-docked menu rail (3.4rem wide)
+  right: auto;
+  bottom: 1.5rem;          // bottom-left row — clear of the undo/redo cluster (now bottom-right)
   z-index: 59996;
 
   display: flex;
@@ -68,6 +67,6 @@ $steel: rgb(126, 182, 214);
 }
 
 @include phone-only {
-  .ws-strip { right: 1rem; bottom: 5rem; max-width: calc(100vw - 2rem); }
+  .ws-strip { left: 1rem; right: auto; bottom: 5rem; max-width: calc(100vw - 2rem); }
   .ws-icon { width: 2.3rem; height: 2.55rem; .mat-sym { font-size: 1.12rem; } }
 }

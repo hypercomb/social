@@ -10,6 +10,7 @@ import { NgTemplateOutlet } from '@angular/common'
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
+import { registerShellSurface } from '../../core/shell-surface-registry'
 
 
 
@@ -1761,3 +1762,16 @@ export class NotesStripComponent implements OnDestroy {
     return get('@hypercomb.social/I18n') as I18nProvider | undefined
   }
 }
+
+// ── shell-surface contribution ──────────────────────────────────────────────
+// The strip mounts itself through the ShellSurfaceRegistry rather than being
+// hand-placed in app.html. <hc-shell-surfaces> renders whatever is registered;
+// stop loading this module (or call registry.remove) and the strip cascades out
+// of the DOM — nothing left behind. This is the vertical-pipeline `interface`
+// stage: the surface owns where it appears.
+registerShellSurface({
+  name: 'hc-notes-strip',
+  owner: '@hypercomb.shared/NotesStripComponent',
+  component: NotesStripComponent,
+  order: 10,
+})

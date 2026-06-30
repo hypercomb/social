@@ -87,97 +87,111 @@
 
 // ── tag panel + float (right-aligned) ─────────────────────
 
+// ── tag list (bottom-right) ───────────────────────────────
+// Box-free and quiet: each tag is a small colour dot + its name, not a bordered
+// chip. Muted at rest; the name brightens to white when its tile is rolled over
+// (the per-tile cue) and gains a hairline underline in its own colour while it's
+// an active filter. The dot carries the tag identity via the --tag-color prop.
 .tag-crumb {
-  font-size: 0.5rem;
-  white-space: nowrap;
-  padding: 0.05rem 0.45rem;
-  border: 0.5px solid var(--md-outline);
-  border-radius: var(--md-shape-xs);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.36em;
+  padding: 0.08rem 0;
+  border: none;
+  border-bottom: 1px solid transparent;
   background: none;
-  color: var(--md-on-surface-var);
-  cursor: pointer;
   font-family: inherit;
-  transition: opacity var(--md-dur-short) var(--md-easing-standard);
-  &:hover { opacity: 0.8; }
+  font-size: 0.625rem;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  color: rgba(214, 228, 240, 0.5);
+  cursor: pointer;
+  transition: color var(--md-dur-short) var(--md-easing-standard),
+              border-color var(--md-dur-short) var(--md-easing-standard);
+
+  &::before {
+    content: '';
+    width: 0.42em;
+    height: 0.42em;
+    border-radius: 50%;
+    background: var(--tag-color, rgba(126, 182, 214, 0.8));
+    opacity: 0.55;
+    flex-shrink: 0;
+    transition: opacity var(--md-dur-short) var(--md-easing-standard);
+  }
+
+  &:hover { color: rgba(232, 242, 250, 0.85); }
+  &:hover::before { opacity: 0.9; }
+}
+
+// active filter — bright name + a hairline underline in the tag's own colour
+.tag-active {
+  color: #eaf5fb;
+  border-bottom-color: var(--tag-color, rgba(126, 182, 214, 0.8));
+  &::before { opacity: 1; }
+}
+
+// tile rollover — the tags defining the hovered tile light up to full white
+.tag-hovered {
+  color: #ffffff;
+  &::before { opacity: 1; }
 }
 
 .tag-float {
   position: fixed;
-  bottom: 0.4rem;
-  right: 0.6rem;
+  bottom: 0.45rem;
+  right: 0.7rem;
   z-index: 59999;
 
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   align-items: center;
-  gap: 0.25rem;
-  max-width: 18rem;
-  overflow: hidden;
+  gap: 0.15rem 0.7rem;
+  max-width: 22rem;
 
   font-family: var(--hc-mono);
   pointer-events: auto;
   transition: opacity 200ms ease;
-
-  &.tag-expanded {
-    flex-wrap: wrap;
-    overflow: visible;
-  }
 }
 
-.tag-lead-icon {
-  font-size: 0.786rem;
-  color: rgba(245, 245, 245, 0.3);
-  line-height: 1;
-  cursor: pointer;
-  flex-shrink: 0;
-  padding-right: 0.2rem;
-}
-
-.tag-active {
-  background: color-mix(in srgb, var(--md-on-surface) 8%, transparent) !important;
-  opacity: 1 !important;
-}
-
-// When the cursor rolls over a tile, the tags that define it light up here —
-// the bottom tag list IS the per-tile tag indicator (there is no on-tile icon).
-// Each active pill tints with its own tag colour (currentColor) and brightens.
-.tag-hovered {
-  opacity: 1 !important;
-  filter: brightness(1.4);
-  background: color-mix(in srgb, currentColor 18%, transparent) !important;
-}
-
-.tag-crumb:not(.tag-active):not(.tag-hovered) {
-  opacity: 0.6;
-}
-
-// Three-stage filter-scope cycle button (page → children → global). Steel
-// accent, separate from the tag colours. Fill intensity rises with reach so the
-// stage reads at a glance: hollow = page, tinted = children, filled = global.
+// Three-stage filter-scope control (page → children → global). A single bare
+// Material glyph — focus → tree → globe — NO circle, ring, or pill, so it can
+// never be mistaken for a tag. It stays hidden until the tag strip is hovered,
+// keeping the resting row pure tag names; brightness rises a touch with reach.
 .tag-scope {
-  font-size: 0.5rem;
-  white-space: nowrap;
-  padding: 0.05rem 0.4rem;
-  border-radius: var(--md-shape-xs);
-  border: 0.5px solid rgba(126, 182, 214, 0.55);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0;
+  padding: 0;
+  border: none;
   background: none;
-  color: rgba(126, 182, 214, 0.85);
+  color: rgba(126, 182, 214, 0.75);
   cursor: pointer;
-  font-family: var(--hc-mono);
   flex-shrink: 0;
-  transition: background var(--md-dur-short) var(--md-easing-standard),
-              color var(--md-dur-short) var(--md-easing-standard),
-              border-color var(--md-dur-short) var(--md-easing-standard);
+  opacity: 0;
+  overflow: hidden;
+  transition: opacity var(--md-dur-short) var(--md-easing-standard),
+              width var(--md-dur-short) var(--md-easing-standard),
+              color var(--md-dur-short) var(--md-easing-standard);
 
-  &[data-scope='children'] {
-    background: rgba(126, 182, 214, 0.16);
-    color: #acd6ee;
+  .mat-sym {
+    font-size: 0.95rem;
+    line-height: 1;
   }
-  &[data-scope='global'] {
-    background: rgba(126, 182, 214, 0.34);
-    border-color: rgba(126, 182, 214, 0.85);
-    color: #eaf5fb;
-  }
+
+  &:hover { color: #eaf5fb; }
+  &[data-scope='children'] { color: rgba(126, 182, 214, 0.9); }
+  &[data-scope='global'] { color: #d6ecf7; }
+}
+
+// reveal the scope glyph only while the tag list is hovered
+.tag-float:hover .tag-scope,
+.tag-scope:focus-visible {
+  opacity: 1;
+  width: 1.05rem;
+  margin-right: 0.15rem;
 }
 
 // ── pill stage (positioning wrapper) ──────────────────────
@@ -1018,8 +1032,7 @@
   .close-x { font-size: 1.1rem; }
 
   .room-display { font-size: 0.7rem; }
-  .tag-crumb { font-size: 0.7rem; }
-  .tag-lead-icon { font-size: 1.1rem; }
+  .tag-crumb { font-size: 0.875rem; }
 }
 
 // ── tablet landscape / Surface (1024–1366px) ──────────────
@@ -1135,11 +1148,10 @@
   .close-x { font-size: 1.3rem; }
 
   .tag-crumb {
-    font-size: 0.8rem;
+    font-size: 1rem;
     padding: 0.08rem 0.55rem;
   }
 
-  .tag-lead-icon { font-size: 1.36rem; }
   .room-display { font-size: 0.8rem; }
   .tag-float { right: 0.8rem; }
 }
@@ -1202,5 +1214,5 @@
   }
 
   .tag-float { max-width: 36rem; }
-  .tag-crumb { font-size: 0.56rem; }
+  .tag-crumb { font-size: 0.7rem; }
 }

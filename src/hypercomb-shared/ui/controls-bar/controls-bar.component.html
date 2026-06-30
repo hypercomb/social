@@ -38,20 +38,20 @@
 </div>
 
 @if (tags().length > 0) {
-  <div class="tag-float" [class.tag-expanded]="tagPanelOpen()">
+  <div class="tag-float">
     <!-- three-stage filter scope — page → children → global. Defaults to page
-         (local) and is non-sticky; sits at the left of the tag list. -->
+         (local) and is non-sticky; fades in at the left of the list on hover. -->
     <button class="tag-scope" [attr.data-scope]="tagScope()"
             (click)="cycleTagScope()"
             [attr.aria-label]="'tags.scope-' + tagScope() | t"
-            [title]="('tags.scope-' + tagScope()) | t">{{ tagScopeLabel() }}</button>
-    <span class="tag-lead-icon hci" (click)="toggleTagPanel()">X</span>
+            [title]="('tags.scope-' + tagScope()) | t">
+      <span class="mat-sym">{{ scopeIcon() }}</span>
+    </button>
     @for (tag of tags(); track tag.name) {
       <button class="tag-crumb"
               [class.tag-active]="isTagFilterActive(tag.name)"
               [class.tag-hovered]="isTagHovered(tag.name)"
-              [style.color]="tagColor(tag.name)"
-              [style.borderColor]="tagColor(tag.name)"
+              [style.--tag-color]="tagColor(tag.name)"
               (click)="toggleTagFilter(tag.name)">{{ tag.name }}</button>
     }
   </div>

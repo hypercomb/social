@@ -313,7 +313,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #textOnly = signal(false)
   #layoutPinned = signal(false)
   #tags = signal<{ name: string; count: number }[]>([])
-  #tagPanelOpen = signal(false)
   #activeTagFilters = signal<Set<string>>(new Set())
   // Filter scope — how wide a tag filter reaches. Non-sticky: resets to 'local'
   // every session (never persisted), so filtering defaults to the current page.
@@ -686,22 +685,19 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly textOnly = this.#textOnly.asReadonly()
   readonly layoutPinned = this.#layoutPinned.asReadonly()
   readonly tags = this.#tags.asReadonly()
-  readonly tagPanelOpen = this.#tagPanelOpen.asReadonly()
 
   readonly tagScope = this.#tagScope.asReadonly()
 
-  /** Short label for the scope cycle button — page / children / global. */
-  readonly tagScopeLabel = computed(() => {
+  /** Material Symbol for the scope cycle button — a glyph per reach, so the
+   *  control reads as a control and never as a tag. page → children → global. */
+  readonly scopeIcon = computed(() => {
     switch (this.#tagScope()) {
-      case 'children': return 'children'
-      case 'global': return 'global'
-      default: return 'page'
+      case 'children': return 'account_tree'
+      case 'global': return 'public'
+      default: return 'center_focus_strong'
     }
   })
 
-  readonly toggleTagPanel = (): void => {
-    this.#tagPanelOpen.update(v => !v)
-  }
 
   /** Cycle the filter scope local → children → global → local. When a filter is
    *  already active, re-apply it immediately so the new reach takes effect. */
