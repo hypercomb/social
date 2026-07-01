@@ -22,6 +22,15 @@ export class HexSdfTextureShader {
       u_imageMix: { value: 1.0, type: 'f32' },
       u_neon: { value: 0, type: 'f32' },
       u_accentColor: { value: [0.4, 0.85, 1.0], type: 'vec3<f32>' },
+      // Launcher "cloud" drift (vertex stage). u_driftAmp = 0 disables it
+      // entirely (the common case); > 0 makes each tile wander on a very slow
+      // per-tile Lissajous orbit driven by u_time. See vertexSource.
+      u_time: { value: 0, type: 'f32' },
+      u_driftAmp: { value: 0, type: 'f32' },
+      // Tile silhouette is PER-TILE — the `aShapeMode` vertex attribute (0 =
+      // hexagon · 1 = websites silhouette · 2 = Space Invader), so a mixed
+      // launch-group page renders each group's OWN shape and groups never share a
+      // visual type. There is no global u_shapeMode uniform; see both shaders.
     }
 
     // v8 shaded mesh requires uniforms nested under a group and shader inputs using in/out
@@ -85,6 +94,22 @@ export class HexSdfTextureShader {
     this.#ug.update()
   }
 
+  /** Advance the drift clock (seconds). Only has a visible effect while
+   *  u_driftAmp > 0; cheap to call every frame. */
+  public setTime = (t: number): void => {
+    this.#ug.uniforms.u_time = t
+    this.#ug.update()
+  }
+
+  /** Per-tile drift amplitude in world (mesh-local) units. 0 = no drift. Kept a
+   *  small fraction of the hex radius by the caller so a drifting tile never
+   *  leaves its pointer→axial click catchment. */
+  public setDriftAmp = (amp: number): void => {
+    this.#ug.uniforms.u_driftAmp = amp
+    this.#ug.update()
+  }
+
+
   public setLabelAtlas = (t: Texture): void => {
     ;(this.shader.resources as any).u_label = this.toSource(t)
   }
@@ -111,6 +136,7 @@ export class HexSdfTextureShader {
     in float aCellIndex;
     in float aDivergence;
     in float aUnshared;
+    in float aShapeMode;
 
     out vec2 vUV;
     out vec4 vLabelUV;
@@ -123,14 +149,36 @@ export class HexSdfTextureShader {
     out float vCellIndex;
     out float vDivergence;
     out float vUnshared;
+    out float vShapeMode;
 
     uniform mat3 uProjectionMatrix;
     uniform mat3 uWorldTransformMatrix;
     uniform mat3 uTransformMatrix;
+    uniform float u_time;
+    uniform float u_driftAmp;
 
     void main() {
       mat3 mvp = uProjectionMatrix * uWorldTransformMatrix * uTransformMatrix;
-      gl_Position = vec4((mvp * vec3(aPosition, 1.0)).xy, 0.0, 1.0);
+
+      // Launcher motion, per group. Websites' CLOUDS drift gently on their own
+      // slow Lissajous orbit (golden-angle phase decorrelates them); GAMES do a
+      // Space-Invaders FORMATION march (shared phase → step together, small hop).
+      // Every normal hive page has u_driftAmp = 0 and is skipped. Offsets are
+      // identical across a quad's 4 vertices, so the tile translates rigidly and
+      // its centre stays inside its pointer→axial click catchment (TileOverlay).
+      vec2 p = aPosition;
+      if (u_driftAmp > 0.0) {
+        if (aShapeMode > 1.5) {
+          float stepX = floor(sin(u_time * 0.55) * 4.0) / 4.0;   // quantized → stepped sway
+          float bob   = sin(u_time * 2.0) * 0.06;
+          p += vec2(stepX * u_driftAmp * 1.6, bob * u_driftAmp);
+        } else if (aShapeMode > 0.5) {
+          float phase = aCellIndex * 2.39996323;                 // golden angle (rad)
+          p += vec2(sin(u_time * 0.16 + phase),
+                    sin(u_time * 0.13 + phase * 1.7 + 1.5707963)) * u_driftAmp;
+        }
+      }
+      gl_Position = vec4((mvp * vec3(p, 1.0)).xy, 0.0, 1.0);
       vUV = aUV;
       vLabelUV = aLabelUV;
       vImageUV = aImageUV;
@@ -142,6 +190,7 @@ export class HexSdfTextureShader {
       vCellIndex = aCellIndex;
       vDivergence = aDivergence;
       vUnshared = aUnshared;
+      vShapeMode = aShapeMode;
     }
   `
 
@@ -159,6 +208,7 @@ export class HexSdfTextureShader {
     in float vCellIndex;
     in float vDivergence;
     in float vUnshared;
+    in float vShapeMode;
 
     uniform vec2 u_quadSize;
     uniform float u_radiusPx;
@@ -169,6 +219,7 @@ export class HexSdfTextureShader {
     uniform float u_imageMix;
     uniform float u_neon;
     uniform vec3 u_accentColor;
+    uniform float u_time;
 
     uniform sampler2D u_label;
     uniform sampler2D u_cellImages;
@@ -176,9 +227,68 @@ export class HexSdfTextureShader {
     // ── light direction (top-left, 10 o'clock) ──────────────
     const vec2 LIGHT_DIR = normalize(vec2(-0.5, -0.866));
 
+    // ── label bake/sample coupling ──────────────────────────
+    // Labels are baked LARGE into the atlas (hex-label.atlas.ts TextStyle
+    // fontSize = 27) so each glyph carries many texels and stays crisp when
+    // magnified onto big hexes. To keep the ON-SCREEN size unchanged we sample a
+    // proportionally smaller window of the cell: normal tiles zoom the quad→cell
+    // map in by LABEL_BAND; the games/website paths divide their label window by
+    // it. LABEL_BAND MUST equal bakeFontSize / 9 (the 9px bake this geometry was
+    // originally tuned for). Keep in lockstep with the atlas fontSize.
+    const float LABEL_BAND = 3.0;
+
     float sdHex(vec2 p, float r) {
       p = abs(p);
       return max(p.x * 0.8660254 + p.y * 0.5, p.y) - r;
+    }
+
+    float sdCircle(vec2 p, vec2 c, float r) {
+      return length(p - c) - r;
+    }
+
+    // Polynomial smooth-min — rounds the seam where two circles meet so the
+    // cloud reads as one puffy mass, not overlapping discs.
+    float smin(float a, float b, float k) {
+      float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+      return mix(b, a, h) - k * h * (1.0 - h);
+    }
+
+    float sdRoundedBox(vec2 p, vec2 b, float r) {
+      vec2 q = abs(p) - b + r;
+      return min(max(q.x, q.y), 0.0) + length(max(q, 0.0)) - r;
+    }
+
+    // ── Space Invader (the classic 11×8 "crab"), two march frames ───────────
+    // Each row is a bitmask of its 11 columns (bit c = column c, 0 = leftmost).
+    // GLSL ES 1.00 has no integer bit ops, so we test bits with float math:
+    // mod(floor(val / 2^c), 2). Kept float-only (no int) to dodge the fragment
+    // shader's default int-precision quirks.
+    float invaderRow(float row, float frame) {
+      if (frame < 0.5) {
+        if (row < 0.5) return 260.0;   if (row < 1.5) return 136.0;
+        if (row < 2.5) return 508.0;   if (row < 3.5) return 886.0;
+        if (row < 4.5) return 2047.0;  if (row < 5.5) return 1533.0;
+        if (row < 6.5) return 1285.0;  return 216.0;
+      }
+      if (row < 0.5) return 260.0;   if (row < 1.5) return 1161.0;
+      if (row < 2.5) return 1533.0;  if (row < 3.5) return 1911.0;
+      if (row < 4.5) return 2047.0;  if (row < 5.5) return 1022.0;
+      if (row < 6.5) return 260.0;   return 514.0;
+    }
+
+    // 1.0 where the invader sprite is lit, 0.0 elsewhere. p is tile-local; the
+    // sprite spans ~±0.72r × ±0.52r, centred, with a tiny inter-pixel gap so the
+    // blocky pixel-art reads.
+    float invaderMask(vec2 p, float r, float frame) {
+      float halfW = 0.72 * r, halfH = 0.52 * r;
+      vec2 g = vec2((p.x + halfW) / (2.0 * halfW) * 11.0,
+                    (p.y + halfH) / (2.0 * halfH) * 8.0);
+      if (g.x < 0.0 || g.x >= 11.0 || g.y < 0.0 || g.y >= 8.0) return 0.0;
+      vec2 cell = fract(g);
+      if (cell.x < 0.08 || cell.x > 0.92 || cell.y < 0.08 || cell.y > 0.92) return 0.0; // pixel gap
+      float col = floor(g.x);
+      float row = floor(g.y);
+      return mod(floor(invaderRow(row, frame) / exp2(col)), 2.0);
     }
 
     vec2 rot30(vec2 p) {
@@ -192,6 +302,116 @@ export class HexSdfTextureShader {
       vec2 local = (vUV - 0.5) * u_quadSize;
       // point-top: rotate 30° so sdHex clips correctly; flat-top: no rotation needed
       vec2 rotated = u_flat > 0.5 ? local : rot30(local);
+      // Websites: a fluffy cartoon CLOUD — a website lives IN the cloud, so the
+      // site's snapshot is clipped to a big, round, cumulus silhouette with a
+      // bold drawn outline and the name across the bottom. Drifts gently (vertex
+      // shader). Drawn and returned here (skips the hex/image/label pipeline
+      // below). r = hex radius.
+      if (vShapeMode > 0.5 && vShapeMode < 1.5) {
+        float r = u_radiusPx;
+        float aa = max(r * 0.04, 1.5);
+
+        // round overlapping puffs → a fat, fluffy cumulus. Small smooth-min keeps
+        // the bumps defined (fluffy), not melted into one blob; a flat-ish bottom
+        // sells the cloud. Extents stay within ±0.85r so it never clips the quad.
+        float k = r * 0.13;
+        float d =      sdCircle(local, vec2( 0.00 * r,  0.04 * r), 0.44 * r);   // body
+        d = smin(d,    sdCircle(local, vec2(-0.42 * r,  0.10 * r), 0.30 * r), k); // left
+        d = smin(d,    sdCircle(local, vec2( 0.44 * r,  0.08 * r), 0.30 * r), k); // right
+        d = smin(d,    sdCircle(local, vec2(-0.20 * r, -0.22 * r), 0.31 * r), k); // upper-left puff
+        d = smin(d,    sdCircle(local, vec2( 0.18 * r, -0.26 * r), 0.30 * r), k); // upper-right puff
+        d = smin(d,    sdCircle(local, vec2(-0.64 * r,  0.18 * r), 0.22 * r), k); // far-left shoulder
+        d = smin(d,    sdCircle(local, vec2( 0.66 * r,  0.18 * r), 0.20 * r), k); // far-right shoulder
+        d = max(d, local.y - 0.42 * r);   // flat bottom
+
+        float alpha = 1.0 - smoothstep(-aa, aa, d);
+        if (alpha < 0.005) discard;
+
+        // the website lives in the cloud: snapshot clipped to the silhouette; a
+        // soft top-lit white puff when imageless.
+        vec2 cMin = vec2(-0.84 * r, -0.58 * r);
+        vec2 cMax = vec2( 0.84 * r,  0.42 * r);
+        vec2 cuv = clamp((local - cMin) / (cMax - cMin), 0.0, 1.0);
+        vec3 col = (vHasImage > 0.5 && u_imageMix > 0.001)
+          ? texture2D(u_cellImages, mix(vImageUV.xy, vImageUV.zw, cuv)).rgb
+          : mix(vec3(0.97, 0.99, 1.0), vec3(0.76, 0.85, 0.95), clamp(local.y / r * 0.7 + 0.5, 0.0, 1.0));
+
+        // name across the bottom of the cloud — a soft dark band so it stays
+        // legible over the snapshot, with the BIG name on it. The atlas glyph is
+        // baked large (see LABEL_BAND), so the sample window is divided by it to
+        // keep the displayed name the same size, just crisp; text lands centre-band.
+        float inBar = smoothstep(0.14 * r - aa, 0.14 * r + aa, local.y);
+        col = mix(col, vec3(0.05, 0.08, 0.11), inBar * 0.52);
+        vec2 labC = vec2(0.0, 0.28 * r);
+        vec2 labHalf = vec2(0.78 * r / LABEL_BAND);
+        vec2 labUV = (local - (labC - labHalf)) / (2.0 * labHalf);
+        float textA = (labUV.x >= 0.0 && labUV.x <= 1.0 && labUV.y >= 0.0 && labUV.y <= 1.0)
+          ? smoothstep(0.02, 0.5, texture2D(u_label, mix(vLabelUV.xy, vLabelUV.zw, labUV)).a) * u_labelMix
+          : 0.0;
+        col = mix(col, vec3(1.0), textA);
+
+        // bold rounded cartoon outline tracing the puffy silhouette
+        float lineW = aa * 1.9;
+        col = mix(col, vec3(0.16, 0.24, 0.36), (1.0 - smoothstep(lineW, lineW + aa * 1.6, abs(d))) * 0.9);
+
+        gl_FragColor = vec4(col * alpha, alpha);
+        return;
+      }
+
+      // Games: the Space Invader IS the tile — its lit pixel-squares each show a
+      // piece of the game's snapshot (one continuous image sampled across the
+      // sprite), so the picture reads through the alien's grid as a sparkling
+      // mosaic. The gaps between squares + a per-square twinkle are the sparkle.
+      // The name is labelled on a strip on top. Marches via the vertex shader.
+      // Drawn and returned here (skips the hex/image/label pipeline below).
+      if (vShapeMode > 1.5) {
+        float r = u_radiusPx;
+        float aa = max(r * 0.04, 1.5);
+        float frame = mod(floor(u_time * 1.8), 2.0);
+
+        float im = invaderMask(local, r, frame);   // 1 on a lit pixel-square, 0 in the gaps
+
+        // one continuous image mapped across the sprite's bounding box, so the
+        // lit squares read as a (pixelated) picture, not random tiles.
+        vec2 invMin = vec2(-0.72 * r, -0.52 * r);
+        vec2 invMax = vec2( 0.72 * r,  0.52 * r);
+        vec2 iuv = clamp((local - invMin) / (invMax - invMin), 0.0, 1.0);
+        vec3 img = (vHasImage > 0.5 && u_imageMix > 0.001)
+          ? texture2D(u_cellImages, mix(vImageUV.xy, vImageUV.zw, iuv)).rgb
+          : mix(vec3(0.30, 1.0, 0.42), u_accentColor, 0.25);   // green when imageless
+
+        // per-square twinkle — gentle brightness wobble keyed on square id + time
+        float halfW = 0.72 * r, halfH = 0.52 * r;
+        vec2 gg = vec2((local.x + halfW) / (2.0 * halfW) * 11.0,
+                       (local.y + halfH) / (2.0 * halfH) * 8.0);
+        float sqId = floor(gg.x) + floor(gg.y) * 11.0;
+        img *= 0.82 + 0.18 * sin(u_time * 4.0 + sqId * 2.39996);
+
+        // BIG name banner so the game is readable at a glance. The atlas glyph is
+        // baked large (see LABEL_BAND), so the sample window is divided by it to
+        // keep the displayed name the same size, just crisp. The visible text
+        // lands in the region's centre band, where the dark banner backs it.
+        // Square region → no aspect distortion.
+        vec2 labC = vec2(0.0, 0.30 * r);
+        vec2 labHalf = vec2(0.85 * r / LABEL_BAND);
+        vec2 labUV = (local - (labC - labHalf)) / (2.0 * labHalf);
+        float textA = (labUV.x >= 0.0 && labUV.x <= 1.0 && labUV.y >= 0.0 && labUV.y <= 1.0)
+          ? smoothstep(0.02, 0.5, texture2D(u_label, mix(vLabelUV.xy, vLabelUV.zw, labUV)).a) * u_labelMix
+          : 0.0;
+        float dPill = sdRoundedBox(local - labC, vec2(0.84 * r, 0.17 * r), 0.08 * r);
+        float pillMask = 1.0 - smoothstep(-aa, aa, dPill);
+
+        float alpha = max(im, pillMask);   // sprite squares ∪ name banner
+        if (alpha < 0.005) discard;
+
+        vec3 col = img;
+        col = mix(col, vec3(0.03, 0.04, 0.07), pillMask * 0.92);   // dark banner behind the name
+        col = mix(col, vec3(1.0), textA);                          // big white name
+        gl_FragColor = vec4(col * alpha, alpha);
+        return;
+      }
+
+      // Every normal hive page: the hexagon, into the distance-driven pipeline.
       float d = sdHex(rotated, u_radiusPx);
 
       // smooth the hex edge — wider band for clean AA
@@ -263,8 +483,11 @@ export class HexSdfTextureShader {
 
       vec4 color = base;
 
-      // label text — always rendered
-      vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, vUV);
+      // label text — always rendered. Sample the central 1/LABEL_BAND of the
+      // cell (glyphs are baked large; see LABEL_BAND) so the on-screen size
+      // matches the old 9px bake but with 3× the texels → crisp. Clamp keeps
+      // out-of-band UVs on this cell's transparent border, never a neighbour.
+      vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, clamp((vUV - 0.5) * LABEL_BAND + 0.5, 0.0, 1.0));
       float labelAlpha = texture2D(u_label, luv).a;
       float la = smoothstep(0.02, 0.5, labelAlpha);
 

@@ -10,7 +10,7 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../gr
 import { isSignature, readCellProperties, writeCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
-import { tagsForLabel } from '../../commands/decoration-kind-index.js'
+import { tagsForLabel, launchShapeForLabel } from '../../commands/decoration-kind-index.js'
 import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
 import type { HistoryService, LayerContent } from '../../history/history.service.js'
@@ -20,6 +20,29 @@ import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoo
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
 type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean }
+
+/** Opaque single-segment location the launch-group aggregator navigates into —
+ *  `agg-<id>`. The only live segment today is `agg-mix` (MixedGroupBag in
+ *  hypercomb-shared, the shared page that shows the UNION of toggled-on groups);
+ *  the per-group `agg-websites` / `agg-games` branches below are retained
+ *  defensively but no longer produced. Matched by string, never imported:
+ *  MixedGroupBag lives in hypercomb-shared and modules must not depend on shared
+ *  (see CLAUDE.md), so the `agg-` naming is mirrored, not used. */
+const AGGREGATOR_SEGMENT_PREFIX = 'agg-'
+
+/** Map a launch group's shape id (from its `launch:target` decoration) to the
+ *  shader's aShapeMode value: 0 = hexagon · 1 = flower-in-pot (websites) ·
+ *  2 = Space Invader (games). Unknown / empty → hexagon, so a normal hive tile
+ *  (no launch decoration) and any future group default to the plain shape. */
+function launchShapeToMode(shape: string): number {
+  return shape === 'flower-pot' ? 1 : shape === 'space-invader' ? 2 : 0
+}
+/** How far a launcher tile may wander while drifting, as a fraction of the hex
+ *  circumradius. Small on purpose: the drifted tile must stay inside its home
+ *  hex's pointer→axial catchment so clicking the floating tile still opens its
+ *  site. The peak offset is √2× this (two summed axes), still well under the
+ *  ~0.87·spacing neighbour boundary. */
+const LAUNCHER_DRIFT_FRACTION = 0.18
 
 /** Deterministic label → RGB via DJB2 hash → HSL → RGB. Returns [r, g, b] in 0–1 range. */
 function labelToRgb(label: string): [number, number, number] {
@@ -525,6 +548,12 @@ export class ShowCellDrone extends Drone {
   #labelsVisible = true
   #substrateFadeStart: number | null = null
   #substrateFadeRaf = 0
+  // Launcher "cloud" drift — a per-tile float driven entirely in the vertex
+  // shader (u_time + u_driftAmp). Active only on launch-group aggregator pages;
+  // a single rAF advances the clock, geometry is never rebuilt.
+  #driftRaf = 0
+  #driftActive = false
+  #driftStart = 0
   #showHiddenItems = false
   #currentHiddenSet = new Set<string>()
   // World mode (control-bar toggle): when on, tiles that are NOT public
@@ -537,6 +566,12 @@ export class ShowCellDrone extends Drone {
   // additive glow (a shader uniform — no geometry/shape change). Off by default.
   #neonMode = (() => {
     try { return localStorage.getItem('hc:neon-mode') === '1' } catch { return false }
+  })()
+  // Launcher-shapes toggle (control-bar): when on, launch-group (`agg-*`) pages
+  // render their tiles as plain hexagons instead of the per-group silhouette.
+  // Off by default (decorative shapes). Selected into shapeMode below.
+  #launcherHexagons = (() => {
+    try { return localStorage.getItem('hc:launcher-hexagons') === '1' } catch { return false }
   })()
   // Names of cells in the current render that came from an ephemeral
   // tile source (sync preview, not adopted to OPFS). Used by the pinned
@@ -3161,6 +3196,21 @@ export class ShowCellDrone extends Drone {
     this.shader.setLabelMix(this.#labelsVisible ? 1.0 : 0.0)
     this.shader.setImageMix(this.#textOnly ? 0.0 : this.#substrateFadeMix())
 
+    // Per-group launcher visuals — NOT universal, and chosen PER TILE so a mixed
+    // launch-group page shows each group's OWN silhouette (websites → flower-in-
+    // pot, games → marching Space Invader) and groups never share a visual type.
+    // The shape is a per-vertex attribute (aShapeMode) packed in applyGeometry
+    // from each cell's `launch:target` decoration `shape`; every normal hive page
+    // (no such decoration) stays plain hexagons. Here we only run the motion
+    // clock when on a launch-group page with the hexagon toggle off — the
+    // per-vertex gate (aShapeMode > 1.5) limits the actual march to game tiles,
+    // leaving flowers and hexagons still. Drift amplitude is a small fraction of
+    // the hex radius so a marching invader never costs the participant a click.
+    const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
+    const onLauncherPage = segs.length === 1 && typeof segs[0] === 'string'
+      && segs[0].startsWith(AGGREGATOR_SEGMENT_PREFIX)
+    this.#setDrift(onLauncherPage && !this.#launcherHexagons, circumRadiusPx)
+
     if (!this.hexMesh) {
       this.hexMesh = new Mesh({ geometry: geom as any, shader: (this.shader as any).shader, texture: Texture.WHITE as any } as any)
       ;(this.hexMesh as any).blendMode = 'pre-multiply'
@@ -3648,6 +3698,36 @@ export class ShowCellDrone extends Drone {
     // icon disappear / reappear at once. Cheap: a render request, no I/O.
     this.onEffect('feature:hidden', () => this.requestRender())
     this.onEffect('feature:restored', () => this.requestRender())
+
+    // launcher:reconciled — the shared launch-group mix (agg-mix) replaced its
+    // committed children (a group was toggled in/out, or a background scan
+    // added/removed a site). This must be a HARD reset: deleting only
+    // renderedLocationKey misses the agg-mix entry when the pick fires while
+    // we're still on the PREVIOUS location (a fresh icon-tap entry — see
+    // MixedGroupBag.enter, which emits this BEFORE goRaw). The stale agg-mix
+    // cells then survive and the next render serves the previous group's tiles
+    // ("switched group but old content / looks hung"). Clear the WHOLE cell
+    // cache (we can't cheaply key just the agg-mix entry, and toggles are rare),
+    // blank renderedLocationKey so the next pass takes the full location-change
+    // gather path, and rebuild the slot set from the fresh children.
+    this.onEffect('launcher:reconciled', () => {
+      this.#layerCellsCache.clear()
+      this.renderedLocationKey = ''
+      this.renderedCellsKey = ''
+      this.#slots.clear()
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
+    // launch:indexed — the decoration index finished hydrating a launcher tile's
+    // `shape` AFTER first paint (it walks async, like tags). The silhouette is a
+    // per-vertex attribute (aShapeMode) built in applyGeometry, so force a
+    // geometry rebuild to pick up the now-known shapes — otherwise the launcher
+    // tiles linger as plain hexagons until the next unrelated render.
+    this.onEffect('launch:indexed', () => {
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
 
     // fs:changed — bulk OPFS mutation marker. Workers fire this BEFORE
     // committing layer state so that any render triggered by the cascade
@@ -4273,6 +4353,16 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // Launcher-shapes toggle from the control bar — flip launch-group tiles
+    // between their per-group silhouettes and plain hexagons. The shape is a
+    // per-vertex attribute (aShapeMode) baked in applyGeometry, so we must force
+    // a geometry rebuild: stash the flag, defeat the no-op fast path, repaint.
+    this.onEffect<{ active: boolean }>('launcher:hexagons', ({ active }) => {
+      this.#launcherHexagons = !!active
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
     // A tile's public/private flag flipped.
     this.onEffect('tile:public-changed', () => {
       // Re-publish the kind-29010 cell list so the flip propagates NOW. The
@@ -4415,6 +4505,12 @@ export class ShowCellDrone extends Drone {
     }
     this.#newCellFadeStart.clear()
 
+    this.#driftActive = false
+    if (this.#driftRaf) {
+      cancelAnimationFrame(this.#driftRaf)
+      this.#driftRaf = 0
+    }
+
     if (this.lineageChangeListening) {
       const lineage = this.resolve<EventTarget>('lineage')
       lineage?.removeEventListener('change', this.onLineageChange)
@@ -4457,6 +4553,29 @@ export class ShowCellDrone extends Drone {
     this.#newCellFadeRaf = requestAnimationFrame(tick)
   }
 
+  /** Turn the launcher "cloud" drift on/off for the current page. When active,
+   *  sets the shader's drift amplitude (a fraction of the hex radius) and runs a
+   *  single rAF that advances u_time; the vertex shader does the rest. When
+   *  inactive, zeroes the amplitude and stops the clock. Idempotent — safe to
+   *  call on every render; the rAF is started once and reused. */
+  #setDrift = (active: boolean, circumRadiusPx: number): void => {
+    this.shader?.setDriftAmp(active ? circumRadiusPx * LAUNCHER_DRIFT_FRACTION : 0)
+    if (active) {
+      if (!this.#driftActive) { this.#driftActive = true; this.#driftStart = performance.now() }
+      if (!this.#driftRaf) {
+        const tick = (): void => {
+          if (!this.#driftActive) { this.#driftRaf = 0; return }
+          this.shader?.setTime((performance.now() - this.#driftStart) / 1000)
+          this.#driftRaf = requestAnimationFrame(tick)
+        }
+        this.#driftRaf = requestAnimationFrame(tick)
+      }
+    } else {
+      this.#driftActive = false
+      if (this.#driftRaf) { cancelAnimationFrame(this.#driftRaf); this.#driftRaf = 0 }
+    }
+  }
+
   private clearMesh = (reason: string): void => {
     if (this.hexMesh && this.layer) {
       // A live-mesh teardown must NEVER be silent. Every "tiles rendered
@@ -4476,6 +4595,9 @@ export class ShowCellDrone extends Drone {
     if (this.geom) {
       try { this.geom.destroy(true) } catch { /* ignore */ }
     }
+
+    // No mesh on screen → no launcher page to drift.
+    this.#setDrift(false, 0)
 
     this.hexMesh = null
     this.geom = null
@@ -5502,9 +5624,12 @@ export class ShowCellDrone extends Drone {
     const cellIndex = new Float32Array(cells.length * 4)
     const divergence = new Float32Array(cells.length * 4)
     const unshared = new Float32Array(cells.length * 4)
+    // Per-tile launcher silhouette (0 hex · 1 flower-pot · 2 invader) — lets a
+    // mixed launch-group page render each group's own shape without sharing.
+    const shapeAttr = new Float32Array(cells.length * 4)
     const idx = new Uint32Array(cells.length * 6)
 
-    let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, cip = 0, dp = 0, ii = 0, base = 0
+    let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, cip = 0, dp = 0, ii = 0, base = 0, sap = 0
     let ci = 0
 
     for (const c of cells) {
@@ -5597,6 +5722,13 @@ export class ShowCellDrone extends Drone {
       unshared.set([us, us, us, us], dp)
       dp += 4
 
+      // Per-tile launcher silhouette. Only launcher tiles carry a launch:target
+      // `shape`; everything else resolves to 0 (hexagon). The hexagon toggle
+      // forces all launchers back to plain hexagons.
+      const sm = this.#launcherHexagons ? 0 : launchShapeToMode(launchShapeForLabel(c.label))
+      shapeAttr.set([sm, sm, sm, sm], sap)
+      sap += 4
+
       idx.set([base, base + 1, base + 2, base, base + 2, base + 3], ii)
       ii += 6
       base += 4
@@ -5615,6 +5747,7 @@ export class ShowCellDrone extends Drone {
       ; (g as any).addAttribute('aCellIndex', cellIndex, 1)
       ; (g as any).addAttribute('aDivergence', divergence, 1)
       ; (g as any).addAttribute('aUnshared', unshared, 1)
+      ; (g as any).addAttribute('aShapeMode', shapeAttr, 1)
       ; (g as any).addIndex(idx)
 
     // save buffer references + label→index map so tile:saved can push

@@ -1,41 +1,22 @@
-// hypercomb-shared/ui/website-strip/website-strip.component.ts
+// hypercomb-shared/core/websites-group.ts
 //
-// The website launcher — a small strip of site icons pinned to the top of the
-// screen, present in BOTH render modes so you can jump to any site anytime
-// from anywhere. Clicking an icon navigates the lineage to that site's ROOT
-// cell and flips into website mode, so the site renders from its home page.
+// The "websites" launch group — discovers every site root in the hive (the
+// topmost cell on each branch carrying a `visual:website:page` decoration, or a
+// first-class `website` slot) and surfaces them as group members. The discovery
+// walk re-runs (debounced) whenever decorations change or a branch is adopted.
 //
-// Discovery walks the layer tree (via HistoryService, the same traversal
-// `/website list` uses) looking for the topmost page-bearing cell on each
-// branch — the site root — and reads its `visual:website:page` decoration
-// payload for the site's own icon + label (the same identity the command-line
-// toggle and the bottom-right exit FAB wear). Once a root is found we stop
-// descending: the whole site is one launcher entry, not one per sub-page.
-//
-// Shell UI: it NEVER imports essentials. HistoryService / Store / Navigation /
-// ViewMode are resolved at call time through window.ioc; the walk re-runs
+// Shell-level: HistoryService / Store / Navigation / ViewMode are resolved
+// through window.ioc at call time (never imports essentials). The walk re-runs
 // (debounced) whenever decorations change or a branch is adopted.
 
-import { Component, OnDestroy, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
-import { TranslatePipe } from '../../core/i18n.pipe'
-
-const get = (key: string): any => (globalThis as { ioc?: { get(k: string): unknown } }).ioc?.get(key)
+import { groupRegistry, type GroupMember, type LaunchGroup } from './group-registry'
 
 const SIG = /^[0-9a-f]{64}$/
 const PAGE_KIND = 'visual:website:page'
 /** Depth guard for the discovery walk — matches the build drone's MAX_DEPTH. */
 const MAX_DEPTH = 24
 const SITE = 'website'
-
-type Site = {
-  segments: string[]
-  label: string
-  /** Material Symbols ligature — the site's own glyph (or `web` fallback). */
-  icon: string
-  /** Stable @for track id. */
-  key: string
-}
 
 type HistoryLike = {
   sign(l: { explorerSegments?: () => readonly string[] }): Promise<string>
@@ -46,17 +27,13 @@ type StoreLike = { getResource(sig: string): Promise<Blob | null> }
 type NavigationLike = { goRaw?: (segments: readonly string[]) => void }
 type ViewModeLike = { setMode(next: string): void }
 
-@Component({
-  selector: 'hc-website-strip',
-  standalone: true,
-  imports: [TranslatePipe],
-  templateUrl: './website-strip.component.html',
-  styleUrls: ['./website-strip.component.scss'],
-})
-export class WebsiteStripComponent implements OnDestroy {
-  readonly sites = signal<Site[]>([])
+class WebsitesGroup implements LaunchGroup {
+  readonly id = 'websites'
+  readonly icon = 'language'
+  readonly label = 'Websites'
+  readonly shape = 'flower-pot'
 
-  #unsubs: (() => void)[] = []
+  #members: GroupMember[] = []
   #debounce: ReturnType<typeof setTimeout> | null = null
   #scanning = false
 
@@ -64,30 +41,21 @@ export class WebsiteStripComponent implements OnDestroy {
     // First scan shortly after boot (let HistoryService/Store register), then
     // re-scan whenever the set of sites could have changed.
     this.#scheduleScan(400)
-    this.#unsubs.push(
-      EffectBus.on('decorations:changed', () => this.#scheduleScan()),
-      EffectBus.on('adopt:done', () => this.#scheduleScan()),
-    )
+    EffectBus.on('decorations:changed', () => this.#scheduleScan())
+    EffectBus.on('adopt:done', () => this.#scheduleScan())
   }
 
-  ngOnDestroy(): void {
-    if (this.#debounce) clearTimeout(this.#debounce)
-    for (const u of this.#unsubs) { try { u() } catch { /* noop */ } }
-  }
+  members(): GroupMember[] { return this.#members }
 
-  // ── click → go to the site root + render it ──────────────
-
-  open(site: Site): void {
-    const nav = get('@hypercomb.social/Navigation') as NavigationLike | undefined
+  open(m: GroupMember): void {
+    const nav = get<NavigationLike>('@hypercomb.social/Navigation')
     // Navigate first (synchronous dispatch updates the lineage) so the site
     // renderer captures THIS site's root as the entry floor when the surface
     // flips.
-    nav?.goRaw?.(site.segments)
-    const vm = get('@hypercomb.social/ViewMode') as ViewModeLike | undefined
+    nav?.goRaw?.(m.segments)
+    const vm = get<ViewModeLike>('@hypercomb.social/ViewMode')
     vm?.setMode?.(SITE)
   }
-
-  // ── discovery ────────────────────────────────────────────
 
   #scheduleScan(delay = 450): void {
     if (this.#debounce) clearTimeout(this.#debounce)
@@ -98,21 +66,22 @@ export class WebsiteStripComponent implements OnDestroy {
     if (this.#scanning) return
     this.#scanning = true
     try {
-      const history = get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
-      const store = get('@hypercomb.social/Store') as StoreLike | undefined
+      const history = get<HistoryLike>('@diamondcoreprocessor.com/HistoryService')
+      const store = get<StoreLike>('@hypercomb.social/Store')
       if (!history || !store?.getResource) { this.#scheduleScan(700); return }   // boot not ready — retry
-      this.sites.set(await findWebsiteSites(history, store))
+      this.#members = await findWebsiteSites(history, store)
+      groupRegistry.notifyChanged()
     } finally {
       this.#scanning = false
     }
   }
 }
 
-/** Walk the tree from the hive root, returning one entry per SITE ROOT (the
+/** Walk the tree from the hive root, returning one member per SITE ROOT (the
  *  topmost page-bearing cell on each branch). Stops descending once a root is
  *  found — the site is a single launcher entry, not one per sub-page. */
-async function findWebsiteSites(history: HistoryLike, store: StoreLike): Promise<Site[]> {
-  const out: Site[] = []
+async function findWebsiteSites(history: HistoryLike, store: StoreLike): Promise<GroupMember[]> {
+  const out: GroupMember[] = []
   const visited = new Set<string>()
 
   const childNames = async (layer: { children?: unknown }): Promise<string[]> => {
@@ -172,7 +141,7 @@ async function findWebsiteSites(history: HistoryLike, store: StoreLike): Promise
     const site = await siteAt(layer)
     if (site) {
       const label = site.label || (segments.length ? segments[segments.length - 1] : '/')
-      out.push({ segments: [...segments], label, icon: site.icon || 'web', key: JSON.stringify(segments) })
+      out.push({ key: JSON.stringify(segments), label, segments: [...segments], icon: site.icon || 'web' })
       return   // site root found — the whole site is one entry; don't descend
     }
     for (const name of await childNames(layer)) await walk([...segments, name], depth - 1)
@@ -181,3 +150,5 @@ async function findWebsiteSites(history: HistoryLike, store: StoreLike): Promise
   await walk([], MAX_DEPTH)
   return out.sort((a, b) => a.label.localeCompare(b.label))
 }
+
+groupRegistry.register(new WebsitesGroup())

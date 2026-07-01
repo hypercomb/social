@@ -1,0 +1,33 @@
+@if (open()) {
+  <div class="landing" role="dialog" aria-label="Websites">
+    <header class="landing-head">
+      <div class="landing-heading">
+        <h1 class="landing-title">Websites</h1>
+        @if (sites().length > 0) {
+          <span class="landing-count">{{ sites().length }}</span>
+        }
+      </div>
+      <button class="landing-close mat-sym" type="button" (click)="close()" aria-label="Close" title="Close">
+        close
+      </button>
+    </header>
+
+    @if (sites().length === 0) {
+      <p class="landing-empty">No websites yet.</p>
+    } @else {
+      <ul class="landing-grid thin-scroll" role="list">
+        @for (site of sites(); track site.key) {
+          <li>
+            <button class="site-card" type="button" (click)="openSite(site)"
+                    (pointerenter)="warmSite(site)"
+                    [style.borderLeftColor]="accent(site.label)">
+              <span class="site-icon mat-sym" [style.color]="accent(site.label)">{{ site.icon || 'language' }}</span>
+              <span class="site-name">{{ site.label }}</span>
+              <span class="site-go mat-sym">arrow_forward</span>
+            </button>
+          </li>
+        }
+      </ul>
+    }
+  </div>
+}

@@ -5,8 +5,8 @@
     <header class="editor-header">
       <span class="mat-sym header-icon">edit</span>
       <h3>{{ cell() }}</h3>
-      <button class="editor-close" type="button" (click)="save()">
-        <span class="mat-sym">close</span>
+      <button class="editor-close" type="button" (click)="cancel()" [attr.aria-label]="'editor.cancel' | t">
+        <span class="mat-sym">arrow_back</span>
       </button>
     </header>
 

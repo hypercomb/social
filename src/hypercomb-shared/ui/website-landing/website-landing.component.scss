@@ -1,0 +1,139 @@
+// hypercomb-shared/ui/website-landing/website-landing.component.scss
+//
+// Cold, clean, professional — steel hairlines on near-black, the house chrome.
+// Full-viewport directory of website cards. No flashy effects.
+
+$steel: rgb(126, 182, 214);
+
+:host { display: contents; }
+
+.landing {
+  position: fixed;
+  inset: 0;
+  z-index: 59990;
+  display: flex;
+  flex-direction: column;
+  background: #0c1118;
+  color: #cfe2ee;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+.landing-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem 2rem;
+  border-bottom: 1px solid rgba($steel, 0.22);
+  flex: 0 0 auto;
+}
+
+.landing-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.landing-title {
+  margin: 0;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #eaf3f9;
+}
+
+.landing-count {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: $steel;
+  background: rgba($steel, 0.12);
+  border: 1px solid rgba($steel, 0.3);
+  border-radius: 999px;
+  padding: 0.05rem 0.55rem;
+  line-height: 1.4;
+}
+
+.landing-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.4rem;
+  height: 2.4rem;
+  padding: 0;
+  border: 1px solid rgba($steel, 0.35);
+  border-radius: 50%;
+  background: rgba($steel, 0.06);
+  color: #cfe2ee;
+  cursor: pointer;
+  font-size: 1.25rem;
+  transition: background 150ms ease, border-color 150ms ease;
+
+  &:hover { background: rgba($steel, 0.16); border-color: rgba($steel, 0.6); }
+  &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: 2px; }
+}
+
+.landing-empty {
+  padding: 2.5rem 2rem;
+  opacity: 0.55;
+  font-size: 1rem;
+}
+
+.landing-grid {
+  list-style: none;
+  margin: 0;
+  padding: 2rem;
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  overflow: auto;
+  flex: 1 1 auto;
+  align-content: start;
+}
+
+.site-card {
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  width: 100%;
+  padding: 1.05rem 1.2rem;
+  border: 1px solid rgba($steel, 0.22);
+  border-left-width: 3px;   // accent stripe (per-site colour, set inline)
+  border-radius: 12px;
+  background: rgba($steel, 0.05);
+  color: #eaf3f9;
+  cursor: pointer;
+  text-align: left;
+  transition: background 150ms ease, border-color 150ms ease, transform 120ms ease;
+
+  &:hover { background: rgba($steel, 0.12); border-color: rgba($steel, 0.5); }
+  &:active { transform: scale(0.99); }
+  &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: 2px; }
+}
+
+.site-icon {
+  font-size: 1.5rem;
+  color: $steel;
+  flex: 0 0 auto;
+}
+
+.site-name {
+  flex: 1 1 auto;
+  font-size: 1rem;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.site-go {
+  font-size: 1.1rem;
+  opacity: 0.35;
+  flex: 0 0 auto;
+  transition: opacity 150ms ease;
+}
+
+.site-card:hover .site-go { opacity: 0.85; }
+
+.mat-sym {
+  font-family: 'Material Symbols Outlined';
+  line-height: 1;
+}

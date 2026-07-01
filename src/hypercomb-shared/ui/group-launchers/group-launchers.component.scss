@@ -1,0 +1,60 @@
+// hypercomb-shared/ui/group-launchers/group-launchers.component.scss
+//
+// Meaning-icons in the top chrome — cold, clean, bare. One glyph per group;
+// quiet at rest, brighten on hover (the same language as the undo/tag chrome).
+
+:host { display: inline-flex; align-items: center; }
+
+.group-launchers {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.group-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  color: rgba(206, 224, 240, 0.6);
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease;
+
+  .mat-sym {
+    font-family: 'Material Symbols Outlined';
+    font-size: 1.3rem;
+    line-height: 1;
+  }
+
+  &:hover { color: #eaf5fb; background: rgba(126, 182, 214, 0.12); }
+  &:active { transform: scale(0.94); }
+  &:focus-visible { outline: 1px solid rgba(126, 182, 214, 0.6); outline-offset: 2px; }
+
+  // ── toggled ON: this group is mixed into the shared aggregator page ──
+  // Same cold-steel "on" glow as command-shell's view/game toggles, written
+  // with literal steel-blue (the --glow-color var is scoped to command-shell's
+  // subtree and doesn't cascade to this sibling). No animation.
+  &.on {
+    color: rgb(126, 182, 214);
+    background: rgba(126, 182, 214, 0.18);
+    box-shadow: 0 0 6px rgba(126, 182, 214, 0.55);
+  }
+  &.on:hover { background: rgba(126, 182, 214, 0.28); }
+}
+
+// ── icon edit mode: float + wiggle (iOS-style) ──
+@keyframes icon-jiggle {
+  0%   { transform: rotate(-2.5deg); }
+  50%  { transform: rotate(2.5deg); }
+  100% { transform: rotate(-2.5deg); }
+}
+.group-btn.icon-jiggle {
+  animation: icon-jiggle 0.2s ease-in-out infinite;
+  // stagger so they don't wiggle in lockstep
+  &:nth-child(even) { animation-delay: -0.1s; }
+}

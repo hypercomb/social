@@ -21,6 +21,14 @@
 // shared content. The arrangement itself IS committed: the reorder goes
 // through `writeTilePropertiesAt({ index })` per tile exactly like a drag,
 // so it is one undoable / time-travelable change.
+//
+// After each press the bounding box of the tiles changes shape, so we
+// re-fit the viewport to the new arrangement — the freshly organised set
+// lands centred and fully in view on every iteration (the same
+// fit-to-center as the `0` / `r` shortcuts, ZoomDrone.zoomToFit). The fit
+// is deferred so the reorder render + new hex-mesh geometry lands first;
+// zoomToFit reads live bounds, so firing before the render would fit the
+// stale pre-arrange rectangle (mirrors AutoFitFirstAddDrone's deferred fit).
 
 import { Drone, hypercomb } from '@hypercomb/core'
 import type { Axial } from '../navigation/hex-detector.js'
@@ -77,6 +85,7 @@ export class SequenceCycleDrone extends Drone {
 
   #busy = false
   #effectsRegistered = false
+  #fitTimer: ReturnType<typeof setTimeout> | null = null
 
   protected override heartbeat = async (): Promise<void> => {
     if (this.#effectsRegistered) return
@@ -147,11 +156,32 @@ export class SequenceCycleDrone extends Drone {
 
       this.#writeActive(locationKey, nextIdx)
       this.#toast(entry)
+      this.#fitToCenter()
     } catch (err) {
       console.warn('[sequence-cycle] apply failed:', err)
     } finally {
       this.#busy = false
     }
+  }
+
+  // ── fit-to-center after arranging ───────────────────────────────────
+  //
+  // Re-fit the viewport so the new arrangement lands centred and fully in
+  // view. Deferred so the cell:reorder render + new hex-mesh geometry
+  // lands first — zoomToFit reads live bounds from the content layer, so
+  // firing before the render fits the stale pre-arrange rectangle. Rapid
+  // `a` presses coalesce: the pending fit is cancelled and rescheduled so
+  // only the final arrangement is fitted, once it settles. Source 'user'
+  // so the recomposed view persists like the `0` / `r` fit shortcuts.
+  #fitToCenter = (): void => {
+    if (this.#fitTimer !== null) clearTimeout(this.#fitTimer)
+    this.#fitTimer = setTimeout(() => {
+      this.#fitTimer = null
+      const zoom = window.ioc.get<{
+        zoomToFit?: (snap?: boolean, source?: 'user' | 'auto') => void
+      }>('@diamondcoreprocessor.com/ZoomDrone')
+      zoom?.zoomToFit?.(false, 'user')
+    }, 80)
   }
 
   /** Built-ins first, then every saved set in the palette. */

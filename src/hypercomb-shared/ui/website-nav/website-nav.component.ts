@@ -4,8 +4,8 @@
 //
 // In website mode the whole top bar (command line included) is hidden so a site
 // reads like a site, not an app. The visible way out is the raw-DOM exit hexagon
-// SiteViewDrone mounts (#hc-site-exit); the way back into a site is its tile in
-// the bottom-right launcher (hc-website-strip). This component owns the one thing
+// SiteViewDrone mounts (#hc-site-exit); the way back into a site is its launcher
+// tile in the shared group-launcher mix (the websites group). This component owns the one thing
 // neither of those can guarantee: a global Escape that ALWAYS leaves website
 // mode, even if a page's CSS hid the exit hexagon or it never rendered. Capture
 // phase so an embedded page script can't swallow the key first.

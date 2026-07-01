@@ -80,6 +80,47 @@ export async function rasteriseSvgToTexture(
   return texture
 }
 
+/**
+ * Render a Material Symbols ligature (an icon NAME, e.g. "edit") to a high-res,
+ * tintable (white-fill) Pixi Texture using the Material Symbols Outlined font on
+ * a canvas. The universal icon protocol uses this to reskin a Pixi overlay icon
+ * with a user-chosen Material glyph — the DOM surfaces just swap the ligature
+ * string, but Pixi needs it baked to a texture.
+ */
+export async function renderMaterialGlyphToTexture(ligature: string): Promise<Texture> {
+  const px = SVG_VIEWBOX * SVG_RENDER_SCALE
+  const fontSize = Math.round(px * 0.82)
+  const font = `${fontSize}px "Material Symbols Outlined"`
+  // Ensure the font (+ this ligature) is loaded before rasterising, else the
+  // canvas draws the literal text or tofu.
+  try {
+    await (document as unknown as { fonts?: { load?: (f: string, t?: string) => Promise<unknown> } })
+      .fonts?.load?.(font, ligature)
+  } catch { /* best effort — proceed */ }
+
+  const canvas = document.createElement('canvas')
+  canvas.width = px
+  canvas.height = px
+  const ctx = canvas.getContext('2d')!
+  ctx.clearRect(0, 0, px, px)
+  ctx.fillStyle = '#ffffff'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.font = font
+  ctx.fillText(ligature, px / 2, px / 2)
+
+  const texture = Texture.from({
+    resource: canvas,
+    alphaMode: 'premultiply-alpha-on-upload',
+    scaleMode: 'linear',
+  })
+  try {
+    texture.source.autoGenerateMipmaps = true
+    texture.source.update()
+  } catch { /* mipmaps optional */ }
+  return texture
+}
+
 export type IconButtonConfig = {
   /** Display size in Pixi units (square) */
   size: number
@@ -125,6 +166,28 @@ export class HexIconButton extends Container {
       this.addChild(sprite)
     } catch (e) {
       console.warn('[HexIconButton] load failed:', e)
+    }
+  }
+
+  /**
+   * Reskin this button with a Material Symbols glyph (icon-protocol override) —
+   * replaces the SVG sprite with a font-rendered glyph texture.
+   */
+  async setGlyph(materialName: string): Promise<void> {
+    if (!this.#alive) return
+    try {
+      const texture = await renderMaterialGlyphToTexture(materialName)
+      if (!this.#alive) { texture.destroy(); return }
+      if (this.#sprite) { this.#sprite.destroy(); this.#sprite = null }
+      const sprite = new Sprite(texture)
+      sprite.width = this.#size
+      sprite.height = this.#size
+      sprite.anchor.set(0.5, 0.5)
+      sprite.tint = this.#hovered ? this.#hoverTint : this.#normalTint
+      this.#sprite = sprite
+      this.addChild(sprite)
+    } catch (e) {
+      console.warn('[HexIconButton] setGlyph failed:', e)
     }
   }
 

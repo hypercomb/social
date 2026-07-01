@@ -7,10 +7,18 @@ import type { HostReadyPayload } from './pixi-host.worker.js'
 import type { Axial, HexDetector } from '../../navigation/hex-detector.js'
 import type { InputGate } from '../../navigation/input-gate.service.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
+import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone.js'
 
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; noImageLabels?: string[]; substrateLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[] }
+
+/** Single-segment location the launch-group aggregator navigates into —
+ *  `agg-<id>` (today only `agg-mix`, the shared union page). On such a page every
+ *  tile is a launcher, so a click opens its target directly. Mirrors
+ *  MixedGroupBag's naming in shared (matched by string, never imported — modules
+ *  must not depend on shared). */
+const AGGREGATOR_SEGMENT_PREFIX = 'agg-'
 
 type OverlayAction = {
   name: string
@@ -202,6 +210,8 @@ export class TileOverlayDrone extends Drone {
 
   #arrangeMode = false
   #arrangeDirty = false
+  /** Icon-protocol edit mode is on — overlay icons wiggle + a tap reskins. */
+  #iconEditOn = false
   #poolContainer: Container | null = null
   #poolBackground: Graphics | null = null
   #poolIcons: PoolIcon[] = []
@@ -245,8 +255,9 @@ export class TileOverlayDrone extends Drone {
     'substrate:applied', 'cell:removed', 'tile:saved',
     'tile:public-changed',
     'keymap:invoke',
+    'icon:edit-mode', 'icon:override-changed',
   ]
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'group:open', 'icon:pick-request']
 
   #dropDragging = false
   #dropPending = false
@@ -405,6 +416,20 @@ export class TileOverlayDrone extends Drone {
           changed = true
         }
         if (changed) this.#rebuildActiveProfile()
+      })
+
+      // ── Universal icon protocol ─────────────────────────────────
+      // Edit mode → overlay icons wiggle (ticker) + a tap reskins them.
+      this.onEffect<{ on?: boolean }>('icon:edit-mode', ({ on }) => {
+        this.#iconEditOn = !!on
+        if (!this.#iconEditOn) {
+          // Stop wiggling: settle every button back to upright.
+          for (const a of this.#actions) a.button.rotation = 0
+        }
+      })
+      // A reskin landed — rebuild so the new glyph renders (gated to overlay ids).
+      this.onEffect<{ id?: string }>('icon:override-changed', ({ id }) => {
+        if (id && id.startsWith('overlay:')) this.#rebuildActiveProfile()
       })
 
       // ── Genotype visibility toggling ────────────────────────────
@@ -693,7 +718,7 @@ export class TileOverlayDrone extends Drone {
         if (this.#hexBg && this.#overlay?.visible) {
           this.#hexBg.setTime(this.#animTime)
         }
-        if (this.#arrangeMode) {
+        if (this.#arrangeMode || this.#iconEditOn) {
           this.#animateArrangeWiggle()
         }
       }
@@ -797,7 +822,12 @@ export class TileOverlayDrone extends Drone {
         hoverTint: desc.hoverTint,
       })
       this.#overlay.addChild(btn)
-      void btn.load(desc.svgMarkup)
+      // Icon protocol: a participant reskin (overlay:<name>) wins over the
+      // author SVG — render the chosen Material glyph to a texture instead.
+      const ov = window.ioc.get<{ has(id: string): boolean; glyph(id: string, d: string): string }>('@hypercomb.social/IconOverrides')
+      const overrideId = 'overlay:' + desc.name
+      if (ov?.has(overrideId)) void btn.setGlyph(ov.glyph(overrideId, ''))
+      else void btn.load(desc.svgMarkup)
 
       this.#actions.push({
         name: desc.name,
@@ -1735,6 +1765,14 @@ export class TileOverlayDrone extends Drone {
     }
   }
 
+  /** True when the current location is a launch-group aggregator page (the
+   *  website / game launcher menu). Race-free: reads the lineage, not the async
+   *  decoration index. */
+  #onLauncherPage(): boolean {
+    const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
+    return segs.length === 1 && typeof segs[0] === 'string' && segs[0].startsWith(AGGREGATOR_SEGMENT_PREFIX)
+  }
+
   // ── Instant branch navigation on pointerdown ────────────────────────
   #onPointerDown = (e: PointerEvent): void => {
     // Right-button down → instant back navigation (trailing pointerup + contextmenu suppressed)
@@ -1771,9 +1809,13 @@ export class TileOverlayDrone extends Drone {
 
     const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
     if (!entry?.label) return
-    if (!this.#branchLabels.has(entry.label)) return
 
-    // Check that pointer is not on an action button — those use click
+    // If the press is over a VISIBLE overlay action button (edit, note, …), let
+    // the click handler run that action — never treat it as a tile-body press.
+    // This MUST run before the launcher branch below: on an aggregator page
+    // every tile is a launcher, so without this the press would be swallowed by
+    // group:open and the hover overlay's Edit icon would be dead. The icon
+    // overlay then works on launcher tiles exactly as it does on normal tiles.
     if (this.#overlay?.visible) {
       const ox = this.#overlay.position.x
       const oy = this.#overlay.position.y
@@ -1785,6 +1827,22 @@ export class TileOverlayDrone extends Drone {
         if (btn.containsPoint(bx, by)) return
       }
     }
+
+    // On a launch-group aggregator page EVERY tile is a launcher: a body press
+    // OPENS its target directly (no arming, nothing to block). Gate on the
+    // LOCATION, which is race-free — the per-cell `launch:target` decoration
+    // index hydrates asynchronously, so relying on it made the first clicks on a
+    // freshly-opened menu do nothing until you re-selected the icon. The
+    // decoration check stays as a fallback for any launcher outside an
+    // aggregator. Consume the pointer so the trailing click is suppressed.
+    if (this.#onLauncherPage() || hasDecorationKind(entry.label, 'launch:target')) {
+      this.#consumedPointerId = e.pointerId
+      consumePointerGesture(e.pointerId)
+      this.#clearSelectionOnNavigate()
+      this.emitEffect('group:open', { label: entry.label })
+      return
+    }
+    if (!this.#branchLabels.has(entry.label)) return
 
     this.#consumedPointerId = e.pointerId
     consumePointerGesture(e.pointerId)
@@ -1868,6 +1926,11 @@ export class TileOverlayDrone extends Drone {
 
         if (btn.containsPoint(bx, by)) {
           this.#clearHint()
+          // Icon edit mode: a tap reskins this overlay icon instead of running it.
+          if (this.#iconEditOn) {
+            this.emitEffect('icon:pick-request', { id: 'overlay:' + action.name })
+            return
+          }
           // ⋮ toggle — reveal/hide the danger row in place; never a tile action.
           if (action.name === 'more') {
             this.#dangerRevealed = !this.#dangerRevealed

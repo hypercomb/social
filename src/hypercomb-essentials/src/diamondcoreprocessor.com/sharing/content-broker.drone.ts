@@ -152,6 +152,25 @@ const FETCH_MISS_TTL_MS = 60_000
 // when it can; silent and non-blocking when it can't.
 const MAX_MISS_TTL_MS = 30 * 60_000
 
+// Beta shared byte mirrors — appended to the HTTP-direct fallback tier (Tier 3)
+// whenever the shared LIVE relay is active (see #getFallbackDomains /
+// #liveRelayActive). The SAME hc:nostrmesh:use-live-relay flag that points the
+// MESH at wss://jwize.com also points BYTE-resolution here, so a single flag
+// makes the whole beta resolvable end to end. Resources (website pages, images,
+// game assets) have NO mesh fallback — without a guaranteed host a fresh viewer
+// that never received the publisher's ['domain'] attribution simply 404s and
+// the tile/page renders blank. These two hosts are that guarantee:
+//   • jwize.com               — the bootstrap relay; ALSO an HTTP /<sig> host.
+//   • pluginthematrix.io/sigs — Azure byte mirror, a byte-equal copy of
+//                               jwize.com's content dir, served flat at
+//                               https://pluginthematrix.io/sigs/<sig>.
+// The interior '/sigs' path survives #domainToHost (it strips scheme + trailing
+// slash only), so the broker GETs https://pluginthematrix.io/sigs/<sig>. sha256
+// gates every fetched byte, so a mirror that 404s or serves wrong bytes is
+// harmless — it only ever costs a 404 before the cascade moves on, never
+// corruption.
+const BETA_FALLBACK_DOMAINS = ['jwize.com', 'pluginthematrix.io/sigs'] as const
+
 export type ContentType = 'layer' | 'resource' | 'dependency'
 
 // Visuals-by-composedSig is the second flavor of fetch this drone
@@ -388,28 +407,68 @@ export class ContentBrokerDrone extends Drone {
     } catch { return new Set<string>() }
   }
 
-  // Optional fallback hosts — Tier 3 of the HTTP-direct cascade. EMPTY by
-  // default: there is no public default registry (domain-as-identity —
-  // bootstrap is an operator domain, and every participant's self-domain
-  // already sits at Tier 0). The old hard-coded Azure CDN default is
-  // retired — a self-hosting operator must never see the app dial central
-  // storage. Operators who WANT extra last-resort mirrors set
-  // `hc:fallback-domains` in localStorage as a JSON array — same shape as
-  // hc:community:domains, just used at a lower-priority tier; sha256 still
-  // gates acceptance.
+  // Tier 3 of the HTTP-direct cascade — last-resort byte mirrors, in priority
+  // order:
+  //
+  //   (a) BETA shared mirrors (BETA_FALLBACK_DOMAINS — jwize.com + the
+  //       pluginthematrix.io/sigs Azure mirror). Injected whenever the shared
+  //       LIVE relay is active, so ONE flag (hc:nostrmesh:use-live-relay) steers
+  //       both the mesh AND a guaranteed byte source. This is what lets a fresh
+  //       viewer resolve a peer's website/resource sig even when no mesh
+  //       ['domain'] attribution ever reached it — resources have no mesh
+  //       fallback, so without a fallback host they'd silently 404. Gated
+  //       exactly like the mesh seed (NostrMeshDrone.loadRelays): '1' forces it
+  //       anywhere, '0' opts fully out, unset defaults ON for a real origin and
+  //       OFF on loopback (dev resolves from the local relay). Per-client opt
+  //       out with `/use-live-relay off`.
+  //
+  //   (b) Operator-configured extras — `hc:fallback-domains` (JSON array, same
+  //       shape as hc:community:domains), appended after the beta mirrors.
+  //
+  // sha256 gates every fetched byte regardless of tier, so a wrong/unreachable
+  // mirror only ever costs a 404 — never corruption. (Pre-beta this returned []
+  // by default to keep a self-hosting operator from ever dialing central
+  // storage; the beta mirrors are a deliberate ramp posture while the shared
+  // relay rolls out, opt-out-able per client — revisit the default when
+  // third-party operators federate.)
   #getFallbackDomains = (): string[] => {
-    try {
-      const raw = String(localStorage.getItem('hc:fallback-domains') ?? '').trim()
-      if (!raw) return []
-      const parsed = JSON.parse(raw)
-      if (!Array.isArray(parsed)) return []
-      const out: string[] = []
-      for (const entry of parsed) {
-        const host = this.#domainToHost(String(entry ?? ''))
+    const out: string[] = []
+    if (this.#liveRelayActive()) {
+      for (const d of BETA_FALLBACK_DOMAINS) {
+        const host = this.#domainToHost(d)
         if (host) out.push(host)
       }
-      return out
-    } catch { return [] }
+    }
+    try {
+      const raw = String(localStorage.getItem('hc:fallback-domains') ?? '').trim()
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) {
+          for (const entry of parsed) {
+            const host = this.#domainToHost(String(entry ?? ''))
+            if (host) out.push(host)
+          }
+        }
+      }
+    } catch { /* malformed list — the beta mirrors above still apply */ }
+    return out
+  }
+
+  // True when the shared LIVE relay is active for this client — the single
+  // condition that also seeds the beta byte mirrors above. Mirrors
+  // NostrMeshDrone.loadRelays' seed policy verbatim so ONE flag governs both
+  // transports:
+  //   flag '1'  → forced on (any origin, incl. loopback)
+  //   flag '0'  → opted fully out
+  //   unset     → ON for a real (deployed) origin, OFF on loopback dev
+  #liveRelayActive = (): boolean => {
+    let flag: string | null = null
+    try { flag = localStorage.getItem('hc:nostrmesh:use-live-relay') } catch { /* private mode */ }
+    if (flag === '1') return true
+    if (flag === '0') return false
+    try {
+      return !/^(localhost|127(?:\.\d+){3}|\[?::1\]?)$/i.test(location.hostname)
+    } catch { return false }
   }
 
   // Pull all `['domain', host]` tags out of an incoming response event.

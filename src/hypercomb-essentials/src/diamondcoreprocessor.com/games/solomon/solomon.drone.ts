@@ -24,6 +24,13 @@ export class SolomonDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'game'
 
+  // Launch descriptor — read by the games launch-group aggregator (which
+  // discovers games by enumerating `genotype:'game'` bees in IoC, no roster).
+  // gameId is the `<id>:toggle` effect prefix; gameIcon is a Material glyph.
+  readonly gameId = 'solomon'
+  readonly gameLabel = "Solomon's Key"
+  readonly gameIcon = 'castle'
+
   public override description =
     "Solomon's Key — a block-conjuring puzzle-platformer with a built-in level designer. Toggle from the header icon or /solomon."
 

@@ -92,6 +92,25 @@ const _runInitializeRuntime = async (
       if (candidate) localStorage.setItem('hc:nostrmesh:self-domain', candidate)
     }
 
+    // ── beta ramp: live relay + byte mirrors (real origins only) ──
+    // On a DEPLOYED origin, seed hc:nostrmesh:use-live-relay='1' ONCE so the
+    // whole beta routing is explicit and stable rather than merely implied by
+    // the unset origin-default: this single flag steers BOTH the mesh
+    // (→ wss://jwize.com, nostr-mesh.drone loadRelays) AND ContentBroker's byte
+    // fallback (→ jwize.com + pluginthematrix.io/sigs, #liveRelayActive). The
+    // one-time marker (hc:beta-relay-seeded) means a later `/use-live-relay
+    // clear` is respected — we never re-seed over an explicit clear. Loopback
+    // dev is never seeded (it resolves from the local relay; force with
+    // `/use-live-relay on` to test the live path). Opt out on a real origin
+    // anytime with `/use-live-relay off`. Revisit when third-party operators
+    // federate (no MANDATORY central chokepoint).
+    if (!isLoopback
+        && localStorage.getItem('hc:nostrmesh:use-live-relay') === null
+        && localStorage.getItem('hc:beta-relay-seeded') === null) {
+      localStorage.setItem('hc:nostrmesh:use-live-relay', '1')
+      localStorage.setItem('hc:beta-relay-seeded', '1')
+    }
+
     // ── location secret (dev-build default) ──
     // On loopback, seed the room secret so two localhost tabs land in the same
     // swarm room without typing it. Respects an explicit clear; never touches

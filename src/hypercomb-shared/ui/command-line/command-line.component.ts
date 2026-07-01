@@ -3,6 +3,7 @@
 import { AfterViewInit, Component, computed, signal, ViewChild, type OnDestroy } from '@angular/core'
 import { CommandShellComponent } from '../command-shell/command-shell.component'
 import { HintBarComponent } from '../hint-bar/hint-bar.component'
+import { GroupLaunchersComponent } from '../group-launchers/group-launchers.component'
 import type { Lineage } from '../../core/lineage'
 import type { MovementService } from '../../core/movement.service'
 import type { Navigation } from '../../core/navigation'
@@ -33,9 +34,6 @@ const BUILTIN_SLASH: { behaviour: { name: string; description: string; descripti
 /** Threshold between a tap and a long-press on the mobile mic button (ms). */
 const MIC_LONG_PRESS_MS = 300
 
-/** How long the undo/redo arrows linger after the last undo/redo activity. */
-const HISTORY_NAV_HIDE_MS = 3000
-
 /** How long the lock indicator stays lit after a pan/zoom-while-locked attempt. */
 const LOCKED_FLASH_MS = 1100
 
@@ -44,6 +42,19 @@ const TAG_ASSIGN_RE = /^([^:]+):([^(]+)(?:\(([^)]+)\))?$/
 
 /** Matches cell:[...] bracket-tag syntax — colon before opening bracket. */
 const BRACKET_TAG_RE = /^([^\[\/!#~]+):\[(.+?)\](.*)$/
+
+/**
+ * `@` attaches a FEATURE (a registered behavior) to a cell — the action/
+ * behavior sibling of `:` tags. `abc@gallery` adds the gallery feature to
+ * `abc`; `~abc@gallery` detaches it. The feature vocabulary is the live
+ * VisualBeeRegistry (every behavior is named + described), so intellisense
+ * lists real, attachable behaviors with their descriptions. The target may
+ * not contain another sigil (`@ : [ / ! # ~`) or whitespace, so genuine URL
+ * / email pastes don't get hijacked — and commit only consumes the input
+ * when the fragment resolves to a registered behavior.
+ */
+const FEATURE_RE = /^([^@:\[\/!#~\s]+)@([^@]*)$/
+const FEATURE_REMOVE_RE = /^~([^@:\[\/!#~\s]+)@([^@]*)$/
 
 /**
  * Brackets `[…]` are THE selection grouping primitive — the one canonical form.
@@ -101,7 +112,7 @@ const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
 @Component({
   selector: 'hc-command-line',
   standalone: true,
-  imports: [CommandShellComponent, HintBarComponent, TranslatePipe],
+  imports: [CommandShellComponent, HintBarComponent, TranslatePipe, GroupLaunchersComponent],
   templateUrl: './command-line.component.html',
   styleUrls: ['./command-line.component.scss'],
   host: {
@@ -176,6 +187,107 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       map.set(m.behaviour.name, m.behaviour.description)
     }
     return map
+  })
+
+  /**
+   * Feature behaviours matching the current `@` fragment, sourced live from
+   * the VisualBeeRegistry — every registered behavior is a named, described,
+   * attachable feature. Each carries its toggle icon and a localized
+   * description so the intellisense reads as self-documenting. Ranking is
+   * alpha for now; overlap-count ranking (the one metric we keep) lands with
+   * the shared ranking pass.
+   */
+  readonly #featureMatches = computed<readonly { view: string; icon: string; description: string; slashCommand: string; count: number }[]>(() => {
+    const ctx = this.context()
+    if (!ctx.active || ctx.mode !== 'feature') return []
+    const registry = get('@diamondcoreprocessor.com/VisualBeeRegistry') as {
+      all(): readonly { view: string; toggleIcon?: string; slashCommand?: string; descriptionKey?: string; labelKey?: string; decorationKind?: string }[]
+    } | undefined
+    const bees = registry?.all() ?? []
+    const metrics = get('@diamondcoreprocessor.com/OverlapMetrics') as { kindCount(kind: string): number } | undefined
+    const i18n = this.#i18n
+    const q = ctx.normalized
+    const mapped = bees.map(b => ({
+      view: b.view,
+      icon: b.toggleIcon ?? '',
+      slashCommand: b.slashCommand ?? '',
+      description:
+        (b.descriptionKey ? i18n?.t(b.descriptionKey) : undefined) ??
+        (b.labelKey ? i18n?.t(b.labelKey) : undefined) ??
+        b.view,
+      // Overlap count = how many tiles share this feature (the popularity metric).
+      count: metrics?.kindCount(b.decorationKind ?? '') ?? 0,
+    }))
+    const filtered = q ? mapped.filter(m => m.view.toLowerCase().startsWith(q)) : mapped
+    // Most-shared first; alpha breaks ties so order is stable.
+    return [...filtered].sort((a, b) => b.count - a.count || a.view.localeCompare(b.view))
+  })
+
+  /**
+   * Descriptions shown right-aligned in the dropdown, keyed by suggestion.
+   * Unified across the description-bearing modes (slash behaviours + `@`
+   * features) so the shell stays presentational and one binding covers both.
+   */
+  readonly descriptionMap = computed<ReadonlyMap<string, string>>(() => {
+    const ctx = this.context()
+    if (ctx.active && ctx.mode === 'slash') return this.slashDescriptionMap()
+    if (ctx.active && ctx.mode === 'feature') {
+      const map = new Map<string, string>()
+      for (const f of this.#featureMatches()) map.set(f.view, f.description)
+      return map
+    }
+    return new Map()
+  })
+
+  /**
+   * Detail for the highlighted suggestion — drives the right-hand intellisense
+   * pane. Returns null for info-less rows (bare cell-create) so the dropdown
+   * stays a clean single column there, and a rich record for behaviours /
+   * features where there's something worth reading. Reads the shell's active
+   * index so arrowing up/down re-renders the pane live (same pattern as
+   * {@link ghostValue}). `count` (the overlap metric) is wired through and
+   * fills in once the shared ranking pass lands.
+   */
+  readonly activeDetail = computed<{
+    name: string; kind?: string; description?: string; icon?: string; count?: number; options?: readonly string[]
+  } | null>(() => {
+    if (this.shell?.suppressed()) return null
+    const ctx = this.context()
+    if (!ctx.active) return null
+    const list = this.suggestions()
+    if (!list.length) return null
+    const idx = this.shell?.activeIndex() ?? 0
+    const name = list[Math.max(0, Math.min(idx, list.length - 1))]
+    if (!name) return null
+
+    // '@' feature — name + localized description + behavior icon + overlap count.
+    if (ctx.mode === 'feature') {
+      const f = this.#featureMatches().find(m => m.view === name)
+      return { name, kind: 'feature', description: f?.description, icon: f?.icon || 'extension', count: f?.count }
+    }
+
+    // ':' tag — show how many tiles share it (the overlap/popularity metric).
+    if (ctx.mode === 'tag') {
+      const metrics = get('@diamondcoreprocessor.com/OverlapMetrics') as { tagCount(name: string): number } | undefined
+      return { name, kind: 'tag', icon: 'sell', count: metrics?.tagCount(name) }
+    }
+
+    // '/' slash — distinguish choosing the BEHAVIOUR (show its description +
+    // its own completions as the "options" cascade) from typing its ARGS.
+    if (ctx.mode === 'slash') {
+      const isArgMode = /^\/\S+?[\s\[]/i.test(ctx.head)
+      if (isArgMode) return { name, kind: 'option', icon: 'tune' }
+      const description = this.slashDescriptionMap().get(name)
+      const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as
+        { complete?(behaviourName: string, args: string): readonly string[] } | undefined
+      let options: readonly string[] = []
+      try { options = drone?.complete?.(name, '') ?? [] } catch { /* no completions */ }
+      if (!description && options.length === 0) return null
+      return { name, kind: 'behaviour', description, icon: 'bolt', options }
+    }
+
+    // Other modes carry no extra info yet — keep the dropdown single-column.
+    return null
   })
 
   /** Prefix of the current suggestion fragment — used by shell for highlight split. */
@@ -268,96 +380,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     get('@hypercomb.social/CellSuggestionProvider') as EventTarget,
     () => this.cellProvider.suggestions()
   )
-
-  // Reactive view of the history cursor's full state. Drives the
-  // command-line's history affordances: undo arrow (disabled at the
-  // start), redo arrow (disabled at head), and the Save As button
-  // (only visible while rewound). Reading the whole state from one
-  // signal keeps the three controls in lockstep.
-  //
-  // Writable so we can keep it correct even when the cursor service
-  // registers AFTER this component's class fields evaluate. fromRuntime
-  // requires a defined target at call time — a one-shot signal that
-  // never updates if the target wasn't there yet — which produced the
-  // "buttons stuck disabled until the first undo" bug at boot. Instead
-  // we own the signal and listen via whenReady so the wiring survives
-  // any load-order. Sync from cursor.state on every 'change' event.
-  private readonly _cursorState = signal({ position: 0, total: 0, rewound: false })
-  readonly cursorState = this._cursorState.asReadonly()
-
-  /** True while the cursor has been moved off head. Drives Save As visibility. */
-  readonly cursorRewound = computed(() => this.cursorState().rewound)
-
-  /** True when there's nowhere to undo to (no history yet OR already at pre-history). */
-  readonly undoDisabled = computed(() => {
-    const s = this.cursorState()
-    return s.total === 0 || s.position <= 0
-  })
-
-  /** True when there's nothing to redo (already at head). */
-  readonly redoDisabled = computed(() => {
-    const s = this.cursorState()
-    return s.total === 0 || s.position >= s.total
-  })
-
-  // Undo/redo arrows are hidden by default and only surface while the user
-  // is actively navigating history — driven by the cursor-transition detector
-  // in the constructor. Stay visible while rewound so the "Save As" button
-  // doesn't sit alone on the bar. See HISTORY_NAV_HIDE_MS for the linger.
-  private readonly _historyNavVisible = signal(false)
-  readonly historyNavVisible = this._historyNavVisible.asReadonly()
-  #historyNavHideTimer: ReturnType<typeof setTimeout> | null = null
-
-  #showHistoryNav(): void {
-    this._historyNavVisible.set(true)
-    if (this.#historyNavHideTimer) clearTimeout(this.#historyNavHideTimer)
-    this.#historyNavHideTimer = setTimeout(() => {
-      this._historyNavVisible.set(false)
-      this.#historyNavHideTimer = null
-    }, HISTORY_NAV_HIDE_MS)
-  }
-
-  /** Fire undo. Routes through the cursor's group-step logic. */
-  doUndo = (): void => {
-    const c = get('@diamondcoreprocessor.com/HistoryCursorService') as { undo?: () => void } | undefined
-    c?.undo?.()
-  }
-
-  /** Fire redo. Mirror of {@link doUndo}. */
-  doRedo = (): void => {
-    const c = get('@diamondcoreprocessor.com/HistoryCursorService') as { redo?: () => void } | undefined
-    c?.redo?.()
-  }
-
-  /**
-   * Promote the rewound layer at the cursor position to be the new head.
-   * Wired to the "Save As" button surfaced by the template when
-   * {@link cursorRewound} is true.
-   *
-   * Routes through HistoryService.promoteToHead, which the history-viewer
-   * also uses for per-row "make HEAD". After promotion the cursor
-   * re-hydrates and lands on the new top.
-   */
-  saveAsHead = async (): Promise<void> => {
-    const cursor = get('@diamondcoreprocessor.com/HistoryCursorService') as {
-      state: { locationSig: string; position: number }
-      currentLayerSig: string
-      load: (sig: string) => Promise<void>
-      seek: (n: number) => void
-    } | undefined
-    const history = get('@diamondcoreprocessor.com/HistoryService') as {
-      promoteToHead?: (locSig: string, layerSig: string) => Promise<void>
-    } | undefined
-    if (!cursor || !history?.promoteToHead) return
-    const locSig = cursor.state.locationSig
-    const layerSig = cursor.currentLayerSig
-    if (!locSig || !layerSig) return
-    await history.promoteToHead(locSig, layerSig)
-    await cursor.load(locSig)
-    // load() puts cursor at head already; explicit jump for clarity.
-    const total = (cursor.state as { total?: number }).total ?? 0
-    cursor.seek(total)
-  }
 
   // pluggable behaviors — validated at construction, no overlapping operations.
   //
@@ -530,37 +552,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     () => this.viewToggles().find(v => v.view === 'website' && v.active) ?? null,
   )
 
-  // ── Solomon's Key game toggle (header icon) ───────────
-  //
-  // The SolomonDrone announces availability + open/closed state over
-  // `solomon:state`. The icon appears once the game module registers and
-  // glows while the overlay is open. A click routes back as `solomon:toggle`.
-  readonly #solomonAvailable = signal(false)
-  readonly #solomonActive = signal(false)
-  readonly showSolomonToggle = this.#solomonAvailable.asReadonly()
-  readonly solomonActive = this.#solomonActive.asReadonly()
-
-  // ── Bubble Bobble game toggle (header icon) ───────────
-  //
-  // The BubbleDrone announces availability + open/closed state over
-  // `bubble:state`. Sibling of the Solomon toggle: the icon appears once the
-  // game module registers and glows while the overlay is open. A click routes
-  // back as `bubble:toggle`.
-  readonly #bubbleAvailable = signal(false)
-  readonly #bubbleActive = signal(false)
-  readonly showBubbleToggle = this.#bubbleAvailable.asReadonly()
-  readonly bubbleActive = this.#bubbleActive.asReadonly()
-
-  // ── Arkanoid game toggle (header icon) ────────────────
-  //
-  // The ArkanoidDrone announces availability + open/closed state over
-  // `arkanoid:state`. Sibling of the Solomon / Bubble toggles: the icon appears
-  // once the game module registers and glows while the overlay is open. A click
-  // routes back as `arkanoid:toggle`.
-  readonly #arkanoidAvailable = signal(false)
-  readonly #arkanoidActive = signal(false)
-  readonly showArkanoidToggle = this.#arkanoidAvailable.asReadonly()
-  readonly arkanoidActive = this.#arkanoidActive.asReadonly()
+  // Arcade games (Solomon's Key, Bubble Bobble, Arkanoid, Roper, …) are no
+  // longer per-game header icons here — they aggregate under the single
+  // "games" launch-group meaning-icon rendered by <hc-group-launchers>, the
+  // same way websites do. See hypercomb-shared/core/games-group.ts.
 
   // ── open-for-subscribers toggle ───────────────────────
   //
@@ -597,55 +592,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   public constructor() {
     console.log('[command-line] initialized with url segments:', this.navigation.segments())
 
-    // Wire cursor state → signal. Uses whenReady so the wiring survives
-    // any IoC load-order: if the cursor service registers AFTER this
-    // component constructs (the common case in hypercomb-web's runtime
-    // bee loading), the callback fires the moment it lands and the
-    // signal starts mirroring `cursor.state`. Without this, fromRuntime
-    // would have captured an undefined target and the buttons would
-    // freeze in their boot-time state until something else forced a
-    // re-render — the symptom Jaime reported as "undo/redo only activate
-    // on undo initially."
-    const wireCursor = (cursor: { state: { position: number; total: number; rewound: boolean } } & EventTarget) => {
-      // Track previous position/total to distinguish undo/redo (position
-      // changes while total stays put) from a new layer being appended
-      // (total grows, position may follow it to head). Only the former
-      // surfaces the nav arrows. -1 sentinel = no prior sync, skip detection.
-      let prevPosition = -1
-      let prevTotal = -1
-      const sync = () => {
-        const nextPosition = cursor.state.position ?? 0
-        const nextTotal = cursor.state.total ?? 0
-        if (prevPosition !== -1
-            && nextTotal === prevTotal
-            && nextPosition !== prevPosition) {
-          this.#showHistoryNav()
-        }
-        prevPosition = nextPosition
-        prevTotal = nextTotal
-        this._cursorState.set({
-          position: nextPosition,
-          total: nextTotal,
-          rewound: !!cursor.state.rewound,
-        })
-      }
-      cursor.addEventListener('change', sync)
-      sync() // pull initial state immediately so the first render has it
-    }
-    const iocAny = (window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void; get?: (k: string) => unknown } }).ioc
-    if (iocAny?.whenReady) {
-      iocAny.whenReady<{ state: { position: number; total: number; rewound: boolean } } & EventTarget>(
-        '@diamondcoreprocessor.com/HistoryCursorService',
-        wireCursor,
-      )
-    } else {
-      // Defensive: if whenReady isn't exposed, fall back to direct get.
-      const direct = iocAny?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as
-        | ({ state: { position: number; total: number; rewound: boolean } } & EventTarget)
-        | undefined
-      if (direct) wireCursor(direct)
-    }
-
     // Listen for indicator registration/removal
     this.#indicatorUnsubs.push(
       EffectBus.on<{ key: string; icon: string; label: string }>('indicator:set', (p) => {
@@ -664,22 +610,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         'view-toggles:changed',
         (p) => this.#viewToggles.set(Array.isArray(p?.toggles) ? p!.toggles : []),
       ),
-      // Solomon's Key header toggle — availability + open/closed state from
-      // the SolomonDrone; late-subscriber replay seeds the current state.
-      EffectBus.on<{ available?: boolean; active?: boolean }>('solomon:state', (p) => {
-        this.#solomonAvailable.set(!!p?.available)
-        this.#solomonActive.set(!!p?.active)
-      }),
-      // Bubble Bobble header toggle — same shape as Solomon's, from BubbleDrone.
-      EffectBus.on<{ available?: boolean; active?: boolean }>('bubble:state', (p) => {
-        this.#bubbleAvailable.set(!!p?.available)
-        this.#bubbleActive.set(!!p?.active)
-      }),
-      // Arkanoid header toggle — same shape as Solomon's, from ArkanoidDrone.
-      EffectBus.on<{ available?: boolean; active?: boolean }>('arkanoid:state', (p) => {
-        this.#arkanoidAvailable.set(!!p?.available)
-        this.#arkanoidActive.set(!!p?.active)
-      }),
       // Pan/zoom attempted while input is locked — flash the lock icon.
       // Transient (no replay), so a fresh mount never flashes spuriously.
       EffectBus.on('input:locked-attempt', () => this.#flashLocked()),
@@ -762,21 +692,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     EffectBus.emit('view:toggle', { view: e.view, disable: e.disable })
   }
 
-  /** Forward a click on the game header icon to the SolomonDrone. */
-  onSolomonToggle(): void {
-    EffectBus.emit('solomon:toggle', {})
-  }
-
-  /** Forward a click on the Bubble Bobble header icon to the BubbleDrone. */
-  onBubbleToggle(): void {
-    EffectBus.emit('bubble:toggle', {})
-  }
-
-  /** Forward a click on the Arkanoid header icon to the ArkanoidDrone. */
-  onArkanoidToggle(): void {
-    EffectBus.emit('arkanoid:toggle', {})
-  }
-
   onIndicatorDismiss(key: string): void {
     EffectBus.emit('indicator:dismiss', { key })
     this.#indicators.update(m => { const n = new Map(m); n.delete(key); return n })
@@ -852,6 +767,26 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         raw,
         normalized: raw.toLowerCase().trim(),
         style: 'space'
+      }
+    }
+
+    // '@' feature mode — `abc@frag` (add) or `~abc@frag` (remove). The fragment
+    // after the last `@` is matched against the VisualBeeRegistry, so the
+    // dropdown lists registered behaviors with their descriptions. Checked
+    // before the `~` remove branch because `~abc@x` would otherwise be read as
+    // a cell removal.
+    const featRemoveCtx = v.match(FEATURE_REMOVE_RE)
+    const featAddCtx = featRemoveCtx ? null : v.match(FEATURE_RE)
+    const featCtx = featRemoveCtx ?? featAddCtx
+    if (featCtx) {
+      const frag = featCtx[2]
+      return {
+        active: true,
+        mode: 'feature',
+        head: v.slice(0, v.length - frag.length),
+        raw: frag,
+        normalized: frag.toLowerCase().trim(),
+        style: 'space',
       }
     }
 
@@ -947,12 +882,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return this.#slashMatches().map(m => m.behaviour.name)
     }
 
-    // plain colon tag mode: suggest tag names from registry
+    // '@' feature mode: list registered behaviors (filtered by fragment).
+    if (ctx.mode === 'feature') {
+      return this.#featureMatches().map(m => m.view)
+    }
+
+    // plain colon tag mode: suggest tag names from registry, most-used first.
     if (ctx.mode === 'tag') {
       const registry = get('@hypercomb.social/TagRegistry') as { names: string[] } | undefined
-      const allTags = registry?.names ?? []
-      if (!ctx.normalized) return allTags
-      return allTags.filter(n => n.toLowerCase().startsWith(ctx.normalized))
+      const metrics = get('@diamondcoreprocessor.com/OverlapMetrics') as { tagCount(name: string): number } | undefined
+      let allTags = registry?.names ?? []
+      if (ctx.normalized) allTags = allTags.filter(n => n.toLowerCase().startsWith(ctx.normalized))
+      // Overlap count = how many tiles carry the tag (popularity); alpha ties.
+      return [...allTags].sort((a, b) => (metrics?.tagCount(b) ?? 0) - (metrics?.tagCount(a) ?? 0) || a.localeCompare(b))
     }
 
     // select mode: suggestions depend on the current phase
@@ -1550,10 +1492,6 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       clearTimeout(this.#micHoldTimer)
       this.#micHoldTimer = null
     }
-    if (this.#historyNavHideTimer) {
-      clearTimeout(this.#historyNavHideTimer)
-      this.#historyNavHideTimer = null
-    }
     if (this.#lockedFlashTimer) {
       clearTimeout(this.#lockedFlashTimer)
       this.#lockedFlashTimer = null
@@ -1577,6 +1515,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (this.#autoPopulateMoveIndex(v)) {
       // shell value was mutated — re-sync
     }
+
+    // auto-advance a fully-typed slash command into its parameter list
+    this.#autoEnterSlashParams(v)
 
     const ctx = this.context()
     if (ctx.active && ctx.mode === 'filter') {
@@ -1786,6 +1727,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // slash behaviour execution
     if (v.startsWith('/')) {
       void this.#executeSlashBehaviour()
+      return
+    }
+
+    // '@' feature attach/detach — `abc@gallery` / `~abc@gallery`. Only consumed
+    // when the fragment resolves to a registered behavior; an unknown `@name`
+    // falls through to normal handling (so a stray `@` never eats input).
+    const feat = this.#parseFeatureInput(v)
+    if (feat) {
+      await this.#applyFeatureOps(feat)
+      this.clear()
       return
     }
 
@@ -2405,6 +2356,68 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (updates.length > 0) EffectBus.emit('tags:changed', { updates })
   }
 
+  /**
+   * Parse `abc@gallery` / `~abc@gallery` into a feature op. Returns null
+   * (input not consumed) unless the fragment resolves to a behavior actually
+   * registered in the VisualBeeRegistry — so a stray `@` never hijacks a
+   * create, paste, or any other input.
+   */
+  #parseFeatureInput(v: string): { target: string; view: string; remove: boolean } | null {
+    const trimmed = v.trim()
+    const rm = trimmed.match(FEATURE_REMOVE_RE)
+    const ad = rm ? null : trimmed.match(FEATURE_RE)
+    const m = rm ?? ad
+    if (!m) return null
+    const target = this.completions.normalize(m[1])
+    const view = m[2].trim().toLowerCase()
+    if (!target || !view) return null
+    const registry = get('@diamondcoreprocessor.com/VisualBeeRegistry') as
+      { get(view: string): unknown } | undefined
+    if (!registry?.get(view)) return null
+    return { target, view, remove: !!rm }
+  }
+
+  /**
+   * Apply a feature op. The target cell is selected first (guarded against the
+   * selection-sync feedback loop), then the behavior is activated through its
+   * OWN registered slash command — reusing the feature's correct attach logic
+   * (proper decoration payload, verification gate) rather than fabricating a
+   * decoration here, exactly as `[a,b]:tag` routes through the keyword queen.
+   * A `feature:apply` intent is also emitted as the decoupled extension seam.
+   */
+  async #applyFeatureOps(op: { target: string; view: string; remove: boolean }): Promise<void> {
+    const registry = get('@diamondcoreprocessor.com/VisualBeeRegistry') as
+      { get(view: string): { view: string; slashCommand?: string } | undefined } | undefined
+    const bee = registry?.get(op.view)
+    if (!bee) return
+
+    const lineage = get('@hypercomb.social/Lineage') as
+      { explorerSegments?: () => readonly string[] } | undefined
+    const parentSegments = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? ''))
+    const segments = [...parentSegments, op.target]
+
+    // Select the target so the behaviour's command operates on it.
+    const selection = get('@diamondcoreprocessor.com/SelectionService') as
+      { clear(): void; add(label: string): void } | undefined
+    if (selection) {
+      this.#syncDirection = 'command'
+      selection.clear()
+      selection.add(op.target)
+      this.#syncDirection = 'idle'
+    }
+
+    EffectBus.emit('feature:apply', { view: op.view, segments, remove: op.remove })
+
+    if (op.remove) return
+
+    const slash = (bee.slashCommand ?? '').replace(/^\//, '')
+    if (slash) {
+      const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as
+        { execute(name: string, args: string): Promise<void> | void } | undefined
+      await drone?.execute(slash, '')
+    }
+  }
+
   /** Echo an active selection as the canonical bare bracket `[a, b, c]`
    *  (truncated when long/unfocused). Never the legacy `/select[…]`. */
   #buildSelectValue(labels: readonly string[], truncate: boolean): string {
@@ -2447,6 +2460,48 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     this.shell?.setValue(v + (idx >= 0 ? idx : 0))
     this.value.set(this.shell?.value() ?? '')
     return true
+  }
+
+  /** Last value seen by {@link #autoEnterSlashParams} — used to confirm the
+   *  user is typing FORWARD toward the command (so deleting the auto-inserted
+   *  space doesn't immediately re-insert it). */
+  #prevSlashValue = ''
+
+  /**
+   * Once the typed input is an exact, unambiguous slash command that takes
+   * parameters, append a space so the full parameter list surfaces as the
+   * navigable dropdown — no hidden "type a space to see options" step.
+   *
+   * Guards:
+   *  - only on FORWARD typing (new value extends the previous one), so
+   *    backspacing the inserted space doesn't loop it back in;
+   *  - never when the command is a strict prefix of another command
+   *    (`background` ⊂ `backgrounds`) — that's still ambiguous, keep listing
+   *    commands;
+   *  - only when the command actually has completions.
+   * The trailing space is inert for execution (`/backdrop ` still runs with no
+   * arg on Enter), so this only ever reveals options, never changes behaviour.
+   */
+  #autoEnterSlashParams(v: string): void {
+    const prev = this.#prevSlashValue
+    this.#prevSlashValue = v
+    if (!(v.startsWith(prev) && v.length > prev.length)) return
+    const m = v.match(/^\/(\S+)$/)
+    if (!m) return
+    const command = m[1].toLowerCase()
+    const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as {
+      all?(): { name: string }[]; complete?(behaviourName: string, args: string): readonly string[]
+    } | undefined
+    if (!drone?.all || !drone.complete) return
+    const names = drone.all().map(b => b.name.toLowerCase())
+    if (!names.includes(command)) return
+    if (names.some(n => n !== command && n.startsWith(command))) return
+    let hasParams = false
+    try { hasParams = drone.complete(command, '').length > 0 } catch { /* none */ }
+    if (!hasParams) return
+    const next = v + ' '
+    this.#prevSlashValue = next
+    this.#setShellValue(next, false)
   }
 
   /** Detect if cursor is inside a /move( parenthesized index — works with or without /select[...] prefix */
@@ -2592,7 +2647,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // If head is just '/', we're completing the command name itself
       // If head is longer (e.g. '/language '), we're completing an argument
       if (ctx.head === '/') {
-        this.#setShellValue('/' + best, true)
+        // Accepting a command that takes parameters drops straight into its
+        // parameter list (append a space, keep the dropdown open) — same
+        // seamless flow as typing the command out in full.
+        const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as
+          { complete?(behaviourName: string, args: string): readonly string[] } | undefined
+        let hasParams = false
+        try { hasParams = (drone?.complete?.(best, '')?.length ?? 0) > 0 } catch { /* none */ }
+        this.#setShellValue('/' + best + (hasParams ? ' ' : ''), !hasParams)
       } else {
         this.#setShellValue(ctx.head + best, false)
       }

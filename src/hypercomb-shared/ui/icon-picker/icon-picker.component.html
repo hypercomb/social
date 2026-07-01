@@ -1,0 +1,47 @@
+@if (open()) {
+  <div class="icon-picker-backdrop" (click)="close()"></div>
+  <div class="icon-picker" role="dialog" aria-label="Choose an icon">
+    <div class="ip-head">
+      <span class="ip-title">choose an icon</span>
+      <button class="ip-close" type="button" (click)="close()" aria-label="close">
+        <span class="mat-sym" aria-hidden="true">close</span>
+      </button>
+    </div>
+
+    <div class="ip-search-field">
+      <span class="ip-search-glyph mat-sym" aria-hidden="true">search</span>
+      <input #searchEl class="ip-search" type="text" placeholder="search icons…"
+             [value]="filter()" (input)="onFilter($event)"
+             autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
+             autofocus aria-label="search icons" />
+      @if (filter().length > 0) {
+        <button class="ip-search-clear" type="button" (click)="clearFilter(searchEl)" aria-label="clear search">
+          <span class="mat-sym" aria-hidden="true">close</span>
+        </button>
+      }
+    </div>
+
+    <div class="ip-hive">
+      @for (name of icons(); track name) {
+        <button class="ip-hex" type="button" (click)="choose(name)" [title]="name" [attr.aria-label]="name">
+          <span class="mat-sym">{{ name }}</span>
+        </button>
+      } @empty {
+        <div class="ip-empty">
+          <span class="mat-sym" aria-hidden="true">search_off</span>
+          <span>no icons match “{{ filter() }}”</span>
+        </div>
+      }
+    </div>
+
+    <div class="ip-foot">
+      <span class="ip-count">
+        @if (filter().length > 0) {
+          {{ icons().length }} / {{ total }}
+        } @else {
+          {{ total }} icons
+        }
+      </span>
+    </div>
+  </div>
+}

@@ -13,8 +13,9 @@ import { SensitivityBarComponent } from "@hypercomb/shared/ui/sensitivity-bar/se
 import { SelectionContextMenuComponent } from "@hypercomb/shared/ui/selection-context-menu/selection-context-menu.component"
 import { ConfirmDialogComponent } from "@hypercomb/shared/ui/confirm-dialog/confirm-dialog.component"
 import { DocsOverlayComponent } from "@hypercomb/shared/ui/docs-overlay/docs-overlay.component"
+import { ShortcutSheetComponent } from "@hypercomb/shared/ui/shortcut-sheet/shortcut-sheet.component"
 import { HistoryViewerComponent } from "@hypercomb/shared/ui/history-viewer/history-viewer.component"
-import { NotesStripComponent } from "@hypercomb/shared/ui/notes-strip/notes-strip.component"
+import { ShellSurfacesComponent } from "@hypercomb/shared/ui/shell-surfaces/shell-surfaces.component"
 import { NotesViewerComponent } from "@hypercomb/shared/ui/notes-viewer/notes-viewer.component"
 import { FilesViewerComponent } from "@hypercomb/shared/ui/files-viewer/files-viewer.component"
 import { FeaturesViewerComponent } from "@hypercomb/shared/ui/features-viewer/features-viewer.component"
@@ -26,7 +27,7 @@ import { ContactHoverComponent } from "@hypercomb/shared/ui/contact-card/contact
 import { FeedbackButtonComponent } from "@hypercomb/shared/ui/feedback-button/feedback-button.component"
 import { FeedbackViewerComponent } from "@hypercomb/shared/ui/feedback-viewer/feedback-viewer.component"
 import { WebsiteNavComponent } from "@hypercomb/shared/ui/website-nav/website-nav.component"
-import { WebsiteStripComponent } from "@hypercomb/shared/ui/website-strip/website-strip.component"
+import { IconPickerComponent } from "@hypercomb/shared/ui/icon-picker/icon-picker.component"
 import { MeshModalComponent } from "@hypercomb/shared/ui/mesh-modal/mesh-modal.component"
 import { TrustPromptComponent } from "@hypercomb/shared/ui/trust-prompt/trust-prompt.component"
 import { LayerCycleStripComponent } from "@hypercomb/shared/ui/layer-cycle-strip/layer-cycle-strip.component"
@@ -39,7 +40,7 @@ import { SwarmAdoptPanelComponent } from "@hypercomb/shared/ui/swarm-adopt-panel
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, EditActionsComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, HistoryViewerComponent, NotesStripComponent, NotesViewerComponent, FilesViewerComponent, FeaturesViewerComponent, TagsViewerComponent, ObserveViewerComponent, ClipboardPanelComponent, ContactFormComponent, ContactHoverComponent, FeedbackButtonComponent, FeedbackViewerComponent, WebsiteNavComponent, WebsiteStripComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, ToastComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent],
+  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, EditActionsComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, ShortcutSheetComponent, HistoryViewerComponent, ShellSurfacesComponent, NotesViewerComponent, FilesViewerComponent, FeaturesViewerComponent, TagsViewerComponent, ObserveViewerComponent, ClipboardPanelComponent, ContactFormComponent, ContactHoverComponent, FeedbackButtonComponent, FeedbackViewerComponent, WebsiteNavComponent, IconPickerComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, ToastComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })

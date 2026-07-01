@@ -24,6 +24,13 @@ export class BubbleDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'game'
 
+  // Launch descriptor — read by the games launch-group aggregator (which
+  // discovers games by enumerating `genotype:'game'` bees in IoC, no roster).
+  // gameId is the `<id>:toggle` effect prefix; gameIcon is a Material glyph.
+  readonly gameId = 'bubble'
+  readonly gameLabel = 'Bubble Bobble'
+  readonly gameIcon = 'bubble_chart'
+
   public override description =
     'Bubble Bobble — blow bubbles to trap foes, pop them for fruit, clear the screen. Toggle from the header icon or /bubble.'
 

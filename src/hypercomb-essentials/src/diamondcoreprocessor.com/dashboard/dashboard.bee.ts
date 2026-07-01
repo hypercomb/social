@@ -44,12 +44,9 @@
 //     not data.
 
 import { Worker, EffectBus } from '@hypercomb/core'
-import type { VisualBeeRegistry } from '../commands/visual-bee-registry.js'
 
 const STATE_KEY = 'hc:@diamondcoreprocessor.com/DashboardBee:bags'
 const RETURN_KEY = 'hc:@diamondcoreprocessor.com/DashboardBee:return'
-/** Material Symbols ligature for the command-line toggle. */
-const DASHBOARD_ICON = 'dashboard'
 
 type LineageLike = {
   domain?: () => string
@@ -365,30 +362,9 @@ export class DashboardBee extends Worker {
 const _dashboardBee = new DashboardBee()
 window.ioc.register('@diamondcoreprocessor.com/DashboardBee', _dashboardBee)
 
-// Visual-bee registration. Declares the dashboard as a `navigation`
-// ViewBehavior so ViewBee surfaces it as a right-side command-line toggle
-// (same family as `/website`). ViewBee resolves `controllerKey` and
-// delegates the toggle's availability / active-state / click to the bee's
-// isAvailable() / isActive() / toggleBehavior(). `adoptable: false` — the
-// dashboard is participant-local and never transfers via tile adoption, so
-// the sentinel decorationKind / iconName are never consulted.
-;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<VisualBeeRegistry>(
-  '@diamondcoreprocessor.com/VisualBeeRegistry',
-  (registry) => {
-    registry.register({
-      view: 'dashboard',
-      slashCommand: '/dashboard',
-      iconName: DASHBOARD_ICON,
-      toggleIcon: DASHBOARD_ICON,
-      decorationKind: 'visual:dashboard:view',
-      behavior: 'navigation',
-      controllerKey: '@diamondcoreprocessor.com/DashboardBee',
-      // Label + description so the "show features" panel (and any other
-      // descriptor consumer) renders meaningful meta details, not a bare
-      // view name with an empty description.
-      labelKey: 'view.dashboard',
-      descriptionKey: 'view.dashboard.description',
-      adoptable: false,
-    })
-  },
-)
+// The dashboard NO LONGER registers a VisualBeeRegistry view-toggle. It now
+// surfaces solely as a launch-group icon (hypercomb-shared/core/dashboard-group),
+// whose click calls this bee's toggleBehavior() — so the old ViewBee command-line
+// toggle was a duplicate of that icon and has been retired (dedupe). The bee
+// remains the dashboard's navigation controller (isAvailable/isActive/
+// toggleBehavior); only the redundant toggle surfacing is gone.

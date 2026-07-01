@@ -8,7 +8,8 @@
     [ghostValue]="ghostValue()"
     [showSuggestions]="showCompletions()"
     [typedPrefix]="completionTypedPrefix()"
-    [descriptionMap]="slashDescriptionMap()"
+    [descriptionMap]="descriptionMap()"
+    [activeDetail]="activeDetail()"
     [colorMap]="accentColorMap()"
     [indicators]="activeIndicators()"
     [armedResource]="armedResource()"
@@ -16,15 +17,6 @@
     [openForSubscribers]="openForSubscribers()"
     [openForSubscribersLabel]="'command-line.open-for-subscribers' | t"
     [viewToggles]="viewToggles()"
-    [showSolomonToggle]="showSolomonToggle()"
-    [solomonActive]="solomonActive()"
-    [solomonLabel]="'command-line.solomon' | t"
-    [showBubbleToggle]="showBubbleToggle()"
-    [bubbleActive]="bubbleActive()"
-    [bubbleLabel]="'command-line.bubble' | t"
-    [showArkanoidToggle]="showArkanoidToggle()"
-    [arkanoidActive]="arkanoidActive()"
-    [arkanoidLabel]="'command-line.arkanoid' | t"
     [lockedFlash]="lockedFlash()"
     [lockedLabel]="'command-line.pinned' | t"
     (valueChange)="onShellValueChange($event)"
@@ -35,10 +27,10 @@
     (armedResourceDismiss)="onArmedResourceDismiss()"
     (openForSubscribersToggle)="onOpenForSubscribersToggle()"
     (viewToggle)="onViewToggle($event)"
-    (solomonToggle)="onSolomonToggle()"
-    (bubbleToggle)="onBubbleToggle()"
-    (arkanoidToggle)="onArkanoidToggle()"
   />
+
+  <!-- launch-group meaning-icons (websites, …) live inside the command line -->
+  <hc-group-launchers></hc-group-launchers>
 
   @if (voiceSupported && pushToTalkEnabled()) {
     <button class="mic-btn" [class.recording]="voiceActive()"
@@ -54,30 +46,6 @@
     {{ 'command-line.go' | t }}
   </button>
 </div>
-
-<!-- Undo / redo cluster — floats at the bottom-right of the viewport.
-     Surfaces briefly on undo/redo activity and stays visible while
-     rewound so the keyboard arrows have a clickable counterpart. Save
-     As / Merge are selection-driven and live in the history viewer
-     header, not here. -->
-@if (historyNavVisible() || cursorRewound()) {
-  <div class="history-controls-cluster">
-    <button class="history-nav-btn history-undo-btn" type="button"
-      [disabled]="undoDisabled()"
-      (click)="doUndo()"
-      [attr.aria-label]="'history.undo' | t"
-      [title]="'history.undo' | t">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
-    </button>
-    <button class="history-nav-btn history-redo-btn" type="button"
-      [disabled]="redoDisabled()"
-      (click)="doRedo()"
-      [attr.aria-label]="'history.redo' | t"
-      [title]="'history.redo' | t">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg>
-    </button>
-  </div>
-}
 
 <!-- Active-view exit toggle — when a full-viewport view (website) takes
      over, the command line is hidden; this lone icon hovers in the

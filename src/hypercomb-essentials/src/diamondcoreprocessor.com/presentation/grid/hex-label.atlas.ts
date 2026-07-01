@@ -50,8 +50,12 @@ export class HexLabelAtlas {
     // swapping this exact RenderTexture to resolution 2 (2048×2048) made the
     // wash vanish while labels stayed crisp. Keep this in lockstep with the
     // known-good HexImageAtlas, which renders fine in Edge at resolution 2.
-    // resolution 2 still gives 256 physical px per 128px label cell — far more
-    // than a 9px font needs.
+    // resolution 2 gives 256 physical px per 128px label cell. We bake glyphs
+    // LARGE (style.fontSize below) rather than at the legacy 9px so each glyph
+    // carries many more texels; the shader samples a small central band
+    // (LABEL_BAND in hex-sdf.shader.ts) to keep the on-screen size unchanged.
+    // Crispness comes from the bigger bake, NOT from raising this resolution —
+    // which Edge caps (see above).
     this.atlas = RenderTexture.create({
       width: this.cols * this.cellPx,
       height: this.rows * this.cellPx,
@@ -63,20 +67,44 @@ export class HexLabelAtlas {
 
     const hcFont = getComputedStyle(document.documentElement).getPropertyValue('--hc-font').trim()
 
+    // fontSize 27 (= 9 × 3) — baked large so glyphs are crisp when magnified onto
+    // big hexes. The shader divides its label sample window by LABEL_BAND (3.0)
+    // so displayed size is identical to the old 9px bake, just sharper. Keep this
+    // in lockstep with LABEL_BAND: LABEL_BAND === fontSize / 9. letterSpacing and
+    // the drop shadow are scaled ×3 too, so they shrink back to their original
+    // proportions once the shader samples the band.
     this.style = new TextStyle({
       fontFamily: hcFont || "'Source Sans Pro Light', system-ui, sans-serif",
-      fontSize: 9,
+      fontSize: 27,
       fill: 0xffffff,
       align: 'center',
-      letterSpacing: 0.5,
+      letterSpacing: 1.5,
       dropShadow: {
         alpha: 0.35,
         angle: Math.PI / 2,
-        blur: 1,
+        blur: 3,
         color: 0x000000,
-        distance: 1,
+        distance: 3,
       },
     })
+  }
+
+  // Build a single label's Text, sized to fill its atlas cell. Glyphs are baked
+  // LARGE (style.fontSize) for texel density; over-long labels are CONDENSED
+  // horizontally (scale.x) so they never overflow the 128px cell into a
+  // neighbour slot — height stays uniform across every label.
+  #buildLabelText = (displayText: string, col: number, row: number): Text => {
+    const text = new Text({ text: displayText, style: this.style })
+    text.resolution = 2 // match the atlas RenderTexture resolution (see constructor)
+    text.anchor.set(0.5)
+    const maxW = this.cellPx * 0.92
+    if (text.width > maxW) text.scale.x = maxW / text.width
+    text.position.set(
+      col * this.cellPx + this.cellPx * 0.5,
+      row * this.cellPx + this.cellPx * 0.5
+    )
+    if (this.#pivot) text.rotation = Math.PI / 2
+    return text
   }
 
   public setPivot = (pivot: boolean): void => {
@@ -204,14 +232,7 @@ export class HexLabelAtlas {
       }
 
       const displayText = this.#labelResolver ? this.#labelResolver(label) : label
-      const text = new Text({ text: displayText, style: this.style })
-      text.resolution = 2
-      text.anchor.set(0.5)
-      text.position.set(
-        col * this.cellPx + this.cellPx * 0.5,
-        row * this.cellPx + this.cellPx * 0.5
-      )
-      if (this.#pivot) text.rotation = Math.PI / 2
+      const text = this.#buildLabelText(displayText, col, row)
 
       batch.addChild(text)
       created.push(text)
@@ -256,19 +277,7 @@ export class HexLabelAtlas {
     // Resolve display text: label resolver (i18n) → raw directory name
     const displayText = this.#labelResolver ? this.#labelResolver(label) : label
 
-    const text = new Text({ text: displayText, style: this.style })
-    text.resolution = 2 // match the atlas RenderTexture resolution (see constructor) and seed(); baking at 8 wasted 16× the glyph pixels per label on the re-bake-heavy path
-
-    text.anchor.set(0.5)
-    text.position.set(
-      col * this.cellPx + this.cellPx * 0.5,
-      row * this.cellPx + this.cellPx * 0.5
-    )
-
-    // rotate text 90° CW when pivot is active (pre-baked rotation)
-    if (this.#pivot) {
-      text.rotation = Math.PI / 2
-    }
+    const text = this.#buildLabelText(displayText, col, row)
 
     // render into the atlas (keep previous labels)
     this.renderer.render({ container: text, target: this.atlas, clear: false })

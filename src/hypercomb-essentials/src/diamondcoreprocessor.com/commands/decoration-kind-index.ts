@@ -120,6 +120,61 @@ export function tagSigFor(label: string, name: string): string | undefined {
   return sigByLabelTag.get(label)?.get(name)
 }
 
+// ── Launcher-shape sub-index ──────────────────────────────────────────
+//
+// Launch-group tiles (on the aggregator page) carry a `launch:target`
+// decoration whose payload includes the owning group's `shape` (e.g.
+// 'flower-pot', 'space-invader'). show-cell reads this PER CELL to pick each
+// launcher tile's silhouette so groups never share a visual type. Hydrates
+// through the same decorations:changed / render:cell-count paths as every other
+// decoration — no extra OPFS walk.
+
+/** Decoration kind that marks a launcher tile. */
+export const LAUNCH_DECORATION_KIND = 'launch:target'
+
+/** Map<cellLabel, shapeId> — the owning group's silhouette for a launcher tile. */
+const launchShapeByLabel = new Map<string, string>()
+
+/** The launcher silhouette id for a cell ('' if none / not a launcher tile).
+ *  Synchronous and O(1) — show-cell reads it per visible cell at geometry build. */
+export function launchShapeForLabel(label: string): string {
+  return launchShapeByLabel.get(label) ?? ''
+}
+
+// ── Overlap metric (the one popularity signal) ────────────────────────
+//
+// "Popularity" = how many cells SHARE an entity — the overlap count. The
+// kind-index already holds exactly this: a decoration kind / tag name is
+// applied to N cells. We count over the cells the index has seen (navigated
+// this session), which is the live, available signal. Exposed via IoC so the
+// shell command-line (which can't import essentials) can rank suggestions by
+// it. Scope: counts cells that carry the kind/tag, honouring the hidden pool.
+
+/** How many indexed cells carry a (non-hidden) decoration of `kind`. */
+export function countLabelsWithKind(kind: string): number {
+  if (!kind) return 0
+  let n = 0
+  for (const [label, set] of kindsByLabel) {
+    if (set.has(kind) && !isKindHidden(label, kind)) n++
+  }
+  return n
+}
+
+/** How many indexed cells carry the tag `name`. */
+export function countLabelsWithTag(name: string): number {
+  if (!name) return 0
+  let n = 0
+  for (const set of tagsByLabel.values()) if (set.has(name)) n++
+  return n
+}
+
+// Register the overlap-metric reader so the shell can resolve it via IoC,
+// mirroring how it reaches DecorationService / VisualBeeRegistry.
+window.ioc.register('@diamondcoreprocessor.com/OverlapMetrics', {
+  kindCount: countLabelsWithKind,
+  tagCount: countLabelsWithTag,
+})
+
 type StoreLike = {
   getResource(sig: string): Promise<Blob | null>
 }
@@ -146,6 +201,15 @@ function tagNameOf(record: DecorationShape): string | null {
     ? (payload as { name?: unknown }).name
     : undefined
   return typeof name === 'string' && name.length > 0 ? name : null
+}
+
+/** Pull the launcher silhouette out of a `launch:target` payload's `{ shape }`. */
+function shapeOf(record: DecorationShape): string | null {
+  const payload = record.payload
+  const shape = payload && typeof payload === 'object'
+    ? (payload as { shape?: unknown }).shape
+    : undefined
+  return typeof shape === 'string' && shape.length > 0 ? shape : null
 }
 
 function addTag(label: string, name: string, sig: string): void {
@@ -176,6 +240,10 @@ function indexRecord(label: string, sig: string, record: DecorationShape): void 
   if (kind === TAG_DECORATION_KIND) {
     const name = tagNameOf(record)
     if (name) addTag(label, name, sig)
+  }
+  if (kind === LAUNCH_DECORATION_KIND) {
+    const shape = shapeOf(record)
+    if (shape) launchShapeByLabel.set(label, shape)
   }
 }
 
@@ -224,12 +292,17 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
     // Re-signal so show-cell recomputes with this cell now in the index — the
     // same hook the navigation-hydration walk uses.
     if (record.kind === TAG_DECORATION_KIND) EffectBus.emit('tags:indexed', { labels: [label] })
+    // Same first-paint race for launcher tiles: the `shape` lands after the
+    // aggregator page first rendered (as plain hexagons). Nudge show-cell to
+    // rebuild its geometry so each tile picks up its group's silhouette.
+    if (record.kind === LAUNCH_DECORATION_KIND) EffectBus.emit('launch:indexed', { label })
   } else if (payload.op === 'removeSig') {
     const kind = kindBySig.get(sig)
     if (kind) {
       removeKind(label, kind)
       kindBySig.delete(sig)
     }
+    if (kind === LAUNCH_DECORATION_KIND) launchShapeByLabel.delete(label)
     // A tag's resource is content-addressed and shared across cells, so subtract
     // it from the cell named in THIS event (`label`), using the sig's constant
     // tag name. Never delete `nameBySig[sig]` — other cells still share it.
@@ -288,6 +361,9 @@ async function hydrateLabel(
       if (!record) continue
       indexRecord(label, decorationSig, record)
     }
+    // A launcher tile discovered on this walk: nudge show-cell to rebuild its
+    // geometry so the tile's silhouette appears (the walk runs after first paint).
+    if (launchShapeByLabel.has(label)) EffectBus.emit('launch:indexed', { label })
     return tagsByLabel.has(label)
   } catch {
     // Layer unavailable or fetch error — skip this label; another render

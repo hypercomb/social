@@ -20,6 +20,20 @@ const MENU_HEIGHT_BASE = 160 // approximate height without paste
 // Fixed zoom at 80% of the former max (2.0) — not user-resizable
 const ZOOM_FIXED = 1.6
 
+// ── selection-menu feature flags ───────────────────────────
+// The eye (hide/unhide) and reroll operations are RETAINED but shipped
+// OFF — the production deploy renders the selection menu without them.
+// The handlers, icons, and hidden-state tracking all stay intact, so a
+// feature is restored simply by flipping its switch back to true (or by
+// deriving these from the build environment for a dev-on / deploy-off
+// split). Off-by-default is the deployed state.
+const SELECTION_FEATURES: { hide: boolean; reroll: boolean } = {
+  /** Per-selection hide/unhide (the eye icon). */
+  hide: false,
+  /** Substrate background reroll. */
+  reroll: false,
+}
+
 @Component({
   selector: 'hc-selection-context-menu',
   standalone: true,
@@ -64,6 +78,8 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
 
   /** Called when the user clicks the "hide menu" affordance in a pack. */
   readonly hidePack = (): void => MenuRegistry.hideActive()
+  /** Off-by-default switches for the retained hide/reroll operations. */
+  readonly selectionFeatures = SELECTION_FEATURES
   readonly allHidden = this.#allHidden.asReadonly()
   readonly moveMode = this.#moveMode.asReadonly()
   readonly clipboardCount = this.#clipboardCount.asReadonly()

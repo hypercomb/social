@@ -1,7 +1,7 @@
 import { normalizeCell } from '@hypercomb/core'
 
 export type CompletionStyle = 'space' | 'dot'
-export type CompletionMode = 'action' | 'marker' | 'filter' | 'slash' | 'delete' | 'remove' | 'select' | 'tag'
+export type CompletionMode = 'action' | 'marker' | 'filter' | 'slash' | 'delete' | 'remove' | 'select' | 'tag' | 'feature'
 
 export type CompletionContext =
   | { active: false }

@@ -1,0 +1,15 @@
+@if (groups().length > 0) {
+  <div class="group-launchers" [class.icon-editing]="iconEditOn()">
+    @for (g of groups(); track g.id) {
+      <button class="group-btn" type="button"
+              [class.icon-jiggle]="iconEditOn()"
+              [class.on]="g.on"
+              (click)="activate(g.id)"
+              (pointerenter)="prewarm(g.id)"
+              (pointerdown)="onPressDown()" (pointerup)="onPressUp()" (pointerleave)="onPressUp()"
+              [attr.aria-label]="g.label" [attr.aria-pressed]="g.on" [title]="g.label">
+        <span class="mat-sym">{{ g.icon }}</span>
+      </button>
+    }
+  </div>
+}

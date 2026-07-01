@@ -25,13 +25,19 @@
         <span class="mat-sym">delete</span>
       </button>
 
-      <div class="ctx-divider"></div>
-      <button class="ctx-btn" (click)="hide()" [attr.aria-label]="'selection.hide' | t">
-        <span class="eye-icon" [class.struck]="!allHidden()"></span>
-      </button>
-      <button class="ctx-btn" (click)="reroll()" [attr.aria-label]="'selection.reroll' | t">
-        <span class="reroll-icon"></span>
-      </button>
+      @if (selectionFeatures.hide || selectionFeatures.reroll) {
+        <div class="ctx-divider"></div>
+        @if (selectionFeatures.hide) {
+          <button class="ctx-btn" (click)="hide()" [attr.aria-label]="'selection.hide' | t">
+            <span class="eye-icon" [class.struck]="!allHidden()"></span>
+          </button>
+        }
+        @if (selectionFeatures.reroll) {
+          <button class="ctx-btn" (click)="reroll()" [attr.aria-label]="'selection.reroll' | t">
+            <span class="reroll-icon"></span>
+          </button>
+        }
+      }
 
       <div class="ctx-divider"></div>
       <button class="ctx-btn" (click)="promoteToParent()" [attr.aria-label]="'selection.promote-to-parent' | t">

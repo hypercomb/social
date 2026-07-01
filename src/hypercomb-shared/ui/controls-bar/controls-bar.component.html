@@ -178,7 +178,11 @@
                       [class.fit-global]="ctrl.id === 'fit' && fitButtonState() === 'global'"
                       [class.fit-page]="ctrl.id === 'fit' && fitButtonState() === 'page'"
                       [class.zoom-btn]="ctrl.id === 'zoom-in' || ctrl.id === 'zoom-out'"
+                      [class.icon-jiggle]="iconEditOn()"
                       (click)="onCtrlClick(ctrl, $event)"
+                      (pointerdown)="onIconPressDown()"
+                      (pointerup)="onIconPressUp()"
+                      (pointerleave)="onIconPressUp()"
                       [attr.aria-label]="ctrl.label | t"
                       [attr.data-ctrl-id]="ctrl.id"
                       [attr.data-instruction]="ctrl.instruction ?? null">

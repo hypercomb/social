@@ -94,48 +94,6 @@
         </div>
       }
 
-      @if (showSolomonToggle()) {
-        <button
-          class="solomon-btn"
-          [class.on]="solomonActive()"
-          type="button"
-          (mousedown)="$event.preventDefault(); solomonToggle.emit()"
-          [attr.aria-label]="solomonLabel()"
-          [attr.aria-pressed]="solomonActive()"
-          [title]="solomonLabel()"
-        >
-          <span class="mat-sym" aria-hidden="true">castle</span>
-        </button>
-      }
-
-      @if (showBubbleToggle()) {
-        <button
-          class="bubble-btn"
-          [class.on]="bubbleActive()"
-          type="button"
-          (mousedown)="$event.preventDefault(); bubbleToggle.emit()"
-          [attr.aria-label]="bubbleLabel()"
-          [attr.aria-pressed]="bubbleActive()"
-          [title]="bubbleLabel()"
-        >
-          <span class="mat-sym" aria-hidden="true">bubble_chart</span>
-        </button>
-      }
-
-      @if (showArkanoidToggle()) {
-        <button
-          class="arkanoid-btn"
-          [class.on]="arkanoidActive()"
-          type="button"
-          (mousedown)="$event.preventDefault(); arkanoidToggle.emit()"
-          [attr.aria-label]="arkanoidLabel()"
-          [attr.aria-pressed]="arkanoidActive()"
-          [title]="arkanoidLabel()"
-        >
-          <span class="mat-sym" aria-hidden="true">sports_tennis</span>
-        </button>
-      }
-
       @if (showOpenForSubscribersToggle()) {
         <button
           class="open-for-subscribers-btn"
@@ -159,23 +117,57 @@
   </div>
 
   @if (effectiveShowCompletions()) {
-    <ul class="command-results" role="listbox">
-      @for (s of suggestions(); track $index; let i = $index) {
-        <li
-          role="option"
-          [class.active]="i === getActiveIndex()"
-          (mousedown)="onSuggestionMouseDown($event, s, i)"
-        >
-          @if (colorFor(s); as color) {
-            <span class="color-dot" [style.background]="color"></span>
+    <div class="command-intel" [class.has-detail]="!!activeDetail()">
+      <ul class="command-results" role="listbox">
+        @for (s of suggestions(); track $index; let i = $index) {
+          <li
+            role="option"
+            [class.active]="i === getActiveIndex()"
+            (mousedown)="onSuggestionMouseDown($event, s, i)"
+          >
+            @if (colorFor(s); as color) {
+              <span class="color-dot" [style.background]="color"></span>
+            }
+            <span class="typed">{{ typedPart(s) }}</span
+            ><span class="rest">{{ restPart(s) }}</span>
+            @if (descriptionFor(s); as desc) {
+              <span class="slash-desc">{{ desc }}</span>
+            }
+          </li>
+        }
+      </ul>
+
+      @if (activeDetail(); as d) {
+        <aside class="command-detail" aria-live="polite">
+          <div class="detail-head">
+            @if (d.icon) {
+              <span class="detail-icon mat-sym" aria-hidden="true">{{ d.icon }}</span>
+            }
+            <span class="detail-name">{{ d.name }}</span>
+            @if (d.kind) {
+              <span class="detail-kind">{{ d.kind }}</span>
+            }
+          </div>
+          @if (d.description) {
+            <p class="detail-desc">{{ d.description }}</p>
           }
-          <span class="typed">{{ typedPart(s) }}</span
-          ><span class="rest">{{ restPart(s) }}</span>
-          @if (descriptionFor(s); as desc) {
-            <span class="slash-desc">{{ desc }}</span>
+          @if (d.count != null) {
+            <div class="detail-meta">
+              <span class="detail-count">{{ d.count }}</span> shared
+            </div>
           }
-        </li>
+          @if (d.options?.length) {
+            <div class="detail-options">
+              <div class="detail-options-label">options</div>
+              <ul>
+                @for (o of d.options; track o) {
+                  <li>{{ o }}</li>
+                }
+              </ul>
+            </div>
+          }
+        </aside>
       }
-    </ul>
+    </div>
   }
 </div>

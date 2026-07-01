@@ -19,6 +19,8 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import type { Navigation } from '../../core/navigation'
 import type { MovementService } from '../../core/movement.service'
 import { EffectBus, consumePointerGesture } from '@hypercomb/core'
+import { iconOverrides } from '../../core/icon-override.store'
+import { iconEditMode } from '../../core/icon-edit.service'
 import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
 import type { InstallMonitor } from '../../core/install-monitor'
@@ -61,6 +63,10 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // mesh-header — it now lives beside the solo/swarm icon and only shows in
   // swarm mode (see MeshHeaderComponent).
   { id: 'neon-mode',    label: 'controls.neon-mode',    action: 'toggleNeonMode',     visibleWhen: 'always' },
+  // Launcher silhouettes (websites → flower-in-pot, games → Space Invader) back
+  // to plain hexagons. Global toggle; only has a visible effect on `agg-*`
+  // launch-group pages — every normal hive page is hexagons regardless.
+  { id: 'launcher-shapes', label: 'controls.launcher-shapes', action: 'toggleLauncherShapes', visibleWhen: 'always' },
   { id: 'text-only',    label: 'controls.text-only',    action: 'toggleTextOnly',     visibleWhen: 'always' },
   { id: 'notes',        label: 'controls.notes',        action: 'toggleNotes',        visibleWhen: 'always' },
   { id: 'cut',          label: 'selection.cut',         action: 'cut',                visibleWhen: 'hasSelection' },
@@ -82,7 +88,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
 // anything in edit mode the persisted map takes over.
 const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'back': true, 'dcp': true, 'fit': true, 'zoom-out': true, 'zoom-in': true, 'pin': true, 'fullscreen': true,
-  'instructions': false, 'show-hidden': false, 'neon-mode': false, 'text-only': false,
+  'instructions': false, 'show-hidden': false, 'neon-mode': false, 'launcher-shapes': false, 'text-only': false,
   'notes': true,
   'cut': false, 'copy': false,
   'clipboard': true, 'voice': false, 'bees': false, 'feedback': false,
@@ -245,6 +251,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // Neon mode — an on/off toggle. When on, the renderer lights every tile's
   // border with an additive glow. Persisted so a refresh keeps the mode.
   #neonMode = signal(localStorage.getItem('hc:neon-mode') === '1')
+  // Launcher-shapes toggle — when on, launch-group pages (websites/games/mix)
+  // render their tiles as plain hexagons instead of their decorative silhouettes.
+  // Persisted so a refresh keeps the mode. Off by default (decorative shapes).
+  #launcherHexagons = signal(localStorage.getItem('hc:launcher-hexagons') === '1')
   // Fit button has three states:
   //  - 'off'    (white): regular click performs a one-shot fit; no pin
   //  - 'global' (green): every layer auto-fits on navigation
@@ -357,6 +367,27 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#editMode.update(v => !v)
   }
 
+  // ── universal icon protocol ──────────────────────────────
+  /** True while reskin (jiggle) mode is on — drives the wiggle class. */
+  readonly iconEditOn = signal(false)
+  /** Bumped on every override change so `iconSymbol` re-resolves in the view. */
+  readonly iconRev = signal(0)
+  #suppressIconClick = false
+  #iconPressTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** Long-press a control icon → enter icon edit mode (without picking it). */
+  readonly onIconPressDown = (): void => {
+    this.#clearIconPress()
+    this.#suppressIconClick = false
+    this.#iconPressTimer = setTimeout(() => {
+      this.#iconPressTimer = null
+      this.#suppressIconClick = true
+      iconEditMode.enter()
+    }, 500)
+  }
+  readonly onIconPressUp = (): void => { this.#clearIconPress() }
+  #clearIconPress(): void { if (this.#iconPressTimer) { clearTimeout(this.#iconPressTimer); this.#iconPressTimer = null } }
+
   readonly isEnabled = (ctrl: ControlItem): boolean => {
     const map = this.#enabledMap()
     return map[ctrl.id] ?? DEFAULT_ENABLED_MAP[ctrl.id] ?? true
@@ -366,6 +397,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  mode runs the action only if the item is enabled — muted items
    *  no-op so the user has to enter edit mode to activate them. */
   readonly onCtrlClick = (ctrl: ControlItem, event: MouseEvent): void => {
+    // Icon protocol: a long-press just entered edit mode — swallow its trailing
+    // click; a tap while editing reskins this control instead of running it.
+    if (this.#suppressIconClick) { this.#suppressIconClick = false; return }
+    if (iconEditMode.on) { iconEditMode.requestPick('control:' + ctrl.id); return }
     if (this.#editMode()) {
       this.#enabledMap.update(m => ({ ...m, [ctrl.id]: !this.isEnabled(ctrl) }))
       this.#persistEnabledMap()
@@ -387,6 +422,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     toggleInstructions: (e) => this.toggleInstructions(e!),
     toggleShowHidden: () => this.toggleShowHidden(),
     toggleNeonMode: () => this.toggleNeonMode(),
+    toggleLauncherShapes: () => this.toggleLauncherShapes(),
     toggleTextOnly: () => this.toggleTextOnly(),
     toggleNotes: () => this.toggleNotes(),
     cut: () => this.cut(),
@@ -409,6 +445,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'fit': return this.fitLocked()
       case 'show-hidden': return this.#showHidden()
       case 'neon-mode': return this.#neonMode()
+      case 'launcher-shapes': return this.#launcherHexagons()
       case 'text-only': return this.#textOnly()
       case 'bees': return this.#beesVisible()
       case 'voice': return this.voiceActive()
@@ -424,7 +461,15 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
    *  rather than a separate glyph.
    *  Returns an empty string for unknown ids so the template falls back
    *  to the legacy glyph rendering. */
+  /** Public glyph resolver — the author default (below) with the participant's
+   *  icon-protocol override layered on top. Touches `iconRev` so a reskin
+   *  re-renders. */
   readonly iconSymbol = (ctrl: ControlItem): string => {
+    this.iconRev()   // CD dependency: re-resolve when an override changes
+    return iconOverrides.glyph('control:' + ctrl.id, this.#rawIconSymbol(ctrl))
+  }
+
+  readonly #rawIconSymbol = (ctrl: ControlItem): string => {
     switch (ctrl.id) {
       case 'back':         return 'arrow_back'
       case 'dcp':          return 'dashboard_customize'
@@ -441,6 +486,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'instructions': return 'help'
       case 'show-hidden':  return this.showHidden() ? 'visibility' : 'visibility_off'
       case 'neon-mode':    return 'flare'
+      case 'launcher-shapes': return 'hexagon'
       case 'text-only':    return this.textOnly() ? 'text_fields' : 'subject'
       case 'notes':        return 'sticky_note_2'
       case 'cut':          return 'content_cut'
@@ -766,6 +812,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #showHiddenUnsub: (() => void) | null = null
   #textOnlyUnsub: (() => void) | null = null
   #neonModeUnsub: (() => void) | null = null
+  #launcherShapesUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
   #clipboardOpenUnsub: (() => void) | null = null
   #notesOpenUnsub: (() => void) | null = null
@@ -776,11 +823,17 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #meshModalUnsub: (() => void) | null = null
   #meshJoinUnsub: (() => void) | null = null
   #lockBumpUnsub: (() => void) | null = null
+  #iconEditUnsub: (() => void) | null = null
+  #onIconOverride = (): void => this.iconRev.update(v => v + 1)
 
   ngOnInit(): void {
     // Pulse the pin button when a pan/zoom is rejected because input is
     // locked. Transient (no replay) so a fresh mount never bumps.
     this.#lockBumpUnsub = EffectBus.on('input:locked-attempt', this.#flashLockBump)
+
+    // Icon protocol: reflect edit mode (jiggle) + re-resolve glyphs on reskin.
+    this.#iconEditUnsub = EffectBus.on<{ on?: boolean }>('icon:edit-mode', ({ on }) => this.iconEditOn.set(!!on))
+    iconOverrides.addEventListener('change', this.#onIconOverride)
 
     this.#meshModalUnsub = EffectBus.on<{ open: boolean }>('mesh:modal-open', ({ open }) => {
       this.#roomOpen.set(!!open)
@@ -915,6 +968,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       this.#neonMode.set(active)
     })
 
+    // keep the launcher-shapes icon in sync if toggled elsewhere
+    this.#launcherShapesUnsub = EffectBus.on<{ active: boolean }>('launcher:hexagons', ({ active }) => {
+      this.#launcherHexagons.set(active)
+    })
+
     this.#atomizeModeUnsub = EffectBus.on<{ active: boolean; target: string; strategy: string }>(
       'atomize:mode',
       ({ active, target, strategy }) => {
@@ -953,6 +1011,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // emit initial neon-mode state so the renderer picks it up
     if (this.#neonMode()) {
       EffectBus.emit('neon:mode', { active: true })
+    }
+
+    // emit initial launcher-shapes state so the renderer picks it up
+    if (this.#launcherHexagons()) {
+      EffectBus.emit('launcher:hexagons', { active: true })
     }
 
     // fit-locked: install the navigation listener if any fit pin exists.
@@ -1020,6 +1083,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#showHiddenUnsub?.()
     this.#textOnlyUnsub?.()
     this.#neonModeUnsub?.()
+    this.#launcherShapesUnsub?.()
     this.#clipboardAvailableUnsub?.()
     this.#clipboardOpenUnsub?.()
     this.#notesOpenUnsub?.()
@@ -1032,6 +1096,9 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#meshModalUnsub?.()
     this.#meshJoinUnsub?.()
     this.#lockBumpUnsub?.()
+    this.#iconEditUnsub?.()
+    iconOverrides.removeEventListener('change', this.#onIconOverride)
+    this.#clearIconPress()
     if (this.#lockBumpTimer) clearTimeout(this.#lockBumpTimer)
     window.removeEventListener('keydown', this.#onPowerKeyDown)
     window.removeEventListener('keyup', this.#onPowerKeyUp)
@@ -1520,6 +1587,19 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#neonMode.set(next)
     localStorage.setItem('hc:neon-mode', next ? '1' : '0')
     EffectBus.emit('neon:mode', { active: next })
+  }
+
+  // ── launcher shapes (decorative ⇄ plain hexagons) ────────
+  // Launch-group pages draw their tiles as group-specific silhouettes (websites
+  // → flower-in-pot, games → marching Space Invader). When this is on, the
+  // renderer (hex SDF shader, via show-cell) forces those pages back to plain
+  // hexagons. Pure shader-mode flip; no geometry/cell-list change.
+
+  readonly toggleLauncherShapes = (): void => {
+    const next = !this.#launcherHexagons()
+    this.#launcherHexagons.set(next)
+    localStorage.setItem('hc:launcher-hexagons', next ? '1' : '0')
+    EffectBus.emit('launcher:hexagons', { active: next })
   }
 
   // ── voice ────────────────────────────────────────────

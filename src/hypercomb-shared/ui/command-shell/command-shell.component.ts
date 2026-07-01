@@ -4,7 +4,7 @@
 // ghost text, suggestion dropdown, keyboard navigation) while delegating
 // all business logic to the parent via inputs/outputs.
 
-import { Component, computed, ElementRef, input, output, signal, ViewChild, type AfterViewInit } from '@angular/core'
+import { Component, computed, effect, ElementRef, inject, input, output, signal, ViewChild, type AfterViewInit, type OnDestroy } from '@angular/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 
 /** How long a view toggle must be held (no modifier) to count as a disable —
@@ -18,10 +18,93 @@ const VIEW_TOGGLE_LONG_PRESS_MS = 500
   templateUrl: './command-shell.component.html',
   styleUrls: ['./command-shell.component.scss']
 })
-export class CommandShellComponent implements AfterViewInit {
+export class CommandShellComponent implements AfterViewInit, OnDestroy {
 
   @ViewChild('shellInput', { read: ElementRef })
   private inputRef?: ElementRef<HTMLInputElement>
+
+  /** Host element — used to anchor the fixed-position dropdown to the bar's
+   *  on-screen rect (the dropdown must be fixed to escape the header chrome's
+   *  overflow:hidden chain). */
+  readonly #host = inject(ElementRef<HTMLElement>)
+  #reflowTeardown?: () => void
+
+  constructor() {
+    // Re-anchor the dropdown each time it opens or switches single↔two-pane.
+    // queueMicrotask defers to after the @if has rendered the element.
+    effect(() => {
+      if (this.effectiveShowCompletions()) {
+        this.activeDetail()
+        this.value()   // re-anchor to the caret as it advances with each keystroke
+        queueMicrotask(() => this.#positionIntel())
+      }
+    })
+  }
+
+  /** Compute the dropdown's fixed screen coordinates from the command bar's
+   *  rect and feed them in as CSS vars. Opens DOWN when the bar is in the top
+   *  half of the viewport, UP when it's in the bottom half (the dev/web shells
+   *  pin the bar to the bottom), so the list is always on-screen. */
+  #positionIntel(): void {
+    const host = this.#host.nativeElement
+    const bar = host.querySelector('.command-bar') as HTMLElement | null
+    const r = (bar ?? host).getBoundingClientRect()
+    if (r.width === 0 && r.height === 0) return
+    const vw = window.innerWidth || document.documentElement.clientWidth
+    const vh = window.innerHeight || document.documentElement.clientHeight
+    const isPhone = vw <= 599
+
+    // Horizontal: line up the dropdown's left edge with the START of the word
+    // you're completing (the caret minus the typed prefix), so the suggestions
+    // continue from where the token begins. On phone it spans the bar from the
+    // left instead (no room to offset).
+    const anchorX = isPhone ? null : this.#fragmentStartX()
+    let left = anchorX ?? r.left
+    left = Math.max(8, Math.min(left, vw - 224))   // keep ~14rem on-screen
+    host.style.setProperty('--intel-left', `${Math.round(left)}px`)
+    host.style.setProperty('--intel-width', `${Math.round(r.width)}px`)
+
+    // Vertical: open UP off a bottom-anchored bar (dev/web pin it to the bottom),
+    // DOWN off a top-anchored one.
+    const openUp = r.top > vh / 2
+    if (openUp) {
+      host.style.setProperty('--intel-top', 'auto')
+      host.style.setProperty('--intel-bottom', `${Math.round(vh - r.top + 6)}px`)
+    } else {
+      host.style.setProperty('--intel-bottom', 'auto')
+      host.style.setProperty('--intel-top', `${Math.round(r.bottom + 6)}px`)
+    }
+  }
+
+  /** Screen x-coordinate of the START of the token being completed — the caret
+   *  minus the typed prefix — measured with a hidden mirror span carrying the
+   *  input's resolved font, so the dropdown anchors under the start of the word
+   *  you're typing. Null when the input isn't available. */
+  #fragmentStartX(): number | null {
+    const input = this.inputElement
+    if (!input) return null
+    const rect = input.getBoundingClientRect()
+    const cs = getComputedStyle(input)
+    const mirror = document.createElement('span')
+    const s = mirror.style
+    s.position = 'absolute'
+    s.visibility = 'hidden'
+    s.whiteSpace = 'pre'
+    // Copy the longhands (the `font` shorthand reads back empty from computed style).
+    s.fontFamily = cs.fontFamily
+    s.fontSize = cs.fontSize
+    s.fontWeight = cs.fontWeight
+    s.fontStyle = cs.fontStyle
+    s.letterSpacing = cs.letterSpacing
+    const caret = input.selectionStart ?? input.value.length
+    const start = Math.max(0, caret - this.typedPrefix().length)
+    mirror.textContent = input.value.slice(0, start)
+    document.body.appendChild(mirror)
+    const textWidth = mirror.getBoundingClientRect().width
+    mirror.remove()
+    const padLeft = parseFloat(cs.paddingLeft) || 0
+    return rect.left + padLeft + textWidth - input.scrollLeft
+  }
 
   private get inputElement(): HTMLInputElement | undefined {
     return this.inputRef?.nativeElement
@@ -46,6 +129,24 @@ export class CommandShellComponent implements AfterViewInit {
 
   /** Optional descriptions keyed by suggestion name (shown right-aligned). */
   readonly descriptionMap = input<ReadonlyMap<string, string>>(new Map())
+
+  /**
+   * Detail for the CURRENTLY-ACTIVE suggestion, rendered in the right-hand
+   * pane of the intellisense (the "to the right and vertically down" surface).
+   * Null collapses the dropdown back to a single column — used for plain
+   * cell-create where there's nothing extra to say. The parent recomputes it
+   * from the active index, so arrowing up/down updates the pane live.
+   */
+  readonly activeDetail = input<{
+    name: string
+    kind?: string
+    description?: string
+    icon?: string
+    /** Overlap metric — how many entities share this one. */
+    count?: number
+    /** Sub-options for a behaviour, listed vertically under the detail. */
+    options?: readonly string[]
+  } | null>(null)
 
   /** Optional color swatches keyed by suggestion name (CSS color string). */
   readonly colorMap = input<ReadonlyMap<string, string>>(new Map())
@@ -75,44 +176,9 @@ export class CommandShellComponent implements AfterViewInit {
    */
   readonly viewToggles = input<readonly { view: string; icon: string; label: string; active: boolean }[]>([])
 
-  /**
-   * Whether the Solomon's Key game toggle is rendered on the header. True
-   * whenever the SolomonDrone has registered (announced via `solomon:state`).
-   * Backed by the parent; the shell stays presentational.
-   */
-  readonly showSolomonToggle = input<boolean>(false)
-
-  /** Whether the game overlay is currently open (drives the on/off glow). */
-  readonly solomonActive = input<boolean>(false)
-
-  /** Aria-label / tooltip for the game toggle. */
-  readonly solomonLabel = input<string>("Solomon's Key game")
-
-  /**
-   * Whether the Bubble Bobble game toggle is rendered on the header. True
-   * whenever the BubbleDrone has registered (announced via `bubble:state`).
-   * Sibling of the Solomon toggle; the shell stays presentational.
-   */
-  readonly showBubbleToggle = input<boolean>(false)
-
-  /** Whether the Bubble Bobble overlay is currently open (drives the on/off glow). */
-  readonly bubbleActive = input<boolean>(false)
-
-  /** Aria-label / tooltip for the Bubble Bobble toggle. */
-  readonly bubbleLabel = input<string>('Bubble Bobble game')
-
-  /**
-   * Whether the Arkanoid game toggle is rendered on the header. True whenever
-   * the ArkanoidDrone has registered (announced via `arkanoid:state`). Sibling
-   * of the Solomon / Bubble toggles; the shell stays presentational.
-   */
-  readonly showArkanoidToggle = input<boolean>(false)
-
-  /** Whether the Arkanoid overlay is currently open (drives the on/off glow). */
-  readonly arkanoidActive = input<boolean>(false)
-
-  /** Aria-label / tooltip for the Arkanoid toggle. */
-  readonly arkanoidLabel = input<string>('Arkanoid game')
+  // Arcade game toggles (Solomon's Key, Bubble Bobble, Arkanoid, …) are no
+  // longer per-game header icons — they aggregate under the single "games"
+  // launch-group icon (<hc-group-launchers>). See games-group.ts.
 
   /**
    * Briefly true when the user tried to pan or zoom while the view is held
@@ -213,18 +279,6 @@ export class CommandShellComponent implements AfterViewInit {
     }
   }
 
-  /** Emitted when the Solomon's Key header icon is clicked. Parent forwards
-   *  it to the SolomonDrone via EffectBus (`solomon:toggle`). */
-  readonly solomonToggle = output<void>()
-
-  /** Emitted when the Bubble Bobble header icon is clicked. Parent forwards
-   *  it to the BubbleDrone via EffectBus (`bubble:toggle`). */
-  readonly bubbleToggle = output<void>()
-
-  /** Emitted when the Arkanoid header icon is clicked. Parent forwards it to
-   *  the ArkanoidDrone via EffectBus (`arkanoid:toggle`). */
-  readonly arkanoidToggle = output<void>()
-
   /** Template handler for clicks on the armed-resource thumbnail. */
   onArmedGlyphMouseDown = (e: MouseEvent): void => {
     if (!this.armedResource()) return
@@ -255,6 +309,18 @@ export class CommandShellComponent implements AfterViewInit {
 
   ngAfterViewInit(): void {
     this.inputElement?.focus()
+    // Keep the fixed dropdown anchored if the viewport changes while it's open.
+    const reflow = (): void => { if (this.effectiveShowCompletions()) this.#positionIntel() }
+    window.addEventListener('resize', reflow)
+    window.addEventListener('scroll', reflow, true)
+    this.#reflowTeardown = (): void => {
+      window.removeEventListener('resize', reflow)
+      window.removeEventListener('scroll', reflow, true)
+    }
+  }
+
+  ngOnDestroy(): void {
+    this.#reflowTeardown?.()
   }
 
   // ── public API for parent ───────────────────────────────

@@ -155,6 +155,17 @@
   transition: opacity 200ms ease;
 }
 
+// ── universal icon protocol: edit-mode jiggle ──
+@keyframes ctl-icon-jiggle {
+  0%   { transform: rotate(-2.5deg); }
+  50%  { transform: rotate(2.5deg); }
+  100% { transform: rotate(-2.5deg); }
+}
+.ctl-btn.icon-jiggle {
+  animation: ctl-icon-jiggle 0.2s ease-in-out infinite;
+  &:nth-child(even) { animation-delay: -0.1s; }
+}
+
 // Three-stage filter-scope control (page → children → global). A single bare
 // Material glyph — focus → tree → globe — NO circle, ring, or pill, so it can
 // never be mistaken for a tag. It stays hidden until the tag strip is hovered,

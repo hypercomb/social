@@ -23,6 +23,13 @@ export class RoperDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'game'
 
+  // Launch descriptor — read by the games launch-group aggregator (which
+  // discovers games by enumerating `genotype:'game'` bees in IoC, no roster).
+  // gameId is the `<id>:toggle` effect prefix; gameIcon is a Material glyph.
+  readonly gameId = 'roper'
+  readonly gameLabel = 'Roper'
+  readonly gameIcon = 'cable'
+
   public override description =
     'Roper — turn-based Worms-style artillery. Swing in on a ninja rope and lob a grenade or bomb. Toggle from the header icon or /roper.'
 
