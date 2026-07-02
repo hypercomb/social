@@ -13,6 +13,10 @@ const DEFAULT_PORTALS: Record<string, string> = {
 const DCP_LOCAL_URL = 'http://localhost:2400'
 const DCP_CANONICAL_URL = 'https://diamondcoreprocessor.com'
 
+// Headless (invisible) DCP install timing.
+const HEADLESS_FALLBACK_MS = 12000  // no config projected in time → promote to visible
+const HEADLESS_SETTLE_MS = 1200     // config projections quiet this long → auto-apply
+
 /** Resolve the DCP installer URL.
  *
  *  ─── The full-split model ────────────────────────────────────────────
@@ -109,6 +113,15 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   pendingPackageChange = false
   #openLogicalBaseline: string | null = null
 
+  /** Headless (invisible) install: the DCP runs in an off-screen iframe with no
+   *  chrome and no gate lock, resolves + installs the branch's staged code
+   *  nodes, and we auto-apply once its config projections go quiet. Used by the
+   *  inline adopt of a CODE-bearing feature so the install never takes over the
+   *  screen. Promotes to the visible installer if the DCP never projects. */
+  headless = false
+  #headlessFallbackTimer: number | null = null
+  #headlessApplyTimer: number | null = null
+
   /** Full URL of the currently-loaded iframe content, for the title-attr tooltip. */
   get activeUrl(): string | null { return this.#activeUrl }
 
@@ -159,6 +172,9 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     const detail = (e as CustomEvent).detail as
       {
         target?: string; url?: string; branchSig?: string; at?: string; domain?: string; label?: string
+        /** Invisible install (code adopt): run the DCP headless, pre-ticking the
+         *  `stage` code sigs, and auto-apply once its config settles. */
+        headless?: boolean; stage?: string[]
         /** Header upgrade-indicator handoff: WHICH package changed + the
          *  delta the installer marks for review. Notify-and-route only. */
         upgrade?: { packageSig?: string | null; newBees?: string[]; previous?: string | null }
@@ -228,7 +244,12 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     // by default. Nothing folds until Done — this only sets checkbox state.
     // Capped so the hash never grows pathological (DCP falls back gracefully).
     if ((detail?.target ?? '') === 'dcp') {
-      const sigs = stagedSigs().slice(0, 80)
+      // Merge the caller's explicit stage sigs (a headless code adopt pre-ticks
+      // the branch's bee/dep nodes) with the "show features" panel's staging.
+      const extra = Array.isArray(detail?.stage)
+        ? detail.stage.map(s => String(s ?? '').trim().toLowerCase()).filter(s => /^[a-f0-9]{64}$/.test(s))
+        : []
+      const sigs = [...new Set([...extra, ...stagedSigs()])].slice(0, 80)
       if (sigs.length) url += (url.includes('#') ? '&' : '#') + `stage=${sigs.join(',')}`
     }
 
@@ -240,12 +261,22 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.pendingPackageChange = false
     this.portalSrc = this.#sanitizer.bypassSecurityTrustResourceUrl(url)
     this.isOpen = true
-    // Freeze tile navigation while the portal/installer covers the canvas —
-    // per the "modals lock tiles while showing" rule no pan/pinch/wheel-zoom/
-    // drag-select may bleed through behind it. Released in close() (every
-    // passive exit funnels there) and ngOnDestroy. Resolved lazily because
-    // the gate's bee may register after this component constructs on web.
-    this.#gate()?.lock(PORTAL_LOCK_OWNER)
+    this.headless = detail?.headless === true && (detail?.target ?? '') === 'dcp'
+    if (this.headless) {
+      // Invisible install — NO gate lock (tiles stay interactive behind the
+      // off-screen iframe) and NO chrome. If the DCP never projects a config in
+      // time (slow / stuck / unresolved) we promote to the visible installer so
+      // the participant can finish by hand — never a silent hung iframe.
+      this.#clearHeadlessTimers()
+      this.#headlessFallbackTimer = window.setTimeout(() => this.#promoteHeadlessToVisible(), HEADLESS_FALLBACK_MS)
+    } else {
+      // Freeze tile navigation while the visible installer covers the canvas —
+      // per the "modals lock tiles while showing" rule no pan/pinch/wheel-zoom/
+      // drag-select may bleed through behind it. Released in close() (every
+      // passive exit funnels there) and ngOnDestroy. Resolved lazily because
+      // the gate's bee may register after this component constructs on web.
+      this.#gate()?.lock(PORTAL_LOCK_OWNER)
+    }
     this.#recomputeDiff()   // also calls detectChanges()
   }
 
@@ -335,8 +366,42 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
       // enforced above (must match the installer iframe's origin).
       case 'hc:registry-snapshot':
         EffectBus.emit('registry:snapshot', data)
+        // Headless install: the DCP resolved the branch + ticked its staged
+        // nodes and is projecting config — auto-apply once that goes quiet.
+        if (this.headless) this.#scheduleHeadlessApply()
         break
     }
+  }
+
+  // -------------------------------------------------
+  // headless (invisible) install
+  // -------------------------------------------------
+  /** Apply once the DCP's config projections go quiet — branch resolved, staged
+   *  nodes ticked, nothing new arriving. Debounced so a burst of snapshots
+   *  settles to ONE apply() (fold + resync), then the off-screen iframe tears
+   *  down. Also cancels the "never projected" fallback. */
+  #scheduleHeadlessApply(): void {
+    if (this.#headlessFallbackTimer !== null) { window.clearTimeout(this.#headlessFallbackTimer); this.#headlessFallbackTimer = null }
+    if (this.#headlessApplyTimer !== null) window.clearTimeout(this.#headlessApplyTimer)
+    this.#headlessApplyTimer = window.setTimeout(() => {
+      this.#headlessApplyTimer = null
+      if (this.headless) this.apply()
+    }, HEADLESS_SETTLE_MS)
+  }
+
+  /** The DCP never projected a config in time — surface the installer VISIBLY so
+   *  the participant can finish the install by hand. Never a silent hung iframe. */
+  #promoteHeadlessToVisible = (): void => {
+    if (!this.headless) return
+    this.#clearHeadlessTimers()
+    this.headless = false
+    this.#gate()?.lock(PORTAL_LOCK_OWNER)
+    this.#recomputeDiff()   // detectChanges → the visible panel now renders
+  }
+
+  #clearHeadlessTimers(): void {
+    if (this.#headlessFallbackTimer !== null) { window.clearTimeout(this.#headlessFallbackTimer); this.#headlessFallbackTimer = null }
+    if (this.#headlessApplyTimer !== null) { window.clearTimeout(this.#headlessApplyTimer); this.#headlessApplyTimer = null }
   }
 
   // -------------------------------------------------
@@ -369,6 +434,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.#unsubEscape?.()
     this.#unsubTouchDragging?.()
     this.#unsubDiff?.()
+    this.#clearHeadlessTimers()
     // Release on teardown so a portal destroyed while open never leaves the
     // hexes locked.
     this.#gate()?.unlock(PORTAL_LOCK_OWNER)
@@ -390,6 +456,8 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   // diff isn't lost: DCP keeps the config and re-surfaces it next open.
   public close = (): void => {
     const wasDcp = this.#activeTarget === 'dcp'
+    this.#clearHeadlessTimers()
+    this.headless = false
     this.isOpen = false
     this.#gate()?.unlock(PORTAL_LOCK_OWNER)
     this.portalSrc = null

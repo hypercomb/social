@@ -1,5 +1,18 @@
 <!-- src/app/common/portal/portal-overlay.component.html -->
-@if (isOpen) {
+@if (isOpen && headless) {
+  <!-- Invisible install: off-screen iframe, no backdrop, no chrome. The DCP
+       resolves + installs the staged code nodes and we auto-apply on quiescence
+       (or promote to the visible panel below on timeout). -->
+  <iframe
+    class="portal-frame-headless"
+    [src]="portalSrc"
+    sandbox="allow-scripts allow-forms allow-same-origin"
+    referrerpolicy="no-referrer"
+    aria-hidden="true"
+    tabindex="-1"
+  ></iframe>
+}
+@if (isOpen && !headless) {
   <div class="backdrop" (click)="close()"></div>
 
   <div class="panel" role="dialog" data-consumes-wheel hcWidget="portal" anchor="center">

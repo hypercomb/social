@@ -22,7 +22,7 @@
 // separate MANUAL concerns — the command-line update icon opens the
 // installer; the participant pulls there.
 
-import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
+import { Drone, EffectBus, hypercomb, requestConfirm } from '@hypercomb/core'
 import {
   childNamesOfStrict,
   flattenLayerTree,
@@ -268,13 +268,13 @@ export class SwarmAdoptDrone extends Drone {
     return { layerSig, at, domain: ownerDomain || undefined, label }
   }
 
-  // ── code-bearing / fallback route → SEND THE SIG TO THE INSTALLER ──
+  // ── VISIBLE installer route → SEND THE SIG TO THE INSTALLER ──
   // Hands the publisher's branch signature to the DCP installer (portal-overlay
   // opens DCP with #branch=<sig>&at=…); the install happens THERE. Now reached
-  // only for a feature that carries CODE (bees/deps) or one the inline path
-  // couldn't resolve to inspect — content features fold inline via #adoptInline
-  // and never come here. (Target end-state: a HEADLESS DCP install behind one
-  // "brings code" prompt; the visible installer is the safe interim.)
+  // only when the inline path couldn't RESOLVE the branch to inspect it — so we
+  // won't inline-fold it blind, nor falsely claim it "brings code." Content
+  // folds inline; a resolved code-bearing feature installs HEADLESS behind a
+  // consent prompt — both via #adoptInline.
   #adoptPeerTile = async (label: string, pubkey?: string): Promise<void> => {
     const branch = this.#resolvePeerBranch(label, pubkey)
     if (!branch) return
@@ -312,13 +312,37 @@ export class SwarmAdoptDrone extends Drone {
   #adoptInline = async (label: string, pubkey?: string): Promise<void> => {
     const branch = this.#resolvePeerBranch(label, pubkey)
     if (!branch) return
-    const declaresCode = await this.#branchDeclaresCode(branch.layerSig, branch.domain)
-    if (declaresCode !== false) {
-      // code-bearing, or indeterminate → installer (fail-safe: never inline-fold
-      // code we haven't resolved and can't gate as content).
+    const codeSigs = await this.#branchCodeSigs(branch.layerSig, branch.domain)
+    if (codeSigs === null) {
+      // Couldn't resolve the branch to inspect it → open the installer VISIBLY.
+      // Never inline-fold content we couldn't verify, and don't falsely claim
+      // "brings code" for something we can't see.
       await this.#adoptPeerTile(label, pubkey)
       return
     }
+    if (codeSigs.length > 0) {
+      // Declares CODE → ask consent, then install via a HEADLESS (invisible) DCP,
+      // pre-ticking the code nodes. The visible installer never takes over the
+      // screen (it only appears if the headless install stalls — its fallback).
+      const ok = await requestConfirm({
+        title: 'adopt.code.title',
+        message: 'adopt.code.message',
+        messageParams: { label: branch.label },
+        confirmLabel: 'adopt.code.allow',
+        cancelLabel: 'adopt.code.deny',
+      })
+      if (!ok) return
+      window.dispatchEvent(new CustomEvent('portal:open', {
+        detail: {
+          target: 'dcp', headless: true,
+          branchSig: branch.layerSig, at: branch.at, domain: branch.domain, label: branch.label,
+          stage: codeSigs,
+        },
+      }))
+      return
+    }
+    // Content-only → immediate in-place fold; the render-time gate is the trust
+    // surface (a foreign page is reviewed before it mounts).
     const res = await this.#commitBranch(branch.layerSig, branch.at, branch.domain, 'fold')
     if (res === 'committed') {
       // Folding may add feature decorations without a per-decoration event —
@@ -330,14 +354,15 @@ export class SwarmAdoptDrone extends Drone {
     }
   }
 
-  // Does this branch carry executable CODE (bee / dependency sigs) anywhere in
-  // its subtree? Content-only branches declare none, so they fold inline with no
-  // installer. Pulls the layer closure (layersOnly — the same cheap immutable-
-  // cache fetch #doCommitBranch reuses) then walks root + children.
-  //   false → content-only (fold inline)
-  //   true  → declares code (route to installer)
-  //   null  → couldn't resolve/inspect (caller treats as "route to installer")
-  #branchDeclaresCode = async (layerSig: string, domain?: string): Promise<boolean | null> => {
+  // The branch's executable-CODE signatures (bee + dependency sigs) anywhere in
+  // its subtree — the nodes a headless DCP install must pre-tick. Content-only
+  // branches declare none, so they fold inline with no installer. Pulls the
+  // layer closure (layersOnly — the same cheap immutable-cache fetch
+  // #doCommitBranch reuses) then walks root + children.
+  //   []    → content-only (fold inline)
+  //   [...] → declares code (headless DCP install of these sigs)
+  //   null  → couldn't resolve/inspect (caller opens the visible installer)
+  #branchCodeSigs = async (layerSig: string, domain?: string): Promise<string[] | null> => {
     const ioc = this.#ioc()
     const broker = ioc?.get?.(BROKER_KEY) as BrokerLike | undefined
     const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
@@ -348,21 +373,27 @@ export class SwarmAdoptDrone extends Drone {
       const root = await history.getLayerBySig(layerSig)
       if (!root) return null
       const seen = new Set<string>()
-      const walk = async (layer: PlacementLayer): Promise<boolean> => {
-        const bees = (layer as { bees?: unknown }).bees
-        const deps = (layer as { dependencies?: unknown }).dependencies
-        if ((Array.isArray(bees) && bees.length > 0) || (Array.isArray(deps) && deps.length > 0)) return true
+      const codeSigs = new Set<string>()
+      const collect = (arr: unknown): void => {
+        if (Array.isArray(arr)) for (const s of arr) {
+          const v = String(s ?? '').trim().toLowerCase()
+          if (SIG_RE.test(v)) codeSigs.add(v)
+        }
+      }
+      const walk = async (layer: PlacementLayer): Promise<void> => {
+        collect((layer as { bees?: unknown }).bees)
+        collect((layer as { dependencies?: unknown }).dependencies)
         const children = Array.isArray(layer.children) ? layer.children : []
         for (const sig of children) {
           const s = String(sig)
           if (seen.has(s)) continue
           seen.add(s)
           const child = await history.getLayerBySig(s)
-          if (child && await walk(child)) return true
+          if (child) await walk(child)
         }
-        return false
       }
-      return await walk(root)
+      await walk(root)
+      return [...codeSigs]
     } catch {
       return null
     }
