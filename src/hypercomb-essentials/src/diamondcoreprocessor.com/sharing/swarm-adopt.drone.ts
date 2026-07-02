@@ -24,10 +24,11 @@
 
 import { Drone, EffectBus, hypercomb } from '@hypercomb/core'
 import {
-  childNamesOf,
+  childNamesOfStrict,
   flattenLayerTree,
   resolveLayerAt,
   type PlacementHistory,
+  type PlacementLayer,
   type PlacementLineage,
 } from '../history/layer-placement.js'
 import {
@@ -139,7 +140,7 @@ export class SwarmAdoptDrone extends Drone {
               .map(s => ({ label: String(s?.label ?? '').trim(), pubkey: String(s?.pubkey ?? '').trim().toLowerCase() }))
               .filter(s => s.label.length > 0)
           : []
-        void (async () => { for (const s of selections) await this.#adoptPeerTile(s.label, s.pubkey || undefined) })()
+        void (async () => { for (const s of selections) await this.#adoptInline(s.label, s.pubkey || undefined) })()
         return
       }
 
@@ -152,18 +153,28 @@ export class SwarmAdoptDrone extends Drone {
         ? payload.labels.map(s => String(s ?? '').trim()).filter(Boolean)
         : []
       if (labels.length > 0) {
-        void (async () => { for (const label of labels) await this.#adoptPeerTile(label) })()
+        void (async () => { for (const label of labels) await this.#adoptInline(label) })()
         return
       }
 
       const label = String(payload?.label ?? '').trim()
       if (!label) return
 
-      // Single adopt-gesture → open the participant-grouped panel; its
-      // confirm comes back as `adopt-selected`.
+      // Single adopt-gesture. When exactly ONE publisher offers this name the
+      // adoption is unambiguous → adopt INLINE right here: a content feature
+      // folds into the hive in place immediately (the render-time gate is the
+      // trust surface), and only a code-bearing feature routes to the installer.
+      // When two+ peers publish the same name, open the participant-grouped
+      // panel so the pick is disambiguated by pubkey; its confirm returns as
+      // `adopt-selected`.
       if (action === 'adopt') {
         if (!this.#isPeerTile(label)) return
-        this.emitEffect('swarm:adopt-panel:open', { preselect: [label] })
+        const publishers = this.#publishersFor(label)
+        if (publishers.length > 1) {
+          this.emitEffect('swarm:adopt-panel:open', { preselect: [label] })
+          return
+        }
+        void this.#adoptInline(label, publishers[0] || undefined)
         return
       }
 
@@ -257,19 +268,104 @@ export class SwarmAdoptDrone extends Drone {
     return { layerSig, at, domain: ownerDomain || undefined, label }
   }
 
-  // ── adopt / features → SEND THE SIG TO THE INSTALLER ───────────────
-  // Does NOT fetch or commit in the hive. Hands the publisher's branch
-  // signature to the installer (portal-overlay opens DCP with
-  // #branch=<sig>&at=…); the install happens THERE when the participant
-  // toggles the node on. No in-hive broker.adopt walk, no layer write. This
-  // is the path the `features` icon uses to let the participant view a
-  // tile's features and turn its scripts on.
+  // ── code-bearing / fallback route → SEND THE SIG TO THE INSTALLER ──
+  // Hands the publisher's branch signature to the DCP installer (portal-overlay
+  // opens DCP with #branch=<sig>&at=…); the install happens THERE. Now reached
+  // only for a feature that carries CODE (bees/deps) or one the inline path
+  // couldn't resolve to inspect — content features fold inline via #adoptInline
+  // and never come here. (Target end-state: a HEADLESS DCP install behind one
+  // "brings code" prompt; the visible installer is the safe interim.)
   #adoptPeerTile = async (label: string, pubkey?: string): Promise<void> => {
     const branch = this.#resolvePeerBranch(label, pubkey)
     if (!branch) return
     window.dispatchEvent(new CustomEvent('portal:open', {
       detail: { target: 'dcp', branchSig: branch.layerSig, at: branch.at, domain: branch.domain, label: branch.label },
     }))
+  }
+
+  /** Distinct publisher pubkeys currently offering `label` (current-location
+   *  cache + subscribed channel). One → unambiguous, adopt inline; two+ → the
+   *  same name from different peers, so the choose-panel disambiguates. */
+  #publishersFor = (label: string): string[] => {
+    const swarm = this.#ioc()?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
+    if (!swarm?.peerTilesAtCurrentSig) return []
+    const keys = new Set<string>()
+    for (const p of swarm.peerTilesAtCurrentSig()) {
+      if (p.name === label) keys.add(String(p.peerPubkey ?? '').toLowerCase())
+    }
+    for (const p of swarm.subscribedTiles?.() ?? []) {
+      if (p.name === label) keys.add(String(p.peerPubkey ?? '').toLowerCase())
+    }
+    return [...keys]
+  }
+
+  // ── inline adopt: fold content in place, route only code to the installer ──
+  // The smooth single-feature adoption. A CONTENT feature (a website is layers +
+  // a `visual:website:page` decoration + streamed resources; its renderer already
+  // ships in essentials) folds straight into the hive HERE via the same
+  // #commitBranch cascade sync uses — immediate, in place, nothing deferred to
+  // "next time". Trust is enforced downstream by the render-time verification gate
+  // (site-view #reconcile → featureNeedsReview), which is fail-closed and path-
+  // agnostic, so a directly-folded foreign page is reviewed before it ever mounts.
+  // Only a branch that declares CODE (bees/deps) — or one we can't resolve to
+  // inspect — routes to the installer.
+  #adoptInline = async (label: string, pubkey?: string): Promise<void> => {
+    const branch = this.#resolvePeerBranch(label, pubkey)
+    if (!branch) return
+    const declaresCode = await this.#branchDeclaresCode(branch.layerSig, branch.domain)
+    if (declaresCode !== false) {
+      // code-bearing, or indeterminate → installer (fail-safe: never inline-fold
+      // code we haven't resolved and can't gate as content).
+      await this.#adoptPeerTile(label, pubkey)
+      return
+    }
+    const res = await this.#commitBranch(branch.layerSig, branch.at, branch.domain, 'fold')
+    if (res === 'committed') {
+      // Folding may add feature decorations without a per-decoration event —
+      // forget the label so the re-render re-walks the decorations slot (keeps
+      // the features icon's visual-bee gate honest) and bust the tile's per-cell
+      // caches so the folded image/border/tags show.
+      forgetDecorationLabel(branch.label)
+      EffectBus.emit('tile:saved', { cell: branch.label })
+    }
+  }
+
+  // Does this branch carry executable CODE (bee / dependency sigs) anywhere in
+  // its subtree? Content-only branches declare none, so they fold inline with no
+  // installer. Pulls the layer closure (layersOnly — the same cheap immutable-
+  // cache fetch #doCommitBranch reuses) then walks root + children.
+  //   false → content-only (fold inline)
+  //   true  → declares code (route to installer)
+  //   null  → couldn't resolve/inspect (caller treats as "route to installer")
+  #branchDeclaresCode = async (layerSig: string, domain?: string): Promise<boolean | null> => {
+    const ioc = this.#ioc()
+    const broker = ioc?.get?.(BROKER_KEY) as BrokerLike | undefined
+    const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
+    if (!broker?.adopt || !history?.getLayerBySig) return null
+    try {
+      if (domain) broker.noteDomainsForSig?.(layerSig, [domain])
+      await broker.adopt(layerSig, { layersOnly: true })
+      const root = await history.getLayerBySig(layerSig)
+      if (!root) return null
+      const seen = new Set<string>()
+      const walk = async (layer: PlacementLayer): Promise<boolean> => {
+        const bees = (layer as { bees?: unknown }).bees
+        const deps = (layer as { dependencies?: unknown }).dependencies
+        if ((Array.isArray(bees) && bees.length > 0) || (Array.isArray(deps) && deps.length > 0)) return true
+        const children = Array.isArray(layer.children) ? layer.children : []
+        for (const sig of children) {
+          const s = String(sig)
+          if (seen.has(s)) continue
+          seen.add(s)
+          const child = await history.getLayerBySig(s)
+          if (child && await walk(child)) return true
+        }
+        return false
+      }
+      return await walk(root)
+    } catch {
+      return null
+    }
   }
 
   // ── sync → FOLD THE PUBLISHER'S VISUALS INTO THE HIVE (replace) ─────
@@ -366,7 +462,18 @@ export class SwarmAdoptDrone extends Drone {
       // read there makes existing=[] and the children SET below WIPE the
       // siblings it couldn't see. Mirrors clipboard paste's #resolveParentLayer.
       const parent = await resolveLayerAt(history, lineage.domain, at)
-      const existing = await childNamesOf(history, parent)
+      // Cold-sibling wipe guard: childNamesOfStrict resolves the parent's
+      // existing children by name, but a child whose layer bytes are COLD
+      // resolves to null and is dropped — and we SET the full children list
+      // below, so a dropped sibling is PERMANENTLY removed. If any sibling is
+      // unresolved, abort with 'unavailable' (retries when the pool warms)
+      // rather than write a lossy list. Visible siblings of the current location
+      // are warm (rendered), so this only bites truly-cold members.
+      const { names: existing, coldMiss } = await childNamesOfStrict(history, parent)
+      if (coldMiss) {
+        console.warn('[swarm-adopt] fold aborted — cold sibling(s) unresolved; refusing lossy children SET', { at })
+        return 'unavailable'
+      }
       const alreadyChild = existing.includes(name)
       // FOLD is idempotent — a tile already present here is left untouched.
       // SYNC deliberately falls through to re-home the publisher's CURRENT
@@ -557,14 +664,23 @@ export class SwarmAdoptDrone extends Drone {
     if (!history?.sign || !history?.currentLayerAt || !committer?.update || !lineage) return false
     try {
       const at = (Array.isArray(atSegments) ? atSegments : []).map(s => String(s ?? '').trim()).filter(Boolean)
-      const atLoc = await history.sign({ domain: lineage.domain, explorerSegments: () => at })
-      const parent = await history.currentLayerAt(atLoc)
-      const existing = await childNamesOf(history, parent)
-      if (!existing.includes(n)) return true   // already gone — idempotent
+      // Resolve the parent ROBUSTLY (parent-chain walk), matching #doCommitBranch.
+      // The bare currentLayerAt reads the location's OWN bag, which is cold for the
+      // current location → existing=[] → a false "already gone" that the DCP
+      // receipt records as a successful removal (desync: the branch stays folded
+      // forever, never retried). A null parent means we cannot CONFIRM the removal.
+      const parent = await resolveLayerAt(history, lineage.domain, at)
+      if (!parent) return false
+      const { names: existing, coldMiss } = await childNamesOfStrict(history, parent)
+      if (coldMiss) {
+        console.warn('[swarm-adopt] unfold aborted — cold sibling(s) unresolved; refusing lossy children SET', { at })
+        return false
+      }
+      if (!existing.includes(n)) return true   // confirmed absent — idempotent
       // Removal = a NEW marker without this child. The prior marker (with it)
       // and the content bytes persist (append-only + content-addressed), so a
       // later re-enable re-folds it — "a path back to recovery, always".
-      await committer.update(at, { ...(parent ?? {}), children: existing.filter(c => c !== n) })
+      await committer.update(at, { ...parent, children: existing.filter(c => c !== n) })
       EffectBus.emit('fs:changed', { segments: at })
       await new hypercomb().act()
       return true

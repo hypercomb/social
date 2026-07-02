@@ -5,6 +5,7 @@ import type { HistoryService } from '../history/history.service.js'
 import type { LayerSlotRegistry } from '../history/layer-slot-registry.js'
 import { inflate } from '../history/inflate.js'
 import { extractPageRefSigs, collectSigsDeep } from '../sharing/decoration-closure.js'
+import { markAuthored, markLayerAuthoredPageSigs } from '../sharing/authored-sigs.js'
 
 // Bridge protocol — matches @hypercomb/sdk/bridge
 const BRIDGE_PORT = 2401
@@ -403,14 +404,20 @@ export class ClaudeBridgeWorker extends Worker {
     // dropped when the body wasn't readable at push time — the exact reason a
     // travelled page rendered unstyled (htmlSig carried, chromeSig lost).
     const htmlSig = String((payload as Record<string, unknown>)['htmlSig'] ?? '').toLowerCase()
-    if (/^[0-9a-f]{64}$/.test(htmlSig) && store.getResource) {
-      try {
-        const body = await store.getResource(htmlSig)
-        if (body) {
-          refs.add(htmlSig)
-          for (const s of extractPageRefSigs(await body.text())) refs.add(s)
-        }
-      } catch { /* body unreadable now → push-time body parse still applies */ }
+    if (/^[0-9a-f]{64}$/.test(htmlSig)) {
+      // Locally-authored page content → record it in the participant's own-
+      // content allow-set so the verification gate never quarantines your own
+      // website (the escape hatch for feature-availability.isLocallyAuthored).
+      markAuthored(htmlSig)
+      if (store.getResource) {
+        try {
+          const body = await store.getResource(htmlSig)
+          if (body) {
+            refs.add(htmlSig)
+            for (const s of extractPageRefSigs(await body.text())) refs.add(s)
+          }
+        } catch { /* body unreadable now → push-time body parse still applies */ }
+      }
     }
     if (refs.size) record['refs'] = [...refs]
 
@@ -509,6 +516,9 @@ export class ClaudeBridgeWorker extends Worker {
     }>('@diamondcoreprocessor.com/LayerCommitter')
     if (!committer?.update) return { id: req.id, ok: false, error: 'LayerCommitter.update not available' }
 
+    // Record locally-authored page sigs written to a page slot (parity with
+    // #bagSet / #update / #decorationAdd) so the gate never quarantines them.
+    markLayerAuthoredPageSigs({ [slot]: next })
     const nextLayer: { name: string; [slot: string]: unknown } = { name: cellName, [slot]: next }
     await committer.update(segments, nextLayer)
     return { id: req.id, ok: true, data: { slot, count: next.length, mode } }
@@ -545,6 +555,10 @@ export class ClaudeBridgeWorker extends Worker {
     }>('@diamondcoreprocessor.com/LayerCommitter')
     if (!committer?.update) return { id: req.id, ok: false, error: 'LayerCommitter.update not available' }
 
+    // A page written to a page-bearing slot (`website`/`context`) is locally-
+    // authored content — record its sigs so the gate treats your own pages as
+    // own. One helper across every local slot-writer keeps coverage from drifting.
+    markLayerAuthoredPageSigs({ [slot]: next })
     const nextLayer: { name: string; [slot: string]: unknown } = { name: cellName, [slot]: next }
     await committer.update(segments, nextLayer)
     return { id: req.id, ok: true, data: { slot, count: next.length } }
@@ -833,6 +847,12 @@ export class ClaudeBridgeWorker extends Worker {
       return { id: req.id, ok: false, error: 'committer.update not available' }
     }
 
+    // Raw layer writes can author a page directly into the `website`/`context`
+    // slots (e.g. a dashboard refresh writing context:[htmlSig,...] alongside
+    // children, which bag-set can't do). Record those page sigs so the gate
+    // treats them as the participant's own — the generic-update coverage the
+    // decoration / bag-set paths would otherwise miss.
+    markLayerAuthoredPageSigs(layer)
     await committer.update(parentSegments, layer)
     return { id: req.id, ok: true, data: { count: children.length, segments: parentSegments } }
   }

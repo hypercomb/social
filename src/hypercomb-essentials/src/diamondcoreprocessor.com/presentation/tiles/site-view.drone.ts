@@ -45,12 +45,22 @@ const EXIT_OVERLAY_CSS = [
   'pointer-events:auto', 'transition:filter .16s ease',
 ].join(';')
 
-/** Raw-DOM review-gate card. Same out-of-Angular, near-max-z-index discipline
- *  as the exit overlay: shown over a FOREIGN, unverified page INSTEAD of
- *  mounting it, so nothing of the page renders, runs, or fetches until the
- *  participant reviews and enables it. Cold steel chrome, no external CSS. */
+/** Raw-DOM review-gate card. Out-of-Angular, opaque full-viewport backdrop:
+ *  shown over a FOREIGN, unverified page INSTEAD of mounting it, so nothing of
+ *  the page renders, runs, or fetches until the participant reviews and enables
+ *  it. Cold steel chrome, no external CSS.
+ *
+ *  Z-INDEX (100001) is deliberately BELOW the shell's right-docked features /
+ *  review panel (z 100002) — the "Review & enable" button hands off to that
+ *  Angular panel (`feature:review:open`), which must be visible and clickable
+ *  ON TOP of this backdrop; a near-max z-index would occlude it and the button
+ *  would appear to do nothing. The security block is enforced by #reconcile NOT
+ *  calling #mountCellPage until the sig is verified — never by this overlay's
+ *  stacking — so sitting below the panel weakens nothing (the page is torn down
+ *  while the gate is up, so there is no page content to sit above). The exit
+ *  overlay keeps its near-max z-index so the guaranteed way out stays on top. */
 const REVIEW_GATE_CSS = [
-  'position:fixed', 'inset:0', 'z-index:2147483600',
+  'position:fixed', 'inset:0', 'z-index:100001',
   'display:flex', 'flex-direction:column', 'align-items:center', 'justify-content:center', 'gap:1rem',
   'background:#0c1118', 'color:#cfe2ee', 'padding:2rem', 'text-align:center',
   "font-family:system-ui,-apple-system,'Segoe UI',sans-serif",
@@ -63,6 +73,10 @@ export class SiteViewDrone extends Drone {
     'Full-viewport site takeover. Mounts each cell\'s `context` HTML resource as the active page; lineage navigation drives page changes.'
 
   #mount: MountState | null = null
+  /** Re-entrancy generation — bumped at the top of every #reconcile; a reconcile
+   *  bails after any await once a newer one has started (see #reconcile), so the
+   *  latest reconcile always wins. */
+  #gen = 0
   #viewActive = false
   #registered = false
   #lineageBound = false
@@ -242,6 +256,16 @@ export class SiteViewDrone extends Drone {
   }
 
   async #reconcile(): Promise<void> {
+    // Re-entrancy generation: every reconcile bumps and captures #gen, then
+    // bails after any await if a newer reconcile has since started. #reconcile
+    // is fired fire-and-forget from many sources (lineage change, viewmode
+    // change, boot heartbeat, and the feature:verified/hidden/restored effect
+    // handlers — which replay their last value synchronously at boot), so
+    // overlapping runs would otherwise race on #mount: whichever resource
+    // resolves LAST wins the final mount, stranding the wrong cell's page (and
+    // an in-flight mount could run foreign scripts AFTER a later reconcile
+    // raised the review gate). Latest reconcile wins.
+    const gen = ++this.#gen
     const lineage = this.resolve<any>('lineage')
     const store = this.resolve<any>('store')
     if (!lineage || !store?.hypercombRoot || !store?.getResource) return
@@ -286,11 +310,14 @@ export class SiteViewDrone extends Drone {
     // Each cell carries its own; lineage navigation drives page changes.
     // No bundle, no manifest, no path table — the lineage IS the route.
     let cellPageSig = await this.#findWebsitePage(segments)
+    if (gen !== this.#gen) return
     if (!cellPageSig) {
       cellPageSig = await this.#findDecorationPage(segments, store)
+      if (gen !== this.#gen) return
     }
     if (!cellPageSig) {
       cellPageSig = await this.#findContextPage(segments, store)
+      if (gen !== this.#gen) return
     }
     if (cellPageSig) {
       // Verification gate. A FOREIGN page — adopted into the hive, or published
@@ -307,7 +334,9 @@ export class SiteViewDrone extends Drone {
       const websiteKind = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
         ?.get<{ get: (view: string) => { decorationKind?: string } | undefined }>('@diamondcoreprocessor.com/VisualBeeRegistry')
         ?.get('website')?.decorationKind
-      if (websiteKind && await isFeatureHidden(segments, websiteKind)) {
+      const hidden = websiteKind ? await isFeatureHidden(segments, websiteKind) : false
+      if (gen !== this.#gen) return
+      if (hidden) {
         this.#removeReviewGate()
         this.#teardown()
         return
@@ -320,7 +349,7 @@ export class SiteViewDrone extends Drone {
         return
       }
       this.#removeReviewGate()
-      await this.#mountCellPage(segments, cellPageSig, store)
+      await this.#mountCellPage(segments, cellPageSig, store, gen)
       return
     }
 
@@ -490,6 +519,7 @@ export class SiteViewDrone extends Drone {
     segments: readonly string[],
     pageSig: string,
     store: { getResource: (sig: string) => Promise<Blob | null> },
+    gen: number,
   ): Promise<void> {
     // Same per-cell page already mounted — just update the sitePath
     // marker so navigate() math stays correct on follow-up clicks.
@@ -499,8 +529,16 @@ export class SiteViewDrone extends Drone {
     }
 
     const blob = await store.getResource(pageSig)
+    // A newer #reconcile started while the resource streamed — that reconcile
+    // owns the final state (it may have navigated away, raised the review gate,
+    // or hidden the feature). Bail before teardown/mount/runScripts so this
+    // stale mount can't clobber it or execute scripts behind an already-shown
+    // gate. The reconcile that raised the gate bumped #gen, so this check is
+    // what enforces "nothing runs until reviewed" across the async boundary.
+    if (gen !== this.#gen) return
     if (!blob) { this.#teardown(); return }
     const rawHtml = await blob.text()
+    if (gen !== this.#gen) return
 
     this.#teardown()
 

@@ -39,6 +39,14 @@ export interface PlacementLayer {
   [slot: string]: unknown
 }
 
+/** A cell name becomes a lineage PATH SEGMENT, and history.sign joins segments
+ *  with '/', so a name containing a separator or control char would address a
+ *  DIFFERENT existing location. Reject such names at every trust boundary (the
+ *  branch root in swarm-adopt.drone.ts, and every adopted descendant in
+ *  flattenLayerTree) so a crafted peer subtree can't collide with — and
+ *  overwrite — the participant's own nested tiles. */
+const UNSAFE_CELL_NAME = /[\\/\x00-\x1f]/
+
 /** Resolve a parent layer's `children` sigs to child display names.
  *  Names are the truth — each child layer's own `name` field — and the
  *  committer re-resolves them to head sigs at commit time. Mirrors the
@@ -57,6 +65,27 @@ export async function childNamesOf(
     }
   }
   return names
+}
+
+/** Like {@link childNamesOf}, but also reports whether any child sig failed to
+ *  resolve (a COLD pool miss). A membership SET (adopt/unfold recomputing a
+ *  parent's `children`) MUST abort on a cold miss rather than write a list that
+ *  silently drops the unresolved sibling — that drop is a PERMANENT wipe of a
+ *  tile whose bytes merely weren't warm. `coldMiss` lets the caller tell "child
+ *  confirmed absent" from "couldn't see the child". */
+export async function childNamesOfStrict(
+  history: PlacementHistory,
+  parent: PlacementLayer | null,
+): Promise<{ names: string[]; coldMiss: boolean }> {
+  const childSigs = Array.isArray(parent?.children) ? parent!.children : []
+  const names: string[] = []
+  let coldMiss = false
+  for (const sig of childSigs) {
+    const child = await history.getLayerBySig(String(sig))
+    if (!child) { coldMiss = true; continue }
+    if (typeof child.name === 'string' && child.name.length > 0) names.push(child.name)
+  }
+  return { names, coldMiss }
 }
 
 /** Resolve a single child cell's layer (and its sig) via its PARENT's
@@ -169,6 +198,15 @@ export async function flattenLayerTree(
   for (const sig of childSigs) {
     const child = await history.getLayerBySig(String(sig))
     if (!child || typeof child.name !== 'string' || child.name.length === 0) continue
+    // Untrusted (adopted) child names arrive here via getLayerBySig on signed
+    // peer layers. A name that is really a path (separator/control char) would
+    // masquerade as a multi-segment lineage path below (destSegments + name) and
+    // overwrite a colliding local tile. Drop it, exactly like an unresolvable
+    // child — the branch root name is guarded the same way in swarm-adopt.drone.ts.
+    if (UNSAFE_CELL_NAME.test(child.name)) {
+      console.warn('[flattenLayerTree] dropped child with unsafe name (path-separator/control char):', child.name)
+      continue
+    }
     childLayers.push(child)
     childNames.push(child.name)
   }
