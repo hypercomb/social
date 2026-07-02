@@ -47,6 +47,23 @@ export interface PlacementLayer {
  *  overwrite — the participant's own nested tiles. */
 const UNSAFE_CELL_NAME = /[\\/\x00-\x1f]/
 
+/** Canonical child-layer slot names, in resolution precedence. A layer's child
+ *  sigs live under ONE of these: built modules emit `cells`, some trees use
+ *  `layers`, hive-authored content uses `children`. Mirrors the ContentBroker's
+ *  own walk (content-broker.drone.ts) + host-sync / website-archive, kept here
+ *  so placement (adopt/paste) and code-detection can't drift from it. */
+export const CHILD_SLOTS = ['cells', 'layers', 'children'] as const
+
+/** The child-layer sigs of a layer, from whichever canonical child slot it uses
+ *  (see CHILD_SLOTS). Empty when the layer has no children in any slot. */
+export function childSigsOf(layer: PlacementLayer): readonly string[] {
+  for (const slot of CHILD_SLOTS) {
+    const v = (layer as Record<string, unknown>)[slot]
+    if (Array.isArray(v) && v.length > 0) return v.map(s => String(s))
+  }
+  return []
+}
+
 /** Resolve a parent layer's `children` sigs to child display names.
  *  Names are the truth — each child layer's own `name` field — and the
  *  committer re-resolves them to head sigs at commit time. Mirrors the
@@ -192,7 +209,10 @@ export async function flattenLayerTree(
   layer: PlacementLayer,
   destSegments: readonly string[],
 ): Promise<{ segments: string[]; layer: { name?: string; [slot: string]: unknown } }[]> {
-  const childSigs = Array.isArray(layer.children) ? layer.children : []
+  // Read child sigs from whichever canonical child slot the source uses
+  // (cells / layers / children) — a built module nests under `cells`, so
+  // reading only `children` would drop its whole subtree on re-home.
+  const childSigs = childSigsOf(layer)
   const childLayers: PlacementLayer[] = []
   const childNames: string[] = []
   for (const sig of childSigs) {
@@ -214,7 +234,11 @@ export async function flattenLayerTree(
   // This node: every source slot verbatim, `children` swapped sigs → names.
   const node: { name?: string; [slot: string]: unknown } = {}
   for (const [slot, value] of Object.entries(layer)) {
-    if (slot === 'children') continue
+    // Skip EVERY child slot — the source may nest under `cells`/`layers`, and
+    // copying a child slot verbatim would carry STALE (un-re-homed) sigs. The
+    // re-homed children are written to `children` (names) below; the renderer
+    // reads them via the same cells||layers||children precedence.
+    if ((CHILD_SLOTS as readonly string[]).includes(slot)) continue
     node[slot] = value
   }
   // Bracket access: `children` rides the index signature, not the declared

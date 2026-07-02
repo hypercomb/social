@@ -182,6 +182,17 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     let url = detail?.url ?? resolvePortalUrl(detail?.target ?? '')
     if (!url) return
 
+    // In-flight guard: a HEADLESS install is running off-screen (no chrome, the
+    // user can't see it). A second portal:open — e.g. the next code pick in an
+    // Adopt-All batch — must NOT tear it down: rebinding the iframe [src] and
+    // clearing its timers would silently drop the in-flight install. Ignore the
+    // incoming request; the current install completes on its own (or promotes to
+    // the visible installer via its fallback).
+    if (this.isOpen && this.headless) {
+      console.warn('[portal] ignoring portal:open — a headless install is in flight')
+      return
+    }
+
     // Hand off the branchSig + placement location to the embedded installer
     // via URL hash so the installer's load-time handler can pick them up
     // and render a branch section without any cross-origin messaging.
@@ -381,7 +392,11 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
    *  settles to ONE apply() (fold + resync), then the off-screen iframe tears
    *  down. Also cancels the "never projected" fallback. */
   #scheduleHeadlessApply(): void {
-    if (this.#headlessFallbackTimer !== null) { window.clearTimeout(this.#headlessFallbackTimer); this.#headlessFallbackTimer = null }
+    // Do NOT clear #headlessFallbackTimer here — it stays armed as a HARD ceiling
+    // so an install that never quiesces (a hypothetical sustained snapshot
+    // stream) promotes to the visible installer instead of hanging invisibly.
+    // On a normal install the settle timer below fires apply() first, and
+    // close() clears both timers.
     if (this.#headlessApplyTimer !== null) window.clearTimeout(this.#headlessApplyTimer)
     this.#headlessApplyTimer = window.setTimeout(() => {
       this.#headlessApplyTimer = null
