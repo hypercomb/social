@@ -107,7 +107,14 @@ export function isFeatureAvailable(sig: unknown, domain: unknown): boolean {
  *  deferred to "later". */
 export function isForeignContent(segments: readonly string[], domain: unknown): boolean {
   const d = normHost(domain)
-  if (d) return d !== selfDomain()
+  if (d && d !== selfDomain()) return true
+  // A matching (or absent) domain is NOT proof of your own authoring. The
+  // runtime seeds hc:nostrmesh:self-domain from the DEPLOYMENT ORIGIN, so on a
+  // shared origin every participant carries the SAME self-domain and a peer's
+  // adopted page arrives attributed to "your" domain — comparing domains alone
+  // ran foreign code ungated. Tree position stays authoritative: content under
+  // an adopted root is foreign regardless of the domain label; your own pages
+  // there are rescued per-signature by isLocallyAuthored in featureNeedsReview.
   return isWithinAdoptedRoot(segments)
 }
 

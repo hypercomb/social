@@ -15,11 +15,6 @@
   >
     <header class="features-header">
       <span class="features-title">{{ 'features.viewer.title' | t }}</span>
-      @if (likedCount() > 0) {
-        <button class="features-clear" type="button" (click)="clearLikes()">
-          {{ 'features.clear' | t }} · {{ likedCount() }}
-        </button>
-      }
       @if (hiddenCount() > 0) {
         <button
           class="features-hidden-toggle"
@@ -31,6 +26,32 @@
       }
       <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'features.close' | t">×</button>
     </header>
+
+    <!-- ── Bulk bar: acts on the selected rows ── -->
+    @if (selectedCount() > 0) {
+      <div class="bulk-bar">
+        <span class="bulk-count">{{ 'features.selected' | t: { count: selectedCount() } }}</span>
+        @if (allowableCount() > 0) {
+          <button
+            class="bulk-allow"
+            type="button"
+            (click)="allowSelected()"
+            [attr.title]="'features.bulk.allow.hint' | t"
+          >✓ {{ 'features.allow' | t }} · {{ allowableCount() }}</button>
+        }
+        @if (downloadableCount() > 0) {
+          <button
+            class="bulk-download"
+            type="button"
+            [class.busy]="isDownloading()"
+            [disabled]="isDownloading()"
+            (click)="downloadSelected()"
+            [attr.title]="'features.bulk.download.hint' | t"
+          >⤓ {{ (isDownloading() ? 'features.downloading' : 'features.bulk.download') | t }} · {{ downloadableCount() }}</button>
+        }
+        <button class="bulk-clear" type="button" (click)="clearSelection()" [attr.aria-label]="'features.selection.clear' | t">×</button>
+      </div>
+    }
 
     <!-- ── Review gate: a foreign feature handed here by the website gate ── -->
     @if (reviewTarget(); as rt) {
@@ -76,19 +97,20 @@
                 @for (feat of visibleApplied(group); track feat.kind) {
                   <li
                     class="features-row"
-                    [class.liked]="isLiked(group, feat)"
                     [class.selected]="isSelected(group, feat)"
+                    [class.gated]="feat.gated"
                     (click)="selectRow(group, feat)"
                   >
+                    <!-- ON switch: the feature is active here; clicking turns it
+                         OFF into the retainable hidden pool (restore any time). -->
                     <button
-                      class="like-star"
+                      class="feat-toggle on"
                       type="button"
-                      [class.on]="isLiked(group, feat)"
-                      (click)="toggleLike(group, feat); $event.stopPropagation()"
-                      [attr.aria-pressed]="isLiked(group, feat)"
-                      [attr.aria-label]="(isLiked(group, feat) ? 'features.liked' : 'features.like') | t"
-                      [attr.title]="(installable(feat) ? 'features.like.hint' : 'features.local.hint') | t"
-                    >{{ isLiked(group, feat) ? '★' : '☆' }}</button>
+                      (click)="hide(group, feat); $event.stopPropagation()"
+                      [attr.aria-pressed]="true"
+                      [attr.aria-label]="'features.hide' | t"
+                      [attr.title]="'features.hide.hint' | t"
+                    ><span class="knob"></span></button>
                     <div class="feature-meta">
                       <span class="feature-name">{{ feat.label }}</span>
                       <!-- Origin: direct on the node, or cascaded from a parent. -->
@@ -114,14 +136,21 @@
                            visible (the tile itself for direct features, the declaring
                            ancestor for cascaded ones). -->
                       <span class="feature-attached">{{ 'features.attached' | t: { path: attachedAt(group, feat) } }}</span>
+                      <!-- Community gate: enabled here but BLOCKED from activating
+                           until allowed. The allow override sits at the end of the
+                           line (bulk-allow in the top bar covers many at once). -->
+                      @if (feat.gated) {
+                        <span class="feature-blocked">
+                          {{ 'features.blocked' | t }}
+                          <button
+                            class="allow-btn"
+                            type="button"
+                            (click)="allow(group, feat); $event.stopPropagation()"
+                            [attr.title]="'features.allow.hint' | t"
+                          >✓ {{ 'features.allow' | t }}</button>
+                        </span>
+                      }
                     </div>
-                    <button
-                      class="hide-btn"
-                      type="button"
-                      (click)="hide(group, feat); $event.stopPropagation()"
-                      [attr.aria-label]="'features.hide' | t"
-                      [attr.title]="'features.hide.hint' | t"
-                    >⊘</button>
                   </li>
                 }
               </ul>
@@ -137,16 +166,30 @@
             } @else {
               <ul class="features-list">
                 @for (feat of group.available; track feat.kind) {
-                  <li class="features-row available" [class.liked]="isLiked(group, feat)">
-                    <button
-                      class="like-star"
-                      type="button"
-                      [class.on]="isLiked(group, feat)"
-                      (click)="toggleLike(group, feat)"
-                      [attr.aria-pressed]="isLiked(group, feat)"
-                      [attr.aria-label]="(isLiked(group, feat) ? 'features.liked' : 'features.like') | t"
-                      [attr.title]="'features.like.hint' | t"
-                    >{{ isLiked(group, feat) ? '★' : '☆' }}</button>
+                  <li
+                    class="features-row available"
+                    [class.selected]="isSelected(group, feat)"
+                    (click)="selectRow(group, feat)"
+                  >
+                    <!-- OFF switch on ADDABLE rows: clicking ADDS the feature to
+                         this tile (essentials writes the decoration at the
+                         tile's own segments). View features aren't switchable —
+                         their content must be authored (e.g. /website builds a
+                         page) — so those rows show the command chip instead. -->
+                    @if (feat.addable) {
+                      <button
+                        class="feat-toggle"
+                        type="button"
+                        [class.busy]="isPending(group, feat)"
+                        [disabled]="isPending(group, feat)"
+                        (click)="enableAvailable(group, feat); $event.stopPropagation()"
+                        [attr.aria-pressed]="false"
+                        [attr.aria-label]="'features.enable' | t"
+                        [attr.title]="'features.enable.hint' | t"
+                      ><span class="knob"></span></button>
+                    } @else {
+                      <span class="feat-toggle-spacer"></span>
+                    }
                     <div class="feature-meta">
                       <span class="feature-name">
                         {{ feat.label }}
@@ -197,10 +240,10 @@
         }
       </div>
       <footer class="features-foot">
-        @if (likedCount() > 0) {
-          {{ 'features.liked.hint' | t: { count: likedCount() } }}
+        @if (selectedCount() > 0) {
+          {{ 'features.bulk.hint' | t: { count: selectedCount() } }}
         } @else {
-          {{ 'features.staged.hint' | t }}
+          {{ 'features.foot.hint' | t }}
         }
       </footer>
     }

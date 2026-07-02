@@ -56,6 +56,9 @@
 import { Drone } from '@hypercomb/core'
 import type { I18nProvider } from '@hypercomb/core'
 import { kindsForLabel } from '../../commands/decoration-kind-index.js'
+import { featureNeedsReview } from '../../sharing/feature-availability.js'
+import { writeDropbox } from '../../files/files-attachment.js'
+import { parseAccept } from '../../files/file-types.js'
 import type { VisualBeeRegistry, VisualBeeDescriptor } from '../../commands/visual-bee-registry.js'
 
 const VISUAL_BEE_REGISTRY_KEY = '@diamondcoreprocessor.com/VisualBeeRegistry'
@@ -65,6 +68,8 @@ const I18N_KEY = '@hypercomb.social/I18n'
 const STORE_KEY = '@hypercomb.social/Store'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const SELECTION_KEY = '@diamondcoreprocessor.com/SelectionService'
+const SITE_VIEW_KEY = '@diamondcoreprocessor.com/SiteViewDrone'
+const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
@@ -114,11 +119,22 @@ interface FeatureItem {
    *  `direct`, or the declaring ancestor for `cascade`. Empty/absent = the hive
    *  root. Surfaced on hover in the panel so you can see the exact location. */
   originSegments?: string[]
+  /** True when the verification gate currently BLOCKS this feature from
+   *  activating (foreign + not authored + not verified + untrusted domain).
+   *  The panel renders the "blocked by community" line + allow override. */
+  gated?: boolean
+  /** The payload signature the gate evaluates (the page sig for a website) —
+   *  the sig the panel's allow override writes to `hc:feature-verified`. */
+  gateSig?: string
+  /** Publisher domain attributed to the gate sig via the broker's address
+   *  graph. Empty/absent = unknown origin. */
+  publisherDomain?: string
 }
 
 /** A feature AVAILABLE to add — registered in the app but not yet on this
- *  tile. The panel lists it with its slash command and a benign "like" toggle
- *  (staging) the participant can flag for the installer. */
+ *  tile. The panel lists it with its slash command; rows marked `addable`
+ *  carry a live ADD switch (the panel emits `features:enable` and this drone
+ *  writes the decoration at the tile's own segments). */
 interface AvailableItem {
   view: string
   kind: string
@@ -127,6 +143,11 @@ interface AvailableItem {
   description: string
   /** True when adding this feature would cascade to the tile's subtree. */
   cascades: boolean
+  /** True when the panel can attach this feature mechanically (a cascading
+   *  capability with a payload-free decoration, e.g. the dropbox). View bees
+   *  are NOT addable here — their slash commands TOGGLE a view; "adding" one
+   *  means authoring content (a page, a deck), which no switch can conjure. */
+  addable?: boolean
 }
 
 interface FeaturesOpenPayload {
@@ -145,6 +166,7 @@ interface TileActionPayload {
 
 interface SwarmDroneLike {
   peerTilesAtCurrentSig?: () => readonly ({ name: string } & Record<string, unknown>)[]
+  subscribedTiles?: () => readonly ({ name: string } & Record<string, unknown>)[]
 }
 
 interface SelectionLike {
@@ -183,8 +205,8 @@ export class ShowFeaturesDrone extends Drone {
   public override description =
     'Gathers the bee-feature metadata (no code) of a clicked tile — both render features and cascading capabilities — and emits features:open so the shell panel lists them, tagging each with its origin (direct on the tile, or cascaded from an ancestor). Read-only — staging the features is benign and handled panel-side.'
 
-  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action']
-  protected override emits: string[] = ['features:open', 'selection:has-features']
+  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable']
+  protected override emits: string[] = ['features:open', 'selection:has-features', 'activity:log']
 
   constructor() {
     super()
@@ -218,6 +240,37 @@ export class ShowFeaturesDrone extends Drone {
         if (this.#labelHasFeature(label)) void this.#open(label)
       }
     })
+
+    // The panel's ADD switch on an addable available row. Attaches the feature
+    // AT THE TILE'S OWN SEGMENTS (explicit — never "wherever the participant
+    // happens to stand", the wrong-target failure the slash route had), then
+    // re-opens the group so the row moves into "On this layer".
+    this.onEffect<{ cell?: string; segments?: string[]; kind?: string }>('features:enable', (p) => {
+      const segments = Array.isArray(p?.segments) ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
+      const kind = String(p?.kind ?? '')
+      if (segments.length === 0 || !kind) return
+      void this.#enableAt(segments, kind)
+    })
+  }
+
+  /** Attach an addable feature at `segments`. Only cascading capabilities are
+   *  mechanically attachable today (dropbox — a payload-free decoration);
+   *  anything else is refused loudly rather than half-applied. */
+  async #enableAt(segments: readonly string[], kind: string): Promise<void> {
+    const label = segments[segments.length - 1] ?? ''
+    try {
+      if (kind === 'files:dropbox') {
+        await writeDropbox(segments, parseAccept(''))
+        this.emitEffect('activity:log', { message: `dropbox on "${label}"`, icon: '●' })
+      } else {
+        this.emitEffect('activity:log', { message: `"${kind}" can't be added from the panel — use its command`, icon: '○' })
+        return
+      }
+      if (label) await this.#open(label)   // refresh the panel group in place
+    } catch (err) {
+      console.warn('[show-features] enable failed', { kind, segments, err })
+      this.emitEffect('activity:log', { message: `couldn't add "${kind}" to "${label}"`, icon: '○' })
+    }
   }
 
   #ioc = () => (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
@@ -252,12 +305,44 @@ export class ShowFeaturesDrone extends Drone {
     const appliedViews = new Set<string>()
     const applied: FeatureItem[] = []
 
-    // ── 1. DIRECT — features declared on this tile (hot in-memory index) ──
-    for (const kind of kindsForLabel(label)) {
+    // ── 1. DIRECT — features declared on this tile ──
+    // UNION of the hot in-memory index and the layer's own `decorations` slot.
+    // The hot index alone misses decorations written since the last render
+    // walk — a freshly-ADOPTED tile's folded features and a decoration the
+    // panel itself just attached (features:enable) both showed as absent until
+    // the next repaint. The layer read is authoritative; the index only adds
+    // speed, never rows.
+    const directKinds: string[] = [...kindsForLabel(label)]
+    for (const rec of await this.#decorationRecordsAt(segments)) {
+      if (!directKinds.includes(rec.kind)) directKinds.push(rec.kind)
+    }
+    for (const kind of directKinds) {
       const feature = this.#recognize(kind, registry)
-      if (!feature || appliedViews.has(feature.view)) continue
-      appliedViews.add(feature.view)
-      applied.push(this.#describe(feature, kind, i18n, 'direct', undefined, branchSig, segments))
+      if (feature) {
+        if (appliedViews.has(feature.view)) continue
+        appliedViews.add(feature.view)
+        applied.push(this.#describe(feature, kind, i18n, 'direct', undefined, branchSig, segments))
+        continue
+      }
+      // UNRECOGNIZED feature kind — a community module's decoration whose bee
+      // isn't installed here. Surface it (visual:* kinds only — tags, images
+      // and attachments are decorations but not features) so foreign features
+      // are never invisible: the row can still be hidden or allowed, and the
+      // participant can see WHAT an adopted tile carries before its module
+      // arrives. Inert until its module is adopted.
+      if (kind.startsWith('visual:') && !appliedViews.has(kind)) {
+        appliedViews.add(kind)
+        applied.push({
+          view: kind,
+          kind,
+          label: this.#t(i18n, 'features.unknown', kind),
+          description: this.#t(i18n, 'features.unknown.desc', ''),
+          cascades: false,
+          origin: 'direct',
+          originSegments: [...segments],
+          ...(branchSig ? { branchSig } : {}),
+        })
+      }
     }
 
     // ── 2. CASCADED — cascading features on an ANCESTOR, nearest → root ──
@@ -280,7 +365,47 @@ export class ShowFeaturesDrone extends Drone {
     // already applied, so the participant sees what they COULD add here.
     const available = this.#available(registry, appliedViews, i18n)
 
+    // ── 4. GATE STATE — is each direct feature blocked by the community? ──
+    // Evaluated with the SAME featureNeedsReview the render gate calls, against
+    // the SAME payload sig the renderer would mount, so the panel's "blocked by
+    // community" line and the site-view review gate can never disagree.
+    await this.#stampGates(applied, segments)
+
     this.emitEffect<FeaturesOpenPayload>('features:open', { cell: label, segments, applied, available })
+  }
+
+  /** Stamp `gated` / `gateSig` / `publisherDomain` onto each DIRECT feature.
+   *  The website feature gates on the cell's resolved page sig (SiteViewDrone's
+   *  three-slot lookup); any other feature gates on its decoration record's
+   *  payload sig when it carries one. Features with no payload sig have nothing
+   *  to verify and are never marked gated. */
+  async #stampGates(applied: FeatureItem[], segments: readonly string[]): Promise<void> {
+    const ioc = this.#ioc()
+    const broker = ioc?.get<{ getKnownDomains?: (s: string) => string[] }>(BROKER_KEY)
+    let records: { kind: string; payloadSig?: string }[] | null = null
+    for (const item of applied) {
+      if (item.origin !== 'direct') continue
+      try {
+        let gateSig: string | undefined
+        if (item.view === 'website') {
+          const siteView = ioc?.get<{ resolvePageSig?: (segs: readonly string[]) => Promise<string | null> }>(SITE_VIEW_KEY)
+          gateSig = (await siteView?.resolvePageSig?.(segments)) ?? undefined
+        }
+        if (!gateSig) {
+          records ??= await this.#decorationRecordsAt(segments)
+          gateSig = records.find(r => r.kind === item.kind)?.payloadSig
+        }
+        if (!gateSig) continue
+        // EXACT parity with the render gate: site-view's #pagePublisherDomain
+        // reads only getKnownDomains(gateSig) — no branch-sig fallback here
+        // either, or the panel's "blocked" line and the actual mount gate
+        // could disagree (panel unblocked, page still quarantined).
+        const domain = broker?.getKnownDomains?.(gateSig)?.[0] ?? ''
+        item.gateSig = gateSig
+        if (domain) item.publisherDomain = domain
+        item.gated = featureNeedsReview(segments, gateSig, domain)
+      } catch { /* gate state is advisory in the panel — render gate still enforces */ }
+    }
   }
 
   /** Catalog of features registered in the app but not yet on this layer —
@@ -315,6 +440,9 @@ export class ShowFeaturesDrone extends Drone {
         label: this.#t(i18n, cap.labelKey, cap.fallbackLabel),
         description: this.#t(i18n, cap.descriptionKey, ''),
         cascades: true,
+        // Cascading capabilities attach mechanically (payload-free decoration
+        // at the tile's segments) — these rows get the live ADD switch.
+        addable: true,
       })
     }
     return out
@@ -389,6 +517,14 @@ export class ShowFeaturesDrone extends Drone {
    *  (off-screen, so the hot index doesn't cover them) — mirrors the layer
    *  walk in decoration-kind-index's hydration. Cold-cache miss → []. */
   async #decorationKindsAt(segments: readonly string[]): Promise<string[]> {
+    return (await this.#decorationRecordsAt(segments)).map(r => r.kind)
+  }
+
+  /** Decoration records AT this exact location — each kind plus the first
+   *  64-hex signature found in its payload (the content the record points at,
+   *  e.g. a website page's htmlSig). The payload sig is what the verification
+   *  gate evaluates, so #stampGates reads it from here. Cold-cache miss → []. */
+  async #decorationRecordsAt(segments: readonly string[]): Promise<{ kind: string; payloadSig?: string }[]> {
     const ioc = this.#ioc()
     const store = ioc?.get<StoreLike>(STORE_KEY)
     const history = ioc?.get<HistoryLike>(HISTORY_KEY)
@@ -398,34 +534,65 @@ export class ShowFeaturesDrone extends Drone {
       const layer = await history.currentLayerAt(locationSig) as { decorations?: unknown } | null
       const slot = layer?.decorations
       if (!Array.isArray(slot)) return []
-      const kinds: string[] = []
+      const records: { kind: string; payloadSig?: string }[] = []
       for (const sig of slot) {
         if (typeof sig !== 'string' || !SIG_RE.test(sig)) continue
         try {
           const blob = await store.getResource(sig)
           if (!blob) continue
-          const rec = JSON.parse(await blob.text()) as { kind?: string }
-          if (typeof rec?.kind === 'string') kinds.push(rec.kind)
+          const rec = JSON.parse(await blob.text()) as { kind?: string; payload?: unknown }
+          if (typeof rec?.kind !== 'string') continue
+          records.push({ kind: rec.kind, payloadSig: this.#firstPayloadSig(rec.payload) })
         } catch {
           /* malformed / unavailable record — skip */
         }
       }
-      return kinds
+      return records
     } catch {
       return []
     }
   }
 
+  /** First 64-hex signature reachable in a decoration payload's values —
+   *  the record's content pointer (htmlSig, deckSig, …). Undefined when the
+   *  payload carries no signature (nothing for the gate to verify). */
+  #firstPayloadSig(payload: unknown): string | undefined {
+    if (typeof payload === 'string') {
+      const s = payload.trim().toLowerCase()
+      return SIG_RE.test(s) ? s : undefined
+    }
+    if (Array.isArray(payload)) {
+      for (const v of payload) {
+        const found = this.#firstPayloadSig(v)
+        if (found) return found
+      }
+      return undefined
+    }
+    if (payload && typeof payload === 'object') {
+      for (const v of Object.values(payload as Record<string, unknown>)) {
+        const found = this.#firstPayloadSig(v)
+        if (found) return found
+      }
+    }
+    return undefined
+  }
+
   /** The publisher's broadcast layer sig for this tile, when a live peer
    *  offers it — the installer-resolvable handle the staging hands over.
-   *  Mirrors tile-actions' peerBroadcastsTile cache read. */
+   *  Checks the current-location cache THEN the subscribed channel, matching
+   *  SwarmAdoptDrone's #resolvePeerBranch — otherwise a subscribed leader's
+   *  tile resolves for the adopt drone but never shows the panel's adopt
+   *  affordances. */
   #peerBranchSig(label: string): string | undefined {
     const swarm = this.#ioc()?.get<SwarmDroneLike>(SWARM_DRONE_KEY)
     if (!swarm?.peerTilesAtCurrentSig) return undefined
-    for (const tile of swarm.peerTilesAtCurrentSig()) {
-      if (tile.name !== label) continue
-      const sig = String(tile['layerSig'] ?? '').trim().toLowerCase()
-      if (SIG_RE.test(sig)) return sig
+    const pools = [swarm.peerTilesAtCurrentSig(), swarm.subscribedTiles?.() ?? []]
+    for (const pool of pools) {
+      for (const tile of pool) {
+        if (tile.name !== label) continue
+        const sig = String(tile['layerSig'] ?? '').trim().toLowerCase()
+        if (SIG_RE.test(sig)) return sig
+      }
     }
     return undefined
   }

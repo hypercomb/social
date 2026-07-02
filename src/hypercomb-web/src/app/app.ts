@@ -171,7 +171,10 @@ export class App implements AfterViewInit {
     // the peer's subtree → adopt:done fires, ensure the participant lands
     // on the tile-grid view at their current location so the adopted
     // content renders. Idempotent — already on 'hexagons' = no-op.
-    EffectBus.on('adopt:done', () => {
+    // `silent` walks (pre-consent code inspection, features-panel downloads)
+    // are background work — they must never yank the view.
+    EffectBus.on<{ silent?: boolean }>('adopt:done', (p) => {
+      if (p?.silent) return
       this.viewMode.set('hexagons')
       EffectBus.emit('nav:to-hive', { reason: 'adopt-complete' })
     })

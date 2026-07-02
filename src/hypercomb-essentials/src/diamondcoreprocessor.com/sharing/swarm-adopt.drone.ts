@@ -25,6 +25,7 @@
 import { Drone, EffectBus, hypercomb, requestConfirm } from '@hypercomb/core'
 import {
   childNamesOfStrict,
+  childSigsOf,
   flattenLayerTree,
   resolveLayerAt,
   type PlacementHistory,
@@ -37,6 +38,7 @@ import {
   writeTilePropsIndex,
 } from '../editor/tile-properties.js'
 import { forgetDecorationLabel } from '../commands/decoration-kind-index.js'
+import { extractPageRefSigs } from './decoration-closure.js'
 import { markAdoptedRoot } from './adopted-roots.js'
 
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
@@ -61,7 +63,7 @@ interface LineageLike {
 }
 
 interface BrokerLike {
-  adopt: (rootSig: string, opts?: { layersOnly?: boolean }) => Promise<{ layers: number; leaves: number; failed: number }>
+  adopt: (rootSig: string, opts?: { layersOnly?: boolean; silent?: boolean }) => Promise<{ layers: number; leaves: number; failed: number }>
   noteDomainsForSig?: (sig: string, domains: string[]) => void
   getKnownDomains?: (sig: string) => string[]
 }
@@ -120,8 +122,8 @@ export class SwarmAdoptDrone extends Drone {
   public override description =
     'Adopts a peer tile by localizing its branch (ContentBroker) and folding it into the hive layer via the same update({children}) cascade as paste, on explicit user click ONLY — no snapshot bridge, no automatic installer fold.'
 
-  protected override listens: string[] = ['tile:action', 'registry:snapshot']
-  protected override emits: string[] = ['adopt:started', 'swarm:adopt-panel:open', 'fs:changed', 'fold:receipt', 'tile:saved']
+  protected override listens: string[] = ['tile:action', 'registry:snapshot', 'features:download']
+  protected override emits: string[] = ['adopt:started', 'swarm:adopt-panel:open', 'fs:changed', 'fold:receipt', 'tile:saved', 'tile:action', 'features:download:done', 'activity:log']
 
   // Latest installer registry projection — cached for the Done-gated fold.
   #lastSnapshot: RegistrySnapshotLike | null = null
@@ -213,6 +215,17 @@ export class SwarmAdoptDrone extends Drone {
     })
     // Fold ONLY on the explicit accept signal, NEVER on a passive close.
     window.addEventListener('actions:available', this.#onDcpDone)
+
+    // ── features:download — pull a feature's bytes onto this machine NOW ──
+    // Backs the features panel's bulk "download" action. A peer-offered /
+    // adopted BRANCH mirrors via the broker's FULL adopt walk (layers +
+    // resources + decoration descent); a bare page feature pulls its body plus
+    // every ref the renderer would resolve (extractPageRefSigs — the same
+    // pattern set rewritePageRefs mounts with). sha256 gates every byte.
+    this.onEffect<{ cell?: string; segments?: string[]; branchSig?: string; gateSig?: string }>(
+      'features:download',
+      (p) => { void this.#downloadFeature(p) },
+    )
   }
 
   #ioc = () => (window as { ioc?: { get: (k: string) => unknown } }).ioc
@@ -311,7 +324,12 @@ export class SwarmAdoptDrone extends Drone {
   // inspect — routes to the installer.
   #adoptInline = async (label: string, pubkey?: string): Promise<void> => {
     const branch = this.#resolvePeerBranch(label, pubkey)
-    if (!branch) return
+    if (!branch) {
+      // The peer cache expired / navigation changed since the click — say so
+      // instead of doing nothing (the silent dead-end reads as "adopt broken").
+      EffectBus.emit('activity:log', { message: `couldn't adopt "${label}" — the peer's branch is no longer offered here`, icon: '○' })
+      return
+    }
     const codeSigs = await this.#branchCodeSigs(branch.layerSig, branch.domain)
     if (codeSigs === null) {
       // Couldn't resolve the branch to inspect it → open the installer VISIBLY.
@@ -339,6 +357,10 @@ export class SwarmAdoptDrone extends Drone {
           stage: codeSigs,
         },
       }))
+      // The headless install proceeds off-screen; the features panel is the
+      // visible outcome of the adopt gesture (rows show their gate state as
+      // the install lands).
+      EffectBus.emit('tile:action', { action: 'features', label: branch.label })
       return
     }
     // Content-only → immediate in-place fold; the render-time gate is the trust
@@ -352,6 +374,62 @@ export class SwarmAdoptDrone extends Drone {
       forgetDecorationLabel(branch.label)
       EffectBus.emit('tile:saved', { cell: branch.label })
     }
+    // Adopt SHOWS THE FEATURES: after the fold lands (or when the tile is
+    // already here — re-clicking adopt is how you get back to this view), open
+    // the features panel for the tile. Each feature row carries its gate state,
+    // so a community-blocked feature reads "enabled — blocked" with its allow
+    // override right there — the adopt gesture ends on the decision surface,
+    // not on a silent fold.
+    if (res === 'committed' || res === 'exists') {
+      EffectBus.emit('tile:action', { action: 'features', label: branch.label })
+    } else {
+      // 'unavailable' — bytes unreachable or a cold-sibling abort. Loud, not
+      // console-only: the user clicked and must see WHY nothing appeared.
+      EffectBus.emit('activity:log', { message: `couldn't adopt "${branch.label}" — its content isn't reachable right now, try again shortly`, icon: '○' })
+    }
+  }
+
+  // ── features:download — mirror a feature's bytes locally (panel action) ──
+  // Branch known (peer cache / explicit sig) → the broker's full adopt walk.
+  // Page-only feature → body + single-level ref closure, matching what the
+  // renderer resolves. Emits `features:download:done { cell, ok }` either way
+  // so the panel can reflect the outcome.
+  #downloadFeature = async (p?: { cell?: string; branchSig?: string; gateSig?: string }): Promise<void> => {
+    const cell = String(p?.cell ?? '').trim()
+    const broker = this.#ioc()?.get?.(BROKER_KEY) as
+      | (BrokerLike & { fetchBySig?: (sig: string, type: 'layer' | 'resource' | 'dependency') => Promise<Uint8Array | null> })
+      | undefined
+    if (!broker?.adopt) return
+    let ok = false
+    try {
+      const explicit = String(p?.branchSig ?? '').trim().toLowerCase()
+      const branchSig = SIG_RE.test(explicit)
+        ? explicit
+        : (cell ? this.#resolvePeerBranch(cell)?.layerSig ?? '' : '')
+      if (SIG_RE.test(branchSig)) {
+        // Full walk — resources included; silent so the shells' adopt:done
+        // handler doesn't yank the participant to hexagons mid-download.
+        const stats = await broker.adopt(branchSig, { silent: true })
+        // Honest outcome: ANY failed fetch means the mirror is incomplete —
+        // partial success must not read as "downloaded".
+        ok = stats.failed === 0
+      } else {
+        const gateSig = String(p?.gateSig ?? '').trim().toLowerCase()
+        if (SIG_RE.test(gateSig) && broker.fetchBySig) {
+          const bytes = await broker.fetchBySig(gateSig, 'resource')
+          ok = !!bytes
+          if (bytes) {
+            try {
+              const refs = extractPageRefSigs(new TextDecoder().decode(bytes))
+              for (const s of refs) await broker.fetchBySig(s, 'resource')
+            } catch { /* refs are best-effort — the page body itself landed */ }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[swarm-adopt] features:download failed', { cell, err })
+    }
+    EffectBus.emit('features:download:done', { cell, ok })
   }
 
   // The branch's executable-CODE signatures (bee + dependency sigs) anywhere in
@@ -361,7 +439,7 @@ export class SwarmAdoptDrone extends Drone {
   // #doCommitBranch reuses) then walks root + children.
   //   []    → content-only (fold inline)
   //   [...] → declares code (headless DCP install of these sigs)
-  //   null  → couldn't resolve/inspect (caller opens the visible installer)
+  //   null  → couldn't resolve/inspect fully (caller opens the visible installer)
   #branchCodeSigs = async (layerSig: string, domain?: string): Promise<string[] | null> => {
     const ioc = this.#ioc()
     const broker = ioc?.get?.(BROKER_KEY) as BrokerLike | undefined
@@ -369,11 +447,18 @@ export class SwarmAdoptDrone extends Drone {
     if (!broker?.adopt || !history?.getLayerBySig) return null
     try {
       if (domain) broker.noteDomainsForSig?.(layerSig, [domain])
-      await broker.adopt(layerSig, { layersOnly: true })
+      // silent: a pre-consent inspection walk must not switch the view.
+      await broker.adopt(layerSig, { layersOnly: true, silent: true })
       const root = await history.getLayerBySig(layerSig)
       if (!root) return null
-      const seen = new Set<string>()
+      // Seed the root so an adversarial child→root back-reference can't re-walk it.
+      const seen = new Set<string>([String(layerSig).trim().toLowerCase()])
       const codeSigs = new Set<string>()
+      // Fail CLOSED: if ANY descendant layer can't be resolved (cold pool /
+      // partially-offline publisher), we can't trust a "content-only" verdict —
+      // a bee/dep may live on the unreachable node. Route to the visible
+      // installer instead of inline-folding hidden code.
+      let incomplete = false
       const collect = (arr: unknown): void => {
         if (Array.isArray(arr)) for (const s of arr) {
           const v = String(s ?? '').trim().toLowerCase()
@@ -383,17 +468,20 @@ export class SwarmAdoptDrone extends Drone {
       const walk = async (layer: PlacementLayer): Promise<void> => {
         collect((layer as { bees?: unknown }).bees)
         collect((layer as { dependencies?: unknown }).dependencies)
-        const children = Array.isArray(layer.children) ? layer.children : []
-        for (const sig of children) {
-          const s = String(sig)
+        // Descend into whichever canonical child slot the layer uses — a built
+        // module nests under `cells`, so reading only `children` would miss its
+        // code entirely and mis-route the branch to an inline fold.
+        for (const sig of childSigsOf(layer)) {
+          const s = String(sig).trim().toLowerCase()
           if (seen.has(s)) continue
           seen.add(s)
           const child = await history.getLayerBySig(s)
           if (child) await walk(child)
+          else incomplete = true
         }
       }
       await walk(root)
-      return [...codeSigs]
+      return incomplete ? null : [...codeSigs]
     } catch {
       return null
     }

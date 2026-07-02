@@ -359,6 +359,20 @@ export class SiteViewDrone extends Drone {
     this.#teardown()
   }
 
+  /** The cell's mountable page sig — the SAME three-slot lookup #reconcile
+   *  mounts with (website slot → decoration → legacy context), exposed so
+   *  other surfaces (ShowFeaturesDrone's blocked-by-community stamping, the
+   *  features panel's gate state) evaluate the gate against the exact sig the
+   *  renderer would gate. Null = no page on this cell. */
+  async resolvePageSig(segments: readonly string[]): Promise<string | null> {
+    const store = this.resolve<any>('store')
+    if (!store?.getResource) return null
+    let sig = await this.#findWebsitePage(segments)
+    if (!sig) sig = await this.#findDecorationPage(segments, store)
+    if (!sig) sig = await this.#findContextPage(segments, store)
+    return sig
+  }
+
   /** First-class page lookup: the cell's `website` slot holds the page's
    *  HTML resource signature DIRECTLY (no decoration envelope). The
    *  newest entry is the current page. Checked BEFORE the decoration and
@@ -817,12 +831,7 @@ export class SiteViewDrone extends Drone {
    * preferred over a warm one — never a false positive.
    */
   async #hasPage(segments: readonly string[]): Promise<boolean> {
-    const store = this.resolve<any>('store')
-    if (!store?.getResource) return false
-    let sig = await this.#findWebsitePage(segments)
-    if (!sig) sig = await this.#findDecorationPage(segments, store)
-    if (!sig) sig = await this.#findContextPage(segments, store)
-    return !!sig
+    return !!(await this.resolvePageSig(segments))
   }
 
   /**
