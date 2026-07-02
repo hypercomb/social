@@ -2,17 +2,27 @@
 #
 # Mirror the relay's content dir (the byte-equal store host-sync PUTs to
 # jwize.com) up to Azure Blob, FLATTENED, so the same bytes are fetchable from a
-# second host. This is the auxiliary byte source the ContentBroker falls back to:
+# second host. This is the auxiliary byte source the ContentBroker falls back to.
 #
-#   pluginthematrix.io  --(custom domain / CDN)-->  storagehypercomb account
-#   GET https://pluginthematrix.io/sigs/<sig>  ==  blob  sigs/<sig>
+# The client address is the bare ROOT of the domain — the broker
+# (content-broker.drone.ts BETA_FALLBACK_DOMAINS) advertises just `pluginthematrix.io`
+# and GETs `https://pluginthematrix.io/<sig>`:
 #
-# The broker (content-broker.drone.ts BETA_FALLBACK_DOMAINS) advertises the host
-# string `pluginthematrix.io/sigs`, so it GETs `https://pluginthematrix.io/sigs/<sig>`.
-# Mapping that to Azure: a container literally named `sigs`, anonymously
-# readable, holding flat `<sig>`-named blobs. A custom domain on the storage
-# account makes `pluginthematrix.io/<container>/<blob>` resolve to
-# `<account>.blob.core.windows.net/<container>/<blob>` — i.e. `/sigs/<sig>`.
+#   browser ──GET /<sig>──> pluginthematrix.io (Cloudflare / Front Door)
+#                             │  rewrite  /<sig> -> /<container>/<sig>
+#                             │  + Access-Control-Allow-Origin header
+#                             ▼
+#                    storagehypercomb / <container>  (flat <sig> blobs)
+#
+# Why the front (Cloudflare recommended — you already run it for jwize.com):
+#   • raw Azure blob custom-domain FORCES a container segment in the path
+#     (`/<container>/<sig>`) — the front rewrites the bare `/<sig>` onto it.
+#   • the cross-origin browser fetch needs an `Access-Control-Allow-Origin`
+#     header; Azure's static-website endpoint can't set one, so a front is
+#     required regardless — folding the rewrite into it is free.
+#   • immutable `/<sig>` is perfect to edge-cache — free scale.
+# This script only UPLOADS the flat blobs to <container>; the root mapping +
+# CORS + cache live in the front (one-time setup, see infrastructure.md).
 #
 # FULL REDUNDANCY (default): every content-addressed byte file in the content
 # dir is flattened to `<sig>` and uploaded — the flat authored heap at the root
@@ -42,7 +52,7 @@
 #   pwsh ./mirror-content-to-azure.ps1                 # incremental full mirror
 #   pwsh ./mirror-content-to-azure.ps1 -SetupCors      # one-time: container + CORS, then mirror
 #   pwsh ./mirror-content-to-azure.ps1 -RootOnly       # authored flat heap only (skip typed pools)
-#   pwsh ./mirror-content-to-azure.ps1 -SourceDir D:\relay\content -Container sigs
+#   pwsh ./mirror-content-to-azure.ps1 -SourceDir D:\relay\content -Container content
 #   pwsh ./mirror-content-to-azure.ps1 -Overwrite      # re-upload all (rarely needed; bytes are immutable)
 #
 # Auth (same precedence as deploy-azure.ps1):
@@ -50,8 +60,10 @@
 #   AZURE_STORAGE_ACCOUNT + AZURE_STORAGE_KEY,      or
 #   `az login` (falls back to --auth-mode login)
 #
-# Account/container default to storagehypercomb / sigs; override via
-# AZURE_STORAGE_ACCOUNT / AZURE_MIRROR_CONTAINER or the -Container param.
+# Account/container default to storagehypercomb / content; override via
+# AZURE_STORAGE_ACCOUNT / AZURE_MIRROR_CONTAINER or the -Container param. The
+# container is an internal origin path (the front rewrites the bare /<sig> onto
+# it) — clients never see it.
 
 param(
   [string]$SourceDir = '',
@@ -152,7 +164,7 @@ if (-not (Test-Path -LiteralPath $resolvedSource -PathType Container)) {
 if ([string]::IsNullOrWhiteSpace($Container)) {
   $Container = get-optional-env -Names @('AZURE_MIRROR_CONTAINER')
 }
-if ([string]::IsNullOrWhiteSpace($Container)) { $Container = 'sigs' }
+if ([string]::IsNullOrWhiteSpace($Container)) { $Container = 'content' }
 
 $authArguments = get-auth-arguments
 
@@ -182,9 +194,11 @@ if ($SetupCors) {
     '--only-show-errors'
   ) + $authArguments)
   write-step ''
-  write-step 'NOTE: map the custom domain so pluginthematrix.io/sigs/<sig> resolves to this'
-  write-step '      container. Azure Portal > Storage account > Networking > Custom domain,'
-  write-step '      or front it with Azure Front Door / CDN pointing at the blob endpoint.'
+  write-step 'NOTE: the ROOT address (https://pluginthematrix.io/<sig>) comes from a FRONT,'
+  write-step '      not from this container directly. Point pluginthematrix.io at Cloudflare'
+  write-step "      (or Azure Front Door) -> the blob origin, with a rule that rewrites"
+  write-step "      /<sig> -> /$Container/<sig> and adds Access-Control-Allow-Origin. Cache"
+  write-step '      immutable /<sig> at the edge for free scale.'
   write-step ''
 }
 
@@ -238,7 +252,7 @@ write-step " mode      : $(if ($RootOnly) { 'root only (authored flat heap)' } e
 write-step " account   : $displayAccount"
 write-step " container : $Container"
 write-step " sigs      : $($bySig.Count) total, $($toUpload.Count) new, $skipped already mirrored"
-write-step " url shape : https://pluginthematrix.io/$Container/<sig>"
+write-step " url shape : https://pluginthematrix.io/<sig>  (front rewrites -> $Container/<sig>)"
 write-step ''
 
 if ($toUpload.Count -eq 0) {
@@ -281,6 +295,6 @@ write-step ''
 write-step " uploaded  : $($toUpload.Count)"
 write-step " skipped   : $skipped (already mirrored)"
 write-step ''
-write-step 'done. verify one sig is reachable + non-html:'
-write-step "  curl -I https://pluginthematrix.io/$Container/<sig>"
+write-step 'done. once the front is wired, verify one sig is reachable + non-html:'
+write-step '  curl -I https://pluginthematrix.io/<sig>'
 write-step ''

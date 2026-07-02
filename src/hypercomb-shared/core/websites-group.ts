@@ -10,7 +10,8 @@
 // (debounced) whenever decorations change or a branch is adopted.
 
 import { EffectBus } from '@hypercomb/core'
-import { groupRegistry, type GroupMember, type LaunchGroup } from './group-registry'
+import { groupRegistry, type GroupMember } from './group-registry'
+import { LaunchGroupBase } from './launch-group-base'
 
 const SIG = /^[0-9a-f]{64}$/
 const PAGE_KIND = 'visual:website:page'
@@ -25,12 +26,12 @@ type HistoryLike = {
 }
 type StoreLike = { getResource(sig: string): Promise<Blob | null> }
 type NavigationLike = { goRaw?: (segments: readonly string[]) => void }
-type ViewModeLike = { setMode(next: string): void }
+type ViewModeLike = EventTarget & { mode?: string; setMode(next: string): void }
 
-class WebsitesGroup implements LaunchGroup {
-  readonly id = 'websites'
-  readonly icon = 'language'
-  readonly label = 'Websites'
+class WebsitesGroup extends LaunchGroupBase {
+  override readonly id = 'websites'
+  override readonly icon = 'language'
+  override readonly label = 'Websites'
   readonly shape = 'flower-pot'
 
   #members: GroupMember[] = []
@@ -38,6 +39,7 @@ class WebsitesGroup implements LaunchGroup {
   #scanning = false
 
   constructor() {
+    super()
     // First scan shortly after boot (let HistoryService/Store register), then
     // re-scan whenever the set of sites could have changed.
     this.#scheduleScan(400)
@@ -45,9 +47,9 @@ class WebsitesGroup implements LaunchGroup {
     EffectBus.on('adopt:done', () => this.#scheduleScan())
   }
 
-  members(): GroupMember[] { return this.#members }
+  override members(): GroupMember[] { return this.#members }
 
-  open(m: GroupMember): void {
+  protected override activate(m: GroupMember): void {
     const nav = get<NavigationLike>('@hypercomb.social/Navigation')
     // Navigate first (synchronous dispatch updates the lineage) so the site
     // renderer captures THIS site's root as the entry floor when the surface
@@ -55,6 +57,20 @@ class WebsitesGroup implements LaunchGroup {
     nav?.goRaw?.(m.segments)
     const vm = get<ViewModeLike>('@hypercomb.social/ViewMode')
     vm?.setMode?.(SITE)
+  }
+
+  /** The site surface's on-screen state is the ViewMode: anything other than
+   *  the hexagon canvas means it's up. EventTarget has no last-value replay,
+   *  so prime by hand — arming from the website-landing directory (already in
+   *  website mode) must start with the surface SEEN OPEN, or the eventual
+   *  return to hexagons would not count as a close. */
+  protected override watchSurface(_m: GroupMember, report: (open: boolean) => void): () => void {
+    const vm = get<ViewModeLike>('@hypercomb.social/ViewMode')
+    if (!vm?.addEventListener) return () => { /* no ViewMode yet — nothing to watch */ }
+    const onChange = (): void => report((vm.mode ?? 'hexagons') !== 'hexagons')
+    vm.addEventListener('change', onChange)
+    onChange()
+    return () => vm.removeEventListener('change', onChange)
   }
 
   #scheduleScan(delay = 450): void {

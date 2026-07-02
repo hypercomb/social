@@ -282,6 +282,7 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
   segmentsByLabel.set(label, segments)
 
   if (payload.op === 'append') {
+    const priorShape = launchShapeByLabel.get(label)
     const record = await fetchDecorationRecord(sig)
     if (!record) return
     indexRecord(label, sig, record)
@@ -294,8 +295,13 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
     if (record.kind === TAG_DECORATION_KIND) EffectBus.emit('tags:indexed', { labels: [label] })
     // Same first-paint race for launcher tiles: the `shape` lands after the
     // aggregator page first rendered (as plain hexagons). Nudge show-cell to
-    // rebuild its geometry so each tile picks up its group's silhouette.
-    if (record.kind === LAUNCH_DECORATION_KIND) EffectBus.emit('launch:indexed', { label })
+    // rebuild its geometry so each tile picks up its group's silhouette — but
+    // ONLY when the shape actually changed: show-cell's pre-paint hydration
+    // (ensureDecorationsIndexed) usually indexed it already, and re-nudging
+    // would queue a redundant full geometry rebuild right after entry.
+    if (record.kind === LAUNCH_DECORATION_KIND && launchShapeByLabel.get(label) !== priorShape) {
+      EffectBus.emit('launch:indexed', { label })
+    }
   } else if (payload.op === 'removeSig') {
     const kind = kindBySig.get(sig)
     if (kind) {
@@ -317,7 +323,14 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
 // cell's `decorations` slot has been scanned, subsequent mutations come
 // through the `decorations:changed` trigger and update the index live.
 
-const checkedLabels = new Set<string>()
+/** Map<label, Set<full-path key>>. Keyed by LOCATION, not label alone: the
+ *  same label exists at several locations with different decorations (the
+ *  root tile "susan" vs the `agg-mix` launcher cell "susan"). A label-only
+ *  memo let whichever location rendered first BLOCK the walk everywhere
+ *  else — launcher cells never got their `launch:target` shape indexed when
+ *  their label had been seen on the hive, so the aggregator page rendered a
+ *  mix of silhouettes and plain hexagons. */
+const checkedLabels = new Map<string, Set<string>>()
 
 /** Forget that we've walked `label` so the next `render:cell-count` re-walks
  *  its `decorations` slot. Called when a tile's whole layer is replaced
@@ -325,7 +338,8 @@ const checkedLabels = new Set<string>()
  *  local copy, which can add decorations WITHOUT firing per-decoration
  *  `decorations:changed` events. Additive-safe: we only clear the
  *  checked-flag (not the kind set), so the re-walk adds any new kinds while
- *  the existing ones keep the `features` icon stable across the refresh. */
+ *  the existing ones keep the `features` icon stable across the refresh.
+ *  Clears the label at EVERY location — callers don't know the path. */
 export function forgetDecorationLabel(label: string): void {
   checkedLabels.delete(label)
 }
@@ -343,12 +357,16 @@ async function hydrateLabel(
   label: string,
   parentSegments: readonly string[],
   history: HistoryServiceLike,
+  nudge = true,
 ): Promise<boolean> {
-  if (checkedLabels.has(label)) return false
-  checkedLabels.add(label)
+  const segments = [...parentSegments, label]
+  const pathKey = segments.join('\u0000')
+  let seenPaths = checkedLabels.get(label)
+  if (seenPaths?.has(pathKey)) return false
+  if (!seenPaths) { seenPaths = new Set<string>(); checkedLabels.set(label, seenPaths) }
+  seenPaths.add(pathKey)
 
   try {
-    const segments = [...parentSegments, label]
     segmentsByLabel.set(label, segments)
     const locationSig = await history.sign({ explorerSegments: () => segments })
     const layer = await history.currentLayerAt(locationSig) as { decorations?: unknown } | null
@@ -362,17 +380,35 @@ async function hydrateLabel(
       indexRecord(label, decorationSig, record)
     }
     // A launcher tile discovered on this walk: nudge show-cell to rebuild its
-    // geometry so the tile's silhouette appears (the walk runs after first paint).
-    if (launchShapeByLabel.has(label)) EffectBus.emit('launch:indexed', { label })
+    // geometry so the tile's silhouette appears (the walk runs after first
+    // paint). The pre-paint hydration path (ensureDecorationsIndexed) passes
+    // nudge=false — nothing is painted yet, so a rebuild request would only
+    // queue a redundant second render.
+    if (nudge && launchShapeByLabel.has(label)) EffectBus.emit('launch:indexed', { label })
     return tagsByLabel.has(label)
   } catch {
-    // Layer unavailable or fetch error — skip this label; another render
-    // pass will retry (checkedLabels is set BEFORE the await, so a
-    // failed walk doesn't replay forever; remove from checked to retry
-    // on next event).
-    checkedLabels.delete(label)
+    // Layer unavailable or fetch error — skip this location; another render
+    // pass will retry (the path key is set BEFORE the await, so a failed
+    // walk doesn't replay forever; remove it to retry on the next event).
+    seenPaths.delete(pathKey)
     return false
   }
+}
+
+/** Awaitable PRE-PAINT hydration for launch-group aggregator pages. The
+ *  launcher silhouette is baked into mesh geometry (aShapeMode), so show-cell
+ *  awaits this before building an `agg-` page's geometry — painting first and
+ *  indexing later shows every launcher as a full-size picture hexagon that
+ *  visibly shrinks into its group silhouette when the async walk lands.
+ *  Rides hydrateLabel's checkedLabels memo, so repeat calls per label are
+ *  synchronous no-ops. */
+export async function ensureDecorationsIndexed(
+  labels: readonly string[],
+  parentSegments: readonly string[],
+): Promise<void> {
+  const history = window.ioc.get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
+  if (!history) return
+  await Promise.all(labels.map(label => hydrateLabel(label, parentSegments, history, false)))
 }
 
 type RenderCellCountPayload = {

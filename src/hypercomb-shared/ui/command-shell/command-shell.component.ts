@@ -39,6 +39,18 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
         queueMicrotask(() => this.#positionIntel())
       }
     })
+
+    // Keep the highlighted row in view when navigating with the arrow keys —
+    // otherwise the selection scrolls past the panel's edge and you can't see
+    // what you're on. Standard autocomplete behaviour.
+    effect(() => {
+      this.activeIndex()
+      if (!this.effectiveShowCompletions()) return
+      queueMicrotask(() => {
+        const el = this.#host.nativeElement.querySelector('.command-results li.active') as HTMLElement | null
+        el?.scrollIntoView({ block: 'nearest' })
+      })
+    })
   }
 
   /** Compute the dropdown's fixed screen coordinates from the command bar's
@@ -54,33 +66,36 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
     const vh = window.innerHeight || document.documentElement.clientHeight
     const isPhone = vw <= 599
 
-    // Horizontal: line up the dropdown's left edge with the START of the word
-    // you're completing (the caret minus the typed prefix), so the suggestions
-    // continue from where the token begins. On phone it spans the bar from the
-    // left instead (no room to offset).
-    const anchorX = isPhone ? null : this.#fragmentStartX()
+    // Horizontal: line up the dropdown's left edge with the text CARET. With no
+    // text the caret sits at the input start, so the list opens flush at the left
+    // (against the controls); as you type it tracks the cursor. On phone it spans
+    // the bar from the left instead (no room to offset).
+    const anchorX = isPhone ? null : this.#caretScreenX()
     let left = anchorX ?? r.left
     left = Math.max(8, Math.min(left, vw - 224))   // keep ~14rem on-screen
     host.style.setProperty('--intel-left', `${Math.round(left)}px`)
     host.style.setProperty('--intel-width', `${Math.round(r.width)}px`)
+    // Cap the panel to the space between its left edge and the viewport's right
+    // edge so the two-pane (list + detail) can never run off the side.
+    host.style.setProperty('--intel-maxw', `${Math.round(vw - left - 8)}px`)
 
     // Vertical: open UP off a bottom-anchored bar (dev/web pin it to the bottom),
-    // DOWN off a top-anchored one.
+    // DOWN off a top-anchored one. Snug (2px) against the bar.
     const openUp = r.top > vh / 2
     if (openUp) {
       host.style.setProperty('--intel-top', 'auto')
-      host.style.setProperty('--intel-bottom', `${Math.round(vh - r.top + 6)}px`)
+      host.style.setProperty('--intel-bottom', `${Math.round(vh - r.top + 10)}px`)
     } else {
       host.style.setProperty('--intel-bottom', 'auto')
-      host.style.setProperty('--intel-top', `${Math.round(r.bottom + 6)}px`)
+      host.style.setProperty('--intel-top', `${Math.round(r.bottom + 2)}px`)
     }
   }
 
-  /** Screen x-coordinate of the START of the token being completed — the caret
-   *  minus the typed prefix — measured with a hidden mirror span carrying the
-   *  input's resolved font, so the dropdown anchors under the start of the word
-   *  you're typing. Null when the input isn't available. */
-  #fragmentStartX(): number | null {
+  /** Screen x-coordinate of the text caret inside the input — measured with a
+   *  hidden mirror span carrying the input's resolved font, so the dropdown
+   *  anchors under the cursor (at the input start when empty). Null when the
+   *  input isn't available. */
+  #caretScreenX(): number | null {
     const input = this.inputElement
     if (!input) return null
     const rect = input.getBoundingClientRect()
@@ -97,8 +112,7 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
     s.fontStyle = cs.fontStyle
     s.letterSpacing = cs.letterSpacing
     const caret = input.selectionStart ?? input.value.length
-    const start = Math.max(0, caret - this.typedPrefix().length)
-    mirror.textContent = input.value.slice(0, start)
+    mirror.textContent = input.value.slice(0, caret)
     document.body.appendChild(mirror)
     const textWidth = mirror.getBoundingClientRect().width
     mirror.remove()

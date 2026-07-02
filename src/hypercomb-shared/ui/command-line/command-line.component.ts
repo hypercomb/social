@@ -380,6 +380,13 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     get('@hypercomb.social/CellSuggestionProvider') as EventTarget,
     () => this.cellProvider.suggestions()
   )
+  /** Reactive master tag-name list. Bridged so tag intellisense re-reads the
+   *  list the moment the (async) registry load finishes — not only after the
+   *  first tag mutation. Loaded on boot in ngAfterViewInit. */
+  private readonly tagNames$ = fromRuntime(
+    get('@hypercomb.social/TagRegistry') as EventTarget,
+    () => (get('@hypercomb.social/TagRegistry') as { names?: string[] } | undefined)?.names ?? [],
+  )
 
   // pluggable behaviors — validated at construction, no overlapping operations.
   //
@@ -889,12 +896,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     // plain colon tag mode: suggest tag names from registry, most-used first.
     if (ctx.mode === 'tag') {
-      const registry = get('@hypercomb.social/TagRegistry') as { names: string[] } | undefined
       const metrics = get('@diamondcoreprocessor.com/OverlapMetrics') as { tagCount(name: string): number } | undefined
-      let allTags = registry?.names ?? []
+      let allTags = [...this.tagNames$()]
       if (ctx.normalized) allTags = allTags.filter(n => n.toLowerCase().startsWith(ctx.normalized))
       // Overlap count = how many tiles carry the tag (popularity); alpha ties.
-      return [...allTags].sort((a, b) => (metrics?.tagCount(b) ?? 0) - (metrics?.tagCount(a) ?? 0) || a.localeCompare(b))
+      return allTags.sort((a, b) => (metrics?.tagCount(b) ?? 0) - (metrics?.tagCount(a) ?? 0) || a.localeCompare(b))
     }
 
     // select mode: suggestions depend on the current phase
@@ -908,6 +914,15 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         if (excluded.size) cells = cells.filter(n => !excluded.has(n))
         if (!ctx.normalized) return cells
         return cells.filter(n => n.startsWith(ctx.normalized))
+      }
+
+      // tag phase (`[a,b]:tag`): suggest tag names, most-used first — same source
+      // and ranking as the plain `label:tag` mode.
+      if (phase === 'tag') {
+        const metrics = get('@diamondcoreprocessor.com/OverlapMetrics') as { tagCount(name: string): number } | undefined
+        let allTags = [...this.tagNames$()]
+        if (ctx.normalized) allTags = allTags.filter(n => n.toLowerCase().startsWith(ctx.normalized))
+        return allTags.sort((a, b) => (metrics?.tagCount(b) ?? 0) - (metrics?.tagCount(a) ?? 0) || a.localeCompare(b))
       }
 
       // operation phase: suggest operation keywords with / prefix
@@ -964,8 +979,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       if (leaf.startsWith(':') || leaf.startsWith('~:')) {
         const isRemove = leaf.startsWith('~:')
         const prefix = isRemove ? leaf.slice(2) : leaf.slice(1)
-        const registry = get('@hypercomb.social/TagRegistry') as { names: string[] } | undefined
-        const allTags = registry?.names ?? []
+        const allTags = this.tagNames$()
         const cellTags = this.#bracketCellTags()
         const pending = this.#bracketPendingTags
 
@@ -1071,6 +1085,25 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     return CommandLineComponent.ACCENT_COLOR_MAP
   })
 
+  /** Colour swatches for the dropdown: accent presets in `/accent`, and each
+   *  tag's own colour in the tag modes (`label:tag` and `[a,b]:tag`) so a tag
+   *  suggestion shows its colour dot. */
+  public readonly dropdownColorMap = computed<ReadonlyMap<string, string>>(() => {
+    const accent = this.accentColorMap()
+    if (accent.size) return accent
+    const ctx = this.context()
+    const inTagMode = ctx.active && (ctx.mode === 'tag' || (ctx.mode === 'select' && this.#selectPhase() === 'tag'))
+    if (!inTagMode) return new Map()
+    const registry = get('@hypercomb.social/TagRegistry') as { color(name: string): string } | undefined
+    if (!registry) return new Map()
+    const map = new Map<string, string>()
+    for (const n of this.tagNames$()) {
+      const c = registry.color(n)
+      if (c) map.set(n, c)
+    }
+    return map
+  })
+
   /** Handle a hint-bar crumb click — accept that preset. */
   public onHintPick(preset: string): void {
     const ctx = this.context()
@@ -1163,6 +1196,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
   public ngAfterViewInit(): void {
     this.shell?.focus()
+
+    // Warm the master tag list so `:` shows every tag immediately — even on a
+    // tile that has none (the registry is otherwise loaded lazily, only on the
+    // first tag mutation). The reactive tagNames$ bridge picks up the load.
+    void (get('@hypercomb.social/TagRegistry') as { ensureLoaded?: () => Promise<void> } | undefined)?.ensureLoaded?.()
 
     window.ioc.register('@hypercomb.social/CommandLineBehaviors', this.behaviorReference)
 
@@ -2599,8 +2637,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     // Otherwise (selection phase or bare /select[tiles]), clear everything
     const v = this.value()
     const bracketClose = v.indexOf(']')
-    const hasOperation = bracketClose >= 0 && v.slice(bracketClose + 1).startsWith('/')
-    if (hasOperation && labels.length > 0) {
+    const afterClose = bracketClose >= 0 ? v.slice(bracketClose + 1) : ''
+    const hasSuffix = afterClose.startsWith('/') || afterClose.startsWith(':')
+    if (hasSuffix && labels.length > 0) {
       this.#collapseToSelect(labels)
     } else {
       this.clear()
@@ -2677,6 +2716,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         this.#syncDirection = 'command'
         this.#setShellValue(before + spacer + op + best, false)
         this.#syncDirection = 'idle'
+        return
+      }
+
+      if (phase === 'tag') {
+        // ctx.head already includes `]:`, any prior tags, and a leading `~`.
+        this.#setShellValue(ctx.head + best, false)
         return
       }
 
@@ -2818,7 +2863,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #lastMoveLabels: readonly string[] = []
 
   /** Phase derived from value — computed, no signal writes */
-  #selectPhase = computed<'none' | 'selection' | 'operation' | 'move-path' | 'move-target-index' | 'move-target-swap'>(() => {
+  #selectPhase = computed<'none' | 'selection' | 'operation' | 'tag' | 'move-path' | 'move-target-index' | 'move-target-swap'>(() => {
     const v = this.value()
     if (!isSelectInput(v)) return 'none'
     return this.#deriveSelectPhase(normalizeSelectInput(v))
@@ -2886,7 +2931,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   })
 
   /** Derive the select phase from the input string (pure, no side effects) */
-  #deriveSelectPhase(v: string): 'selection' | 'operation' | 'move-path' | 'move-target-index' | 'move-target-swap' {
+  #deriveSelectPhase(v: string): 'selection' | 'operation' | 'tag' | 'move-path' | 'move-target-index' | 'move-target-swap' {
     const bracketOpen = v.indexOf('[')
     const bracketClose = v.indexOf(']')
 
@@ -2894,6 +2939,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
 
     const afterBracket = v.slice(bracketClose + 1)
     if (!afterBracket || afterBracket === '/') return 'operation'
+    // `[a,b]:tag` — colon after the bracket tags the selection. This is its OWN
+    // phase (not operation), so intellisense shows tag names + a tag ghost, not
+    // the `/op` slash.
+    if (afterBracket.startsWith(':')) return 'tag'
 
     if (afterBracket.startsWith('/')) {
       const opAndRest = afterBracket.slice(1)
@@ -2950,6 +2999,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     }
 
     const afterBracket = v.slice(bracketClose + 1)
+
+    // Phase: tag — `[a,b]:tag` / `[a,b]:t1,t2` / `[a,b]:[t1, ~t2]`. The fragment
+    // being typed is whatever follows the last separator (the `:`, a `,`, or a
+    // batch-opening `[`); a leading `~` (remove) is kept in `head`.
+    if (phase === 'tag') {
+      const sepIdx = Math.max(afterBracket.lastIndexOf(':'), afterBracket.lastIndexOf(','), afterBracket.lastIndexOf('['))
+      let raw = afterBracket.slice(sepIdx + 1).trimStart()
+      if (raw.startsWith('~')) raw = raw.slice(1)
+      const head = v.slice(0, v.length - raw.length)
+      return { active: true, mode: 'select', head, raw, normalized: raw.toLowerCase().trim(), style: 'space' }
+    }
 
     // Phase: operation keyword
     if (phase === 'operation') {

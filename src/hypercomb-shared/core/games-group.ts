@@ -16,7 +16,8 @@
 // the game drones already listen for). Mirrors websites-group / dashboard-group.
 
 import { EffectBus } from '@hypercomb/core'
-import { groupRegistry, type GroupMember, type LaunchGroup } from './group-registry'
+import { groupRegistry, type GroupMember } from './group-registry'
+import { LaunchGroupBase } from './launch-group-base'
 
 /** The self-describing surface a `genotype:'game'` bee exposes for the launcher. */
 type GameLike = {
@@ -34,13 +35,14 @@ type IocLike = {
 
 const ioc = (): IocLike | undefined => (window as unknown as { ioc?: IocLike }).ioc
 
-class GamesGroup implements LaunchGroup {
-  readonly id = 'games'
-  readonly icon = 'sports_esports'
-  readonly label = 'Games'
+class GamesGroup extends LaunchGroupBase {
+  override readonly id = 'games'
+  override readonly icon = 'sports_esports'
+  override readonly label = 'Games'
   readonly shape = 'space-invader'
 
   constructor() {
+    super()
     // Re-render the launcher whenever a new game bee registers. Order-agnostic:
     // games may load before OR after this provider — anything already present is
     // picked up by the first members() enumeration, anything later by this feed.
@@ -51,7 +53,7 @@ class GamesGroup implements LaunchGroup {
 
   /** The live pool of games — every `genotype:'game'` bee in IoC that carries a
    *  launch descriptor. No roster: a new game module appears here for free. */
-  members(): GroupMember[] {
+  override members(): GroupMember[] {
     const c = ioc()
     if (!c) return []
     const seen = new Set<string>()
@@ -72,8 +74,17 @@ class GamesGroup implements LaunchGroup {
   /** Launch a game: route back to its drone as `<gameId>:toggle`. The overlay
    *  mounts above the hive (and above the aggregator bag, when launched from
    *  it); games carry no hive location, so there is nothing to navigate here. */
-  open(m: GroupMember): void {
+  protected override activate(m: GroupMember): void {
     EffectBus.emit(`${m.key}:toggle`, {})
+  }
+
+  /** A game overlay's on-screen state rides its own `<gameId>:state` emit
+   *  ({ available, active }) — fired on open and close. EffectBus replays the
+   *  last value on subscribe; a stale close is ignored by the base's
+   *  seen-open-first machine, a live "already open" (re-tapping the lit tile
+   *  toggles it closed) arms correctly. */
+  protected override watchSurface(m: GroupMember, report: (open: boolean) => void): () => void {
+    return EffectBus.on<{ active?: boolean }>(`${m.key}:state`, p => report(p?.active === true))
   }
 }
 

@@ -58,7 +58,14 @@ export class GroupLaunchersComponent implements OnDestroy {
   /** Tap: edit mode → reskin this icon; else select this group EXCLUSIVELY (one
    *  group at a time — tapping another switches, tapping the active one closes).
    *  The registry owns the bag + enter/exit. */
-  activate(id: string): void {
+  activate(id: string, ev?: Event): void {
+    // A pointer click (detail ≥ 1) leaves browser focus pinned on the icon;
+    // the next keystroke — Escape to leave the launch page — would promote it
+    // to :focus-visible and paint a stray focus ring in the chrome. Drop the
+    // focus for pointer activations only; keyboard activation (Enter/Space,
+    // detail 0) keeps the ring, which a keyboard user needs to see.
+    const t = ev?.currentTarget
+    if ((ev as MouseEvent | undefined)?.detail && t instanceof HTMLElement) t.blur()
     if (this.#suppressClick) { this.#suppressClick = false; return }
     if (iconEditMode.on) { iconEditMode.requestPick('group:' + id); return }
     const group = groupRegistry.get(id)

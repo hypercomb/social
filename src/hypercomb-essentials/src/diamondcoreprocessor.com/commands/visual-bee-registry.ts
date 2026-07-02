@@ -102,6 +102,15 @@ export type VisualBeeDescriptor = {
   readonly toggleIcon?: string
 
   /**
+   * Whether this view surfaces a per-node toggle on the command line
+   * (ViewBee). Defaults to true. A view whose members are launched from the
+   * launch-group aggregator (website — the cloud tiles) sets false: the
+   * launcher already owns opening it, so a second button beside the launcher
+   * icons is redundant. The slash command stays the escape hatch.
+   */
+  readonly commandLineToggle?: boolean
+
+  /**
    * What kind of view this is:
    *   - `'render'` (default when absent): an alternate RENDER of the same
    *     branch (e.g. website). Availability comes from a decoration/page on

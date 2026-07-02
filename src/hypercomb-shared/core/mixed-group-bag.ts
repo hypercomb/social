@@ -58,9 +58,6 @@ export class MixedGroupBag {
   #memberByLabel = new Map<string, GroupMember>()
   #groupByLabel = new Map<string, LaunchGroup>()
   #suppressContextMenu = false
-  /** Tear-down for the live "return to the bag when the member's surface closes"
-   *  listener. Null when nothing is armed. */
-  #disarmReturn: (() => void) | null = null
   /** Hive location of the site opened from the list this session, or null. */
   #lastOpenedSegments: string[] | null = null
   /** Serializes sync()/refresh so two rapid toggles can't both observe
@@ -70,6 +67,13 @@ export class MixedGroupBag {
   /** Last (enabled-set + member-label) signature already warmed by prewarm(), so
    *  the per-discovery-scan re-trigger is a cheap no-op once warm. */
   #prewarmedKey = ''
+  /** True while the bag ITSELF flips ViewMode back to 'hexagons' as part of a
+   *  group switch (#dismissActiveSurface). ViewMode dispatch is synchronous, so
+   *  the flag brackets the setMode call and tells the surface-exit watchers
+   *  (#wireModeReset + GroupRegistry.surfaceClosed via isSwitching()) that this
+   *  transition is a SWITCH, not a user exit — without it the reset would wipe
+   *  the group just tapped. */
+  #suppressModeClear = false
 
   constructor(registry: GroupRegistry) {
     this.#registry = registry
@@ -78,6 +82,9 @@ export class MixedGroupBag {
     // honours escape / right-click-to-exit. All handlers guard on isActive(),
     // so they're inert when the participant isn't standing in the mix.
     this.#wireGestures()
+    // Every return to the hexagon canvas resets the launcher toggles, whatever
+    // path the surface was opened or closed through (see #wireModeReset).
+    this.#wireModeReset()
 
     // A launcher-tile click surfaces as `group:open { label }` (tile-overlay).
     // ONE listener for the whole mix — rebuild the routing maps, then resolve
@@ -90,21 +97,22 @@ export class MixedGroupBag {
       const member = this.#memberByLabel.get(label)
       const group = this.#groupByLabel.get(label)
       if (!member || !group) return
-      // Members WITH a hive location (websites) take over a transient surface at
-      // their OWN location, navigating us out of the bag: remember where the
-      // site lives (back-drill) and arm a return so closing it drops back onto
-      // the MIXED list, never the member's stray tile. Members WITHOUT a location
-      // (games/dashboard/help) mount an overlay / toggle a view ABOVE the bag —
-      // the lineage either stays put (games/help) or the surface owns its own
-      // return (dashboard), so neither the back-drill target nor the return-arm
-      // applies.
-      if (member.segments.length > 0) {
-        this.#lastOpenedSegments = [...member.segments]
-        this.#armReturnOnExit()
-      }
+      // Members WITH a hive location (websites) take over a transient surface
+      // at their OWN location, navigating us out of the bag: remember where the
+      // site lives so the bag's own exit() back-drills onto it. The FULL-exit
+      // reset on surface close (launcher icons back to default, land on the
+      // hive) is the STANDARD armed inside group.open() itself — every group
+      // inherits it from LaunchGroupBase, so nothing group-specific is wired
+      // here.
+      if (member.segments.length > 0) this.#lastOpenedSegments = [...member.segments]
       group.open(member)
     })
   }
+
+  /** True while the bag is dismissing a member surface as part of a group
+   *  SWITCH. GroupRegistry.surfaceClosed (the standard launcher exit armed by
+   *  LaunchGroupBase) consults this so a switch never reads as a user exit. */
+  isSwitching(): boolean { return this.#suppressModeClear }
 
   /** True when the participant is currently inside the mixed bag. */
   isActive(): boolean {
@@ -232,10 +240,15 @@ export class MixedGroupBag {
 
   /** Leave a ViewMode render surface (website/tutor) so the mixed page is
    *  visible. The dashboard bag is hexagons-mode and is left by enter()'s goRaw,
-   *  so only a ViewMode flip back to hexagons is needed here. */
+   *  so only a ViewMode flip back to hexagons is needed here. The flip is
+   *  bracketed by #suppressModeClear: it's a group SWITCH, not a user exit, so
+   *  the hexagons-return watchers must not reset the toggle just selected. */
   #dismissActiveSurface(): void {
     const vm = get<ViewModeLike & { setMode?: (m: string) => void }>('@hypercomb.social/ViewMode')
-    if (vm?.mode && vm.mode !== 'hexagons') vm.setMode?.('hexagons')
+    if (vm?.mode && vm.mode !== 'hexagons') {
+      this.#suppressModeClear = true
+      try { vm.setMode?.('hexagons') } finally { this.#suppressModeClear = false }
+    }
   }
 
   async #refreshOnce(): Promise<void> {
@@ -299,10 +312,8 @@ export class MixedGroupBag {
 
   /** Leave the bag. After a site was opened this session, back out onto that
    *  site's OWN hive cell so the participant can explore its hive; otherwise
-   *  return to where the list was first entered from. Disarm any in-flight
-   *  return first so the two don't race a double-navigation. */
+   *  return to where the list was first entered from. */
   exit(): void {
-    this.#disarmReturn?.()
     const nav = get<NavigationLike>('@hypercomb.social/Navigation')
     nav?.goRaw?.(this.#lastOpenedSegments ?? this.#returnSegments)
   }
@@ -474,27 +485,37 @@ export class MixedGroupBag {
     return names
   }
 
-  // ── return-on-exit + helpers + exit gestures (mirror the old GroupBag) ──
+  // ── mode-reset safety net + helpers + exit gestures ────────────────────
 
-  /** Watch ViewMode after a launcher opens. The member took over a transient
-   *  surface (website mode) and moved the lineage to its own location; when
-   *  that surface closes — ViewMode returns to the hexagon canvas — pull the
-   *  lineage back INTO the mixed bag so the list is on screen again. One-shot
-   *  and self-disarming; a fresh open supersedes any prior arm. */
-  #armReturnOnExit(): void {
-    const vm = get<ViewModeLike>('@hypercomb.social/ViewMode')
-    if (!vm?.addEventListener) return
-    this.#disarmReturn?.()
-    const onChange = (): void => {
-      if (vm.mode !== 'hexagons') return        // still on the surface (or sub-page nav)
-      this.#disarmReturn?.()
-      get<NavigationLike>('@hypercomb.social/Navigation')?.goRaw?.(this.#segments)
-    }
-    vm.addEventListener('change', onChange)
-    this.#disarmReturn = (): void => {
-      vm.removeEventListener('change', onChange)
-      this.#disarmReturn = null
-    }
+  /** PERMANENT ViewMode watcher: ANY return to the hexagon canvas (exit-overlay
+   *  click, the Escape safety net, the /website toggle) resets the launcher
+   *  toggles to their default (nothing lit). The per-open reset is the STANDARD
+   *  armed by LaunchGroupBase inside every group.open(); this watcher is the
+   *  safety net for surfaces entered with NO group.open() at all (a typed
+   *  /website over toggles that survived a reload) — without it the icon stays
+   *  lit after the surface closes, and the next tap reads as "sole enabled →
+   *  turn off" (selectExclusive), costing a second click to actually
+   *  reactivate. Clearing here makes every reactivation a single click. Skipped while the bag itself
+   *  dismisses a surface for a group switch (#suppressModeClear), and while the
+   *  participant is still STANDING in the bag (a surface toggled over agg-mix —
+   *  /website, /tutor — keeps the launcher session alive: clearing there would
+   *  empty the bag and cascade into an unrequested exit navigation). Outside the
+   *  bag clear() only syncs — enabledIds()===0 with isActive()===false is a
+   *  no-op — so the screen stays where the participant is (stillness). */
+  #wireModeReset(): void {
+    const ioc = (window as unknown as { ioc?: IocLike }).ioc
+    ioc?.whenReady?.('@hypercomb.social/ViewMode', (v) => {
+      const vm = v as ViewModeLike
+      if (!vm?.addEventListener) return
+      let prev = vm.mode ?? 'hexagons'
+      vm.addEventListener('change', () => {
+        const next = vm.mode ?? 'hexagons'
+        const leftSurface = prev !== 'hexagons' && next === 'hexagons'
+        prev = next
+        if (!leftSurface || this.#suppressModeClear || this.isActive()) return
+        this.#registry.clear()
+      })
+    })
   }
 
   #currentSegments(): string[] {
@@ -502,9 +523,20 @@ export class MixedGroupBag {
     return (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
   }
 
+  /** User-initiated exit gesture from the launch page (Escape / right-click):
+   *  a FULL exit, uniform with closing a launched surface — reset the header
+   *  launcher icons to their default FIRST (an icon left glowing after an
+   *  explicit exit reads as still-active), then leave. exit() navigates
+   *  synchronously; clear()'s queued sync then sees the bag inactive and
+   *  stays put, so there is no double navigation. */
+  #fullExit(): void {
+    this.#registry.clear()
+    this.exit()
+  }
+
   #wireGestures(): void {
-    // Escape (cascade last resort) closes the aggregator.
-    EffectBus.on('global:escape', () => { if (this.isActive()) this.exit() })
+    // Escape (cascade last resort) closes the aggregator — icons reset too.
+    EffectBus.on('global:escape', () => { if (this.isActive()) this.#fullExit() })
     // Right-click on the HEX-GRID canvas inside the aggregator = close. Capture
     // phase so it preempts tile-overlay's bubble-phase "up a level". Gated to the
     // Pixi host (#pixi-host) so a right-click inside a GAME overlay launched from
@@ -522,7 +554,7 @@ export class MixedGroupBag {
     e.preventDefault()
     e.stopPropagation()
     this.#suppressContextMenu = true
-    this.exit()
+    this.#fullExit()
   }
 
   #onContextMenuCapture = (e: MouseEvent): void => {

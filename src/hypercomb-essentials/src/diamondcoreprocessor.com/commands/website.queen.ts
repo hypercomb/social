@@ -698,6 +698,9 @@ window.ioc.register('@diamondcoreprocessor.com/WebsiteQueenBee', _website)
       slashCommand: '/website',
       iconName: 'website',
       toggleIcon: 'web',
+      // Websites are opened from the launch-group aggregator (the cloud
+      // tiles); a per-node toggle beside the launcher icons is redundant.
+      commandLineToggle: false,
       decorationKind: 'visual:website:page',
       labelKey: 'view.website',
       descriptionKey: 'view.website.description',

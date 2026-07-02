@@ -1,5 +1,6 @@
 // diamondcoreprocessor.com/pixi/hex-label.atlas.ts
-import { Container, Graphics, RenderTexture, Text, TextStyle, Texture } from 'pixi.js'
+import { Container, Graphics, RenderTexture, Sprite, Texture } from 'pixi.js'
+import { buildSdfCell } from './sdf-glyph.js'
 
 export interface LabelUV {
   u0: number
@@ -30,7 +31,14 @@ export class HexLabelAtlas {
 
   private readonly cols: number
   private readonly rows: number
-  private readonly style: TextStyle
+
+  // Reusable blit targets for writing one SDF cell into the atlas: the
+  // device-sized canvas the field is written to, its Pixi texture, and the
+  // logical-sized sprite that stamps it into a cell. Created lazily once.
+  #sdfCanvas: HTMLCanvasElement | null = null
+  #sdfCtx: CanvasRenderingContext2D | null = null
+  #sdfTexture: Texture | null = null
+  #sdfSprite: Sprite | null = null
 
   public constructor(
     private readonly renderer: any,
@@ -50,12 +58,12 @@ export class HexLabelAtlas {
     // swapping this exact RenderTexture to resolution 2 (2048×2048) made the
     // wash vanish while labels stayed crisp. Keep this in lockstep with the
     // known-good HexImageAtlas, which renders fine in Edge at resolution 2.
-    // resolution 2 gives 256 physical px per 128px label cell. We bake glyphs
-    // LARGE (style.fontSize below) rather than at the legacy 9px so each glyph
-    // carries many more texels; the shader samples a small central band
-    // (LABEL_BAND in hex-sdf.shader.ts) to keep the on-screen size unchanged.
-    // Crispness comes from the bigger bake, NOT from raising this resolution —
-    // which Edge caps (see above).
+    // resolution 2 gives 256 physical px per 128px label cell. Cells hold a
+    // CPU-computed signed distance field (see sdf-glyph.ts / #bakeLabel), which
+    // the shader decodes with fwidth-based AA — crisp at ANY zoom without ever
+    // raising this resolution, which Edge caps (see above). The shader samples
+    // a central band (LABEL_BAND in hex-sdf.shader.ts) to keep on-screen size
+    // matched to the legacy 9px look.
     this.atlas = RenderTexture.create({
       width: this.cols * this.cellPx,
       height: this.rows * this.cellPx,
@@ -64,47 +72,52 @@ export class HexLabelAtlas {
 
     // clear once so sampling starts transparent
     this.renderer.render({ container: new Container(), target: this.atlas, clear: true })
-
-    const hcFont = getComputedStyle(document.documentElement).getPropertyValue('--hc-font').trim()
-
-    // fontSize 27 (= 9 × 3) — baked large so glyphs are crisp when magnified onto
-    // big hexes. The shader divides its label sample window by LABEL_BAND (3.0)
-    // so displayed size is identical to the old 9px bake, just sharper. Keep this
-    // in lockstep with LABEL_BAND: LABEL_BAND === fontSize / 9. letterSpacing and
-    // the drop shadow are scaled ×3 too, so they shrink back to their original
-    // proportions once the shader samples the band.
-    this.style = new TextStyle({
-      fontFamily: hcFont || "'Source Sans Pro Light', system-ui, sans-serif",
-      fontSize: 27,
-      fill: 0xffffff,
-      align: 'center',
-      letterSpacing: 1.5,
-      dropShadow: {
-        alpha: 0.35,
-        angle: Math.PI / 2,
-        blur: 3,
-        color: 0x000000,
-        distance: 3,
-      },
-    })
   }
 
-  // Build a single label's Text, sized to fill its atlas cell. Glyphs are baked
-  // LARGE (style.fontSize) for texel density; over-long labels are CONDENSED
-  // horizontally (scale.x) so they never overflow the 128px cell into a
-  // neighbour slot — height stays uniform across every label.
-  #buildLabelText = (displayText: string, col: number, row: number): Text => {
-    const text = new Text({ text: displayText, style: this.style })
-    text.resolution = 2 // match the atlas RenderTexture resolution (see constructor)
-    text.anchor.set(0.5)
-    const maxW = this.cellPx * 0.92
-    if (text.width > maxW) text.scale.x = maxW / text.width
-    text.position.set(
-      col * this.cellPx + this.cellPx * 0.5,
-      row * this.cellPx + this.cellPx * 0.5
-    )
-    if (this.#pivot) text.rotation = Math.PI / 2
-    return text
+  // Lazily create the reusable canvas / texture / sprite used to stamp one SDF
+  // cell into the atlas. The canvas is device-sized (cellPx × RT resolution) so
+  // it maps 1:1 into a cell; the sprite is logical cellPx so positions match
+  // the UV math.
+  #ensureSdfTargets = (): boolean => {
+    if (this.#sdfSprite) return true
+    const dev = this.cellPx * (this.atlas.source?.resolution ?? 2)
+    const cv = document.createElement('canvas')
+    cv.width = dev
+    cv.height = dev
+    const cx = cv.getContext('2d')
+    if (!cx) return false
+    this.#sdfCanvas = cv
+    this.#sdfCtx = cx
+    this.#sdfTexture = Texture.from(cv)
+    const sp = new Sprite(this.#sdfTexture)
+    sp.width = this.cellPx
+    sp.height = this.cellPx
+    this.#sdfSprite = sp
+    return true
+  }
+
+  // Bake one label into slot (col,row): CPU signed-distance field → canvas →
+  // Sprite render into the atlas. The cell is fully overwritten (every texel
+  // gets a field value, A=255), so slot reuse can never superimpose. The field
+  // itself is a PLAIN WHITE GLYPH — no shadow, no stroke, no edge of any kind
+  // (hard user rule; legibility over images comes from the pill/banner the
+  // shader draws BEHIND text, never from decorating the glyphs).
+  // baseFontPx 18 is load-bearing: LABEL_BAND (2.0) in hex-sdf.shader.ts
+  // compensates the sample window so on-screen size matches the legacy 9px
+  // look. Keep the two in lockstep.
+  #bakeLabel = (displayText: string, col: number, row: number): void => {
+    if (!this.#ensureSdfTargets()) return // no 2D context → skip (Pixi itself needs one anyway)
+    const img = buildSdfCell(displayText, {
+      cellDevice: this.#sdfCanvas!.width,
+      baseFontPx: 18,
+      letterSpacingPx: 1.0,
+      radiusLogical: 8,
+      rotate: this.#pivot ? Math.PI / 2 : 0,
+    })
+    this.#sdfCtx!.putImageData(img, 0, 0)
+    this.#sdfTexture!.source.update()
+    this.#sdfSprite!.position.set(col * this.cellPx, row * this.cellPx)
+    this.renderer.render({ container: this.#sdfSprite!, target: this.atlas, clear: false })
   }
 
   public setPivot = (pivot: boolean): void => {
@@ -207,9 +220,6 @@ export class HexLabelAtlas {
   public seed = (labels: readonly string[]): void => {
     if (!labels.length) return
 
-    const batch = new Container()
-    const created: Text[] = []
-
     for (const label of labels) {
       if (!label || this.map.has(label)) continue
 
@@ -232,10 +242,7 @@ export class HexLabelAtlas {
       }
 
       const displayText = this.#labelResolver ? this.#labelResolver(label) : label
-      const text = this.#buildLabelText(displayText, col, row)
-
-      batch.addChild(text)
-      created.push(text)
+      this.#bakeLabel(displayText, col, row)
 
       const u0 = (col * this.cellPx) / this.atlas.width
       const v0 = (row * this.cellPx) / this.atlas.height
@@ -243,11 +250,6 @@ export class HexLabelAtlas {
       const v1 = ((row + 1) * this.cellPx) / this.atlas.height
       this.map.set(label, { u0, v0, u1, v1 })
     }
-
-    if (!created.length) return
-
-    this.renderer.render({ container: batch, target: this.atlas, clear: false })
-    for (const text of created) text.destroy()
   }
 
   public getLabelUV = (label: string): LabelUV => {
@@ -277,11 +279,7 @@ export class HexLabelAtlas {
     // Resolve display text: label resolver (i18n) → raw directory name
     const displayText = this.#labelResolver ? this.#labelResolver(label) : label
 
-    const text = this.#buildLabelText(displayText, col, row)
-
-    // render into the atlas (keep previous labels)
-    this.renderer.render({ container: text, target: this.atlas, clear: false })
-    text.destroy()
+    this.#bakeLabel(displayText, col, row)
 
     const u0 = (col * this.cellPx) / this.atlas.width
     const v0 = (row * this.cellPx) / this.atlas.height

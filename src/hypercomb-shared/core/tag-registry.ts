@@ -56,6 +56,12 @@ export class TagRegistry extends EventTarget {
     this.#loading = this.#load()
     await this.#loading
     this.#loading = null
+    // Announce the first load so reactive readers (tag intellisense) that
+    // captured an empty `names` at boot re-read the now-populated list. `#load`
+    // itself is silent; without this, the master list never surfaces until a
+    // tag is mutated (the first thing that dispatches 'change').
+    this.dispatchEvent(new Event('change'))
+    EffectBus.emit('tags:registry', { tags: this.#tags })
   }
 
   /** Add or update a tag in the master list. */

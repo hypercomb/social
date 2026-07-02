@@ -10,7 +10,7 @@ hypercomb is a decentralized platform. there is no place for a central byte chok
 
 this is *not* "no CDN ever." immutable `/<sig>` URLs are exactly what edge caches are good at — Cloudflare caching of `/<sig>` is **embraced** as a scale primitive, because a cache hit on an immutable content-addressed URL can never serve the wrong bytes (the sig gates them). what we reject is a *central* chokepoint: a single origin every client must funnel through, or a hard-coded fallback that turns one provider's outage into a network outage. fetch candidates come from the operator's own domain, community-trusted domains, and mesh-learned domains, tried in trust order; first verified-bytes wins.
 
-**beta ramp exception (current).** while the shared relay rolls out, `ContentBroker.#getFallbackDomains` appends two shared byte mirrors — `jwize.com` and `pluginthematrix.io/sigs` (an Azure copy of jwize.com's content dir) — but **only when the shared live relay is active** (`#liveRelayActive`, same policy as the mesh seed: `use-live-relay='1'` forces it, `'0'` opts fully out, unset = on for a real origin / off on loopback). this exists because *resources have no mesh fallback*: a fresh viewer that never received the publisher's `['domain']` attribution has no host to try and the page/tile 404s. the two mirrors give every client a guaranteed byte source. sha256 still gates every byte, so a mirror outage degrades to "try the next host," never wrong content. this is a deliberate ramp posture, opt-out-able per client (`/use-live-relay off`) — revisit the default when third-party operators federate (the doctrine remains: no *mandatory* central chokepoint).
+**beta ramp exception (current).** while the shared relay rolls out, `ContentBroker.#getFallbackDomains` appends two shared byte mirrors — `jwize.com` and `pluginthematrix.io` (an Azure copy of jwize.com's content dir, served at the domain root — see the mirror section below) — but **only when the shared live relay is active** (`#liveRelayActive`, same policy as the mesh seed: `use-live-relay='1'` forces it, `'0'` opts fully out, unset = on for a real origin / off on loopback). this exists because *resources have no mesh fallback*: a fresh viewer that never received the publisher's `['domain']` attribution has no host to try and the page/tile 404s. the two mirrors give every client a guaranteed byte source. sha256 still gates every byte, so a mirror outage degrades to "try the next host," never wrong content. this is a deliberate ramp posture, opt-out-able per client (`/use-live-relay off`) — revisit the default when third-party operators federate (the doctrine remains: no *mandatory* central chokepoint).
 
 two transports, by content type:
 
@@ -67,29 +67,36 @@ publisher's browser ──HostSync PUT──> jwize.com content dir  (flat /<sig
                                             │
                           mirror-content-to-azure.ps1 (rsync-up, incremental)
                                             ▼
-                       storagehypercomb / sigs container  (flat <sig> blobs)
+                    storagehypercomb / content container  (flat <sig> blobs)
                                             │
-                              custom domain: pluginthematrix.io
+            Cloudflare / Front Door  (pluginthematrix.io):
+              rewrite /<sig> -> /content/<sig>  +  CORS  +  edge cache
                                             ▼
-        broker fetches  https://pluginthematrix.io/sigs/<sig>   (sha256-gated)
+          broker fetches  https://pluginthematrix.io/<sig>   (sha256-gated)
 ```
 
-the broker advertises the host string **`pluginthematrix.io/sigs`** (in `BETA_FALLBACK_DOMAINS`); `#domainToHost` strips scheme + trailing slash only, so the interior `/sigs` survives and it GETs `https://pluginthematrix.io/sigs/<sig>`. mapping: a container literally named `sigs` (anonymous blob-read), flat `<sig>`-named blobs, fronted by the `pluginthematrix.io` custom domain on the `storagehypercomb` account.
+**the client address is the bare ROOT** — the broker advertises just **`pluginthematrix.io`** (in `BETA_FALLBACK_DOMAINS`) and GETs `https://pluginthematrix.io/<sig>`. no `/container/` segment in the client URL — a folder there would be noise. that root is delivered by a **front**, not by raw blob:
+
+- raw Azure blob custom-domain forces `/<container>/<sig>` in the path; the front rewrites the bare `/<sig>` onto the internal `content` container.
+- the cross-origin browser fetch needs an `Access-Control-Allow-Origin` header, and Azure's static-website endpoint can't set one — so a front is required *regardless*; folding the rewrite into it is free.
+- immutable `/<sig>` edge-caches for free scale (the same reason we embrace Cloudflare caching of `/<sig>`).
+
+Cloudflare is the natural front (you already run it for jwize.com's tunnel): point `pluginthematrix.io` at it → Azure blob origin, one rule doing rewrite + CORS + cache. Azure Front Door is the all-Azure equivalent. the `content` container name is internal — clients never see it.
 
 **deploy.** run on the box where the relay's content dir lives (or a synced copy):
 
 ```bash
-npm run mirror:content:setup     # ONE-TIME: create the sigs container + CORS rule
+npm run mirror:content:setup     # ONE-TIME: create the content container + blob CORS
 npm run mirror:content           # incremental upload of flat <sig> files
 # or directly:
-pwsh hypercomb-relay/mirror-content-to-azure.ps1 [-SourceDir <dir>] [-Container sigs] [-Overwrite]
+pwsh hypercomb-relay/mirror-content-to-azure.ps1 [-SourceDir <dir>] [-Container content] [-Overwrite]
 ```
 
 by default it mirrors **everything content-addressed, flattened** for full redundancy: the flat authored heap at the content-dir root (resources, layers, page bodies — what host-sync writes at `/<sig>`) AND the typed essentials pools, flattened (`__bees__/<sig>.js` → blob `<sig>`, `__layers__/<sig>.json` → `<sig>`, etc.). the sig IS sha256 of the bytes, so a `.js`/`.json` file flattens to its `<sig>` blob and still verifies — after a full run pluginthematrix.io can serve *any* sig flat, matching the relay's own flat-heap model. (`-RootOnly` restores authored-heap-only. the separate `npm run deploy:essentials` still publishes the TYPED layout to the `dcp` container for the *install* pipeline; this flat mirror is the *broker's* view.) Content-Type is forced to `application/octet-stream` so the broker's `text/html` guard never rejects a page body.
 
 at scale (the content dir holds tens of thousands of files) it does **not** make one `az` call per file: it lists the container once to learn what's already mirrored (content-addressed ⇒ immutable ⇒ skip), hardlinks just the new sigs into a flat staging dir, then `az storage blob upload-batch` uploads that dir in one parallel pass. so re-runs are cheap — only genuinely new bytes move.
 
-two things the mirror needs that are easy to miss (both silent failures): **anonymous blob read** (the broker GET is unauthenticated — a private container 403s) and a **CORS rule** allowing the app origin (`mirror:content:setup` sets `GET/HEAD` from `*`; without it the browser blocks the cross-origin read).
+two things that are easy to miss (both silent failures): **anonymous read on the `content` container** (so the front can pull the origin without credentials — `mirror:content:setup` sets `--public-access blob`) and **CORS on the front** (the browser's cross-origin GET needs `Access-Control-Allow-Origin`; the front adds it — `mirror:content:setup` also sets a blob-service CORS rule as a fallback for the raw-blob path, but the authoritative header is the front's). the sig URL must return non-`text/html` bytes (octet-stream, which the upload forces) or the broker's guard skips it.
 
 ---
 

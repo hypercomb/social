@@ -97,7 +97,7 @@ const _runInitializeRuntime = async (
     // whole beta routing is explicit and stable rather than merely implied by
     // the unset origin-default: this single flag steers BOTH the mesh
     // (→ wss://jwize.com, nostr-mesh.drone loadRelays) AND ContentBroker's byte
-    // fallback (→ jwize.com + pluginthematrix.io/sigs, #liveRelayActive). The
+    // fallback (→ jwize.com + pluginthematrix.io, #liveRelayActive). The
     // one-time marker (hc:beta-relay-seeded) means a later `/use-live-relay
     // clear` is respected — we never re-seed over an explicit clear. Loopback
     // dev is never seeded (it resolves from the local relay; force with

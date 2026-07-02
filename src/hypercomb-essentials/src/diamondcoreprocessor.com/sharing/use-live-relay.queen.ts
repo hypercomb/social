@@ -7,7 +7,7 @@
 //   2. BYTES — ContentBroker's HTTP-direct fallback tier
 //      (#getFallbackDomains / #liveRelayActive): when the live relay is
 //      active the broker also falls back to the beta mirror hosts
-//      (jwize.com + pluginthematrix.io/sigs) for ANY sig, so a fresh viewer
+//      (jwize.com + pluginthematrix.io) for ANY sig, so a fresh viewer
 //      can resolve a peer's website/resource bytes even when no mesh
 //      ['domain'] attribution reached it. sha256 still gates every byte.
 //
@@ -37,7 +37,7 @@ const FLAG_KEY = 'hc:nostrmesh:use-live-relay'
 
 export class UseLiveRelayQueenBee {
   readonly command = 'use-live-relay'
-  readonly description = `Set localStorage['${FLAG_KEY}'] — '1' forces the live relay + beta byte mirrors (jwize.com + pluginthematrix.io/sigs), '0' opts out of both, clear restores the origin default. Takes effect on reload.`
+  readonly description = `Set localStorage['${FLAG_KEY}'] — '1' forces the live relay + beta byte mirrors (jwize.com + pluginthematrix.io), '0' opts out of both, clear restores the origin default. Takes effect on reload.`
   readonly slashHidden = true
 
   invoke(args: string): void {

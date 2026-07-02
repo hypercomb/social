@@ -159,17 +159,20 @@ const MAX_MISS_TTL_MS = 30 * 60_000
 // makes the whole beta resolvable end to end. Resources (website pages, images,
 // game assets) have NO mesh fallback — without a guaranteed host a fresh viewer
 // that never received the publisher's ['domain'] attribution simply 404s and
-// the tile/page renders blank. These two hosts are that guarantee:
-//   • jwize.com               — the bootstrap relay; ALSO an HTTP /<sig> host.
-//   • pluginthematrix.io/sigs — Azure byte mirror, a byte-equal copy of
-//                               jwize.com's content dir, served flat at
-//                               https://pluginthematrix.io/sigs/<sig>.
-// The interior '/sigs' path survives #domainToHost (it strips scheme + trailing
-// slash only), so the broker GETs https://pluginthematrix.io/sigs/<sig>. sha256
-// gates every fetched byte, so a mirror that 404s or serves wrong bytes is
-// harmless — it only ever costs a 404 before the cascade moves on, never
+// the tile/page renders blank. These two hosts are that guarantee — both serve
+// bytes at the bare ROOT of the domain, `https://<host>/<sig>`:
+//   • jwize.com          — the bootstrap relay; ALSO an HTTP /<sig> host.
+//   • pluginthematrix.io — Azure byte mirror, a byte-equal copy of jwize.com's
+//                          content dir. Served at the ROOT: a CDN/Cloudflare
+//                          front rewrites /<sig> → the blob container and adds
+//                          the CORS header (raw Azure blob forces a container
+//                          segment; the static-website endpoint can't set CORS —
+//                          the front resolves both, and edge-caches for scale).
+//                          See mirror-content-to-azure.ps1 + infrastructure.md.
+// sha256 gates every fetched byte, so a mirror that 404s or serves wrong bytes
+// is harmless — it only ever costs a 404 before the cascade moves on, never
 // corruption.
-const BETA_FALLBACK_DOMAINS = ['jwize.com', 'pluginthematrix.io/sigs'] as const
+const BETA_FALLBACK_DOMAINS = ['jwize.com', 'pluginthematrix.io'] as const
 
 export type ContentType = 'layer' | 'resource' | 'dependency'
 
@@ -411,7 +414,7 @@ export class ContentBrokerDrone extends Drone {
   // order:
   //
   //   (a) BETA shared mirrors (BETA_FALLBACK_DOMAINS — jwize.com + the
-  //       pluginthematrix.io/sigs Azure mirror). Injected whenever the shared
+  //       pluginthematrix.io Azure mirror). Injected whenever the shared
   //       LIVE relay is active, so ONE flag (hc:nostrmesh:use-live-relay) steers
   //       both the mesh AND a guaranteed byte source. This is what lets a fresh
   //       viewer resolve a peer's website/resource sig even when no mesh

@@ -34,6 +34,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 - [network-architecture.md](network-architecture.md) — Canonical reference: participants, hosts, installers, and content flow
 - [install-push-only.md](install-push-only.md) — *(design — aspirational)* Push-only install model: Hypercomb load is inert, DCP pushes updates, labels are branches
 - [drone-installer-contract.md](drone-installer-contract.md) — The contract a drone follows so the installer can disable it cleanly
+- [capability-tags.md](capability-tags.md) — Seed vocabulary for the `capability` tag — marking only the bees that genuinely compete for one slot
 
 ## Protocols
 
@@ -46,6 +47,7 @@ The complete reference. Every page is also reachable through `/help` in the app 
 - [sync-paired-channel.md](sync-paired-channel.md) — Paired-channel sync: sharing tree branches across browsers and devices
 - [swarm-resource-streaming.md](swarm-resource-streaming.md) — Share bundles: layer payload plus transitively referenced resources
 - [swarm-scale-and-host-delegation.md](swarm-scale-and-host-delegation.md) — Root announcements, location snapshots, and host delegation
+- [file-transit.md](file-transit.md) — *(design — phased plan)* Moving signature-addressed content across the wire
 
 ## Features
 
@@ -54,6 +56,9 @@ The complete reference. Every page is also reachable through `/help` in the app 
 - [embedded-sites.md](embedded-sites.md) — Website bundles as cell decoration
 - [revision-mode.md](revision-mode.md) — Undo, redo, and time-travel through the history clock
 - [universal-history-plan.md](universal-history-plan.md) — Full history architecture: every op type, cross-hierarchy clock
+- [tag-pools.md](tag-pools.md) — *(design — partially built)* A tag as a deterministic meaning-pool
+- [zoomable-widgets.md](zoomable-widgets.md) — Participant-local per-widget scaling for floating UI (Shift-hover)
+- [arkanoid-theme-authoring.md](arkanoid-theme-authoring.md) — Authoring a pluggable Arkanoid scene theme (palette + two painters)
 
 ## CLI & Commands
 
@@ -65,6 +70,15 @@ The complete reference. Every page is also reachable through `/help` in the app 
 
 - [infrastructure.md](infrastructure.md) — Decentralized design: two relays, no centralized hosting
 - [lets-discover-meadowverse-pipeline.md](lets-discover-meadowverse-pipeline.md) — Authoring-runtime split: hypercomb.io → meadowverse.ca
+- [feedback-channel.md](feedback-channel.md) — Durable feedback transport — the loop routed through jwize.com
+
+## Design & Plans
+
+Forward-looking proposals and migration plans — not yet built. Retained so the intended direction is legible before any code lands.
+
+- [feature-tuning-garage.md](feature-tuning-garage.md) — Installer feature-gating, two-lens review, capability dedup, and signature-addressed tuning recipes
+- [sign-meaning-pool-migration-plan.md](sign-meaning-pool-migration-plan.md) — Removing the underscore folders in favour of `sign(meaning)` pools
+- [three-js-migration-plan.md](three-js-migration-plan.md) — Pixi.js → three.js feasibility and strategy evaluation
 
 ## Security & Governance
 
@@ -102,3 +116,4 @@ Historical or non-canonical documents. Retained for reference, not part of the c
 - [archive/architecture-critique.md](archive/architecture-critique.md) — Martin Fowler-lens critique of the architecture
 - [archive/recommendations.md](archive/recommendations.md) — Ten architectural improvements proposed
 - [archive/selection-as-history.md](archive/selection-as-history.md) — Incomplete sketch, superseded by universal-history-plan
+- [visuals-pool-of-meaning-plan.md](visuals-pool-of-meaning-plan.md) — Superseded/parked visuals build plan — replaced by sign-meaning-pool-migration-plan

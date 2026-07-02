@@ -17,27 +17,36 @@
 // the sheet drone listens. Same self-registration pattern as DashboardGroup.
 
 import { EffectBus } from '@hypercomb/core'
-import { groupRegistry, type GroupMember, type LaunchGroup } from './group-registry'
+import { groupRegistry, type GroupMember } from './group-registry'
+import { LaunchGroupBase } from './launch-group-base'
 
 const MEMBER: GroupMember = { key: 'help', label: 'Help', segments: [] }
 
-class HelpGroup implements LaunchGroup {
-  readonly id = 'help'
-  readonly icon = 'help'
-  readonly label = 'Help'
+class HelpGroup extends LaunchGroupBase {
+  override readonly id = 'help'
+  override readonly icon = 'help'
+  override readonly label = 'Help'
 
   // Help is always available, so the member set never changes — no member-set
   // subscription / notifyChanged() is needed (unlike dashboard / websites,
   // which appear only once content is discovered).
-  members(): GroupMember[] {
+  override members(): GroupMember[] {
     return [MEMBER]
   }
 
   // No hive location → opens an overlay above the current surface (the mixed
   // bag stays put, mirroring games). Toggling the sheet reuses the keymap
   // command so the sheet's own open/close logic and input-gate locking apply.
-  open(_m: GroupMember): void {
+  protected override activate(_m: GroupMember): void {
     EffectBus.emit('keymap:invoke', { cmd: 'ui.shortcutSheet', binding: null, event: null })
+  }
+
+  /** The sheet broadcasts `shortcut-sheet:state { open }` on every open/close
+   *  (whatever closed it — Escape, the keymap toggle, the sheet's own close).
+   *  Sheets opened via `/help` or the `/` key are never armed — only a
+   *  launcher-icon open runs the reset contract. */
+  protected override watchSurface(_m: GroupMember, report: (open: boolean) => void): () => void {
+    return EffectBus.on<{ open?: boolean }>('shortcut-sheet:state', s => report(s?.open === true))
   }
 }
 

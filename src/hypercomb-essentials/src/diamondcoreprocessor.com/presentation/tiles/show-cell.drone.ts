@@ -10,7 +10,7 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../gr
 import { isSignature, readCellProperties, writeCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
-import { tagsForLabel, launchShapeForLabel } from '../../commands/decoration-kind-index.js'
+import { tagsForLabel, launchShapeForLabel, ensureDecorationsIndexed } from '../../commands/decoration-kind-index.js'
 import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
 import type { HistoryService, LayerContent } from '../../history/history.service.js'
@@ -1753,7 +1753,6 @@ export class ShowCellDrone extends Drone {
     ) {
       return
     }
-    this.#forceNextRender = false
 
     // ── coalesce duplicate renders for the same target ───────────────
     // One user nav gesture fires 3–5 events: popstate, navigate,
@@ -1776,8 +1775,16 @@ export class ShowCellDrone extends Drone {
       this.#activeRenderTarget === locationKey ||
       (this.streamActive && locationKey === this.renderedLocationKey)
     ) {
+      // A FORCED invalidation (launcher:reconciled, swarm arrivals) must not
+      // be swallowed by this drop: the in-flight pass gathered its cells
+      // BEFORE the invalidation, so letting it stand paints stale content
+      // with nothing queued behind it. Keep #forceNextRender armed (it is
+      // only consumed below, when a pass actually runs) and retry once the
+      // active pass / stream has settled.
+      if (this.#forceNextRender) setTimeout(() => this.requestRender(), 50)
       return
     }
+    this.#forceNextRender = false
 
     // From here on we own the render for this target. Wrap the rest in
     // try/finally so the flag is reliably cleared even on early return
@@ -2830,7 +2837,12 @@ export class ShowCellDrone extends Drone {
     // Runs even when dir is null — loadCellImages is null-tolerant (dir
     // only feeds tags/link reads) and EXTERNAL (peer) tiles resolve
     // images from streamed sigs + __resources__ without any local dir.
-    await this.loadCellImages(cells, dir)
+    // Launcher-shape hydration rides along so an `agg-` page re-render
+    // paints silhouettes on the first pass (see streamCells).
+    await Promise.all([
+      this.loadCellImages(cells, dir),
+      this.#ensureLaunchShapes(cells),
+    ])
     if (isStale()) {
       this.renderQueued = true
       return
@@ -2883,6 +2895,21 @@ export class ShowCellDrone extends Drone {
     this.#layerCellsCache.set(locationKey, { cells: [...cells], cellNames, localCellSet, branchSet })
     // seed the slot state machine — incremental paths read from here after every full render
     this.#slots.seed({ names: cellNames, localCells: localCellSet, branches: branchSet, mode: this.#layoutMode })
+  }
+
+  /** Pre-paint launcher-shape hydration. On a launch-group aggregator page
+   *  the silhouette is a per-vertex geometry attribute (aShapeMode), so it
+   *  must be indexed BEFORE the paint — a rebuild after the async decoration
+   *  walk visibly shrinks full-size picture hexagons into their silhouettes.
+   *  No-op off `agg-` pages and when the hexagon toggle forces plain hexes;
+   *  the index's per-label memo makes repeat calls synchronous no-ops. */
+  #ensureLaunchShapes = async (cells: readonly Cell[]): Promise<void> => {
+    if (this.#launcherHexagons || cells.length === 0) return
+    const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
+    const onLauncherPage = segs.length === 1 && typeof segs[0] === 'string'
+      && segs[0].startsWith(AGGREGATOR_SEGMENT_PREFIX)
+    if (!onLauncherPage) return
+    await ensureDecorationsIndexed(cells.map(c => c.label), segs).catch(() => { /* best effort */ })
   }
 
   private readonly streamCells = async (
@@ -2957,11 +2984,23 @@ export class ShowCellDrone extends Drone {
     this.renderedCells.clear()
     for (const cell of allCells) this.renderedCells.set(cell.label, cell)
 
-    await this.loadCellImages(allCells, dir)
-    if (superseded()) return
+    // Launcher silhouettes are baked into the geometry (aShapeMode), so on an
+    // `agg-` page the shape index must be warm BEFORE the single paint below —
+    // otherwise every launcher paints as a full-size picture hexagon and then
+    // shrinks into its group silhouette when `launch:indexed` lands. Hydrates
+    // in parallel with the image loads; a per-label memo makes revisits free.
+    // Superseded exits MUST drop streamActive: the token bump may come from a
+    // cache-reset (launcher:reconciled, cursor scrub) with no successor stream
+    // to reclaim the flag — left true, the render dedup would drop every
+    // follow-up pass for this location and the reset could never repaint.
+    await Promise.all([
+      this.loadCellImages(allCells, dir),
+      this.#ensureLaunchShapes(allCells),
+    ])
+    if (superseded()) { this.streamActive = false; return }
 
     await this.applyGeometry(allCells, true)
-    if (superseded()) return
+    if (superseded()) { this.streamActive = false; return }
 
     if (this.layer) this.layer.visible = true
     hcNav?.('reveal:all-at-once', `${allCells.length} tiles`)
@@ -3711,6 +3750,12 @@ export class ShowCellDrone extends Drone {
     // blank renderedLocationKey so the next pass takes the full location-change
     // gather path, and rebuild the slot set from the fresh children.
     this.onEffect('launcher:reconciled', () => {
+      // Supersede any in-flight stream: its cells were gathered from the
+      // PREVIOUS union, and left alone it finishes AFTER this reset, painting
+      // the old group's tiles and re-seeding the caches we just cleared (the
+      // sticky "switched group but old content" bug). Same token bump the
+      // cursor-scrub path uses.
+      this.#streamToken++
       this.#layerCellsCache.clear()
       this.renderedLocationKey = ''
       this.renderedCellsKey = ''
@@ -5612,6 +5657,15 @@ export class ShowCellDrone extends Drone {
     const selectionService = (window as any).ioc?.get?.('@diamondcoreprocessor.com/SelectionService') as
       { isSelected: (label: string) => boolean } | undefined
 
+    // Launcher silhouettes exist ONLY on launch-group aggregator pages. The
+    // shape index is keyed by label alone, and a hive tile can share a label
+    // with a launcher cell (the root tile "susan" vs the websites launcher
+    // "susan") — resolving shapes off `agg-` pages leaked the group theme
+    // onto normal hive tiles. Gate here, the one place aShapeMode is baked.
+    const gateSegs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
+    const onLauncherPage = gateSegs.length === 1 && typeof gateSegs[0] === 'string'
+      && gateSegs[0].startsWith(AGGREGATOR_SEGMENT_PREFIX)
+
     const pos = new Float32Array(cells.length * 8)
     const uv = new Float32Array(cells.length * 8)
     const labelUV = new Float32Array(cells.length * 16)
@@ -5725,7 +5779,7 @@ export class ShowCellDrone extends Drone {
       // Per-tile launcher silhouette. Only launcher tiles carry a launch:target
       // `shape`; everything else resolves to 0 (hexagon). The hexagon toggle
       // forces all launchers back to plain hexagons.
-      const sm = this.#launcherHexagons ? 0 : launchShapeToMode(launchShapeForLabel(c.label))
+      const sm = (!onLauncherPage || this.#launcherHexagons) ? 0 : launchShapeToMode(launchShapeForLabel(c.label))
       shapeAttr.set([sm, sm, sm, sm], sap)
       sap += 4
 

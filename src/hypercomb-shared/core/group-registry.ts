@@ -68,7 +68,15 @@ export class GroupRegistry extends EventTarget {
     try {
       const raw = localStorage.getItem(ENABLED_KEY)
       const ids = raw ? JSON.parse(raw) : null
-      if (Array.isArray(ids)) for (const id of ids) if (typeof id === 'string') this.#enabled.add(id)
+      // Exclusive launcher: at most ONE group is ever lit. Persisted sets from
+      // the independent-toggles era can hold several ids — honoring them boots
+      // into a mixed-union page with every group's tiles and themes blended.
+      // Keep the first id only (and rewrite storage so this never re-fires).
+      if (Array.isArray(ids)) {
+        const first = ids.find((x): x is string => typeof x === 'string')
+        if (first) this.#enabled.add(first)
+        if (ids.length > 1) this.#persist()
+      }
     } catch { /* corrupt — start with nothing enabled */ }
     this.#mix = new MixedGroupBag(this)
   }
@@ -107,16 +115,54 @@ export class GroupRegistry extends EventTarget {
   }
 
   /** MUTUALLY-EXCLUSIVE selection (the launcher icon click): make `id` the ONLY
-   *  enabled group, clearing the rest; if it's already the sole one, turn it off.
-   *  Updates the set and syncs the bag ONCE — so switching groups is a single
-   *  operation (snappier than an off-then-on toggle pair). No-op if nothing
-   *  actually changed. */
+   *  enabled group, clearing the rest; if it's already the sole one AND its bag
+   *  is on screen, turn it off. A lit icon whose bag is NOT showing (the toggle
+   *  survived a reload out of website mode, or any path that left the icon lit
+   *  while the participant is elsewhere) re-ENTERS the bag instead of going
+   *  dark — the tap means "show me this group", and turning off first would
+   *  cost a second click to reactivate. Updates the set and syncs the bag
+   *  ONCE — so switching groups is a single operation (snappier than an
+   *  off-then-on toggle pair). No-op if nothing actually changed. */
   selectExclusive(id: string): void {
     const only = this.#enabled.size === 1 && this.#enabled.has(id)
+    if (only && !this.#mix.isActive()) { void this.#mix.sync(); return }
     const next = only ? [] : [id]
     if (next.length === this.#enabled.size && next.every(x => this.#enabled.has(x))) return
     this.#enabled.clear()
     for (const x of next) this.#enabled.add(x)
+    this.#persist()
+    this.dispatchEvent(new CustomEvent('change'))
+    void this.#mix.sync()
+  }
+
+  /** The STANDARD launcher exit — see LaunchGroupBase, which arms this for
+   *  every group. A member surface opened through the launcher just closed
+   *  back to the hexagon canvas: reset the header icons to their default
+   *  (nothing lit). clear() also syncs the bag, which exits it when the
+   *  participant is still standing in it (games/help overlays, the
+   *  dashboard's return) — landing on the hive, never a stale mixed list.
+   *  Members that moved the lineage into their OWN tree (websites) then land
+   *  on their root cell, so hexagons resume at the site rather than buried in
+   *  a sub-page. Skipped while the bag itself dismisses a surface for a group
+   *  SWITCH — the fresh pick must survive, and the switch's own enter() owns
+   *  the navigation. */
+  surfaceClosed(member: GroupMember): void {
+    if (this.#mix.isSwitching()) return
+    this.clear()
+    if (member.segments.length > 0) {
+      get<{ goRaw?: (segments: readonly string[]) => void }>('@hypercomb.social/Navigation')
+        ?.goRaw?.(member.segments)
+    }
+  }
+
+  /** Clear ALL toggles — the launcher icons return to their default (nothing
+   *  lit). Used when a full exit from a launched surface (closing a website via
+   *  its "Return from the web page" affordance / escape) should reset the header
+   *  icons rather than leave the group that opened the site stuck on. No-op when
+   *  nothing is enabled. */
+  clear(): void {
+    if (this.#enabled.size === 0) return
+    this.#enabled.clear()
     this.#persist()
     this.dispatchEvent(new CustomEvent('change'))
     void this.#mix.sync()

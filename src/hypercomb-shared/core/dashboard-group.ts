@@ -11,7 +11,8 @@
 // (count-gated 1 → open), never a hexagon page.
 
 import { EffectBus } from '@hypercomb/core'
-import { groupRegistry, type GroupMember, type LaunchGroup } from './group-registry'
+import { groupRegistry, type GroupMember } from './group-registry'
+import { LaunchGroupBase } from './launch-group-base'
 
 type DashboardBeeLike = {
   isAvailable(): boolean
@@ -21,29 +22,40 @@ type DashboardBeeLike = {
 
 const MEMBER: GroupMember = { key: 'dashboard', label: 'Dashboard', segments: [] }
 
-class DashboardGroup implements LaunchGroup {
-  readonly id = 'dashboard'
-  readonly icon = 'dashboard'
-  readonly label = 'Dashboard'
+class DashboardGroup extends LaunchGroupBase {
+  override readonly id = 'dashboard'
+  override readonly icon = 'dashboard'
+  override readonly label = 'Dashboard'
 
   constructor() {
+    super()
     // DashboardBee emits this on mint / open / close (and first paint) — late
     // subscribers get the last value replayed, so boot-time availability lands.
     EffectBus.on('dashboard:state', () => groupRegistry.notifyChanged())
   }
 
-  members(): GroupMember[] {
+  override members(): GroupMember[] {
     const bee = get<DashboardBeeLike>('@diamondcoreprocessor.com/DashboardBee')
     return bee?.isAvailable() ? [MEMBER] : []
   }
 
-  // The dashboard now participates in the mix as a single launcher tile: its
-  // click runs toggleBehavior() while standing on the mixed bag, so DashboardBee
-  // captures agg-mix as its return location and closing the dashboard lands back
-  // on the mixed page automatically (no dashboard-side wiring needed).
-  open(_m: GroupMember): void {
+  // The dashboard participates in the mix as a single launcher tile: its click
+  // runs toggleBehavior() while standing on the mixed bag, so DashboardBee
+  // captures agg-mix as its return location and navigates back there on close.
+  protected override activate(_m: GroupMember): void {
     const bee = get<DashboardBeeLike>('@diamondcoreprocessor.com/DashboardBee')
     bee?.toggleBehavior()
+  }
+
+  /** `dashboard:state` carries no payload — query the bee for the live state.
+   *  It fires on open and close; the close navigates back to the bag FIRST,
+   *  so by the time the base's reset runs, the bag is active again and its
+   *  sync exits it onto the hive (the uniform full-exit contract). */
+  protected override watchSurface(_m: GroupMember, report: (open: boolean) => void): () => void {
+    return EffectBus.on('dashboard:state', () => {
+      const bee = get<DashboardBeeLike>('@diamondcoreprocessor.com/DashboardBee')
+      report(bee?.isActive() === true)
+    })
   }
 }
 

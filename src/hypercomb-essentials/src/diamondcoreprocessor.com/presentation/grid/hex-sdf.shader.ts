@@ -194,7 +194,7 @@ export class HexSdfTextureShader {
     }
   `
 
-  private static fragmentSource = `
+  private static fragmentSource = `#version 300 es
     precision highp float;
 
     in vec2 vUV;
@@ -224,18 +224,36 @@ export class HexSdfTextureShader {
     uniform sampler2D u_label;
     uniform sampler2D u_cellImages;
 
+    out vec4 fragColor;
+
     // ── light direction (top-left, 10 o'clock) ──────────────
     const vec2 LIGHT_DIR = normalize(vec2(-0.5, -0.866));
 
     // ── label bake/sample coupling ──────────────────────────
-    // Labels are baked LARGE into the atlas (hex-label.atlas.ts TextStyle
-    // fontSize = 27) so each glyph carries many texels and stays crisp when
+    // Labels are baked at 2× into the atlas (hex-label.atlas.ts TextStyle
+    // fontSize = 18) so each glyph carries more texels and stays crisp when
     // magnified onto big hexes. To keep the ON-SCREEN size unchanged we sample a
     // proportionally smaller window of the cell: normal tiles zoom the quad→cell
     // map in by LABEL_BAND; the games/website paths divide their label window by
     // it. LABEL_BAND MUST equal bakeFontSize / 9 (the 9px bake this geometry was
     // originally tuned for). Keep in lockstep with the atlas fontSize.
-    const float LABEL_BAND = 3.0;
+    const float LABEL_BAND = 2.0;
+
+    // ── label decode: SDF fill ONLY ─────────────────────────────
+    // The atlas stores a signed distance field in .r (0.5 == the glyph edge,
+    // >0.5 inside, 0 far outside; see sdf-glyph.ts). Screen-space derivatives
+    // keep the reconstructed edge ~1px wide at ANY magnification — true
+    // vector-sharp text. aa is clamped: the 1e-4 floor avoids a hard-step on
+    // flat field regions; the 0.3 ceiling stops the LABEL_BAND clamp seam (a
+    // uv discontinuity where fwidth spikes) from leaking a faint ring.
+    // FILL ONLY — hard user rule: no halo, no outline, no shadow, no second
+    // threshold. Nothing may darken or decorate the outside of a glyph;
+    // legibility over images comes from the pill/banner drawn BEHIND text.
+    float labelFill(vec2 uv) {
+      float sd = texture(u_label, uv).r;
+      float aa = clamp(fwidth(sd), 1e-4, 0.3);
+      return smoothstep(0.5 - aa, 0.5 + aa, sd);
+    }
 
     float sdHex(vec2 p, float r) {
       p = abs(p);
@@ -333,7 +351,7 @@ export class HexSdfTextureShader {
         vec2 cMax = vec2( 0.84 * r,  0.42 * r);
         vec2 cuv = clamp((local - cMin) / (cMax - cMin), 0.0, 1.0);
         vec3 col = (vHasImage > 0.5 && u_imageMix > 0.001)
-          ? texture2D(u_cellImages, mix(vImageUV.xy, vImageUV.zw, cuv)).rgb
+          ? texture(u_cellImages, mix(vImageUV.xy, vImageUV.zw, cuv)).rgb
           : mix(vec3(0.97, 0.99, 1.0), vec3(0.76, 0.85, 0.95), clamp(local.y / r * 0.7 + 0.5, 0.0, 1.0));
 
         // name across the bottom of the cloud — a soft dark band so it stays
@@ -342,19 +360,24 @@ export class HexSdfTextureShader {
         // keep the displayed name the same size, just crisp; text lands centre-band.
         float inBar = smoothstep(0.14 * r - aa, 0.14 * r + aa, local.y);
         col = mix(col, vec3(0.05, 0.08, 0.11), inBar * 0.52);
-        vec2 labC = vec2(0.0, 0.28 * r);
-        vec2 labHalf = vec2(0.78 * r / LABEL_BAND);
-        vec2 labUV = (local - (labC - labHalf)) / (2.0 * labHalf);
-        float textA = (labUV.x >= 0.0 && labUV.x <= 1.0 && labUV.y >= 0.0 && labUV.y <= 1.0)
-          ? smoothstep(0.02, 0.5, texture2D(u_label, mix(vLabelUV.xy, vLabelUV.zw, labUV)).a) * u_labelMix
-          : 0.0;
-        col = mix(col, vec3(1.0), textA);
 
-        // bold rounded cartoon outline tracing the puffy silhouette
+        // bold rounded cartoon outline tracing the puffy silhouette — drawn
+        // BEFORE the name so the dark band can never paint over the letters.
+        // (It used to composite after the label; near the cloud's flat bottom
+        // the band crossed the glyph descenders and read as a stroke on the
+        // text. Text must always be the last thing composited.)
         float lineW = aa * 1.9;
         col = mix(col, vec3(0.16, 0.24, 0.36), (1.0 - smoothstep(lineW, lineW + aa * 1.6, abs(d))) * 0.9);
 
-        gl_FragColor = vec4(col * alpha, alpha);
+        vec2 labC = vec2(0.0, 0.28 * r);
+        vec2 labHalf = vec2(0.78 * r / LABEL_BAND);   // LABEL_BAND unchanged → same on-screen size
+        vec2 labUV = (local - (labC - labHalf)) / (2.0 * labHalf);
+        float textA = (labUV.x >= 0.0 && labUV.x <= 1.0 && labUV.y >= 0.0 && labUV.y <= 1.0)
+          ? labelFill(mix(vLabelUV.xy, vLabelUV.zw, labUV)) * u_labelMix
+          : 0.0;
+        col = mix(col, vec3(1.0), textA);
+
+        fragColor = vec4(col * alpha, alpha);
         return;
       }
 
@@ -377,7 +400,7 @@ export class HexSdfTextureShader {
         vec2 invMax = vec2( 0.72 * r,  0.52 * r);
         vec2 iuv = clamp((local - invMin) / (invMax - invMin), 0.0, 1.0);
         vec3 img = (vHasImage > 0.5 && u_imageMix > 0.001)
-          ? texture2D(u_cellImages, mix(vImageUV.xy, vImageUV.zw, iuv)).rgb
+          ? texture(u_cellImages, mix(vImageUV.xy, vImageUV.zw, iuv)).rgb
           : mix(vec3(0.30, 1.0, 0.42), u_accentColor, 0.25);   // green when imageless
 
         // per-square twinkle — gentle brightness wobble keyed on square id + time
@@ -393,10 +416,10 @@ export class HexSdfTextureShader {
         // lands in the region's centre band, where the dark banner backs it.
         // Square region → no aspect distortion.
         vec2 labC = vec2(0.0, 0.30 * r);
-        vec2 labHalf = vec2(0.85 * r / LABEL_BAND);
+        vec2 labHalf = vec2(0.85 * r / LABEL_BAND);   // LABEL_BAND unchanged → same on-screen size
         vec2 labUV = (local - (labC - labHalf)) / (2.0 * labHalf);
         float textA = (labUV.x >= 0.0 && labUV.x <= 1.0 && labUV.y >= 0.0 && labUV.y <= 1.0)
-          ? smoothstep(0.02, 0.5, texture2D(u_label, mix(vLabelUV.xy, vLabelUV.zw, labUV)).a) * u_labelMix
+          ? labelFill(mix(vLabelUV.xy, vLabelUV.zw, labUV)) * u_labelMix
           : 0.0;
         float dPill = sdRoundedBox(local - labC, vec2(0.84 * r, 0.17 * r), 0.08 * r);
         float pillMask = 1.0 - smoothstep(-aa, aa, dPill);
@@ -407,7 +430,7 @@ export class HexSdfTextureShader {
         vec3 col = img;
         col = mix(col, vec3(0.03, 0.04, 0.07), pillMask * 0.92);   // dark banner behind the name
         col = mix(col, vec3(1.0), textA);                          // big white name
-        gl_FragColor = vec4(col * alpha, alpha);
+        fragColor = vec4(col * alpha, alpha);
         return;
       }
 
@@ -455,7 +478,7 @@ export class HexSdfTextureShader {
           hexUV = vec2(hexUV.y, 1.0 - hexUV.x);
         }
         vec2 imgUV = mix(vImageUV.xy, vImageUV.zw, hexUV);
-        vec4 imgBase = texture2D(u_cellImages, imgUV);
+        vec4 imgBase = texture(u_cellImages, imgUV);
 
         // vignette: darken image edges so snapshots blend into border
         float vignette = smoothstep(0.5, 1.0, dist);
@@ -488,8 +511,7 @@ export class HexSdfTextureShader {
       // matches the old 9px bake but with 3× the texels → crisp. Clamp keeps
       // out-of-band UVs on this cell's transparent border, never a neighbour.
       vec2 luv = mix(vLabelUV.xy, vLabelUV.zw, clamp((vUV - 0.5) * LABEL_BAND + 0.5, 0.0, 1.0));
-      float labelAlpha = texture2D(u_label, luv).a;
-      float la = smoothstep(0.02, 0.5, labelAlpha);
+      float la = labelFill(luv);   // vector-sharp glyph fill — plain white, nothing else
 
       if (imgBlend < 0.001) {
         // no image: bright white label
@@ -623,7 +645,7 @@ export class HexSdfTextureShader {
       // premultiplied alpha output for correct blending at hex edges
       color.a *= hexAlpha;
       color.rgb *= color.a;
-      gl_FragColor = color;
+      fragColor = color;
     }
   `
 }

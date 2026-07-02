@@ -171,6 +171,12 @@ export class ViewBee extends Worker {
     for (const v of views) {
       if (!v?.view) continue
 
+      // Views launched from the launch-group aggregator (website) opt out of
+      // the per-node command-line toggle — the launcher owns opening them, so
+      // a second button beside the launcher icons is redundant. Their slash
+      // command still routes through `view:toggle` above.
+      if (v.commandLineToggle === false) continue
+
       // Navigation behaviors (e.g. the dashboard) are not render surfaces —
       // availability and active-state come from a controller bee, and the
       // toggle navigates rather than switching ViewMode. Delegate and skip
