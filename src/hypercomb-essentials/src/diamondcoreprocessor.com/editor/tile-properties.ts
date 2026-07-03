@@ -269,7 +269,7 @@ export const writeCellProperties = async (
 
 type HistoryServiceLike = {
   sign?: (l: { explorerSegments?: () => readonly string[] }) => Promise<string>
-  currentLayerAt?: (sig: string) => Promise<unknown>
+  currentLayerAt?: (sig: string, stats?: { cold?: boolean }) => Promise<unknown>
 }
 
 type StoreLike = {
@@ -299,14 +299,26 @@ const iocGet = <T>(key: string): T | undefined => {
  * (fresh tile with no layer, layer with no properties slot, store not
  * ready). Logs a warning if the resource exists but fails to parse —
  * that's a real corruption signal worth surfacing.
+ *
+ * `stats.cold` (optional out-param): set true when the `{}` is a
+ * TRANSIENT miss (services not registered yet, layer head not warmed,
+ * properties sig present but its bytes not readable yet) rather than an
+ * authoritative "this tile has no properties". Callers that CACHE the
+ * result (NurseBee) or make placement decisions from it (the render's
+ * index resolution) must treat a cold `{}` as unresolved — retry — never
+ * as truth. Caching a cold miss was the root of the tile-scramble bug.
  */
 export const readTilePropertiesAt = async (
   parentSegments: readonly string[],
   cellName: string,
+  stats?: { cold?: boolean },
 ): Promise<Record<string, unknown>> => {
   const history = iocGet<HistoryServiceLike>(HISTORY_KEY)
   const store   = iocGet<StoreLike>(STORE_KEY)
-  if (!history?.sign || !history?.currentLayerAt || !store?.getResource) return {}
+  if (!history?.sign || !history?.currentLayerAt || !store?.getResource) {
+    if (stats) stats.cold = true  // boot: services not registered yet
+    return {}
+  }
 
   // Pass segments raw — `history.sign` is the single canonicalization
   // site (it does trim + empty-filter + join + hash). Pre-normalizing
@@ -315,9 +327,15 @@ export const readTilePropertiesAt = async (
   const cellSig = await history.sign({
     explorerSegments: () => [...parentSegments, cellName],
   })
-  if (!cellSig) return {}
+  if (!cellSig) {
+    if (stats) stats.cold = true  // history can't sign yet — transient
+    return {}
+  }
 
-  const layer = await history.currentLayerAt(cellSig) as
+  // currentLayerAt sets stats.cold itself on its transient-null paths
+  // (history root initializing, head sig present but bytes not pooled);
+  // an authoritative "no layer" leaves cold unset.
+  const layer = await history.currentLayerAt(cellSig, stats) as
     | { properties?: readonly unknown[] }
     | null
   const slot = Array.isArray(layer?.properties) ? layer!.properties : []
@@ -326,12 +344,19 @@ export const readTilePropertiesAt = async (
 
   try {
     const blob = await store.getResource(propSig)
-    if (!blob) return {}
+    if (!blob) {
+      // The layer SAYS properties exist (we hold the sig) but the bytes
+      // aren't readable yet — sync/stream still landing. Unambiguously
+      // transient: retrying can succeed once the resource pool warms.
+      if (stats) stats.cold = true
+      return {}
+    }
     const text = await blob.text()
     const parsed = JSON.parse(text)
     return (parsed && typeof parsed === 'object') ? parsed as Record<string, unknown> : {}
   } catch (err) {
     console.warn('[tile-properties] failed to read/parse properties resource', propSig, err)
+    if (stats) stats.cold = true  // read/parse failure — retry-able, never authoritative
     return {}
   }
 }
@@ -448,7 +473,7 @@ export const writeTilePropertiesAt = async (
   // path-derived key so two such early writes still serialize.
   const lockKey =
     (await cellLocationSig(parentSegments, cellName)) ||
-    `path ${parentSegments.join(' ')} ${cellName}`
+    `path\u0000${parentSegments.join('\u0000')}\u0000${cellName}`
 
   return withTileWriteLock(lockKey, async () => {
     // READ INSIDE THE LOCK. The merge must build on the latest committed

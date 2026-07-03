@@ -104,7 +104,17 @@ export class AutoFitFirstAddDrone extends Drone {
     // zoomToFit reads live bounds from the hex-mesh content layer; if
     // we fire before that layer has the new geometry the bounds union
     // is stale and the fit zooms to the wrong rectangle.
+    //
+    // Location-stamped: the delay is a real navigation window. Without
+    // the stamp, an add-then-navigate inside 80ms fired the fit against
+    // the DESTINATION page's mesh — an automatic viewport jump on a page
+    // the user never asked to fit (a "wrong zoom on navigation" vector).
+    // If the lineage changed by the time the timer lands, drop the fit.
     setTimeout(() => {
+      const liveSegs = (lineage.explorerSegments?.() ?? [])
+        .map((x: unknown) => String(x ?? '').trim())
+        .filter((x: string) => x.length > 0)
+      if (liveSegs.join('/') !== key) return  // navigated away inside the delay
       const zoom = (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(ZOOM_DRONE_KEY) as ZoomLike | undefined
       zoom?.zoomToFit?.(true)
     }, 80)

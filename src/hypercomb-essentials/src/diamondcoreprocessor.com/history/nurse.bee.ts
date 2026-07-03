@@ -118,6 +118,7 @@ export abstract class NurseBee<T = unknown> extends Bee {
     cellName: string,
     cellDir?: FileSystemDirectoryHandle,
     cacheKey?: string,
+    stats?: { cold?: boolean },
   ): Promise<T | undefined> {
     const key = cacheKey ?? await cellLocationSig(parentSegments, cellName)
     const cached = this.#cache.get(key)
@@ -129,8 +130,12 @@ export abstract class NurseBee<T = unknown> extends Bee {
     const startKeyEpoch = this.#keyEpoch.get(key) ?? 0
     const startGlobalEpoch = this.#globalEpoch
 
-    // Primary path: layer slot.
-    const layerProps = await readTilePropertiesAt(parentSegments, cellName)
+    // Primary path: layer slot. `readStats.cold` comes back true when the
+    // read was TRANSIENTLY unresolvable (history/store initializing, head
+    // sig present but bytes not pooled yet) as opposed to an authoritative
+    // "this tile has no such property".
+    const readStats = stats ?? { cold: false }
+    const layerProps = await readTilePropertiesAt(parentSegments, cellName, readStats)
     let value = this.parse(layerProps[this.attribute])
 
     // Fallback: legacy 0000 file. Only consulted when the layer slot
@@ -140,12 +145,24 @@ export abstract class NurseBee<T = unknown> extends Bee {
       value = this.parse(fileProps[this.attribute])
     }
 
-    // Publish only if no invalidation occurred during the read. A
-    // mismatch means a writer committed mid-read (e.g. a move wrote this
-    // tile's new index): drop the result so the next read re-fetches the
-    // fresh head, but still return what we read to this caller — it is
-    // re-rendering and will read again.
-    if ((this.#keyEpoch.get(key) ?? 0) === startKeyEpoch && this.#globalEpoch === startGlobalEpoch) {
+    // Publish only if the read was WARM and no invalidation occurred
+    // during it. Two distinct poisonings are refused here:
+    //   - epoch mismatch: a writer committed mid-read (e.g. a move wrote
+    //     this tile's new index) — the pre-write value must not overwrite
+    //     the invalidation.
+    //   - cold read: the value (usually `undefined`) reflects a layer head
+    //     that hasn't warmed yet, NOT the tile's truth. Caching it made a
+    //     one-pass glitch permanent: a tile with a durable `index` read
+    //     cold once during a navigation, the `undefined` was cached, and
+    //     since pure nav never writes (no cell:0000-changed) nothing ever
+    //     evicted it — the tile stayed score-filled at a wrong slot until
+    //     reload. Cold results are returned to the caller but never
+    //     cached, so the next render re-reads the (by then warm) head.
+    if (
+      !readStats.cold &&
+      (this.#keyEpoch.get(key) ?? 0) === startKeyEpoch &&
+      this.#globalEpoch === startGlobalEpoch
+    ) {
       this.#cache.set(key, { value, layerSig: '' })
     }
     return value

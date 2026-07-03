@@ -1479,9 +1479,21 @@ export class HistoryService {
    * `preloadAllBags` (idempotent, completes once per session) which fills
    * the lineage cache for every existing bag. Returns null when the
    * location truly has no committed marker.
+   *
+   * `stats.cold` (optional out-param) distinguishes the two null cases —
+   * a distinction callers CANNOT make from the return value alone:
+   *   cold=true  → TRANSIENT miss (history root not ready, or a head sig
+   *                exists but its bytes aren't in the local pool yet).
+   *                The caller should retry/re-render; caching this null
+   *                as "no layer" poisons downstream state (the tile-index
+   *                scramble was exactly this: a cold index read cached as
+   *                "no index" → viewport score-fill → wrong slot forever).
+   *   cold unset → AUTHORITATIVE absence: the bag genuinely has no
+   *                committed marker. Safe to cache as empty.
    */
   public readonly currentLayerAt = async (
     locationSig: string,
+    stats?: { cold?: boolean },
   ): Promise<LayerContent | null> => {
     if (!HistoryService.#SIG_RE.test(locationSig)) return null
     const cached = this.#latestSigByLineage.get(locationSig)
@@ -1510,12 +1522,20 @@ export class HistoryService {
     } catch {
       // History root not ready yet (Store still initializing). Do NOT
       // brute-force preloadAllBags — return null and let the caller re-render
-      // once the single-lineage head warm can run.
+      // once the single-lineage head warm can run. COLD: this null says
+      // nothing about whether the bag has a marker.
+      if (stats) stats.cold = true
       return null
     }
     const refreshed = this.#latestSigByLineage.get(locationSig)
+    // Warm succeeded and found no marker — the bag genuinely has none.
+    // AUTHORITATIVE absence: cold stays unset.
     if (!refreshed) return null
-    return this.getLayerBySig(refreshed)
+    const layer = await this.getLayerBySig(refreshed)
+    // A head sig EXISTS but its bytes didn't resolve (pool miss — sync
+    // still landing, cross-session drift). COLD: retrying can succeed.
+    if (!layer && stats) stats.cold = true
+    return layer
   }
 
   /**

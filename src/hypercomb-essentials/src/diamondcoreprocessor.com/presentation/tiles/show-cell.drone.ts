@@ -21,14 +21,18 @@ type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
 type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean }
 
-/** Opaque single-segment location the launch-group aggregator navigates into —
- *  `agg-<id>`. The only live segment today is `agg-mix` (MixedGroupBag in
- *  hypercomb-shared, the shared page that shows the UNION of toggled-on groups);
- *  the per-group `agg-websites` / `agg-games` branches below are retained
- *  defensively but no longer produced. Matched by string, never imported:
- *  MixedGroupBag lives in hypercomb-shared and modules must not depend on shared
- *  (see CLAUDE.md), so the `agg-` naming is mirrored, not used. */
-const AGGREGATOR_SEGMENT_PREFIX = 'agg-'
+/** Launch-group pages live at single-segment ROOT locations named by group id
+ *  (/games, /websites, /help, …) — each is its own leaf-only lineage,
+ *  addressable directly. Resolved LIVE against the shell's GroupLauncher
+ *  registry over IoC at call time (modules must not IMPORT shared — an IoC
+ *  read is the sanctioned bridge). Legacy `agg-` locations still count so old
+ *  history renders. */
+function isLauncherLocation(segs: readonly unknown[]): boolean {
+  if (segs.length !== 1 || typeof segs[0] !== 'string') return false
+  if (segs[0].startsWith('agg-')) return true
+  const reg = (window as any).ioc?.get?.('@hypercomb.social/GroupLauncher') as { get?: (id: string) => unknown } | undefined
+  return !!reg?.get?.(segs[0])
+}
 
 /** Map a launch group's shape id (from its `launch:target` decoration) to the
  *  shader's aShapeMode value: 0 = hexagon · 1 = flower-in-pot (websites) ·
@@ -2678,7 +2682,44 @@ export class ShowCellDrone extends Drone {
     // may be null when no OPFS folder mirror exists for this sub-layer;
     // pass a typed sentinel so the resolver chooses its layer-only
     // strategy instead of guarding on null shape inside the resolver.
-    const cellNames = await this.#resolveCellOrder(this.#layoutMode, dir as FileSystemDirectoryHandle, union, localCellSet, lineage, peerIndices, passSegments)
+    // navPass tells the resolver this is a layer CHANGE, so unindexed
+    // placement must be deterministic (the on-screen camera still belongs
+    // to the outgoing page — scoring against it is the "tiles land where
+    // they'd be best on the page I just left" scramble). Evaluated BEFORE
+    // the await: render bodies are serialized by requestRender, so
+    // renderedLocationKey is stable across this pass.
+    const navPass = locationKey !== this.renderedLocationKey
+    const orderStats = { coldIndexNames: [] as string[] }
+    const cellNames = await this.#resolveCellOrder(this.#layoutMode, dir as FileSystemDirectoryHandle, union, localCellSet, lineage, peerIndices, passSegments, navPass, orderStats)
+
+    // ── INDEX COMPLETENESS GATE ──────────────────────────────────────
+    // The name gate above guarantees every child NAME resolved; this one
+    // guarantees every child's INDEX read was authoritative. A cold index
+    // (layer head not warmed / bytes not pooled yet) means a tile that
+    // OWNS a durable slot would be score-filled into a wrong one — the
+    // "tiles randomly rearranged on navigation" glitch. Hold the paint
+    // (outgoing layer stays up — nothing has been hidden or superseded
+    // yet), retry with backoff, and paint best-effort once the bounded
+    // budget is spent so a permanently-cold tile can't blank the canvas.
+    // The nurse never caches cold reads, so each retry re-reads the head.
+    if (orderStats.coldIndexNames.length > 0) {
+      const idxGateKey = 'idx:' + (gateParentSig || locationKey)
+      if (!this.#resolveGateExhausted.has(idxGateKey)) {
+        const attempts = (this.#incompleteResolveAttempts.get(idxGateKey) ?? 0) + 1
+        this.#incompleteResolveAttempts.set(idxGateKey, attempts)
+        if (attempts <= ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS) {
+          this.#recordRenderAudit('gate', union.size, locationKey)
+          console.info(`[diag:idxres] GATE hold loc=${locationKey} attempt=${attempts}/${ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS} cold-index: ${orderStats.coldIndexNames.join(', ')} — deferring paint`)
+          this.#forceNextRender = true
+          setTimeout(() => this.requestRender(), Math.min(400, 60 * attempts))
+          return
+        }
+        this.#resolveGateExhausted.add(idxGateKey)
+        console.warn(`[diag:idxres] GATE exhausted loc=${locationKey} after ${attempts} attempts cold-index: ${orderStats.coldIndexNames.join(', ')} — painting best-effort`)
+      }
+    } else {
+      this.#incompleteResolveAttempts.delete('idx:' + (gateParentSig || locationKey))
+    }
 
     const previousLocationKey = this.renderedLocationKey
     const layerChanged = locationKey !== previousLocationKey
@@ -2908,9 +2949,7 @@ export class ShowCellDrone extends Drone {
   #ensureLaunchShapes = async (cells: readonly Cell[]): Promise<void> => {
     if (this.#launcherHexagons || cells.length === 0) return
     const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
-    const onLauncherPage = segs.length === 1 && typeof segs[0] === 'string'
-      && segs[0].startsWith(AGGREGATOR_SEGMENT_PREFIX)
-    if (!onLauncherPage) return
+    if (!isLauncherLocation(segs)) return
     await ensureDecorationsIndexed(cells.map(c => c.label), segs).catch(() => { /* best effort */ })
   }
 
@@ -3248,8 +3287,7 @@ export class ShowCellDrone extends Drone {
     // leaving flowers and hexagons still. Drift amplitude is a small fraction of
     // the hex radius so a marching invader never costs the participant a click.
     const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
-    const onLauncherPage = segs.length === 1 && typeof segs[0] === 'string'
-      && segs[0].startsWith(AGGREGATOR_SEGMENT_PREFIX)
+    const onLauncherPage = isLauncherLocation(segs)
     this.#setDrift(onLauncherPage && !this.#launcherHexagons, circumRadiusPx)
 
     if (!this.hexMesh) {
@@ -3919,12 +3957,14 @@ export class ShowCellDrone extends Drone {
       // layer mirrors live state because every user intent commits, so
       // applying head is a no-op modulo redundant emits.
       void this.#applyCursorLayout()
-      // Actually trigger the re-render. Without this, clicking a row
-      // in the history viewer (which calls cursor.seek → emits
-      // history:cursor-changed) clears the caches but doesn't paint
-      // the new state. renderFromSynchronize re-reads the cursor and
-      // produces the historical view at the new position.
-      void this.renderFromSynchronize()
+      // The re-render itself is scheduled by the requestRender() below
+      // (renderedCellsKey was cleared above, so the fast-path skip can't
+      // swallow it). This used to ALSO call renderFromSynchronize()
+      // directly — the only call site that bypassed requestRender's
+      // body serialization. A direct body interleaving with a queued
+      // body mid-await re-entered the layer-change block against a
+      // repointed renderedLocationKey and repainted the OLD page over
+      // the new one. One scheduler, one queue: requestRender only.
 
       // Preserve viewport (scale + pan) across the undo/redo re-render.
       // Snapshot stage / container transforms before requestRender and
@@ -4810,7 +4850,20 @@ export class ShowCellDrone extends Drone {
     localStorage.setItem(this.#layoutModeKey(locationKey), mode)
   }
 
-  async #orderByIndexPinned(dir: FileSystemDirectoryHandle, names: string[], localCellSet: Set<string>, readOnly = false, peerIndices?: Map<string, number>, passSegments?: readonly string[]): Promise<string[]> {
+  // `navPass`: true when this pass is a layer CHANGE (navigation). During a
+  // nav the viewport still belongs to the OUTGOING page — the destination
+  // pan/zoom is applied later in the pass, and ViewportPersistence/
+  // CenterSlotTracker aren't synced forward on nav at all — so any
+  // viewport-scored placement here would land tiles relative to the page
+  // the user just LEFT. On nav passes, unindexed placement is therefore
+  // deterministic (lowest free slot), never camera-relative. Same-page
+  // passes (tile added while viewing) keep the viewport score: there the
+  // camera is live and correct.
+  // `orderStats.coldIndexNames`: out-param — tiles whose index read was
+  // TRANSIENTLY unresolvable this pass (layer head cold, bytes not pooled).
+  // The caller gates the paint on it: placing a cold tile means painting a
+  // tile that HAS a durable slot at a wrong one.
+  async #orderByIndexPinned(dir: FileSystemDirectoryHandle, names: string[], localCellSet: Set<string>, readOnly = false, peerIndices?: Map<string, number>, passSegments?: readonly string[], navPass = false, orderStats?: { coldIndexNames: string[] }): Promise<string[]> {
     const axial = this.resolve<any>('axial')
     const maxSlot = axial?.count ?? 60
     const sparse: string[] = new Array(maxSlot + 1).fill('')
@@ -4825,7 +4878,7 @@ export class ShowCellDrone extends Drone {
     // the layer's properties slot or the 0000 file; warm reads are
     // constant-time. Registered eagerly in side-effects.
     const indexNurse = (window as any).ioc?.get?.('@diamondcoreprocessor.com/IndexNurse') as
-      | { read: (parentSegments: readonly string[], cellName: string, cellDir?: FileSystemDirectoryHandle, cacheKey?: string) => Promise<number | undefined> }
+      | { read: (parentSegments: readonly string[], cellName: string, cellDir?: FileSystemDirectoryHandle, cacheKey?: string, stats?: { cold?: boolean }) => Promise<number | undefined> }
       | undefined
 
     // Cache key is the cell's lineage signature, never its bare folder
@@ -4868,6 +4921,12 @@ export class ShowCellDrone extends Drone {
       else localNames.push(name)
     }
     const idxByName = new Map<string, number | undefined>()
+    // Per-name cold flags: a read is COLD when it was transiently
+    // unresolvable (head not warmed, bytes not pooled, services booting) —
+    // as opposed to an authoritative "tile has no index". Cold + undefined
+    // means we do NOT know this tile's slot; the caller's index gate holds
+    // the paint rather than score-filling a tile that owns a real slot.
+    const coldByName = new Set<string>()
     await Promise.all(localNames.map(async (name) => {
       try {
         // Layer-slot read with 0000 fallback. cellDir is opportunistic
@@ -4876,16 +4935,22 @@ export class ShowCellDrone extends Drone {
         let cellDir: FileSystemDirectoryHandle | undefined
         try { cellDir = await dir.getDirectoryHandle(name, { create: false }) } catch { /* layer-only tile */ }
         const cacheKey = await cellLocationSig(parentSegments, name)
+        const readStats = { cold: false }
         const idx = indexNurse
-          ? await indexNurse.read(parentSegments, name, cellDir, cacheKey)
-          : await readTilePropertiesAt(parentSegments, name).then(p =>
+          ? await indexNurse.read(parentSegments, name, cellDir, cacheKey, readStats)
+          : await readTilePropertiesAt(parentSegments, name, readStats).then(p =>
               typeof p['index'] === 'number' ? (p['index'] as number) : undefined,
             )
         idxByName.set(name, typeof idx === 'number' ? idx : undefined)
+        if (readStats.cold && typeof idx !== 'number') coldByName.add(name)
       } catch {
         idxByName.set(name, undefined)
+        // A throw is never an authoritative "no index" — treat as cold so
+        // the gate retries instead of mis-placing the tile.
+        coldByName.add(name)
       }
     }))
+    if (orderStats) orderStats.coldIndexNames = [...coldByName].sort()
     for (const name of localNames) {
       const idx = idxByName.get(name)
       if (typeof idx === 'number' && idx >= 0 && idx <= maxSlot) {
@@ -4960,6 +5025,20 @@ export class ShowCellDrone extends Drone {
       let placed: number
       if (typeof cachedSlot === 'number' && cachedSlot >= 0 && cachedSlot <= maxSlot && sparse[cachedSlot] === '') {
         placed = cachedSlot
+      } else if (navPass) {
+        // Navigation pass: the camera on screen (and the persisted
+        // lastZoom/lastPan the CenterSlotTracker scores derive from) still
+        // belongs to the OUTGOING page — the destination viewport is applied
+        // AFTER ordering. Scoring against it places tiles relative to the
+        // page the user just left. Take the lowest free slot instead:
+        // deterministic, camera-independent, stable across re-renders (the
+        // session cache above pins it for the rest of the tab session).
+        placed = -1
+        for (let i = 0; i <= maxSlot; i++) {
+          const v = sparse[i]
+          if (v === '' || v == null) { placed = i; break }
+        }
+        if (placed < 0) continue  // grid genuinely full
       } else {
         placed = this.#bestFreeSlotByScore(sparse, maxSlot)
         if (placed < 0) continue  // grid genuinely full
@@ -5165,6 +5244,8 @@ export class ShowCellDrone extends Drone {
     _lineage: any,
     peerIndices?: Map<string, number>,
     passSegments?: readonly string[],
+    navPass = false,
+    orderStats?: { coldIndexNames: string[] },
   ): Promise<string[]> {
     // When cursor is rewound, use cursor-aware ordering so deletions
     // that happened later don't leave stale slot indices in OPFS
@@ -5195,12 +5276,12 @@ export class ShowCellDrone extends Drone {
         // don't shift across undo — only membership (which slots are
         // occupied) changes between history points. readOnly: rewound
         // viewing must not mutate disk indices.
-        cellNames = await this.#orderByIndexPinned(dir, filtered, localCellSet, true, peerIndices, passSegments)
+        cellNames = await this.#orderByIndexPinned(dir, filtered, localCellSet, true, peerIndices, passSegments, navPass, orderStats)
       } else {
-        cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet, false, peerIndices, passSegments)
+        cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet, false, peerIndices, passSegments, navPass, orderStats)
       }
     } else {
-      cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet, false, peerIndices, passSegments)
+      cellNames = await this.#orderByIndexPinned(dir, Array.from(union), localCellSet, false, peerIndices, passSegments, navPass, orderStats)
     }
 
     if (this.filterKeyword) {
@@ -5665,8 +5746,7 @@ export class ShowCellDrone extends Drone {
     // "susan") — resolving shapes off `agg-` pages leaked the group theme
     // onto normal hive tiles. Gate here, the one place aShapeMode is baked.
     const gateSegs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
-    const onLauncherPage = gateSegs.length === 1 && typeof gateSegs[0] === 'string'
-      && gateSegs[0].startsWith(AGGREGATOR_SEGMENT_PREFIX)
+    const onLauncherPage = isLauncherLocation(gateSegs)
 
     const pos = new Float32Array(cells.length * 8)
     const uv = new Float32Array(cells.length * 8)
