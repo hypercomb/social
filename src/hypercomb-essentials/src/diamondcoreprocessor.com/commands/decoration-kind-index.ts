@@ -135,10 +135,22 @@ export const LAUNCH_DECORATION_KIND = 'launch:target'
 /** Map<cellLabel, shapeId> — the owning group's silhouette for a launcher tile. */
 const launchShapeByLabel = new Map<string, string>()
 
+/** Map<cellLabel, memberKey> — the member's STABLE id from the `launch:target`
+ *  payload (help → the keymap cmd, games → gameId). Lets hover features
+ *  resolve a launcher tile back to the thing it launches without matching on
+ *  display labels. */
+const launchKeyByLabel = new Map<string, string>()
+
 /** The launcher silhouette id for a cell ('' if none / not a launcher tile).
  *  Synchronous and O(1) — show-cell reads it per visible cell at geometry build. */
 export function launchShapeForLabel(label: string): string {
   return launchShapeByLabel.get(label) ?? ''
+}
+
+/** The launcher member key for a cell ('' if none). Synchronous and O(1) —
+ *  the action-card drone resolves a hovered keycap to its keymap cmd here. */
+export function launchKeyForLabel(label: string): string {
+  return launchKeyByLabel.get(label) ?? ''
 }
 
 // ── Overlap metric (the one popularity signal) ────────────────────────
@@ -212,6 +224,15 @@ function shapeOf(record: DecorationShape): string | null {
   return typeof shape === 'string' && shape.length > 0 ? shape : null
 }
 
+/** Pull the launcher member key out of a `launch:target` payload's `{ key }`. */
+function keyOf(record: DecorationShape): string | null {
+  const payload = record.payload
+  const key = payload && typeof payload === 'object'
+    ? (payload as { key?: unknown }).key
+    : undefined
+  return typeof key === 'string' && key.length > 0 ? key : null
+}
+
 function addTag(label: string, name: string, sig: string): void {
   let set = tagsByLabel.get(label)
   if (!set) { set = new Set<string>(); tagsByLabel.set(label, set) }
@@ -244,6 +265,8 @@ function indexRecord(label: string, sig: string, record: DecorationShape): void 
   if (kind === LAUNCH_DECORATION_KIND) {
     const shape = shapeOf(record)
     if (shape) launchShapeByLabel.set(label, shape)
+    const key = keyOf(record)
+    if (key) launchKeyByLabel.set(label, key)
   }
 }
 
@@ -308,7 +331,10 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
       removeKind(label, kind)
       kindBySig.delete(sig)
     }
-    if (kind === LAUNCH_DECORATION_KIND) launchShapeByLabel.delete(label)
+    if (kind === LAUNCH_DECORATION_KIND) {
+      launchShapeByLabel.delete(label)
+      launchKeyByLabel.delete(label)
+    }
     // A tag's resource is content-addressed and shared across cells, so subtract
     // it from the cell named in THIS event (`label`), using the sig's constant
     // tag name. Never delete `nameBySig[sig]` — other cells still share it.

@@ -46,6 +46,8 @@ export class TutorQueenBee extends QueenBee {
   override readonly aliases = ['study']
   override description = 'Study games — turn this hive into spaced-repetition games'
   override descriptionKey = 'slash.tutor'
+  override options = ['on', 'off', 'here', 'build', 'list']
+  override examples = [{ input: '/tutor here', result: 'Opens study games for the current cell' }]
 
   override slashComplete(args: string): readonly string[] {
     const q = args.trim().toLowerCase()

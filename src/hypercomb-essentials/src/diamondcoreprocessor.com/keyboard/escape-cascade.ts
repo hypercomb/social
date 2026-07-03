@@ -32,6 +32,14 @@ EffectBus.on<{ active: boolean }>('contact:pinned', ({ active }) => {
   contactPinned = active
 })
 
+// Action study cards (help tiles) announce the same way. Escape releases the
+// pin before falling through to clearing the selection.
+let actionPinned = false
+
+EffectBus.on<{ active: boolean }>('action:pinned', ({ active }) => {
+  actionPinned = active
+})
+
 // ── cascade handler ───────────────────────────────────────────────────
 
 EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
@@ -67,6 +75,12 @@ EffectBus.on<{ cmd: string }>('keymap:invoke', ({ cmd }) => {
   // must dismiss before Escape falls through to clearing the selection.
   if (contactPinned) {
     EffectBus.emit('contact:hover-unpin', undefined)
+    return
+  }
+
+  // Priority 2d: same release for a pinned action study card.
+  if (actionPinned) {
+    EffectBus.emit('action:hover-unpin', undefined)
     return
   }
 

@@ -29,6 +29,11 @@ export class SubstrateQueenBee extends QueenBee {
   override readonly aliases = []
   override description = 'Manage substrate background image sources'
   override descriptionKey = 'slash.substrate'
+  override options = ['sets', 'set <name>', 'here', 'link', 'on', 'off', 'reset', 'list']
+  override examples = [
+    { input: '/substrate', result: 'Opens the substrate organizer' },
+    { input: '/substrate set steel', result: 'Switches backgrounds to the Steel set' },
+  ]
 
   override slashComplete(args: string): readonly string[] {
     const q = args.toLowerCase().trim()

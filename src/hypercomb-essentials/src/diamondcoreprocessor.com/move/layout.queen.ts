@@ -32,6 +32,11 @@ export class LayoutQueenBee extends QueenBee {
   override readonly aliases = []
   override description = 'Save, apply, list, or remove layout templates'
   override descriptionKey = 'slash.layout'
+  override options = ['save <name>', 'apply <name>', '<name>', 'list', 'remove <name>']
+  override examples = [
+    { input: '/layout my-grid', result: 'Applies the saved layout "my-grid"' },
+    { input: '/layout list', result: 'Lists available layouts' },
+  ]
 
   override slashComplete(args: string): readonly string[] {
     const subcommands = ['save', 'apply', 'list', 'remove']

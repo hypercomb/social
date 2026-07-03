@@ -24,6 +24,11 @@ export class FilesQueenBee extends QueenBee {
   override readonly aliases = ['resources']
   override description = 'Browse files attached to the selected tiles, or every tile in view'
   override descriptionKey = 'slash.files'
+  override options = ['all']
+  override examples = [
+    { input: '/files', result: 'Lists files on the selected tiles, else all in view' },
+    { input: '/files all', result: 'Lists every tile in view with files' },
+  ]
 
   override slashComplete(args: string): readonly string[] {
     const q = args.toLowerCase().trim()

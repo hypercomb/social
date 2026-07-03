@@ -25,6 +25,9 @@ export class SweepQueenBee extends QueenBee {
   readonly command = 'sweep'
   override readonly aliases = []
   override description = 'Move non-underscored OPFS root entries into __temporary__/'
+  override examples = [
+    { input: '/sweep', result: 'Moves stray OPFS root entries into __temporary__/' },
+  ]
   // Destructive (soft) — hide from autocomplete so the user types it
   // deliberately. Same posture as /flatten and /collapse-history.
   override slashHidden = true

@@ -18,6 +18,8 @@ export class BubbleQueenBee extends QueenBee {
   override readonly aliases = ['bobble']
   override description = 'Bubble Bobble — blow bubbles, trap foes, clear the screen'
   override descriptionKey = 'slash.bubble'
+  override options = ['on', 'off', 'design']
+  override examples = [{ input: '/bubble on', result: 'Starts Bubble Bobble' }]
 
   override slashComplete(args: string): readonly string[] {
     const q = args.trim().toLowerCase()

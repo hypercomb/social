@@ -22,6 +22,7 @@ export class DownloadQueenBee extends QueenBee {
   readonly command = 'download'
   override readonly aliases = ['export']
   override description = 'Download an OPFS zip snapshot of the full client state'
+  override examples = [{ input: '/download', result: 'Browser saves a .zip snapshot of all OPFS state' }]
 
   protected async execute(_args: string): Promise<void> {
     const opfsRoot = await navigator.storage?.getDirectory?.()

@@ -22,6 +22,9 @@ export class ConsolidateHistoryQueenBee extends QueenBee {
   override readonly aliases = ['retire-history-folder', 'migrate-history']
 
   override description = 'Relocate leftover __history__ bags into the hive root and remove the legacy folder'
+  override examples = [
+    { input: '/consolidate-history', result: 'Relocates legacy __history__ bags to the hive root' },
+  ]
   // Maintenance utility — keep it out of autocomplete so a stray tab-complete
   // can't trigger it; still invokable when typed in full.
   override slashHidden = true

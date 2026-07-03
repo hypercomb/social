@@ -1,29 +1,48 @@
 @if (visible()) {
   <div class="presence-wrapper">
-    <button
-      class="presence-banner"
-      type="button"
-      [class.alone]="alone()"
-      [class.has-peers]="!alone()"
-      [class.expanded]="expanded()"
-      [disabled]="alone()"
-      (click)="onBannerClick()"
-      [attr.aria-expanded]="expanded()"
-      [attr.aria-label]="(alone() ? 'presence.alone' : 'presence.expand') | t">
-      @if (alone()) {
-        <span class="presence-text presence-alone">{{ 'presence.alone' | t }}</span>
-      } @else {
-        <span class="presence-text presence-with-others">
-          <span class="presence-dot" aria-hidden="true"></span>
-          @if (peerCount() === 1) {
-            {{ 'presence.one-here' | t: { who: joinedLabels() } }}
-          } @else {
-            {{ 'presence.many-here' | t: { count: peerCount(), who: joinedLabels() } }}
-          }
-          <span class="presence-caret" aria-hidden="true">{{ expanded() ? '▴' : '▾' }}</span>
-        </span>
+
+    <!-- Initials badge strip: you first, then each peer. -->
+    <div class="badge-strip" role="group" [attr.aria-label]="'presence.panel-label' | t">
+      @for (b of badges(); track b.key) {
+        @if (b.isSelf && editingName()) {
+          <input
+            #nameInput
+            class="name-input"
+            type="text"
+            maxlength="64"
+            autocomplete="off"
+            spellcheck="false"
+            [value]="draftName()"
+            [placeholder]="'presence.name-placeholder' | t"
+            [attr.aria-label]="'presence.set-name' | t"
+            (input)="onNameInput($event)"
+            (keydown)="onNameKeydown($event)"
+            (blur)="commitName()"
+            autofocus />
+        } @else {
+          <button
+            class="badge"
+            type="button"
+            [class.self]="b.isSelf"
+            [class.add-name]="b.unnamed"
+            [style.color]="b.color"
+            [style.text-shadow]="b.glow"
+            [style.border-color]="b.isSelf ? b.color : null"
+            (click)="b.isSelf ? onSelfBadgeClick() : onPeerBadgeClick()"
+            [attr.aria-label]="(b.isSelf ? 'presence.set-name' : 'presence.expand') | t"
+            [title]="(b.isSelf ? 'presence.set-name' : 'presence.expand') | t">
+            {{ b.initials }}
+          </button>
+        }
       }
-    </button>
+      @if (!alone()) {
+        <span class="strip-caret" aria-hidden="true">{{ expanded() ? '▴' : '▾' }}</span>
+      }
+    </div>
+
+    @if (alone()) {
+      <span class="presence-caption">{{ 'presence.alone' | t }}</span>
+    }
 
     @if (expanded() && !alone()) {
       <div class="participant-panel" role="dialog" [attr.aria-label]="'presence.panel-label' | t">

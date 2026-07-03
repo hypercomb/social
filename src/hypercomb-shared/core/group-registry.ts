@@ -4,13 +4,13 @@
 // single icon in the top chrome, never a per-item glyph. Members are discovered
 // dynamically; a group with zero members is not rendered.
 //
-// Each icon is an INDEPENDENT ON/OFF TOGGLE. Toggling groups on MIXES their
-// members into ONE shared aggregator hexagon page (MixedGroupBag) — the union
-// of every enabled group. Toggling the last one off leaves it. The enabled set
-// is the launcher's only selection state and lives here (this registry is the
-// single EventTarget the launcher component already subscribes to); it persists
-// to localStorage and lights the icons at first paint, but the bag is NOT
-// auto-entered on boot (never-nav-at-init / stillness).
+// ONE-STATE (2026-07-03): each icon is a PORTAL, not a toggle. Clicking it
+// brings up that group's layer (the shared aggregator page); clicking another
+// icon closes the previous layer by the mere fact of navigating; clicking the
+// same icon again is an idempotent no-op. There is no enabled set, nothing
+// persisted, no close-watch choreography and no go-back reset — being on the
+// page IS the state, and any icon highlight is DERIVED from where the
+// participant is standing (currentId()), never stored.
 //
 // Shell-level plumbing: providers resolve HistoryService/Store/Navigation
 // through window.ioc at call time and NEVER import essentials. Registered at
@@ -47,37 +47,18 @@ export interface LaunchGroup {
   open(m: GroupMember): void
 }
 
-/** localStorage key for the enabled (toggled-on) group ids. */
-const ENABLED_KEY = 'hc:launch-groups:enabled'
-
 export class GroupRegistry extends EventTarget {
   #groups = new Map<string, LaunchGroup>()
-  /** Toggle state — raw enabled ids (a group may be enabled before it (re)gains
-   *  members, so we store the id, not a resolved group). */
-  #enabled = new Set<string>()
-  /** The single shared mixed aggregator. Built EAGERLY (in the constructor),
-   *  not lazily on first toggle: its `group:open` click listener + exit gestures
+  /** The single shared aggregator. Built EAGERLY (in the constructor), not
+   *  lazily on first click: its `group:open` click listener + exit gestures
    *  must be live even when the app reloads straight into `agg-mix` (a refresh
-   *  while inside the mix), otherwise the launcher tiles render but every click
-   *  is a dead no-op. Construction only wires listeners (no nav, no IoC reads),
+   *  while inside it), otherwise the launcher tiles render but every click is
+   *  a dead no-op. Construction only wires listeners (no nav, no IoC reads),
    *  so it's safe at module load. */
   #mix: MixedGroupBag
 
   constructor() {
     super()
-    try {
-      const raw = localStorage.getItem(ENABLED_KEY)
-      const ids = raw ? JSON.parse(raw) : null
-      // Exclusive launcher: at most ONE group is ever lit. Persisted sets from
-      // the independent-toggles era can hold several ids — honoring them boots
-      // into a mixed-union page with every group's tiles and themes blended.
-      // Keep the first id only (and rewrite storage so this never re-fires).
-      if (Array.isArray(ids)) {
-        const first = ids.find((x): x is string => typeof x === 'string')
-        if (first) this.#enabled.add(first)
-        if (ids.length > 1) this.#persist()
-      }
-    } catch { /* corrupt — start with nothing enabled */ }
     this.#mix = new MixedGroupBag(this)
   }
 
@@ -89,84 +70,22 @@ export class GroupRegistry extends EventTarget {
   get(id: string): LaunchGroup | undefined { return this.#groups.get(id) }
   all(): LaunchGroup[] { return [...this.#groups.values()] }
 
-  /** Raw toggle membership — drives the icon's on-glow. */
-  isEnabled(id: string): boolean { return this.#enabled.has(id) }
+  /** The group whose layer the participant is standing in, or null. DERIVED
+   *  from the current location — never stored. Drives the icon highlight. */
+  currentId(): string | null { return this.#mix.currentGroupId() }
 
-  /** Enabled groups that currently resolve to a registered, NON-EMPTY group —
-   *  what actually feeds the mix. Pruned on every read so a stale or not-yet-
-   *  loaded id never pins the page open, blocks the all-off exit, or lights a
-   *  glow with nothing behind it. */
-  enabledIds(): string[] {
-    return this.all()
-      .filter(g => this.#enabled.has(g.id) && g.members().length > 0)
-      .map(g => g.id)
+  /** The launcher icon click — the ONE state. Show this group's layer;
+   *  whatever was up before closes by plain navigation. Idempotent when the
+   *  participant is already standing in this group's layer. */
+  show(id: string): void {
+    if (!this.#groups.has(id)) return
+    void this.#mix.show(id).then(() => this.dispatchEvent(new CustomEvent('change')))
   }
 
-  /** Flip one group's toggle (the launcher icon click). */
-  toggle(id: string): void { this.setEnabled(id, !this.#enabled.has(id)) }
-
-  setEnabled(id: string, on: boolean): void {
-    if (on === this.#enabled.has(id)) return
-    if (on) this.#enabled.add(id)
-    else this.#enabled.delete(id)
-    this.#persist()
-    this.dispatchEvent(new CustomEvent('change'))
-    void this.#mix.sync()
-  }
-
-  /** MUTUALLY-EXCLUSIVE selection (the launcher icon click): make `id` the ONLY
-   *  enabled group, clearing the rest; if it's already the sole one AND its bag
-   *  is on screen, turn it off. A lit icon whose bag is NOT showing (the toggle
-   *  survived a reload out of website mode, or any path that left the icon lit
-   *  while the participant is elsewhere) re-ENTERS the bag instead of going
-   *  dark — the tap means "show me this group", and turning off first would
-   *  cost a second click to reactivate. Updates the set and syncs the bag
-   *  ONCE — so switching groups is a single operation (snappier than an
-   *  off-then-on toggle pair). No-op if nothing actually changed. */
-  selectExclusive(id: string): void {
-    const only = this.#enabled.size === 1 && this.#enabled.has(id)
-    if (only && !this.#mix.isActive()) { void this.#mix.sync(); return }
-    const next = only ? [] : [id]
-    if (next.length === this.#enabled.size && next.every(x => this.#enabled.has(x))) return
-    this.#enabled.clear()
-    for (const x of next) this.#enabled.add(x)
-    this.#persist()
-    this.dispatchEvent(new CustomEvent('change'))
-    void this.#mix.sync()
-  }
-
-  /** The STANDARD launcher exit — see LaunchGroupBase, which arms this for
-   *  every group. A member surface opened through the launcher just closed
-   *  back to the hexagon canvas: reset the header icons to their default
-   *  (nothing lit). clear() also syncs the bag, which exits it when the
-   *  participant is still standing in it (games/help overlays, the
-   *  dashboard's return) — landing on the hive, never a stale mixed list.
-   *  Members that moved the lineage into their OWN tree (websites) then land
-   *  on their root cell, so hexagons resume at the site rather than buried in
-   *  a sub-page. Skipped while the bag itself dismisses a surface for a group
-   *  SWITCH — the fresh pick must survive, and the switch's own enter() owns
-   *  the navigation. */
-  surfaceClosed(member: GroupMember): void {
-    if (this.#mix.isSwitching()) return
-    this.clear()
-    if (member.segments.length > 0) {
-      get<{ goRaw?: (segments: readonly string[]) => void }>('@hypercomb.social/Navigation')
-        ?.goRaw?.(member.segments)
-    }
-  }
-
-  /** Clear ALL toggles — the launcher icons return to their default (nothing
-   *  lit). Used when a full exit from a launched surface (closing a website via
-   *  its "Return from the web page" affordance / escape) should reset the header
-   *  icons rather than leave the group that opened the site stuck on. No-op when
-   *  nothing is enabled. */
-  clear(): void {
-    if (this.#enabled.size === 0) return
-    this.#enabled.clear()
-    this.#persist()
-    this.dispatchEvent(new CustomEvent('change'))
-    void this.#mix.sync()
-  }
+  /** Leave the aggregator page — ONLY for an explicit close affordance (the
+   *  websites directory X). There are no global leave gestures: the page
+   *  stays until the participant navigates, like any other page. */
+  exitBag(): void { this.#mix.exit() }
 
   /** A provider calls this when its member set may have changed. Re-renders the
    *  launcher and, if the participant is inside the mix, updates it in place
@@ -176,7 +95,7 @@ export class GroupRegistry extends EventTarget {
     void this.#mix.refreshIfActive()
     // Discovery settled — warm the aggregator's layer caches in the background
     // (non-navigating, read-only) so the first click into a group is fast
-    // instead of paying a cold reconcile. No-op when nothing is toggled on.
+    // instead of paying a cold reconcile. No-op when nothing is shown.
     void this.#mix.prewarm()
   }
 
@@ -184,10 +103,6 @@ export class GroupRegistry extends EventTarget {
    *  fast (read-only, non-navigating). The launcher icon calls this on hover. */
   prewarmGroup(id: string): void {
     void this.#mix.prewarmFor(id)
-  }
-
-  #persist(): void {
-    try { localStorage.setItem(ENABLED_KEY, JSON.stringify([...this.#enabled])) } catch { /* ignore */ }
   }
 }
 

@@ -21,7 +21,7 @@
 
 import { createServer } from 'node:http'
 import { randomBytes, createHash } from 'node:crypto'
-import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
@@ -590,8 +590,7 @@ function getContentType(path) {
 //
 // Probe order is the membership oracle; first hit wins. A sig lives in
 // exactly one pool (its bytes are one thing), so order only decides which
-// stat lands first. __roots__ attestations (grouped by domain) resolve
-// too when present. Returns { path, contentType } or null (→ 404).
+// stat lands first. Returns { path, contentType } or null (→ 404).
 function resolveFlatSig(sig) {
   const root = resolve(cfg.contentDir)
   const probes = [
@@ -609,16 +608,6 @@ function resolveFlatSig(sig) {
   for (const [p, ct] of probes) {
     try { if (statSync(p).isFile()) return { path: p, contentType: ct } } catch { /* not in this pool */ }
   }
-  // __roots__/<domain>/<sig> — attestations, grouped by attester domain.
-  try {
-    const rootsDir = join(root, '__roots__')
-    if (statSync(rootsDir).isDirectory()) {
-      for (const domain of readdirSync(rootsDir)) {
-        const p = join(rootsDir, domain, sig)
-        try { if (statSync(p).isFile()) return { path: p, contentType: 'application/json; charset=utf-8' } } catch { /* next domain */ }
-      }
-    }
-  } catch { /* no __roots__ pool */ }
   return null
 }
 

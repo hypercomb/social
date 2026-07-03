@@ -25,6 +25,11 @@ export class I18nOverrideQueenBee extends QueenBee {
   override readonly aliases = []
   override description = 'Override any UI translation (savvy users)'
   override descriptionKey = 'slash.i18n-override'
+  override options = ['<locale> <key> <value>', '<locale> <key>', 'reset', 'reset <locale>']
+  override examples = [
+    { input: '/i18n-override ja editor.save 保存する', result: 'Sets the ja override for editor.save' },
+    { input: '/i18n-override reset ja', result: 'Clears all ja overrides (reload to apply)' },
+  ]
 
   override slashComplete(args: string): readonly string[] {
     const parts = args.split(/\s+/)

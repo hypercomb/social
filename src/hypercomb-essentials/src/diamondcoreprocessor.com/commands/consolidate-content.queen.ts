@@ -27,6 +27,7 @@ export class ConsolidateContentQueenBee extends QueenBee {
   readonly command = 'consolidate-content'
   override readonly aliases = ['retire-content-pools', 'migrate-content']
   override description = 'Relocate leftover __resources__/__layers__ content into the hive root and retire the legacy pools'
+  override examples = [{ input: '/consolidate-content', result: 'Copies legacy pool content to the hive root' }]
   // Maintenance utility — keep it out of autocomplete so a stray tab-complete
   // can't trigger it; still invokable when typed in full.
   override slashHidden = true

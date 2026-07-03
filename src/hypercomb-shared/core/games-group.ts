@@ -7,9 +7,9 @@
 // pool of games IS the IoC registry filtered by genotype, and
 // `window.ioc.onRegister` is the live feed, so any game module (including a
 // community one loaded at runtime) auto-aggregates the moment it registers, with
-// no edit here. Like every launch group the icon is an independent on/off
-// toggle: 0 members → hidden; otherwise toggling it on adds the games to the
-// shared mixed aggregator page (MixedGroupBag) — click a game tile to launch.
+// no edit here. Like every launch group the icon is a one-state portal:
+// 0 members → hidden; otherwise clicking it shows the games on the shared
+// aggregator page (MixedGroupBag) — click a game tile to launch.
 //
 // Shell-level: never imports essentials; resolves games purely by enumerating
 // window.ioc and routes a launch back as `<gameId>:toggle` (the uniform toggle
@@ -76,15 +76,6 @@ class GamesGroup extends LaunchGroupBase {
    *  it); games carry no hive location, so there is nothing to navigate here. */
   protected override activate(m: GroupMember): void {
     EffectBus.emit(`${m.key}:toggle`, {})
-  }
-
-  /** A game overlay's on-screen state rides its own `<gameId>:state` emit
-   *  ({ available, active }) — fired on open and close. EffectBus replays the
-   *  last value on subscribe; a stale close is ignored by the base's
-   *  seen-open-first machine, a live "already open" (re-tapping the lit tile
-   *  toggles it closed) arms correctly. */
-  protected override watchSurface(m: GroupMember, report: (open: boolean) => void): () => void {
-    return EffectBus.on<{ active?: boolean }>(`${m.key}:state`, p => report(p?.active === true))
   }
 }
 

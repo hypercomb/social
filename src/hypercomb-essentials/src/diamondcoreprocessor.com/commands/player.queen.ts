@@ -16,6 +16,9 @@ export class PlayerQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'ebook'
   override description = 'Open the audiobook (inspiredbyhumans.org) in a new tab'
+  override examples = [
+    { input: '/ebook', result: 'Opens inspiredbyhumans.org in a new tab' },
+  ]
 
   protected execute(_args: string): void {
     try {

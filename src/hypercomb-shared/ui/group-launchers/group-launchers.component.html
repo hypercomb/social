@@ -1,4 +1,4 @@
-@if (groups().length > 0) {
+@if (!swarmMode() && groups().length > 0) {
   <div class="group-launchers" [class.icon-editing]="iconEditOn()">
     @for (g of groups(); track g.id) {
       <button class="group-btn" type="button"

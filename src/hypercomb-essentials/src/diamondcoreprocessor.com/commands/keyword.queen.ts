@@ -28,6 +28,11 @@ export class KeywordQueenBee extends QueenBee {
   readonly command = 'keyword'
   override readonly aliases = []
   override description = 'Add or remove keywords (tags) on selected tiles'
+  override options = ['<tag>', '<tag>(#<color>)', '~<tag>', '[<tag>, ~<tag>, ...]']
+  override examples = [
+    { input: '/keyword urgent', result: 'Tags selected tiles with "urgent"' },
+    { input: '/keyword ~urgent', result: 'Removes "urgent" from selected tiles' },
+  ]
 
   protected async execute(args: string): Promise<void> {
     const parsed = parseKeywordArgs(args)

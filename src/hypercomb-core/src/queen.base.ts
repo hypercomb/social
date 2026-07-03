@@ -4,6 +4,14 @@ import { Bee, BeeState } from './bee.base.js'
 // queen bee — real-time slash behaviour dispatch, no lifecycle
 // -------------------------------------------------
 
+/** One worked usage example a queen supplies for the reference surfaces. */
+export interface QueenUsageExample {
+  /** What the participant types, e.g. '/screensaver circle'. */
+  readonly input: string
+  /** What happens, e.g. 'Screensaver starts with the circle look'. */
+  readonly result: string
+}
+
 export abstract class QueenBee extends Bee {
 
   /** The slash behaviour this queen bee responds to (e.g. 'paste', 'export', 'publish') */
@@ -18,6 +26,22 @@ export abstract class QueenBee extends Bee {
    * Pattern: `slash.<command>`.
    */
   public descriptionKey?: string
+
+  /**
+   * STRUCTURED USAGE DOCS — the standard way a queen documents its own
+   * parameters, supplied at authoring time next to `description`. Every
+   * reference surface (the help page's study cards, the /help sheet, future
+   * autocomplete detail panes) reads these fields directly; nothing is ever
+   * parsed out of the description string. Entries are the accepted values
+   * or forms — literals like 'on' / 'off', or placeholders like '<color>'.
+   */
+  public options?: readonly string[]
+
+  /**
+   * Worked examples for the reference surfaces — what to type and what
+   * happens. One or two well-chosen examples beat an exhaustive list.
+   */
+  public examples?: readonly QueenUsageExample[]
 
   /**
    * Optional autocomplete hook. Returns the list of completions for the current

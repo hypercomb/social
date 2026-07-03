@@ -451,6 +451,11 @@ export class WebsiteQueenBee extends QueenBee {
   override description =
     'Toggle the website view, export the current subtree as JSON, or trigger a Claude codegen build. Bundle stamping was removed; per-cell pages live on each cell\'s `context` slot.'
   override descriptionKey = 'slash.website'
+  override options = ['on', 'off', 'here', 'save', 'load', 'export', '<name-or-path>', 'upgrade', 'upgrade *', 'upgrade <name>', 'new', 'build', 'list']
+  override examples = [
+    { input: '/website', result: 'Toggles the website view globally' },
+    { input: '/website here', result: 'Flags this cell for the next gen pass' },
+  ]
 
   override slashComplete(args: string): readonly string[] {
     const registry = get('@hypercomb.social/NameRegistry') as any

@@ -33,7 +33,9 @@ const AGGREGATOR_SEGMENT_PREFIX = 'agg-'
 /** Map a launch group's shape id (from its `launch:target` decoration) to the
  *  shader's aShapeMode value: 0 = hexagon · 1 = flower-in-pot (websites) ·
  *  2 = Space Invader (games). Unknown / empty → hexagon, so a normal hive tile
- *  (no launch decoration) and any future group default to the plain shape. */
+ *  (no launch decoration) and any future group default to the plain shape.
+ *  (Help tiles carry no shape — hexagons; a retired 'keycap' silhouette in
+ *  old decorations falls through to hexagon here, no migration needed.) */
 function launchShapeToMode(shape: string): number {
   return shape === 'flower-pot' ? 1 : shape === 'space-invader' ? 2 : 0
 }

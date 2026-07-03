@@ -89,7 +89,7 @@ the path from root to the current cell in the hierarchy. a lineage like `domain/
 a snapshot of a node's state — the atomic unit of hypercomb content distribution. layers are content-addressed by sha-256 and contain references to bees, dependencies, resources, and child layers. layer *signatures* propagate over the nostr mesh (live swarm layer kind 30200; legacy kind 29010), while the layer *bytes* resolve HTTP-direct from operator hosts. a layer is the "gene" rung of the **dna** ladder (see [dna.md](dna.md)).
 
 ### history bag (sigbag)
-an append-only sequence of layer-metadata markers (`0000`, `0001`, ...) sitting alongside the flat `<sig>` content bucket. each marker is a tiny record `{ layer: <sig>, context?: [<sig>, ...], expiresAt?: <ms> }`. the max marker IS the current root + entrance + attestation in one — there is no separate `__history__`, `__roots__`, or `manifest.json`. per-lineage sigbags carry the same shape at every level. see [history-sigbag-as-root.md](history-sigbag-as-root.md) for the unified model.
+an append-only sequence of layer-metadata markers (`0000`, `0001`, ...) sitting alongside the flat `<sig>` content bucket. each marker is a tiny record `{ layer: <sig>, context?: [<sig>, ...], tags?: [<name>, ...], expiresAt?: <ms> }`. the max marker IS the current root + entrance + attestation in one — there is no separate `__history__`, `__roots__`, or `manifest.json`. `tags` select *which* layer to show (highest-indexed marker carrying the tag; default = max marker = HEAD), so channels/versions/rollback are ordinary appends — marker sidecar, never layer content. per-lineage sigbags carry the same shape at every level. see [history-sigbag-as-root.md](history-sigbag-as-root.md) for the unified model.
 
 ---
 

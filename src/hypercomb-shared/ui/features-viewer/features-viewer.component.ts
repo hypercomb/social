@@ -97,22 +97,36 @@ type RowLike = {
   originSegments?: string[]
 }
 
-/** A domain-level GLOBAL published on a cell's layer (`feature:global` mark
- *  on a domain root) — a game or package tool with no hive location. Name +
- *  meta only, inert: `installed` = a local module answers to the id, so the
- *  row gets a live play affordance; otherwise the module arrives only through
- *  the installer's own consent path. */
+/** One row of a domain's globals TREE (flattened, depth = indent) — globals
+ *  are folders at every level: `games` is a folder, each game a leaf inside
+ *  it, and publish/adopt operate at any level. Name + meta only, inert:
+ *  `installed` = a local module answers to a leaf's id, so the row gets a
+ *  live play affordance; a missing module arrives only through the
+ *  installer's own consent path. */
 interface GlobalRow {
+  /** Stable row key — the path joined (`games/arkanoid`). */
+  key: string
+  path: string[]
+  depth: number
+  folder: boolean
+  /** Path tail — a leaf's toggle key (`<id>:toggle` launches it). */
   id: string
   label: string
   icon?: string
-  family?: string
   installed?: boolean
 }
 
-/** A global of YOUR OWN hive on the Globals tab — with its public state. */
+/** A row of YOUR OWN globals tree on the Globals tab — with public state. */
 interface OwnGlobalRow extends GlobalRow {
   public: boolean
+}
+
+/** Participant-local memory of the panel's active tab — the panel re-opens
+ *  where you left it instead of bouncing back to Tiles every time. */
+const TAB_KEY = 'hc:features-tab'
+
+function savedTab(): 'tiles' | 'globals' {
+  try { return localStorage.getItem(TAB_KEY) === 'globals' ? 'globals' : 'tiles' } catch { return 'tiles' }
 }
 
 interface FeatureGroup {
@@ -144,14 +158,16 @@ export class FeaturesViewerComponent implements OnDestroy {
   readonly groups = signal<FeatureGroup[]>([])
 
   /** Active tab: `tiles` = the per-tile groups; `globals` = your domain's
-   *  global features (games, package tools) with their PUBLIC switches. */
-  readonly tab = signal<'tiles' | 'globals'>('tiles')
+   *  globals tree with its PUBLIC switches. Restored from your last choice —
+   *  never forced back to Tiles. */
+  readonly tab = signal<'tiles' | 'globals'>(savedTab())
 
-  /** Your own globals — every local game plus every published root mark,
-   *  from `features:globals` (refreshed on every open and publish toggle). */
+  /** Your own globals tree (flattened rows) — the local tree merged with
+   *  every published root mark, from `features:globals` (refreshed on every
+   *  open and publish toggle). */
   readonly ownGlobals = signal<OwnGlobalRow[]>([])
 
-  /** Publish toggles in flight (by feature id) — guards the double-click. */
+  /** Publish toggles in flight (by row key) — guards the double-click. */
   readonly publishPending = signal<ReadonlySet<string>>(new Set())
 
   /** A foreign feature the participant has been asked to REVIEW before enabling.
@@ -290,6 +306,12 @@ export class FeaturesViewerComponent implements OnDestroy {
         return next
       })
     }))
+
+    // Request the globals listing once up front — the restored-to-Globals
+    // panel must not sit empty until a tab click. Order-safe both ways: if
+    // the drone isn't loaded yet, last-value replay hands it this request the
+    // moment it subscribes, and its answer replays to us the same way.
+    EffectBus.emit('features:globals-open', {})
   }
 
   /** Read a feature resource's bytes as text for review. Capped so a huge page
@@ -347,37 +369,39 @@ export class FeaturesViewerComponent implements OnDestroy {
 
   setTab(tab: 'tiles' | 'globals'): void {
     this.tab.set(tab)
+    try { localStorage.setItem(TAB_KEY, tab) } catch { /* no storage — session-only memory */ }
     // Ask for a fresh listing on entry — covers a panel that opened before
     // the drone's first emit (replay handles the reverse ordering).
     if (tab === 'globals') EffectBus.emit('features:globals-open', {})
   }
 
-  /** Flip a global's PUBLIC switch. The drone writes / removes the root's
-   *  `feature:global` mark and answers with a fresh `features:globals`
-   *  (which also clears the pending set). */
+  /** Flip a global node's PUBLIC switch — hierarchically. A folder covers
+   *  everything inside it; a leaf brings its ancestor folders along (the
+   *  parent is the leaf's dependency). The drone rewrites the root marks and
+   *  answers with a fresh `features:globals` (which clears the pending set). */
   togglePublish(g: OwnGlobalRow): void {
-    if (this.publishPending().has(g.id)) return
-    this.publishPending.update(set => new Set([...set, g.id]))
-    EffectBus.emit('features:publish-global', { id: g.id, on: !g.public })
+    if (this.publishPending().has(g.key)) return
+    this.publishPending.update(set => new Set([...set, g.key]))
+    EffectBus.emit('features:publish-global', { path: [...g.path], on: !g.public })
     // Leash: a failed publish must not wedge the switch.
     setTimeout(() => {
       this.publishPending.update(set => {
-        if (!set.has(g.id)) return set
+        if (!set.has(g.key)) return set
         const next = new Set(set)
-        next.delete(g.id)
+        next.delete(g.key)
         return next
       })
     }, 4000)
   }
 
   isPublishPending(g: OwnGlobalRow): boolean {
-    return this.publishPending().has(g.id)
+    return this.publishPending().has(g.key)
   }
 
-  /** Launch an installed global — routes the launcher's uniform
+  /** Launch an installed leaf global — routes the launcher's uniform
    *  `<gameId>:toggle`, the same gesture as its tile in the games group. */
   playGlobal(g: GlobalRow): void {
-    if (g.installed) EffectBus.emit(`${g.id}:toggle`, {})
+    if (!g.folder && g.installed) EffectBus.emit(`${g.id}:toggle`, {})
   }
 
   /** Human-readable hive path of where an applied feature is attached — the

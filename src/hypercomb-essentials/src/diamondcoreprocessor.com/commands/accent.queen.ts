@@ -34,6 +34,8 @@ export class AccentQueenBee extends QueenBee {
   readonly command = 'accent'
   override readonly aliases = []
   override description = 'Set the hover accent color by name'
+  override options = ['<color name>']
+  override examples = [{ input: '/accent teal', result: 'Hover accent turns teal' }]
 
   protected async execute(args: string): Promise<void> {
     const trimmed = args.trim().toLowerCase()

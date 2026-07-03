@@ -26,6 +26,7 @@ export class HistoryQueenBee extends QueenBee {
   override readonly aliases = []
   override description = 'Toggle the history panel'
   override descriptionKey = 'slash.history'
+  override examples = [{ input: '/history', result: 'History panel opens; repeat to hide it' }]
 
   protected execute(_args: string): void {
     const pack = get('@hypercomb.social/HistoryMenuPack') as HistoryMenuPackHandle | undefined

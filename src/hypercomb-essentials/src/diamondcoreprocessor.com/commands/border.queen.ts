@@ -29,6 +29,8 @@ export class BorderQueenBee extends QueenBee {
   override readonly aliases = ['edge']
   override description = 'Tile border style — neon glow on/off'
   override descriptionKey = 'slash.border'
+  override options = ['neon', 'off']
+  override examples = [{ input: '/border neon', result: 'Tile borders glow' }]
 
   override slashComplete(args: string): readonly string[] {
     const q = args.trim().toLowerCase()

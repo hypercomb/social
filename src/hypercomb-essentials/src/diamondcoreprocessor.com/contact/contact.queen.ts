@@ -26,6 +26,11 @@ export class ContactQueenBee extends QueenBee {
   override description =
     'Enable contact cards for this location\'s children (cascades to the subtree). Then click the contact icon on a tile to add a shareable contact.'
   override descriptionKey = 'slash.contact'
+  override options = ['off']
+  override examples = [
+    { input: '/contact', result: 'Tiles here can now add contact cards' },
+    { input: '/contact off', result: 'Removes the contact behaviour here' },
+  ]
 
   override slashComplete(args: string): readonly string[] {
     const q = args.toLowerCase().trim()

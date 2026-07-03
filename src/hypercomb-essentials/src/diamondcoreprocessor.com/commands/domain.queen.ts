@@ -22,6 +22,11 @@ export class DomainQueenBee extends QueenBee {
   readonly command = 'domain'
   override readonly aliases = ['relay']
   override description = 'Add, remove, or list mesh relay domains'
+  override options = ['<ws:// or wss:// url>', 'remove <url>', 'list', 'clear']
+  override examples = [
+    { input: '/domain wss://relay.example.com', result: 'Adds the relay to the mesh' },
+    { input: '/domain list', result: 'Lists configured relays with socket state' },
+  ]
 
   protected execute(args: string): void {
     const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any

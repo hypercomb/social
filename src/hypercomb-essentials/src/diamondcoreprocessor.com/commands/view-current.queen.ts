@@ -44,6 +44,11 @@ export class ViewCurrentQueenBee extends QueenBee {
   override readonly aliases = ['view-layer', 'current']
 
   override description = 'Show the current branch as a fully-expanded object'
+  override options = ['<depth>']
+  override examples = [
+    { input: '/view-current', result: 'Logs the current branch fully expanded' },
+    { input: '/view-current 2', result: 'Expands two levels; deeper children stay sigs' },
+  ]
 
   protected async execute(args: string): Promise<void> {
     const lineage = get<Lineage>('@hypercomb.social/Lineage')

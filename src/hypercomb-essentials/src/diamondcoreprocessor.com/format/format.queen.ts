@@ -17,6 +17,9 @@ export class FormatQueenBee extends QueenBee {
   override readonly aliases = []
   override description = 'Copy visual formatting from the active tile'
   override descriptionKey = 'slash.format'
+  override examples = [
+    { input: '/format', result: 'Opens the format painter; run again to close' },
+  ]
 
   protected async execute(_args: string): Promise<void> {
     // toggle: if already open, close

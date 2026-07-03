@@ -27,6 +27,11 @@ export class CanvasQueenBee extends QueenBee {
   override readonly aliases = ['backdrop']
   override description = 'Choose the screen backdrop (hex dots, honeycomb, depth, …)'
   override descriptionKey = 'slash.canvas'
+  override options = ['dots', 'honeycomb', 'grid', 'depth', 'sheen', 'mesh', 'contour', 'steel', 'daylight', 'indigo', 'teal', 'ember', 'auto', 'off']
+  override examples = [
+    { input: '/canvas indigo dots', result: 'Hex-dot backdrop with the indigo palette' },
+    { input: '/canvas off', result: 'No backdrop — bare surface' },
+  ]
 
   override slashComplete(args: string): readonly string[] {
     const svc = get(SVC) as CanvasBackgroundService | undefined

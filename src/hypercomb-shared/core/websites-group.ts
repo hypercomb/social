@@ -59,20 +59,6 @@ class WebsitesGroup extends LaunchGroupBase {
     vm?.setMode?.(SITE)
   }
 
-  /** The site surface's on-screen state is the ViewMode: anything other than
-   *  the hexagon canvas means it's up. EventTarget has no last-value replay,
-   *  so prime by hand — arming from the website-landing directory (already in
-   *  website mode) must start with the surface SEEN OPEN, or the eventual
-   *  return to hexagons would not count as a close. */
-  protected override watchSurface(_m: GroupMember, report: (open: boolean) => void): () => void {
-    const vm = get<ViewModeLike>('@hypercomb.social/ViewMode')
-    if (!vm?.addEventListener) return () => { /* no ViewMode yet — nothing to watch */ }
-    const onChange = (): void => report((vm.mode ?? 'hexagons') !== 'hexagons')
-    vm.addEventListener('change', onChange)
-    onChange()
-    return () => vm.removeEventListener('change', onChange)
-  }
-
   #scheduleScan(delay = 450): void {
     if (this.#debounce) clearTimeout(this.#debounce)
     this.#debounce = setTimeout(() => { this.#debounce = null; void this.#scan() }, delay)

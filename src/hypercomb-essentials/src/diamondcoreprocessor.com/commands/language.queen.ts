@@ -32,6 +32,8 @@ export class LanguageQueenBee extends QueenBee {
   override readonly aliases = []
   override description = 'Switch the UI language (14 languages supported)'
   override descriptionKey = 'slash.language'
+  override options = ['en', 'ja', 'zh', 'es', 'ar', 'pt', 'fr', 'de', 'ko', 'ru', 'hi', 'id', 'tr', 'it']
+  override examples = [{ input: '/language ja', result: 'UI switches to Japanese' }]
 
   override slashComplete(args: string): readonly string[] {
     const locales = ['en', 'ja', 'zh', 'es', 'ar', 'pt', 'fr', 'de', 'ko', 'ru', 'hi', 'id', 'tr', 'it']

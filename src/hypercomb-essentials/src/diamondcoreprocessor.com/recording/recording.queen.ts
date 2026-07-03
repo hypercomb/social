@@ -19,6 +19,11 @@ export class RecordingQueenBee extends QueenBee {
   override readonly aliases = []
   override description = 'Start AI-powered meeting recording with live hierarchy compilation'
   override descriptionKey = 'slash.record'
+  override options = ['start', 'stop', 'interval <seconds>', 'model <haiku|sonnet|opus>']
+  override examples = [
+    { input: '/record', result: 'Toggles recording on the selected tile' },
+    { input: '/record interval 30', result: 'Compiles hierarchy every 30 seconds' },
+  ]
 
   override slashComplete(args: string): readonly string[] {
     const q = args.toLowerCase().trim()

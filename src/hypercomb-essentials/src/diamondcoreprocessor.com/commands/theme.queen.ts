@@ -24,6 +24,11 @@ export class ThemeQueenBee extends QueenBee {
   override readonly aliases = ['themes']
   override description = 'Switch the UI theme (light, dark, system, or a registered theme)'
   override descriptionKey = 'slash.theme'
+  override options = ['light', 'dark', 'system', '<theme name>']
+  override examples = [
+    { input: '/theme dark', result: 'Switches to the dark theme' },
+    { input: '/theme', result: 'Prints the current theme and available list' },
+  ]
 
   override slashComplete(args: string): readonly string[] {
     const options = this.#options()

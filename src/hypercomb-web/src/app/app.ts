@@ -24,6 +24,7 @@ import { ObserveViewerComponent } from "@hypercomb/shared/ui/observe-viewer/obse
 import { ClipboardPanelComponent } from "@hypercomb/shared/ui/clipboard-panel/clipboard-panel.component"
 import { ContactFormComponent } from "@hypercomb/shared/ui/contact-card/contact-form.component"
 import { ContactHoverComponent } from "@hypercomb/shared/ui/contact-card/contact-hover.component"
+import { ActionCardComponent } from "@hypercomb/shared/ui/action-card/action-card.component"
 import { FeedbackButtonComponent } from "@hypercomb/shared/ui/feedback-button/feedback-button.component"
 import { FeedbackViewerComponent } from "@hypercomb/shared/ui/feedback-viewer/feedback-viewer.component"
 import { WebsiteNavComponent } from "@hypercomb/shared/ui/website-nav/website-nav.component"
@@ -40,7 +41,7 @@ import { SwarmAdoptPanelComponent } from "@hypercomb/shared/ui/swarm-adopt-panel
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, EditActionsComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, ShortcutSheetComponent, HistoryViewerComponent, ShellSurfacesComponent, NotesViewerComponent, FilesViewerComponent, FeaturesViewerComponent, TagsViewerComponent, ObserveViewerComponent, ClipboardPanelComponent, ContactFormComponent, ContactHoverComponent, FeedbackButtonComponent, FeedbackViewerComponent, WebsiteNavComponent, IconPickerComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, ToastComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent],
+  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, EditActionsComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, ShortcutSheetComponent, HistoryViewerComponent, ShellSurfacesComponent, NotesViewerComponent, FilesViewerComponent, FeaturesViewerComponent, TagsViewerComponent, ObserveViewerComponent, ClipboardPanelComponent, ContactFormComponent, ContactHoverComponent, ActionCardComponent, FeedbackButtonComponent, FeedbackViewerComponent, WebsiteNavComponent, IconPickerComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, ToastComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })

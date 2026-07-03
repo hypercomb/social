@@ -1,0 +1,65 @@
+@for (panel of panels(); track panel.id) {
+  <aside
+    class="pools-panel"
+    [class.pinned]="!panel.ephemeral"
+    [class.peek]="panel.ephemeral"
+    [style.left.px]="panel.pos.x"
+    [style.top.px]="panel.pos.y"
+    (pointerenter)="onPeekEnter(panel)"
+    (pointerleave)="onPeekLeave(panel)"
+    (pointerdown)="onPanelFocus(panel)"
+    (click)="stick(panel)"
+    role="dialog"
+    [attr.aria-label]="'pools.title' | t"
+  >
+    <header
+      class="pools-header"
+      [class.static]="panel.ephemeral"
+      (pointerdown)="onHeaderDown($event, panel)"
+    >
+      @if (!panel.ephemeral) {
+        <span class="pools-drag-grip" aria-hidden="true">⠿</span>
+      }
+      <span class="pools-title">{{ 'pools.title' | t }}</span>
+      @if (!panel.ephemeral) {
+        <button
+          class="pools-close"
+          type="button"
+          (click)="closePanel(panel.id)"
+          (pointerdown)="$event.stopPropagation()"
+          [attr.aria-label]="'pools.close' | t"
+        >×</button>
+      }
+    </header>
+
+    <div class="pools-body">
+      @if (panel.data.roots.length === 0) {
+        <p class="pools-empty">{{ 'pools.empty' | t }}</p>
+      } @else {
+        <ul class="pools-roots">
+          @for (root of panel.data.roots; track root.domain) {
+            <li class="pools-root">
+              <span class="pools-root-icon mat-sym" aria-hidden="true">hive</span>
+              <span class="pools-domain">{{ root.domain }}</span>
+              <span class="pools-kind" [class.self]="root.kind === 'self'">
+                {{ 'pools.kind.' + root.kind | t }}
+              </span>
+              <button class="pools-mini" type="button" (click)="openRoot(root, $event)">
+                {{ 'pools.open' | t }}
+              </button>
+              @if (root.kind === 'learned') {
+                <button class="pools-mini ghost" type="button"
+                        (click)="forget(panel, root, $event)"
+                        [attr.aria-label]="'pools.forget' | t"
+                        [title]="'pools.forget' | t">×</button>
+              }
+            </li>
+          }
+        </ul>
+      }
+      @if (panel.ephemeral) {
+        <span class="pools-stick-hint">{{ 'pools.stick' | t }}</span>
+      }
+    </div>
+  </aside>
+}

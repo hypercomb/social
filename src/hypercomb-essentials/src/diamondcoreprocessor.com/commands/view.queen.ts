@@ -39,6 +39,11 @@ export class ViewQueenBee extends QueenBee {
   override readonly aliases = ['mode', 'surface']
   override description = 'Toggle between hexagons and website rendering of the layer tree'
   override descriptionKey = 'slash.view'
+  override options = ['hexagons', 'website', '<mode name>']
+  override examples = [
+    { input: '/view', result: 'Toggles between hexagons and website' },
+    { input: '/view website', result: 'Switches to website rendering' },
+  ]
 
   override slashComplete(args: string): readonly string[] {
     const modes = ['hexagons', 'website', 'hex']

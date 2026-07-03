@@ -30,6 +30,11 @@ export class BranchQueenBee extends QueenBee {
   override description =
     'Give a lineage path or signature a named handle that other slash commands autocomplete against.'
   override descriptionKey = 'slash.branch'
+  override options = ['<name>', '<name> <64-hex signature>', '<name> clear', 'list']
+  override examples = [
+    { input: '/branch docs', result: 'Labels the current cell\'s lineage as "docs"' },
+    { input: '/branch list', result: 'Dumps all saved labels to the console' },
+  ]
 
   override slashComplete(args: string): readonly string[] {
     const tokens = args.split(/\s+/)

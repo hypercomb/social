@@ -19,6 +19,8 @@ export class SolomonQueenBee extends QueenBee {
   override readonly aliases = ['game', 'dana']
   override description = "Solomon's Key — block-conjuring puzzle-platformer with a level designer"
   override descriptionKey = 'slash.solomon'
+  override options = ['on', 'off', 'design']
+  override examples = [{ input: '/solomon design', result: 'Opens the level designer' }]
 
   override slashComplete(args: string): readonly string[] {
     const q = args.trim().toLowerCase()

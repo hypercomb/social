@@ -30,6 +30,11 @@ export class DropboxQueenBee extends QueenBee {
   override readonly aliases = ['dropzone']
   override description = 'Make this location a typed file dropbox (cascades to its subtree)'
   override descriptionKey = 'slash.dropbox'
+  override options = ['documents', 'images', 'any', '<ext,ext>', 'off']
+  override examples = [
+    { input: '/dropbox images', result: 'Tiles in this subtree accept image drops' },
+    { input: '/dropbox pdf,csv', result: 'Accepts only pdf and csv files' },
+  ]
 
   override slashComplete(args: string): readonly string[] {
     const options = ['documents', 'images', 'any', 'off']

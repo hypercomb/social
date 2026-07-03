@@ -26,6 +26,11 @@ export class BackgroundsQueenBee extends QueenBee {
   override readonly aliases = ['background', 'bg']
   override description = 'View or toggle which default background images are available'
   override descriptionKey = 'slash.backgrounds'
+  override options = ['<image name>']
+  override examples = [
+    { input: '/backgrounds', result: 'Lists default images with on/off state' },
+    { input: '/backgrounds lava', result: 'Toggles "lava"; rerolls tiles showing it' },
+  ]
 
   override slashComplete(args: string): readonly string[] {
     const service = get('@diamondcoreprocessor.com/SubstrateService') as SubstrateService | undefined

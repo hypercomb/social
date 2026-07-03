@@ -13,6 +13,7 @@ export class FitQueenBee extends QueenBee {
   override readonly aliases = []
 
   override description = 'Zoom to fit all visible content'
+  override examples = [{ input: '/fit', result: 'Viewport zooms to show all tiles' }]
 
   protected execute(_args: string): void {
     const zoom = window.ioc.get<any>('@diamondcoreprocessor.com/ZoomDrone')

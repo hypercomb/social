@@ -21,6 +21,11 @@ export class MeetingQueenBee extends QueenBee {
   override readonly aliases = []
   override description = 'Start or join a video meeting on the selected tile'
   override descriptionKey = 'slash.meeting'
+  override options = ['join', 'leave', 'cascade', 'cascade:19']
+  override examples = [
+    { input: '/meeting', result: 'Tags selected tile and joins its meeting' },
+    { input: '/meeting leave', result: 'Leaves the meeting on selected tiles' },
+  ]
 
   protected async execute(args: string): Promise<void> {
     const trimmed = args.trim().toLowerCase()

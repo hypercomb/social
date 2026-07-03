@@ -18,6 +18,8 @@ export class RoperQueenBee extends QueenBee {
   override readonly aliases = ['worms', 'rope']
   override description = 'Roper — turn-based Worms-style artillery with a ninja rope'
   override descriptionKey = 'slash.roper'
+  override options = ['on', 'off']
+  override examples = [{ input: '/roper on', result: 'Starts a Roper match' }]
 
   override slashComplete(args: string): readonly string[] {
     const q = args.trim().toLowerCase()

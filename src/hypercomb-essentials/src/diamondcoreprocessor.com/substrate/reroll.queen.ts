@@ -24,6 +24,11 @@ export class RerollQueenBee extends QueenBee {
   override readonly aliases = []
   override description = 'Reroll substrate background images on tiles'
   override descriptionKey = 'slash.reroll'
+  override options = ['<cell name>', '[<cell>, <cell>, ...]']
+  override examples = [
+    { input: '/reroll', result: 'Rerolls selection, or all substrate tiles' },
+    { input: '/reroll garden', result: 'Picks a new background for "garden"' },
+  ]
 
   override slashComplete(args: string): readonly string[] {
     const cellProvider = get('@hypercomb.social/CellSuggestionProvider') as { suggestions(): string[] } | undefined

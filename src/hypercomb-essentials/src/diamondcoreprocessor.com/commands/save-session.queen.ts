@@ -27,6 +27,11 @@ export class SaveSessionQueenBee extends QueenBee {
   readonly command = 'save-session'
   override readonly aliases = ['session-save', 'save']
   override description = 'Collapse this session\'s history entries at the current location into one head'
+  override options = ['auto on', 'auto off']
+  override examples = [
+    { input: '/save-session', result: 'Collapses this session\'s entries into one head' },
+    { input: '/save-session auto on', result: 'Auto-collapse when leaving the tab: ON' },
+  ]
 
   protected async execute(args: string): Promise<void> {
     const trimmed = args.trim().toLowerCase()

@@ -103,7 +103,8 @@ class HelpProvider implements SlashBehaviourProvider {
   readonly name = 'help-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'help', description: 'Show reference', descriptionKey: 'slash.help' }
+    { name: 'help', description: 'Show reference', descriptionKey: 'slash.help',
+      examples: [{ input: '/help', result: 'Opens the keyboard shortcut reference sheet' }] }
   ]
 
   execute(): void {
@@ -115,7 +116,8 @@ class ClearProvider implements SlashBehaviourProvider {
   readonly name = 'clear-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'clear', description: 'Clear active filter', descriptionKey: 'slash.clear' }
+    { name: 'clear', description: 'Clear active filter', descriptionKey: 'slash.clear',
+      examples: [{ input: '/clear', result: 'Clears the active search filter so all tiles show' }] }
   ]
 
   execute(): void {
@@ -128,7 +130,12 @@ class KeywordProvider implements SlashBehaviourProvider {
   readonly name = 'keyword-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'keyword', description: 'Add or remove keywords (tags) on selected tiles', descriptionKey: 'slash.keyword' }
+    { name: 'keyword', description: 'Add or remove keywords (tags) on selected tiles', descriptionKey: 'slash.keyword',
+      options: ['<tag>', '<tag>(#hexcolor)', '~<tag>', '[<tag>, ~<tag>, ...]'],
+      examples: [
+        { input: '/keyword urgent', result: 'Tags the selected tiles with "urgent"' },
+        { input: '/keyword ~urgent', result: 'Removes the "urgent" tag from the selected tiles' },
+      ] }
   ]
 
   async execute(_behaviourName: string, args: string): Promise<void> {
@@ -153,7 +160,8 @@ class DebugProvider implements SlashBehaviourProvider {
   readonly name = 'debug-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'debug', description: 'Toggle the Pixi display-tree inspector', descriptionKey: 'slash.debug' }
+    { name: 'debug', description: 'Toggle the Pixi display-tree inspector', descriptionKey: 'slash.debug',
+      examples: [{ input: '/debug', result: 'Toggles the Pixi display-tree inspector' }] }
   ]
 
   async execute(): Promise<void> {
@@ -168,7 +176,12 @@ class RemoveProvider implements SlashBehaviourProvider {
   readonly name = 'remove-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'remove', description: 'Remove tiles from the current directory', descriptionKey: 'slash.remove' }
+    { name: 'remove', description: 'Remove tiles from the current directory', descriptionKey: 'slash.remove',
+      options: ['<tile name>', '[<tile>, <tile>, ...]'],
+      examples: [
+        { input: '/remove drafts', result: 'Removes the tile named "drafts" from the current directory' },
+        { input: '/remove', result: 'Removes the currently selected tiles' },
+      ] }
   ]
 
   async execute(_behaviourName: string, args: string): Promise<void> {
@@ -209,7 +222,12 @@ class AccentProvider implements SlashBehaviourProvider {
   readonly name = 'accent-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'accent', description: 'Set the hover accent color by name', descriptionKey: 'slash.accent' }
+    { name: 'accent', description: 'Set the hover accent color by name', descriptionKey: 'slash.accent',
+      options: ['glacier', 'bloom', 'aurora', 'ember', 'nebula', '<tag> <preset>', '[<tag>, <tag>] <preset>', '~<tag>'],
+      examples: [
+        { input: '/accent ember', result: 'Sets the default hover accent to ember' },
+        { input: '/accent education aurora', result: 'Tiles tagged "education" glow aurora on hover' },
+      ] }
   ]
 
   async execute(_behaviourName: string, args: string): Promise<void> {
@@ -503,6 +521,10 @@ const wrapQueen = (queen: ReturnType<typeof isQueen> extends true ? never : any)
     descriptionKey: queen.descriptionKey,
     aliases: queen.aliases ?? [],
     hidden: queen.slashHidden === true,
+    // Structured usage docs (QueenBee.options / .examples) ride through so
+    // every reference surface gets them without parsing descriptions.
+    options: queen.options,
+    examples: queen.examples,
   }],
   execute(_behaviourName: string, args: string): Promise<void> | void {
     return queen.invoke(args)

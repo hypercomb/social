@@ -62,6 +62,11 @@ export class MiroImportQueenBee extends QueenBee {
   readonly namespace = 'miro.com'
   readonly command = 'miro-import'
   override description = 'Import a Miro board as a tile hierarchy; images become tile backgrounds'
+  override options = ['<boardId>']
+  override examples = [
+    { input: '/miro-import uXjVKs1234=', result: 'Imports the board as a tile hierarchy' },
+    { input: '/miro-import', result: 'Re-imports the last-used board' },
+  ]
 
   protected async execute(args: string): Promise<void> {
     const api = ioc('@miro.com/MiroApiService') as MiroApiService | undefined

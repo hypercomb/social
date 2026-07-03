@@ -23,6 +23,11 @@ export class TranslateSweepQueenBee extends QueenBee {
   override readonly aliases = ['translate']
   override description = 'Batch-translate all tiles (dry-run by default; add --go to execute)'
   override descriptionKey = 'slash.translate-sweep'
+  override options = ['<locale>', 'all', '--go']
+  override examples = [
+    { input: '/translate-sweep ja', result: 'Dry-run cost estimate for Japanese' },
+    { input: '/translate-sweep ja --go', result: 'Translates all tiles to Japanese' },
+  ]
 
   override slashComplete(args: string): readonly string[] {
     const locales = ['en', 'ja', 'zh', 'es', 'ar', 'pt', 'fr', 'de', 'ko', 'ru', 'hi', 'id', 'tr', 'it', 'all']

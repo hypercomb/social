@@ -744,17 +744,19 @@ Mismatched bytes are discarded silently and the broker keeps waiting (until time
 The operator's relay binary (`hypercomb-relay/relay.js`) serves HTTP content alongside the WebSocket relay. Both share the same hostname:
 
 ```
-https://<domain>/<sig>            ← any content-addressed blob (§21.9 universal handler, §21.10)
-https://<domain>/__roots__/       ← DESIGN TARGET: discovery index (domains served)
-https://<domain>/__roots__/<dom>/ ← DESIGN TARGET: discovery index (attestation sigs)
-wss://<domain>/                   ← WebSocket relay endpoint
+https://<domain>/<sig>                 ← any content-addressed blob (§21.9 universal handler, §21.10)
+https://<domain>/<sign(domain)>/000x   ← DESIGN TARGET: the domain's root markers (max = current root)
+https://<domain>/<lineageSig>/000x     ← DESIGN TARGET: per-lineage sigbag markers
+wss://<domain>/                        ← WebSocket relay endpoint
 ```
 
-> **Status: the `__roots__/` discovery routes are a DESIGN TARGET, not the current build.** The shipped relay HTTP host serves typed-path content and a `manifest.json` (keyed by `rootLayerSig`); the attestation-based `__roots__/` index has not yet replaced it. Treat every `__roots__/` reference below (§21.7–§21.13) as the agreed destination, with `manifest.json` as the live mechanism in the meantime.
+The root markers live in a **disconnected reference signature pool**: a scope folder named `sign(utf8(domain))`, holding only sigbag markers (`{ layer: <sig>, ... }` reference records). *Disconnected* — it is not referenced from any tree; *deterministic* — anyone computes the scope from the domain string alone, so there is nothing to discover; *uniform* — the address is identical on the domain's own host and on every mirror. Pool-of-meaning applied to the wire: the folder is the signature of "this domain's roots."
+
+> **Status: the sigbag marker routes are a DESIGN TARGET, not the current build.** The shipped relay HTTP host serves typed-path content and a `manifest.json` (keyed by `rootLayerSig`); serving the sigbags (see [history-sigbag-as-root.md](history-sigbag-as-root.md)) has not yet replaced it. There is no separate discovery index and no named meta routes: every folder is signature-named, and marker names (zero-padded decimal) plus sig names (64-hex) are the entire URL vocabulary. Treat the marker routes as the agreed destination, with `manifest.json` as the live mechanism in the meantime.
 
 Build output (`hypercomb-essentials/dist/`) is copied to `hypercomb-relay/content/` by `scripts/copy-to-dcp.ts` on every build, so the operator's own machine is always serving the latest content their build produced. See `memory: project_domain_as_identity.md` for the full "host is a verb" doctrine.
 
-> **Implementation lag:** the shipped relay HTTP host currently serves typed paths with extensions (`/__layers__/<sig>.json`, etc.) and a `manifest.json`. The bare-sig universal handler (§21.9) and the retirement of `manifest.json` in favor of `__roots__/` attestations (§21.9) are the target; the relay can serve both forms during cutover.
+> **Implementation lag:** the shipped relay HTTP host currently serves typed paths with extensions (`/__layers__/<sig>.json`, etc.) and a `manifest.json`. The bare-sig universal handler (§21.9) and the retirement of `manifest.json` in favor of sigbag-max discovery (§21.9) are the target; the relay can serve both forms during cutover.
 
 ### 21.8 Daisy-chain federation (structural property)
 
@@ -838,16 +840,17 @@ So the queue is the universal sync unit; **direction is the only difference betw
 
 A reader pulling alice's content *from jwize.com* still verifies alice's attestation signature — so jwize is a **replica, not an impersonator**. You can't fake being alice by hosting her bytes; you can only relay them, and the signature is checked regardless of relay. Hosting stays cheap and spreadable (resilience); identity stays a signature (trust).
 
-**`__roots__/<domain>/` is the multi-tenancy.** A subscriber grows sibling domain folders:
+**Disconnected root pools are the multi-tenancy.** A subscriber grows sibling root pools at its content root — each a signature-named scope (`sign(domain)`), disconnected from the host's own tree:
 
 ```
-jwize.com/__roots__/
-  jwize.com/    ← own attestations
-  alice.dev/    ← alice's, mirrored via subscription (co-hosted)
-  bob.io/       ← bob's, likewise
+jwize.com/
+  <sig> files              ← flat content bucket (own + co-hosted bytes, deduped by sig)
+  <sign(jwize.com)>/000x   ← own root markers (disconnected reference pool)
+  <sign(alice.dev)>/000x   ← alice's root markers, mirrored via subscription (co-hosted)
+  <sign(bob.io)>/000x      ← bob's, likewise
 ```
 
-`GET jwize.com/__roots__/` lists everyone jwize co-hosts — jwize advertising "here's whose content I serve." Readers discover replicas by which domain folders a host carries.
+A reader who knows a domain computes `sign(alice.dev)` and probes `jwize.com/<sign(alice.dev)>/000x` to get alice's current root as jwize mirrors it — no index file, no named folder; the pool's presence IS the advertisement, and the marker content still verifies against alice's key (hosting ≠ attesting, above).
 
 **Other properties:**
 - **Deliberate redundancy** — §21.8's resilience was incidental (someone happened to adopt); subscription makes it intentional (a parent commits to mirroring a child, guaranteeing survival if the child goes offline).
@@ -889,7 +892,7 @@ and every cache layer holds it forever with zero invalidation logic — browser 
 
 **This is what makes home-hosting scale.** The weakness of running `jwize.com` off a home machine via Cloudflare Tunnel is residential upload bandwidth. But with immutable `/<sig>` URLs, **Cloudflare's edge caches every blob after the first fetch** — the home machine serves each unique sig once, globally; the edge serves the millions of repeat reads. The home box becomes an origin-of-last-resort, not a bottleneck. The grid doctrine (everyone hosts their own domain) only works at scale *because* the URLs are immutable. It is load-bearing, not cosmetic.
 
-**The only mutable surface** is the discovery index (`/__roots__/`, `/__roots__/<domain>/`) — it must revalidate (new attestations appear). Perfect split: a mutable index pointing at immutable content. There is no `manifest.json` (retired in favor of `__roots__` attestations); the named `__roots__/` routes are the sole non-sig paths.
+**The only mutable surface** is the *next marker's existence*. Marker files themselves are append-only — once `000x` is written its content never changes, so markers are immutable-cacheable like everything else. The single revalidating request in the whole protocol is the probe for `000(x+1)`: a 404 that eventually becomes a 200. Perfect split: one uncacheable existence check pointing at otherwise-forever-cacheable content. There is no `manifest.json` (retired in favor of sigbag-max discovery) and no named meta routes; markers (`000x`) are the sole non-sig paths.
 
 ### 21.11 Host sync — continuous backup, cascade queue, receipts
 
@@ -898,7 +901,7 @@ hypercomb.io is the **authoring** surface; the operator's host is the **backup +
 #### 21.11.1 Save / branch / restore model
 
 - **Root (HEAD)** — the live state. Advances on *every* change. Continuously backed up to the host. The latest is always pushed; you never depend on a manual save to avoid loss.
-- **Branch** — a *named freeze* of the root at a moment. `save as branch v1` (from DCP or the host domain) writes a named attestation pointing at the current root. Immediately after: root == v1. Keep working: root advances, v1 stays frozen; changes accumulate.
+- **Branch** — a *named freeze* of the root at a moment. `save as branch v1` (from DCP or the host domain) appends a **tagged marker** — `{ layer: <currentRootSig>, tags: ["v1"] }` — to the root pool (§21.7). Immediately after: root == v1. Keep working: root advances, v1 stays frozen; changes accumulate. A consumer resolves tag T to the highest-indexed marker carrying T (default view = max marker = HEAD); re-tagging is appending a newer marker with the same tag — pointing anywhere, including an older layer — so promote/rollback/channel switching are ordinary appends with the audit trail built in. Tags ride the signed marker bytes, so they are attested by the domain key like the root advance itself, and they never touch layer content (the layer's sig is unchanged — metadata stays sidecar).
 - **Restore** — moving HEAD back to a branch's root. Realized as a **"Make HEAD"** append (see the linear-history model): new ops are appended that bring the live state to equal the branch's root. History stays linear and append-only — restoring is a forward entry, never a truncation or fork.
 
 A "branch" here is a **name on a merkle root**, not a fork in the op-history. The history remains one linear chain; only the *labels* branch. This is consistent with the linear-append-only history model.
@@ -994,18 +997,18 @@ Default is push-them-all, matching the durable-pool posture. Coalescing is opt-i
 
 ### 21.12 Write contract and authorization
 
-> **Status: DESIGN TARGET, not current build.** The `PUT /<sig>` content path and the `PUT /__roots__/<domain>/<sig>` attestation path described here specify the agreed write contract. The running build does not yet enforce this two-path model; the attestation PUT in particular depends on the `__roots__/` discovery surface (§21.7) and the domain↔key binding (§21.13), both of which are themselves design targets.
+> **Status: DESIGN TARGET, not current build.** The `PUT /<sig>` content path and the marker-append path described here specify the agreed write contract. The running build enforces sig-addressed hash-verified PUTs behind an authorized-writer set, but not yet the marker-append rules (which depend on the domain↔key binding, §21.13, itself a design target).
 
 §21.1–21.11 specify reading, resolving, and the *flow* of pushing. This section pins how content is actually accepted **onto** a host. There are two write paths, with different trust:
 
 ```
-PUT /<sig>                       → store a content blob (layer/bee/dep/resource)
-PUT /__roots__/<domain>/<sig>    → store an attestation
+PUT /<sig>                    → store a content blob (layer/bee/dep/resource)
+PUT /<scope>/000x             → append a sigbag marker (root advance for that scope)
 ```
 
 **Content PUT is self-verifying.** On `PUT /<sig>`, the host computes `sha256(body)` and **rejects unless it equals the URL sig.** You cannot forge a sig without breaking SHA-256, so the bytes authenticate themselves — the host never has to trust the *content* of a PUT, only check the hash. Idempotent by construction: the same sig is the same bytes, so a re-PUT is a no-op (or an identical overwrite). This is why mirroring/adoption is safe — a host storing bytes pulled from anywhere can verify them locally before serving.
 
-**Attestation PUT is identity-verified.** On `PUT /__roots__/<domain>/<sig>`, the host (a) checks `sha256(body) == sig` like any blob, *and* (b) verifies the attestation's `signature` field against `<domain>`'s authorized key(s) per §21.13. An attestation claiming `domain: "alice.dev"` is rejected unless signed by a key alice.dev has published. This is what enforces **hosting ≠ attesting**: anyone can store alice's *bytes*, but only alice's key can mint alice's *roots*.
+**Marker append is identity-verified.** Markers are positional (`000x`), not sig-named, so the hash cannot authenticate them — the *writer* must. On `PUT /<scope>/000x` the host (a) rejects unless `x` is exactly max+1 for that scope (append-only, no gaps, no overwrite), and (b) verifies the marker content's `signature` field against the scope's domain key(s) per §21.13. A marker advancing `alice.dev`'s root is rejected unless signed by a key alice.dev has published. This is what enforces **hosting ≠ attesting**: anyone can store alice's *bytes*, but only alice's key can advance alice's *root*.
 
 **Who may write (storage authorization).** Storing bytes consumes the host's disk, so the *inbound* write path is gated by an **authorized-writer set** — pubkeys the operator permits to PUT, configured on the host:
 
@@ -1018,29 +1021,29 @@ So content-integrity is permissionless (the hash proves the bytes) while disk-wr
 
 ### 21.13 Domain ↔ key binding (the trust root)
 
-> **Status: DESIGN TARGET, not current build.** The `/__keys__` domain-key publication endpoint and the attestation-verification flow below are the agreed trust-root design. The running build does not yet serve `/__keys__` or verify attestation signatures against a domain-published key set; the mesh today is **plaintext JSON** (the `x`-tag sig is visible in the clear — there is no AEAD on the wire yet). Read this section as the destination for identity verification, not a description of shipped confidentiality or signature-checking.
+> **Status: DESIGN TARGET, not current build.** The key-in-the-bag publication and the marker-verification flow below are the agreed trust-root design. The running build does not yet verify marker signatures against a domain-published key set; the mesh today is **plaintext JSON** (the `x`-tag sig is visible in the clear — there is no AEAD on the wire yet). Read this section as the destination for identity verification, not a description of shipped confidentiality or signature-checking.
 
-Attestation verification (§21.8.1, §21.12) reduces to one question: *given an attestation claiming `domain: "alice.dev"` signed by key K, how does a verifier know K is legitimately alice.dev's?* The answer uses the web's existing two-factor identity — **a signature proves you hold the key; DNS + TLS proves you control the domain** — and binds them by having the domain publish its keys over its own TLS:
+Marker verification (§21.8.1, §21.12) reduces to one question: *given a marker advancing `alice.dev`'s root, signed by key K, how does a verifier know K is legitimately alice.dev's?* The answer uses the web's existing two-factor identity — **a signature proves you hold the key; DNS + TLS proves you control the domain** — and binds them by having the domain publish its keys **inside its own sigbag**, read over its own TLS. There is no named key endpoint; key material is content like everything else:
 
-```
-GET https://alice.dev/__keys__   → alice.dev's authorized public key(s)   (mutable; revalidated)
-```
+- The domain's root pool (`sign(domain)`, §21.7) opens with marker `0000` carrying the domain's authorized key(s) (directly, or as a sig pointing to a key record in the flat bucket).
+- Rotation is a later marker that updates the authorized set — append-only, so the rotation history is itself auditable.
+- A verifier learns the key set by reading `https://alice.dev/<sign(alice.dev)>/000x` — served over TLS *for alice.dev*, so the CA + DNS system vouches that "alice.dev asserts these are its keys" (trust-on-first-use from the domain itself; thereafter mirrors' copies verify against it).
 
-Because that endpoint is served over TLS *for alice.dev*, the CA + DNS system vouches that "alice.dev asserts these are its keys." No separate PKI is introduced — the binding rides on the same TLS that already authenticates the domain. Verification of an attestation is then:
+No separate PKI is introduced — the binding rides on the same TLS that already authenticates the domain. Verification of a marker (from any host, including mirrors) is then:
 
-1. Read the attestation's `domain` (alice.dev) and `signature` (by K).
-2. `GET https://alice.dev/__keys__` (TLS-authenticated for alice.dev).
-3. Confirm K is in the published set.
-4. Verify the attestation signature with K.
+1. Read the marker's scope domain (alice.dev) and `signature` (by K).
+2. Read alice.dev's current authorized key set from her own bag over TLS (cached; refreshed when a key-bearing marker appears).
+3. Confirm K is in the authorized set at that point in the chain.
+4. Verify the marker signature with K.
 
-Two independent attestations now agree: DNS+TLS says alice.dev endorses K, and K signed the root. Only when both hold is the attestation trusted.
+Two independent attestations now agree: DNS+TLS says alice.dev endorses K, and K signed the root advance. Only when both hold is the marker trusted.
 
 **Properties:**
 
-- **Key rotation** — alice.dev updates its published set. *Old* attestations signed by a retired key stay valid (they're immutable, content-addressed); *new* attestations use the new key. The set may carry validity windows, but the minimal form is just "current authorized keys."
-- **Survives key loss** — because the binding is anchored in *domain control* (DNS/registrar), a lost signing key is recoverable: you still control alice.dev, so you publish a new key. This is exactly why domain-as-identity is more durable than pubkey-as-identity — the key can rotate under a stable name.
-- **Not immutable-cached** — the key set is mutable (rotation happens), so unlike `/<sig>` content it must revalidate. It joins `__roots__/` as a mutable, named (non-sig) route with a short cache.
-- **Composes with community trust** — `hc:community:domains` (§21.3) names the domains a verifier trusts; this binding resolves each trusted *domain* to the *keys* whose attestations it will accept. The trust graph is domain-keyed; the key binding is the domain→key lookup underneath it.
+- **Key rotation** — alice.dev appends a key-bearing marker. *Old* markers signed by a retired key stay valid (append-only, position-immutable); *new* markers use the new key. Validity windows are possible, but the minimal form is just "current authorized keys as of the latest key-bearing marker."
+- **Survives key loss** — because the binding is anchored in *domain control* (DNS/registrar), a lost signing key is recoverable: you still control alice.dev, so you append a new key marker. This is exactly why domain-as-identity is more durable than pubkey-as-identity — the key can rotate under a stable name.
+- **No mutable route needed** — markers are immutable once written; the only revalidating request remains the next-marker probe (§21.10). The key set changes only when a new marker appears, so key freshness rides the same probe that update detection already performs.
+- **Composes with community trust** — `hc:community:domains` (§21.3) names the domains a verifier trusts; this binding resolves each trusted *domain* to the *keys* whose root advances it will accept. The trust graph is domain-keyed; the key binding is the domain→key lookup underneath it.
 
 With this, the two verification primitives that the whole protocol rests on are both pinned: **content is verified by hash** (SHA-256, §21.6/§21.12) and **identity is verified by domain-published key over TLS** (§21.13). Everything else — resolution, federation, subscription, co-hosting, sync — is consequence.
 

@@ -97,6 +97,9 @@ export class VerifyHistoryQueenBee extends QueenBee {
 
   override description =
     "Walk the current location's history forward and backward; verify undo and redo render the same tile count at every position"
+  override examples = [
+    { input: '/verify-history', result: 'Walks history both ways; reports undo consistency' },
+  ]
 
   protected async execute(_args: string): Promise<void> {
     const cursor = window.ioc.get<HistoryCursor>('@diamondcoreprocessor.com/HistoryCursorService')

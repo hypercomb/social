@@ -20,6 +20,11 @@ export class MiroTokenQueenBee extends QueenBee {
   readonly namespace = 'miro.com'
   readonly command = 'miro-token'
   override description = 'Store your Miro API token locally (localStorage, never sent anywhere)'
+  override options = ['<token>', 'clear']
+  override examples = [
+    { input: '/miro-token abc123', result: 'Stores the token in localStorage' },
+    { input: '/miro-token clear', result: 'Removes the stored token' },
+  ]
 
   protected execute(args: string): void {
     const api = ioc('@miro.com/MiroApiService') as MiroApiService | undefined

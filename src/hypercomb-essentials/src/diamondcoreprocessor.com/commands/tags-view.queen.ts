@@ -11,6 +11,9 @@ export class TagsViewQueenBee extends QueenBee {
   readonly command = 'tags'
   override readonly aliases = []
   override description = 'Open the tag view'
+  override examples = [
+    { input: '/tags', result: 'Opens the right-docked tags panel' },
+  ]
 
   protected async execute(): Promise<void> {
     EffectBus.emit('tags:view-open', {})

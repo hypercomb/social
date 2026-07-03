@@ -42,6 +42,11 @@ export class RemoveQueenBee extends QueenBee {
   readonly command = 'remove'
   override readonly aliases = []
   override description = 'Remove tiles from the current directory'
+  override options = ['<tile name>', '[<tile>, <tile>, ...]']
+  override examples = [
+    { input: '/remove', result: 'Removes the currently selected tiles' },
+    { input: '/remove drafts', result: 'Removes the tile "drafts"' },
+  ]
 
   protected async execute(args: string): Promise<void> {
     const targets = parseRemoveArgs(args)

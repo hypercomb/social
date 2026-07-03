@@ -46,17 +46,6 @@ class DashboardGroup extends LaunchGroupBase {
     const bee = get<DashboardBeeLike>('@diamondcoreprocessor.com/DashboardBee')
     bee?.toggleBehavior()
   }
-
-  /** `dashboard:state` carries no payload — query the bee for the live state.
-   *  It fires on open and close; the close navigates back to the bag FIRST,
-   *  so by the time the base's reset runs, the bag is active again and its
-   *  sync exits it onto the hive (the uniform full-exit contract). */
-  protected override watchSurface(_m: GroupMember, report: (open: boolean) => void): () => void {
-    return EffectBus.on('dashboard:state', () => {
-      const bee = get<DashboardBeeLike>('@diamondcoreprocessor.com/DashboardBee')
-      report(bee?.isActive() === true)
-    })
-  }
 }
 
 groupRegistry.register(new DashboardGroup())

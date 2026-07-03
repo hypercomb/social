@@ -17,6 +17,11 @@ export class ConversationQueenBee extends QueenBee {
   override readonly aliases = []
   override description = 'Multi-turn conversation with Claude — creates thread tiles with Q&A children'
   override descriptionKey = 'slash.chat'
+  override options = ['<message>', '(<threadId>) <message>', '--model <model> <message>']
+  override examples = [
+    { input: '/chat What is TypeScript?', result: 'Starts a new thread tile with the answer' },
+    { input: '/chat(a1b2c3) Tell me more', result: 'Continues thread a1b2c3' },
+  ]
 
   protected async execute(args: string): Promise<void> {
     const parsed = parseChatArgs(args)

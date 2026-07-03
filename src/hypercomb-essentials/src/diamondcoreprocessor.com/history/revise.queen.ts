@@ -22,6 +22,9 @@ export class ReviseQueenBee extends QueenBee {
 
   override description = 'Toggle revision mode (history clock)'
   override descriptionKey = 'slash.revise'
+  override examples = [
+    { input: '/revise', result: 'Shows the history slider; run again to exit' },
+  ]
 
   #active = false
 

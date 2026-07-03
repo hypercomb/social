@@ -25,6 +25,11 @@ export class SequenceQueenBee extends QueenBee {
   override readonly aliases = ['seq']
   override description = 'Create or apply a drop-target sequence for new tiles'
   override descriptionKey = 'slash.sequence'
+  override options = ['<set name>']
+  override examples = [
+    { input: '/sequence', result: 'Opens the editor for the "default" set' },
+    { input: '/sequence normal', result: 'Creates or edits the set named "normal"' },
+  ]
 
   override slashComplete(args: string): readonly string[] {
     const svc = window.ioc.get<SequenceServiceLike>('@diamondcoreprocessor.com/SequenceService')

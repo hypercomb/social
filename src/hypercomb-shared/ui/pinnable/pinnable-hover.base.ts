@@ -82,6 +82,13 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
   /** Map a raw EffectBus payload to a panel identity + data, or null to ignore. */
   protected abstract toPanel(payload: unknown): { key: string; data: T } | null
 
+  /** Optional anchor for NEW panels (the hover peek + fresh pins). A subclass
+   *  that tracks the pointer returns it so the card appears AT the hover —
+   *  a true mouse-over card — instead of the classic top-right dock. Null
+   *  (the default) keeps the dock; per-key saved positions still win for
+   *  pins the user has dragged. */
+  protected anchorPos(): { x: number; y: number } | null { return null }
+
   /** Render order = stack order (later = on top). At most one ephemeral entry. */
   readonly panels = signal<PinnablePanel<T>[]>([])
 
@@ -151,7 +158,8 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
   onPeekLeave(p: PinnablePanel<T>): void { if (p.ephemeral) { this.#peekInside = false; this.#scheduleHide() } }
 
   #showPeek(key: string, data: T): void {
-    const peek: PinnablePanel<T> = { id: PEEK_ID, ephemeral: true, key, data, pos: this.#basePos() }
+    const a = this.anchorPos()
+    const peek: PinnablePanel<T> = { id: PEEK_ID, ephemeral: true, key, data, pos: a ? this.#clamp(a.x, a.y) : this.#basePos() }
     this.panels.update(l => [...l.filter(x => x.id !== PEEK_ID), peek])
   }
   #hidePeek(): void {
@@ -256,6 +264,10 @@ export abstract class PinnableHoverBase<T> implements OnInit, OnDestroy {
   #nextPinPos(key: string): { x: number; y: number } {
     const saved = this.#savedPos[key]
     if (saved) return this.#clamp(saved.x, saved.y)
+    // Anchored features pin where the user is looking (the hover spot);
+    // docked features cascade from the top-right base.
+    const a = this.anchorPos()
+    if (a) return this.#clamp(a.x, a.y)
     const base = this.#basePos()
     const n = this.panels().filter(x => !x.ephemeral).length
     return this.#clamp(base.x - n * CASCADE_STEP, base.y + n * CASCADE_STEP)

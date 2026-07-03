@@ -18,6 +18,9 @@ export class DashboardQueenBee extends QueenBee {
   readonly command = 'dashboard'
   override readonly aliases = []
   override description = 'Create a dashboard at the current location'
+  override examples = [
+    { input: '/dashboard', result: 'Creates a dashboard at the current location' },
+  ]
 
   protected async execute(_args: string): Promise<void> {
     const bee = get<DashboardBeeLike>('@diamondcoreprocessor.com/DashboardBee')

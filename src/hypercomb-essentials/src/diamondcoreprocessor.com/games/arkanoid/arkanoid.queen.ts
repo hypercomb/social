@@ -19,6 +19,8 @@ export class ArkanoidQueenBee extends QueenBee {
   override readonly aliases = ['breakout', 'bricks']
   override description = 'Arkanoid — bounce the ball off the paddle to break every brick'
   override descriptionKey = 'slash.arkanoid'
+  override options = ['on', 'off', 'design']
+  override examples = [{ input: '/arkanoid design', result: 'Opens the level designer' }]
 
   override slashComplete(args: string): readonly string[] {
     const q = args.trim().toLowerCase()

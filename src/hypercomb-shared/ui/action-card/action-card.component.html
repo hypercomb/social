@@ -1,0 +1,114 @@
+@for (panel of panels(); track panel.id) {
+  <aside
+    class="action-card-panel"
+    [class.pinned]="!panel.ephemeral"
+    [class.peek]="panel.ephemeral"
+    [style.left.px]="panel.pos.x"
+    [style.top.px]="panel.pos.y"
+    (pointerenter)="onPeekEnter(panel)"
+    (pointerleave)="onPeekLeave(panel)"
+    (pointerdown)="onPanelFocus(panel)"
+    role="dialog"
+    [attr.aria-label]="'action.hover.title' | t"
+  >
+    <header
+      class="action-card-header"
+      [class.static]="panel.ephemeral"
+      (pointerdown)="onHeaderDown($event, panel)"
+    >
+      @if (!panel.ephemeral) {
+        <span class="action-drag-grip" aria-hidden="true">⠿</span>
+      }
+      <span class="action-card-name">{{ panel.data.label }}</span>
+      @if (panel.data.category) {
+        <span class="action-category">{{ panel.data.category }}</span>
+      }
+      @if (!panel.ephemeral) {
+        <button
+          class="action-card-close"
+          type="button"
+          (click)="closePanel(panel.id)"
+          (pointerdown)="$event.stopPropagation()"
+          [attr.aria-label]="'action.hover.close' | t"
+        >×</button>
+      }
+    </header>
+
+    <div class="action-card-body">
+      <!-- keyboard action: its shortcut -->
+      @if (panel.data.steps.length) {
+        <div class="action-fact">
+          <span class="action-fact-label">{{ 'action.hover.shortcut' | t }}</span>
+          <span class="action-combo">
+            @for (step of panel.data.steps; track $index) {
+              @if ($index > 0) { <span class="action-then">{{ 'shortcuts.chord-sep' | t }}</span> }
+              @for (part of step; track $index) {
+                <kbd class="action-key">{{ part }}</kbd>
+              }
+            }
+          </span>
+        </div>
+      }
+
+      <!-- slash behaviour: how it's typed, its options, its aliases -->
+      @if (panel.data.usage) {
+        <div class="action-fact">
+          <span class="action-fact-label">{{ 'action.hover.usage' | t }}</span>
+          <code class="action-usage">{{ panel.data.usage }}</code>
+        </div>
+      }
+      @if (panel.data.params?.length) {
+        <div class="action-fact">
+          <span class="action-fact-label">{{ 'action.hover.options' | t }}</span>
+          <span class="action-combo">
+            @for (opt of panel.data.params; track $index) {
+              <code class="action-param">{{ opt }}</code>
+            }
+          </span>
+        </div>
+      }
+      @if (panel.data.aliases?.length) {
+        <div class="action-fact">
+          <span class="action-fact-label">{{ 'action.hover.aliases' | t }}</span>
+          <span class="action-combo">
+            @for (a of panel.data.aliases; track $index) {
+              <code class="action-usage muted">{{ a }}</code>
+            }
+          </span>
+        </div>
+      }
+
+      @if (panel.data.description) {
+        <p class="action-description">{{ panel.data.description }}</p>
+      }
+
+      <!-- author-supplied worked examples (slash behaviors) -->
+      @for (ex of panel.data.examples ?? []; track $index) {
+        <div class="action-example">
+          <code class="action-example-input">{{ ex.input }}</code>
+          <span class="action-example-arrow" aria-hidden="true">→</span>
+          <span class="action-example-result">{{ ex.result }}</span>
+        </div>
+      }
+
+      <!-- command-line behavior: each operation with trigger + example -->
+      @for (op of panel.data.ops ?? []; track $index) {
+        <div class="action-op">
+          <div class="action-op-head">
+            <span class="action-op-description">{{ op.description }}</span>
+            @if (op.trigger) {
+              <kbd class="action-key">{{ op.trigger }}</kbd>
+            }
+          </div>
+          @if (op.example) {
+            <div class="action-example">
+              <code class="action-example-input">{{ op.example.input }}</code>
+              <span class="action-example-arrow" aria-hidden="true">→</span>
+              <span class="action-example-result">{{ op.example.result }}</span>
+            </div>
+          }
+        </div>
+      }
+    </div>
+  </aside>
+}

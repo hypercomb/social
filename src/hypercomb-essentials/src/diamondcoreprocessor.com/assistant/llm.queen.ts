@@ -30,6 +30,10 @@ export class LlmQueenBee extends QueenBee {
   readonly command = 'opus'
   override readonly aliases = []
   override description = 'Ask a live Claude Code (via the bridge) about the selected tiles'
+  override options = ['<question>']
+  override examples = [
+    { input: '/opus what links these tiles?', result: 'Queues the ask; answer lands as a tile note' },
+  ]
 
   /** LlmProvider declares opus/sonnet/haiku manually — skip auto-wrap to avoid a duplicate /opus */
   readonly slashSkipAutoWrap = true

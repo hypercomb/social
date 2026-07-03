@@ -136,10 +136,10 @@ export class WebsiteLandingComponent implements OnDestroy {
     groupRegistry.get(WEBSITES)?.open(site)
   }
 
-  /** Close the directory — toggle the websites group off, which exits the
-   *  aggregator and hides this surface. */
+  /** Close the directory — leave the aggregator (plain navigation back to the
+   *  last real page), which hides this surface. */
   close(): void {
-    groupRegistry.selectExclusive(WEBSITES)
+    groupRegistry.exitBag()
   }
 
   // Lineage may not be registered at construction; resolve + bind lazily.
@@ -159,11 +159,10 @@ export class WebsiteLandingComponent implements OnDestroy {
 
   #refresh(): void {
     this.#ensureLineage()
-    const enabled = groupRegistry.enabledIds()
     const segs = (this.#lineage?.explorerSegments?.() ?? [])
       .map(s => String(s ?? '').trim()).filter(Boolean)
     const active = segs.length === 1 && segs[0] === AGG_SEGMENT
-      && enabled.length === 1 && enabled[0] === WEBSITES
+      && groupRegistry.currentId() === WEBSITES
 
     // Truly REPLACE the floating launcher (don't just cover it): hide the Pixi
     // hive mesh while the landing owns the screen, restore it when it doesn't.
