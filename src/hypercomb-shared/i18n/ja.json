@@ -404,6 +404,7 @@
   "features.allow.hint": "そのまま許可します — コミュニティの検証を待たずにこの機能を今すぐ有効にします。リソースが読み込まれる場合があります。",
   "features.enable": "追加",
   "features.enable.hint": "この機能をタイルに追加します — すぐに有効になります。",
+  "features.turnon.hint": "この機能を再びオンにします — ここで再度有効になります。何も失われていません。",
   "features.selected.one": "1 件選択中",
   "features.selected.other": "{count} 件選択中",
   "features.selection.clear": "選択を解除",

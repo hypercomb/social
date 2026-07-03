@@ -436,6 +436,7 @@
   "features.allow.hint": "Allow it anyway — activate this feature now without waiting for community verification. Its resources may load.",
   "features.enable": "add",
   "features.enable.hint": "Add this feature to the tile — it turns on now.",
+  "features.turnon.hint": "Turn this feature back on — it activates again here. Nothing was lost.",
   "features.selected.one": "1 selected",
   "features.selected.other": "{count} selected",
   "features.selection.clear": "clear selection",

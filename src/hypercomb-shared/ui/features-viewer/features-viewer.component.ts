@@ -126,14 +126,12 @@ export class FeaturesViewerComponent implements OnDestroy {
     cell: string; segments: string[]; sig: string; kind: string; label: string; code: string
   } | null>(null)
 
-  /** Hidden pool members, loaded from the signature pool. Drives two things:
-   *  filtering hidden features OUT of the active lists, and the "show hidden"
-   *  view (where each carries a Restore affordance). */
+  /** Hidden pool members, loaded from the signature pool. An OFF feature stays
+   *  in the applied list rendered with its switch off (turning it off just
+   *  means "not active / not adopted" — it never disappears); this set is what
+   *  the row's on/off state reads from, and restoring = flipping the switch
+   *  back on in place. */
   readonly hidden = signal<HiddenFeature[]>([])
-
-  /** When true the panel reveals HIDDEN features (with restore) instead of
-   *  hiding them. The hidden set is scoped per location (per group). */
-  readonly showHidden = signal(false)
 
   /** Multi-selected rows (by stable row key). The bulk bar at the top acts on
    *  this set: allow the blocked ones, download the selected ones. */
@@ -172,13 +170,6 @@ export class FeaturesViewerComponent implements OnDestroy {
     const s = new Set<string>()
     for (const d of this.hidden()) s.add(hiddenKey(d.featKind, d.appliesTo))
     return s
-  })
-
-  /** Total hidden features across the open groups' locations — drives the
-   *  header toggle's count. */
-  readonly hiddenCount = computed(() => {
-    const locs = new Set(this.groups().map(g => g.segments.join('/')))
-    return this.hidden().filter(d => locs.has(d.appliesTo.join('/'))).length
   })
 
   #cleanups: (() => void)[] = []
@@ -289,7 +280,6 @@ export class FeaturesViewerComponent implements OnDestroy {
   close(): void {
     this.visible.set(false)
     this.groups.set([])
-    this.showHidden.set(false)
     this.selectedKeys.set(new Set())
     this.pending.set(new Set())
   }
@@ -360,31 +350,32 @@ export class FeaturesViewerComponent implements OnDestroy {
     return out
   }
 
-  isHidden(group: FeatureGroup, feat: FeatureRow): boolean {
+  /** True when this feature is turned OFF (in the hidden pool) — the row's
+   *  switch reads this for its on/off state. Off features stay in the list. */
+  isHidden(group: FeatureGroup, feat: RowLike): boolean {
     return this.#hiddenKeys().has(this.rowKey(group, feat))
   }
 
-  /** Applied features still active at this tile — hidden ones removed unless
-   *  the participant is explicitly viewing hidden. */
+  /** Every feature ON THIS LAYER — both active AND turned-off. Turning a
+   *  feature off does NOT remove it from the list (it just flips its switch);
+   *  "off" reads the same as "not adopted", so the row stays put and one click
+   *  turns it back on. */
   visibleApplied(group: FeatureGroup): FeatureRow[] {
-    if (this.showHidden()) return []
-    return group.applied.filter(f => !this.isHidden(group, f))
+    return group.applied
   }
 
-  /** Hidden features affecting this tile — the "show hidden" view, each
-   *  restorable. Includes hides scoped to ANCESTOR locations too (a cascaded
-   *  feature's hide is written at its declaring ancestor — an exact-location
-   *  filter made those unrestorable from the very panel that hid them). */
-  hiddenFor(group: FeatureGroup): HiddenFeature[] {
-    const segs = group.segments
-    return this.hidden().filter(d =>
-      d.appliesTo.length <= segs.length
-      && d.appliesTo.every((s, i) => s === segs[i]))
+  /** The switch's ON gesture on an applied row: flip active ⇄ off IN PLACE.
+   *  Off = written to the hidden pool (inert but retained; the render gate
+   *  keeps it from mounting). On = its pool member removed (the gate re-mounts).
+   *  The row never leaves the list either way. */
+  async toggleActive(group: FeatureGroup, feat: FeatureRow): Promise<void> {
+    if (this.isHidden(group, feat)) await this.#turnOn(group, feat)
+    else await this.#turnOff(group, feat)
   }
 
-  /** Hide an applied feature: write it into the pool (turn off, retained) and
+  /** Turn a feature OFF: write it into the hidden pool (retained) and
    *  re-reconcile its render via `feature:hidden`. */
-  async hide(group: FeatureGroup, feat: FeatureRow): Promise<void> {
+  async #turnOff(group: FeatureGroup, feat: FeatureRow): Promise<void> {
     const segments = this.#segmentsFor(group, feat)
     const sig = await hideFeature({ featKind: feat.kind, view: feat.view, label: feat.label, segments })
     if (!sig) return
@@ -392,20 +383,16 @@ export class FeaturesViewerComponent implements OnDestroy {
     await this.#refreshHidden()
   }
 
-  /** Restore a hidden feature — remove its pool member; the gate re-mounts. */
-  async restore(rec: HiddenFeature): Promise<void> {
+  /** Turn a feature back ON: remove its hidden-pool member so the gate
+   *  re-mounts it. Resolves the pool record from the row's hide scope. */
+  async #turnOn(group: FeatureGroup, feat: FeatureRow): Promise<void> {
+    const key = this.rowKey(group, feat)
+    const rec = this.hidden().find(d => hiddenKey(d.featKind, d.appliesTo) === key)
+    if (!rec) return
     const ok = await restoreFeature(rec.recordSig)
     if (!ok) return
     EffectBus.emit('feature:restored', { featKind: rec.featKind, segments: rec.appliesTo })
     await this.#refreshHidden()
-    // Restoring the LAST hidden feature removes the header toggle (count 0) —
-    // flip back to the active view so the panel isn't stranded on an empty
-    // hidden list with no way out.
-    if (this.showHidden() && this.hiddenCount() === 0) this.showHidden.set(false)
-  }
-
-  toggleShowHidden(): void {
-    this.showHidden.update(v => !v)
   }
 
   async #refreshHidden(): Promise<void> {

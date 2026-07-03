@@ -15,15 +15,6 @@
   >
     <header class="features-header">
       <span class="features-title">{{ 'features.viewer.title' | t }}</span>
-      @if (hiddenCount() > 0) {
-        <button
-          class="features-hidden-toggle"
-          type="button"
-          [class.on]="showHidden()"
-          (click)="toggleShowHidden()"
-          [attr.aria-pressed]="showHidden()"
-        >{{ (showHidden() ? 'features.hidden.hide' : 'features.hidden.show') | t }} · {{ hiddenCount() }}</button>
-      }
       <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'features.close' | t">×</button>
     </header>
 
@@ -84,7 +75,6 @@
               <button class="fgroup-remove" type="button" (click)="removeGroup(group.cell)" [attr.aria-label]="'features.remove' | t">×</button>
             </header>
 
-            @if (!showHidden()) {
             <!-- ── On this layer: features the tile already has ── -->
             <div class="section-head">
               <span class="section-label">{{ 'features.section.applied' | t }}</span>
@@ -99,17 +89,21 @@
                     class="features-row"
                     [class.selected]="isSelected(group, feat)"
                     [class.gated]="feat.gated"
+                    [class.off]="isHidden(group, feat)"
                     (click)="selectRow(group, feat)"
                   >
-                    <!-- ON switch: the feature is active here; clicking turns it
-                         OFF into the retainable hidden pool (restore any time). -->
+                    <!-- Real on/off switch: ON = active here, OFF = turned off but
+                         KEPT in the list (inert + retained, exactly like a feature
+                         you haven't adopted). Click flips it in place — the row
+                         never disappears. -->
                     <button
-                      class="feat-toggle on"
+                      class="feat-toggle"
                       type="button"
-                      (click)="hide(group, feat); $event.stopPropagation()"
-                      [attr.aria-pressed]="true"
-                      [attr.aria-label]="'features.hide' | t"
-                      [attr.title]="'features.hide.hint' | t"
+                      [class.on]="!isHidden(group, feat)"
+                      (click)="toggleActive(group, feat); $event.stopPropagation()"
+                      [attr.aria-pressed]="!isHidden(group, feat)"
+                      [attr.aria-label]="(isHidden(group, feat) ? 'features.enable' : 'features.hide') | t"
+                      [attr.title]="(isHidden(group, feat) ? 'features.turnon.hint' : 'features.hide.hint') | t"
                     ><span class="knob"></span></button>
                     <div class="feature-meta">
                       <span class="feature-name">{{ feat.label }}</span>
@@ -207,34 +201,6 @@
                   </li>
                 }
               </ul>
-            }
-            } @else {
-            <!-- ── Hidden: turned off but retained, restorable ── -->
-            <div class="section-head">
-              <span class="section-label">{{ 'features.section.hidden' | t }}</span>
-              <span class="section-count">{{ hiddenFor(group).length }}</span>
-            </div>
-            @if (hiddenFor(group).length === 0) {
-              <p class="section-empty">{{ 'features.hidden.empty' | t }}</p>
-            } @else {
-              <ul class="features-list">
-                @for (rec of hiddenFor(group); track rec.recordSig) {
-                  <li class="features-row is-hidden">
-                    <div class="feature-meta">
-                      <span class="feature-name">{{ rec.label }}</span>
-                      <span class="feature-kind" [title]="rec.featKind">{{ rec.featKind }}</span>
-                    </div>
-                    <button
-                      class="restore-btn"
-                      type="button"
-                      (click)="restore(rec)"
-                      [attr.aria-label]="'features.restore' | t"
-                      [attr.title]="'features.restore.hint' | t"
-                    >{{ 'features.restore' | t }}</button>
-                  </li>
-                }
-              </ul>
-            }
             }
           </section>
         }
