@@ -212,6 +212,14 @@ interface FeaturesOpenPayload {
   /** Domain-level globals published on THIS cell's layer (`feature:global`
    *  records) — non-empty only on a domain root (peer or adopted). */
   globals: GlobalItem[]
+  /** True = the tile exists in the LOCAL layer (held). False = a peer-only
+   *  offer; the panel shows the adopt-target row only then. */
+  held?: boolean
+  /** When a live peer publishes a same-named copy of a HELD tile: the
+   *  children each side has that the other doesn't (names). `missing` rows
+   *  get an add affordance (merge that child's branch in); `extra` is
+   *  informational — a diff view never deletes the participant's content. */
+  hierarchy?: { missing: string[]; extra: string[] }
 }
 
 /** Merges globals tree sources (the local tree, published root records, a
@@ -314,6 +322,7 @@ interface StoreLike {
 interface HistoryLike {
   sign(lineage: { explorerSegments?: () => readonly string[] }): Promise<string>
   currentLayerAt(locationSig: string): Promise<unknown | null>
+  getLayerBySig?(sig: string): Promise<{ name?: string } | null>
 }
 
 /** Unified shape resolved from either a visual bee or a cascading capability. */
@@ -586,6 +595,45 @@ export class ShowFeaturesDrone extends Drone {
       }
     }
 
+    // ── 2.5 PEER DIFF — two people share this tile with different content ──
+    // A live publisher offers a same-named copy of this HELD tile. The window
+    // is the diff surface: the peer's features NOT on the local copy arrive as
+    // adopted:false rows (switch OFF — flipping one MERGES that single feature
+    // onto your tile), and `hierarchy` carries the children each side has that
+    // the other doesn't. Root-layer reads only — the window stays free; the
+    // per-difference click is what downloads. A diff never deletes: `extra`
+    // (yours only) is informational.
+    let hierarchy: { missing: string[]; extra: string[] } | undefined
+    if (branchSig) {
+      const peerRoot = await this.#peerRootLayer(branchSig)
+      if (peerRoot) {
+        for (const rec of await this.#peerFeatureRecords(peerRoot, registry)) {
+          const feature = this.#recognize(rec.kind, registry)
+          if (feature) {
+            if (appliedViews.has(feature.view)) continue
+            appliedViews.add(feature.view)
+            const item = this.#describe(feature, rec.kind, i18n, 'direct', undefined, branchSig, segments)
+            item.adopted = false
+            applied.push(item)
+          } else if (rec.kind.startsWith('visual:') && !appliedViews.has(rec.kind)) {
+            appliedViews.add(rec.kind)
+            applied.push({
+              view: rec.kind,
+              kind: rec.kind,
+              label: this.#t(i18n, 'features.unknown', rec.kind),
+              description: this.#t(i18n, 'features.unknown.desc', ''),
+              cascades: false,
+              origin: 'direct',
+              originSegments: [...segments],
+              branchSig,
+              adopted: false,
+            })
+          }
+        }
+        hierarchy = await this.#hierarchyDiff(segments, peerRoot)
+      }
+    }
+
     // ── 3. AVAILABLE — every registered feature this layer doesn't have ──
     // The full catalog (visual bees + cascading capabilities) minus what's
     // already applied, so the participant sees what they COULD add here.
@@ -602,8 +650,103 @@ export class ShowFeaturesDrone extends Drone {
     // your own). Name + meta, inert: the panel shows what the domain offers.
     const globals = this.#globalItems(records)
 
-    this.emitEffect<FeaturesOpenPayload>('features:open', { cell: label, segments, applied, available, globals })
+    this.emitEffect<FeaturesOpenPayload>('features:open', {
+      cell: label, segments, applied, available, globals, held: true,
+      ...(hierarchy && (hierarchy.missing.length || hierarchy.extra.length) ? { hierarchy } : {}),
+    })
     void this.#emitOwnGlobals()   // keep the Globals tab current on every open
+  }
+
+  /** The peer branch's ROOT layer, fetched through the broker (one small
+   *  layer read — local hit or a single HTTP/mesh fetch). Null when
+   *  unreachable or malformed. */
+  async #peerRootLayer(branchSig: string): Promise<Record<string, unknown> | null> {
+    const broker = this.#ioc()?.get<{ fetchBySig?: (sig: string, type: 'layer' | 'resource' | 'dependency') => Promise<Uint8Array | null> }>(BROKER_KEY)
+    try {
+      const bytes = await broker?.fetchBySig?.(branchSig, 'layer')
+      if (!bytes) return null
+      const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
+      return parsed && typeof parsed === 'object' ? parsed : null
+    } catch {
+      return null
+    }
+  }
+
+  /** Feature kinds carried by a peer root layer: its decoration records plus
+   *  a synthetic website record when the first-class `website` slot is
+   *  non-empty (the renderer's read-through order). */
+  async #peerFeatureRecords(
+    layer: Record<string, unknown>,
+    registry: VisualBeeRegistry,
+  ): Promise<{ kind: string }[]> {
+    const store = this.#ioc()?.get<StoreLike>(STORE_KEY)
+    const out: { kind: string }[] = []
+    const decorations = Array.isArray(layer['decorations']) ? layer['decorations'] as unknown[] : []
+    for (const raw of decorations) {
+      const sig = String(raw ?? '')
+      if (!SIG_RE.test(sig)) continue
+      try {
+        const blob = await store?.getResource(sig)
+        if (!blob) continue
+        const rec = JSON.parse(await blob.text()) as { kind?: string }
+        if (typeof rec?.kind === 'string' && rec.kind) out.push({ kind: rec.kind })
+      } catch { /* unavailable record — skip */ }
+    }
+    const websiteBee = registry.get('website')
+    const slot = layer[WEBSITE_SLOT]
+    if (websiteBee?.decorationKind && Array.isArray(slot) && slot.some(s => SIG_RE.test(String(s)))
+        && !out.some(r => r.kind === websiteBee.decorationKind)) {
+      out.push({ kind: websiteBee.decorationKind })
+    }
+    return out
+  }
+
+  /** Direct-children diff between the LOCAL tile at `segments` and a peer's
+   *  root layer. Names resolve via getLayerBySig for local sigs and via the
+   *  broker (tiny layer reads, direct children only — never recursive) for
+   *  peer sigs the local pool doesn't hold. */
+  async #hierarchyDiff(
+    segments: readonly string[],
+    peerRoot: Record<string, unknown>,
+  ): Promise<{ missing: string[]; extra: string[] } | undefined> {
+    const ioc = this.#ioc()
+    const history = ioc?.get<HistoryLike>(HISTORY_KEY)
+    const broker = ioc?.get<{ fetchBySig?: (sig: string, type: 'layer' | 'resource' | 'dependency') => Promise<Uint8Array | null> }>(BROKER_KEY)
+    if (!history?.getLayerBySig) return undefined
+
+    const resolveNames = async (children: unknown, peer: boolean): Promise<string[]> => {
+      const names: string[] = []
+      if (!Array.isArray(children)) return names
+      for (const raw of children) {
+        const entry = String(raw ?? '').trim()
+        if (!entry) continue
+        if (!SIG_RE.test(entry)) { names.push(entry); continue }   // literal name
+        let layer = await history.getLayerBySig!(entry).catch(() => null)
+        if (!layer && peer) {
+          try {
+            const bytes = await broker?.fetchBySig?.(entry, 'layer')
+            if (bytes) layer = JSON.parse(new TextDecoder().decode(bytes)) as { name?: string }
+          } catch { /* unreachable child — skip */ }
+        }
+        const name = typeof layer?.name === 'string' ? layer.name.trim() : ''
+        if (name) names.push(name)
+      }
+      return names
+    }
+
+    try {
+      const locationSig = await history.sign({ explorerSegments: () => segments })
+      const local = await history.currentLayerAt(locationSig) as { children?: unknown } | null
+      const localNames = await resolveNames(local?.children, false)
+      const peerNames = await resolveNames(peerRoot['children'], true)
+      const localSet = new Set(localNames)
+      const peerSet = new Set(peerNames)
+      const missing = peerNames.filter(n => !localSet.has(n))
+      const extra = localNames.filter(n => !peerSet.has(n))
+      return { missing, extra }
+    } catch {
+      return undefined
+    }
   }
 
   /** Does a layer resolve for this exact location — i.e. is the tile part of
@@ -706,6 +849,7 @@ export class ShowFeaturesDrone extends Drone {
       applied,
       available: [],
       globals: this.#globalItems(globalRecords),
+      held: false,
     })
     void this.#emitOwnGlobals()
   }

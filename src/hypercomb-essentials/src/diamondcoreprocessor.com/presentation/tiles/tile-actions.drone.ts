@@ -242,6 +242,23 @@ export type IconRegistryEntry = {
   descriptionKey?: string
 }
 
+// True when a live peer is broadcasting a same-named tile that carries a
+// layerSig — i.e. there is a publisher's version of this locally-held tile.
+// Gates the FEATURES icon on held tiles: the features window is where the
+// two copies' differences (features + hierarchy) are inspected and merged,
+// so the icon must show even when the LOCAL copy carries no feature yet.
+const peerBroadcastsTile = (label: string): boolean => {
+  const swarm = window.ioc.get<{
+    peerTilesAtCurrentSig?: () => readonly ({ name: string } & Record<string, unknown>)[]
+  }>('@diamondcoreprocessor.com/SwarmDrone')
+  if (!swarm?.peerTilesAtCurrentSig) return false
+  for (const tile of swarm.peerTilesAtCurrentSig()) {
+    if (tile.name !== label) continue
+    if (/^[a-f0-9]{64}$/.test(String(tile['layerSig'] ?? ''))) return true
+  }
+  return false
+}
+
 // True when this tile OBVIOUSLY carries a feature with a "scripts portion" —
 // i.e. one of its decoration kinds is owned by a registered visual bee
 // (website, dashboard, audio, …). This is the honest "has features" signal:
@@ -360,8 +377,13 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // your own hive) and `public-own` (your tile in public mode). Click handled
   // by ShowFeaturesDrone (action 'features'); turning a feature on from the
   // panel is BENIGN staging that only pre-ticks the installer later.
-  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => tileHasVisualBeeFeature(ctx.label), labelKey: 'action.features', descriptionKey: 'action.features.description' },
-  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => tileHasVisualBeeFeature(ctx.label), labelKey: 'action.features', descriptionKey: 'action.features.description' },
+  // Visible when the tile carries a feature — OR when a peer broadcasts a
+  // same-named copy: the features window is also the DIFF surface for two
+  // people sharing one tile with different content (peer-only features show
+  // as OFF switches to merge in; a hierarchy section lists missing children),
+  // so the icon must appear even while the local copy has no feature at all.
+  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => tileHasVisualBeeFeature(ctx.label) || peerBroadcastsTile(ctx.label), labelKey: 'action.features', descriptionKey: 'action.features.description' },
+  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => tileHasVisualBeeFeature(ctx.label) || peerBroadcastsTile(ctx.label), labelKey: 'action.features', descriptionKey: 'action.features.description' },
   // ── public-external profile ──
   { name: 'adopt', svgMarkup: ICONS.adopt, hoverTint: 0xa8ffd8, profile: 'public-external', labelKey: 'action.adopt', descriptionKey: 'action.adopt.description' },
   // 'hide' also lives in `public-own` (your own tile in public mode);

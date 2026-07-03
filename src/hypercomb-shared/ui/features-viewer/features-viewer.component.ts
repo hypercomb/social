@@ -135,6 +135,13 @@ interface FeatureGroup {
   applied: FeatureRow[]
   available: AvailableRow[]
   globals: GlobalRow[]
+  /** True = the tile exists in the LOCAL layer. False = a peer-only offer —
+   *  the adopt-target row shows only then. */
+  held?: boolean
+  /** Held tile with a live peer counterpart: the children each copy has that
+   *  the other doesn't. `missing` rows merge in per name; `extra` (yours
+   *  only) is informational — a diff never deletes your content. */
+  hierarchy?: { missing: string[]; extra: string[] }
 }
 
 interface FeaturesOpenPayload {
@@ -143,6 +150,8 @@ interface FeaturesOpenPayload {
   applied: FeatureRow[]
   available: AvailableRow[]
   globals?: GlobalRow[]
+  held?: boolean
+  hierarchy?: { missing: string[]; extra: string[] }
 }
 
 @Component({
@@ -238,6 +247,8 @@ export class FeaturesViewerComponent implements OnDestroy {
         applied: Array.isArray(p.applied) ? p.applied : [],
         available: Array.isArray(p.available) ? p.available : [],
         globals: Array.isArray(p.globals) ? p.globals : [],
+        held: p.held,
+        ...(p.hierarchy ? { hierarchy: p.hierarchy } : {}),
       }
       // Upsert by tile: re-clicking a tile refreshes its group in place
       // rather than duplicating it; a new tile appends to the list.
@@ -515,10 +526,22 @@ export class FeaturesViewerComponent implements OnDestroy {
   readonly #targetsVersion = signal(0)
 
   /** True when this group is a not-yet-adopted peer tile — the target row
-   *  shows only then (a tile already held has a location; it isn't re-homed
-   *  from here). */
+   *  shows only then. A HELD tile (held !== false) keeps its location even
+   *  when peer DIFF rows (adopted:false) are mixed into its list — those
+   *  merge in place, they don't re-home anything. */
   isPeerGroup(group: FeatureGroup): boolean {
-    return group.applied.some(f => f.adopted === false)
+    return group.held === false
+  }
+
+  /** Merge one missing child (or all of them) from the peer's copy of this
+   *  held tile — the hierarchy half of the diff. Additive only. */
+  mergeChild(group: FeatureGroup, name?: string): void {
+    EffectBus.emit('tile:action', {
+      action: 'merge-children',
+      label: group.cell,
+      segments: [...group.segments],
+      ...(name ? { names: [name] } : {}),
+    })
   }
 
   /** The group's adopt target as a display path ('/' = the hive root). */
@@ -544,13 +567,17 @@ export class FeaturesViewerComponent implements OnDestroy {
     const key = this.rowKey(group, feat)
     if (this.pending().has(key)) return
     this.pending.update(set => new Set([...set, key]))
-    this.#pendingAdopt.set(group.cell, feat.kind)
+    // Seed-others-off applies ONLY to a fresh branch adopt. On a HELD tile
+    // this switch is a single-feature MERGE from the peer's copy — seeding
+    // would turn the participant's own existing features off.
+    if (group.held === false) this.#pendingAdopt.set(group.cell, feat.kind)
     EffectBus.emit('tile:action', {
       action: 'adopt-feature',
       label: group.cell,
       kind: feat.kind,
       // The CHOSEN destination — SwarmAdoptDrone validates it exists
-      // (refuse-don't-guess) and folds the branch under it.
+      // (refuse-don't-guess) and folds the branch under it. For a held tile
+      // this is simply its own parent path (no target row shows).
       at: this.#targetSegments(group),
     })
     // Leash: a failed/declined adopt must not wedge the switch (the refresh

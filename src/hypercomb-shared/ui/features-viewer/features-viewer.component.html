@@ -208,9 +208,13 @@
                     ><span class="knob"></span></button>
                     <div class="feature-meta">
                       <span class="feature-name">{{ feat.label }}</span>
-                      <!-- Origin: direct on the node, or cascaded from a parent. -->
-                      <span class="feature-origin" [class.cascade]="feat.origin === 'cascade'">
-                        @if (feat.origin === 'cascade') {
+                      <!-- Origin: direct on the node, cascaded from a parent, or
+                           the PEER's same-named copy (a diff row on a held tile —
+                           flipping it merges that single feature onto yours). -->
+                      <span class="feature-origin" [class.cascade]="feat.origin === 'cascade'" [class.peer]="feat.adopted === false && group.held !== false">
+                        @if (feat.adopted === false && group.held !== false) {
+                          {{ 'features.origin.peer' | t }}
+                        } @else if (feat.origin === 'cascade') {
                           @if (feat.originCell) {
                             {{ 'features.origin.cascade' | t: { cell: feat.originCell } }}
                           } @else {
@@ -249,6 +253,42 @@
                   </li>
                 }
               </ul>
+            }
+
+            <!-- ── Hierarchy diff: a peer publishes a same-named copy of this
+                 held tile — the children each side has that the other doesn't.
+                 `add` merges that child's branch onto yours; what's only on
+                 YOUR copy is listed but never touched (a diff never deletes). ── -->
+            @if (group.hierarchy; as diff) {
+              @if (diff.missing.length || diff.extra.length) {
+                <div class="section-head">
+                  <span class="section-label">{{ 'features.hierarchy' | t }}</span>
+                  <span class="section-count">{{ diff.missing.length }}</span>
+                  @if (diff.missing.length > 1) {
+                    <button class="hier-add-all" type="button" (click)="mergeChild(group)" [attr.title]="'features.hierarchy.addall.hint' | t">
+                      {{ 'features.hierarchy.addall' | t }}
+                    </button>
+                  }
+                </div>
+                @if (diff.missing.length) {
+                  <ul class="features-list">
+                    @for (name of diff.missing; track name) {
+                      <li class="features-row hier-row">
+                        <div class="feature-meta">
+                          <span class="feature-name">{{ name }}</span>
+                          <span class="feature-kind">{{ 'features.hierarchy.frompeer' | t }}</span>
+                        </div>
+                        <button class="hier-add" type="button" (click)="mergeChild(group, name)" [attr.title]="'features.hierarchy.add.hint' | t">
+                          + {{ 'features.hierarchy.add' | t }}
+                        </button>
+                      </li>
+                    }
+                  </ul>
+                }
+                @if (diff.extra.length) {
+                  <p class="hier-extra">{{ 'features.hierarchy.extra' | t: { names: diff.extra.join(', ') } }}</p>
+                }
+              }
             }
 
             <!-- ── Available to add: features this layer doesn't have yet ── -->

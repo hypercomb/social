@@ -205,6 +205,46 @@ $accent: #c8b8ff;
   }
 }
 
+// ── hierarchy diff (held tile vs a peer's same-named copy) ────────
+// Missing children merge in per row; "yours only" is informational.
+.hier-add,
+.hier-add-all {
+  flex: 0 0 auto;
+  align-self: center;
+  background: rgba($accent, 0.14);
+  border: 1px solid rgba($accent, 0.4);
+  border-radius: 5px;
+  color: #f3f3f3;
+  font-family: inherit;
+  font-size: 0.64em;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.22em 0.6em;
+  cursor: pointer;
+  transition: background 120ms ease, transform 120ms ease;
+
+  &:hover { background: rgba($accent, 0.28); }
+  &:active { transform: scale(0.94); }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
+}
+
+.hier-row .feature-name { color: rgba(245, 245, 245, 0.85); }
+
+.hier-extra {
+  margin: 0;
+  padding: 0.1em 1em 0.5em;
+  font-size: 0.66em;
+  color: rgba(255, 255, 255, 0.4);
+  font-style: italic;
+}
+
+// Peer-origin badge on diff rows — the feature lives on the PEER's copy.
+.feature-origin.peer {
+  color: rgba(150, 210, 255, 0.95);
+  background: rgba(150, 210, 255, 0.1);
+  border-color: rgba(150, 210, 255, 0.35);
+}
+
 // ── section header (On this layer / Available to add) ─────────────
 .section-head {
   display: flex;
