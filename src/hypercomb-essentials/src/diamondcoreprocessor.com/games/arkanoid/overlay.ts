@@ -23,7 +23,7 @@ import { LEVELS, cloneLevel, loadCustomLevels, upsertCustomLevel, deleteCustomLe
 import { Designer, TOOLS, type Tool } from './designer.js'
 import { Shaker, ParticleField, easeOutBack, ARCADE } from '../juice.js'
 import { arkanoidThemes } from './theme.js'
-import './themes/index.js'   // side-effect: load + register the built-in scene themes
+import './themes/register-themes.js'   // side-effect: load + register the built-in scene themes
 
 const STYLE_ID = 'ark-overlay-styles'
 const Z = 2147483000
