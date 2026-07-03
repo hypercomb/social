@@ -75,3 +75,65 @@ export function unmarkVerified(sig: string): void {
   const s = String(sig ?? '').trim().toLowerCase()
   save(loadVerified().filter(e => e.sig !== s))
 }
+
+// ── branch-scoped allow (`hc:allowed-roots`) ─────────────────────────────
+// A website is a BRANCH feature: adopting/allowing it covers every page under
+// its root as ONE operation. Allowing only the root page's SIG left every
+// child page individually gated — and since per-sig domain attributions are
+// in-memory, an adopted site that navigated fine in-session re-gated page by
+// page after a refresh ("the site disappeared"). The reader — essentials
+// `feature-availability.ts` `isWithinAllowedRoot` — checks this same key at
+// gate time; the two agree ONLY on key + shape (a JSON array of segment-path
+// arrays, the same shape as `hc:adopted-roots`), never importing each other.
+
+const ALLOWED_ROOTS_KEY = 'hc:allowed-roots'
+
+const loadAllowedRoots = (): string[][] => {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ALLOWED_ROOTS_KEY) ?? '[]')
+    return Array.isArray(parsed) ? parsed.filter(Array.isArray) : []
+  } catch {
+    return []
+  }
+}
+
+/** Allow a whole BRANCH: every location at or under `segments` passes the
+ *  verification gate. Idempotent by path. */
+export function markAllowedRoot(segments: readonly string[]): void {
+  const segs = segments.map(s => String(s ?? '').trim()).filter(Boolean)
+  if (segs.length === 0) return
+  const roots = loadAllowedRoots()
+  const key = segs.join(' ')
+  if (roots.some(r => r.join(' ') === key)) return
+  roots.push(segs)
+  try { localStorage.setItem(ALLOWED_ROOTS_KEY, JSON.stringify(roots)) } catch { /* quota — degrades to per-sig */ }
+}
+
+export function unmarkAllowedRoot(segments: readonly string[]): void {
+  const key = segments.map(s => String(s ?? '').trim()).filter(Boolean).join(' ')
+  try {
+    localStorage.setItem(ALLOWED_ROOTS_KEY, JSON.stringify(loadAllowedRoots().filter(r => r.join(' ') !== key)))
+  } catch { /* no storage — nothing recorded anyway */ }
+}
+
+/** The BRANCH root to allow for a location: the ADOPTED root containing it
+ *  (`hc:adopted-roots`, written by the fold) — so accepting a site from one of
+ *  its CHILD pages still allows the whole site, not just that child's subtree.
+ *  Falls back to the location itself when it isn't under an adopted root. */
+export function branchRootFor(segments: readonly string[]): string[] {
+  const segs = segments.map(s => String(s ?? '').trim()).filter(Boolean)
+  try {
+    const parsed = JSON.parse(localStorage.getItem('hc:adopted-roots') ?? '[]')
+    if (Array.isArray(parsed)) {
+      for (const root of parsed) {
+        if (Array.isArray(root)
+            && root.length > 0
+            && root.length <= segs.length
+            && root.every((r, i) => String(r ?? '') === segs[i])) {
+          return root.map(r => String(r ?? ''))
+        }
+      }
+    }
+  } catch { /* malformed — fall through */ }
+  return segs
+}

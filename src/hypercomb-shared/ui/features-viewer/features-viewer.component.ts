@@ -34,7 +34,7 @@ import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
-import { markVerified } from './feature-verified'
+import { markVerified, markAllowedRoot, branchRootFor } from './feature-verified'
 import { hideFeature, restoreFeature, loadHidden, hiddenKey, type HiddenFeature } from './feature-hidden'
 
 /** A feature already applied to the layer. */
@@ -97,11 +97,30 @@ type RowLike = {
   originSegments?: string[]
 }
 
+/** A domain-level GLOBAL published on a cell's layer (`feature:global` mark
+ *  on a domain root) — a game or package tool with no hive location. Name +
+ *  meta only, inert: `installed` = a local module answers to the id, so the
+ *  row gets a live play affordance; otherwise the module arrives only through
+ *  the installer's own consent path. */
+interface GlobalRow {
+  id: string
+  label: string
+  icon?: string
+  family?: string
+  installed?: boolean
+}
+
+/** A global of YOUR OWN hive on the Globals tab — with its public state. */
+interface OwnGlobalRow extends GlobalRow {
+  public: boolean
+}
+
 interface FeatureGroup {
   cell: string
   segments: string[]
   applied: FeatureRow[]
   available: AvailableRow[]
+  globals: GlobalRow[]
 }
 
 interface FeaturesOpenPayload {
@@ -109,6 +128,7 @@ interface FeaturesOpenPayload {
   segments: string[]
   applied: FeatureRow[]
   available: AvailableRow[]
+  globals?: GlobalRow[]
 }
 
 @Component({
@@ -122,6 +142,17 @@ export class FeaturesViewerComponent implements OnDestroy {
 
   readonly visible = signal(false)
   readonly groups = signal<FeatureGroup[]>([])
+
+  /** Active tab: `tiles` = the per-tile groups; `globals` = your domain's
+   *  global features (games, package tools) with their PUBLIC switches. */
+  readonly tab = signal<'tiles' | 'globals'>('tiles')
+
+  /** Your own globals — every local game plus every published root mark,
+   *  from `features:globals` (refreshed on every open and publish toggle). */
+  readonly ownGlobals = signal<OwnGlobalRow[]>([])
+
+  /** Publish toggles in flight (by feature id) — guards the double-click. */
+  readonly publishPending = signal<ReadonlySet<string>>(new Set())
 
   /** A foreign feature the participant has been asked to REVIEW before enabling.
    *  Set from `feature:review:open` (emitted by the website gate when it blocks
@@ -190,6 +221,7 @@ export class FeaturesViewerComponent implements OnDestroy {
         segments: Array.isArray(p.segments) ? p.segments : [],
         applied: Array.isArray(p.applied) ? p.applied : [],
         available: Array.isArray(p.available) ? p.available : [],
+        globals: Array.isArray(p.globals) ? p.globals : [],
       }
       // Upsert by tile: re-clicking a tile refreshes its group in place
       // rather than duplicating it; a new tile appends to the list.
@@ -240,6 +272,13 @@ export class FeaturesViewerComponent implements OnDestroy {
       },
     ))
 
+    // Your domain's globals (local games + public state) — the Globals tab's
+    // feed. Last-value replay covers a panel that mounts after the emit.
+    this.#cleanups.push(EffectBus.on<{ globals?: OwnGlobalRow[] }>('features:globals', (p) => {
+      this.ownGlobals.set(Array.isArray(p?.globals) ? p!.globals! : [])
+      if (this.publishPending().size) this.publishPending.set(new Set())
+    }))
+
     // A bulk download finished for a tile — drop its busy marker.
     this.#cleanups.push(EffectBus.on<{ cell?: string }>('features:download:done', (p) => {
       const cell = String(p?.cell ?? '')
@@ -270,12 +309,15 @@ export class FeaturesViewerComponent implements OnDestroy {
   }
 
   /** Accept the reviewed feature (or BYPASS the review as an explicit override).
-   *  Writes the verified sig and emits `feature:verified` so the gate
-   *  re-reconciles and the page activates. */
+   *  Writes the verified sig — and for a WEBSITE, the allowed ROOT: a site is
+   *  accepted as one operation covering every page beneath it, so navigation
+   *  never re-gates page by page (nor after a reload). Emits `feature:verified`
+   *  so the gate re-reconciles and the page activates. */
   acceptReview(bypassed: boolean): void {
     const t = this.reviewTarget()
     if (!t) return
     markVerified({ sig: t.sig, cell: t.cell, kind: t.kind, label: t.label, bypassed })
+    if (t.kind === 'website' && t.segments.length) markAllowedRoot(branchRootFor(t.segments))
     EffectBus.emit('feature:verified', { sig: t.sig })
     this.reviewTarget.set(null)
   }
@@ -299,6 +341,43 @@ export class FeaturesViewerComponent implements OnDestroy {
   removeGroup(cell: string): void {
     this.groups.update(list => list.filter(g => g.cell !== cell))
     if (this.groups().length === 0) this.close()
+  }
+
+  // ── Globals tab (domain-level features) ───────────────────────────
+
+  setTab(tab: 'tiles' | 'globals'): void {
+    this.tab.set(tab)
+    // Ask for a fresh listing on entry — covers a panel that opened before
+    // the drone's first emit (replay handles the reverse ordering).
+    if (tab === 'globals') EffectBus.emit('features:globals-open', {})
+  }
+
+  /** Flip a global's PUBLIC switch. The drone writes / removes the root's
+   *  `feature:global` mark and answers with a fresh `features:globals`
+   *  (which also clears the pending set). */
+  togglePublish(g: OwnGlobalRow): void {
+    if (this.publishPending().has(g.id)) return
+    this.publishPending.update(set => new Set([...set, g.id]))
+    EffectBus.emit('features:publish-global', { id: g.id, on: !g.public })
+    // Leash: a failed publish must not wedge the switch.
+    setTimeout(() => {
+      this.publishPending.update(set => {
+        if (!set.has(g.id)) return set
+        const next = new Set(set)
+        next.delete(g.id)
+        return next
+      })
+    }, 4000)
+  }
+
+  isPublishPending(g: OwnGlobalRow): boolean {
+    return this.publishPending().has(g.id)
+  }
+
+  /** Launch an installed global — routes the launcher's uniform
+   *  `<gameId>:toggle`, the same gesture as its tile in the games group. */
+  playGlobal(g: GlobalRow): void {
+    if (g.installed) EffectBus.emit(`${g.id}:toggle`, {})
   }
 
   /** Human-readable hive path of where an applied feature is attached — the
@@ -466,12 +545,25 @@ export class FeaturesViewerComponent implements OnDestroy {
   // (No group-level adopt button: the features window IS the adopt surface —
   //  each row's switch is the individual add.)
 
+  /** Branch-scope for the allow: a WEBSITE is adopted as ONE operation — its
+   *  pages span the whole subtree, so allowing it must cover every page under
+   *  the site's root, not just the one page sig in hand. Without this, each
+   *  child page re-gated individually (and after a reload — when the
+   *  in-memory per-sig domain attributions are gone — the whole adopted site
+   *  fell back behind per-page gates: "the site disappeared"). Per-TILE
+   *  features (a game on one tile) stay per-sig. */
+  #allowScope(group: FeatureGroup, feat: FeatureRow): void {
+    if (feat.view === 'website') markAllowedRoot(branchRootFor(this.#segmentsFor(group, feat)))
+  }
+
   /** Override the community block for one feature: record its payload sig as
-   *  verified (an explicit bypass) and tell the render gate to re-reconcile —
-   *  the feature activates and its resources may stream. */
+   *  verified (an explicit bypass) — branch-wide for branch features (see
+   *  #allowScope) — and tell the render gate to re-reconcile: the feature
+   *  activates and its resources may stream. */
   allow(group: FeatureGroup, feat: FeatureRow): void {
     if (!feat.gateSig) return
     markVerified({ sig: feat.gateSig, cell: group.cell, kind: feat.kind, label: feat.label, bypassed: true })
+    this.#allowScope(group, feat)
     EffectBus.emit('feature:verified', { sig: feat.gateSig })
     feat.gated = false
     this.groups.update(list => [...list])   // re-render the cleared line
@@ -483,6 +575,7 @@ export class FeaturesViewerComponent implements OnDestroy {
     for (const { group, feat } of this.#selectedRows()) {
       if (!feat.gated || !feat.gateSig) continue
       markVerified({ sig: feat.gateSig, cell: group.cell, kind: feat.kind, label: feat.label, bypassed: true })
+      this.#allowScope(group, feat as FeatureRow)
       EffectBus.emit('feature:verified', { sig: feat.gateSig })
       feat.gated = false
       cleared = true

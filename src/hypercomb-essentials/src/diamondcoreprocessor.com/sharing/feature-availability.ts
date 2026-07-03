@@ -21,6 +21,7 @@ import { isAuthored } from './authored-sigs.js'
 import { isWithinAdoptedRoot } from './adopted-roots.js'
 
 const VERIFIED_KEY = 'hc:feature-verified'
+const ALLOWED_ROOTS_KEY = 'hc:allowed-roots'
 const COMMUNITY_KEY = 'hc:community:domains'
 const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -90,6 +91,31 @@ export function isFeatureAvailable(sig: unknown, domain: unknown): boolean {
   return isVerifiedSig(sig) || isTrustedDomain(domain)
 }
 
+/** BRANCH-scoped allow — a website (or any branch feature) is adopted as ONE
+ *  operation covering every page beneath its root. When the participant allows
+ *  the feature, the shell writer (feature-verified.ts `markAllowedRoot`)
+ *  records the site's root PATH at `hc:allowed-roots`; every location under
+ *  that prefix passes the gate. This is what keeps an adopted site working
+ *  across reloads: per-SIG verification only covered the one page that was
+ *  allowed, and per-sig domain attributions are in-memory — after a refresh
+ *  every child page re-gated individually and the site read as broken.
+ *  Participant-local, path-keyed — the same shape as `hc:adopted-roots`. */
+export function isWithinAllowedRoot(segments: readonly string[]): boolean {
+  if (segments.length === 0) return false
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ALLOWED_ROOTS_KEY) ?? '[]')
+    if (!Array.isArray(parsed)) return false
+    const segs = segments.map(s => String(s ?? ''))
+    return parsed.some((root: unknown) =>
+      Array.isArray(root)
+      && root.length > 0
+      && root.length <= segs.length
+      && root.every((r, i) => String(r ?? '') === segs[i]))
+  } catch {
+    return false
+  }
+}
+
 /** Is this content foreign to the participant — i.e. from somewhere ELSE, not
  *  authored here? Foreign when it carries a publisher domain that isn't yours
  *  (mesh/host attribution), OR — when no domain is attributed — when it sits
@@ -129,4 +155,5 @@ export function featureNeedsReview(segments: readonly string[], sig: unknown, do
   return isForeignContent(segments, domain)
     && !isLocallyAuthored(sig)
     && !isFeatureAvailable(sig, domain)
+    && !isWithinAllowedRoot(segments)
 }
