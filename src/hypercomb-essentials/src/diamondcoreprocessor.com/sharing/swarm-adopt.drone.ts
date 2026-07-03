@@ -682,68 +682,81 @@ export class SwarmAdoptDrone extends Drone {
   }
 
   #folding = false
+  #foldQueued = false
   #foldEnabledConfig = async (): Promise<void> => {
-    if (this.#folding) return            // a fold is already running — skip re-entry
+    // COALESCE re-entry, never drop it: sequential headless installs (the
+    // portal-overlay pending-open queue) fire `actions:available` back-to-back,
+    // and a trigger landing while a fold is mid-flight carries NEWLY-accepted
+    // config — skipping it would silently leave that install unfolded. A
+    // single trailing re-run reads the latest snapshot, so N triggers coalesce.
+    if (this.#folding) { this.#foldQueued = true; return }
     this.#folding = true
     try {
-      // Prefer the persisted snapshot store (survives reloads); fall back to
-      // the last live snapshot seen this session.
-      const store = this.#ioc()?.get?.(REGISTRY_SNAPSHOT_KEY) as RegistrySnapshotStoreLike | undefined
-      const snap = store?.snapshot ?? this.#lastSnapshot
-      const branches: RegistryBranchLike[] = (snap && Array.isArray(snap.branches)) ? snap.branches : []
-
-      // DESIRED = the installer's ENABLED CONTENT branches (its current intent).
-      // Packages are functionality (refs only, never tiles); disabled = off.
-      const desired = branches.filter((b): b is RegistryBranchLike & { branchSig: string } =>
-        !!b && b.enabled !== false
-        && (b.kind ?? 'content') === 'content'
-        && typeof b.branchSig === 'string' && SIG_RE.test(b.branchSig.toLowerCase()))
-
-      // FOLDED = the recoverable receipt of what this hive last folded in.
-      const folded = this.#loadFolded()
-      const desiredSigs = new Set(desired.map(b => b.branchSig.toLowerCase()))
-      const foldedSigs = new Set(folded.map(f => f.sig))
-
-      // ADDS = desired, not yet folded.  REMOVES = folded, no longer desired.
-      const adds = desired.filter(b => !foldedSigs.has(b.branchSig.toLowerCase()))
-      const removes = folded.filter(f => !desiredSigs.has(f.sig))
-
-      console.info(`[swarm-adopt] fold: desired ${desired.length}, folded ${folded.length} → +${adds.length} −${removes.length}`)
-      if (!adds.length && !removes.length) return
-
-      // Next receipt begins as the still-desired folded entries.
-      const nextFolded: FoldedEntry[] = folded.filter(f => desiredSigs.has(f.sig))
-      let committed = 0, removed = 0, unavailable = 0
-
-      // REMOVES first — un-fold the tile from the hive membership. RECOVERABLE:
-      // the installer keeps the branch record (re-enable re-folds) and history
-      // keeps the prior marker + content-addressed bytes, so nothing is lost.
-      for (const f of removes) {
-        const ok = await this.#unfoldBranch(f.name, f.at)
-        if (ok) removed++
-        else nextFolded.push(f)   // couldn't remove → keep it in the receipt
-      }
-
-      // ADDS — fold the newly-enabled content in (layersOnly; resources stream).
-      for (const b of adds) {
-        const at = Array.isArray(b.at) ? b.at.map(s => String(s ?? '').trim()).filter(Boolean) : []
-        const res = await this.#commitBranch(b.branchSig.toLowerCase(), at, b.domain ? String(b.domain) : undefined)
-        if (res === 'committed' || res === 'exists') {
-          committed++
-          nextFolded.push({ sig: b.branchSig.toLowerCase(), name: String(b.name ?? '').trim(), at })
-        } else {
-          unavailable++   // bytes unresolved — stays a pending add for next time
-        }
-      }
-
-      // Persist the new recoverable receipt (sorted by sig — a stable list whose
-      // sha256 is the hive's installed signature the installer can verify).
-      this.#saveFolded([...nextFolded].sort((a, b) => a.sig.localeCompare(b.sig)))
-      console.info(`[swarm-adopt] DCP config fold — +${committed} −${removed} (${unavailable} unavailable)`)
-      EffectBus.emit('fold:receipt', { committed, removed, unavailable })
+      do {
+        this.#foldQueued = false
+        await this.#foldEnabledConfigOnce()
+      } while (this.#foldQueued)
     } finally {
       this.#folding = false
     }
+  }
+
+  #foldEnabledConfigOnce = async (): Promise<void> => {
+    // Prefer the persisted snapshot store (survives reloads); fall back to
+    // the last live snapshot seen this session.
+    const store = this.#ioc()?.get?.(REGISTRY_SNAPSHOT_KEY) as RegistrySnapshotStoreLike | undefined
+    const snap = store?.snapshot ?? this.#lastSnapshot
+    const branches: RegistryBranchLike[] = (snap && Array.isArray(snap.branches)) ? snap.branches : []
+
+    // DESIRED = the installer's ENABLED CONTENT branches (its current intent).
+    // Packages are functionality (refs only, never tiles); disabled = off.
+    const desired = branches.filter((b): b is RegistryBranchLike & { branchSig: string } =>
+      !!b && b.enabled !== false
+      && (b.kind ?? 'content') === 'content'
+      && typeof b.branchSig === 'string' && SIG_RE.test(b.branchSig.toLowerCase()))
+
+    // FOLDED = the recoverable receipt of what this hive last folded in.
+    const folded = this.#loadFolded()
+    const desiredSigs = new Set(desired.map(b => b.branchSig.toLowerCase()))
+    const foldedSigs = new Set(folded.map(f => f.sig))
+
+    // ADDS = desired, not yet folded.  REMOVES = folded, no longer desired.
+    const adds = desired.filter(b => !foldedSigs.has(b.branchSig.toLowerCase()))
+    const removes = folded.filter(f => !desiredSigs.has(f.sig))
+
+    console.info(`[swarm-adopt] fold: desired ${desired.length}, folded ${folded.length} → +${adds.length} −${removes.length}`)
+    if (!adds.length && !removes.length) return
+
+    // Next receipt begins as the still-desired folded entries.
+    const nextFolded: FoldedEntry[] = folded.filter(f => desiredSigs.has(f.sig))
+    let committed = 0, removed = 0, unavailable = 0
+
+    // REMOVES first — un-fold the tile from the hive membership. RECOVERABLE:
+    // the installer keeps the branch record (re-enable re-folds) and history
+    // keeps the prior marker + content-addressed bytes, so nothing is lost.
+    for (const f of removes) {
+      const ok = await this.#unfoldBranch(f.name, f.at)
+      if (ok) removed++
+      else nextFolded.push(f)   // couldn't remove → keep it in the receipt
+    }
+
+    // ADDS — fold the newly-enabled content in (layersOnly; resources stream).
+    for (const b of adds) {
+      const at = Array.isArray(b.at) ? b.at.map(s => String(s ?? '').trim()).filter(Boolean) : []
+      const res = await this.#commitBranch(b.branchSig.toLowerCase(), at, b.domain ? String(b.domain) : undefined)
+      if (res === 'committed' || res === 'exists') {
+        committed++
+        nextFolded.push({ sig: b.branchSig.toLowerCase(), name: String(b.name ?? '').trim(), at })
+      } else {
+        unavailable++   // bytes unresolved — stays a pending add for next time
+      }
+    }
+
+    // Persist the new recoverable receipt (sorted by sig — a stable list whose
+    // sha256 is the hive's installed signature the installer can verify).
+    this.#saveFolded([...nextFolded].sort((a, b) => a.sig.localeCompare(b.sig)))
+    console.info(`[swarm-adopt] DCP config fold — +${committed} −${removed} (${unavailable} unavailable)`)
+    EffectBus.emit('fold:receipt', { committed, removed, unavailable })
   }
 
   // ── recoverable fold receipt (persisted) ──────────────────────────
