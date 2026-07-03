@@ -48,8 +48,11 @@ self.addEventListener('message', (event) => {
     ? data.domains.filter((d) => typeof d === 'string' && d)
     : []
   if (domains.length) {
-    KNOWN_DOMAINS = domains
-    void persistDomains(domains)
+    // MERGE with what we already know — posts arrive from two independent
+    // senders (the boot re-post and the broker's learned-host pushes) and a
+    // replace would let whichever fired last drop the other's hosts.
+    KNOWN_DOMAINS = [...new Set([...domains, ...KNOWN_DOMAINS])]
+    void persistDomains(KNOWN_DOMAINS)
   }
 })
 
@@ -196,7 +199,7 @@ async function handleSiteResourceRequest(request) {
   const rootFile = await tryReadHiveFile(sig)
   if (rootFile) {
     const headers = new Headers()
-    headers.set('content-type', guessResourceContentType(rest, rootFile))
+    headers.set('content-type', guessResourceContentType(rest, rootFile, request))
     headers.set('cache-control', 'public, max-age=31536000, immutable')
     const response = new Response(rootFile, { status: 200, headers })
     await cachePut(request, response)
@@ -210,7 +213,7 @@ async function handleSiteResourceRequest(request) {
     const file = await fileHandle.getFile()
 
     const headers = new Headers()
-    headers.set('content-type', guessResourceContentType(rest, file))
+    headers.set('content-type', guessResourceContentType(rest, file, request))
     headers.set('cache-control', 'public, max-age=31536000, immutable')
     const response = new Response(file, { status: 200, headers })
 
@@ -233,8 +236,8 @@ async function handleSiteResourceRequest(request) {
     // is warm in OPFS (where the OPFS branch's URL-tail guess sets text/css).
     // The URL tail (`/chrome.css`) is the authoritative type here, so prefer it
     // over the host's generic type; fall back to the host type only when the
-    // tail/sniff can't pin a specific one (e.g. an extensionless image sig).
-    const guessed = guessResourceContentType(rest, new Blob([fetched.buf]))
+    // tail/sniff/destination can't pin a specific one.
+    const guessed = guessResourceContentType(rest, new Blob([fetched.buf]), request)
     headers.set('content-type', guessed !== 'application/octet-stream' ? guessed : (fetched.contentType || guessed))
     headers.set('cache-control', 'public, max-age=31536000, immutable')
     const response = new Response(fetched.buf, { status: 200, headers })
@@ -243,10 +246,12 @@ async function handleSiteResourceRequest(request) {
   }
 }
 
-function guessResourceContentType(tail, file) {
-  // Prefer explicit extension in the URL tail; fall back to the Blob's
-  // mime type (set by File constructor when the browser sniffs it); last
-  // resort is octet-stream.
+function guessResourceContentType(tail, file, request) {
+  // Prefer explicit extension in the URL tail; then WHAT THE PAGE IS ASKING
+  // FOR (request.destination — a rewritten ref is usually a bare
+  // /@resource/<sig> with no extension, but a <link rel="stylesheet"> still
+  // says destination 'style', and browsers REFUSE non-text/css stylesheets);
+  // then the Blob's sniffed type; last resort octet-stream.
   const ext = (tail.match(/\.([a-z0-9]+)$/i)?.[1] ?? '').toLowerCase()
   const map = {
     html: 'text/html; charset=utf-8',
@@ -273,8 +278,24 @@ function guessResourceContentType(tail, file) {
     md: 'text/markdown; charset=utf-8',
   }
   if (ext && map[ext]) return map[ext]
+  const destType = destinationContentType(request)
+  if (destType) return destType
   if (file.type) return file.type
   return 'application/octet-stream'
+}
+
+// Content-type implied by the requesting context. Only destinations where the
+// browser enforces (or strongly prefers) a specific type are mapped; images
+// and media sniff fine from bytes, so they stay on the blob-type path.
+function destinationContentType(request) {
+  switch (request && request.destination) {
+    case 'style': return 'text/css; charset=utf-8'
+    case 'script':
+    case 'worker':
+    case 'sharedworker': return 'application/javascript; charset=utf-8'
+    case 'font': return 'font/woff2'
+    default: return ''
+  }
 }
 
 /* ----------------------------------------

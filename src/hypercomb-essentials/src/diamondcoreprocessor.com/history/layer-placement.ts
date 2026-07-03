@@ -39,6 +39,31 @@ export interface PlacementLayer {
   [slot: string]: unknown
 }
 
+/** A cell name becomes a lineage PATH SEGMENT, and history.sign joins segments
+ *  with '/', so a name containing a separator or control char would address a
+ *  DIFFERENT existing location. Reject such names at every trust boundary (the
+ *  branch root in swarm-adopt.drone.ts, and every adopted descendant in
+ *  flattenLayerTree) so a crafted peer subtree can't collide with — and
+ *  overwrite — the participant's own nested tiles. */
+const UNSAFE_CELL_NAME = /[\\/\x00-\x1f]/
+
+/** Canonical child-layer slot names, in resolution precedence. A layer's child
+ *  sigs live under ONE of these: built modules emit `cells`, some trees use
+ *  `layers`, hive-authored content uses `children`. Mirrors the ContentBroker's
+ *  own walk (content-broker.drone.ts) + host-sync / website-archive, kept here
+ *  so placement (adopt/paste) and code-detection can't drift from it. */
+export const CHILD_SLOTS = ['cells', 'layers', 'children'] as const
+
+/** The child-layer sigs of a layer, from whichever canonical child slot it uses
+ *  (see CHILD_SLOTS). Empty when the layer has no children in any slot. */
+export function childSigsOf(layer: PlacementLayer): readonly string[] {
+  for (const slot of CHILD_SLOTS) {
+    const v = (layer as Record<string, unknown>)[slot]
+    if (Array.isArray(v) && v.length > 0) return v.map(s => String(s))
+  }
+  return []
+}
+
 /** Resolve a parent layer's `children` sigs to child display names.
  *  Names are the truth — each child layer's own `name` field — and the
  *  committer re-resolves them to head sigs at commit time. Mirrors the
@@ -57,6 +82,27 @@ export async function childNamesOf(
     }
   }
   return names
+}
+
+/** Like {@link childNamesOf}, but also reports whether any child sig failed to
+ *  resolve (a COLD pool miss). A membership SET (adopt/unfold recomputing a
+ *  parent's `children`) MUST abort on a cold miss rather than write a list that
+ *  silently drops the unresolved sibling — that drop is a PERMANENT wipe of a
+ *  tile whose bytes merely weren't warm. `coldMiss` lets the caller tell "child
+ *  confirmed absent" from "couldn't see the child". */
+export async function childNamesOfStrict(
+  history: PlacementHistory,
+  parent: PlacementLayer | null,
+): Promise<{ names: string[]; coldMiss: boolean }> {
+  const childSigs = Array.isArray(parent?.children) ? parent!.children : []
+  const names: string[] = []
+  let coldMiss = false
+  for (const sig of childSigs) {
+    const child = await history.getLayerBySig(String(sig))
+    if (!child) { coldMiss = true; continue }
+    if (typeof child.name === 'string' && child.name.length > 0) names.push(child.name)
+  }
+  return { names, coldMiss }
 }
 
 /** Resolve a single child cell's layer (and its sig) via its PARENT's
@@ -163,12 +209,24 @@ export async function flattenLayerTree(
   layer: PlacementLayer,
   destSegments: readonly string[],
 ): Promise<{ segments: string[]; layer: { name?: string; [slot: string]: unknown } }[]> {
-  const childSigs = Array.isArray(layer.children) ? layer.children : []
+  // Read child sigs from whichever canonical child slot the source uses
+  // (cells / layers / children) — a built module nests under `cells`, so
+  // reading only `children` would drop its whole subtree on re-home.
+  const childSigs = childSigsOf(layer)
   const childLayers: PlacementLayer[] = []
   const childNames: string[] = []
   for (const sig of childSigs) {
     const child = await history.getLayerBySig(String(sig))
     if (!child || typeof child.name !== 'string' || child.name.length === 0) continue
+    // Untrusted (adopted) child names arrive here via getLayerBySig on signed
+    // peer layers. A name that is really a path (separator/control char) would
+    // masquerade as a multi-segment lineage path below (destSegments + name) and
+    // overwrite a colliding local tile. Drop it, exactly like an unresolvable
+    // child — the branch root name is guarded the same way in swarm-adopt.drone.ts.
+    if (UNSAFE_CELL_NAME.test(child.name)) {
+      console.warn('[flattenLayerTree] dropped child with unsafe name (path-separator/control char):', child.name)
+      continue
+    }
     childLayers.push(child)
     childNames.push(child.name)
   }
@@ -176,7 +234,11 @@ export async function flattenLayerTree(
   // This node: every source slot verbatim, `children` swapped sigs → names.
   const node: { name?: string; [slot: string]: unknown } = {}
   for (const [slot, value] of Object.entries(layer)) {
-    if (slot === 'children') continue
+    // Skip EVERY child slot — the source may nest under `cells`/`layers`, and
+    // copying a child slot verbatim would carry STALE (un-re-homed) sigs. The
+    // re-homed children are written to `children` (names) below; the renderer
+    // reads them via the same cells||layers||children precedence.
+    if ((CHILD_SLOTS as readonly string[]).includes(slot)) continue
     node[slot] = value
   }
   // Bracket access: `children` rides the index signature, not the declared

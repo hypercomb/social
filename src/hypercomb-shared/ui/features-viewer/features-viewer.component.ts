@@ -1,31 +1,39 @@
 // hypercomb-shared/ui/features-viewer/features-viewer.component.ts
 //
 // Right-docked "Features" panel. Opened when a tile's puzzle-piece icon is
-// clicked (ShowFeaturesDrone answers `tile:action` with `features:open`). For
-// each tile it shows TWO sections:
+// clicked — or by the ADOPT gesture, which folds the branch and lands here
+// (ShowFeaturesDrone answers `tile:action` with `features:open`). For each
+// tile it shows TWO sections:
 //
 //   • On this layer — the features the tile already HAS (direct + cascaded),
-//     each tagged with where it comes from.
+//     each tagged with where it comes from. The row's switch turns the
+//     feature OFF into the retainable hidden pool. A row the community gate
+//     BLOCKS carries a small "enabled — blocked" line with an inline allow
+//     override (markVerified bypass → `feature:verified` → the render gate
+//     re-reconciles and the feature activates).
 //   • Available to add — every feature the app knows that this layer does NOT
-//     have yet, each with its slash command.
+//     have yet. The row's switch ADDS it — routed through the bee's OWN slash
+//     command (the same attach logic the command line's `@feature` uses), so
+//     payloads and gating stay correct.
+//
+// Rows are multi-selectable; a bulk bar at the top acts on the selection:
+// ALLOW overrides the community block for every selected blocked feature,
+// DOWNLOAD mirrors the selected features' bytes locally (`features:download`,
+// handled by SwarmAdoptDrone → broker walk).
 //
 // Click another tile's icon and its sections APPEND to the list — you run
 // through the hive comparing what each layer has against what it could have,
 // without leaving for the installer.
 //
-// Shell UI, so it must NOT import essentials. It renders straight from the
-// `features:open` payload (already i18n-resolved by the drone) and owns only
-// the BENIGN "like" staging: a per-row star records the feature in
-// feature-staging.ts (hive-local). Nothing activates — when the participant
-// later opens the installer, portal-overlay hands the staged branch sigs over
-// and they come pre-ticked / focused.
+// Shell UI, so it must NOT import essentials — module services are reached
+// only through window.ioc at runtime, and gate state arrives pre-computed on
+// the `features:open` payload.
 
 import { Component, computed, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
-import { featureKey, isStaged, toggleStaged, clearStaged, type StagedFeature } from './feature-staging'
 import { markVerified } from './feature-verified'
 import { hideFeature, restoreFeature, loadHidden, hiddenKey, type HiddenFeature } from './feature-hidden'
 
@@ -47,6 +55,13 @@ interface FeatureRow {
   /** Full hive path of where the feature is attached (tile for direct, the
    *  declaring ancestor for cascade). Empty/absent = the hive root. */
   originSegments?: string[]
+  /** True when the community verification gate currently blocks activation —
+   *  the row shows the "enabled — blocked" line + allow override. */
+  gated?: boolean
+  /** The payload sig the gate evaluates — what the allow override verifies. */
+  gateSig?: string
+  /** Publisher domain attributed to the gate sig (empty = unknown origin). */
+  publisherDomain?: string
 }
 
 /** A feature the app knows but this layer doesn't have yet. */
@@ -58,10 +73,24 @@ interface AvailableRow {
   slashCommand?: string
   /** True when adding this feature would cascade to the layer's subtree. */
   cascades?: boolean
+  /** True when the panel can ADD this feature mechanically (essentials writes
+   *  the decoration at the tile's segments on `features:enable`). View bees
+   *  are not addable — their content (a page, a deck) must be authored, so
+   *  their rows carry the slash-command chip instead of a switch. */
+  addable?: boolean
 }
 
-/** Minimal shape the staging helpers need — both row kinds satisfy it. */
-type StageableRow = { kind: string; branchSig?: string; view: string; label: string }
+/** Minimal shape the selection / bulk helpers need — both row kinds satisfy
+ *  it (available rows simply have no branchSig/gateSig/originSegments). */
+type RowLike = {
+  kind: string
+  view: string
+  label: string
+  branchSig?: string
+  gateSig?: string
+  gated?: boolean
+  originSegments?: string[]
+}
 
 interface FeatureGroup {
   cell: string
@@ -97,10 +126,6 @@ export class FeaturesViewerComponent implements OnDestroy {
     cell: string; segments: string[]; sig: string; kind: string; label: string; code: string
   } | null>(null)
 
-  /** Reactivity trigger for staged state (read synchronously from
-   *  localStorage, mirroring DCP's domain-visibility pattern). */
-  readonly stagingVersion = signal(0)
-
   /** Hidden pool members, loaded from the signature pool. Drives two things:
    *  filtering hidden features OUT of the active lists, and the "show hidden"
    *  view (where each carries a Restore affordance). */
@@ -110,9 +135,37 @@ export class FeaturesViewerComponent implements OnDestroy {
    *  hiding them. The hidden set is scoped per location (per group). */
   readonly showHidden = signal(false)
 
-  /** Row the participant has highlighted — purely a selection affordance so it
-   *  reads as actionable (hover highlights, click pins the highlight). */
-  readonly selectedKey = signal<string | null>(null)
+  /** Multi-selected rows (by stable row key). The bulk bar at the top acts on
+   *  this set: allow the blocked ones, download the selected ones. */
+  readonly selectedKeys = signal<ReadonlySet<string>>(new Set())
+
+  /** Rows whose ADD is in flight (available-row switch clicked) — guards the
+   *  double-click and shows the busy state. */
+  readonly pending = signal<ReadonlySet<string>>(new Set())
+
+  /** Bulk downloads in flight (by cell) — the bar's download button shows
+   *  busy until every `features:download:done` lands. */
+  readonly downloading = signal<ReadonlySet<string>>(new Set())
+
+  readonly selectedCount = computed(() => this.selectedKeys().size)
+
+  /** Selected APPLIED rows the gate currently blocks — what bulk-allow acts on. */
+  readonly allowableCount = computed(() => {
+    let n = 0
+    for (const { feat, applied } of this.#selectedRows()) {
+      if (applied && feat.gated && feat.gateSig) n++
+    }
+    return n
+  })
+
+  /** Selected rows with anything to fetch — what bulk-download acts on. */
+  readonly downloadableCount = computed(() => {
+    let n = 0
+    for (const { feat } of this.#selectedRows()) {
+      if (feat.branchSig || feat.gateSig) n++
+    }
+    return n
+  })
 
   /** Fast membership: the hide keys currently in the pool. */
   readonly #hiddenKeys = computed(() => {
@@ -126,17 +179,6 @@ export class FeaturesViewerComponent implements OnDestroy {
   readonly hiddenCount = computed(() => {
     const locs = new Set(this.groups().map(g => g.segments.join('/')))
     return this.hidden().filter(d => locs.has(d.appliesTo.join('/'))).length
-  })
-
-  /** Total liked features across all groups — drives the footer hint. */
-  readonly likedCount = computed(() => {
-    this.stagingVersion()   // establish reactive dependency
-    let n = 0
-    for (const g of this.groups()) {
-      for (const r of g.applied) if (isStaged(this.#keyFor(g, r))) n++
-      for (const r of g.available) if (isStaged(this.#keyFor(g, r))) n++
-    }
-    return n
   })
 
   #cleanups: (() => void)[] = []
@@ -165,6 +207,8 @@ export class FeaturesViewerComponent implements OnDestroy {
         return [...list, group]
       })
       if (!this.visible()) this.visible.set(true)
+      // A fresh group replaces its rows — any in-flight ADD for it is settled.
+      if (this.pending().size) this.pending.set(new Set())
       // Refresh the hidden pool so the new group's features are filtered /
       // its hidden ones become restorable.
       void this.#refreshHidden()
@@ -193,6 +237,18 @@ export class FeaturesViewerComponent implements OnDestroy {
         })
       },
     ))
+
+    // A bulk download finished for a tile — drop its busy marker.
+    this.#cleanups.push(EffectBus.on<{ cell?: string }>('features:download:done', (p) => {
+      const cell = String(p?.cell ?? '')
+      if (!cell) return
+      this.downloading.update(set => {
+        if (!set.has(cell)) return set
+        const next = new Set(set)
+        next.delete(cell)
+        return next
+      })
+    }))
   }
 
   /** Read a feature resource's bytes as text for review. Capped so a huge page
@@ -234,7 +290,8 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.visible.set(false)
     this.groups.set([])
     this.showHidden.set(false)
-    this.selectedKey.set(null)
+    this.selectedKeys.set(new Set())
+    this.pending.set(new Set())
   }
 
   /** Drop one tile's sections from the view (does not clear its staging). */
@@ -258,24 +315,49 @@ export class FeaturesViewerComponent implements OnDestroy {
 
   /** The location an applied feature is attached at — its declaring ancestor
    *  for a cascaded feature, else the tile itself. This is the hide scope. */
-  #segmentsFor(group: FeatureGroup, feat: FeatureRow): string[] {
+  #segmentsFor(group: FeatureGroup, feat: RowLike): string[] {
     return feat.originSegments?.length ? [...feat.originSegments] : [...group.segments]
   }
 
-  /** Stable per-row key (feature kind @ scope) — used for both the hide pool
-   *  membership and the selection highlight. */
-  rowKey(group: FeatureGroup, feat: FeatureRow): string {
+  /** Stable per-row key (feature kind @ scope) — used for the hide pool
+   *  membership, the multi-selection, and the pending/busy markers. */
+  rowKey(group: FeatureGroup, feat: RowLike): string {
     return hiddenKey(feat.kind, this.#segmentsFor(group, feat))
   }
 
-  isSelected(group: FeatureGroup, feat: FeatureRow): boolean {
-    return this.selectedKey() === this.rowKey(group, feat)
+  isSelected(group: FeatureGroup, feat: RowLike): boolean {
+    return this.selectedKeys().has(this.rowKey(group, feat))
   }
 
-  /** Click a row to pin/unpin its highlight (the "this is actionable" cue). */
-  selectRow(group: FeatureGroup, feat: FeatureRow): void {
+  /** Click a row to toggle it in the multi-selection the bulk bar acts on. */
+  selectRow(group: FeatureGroup, feat: RowLike): void {
     const k = this.rowKey(group, feat)
-    this.selectedKey.update(cur => (cur === k ? null : k))
+    this.selectedKeys.update(cur => {
+      const next = new Set(cur)
+      if (next.has(k)) next.delete(k)
+      else next.add(k)
+      return next
+    })
+  }
+
+  clearSelection(): void {
+    this.selectedKeys.set(new Set())
+  }
+
+  /** Every currently-selected row, resolved back to its group. Applied rows
+   *  are matched first; available rows carry `applied: false`. */
+  #selectedRows(): { group: FeatureGroup; feat: RowLike; applied: boolean }[] {
+    const picked = this.selectedKeys()
+    const out: { group: FeatureGroup; feat: RowLike; applied: boolean }[] = []
+    for (const group of this.groups()) {
+      for (const feat of group.applied) {
+        if (picked.has(this.rowKey(group, feat))) out.push({ group, feat, applied: true })
+      }
+      for (const feat of group.available) {
+        if (picked.has(this.rowKey(group, feat))) out.push({ group, feat, applied: false })
+      }
+    }
+    return out
   }
 
   isHidden(group: FeatureGroup, feat: FeatureRow): boolean {
@@ -289,11 +371,15 @@ export class FeaturesViewerComponent implements OnDestroy {
     return group.applied.filter(f => !this.isHidden(group, f))
   }
 
-  /** Hidden features attached at this tile's location — the "show hidden" view,
-   *  each restorable. */
+  /** Hidden features affecting this tile — the "show hidden" view, each
+   *  restorable. Includes hides scoped to ANCESTOR locations too (a cascaded
+   *  feature's hide is written at its declaring ancestor — an exact-location
+   *  filter made those unrestorable from the very panel that hid them). */
   hiddenFor(group: FeatureGroup): HiddenFeature[] {
-    const loc = group.segments.join('/')
-    return this.hidden().filter(d => d.appliesTo.join('/') === loc)
+    const segs = group.segments
+    return this.hidden().filter(d =>
+      d.appliesTo.length <= segs.length
+      && d.appliesTo.every((s, i) => s === segs[i]))
   }
 
   /** Hide an applied feature: write it into the pool (turn off, retained) and
@@ -312,6 +398,10 @@ export class FeaturesViewerComponent implements OnDestroy {
     if (!ok) return
     EffectBus.emit('feature:restored', { featKind: rec.featKind, segments: rec.appliesTo })
     await this.#refreshHidden()
+    // Restoring the LAST hidden feature removes the header toggle (count 0) —
+    // flip back to the active view so the panel isn't stranded on an empty
+    // hidden list with no way out.
+    if (this.showHidden() && this.hiddenCount() === 0) this.showHidden.set(false)
   }
 
   toggleShowHidden(): void {
@@ -322,21 +412,10 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.hidden.set(await loadHidden())
   }
 
-  // ── benign "like" staging ─────────────────────────────────
+  // ── allow / add / download — the toggles are REAL ─────────────────
 
-  #keyFor(group: FeatureGroup, row: StageableRow): string {
-    return featureKey({ sig: row.branchSig, cell: group.cell, kind: row.kind })
-  }
-
-  isLiked(group: FeatureGroup, row: StageableRow): boolean {
-    this.stagingVersion()   // establish reactive dependency
-    return isStaged(this.#keyFor(group, row))
-  }
-
-  /** True when this feature carries an installer-resolvable branch sig — i.e.
-   *  liking it will actually pre-tick something in the installer (vs. a benign
-   *  metadata-only like for a feature with no peer branch). */
-  installable(row: StageableRow): boolean {
+  /** True when this feature carries an installer-resolvable branch sig. */
+  installable(row: RowLike): boolean {
     return typeof row.branchSig === 'string' && /^[a-f0-9]{64}$/.test(row.branchSig)
   }
 
@@ -348,30 +427,96 @@ export class FeaturesViewerComponent implements OnDestroy {
   }
 
   /** Lead into the adopt process for this peer-offered tile. Emits the canonical
-   *  adopt verb — SwarmAdoptDrone re-resolves the branch from the live peer cache
-   *  and routes into the same install/enable flow used everywhere. NOT a benign
-   *  stage: this is "adopt", reached from the features window, the way the
-   *  features icon is the one surface in both solo and swarm. */
+   *  single-adopt verb — SwarmAdoptDrone resolves the branch, DISAMBIGUATES when
+   *  several publishers offer the same name (choose-panel), folds inline
+   *  (code-bearing branches prompt for consent), then this panel reopens with
+   *  the tile's real rows + gate states. NOT `adopt-selected` — that form skips
+   *  the multi-publisher check and would silently adopt whichever copy the
+   *  cache lists first. */
   adopt(group: FeatureGroup): void {
-    EffectBus.emit('tile:action', { action: 'adopt-selected', selections: [{ label: group.cell }] })
+    EffectBus.emit('tile:action', { action: 'adopt', label: group.cell })
   }
 
-  toggleLike(group: FeatureGroup, row: StageableRow): void {
-    const staged: StagedFeature = {
-      key: this.#keyFor(group, row),
-      ...(row.branchSig ? { sig: row.branchSig } : {}),
-      cell: group.cell,
-      kind: row.kind,
-      view: row.view,
-      label: row.label,
+  /** Override the community block for one feature: record its payload sig as
+   *  verified (an explicit bypass) and tell the render gate to re-reconcile —
+   *  the feature activates and its resources may stream. */
+  allow(group: FeatureGroup, feat: FeatureRow): void {
+    if (!feat.gateSig) return
+    markVerified({ sig: feat.gateSig, cell: group.cell, kind: feat.kind, label: feat.label, bypassed: true })
+    EffectBus.emit('feature:verified', { sig: feat.gateSig })
+    feat.gated = false
+    this.groups.update(list => [...list])   // re-render the cleared line
+  }
+
+  /** Bulk allow — override the block for every SELECTED blocked feature. */
+  allowSelected(): void {
+    let cleared = false
+    for (const { group, feat } of this.#selectedRows()) {
+      if (!feat.gated || !feat.gateSig) continue
+      markVerified({ sig: feat.gateSig, cell: group.cell, kind: feat.kind, label: feat.label, bypassed: true })
+      EffectBus.emit('feature:verified', { sig: feat.gateSig })
+      feat.gated = false
+      cleared = true
     }
-    toggleStaged(staged)
-    this.stagingVersion.update(v => v + 1)
+    if (cleared) this.groups.update(list => [...list])
   }
 
-  clearLikes(): void {
-    clearStaged()
-    this.stagingVersion.update(v => v + 1)
+  /** Bulk download — mirror every selected feature's bytes onto this machine.
+   *  SwarmAdoptDrone answers `features:download` with the broker's full walk
+   *  (branch) or the page + its refs (page-only), and confirms per cell. */
+  downloadSelected(): void {
+    const cells = new Set<string>()
+    for (const { group, feat } of this.#selectedRows()) {
+      if (!feat.branchSig && !feat.gateSig) continue
+      cells.add(group.cell)
+      EffectBus.emit('features:download', {
+        cell: group.cell,
+        segments: [...group.segments],
+        ...(feat.branchSig ? { branchSig: feat.branchSig } : {}),
+        ...(feat.gateSig ? { gateSig: feat.gateSig } : {}),
+      })
+    }
+    if (cells.size) this.downloading.update(set => new Set([...set, ...cells]))
+  }
+
+  isDownloading(): boolean {
+    return this.downloading().size > 0
+  }
+
+  isPending(group: FeatureGroup, feat: RowLike): boolean {
+    return this.pending().has(this.rowKey(group, feat))
+  }
+
+  /** ADD an available feature to the tile — the switch's ON gesture. Emits
+   *  `features:enable` with the tile's EXPLICIT segments; ShowFeaturesDrone
+   *  writes the decoration there and re-opens the group (the row moves into
+   *  "On this layer"). Explicit segments — never the current selection or
+   *  location — so the attach can't land on the wrong cell. Only rows the
+   *  drone marked `addable` render this switch (view bees' slash commands
+   *  TOGGLE a view; running one here flipped the whole app into website mode
+   *  instead of attaching anything). */
+  enableAvailable(group: FeatureGroup, feat: AvailableRow): void {
+    if (!feat.addable) return
+    const key = this.rowKey(group, feat)
+    if (this.pending().has(key)) return
+    this.pending.update(set => new Set([...set, key]))
+    EffectBus.emit('features:enable', {
+      cell: group.cell,
+      segments: [...group.segments],
+      kind: feat.kind,
+      view: feat.view,
+    })
+    // The drone answers with a fresh `features:open` upsert for this tile,
+    // which replaces the whole group — clear the busy marker on a short leash
+    // so a failed enable doesn't wedge the switch.
+    setTimeout(() => {
+      this.pending.update(set => {
+        if (!set.has(key)) return set
+        const next = new Set(set)
+        next.delete(key)
+        return next
+      })
+    }, 4000)
   }
 
   onKey(event: KeyboardEvent): void {

@@ -13,6 +13,30 @@ const DEFAULT_PORTALS: Record<string, string> = {
 const DCP_LOCAL_URL = 'http://localhost:2400'
 const DCP_CANONICAL_URL = 'https://diamondcoreprocessor.com'
 
+// Headless (invisible) DCP install timing.
+const HEADLESS_FALLBACK_MS = 12000  // no config projected in time → promote to visible
+const HEADLESS_SETTLE_MS = 1200     // config projections quiet this long → auto-apply
+
+// Pending portal:open queue — requests that arrive while a headless install is
+// in flight are DEFERRED (drained one at a time on close), never dropped.
+const PENDING_OPENS_KEY = 'hc:portal-pending-opens'
+const PENDING_OPEN_TTL_MS = 15 * 60_000  // a persisted entry older than this is stale — drop, don't surprise-install
+const MAX_PENDING_OPENS = 8              // each code adopt needs its own consent click, so a real batch stays small
+const RESUME_DELAY_MS = 4000             // post-boot grace before resuming a persisted install (drones registering)
+
+/** The portal:open request payload. Also the pending-queue entry shape, so it
+ *  must stay JSON-serializable — headless entries persist across the web
+ *  shell's post-accept reload (main.ts reloadIfDrifted). */
+interface PortalOpenRequest {
+  target?: string; url?: string; branchSig?: string; at?: string; domain?: string; label?: string
+  /** Invisible install (code adopt): run the DCP headless, pre-ticking the
+   *  `stage` code sigs, and auto-apply once its config settles. */
+  headless?: boolean; stage?: string[]
+  /** Header upgrade-indicator handoff: WHICH package changed + the
+   *  delta the installer marks for review. Notify-and-route only. */
+  upgrade?: { packageSig?: string | null; newBees?: string[]; previous?: string | null }
+}
+
 /** Resolve the DCP installer URL.
  *
  *  ─── The full-split model ────────────────────────────────────────────
@@ -109,6 +133,34 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   pendingPackageChange = false
   #openLogicalBaseline: string | null = null
 
+  /** Headless (invisible) install: the DCP runs in an off-screen iframe with no
+   *  chrome and no gate lock, resolves + installs the branch's staged code
+   *  nodes, and we auto-apply once its config projections go quiet. Used by the
+   *  inline adopt of a CODE-bearing feature so the install never takes over the
+   *  screen. Promotes to the visible installer if the DCP never projects. */
+  headless = false
+  #headlessFallbackTimer: number | null = null
+  #headlessApplyTimer: number | null = null
+
+  /** The request behind the currently-open portal — kept for the per-branch
+   *  outcome messages (activity:log) a headless install must say out loud. */
+  #activeRequest: PortalOpenRequest | null = null
+
+  /** Deferred portal:open requests (see the in-flight guard in onPortalOpen).
+   *  Drained one at a time from close(); headless entries also persist to
+   *  localStorage so the web shell's post-accept reload can't eat the rest of
+   *  an Adopt-All batch. */
+  #pendingOpens: { ts: number; detail: PortalOpenRequest }[] = []
+  /** True while #drainPendingOpens is re-dispatching the queue head — lets the
+   *  open path know the new portal came off the queue (`#openWasQueued`). */
+  #dispatchingQueued = false
+  /** The open portal came off the queue: its entry stays at the queue head
+   *  until close() (terminal), so a mid-install reload resumes it next boot. */
+  #openWasQueued = false
+  /** Set by apply() around close() so the outcome message can distinguish an
+   *  accepted headless install from a discarded one. */
+  #applyInProgress = false
+
   /** Full URL of the currently-loaded iframe content, for the title-attr tooltip. */
   get activeUrl(): string | null { return this.#activeUrl }
 
@@ -156,15 +208,22 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   // open portal
   // -------------------------------------------------
   private readonly onPortalOpen = (e: Event): void => {
-    const detail = (e as CustomEvent).detail as
-      {
-        target?: string; url?: string; branchSig?: string; at?: string; domain?: string; label?: string
-        /** Header upgrade-indicator handoff: WHICH package changed + the
-         *  delta the installer marks for review. Notify-and-route only. */
-        upgrade?: { packageSig?: string | null; newBees?: string[]; previous?: string | null }
-      } | null
+    const detail = (e as CustomEvent).detail as PortalOpenRequest | null
     let url = detail?.url ?? resolvePortalUrl(detail?.target ?? '')
     if (!url) return
+
+    // In-flight guard: a HEADLESS install is running off-screen (no chrome, the
+    // user can't see it). A second portal:open — e.g. the next code pick in an
+    // Adopt-All batch — must NOT tear it down: rebinding the iframe [src] and
+    // clearing its timers would silently drop the in-flight install. And an
+    // incoming HEADLESS request must never hijack a VISIBLE session the user is
+    // mid-review in. Either way the request is QUEUED, not dropped — close()
+    // drains the queue one install at a time (promoting a stalled headless
+    // install to visible still works exactly as before).
+    if (this.isOpen && (this.headless || detail?.headless === true)) {
+      this.#enqueueOpen(detail)
+      return
+    }
 
     // Hand off the branchSig + placement location to the embedded installer
     // via URL hash so the installer's load-time handler can pick them up
@@ -228,24 +287,41 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     // by default. Nothing folds until Done — this only sets checkbox state.
     // Capped so the hash never grows pathological (DCP falls back gracefully).
     if ((detail?.target ?? '') === 'dcp') {
-      const sigs = stagedSigs().slice(0, 80)
+      // Merge the caller's explicit stage sigs (a headless code adopt pre-ticks
+      // the branch's bee/dep nodes) with the "show features" panel's staging.
+      const extra = Array.isArray(detail?.stage)
+        ? detail.stage.map(s => String(s ?? '').trim().toLowerCase()).filter(s => /^[a-f0-9]{64}$/.test(s))
+        : []
+      const sigs = [...new Set([...extra, ...stagedSigs()])].slice(0, 80)
       if (sigs.length) url += (url.includes('#') ? '&' : '#') + `stage=${sigs.join(',')}`
     }
 
     this.#activeUrl = url
     this.#activeTarget = detail?.target ?? null
+    this.#activeRequest = detail
+    this.#openWasQueued = this.#dispatchingQueued
     // Baseline the installer's logical config at open so a package/code opt-in
     // made while the portal is up surfaces a Done button (see pendingPackageChange).
     this.#openLogicalBaseline = this.#snapshotLogicalRootSig()
     this.pendingPackageChange = false
     this.portalSrc = this.#sanitizer.bypassSecurityTrustResourceUrl(url)
     this.isOpen = true
-    // Freeze tile navigation while the portal/installer covers the canvas —
-    // per the "modals lock tiles while showing" rule no pan/pinch/wheel-zoom/
-    // drag-select may bleed through behind it. Released in close() (every
-    // passive exit funnels there) and ngOnDestroy. Resolved lazily because
-    // the gate's bee may register after this component constructs on web.
-    this.#gate()?.lock(PORTAL_LOCK_OWNER)
+    this.headless = detail?.headless === true && (detail?.target ?? '') === 'dcp'
+    if (this.headless) {
+      // Invisible install — NO gate lock (tiles stay interactive behind the
+      // off-screen iframe) and NO chrome. If the DCP never projects a config in
+      // time (slow / stuck / unresolved) we promote to the visible installer so
+      // the participant can finish by hand — never a silent hung iframe.
+      this.#clearHeadlessTimers()
+      this.#headlessFallbackTimer = window.setTimeout(() => this.#promoteHeadlessToVisible(), HEADLESS_FALLBACK_MS)
+    } else {
+      // Freeze tile navigation while the visible installer covers the canvas —
+      // per the "modals lock tiles while showing" rule no pan/pinch/wheel-zoom/
+      // drag-select may bleed through behind it. Released in close() (every
+      // passive exit funnels there) and ngOnDestroy. Resolved lazily because
+      // the gate's bee may register after this component constructs on web.
+      this.#gate()?.lock(PORTAL_LOCK_OWNER)
+    }
     this.#recomputeDiff()   // also calls detectChanges()
   }
 
@@ -335,8 +411,140 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
       // enforced above (must match the installer iframe's origin).
       case 'hc:registry-snapshot':
         EffectBus.emit('registry:snapshot', data)
+        // Headless install: the DCP resolved the branch + ticked its staged
+        // nodes and is projecting config — auto-apply once that goes quiet.
+        if (this.headless) this.#scheduleHeadlessApply()
         break
     }
+  }
+
+  // -------------------------------------------------
+  // headless (invisible) install
+  // -------------------------------------------------
+  /** Apply once the DCP's config projections go quiet — branch resolved, staged
+   *  nodes ticked, nothing new arriving. Debounced so a burst of snapshots
+   *  settles to ONE apply() (fold + resync), then the off-screen iframe tears
+   *  down. Also cancels the "never projected" fallback. */
+  #scheduleHeadlessApply(): void {
+    // Do NOT clear #headlessFallbackTimer here — it stays armed as a HARD ceiling
+    // so an install that never quiesces (a hypothetical sustained snapshot
+    // stream) promotes to the visible installer instead of hanging invisibly.
+    // On a normal install the settle timer below fires apply() first, and
+    // close() clears both timers.
+    if (this.#headlessApplyTimer !== null) window.clearTimeout(this.#headlessApplyTimer)
+    this.#headlessApplyTimer = window.setTimeout(() => {
+      this.#headlessApplyTimer = null
+      if (this.headless) this.apply()
+    }, HEADLESS_SETTLE_MS)
+  }
+
+  /** The DCP never projected a config in time — surface the installer VISIBLY so
+   *  the participant can finish the install by hand. Never a silent hung iframe. */
+  #promoteHeadlessToVisible = (): void => {
+    if (!this.headless) return
+    this.#clearHeadlessTimers()
+    this.headless = false
+    this.#gate()?.lock(PORTAL_LOCK_OWNER)
+    this.#recomputeDiff()   // detectChanges → the visible panel now renders
+    // Say WHY the installer suddenly appeared — the install was invisible
+    // until now, so the promotion needs a visible cause. Emitted AFTER our own
+    // detectChanges: the activity-log handler ticks the whole app, and ticking
+    // while this component's bindings are mid-flip throws NG0100 in dev.
+    EffectBus.emit('activity:log', {
+      message: `the install of ${this.#requestLabel(this.#activeRequest)} needs attention — opening the installer`, icon: '◈',
+    })
+  }
+
+  #clearHeadlessTimers(): void {
+    if (this.#headlessFallbackTimer !== null) { window.clearTimeout(this.#headlessFallbackTimer); this.#headlessFallbackTimer = null }
+    if (this.#headlessApplyTimer !== null) { window.clearTimeout(this.#headlessApplyTimer); this.#headlessApplyTimer = null }
+  }
+
+  // -------------------------------------------------
+  // pending-open queue (defer, never drop)
+  // -------------------------------------------------
+  /** Human handle for a request in activity:log messages: the tile name,
+   *  else the branch-sig prefix, else the portal target. */
+  #requestLabel(detail: PortalOpenRequest | null): string {
+    const label = String(detail?.label ?? '').trim()
+    if (label) return `"${label}"`
+    const sig = String(detail?.branchSig ?? '').trim().toLowerCase()
+    if (/^[a-f0-9]{64}$/.test(sig)) return `branch ${sig.slice(0, 6)}`
+    return String(detail?.target ?? '').trim() || 'the install'
+  }
+
+  #enqueueOpen(detail: PortalOpenRequest | null): void {
+    if (!detail || this.#pendingOpens.length >= MAX_PENDING_OPENS) {
+      console.warn('[portal] dropping portal:open — pending queue full or detail missing')
+      EffectBus.emit('activity:log', {
+        message: `couldn't queue ${this.#requestLabel(detail)} — try again when the current install finishes`, icon: '○',
+      })
+      return
+    }
+    this.#pendingOpens.push({ ts: Date.now(), detail })
+    this.#persistPendingOpens()
+    EffectBus.emit('activity:log', { message: `queued ${this.#requestLabel(detail)} — another install is finishing`, icon: '◈' })
+  }
+
+  /** Only HEADLESS installs persist: they run unattended, so the web shell's
+   *  post-accept reload (main.ts reloadIfDrifted fires on every accepted
+   *  install that advances the sync sig) must not eat the rest of an Adopt-All
+   *  batch. A queued VISIBLE open is a user gesture — auto-popping the
+   *  installer after a reload would be worse than a re-click. */
+  #persistPendingOpens(): void {
+    try {
+      const headless = this.#pendingOpens.filter(p => p.detail.headless === true)
+      if (headless.length === 0) localStorage.removeItem(PENDING_OPENS_KEY)
+      else localStorage.setItem(PENDING_OPENS_KEY, JSON.stringify(headless))
+    } catch { /* no localStorage — the queue degrades to in-memory */ }
+  }
+
+  #restorePendingOpens(): void {
+    let entries: { ts: number; detail: PortalOpenRequest }[] = []
+    try {
+      const raw = localStorage.getItem(PENDING_OPENS_KEY)
+      const arr = raw ? JSON.parse(raw) : []
+      if (Array.isArray(arr)) {
+        entries = arr.filter((e: { ts?: unknown; detail?: PortalOpenRequest } | null) =>
+          !!e && typeof e.ts === 'number' && e.detail?.headless === true) as { ts: number; detail: PortalOpenRequest }[]
+      }
+    } catch { /* corrupt/absent — nothing to resume */ }
+    if (entries.length === 0) return
+    const now = Date.now()
+    const fresh = entries.filter(e => now - e.ts <= PENDING_OPEN_TTL_MS)
+    for (const e of entries) {
+      if (now - e.ts > PENDING_OPEN_TTL_MS) {
+        EffectBus.emit('activity:log', { message: `dropped a stale queued install of ${this.#requestLabel(e.detail)} — adopt it again`, icon: '○' })
+      }
+    }
+    this.#pendingOpens = fresh
+    this.#persistPendingOpens()
+    if (fresh.length === 0) return
+    // Resume after boot settles — the fold path needs the sharing drones
+    // registered, and the headless fallback (12s) still guards a stuck DCP.
+    window.setTimeout(() => this.#drainPendingOpens(), RESUME_DELAY_MS)
+  }
+
+  #drainPendingOpens(): void {
+    if (this.isOpen || this.#pendingOpens.length === 0) return
+    // Re-dispatch the REAL window event (not a private call) so every
+    // portal:open listener sees it — the web shell mounts its sentinel, the
+    // screensaver suspends, the welcome card yields — exactly as if the
+    // request had just fired. All of those listeners are idempotent.
+    this.#dispatchingQueued = true
+    try {
+      window.dispatchEvent(new CustomEvent('portal:open', { detail: this.#pendingOpens[0].detail }))
+    } finally {
+      this.#dispatchingQueued = false
+    }
+    // If the open landed, the head is now IN FLIGHT — it leaves the queue in
+    // close() (terminal), so a mid-install shell reload resumes it next boot.
+    if (this.isOpen) return
+    // The open bailed (unresolvable target/url) — drop the head, try the next.
+    const dropped = this.#pendingOpens.shift()
+    this.#persistPendingOpens()
+    if (dropped) EffectBus.emit('activity:log', { message: `couldn't start the queued install of ${this.#requestLabel(dropped.detail)}`, icon: '○' })
+    this.#drainPendingOpens()
   }
 
   // -------------------------------------------------
@@ -352,15 +560,21 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   public ngOnInit(): void {
     window.addEventListener('portal:open', this.onPortalOpen)
     window.addEventListener('message', this.onMessage)
+    // A HEADLESS portal is invisible — Escape / a touch-drag is aimed at
+    // something the user can see, and closing here would silently kill the
+    // in-flight install. Once promoted to visible, both dismiss as usual.
     this.#unsubEscape = EffectBus.on('global:escape', () => {
-      if (this.isOpen) this.close()
+      if (this.isOpen && !this.headless) this.close()
     })
     this.#unsubTouchDragging = EffectBus.on<{ active: boolean }>('touch:dragging', ({ active }) => {
-      if (active && this.isOpen) this.close()
+      if (active && this.isOpen && !this.headless) this.close()
     })
     // Installer pushed a new config while the portal is open → refresh the
     // pending +adds/−removes next to the back/Done button.
     this.#unsubDiff = EffectBus.on('registry:snapshot', () => this.#recomputeDiff())
+    // Headless installs the last session queued but never ran (the web shell
+    // reloads after each accepted install) resume here.
+    this.#restorePendingOpens()
   }
 
   public ngOnDestroy(): void {
@@ -369,6 +583,7 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     this.#unsubEscape?.()
     this.#unsubTouchDragging?.()
     this.#unsubDiff?.()
+    this.#clearHeadlessTimers()
     // Release on teardown so a portal destroyed while open never leaves the
     // hexes locked.
     this.#gate()?.unlock(PORTAL_LOCK_OWNER)
@@ -390,14 +605,34 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   // diff isn't lost: DCP keeps the config and re-surfaces it next open.
   public close = (): void => {
     const wasDcp = this.#activeTarget === 'dcp'
+    const wasHeadless = this.headless
+    const finished = this.#activeRequest
+    // The portal that just terminated came off the queue — remove its entry
+    // NOW (not at dispatch): if the shell had reloaded mid-install, the
+    // persisted entry would have resumed on the next boot instead of vanishing.
+    if (this.#openWasQueued) {
+      this.#pendingOpens.shift()
+      this.#persistPendingOpens()
+      this.#openWasQueued = false
+    }
+    this.#clearHeadlessTimers()
+    this.headless = false
     this.isOpen = false
     this.#gate()?.unlock(PORTAL_LOCK_OWNER)
     this.portalSrc = null
     this.#activeUrl = null
     this.#activeTarget = null
+    this.#activeRequest = null
     this.pendingPackageChange = false
     this.#openLogicalBaseline = null
     this.#cdr.detectChanges()
+    // Per-branch outcome — a headless install is invisible, so its end must be
+    // said out loud: accepted (apply) or discarded (any passive close).
+    if (wasHeadless) {
+      EffectBus.emit('activity:log', this.#applyInProgress
+        ? { message: `installed ${this.#requestLabel(finished)}`, icon: '◈' }
+        : { message: `the install of ${this.#requestLabel(finished)} was cancelled before it finished`, icon: '○' })
+    }
     // Generic close signal for EVERY overlay target (installer, meadowverse,
     // …). Symmetric counterpart to `portal:open`; lets listeners that suspend
     // while the hive is covered (e.g. the screensaver) reliably resume on
@@ -405,6 +640,10 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     // the install trigger — installs ride `actions:available` from apply().
     window.dispatchEvent(new CustomEvent('portal:closed'))
     if (wasDcp) window.dispatchEvent(new CustomEvent('dcp:embed-closed'))
+    // Drain the next queued request — deferred a macrotask so apply()'s
+    // `actions:available` (dispatched right after this close returns) reaches
+    // its listeners before the next install's iframe starts loading.
+    if (this.#pendingOpens.length) window.setTimeout(() => this.#drainPendingOpens(), 0)
   }
 
   // -------------------------------------------------
@@ -418,7 +657,8 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
   // participant authorizes it here.
   public apply = (): void => {
     const wasDcp = this.#activeTarget === 'dcp'
-    this.close()
+    this.#applyInProgress = true
+    try { this.close() } finally { this.#applyInProgress = false }
     if (wasDcp) window.dispatchEvent(new CustomEvent('actions:available'))
   }
 }

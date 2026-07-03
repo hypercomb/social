@@ -24,6 +24,19 @@
   opacity: 0.92;
 }
 
+// Headless install iframe — kept in the layout (so it LOADS and its scripts
+// RUN) but off-screen and inert. NOT display:none, which some engines throttle.
+.portal-frame-headless {
+  position: fixed;
+  left: -10000px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
 // ── Iframe-address breadcrumb ────────────────────────────────────────
 // Top-right corner of the panel; matches the install-crumb's position in
 // the underlying shell so the participant always knows "which host's UI

@@ -18,15 +18,23 @@ const readDomains = (): string[] => {
     const self = localStorage.getItem('hc:nostrmesh:self-domain')?.trim()
     if (self) out.push(self)
   } catch { /* localStorage unavailable — ignore */ }
-  try {
-    const raw = localStorage.getItem('hc:community:domains')
-    if (raw) {
-      const arr: unknown = JSON.parse(raw)
-      if (Array.isArray(arr)) {
-        for (const d of arr) if (typeof d === 'string' && d.trim()) out.push(d.trim())
+  const readList = (key: string): void => {
+    try {
+      const raw = localStorage.getItem(key)
+      if (raw) {
+        const arr: unknown = JSON.parse(raw)
+        if (Array.isArray(arr)) {
+          for (const d of arr) if (typeof d === 'string' && d.trim()) out.push(d.trim())
+        }
       }
-    }
-  } catch { /* malformed / absent — ignore */ }
+    } catch { /* malformed / absent — ignore */ }
+  }
+  readList('hc:community:domains')
+  // Learned publisher hosts, persisted by the content broker (`hc:known-domains`
+  // — same key-only contract as the broker's reader). Without these the SW can
+  // only try self + community hosts after a reload, and an adopted site's
+  // not-yet-streamed images/stylesheets 404 forever.
+  readList('hc:known-domains')
   return [...new Set(out)]   // dedupe, preserve order
 }
 

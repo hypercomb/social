@@ -337,6 +337,14 @@ export class ContentBrokerDrone extends Drone {
   // content's resources from. This is a FETCH source, NOT a trust grant:
   // sha256 verification gates acceptance regardless, so noting a domain
   // can only ever speed up finding correct bytes, never accept wrong ones.
+  //
+  // PERSISTED at `hc:known-domains` (bounded) and re-seeded on construction:
+  // without persistence every learned publisher host evaporated on reload, so
+  // an adopted site whose resources hadn't streamed yet became permanently
+  // unreachable (self/community/beta-mirror hosts were the only survivors).
+  // Every learned host is ALSO posted to the service worker — the SW serves
+  // the page's /@resource/<sig> DOM requests (images, stylesheets) and only
+  // knows the domains the page tells it about.
   #sessionKnownDomains = new Set<string>()
 
   // Cancelled sigs — populated by inbound KIND_FETCH_CANCEL events.
@@ -350,6 +358,11 @@ export class ContentBrokerDrone extends Drone {
     super()
     queueMicrotask(() => this.#resolveMyPubkeyWithRetry(0))
     queueMicrotask(() => this.#subscribeBroadcastWithRetry(0))
+    // Re-seed learned publisher hosts from the persisted list so adopted
+    // content keeps resolving across reloads (see #sessionKnownDomains).
+    queueMicrotask(() => {
+      for (const host of this.#loadPersistedHosts()) this.#sessionKnownDomains.add(host)
+    })
   }
 
   protected override sense = () => true
@@ -499,11 +512,70 @@ export class ContentBrokerDrone extends Drone {
     const set = this.#knownDomainsBySig.get(sig) ?? new Set<string>()
     for (const d of domains) set.add(d)
     this.#knownDomainsBySig.set(sig, set)
+    // The HOST half of the knowledge is durable: persist + hand to the SW so
+    // reloads and DOM-side /@resource/ fetches can still reach the publisher.
+    for (const d of domains) this.#learnHost(d)
     // New address knowledge for this sig — its egg may now hatch; lift
     // the miss window AND reset the backoff so the next ask re-dials
     // immediately (not on the backed-off schedule).
     this.#fetchMissUntil.delete(sig)
     this.#missBackoff.delete(sig)
+  }
+
+  // ── durable host knowledge — persisted + shared with the service worker ──
+  // localStorage key agreed with shared's sw-domains.ts readDomains() (the
+  // same never-import, key-only contract as hc:feature-verified). Bounded,
+  // most-recent-first. sha256 verification still gates every byte a listed
+  // host serves, so this list can only ever speed up finding correct bytes.
+  static readonly #KNOWN_HOSTS_KEY = 'hc:known-domains'
+  static readonly #KNOWN_HOSTS_MAX = 24
+
+  #loadPersistedHosts = (): string[] => {
+    try {
+      const raw = localStorage.getItem(ContentBrokerDrone.#KNOWN_HOSTS_KEY)
+      const arr = raw ? JSON.parse(raw) : []
+      return Array.isArray(arr)
+        ? arr.map(d => this.#domainToHost(String(d ?? ''))).filter(Boolean)
+        : []
+    } catch { return [] }
+  }
+
+  /** Learn a publisher host: session set + persisted list + service worker.
+   *  Idempotent per host; a no-op for hosts already known this session. */
+  #learnHost = (raw: string): void => {
+    const host = this.#domainToHost(raw)
+    if (!host || this.#sessionKnownDomains.has(host)) return
+    this.#sessionKnownDomains.add(host)
+    try {
+      const list = [host, ...this.#loadPersistedHosts().filter(h => h !== host)]
+        .slice(0, ContentBrokerDrone.#KNOWN_HOSTS_MAX)
+      localStorage.setItem(ContentBrokerDrone.#KNOWN_HOSTS_KEY, JSON.stringify(list))
+    } catch { /* no storage — session-only, as before */ }
+    this.#postDomainsToServiceWorker()
+  }
+
+  /** Hand the full host list (self + community + learned) to the service
+   *  worker — the SW serves the mounted page's /@resource/<sig> requests and
+   *  has no localStorage of its own, so without this push it can only try
+   *  self + community hosts and every adopted site's DOM assets 404 on a
+   *  cold cache. Same message shape as shared's sw-domains.ts. */
+  #postDomainsToServiceWorker = (): void => {
+    try {
+      if (!('serviceWorker' in navigator)) return
+      const domains = [...new Set([
+        this.#domainToHost(this.#getSelfDomain()),
+        ...this.#getCommunityDomains(),
+        ...this.#sessionKnownDomains,
+      ].filter(Boolean))]
+      if (!domains.length) return
+      const post = (target: ServiceWorker | null | undefined): void => {
+        target?.postMessage({ type: 'hc:sw:domains', domains })
+      }
+      post(navigator.serviceWorker.controller)
+      if (!navigator.serviceWorker.controller) {
+        void navigator.serviceWorker.getRegistration().then(reg => post(reg?.active))
+      }
+    } catch { /* best-effort — the boot re-post covers the next load */ }
   }
 
   /** Record a full-cascade miss for `s` with exponential backoff: first miss
@@ -747,7 +819,7 @@ export class ContentBrokerDrone extends Drone {
   public noteDomain = (domain: string): void => {
     const host = this.#domainToHost(String(domain ?? ''))
     if (host) {
-      this.#sessionKnownDomains.add(host)
+      this.#learnHost(host)   // session set + persisted list + service worker
       // A new session-wide fetch source can satisfy ANY pending egg —
       // clear all miss windows + backoff (rare event: adopt handoff, config).
       this.#fetchMissUntil.clear()
@@ -914,7 +986,7 @@ export class ContentBrokerDrone extends Drone {
    * makes already-present sigs free. Emits `adopt:progress` as it fills
    * and `adopt:done` at the end (UI can sprout the cell as counts climb).
    */
-  public adopt = async (rootSig: string, opts: { layersOnly?: boolean } = {}): Promise<{ layers: number; leaves: number; failed: number }> => {
+  public adopt = async (rootSig: string, opts: { layersOnly?: boolean; silent?: boolean } = {}): Promise<{ layers: number; leaves: number; failed: number }> => {
     const root = String(rootSig ?? '').toLowerCase().trim()
     const stats = { layers: 0, leaves: 0, failed: 0 }
     if (!SIG_RE.test(root)) return stats
@@ -1002,7 +1074,11 @@ export class ContentBrokerDrone extends Drone {
     }
 
     await walkLayer(root)
-    this.emitEffect('adopt:done', { root, ...stats })
+    // `silent` marks background walks (code inspection, panel downloads) —
+    // the shells' adopt:done handlers switch the view to hexagons for a REAL
+    // adopt landing, which must not fire for a walk the user never asked to
+    // navigate for.
+    this.emitEffect('adopt:done', { root, silent: opts.silent === true, ...stats })
     return stats
   }
 
@@ -1055,12 +1131,23 @@ export class ContentBrokerDrone extends Drone {
         // verify. The address graph is informational — a domain that
         // responded once for this sig is worth recording even if their
         // particular byte payload was malformed.
-        this.#noteDomains(sig, this.#extractDomains(evt))
+        const attributed = this.#extractDomains(evt)
+        this.#noteDomains(sig, attributed)
 
         const b64 = String(evt.event?.content ?? '')
         if (!b64) return
         void this.#acceptResponseBytes(sig, type, b64).then((bytes) => {
           if (bytes) {
+            // Branch-closure attribution (§21.14) for MESH-fetched layers too —
+            // the HTTP path already does this (#fetchOverHttp), and skipping it
+            // here left every ref inside a mesh-delivered layer without a host,
+            // so the branch's resources could never HTTP-resolve.
+            if (type === 'layer') {
+              for (const d of attributed) {
+                const host = this.#domainToHost(d)
+                if (host) this.#attributeClosure(bytes, host)
+              }
+            }
             // Cooperative-cancellable broadcast: signal that the sig
             // is satisfied so other in-flight preparers abort before
             // committing duplicate bandwidth. Fire-and-forget — we

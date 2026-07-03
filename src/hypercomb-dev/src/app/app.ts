@@ -123,7 +123,10 @@ export class App implements AfterViewInit {
     // 'hexagons' (any non-tile view from before adopt is dismissed) and
     // emits 'nav:to-hive' so any other listener (toasts, banners, future
     // routing) can react. Idempotent — already on hexagons = no-op.
-    EffectBus.on('adopt:done', () => {
+    // `silent` walks (pre-consent code inspection, features-panel downloads)
+    // are background work — they must never yank the view.
+    EffectBus.on<{ silent?: boolean }>('adopt:done', (p) => {
+      if (p?.silent) return
       this.viewMode.set('hexagons')
       EffectBus.emit('nav:to-hive', { reason: 'adopt-complete' })
     })

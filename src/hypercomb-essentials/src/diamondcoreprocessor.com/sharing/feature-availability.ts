@@ -17,6 +17,7 @@
 // import each other — they agree ONLY on the `hc:feature-verified` key + shape,
 // exactly as portal-overlay reads the shared `hc:feature-staging` key.
 
+import { isAuthored } from './authored-sigs.js'
 import { isWithinAdoptedRoot } from './adopted-roots.js'
 
 const VERIFIED_KEY = 'hc:feature-verified'
@@ -52,6 +53,16 @@ export function isVerifiedSig(sig: unknown): boolean {
   return SIG_RE.test(s) && verifiedSigs().has(s)
 }
 
+/** Is this page/feature signature one the participant AUTHORED locally? The
+ *  per-signature "own content" signal for the gate's planned fail-closed rule
+ *  (see authored-sigs.ts). NOT yet consulted by `featureNeedsReview` — the
+ *  allow-set is empty until the authoring write-sites + one-time bootstrap land,
+ *  so requiring it now would gate every existing page. Exposed so that wiring
+ *  can build on a stable reader. */
+export function isLocallyAuthored(sig: unknown): boolean {
+  return isAuthored(sig)
+}
+
 function selfDomain(): string {
   try { return normHost(localStorage.getItem(SELF_DOMAIN_KEY)) } catch { return '' }
 }
@@ -79,19 +90,43 @@ export function isFeatureAvailable(sig: unknown, domain: unknown): boolean {
   return isVerifiedSig(sig) || isTrustedDomain(domain)
 }
 
-/** Is this content foreign to the participant — i.e. NOT their own authoring?
- *  Your own work is never gated. Foreign when it carries a publisher domain
- *  that isn't yours, OR (when no domain is attributed) when it sits under an
- *  adopted root. Locally-authored content (no foreign domain, not adopted) is
- *  not foreign → never gated. */
+/** Is this content foreign to the participant — i.e. from somewhere ELSE, not
+ *  authored here? Foreign when it carries a publisher domain that isn't yours
+ *  (mesh/host attribution), OR — when no domain is attributed — when it sits
+ *  under an adopted root (content folded in from a peer).
+ *
+ *  This tree-position signal previously OVER-gated on its own: a page the
+ *  participant AUTHORED beneath a branch they'd once adopted is
+ *  `isWithinAdoptedRoot` yet is their own work, so it wrongly showed the review
+ *  gate. That false positive is resolved NOT by weakening foreignness but by the
+ *  per-signature authored allow-set consulted in `featureNeedsReview` (see
+ *  `isLocallyAuthored` / authored-sigs.ts): your own page under an adopted root
+ *  is foreign-by-position but authored-by-you, so it is never gated. Foreignness
+ *  stays honest, so a domainless adopted PEER page (not authored, not verified)
+ *  correctly gates — this is the per-sig adopted tracking the prior removal
+ *  deferred to "later". */
 export function isForeignContent(segments: readonly string[], domain: unknown): boolean {
   const d = normHost(domain)
-  if (d) return d !== selfDomain()
+  if (d && d !== selfDomain()) return true
+  // A matching (or absent) domain is NOT proof of your own authoring. The
+  // runtime seeds hc:nostrmesh:self-domain from the DEPLOYMENT ORIGIN, so on a
+  // shared origin every participant carries the SAME self-domain and a peer's
+  // adopted page arrives attributed to "your" domain — comparing domains alone
+  // ran foreign code ungated. Tree position stays authoritative: content under
+  // an adopted root is foreign regardless of the domain label; your own pages
+  // there are rescued per-signature by isLocallyAuthored in featureNeedsReview.
   return isWithinAdoptedRoot(segments)
 }
 
-/** The composite the activation gate calls: a feature must be REVIEWED before
- *  it runs iff it's foreign AND not yet available. */
+/** The composite the activation gate calls: a feature must be REVIEWED before it
+ *  runs iff it is FOREIGN (from a peer / another domain — see isForeignContent)
+ *  AND not already trusted — that is, NOT authored by you, NOT reviewed-and-
+ *  accepted or bypassed, and NOT from a trusted domain. Fail-closed: a foreign
+ *  page matching none of those stays gated (no mount, no scripts, no fetch) until
+ *  reviewed. `isLocallyAuthored` is the escape hatch that keeps your OWN pages —
+ *  even ones sitting under an adopted root — from being quarantined. */
 export function featureNeedsReview(segments: readonly string[], sig: unknown, domain: unknown): boolean {
-  return isForeignContent(segments, domain) && !isFeatureAvailable(sig, domain)
+  return isForeignContent(segments, domain)
+    && !isLocallyAuthored(sig)
+    && !isFeatureAvailable(sig, domain)
 }
