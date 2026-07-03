@@ -344,7 +344,13 @@ export class ShowFeaturesDrone extends Drone {
       if (String(payload?.action ?? '') !== 'features') return
       const label = String(payload?.label ?? '').trim()
       if (!label) return
-      void this.#open(label)
+      // Optional explicit path — the adopt fold passes the TARGET location so
+      // the refreshed group reads the tile where it actually landed, which the
+      // target picker may have pointed away from the current position.
+      const segments = Array.isArray((payload as { segments?: unknown }).segments)
+        ? ((payload as { segments: unknown[] }).segments).map(s => String(s ?? '').trim()).filter(Boolean)
+        : undefined
+      void this.#open(label, segments && segments.length ? segments : undefined)
     })
 
     // The selection context menu mirrors the per-tile puzzle-piece: when the
@@ -492,14 +498,19 @@ export class ShowFeaturesDrone extends Drone {
     return false
   }
 
-  async #open(label: string): Promise<void> {
+  async #open(label: string, segmentsOverride?: readonly string[]): Promise<void> {
     const ioc = this.#ioc()
     const registry = ioc?.get<VisualBeeRegistry>(VISUAL_BEE_REGISTRY_KEY)
     if (!registry) return
 
+    // Default: the tile lives at the CURRENT location. An explicit override
+    // (the adopt fold's target) wins — the panel must describe the tile where
+    // it IS, not where the participant happens to stand.
     const lineage = ioc?.get<LineageLike>(LINEAGE_KEY)
-    const parent = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
-    const segments = [...parent, label]
+    const segments = segmentsOverride?.length
+      ? segmentsOverride.map(s => String(s ?? '').trim()).filter(Boolean)
+      : [...(lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean), label]
+    const parent = segments.slice(0, -1)
 
     const branchSig = this.#peerBranchSig(label)
     const i18n = ioc?.get<I18nProvider>(I18N_KEY)

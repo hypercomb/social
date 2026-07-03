@@ -154,6 +154,24 @@
               <button class="fgroup-remove" type="button" (click)="removeGroup(group.cell)" [attr.aria-label]="'features.remove' | t">×</button>
             </header>
 
+            <!-- ── Adopt target: WHERE the branch folds (peer tiles only).
+                 Captured at adopt-click, editable — adopting into a
+                 reorganized hive must not mean adopt-then-move. ── -->
+            @if (isPeerGroup(group)) {
+              <div class="fgroup-target">
+                <label class="target-label" [attr.for]="'target-' + group.cell">{{ 'features.target' | t }}</label>
+                <input
+                  class="target-input"
+                  [id]="'target-' + group.cell"
+                  type="text"
+                  [value]="targetFor(group)"
+                  (input)="setTarget(group, $any($event.target).value)"
+                  [attr.title]="'features.target.hint' | t"
+                  spellcheck="false"
+                />
+              </div>
+            }
+
             <!-- ── On this layer: features the tile already has ── -->
             <div class="section-head">
               <span class="section-label">{{ 'features.section.applied' | t }}</span>

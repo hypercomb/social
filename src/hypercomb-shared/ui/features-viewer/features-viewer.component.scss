@@ -168,6 +168,43 @@ $accent: #c8b8ff;
   &:hover { color: #ffc8c8; }
 }
 
+// ── adopt target (peer groups) ────────────────────────────────────
+// Where the branch will fold. Quiet mono path input — pre-filled with the
+// location captured at adopt-click, editable before any switch is flipped.
+.fgroup-target {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0 1em 0.35em;
+}
+
+.target-label {
+  flex: 0 0 auto;
+  font-size: 0.6em;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.target-input {
+  flex: 1;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  padding: 0.2em 0.5em;
+  font-family: var(--hc-mono, monospace);
+  font-size: 0.7em;
+  color: rgba($accent, 0.9);
+
+  &:focus-visible {
+    outline: none;
+    border-color: rgba($accent, 0.55);
+    background: rgba($accent, 0.08);
+  }
+}
+
 // ── section header (On this layer / Available to add) ─────────────
 .section-head {
   display: flex;

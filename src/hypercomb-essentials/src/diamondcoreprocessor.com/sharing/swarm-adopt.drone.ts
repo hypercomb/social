@@ -108,6 +108,11 @@ interface TileActionPayload {
   /** `adopt-selected` (panel confirm) carries participant-grouped picks;
    *  pubkey disambiguates the same name published by two peers. */
   selections?: readonly { label: string; pubkey?: string }[]
+  /** `adopt-feature` TARGET: the parent path the branch folds under. Captured
+   *  by the features window at adopt-click time (and editable there), so the
+   *  fold lands where the participant CHOSE — never "wherever they happen to
+   *  be standing by the time they toggle". [] = the hive root. */
+  at?: readonly string[]
   q?: number
   r?: number
   index?: number
@@ -148,10 +153,16 @@ export class SwarmAdoptDrone extends Drone {
       // The features panel's per-feature ADD on a not-yet-adopted peer tile —
       // THE moment anything actually downloads/folds. This is the individual
       // consent the adopt gesture defers to: the adopt click only OPENS the
-      // window; each feature's switch does the work for that feature.
+      // window; each feature's switch does the work for that feature. The
+      // payload's `at` is the CHOSEN target parent (captured at adopt-click,
+      // editable in the window) — adopting into a reorganized hive must not
+      // mean "fold at the original position, then move it".
       if (action === 'adopt-feature') {
         const label = String(payload?.label ?? '').trim()
-        if (label) void this.#adoptInline(label)
+        const at = Array.isArray(payload?.at)
+          ? payload.at.map(s => String(s ?? '').trim()).filter(Boolean)
+          : undefined
+        if (label) void this.#adoptInline(label, undefined, at)
         return
       }
 
@@ -332,13 +343,31 @@ export class SwarmAdoptDrone extends Drone {
   // agnostic, so a directly-folded foreign page is reviewed before it ever mounts.
   // Only a branch that declares CODE (bees/deps) — or one we can't resolve to
   // inspect — routes to the installer.
-  #adoptInline = async (label: string, pubkey?: string): Promise<void> => {
+  #adoptInline = async (label: string, pubkey?: string, atOverride?: readonly string[]): Promise<void> => {
     const branch = this.#resolvePeerBranch(label, pubkey)
     if (!branch) {
       // The peer cache expired / navigation changed since the click — say so
       // instead of doing nothing (the silent dead-end reads as "adopt broken").
       EffectBus.emit('activity:log', { message: `couldn't adopt "${label}" — the peer's branch is no longer offered here`, icon: '○' })
       return
+    }
+    // TARGET override — the features window's chosen destination. Refuse,
+    // don't guess: an explicitly-typed target that doesn't resolve to an
+    // existing location is a typo or a not-yet-created folder, and silently
+    // folding at the literal path would conjure a phantom hierarchy.
+    if (atOverride) {
+      const at = atOverride.map(s => String(s ?? '').trim()).filter(Boolean)
+      if (at.length > 0) {
+        const ioc = this.#ioc()
+        const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
+        const lineage = ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined
+        const target = (history && lineage) ? await resolveLayerAt(history, lineage.domain, at) : null
+        if (!target) {
+          EffectBus.emit('activity:log', { message: `couldn't adopt "${label}" — target "/${at.join('/')}" doesn't exist; create it first`, icon: '○' })
+          return
+        }
+      }
+      branch.at = at
     }
     const codeSigs = await this.#branchCodeSigs(branch.layerSig, branch.domain)
     if (codeSigs === null) {
@@ -369,8 +398,9 @@ export class SwarmAdoptDrone extends Drone {
       }))
       // The headless install proceeds off-screen; the features panel is the
       // visible outcome of the adopt gesture (rows show their gate state as
-      // the install lands).
-      EffectBus.emit('tile:action', { action: 'features', label: branch.label })
+      // the install lands). segments = the TARGET, so the refreshed group
+      // reads the tile where it will actually land.
+      EffectBus.emit('tile:action', { action: 'features', label: branch.label, segments: [...branch.at, branch.label] })
       return
     }
     // Content-only → immediate in-place fold; the render-time gate is the trust
@@ -391,7 +421,10 @@ export class SwarmAdoptDrone extends Drone {
     // override right there — the adopt gesture ends on the decision surface,
     // not on a silent fold.
     if (res === 'committed' || res === 'exists') {
-      EffectBus.emit('tile:action', { action: 'features', label: branch.label })
+      // segments = the FOLD location — the refreshed group must read the tile
+      // where it landed, which the target picker may have pointed away from
+      // the participant's current position.
+      EffectBus.emit('tile:action', { action: 'features', label: branch.label, segments: [...branch.at, branch.label] })
     } else {
       // 'unavailable' — bytes unreachable or a cold-sibling abort. Loud, not
       // console-only: the user clicked and must see WHY nothing appeared.

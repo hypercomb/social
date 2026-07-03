@@ -505,12 +505,54 @@ export class FeaturesViewerComponent implements OnDestroy {
    *  feature" — nothing you didn't ask for turns on or downloads). */
   #pendingAdopt = new Map<string, string>()
 
+  // ── adopt target ──────────────────────────────────────────────────
+  // WHERE the branch folds. Captured at adopt-click time (the group's own
+  // parent path — never re-derived from wherever the participant wanders) and
+  // EDITABLE per group, so a reorganized hive adopts straight into the right
+  // place instead of "fold at the original position, then move it". Keyed by
+  // cell; the version signal drives re-render on edits.
+  #targetOverrides = new Map<string, string>()
+  readonly #targetsVersion = signal(0)
+
+  /** True when this group is a not-yet-adopted peer tile — the target row
+   *  shows only then (a tile already held has a location; it isn't re-homed
+   *  from here). */
+  isPeerGroup(group: FeatureGroup): boolean {
+    return group.applied.some(f => f.adopted === false)
+  }
+
+  /** The group's adopt target as a display path ('/' = the hive root). */
+  targetFor(group: FeatureGroup): string {
+    this.#targetsVersion()   // establish reactive dependency
+    const override = this.#targetOverrides.get(group.cell)
+    if (override !== undefined) return override
+    const parent = group.segments.slice(0, -1)
+    return '/' + parent.join('/')
+  }
+
+  setTarget(group: FeatureGroup, raw: string): void {
+    this.#targetOverrides.set(group.cell, String(raw ?? ''))
+    this.#targetsVersion.update(v => v + 1)
+  }
+
+  /** Parse the target path into parent segments ([] = root). */
+  #targetSegments(group: FeatureGroup): string[] {
+    return this.targetFor(group).split('/').map(s => s.trim()).filter(Boolean)
+  }
+
   #adoptFeature(group: FeatureGroup, feat: FeatureRow): void {
     const key = this.rowKey(group, feat)
     if (this.pending().has(key)) return
     this.pending.update(set => new Set([...set, key]))
     this.#pendingAdopt.set(group.cell, feat.kind)
-    EffectBus.emit('tile:action', { action: 'adopt-feature', label: group.cell, kind: feat.kind })
+    EffectBus.emit('tile:action', {
+      action: 'adopt-feature',
+      label: group.cell,
+      kind: feat.kind,
+      // The CHOSEN destination — SwarmAdoptDrone validates it exists
+      // (refuse-don't-guess) and folds the branch under it.
+      at: this.#targetSegments(group),
+    })
     // Leash: a failed/declined adopt must not wedge the switch (the refresh
     // normally clears pending long before this).
     setTimeout(() => {
