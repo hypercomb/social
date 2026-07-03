@@ -69,9 +69,6 @@
           <section class="features-group">
             <header class="fgroup-header">
               <span class="fgroup-cell" [title]="group.cell">{{ group.cell }}</span>
-              @if (adoptable(group)) {
-                <button class="fgroup-adopt" type="button" (click)="adopt(group)" [attr.title]="'features.adopt.hint' | t">{{ 'features.adopt' | t }}</button>
-              }
               <button class="fgroup-remove" type="button" (click)="removeGroup(group.cell)" [attr.aria-label]="'features.remove' | t">×</button>
             </header>
 
@@ -89,21 +86,25 @@
                     class="features-row"
                     [class.selected]="isSelected(group, feat)"
                     [class.gated]="feat.gated"
-                    [class.off]="isHidden(group, feat)"
+                    [class.off]="!isOn(group, feat)"
                     (click)="selectRow(group, feat)"
                   >
-                    <!-- Real on/off switch: ON = active here, OFF = turned off but
-                         KEPT in the list (inert + retained, exactly like a feature
-                         you haven't adopted). Click flips it in place — the row
+                    <!-- Real on/off switch: ON = active here, OFF = present but
+                         inert — a turned-off local feature OR a peer feature
+                         you haven't adopted yet. Click flips it in place; for a
+                         not-yet-adopted feature the flip IS the individual add
+                         (the only moment anything folds or downloads). The row
                          never disappears. -->
                     <button
                       class="feat-toggle"
                       type="button"
-                      [class.on]="!isHidden(group, feat)"
+                      [class.on]="isOn(group, feat)"
+                      [class.busy]="isPending(group, feat)"
+                      [disabled]="isPending(group, feat)"
                       (click)="toggleActive(group, feat); $event.stopPropagation()"
-                      [attr.aria-pressed]="!isHidden(group, feat)"
-                      [attr.aria-label]="(isHidden(group, feat) ? 'features.enable' : 'features.hide') | t"
-                      [attr.title]="(isHidden(group, feat) ? 'features.turnon.hint' : 'features.hide.hint') | t"
+                      [attr.aria-pressed]="isOn(group, feat)"
+                      [attr.aria-label]="(isOn(group, feat) ? 'features.hide' : 'features.enable') | t"
+                      [attr.title]="(isOn(group, feat) ? 'features.hide.hint' : (feat.adopted === false ? 'features.enable.hint' : 'features.turnon.hint')) | t"
                     ><span class="knob"></span></button>
                     <div class="feature-meta">
                       <span class="feature-name">{{ feat.label }}</span>

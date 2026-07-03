@@ -55,6 +55,11 @@ interface FeatureRow {
   /** Full hive path of where the feature is attached (tile for direct, the
    *  declaring ancestor for cascade). Empty/absent = the hive root. */
   originSegments?: string[]
+  /** False = a NOT-YET-ADOPTED peer tile's feature (listed from the peer's
+   *  branch root; nothing local yet). Its switch renders OFF and turning it
+   *  on emits `adopt-feature` — the individual add, and the only moment
+   *  anything folds or downloads. Absent = on the local layer. */
+  adopted?: boolean
   /** True when the community verification gate currently blocks activation —
    *  the row shows the "enabled — blocked" line + allow override. */
   gated?: boolean
@@ -200,8 +205,14 @@ export class FeaturesViewerComponent implements OnDestroy {
       if (!this.visible()) this.visible.set(true)
       // A fresh group replaces its rows — any in-flight ADD for it is settled.
       if (this.pending().size) this.pending.set(new Set())
-      // Refresh the hidden pool so the new group's features are filtered /
-      // its hidden ones become restorable.
+      // An adopt-feature just folded this tile — seed every OTHER direct
+      // feature OFF so only the chosen one activates.
+      const chosen = this.#pendingAdopt.get(group.cell)
+      if (chosen !== undefined) {
+        this.#pendingAdopt.delete(group.cell)
+        void this.#seedOthersOff(group, chosen)
+      }
+      // Refresh the hidden pool so the rows' switches read their real state.
       void this.#refreshHidden()
     }))
 
@@ -364,13 +375,65 @@ export class FeaturesViewerComponent implements OnDestroy {
     return group.applied
   }
 
-  /** The switch's ON gesture on an applied row: flip active ⇄ off IN PLACE.
-   *  Off = written to the hidden pool (inert but retained; the render gate
-   *  keeps it from mounting). On = its pool member removed (the gate re-mounts).
-   *  The row never leaves the list either way. */
+  /** Is this row's switch ON? A not-yet-adopted peer feature is always OFF;
+   *  a local feature is ON unless it's in the hidden pool. */
+  isOn(group: FeatureGroup, feat: FeatureRow): boolean {
+    if (feat.adopted === false) return false
+    return !this.isHidden(group, feat)
+  }
+
+  /** The applied row's switch. Three cases, all IN PLACE (the row never
+   *  leaves the list):
+   *   • not-yet-adopted peer feature → `adopt-feature`: THE individual add —
+   *     the only moment the branch folds / code-consent runs / bytes move.
+   *     Every OTHER feature of the tile starts OFF (seeded on the refresh).
+   *   • local + on  → off: written to the hidden pool (inert but retained;
+   *     the render gate keeps it from mounting).
+   *   • local + off → on: its pool member removed (the gate re-mounts). */
   async toggleActive(group: FeatureGroup, feat: FeatureRow): Promise<void> {
+    if (feat.adopted === false) { this.#adoptFeature(group, feat); return }
     if (this.isHidden(group, feat)) await this.#turnOn(group, feat)
     else await this.#turnOff(group, feat)
+  }
+
+  /** Cells with an adopt-feature in flight → the feature kind that was chosen.
+   *  When the post-fold refresh lands, every OTHER direct feature is seeded
+   *  OFF so only the chosen one activates ("click for each individual
+   *  feature" — nothing you didn't ask for turns on or downloads). */
+  #pendingAdopt = new Map<string, string>()
+
+  #adoptFeature(group: FeatureGroup, feat: FeatureRow): void {
+    const key = this.rowKey(group, feat)
+    if (this.pending().has(key)) return
+    this.pending.update(set => new Set([...set, key]))
+    this.#pendingAdopt.set(group.cell, feat.kind)
+    EffectBus.emit('tile:action', { action: 'adopt-feature', label: group.cell, kind: feat.kind })
+    // Leash: a failed/declined adopt must not wedge the switch (the refresh
+    // normally clears pending long before this).
+    setTimeout(() => {
+      this.#pendingAdopt.delete(group.cell)
+      this.pending.update(set => {
+        if (!set.has(key)) return set
+        const next = new Set(set)
+        next.delete(key)
+        return next
+      })
+    }, 8000)
+  }
+
+  /** After an adopt-feature fold lands (the refreshed group arrives), turn
+   *  every OTHER direct feature OFF so only the chosen one is on. Idempotent —
+   *  hideFeature dedups by pool signature. */
+  async #seedOthersOff(group: FeatureGroup, chosenKind: string): Promise<void> {
+    for (const feat of group.applied) {
+      if (feat.origin !== 'direct' || feat.kind === chosenKind) continue
+      if (feat.adopted === false) continue   // still peer-only — nothing local to turn off
+      if (this.isHidden(group, feat)) continue
+      const segments = this.#segmentsFor(group, feat)
+      const sig = await hideFeature({ featKind: feat.kind, view: feat.view, label: feat.label, segments })
+      if (sig) EffectBus.emit('feature:hidden', { featKind: feat.kind, segments })
+    }
+    await this.#refreshHidden()
   }
 
   /** Turn a feature OFF: write it into the hidden pool (retained) and
@@ -400,29 +463,8 @@ export class FeaturesViewerComponent implements OnDestroy {
   }
 
   // ── allow / add / download — the toggles are REAL ─────────────────
-
-  /** True when this feature carries an installer-resolvable branch sig. */
-  installable(row: RowLike): boolean {
-    return typeof row.branchSig === 'string' && /^[a-f0-9]{64}$/.test(row.branchSig)
-  }
-
-  /** True when this tile is offered by a peer — at least one applied feature
-   *  carries an installer-resolvable branch sig. Only then is there a branch to
-   *  adopt. */
-  adoptable(group: FeatureGroup): boolean {
-    return group.applied.some(r => this.installable(r))
-  }
-
-  /** Lead into the adopt process for this peer-offered tile. Emits the canonical
-   *  single-adopt verb — SwarmAdoptDrone resolves the branch, DISAMBIGUATES when
-   *  several publishers offer the same name (choose-panel), folds inline
-   *  (code-bearing branches prompt for consent), then this panel reopens with
-   *  the tile's real rows + gate states. NOT `adopt-selected` — that form skips
-   *  the multi-publisher check and would silently adopt whichever copy the
-   *  cache lists first. */
-  adopt(group: FeatureGroup): void {
-    EffectBus.emit('tile:action', { action: 'adopt', label: group.cell })
-  }
+  // (No group-level adopt button: the features window IS the adopt surface —
+  //  each row's switch is the individual add.)
 
   /** Override the community block for one feature: record its payload sig as
    *  verified (an explicit bypass) and tell the render gate to re-reconcile —

@@ -125,27 +125,6 @@ $accent: #c8b8ff;
   white-space: nowrap;
 }
 
-// Adopt — leads into the adopt process for a peer-offered tile. The real verb
-// (not the benign like-star), so it reads as an action chip, accent-filled.
-.fgroup-adopt {
-  flex: 0 0 auto;
-  background: rgba($accent, 0.16);
-  border: 1px solid rgba($accent, 0.45);
-  border-radius: 5px;
-  color: #f3f3f3;
-  font-family: inherit;
-  font-size: 0.62em;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  padding: 0.22em 0.6em;
-  cursor: pointer;
-  transition: background 120ms ease, transform 120ms ease;
-
-  &:hover { background: rgba($accent, 0.3); }
-  &:active { transform: scale(0.94); }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
-}
-
 .fgroup-remove {
   background: transparent;
   border: none;

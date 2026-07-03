@@ -59,6 +59,7 @@ import { kindsForLabel } from '../../commands/decoration-kind-index.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
 import { writeDropbox } from '../../files/files-attachment.js'
 import { parseAccept } from '../../files/file-types.js'
+import { WEBSITE_SLOT } from '../../commands/website-slot.js'
 import type { VisualBeeRegistry, VisualBeeDescriptor } from '../../commands/visual-bee-registry.js'
 
 const VISUAL_BEE_REGISTRY_KEY = '@diamondcoreprocessor.com/VisualBeeRegistry'
@@ -119,6 +120,12 @@ interface FeatureItem {
    *  `direct`, or the declaring ancestor for `cascade`. Empty/absent = the hive
    *  root. Surfaced on hover in the panel so you can see the exact location. */
   originSegments?: string[]
+  /** False when this feature belongs to a NOT-YET-ADOPTED peer tile — listed
+   *  from the peer's branch root so the participant can see what's on offer.
+   *  The panel renders its switch OFF; turning it on is the individual add
+   *  (`adopt-feature`), the only moment anything folds or downloads. Absent =
+   *  the feature is on the local layer. */
+  adopted?: boolean
   /** True when the verification gate currently BLOCKS this feature from
    *  activating (foreign + not authored + not verified + untrusted domain).
    *  The panel renders the "blocked by community" line + allow override. */
@@ -300,6 +307,16 @@ export class ShowFeaturesDrone extends Drone {
     const branchSig = this.#peerBranchSig(label)
     const i18n = ioc?.get<I18nProvider>(I18N_KEY)
 
+    // ── PEER path: offered on the mesh, NOT yet part of the local layer ──
+    // Adopt is a window, not a download: list the branch's features from its
+    // ROOT layer alone (one tiny layer fetch + its decoration records — no
+    // subtree walk, no fold, no resources). Every row arrives adopted:false
+    // with its switch OFF; turning one on is the individual add.
+    if (branchSig && !(await this.#isLocalCell(segments))) {
+      await this.#openPeer(label, segments, branchSig, registry, i18n)
+      return
+    }
+
     // De-dupe by view across both passes: a feature attached directly to the
     // tile shadows the same feature inherited from an ancestor (nearest wins).
     const appliedViews = new Set<string>()
@@ -372,6 +389,96 @@ export class ShowFeaturesDrone extends Drone {
     await this.#stampGates(applied, segments)
 
     this.emitEffect<FeaturesOpenPayload>('features:open', { cell: label, segments, applied, available })
+  }
+
+  /** Does a layer resolve for this exact location — i.e. is the tile part of
+   *  the LOCAL hive here (authored or already adopted)? False for a peer-only
+   *  mesh tile, which routes #open to the peer listing path. */
+  async #isLocalCell(segments: readonly string[]): Promise<boolean> {
+    const history = this.#ioc()?.get<HistoryLike>(HISTORY_KEY)
+    if (!history) return false
+    try {
+      const locationSig = await history.sign({ explorerSegments: () => segments })
+      return (await history.currentLayerAt(locationSig)) != null
+    } catch {
+      return false
+    }
+  }
+
+  /** List a NOT-YET-ADOPTED peer tile's features from its branch ROOT layer
+   *  alone — one small layer fetch plus its decoration records. No fold, no
+   *  subtree walk, no resource pulls: nothing enters the hive and nothing
+   *  heavy downloads until a feature's switch is turned on (`adopt-feature`).
+   *  Rows carry `adopted: false` so the panel renders their switches OFF;
+   *  `available` is empty (you can't ADD features to a tile you don't hold). */
+  async #openPeer(
+    label: string,
+    segments: readonly string[],
+    branchSig: string,
+    registry: VisualBeeRegistry,
+    i18n: I18nProvider | undefined,
+  ): Promise<void> {
+    const ioc = this.#ioc()
+    const broker = ioc?.get<{ fetchBySig?: (sig: string, type: 'layer' | 'resource' | 'dependency') => Promise<Uint8Array | null> }>(BROKER_KEY)
+    const store = ioc?.get<StoreLike>(STORE_KEY)
+
+    let layer: Record<string, unknown> | null = null
+    try {
+      const bytes = await broker?.fetchBySig?.(branchSig, 'layer')
+      if (bytes) layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
+    } catch { /* unreachable / malformed root — list nothing rather than guess */ }
+
+    const appliedViews = new Set<string>()
+    const applied: FeatureItem[] = []
+    const pushPeer = (item: FeatureItem): void => {
+      item.adopted = false
+      applied.push(item)
+    }
+
+    // Decoration-borne features on the peer root.
+    const decorations = Array.isArray(layer?.['decorations']) ? layer!['decorations'] as unknown[] : []
+    for (const raw of decorations) {
+      const sig = String(raw ?? '')
+      if (!SIG_RE.test(sig)) continue
+      try {
+        const blob = await store?.getResource(sig)
+        if (!blob) continue
+        const rec = JSON.parse(await blob.text()) as { kind?: string }
+        const kind = typeof rec?.kind === 'string' ? rec.kind : ''
+        if (!kind) continue
+        const feature = this.#recognize(kind, registry)
+        if (feature) {
+          if (appliedViews.has(feature.view)) continue
+          appliedViews.add(feature.view)
+          pushPeer(this.#describe(feature, kind, i18n, 'direct', undefined, branchSig, segments))
+        } else if (kind.startsWith('visual:') && !appliedViews.has(kind)) {
+          appliedViews.add(kind)
+          pushPeer({
+            view: kind,
+            kind,
+            label: this.#t(i18n, 'features.unknown', kind),
+            description: this.#t(i18n, 'features.unknown.desc', ''),
+            cascades: false,
+            origin: 'direct',
+            originSegments: [...segments],
+            branchSig,
+          })
+        }
+      } catch { /* unavailable record — skip */ }
+    }
+
+    // The website feature may live in the first-class `website` slot instead
+    // of a decoration — same read-through order the renderer uses.
+    const websiteBee = registry.get('website')
+    const slot = layer?.[WEBSITE_SLOT]
+    if (websiteBee && Array.isArray(slot) && slot.some(s => SIG_RE.test(String(s)))
+        && !appliedViews.has(websiteBee.view)) {
+      appliedViews.add(websiteBee.view)
+      const feature = this.#recognize(websiteBee.decorationKind, registry)
+      if (feature) pushPeer(this.#describe(feature, websiteBee.decorationKind, i18n, 'direct', undefined, branchSig, segments))
+    }
+
+    this.emitEffect<FeaturesOpenPayload>('features:open', { cell: label, segments: [...segments], applied, available: [] })
   }
 
   /** Stamp `gated` / `gateSig` / `publisherDomain` onto each DIRECT feature.

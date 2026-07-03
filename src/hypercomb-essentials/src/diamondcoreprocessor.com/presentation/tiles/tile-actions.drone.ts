@@ -242,24 +242,6 @@ export type IconRegistryEntry = {
   descriptionKey?: string
 }
 
-// True when a live peer is broadcasting a same-named tile that carries a
-// layerSig — i.e., there is a publisher version of this locally-held tile
-// that `sync` can re-adopt. The swarm CACHE keeps every peer visual even
-// when the render pipeline dedupes it against the local cell set, so this
-// is exactly the "the publisher updated a tile I hold" detector. Stale
-// peers are already filtered out by peerTilesAtCurrentSig.
-const peerBroadcastsTile = (label: string): boolean => {
-  const swarm = window.ioc.get<{
-    peerTilesAtCurrentSig?: () => readonly ({ name: string } & Record<string, unknown>)[]
-  }>('@diamondcoreprocessor.com/SwarmDrone')
-  if (!swarm?.peerTilesAtCurrentSig) return false
-  for (const tile of swarm.peerTilesAtCurrentSig()) {
-    if (tile.name !== label) continue
-    if (/^[a-f0-9]{64}$/.test(String(tile['layerSig'] ?? ''))) return true
-  }
-  return false
-}
-
 // True when this tile OBVIOUSLY carries a feature with a "scripts portion" —
 // i.e. one of its decoration kinds is owned by a registered visual bee
 // (website, dashboard, audio, …). This is the honest "has features" signal:
@@ -285,7 +267,7 @@ const tileHasVisualBeeFeature = (label: string): boolean => {
 // decoration (the owner's own junction) or a PEER broadcasting one over the
 // wire (its bundle sig rides as `inviteSig`; see swarm.drone publish +
 // visual-sanitizer). Synchronous + O(peers): the decoration index is the hot
-// in-memory map and the peer scan is the same cache peerBroadcastsTile reads.
+// in-memory map and the peer scan reads peerTilesAtCurrentSig's cache.
 const peerTileHasInvite = (label: string): boolean => {
   const swarm = window.ioc.get<{
     peerTilesAtCurrentSig?: () => readonly ({ name: string } & Record<string, unknown>)[]
@@ -362,13 +344,11 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'more', svgMarkup: ICONS.more, hoverTint: 0xc8d4ff, profile: 'public-own' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   { name: 'promote-to-parent', svgMarkup: ICONS.arrowUpward, hoverTint: 0xc8d4ff, profile: 'public-own', visibleWhen: () => (window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []).length > 0, labelKey: 'action.promote-to-parent', descriptionKey: 'action.promote-to-parent.description' },
-  // `sync` re-adopts the broadcasting peer's CURRENT version of a tile
-  // you already hold (adopted earlier, or same-named). Visible only while
-  // a live peer publishes that name. Dispatches the same sig-handoff as
-  // adopt (SwarmAdoptDrone accepts both actions) — the installer's
-  // (name, at) identity makes it idempotent: same-sig aborts, a re-signed
-  // publisher layer replaces your stale copy.
-  { name: 'sync', svgMarkup: ICONS.sync, hoverTint: 0xa8d8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => peerBroadcastsTile(ctx.label), labelKey: 'action.sync', descriptionKey: 'action.sync.description' },
+  // NOTE: there is NO `sync` button. Pulling a broadcasting peer's current
+  // version of a tile you hold is an INTERNAL concern (SwarmAdoptDrone still
+  // answers the `sync` action programmatically — a future auto-sync can ride
+  // it) — never a per-tile icon. The participant's surface is Add (adopt) +
+  // the features window; a feature that is ON keeps itself current.
   // `features` (the puzzle-piece) is now "SHOW FEATURES": click it and
   // ShowFeaturesDrone gathers the META details (no code) of the bee features
   // this tile uses and opens the right-docked features panel — you stay in
@@ -430,12 +410,11 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   // World mode: ONLY the two share-toggles, none of the regular icons.
   'world': ['make-public', 'make-branch-public'],
   // Your own tile in public mode. `more` + `remove` ride the same danger-row
-  // reveal as private. `sync` folds the broadcasting peer's latest VISUALS into
-  // the tile in place and is rendered ONLY while a live peer publishes the
-  // same name. `features` (puzzle-piece) opens the read-only SHOW FEATURES
+  // reveal as private. `features` (puzzle-piece) opens the SHOW FEATURES
   // panel for any tile carrying a registered visual bee — it stays in the
-  // hive and has NO peer-broadcast requirement.
-  'public-own': ['sync', 'features', 'break-apart', 'files', 'invite', 'more', 'remove'],
+  // hive and has NO peer-broadcast requirement. (No `sync` icon — keeping a
+  // held tile current is internal, not a button.)
+  'public-own': ['features', 'break-apart', 'files', 'invite', 'more', 'remove'],
   // Peer-only mesh tiles. Single-click `adopt` is the explicit
   // "I want to expand on this topic" action — writes the tile to
   // your local layer AND pulls the resources it references (images

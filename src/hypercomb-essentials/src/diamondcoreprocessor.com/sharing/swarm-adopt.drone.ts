@@ -11,16 +11,15 @@
 // content and no snapshot bridge: your layer is the one way into your hive.
 //
 // SAFETY: this drone applies content ONLY in response to an explicit user
-// click. `sync` folds a broadcasting peer's VISUALS straight into the hive
-// (replace-in-place); `adopt` hands the branch sig to the DCP installer so
-// the participant can turn its scripts on THERE. (`features` no longer routes
-// here — it's now "show features", handled by ShowFeaturesDrone, which opens a
-// read-only panel and stays in the hive.) It does NOT auto-fold the
-// installer's projected branches (RegistrySnapshot) — that automation was
-// removed: nothing enters your tree without a participant action. Whether an
-// update EXISTS (detection) and surfacing installer-installed content are
-// separate MANUAL concerns — the command-line update icon opens the
-// installer; the participant pulls there.
+// click — and the click that downloads is the FEATURE switch, not the adopt
+// icon. `adopt` merely opens the features window (ShowFeaturesDrone lists the
+// peer branch's features from its root layer — no fold, no subtree walk, no
+// resource pulls); each feature's switch in that window emits `adopt-feature`,
+// and THAT is when the branch folds / code-consent runs / bytes move. `sync`
+// (re-pull a publisher's current version of a tile you hold) has NO user
+// button — it remains a programmatic action a future auto-sync can ride. It
+// does NOT auto-fold the installer's projected branches (RegistrySnapshot) —
+// nothing enters your tree without a participant action.
 
 import { Drone, EffectBus, hypercomb, requestConfirm } from '@hypercomb/core'
 import {
@@ -146,6 +145,16 @@ export class SwarmAdoptDrone extends Drone {
         return
       }
 
+      // The features panel's per-feature ADD on a not-yet-adopted peer tile —
+      // THE moment anything actually downloads/folds. This is the individual
+      // consent the adopt gesture defers to: the adopt click only OPENS the
+      // window; each feature's switch does the work for that feature.
+      if (action === 'adopt-feature') {
+        const label = String(payload?.label ?? '').trim()
+        if (label) void this.#adoptInline(label)
+        return
+      }
+
       if (action !== 'adopt' && action !== 'sync') return
 
       // Multi-tile adopt (selection-menu Adopt All) — sequential. Only the
@@ -162,13 +171,14 @@ export class SwarmAdoptDrone extends Drone {
       const label = String(payload?.label ?? '').trim()
       if (!label) return
 
-      // Single adopt-gesture. When exactly ONE publisher offers this name the
-      // adoption is unambiguous → adopt INLINE right here: a content feature
-      // folds into the hive in place immediately (the render-time gate is the
-      // trust surface), and only a code-bearing feature routes to the installer.
-      // When two+ peers publish the same name, open the participant-grouped
-      // panel so the pick is disambiguated by pubkey; its confirm returns as
-      // `adopt-selected`.
+      // Single adopt-gesture. Adopt is a WINDOW, not a download: open the
+      // features panel for the peer tile and STOP. Nothing folds and nothing
+      // walks the subtree here — ShowFeaturesDrone's peer path lists the
+      // branch's features from its root layer alone (a few tiny reads), and
+      // each feature's switch in the panel is the individual add
+      // (`adopt-feature` above), which is when the fold/consent/downloads
+      // actually happen. Two+ publishers of the same name still disambiguate
+      // through the participant-grouped panel first.
       if (action === 'adopt') {
         if (!this.#isPeerTile(label)) return
         const publishers = this.#publishersFor(label)
@@ -176,7 +186,7 @@ export class SwarmAdoptDrone extends Drone {
           this.emitEffect('swarm:adopt-panel:open', { preselect: [label] })
           return
         }
-        void this.#adoptInline(label, publishers[0] || undefined)
+        EffectBus.emit('tile:action', { action: 'features', label })
         return
       }
 
