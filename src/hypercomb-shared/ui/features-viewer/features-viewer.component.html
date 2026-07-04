@@ -44,6 +44,55 @@
       </div>
     }
 
+    <!-- ── Download pathway: the panel's answer to "did anything happen?" —
+         one stepper per tile, sent → receiving → done. The first node fills
+         the instant the click lands, the second when bytes stream (with the
+         climbing file count as the anti-stall cue), and the terminal node is
+         unmistakable: full green track + check on success, red node with
+         what went wrong on failure. -->
+    @if (pathway().length > 0) {
+      <div class="download-status" role="status" aria-live="polite">
+        @for (p of pathway(); track p.cell) {
+          <div class="dl-path" [class.ok]="p.stage === 3 && p.ok" [class.fail]="p.stage === 3 && !p.ok">
+            <div class="dl-path-head">
+              <span class="dl-cell" [title]="p.cell">{{ p.cell }}</span>
+              <span class="dl-text">
+                @if (p.stage < 3) {
+                  @if (downloadedCount() > 0) {
+                    {{ 'features.download.active' | t: { count: downloadedCount() } }}
+                  } @else {
+                    {{ 'features.downloading' | t }}
+                  }
+                } @else if (p.stalled) {
+                  {{ 'features.download.stalled' | t }}
+                } @else if (!p.ok && p.failed > 0) {
+                  {{ 'features.download.partial' | t: { count: p.failed } }}
+                } @else if (!p.ok) {
+                  {{ 'features.download.failed' | t }}
+                } @else if (p.files === 0) {
+                  {{ 'features.download.uptodate' | t }}
+                } @else {
+                  {{ 'features.download.done' | t: { count: p.files } }}
+                }
+              </span>
+            </div>
+            <div class="dl-track">
+              <span class="dl-node filled" [class.pulse]="p.active && p.stage === 1"></span>
+              <span class="dl-seg" [class.filled]="p.stage >= 2"></span>
+              <span class="dl-node" [class.filled]="p.stage >= 2" [class.pulse]="p.active && p.stage === 2"></span>
+              <span class="dl-seg" [class.filled]="p.stage >= 3"></span>
+              <span class="dl-node terminal" [class.filled]="p.stage >= 3">@if (p.stage === 3) {{{ p.ok ? '✓' : '✕' }}}</span>
+            </div>
+            <div class="dl-labels">
+              <span [class.lit]="p.stage >= 1">{{ 'features.path.sent' | t }}</span>
+              <span [class.lit]="p.stage >= 2">{{ 'features.path.receiving' | t }}</span>
+              <span [class.lit]="p.stage >= 3">{{ (p.stage === 3 && !p.ok ? 'features.path.failed' : 'features.path.done') | t }}</span>
+            </div>
+          </div>
+        }
+      </div>
+    }
+
     <!-- ── Review gate: a foreign feature handed here by the website gate ── -->
     @if (reviewTarget(); as rt) {
       <div class="feature-review">

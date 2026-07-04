@@ -1,11 +1,33 @@
-<!-- Progress bar ONLY — no numbers, no text label. The bar itself is the
-     indicator: an indeterminate sweep while the frontier is unknown (adopt /
-     count-less sync), a determinate fill once a total is announced, and a
-     full green bar on completion before it fades. The status text lives in
-     the aria-label for screen readers, never on screen. -->
+<!-- Light text line + progress bar. The text answers "am I waiting on
+     something or is it stalled?": determinate counts show processed AND
+     remaining ("38 of 214 files · 176 left"), the frontier-unknown adopt
+     walk shows a climbing fetch count, and the done flash carries the
+     final figure. The line doubles as the screen-reader status (visible
+     content inside role="status" — no separate aria-label needed). -->
 @if (visible()) {
-  <div class="sync-cell" [class.done]="done()" role="status" aria-live="polite"
-       [attr.aria-label]="(done() ? (doneKind() === 'adopt' ? 'sync.adopted' : 'sync.done') : (adopting() ? 'sync.adopting' : 'sync.synchronizing')) | t">
+  <div class="sync-cell" [class.done]="done()" role="status" aria-live="polite">
+    <div class="sync-line">
+      <span class="sync-dot"></span>
+      <span class="sync-label">
+        @if (done()) {
+          @if (doneCount() > 0) {
+            {{ (doneKind() === 'adopt' ? 'sync.adopted.files' : 'sync.done.files') | t: { count: doneCount() } }}
+          } @else {
+            {{ (doneKind() === 'adopt' ? 'sync.adopted' : 'sync.done') | t }}
+          }
+        } @else if (adopting()) {
+          @if (adoptItems() > 0) {
+            {{ 'sync.adopting-progress' | t: { items: adoptItems() } }}
+          } @else {
+            {{ 'sync.adopting' | t }}
+          }
+        } @else if (hasCounts()) {
+          {{ 'sync.progress.left' | t: { current: current(), total: total(), left: left() } }}
+        } @else {
+          {{ 'sync.synchronizing' | t }}
+        }
+      </span>
+    </div>
     <div class="sync-track" [class.indeterminate]="!done() && !hasCounts()">
       <div class="sync-fill" [style.width.%]="done() ? 100 : (hasCounts() ? percent() : null)"></div>
     </div>

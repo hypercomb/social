@@ -13,12 +13,15 @@
 //     local pool, observed via the broker's existing `adopt:meta` /
 //     `adopt:progress` / `adopt:done` effects
 //
-// Hidden until something starts; shows determinate counts when the
-// producer streams progress, an indeterminate label otherwise, and a
-// brief confirmation ("synchronized" / "adopted") on completion before
-// fading out. When sync and adoption overlap, adoption wins the label
-// (it is the user's own gesture) and the pill stays up until BOTH are
-// quiet.
+// Hidden until something starts. Shows a light text line + progress bar:
+// "{current} of {total} files · {left} left" when the producer streams
+// counts, a climbing "adopting… {n} fetched" for the frontier-unknown
+// adopt walk, and a brief confirmation with the final file count
+// ("synchronized · 214 files") on completion before fading out. The text
+// is the anti-stall cue — a bare bar reads as "maybe broken"; a counting
+// line reads as "receiving". When sync and adoption overlap, adoption
+// wins the label (it is the user's own gesture) and the pill stays up
+// until BOTH are quiet.
 //
 // EffectBus last-value replay means a component mounted mid-activity
 // catches up immediately; terminal events replayed while nothing is
@@ -61,7 +64,9 @@ interface AdoptStatsPayload {
  *  Any new event re-arms the guard. */
 const STALE_GUARD_MS = 90_000
 
-const DONE_FLASH_MS = 2_000
+// Long enough to actually READ the completion line ("synchronized · 214
+// files") — 2s made arrival easy to miss, which read as "did it finish?".
+const DONE_FLASH_MS = 3_500
 
 @Component({
   selector: 'hc-sync-indicator',
@@ -91,6 +96,16 @@ export class SyncIndicatorComponent implements OnInit, OnDestroy {
   readonly #done = signal(false)
   readonly #doneKind = signal<'sync' | 'adopt'>('sync')
 
+  /** Highest file count seen during the current activity — what the done
+   *  flash reports ("synchronized · {count} files"). Peak, not final-read:
+   *  lanes are deleted (and adopt items zeroed) before the flash, so the
+   *  live signals are already empty by then. */
+  #peakCount = 0
+
+  /** File count carried into the done flash (0 = no counts were streamed —
+   *  the flash falls back to the plain "synchronized"/"adopted" label). */
+  readonly #doneCount = signal(0)
+
   readonly adopting = computed(() => this.#adoptActive())
   readonly done = computed(() => this.#done())
   readonly visible = computed(() => this.#syncLanes().size > 0 || this.#adoptActive() || this.#done())
@@ -109,6 +124,9 @@ export class SyncIndicatorComponent implements OnInit, OnDestroy {
   readonly hasCounts = computed(() => this.total() > 0)
   readonly adoptItems = computed(() => this.#adoptItems())
   readonly doneKind = computed(() => this.#doneKind())
+  readonly doneCount = computed(() => this.#doneCount())
+  /** Files still to come — the "how many are left" half of the label. */
+  readonly left = computed(() => Math.max(0, this.total() - this.current()))
 
   /** Determinate fill percentage for the progress bar. Clamped — a
    *  producer that overshoots its announced total must not blow the
@@ -136,6 +154,7 @@ export class SyncIndicatorComponent implements OnInit, OnDestroy {
             })
             return next
           })
+          this.#peakCount = Math.max(this.#peakCount, this.current() + this.#adoptItems())
           return
         }
         if (!this.#syncLanes().has(lane)) return
@@ -160,6 +179,7 @@ export class SyncIndicatorComponent implements OnInit, OnDestroy {
         this.#begin()
         this.#adoptActive.set(true)
         this.#adoptItems.set((payload?.layers ?? 0) + (payload?.leaves ?? 0))
+        this.#peakCount = Math.max(this.#peakCount, this.current() + this.#adoptItems())
       }),
       EffectBus.on<AdoptStatsPayload>('adopt:done', () => {
         if (!this.#adoptActive()) return
@@ -184,6 +204,8 @@ export class SyncIndicatorComponent implements OnInit, OnDestroy {
     if (this.#syncLanes().size > 0 || this.#adoptActive()) return
     this.#clearTimer('stale')
     this.#doneKind.set(kind)
+    this.#doneCount.set(this.#peakCount)
+    this.#peakCount = 0
     this.#done.set(true)
     this.#clearTimer('done')
     this.#doneTimer = setTimeout(() => {
@@ -201,6 +223,7 @@ export class SyncIndicatorComponent implements OnInit, OnDestroy {
       this.#syncLanes.set(new Map())
       this.#adoptActive.set(false)
       this.#adoptItems.set(0)
+      this.#peakCount = 0
       this.#done.set(false)
     }, STALE_GUARD_MS)
   }

@@ -21,7 +21,7 @@
 // does NOT auto-fold the installer's projected branches (RegistrySnapshot) —
 // nothing enters your tree without a participant action.
 
-import { Drone, EffectBus, hypercomb, requestConfirm } from '@hypercomb/core'
+import { Drone, EffectBus, hypercomb, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
   childNamesOfStrict,
   childSigsOf,
@@ -626,15 +626,22 @@ export class SwarmAdoptDrone extends Drone {
   // ── features:download — mirror a feature's bytes locally (panel action) ──
   // Branch known (peer cache / explicit sig) → the broker's full adopt walk.
   // Page-only feature → body + single-level ref closure, matching what the
-  // renderer resolves. Emits `features:download:done { cell, ok }` either way
-  // so the panel can reflect the outcome.
+  // renderer resolves. ALWAYS terminates with `features:download:done
+  // { cell, ok, files, failed }` — files = sigs that landed, failed = sigs
+  // that didn't — so the panel can show a real outcome ("42 files
+  // downloaded" / "already local" / "3 missing"), never just un-dim a button.
   #downloadFeature = async (p?: { cell?: string; branchSig?: string; gateSig?: string }): Promise<void> => {
     const cell = String(p?.cell ?? '').trim()
     const broker = this.#ioc()?.get?.(BROKER_KEY) as
       | (BrokerLike & { fetchBySig?: (sig: string, type: 'layer' | 'resource' | 'dependency') => Promise<Uint8Array | null> })
       | undefined
-    if (!broker?.adopt) return
     let ok = false
+    let files = 0
+    let failed = 0
+    if (!broker?.adopt) {
+      EffectBus.emit('features:download:done', { cell, ok, files, failed })
+      return
+    }
     try {
       const explicit = String(p?.branchSig ?? '').trim().toLowerCase()
       const branchSig = SIG_RE.test(explicit)
@@ -647,23 +654,39 @@ export class SwarmAdoptDrone extends Drone {
         // Honest outcome: ANY failed fetch means the mirror is incomplete —
         // partial success must not read as "downloaded".
         ok = stats.failed === 0
+        files = stats.layers + stats.leaves
+        failed = stats.failed
       } else {
         const gateSig = String(p?.gateSig ?? '').trim().toLowerCase()
         if (SIG_RE.test(gateSig) && broker.fetchBySig) {
           const bytes = await broker.fetchBySig(gateSig, 'resource')
           ok = !!bytes
           if (bytes) {
+            files++
             try {
               const refs = extractPageRefSigs(new TextDecoder().decode(bytes))
-              for (const s of refs) await broker.fetchBySig(s, 'resource')
+              for (const s of refs) {
+                const got = await broker.fetchBySig(s, 'resource')
+                if (got) files++
+                else failed++
+              }
             } catch { /* refs are best-effort — the page body itself landed */ }
+          } else {
+            failed++
           }
         }
       }
     } catch (err) {
       console.warn('[swarm-adopt] features:download failed', { cell, err })
     }
-    EffectBus.emit('features:download:done', { cell, ok })
+    EffectBus.emit('features:download:done', { cell, ok, files, failed })
+    // A visible receipt in the activity log too — the panel may already be
+    // closed by the time a long walk finishes.
+    const i18n = this.#ioc()?.get?.(I18N_IOC_KEY) as I18nProvider | undefined
+    const message = ok
+      ? (i18n?.t('activity.downloaded', { count: files, cell }) ?? `downloaded ${files} file(s) for "${cell}"`)
+      : (i18n?.t('activity.download-failed', { cell }) ?? `couldn't fully download "${cell}"`)
+    EffectBus.emit('activity:log', { message, icon: ok ? '●' : '○' })
   }
 
   // The branch's executable-CODE signatures (bee + dependency sigs) anywhere in

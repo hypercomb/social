@@ -526,6 +526,139 @@ $accent: #c8b8ff;
   &.busy { opacity: 0.55; cursor: progress; }
 }
 
+// ── download pathway (under the header, independent of selection) ──
+// One stepper per tile: sent → receiving → done. Amber marks the ground
+// covered so far (activity, same hue as the header sync pill), the frontier
+// node pulses, and the terminal state is unambiguous — the WHOLE track goes
+// green with a check on success, the terminal node red on failure. Cold and
+// quiet: 2px lines, 10px nodes, no motion beyond the frontier pulse.
+
+$path-active: #e0a93e;   // work in progress — matches the sync pill
+$path-ok: #6ec96e;       // complete
+$path-fail: #e08a8a;     // failed terminal
+
+.download-status {
+  padding: 0.55em 1em 0.5em;
+  border-bottom: 1px solid rgba($accent, 0.18);
+  display: flex;
+  flex-direction: column;
+  gap: 0.65em;
+}
+
+.dl-path {
+  display: flex;
+  flex-direction: column;
+  gap: 0.28em;
+  min-width: 0;
+}
+
+.dl-path-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6em;
+  min-width: 0;
+  font-size: 0.7em;
+  letter-spacing: 0.03em;
+}
+
+.dl-cell {
+  flex-shrink: 1;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba($accent, 0.85);
+}
+
+.dl-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.dl-path.ok .dl-text { color: rgba($path-ok, 0.9); }
+.dl-path.fail .dl-text { color: rgba($path-fail, 0.9); }
+
+// ── the track: node ─ seg ─ node ─ seg ─ node ──
+.dl-track {
+  display: flex;
+  align-items: center;
+}
+
+.dl-node {
+  flex-shrink: 0;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  background: transparent;
+  box-sizing: border-box;
+
+  &.filled {
+    border-color: $path-active;
+    background: $path-active;
+  }
+
+  &.pulse { animation: dl-pulse 1.2s ease-in-out infinite; }
+}
+
+// Terminal node carries the verdict glyph — a size up so ✓ / ✕ stay legible.
+.dl-node.terminal {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  line-height: 1;
+  color: rgba(10, 10, 16, 0.9);
+}
+
+.dl-seg {
+  flex: 1;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.14);
+
+  &.filled { background: $path-active; }
+}
+
+// Success: the whole pathway reads green — arrival is unmistakable.
+.dl-path.ok {
+  .dl-node.filled { border-color: $path-ok; background: $path-ok; }
+  .dl-seg.filled { background: $path-ok; }
+}
+
+// Failure: the ground covered stays amber; only the terminal verdict is red.
+.dl-path.fail .dl-node.terminal.filled {
+  border-color: $path-fail;
+  background: $path-fail;
+}
+
+.dl-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.58em;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.3);
+
+  span.lit { color: rgba(255, 255, 255, 0.6); }
+  span:first-child { text-align: left; }
+  span:last-child { text-align: right; }
+}
+
+.dl-path.ok .dl-labels span:last-child { color: rgba($path-ok, 0.85); }
+.dl-path.fail .dl-labels span:last-child { color: rgba($path-fail, 0.85); }
+
+@keyframes dl-pulse {
+  0%, 100% { opacity: 1;    transform: scale(1);    }
+  50%      { opacity: 0.55; transform: scale(0.85); }
+}
+
 .bulk-clear {
   flex: 0 0 auto;
   background: transparent;

@@ -111,6 +111,23 @@ interface FeatureGroup {
   hierarchy?: { missing: string[]; extra: string[] }
 }
 
+/** Download-leash trip point: this much SILENCE (no progress tick, no done)
+ *  means the producer died mid-walk — matches the sync pill's stale guard. */
+const DOWNLOAD_STALL_MS = 90_000
+
+/** One row of the download pathway stepper: sent → receiving → done. */
+interface DownloadPath {
+  cell: string
+  /** 1 = request sent, 2 = bytes streaming, 3 = terminal (ok or failed). */
+  stage: 1 | 2 | 3
+  /** Still in flight — the frontier node pulses. */
+  active: boolean
+  ok: boolean
+  stalled?: boolean
+  files: number
+  failed: number
+}
+
 interface FeaturesOpenPayload {
   cell: string
   segments: string[]
@@ -158,6 +175,33 @@ export class FeaturesViewerComponent implements OnDestroy {
   /** Bulk downloads in flight (by cell) — the bar's download button shows
    *  busy until every `features:download:done` lands. */
   readonly downloading = signal<ReadonlySet<string>>(new Set())
+
+  /** Files fetched since this download batch started — one tick per
+   *  `adopt:progress` the broker streams while a download is in flight.
+   *  The climbing number IS the "not stalled" cue. */
+  readonly downloadedCount = signal(0)
+
+  /** Per-cell download outcomes, in arrival order — what the status block
+   *  under the header renders. `stalled` marks a download the leash gave up
+   *  waiting on (no progress, no done) — distinct from an honest failure. */
+  readonly downloadResults = signal<{ cell: string; ok: boolean; files: number; failed: number; stalled?: boolean }[]>([])
+
+  /** The visible PATHWAY: one stepper row per cell, sent → receiving → done.
+   *  Stage 1 fills the instant the click lands (the request is out), stage 2
+   *  when bytes start streaming, stage 3 when the outcome arrives — green
+   *  track + check on success, red terminal node on failure. Active rows
+   *  first (they're what the participant is watching), finished rows after. */
+  readonly pathway = computed<DownloadPath[]>(() => {
+    const out: DownloadPath[] = []
+    const receiving = this.downloadedCount() > 0
+    for (const cell of this.downloading()) {
+      out.push({ cell, stage: receiving ? 2 : 1, active: true, ok: false, files: 0, failed: 0 })
+    }
+    for (const r of this.downloadResults()) {
+      out.push({ cell: r.cell, stage: 3, active: false, ok: r.ok, stalled: r.stalled, files: r.files, failed: r.failed })
+    }
+    return out
+  })
 
   readonly selectedCount = computed(() => this.selectedKeys().size)
 
@@ -251,18 +295,69 @@ export class FeaturesViewerComponent implements OnDestroy {
       },
     ))
 
-    // A bulk download finished for a tile — drop its busy marker.
-    this.#cleanups.push(EffectBus.on<{ cell?: string }>('features:download:done', (p) => {
+    // A bulk download finished for a tile — drop its busy marker and record
+    // the outcome so the status block shows a real result, not a silent
+    // un-dimmed button.
+    this.#cleanups.push(EffectBus.on<{ cell?: string; ok?: boolean; files?: number; failed?: number }>('features:download:done', (p) => {
       const cell = String(p?.cell ?? '')
       if (!cell) return
+      const wasBusy = this.downloading().has(cell)
       this.downloading.update(set => {
         if (!set.has(cell)) return set
         const next = new Set(set)
         next.delete(cell)
         return next
       })
+      if (!wasBusy) return   // last-value replay of an old done — not ours
+      this.#recordResult({
+        cell,
+        ok: p?.ok === true,
+        files: Number(p?.files ?? 0) || 0,
+        failed: Number(p?.failed ?? 0) || 0,
+      })
+      if (this.downloading().size > 0) this.#armDownloadLeash()
+      else this.#clearDownloadLeash()
     }))
 
+    // The broker streams one `adopt:progress` per sig it fills. While a panel
+    // download is in flight that stream is OUR download moving — surface it as
+    // a climbing file count (and proof the walk hasn't stalled).
+    this.#cleanups.push(EffectBus.on('adopt:progress', () => {
+      if (this.downloading().size === 0) return
+      this.downloadedCount.update(n => n + 1)
+      this.#armDownloadLeash()
+    }))
+
+  }
+
+  // ── download stall leash ──────────────────────────────────────────
+  // A producer that dies mid-walk (peer gone, relay dropped) emits neither
+  // progress nor done — without a leash the busy state shows forever and
+  // "stalled" is exactly what the participant can't distinguish. Prolonged
+  // SILENCE (no progress tick, no done) clears the busy markers and records
+  // the still-open cells as stalled. Any activity re-arms it.
+  #downloadLeash: ReturnType<typeof setTimeout> | null = null
+
+  #armDownloadLeash(): void {
+    this.#clearDownloadLeash()
+    this.#downloadLeash = setTimeout(() => {
+      this.#downloadLeash = null
+      const open = [...this.downloading()]
+      if (!open.length) return
+      this.downloading.set(new Set())
+      for (const cell of open) this.#recordResult({ cell, ok: false, files: 0, failed: 0, stalled: true })
+    }, DOWNLOAD_STALL_MS)
+  }
+
+  #clearDownloadLeash(): void {
+    if (!this.#downloadLeash) return
+    clearTimeout(this.#downloadLeash)
+    this.#downloadLeash = null
+  }
+
+  /** Upsert one cell's download outcome (a re-download replaces its line). */
+  #recordResult(r: { cell: string; ok: boolean; files: number; failed: number; stalled?: boolean }): void {
+    this.downloadResults.update(list => [...list.filter(x => x.cell !== r.cell), r])
   }
 
   /** Read a feature resource's bytes as text for review. Capped so a huge page
@@ -301,6 +396,7 @@ export class FeaturesViewerComponent implements OnDestroy {
 
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
+    this.#clearDownloadLeash()
   }
 
   close(): void {
@@ -308,6 +404,9 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.groups.set([])
     this.selectedKeys.set(new Set())
     this.pending.set(new Set())
+    this.downloadResults.set([])
+    // In-flight downloads keep running (the bytes still land, and the header
+    // sync pill keeps showing them) — only the panel-local status resets.
   }
 
   /** Drop one tile's sections from the view (does not clear its staging). */
@@ -579,7 +678,9 @@ export class FeaturesViewerComponent implements OnDestroy {
 
   /** Bulk download — mirror every selected feature's bytes onto this machine.
    *  SwarmAdoptDrone answers `features:download` with the broker's full walk
-   *  (branch) or the page + its refs (page-only), and confirms per cell. */
+   *  (branch) or the page + its refs (page-only), and confirms per cell with
+   *  counts. The status block tracks the whole batch: live file count while
+   *  the walk streams, a per-cell outcome line when each finishes. */
   downloadSelected(): void {
     const cells = new Set<string>()
     for (const { group, feat } of this.#selectedRows()) {
@@ -592,7 +693,13 @@ export class FeaturesViewerComponent implements OnDestroy {
         ...(feat.gateSig ? { gateSig: feat.gateSig } : {}),
       })
     }
-    if (cells.size) this.downloading.update(set => new Set([...set, ...cells]))
+    if (!cells.size) return
+    // Fresh batch from idle → the counter starts over; a re-requested cell's
+    // old outcome line drops (its NEW outcome replaces it when done lands).
+    if (this.downloading().size === 0) this.downloadedCount.set(0)
+    this.downloadResults.update(list => list.filter(r => !cells.has(r.cell)))
+    this.downloading.update(set => new Set([...set, ...cells]))
+    this.#armDownloadLeash()
   }
 
   isDownloading(): boolean {
