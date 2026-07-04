@@ -127,7 +127,12 @@ export class MixedGroupBag {
    *  participant is elsewhere. DERIVED — the location is the state. */
   currentGroupId(): string | null {
     const segs = this.#currentSegments()
-    return segs.length === 1 && this.#registry.get(segs[0]) ? segs[0] : null
+    if (segs.length !== 1) return null
+    const g = this.#registry.get(segs[0])
+    // An openDirectly group (the dashboard) has no page, so standing at its id
+    // segment is NOT standing in a launcher page — it renders as a normal
+    // location (and the fix ensures we never navigate there in the first place).
+    return g && !g.openDirectly ? segs[0] : null
   }
 
   /** The launcher icon click. Serialized so overlapping clicks resolve in

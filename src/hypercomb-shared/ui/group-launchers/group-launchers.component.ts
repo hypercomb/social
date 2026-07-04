@@ -127,7 +127,7 @@ export class GroupLaunchersComponent implements OnDestroy {
     this.groups.set(
       groupRegistry.all()
         .filter(g => g.members().length > 0)
-        .map(g => ({ id: g.id, icon: iconOverrides.glyph('group:' + g.id, g.icon), label: g.label, on: g.id === current })),
+        .map(g => ({ id: g.id, icon: iconOverrides.glyph('group:' + g.id, g.icon), label: g.label, on: g.id === current || !!g.isActive?.() })),
     )
   }
 }

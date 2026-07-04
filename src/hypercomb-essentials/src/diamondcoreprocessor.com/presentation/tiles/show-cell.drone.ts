@@ -31,8 +31,10 @@ type Cell = { q: number; r: number; label: string; external: boolean; imageSig?:
 function isLauncherLocation(segs: readonly unknown[]): boolean {
   if (segs.length !== 1 || typeof segs[0] !== 'string') return false
   if (segs[0].startsWith('agg-')) return true
-  const reg = (window as any).ioc?.get?.('@hypercomb.social/GroupLauncher') as { get?: (id: string) => unknown } | undefined
-  return !!reg?.get?.(segs[0])
+  const reg = (window as any).ioc?.get?.('@hypercomb.social/GroupLauncher') as { get?: (id: string) => { openDirectly?: boolean } | undefined } | undefined
+  const group = reg?.get?.(segs[0])
+  // openDirectly groups (the dashboard) have no page — never a launcher location.
+  return !!group && !group.openDirectly
 }
 
 /** Map a launch group's shape id (from its `launch:target` decoration) to the

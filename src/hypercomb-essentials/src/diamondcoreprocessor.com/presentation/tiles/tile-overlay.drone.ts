@@ -23,8 +23,10 @@ type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; bran
 function isLauncherLocation(segs: readonly unknown[]): boolean {
   if (segs.length !== 1 || typeof segs[0] !== 'string') return false
   if (segs[0].startsWith('agg-')) return true
-  const reg = window.ioc.get<{ get?: (id: string) => unknown }>('@hypercomb.social/GroupLauncher')
-  return !!reg?.get?.(segs[0])
+  const reg = window.ioc.get<{ get?: (id: string) => { openDirectly?: boolean } | undefined }>('@hypercomb.social/GroupLauncher')
+  const group = reg?.get?.(segs[0])
+  // openDirectly groups (the dashboard) have no page — never a launcher location.
+  return !!group && !group.openDirectly
 }
 
 type OverlayAction = {
