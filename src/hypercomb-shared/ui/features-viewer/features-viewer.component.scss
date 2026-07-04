@@ -96,37 +96,6 @@ $accent: #c8b8ff;
   color: rgba(255, 255, 255, 0.45);
 }
 
-// ── tabs (Tiles / Globals) ────────────────────────────────────────
-// Quiet underline tabs directly under the header — the Globals tab holds the
-// domain-level features (games, package tools) and their PUBLIC switches.
-.features-tabs {
-  display: flex;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-}
-
-.ftab {
-  flex: 0 0 auto;
-  background: transparent;
-  border: none;
-  border-bottom: 2px solid transparent;
-  padding: 0.45em 1em 0.4em;
-  font-family: inherit;
-  font-size: 0.72em;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.5);
-  cursor: pointer;
-  transition: color 120ms ease, border-color 120ms ease;
-
-  &:hover { color: rgba($accent, 0.85); }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
-
-  &.active {
-    color: rgba($accent, 0.95);
-    border-bottom-color: rgba($accent, 0.7);
-  }
-}
-
 .features-scroll {
   flex: 1;
   overflow-y: auto;
@@ -467,47 +436,6 @@ $accent: #c8b8ff;
   font-size: 0.72em;
   line-height: 1.4;
   color: rgba(255, 255, 255, 0.5);
-}
-
-// ── globals (domain-level features) ───────────────────────────────
-// Globals render as a FOLDER TREE — folder rows carry the family (games),
-// leaves sit indented beneath them (inset comes inline from `depth`). The
-// glyph next to a name is the launcher icon; installed leaves get the play
-// affordance. Global rows aren't part of the bulk selection, so they don't
-// take the row cursor.
-.features-row.global { cursor: default; }
-
-.features-row.folder .feature-name {
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.global-icon {
-  font-size: 1.05em;
-  vertical-align: -0.18em;
-  margin-right: 0.25em;
-  color: rgba($accent, 0.85);
-}
-
-.play-btn {
-  flex: 0 0 auto;
-  align-self: center;
-  background: transparent;
-  border: 1px solid rgba($accent, 0.4);
-  border-radius: 4px;
-  color: rgba($accent, 0.9);
-  font-family: inherit;
-  font-size: 0.66em;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  padding: 0.28em 0.7em;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 120ms ease, transform 120ms ease;
-
-  &:hover { background: rgba($accent, 0.16); }
-  &:active { transform: scale(0.94); }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
 }
 
 // ── responsive: stay flush below the header at every header height ──

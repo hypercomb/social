@@ -3,7 +3,7 @@
 // through the safety service + tile editor pipeline.
 
 import { Worker, EffectBus } from '@hypercomb/core'
-import { parseYouTubeVideoId, youTubeThumbnailUrl } from './youtube.js'
+import { parseYouTubeVideoId, youTubeThumbnailUrl, fetchYouTubeTitle } from './youtube.js'
 import { fetchImageBlob } from './photo.js'
 import type { TileEditorService } from '../editor/tile-editor.service.js'
 import type { ImageEditorService } from '../editor/image-editor.service.js'
@@ -172,8 +172,13 @@ export class LinkDropWorker extends Worker {
    */
   async #armLink(url: string, videoId: string | null, thumbnailBlob: Blob | null): Promise<void> {
     const type = videoId ? 'youtube' as const : 'link' as const
+
+    // Default tile name: the YouTube video's title (via oEmbed). Overridable —
+    // the command-line pre-fills it but the user can retype before Enter.
+    const name = videoId ? await fetchYouTubeTitle(url) : null
+
     if (thumbnailBlob) {
-      await armImageBlob(thumbnailBlob, { url, type })
+      await armImageBlob(thumbnailBlob, { url, type, name })
       return
     }
     // No thumbnail available — emit a bare arm payload so the chevron shows a
@@ -185,6 +190,7 @@ export class LinkDropWorker extends Worker {
       smallFlatSig: null,
       url,
       type,
+      name,
     })
   }
 

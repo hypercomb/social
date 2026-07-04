@@ -4,6 +4,7 @@
 
 import { Worker, EffectBus } from '@hypercomb/core'
 import { isImageUrl, fetchImageBlob } from './photo.js'
+import { parseYouTubeVideoId } from './youtube.js'
 import { readCellProperties, readTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig } from '../editor/tile-properties.js'
 import type { PhotoView } from './photo.view.js'
 
@@ -14,9 +15,9 @@ export class LinkOpenWorker extends Worker {
   override genotype = 'linking'
 
   public override description =
-    'Handles the default tile open action — routes image links to the photo view.'
+    'Handles the default tile open action — routes image links to the photo view, YouTube to the iframe viewer.'
 
-  protected override emits: string[] = []
+  protected override emits: string[] = ['viewer:open']
 
   protected override act = async (): Promise<void> => {
     EffectBus.on<TileActionPayload>('tile:action', (payload) => {
@@ -28,6 +29,14 @@ export class LinkOpenWorker extends Worker {
   async #handleOpen(label: string): Promise<void> {
     const link = await this.#readTileLink(label)
     if (!link) return
+
+    // YouTube → immersive iframe embed (viewer:open), NOT a new tab. This is
+    // how link tiles opened before the emit was lost; YoutubeViewerComponent
+    // listens for `viewer:open` kind:'youtube' and shows the embed overlay.
+    if (parseYouTubeVideoId(link)) {
+      EffectBus.emit('viewer:open', { kind: 'youtube', url: link })
+      return
+    }
 
     // Image URL → photo view (extension-based or HEAD probe fallback)
     const blob = await fetchImageBlob(link)

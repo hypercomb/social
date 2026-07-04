@@ -12,13 +12,14 @@
 
 import { Component, OnDestroy, computed, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
+import { TranslatePipe } from '../../core/i18n.pipe'
 import { iconOverrides } from '../../core/icon-override.store'
 import { MATERIAL_ICON_NAMES } from './material-icon-names'
 
 @Component({
   selector: 'hc-icon-picker',
   standalone: true,
-  imports: [],
+  imports: [TranslatePipe],
   templateUrl: './icon-picker.component.html',
   styleUrls: ['./icon-picker.component.scss'],
 })

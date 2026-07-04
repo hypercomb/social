@@ -1,19 +1,19 @@
 @if (open()) {
-  <div class="landing" role="dialog" aria-label="Websites">
+  <div class="landing" role="dialog" [attr.aria-label]="'website-landing.title' | t">
     <header class="landing-head">
       <div class="landing-heading">
-        <h1 class="landing-title">Websites</h1>
+        <h1 class="landing-title">{{ 'website-landing.title' | t }}</h1>
         @if (sites().length > 0) {
           <span class="landing-count">{{ sites().length }}</span>
         }
       </div>
-      <button class="landing-close mat-sym" type="button" (click)="close()" aria-label="Close" title="Close">
+      <button class="landing-close mat-sym" type="button" (click)="close()" [attr.aria-label]="'website-landing.close' | t" [title]="'website-landing.close' | t">
         close
       </button>
     </header>
 
     @if (sites().length === 0) {
-      <p class="landing-empty">No websites yet.</p>
+      <p class="landing-empty">{{ 'website-landing.empty' | t }}</p>
     } @else {
       <ul class="landing-grid thin-scroll" role="list">
         @for (site of sites(); track site.key) {

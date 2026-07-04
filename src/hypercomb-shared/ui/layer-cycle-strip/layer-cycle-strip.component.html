@@ -5,8 +5,8 @@
         type="button"
         class="entry"
         [class.active]="entry.active"
-        [attr.aria-label]="entry.active ? 'Active layer (click to dismiss)' : 'Spotlight this layer'"
-        [title]="entry.active ? 'click to dismiss' : ''"
+        [attr.aria-label]="entry.active ? ('layer-cycle.active' | t) : ('layer-cycle.spotlight' | t)"
+        [title]="entry.active ? ('layer-cycle.dismiss' | t) : ''"
         (click)="onEntryClick(entry)">
         <span class="dot" [style.background-color]="entry.color"
                           [style.box-shadow]="entry.active ? '0 0 14px ' + entry.color + ', 0 0 4px ' + entry.color : 'none'"></span>

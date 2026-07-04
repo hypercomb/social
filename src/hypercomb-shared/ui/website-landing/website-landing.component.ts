@@ -18,12 +18,12 @@
 
 import { Component, OnDestroy, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
+import { TranslatePipe } from '../../core/i18n.pipe'
 import { groupRegistry, type GroupMember } from '../../core/group-registry'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 
-/** The MixedGroupBag's opaque aggregator location — mirrored by string (a shared
- *  internal convention, see mixed-group-bag.ts), never imported. */
-const AGG_SEGMENT = 'agg-mix'
+/** The websites group's page is its OWN root location, /websites — the group
+ *  id IS the segment (see mixed-group-bag.ts). */
 const WEBSITES = 'websites'
 
 type LineageLike = EventTarget & { explorerSegments?: () => readonly string[] }
@@ -44,7 +44,7 @@ const ioc = (): { get(k: string): unknown } | undefined =>
 @Component({
   selector: 'hc-website-landing',
   standalone: true,
-  imports: [],
+  imports: [TranslatePipe],
   templateUrl: './website-landing.component.html',
   styleUrls: ['./website-landing.component.scss'],
 })
@@ -161,8 +161,9 @@ export class WebsiteLandingComponent implements OnDestroy {
     this.#ensureLineage()
     const segs = (this.#lineage?.explorerSegments?.() ?? [])
       .map(s => String(s ?? '').trim()).filter(Boolean)
-    const active = segs.length === 1 && segs[0] === AGG_SEGMENT
-      && groupRegistry.currentId() === WEBSITES
+    // currentId() derives from the location (segs[0] === 'websites'), so the
+    // one check covers icon clicks, cold reloads, and typed /websites alike.
+    const active = segs.length === 1 && groupRegistry.currentId() === WEBSITES
 
     // Truly REPLACE the floating launcher (don't just cover it): hide the Pixi
     // hive mesh while the landing owns the screen, restore it when it doesn't.

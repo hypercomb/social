@@ -1,6 +1,7 @@
 // hypercomb-shared/core/bootstrap-history.ts
 // hypercomb-web/src/bootstrap/bootstrap-history.ts
 
+import { EffectBus } from '@hypercomb/core'
 import { CompletionUtility } from './completion-utility'
 
 type BootstrapStep = {
@@ -34,7 +35,26 @@ export class BootstrapHistory {
       .filter(Boolean)
       .map(seg => { try { return decodeURIComponent(seg) } catch { return seg } })
       .join('/')
-    const inputSuffix = (window.location.search || '') + (window.location.hash || '')
+
+    // ── Share-link landing intent ──────────────────────────────────
+    // A minted share link carries `?features=<cell>` (see essentials'
+    // share-link.drone): land normally, then open the features panel for
+    // that cell once the shell has warmed. The param is CONSUMED here —
+    // stripped from the settling URL so a refresh doesn't re-open the
+    // panel — and the intent only ever OPENS a panel: nothing activates,
+    // downloads, or installs from a link.
+    let featuresIntent = ''
+    let search = window.location.search || ''
+    try {
+      const params = new URLSearchParams(search)
+      featuresIntent = (params.get('features') ?? '').trim()
+      if (params.has('features')) {
+        params.delete('features')
+        const rest = params.toString()
+        search = rest ? `?${rest}` : ''
+      }
+    } catch { /* malformed search — no intent, suffix passes through */ }
+    const inputSuffix = search + (window.location.hash || '')
 
     // use the same decode + normalize rules as navigation.cleanSegment
     const urlSegments = this.parsePath(inputPath, utility)
@@ -83,6 +103,18 @@ export class BootstrapHistory {
     }
 
     this.dispatchPopState()
+
+    // Fire the landing intent on the first `synchronize` — emitted once all
+    // registered bees have pulsed, i.e. the shell is warm and the lineage
+    // reflects the restored path. Emitting `tile:action {features}` is
+    // order-safe even if ShowFeaturesDrone loads later: EffectBus replays
+    // the last value to late subscribers.
+    if (featuresIntent) {
+      const label = featuresIntent
+      window.addEventListener('synchronize', () => {
+        EffectBus.emit('tile:action', { action: 'features', label })
+      }, { once: true })
+    }
 
     // Phase 2: background bee loading in URL order. Errors are
     // swallowed per level so one failure can't strand the chain.

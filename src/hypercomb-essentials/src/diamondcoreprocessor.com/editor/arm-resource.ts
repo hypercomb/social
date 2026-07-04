@@ -49,7 +49,7 @@ export const storeImageResources = async (blob: Blob): Promise<ImageResources | 
 
 export const armImageBlob = async (
   blob: Blob,
-  opts: { url?: string | null; type?: ArmType; attachment?: PendingAttachment | null } = {},
+  opts: { url?: string | null; type?: ArmType; attachment?: PendingAttachment | null; name?: string | null } = {},
 ): Promise<boolean> => {
   const res = await storeImageResources(blob)
   if (!res) return false
@@ -62,6 +62,7 @@ export const armImageBlob = async (
     url: opts.url ?? null,
     type: opts.type ?? 'image',
     attachment: opts.attachment ?? null,
+    name: opts.name ?? null,
   })
   return true
 }

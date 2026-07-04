@@ -285,7 +285,12 @@ class MoveProvider implements SlashBehaviourProvider {
   readonly name = 'move-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'move', description: 'Toggle move mode for drag-reordering tiles', descriptionKey: 'slash.move' }
+    { name: 'move', description: 'Toggle move mode for drag-reordering tiles', descriptionKey: 'slash.move',
+      options: ['(<index>)'],
+      examples: [
+        { input: '/move', result: 'Toggles drag-reorder move mode' },
+        { input: '/move(3)', result: 'Moves the selection to slot 3' },
+      ] }
   ]
 
   async execute(_behaviourName: string, args: string): Promise<void> {
@@ -316,7 +321,8 @@ class ExpandProvider implements SlashBehaviourProvider {
   readonly name = 'expand-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'expand', description: 'Expand selected tiles into constituent parts via Claude Haiku', descriptionKey: 'slash.expand' }
+    { name: 'expand', description: 'Expand selected tiles into constituent parts via Claude Haiku', descriptionKey: 'slash.expand',
+      examples: [{ input: '/expand', result: 'Expands each selected tile into child tiles' }] }
   ]
 
   async execute(_behaviourName: string, _args: string): Promise<void> {
@@ -340,7 +346,8 @@ class ArrangeProvider implements SlashBehaviourProvider {
   readonly name = 'arrange-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'arrange', description: 'Toggle icon arrangement mode on the tile overlay', descriptionKey: 'slash.arrange' }
+    { name: 'arrange', description: 'Toggle icon arrangement mode on the tile overlay', descriptionKey: 'slash.arrange',
+      examples: [{ input: '/arrange', result: 'Overlay icons become draggable; repeat to exit' }] }
   ]
 
   async execute(): Promise<void> {
@@ -353,7 +360,8 @@ class VoiceProvider implements SlashBehaviourProvider {
   readonly name = 'voice-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'voice', description: 'Toggle voice input (speech-to-text)', descriptionKey: 'slash.voice' }
+    { name: 'voice', description: 'Toggle voice input (speech-to-text)', descriptionKey: 'slash.voice',
+      examples: [{ input: '/voice', result: 'Toggles speech-to-text input' }] }
   ]
 
   async execute(): Promise<void> {
@@ -366,7 +374,8 @@ class PushToTalkProvider implements SlashBehaviourProvider {
   readonly name = 'push-to-talk-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'push-to-talk', description: 'Toggle push-to-talk mic button', descriptionKey: 'slash.push-to-talk' }
+    { name: 'push-to-talk', description: 'Toggle push-to-talk mic button', descriptionKey: 'slash.push-to-talk',
+      examples: [{ input: '/push-to-talk', result: 'Shows or hides the hold-to-talk mic button' }] }
   ]
 
   async execute(): Promise<void> {
@@ -381,7 +390,8 @@ class TextOnlyProvider implements SlashBehaviourProvider {
   readonly name = 'text-only-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'text-only', description: 'Toggle text-only mode (hide images)', descriptionKey: 'slash.text-only' }
+    { name: 'text-only', description: 'Toggle text-only mode (hide images)', descriptionKey: 'slash.text-only',
+      examples: [{ input: '/text-only', result: 'Tiles render labels only; repeat to restore images' }] }
   ]
 
   #active = false
@@ -396,7 +406,8 @@ class InstructionsProvider implements SlashBehaviourProvider {
   readonly name = 'instructions-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'instructions', description: 'Toggle instruction overlay', descriptionKey: 'slash.instructions' }
+    { name: 'instructions', description: 'Toggle instruction overlay', descriptionKey: 'slash.instructions',
+      examples: [{ input: '/instructions', result: 'Toggles the instruction overlay' }] }
   ]
 
   execute(): void {
@@ -408,7 +419,8 @@ class AtomizeUiProvider implements SlashBehaviourProvider {
   readonly name = 'atomize-ui-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'atomize-ui', description: 'Toggle the atomizer toolbar', descriptionKey: 'slash.atomize-ui' }
+    { name: 'atomize-ui', description: 'Toggle the atomizer toolbar', descriptionKey: 'slash.atomize-ui',
+      examples: [{ input: '/atomize-ui', result: 'Opens the atomizer toolbar' }] }
   ]
 
   execute(): void {
@@ -420,7 +432,9 @@ class DocsProvider implements SlashBehaviourProvider {
   readonly name = 'docs-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'docs', description: 'Browse project documentation', descriptionKey: 'slash.docs' }
+    { name: 'docs', description: 'Browse project documentation', descriptionKey: 'slash.docs',
+      options: ['<page>'],
+      examples: [{ input: '/docs', result: 'Opens the documentation browser' }] }
   ]
 
   execute(_behaviourName: string, args: string): void {
@@ -432,7 +446,12 @@ class DomainProvider implements SlashBehaviourProvider {
   readonly name = 'domain-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'domain', description: 'Add, remove, or list mesh relay domains', descriptionKey: 'slash.domain' }
+    { name: 'domain', description: 'Add, remove, or list mesh relay domains', descriptionKey: 'slash.domain',
+      options: ['<ws:// or wss:// url>', 'remove <url>', 'list', 'clear'],
+      examples: [
+        { input: '/domain wss://relay.example.com', result: 'Adds the relay domain' },
+        { input: '/domain list', result: 'Lists configured relay domains' },
+      ] }
   ]
 
   async execute(_behaviourName: string, args: string): Promise<void> {
@@ -452,7 +471,8 @@ class ObserveProvider implements SlashBehaviourProvider {
   readonly name = 'observe-provider'
   readonly priority = 100
   readonly behaviours: SlashBehaviour[] = [
-    { name: 'observe', description: 'Observe the swarm — who is here and what they share', descriptionKey: 'slash.observe' }
+    { name: 'observe', description: 'Observe the swarm — who is here and what they share', descriptionKey: 'slash.observe',
+      examples: [{ input: '/observe', result: 'Opens the swarm observe panel' }] }
   ]
 
   execute(): void {

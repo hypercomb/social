@@ -41,16 +41,6 @@
 // `DropboxService.#resolve`. Only CASCADING features contribute from
 // ancestors — a node-local render on a parent is irrelevant to the child.
 //
-// ── Globals (domain-level features) ───────────────────────────────────
-//
-// Besides tile features, a domain can publish GLOBALS — games and package
-// tools with no hive location (see sharing/global-features.ts). They are
-// `feature:global` decorations on a domain ROOT: this drone surfaces them on
-// the payload (`globals`) when a clicked cell's layer carries them (an
-// adopted domain's root, or a peer root in the adopt window), answers the
-// panel's Globals tab with YOUR OWN games + public state (`features:globals`),
-// and flips the root mark on `features:publish-global`.
-//
 // ── Staging is benign (panel-side) ────────────────────────────────────
 //
 // The panel lets the participant "want" a feature. That is BENIGN: nothing
@@ -67,15 +57,6 @@ import { Drone } from '@hypercomb/core'
 import type { I18nProvider } from '@hypercomb/core'
 import { kindsForLabel } from '../../commands/decoration-kind-index.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
-import {
-  GLOBAL_FEATURE_KIND,
-  localGlobalTree,
-  isGlobalInstalled,
-  publishedGlobals,
-  setGlobalPublic,
-  pathKey,
-  type GlobalNode,
-} from '../../sharing/global-features.js'
 import { writeDropbox } from '../../files/files-attachment.js'
 import { parseAccept } from '../../files/file-types.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
@@ -176,32 +157,6 @@ interface AvailableItem {
   addable?: boolean
 }
 
-/** One row of a domain's globals TREE, flattened for the panel — globals are
- *  folders at every level (`games` is a folder, each game a leaf inside it),
- *  and both publish and adopt operate at any level. Name + meta only, inert
- *  by construction: `installed` says a local module answers to a leaf's id
- *  (launchable right now); a missing module arrives only through the
- *  installer's own consent path. */
-interface GlobalItem {
-  /** Stable row key — the path joined (`games/arkanoid`). */
-  key: string
-  path: string[]
-  /** Indent level (path.length - 1) — the panel renders the tree by inset. */
-  depth: number
-  folder: boolean
-  /** Path tail — a leaf's toggle key (`<id>:toggle` launches it). */
-  id: string
-  label: string
-  icon: string
-  installed: boolean
-}
-
-/** A row of YOUR OWN globals tree on the panel's Globals tab. */
-interface OwnGlobalItem extends GlobalItem {
-  /** True when the root carries this node's `feature:global` record. */
-  public: boolean
-}
-
 interface FeaturesOpenPayload {
   cell: string
   segments: string[]
@@ -209,9 +164,6 @@ interface FeaturesOpenPayload {
   applied: FeatureItem[]
   /** Features the app knows but this layer doesn't have yet. */
   available: AvailableItem[]
-  /** Domain-level globals published on THIS cell's layer (`feature:global`
-   *  records) — non-empty only on a domain root (peer or adopted). */
-  globals: GlobalItem[]
   /** True = the tile exists in the LOCAL layer (held). False = a peer-only
    *  offer; the panel shows the adopt-target row only then. */
   held?: boolean
@@ -220,81 +172,6 @@ interface FeaturesOpenPayload {
    *  get an add affordance (merge that child's branch in); `extra` is
    *  informational — a diff view never deletes the participant's content. */
   hierarchy?: { missing: string[]; extra: string[] }
-}
-
-/** Merges globals tree sources (the local tree, published root records, a
- *  peer root's records) into ONE tree and flattens it depth-first for the
- *  panel. First writer of a node keeps its label/icon (the local tree is
- *  added first, so local metadata wins over a stale published record). */
-class MergedGlobals {
-  #root = new Map<string, MergedNode>()
-  #public = new Set<string>()
-
-  add(path: readonly string[], label?: string, icon?: string): void {
-    let level = this.#root
-    let node: MergedNode | undefined
-    for (let i = 1; i <= path.length; i++) {
-      const seg = path[i - 1]
-      node = level.get(seg)
-      if (!node) {
-        node = { path: path.slice(0, i), label: seg, icon: 'sports_esports', children: new Map() }
-        level.set(seg, node)
-        // Metadata applies to the node the caller ADDRESSED; auto-created
-        // ancestors keep their segment name until their own record arrives.
-        if (i === path.length) {
-          if (label) node.label = label
-          if (icon) node.icon = icon
-        }
-      }
-      level = node.children
-    }
-  }
-
-  addTree(nodes: readonly GlobalNode[]): void {
-    for (const n of nodes) {
-      this.add(n.path, n.label, n.icon)
-      this.addTree(n.children)
-    }
-  }
-
-  markPublic(path: readonly string[]): void {
-    this.#public.add(pathKey(path))
-  }
-
-  flatten(): OwnGlobalItem[] {
-    const out: OwnGlobalItem[] = []
-    const walk = (level: Map<string, MergedNode>): boolean => {
-      let anyInstalled = false
-      for (const node of level.values()) {
-        const row: OwnGlobalItem = {
-          key: pathKey(node.path),
-          path: [...node.path],
-          depth: node.path.length - 1,
-          folder: node.children.size > 0,
-          id: node.path[node.path.length - 1],
-          label: node.label,
-          icon: node.icon,
-          installed: false,
-          public: this.#public.has(pathKey(node.path)),
-        }
-        out.push(row)
-        row.installed = node.children.size > 0
-          ? walk(node.children)                       // folder: any child installed
-          : isGlobalInstalled(row.id)                 // leaf: a module answers
-        anyInstalled ||= row.installed
-      }
-      return anyInstalled
-    }
-    walk(this.#root)
-    return out
-  }
-}
-
-interface MergedNode {
-  path: string[]
-  label: string
-  icon: string
-  children: Map<string, MergedNode>
 }
 
 interface TileActionPayload {
@@ -344,8 +221,8 @@ export class ShowFeaturesDrone extends Drone {
   public override description =
     'Gathers the bee-feature metadata (no code) of a clicked tile — both render features and cascading capabilities — and emits features:open so the shell panel lists them, tagging each with its origin (direct on the tile, or cascaded from an ancestor). Read-only — staging the features is benign and handled panel-side.'
 
-  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable', 'features:globals-open', 'features:publish-global']
-  protected override emits: string[] = ['features:open', 'features:globals', 'selection:has-features', 'activity:log']
+  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable']
+  protected override emits: string[] = ['features:open', 'selection:has-features', 'activity:log']
 
   constructor() {
     super()
@@ -397,79 +274,6 @@ export class ShowFeaturesDrone extends Drone {
       void this.#enableAt(segments, kind)
     })
 
-    // The panel's Globals tab asks for YOUR domain's globals (local games +
-    // their public state on the root). Also refreshed after every publish
-    // toggle and on every panel open — last-value replay keeps a late-mounting
-    // panel correct.
-    this.onEffect('features:globals-open', () => {
-      void this.#emitOwnGlobals()
-    })
-
-    // The Globals tab's PUBLIC switch — HIERARCHICAL. ON at a folder marks
-    // the folder and everything inside it public; ON at a leaf marks the
-    // leaf and its ancestor folders (a leaf's folder is its dependency).
-    // OFF withdraws the node's whole subtree and prunes childless folders.
-    this.onEffect<{ path?: string[]; on?: boolean }>('features:publish-global', (p) => {
-      const path = Array.isArray(p?.path) ? p!.path!.map(s => String(s ?? '').trim()).filter(Boolean) : []
-      if (path.length === 0) return
-      void this.#publishGlobal(path, p?.on === true)
-    })
-  }
-
-  /** Flip a node's public state on the hive root, then refresh the tab. */
-  async #publishGlobal(path: string[], on: boolean): Promise<void> {
-    const key = pathKey(path)
-    try {
-      await setGlobalPublic(path, on)
-      this.emitEffect('activity:log', {
-        message: on ? `"${key}" is public on your domain` : `"${key}" withdrawn from your domain`,
-        icon: on ? '●' : '○',
-      })
-    } catch (err) {
-      console.warn('[show-features] publish-global failed', { path, on, err })
-      this.emitEffect('activity:log', { message: `couldn't update global "${key}"`, icon: '○' })
-    }
-    await this.#emitOwnGlobals()
-  }
-
-  /** YOUR globals tree — the local tree (games folder + leaves) merged with
-   *  every `feature:global` node on the root, flattened with depth for the
-   *  panel. A published node whose module is gone stays listed (public, not
-   *  installed) so it can still be withdrawn. */
-  async #emitOwnGlobals(): Promise<void> {
-    const merged = new MergedGlobals()
-    merged.addTree(localGlobalTree())
-    try {
-      for (const p of await publishedGlobals()) {
-        merged.add(p.path, p.label, p.icon)
-        merged.markPublic(p.path)
-      }
-    } catch { /* store/history not up yet — list the local tree as all-private */ }
-    this.emitEffect('features:globals', { globals: merged.flatten() })
-  }
-
-  /** Globals rows from a layer's decoration records — the `feature:global`
-   *  tree a domain root carries, flattened with depth, each leaf stamped
-   *  with whether a local module answers to its id. */
-  #globalItems(records: readonly { kind: string; payload?: unknown }[]): GlobalItem[] {
-    const merged = new MergedGlobals()
-    for (const r of records) {
-      if (r.kind !== GLOBAL_FEATURE_KIND) continue
-      const p = r.payload as { path?: unknown; id?: unknown; label?: unknown; icon?: unknown } | undefined
-      if (!p || typeof p !== 'object') continue
-      // Same normalization as publishedGlobals: `path` is the tree shape;
-      // a legacy flat record (`{ id }`) reads as `games/<id>`.
-      const path = Array.isArray(p.path)
-        ? p.path.map(s => String(s ?? '').trim()).filter(Boolean)
-        : (typeof p.id === 'string' && p.id ? ['games', p.id] : [])
-      if (path.length === 0) continue
-      merged.add(
-        path,
-        typeof p.label === 'string' && p.label.trim() ? p.label.trim() : path[path.length - 1],
-        typeof p.icon === 'string' && p.icon ? p.icon : 'sports_esports',
-      )
-    }
-    return merged.flatten().map(({ public: _public, ...row }) => row)
   }
 
   /** Attach an addable feature at `segments`. Only cascading capabilities are
@@ -645,16 +449,10 @@ export class ShowFeaturesDrone extends Drone {
     // community" line and the site-view review gate can never disagree.
     await this.#stampGates(applied, segments, records)
 
-    // ── 5. GLOBALS — domain-level features published on this cell's layer ──
-    // Non-empty only on a domain root (an adopted domain's folded root, or
-    // your own). Name + meta, inert: the panel shows what the domain offers.
-    const globals = this.#globalItems(records)
-
     this.emitEffect<FeaturesOpenPayload>('features:open', {
-      cell: label, segments, applied, available, globals, held: true,
+      cell: label, segments, applied, available, held: true,
       ...(hierarchy && (hierarchy.missing.length || hierarchy.extra.length) ? { hierarchy } : {}),
     })
-    void this.#emitOwnGlobals()   // keep the Globals tab current on every open
   }
 
   /** The peer branch's ROOT layer, fetched through the broker (one small
@@ -793,10 +591,7 @@ export class ShowFeaturesDrone extends Drone {
       applied.push(item)
     }
 
-    // Decoration-borne features on the peer root — plus any `feature:global`
-    // marks the publisher put there (the domain's public globals ride the
-    // same root layer this path already fetched; zero extra reads).
-    const globalRecords: { kind: string; payload?: unknown }[] = []
+    // Decoration-borne features on the peer root.
     const decorations = Array.isArray(layer?.['decorations']) ? layer!['decorations'] as unknown[] : []
     for (const raw of decorations) {
       const sig = String(raw ?? '')
@@ -807,10 +602,6 @@ export class ShowFeaturesDrone extends Drone {
         const rec = JSON.parse(await blob.text()) as { kind?: string; payload?: unknown }
         const kind = typeof rec?.kind === 'string' ? rec.kind : ''
         if (!kind) continue
-        if (kind === GLOBAL_FEATURE_KIND) {
-          globalRecords.push({ kind, payload: rec.payload })
-          continue
-        }
         const feature = this.#recognize(kind, registry)
         if (feature) {
           if (appliedViews.has(feature.view)) continue
@@ -848,10 +639,8 @@ export class ShowFeaturesDrone extends Drone {
       segments: [...segments],
       applied,
       available: [],
-      globals: this.#globalItems(globalRecords),
       held: false,
     })
-    void this.#emitOwnGlobals()
   }
 
   /** Stamp `gated` / `gateSig` / `publisherDomain` onto each DIRECT feature.
@@ -1007,10 +796,8 @@ export class ShowFeaturesDrone extends Drone {
   /** Decoration records AT this exact location — each kind plus the first
    *  64-hex signature found in its payload (the content the record points at,
    *  e.g. a website page's htmlSig). The payload sig is what the verification
-   *  gate evaluates, so #stampGates reads it from here; the raw payload rides
-   *  along so #globalItems can read `feature:global` marks without a second
-   *  walk. Cold-cache miss → []. */
-  async #decorationRecordsAt(segments: readonly string[]): Promise<{ kind: string; payloadSig?: string; payload?: unknown }[]> {
+   *  gate evaluates, so #stampGates reads it from here. Cold-cache miss → []. */
+  async #decorationRecordsAt(segments: readonly string[]): Promise<{ kind: string; payloadSig?: string }[]> {
     const ioc = this.#ioc()
     const store = ioc?.get<StoreLike>(STORE_KEY)
     const history = ioc?.get<HistoryLike>(HISTORY_KEY)
@@ -1020,7 +807,7 @@ export class ShowFeaturesDrone extends Drone {
       const layer = await history.currentLayerAt(locationSig) as { decorations?: unknown } | null
       const slot = layer?.decorations
       if (!Array.isArray(slot)) return []
-      const records: { kind: string; payloadSig?: string; payload?: unknown }[] = []
+      const records: { kind: string; payloadSig?: string }[] = []
       for (const sig of slot) {
         if (typeof sig !== 'string' || !SIG_RE.test(sig)) continue
         try {
@@ -1028,7 +815,7 @@ export class ShowFeaturesDrone extends Drone {
           if (!blob) continue
           const rec = JSON.parse(await blob.text()) as { kind?: string; payload?: unknown }
           if (typeof rec?.kind !== 'string') continue
-          records.push({ kind: rec.kind, payloadSig: this.#firstPayloadSig(rec.payload), payload: rec.payload })
+          records.push({ kind: rec.kind, payloadSig: this.#firstPayloadSig(rec.payload) })
         } catch {
           /* malformed / unavailable record — skip */
         }

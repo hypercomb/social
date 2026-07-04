@@ -69,6 +69,12 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   { id: 'launcher-shapes', label: 'controls.launcher-shapes', action: 'toggleLauncherShapes', visibleWhen: 'always' },
   { id: 'text-only',    label: 'controls.text-only',    action: 'toggleTextOnly',     visibleWhen: 'always' },
   { id: 'notes',        label: 'controls.notes',        action: 'toggleNotes',        visibleWhen: 'always' },
+  // Pools of Meaning — the reference feature's portal (one-state, like DCP):
+  // navigates to the `sets/` layer, where each tile is a reference set (see
+  // documentation/entrances-and-sets.md). Lives HERE on the control bar, not
+  // among the header aggregates — it manages referenced hives on different
+  // roots; it is not a launch group.
+  { id: 'pools',        label: 'pools.title',           action: 'openPools',          visibleWhen: 'always' },
   { id: 'cut',          label: 'selection.cut',         action: 'cut',                visibleWhen: 'hasSelection' },
   { id: 'copy',         label: 'selection.copy',        action: 'copy',               visibleWhen: 'hasSelection' },
   // The clipboard icon is the way back into the side panel once it's been
@@ -89,7 +95,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
 const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'back': true, 'dcp': true, 'fit': true, 'zoom-out': true, 'zoom-in': true, 'pin': true, 'fullscreen': true,
   'instructions': false, 'show-hidden': false, 'neon-mode': false, 'launcher-shapes': false, 'text-only': false,
-  'notes': true,
+  'notes': true, 'pools': true,
   'cut': false, 'copy': false,
   'clipboard': true, 'voice': false, 'bees': false, 'feedback': false,
 }
@@ -425,6 +431,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     toggleLauncherShapes: () => this.toggleLauncherShapes(),
     toggleTextOnly: () => this.toggleTextOnly(),
     toggleNotes: () => this.toggleNotes(),
+    openPools: () => this.navigateTo(['sets']),
     cut: () => this.cut(),
     copy: () => this.copy(),
     toggleClipboard: () => this.toggleClipboard(),
@@ -489,6 +496,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'launcher-shapes': return 'hexagon'
       case 'text-only':    return this.textOnly() ? 'text_fields' : 'subject'
       case 'notes':        return 'sticky_note_2'
+      case 'pools':        return 'workspaces'
       case 'cut':          return 'content_cut'
       case 'copy':         return 'content_copy'
       case 'clipboard':    return 'content_paste'

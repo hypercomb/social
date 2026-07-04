@@ -1,32 +1,37 @@
 // hypercomb-shared/core/mixed-group-bag.ts
 //
-// MixedGroupBag — ONE shared positional aggregator page (`agg-mix`) that shows
-// the members of the group being VIEWED. ONE-STATE (2026-07-03): the launcher
-// icons are portals, not toggles — show(id) brings this page up for that group,
-// showing another group replaces it (one at a time), and the page simply STAYS
-// until the participant navigates like on any other page. No enabled set, no
-// mode-reset safety net, no exit choreography, and NO special leave gestures:
-// Escape and right-click mean here exactly what they mean on every page.
-// "Which group" is one session-local field (#groupId) and "is it showing" is
-// derived from the current lineage location (isActive()).
+// MixedGroupBag — each launch group's page lives at its OWN single-segment
+// ROOT location named by the group id: /games, /websites, /dashboard, /help.
+// The old opaque `agg-mix` union page is gone (2026-07-03): the route's first
+// segment is a VARIABLE root — whatever tree is active at that name — so every
+// group page is directly ADDRESSABLE (type /games and land on it) and each is
+// its own leaf-only lineage: a separate pool that is never linked into the
+// hive root's children, viewable at root level with a different pool lineage.
+//
+// ONE-STATE: the launcher icons are portals, not toggles — show(id) navigates
+// to that group's page, showing another group is a plain navigation to a
+// different location, and the page simply STAYS until the participant
+// navigates like on any other page. The LOCATION IS THE STATE: active/current
+// derive from the lineage segments against the registry's group ids, so a
+// cold reload or a typed address works with no show() having happened.
+//
+// SWARM: joining the swarm (mesh → public) ESCAPES any launcher page — these
+// pages are participant-local chrome on their own roots, so going public
+// lands back on the participant's real page and THAT is what the swarm sees.
 //
 // Mirrors DashboardBee: a real lineage bag you NAVIGATE INTO, so "current
-// lineage location = where edits commit" makes arrangement persist. Committed
-// LEAF-ONLY (its opaque segment is never linked into root's children) so it
-// never appears as a stray tile and the website scan never reaches it.
+// lineage location = where edits commit" makes arrangement persist per group.
 //
-// Cross-module contract: the opaque segment is `agg-mix`, under the shared
-// `agg-` prefix. essentials/show-cell.drone.ts gives `agg-`-prefixed locations
-// the launcher silhouette + drift, and tile-overlay.drone.ts routes a launcher
-// tile click back as `group:open { label }`. Those modules MUST NOT import
-// shared (CLAUDE.md), so the prefix is mirrored by string, never imported — a
-// rename has to touch show-cell, tile-overlay, and this file together.
+// Cross-module contract: essentials (show-cell, tile-overlay, action-card)
+// detect a launcher page by resolving the single segment against the
+// GroupLauncher registry over IoC at call time (never imported); legacy
+// `agg-` locations still read as launcher pages so old history renders.
 //
 // The bag is constructed EAGERLY by GroupRegistry (not lazily on first click):
 // its `group:open` listener must be live even after a refresh that reloads
-// straight INTO `agg-mix`, otherwise the launcher tiles render but every click
-// is a dead no-op. The listener rebuilds its routing maps on each click, so it
-// routes correctly regardless of whether a show happened this session.
+// straight INTO a group page, otherwise the launcher tiles render but every
+// click is a dead no-op. The listener rebuilds its routing maps on each click,
+// so it routes correctly regardless of whether a show happened this session.
 //
 // Shell-level: every essentials service is resolved through window.ioc at call
 // time. Never imports essentials.
@@ -53,10 +58,10 @@ type IocLike = { whenReady?: (key: string, cb: (v: unknown) => void) => void }
 
 export class MixedGroupBag {
   #registry: GroupRegistry
-  #segments = ['agg-mix']
   #returnSegments: string[] = []
-  /** The group this page currently shows (last shown). Session-local, never
-   *  persisted — the ONE state. Null until the first show(). */
+  /** The group last shown via show() — a session-local hint for prewarm and
+   *  the enter() retry; the CURRENT group always derives from the location
+   *  (currentGroupId). Null until the first show(). */
   #groupId: string | null = null
   /** Final (collision-resolved) cell label → its member / owning group. Rebuilt
    *  on every projection so a click routes to the right group's open(). */
@@ -79,8 +84,9 @@ export class MixedGroupBag {
     // existing open() verbatim. Rebuilding per click keeps routing correct after
     // a refresh (maps cold) or a background member change (maps stale).
     EffectBus.on<{ label?: string }>('group:open', ({ label }) => {
-      if (!label || !this.isActive()) return
-      this.#members()
+      const id = this.currentGroupId()
+      if (!label || !id) return
+      this.#members(id)
       const member = this.#memberByLabel.get(label)
       const group = this.#groupByLabel.get(label)
       if (!member || !group) return
@@ -92,17 +98,37 @@ export class MixedGroupBag {
       if (member.segments.length > 0) this.#lastOpenedSegments = [...member.segments]
       group.open(member)
     })
+
+    // Joining the swarm ESCAPES any launcher page: group pages are
+    // participant-local chrome on their own root lineages, so going public
+    // must land the participant back on their REAL page — the swarm sees the
+    // current content page's tiles, never the launcher. Only a live JOIN
+    // (private → public) escapes: EffectBus replays the last emit on
+    // subscribe, so a profile that BOOTS public would otherwise yank a cold
+    // /games address straight back to the hive.
+    let prevPublic: boolean | null = null
+    EffectBus.on<{ public?: boolean }>('mesh:public-changed', (p) => {
+      const pub = p?.public === true
+      const was = prevPublic
+      prevPublic = pub
+      if (was === false && pub && this.isActive()) this.exit()
+    })
   }
 
-  /** True when the participant is currently inside the mixed bag. */
-  isActive(): boolean {
+  /** A group's page location: its id as the single ROOT segment (/games). */
+  #segsFor(id: string): string[] { return [id] }
+
+  /** True when the participant is standing in ANY group's page — derived from
+   *  the location: a single-segment root whose name is a registered group id.
+   *  Cold reloads and typed addresses (/games) count; no show() needed. */
+  isActive(): boolean { return this.currentGroupId() !== null }
+
+  /** The group whose page the participant is standing in, or null when the
+   *  participant is elsewhere. DERIVED — the location is the state. */
+  currentGroupId(): string | null {
     const segs = this.#currentSegments()
-    return segs.length > 0 && segs[0] === this.#segments[0]
+    return segs.length === 1 && this.#registry.get(segs[0]) ? segs[0] : null
   }
-
-  /** The group whose layer the participant is standing in, or null when the
-   *  participant is elsewhere. DERIVED — location is the state. */
-  currentGroupId(): string | null { return this.isActive() ? this.#groupId : null }
 
   /** The launcher icon click. Serialized so overlapping clicks resolve in
    *  order. Idempotent when already standing in this group's layer. */
@@ -112,15 +138,15 @@ export class MixedGroupBag {
   }
 
   async #showOnce(id: string): Promise<void> {
-    if (this.#groupId === id && this.isActive()) return   // already up — one state
     this.#groupId = id
-    if (this.isActive()) {
-      // Standing in the bag showing another group — replace in place.
-      await this.#reconcileAndRepaint()
+    if (this.currentGroupId() === id) {
+      // Already standing in this group's page — refresh it in place.
+      await this.#reconcileAndRepaint(id)
       return
     }
-    // Elsewhere (hive, a website surface, the dashboard): leave any open member
-    // surface and navigate to the page. Tap games → see games.
+    // Elsewhere (hive, another group's page, a website surface, the
+    // dashboard): leave any open member surface and navigate to the page.
+    // Tap games → land on /games.
     this.#dismissActiveSurface()
     await this.enter(true)
   }
@@ -136,9 +162,9 @@ export class MixedGroupBag {
 
   /** Background, NON-NAVIGATING cache warm so the first click into the launcher
    *  is fast. Discovery settling (GroupRegistry.notifyChanged) calls this; it
-   *  primes the SAME history caches the click's #reconcile reads — the agg-mix
-   *  head and every launcher child's head — using currentLayerAt, which is
-   *  strictly read-only (see #warmAgg: absent bag returns silently, NO
+   *  primes the SAME history caches the click's #reconcile reads — the group
+   *  page's head and every launcher child's head — using currentLayerAt, which
+   *  is strictly read-only (see #warmGroup: absent bag returns silently, NO
    *  minting). It never commits, never writes a decoration, never navigates, so
    *  the screen never moves (stillness rule). Serialized on #syncing so it can't
    *  race a real show; a show that lands mid-warm reconciles afterwards over
@@ -148,11 +174,9 @@ export class MixedGroupBag {
     return this.#syncing
   }
 
-  /** Warm a SPECIFIC group's aggregator on INTENT (icon hover) — even before it
-   *  is shown — so the FIRST click into it is fast, not just later ones. The
-   *  agg-mix location is the same whatever group is shown; only the launcher
-   *  children differ, so we warm this group's members' heads. Same read-only
-   *  currentLayerAt warm as prewarm(); no-op while already active. */
+  /** Warm a SPECIFIC group's page on INTENT (icon hover) — even before it is
+   *  shown — so the FIRST click into it is fast, not just later ones. Same
+   *  read-only currentLayerAt warm as prewarm(); no-op while already active. */
   prewarmFor(groupId: string): Promise<void> {
     this.#syncing = this.#syncing.then(() => this.#prewarmForOnce(groupId)).catch(() => {})
     return this.#syncing
@@ -164,24 +188,25 @@ export class MixedGroupBag {
     if (members.length === 0) return
     const key = 'hover:' + groupId + '|' + members.map(m => m.label).join('')
     if (key === this.#prewarmedKey) return
-    if (await this.#warmAgg(members.map(m => m.label))) this.#prewarmedKey = key
+    if (await this.#warmGroup(groupId, members.map(m => m.label))) this.#prewarmedKey = key
   }
 
-  /** Read-only warm of the agg-mix head + the given launcher-child labels' heads
-   *  via currentLayerAt (mints nothing — see #warmAgg). Shared by the
-   *  current-group prewarm and the per-group hover prewarm. Never commits /
-   *  writes / navigates. Returns true once the warm actually ran. */
-  async #warmAgg(labels: readonly string[]): Promise<boolean> {
+  /** Read-only warm of a group page's head + the given launcher-child labels'
+   *  heads via currentLayerAt (mints nothing). Shared by the last-shown prewarm
+   *  and the per-group hover prewarm. Never commits / writes / navigates.
+   *  Returns true once the warm actually ran. */
+  async #warmGroup(id: string, labels: readonly string[]): Promise<boolean> {
     const history = get<HistoryLike>('@diamondcoreprocessor.com/HistoryService')
     if (!history) return false
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
     const domain = lineage?.domain
-    const bagLocSig = await history.sign({ domain, explorerSegments: () => this.#segments }).catch(() => '')
+    const segs = this.#segsFor(id)
+    const bagLocSig = await history.sign({ domain, explorerSegments: () => segs }).catch(() => '')
     if (!bagLocSig) return false
     await history.currentLayerAt(bagLocSig).catch(() => null)
     await Promise.all(labels.map(async label => {
       const childLocSig = await history
-        .sign({ domain, explorerSegments: () => [...this.#segments, label] })
+        .sign({ domain, explorerSegments: () => [...segs, label] })
         .catch(() => '')
       if (childLocSig) await history.currentLayerAt(childLocSig).catch(() => null)
     }))
@@ -189,17 +214,18 @@ export class MixedGroupBag {
   }
 
   async #prewarmOnce(): Promise<void> {
-    if (!this.#groupId) return              // nothing shown yet — no likely destination
+    const id = this.#groupId
+    if (!id) return                         // nothing shown yet — no likely destination
     if (this.isActive()) return             // already inside — refreshIfActive owns it
-    const members = this.#members()
+    const members = this.#members(id)
     if (members.length === 0) return
     // Cheap idempotence: skip when this exact projection is already warm.
     // Discovery re-fires notifyChanged on every scan; after the first warm these
     // are currentLayerAt cache hits anyway, but the key check avoids the OPFS
     // dir listings entirely.
-    const key = this.#groupId + '|' + members.map(m => m.label).join('')
+    const key = id + '|' + members.map(m => m.label).join('')
     if (key === this.#prewarmedKey) return
-    if (await this.#warmAgg(members.map(m => m.label))) this.#prewarmedKey = key
+    if (await this.#warmGroup(id, members.map(m => m.label))) this.#prewarmedKey = key
   }
 
   /** Leave a ViewMode render surface (website/tutor) so the mixed page is
@@ -211,12 +237,13 @@ export class MixedGroupBag {
   }
 
   async #refreshOnce(): Promise<void> {
-    if (!this.isActive()) return
-    await this.#reconcileAndRepaint()
+    const id = this.currentGroupId()
+    if (!id) return
+    await this.#reconcileAndRepaint(id)
   }
 
-  /** Reconcile the bag to the shown group's members, then navigate into it.
-   *  `force` (an explicit icon click) navigates even from another member
+  /** Reconcile the last-shown group's page to its members, then navigate into
+   *  it. `force` (an explicit icon click) navigates even from another member
    *  surface — see #showOnce; a background entry still defers via canEnter(). */
   async enter(force = false): Promise<void> {
     const history = get<HistoryLike>('@diamondcoreprocessor.com/HistoryService')
@@ -231,40 +258,43 @@ export class MixedGroupBag {
       })
       return
     }
-    if (!this.#groupId) return
+    const id = this.#groupId
+    if (!id) return
+    const segs = this.#segsFor(id)
     this.#lastOpenedSegments = null   // fresh session — nothing opened from the list yet
 
-    // Don't capture a bag/dashboard segment as the return target — return to the
-    // last REAL page so leaving the mix lands somewhere meaningful.
+    // Don't capture a launcher/dashboard segment as the return target — return
+    // to the last REAL page so leaving a group page lands somewhere meaningful.
     const captureReturn = (): void => {
       const cur = this.#currentSegments()
-      if (!(cur[0]?.startsWith('agg-') || cur[0]?.startsWith('dash-'))) this.#returnSegments = cur
+      const onChrome = (cur.length === 1 && !!this.#registry.get(cur[0]))
+        || cur[0]?.startsWith('agg-') || cur[0]?.startsWith('dash-')
+      if (!onChrome) this.#returnSegments = cur
     }
 
     if (force) {
-      // Explicit pick (an icon click): reconcile the bag to the picked group's
-      // members FIRST — fully replacing whatever the previous group committed —
-      // THEN reset the render caches and navigate. Committing before the
-      // navigate means the first paint at agg-mix reads the NEW children;
-      // emitting `launcher:reconciled` before the (synchronous) goRaw clears
-      // show-cell's cell cache so the landing render can't serve the previous
-      // group's tiles. Net: switching groups never flashes / sticks on the old
-      // content. The reconcile reads warm caches after prewarm(), so the commit
-      // is cheap.
+      // Explicit pick (an icon click): reconcile the page to the picked group's
+      // members FIRST, THEN reset the render caches and navigate. Committing
+      // before the navigate means the first paint at /<group> reads the fresh
+      // children; `launcher:reconciled` before the (synchronous) goRaw clears
+      // show-cell's cell cache. Group switches are now REAL navigations between
+      // distinct locations, so the old same-location stale-render trap doesn't
+      // apply — the emit stays as the repaint nudge for re-entering the SAME
+      // group's page.
       captureReturn()
-      await this.#reconcile(history)
-      EffectBus.emit('launcher:reconciled', { segments: this.#segments })
-      nav.goRaw(this.#segments)
+      await this.#reconcile(history, id)
+      EffectBus.emit('launcher:reconciled', { segments: segs })
+      nav.goRaw(segs)
       return
     }
 
     // Background entry: reconcile FIRST so we never navigate into an empty/stale
     // bag, and defer to canEnter() so a background scan can't yank the participant
     // off a surface.
-    await this.#reconcile(history)
-    if (this.#members().length === 0 || !this.#canEnter()) return
+    await this.#reconcile(history, id)
+    if (this.#members(id).length === 0 || !this.#canEnter()) return
     captureReturn()
-    nav.goRaw(this.#segments)
+    nav.goRaw(segs)
   }
 
   /** Leave the bag. After a site was opened this session, back out onto that
@@ -275,12 +305,12 @@ export class MixedGroupBag {
     nav?.goRaw?.(this.#lastOpenedSegments ?? this.#returnSegments)
   }
 
-  /** Whether it's safe to NAVIGATE into the bag right now. False when another
-   *  member surface owns the screen (a render view like website, or the
-   *  dashboard bag) — a background refresh must update in place, never eject
-   *  the participant onto agg-mix. Games/help mount overlays that keep the
-   *  lineage on agg-mix, so they read as active (the reconcile-in-place
-   *  branch), not here. */
+  /** Whether it's safe to NAVIGATE into a group page right now. False when
+   *  another member surface owns the screen (a render view like website, or
+   *  the dashboard bag) — a background refresh must update in place, never
+   *  eject the participant onto a launcher page. Games/help overlays keep the
+   *  lineage on the group page, so they read as active (the
+   *  reconcile-in-place branch), not here. */
   #canEnter(): boolean {
     const vm = get<ViewModeLike>('@hypercomb.social/ViewMode')
     if (vm?.mode && vm.mode !== 'hexagons') return false
@@ -289,15 +319,15 @@ export class MixedGroupBag {
     return true
   }
 
-  // ── projection (the shown group + collision-resolved labels) ─────────────
+  // ── projection (a group's members + collision-resolved labels) ───────────
 
-  /** The shown group's members, with deterministic labels and the
-   *  label→{member,group} maps the click route reads. A duplicate label within
-   *  the group is suffixed `Label (2)` so routing stays exact. */
-  #members(): GroupMember[] {
+  /** A group's members, with deterministic labels and the label→{member,group}
+   *  maps the click route reads. A duplicate label within the group is
+   *  suffixed `Label (2)` so routing stays exact. */
+  #members(id: string): GroupMember[] {
     this.#memberByLabel.clear()
     this.#groupByLabel.clear()
-    const group = this.#groupId ? this.#registry.get(this.#groupId) : undefined
+    const group = this.#registry.get(id)
     if (!group) return []
     const out: GroupMember[] = []
     for (const m of group.members()) {
@@ -314,29 +344,31 @@ export class MixedGroupBag {
 
   // ── reconcile ──────────────────────────────────────────────────────────
 
-  async #reconcileAndRepaint(): Promise<void> {
+  async #reconcileAndRepaint(id: string): Promise<void> {
     const history = get<HistoryLike>('@diamondcoreprocessor.com/HistoryService')
     const nav = get<NavigationLike>('@hypercomb.social/Navigation')
     if (!history) return
-    await this.#reconcile(history)
-    // The lineage location is unchanged (still agg-mix), so a bare same-location
-    // navigate is swallowed by show-cell's fast-path skip. This force-repaint
-    // signal makes show-cell drop its render cache and re-read the new children
-    // (the launcher tiles mix in/out live). The navigate is kept as a belt-and-
-    // braces nudge.
-    EffectBus.emit('launcher:reconciled', { segments: this.#segments })
-    ;(nav?.replaceRaw ?? nav?.goRaw)?.(this.#segments)
+    await this.#reconcile(history, id)
+    // The lineage location is unchanged (still this group's page), so a bare
+    // same-location navigate is swallowed by show-cell's fast-path skip. This
+    // force-repaint signal makes show-cell drop its render cache and re-read
+    // the new children (the launcher tiles mix in/out live). The navigate is
+    // kept as a belt-and-braces nudge.
+    EffectBus.emit('launcher:reconciled', { segments: this.#segsFor(id) })
+    ;(nav?.replaceRaw ?? nav?.goRaw)?.(this.#segsFor(id))
   }
 
-  /** Diff the bag's launcher cells against the shown group's members: keep
+  /** Diff a group page's launcher cells against the group's members: keep
    *  existing in place (preserving arrangement), append new, drop removed.
-   *  Commit LEAF-ONLY so the bag is never linked into a parent. */
-  async #reconcile(history: HistoryLike): Promise<void> {
+   *  Commit LEAF-ONLY so the page is never linked into a parent — each group
+   *  page is its own root lineage, a separate pool from the hive tree. */
+  async #reconcile(history: HistoryLike, id: string): Promise<void> {
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
     const domain = lineage?.domain
-    const members = this.#members()
+    const members = this.#members(id)
+    const segs = this.#segsFor(id)
 
-    const bagLocSig = await history.sign({ domain, explorerSegments: () => this.#segments })
+    const bagLocSig = await history.sign({ domain, explorerSegments: () => segs })
     const layer = await history.currentLayerAt(bagLocSig).catch(() => null)
     const existing = await this.#childNames(history, layer)
 
@@ -364,7 +396,7 @@ export class MixedGroupBag {
       for (const name of fresh) {
         const m = this.#memberByLabel.get(name)
         const shape = this.#groupByLabel.get(name)?.shape ?? ''
-        const childSegs = [...this.#segments, name]
+        const childSegs = [...segs, name]
         try {
           const record = { kind: LAUNCH_KIND, appliesTo: [], payload: { segments: m?.segments ?? [], icon: m?.icon ?? '', label: name, shape, key: m?.key ?? '' } }
           const decoSig = await store.putResource(new Blob([JSON.stringify(record)], { type: 'application/json' }))
@@ -382,13 +414,13 @@ export class MixedGroupBag {
     const resolved = await Promise.all(order.map(async name => {
       const pre = freshMarker.get(name)
       if (pre) return pre
-      const childLocSig = await history.sign({ domain, explorerSegments: () => [...this.#segments, name] })
+      const childLocSig = await history.sign({ domain, explorerSegments: () => [...segs, name] })
       const childSig = await history.latestMarkerSigFor(childLocSig, name).catch(() => '')
       return childSig && SIG.test(childSig) ? childSig : ''
     }))
     const childSigs = resolved.filter(s => s !== '')
 
-    await history.commitLayer(bagLocSig, { name: this.#segments[0], children: childSigs })
+    await history.commitLayer(bagLocSig, { name: id, children: childSigs })
 
     // The leaf commit above goes straight through history.commitLayer, bypassing
     // LayerCommitter — so the history cursor and the lineage layer memo never learn

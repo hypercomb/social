@@ -29,12 +29,10 @@
     (viewToggle)="onViewToggle($event)"
   />
 
-  <!-- the reference feature — Pools of Meaning. Directly in the command bar,
-       NOT a launch group: it manages referenced hives on different roots.
-       Hover names it + peeks the card; click sticks the card. -->
-  <hc-pools-icon></hc-pools-icon>
-
-  <!-- launch-group meaning-icons (websites, …) live inside the command line -->
+  <!-- launch-group meaning-icons (websites, …) live inside the command line.
+       The Pools of Meaning portal is NOT here — it lives on the control bar
+       (controls-bar 'pools'): it manages referenced hives on different roots
+       and is not an aggregate. -->
   <hc-group-launchers></hc-group-launchers>
 
   @if (voiceSupported && pushToTalkEnabled()) {

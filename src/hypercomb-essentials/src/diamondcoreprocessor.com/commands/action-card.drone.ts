@@ -109,8 +109,13 @@ export class ActionCardDrone extends Drone {
   /** Card data for a hovered help cell, or null when the hover is anything
    *  else (normal tile, other groups' launchers, off the launch page). */
   #build(label: string): ActionCardPayload | null {
+    // The help page lives at its own root location, /help (group id = the
+    // segment). Any launcher page counts — non-help tiles resolve no cmd and
+    // fall through to hover-hide anyway.
     const segs = ioc<LineageLike>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []
-    if (!(segs.length === 1 && String(segs[0]).startsWith('agg-'))) return null
+    if (segs.length !== 1) return null
+    const seg = String(segs[0])
+    if (!seg.startsWith('agg-') && !ioc<{ get?: (id: string) => unknown }>('@hypercomb.social/GroupLauncher')?.get?.(seg)) return null
     let key = launchKeyForLabel(label)
     if (!key) {
       // Cells committed before the decoration carried `key` have no indexed

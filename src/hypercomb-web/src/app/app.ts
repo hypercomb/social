@@ -37,11 +37,13 @@ import { PresenceBannerComponent } from "@hypercomb/shared/ui/presence-banner/pr
 import { SyncIndicatorComponent } from "@hypercomb/shared/ui/sync-indicator/sync-indicator.component"
 import { UpgradeIndicatorComponent } from "@hypercomb/shared/ui/upgrade-indicator/upgrade-indicator.component"
 import { SwarmAdoptPanelComponent } from "@hypercomb/shared/ui/swarm-adopt-panel/swarm-adopt-panel.component"
+import { YoutubeViewerComponent } from "@hypercomb/shared/ui/youtube-viewer/youtube-viewer.component"
+import { TranslatePipe } from "@hypercomb/shared/core/i18n.pipe"
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, EditActionsComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, ShortcutSheetComponent, HistoryViewerComponent, ShellSurfacesComponent, NotesViewerComponent, FilesViewerComponent, FeaturesViewerComponent, TagsViewerComponent, ObserveViewerComponent, ClipboardPanelComponent, ContactFormComponent, ContactHoverComponent, ActionCardComponent, FeedbackButtonComponent, FeedbackViewerComponent, WebsiteNavComponent, IconPickerComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, ToastComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent],
+  imports: [RouterOutlet, Header, TranslatePipe, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, EditActionsComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, ShortcutSheetComponent, HistoryViewerComponent, ShellSurfacesComponent, NotesViewerComponent, FilesViewerComponent, FeaturesViewerComponent, TagsViewerComponent, ObserveViewerComponent, ClipboardPanelComponent, ContactFormComponent, ContactHoverComponent, ActionCardComponent, FeedbackButtonComponent, FeedbackViewerComponent, WebsiteNavComponent, IconPickerComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, ToastComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent, YoutubeViewerComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })

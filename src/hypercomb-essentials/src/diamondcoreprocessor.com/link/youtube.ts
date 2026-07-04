@@ -39,6 +39,23 @@ export function parseYouTubeVideoId(link: string): string | null {
 }
 
 /**
+ * Fetch a YouTube video's title via the public oEmbed endpoint (CORS-enabled),
+ * so a dropped link can pre-fill a default tile name the user can override.
+ * Returns null on any failure — the caller falls back to manual naming.
+ */
+export async function fetchYouTubeTitle(link: string): Promise<string | null> {
+  try {
+    const endpoint = `https://www.youtube.com/oembed?url=${encodeURIComponent(link)}&format=json`
+    const resp = await fetch(endpoint)
+    if (!resp.ok) return null
+    const data = await resp.json() as { title?: unknown }
+    return typeof data.title === 'string' && data.title.trim() ? data.title.trim() : null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Build a YouTube thumbnail URL for a given video ID.
  */
 export function youTubeThumbnailUrl(

@@ -49,12 +49,13 @@ export interface LaunchGroup {
 
 export class GroupRegistry extends EventTarget {
   #groups = new Map<string, LaunchGroup>()
-  /** The single shared aggregator. Built EAGERLY (in the constructor), not
-   *  lazily on first click: its `group:open` click listener + exit gestures
-   *  must be live even when the app reloads straight into `agg-mix` (a refresh
-   *  while inside it), otherwise the launcher tiles render but every click is
-   *  a dead no-op. Construction only wires listeners (no nav, no IoC reads),
-   *  so it's safe at module load. */
+  /** The shared page machinery behind every group's root location (/games,
+   *  /websites, …). Built EAGERLY (in the constructor), not lazily on first
+   *  click: its `group:open` click listener must be live even when the app
+   *  reloads straight into a group page (or one is typed as an address),
+   *  otherwise the launcher tiles render but every click is a dead no-op.
+   *  Construction only wires listeners (no nav, no IoC reads), so it's safe
+   *  at module load. */
   #mix: MixedGroupBag
 
   constructor() {

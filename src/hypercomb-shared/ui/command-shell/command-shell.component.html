@@ -153,12 +153,12 @@
           }
           @if (d.count != null) {
             <div class="detail-meta">
-              <span class="detail-count">{{ d.count }}</span> shared
+              <span class="detail-count">{{ d.count }}</span> {{ 'command-shell.detail-shared' | t }}
             </div>
           }
           @if (d.options?.length) {
             <div class="detail-options">
-              <div class="detail-options-label">options</div>
+              <div class="detail-options-label">{{ 'command-shell.detail-options' | t }}</div>
               <ul>
                 @for (o of d.options; track o) {
                   <li>{{ o }}</li>

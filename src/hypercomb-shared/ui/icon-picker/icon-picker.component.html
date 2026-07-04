@@ -1,21 +1,21 @@
 @if (open()) {
   <div class="icon-picker-backdrop" (click)="close()"></div>
-  <div class="icon-picker" role="dialog" aria-label="Choose an icon">
+  <div class="icon-picker" role="dialog" [attr.aria-label]="'icon-picker.title' | t">
     <div class="ip-head">
-      <span class="ip-title">choose an icon</span>
-      <button class="ip-close" type="button" (click)="close()" aria-label="close">
+      <span class="ip-title">{{ 'icon-picker.title' | t }}</span>
+      <button class="ip-close" type="button" (click)="close()" [attr.aria-label]="'icon-picker.close' | t">
         <span class="mat-sym" aria-hidden="true">close</span>
       </button>
     </div>
 
     <div class="ip-search-field">
       <span class="ip-search-glyph mat-sym" aria-hidden="true">search</span>
-      <input #searchEl class="ip-search" type="text" placeholder="search icons…"
+      <input #searchEl class="ip-search" type="text" [placeholder]="'icon-picker.search-placeholder' | t"
              [value]="filter()" (input)="onFilter($event)"
              autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false"
-             autofocus aria-label="search icons" />
+             autofocus [attr.aria-label]="'icon-picker.search-label' | t" />
       @if (filter().length > 0) {
-        <button class="ip-search-clear" type="button" (click)="clearFilter(searchEl)" aria-label="clear search">
+        <button class="ip-search-clear" type="button" (click)="clearFilter(searchEl)" [attr.aria-label]="'icon-picker.clear-search' | t">
           <span class="mat-sym" aria-hidden="true">close</span>
         </button>
       }
@@ -29,7 +29,7 @@
       } @empty {
         <div class="ip-empty">
           <span class="mat-sym" aria-hidden="true">search_off</span>
-          <span>no icons match “{{ filter() }}”</span>
+          <span>{{ 'icon-picker.empty' | t: { query: filter() } }}</span>
         </div>
       }
     </div>
@@ -39,7 +39,7 @@
         @if (filter().length > 0) {
           {{ icons().length }} / {{ total }}
         } @else {
-          {{ total }} icons
+          {{ 'icon-picker.count' | t: { count: total } }}
         }
       </span>
     </div>

@@ -18,28 +18,8 @@
       <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'features.close' | t">×</button>
     </header>
 
-    <!-- ── Tabs: per-tile features vs your domain's globals ── -->
-    <nav class="features-tabs" role="tablist">
-      <button
-        class="ftab"
-        type="button"
-        role="tab"
-        [class.active]="tab() === 'tiles'"
-        [attr.aria-selected]="tab() === 'tiles'"
-        (click)="setTab('tiles')"
-      >{{ 'features.tab.tiles' | t }}</button>
-      <button
-        class="ftab"
-        type="button"
-        role="tab"
-        [class.active]="tab() === 'globals'"
-        [attr.aria-selected]="tab() === 'globals'"
-        (click)="setTab('globals')"
-      >{{ 'features.tab.globals' | t }}</button>
-    </nav>
-
     <!-- ── Bulk bar: acts on the selected rows ── -->
-    @if (tab() === 'tiles' && selectedCount() > 0) {
+    @if (selectedCount() > 0) {
       <div class="bulk-bar">
         <span class="bulk-count">{{ 'features.selected' | t: { count: selectedCount() } }}</span>
         @if (allowableCount() > 0) {
@@ -81,69 +61,7 @@
       </div>
     }
 
-    @if (tab() === 'globals') {
-      <!-- ── Globals tab: your domain-level features as a FOLDER TREE
-           (`games` is a folder, each game a leaf; publish at any level).
-           A folder's PUBLIC switch covers everything inside it; a leaf's
-           brings its ancestor folders along. The marks ride your hive root —
-           they travel with your domain; visitors see them in this panel. ── -->
-      <div class="features-scroll">
-        <section class="features-group">
-          <div class="section-head">
-            <span class="section-label">{{ 'features.globals.yours' | t }}</span>
-            <span class="section-count">{{ ownGlobals().length }}</span>
-          </div>
-          @if (ownGlobals().length === 0) {
-            <p class="section-empty">{{ 'features.globals.empty' | t }}</p>
-          } @else {
-            <ul class="features-list">
-              @for (g of ownGlobals(); track g.key) {
-                <li
-                  class="features-row"
-                  [class.off]="!g.public"
-                  [class.folder]="g.folder"
-                  [style.paddingLeft.em]="1 + g.depth * 1.2"
-                >
-                  <button
-                    class="feat-toggle"
-                    type="button"
-                    [class.on]="g.public"
-                    [class.busy]="isPublishPending(g)"
-                    [disabled]="isPublishPending(g)"
-                    (click)="togglePublish(g)"
-                    [attr.aria-pressed]="g.public"
-                    [attr.aria-label]="'features.globals.public.switch' | t"
-                    [attr.title]="(g.folder ? 'features.globals.folder.hint' : 'features.globals.public.hint') | t"
-                  ><span class="knob"></span></button>
-                  <div class="feature-meta">
-                    <span class="feature-name">
-                      @if (g.icon) {
-                        <span class="global-icon material-symbols-outlined" aria-hidden="true">{{ g.icon }}</span>
-                      }
-                      {{ g.label }}
-                    </span>
-                    <span class="feature-kind">{{ g.key }}</span>
-                    <span class="feature-desc">{{ (g.public ? 'features.globals.public' : 'features.globals.private') | t }}</span>
-                    @if (!g.folder && !g.installed) {
-                      <span class="feature-desc">{{ 'features.global.missing' | t }}</span>
-                    }
-                  </div>
-                  @if (!g.folder && g.installed) {
-                    <button
-                      class="play-btn"
-                      type="button"
-                      (click)="playGlobal(g)"
-                      [attr.title]="'features.global.play.hint' | t"
-                    >▶ {{ 'features.global.play' | t }}</button>
-                  }
-                </li>
-              }
-            </ul>
-          }
-        </section>
-      </div>
-      <footer class="features-foot">{{ 'features.globals.hint' | t }}</footer>
-    } @else if (groups().length === 0) {
+    @if (groups().length === 0) {
       <p class="features-empty">{{ 'features.empty' | t }}</p>
     } @else {
       <div class="features-scroll">
@@ -344,48 +262,6 @@
               </ul>
             }
 
-            <!-- ── Global features: the domain-level globals TREE published
-                 on this cell's layer (a domain root) — folders with their
-                 leaves indented beneath them. Installed = a local module
-                 answers to a leaf's id — play it now; otherwise it stays
-                 inert until its module arrives through the installer. ── -->
-            @if (group.globals.length > 0) {
-              <div class="section-head">
-                <span class="section-label">{{ 'features.section.globals' | t }}</span>
-                <span class="section-count">{{ group.globals.length }}</span>
-              </div>
-              <ul class="features-list">
-                @for (g of group.globals; track g.key) {
-                  <li
-                    class="features-row global"
-                    [class.folder]="g.folder"
-                    [style.paddingLeft.em]="1 + g.depth * 1.2"
-                  >
-                    <span class="feat-toggle-spacer"></span>
-                    <div class="feature-meta">
-                      <span class="feature-name">
-                        @if (g.icon) {
-                          <span class="global-icon material-symbols-outlined" aria-hidden="true">{{ g.icon }}</span>
-                        }
-                        {{ g.label }}
-                      </span>
-                      <span class="feature-kind">{{ g.key }}</span>
-                      @if (!g.folder && !g.installed) {
-                        <span class="feature-desc">{{ 'features.global.missing' | t }}</span>
-                      }
-                    </div>
-                    @if (!g.folder && g.installed) {
-                      <button
-                        class="play-btn"
-                        type="button"
-                        (click)="playGlobal(g)"
-                        [attr.title]="'features.global.play.hint' | t"
-                      >▶ {{ 'features.global.play' | t }}</button>
-                    }
-                  </li>
-                }
-              </ul>
-            }
           </section>
         }
       </div>

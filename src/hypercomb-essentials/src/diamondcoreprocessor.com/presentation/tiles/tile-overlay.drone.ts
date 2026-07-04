@@ -13,12 +13,19 @@ import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone
 
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; noImageLabels?: string[]; substrateLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[] }
 
-/** Single-segment location the launch-group aggregator navigates into —
- *  `agg-<id>` (today only `agg-mix`, the shared union page). On such a page every
- *  tile is a launcher, so a click opens its target directly. Mirrors
- *  MixedGroupBag's naming in shared (matched by string, never imported — modules
- *  must not depend on shared). */
-const AGGREGATOR_SEGMENT_PREFIX = 'agg-'
+/** Launch-group pages live at single-segment ROOT locations named by group id
+ *  (/games, /websites, /help, …) — each is its own leaf-only lineage,
+ *  addressable directly. Resolved LIVE against the shell's GroupLauncher
+ *  registry over IoC at call time (modules must not IMPORT shared — an IoC
+ *  read is the sanctioned bridge). Legacy `agg-` locations still count so old
+ *  history renders. On such a page every tile is a launcher: a click opens
+ *  its target directly. */
+function isLauncherLocation(segs: readonly unknown[]): boolean {
+  if (segs.length !== 1 || typeof segs[0] !== 'string') return false
+  if (segs[0].startsWith('agg-')) return true
+  const reg = window.ioc.get<{ get?: (id: string) => unknown }>('@hypercomb.social/GroupLauncher')
+  return !!reg?.get?.(segs[0])
+}
 
 type OverlayAction = {
   name: string
@@ -1765,12 +1772,12 @@ export class TileOverlayDrone extends Drone {
     }
   }
 
-  /** True when the current location is a launch-group aggregator page (the
-   *  website / game launcher menu). Race-free: reads the lineage, not the async
-   *  decoration index. */
+  /** True when the current location is a launch-group page (the website /
+   *  game / help launcher menu). Race-free: reads the lineage + the launcher
+   *  registry (synchronous), not the async decoration index. */
   #onLauncherPage(): boolean {
     const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
-    return segs.length === 1 && typeof segs[0] === 'string' && segs[0].startsWith(AGGREGATOR_SEGMENT_PREFIX)
+    return isLauncherLocation(segs)
   }
 
   // ── Instant branch navigation on pointerdown ────────────────────────
@@ -2017,6 +2024,19 @@ export class TileOverlayDrone extends Drone {
     const swarm = window.ioc.get<SwarmInterestApi>('@diamondcoreprocessor.com/SwarmDrone')
     if (swarm?.publishInterest) {
       void swarm.publishInterest(label).catch(() => { /* silent — swarm logs internally */ })
+    }
+
+    // VARIABLE-ROOT hop: the sets index (/sets) lists reference SETS, and a
+    // set is its own ROOT lineage — entering "interests" lands on /interests,
+    // never /sets/interests. The system knows it came from sets (membership
+    // lives in the sets index); the address carries JUST the root, and from
+    // that root the set's tree navigates like any other lineage. Mirrors the
+    // 'sets' convention (entrances-and-sets.md) by string — modules must not
+    // import shared.
+    const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
+    if (segs.length === 1 && String(segs[0]) === 'sets') {
+      const nav = window.ioc.get<{ goRaw?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
+      if (nav?.goRaw) { nav.goRaw([label]); return }
     }
 
     lineage.explorerEnter(label)

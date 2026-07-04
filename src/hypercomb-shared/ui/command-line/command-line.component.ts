@@ -4,7 +4,6 @@ import { AfterViewInit, Component, computed, signal, ViewChild, type OnDestroy }
 import { CommandShellComponent } from '../command-shell/command-shell.component'
 import { HintBarComponent } from '../hint-bar/hint-bar.component'
 import { GroupLaunchersComponent } from '../group-launchers/group-launchers.component'
-import { PoolsIconComponent } from '../pools-of-meaning/pools-icon.component'
 import type { Lineage } from '../../core/lineage'
 import type { MovementService } from '../../core/movement.service'
 import type { Navigation } from '../../core/navigation'
@@ -113,7 +112,7 @@ const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
 @Component({
   selector: 'hc-command-line',
   standalone: true,
-  imports: [CommandShellComponent, HintBarComponent, TranslatePipe, GroupLaunchersComponent, PoolsIconComponent],
+  imports: [CommandShellComponent, HintBarComponent, TranslatePipe, GroupLaunchersComponent],
   templateUrl: './command-line.component.html',
   styleUrls: ['./command-line.component.scss'],
   host: {
@@ -1357,6 +1356,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       url: string | null
       type: 'image' | 'youtube' | 'link' | 'document'
       attachment?: { name: string; mime: string; size: number; sig: string } | null
+      name?: string | null
     }>('command:arm-resource', (payload) => {
       if (!payload || (!payload.largeSig && !payload.url)) return
       const prev = this.armedResource()
@@ -1364,6 +1364,18 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         try { URL.revokeObjectURL(prev.previewUrl) } catch { /* ignore */ }
       }
       this.armedResource.set(payload)
+      // Seed the tile name with the link's default title (e.g. the YouTube
+      // video title). Only when the field is empty — never clobber what the
+      // user is already typing; select it so an immediate keystroke overrides
+      // it while Enter accepts it as-is.
+      if (payload.name && this.value().trim() === '') {
+        const seed = this.#sanitizeArmName(payload.name)
+        if (seed) {
+          this.shell?.setValue(seed)
+          this.value.set(this.shell?.value() ?? seed)
+          this.shell?.selectAll()
+        }
+      }
       this.shell?.focus()
     })
   }
@@ -1375,6 +1387,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       try { URL.revokeObjectURL(prev.previewUrl) } catch { /* ignore */ }
     }
     this.armedResource.set(null)
+  }
+
+  /** Strip command-line grammar chars ([ ] , : / @) so a dropped link's title
+   *  can seed the tile name without tripping select/tag/slash/feature parsing. */
+  #sanitizeArmName(raw: string): string {
+    return raw.replace(/[[\],:\/@]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80).trim()
   }
 
   readonly touchDragging = signal(false)
@@ -1391,6 +1409,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     type: 'image' | 'youtube' | 'link' | 'document'
     /** A document to attach to the cell on Enter (file-drop dropbox flow). */
     attachment?: { name: string; mime: string; size: number; sig: string } | null
+    /** Default tile name suggested by the dropped resource (link title). */
+    name?: string | null
   } | null>(null)
   #armResourceUnsub?: () => void
   /** True when the command-line should be collapsed on mobile (toggle off). */
