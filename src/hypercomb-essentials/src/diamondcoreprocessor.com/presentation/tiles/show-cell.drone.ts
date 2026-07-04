@@ -10,7 +10,8 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../gr
 import { isSignature, readCellProperties, writeCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
-import { tagsForLabel, launchShapeForLabel, ensureDecorationsIndexed } from '../../commands/decoration-kind-index.js'
+import { tagsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed } from '../../commands/decoration-kind-index.js'
+import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-layout.js'
 import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
 import type { HistoryService, LayerContent } from '../../history/history.service.js'
@@ -19,7 +20,7 @@ import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoo
 
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
-type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean }
+type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean }
 
 /** Launch-group pages live at single-segment ROOT locations named by group id
  *  (/games, /websites, /help, …) — each is its own leaf-only lineage,
@@ -43,6 +44,11 @@ function isLauncherLocation(segs: readonly unknown[]): boolean {
 function launchShapeToMode(shape: string): number {
   return shape === 'flower-pot' ? 1 : shape === 'space-invader' ? 2 : 0
 }
+
+/** Cold-steel border (126,182,214 → 0..1) for the clustered-help category
+ *  TITLE tiles, so a header reads as a header without any new tile shape —
+ *  the per-cell borderColor attribute already exists. */
+const HEADER_BORDER: [number, number, number] = [0.494, 0.714, 0.839]
 /** How far a launcher tile may wander while drifting, as a fraction of the hex
  *  circumradius. Small on purpose: the drifted tile must stay inside its home
  *  hex's pointer→axial catchment so clicking the floating tile still opens its
@@ -246,6 +252,12 @@ async function resolveChildNames(
   // from a single read and DELETE the separate per-child branchSet walk that
   // re-loaded every child on every frame.
   branchesOut?: Set<string>,
+  // Optional out-param: set `cold=true` when a child's branch-STATUS could not
+  // be read this pass because its head-layer bytes weren't pooled yet (a
+  // TRANSIENT cold miss, NOT a leaf). The caller uses this to avoid memoizing
+  // an incomplete branch set and to schedule a re-render — never to conclude
+  // "not a branch", which would poison the tile's navigability.
+  branchStats?: { cold: boolean },
 ): Promise<Set<string>> {
   const out = new Set<string>()
   if (stats) { stats.expected = content?.children?.length ?? 0; stats.resolved = 0 }
@@ -263,16 +275,38 @@ async function resolveChildNames(
       try {
         const childLocSig = await history.sign({ explorerSegments: () => [...parentSegments, name] })
         const headSig = await history.latestMarkerSigFor(childLocSig, name)
+        // No head marker = the child never committed a layer of its own = an
+        // authoritative leaf. NOT a cold miss — don't flag the pass cold, or a
+        // leaf-heavy layer would retry forever.
         if (!headSig) return
         let hasChildren = branchByHeadSig.get(headSig)
         if (hasChildren === undefined) {
           const head = await history.getLayerBySig(headSig)
+          if (!head) {
+            // TRANSIENT cold-pool miss: the head sig exists but its bytes
+            // aren't pooled yet. getLayerBySig returns null here EXACTLY as it
+            // does for a genuine absence (history.service.ts getLayerBySig), so
+            // we must NOT conclude "no children" — and, critically, must NOT
+            // cache that false into the module-global branchByHeadSig. Doing so
+            // poisoned the branch dot for the whole session: the tile painted
+            // as a non-branch, so #onPointerDown/#onClick routed its click to
+            // the 'open' editor action instead of navigating in — locking the
+            // user out of the child branch until a full reload. Leave it
+            // unresolved and flag the pass cold so the caller re-renders once
+            // the neighbourhood warms.
+            if (branchStats) branchStats.cold = true
+            return
+          }
           const kids = (head as { children?: unknown } | null)?.children
           hasChildren = Array.isArray(kids) && kids.length > 0
           branchByHeadSig.set(headSig, hasChildren)
         }
         if (hasChildren) branchesOut.add(name)
-      } catch { /* best-effort — leave the dot off on resolve failure */ }
+      } catch {
+        // A read threw mid-resolution — transient. Leave the dot off for now
+        // and flag cold so the caller retries; never cache a false.
+        if (branchStats) branchStats.cold = true
+      }
     }))
   }
 
@@ -475,6 +509,14 @@ export class ShowCellDrone extends Drone {
   // parent sig (content changed) gates fresh.
   readonly #resolveGateExhausted = new Set<string>()
   static readonly #RESOLVE_GATE_MAX_ATTEMPTS = 12
+  // Per-parent-sig count of consecutive renders whose branch-STATUS (does a
+  // child have its own children?) came back on a cold pool miss. Unlike the
+  // name gate this NEVER holds the paint — tiles show immediately — it only
+  // schedules a bounded re-render so a branch dot that was cold at first paint
+  // fills in THIS visit instead of waiting for an unrelated event. Bounded so a
+  // genuinely-unreadable child head can't thrash the render loop.
+  readonly #branchColdRetries = new Map<string, number>()
+  static readonly #BRANCH_COLD_MAX_RETRIES = 6
 
   private lineageChangeListening = false
 
@@ -2335,13 +2377,28 @@ export class ShowCellDrone extends Drone {
             childResolveComplete = true
           } else {
             const stats = { expected: 0, resolved: 0 }
+            const branchStats = { cold: false }
             // branchSetFromResolve is filled in the SAME pass that resolves
-            // names — one read, no separate per-child branch walk.
-            layerAllowed = await resolveChildNames(historyService, parentSegments, dir, content, parentLayerSig, stats, branchSetFromResolve)
+            // names — one read, no separate per-child branch walk. branchStats
+            // reports separately whether any child's branch-STATUS came back on
+            // a cold pool miss (see freshenBranches) — names can be complete
+            // while branch-status is not.
+            layerAllowed = await resolveChildNames(historyService, parentSegments, dir, content, parentLayerSig, stats, branchSetFromResolve, branchStats)
             // Complete iff every child sig produced a name. expected===0 is
             // a (trivially complete) empty layer.
             childResolveComplete = stats.expected === 0 || stats.resolved >= stats.expected
-            if (childResolveComplete && parentLayerSig && stats.expected > 0) {
+            // A complete NAME set does NOT mean branch-status is settled: a
+            // child's head bytes can be cold while its name resolved from the
+            // manifest. Only memoize when BOTH are settled — caching a cold
+            // branch set under this parent sig would re-serve a missing branch
+            // dot on every later render at this location and lock the tile out
+            // of navigation (the same poison the per-headSig guard in
+            // freshenBranches prevents). When branch-status is cold, schedule a
+            // bounded, NON-blocking re-render so the dot fills in this visit;
+            // the layer still paints now — a missing dot is not a missing tile,
+            // so we never hold the paint the way the name gate does.
+            const branchComplete = !branchStats.cold
+            if (childResolveComplete && branchComplete && parentLayerSig && stats.expected > 0) {
               const names: string[] = []
               for (const n of layerAllowed) if (typeof n === 'string' && n.length > 0) names.push(n)
               // Bound: evict oldest (Map keeps insertion order) past a cap so
@@ -2352,6 +2409,18 @@ export class ShowCellDrone extends Drone {
                 if (oldest !== undefined) this.#completeChildNamesByParentSig.delete(oldest)
               }
               this.#completeChildNamesByParentSig.set(parentLayerSig, { names, branches: [...branchSetFromResolve] })
+            }
+            if (parentLayerSig) {
+              if (branchComplete) {
+                this.#branchColdRetries.delete(parentLayerSig)
+              } else {
+                const n = (this.#branchColdRetries.get(parentLayerSig) ?? 0) + 1
+                if (n <= ShowCellDrone.#BRANCH_COLD_MAX_RETRIES) {
+                  this.#branchColdRetries.set(parentLayerSig, n)
+                  this.#forceNextRender = true
+                  setTimeout(() => this.requestRender(), Math.min(500, 100 * n))
+                }
+              }
             }
           }
           // Layer is the only source of truth (project_layer_is_primitive).
@@ -3834,6 +3903,19 @@ export class ShowCellDrone extends Drone {
     // into a single render.
     this.onEffect<{ cell: string; segments?: string[]; groupId?: string }>('cell:added', (payload) => {
       if (!payload?.cell) return
+      // A child gaining its FIRST child flips its branch-status AS SEEN FROM ITS
+      // PARENT — but per-page history commits only the leaf (the child's own
+      // layer), never re-committing the parent, so the parent's content sig is
+      // unchanged and its #completeChildNamesByParentSig entry still lists this
+      // child as a leaf. On a later memo HIT that stale branch-set is re-served
+      // and freshenBranches never re-runs, so the parent's tile paints with no
+      // branch dot and refuses to navigate in. Drop the whole memo (a pure perf
+      // cache; re-resolution runs warm right after an edit) so the parent
+      // re-derives branch-status on its next render. Cleared BEFORE the
+      // current-location guard below so an add at ANY location invalidates a
+      // possibly-ancestor entry. branchByHeadSig is intentionally NOT cleared —
+      // it is keyed by the immutable head sig, so a changed head is just a miss.
+      this.#completeChildNamesByParentSig.clear()
       // Only react to additions at the location we're currently showing.
       // One create can emit cell:added for several locations at once — a
       // nested `a/b/c` adds a child to root, /a AND /a/b — and the tiles for
@@ -3858,6 +3940,11 @@ export class ShowCellDrone extends Drone {
 
     this.onEffect<{ cell: string; groupId?: string }>('cell:removed', (payload) => {
       if (!payload?.cell) return
+      // Symmetric to cell:added: a child losing its LAST child flips it back to
+      // a leaf, and the parent is not re-committed, so its cached branch-set is
+      // stale. Invalidate the parent-branch memo so the (now stale) branch dot
+      // is re-derived on the next render. See the cell:added note above.
+      this.#completeChildNamesByParentSig.clear()
       this.#pendingRemoves.add(payload.cell)
       this.cellImageCache.delete(payload.cell)
       this.cellTagsCache.delete(payload.cell)
@@ -4824,7 +4911,7 @@ export class ShowCellDrone extends Drone {
       // index[cellLocationSig(here, name)] → on adopt that random image won
       // over the publisher's real one ("autogenerated background on adopt").
       noImageLabels: cells
-        .filter(c => !c.imageSig && !c.external && !this.#peerCellSet.has(c.label))
+        .filter(c => !c.imageSig && !c.external && !this.#peerCellSet.has(c.label) && !c.plain)
         .map(c => c.label),
       substrateLabels: cells.filter(c => c.hasSubstrate).map(c => c.label),
       linkLabels: cells.filter(c => c.hasLink).map(c => c.label),
@@ -5360,10 +5447,48 @@ export class ShowCellDrone extends Drone {
     } catch { /* swarm not ready — no glow */ }
   }
 
+  /** Cluster-island coordinates for an ORDERED launcher page (help), or null
+   *  to fall through to the normal spiral. Engages only on a launcher page and
+   *  only once at least one cell carries the `header` role — so /games,
+   *  /websites, /dashboard and every hive page keep the spiral untouched.
+   *  Keyed by LABEL (islands are placed by identity, not index). Also returns
+   *  the header labels for the title-tile border tint. */
+  #launcherClusterCoords = (names: string[]): { coords: Map<string, { q: number; r: number }>; headers: Set<string> } | null => {
+    const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
+    if (!isLauncherLocation(segs)) return null
+
+    // Gather each island by its GROUP id (carried per tile in the launch:target
+    // decoration), NOT by render order — a slot system re-sorts `names`, so a
+    // position-delimited walk would scatter an island's tiles across the field.
+    // Each island's header is its role:'header' tile; islands order by the id's
+    // trailing digits.
+    const headers = new Set<string>()
+    const byGroup = new Map<string, { header: string | null; actions: string[]; ord: number }>()
+    for (const label of names) {
+      if (!label) continue
+      const g = launchGroupForLabel(label)
+      if (!g) continue
+      let bucket = byGroup.get(g)
+      if (!bucket) { bucket = { header: null, actions: [], ord: parseInt(g.replace(/\D/g, ''), 10) || 0 }; byGroup.set(g, bucket) }
+      if (launchRoleForLabel(label) === 'header') { bucket.header = label; headers.add(label) }
+      else bucket.actions.push(label)
+    }
+    // Nothing grouped yet (cold hydration) or a non-clustered launcher page
+    // (games/websites/dashboard): keep the spiral. A late-hydrating group
+    // re-renders via the `launch:indexed` nudge.
+    if (byGroup.size === 0) return null
+    const groups: ClusterGroup[] = [...byGroup.values()].sort((a, b) => a.ord - b.ord)
+    return { coords: launcherClusterLayout(groups), headers }
+  }
+
   private buildCellsFromAxial = (axial: any, names: string[], max: number, localCellSet: Set<string>, branchSet?: Set<string>): Cell[] => {
     const out: Cell[] = []
     // during move drag, use reordered names so labels map to correct indices
     const effectiveNames = this.moveNames ?? names
+    // Clustered-island layout for the ordered help page — placed by label, so
+    // grouping reads the committed `names` order (a transient move-drag never
+    // rescrambles the islands). Null on every other page ⇒ the spiral below.
+    const cluster = this.#launcherClusterCoords(names)
 
     // World mode: tiles that aren't public render dimmed. Resolve the location
     // once; isCellPublic() is branch-aware (own flag or any ancestor branch).
@@ -5378,8 +5503,11 @@ export class ShowCellDrone extends Drone {
     if (beyondMax.length) console.info(`[layout] axial-truncated (slots ≥ ${max}):`, beyondMax.join(', '))
 
     for (let i = 0; i < max; i++) {
-      const a = axial.items.get(i) as Axial | undefined
       const label = effectiveNames[i] ?? names[i]
+      // On a clustered launcher page the tile sits at its island coordinate
+      // (resolved by label); everywhere else it takes the axial spiral slot i.
+      const override = cluster?.coords.get(label)
+      const a = override ?? (axial.items.get(i) as Axial | undefined)
       if (!a) {
         const dropped = names.slice(i).map((l, off) => l ? `${l}@${i + off}` : '').filter(Boolean)
         if (dropped.length) console.info(`[layout] axial-dropped (no coords from slot ${i}):`, dropped.join(', '))
@@ -5393,7 +5521,12 @@ export class ShowCellDrone extends Drone {
       // presence glow keeps a tile lit while peers are exploring inside it.
       const heat = Math.max(this.#heatByLabel.get(label) ?? 0, this.#presenceGlowByLabel.get(label) ?? 0)
       const unshared = worldMode && !isCellPublic(worldLocation, label)
-      out.push({ q: a.q, r: a.r, label, external: !localCellSet.has(label), heat, hasBranch: branchSet?.has(label) ?? false, divergence: div, unshared })
+      // Category title tiles carry the cold-steel border so an island header
+      // reads as a header — no new tile shape needed.
+      const borderColor = cluster?.headers.has(label) ? HEADER_BORDER : undefined
+      // Clustered help tiles render PLAIN — no photo/substrate imagery — so the
+      // category words and steel headers read cleanly.
+      out.push({ q: a.q, r: a.r, label, external: !localCellSet.has(label), heat, hasBranch: branchSet?.has(label) ?? false, divergence: div, unshared, borderColor, plain: !!cluster })
     }
 
     return out
@@ -5780,7 +5913,7 @@ export class ShowCellDrone extends Drone {
       uv.set([0, 0, 1, 0, 1, 1, 0, 1], uvp)
       uvp += 8
 
-      const imgUV = c.imageSig ? this.imageAtlas?.getImageUV(c.imageSig) ?? null : null
+      const imgUV = c.plain ? null : (c.imageSig ? this.imageAtlas?.getImageUV(c.imageSig) ?? null : null)
 
       // label UV: collapse to [0,0,0,0] when hideText + image present so the
       // shader samples a transparent corner and the label is effectively hidden.

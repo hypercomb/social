@@ -27,6 +27,15 @@ export interface GroupMember {
   segments: string[]
   /** Optional per-member glyph (the group ICON is by meaning, not this). */
   icon?: string
+  /** Layout role on a CLUSTERED launcher page (`orderedLayout` groups only).
+   *  'header' marks a category-title tile that opens nothing and starts a new
+   *  island; anything else is a normal action tile. Default (absent) = action. */
+  role?: 'header' | 'action'
+  /** Island id on a CLUSTERED launcher page — every tile of one island (its
+   *  header + its actions) shares the SAME group id, so the renderer can gather
+   *  the island by identity regardless of the (slot-sorted) render order. Ids
+   *  sort by their trailing number to order the islands. Absent = ungrouped. */
+  group?: string
 }
 
 export interface LaunchGroup {
@@ -40,6 +49,13 @@ export interface LaunchGroup {
    *  the plain hexagon (dashboard, help). Written into each member's
    *  `launch:target` decoration so show-cell can pick the shape PER TILE. */
   shape?: string
+  /** When true, the aggregator lays this group's members out as CLUSTERED
+   *  ISLANDS — one compact hex blob per category, each titled by a
+   *  `role:'header'` tile — instead of one continuous spiral, and its
+   *  reconcile keeps the page in members() ORDER (so headers interleave into
+   *  their categories) rather than preserving prior arrangement. Help opts in;
+   *  other groups keep the spiral + arrangement-preserving reconcile. */
+  orderedLayout?: boolean
   members(): GroupMember[]
   /** Activate a single member — its routing is owned by the group (websites →
    *  website mode, games → overlay toggle, dashboard → toggleBehavior). The

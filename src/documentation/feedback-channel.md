@@ -53,23 +53,37 @@ hard problem of distributed deletion entirely.
 
 ## Identity and the channel address
 
-The channel belongs to a **hive owner**. Both the owner's everyday browser and
-the owner's routine address the same channel:
+The channel belongs to a **host** (a domain like `jwize.com`), **not** to any one
+browser's ephemeral key. Its address is derived from the host domain:
 
 ```
-channelId = sha256("hc:feedback-channel\0" + <ownerPubkeyHex>)
+channelId = sha256("hc:feedback-channel\0" + <hostDomain>)
 ```
 
-- The owner's browser derives `ownerPubkeyHex` from its own `NostrSigner`.
-- The routine targets a specific hive via `localStorage['hc:feedback-channel:id']`
-  (an explicit 64-hex channel id) when it does **not** share the owner's key,
-  or — recommended — runs with the owner's `hc:nostr:secret-key` injected, so
-  it derives the identical channel id automatically and *is* the same identity
-  (the multi-device case).
+- `hostDomain` is `localStorage['hc:nostrmesh:self-domain']` — the canonical host
+  identity `runtime-initializer.ts` seeds from the page origin on a real host, or
+  `DEV_DEFAULT_HOST` (`jwize.com`) on loopback. So the owner's app on **any** origin
+  or device, a granted visitor's host, and the loop routine (which runs on
+  `localhost:4250` but whose self-domain is also `jwize.com`) all derive the **same**
+  channel id with **no key exchange**. This is what makes "the host receives all
+  feedback for all messages" hold regardless of which OPFS submitted it. It also
+  replaces the old per-owner-pubkey derivation, which silently diverged because
+  `NostrSigner` mints a fresh random key per browser profile — so the owner and a
+  headless routine never met.
+- `localStorage['hc:feedback-channel:id']` (an explicit 64-hex id) still overrides
+  the derivation when you need to target a specific channel; the own-pubkey
+  derivation remains only as a fallback for a bare local dev with no host set.
 
-`channelId` is the mesh `x`-tag both sides subscribe to. The relay returns
-every author's events for that tag; each side filters by the optimization
-`kind` it cares about. Single concern per author → no manifest merge.
+`channelId` is the mesh `x`-tag both sides subscribe to. The relay returns every
+author's events for that tag; each side filters by the optimization `kind` it
+cares about.
+
+> **Multi-tenant note.** A host-domain-scoped channel means everyone using that
+> host shares one feedback channel — correct for a single-owner host like
+> jwize.com (feedback from every device and every granted visitor converges to the
+> owner + routine). If a host ever serves *independent* owners who must not see one
+> another's feedback, scope the channel per-owner (derive from the owner pubkey or a
+> per-owner salt) and gate the SUBSCRIBE side to the owner. Not needed today.
 
 ## Transport (v1 — relay-backed)
 
@@ -137,13 +151,25 @@ continues the improvement loop. Nothing is fire-and-forget.
 ## The drone
 
 `FeedbackChannelDrone` (`diamondcoreprocessor.com/sharing/feedback-channel.drone.ts`)
-owns the whole concern and is **inert by default**, gated exactly like
-host-sync so a casual visitor (or a hot-reload into a running dev session)
-publishes nothing:
+owns the whole concern. The enable gate is **owner-default-on**:
 
 ```
-localStorage['hc:feedback-channel:enabled'] = 'true'   // opt-in gate
+localStorage['hc:feedback-channel:enabled']            // unset ⇒ ON for the owner on
+                                                       //   their own hive, OFF for a
+                                                       //   visitor of another hive
+localStorage['hc:feedback-channel:enabled'] = 'true'   // force-on (routine, dev opt-in)
+localStorage['hc:feedback-channel:enabled'] = 'false'  // force-off (dev opt-out)
 ```
+
+Owner vs visitor is read from `SwarmDrone.subscribedTo()` (the host pubkey we're a
+visitor of; null on our own hive). So submitting feedback on your own hive always
+crosses and returned qa always renders — with no hidden flag a normal user would
+never set — while a visitor's feedback rides the consent handshake
+(`FeedbackSwarmDrone`) instead. A dev hot-reload still publishes nothing on its own,
+because publishing only happens when a `feedback`/`qa`/`qa-answer` record is actually
+written. `DashboardProducerDrone` reads the same effective gate, so the render side
+follows automatically (and lazily mints the dashboard bag on the first arriving
+question).
 
 When enabled it:
 
@@ -189,29 +215,37 @@ localStorage), so the routine's `/dashboard` layer cannot simply be layer-synced
 onto the user's — each side must render its OWN dashboard from its OWN (now
 channel-synced) qa records.
 
-Consequence in the headless-routine topology: the routine builds its dashboard
-in its OPFS; the user's browser receives the qa **data** but does not yet
-auto-build the card page. Closing this needs an **in-app dashboard producer** —
-a drone that runs the `renderDashboard` logic client-side on
-`feedback:channel-ingested` (and on boot), so the user's browser rebuilds its
-dashboard from local qa with no node runner, plus an auto-remount of the
-`/dashboard` view when its layer changes. Until that lands, the cards become
-visible by running the loop's `dashboard` step against the user's own hive
-(Claude-in-Chrome, shared OPFS) — which works today because the qa data is
-synced. Tracked as a follow-up.
+This is now closed by **`DashboardProducerDrone`**
+(`diamondcoreprocessor.com/dashboard/dashboard-producer.drone.ts`, shipped): it runs
+the `renderDashboard` logic client-side on `feedback:channel-ingested` (and on boot),
+rebuilding the participant-local `/dashboard` bag from local `qa` with no node runner,
+and **lazily mints the bag on the first arriving question** so a user who never ran
+`/dashboard` still sees cards. It reads the same owner-default-on gate as the channel.
+One residual polish item remains: an **auto-remount** of the `/dashboard` view when
+its layer changes, so a user already staring at the dashboard sees a new card without
+a nav-away/back or reload (until then, re-open the toggle to refresh).
 
 ## Operator + test checklist
 
-1. Owner browser: `localStorage['hc:feedback-channel:enabled']='true'`, reload.
-2. Routine renderer: same flag; either inject the owner's
-   `hc:nostr:secret-key` (same identity) or set
-   `hc:feedback-channel:id` to the owner's channel id.
-3. Both must point at the same relay (`hc:nostrmesh:relays` includes
-   `wss://jwize.com`, or `wss://localhost:7777` for local dev).
-4. Submit a feedback item in the owner browser → confirm an ITEM event lands
-   on the relay → run one feedback-loop cycle in the routine → confirm a `qa`
+1. Owner browser: nothing to set — the channel is **owner-default-on** (submitting
+   feedback on your own hive publishes automatically). To force-disable, set
+   `localStorage['hc:feedback-channel:enabled']='false'`.
+2. Routine renderer: `ensure-renderer.cjs` auto-injects the preflight (enabled +
+   `hc:nostrmesh:self-domain=jwize.com` + live relay) before the page loads, so it
+   converges on the owner's channel with no key injection. Assert with
+   `node .claude/skills/feedback-loop/fb.cjs channel-status` →
+   `{ enabled:true, channelId:<64-hex> }`.
+3. Both derive the channel from `hc:nostrmesh:self-domain` (default `jwize.com`) and
+   ride the same relay (`wss://jwize.com`, or `wss://localhost:7777` — the same relay
+   via cloudflared for a local host).
+4. Submit a feedback item in the owner browser → confirm a kind-30213 ITEM event
+   lands on the relay (a raw `REQ {"#x":[channelId],"kinds":[30213]}` on
+   `wss://jwize.com`) → run one feedback-loop cycle in the routine → confirm a `qa`
    ITEM comes back and the dashboard shows the card.
 5. Down-test: stop the relay, submit feedback, confirm it rests in
-   `__feedback_outbox__/`; restart the relay, confirm it auto-posts and the
-   routine picks it up next cycle.
+   `__feedback_outbox__/`; restart the relay, confirm it auto-posts and the routine
+   picks it up next cycle.
+6. Visitor path: a granted visitor's post now carries a 7-day expiration and a unique
+   d-tag, so it survives on the relay until the host is next online (no more
+   90-second loss window); the host ingests it idempotently (content-addressed).
 ```

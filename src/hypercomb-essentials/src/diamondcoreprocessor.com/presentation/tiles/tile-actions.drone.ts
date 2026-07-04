@@ -154,6 +154,9 @@ type IconProviderEntry = {
   profiles?: readonly string[]
   /** Auto-join the default arrangement for each profile (no DEFAULT_ACTIVE edit). */
   defaultActive?: boolean
+  /** Ride the hidden row revealed by the ⋮ (more) toggle instead of the
+   *  always-visible row — for secondary or destructive actions. */
+  dangerRow?: boolean
   hoverTint?: number
   visibleWhen?: (ctx: OverlayTileContext) => boolean
   tintWhen?: OverlayTintFn
@@ -394,6 +397,9 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // immediately without needing to adopt them first.
   { name: 'hide', svgMarkup: ICONS.hide, hoverTint: 0xffd8a8, profile: 'public-external', visibleWhen: (ctx: OverlayTileContext) => !ctx.isHidden, labelKey: 'action.hide', descriptionKey: 'action.hide.description' },
   { name: 'block', svgMarkup: ICONS.block, hoverTint: 0xffc8c8, profile: 'public-external', labelKey: 'action.block', descriptionKey: 'action.block.description' },
+  // ⋮ toggle for peer tiles too — provider icons that ride the hidden row
+  // (e.g. share-link) register on public-external and need a reveal.
+  { name: 'more', svgMarkup: ICONS.more, hoverTint: 0xc8d4ff, profile: 'public-external' },
   // ── files (all profiles) ──
   // The file icon appears on any tile that has at least one `files:attachment`
   // decoration — your own (private / public-own) or a peer's (public-external,
@@ -443,8 +449,9 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   // etc.) via the content broker. Different mechanism from auto-
   // adopt: auto-adopt follows a participant continuously, single-
   // adopt is one tile + its resources, on demand. `hide` dismisses
-  // a peer tile from view without taking ownership.
-  'public-external': ['adopt', 'hide', 'files', 'invite'],
+  // a peer tile from view without taking ownership. `more` (⋮) only
+  // renders when a hidden-row icon (e.g. share-link) is present.
+  'public-external': ['adopt', 'hide', 'files', 'invite', 'more'],
 }
 
 // ── Position computation ──────────────────────────────────────────
@@ -613,6 +620,7 @@ export class TileActionsDrone extends Drone {
           hoverTint: p.hoverTint,
           profile: prof as OverlayProfileKey,
           defaultActive: p.defaultActive,
+          dangerRow: p.dangerRow,
           visibleWhen: p.visibleWhen,
           tintWhen: p.tintWhen,
           labelKey: p.labelKey,

@@ -153,6 +153,27 @@ export function launchKeyForLabel(label: string): string {
   return launchKeyByLabel.get(label) ?? ''
 }
 
+/** Map<cellLabel, role> — the launcher tile's layout role ('header' for a
+ *  category-title tile). Absent = a normal action tile. */
+const launchRoleByLabel = new Map<string, string>()
+
+/** The launcher layout role for a cell ('' if none / a normal action tile).
+ *  Synchronous and O(1) — show-cell reads it per visible cell to group the
+ *  clustered-island layout on the help page. */
+export function launchRoleForLabel(label: string): string {
+  return launchRoleByLabel.get(label) ?? ''
+}
+
+/** Map<cellLabel, group> — the clustered-help island id a launcher tile belongs
+ *  to. Every tile of one island shares it. Absent = ungrouped. */
+const launchGroupByLabel = new Map<string, string>()
+
+/** The clustered-help island id for a cell ('' if none). Synchronous and O(1) —
+ *  show-cell gathers each island by this id, independent of render order. */
+export function launchGroupForLabel(label: string): string {
+  return launchGroupByLabel.get(label) ?? ''
+}
+
 // ── Overlap metric (the one popularity signal) ────────────────────────
 //
 // "Popularity" = how many cells SHARE an entity — the overlap count. The
@@ -233,6 +254,26 @@ function keyOf(record: DecorationShape): string | null {
   return typeof key === 'string' && key.length > 0 ? key : null
 }
 
+/** Pull the launcher layout role out of a `launch:target` payload's `{ role }`
+ *  ('header' for a category-title tile). Absent → a normal action tile. */
+function roleOf(record: DecorationShape): string | null {
+  const payload = record.payload
+  const role = payload && typeof payload === 'object'
+    ? (payload as { role?: unknown }).role
+    : undefined
+  return typeof role === 'string' && role.length > 0 ? role : null
+}
+
+/** Pull the launcher island id out of a `launch:target` payload's `{ group }`.
+ *  Every tile of one clustered-help island shares it. Absent → ungrouped. */
+function groupOf(record: DecorationShape): string | null {
+  const payload = record.payload
+  const group = payload && typeof payload === 'object'
+    ? (payload as { group?: unknown }).group
+    : undefined
+  return typeof group === 'string' && group.length > 0 ? group : null
+}
+
 function addTag(label: string, name: string, sig: string): void {
   let set = tagsByLabel.get(label)
   if (!set) { set = new Set<string>(); tagsByLabel.set(label, set) }
@@ -267,6 +308,12 @@ function indexRecord(label: string, sig: string, record: DecorationShape): void 
     if (shape) launchShapeByLabel.set(label, shape)
     const key = keyOf(record)
     if (key) launchKeyByLabel.set(label, key)
+    const role = roleOf(record)
+    if (role) launchRoleByLabel.set(label, role)
+    else launchRoleByLabel.delete(label)
+    const group = groupOf(record)
+    if (group) launchGroupByLabel.set(label, group)
+    else launchGroupByLabel.delete(label)
   }
 }
 
@@ -306,6 +353,8 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
 
   if (payload.op === 'append') {
     const priorShape = launchShapeByLabel.get(label)
+    const priorRole = launchRoleByLabel.get(label)
+    const priorGroup = launchGroupByLabel.get(label)
     const record = await fetchDecorationRecord(sig)
     if (!record) return
     indexRecord(label, sig, record)
@@ -322,7 +371,10 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
     // ONLY when the shape actually changed: show-cell's pre-paint hydration
     // (ensureDecorationsIndexed) usually indexed it already, and re-nudging
     // would queue a redundant full geometry rebuild right after entry.
-    if (record.kind === LAUNCH_DECORATION_KIND && launchShapeByLabel.get(label) !== priorShape) {
+    if (record.kind === LAUNCH_DECORATION_KIND
+        && (launchShapeByLabel.get(label) !== priorShape
+          || launchRoleByLabel.get(label) !== priorRole
+          || launchGroupByLabel.get(label) !== priorGroup)) {
       EffectBus.emit('launch:indexed', { label })
     }
   } else if (payload.op === 'removeSig') {
@@ -334,6 +386,8 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
     if (kind === LAUNCH_DECORATION_KIND) {
       launchShapeByLabel.delete(label)
       launchKeyByLabel.delete(label)
+      launchRoleByLabel.delete(label)
+      launchGroupByLabel.delete(label)
     }
     // A tag's resource is content-addressed and shared across cells, so subtract
     // it from the cell named in THIS event (`label`), using the sig's constant

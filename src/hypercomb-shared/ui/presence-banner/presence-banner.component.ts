@@ -17,6 +17,13 @@
 //
 // Source: SwarmDrone effects + APIs. The strip stays inert without a
 // SwarmDrone in IoC, so non-swarm shells pay zero cost.
+//
+// Private mode gate: presence is a public (swarm) concept. In private
+// mode the mesh network is disabled, so no peer can ever surface — it's
+// only you. Showing a participant badge for yourself alone is noise, so
+// the whole strip stays hidden until mesh-public is on. Driven by the
+// processor's 'mesh:public-changed' broadcast (last-value replay →
+// correct on mount, even if we subscribe after the initial emit).
 
 import { Component, signal, computed, effect, viewChild, type ElementRef, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
@@ -77,6 +84,12 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
    *  strip stays hidden (no flashing on cold boot). */
   readonly #seen = signal(false)
 
+  /** True while mesh-public (swarm) mode is on. Private mode can never
+   *  have peers, so the strip stays hidden — presence is a public-only
+   *  affordance. Seeded from the processor's 'mesh:public-changed'
+   *  broadcast (last-value replay makes it correct on mount). */
+  readonly #public = signal(false)
+
   /** Pubkeys of the live participants at our location. Sorted by
    *  the swarm drone (freshest first). */
   readonly #peers = signal<readonly string[]>([])
@@ -120,7 +133,7 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
   readonly #subscribedTo = signal('')
   readonly #following = signal('')
 
-  readonly visible = computed(() => this.#seen())
+  readonly visible = computed(() => this.#seen() && this.#public())
   readonly alone = computed(() => this.#alone())
   readonly peerCount = computed(() => this.#peers().length)
 
@@ -210,6 +223,12 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
       }),
       EffectBus.on<{ pubkey?: string }>('swarm:following-changed', (p) => {
         this.#following.set(String(p?.pubkey ?? ''))
+      }),
+
+      // Public/private toggle — presence is public-only, so the strip
+      // hides the instant mesh-public goes off (and reappears on).
+      EffectBus.on<{ public?: boolean }>('mesh:public-changed', ({ public: pub }) => {
+        this.#public.set(!!pub)
       }),
     )
   }

@@ -200,6 +200,7 @@ export class ClaudeBridgeWorker extends Worker {
       case 'optimization-add':    return this.#optimizationAdd(req)
       case 'optimization-list':   return this.#optimizationList(req)
       case 'optimization-remove': return this.#optimizationRemove(req)
+      case 'feedback-channel-status': return this.#feedbackChannelStatus(req)
       case 'decoration-add':      return this.#decorationAdd(req)
       case 'bag-add':      return this.#bagMutate(req, 'add')
       case 'bag-remove':   return this.#bagMutate(req, 'remove')
@@ -322,6 +323,19 @@ export class ClaudeBridgeWorker extends Worker {
     if (!isSignature(sig)) return { id: req.id, ok: false, error: 'optimization-remove requires `sig` (64-hex)' }
     const removed = await store.removeOptimization(sig)
     return { id: req.id, ok: true, data: { sig, removed } }
+  }
+
+  // ─── feedback-channel-status ───────────────────────────────────────
+  //
+  // Liveness readout for the durable feedback channel. The loop routine calls
+  // this in preflight to assert the transport is actually converged (enabled +
+  // a channelId) before reading the inbox — so a misconfigured cycle fails
+  // loudly instead of silently reporting an empty inbox forever.
+  async #feedbackChannelStatus(req: BridgeRequest): Promise<BridgeResponse> {
+    const drone = get<{ status?: () => Promise<{ enabled: boolean; channelId: string | null; pending: number; ingested: number }> }>('@diamondcoreprocessor.com/FeedbackChannelDrone')
+    if (!drone?.status) return { id: req.id, ok: false, error: 'FeedbackChannelDrone not available' }
+    try { return { id: req.id, ok: true, data: await drone.status() } }
+    catch (e) { return { id: req.id, ok: false, error: `channel status failed: ${(e as Error)?.message ?? 'unknown'}` } }
   }
 
   // ─── decoration-add ────────────────────────────────────────────────

@@ -36,10 +36,19 @@ export const FEEDBACK_ITEM_KIND = 30213
 
 const MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
 const SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
+const SWARM_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const STORE_KEY = '@hypercomb.social/Store'
 
-const ENABLED_KEY = 'hc:feedback-channel:enabled'  // opt-in gate (default off)
+// Owner-default-on: unset ⇒ ON for the owner on their own hive, OFF for a
+// visitor of someone else's hive. Explicit 'true' force-on (the loop routine,
+// a dev opting in); explicit 'false' force-off (a dev opting out).
+const ENABLED_KEY = 'hc:feedback-channel:enabled'
 const CHANNEL_ID_KEY = 'hc:feedback-channel:id'    // explicit channel override
+// Canonical host domain this hive uses (e.g. 'jwize.com'). runtime-initializer
+// seeds it from the page origin on a real host, or DEV_DEFAULT_HOST=jwize.com on
+// loopback — so the owner app, granted visitors' host, and the loop routine all
+// derive the SAME feedback channel with no key exchange.
+const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
 const OUTBOX_DIR = '__feedback_outbox__'
 const RETRY_MS = 30_000
 const MAX_OUTBOX_AGE_MS = 24 * 60 * 60 * 1000      // backstop sweep
@@ -69,6 +78,7 @@ interface MeshLike {
   setNetworkEnabled?: (enabled: boolean, persist?: boolean) => void
 }
 interface SignerLike { getPublicKeyHex: () => Promise<string | null> }
+interface SwarmLike { subscribedTo?: () => string | null }
 interface StoreLike {
   putOptimization?: (blob: Blob, options?: { emit?: boolean }) => Promise<string>
   getOptimization?: (sig: string) => Promise<Blob | null>
@@ -121,7 +131,23 @@ export class FeedbackChannelDrone extends Drone {
   // ── gate ────────────────────────────────────────────────
   public readonly isEnabled = (): boolean => this.#isEnabled()
   readonly #isEnabled = (): boolean => {
-    try { return String(localStorage.getItem(ENABLED_KEY) ?? '').trim().toLowerCase() === 'true' }
+    // Explicit flag wins both ways.
+    let raw = ''
+    try { raw = String(localStorage.getItem(ENABLED_KEY) ?? '').trim().toLowerCase() } catch { return false }
+    if (raw === 'true') return true
+    if (raw === 'false') return false
+    // Unset ⇒ default ON for the OWNER on their own hive, so submitting always
+    // crosses and returned qa always renders without a hidden flag. A VISITOR
+    // (subscribed to another hive) stays OFF — their feedback rides the consent
+    // handshake (FeedbackSwarmDrone) instead of this channel.
+    return this.#isOwnerContext()
+  }
+
+  /** Owner context = NOT a visitor of another hive. SwarmDrone.subscribedTo()
+   *  is the host pubkey we're visiting (null/empty on our own hive). Absent
+   *  swarm drone (early boot) ⇒ treat as owner, the common case. */
+  readonly #isOwnerContext = (): boolean => {
+    try { return !ioc()?.get<SwarmLike>(SWARM_KEY)?.subscribedTo?.() }
     catch { return false }
   }
 
@@ -175,18 +201,39 @@ export class FeedbackChannelDrone extends Drone {
     }
   }
 
-  /** The channel address. Explicit override (a routine targeting a specific
-   *  hive without sharing keys) wins; otherwise derive from this participant's
-   *  own pubkey — owner browser and key-sharing routine land on the same id. */
+  /** The channel address. Resolution order:
+   *   1. explicit override (hc:feedback-channel:id) — a routine pinned to a
+   *      specific hive's channel;
+   *   2. HOST DOMAIN (hc:nostrmesh:self-domain, e.g. 'jwize.com') — the channel
+   *      belongs to the HOST, not to any one browser's ephemeral key, so every
+   *      context using this host (the owner on any origin/device, a granted
+   *      visitor's host, and the loop routine) derives the SAME id with no key
+   *      exchange. This is what makes "the host receives all feedback" hold
+   *      regardless of which OPFS submitted it;
+   *   3. own pubkey — fallback for a bare local dev with no host configured. */
   readonly #resolveChannelId = async (): Promise<string | null> => {
     if (this.#channelId) return this.#channelId
     let override = ''
     try { override = String(localStorage.getItem(CHANNEL_ID_KEY) ?? '').trim().toLowerCase() } catch { /* ignore */ }
     if (HEX64.test(override)) { this.#channelId = override; return override }
+    const host = this.#hostDomain()
+    if (host) {
+      this.#channelId = await SignatureService.sign(enc.encode(`hc:feedback-channel\0${host}`).buffer as ArrayBuffer)
+      return this.#channelId
+    }
     const pk = (await ioc()?.get<SignerLike>(SIGNER_KEY)?.getPublicKeyHex?.()) ?? null
     if (!pk || !HEX64.test(pk)) return null
     this.#channelId = await SignatureService.sign(enc.encode(`hc:feedback-channel\0${pk}`).buffer as ArrayBuffer)
     return this.#channelId
+  }
+
+  /** Canonical host domain (hc:nostrmesh:self-domain), scheme/slash-stripped
+   *  and lowercased. Empty when unset. */
+  readonly #hostDomain = (): string => {
+    try {
+      return String(localStorage.getItem(SELF_DOMAIN_KEY) ?? '').trim()
+        .replace(/^wss?:\/\//i, '').replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase()
+    } catch { return '' }
   }
 
   // ── publish (local write → channel) ─────────────────────

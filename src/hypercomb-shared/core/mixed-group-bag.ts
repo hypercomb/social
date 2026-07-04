@@ -376,7 +376,12 @@ export class MixedGroupBag {
     const wantedSet = new Set(wanted)
     const kept = existing.filter(n => wantedSet.has(n))          // preserve order
     const fresh = wanted.filter(n => !existing.includes(n))      // append new
-    const order = [...kept, ...fresh]
+    // Clustered-island groups (help) demand a FIXED members() order so each
+    // category's header tile interleaves directly ahead of its members; the
+    // per-category islands are derived from that order downstream. Every other
+    // group preserves the participant's arrangement (kept first, new appended).
+    const ordered = !!this.#registry.get(id)?.orderedLayout
+    const order = ordered ? wanted : [...kept, ...fresh]
 
     const store = get<StoreLike>('@hypercomb.social/Store')
     // 1. Create any FRESH launcher cells first — DETERMINISTICALLY, capturing each
@@ -391,28 +396,42 @@ export class MixedGroupBag {
     //    shape-index synchronously. (NOT a website page, so the website scan never
     //    re-discovers it as a site.) This mirrors how the PARENT bag is committed
     //    below — a direct history.commitLayer, not the async committer machine.
-    const freshMarker = new Map<string, string>()
+    // A CLUSTERED (orderedLayout / help) group carries per-tile role + group in
+    // the payload, and BOTH header and action tiles need the group. Existing
+    // action cells are "kept" (label unchanged), so writing only FRESH cells
+    // would leave them without a group forever. So clustered groups (re)write
+    // EVERY tile's decoration — self-migrating; content-addressed commitLayer
+    // dedups the unchanged ones, so no history bloat and no re-index churn (we
+    // only signal decorations:changed when the marker actually moved). Every
+    // other group keeps the cheap fresh-only path (byte-identical payloads).
+    const writtenMarker = new Map<string, string>()
+    const toWrite = ordered ? order : fresh
     if (store?.putResource) {
-      for (const name of fresh) {
+      for (const name of toWrite) {
         const m = this.#memberByLabel.get(name)
         const shape = this.#groupByLabel.get(name)?.shape ?? ''
+        const role = m?.role === 'header' ? 'header' : ''
+        const group = m?.group ?? ''
         const childSegs = [...segs, name]
         try {
-          const record = { kind: LAUNCH_KIND, appliesTo: [], payload: { segments: m?.segments ?? [], icon: m?.icon ?? '', label: name, shape, key: m?.key ?? '' } }
+          const record = { kind: LAUNCH_KIND, appliesTo: [], payload: { segments: m?.segments ?? [], icon: m?.icon ?? '', label: name, shape, key: m?.key ?? '', ...(role ? { role } : {}), ...(group ? { group } : {}) } }
           const decoSig = await store.putResource(new Blob([JSON.stringify(record)], { type: 'application/json' }))
           const childLocSig = await history.sign({ domain, explorerSegments: () => childSegs })
+          // Only clustered rewrites can hit an existing cell; read its prior head
+          // so an unchanged decoration doesn't re-fire the index walk.
+          const prior = ordered ? await history.latestMarkerSigFor(childLocSig, name).catch(() => '') : ''
           const marker = await history.commitLayer(childLocSig, { name, decorations: [decoSig] })
-          if (marker && SIG.test(marker)) freshMarker.set(name, marker)
-          EffectBus.emit('decorations:changed', { segments: childSegs, op: 'append', sig: decoSig })
+          if (marker && SIG.test(marker)) writtenMarker.set(name, marker)
+          if (marker !== prior) EffectBus.emit('decorations:changed', { segments: childSegs, op: 'append', sig: decoSig })
         } catch { /* fall through to the marker read below */ }
       }
     }
-    // 2. Resolve every child's marker sig. Fresh cells use the marker we just
-    //    committed (deterministic — no empty-marker race); kept cells read their
-    //    existing head IN PARALLEL. Promise.all preserves `order`, so arrangement
-    //    is unchanged; empties filter out.
+    // 2. Resolve every child's marker sig. Written cells use the marker we just
+    //    committed (deterministic — no empty-marker race); any not written reads
+    //    its existing head IN PARALLEL. Promise.all preserves `order`, so
+    //    arrangement is unchanged; empties filter out.
     const resolved = await Promise.all(order.map(async name => {
-      const pre = freshMarker.get(name)
+      const pre = writtenMarker.get(name)
       if (pre) return pre
       const childLocSig = await history.sign({ domain, explorerSegments: () => [...segs, name] })
       const childSig = await history.latestMarkerSigFor(childLocSig, name).catch(() => '')

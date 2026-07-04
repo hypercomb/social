@@ -35,6 +35,7 @@ const COMMITTER_KEY = '@diamondcoreprocessor.com/LayerCommitter'
 const DASHBOARD_BEE_KEY = '@diamondcoreprocessor.com/DashboardBee'
 
 const ENABLED_KEY = 'hc:feedback-channel:enabled'
+const FEEDBACK_CHANNEL_KEY = '@diamondcoreprocessor.com/FeedbackChannelDrone'
 const BINDING_KIND = 'dashboard-q-binding'
 const REBUILD_DEBOUNCE_MS = 600
 
@@ -55,6 +56,7 @@ interface CommitterLike {
 }
 interface DashboardBeeLike {
   listPinnedBags: () => readonly Bag[]
+  createDashboardForCurrentLocation?: () => Promise<Bag | null>
 }
 
 const ioc = () => (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
@@ -88,6 +90,11 @@ export class DashboardProducerDrone extends Drone {
   }
 
   #isEnabled(): boolean {
+    // Mirror the feedback channel's owner-default-on (so returned qa renders
+    // for the owner on their own hive without a hidden flag). Fall back to the
+    // raw flag if the channel drone isn't resolved yet.
+    const channel = ioc()?.get<{ isEnabled?: () => boolean }>(FEEDBACK_CHANNEL_KEY)
+    if (channel?.isEnabled) return channel.isEnabled()
     try { return String(localStorage.getItem(ENABLED_KEY) ?? '').trim().toLowerCase() === 'true' }
     catch { return false }
   }
@@ -111,11 +118,18 @@ export class DashboardProducerDrone extends Drone {
       const history = ioc()?.get<HistoryLike>(HISTORY_KEY)
       if (!store?.listOptimizations || !store.getOptimization || !committer?.update || !bee?.listPinnedBags || !history) return
 
-      const bag = bee.listPinnedBags()[0]
-      if (!bag || !bag.bagSegments?.length) return  // no dashboard pinned — nothing to render into
-
       // 1) open questions, deduped by path + question (mirror the node script)
       const open = await this.#openQuestions(store)
+
+      // Lazily mint the dashboard bag on the FIRST arriving question so a
+      // channel-ingested qa is visible without the user having run /dashboard
+      // once (closes the pinned-bag precondition). Never mint an empty one.
+      let bag = bee.listPinnedBags()[0]
+      if ((!bag || !bag.bagSegments?.length) && open.length > 0 && bee.createDashboardForCurrentLocation) {
+        try { await bee.createDashboardForCurrentLocation() } catch { /* best-effort */ }
+        bag = bee.listPinnedBags()[0]
+      }
+      if (!bag || !bag.bagSegments?.length) return  // nothing pinned + nothing to render
 
       // 2) one normalized child label per open Q — last path segment, numbered
       //    on collision so every label is unique (same algorithm as the script)

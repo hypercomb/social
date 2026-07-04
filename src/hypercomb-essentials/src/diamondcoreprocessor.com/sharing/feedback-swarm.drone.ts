@@ -48,7 +48,12 @@ const I18N_KEY = '@hypercomb.social/I18n'
 const ALLOWED_LIST = 'hc:feedback-allowed'   // host: pubkeys allowed to post to me
 const DECLINED_LIST = 'hc:feedback-declined'  // host: pubkeys I declined
 const GRANTED_LIST = 'hc:feedback-granted'    // visitor: host pubkeys that granted me
-const EVENT_TTL_SECS = 90
+// Durable retention: a granted visitor's post (and a pending request/grant) must
+// survive on the relay until the other side is next online — the same 7-day
+// window the owner channel uses. The old 90s ephemeral window silently LOST
+// visitor feedback whenever the host tab wasn't open in that exact 90s (the
+// relay's deleteExpired purged it first). Re-publish slides the window forward.
+const EVENT_TTL_SECS = 7 * 24 * 60 * 60
 
 type MeshEvt = { relay: string; sig: string; event: { kind?: number; pubkey?: string } | null; payload: unknown }
 type MeshSub = { close: () => void }
@@ -84,6 +89,10 @@ export class FeedbackSwarmDrone extends Drone {
   #reqSub: MeshSub | null = null
   #postSub: MeshSub | null = null
   #grantSub: MeshSub | null = null
+  /** Session-level dedup of ingested posts (from:itemId). Durable posts are
+   *  replayed on every (re)subscribe; this skips the redundant work + toast
+   *  before touching the store (cross-session dedup is content-addressing). */
+  #seenPosts = new Set<string>()
 
   protected override sense = () => true
   protected override heartbeat = async (): Promise<void> => {
@@ -221,19 +230,27 @@ export class FeedbackSwarmDrone extends Drone {
     if (!HEX64.test(from) || !this.#readList(ALLOWED_LIST).has(from)) return   // gate: only granted pubkeys
     const p = (e.payload && typeof e.payload === 'object') ? e.payload as Record<string, unknown> : null
     if (!p) return
+    // Dedup: derive the ingested record's identity from the SENDER's own stable
+    // id + timestamp (never Date.now()), so a re-delivered durable post hashes to
+    // the SAME optimization sig and putOptimization no-ops. The session seen-set
+    // skips the redundant work + toast before we even touch the store.
+    const srcId = typeof p['id'] === 'string' && p['id'] ? String(p['id']) : `fb-remote-${from.slice(0, 8)}`
+    const postKey = `${from}:${srcId}`
+    if (this.#seenPosts.has(postKey)) return
     const store = ioc()?.get<StoreLike>(STORE_KEY)
     if (!store?.putOptimization) return
     // Same record shape the local feedback button writes, tagged with the
-    // sender so the host can see who it came from.
+    // sender so the host can see who it came from. Deterministic id/at ⇒
+    // content-addressed idempotence across sessions.
     const record = {
       kind: 'feedback',
       appliesTo: Array.isArray(p['appliesTo']) ? p['appliesTo'] : [],
       payload: {
-        id: `fb-remote-${from.slice(0, 8)}-${Date.now().toString(36)}`,
+        id: srcId,
         category: typeof p['category'] === 'string' ? p['category'] : 'idea',
         text: String(p['text'] ?? '').slice(0, 4000),
         route: typeof p['route'] === 'string' ? p['route'] : '',
-        at: Date.now(),
+        at: typeof p['at'] === 'number' ? p['at'] : 0,
         from,
         remote: true,
       },
@@ -241,6 +258,7 @@ export class FeedbackSwarmDrone extends Drone {
     }
     try {
       await store.putOptimization(new Blob([new TextEncoder().encode(JSON.stringify(record)) as BlobPart]))
+      this.#seenPosts.add(postKey)
       EffectBus.emit('feedback:submitted', {})
     } catch { /* ignore */ }
   }
@@ -282,8 +300,13 @@ export class FeedbackSwarmDrone extends Drone {
     if (!mesh?.publish || !me) return false
     const postSig = await this.#channelSig('feedback-post', hostPk)
     if (!postSig) return false
+    // Unique d-tag PER POST (…:me:itemId) so a burst of posts from one visitor
+    // accumulate on the relay instead of NIP-33-replacing each other. itemId is
+    // the button's own stable id, so re-publishing the same post stays idempotent.
+    const itemId = (payload && typeof payload === 'object' && typeof (payload as { id?: unknown }).id === 'string')
+      ? String((payload as { id: string }).id) : `p-${Date.now().toString(36)}`
     const exp = Math.floor(Date.now() / 1000) + EVENT_TTL_SECS
-    return mesh.publish(FEEDBACK_POST_KIND, postSig, payload ?? {}, [['d', `${postSig}:${me}`], ['expiration', String(exp)]])
+    return mesh.publish(FEEDBACK_POST_KIND, postSig, payload ?? {}, [['d', `${postSig}:${me}:${itemId}`], ['expiration', String(exp)]])
   }
 }
 

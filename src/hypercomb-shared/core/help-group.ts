@@ -63,7 +63,18 @@ const ACTION_LABELS: Record<string, string> = {
  *  the view/mesh toggles; slash behaviours and command-line operations follow
  *  as their own clusters; anything uncategorized lands last. The Reference
  *  tile leads the grid regardless. */
-const CATEGORY_ORDER = ['Navigation', 'Clipboard', 'Selection', 'Editing', 'History', 'View', 'Mesh', 'Slash', 'Command Line']
+const CATEGORY_ORDER = ['Navigation', 'Clipboard', 'Selection', 'Editing', 'Tiles', 'History', 'View', 'Mesh', 'Slash', 'Command Line']
+
+/** Header tile labels that differ from the raw category — to avoid colliding
+ *  with an ACTION tile of the same name. The 'Command Line' category (its typed
+ *  input behaviours) would otherwise clash with the command-line toggle action,
+ *  suffixing the header "Command Line (2)". */
+const HEADER_LABELS: Record<string, string> = { 'Command Line': 'Command Bar' }
+
+/** A category with more than this many tiles splits into alphabetical
+ *  sub-islands, so one big group (Slash, ~60 commands) doesn't dwarf the 2–6
+ *  tile categories. */
+const MAX_ISLAND = 16
 
 /** Commands that make no sense as a tile. Escape's whole meaning is "leave
  *  the current surface"; the sheet is added explicitly (SHEET_MEMBER). */
@@ -103,6 +114,11 @@ class HelpGroup extends LaunchGroupBase {
   override readonly id = 'help'
   override readonly icon = 'help'
   override readonly label = 'Help'
+  /** The help page renders as clustered ISLANDS — one compact hex blob per
+   *  category, titled by a header tile — not one continuous spiral. This also
+   *  makes the reconcile keep the page in members() order so each header
+   *  interleaves directly ahead of its category's tiles. */
+  readonly orderedLayout = true
 
   constructor() {
     super()
@@ -168,8 +184,58 @@ class HelpGroup extends LaunchGroupBase {
       const i = CATEGORY_ORDER.indexOf(c)
       return i === -1 ? CATEGORY_ORDER.length : i
     }
-    actions.sort((a, b) => rank(a.category) - rank(b.category))   // stable — source order within a category
-    return [SHEET_MEMBER, ...actions.map(a => a.member)]
+    // Bucket into category islands (source order preserved within each), then
+    // emit them in CATEGORY_ORDER, each led by a header tile that titles the
+    // island. Reference leads the page on its own (no header). The
+    // members()-ORDER reconcile (orderedLayout) keeps this interleaving intact,
+    // and show-cell reads each header's role to lay the categories out as
+    // separated hex blobs.
+    const byCategory = new Map<string, GroupMember[]>()
+    for (const { member, category } of actions) {
+      const cat = category || 'Other'
+      const bucket = byCategory.get(cat)
+      if (bucket) bucket.push(member)
+      else byCategory.set(cat, [member])
+    }
+    const cats = [...byCategory.keys()].sort((a, b) => rank(a) - rank(b))
+    const baseLabel = (cat: string): string => HEADER_LABELS[cat] ?? (cat === 'Other' ? 'More' : cat)
+    // First letter of a label, skipping the slash prefix / punctuation.
+    const initial = (label: string): string => {
+      const m = label.match(/[a-z0-9]/i)
+      return (m ? m[0] : label.charAt(0)).toUpperCase()
+    }
+    // Each island gets a group id ('g0', 'g1', …) shared by its header and its
+    // tiles, so show-cell gathers the island by IDENTITY — not by render order,
+    // which a slot system re-sorts. The trailing number orders the islands.
+    // Reference leads as its own headerless island.
+    let gid = 0
+    const nextGroup = (): string => `g${gid++}`
+    const out: GroupMember[] = [{ ...SHEET_MEMBER, group: nextGroup() }]
+    for (const cat of cats) {
+      const members = byCategory.get(cat)!
+      if (members.length <= MAX_ISLAND) {
+        const g = nextGroup()
+        out.push({ key: `header:${cat}`, label: baseLabel(cat), segments: [], role: 'header', group: g })
+        out.push(...members.map(m => ({ ...m, group: g })))
+        continue
+      }
+      // Big category (Slash) → balanced alphabetical sub-islands, each its own
+      // group, titled by its letter range ("Slash A–D"), so it stops dominating.
+      const sorted = [...members].sort((a, b) => a.label.localeCompare(b.label))
+      const chunks = Math.ceil(sorted.length / MAX_ISLAND)
+      const size = Math.ceil(sorted.length / chunks)
+      for (let ci = 0; ci < chunks; ci++) {
+        const slice = sorted.slice(ci * size, (ci + 1) * size)
+        if (slice.length === 0) continue
+        const from = initial(slice[0].label)
+        const to = initial(slice[slice.length - 1].label)
+        const label = from === to ? `${baseLabel(cat)} ${from}` : `${baseLabel(cat)} ${from}–${to}`
+        const g = nextGroup()
+        out.push({ key: `header:${cat}:${ci}`, label, segments: [], role: 'header', group: g })
+        out.push(...slice.map(m => ({ ...m, group: g })))
+      }
+    }
+    return out
   }
 
   /** Help tiles are documentation: a CLICK pins the action's study card (the
@@ -178,6 +244,8 @@ class HelpGroup extends LaunchGroupBase {
    *  Reference tile is the one exception — its operation IS the popup, so it
    *  toggles the sheet directly. */
   protected override activate(m: GroupMember): void {
+    // Header tiles title an island; they open nothing.
+    if (m.role === 'header') return
     if (m.key === 'ui.shortcutSheet') {
       EffectBus.emit('keymap:invoke', { cmd: m.key, binding: null, event: null })
       return

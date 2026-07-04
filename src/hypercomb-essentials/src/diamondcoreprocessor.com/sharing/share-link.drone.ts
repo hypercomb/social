@@ -46,6 +46,7 @@ interface IconProviderRegistryLike {
     svgMarkup: string
     profiles?: readonly string[]
     defaultActive?: boolean
+    dangerRow?: boolean
     hoverTint?: number
     labelKey?: string
     descriptionKey?: string
@@ -81,6 +82,9 @@ export class ShareLinkDrone extends Drone {
       svgMarkup: LINK_ICON_SVG,
       profiles: ['private', 'public-own', 'public-external'],
       defaultActive: true,
+      // Rides the hidden row behind the ⋮ (more) toggle — sharing is a
+      // deliberate gesture, not an always-visible one-tap.
+      dangerRow: true,
       hoverTint: 0xa8d8ff,
       labelKey: 'action.share-link',
       descriptionKey: 'action.share-link.description',
