@@ -29,6 +29,14 @@ export class HexImageAtlas {
   // holds a different image. New loads into fresh slots do NOT bump
   // this — they can't invalidate any previously-issued UV.
   #evictionGeneration = 0
+  // Cross-batch in-flight dedup. The renderer dedups loads per BATCH, but
+  // batches overlap (synchronize bursts, move preview, back-nav refills)
+  // and decode takes hundreds of ms on weak hardware — every overlapping
+  // call for the same sig used to burn its own slot for identical pixels.
+  // The duplicate slots were phantoms: when the ring later reused one, the
+  // eviction deleted the sig's LIVE map entry and the tile silently lost
+  // its image. One shared promise per sig means one slot per sig.
+  readonly #inFlight = new Map<string, Promise<ImageUV | null>>()
 
   readonly #cols: number
   readonly #rows: number
@@ -92,12 +100,25 @@ export class HexImageAtlas {
   }
 
   async loadImage(sig: string, blob: Blob): Promise<ImageUV | null> {
-    const tLoad = performance.now()
     const existing = this.#map.get(sig)
     if (existing) return existing
 
     if (this.hasFailed(sig)) return null
 
+    const pending = this.#inFlight.get(sig)
+    if (pending) return pending
+
+    const load = this.#loadInto(sig, blob)
+    this.#inFlight.set(sig, load)
+    try {
+      return await load
+    } finally {
+      this.#inFlight.delete(sig)
+    }
+  }
+
+  async #loadInto(sig: string, blob: Blob): Promise<ImageUV | null> {
+    const tLoad = performance.now()
     const slot = this.#nextSlot % (this.#cols * this.#rows)
     this.#nextSlot++
 
@@ -113,6 +134,12 @@ export class HexImageAtlas {
       // valid. The geometry builder reads this counter to decide
       // whether to rebuild its baked UV buffer.
       this.#evictionGeneration++
+      // A live sig just lost its pixels — and evictions can originate
+      // OUTSIDE any render pass (substrate preheat, detached back-nav
+      // refills). If the displaced sig belongs to an on-screen cell, its
+      // baked UV now samples foreign pixels and no pass is guaranteed to
+      // follow. Announce it so the renderer can repaint when affected.
+      window.dispatchEvent(new CustomEvent('hex-image-atlas:evicted', { detail: { sig: previous } }))
     }
 
     const col = slot % this.#cols
