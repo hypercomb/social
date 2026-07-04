@@ -132,6 +132,24 @@ export function tagSigFor(label: string, name: string): string | undefined {
 /** Decoration kind that marks a launcher tile. */
 export const LAUNCH_DECORATION_KIND = 'launch:target'
 
+/** Decoration kind that marks a REFERENCE tile — a live pointer to another
+ *  lineage. Its payload is `{ targetSegments: string[] }`. Clicking the tile
+ *  portals to that location. See reference.drone.ts / reference.queen.ts. */
+export const REFERENCE_DECORATION_KIND = 'reference'
+
+/** Map<cellLabel, targetSegments> — the location a reference tile points at.
+ *  A present entry (even `[]`, meaning the hive root) marks the label as a
+ *  reference; absent means "not a reference". */
+const referenceTargetByLabel = new Map<string, readonly string[]>()
+
+/** The location a reference tile points at, or `null` if the label is not a
+ *  reference. `[]` is a valid target (the hive root) and is DISTINCT from
+ *  `null`. Synchronous + O(1) — tile-overlay reads it per click to decide
+ *  whether a body press should portal instead of entering a child. */
+export function referenceTargetForLabel(label: string): readonly string[] | null {
+  return referenceTargetByLabel.get(label) ?? null
+}
+
 /** Map<cellLabel, shapeId> — the owning group's silhouette for a launcher tile. */
 const launchShapeByLabel = new Map<string, string>()
 
@@ -172,6 +190,36 @@ const launchGroupByLabel = new Map<string, string>()
  *  show-cell gathers each island by this id, independent of render order. */
 export function launchGroupForLabel(label: string): string {
   return launchGroupByLabel.get(label) ?? ''
+}
+
+// ── Dashboard-island sub-index ────────────────────────────────────────
+//
+// Dashboard question tiles carry a `dashboard-island` decoration whose payload
+// holds the island `group` id and a `role` ('header' for a category-title
+// tile). show-cell reads these PER CELL to lay the dashboard bag out as
+// clustered islands — the SAME layout the /help page uses — but WITHOUT a
+// `launch:target` decoration (which would hijack the click into `group:open`
+// instead of opening the Q&A modal). Hydrates through the same
+// decorations:changed / render:cell-count paths as every other decoration.
+
+/** Decoration kind that groups a dashboard question tile into an island. */
+export const DASHBOARD_ISLAND_KIND = 'dashboard-island'
+
+/** Map<cellLabel, islandId> — the dashboard island a tile belongs to. Every
+ *  tile of one island shares it. Absent = ungrouped. */
+const islandGroupByLabel = new Map<string, string>()
+/** Map<cellLabel, role> — 'header' for a category-title tile, else a question. */
+const islandRoleByLabel = new Map<string, string>()
+
+/** The dashboard island id for a cell ('' if none). Synchronous and O(1) —
+ *  show-cell gathers each island by this id, independent of render order. */
+export function dashboardIslandGroupForLabel(label: string): string {
+  return islandGroupByLabel.get(label) ?? ''
+}
+
+/** The dashboard island role for a cell ('' / 'header'). Synchronous, O(1). */
+export function dashboardIslandRoleForLabel(label: string): string {
+  return islandRoleByLabel.get(label) ?? ''
 }
 
 // ── Overlap metric (the one popularity signal) ────────────────────────
@@ -274,6 +322,18 @@ function groupOf(record: DecorationShape): string | null {
   return typeof group === 'string' && group.length > 0 ? group : null
 }
 
+/** Pull the target path out of a `reference` payload's `{ targetSegments }`.
+ *  Returns `null` when the field is absent/malformed so the caller can skip
+ *  indexing (a reference with no target is meaningless). */
+function targetSegmentsOf(record: DecorationShape): readonly string[] | null {
+  const payload = record.payload
+  const raw = payload && typeof payload === 'object'
+    ? (payload as { targetSegments?: unknown }).targetSegments
+    : undefined
+  if (!Array.isArray(raw)) return null
+  return raw.map(s => String(s)).filter(s => s.length > 0)
+}
+
 function addTag(label: string, name: string, sig: string): void {
   let set = tagsByLabel.get(label)
   if (!set) { set = new Set<string>(); tagsByLabel.set(label, set) }
@@ -315,6 +375,19 @@ function indexRecord(label: string, sig: string, record: DecorationShape): void 
     if (group) launchGroupByLabel.set(label, group)
     else launchGroupByLabel.delete(label)
   }
+  if (kind === DASHBOARD_ISLAND_KIND) {
+    const group = groupOf(record)
+    if (group) islandGroupByLabel.set(label, group)
+    else islandGroupByLabel.delete(label)
+    const role = roleOf(record)
+    if (role) islandRoleByLabel.set(label, role)
+    else islandRoleByLabel.delete(label)
+  }
+  if (kind === REFERENCE_DECORATION_KIND) {
+    const target = targetSegmentsOf(record)
+    if (target) referenceTargetByLabel.set(label, target)
+    else referenceTargetByLabel.delete(label)
+  }
 }
 
 function addKind(label: string, kind: string): void {
@@ -355,6 +428,8 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
     const priorShape = launchShapeByLabel.get(label)
     const priorRole = launchRoleByLabel.get(label)
     const priorGroup = launchGroupByLabel.get(label)
+    const priorIslandGroup = islandGroupByLabel.get(label)
+    const priorIslandRole = islandRoleByLabel.get(label)
     const record = await fetchDecorationRecord(sig)
     if (!record) return
     indexRecord(label, sig, record)
@@ -377,6 +452,15 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
           || launchGroupByLabel.get(label) !== priorGroup)) {
       EffectBus.emit('launch:indexed', { label })
     }
+    // Same first-paint race for dashboard-island tiles: the island id lands
+    // after the bag first rendered (as a plain spiral). Reuse the launch:indexed
+    // nudge — show-cell rebuilds geometry on it regardless of kind — so the
+    // clustered islands appear without waiting for an unrelated render.
+    if (record.kind === DASHBOARD_ISLAND_KIND
+        && (islandGroupByLabel.get(label) !== priorIslandGroup
+          || islandRoleByLabel.get(label) !== priorIslandRole)) {
+      EffectBus.emit('launch:indexed', { label })
+    }
   } else if (payload.op === 'removeSig') {
     const kind = kindBySig.get(sig)
     if (kind) {
@@ -388,6 +472,13 @@ EffectBus.on('decorations:changed', async (payload: DecorationsChangedPayload | 
       launchKeyByLabel.delete(label)
       launchRoleByLabel.delete(label)
       launchGroupByLabel.delete(label)
+    }
+    if (kind === DASHBOARD_ISLAND_KIND) {
+      islandGroupByLabel.delete(label)
+      islandRoleByLabel.delete(label)
+    }
+    if (kind === REFERENCE_DECORATION_KIND) {
+      referenceTargetByLabel.delete(label)
     }
     // A tag's resource is content-addressed and shared across cells, so subtract
     // it from the cell named in THIS event (`label`), using the sig's constant
@@ -464,7 +555,7 @@ async function hydrateLabel(
     // paint). The pre-paint hydration path (ensureDecorationsIndexed) passes
     // nudge=false — nothing is painted yet, so a rebuild request would only
     // queue a redundant second render.
-    if (nudge && launchShapeByLabel.has(label)) EffectBus.emit('launch:indexed', { label })
+    if (nudge && (launchShapeByLabel.has(label) || islandGroupByLabel.has(label))) EffectBus.emit('launch:indexed', { label })
     return tagsByLabel.has(label)
   } catch {
     // Layer unavailable or fetch error — skip this location; another render

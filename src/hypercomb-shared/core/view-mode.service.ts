@@ -30,7 +30,7 @@ const DEFAULT_MODE: ViewMode = 'hexagons'
 // boot: a stale one strands the hive on a blank, body-coloured screen with no
 // page mounted (the "white overlay over all tiles" regression). They are only
 // ever entered live, and fall back to the hexagon canvas across a reload.
-const TRANSIENT_MODES = new Set<ViewMode>(['website'])
+const TRANSIENT_MODES = new Set<ViewMode>(['website', 'home'])
 
 export class ViewModeService extends EventTarget {
   #mode: ViewMode

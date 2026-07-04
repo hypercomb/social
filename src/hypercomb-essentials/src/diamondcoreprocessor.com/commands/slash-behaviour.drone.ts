@@ -402,19 +402,6 @@ class TextOnlyProvider implements SlashBehaviourProvider {
   }
 }
 
-class InstructionsProvider implements SlashBehaviourProvider {
-  readonly name = 'instructions-provider'
-  readonly priority = 100
-  readonly behaviours: SlashBehaviour[] = [
-    { name: 'instructions', description: 'Toggle instruction overlay', descriptionKey: 'slash.instructions',
-      examples: [{ input: '/instructions', result: 'Toggles the instruction overlay' }] }
-  ]
-
-  execute(): void {
-    EffectBus.emit('instruction:toggle', undefined)
-  }
-}
-
 class AtomizeUiProvider implements SlashBehaviourProvider {
   readonly name = 'atomize-ui-provider'
   readonly priority = 100
@@ -495,7 +482,6 @@ _slashBehaviours.addProvider(new ArrangeProvider())
 _slashBehaviours.addProvider(new VoiceProvider())
 _slashBehaviours.addProvider(new PushToTalkProvider())
 _slashBehaviours.addProvider(new TextOnlyProvider())
-_slashBehaviours.addProvider(new InstructionsProvider())
 _slashBehaviours.addProvider(new AtomizeUiProvider())
 _slashBehaviours.addProvider(new DocsProvider())
 _slashBehaviours.addProvider(new DomainProvider())

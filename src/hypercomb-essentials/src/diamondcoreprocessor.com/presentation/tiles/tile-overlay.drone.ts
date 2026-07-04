@@ -7,7 +7,7 @@ import type { HostReadyPayload } from './pixi-host.worker.js'
 import type { Axial, HexDetector } from '../../navigation/hex-detector.js'
 import type { InputGate } from '../../navigation/input-gate.service.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
-import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
+import { hasDecorationKind, referenceTargetForLabel } from '../../commands/decoration-kind-index.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone.js'
 
@@ -1977,7 +1977,9 @@ export class TileOverlayDrone extends Drone {
       return
     }
 
-    if (this.#branchLabels.has(entry.label)) {
+    if (this.#branchLabels.has(entry.label) || referenceTargetForLabel(entry.label) !== null) {
+      // A branch (enter its children) OR a reference tile (portal to its
+      // target). #navigateInto routes references to their pointer.
       this.#navigateInto(entry.label)
     } else {
       // Non-branch tile with no action button hit → default "open" action
@@ -2011,6 +2013,19 @@ export class TileOverlayDrone extends Drone {
   #navigateInto(label: string): void {
     const lineage = this.resolve<{ explorerEnter(name: string): void }>('lineage')
     if (!lineage) return
+
+    // REFERENCE portal: a reference tile is a live pointer to another lineage —
+    // clicking it TRAVELS to that location rather than entering a child. The
+    // target ([] = hive root) is resolved synchronously from the decoration
+    // index (warm by paint time, same guarantee launch:target relies on).
+    const refTarget = referenceTargetForLabel(label)
+    if (refTarget !== null) {
+      this.#clearSelectionOnNavigate()
+      const nav = window.ioc.get<{ goRaw?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
+      nav?.goRaw?.([...refTarget])
+      return
+    }
+
     this.#clearSelectionOnNavigate()
     this.emitEffect('tile:navigate-in', { label })
 

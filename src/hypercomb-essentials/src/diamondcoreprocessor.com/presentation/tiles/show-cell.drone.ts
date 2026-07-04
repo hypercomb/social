@@ -10,7 +10,7 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../gr
 import { isSignature, readCellProperties, writeCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
-import { tagsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, ensureDecorationsIndexed } from '../../commands/decoration-kind-index.js'
+import { tagsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, dashboardIslandGroupForLabel, dashboardIslandRoleForLabel, ensureDecorationsIndexed } from '../../commands/decoration-kind-index.js'
 import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-layout.js'
 import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
@@ -1424,6 +1424,24 @@ export class ShowCellDrone extends Drone {
     })
   }
 
+  /** An atlas slot was reused for different content. If the displaced sig
+   *  belongs to an on-screen cell, its baked UV now points at foreign
+   *  pixels — force a pass so the cell either reloads (loadOne re-queues
+   *  evicted sigs) or falls back to label. Mid-pass evictions are the
+   *  running pass's own loads; it rebuilds geometry itself, so skip. */
+  readonly #onAtlasEvicted = (): void => {
+    if (this.rendering) return
+    const atlas = this.imageAtlas
+    if (!atlas) return
+    for (const c of this.renderedCells.values()) {
+      if (c.imageSig && !atlas.hasImage(c.imageSig) && !atlas.hasFailed(c.imageSig)) {
+        this.#forceNextRender = true
+        this.requestRender()
+        return
+      }
+    }
+  }
+
   /** Fast path for move:preview — skips OPFS/mesh/image loading, only rebuilds geometry with reordered labels */
   private readonly renderMovePreview = (): void => {
     const axial = this.resolve<any>('axial')
@@ -1483,6 +1501,9 @@ export class ShowCellDrone extends Drone {
         // null-tolerant and external tiles don't need a local dir.
         const dir = (await lineage?.explorerDir?.()) ?? null
         await this.loadCellImages(needReload, dir)
+        // Forced — a bare requestRender at an unchanged location is
+        // swallowed by the fast-path skip and the reloads would never paint.
+        this.#forceNextRender = true
         this.requestRender()
       })()
     }
@@ -1617,6 +1638,9 @@ export class ShowCellDrone extends Drone {
         // null-tolerant and external tiles don't need a local dir.
         const dir = (await lineage?.explorerDir?.()) ?? null
         await this.loadCellImages(needReload, dir)
+        // Forced — a bare requestRender at an unchanged location is
+        // swallowed by the fast-path skip and the reloads would never paint.
+        this.#forceNextRender = true
         this.requestRender()
       })()
     }
@@ -2046,15 +2070,21 @@ export class ShowCellDrone extends Drone {
         this.emitEffect('render:cell-count', this.#buildCellCountPayload(cached.cells))
 
         // Background: if any atlas slots were evicted, refill from the
-        // (still-hot) Store resource cache. When new images land, the
-        // shader picks them up by sig — no rerender needed. The refill
+        // (still-hot) Store resource cache, then REPAINT. The repaint is
+        // mandatory: the geometry above just baked hasImage=0 for the
+        // evicted sigs, and the reloads land in FRESH atlas slots which
+        // bump no eviction generation — so without an explicit forced
+        // pass the cells key never changes and the tiles stay label-only
+        // forever (the old "the shader picks them up by sig" assumption
+        // was wrong; UVs live in baked attribute buffers). The refill
         // runs even when cachedDir is null: substrate images live in
         // __resources__ keyed by signature, so loadCellImages only needs
-        // the dir for tags/link reads (already null-tolerant). Without
-        // this, sub-layer tiles whose atlas slot got displaced by other
-        // layers' loads while the user was away never re-paint.
+        // the dir for tags/link reads (already null-tolerant).
         if (evictedSigs.length > 0) {
-          void this.loadCellImages(cached.cells, cachedDir ?? null)
+          void this.loadCellImages(cached.cells, cachedDir ?? null).then(() => {
+            this.#forceNextRender = true
+            this.requestRender()
+          })
         }
 
         // background: refresh cursor for undo/redo readiness. Renderer
@@ -3016,9 +3046,15 @@ export class ShowCellDrone extends Drone {
    *  No-op off `agg-` pages and when the hexagon toggle forces plain hexes;
    *  the index's per-label memo makes repeat calls synchronous no-ops. */
   #ensureLaunchShapes = async (cells: readonly Cell[]): Promise<void> => {
-    if (this.#launcherHexagons || cells.length === 0) return
+    if (cells.length === 0) return
     const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
-    if (!isLauncherLocation(segs)) return
+    const launcher = isLauncherLocation(segs)
+    const dashboard = !launcher && this.#inDashboardBag()
+    if (!launcher && !dashboard) return
+    // The hexagon toggle forces plain hexes on LAUNCHER pages only — in that mode
+    // there are no silhouettes to pre-index. The dashboard always needs its island
+    // metadata pre-indexed so the clusters paint on the first frame.
+    if (launcher && this.#launcherHexagons) return
     await ensureDecorationsIndexed(cells.map(c => c.label), segs).catch(() => { /* best effort */ })
   }
 
@@ -3717,6 +3753,15 @@ export class ShowCellDrone extends Drone {
     // respond to processor-emitted synchronize and URL navigation
     window.addEventListener('synchronize', this.requestRender)
     window.addEventListener('navigate', this.requestRender)
+
+    // Atlas ring eviction — a sig referenced by an ON-SCREEN cell can lose
+    // its pixels with no render pass in flight (substrate preheat, detached
+    // refills wrapping the ring). The baked UV then samples whatever image
+    // took over the slot — the tile shows WRONG pixels — until something
+    // else invalidates. Repaint only when a rendered cell is actually
+    // affected; mid-pass evictions are skipped because the running pass
+    // rebuilds geometry itself.
+    window.addEventListener('hex-image-atlas:evicted', this.#onAtlasEvicted)
 
     // Lineage 'change' is the canonical "the user's explorerPath
     // changed" signal — fired by every code path that mutates the
@@ -4672,6 +4717,7 @@ export class ShowCellDrone extends Drone {
   protected override dispose = (): void => {
     window.removeEventListener('synchronize', this.requestRender)
     window.removeEventListener('navigate', this.requestRender)
+    window.removeEventListener('hex-image-atlas:evicted', this.#onAtlasEvicted)
 
     if (this.#newCellFadeRaf) {
       cancelAnimationFrame(this.#newCellFadeRaf)
@@ -5447,35 +5493,50 @@ export class ShowCellDrone extends Drone {
     } catch { /* swarm not ready — no glow */ }
   }
 
-  /** Cluster-island coordinates for an ORDERED launcher page (help), or null
-   *  to fall through to the normal spiral. Engages only on a launcher page and
-   *  only once at least one cell carries the `header` role — so /games,
-   *  /websites, /dashboard and every hive page keep the spiral untouched.
+  /** True when the participant is standing inside the dashboard bag (the
+   *  hidden `dash-*` lineage the toggle opens). Resolved through IoC — the
+   *  dashboard is essentials, but a load-order-safe read (never an import). */
+  #inDashboardBag = (): boolean => {
+    const bee = (window as any).ioc?.get?.('@diamondcoreprocessor.com/DashboardBee') as { isActive?: () => boolean } | undefined
+    return bee?.isActive?.() === true
+  }
+
+  /** Cluster-island coordinates for an ORDERED launcher page (help) OR the
+   *  dashboard bag (questions grouped by category), or null to fall through to
+   *  the normal spiral. Engages only once at least one cell carries the `header`
+   *  role — so /games, /websites and every hive page keep the spiral untouched.
    *  Keyed by LABEL (islands are placed by identity, not index). Also returns
    *  the header labels for the title-tile border tint. */
   #launcherClusterCoords = (names: string[]): { coords: Map<string, { q: number; r: number }>; headers: Set<string> } | null => {
     const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
-    if (!isLauncherLocation(segs)) return null
+    const launcher = isLauncherLocation(segs)
+    const dashboard = !launcher && this.#inDashboardBag()
+    if (!launcher && !dashboard) return null
 
-    // Gather each island by its GROUP id (carried per tile in the launch:target
-    // decoration), NOT by render order — a slot system re-sorts `names`, so a
-    // position-delimited walk would scatter an island's tiles across the field.
-    // Each island's header is its role:'header' tile; islands order by the id's
-    // trailing digits.
+    // The island id + header role live on each tile's decoration — `launch:target`
+    // for launcher pages, `dashboard-island` for the dashboard bag. Same layout
+    // engine, different metadata source.
+    const groupOf = dashboard ? dashboardIslandGroupForLabel : launchGroupForLabel
+    const roleOf = dashboard ? dashboardIslandRoleForLabel : launchRoleForLabel
+
+    // Gather each island by its GROUP id (carried per tile in the decoration),
+    // NOT by render order — a slot system re-sorts `names`, so a position-delimited
+    // walk would scatter an island's tiles across the field. Each island's header
+    // is its role:'header' tile; islands order by the id's trailing digits.
     const headers = new Set<string>()
     const byGroup = new Map<string, { header: string | null; actions: string[]; ord: number }>()
     for (const label of names) {
       if (!label) continue
-      const g = launchGroupForLabel(label)
+      const g = groupOf(label)
       if (!g) continue
       let bucket = byGroup.get(g)
       if (!bucket) { bucket = { header: null, actions: [], ord: parseInt(g.replace(/\D/g, ''), 10) || 0 }; byGroup.set(g, bucket) }
-      if (launchRoleForLabel(label) === 'header') { bucket.header = label; headers.add(label) }
+      if (roleOf(label) === 'header') { bucket.header = label; headers.add(label) }
       else bucket.actions.push(label)
     }
     // Nothing grouped yet (cold hydration) or a non-clustered launcher page
-    // (games/websites/dashboard): keep the spiral. A late-hydrating group
-    // re-renders via the `launch:indexed` nudge.
+    // (games/websites): keep the spiral. A late-hydrating group re-renders via
+    // the `launch:indexed` nudge.
     if (byGroup.size === 0) return null
     const groups: ClusterGroup[] = [...byGroup.values()].sort((a, b) => a.ord - b.ord)
     return { coords: launcherClusterLayout(groups), headers }
@@ -5562,8 +5623,12 @@ export class ShowCellDrone extends Drone {
           if (!blob) return // not yet delivered — egg; retried after the miss TTL
           // Bytes landed (memory + OPFS write-through). Drop the label's
           // cached derivation so the next pass re-derives from fresh
-          // bytes, then schedule that pass.
+          // bytes, then schedule that pass. The force is required — a
+          // bare requestRender is a no-op at an unchanged location
+          // (fast-path skip on renderedCellsKey), so the landed bytes
+          // would never paint until an unrelated invalidation.
           if (label) this.cellImageCache.delete(label)
+          this.#forceNextRender = true
           this.requestRender()
         } catch { /* bounded by the Store's miss cache */ }
         finally { this.#hostFillInFlight.delete(sig) }
@@ -5859,7 +5924,17 @@ export class ShowCellDrone extends Drone {
     // their fresh slots (the superimposed-labels-after-screensaver bug).
     const labelGen = this.atlas?.evictionGeneration ?? 0
     let s = `p${this.#pivot ? 1 : 0}f${this.#flat ? 1 : 0}g${atlasGen}L${labelGen}|`
-    for (const c of cells) s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${c.hasBranch ? 1 : 0}:${c.divergence ?? 0}:${c.hideText ? 1 : 0}:${c.unshared ? 1 : 0}|`
+    // Fold in whether each cell's image is CURRENTLY resolvable in the
+    // atlas. The sig alone is not enough: an image that arrives late (host
+    // fill, back-nav refill, eviction reload) lands in a FRESH slot, which
+    // bumps no eviction generation — without this bit the key stays
+    // identical and applyGeometry skips the rebuild, leaving hasImage=0
+    // baked in the buffer forever (tile renders label-only although the
+    // atlas holds its image).
+    for (const c of cells) {
+      const ia = c.imageSig && this.imageAtlas?.hasImage(c.imageSig) ? 1 : 0
+      s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${ia}:${c.hasBranch ? 1 : 0}:${c.divergence ?? 0}:${c.hideText ? 1 : 0}:${c.unshared ? 1 : 0}|`
+    }
     return s
   }
 
