@@ -27,16 +27,21 @@
 // channel-fed loop. With the gate off it never commits to the hive, so a
 // hot-reload into a running session changes nothing.
 
-import { Drone, normalizeCell } from '@hypercomb/core'
+import { Drone, EffectBus, normalizeCell } from '@hypercomb/core'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const COMMITTER_KEY = '@diamondcoreprocessor.com/LayerCommitter'
 const DASHBOARD_BEE_KEY = '@diamondcoreprocessor.com/DashboardBee'
+const NAV_KEY = '@hypercomb.social/Navigation'
 
 const ENABLED_KEY = 'hc:feedback-channel:enabled'
 const FEEDBACK_CHANNEL_KEY = '@diamondcoreprocessor.com/FeedbackChannelDrone'
 const BINDING_KIND = 'dashboard-q-binding'
+// Per-tile decoration that groups a question/header tile into a category island.
+// Read by show-cell (dashboardIslandGroupForLabel/RoleForLabel) to lay the bag
+// out as clustered islands — NOT `launch:target`, which would hijack the click.
+const ISLAND_KIND = 'dashboard-island'
 const REBUILD_DEBOUNCE_MS = 600
 
 type OpenQ = { qId: string; question: string; path: string[]; sig: string }
@@ -47,9 +52,12 @@ interface StoreLike {
   getOptimization?: (sig: string) => Promise<Blob | null>
   putOptimization?: (blob: Blob, options?: { emit?: boolean }) => Promise<string>
   removeOptimization?: (sig: string) => Promise<boolean>
+  putResource?: (blob: Blob) => Promise<string>
 }
 interface HistoryLike {
   currentLayerAt: (locationSig: string) => Promise<Record<string, unknown> | null>
+  sign?: (lineage: { explorerSegments: () => readonly string[] }) => Promise<string>
+  commitLayer?: (locationSig: string, layer: { name?: string; [slot: string]: unknown }) => Promise<string>
 }
 interface CommitterLike {
   update: (segments: readonly string[], layer: { name?: string; [slot: string]: unknown }, nameSlots?: ReadonlySet<string>) => Promise<string>
@@ -57,7 +65,9 @@ interface CommitterLike {
 interface DashboardBeeLike {
   listPinnedBags: () => readonly Bag[]
   createDashboardForCurrentLocation?: () => Promise<Bag | null>
+  isActive?: () => boolean
 }
+interface NavigationLike { goRaw?: (segments: readonly string[]) => void }
 
 const ioc = () => (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
 const enc = new TextEncoder()
@@ -131,33 +141,96 @@ export class DashboardProducerDrone extends Drone {
       }
       if (!bag || !bag.bagSegments?.length) return  // nothing pinned + nothing to render
 
-      // 2) one normalized child label per open Q — last path segment, numbered
-      //    on collision so every label is unique (same algorithm as the script)
-      const labels: string[] = []
-      const counts = new Map<string, number>()
-      const byLabel: Array<{ label: string; q: OpenQ }> = []
+      // 2) group open questions into ISLANDS by category — the root of each
+      //    question's path (games, websites, feedback, …); a path-less question
+      //    is 'general'. Categories keep first-seen order so islands are stable.
+      const catOrder: string[] = []
+      const byCat = new Map<string, OpenQ[]>()
       for (const q of open) {
-        const base = normalizeCell((q.path.length ? q.path[q.path.length - 1] : 'root') || 'q') || 'q'
-        const n = (counts.get(base) ?? 0) + 1
-        counts.set(base, n)
-        const label = n === 1 ? base : `${base}-${n}`
-        labels.push(label)
-        byLabel.push({ label, q })
+        const cat = normalizeCell((q.path.length ? q.path[0] : 'general') || 'general') || 'general'
+        let arr = byCat.get(cat)
+        if (!arr) { arr = []; byCat.set(cat, arr); catOrder.push(cat) }
+        arr.push(q)
       }
 
-      // 3) replace the bag's children — committer.update replaces the slot set,
-      //    so preserve every OTHER array slot (context, etc.) to avoid wiping it
+      // Allocate a UNIQUE label per tile across the whole bag: one category
+      // HEADER tile per island + one tile per question. Build the island-ordered
+      // child list, the per-tile island metadata, and the (label → question)
+      // list the bindings need (questions only — headers open nothing).
+      const used = new Set<string>()
+      const uniq = (base: string): string => {
+        const b = normalizeCell(base || 'q') || 'q'
+        let label = b, n = 1
+        while (used.has(label)) label = `${b}-${++n}`
+        used.add(label)
+        return label
+      }
+      const orderedLabels: string[] = []
+      const tiles: Array<{ label: string; role: 'header' | 'question'; island: string; category?: string }> = []
+      const byLabel: Array<{ label: string; q: OpenQ }> = []
+      catOrder.forEach((cat, i) => {
+        const island = `island-${i}`
+        const headerLabel = uniq(cat)
+        orderedLabels.push(headerLabel)
+        tiles.push({ label: headerLabel, role: 'header', island, category: cat })
+        for (const q of byCat.get(cat) ?? []) {
+          const base = q.path.length ? q.path[q.path.length - 1] : 'q'
+          const label = uniq(base)
+          orderedLabels.push(label)
+          tiles.push({ label, role: 'question', island })
+          byLabel.push({ label, q })
+        }
+      })
+
+      // 3) commit each tile's OWN layer carrying a `dashboard-island` decoration
+      //    (island id + role). Direct put-resource + commitLayer so the child head
+      //    the bag links below already carries the decoration — the same
+      //    deterministic pattern MixedGroupBag uses for launcher tiles, avoiding
+      //    the empty-marker race a DecorationService request would hit. The emit
+      //    warms the decoration-kind index (and nudges show-cell to cluster) when
+      //    the host is already looking at the bag. Best-effort: if this store lacks
+      //    putResource, tiles still render — just unclustered.
+      if (store.putResource && history.sign && history.commitLayer) {
+        for (const t of tiles) {
+          try {
+            const record = { kind: ISLAND_KIND, appliesTo: [], payload: { role: t.role, group: t.island, ...(t.category ? { category: t.category } : {}) } }
+            const decoSig = await store.putResource(new Blob([JSON.stringify(record)], { type: 'application/json' }))
+            const childSegs = [...bag.bagSegments, t.label]
+            const childLocSig = await history.sign({ explorerSegments: () => childSegs })
+            await history.commitLayer(childLocSig, { name: t.label, decorations: [decoSig] })
+            EffectBus.emit('decorations:changed', { segments: childSegs, op: 'append', sig: decoSig })
+          } catch { /* fall through — the tile still renders, just unclustered */ }
+        }
+      }
+
+      // 4) replace the bag's children with the island-ordered labels —
+      //    committer.update re-resolves each label to its (decoration-carrying)
+      //    head. Preserve every OTHER array slot (context, etc.) to avoid wiping it.
       const cur = (await history.currentLayerAt(bag.bagLocSig)) ?? {}
       const payload: { name?: string; [slot: string]: unknown } = { name: String(bag.bagSegments[0]) }
       for (const [k, v] of Object.entries(cur)) {
         if (k === 'name' || k === 'children') continue
         if (Array.isArray(v)) payload[k] = v
       }
-      payload['children'] = labels
+      const prevChildren = Array.isArray(cur['children']) ? (cur['children'] as unknown[]).map(String) : []
+      const changed = prevChildren.length !== orderedLabels.length || prevChildren.some((c, i) => c !== orderedLabels[i])
+      payload['children'] = orderedLabels
       await committer.update(bag.bagSegments, payload)
 
       // 4) bag-scoped bindings: prune the old set, write the current one
       await this.#rewriteBindings(store, bag.bagSegments, byLabel)
+
+      // 5) REAL-TIME: if the host is looking at the dashboard right now, force the
+      //    hex view to re-read the layer so a newly-arrived question (or a drained
+      //    one) shows LIVE — no reload. The render pipeline only re-renders on nav
+      //    or the processor's `synchronize` (which only the processor may
+      //    dispatch), so re-navigate to the current bag — the established
+      //    "force re-read" pattern (show-cell.drone uses the same goRaw). Guarded
+      //    on an actual child-set change so a stream of ingests doesn't churn the
+      //    viewport when nothing visible changed.
+      if (changed && bee.isActive?.()) {
+        ioc()?.get<NavigationLike>(NAV_KEY)?.goRaw?.(bag.bagSegments)
+      }
     } finally {
       this.#rebuilding = false
     }

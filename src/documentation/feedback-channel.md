@@ -53,37 +53,34 @@ hard problem of distributed deletion entirely.
 
 ## Identity and the channel address
 
-The channel belongs to a **host** (a domain like `jwize.com`), **not** to any one
-browser's ephemeral key. Its address is derived from the host domain:
+The channel is a **single fixed rendezvous** for the whole community — **not** tied
+to any browser's ephemeral key or per-origin self-domain. Its address:
 
 ```
-channelId = sha256("hc:feedback-channel\0" + <hostDomain>)
+channelId = sha256("hc:feedback-channel\0" + <canonicalHost>)
 ```
 
-- `hostDomain` is `localStorage['hc:nostrmesh:self-domain']` — the canonical host
-  identity `runtime-initializer.ts` seeds from the page origin on a real host, or
-  `DEV_DEFAULT_HOST` (`jwize.com`) on loopback. So the owner's app on **any** origin
-  or device, a granted visitor's host, and the loop routine (which runs on
-  `localhost:4250` but whose self-domain is also `jwize.com`) all derive the **same**
-  channel id with **no key exchange**. This is what makes "the host receives all
-  feedback for all messages" hold regardless of which OPFS submitted it. It also
-  replaces the old per-owner-pubkey derivation, which silently diverged because
-  `NostrSigner` mints a fresh random key per browser profile — so the owner and a
-  headless routine never met.
-- `localStorage['hc:feedback-channel:id']` (an explicit 64-hex id) still overrides
-  the derivation when you need to target a specific channel; the own-pubkey
-  derivation remains only as a fallback for a bare local dev with no host set.
+- `canonicalHost` is a FIXED constant (`CANONICAL_FEEDBACK_HOST = 'hypercomb.io'`),
+  overridable via `localStorage['hc:feedback-channel:host']`. Because it is fixed,
+  every participant, the host, and the routine compute the **identical** channel id
+  regardless of which origin loaded the app (hypercomb.io, localhost, a preview
+  deploy…) — so all feedback converges to one place with **no key exchange and no
+  origin-matching**. It is a rendezvous LABEL, not a fetch target; the transport is
+  still the `wss://jwize.com` relay. (This replaces two earlier designs that each
+  silently diverged: per-owner-pubkey — `NostrSigner` mints a random key per
+  profile — and per-origin `self-domain` — participants on hypercomb.io and a
+  routine defaulting to jwize.com never met.)
+- `localStorage['hc:feedback-channel:id']` (an explicit 64-hex id) overrides the
+  derivation entirely when you need to target a specific channel.
 
-`channelId` is the mesh `x`-tag both sides subscribe to. The relay returns every
-author's events for that tag; each side filters by the optimization `kind` it
-cares about.
+`channelId` is the mesh `x`-tag. The relay returns every author's events for that
+tag; each side filters by the optimization `kind` it cares about.
 
-> **Multi-tenant note.** A host-domain-scoped channel means everyone using that
-> host shares one feedback channel — correct for a single-owner host like
-> jwize.com (feedback from every device and every granted visitor converges to the
-> owner + routine). If a host ever serves *independent* owners who must not see one
-> another's feedback, scope the channel per-owner (derive from the owner pubkey or a
-> per-owner salt) and gate the SUBSCRIBE side to the owner. Not needed today.
+> **Who receives.** The channel is public-by-derivation (anyone who knows the
+> canonical host can compute it), but the ROLES keep it clean: participants only
+> PUBLISH their own feedback, and only the host + routine SUBSCRIBE/ingest (see the
+> two-role gate below). So a fixed community channel does **not** mean everyone sees
+> everyone's feedback — only the host and its routine aggregate.
 
 ## Transport (v1 — relay-backed)
 
@@ -118,69 +115,75 @@ be recovered (HTTP GET). v1 logs such a gap rather than pretending to heal it.
 
 ## Store-and-forward (the "jwize.com is down" requirement)
 
-Every published item is also written to a durable local outbox:
+The substrate already holds every record's bytes — `putOptimization` wrote
+them, and that write is what fires `optimization:wrote`. So the durable outbox
+is **bookkeeping only**: a pending map in localStorage, never an OPFS folder
+(typed folders are banned — signature pools are the only structure, see
+`sign-meaning-pool-migration-plan.md`):
 
 ```
-__feedback_outbox__/<itemSig>     ← raw JSON text, survives offline + restart
+localStorage['hc:feedback-channel:pending'] = { "<itemSig>": <firstAttemptMs>, … }
 ```
 
-- On submit: write the outbox file, then publish the ITEM event.
-- An item is removed from the outbox only on a **confirmed read-back** — the
-  relay actually serving it back to us — never a bare send-ok (host-sync's
-  discipline). The subtlety: `relay.js` does **not** echo a publisher's own
-  event back to it live (`broadcast(evt, client.ws)` excludes the sending
-  socket), so a long-lived subscription never re-sees what it published. The
-  drain therefore issues a one-shot **read-back query** (`mesh.query` — a fresh
-  REQ on a transient subId that makes the relay replay its STORED matching
-  events, including ours) and clears any outbox item the relay returns from a
-  non-`local` relay.
-- On a periodic timer (30s) the drain runs: (1) re-publish every pending item —
-  this refreshes each event's `created_at` so the read-back REQ's 15-minute
-  `since` window returns it, and is the reconnect flush (NIP-33 replace makes
-  it idempotent); then (2) the read-back query clears confirmed items. A public
-  `drain()` exposes an immediate flush. `feedback:channel-receipt` is emitted
-  per cleared item.
-- A backstop age-sweep drops outbox entries older than 24h (with a warning) so
-  a never-reachable relay can't grow the queue without bound.
+(An earlier build persisted a `__feedback_outbox__/` folder; the drone absorbs
+any leftover entries into the pending map and deletes that folder on sight.)
 
-So if jwize.com is down when feedback is submitted, the item rests in the
-outbox and is posted the instant the relay reconnects — and because the loop
-re-reads the channel each cycle, the next routine iteration picks it up and
-continues the improvement loop. Nothing is fire-and-forget.
+- On submit: record the sig in the pending map, then publish the ITEM event.
+- A sig leaves the pending map only on a **confirmed read-back** — the
+  relay actually serving the item back to us — never a bare send-ok
+  (host-sync's discipline). The subtlety: `relay.js` does **not** echo a
+  publisher's own event back to it live (`broadcast(evt, client.ws)` excludes
+  the sending socket), so a long-lived subscription never re-sees what it
+  published. The drain therefore issues a one-shot **read-back query**
+  (`mesh.query` — a fresh REQ on a transient subId that makes the relay replay
+  its STORED matching events, including ours) and clears any pending item the
+  relay returns from a non-`local` relay.
+- On a periodic timer (30s) the drain runs: (1) re-read each pending sig's
+  bytes from the substrate and re-publish — this refreshes each event's
+  `created_at` so the read-back REQ's 15-minute `since` window returns it, and
+  is the reconnect flush (NIP-33 replace makes it idempotent); then (2) the
+  read-back query clears confirmed items. A public `drain()` exposes an
+  immediate flush. `feedback:channel-receipt` is emitted per cleared item.
+- A backstop age-sweep drops pending entries older than 24h (with a warning) so
+  a never-reachable relay can't grow the queue without bound. A record retired
+  locally (resolved/removed) while still pending drops out too — there is
+  nothing left to sync.
+
+So if jwize.com is down when feedback is submitted, the sig rests in the
+pending map and the bytes are republished from the substrate the instant the
+relay reconnects — and because the loop re-reads the channel each cycle, the
+next routine iteration picks it up and continues the improvement loop. Nothing
+is fire-and-forget.
 
 ## The drone
 
 `FeedbackChannelDrone` (`diamondcoreprocessor.com/sharing/feedback-channel.drone.ts`)
-owns the whole concern. The enable gate is **owner-default-on**:
+owns the whole concern. It has **two roles**, keyed off one flag
+(`hc:feedback-channel:enabled`) plus owner/visitor context:
 
-```
-localStorage['hc:feedback-channel:enabled']            // unset ⇒ ON for the owner on
-                                                       //   their own hive, OFF for a
-                                                       //   visitor of another hive
-localStorage['hc:feedback-channel:enabled'] = 'true'   // force-on (routine, dev opt-in)
-localStorage['hc:feedback-channel:enabled'] = 'false'  // force-off (dev opt-out)
-```
+- **CONTRIBUTE** (publish MY feedback to the host) — default ON on your own hive;
+  a visitor of another hive uses the consent handshake (`FeedbackSwarmDrone`)
+  instead; explicit `…enabled='false'` opts out. Publishing only happens when a
+  `feedback`/`qa`/`qa-answer` record is actually written, so a dev hot-reload sends
+  nothing. Owner vs visitor is read from `SwarmDrone.subscribedTo()` (the host
+  pubkey we're a visitor of; null on our own hive).
+- **HOST** (subscribe + ingest + render the aggregated dashboard) — OFF unless
+  `…enabled='true'` (you + the routine; `/feedback-host on` sets it). So a
+  participant PUBLISHES their feedback but never INGESTS anyone else's — only the
+  host and its routine aggregate. `DashboardProducerDrone` reads the same host gate
+  (renders only for the host) and lazily mints the dashboard bag on the first
+  arriving question.
 
-Owner vs visitor is read from `SwarmDrone.subscribedTo()` (the host pubkey we're a
-visitor of; null on our own hive). So submitting feedback on your own hive always
-crosses and returned qa always renders — with no hidden flag a normal user would
-never set — while a visitor's feedback rides the consent handshake
-(`FeedbackSwarmDrone`) instead. A dev hot-reload still publishes nothing on its own,
-because publishing only happens when a `feedback`/`qa`/`qa-answer` record is actually
-written. `DashboardProducerDrone` reads the same effective gate, so the render side
-follows automatically (and lazily mints the dashboard bag on the first arriving
-question).
-
-When enabled it:
+When in a role it:
 
 1. Subscribes `optimization:wrote` (emitted by `Store.putOptimization` for the
-   three syncable kinds) → write outbox + publish ITEM.
+   three syncable kinds) → record the sig in the pending map + publish ITEM.
 2. Subscribes the channel (`mesh.subscribe(channelId)`) → on any peer ITEM
    event: if we don't already hold the sig, verify `s` against `sha256(t)` and
    `putOptimization(blob([t]), {emit:false})` into local `__optimization__`.
-   (A live real-relay echo of our own item also clears the outbox here, but
-   most relays don't echo to the sender — the drain's read-back query above is
-   the reliable receipt.)
+   (A live real-relay echo of our own item also clears its pending entry here,
+   but most relays don't echo to the sender — the drain's read-back query above
+   is the reliable receipt.)
 3. Emits `feedback:channel-state` (`{ pending, ingested }`) for UI/telemetry.
 
 Both the owner browser and the routine renderer run the same drone; the only
@@ -242,9 +245,9 @@ a nav-away/back or reload (until then, re-open the toggle to refresh).
    lands on the relay (a raw `REQ {"#x":[channelId],"kinds":[30213]}` on
    `wss://jwize.com`) → run one feedback-loop cycle in the routine → confirm a `qa`
    ITEM comes back and the dashboard shows the card.
-5. Down-test: stop the relay, submit feedback, confirm it rests in
-   `__feedback_outbox__/`; restart the relay, confirm it auto-posts and the routine
-   picks it up next cycle.
+5. Down-test: stop the relay, submit feedback, confirm its sig rests in
+   `localStorage['hc:feedback-channel:pending']`; restart the relay, confirm it
+   auto-posts and the routine picks it up next cycle.
 6. Visitor path: a granted visitor's post now carries a 7-day expiration and a unique
    d-tag, so it survives on the relay until the host is next online (no more
    90-second loss window); the host ingests it idempotently (content-addressed).

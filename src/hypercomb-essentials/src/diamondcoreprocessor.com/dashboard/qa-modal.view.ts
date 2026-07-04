@@ -21,6 +21,11 @@
 // ViewMode (hexagons OR website). The user is in hexagons mode the
 // majority of the time — that's why the inline `/dashboard` HTML
 // cards can't be the only answer surface.
+//
+// LOOK: cold / clean chrome — steel accent (126,182,214), a glass
+// backdrop, no warm highlights, gentle scale-in. The question's
+// category (its qPath root) surfaces as an indicator pill, echoing
+// the dashboard's island grouping.
 
 import { EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 
@@ -36,6 +41,11 @@ type StoreLike = {
   removeOptimization?(sig: string): Promise<boolean>
 }
 
+const STYLE_ID = 'hc-qa-modal-styles'
+
+/** Steel chrome accent, shared with the rest of the cold UI. */
+const STEEL = '126, 182, 214'
+
 export class QaModalView extends EventTarget {
   #overlay: HTMLDivElement | null = null
   #current: QaBindingPayload | null = null
@@ -45,196 +55,115 @@ export class QaModalView extends EventTarget {
     if (this.#overlay) this.close()
     this.#current = binding
     this.#onAfterCommit = onAfterCommit ?? null
+    this.#ensureStyles()
+
+    const i18n = (window as any).ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined
 
     const overlay = document.createElement('div')
+    overlay.className = 'hc-qa'
     overlay.setAttribute('data-hc-qa-modal', '')
-    Object.assign(overlay.style, {
-      position: 'fixed',
-      inset: '0',
-      zIndex: '60000',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      opacity: '0',
-      transition: 'opacity 180ms ease',
-    } as CSSStyleDeclaration)
 
     const backdrop = document.createElement('div')
-    Object.assign(backdrop.style, {
-      position: 'absolute',
-      inset: '0',
-      background: 'rgba(0, 0, 0, 0.55)',
-      cursor: 'pointer',
-    } as CSSStyleDeclaration)
+    backdrop.className = 'hc-qa__backdrop'
     backdrop.addEventListener('click', () => this.close())
     overlay.appendChild(backdrop)
 
     const dialog = document.createElement('div')
+    dialog.className = 'hc-qa__dialog'
     dialog.setAttribute('role', 'dialog')
     dialog.setAttribute('aria-modal', 'true')
-    Object.assign(dialog.style, {
-      position: 'relative',
-      width: 'min(640px, 92vw)',
-      maxHeight: '82vh',
-      padding: '1.4rem 1.4rem 1.1rem',
-      background: '#1c1c20',
-      color: '#eaeaea',
-      border: '1px solid rgba(255,255,255,0.12)',
-      borderRadius: '12px',
-      boxShadow: '0 18px 48px rgba(0,0,0,0.55)',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '0.85rem',
-      font: '14px/1.45 Inter, system-ui, sans-serif',
-    } as CSSStyleDeclaration)
     dialog.addEventListener('click', (e) => e.stopPropagation())
 
     const closeBtn = document.createElement('button')
     closeBtn.type = 'button'
+    closeBtn.className = 'hc-qa__close'
     closeBtn.setAttribute('aria-label', 'close')
     closeBtn.textContent = '×'
-    Object.assign(closeBtn.style, {
-      position: 'absolute',
-      top: '0.4rem',
-      right: '0.55rem',
-      width: '2rem',
-      height: '2rem',
-      border: 'none',
-      background: 'transparent',
-      color: '#eaeaea',
-      fontSize: '1.4rem',
-      lineHeight: '1',
-      cursor: 'pointer',
-      opacity: '0.7',
-    } as CSSStyleDeclaration)
     closeBtn.addEventListener('click', () => this.close())
     dialog.appendChild(closeBtn)
 
-    // Source row: the tile this question belongs to, plus quick-nav icons so a
-    // host reviewing the question can jump straight to that tile's layer (or
-    // open it in a new window) for context without losing the dashboard.
-    const sourceRow = document.createElement('div')
-    Object.assign(sourceRow.style, {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.45rem',
-      fontSize: '0.78rem',
-      opacity: '0.7',
-      letterSpacing: '0.04em',
-    } as CSSStyleDeclaration)
+    // ── header: category pill + source path + quick-nav ─────────────────
+    const header = document.createElement('div')
+    header.className = 'hc-qa__header'
+
+    // The question's category = the root of its path (games / websites /
+    // feedback …) — the same key the dashboard groups islands by. A
+    // path-less question is a general one.
+    const category = binding.qPath.length ? String(binding.qPath[0]) : 'general'
+    const pill = document.createElement('span')
+    pill.className = 'hc-qa__pill'
+    pill.textContent = category
+    header.appendChild(pill)
+
     const sourceLabel = document.createElement('span')
+    sourceLabel.className = 'hc-qa__source'
     sourceLabel.textContent = binding.qPath.length === 0 ? '/' : '/' + binding.qPath.join('/')
-    Object.assign(sourceLabel.style, {
-      flex: '1',
-      overflow: 'hidden',
-      textOverflow: 'ellipsis',
-      whiteSpace: 'nowrap',
-    } as CSSStyleDeclaration)
-    sourceRow.appendChild(sourceLabel)
+    sourceLabel.title = sourceLabel.textContent
+    header.appendChild(sourceLabel)
 
     const routeOf = (segs: readonly string[]): string =>
       location.origin + '/' + segs.map(s => encodeURIComponent(String(s))).join('/')
     const mkNav = (label: string, title: string, onClick: () => void): HTMLButtonElement => {
       const b = document.createElement('button')
       b.type = 'button'
+      b.className = 'hc-qa__nav'
       b.textContent = label
       b.title = title
-      Object.assign(b.style, {
-        flex: '0 0 auto',
-        border: '1px solid rgba(255,255,255,0.16)',
-        background: 'rgba(255,255,255,0.04)',
-        color: '#eaeaea',
-        borderRadius: '5px',
-        padding: '0.14rem 0.45rem',
-        fontSize: '0.82rem',
-        lineHeight: '1',
-        cursor: 'pointer',
-        opacity: '0.85',
-      } as CSSStyleDeclaration)
-      b.addEventListener('mouseenter', () => { b.style.opacity = '1'; b.style.background = 'rgba(110,180,255,0.18)' })
-      b.addEventListener('mouseleave', () => { b.style.opacity = '0.85'; b.style.background = 'rgba(255,255,255,0.04)' })
       b.addEventListener('click', (e) => { e.stopPropagation(); onClick() })
       return b
     }
     if (binding.qPath.length > 0) {
-      sourceRow.appendChild(mkNav('→ tile', 'Go to this tile', () => {
+      header.appendChild(mkNav('→ tile', 'Go to this tile', () => {
         const nav = get<{ goRaw?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
         nav?.goRaw?.(binding.qPath)
         this.close()
       }))
-      sourceRow.appendChild(mkNav('↗', 'Open this tile in a new window', () => {
+      header.appendChild(mkNav('↗', 'Open this tile in a new window', () => {
         window.open(routeOf(binding.qPath), '_blank', 'noopener')
       }))
     }
-    dialog.appendChild(sourceRow)
+    dialog.appendChild(header)
 
+    // ── the question ────────────────────────────────────────────────────
     const question = document.createElement('div')
+    question.className = 'hc-qa__question'
     question.textContent = binding.question
-    Object.assign(question.style, {
-      fontSize: '1.02rem',
-      lineHeight: '1.5',
-      padding: '0.65rem 0.8rem',
-      background: 'rgba(255, 225, 74, 0.12)',
-      border: '1px solid rgba(255, 225, 74, 0.28)',
-      borderLeftWidth: '3px',
-      borderRadius: '4px 6px 6px 4px',
-      whiteSpace: 'pre-wrap',
-    } as CSSStyleDeclaration)
     dialog.appendChild(question)
 
+    // ── answer ──────────────────────────────────────────────────────────
     const input = document.createElement('textarea')
-    const i18n = (window as any).ioc?.get?.(I18N_IOC_KEY) as I18nProvider | undefined
+    input.className = 'hc-qa__input'
     input.placeholder = i18n?.t('dashboard.answer.placeholder') ?? 'type your answer…'
     input.rows = 4
-    Object.assign(input.style, {
-      width: '100%',
-      resize: 'vertical',
-      padding: '0.55rem 0.7rem',
-      background: 'rgba(0,0,0,0.22)',
-      color: 'inherit',
-      border: '1px solid rgba(255,255,255,0.1)',
-      borderRadius: '6px',
-      font: 'inherit',
-      lineHeight: '1.45',
-      boxSizing: 'border-box',
-    } as CSSStyleDeclaration)
     dialog.appendChild(input)
 
+    // ── footer: keyboard hint + Done ────────────────────────────────────
     const status = document.createElement('div')
-    Object.assign(status.style, {
-      minHeight: '1.1em',
-      fontSize: '0.78rem',
-      opacity: '0.75',
-    } as CSSStyleDeclaration)
-    dialog.appendChild(status)
+    status.className = 'hc-qa__status'
+    const isMac = /Mac|iP(hone|ad)/.test(navigator.platform)
+    const submitHint = (isMac ? '⌘' : 'Ctrl') + ' + Enter to submit'
+    status.textContent = submitHint
+    status.dataset['hint'] = '1'
 
     const actions = document.createElement('div')
-    Object.assign(actions.style, {
-      display: 'flex',
-      justifyContent: 'flex-end',
-      gap: '0.6rem',
-    } as CSSStyleDeclaration)
+    actions.className = 'hc-qa__actions'
     const doneBtn = document.createElement('button')
     doneBtn.type = 'button'
+    doneBtn.className = 'hc-qa__done'
     doneBtn.textContent = i18n?.t('dashboard.done') ?? 'Done'
-    Object.assign(doneBtn.style, {
-      padding: '0.45rem 1.2rem',
-      background: 'rgba(110, 180, 255, 0.22)',
-      border: '1px solid rgba(110, 180, 255, 0.55)',
-      borderRadius: '6px',
-      color: '#d4e6ff',
-      fontWeight: '600',
-      letterSpacing: '0.02em',
-      cursor: 'pointer',
-    } as CSSStyleDeclaration)
     actions.appendChild(doneBtn)
-    dialog.appendChild(actions)
+
+    const footer = document.createElement('div')
+    footer.className = 'hc-qa__footer'
+    footer.appendChild(status)
+    footer.appendChild(actions)
+    dialog.appendChild(footer)
 
     overlay.appendChild(dialog)
     document.body.appendChild(overlay)
     this.#overlay = overlay
 
-    requestAnimationFrame(() => { overlay.style.opacity = '1' })
+    requestAnimationFrame(() => { overlay.classList.add('hc-qa--in') })
     setTimeout(() => { try { input.focus() } catch { /* ignore */ } }, 60)
 
     document.addEventListener('keydown', this.#onKeyDown)
@@ -242,11 +171,16 @@ export class QaModalView extends EventTarget {
 
     const setStatus = (msg: string, isErr = false): void => {
       status.textContent = msg
-      status.style.color = isErr ? '#ff9b9b' : ''
-      status.style.opacity = isErr ? '1' : '0.75'
+      delete status.dataset['hint']
+      status.classList.toggle('hc-qa__status--err', isErr)
+    }
+    const resetHint = (): void => {
+      status.textContent = submitHint
+      status.dataset['hint'] = '1'
+      status.classList.remove('hc-qa__status--err')
     }
 
-    doneBtn.addEventListener('click', async () => {
+    const submit = async (): Promise<void> => {
       const text = input.value.trim()
       if (!text) { setStatus('type an answer first', true); input.focus(); return }
       const cur = this.#current
@@ -264,7 +198,14 @@ export class QaModalView extends EventTarget {
         const msg = err instanceof Error ? err.message : String(err)
         setStatus('failed: ' + msg, true)
       }
+    }
+
+    doneBtn.addEventListener('click', () => void submit())
+    // Cmd/Ctrl + Enter submits from the textarea; typing clears a stale error.
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void submit() }
     })
+    input.addEventListener('input', () => { if (!status.dataset['hint']) resetHint() })
   }
 
   close(): void {
@@ -273,7 +214,7 @@ export class QaModalView extends EventTarget {
     this.#overlay = null
     this.#current = null
     this.#onAfterCommit = null
-    overlay.style.opacity = '0'
+    overlay.classList.remove('hc-qa--in')
     overlay.addEventListener('transitionend', () => overlay.remove(), { once: true })
     setTimeout(() => overlay.remove(), 280)
     document.removeEventListener('keydown', this.#onKeyDown)
@@ -282,6 +223,130 @@ export class QaModalView extends EventTarget {
 
   get isOpen(): boolean {
     return this.#overlay !== null
+  }
+
+  /** Inject the modal stylesheet once. Kept as a <style> (not inline) so
+   *  hover/focus states and the scale-in keyframe can be expressed cleanly;
+   *  every rule is scoped under `.hc-qa` so nothing leaks. */
+  #ensureStyles(): void {
+    if (document.getElementById(STYLE_ID)) return
+    const style = document.createElement('style')
+    style.id = STYLE_ID
+    style.textContent = `
+.hc-qa {
+  position: fixed; inset: 0; z-index: 60000;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity 180ms ease;
+}
+.hc-qa.hc-qa--in { opacity: 1; }
+.hc-qa__backdrop {
+  position: absolute; inset: 0; cursor: pointer;
+  background: rgba(8, 12, 16, 0.62);
+  backdrop-filter: blur(6px) saturate(0.9);
+  -webkit-backdrop-filter: blur(6px) saturate(0.9);
+}
+.hc-qa__dialog {
+  position: relative; width: min(560px, 92vw); max-height: 82vh;
+  padding: 1.35rem 1.4rem 1.15rem; box-sizing: border-box;
+  display: flex; flex-direction: column; gap: 0.9rem;
+  color: #e6edf2;
+  font: 14px/1.5 Inter, system-ui, sans-serif;
+  background: linear-gradient(180deg, #191c22 0%, #15171c 100%);
+  border: 1px solid rgba(${STEEL}, 0.22);
+  border-radius: 14px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(0,0,0,0.4);
+  overflow: hidden;
+  transform: translateY(6px) scale(0.985);
+  transition: transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.hc-qa.hc-qa--in .hc-qa__dialog { transform: translateY(0) scale(1); }
+/* thin steel accent line along the top edge */
+.hc-qa__dialog::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(${STEEL}, 0.75), transparent);
+}
+.hc-qa__close {
+  position: absolute; top: 0.55rem; right: 0.6rem;
+  width: 1.9rem; height: 1.9rem; border: none; background: transparent;
+  color: #9aa7b2; font-size: 1.35rem; line-height: 1; cursor: pointer;
+  border-radius: 6px; transition: color 120ms ease, background 120ms ease;
+}
+.hc-qa__close:hover { color: #e6edf2; background: rgba(255,255,255,0.06); }
+.hc-qa__header {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding-right: 2rem; min-width: 0;
+}
+.hc-qa__pill {
+  flex: 0 0 auto; font-size: 0.66rem; font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  padding: 0.2rem 0.55rem; border-radius: 999px;
+  color: #bcdcee;
+  background: rgba(${STEEL}, 0.14);
+  border: 1px solid rgba(${STEEL}, 0.34);
+}
+.hc-qa__source {
+  flex: 1 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 0.76rem; color: #8b98a4; letter-spacing: 0.02em;
+}
+.hc-qa__nav {
+  flex: 0 0 auto; cursor: pointer;
+  border: 1px solid rgba(${STEEL}, 0.24);
+  background: rgba(${STEEL}, 0.06);
+  color: #c6d3dc; border-radius: 6px;
+  padding: 0.18rem 0.5rem; font-size: 0.78rem; line-height: 1;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+.hc-qa__nav:hover {
+  background: rgba(${STEEL}, 0.2); border-color: rgba(${STEEL}, 0.5); color: #eaf3f8;
+}
+.hc-qa__question {
+  font-size: 1.06rem; line-height: 1.5; color: #f0f4f7;
+  padding: 0.8rem 0.95rem; white-space: pre-wrap;
+  background: rgba(${STEEL}, 0.07);
+  border: 1px solid rgba(${STEEL}, 0.16);
+  border-left: 3px solid rgba(${STEEL}, 0.7);
+  border-radius: 4px 8px 8px 4px;
+}
+.hc-qa__input {
+  width: 100%; box-sizing: border-box; resize: vertical; min-height: 5.5rem;
+  padding: 0.65rem 0.75rem; color: inherit; font: inherit; line-height: 1.5;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  transition: border-color 130ms ease, box-shadow 130ms ease, background 130ms ease;
+}
+.hc-qa__input::placeholder { color: #6f7c88; }
+.hc-qa__input:focus {
+  outline: none; background: rgba(0, 0, 0, 0.34);
+  border-color: rgba(${STEEL}, 0.6);
+  box-shadow: 0 0 0 3px rgba(${STEEL}, 0.14);
+}
+.hc-qa__footer {
+  display: flex; align-items: center; justify-content: space-between; gap: 0.75rem;
+}
+.hc-qa__status {
+  flex: 1 1 auto; min-height: 1.1em; font-size: 0.75rem;
+  color: #6f7c88; letter-spacing: 0.02em;
+}
+.hc-qa__status--err { color: #ff9b9b !important; }
+.hc-qa__actions { flex: 0 0 auto; display: flex; gap: 0.6rem; }
+.hc-qa__done {
+  padding: 0.5rem 1.35rem; cursor: pointer;
+  color: #eaf4fa; font-weight: 600; letter-spacing: 0.02em; font-size: 0.9rem;
+  background: rgba(${STEEL}, 0.18);
+  border: 1px solid rgba(${STEEL}, 0.55);
+  border-radius: 8px;
+  transition: background 130ms ease, border-color 130ms ease, transform 80ms ease;
+}
+.hc-qa__done:hover { background: rgba(${STEEL}, 0.3); border-color: rgba(${STEEL}, 0.8); }
+.hc-qa__done:active { transform: translateY(1px); }
+.hc-qa__done:disabled { opacity: 0.5; cursor: default; }
+@media (prefers-reduced-motion: reduce) {
+  .hc-qa, .hc-qa__dialog { transition: none; }
+}
+`
+    document.head.appendChild(style)
   }
 
   async #commit(binding: QaBindingPayload, text: string): Promise<void> {
