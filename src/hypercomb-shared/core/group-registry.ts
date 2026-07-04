@@ -56,11 +56,24 @@ export interface LaunchGroup {
    *  their categories) rather than preserving prior arrangement. Help opts in;
    *  other groups keep the spiral + arrangement-preserving reconcile. */
   orderedLayout?: boolean
+  /** When true, this group has NO browsable aggregator page: it is a single
+   *  toggle surfaced only as a rail icon (the dashboard). Clicking the icon
+   *  opens its member DIRECTLY via open() — the registry never navigates to
+   *  /<id>, so MixedGroupBag never reconciles a self-referential launcher tile
+   *  there, and /<id> is not treated as a launcher page (isLauncherLocation
+   *  excludes it). This restores the documented "single member → open directly,
+   *  never a hexagon page" behavior the one-state refactor dropped. */
+  openDirectly?: boolean
   members(): GroupMember[]
   /** Activate a single member — its routing is owned by the group (websites →
    *  website mode, games → overlay toggle, dashboard → toggleBehavior). The
    *  MixedGroupBag calls this when a launcher tile is clicked. */
   open(m: GroupMember): void
+  /** Optional live "is this group's surface open" check for the rail highlight.
+   *  A page-backed group derives its highlight from the location (currentId);
+   *  an openDirectly group (dashboard) has no page, so it reports its own active
+   *  state here (its bag being open). Absent → highlight is location-only. */
+  isActive?(): boolean
 }
 
 export class GroupRegistry extends EventTarget {
@@ -95,7 +108,17 @@ export class GroupRegistry extends EventTarget {
    *  whatever was up before closes by plain navigation. Idempotent when the
    *  participant is already standing in this group's layer. */
   show(id: string): void {
-    if (!this.#groups.has(id)) return
+    const group = this.#groups.get(id)
+    if (!group) return
+    // An `openDirectly` group (the dashboard) has NO browsable page: open its
+    // single member immediately instead of navigating to /<id> and reconciling
+    // a self-referential launcher tile there. The rail-icon click routes here.
+    if (group.openDirectly) {
+      const members = group.members()
+      if (members.length > 0) group.open(members[0])
+      this.dispatchEvent(new CustomEvent('change'))
+      return
+    }
     void this.#mix.show(id).then(() => this.dispatchEvent(new CustomEvent('change')))
   }
 

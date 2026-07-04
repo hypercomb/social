@@ -26,6 +26,9 @@ class DashboardGroup extends LaunchGroupBase {
   override readonly id = 'dashboard'
   override readonly icon = 'dashboard'
   override readonly label = 'Dashboard'
+  // The dashboard is a single toggle, not a browsable collection: the rail icon
+  // opens the dashboard bag directly (toggleBehavior), never a /dashboard page.
+  readonly openDirectly = true
 
   constructor() {
     super()
@@ -37,6 +40,14 @@ class DashboardGroup extends LaunchGroupBase {
   override members(): GroupMember[] {
     const bee = get<DashboardBeeLike>('@diamondcoreprocessor.com/DashboardBee')
     return bee?.isAvailable() ? [MEMBER] : []
+  }
+
+  /** Rail-icon highlight: the dashboard is "on" while its bag is open. The
+   *  icon has no page, so the location-derived highlight (currentId) never
+   *  covers it — report the bag's live open state instead. */
+  isActive(): boolean {
+    const bee = get<DashboardBeeLike>('@diamondcoreprocessor.com/DashboardBee')
+    return bee?.isActive() ?? false
   }
 
   // The dashboard participates in the mix as a single launcher tile: its click

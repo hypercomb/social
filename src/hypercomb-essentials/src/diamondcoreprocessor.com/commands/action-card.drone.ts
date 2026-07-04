@@ -115,7 +115,9 @@ export class ActionCardDrone extends Drone {
     const segs = ioc<LineageLike>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []
     if (segs.length !== 1) return null
     const seg = String(segs[0])
-    if (!seg.startsWith('agg-') && !ioc<{ get?: (id: string) => unknown }>('@hypercomb.social/GroupLauncher')?.get?.(seg)) return null
+    // openDirectly groups (the dashboard) have no page — treat like a normal location.
+    const grp = ioc<{ get?: (id: string) => { openDirectly?: boolean } | undefined }>('@hypercomb.social/GroupLauncher')?.get?.(seg)
+    if (!seg.startsWith('agg-') && (!grp || grp.openDirectly)) return null
     let key = launchKeyForLabel(label)
     if (!key) {
       // Cells committed before the decoration carried `key` have no indexed
