@@ -16,8 +16,9 @@
 // sigs — but the slot names differ because the containers differ (cells
 // call them `notes`; notes call their sub-notes `children`).
 //
-// Storage: note blobs live in `__resources__/<sig>` alongside other
-// content-addressed resources. No per-note history bag — the note is
+// Storage: note blobs are content-addressed resources — sig-named files
+// at the flat OPFS root (legacy `__resources__/<sig>` is a read-fallback),
+// alongside other resources. No per-note history bag — the note is
 // just its bytes. Per-note edit history is reconstructed by walking the
 // owning cell's layer history and looking at which sig occupied each
 // position at each revision.
@@ -104,7 +105,8 @@ export type Note = {
  * NotesService — content-addressed notes attached to cells.
  *
  * Cells carry top-level notes in their `notes` slot (sigs pointing at
- * note blobs in `__resources__/`). Notes carry sub-notes in their own
+ * note blobs — root sig files; legacy `__resources__/` is a read-fallback).
+ * Notes carry sub-notes in their own
  * `children` slot. No HiveParticipant base class; this service stands
  * on its own (cells and notes are independent shapes that happen to
  * share `children` as a hierarchy slot — they don't implement a common

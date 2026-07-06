@@ -141,7 +141,7 @@ when a child signals a change, the parent sets `genome = null` and propagates up
 
 ## tag query syntax
 
-> **proposed UX — not built.** the `?:` query engine and the genome-keyed tag index do not exist in the live build. today tags are stored in the cell's `0000` properties file (master list in `__resources__/`, sig pointer in OPFS root `0000`) and managed by `TagRegistry` (`hypercomb-shared/core/tag-registry.ts`); there is no `?:` command-line mode yet. the syntax below is the intended surface, not current behavior.
+> **proposed UX — not built.** the `?:` query engine and the genome-keyed tag index do not exist in the live build. today tags are stored in the cell's `0000` properties file (master list stored as a sig-named resource at the content root, sig pointer in the `0000` file) and managed by `TagRegistry` (`hypercomb-shared/core/tag-registry.ts`); there is no `?:` command-line mode yet. the syntax below is the intended surface, not current behavior.
 
 the `?` prefix would activate tag query mode in the command line. the query would run against the tag index cached under the current subtree's genome.
 

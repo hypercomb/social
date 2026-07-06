@@ -204,8 +204,9 @@ class CellSlots {
  * Resolve a parent layer's `children` (sigs) into a Set of child
  * display names.
  *
- * Each child layer lives in the CHILD's bag (`__history__/<childLocSig>`),
- * not the parent's. We don't have a sig→name index, so the only way
+ * Each child layer lives in the CHILD's lineage sigbag `<childLocSig>/`
+ * (at the flat OPFS root; legacy `__history__/<childLocSig>` is a
+ * read-fallback), not the parent's. We don't have a sig→name index, so the only way
  * to map a sig back to a name is to enumerate the parent's on-disk
  * children, compute each child's lineage sig, list that bag's markers,
  * and check if any marker sig matches the parent's `children` entry.
@@ -311,7 +312,9 @@ async function resolveChildNames(
   }
 
   // Children manifest fast-path. When the parent's sig is known, try
-  // __manifests__/<parentSig> — a single file read returns the resolved
+  // the sign('manifests') pool keyed by <parentSig> (via
+  // Store.readChildrenManifest; legacy __manifests__/ is a read-fallback)
+  // — a single file read returns the resolved
   // child layer objects with names already inlined. Skips the per-child
   // getLayerBySig walk entirely on cold load. Falls through to the
   // signature-resolution path on miss; commitLayer writes a fresh
@@ -1424,17 +1427,61 @@ export class ShowCellDrone extends Drone {
     })
   }
 
+  // Bound on CONSECUTIVE eviction-forced repaints while on-screen sigs
+  // keep going missing. A normal layer converges in one or two passes
+  // (reload lands, next eviction scan comes back clean and resets the
+  // counter). Only a layer with more images than the atlas has slots can
+  // keep the scan dirty forever — self-eviction — and that pathology must
+  // not be allowed to spin the render loop.
+  #evictRepaintCount = 0
+  static readonly #EVICT_REPAINT_MAX = 8
+
   /** An atlas slot was reused for different content. If the displaced sig
    *  belongs to an on-screen cell, its baked UV now points at foreign
    *  pixels — force a pass so the cell either reloads (loadOne re-queues
-   *  evicted sigs) or falls back to label. Mid-pass evictions are the
-   *  running pass's own loads; it rebuilds geometry itself, so skip. */
+   *  evicted sigs) or falls back to label. This must run even while a
+   *  pass is mid-flight: the eviction may have displaced pixels the
+   *  running pass already awaited (loads and evictions from elsewhere
+   *  interleave), so its rebuilt geometry is stale the moment it bakes.
+   *  requestRender during a pass queues a follow-up pass — bounded by
+   *  #EVICT_REPAINT_MAX so self-evicting oversized layers can't loop. */
   readonly #onAtlasEvicted = (): void => {
-    if (this.rendering) return
     const atlas = this.imageAtlas
     if (!atlas) return
     for (const c of this.renderedCells.values()) {
       if (c.imageSig && !atlas.hasImage(c.imageSig) && !atlas.hasFailed(c.imageSig)) {
+        if (this.#evictRepaintCount >= ShowCellDrone.#EVICT_REPAINT_MAX) {
+          console.warn('[show-cell] atlas eviction repaint bound reached — layer likely exceeds atlas capacity')
+          return
+        }
+        this.#evictRepaintCount++
+        this.#forceNextRender = true
+        this.requestRender()
+        return
+      }
+    }
+    // Clean scan — every on-screen sig is resolvable again; reset the bound.
+    this.#evictRepaintCount = 0
+  }
+
+  /** Label-atlas twin of #onAtlasEvicted. A displaced on-screen label's
+   *  baked UV samples a DIFFERENT label's glyphs (wrong text — the
+   *  superimposed-labels bug class), so force a repaint; the rebuild
+   *  re-bakes it on demand. Shares #evictRepaintCount with the image
+   *  handler — a converged paint resets both. Cells rendering
+   *  hideText-with-image are skipped: their labelUV is intentionally
+   *  zeroed, so a displaced label cannot show. */
+  readonly #onLabelAtlasEvicted = (): void => {
+    const atlas = this.atlas
+    if (!atlas) return
+    for (const c of this.renderedCells.values()) {
+      if (c.hideText && c.imageSig && this.imageAtlas?.hasImage(c.imageSig)) continue
+      if (!atlas.hasLabel(c.label)) {
+        if (this.#evictRepaintCount >= ShowCellDrone.#EVICT_REPAINT_MAX) {
+          console.warn('[show-cell] label-atlas eviction repaint bound reached — more on-screen labels than atlas slots')
+          return
+        }
+        this.#evictRepaintCount++
         this.#forceNextRender = true
         this.requestRender()
         return
@@ -1494,24 +1541,29 @@ export class ShowCellDrone extends Drone {
       }
     }
 
+    const finishPreview = (): void => {
+      this.renderedCells.clear()
+      for (const cell of cells) this.renderedCells.set(cell.label, cell)
+      void this.applyGeometry(cells)
+    }
+
     if (needReload.length > 0) {
+      // Image-complete paint: a tile must NEVER render without its image
+      // outside text-only mode. Finish the (local) reloads BEFORE painting
+      // — the previous geometry stays visible meanwhile, which is images
+      // at old positions rather than an imageless flash.
       void (async () => {
         const lineage = this.resolve<any>('lineage')
         // dir may be null at foreign locations — loadCellImages is
         // null-tolerant and external tiles don't need a local dir.
         const dir = (await lineage?.explorerDir?.()) ?? null
         await this.loadCellImages(needReload, dir)
-        // Forced — a bare requestRender at an unchanged location is
-        // swallowed by the fast-path skip and the reloads would never paint.
-        this.#forceNextRender = true
-        this.requestRender()
+        finishPreview()
       })()
+      return
     }
 
-    this.renderedCells.clear()
-    for (const cell of cells) this.renderedCells.set(cell.label, cell)
-
-    void this.applyGeometry(cells)
+    finishPreview()
   }
 
   /**
@@ -1631,52 +1683,61 @@ export class ShowCellDrone extends Drone {
       cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false
       cell.hideText = this.cellHideTextCache.get(cell.label) ?? false
     }
+    const finishIncremental = (): void => {
+      this.renderedCells.clear()
+      for (const cell of cells) this.renderedCells.set(cell.label, cell)
+
+      this.#layerCellsCache.set(this.renderedLocationKey, {
+        cells: [...cells], cellNames, localCellSet, branchSet,
+      })
+
+      // applyGeometry returns a promise but its body is synchronous for our
+      // purposes; don't await — the paint happens in the next frame anyway.
+      void this.applyGeometry(cells)
+
+      // Fire-and-forget: load images and branch flags for added cells, then
+      // push in-place buffer updates. Never blocks the click path. (A
+      // just-created tile has no image YET — substrate assigns one right
+      // after — which is different from rendering an image-bearing tile
+      // without its image; the hard rule targets the latter.)
+      if (change.added.length > 0) {
+        const added = change.added.map(a => a.name)
+        const lineage = this.resolve<any>('lineage')
+        void Promise.resolve(lineage?.explorerDir?.()).then(async (dir) => {
+          if (!dir) return
+          // Branch flags (cheap, parallel)
+          await Promise.all(added.map(async name => {
+            const hasBranch = await this.checkCellHasBranch(dir, name)
+            if (hasBranch) this.#slots.markBranch(name)  // idempotent; pinned-safe
+          }))
+          // Images + props — pushed per-cell via in-place update
+          for (const name of added) {
+            await this.#tryInPlaceCellUpdate(name, { dir })
+          }
+        }).catch(() => { /* best effort */ })
+      }
+
+      this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
+      this.#emitRenderTags(cells)
+    }
+
     if (needReload.length > 0) {
+      // Image-complete paint: a tile must NEVER render without its image
+      // outside text-only mode. Finish the (local) eviction reloads BEFORE
+      // painting — the previous geometry stays visible meanwhile, images
+      // at old positions rather than an imageless flash.
       void (async () => {
         const lineage = this.resolve<any>('lineage')
         // dir may be null at foreign locations — loadCellImages is
         // null-tolerant and external tiles don't need a local dir.
         const dir = (await lineage?.explorerDir?.()) ?? null
         await this.loadCellImages(needReload, dir)
-        // Forced — a bare requestRender at an unchanged location is
-        // swallowed by the fast-path skip and the reloads would never paint.
-        this.#forceNextRender = true
-        this.requestRender()
+        finishIncremental()
       })()
+      return
     }
 
-    this.renderedCells.clear()
-    for (const cell of cells) this.renderedCells.set(cell.label, cell)
-
-    this.#layerCellsCache.set(this.renderedLocationKey, {
-      cells: [...cells], cellNames, localCellSet, branchSet,
-    })
-
-    // applyGeometry returns a promise but its body is synchronous for our
-    // purposes; don't await — the paint happens in the next frame anyway.
-    void this.applyGeometry(cells)
-
-    // Fire-and-forget: load images and branch flags for added cells, then
-    // push in-place buffer updates. Never blocks the click path.
-    if (change.added.length > 0) {
-      const added = change.added.map(a => a.name)
-      const lineage = this.resolve<any>('lineage')
-      void Promise.resolve(lineage?.explorerDir?.()).then(async (dir) => {
-        if (!dir) return
-        // Branch flags (cheap, parallel)
-        await Promise.all(added.map(async name => {
-          const hasBranch = await this.checkCellHasBranch(dir, name)
-          if (hasBranch) this.#slots.markBranch(name)  // idempotent; pinned-safe
-        }))
-        // Images + props — pushed per-cell via in-place update
-        for (const name of added) {
-          await this.#tryInPlaceCellUpdate(name, { dir })
-        }
-      }).catch(() => { /* best effort */ })
-    }
-
-    this.emitEffect('render:cell-count', this.#buildCellCountPayload(cells))
-    this.#emitRenderTags(cells)
+    finishIncremental()
   }
 
   /**
@@ -2052,6 +2113,19 @@ export class ShowCellDrone extends Drone {
           this.renderedCells.set(label, cell)
         }
 
+        // Image-complete paint: a tile must NEVER render without its
+        // image outside text-only mode. If any restored sig lost its
+        // atlas slot while we were away, refill BEFORE painting — the
+        // loads are local (resource cache / OPFS + decode), so this is
+        // bounded by warm reads, not network. Painting first and healing
+        // after showed a label-only flash, which the display rule forbids.
+        // The refill runs even when cachedDir is null: substrate images
+        // live in __resources__ keyed by signature, so loadCellImages
+        // only needs the dir for tags/link reads (already null-tolerant).
+        if (evictedSigs.length > 0) {
+          try { await this.loadCellImages(cached.cells, cachedDir ?? null) } catch { /* paint best-effort */ }
+        }
+
         if (this.layer) this.layer.visible = true
 
         // applyGeometry has no internal awaits; the `async` modifier
@@ -2068,24 +2142,6 @@ export class ShowCellDrone extends Drone {
 
         this.#emitRenderTags(cached.cells)
         this.emitEffect('render:cell-count', this.#buildCellCountPayload(cached.cells))
-
-        // Background: if any atlas slots were evicted, refill from the
-        // (still-hot) Store resource cache, then REPAINT. The repaint is
-        // mandatory: the geometry above just baked hasImage=0 for the
-        // evicted sigs, and the reloads land in FRESH atlas slots which
-        // bump no eviction generation — so without an explicit forced
-        // pass the cells key never changes and the tiles stay label-only
-        // forever (the old "the shader picks them up by sig" assumption
-        // was wrong; UVs live in baked attribute buffers). The refill
-        // runs even when cachedDir is null: substrate images live in
-        // __resources__ keyed by signature, so loadCellImages only needs
-        // the dir for tags/link reads (already null-tolerant).
-        if (evictedSigs.length > 0) {
-          void this.loadCellImages(cached.cells, cachedDir ?? null).then(() => {
-            this.#forceNextRender = true
-            this.requestRender()
-          })
-        }
 
         // background: refresh cursor for undo/redo readiness. Renderer
         // doesn't need it to draw — cells are already filtered.
@@ -2962,6 +3018,19 @@ export class ShowCellDrone extends Drone {
 
     const wasEmpty = this.renderedCount === 0
 
+    // First real render after the layer was empty — the sanctioned exception to
+    // "add/remove leaves the screen still". A newly-navigated empty layer never
+    // seeds #slots, so its first tile arrives through this full same-layer render
+    // (not the incremental path). Navigating in nulls #pendingRecenter (clearMesh)
+    // and the add itself never re-sets it, so without this the new mesh inherits
+    // the PREVIOUS layer's stale offset and the first tile lands off-screen
+    // ("nothing was created"). Re-arm here so applyGeometry frames the mesh on the
+    // new bounds AND the wasEmpty camera block below runs. Reaching this line at
+    // all means cellNames is non-empty (the length===0 guard above returned), so
+    // wasEmpty here is exactly the empty→first-tile transition; a later empty
+    // build (maxCells<=0) just clearMesh-resets it, so no spurious recenter.
+    if (wasEmpty) this.#pendingRecenter = true
+
     const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
     const maxCells = Math.min(cellNames.length, axialMax)
     if (maxCells <= 0) {
@@ -3008,9 +3077,17 @@ export class ShowCellDrone extends Drone {
     // correct.
     if (this.layer) this.layer.visible = true
 
-    if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer && this.#pendingRecenter) {
+    if (wasEmpty && cells.length > 0 && this.pixiApp && this.pixiContainer && this.pixiRenderer) {
       // first tile on empty screen → apply 2× default ONLY when the
       // user has no saved zoom/pan for this layer. A layer with saved
+      // NOTE: gated on the local `wasEmpty`, NOT `#pendingRecenter`. The
+      // applyGeometry() call above consumes #pendingRecenter (sets it false
+      // once the mesh recenter runs), so re-reading it here was always false —
+      // the camera default never ran and the first tile on a freshly-navigated
+      // empty layer stayed at the previous layer's stale camera (off-screen).
+      // `wasEmpty` here is exactly the empty→first-tile transition (the
+      // cellNames.length===0 guard above returns before this), and the saved-
+      // viewport check below still protects a laid-out layer's own viewport.
       // viewport state (mousewheel zoom, spacebar pan, fit-to-screen)
       // but missing meshOffset used to land here and have its zoom+pan
       // wiped to (2, 0, 0) — destroying the user's last position.
@@ -3491,6 +3568,21 @@ export class ShowCellDrone extends Drone {
     this.renderedCount = cells.length
     this.#recordRenderAudit('paint', cells.length, this.renderedLocationKey)
 
+    // A paint with every image resolvable is the convergence point of the
+    // eviction-repaint cycle — reset its bound here (eviction events alone
+    // can't be relied on for the reset: after the reload pass converges,
+    // no further event arrives to run a clean scan).
+    if (this.imageAtlas && !cells.some(c =>
+      c.imageSig && !this.imageAtlas!.hasImage(c.imageSig) && !this.imageAtlas!.hasFailed(c.imageSig))) {
+      this.#evictRepaintCount = 0
+    }
+
+    // Pin every on-screen image so the ring allocator never reuses their
+    // slots — the hard display rule: a tile never renders without its
+    // image outside text-only mode. Replacing the set wholesale unpins
+    // the previous layer's sigs automatically.
+    this.imageAtlas?.setPinned(cells.flatMap(c => (c.imageSig ? [c.imageSig] : [])))
+
     // rebuild reverse axial lookup for O(1) tile:hover
     this.#axialToIndex.clear()
     for (let i = 0; i < cells.length; i++) {
@@ -3762,6 +3854,10 @@ export class ShowCellDrone extends Drone {
     // affected; mid-pass evictions are skipped because the running pass
     // rebuilds geometry itself.
     window.addEventListener('hex-image-atlas:evicted', this.#onAtlasEvicted)
+    // Label-atlas twin — in-place updates bake uncached labels on demand,
+    // and once the 256-slot label ring has wrapped, such a bake displaces
+    // an on-screen label whose baked UV then shows the WRONG text.
+    window.addEventListener('hex-label-atlas:evicted', this.#onLabelAtlasEvicted)
 
     // Lineage 'change' is the canonical "the user's explorerPath
     // changed" signal — fired by every code path that mutates the
@@ -4718,6 +4814,7 @@ export class ShowCellDrone extends Drone {
     window.removeEventListener('synchronize', this.requestRender)
     window.removeEventListener('navigate', this.requestRender)
     window.removeEventListener('hex-image-atlas:evicted', this.#onAtlasEvicted)
+    window.removeEventListener('hex-label-atlas:evicted', this.#onLabelAtlasEvicted)
 
     if (this.#newCellFadeRaf) {
       cancelAnimationFrame(this.#newCellFadeRaf)
@@ -5462,7 +5559,10 @@ export class ShowCellDrone extends Drone {
     try {
       const cellDir = await parentDir.getDirectoryHandle(cellName, { create: false })
       for await (const [name, handle] of cellDir.entries()) {
-        if (handle.kind === 'directory' && !name.startsWith('__')) return true
+        // A branch is a NAMED child dir. Skip legacy underscore sidecars and
+        // sig-named dirs (64-hex: a sign(meaning) pool or a lineage sigbag)
+        // so a flat-root sibling never registers as a false branch.
+        if (handle.kind === 'directory' && !name.startsWith('__') && !/^[0-9a-f]{64}$/.test(name)) return true
       }
     } catch { /* cell doesn't exist or can't be read */ }
     return false
@@ -5605,7 +5705,12 @@ export class ShowCellDrone extends Drone {
     forceReload?: Set<string>,
   ): Promise<void> => {
     const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as
-      { getResource: (sig: string) => Promise<Blob | null>; getResourceLocal: (sig: string) => Promise<Blob | null> } | undefined
+      {
+        getResource: (sig: string) => Promise<Blob | null>
+        getResourceLocal: (sig: string) => Promise<Blob | null>
+        getOptimizedVisual?: (sig: string) => Promise<Blob | null>
+        optimizeVisual?: (sig: string, raw: Blob) => Promise<void>
+      } | undefined
     if (!store || !this.imageAtlas) return
     const imageAtlas = this.imageAtlas
 

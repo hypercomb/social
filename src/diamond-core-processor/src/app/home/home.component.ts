@@ -1489,9 +1489,9 @@ export class HomeComponent implements OnDestroy {
   // ─── Per-domain visibility toggle (sticky, OPFS-persisted) ──────────
   // Master switch per domain. When toggled OFF, the domain's contribution
   // to the rendered installation union is filtered out even if individual
-  // node toggles are on. Toggle state lives in
-  // __domains__/<domain>/meta.json (via DcpDomainStorage) so it survives
-  // reloads — "sticky" in user vocabulary.
+  // node toggles are on. Visibility now lives in the settings sigbag
+  // (DcpDomainStorage, key `visibility.<domain>`) so it survives reloads and
+  // is undoable — "sticky" in user vocabulary.
   //
   // Default for any domain not in the visibility map is TRUE (visible).
   // First contact via touchDomain() also sets visible: true.

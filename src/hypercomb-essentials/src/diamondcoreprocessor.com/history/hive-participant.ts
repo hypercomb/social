@@ -24,7 +24,10 @@
 // The base class then provides:
 //   - hashing items → putResource → bodyResourceSig
 //   - committing the participant's layer at sign([...parent, '__<slot>__', id])
-//     → participantLayerSig
+//     → participantLayerSig. NOTE: `__<slot>__` here is a hashed PATH
+//     SEGMENT (part of the lineage's signed identity), NOT an OPFS folder
+//     name — the underscore-folder eradication leaves it untouched;
+//     renaming it would re-sig every existing participant bag.
 //   - emitting the trigger with `{ segments, op: 'set', sigs }` so
 //     LayerCommitter applies the full canonical list to the parent's
 //     slot in ONE leaf delta and cascades to root
@@ -38,8 +41,9 @@
 // Every read flows through the parent layer's slot field; every write
 // flows through commitLayer. The layer is the truth. Wipe localStorage
 // → notes still load. Hand someone the root sig → they walk the merkle
-// tree and resolve every note via `__resources__/<bodySig>`. Single
-// signature = full expandable AI-payload context, by construction.
+// tree and resolve every note's body by its sig — a sig-named file at the
+// OPFS root (via Store.getResource, legacy `__resources__/` as fallback).
+// Single signature = full expandable AI-payload context, by construction.
 //
 // ── Contract for subclasses ───────────────────────────────────────────
 //
@@ -427,6 +431,9 @@ export abstract class HiveParticipant<T> {
     if (!layer || layer.name !== id) {
       throw new Error(`[hive:${this.slot}] layerFor must return { name: idOf(item) === "${id}" } (got "${layer?.name}")`)
     }
+    // `__${this.slot}__` is a hashed lineage SEGMENT (identity), never an
+    // OPFS dir — #signSegments folds it into participantLocSig. Left as-is
+    // by the underscore eradication (renaming re-sigs every existing bag).
     const participantSegments = [...parentSegments, `__${this.slot}__`, id]
     const participantLocSig = await this.#signSegments(participantSegments)
     const participantLayerSig = await history.commitLayer(participantLocSig, layer)

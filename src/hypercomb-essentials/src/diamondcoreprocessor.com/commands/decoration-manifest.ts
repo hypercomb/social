@@ -3,8 +3,10 @@
 // `decorations` layer slot + write helpers.
 //
 // The slot holds an array of decoration signatures. Each entry points to
-// a JSON record in `__resources__` (see `Store.putResource` /
-// `Store.getResource` in hypercomb-shared/core/store.ts) of the shape:
+// a content-addressed JSON record — a sig file at the flat OPFS root
+// (legacy `__resources__/` is a read-fallback drain source); see
+// `Store.putResource` / `Store.getResource` in
+// hypercomb-shared/core/store.ts — of the shape:
 //
 //   {
 //     kind: string,            // e.g. 'visual:website:page'
@@ -13,23 +15,23 @@
 //     mark?: 'persistent',
 //   }
 //
-// ── Why a slot, and why `__resources__` (not `__optimization__`) ──────
+// ── Why a slot, and why the RESOURCE store (not the optimization pool) ─
 //
 // VISUAL-BEE decorations are SHAREABLE: a peer's website page should be
 // fetchable by an adopter through the same content pipeline that already
-// handles HTML, images, and other resources. Storing decoration JSON in
-// `__resources__` means it rides existing replication/sync without a
-// new substrate. The cell's `decorations` slot still references the
-// JSON by sig — peer publishes layer → slot sigs ride the merkle tree
-// → adopter fetches each sig via the resource pipeline lazily.
+// handles HTML, images, and other resources. Storing decoration JSON as
+// a content resource (root sig file) means it rides existing
+// replication/sync without a new substrate. The cell's `decorations` slot
+// still references the JSON by sig — peer publishes layer → slot sigs ride
+// the merkle tree → adopter fetches each sig via the resource pipeline lazily.
 //
-// `__optimization__` remains the substrate for PERSONAL decorations
-// (Q&A, comms) that shouldn't leak across peers. Those have their own
-// bridge ops (`optimization-add` / `optimization-list`) and are NOT
-// referenced from the `decorations` slot. See the layer-purity memory
+// The sign('optimization') pool remains the substrate for PERSONAL
+// decorations (Q&A, comms) that shouldn't leak across peers. Those have
+// their own bridge ops (`optimization-add` / `optimization-list`) and are
+// NOT referenced from the `decorations` slot. See the layer-purity memory
 // for the broader split: canonical primitives in the layer, public
-// decoration content in `__resources__`, personal decoration content
-// in `__optimization__`.
+// decoration content in the resource store (root sig files), personal
+// decoration content in the sign('optimization') pool.
 //
 // Path (i) in the visual-bee design: layer holds the sig-array, content
 // is external. Per-feature opt-in adoption is then trivial — the adopter
@@ -66,8 +68,8 @@ export const DECORATIONS_SLOT = 'decorations'
 export const DECORATIONS_TRIGGER = 'decorations:changed'
 
 /**
- * Decoration record shape stored in `__optimization__`. Generic over the
- * payload so visual bees can declare their own payload type.
+ * Decoration record shape stored as a content resource (root sig file).
+ * Generic over the payload so visual bees can declare their own payload type.
  */
 export interface DecorationRecord<TPayload = unknown> {
   readonly kind: string
@@ -90,8 +92,8 @@ type StoreLike = {
 }
 
 /**
- * Write a decoration JSON to `__resources__` and append its sig to the
- * cell's `decorations` slot via the active trigger.
+ * Write a decoration JSON as a content resource (root sig file) and append
+ * its sig to the cell's `decorations` slot via the active trigger.
  *
  * Returns the decoration sig (the content hash; same sig everywhere the
  * same record is written — natural dedup across the network).
@@ -144,8 +146,9 @@ export async function writeDecoration<TPayload>(opts: {
 
 /**
  * Remove a decoration sig from the cell's `decorations` slot. The
- * decoration JSON itself stays in `__resources__` (it's content-
- * addressed and may be referenced by other manifests — same sig for
+ * decoration JSON itself stays in the resource store (root sig file;
+ * it's content-addressed and may be referenced by other manifests —
+ * same sig for
  * the same content). Garbage-collecting orphaned records is a separate
  * concern handled by a future sweep, not by individual remove calls.
  */

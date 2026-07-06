@@ -7,18 +7,43 @@
 // - correct content-type + head support
 
 const CACHE_NAME = 'hypercomb-modules-v2'
-const DEP_PREFIX = '/opfs/__dependencies__/'
-const RES_PREFIX = '/opfs/__bees__/'
-const LAYER_PREFIX = '/opfs/__layers__/'
-// Embedded-website resource lookups: /@resource/<sig> → __resources__/<sig>.
-// Any content-type — resolved from blob mime sniff / extension fallback.
+// Module/layer requests all live under /opfs/. The dir token after it is
+// either a POOL OF MEANING signature (sign('bees') / sign('dependencies'),
+// derived below — never hardcoded) or a legacy `__x__` URL token kept
+// servable for pages that froze an old import map. Either shape resolves
+// pool-first with the legacy OPFS dir as a drain-window read fallback.
+const OPFS_PREFIX = '/opfs/'
+// Embedded-website resource lookups: /@resource/<sig> → flat OPFS root
+// `<root>/<sig>` (legacy content dirs as read fallback). Any content-type
+// — resolved from blob mime sniff / extension fallback.
 const SITE_RESOURCE_PREFIX = '/@resource/'
+
+// Pools of meaning: install-cache dirs at the OPFS root named by
+// sign(<meaning>) — sha256 of the UTF-8 bytes of the meaning string.
+// DERIVED at runtime so the SW computes the identical address Store does,
+// with no registry and no hardcoded hex.
+const BEES_MEANING = 'bees'
+const DEPENDENCIES_MEANING = 'dependencies'
+let poolSigsPromise = null
+function poolSignatures() {
+  return poolSigsPromise ??= (async () => ({
+    bees: await sha256Hex(new TextEncoder().encode(BEES_MEANING)),
+    dependencies: await sha256Hex(new TextEncoder().encode(DEPENDENCIES_MEANING)),
+  }))()
+}
+
+// SHA-256 of zero bytes — the only signature whose valid content is empty.
+// Any OTHER sig read as a 0-byte file is an interrupted write: treat it as
+// a miss and keep falling back to wherever the complete bytes live
+// (mirrors Store's incomplete-write guard).
+const EMPTY_CONTENT_SIG = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
 
 // Phase-2 resource streaming. The page posts host domains (self + community)
 // via postMessage; on an OPFS miss for /@resource/<sig> the SW streams the
 // bytes from a host and sha256-verifies them before serving. KNOWN_DOMAINS is
-// the in-memory copy; it's also persisted inside CACHE_NAME (DOMAINS_CACHE_KEY)
-// so a restarted SW that serves before the page re-posts still has the list.
+// the in-memory copy; it's also persisted inside CACHE_NAME (DOMAINS_CACHE_KEY
+// — a Cache-API URL key, not an OPFS dir) so a restarted SW that serves before
+// the page re-posts still has the list.
 const SW_DOMAINS_MSG = 'hc:sw:domains'
 const DOMAINS_CACHE_KEY = '/__hc_sw_domains__'
 let KNOWN_DOMAINS = []
@@ -89,18 +114,8 @@ self.addEventListener('fetch', (event) => {
   // prod: opfs resolution by signature
   // ----------------------------------------
 
-  if (url.pathname.startsWith(RES_PREFIX)) {
-    event.respondWith(handleModuleRequest(event.request, '__bees__'))
-    return
-  }
-
-  if (url.pathname.startsWith(DEP_PREFIX)) {
-    event.respondWith(handleModuleRequest(event.request, '__dependencies__'))
-    return
-  }
-
-  if (url.pathname.startsWith(LAYER_PREFIX)) {
-    event.respondWith(handleLayerRequest(event.request))
+  if (url.pathname.startsWith(OPFS_PREFIX)) {
+    event.respondWith(handleOpfsRequest(event.request))
     return
   }
 
@@ -128,7 +143,26 @@ async function handleDevRequest(request) {
  * prod module handlers
  * ------------------------------------- */
 
-async function handleModuleRequest(request, dirName) {
+// Route an /opfs/<dirToken>/<sig>[.ext] request. The dir token is either a
+// derived pool signature or a legacy `__x__` URL token (frozen URL shape —
+// kept servable so a page holding an old frozen import map keeps working).
+// Both shapes read the pool dir first, then the legacy OPFS dir while the
+// Store's drain still has files mid-flight there.
+async function handleOpfsRequest(request) {
+  const url = new URL(request.url)
+  const token = url.pathname.split('/')[2] || ''
+  if (token === '__layers__') return handleLayerRequest(request)
+  const pools = await poolSignatures()
+  if (token === pools.bees || token === '__bees__') {
+    return handleModuleRequest(request, [pools.bees, '__bees__'])
+  }
+  if (token === pools.dependencies || token === '__dependencies__') {
+    return handleModuleRequest(request, [pools.dependencies, '__dependencies__'])
+  }
+  return new Response('unknown opfs path', { status: 404 })
+}
+
+async function handleModuleRequest(request, dirNames) {
   const url = new URL(request.url)
   const sig = readSignature(url.pathname)
   if (!sig) return new Response('invalid signature', { status: 400 })
@@ -136,10 +170,13 @@ async function handleModuleRequest(request, dirName) {
   const cached = await tryCacheMatch(request)
   if (cached) return toHeadIfNeeded(request, cached)
 
-  const opfs = await tryReadFromOpfs(dirName, `${sig}.js`)
-  if (opfs) {
-    await cachePut(request, opfs)
-    return toHeadIfNeeded(request, opfs)
+  for (const dirName of dirNames) {
+    const opfs = await tryReadFromOpfs(dirName, `${sig}.js`)
+      || await tryReadFromOpfs(dirName, sig)
+    if (opfs) {
+      await cachePut(request, opfs)
+      return toHeadIfNeeded(request, opfs)
+    }
   }
 
   return new Response('module not found', { status: 404 })
@@ -153,11 +190,11 @@ async function handleLayerRequest(request) {
   const cached = await tryCacheMatch(request)
   if (cached) return toHeadIfNeeded(request, cached)
 
-  // Flat hive-root pool first (`__hive__/<sig>` — the migration
-  // destination), legacy `__layers__/<sig>.json` pool as fallback until
-  // the relocation pass moves the bytes up. Content-addressed, so either
-  // location serves identical bytes.
-  const rootFile = await tryReadHiveFile(sig)
+  // Flat OPFS root first (`<root>/<sig>` — the canonical content
+  // address), then the legacy content roots, then the legacy
+  // `__layers__` drain dir. Content-addressed, so any hit serves
+  // identical bytes.
+  const rootFile = await tryReadContentFile(sig)
   if (rootFile) {
     const headers = new Headers()
     headers.set('content-type', 'application/json; charset=utf-8')
@@ -168,6 +205,7 @@ async function handleLayerRequest(request) {
   }
 
   const opfs = await tryReadFromOpfs('__layers__', `${sig}.json`)
+    || await tryReadFromOpfs('__layers__', sig)
   if (opfs) {
     await cachePut(request, opfs)
     return toHeadIfNeeded(request, opfs)
@@ -194,24 +232,12 @@ async function handleSiteResourceRequest(request) {
   const cached = await tryCacheMatch(request)
   if (cached) return toHeadIfNeeded(request, cached)
 
-  // Flat hive-root pool first (`__hive__/<sig>` — the migration
-  // destination), legacy `__resources__/<sig>` pool next, host stream last.
-  const rootFile = await tryReadHiveFile(sig)
-  if (rootFile) {
-    const headers = new Headers()
-    headers.set('content-type', guessResourceContentType(rest, rootFile, request))
-    headers.set('cache-control', 'public, max-age=31536000, immutable')
-    const response = new Response(rootFile, { status: 200, headers })
-    await cachePut(request, response)
-    return toHeadIfNeeded(request, response.clone())
-  }
-
-  try {
-    const root = await self.navigator.storage.getDirectory()
-    const dir = await root.getDirectoryHandle('__resources__')
-    const fileHandle = await dir.getFileHandle(sig)
-    const file = await fileHandle.getFile()
-
+  // Flat OPFS root first (`<root>/<sig>` — the canonical content address,
+  // with the legacy content roots as drain-window fallbacks), then the
+  // legacy `__resources__` drain dir, host stream last.
+  const file = await tryReadContentFile(sig)
+    || await tryReadLegacyDirFile('__resources__', sig)
+  if (file) {
     const headers = new Headers()
     headers.set('content-type', guessResourceContentType(rest, file, request))
     headers.set('cache-control', 'public, max-age=31536000, immutable')
@@ -220,30 +246,30 @@ async function handleSiteResourceRequest(request) {
     // Cache immutable — signatures never change.
     await cachePut(request, response)
     return toHeadIfNeeded(request, response.clone())
-  } catch {
-    // OPFS miss → stream from a host (Phase 2). The SW has no IoC, so it uses
-    // the domains the page posted. Bytes are sha256-verified before serving,
-    // then written through to OPFS (silently — the SW can't emit
-    // content:wrote) so future reads (SW or Store) hit locally and offline.
-    const fetched = await fetchResourceFromHosts(sig)
-    if (!fetched) return new Response('resource not found', { status: 404 })
-    void writeResourceToOpfs(sig, fetched.buf)
-    const headers = new Headers()
-    // The host stores resources by bare signature (no extension) and serves
-    // them as application/octet-stream. Browsers enforce strict MIME checking
-    // for <link rel="stylesheet"> (and images), so an octet-stream chrome.css
-    // is REFUSED — a fresh adopter's page renders UNSTYLED until the resource
-    // is warm in OPFS (where the OPFS branch's URL-tail guess sets text/css).
-    // The URL tail (`/chrome.css`) is the authoritative type here, so prefer it
-    // over the host's generic type; fall back to the host type only when the
-    // tail/sniff/destination can't pin a specific one.
-    const guessed = guessResourceContentType(rest, new Blob([fetched.buf]), request)
-    headers.set('content-type', guessed !== 'application/octet-stream' ? guessed : (fetched.contentType || guessed))
-    headers.set('cache-control', 'public, max-age=31536000, immutable')
-    const response = new Response(fetched.buf, { status: 200, headers })
-    await cachePut(request, response)
-    return toHeadIfNeeded(request, response.clone())
   }
+
+  // OPFS miss → stream from a host (Phase 2). The SW has no IoC, so it uses
+  // the domains the page posted. Bytes are sha256-verified before serving,
+  // then written through to OPFS (silently — the SW can't emit
+  // content:wrote) so future reads (SW or Store) hit locally and offline.
+  const fetched = await fetchResourceFromHosts(sig)
+  if (!fetched) return new Response('resource not found', { status: 404 })
+  void writeResourceToOpfs(sig, fetched.buf)
+  const headers = new Headers()
+  // The host stores resources by bare signature (no extension) and serves
+  // them as application/octet-stream. Browsers enforce strict MIME checking
+  // for <link rel="stylesheet"> (and images), so an octet-stream chrome.css
+  // is REFUSED — a fresh adopter's page renders UNSTYLED until the resource
+  // is warm in OPFS (where the OPFS branch's URL-tail guess sets text/css).
+  // The URL tail (`/chrome.css`) is the authoritative type here, so prefer it
+  // over the host's generic type; fall back to the host type only when the
+  // tail/sniff/destination can't pin a specific one.
+  const guessed = guessResourceContentType(rest, new Blob([fetched.buf]), request)
+  headers.set('content-type', guessed !== 'application/octet-stream' ? guessed : (fetched.contentType || guessed))
+  headers.set('cache-control', 'public, max-age=31536000, immutable')
+  const response = new Response(fetched.buf, { status: 200, headers })
+  await cachePut(request, response)
+  return toHeadIfNeeded(request, response.clone())
 }
 
 function guessResourceContentType(tail, file, request) {
@@ -421,16 +447,44 @@ async function tryReadFromOpfs(dirName, fileName) {
   }
 }
 
-// Read a sig-named file from the flat hive-root pool (`__hive__/<sig>`),
-// the destination of the content-pool-to-root migration. Returns the File
-// (caller sets content-type — layers are JSON, site resources sniff by
-// tail) or null when not yet present at the root.
-async function tryReadHiveFile(sig) {
+// Resolve a content sig to its File: the flat OPFS root (`<root>/<sig>`,
+// the canonical address) first, then the legacy content roots
+// (`__hive__/`, `hypercomb.io/`) while the Store's self-cleaning drain
+// still holds bytes there. A 0-byte file under a non-empty sig is an
+// incomplete write — skipped so the read lands on wherever the COMPLETE
+// bytes live. Returns the File (caller sets content-type — layers are
+// JSON, site resources sniff by tail) or null when absent everywhere.
+async function tryReadContentFile(sig) {
+  let root
+  try {
+    root = await self.navigator.storage.getDirectory()
+  } catch {
+    return null
+  }
+  try {
+    const handle = await root.getFileHandle(sig)
+    const file = await handle.getFile()
+    if (file.size > 0 || sig === EMPTY_CONTENT_SIG) return file
+  } catch { /* not at the root — fall back to the legacy sources */ }
+  for (const dirName of ['__hive__', 'hypercomb.io']) {
+    try {
+      const dir = await root.getDirectoryHandle(dirName)
+      const file = await (await dir.getFileHandle(sig)).getFile()
+      if (file.size > 0 || sig === EMPTY_CONTENT_SIG) return file
+    } catch { /* not in this drain source — keep falling back */ }
+  }
+  return null
+}
+
+// Bare-sig read from one legacy drain dir (e.g. `__resources__`). Read
+// fallback only — the SW never creates or writes these dirs.
+async function tryReadLegacyDirFile(dirName, sig) {
   try {
     const root = await self.navigator.storage.getDirectory()
-    const dir = await root.getDirectoryHandle('__hive__')
-    const handle = await dir.getFileHandle(sig)
-    return await handle.getFile()
+    const dir = await root.getDirectoryHandle(dirName)
+    const file = await (await dir.getFileHandle(sig)).getFile()
+    if (file.size > 0 || sig === EMPTY_CONTENT_SIG) return file
+    return null
   } catch {
     return null
   }
@@ -514,16 +568,15 @@ async function fetchResourceFromHosts(sig) {
 
 // Write-through to OPFS. Skip if already present — re-writing an existing
 // content-addressed file invalidates any Blob already handed out for that sig
-// (NotReadableError), the hazard Store.putResource documents. Phase-1b: the
-// write-through lands in the flat hive root (`__hive__/<sig>`) — the canonical
-// content pool — not the legacy `__resources__` dir, so the SW is no longer a
-// writer that would resurrect that dir after the Store relocates and GCs it.
+// (NotReadableError), the hazard Store.putResource documents. The bytes land
+// as a sig-named file at the FLAT OPFS ROOT — the canonical content address.
+// No directory is created, ever: the legacy `__hive__`/`__resources__` dirs
+// are drain sources the Store removes, and a create here would resurrect them.
 async function writeResourceToOpfs(sig, buffer) {
   try {
     const root = await self.navigator.storage.getDirectory()
-    const dir = await root.getDirectoryHandle('__hive__', { create: true })
-    try { await dir.getFileHandle(sig); return } catch { /* not present — create */ }
-    const handle = await dir.getFileHandle(sig, { create: true })
+    try { await root.getFileHandle(sig); return } catch { /* not present — create */ }
+    const handle = await root.getFileHandle(sig, { create: true })
     const writable = await handle.createWritable()
     try { await writable.write(buffer) } finally { await writable.close() }
   } catch { /* best-effort cache fill */ }

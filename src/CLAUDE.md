@@ -80,10 +80,10 @@ npm run runtime:core            # Copy core dist to public/core/
 
 Essentials are built as **signature-addressed modules** and auto-installed into OPFS at runtime:
 
-1. **Build** (`npm run build:essentials`): esbuild bundles drones into flat `dist/` with `__layers__/`, `__bees__/`, `__dependencies__/`, and `manifest.json`. Then `copy-to-web.ts` copies output to `hypercomb-web/public/content/`.
+1. **Build** (`npm run build:essentials`): esbuild bundles drones into flat `dist/` as **sig-named files** (layers, bees, dependencies — no typed dirs) plus `manifest.json`. Then `copy-to-web.ts` copies output to `hypercomb-web/public/content/`. *(Legacy note: already-deployed content may still use the retired `__layers__/`/`__bees__/`/`__dependencies__/` URL layout; fetchers try the flat `/<sig>` URL first and fall back to the legacy typed URL — new builds never emit those dirs.)*
 2. **Deploy** (`npm run deploy:essentials`): Same build, but uploads flat content to Azure blob storage (`storagehypercomb`) instead of copying locally. Uploads `manifest.json` for discovery.
-3. **Runtime auto-install**: On app load, `ensureInstall()` uses sentinel sync or `LayerInstaller` fetches `manifest.json` → looks up package by signature → downloads all listed layers/bees/deps → writes to OPFS. Skips if already installed (checked via `localStorage` + OPFS directory presence).
-4. **Import map**: `resolveImportMap()` reads `__dependencies__/` from OPFS, extracts aliases from first-line comments (`// @scope/name`), and injects a dynamic `<script type="importmap">`.
+3. **Runtime auto-install**: On app load, `ensureInstall()` uses sentinel sync or `LayerInstaller` fetches `manifest.json` → looks up package by signature → downloads all listed layers/bees/deps → writes sig-named files to the OPFS root and the `sign('bees')`/`sign('dependencies')` pools. Skips if already installed (checked via `localStorage` + OPFS presence).
+4. **Import map**: `resolveImportMap()` reads the `sign('dependencies')` pool from OPFS (union-reading the legacy `__dependencies__/` dir as a read-only fallback while it drains), extracts aliases from first-line comments (`// @scope/name`), and injects a dynamic `<script type="importmap">`.
 5. **Module loading**: `DependencyLoader` imports dependencies via the import map. `ScriptPreloader` loads bees from OPFS, instantiates them, and registers in IoC.
 
 ## Documentation File Placement
@@ -151,10 +151,10 @@ src/
 
 SHA-256 hash (64 hex chars) of canonical content. Created via `SignatureService.sign(bytes)`. Immutable identity.
 
-**Signatures are not just identifiers — they are the composition mechanism.** Any JSON field, class property, array element, or configuration value that references content must hold a signature pointing to a resource in `__resources__/`, not inline data. This is the fundamental pattern of the architecture:
+**Signatures are not just identifiers — they are the composition mechanism.** Any JSON field, class property, array element, or configuration value that references content must hold a signature pointing to a sig-named resource at the content root, not inline data. This is the fundamental pattern of the architecture:
 
 ```typescript
-// ✅ CORRECT: signature references — content lives in __resources__/<sig>
+// ✅ CORRECT: signature references — content lives at the content root: <root>/<sig>
 { "op": "reorder", "cell": "a1b2c3d4...", "at": 1712345678 }
 { "turns": [{ "role": "user", "contentSig": "e5f6a7b8..." }] }
 { "manifestSig": "c9d0e1f2...", "hidden": ["selector1", "selector2"] }
@@ -166,7 +166,7 @@ SHA-256 hash (64 hex chars) of canonical content. Created via `SignatureService.
 
 **Why this matters:**
 - **Deduplication**: same content → same signature → stored once, referenced many times
-- **Instant cache hits**: hold the signature, load from `__resources__/<sig>` — no queries, no lookups
+- **Instant cache hits**: hold the signature, load the sig-named resource from the content root (`<root>/<sig>`) — no queries, no lookups
 - **History composition**: history ops point at resource signatures. Undo = load the previous resource. Time-travel = load the resource at any timestamp. Infinitely expandable.
 - **Sharing**: a signature can be shared, imported, or bundled. The recipient resolves it against their own OPFS.
 - **Immutability**: content never changes. New content = new signature. Old signatures remain valid forever.
@@ -210,26 +210,54 @@ Self-contained modules. Lifecycle: Created → Registered → Active → Dispose
 
 ### OPFS (Origin-Private File System)
 
-There is **no `__layers__` folder** (phased out — never reintroduce it). Typed
-content-pool folders are gone: content is **signature-named files at the root
-of their owning scope**, and **sigbags** (`0000`, `0001`, … `000x` marker
-files) are the only structure — the max marker IS the current root. When
-resolving a sig, the only local fallback is the owning **folder** itself.
+There are **no typed `__x__` folders** (eradicated — never reintroduce one,
+and never propose a new one, even aspirationally; a new grouping is a **pool
+of meaning**, never a `__name__` dir). The model:
+
+- **Content bytes are sig-named files at the OPFS root.** The user-content
+  root IS the OPFS root (`hypercombRoot === opfsRoot`). A resource/layer
+  entry is `<root>/<sig>`.
+- **The only folders are signature-named**:
+  - **Lineage sigbags** — `<lineageSig>/` holding `0000`, `0001`, … `000x`
+    marker files; the max marker IS the current root/head.
+  - **Pools of meaning** — dirs named `sign(<meaning>)` (SHA-256 of the
+    UTF-8 meaning string). Addresses are DERIVED at runtime via
+    `Store.poolSignature(meaning)` / `store.getPool(meaning)` — never
+    hardcode the hex in code. For humans:
+
+    | Meaning | sign(meaning) |
+    |---|---|
+    | `optimization` | `be92e94aba0be148ec1f142becadb01480a3c633ed6e675d98945416a5a3d24d` |
+    | `bees` | `23da0d3b0b5aa5ee43ba33f15f971ee4cf32afd1b27ad901863346ba9dd06966` |
+    | `dependencies` | `2188dfc2d889b53230f6891977d505642d718b940aa3eec23985afb379141dcd` |
+    | `clipboard` | `a78c94675455b6203686c7f220c225c90d386a52a623c547bfce8bbbac94c31c` |
+    | `threads` | `4cc500db62ede737f8f7a8c83c02b5fc5cbcebf26bffc48fb49b4540ffc67306` |
+    | `computation` | `fb209e75cfb94344539afe813559f0950250a5ab843fcb30d1231021428d11ac` |
+    | `manifests` | `c7af7c7a948db8800f71f26f3c90280cf09dfc3141b72318c5ff31ffc9470a59` |
+
+- **Legacy `__x__` dirs are self-cleaning drain sources.** (`__hive__/`,
+  `hypercomb.io/`, `__layers__/`, `__resources__/`, `__optimized__/`,
+  `__history__/`, `__bees__/`, `__dependencies__/`, `__clipboard__/`,
+  `__threads__/`, `__computation__/`, `__manifests__/`.) They are opened
+  `create: false` (try/catch → `undefined`), read-fallback only, and are
+  migrated + removed automatically — detached record-pool absorbs after
+  init, and the content relocation self-schedules off the boot path
+  (`/consolidate-content` forces a run). Reads try the new location first,
+  then legacy. **Writes NEVER target a legacy dir.** Lineage bags
+  union-resolve across root + legacy sources; the HIGHEST marker wins.
 
 ```
-# Hive (hypercomb.io app)
-hypercomb.io/                # the participant's own tree: sigbag + sig files at the root
+# Hive (hypercomb.io app) — the OPFS root IS the participant's tree
+<opfs root>/<sig>            # content bytes: layers, resources (flat, sig-named)
+<opfs root>/<lineageSig>/    # lineage sigbags (000x markers, max = current)
+<opfs root>/<sign(meaning)>/ # pools of meaning (table above)
 
-# DCP (installer)
+# DCP (installer) — domain identity scopes, unchanged (not typed folders)
 dcp/hypercomb.io/            # the LOGICAL install: sigbags (packages + pushed tiles)
 dcp/<current files>/         # pushed tiles
 dcp/domain.com/              # one folder per adopted domain: its sigbag + sig files at the root
 dcp/domain2.com/
 ```
-
-Legacy install-cache dirs that still exist in code (`__bees__/`,
-`__dependencies__/`, `__resources__/`) hold sig-named files and are owned by
-the install/sync path; do not add new typed folders.
 
 ## Localization (i18n)
 
@@ -319,22 +347,20 @@ Or via slash behaviour: `/language ja`, `/language en`, `/lang jp`
 
 ## OPFS: user data vs install cache (READ BEFORE TOUCHING)
 
-The web shell's OPFS root is split into two zones with different ownership:
+The web shell's OPFS root holds two zones with different ownership:
 
 **User data — NEVER wipe, NEVER `removeEntry` on these in scripts, console snippets, or "let me cold-boot test" experiments:**
-- `hypercomb.io/` — the user's content tree (tiles, folders, body resources)
-- `__history__/` — per-lineage layer commit chains (every undo/redo entry the user has ever made)
-- `__resources__/` — signature-addressed content blobs the user has authored or pulled
-- `__receipts__/` — receipt log
-- `__structure__/` — structure cache
-- `__threads__/` — thread state
+- Sig-named files at the OPFS root — the user's content (layer bytes, resources, tile bodies)
+- Lineage sigbags at the root (`<lineageSig>/` with `000x` markers) — every undo/redo entry the user has ever made
+- Pools of meaning at the root (`sign('optimization')`, `sign('clipboard')`, `sign('threads')`, `sign('computation')`, `sign('manifests')`, …) — user records
+- Legacy drain sources, while they still exist — read-fallback only, and STILL never wipe: `hypercomb.io/`, `__hive__/`, `__history__/`, `__resources__/`, `__layers__/`, `__optimized__/`, `__receipts__/`, `__structure__/`, `__threads__/`. Only the self-cleaning migration (per-record copy→verify→remove, gated final removeEntry when fully drained) may remove them — nothing else.
 
 **Install/sync cache — owned by `ensureInstall` / `resyncFromSentinel`, safe to clear if you're inside that code path:**
-- `__bees__/` — drone bundles by signature
-- `__dependencies__/` — namespace deps by signature
-- `__layers__/sentinel/` — LEGACY sentinel-scoped layer cache (the `__layers__` folder is phased out; per-domain folders + sigbags are canonical — never write new content here)
+- the `sign('bees')` pool — drone bundles by signature
+- the `sign('dependencies')` pool — namespace deps by signature
+- legacy `__bees__/`, `__dependencies__/`, `__layers__/sentinel/` — drain sources, opened without `create`, read-fallback until absorbed; never write new content here
 
-**Verification rule:** to prove an essentials change reaches the web shell, do NOT clear OPFS. Use signature comparison instead — make a source change, rebuild, reload, and check that the new bee signatures appear in the manifest and the new bytes are in `__bees__/`. The user's data dirs should be unchanged across the test. If you find yourself reaching for `localStorage.clear()` or `navigator.storage.getDirectory()` removal, stop — there is a non-destructive way to verify.
+**Verification rule:** to prove an essentials change reaches the web shell, do NOT clear OPFS. Use signature comparison instead — make a source change, rebuild, reload, and check that the new bee signatures appear in the manifest and the new bytes are in the `sign('bees')` pool (legacy `__bees__/` only while it drains). The user's data (root sig files, sigbags, pools) should be unchanged across the test. If you find yourself reaching for `localStorage.clear()` or `navigator.storage.getDirectory()` removal, stop — there is a non-destructive way to verify.
 
 ## Web/Dev shell parity
 

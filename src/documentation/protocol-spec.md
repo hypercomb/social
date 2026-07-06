@@ -380,7 +380,7 @@ The build signs **raw bytes**, never sorted-key canonical JSON:
 
 The Origin Private File System is the persistent local store. No server storage exists.
 
-> **Migration in progress — see [history-sigbag-as-root.md](history-sigbag-as-root.md).** The **agreed target** is a single flat content bucket at the root (one `<sig>` file per artifact) with sigbag markers (`0000`, `0001`, ...) at the root and at each lineage, where the max marker IS the current root + entrance + attestation in one. The **running build still uses** the typed pools described below (`__layers__/`, `__bees__/`, `__dependencies__/`, `__resources__/`, `__optimization__/`) plus `__history__/` marker chains, and discovery still goes through `manifest.json`. Treat the typed-pool layout as current and the flat-bucket model as the destination; the wire protocol, signing, and lineage sections of this spec hold under both.
+> **Landed 2026-07-04 — see [history-sigbag-as-root.md](history-sigbag-as-root.md) and [sign-meaning-pool-migration-plan.md](sign-meaning-pool-migration-plan.md).** The **shipping layout** is the flat model: content bytes are sig-named files at the OPFS root (one `<sig>` file per artifact), lineage **sigbags** (`<lineageSig>/` with `0000`, `0001`, … markers, max marker = current root + entrance + attestation) sit at the root, and record pools live at **`sign(meaning)`** addresses (bees, dependencies, manifests, optimization, clipboard, threads, computation). The legacy typed dirs (`__layers__/`, `__bees__/`, `__dependencies__/`, `__resources__/`, `__optimization__/`, `__history__/`, `__hive__/`) are **read-fallback drain sources only** — opened without `create`, never written; self-cleaning boot absorbs (record pools) and the delayed content relocation (manual force-run: `/consolidate-content`) migrate and remove them. The wire protocol, signing, and lineage sections of this spec hold under both layouts while legacy data drains.
 
 ### 12.1 Cells are layer content, not directories
 
@@ -403,7 +403,7 @@ label:    "/chemistry/organic"
 Lineage drives:
 - The browser URL path (via `Navigation.goRaw()`).
 - The signature computation for mesh subscribe/publish (§4).
-- The layer-signature lookup that resolves content (`__layers__/<sig>`) — *not* a cell-directory traversal (§12.2).
+- The layer-signature lookup that resolves content (a root `<sig>` file; legacy typed dirs only as read fallback while they drain) — *not* a cell-directory traversal (§12.2).
 - The visual render of the honeycomb grid.
 
 ### 12.4 Synchronization Event
@@ -684,7 +684,7 @@ https://<domain>/<sig>
 
 These are static fetches with no auth. Each candidate's bytes are SHA-256 verified against the requested sig before being returned — bad bytes are dropped and the next candidate is tried. The fetcher already knows the type from the referring context, so it does not need a typed path.
 
-> **Implementation lag:** the shipped content-broker (`#httpPathForType`) and relay HTTP host currently use typed paths with extensions (`/__layers__/<sig>.json`, `/__resources__/<sig>`, `/__dependencies__/<sig>.js`). The bare-sig form (§21.10) is the target; the typed paths remain valid during migration and the relay can serve both while the cutover happens.
+> **Legacy-URL fallback:** fetchers try the flat `/<sig>` URL first, then fall back to the legacy typed URL shape (`/__layers__/<sig>.json`, `/__resources__/<sig>`, `/__dependencies__/<sig>.js`) — live Azure/CDN content stays old-layout until the next deploy, and old clients keep working because old content remains. New builds emit only flat sig-named files; the typed URLs exist purely to read already-deployed legacy content.
 
 ### 21.3 HTTP-direct: candidate ordering (binary in-community trust)
 
@@ -752,11 +752,11 @@ wss://<domain>/                        ← WebSocket relay endpoint
 
 The root markers live in a **disconnected reference signature pool**: a scope folder named `sign(utf8(domain))`, holding only sigbag markers (`{ layer: <sig>, ... }` reference records). *Disconnected* — it is not referenced from any tree; *deterministic* — anyone computes the scope from the domain string alone, so there is nothing to discover; *uniform* — the address is identical on the domain's own host and on every mirror. Pool-of-meaning applied to the wire: the folder is the signature of "this domain's roots."
 
-> **Status: the sigbag marker routes are a DESIGN TARGET, not the current build.** The shipped relay HTTP host serves typed-path content and a `manifest.json` (keyed by `rootLayerSig`); serving the sigbags (see [history-sigbag-as-root.md](history-sigbag-as-root.md)) has not yet replaced it. There is no separate discovery index and no named meta routes: every folder is signature-named, and marker names (zero-padded decimal) plus sig names (64-hex) are the entire URL vocabulary. Treat the marker routes as the agreed destination, with `manifest.json` as the live mechanism in the meantime.
+> **Status: the sigbag marker routes are a DESIGN TARGET, not the current build.** The shipped relay HTTP host serves the flat `/<sig>` heap and a `manifest.json` (keyed by `rootLayerSig`) for discovery; serving the sigbags (see [history-sigbag-as-root.md](history-sigbag-as-root.md)) has not yet replaced the manifest. There is no separate discovery index and no named meta routes: every folder is signature-named, and marker names (zero-padded decimal) plus sig names (64-hex) are the entire URL vocabulary. Treat the marker routes as the agreed destination, with `manifest.json` as the live mechanism in the meantime.
 
 Build output (`hypercomb-essentials/dist/`) is copied to `hypercomb-relay/content/` by `scripts/copy-to-dcp.ts` on every build, so the operator's own machine is always serving the latest content their build produced. See `memory: project_domain_as_identity.md` for the full "host is a verb" doctrine.
 
-> **Implementation lag:** the shipped relay HTTP host currently serves typed paths with extensions (`/__layers__/<sig>.json`, etc.) and a `manifest.json`. The bare-sig universal handler (§21.9) and the retirement of `manifest.json` in favor of sigbag-max discovery (§21.9) are the target; the relay can serve both forms during cutover.
+> **Legacy-URL fallback:** the relay HTTP host serves the flat bare-sig form first-class and keeps answering the legacy typed paths (`/__layers__/<sig>.json`, etc.) plus `manifest.json` only so already-deployed old-layout content and old clients keep resolving — new builds publish flat sig files only. The retirement of `manifest.json` in favor of sigbag-max discovery (§21.9) remains the open target.
 
 ### 21.8 Daisy-chain federation (structural property)
 
@@ -874,7 +874,7 @@ The read endpoint for any content-addressed blob is a **bare signature** — no 
 https://<domain>/<sig>
 ```
 
-This drops *both* the extension (`.json`/`.js` — build-tooling residue) *and* the type prefix (`__layers__/` etc. — which moves to internal storage, §21.9). The URL commits to nothing but the sig. Content-Type comes from the host's pool/subfolder via the in-memory index (§21.9); the consumer also knows the type from the referring context (a sig in a layer's `bees[]` is a bee), so neither side needs the URL to carry it.
+This drops *both* the extension (`.json`/`.js` — build-tooling residue) *and* the type prefix (`__layers__/` etc. — retired everywhere: internal storage is flat sig files plus `sign(meaning)` pools, never typed dirs, §21.9/§12). The URL commits to nothing but the sig. Content-Type comes from the host's in-memory index (§21.9); the consumer also knows the type from the referring context (a sig in a layer's `bees[]` is a bee), so neither side needs the URL to carry it.
 
 **Why bare-sig URLs are the right address:**
 

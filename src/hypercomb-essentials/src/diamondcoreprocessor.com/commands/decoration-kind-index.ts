@@ -9,7 +9,8 @@
 // OPFS read per tile per frame. So we maintain a hot in-memory map
 // keyed by cell label, populated reactively from `decorations:changed`
 // events. The `decorations:changed` payload carries `{ segments, op,
-// sig }`; we look up the sig in `__resources__`, parse its `kind`,
+// sig }`; we look up the sig in the resource store (root sig file;
+// legacy `__resources__/` is a read-fallback), parse its `kind`,
 // and update the map. On remove we use a sig→kind reverse cache so we
 // can subtract without re-fetching.
 //

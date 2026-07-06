@@ -102,25 +102,22 @@ export class PackageExportService {
     const contentManifest = { version: 1, packages: { [rootSig]: manifest } }
     await this.#writeTextFile(rootDir, 'manifest.json', JSON.stringify(contentManifest))
 
-    // write layers
-    const layersDir = await rootDir.getDirectoryHandle('__layers__', { create: true })
+    // FLAT delivery layout: every layer/bee/dep is an extensionless
+    // sig-named file at the package root — no `__layers__`/`__bees__`/
+    // `__dependencies__` typed dirs (the flat sig heap the installer/
+    // resolver/sentinel fetch `/<sig>` from). Content-addressed, so the
+    // sig alone is the address; the kind is recoverable from the manifest.
     for (const sig of layers) {
       const bytes = await this.#readLayerBytes(sig, domain)
-      if (bytes) await this.#writeBinaryFile(layersDir, `${sig}.json`, bytes)
+      if (bytes) await this.#writeBinaryFile(rootDir, sig, bytes)
     }
-
-    // write bees
-    const beesDir = await rootDir.getDirectoryHandle('__bees__', { create: true })
     for (const sig of bees) {
       const bytes = await this.#readBeeBytes(sig, domain)
-      if (bytes) await this.#writeBinaryFile(beesDir, `${sig}.js`, bytes)
+      if (bytes) await this.#writeBinaryFile(rootDir, sig, bytes)
     }
-
-    // write dependencies
-    const depsDir = await rootDir.getDirectoryHandle('__dependencies__', { create: true })
     for (const sig of deps) {
       const bytes = await this.#readDepBytes(sig, domain)
-      if (bytes) await this.#writeBinaryFile(depsDir, `${sig}.js`, bytes)
+      if (bytes) await this.#writeBinaryFile(rootDir, sig, bytes)
     }
   }
 
@@ -131,19 +128,23 @@ export class PackageExportService {
   ): Promise<void> {
     const files: Record<string, string> = {}
 
+    // FLAT keys: each file is keyed by its bare `<sig>` (no `__layers__/`
+    // etc. path prefix). The bundle's manifest.layers/bees/dependencies
+    // arrays name which sig is which kind, so the key carries identity only
+    // — the same flat sig-heap shape the delivery pipeline emits.
     for (const sig of layers) {
       const bytes = await this.#readLayerBytes(sig, domain)
-      if (bytes) files[`__layers__/${sig}.json`] = this.#toBase64(bytes)
+      if (bytes) files[sig] = this.#toBase64(bytes)
     }
 
     for (const sig of bees) {
       const bytes = await this.#readBeeBytes(sig, domain)
-      if (bytes) files[`__bees__/${sig}.js`] = this.#toBase64(bytes)
+      if (bytes) files[sig] = this.#toBase64(bytes)
     }
 
     for (const sig of deps) {
       const bytes = await this.#readDepBytes(sig, domain)
-      if (bytes) files[`__dependencies__/${sig}.js`] = this.#toBase64(bytes)
+      if (bytes) files[sig] = this.#toBase64(bytes)
     }
 
     const bundle: ExportBundle = {

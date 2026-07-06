@@ -1,17 +1,25 @@
 // hypercomb-shared/core/tag-registry.ts
-// Master tag list — content-addressed resource in __resources__/,
-// sig pointer stored in OPFS root 0000 properties.
+// Master tag list — content-addressed resource (sig-named file at the
+// flat OPFS root, via Store.putResource), with the current sig pointer
+// kept as the `tags-master` record in the sign('registry') pool. The
+// pointer's legacy home — a plain `0000` props file at the OPFS root —
+// is read-fallback only: at the unified root that filename collides
+// with the sigbag-marker namespace, so writes moved to the pool.
 //
 // In-memory map populated on first load, mutated via add/remove,
-// persisted by writing a new resource blob and updating the root sig.
+// persisted by writing a new resource blob and updating the pointer.
 
 import { EffectBus, SignatureService } from '@hypercomb/core'
 
 type TagEntry = { color?: string; enabled?: boolean; accent?: string }
 type TagMap = Record<string, TagEntry>
 
-const PROPS_FILE = '0000'
+/** Legacy pointer file at the OPFS root — read-fallback only. */
+const LEGACY_PROPS_FILE = '0000'
 const MASTER_KEY = 'tags-master'
+/** Pool of meaning holding the registry pointer records (`tags-master`,
+ *  `names-master`). Address = sign('registry'), derived by Store. */
+const REGISTRY_MEANING = 'registry'
 
 export class TagRegistry extends EventTarget {
 
@@ -88,16 +96,15 @@ export class TagRegistry extends EventTarget {
     await this.#save()
   }
 
-  // ── persistence (content-addressed resource + root 0000 sig pointer) ──
+  // ── persistence (content-addressed resource + sign('registry') pool pointer) ──
 
   async #load(): Promise<void> {
     try {
       const store = this.#store()
       if (!store) return
 
-      const rootProps = await this.#readRootProps(store)
-      const sig = rootProps[MASTER_KEY]
-      if (typeof sig !== 'string' || !sig) {
+      const sig = await this.#readPointer(store)
+      if (!sig) {
         // No master list yet — try migrating from legacy hc:tag-colors
         this.#migrateFromLegacy()
         this.#loaded = true
@@ -121,7 +128,7 @@ export class TagRegistry extends EventTarget {
       const blob = new Blob([json], { type: 'application/json' })
       const sig = await store.putResource(blob)
 
-      await this.#writeRootProps(store, { [MASTER_KEY]: sig })
+      await this.#writePointer(store, sig)
 
       // Also keep localStorage in sync for fast reads by controls bar
       localStorage.setItem('hc:tag-colors', JSON.stringify(
@@ -145,27 +152,38 @@ export class TagRegistry extends EventTarget {
     } catch { /* no legacy data */ }
   }
 
-  // ── root 0000 helpers ──
+  // ── pointer record (sign('registry') pool; legacy root 0000 read-fallback) ──
 
-  async #readRootProps(store: any): Promise<Record<string, unknown>> {
+  async #readPointer(store: any): Promise<string | null> {
+    // Canonical: the `tags-master` record in the sign('registry') pool.
+    try {
+      const pool = await store.getPool?.(REGISTRY_MEANING)
+      if (pool) {
+        const fh = await pool.getFileHandle(MASTER_KEY)
+        const sig = (await (await fh.getFile()).text()).trim()
+        if (sig) return sig
+      }
+    } catch { /* no pool record yet — fall back */ }
+    // Legacy fallback: the pointer used to ride a plain `0000` props file
+    // at the OPFS root. Read-only; the next #save rehomes the pointer
+    // into the pool. The stale 0000 key is deliberately left untouched —
+    // rewriting that contested file is exactly what this stops.
     try {
       const root = store.opfsRoot as FileSystemDirectoryHandle
-      const fh = await root.getFileHandle(PROPS_FILE)
-      const file = await fh.getFile()
-      return JSON.parse(await file.text())
-    } catch {
-      return {}
-    }
+      const fh = await root.getFileHandle(LEGACY_PROPS_FILE)
+      const props = JSON.parse(await (await fh.getFile()).text())
+      const sig = props?.[MASTER_KEY]
+      if (typeof sig === 'string' && sig) return sig
+    } catch { /* no legacy pointer either */ }
+    return null
   }
 
-  async #writeRootProps(store: any, updates: Record<string, unknown>): Promise<void> {
-    const root = store.opfsRoot as FileSystemDirectoryHandle
-    const existing = await this.#readRootProps(store)
-    const merged = { ...existing, ...updates }
-    const fh = await root.getFileHandle(PROPS_FILE, { create: true })
+  async #writePointer(store: any, sig: string): Promise<void> {
+    const pool = await store.getPool?.(REGISTRY_MEANING)
+    if (!pool) throw new Error('registry pool unavailable')
+    const fh = await pool.getFileHandle(MASTER_KEY, { create: true })
     const writable = await fh.createWritable()
-    await writable.write(JSON.stringify(merged))
-    await writable.close()
+    try { await writable.write(sig) } finally { await writable.close() }
   }
 
   #store(): any {

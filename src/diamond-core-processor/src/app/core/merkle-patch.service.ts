@@ -40,8 +40,11 @@ export class MerklePatchService {
 
   /**
    * Apply a patch: compile modified source, cascade through the Merkle tree,
-   * produce a new root. All patched files are written to __patches__/{domain}/,
-   * never touching the original installation.
+   * produce a new root. Patched content is re-signed (new bytes ⇒ new sig)
+   * and written alongside the originals — cascaded layers into the domain
+   * scope, bees/deps into the sign('bees')/sign('dependencies') pools —
+   * never touching the original installation (content addressing keeps them
+   * distinct). Only the patch BOOKKEEPING lives under sign('patches')/.
    */
   async applyPatch(params: {
     originalSig: string

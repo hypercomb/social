@@ -10,7 +10,8 @@
 //     No `dashboards` slot. No `properties` slot. Properties live in the
 //     0000 sidecar and travel via swarm, not via the merkle tree.
 //
-//   • A dashboard is a content-addressed bag at `__history__/<bagLocSig>/`.
+//   • A dashboard is a content-addressed lineage sigbag `<bagLocSig>/` at
+//     the flat OPFS root (legacy `__history__/<bagLocSig>/` is a read-fallback).
 //     Its bagLocSig is derived from a one-off segment string so the bag's
 //     identity is unique but doesn't appear in any visible lineage. The
 //     bag's layer markers (000x) hold `{ name, children: [<questionSig>] }`
@@ -40,7 +41,8 @@
 //
 //   • Removing the bee removes the dashboard surface entirely; the bag's
 //     bytes remain in OPFS (recoverable by sig), and the layers it
-//     references stay reachable from `__resources__/`. Bee = capability,
+//     references stay reachable as content at the flat OPFS root (legacy
+//     `__resources__/` is a read-fallback). Bee = capability,
 //     not data.
 
 import { Worker, EffectBus } from '@hypercomb/core'
@@ -70,7 +72,8 @@ type NavigationLike = {
 type PinnedBag = {
   /** locSig of the location this dashboard is pinned to (the "anchor"). */
   locationSig: string
-  /** locSig of the dashboard's own bag at `__history__/<bagLocSig>/`. */
+  /** locSig of the dashboard's own lineage sigbag `<bagLocSig>/` (at the
+   *  flat OPFS root; legacy `__history__/<bagLocSig>/` is a read-fallback). */
   bagLocSig: string
   /** Segments that hash to bagLocSig — preserved so we can navigate the
    *  canvas into the bag (URL → Lineage → locSig must match). */

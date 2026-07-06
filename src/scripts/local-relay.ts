@@ -22,7 +22,7 @@ const CONTENT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '.dev-re
 // bytes and lives at `/<sig>`; the optional `/@resource/<sig>` prefix is the
 // in-app fetch alias (service worker / embedded-site composition) — same heap,
 // same bytes. The old typed "bags" (__layers__ / __resources__ / __bees__ /
-// __dependencies__) are gone from the URL surface: named buckets invite fishing
+// __dependencies__) are gone as STORAGE: named buckets invite fishing
 // the store by category, whereas a flat sig-only route can only hand back an
 // exact blob the caller already names — nothing to enumerate or browse. sigbag
 // marker files (`0000`…`000x`) aren't 64-hex, so they never match this route
@@ -30,6 +30,13 @@ const CONTENT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', '.dev-re
 // client conventions: host-sync PUTs to `/<sig>` (host-sync.service #pathFor)
 // and the content broker fetches `/@resource/<sig>`.
 const SIG_RE = /^\/(?:@resource\/)?([a-f0-9]{64})(?:\.(?:json|js))?$/i
+// LEGACY typed URL shapes are still ACCEPTED as aliases — an older client
+// dialing `/__layers__/<sig>.json` (or PUTting `/__resources__/<sig>`) is
+// served from / written into the SAME flat heap. The typed segment is
+// stripped, never materialized as a directory, so no `__x__` dir can be
+// (re)created here and the relay serves both URL layouts during the
+// transition. Same self-authenticating sha256 gate on writes.
+const LEGACY_SIG_RE = /^\/__(?:layers|bees|dependencies|resources)__\/([a-f0-9]{64})(?:\.(?:json|js))?$/i
 
 // Auto-expire window for ephemeral-range (20000-29999) events. Long
 // enough that a receiver who reloads / joins shortly after a publisher
@@ -148,7 +155,7 @@ const httpServer = createServer(async (req, res) => {
     res.setHeader('Content-Type', 'application/json')
     res.writeHead(200); res.end('{"packages":{}}'); return
   }
-  const m = path.match(SIG_RE)
+  const m = path.match(SIG_RE) ?? path.match(LEGACY_SIG_RE)
   if (!m) { res.writeHead(404); res.end('not found'); return }
   const sig = m[1].toLowerCase()
   const filePath = join(CONTENT_DIR, sig)

@@ -11,7 +11,8 @@
 // string) buries the page behind a mini type-system. The explicit
 // `website` slot holds the page's HTML resource signature DIRECTLY — no
 // envelope, no kind discriminator. The value is a flat array of 64-hex
-// sigs into `__resources__`; the newest entry is the current page. This
+// resource sigs (content files at the flat OPFS root; legacy
+// `__resources__/` is a read-fallback); the newest entry is the current page. This
 // is the "explicit named array per concern" rule: every stateful concern
 // gets its own named slot, never a shared catch-all. (No `Artifact`
 // suffix — every slot's value is already a signature artifact.)

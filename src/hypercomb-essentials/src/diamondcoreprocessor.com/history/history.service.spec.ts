@@ -6,8 +6,14 @@
 //   - layerSig = sha256(marker file bytes)
 //   - empty layer (00000000) auto-minted on bag's first touch
 //   - merkle cascade: parent.children[i] = child's current marker sig
+//   - lineage sigbags live at the OPFS ROOT (`<root>/<lineageSig>/`); the
+//     legacy `__history__`/`__hive__`/`hypercomb.io` dirs are read-fallback
+//     drain sources, union-promoted to the root bag with HIGHEST MARKER
+//     WINNING (see the "multi-source union" describe block)
 //
 // Uses an in-memory OPFS mock so tests run in jsdom without browser.
+// The `bagRoot` handle passed to every helper IS the OPFS root — the
+// helpers are generic over "the dir that holds lineage bags".
 
 import { describe, it, expect, beforeEach } from 'vitest'
 
@@ -475,13 +481,17 @@ class Cursor {
 // -------------------------------------------------
 
 let opfsRoot: MockDir = new MockDir('/')
-let historyRoot: MockDir = new MockDir('__history__')
+// Lineage sigbags live at the OPFS root now (`hypercombRoot === opfsRoot`
+// in production). `historyRoot` is the bag-root handle every helper takes;
+// it IS the OPFS root, not a `__history__` subdir. The legacy
+// `__history__`/`__hive__`/`hypercomb.io` dirs only appear in the
+// multi-source union tests, as read-fallback drain sources.
+let historyRoot: MockDir = opfsRoot
 
 beforeEach(() => {
   preloaderCache.clear()
   opfsRoot = new MockDir('/')
-  historyRoot = new MockDir('__history__')
-  opfsRoot.dirs.set('__history__', historyRoot)
+  historyRoot = opfsRoot
 })
 
 // Helper: build a fake child sig string of a given length (pads to 64).
@@ -2121,7 +2131,11 @@ describe('additive write pattern — caller pulls head, builds full layer, commi
 // Clipboard model under the layer-primitive doctrine:
 //
 //   - The clipboard is a normal lineage at segments=['__clipboard__'].
-//     It has its own sigbag in __history__/, just like any cell.
+//     `__clipboard__` here is a hashed lineage SEGMENT (part of the signed
+//     bag identity), NOT an OPFS folder — the underscore-folder eradication
+//     leaves it untouched; renaming it would re-sig every clipboard bag.
+//     Its sigbag lives at the OPFS root (`<root>/<clipSig>/`), just like
+//     any cell.
 //   - Cut / copy = compute the source-cell sigs that are moving (their
 //     current head-layer sigs), then commit a NEW FULL layer at the
 //     clipboard lineage whose `children` are those sigs.
@@ -2292,6 +2306,98 @@ describe('clipboard sigbag — copy / paste / cut via full-layer commits', () =>
     const layer = await currentLayer(historyRoot, clipSeg)
     expect(layer?.children).toEqual([a, b])
     expect(layer?.['notes']).toEqual([clipNote])
+  })
+})
+
+// =====================================================================
+// Multi-source union — root bags + legacy drain sources, highest marker wins
+// =====================================================================
+//
+// After the underscore-folder eradication a lineage's bag can be split
+// across the OPFS root and any legacy drain source (`__history__/`,
+// `__hive__/`, `hypercomb.io/`) during the drain window. Reads must UNION
+// every source into the root bag with the HIGHEST MARKER WINNING —
+// first-hit source selection is forbidden because a stale source would
+// time-travel the tree backwards. These tests mirror production's
+// `#promoteBag` / `#copyBagInto`: copy every marker a legacy source holds
+// that the root bag lacks; on a same-name divergence the ROOT's copy is
+// kept (it is the live era).
+
+/** Union-promote a lineage's bag to the root bag: copy every marker file
+ *  any legacy source holds and the root lacks. Mirrors HistoryService's
+ *  #promoteBag — only ADDS missing filenames, never overwrites, so the
+ *  max marker across sources only grows. */
+const promoteBag = async (
+  root: MockDir,
+  legacySources: MockDir[],
+  lineageSig: string,
+): Promise<MockDir> => {
+  const rootBag = await root.getDirectoryHandle(lineageSig, { create: true })
+  for (const source of legacySources) {
+    let srcBag: MockDir
+    try { srcBag = await source.getDirectoryHandle(lineageSig, { create: false }) } catch { continue }
+    for await (const [name, h] of srcBag.entries()) {
+      if (h.kind !== 'file') continue
+      if (await fileExists(rootBag, name)) continue  // root wins same-name
+      const bytes = new Uint8Array(await (await (h as MockFile).getFile()).arrayBuffer())
+      await writeBytes(rootBag, name, bytes)
+    }
+  }
+  return rootBag
+}
+
+describe('multi-source union — highest marker wins across drain sources', () => {
+  it('a bag stranded only in legacy __history__ promotes intact to the root', async () => {
+    const seg = await signLineage(['stranded'])
+    const legacyHistory = new MockDir('__history__')
+    // Commit lands entirely in the legacy source (models pre-upgrade data).
+    await commitLayer(legacyHistory, seg, { name: 'stranded', children: [fakeSig('x')] })
+
+    // Root has nothing yet; union-promote, then read from the root bag.
+    await promoteBag(opfsRoot, [legacyHistory], seg)
+    const layer = await currentLayer(opfsRoot, seg)
+    expect(layer?.name).toBe('stranded')
+    expect(layer?.children).toEqual([fakeSig('x')])
+  })
+
+  it('root markers deeper than a legacy source WIN — no rewind on a same-index divergence', async () => {
+    const seg = await signLineage(['diverged'])
+    const legacyHive = new MockDir('__hive__')
+
+    // Legacy source: a shallow history (00000000 + 00000001 = one child).
+    await commitLayer(legacyHive, seg, { name: 'diverged', children: [fakeSig('old')] })
+
+    // Root: deeper history for the SAME lineage (two commits past genesis).
+    await commitLayer(opfsRoot, seg, { name: 'diverged', children: [fakeSig('old')] })
+    await commitLayer(opfsRoot, seg, { name: 'diverged', children: [fakeSig('new')] })
+
+    // Union: the root's 00000001 (its live era) must survive; the legacy
+    // same-name marker must NOT overwrite it, and the deeper root head wins.
+    await promoteBag(opfsRoot, [legacyHive], seg)
+    const layer = await currentLayer(opfsRoot, seg)
+    expect(layer?.children).toEqual([fakeSig('new')])  // highest marker, not the legacy 'old'
+  })
+
+  it('markers unique to a legacy source EXTEND the root bag past its own head', async () => {
+    const seg = await signLineage(['extend'])
+    const legacyHistory = new MockDir('__history__')
+
+    // Root: genesis + one commit (00000000, 00000001).
+    await commitLayer(opfsRoot, seg, { name: 'extend', children: [fakeSig('a')] })
+
+    // Legacy source independently reached a DEEPER marker (00000002) that
+    // the root never saw — union must carry it up so it becomes head.
+    const rootBag = await opfsRoot.getDirectoryHandle(seg, { create: true })
+    const deeper = JSON.stringify(canonicalizeLayer({ name: 'extend', children: [fakeSig('b')] }))
+    const legacyBag = await legacyHistory.getDirectoryHandle(seg, { create: true })
+    await writeBytes(legacyBag, '00000002', new TextEncoder().encode(deeper))
+    void rootBag
+
+    await promoteBag(opfsRoot, [legacyHistory], seg)
+    const layers = await listLayers(opfsRoot, seg)
+    expect(layers[layers.length - 1].filename).toBe('00000002')
+    const head = await currentLayer(opfsRoot, seg)
+    expect(head?.children).toEqual([fakeSig('b')])
   })
 })
 

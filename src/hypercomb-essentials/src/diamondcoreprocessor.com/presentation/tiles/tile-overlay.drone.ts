@@ -548,14 +548,7 @@ export class TileOverlayDrone extends Drone {
         if (this.#currentAxial) this.#positionOverlay(this.#currentAxial.q, this.#currentAxial.r)
       })
 
-      this.onEffect('navigation:guard-start', () => {
-        this.#navigationBlocked = true
-        this.#currentAxial = null
-        this.#currentIndex = undefined
-        if (this.#overlay && !this.#arrangeMode) this.#overlay.visible = false
-        if (this.#navigationGuardTimer) clearTimeout(this.#navigationGuardTimer)
-        this.#navigationGuardTimer = setTimeout(() => { this.#navigationBlocked = false }, 200)
-      })
+      this.onEffect('navigation:guard-start', () => { this.#beginNavigationTransition() })
 
       this.onEffect('navigation:guard-end', () => {
         this.#navigationBlocked = false
@@ -2010,9 +2003,33 @@ export class TileOverlayDrone extends Drone {
 
   // ── Navigation ─────────────────────────────────────────────────────
 
+  // Arm the navigation-transition guard SYNCHRONOUSLY. The render pipeline's
+  // `navigation:guard-start` also calls this, but that fires AFTER the pulse —
+  // async. Between a tile-click committing a navigation (below) and that
+  // guard-start landing, #navigationBlocked is still false and the tile maps
+  // (#branchLabels/#occupiedByAxial) still describe the level we're LEAVING.
+  // A double-click's second press, or a too-early press on a slow frame, would
+  // read those stale maps and enter a child that doesn't exist at the new
+  // level — appending a phantom URL segment that then "runs up" as you keep
+  // clicking. Arming here closes that window: the trailing pointerdown/click is
+  // blocked (#onPointerDown / #onClick both check #navigationBlocked) until
+  // `navigation:guard-end` (or the 200ms fallback) releases it.
+  #beginNavigationTransition = (): void => {
+    this.#navigationBlocked = true
+    this.#currentAxial = null
+    this.#currentIndex = undefined
+    if (this.#overlay && !this.#arrangeMode) this.#overlay.visible = false
+    if (this.#navigationGuardTimer) clearTimeout(this.#navigationGuardTimer)
+    this.#navigationGuardTimer = setTimeout(() => { this.#navigationBlocked = false }, 200)
+  }
+
   #navigateInto(label: string): void {
     const lineage = this.resolve<{ explorerEnter(name: string): void }>('lineage')
     if (!lineage) return
+
+    // Block re-entry for the duration of this transition — every branch below
+    // commits a navigation (reference portal, sets-root hop, or explorerEnter).
+    this.#beginNavigationTransition()
 
     // REFERENCE portal: a reference tile is a live pointer to another lineage —
     // clicking it TRAVELS to that location rather than entering a child. The
@@ -2079,6 +2096,9 @@ export class TileOverlayDrone extends Drone {
   #navigateBack(): void {
     const lineage = this.resolve<{ explorerUp(): void }>('lineage')
     if (!lineage) return
+    // Same race guard as #navigateInto: block a double back-gesture from
+    // over-popping past the level this transition is settling on.
+    this.#beginNavigationTransition()
     this.#clearSelectionOnNavigate()
     this.emitEffect('tile:navigate-back', {})
     lineage.explorerUp()

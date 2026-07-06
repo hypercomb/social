@@ -33,7 +33,7 @@ that is all. no timestamps, no user ids, no server addresses. the smallest possi
 
 the trail capsule above is an *optional published route*. it is a different thing from the **opfs sig-pool** — the always-on local substrate where your authored content actually lives. this is the **dna** of your hive: the content-addressed, merkle-versioned artifacts that compose your tree (the genetic ladder is documented in [dna.md](../dna.md)).
 
-this substrate is not opt-in. every change you make is committed automatically and durably to the browser's origin private file system (opfs): marker chains under `__history__/`, the signed layer bytes and content pools under `__layers__/`, `__resources__/`, `__bees__/`, `__dependencies__/`, and your tree under `hypercomb.io/`. a cell is identified by signing its path segments (the domain is discarded; the root signs as the empty path). nothing here leaves the device unless you publish.
+this substrate is not opt-in. every change you make is committed automatically and durably to the browser's origin private file system (opfs): marker chains in each lineage's own sigbag at the root of the comb, the signed layer bytes and content as sig-named files beside them, and the module pools each addressed by the signature of their meaning. a cell is identified by signing its path segments (the domain is discarded; the root signs as the empty path). nothing here leaves the device unless you publish.
 
 what *is* ephemeral — and deliberately kept out of the signed layer so it never skews your lineage signature — is **presence**: your cursor, clipboard, selection, viewport, and who else is live in the session right now. that is the dance. it dissolves. the comb beneath it does not.
 

@@ -482,9 +482,11 @@ export class SentinelHandler {
 
   /**
    * Read a single layer JSON for the tree-walk. Tries DCP's OPFS cache
-   * first; on miss, fetches from the domain's `__layers__/<sig>.json`,
-   * verifies the hash, and writes it back to OPFS so the next walk hits
-   * the cache. This is the path that lets a freshly-deployed essentials
+   * first (the domain's identity scope); on miss, fetches from the domain
+   * (flat `/<sig>` first, legacy `__layers__/<sig>.json` fallback for
+   * un-migrated hosts), verifies the hash, and writes it back to OPFS so
+   * the next walk hits the cache. This is the path that lets a
+   * freshly-deployed essentials
    * (new rootSig, new layer signatures) propagate through sync without
    * needing DCP to re-run a full install first.
    */
@@ -540,9 +542,9 @@ export class SentinelHandler {
 
   /**
    * Receive a sig + bytes from hypercomb-web. Verify the hash, write
-   * to __from-hypercomb__/{kind}/, append to the provenance manifest,
-   * broadcast on `dcp-from-hypercomb` so any DCP main tab refreshes
-   * its tree, and ack.
+   * to the sign('from-hypercomb') pool's sign(kind) sub-pool, append to
+   * the provenance index, broadcast on `dcp-from-hypercomb` so any DCP
+   * main tab refreshes its tree, and ack.
    *
    * On ack=false the web side leaves the queue entry in place; next
    * drain will retry. So this method is conservative: any failure

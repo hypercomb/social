@@ -56,3 +56,4 @@ src/hypercomb-relay/relay.err-*
 # here (legacy .edge-*/.test-profile* profiles, or a future script that forgets)
 # is pure browser scratch — never source/content. Real scripts are not dotfiles.
 src/scripts/ai-inside/.*/
+src/diamond-core-processor/public/

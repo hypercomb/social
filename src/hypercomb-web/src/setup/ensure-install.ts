@@ -97,9 +97,15 @@ export const ensureInstall = async (sentinel: SentinelBridge | null): Promise<vo
     // probes (59 bees + 28 deps + 10 beeDep values, each a sequential
     // awaited OPFS roundtrip blocking the import map, dep loading, and
     // first paint). Enumerate names once, check membership in memory.
+    // UNION the sign(meaning) pool with its legacy `__x__` drain dir:
+    // the Store's absorb runs detached, so on the first post-upgrade
+    // boot a file can still be mid-drain in the legacy dir. An empty
+    // pool with a live legacy dir is NOT "nothing installed" — without
+    // the union this spot-check would wipe the manifest and punt every
+    // existing user to the install prompt.
     const [beeNames, depNames] = await Promise.all([
-      listFileNames(store.bees),
-      listFileNames(store.dependencies),
+      listFileNames(store.bees, store.legacyBees),
+      listFileNames(store.dependencies, store.legacyDependencies),
     ])
     const beeOk = (cachedManifest.bees ?? []).every(sig => beeNames.has(`${sig}.js`))
     const beeDepSigs = new Set(Object.values(cachedManifest.beeDeps ?? {}).flatMap(list => list ?? []))
@@ -283,9 +289,11 @@ type BundledPackage = {
   dependencies: string[]
   layers: string[]
   beeDeps?: Record<string, string[]>
-  // Sigbag (Phase 1 additive): when present, the bundle ships
-  // `__dependencies__/<dependenciesBag>/0000…` and `__bees__/<beesBag>/0000…`
-  // alongside the flat leaves. Absent for older bundles.
+  // Sigbag (Phase 1 additive): when present, the bundle ships a
+  // `<bagSig>/0000…` dir alongside the flat leaves. New flat builds put
+  // the bag dir at the content root; legacy bundles nested it inside the
+  // retired `__dependencies__/` / `__bees__/` dirs (fetch falls back to
+  // that URL shape). Absent for older bundles.
   dependenciesBag?: string
   beesBag?: string
   // Sidecar branch metadata (does not affect packageSig). Ignored at install.
@@ -334,35 +342,51 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   const store = get('@hypercomb.social/Store') as Store | undefined
   if (!store) return
 
-  // All layers — boot bundle, sentinel sync, user commits — share one
-  // flat pool at `__layers__/<sig>`. No subdirectories. Sig-keyed
-  // content-addressed storage means there's no "install-scope" to
-  // partition by; everything that lives at sig X is, by definition,
-  // the bytes that hash to X.
-  // Phase-1b: bundled layers write to the flat hive root (`__hive__/<sig>`),
-  // the canonical content pool — not the retired `__layers__` dir. Reads
-  // resolve root-first (see Store.#readContentFile).
+  // All layers — boot bundle, sentinel sync, user commits — share the
+  // flat OPFS root (`<root>/<sig>`, `store.hypercombRoot === opfsRoot`).
+  // No subdirectories, no typed pools. Sig-keyed content-addressed
+  // storage means there's no "install-scope" to partition by; everything
+  // that lives at sig X is, by definition, the bytes that hash to X.
+  // Reads resolve root-first with the legacy dirs as drain-window
+  // fallbacks (see Store.#readContentFile).
   const layerDir = store.hypercombRoot
 
   const fetchBytes = async (path: string): Promise<ArrayBuffer | null> => {
     try {
       const res = await fetch(path, { cache: 'no-store' })
       if (!res.ok) return null
+      // SPA fallback guard: an extension-less flat /content/<sig> on a
+      // dev-server origin returns index.html with 200. Sig-addressed
+      // bytes are never text/html.
+      if ((res.headers.get('content-type') || '').toLowerCase().includes('text/html')) return null
       return await res.arrayBuffer()
     } catch {
       return null
     }
   }
 
+  // Delivery-format bridge: new builds emit FLAT sig-named files at the
+  // content root (no `__bees__`/`__dependencies__`/`__layers__` dirs in
+  // dist); deployed Azure/CDN content and the shell's own /content/ tree
+  // stay old-layout until redeployed. Try the flat URL first, fall back
+  // to the legacy typed URL shape.
+  const fetchFirst = async (paths: string[]): Promise<ArrayBuffer | null> => {
+    for (const path of paths) {
+      const bytes = await fetchBytes(path)
+      if (bytes) return bytes
+    }
+    return null
+  }
+
   const writeAll = async (
     sigs: string[],
-    urlFor: (sig: string) => string,
+    urlsFor: (sig: string) => string[],
     dir: FileSystemDirectoryHandle,
     nameFor: (sig: string) => string,
   ): Promise<number> => {
     let written = 0
     await Promise.all(sigs.map(async (sig) => {
-      const bytes = await fetchBytes(urlFor(sig))
+      const bytes = await fetchFirst(urlsFor(sig))
       if (!bytes) return
       const handle = await dir.getFileHandle(nameFor(sig), { create: true })
       const writable = await handle.createWritable()
@@ -373,24 +397,33 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
     return written
   }
 
-  const beeCount = await writeAll(bundled.bees, (s) => `/content/__bees__/${s}.js`, store.bees, (s) => `${s}.js`)
-  const depCount = await writeAll(bundled.dependencies, (s) => `/content/__dependencies__/${s}.js`, store.dependencies, (s) => `${s}.js`)
-  const layerCount = await writeAll(bundled.layers, (s) => `/content/__layers__/${s}.json`, layerDir, (s) => s)
+  // Writes land in the sign('bees') / sign('dependencies') pools (the
+  // store.bees / store.dependencies handles) and the flat root for layers.
+  const beeCount = await writeAll(bundled.bees, (s) => [`/content/${s}`, `/content/__bees__/${s}.js`], store.bees, (s) => `${s}.js`)
+  const depCount = await writeAll(bundled.dependencies, (s) => [`/content/${s}`, `/content/__dependencies__/${s}.js`], store.dependencies, (s) => `${s}.js`)
+  const layerCount = await writeAll(bundled.layers, (s) => [`/content/${s}`, `/content/__layers__/${s}.json`], layerDir, (s) => s)
 
   // Sigbag fetch (Phase 2 additive): when the bundle declares a bag sig,
   // fetch each indexed entry and write under <bagSig>/<index>. Entry count
   // matches the flat array length by construction (the build emits both).
+  // The bag dir is a sig-named dir INSIDE the sign(meaning) pool —
+  // legitimate structure, not a typed folder.
   const writeBag = async (
     parentDir: FileSystemDirectoryHandle,
     bagSig: string,
     entryCount: number,
-    contentPath: string,
+    legacyContentPath: string,
   ): Promise<number> => {
     const bagDir = await parentDir.getDirectoryHandle(bagSig, { create: true })
     let written = 0
     await Promise.all(Array.from({ length: entryCount }, (_, i) => i).map(async (i) => {
       const indexName = String(i).padStart(4, '0')
-      const bytes = await fetchBytes(`${contentPath}/${bagSig}/${indexName}`)
+      // Flat dist puts the bag dir at the content root; legacy dists
+      // nested it inside the typed dir (URL-shape fallback only).
+      const bytes = await fetchFirst([
+        `/content/${bagSig}/${indexName}`,
+        `${legacyContentPath}/${bagSig}/${indexName}`,
+      ])
       if (!bytes) return
       const handle = await bagDir.getFileHandle(indexName, { create: true })
       const writable = await handle.createWritable()
@@ -402,9 +435,11 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
   }
 
   // Single-bag invariant: before writing the new bag dir, evict any prior
-  // bag dirs so `__dependencies__/` and `__bees__/` each contain exactly
-  // one bag dir after install. The receiver's importmap build relies on
-  // a `readdir` finding only the active bag — no pointer file needed.
+  // bag dirs so the sign('dependencies') and sign('bees') pools each
+  // contain exactly one bag dir after install. The receiver's importmap
+  // build relies on a `readdir` finding only the active bag — no pointer
+  // file needed. Scoped STRICTLY to install-owned pools: at the OPFS root
+  // the same 64-hex dir shape is a user lineage sigbag.
   const evictOldBagDirs = async (parentDir: FileSystemDirectoryHandle, keepSig: string): Promise<void> => {
     const stale: string[] = []
     for await (const [name, handle] of parentDir.entries()) {
@@ -469,6 +504,11 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
  * writes the new files; it never removes signatures that fell out of
  * the manifest. The script-preloader can then still find and load a
  * stale dep with broken Angular code in it.
+ *
+ * Scope: install-cache POOL CONTENTS only (sign('bees') /
+ * sign('dependencies') pools plus their legacy `__x__` drain dirs).
+ * Never the pool dirs themselves, never the flat root (layer bytes
+ * share it with user commits), never lineage bags.
  */
 const purgeStaleOpfsArtifacts = async (store: Store): Promise<void> => {
   const purgeDir = async (dir: FileSystemDirectoryHandle) => {
@@ -481,9 +521,23 @@ const purgeStaleOpfsArtifacts = async (store: Store): Promise<void> => {
     }
   }
   await Promise.all([purgeDir(store.bees), purgeDir(store.dependencies)])
+  // The legacy `__bees__`/`__dependencies__` drain dirs are the same
+  // install cache — empty them in the same wipe so the Store's detached
+  // absorb can't re-seed the pools with the stale sigs we just purged,
+  // then remove the emptied dir (non-recursive: only succeeds once
+  // genuinely empty) so it stays gone. Self-cleaning, not user data.
+  const dropLegacy = async (dir: FileSystemDirectoryHandle | undefined, name: string): Promise<boolean> => {
+    if (!dir) return false
+    await purgeDir(dir)
+    try { await store.opfsRoot.removeEntry(name); return true } catch { return false }
+  }
+  if (await dropLegacy(store.legacyBees, Store.LEGACY_BEES_DIRECTORY)) store.legacyBees = undefined
+  if (await dropLegacy(store.legacyDependencies, Store.LEGACY_DEPENDENCIES_DIRECTORY)) store.legacyDependencies = undefined
   try {
-    // `__layers__` may be absent post-migration (retired to the hive root);
-    // only legacy installs still have stale subdirs to purge here.
+    // Legacy `__layers__` may be absent (retired — layer bytes live flat
+    // at the OPFS root now); only legacy installs still have stale
+    // per-domain manifest subdirs to purge here. Its flat sig files are
+    // left for the Store's content relocation to drain.
     if (store.layers) {
       for await (const [, handle] of store.layers.entries()) {
         if (handle.kind === 'directory') await purgeDir(handle as FileSystemDirectoryHandle)
@@ -543,11 +597,17 @@ const resyncPass = async (sentinel: SentinelBridge, store: Store): Promise<void>
   // When sentinel later pushes its own bag sigs, swap in those instead.
   const priorManifest = tryParseManifest(localStorage.getItem(MANIFEST_KEY) ?? '')
 
+  // GC targets both the sign(meaning) pools AND their legacy `__x__`
+  // drain dirs while those exist — a disabled sig lingering in the legacy
+  // dir would otherwise be absorbed back into the pool by the Store's
+  // detached drain. Install cache only; never user data.
   await removeDisabled(store.bees, enabledBeeSet, '.js', priorManifest?.beesBag)
   await removeDisabled(store.dependencies, enabledDepSet, '.js', priorManifest?.dependenciesBag)
+  if (store.legacyBees) await removeDisabled(store.legacyBees, enabledBeeSet, '.js', priorManifest?.beesBag)
+  if (store.legacyDependencies) await removeDisabled(store.legacyDependencies, enabledDepSet, '.js', priorManifest?.dependenciesBag)
 
   // The dependency *bag* is the import-map's source of truth: resolveImportMap
-  // reads the bag's leaf sigs to build the alias→`/opfs/__dependencies__/<sig>`
+  // reads the bag's leaf sigs to build the alias→`/opfs/<sign('dependencies')>/<sig>`
   // map. But resync only maintains the FLAT `<sig>.js` dep files — it writes
   // enabledDeps and removeDisabled() above just deleted the rest. It never
   // rebuilds the bag. So a bag carried over from the last bundled install
@@ -558,29 +618,47 @@ const resyncPass = async (sentinel: SentinelBridge, store: Store): Promise<void>
   // map straight from the `// @scope/name` first line of each flat file this
   // pass wrote — always consistent with what's actually on disk.
   await evictBagDirs(store.dependencies)
-  // Layers live flat at the hive root (`__hive__/<sig>`, Phase-1b) shared
-  // with user commits. We can't blindly remove sigs not in `enabledLayerSet`
+  // Bag dirs stranded in the legacy drain dirs are stale by the same
+  // argument (the pool carries the active install; nothing on the
+  // receiver's read path consults a bee bag at all) — and a bag dir is
+  // the one thing that blocks the Store's gated final removeEntry from
+  // ever retiring the legacy dir. Evict them so the drain can finish.
+  if (store.legacyDependencies) await evictBagDirs(store.legacyDependencies)
+  if (store.legacyBees) await evictBagDirs(store.legacyBees)
+  // Layers live flat at the OPFS root (`<root>/<sig>`) shared with user
+  // commits. We can't blindly remove sigs not in `enabledLayerSet`
   // here — that would also delete every user-committed layer. GC for the
-  // layer pool requires a separate reachability sweep (mark-and-sweep over
-  // history markers + install set). For now, layers grow monotonically;
-  // a future `/sweep` command cleans unreachable sigs.
+  // layer content requires a separate reachability sweep (mark-and-sweep
+  // over history markers + install set). For now, layers grow
+  // monotonically; a future `/sweep` command cleans unreachable sigs.
   const layerDir = store.hypercombRoot
   await clearStaleCaches()
+
+  // Module-cache keys are pool-addressed: `/opfs/<sign(meaning)>/…`, the
+  // same derived URL shape Store's bee cache uses and the SW routes
+  // (legacy `/opfs/__x__/` URLs stay servable for pages that froze the
+  // old import map). Dep entries are keyed WITHOUT `.js` — the import
+  // map emits extension-less URLs, and a `.js`-suffixed key can never
+  // match the browser's actual fetch.
+  const beesUrlBase = `/opfs/${await Store.poolSignature(Store.BEES_MEANING)}`
+  const depsUrlBase = `/opfs/${await Store.poolSignature(Store.DEPENDENCIES_MEANING)}`
 
   let appliedCount = 0
   for (const file of files) {
     switch (file.kind) {
       case 'layer':
         await writeBytes(layerDir, file.signature, file.bytes)
+        // Legacy URL token kept as the layer route's cache key — a frozen
+        // URL shape, not an OPFS dir (the SW reads the flat root first).
         await seedCacheEntry(`/opfs/__layers__/${file.signature}.json`, file.bytes, 'application/json; charset=utf-8')
         break
       case 'bee':
         await writeBytes(store.bees, `${file.signature}.js`, file.bytes)
-        await seedCacheEntry(`/opfs/__bees__/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
+        await seedCacheEntry(`${beesUrlBase}/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
         break
       case 'dependency':
         await writeBytes(store.dependencies, `${file.signature}.js`, file.bytes)
-        await seedCacheEntry(`/opfs/__dependencies__/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
+        await seedCacheEntry(`${depsUrlBase}/${file.signature}`, file.bytes, 'application/javascript; charset=utf-8')
         break
     }
     appliedCount++
@@ -778,11 +856,15 @@ const restoreSignatureStore = (sigStore: SignatureStore): void => {
 }
 
 /** Sigs already present in OPFS (flat bee/dep/layer files), so the sentinel can
- *  stream only the delta on resync. Bees/deps are `<sig>.js`; layers are bare
- *  `<sig>` in the shared flat pool (user-committed layers included — harmless:
- *  they're sigs the hive genuinely holds, and the sentinel only checks the
- *  enabled set against this). Bag subdirectories are skipped — resyncPass writes
- *  the flat files, so flat presence is what the delta is computed against. */
+ *  stream only the delta on resync. Bees/deps are `<sig>.js` in their
+ *  sign(meaning) pools; layers are bare `<sig>` at the flat OPFS root
+ *  (user-committed layers included — harmless: they're sigs the hive
+ *  genuinely holds, and the sentinel only checks the enabled set against
+ *  this). Every legacy drain source is UNIONED in while it still exists —
+ *  a byte mid-drain is a byte we hold. Bag subdirectories are skipped —
+ *  resyncPass writes the flat files, so flat presence is what the delta is
+ *  computed against (directories are also what keeps this from ever
+ *  counting lineage bags at the root). */
 const collectPresentSigs = async (store: Store): Promise<string[]> => {
   const sigs = new Set<string>()
   const addFrom = async (dir: FileSystemDirectoryHandle | undefined, ext: string): Promise<void> => {
@@ -797,25 +879,35 @@ const collectPresentSigs = async (store: Store): Promise<string[]> => {
   }
   await addFrom(store.bees, '.js')
   await addFrom(store.dependencies, '.js')
-  // Layers now live at the flat hive root (Phase-1b); the legacy `__layers__`
-  // pool is scanned too while it drains. Both are flat sig files — the 64-hex
-  // filter ignores history markers (NNNN) and scope subdirs. The resource sigs
-  // the root also holds are a harmless superset (the sentinel only checks its
+  await addFrom(store.legacyBees, '.js')
+  await addFrom(store.legacyDependencies, '.js')
+  // Layer/content bytes live at the flat OPFS root; the legacy content
+  // sources (`__layers__`, `__hive__`, `hypercomb.io/`) are scanned too
+  // while they drain. All are flat sig files — the 64-hex filter ignores
+  // history markers (NNNN) and scope subdirs. The resource sigs the root
+  // also holds are a harmless superset (the sentinel only checks its
   // enabled set against this — more, never fewer).
   await addFrom(store.hypercombRoot, '')
   await addFrom(store.layers, '')
+  await addFrom(store.legacyHive, '')
+  await addFrom(store.legacyHypercombIo, '')
   return [...sigs]
 }
 
-/** All file names in a directory as a Set — one enumeration replaces N
- *  serial getFileHandle existence probes on the boot spot-check. */
-const listFileNames = async (dir: FileSystemDirectoryHandle): Promise<Set<string>> => {
+/** All file names across the given directories as one Set — a single
+ *  enumeration per dir replaces N serial getFileHandle existence probes
+ *  on the boot spot-check. Callers pass a pool plus its legacy drain dir
+ *  so the union covers files still mid-drain. */
+const listFileNames = async (...dirs: (FileSystemDirectoryHandle | undefined)[]): Promise<Set<string>> => {
   const names = new Set<string>()
-  try {
-    for await (const [name, handle] of dir.entries()) {
-      if (handle.kind === 'file') names.add(name)
-    }
-  } catch { /* dir unreadable — empty set fails the spot-check, triggering reinstall */ }
+  for (const dir of dirs) {
+    if (!dir) continue
+    try {
+      for await (const [name, handle] of dir.entries()) {
+        if (handle.kind === 'file') names.add(name)
+      }
+    } catch { /* dir unreadable — missing names fail the spot-check, triggering reinstall */ }
+  }
   return names
 }
 

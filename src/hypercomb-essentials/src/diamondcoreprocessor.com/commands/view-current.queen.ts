@@ -26,8 +26,9 @@ type Store = {
  * sig that points at a resource (body content, projection sigs, slot
  * payloads, etc.) is inlined to its parsed value. As a second pass,
  * any sig still appearing in `children` arrays — those point at layer
- * markers in `__history__/`, which `Store.deepResolve` doesn't follow
- * — is resolved through `HistoryService.getLayerBySig`, recursively.
+ * markers in lineage sigbags at the flat OPFS root (legacy `__history__/`
+ * is a read-fallback), which `Store.deepResolve` doesn't follow — is
+ * resolved through `HistoryService.getLayerBySig`, recursively.
  *
  * Optional argument: integer depth cap on the children walk.
  *   /current        → expand everything (default)

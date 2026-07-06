@@ -40,7 +40,7 @@ the infrastructure connecting these two environments is not hypothetical. it is 
 | `LayerInstaller` | downloads + verifies + writes artifacts to OPFS | `hypercomb-shared/core/layer-installer.ts` |
 | `ScriptPreloader` | discovers bees from install manifest, verifies signatures, loads from OPFS | `hypercomb-shared/core/script-preloader.ts` |
 | `DependencyLoader` | resolves namespace dependencies via import map | `hypercomb-shared/core/dependency-loader.ts` |
-| `resolveImportMap()` | scans the `__dependencies__` pool in OPFS for dependency aliases, builds dynamic import map | `hypercomb-shared` |
+| `resolveImportMap()` | scans the dependencies pool (`sign('dependencies')` at the OPFS root; legacy `__dependencies__/` read-fallback while it drains) for dependency aliases, builds dynamic import map | `hypercomb-shared` |
 | service worker | intercepts `/opfs/` requests, serves from OPFS with correct MIME types | per-app `public/` |
 | `manifest.json` | discovery file keyed by `rootLayerSig`; each package entry lists all bees, deps, layers by signature + `beeDeps` for lazy loading | build output |
 | `EffectBus` | pub/sub with last-value replay — bees coordinate without coupling | `@hypercomb/core` |
@@ -137,7 +137,7 @@ here's the workflow, step by step:
              LayerInstaller downloads bee + deps → OPFS
              signature verified at every step
 
-4. RESOLVE   resolveImportMap() scans the __dependencies__ pool in OPFS
+4. RESOLVE   resolveImportMap() scans the sign('dependencies') pool in OPFS
              injects <script type="importmap">
              Three.js mapped to /vendor/three.runtime.js
 

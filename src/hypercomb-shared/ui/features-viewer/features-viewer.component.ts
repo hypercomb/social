@@ -36,6 +36,7 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { markVerified, markAllowedRoot, branchRootFor } from './feature-verified'
 import { hideFeature, restoreFeature, loadHidden, hiddenKey, type HiddenFeature } from './feature-hidden'
+import { adoptTargetSuggestions, createAdoptTargetPath, type AdoptTargetSuggestion } from './adopt-target'
 
 /** A feature already applied to the layer. */
 interface FeatureRow {
@@ -397,6 +398,7 @@ export class FeaturesViewerComponent implements OnDestroy {
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
     this.#clearDownloadLeash()
+    this.#cancelTargetBlur()
   }
 
   close(): void {
@@ -405,6 +407,11 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.selectedKeys.set(new Set())
     this.pending.set(new Set())
     this.downloadResults.set([])
+    // Reset the target combobox so a reopen starts clean.
+    this.openTargetCell.set(null)
+    this.activeSuggestIndex.set(-1)
+    this.#targetSuggestions.clear()
+    this.#cancelTargetBlur()
     // In-flight downloads keep running (the bytes still land, and the header
     // sync pill keeps showing them) — only the panel-local status resets.
   }
@@ -561,6 +568,119 @@ export class FeaturesViewerComponent implements OnDestroy {
   /** Parse the target path into parent segments ([] = root). */
   #targetSegments(group: FeatureGroup): string[] {
     return this.targetFor(group).split('/').map(s => s.trim()).filter(Boolean)
+  }
+
+  // ── adopt-target autocomplete ─────────────────────────────────────
+  // The target input is a combobox: type a destination and either COMPLETE
+  // against locations that exist or CREATE the typed path (the drone refuses a
+  // target that doesn't resolve, so create-then-set is what makes an adopt into
+  // a not-yet-built folder actually land). One dropdown open at a time, keyed
+  // by cell; suggestions are computed async off HistoryService, so a per-cell
+  // sequence guards against a slow earlier query clobbering a newer one.
+
+  /** The cell whose target dropdown is open (null = none). */
+  readonly openTargetCell = signal<string | null>(null)
+  /** Keyboard cursor within the open dropdown (-1 = none highlighted). */
+  readonly activeSuggestIndex = signal(-1)
+
+  #targetSuggestions = new Map<string, AdoptTargetSuggestion[]>()
+  readonly #targetSuggestVersion = signal(0)
+  #targetSeq = new Map<string, number>()
+  #targetBlurTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** Rows to render for a group's dropdown (reactive via the version signal). */
+  targetSuggestions(group: FeatureGroup): AdoptTargetSuggestion[] {
+    this.#targetSuggestVersion()
+    return this.#targetSuggestions.get(group.cell) ?? []
+  }
+
+  /** Open + non-empty — the only time the listbox renders. */
+  isTargetOpen(group: FeatureGroup): boolean {
+    return this.openTargetCell() === group.cell && this.targetSuggestions(group).length > 0
+  }
+
+  isActiveSuggest(index: number): boolean {
+    return this.activeSuggestIndex() === index
+  }
+
+  onTargetFocus(group: FeatureGroup): void {
+    this.#cancelTargetBlur()
+    this.openTargetCell.set(group.cell)
+    this.activeSuggestIndex.set(-1)
+    void this.#recomputeTargetSuggestions(group)
+  }
+
+  onTargetInput(group: FeatureGroup, value: string): void {
+    this.setTarget(group, value)
+    this.openTargetCell.set(group.cell)
+    this.activeSuggestIndex.set(-1)
+    void this.#recomputeTargetSuggestions(group)
+  }
+
+  /** Close on blur, but after a beat so a mousedown on an option still lands
+   *  (option clicks also preventDefault the blur — this is the belt-and-braces). */
+  onTargetBlur(group: FeatureGroup): void {
+    this.#cancelTargetBlur()
+    this.#targetBlurTimer = setTimeout(() => {
+      this.#targetBlurTimer = null
+      if (this.openTargetCell() === group.cell) this.openTargetCell.set(null)
+    }, 150)
+  }
+
+  onTargetKey(group: FeatureGroup, event: KeyboardEvent): void {
+    if (event.key === 'Escape') {
+      // Close the dropdown WITHOUT letting the panel's own Escape handler fire
+      // and close the whole panel.
+      if (this.openTargetCell() === group.cell) {
+        event.preventDefault()
+        event.stopPropagation()
+        this.openTargetCell.set(null)
+      }
+      return
+    }
+    if (!this.isTargetOpen(group)) return
+    const list = this.targetSuggestions(group)
+    if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      this.activeSuggestIndex.set((this.activeSuggestIndex() + 1) % list.length)
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault()
+      this.activeSuggestIndex.set((this.activeSuggestIndex() - 1 + list.length) % list.length)
+    } else if (event.key === 'Enter') {
+      const i = this.activeSuggestIndex()
+      if (i >= 0 && i < list.length) {
+        event.preventDefault()
+        void this.pickTarget(group, list[i])
+      }
+    }
+  }
+
+  /** Accept a row: a `create` mints the path first (so the drone's existence
+   *  check passes), then either kind sets the field to the chosen path. */
+  async pickTarget(group: FeatureGroup, suggestion: AdoptTargetSuggestion): Promise<void> {
+    this.#cancelTargetBlur()
+    if (suggestion.kind === 'create') {
+      const ok = await createAdoptTargetPath(suggestion.segments)
+      if (!ok) return
+    }
+    this.setTarget(group, suggestion.path)
+    this.openTargetCell.set(null)
+    this.activeSuggestIndex.set(-1)
+  }
+
+  async #recomputeTargetSuggestions(group: FeatureGroup): Promise<void> {
+    const seq = (this.#targetSeq.get(group.cell) ?? 0) + 1
+    this.#targetSeq.set(group.cell, seq)
+    const list = await adoptTargetSuggestions(this.targetFor(group))
+    if (this.#targetSeq.get(group.cell) !== seq) return   // a newer query superseded this one
+    this.#targetSuggestions.set(group.cell, list)
+    this.#targetSuggestVersion.update(v => v + 1)
+  }
+
+  #cancelTargetBlur(): void {
+    if (!this.#targetBlurTimer) return
+    clearTimeout(this.#targetBlurTimer)
+    this.#targetBlurTimer = null
   }
 
   #adoptFeature(group: FeatureGroup, feat: FeatureRow): void {

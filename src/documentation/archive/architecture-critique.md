@@ -54,7 +54,7 @@ Fowler's writing on **Event-Driven Architecture** distinguishes between:
 
 Hypercomb's Effect system appears to operate primarily at level 1 (notification), which is the simplest and most decoupled form.
 
-> **archive note (2026-06-18):** the event-sourcing rung the critique reads as missing was added — but as *durable state*, not an effect log. Every user action commits exactly one layer marker into a per-lineage sigbag (`__history__/<lineageSig>/`), and "what's here now" reads the head layer's slots (`currentLayerAt → getLayerBySig`), not a replay of effects from zero. The merkle layer/marker chain IS the full history of what happened — addressable by signature and time-travelable. See `history-sigbag-as-root.md`.
+> **archive note (2026-06-18):** the event-sourcing rung the critique reads as missing was added — but as *durable state*, not an effect log. Every user action commits exactly one layer marker into a per-lineage sigbag (now `<lineageSig>/` at the OPFS root; `__history__/` is a legacy drain), and "what's here now" reads the head layer's slots (`currentLayerAt → getLayerBySig`), not a replay of effects from zero. The merkle layer/marker chain IS the full history of what happened — addressable by signature and time-travelable. See `history-sigbag-as-root.md`.
 
 **What Fowler would commend:**
 - Decoupling drones via effects means adding a new drone doesn't require modifying existing ones. This is the **Open-Closed Principle** in practice.

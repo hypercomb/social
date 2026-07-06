@@ -20,11 +20,12 @@
 // Store's #SYNCABLE_OPTIMIZATION_KINDS ({feedback,qa,qa-answer}) so it stays on
 // this participant's machine (a local view/off preference, like adopted-roots).
 //
-// INTERIM SUBSTRATE: the records physically ride the shared `__optimization__`
-// pool today because that is the only signature pool that exists in
-// `development`. The canonical home is a `sign('hidden')` meaning pool — pending
-// the parked no-underscore storage migration. Swapping the substrate is
-// internal to this module; the exported API does not change.
+// INTERIM SUBSTRATE: the records physically ride the shared sign('optimization')
+// pool today (the legacy `__optimization__` dir is a drain source Store absorbs
+// on boot). The canonical home is a `sign('hidden')` meaning pool — a future
+// split that must copy existing members per-record and keep 'hidden' out of
+// Store's syncable kinds. Swapping the substrate is internal to this module;
+// the exported API does not change.
 
 const SIG_RE = /^[a-f0-9]{64}$/
 

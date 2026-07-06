@@ -9,18 +9,26 @@ import { EffectBus, SignatureService, I18N_IOC_KEY, type I18nProvider } from '@h
 import { callAnthropic, callAnthropicBatch, getApiKey, MODELS } from '../assistant/llm-api.js'
 import { cellLocationSig, lookupTilePropsSig } from '../editor/tile-properties.js'
 
-// Translation cache: per-locale JSON files in OPFS at /translations/<locale>.json.
-// localStorage is NOT used — it doesn't scale past a few MB and doesn't belong
-// holding bulk language data. The OPFS files are plain bytes: editable, shareable,
-// signable, and user-accessible via any OPFS tool. Shape per file:
+// Translation cache: per-locale maps, each a CONTENT-ADDRESSED document in
+// the sign('translations') document pool (Store.putPoolDoc/getPoolDoc,
+// sub-keyed by locale → a sign(locale) sub-bucket holding one member named
+// by sign(its bytes)). Never a human filename. Shape per locale:
 //   { "<sourceSig>": "<translatedSig>", ... }
+// The legacy non-signed `translations/<locale>.json` dir is a read-fallback/
+// drain source: Store's boot absorb content-addresses it into the pool.
 const PROPS_INDEX_KEY = 'hc:tile-props-index'
-const TRANSLATIONS_DIR = 'translations'
+const LEGACY_TRANSLATIONS_DIR = 'translations'
 const BATCH_SIZE = 40
 
 type StoreLike = {
   putResource: (blob: Blob) => Promise<string>
   getResource: (sig: string) => Promise<Blob | null>
+}
+
+type StoreDocApi = {
+  translations?: FileSystemDirectoryHandle
+  getPoolDoc: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
+  putPoolDoc: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
 }
 
 type LocaleMap = Record<string, string> // sourceSig → translatedSig for one locale
@@ -518,27 +526,41 @@ export class TranslationService extends EventTarget {
   async #cacheFor(locale: string): Promise<LocaleMap> {
     let m = this.#cache.get(locale)
     if (m) return m
-    try {
-      const root = await navigator.storage.getDirectory()
-      const dir = await root.getDirectoryHandle(TRANSLATIONS_DIR, { create: false })
-      const handle = await dir.getFileHandle(`${locale}.json`, { create: false })
-      const file = await handle.getFile()
-      m = JSON.parse(await file.text()) as LocaleMap
-    } catch {
-      m = {}
-    }
+    m = await this.#readLocale(locale) ?? {}
     this.#cache.set(locale, m)
     return m
   }
 
+  /** Document pool (authoritative) → legacy dir → pool again. The re-read
+   *  closes the boot-absorb race (Store writes the pool member before
+   *  deleting the legacy file); first-hit so the pool wins. Null when the
+   *  locale is absent everywhere. */
+  async #readLocale(locale: string): Promise<LocaleMap | null> {
+    const store = get('@hypercomb.social/Store') as StoreDocApi | undefined
+    const readPool = async (): Promise<LocaleMap | null> => {
+      if (!store?.translations) return null
+      const buf = await store.getPoolDoc(store.translations, locale)
+      if (!buf) return null
+      try { return JSON.parse(new TextDecoder().decode(buf)) as LocaleMap } catch { return null }
+    }
+    return (await readPool()) ?? (await this.#readLegacyLocale(locale)) ?? (await readPool())
+  }
+
+  async #readLegacyLocale(locale: string): Promise<LocaleMap | null> {
+    try {
+      const root = await navigator.storage.getDirectory()
+      const dir = await root.getDirectoryHandle(LEGACY_TRANSLATIONS_DIR, { create: false })
+      const handle = await dir.getFileHandle(`${locale}.json`, { create: false })
+      return JSON.parse(await (await handle.getFile()).text()) as LocaleMap
+    } catch { return null }
+  }
+
   async #persistLocale(locale: string): Promise<void> {
+    const store = get('@hypercomb.social/Store') as StoreDocApi | undefined
+    if (!store?.translations) return
     const m = this.#cache.get(locale) ?? {}
-    const root = await navigator.storage.getDirectory()
-    const dir = await root.getDirectoryHandle(TRANSLATIONS_DIR, { create: true })
-    const handle = await dir.getFileHandle(`${locale}.json`, { create: true })
-    const writable = await handle.createWritable()
-    await writable.write(JSON.stringify(m, null, 2))
-    await writable.close()
+    const bytes = new TextEncoder().encode(JSON.stringify(m, null, 2)).buffer as ArrayBuffer
+    await store.putPoolDoc(store.translations, bytes, locale)
   }
 
   async #signString(text: string): Promise<string> {

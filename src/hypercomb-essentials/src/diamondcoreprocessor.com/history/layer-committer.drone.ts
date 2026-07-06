@@ -174,6 +174,27 @@ class CommitMachine {
     })
     return ran
   }
+
+  /**
+   * Run an arbitrary commit task in the SAME serialisation chain as
+   * request()/requestAndWait(). importTree (create / paste / adopt) commits
+   * OUTSIDE the per-event #commit path — it reads each affected bag's current
+   * layer, then writes an updated one. That read-modify-write is NOT atomic:
+   * if a machine-driven #commit (or another importTree) on the same bag
+   * interleaves — reading the parent BEFORE this task's write and writing
+   * AFTER — it clobbers the freshly-appended child, so a created tile never
+   * "sticks". Chaining the whole task here makes every commit path share one
+   * FIFO, so no two read-modify-write cycles overlap. Returns a promise that
+   * settles with the task's result; the chain absorbs the error so later
+   * requests still run.
+   */
+  enqueue<T>(task: () => Promise<T>): Promise<T> {
+    const ran = this.#chain.then(task)
+    this.#chain = ran.then(() => {}, err => {
+      console.error('[LayerCommitter] enqueued task failed:', err)
+    })
+    return ran
+  }
 }
 
 export class LayerCommitter {
@@ -518,7 +539,15 @@ export class LayerCommitter {
    * alone, exactly as a normal deep edit is.
    *   - total layer files written = |updates ∪ their direct parents|
    */
-  public importTree = async (
+  // Public entry: run the import on the shared commit FIFO so its
+  // read-modify-write can't interleave with a #commit (or another
+  // importTree) on the same bag — the lost-child race. See CommitMachine.enqueue.
+  public importTree = (
+    updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],
+    nameSlots: ReadonlySet<string> = new Set(['children']),
+  ): Promise<void> => this.#machine.enqueue(() => this.#importTree(updates, nameSlots))
+
+  readonly #importTree = async (
     updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],
     nameSlots: ReadonlySet<string> = new Set(['children']),
   ): Promise<void> => {

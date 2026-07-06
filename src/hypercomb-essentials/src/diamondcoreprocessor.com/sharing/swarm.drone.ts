@@ -26,7 +26,7 @@
 // subscription on the same sig auto-triggers that paint when an event
 // arrives, so we don't need to dispatch a render signal ourselves.
 
-import { Drone, EffectBus } from '@hypercomb/core'
+import { Drone, EffectBus, SignatureService } from '@hypercomb/core'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
@@ -328,15 +328,55 @@ interface TileSourceRegistryLike {
     Promise<readonly { name: string; kind: string; source: Record<string, unknown> }[]>) => () => void
 }
 
+// Publish-exclusion FIREWALL for the OPFS-fallback walk. The user tree
+// root IS the OPFS root now, so an enumeration there sees — besides
+// tile dirs — legacy `__x__` drain sources, the legacy `hypercomb.io/`
+// content root, the i18n `overrides/` dir, lineage sigbags and every
+// sign(meaning) pool. None of those are tiles and none may ever
+// publish to peers as one.
 const SYSTEM_DIR_NAMES = new Set([
+  // LEGACY `__x__` drain sources — read-fallback dirs until their
+  // self-cleaning absorb removes them. The generic `__*__` test in
+  // isSystemDirName covers these too; listed for documentation.
   '__dependencies__', '__bees__', '__layers__', '__location__',
   '__history__', '__optimization__', '__resources__',
+  // Legacy pre-`__hive__` content root (drain source) and the legacy
+  // non-signed i18n dirs — the non-sig, non-underscore root residents,
+  // all self-cleaning drain sources now.
+  'hypercomb.io', 'overrides', 'translations',
 ])
+
+// POOLS OF MEANING are signature-addressed — dir name = sign(meaning),
+// derived exactly as Store derives it (sha256 of the UTF-8 meaning
+// bytes) so the firewall computes the identical addresses with no
+// registry. Every known pool is excluded: pool records never ride the
+// swarm. The derivations are async, but the synchronous 64-hex rule in
+// isSystemDirName already excludes every sig-named dir (pools AND
+// lineage sigbags), so a walk racing these additions cannot leak a
+// pool onto the wire — this set is defence in depth + documentation.
+const POOL_MEANINGS = [
+  'optimization', 'bees', 'dependencies', 'clipboard', 'threads',
+  'computation', 'manifests', 'push', 'receipts', 'structure',
+  'roots', 'patches', 'host-push', 'host-receipts', 'substrate',
+  'temporary', 'overrides', 'translations',
+] as const
+for (const meaning of POOL_MEANINGS) {
+  void SignatureService.sign(new TextEncoder().encode(meaning).buffer as ArrayBuffer)
+    .then((sig) => { SYSTEM_DIR_NAMES.add(sig) })
+}
+
+const SIG_DIR_RE = /^[0-9a-f]{64}$/
 
 function isSystemDirName(name: string): boolean {
   if (!name) return true
   if (SYSTEM_DIR_NAMES.has(name)) return true
-  return name.startsWith('__') && name.endsWith('__')
+  // Legacy `__x__` dirs — drain sources only, never tiles.
+  if (name.startsWith('__') && name.endsWith('__')) return true
+  // Sig-named dirs: lineage sigbags and sign(meaning) pools live at the
+  // root as 64-hex names. Tiles are human-named — a 64-hex dir is never
+  // a publishable tile. Synchronous, so the publish walk cannot race
+  // the async pool derivations above.
+  return SIG_DIR_RE.test(name)
 }
 
 /** Deep-canonicalize a JSON-shaped value before signing. Object keys
@@ -414,8 +454,8 @@ function base64ToArrayBuffer(b64: string): ArrayBuffer {
 // receive to discover any sub-resources a streamed propsSig blob
 // references (e.g. `small.image = pointSig`), so the receiver can
 // queue those for fetch too. Returns deduped sig strings; only fields
-// that are exactly 64 lowercase hex chars qualify (matches OPFS
-// __resources__ filename shape).
+// that are exactly 64 lowercase hex chars qualify (matches the flat
+// root's sig-named content files).
 function collectNestedSigs(value: unknown, out: Set<string>): void {
   if (!value) return
   if (typeof value === 'string') {
@@ -449,7 +489,10 @@ async function listLocalChildren(dir: FileSystemDirectoryHandle): Promise<string
 // Lightweight 0000 reader. Mirrors readCellProperties() in
 // editor/tile-properties.ts; kept local so swarm.drone has no
 // presentation/editor import chain. Returns {} on missing/parse-fail
-// — callers treat absence as "no index field".
+// — callers treat absence as "no index field". NOTE: lineage sigbag
+// MARKER files are also named 0000/0001/… — safe here only because
+// isSystemDirName keeps sig-named dirs out of the walk entirely, so a
+// dir reaching this helper is always a tile dir.
 async function readChildProperties(cellDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
   let fh: FileSystemFileHandle
   try { fh = await cellDir.getFileHandle('0000') }

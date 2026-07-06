@@ -156,9 +156,17 @@ $accent: #c8b8ff;
   color: rgba(255, 255, 255, 0.5);
 }
 
-.target-input {
+// Combobox wrapper: holds the input and anchors the suggestion listbox that
+// drops beneath it (position: relative → the absolute list tracks the input).
+.target-combo {
+  position: relative;
   flex: 1;
   min-width: 0;
+}
+
+.target-input {
+  width: 100%;
+  box-sizing: border-box;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 4px;
@@ -171,6 +179,79 @@ $accent: #c8b8ff;
     outline: none;
     border-color: rgba($accent, 0.55);
     background: rgba($accent, 0.08);
+  }
+}
+
+// Suggestion listbox — matches first, an optional CREATE row last. Cold/clean:
+// a solid dark sheet so rows beneath don't bleed through, a thin border, and a
+// single soft shadow for separation (no glow, no animation).
+.target-suggest {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 5;
+  margin: 0;
+  padding: 0.15em;
+  list-style: none;
+  max-height: 14em;
+  overflow-y: auto;
+  background: #17171c;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+}
+
+.target-option {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4em;
+  padding: 0.28em 0.4em;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 0.7em;
+  line-height: 1.2;
+  color: rgba(255, 255, 255, 0.85);
+
+  &:hover,
+  &.active {
+    background: rgba($accent, 0.16);
+  }
+
+  .opt-badge {
+    flex: 0 0 auto;
+    width: 1.1em;
+    text-align: center;
+    font-family: var(--hc-mono, monospace);
+    color: rgba(255, 255, 255, 0.4);
+
+    &.create { color: rgba($accent, 0.9); }
+  }
+
+  .opt-text {
+    flex: 0 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  // Full path trailing a match, dimmed — the leaf name leads, the location
+  // follows so identical names under different parents stay distinguishable.
+  .opt-path {
+    flex: 1 1 auto;
+    min-width: 0;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--hc-mono, monospace);
+    color: rgba(255, 255, 255, 0.3);
+  }
+
+  // The create row reads as an action, not an existing thing.
+  &.create {
+    color: rgba($accent, 0.95);
+    .opt-text { font-style: italic; }
   }
 }
 

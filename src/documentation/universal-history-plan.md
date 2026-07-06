@@ -37,7 +37,7 @@ When you rewind the clock to any timestamp and then navigate through the hive, e
 
 The implemented history is **not** per-op-type replay from zero. It is the layer-marker model with **per-page, leaf-only** commit (see [history-sigbag-as-root.md](history-sigbag-as-root.md)):
 
-- A **marker** is a pointer record `{ "layer": "<sig>" }` appended to the lineage's history bag at `__history__/<lineageSig>/NNNNNNNN`. The layer bytes themselves live at the hive root (`__hive__/<sig>`; legacy `__layers__/<sig>` while it drains).
+- A **marker** is a pointer record `{ "layer": "<sig>" }` appended to the lineage's sigbag at the OPFS root (`<lineageSig>/NNNNNNNN`; legacy `__history__/` is a read-fallback drain). The layer bytes themselves live as sig-named files at the OPFS root (legacy `__hive__/` and `__layers__/` are read-fallbacks while they drain).
 - `commitLayer(locationSig, layer)` signs the **canonical layer bytes** (`SignatureService.sign` over `JSON.stringify` of the canonicalized layer) to get `layerSig`, writes the layer to the pool, then appends one marker. Identical bytes dedupe (no new marker).
 - One user action = **one layer + one marker at the edited leaf**. Per-page commit is **leaf-only**: `LayerCommitter` commits exactly where the change happened and does **not** re-commit ancestors — a parent's stored child sig is left as a stale hint, and a lineage's liveness/current root is resolved on demand from its **own** bag head, never from a parent's stale pointer. Cost is **one marker**, not O(depth) up the spine. The merkle relationship still holds — a subtree's root is `f(child sigs)` — but it is resolved **lazily on read**, not materialized eagerly at commit. (This retired the earlier eager leaf→root commit cascade, which wrote one marker per ancestor on every change; its handlers survive only for graceful migration of pre-existing history.)
 - "What's here now" reads the **head layer's slots** (`currentLayerAt` → `getLayerBySig`, children from the `children[]` slot) — not an op-replay from zero. Marker `00000000` is an auto-minted EMPTY `{ name }` layer.
@@ -315,7 +315,7 @@ Related operations share a `groupId`. Undo/redo treats the group as one step. Ex
 The `at` field carries a millisecond epoch. The per-location cursor uses this to seek within a bag (solid, shipped). The *global* clock is designed to seek across all bags by the same key — but as noted under Clock capabilities, that cross-bag join is not yet wired end-to-end. The principle holds; the global wiring is outstanding.
 
 ### Nothing is deleted
-History bags are permanent. Cells are "removed" by appending a remove (a new layer whose `children` slot drops the cell), not by deleting files. The signature addresses the bag; the head layer's slots are the live truth. Locally this is durable by default — OPFS `__history__` marker chains plus the `__layers__`/`__resources__` pools persist without any network round-trip. This is what makes the debugger possible — you can always go back.
+History bags are permanent. Cells are "removed" by appending a remove (a new layer whose `children` slot drops the cell), not by deleting files. The signature addresses the bag; the head layer's slots are the live truth. Locally this is durable by default — the OPFS lineage sigbags plus the root sig files persist without any network round-trip (legacy `__history__`/`__layers__`/`__resources__` dirs remain readable only as drain sources). This is what makes the debugger possible — you can always go back.
 
 ---
 

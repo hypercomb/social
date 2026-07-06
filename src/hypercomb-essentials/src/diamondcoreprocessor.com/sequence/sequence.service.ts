@@ -8,7 +8,8 @@
 //     the canonical, shareable copy is the content-addressed resource.
 //
 //   • Sets — each saved set is a resource `{ kind:'sequence', name, indexes }`
-//     in `__resources__` (the "file that has a bunch of indexes"). Content-
+//     stored as a sig file at the flat OPFS root (legacy `__resources__/` is a
+//     read-fallback) — the "file that has a bunch of indexes". Content-
 //     addressed so identical sets dedup and peers can resolve them.
 //
 //   • Resolver — answers, synchronously, "which sequence governs new tiles at

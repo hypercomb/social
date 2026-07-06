@@ -17,7 +17,11 @@ import type { LayoutService } from './layout.service.js'
  *   /layout remove my-grid     — remove a saved layout
  */
 
+// LEGACY per-level sidecar dir of saved layout templates. Opened create:false
+// only (read / enumerate / remove) — a drain-source fallback, never created.
+// New saves are pending the optimization-substrate rewire (see #save).
 const LAYOUTS_DIR = '__layouts__'
+const SIG_NAME_RE = /^[0-9a-f]{64}$/
 
 export type LayoutTemplate = {
   readonly name: string
@@ -76,12 +80,12 @@ export class LayoutQueenBee extends QueenBee {
 
     const template: LayoutTemplate = { name, order, commands }
 
-    // Layouts are decorations — they belong in the __optimization__
-    // substrate, not as per-level `__layouts__/` sidecar folders. The
-    // legacy save site minted a sidecar dir at the current explorer
-    // depth; under the layer-primitive doctrine that's a parallel store.
-    // PENDING re-wire: write through the optimization substrate keyed
-    // by the current lineage sig.
+    // Layouts are decorations — they belong in the optimization substrate
+    // (the sign('optimization') pool), not as per-level `__layouts__/`
+    // sidecar folders. The legacy save site minted a sidecar dir at the
+    // current explorer depth; under the layer-primitive doctrine that's a
+    // parallel store. PENDING re-wire: write through the optimization
+    // substrate keyed by the current lineage sig.
     void template
     console.warn('[layout] save: optimization-substrate write path pending; layout not persisted')
     EffectBus.emit('layout:saved', { name, count: order.length })
@@ -164,7 +168,10 @@ export class LayoutQueenBee extends QueenBee {
   async #currentCells(dir: FileSystemDirectoryHandle): Promise<string[]> {
     const cells: string[] = []
     for await (const [key, handle] of (dir as any).entries()) {
-      if (handle.kind === 'directory' && !key.startsWith('__')) {
+      // Cells are NAMED child dirs. Skip legacy underscore sidecars AND
+      // sig-named dirs (64-hex: a pool or lineage bag) so that when the
+      // resolved dir is the flat root, pools/bags are never mistaken for cells.
+      if (handle.kind === 'directory' && !key.startsWith('__') && !SIG_NAME_RE.test(key)) {
         cells.push(key)
       }
     }

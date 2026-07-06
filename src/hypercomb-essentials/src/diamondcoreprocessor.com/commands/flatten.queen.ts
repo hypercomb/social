@@ -50,11 +50,14 @@ export class FlattenQueenBee extends QueenBee {
     //    when the user explicitly invokes /flatten.
     await history.purgeNonLayerFiles(locationSig)
 
-    // 3. Archive existing markers into __temporary__/ inside the bag.
+    // 3. Archive existing markers via HistoryService.archiveEntries.
     //    Soft-delete, not hard — the bag mirrors deleted history so
     //    /flatten can be undone manually if needed. The empty marker
     //    re-mint and fresh commit below land on names that don't
-    //    collide because #nextMarkerName scans the archive too.
+    //    collide because #nextMarkerName scans the archive too. (The
+    //    physical archive location is owned by the history subsystem;
+    //    its legacy `__temporary__/`-inside-the-bag home is being
+    //    retired toward a sign('temporary') pool — see concerns.)
     await history.archiveEntries(locationSig, entries.map(e => e.filename))
 
     // 4. Commit one marker carrying the head's content verbatim.

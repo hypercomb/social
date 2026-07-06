@@ -7,17 +7,19 @@ Status: v1 (relay-backed) building 2026-06-24. Hardening (HTTP byte rest) docume
 The self-feeding feedback loop (`.claude/skills/feedback-loop`, see
 `project_feedback_loop`) reads `kind:'feedback'` items, mints `kind:'qa'`
 dashboard questions, drains `kind:'qa-answer'` into notes, and re-feeds.
-Every one of those records lives in the **optimization substrate**
-(`__optimization__/<sig>`, `Store.putOptimization`).
+Every one of those records lives in the **optimization substrate** — the
+`sign('optimization')` pool of meaning (`Store.putOptimization`; the legacy
+`__optimization__` folder is absorbed and deleted on boot).
 
 The substrate is **strictly local OPFS**. It is deliberately excluded from
 both sync paths:
 
 - Host-sync's closure walk (`host-sync.service.ts #enqueueLayerRefs`) pushes
-  only a layer's transitive closure — `__optimization__` is never referenced
-  from a layer slot, so it is never pushed.
-- The swarm lists `__optimization__` in `SYSTEM_DIR_NAMES`
-  (`swarm.drone.ts`) — it is explicitly skipped during publish.
+  only a layer's transitive closure — the optimization pool is never
+  referenced from a layer slot, so it is never pushed.
+- The swarm excludes the pool from publish (`SYSTEM_DIR_NAMES` in
+  `swarm.drone.ts` — it derives the same `sign('optimization')` address by
+  convention and skips it, alongside the legacy `__optimization__` name).
 
 Consequence: feedback submitted in browser A is invisible to a feedback-loop
 routine running in any other OPFS (a headless Playwright renderer, a second
@@ -180,7 +182,7 @@ When in a role it:
    three syncable kinds) → record the sig in the pending map + publish ITEM.
 2. Subscribes the channel (`mesh.subscribe(channelId)`) → on any peer ITEM
    event: if we don't already hold the sig, verify `s` against `sha256(t)` and
-   `putOptimization(blob([t]), {emit:false})` into local `__optimization__`.
+   `putOptimization(blob([t]), {emit:false})` into the local `sign('optimization')` pool.
    (A live real-relay echo of our own item also clears its pending entry here,
    but most relays don't echo to the sender — the drain's read-back query above
    is the reliable receipt.)

@@ -123,19 +123,54 @@
 
             <!-- ── Adopt target: WHERE the branch folds (peer tiles only).
                  Captured at adopt-click, editable — adopting into a
-                 reorganized hive must not mean adopt-then-move. ── -->
+                 reorganized hive must not mean adopt-then-move. A combobox:
+                 complete against locations that exist, or CREATE the typed
+                 path (the drone refuses a target that doesn't resolve). ── -->
             @if (isPeerGroup(group)) {
               <div class="fgroup-target">
                 <label class="target-label" [attr.for]="'target-' + group.cell">{{ 'features.target' | t }}</label>
-                <input
-                  class="target-input"
-                  [id]="'target-' + group.cell"
-                  type="text"
-                  [value]="targetFor(group)"
-                  (input)="setTarget(group, $any($event.target).value)"
-                  [attr.title]="'features.target.hint' | t"
-                  spellcheck="false"
-                />
+                <div class="target-combo">
+                  <input
+                    class="target-input"
+                    [id]="'target-' + group.cell"
+                    type="text"
+                    role="combobox"
+                    aria-autocomplete="list"
+                    autocomplete="off"
+                    [attr.aria-expanded]="isTargetOpen(group)"
+                    [attr.aria-controls]="'target-list-' + group.cell"
+                    [value]="targetFor(group)"
+                    (input)="onTargetInput(group, $any($event.target).value)"
+                    (focus)="onTargetFocus(group)"
+                    (blur)="onTargetBlur(group)"
+                    (keydown)="onTargetKey(group, $event)"
+                    [attr.title]="'features.target.hint' | t"
+                    spellcheck="false"
+                  />
+                  @if (isTargetOpen(group)) {
+                    <ul class="target-suggest" role="listbox" [id]="'target-list-' + group.cell">
+                      @for (s of targetSuggestions(group); track s.path; let i = $index) {
+                        <li
+                          role="option"
+                          class="target-option"
+                          [class.create]="s.kind === 'create'"
+                          [class.active]="isActiveSuggest(i)"
+                          [attr.aria-selected]="isActiveSuggest(i)"
+                          (mousedown)="pickTarget(group, s); $event.preventDefault()"
+                        >
+                          @if (s.kind === 'create') {
+                            <span class="opt-badge create">+</span>
+                            <span class="opt-text">{{ 'features.target.create' | t: { path: s.path } }}</span>
+                          } @else {
+                            <span class="opt-badge">/</span>
+                            <span class="opt-text">{{ s.name }}</span>
+                            <span class="opt-path">{{ s.path }}</span>
+                          }
+                        </li>
+                      }
+                    </ul>
+                  }
+                </div>
               </div>
             }
 

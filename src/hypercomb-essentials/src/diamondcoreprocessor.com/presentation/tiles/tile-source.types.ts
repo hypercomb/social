@@ -51,8 +51,9 @@ export interface TileSourceRef {
   /** Derived image sig — set on kind='peer' when the publisher's
    *  inlined 0000 carried an imageSig (top-level, small.image, or
    *  flat.small.image). Lets the renderer bind images sync via the
-   *  imageAtlas pipeline; bytes are already in __resources__/ via
-   *  the swarm resource pipeline (kind 30201). */
+   *  imageAtlas pipeline; bytes are already content-addressed at the flat
+   *  OPFS root (legacy `__resources__/` is a read-fallback) via the swarm
+   *  resource pipeline (kind 30201). */
   readonly imageSig?: string
   /** Slot index the peer was rendering this tile at — set on kind='peer'
    *  when the publisher's 0000 carried an `index` field. Show-cell's

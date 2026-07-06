@@ -55,8 +55,10 @@ void IconProviderRegistry
 
 /**
  * Register the same service worker prod uses. It serves
- * `/@resource/<sig>` from OPFS `__resources__/`, with content-type
- * inferred from the URL tail extension (or sniffed from the blob).
+ * `/@resource/<sig>` from the flat OPFS root (sig-named content files;
+ * the legacy `__resources__/` dir is a read-fallback drain source only),
+ * with content-type inferred from the URL tail extension (or sniffed
+ * from the blob).
  * Per-cell pages link shared chrome via `<link href="resource:<sig>">`
  * — the renderer rewrites to `/@resource/<sig>` before injection,
  * and the worker resolves it. Without the worker the dev shell

@@ -1,9 +1,20 @@
 // hypercomb-essentials/scripts/build-module.ts
-// hypercomb-essentials/scripts/build-module.ts
-// MINIMAL UPGRADE:
-// - exclude *.keys.ts / *.keys.js at discovery time
-// - add install.manifest.json at dist/<rootSignature>/install.manifest.json with only signatures (no root field)
-// - nothing else changed (deploy, layers, signing untouched)
+//
+// DELIVERY LAYOUT (flat — no typed `__x__` dirs, ever):
+//   dist/manifest.json      package entry keyed by rootLayerSig; its
+//                           layers[]/bees[]/dependencies[] arrays carry the
+//                           KIND of every sig (the flat files don't)
+//   dist/<sig>              every layer (JSON bytes), bee (JS bytes) and
+//                           namespace dependency (JS bytes) as a bare
+//                           sig-named file at the dist root
+//   dist/<bagSig>/0000…     the two sigbags (dependencies, bees) — dirs
+//                           named by bag sig, discovered ONLY via the
+//                           manifest's dependenciesBag/beesBag fields
+//   dist/.cache/            build cache — never copied or deployed
+// Consumers fetch `<base>/<sig>` flat-first and fall back to the legacy
+// `__layers__/<sig>.json` | `__bees__/<sig>.js` | `__dependencies__/<sig>.js`
+// URL shapes only for OLD deployed content (live Azure stays old-layout
+// until redeployed; those legacy blobs are never deleted).
 
 import { spawnSync } from 'child_process'
 import { fileURLToPath } from 'url'
@@ -106,8 +117,12 @@ interface BeeDepCacheEntry {
   depSigs: string[]     // resolved dependency signatures
 }
 
+// version 4 = flat delivery layout (bare sig files at the dist root).
+// The bump busts every version-3 cache so the first post-flip build can
+// never take the "Merkle root unchanged" early exit and re-deploy a dist
+// that still holds the typed `__x__` layout.
 interface BuildCache {
-  version: 3
+  version: 4
   rootHash: string                            // Merkle root of all unit hashes
   rootLayerSig: string                        // last output root signature
   namespaces: Record<string, UnitCache>
@@ -123,7 +138,7 @@ const OUTPUT_CACHE_DIR = join(DIST_ROOT, '.cache')
 const loadCache = (): BuildCache | null => {
   try {
     const raw = JSON.parse(readFileSync(CACHE_FILE, 'utf8'))
-    if (raw?.version === 3) return raw
+    if (raw?.version === 4) return raw
   } catch {}
   return null
 }
@@ -379,18 +394,16 @@ const extractBeeDoc = (sourceText: string): BeeDocEntry | null => {
   }
 }
 
+// `.js`-suffixed refs INSIDE layer JSON (bees/dependencies fields) are a
+// wire-format legacy consumers already normalise away (`bare()` below and in
+// every fetcher). Kept so layer sigs don't churn; on-disk names are bare.
 const jsFileName = (sig: string): string => `${sig}.js`
 
-const writeSigJsFile = (dir: string, sig: string, bytes: Uint8Array): void => {
+// Flat emission: every content file is a BARE sig-named file at the dist
+// root — no extension, no typed dir. Kind travels in the manifest.
+const writeSigFile = (dir: string, sig: string, bytes: Uint8Array | string): void => {
   if (!isSig(sig)) throw new Error(`invalid signature: ${sig}`)
-  writeFileSync(join(dir, jsFileName(sig)), bytes)
-}
-
-const layerFileName = (sig: string): string => `${sig}.json`
-
-const writeLayerJsonFile = (dir: string, sig: string, json: string): void => {
-  if (!isSig(sig)) throw new Error(`invalid signature: ${sig}`)
-  writeFileSync(join(dir, layerFileName(sig)), json, 'utf8')
+  writeFileSync(join(dir, sig), bytes)
 }
 
 const splitPath = (p: string): string[] =>
@@ -989,6 +1002,12 @@ const main = async (): Promise<void> => {
 
   const tree = readDirTree(SRC_ROOT, '')
   const rootLayerSig = await buildLayersFromTree(tree, resourcesByDir, layers, rootDependencies, docsByDir, cache?.layerCache)
+  // The root node (`node.rel === ''`) always builds a layer — the null
+  // early-return in buildLayersFromTree is gated on `node.rel`, so only a
+  // non-root empty dir returns null. Assert it here so the rest of the
+  // pipeline (closure check, manifest key) can treat the root sig as the
+  // string it always is.
+  if (!rootLayerSig) throw new Error('build-module: root layer produced no signature (empty source tree?)')
 
   console.log(`[build-module] layers: ${layerCacheHits} cached, ${layerCacheMisses} built`)
   console.log(`[build-module] doc extraction: ${docCacheHits} cached, ${docCacheMisses} parsed`)
@@ -998,18 +1017,12 @@ const main = async (): Promise<void> => {
   for (const dirDocs of docsByDir.values()) docCount += Object.keys(dirDocs).length
   console.log(`[build-module] docs: ${docCount} bee doc(s) extracted across ${docsByDir.size} lineage(s)`)
 
-  // write package — flat at dist root
-  const layersDir  = join(DIST_ROOT, '__layers__')
-  const resDir     = join(DIST_ROOT, '__bees__')
-  const depDir     = join(DIST_ROOT, '__dependencies__')
-
-  ensureDir(layersDir)
-  ensureDir(resDir)
-  ensureDir(depDir)
-
-  for (const [sig, json] of layers) writeLayerJsonFile(layersDir, sig, json)
-  for (const [sig, bytes] of dependencyBytes) writeSigJsFile(depDir, sig, bytes)
-  for (const [sig, bytes] of resourceBytes) writeSigJsFile(resDir, sig, bytes)
+  // write package — flat bare-sig files at the dist root. No typed dirs:
+  // layers, bees and dependencies all land as `dist/<sig>`; the manifest's
+  // arrays are what say which sig is which kind.
+  for (const [sig, json] of layers) writeSigFile(DIST_ROOT, sig, json)
+  for (const [sig, bytes] of dependencyBytes) writeSigFile(DIST_ROOT, sig, bytes)
+  for (const [sig, bytes] of resourceBytes) writeSigFile(DIST_ROOT, sig, bytes)
 
   // Sigbag emission. A bag is a directory named by its content sig; entries
   // are zero-padded index files (0000, 0001, …) whose contents carry the
@@ -1026,9 +1039,12 @@ const main = async (): Promise<void> => {
   //
   // No HEAD pointer file is emitted. Everything written here is content-
   // addressed: the bag dir is named by its sig, entries are named by
-  // index, leaves are named by their own sig. The receiver discovers the
-  // active bag by scanning `__dependencies__/` for the single bag dir —
-  // `installFromBundled` removes prior bag dirs to maintain that invariant.
+  // index, leaves are named by their own sig. Bags live at the DIST ROOT
+  // next to the flat sig files, and the receiver discovers them ONLY via
+  // the manifest's `dependenciesBag`/`beesBag` fields — never by scanning
+  // a dir (under the flat layout a scan can't tell a bag from any other
+  // sig-named dir, and scan-and-delete against a shared root is a
+  // data-loss trap).
   type BagEntry = { sig: string; content: string }
   const writeBag = async (parentDir: string, entries: BagEntry[]): Promise<string> => {
     const sorted = [...entries].sort((a, b) => a.sig.localeCompare(b.sig))
@@ -1058,8 +1074,8 @@ const main = async (): Promise<void> => {
     content: `\n${sig}\n`,   // empty alias line; layout matches dep entries
   }))
 
-  const dependenciesBag = await writeBag(depDir, depEntries)
-  const beesBag = await writeBag(resDir, beeEntries)
+  const dependenciesBag = await writeBag(DIST_ROOT, depEntries)
+  const beesBag = await writeBag(DIST_ROOT, beeEntries)
   console.log(`[build-module] bags: dependencies=${dependenciesBag.slice(0, 12)} bees=${beesBag.slice(0, 12)}`)
 
   // content manifest — package entry keyed by root signature.
@@ -1106,7 +1122,7 @@ const main = async (): Promise<void> => {
     const bare = (s: unknown): string => String(s ?? '').replace(/\.js$/i, '')
     const errors: string[] = []
 
-    if (!onDiskLayers.has(rootLayerSig)) errors.push(`root layer ${rootLayerSig.slice(0, 12)} not written to __layers__`)
+    if (!onDiskLayers.has(rootLayerSig)) errors.push(`root layer ${rootLayerSig.slice(0, 12)} not written to dist`)
     if (!inManifestLayers.has(rootLayerSig)) errors.push(`root layer ${rootLayerSig.slice(0, 12)} missing from manifest.layers`)
 
     for (const [sig, json] of layers) {
@@ -1167,7 +1183,7 @@ const main = async (): Promise<void> => {
 
   const rootHash = await computeRootHash(allUnitSigs)
   saveCache({
-    version: 3,
+    version: 4,
     rootHash,
     rootLayerSig,
     namespaces: newNamespaces,

@@ -26,8 +26,9 @@ import { TAG_DECORATION_KIND, tagSigFor } from './decoration-kind-index.js'
 
 export class DecorationService {
 
-  /** Write a decoration JSON to `__resources__` and append its sig to the
-   *  cell's `decorations` slot. Returns the decoration sig. */
+  /** Write a decoration JSON as a content-addressed resource (a sig file
+   *  at the flat OPFS root; legacy `__resources__/` is a read-fallback) and
+   *  append its sig to the cell's `decorations` slot. Returns the sig. */
   write<TPayload>(opts: {
     kind: string
     appliesTo: readonly string[]

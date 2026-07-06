@@ -16,8 +16,9 @@
 //      activates. Submitting now publishes a FEEDBACK_POST to the host's post
 //      channel.
 //   4. The HOST receives posts ONLY from allow-listed pubkeys and ingests each
-//      into `__optimization__` as `kind:'feedback'` — the exact shape the
-//      feedback button writes locally — so the existing loop takes over.
+//      into the sign('optimization') pool via store.putOptimization as
+//      `kind:'feedback'` — the exact shape the feedback button writes locally
+//      — so the existing loop takes over.
 //
 // Channel sigs are deterministic (sha256 of a labelled string scoped to the
 // active room+secret), so both sides address the same channel with no

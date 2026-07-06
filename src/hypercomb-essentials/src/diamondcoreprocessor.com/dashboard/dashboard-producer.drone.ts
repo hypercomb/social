@@ -153,10 +153,11 @@ export class DashboardProducerDrone extends Drone {
         arr.push(q)
       }
 
-      // Allocate a UNIQUE label per tile across the whole bag: one category
-      // HEADER tile per island + one tile per question. Build the island-ordered
-      // child list, the per-tile island metadata, and the (label → question)
-      // list the bindings need (questions only — headers open nothing).
+      // Allocate a UNIQUE label per tile. EVERY tile is a QUESTION — no category
+      // header/title tiles, because a dashboard item that isn't tied to a question
+      // would be an "empty item". The category still groups the questions into a
+      // spatial island (a headerless cluster); it's carried on each question's
+      // `dashboard-island` decoration, never as its own tile.
       const used = new Set<string>()
       const uniq = (base: string): string => {
         const b = normalizeCell(base || 'q') || 'q'
@@ -166,34 +167,32 @@ export class DashboardProducerDrone extends Drone {
         return label
       }
       const orderedLabels: string[] = []
-      const tiles: Array<{ label: string; role: 'header' | 'question'; island: string; category?: string }> = []
+      const tiles: Array<{ label: string; island: string }> = []
       const byLabel: Array<{ label: string; q: OpenQ }> = []
       catOrder.forEach((cat, i) => {
         const island = `island-${i}`
-        const headerLabel = uniq(cat)
-        orderedLabels.push(headerLabel)
-        tiles.push({ label: headerLabel, role: 'header', island, category: cat })
         for (const q of byCat.get(cat) ?? []) {
           const base = q.path.length ? q.path[q.path.length - 1] : 'q'
           const label = uniq(base)
           orderedLabels.push(label)
-          tiles.push({ label, role: 'question', island })
+          tiles.push({ label, island })
           byLabel.push({ label, q })
         }
       })
 
-      // 3) commit each tile's OWN layer carrying a `dashboard-island` decoration
-      //    (island id + role). Direct put-resource + commitLayer so the child head
-      //    the bag links below already carries the decoration — the same
-      //    deterministic pattern MixedGroupBag uses for launcher tiles, avoiding
-      //    the empty-marker race a DecorationService request would hit. The emit
-      //    warms the decoration-kind index (and nudges show-cell to cluster) when
-      //    the host is already looking at the bag. Best-effort: if this store lacks
-      //    putResource, tiles still render — just unclustered.
+      // 3) commit each question tile's OWN layer carrying a `dashboard-island`
+      //    decoration (its island id — no role: every tile is a question). Direct
+      //    put-resource + commitLayer so the child head the bag links below already
+      //    carries the decoration — the same deterministic pattern MixedGroupBag
+      //    uses for launcher tiles, avoiding the empty-marker race a
+      //    DecorationService request would hit. The emit warms the decoration-kind
+      //    index (and nudges show-cell to cluster) when the host is already looking
+      //    at the bag. Best-effort: if this store lacks putResource, tiles still
+      //    render — just unclustered.
       if (store.putResource && history.sign && history.commitLayer) {
         for (const t of tiles) {
           try {
-            const record = { kind: ISLAND_KIND, appliesTo: [], payload: { role: t.role, group: t.island, ...(t.category ? { category: t.category } : {}) } }
+            const record = { kind: ISLAND_KIND, appliesTo: [], payload: { group: t.island } }
             const decoSig = await store.putResource(new Blob([JSON.stringify(record)], { type: 'application/json' }))
             const childSegs = [...bag.bagSegments, t.label]
             const childLocSig = await history.sign({ explorerSegments: () => childSegs })

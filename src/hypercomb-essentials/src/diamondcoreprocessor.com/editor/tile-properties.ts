@@ -35,10 +35,12 @@
 // These functions take a `FileSystemDirectoryHandle` and read/write a
 // `0000` JSON file inside it. The directory they expect — a per-tile
 // dir under a content domain — IS NOT a legitimate OPFS structure in
-// this architecture. The only legitimate hierarchy under any domain
-// is the fixed system-folder set (`__history__`, `__layers__`,
-// `__resources__`, `__dependencies__`, `__bees__`, …); per-tile dirs
-// are phantom artifacts left by old callers that called
+// this architecture. Under the pools-of-meaning model the OPFS root
+// holds only sig-named FILES (content bytes), sig-named DIRS (lineage
+// sigbags and `sign(meaning)` pools), and the legacy `__x__` /
+// `hypercomb.io/` drain sources being retired — NEVER typed system
+// folders, and never per-tile named dirs. Those per-tile dirs are
+// phantom artifacts left by old callers that called
 // `getDirectoryHandle('<tile-name>', { create: true })`. Tile
 // membership lives in `layer.children` (signature arrays in the
 // merkle tree), not in a directory listing.
@@ -64,8 +66,9 @@ export const TILE_PROPERTIES_FILE = '0000'
 
 /**
  * The layer slot that holds the tile's properties resource sig. At most
- * one sig per tile; the sig points at a JSON blob in `__resources__/`
- * whose shape matches the legacy 0000 file.
+ * one sig per tile; the sig points at a JSON blob content-addressed at
+ * the flat OPFS root (legacy `__resources__/` is a read-fallback) whose
+ * shape matches the legacy 0000 file.
  *
  * Registered with LayerSlotRegistry as a passive slot (`triggers: []`)
  * because writes go through `LayerCommitter.commitSlotSet` directly —
@@ -152,8 +155,9 @@ export const lookupTilePropsSig = (
  *
  * The lineage signature is unique per location and stable as long as
  * the cell stays put — the address the inflate primitive and the
- * navigation primitive (visiting __history__/<sig>/) both consume.
- * Memoised inside HistoryService.sign via SignatureStore.signText.
+ * navigation primitive (visiting the lineage sigbag `<sig>/` at the
+ * flat OPFS root; legacy `__history__/<sig>/` is a read-fallback) both
+ * consume. Memoised inside HistoryService.sign via SignatureStore.signText.
  */
 export const cellLocationSig = async (
   parentSegments: readonly string[],
@@ -259,13 +263,13 @@ export const writeCellProperties = async (
 //     committer.commitSlotSet(segments, 'properties', [sig]) →
 //     LayerCommitter cascades up to root, one marker per ancestor
 //
-// Both paths are domain-agnostic. When a tile's bag is canonical on
-// DCP (markers + shared `__layers__` pool) the reader hits the marker
-// and dereferences into the pool. When a bag is materialized on a
-// content domain (`hypercomb.io/__history__/<SB>/<sig>` with bytes
-// in-place), the reader gets the same layer JSON, and the resource
-// sig in `properties[0]` resolves through the content-addressed pool
-// regardless of which domain root that pool sits under.
+// Both paths are domain-agnostic. Layer bytes are content: they live as
+// sig-named files at the flat OPFS root, referenced by the markers in the
+// bag's lineage sigbag (legacy `__layers__` / `hypercomb.io/__history__/
+// <SB>/<sig>` are read-fallback drain sources). The reader hits the
+// marker and dereferences the layer JSON; the resource sig in
+// `properties[0]` resolves through the same content-addressed root
+// (root-first, legacy sources as fallback) regardless of domain.
 
 type HistoryServiceLike = {
   sign?: (l: { explorerSegments?: () => readonly string[] }) => Promise<string>

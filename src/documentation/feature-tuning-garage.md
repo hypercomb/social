@@ -24,10 +24,10 @@ These can be revisited; they are recorded so the rest of this doc is decision-co
 
 ## 0. Principles this design must not violate
 
-- **Signatures are identity + composition.** Manifests and recipes are signature-addressed `__resources__` blobs referenced by sig; consumer choice is never inline in shareable content. These artifacts are [DNA](dna.md) — content-addressed, merkle-versioned, immutable, composing upward to root. "DNA" is a documentation lens over the *existing* `kind` discriminant (layer / dependency / bee / resource / content): there is no `DnaService`, no `dna` field, no new OPFS folder — the signature is the only universal primitive.
+- **Signatures are identity + composition.** Manifests and recipes are signature-addressed resource blobs — sig-named files at the content root, written via `putResource` — referenced by sig; consumer choice is never inline in shareable content. These artifacts are [DNA](dna.md) — content-addressed, merkle-versioned, immutable, composing upward to root. "DNA" is a documentation lens over the *existing* `kind` discriminant (layer / dependency / bee / resource / content): there is no `DnaService`, no `dna` field, no new OPFS folder — the signature is the only universal primitive.
 - **Layer purity.** The shared layer holds canonical primitives only. All consumer tune state lives in the participant-local settings sigbag, so the **branch lineage sig is byte-identical before and after a full tune** (the cardinal anti-skew invariant — see [`feedback_viewport_not_in_history`]).
 - **Accept-gated.** Fold/resync fire only on portal "Done" (`actions:available`). Passive close discards the pending diff.
-- **Two-store split.** Registry markers (`__content__`/`__lineages__`) and module bytes (`DcpStore`) drift independently; restore reconciles both.
+- **Two-store split.** Registry markers (DCP's `__content__`/`__lineages__` stores — legacy naming, pending their own pool migration) and module bytes (`DcpStore`) drift independently; restore reconciles both.
 - **Minimalism.** No new state library, no new OPFS folder, no new mesh kind. Reuse `EventTarget` + EffectBus, the `decorations` slot, the settings sigbag, and IoC. (This is the DNA guardrail in practice: feature-gating composes over the existing content-addressed artifacts; it never invents a parallel store or transport.)
 
 ---
@@ -118,12 +118,12 @@ Both components mount in the DCP shell; the segmented control flips a `signal<'b
 2. **SEE:** the installer joins this manifest with any present peers' manifests → `Map<tag, providers>` → Bench renders one row per competing tag; File Explorer renders the raw branch. `registry:snapshot` streams live — **nothing is committed**.
 3. **TUNE:** consumer picks a recipe (batch write of pending `cap.enable.*` + `cap.winner.*`) or flips individual tags / re-pins providers. All writes are **pending overlay intent only**; the layer is untouched (no lineage-sig skew). The portal's `+adds/−removes` counter reflects this.
 4. **LOCK IN YOUR TUNE (the accept gate — UNCHANGED sole trigger):** "Done" → `portal-overlay.apply()` → `actions:available`. **Passive close (×, backdrop, Escape, touch-drag) discards everything** and fires `dcp:embed-closed` (`portal-overlay.component.ts:299-309`, `swarm-adopt.drone.ts:161-181`). This is the only place anything installs or runs.
-5. **REGISTER / DEDUP (on `actions:available`):** `SwarmAdoptDrone.#onDcpDone` (`swarm-adopt.drone.ts:328`) reads the accepted snapshot (now carrying `caps[]`), computes ADDS/REMOVES against the recoverable `hc:last-folded` receipt, folds enabled content via the existing `#commitBranch`/`importTree` cascade. **Only the winning provider's sig per competing tag enters the active set** — the preloader imports one bee per such tag (see §6 for the allow-set mechanism). Losing candidates' bytes may land in `__bees__` (incremental, immutable) but are never imported.
+5. **REGISTER / DEDUP (on `actions:available`):** `SwarmAdoptDrone.#onDcpDone` (`swarm-adopt.drone.ts:328`) reads the accepted snapshot (now carrying `caps[]`), computes ADDS/REMOVES against the recoverable `hc:last-folded` receipt, folds enabled content via the existing `#commitBranch`/`importTree` cascade. **Only the winning provider's sig per competing tag enters the active set** — the preloader imports one bee per such tag (see §6 for the allow-set mechanism). Losing candidates' bytes may land in the `sign('bees')` pool (incremental, immutable; legacy `__bees__/` is a read-fallback drain) but are never imported.
 6. **RENDER:** hive reads `RegistrySnapshot.caps` (fail-open) as a code-activation filter alongside `isInLogical`. Winning workers drive their surfaces; bench badges flip to "active here".
 
 ### 3.2 Restore reconciles both stores (the two-store split)
 
-Restore is step 5 driven by a saved logical root instead of a fresh adopt. For each manifest feature it reconciles registry markers (`__content__`/`__lineages__`) against `DcpStore` bytes with **bytes-present-before-marker** discipline:
+Restore is step 5 driven by a saved logical root instead of a fresh adopt. For each manifest feature it reconciles registry markers (DCP's legacy `__content__`/`__lineages__` stores, pending their own pool migration) against `DcpStore` bytes with **bytes-present-before-marker** discipline:
 
 - providerBeeSig bytes present in `DcpStore` **and** marker present → enable-eligible.
 - bytes present, marker missing → append marker.
@@ -165,7 +165,7 @@ DecorationRecord<FeatureManifest> {
     features: Array<{
       tag: string,            // capability tag, e.g. 'render:tiles'
       exclusive: boolean,     // true = competing (one-winner); false/absent = run-all
-      providerBeeSig: string, // 64-hex; bytes in __bees__/<sig>
+      providerBeeSig: string, // 64-hex; bytes in the sign('bees') pool
       iocKey: string,         // '@ns/ClassName' (Bee.iocKey)
       defaultEnabled: boolean,// SUGGESTION only; trust gate still applies to code
       label?: string, iconName?: string, descriptionKey?: string,
@@ -176,7 +176,7 @@ DecorationRecord<FeatureManifest> {
 
 **Publisher-write-once, consumer-read-only.** Consumer choice never enters this resource — it lives only in the settings sigbag (§1.3). This is the structural guarantee that the branch lineage sig is byte-identical before and after a full recipe apply.
 
-> Storage note: feature manifests are **SHAREABLE** decoration content, so `writeDecoration` writes them to `__resources__` via `putResource` (`decoration-manifest.ts:84-119`) — they ride the merkle tree and replicate through the existing resource pipeline. `__optimization__` is a **separate decoration substrate** for PERSONAL decorations (Q&A, comms) that must NOT leak across peers; it has its own bridge ops (`optimization-add`/`optimization-list`) and is never referenced from the `decorations` slot (`decoration-manifest.ts:16-32`). Do not conflate the two: public decoration content → `__resources__`; personal decoration content → `__optimization__`. (`decoration-manifest.ts` also carries a stale interface comment at line ~68 mis-stating the record is "stored in `__optimization__`" — fix that before building on it.)
+> Storage note: feature manifests are **SHAREABLE** decoration content, so `writeDecoration` writes them via `putResource` as sig-named resources at the content root (`decoration-manifest.ts:84-119`) — they ride the merkle tree and replicate through the existing resource pipeline. The optimization substrate — the `sign('optimization')` pool (the legacy `__optimization__` folder is absorbed and deleted on boot) — is a **separate decoration substrate** for PERSONAL decorations (Q&A, comms) that must NOT leak across peers; it has its own bridge ops (`optimization-add`/`optimization-list`) and is never referenced from the `decorations` slot (`decoration-manifest.ts:16-32`). Do not conflate the two: public decoration content → sig-named resources at the content root; personal decoration content → the `sign('optimization')` pool. (`decoration-manifest.ts` also carries a stale interface comment at line ~68 mis-stating where the record is stored — fix that before building on it.)
 
 ### 4.3 `CapResolver` — observe, don't mutate
 
@@ -242,7 +242,7 @@ A non-exclusive (cohort) tag like the 9-drone `sharing` cohort is **never** put 
 
 ### 5.1 What a recipe IS
 
-A recipe is a **signature-addressed `DecorationRecord`** of the same family as the manifest, `kind:'recipe:tune'`, written via `writeDecoration` → `putResource` into `__resources__/<recipeSig>`. **Not a layer, not a new store** — it dedupes, forks, and shares by sig like every other resource.
+A recipe is a **signature-addressed `DecorationRecord`** of the same family as the manifest, `kind:'recipe:tune'`, written via `writeDecoration` → `putResource` as a sig-named resource at the content root (`<recipeSig>`). **Not a layer, not a new store** — it dedupes, forks, and shares by sig like every other resource.
 
 ```ts
 DecorationRecord<RecipeTune> {
@@ -276,7 +276,7 @@ Manual overrides are a **higher tier** than the recipe, so switching recipes nev
 
 ### 5.4 Seed recipes (shipped baseline-signed)
 
-Bundled `__resources__` blobs referenced from a built-in recipe index:
+Bundled sig-named resource blobs (shipped via `putResource`) referenced from a built-in recipe index:
 
 - **simple** — enable only `core:*` (navigation, show-cell, selection); pin baseline providers; everything else off.
 - **desktop** — full `input:*` / `editor:*` / `clipboard:*` / `move:*` / `keyboard:*`.
@@ -333,7 +333,7 @@ At adopt time the adopted bees are untrusted and **not instantiated**, so `capab
 - per-node toggle: `ToggleStateService` `localStorage['dcp.toggleState']` (unchanged).
 
 **Resources:**
-- `__resources__/<sig>` — feature manifest `kind:'feature:manifest'`, recipes `kind:'recipe:tune'`, via `writeDecoration`/`putResource`.
+- content root `<sig>` (sig-named resource files at the OPFS root) — feature manifest `kind:'feature:manifest'`, recipes `kind:'recipe:tune'`, via `writeDecoration`/`putResource`.
 
 **Events (EffectBus, last-value replay):** reuse `decorations:changed`, `registry:snapshot`, `actions:available`, `fold:receipt`, `genotype:set-visible`. **New:** `cap:resolved`. **No new event from `ioc.web.ts`.**
 

@@ -1,22 +1,29 @@
 # History sigbag as root — store, discovery, self-heal, and integrity
 
-> **status: design — not built (as of 2026-06-18).** The flat-root,
-> no-`__history__` sigbag layout described here is the design target;
-> durability, discovery, and self-heal "fall out" of it once built.
+> **status: landing (updated 2026-07-04).** The flat-root, no-`__history__`
+> sigbag layout described here is now the **shipping local layout**: lineage
+> sigbags sit at the OPFS root and the legacy `__history__/` / `__layers__/`
+> dirs are read-fallback drain sources only (self-cleaning; see
+> `sign-meaning-pool-migration-plan.md`). The host-side replication,
+> discovery, and self-heal pieces remain buildables (see the end).
 
 > Status: design-affirmed 2026-06-05 (session conclusions). Not yet built —
 > see "Buildables" at the end. This doc unifies and in one place supersedes
 > parts of `domain-as-identity` and refines `history-is-the-deploy`,
 > `universal-history-plan`, `merkle-layer-model`, and `uniform-paradigm`.
 >
-> **What the current build does instead (as of 2026-06-18):** history lives
-> in per-lineage bags at `__history__/<lineageSig>/` whose markers (`{ layer:
-> <sig> }` pointers) reference layer bytes in a flat `__layers__/<sig>` pool.
-> The `00000000` marker is an auto-minted **empty** `{ name }` layer. "What's
-> here now" reads the head layer's slots (`currentLayerAt` → `getLayerBySig`,
-> children from the `children[]` slot) — **not** op-replay from zero. The
-> flat-root collapse below (no `__history__`, sigbags at the root) is the
-> direction, not today's on-disk shape. These are **Distributed Network
+> **What the current build does (updated 2026-07-04):** history lives in
+> per-lineage sigbags **at the OPFS root** (`<lineageSig>/`) whose markers
+> (`{ layer: <sig> }` pointers) reference layer bytes stored as sig-named
+> files at that same root. Legacy `__history__/<lineageSig>/` bags and the
+> flat `__layers__/<sig>` pool are **read-fallback drain sources only** —
+> during the drain, lineage resolution unions the sources and the HIGHEST
+> marker wins; `gcLegacyHistory` and the content relocation empty and remove
+> them. The `00000000` marker is an auto-minted **empty** `{ name }` layer.
+> "What's here now" reads the head layer's slots (`currentLayerAt` →
+> `getLayerBySig`, children from the `children[]` slot) — **not** op-replay
+> from zero. The flat-root collapse below (no `__history__`, sigbags at the
+> root) IS today's on-disk shape. These are **Distributed Network
 > Artifacts** (the merkle-versioned, content-addressed assets — layers, deps,
 > bees, resources, content; see `dna.md`); the genetic vocabulary in this doc
 > is documentation-only and rides the existing `kind` discriminant, never a
@@ -92,28 +99,31 @@ the genetic-ladder picture, and this doc is the prime anchor for its rungs:
 ## 2. The sigbag IS the root (skip `__roots__`)
 
 Every lineage keeps a linear, append-only **sigbag** — a folder of `000x`
-markers. In the **design target**, there is **no `__history__` folder** (and
-no `__roots__`): history is not a separate place, it *is* what a sigbag is, and
-the sigbags sit at the root directly.
+markers. There is **no `__history__` folder** (and no `__roots__`): history
+is not a separate place, it *is* what a sigbag is, and the sigbags sit at the
+root directly. This is now the shipping layout.
 
-> **Current build vs. target (as of 2026-06-18):** today the bags live under
-> `__history__/<lineageSig>/` and the layer bytes a marker points at live in a
-> flat `__layers__/<sig>` pool — the marker is a `{ layer: <sig> }` pointer,
-> not the layer itself. The flat-root collapse (sigbags at the root, no
-> `__history__`) is the direction this doc argues for; the markers'
-> position-named, append-only semantics already hold.
+> **Legacy layout (drain sources, updated 2026-07-04):** older builds kept the
+> bags under `__history__/<lineageSig>/` and the layer bytes a marker points
+> at in a flat `__layers__/<sig>` pool — the marker is a `{ layer: <sig> }`
+> pointer, not the layer itself. Those dirs are now read-fallback drains only:
+> self-cleaning (`gcLegacyHistory`, the content relocation) migrates their
+> records to the root and removes them; while a lineage appears in more than
+> one source, the HIGHEST marker wins. The markers' position-named,
+> append-only semantics are unchanged.
 
 ```
-root/                          # design target (not built)
+root/                               # current layout (shipping)
   <lineage>/0000
   <lineage>/0001
   <lineage>/000x   <- max-x = HEAD = current root
+  <sig>            <- the layer bytes the markers point at (flat root files)
   ...
 
-# current build
+# legacy layout (read-fallback drains only — never written)
 __history__/<lineageSig>/00000000   # auto-minted EMPTY { name } layer
 __history__/<lineageSig>/000000xx   # { layer: <sig> } pointers
-__layers__/<sig>                    # the layer bytes the markers point at
+__layers__/<sig>                    # layer bytes
 ```
 
 Each marker is a tiny record `{ layer: <sig>, ... }` pointing at the layer
@@ -249,7 +259,7 @@ is a bug.
   They are **not sig-verified, by design.**
 - **Trust = ownership.** Locally it's just *your own disk* — trusted because
   it's yours. On a host, the gate is **write-authorization** (your signing
-  key / the NIP-98 PUT): "only I can write to my `__history__`." Safe because
+  key / the NIP-98 PUT): "only I can write to my lineage bags." Safe because
   it's *mine*, not because a hash matches.
 - **The marker is the bridge between the zones:** a positional, owned record
   whose `layer` field points *into* the content-verified pool. The pointer is
@@ -334,8 +344,10 @@ sig and breaks every reference.
 
 - **Rule:** read the stored file, write the identical file — no decode/encode
   round-trip, *nothing re-serialized en route.* "Copy, don't recompute."
-- **True for every surface:** `__layers__`, `__bees__`, `__dependencies__`,
-  `__resources__` (sig-named, by-hash pools) and the per-lineage sigbags
+- **True for every surface:** the root sig files (layers, resources) and the
+  `sign('bees')` / `sign('dependencies')` pools (sig-named, by-hash content;
+  legacy `__layers__`/`__bees__`/`__dependencies__`/`__resources__` dirs only
+  as read-fallback drains) and the per-lineage sigbags
   (position-named `000x` bags). *Replication* (adopt / install / sync /
   host-push) is byte-faithful across all of them — but **self-heal on the
   render path is not uniform** (see §7's metabolism asymmetry).
@@ -367,7 +379,9 @@ entrance (sigbag max) -> walk the closure (via children[] sigs)
   render-time guarantee. **On the render path, only RESOURCES self-heal**:
   `Store.getResource` resolves memory → OPFS → host (via `ContentBroker`),
   sha256-verifies, writes through, and negative-caches a miss for ~60s.
-  **`__layers__`, `__dependencies__`, and `__bees__` are OPFS-only on render**
+  **Layers, dependencies, and bees are OPFS-only on render** (root sig files
+  and the `sign('bees')` / `sign('dependencies')` pools; legacy `__x__/` dirs
+  only as read fallback)
   — a missing layer/dep/bee does *not* stream in mid-render; it heals only via
   the explicit adopt/install/sync closure-walk above. So the same
   content-addressed artifacts (same DNA — see `dna.md`) carry a *different
@@ -462,7 +476,7 @@ whole game.
 
 ---
 
-## Buildables (none done yet)
+## Buildables (host-side — still open; the local flat-root collapse landed 2026-07-04)
 
 1. **Replicate the root's sigbags to the host** — push the entrances so
    durability, discovery, and self-heal actually work. Add the per-lineage

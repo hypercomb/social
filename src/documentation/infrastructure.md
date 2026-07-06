@@ -92,7 +92,7 @@ npm run mirror:content           # incremental upload of flat <sig> files
 pwsh hypercomb-relay/mirror-content-to-azure.ps1 [-SourceDir <dir>] [-Container content] [-Overwrite]
 ```
 
-by default it mirrors **everything content-addressed, flattened** for full redundancy: the flat authored heap at the content-dir root (resources, layers, page bodies — what host-sync writes at `/<sig>`) AND the typed essentials pools, flattened (`__bees__/<sig>.js` → blob `<sig>`, `__layers__/<sig>.json` → `<sig>`, etc.). the sig IS sha256 of the bytes, so a `.js`/`.json` file flattens to its `<sig>` blob and still verifies — after a full run pluginthematrix.io can serve *any* sig flat, matching the relay's own flat-heap model. (`-RootOnly` restores authored-heap-only. the separate `npm run deploy:essentials` still publishes the TYPED layout to the `dcp` container for the *install* pipeline; this flat mirror is the *broker's* view.) Content-Type is forced to `application/octet-stream` so the broker's `text/html` guard never rejects a page body.
+by default it mirrors **everything content-addressed, flattened** for full redundancy: the flat authored heap at the content-dir root (resources, layers, page bodies — what host-sync writes at `/<sig>`) AND — for LEGACY build output only — the old typed essentials pools, flattened (`__bees__/<sig>.js` → blob `<sig>`, `__layers__/<sig>.json` → `<sig>`, etc.). new builds already emit flat sig-named files with no typed dirs, so the flatten step is a legacy-drain shim that becomes a no-op as old content ages out. the sig IS sha256 of the bytes, so a `.js`/`.json` file flattens to its `<sig>` blob and still verifies — after a full run pluginthematrix.io can serve *any* sig flat, matching the relay's own flat-heap model. (`-RootOnly` restores authored-heap-only. the separate `npm run deploy:essentials` publishes flat sig-named files to the `dcp` container for the *install* pipeline — already-deployed typed `__x__/` content stays reachable via the fetchers' legacy-URL fallback until the next deploy overwrites it; this flat mirror is the *broker's* view.) Content-Type is forced to `application/octet-stream` so the broker's `text/html` guard never rejects a page body.
 
 at scale (the content dir holds tens of thousands of files) it does **not** make one `az` call per file: it lists the container once to learn what's already mirrored (content-addressed ⇒ immutable ⇒ skip), hardlinks just the new sigs into a flat staging dir, then `az storage blob upload-batch` uploads that dir in one parallel pass. so re-runs are cheap — only genuinely new bytes move.
 
@@ -105,7 +105,7 @@ two things that are easy to miss (both silent failures): **anonymous read on the
 a content-addressed fetch resolves in tiers, cheapest first:
 
 1. **memory** — in-process cache.
-2. **OPFS** — the local pools (`__layers__/`, `__resources__/`, `__dependencies__/`, `__bees__/`). this is where everything you've authored, adopted, or pulled already lives. on the render path, layers / dependencies / bees are **OPFS-only** — they heal only via adopt / install / sync, never on render.
+2. **OPFS** — sig-named files at the content root plus the `sign(meaning)` pools (bees, dependencies, optimization); legacy `__x__/` dirs (`__layers__/`, `__resources__/`, `__dependencies__/`, `__bees__/`) are read-fallback drain sources only while self-cleaning empties them. this is where everything you've authored, adopted, or pulled already lives. on the render path, layers / dependencies / bees are **OPFS-only** — they heal only via adopt / install / sync, never on render.
 3. **host (HTTP-direct)** — a cold miss on a *resource* falls back to `GET /<sig>` against the operator domains via `ContentBroker.#fetchOverHttp`, then write-through into OPFS. `Store.getResource` is `memory → OPFS → host`, sha256-verified, with a 60s negative cache (`HOST_MISS_TTL_MS`) so a missing sig doesn't re-hammer the network.
 4. **mesh broker (layers only)** — if a layer sig can't be resolved any other way, broadcast it on the mesh and accept the first peer response whose bytes hash to the requested sig.
 
@@ -123,9 +123,8 @@ anyone running an operator host (e.g. `jwize.com`, `alice.dev`) serves their con
 
 hypercomb is **not** ephemeral. everything you author persists durably and locally in OPFS by default:
 
-- `__history__/<lineageSig>/` — per-lineage marker chains (every undo/redo entry you've ever made)
-- `__layers__/`, `__resources__/`, `__bees__/`, `__dependencies__/`, `__optimization__/` — the signature-addressed content pools
-- the `hypercomb.io/` tree — your content (tiles, folders, body resources)
+- lineage sigbags at the OPFS root (`<lineageSig>/` marker chains) — every undo/redo entry you've ever made (legacy `__history__/` is a read-fallback drain until `gcLegacyHistory` empties it)
+- sig-named content files at the OPFS root (layers, resources, tiles, body resources) plus the `sign(meaning)` pools (bees, dependencies, optimization) — the signature-addressed content (legacy `__layers__/`, `__resources__/`, `__bees__/`, `__dependencies__/`, `__optimization__/`, `__hive__/`, and `hypercomb.io/` dirs persist only as read-fallback drains until self-cleaning removes them)
 
 only the **network** is opt-in. nothing crosses the wire unless you publish. and a small set of values stay **participant-local on purpose** — presence, cursor, clipboard, selection, and viewport are kept *out* of the signed layer so they never skew the lineage signature across peers.
 
@@ -191,7 +190,7 @@ operator domains     →  each is a relay node + an HTTP /<sig> byte host; adopt
 
 bytes                →  HTTP-direct GET /<sig> (memory → OPFS → host), sha256-verified, edge-cacheable
 mesh                 →  layer sigs + presence only (+ bounded 256KB swarm-preview images, kind 30201)
-persistence          →  durable & local by default (OPFS pools + history chains); only the network is opt-in
+persistence          →  durable & local by default (root sig files + lineage sigbags + sign(meaning) pools in OPFS); only the network is opt-in
 identity             →  rootLayerSig is the package sig; label/previous/at are sidecar metadata
 updates              →  O(1) root-sig compare (installedSig === rootSig)
 

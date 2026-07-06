@@ -13,7 +13,8 @@ const BRIDGE_ENABLED_QUERY_KEY = 'claudeBridge'
 const BRIDGE_ENABLED_STORAGE_KEY = 'hypercomb.claudeBridge.enabled'
 
 /** Per-cell context bag slot — value is a sig array. Each entry is a
- *  resource sig in __resources__/ that the LLM should see when working
+ *  resource sig (a content file at the flat OPFS root; legacy
+ *  `__resources__/` is a read-fallback) that the LLM should see when working
  *  on this cell (prior impls, chrome refs, examples, etc). Add/remove
  *  rewrites the array, the new bag sig replaces the old slot value, one
  *  cascade carries it up. Passive — no triggers; bridge `update` and
@@ -271,9 +272,12 @@ export class ClaudeBridgeWorker extends Worker {
     }
   }
 
-  // ─── persistent decoration substrate (__optimization__) ────────────
+  // ─── persistent decoration substrate (sign('optimization') pool) ───
   //
-  // Mint, list, and remove optimization objects in OPFS `__optimization__/`.
+  // Mint, list, and remove optimization objects in the sign('optimization')
+  // pool of meaning at the OPFS root (legacy `__optimization__/` is a
+  // read-fallback the Store absorb drains). Physical access is the Store
+  // pool API (putOptimization/listOptimizations/removeOptimization).
   // Each entry is a content-addressed JSON file (Q&A, comm, future kinds).
   // Layer-untouched: this directory is structurally separate from any
   // cell's layer slots. The dashboard reader and state-machine wrappers
@@ -700,20 +704,34 @@ export class ClaudeBridgeWorker extends Worker {
   // lineage's current explorerDir) so segments are interpreted as a
   // path from root, identical regardless of where the user is.
   async #listAt(req: BridgeRequest): Promise<BridgeResponse> {
-    const store = get<{ hypercombRoot?: FileSystemDirectoryHandle | null }>('@hypercomb.social/Store')
-    let dir = store?.hypercombRoot ?? null
-    if (!dir) return { id: req.id, ok: false, error: 'no hypercombRoot' }
+    const store = get<{
+      hypercombRoot?: FileSystemDirectoryHandle | null
+      legacyHive?: FileSystemDirectoryHandle | null
+      legacyHypercombIo?: FileSystemDirectoryHandle | null
+    }>('@hypercomb.social/Store')
+    if (!store?.hypercombRoot) return { id: req.id, ok: false, error: 'no hypercombRoot' }
 
     const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
-    for (const seg of segments) {
-      const clean = normalizeCell(seg)
-      if (!clean) continue
-      try {
-        dir = await dir.getDirectoryHandle(clean, { create: false })
-      } catch {
-        return { id: req.id, ok: false, error: `path not found: ${segments.join('/')}` }
+    // Named tile dirs live in the (still-undrained) legacy content roots as
+    // well as the flat root — resolve the path root-first, then through the
+    // legacy roots (union rule), so a partially-drained boot still lists cells.
+    const resolveUnder = async (root: FileSystemDirectoryHandle): Promise<FileSystemDirectoryHandle | null> => {
+      let dir: FileSystemDirectoryHandle = root
+      for (const seg of segments) {
+        const clean = normalizeCell(seg)
+        if (!clean) continue
+        try { dir = await dir.getDirectoryHandle(clean, { create: false }) }
+        catch { return null }
       }
+      return dir
     }
+    let dir: FileSystemDirectoryHandle | null = null
+    for (const root of [store.hypercombRoot, store.legacyHive ?? null, store.legacyHypercombIo ?? null]) {
+      if (!root) continue
+      dir = await resolveUnder(root)
+      if (dir) break
+    }
+    if (!dir) return { id: req.id, ok: false, error: `path not found: ${segments.join('/')}` }
     const cells = await this.#listCellFolders(dir)
     return { id: req.id, ok: true, data: cells }
   }
@@ -1002,7 +1020,13 @@ export class ClaudeBridgeWorker extends Worker {
     for await (const [name, handle] of (dir as any).entries()) {
       if (handle.kind !== 'directory') continue
       if (!name) continue
+      // Cells are NAMED dirs. Skip legacy underscore drain sources, the
+      // legacy content root, and any sig-named dir (64-hex: a sign(meaning)
+      // pool or a lineage sigbag) — under the flat-root model those all sit
+      // at the OPFS root and must never be reported as tiles.
       if (name.startsWith('__') && name.endsWith('__')) continue
+      if (name === 'hypercomb.io') continue
+      if (/^[0-9a-f]{64}$/.test(name)) continue
       out.push(name)
     }
     out.sort((a, b) => a.localeCompare(b))

@@ -690,9 +690,9 @@ window.ioc.register('@diamondcoreprocessor.com/WebsiteQueenBee', _website)
 
 // Visual-bee registration. Declares the view identity, decoration kind,
 // and adoption icon name so the renderer + adoption UI can discover the
-// website bee. Decoration writes (to `__optimization__` + the cell's
-// `decorations` slot) are still handled by the bridge worker / build
-// drone via the helpers in decoration-manifest.ts — this registration
+// website bee. Decoration writes (to the resource store — root sig files —
+// + the cell's `decorations` slot) are still handled by the bridge worker /
+// build drone via the helpers in decoration-manifest.ts — this registration
 // is just the declaration. Adoption icons surface for any tile whose
 // peer manifest contains entries matching this decorationKind.
 ;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<VisualBeeRegistry>(

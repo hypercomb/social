@@ -9,7 +9,8 @@
 // page, achieved purely by nearest-ancestor resolution (no nav trapping;
 // this is placement, not a view).
 //
-// payload.sequenceSig points at the saved set resource in `__resources__`
+// payload.sequenceSig points at the saved set resource (a content sig file
+// at the flat OPFS root; legacy `__resources__/` is a read-fallback)
 // of shape `{ kind: 'sequence', name, indexes: number[] }` (the "file that
 // has a bunch of indexes"). Storing the indexes as a content-addressed
 // resource — not inline — keeps the set shareable, dedup'd, and resolvable

@@ -3,7 +3,7 @@
 // A fixed bottom-right "share feedback" affordance. The round button is
 // always present; clicking it brings up a dismissible (NOT sticky) frosted
 // glass panel with a short message + a category (idea / issue). Submitting
-// writes a `kind: 'feedback'` record into the __optimization__ substrate —
+// writes a `kind: 'feedback'` record into the sign('optimization') pool —
 // the host inbox — via Store.putOptimization, the exact same call the
 // dashboard Q&A modal uses (qa-modal.view.ts #commit). The autonomous
 // feedback-loop routine reads it back with optimization-list, turns it into

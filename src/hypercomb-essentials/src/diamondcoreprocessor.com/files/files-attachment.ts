@@ -14,7 +14,8 @@
 //                       ancestor (cascading, top-down).
 //   files:attachment  — a concrete downloadable file placed on ONE tile.
 //                       payload points at the raw bytes saved via
-//                       Store.putResource → __resources__/<sig>.
+//                       Store.putResource → a content sig file at the flat
+//                       OPFS root (legacy `__resources__/<sig>` is a read-fallback).
 
 import {
   writeDecoration,
@@ -83,7 +84,8 @@ export async function listAttachments(segments: readonly string[]): Promise<Arra
   return found.map(({ sig, record }) => ({ sig, payload: record.payload }))
 }
 
-/** Detach a file from the tile at `segments` (bytes stay in __resources__). */
+/** Detach a file from the tile at `segments` (content bytes stay at the flat
+ *  OPFS root — content-addressed, may be shared). */
 export function removeAttachment(sig: string, segments: readonly string[]): void {
   removeDecoration({ sig, segments })
 }

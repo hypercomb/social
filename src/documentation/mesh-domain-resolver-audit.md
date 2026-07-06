@@ -6,6 +6,12 @@ meta formats, performance) followed by 12 independent adversarial verifications 
 load-bearing claim against working-tree code. Only verified findings appear here; where a
 first-pass claim was corrected, the corrected form is stated.
 
+> **Note (2026-07-04)**: storage paths recorded in this audit predate the
+> underscore-folder eradication: lineage bags now live at the OPFS root and
+> `__x__` dirs are read-fallback drain sources only — see
+> `sign-meaning-pool-migration-plan.md`. The §6 recommendation already IS the
+> pools model.
+
 **Target architecture**: the mesh (Nostr relays) is *thin* — it carries signatures,
 announcements, and presence, never content. Domains are *thick* — they resolve signatures
 to bytes over HTTPS and publish small meta descriptors (`layer: sig`) that let a client

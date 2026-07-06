@@ -3,7 +3,8 @@
 // QA Modal — fullscreen-overlay dialog that opens when a tile with a
 // `dashboard-q-binding` is clicked. Shows the question, accepts an
 // answer, and persists the (question, answer) pair as a
-// `kind: 'qa-answer'` optimization in `__optimization__/`. The
+// `kind: 'qa-answer'` optimization in the sign('optimization') pool (via
+// Store.putOptimization; legacy `__optimization__/` is a read-fallback). The
 // original `kind: 'qa'` optimization (the open Q) is then removed so
 // the dashboard's next refresh drops the card.
 //
@@ -357,7 +358,7 @@ export class QaModalView extends EventTarget {
 
     // 1) Mint a `qa-answer` optimization pairing the question with the
     //    user's raw answer. This is decoration, not canonical content
-    //    — it sits in `__optimization__/` until the next codegen pass
+    //    — it sits in the sign('optimization') pool until the next codegen pass
     //    reads it, interprets the answer, and (if warranted) writes a
     //    note via the state-machine `update(layer)` path. The note is
     //    Claude's instruction-form interpretation; the user's raw text

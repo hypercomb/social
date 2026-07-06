@@ -1,6 +1,16 @@
 // meadowverse/src/ensure-install.ts
 // runs BEFORE the import map is set, so that OPFS dependencies are written
 // before the browser freezes the import-map entries.
+//
+// Storage model (see hypercomb-shared/core/store.ts): bees and dependencies
+// live in their sign(meaning) POOLS (store.bees / store.dependencies —
+// the handles already point at the pools); layers live as bare sig-named
+// files at the FLAT OPFS ROOT. The legacy `__bees__`/`__dependencies__`/
+// `__layers__` dirs are read-fallback drain sources only: presence checks
+// UNION pool + legacy while a legacy handle exists, and install-cache
+// deletions touch pools + legacy dirs ONLY — never the flat root, which is
+// shared, content-addressed space (a stale layer sig file there is inert;
+// GC is a deliberate separate phase, never an install side effect).
 
 import { SignatureStore } from '@hypercomb/core'
 import { Store, LayerInstaller } from '../../hypercomb-shared/core'
@@ -90,14 +100,20 @@ export const ensureInstall = async (): Promise<void> => {
 
   if (oldManifest && newManifest) {
     console.log('[meadowverse:install] incremental update:', signature)
-    await removeStale(store.layers, oldManifest.layers, newManifest.layers, '.json')
-    await removeStale(store.bees, oldManifest.bees, newManifest.bees, '.js')
-    await removeStale(store.dependencies, oldManifest.dependencies, newManifest.dependencies, '.js')
+    // bees/deps: install-cache pools + their legacy drain dirs.
+    await removeStale([store.bees, store.legacyBees], oldManifest.bees, newManifest.bees)
+    await removeStale([store.dependencies, store.legacyDependencies], oldManifest.dependencies, newManifest.dependencies)
+    // layers: clean the LEGACY dir only. Dropped layer sigs at the flat
+    // root stay put — content-addressed, so they can only be absent or
+    // correct, and the root is not an install-owned location.
+    await removeStale([store.layers], oldManifest.layers, newManifest.layers)
   } else {
     console.log('[meadowverse:install] full install:', signature)
-    await clearDirectory(store.layers)
-    await clearDirectory(store.bees)
-    await clearDirectory(store.dependencies)
+    // Wipe the install-cache POOLS (bees/deps) and any legacy install
+    // dirs still draining. NEVER the flat root (see header comment).
+    await clearDirectories(store.bees, store.legacyBees)
+    await clearDirectories(store.dependencies, store.legacyDependencies)
+    await clearDirectories(store.layers)
   }
 
   const installUrl = `${contentBase}/${signature}`
@@ -133,10 +149,19 @@ const needsInstall = async (
   const installed = (localStorage.getItem(INSTALLED_KEY) ?? '').trim().toLowerCase()
   if (installed !== signature) return true
 
-  const hasLayers = await hasAny(store.layers)
-  const hasBees = await hasAny(store.bees)
-  const hasDeps = await hasAny(store.dependencies)
-  if (!(hasLayers && hasBees && hasDeps)) return true
+  // Presence probes UNION each pool with its legacy drain dir — during the
+  // drain window a half-absorbed pool must not read as "nothing installed".
+  const hasBees = await hasAny(store.bees, store.legacyBees)
+  const hasDeps = await hasAny(store.dependencies, store.legacyDependencies)
+  // Layers live flat at the OPFS root now, so "is the dir non-empty" is
+  // meaningless there (the root also holds pools and other sig files, and
+  // a drained-away `__layers__` must not read as genesis). Genesis is
+  // re-keyed on the root LAYER SIG itself: present ⇒ installed.
+  const hasRootLayer = await presentIn(
+    [store.hypercombRoot, store.layers],
+    [signature, `${signature}.json`],
+  )
+  if (!(hasBees && hasDeps && hasRootLayer)) return true
 
   // CRITICAL: also verify every dep + bee + layer sig referenced by the
   // LIVE manifest exists in OPFS. A previous build-cache bug (or
@@ -145,35 +170,65 @@ const needsInstall = async (
   // localStorage cache) so that any beeDeps fixed mid-rebuild forces a
   // re-install when the new dep file isn't in OPFS.
   if (!liveManifest) return false  // offline — trust whatever's in OPFS
-  if (!(await allPresent(store.bees, liveManifest.bees, '.js'))) return true
-  if (!(await allPresent(store.dependencies, liveManifest.dependencies, '.js'))) return true
-  if (!(await allPresent(store.layers, liveManifest.layers, '.json'))) return true
+  if (!(await allPresent([store.bees, store.legacyBees], liveManifest.bees))) return true
+  if (!(await allPresent([store.dependencies, store.legacyDependencies], liveManifest.dependencies))) return true
+  if (!(await allPresent([store.hypercombRoot, store.layers], liveManifest.layers))) return true
+  return false
+}
+
+// Name shapes vary across eras: pools/flat root hold bare `<sig>` while the
+// legacy dirs (and some installer writes) used `<sig>.js` / `<sig>.json`.
+// Every probe dual-checks all shapes so a shape flip never reads as absence.
+const NAME_SHAPES = ['', '.js', '.json']
+
+const probe = async (dir: FileSystemDirectoryHandle, names: string[]): Promise<boolean> => {
+  for (const name of names) {
+    try { await dir.getFileHandle(name); return true } catch { /* next shape */ }
+  }
+  return false
+}
+
+const presentIn = async (
+  dirs: (FileSystemDirectoryHandle | undefined)[],
+  names: string[],
+): Promise<boolean> => {
+  for (const dir of dirs) {
+    if (dir && await probe(dir, names)) return true
+  }
   return false
 }
 
 const allPresent = async (
-  dir: FileSystemDirectoryHandle,
+  dirs: (FileSystemDirectoryHandle | undefined)[],
   sigs: string[],
-  ext: string,
 ): Promise<boolean> => {
   for (const sig of sigs) {
-    try {
-      await dir.getFileHandle(`${sig}${ext}`)
-    } catch {
-      return false
-    }
+    if (!(await presentIn(dirs, NAME_SHAPES.map(ext => `${sig}${ext}`)))) return false
   }
   return true
 }
 
-const hasAny = async (dir: FileSystemDirectoryHandle): Promise<boolean> => {
-  for await (const _ of dir.entries()) return true
+// TS's DOM lib still lacks the async-iterator members on
+// FileSystemDirectoryHandle — same duck-type cast Store uses.
+const dirEntries = (dir: FileSystemDirectoryHandle): AsyncIterable<[string, FileSystemHandle]> =>
+  (dir as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()
+
+const hasAny = async (...dirs: (FileSystemDirectoryHandle | undefined)[]): Promise<boolean> => {
+  for (const dir of dirs) {
+    if (!dir) continue
+    for await (const _ of dirEntries(dir)) return true
+  }
   return false
 }
 
-const clearDirectory = async (dir: FileSystemDirectoryHandle): Promise<void> => {
-  for await (const [name] of dir.entries()) {
-    try { await dir.removeEntry(name, { recursive: true }) } catch { /* skip */ }
+// Install-cache wipe — pools and legacy drain dirs only; callers must never
+// hand this the flat root.
+const clearDirectories = async (...dirs: (FileSystemDirectoryHandle | undefined)[]): Promise<void> => {
+  for (const dir of dirs) {
+    if (!dir) continue
+    for await (const [name] of dirEntries(dir)) {
+      try { await dir.removeEntry(name, { recursive: true }) } catch { /* skip */ }
+    }
   }
 }
 
@@ -198,13 +253,6 @@ const extractRootFromManifest = (content: any): string | null => {
   return extractSignature(sigs[0])
 }
 
-const fetchText = async (url: string): Promise<string | null> => {
-  try {
-    const r = await fetch(url, { cache: 'no-store' })
-    return r.ok ? await r.text() : null
-  } catch { return null }
-}
-
 const fetchJson = async (url: string): Promise<Record<string, unknown> | null> => {
   try {
     const r = await fetch(url, { cache: 'no-store' })
@@ -213,7 +261,7 @@ const fetchJson = async (url: string): Promise<Record<string, unknown> | null> =
 }
 
 const extractSignature = (raw: string | null | undefined): string | null => {
-  const text = (raw ?? '').replace(/\uFEFF/g, '').trim()
+  const text = (raw ?? '').replace(/﻿/g, '').trim()
   if (!text) return null
   const fromPath = text.split('/').filter(Boolean).at(-1) ?? text
   const clean = fromPath.replace(/\.json$/i, '').replace(/\.txt$/i, '')
@@ -251,17 +299,22 @@ const tryParseManifest = (json: string): InstallManifest | null => {
   }
 }
 
+// Removes sigs dropped between manifests from the given install-cache dirs
+// (pool + legacy drain dir). Tries every name shape; absent entries no-op.
 const removeStale = async (
-  dir: FileSystemDirectoryHandle,
+  dirs: (FileSystemDirectoryHandle | undefined)[],
   oldSigs: string[],
   newSigs: string[],
-  ext: string
 ): Promise<void> => {
   const keep = new Set(newSigs)
   for (const sig of oldSigs) {
     if (keep.has(sig)) continue
-    try { await dir.removeEntry(`${sig}${ext}`) } catch { /* already gone */ }
-    try { await dir.removeEntry(sig) } catch { /* already gone */ }
+    for (const dir of dirs) {
+      if (!dir) continue
+      for (const ext of NAME_SHAPES) {
+        try { await dir.removeEntry(`${sig}${ext}`) } catch { /* already gone */ }
+      }
+    }
   }
 }
 

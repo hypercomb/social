@@ -2,8 +2,9 @@
 //
 // Right-docked "Feedback" review panel — the host's inbox surface. Opened by
 // the controls-bar feedback toggle (EffectBus `feedback:viewer-toggle`). It
-// reads every `kind: 'feedback'` record straight out of the __optimization__
-// substrate (Store.listOptimizations) and lists them newest-first, with a
+// reads every `kind: 'feedback'` record straight out of the sign('optimization')
+// pool (Store.listOptimizations — which unions the legacy `__optimization__`
+// dir only while it drains) and lists them newest-first, with a
 // per-item Resolve that removes the record. The hive stays visible/interactive
 // behind it (host pointer-events:none; panel pointer-events:auto), mirroring
 // the Features panel.

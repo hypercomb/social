@@ -3,7 +3,8 @@
 // /opus, /sonnet, /haiku — ask a live Claude Code (over the bridge) about the
 // selected tiles, and get the answer back IN THE HIVE. No API key, no direct
 // Anthropic call: the command writes an `ask` record into the participant-local
-// optimization inbox (`__optimization__/`, kind:'ask'). A Claude Code instance
+// optimization inbox (the sign('optimization') pool via Store.putOptimization;
+// legacy `__optimization__/` is a read-fallback — kind:'ask'). A Claude Code instance
 // the participant is running (bridge-connected) drains the inbox
 // (`optimization-list kind:'ask'`), reads the tiles for context, and writes the
 // answer back onto the tile (`note-add`) — which the hive renders live. The

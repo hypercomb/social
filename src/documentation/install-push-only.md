@@ -1,6 +1,6 @@
 # Install Push-Only Model
 
-> **status: design — not built (as of 2026-06-18).** A forward-looking spec for a branch-labelled push protocol; the named on-disk shapes and IoC services below (`head.json`, `__head__/`, `PushTarget`, `readHeadJson`/`writeHeadJson`) do NOT exist in the current build. What *is* built is the push-only load posture (boot reads OPFS only) plus a sentinel-mediated install/sync path — see [§1.1](#11-what-is-actually-built-today) for the real mechanism. Named Distributed Network Artifacts (layers, deps, bees, resources, content) are content-addressed and merkle-versioned today; this doc layers branch *labels* on top of those immutable signatures. See [dna.md](./dna.md) for the artifacts and [trail-capsule.md](./trail-capsule.md) for the route stream.
+> **status: design — not built (as of 2026-06-18).** A forward-looking spec for a branch-labelled push protocol; the named on-disk shapes and IoC services below (`head.json`, `PushTarget`, `readHeadJson`/`writeHeadJson`) do NOT exist in the current build. The `__head__/` directory the original draft proposed is **retired vocabulary** (2026-07-04): typed `__x__` folders are banned even as proposals — see §5.1 for the pool-terms re-expression. What *is* built is the push-only load posture (boot reads OPFS only) plus a sentinel-mediated install/sync path — see [§1.1](#11-what-is-actually-built-today) for the real mechanism. Named Distributed Network Artifacts (layers, deps, bees, resources, content) are content-addressed and merkle-versioned today; this doc layers branch *labels* on top of those immutable signatures. See [dna.md](./dna.md) for the artifacts and [trail-capsule.md](./trail-capsule.md) for the route stream.
 
 ## 1. Motivation
 
@@ -23,7 +23,7 @@ The verbs, on-disk shapes and IoC services in the rest of this doc (§3–§8) a
 ## 2. Core Principles
 
 1. **Load is inert.** Hypercomb's boot path performs zero network I/O against `manifest.json`. It reads the current state from OPFS and renders.
-2. **First-time bootstrap is the only exception.** If the domain's OPFS layers directory is empty, a one-shot install runs. After that, never again automatically.
+2. **First-time bootstrap is the only exception.** If the domain's OPFS holds no installed layers, a one-shot install runs. After that, never again automatically.
 3. **DCP push is the sole update path.** All changes to what Hypercomb loads flow through an explicit push action in DCP.
 4. **Pull-before-push.** DCP always reconciles against Hypercomb's current state before advancing a branch. There is no such thing as a blind overwrite.
 5. **Transport is pluggable.** The push *mechanism* is not prescribed. Same-origin deployments write OPFS directly; cross-origin deployments bridge via postMessage; hosted deployments upload to a storage backend. Community forks can implement whatever transport suits them.
@@ -34,7 +34,7 @@ The entire model is four verbs:
 
 ### 3.1 Working Copy
 
-DCP's local, uncommitted patches. Nameless, ephemeral, not a branch. Lives in `__patches__/{domain}/` as it does today.
+DCP's local, uncommitted patches. Nameless, ephemeral, not a branch. Lives in the DCP patch log — today still the legacy `__patches__/{domain}/` store (DCP legacy naming, pending its own pool migration, e.g. a lineage-style bag per domain scope).
 
 Until a push lands, the working copy has no identity. There is no "current branch" state to track — DCP is just "editing against some base."
 
@@ -42,7 +42,7 @@ Until a push lands, the working copy has no identity. There is no "current branc
 
 The commit event. Performs:
 
-1. **Pull** — read Hypercomb's current head pointer and the patch log at `__patches__/{domain}/`. (Proposed: `head.json`. Today there is no `head.json`; the hive's current tip is the `rootSig` reported over the sentinel bridge, and `PatchStore` already maintains the `__patches__` log in DCP.)
+1. **Pull** — read Hypercomb's current head pointer and the DCP patch log. (Proposed: `head.json`. Today there is no `head.json`; the hive's current tip is the `rootSig` reported over the sentinel bridge, and `PatchStore` still maintains its log in the legacy `__patches__/{domain}/` store — DCP legacy naming, pending its own pool migration.)
 2. **Resolve** — compute the set difference between Hypercomb's patches and DCP's locally-known patches. Classify conflicts by comparing touched file signatures.
 3. **Linearize** — append DCP's new patches after Hypercomb's new ones, producing a linear extension.
 4. **Append & advance** — write the new patch records, new layer signatures, and advance the named label pointer.
@@ -78,15 +78,9 @@ The exact authorship scheme (Nostr pubkey, local nickname, etc.) is deployment-d
 
 ### 5.1 `head.json`
 
-> **Not built.** Neither `head.json` nor the `__head__/` directory exists in the current build, and there are no `readHeadJson`/`writeHeadJson` helpers. The role this section proposes — naming a branch tip on top of an immutable layer signature — is filled today by the `rootSig`/`installedSig` compare over the sentinel bridge (see §1.1). The shape below is a design target.
+> **Not built — and the directory shape is retired (2026-07-04).** No `head.json` exists in the current build, and there are no `readHeadJson`/`writeHeadJson` helpers. The original draft placed this file at a typed `/__head__/{domain}/` path — that name is retired vocabulary; new typed `__x__` directories may not be proposed at all. Under the pools model the branch-tip role this section wants is already structural: **a lineage sigbag's max marker IS its HEAD** (`history-sigbag-as-root.md`), and today the tip is named by the `rootSig`/`installedSig` compare over the sentinel bridge (see §1.1). A named-label map, if ever built, would live as markers/tags inside a signature-named scope — e.g. tagged markers in the domain's `sign(domain)` reference pool (`mesh-domain-resolver-audit.md` §6) — never a typed directory. The JSON below is kept only to document what such a label map would contain.
 
-Written to the domain's OPFS root:
-
-```
-/__head__/{domain}/head.json
-```
-
-Contents:
+Label-map contents (design target; storage per the pool-terms note above):
 
 ```json
 {
@@ -104,7 +98,7 @@ Hypercomb's load path reads `head.json`, resolves `labels[activeLabel]` to a lay
 
 ### 5.2 Patch Log
 
-Unchanged from today — `__patches__/{domain}/NNNNNNNN` files written by `PatchStore.record()`. Already content-addressable via patch record contents. Each push appends to this log; the log is the authoritative history.
+Unchanged from today — the DCP patch log written by `PatchStore.record()` (still the legacy `__patches__/{domain}/NNNNNNNN` store; DCP legacy naming, pending its own pool migration to a lineage-style bag per domain scope). Already content-addressable via patch record contents. Each push appends to this log; the log is the authoritative history.
 
 ## 6. Transport Interface
 

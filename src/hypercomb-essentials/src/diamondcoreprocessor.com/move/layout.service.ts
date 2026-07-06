@@ -1,11 +1,19 @@
 // diamondcoreprocessor.com/core/layout/layout.service.ts
+//
+// LEGACY ordering sidecar. `__layout__` is a per-directory FILE (never a
+// typed directory) holding the ordered cell list for a content-tree dir.
+// Tile order is layer state now; this sidecar survives only for the
+// still-undrained legacy content trees and is a read-fallback. Nothing new
+// should write it — the ordering rewire onto the optimization substrate is
+// tracked in layout.queen's #save stub.
 const LAYOUT_FILE = '__layout__'
 
 export class LayoutService {
 
   /**
-   * Read the ordered cell list from __layout__ in the given directory.
-   * Returns null if no layout file exists (fall back to alphabetical).
+   * Read the ordered cell list from the legacy `__layout__` sidecar in the
+   * given directory. Returns null if no layout file exists (fall back to
+   * alphabetical).
    */
   async read(dir: FileSystemDirectoryHandle): Promise<string[] | null> {
     try {
@@ -21,7 +29,9 @@ export class LayoutService {
   }
 
   /**
-   * Write the ordered cell list to __layout__.
+   * Write the ordered cell list to the legacy `__layout__` sidecar FILE.
+   * Reachable only from /layout apply against a legacy content-tree dir;
+   * pending the ordering rewire onto the optimization substrate.
    */
   async write(dir: FileSystemDirectoryHandle, order: string[]): Promise<void> {
     const handle = await dir.getFileHandle(LAYOUT_FILE, { create: true })

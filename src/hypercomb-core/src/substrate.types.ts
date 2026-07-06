@@ -5,7 +5,9 @@
 // unified abstraction — layer packages, hives, linked local folders, and
 // remote URL bundles all resolve to the same pool of image signatures.
 
-/** A layer package in OPFS `__layers__/`, addressed by its layer signature. */
+/** A layer package addressed by its layer signature. The bytes live as a
+ *  sig-named file at the flat OPFS root (legacy `__layers__/` is a
+ *  read-fallback drain source inside Store — never a live location). */
 export interface SubstrateLayerSource {
   readonly type: 'layer'
   readonly id: string          // sha256 of discriminated content; stable registry key
@@ -14,11 +16,14 @@ export interface SubstrateLayerSource {
   readonly builtin?: boolean
 }
 
-/** A hive (directory path) within the `hypercomb.io/` user content tree. */
+/** A hive: a named path within the user content tree. */
 export interface SubstrateHiveSource {
   readonly type: 'hive'
   readonly id: string
-  readonly path: string        // slash-joined path under hypercomb.io/
+  // Slash-joined named path. Persisted registry data still encodes this
+  // relative to the (now legacy) `hypercomb.io/` tree; the union walker
+  // resolves it root-first then through the legacy content roots.
+  readonly path: string
   readonly label: string
   readonly builtin?: boolean
 }
@@ -55,7 +60,9 @@ export type SubstrateSource =
   | SubstrateFolderSource
   | SubstrateUrlSource
 
-/** Registry persisted in root OPFS `0000` under `substrate-registry`. */
+/** Registry persisted in the sign('substrate') pool as the `registry`
+ *  record (legacy: root OPFS `0000` under `substrate-registry`, a
+ *  read-fallback scrubbed once migrated). */
 export interface SubstrateRegistry {
   readonly sources: readonly SubstrateSource[]
   readonly activeId: string | null

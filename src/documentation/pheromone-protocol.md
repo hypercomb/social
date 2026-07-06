@@ -82,7 +82,7 @@ A bee emits a pheromone by publishing the pheromone resource to its own host and
 - **Receiving hives subscribe by target signature**, not by emitter. If a DCP holds fragment `abc...` in its merkle tree, it watches for pheromones attached to `abc...` regardless of who emits them.
 - **Pheromones are not in the module's merkle tree.** They would live in a parallel signature-addressed space, indexed by target signature. Grafting a pollination does not touch pheromones; emitting a pheromone does not touch the module.
 
-> The `__pheromones__/<sig>` OPFS path is **proposed only — it does not exist** in the live tree (the sole pheromone code is in dead `hypercomb-legacy`). And even if built it would **not** be a DNA folder: pheromones are advisory annotations outside the merkle tree, not merkle-resident artifacts. The only universal primitive remains the signature ([signature-system.md](signature-system.md)); a pheromone is a resource that *references* a signature, it does not become part of the addressed content it marks.
+> This parallel space is **not built** (the sole pheromone code is in dead `hypercomb-legacy`), and if built it would be a **pool of meaning** — a folder named `sign('pheromones')` holding sig-named members — never a typed `__pheromones__` directory (retired draft vocabulary; typed `__x__` folders are banned, even as proposals). Nor would it be a DNA space: pheromones are advisory annotations outside the merkle tree, not merkle-resident artifacts. The only universal primitive remains the signature ([signature-system.md](signature-system.md)); a pheromone is a resource that *references* a signature, it does not become part of the addressed content it marks.
 
 ## Decay
 

@@ -88,7 +88,9 @@ as a normal self-registering module — the same delivery path as any drone/bee:
 
 1. Author the module using the **decoupled** form above (`import type` + `whenReady`).
 2. Build it into the signed module set (`npm run build:essentials` bundles
-   self-registering modules into `dist/__bees__/` with a `manifest.json`).
+   self-registering modules as flat sig-named files in `dist/` with a
+   `manifest.json`; the legacy `dist/__bees__/` layout is retired — fetchers
+   fall back to it only for old deployed content).
 3. At runtime the web shell installs it into OPFS and the `ScriptPreloader` imports it;
    the module's top-level `whenReady(...).register(...)` runs and the theme appears in
    the picker. **No edits to the Arkanoid game are required.**

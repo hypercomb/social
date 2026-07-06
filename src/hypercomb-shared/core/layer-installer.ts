@@ -17,11 +17,11 @@ export class LayerInstaller {
 
     const store = get('@hypercomb.social/Store') as Store
 
-    // Layers go directly into the flat hive-root pool (`__hive__/<sig>`,
-    // Phase-1b) — no per-domain partition, no legacy `__layers__` dir. The
-    // install pipeline is literally xcopy: the host serves flat sig-keyed
-    // files; the installer copies them flat into OPFS. Resume is by pool
-    // presence (no install-cache file).
+    // Layers go directly to the flat OPFS root (`<root>/<sig>`,
+    // store.hypercombRoot === opfsRoot) — no per-domain partition, no
+    // typed dir. The install pipeline is literally xcopy: the host serves
+    // flat sig-keyed files; the installer copies them flat into OPFS.
+    // Resume is by presence (no install-cache file).
     const layersDir = store.hypercombRoot
 
     // 1) fetch content manifest and resolve the package by signature
@@ -97,15 +97,19 @@ export class LayerInstaller {
     endpoint: string,
     layers: string[]
   ): Promise<void> => {
+    const store = get('@hypercomb.social/Store') as Store
     for (const sig of layers) {
       if (!sig) continue
 
-      // Resume: layers are sig-keyed; if `__layers__/<sig>` already
-      // exists, the content IS correct (sig === hash(bytes)) — skip.
-      // Also tolerate legacy `<sig>.json` files from older installs.
-      const existing =
-        (await this.#tryGetFileHandle(layersDir, sig)) ??
-        (await this.#tryGetFileHandle(layersDir, `${sig}.json`))
+      // Resume: layers are sig-keyed; if `<root>/<sig>` already exists,
+      // the content IS correct (sig === hash(bytes)) — skip. Also probe
+      // the legacy content sources (`__hive__/`, `hypercomb.io/`,
+      // `__layers__/` — drain-window read fallbacks) and tolerate legacy
+      // `<sig>.json` names from older installs.
+      const existing = await this.#tryGetFromAny(
+        [layersDir, store.legacyHive, store.legacyHypercombIo, store.layers],
+        [sig, `${sig}.json`],
+      )
       if (existing) {
         console.log(`[layer-installer] layer ${sig} already installed, skipping`)
         continue
@@ -121,9 +125,9 @@ export class LayerInstaller {
         continue
       }
 
-      // Store flat at `__layers__/<sig>` — no extension, no domain
-      // partition. Matches what commitLayer writes; readers find it
-      // via store.getLayerPoolBytes(sig).
+      // Store flat at the OPFS root (`<root>/<sig>`) — no extension, no
+      // domain partition, no typed dir. Matches what commitLayer writes;
+      // readers find it via store.getLayerPoolBytes(sig) root-first.
       await this.#writeBytesFile(layersDir, sig, bytes)
       console.log(`[layer-installer] layer ${sig} installed`)
     }
@@ -140,9 +144,12 @@ export class LayerInstaller {
       if (!sig) continue
 
       const name = `${sig}.js`
-      const existing =
-        (await this.#tryGetFileHandle(depDir, name)) ??
-        (await this.#tryGetFileHandle(depDir, sig))
+      // Resume probe: sign('dependencies') pool ∪ the legacy
+      // `__dependencies__` drain dir (a file mid-drain is installed).
+      const existing = await this.#tryGetFromAny(
+        [depDir, store.legacyDependencies],
+        [name, sig],
+      )
 
       if (existing) {
         console.log(`[layer-installer] dependency ${sig} already installed, skipping`)
@@ -150,7 +157,7 @@ export class LayerInstaller {
       }
 
       console.log(`[layer-installer] downloading dependency ${sig}`)
-      // Flat heap first, legacy typed path fallback.
+      // Flat heap first, legacy typed URL shape fallback.
       const bytes = await this.#fetchBytes(`${endpoint}/${sig}`)
         ?? await this.#fetchBytes(`${endpoint}/__dependencies__/${name}`)
       if (!bytes) {
@@ -158,7 +165,7 @@ export class LayerInstaller {
         continue
       }
 
-      // store as: opfsroot/__dependencies__/<sig>.js
+      // store as <sig>.js in the sign('dependencies') pool
       await this.#writeBytesFile(depDir, name, bytes)
       console.log(`[layer-installer] dependency ${sig} installed`)
     }
@@ -175,9 +182,11 @@ export class LayerInstaller {
       if (!sig) continue
 
       const name = `${sig}.js`
-      const existing =
-        (await this.#tryGetFileHandle(beesDir, name)) ??
-        (await this.#tryGetFileHandle(beesDir, sig))
+      // Resume probe: sign('bees') pool ∪ the legacy `__bees__` drain dir.
+      const existing = await this.#tryGetFromAny(
+        [beesDir, store.legacyBees],
+        [name, sig],
+      )
 
       if (existing) {
         console.log(`[layer-installer] bee ${sig} already installed, skipping`)
@@ -185,7 +194,7 @@ export class LayerInstaller {
       }
 
       console.log(`[layer-installer] downloading bee ${sig}`)
-      // Flat heap first, legacy typed path fallback.
+      // Flat heap first, legacy typed URL shape fallback.
       const bytes = await this.#fetchBytes(`${endpoint}/${sig}`)
         ?? await this.#fetchBytes(`${endpoint}/__bees__/${name}`)
       if (!bytes) {
@@ -193,7 +202,7 @@ export class LayerInstaller {
         continue
       }
 
-      // store as: opfsroot/__bees__/<sig>.js
+      // store as <sig>.js in the sign('bees') pool
       await this.#writeBytesFile(beesDir, name, bytes)
       console.log(`[layer-installer] bee ${sig} installed`)
     }
@@ -243,6 +252,24 @@ export class LayerInstaller {
     } catch {
       return null
     }
+  }
+
+  /** Resume probe across the sign(meaning) pool AND its legacy `__x__`
+   *  drain dir(s): try each name in each dir until a handle resolves.
+   *  Undefined dirs (a drained/absent legacy source) are skipped. Content-
+   *  addressed, so a hit in any source is the same bytes. */
+  #tryGetFromAny = async (
+    dirs: (FileSystemDirectoryHandle | undefined)[],
+    names: string[],
+  ): Promise<FileSystemFileHandle | null> => {
+    for (const dir of dirs) {
+      if (!dir) continue
+      for (const name of names) {
+        const handle = await this.#tryGetFileHandle(dir, name)
+        if (handle) return handle
+      }
+    }
+    return null
   }
 
   #writeBytesFile = async (

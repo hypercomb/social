@@ -496,17 +496,21 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
     const tStart = performance.now()
     let tOpfs = 0, tDeps = 0, tEval = 0
 
-    // Try __bees__/{sig}.js then __bees__/{sig}
+    // sign('bees') pool first ({sig}.js then bare {sig}), then the same
+    // names in the legacy `__bees__` drain dir while the Store's detached
+    // absorb is still emptying it. Content-addressed — any hit is the
+    // same bytes.
     let handle: FileSystemFileHandle | null = null
-    try {
-      handle = await this.store.bees.getFileHandle(`${signature}.js`)
-    } catch {
-      try {
-        handle = await this.store.bees.getFileHandle(signature)
-      } catch {
-        console.warn(`[script-preloader] bee ${signature} not found in OPFS`)
-        return null
+    for (const dir of [this.store.bees, this.store.legacyBees]) {
+      if (!dir) continue
+      for (const name of [`${signature}.js`, signature]) {
+        try { handle = await dir.getFileHandle(name); break } catch { /* keep falling back */ }
       }
+      if (handle) break
+    }
+    if (!handle) {
+      console.warn(`[script-preloader] bee ${signature} not found in OPFS`)
+      return null
     }
 
     const file = await handle.getFile()

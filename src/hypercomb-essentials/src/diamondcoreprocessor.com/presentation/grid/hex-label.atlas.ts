@@ -158,6 +158,11 @@ export class HexLabelAtlas {
     return this.#evictionGeneration
   }
 
+  /** True if the label currently owns a live slot — its previously-issued
+   *  UV still points at its own pixels. False after eviction (a baked UV
+   *  for this label now samples a DIFFERENT label's glyphs). */
+  public hasLabel = (label: string): boolean => this.map.has(label)
+
   /**
    * Zero a single slot's pixels before a reused slot is overwritten.
    * Labels are mostly transparent (only the glyph strokes have alpha), so
@@ -239,6 +244,9 @@ export class HexLabelAtlas {
         this.map.delete(previous)
         this.#evictionGeneration++
         this.#clearSlot(col, row)
+        // Same contract as HexImageAtlas: announce the displacement so the
+        // renderer can repaint if the victim label is on screen.
+        window.dispatchEvent(new CustomEvent('hex-label-atlas:evicted', { detail: { label: previous } }))
       }
 
       const displayText = this.#labelResolver ? this.#labelResolver(label) : label
@@ -274,6 +282,13 @@ export class HexLabelAtlas {
       this.map.delete(previous)
       this.#evictionGeneration++
       this.#clearSlot(col, row)
+      // Evictions can originate OUTSIDE any render pass — an in-place cell
+      // update (#tryInPlaceCellUpdate) baking an uncached label after the
+      // ring has wrapped displaces a slot that may belong to an ON-SCREEN
+      // label, whose baked UV then samples the wrong glyphs with no pass
+      // scheduled to heal it (the superimposed/wrong-label bug class).
+      // Announce it so the renderer can repaint affected cells.
+      window.dispatchEvent(new CustomEvent('hex-label-atlas:evicted', { detail: { label: previous } }))
     }
 
     // Resolve display text: label resolver (i18n) → raw directory name

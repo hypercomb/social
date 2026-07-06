@@ -36,7 +36,6 @@ type TileActionPayload = {
 }
 
 type Store = {
-  resources: FileSystemDirectoryHandle
   putResource: (blob: Blob) => Promise<string>
   getResource: (signature: string) => Promise<Blob | null>
 }
@@ -127,7 +126,8 @@ export class TileEditorDrone {
       }
     }
 
-    // 2. load large image blob from __resources__ (if present)
+    // 2. load large image blob from the resource store (root sig file;
+    //    legacy __resources__/ is a read-fallback inside Store) if present
     let largeBlob: Blob | null = null
     const largeSig = (properties as any).large?.image
     if (largeSig && typeof largeSig === 'string') {

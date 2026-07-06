@@ -1,22 +1,51 @@
 // hypercomb-shared/core/tree-logger.ts
+//
+// Console dump of the OPFS tree, classified by the pools model: the
+// root inventory is sig-named files (content bytes), sig-named dirs
+// (lineage sigbags and sign(meaning) pools — pool addresses are derived
+// via Store.poolSignature, never hardcoded) and, until the self-cleaning
+// drains finish, legacy `__x__` / root-level `hypercomb.io` sources.
+// Sig dirs and drain dirs get count-only summaries (no deep walk — a
+// thousand-member pool would flood the console); root-level sig files
+// collapse into a single count line. Everything else (domain trees,
+// overrides) deep-walks as before.
+
+import { Store } from './store'
 
 const SIG_RE = /^[a-f0-9]{64}$/i
-const SYSTEM_DIRS = new Set(['__bees__', '__dependencies__', '__resources__', '__history__', '__layers__'])
+/** Legacy `__x__` dirs — drain sources awaiting self-clean removal. */
+const LEGACY_DRAIN_RE = /^__.+__$/
+/** Pools of meaning the logger knows how to label. */
+const POOL_MEANINGS = [
+    Store.BEES_MEANING, Store.DEPENDENCIES_MEANING, Store.CLIPBOARD_MEANING,
+    Store.THREADS_MEANING, Store.COMPUTATION_MEANING, Store.MANIFESTS_MEANING,
+    Store.OPTIMIZATION_MEANING, 'registry', 'receipts', 'structure', 'patches', 'roots',
+]
 
 export class OpfsTreeLogger {
 
     public log = async (): Promise<void> => {
         console.clear()
+        // sign(meaning) → meaning, derived fresh (memoized inside Store).
+        const pools = new Map<string, string>()
+        for (const meaning of POOL_MEANINGS) {
+            pools.set(await Store.poolSignature(meaning), meaning)
+        }
         try {
             const root = await navigator.storage.getDirectory()
             console.log('📂 /')
-            await this.#walk(root, '  ')
+            await this.#walk(root, '  ', pools, true)
         } catch (err) {
             console.log('[opfs] unable to read opfs root', err)
         }
     }
 
-    #walk = async (dir: FileSystemDirectoryHandle, indent: string): Promise<void> => {
+    #walk = async (
+        dir: FileSystemDirectoryHandle,
+        indent: string,
+        pools: Map<string, string>,
+        atRoot: boolean,
+    ): Promise<void> => {
         const entries: Array<{ name: string; kind: FileSystemHandleKind; handle: FileSystemHandle }> = []
 
         for await (const [name, handle] of dir.entries()) {
@@ -29,22 +58,38 @@ export class OpfsTreeLogger {
             return a.name.localeCompare(b.name)
         })
 
+        let rootSigFiles = 0
+
         for (const e of entries) {
             if (e.kind === 'directory') {
-                const isSystem = SYSTEM_DIRS.has(e.name)
-                const icon = isSystem ? '📦' : '📁'
                 const childDir = e.handle as FileSystemDirectoryHandle
-                const summary = isSystem ? await this.#summarizeSystemDir(childDir) : ''
-                console.log(`${indent}${icon} ${e.name}/${summary}`)
-
-                // System dirs: show summary only (skip deep walk)
-                if (!isSystem) {
-                    await this.#walk(childDir, indent + '  ')
+                const meaning = pools.get(e.name)
+                const isLegacy = LEGACY_DRAIN_RE.test(e.name) ||
+                    (atRoot && e.name === Store.LEGACY_HYPERCOMB_IO_DIRECTORY)
+                if (meaning) {
+                    // sign(meaning) pool — summarize, never deep-walk
+                    console.log(`${indent}📦 ${e.name}/  pool: ${meaning}${await this.#summarize(childDir)}`)
+                } else if (SIG_RE.test(e.name)) {
+                    // lineage sigbag — markers only, summarize
+                    console.log(`${indent}📁 ${e.name}/  (lineage sigbag)${await this.#summarize(childDir)}`)
+                } else if (isLegacy) {
+                    // legacy drain source — read-fallback only, self-clean removes it
+                    console.log(`${indent}📦 ${e.name}/  (legacy drain)${await this.#summarize(childDir)}`)
+                } else {
+                    console.log(`${indent}📁 ${e.name}/`)
+                    await this.#walk(childDir, indent + '  ', pools, false)
                 }
+            } else if (atRoot && SIG_RE.test(e.name.replace(/\.js$/i, ''))) {
+                // flat content files at the root — count, don't flood
+                rootSigFiles++
             } else {
                 const label = await this.#describeFile(e.name, e.handle as FileSystemFileHandle)
                 console.log(`${indent}📄 ${e.name}${label}`)
             }
+        }
+
+        if (rootSigFiles > 0) {
+            console.log(`${indent}📄 ${rootSigFiles} sig-named content files`)
         }
     }
 
@@ -77,7 +122,7 @@ export class OpfsTreeLogger {
         return parts.length ? parts.join('  ') : JSON.stringify(props)
     }
 
-    #summarizeSystemDir = async (dir: FileSystemDirectoryHandle): Promise<string> => {
+    #summarize = async (dir: FileSystemDirectoryHandle): Promise<string> => {
         let count = 0
         try {
             for await (const _ of dir.entries()) { count++; if (count > 999) break }

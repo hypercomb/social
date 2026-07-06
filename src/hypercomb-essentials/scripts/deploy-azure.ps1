@@ -220,6 +220,11 @@ function is-content-addressed {
     [string]$RelativePath
   )
 
+  # Flat layout: bare 64-hex blob at the container root, or a path inside a
+  # 64-hex-named sigbag dir. The typed `__x__/` prefixes are LEGACY (kept so
+  # a stale mixed dist still deploys incrementally during the transition —
+  # new builds never emit them).
+  if ($RelativePath -match '^[0-9a-f]{64}(/|$)') { return $true }
   return $RelativePath -match '^(__layers__|__bees__|__dependencies__)/'
 }
 
@@ -262,15 +267,22 @@ if ([string]::IsNullOrWhiteSpace($containerName)) {
 
 $authArguments = get-auth-arguments
 
-# only upload content directories and manifest — skip .cache/
-$contentItems = @('__layers__', '__bees__', '__dependencies__', 'manifest.json')
+# Flat delivery layout: content entries are 64-hex sig names at the dist root
+# (file = layer/bee/dependency bytes, dir = sigbag) plus manifest.json — see
+# build-module.ts. Never .cache/. The legacy typed dirs are still swept up
+# when a stale dist carries them (transition safety); new builds don't emit
+# them. Blobs already on Azure under the typed `__x__/` names are NEVER
+# deleted or renamed — old deployed clients keep resolving them forever.
+$sigNamePattern = '^[0-9a-f]{64}$'
+$legacyContentDirs = @('__layers__', '__bees__', '__dependencies__')
 $files = @()
-foreach ($item in $contentItems) {
-  $itemPath = Join-Path $resolvedSource $item
-  if (Test-Path -LiteralPath $itemPath -PathType Container) {
-    $files += @(Get-ChildItem -LiteralPath $itemPath -Recurse -File | Sort-Object FullName)
-  } elseif (Test-Path -LiteralPath $itemPath -PathType Leaf) {
-    $files += @(Get-Item -LiteralPath $itemPath)
+foreach ($entry in (Get-ChildItem -LiteralPath $resolvedSource | Sort-Object Name)) {
+  if ($entry.PSIsContainer) {
+    if ($entry.Name -match $sigNamePattern -or $legacyContentDirs -contains $entry.Name) {
+      $files += @(Get-ChildItem -LiteralPath $entry.FullName -Recurse -File | Sort-Object FullName)
+    }
+  } elseif ($entry.Name -match $sigNamePattern -or $entry.Name -eq 'manifest.json') {
+    $files += @(Get-Item -LiteralPath $entry.FullName)
   }
 }
 
@@ -397,6 +409,24 @@ $skipped = 0
 # AND verify each upload after the fact, retrying any that silently dropped.
 $uploadAttempts = @()
 
+# Flat blobs carry no extension, so MIME comes from what the manifest says
+# each sig IS: bees/dependencies are ES modules, layers are JSON. Consumers
+# fetch bytes (never import()-by-URL), but keeping honest content-types
+# avoids the octet-stream class of bugs for anything that does care.
+$sigContentTypes = @{}
+try {
+  $kindManifest = Get-Content -LiteralPath (Join-Path $resolvedSource 'manifest.json') -Raw | ConvertFrom-Json
+  if ($null -ne $kindManifest.packages) {
+    foreach ($pkgProp in $kindManifest.packages.PSObject.Properties) {
+      foreach ($s in @($pkgProp.Value.layers))       { if ($s) { $sigContentTypes[[string]$s] = 'application/json' } }
+      foreach ($s in @($pkgProp.Value.bees))         { if ($s) { $sigContentTypes[[string]$s] = 'application/javascript' } }
+      foreach ($s in @($pkgProp.Value.dependencies)) { if ($s) { $sigContentTypes[[string]$s] = 'application/javascript' } }
+    }
+  }
+} catch {
+  write-step 'warning: could not index sig kinds from manifest.json — bare-sig blobs upload as octet-stream'
+}
+
 function get-content-type {
   param([Parameter(Mandatory = $true)][string]$Path)
   if ($Path -match '\.js$')   { return 'application/javascript' }
@@ -404,6 +434,9 @@ function get-content-type {
   if ($Path -match '\.css$')  { return 'text/css' }
   if ($Path -match '\.html$') { return 'text/html' }
   if ($Path -match '\.svg$')  { return 'image/svg+xml' }
+  if ($Path -match '^[0-9a-f]{64}$' -and $script:sigContentTypes.ContainsKey($Path)) {
+    return $script:sigContentTypes[$Path]  # flat sig blob — kind from manifest
+  }
   return 'application/octet-stream'  # bag entries (no extension)
 }
 

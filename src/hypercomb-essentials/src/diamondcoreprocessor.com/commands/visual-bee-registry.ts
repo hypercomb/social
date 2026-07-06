@@ -3,26 +3,28 @@
 // VisualBeeRegistry — declarations of "visual bees": bees that produce a
 // renderable view over a cell. A visual bee is anything with a slash
 // command + an icon + a decoration kind, e.g. `/website`, `/audio`,
-// `/story`, `/video`. Each bee writes its output as DECORATION JSONs in
-// the `__optimization__` substrate (via Store.putOptimization) and adds
-// the resulting sigs to the cell's `decorationManifest` slot so the
-// pointers ride in the merkle tree (and therefore are shared / adopted /
-// undoable like any other slot value).
+// `/story`, `/video`. Each bee writes its output as DECORATION JSONs —
+// content-addressed resources (sig files at the flat OPFS root, via
+// Store.putResource / the DecorationService facade; legacy `__resources__/`
+// is a read-fallback) — and adds the resulting sigs to the cell's
+// `decorationManifest` slot so the pointers ride in the merkle tree (and
+// therefore are shared / adopted / undoable like any other slot value).
 //
 // ── Why a registry? ────────────────────────────────────────────────────
 //
 // Two consumers need to enumerate visual bees:
 //
 //   1. The RENDERER picks the visual bee whose decoration kind matches
-//      the current view mode, then resolves its decorations against
-//      `__optimization__` to render the cell.
+//      the current view mode, then resolves its decorations (content
+//      resources at the flat OPFS root) to render the cell.
 //
 //   2. ADOPTION surfaces a per-view opt-in icon. For an adopted tile,
 //      walk every adoptable visual bee, check whether the peer's
 //      manifest has entries with that kind — if so, render an icon
 //      (looked up via IconProviderRegistry by `iconName`). Click =
-//      copy peer's decoration JSONs into local `__optimization__` and
-//      append their sigs to the local cell's `decorationManifest`.
+//      copy peer's decoration JSONs into the local resource store (root
+//      sig files) and append their sigs to the local cell's
+//      `decorationManifest`.
 //
 // Both consumers depend on the same declarations, hence the registry.
 //
@@ -131,9 +133,10 @@ export type VisualBeeDescriptor = {
   readonly controllerKey?: string
 
   /**
-   * Optimization-record `kind` string written by this bee. Decoration
-   * JSONs in `__optimization__` carry `{ kind, appliesTo, payload }` and
-   * the renderer / adoption use this string to filter records.
+   * Decoration-record `kind` string written by this bee. Decoration
+   * JSONs (content resources at the flat OPFS root) carry
+   * `{ kind, appliesTo, payload }` and the renderer / adoption use this
+   * string to filter records.
    *
    * Convention: `visual:<view>:<noun>`, e.g. `'visual:website:page'`,
    * `'visual:audio:track'`. Multiple kinds per view are allowed (declare

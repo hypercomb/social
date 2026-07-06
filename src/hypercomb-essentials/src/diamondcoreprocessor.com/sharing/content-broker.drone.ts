@@ -61,12 +61,16 @@
 // so we don't loop on our own broadcasts. Local-fanout events arrive
 // without a pubkey (pre-sign) — also dropped.
 //
-// On dependency fetches: stored at `__dependencies__/<sig>` (Store
-// doesn't expose a getDependencyBytes yet, so we read the file handle
-// directly through Store.opfsRoot fallback). Layer/resource paths use
-// the canonical Store APIs.
+// On dependency fetches: dependencies live in the sign('dependencies')
+// POOL OF MEANING — a dir at the OPFS root named by sha256 of the
+// UTF-8 'dependencies' bytes, the same derivation Store uses. Store
+// doesn't expose a getDependencyBytes yet, so we address the pool
+// directly (prefer Store's pre-opened handle, else derive); the legacy
+// `__dependencies__` dir is a READ fallback only until its
+// self-cleaning drain removes it. Layer/resource paths use the
+// canonical Store APIs.
 
-import { Drone } from '@hypercomb/core'
+import { Drone, SignatureService } from '@hypercomb/core'
 import { decorationClosureSigs } from './decoration-closure.js'
 
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
@@ -237,6 +241,8 @@ interface SignerApi {
 
 interface StoreApi {
   opfsRoot?: FileSystemDirectoryHandle
+  /** sign('dependencies') pool handle — Store pre-opens it at init. */
+  dependencies?: FileSystemDirectoryHandle
   getResource?: (sig: string) => Promise<Blob | null>
   getResourceLocal?: (sig: string) => Promise<Blob | null>
   putResource?: (blob: Blob) => Promise<string>
@@ -273,6 +279,20 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 }
 
 const SIG_RE = /^[0-9a-f]{64}$/
+
+// sign(meaning) → pool address: sha256 of the UTF-8 bytes of the
+// meaning string, memoized. Identical to Store.poolSignature — derived
+// by convention, no registry — reimplemented here because essentials
+// must never import shared.
+const poolSigCache = new Map<string, Promise<string>>()
+const poolSignature = (meaning: string): Promise<string> => {
+  let sig = poolSigCache.get(meaning)
+  if (!sig) {
+    sig = SignatureService.sign(new TextEncoder().encode(meaning).buffer as ArrayBuffer)
+    poolSigCache.set(meaning, sig)
+  }
+  return sig
+}
 
 // ── drone ───────────────────────────────────────────────────────────
 
@@ -1286,10 +1306,11 @@ export class ContentBrokerDrone extends Drone {
    *  Shared by BOTH fetch paths: the mesh response (#acceptResponseBytes) AND
    *  the HTTP-direct path (#fetchOverHttp). The HTTP path historically skipped
    *  persistence, so an HTTP-fetched LAYER was returned (and counted as
-   *  adopted) but never landed in the `__layers__/<sig>` pool that
-   *  getLayerBySig reads — so adopted content silently failed to commit into
-   *  the hive ("adopt allowed but not saved in solo"). The fetchBySig contract
-   *  is "bytes are written to the local Store on success"; both paths honor it. */
+   *  adopted) but never landed in the local layer store getLayerBySig reads
+   *  (a flat-root sig file now; the legacy `__layers__` pool back then) — so
+   *  adopted content silently failed to commit into the hive ("adopt allowed
+   *  but not saved in solo"). The fetchBySig contract is "bytes are written
+   *  to the local Store on success"; both paths honor it. */
   #persistLocal = async (sig: string, type: ContentType, bytes: Uint8Array): Promise<void> => {
     const store = this.#getStore()
     try {
@@ -1336,29 +1357,54 @@ export class ContentBrokerDrone extends Drone {
     return null
   }
 
-  // Dependencies live at `__dependencies__/<sig>` per CLAUDE.md OPFS
-  // layout, but Store doesn't expose a typed accessor for them yet,
-  // so we reach in via opfsRoot. Read-only and write paths are kept
-  // local so a future Store.getDependencyBytes refactor only needs to
-  // replace these two helpers.
+  // Dependencies live in the sign('dependencies') pool at the OPFS
+  // root. Store doesn't expose a typed accessor for them yet, so we
+  // address the pool here — Store's pre-opened handle when available
+  // (it auto-retargets with Store), else the derived pool address.
+  // Read-only and write paths are kept local so a future
+  // Store.getDependencyBytes refactor only needs to replace these
+  // helpers.
+
+  #dependencyPool = async (create: boolean): Promise<FileSystemDirectoryHandle | null> => {
+    const store = this.#getStore()
+    if (store?.dependencies) return store.dependencies
+    const root = store?.opfsRoot
+    if (!root) return null
+    try {
+      return await root.getDirectoryHandle(await poolSignature('dependencies'), { create })
+    } catch { return null }
+  }
 
   #readDependencyBytes = async (sig: string): Promise<Uint8Array | null> => {
+    const pool = await this.#dependencyPool(false)
+    if (pool) {
+      try {
+        const handle = await pool.getFileHandle(sig, { create: false })
+        const file = await handle.getFile()
+        return new Uint8Array(await file.arrayBuffer())
+      } catch { /* pool miss — fall through to the legacy drain source */ }
+    }
+    // LEGACY read fallback (drain window only): `__dependencies__` is
+    // opened WITHOUT create so the dir stays gone once Store's
+    // self-cleaning absorb has drained and removed it.
     const root = this.#getStore()?.opfsRoot
     if (!root) return null
     try {
-      const deps = await root.getDirectoryHandle('__dependencies__', { create: false })
-      const handle = await deps.getFileHandle(sig, { create: false })
+      const legacy = await root.getDirectoryHandle('__dependencies__', { create: false })
+      const handle = await legacy.getFileHandle(sig, { create: false })
       const file = await handle.getFile()
       return new Uint8Array(await file.arrayBuffer())
     } catch { return null }
   }
 
   #writeDependencyBytes = async (sig: string, bytes: Uint8Array): Promise<void> => {
-    const root = this.#getStore()?.opfsRoot
-    if (!root) return
+    // Writes target the sign('dependencies') pool ONLY — never the
+    // legacy dir (a legacy write would split-brain freshly fetched
+    // bytes away from the pool the loaders read).
+    const pool = await this.#dependencyPool(true)
+    if (!pool) return
     try {
-      const deps = await root.getDirectoryHandle('__dependencies__', { create: true })
-      const handle = await deps.getFileHandle(sig, { create: true })
+      const handle = await pool.getFileHandle(sig, { create: true })
       const w = await handle.createWritable()
       try { await w.write(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer) }
       finally { await w.close() }

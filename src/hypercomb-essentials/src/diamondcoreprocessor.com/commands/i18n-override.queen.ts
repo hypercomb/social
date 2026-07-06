@@ -1,8 +1,12 @@
 // diamondcoreprocessor.com/commands/i18n-override.queen.ts
 //
 // Savvy-user override layer for UI translations.
-// Reads/writes /overrides/i18n.json in OPFS — the same file the runtime
-// initializer consumes on boot. Shape:
+// Reads/writes `i18n.json` in the sign('overrides') POOL OF MEANING at the
+// OPFS root (dir named sha256 of the meaning, derived below — never a
+// human-named folder), the same file the runtime initializer consumes on
+// boot. The legacy non-signed `overrides/` dir is a read-fallback/drain
+// source: Store's boot absorb migrates it into the pool and removes it.
+// Shape:
 //   { "<locale>": { "<key>": "<value>", ... }, ... }
 //
 // Usage:
@@ -15,9 +19,21 @@
 
 import { QueenBee, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 
-const OVERRIDES_PATH = 'overrides/i18n.json'
+// The override layer is a CONTENT-ADDRESSED document in the sign('overrides')
+// document pool (Store.putPoolDoc/getPoolDoc): the member is named by
+// sign(its bytes), never a human filename. The legacy non-signed
+// `overrides/i18n.json` is a read-fallback/drain source — Store's boot absorb
+// content-addresses it into the pool and removes it.
+const LEGACY_OVERRIDES_DIR = 'overrides'
+const OVERRIDES_FILE = 'i18n.json'
 
 type OverrideLayer = Record<string, Record<string, string>>
+
+type StoreDocApi = {
+  overrides?: FileSystemDirectoryHandle
+  getPoolDoc: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
+  putPoolDoc: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+}
 
 export class I18nOverrideQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -107,25 +123,40 @@ export class I18nOverrideQueenBee extends QueenBee {
     console.log(`[i18n-override] set ${locale}:${key} = "${value}"`)
   }
 
+  // Pool is authoritative (writes + reset land there); the legacy
+  // `overrides/` dir is the not-yet-drained fallback. Order: pool →
+  // legacy → pool AGAIN. The final re-read closes the boot-absorb race —
+  // Store's content-addressing absorb writes the pool member BEFORE
+  // deleting the legacy file, so if the first pool read missed and legacy
+  // then vanished mid-read, the copy has landed and the re-read finds it.
+  // First-hit (not merge) so a reset — `{}` written to the pool — wins
+  // over stale legacy instead of resurrecting it. Empty only when absent
+  // in every read.
   async #read(): Promise<OverrideLayer> {
+    const store = get('@hypercomb.social/Store') as StoreDocApi | undefined
+    const readPool = async (): Promise<OverrideLayer | null> => {
+      if (!store?.overrides) return null
+      const buf = await store.getPoolDoc(store.overrides)
+      if (!buf) return null
+      try { return JSON.parse(new TextDecoder().decode(buf)) as OverrideLayer } catch { return null }
+    }
+    return (await readPool()) ?? (await this.#readLegacy()) ?? (await readPool()) ?? {}
+  }
+
+  async #readLegacy(): Promise<OverrideLayer | null> {
     try {
       const root = await navigator.storage.getDirectory()
-      const dir = await root.getDirectoryHandle('overrides', { create: false })
-      const handle = await dir.getFileHandle('i18n.json', { create: false })
-      const file = await handle.getFile()
-      return JSON.parse(await file.text()) as OverrideLayer
-    } catch {
-      return {}
-    }
+      const dir = await root.getDirectoryHandle(LEGACY_OVERRIDES_DIR, { create: false })
+      const handle = await dir.getFileHandle(OVERRIDES_FILE, { create: false })
+      return JSON.parse(await (await handle.getFile()).text()) as OverrideLayer
+    } catch { return null }
   }
 
   async #write(layer: OverrideLayer): Promise<void> {
-    const root = await navigator.storage.getDirectory()
-    const dir = await root.getDirectoryHandle('overrides', { create: true })
-    const handle = await dir.getFileHandle('i18n.json', { create: true })
-    const writable = await handle.createWritable()
-    await writable.write(JSON.stringify(layer, null, 2))
-    await writable.close()
+    const store = get('@hypercomb.social/Store') as StoreDocApi | undefined
+    if (!store?.overrides) return
+    const bytes = new TextEncoder().encode(JSON.stringify(layer, null, 2)).buffer as ArrayBuffer
+    await store.putPoolDoc(store.overrides, bytes)
   }
 
   #applyLive(locale: string, catalog: Record<string, string>): void {

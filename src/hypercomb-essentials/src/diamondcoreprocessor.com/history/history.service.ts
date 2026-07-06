@@ -85,9 +85,9 @@ export const emptyLayer = (name: string): LayerContent => ({ name })
 
 /**
  * One history entry. Just a pointer to a layer resource plus the timestamp
- * at which this entry was appended. Entries live in
- * `__history__/{locationSig}/layers/{uuid}.json`. Filenames carry no
- * semantic meaning — they're opaque handles. Ordering comes from `at`.
+ * at which this entry was appended. Entries are the `NNNNNNNN` marker files
+ * inside the lineage's sigbag (`<root>/<lineageSig>/`). Filenames carry no
+ * semantic meaning beyond ordering — the max marker is the current head.
  */
 export type LayerEntry = {
   layerSig: string
@@ -95,9 +95,11 @@ export type LayerEntry = {
 }
 
 /**
- * Marker file shape. A marker at `__history__/<lineage>/<NNNN>` is a
- * small JSON record naming WHICH layer this revision points at, plus
- * (optionally) any supporting-data sigs attached to the same revision.
+ * Marker file shape. A marker at `<root>/<lineageSig>/<NNNNNNNN>` (the
+ * lineage sigbag at the OPFS root; legacy `__history__`/`__hive__`/
+ * `hypercomb.io` bags are read-fallback drain sources) is a small JSON
+ * record naming WHICH layer this revision points at, plus (optionally)
+ * any supporting-data sigs attached to the same revision.
  *
  * Legacy markers contain the full layer JSON directly (the bytes
  * themselves were the layer). Readers detect this by parsing: if the
@@ -176,75 +178,158 @@ export class HistoryService {
         if (document.visibilityState === 'hidden') this.#flushHeadIndex()
       })
     } catch { /* non-DOM context — head persistence is a main-thread-only optimization */ }
+    // SELF-CLEANING: when the legacy `__history__` pool (or a per-bag
+    // `__temporary__` archive) still exists, drain it into the signed
+    // locations and remove the orphaned dirs — automatically. Detached
+    // and delayed so it never competes with first paint or the warmup
+    // walk; `/consolidate-history` remains as a manual force-run of the
+    // same pass. Idempotent and resumable — a partial pass finishes on
+    // a later boot.
+    setTimeout(() => { void this.#selfCleanLegacy() }, HistoryService.#SELF_CLEAN_DELAY_MS)
   }
 
-  /** Legacy `__history__` pool handle, or undefined once it has been GC'd
-   *  (or for a fresh participant). Phase-2 reads fall back to it via
-   *  `bagForRead`; writes promote out of it via `getBag`. */
+  /** How long after construction the history self-clean waits — clear of
+   *  first paint and the warmup walk. Slightly later than Store's content
+   *  self-clean (20s) so the two drains don't contend for single-threaded
+   *  OPFS. */
+  static readonly #SELF_CLEAN_DELAY_MS = 30_000
+
+  /** Detached drain pass: waits for Store, then (1) relocates + retires
+   *  the legacy `__history__` pool via gcLegacyHistory, and (2) absorbs
+   *  any per-bag `__temporary__` archives at the root into the
+   *  sign('temporary') pool. Best-effort — never throws, never blocks a
+   *  render; removal is gated on confirmed copies throughout. */
+  readonly #selfCleanLegacy = async (): Promise<void> => {
+    try {
+      const store = get<{
+        initialize?: () => Promise<void>
+        hypercombRoot?: FileSystemDirectoryHandle
+        history?: FileSystemDirectoryHandle
+      }>('@hypercomb.social/Store')
+      await store?.initialize?.()
+      if (!store?.hypercombRoot) return  // OPFS unavailable — a later boot retries
+      if (store.history) await this.gcLegacyHistory()
+      await this.#absorbRootBagArchives()
+    } catch { /* best-effort — resumed on a later boot */ }
+  }
+
+  /** Legacy `__history__` drain source (opened WITHOUT create by Store),
+   *  or undefined once drained / for a fresh participant. Reads union it
+   *  in via bag promotion; the self-cleaning drain (`gcLegacyHistory`)
+   *  retires it. */
   private get historyRoot(): FileSystemDirectoryHandle | undefined {
     const store = get<{ history?: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
     return store?.history
   }
 
-  /** Hive root (`__hive__`) — the Phase-2 destination for lineage sigbags.
-   *  Bags relocate here from the legacy `__history__/<lineageSig>/` pool so
-   *  the participant tree is one set of sig-keyed pools at a single root:
-   *  content sig FILES and lineage sigbag DIRS side by side, both 64-hex,
-   *  discriminated by kind (a lineageSig and a content sig never collide —
-   *  different preimages). */
+  /** The user-content root — `store.hypercombRoot`, which IS the OPFS
+   *  root. Lineage sigbags (`<lineageSig>/` of `NNNNNNNN` markers, max
+   *  marker = current) live here as sig-named DIRS beside content sig
+   *  FILES and sign(meaning) pool dirs; a lineage sig and a content sig
+   *  never collide (different preimages). Every NEW bag and marker
+   *  writes here — never to a legacy dir. */
   private get hiveRoot(): FileSystemDirectoryHandle {
     const store = get<{ hypercombRoot: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
     return store!.hypercombRoot
   }
 
-  /** Resolve a lineage bag for WRITING, Phase-2 **promote-on-write**. The hive
-   *  root is the destination: if the bag is already there, append to it; if it
-   *  still lives in the legacy `__history__` pool, copy the WHOLE bag up first
-   *  (so the ordered NNNN sequence is never split across two locations) and
-   *  append to the hive copy; otherwise create a fresh bag at the hive root.
-   *  Commits are serialized, so no two writers race the same bag, and the copy
-   *  is idempotent (skips entries already present). */
+  /** Legacy bag sources, all optional (Store opens them WITHOUT create,
+   *  so a drained dir stays gone): `__hive__/` (the brief-lived root
+   *  rename), `hypercomb.io/` (pre-`__hive__`), `__history__/` (Phase-1).
+   *  Store's content relocation drains the first two; `gcLegacyHistory`
+   *  owns the third. Until every one is gone, reads UNION them. */
+  readonly #legacyBagSources = (): (FileSystemDirectoryHandle | undefined)[] => {
+    const store = get<{
+      legacyHive?: FileSystemDirectoryHandle
+      legacyHypercombIo?: FileSystemDirectoryHandle
+      history?: FileSystemDirectoryHandle
+    }>('@hypercomb.social/Store')
+    return [store?.legacyHive, store?.legacyHypercombIo, store?.history]
+  }
+
+  /** Lineages whose root bag is confirmed union-complete for this session
+   *  (every legacy copy merged in, or no legacy copy exists). */
+  readonly #promotedBags = new Set<string>()
+  readonly #promotePending = new Map<string, Promise<void>>()
+
+  /** UNION-promote one lineage's bag to the root: copy every marker /
+   *  record file that any legacy source (`__hive__`, `hypercomb.io/`,
+   *  `__history__`) holds and the root bag lacks. The HIGHEST marker
+   *  across sources wins by construction — the union only ADDS missing
+   *  filenames, and on a same-name divergence the root's copy is kept
+   *  (it is the live era; the content bytes both markers point at live
+   *  at the root regardless). First-hit source selection is forbidden:
+   *  a stale source must never time-travel the tree backwards. Legacy
+   *  `__temporary__` archive subdirs absorb into the sign('temporary')
+   *  pool instead of being copied — no underscore dir is ever created.
+   *  Memoized per session and a cheap no-op once every legacy source is
+   *  drained. */
+  readonly #promoteBag = (lineageSig: string): Promise<void> => {
+    if (this.#promotedBags.has(lineageSig)) return Promise.resolve()
+    const pending = this.#promotePending.get(lineageSig)
+    if (pending) return pending
+    const promise = (async (): Promise<void> => {
+      const store = get<{ hypercombRoot?: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
+      // Store not ready — do NOT memoize; the caller's root access throws
+      // the same not-ready signal it always did, and a later touch retries.
+      if (!store?.hypercombRoot) return
+      try {
+        const sources: FileSystemDirectoryHandle[] = []
+        for (const src of this.#legacyBagSources()) {
+          if (!src) continue
+          try { sources.push(await src.getDirectoryHandle(lineageSig, { create: false })) } catch { /* not in this source */ }
+        }
+        if (sources.length > 0) {
+          const root = await store.hypercombRoot.getDirectoryHandle(lineageSig, { create: true })
+          for (const src of sources) await this.#copyBagInto(src, root)
+        }
+        this.#promotedBags.add(lineageSig)
+      } catch { /* transient OPFS hiccup — retried on the next touch */ }
+    })()
+    this.#promotePending.set(lineageSig, promise)
+    promise.finally(() => { this.#promotePending.delete(lineageSig) })
+    return promise
+  }
+
+  /** Resolve a lineage bag for WRITING. The root bag is the ONLY write
+   *  destination; the union-promotion runs first so the NNNNNNNN sequence
+   *  continues from the highest marker across every source (a fresh root
+   *  bag must never restart at 00000001 while deeper markers sit in a
+   *  legacy dir). Commits are serialized, so no two writers race the same
+   *  bag, and promotion is idempotent. */
   private readonly getBag = async (signature: string): Promise<FileSystemDirectoryHandle> => {
-    try {
-      return await this.hiveRoot.getDirectoryHandle(signature, { create: false })
-    } catch { /* not yet at the hive root */ }
-    let legacy: FileSystemDirectoryHandle | null = null
-    try { legacy = (await this.historyRoot?.getDirectoryHandle(signature, { create: false })) ?? null } catch { /* fresh lineage */ }
-    const hive = await this.hiveRoot.getDirectoryHandle(signature, { create: true })
-    if (legacy) await HistoryService.#copyDirInto(legacy, hive)
-    return hive
+    await this.#promoteBag(signature)
+    return await this.hiveRoot.getDirectoryHandle(signature, { create: true })
   }
 
-  /** Resolve a lineage bag for READING, Phase-2 root-first: the hive-root
-   *  pool (`__hive__/<lineageSig>`) then the legacy `__history__/<lineageSig>`.
-   *  Promote-on-write keeps every written bag whole in the hive root, so a
-   *  hive hit is always at least as fresh as legacy — no merge needed. Throws
-   *  (like getDirectoryHandle) when the bag is absent in both, so every
-   *  existing try/catch read site is unchanged. */
+  /** Resolve a lineage bag for READING. Union-promotes first (see
+   *  `#promoteBag`) so the returned ROOT bag holds every marker from every
+   *  source — highest marker wins — then opens it WITHOUT create. Throws
+   *  (like getDirectoryHandle) when the bag is absent at the root and in
+   *  every legacy source, so every existing try/catch read site keeps its
+   *  cold-vs-authoritative-absence semantics. */
   private readonly bagForRead = async (lineageSig: string): Promise<FileSystemDirectoryHandle> => {
-    try {
-      return await this.hiveRoot.getDirectoryHandle(lineageSig, { create: false })
-    } catch {
-      const legacy = this.historyRoot
-      if (!legacy) throw new Error('history bag not found')
-      return await legacy.getDirectoryHandle(lineageSig, { create: false })
-    }
+    await this.#promoteBag(lineageSig)
+    return await this.hiveRoot.getDirectoryHandle(lineageSig, { create: false })
   }
 
-  /** Recursively copy every file (and subdir, e.g. a bag's `__temporary__`
-   *  archive) from `src` into `dst`, skipping entries already present. Marker
-   *  files (`NNNN`) within one lineage bag are positional and identical
-   *  between the two copies; archived layers are sig-named. So "already
-   *  present" means "identical bytes", making the copy idempotent and safe to
-   *  re-run — it never overwrites a fresher hive marker with an older one. */
-  static readonly #copyDirInto = async (
+  /** Copy one legacy bag's FILES into the root bag, skipping names already
+   *  present (union — the root's copy wins on any same-name divergence;
+   *  the max marker only grows). A legacy `__temporary__` archive subdir
+   *  is absorbed into the sign('temporary') pool — and removed from the
+   *  source once fully drained — instead of being copied, so no
+   *  underscore dir is ever (re)created. Unknown subdirs are left
+   *  untouched; their presence defers the source's GC. Best-effort per
+   *  entry, idempotent, safe to re-run. */
+  readonly #copyBagInto = async (
     src: FileSystemDirectoryHandle,
     dst: FileSystemDirectoryHandle,
   ): Promise<void> => {
     for await (const [name, handle] of (src as any).entries()) {
       if (handle.kind === 'directory') {
-        const subDst = await dst.getDirectoryHandle(name, { create: true })
-        await HistoryService.#copyDirInto(handle as FileSystemDirectoryHandle, subDst)
+        if (name === HistoryService.#LEGACY_TEMPORARY_DIRECTORY) {
+          await this.#absorbTemporaryDir(handle as FileSystemDirectoryHandle, src)
+        }
         continue
       }
       try { await dst.getFileHandle(name, { create: false }); continue } catch { /* absent — copy it */ }
@@ -257,70 +342,217 @@ export class HistoryService {
     }
   }
 
-  /** Every lineage bag across both pools, hive root preferred. A promoted bag
-   *  exists in both; the hive copy is authoritative (promote-on-write keeps it
-   *  current), so it's yielded once. At the hive root only 64-hex DIRECTORIES
-   *  are bags — Phase-1 content sig FILES are skipped. */
+  /** Every lineage bag across the root and every legacy drain source,
+   *  keyed by lineage sig and resolved to the ROOT bag — each name is
+   *  union-promoted first, so the returned handle holds every marker from
+   *  every source (highest marker wins). Only 64-hex DIRECTORIES count:
+   *  content sig FILES are skipped, and so are the sign(meaning) POOL
+   *  dirs that share the root (their addresses are derivable from the
+   *  known meanings — see `#poolSigs`). */
   private readonly enumerateBags = async (): Promise<Map<string, FileSystemDirectoryHandle>> => {
-    const bags = new Map<string, FileSystemDirectoryHandle>()
+    const pools = await this.#poolSigs()
+    const names = new Set<string>()
     const scan = async (root: FileSystemDirectoryHandle | undefined): Promise<void> => {
       if (!root) return
       try {
         for await (const [name, handle] of (root as any).entries()) {
           if (handle.kind !== 'directory') continue
           if (!HistoryService.#SIG_RE.test(name)) continue
-          if (!bags.has(name)) bags.set(name, handle as FileSystemDirectoryHandle)
+          if (pools.has(name)) continue
+          names.add(name)
         }
       } catch { /* root unreadable — skip */ }
     }
-    await scan(this.hiveRoot)       // authoritative for promoted bags
-    await scan(this.historyRoot)    // legacy fallback for not-yet-promoted bags
+    await scan(this.hiveRoot)
+    for (const src of this.#legacyBagSources()) await scan(src)
+    const bags = new Map<string, FileSystemDirectoryHandle>()
+    for (const name of names) {
+      await this.#promoteBag(name)
+      try { bags.set(name, await this.hiveRoot.getDirectoryHandle(name, { create: false })) } catch { /* vanished mid-scan — skip */ }
+    }
     return bags
   }
 
-  /** MANUAL Phase-2 GC — the single destructive step on NEVER-WIPE history.
-   *  Copies every remaining legacy `__history__/<lineageSig>` bag WHOLE into
-   *  the hive root (idempotent; promote-on-write has already moved the active
-   *  ones), and only once EVERY legacy bag is confirmed shadowed at the hive
-   *  root does it remove `__history__` entirely. Never auto-runs — invoked
-   *  explicitly (e.g. via a slash command / bridge). Returns a report; leaves
-   *  `__history__` in place on any copy failure or unverified bag. */
+  /** sign(meaning) pool addresses that share the OPFS root with lineage
+   *  sigbags. Derived at runtime — sha256 of the UTF-8 meaning bytes,
+   *  never hardcoded hex — and excluded from bag enumeration: a pool dir
+   *  is not a lineage. The list mirrors the known pool meanings across
+   *  subsystems (Store pre-opens the first seven). */
+  static readonly #POOL_MEANINGS = [
+    'bees', 'dependencies', 'clipboard', 'threads', 'computation',
+    'manifests', 'optimization', 'temporary', 'receipts', 'structure',
+    'roots', 'patches',
+  ] as const
+  #poolSigsPromise: Promise<ReadonlySet<string>> | null = null
+  readonly #poolSigs = (): Promise<ReadonlySet<string>> => {
+    return this.#poolSigsPromise ??= (async () => {
+      const sigs = new Set<string>()
+      for (const meaning of HistoryService.#POOL_MEANINGS) {
+        sigs.add(await SignatureService.sign(new TextEncoder().encode(meaning).buffer as ArrayBuffer))
+      }
+      return sigs
+    })()
+  }
+
+  /** SELF-CLEANING drain of the legacy `__history__/` pool — the single
+   *  destructive step on NEVER-WIPE history. Union-merges every remaining
+   *  legacy bag into its root bag (idempotent; promote-on-touch has
+   *  already moved the active ones), then verifies EVERY legacy entry is
+   *  shadowed at the root — per FILE, not per directory — before removing
+   *  `__history__`. Any unshadowed or unrecognised entry retains the
+   *  folder for a later pass. Runs detached + delayed after boot (see the
+   *  constructor) and stays manually invocable via `/consolidate-history`
+   *  as a force-run. The `__hive__/` and `hypercomb.io/` content roots
+   *  drain via Store's relocation, not here — but reads union all four
+   *  sources until every one is gone. */
   public readonly gcLegacyHistory = async (): Promise<{ bags: number; copied: number; removed: boolean }> => {
     const legacyRoot = this.historyRoot
-    if (!legacyRoot) return { bags: 0, copied: 0, removed: true }  // already gone (or fresh participant)
-    const legacySigs: string[] = []
+    if (!legacyRoot) return { bags: 0, copied: 0, removed: true }  // already drained (or fresh participant)
+    let bags = 0
     let copied = 0
+    let allShadowed = true
     try {
       for await (const [name, handle] of (legacyRoot as any).entries()) {
-        if (handle.kind !== 'directory') continue
-        if (!HistoryService.#SIG_RE.test(name)) continue
-        legacySigs.push(name)
-        const hive = await this.hiveRoot.getDirectoryHandle(name, { create: true })
-        await HistoryService.#copyDirInto(handle as FileSystemDirectoryHandle, hive)
-        copied++
+        if (handle.kind !== 'directory' || !HistoryService.#SIG_RE.test(name)) {
+          // Not a lineage bag — not ours to move; its presence defers removal.
+          allShadowed = false
+          continue
+        }
+        bags++
+        const rootBag = await this.hiveRoot.getDirectoryHandle(name, { create: true })
+        await this.#copyBagInto(handle as FileSystemDirectoryHandle, rootBag)
+        // Per-file gate: every legacy entry must be confirmed at the root
+        // bag. Directory existence alone is NOT enough — a copy that died
+        // mid-bag on an earlier run must not pass the gate.
+        if (await HistoryService.#dirShadowed(handle as FileSystemDirectoryHandle, rootBag)) copied++
+        else allShadowed = false
       }
     } catch (err) {
-      console.warn('[history] gcLegacyHistory: scan/copy failed — __history__ left in place', err)
-      return { bags: legacySigs.length, copied, removed: false }
+      console.warn('[history] gcLegacyHistory: scan/copy failed — legacy __history__ left in place', err)
+      return { bags, copied, removed: false }
     }
-    // Gate: every legacy bag must be present at the hive root before removal.
-    for (const sig of legacySigs) {
-      try { await this.hiveRoot.getDirectoryHandle(sig, { create: false }) }
-      catch {
-        console.warn(`[history] gcLegacyHistory: bag ${sig.slice(0, 12)} not shadowed — __history__ retained`)
-        return { bags: legacySigs.length, copied, removed: false }
-      }
+    if (!allShadowed) {
+      console.warn(`[history] gcLegacyHistory: ${copied}/${bags} bags shadowed — legacy __history__ retained for a later pass`)
+      return { bags, copied, removed: false }
     }
     const store = get<{ opfsRoot?: FileSystemDirectoryHandle }>('@hypercomb.social/Store')
-    if (!store?.opfsRoot) return { bags: legacySigs.length, copied, removed: false }
+    if (!store?.opfsRoot) return { bags, copied, removed: false }
     try {
-      await store.opfsRoot.removeEntry('__history__', { recursive: true })
-      console.log(`[history] gcLegacyHistory: ${legacySigs.length} bags shadowed at hive root — __history__ removed`)
-      return { bags: legacySigs.length, copied, removed: true }
+      await store.opfsRoot.removeEntry(HistoryService.#LEGACY_HISTORY_DIRECTORY, { recursive: true })
+      console.log(`[history] gcLegacyHistory: ${bags} bags shadowed at the root — legacy __history__ removed`)
+      return { bags, copied, removed: true }
     } catch (err) {
       console.warn('[history] gcLegacyHistory: removeEntry(__history__) failed — left in place', err)
-      return { bags: legacySigs.length, copied, removed: false }
+      return { bags, copied, removed: false }
     }
+  }
+
+  /** True when every FILE in `src` exists (by name) in `dst` and `src`
+   *  holds no leftover subdirs. The union copy never overwrites, so name
+   *  presence is the correct shadow test: a same-named file IS the
+   *  surviving era's marker, and the content bytes both point at live at
+   *  the root regardless. */
+  static readonly #dirShadowed = async (
+    src: FileSystemDirectoryHandle,
+    dst: FileSystemDirectoryHandle,
+  ): Promise<boolean> => {
+    try {
+      for await (const [name, handle] of (src as any).entries()) {
+        if (handle.kind !== 'file') return false  // `__temporary__` straggler or unknown subdir
+        try { await dst.getFileHandle(name, { create: false }) } catch { return false }
+      }
+      return true
+    } catch { return false }
+  }
+
+  // -------------------------------------------------
+  // sign('temporary') pool — soft-deleted marker archive
+  // -------------------------------------------------
+  //
+  // Archived markers are keyed by the layer sig they point at, so
+  // identical archived states dedup GLOBALLY (one pool, not one archive
+  // per bag). The address is derived by convention — sha256 of the
+  // UTF-8 bytes of 'temporary' — so any tier computes it with no
+  // registry. The legacy per-bag `__temporary__` subdirs are drain
+  // sources: absorbed into this pool and removed by the self-clean.
+
+  static readonly #TEMPORARY_MEANING = 'temporary'
+  static readonly #LEGACY_TEMPORARY_DIRECTORY = '__temporary__'
+  static readonly #LEGACY_HISTORY_DIRECTORY = '__history__'
+
+  #temporaryPoolPromise: Promise<FileSystemDirectoryHandle | null> | null = null
+  readonly #temporaryPool = async (): Promise<FileSystemDirectoryHandle | null> => {
+    if (this.#temporaryPoolPromise) {
+      const cached = await this.#temporaryPoolPromise
+      if (cached) return cached
+      this.#temporaryPoolPromise = null  // Store wasn't ready — retry
+    }
+    this.#temporaryPoolPromise = (async (): Promise<FileSystemDirectoryHandle | null> => {
+      const store = get<{
+        getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
+        hypercombRoot?: FileSystemDirectoryHandle
+      }>('@hypercomb.social/Store')
+      try {
+        if (store?.getPool) return await store.getPool(HistoryService.#TEMPORARY_MEANING)
+        // Store without getPool — derive the address by convention.
+        if (!store?.hypercombRoot) return null
+        const sig = await SignatureService.sign(
+          new TextEncoder().encode(HistoryService.#TEMPORARY_MEANING).buffer as ArrayBuffer)
+        return await store.hypercombRoot.getDirectoryHandle(sig, { create: true })
+      } catch { return null }
+    })()
+    return this.#temporaryPoolPromise
+  }
+
+  /** Drain one legacy `__temporary__` archive dir into the
+   *  sign('temporary') pool: copy→remove per record, then a NON-recursive
+   *  removeEntry that only succeeds once the dir is empty — a straggler
+   *  is never destroyed. Mirrors Store's legacy record-pool absorb. */
+  readonly #absorbTemporaryDir = async (
+    dir: FileSystemDirectoryHandle,
+    parent: FileSystemDirectoryHandle,
+  ): Promise<void> => {
+    const pool = await this.#temporaryPool()
+    if (!pool) return
+    try {
+      for await (const [name, handle] of (dir as any).entries()) {
+        if (handle.kind !== 'file') continue
+        try {
+          let present = true
+          try { await pool.getFileHandle(name, { create: false }) } catch { present = false }
+          if (!present) {
+            const bytes = await (await (handle as FileSystemFileHandle).getFile()).arrayBuffer()
+            const out = await pool.getFileHandle(name, { create: true })
+            const w = await out.createWritable()
+            try { await w.write(bytes) } finally { await w.close() }
+          }
+          await dir.removeEntry(name)
+        } catch { /* straggler — absorbed on a later pass */ }
+      }
+      await parent.removeEntry(HistoryService.#LEGACY_TEMPORARY_DIRECTORY)
+    } catch { /* not yet empty — retried on a later pass */ }
+  }
+
+  /** Sweep root lineage bags for legacy `__temporary__` archive subdirs
+   *  and absorb each into the sign('temporary') pool. Pool dirs are
+   *  excluded via `#poolSigs`; anything unrecognised is untouched. Part
+   *  of the detached self-clean — never on a render path. */
+  readonly #absorbRootBagArchives = async (): Promise<void> => {
+    const root = this.hiveRoot
+    if (!root) return
+    const pools = await this.#poolSigs()
+    try {
+      for await (const [name, handle] of (root as any).entries()) {
+        if (handle.kind !== 'directory') continue
+        if (!HistoryService.#SIG_RE.test(name) || pools.has(name)) continue
+        let archive: FileSystemDirectoryHandle
+        try {
+          archive = await (handle as FileSystemDirectoryHandle)
+            .getDirectoryHandle(HistoryService.#LEGACY_TEMPORARY_DIRECTORY, { create: false })
+        } catch { continue }
+        await this.#absorbTemporaryDir(archive, handle as FileSystemDirectoryHandle)
+      }
+    } catch { /* root unreadable — a later boot retries */ }
   }
 
   /**
@@ -430,7 +662,8 @@ export class HistoryService {
   }
 
   /**
-   * List all lineage bags (hive root + legacy `__history__`, deduped).
+   * List all lineage bags (root bags + legacy drain sources —
+   * `__history__`/`__hive__`/`hypercomb.io` — deduped, union-promoted).
    */
   public readonly list = async (): Promise<{ signature: string; count: number }[]> => {
     const result: { signature: string; count: number }[] = []
@@ -560,27 +793,25 @@ export class HistoryService {
   // layer snapshots — signature-addressed history entries
   // -------------------------------------------------
   //
-  // On hypercomb.io a lineage's history bag is self-contained:
+  // A lineage's history bag is a sig-named dir at the OPFS root:
   //
-  //   __history__/{sign(lineage)}/
-  //     {sig}              ← layer content, named by its own content sig
-  //     {sig}              ← another layer content
+  //   <root>/{sign(lineage)}/
+  //     00000000           ← pointer-record marker (empty layer, auto-minted)
+  //     00000001           ← marker for the first user-event commit
   //     ...
-  //     __temporary__/     ← soft-deleted layers (30-day TTL)
-  //       {sig}
   //
-  // No inner `layers/` subfolder. No marker indirection. No entry
-  // wrapper JSON. The bag file IS the LayerContent JSON, named by the
-  // hash of its bytes — same state collapses to the same file (natural
-  // dedupe). Ordering comes from `file.lastModified`. Promotion ("make
-  // head") rewrites the file to bump its lastModified; soft-delete
-  // pools it into `__temporary__/{sig}` keyed by its layer sig, so
-  // identical archived states dedup to one entry (signature pool).
+  // Markers are pointer records `{"layer":"<sig>"}`; the layer bytes
+  // they name live as sig files at the flat root (store.writeLayerBytes
+  // / getLayerPoolBytes). Max marker = current head. Soft-deleted
+  // markers pool into the sign('temporary') pool keyed by layer sig, so
+  // identical archived states dedup to one entry globally.
   //
-  // DCP, by contrast, splits the model: `__layers__/{sig}` holds layer
-  // content shared across lineages, and `__history__/{lineageSig}/NNNNNNNN`
-  // markers (each containing a single sig line) point into that pool.
-  // Markers are a DCP-only indirection — they do not appear here.
+  // LEGACY (drain sources, read-fallback only): bags stranded in
+  // `__history__/`, `__hive__/` or `hypercomb.io/` union-promote to the
+  // root bag on first touch — highest marker wins; per-bag
+  // `__temporary__` archives absorb into the sign('temporary') pool.
+  // Pre-merkle bags whose marker bytes ARE the layer JSON migrate
+  // opportunistically on read (see #opportunisticMigrateMarker).
 
   /**
    * Canonicalize a layer so byte-equal content produces byte-equal JSON.
@@ -614,15 +845,16 @@ export class HistoryService {
    * Commit a complete layer snapshot for a lineage.
    *
    * Two writes per commit:
-   *   1. layer bytes → content pool `__layers__/<layerSig>`
-   *      (layerSig = sha256 of the canonical layer JSON);
+   *   1. layer bytes → sig-named file at the flat OPFS root
+   *      (store.writeLayerBytes; layerSig = sha256 of the canonical
+   *      layer JSON);
    *   2. a POINTER-RECORD marker — `{"layer":"<layerSig>"}` — appended
-   *      to the lineage bag. The marker is META (names which layer this
-   *      revision points at); the layer itself lives in the pool. Bag layout:
+   *      to the lineage's root bag. The marker is META (names which layer
+   *      this revision points at); the layer itself is root content. Bag:
    *
-   *   __history__/{lineageSig}/00000000  ← marker for the empty layer (auto-minted on first touch)
-   *   __history__/{lineageSig}/00000001  ← marker for the first user-event commit
-   *   __history__/{lineageSig}/00000002
+   *   <root>/{lineageSig}/00000000  ← marker for the empty layer (auto-minted on first touch)
+   *   <root>/{lineageSig}/00000001  ← marker for the first user-event commit
+   *   <root>/{lineageSig}/00000002
    *   ...
    *
    * Each NNNNNNNN file is a pointer record, NOT a layer; the highest
@@ -705,15 +937,16 @@ export class HistoryService {
     // warm path instead of re-scanning the whole bag.
     if (knownList) knownList.push({ layerSig, at: Date.now(), filename: markerName })
 
-    // Pool is the only writer destination. No legacy mirror — sig is
-    // hash(bytes), one pool entry per sig, content-addressed and never
-    // stale. Anything that still reads from __optimized__/ resolves
-    // through the pool now (or has been retired).
+    // The flat root is the only writer destination. No legacy mirror —
+    // sig is hash(bytes), one root entry per sig, content-addressed and
+    // never stale. The legacy `__optimized__`/`__layers__` dirs are
+    // read-fallback drain sources only (resolved inside Store).
 
     // Children manifest: for any layer with a non-empty `children` array,
-    // pre-resolve each child sig to its head layer and write the array as
-    // a per-parent decoration at __manifests__/<layerSig>. Reads of this
-    // parent's children skip the per-child sig→layer walk on cold load.
+    // pre-resolve each child sig to its head layer and write the array
+    // into the sign('manifests') pool keyed by the parent layer sig.
+    // Reads of this parent's children skip the per-child sig→layer walk
+    // on cold load.
     // Microtask-scheduled (not idle) — the commit return is unblocked,
     // but the write fires before the next render frame so the manifest
     // is reliably present on "next start" after a single commit cycle.
@@ -817,13 +1050,15 @@ export class HistoryService {
   /**
    * Return the sig of the lineage's CURRENT layer bytes.
    *
-   * Source of truth: the bag at `__history__/<lineageSig>/`. If it has
+   * Source of truth: the lineage sigbag at `<root>/<lineageSig>/` (the
+   * OPFS root; legacy `__history__`/`__hive__`/`hypercomb.io` bags are
+   * read-fallback drain sources, union-promoted on touch). If it has
    * markers, return the latest marker's content sig. If it's empty (or
    * doesn't exist yet), MATERIALIZE the empty marker `00000000` on
    * disk for this name, then return the sig of those real bytes.
    *
    * No virtual / name-derived sigs. Every sig the cascade hands to a
-   * parent is the hash of bytes that physically exist in `__history__`.
+   * parent is the hash of bytes that physically exist in the bag.
    * The only named primitive in the system is `<lineageSig>` itself —
    * the bag directory — and the marker filenames `NNNNNNNN`. Cell
    * names live INSIDE the marker JSON (`{name, children?}`), never as
@@ -877,8 +1112,8 @@ export class HistoryService {
 
   /**
    * Opportunistic legacy-marker migration: when a marker is read in its
-   * legacy bytes-in-marker shape, (1) write its bytes to the canonical
-   * pool at `__layers__/<sig>`, then (2) rewrite the marker file itself
+   * legacy bytes-in-marker shape, (1) write its bytes as a sig-named file
+   * at the OPFS root (store.writeLayerBytes), then (2) rewrite the marker file itself
    * as a pointer record `{"layer":"<sig>"}`. After this the marker is
    * indistinguishable from a fresh commit. Best-effort, idle-deferred —
    * no caller waits.
@@ -1135,9 +1370,10 @@ export class HistoryService {
   /**
    * Resolve `layerSig` → parsed layer content.
    *
-   * Canonical path: layers live in the global `__layers__/<sig>` pool,
-   * routed through {@link getLayerBySig}. Pointer-record markers carry
-   * only the sig; the bytes always come from the pool.
+   * Canonical path: layer bytes are sig-named files at the OPFS root,
+   * routed through {@link getLayerBySig} (Store resolves root-first with
+   * legacy `__layers__`/`__optimized__` fallbacks). Pointer-record markers
+   * carry only the sig; the bytes always come from that content read.
    *
    * Legacy fallback: pre-migration markers store the layer JSON inline
    * (bytes IS the layer). The cold scan below recovers those and
@@ -1176,9 +1412,9 @@ export class HistoryService {
       } catch { /* fall through to pool / cold scan */ }
     }
 
-    // 2. Pool + preloader caches. Pointer-record markers stash layer
-    //    bytes in __layers__/<sig>; getLayerBySig handles that path
-    //    plus parsed-/preloader-cache lookups.
+    // 2. Content + preloader caches. Pointer-record markers stash layer
+    //    bytes as sig-named files at the OPFS root; getLayerBySig handles
+    //    that path plus parsed-/preloader-cache lookups.
     const fromPool = await this.getLayerBySig(layerSig)
     if (fromPool) return fromPool
 
@@ -1407,9 +1643,10 @@ export class HistoryService {
       } catch { /* fall through to pool */ }
     }
 
-    // Sig-direct lookup through the canonical layer pool. Markers in
-    // __history__/ are revision-pointers; layer bytes live ONLY in
-    // __layers__/<sig>. One pool, content-addressed, no mirrors.
+    // Sig-direct lookup through Store's content read. Markers in the
+    // lineage sigbags are revision-pointers; layer bytes live as sig-named
+    // files at the OPFS root (legacy `__layers__`/`__optimized__` are
+    // read-fallback drain sources). Content-addressed, no mirrors.
     const store = get<{
       getLayerPoolBytes?: (sig: string) => Promise<Uint8Array | null>
     }>('@hypercomb.social/Store')
@@ -1539,30 +1776,110 @@ export class HistoryService {
   }
 
   /**
+   * The child NAMES directly under a location path — the SAME source of
+   * truth the renderer uses (`currentLayerAt` → each child sig's own
+   * `.name`), so a membership test here matches what actually paints as a
+   * navigable tile. Returns `{ names, authoritative }`. `authoritative` is
+   * false when the answer is uncertain — the location's head is cold, or a
+   * child layer's bytes aren't pooled yet — so callers can refuse to act on
+   * an incomplete read (never conclude "not a child" from a cold miss).
+   */
+  readonly #childNamesOf = async (
+    segments: readonly string[],
+  ): Promise<{ names: Set<string>; authoritative: boolean }> => {
+    const names = new Set<string>()
+    const locSig = await this.sign({ explorerSegments: () => [...segments] })
+    if (!locSig) return { names, authoritative: false }
+    const stats = { cold: false }
+    const layer = await this.currentLayerAt(locSig, stats)
+    if (!layer) {
+      // No committed layer here. If the read was cold the absence is not
+      // authoritative; otherwise the location genuinely has zero children.
+      return { names, authoritative: !stats.cold }
+    }
+    const childSigs = Array.isArray(layer.children) ? layer.children : []
+    let miss = false
+    await Promise.all(childSigs.map(async (sig) => {
+      const child = await this.getLayerBySig(sig)
+      if (!child) { miss = true; return } // cold pool miss — set is incomplete
+      const nm = (child.name ?? '').trim()
+      if (nm) names.add(nm)
+    }))
+    return { names, authoritative: !miss }
+  }
+
+  /**
+   * Walk a lineage path and return the DEEPEST prefix that is fully real —
+   * every segment at depth ≥ 1 must be a genuine child of its parent. The
+   * self-heal oracle: a too-early / double-click can append a segment for a
+   * child that doesn't exist at the new level (e.g. `/a/b/c/c`); clamping to
+   * this prefix repairs the address instead of letting it "run up" disjoint
+   * phantom segments.
+   *
+   * Safety contract:
+   *  - Segment[0] is treated as an always-valid root. Under variable roots a
+   *    first segment can be a standalone tree root (a set, launcher, adopted
+   *    domain) that is NOT a child of the empty root, so it must never be
+   *    clamped away. Healing only ever trims phantom CHILDREN (depth ≥ 1).
+   *  - `cold: true` is returned the moment resolution stops being
+   *    authoritative (a cold head, an unpooled child). The walk stops there
+   *    and the caller MUST NOT clamp on a cold result — a false clamp of a
+   *    real-but-not-yet-warm location is worse than the phantom it heals.
+   *  - Empty-but-real leaves and dir-less virtual sub-layers are preserved:
+   *    they are real children of their parent, so they stay in the prefix.
+   */
+  public readonly deepestRealPrefix = async (
+    segments: readonly string[],
+  ): Promise<{ prefix: string[]; cold: boolean }> => {
+    const path = segments.map((s) => String(s ?? '').trim()).filter(Boolean)
+    if (path.length <= 1) return { prefix: [...path], cold: false }
+
+    let validDepth = 1 // root (index 0) always kept
+    let cold = false
+    for (let i = 1; i < path.length; i++) {
+      const parent = path.slice(0, i) // known-valid: we only continue while valid
+      const { names, authoritative } = await this.#childNamesOf(parent)
+      if (!authoritative) { cold = true; break } // uncertain — stop, don't trim below
+      if (names.has(path[i])) { validDepth = i + 1; continue }
+      break // path[i] is not a real child of `parent` → clamp here
+    }
+    return { prefix: path.slice(0, validDepth), cold }
+  }
+
+  /**
    * Warm ONE lineage's head into `#latestSigByLineage`: filename-only
    * enumeration to find the latest NNNN marker, then a single byte read —
-   * the per-lineage analog of preloadAllBags' two-pass discipline. Cost is
-   * one directory listing + one file read regardless of how deep the
-   * bag's history runs (the root lineage gains a marker on every cascade,
-   * so reading every marker — what refreshLineageCache does — is not
-   * first-paint material). An absent bag returns silently (the location
-   * truly has no committed marker, no minting); a missing history root
-   * THROWS so the caller can fall back to the store-ready-polling preload.
+   * the per-lineage analog of preloadAllBags' two-pass discipline. The
+   * scan spans the ROOT bag and every legacy drain source WITHOUT the
+   * promotion copy (first paint must never pay a whole-bag copy): the
+   * HIGHEST marker across all sources wins, whichever dir holds it — a
+   * stale source can never time-travel the head backwards. An absent bag
+   * returns silently (the location truly has no committed marker, no
+   * minting); a missing store root THROWS so the caller flags the null
+   * as cold instead of authoritative absence.
    */
   readonly #warmLineageHead = async (lineageSig: string): Promise<void> => {
-    let bag: FileSystemDirectoryHandle
-    try {
-      bag = await this.bagForRead(lineageSig)
-    } catch { return }
+    const root = this.hiveRoot
+    if (!root) throw new Error('history: store not ready')
     let latestName = ''
-    for await (const [name, handle] of (bag as any).entries()) {
-      if (handle.kind !== 'file') continue
-      if (!HistoryService.#MARKER_RE.test(name)) continue
-      if (name > latestName) latestName = name
+    let latestBag: FileSystemDirectoryHandle | null = null
+    const scan = async (source: FileSystemDirectoryHandle | undefined): Promise<void> => {
+      if (!source) return
+      let bag: FileSystemDirectoryHandle
+      try { bag = await source.getDirectoryHandle(lineageSig, { create: false }) } catch { return }
+      for await (const [name, handle] of (bag as any).entries()) {
+        if (handle.kind !== 'file') continue
+        if (!HistoryService.#MARKER_RE.test(name)) continue
+        if (name > latestName) { latestName = name; latestBag = bag }
+      }
     }
-    if (!latestName) return
+    await scan(root)
+    for (const src of this.#legacyBagSources()) {
+      try { await scan(src) } catch { /* source unreadable — union what we have */ }
+    }
+    if (!latestName || !latestBag) return
     try {
-      const fileHandle = await bag.getFileHandle(latestName, { create: false })
+      const fileHandle = await (latestBag as FileSystemDirectoryHandle).getFileHandle(latestName, { create: false })
       const bytes = await (await fileHandle.getFile()).arrayBuffer()
       const { layerSig, isPointer } = await extractLayerSigFromMarker(bytes)
       if (!isPointer) this.#preloaderCache.set(layerSig, bytes)
@@ -1609,9 +1926,16 @@ export class HistoryService {
     return [...this.#preloaderCache.keys()]
   }
 
+  /** Number of lineages with a known head marker. A cheap O(1) change
+   *  signal — it grows when a bag is adopted / synced / first-committed —
+   *  so consumers (e.g. the substrate reconcile) can detect "the hive
+   *  changed" and skip an expensive full-tree walk when it hasn't. */
+  public readonly headIndexCount = (): number => this.#latestSigByLineage.size
+
   /**
-   * One-shot session preload: walk every bag in `__history__/`, hash
-   * every NNNNNNNN marker, populate `#preloaderCache` and
+   * One-shot session preload: walk every lineage sigbag (root bags plus
+   * any legacy `__history__`/`__hive__`/`hypercomb.io` drain sources, via
+   * enumerateBags), hash every NNNNNNNN marker, populate `#preloaderCache` and
    * `#latestSigByLineage`. After this runs, every sig anywhere in any
    * layer is resolvable in O(1) from the preloader — no cold walks
    * during render.
@@ -1717,9 +2041,10 @@ export class HistoryService {
         sliceStart = performance.now()
       }
 
-      // Union of hive-root bags (promoted) and legacy `__history__` bags,
-      // deduped (hive authoritative). `root` was only needed to gate on Store
-      // readiness above; the scan itself spans both pools.
+      // Union of root bags (promoted) and every legacy drain source
+      // (`__history__`/`__hive__`/`hypercomb.io`), deduped with highest
+      // marker winning. `root` was only needed to gate on Store readiness
+      // above; the scan itself spans every source.
       const bags = await this.enumerateBags()
       for (const [lineageSig, dirHandle] of bags) {
         await yieldIfDue()
@@ -1841,7 +2166,16 @@ export class HistoryService {
    * Logs progress every 50 layers so a long boot doesn't look frozen,
    * and emits a summary at the end with depth-binned counts.
    */
-  public readonly preloadFromRoot = async (rootSig: string): Promise<void> => {
+  // Bounded neighbourhood warm: root pool → children → … up to this depth,
+  // one file per tile. NOT the whole hive — an unbounded walk fetched every
+  // reachable layer (~1500 on a big tree) and its OPFS churn starved paint
+  // and input. Deeper tiles warm ON DEMAND (one file per tile) as the user
+  // navigates into them; there is no need to pull the entire universe ahead.
+  static readonly #PRELOAD_MAX_DEPTH = 3
+  public readonly preloadFromRoot = async (
+    rootSig: string,
+    maxDepth: number = HistoryService.#PRELOAD_MAX_DEPTH,
+  ): Promise<void> => {
     if (!HistoryService.#SIG_RE.test(rootSig)) return
     const startMs = performance.now()
     const visited = new Set<string>([rootSig])
@@ -1862,7 +2196,9 @@ export class HistoryService {
     let frontier: string[] = [rootSig]
     let depth = 0
 
-    while (frontier.length) {
+    // BOUNDED: stop once we've warmed `maxDepth` levels out from the root.
+    // Beyond that is on-demand (getLayerBySig cold path, one file per tile).
+    while (frontier.length && depth < maxDepth) {
       const nextFrontier = new Set<string>()
       // Bounded worker pool over this depth level. A shared cursor hands
       // each idle worker the next sig; visited is pre-seeded so no sig is
@@ -2104,13 +2440,14 @@ export class HistoryService {
   }
 
   /**
-   * Soft-delete into the `__temporary__` SIGNATURE POOL: each archived
-   * marker is keyed by the layer sig it points at — `__temporary__/{sig}` —
-   * so identical archived states dedup to one entry (sign(MEANING) = the
-   * layer content). Matches the documented bag layout above. The marker
-   * bytes are preserved under the sig key; restore = re-commit a marker
-   * pointing at that sig. Markers whose sig can't be resolved fall back to
-   * their positional filename.
+   * Soft-delete into the sign('temporary') POOL at the OPFS root: each
+   * archived marker is keyed by the layer sig it points at, so identical
+   * archived states dedup to one entry — globally, across every bag. The
+   * marker bytes are preserved under the sig key; restore = re-commit a
+   * marker pointing at that sig. Markers whose sig can't be resolved fall
+   * back to their positional filename. (The legacy per-bag `__temporary__`
+   * subdirs are drain sources — absorbed into this pool by the self-clean,
+   * never written again.)
    *
    * USED ONLY BY /collapse-history AND /flatten. These are the rare
    * paths that wipe non-head markers in bulk; everywhere else
@@ -2127,7 +2464,9 @@ export class HistoryService {
       bag = await this.bagForRead(locationSig)
     } catch { return 0 }
 
-    const archive = await bag.getDirectoryHandle('__temporary__', { create: true })
+    // Never delete a marker that hasn't been archived: no pool, no soft-delete.
+    const archive = await this.#temporaryPool()
+    if (!archive) return 0
 
     let archived = 0
     for (const filename of filenames) {
@@ -2390,13 +2729,13 @@ export class HistoryService {
   //
   // Records are the pure-differential form of history. A record is
   // `{name, <op>: [sigs]}` serialised as raw line-oriented text (see
-  // delta-record.ts). Records are immutable and content-addressed:
-  // the record bytes live at `__layers__/{sig}` (flat, not in a
-  // domain subfolder — LayerInstaller's domain-scoped package reads
-  // iterate only directories, so flat sig files coexist cleanly).
+  // delta-record.ts). Records are immutable and content-addressed: the
+  // record bytes live as a sig-named FILE inside the lineage sigbag
+  // (`<root>/{locSig}/{sig}`), so publishing a bag ships its markers and
+  // the records they reference together.
   //
   // Per-location markers live at the bag root as opaque zero-padded
-  // entry files (`__history__/{locSig}/NNNNNNNN`, no extension).
+  // entry files (`<root>/{locSig}/NNNNNNNN`, no extension).
   // Each marker contains exactly one sig on one line. Ordering and
   // timestamps come from file.lastModified on the filesystem; under
   // the immutable-files invariant that IS the creation time. Nothing
@@ -2413,8 +2752,8 @@ export class HistoryService {
    * same history bag as `{sig}`, and append a numeric marker at the
    * bag root whose content is that sig. Everything lives in one
    * folder per location so publishing maps to "share this bag" —
-   * tar up `__history__/{locSig}/` and the peer gets the markers
-   * and the layer content they reference as one self-contained unit.
+   * tar up the lineage sigbag `<root>/{locSig}/` and the peer gets the
+   * markers and the layer content they reference as one self-contained unit.
    * Returns the record-sig, or null if the Store isn't available.
    */
   public readonly writeRecord = async (
@@ -2427,8 +2766,8 @@ export class HistoryService {
 
     const bag = await this.getBag(locationSig)
 
-    // Layer content at __history__/{locSig}/{sig}. Content-addressed,
-    // immutable — skip the rewrite if the file already exists so live
+    // Record content at <root>/{locSig}/{sig} (inside the sigbag).
+    // Content-addressed, immutable — skip the rewrite if the file already exists so live
     // Blob handles elsewhere can't be invalidated.
     let exists = true
     try { await bag.getFileHandle(sig) } catch { exists = false }
@@ -2483,8 +2822,8 @@ export class HistoryService {
   }
 
   /**
-   * Load + parse the DeltaRecord at the given signature. Records now
-   * live inside each history bag (`__history__/{locSig}/{sig}`), so
+   * Load + parse the DeltaRecord at the given signature. Records live
+   * inside each lineage sigbag (`<root>/{locSig}/{sig}`), so
    * resolution is scoped to the bag — callers pass the locationSig
    * along with the record sig. Returns null on missing or malformed
    * content.

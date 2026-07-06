@@ -29,7 +29,8 @@ queried in order by the renderer (`site-view.drone.ts`):
 3. The legacy `context` slot — raw HTML resource sigs. Existing pages
    live here; the renderer falls back to it when neither above is found.
 
-The HTML resource sig resolves to a resource in `__resources__/<sig>`.
+The HTML resource sig resolves to a sig-named resource file at the OPFS
+content root (legacy `__resources__/` is a read-fallback while it drains).
 Each cell is responsible for its own surface — there is no cascade, no
 manifest, no path-table. Child cells become subpages because lineage
 navigation moves between cells, and each cell's page replaces the
@@ -65,7 +66,7 @@ scan layer.decorations for a visual:website:page decoration → payload.htmlSig
   ↓ (none?)
 fall back to scanning layer.context for an HTML-shaped resource sig
   ↓
-fetch page HTML from __resources__/<sig>
+fetch page HTML from the root <sig> resource file
   ↓
 rewrite resource:<sig> and bare-64-hex src/href refs → /@resource/<sig>
   ↓
@@ -83,9 +84,10 @@ nodes are lifted into `<head>` (tagged so unmount lifts exactly those),
 `<body>` content is dropped into a fixed-position host div.
 
 The resource service worker (`hypercomb.worker.js`) serves
-`/@resource/<sig>` from OPFS `__resources__/<sig>`, with an HTTP host
-fallback (`GET /<sig>` against registered operator domains) on an OPFS
-miss. That's the only network shape the runtime needs.
+`/@resource/<sig>` from the OPFS root `<sig>` file (legacy `__hive__/`
+and `__resources__/` are read-fallbacks while they drain), with an HTTP
+host fallback (`GET /<sig>` against registered operator domains) on an
+OPFS miss. That's the only network shape the runtime needs.
 
 ## Authoring — design-time AI loop
 
@@ -160,7 +162,7 @@ and content-addressing every Hypercomb artifact does (see
 - Unchanged pages keep their signatures across runs — same HTML →
   same `htmlSig` → no new write. Only edited pages produce new sigs.
 - Remove a tile → its cell (and its page decoration) leaves the layer,
-  but the HTML resource in `__resources__/<sig>` remains (GC is a
+  but the HTML resource (the root `<sig>` file) remains (GC is a
   future concern).
 - Add a tile → flag it (`/website here`) and the skill generates a page
   for it on the next pass.
@@ -251,8 +253,8 @@ primitives as everything else (see [dna.md](dna.md)):
   — the Claude Code skill that authors per-cell pages (gitignored — local to
   each checkout).
 - [hypercomb-web/public/hypercomb.worker.js](../hypercomb-web/public/hypercomb.worker.js)
-  — `/@resource/<sig>` service-worker route, OPFS `__resources__/<sig>` +
-  HTTP host fallback.
+  — `/@resource/<sig>` service-worker route, OPFS root `<sig>` file
+  (legacy `__resources__/` read-fallback) + HTTP host fallback.
 
 ## Related
 

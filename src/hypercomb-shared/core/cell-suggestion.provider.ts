@@ -1,8 +1,10 @@
 // hypercomb-shared/core/cell-suggestion.provider.ts
 //
 // Lists cell names at the current explorer level as autocomplete suggestions.
-// Source of truth: the layer at the current cursor position in
-// `__history__/<sign(lineage)>/`. Resolution is purely signature-based —
+// Source of truth: the layer at the current cursor position in the lineage
+// sigbag (`<sign(lineage)>/` at the OPFS root; HistoryService still unions
+// the legacy `__history__` bags while they drain). Resolution is purely
+// signature-based —
 // we read each child sig in the head layer's `children` array and resolve
 // it to a display name via the LayerContent's `name` field. NO OPFS
 // directory enumeration; the on-disk cell folders are not the source of

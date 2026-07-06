@@ -25,18 +25,26 @@
 // within itself. host-domains edits never re-sign the domains tree.
 // "cost = depth, not tree-size" (the fractal principle).
 //
-// OPFS layout:
-//   __content__/<sig>          content-addressed bytes (layer JSONs + blobs),
-//                              deduplicated across ALL lineages.
-//   __lineages__/<name>/000x   per-lineage sigbag markers. Each marker file's
-//                              content is that lineage's root sig at that
-//                              revision. Max marker = HEAD. The NAME is the
-//                              address (the sign("<name>", …segments) ideal;
-//                              for these reserved root lineages segments are
-//                              empty so the name alone locates the sigbag).
+// OPFS layout — POOLS OF MEANING, no typed folders:
+//   sign('content')/<sig>          content-addressed bytes (layer JSONs +
+//                                  blobs), deduplicated across ALL lineages.
+//   sign('lineages')/<name>/000x   per-lineage sigbag markers. Each marker
+//                                  file's content is that lineage's root sig
+//                                  at that revision. Max marker = HEAD. The
+//                                  NAME is the address (the sign("<name>",
+//                                  …segments) ideal; for these reserved root
+//                                  lineages segments are empty so the name
+//                                  alone locates the sigbag WITHIN the pool).
+//
+// The pool addresses are sign(meaning) — sha256 of the UTF-8 bytes of the
+// meaning string, derived by convention so any tier computes the identical
+// address. The legacy `__content__` / `__lineages__` dirs are read-fallback
+// drain sources ONLY: opened WITHOUT create, absorbed into the pools by a
+// detached + delayed self-clean (marker bags union-merged, highest marker
+// wins), and removed once fully drained.
 //
 // The write atom is the same one MerklePatchService uses: mutate a layer
-// JSON → SignatureService.sign(bytes) → write to the content bucket →
+// JSON → SignatureService.sign(bytes) → write to the content pool →
 // cascade → append a marker.
 
 import { Injectable } from '@angular/core'
@@ -44,8 +52,32 @@ import { SignatureService } from '@hypercomb/core'
 
 // ── Path + lineage constants ──────────────────────────────────────────────────
 
-export const CONTENT_DIRECTORY = '__content__'
-export const LINEAGES_DIRECTORY = '__lineages__'
+export const CONTENT_MEANING = 'content'
+export const LINEAGES_MEANING = 'lineages'
+/** Legacy typed dirs — read-fallback drain sources only; never created,
+ *  never written. Removed by the self-clean once fully absorbed. */
+export const LEGACY_CONTENT_DIRECTORY = '__content__'
+export const LEGACY_LINEAGES_DIRECTORY = '__lineages__'
+
+/** sign(meaning) → pool address, memoized. Module-level (not a static
+ *  `#field`) because `@Injectable` + a static private member trips TS18036
+ *  under experimentalDecorators; the derivation IS the registry. */
+const POOL_SIGNATURES = new Map<string, string>()
+async function poolSignature(meaning: string): Promise<string> {
+  let sig = POOL_SIGNATURES.get(meaning)
+  if (!sig) {
+    sig = await SignatureService.sign(new TextEncoder().encode(meaning).buffer as ArrayBuffer)
+    POOL_SIGNATURES.set(meaning, sig)
+  }
+  return sig
+}
+
+/** How long after init the self-clean waits before draining legacy dirs —
+ *  clear of the first install/sync burst. */
+const SELF_CLEAN_DELAY_MS = 5_000
+
+const entriesOf = (dir: FileSystemDirectoryHandle) =>
+  (dir as unknown as { entries(): AsyncIterable<[string, FileSystemHandle]> }).entries()
 
 export const DOMAINS_LINEAGE = 'domains'
 export const HOST_DOMAINS_LINEAGE = 'host-domains'
@@ -135,6 +167,10 @@ export class DcpDomainStorage {
   #root: FileSystemDirectoryHandle | null = null
   #contentDir: FileSystemDirectoryHandle | null = null
   #lineagesDir: FileSystemDirectoryHandle | null = null
+  // Legacy `__content__` / `__lineages__` drain sources — undefined when
+  // absent or already drained. Read-fallback only, never written.
+  #legacyContentDir?: FileSystemDirectoryHandle
+  #legacyLineagesDir?: FileSystemDirectoryHandle
   #initPromise: Promise<void> | null = null
 
   // In-memory mirror of the settings lineage HEAD, for synchronous reads
@@ -148,8 +184,28 @@ export class DcpDomainStorage {
 
   async #doInit(): Promise<void> {
     this.#root = await navigator.storage.getDirectory()
-    this.#contentDir = await this.#root.getDirectoryHandle(CONTENT_DIRECTORY, { create: true })
-    this.#lineagesDir = await this.#root.getDirectoryHandle(LINEAGES_DIRECTORY, { create: true })
+    // sign(meaning) pools — the only dirs init ever creates.
+    this.#contentDir = await this.#root.getDirectoryHandle(await poolSignature(CONTENT_MEANING), { create: true })
+    this.#lineagesDir = await this.#root.getDirectoryHandle(await poolSignature(LINEAGES_MEANING), { create: true })
+    // Legacy drain sources: opened WITHOUT create so a drained dir stays
+    // gone (create:true would resurrect it empty every boot). Absent →
+    // undefined; every reader tolerates that.
+    const legacy = async (name: string) => {
+      try { return await this.#root!.getDirectoryHandle(name) } catch { return undefined }
+    }
+    ;[this.#legacyContentDir, this.#legacyLineagesDir] = await Promise.all([
+      legacy(LEGACY_CONTENT_DIRECTORY),
+      legacy(LEGACY_LINEAGES_DIRECTORY),
+    ])
+    // SELF-CLEANING: when a legacy source exists, migrate everything into
+    // the signed pools and remove the orphaned folders — detached and
+    // delayed so it never competes with the first install/sync burst.
+    // Reads stay correct meanwhile via every reader's legacy fallback
+    // (content pool → legacy content; lineage markers union both bags,
+    // highest marker wins).
+    if (this.#legacyContentDir || this.#legacyLineagesDir) {
+      setTimeout(() => { void this.#selfClean() }, SELF_CLEAN_DELAY_MS)
+    }
   }
 
   // ── content bucket (sig-addressed, deduplicated across all lineages) ──────
@@ -157,10 +213,17 @@ export class DcpDomainStorage {
   async getContent(sig: string): Promise<Uint8Array | null> {
     if (!this.#contentDir) await this.initialize()
     if (!SIG_RE.test(sig)) return null
-    try {
-      const fh = await this.#contentDir!.getFileHandle(sig.toLowerCase())
-      return new Uint8Array(await (await fh.getFile()).arrayBuffer())
-    } catch { return null }
+    const key = sig.toLowerCase()
+    // Content pool first, then the legacy `__content__` drain source
+    // (content-addressed, so a hit anywhere is provably the same bytes).
+    for (const dir of [this.#contentDir, this.#legacyContentDir]) {
+      if (!dir) continue
+      try {
+        const fh = await dir.getFileHandle(key)
+        return new Uint8Array(await (await fh.getFile()).arrayBuffer())
+      } catch { /* miss — try the next source */ }
+    }
+    return null
   }
 
   async putContent(sig: string, bytes: Uint8Array): Promise<void> {
@@ -175,8 +238,14 @@ export class DcpDomainStorage {
   async hasContent(sig: string): Promise<boolean> {
     if (!this.#contentDir) await this.initialize()
     if (!SIG_RE.test(sig)) return false
-    try { await this.#contentDir!.getFileHandle(sig.toLowerCase()); return true }
-    catch { return false }
+    const key = sig.toLowerCase()
+    // Union the pool with the legacy drain source — during the drain
+    // window a sig may still live only in `__content__`.
+    for (const dir of [this.#contentDir, this.#legacyContentDir]) {
+      if (!dir) continue
+      try { await dir.getFileHandle(key); return true } catch { /* not here */ }
+    }
+    return false
   }
 
   async #signJson(obj: unknown): Promise<string> {
@@ -197,16 +266,36 @@ export class DcpDomainStorage {
   async #lineageDir(name: string): Promise<FileSystemDirectoryHandle> {
     if (!this.#lineagesDir) await this.initialize()
     if (!LINEAGE_NAME_RE.test(name)) throw new Error(`invalid lineage name: ${name}`)
-    return this.#lineagesDir!.getDirectoryHandle(name, { create: true })
+    // The bucket dir is SIGNED — sign(name) — never the raw human label:
+    // the reserved lineage name ('settings','home','domains'…) is a
+    // meaning, so its bag is addressed by sha256 of that meaning, same as
+    // every other pool. The legacy `__lineages__/<name>/` bag stays
+    // human-named on disk (see #legacyLineageDir) — it is what we drain FROM.
+    return this.#lineagesDir!.getDirectoryHandle(await poolSignature(name), { create: true })
   }
 
+  /** The legacy `__lineages__/<name>/` bag, or undefined when the legacy
+   *  dir is absent/drained or this lineage never existed there. */
+  async #legacyLineageDir(name: string): Promise<FileSystemDirectoryHandle | undefined> {
+    if (!this.#legacyLineagesDir) return undefined
+    if (!LINEAGE_NAME_RE.test(name)) return undefined
+    try { return await this.#legacyLineagesDir.getDirectoryHandle(name) } catch { return undefined }
+  }
+
+  /** Marker numbers UNIONED across the pool bag and its legacy bag — during
+   *  the drain window a marker may still live only in the legacy source, and
+   *  an empty pool bag with a live legacy bag is NOT "no history". */
   async #markerNumbers(lineage: string): Promise<number[]> {
-    const dir = await this.#lineageDir(lineage)
-    const nums: number[] = []
-    for await (const [n, h] of (dir as unknown as AsyncIterable<[string, FileSystemHandle]>)) {
-      if (h.kind === 'file' && MARKER_RE.test(n)) nums.push(parseInt(n, 10))
+    const nums = new Set<number>()
+    for (const dir of [await this.#lineageDir(lineage), await this.#legacyLineageDir(lineage)]) {
+      if (!dir) continue
+      try {
+        for await (const [n, h] of (dir as unknown as AsyncIterable<[string, FileSystemHandle]>)) {
+          if (h.kind === 'file' && MARKER_RE.test(n)) nums.add(parseInt(n, 10))
+        }
+      } catch { /* bag vanished mid-scan (drained) — the other source covers it */ }
     }
-    return nums.sort((a, b) => a - b)
+    return [...nums].sort((a, b) => a - b)
   }
 
   async markerCount(lineage: string): Promise<number> {
@@ -214,12 +303,18 @@ export class DcpDomainStorage {
   }
 
   async rootAtMarker(lineage: string, n: number): Promise<string | null> {
-    const dir = await this.#lineageDir(lineage)
-    try {
-      const fh = await dir.getFileHandle(String(n).padStart(4, '0'))
-      const text = (await (await fh.getFile()).text()).trim().toLowerCase()
-      return SIG_RE.test(text) ? text : null
-    } catch { return null }
+    const marker = String(n).padStart(4, '0')
+    // Pool bag first (the live era, per the highest-marker-wins merge
+    // doctrine), then the legacy bag for a marker not yet relocated.
+    for (const dir of [await this.#lineageDir(lineage), await this.#legacyLineageDir(lineage)]) {
+      if (!dir) continue
+      try {
+        const fh = await dir.getFileHandle(marker)
+        const text = (await (await fh.getFile()).text()).trim().toLowerCase()
+        if (SIG_RE.test(text)) return text
+      } catch { /* not in this bag — try the next */ }
+    }
+    return null
   }
 
   /** Current HEAD sig for a lineage (root at max marker), or null if empty. */
@@ -680,5 +775,103 @@ export class DcpDomainStorage {
    *  lineage holds the flags. */
   async recomputeLogical(): Promise<{ refs: string[]; rootSig: string | null }> {
     return this.computeLogicalInstall(await this.enabledBranchSigs())
+  }
+
+  // ── self-cleaning drains — legacy `__x__` → signed pools ──────────────────
+  //
+  // Detached + delayed from init. Content sig files copy into the content
+  // pool; lineage bags union-merge their markers into the pool bag of the
+  // same name (highest marker wins — a stale legacy marker never rewinds the
+  // live era). Copy → remove per record; every final removeEntry is
+  // non-recursive ON PURPOSE — it only succeeds once the folder is empty, so
+  // a straggler is never destroyed. Idempotent and resumable: a partial pass
+  // just finishes on a later boot. NEVER deletes anything not confirmed
+  // copied.
+
+  async #selfClean(): Promise<void> {
+    try {
+      if (this.#legacyContentDir && await this.#drainContent()) {
+        this.#legacyContentDir = undefined
+      }
+      if (this.#legacyLineagesDir && await this.#drainLineages()) {
+        this.#legacyLineagesDir = undefined
+      }
+    } catch (err) {
+      console.warn('[dcp-domain-storage] legacy drain pass aborted — retried next boot', err)
+    }
+  }
+
+  /** Copy every sig-named file from `__content__` into the content pool
+   *  (an existing pool entry wins — content-addressed, identical bytes),
+   *  then remove it from the legacy dir. GC the legacy dir once empty. */
+  async #drainContent(): Promise<boolean> {
+    const src = this.#legacyContentDir
+    if (!src || !this.#contentDir) return false
+    let clean = true
+    try {
+      for await (const [name, handle] of entriesOf(src)) {
+        if (handle.kind !== 'file' || !SIG_RE.test(name)) { clean = false; continue }
+        try {
+          let present = true
+          try { await this.#contentDir.getFileHandle(name) } catch { present = false }
+          if (!present) {
+            const bytes = await (handle as FileSystemFileHandle).getFile()
+            const dest = await this.#contentDir.getFileHandle(name, { create: true })
+            const w = await dest.createWritable()
+            try { await w.write(bytes) } finally { await w.close() }
+          }
+          await src.removeEntry(name)
+        } catch { clean = false }  // straggler — absorbed on a later boot
+      }
+    } catch { return false }
+    if (!clean) return false
+    try { await this.#root!.removeEntry(LEGACY_CONTENT_DIRECTORY); return true }
+    catch { return false }  // not yet empty — dual-reads keep working
+  }
+
+  /** Union-merge each `__lineages__/<name>/` bag into the pool bag of the
+   *  same name: copy the markers the pool bag lacks (a non-empty pool marker
+   *  under the same index wins — the pool is the live era; a 0-byte pool
+   *  marker is an interrupted copy, healed from the source). Remove each
+   *  source marker only once its bytes are confirmed present in the pool. */
+  async #drainLineages(): Promise<boolean> {
+    const src = this.#legacyLineagesDir
+    if (!src || !this.#lineagesDir) return false
+    let clean = true
+    try {
+      for await (const [name, handle] of entriesOf(src)) {
+        if (handle.kind !== 'directory' || !LINEAGE_NAME_RE.test(name)) { clean = false; continue }
+        const sourceBag = handle as FileSystemDirectoryHandle
+        // Source bag is the legacy human-named `__lineages__/<name>/`; the
+        // pool bag is SIGNED — sign(name) — matching #lineageDir.
+        const poolBag = await this.#lineagesDir.getDirectoryHandle(await poolSignature(name), { create: true })
+        let bagClean = true
+        try {
+          for await (const [marker, mh] of entriesOf(sourceBag)) {
+            if (mh.kind !== 'file' || !MARKER_RE.test(marker)) { bagClean = false; continue }
+            try {
+              const file = await (mh as FileSystemFileHandle).getFile()
+              let present = false
+              try {
+                const existing = await poolBag.getFileHandle(marker)
+                present = (await existing.getFile()).size > 0 || file.size === 0
+              } catch { /* absent — copy */ }
+              if (!present) {
+                const bytes = await file.arrayBuffer()
+                const dest = await poolBag.getFileHandle(marker, { create: true })
+                const w = await dest.createWritable()
+                try { await w.write(bytes) } finally { await w.close() }
+              }
+              await sourceBag.removeEntry(marker)
+            } catch { bagClean = false }
+          }
+        } catch { bagClean = false }
+        if (bagClean) { try { await src.removeEntry(name) } catch { clean = false } }
+        else clean = false
+      }
+    } catch { return false }
+    if (!clean) return false
+    try { await this.#root!.removeEntry(LEGACY_LINEAGES_DIRECTORY); return true }
+    catch { return false }  // not yet empty — dual-reads keep working
   }
 }

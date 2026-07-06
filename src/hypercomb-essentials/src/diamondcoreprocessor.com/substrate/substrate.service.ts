@@ -4,8 +4,11 @@
 // backgrounds for cells that have no image of their own.
 //
 // Sources (unified abstraction):
-//   layer   — a layer package in OPFS __layers__/<domain>/<sig>
-//   hive    — a directory path under hypercomb.io/ (cells with images)
+//   layer   — a layer addressed by signature (bytes at the flat OPFS
+//             root; the legacy `__layers__` dir is a read-fallback drain
+//             source inside Store)
+//   hive    — a content-tree path (cells with images); dirs resolve
+//             root-first then through the legacy content roots
 //   folder  — a live FileSystemDirectoryHandle persisted in IDB
 //   url     — a remote bundle with manifest.json { images: string[] }
 //
@@ -15,12 +18,15 @@
 //     → first builtin in registry
 //     → none
 //
-// Storage:
-//   Root OPFS 0000 → `substrate-registry` (SubstrateRegistry JSON)
-//   Per-hive 0000  → `substrate` (hive path, legacy property name)
-//   Per-hive 0000  → `substrate-inherit` = false (barrier)
+// Storage (pools-of-meaning model):
+//   sign('substrate') pool, `registry` file → SubstrateRegistry JSON
+//   sign('substrate') pool, `<locationSig>` files → per-hive overrides
+//     ({ substrate: path | null, 'substrate-inherit': boolean })
+//   LEGACY (read-fallback only, drained by the detached scrub):
+//     root OPFS `0000` → `substrate-registry` key
+//     per-hive dir `0000` → `substrate` / `substrate-inherit` keys
 
-import { EffectBus, type SubstrateSource, type SubstrateRegistry, EMPTY_SUBSTRATE_REGISTRY } from '@hypercomb/core'
+import { EffectBus, SignatureService, type SubstrateSource, type SubstrateRegistry, EMPTY_SUBSTRATE_REGISTRY } from '@hypercomb/core'
 // Folder helpers live in this namespace — see folder-handles.ts header for why
 // essentials must NOT import from @hypercomb/shared. Pulling shared into a
 // module bundle drags in Angular component code, which fails JIT in the
@@ -37,12 +43,24 @@ import {
 } from './folder-handles.js'
 import { readTilePropertiesAt, readTilePropsSigAt, writeTilePropertiesAt, cellLocationSig, readTilePropsIndex, writeTilePropsIndex, lookupTilePropsSig } from '../editor/tile-properties.js'
 
-const PROPS_FILE = '0000'
+const PROPS_FILE = '0000'                    // legacy per-hive dir props (read-fallback)
 const HIVE_KEY = 'substrate'                 // per-hive override (path string)
 const INHERIT_KEY = 'substrate-inherit'      // per-hive barrier
-const REGISTRY_KEY = 'substrate-registry'    // root OPFS 0000 property
+const REGISTRY_KEY = 'substrate-registry'    // LEGACY root-0000 property (read-fallback)
 const LEGACY_GLOBAL_KEY = 'substrate-global' // migrated into registry on load
 const LEGACY_LS_GLOBAL = 'hc:substrate-global'
+
+// Pools-of-meaning storage: the sign('substrate') pool at the OPFS root
+// holds the registry (under the local name below) and the per-hive
+// override records (keyed by location sig). The address is DERIVED —
+// sha256 of the UTF-8 bytes of 'substrate' — never a typed folder name.
+// The legacy homes (root `0000` for the registry, per-hive dir `0000`
+// for overrides) are read-fallbacks only; the registry's legacy keys are
+// scrubbed from root `0000` once migrated so the root marker namespace
+// stays clean.
+const SUBSTRATE_MEANING = 'substrate'
+const REGISTRY_RECORD = 'registry'
+const SIG_NAME_RE = /^[0-9a-f]{64}$/
 
 // Built-in TILE background sets shipped with the app, seeded on first load.
 // Each set is a url source whose baseUrl hosts manifest.json + PNGs:
@@ -79,8 +97,17 @@ const get = (key: string) => (window as any).ioc?.get?.(key)
 
 type StoreHandle = {
   opfsRoot: FileSystemDirectoryHandle
+  /** The flat content root — IS the OPFS root now. Named tile dirs no
+   *  longer live here; they linger in the legacy content roots below
+   *  until the self-cleaning relocation drains them. */
   hypercombRoot: FileSystemDirectoryHandle
-  layers: FileSystemDirectoryHandle
+  /** Legacy content roots (`__hive__/`, `hypercomb.io/`) — optional,
+   *  opened create:false by Store; the dir walkers below fall back
+   *  through them while they exist. */
+  legacyHive?: FileSystemDirectoryHandle
+  legacyHypercombIo?: FileSystemDirectoryHandle
+  /** Open (creating if needed) the sign(meaning) pool for a meaning. */
+  getPool?: (meaning: string) => Promise<FileSystemDirectoryHandle | null>
   getResource: (sig: string) => Promise<Blob | null>
   putResource: (blob: Blob) => Promise<string>
 }
@@ -182,13 +209,31 @@ export class SubstrateService extends EventTarget {
     const store = this.#store()
     if (!store) return
     let registry: SubstrateRegistry | null = null
+    let fromLegacy = false
+    // Canonical: the sign('substrate') pool `registry` record. Legacy
+    // read-fallback: the root `0000` props under `substrate-registry`.
     try {
-      const props = await this.#readRootProps(store)
-      const raw = props[REGISTRY_KEY]
-      if (raw && typeof raw === 'object' && Array.isArray((raw as any).sources)) {
-        registry = raw as SubstrateRegistry
+      const rec = await this.#readPoolRecord(store, REGISTRY_RECORD)
+      if (rec && Array.isArray((rec as any).sources)) {
+        registry = rec as unknown as SubstrateRegistry
       }
-    } catch { /* no root props */ }
+    } catch { /* pool miss */ }
+    if (!registry) {
+      try {
+        const props = await this.#readRootProps(store)
+        const raw = props[REGISTRY_KEY]
+        if (raw && typeof raw === 'object' && Array.isArray((raw as any).sources)) {
+          registry = raw as SubstrateRegistry
+          fromLegacy = true
+        }
+      } catch { /* no root props */ }
+    }
+    // Migrate a legacy-sourced registry into the pool, then scrub the
+    // legacy root keys — self-cleaning, detached from any read path.
+    if (registry && fromLegacy) {
+      await this.#saveRegistry(registry)
+      void this.#scrubLegacyRootRegistry(store)
+    }
 
     if (!registry) {
       // First-ever load — seed with all built-in sets, Photos active (the
@@ -266,7 +311,10 @@ export class SubstrateService extends EventTarget {
     const store = this.#store()
     if (!store) return
     try {
-      await this.#writeRootProps(store, { [REGISTRY_KEY]: next })
+      // Registry lives in the sign('substrate') pool `registry` record —
+      // never the legacy root `0000` (which collides with the root sigbag
+      // marker convention). The legacy keys are scrubbed on first migrate.
+      await this.#writePoolRecord(store, REGISTRY_RECORD, next as unknown as Record<string, unknown>)
     } catch { /* store not ready */ }
   }
 
@@ -337,24 +385,37 @@ export class SubstrateService extends EventTarget {
   // ─────────────────────── per-hive overrides ───────────────────────
 
   async setHive(path: string): Promise<void> {
-    const dir = await this.#explorerDir()
-    if (!dir) return
-    await this.#writeProps(dir, { [HIVE_KEY]: path })
+    if (!(await this.#writeOverride({ [HIVE_KEY]: path }))) return
     EffectBus.emit('substrate:changed', { scope: 'hive', path })
   }
 
   async clearHive(): Promise<void> {
-    const dir = await this.#explorerDir()
-    if (!dir) return
-    await this.#writeProps(dir, { [HIVE_KEY]: null })
+    if (!(await this.#writeOverride({ [HIVE_KEY]: null }))) return
     EffectBus.emit('substrate:changed', { scope: 'hive', path: null })
   }
 
   async setInherit(inherit: boolean): Promise<void> {
-    const dir = await this.#explorerDir()
-    if (!dir) return
-    await this.#writeProps(dir, { [INHERIT_KEY]: inherit })
+    if (!(await this.#writeOverride({ [INHERIT_KEY]: inherit }))) return
     EffectBus.emit('substrate:changed', { scope: 'inherit', inherit })
+  }
+
+  /** Merge-write a per-hive override for the CURRENT location into the
+   *  sign('substrate') pool, keyed by that location's sig — never a
+   *  per-hive dir `0000` (a legacy-tree write the new model forbids). The
+   *  existing pool record (and, as a read-fallback, the legacy dir `0000`)
+   *  seeds the merge so a partial update never drops the other key.
+   *  Returns false when the store/location isn't resolvable yet. */
+  async #writeOverride(patch: Record<string, unknown>): Promise<boolean> {
+    const store = this.#store()
+    if (!store) return false
+    const segments = this.#lineage()?.explorerSegments?.() ?? []
+    const locSig = await this.#locationSig(segments)
+    if (!locSig) return false
+    const existing = (await this.#readPoolRecord(store, locSig))
+      ?? (await this.#legacyDirProps(store, segments))
+      ?? {}
+    await this.#writePoolRecord(store, locSig, { ...existing, ...patch })
+    return true
   }
 
   // ───────────────────────── resolution ─────────────────────────
@@ -387,11 +448,15 @@ export class SubstrateService extends EventTarget {
 
     const segments = [...lineage.explorerSegments()]
     while (segments.length > 0) {
-      try {
-        let dir: FileSystemDirectoryHandle = store.hypercombRoot
-        for (const seg of segments) dir = await dir.getDirectoryHandle(seg)
-        const props = await this.#readProps(dir)
+      // Canonical: the sign('substrate') pool record keyed by this
+      // ancestor's location sig. Legacy read-fallback: the per-hive dir
+      // `0000` (only present in the not-yet-drained content trees).
+      let props: Record<string, unknown> | null = null
+      const locSig = await this.#locationSig(segments)
+      if (locSig) props = await this.#readPoolRecord(store, locSig)
+      if (!props) props = await this.#legacyDirProps(store, segments)
 
+      if (props) {
         if (props[INHERIT_KEY] === false) return null // barrier → fall through to registry
 
         const path = props[HIVE_KEY]
@@ -403,10 +468,20 @@ export class SubstrateService extends EventTarget {
             label: path,
           }
         }
-      } catch { /* missing dir / props */ }
+      }
       segments.pop()
     }
     return null
+  }
+
+  /** LEGACY read-fallback for a per-hive override: resolve the named
+   *  segments path to its (still-undrained) content-tree dir and read the
+   *  `0000` props file. Null when the dir/file is gone. */
+  async #legacyDirProps(store: StoreHandle, segments: readonly string[]): Promise<Record<string, unknown> | null> {
+    const dir = await this.#segmentsToDir(store, segments)
+    if (!dir) return null
+    const props = await this.#readProps(dir)
+    return Object.keys(props).length > 0 ? props : null
   }
 
   // ─────────────────── source resolvers (per type) ───────────────────
@@ -427,10 +502,10 @@ export class SubstrateService extends EventTarget {
     const propsIndex = readTilePropsIndex()
     const pathSegments = layerPath.split('/').filter(Boolean)
     try {
-      let dir: FileSystemDirectoryHandle = store.hypercombRoot
-      for (const seg of pathSegments) {
-        dir = await dir.getDirectoryHandle(seg)
-      }
+      // Named tile dirs live in the (undrained) legacy content roots — the
+      // union resolver walks root-first then the legacy roots.
+      const dir = await this.#segmentsToDir(store, pathSegments)
+      if (!dir) return images
       for await (const [name, handle] of (dir as any).entries()) {
         if (handle.kind !== 'directory') continue
         try {
@@ -534,11 +609,19 @@ export class SubstrateService extends EventTarget {
 
     await this.#preloadAtlas(images)
     await this.#fillPropsPool(images)
-    // Reconcile canonical <-> index BOTH ways (background; idempotent): stamp
-    // index-only images into the CANONICAL slot so they travel with the layer,
-    // AND seed the local index from canonical so an imaged tile is never
-    // missing its index entry on this device (adopted / synced / cross-device).
-    void this.reconcileCanonicalImageStamps()
+    // Reconcile canonical <-> index BOTH ways (idempotent): stamp index-only
+    // images into the CANONICAL slot so they travel with the layer, AND seed
+    // the local index from canonical so an imaged tile is never missing its
+    // index entry on this device (adopted / synced / cross-device).
+    //
+    // DEFERRED off the boot/paint path: it walks the layer tree, so running it
+    // inline warmed the ENTIRE hive into the layer cache and its OPFS churn
+    // starved the user's first clicks. It self-skips when the hive is unchanged
+    // (fingerprint gate), so most sessions do nothing; when it does run, idle
+    // keeps it clear of first paint and first interaction.
+    const runReconcile = (): void => { void this.reconcileCanonicalImageStamps() }
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(runReconcile, { timeout: 10000 })
+    else setTimeout(runReconcile, 5000)
   }
 
   // (Removed: #migrateLegacySubstrateProps — a one-time pass that DELETED
@@ -927,6 +1010,28 @@ export class SubstrateService extends EventTarget {
     if (this.#stampRunning) return 0
     this.#stampRunning = true
     try {
+      // Skip the whole-tree walk when nothing has changed since the last
+      // COMPLETED reconcile. The pass is idempotent — re-walking hundreds of
+      // tiles to stamp/heal NOTHING is pure boot cost, and it warms the entire
+      // layer cache (the "why is the whole hive loaded / first click lags"
+      // symptom). Fingerprint = lineage count (grows on adopt / sync /
+      // first-commit) + a hash of the local props index (changes on any edit).
+      // Those are the only inputs that can create new reconcile work, so a
+      // matching fingerprint means there is provably nothing to do.
+      const hashStr = (s: string): string => {
+        let h = 5381
+        for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0
+        return (h >>> 0).toString(36)
+      }
+      const fingerprintOf = (): string => {
+        const hist = get('@diamondcoreprocessor.com/HistoryService') as { headIndexCount?: () => number } | undefined
+        const idxRaw = localStorage.getItem('hc:tile-props-index') ?? '{}'
+        return `${hist?.headIndexCount?.() ?? 0}:${idxRaw.length}:${hashStr(idxRaw)}`
+      }
+      if (localStorage.getItem('hc:substrate-reconciled') === fingerprintOf()) {
+        console.info('[substrate] stamp pass: skipped — hive unchanged since last reconcile')
+        return 0
+      }
       const store = this.#store()
       if (!store) { console.info('[substrate] stamp pass: store not ready'); return 0 }
       const index: Record<string, string> = JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}')
@@ -940,9 +1045,10 @@ export class SubstrateService extends EventTarget {
       // nothing. Resolve the tile's dir lazily from the segments path.
       const dirPropsFor = async (segments: string[], name: string): Promise<Record<string, unknown> | null> => {
         try {
-          if (!store.hypercombRoot) return null
-          let dir: FileSystemDirectoryHandle = store.hypercombRoot
-          for (const seg of segments) dir = await dir.getDirectoryHandle(seg, { create: false })
+          // The `0000` dir-file generation only survives in the legacy
+          // content roots — resolve the tile dir through the union walker.
+          const dir = await this.#segmentsToDir(store, segments)
+          if (!dir) return null
           const cellDir = await dir.getDirectoryHandle(name, { create: false })
           const fh = await cellDir.getFileHandle('0000', { create: false })
           const parsed = JSON.parse(await (await fh.getFile()).text())
@@ -1063,16 +1169,25 @@ export class SubstrateService extends EventTarget {
         }
         await walkLayers([])
       } else if (store.hypercombRoot) {
-        // FALLBACK: legacy dir-backed tiles.
+        // FALLBACK: legacy dir-backed tiles. The named tile dirs only ever
+        // lived in the legacy content roots — walk those, NOT the flat OPFS
+        // root (whose top-level dirs are now sig-named pools + lineage bags
+        // that a name walk would misread as tiles). Skip any sig-named dir
+        // (64-hex: a pool or bag) and the underscore/legacy drain sources at
+        // every level so the stamp pass never recurses into non-tile dirs.
+        const isTileDir = (name: string): boolean =>
+          !SIG_NAME_RE.test(name) && !name.startsWith('__') && name !== 'hypercomb.io'
         const walkDirs = async (dir: FileSystemDirectoryHandle, segments: string[]): Promise<void> => {
           if (segments.length > 8) return
           for await (const [name, handle] of (dir as any).entries()) {
-            if (handle.kind !== 'directory' || name.startsWith('__')) continue
+            if (handle.kind !== 'directory' || !isTileDir(name)) continue
             await stampIfNeeded(segments, name)
             await walkDirs(handle as FileSystemDirectoryHandle, [...segments, name])
           }
         }
-        await walkDirs(store.hypercombRoot, [])
+        for (const root of [store.legacyHive, store.legacyHypercombIo]) {
+          if (root) await walkDirs(root, [])
+        }
       }
 
       // Always log the summary — the silent-0 case is exactly what made the
@@ -1090,6 +1205,9 @@ export class SubstrateService extends EventTarget {
         if (healed > 0) writeTilePropsIndex(fresh)
       }
       console.info(`[substrate] stamp pass: index=${indexSize} walked=${walked} matched=${matched} stamped=${stamped} index-healed=${healed}`)
+      // Completed — persist the post-pass fingerprint (recomputed AFTER the
+      // index heal above) so an unchanged next boot skips the walk entirely.
+      try { localStorage.setItem('hc:substrate-reconciled', fingerprintOf()) } catch { /* storage full — re-walk next time */ }
       return stamped
     } catch (err) { console.warn('[substrate] stamp pass failed', err); return 0 }
     finally { this.#stampRunning = false }
@@ -1097,6 +1215,8 @@ export class SubstrateService extends EventTarget {
 
   // ───────────────────────── OPFS helpers ─────────────────────────
 
+  /** LEGACY per-hive dir props (`<dir>/0000`) — read-fallback only;
+   *  nothing writes these anymore (overrides live in the pool). */
   async #readProps(dir: FileSystemDirectoryHandle): Promise<Record<string, any>> {
     try {
       const fh = await dir.getFileHandle(PROPS_FILE)
@@ -1105,16 +1225,66 @@ export class SubstrateService extends EventTarget {
     } catch { return {} }
   }
 
-  async #writeProps(dir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
-    const existing = await this.#readProps(dir)
-    const merged: Record<string, unknown> = { ...existing, ...updates }
-    for (const k of Object.keys(updates)) if (merged[k] === null) delete merged[k]
-    const fh = await dir.getFileHandle(PROPS_FILE, { create: true })
+  /** The sign('substrate') pool at the OPFS root. Prefers Store.getPool;
+   *  derives the address locally when the store predates it (essentials
+   *  must not import shared, so the derivation is by convention:
+   *  sha256 of the UTF-8 bytes of the meaning). */
+  async #pool(store: StoreHandle): Promise<FileSystemDirectoryHandle | null> {
+    try {
+      if (store.getPool) return await store.getPool(SUBSTRATE_MEANING)
+      const sig = await SignatureService.sign(new TextEncoder().encode(SUBSTRATE_MEANING).buffer as ArrayBuffer)
+      return await store.opfsRoot.getDirectoryHandle(sig, { create: true })
+    } catch { return null }
+  }
+
+  async #readPoolRecord(store: StoreHandle, name: string): Promise<Record<string, unknown> | null> {
+    try {
+      const pool = await this.#pool(store)
+      if (!pool) return null
+      const fh = await pool.getFileHandle(name, { create: false })
+      const parsed = JSON.parse(await (await fh.getFile()).text())
+      return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
+    } catch { return null }
+  }
+
+  async #writePoolRecord(store: StoreHandle, name: string, record: Record<string, unknown>): Promise<void> {
+    const pool = await this.#pool(store)
+    if (!pool) return
+    const fh = await pool.getFileHandle(name, { create: true })
     const writable = await fh.createWritable()
-    await writable.write(JSON.stringify(merged))
+    await writable.write(JSON.stringify(record))
     await writable.close()
   }
 
+  /** Location sig for a segments path — same canonical signing site the
+   *  history bags use (empty segments = root, which the override walk
+   *  never consults, so no ROOT_NAME special-case is needed here). */
+  async #locationSig(segments: readonly string[]): Promise<string | null> {
+    const history = get('@diamondcoreprocessor.com/HistoryService') as {
+      sign?: (l: { explorerSegments?: () => readonly string[] }) => Promise<string>
+    } | undefined
+    if (!history?.sign) return null
+    try { return await history.sign({ explorerSegments: () => [...segments] }) } catch { return null }
+  }
+
+  /** Resolve a NAMED segments path to its dir: the flat root first, then
+   *  the legacy content roots (`__hive__/`, `hypercomb.io/`) — named
+   *  tile dirs only exist in the legacy trees now, and the union rule
+   *  says a partially-drained boot must still resolve them. */
+  async #segmentsToDir(store: StoreHandle, segments: readonly string[]): Promise<FileSystemDirectoryHandle | null> {
+    for (const root of [store.hypercombRoot, store.legacyHive, store.legacyHypercombIo]) {
+      if (!root) continue
+      try {
+        let dir: FileSystemDirectoryHandle = root
+        for (const seg of segments) dir = await dir.getDirectoryHandle(seg, { create: false })
+        return dir
+      } catch { /* not under this root — try the next */ }
+    }
+    return null
+  }
+
+  /** LEGACY root `0000` props — read-fallback for the registry until the
+   *  scrub below retires the substrate keys from it. */
   async #readRootProps(store: StoreHandle): Promise<Record<string, unknown>> {
     try {
       const fh = await store.opfsRoot.getFileHandle(PROPS_FILE)
@@ -1123,22 +1293,34 @@ export class SubstrateService extends EventTarget {
     } catch { return {} }
   }
 
-  async #writeRootProps(store: StoreHandle, updates: Record<string, unknown>): Promise<void> {
-    const existing = await this.#readRootProps(store)
-    const merged = { ...existing, ...updates }
-    const fh = await store.opfsRoot.getFileHandle(PROPS_FILE, { create: true })
-    const writable = await fh.createWritable()
-    await writable.write(JSON.stringify(merged))
-    await writable.close()
+  /** Self-cleaning scrub: once the registry lives in the pool, remove the
+   *  substrate keys from the legacy root `0000` — and the file itself when
+   *  nothing else remains in it (it may be shared with other root-props
+   *  writers, or be a non-JSON marker — both are left untouched). Detached
+   *  from every read path; best-effort. */
+  async #scrubLegacyRootRegistry(store: StoreHandle): Promise<void> {
+    try {
+      const fh = await store.opfsRoot.getFileHandle(PROPS_FILE, { create: false })
+      const parsed = JSON.parse(await (await fh.getFile()).text())
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return // not props — not ours
+      const props = parsed as Record<string, unknown>
+      if (!(REGISTRY_KEY in props) && !(LEGACY_GLOBAL_KEY in props)) return
+      delete props[REGISTRY_KEY]
+      delete props[LEGACY_GLOBAL_KEY]
+      if (Object.keys(props).length === 0) {
+        await store.opfsRoot.removeEntry(PROPS_FILE)
+        return
+      }
+      const out = await store.opfsRoot.getFileHandle(PROPS_FILE, { create: true })
+      const writable = await out.createWritable()
+      try { await writable.write(JSON.stringify(props)) } finally { await writable.close() }
+    } catch { /* absent or unreadable — nothing to scrub */ }
   }
 
   // ───────────────────────── IoC helpers ─────────────────────────
 
   #store(): StoreHandle | undefined { return get('@hypercomb.social/Store') }
   #lineage(): LineageHandle | undefined { return get('@hypercomb.social/Lineage') }
-  async #explorerDir(): Promise<FileSystemDirectoryHandle | null> {
-    return this.#lineage()?.explorerDir() ?? null
-  }
 }
 
 const _substrateService = new SubstrateService()

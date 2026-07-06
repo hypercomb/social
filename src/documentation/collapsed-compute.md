@@ -113,7 +113,8 @@ that names a package is exactly this insertion-order re-sign cascaded to the top
 
 A snapshot of the system at time T is just the layer that was HEAD at that
 timestamp — and a layer already *is* a signed merkle root. History is a chain of
-markers (`{ layer: <sig> }` pointers) in `__history__/<lineageSig>/`; "what's here
+markers (`{ layer: <sig> }` pointers) in the lineage's sigbag at the OPFS root
+(`<lineageSig>/`; legacy `__history__/` is a read-fallback drain); "what's here
 now" is **not** an op-replay from zero but a direct read of the head layer's slots
 (`currentLayerAt` → `getLayerBySig`, children from the `children[]`/`cells` slot).
 So time-travel to T is "load the layer the marker at T points at" — no replay, no

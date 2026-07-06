@@ -14,8 +14,9 @@ type Pt = { x: number; y: number }
 // -------------------------------------------------
 // Inlined here so Angular's esbuild cannot tree-shake the IoC registration.
 // Both ZoomDrone and PanningDrone report viewport state here. It is
-// persisted by LOCATION SIGNATURE into the flat, non-history
-// `__viewport__/<sig>` store (see editor/viewport-store.ts) — never into
+// persisted by LOCATION SIGNATURE into the flat, non-history sign('viewport')
+// pool of meaning — one `<sig>` file per location (see editor/viewport-store.ts;
+// legacy `__viewport__/` is a read-fallback drained by that store) — never into
 // the content-addressed layer, so panning/zooming can't skew a layer's
 // signature or pollute undo/redo.
 
@@ -65,15 +66,16 @@ export class ViewportPersistence extends EventTarget {
 
   // In-memory mirror of the current location's viewport. Synchronous
   // getters (read by applyCenter on resize/boot) serve from here; the
-  // sig-keyed `__viewport__` store is the source of truth across reloads.
+  // sig-keyed sign('viewport') pool is the source of truth across reloads.
   #lastRead: ViewportSnapshot = {}
   #reading: Promise<ViewportSnapshot> | null = null
   #suspended = false
 
   // ── Persist coordination ──────────────────────────────────────────
   //
-  // Viewport is committed to `__viewport__/<sign(segments)>` (flat,
-  // non-history) keyed by the CURRENT location. Only `source: 'user'`
+  // Viewport is committed to the sign('viewport') pool as
+  // `<sign(segments)>` (flat, non-history) keyed by the CURRENT location.
+  // Only `source: 'user'`
   // setter calls schedule a commit — auto sources (refit-on-entry,
   // init defaults) update the in-memory mirror only, so re-entering a
   // layer can't clobber the user's saved gesture. ~200ms debounce; a

@@ -1,23 +1,24 @@
 // diamondcoreprocessor.com/history/collapse-history.queen.ts
 //
 // /collapse-history — dev utility that walks every lineage bag (via
-// HistoryService.list(), which unions the hive-root pool with any legacy
-// __history__ stragglers) and reduces it to THREE canonical states: empty
-// (genesis), unused (the state just before head), and active (head) —
-// soft-deleting everything between into the bag's __temporary__/. Also clears
-// persisted cursor positions so every bag snaps to head on the next load.
+// HistoryService.list(), which unions the root bags with any legacy drain
+// sources — `__history__/`, `__hive__/`, `hypercomb.io/` — until they drain)
+// and reduces it to THREE canonical states: empty (genesis), unused (the state
+// just before head), and active (head) — soft-deleting everything between into
+// the sign('temporary') pool at the OPFS root. Also clears persisted cursor
+// positions so every bag snaps to head on the next load.
 //
 // This is the one-time "fresh slate" after the per-page (no-cascade)
 // migration: it strips the accumulated cascade markers the retired
 // leaf→root cascade used to write. Surviving markers keep their original
 // sequence numbers (the chain is reduced, not renumbered).
 //
-// Operates on the Phase-2 bag-root layout: layer files live directly at
-// <root>/{lineageSig}/{sig} (the hive root `__hive__/`, or legacy
-// `__history__/` until /consolidate-history relocates it), ordered by
-// file.lastModified. No inner `layers/` subdir — that path was removed in
-// the bag-root refactor; the migrator in HistoryService cleans up legacy
-// bags lazily on first listLayers call.
+// Operates on the bag-root layout: lineage sigbags are sig-named DIRS at the
+// OPFS root (`<root>/<lineageSig>/`) holding NNNNNNNN markers + sig-named
+// record files, ordered by file.lastModified. Legacy `__history__/`,
+// `__hive__/` and `hypercomb.io/` bags are read-fallback drain sources,
+// union-promoted to the root bag on touch. No inner `layers/` subdir — that
+// path was removed in the bag-root refactor.
 
 import { QueenBee } from '@hypercomb/core'
 import type { HistoryService } from './history.service.js'
@@ -51,14 +52,14 @@ export class CollapseHistoryQueenBee extends QueenBee {
     let bags = 0
     let removed = 0
 
-    // Enumerate via HistoryService.list(), which unions the hive-root pool
-    // (where lineage bags live post-Phase-2) with any legacy __history__
-    // stragglers. Iterating store.history directly would miss every
-    // promoted/new bag — and it's absent entirely once consolidated.
+    // Enumerate via HistoryService.list(), which unions the root bags with
+    // any legacy drain sources (`__history__/`, `__hive__/`, `hypercomb.io/`).
+    // Iterating store.history directly would miss every promoted/new bag —
+    // and it's absent entirely once consolidated.
     for (const { signature: lineageSig } of await history.list()) {
       bags++
-      // listLayers handles the legacy-`layers/` migrator and the
-      // bag-pollution cleanup before returning, so by the time we
+      // listLayers union-promotes the bag and runs the opportunistic
+      // legacy-marker migration before returning, so by the time we
       // see the rows the bag is well-formed.
       const entries = await history.listLayers(lineageSig)
       if (entries.length <= 3) continue

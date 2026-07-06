@@ -1,10 +1,12 @@
 // diamondcoreprocessor.com/assistant/structure-drop.worker.ts
 //
 // Bridges the structure view with the atomizer drag-drop system.
-// When the explorer is inside __structure__/, this worker registers
-// the PixiJS canvas as an AtomizableTarget so the structure atomizer
-// can be dropped onto hex cells. On drop, it resolves the hovered cell
-// and passes its structure properties to the atomizer.
+// When the explorer is in structure mode (the `__structure__` URL/lineage
+// SEGMENT — a virtual mode marker in the navigation path, NOT an OPFS typed
+// folder that anything creates), this worker registers the PixiJS canvas as
+// an AtomizableTarget so the structure atomizer can be dropped onto hex cells.
+// On drop, it resolves the hovered cell (via the lineage service's resolved
+// dir, not a raw dir handle) and passes its structure props to the atomizer.
 
 import { Bee, EffectBus } from '@hypercomb/core'
 import { ATOMIZABLE_TARGET_PREFIX } from '@hypercomb/core'

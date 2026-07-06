@@ -7,6 +7,9 @@
 > improvise storage. Kept only for the render-hook detail (write after
 > `loadCellImages`, before the supersede guards) and the field projection, which
 > remain valid. Do not build from the storage parts here.
+> All `__x__` folder names below are the retired pre-pools vocabulary — members
+> are root sig files via `putResource`, the private set is the
+> `sign('optimization')` pool, and lineage sigbags live at the OPFS root.
 
 ## Goal
 

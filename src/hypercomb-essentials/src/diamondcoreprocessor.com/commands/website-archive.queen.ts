@@ -32,7 +32,7 @@
 // swarm-adopt uses (including the tile-props-index seed, without which the
 // substrate clobbers each imported image).
 
-import { EffectBus, hypercomb, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { EffectBus, hypercomb, I18N_IOC_KEY, SignatureService, type I18nProvider } from '@hypercomb/core'
 import { buildStoreZip, readStoreZip } from './store-zip.js'
 import { decorationClosureSigs } from '../sharing/decoration-closure.js'
 import {
@@ -53,12 +53,40 @@ const CURSOR_KEY = '@diamondcoreprocessor.com/HistoryCursorService'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 const CHILD_SLOTS = new Set(['cells', 'layers', 'children'])
-const ENTRY_RE = /^(__layers__|__bees__|__dependencies__|__resources__)\/([0-9a-f]{64})(?:\.js|\.json)?$/
+
+// ── zip entry shapes ──────────────────────────────────────────
+// v2 archives mirror the OPFS pools model: layer + resource bytes are FLAT
+// sig-named entries (`<sig>` — same as the flat OPFS root), bee/dep bundles
+// live under their DERIVED pool address (`<sign('bees')>/<sig>.js`,
+// `<sign('dependencies')>/<sig>.js`). No typed `__x__` dirs anywhere.
+// v1 archives (already downloaded by users) used the legacy underscore
+// paths — the LEGACY_ENTRY_RE below keeps them importing forever; only
+// the exporter moved to the new shape.
+const LEGACY_ENTRY_RE = /^(__layers__|__bees__|__dependencies__|__resources__)\/([0-9a-f]{64})(?:\.js|\.json)?$/
+const POOL_ENTRY_RE = /^([0-9a-f]{64})\/([0-9a-f]{64})(?:\.js)?$/
+const FLAT_ENTRY_RE = /^([0-9a-f]{64})$/
+
+const BEES_MEANING = 'bees'
+const DEPENDENCIES_MEANING = 'dependencies'
+// Pool addresses are derived, never hardcoded: sha256 of the UTF-8 bytes
+// of the meaning string (essentials must not import shared's Store, so
+// the derivation lives here — same convention, identical address).
+const poolSig = (meaning: string): Promise<string> =>
+  SignatureService.sign(new TextEncoder().encode(meaning).buffer as ArrayBuffer)
 
 // ── service shapes (resolved via IoC at runtime) ──────────────
 
 interface StoreLike {
   opfsRoot?: FileSystemDirectoryHandle
+  /** sign('bees') / sign('dependencies') pools — Store pre-opens these;
+   *  optional so a partially-booted store degrades to the derived-address
+   *  open in `beeDepPool`. */
+  bees?: FileSystemDirectoryHandle
+  dependencies?: FileSystemDirectoryHandle
+  /** Legacy `__bees__` / `__dependencies__` drain sources (read-fallback
+   *  only, opened create:false by Store; absent once absorbed). */
+  legacyBees?: FileSystemDirectoryHandle
+  legacyDependencies?: FileSystemDirectoryHandle
   getLayerPoolBytes(signature: string): Promise<Uint8Array | null>
   writeLayerBytes(signature: string, bytes: ArrayBuffer): Promise<void>
   getResourceLocal(signature: string): Promise<Blob | null>
@@ -168,7 +196,9 @@ export async function exportBranch(): Promise<void> {
     const blob = await store.getResourceLocal(sig)
     if (!blob) { missing.push(sig); return }
     const bytes = new Uint8Array(await blob.arrayBuffer())
-    files.push({ path: `__resources__/${sig}`, bytes })
+    // Flat sig entry — mirrors the flat OPFS root; the manifest's
+    // `resources` array types it for the importer.
+    files.push({ path: sig, bytes })
     resources.push(sig)
 
     const children = new Set<string>()
@@ -180,27 +210,45 @@ export async function exportBranch(): Promise<void> {
     for (const child of children) await walkResource(child)
   }
 
-  const readBeeDep = async (dirName: string, sig: string): Promise<Uint8Array | null> => {
-    const opfs = store.opfsRoot
-    if (!opfs) return null
-    try {
-      const dir = await opfs.getDirectoryHandle(dirName, { create: false })
+  // Read a bee/dep bundle: the sign(meaning) pool first, then the legacy
+  // `__x__` drain source while it still exists (union rule — the detached
+  // absorb may not have moved this sig yet). Both filename shapes tried
+  // (`<sig>.js` and bare `<sig>`); the absorb preserves names, so either
+  // may hold the bytes.
+  const readBeeDep = async (meaning: string, sig: string): Promise<Uint8Array | null> => {
+    const pool = meaning === BEES_MEANING ? store.bees : store.dependencies
+    const legacy = meaning === BEES_MEANING ? store.legacyBees : store.legacyDependencies
+    const sources: FileSystemDirectoryHandle[] = []
+    if (pool) sources.push(pool)
+    else if (store.opfsRoot) {
+      // Store didn't pre-open the pool (partial boot) — derive the address.
+      try { sources.push(await store.opfsRoot.getDirectoryHandle(await poolSig(meaning), { create: false })) }
+      catch { /* pool absent */ }
+    }
+    if (legacy) sources.push(legacy)
+    for (const dir of sources) {
       for (const fname of [`${sig}.js`, sig]) {
         try {
           const h = await dir.getFileHandle(fname, { create: false })
           return new Uint8Array(await (await h.getFile()).arrayBuffer())
-        } catch { /* try next filename shape */ }
+        } catch { /* try next filename shape / source */ }
       }
-    } catch { /* dir absent */ }
+    }
     return null
   }
+
+  // Derived pool addresses for the bee/dep zip entries (v2 shape).
+  const beesPoolSig = await poolSig(BEES_MEANING)
+  const depsPoolSig = await poolSig(DEPENDENCIES_MEANING)
 
   const walkLayer = async (sig: string): Promise<void> => {
     if (visitedLayers.has(sig)) return
     visitedLayers.add(sig)
     const bytes = await store.getLayerPoolBytes(sig)
     if (!bytes) { missing.push(sig); return }
-    files.push({ path: `__layers__/${sig}.json`, bytes })
+    // Flat sig entry — layer bytes are content at the flat root; the
+    // manifest's `layers` array types it for the importer.
+    files.push({ path: sig, bytes })
     layers.push(sig)
 
     let layer: Record<string, unknown>
@@ -214,15 +262,15 @@ export async function exportBranch(): Promise<void> {
         if (slot === 'bees') {
           if (visitedAssets.has(ref)) continue
           visitedAssets.add(ref)
-          const b = await readBeeDep('__bees__', ref)
-          if (b) { files.push({ path: `__bees__/${ref}.js`, bytes: b }); bees.push(ref) } else missing.push(ref)
+          const b = await readBeeDep(BEES_MEANING, ref)
+          if (b) { files.push({ path: `${beesPoolSig}/${ref}.js`, bytes: b }); bees.push(ref) } else missing.push(ref)
           continue
         }
         if (slot === 'dependencies') {
           if (visitedAssets.has(ref)) continue
           visitedAssets.add(ref)
-          const b = await readBeeDep('__dependencies__', ref)
-          if (b) { files.push({ path: `__dependencies__/${ref}.js`, bytes: b }); deps.push(ref) } else missing.push(ref)
+          const b = await readBeeDep(DEPENDENCIES_MEANING, ref)
+          if (b) { files.push({ path: `${depsPoolSig}/${ref}.js`, bytes: b }); deps.push(ref) } else missing.push(ref)
           continue
         }
         // every other slot (decorations, properties, notes, …) → resource closure
@@ -234,7 +282,7 @@ export async function exportBranch(): Promise<void> {
   await walkLayer(root.sig)
 
   const manifest = {
-    version: 1,
+    version: 2,
     kind: 'hypercomb.payload-bundle',
     payload: 'website',
     rootSig: root.sig,
@@ -324,25 +372,61 @@ export async function importArchive(): Promise<void> {
   // PASS 1 — VERIFY every sig-named entry before landing ANY of them, so a
   // tampered archive lands nothing. Raw sha256 (carried bytes are untrusted;
   // a trust-store check would short-circuit pre-trusted sigs).
-  const toLand: { dir: string; sig: string; bytes: Uint8Array }[] = []
+  //
+  // Entry classification handles BOTH archive generations:
+  //   v1 (legacy): `__layers__/…`, `__resources__/…`, `__bees__/…`,
+  //       `__dependencies__/…` — archives users already downloaded must
+  //       import forever.
+  //   v2 (pools): flat `<sig>` entries typed by the manifest's `layers` /
+  //       `resources` arrays, bee/dep bundles under their derived pool
+  //       address `<sign(meaning)>/<sig>.js`.
+  const beesPool = await poolSig(BEES_MEANING)
+  const depsPool = await poolSig(DEPENDENCIES_MEANING)
+  const layerSet = new Set((Array.isArray((manifest as { layers?: unknown }).layers)
+    ? (manifest as { layers: unknown[] }).layers : []).map(s => String(s ?? '').toLowerCase()))
+  type LandKind = 'layer' | 'resource' | 'bee' | 'dependency'
+  const classify = (path: string): { kind: LandKind; sig: string } | null => {
+    const legacy = LEGACY_ENTRY_RE.exec(path)
+    if (legacy) {
+      const kind: LandKind = legacy[1] === '__layers__' ? 'layer'
+        : legacy[1] === '__resources__' ? 'resource'
+        : legacy[1] === '__bees__' ? 'bee' : 'dependency'
+      return { kind, sig: legacy[2] }
+    }
+    const pooled = POOL_ENTRY_RE.exec(path)
+    if (pooled) {
+      if (pooled[1] === beesPool) return { kind: 'bee', sig: pooled[2] }
+      if (pooled[1] === depsPool) return { kind: 'dependency', sig: pooled[2] }
+      return null // unknown pool — not ours to land
+    }
+    const flat = FLAT_ENTRY_RE.exec(path)
+    // Flat entries: the manifest types layers; everything else is a
+    // resource (putResource is content-addressed, so a mistyped entry
+    // still lands at the identical root file).
+    if (flat) return { kind: layerSet.has(flat[1]) ? 'layer' : 'resource', sig: flat[1] }
+    return null
+  }
+  const toLand: { kind: LandKind; sig: string; bytes: Uint8Array }[] = []
   for (const e of entries) {
     if (e.path === 'manifest.json') continue
-    const m = ENTRY_RE.exec(e.path)
+    const m = classify(e.path)
     if (!m) continue
-    if ((await sha256Hex(e.bytes)) !== m[2]) {
+    if ((await sha256Hex(e.bytes)) !== m.sig) {
       toast('error', i18n()?.t('website-archive.tampered.title') ?? 'Tampered archive', i18n()?.t('website-archive.tampered.message', { path: e.path }) ?? `${e.path} failed signature verification — nothing imported`); return
     }
-    toLand.push({ dir: m[1], sig: m[2], bytes: e.bytes })
+    toLand.push({ kind: m.kind, sig: m.sig, bytes: e.bytes })
   }
 
   // PASS 2 — LAND all verified entries. Layers land before the fold runs, so
-  // flattenLayerTree resolves every child via getLayerPoolBytes.
-  for (const { dir, sig, bytes } of toLand) {
+  // flattenLayerTree resolves every child via getLayerPoolBytes. Layer and
+  // resource bytes land at the flat OPFS root (Store decides the physical
+  // location); bee/dep bundles land in their sign(meaning) pools.
+  for (const { kind, sig, bytes } of toLand) {
     const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
-    if (dir === '__layers__') await store.writeLayerBytes(sig, ab)
-    else if (dir === '__resources__') await store.putResource(new Blob([ab]), { emit: false })
-    else if (dir === '__bees__') await writeBeeDep(store, '__bees__', sig, ab)
-    else if (dir === '__dependencies__') await writeBeeDep(store, '__dependencies__', sig, ab)
+    if (kind === 'layer') await store.writeLayerBytes(sig, ab)
+    else if (kind === 'resource') await store.putResource(new Blob([ab]), { emit: false })
+    else if (kind === 'bee') await writeBeeDep(store, BEES_MEANING, sig, ab)
+    else await writeBeeDep(store, DEPENDENCIES_MEANING, sig, ab)
   }
 
   // FOLD at the importer's current node — the swarm-adopt path, minus the
@@ -416,11 +500,18 @@ function pickZip(): Promise<ArrayBuffer | null> {
   })
 }
 
-async function writeBeeDep(store: StoreLike, dirName: string, sig: string, ab: ArrayBuffer): Promise<void> {
-  const opfs = store.opfsRoot
-  if (!opfs) return
+// Land a bee/dep bundle into its sign(meaning) POOL — never the legacy
+// `__bees__`/`__dependencies__` dirs (those are read-only drain sources;
+// creating them would resurrect what the self-clean removes). Prefers the
+// Store's pre-opened pool handle; derives the pool address when absent.
+async function writeBeeDep(store: StoreLike, meaning: string, sig: string, ab: ArrayBuffer): Promise<void> {
   try {
-    const dir = await opfs.getDirectoryHandle(dirName, { create: true })
+    let dir = meaning === BEES_MEANING ? store.bees : store.dependencies
+    if (!dir) {
+      const opfs = store.opfsRoot
+      if (!opfs) return
+      dir = await opfs.getDirectoryHandle(await poolSig(meaning), { create: true })
+    }
     const h = await dir.getFileHandle(`${sig}.js`, { create: true })
     const w = await h.createWritable()
     try { await w.write(ab) } finally { await w.close() }

@@ -104,30 +104,43 @@ export class DependencyLoader extends EventTarget {
       return pending
     }
 
-    // Fallback: scan OPFS dependencies directory (dev mode or no cached map)
+    // Fallback: scan the sign('dependencies') pool (dev mode or no cached
+    // map), UNIONED with the legacy `__dependencies__` drain dir while it
+    // exists — the Store's detached absorb may still be moving files on
+    // the first post-upgrade boot.
     if (!this.store.opfsAvailable) return []
-    const depDir = this.store.dependencies
-    if (!depDir) return []
+    const depDirs = [this.store.dependencies, this.store.legacyDependencies]
+      .filter((d): d is FileSystemDirectoryHandle => !!d)
+    if (!depDirs.length) return []
 
     const pending: { sig: string; alias: string }[] = []
+    const seen = new Set<string>()
 
-    for await (const [sig, entry] of depDir.entries()) {
-      if (entry.kind !== 'file') continue
-      if (!this.#isSignature(sig)) continue
-      if (this.#loaded.has(sig)) {
-        console.log(`[dependency-loader] ${sig} already loaded, skipping`)
-        continue
-      }
-
+    for (const depDir of depDirs) {
       try {
-        const file = await (entry as FileSystemFileHandle).getFile()
-        const prefix = await file.slice(0, 512).arrayBuffer()
-        const first = new TextDecoder().decode(prefix).split('\n', 1)[0]?.trim() ?? ''
+        for await (const [sig, entry] of depDir.entries()) {
+          if (entry.kind !== 'file') continue
+          if (!this.#isSignature(sig)) continue
+          if (seen.has(sig)) continue   // mid-drain: same file in both locations
+          seen.add(sig)
+          if (this.#loaded.has(sig)) {
+            console.log(`[dependency-loader] ${sig} already loaded, skipping`)
+            continue
+          }
 
-        const alias = this.#readAliasFromFirstLine(first)
-        if (alias) pending.push({ sig, alias })
+          try {
+            const file = await (entry as FileSystemFileHandle).getFile()
+            const prefix = await file.slice(0, 512).arrayBuffer()
+            const first = new TextDecoder().decode(prefix).split('\n', 1)[0]?.trim() ?? ''
+
+            const alias = this.#readAliasFromFirstLine(first)
+            if (alias) pending.push({ sig, alias })
+          } catch {
+            // skip unreadable entries
+          }
+        }
       } catch {
-        // skip unreadable entries
+        // legacy dir vanished mid-drain — the pool holds everything
       }
     }
 

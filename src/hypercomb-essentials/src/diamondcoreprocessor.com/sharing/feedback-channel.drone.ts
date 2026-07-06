@@ -416,24 +416,42 @@ export class FeedbackChannelDrone extends Drone {
   /** One-time: an earlier build persisted the outbox as a typed OPFS folder
    *  (__feedback_outbox__). Absorb any leftover sigs into the pending map and
    *  DELETE the folder — typed folders are banned; signature pools are the only
-   *  structure. Safe: it held only bookkeeping copies of substrate bytes. */
+   *  structure. Self-cleaning, mirroring Store's absorb: per-entry
+   *  record-into-pending → remove the source file, then a gated non-recursive
+   *  removeEntry that only succeeds once the dir is empty (a straggler is never
+   *  destroyed). Safe: the folder held only bookkeeping copies of substrate
+   *  bytes — the real bytes live in the sign('optimization') pool — so an
+   *  entry recorded in the pending map is fully preserved before its file is
+   *  removed. Nothing is removed before it is recorded. */
   readonly #absorbLegacyOutbox = async (): Promise<void> => {
     if (this.#legacyAbsorbed) return
     const root = ioc()?.get<StoreLike>(STORE_KEY)?.opfsRoot
     if (!root) return                       // store not ready — retry next drain
-    this.#legacyAbsorbed = true
+    let dir: FileSystemDirectoryHandle
     try {
-      const dir = await root.getDirectoryHandle(LEGACY_OUTBOX_DIR, { create: false })
+      dir = await root.getDirectoryHandle(LEGACY_OUTBOX_DIR, { create: false })
+    } catch { this.#legacyAbsorbed = true; return }   // no legacy folder — nothing to absorb
+    let drained = true
+    try {
       const entries = (dir as unknown as { entries: () => AsyncIterable<[string, FileSystemHandle]> }).entries()
       for await (const [name, handle] of entries) {
-        if (!HEX64.test(name) || handle.kind !== 'file' || this.#pending.has(name)) continue
-        let first = Date.now()
-        try { first = (await (handle as FileSystemFileHandle).getFile()).lastModified } catch { /* keep now */ }
-        this.#pending.set(name, first)
+        if (handle.kind !== 'file' || !HEX64.test(name)) { drained = false; continue }
+        // Record into the pending map (the "target") — the sig is now tracked and
+        // its bytes are already durable in the substrate — THEN drop the source
+        // file. A sig already pending needs no re-record; still remove its file.
+        if (!this.#pending.has(name)) {
+          let first = Date.now()
+          try { first = (await (handle as FileSystemFileHandle).getFile()).lastModified } catch { /* keep now */ }
+          this.#pending.set(name, first)
+        }
+        try { await dir.removeEntry(name) } catch { drained = false /* straggler — next drain */ }
       }
-      await root.removeEntry(LEGACY_OUTBOX_DIR, { recursive: true })
-      this.#savePending()
-    } catch { /* no legacy folder — nothing to absorb */ }
+    } catch { drained = false }
+    this.#savePending()
+    if (drained) {
+      // Non-recursive on purpose: only succeeds once the dir is truly empty.
+      try { await root.removeEntry(LEGACY_OUTBOX_DIR); this.#legacyAbsorbed = true } catch { /* not empty — retry */ }
+    }
   }
 }
 

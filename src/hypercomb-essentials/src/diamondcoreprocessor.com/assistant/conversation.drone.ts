@@ -72,6 +72,7 @@ export class ConversationDrone extends Drone {
         putResource: (blob: Blob) => Promise<string>
         getResource: (sig: string) => Promise<Blob | null>
         threads: FileSystemDirectoryHandle
+        legacyThreads?: FileSystemDirectoryHandle
       }>('store')
       const lineage = this.resolve<{
         explorerSegments?: () => readonly string[]
@@ -101,7 +102,7 @@ export class ConversationDrone extends Drone {
         // layer.children scan, which isn't wired here yet; we recover the
         // tile name from the manifest's first turn (saved at create time)
         // and trust the segments match the current explorer.
-        const loaded = await loadThread(store.threads, payload.threadId)
+        const loaded = await loadThread(store.threads, payload.threadId, store.legacyThreads)
         if (!loaded) {
           console.warn(`[conversation] Thread not found: ${payload.threadId}`)
           return

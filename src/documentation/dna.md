@@ -102,7 +102,7 @@ do not flatten this into "all dna fetches the same way." it does not.
 
 ## persistence reality
 
-hypercomb **persists durably and locally by default**. every authored action commits a signed `layer` + marker into OPFS (`__history__` marker chains, `__layers__` / `__resources__` / `__bees__` / `__dependencies__` / `__optimization__` pools, and the `hypercomb.io` user tree). dna is the durable, content-addressed memory of the hive.
+hypercomb **persists durably and locally by default**. every authored action commits a signed `layer` + marker into OPFS — the marker into the lineage's sigbag at the OPFS root (`<lineageSig>/000x`), the layer bytes as a sig-named file at the root, with `sign(meaning)` pools (optimization, bees, dependencies, …) alongside; legacy `__x__` dirs persist only as read-fallback drains while they empty. dna is the durable, content-addressed memory of the hive.
 
 what is *not* automatic is the **network**: nothing crosses the mesh by default. publishing, sharing, and adoption are explicit acts. presence, cursor, clipboard, selection, and viewport are the only genuinely ephemeral, participant-local state — and they are deliberately kept **out** of the signed layer so they never skew the lineage signature across peers.
 

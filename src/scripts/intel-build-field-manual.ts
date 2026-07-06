@@ -85,7 +85,7 @@ const MANUAL: ManualNode = {
         {
           name: 'bee',
           notes: [
-            'A drone after esbuild — flat JS bundle, named by SHA-256 of its bytes, lives in OPFS at __bees__/<sig>.js. The runtime\'s import map maps namespaces to bee URLs.',
+            'A drone after esbuild — flat JS bundle, named by SHA-256 of its bytes, lives in OPFS in the sign(\'bees\') pool of meaning — a directory addressed by the signature of its meaning, never by a human label. The runtime\'s import map maps namespaces to bee URLs.',
             'Bees are signed. Hand someone the manifest, they fetch the same bytes, they run the same code.',
           ],
         },
@@ -143,27 +143,27 @@ const MANUAL: ManualNode = {
     {
       name: 'persistence',
       notes: [
-        'OPFS is the substrate. Three flat directories — bees, dependencies, layers — and one user content tree. Everything else is derived.',
+        'OPFS is the substrate. Sig-named files at the root, lineage sigbags, and sign(meaning) pools — no typed folders. Everything else is derived.',
       ],
       children: [
         {
           name: 'opfs',
           notes: [
             'Origin Private File System. Per-origin, persistent, no permission prompt. Browser-managed but truly user-owned for the duration of the origin.',
-            'Hypercomb\'s OPFS layout: __bees__/, __dependencies__/, __layers__/, __resources__/, __history__/, hypercomb.io/. The first three are install cache; the rest are user data — never wiped on routine ops.',
+            'Hypercomb\'s OPFS layout: content bytes as sig-named files at the root, lineage sigbags (a dir per lineage sig holding 000x markers — the max marker is current), and pools of meaning (dirs named sign(meaning): bees, dependencies, clipboard, threads, computation, manifests, optimization). Legacy __x__ dirs and hypercomb.io/ survive only as read-fallback drain sources until the self-cleaning absorbs empty and remove them — nothing is ever written there, and user data is never wiped on routine ops.',
           ],
         },
         {
           name: 'resources',
           notes: [
-            'Signature-addressed blobs in __resources__/<sig>. A note body, a renamed cell\'s cell-list snapshot, a settings preset — anything content-addressed lives here.',
+            'Signature-addressed blobs as sig-named files at the OPFS root. A note body, a renamed cell\'s cell-list snapshot, a settings preset — anything content-addressed lives here. (The legacy __resources__/ dir is a read-fallback drain source only.)',
             'Same sig anywhere = same bytes. Stored once, referenced from many layers.',
           ],
         },
         {
           name: 'install',
           notes: [
-            'manifest.json names a package by sig; the package lists the bee/dep/layer sigs that constitute it. Install fetches each, writes to OPFS, registers the import map. Stale-detection compares bundled sig vs cached and re-installs on drift.',
+            'manifest.json names a package by sig; the package lists the bee/dep/layer sigs that constitute it. Install fetches each, writes bees and dependencies into their sign(meaning) pools and layers to the flat OPFS root, registers the import map. Stale-detection compares bundled sig vs cached and re-installs on drift.',
           ],
         },
       ],
@@ -183,7 +183,7 @@ const MANUAL: ManualNode = {
         {
           name: 'notes',
           notes: [
-            'Free-text annotations attached to a cell. Each note is its own participant layer at sign([...parent, \'__notes__\', noteId]) — same merkle pattern as cells. The cell\'s notes slot lists participant layer sigs.',
+            'Free-text annotations attached to a cell. Each note is a content-addressed blob — a sig-named file at the OPFS root, its signature IS its identity (edit the text → new bytes → new sig). The cell\'s notes slot lists those note sigs; sub-notes hang off each note\'s own children slot (same recursive pattern).',
           ],
         },
         {

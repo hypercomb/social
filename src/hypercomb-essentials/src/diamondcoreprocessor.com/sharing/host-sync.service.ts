@@ -21,11 +21,22 @@
 // layer-sigs-only and lightweight (backup is not broadcast). No new event
 // kinds, no bytes on the relay's event channel — just HTTP PUT/GET.
 //
-// On-disk (top-level OPFS), isolated from PushQueueService's dirs so the
-// two backup channels never interfere:
+// On-disk shape: two POOLS OF MEANING at the OPFS root — dirs named by
+// sign(meaning), sha256 of the UTF-8 meaning bytes, the same derivation
+// Store uses (no typed __folders__, ever). Isolated from
+// PushQueueService's pools (distinct meanings) so the two backup channels
+// never interfere:
 //
-//   __host_push__/queue/{sig}.{kind}  ← queued bytes (FIFO by mtime)
-//   __host_receipts__/{sig}           ← receipt (existence = host serves it)
+//   sign('host-push')/{sig}.{kind}  ← queued bytes (FIFO by mtime)
+//   sign('host-receipts')/{sig}     ← receipt (existence = host serves it)
+//
+// LEGACY: `__host_push__/queue/` and `__host_receipts__/` are the pre-pool
+// locations. Read-fallback/drain sources ONLY — opened without create,
+// unioned into reads while they exist, absorbed into the pools by the
+// self-cleaning drain (per-entry copy→remove, gated non-recursive
+// removeEntry once fully drained). Receipts are the only "host already
+// serves this" ledger — losing one re-PUTs its sig on the next drain — so
+// nothing is removed before its copy is confirmed in the pool.
 //
 // Inert by default. Two operator-controlled gates must BOTH be on for
 // the service to subscribe to content commits, enqueue bytes, or invoke
@@ -54,9 +65,16 @@ interface SignerLike {
 
 const SIG_RE = /^[a-f0-9]{64}$/
 const ENTRY_RE = /^([a-f0-9]{64})\.(layer|bee|dependency|resource)$/
-const PUSH_DIR = '__host_push__'
-const QUEUE_SUBDIR = 'queue'
-const RECEIPTS_DIR = '__host_receipts__'
+// Pool meanings — sign(meaning) IS the pool address (see #poolSignature).
+// Distinct from PushQueueService's 'push'/'receipts' meanings so the two
+// backup channels' pools never collide.
+const PUSH_MEANING = 'host-push'
+const RECEIPTS_MEANING = 'host-receipts'
+// Legacy drain sources — pre-pool dirs. Opened WITHOUT create (a drained
+// dir stays gone); read/absorb only, never written.
+const LEGACY_PUSH_DIR = '__host_push__'
+const LEGACY_QUEUE_SUBDIR = 'queue'
+const LEGACY_RECEIPTS_DIR = '__host_receipts__'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 const STORE_KEY = '@hypercomb.social/Store'
 const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
@@ -72,9 +90,28 @@ const RETRY_MS = 30_000
 // every enqueue/timer tick only spams the console. enable() clears it.
 const UNAUTHORIZED_BACKOFF_MS = 300_000
 
+type QueueEntry = { sig: string; kind: HostSyncKind; fileName: string; mtime: number; dir: FileSystemDirectoryHandle }
+
 export class HostSyncService extends EventTarget {
 
+  /** sign(meaning) → pool address, memoized. Same derivation as
+   *  Store.poolSignature — reimplemented because essentials must never
+   *  import shared. */
+  static readonly #poolSigs = new Map<string, Promise<string>>()
+  static #poolSignature = (meaning: string): Promise<string> => {
+    let sig = HostSyncService.#poolSigs.get(meaning)
+    if (!sig) {
+      sig = SignatureService.sign(new TextEncoder().encode(meaning).buffer as ArrayBuffer)
+      HostSyncService.#poolSigs.set(meaning, sig)
+    }
+    return sig
+  }
+
   #draining = false
+
+  /** True once both legacy dirs are confirmed gone — skips the absorb
+   *  probe on subsequent drains. */
+  #legacyDrained = false
 
   /** Epoch ms until which drains are suppressed after a writer-auth
    *  rejection. 0 = no suppression. */
@@ -117,7 +154,7 @@ export class HostSyncService extends EventTarget {
    *  showing the user a clear "we will sign each backup to <domain>" dialog
    *  BEFORE invoking this.
    *
-   *  You own the host: writes go to permanent typed pools and require your
+   *  You own the host: writes go to the host's flat sig heap and require your
    *  pubkey to be in the relay's writers list. (The old 'temp-swarm' mode —
    *  pushing to a host's per-participant staging pool — was removed: the
    *  relay no longer host-brokers others' bytes; a sig with no endpoint is
@@ -267,6 +304,8 @@ export class HostSyncService extends EventTarget {
       getResourceLocal?: (s: string) => Promise<Blob | null>
       bees?: FileSystemDirectoryHandle
       dependencies?: FileSystemDirectoryHandle
+      legacyBees?: FileSystemDirectoryHandle
+      legacyDependencies?: FileSystemDirectoryHandle
     }>(STORE_KEY)
     if (!store) return null
     if (kind === 'layer') {
@@ -277,14 +316,22 @@ export class HostSyncService extends EventTarget {
       const blob = await store.getResourceLocal?.(sig)
       return blob ? await blob.arrayBuffer() : null
     }
-    // bee / dependency — sig-named .js files in their OPFS dirs
-    const dir = kind === 'bee' ? store.bees : store.dependencies
-    if (!dir) return null
-    for (const name of [`${sig}.js`, sig]) {
-      try {
-        const handle = await dir.getFileHandle(name, { create: false })
-        return await (await handle.getFile()).arrayBuffer()
-      } catch { /* try next name shape */ }
+    // bee / dependency — sig-named files in the sign('bees')/sign('dependencies')
+    // pools. UNION the pool handle with its legacy drain handle: absorbs are
+    // detached, so mid-migration a record may still sit in the legacy dir. Reading
+    // the pool alone would return null and host backup would silently stage
+    // nothing. Both name shapes tried at each source: pools are bare-sig, the
+    // legacy dirs used `{sig}.js`.
+    const pool = kind === 'bee' ? store.bees : store.dependencies
+    const legacy = kind === 'bee' ? store.legacyBees : store.legacyDependencies
+    for (const dir of [pool, legacy]) {
+      if (!dir) continue
+      for (const name of [sig, `${sig}.js`]) {
+        try {
+          const handle = await dir.getFileHandle(name, { create: false })
+          return await (await handle.getFile()).arrayBuffer()
+        } catch { /* try next name shape / source */ }
+      }
     }
     return null
   }
@@ -306,12 +353,15 @@ export class HostSyncService extends EventTarget {
     if (!host) return // no host named — stay inert
     this.#draining = true
     try {
+      // Absorb any legacy dirs into the pools first, under this same
+      // single-flight guard so it can never race the queue removals below.
+      await this.#absorbLegacy()
       for (;;) {
         const entries = await this.#listQueue()
         if (entries.length === 0) break
         let progressed = false
         for (const entry of entries) {
-          if (await this.hasReceipt(entry.sig)) { await this.#removeEntry(entry.fileName); continue }
+          if (await this.hasReceipt(entry.sig)) { await this.#removeEntry(entry); continue }
           const ok = await this.#pushAndReceipt(host, entry)
           if (ok === 'unauthorized') {
             // The host refused our writer key — a config gap, not a
@@ -337,7 +387,7 @@ export class HostSyncService extends EventTarget {
             // the entry and warn ONCE per sig, naming sig + kind so the
             // upstream source of the bad bytes can be traced. Unlike the 401
             // case this is per-entry, not a whole-queue gap — keep draining.
-            await this.#removeEntry(entry.fileName)
+            await this.#removeEntry(entry)
             if (!this.#warnedCorrupt.has(entry.sig)) {
               this.#warnedCorrupt.add(entry.sig)
               console.warn(
@@ -350,7 +400,7 @@ export class HostSyncService extends EventTarget {
             continue
           }
           if (!ok) continue // leave entry; retry timer handles offline/host-down
-          await this.#removeEntry(entry.fileName)
+          await this.#removeEntry(entry)
           progressed = true
           this.dispatchEvent(new CustomEvent('receipt', { detail: { sig: entry.sig } }))
           EffectBus.emit('host:receipt', { sig: entry.sig })
@@ -407,10 +457,12 @@ export class HostSyncService extends EventTarget {
         const res = await fetch(`${scheme}://${host}/${sig}`, { method: 'HEAD', cache: 'no-store' })
         if (res.ok) { this.#verifiedOnHost.add(sig); return true }
         if (res.status === 404) {
-          try {
-            const dir = await this.#getReceiptsDir()
-            await dir?.removeEntry(sig)
-          } catch { /* already gone */ }
+          // Revoke from BOTH the pool and the legacy dir — mid-migration the
+          // receipt may still sit in the legacy source; leaving it there would
+          // keep hasReceipt() true and suppress the re-stage.
+          for (const dir of [await this.#getReceiptsDir(false), await this.#getLegacyReceiptsDir()]) {
+            try { await dir?.removeEntry(sig) } catch { /* already gone */ }
+          }
           console.warn(`[host-sync] revoked stale receipt ${sig.slice(0, 12)} — host no longer serves it; re-staging`)
           return false
         }
@@ -425,15 +477,23 @@ export class HostSyncService extends EventTarget {
     return run
   }
 
-  /** True iff the host has confirmed (read-back) this sig. */
+  /** True iff the host has confirmed (read-back) this sig. Dual-read: the
+   *  sign('host-receipts') pool first, then the legacy `__host_receipts__`
+   *  drain source while it still exists — an empty pool must never read as
+   *  "nothing receipted" mid-migration (that would re-PUT everything). */
   public readonly hasReceipt = async (sig: string): Promise<boolean> => {
     if (!SIG_RE.test(sig)) return false
-    try {
-      const dir = await this.#getReceiptsDir()
-      if (!dir) return false
-      await dir.getFileHandle(sig, { create: false })
-      return true
-    } catch { return false }
+    for (const dir of [
+      await this.#getReceiptsDir(),
+      await this.#getLegacyReceiptsDir(),
+    ]) {
+      if (!dir) continue
+      try {
+        await dir.getFileHandle(sig, { create: false })
+        return true
+      } catch { /* not in this source */ }
+    }
+    return false
   }
 
   /** All sigs queued for the host and not yet receipted, in enqueue order. */
@@ -450,12 +510,12 @@ export class HostSyncService extends EventTarget {
   // transport — signed HTTP PUT + confirmed read-back
   // -------------------------------------------------
 
-  readonly #pushAndReceipt = async (host: string, entry: { sig: string; kind: HostSyncKind; fileName: string }): Promise<boolean | 'unauthorized' | 'corrupt'> => {
+  readonly #pushAndReceipt = async (host: string, entry: QueueEntry): Promise<boolean | 'unauthorized' | 'corrupt'> => {
     let bytes: ArrayBuffer
     try {
-      const dir = await this.#getQueueDir()
-      if (!dir) return false
-      const handle = await dir.getFileHandle(entry.fileName, { create: false })
+      // Read from the entry's OWN dir (pool or legacy) — mid-migration a queued
+      // entry may still live in the legacy dir the union surfaced it from.
+      const handle = await entry.dir.getFileHandle(entry.fileName, { create: false })
       bytes = await (await handle.getFile()).arrayBuffer()
     } catch { return false }
 
@@ -583,20 +643,40 @@ export class HostSyncService extends EventTarget {
 
   // -------------------------------------------------
   // internal — directory resolution + queue ops
-  // (mirrors PushQueueService; isolated dirs)
+  // (mirrors PushQueueService; distinct pool meanings)
   // -------------------------------------------------
 
-  readonly #getQueueDir = async (): Promise<FileSystemDirectoryHandle | null> => {
+  readonly #getPool = async (meaning: string, create: boolean): Promise<FileSystemDirectoryHandle | null> => {
     const root = await this.#getOpfsRoot()
     if (!root) return null
-    const push = await root.getDirectoryHandle(PUSH_DIR, { create: true })
-    return await push.getDirectoryHandle(QUEUE_SUBDIR, { create: true })
+    try {
+      return await root.getDirectoryHandle(await HostSyncService.#poolSignature(meaning), { create })
+    } catch { return null }
   }
 
-  readonly #getReceiptsDir = async (): Promise<FileSystemDirectoryHandle | null> => {
+  readonly #getQueueDir = (create = true): Promise<FileSystemDirectoryHandle | null> =>
+    this.#getPool(PUSH_MEANING, create)
+
+  readonly #getReceiptsDir = (create = true): Promise<FileSystemDirectoryHandle | null> =>
+    this.#getPool(RECEIPTS_MEANING, create)
+
+  /** Legacy `__host_push__/queue/` — drain source, opened without create. */
+  readonly #getLegacyQueueDir = async (): Promise<FileSystemDirectoryHandle | null> => {
     const root = await this.#getOpfsRoot()
     if (!root) return null
-    return await root.getDirectoryHandle(RECEIPTS_DIR, { create: true })
+    try {
+      const push = await root.getDirectoryHandle(LEGACY_PUSH_DIR, { create: false })
+      return await push.getDirectoryHandle(LEGACY_QUEUE_SUBDIR, { create: false })
+    } catch { return null }
+  }
+
+  /** Legacy `__host_receipts__/` — drain source, opened without create. */
+  readonly #getLegacyReceiptsDir = async (): Promise<FileSystemDirectoryHandle | null> => {
+    const root = await this.#getOpfsRoot()
+    if (!root) return null
+    try {
+      return await root.getDirectoryHandle(LEGACY_RECEIPTS_DIR, { create: false })
+    } catch { return null }
   }
 
   readonly #getOpfsRoot = async (): Promise<FileSystemDirectoryHandle | null> => {
@@ -604,28 +684,116 @@ export class HostSyncService extends EventTarget {
     return store?.opfsRoot ?? null
   }
 
-  readonly #listQueue = async (): Promise<Array<{ sig: string; kind: HostSyncKind; fileName: string; mtime: number }>> => {
-    const dir = await this.#getQueueDir()
-    if (!dir) return []
-    const items: Array<{ sig: string; kind: HostSyncKind; fileName: string; mtime: number }> = []
-    for await (const [name, handle] of (dir as unknown as { entries: () => AsyncIterable<[string, FileSystemHandle]> }).entries()) {
-      if (handle.kind !== 'file') continue
-      const m = name.match(ENTRY_RE)
-      if (!m) continue
-      try {
-        const file = await (handle as FileSystemFileHandle).getFile()
-        items.push({ sig: m[1], kind: m[2] as HostSyncKind, fileName: name, mtime: file.lastModified })
-      } catch { /* skip unreadable */ }
+  // -------------------------------------------------
+  // internal — self-cleaning legacy absorb
+  // -------------------------------------------------
+
+  /** Drain the legacy `__host_push__/queue/` and `__host_receipts__/` dirs
+   *  into their sign(meaning) pools, then remove the emptied dirs. Runs
+   *  under drain()'s single-flight guard. Per-entry copy→remove; the final
+   *  removeEntry calls are non-recursive ON PURPOSE — they only succeed once
+   *  a dir is truly empty, so a straggler is never destroyed. Nothing is
+   *  removed before its copy is confirmed in the pool; an interrupted absorb
+   *  resumes on a later drain, with dual-reads correct meanwhile. */
+  readonly #absorbLegacy = async (): Promise<void> => {
+    if (this.#legacyDrained) return
+    const root = await this.#getOpfsRoot()
+    if (!root) return
+    let clean = true
+
+    const legacyQueue = await this.#getLegacyQueueDir()
+    if (legacyQueue) {
+      const pool = await this.#getQueueDir(true)
+      if (!pool) return
+      let ok = await this.#absorbDir(legacyQueue, pool)
+      if (ok) {
+        try {
+          const legacyPush = await root.getDirectoryHandle(LEGACY_PUSH_DIR, { create: false })
+          await legacyPush.removeEntry(LEGACY_QUEUE_SUBDIR)
+          await root.removeEntry(LEGACY_PUSH_DIR)
+        } catch { ok = false }
+      }
+      clean = ok && clean
     }
+
+    const legacyReceipts = await this.#getLegacyReceiptsDir()
+    if (legacyReceipts) {
+      const pool = await this.#getReceiptsDir(true)
+      if (!pool) return
+      let ok = await this.#absorbDir(legacyReceipts, pool)
+      if (ok) {
+        try { await root.removeEntry(LEGACY_RECEIPTS_DIR) } catch { ok = false }
+      }
+      clean = ok && clean
+    }
+
+    this.#legacyDrained = clean
+  }
+
+  /** Copy every plain file from `legacy` into `pool` (an existing pool
+   *  entry wins — same-name means same record: queue bytes are
+   *  sig-addressed, receipts are presence-only), removing each source entry
+   *  only after its copy is confirmed present. Returns true iff the source
+   *  dir ended fully drained. */
+  readonly #absorbDir = async (
+    legacy: FileSystemDirectoryHandle,
+    pool: FileSystemDirectoryHandle,
+  ): Promise<boolean> => {
+    let drained = true
+    try {
+      for await (const [name, handle] of (legacy as unknown as { entries: () => AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+        if (handle.kind !== 'file') { drained = false; continue }
+        try {
+          let present = true
+          try { await pool.getFileHandle(name, { create: false }) } catch { present = false }
+          if (!present) {
+            const file = await (handle as FileSystemFileHandle).getFile()
+            const dest = await pool.getFileHandle(name, { create: true })
+            const writable = await dest.createWritable()
+            try { await writable.write(await file.arrayBuffer()) } finally { await writable.close() }
+          }
+          await legacy.removeEntry(name)
+        } catch { drained = false /* straggler — absorbed on a later drain */ }
+      }
+    } catch { drained = false }
+    return drained
+  }
+
+  // -------------------------------------------------
+  // internal — queue ops
+  // -------------------------------------------------
+
+  /** List queued entries: the sign('host-push') pool UNIONED with the
+   *  legacy queue while that drain source still exists (an entry must never
+   *  vanish from view mid-migration). Each entry carries the dir it lives in
+   *  so read/remove target the right source; on a same-name collision the
+   *  pool copy wins. */
+  readonly #listQueue = async (): Promise<QueueEntry[]> => {
+    const byName = new Map<string, QueueEntry>()
+    const collect = async (dir: FileSystemDirectoryHandle | null): Promise<void> => {
+      if (!dir) return
+      try {
+        for await (const [name, handle] of (dir as unknown as { entries: () => AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+          if (handle.kind !== 'file') continue
+          const m = name.match(ENTRY_RE)
+          if (!m || byName.has(name)) continue
+          try {
+            const file = await (handle as FileSystemFileHandle).getFile()
+            byName.set(name, { sig: m[1], kind: m[2] as HostSyncKind, fileName: name, mtime: file.lastModified, dir })
+          } catch { /* skip unreadable */ }
+        }
+      } catch { /* dir vanished mid-walk (absorb finished) — pool has it */ }
+    }
+    await collect(await this.#getQueueDir(false))
+    await collect(await this.#getLegacyQueueDir())
+    const items = [...byName.values()]
     items.sort((a, b) => a.mtime - b.mtime)
     return items
   }
 
-  readonly #removeEntry = async (fileName: string): Promise<void> => {
+  readonly #removeEntry = async (entry: { dir: FileSystemDirectoryHandle; fileName: string }): Promise<void> => {
     try {
-      const dir = await this.#getQueueDir()
-      if (!dir) return
-      await dir.removeEntry(fileName)
+      await entry.dir.removeEntry(entry.fileName)
     } catch { /* already gone */ }
   }
 
@@ -641,5 +809,15 @@ window.ioc.register('@diamondcoreprocessor.com/HostSyncService', _hostSync)
 // On boot, drain anything left from a prior session — only if the operator
 // has explicitly opted in. Visitors with no host configured (or who haven't
 // flipped the gate) skip the drain entirely, so the signer is never invoked
-// at startup and no Nostr-signer prompt appears.
+// at startup and no Nostr-signer prompt appears. The drain also self-cleans
+// the legacy `__host_push__`/`__host_receipts__` dirs into the pools.
 if (_hostSync.isEnabled()) void _hostSync.drain()
+
+// Delayed re-kick: the boot drain above usually fires before Store has
+// resolved its OPFS root (module-load order), silently no-oping. Re-run once
+// the shell has settled so the legacy dir absorb happens even in an
+// opted-in session that never writes new content. Detached + delayed clear
+// of first paint and the warmup walk, mirroring Store's content self-clean
+// and PushQueueService's boot kick. Gated on isEnabled() so an un-opted-in
+// visitor never triggers the signer.
+setTimeout(() => { if (_hostSync.isEnabled()) void _hostSync.drain() }, 20_000)

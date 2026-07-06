@@ -94,7 +94,7 @@ You can't retrofit composition onto inline data. You can't add caching to embedd
 
 > If a field contains content that could be shared, cached, versioned, or composed — it must be a signature reference to a resource. Never store expandable content inline.
 
-A signature is a 64-character hex string. It points to a blob addressed by `<signature>` — locally as a flat sig-named file in its owning scope (content layers and resources live at the hive root, `__hive__/<sig>`), on a host in the flat sig heap. The blob is immutable — same content always produces the same signature. Resolution is lazy — signatures remain as lightweight string pointers until explicitly expanded via `Store.getResource(sig)`.
+A signature is a 64-character hex string. It points to a blob addressed by `<signature>` — locally as a flat sig-named file at the OPFS root (`<root>/<sig>` — the hive root IS the OPFS root), on a host in the flat sig heap. The blob is immutable — same content always produces the same signature. Resolution is lazy — signatures remain as lightweight string pointers until explicitly expanded via `Store.getResource(sig)`.
 
 ---
 
@@ -111,7 +111,7 @@ A signature is a 64-character hex string. It points to a blob addressed by `<sig
 const json = JSON.stringify(data, Object.keys(data).sort(), 0)
 const sig = await Store.putResource(new Blob([json]))
 // sig = "a1b2c3d4e5f6…" (64 hex chars)
-// content now lives at the hive root: __hive__/<sig>=a1b2c3d4e5f6…
+// content now lives as a sig-named file at the OPFS root: <root>/a1b2c3d4e5f6…
 ```
 
 ### Reference
@@ -141,18 +141,18 @@ Every signed artifact is one of a fixed set of **kinds** — `layer | bee | depe
 The **storage layout depends on where you are**:
 
 - **On a host** — a single flat heap probed by signature: `GET /<sig>` resolves any kind, no type prefix. (The `HostSync` PUT path writes into that one heap.)
-- **Locally (OPFS)** — content is converging on **flat sig-named files at the hive root** (`__hive__/<sig>`). **Layers and resources** write there now; the legacy typed pools `__layers__/<sig>` / `__resources__/<sig>` survive only as read fallbacks while a boot-time relocation (`Store.migrateContentPoolToRoot`) drains and removes them. **Bee modules and dependencies** still live in the typed pools `__bees__/<sig>` / `__dependencies__/<sig>` — they are install-cache, not participant content, so their root migration is a later phase. The `__optimization__/` decoration substrate is unchanged. None of this touches identity: a sig resolves the same bytes wherever they sit — the location is being *simplified*, never made meaningful. This is what enables the **metabolism asymmetry** below (resources self-heal from hosts on render; layers/deps/bees do not).
+- **Locally (OPFS)** — content is **flat sig-named files at the OPFS root** (`<root>/<sig>` — the hive root IS the OPFS root). **Layers and resources** write there; the only folders are signature-named: lineage sigbags (`<lineageSig>/` with `000x` markers) and pools of meaning addressed by `sign(meaning)`. **Bee modules and dependencies** live in the `sign('bees')` / `sign('dependencies')` pools; the decoration substrate is the `sign('optimization')` pool. Legacy typed dirs (`__hive__/`, `hypercomb.io/`, `__layers__/`, `__resources__/`, `__bees__/`, `__dependencies__/`, `__optimization__/`) survive only as **read-fallback drain sources** — opened without `create`, never written; record pools are absorbed by self-cleaning boot passes and content relocates via the delayed self-clean relocation (`Store.migrateContentPoolToRoot`, with `/consolidate-content` as the manual force-run), each legacy dir removed once fully drained. None of this touches identity: a sig resolves the same bytes wherever they sit — the location is being *simplified*, never made meaningful. This is what enables the **metabolism asymmetry** below (resources self-heal from hosts on render; layers/deps/bees do not).
 
 The signature appears in:
 
 | kind / context | what is signed | how the signature is used |
 |---|---|---|
-| Bee modules (`bee`) | Raw compiled esbuild bytes | Loaded by signature from `__bees__/` (OPFS-only on render) |
-| Dependencies (`dependency`) | Raw compiled namespace bundle bytes | Loaded by signature from `__dependencies__/` (OPFS-only on render) |
+| Bee modules (`bee`) | Raw compiled esbuild bytes | Loaded by signature from the `sign('bees')` pool (legacy `__bees__/` read-fallback while it drains; OPFS-only on render) |
+| Dependencies (`dependency`) | Raw compiled namespace bundle bytes | Loaded by signature from the `sign('dependencies')` pool (legacy `__dependencies__/` read-fallback while it drains; OPFS-only on render) |
 | Resources (`resource`) | Static asset (image, JSON) | Loaded by signature; self-heals from a host on render (memory → OPFS → host) |
-| Layers (`layer`) | `JSON.stringify(layer)` | Resolved by signature from the hive-root pool `__hive__/<sig>` (legacy `__layers__/` as fallback while it drains; OPFS-only on render) |
+| Layers (`layer`) | `JSON.stringify(layer)` | Resolved by signature from the OPFS root (`<root>/<sig>`; legacy `__hive__/` / `__layers__/` read-fallbacks while they drain; OPFS-only on render) |
 | Lineage paths | UTF-8 path **segments** (domain discarded) | Location signature for a *position* (mesh subscription); root = `sign([])` = `e3b0c442…` |
-| History markers | Marker JSON `{ "layer": "<sig>", … }` | Pointer record; the bag at `__history__/<lineageSig>/` orders revisions, layer bytes live at the hive root `__hive__/<sig>`. `00000000` is an auto-minted empty `{ name }` layer; max marker = current head |
+| History markers | Marker JSON `{ "layer": "<sig>", … }` | Pointer record; the lineage's sigbag at the OPFS root (`<lineageSig>/`; legacy `__history__/` is a read-fallback drain) orders revisions, layer bytes are sig-named files at the OPFS root. `00000000` is an auto-minted empty `{ name }` layer; max marker = current head |
 | Thread manifests | `contentSig` | Message content blob |
 | Layer fields | `bees[]`, `cells[]` (child layer sigs), `dependencies[]` | Bee modules, child layers, dependency bundles |
 | Deterministic computation *(planned — unbuilt)* | `authenticity` | Composition of script-sig + resource-sig |
@@ -283,7 +283,7 @@ This is why we call it signature algebra (see [signature-algebra.md](signature-a
 | level | storage | speed | invalidation |
 |---|---|---|---|
 | In-memory | `Map<string, T>` in the service | synchronous | service lifecycle |
-| OPFS | the sig's local pool at `<sig>` (hive root `__hive__/` for layers/resources; `__bees__/`, `__dependencies__/` for modules) | microseconds | never (immutable content) |
+| OPFS | root sig file or `sign(meaning)` pool member (`<root>/<sig>` for layers/resources; `sign('bees')` / `sign('dependencies')` pools for modules; legacy `__x__/` dirs read-fallback only while they drain) | microseconds | never (immutable content) |
 | SignatureStore | `signText()` memo | synchronous | never (deterministic) |
 
 ### Cache hit flow

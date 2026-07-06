@@ -21,7 +21,9 @@
 //
 // Resolution order for a sig:
 //   1. HistoryService.getLayerBySig — most sigs in this system are
-//      layer sigs that live in __history__ bags.
+//      layer sigs; their bytes are sig-named files at the OPFS root
+//      (resolved via Store, with legacy `__layers__`/`__history__`
+//      fallbacks), referenced by markers in the lineage sigbags.
 //   2. Store.resolve — sigs whose bytes are JSON (participant bodies,
 //      manifests, sig arrays).
 //   3. Store.getResource — sigs whose bytes are not JSON (HTML, images,

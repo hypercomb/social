@@ -55,7 +55,7 @@ Two texture atlases are prepared:
 | Atlas | Class | Purpose |
 |-------|-------|---------|
 | **Label** | `HexLabelAtlas` | Renders cell names as text into a shared texture |
-| **Image** | `HexImageAtlas` | Loads cell thumbnail blobs from the `__resources__/` resource store by signature into a shared texture |
+| **Image** | `HexImageAtlas` | Loads cell thumbnail blobs by signature from the content root (sig-named files; legacy `__resources__/` read-fallback) into a shared texture |
 
 `loadCellImages()` extracts each cell's image signature from the **dual-store** props index — the `hc:tile-props-index` entry in `localStorage`, keyed by the tile's full-lineage sig with a bare-label fallback — not the layer's `0000` properties file on the hot path. (The `0000` file is the canonical store; the localStorage index is the render-time fast read. The two are kept in sync by the property-write path; see the tile-properties dual-store note.)
 

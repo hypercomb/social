@@ -4,7 +4,7 @@ import { CommonModule } from '@angular/common'
 import { Component, signal, type OnDestroy } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import type { Lineage } from '../../core/lineage'
-import type { Store } from '../../core/store'
+import { Store } from '../../core/store'
 import { hypercomb, requestConfirm } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import type { ScriptPreloader } from '../../core/script-preloader'
@@ -46,7 +46,22 @@ export class OpfsExplorerComponent extends hypercomb {
   private static readonly SHOW_ALL_BOOTSTRAP_V2_KEY = 'opfs-explorer.show-all.bootstrap-v2'
   private static readonly COPY_MAX_BYTES = 250_000
   private static readonly INSTALL_SUFFIX = '-install'
-  public domain: string = 'hypercomb.io'
+  /** 64-hex signature — names content files, lineage sigbags and pools. */
+  private static readonly SIG_RE = /^[0-9a-f]{64}$/
+  /** Legacy `__x__` dirs — drain sources only, never live locations. */
+  private static readonly LEGACY_DRAIN_RE = /^__.+__$/
+  /** Pools of meaning the explorer can label — dir name = sign(meaning),
+   *  derived via Store.poolSignature (the derivation IS the registry). */
+  private static readonly POOL_MEANINGS = [
+    Store.BEES_MEANING, Store.DEPENDENCIES_MEANING, Store.CLIPBOARD_MEANING,
+    Store.THREADS_MEANING, Store.COMPUTATION_MEANING, Store.MANIFESTS_MEANING,
+    Store.OPTIMIZATION_MEANING, Store.OVERRIDES_MEANING, Store.TRANSLATIONS_MEANING,
+    'registry', 'receipts', 'structure', 'patches', 'roots',
+  ]
+  /** The explorer browses the true OPFS root (`hypercombRoot === opfsRoot`).
+   *  The old `'hypercomb.io'` label here named what is now a legacy drain
+   *  dir — the path bar shows the root itself, no domain prefix. */
+  public domain: string = ''
 
   // -------------------------------------------------
   // dependencies
@@ -66,6 +81,13 @@ export class OpfsExplorerComponent extends hypercomb {
   public readonly entries = signal<readonly ExplorerEntry[]>([])
   public readonly domainGroups = signal<readonly DomainGroup[]>([])
   public newName = ''
+
+  /** sign(meaning) → meaning, derived once so pool dirs at the root can
+   *  be recognized and labeled by what they hold. */
+  readonly #poolMeaningBySig = new Map<string, string>()
+  /** Bee labels are sig-addressed (immutable) — cached so the
+   *  per-synchronize refresh never re-probes the same root sig files. */
+  readonly #labelCache = new Map<string, string | null>()
 
   public readonly showAll = signal(this.readInitialShowAll())
   public readonly isAtRoot = (): boolean => this.directory() === '/'
@@ -112,9 +134,23 @@ export class OpfsExplorerComponent extends hypercomb {
 
     window.addEventListener('synchronize', this.onSynchronize)
 
+    // derive the known pool addresses, then re-label
+    void this.#loadPoolMeanings()
+
     // initial load
     this.requestRefresh()
   }
+
+  #loadPoolMeanings = async (): Promise<void> => {
+    for (const meaning of OpfsExplorerComponent.POOL_MEANINGS) {
+      this.#poolMeaningBySig.set(await Store.poolSignature(meaning), meaning)
+    }
+    this.requestRefresh()  // pool dirs are recognizable now
+  }
+
+  /** Legacy `__x__` dirs are drain sources — read-fallback only. */
+  #isLegacyDrain = (name: string): boolean =>
+    OpfsExplorerComponent.LEGACY_DRAIN_RE.test(name)
 
   public ngOnDestroy(): void {
     window.removeEventListener('synchronize', this.onSynchronize)
@@ -127,7 +163,12 @@ export class OpfsExplorerComponent extends hypercomb {
   public trackByName = (_: number, e: ExplorerEntry): string => e.name
 
   public icon = (e: ExplorerEntry): string => {
-    if (e.kind === 'directory') return e.name === '..' ? '↩' : '📁'
+    if (e.kind === 'directory') {
+      if (e.name === '..') return '↩'
+      // system dirs: sign(meaning) pools and legacy drains
+      if (this.#poolMeaningBySig.has(e.name) || this.#isLegacyDrain(e.name)) return '📦'
+      return '📁'
+    }
     return '📄'
   }
 
@@ -219,6 +260,20 @@ export class OpfsExplorerComponent extends hypercomb {
   public remove = async (e: ExplorerEntry, ev: MouseEvent): Promise<void> => {
     ev.stopPropagation()
 
+    // Root-inventory protection: sig-named dirs (lineage sigbags, pools
+    // of meaning) and legacy drain dirs are never deletable from the
+    // explorer — a recursive removeEntry on one of these is user history
+    // or an undrained migration source. Drains disappear on their own
+    // once the self-cleaning passes finish.
+    if (e.kind === 'directory' && (
+      OpfsExplorerComponent.SIG_RE.test(e.name) ||
+      this.#isLegacyDrain(e.name) ||
+      (this.isAtRoot() && e.name === Store.LEGACY_HYPERCOMB_IO_DIRECTORY)
+    )) {
+      console.warn('[opfs explorer] refusing to remove protected entry', e.name)
+      return
+    }
+
     const confirmed = await requestConfirm({
       title: 'confirm.delete-title',
       message: 'confirm.delete-message',
@@ -254,17 +309,31 @@ export class OpfsExplorerComponent extends hypercomb {
     }
 
     const out: ExplorerEntry[] = []
+    const atRoot = this.directory() === '/'
 
-    if (this.directory() !== '/') {
+    if (!atRoot) {
       out.push({ name: '..', label: '..', kind: 'directory' })
     }
 
     for await (const [name, handle] of dir.entries()) {
-      if (this.isHiddenEntry(name)) continue
+      if (this.isHiddenEntry(name, atRoot)) continue
 
       let label = name
 
-      if (handle.kind === 'file') {
+      if (handle.kind === 'directory') {
+        // Root inventory under the pools model: sign(meaning) dirs are
+        // pools (labeled by their meaning), other sig dirs are lineage
+        // sigbags, `__x__` / root-level `hypercomb.io` are legacy drains.
+        const meaning = this.#poolMeaningBySig.get(name)
+        if (meaning) {
+          label = `${meaning} (pool)`
+        } else if (OpfsExplorerComponent.SIG_RE.test(name)) {
+          label = `${name.slice(0, 16)}… (lineage)`
+        } else if (this.#isLegacyDrain(name) ||
+                   (atRoot && name === Store.LEGACY_HYPERCOMB_IO_DIRECTORY)) {
+          label = `${name} (legacy drain)`
+        }
+      } else {
         const resourceLabel = await this.resolveResourceLabel(name)
         if (resourceLabel) {
           label = `${name.slice(0, 16)} - ${resourceLabel}`
@@ -291,8 +360,10 @@ export class OpfsExplorerComponent extends hypercomb {
 
     this.entries.set(out)
 
-    // build domain groups when at root level
-    if (this.directory() === '/') {
+    // Curated root view (show-all off) groups the domain trees; the raw
+    // view (show-all on) lists the true root flat — pools, sigbags and
+    // drains labeled — since the grouped template hides flat entries.
+    if (atRoot && !this.showAll()) {
       await this.buildDomainGroups(dir, out)
     } else {
       this.domainGroups.set([])
@@ -308,6 +379,14 @@ export class OpfsExplorerComponent extends hypercomb {
     for (const entry of flatEntries) {
       if (entry.name === '..' || entry.kind !== 'directory') continue
 
+      // Never present system dirs as domains: sig dirs (pools of meaning,
+      // lineage sigbags), legacy drains, or the legacy i18n dirs.
+      if (OpfsExplorerComponent.SIG_RE.test(entry.name)) continue
+      if (this.#isLegacyDrain(entry.name)) continue
+      if (entry.name === Store.LEGACY_HYPERCOMB_IO_DIRECTORY) continue
+      if (entry.name === Store.LEGACY_OVERRIDES_DIRECTORY ||
+          entry.name === Store.LEGACY_TRANSLATIONS_DIRECTORY) continue
+
       let domainDir: FileSystemDirectoryHandle
       try {
         domainDir = await rootDir.getDirectoryHandle(entry.name, { create: false })
@@ -318,7 +397,7 @@ export class OpfsExplorerComponent extends hypercomb {
       const branches = groups.get(domainKey)!
 
       for await (const [childName, childHandle] of domainDir.entries()) {
-        if (this.isHiddenEntry(childName)) continue
+        if (this.isHiddenEntry(childName, false)) continue
 
         let rootGrammar = childName
         if (childHandle.kind === 'file') {
@@ -409,11 +488,18 @@ export class OpfsExplorerComponent extends hypercomb {
       }
     }
 
-    // Fallback to direct fetch only in dev (no sentinel available)
+    // Fallback to direct fetch only in dev (no sentinel available):
+    // flat sig URL first (new delivery layout), then the legacy
+    // `__dependencies__/` URL shape while live Azure content is
+    // old-layout (until the next deploy).
     if (!bytes && !bridge) {
-      const url = `https://storagehypercomb.blob.core.windows.net/dcp/__dependencies__/`
-      const res = await fetch(`${url}${sig}`)
-      if (res.ok) bytes = await res.arrayBuffer()
+      const base = 'https://storagehypercomb.blob.core.windows.net/dcp/'
+      for (const url of [`${base}${sig}`, `${base}__dependencies__/${sig}`]) {
+        try {
+          const res = await fetch(url)
+          if (res.ok) { bytes = await res.arrayBuffer(); break }
+        } catch { /* try the next URL shape */ }
+      }
     }
 
     if (!bytes) {
@@ -421,8 +507,13 @@ export class OpfsExplorerComponent extends hypercomb {
       return
     }
 
-    const root = this.store.opfsRoot
-    const depsDir = await root.getDirectoryHandle('__dependencies__', { create: true })
+    // Write into the sign('dependencies') pool — store.dependencies
+    // already points at it. Never the legacy `__dependencies__` dir.
+    const depsDir = this.store.dependencies
+    if (!depsDir) {
+      console.error('[opfs-explorer] dependencies pool unavailable — dependency not stored', sig)
+      return
+    }
 
     const fileHandle = await depsDir.getFileHandle(sig, { create: true })
     const writable = await fileHandle.createWritable()
@@ -462,12 +553,19 @@ export class OpfsExplorerComponent extends hypercomb {
     }
   }
 
-  private readonly isHiddenEntry = (name: string): boolean => {
+  private readonly isHiddenEntry = (name: string, atRoot: boolean): boolean => {
     if (this.showAll()) return false
-    if (name === '__location__') return true
-    if (name === '__bees__') return true
-    if (name === '__layers__') return true
-    if (name === '__dependencies__') return true
+    // Legacy `__x__` drains (covers the old name-list: __location__,
+    // __bees__, __layers__, __dependencies__, and every other drain).
+    if (this.#isLegacyDrain(name)) return true
+    if (atRoot && name === Store.LEGACY_HYPERCOMB_IO_DIRECTORY) return true
+    // System entries at the unified root: sign(meaning) pools, lineage
+    // sigbags and flat content sig files — the curated view shows the
+    // domain trees only. Below the root, sig-named entries stay visible.
+    if (this.#poolMeaningBySig.has(name)) return true
+    if (atRoot && OpfsExplorerComponent.SIG_RE.test(name)) return true
+    if (atRoot && (name === Store.LEGACY_OVERRIDES_DIRECTORY ||
+                   name === Store.LEGACY_TRANSLATIONS_DIRECTORY)) return true
     if (name.startsWith('install-')) return true
     if (name.endsWith(OpfsExplorerComponent.INSTALL_SUFFIX)) return true
     return false
@@ -499,27 +597,43 @@ export class OpfsExplorerComponent extends hypercomb {
   }
 
   private readonly resolveResourceLabel = async (name: string): Promise<string | null> => {
+    // Bee bundles are sig-named — skip the probe for anything else.
+    if (!OpfsExplorerComponent.SIG_RE.test(name.replace(/\.js$/i, ''))) return null
+    const cached = this.#labelCache.get(name)
+    if (cached !== undefined) return cached
+
+    let label: string | null = null
     try {
-      const root = this.store.opfsRoot
-      const resourcesDir = await root.getDirectoryHandle('__bees__', { create: false })
-      const handle = await resourcesDir.getFileHandle(name, { create: false })
-      const file = await handle.getFile()
-      if (file.size === 0) return null
-
-      const slice = await file.slice(0, 256).text()
-      const firstLine = slice.split('\n')[0]?.trim()
-      if (!firstLine?.startsWith('// @hypercomb ')) return null
-
-      const jsonText = firstLine.slice('// @hypercomb '.length)
-      const meta = JSON.parse(jsonText)
-
-      if (typeof meta.label === 'string' && meta.label.trim()) {
-        return `${meta.label} – ${new Date(file.lastModified).toLocaleTimeString()}`
+      const file = await this.#readBeeFile(name)
+      if (file && file.size > 0) {
+        const slice = await file.slice(0, 256).text()
+        const firstLine = slice.split('\n')[0]?.trim()
+        if (firstLine?.startsWith('// @hypercomb ')) {
+          const meta = JSON.parse(firstLine.slice('// @hypercomb '.length))
+          if (typeof meta.label === 'string' && meta.label.trim()) {
+            label = `${meta.label} – ${new Date(file.lastModified).toLocaleTimeString()}`
+          }
+        }
       }
     } catch {
       // ignore
     }
 
+    this.#labelCache.set(name, label)
+    return label
+  }
+
+  /** Sniff a bee bundle by sig: the sign('bees') pool first, then the
+   *  legacy `__bees__` drain while it still exists (union read during
+   *  the drain window — see the migration brief). */
+  #readBeeFile = async (name: string): Promise<File | null> => {
+    for (const source of [this.store.bees, this.store.legacyBees]) {
+      if (!source) continue
+      try {
+        const handle = await source.getFileHandle(name, { create: false })
+        return await handle.getFile()
+      } catch { /* not in this source — keep falling back */ }
+    }
     return null
   }
 }

@@ -20,7 +20,7 @@ the `AxialService` builds the hive outward from the center in concentric rings, 
 
 a real hive exists only while bees inhabit it. an abandoned hive is wax and memory — the life is gone. hypercomb works the same way. the hex grid is rendered live via pixi.js. when drones are active, the hive blooms on screen. when they dispose, the rendering clears. the *rendering* is what is happening now — it is not a stored snapshot you scroll through.
 
-but the wax remembers. locally, every change you author is content-addressed and immutably recorded as a merkle-versioned layer in your own OPFS — the `__history__` marker chains and the layer pools (`__layers__`, `__resources__`, `__bees__`, `__dependencies__`) persist durably by default. what clears on dispose is the live render, not the record. nothing crosses the network unless you publish.
+but the wax remembers. locally, every change you author is content-addressed and immutably recorded as a merkle-versioned layer in your own OPFS — the per-lineage marker chains and the sig-named content files persist durably by default. what clears on dispose is the live render, not the record. nothing crosses the network unless you publish.
 
 this is the first principle: **presence is the hive** — the *moment* is live, the *history* is kept.
 

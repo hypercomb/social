@@ -78,7 +78,9 @@ export class Lineage extends EventTarget {
   // sigbag + current layer — the canonical layer-as-truth accessors.
   //
   // The navigation primitive IS the sigbag — "where the user is" =
-  // "which __history__/<sig>/ bag they're addressing". Every reader
+  // "which <lineageSig>/ bag (at the OPFS root) they're addressing".
+  // (Legacy `__history__/`/`__hive__/`/`hypercomb.io/` bags are
+  // read-fallback drain sources; HistoryService unions them.) Every reader
   // that wants "what tiles exist here?" or "what's this location's
   // state?" should go through these two methods. There is ONE source
   // of truth for sigbag computation (HistoryService.sign), and ONE
@@ -171,7 +173,24 @@ export class Lineage extends EventTarget {
     const promise = (async (): Promise<FileSystemDirectoryHandle | null> => {
       let dir: FileSystemDirectoryHandle | null = null
       try {
+        // The user-content name tree lives at the OPFS root
+        // (`hypercombRoot === opfsRoot`). tryResolveFrom drives the
+        // #materialized/#missing UI state off this canonical source.
         dir = await this.tryResolveFrom(this.store.hypercombRoot, this.explorerPath)
+        // UNION drain-window fallback: a name folder still stranded under
+        // a legacy content root (`__hive__/`, `hypercomb.io/`) until
+        // Store's relocation drains it would otherwise report the path
+        // unmaterialized. Probe those sources WITHOUT touching
+        // #materialized/#missing (a stateless resolve) — a legacy hit is
+        // the real directory, and the state stays owned by the canonical
+        // pass above.
+        if (!dir) {
+          for (const legacy of [this.store.legacyHive, this.store.legacyHypercombIo]) {
+            if (!legacy) continue
+            const hit = await this.#resolveStateless(legacy, this.explorerPath)
+            if (hit) { dir = hit; break }
+          }
+        }
       } catch {
         dir = null
       }
@@ -199,6 +218,13 @@ export class Lineage extends EventTarget {
   #materialized = true
   #missing: readonly string[] = []
   #fsRevision = 0
+
+  // Self-heal: after a navigation settles, an authoritative walk trims any
+  // phantom tail from the address (see #healPath). #lastHealedPath memoizes
+  // the last path we confirmed fully-real so fs-only invalidations (editing,
+  // sync) don't re-walk an unchanged, already-valid path every tick.
+  #healTimer: ReturnType<typeof setTimeout> | null = null
+  #lastHealedPath = ''
 
   public get ready(): boolean { return this.#ready }
   public get materialized(): boolean { return this.#materialized }
@@ -282,6 +308,27 @@ export class Lineage extends EventTarget {
     return dir
   }
 
+  /** Resolve a name path under `start` WITHOUT mutating #materialized /
+   *  #missing — the drain-window fallback used by explorerDir to probe a
+   *  legacy content root. Returns the handle or null; no side effects, no
+   *  'change' event. */
+  readonly #resolveStateless = async (
+    start: FileSystemDirectoryHandle,
+    segments: readonly string[],
+  ): Promise<FileSystemDirectoryHandle | null> => {
+    let dir = start
+    for (const raw of segments) {
+      const seg = (raw ?? '').trim()
+      if (!seg) continue
+      try {
+        dir = await dir.getDirectoryHandle(seg, { create: false })
+      } catch {
+        return null
+      }
+    }
+    return dir
+  }
+
   public addMarker = async (_segments: readonly string[], _signature: string): Promise<void> => {
     // no-op: directory-based markers removed
   }
@@ -293,6 +340,82 @@ export class Lineage extends EventTarget {
   private readonly invalidate = (): void => {
     this.#fsRevision = this.#fsRevision + 1
     this.dispatchEvent(new CustomEvent('change'))
+    // Self-heal DISABLED — it made a freshly-created tile un-enterable until a
+    // page refresh. A create renders the new tile incrementally (cell:added,
+    // viaUpdate) BEFORE its parent-head commit (importTree) lands. Clicking the
+    // just-appeared tile fires this invalidate → #scheduleHeal, whose oracle
+    // (deepestRealPrefix) reads the parent's children from the not-yet-updated
+    // head, finds the child "absent" AUTHORITATIVELY (not cold, so the cold
+    // guard doesn't spare it), and replaceRaw()s the address back to the parent.
+    // Net: you couldn't navigate into a new tile without refreshing (which warms
+    // the heads so the heal stops mis-clamping). `main` has no self-heal and
+    // navigates correctly; matching that. The common double-click phantom-URL
+    // race is already closed by TileOverlayDrone's prevent-guard, so dropping
+    // this backstop only forgoes auto-repair of rare typed/stale phantom URLs.
+    // this.#scheduleHeal()
+  }
+
+  // -------------------------------------------------
+  // self-heal — repair a phantom address
+  //
+  // A too-early / double-click can append a URL segment for a child that
+  // doesn't exist at the new level (the prevent guard in TileOverlayDrone
+  // closes the common click race; this is the backstop for anything that
+  // still arrives — typed URL, shared link, back/forward, sync). Without
+  // repair the bad segment sticks and each further stale click deepens it
+  // (`/a/b/c` → `/a/b/c/c` → …), disjoint from the real tree.
+  //
+  // The oracle is HistoryService.deepestRealPrefix — it uses the SAME child
+  // resolution the renderer uses (each child layer's own `.name`), so a
+  // membership test matches what actually paints as a navigable tile. It
+  // NEVER clamps on cold/uncertain data (a false clamp of a real-but-not-yet-
+  // warm location is worse than the phantom), preserves empty-but-real leaves
+  // and virtual sub-layers (they are real children), and keeps segment[0] as
+  // an always-valid variable root.
+  // -------------------------------------------------
+
+  readonly #scheduleHeal = (): void => {
+    // Only walk when the path actually changed — fs-only invalidations on an
+    // already-validated path are skipped. Debounced so a burst coalesces.
+    const key = this.explorerPath.join(' ')
+    if (key === this.#lastHealedPath) return
+    if (this.#healTimer) clearTimeout(this.#healTimer)
+    this.#healTimer = setTimeout(() => { this.#healTimer = null; void this.#healPath() }, 0)
+  }
+
+  readonly #healPath = async (): Promise<void> => {
+    const path = this.explorerPath
+    if (path.length <= 1) { this.#lastHealedPath = path.join(' '); return }
+
+    const revision = this.#fsRevision
+    const history = get('@diamondcoreprocessor.com/HistoryService') as
+      { deepestRealPrefix?: (s: readonly string[]) => Promise<{ prefix: string[]; cold: boolean }> } | undefined
+    if (!history?.deepestRealPrefix) return // not ready yet — a later change re-triggers
+
+    let result: { prefix: string[]; cold: boolean }
+    try { result = await history.deepestRealPrefix(path) }
+    catch { return }
+
+    // Abandon if the location moved while we resolved — the newer path
+    // scheduled its own heal.
+    if (this.#fsRevision !== revision) return
+    if (!this.sameSegments(this.explorerPath, path)) return
+
+    // Uncertain read — never clamp on non-authoritative data. Leave
+    // #lastHealedPath unset so a subsequent invalidation re-walks once warm.
+    if (result.cold) return
+
+    if (result.prefix.length >= path.length) {
+      // Fully real — remember it so we don't re-walk on every fs tick.
+      this.#lastHealedPath = path.join(' ')
+      return
+    }
+
+    // Phantom tail — repair the address back to the deepest real ancestor.
+    this.explorerPath = result.prefix
+    try { this.navigation.replaceRaw(result.prefix) } catch { /* nav not ready */ }
+    this.invalidate()
+    console.warn(`[hypercomb] lineage: healed phantom address /${path.join('/')} -> /${result.prefix.join('/')}`)
   }
 
   private readonly followLocation = (): void => {

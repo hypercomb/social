@@ -171,25 +171,34 @@ const _runInitializeRuntime = async (
     } catch { /* translations unavailable — graceful degradation */ }
     ;(window as any).__hcBoot?.('i18n catalogs loaded')
 
-    // User override layer — a single JSON file in OPFS whose shape is
-    //   { "<locale>": { "<key>": "<value>", ... }, ... }
-    // Loaded after defaults so savvy users/consumers can shadow any key
-    // without editing the shipped catalogs. The file is plain bytes — it
-    // can be edited, exported, shared, or signed like any other resource.
+    // User override layer — a CONTENT-ADDRESSED document in the
+    // sign('overrides') document pool, shape { "<locale>": { "<key>":
+    // "<value>" } }. Loaded after defaults so savvy users/consumers can
+    // shadow any key without editing the shipped catalogs. Read the pool
+    // first, then the legacy non-signed `overrides/i18n.json` (Store's boot
+    // absorb content-addresses it into the pool and removes it).
     try {
-      const root = await navigator.storage.getDirectory()
-      const overridesDir = await root.getDirectoryHandle('overrides', { create: false }).catch(() => null)
-      const fileHandle = await overridesDir?.getFileHandle('i18n.json', { create: false }).catch(() => null)
-      if (fileHandle) {
-        const file = await fileHandle.getFile()
-        const json = JSON.parse(await file.text()) as Record<string, Record<string, string>>
+      let json: Record<string, Record<string, string>> | null = null
+      const poolBuf = store?.overrides ? await store.getPoolDoc(store.overrides) : null
+      if (poolBuf) {
+        try { json = JSON.parse(new TextDecoder().decode(poolBuf)) } catch { json = null }
+      }
+      if (!json) {
+        const root = await navigator.storage.getDirectory()
+        const dir = await root.getDirectoryHandle(Store.LEGACY_OVERRIDES_DIRECTORY, { create: false }).catch(() => null)
+        const fileHandle = await dir?.getFileHandle('i18n.json', { create: false }).catch(() => null)
+        if (fileHandle) {
+          try { json = JSON.parse(await (await fileHandle.getFile()).text()) } catch { json = null }
+        }
+      }
+      if (json) {
         for (const [locale, catalog] of Object.entries(json)) {
           if (catalog && typeof catalog === 'object') {
             i18n.registerOverrides('app', locale, catalog)
           }
         }
       }
-    } catch { /* no overrides file or malformed — ignore silently */ }
+    } catch { /* no overrides or malformed — ignore silently */ }
   }
 
   const lineage = get('@hypercomb.social/Lineage') as Lineage | undefined

@@ -193,12 +193,17 @@ fetched byte regardless of which list a domain came from.
 - Manual approval — requires the participant's attention per source
 - Foundation: even without communities, individual trust still works
 
-> **Design note (not built as of 2026-06-18):** the richer
-> `__domains__/<domain>/` registry described in earlier drafts — per-
-> feature toggle state stored as an OPFS directory tree, with attestation
-> feeds under `__communities__/` — is design-only. The shipped gate is
-> the flat `hc:community:domains` allow-list above. Treat any reference
-> to `__domains__/`/`__communities__` directories below as the target
+> **Design note (not built as of 2026-06-18; vocabulary retired
+> 2026-07-04):** earlier drafts sketched a richer per-domain registry as
+> typed OPFS directories (`__domains__/<domain>/`, with attestation feeds
+> under `__communities__/`). Those names are retired draft vocabulary —
+> typed `__x__` folders are banned, even as proposals. The target design,
+> re-expressed in pool terms: per-domain trust/toggle state lives as
+> participant-local settings (or, if it ever needs an OPFS home, a
+> `sign('domains')` pool of meaning), and attestation feeds are
+> sig-addressed resources in a `sign('communities')` pool — or simply in
+> the community domain's own sigbag. The shipped gate remains the flat
+> `hc:community:domains` allow-list above; the richer registry is target
 > design, not current behavior.
 
 ### Tier 3 — Pheromones (social)
@@ -239,7 +244,7 @@ Other pheromone types in the design (not yet implemented):
 
 The cascade below is the **target shape**. Today only steps 1 and 2 are
 wired, and step 2 is the flat `hc:community:domains` allow-list (not a
-per-node toggle tree). Step 3 (`__communities__/` attestation feeds) is
+per-node toggle tree). Step 3 (subscribed attestation pools) is
 design-only as of 2026-06-18.
 
 ```
@@ -250,8 +255,8 @@ design-only as of 2026-06-18.
    list (today: hc:community:domains)?             ← Tier 2 (built)
    if yes → use it.
 
-3. Community attestation: any subscribed community
-   in __communities__/ has attested?               ← Tier 3 (design-only)
+3. Community attestation: any subscribed community's
+   attestation pool has attested?                  ← Tier 3 (design-only)
    if yes → surface community's vouch + skip the
             manual prompt (the community already
             did the work).

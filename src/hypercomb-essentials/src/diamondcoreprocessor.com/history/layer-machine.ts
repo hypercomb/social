@@ -22,7 +22,8 @@
 // `children` is just a slot. `name` is the layer's intrinsic identity
 // (the location's segment label). All other fields on the layer JSON
 // are slots — every one of them is an array of either 64-hex sigs
-// (pointers to `__resources__/` or `__history__/` content) or inline
+// (pointers to content — sig-named files at the OPFS root; resolved via
+// Store with legacy `__resources__/`/`__history__` fallbacks) or inline
 // JSON payloads (treated opaquely; matched by `===`).
 //
 // Sparse-layer invariant: empty arrays never appear in the output —
@@ -77,7 +78,7 @@ export class LayerMachine {
   #name: string = ''
 
   // Lineage segments — the path from root that locates this layer's
-  // bag in `__history__/{sign(segments)}/`. Optional: if set, the
+  // sigbag at the OPFS root (`<root>/{sign(segments)}/`). Optional: if set, the
   // machine can self-commit (`commit(history)`); if absent, the caller
   // must compute the locationSig and use `output()` + `history.commitLayer`
   // directly. Stored verbatim and treated as immutable.

@@ -101,7 +101,7 @@ the colony is not a company. there is no ceo bee. there is no product roadmap ph
 
 the colony is not a platform. it does not extract value from its members. it does not sell attention. it does not optimize for engagement.
 
-the colony is not a service. it does not promise uptime. it keeps no surveillance memory of you — no account, no profile, no cross-visit identity tracking. but make no mistake about your own work: locally, everything you author is content-addressed and versioned in OPFS by default — the `__history__` marker chains and the layer/resource/bee pools persist durably and are yours. nothing crosses the network unless you publish. the colony does not remember *you*; your hive remembers *everything you made*.
+the colony is not a service. it does not promise uptime. it keeps no surveillance memory of you — no account, no profile, no cross-visit identity tracking. but make no mistake about your own work: locally, everything you author is content-addressed and versioned in OPFS by default — the lineage marker chains and content-addressed pools persist durably and are yours. nothing crosses the network unless you publish. the colony does not remember *you*; your hive remembers *everything you made*.
 
 the colony is a living system. it exists because its members are present and contributing. when they stop, it rests. when they return, it resumes. this is the only contract.
 

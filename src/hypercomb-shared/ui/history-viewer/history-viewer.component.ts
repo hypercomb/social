@@ -37,8 +37,11 @@ type Content = {
 
 type HistoryService = {
   /** Cheap list of marker filenames in the bag — names only, no parse.
-   *  Reflection contract: this is the canonical "what files exist right
-   *  now in __history__/<SB>/" view. Called fresh on every reload. */
+   *  Reflection contract: this is the canonical "what marker files exist
+   *  right now in the lineage's sigbag (`<sign(lineage)>/` at the OPFS
+   *  root)" view — HistoryService unions the legacy sources (the
+   *  `__history__` drain et al.) underneath while they drain, highest
+   *  marker wins. Called fresh on every reload. */
   listMarkerFilenames?(locationSig: string): Promise<readonly string[]>
   /** Resolve one marker by filename — bytes, parsed JSON (or null if
    *  unparseable), and sig. Cached at the viewer by filename, so this
@@ -695,8 +698,8 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
    *     This is the typical case: a layer's `children` array holds
    *     sibling-layer sigs in the same bag, and that's what users
    *     want to walk into. Tried first because pure resource lookup
-   *     wouldn't find them — they're inside __history__/{loc}/, not
-   *     __resources__/.
+   *     wouldn't find them — they resolve through the lineage sigbag's
+   *     markers, not as standalone content files.
    *  2. store.getResource(sig) — covers content-addressed resources
    *     like notes, tags, or any blob referenced by sig that isn't a
    *     bag layer.
@@ -740,7 +743,8 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
     }
 
     // 3. content-addressed resource lookup — for non-layer sigs (notes,
-    //    tags, anything stored under __resources__/<sig>)
+    //    tags, any sig-named content file at the flat root; Store still
+    //    falls back to the legacy `__resources__` drain while it exists)
     if (!parsed && store) {
       try {
         const blob = await store.getResource(sig)
@@ -862,10 +866,11 @@ export class HistoryViewerComponent implements OnInit, OnDestroy, AfterViewInit 
   }
 
   /**
-   * Per-row delete — soft-delete a single entry into __deleted__/. The
-   * entry is restorable from there for 30 days. If the cursor was
-   * pointing at the removed entry, we nudge it to the nearest neighbour
-   * so the canvas doesn't freeze on a dead position.
+   * Per-row delete — soft-delete a single entry via HistoryService's
+   * removeEntries (it parks the marker in the history soft-delete area,
+   * restorable for 30 days). If the cursor was pointing at the removed
+   * entry, we nudge it to the nearest neighbour so the canvas doesn't
+   * freeze on a dead position.
    */
   readonly deleteRow = async (index: number, event: Event): Promise<void> => {
     event.stopPropagation()

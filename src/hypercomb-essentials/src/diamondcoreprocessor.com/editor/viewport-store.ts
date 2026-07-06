@@ -1,8 +1,13 @@
 // diamondcoreprocessor.com/editor/viewport-store.ts
 //
 // Viewport storage — per-location zoom / pan / meshOffset, keyed by the
-// location SIGNATURE in a flat, non-history OPFS store at
-// `__viewport__/<sig>`.
+// location SIGNATURE in a flat, non-history OPFS pool of meaning: one
+// file per location sig inside the `sign('viewport')` pool at the OPFS
+// root. The pool address is DERIVED — sha256 of the UTF-8 bytes of
+// 'viewport' — never a typed folder name. The legacy `__viewport__`
+// dir is a read-fallback/drain source only: opened WITHOUT create,
+// union-read into the warm cache while it exists, absorbed into the
+// pool by the self-cleaning drain below, never written again.
 //
 // Why NOT history
 // ───────────────
@@ -23,15 +28,21 @@
 // No OPFS folder handle (`<dir>/0000`) is required, which is what made
 // the old path silently no-op for sub-layers and racily for root.
 
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, SignatureService } from '@hypercomb/core'
 import type { ViewportSnapshot } from '../navigation/zoom/zoom.drone.js'
 import { ROOT_NAME } from '../history/history.service.js'
 import { readTilePropertiesAt } from './tile-properties.js'
 
 export type { ViewportSnapshot }
 
-const VIEWPORT_DIR = '__viewport__'
+const VIEWPORT_MEANING = 'viewport'
+/** Legacy drain source — read/union only until the absorb removes it. */
+const LEGACY_VIEWPORT_DIRECTORY = '__viewport__'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
+
+/** How long after module load the legacy drain waits — clear of first
+ *  paint and the warmup walk (mirrors Store's self-clean delay). */
+const SELF_CLEAN_DELAY_MS = 20_000
 
 type HistoryServiceLike = {
   sign?: (l: { explorerSegments?: () => readonly string[] }) => Promise<string>
@@ -51,17 +62,33 @@ function signingSegments(segments: readonly string[]): readonly string[] {
   return segments.length === 0 ? [ROOT_NAME] : segments
 }
 
-// ── flat OPFS store ────────────────────────────────────────────────
-// One directory at the OPFS root, one file per location signature.
-// Direct handle access (no service-worker round-trip, no Store
-// coupling). The handle is resolved lazily and cached.
+// ── flat OPFS pool ─────────────────────────────────────────────────
+// One sign(meaning) pool dir at the OPFS root, one file per location
+// signature. Direct handle access (no service-worker round-trip, no
+// Store coupling — essentials must not import shared, so the pool sig
+// is derived locally via SignatureService). Handles resolve lazily and
+// are cached.
 
 let _dir: Promise<FileSystemDirectoryHandle | null> | null = null
-const viewportDir = (): Promise<FileSystemDirectoryHandle | null> =>
+const viewportPool = (): Promise<FileSystemDirectoryHandle | null> =>
   (_dir ??= (async () => {
     try {
       const root = await navigator.storage.getDirectory()
-      return await root.getDirectoryHandle(VIEWPORT_DIR, { create: true })
+      const poolSig = await SignatureService.sign(new TextEncoder().encode(VIEWPORT_MEANING).buffer as ArrayBuffer)
+      return await root.getDirectoryHandle(poolSig, { create: true })
+    } catch {
+      return null
+    }
+  })())
+
+// Legacy `__viewport__` — opened WITHOUT create (stays gone once
+// drained), tolerated absent. Read/union + drain source only.
+let _legacyDir: Promise<FileSystemDirectoryHandle | null> | null = null
+const legacyViewportDir = (): Promise<FileSystemDirectoryHandle | null> =>
+  (_legacyDir ??= (async () => {
+    try {
+      const root = await navigator.storage.getDirectory()
+      return await root.getDirectoryHandle(LEGACY_VIEWPORT_DIRECTORY)
     } catch {
       return null
     }
@@ -88,37 +115,83 @@ const serialize = <T>(op: () => Promise<T>): Promise<T> => {
 }
 
 // ── warm cache ─────────────────────────────────────────────────────
-// In-memory mirror of the whole `__viewport__/` directory, hydrated ONCE
-// at module load (boot). Doctrine: data is warmed at boot and navigation
-// reads from cache — render must never wait on a per-location OPFS read.
-// The directory is tiny (one small JSON per visited location), so one
+// In-memory mirror of the whole viewport pool, hydrated ONCE at module
+// load (boot). Doctrine: data is warmed at boot and navigation reads
+// from cache — render must never wait on a per-location OPFS read.
+// The pool is tiny (one small JSON per visited location), so one
 // enumeration covers everything; `writeViewportAt` keeps the mirror
-// coherent afterwards. The only read that can ever wait is the very
-// first one at boot (root), and it waits on this single enumeration —
-// not a per-location fetch.
+// coherent afterwards. UNION-enumerated with the legacy `__viewport__`
+// dir while that drain source still exists (the absorb is detached, so
+// a partially-drained boot must still see every saved framing — losing
+// them would re-fire every first-visit fit). Pool entries win on a key
+// collision. The only read that can ever wait is the very first one at
+// boot (root), and it waits on this single enumeration — not a
+// per-location fetch.
 
 const _warmCache = new Map<string, ViewportSnapshot>()
 let _warmed: Promise<void> | null = null
 const warmAll = (): Promise<void> =>
   (_warmed ??= serialize(async () => {
-    const dir = await viewportDir()
-    if (!dir) return
-    try {
-      for await (const [name, handle] of (dir as unknown as {
-        entries: () => AsyncIterable<[string, FileSystemHandle]>
-      }).entries()) {
-        if (handle.kind !== 'file' || !/^[a-f0-9]{64}$/.test(name)) continue
-        try {
-          const file = await (handle as FileSystemFileHandle).getFile()
-          const parsed = JSON.parse(await file.text())
-          if (parsed && typeof parsed === 'object') _warmCache.set(name, parsed as ViewportSnapshot)
-        } catch { /* unreadable entry — treated as absent */ }
-      }
-    } catch { /* enumeration failed — reads fall back to empty */ }
+    const hydrate = async (dir: FileSystemDirectoryHandle | null): Promise<void> => {
+      if (!dir) return
+      try {
+        for await (const [name, handle] of (dir as unknown as {
+          entries: () => AsyncIterable<[string, FileSystemHandle]>
+        }).entries()) {
+          if (handle.kind !== 'file' || !/^[a-f0-9]{64}$/.test(name)) continue
+          try {
+            const file = await (handle as FileSystemFileHandle).getFile()
+            const parsed = JSON.parse(await file.text())
+            if (parsed && typeof parsed === 'object') _warmCache.set(name, parsed as ViewportSnapshot)
+          } catch { /* unreadable entry — treated as absent */ }
+        }
+      } catch { /* enumeration failed — reads fall back to empty */ }
+    }
+    // Legacy first, pool second — the pool overwrites, so canonical wins.
+    await hydrate(await legacyViewportDir())
+    await hydrate(await viewportPool())
   }))
 
 // Hydrate at module load so the cache is warm before first navigation.
 void warmAll()
+
+// ── self-cleaning drain ────────────────────────────────────────────
+// Absorb the legacy `__viewport__` dir into the sign('viewport') pool:
+// per-record copy → remove (pool entry wins — the legacy copy is by
+// definition older), then a NON-recursive final removeEntry that only
+// succeeds once the dir is empty, so a straggler is never destroyed.
+// Detached + delayed so it never competes with first paint; idempotent
+// and resumable — an interrupted pass finishes on a later boot. Reads
+// stay correct meanwhile via the union hydrate above.
+setTimeout(() => {
+  void serialize(async () => {
+    const legacy = await legacyViewportDir()
+    const pool = await viewportPool()
+    if (!legacy || !pool) return
+    try {
+      for await (const [name, handle] of (legacy as unknown as {
+        entries: () => AsyncIterable<[string, FileSystemHandle]>
+      }).entries()) {
+        if (handle.kind !== 'file') continue
+        try {
+          let present = true
+          try { await pool.getFileHandle(name) } catch { present = false }
+          if (!present) {
+            const blob = await (handle as FileSystemFileHandle).getFile()
+            const dest = await pool.getFileHandle(name, { create: true })
+            const writable = await dest.createWritable()
+            try { await writable.write(blob) } finally { await writable.close() }
+          }
+          await legacy.removeEntry(name)
+        } catch { /* straggler — absorbed on a later boot */ }
+      }
+      const root = await navigator.storage.getDirectory()
+      await root.removeEntry(LEGACY_VIEWPORT_DIRECTORY)
+      _legacyDir = Promise.resolve(null)  // drained — drop the stale handle
+      console.log(`[viewport-store] ${LEGACY_VIEWPORT_DIRECTORY} absorbed into the sign('${VIEWPORT_MEANING}') pool`)
+    } catch { /* dir not yet empty — union reads keep working; retry next boot */ }
+  })
+}, SELF_CLEAN_DELAY_MS)
 
 // ── Public API ─────────────────────────────────────────────────────
 
@@ -179,6 +252,10 @@ export const hasPersistedViewportAt = async (
  * Merge-by-field: pass only the parts you want to update. Pass `null`
  * to clear the whole viewport for that location.
  *
+ * Writes land ONLY in the sign('viewport') pool. A clear also drops any
+ * legacy `__viewport__` entry for the same sig — a user-intent clear
+ * must not resurrect through the union hydrate on the next boot.
+ *
  * Broadcasts `viewport:persisted` ({ segments, snapshot }) so caches can
  * refresh their mirror of this location's viewport.
  */
@@ -186,7 +263,7 @@ export const writeViewportAt = async (
   segments: readonly string[],
   snapshot: ViewportSnapshot | null,
 ): Promise<void> => {
-  const dir = await viewportDir()
+  const dir = await viewportPool()
   const sig = await locationSig(segments)
   if (!dir || !sig) return
 
@@ -196,6 +273,8 @@ export const writeViewportAt = async (
     if (snapshot === null) {
       _warmCache.delete(sig)
       try { await dir.removeEntry(sig) } catch { /* already absent */ }
+      // Drop the legacy copy too (drain source) — cleared means cleared.
+      try { await (await legacyViewportDir())?.removeEntry(sig) } catch { /* absent / drained */ }
       return null
     }
     // Merge over existing so partial writes (just pan, just zoom) don't

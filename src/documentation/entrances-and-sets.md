@@ -34,9 +34,11 @@ without intrinsically sharing anything.
 
 ## entrances
 
-Mechanically nothing is missing. Every lineage already has a sigbag
-(`sha256(segments + room + secret)` → `__hive__/<lineageSig>/`, `000x` markers,
-max = head), so **every cell is already a valid entrance**. What's missing is
+Mechanically nothing is missing. Every lineage already has a sigbag at the
+OPFS root (`sha256(segments + room + secret)` → `<lineageSig>/`, `000x` markers,
+max = head; legacy `__hive__/` and `__history__/` are read-fallback drains —
+highest marker wins across sources), so **every cell is already a valid
+entrance**. What's missing is
 choice: publishing is hardwired to the publisher's current location
 (`#publishMyLayerAt` reads `lineage.explorerSegments()` in
 [swarm.drone.ts](../hypercomb-essentials/src/diamondcoreprocessor.com/sharing/swarm.drone.ts)).

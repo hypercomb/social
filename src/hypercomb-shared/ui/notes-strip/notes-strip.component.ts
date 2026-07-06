@@ -62,10 +62,11 @@ type SelectionService = EventTarget & {
 }
 
 /** Single open question — Claude's side of the comm channel.
- *  Lives in the cell's `qa` layer slot (or in `__optimization__/` with
- *  kind=qa for the substrate-stored variant) as a content-addressed
- *  JSON: `{ qId, question, askedAt }`. Surfaced into the notes strip
- *  alongside user notes so the conversation reads in one list. */
+ *  Lives in the cell's `qa` layer slot (or in the sign('optimization')
+ *  pool with kind=qa for the substrate-stored variant) as a
+ *  content-addressed JSON: `{ qId, question, askedAt }`. Surfaced into
+ *  the notes strip alongside user notes so the conversation reads in
+ *  one list. */
 type QaItem = {
   qId: string
   question: string

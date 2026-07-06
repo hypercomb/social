@@ -37,6 +37,12 @@ export class HexImageAtlas {
   // eviction deleted the sig's LIVE map entry and the tile silently lost
   // its image. One shared promise per sig means one slot per sig.
   readonly #inFlight = new Map<string, Promise<ImageUV | null>>()
+  // Sigs whose slots must NOT be reused for other content. The renderer
+  // pins every image currently on screen: evicting an on-screen sig makes
+  // its baked UV sample foreign pixels until a repaint lands, and the
+  // hard display rule is that a tile NEVER renders without its image
+  // outside text-only mode. The ring allocator steps over pinned slots.
+  #pinned: ReadonlySet<string> = new Set()
 
   readonly #cols: number
   readonly #rows: number
@@ -89,6 +95,13 @@ export class HexImageAtlas {
     return this.#evictionGeneration
   }
 
+  /** Replace the pinned set — the sigs whose slots the ring allocator must
+   *  not reuse. Called by the renderer with the on-screen image sigs on
+   *  every paint; the previous layer's sigs unpin automatically. */
+  setPinned(sigs: Iterable<string>): void {
+    this.#pinned = new Set(sigs)
+  }
+
   /** Returns true if the signature has permanently failed loading (exceeded max retries). */
   hasFailed(sig: string): boolean {
     return (this.#failures.get(sig) ?? 0) >= HexImageAtlas.MAX_RETRIES
@@ -119,7 +132,22 @@ export class HexImageAtlas {
 
   async #loadInto(sig: string, blob: Blob): Promise<ImageUV | null> {
     const tLoad = performance.now()
-    const slot = this.#nextSlot % (this.#cols * this.#rows)
+    // Step over slots whose occupant is pinned (on screen) — a visible
+    // tile must never lose its pixels mid-view. Bounded scan; if EVERY
+    // slot is pinned (a layer bigger than the atlas) fall back to plain
+    // reuse — the eviction event downstream schedules the repaint that
+    // keeps the display converging.
+    const capacity = this.#cols * this.#rows
+    let slot = this.#nextSlot % capacity
+    for (let scanned = 0; scanned < capacity; scanned++) {
+      const occupant = this.#slotToSig[slot]
+      if (occupant === null || occupant === sig || !this.#pinned.has(occupant)) break
+      this.#nextSlot++
+      slot = this.#nextSlot % capacity
+      if (scanned === capacity - 1) {
+        console.warn('[HexImageAtlas] every slot pinned — layer exceeds atlas capacity, evicting a pinned slot')
+      }
+    }
     this.#nextSlot++
 
     // Invariant maintenance: whatever sig was living in this slot is

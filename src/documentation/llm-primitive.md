@@ -15,7 +15,7 @@ In Hypercomb:
 /select[tile-a, tile-b, tile-c]/opus('[lineage1, sig2, sig3]')
 ```
 
-This single command is a hyperedge connecting **six vertices**: three context sources (input) and three target tiles (output). The result — a new signature stored in the resource store (`__resources__/<sig>`) — becomes a seventh vertex, immediately available as input to future hyperedges.
+This single command is a hyperedge connecting **six vertices**: three context sources (input) and three target tiles (output). The result — a new signature stored via `Store.putResource` as a sig-named file at the content root (`<root>/<sig>`) — becomes a seventh vertex, immediately available as input to future hyperedges.
 
 A traditional graph edge is binary: A → B. A hyperedge is N-ary: {A, B, C} → {D, E, F}. This is what makes it a **hyper**comb, not just a comb.
 
@@ -27,7 +27,7 @@ A traditional graph edge is binary: A → B. A hyperedge is N-ary: {A, B, C} →
          └─────────────┘
                 │
                 ▼
-         <sig> = SHA-256(response)  in __resources__/<sig>
+         <sig> = SHA-256(response)  — <sig> file at the OPFS root
          (new vertex in the hypergraph)
 ```
 
@@ -65,7 +65,7 @@ The system:
 
 1. **Gathers context** from the referenced lineages (folder trees) and signatures (content-addressed blobs)
 2. **Sends** the assembled context to the chosen Claude model via the Anthropic Messages API
-3. **Stores the response** as a content-addressed resource via `Store.putResource(blob)`: `<sig> = SHA-256(response)` lands in `__resources__/<sig>` and fires a `content:wrote` effect with `kind: 'resource'`
+3. **Stores the response** as a content-addressed resource via `Store.putResource(blob)`: `<sig> = SHA-256(response)` lands as a sig-named file at the OPFS content root and fires a `content:wrote` effect with `kind: 'resource'`
 4. **Writes the response signature** into each selected tile's properties
 
 The response is now a first-class vertex in the hypergraph.
