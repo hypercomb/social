@@ -30,6 +30,7 @@ type LineageLike = EventTarget & { explorerSegments?: () => readonly string[] }
 type HistoryLike = {
   sign(l: { explorerSegments?: () => readonly string[] }): Promise<string>
   currentLayerAt(locationSig: string): Promise<Record<string, unknown> | null>
+  getLayerBySig?(sig: string): Promise<Record<string, unknown> | null>
 }
 type StoreLike = {
   getResource(sig: string): Promise<Blob | null>
@@ -51,6 +52,11 @@ const ioc = (): { get(k: string): unknown } | undefined =>
 export class WebsiteLandingComponent implements OnDestroy {
   readonly sites = signal<GroupMember[]>([])
   readonly open = signal(false)
+  /** site.key → object URL of the site's representative tile image. Resolved
+   *  asynchronously once the surface opens (each site's own hex-tile picture,
+   *  or a child tile's), so cards show real imagery from the hive. Revoked on
+   *  destroy. */
+  readonly images = signal<ReadonlyMap<string, string>>(new Map())
 
   #lineage: LineageLike | null = null
   #lineageBound = false
@@ -60,6 +66,10 @@ export class WebsiteLandingComponent implements OnDestroy {
   /** Sites whose page has already been warmed (hover prewarm), so re-hovering is
    *  a no-op. */
   #warmed = new Set<string>()
+  /** Live image object URLs (held for revocation) and the set of sites whose
+   *  image resolution has already been kicked off (dedupe across refreshes). */
+  #imageUrls = new Map<string, string>()
+  #imageRequested = new Set<string>()
   #onChange = (): void => this.#refresh()
 
   constructor() {
@@ -74,6 +84,7 @@ export class WebsiteLandingComponent implements OnDestroy {
     this.#lineage?.removeEventListener?.('change', this.#onChange)
     window.removeEventListener('keydown', this.#onKey, true)
     if (this.#hidHive) EffectBus.emit('render:set-hive-visible', { visible: true })
+    for (const url of this.#imageUrls.values()) URL.revokeObjectURL(url)
   }
 
   /** Deterministic per-site accent (hue from the name) — gives each card its own
@@ -130,6 +141,71 @@ export class WebsiteLandingComponent implements OnDestroy {
     if (htmlSig) await store.preheatResource(htmlSig).catch(() => null)
   }
 
+  /** Resolve a representative tile image for a site and publish its object URL.
+   *  Best-effort, deduped per site. Reads the site root's tile properties the
+   *  same way the hive renderer does (layer → `properties[0]` → JSON →
+   *  `small.image`), falling back to the first child tile that carries an image
+   *  so text-only site roots still show a picture. Shell-safe: window.ioc only. */
+  async #resolveImage(site: GroupMember): Promise<void> {
+    const history = ioc()?.get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
+    const store = ioc()?.get('@hypercomb.social/Store') as StoreLike | undefined
+    if (!history?.sign || !store?.getResource) { this.#imageRequested.delete(site.key); return }
+    const imageSig = await this.#siteImageSig(site.segments, history, store)
+    if (!imageSig) return
+    const blob = await store.getResource(imageSig).catch(() => null)
+    if (!blob) return
+    const url = URL.createObjectURL(blob)
+    this.#imageUrls.set(site.key, url)
+    this.images.set(new Map(this.#imageUrls))   // new map instance → signal fires
+  }
+
+  /** A site's picture sig: the root cell's own tile image, else the first child
+   *  (by layer link) that has one. The child scan is bounded — sites are few
+   *  and this runs on open, not on the render path. */
+  async #siteImageSig(segments: readonly string[], history: HistoryLike, store: StoreLike): Promise<string> {
+    const locSig = await history.sign({ explorerSegments: () => segments }).catch(() => '')
+    if (!locSig) return ''
+    const layer = await history.currentLayerAt(locSig).catch(() => null)
+    if (!layer) return ''
+    const own = await this.#imageSigFromLayer(layer, store)
+    if (own) return own
+    const children = Array.isArray(layer['children']) ? (layer['children'] as unknown[]) : []
+    let scanned = 0
+    for (const entry of children) {
+      if (scanned >= 16) break
+      const csig = String(entry ?? '')
+      if (!SIG.test(csig)) continue
+      scanned++
+      const childLayer = history.getLayerBySig
+        ? await history.getLayerBySig(csig).catch(() => null)
+        : null
+      if (!childLayer) continue
+      const img = await this.#imageSigFromLayer(childLayer, store)
+      if (img) return img
+    }
+    return ''
+  }
+
+  /** Pull a tile image sig out of a layer's properties blob — the same
+   *  `small.image` (point-top hex thumbnail) the hex renderer reads, with the
+   *  flat-orientation thumbnail and the full-size image as fallbacks. */
+  async #imageSigFromLayer(layer: Record<string, unknown>, store: StoreLike): Promise<string> {
+    const propsArr = layer['properties']
+    const propSig = Array.isArray(propsArr) ? String(propsArr[0] ?? '') : ''
+    if (!SIG.test(propSig)) return ''
+    const blob = await store.getResource(propSig).catch(() => null)
+    if (!blob) return ''
+    try {
+      const props = JSON.parse(await blob.text()) as {
+        small?: { image?: unknown }
+        flat?: { small?: { image?: unknown } }
+        large?: { image?: unknown }
+      }
+      const sig = props?.small?.image ?? props?.flat?.small?.image ?? props?.large?.image
+      return (typeof sig === 'string' && SIG.test(sig)) ? sig : ''
+    } catch { return '' }
+  }
+
   /** Open a site — same routing as the launcher tile (navigate + website mode).
    *  The lineage leaves the aggregator, so this surface hides on the next tick. */
   openSite(site: GroupMember): void {
@@ -175,7 +251,16 @@ export class WebsiteLandingComponent implements OnDestroy {
     }
 
     this.open.set(active)
-    this.sites.set(active ? (groupRegistry.get(WEBSITES)?.members() ?? []) : [])
+    const members = active ? (groupRegistry.get(WEBSITES)?.members() ?? []) : []
+    this.sites.set(members)
+
+    // Resolve each site's tile image once the directory is showing. Deduped by
+    // site key across refreshes; best-effort and off the render path.
+    for (const site of members) {
+      if (this.#imageRequested.has(site.key)) continue
+      this.#imageRequested.add(site.key)
+      void this.#resolveImage(site)
+    }
   }
 }
 

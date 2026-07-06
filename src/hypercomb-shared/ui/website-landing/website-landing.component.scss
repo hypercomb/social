@@ -1,9 +1,14 @@
 // hypercomb-shared/ui/website-landing/website-landing.component.scss
 //
 // Cold, clean, professional — steel hairlines on near-black, the house chrome.
-// Full-viewport directory of website cards. No flashy effects.
+// A centered entrance to every website in the hive: each site is one of its own
+// hex tiles (its real image), laid out as a small honeycomb directory. No
+// flashy effects.
 
 $steel: rgb(126, 182, 214);
+$ink: #0c1118;
+// Point-top hexagon (matches the hive's default tile orientation).
+$hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 
 :host { display: contents; }
 
@@ -11,48 +16,17 @@ $steel: rgb(126, 182, 214);
   position: fixed;
   inset: 0;
   z-index: 59990;
-  display: flex;
-  flex-direction: column;
-  background: #0c1118;
+  background: $ink;
   color: #cfe2ee;
   font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
 }
 
-.landing-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 1.5rem 2rem;
-  border-bottom: 1px solid rgba($steel, 0.22);
-  flex: 0 0 auto;
-}
-
-.landing-heading {
-  display: flex;
-  align-items: baseline;
-  gap: 0.75rem;
-}
-
-.landing-title {
-  margin: 0;
-  font-size: 1.5rem;
-  font-weight: 600;
-  letter-spacing: 0.5px;
-  color: #eaf3f9;
-}
-
-.landing-count {
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: $steel;
-  background: rgba($steel, 0.12);
-  border: 1px solid rgba($steel, 0.3);
-  border-radius: 999px;
-  padding: 0.05rem 0.55rem;
-  line-height: 1.4;
-}
-
+// Close sits in the corner so the header below can be truly centred.
 .landing-close {
+  position: absolute;
+  top: 1.25rem;
+  right: 1.25rem;
+  z-index: 1;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -71,67 +45,157 @@ $steel: rgb(126, 182, 214);
   &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: 2px; }
 }
 
+// Full-height scroll surface; the inner column is centred within it.
+.landing-scroll {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.landing-inner {
+  width: 100%;
+  max-width: 1040px;
+  margin: 0 auto;
+  padding: clamp(3rem, 9vh, 6rem) 2rem 5rem;
+  box-sizing: border-box;
+}
+
+// ── header — centred title + a plain-language line on what this page is ──────
+.landing-head {
+  text-align: center;
+  margin-bottom: clamp(2rem, 5vh, 3.25rem);
+}
+
+.landing-heading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.landing-title {
+  margin: 0;
+  font-size: clamp(1.6rem, 4vw, 2.1rem);
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: #eaf3f9;
+}
+
+.landing-count {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: $steel;
+  background: rgba($steel, 0.12);
+  border: 1px solid rgba($steel, 0.3);
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  line-height: 1.5;
+}
+
+.landing-lede {
+  margin: 0 auto;
+  max-width: 46ch;
+  font-size: 1rem;
+  line-height: 1.65;
+  color: rgba(207, 226, 238, 0.62);
+}
+
 .landing-empty {
+  text-align: center;
   padding: 2.5rem 2rem;
   opacity: 0.55;
   font-size: 1rem;
 }
 
+// ── the honeycomb directory — one hex tile per site, centred ─────────────────
 .landing-grid {
   list-style: none;
   margin: 0;
-  padding: 2rem;
+  padding: 0;
   display: grid;
-  gap: 1rem;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  overflow: auto;
-  flex: 1 1 auto;
-  align-content: start;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 168px));
+  justify-content: center;
+  gap: clamp(1.25rem, 3vw, 2rem) clamp(1rem, 2.5vw, 1.75rem);
 }
 
 .site-card {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.9rem;
+  gap: 0.75rem;
   width: 100%;
-  padding: 1.05rem 1.2rem;
-  border: 1px solid rgba($steel, 0.22);
-  border-left-width: 3px;   // accent stripe (per-site colour, set inline)
-  border-radius: 12px;
-  background: rgba($steel, 0.05);
+  padding: 0.4rem 0.2rem;
+  border: 0;
+  background: none;
   color: #eaf3f9;
   cursor: pointer;
-  text-align: left;
-  transition: background 150ms ease, border-color 150ms ease, transform 120ms ease;
+  font: inherit;
 
-  &:hover { background: rgba($steel, 0.12); border-color: rgba($steel, 0.5); }
-  &:active { transform: scale(0.99); }
-  &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: 2px; }
+  &:focus-visible { outline: none; }
+  &:focus-visible .site-hex { outline: 2px solid rgba($steel, 0.75); outline-offset: 3px; }
+}
+
+// The hex frame: a thin ring whose fill peeks through a small inset around the
+// tile image. Clipping both the frame and the image to the same polygon keeps
+// the edges crisp.
+.site-hex {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 0.866;   // √3 / 2 — a regular point-top hexagon
+  clip-path: $hex-clip;
+  background: rgba($steel, 0.22);
+  padding: 2px;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  transition: background 160ms ease, transform 160ms ease;
+}
+
+.site-hex-img,
+.site-hex-fallback {
+  width: 100%;
+  height: 100%;
+  clip-path: $hex-clip;
+}
+
+.site-hex-img {
+  object-fit: cover;
+  display: block;
+  background: $ink;   // letterbox behind transparent-cornered hex thumbnails
+}
+
+.site-hex-fallback {
+  display: grid;
+  place-items: center;
+  background: rgba($steel, 0.07);
 }
 
 .site-icon {
-  font-size: 1.5rem;
-  color: $steel;
-  flex: 0 0 auto;
+  font-size: 2rem;
+  color: var(--accent, #{$steel});
+  opacity: 0.85;
 }
 
 .site-name {
-  flex: 1 1 auto;
-  font-size: 1rem;
+  max-width: 100%;
+  font-size: 0.95rem;
   font-weight: 500;
-  white-space: nowrap;
+  text-align: center;
+  color: rgba(234, 243, 249, 0.82);
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color 150ms ease;
 }
 
-.site-go {
-  font-size: 1.1rem;
-  opacity: 0.35;
-  flex: 0 0 auto;
-  transition: opacity 150ms ease;
-}
-
-.site-card:hover .site-go { opacity: 0.85; }
+// Restrained hover: the ring warms and the tile lifts a touch. Nothing flashy.
+.site-card:hover .site-hex { background: rgba($steel, 0.5); transform: translateY(-3px); }
+.site-card:hover .site-name { color: #f4fafd; }
+.site-card:active .site-hex { transform: translateY(-1px); }
 
 .mat-sym {
   font-family: 'Material Symbols Outlined';
