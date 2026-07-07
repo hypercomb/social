@@ -96,20 +96,25 @@ export class RemoveQueenBee extends QueenBee {
     if (!(await confirmRemoval(history, parent, targets))) return
     selectionToClear?.clear()
 
-    // Names are the truth. Resolve each child sig to its layer's `name`,
-    // drop the targets, and pass the surviving names back. The committer
-    // re-resolves each name to its current head sig at commit time, so
-    // concurrent edits to a sibling cell are picked up automatically.
+    // SIG-PRESERVING drop. Keep every surviving child's EXACT stored sig and
+    // remove only the target(s). Do NOT rebuild `children` from survivor NAMES:
+    // committer.update resolves a `children` NAME slot via latestMarkerSigFor on
+    // each survivor's OWN bag, which AUTO-MINTS an empty {name} layer for any
+    // survivor whose own bag is cold — e.g. freshly-installed content whose child
+    // bags aren't materialised. That silently replaces a survivor's real sig with
+    // an empty one, so the renderer (which reads each child's image from its
+    // stored sig) paints it as a no-image tile. Dropping the target sig and
+    // re-committing the remaining sigs verbatim preserves every survivor exactly.
     const childSigs = Array.isArray(parent.children) ? parent.children : []
     const targetSet = new Set(targets)
-    const survivorNames: string[] = []
+    const survivorSigs: string[] = []
     for (const sig of childSigs) {
       const child = await history.getLayerBySig(sig)
-      if (!child || typeof child.name !== 'string') continue
-      if (!targetSet.has(child.name)) survivorNames.push(child.name)
+      // Drop only sigs we can positively identify as a target; keep everything
+      // else (incl. an unreadable sibling) so a cold miss never wipes a tile.
+      if (child && typeof child.name === 'string' && targetSet.has(child.name)) continue
+      survivorSigs.push(String(sig))
     }
-
-    const nextLayer = { ...parent, children: survivorNames }
 
     // Notify downstream UI subscribers (activity log, substrate, slot
     // machine, tile-overlay) BEFORE awaiting the commit so the visual
@@ -126,7 +131,10 @@ export class RemoveQueenBee extends QueenBee {
       EffectBus.emit('cell:removed', { cell: name, segments, viaUpdate: true })
     }
 
-    await committer.update(segments, nextLayer)
+    // Empty nameSlots → the committer SETs `children` to these exact sigs (no
+    // name→sig re-resolution, no auto-mint). Other slots (decorations, notes,
+    // properties) are preserved — #commit hydrates them from the previous layer.
+    await committer.update(segments, { children: survivorSigs }, new Set<string>())
   }
 }
 

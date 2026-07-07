@@ -13,6 +13,17 @@ import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone
 
 type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; noImageLabels?: string[]; substrateLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[] }
 
+// Backstop timeout (ms) for the navigation-transition guard. This is NOT the
+// normal release — the guard lifts on render:cell-count (the renderer has
+// rebuilt the maps a click reads for the level we moved TO), mirrored by the
+// post-reveal navigation:guard-end. The timer only prevents a permanent block
+// if a render ever emits neither; sized above the slowest legit cold-layer
+// render so it never preempts a still-rendering navigation. (The prior value
+// was 200ms and WAS the de-facto release — it undercut the guard on any layer
+// whose render took >200ms, dropping it while the leaving level was still on
+// screen so a 2nd click ran up a phantom address.)
+const NAV_GUARD_BACKSTOP_MS = 6000
+
 /** Launch-group pages live at single-segment ROOT locations named by group id
  *  (/games, /websites, /help, …) — each is its own leaf-only lineage,
  *  addressable directly. Resolved LIVE against the shell's GroupLauncher
@@ -495,6 +506,16 @@ export class TileOverlayDrone extends Drone {
         this.#linkLabels = new Set(payload.linkLabels ?? [])
         this.#hiddenLabels = new Set(payload.hiddenLabels ?? [])
         this.#rebuildOccupiedMap()
+        // A navigation transition is "done" the instant these maps describe the
+        // level we moved to — which is exactly this emit: the renderer rebuilds
+        // occupancy/branch data for the new level at render completion, right
+        // before it reveals. The click guard exists solely to stop a 2nd/too-early
+        // click from reading the LEAVING level's stale maps, so release it HERE.
+        // That makes the guard hold for the FULL render (however long a big/cold
+        // layer takes) instead of a blind 200ms timer that dropped it early and
+        // let the click run up a phantom address. No-op on same-level re-renders
+        // (edits/substrate) — nothing is blocked then.
+        this.#endNavigationTransition()
         if (this.#overlay && this.#currentAxial) {
           this.#currentIndex = this.#lookupIndex(this.#currentAxial.q, this.#currentAxial.r)
           // Overlay-level visibility first, then per-icon visibility.
@@ -550,14 +571,11 @@ export class TileOverlayDrone extends Drone {
 
       this.onEffect('navigation:guard-start', () => { this.#beginNavigationTransition() })
 
-      this.onEffect('navigation:guard-end', () => {
-        this.#navigationBlocked = false
-        this.#consumedPointerId = null
-        if (this.#navigationGuardTimer) {
-          clearTimeout(this.#navigationGuardTimer)
-          this.#navigationGuardTimer = null
-        }
-      })
+      // Post-reveal mirror of the render:cell-count release. Redundant with it
+      // (cell-count fires just before this, from applyGeometry/clearMesh, so the
+      // maps are already fresh by here) but kept as the semantic "hive is now on
+      // screen" signal and a second release for paths that emit it.
+      this.onEffect('navigation:guard-end', () => { this.#endNavigationTransition() })
 
       this.onEffect<{ active: boolean }>('touch:dragging', ({ active }) => {
         this.#touchDragging = active
@@ -2012,20 +2030,74 @@ export class TileOverlayDrone extends Drone {
   // read those stale maps and enter a child that doesn't exist at the new
   // level — appending a phantom URL segment that then "runs up" as you keep
   // clicking. Arming here closes that window: the trailing pointerdown/click is
-  // blocked (#onPointerDown / #onClick both check #navigationBlocked) until
-  // `navigation:guard-end` (or the 200ms fallback) releases it.
+  // blocked (#onPointerDown / #onClick both check #navigationBlocked) until the
+  // renderer rebuilds the maps for the new level — `render:cell-count`, mirrored
+  // by the post-reveal `navigation:guard-end` (see #endNavigationTransition).
+  // The timer below is ONLY a long backstop against a render that emits neither;
+  // it must never be the normal release. It previously fired at 200ms and WAS
+  // the de-facto release, which undercut the guard on any layer whose render ran
+  // longer than that: it dropped the block while the LEAVING level was still on
+  // screen, so a 2nd click still read stale maps and ran up a phantom address.
   #beginNavigationTransition = (): void => {
     this.#navigationBlocked = true
     this.#currentAxial = null
     this.#currentIndex = undefined
     if (this.#overlay && !this.#arrangeMode) this.#overlay.visible = false
-    if (this.#navigationGuardTimer) clearTimeout(this.#navigationGuardTimer)
-    this.#navigationGuardTimer = setTimeout(() => { this.#navigationBlocked = false }, 200)
+    // Backstop only — the real release is render:cell-count / guard-end. Arm it
+    // as a FIXED deadline: set it once and NEVER push it out. `guard-start`
+    // re-arms this on every render of a burst, so resetting the timer each call
+    // would let a storm of renders extend the block indefinitely and strand the
+    // layer. Arming only when unset guarantees the guard clears within
+    // NAV_GUARD_BACKSTOP_MS of the FIRST arm, whatever races follow.
+    if (!this.#navigationGuardTimer) {
+      this.#navigationGuardTimer = setTimeout(() => {
+        this.#navigationGuardTimer = null
+        this.#navigationBlocked = false
+      }, NAV_GUARD_BACKSTOP_MS)
+    }
+  }
+
+  // Release the navigation-transition guard. Called when the renderer has
+  // rebuilt the tile maps for the level we navigated to: render:cell-count fires
+  // at render completion on EVERY path (full paint via applyGeometry's tail,
+  // empty/bail via clearMesh), mirrored by the post-reveal navigation:guard-end.
+  // Idempotent — a no-op when nothing is in flight (e.g. a same-level edit's
+  // cell-count), so it is safe to call from the always-firing cell-count handler.
+  #endNavigationTransition = (): void => {
+    this.#navigationBlocked = false
+    this.#consumedPointerId = null
+    if (this.#navigationGuardTimer) {
+      clearTimeout(this.#navigationGuardTimer)
+      this.#navigationGuardTimer = null
+    }
+  }
+
+  // Current lineage location as a normalized "/"-joined key. Captured BEFORE a
+  // nav commit so we can tell whether the commit actually moved.
+  #currentLocationKey(): string {
+    const lineage = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
+    return (lineage?.explorerSegments?.() ?? [])
+      .map(s => String(s ?? '').trim()).filter(Boolean).join('/')
+  }
+
+  // Release the guard immediately if a nav commit did NOT change the location —
+  // a no-op nav (back at the root; a reference/sets hop that targets where you
+  // already are). Such a nav fires no render, so render:cell-count never
+  // arrives and ONLY the backstop timer would clear the guard: a multi-second
+  // dead layer, the exact "locked onto a layer" failure. The commit updates
+  // lineage.explorerPath synchronously (explorerEnter appends; goRaw dispatches
+  // 'navigate' → followLocation), so an unchanged key here means nothing moved.
+  #releaseGuardIfNoMove(before: string): void {
+    if (this.#currentLocationKey() === before) this.#endNavigationTransition()
   }
 
   #navigateInto(label: string): void {
     const lineage = this.resolve<{ explorerEnter(name: string): void }>('lineage')
     if (!lineage) return
+
+    // Snapshot where we are BEFORE committing, so a branch that resolves to the
+    // CURRENT location (a no-op) can release the guard instead of stranding it.
+    const before = this.#currentLocationKey()
 
     // Block re-entry for the duration of this transition — every branch below
     // commits a navigation (reference portal, sets-root hop, or explorerEnter).
@@ -2040,6 +2112,7 @@ export class TileOverlayDrone extends Drone {
       this.#clearSelectionOnNavigate()
       const nav = window.ioc.get<{ goRaw?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
       nav?.goRaw?.([...refTarget])
+      this.#releaseGuardIfNoMove(before)
       return
     }
 
@@ -2068,11 +2141,14 @@ export class TileOverlayDrone extends Drone {
     const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
     if (segs.length === 1 && String(segs[0]) === 'sets') {
       const nav = window.ioc.get<{ goRaw?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
-      if (nav?.goRaw) { nav.goRaw([label]); return }
+      if (nav?.goRaw) { nav.goRaw([label]); this.#releaseGuardIfNoMove(before); return }
     }
 
     lineage.explorerEnter(label)
-    // Processor pulse triggered by lineage change
+    // Processor pulse triggered by lineage change. A valid label always appends
+    // a segment (explorerEnter guards empty/'.'/'..'), so this is never a no-op
+    // on the normal path — the check is belt-and-braces and simply won't fire.
+    this.#releaseGuardIfNoMove(before)
   }
 
   // Shared guard + commit for the back-navigation gesture (right-click or
@@ -2094,14 +2170,30 @@ export class TileOverlayDrone extends Drone {
   }
 
   #navigateBack(): void {
-    const lineage = this.resolve<{ explorerUp(): void }>('lineage')
+    const lineage = this.resolve<{ explorerUp(): void; explorerSegments?(): readonly string[] }>('lineage')
     if (!lineage) return
+    const before = this.#currentLocationKey()
     // Same race guard as #navigateInto: block a double back-gesture from
     // over-popping past the level this transition is settling on.
     this.#beginNavigationTransition()
     this.#clearSelectionOnNavigate()
     this.emitEffect('tile:navigate-back', {})
-    lineage.explorerUp()
+
+    // TRUE BACK — retrace the pages actually visited, not the structural parent.
+    // A set/collection opened from an aggregate page (/sets) is a ROOT-HOP: its
+    // own top-level segment, so popping a segment (explorerUp) would jump to the
+    // hive root instead of BACK to /sets. window.history.back() walks the real
+    // visited sequence (… → /sets → /music → back → /sets → back → root), the
+    // same mechanism as the controls-bar back button. The move settles async via
+    // popstate → render:cell-count, which ends the navigation guard; the guard's
+    // backstop timer covers a no-op back (no in-app history to pop). At the hive
+    // root there is nothing to retrace to — keep the prior no-op + release now.
+    const segs = lineage.explorerSegments?.() ?? []
+    if (segs.length === 0) { this.#releaseGuardIfNoMove(before); return }
+
+    const nav = window.ioc.get<{ back?(): void }>('@hypercomb.social/Navigation')
+    if (nav?.back) nav.back()
+    else { lineage.explorerUp(); this.#releaseGuardIfNoMove(before) }   // defensive fallback
   }
 
   #clearSelectionOnNavigate(): void {

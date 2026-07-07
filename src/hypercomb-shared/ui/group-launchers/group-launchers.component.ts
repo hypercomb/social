@@ -17,7 +17,7 @@ import { Component, OnDestroy, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { groupRegistry } from '../../core/group-registry'
 import { iconOverrides } from '../../core/icon-override.store'
-import { iconEditMode } from '../../core/icon-edit.service'
+import { iconEditMode, LONG_PRESS_MS } from '../../core/icon-edit.service'
 import '../../core/websites-group'   // side-effect: registers the websites group
 import '../../core/dashboard-group'  // side-effect: registers the dashboard group
 import '../../core/games-group'      // side-effect: registers the games group
@@ -103,7 +103,7 @@ export class GroupLaunchersComponent implements OnDestroy {
       this.#pressTimer = null
       this.#suppressClick = true   // the trailing click must not also pick
       iconEditMode.enter()
-    }, 500)
+    }, LONG_PRESS_MS)
   }
   onPressUp(): void { this.#clearPress() }
   #clearPress(): void { if (this.#pressTimer) { clearTimeout(this.#pressTimer); this.#pressTimer = null } }

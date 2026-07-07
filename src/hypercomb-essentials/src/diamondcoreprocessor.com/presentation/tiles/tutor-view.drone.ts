@@ -17,10 +17,14 @@
 
 import { Drone } from '@hypercomb/core'
 import { TUTOR_SLOT } from '../../commands/tutor-slot.js'
+import { isFeatureHidden } from '../../sharing/feature-hidden.js'
 import { TutorShell } from '../../games/tutor/shell.js'
 import type { StudyItem } from '../../games/tutor/deck.types.js'
 
 const TUTOR_VIEW = 'tutor'
+/** The tutor behaviour's feature identity (registry decorationKind) — the key
+ *  the Beehaviors panel writes a hide record under. */
+const TUTOR_DECK_KIND = 'visual:tutor:deck'
 const SIG = /^[0-9a-f]{64}$/
 
 type ViewModeShape = EventTarget & { mode: string; setMode(next: string): void }
@@ -44,6 +48,7 @@ export class TutorViewDrone extends Drone {
   #lineageBound = false
   #viewModeBound = false
   #contextMenuBound = false
+  #featureBound = false
   /** Guards against re-entrant async reconciles racing each other. */
   #reconciling = false
 
@@ -79,6 +84,12 @@ export class TutorViewDrone extends Drone {
       // so it's inert in hexagon view.
       window.addEventListener('contextmenu', this.#onContextMenu, true)
       this.#contextMenuBound = true
+    }
+    if (!this.#featureBound) {
+      // Hide / restore in the Beehaviors panel turns this behaviour off / back on.
+      this.onEffect('feature:hidden', () => { void this.#reconcile() })
+      this.onEffect('feature:restored', () => { void this.#reconcile() })
+      this.#featureBound = true
     }
     void this.#reconcile()
   }
@@ -123,6 +134,8 @@ export class TutorViewDrone extends Drone {
       if (vm && vm.mode !== TUTOR_VIEW) { this.#teardown(); return }
 
       const segments: string[] = [...(lineage.explorerSegments?.() ?? [])]
+      // Honor the Beehaviors panel's off switch (hidden-pool gate).
+      if (await isFeatureHidden(segments, TUTOR_DECK_KIND)) { this.#teardown(); return }
       const found = await this.#findItems(segments)
       if (!found || found.sigs.length === 0) { this.#teardown(); return }
       await this.#mountItems(found.sigs, found.locationSig, getResource)

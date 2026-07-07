@@ -631,15 +631,35 @@ export class HexSdfTextureShader {
         color.rgb = mix(color.rgb, neon, rim * 0.92);
       }
 
-      // hover accent: simple border glow using the active accent color
+      // hover accent: TWO distinct border highlights so a pathway tile (has
+      // children — a click navigates IN) never reads the same on hover as a
+      // leaf (a click acts in place). vHasBranch is the SAME per-tile pathway
+      // signal the branch indicator above uses, so the hover state reinforces
+      // the persistent chevron rather than washing it out. The two differ in
+      // hue, ring weight, and bloom, so which kind of tile is under the cursor
+      // is unmistakable at a glance:
+      //   • PATHWAY → the energetic accent colour, a bold ring + outward bloom
+      //     — an "enter / go deeper" cue that lights up with the chevron.
+      //   • LEAF    → a tight, cool-neutral outline with no bloom — a quiet
+      //     "focused, stops here" highlight that never masquerades as the
+      //     accent-coloured pathway glow.
       if (u_hoveredIndex >= 0.0 && abs(vCellIndex - u_hoveredIndex) < 0.5) {
-        // crisp border ring
-        float hoverRing = 1.0 - smoothstep(0.0, aa * 1.8, abs(d));
-        color.rgb = mix(color.rgb, u_accentColor, hoverRing * 0.75);
+        if (vHasBranch > 0.5) {
+          // crisp accent ring — heavier than a leaf's so a pathway reads as
+          // actionable navigation
+          float hoverRing = 1.0 - smoothstep(0.0, aa * 1.8, abs(d));
+          color.rgb = mix(color.rgb, u_accentColor, hoverRing * 0.85);
 
-        // softer outer bloom that stays near the edge
-        float hoverBloom = 1.0 - smoothstep(0.0, aa * 3.5, abs(d + aa * 1.5));
-        color.rgb += u_accentColor * hoverBloom * 0.12;
+          // outward accent bloom — the radiating "come in" halo, leaf-absent
+          float hoverBloom = 1.0 - smoothstep(0.0, aa * 4.0, abs(d + aa * 1.5));
+          color.rgb += u_accentColor * hoverBloom * 0.16;
+        } else {
+          // tight cool-neutral outline — clearly a highlight, but flatter and
+          // uncoloured so it can't be mistaken for the pathway's accent glow
+          vec3 leafHover = vec3(0.74, 0.82, 0.94);
+          float leafRing = 1.0 - smoothstep(0.0, aa * 1.15, abs(d));
+          color.rgb = mix(color.rgb, leafHover, leafRing * 0.6);
+        }
       }
 
       // premultiplied alpha output for correct blending at hex edges

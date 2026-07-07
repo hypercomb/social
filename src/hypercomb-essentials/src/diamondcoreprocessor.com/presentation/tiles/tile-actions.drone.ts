@@ -5,7 +5,7 @@ import { resolveCurrentLayer } from '../../history/layer-placement.js'
 import type { PlacementHistory } from '../../history/layer-placement.js'
 import type { OverlayActionDescriptor, OverlayTileContext, OverlayProfileKey, OverlayTintFn } from './tile-overlay.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
-import { hasDecorationKind, kindsForLabel } from '../../commands/decoration-kind-index.js'
+import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
 import { FILES_ATTACHMENT_KIND } from '../../files/files-attachment.js'
 import { FILES_ICON } from '../../files/file-types.js'
 import { SWARM_INVITE_KIND } from '../../sharing/meeting-invite.js'
@@ -245,44 +245,6 @@ export type IconRegistryEntry = {
   descriptionKey?: string
 }
 
-// True when a live peer is broadcasting a same-named tile that carries a
-// layerSig — i.e. there is a publisher's version of this locally-held tile.
-// Gates the FEATURES icon on held tiles: the features window is where the
-// two copies' differences (features + hierarchy) are inspected and merged,
-// so the icon must show even when the LOCAL copy carries no feature yet.
-const peerBroadcastsTile = (label: string): boolean => {
-  const swarm = window.ioc.get<{
-    peerTilesAtCurrentSig?: () => readonly ({ name: string } & Record<string, unknown>)[]
-  }>('@diamondcoreprocessor.com/SwarmDrone')
-  if (!swarm?.peerTilesAtCurrentSig) return false
-  for (const tile of swarm.peerTilesAtCurrentSig()) {
-    if (tile.name !== label) continue
-    if (/^[a-f0-9]{64}$/.test(String(tile['layerSig'] ?? ''))) return true
-  }
-  return false
-}
-
-// True when this tile OBVIOUSLY carries a feature with a "scripts portion" —
-// i.e. one of its decoration kinds is owned by a registered visual bee
-// (website, dashboard, audio, …). This is the honest "has features" signal:
-// a visual bee IS the code/render-type the installer would turn on, whereas
-// plain images and pure-data decorations (contact cards, file attachments —
-// which register a layer-slot/icon, NOT a VisualBeeRegistry entry) are not.
-// Reads the same live registry the per-view adoption icons use, so new
-// community view-features participate automatically and a drone toggled off
-// in DCP drops out — no hardcoded allowlist. Synchronous: kindsForLabel is
-// the hot in-memory decoration index; byDecorationKind is a Map lookup.
-const tileHasVisualBeeFeature = (label: string): boolean => {
-  const registry = window.ioc.get<{ byDecorationKind?: (kind: string) => unknown }>(
-    '@diamondcoreprocessor.com/VisualBeeRegistry',
-  )
-  if (!registry?.byDecorationKind) return false
-  for (const kind of kindsForLabel(label)) {
-    if (registry.byDecorationKind(kind)) return true
-  }
-  return false
-}
-
 // True when a tile carries a swarm invite — either a LOCAL `swarm:invite`
 // decoration (the owner's own junction) or a PEER broadcasting one over the
 // wire (its bundle sig rides as `inviteSig`; see swarm.drone publish +
@@ -369,24 +331,22 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // answers the `sync` action programmatically — a future auto-sync can ride
   // it) — never a per-tile icon. The participant's surface is Add (adopt) +
   // the features window; a feature that is ON keeps itself current.
-  // `features` (the puzzle-piece) is now "SHOW FEATURES": click it and
-  // ShowFeaturesDrone gathers the META details (no code) of the bee features
-  // this tile uses and opens the right-docked features panel — you stay in
-  // the hive. Clicking another tile's icon ADDS its features to the same
-  // list. Shown on any tile that carries a registered visual bee
-  // (tileHasVisualBeeFeature: a real render-feature, NOT a plain image or
-  // pure-data card) — the peer-broadcast requirement is gone, because viewing
-  // metadata needs no publisher branch. Registered on `private` (browsing
-  // your own hive) and `public-own` (your tile in public mode). Click handled
-  // by ShowFeaturesDrone (action 'features'); turning a feature on from the
-  // panel is BENIGN staging that only pre-ticks the installer later.
-  // Visible when the tile carries a feature — OR when a peer broadcasts a
-  // same-named copy: the features window is also the DIFF surface for two
-  // people sharing one tile with different content (peer-only features show
-  // as OFF switches to merge in; a hierarchy section lists missing children),
-  // so the icon must appear even while the local copy has no feature at all.
-  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => tileHasVisualBeeFeature(ctx.label) || peerBroadcastsTile(ctx.label), labelKey: 'action.features', descriptionKey: 'action.features.description' },
-  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => tileHasVisualBeeFeature(ctx.label) || peerBroadcastsTile(ctx.label), labelKey: 'action.features', descriptionKey: 'action.features.description' },
+  // `features` (the puzzle-piece) is the BEEHAVIORS window: click it and
+  // ShowFeaturesDrone gathers the META details (no code) of this tile's
+  // beehaviors and opens the right-docked panel — you stay in the hive.
+  // Clicking another tile's icon ADDS its rows to the same list.
+  //
+  // ALWAYS VISIBLE on every held tile — `private` (browsing your own hive)
+  // and `public-own` (your tile in public mode) — with NO feature-present /
+  // peer-broadcast gate. The panel is the STANDARD, discoverable way in (turn
+  // beehaviors on/off, adopt, review a peer's diff), so a participant never
+  // has to reach for a slash command just to FIND it; the slash commands stay
+  // as the power-user shortcut for when they're comfortable. On a tile with
+  // nothing yet the panel simply shows "no beehaviors" plus the available
+  // list; the peer diff + adopt rows still surface for a held tile a live peer
+  // also broadcasts. Click handled by ShowFeaturesDrone (action 'features').
+  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'private', labelKey: 'action.features', descriptionKey: 'action.features.description' },
+  { name: 'features', svgMarkup: ICONS.extension, hoverTint: 0xc8b8ff, profile: 'public-own', labelKey: 'action.features', descriptionKey: 'action.features.description' },
   // ── public-external profile ──
   { name: 'adopt', svgMarkup: ICONS.adopt, hoverTint: 0xa8ffd8, profile: 'public-external', labelKey: 'action.adopt', descriptionKey: 'action.adopt.description' },
   // 'hide' also lives in `public-own` (your own tile in public mode);
@@ -883,18 +843,21 @@ export class TileActionsDrone extends Drone {
     // confirm (the dialog is skipped when nothing is nested — see helper).
     if (!(await confirmRemoval(history, parent, [label]))) return
 
-    // Names are the truth. Resolve each child sig to its layer's `name`,
-    // drop the target, and pass the surviving names back. The committer
-    // re-resolves each name to its current head sig at commit time.
+    // SIG-PRESERVING drop — keep every survivor's EXACT stored sig, remove only
+    // the target. Rebuilding `children` from survivor NAMES makes committer.update
+    // re-resolve each survivor via latestMarkerSigFor on its own bag, AUTO-MINTING
+    // an empty {name} layer for any survivor whose bag is cold (freshly-installed
+    // content). That swaps the survivor's real sig for an empty one and the
+    // renderer paints it as a no-image tile. Keep the sigs verbatim instead.
     const childSigs = Array.isArray(parent.children) ? parent.children : []
-    const survivorNames: string[] = []
+    const survivorSigs: string[] = []
     for (const sig of childSigs) {
       const child = await history.getLayerBySig(sig)
-      if (!child || typeof child.name !== 'string') continue
-      if (child.name !== label) survivorNames.push(child.name)
+      // Drop only the sig we can confirm IS the target; keep everything else
+      // (incl. an unreadable sibling) so a cold miss never wipes a tile.
+      if (child && child.name === label) continue
+      survivorSigs.push(String(sig))
     }
-
-    const nextLayer = { ...parent, children: survivorNames }
 
     // Emit BEFORE awaiting the commit so the visual unmount (ShowCellDrone's
     // sync incremental path) runs immediately. The OPFS cascade in
@@ -904,7 +867,9 @@ export class TileActionsDrone extends Drone {
     // emit is safe; if the background commit throws, the cell will reappear
     // on the next layer re-read (no worse than today's failure mode).
     EffectBus.emit('cell:removed', { cell: label, segments })
-    await committer.update(segments, nextLayer)
+    // Empty nameSlots → SET `children` to these exact sigs (no re-resolve, no
+    // auto-mint); other slots hydrate from the previous layer.
+    await committer.update(segments, { children: survivorSigs }, new Set<string>())
   }
 
   #bulkRerollSelected(): void {

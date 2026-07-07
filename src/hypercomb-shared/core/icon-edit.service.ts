@@ -11,7 +11,7 @@
 
 import { EffectBus } from '@hypercomb/core'
 
-const LONG_PRESS_MS = 500
+export const LONG_PRESS_MS = 5000
 
 export class IconEditMode extends EventTarget {
   #on = false

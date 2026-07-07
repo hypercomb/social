@@ -301,6 +301,10 @@ interface HistoryServiceLike {
   sign: (l: LineageLike) => Promise<string>
   currentLayerAt: (locationSig: string) => Promise<{ children?: readonly string[]; name?: string } | null>
   getLayerBySig: (sig: string) => Promise<{ name?: string } | null>
+  // Seal a subtree's LIVE location heads into a merkle-correct root sig for
+  // sharing — leaf-only commit leaves parent.children frozen/stale. Optional so
+  // an older HistoryService without it falls back to the raw child sig.
+  sealSubtree?: (segments: readonly string[]) => Promise<string | null>
 }
 
 interface StoreLike {
@@ -2403,9 +2407,21 @@ const payload: SwarmLayerPayload = myLabel
         const resolved = await Promise.all(childSigs.map(async (cs) => {
           try {
             const child = await history.getLayerBySig(cs)
-            return typeof child?.name === 'string' && child.name.length > 0
-              ? { name: child.name, layerSig: cs }
-              : null
+            const nm = typeof child?.name === 'string' && child.name.length > 0 ? child.name : null
+            if (!nm) return null
+            // Publish the SEALED (merkle-consolidated) handle, not the raw
+            // parent.children sig. Under leaf-only commit `cs` is frozen at THIS
+            // parent's last commit and omits any descendant added since (a page
+            // added under a site re-commits the site's own head, never this
+            // parent), so a peer pulling `cs` gets the tile but none of its
+            // pages. sealSubtree re-runs the merkle cascade from live location
+            // heads so the handle names the WHOLE current subtree. Falls back to
+            // the raw sig if the seal can't fully resolve right now (a cold child).
+            let handle = cs
+            if (history.sealSubtree) {
+              try { handle = (await history.sealSubtree([...segments, nm])) || cs } catch { handle = cs }
+            }
+            return { name: nm, layerSig: handle }
           } catch { return null }
         }))
         const refs = resolved.filter((n): n is { name: string; layerSig: string } => n !== null)
@@ -3075,9 +3091,21 @@ const payload: SwarmLayerPayload = myLabel
         const resolved = await Promise.all(childSigs.map(async (cs) => {
           try {
             const child = await history.getLayerBySig(cs)
-            return typeof child?.name === 'string' && child.name.length > 0
-              ? { name: child.name, layerSig: cs }
-              : null
+            const nm = typeof child?.name === 'string' && child.name.length > 0 ? child.name : null
+            if (!nm) return null
+            // Publish the SEALED (merkle-consolidated) handle, not the raw
+            // parent.children sig. Under leaf-only commit `cs` is frozen at THIS
+            // parent's last commit and omits any descendant added since (a page
+            // added under a site re-commits the site's own head, never this
+            // parent), so a peer pulling `cs` gets the tile but none of its
+            // pages. sealSubtree re-runs the merkle cascade from live location
+            // heads so the handle names the WHOLE current subtree. Falls back to
+            // the raw sig if the seal can't fully resolve right now (a cold child).
+            let handle = cs
+            if (history.sealSubtree) {
+              try { handle = (await history.sealSubtree([...segments, nm])) || cs } catch { handle = cs }
+            }
+            return { name: nm, layerSig: handle }
           } catch { return null }
         }))
         childEntries = resolved.filter((n): n is { name: string; layerSig: string } => n !== null)

@@ -20,6 +20,8 @@
 
 import { Drone, EffectBus, I18N_IOC_KEY } from '@hypercomb/core'
 import { childNamesOf } from '../../history/layer-placement.js'
+import { isFeatureHidden } from '../../sharing/feature-hidden.js'
+import { HOME_PAGE_KIND } from '../../commands/home.queen.js'
 import {
   HOME_WIDGET_KIND, homeWidgetRenderer,
   HOME_INK, HOME_TEXT, HOME_DIM, HOME_STEEL, HOME_CARD_BG, HOME_CARD_BORDER,
@@ -121,6 +123,9 @@ export class HomeViewDrone extends Drone {
       this.onEffect('decorations:changed', () => { void this.#reconcile() })
       this.onEffect('cell:added', () => { void this.#reconcile() })
       this.onEffect('cell:removed', () => { void this.#reconcile() })
+      // Hide / restore in the Beehaviors panel turns this behaviour off / back on.
+      this.onEffect('feature:hidden', () => { void this.#reconcile() })
+      this.onEffect('feature:restored', () => { void this.#reconcile() })
       this.#effectsBound = true
     }
     void this.#reconcile()
@@ -185,6 +190,8 @@ export class HomeViewDrone extends Drone {
       if (!lineage || !store?.getResource || !history) return
 
       const segments: string[] = [...(lineage.explorerSegments?.() ?? [])]
+      // Honor the Beehaviors panel's off switch (hidden-pool gate, as SiteView).
+      if (await isFeatureHidden(segments, HOME_PAGE_KIND)) { this.#teardown(); return }
       const cards = await this.#collectChildren(segments, history, store)
       if (this.#vm()?.mode !== HOME_VIEW) { this.#teardown(); return } // mode flipped mid-read
 

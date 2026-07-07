@@ -24,7 +24,7 @@ export interface KeyChord {
 
 export interface KeyBinding {
   cmd: string              // e.g. 'tile.branch', 'navigation.fullscreen'
-  sequence: KeyChord[][]   // outer = sequence steps, inner = simultaneous keys per step
+  sequence: KeyChord[][]   // outer = sequence steps (pressed in order); inner = ALTERNATIVE keys for that step (any-of). Modifiers ride on each KeyChord, so a one-entry step is a plain chord.
   description?: string
   descriptionKey?: string   // i18n key for localized description (resolved at render time)
   category?: string

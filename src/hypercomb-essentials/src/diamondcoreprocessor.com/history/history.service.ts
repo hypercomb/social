@@ -1775,6 +1775,104 @@ export class HistoryService {
     return layer
   }
 
+  // ── merkle SEAL for sharing (leaf-only-commit safe) ───────────────────
+  // Consolidated-sig cache: locationSig → { key, sealedSig }. `key` folds the
+  // location's live head sig + its children's sealed sigs, so any change at or
+  // below a node invalidates exactly that node's entry.
+  readonly #sealCache = new Map<string, { key: string; sealedSig: string }>()
+
+  /**
+   * Seal a tile's subtree into a merkle-correct root sig for SHARING, WITHOUT
+   * touching history. Under leaf-only commit (per-page history — the cascade is
+   * stopped) a parent layer's `children` sigs are frozen at the parent's LAST
+   * commit, so a descendant added since (a page added under a site) is invisible
+   * to any consumer that walks the content-sig chain: broker.adopt,
+   * flattenLayerTree, and the swarm publish handle. Local navigation is
+   * unaffected — it resolves each location's LIVE head via currentLayerAt — so
+   * the staleness only surfaces when the tree leaves this machine. Sharing the
+   * raw child sig therefore ships a CHILDLESS snapshot: the adopter gets the
+   * host tile and none of its pages ("adopted, but no tiles").
+   *
+   * sealSubtree re-runs the merkle cascade for `segments` from LIVE location
+   * heads. Bottom-up, each internal node is re-signed with its children pointing
+   * at their freshly-sealed sigs; the consolidated bytes are pool-written by sig
+   * (store.writeLayerBytes) with NO marker, NO head advance, NO history entry —
+   * leaf-only commit and the participant's history stay exactly as they are. The
+   * sealed layers live in this pool and are served to peers over the mesh, so a
+   * peer adopting the sealed root walks the whole subtree with the UNCHANGED
+   * content-sig walk; nothing downstream of the publish handle changes.
+   *
+   * Returns the sealed root sig, or null when the subtree can't be fully
+   * resolved right now (a cold / unpooled child) so the caller shares the live
+   * sig rather than a lossy seal. Memoised per location by (headSig + children)
+   * so an unchanged subtree re-seals in O(nodes) map hits with no re-hash /
+   * re-write; `visited` guards against corrupt cycles.
+   */
+  public readonly sealSubtree = async (
+    segments: readonly string[],
+    visited: Set<string> = new Set(),
+  ): Promise<string | null> => {
+    const locSig = await this.sign({ explorerSegments: () => [...segments] })
+    if (!locSig || visited.has(locSig)) return null
+    visited.add(locSig)
+
+    const head = await this.currentLayerAt(locSig)
+    if (!head) return null
+    const headSig = this.#latestSigByLineage.get(locSig) ?? null
+
+    // A location's DIRECT children are authoritative at its own head (adding,
+    // removing or renaming a direct child re-commits THIS head). Seal each child
+    // through its OWN live head — recursing by LOCATION, never by the possibly-
+    // stale child sig, is what freshens grandchildren and deeper.
+    const childSigs = Array.isArray(head.children) ? head.children : []
+    const sealedChildren: string[] = []
+    for (const cs of childSigs) {
+      const child = await this.getLayerBySig(String(cs))
+      const name = (child?.name ?? '').trim()
+      if (!name) return null // cold / unresolvable child — refuse a lossy seal
+      const sealed = await this.sealSubtree([...segments, name], visited)
+      if (!sealed) return null
+      sealedChildren.push(sealed)
+    }
+
+    // Leaf: the head is already a correct merkle node. getLayerBySig ===
+    // canonicalizeLayer (a round-trip invariant), so re-signing reproduces the
+    // SAME sig — reuse the head sig when known, else materialise it.
+    if (sealedChildren.length === 0) {
+      if (headSig) return headSig
+      const leaf = await HistoryService.#signLayer(head)
+      await HistoryService.#poolWriteLayer(leaf.sig, leaf.bytes)
+      return leaf.sig
+    }
+
+    // Internal node: rebuild with children → sealed sigs; memoise on the fold.
+    const key = `${headSig ?? ''}|${sealedChildren.join(',')}`
+    const memo = this.#sealCache.get(locSig)
+    if (memo && memo.key === key) return memo.sealedSig
+    const { sig, bytes } = await HistoryService.#signLayer({ ...head, children: sealedChildren })
+    await HistoryService.#poolWriteLayer(sig, bytes)
+    this.#sealCache.set(locSig, { key, sealedSig: sig })
+    return sig
+  }
+
+  /** Canonicalize → encode → sha256 a layer, exactly as commitLayer does, but
+   *  WITHOUT committing it. Backs sealSubtree's node materialisation. */
+  static readonly #signLayer = async (
+    layer: LayerContent,
+  ): Promise<{ sig: string; bytes: Uint8Array }> => {
+    const canonical = HistoryService.canonicalizeLayer(layer)
+    const bytes = new TextEncoder().encode(JSON.stringify(canonical))
+    const sig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+    return { sig, bytes }
+  }
+
+  /** Pool-write layer bytes by sig (additive, content-addressed, dedup) with NO
+   *  marker — the seal's only side effect. */
+  static readonly #poolWriteLayer = async (sig: string, bytes: Uint8Array): Promise<void> => {
+    const store = get<{ writeLayerBytes?: (s: string, b: ArrayBuffer) => Promise<void> }>('@hypercomb.social/Store')
+    if (store?.writeLayerBytes) await store.writeLayerBytes(sig, bytes.buffer as ArrayBuffer)
+  }
+
   /**
    * The child NAMES directly under a location path — the SAME source of
    * truth the renderer uses (`currentLayerAt` → each child sig's own

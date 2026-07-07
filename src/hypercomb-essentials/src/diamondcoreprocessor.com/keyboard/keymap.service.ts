@@ -202,7 +202,15 @@ export class KeyMapService extends EventTarget {
   // -------------------------------------------------
 
   #matchesChord(e: KeyboardEvent, chord: KeyChord[]): boolean {
-    return chord.every(k => this.#matchesSingleKey(e, k))
+    // A step's KeyChords are ALTERNATIVES (any-of), not simultaneous. A keydown
+    // carries exactly one base key, so listing several base keys in one step can
+    // only mean "delete OR backspace" — never "both at once". Modifiers
+    // (ctrl/shift/alt/meta/primary) ride ON each KeyChord, so a lone-key step is
+    // unaffected: `.some` and `.every` agree for the one-entry steps every other
+    // binding uses. This is what lets `selection.remove` fire from a SINGLE
+    // Delete or Backspace press (previously it was authored as a two-step
+    // sequence — Delete THEN Backspace — so a lone press deleted nothing).
+    return chord.some(k => this.#matchesSingleKey(e, k))
   }
 
   #matchesSingleKey(e: KeyboardEvent, k: KeyChord): boolean {

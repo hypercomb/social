@@ -40,19 +40,46 @@
           <ul class="landing-grid" role="list">
             @for (name of collections(); track name) {
               <li>
-                <button class="set-card" type="button" (click)="openCollection(name)"
-                        [style.--accent]="accent(name)">
-                  <span class="set-hex">
-                    @if (images().get(name); as img) {
-                      <img class="set-hex-img" [src]="img" alt="" decoding="async" />
-                    } @else {
-                      <span class="set-hex-fallback">
-                        <span class="set-icon mat-sym">workspaces</span>
-                      </span>
+                <div class="set-card" [class.is-renaming]="renaming() === name" [style.--accent]="accent(name)">
+                  <button class="set-open" type="button" (click)="openCollection(name)"
+                          [attr.aria-label]="name">
+                    <span class="set-hex">
+                      @if (images().get(name); as img) {
+                        <img class="set-hex-img" [src]="img" alt="" decoding="async" />
+                      } @else {
+                        <span class="set-hex-fallback">
+                          <span class="set-icon mat-sym">workspaces</span>
+                        </span>
+                      }
+                    </span>
+                    @if (renaming() !== name) {
+                      <span class="set-name">{{ name }}</span>
                     }
-                  </span>
-                  <span class="set-name">{{ name }}</span>
-                </button>
+                  </button>
+
+                  @if (renaming() === name) {
+                    <form class="set-rename" (submit)="$event.preventDefault(); renameCollection(name, renameField)">
+                      <input #renameField class="set-rename-input" type="text" [value]="name" autocomplete="off"
+                             [attr.aria-label]="'collections-landing.rename' | t"
+                             (keydown.escape)="cancelRename()" (blur)="cancelRename()" />
+                    </form>
+                  }
+
+                  @if (renaming() !== name) {
+                    <div class="set-actions">
+                      <button class="set-action" type="button" (click)="startRename(name, $event)"
+                              [attr.aria-label]="'collections-landing.rename' | t" [title]="'collections-landing.rename' | t">
+                        <span class="mat-sym">edit</span>
+                      </button>
+                      @if (manageable(name)) {
+                        <button class="set-action set-action-danger" type="button" (click)="deleteCollection(name)"
+                                [attr.aria-label]="'collections-landing.delete' | t" [title]="'collections-landing.delete' | t">
+                          <span class="mat-sym">delete</span>
+                        </button>
+                      }
+                    </div>
+                  }
+                </div>
               </li>
             }
           </ul>

@@ -384,6 +384,25 @@ export class ShowFeaturesDrone extends Drone {
       }
     }
 
+    // ── 1b. SLOT-BASED — a bee whose feature lives in a first-class layer slot
+    // (e.g. tutor's `tutor` deck, or a website's `website` slot) rather than a
+    // decoration. Mirror ViewBee's slot-OR-decoration gate so slot behaviours
+    // are on/off-toggleable in this panel too (they'd otherwise only ever show
+    // as "available" with no switch). Keyed by the bee's decorationKind — the
+    // same identity the hidden pool records a hide under.
+    const slotLayer = await this.#layerAt(segments)
+    if (slotLayer) {
+      for (const bee of registry.all?.() ?? []) {
+        if (!bee.slot || appliedViews.has(bee.view)) continue
+        const slotVal = slotLayer[bee.slot]
+        if (!Array.isArray(slotVal) || !slotVal.some(s => typeof s === 'string' && SIG_RE.test(s))) continue
+        const feature = this.#recognize(bee.decorationKind, registry)
+        if (!feature) continue
+        appliedViews.add(bee.view)
+        applied.push(this.#describe(feature, bee.decorationKind, i18n, 'direct', undefined, branchSig, segments))
+      }
+    }
+
     // ── 2. CASCADED — cascading features on an ANCESTOR, nearest → root ──
     // A closer declaration shadows one further up (mirrors DropboxService).
     for (let depth = parent.length; depth >= 0; depth--) {
@@ -782,6 +801,20 @@ export class ShowFeaturesDrone extends Drone {
       ...(originCell ? { originCell } : {}),
       ...(originSegments && originSegments.length ? { originSegments: [...originSegments] } : {}),
       ...(branchSig ? { branchSig } : {}),
+    }
+  }
+
+  /** The raw layer at this exact location — used to detect SLOT-based features
+   *  (a bee whose content rides a first-class slot, not a decoration). Cold-cache
+   *  miss / unresolved → null. */
+  async #layerAt(segments: readonly string[]): Promise<Record<string, unknown> | null> {
+    const history = this.#ioc()?.get<HistoryLike>(HISTORY_KEY)
+    if (!history) return null
+    try {
+      const locationSig = await history.sign({ explorerSegments: () => segments })
+      return (await history.currentLayerAt(locationSig)) as Record<string, unknown> | null
+    } catch {
+      return null
     }
   }
 

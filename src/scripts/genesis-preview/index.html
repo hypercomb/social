@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hypercomb — genesis (Pixi.js)</title>
+<style>
+  *{ box-sizing:border-box; margin:0; padding:0; }
+  html,body{ height:100%; }
+  body{
+    background:
+      radial-gradient(120% 90% at 50% 42%, #0c1018 0%, #05060a 60%, #030409 100%);
+    overflow:hidden;
+    font-family:ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    color:#8ea0b4;
+  }
+  #stage{ position:fixed; inset:0; }
+  #stage canvas{ display:block; }
+
+  .readout{
+    position:fixed; top:22px; left:24px; z-index:5;
+    font-size:11px; letter-spacing:.14em; text-transform:uppercase;
+    line-height:1.9; pointer-events:none; user-select:none;
+  }
+  .readout .k{ color:#4c5b6e; }
+  .readout .v{ color:#c7d4e0; }
+  .readout .shape{ color:#f5f9fc; font-size:13px; letter-spacing:.08em; }
+  .readout .n{ font-variant-numeric:tabular-nums; }
+  .readout .badge{ color:#5f7186; font-size:10px; letter-spacing:.2em; margin-top:8px; }
+
+  .mark{
+    position:fixed; left:0; right:0; bottom:14%; z-index:5;
+    text-align:center; pointer-events:none;
+    font-size:clamp(13px,2.4vw,20px); letter-spacing:.62em; text-indent:.62em;
+    color:#dfe8f0; opacity:0; transition:opacity .6s ease;
+    text-transform:uppercase; font-weight:600;
+  }
+  .mark small{ display:block; margin-top:10px; font-size:.5em; letter-spacing:.3em;
+    color:#5f7186; text-indent:.3em; }
+
+  .bar{
+    position:fixed; left:50%; bottom:20px; transform:translateX(-50%); z-index:5;
+    display:flex; align-items:center; gap:6px;
+    padding:6px; border:1px solid #1b2530; border-radius:10px;
+    background:rgba(8,11,16,.62); backdrop-filter:blur(6px);
+  }
+  .bar button{
+    font:inherit; font-size:11px; letter-spacing:.08em;
+    color:#a9b8c8; background:transparent; border:1px solid transparent;
+    padding:6px 11px; border-radius:7px; cursor:pointer; text-transform:uppercase;
+    transition:background .15s,color .15s,border-color .15s;
+  }
+  .bar button:hover{ background:#121a24; color:#e6eef5; }
+  .bar button.on{ color:#ffb030; border-color:#3a3320; background:#15130c; }
+  .bar button:focus-visible{ outline:2px solid #3f5a72; outline-offset:2px; }
+  .bar .sep{ width:1px; height:20px; background:#1b2530; margin:0 3px; }
+  .bar .sp{ color:#4c5b6e; font-size:11px; padding:0 4px; min-width:38px; text-align:center;
+    font-variant-numeric:tabular-nums; }
+
+  @media (prefers-reduced-motion: reduce){ .mark{ transition:none; } }
+</style>
+</head>
+<body>
+  <div id="stage"></div>
+
+  <div class="readout">
+    <div><span class="k">phase</span> <span class="v" id="r-phase">—</span></div>
+    <div class="shape" id="r-shape">·</div>
+    <div><span class="k">points</span> <span class="v n" id="r-n">0</span></div>
+    <div class="badge" id="r-badge">pixi.js — webgl</div>
+  </div>
+
+  <div class="mark" id="mark">Hypercomb<small>a living structure</small></div>
+
+  <div class="bar">
+    <button id="b-play" title="Pause / play">Pause</button>
+    <span class="sep"></span>
+    <button id="b-slow" title="Slower">−</button>
+    <span class="sp" id="b-spd">1.0×</span>
+    <button id="b-fast" title="Faster">+</button>
+    <span class="sep"></span>
+    <button id="b-edges" class="on" title="Toggle wireframe">Edges</button>
+    <button id="b-warm" class="on" title="Warm birth spark">Spark</button>
+    <span class="sep"></span>
+    <button id="b-restart" title="Restart cycle">Restart</button>
+  </div>
+
+  <script type="module" src="./genesis.js"></script>
+</body>
+</html>

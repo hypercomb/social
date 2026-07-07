@@ -160,10 +160,14 @@ export const defaultKeyMap: KeyMapLayer = {
       category: 'Selection',
     },
 
-    // Remove
+    // Remove — Delete OR Backspace. ONE step listing both keys as alternatives
+    // (see #matchesChord). This was `[[{key:'delete'}],[{key:'backspace'}]]` —
+    // TWO steps, i.e. "press Delete THEN Backspace" — so a lone Delete/Backspace
+    // advanced the sequence and timed out, deleting nothing (the "delete tiles
+    // is not working" bug). Cross-platform: Windows sends 'delete', macOS 'backspace'.
     {
       cmd: 'selection.remove',
-      sequence: [[{ key: 'delete' }], [{ key: 'backspace' }]],
+      sequence: [[{ key: 'delete' }, { key: 'backspace' }]],
       description: 'Remove selected tiles',
       descriptionKey: 'keymap.remove',
       category: 'Editing',

@@ -78,7 +78,11 @@ async function navigateTo(page, segments) {
 async function fireAdopt(page, label) {
   return page.evaluate((cellLabel) => {
     const swarm = window.ioc?.get?.('@diamondcoreprocessor.com/SwarmDrone')
-    swarm?.emitEffect?.('tile:action', { action: 'adopt', label: cellLabel, q: 0, r: 0, index: 0 })
+    // `adopt-feature` is the REAL download/fold trigger since lazy-adopt (commit
+    // 75069eaa): bare `adopt` now only OPENS the features panel and folds
+    // nothing. Firing `adopt` here is why this harness silently regressed to
+    // "all combos fail" — it never actually adopted.
+    swarm?.emitEffect?.('tile:action', { action: 'adopt-feature', label: cellLabel })
   }, label)
 }
 
@@ -128,7 +132,7 @@ async function runScenario(publisherPort, adopterPort) {
   await configure(B.page)
   await B.page.reload({ waitUntil: 'domcontentloaded' })
   if (!(await waitForReady(B.page))) { log('B', 'TIMEOUT'); return { ok: false, reason: 'B TIMEOUT' } }
-  await new Promise(r => setTimeout(r, 3000))
+  await new Promise(r => setTimeout(r, 5000)) // mesh delivery: B must SEE dolphin as a peer before adopt-feature
 
   await fireAdopt(B.page, 'dolphin')
 

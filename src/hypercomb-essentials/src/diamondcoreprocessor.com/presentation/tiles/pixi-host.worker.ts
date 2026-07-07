@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/pixi/pixi-host.worker.ts
 import { Worker } from '@hypercomb/core'
-import { Application, Container } from 'pixi.js'
+import { Application, Container, Sprite, RenderTexture, Texture } from 'pixi.js'
 import {
   computeStageCenter,
   computeViewportOrigin,
@@ -435,6 +435,33 @@ export class PixiHostWorker extends Worker {
       renderer: this.app.renderer,
     })
     ;(window as any).__hcBoot?.('render:host-ready emitted')
+
+    // ── Pre-warm the Sprite→RenderTexture pipeline ──────────────────────
+    // The first atlas bake (HexImageAtlas.loadImage → renderer.render of a
+    // Sprite into a RenderTexture) pays a one-time WebGL cost — batch-shader
+    // program compile/link + first render-target FBO bind — measured ~3.3s
+    // cold on integrated GPUs. It can't start until the layer resolves and
+    // geometry builds (~3.6s in), so it lands squarely ON the first-paint
+    // critical path. Issuing one throwaway Sprite→RenderTexture render HERE,
+    // right at host-ready, moves that compile into the idle window before the
+    // first real decode. If the driver compiles in parallel (Chrome's
+    // KHR_parallel_shader_compile), the first real tile then bakes warm
+    // (~15ms) instead of cold. Best-effort: on failure the first bake just
+    // costs what it always did. The logged duration is the diagnostic —
+    // fast here + fast first-decode = overlap win; ~3.3s here = synchronous
+    // compile (merely reordered, not removed).
+    try {
+      const renderer = this.app?.renderer
+      if (renderer) {
+        const t0 = performance.now()
+        const warmTarget = RenderTexture.create({ width: 8, height: 8 })
+        const warmSprite = new Sprite(Texture.WHITE)
+        renderer.render({ container: warmSprite, target: warmTarget, clear: true })
+        warmSprite.destroy()
+        warmTarget.destroy(true)
+        ;(window as any).__hcBoot?.(`gpu pipeline pre-warmed (${(performance.now() - t0).toFixed(0)}ms)`)
+      }
+    } catch { /* best-effort — a cold first bake just costs what it always did */ }
   }
 }
 

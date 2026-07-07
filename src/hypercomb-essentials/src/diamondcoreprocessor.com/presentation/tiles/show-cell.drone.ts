@@ -3900,8 +3900,24 @@ export class ShowCellDrone extends Drone {
     // force a fresh paint since renders were suppressed.
     this.onEffect<{ visible: boolean }>('render:set-hive-visible', ({ visible }) => {
       this.#hiveHidden = !visible
-      if (this.layer) this.layer.visible = visible
-      if (visible) this.requestRender()
+      if (!visible) {
+        if (this.layer) this.layer.visible = false
+        return
+      }
+      // Becoming visible again. If the location changed WHILE the hive was
+      // hidden — a shell landing (e.g. the collections page at /sets) navigates
+      // into a node before restoring the hive — the mesh still holds the OLD
+      // node's tiles. Flipping the layer visible would flash those stale tiles
+      // for a frame before the async repaint lands (the blink). Tear the stale
+      // mesh down first so the reveal shows the empty ink field, then repaint
+      // the current node. When the location is UNCHANGED (screensaver dismiss)
+      // the mesh is already correct — reveal instantly, no clear, no regression.
+      const currentKey = String(this.resolve<any>('lineage')?.explorerLabel?.() ?? '/')
+      if (this.renderedLocationKey && currentKey !== this.renderedLocationKey) {
+        this.clearMesh('hive revealed at a new location — drop stale tiles before repaint')
+      }
+      if (this.layer) this.layer.visible = true
+      this.requestRender()
     })
 
     // viewport:persisted — VP just wrote pan/zoom/meshOffset for some
