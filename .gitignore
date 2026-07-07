@@ -31,6 +31,11 @@ yarn-error.log*
 # Claude Code
 .claude/
 
+# Agent git worktrees created at the repo root (.wt-<name>/). These are live
+# worktrees, not content — never commit them (a stray `git add` turns one into
+# a gitlink/submodule with no .gitmodules entry, which breaks CI checkout).
+.wt-*/
+
 # Dev drones and essentials (generated build artifacts)
 src/hypercomb-web/public/dev/
 src/hypercomb-web/public/content/*
