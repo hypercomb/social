@@ -94,15 +94,21 @@ jobs:
               echo "OK: $ROOT/$f"
             fi
           done
-          # Verify essentials content was copied into the build
-          for dir in __bees__ __layers__ __dependencies__; do
-            if [ ! -d "$ROOT/$dir" ] || [ -z "$(ls -A "$ROOT/$dir")" ]; then
-              echo "MISSING or empty essentials directory: $ROOT/$dir"
-              exit 1
-            else
-              echo "OK: $ROOT/$dir ($(ls "$ROOT/$dir" | wc -l) files)"
-            fi
-          done
+          # Essentials content now ships as FLAT signature-named files at the
+          # app root (the __bees__/__layers__/__dependencies__ typed dirs were
+          # retired — copy-to-dcp.ts emits bare <sig> files + manifest.json).
+          # Verify the manifest lists packages and the flat sig files landed.
+          PKG_KEYS=$(jq -r '.packages | keys[]' "$ROOT/manifest.json")
+          if [ -z "$PKG_KEYS" ]; then
+            echo "manifest.json contains no package entries"
+            exit 1
+          fi
+          SIG_COUNT=$(find "$ROOT" -maxdepth 1 -type f -regextype posix-extended -regex '.*/[0-9a-f]{64}' | wc -l)
+          if [ "$SIG_COUNT" -eq 0 ]; then
+            echo "No flat signature-named content files found in $ROOT"
+            exit 1
+          fi
+          echo "OK: manifest packages present; $SIG_COUNT flat content files."
           echo ""
           echo "All required artifacts present."
       - name: Upload to Azure Static Web Apps
