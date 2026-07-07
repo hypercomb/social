@@ -32,8 +32,8 @@
     position:fixed; left:0; right:0; bottom:14%; z-index:5;
     text-align:center; pointer-events:none;
     font-size:clamp(13px,2.4vw,20px); letter-spacing:.62em; text-indent:.62em;
-    color:#dfe8f0; opacity:0; transition:opacity .6s ease;
-    text-transform:uppercase; font-weight:600;
+    color:#dfe8f0; opacity:0;
+    text-transform:none; font-weight:600;
   }
   .mark small{ display:block; margin-top:10px; font-size:.5em; letter-spacing:.3em;
     color:#5f7186; text-indent:.3em; }
@@ -70,17 +70,17 @@
     <div class="badge" id="r-badge">pixi.js — webgl</div>
   </div>
 
-  <div class="mark" id="mark">Hypercomb<small>a living structure</small></div>
+  <div class="mark" id="mark" style="opacity:1">hypercomb</div>
 
   <div class="bar">
     <button id="b-play" title="Pause / play">Pause</button>
     <span class="sep"></span>
     <button id="b-slow" title="Slower">−</button>
-    <span class="sp" id="b-spd">1.0×</span>
+    <span class="sp" id="b-spd">1.25×</span>
     <button id="b-fast" title="Faster">+</button>
     <span class="sep"></span>
-    <button id="b-edges" class="on" title="Toggle wireframe">Edges</button>
-    <button id="b-warm" class="on" title="Warm birth spark">Spark</button>
+    <button id="b-edges" title="Toggle wireframe">Edges</button>
+    <button id="b-warm" title="Warm birth spark">Spark</button>
     <span class="sep"></span>
     <button id="b-restart" title="Restart cycle">Restart</button>
   </div>

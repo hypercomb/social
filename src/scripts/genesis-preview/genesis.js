@@ -27,8 +27,12 @@ import { Application, Container, Graphics, Sprite, Texture } from './vendor/pixi
   // a point sweeping across the shape. The apex (index 2) is the newcomer — it pops in at the top.
   const PIN = {
     1: [[0, 0.2571, 0.9664]],                // tilt-corrected front pole → projects to dead center
-    2: [[-1,0,0],[1,0,0]],
-    3: [[-S3,-0.5,0],[S3,-0.5,0],[0,1,0]],   // left base, right base, apex(new)
+    2: [[0,1,0],[0,-1,0]],                   // vertical line: top, bottom
+    3: [[0,1,0],[-S3,-0.5,0],[S3,-0.5,0]],   // apex stays on top; the bottom point splits left/right
+  };
+  const BIRTH = {                            // where a pinned newcomer is born, so it visibly splits off
+    2: [0, 0.2571, 0.9664],                  // from the centre dot → pushes apart vertically
+    3: [0, -1, 0],                           // from the bottom point → splits left ↔ right
   };
 
   let pts = [];                                  // { p:[x,y,z] unit vector, s, born }
@@ -49,7 +53,9 @@ import { Application, Container, Graphics, Sprite, Texture } from './vendor/pixi
   function setCount(n){
     while(pts.length < n){
       const i=pts.length;
-      const pos = (n<=3 && PIN[n]) ? PIN[n][i].slice() : (i<3 && pts.length<3 ? [0,0,1] : emptiestDir());
+      let pos;
+      if(n<=3) pos = (BIRTH[n] || PIN[n][i]).slice();   // pinned newcomer births at the split origin, then glides
+      else pos = emptiestDir();
       pts.push({ p:pos, s:0, born:nowSec });
     }
     if(pts.length > n) pts.length = n;
@@ -80,11 +86,13 @@ import { Application, Container, Graphics, Sprite, Texture } from './vendor/pixi
     }
   }
 
-  // ================= timeline (stateless in t) =================
-  const STEP_DT=0.2, STEPS=6, STEP_END=STEP_DT*STEPS;   // boom · step · step …
-  const BALL_T=1.5,  BALL_END=STEP_END+BALL_T;          // accelerating fill + zoom-out
-  const RECEDE=0.3,  TOTAL=BALL_END+RECEDE;             // recede + loop  (3.0s)
-  const SPIN=0.45, TILT=0.26, ZOOM_MIN=0.4;
+  // ================= timeline — forward: fill, then collapse straight DOWN to an opaque white dot =================
+  const HOLD0=0.3, STEP_DT=0.2, STEP_END=HOLD0+5*STEP_DT;   // boom · step · step …
+  const BALL_T=1.5, BALL_END=STEP_END+BALL_T;           // sphere fully formed
+  const COLLAPSE=0.7, COLLAPSE_END=BALL_END+COLLAPSE;   // shrink straight down to the white dot (no fade)
+  const DOT_HOLD=0.8, TOTAL=COLLAPSE_END+DOT_HOLD;      // hold on the white dot, then loop
+  const SPIN=0.45, TILT=0.26;
+  const ZOOM0=0.75, ZOOM_STEP=0.62, ZOOM_MIN=0.30, ZOOM_DOT=0.045;   // start ~0.75, work down, then down to the dot
   const ease = x => x*x*(3-2*x);
   const smooth = (a,b,x)=>{ const t=Math.min(1,Math.max(0,(x-a)/(b-a))); return t*t*(3-2*t); };
 
@@ -93,14 +101,14 @@ import { Application, Container, Graphics, Sprite, Texture } from './vendor/pixi
   function timeline(dt){
     nowSec += dt;
     if(nowSec >= TOTAL){ nowSec -= TOTAL; pts=[]; lastN=-1; }
-    const t = nowSec;
-    let N;
-    if(t < STEP_END){ N=Math.min(STEPS, 1+Math.floor(t/STEP_DT)); zoom=1; fade=1; edgeK=1; phaseName=N<3?'2D':'3D'; }
-    else if(t < BALL_END){ const tau=(t-STEP_END)/BALL_T;
-      N=Math.min(NMAX, Math.round(6*Math.pow(NMAX/6, tau)));
-      zoom=1-(1-ZOOM_MIN)*ease(tau); fade=1; edgeK=1-ease(tau); phaseName='ball'; }
-    else { const r=(t-BALL_END)/RECEDE; N=NMAX; zoom=ZOOM_MIN-0.25*r; fade=1-ease(r); edgeK=0; phaseName='recede'; }
-    backCull = smooth(8, 34, pts.length);                // hero shapes show all; ball hides the back
+    const t=nowSec; let N;
+    if(t < HOLD0){ N=1; zoom=ZOOM0-(ZOOM0-ZOOM_STEP)*ease(t/STEP_END); phaseName='start'; edgeK=1; }
+    else if(t < STEP_END){ N=Math.min(6, 2+Math.floor((t-HOLD0)/STEP_DT)); zoom=ZOOM0-(ZOOM0-ZOOM_STEP)*ease(t/STEP_END); phaseName=N<3?'2D':'3D'; edgeK=1; }
+    else if(t < BALL_END){ const tau=(t-STEP_END)/BALL_T; N=Math.min(NMAX, Math.round(6*Math.pow(NMAX/6, tau))); zoom=ZOOM_STEP-(ZOOM_STEP-ZOOM_MIN)*ease(tau); phaseName='fill'; edgeK=1-ease(tau); }
+    else if(t < COLLAPSE_END){ const r=(t-BALL_END)/COLLAPSE; N=NMAX; zoom=ZOOM_MIN-(ZOOM_MIN-ZOOM_DOT)*ease(r); phaseName='collapse'; edgeK=0; }
+    else { N=NMAX; zoom=ZOOM_DOT; phaseName='dot'; edgeK=0; }
+    fade=1;                                             // never fades — no disappearance; ends on the opaque white dot
+    backCull=smooth(8,34,pts.length);
     if(N!==lastN){ setCount(N); lastN=N; }
   }
 
@@ -160,7 +168,7 @@ import { Application, Container, Graphics, Sprite, Texture } from './vendor/pixi
   function render(){
     const cx=app.screen.width/2, cy=app.screen.height/2;
     const R=Math.min(app.screen.width, app.screen.height)*0.30*zoom;
-    const yaw=nowSec*(reduce?0.15:SPIN);
+    const yaw=Math.max(0,nowSec-HOLD0)*(reduce?0.15:SPIN);   // still during the opening pause
     const cyw=Math.cos(yaw), syw=Math.sin(yaw), ctl=Math.cos(TILT), stl=Math.sin(TILT);
     const n=pts.length;
 
@@ -206,17 +214,15 @@ import { Application, Container, Graphics, Sprite, Texture } from './vendor/pixi
   // ================= hud + controls =================
   const $ = id => document.getElementById(id);
   const rPhase=$('r-phase'), rShape=$('r-shape'), rN=$('r-n'), mark=$('mark');
-  const NAME={1:'point',2:'two points',3:'triangle',4:'tetrahedron',5:'bipyramid',6:'octahedron'};
+  const NAME={1:'point',2:'line',3:'triangle',4:'tetrahedron',5:'bipyramid',6:'octahedron'};
   function updateHud(){
-    let shape, showMark=false;
-    if(nowSec<STEP_END) shape=NAME[Math.min(6,1+Math.floor(nowSec/STEP_DT))]||'·';
-    else if(nowSec<BALL_END) shape='balancing';
-    else { shape='sphere'; showMark=true; }
+    const shape = pts.length<=6 ? (NAME[pts.length]||'')
+                : (pts.length>=NMAX ? 'sphere' : 'fill');
     rPhase.textContent=phaseName; rShape.textContent=shape; rN.textContent=pts.length;
-    mark.style.opacity = showMark ? String(fade) : '0';
+    // "hypercomb" stays on screen the whole time (loading brand) — opacity left at its inline 1
   }
 
-  let running=true, showEdges=true, warmOn=true, speed=1;
+  let running=true, showEdges=false, warmOn=false, speed=1.25;  // clean defaults: no edges, no spark
   const bPlay=$('b-play'), bSpd=$('b-spd');
   bPlay.onclick=()=>{ running=!running; bPlay.textContent=running?'Pause':'Play'; };
   $('b-slow').onclick=()=>{ speed=Math.max(0.25,+(speed-0.25).toFixed(2)); bSpd.textContent=speed.toFixed(2)+'×'; };
@@ -240,10 +246,12 @@ import { Application, Container, Graphics, Sprite, Texture } from './vendor/pixi
       const n=pts.length; let mn=Infinity, mx=0, front=0;
       for(let i=0;i<n;i++){ if(proj[i].front>0.5 && proj[i].z>0) front++;
         for(let j=i+1;j<n;j++){ const a=pts[i].p,b=pts[j].p, d=Math.hypot(a[0]-b[0],a[1]-b[1],a[2]-b[2]); if(d<mn)mn=d; if(d>mx)mx=d; } }
-      return { t:+nowSec.toFixed(2), phase:phaseName, n, edges:edges.length, zoom:+zoom.toFixed(2), fade:+fade.toFixed(2),
-        backCull:+backCull.toFixed(2), minDist:n>1?+mn.toFixed(3):null, maxDist:n>1?+mx.toFixed(3):null, frontVisible:front };
+      const screen = n<=6 ? proj.slice(0,n).map(q=>[Math.round(q.sx),Math.round(q.sy)]) : undefined;
+      const yaw = +(Math.max(0,nowSec-HOLD0)*SPIN).toFixed(3);
+      return { t:+nowSec.toFixed(2), phase:phaseName, n, edges:edges.length, zoom:+zoom.toFixed(2), fade:+fade.toFixed(2), yaw,
+        backCull:+backCull.toFixed(2), minDist:n>1?+mn.toFixed(3):null, maxDist:n>1?+mx.toFixed(3):null, frontVisible:front, screen };
     },
-    get info(){ return { renderer:app.renderer?.name, screen:{w:app.screen.width,h:app.screen.height}, total:TOTAL, nmax:NMAX }; }
+    get info(){ return { renderer:app.renderer?.name, screen:{w:app.screen.width,h:app.screen.height}, cycle:+TOTAL.toFixed(2), nmax:NMAX }; }
   };
-  console.log('[genesis] repulsion engine ready —', app.renderer?.name, 'NMAX', NMAX, 'cycle', TOTAL+'s');
+  console.log('[genesis] engine ready —', app.renderer?.name, 'NMAX', NMAX, 'cycle', +TOTAL.toFixed(2)+'s');
 })();

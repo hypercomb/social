@@ -227,7 +227,9 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   width: 100%;
   aspect-ratio: 0.866;   // √3 / 2 — a regular point-top hexagon
   clip-path: $hex-clip;
-  background: rgba($steel, 0.22);
+  // The frame carries a whisper of the collection's own accent, so even the ring
+  // belongs to this set rather than being uniform steel.
+  background: color-mix(in srgb, var(--accent, #{$steel}) 24%, rgba($steel, 0.18));
   padding: 2px;
   box-sizing: border-box;
   display: grid;
@@ -248,16 +250,35 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   background: $ink;   // letterbox behind transparent-cornered hex thumbnails
 }
 
+// Tinted glass: a soft bloom of the collection's accent over near-black, so an
+// imageless hex reads as considered surface rather than an empty slot. Kept low
+// so it's a whisper of colour, never a glow.
 .set-hex-fallback {
   display: grid;
   place-items: center;
-  background: rgba($steel, 0.07);
+  background:
+    radial-gradient(118% 86% at 50% 24%,
+      color-mix(in srgb, var(--accent, #{$steel}) 26%, transparent),
+      transparent 66%),
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--accent, #{$steel}) 9%, transparent),
+      transparent 58%),
+    $ink;
 }
 
-.set-icon {
-  font-size: 2rem;
-  color: var(--accent, #{$steel});
-  opacity: 0.85;
+// Identity label for the imageless hex — the collection's initial(s), so every
+// empty collection reads as ITSELF rather than a shared icon. Accent-leaning but
+// kept legible (mixed toward off-white); a single-pixel etch gives it depth on
+// the tinted glass without any flashy glow.
+.set-monogram {
+  font-size: clamp(1.7rem, 5.5vw, 2.35rem);
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  line-height: 1;
+  color: color-mix(in srgb, var(--accent, #{$steel}) 68%, #eaf3f9);
+  text-transform: uppercase;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.42);
+  user-select: none;
 }
 
 .set-name {
@@ -272,8 +293,12 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   transition: color 150ms ease;
 }
 
-// Restrained hover: the ring warms and the tile lifts a touch. Nothing flashy.
-.set-card:hover .set-hex { background: rgba($steel, 0.5); transform: translateY(-3px); }
+// Restrained hover: the ring blooms toward the collection's own accent and the
+// tile lifts a touch. Nothing flashy — just the frame acknowledging its identity.
+.set-card:hover .set-hex {
+  background: color-mix(in srgb, var(--accent, #{$steel}) 58%, rgba($steel, 0.28));
+  transform: translateY(-3px);
+}
 .set-card:hover .set-name { color: #f4fafd; }
 .set-open:active .set-hex { transform: translateY(-1px); }
 

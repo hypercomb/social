@@ -16,6 +16,7 @@
 import { Component, OnDestroy, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { groupRegistry } from '../../core/group-registry'
+import { registerProximityProvider } from '../../core/proximity-registry'
 import { iconOverrides } from '../../core/icon-override.store'
 import { iconEditMode, LONG_PRESS_MS } from '../../core/icon-edit.service'
 import '../../core/websites-group'   // side-effect: registers the websites group
@@ -51,10 +52,19 @@ export class GroupLaunchersComponent implements OnDestroy {
   #suppressClick = false
   #lineage: LineageLike | null = null
   #lineageBound = false
+  /** member path (segments joined) → its root lineage sig, memoized so the
+   *  proximity provider doesn't re-sign every navigation. */
+  #rootSigByPath = new Map<string, string>()
+  #unregisterProximity: (() => void) | null = null
 
   constructor() {
     groupRegistry.addEventListener('change', this.#onChange)
     iconOverrides.addEventListener('change', this.#onChange)   // reskins re-resolve live
+    // Declare every launch-group member as proximity: the strip is always one tap
+    // away, so the shell's nav-driven warmer pre-warms each member's subtree (the
+    // hive tiles you land on after opening a group). Complements prewarmGroup,
+    // which warms the group PAGE aggregation on hover. Silent in swarm mode.
+    this.#unregisterProximity = registerProximityProvider(this.#proximitySigs)
     this.#refresh()
     this.#unsubs.push(
       EffectBus.on<{ on?: boolean }>('icon:edit-mode', ({ on }) => this.iconEditOn.set(!!on)),
@@ -66,8 +76,34 @@ export class GroupLaunchersComponent implements OnDestroy {
     groupRegistry.removeEventListener('change', this.#onChange)
     iconOverrides.removeEventListener('change', this.#onChange)
     this.#lineage?.removeEventListener('change', this.#onChange)
+    this.#unregisterProximity?.()
     for (const u of this.#unsubs) { try { u() } catch { /* noop */ } }
     this.#clearPress()
+  }
+
+  /** The shell's nav-driven warmer asks for our one-click destinations: every
+   *  member of every launch group (its root subtree). Memoized per member path;
+   *  `[]` in swarm mode, where the whole strip is hidden. */
+  #proximitySigs = async (): Promise<string[]> => {
+    if (this.swarmMode()) return []
+    const history = get('@diamondcoreprocessor.com/HistoryService') as
+      { sign?: (l: { explorerSegments?: () => readonly string[] }) => Promise<string> } | undefined
+    if (!history?.sign) return []
+    const out: string[] = []
+    for (const g of groupRegistry.all()) {
+      for (const m of g.members()) {
+        const segs = m.segments
+        if (!Array.isArray(segs) || segs.length === 0) continue
+        const key = segs.join(' ')
+        let sig = this.#rootSigByPath.get(key)
+        if (!sig) {
+          sig = await history.sign({ explorerSegments: () => segs }).catch(() => '')
+          if (sig) this.#rootSigByPath.set(key, sig)
+        }
+        if (sig) out.push(sig)
+      }
+    }
+    return out
   }
 
   /** Tap: edit mode → reskin this icon; else SHOW this group's layer (the one

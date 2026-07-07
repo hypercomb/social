@@ -137,6 +137,7 @@ export class HexSdfTextureShader {
     in float aDivergence;
     in float aUnshared;
     in float aShapeMode;
+    in float aIsPortal;
 
     out vec2 vUV;
     out vec4 vLabelUV;
@@ -150,6 +151,7 @@ export class HexSdfTextureShader {
     out float vDivergence;
     out float vUnshared;
     out float vShapeMode;
+    out float vIsPortal;
 
     uniform mat3 uProjectionMatrix;
     uniform mat3 uWorldTransformMatrix;
@@ -191,6 +193,7 @@ export class HexSdfTextureShader {
       vDivergence = aDivergence;
       vUnshared = aUnshared;
       vShapeMode = aShapeMode;
+      vIsPortal = aIsPortal;
     }
   `
 
@@ -209,6 +212,7 @@ export class HexSdfTextureShader {
     in float vDivergence;
     in float vUnshared;
     in float vShapeMode;
+    in float vIsPortal;
 
     uniform vec2 u_quadSize;
     uniform float u_radiusPx;
@@ -644,9 +648,32 @@ export class HexSdfTextureShader {
       //     "focused, stops here" highlight that never masquerades as the
       //     accent-coloured pathway glow.
       if (u_hoveredIndex >= 0.0 && abs(vCellIndex - u_hoveredIndex) < 0.5) {
-        if (vHasBranch > 0.5) {
-          // crisp accent ring — heavier than a leaf's so a pathway reads as
-          // actionable navigation
+        if (vIsPortal > 0.5) {
+          // PORTAL: a reference tile is a doorway to another lineage — the one
+          // place a little enchantment is earned. Kept TASTEFUL, not confetti:
+          // a breathing accent ring, a pair of near-white glints that slowly
+          // orbit the rim (a charged-gateway shimmer), and a soft pulsing bloom
+          // into the gap. The motion is the whole trick, so it stays gentle —
+          // anything faster or brighter tips into cheesy. u_time only advances
+          // while a portal is hovered (see #setPortalShimmer), so tiles are
+          // perfectly still until you land on a portal.
+          float ring = 1.0 - smoothstep(0.0, aa * 1.8, abs(d));
+
+          // slow breathe (~0.58..1.0) — life, never a strobe
+          float breathe = 0.79 + 0.21 * sin(u_time * 2.1);
+          color.rgb = mix(color.rgb, u_accentColor, ring * 0.80 * breathe);
+
+          // two opposed glints sweeping around the frame — the magical signature
+          float ang = atan(local.y, local.x);
+          float glint = smoothstep(0.90, 1.0, cos(2.0 * (ang - u_time * 1.3))) * ring;
+          color.rgb += mix(u_accentColor, vec3(1.0), 0.7) * glint * 0.45;
+
+          // soft breathing bloom just outside the edge — the portal glows out
+          float bloom = 1.0 - smoothstep(0.0, aa * 4.5, abs(d + aa * 1.6));
+          color.rgb += u_accentColor * bloom * (0.10 + 0.07 * breathe);
+        } else if (vHasBranch > 0.5) {
+          // PATHWAY: crisp accent ring — heavier than a leaf's so a tile with
+          // children reads as actionable navigation
           float hoverRing = 1.0 - smoothstep(0.0, aa * 1.8, abs(d));
           color.rgb = mix(color.rgb, u_accentColor, hoverRing * 0.85);
 
@@ -654,8 +681,8 @@ export class HexSdfTextureShader {
           float hoverBloom = 1.0 - smoothstep(0.0, aa * 4.0, abs(d + aa * 1.5));
           color.rgb += u_accentColor * hoverBloom * 0.16;
         } else {
-          // tight cool-neutral outline — clearly a highlight, but flatter and
-          // uncoloured so it can't be mistaken for the pathway's accent glow
+          // LEAF: tight cool-neutral outline — clearly a highlight, but flatter
+          // and uncoloured so it can't be mistaken for the pathway accent glow
           vec3 leafHover = vec3(0.74, 0.82, 0.94);
           float leafRing = 1.0 - smoothstep(0.0, aa * 1.15, abs(d));
           color.rgb = mix(color.rgb, leafHover, leafRing * 0.6);

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>splash test</title>
+<style>
+  html,body{margin:0;height:100%;background:#04060a}
+  #hc-splash{position:fixed;inset:0;z-index:2147483000;overflow:hidden;background:radial-gradient(120% 90% at 50% 42%,#0c1018 0%,#05060a 60%,#030409 100%)}
+  #hc-splash canvas{position:absolute;inset:0;width:100%;height:100%;display:block}
+  #hc-splash .m{position:absolute;left:0;right:0;bottom:14%;text-align:center;color:#dfe8f0;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:clamp(13px,2.4vw,20px);letter-spacing:.62em;text-indent:.62em;font-weight:600;pointer-events:none;user-select:none}
+</style>
+</head>
+<body>
+  <div id="hc-splash" aria-hidden="true">
+    <canvas id="hc-splash-cv"></canvas>
+    <div class="m">hypercomb</div>
+  </div>
+  <script>
+    window.__hypercombEffectBus = {
+      _h:{}, _last:{},
+      on(e,f){ (this._h[e]=this._h[e]||[]).push(f); if(Object.prototype.hasOwnProperty.call(this._last,e)) f(this._last[e]); return function(){}; },
+      emit(e,p){ this._last[e]=p; (this._h[e]||[]).forEach(function(fn){ fn(p); }); }
+    };
+    window.__fireTiles = function(){ window.__hypercombEffectBus.emit('render:cell-count', { count: 7 }); };
+  </script>
+  <script src="splash.js"></script>
+</body>
+</html>

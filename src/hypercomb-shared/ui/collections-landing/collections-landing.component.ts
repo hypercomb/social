@@ -31,6 +31,7 @@ import { Component, OnDestroy, signal } from '@angular/core'
 import { EffectBus, hypercomb } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerProximityProvider } from '../../core/proximity-registry'
 
 /** The reserved lineage that indexes every reference set. */
 const SETS = 'sets'
@@ -109,6 +110,11 @@ export class CollectionsLandingComponent implements OnDestroy {
   #hidHive = false
   #imageUrls = new Map<string, string>()
   #imageRequested = new Set<string>()
+  /** collection name → its ROOT lineage sig (`sign(['<name>'])`), memoized so the
+   *  proximity provider doesn't re-sign every navigation. Each is one click from
+   *  being the active root — the shell's nav-driven warmer pre-warms them. */
+  #rootSigByName = new Map<string, string>()
+  #unregisterProximity: (() => void) | null = null
   #empty = new Map<string, boolean>()
   /** Cached sign(['sets']) — the history location of the collection index. */
   #setsSig = ''
@@ -124,6 +130,10 @@ export class CollectionsLandingComponent implements OnDestroy {
     window.addEventListener('synchronize', this.#onSynchronize)
     // Undo/redo moves the history cursor; reflect it when it reaches this index.
     this.#cursorUnsub = EffectBus.on('history:cursor-changed', () => this.#scheduleReload())
+    // Declare our cards as proximity: while the grid is showing, every collection
+    // root is one click from being the active root, so the shell's nav-driven
+    // warmer pre-warms their subtrees. Off-screen we contribute nothing.
+    this.#unregisterProximity = registerProximityProvider(this.#proximitySigs)
     this.#ensureLineage()
     this.#refresh()
   }
@@ -132,6 +142,7 @@ export class CollectionsLandingComponent implements OnDestroy {
     this.#lineage?.removeEventListener?.('change', this.#onChange)
     window.removeEventListener('keydown', this.#onKey, true)
     window.removeEventListener('synchronize', this.#onSynchronize)
+    this.#unregisterProximity?.()
     this.#cursorUnsub?.()
     if (this.#hidHive) EffectBus.emit('render:set-hive-visible', { visible: true })
     for (const url of this.#imageUrls.values()) URL.revokeObjectURL(url)
@@ -143,6 +154,17 @@ export class CollectionsLandingComponent implements OnDestroy {
     let h = 5381
     for (let i = 0; i < label.length; i++) h = ((h << 5) + h + label.charCodeAt(i)) | 0
     return `hsl(${(h >>> 0) % 360} 62% 64%)`
+  }
+
+  /** A compact identity label for a collection with no image to reflect (empty,
+   *  or its picture not yet resolved) — its initial(s), tinted by the accent — so
+   *  an imageless hex still says WHICH collection it is at a glance, instead of a
+   *  generic icon shared by every empty set. The full name still shows below. */
+  monogram(name: string): string {
+    const words = (name ?? '').trim().split(/\s+/).filter(Boolean)
+    if (!words.length) return '·'
+    if (words.length === 1) return [...words[0]].slice(0, 2).join('').toUpperCase()
+    return ([...words[0]][0] + [...words[1]][0]).toUpperCase()
   }
 
   /** Rename and delete are offered only for an EMPTY collection (its root has no
@@ -289,6 +311,7 @@ export class CollectionsLandingComponent implements OnDestroy {
     const url = this.#imageUrls.get(name)
     if (url) { URL.revokeObjectURL(url); this.#imageUrls.delete(name); this.images.set(new Map(this.#imageUrls)) }
     this.#imageRequested.delete(name)
+    this.#rootSigByName.delete(name)   // a re-created name re-signs + re-warms
     if (this.#empty.delete(name)) this.empty.set(new Map(this.#empty))
   }
 
@@ -318,6 +341,30 @@ export class CollectionsLandingComponent implements OnDestroy {
     const url = URL.createObjectURL(blob)
     this.#imageUrls.set(name, url)
     this.images.set(new Map(this.#imageUrls))   // new map instance → signal fires
+  }
+
+  // ── proximity declaration — the collection roots one click from this grid ────
+
+  /** The shell's nav-driven warmer asks every visible surface for its one-click
+   *  destinations. While the grid owns the screen, ours are the collection ROOTS
+   *  (`sign(['<name>'])` — a set is its own root, the variable-root hop). Sigs are
+   *  memoized per name so this stays cheap when polled on each navigation; the
+   *  actual bounded subtree walk happens once, in the shell handler. Off-screen we
+   *  return nothing, so we stop contributing the moment the landing closes. */
+  #proximitySigs = async (): Promise<string[]> => {
+    if (!this.open()) return []
+    const history = ioc()?.get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
+    if (!history?.sign) return []
+    const out: string[] = []
+    for (const name of this.collections()) {
+      let sig = this.#rootSigByName.get(name)
+      if (!sig) {
+        sig = await history.sign({ explorerSegments: () => [name] }).catch(() => '')
+        if (sig) this.#rootSigByName.set(name, sig)
+      }
+      if (sig) out.push(sig)
+    }
+    return out
   }
 
   async #collectionImageSig(segments: readonly string[], history: HistoryLike, store: StoreLike): Promise<string> {

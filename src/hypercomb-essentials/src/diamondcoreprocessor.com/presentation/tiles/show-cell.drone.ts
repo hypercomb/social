@@ -10,7 +10,7 @@ import { type HexGeometry, DEFAULT_HEX_GEOMETRY, createHexGeometry } from '../gr
 import { isSignature, readCellProperties, writeCellProperties, cellLocationSig, readTilePropertiesAt, writeTilePropertiesAt } from '../../editor/tile-properties.js'
 import { readViewportAt, hasPersistedViewportAt } from '../../editor/viewport-store.js'
 import { isWithinAdoptedRoot } from '../../sharing/adopted-roots.js'
-import { tagsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, dashboardIslandGroupForLabel, dashboardIslandRoleForLabel, ensureDecorationsIndexed } from '../../commands/decoration-kind-index.js'
+import { tagsForLabel, launchShapeForLabel, launchRoleForLabel, launchGroupForLabel, dashboardIslandGroupForLabel, dashboardIslandRoleForLabel, ensureDecorationsIndexed, referenceTargetForLabel } from '../../commands/decoration-kind-index.js'
 import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-layout.js'
 import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
@@ -605,6 +605,13 @@ export class ShowCellDrone extends Drone {
   #driftRaf = 0
   #driftActive = false
   #driftStart = 0
+  // Portal shimmer clock — advances u_time while a reference/portal tile is
+  // hovered so its magical hover animates on an otherwise-static hive page. It
+  // shares the u_time uniform and #driftStart origin with launcher drift; only
+  // one drives the clock at a time (drift wins on launcher pages, where u_time
+  // is already ticking, so the shimmer rides it for free).
+  #portalShimmerRaf = 0
+  #portalShimmerActive = false
   #showHiddenItems = false
   #currentHiddenSet = new Set<string>()
   // World mode (control-bar toggle): when on, tiles that are NOT public
@@ -4738,15 +4745,19 @@ export class ShowCellDrone extends Drone {
       const idx = this.#axialToIndex.get(`${payload.q},${payload.r}`)
       this.shader.setHoveredIndex(idx ?? -1)
 
-      // Emit hovered tile's tags for UI highlight
-      let hoverTags: string[] = []
+      // Resolve the hovered label once — feeds both the tag highlight and the
+      // portal shimmer clock.
+      let hoverLabel: string | null = null
       for (const [label, cell] of this.renderedCells) {
-        if (cell.q === payload.q && cell.r === payload.r) {
-          hoverTags = this.#tagsFor(label)
-          break
-        }
+        if (cell.q === payload.q && cell.r === payload.r) { hoverLabel = label; break }
       }
-      this.emitEffect('tile:hover-tags', { tags: hoverTags })
+
+      // Drive the shimmer clock only while a reference/portal tile is hovered,
+      // so u_time (and the magical hover animation) idles the rest of the time.
+      this.#setPortalShimmer(hoverLabel !== null && referenceTargetForLabel(hoverLabel) !== null)
+
+      // Emit hovered tile's tags for UI highlight
+      this.emitEffect('tile:hover-tags', { tags: hoverLabel ? this.#tagsFor(hoverLabel) : [] })
     })
 
     // accent color presets: glacier, bloom, aurora, ember, nebula
@@ -4844,6 +4855,12 @@ export class ShowCellDrone extends Drone {
       this.#driftRaf = 0
     }
 
+    this.#portalShimmerActive = false
+    if (this.#portalShimmerRaf) {
+      cancelAnimationFrame(this.#portalShimmerRaf)
+      this.#portalShimmerRaf = 0
+    }
+
     if (this.lineageChangeListening) {
       const lineage = this.resolve<EventTarget>('lineage')
       lineage?.removeEventListener('change', this.onLineageChange)
@@ -4909,6 +4926,30 @@ export class ShowCellDrone extends Drone {
     }
   }
 
+  /** Start/stop the portal shimmer clock. A reference/portal tile's hover ring
+   *  breathes and spins (fragment shader, keyed on u_time); u_time is otherwise
+   *  frozen on a normal hive page, so we tick it only while a portal is hovered.
+   *  No-op when launcher drift already owns the clock (u_time is live there).
+   *  Idempotent. */
+  #setPortalShimmer = (active: boolean): void => {
+    if (active === this.#portalShimmerActive) return
+    this.#portalShimmerActive = active
+    if (active) {
+      if (this.#driftActive) return                    // drift already advances u_time
+      if (!this.#driftStart) this.#driftStart = performance.now()
+      if (!this.#portalShimmerRaf) {
+        const tick = (): void => {
+          if (!this.#portalShimmerActive || this.#driftActive) { this.#portalShimmerRaf = 0; return }
+          this.shader?.setTime((performance.now() - this.#driftStart) / 1000)
+          this.#portalShimmerRaf = requestAnimationFrame(tick)
+        }
+        this.#portalShimmerRaf = requestAnimationFrame(tick)
+      }
+    } else {
+      if (this.#portalShimmerRaf) { cancelAnimationFrame(this.#portalShimmerRaf); this.#portalShimmerRaf = 0 }
+    }
+  }
+
   private clearMesh = (reason: string): void => {
     if (this.hexMesh && this.layer) {
       // A live-mesh teardown must NEVER be silent. Every "tiles rendered
@@ -4929,8 +4970,9 @@ export class ShowCellDrone extends Drone {
       try { this.geom.destroy(true) } catch { /* ignore */ }
     }
 
-    // No mesh on screen → no launcher page to drift.
+    // No mesh on screen → no launcher page to drift, no portal to shimmer.
     this.#setDrift(false, 0)
+    this.#setPortalShimmer(false)
 
     this.hexMesh = null
     this.geom = null
@@ -6054,7 +6096,8 @@ export class ShowCellDrone extends Drone {
     // atlas holds its image).
     for (const c of cells) {
       const ia = c.imageSig && this.imageAtlas?.hasImage(c.imageSig) ? 1 : 0
-      s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${ia}:${c.hasBranch ? 1 : 0}:${c.divergence ?? 0}:${c.hideText ? 1 : 0}:${c.unshared ? 1 : 0}|`
+      const pf = referenceTargetForLabel(c.label) !== null ? 1 : 0
+      s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${ia}:${c.hasBranch ? 1 : 0}:${c.divergence ?? 0}:${c.hideText ? 1 : 0}:${c.unshared ? 1 : 0}:${pf}|`
     }
     return s
   }
@@ -6092,9 +6135,12 @@ export class ShowCellDrone extends Drone {
     // Per-tile launcher silhouette (0 hex · 1 flower-pot · 2 invader) — lets a
     // mixed launch-group page render each group's own shape without sharing.
     const shapeAttr = new Float32Array(cells.length * 4)
+    // Per-tile portal flag — a reference tile (doorway to another lineage) gets
+    // the magical hover shimmer instead of the plain pathway/leaf ring.
+    const portal = new Float32Array(cells.length * 4)
     const idx = new Uint32Array(cells.length * 6)
 
-    let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, cip = 0, dp = 0, ii = 0, base = 0, sap = 0
+    let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, cip = 0, dp = 0, ii = 0, base = 0, sap = 0, pp = 0
     let ci = 0
 
     for (const c of cells) {
@@ -6194,6 +6240,13 @@ export class ShowCellDrone extends Drone {
       shapeAttr.set([sm, sm, sm, sm], sap)
       sap += 4
 
+      // Reference/portal tiles hover with the magical shimmer (see hex-sdf
+      // fragment). referenceTargetForLabel returns the target segments (or null
+      // for a non-reference) from the same decoration index the click path uses.
+      const pv2 = referenceTargetForLabel(c.label) !== null ? 1 : 0
+      portal.set([pv2, pv2, pv2, pv2], pp)
+      pp += 4
+
       idx.set([base, base + 1, base + 2, base, base + 2, base + 3], ii)
       ii += 6
       base += 4
@@ -6213,6 +6266,7 @@ export class ShowCellDrone extends Drone {
       ; (g as any).addAttribute('aDivergence', divergence, 1)
       ; (g as any).addAttribute('aUnshared', unshared, 1)
       ; (g as any).addAttribute('aShapeMode', shapeAttr, 1)
+      ; (g as any).addAttribute('aIsPortal', portal, 1)
       ; (g as any).addIndex(idx)
 
     // save buffer references + label→index map so tile:saved can push

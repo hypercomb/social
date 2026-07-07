@@ -3,6 +3,7 @@ import type { Lineage } from './lineage'
 import type { LocalizationService } from './i18n.service'
 import type { Navigation } from './navigation'
 import { OpfsTreeLogger } from './tree-logger'
+import { collectProximity } from './proximity-registry'
 import './install-monitor'
 import './registry-snapshot'
 import type { BootstrapHistory } from './bootstrap-history'
@@ -273,11 +274,38 @@ const _runInitializeRuntime = async (
       if (typeof ric === 'function') ric(cb, { timeout: 1200 })
       else setTimeout(cb, 200)
     }
+    // Proximity is warmed as ONE pattern with the current location: after the
+    // current subtree, warm every one-click destination a visible surface has
+    // DECLARED (collections cards, website cards, launch-group members — see
+    // proximity-registry). The current location re-warms every nav (its head may
+    // have moved); each declared destination warms ONCE per session (its lineage
+    // sig is stable — content changes surface as a fresh sig, or as the current-
+    // location warm when the user actually arrives). Capped per pass so a huge
+    // declared set drains over several navs instead of flooding one idle slice.
+    const warmedProximity = new Set<string>()
+    const PROXIMITY_WARM_CAP = 16
     const warmCurrent = (): void => {
       void (async () => {
         try {
           const sig = await lineage.currentSig()
           if (sig) await historyService.preloadNeighbourhood!(sig)
+        } catch { /* non-fatal: a cold render is correct, just slower */ }
+        try {
+          const proximate = await collectProximity()
+          let warmed = 0
+          for (const psig of proximate) {
+            if (warmedProximity.has(psig)) continue
+            if (warmed >= PROXIMITY_WARM_CAP) {
+              console.log(
+                `[preload] proximity warm capped at ${PROXIMITY_WARM_CAP} this pass; ` +
+                `${proximate.length} declared, remainder drains on the next navigations`,
+              )
+              break
+            }
+            warmedProximity.add(psig)
+            warmed++
+            await historyService.preloadNeighbourhood!(psig)
+          }
         } catch { /* non-fatal: a cold render is correct, just slower */ }
       })()
     }

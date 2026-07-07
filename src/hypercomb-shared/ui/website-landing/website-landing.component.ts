@@ -21,6 +21,7 @@ import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { groupRegistry, type GroupMember } from '../../core/group-registry'
 import { registerShellSurface } from '../../core/shell-surface-registry'
+import { registerProximityProvider } from '../../core/proximity-registry'
 
 /** The websites group's page is its OWN root location, /websites — the group
  *  id IS the segment (see mixed-group-bag.ts). */
@@ -70,11 +71,19 @@ export class WebsiteLandingComponent implements OnDestroy {
    *  image resolution has already been kicked off (dedupe across refreshes). */
   #imageUrls = new Map<string, string>()
   #imageRequested = new Set<string>()
+  /** site.key → its ROOT lineage sig, memoized so the proximity provider doesn't
+   *  re-sign every navigation. Declares each site root as a one-click destination
+   *  for the shell's nav-driven neighbourhood warmer (distinct from the hover
+   *  page-HTML preheat below — that warms the rendered page blob, this warms the
+   *  root subtree the site renders from). */
+  #rootSigBySite = new Map<string, string>()
+  #unregisterProximity: (() => void) | null = null
   #onChange = (): void => this.#refresh()
 
   constructor() {
     groupRegistry.addEventListener('change', this.#onChange)
     window.addEventListener('keydown', this.#onKey, true)
+    this.#unregisterProximity = registerProximityProvider(this.#proximitySigs)
     this.#ensureLineage()
     this.#refresh()
   }
@@ -83,8 +92,28 @@ export class WebsiteLandingComponent implements OnDestroy {
     groupRegistry.removeEventListener('change', this.#onChange)
     this.#lineage?.removeEventListener?.('change', this.#onChange)
     window.removeEventListener('keydown', this.#onKey, true)
+    this.#unregisterProximity?.()
     if (this.#hidHive) EffectBus.emit('render:set-hive-visible', { visible: true })
     for (const url of this.#imageUrls.values()) URL.revokeObjectURL(url)
+  }
+
+  /** The shell's nav-driven warmer asks for our one-click destinations. While the
+   *  directory is showing, those are the site ROOTS — warm each site's subtree so
+   *  a click lands on a warm canvas. Memoized per site.key; `[]` when off-screen. */
+  #proximitySigs = async (): Promise<string[]> => {
+    if (!this.open()) return []
+    const history = ioc()?.get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
+    if (!history?.sign) return []
+    const out: string[] = []
+    for (const site of this.sites()) {
+      let sig = this.#rootSigBySite.get(site.key)
+      if (!sig) {
+        sig = await history.sign({ explorerSegments: () => site.segments }).catch(() => '')
+        if (sig) this.#rootSigBySite.set(site.key, sig)
+      }
+      if (sig) out.push(sig)
+    }
+    return out
   }
 
   /** Deterministic per-site accent (hue from the name) — gives each card its own
