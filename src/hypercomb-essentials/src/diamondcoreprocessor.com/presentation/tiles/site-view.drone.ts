@@ -100,7 +100,10 @@ export class SiteViewDrone extends Drone {
    * <body> at a near-max z-index, and shown for the entire duration of website
    * mode — even on a page-less dead-end. No component, no signal binding, no
    * load-order failure mode: if a site can show, this button is there. Clicking
-   * it resolves ViewMode fresh and drops back to the hive.
+   * it steps back to the WEBSITES DIRECTORY the site was launched from (the
+   * `/websites` menu) — a second back there returns to the hive tiles. When no
+   * sites are discovered it falls back to a plain flip to the hive, so the
+   * button is never dead.
    */
   #exitOverlay: HTMLButtonElement | null = null
   #exitTogglesBound = false
@@ -696,11 +699,7 @@ export class SiteViewDrone extends Drone {
       btn.id = 'hc-site-exit'
       btn.type = 'button'
       btn.style.cssText = EXIT_OVERLAY_CSS
-      btn.addEventListener('click', () => {
-        const vm = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
-          ?.get<{ setMode(m: string): void }>('@hypercomb.social/ViewMode')
-        vm?.setMode('hexagons')
-      })
+      btn.addEventListener('click', () => { this.#exitToWebsites() })
       // Hover affordance without a stylesheet — cheap inline listeners.
       btn.addEventListener('pointerenter', () => { btn.style.filter = 'brightness(1.12)' })
       btn.addEventListener('pointerleave', () => { btn.style.filter = 'none' })
@@ -714,9 +713,31 @@ export class SiteViewDrone extends Drone {
     const btn = this.#exitOverlay
     if (!btn) return
     btn.textContent = this.#siteIcon || 'grid_view'
-    const label = this.#siteLabel || 'Back to tiles'
+    // The button now steps back to the websites directory, not straight to the
+    // tiles — the label says so (the site's own glyph still tints the button).
+    const label = 'Back to websites'
     btn.title = label
     btn.setAttribute('aria-label', label)
+  }
+
+  /** Exit the page onto the WEBSITES DIRECTORY, not straight to the tiles.
+   *  Leaving a site steps back to the `/websites` menu it was launched from;
+   *  that menu's own close then returns to the hive tiles — a two-step out.
+   *  Routed through the shared GroupLauncher (resolved via IoC, never imported)
+   *  which flips ViewMode back to the hive AND navigates to /websites. Falls
+   *  back to a plain flip to the hive when no sites are discovered yet, so the
+   *  exit is never a dead button. */
+  #exitToWebsites(): void {
+    const ioc = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+    const launcher = ioc?.get<{
+      show(id: string): void
+      get(id: string): { members(): unknown[] } | undefined
+    }>('@hypercomb.social/GroupLauncher')
+    if (launcher && (launcher.get('websites')?.members().length ?? 0) > 0) {
+      launcher.show('websites')
+      return
+    }
+    ioc?.get<{ setMode(m: string): void }>('@hypercomb.social/ViewMode')?.setMode('hexagons')
   }
 
   #removeExitOverlay(): void {

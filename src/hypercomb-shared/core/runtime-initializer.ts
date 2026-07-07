@@ -224,6 +224,7 @@ const _runInitializeRuntime = async (
   const historyService = get('@diamondcoreprocessor.com/HistoryService') as {
     preloadAllBags?: () => Promise<void>
     preloadFromRoot?: (rootSig: string) => Promise<void>
+    preloadNeighbourhood?: (locationSig: string, maxDepth?: number) => Promise<void>
     sign?: (l: { explorerSegments: () => readonly string[] }) => Promise<string>
     latestMarkerSigFor?: (lineageSig: string, name: string) => Promise<string>
   } | undefined
@@ -253,6 +254,41 @@ const _runInitializeRuntime = async (
   const history = get('@hypercomb.social/BootstrapHistory') as BootstrapHistory | undefined
   await history?.run?.()
   ;(window as any).__hcBoot?.('BootstrapHistory.run done (Phase-1 URL restore; bees load in Phase-2 background)')
+
+  // ── Bounded neighbourhood pre-warm ──────────────────────────────────
+  // 79c36e63 removed the whole-hive substrate walk that (as a SIDE EFFECT)
+  // warmed the click targets, so the first interaction at any location was cold
+  // and show-cell's completeness gate held the canvas blank until the neighbour
+  // layers landed (project_boot_first_click_warming; also the "post-adopt
+  // nothing shows" symptom). This is the bounded, passive warmer the disabled
+  // global preload above alludes to: on boot and on every navigation, breadth-
+  // warm the CURRENT location's bounded subtree (depth ≤ 3) via the already-
+  // bounded, cooperatively-sliced preloadFromRoot — NOT the O(hive) walk that
+  // starved paint. Debounced so a nav/fs burst coalesces; idle-deferred so it
+  // never steals the paint it's warming for; HistoryService dedups on head sig.
+  // Non-fatal throughout.
+  if (lineage && typeof historyService?.preloadNeighbourhood === 'function') {
+    const idle = (cb: () => void): void => {
+      const ric = (window as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback
+      if (typeof ric === 'function') ric(cb, { timeout: 1200 })
+      else setTimeout(cb, 200)
+    }
+    const warmCurrent = (): void => {
+      void (async () => {
+        try {
+          const sig = await lineage.currentSig()
+          if (sig) await historyService.preloadNeighbourhood!(sig)
+        } catch { /* non-fatal: a cold render is correct, just slower */ }
+      })()
+    }
+    let warmTimer: ReturnType<typeof setTimeout> | null = null
+    const scheduleWarm = (): void => {
+      if (warmTimer) clearTimeout(warmTimer)
+      warmTimer = setTimeout(() => { warmTimer = null; idle(warmCurrent) }, 180)
+    }
+    lineage.addEventListener('change', scheduleWarm)
+    idle(warmCurrent)  // boot: warm the restored location once first paint is past
+  }
 
   // console.log('[runtime-initializer] ioc keys:', list())
 

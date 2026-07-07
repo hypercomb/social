@@ -1,0 +1,63 @@
+@if (open()) {
+  <div class="landing" role="dialog" [attr.aria-label]="'collections-landing.title' | t">
+    <button class="landing-close mat-sym" type="button" (click)="close()"
+            [attr.aria-label]="'collections-landing.close' | t" [title]="'collections-landing.close' | t">
+      close
+    </button>
+
+    <div class="landing-scroll">
+      <div class="landing-inner">
+        <header class="landing-head">
+          <div class="landing-heading">
+            <h1 class="landing-title">{{ 'collections-landing.title' | t }}</h1>
+            @if (collections().length > 0) {
+              <span class="landing-count">{{ collections().length }}</span>
+            }
+          </div>
+          <p class="landing-lede">{{ 'collections-landing.lede' | t }}</p>
+        </header>
+
+        <!-- create a new referenceable collection — the welcome's whole point -->
+        <div class="create">
+          @if (creating()) {
+            <form class="create-row" (submit)="$event.preventDefault(); create(nameField)">
+              <input #nameField class="create-input" type="text" autocomplete="off" autofocus
+                     [placeholder]="'collections-landing.placeholder' | t"
+                     [attr.aria-label]="'collections-landing.placeholder' | t" />
+              <button class="create-submit" type="submit">{{ 'collections-landing.create' | t }}</button>
+            </form>
+          } @else {
+            <button class="create-open" type="button" (click)="toggleCreate()">
+              <span class="mat-sym">add</span>
+              <span>{{ 'collections-landing.new' | t }}</span>
+            </button>
+          }
+        </div>
+
+        @if (collections().length === 0) {
+          <p class="landing-empty">{{ 'collections-landing.empty' | t }}</p>
+        } @else {
+          <ul class="landing-grid" role="list">
+            @for (name of collections(); track name) {
+              <li>
+                <button class="set-card" type="button" (click)="openCollection(name)"
+                        [style.--accent]="accent(name)">
+                  <span class="set-hex">
+                    @if (images().get(name); as img) {
+                      <img class="set-hex-img" [src]="img" alt="" decoding="async" />
+                    } @else {
+                      <span class="set-hex-fallback">
+                        <span class="set-icon mat-sym">workspaces</span>
+                      </span>
+                    }
+                  </span>
+                  <span class="set-name">{{ name }}</span>
+                </button>
+              </li>
+            }
+          </ul>
+        }
+      </div>
+    </div>
+  </div>
+}

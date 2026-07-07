@@ -939,6 +939,32 @@ export class SwarmAdoptDrone extends Drone {
       // beneath it) fits-to-content instead of opening at an arbitrary scale.
       // Participant-local — never folded into the layer (see adopted-roots.ts).
       markAdoptedRoot([...at, name])
+
+      // Pre-warm the freshly-committed neighbourhood BEFORE the render fires, so
+      // show-cell's COMPLETENESS GATE resolves every child on the FIRST paint
+      // instead of holding the WHOLE canvas blank while cold bytes land — the
+      // "post-adopt nothing shows, not even the root tile" symptom. A fold
+      // changes the current location's parent sig, which invalidates show-cell's
+      // child-name memo and forces a full re-resolve of that layer's children;
+      // any child cold on that pass (the new tile OR a pre-existing sibling)
+      // fails the name gate and blanks the view. 79c36e63 gated the render walk
+      // and the compensating pre-warm was never built (see
+      // project_boot_first_click_warming). Warm by LOCATION down the fold path:
+      // resolveLayerAt resolves each ancestor (the current view is one of them)
+      // and getLayerBySig warms every child sig at each level, plus the folded
+      // node's own children (its pages). Additive, read-only, best-effort — a
+      // warm miss never blocks the fold, it just lets the gate's own retry heal.
+      try {
+        const foldPath = [...at, name]
+        for (let d = 0; d <= foldPath.length; d++) {
+          const hop = await resolveLayerAt(history, lineage.domain, foldPath.slice(0, d))
+          const kids = hop ? childSigsOf(hop) : []
+          if (kids.length) await Promise.all(kids.map(s => history.getLayerBySig(String(s))))
+        }
+      } catch (err) {
+        console.warn('[swarm-adopt] post-fold neighbourhood warm skipped', err)
+      }
+
       EffectBus.emit('fs:changed', { segments: at })
       await new hypercomb().act()
       return 'committed'

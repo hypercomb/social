@@ -10,3 +10,4 @@
 
 import '../notes-strip/notes-strip.component'
 import '../website-landing/website-landing.component'
+import '../collections-landing/collections-landing.component'

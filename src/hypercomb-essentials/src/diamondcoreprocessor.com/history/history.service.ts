@@ -2244,6 +2244,36 @@ export class HistoryService {
     )
   }
 
+  // Bounded NEIGHBOURHOOD pre-warm — the "passive warmer" the disabled boot
+  // preload alludes to. 79c36e63 removed the whole-hive substrate walk that, as
+  // a SIDE EFFECT, warmed the click targets — so the FIRST interaction at any
+  // location was cold and show-cell's completeness gate held the canvas blank
+  // until the current layer's children landed (project_boot_first_click_warming,
+  // and the same gate behind the "post-adopt nothing shows" symptom). Restore
+  // the warm WITHOUT the O(hive) cost: resolve THIS location's head, then
+  // breadth-warm its bounded subtree (depth ≤ #PRELOAD_MAX_DEPTH) through the
+  // cooperatively-sliced preloadFromRoot. Dedup on the head sig so back-to-back
+  // fs-churn 'change' events at one location don't re-walk. Driven from
+  // runtime-initializer on boot + every lineage 'change' (debounced + idle
+  // there). Non-fatal: a cold render is correct, just slower.
+  #lastWarmedHead = ''
+  public readonly preloadNeighbourhood = async (
+    locationSig: string,
+    maxDepth: number = HistoryService.#PRELOAD_MAX_DEPTH,
+  ): Promise<void> => {
+    if (!HistoryService.#SIG_RE.test(locationSig)) return
+    // Resolve (warming if needed) this location's head layer sig the SAME way
+    // currentLayerAt does — #latestSigByLineage is the per-lineage head map.
+    let headSig = this.#latestSigByLineage.get(locationSig)
+    if (!headSig) {
+      try { await this.#warmLineageHead(locationSig) } catch { return }
+      headSig = this.#latestSigByLineage.get(locationSig)
+    }
+    if (!headSig || headSig === this.#lastWarmedHead) return
+    this.#lastWarmedHead = headSig
+    await this.preloadFromRoot(headSig, maxDepth)
+  }
+
   /**
    * Per-lineage refresh: invalidate the cached latest for one lineage
    * and re-read its bag. Use after destructive ops on that lineage
