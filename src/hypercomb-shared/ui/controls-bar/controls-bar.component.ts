@@ -20,7 +20,7 @@ import type { Navigation } from '../../core/navigation'
 import type { MovementService } from '../../core/movement.service'
 import { EffectBus, consumePointerGesture } from '@hypercomb/core'
 import { iconOverrides } from '../../core/icon-override.store'
-import { iconEditMode } from '../../core/icon-edit.service'
+import { iconEditMode, LONG_PRESS_MS } from '../../core/icon-edit.service'
 import type { RoomStore } from '../../core/room-store'
 import type { SecretStore } from '../../core/secret-store'
 import type { InstallMonitor } from '../../core/install-monitor'
@@ -44,20 +44,18 @@ const LOCK_BUMP_MS = 900
 interface ControlItem {
   id: string
   label: string
-  instruction?: string
   action: string
   visibleWhen: 'always' | 'clipboardHasItems' | 'voiceSupported' | 'public' | 'hasSelection'
 }
 
 const CONTROL_REGISTRY: readonly ControlItem[] = [
   { id: 'back',         label: 'controls.back',         action: 'goBack',             visibleWhen: 'always' },
-  { id: 'dcp',          label: 'controls.dcp',          action: 'openDcp',            visibleWhen: 'always', instruction: 'dcp.open-processor' },
-  { id: 'fit',          label: 'controls.fit-content',  action: 'fitOrCenter',        visibleWhen: 'always', instruction: 'dcp.fit-content' },
-  { id: 'zoom-out',     label: 'controls.zoom-out',     action: 'zoomOut',            visibleWhen: 'always', instruction: 'dcp.zoom-out' },
-  { id: 'zoom-in',      label: 'controls.zoom-in',      action: 'zoomIn',             visibleWhen: 'always', instruction: 'dcp.zoom-in' },
-  { id: 'pin',          label: 'controls.pin',          action: 'togglePin',          visibleWhen: 'always', instruction: 'dcp.pin' },
-  { id: 'fullscreen',   label: 'controls.fullscreen',   action: 'toggleFullscreen',   visibleWhen: 'always', instruction: 'dcp.fullscreen' },
-  { id: 'instructions', label: 'controls.instructions', action: 'toggleInstructions', visibleWhen: 'always', instruction: 'dcp.instructions-toggle' },
+  { id: 'dcp',          label: 'controls.dcp',          action: 'openDcp',            visibleWhen: 'always' },
+  { id: 'fit',          label: 'controls.fit-content',  action: 'fitOrCenter',        visibleWhen: 'always' },
+  { id: 'zoom-out',     label: 'controls.zoom-out',     action: 'zoomOut',            visibleWhen: 'always' },
+  { id: 'zoom-in',      label: 'controls.zoom-in',      action: 'zoomIn',             visibleWhen: 'always' },
+  { id: 'pin',          label: 'controls.pin',          action: 'togglePin',          visibleWhen: 'always' },
+  { id: 'fullscreen',   label: 'controls.fullscreen',   action: 'toggleFullscreen',   visibleWhen: 'always' },
   { id: 'show-hidden',  label: 'controls.show-hidden',  action: 'toggleShowHidden',   visibleWhen: 'always' },
   // 'world-mode' (the world-view share toggle) moved to the header's
   // mesh-header — it now lives beside the solo/swarm icon and only shows in
@@ -94,7 +92,7 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
 // anything in edit mode the persisted map takes over.
 const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'back': true, 'dcp': true, 'fit': true, 'zoom-out': true, 'zoom-in': true, 'pin': true, 'fullscreen': true,
-  'instructions': false, 'show-hidden': false, 'neon-mode': false, 'launcher-shapes': false, 'text-only': false,
+  'show-hidden': false, 'neon-mode': false, 'launcher-shapes': false, 'text-only': false,
   'notes': true, 'pools': true,
   'cut': false, 'copy': false,
   'clipboard': true, 'voice': false, 'bees': false, 'feedback': false,
@@ -389,7 +387,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       this.#iconPressTimer = null
       this.#suppressIconClick = true
       iconEditMode.enter()
-    }, 500)
+    }, LONG_PRESS_MS)
   }
   readonly onIconPressUp = (): void => { this.#clearIconPress() }
   #clearIconPress(): void { if (this.#iconPressTimer) { clearTimeout(this.#iconPressTimer); this.#iconPressTimer = null } }
@@ -425,7 +423,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     zoomIn: () => this.zoomIn(),
     togglePin: () => this.togglePin(),
     toggleFullscreen: () => this.toggleFullscreen(),
-    toggleInstructions: (e) => this.toggleInstructions(e!),
     toggleShowHidden: () => this.toggleShowHidden(),
     toggleNeonMode: () => this.toggleNeonMode(),
     toggleLauncherShapes: () => this.toggleLauncherShapes(),
@@ -490,7 +487,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'zoom-in':      return 'zoom_in'
       case 'pin':          return 'push_pin'
       case 'fullscreen':   return 'fullscreen'
-      case 'instructions': return 'help'
       case 'show-hidden':  return this.showHidden() ? 'visibility' : 'visibility_off'
       case 'neon-mode':    return 'flare'
       case 'launcher-shapes': return 'hexagon'
@@ -1397,14 +1393,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     const center = this.#viewportCenter()
     this.zoom?.zoomByFactor?.(0.8, center, 'controls-bar')
     this.zoom?.end?.('controls-bar')
-  }
-
-  readonly toggleInstructions = (event: MouseEvent): void => {
-    if (event.ctrlKey || event.metaKey) {
-      EffectBus.emit('instruction:catalog', undefined)
-    } else {
-      EffectBus.emit('instruction:toggle', undefined)
-    }
   }
 
   readonly toggleFullscreen = (): void => {

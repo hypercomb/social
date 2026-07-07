@@ -1,7 +1,6 @@
 import { Effect } from "./effect.js"
 import { EffectBus, type EffectHandler } from "./effect-bus.js"
 import { GrammarHint } from "./grammar-hint.js"
-import { InstructionAnchor } from "./instruction.types.js"
 import { ProviderLink } from "./provider-link.js"
 import { serviceKey } from "./ioc/service-key.js"
 
@@ -139,7 +138,6 @@ export abstract class Bee {
   public grammar?: GrammarHint[]
   public links?: ProviderLink[]
   public effects?: readonly Effect[]
-  public instructions?: readonly InstructionAnchor[]
 
   // --------------------------------
   // bee mechanics (framework-owned)
