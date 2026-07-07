@@ -530,7 +530,10 @@ export class SwarmAdoptDrone extends Drone {
       }
       // …plus the first-class website slot when merging the website feature.
       const registry = ioc?.get?.('@diamondcoreprocessor.com/VisualBeeRegistry') as
-        | { get?: (view: string) => { decorationKind?: string } | undefined }
+        | {
+            get?: (view: string) => { decorationKind?: string } | undefined
+            byDecorationKind?: (kind: string) => { adoptScope?: string } | undefined
+          }
         | undefined
       const websiteKind = registry?.get?.('website')?.decorationKind
       const peerWebSlot = (kind === websiteKind && Array.isArray(peerRoot[WEBSITE_SLOT]))
@@ -560,6 +563,19 @@ export class SwarmAdoptDrone extends Drone {
       EffectBus.emit('fs:changed', { segments: [...at] })
       await new hypercomb().act()
       EffectBus.emit('activity:log', { message: `merged "${kind}" from the peer's "${label}"`, icon: '●' })
+
+      // A HIERARCHY-scoped feature (a website) IS its subtree: the pages are
+      // child cells that belong with the feature. Merging just the host cell's
+      // slot/decoration onto a HELD tile would leave a site with no pages, so
+      // after the feature merge fold the peer's owned children too — the same
+      // additive, per-child #commitBranch the manual `merge-children` action
+      // uses (idempotent: children already held return 'exists'; a cold sibling
+      // aborts loudly). #mergeChildren owns the closing panel refresh and its
+      // own "merged N tiles" log; a tile-scoped merge just refreshes the panel.
+      if (registry?.byDecorationKind?.(kind)?.adoptScope === 'hierarchy') {
+        await this.#mergeChildren(label, target)
+        return
+      }
       EffectBus.emit('tile:action', { action: 'features', label, segments: target })
     } catch (err) {
       console.warn('[swarm-adopt] feature merge failed', { label, kind, err })

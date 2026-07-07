@@ -711,6 +711,10 @@ window.ioc.register('@diamondcoreprocessor.com/WebsiteQueenBee', _website)
       descriptionKey: 'view.website.description',
       queenKey: '@diamondcoreprocessor.com/WebsiteQueenBee',
       adoptable: true,
+      // A website IS its subtree — each page is a child cell carrying its own
+      // page in its `website` slot. Adopting the site must bring the page-tiles,
+      // not just the host cell's slot. See VisualBeeDescriptor.adoptScope.
+      adoptScope: 'hierarchy',
     })
   },
 )

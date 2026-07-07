@@ -177,6 +177,26 @@ export type VisualBeeDescriptor = {
   readonly cascades?: boolean
 
   /**
+   * How much of the tile's tree travels when this feature is ADOPTED.
+   *   - `'tile'` (default when absent): only the tile the feature lives on —
+   *     its slots/decorations, no children.
+   *   - `'hierarchy'`: the tile PLUS its owned child subtree. A feature whose
+   *     content IS a subtree — a website, whose pages are child cells — MUST
+   *     declare this, so adopting the feature carries the page-tiles, not just
+   *     the host cell's `website` slot. Honored on BOTH adopt paths: the
+   *     not-held fold already re-homes the whole subtree (flattenLayerTree);
+   *     the held-tile diff-merge folds the peer's owned missing children after
+   *     merging the feature. "When owned" is a SHARE-side rule (a contributor
+   *     can only offer a hierarchy they own) — the adopt side trusts the
+   *     published branch's own children, the same as any subtree fold.
+   *
+   * Distinct from `cascades`: cascade is top-down INHERITANCE of a behavior by
+   * descendants; adoptScope is how far the fold reaches when the feature is
+   * pulled onto another hive.
+   */
+  readonly adoptScope?: 'tile' | 'hierarchy'
+
+  /**
    * IoC key of the QueenBee that handles this view's slash command.
    * Used by the adoption-icon click handler to dispatch the bee for the
    * clicked cell (`queen.invoke(args)`). Optional: if absent, the icon
