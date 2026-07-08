@@ -3,10 +3,10 @@
 // "Show features" — the puzzle-piece overlay icon. Click it and this drone
 // gathers the META details (NO code) of the bee features the clicked tile
 // is using, and emits `features:open` so the shell-side right-docked
-// features panel can list them. Clicking another tile's icon ADDS that
-// tile's features to the same list (the panel accumulates) — you run
-// through the hive collecting features without ever leaving for the
-// installer.
+// Beehaviors panel can list them. Beehaviors are managed ONE tile at a time:
+// clicking another tile's icon REPLACES the panel's subject (its name rides
+// in the panel header) — no accumulation, so you're never acting on several
+// tiles at once.
 //
 // ── What counts as a "feature" of a tile ──────────────────────────────
 //
@@ -107,6 +107,12 @@ interface FeatureItem {
   kind: string
   slashCommand?: string
   behavior?: string
+  /** True when this feature is a VIEW BEHAVIOUR (a registered visual bee whose
+   *  view can be ENTERED — slides, website, home, tutor). The panel offers an
+   *  Open action that navigates into the tile and switches to that view.
+   *  Absent for cascading capabilities (dropbox) and unrecognized foreign
+   *  kinds — there is no view to enter. */
+  openable?: boolean
   label: string
   description: string
   branchSig?: string
@@ -211,6 +217,9 @@ interface RecognizedFeature {
   descriptionKey?: string
   fallbackLabel: string
   cascades: boolean
+  /** True for a registered visual bee (an enterable view); false for a
+   *  cascading capability (dropbox) — which has no view to open. */
+  isVisualBee: boolean
 }
 
 export class ShowFeaturesDrone extends Drone {
@@ -251,16 +260,16 @@ export class ShowFeaturesDrone extends Drone {
     })
 
     // The menu's features button fires `controls:action {features}` — it has no
-    // single label, so read the selection here and open the panel for each
-    // selected tile that actually carries a feature. The viewer upserts one
-    // group per tile, so the whole selection shows at once.
+    // single label, so read the selection here. Beehaviors are managed ONE tile
+    // at a time: open the first selected tile that actually carries a feature
+    // (the panel replaces its subject, so firing for the whole selection would
+    // just race to "last one wins").
     this.onEffect<{ action?: string }>('controls:action', (payload) => {
       if (String(payload?.action ?? '') !== 'features') return
       const selection = this.#ioc()?.get<SelectionLike>(SELECTION_KEY)
       const labels = [...(selection?.selected ?? [])].map(String).filter(Boolean)
-      for (const label of labels) {
-        if (this.#labelHasFeature(label)) void this.#open(label)
-      }
+      const target = labels.find(l => this.#labelHasFeature(l))
+      if (target) void this.#open(target)
     })
 
     // The panel's ADD switch on an addable available row. Attaches the feature
@@ -762,6 +771,7 @@ export class ShowFeaturesDrone extends Drone {
         descriptionKey: bee.descriptionKey,
         fallbackLabel: bee.view,
         cascades: bee.cascades === true,
+        isVisualBee: true,
       }
     }
     const cap = CASCADING_CAPABILITIES[kind]
@@ -773,6 +783,7 @@ export class ShowFeaturesDrone extends Drone {
         descriptionKey: cap.descriptionKey,
         fallbackLabel: cap.fallbackLabel,
         cascades: true,
+        isVisualBee: false,
       }
     }
     return null
@@ -794,6 +805,7 @@ export class ShowFeaturesDrone extends Drone {
       kind,
       slashCommand: feature.slashCommand,
       behavior: feature.behavior,
+      openable: feature.isVisualBee,
       label: this.#t(i18n, feature.labelKey, feature.fallbackLabel),
       description: this.#t(i18n, feature.descriptionKey, ''),
       cascades: feature.cascades,

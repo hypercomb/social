@@ -15,6 +15,7 @@
 // resize math are unaffected by the scale.
 
 @use '../breakpoints' as *;
+@use '../toolwindow' as tw;
 
 $steel: rgb(126, 182, 214);
 
@@ -90,10 +91,7 @@ $steel: rgb(126, 182, 214);
 }
 
 .clipboard-header {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5em;
-  padding: 0.8em 1em;
+  @include tw.header;
   border-bottom: 1px solid rgba($steel, 0.22);
 }
 

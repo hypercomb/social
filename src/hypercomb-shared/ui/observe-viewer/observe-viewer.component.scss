@@ -12,6 +12,7 @@
 // unaffected by the scale.
 
 @use '../breakpoints' as *;
+@use '../toolwindow' as tw;
 
 $accent: #7eb6d6;
 
@@ -43,10 +44,7 @@ $accent: #7eb6d6;
 }
 
 .observe-header {
-  display: flex;
-  align-items: center;
-  gap: 0.4em;
-  padding: 0.8em 1em;
+  @include tw.header;
   border-bottom: 1px solid rgba($accent, 0.22);
 }
 

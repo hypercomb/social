@@ -34,6 +34,7 @@ import { isCellPublic, setCellPublic } from '../presentation/tiles/tile-actions.
 import { listDecorations } from '../commands/decoration-manifest.js'
 import { kindsForLabel } from '../commands/decoration-kind-index.js'
 import { SWARM_INVITE_KIND } from './meeting-invite.js'
+import { lineageKey } from '../history/lineage-key.js'
 
 const SWARM_LAYER_KIND = 30200
 
@@ -1210,10 +1211,11 @@ export class SwarmDrone extends Drone {
     const room = this.#getRoomStore()?.value?.trim() ?? ''
     const secret = this.#getSecretStore()?.value?.trim() ?? ''
     if (!room || !secret) return ''
-    const segs = (Array.isArray(segments) ? segments : [])
-      .map((x: unknown) => String(x ?? '').trim())
-      .filter((x: string) => x.length > 0)
-    const lineageKey = segs.join('/')
+    // Canonical lineage key — folds punctuation/hyphens so two peers who read
+    // the path the same way converge on one slot. MUST match #publishSubtree
+    // and #syncForCurrentLineage byte-for-byte (see the NUL-separator note);
+    // all three derive the key through the same lineageKey() helper.
+    const pathKey = lineageKey(segments)
     // NUL separators — must match #publishSubtree (line ~1352) exactly so
     // subscribers and publishers address the same slot. A SPACE separator
     // here was the bug behind months of "incognito sees nothing": the
@@ -1222,7 +1224,7 @@ export class SwarmDrone extends Drone {
     // another. Both A's local fanout (mesh.fanoutToSig keys by sig) and
     // the relay's #x tag filter use the publish sig — so the subscriber
     // must compose the SAME bytes the publisher does.
-    try { return await sigStore.signText(`${lineageKey}\0${room}\0${secret}`) }
+    try { return await sigStore.signText(`${pathKey}\0${room}\0${secret}`) }
     catch { return '' }
   }
 
@@ -1479,24 +1481,26 @@ export class SwarmDrone extends Drone {
     slog('[swarm] syncForCurrentLineage: proceeding', { roomLen: room.length, secretLen: secret.length })
 
     const segsRaw = lineage.explorerSegments?.() ?? []
-    // Match show-cell's lineage derivation exactly: trim, drop empty,
-    // join with '/'. Then mix in room + secret to form the swarm sig
-    // so two peers must share BOTH the path AND the credentials.
+    // Same lineage derivation as composeSigForSegments / #publishSubtree: the
+    // CANONICAL key (via lineageKey — folds punctuation so equivalent paths
+    // converge), then mix in room + secret so two peers must share BOTH the
+    // path AND the credentials. `segments` (trimmed, uncanonicalized) is kept
+    // for #lastSyncInput / downstream walks; only the hashed key canonicalizes.
     const segments = (Array.isArray(segsRaw) ? segsRaw : [])
       .map((x: unknown) => String(x ?? '').trim())
       .filter((x: string) => x.length > 0)
-    const lineageKey = segments.join('/')
+    const pathKey = lineageKey(segments)
 
     let composedSig = ''
     try {
       // sha256(lineage + '\0' + room + '\0' + secret) — NUL separators
       // prevent any one field bleeding into another (e.g. room='a:b'
       // and secret='' colliding with room='a' and secret='b').
-      composedSig = await sigStore.signText(`${lineageKey}\0${room}\0${secret}`)
+      composedSig = await sigStore.signText(`${pathKey}\0${room}\0${secret}`)
     } catch { return }
     if (!composedSig) return
 
-    this.#lastSyncInput = { segments, room, secretLen: secret.length, key: `${lineageKey}\0${room}\0${secret}` }
+    this.#lastSyncInput = { segments, room, secretLen: secret.length, key: `${pathKey}\0${room}\0${secret}` }
     
     await this.#syncForSig(composedSig)
 
@@ -2120,9 +2124,11 @@ export class SwarmDrone extends Drone {
     if (counter.count >= MAX_PUBLISH_NODES) return
     this.#publishStats.walkNodeVisits++
 
-    // Composed sig — must match the formula in #syncForCurrentLineage
-    // exactly so subscribers and publishers address the same slot.
-    const key = `${segments.join("/")}\0${room}\0${secret}`
+    // Composed sig — must match the formula in #syncForCurrentLineage /
+    // composeSigForSegments exactly so subscribers and publishers address the
+    // same slot. Canonical key via lineageKey() (folds punctuation) — the walk
+    // still resolves dirs/children by RAW name; only the hashed key normalizes.
+    const key = `${lineageKey(segments)}\0${room}\0${secret}`
     let sig = ''
     try { sig = await sigStore.signText(key) } catch { return }
     if (!sig) return
@@ -2475,7 +2481,8 @@ const payload: SwarmLayerPayload = myLabel
     if (counter.count >= MAX_PUBLISH_NODES) return
     this.#publishStats.walkNodeVisits++
 
-    const key = `${segments.join("/")}\0${room}\0${secret}`
+    // Canonical key via lineageKey() — must match #publishSubtree byte-for-byte.
+    const key = `${lineageKey(segments)}\0${room}\0${secret}`
     let sig = ''
     try { sig = await sigStore.signText(key) } catch { return }
     if (!sig) return

@@ -3,6 +3,8 @@
 // Floating, draggable "Pools of Meaning" card — referenced hive roots.
 // Steel accent, same structural shape as the other pinnable hover panels.
 
+@use '../toolwindow' as tw;
+
 $steel: rgb(126, 182, 214);
 
 :host {
@@ -36,10 +38,7 @@ $steel: rgb(126, 182, 214);
 }
 
 .pools-header {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-  padding: 0.6rem 0.8rem;
+  @include tw.header;
   border-bottom: 1px solid rgba($steel, 0.22);
   cursor: grab;
   user-select: none;

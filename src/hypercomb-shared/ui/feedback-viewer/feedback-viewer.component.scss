@@ -5,6 +5,7 @@
 // matches the feedback button. Cold, clean chrome.
 
 @use '../breakpoints' as *;
+@use '../toolwindow' as tw;
 
 $steel: rgb(126, 182, 214);
 
@@ -42,11 +43,8 @@ $steel: rgb(126, 182, 214);
 }
 
 .fv-header {
-  display: flex;
-  align-items: flex-start;
+  @include tw.header;
   justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.9rem 1rem 0.7rem;
   border-bottom: 1px solid rgba($steel, 0.22);
 }
 

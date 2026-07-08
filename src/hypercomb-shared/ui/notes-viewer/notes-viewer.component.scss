@@ -4,6 +4,7 @@
 // of the surface so the focus stays on this note. Gold accent matches the
 // note icon and the command line capture state.
 @use '../../styles/notes-shapes';
+@use '../toolwindow' as tw;
 
 $accent: #ffe14a;
 
@@ -121,11 +122,8 @@ $accent: #ffe14a;
 }
 
 .viewer-header {
-  display: flex;
-  align-items: center;
+  @include tw.header;
   justify-content: space-between;
-  gap: 0.5rem;
-  padding: 0.75rem 1rem;
   border-bottom: 1px solid rgba($accent, 0.25);
 }
 

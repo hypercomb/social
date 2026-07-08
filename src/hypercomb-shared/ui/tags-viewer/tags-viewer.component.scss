@@ -6,6 +6,8 @@
 // shared `hcDockedPanel` directive (inline width + `--hc-panel-scale`), same as
 // the features panel.
 
+@use '../toolwindow' as tw;
+
 $steel: #7eb6d6;
 
 :host {
@@ -36,10 +38,7 @@ $steel: #7eb6d6;
 }
 
 .tags-header {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5em;
-  padding: 0.85em 1em;
+  @include tw.header;
   border-bottom: 1px solid rgba($steel, 0.25);
 }
 

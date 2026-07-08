@@ -46,6 +46,11 @@ interface FeatureRow {
   description: string
   slashCommand?: string
   behavior?: string
+  /** True when this is a VIEW BEHAVIOUR whose view can be entered (slides,
+   *  website, home, tutor). The row gets an Open action that navigates into
+   *  the tile and switches to that view; the switch stays the on/off control.
+   *  Stamped by ShowFeaturesDrone, which has the visual-bee registry. */
+  openable?: boolean
   branchSig?: string
   /** True when this feature, declared on a container, flows to its subtree. */
   cascades?: boolean
@@ -148,7 +153,11 @@ interface FeaturesOpenPayload {
 export class FeaturesViewerComponent implements OnDestroy {
 
   readonly visible = signal(false)
-  readonly groups = signal<FeatureGroup[]>([])
+
+  /** The ONE tile the panel is describing. Beehaviors are managed one tile at a
+   *  time — clicking another tile's icon REPLACES the subject (its name rides
+   *  in the panel header), never accumulates a second group. Null = closed. */
+  readonly group = signal<FeatureGroup | null>(null)
 
   /** A foreign feature the participant has been asked to REVIEW before enabling.
    *  Set from `feature:review:open` (emitted by the website gate when it blocks
@@ -224,6 +233,19 @@ export class FeaturesViewerComponent implements OnDestroy {
     return n
   })
 
+  /** Selected APPLIED rows that are enterable views AND currently on — what the
+   *  bulk-bar Open acts on (opening an off/inert row would render nothing). */
+  readonly openableSelectedCount = computed(() => {
+    const group = this.group()
+    if (!group) return 0
+    const picked = this.selectedKeys()
+    let n = 0
+    for (const feat of group.applied) {
+      if (feat.openable && picked.has(this.rowKey(group, feat)) && this.isOn(group, feat)) n++
+    }
+    return n
+  })
+
   /** Fast membership: the hide keys currently in the pool. */
   readonly #hiddenKeys = computed(() => {
     const s = new Set<string>()
@@ -247,17 +269,12 @@ export class FeaturesViewerComponent implements OnDestroy {
         held: p.held,
         ...(p.hierarchy ? { hierarchy: p.hierarchy } : {}),
       }
-      // Upsert by tile: re-clicking a tile refreshes its group in place
-      // rather than duplicating it; a new tile appends to the list.
-      this.groups.update(list => {
-        const idx = list.findIndex(g => g.cell === group.cell)
-        if (idx >= 0) {
-          const next = [...list]
-          next[idx] = group
-          return next
-        }
-        return [...list, group]
-      })
+      // One tile at a time: re-clicking the SAME tile refreshes it in place;
+      // clicking a DIFFERENT tile replaces the subject (and drops the old
+      // tile's row selection, which can't carry across cells).
+      const prev = this.group()
+      if (prev?.cell !== group.cell) this.selectedKeys.set(new Set())
+      this.group.set(group)
       if (!this.visible()) this.visible.set(true)
       // A fresh group replaces its rows — any in-flight ADD for it is settled.
       if (this.pending().size) this.pending.set(new Set())
@@ -403,7 +420,7 @@ export class FeaturesViewerComponent implements OnDestroy {
 
   close(): void {
     this.visible.set(false)
-    this.groups.set([])
+    this.group.set(null)
     this.selectedKeys.set(new Set())
     this.pending.set(new Set())
     this.downloadResults.set([])
@@ -414,12 +431,6 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.#cancelTargetBlur()
     // In-flight downloads keep running (the bytes still land, and the header
     // sync pill keeps showing them) — only the panel-local status resets.
-  }
-
-  /** Drop one tile's sections from the view (does not clear its staging). */
-  removeGroup(cell: string): void {
-    this.groups.update(list => list.filter(g => g.cell !== cell))
-    if (this.groups().length === 0) this.close()
   }
 
   /** Human-readable hive path of where an applied feature is attached — the
@@ -466,18 +477,18 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.selectedKeys.set(new Set())
   }
 
-  /** Every currently-selected row, resolved back to its group. Applied rows
-   *  are matched first; available rows carry `applied: false`. */
+  /** Every currently-selected row of the active tile. Applied rows are matched
+   *  first; available rows carry `applied: false`. */
   #selectedRows(): { group: FeatureGroup; feat: RowLike; applied: boolean }[] {
+    const group = this.group()
+    if (!group) return []
     const picked = this.selectedKeys()
     const out: { group: FeatureGroup; feat: RowLike; applied: boolean }[] = []
-    for (const group of this.groups()) {
-      for (const feat of group.applied) {
-        if (picked.has(this.rowKey(group, feat))) out.push({ group, feat, applied: true })
-      }
-      for (const feat of group.available) {
-        if (picked.has(this.rowKey(group, feat))) out.push({ group, feat, applied: false })
-      }
+    for (const feat of group.applied) {
+      if (picked.has(this.rowKey(group, feat))) out.push({ group, feat, applied: true })
+    }
+    for (const feat of group.available) {
+      if (picked.has(this.rowKey(group, feat))) out.push({ group, feat, applied: false })
     }
     return out
   }
@@ -501,6 +512,13 @@ export class FeaturesViewerComponent implements OnDestroy {
   isOn(group: FeatureGroup, feat: FeatureRow): boolean {
     if (feat.adopted === false) return false
     return !this.isHidden(group, feat)
+  }
+
+  /** Can this row be ENTERED as a view? True for on, local view behaviours
+   *  (slides/website/home/tutor). A turned-off or not-yet-adopted row has no
+   *  live view to open, so the Open affordance stays hidden for it. */
+  isOpenable(group: FeatureGroup, feat: FeatureRow): boolean {
+    return feat.openable === true && this.isOn(group, feat)
   }
 
   /** The applied row's switch. Three cases, all IN PLACE (the row never
@@ -779,7 +797,7 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.#allowScope(group, feat)
     EffectBus.emit('feature:verified', { sig: feat.gateSig })
     feat.gated = false
-    this.groups.update(list => [...list])   // re-render the cleared line
+    this.group.update(g => g ? { ...g } : g)   // re-render the cleared line
   }
 
   /** Bulk allow — override the block for every SELECTED blocked feature. */
@@ -793,7 +811,7 @@ export class FeaturesViewerComponent implements OnDestroy {
       feat.gated = false
       cleared = true
     }
-    if (cleared) this.groups.update(list => [...list])
+    if (cleared) this.group.update(g => g ? { ...g } : g)
   }
 
   /** Bulk download — mirror every selected feature's bytes onto this machine.
@@ -824,6 +842,40 @@ export class FeaturesViewerComponent implements OnDestroy {
 
   isDownloading(): boolean {
     return this.downloading().size > 0
+  }
+
+  /** OPEN this view behaviour — the "enter it now" action the deck's slides
+   *  needed. Navigates INTO the tile, then flips the global render surface to
+   *  the behaviour's view: for slides that hands the viewport to
+   *  SlidesViewDrone, which plays the deck's child diagram tiles; for a
+   *  website/home/tutor it renders that cell's page. The row's switch stays
+   *  the on/off control — this is separate. Activation routes through
+   *  `view:toggle` (the same path the command-line view toggle and
+   *  `/present on` use, so ViewBee owns the flip), then the panel closes so
+   *  the view takes the screen.
+   *
+   *  Order matters: navigate BEFORE the flip. Renderers reconcile off the
+   *  live lineage, so entering the tile first means the first reconcile in the
+   *  new view already sees the deck (not the parent we opened the panel from). */
+  openBehavior(group: FeatureGroup, feat: FeatureRow): void {
+    if (!feat.openable || !feat.view) return
+    const nav = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+      ?.get<{ go?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
+    nav?.go?.([...group.segments])
+    EffectBus.emit('view:toggle', { view: feat.view, mode: 'on' })
+    this.close()
+  }
+
+  /** Bulk-bar Open — enter the first selected openable behaviour. Opening a
+   *  view is a single-surface action (you're in one view at a time), so the
+   *  top-bar button opens the first selected enterable row and closes; the
+   *  per-row ▶ button is the direct path for a specific one. */
+  openSelected(): void {
+    const group = this.group()
+    if (!group) return
+    const feat = group.applied.find(f =>
+      f.openable && this.selectedKeys().has(this.rowKey(group, f)) && this.isOn(group, f))
+    if (feat) this.openBehavior(group, feat)
   }
 
   isPending(group: FeatureGroup, feat: RowLike): boolean {

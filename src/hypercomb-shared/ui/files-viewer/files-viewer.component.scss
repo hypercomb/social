@@ -9,6 +9,8 @@
 // and the content is sized in `em`, so it shrinks as the panel narrows / grows
 // as it widens. Dock GEOMETRY (top offset) stays in rem so position is fixed.
 
+@use '../toolwindow' as tw;
+
 $accent: #a8c8ff;
 
 :host {
@@ -44,10 +46,7 @@ $accent: #a8c8ff;
 }
 
 .files-header {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5em;
-  padding: 0.85em 1em;
+  @include tw.header;
   border-bottom: 1px solid rgba($accent, 0.25);
 }
 

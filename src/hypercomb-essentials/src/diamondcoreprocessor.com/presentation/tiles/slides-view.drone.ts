@@ -37,6 +37,7 @@ import { Drone, RESOURCE_URL_PREFIX } from '@hypercomb/core'
 import { childSigsOf } from '../../history/layer-placement.js'
 import { isFeatureHidden } from '../../sharing/feature-hidden.js'
 import { DECK_KIND, SLIDE_KIND } from '../../commands/present.queen.js'
+import { isImageUrl } from '../../link/photo.js'
 
 const SLIDES_VIEW = 'slides'
 const SIG = /^[0-9a-f]{64}$/
@@ -54,7 +55,10 @@ type HistoryShape = {
 }
 type StoreShape = { getResource(sig: string): Promise<Blob | null> }
 
-type Slide = { sig: string; title: string; caption?: string }
+// `src` is EITHER a 64-hex resource signature (content in OPFS, resolved via
+// Store → object URL) OR a full image URL (an external diagram a child links
+// to, used directly as a background-image — no CORS needed to DISPLAY one).
+type Slide = { src: string; title: string; caption?: string }
 
 type MountState = {
   host: HTMLDivElement
@@ -239,16 +243,29 @@ export class SlidesViewDrone extends Drone {
       const childSigs = childSigsOf(deckLayer as Parameters<typeof childSigsOf>[0])
       let childIndex = 0
       for (const sig of childSigs) {
-        const child = await history.getLayerBySig(String(sig))
-        if (!child) { childIndex++; continue }
-        const name = typeof child['name'] === 'string' ? (child['name'] as string) : ''
+        const ref = await history.getLayerBySig(String(sig))
+        if (!ref) { childIndex++; continue }
+        const name = typeof ref['name'] === 'string' ? (ref['name'] as string) : ''
+        // Re-resolve the child's CURRENT layer via its OWN lineage bag. The
+        // parent's children-slot sig can lag the child's head, and tile
+        // properties — where an attached link/diagram lives — sit on that head:
+        // reading the parent's stale ref shows `{ name }` only and the slide is
+        // missed. Fall back to the ref layer when the head can't be signed yet.
+        let child: Record<string, unknown> = ref
+        if (name) {
+          try {
+            const freshSig = await history.sign({ explorerSegments: () => [...segments, name] })
+            const fresh = freshSig ? await history.currentLayerAt(freshSig) : null
+            if (fresh) child = fresh
+          } catch { /* keep the ref layer */ }
+        }
         const found = await this.#slidesFromChild(child, name, childIndex, store)
         out.push(...found)
         childIndex++
       }
     } catch { /* cold read — render the empty guide, retry on next reconcile */ }
     out.sort((a, b) => a.order - b.order)
-    return out.map(({ sig, title, caption }) => ({ sig, title, caption }))
+    return out.map(({ src, title, caption }) => ({ src, title, caption }))
   }
 
   /** Resolve one child layer to its slide(s): slide-decoration → gallery → link. */
@@ -285,7 +302,7 @@ export class SlidesViewDrone extends Drone {
         const titleRaw = slidePayload['title']
         const captionRaw = slidePayload['caption']
         return [{
-          sig: contentSig,
+          src: contentSig,
           title: (typeof titleRaw === 'string' && titleRaw.trim()) ? titleRaw : name,
           caption: typeof captionRaw === 'string' ? captionRaw : undefined,
           order: typeof orderRaw === 'number' ? orderRaw : childIndex,
@@ -294,32 +311,70 @@ export class SlidesViewDrone extends Drone {
     }
     if (gallery && gallery.length) {
       return gallery.map((imgSig, i) => ({
-        sig: imgSig,
+        src: imgSig,
         title: gallery!.length > 1 ? `${name} ${i + 1}` : name,
         order: childIndex + i / 1000,
       }))
     }
 
-    // 3: the child's own `link` slot, only when it points at a resource (an
-    // image diagram) — never an external hyperlink (that's navigation).
-    const link = typeof child['link'] === 'string' ? (child['link'] as string).trim() : ''
+    // 3: the child's own LINK — the diagram/image the tile points at IS the
+    // slide. The link is a TILE PROPERTY (`properties[0].link`, where the attach
+    // flow writes it), with a legacy top-level `link` as fallback. A
+    // content-addressed resource (bare sig, or a `/@resource/<sig>` URL in any
+    // form) resolves through the Store; an external IMAGE url (…/diagram.png,
+    // .svg, …) is shown directly. A non-image hyperlink is navigation, not a
+    // slide, so it contributes nothing.
+    const link = await this.#childLink(child, store)
     const sig = this.#resourceSig(link)
-    if (sig) return [{ sig, title: name, order: childIndex }]
+    if (sig) return [{ src: sig, title: name, order: childIndex }]
+    if (isImageUrl(link)) return [{ src: link, title: name, order: childIndex }]
 
     return []
   }
 
-  /** The 64-hex content sig a link value points at, when it is a resource link
-   *  (a `/@resource/<sig>` URL or a bare sig). Null for external / non-resource
-   *  links, which are not diagrams. */
+  /** The child tile's link. Attached links/diagrams live in the tile's
+   *  canonical PROPERTIES resource (`properties[0]` → JSON → `link`), NOT a
+   *  top-level layer field — that's why a plain `child.link` read missed every
+   *  attached diagram. Falls back to a legacy top-level `link` for tiles that
+   *  stored it inline. Empty when the tile has no link. */
+  async #childLink(child: Record<string, unknown>, store: StoreShape): Promise<string> {
+    const slot = child['properties']
+    const propSig = Array.isArray(slot) && typeof slot[0] === 'string' ? slot[0] : ''
+    if (SIG.test(propSig)) {
+      try {
+        const blob = await store.getResource(propSig)
+        if (blob) {
+          const props = JSON.parse(await blob.text()) as Record<string, unknown>
+          const link = props['link']
+          if (typeof link === 'string' && link.trim()) return link.trim()
+        }
+      } catch { /* unreadable/malformed props — fall back to a legacy inline link */ }
+    }
+    return typeof child['link'] === 'string' ? (child['link'] as string).trim() : ''
+  }
+
+  /** The 64-hex content sig a link value points at, when it is a resource link:
+   *  a bare sig, or a `/@resource/<sig>` URL in ANY form — RELATIVE
+   *  (`/@resource/<sig>`) or ABSOLUTE (`http://host/@resource/<sig>[/name.ext]`).
+   *  Matches link/photo.ts's includes-based resolver; a startsWith check missed
+   *  absolute links a tile can legitimately store. Null for non-resource links. */
   #resourceSig(link: string): string | null {
     if (!link) return null
     if (SIG.test(link)) return link
-    if (link.startsWith(RESOURCE_URL_PREFIX)) {
-      const tail = link.slice(RESOURCE_URL_PREFIX.length).split(/[?#]/)[0] ?? ''
+    const at = link.indexOf(RESOURCE_URL_PREFIX)
+    if (at >= 0) {
+      const tail = link.slice(at + RESOURCE_URL_PREFIX.length).split(/[/?#]/)[0] ?? ''
       return SIG.test(tail) ? tail : null
     }
     return null
+  }
+
+  /** Resolve a slide `src` to the URL painted as the stage background: a
+   *  resource sig goes through the Store (object URL, blob's own MIME); a full
+   *  image URL is already displayable and used as-is (a background-image needs
+   *  no CORS to render, unlike reading pixels). */
+  async #srcToUrl(src: string): Promise<string> {
+    return SIG.test(src) ? this.#urlForSig(src) : src
   }
 
   /** Resolve a content sig to a same-origin object URL carrying the blob's own
@@ -479,7 +534,7 @@ export class SlidesViewDrone extends Drone {
     this.#renderDots(m, n, index)
 
     const token = ++this.#showToken
-    void this.#urlForSig(slide.sig).then(url => {
+    void this.#srcToUrl(slide.src).then(url => {
       if (token !== this.#showToken || this.#mount !== m) return // superseded / torn down
       m.stage.style.backgroundImage = url ? `url("${url}")` : 'none'
     })

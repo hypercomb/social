@@ -4,6 +4,8 @@
 // contact overlay icon's hoverTint. Cold, clean chrome — frosted dark
 // surface, steel hairline, no flashy effects.
 
+@use '../toolwindow' as tw;
+
 $accent: #a8ffd8;
 
 :host {
@@ -41,10 +43,7 @@ $accent: #a8ffd8;
 }
 
 .contact-form-header {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  padding: 0.85rem 1rem;
+  @include tw.header;
   border-bottom: 1px solid rgba($accent, 0.22);
 }
 

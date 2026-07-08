@@ -25,6 +25,7 @@ import type { HistoryCursorService } from './history-cursor.service.js'
 // the shared instance and silently breaking the singleton.
 import type { LayerSlotRegistry } from './layer-slot-registry.js'
 import { LayerMachine } from './layer-machine.js'
+import { isBareLayer, chooseChildSig } from './child-sig-guard.js'
 
 type Lineage = {
   domain?: () => string
@@ -621,15 +622,16 @@ export class LayerCommitter {
           if (!Array.isArray(raw)) continue
           let sigs: string[]
           if (nameSlots.has(slot)) {
+            // Snapshot prior (name→live sig) before the set so a paste / adopt
+            // that re-lists this parent's children by name can't let a cold
+            // bag auto-mint an existing child into an empty {name} husk — the
+            // reference-tile disappearance guard (see #resolveChildName).
+            const priorByName = await this.#priorChildSigByName(history, machine.getSlot(slot))
             sigs = []
             for (const cell of raw) {
               const trimmed = String(cell ?? '').trim()
               if (!trimmed) continue
-              const cellLocSig = await history.sign({
-                domain: lineage.domain,
-                explorerSegments: () => [...segments, trimmed],
-              } as Lineage)
-              const cellSig = await history.latestMarkerSigFor(cellLocSig, trimmed)
+              const cellSig = await this.#resolveChildName(history, lineage, segments, trimmed, priorByName)
               if (cellSig) sigs.push(cellSig)
             }
           } else {
@@ -765,6 +767,79 @@ export class LayerCommitter {
     try { await run } finally { this.#bootstrapInFlight.delete(locSig) }
   }
 
+  // ── Cold-mint preserve guard ─────────────────────────────────────────
+  //
+  // `latestMarkerSigFor` auto-mints an empty `{name}` layer for any bag
+  // that reads cold (see history.service.ts) — so any commit that re-lists
+  // a parent's children BY NAME (paste, cut, move-into, promote, adopt,
+  // any `nameSlots` layer update) can silently swap a live child's sig for
+  // an empty husk. For a REFERENCE tile — whose entire identity is its
+  // `decorations` slot, with no image fallback — that is fatal: it stops
+  // portaling and renders blank; ordinary tiles merely go imageless. Undo
+  // recovers (the prior marker still holds the real sig), but the next
+  // same op re-breaks it. These helpers make name-resolution refuse to let
+  // a cold husk overwrite a live child.
+
+  /** name → its current live child sig, built from a parent's prior
+   *  children sigs (the hydrated machine's slot, read BEFORE the set). */
+  async #priorChildSigByName(
+    history: HistoryService,
+    priorChildSigs: readonly unknown[],
+  ): Promise<Map<string, string>> {
+    const byName = new Map<string, string>()
+    await Promise.all(priorChildSigs.map(async (raw) => {
+      const sig = String(raw ?? '')
+      if (!/^[0-9a-f]{64}$/.test(sig)) return
+      const layer = await history.getLayerBySig(sig)
+      const name = typeof layer?.name === 'string' ? layer.name : ''
+      if (name) byName.set(name, sig)
+    }))
+    return byName
+  }
+
+  /** True when a sig resolves to a bare `{name}` layer — no slot carries
+   *  content. That is exactly the shape `latestMarkerSigFor` mints for a
+   *  cold bag, so a bare result for an EXISTING child is the auto-mint
+   *  fingerprint (a live child always carries children / notes / tags /
+   *  decorations / properties). A missing layer counts as bare, so a read
+   *  miss also prefers the known-live prior sig. */
+  async #isBareHusk(history: HistoryService, sig: string): Promise<boolean> {
+    return isBareLayer(await history.getLayerBySig(sig))
+  }
+
+  /** Resolve ONE child name to its live sig, guarding the cold-mint case:
+   *  if `latestMarkerSigFor` degenerated to a bare `{name}` husk for a name
+   *  we already hold a RICH sig for, keep the prior sig — never let a
+   *  transient cold read blank a reference/tile. A legitimate edit yields a
+   *  non-bare sig and is trusted verbatim; a genuinely new child (no prior)
+   *  mints exactly as before. */
+  async #resolveChildName(
+    history: HistoryService,
+    lineage: Lineage,
+    parentSegs: readonly string[],
+    name: string,
+    priorByName: Map<string, string>,
+  ): Promise<string> {
+    const cellLocSig = await history.sign({
+      domain: lineage.domain,
+      explorerSegments: () => [...parentSegs, name],
+    } as Lineage)
+    const resolved = await history.latestMarkerSigFor(cellLocSig, name)
+    const prior = priorByName.get(name)
+    // Fast path: brand-new child (no prior), or the resolve matched the
+    // prior sig — trust the resolve, no extra reads.
+    if (!prior || prior === resolved) return resolved
+    // The resolve moved an existing child's sig. Fetch both layers' bareness
+    // and let the pure guard decide — it keeps the prior only when a bare
+    // {name} husk (cold-mint) would otherwise replace a live child.
+    return chooseChildSig({
+      resolvedSig: resolved,
+      resolvedBare: await this.#isBareHusk(history, resolved),
+      priorSig: prior,
+      priorBare: await this.#isBareHusk(history, prior),
+    })
+  }
+
   async #commit(req: CommitRequest = { segments: null }): Promise<void> {
     // Never commit while cursor is rewound — the assembled state reflects
     // the past view, not a new user intent.
@@ -863,6 +938,11 @@ export class LayerCommitter {
             const values = Array.isArray(raw) ? raw : []
             let sigs: string[]
             if (nameSlots.has(slot)) {
+              // Snapshot this slot's prior (name→live sig) map BEFORE the set,
+              // so #resolveChildName can PRESERVE a live child sig that a cold
+              // bag would otherwise auto-mint into an empty {name} husk — the
+              // reference-tile / imageless-tile disappearance guard.
+              const priorByName = await this.#priorChildSigByName(history, machine.getSlot(slot))
               // Each child's sign + latestMarkerSigFor pair is independent —
               // pure compute (memoized) and a bag head read respectively, with
               // no shared mutable state. Running them sequentially was O(N)
@@ -872,11 +952,7 @@ export class LayerCommitter {
               const resolved = await Promise.all(values.map(async (cell) => {
                 const trimmed = String(cell ?? '').trim()
                 if (!trimmed) return ''
-                const cellLocSig = await history.sign({
-                  domain: lineage.domain,
-                  explorerSegments: () => [...sub, trimmed],
-                } as Lineage)
-                return await history.latestMarkerSigFor(cellLocSig, trimmed)
+                return await this.#resolveChildName(history, lineage, sub, trimmed, priorByName)
               }))
               sigs = resolved.filter(Boolean)
             } else {

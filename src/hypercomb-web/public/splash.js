@@ -1,10 +1,14 @@
 /* Hypercomb loading page — genesis animation (pure canvas, zero dependencies).
  *
  * Paints instantly from inside <app-root>, then RE-PARENTS itself to <body> so it
- * survives Angular's bootstrap, and stays up until the first tiles are actually on
- * screen — EffectBus 'render:cell-count' with count>0 (emitted after the tile meshes
- * are built and the render completeness gate passes). Then it finishes the animation
- * down to the white dot, holds ~1s, and fades to reveal the hive.
+ * survives Angular's bootstrap, and stays up until the hive is ready to show — the
+ * first tiles on screen (EffectBus 'render:cell-count' with count>0), OR a genuinely
+ * empty layer (count===0 with settled:true — pixi + data were up, the location just
+ * has no tiles), OR the install-needed welcome card (boot:status) whose "Start" button
+ * the splash must not cover. Then it finishes the animation down to the white dot,
+ * holds ~1s, and fades to reveal the hive. It never blocks on an event that may not
+ * fire: an empty page reveals via settled, and after MAXLOOPS (3) plays with no signal
+ * it rests on the dot and offers "click to enter" — the user always has a way in.
  *
  * Keep in sync with hypercomb-dev/public/splash.js. The #hc-splash styles live in
  * <head> (index.html) so they persist after we move out of <app-root>.
@@ -72,11 +76,11 @@
   var HOLD0 = 0.3, STEP_DT = 0.2, STEP_END = HOLD0 + 5 * STEP_DT;
   var BALL_T = 1.5, BALL_END = STEP_END + BALL_T;                 // sphere fully formed
   var COLLAPSE = 0.7, COLLAPSE_END = BALL_END + COLLAPSE;         // shrink down to the white dot
-  var DOT_HOLD = 0.6, TOTAL = COLLAPSE_END + DOT_HOLD;            // brief dwell on the dot, then loop
+  var DOT_HOLD = 0.9, TOTAL = COLLAPSE_END + DOT_HOLD;            // the small circle fills to solid here, holds, then loops
   var SPIN = 0.45, TILT = 0.26, ZOOM0 = 0.75, ZOOM_STEP = 0.62, ZOOM_MIN = 0.30, ZOOM_DOT = 0.045, SPEED = 1.25;
   function ease(x) { return x * x * (3 - 2 * x); }
   function smooth(a, b, x) { var t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
-  var lastN = -1, nowSec = 0, zoom = 1, backCull = 0;
+  var lastN = -1, nowSec = 0, zoom = 1, backCull = 0, solidify = 0;   // solidify: 0 everywhere except the end dot, where the small circle fills solid
 
   function computeState() {
     var t = nowSec, N;
@@ -91,12 +95,19 @@
   function timeline(dt, realDt) {
     nowSec += dt;
     if (finishing && nowSec >= COLLAPSE_END) {          // the finishing run has reached the white dot
-      nowSec = COLLAPSE_END;                            // hold on it ~1s, then hand off to the hive
-      dotReal += realDt; if (dotReal >= 1.0) dismiss();
+      nowSec = COLLAPSE_END;                            // pin on the dot
+      if (awaitEnter) showEnter();                      // cap hit with no ready signal → rest here, wait for a click
+      else { dotReal += realDt; if (dotReal >= 1.0) dismiss(); }   // real signal → hold ~1s, then hand off to the hive
     } else if (nowSec >= TOTAL) {
-      nowSec -= TOTAL; pts = []; lastN = -1;            // keep looping through the dot until tiles are ready
+      if (++loops >= MAXLOOPS && !finishing) {          // played the animation MAXLOOPS times, still no ready signal:
+        finishing = true; awaitEnter = true;            //   finish this run down to the dot and offer click-to-enter
+      } else {
+        nowSec -= TOTAL; pts = []; lastN = -1; solidify = 0;   // keep looping; start the next run sparse again
+      }
     }
     computeState();
+    var atDot = nowSec >= COLLAPSE_END - 1e-6;               // the pause at the small circle
+    solidify += ((atDot ? 1 : 0) - solidify) * (1 - Math.pow(0.0025, dt));   // fill it to solid white there, only there
   }
   function integrate(dt) {
     var n = pts.length; if (!n) return;
@@ -124,7 +135,7 @@
 
   function render() {
     ctx.clearRect(0, 0, W, H);
-    var cx = W / 2, cy = H / 2, R = Math.min(W, H) * 0.30 * zoom;
+    var cx = W / 2, cy = H * 0.46 - 10, R = Math.min(W, H) * 0.30 * zoom;   // up 10px; title (index.html .m) down 10px → +20px gap, group stays centred   // sphere a touch above centre; the title (index.html #hc-splash .m, top:66%) hugs beneath it — the pair balanced as one vertically-centred group
     var yaw = Math.max(0, nowSec - HOLD0) * (reduce ? 0.15 : SPIN);
     var cyw = Math.cos(yaw), syw = Math.sin(yaw), ctl = Math.cos(TILT), stl = Math.sin(TILT), n = pts.length, i;
     for (i = 0; i < n; i++) {
@@ -134,18 +145,32 @@
       q.sx = cx + x1 * R * persp; q.sy = cy - y2 * R * persp; q.z = z2; q.persp = persp; q.s = pts[i].s;
       q.front = 1 - backCull + backCull * smooth(-0.05, 0.28, z2);
     }
+    // Original sparse render EVERYWHERE; only at the end dot does 'solidify' (see timeline) grow the dots a
+    // little — just enough to merge and close the gaps — CLIPPED to the circle so white can never flood past
+    // the outline. FILLK = how much the dots grow (bigger = fills sooner, but risks looking flooded).
+    var FILLK = 0.07;
     var order = proj.slice(0, n).sort(function (u, v) { return u.z - v.z; });
+    var clipped = solidify > 0.01;
+    if (clipped) { ctx.save(); ctx.beginPath(); ctx.arc(cx, cy, R, 0, 6.2832); ctx.clip(); }
     for (var k = 0; k < order.length; k++) {
       var o = order[k], vis = o.s * o.front; if (vis <= 0.006) continue;
-      var radPx = Math.max(0.8, (n <= 6 ? 7.5 : 3.2) * o.persp * zoom * (0.5 + 0.5 * o.s));
-      var shade = Math.min(1, Math.max(0, (o.z + 1) * 0.5)), a = Math.min(1, (0.5 + 0.5 * shade) * vis);
+      var sparse = (n <= 6 ? 7.5 : 3.2) * o.persp * zoom;                     // untouched — how it was before
+      var radPx = Math.max(0.8, (sparse + (R * FILLK - sparse) * solidify) * (0.5 + 0.5 * o.s));
+      var shade = Math.min(1, Math.max(0, (o.z + 1) * 0.5));
+      var a = Math.min(1, ((0.5 + 0.5 * shade) + 0.35 * solidify) * vis);
       ctx.beginPath(); ctx.arc(o.sx, o.sy, radPx, 0, 6.2832); ctx.fillStyle = 'rgba(245,249,252,' + a + ')'; ctx.fill();
     }
+    if (clipped) ctx.restore();
   }
 
   // ---- dismissal: wait for real tiles, finish down to the dot, then fade to the hive ----
-  var finishing = false, dismissed = false, dotReal = 0;
-  function requestExit() { finishing = true; }                  // stop looping; finish this run down to the dot, then dismiss
+  // finishing  — a ready signal (or the 3-play cap) said "stop looping, run down to the dot".
+  // awaitEnter — the cap was hit with NO ready signal: rest on the dot and let the user
+  //              click / press a key to enter, rather than auto-revealing a hive that may
+  //              not be ready yet or looping the animation forever.
+  var finishing = false, awaitEnter = false, dismissed = false, dotReal = 0, loops = 0, enterHint = null;
+  var MAXLOOPS = 3;                                             // play the genesis animation at most this many times
+  function requestExit() { finishing = true; awaitEnter = false; }   // a real ready signal → finish + auto-reveal (wins over click-to-enter)
   function dismiss() {
     if (dismissed) return; dismissed = true;
     requestAnimationFrame(function () {                         // let the tile frame flip to pixels first
@@ -154,16 +179,48 @@
       setTimeout(function () { if (splash.parentNode) splash.parentNode.removeChild(splash); }, 520);
     });
   }
+  // After MAXLOOPS plays with no ready signal, rest on the solid dot and offer a way in
+  // instead of looping forever OR auto-revealing a not-yet-ready hive. A click anywhere or
+  // any keypress enters. Built once (idempotent) the first frame we settle on the dot.
+  function showEnter() {
+    if (enterHint) return;
+    splash.style.cursor = 'pointer';
+    enterHint = document.createElement('div');
+    enterHint.textContent = 'click to enter';
+    enterHint.setAttribute('style',
+      'position:absolute;left:0;right:0;top:calc(66% + 76px);text-align:center;pointer-events:none;' +
+      'user-select:none;color:#8ea0b4;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;' +
+      'font-size:11px;letter-spacing:.42em;text-indent:.42em;text-transform:uppercase;opacity:0;transition:opacity .8s ease');
+    splash.appendChild(enterHint);
+    requestAnimationFrame(function () { if (enterHint) enterHint.style.opacity = '0.6'; });
+  }
+  function enterNow() { if (awaitEnter && !dismissed) dismiss(); }   // click/key only bites once we're resting on the dot
+  splash.addEventListener('click', enterNow);
+  window.addEventListener('keydown', function (e) { if (awaitEnter && !dismissed) { e.preventDefault(); dismiss(); } });
   (function waitBus() {
     if (dismissed) return;
     var bus = window.__hypercombEffectBus;
     if (bus && bus.on) {
-      bus.on('render:cell-count', function (pl) { if (pl && pl.count > 0) requestExit(); });   // first real tiles on screen
+      // Reveal the hive when the renderer reports it is ready. Two ready shapes:
+      //   • count > 0             — real tiles are on screen.
+      //   • count === 0 && settled — a GENUINELY empty layer (pixi + data were up,
+      //     the location simply has no tiles). Without the settled case an empty
+      //     tile page would just loop the animation until the 3-play cap drops it
+      //     to click-to-enter — settled reveals it promptly instead.
+      // A count:0 WITHOUT settled is a not-ready transient (pixi still warming —
+      // clearMesh's early "not ready" bails) and is IGNORED, so a populated hive
+      // never flashes an empty canvas before its tiles paint.
+      bus.on('render:cell-count', function (pl) { if (pl && (pl.count > 0 || pl.settled)) requestExit(); });
       bus.on('render:unsupported', function () { dismiss(); });                                 // GPU blocked → tiles never paint
-      bus.on('boot:status', function (s) { if (s && s.kind === 'install-needed') dismiss(); }); // empty shell, nothing coming
+      // install-needed → the welcome card's "Start" button is behind the splash.
+      // Reveal it NOW so the user can click Start to load the libraries. Holding
+      // the splash here is a hard deadlock: no Start → no libraries → no hive.
+      bus.on('boot:status', function (s) { if (s && s.kind === 'install-needed') dismiss(); });
     } else { requestAnimationFrame(waitBus); }
   })();
-  setTimeout(requestExit, 20000);                              // backstop: gracefully finish out even with no signal
+  // No blind auto-hide timer: the 3-play cap (see timeline) is the terminal fallback —
+  // it rests on the dot and shows "click to enter" so we never reveal a not-ready hive
+  // on a timer, and the user always has a guaranteed way in.
 
   // ---- loop; stops when the splash leaves the DOM ----
   var last = (typeof performance !== 'undefined' ? performance.now() : Date.now()), raf = 0;

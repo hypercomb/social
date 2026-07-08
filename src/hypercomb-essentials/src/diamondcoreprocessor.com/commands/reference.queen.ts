@@ -2,7 +2,7 @@
 //
 // `/reference` (alias `/ref`) — drop a REFERENCE tile at the current location:
 // a live pointer to another lineage. Clicking the tile portals to the target
-// (see reference-action.drone.ts + tile-overlay #navigateInto). This is the
+// (see tile-overlay #navigateInto). This is the
 // atom that lets a set collect references to your own tiles without
 // duplicating their content — the same target can be referenced from many
 // places (reference sets / pools of meaning).

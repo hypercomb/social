@@ -11,6 +11,7 @@
 // (top offset) stays in rem so the panel's position is unaffected by the scale.
 
 @use '../breakpoints' as *;
+@use '../toolwindow' as tw;
 
 $accent: #c8b8ff;
 
@@ -51,18 +52,36 @@ $accent: #c8b8ff;
 }
 
 .features-header {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5em;
-  padding: 0.85em 1em;
+  @include tw.header;
   border-bottom: 1px solid rgba($accent, 0.25);
 }
 
 .features-title {
-  flex: 1;
+  flex: 0 0 auto;
   font-size: 0.9em;
   letter-spacing: 0.05em;
   color: rgba($accent, 0.95);
+}
+
+// Divider between the panel name and the tile it's describing — "Beehaviors / cell".
+.features-sep {
+  flex: 0 0 auto;
+  font-size: 0.9em;
+  color: rgba(255, 255, 255, 0.3);
+}
+
+// The ONE tile the panel is scoped to, promoted into the header (the panel is
+// single-tile — no per-group cell row below). Takes the slack and ellipsizes.
+.features-cell {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.86em;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: rgba($accent, 0.8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .features-clear {
@@ -102,39 +121,9 @@ $accent: #c8b8ff;
   padding: 0.25em 0 0.5em;
 }
 
-// ── per-tile group ────────────────────────────────────────────────
+// ── the tile's group (single — its name is promoted to the panel header) ──
 .features-group {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.fgroup-header {
-  display: flex;
-  align-items: center;
-  gap: 0.5em;
-  padding: 0.55em 1em 0.3em;
-}
-
-.fgroup-cell {
-  flex: 1;
-  font-size: 0.78em;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  color: rgba($accent, 0.8);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.fgroup-remove {
-  background: transparent;
-  border: none;
-  color: rgba(255, 255, 255, 0.35);
-  font-size: 1.05em;
-  line-height: 1;
-  cursor: pointer;
-  padding: 0 0.2em;
-
-  &:hover { color: #ffc8c8; }
+  padding-top: 0.35em;
 }
 
 // ── adopt target (peer groups) ────────────────────────────────────
@@ -607,6 +596,27 @@ $accent: #c8b8ff;
   &.busy { opacity: 0.55; cursor: progress; }
 }
 
+// Open (bulk bar) — ENTER the selected view behaviour and close. Primary
+// action: filled accent so it reads as the main thing to do with a view row.
+.bulk-open {
+  flex: 0 0 auto;
+  border-radius: 5px;
+  border: 1px solid rgba($accent, 0.9);
+  background: rgba($accent, 0.85);
+  color: #0c1118;
+  font-family: inherit;
+  font-size: 0.66em;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.28em 0.7em;
+  cursor: pointer;
+  transition: filter 120ms ease, transform 120ms ease;
+
+  &:hover { filter: brightness(1.12); }
+  &:active { transform: scale(0.94); }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
+}
+
 // ── download pathway (under the header, independent of selection) ──
 // One stepper per tile: sent → receiving → done. Amber marks the ground
 // covered so far (activity, same hue as the header sync pill), the frontier
@@ -791,6 +801,28 @@ $path-fail: #e08a8a;     // failed terminal
 
   &:hover { background: rgba(255, 180, 120, 0.16); color: #ffe4c8; }
   &:focus-visible { outline: 1px solid rgba(255, 180, 120, 0.6); outline-offset: -1px; }
+}
+
+// Per-row Open — trailing button on an enterable applied row (slides/website/
+// home/tutor that is ON). Accent tint, not filled: discoverable without
+// shouting over the on/off switch to its left.
+.feat-open {
+  flex: 0 0 auto;
+  align-self: center;
+  border-radius: 4px;
+  border: 1px solid rgba($accent, 0.5);
+  background: rgba($accent, 0.16);
+  color: #eaf3f9;
+  font-family: inherit;
+  font-size: 0.72em;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.18em 0.55em;
+  cursor: pointer;
+  transition: background 120ms ease;
+
+  &:hover { background: rgba($accent, 0.3); }
+  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
 }
 
 // ── Review gate ─────────────────────────────────────────────────────────────

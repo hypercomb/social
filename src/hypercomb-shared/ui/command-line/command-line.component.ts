@@ -2721,6 +2721,16 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       return
     }
 
+    // '@' feature mode: keep the `cell@` (or `~cell@`) head and append the
+    // chosen behavior name. Without this branch it falls through to the bare
+    // fallback below, which replaces the whole input with just the feature
+    // name — dropping the target cell (typed `diagrams@slides`, Tab left only
+    // `slides`).
+    if (ctx.mode === 'feature') {
+      this.#setShellValue(ctx.head + best, true)
+      return
+    }
+
     // select mode: completion depends on phase
     if (ctx.mode === 'select') {
       const phase = this.#selectPhase()

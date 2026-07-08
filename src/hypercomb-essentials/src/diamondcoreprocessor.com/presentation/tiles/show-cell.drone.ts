@@ -15,6 +15,7 @@ import { launcherClusterLayout, type ClusterGroup } from './launcher-cluster-lay
 import { hideStorageKey, isCellPublic } from './tile-actions.drone.js'
 import { sessionHideStore } from './session-hide.store.js'
 import type { HistoryService, LayerContent } from '../../history/history.service.js'
+import { lineageKey } from '../../history/lineage-key.js'
 import type { HistoryCursorService, CursorState } from '../../history/history-cursor.service.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoom/zoom.drone.js'
 
@@ -1148,12 +1149,10 @@ export class ShowCellDrone extends Drone {
     const currentSig: () => Promise<string> | undefined = lineage?.currentSig
     const sig = typeof currentSig === 'function' ? await lineage.currentSig() : ''
     const explorerSegmentsRaw = lineage?.explorerSegments?.() ?? []
-    const explorerSegments = Array.isArray(explorerSegmentsRaw)
-      ? explorerSegmentsRaw
-        .map((x: unknown) => String(x ?? '').trim())
-        .filter((x: string) => x.length > 0)
-      : []
-    const key = explorerSegments.join('/')
+    // Canonical key via the shared helper so `key` and `sig` describe the same
+    // bag (sig comes from lineage.currentSig() → HistoryService.sign, which
+    // hashes this exact canonical key).
+    const key = lineageKey(explorerSegmentsRaw)
     return { key, sig }
   }
 
@@ -2211,7 +2210,7 @@ export class ShowCellDrone extends Drone {
       this.renderedCellsKey = `tag-flatten:${this.#filterScope}:` + [...this.filterTags].sort().join(',')
       this.renderedLocationKey = locationKey
       this.renderedCells.clear()
-      this.emitEffect('render:cell-count', this.#buildCellCountPayload([]))
+      this.emitEffect('render:cell-count', { ...this.#buildCellCountPayload([]), settled: true })
       this.rendering = false
       return
     }
@@ -2977,7 +2976,10 @@ export class ShowCellDrone extends Drone {
 
       if (cellNames.length === 0) {
         if (this.layer) this.layer.visible = true
-        this.clearMesh("layer-change: location has no cells")
+        // Ready + genuinely empty (this is the boot path for an empty root):
+        // settled=true so the loading splash reveals the hive instead of
+        // waiting for a count>0 that will never arrive.
+        this.clearMesh("layer-change: location has no cells", true)
         return
       }
 
@@ -3019,7 +3021,7 @@ export class ShowCellDrone extends Drone {
 
     // note: same layer — incremental path (cell collection was fresh, images are cached)
     if (cellNames.length === 0) {
-      this.clearMesh("same-layer: cellNames empty")
+      this.clearMesh("same-layer: cellNames empty", true)   // ready + genuinely empty → splash may reveal
       return
     }
 
@@ -3041,13 +3043,13 @@ export class ShowCellDrone extends Drone {
     const axialMax = typeof axial.items.size === 'number' ? axial.items.size : cellNames.length
     const maxCells = Math.min(cellNames.length, axialMax)
     if (maxCells <= 0) {
-      this.clearMesh(`same-layer: maxCells=0 (names=${cellNames.length}, axial=${axialMax})`)
+      this.clearMesh(`same-layer: maxCells=0 (names=${cellNames.length}, axial=${axialMax})`, true)
       return
     }
 
     const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, localCellSet, branchSet)
     if (cells.length === 0) {
-      this.clearMesh("same-layer: axial yielded 0 cells")
+      this.clearMesh("same-layer: axial yielded 0 cells", true)
       return
     }
 
@@ -3179,7 +3181,11 @@ export class ShowCellDrone extends Drone {
       // (When axial isn't ready yet we keep the old reveal-and-wait
       // behaviour so a transient unready frame doesn't flash empty.)
       const axialReady = typeof axial?.items?.size === 'number' && axial.items.size > 0
-      if (axialReady) this.clearMesh('stream: empty location (no renderable cells)')
+      // axialReady gates settled=true: the map is populated and this location
+      // simply has no renderable cells — a real empty layer the splash can
+      // reveal. (When axial isn't ready we skip clearMesh entirely, so no
+      // premature settled signal escapes.)
+      if (axialReady) this.clearMesh('stream: empty location (no renderable cells)', true)
       if (this.layer) this.layer.visible = true
       this.streamActive = false
       this.emitEffect('navigation:guard-end', {})
@@ -4080,6 +4086,21 @@ export class ShowCellDrone extends Drone {
       // possibly-ancestor entry. branchByHeadSig is intentionally NOT cleared —
       // it is keyed by the immutable head sig, so a changed head is just a miss.
       this.#completeChildNamesByParentSig.clear()
+      // The memo clear above only heals the SLOW render path. Back-nav restores
+      // a parent location SYNCHRONOUSLY from #layerCellsCache — a SEPARATE cache
+      // the fast path paints VERBATIM, cell-by-cell hasBranch flags included,
+      // never re-resolving branch-status. Those flags were captured when the
+      // parent last rendered, with this child still a LEAF; so after the child
+      // gains its first grandchild, the parent's cached cells still mark it
+      // hasBranch=false. #buildCellCountPayload then omits it from branchLabels,
+      // and the tile-overlay routes its click to the 'open' editor action
+      // instead of #navigateInto — the branch is un-enterable until a full
+      // reload drops the in-memory cache ("can't click into the branch until I
+      // refresh"). Invalidate the fast-path cache alongside the memo. Same
+      // perf-cache rationale (it re-warms on the next render) and same reason
+      // it's cleared BEFORE the location guard: an add at a DESCENDANT location
+      // still flips an ancestor's branch dot.
+      this.#layerCellsCache.clear()
       // Only react to additions at the location we're currently showing.
       // One create can emit cell:added for several locations at once — a
       // nested `a/b/c` adds a child to root, /a AND /a/b — and the tiles for
@@ -4109,6 +4130,12 @@ export class ShowCellDrone extends Drone {
       // stale. Invalidate the parent-branch memo so the (now stale) branch dot
       // is re-derived on the next render. See the cell:added note above.
       this.#completeChildNamesByParentSig.clear()
+      // Same back-nav fast-path staleness as cell:added: a child losing its LAST
+      // grandchild flips branch→leaf, but the parent's #layerCellsCache entry
+      // still marks it a branch (a stale dot + a click that drills into a now-
+      // empty layer) until reload. Invalidate the fast-path cache alongside the
+      // memo. See the cell:added note.
+      this.#layerCellsCache.clear()
       this.#pendingRemoves.add(payload.cell)
       this.cellImageCache.delete(payload.cell)
       this.cellTagsCache.delete(payload.cell)
@@ -4950,7 +4977,15 @@ export class ShowCellDrone extends Drone {
     }
   }
 
-  private clearMesh = (reason: string): void => {
+  // settledEmpty: TRUE only when the caller has confirmed the render pipeline
+  // was READY (pixi + axial + lineage up) and the location genuinely resolved
+  // to zero tiles — i.e. this is a real "empty layer", not a "not ready yet"
+  // bail. It rides out on the render:cell-count payload so the loading splash
+  // can tell the two apart: a settled empty layer means the hive is ready to
+  // reveal (there are simply no tiles), whereas a not-ready count:0 (pixi still
+  // warming) must be ignored so a populated hive never flashes blank before its
+  // tiles paint. Default false — an unclassified clear is treated as not-ready.
+  private clearMesh = (reason: string, settledEmpty = false): void => {
     if (this.hexMesh && this.layer) {
       // A live-mesh teardown must NEVER be silent. Every "tiles rendered
       // and then vanished" bug funnels through here, and an unexplained
@@ -4989,7 +5024,7 @@ export class ShowCellDrone extends Drone {
     // the saved meshOffset and recentered → tiles + overlay misaligned.
     this.#pendingRecenter = false
     this.#pendingMeshOffsetRestore = null
-    this.emitEffect('render:cell-count', this.#buildCellCountPayload([]))
+    this.emitEffect('render:cell-count', { ...this.#buildCellCountPayload([]), settled: settledEmpty })
   }
 
   /**

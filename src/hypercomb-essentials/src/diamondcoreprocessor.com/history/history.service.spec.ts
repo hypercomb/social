@@ -16,11 +16,13 @@
 // helpers are generic over "the dir that holds lineage bags".
 
 import { describe, it, expect, beforeEach } from 'vitest'
+import { lineageKey } from './lineage-key.js'
 
 // -------------------------------------------------
-// Pure: lineage sig algorithm (mirrors history.service.ts:sign +
-// show-cell.drone.ts:computeSignatureLocation, the two compute
-// sites that must agree on the bag's identity)
+// Pure: lineage sig algorithm. Every site that names a bag (history.service
+// sign, the swarm mesh sig, show-cell.computeSignatureLocation) derives its
+// key through the shared `lineageKey` helper — so the oracle uses it too and
+// cannot drift from the service.
 // -------------------------------------------------
 
 const SIG_RE = /^[a-f0-9]{64}$/
@@ -34,10 +36,8 @@ const sha256Hex = async (s: string | ArrayBuffer): Promise<string> => {
     .join('')
 }
 
-const signLineage = async (segments: string[]): Promise<string> => {
-  const cleaned = segments.map(s => String(s ?? '').trim()).filter(s => s.length > 0)
-  return await sha256Hex(cleaned.join('/'))
-}
+const signLineage = async (segments: string[]): Promise<string> =>
+  await sha256Hex(lineageKey(segments))
 
 // -------------------------------------------------
 // Mock OPFS — in-memory implementation of the slice of
@@ -526,6 +526,18 @@ describe('signLineage — bag identity = ancestry only', () => {
     const a = await signLineage(['abc', '  ', '', 'def'])
     const b = await signLineage(['abc', 'def'])
     expect(a).toBe(b)
+  })
+
+  it('punctuation-variant paths converge on one bag (no "same but does not match")', async () => {
+    const hyphen = await signLineage(['My-Cool-Tile'])
+    const spaced = await signLineage(['My Cool Tile'])
+    expect(hyphen).toBe(spaced)
+  })
+
+  it('canonicalization keeps genuinely-different names apart', async () => {
+    const one = await signLineage(['Chapter 1'])
+    const two = await signLineage(['Chapter 2'])
+    expect(one).not.toBe(two)
   })
 })
 

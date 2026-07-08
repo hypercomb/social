@@ -1,0 +1,37 @@
+// hypercomb-shared/ui/_toolwindow.scss
+//
+// Shared chrome for the docked tool-window panels (Beehaviors, Files, Tags,
+// Observe, Feedback, Clipboard, History). Before this, every panel hand-rolled
+// its own header padding (0.8em / 0.85em / 0.667em / 0.9rem …), so the docked
+// column read as "mal-arranged" — each panel's title bar a different height.
+//
+// ONE knob, ONE mixin. The mixin sets the header BAND (height + horizontal
+// padding + flex layout) so every tool window's title bar is exactly the same
+// height and its title/close line up across panels. Each panel keeps its own
+// accent `border-bottom` and title colour (its identity) — this only unifies
+// the geometry.
+//
+// rem, NOT em, on purpose: the docked panels scale their BODY content by
+// `--hc-panel-scale` (per-panel width), but the header band must read the SAME
+// physical height in every tool window regardless of how wide any one panel
+// is — so it's anchored to the root font, not the panel's scaled font.
+//
+// Usage (at the top of a panel's SCSS, alongside `@use '../breakpoints'`):
+//   @use '../toolwindow' as tw;
+//   .files-header { @include tw.header; border-bottom: 1px solid …; }
+
+/// The one common tool-window header height. ~42px at the default root font.
+$header-height: 2.6rem;
+
+/// The shared header band: fixed height, centered content, consistent padding.
+/// Panels add their own `border-bottom` (accent) and, where the close button
+/// must sit hard-right, a `justify-content` / a flex:1 title.
+@mixin header {
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: $header-height;
+  padding: 0 0.9rem;
+}

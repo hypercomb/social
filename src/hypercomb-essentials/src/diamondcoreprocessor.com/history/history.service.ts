@@ -1,5 +1,6 @@
 // diamondcoreprocessor.com/core/history.service.ts
 import { EffectBus, SignatureService, SignatureStore } from '@hypercomb/core'
+import { lineageKey, rawLineageKey } from './lineage-key.js'
 import { canonicalise, parse as parseRecord, type DeltaRecord } from './delta-record.js'
 import { reduce as reduceRecords, type HydratedState } from './delta-reducer.js'
 export type { DeltaRecord } from './delta-record.js'
@@ -252,6 +253,12 @@ export class HistoryService {
   readonly #promotedBags = new Set<string>()
   readonly #promotePending = new Map<string, Promise<void>>()
 
+  /** canonical lineage sig → OLD raw-key sig, populated by `sign` only when
+   *  canonicalization changed the key. #promoteBag unions the old bag (a
+   *  punctuation-named tile's pre-canonicalization history) into the new
+   *  canonical bag. Empty for the common clean-name case. */
+  readonly #rawAlias = new Map<string, string>()
+
   /** UNION-promote one lineage's bag to the root: copy every marker /
    *  record file that any legacy source (`__hive__`, `hypercomb.io/`,
    *  `__history__`) holds and the root bag lacks. The HIGHEST marker
@@ -278,6 +285,20 @@ export class HistoryService {
         for (const src of this.#legacyBagSources()) {
           if (!src) continue
           try { sources.push(await src.getDirectoryHandle(lineageSig, { create: false })) } catch { /* not in this source */ }
+        }
+        // MIGRATION: before canonicalization this lineage's bag was named by
+        // its raw-key sig. Union that bag in — from the root AND every legacy
+        // source — so a punctuation-named tile keeps its committed history and
+        // head layer (highest marker wins, same construction as legacy union).
+        // Non-destructive: the raw bag is left in place as a read-drained
+        // remnant; a later GC can remove verified copies. Absent for clean
+        // names (no alias) — the common path is unchanged.
+        const rawSig = this.#rawAlias.get(lineageSig)
+        if (rawSig && rawSig !== lineageSig) {
+          for (const src of [store.hypercombRoot as FileSystemDirectoryHandle, ...this.#legacyBagSources()]) {
+            if (!src) continue
+            try { sources.push(await src.getDirectoryHandle(rawSig, { create: false })) } catch { /* raw bag not in this source */ }
+          }
         }
         if (sources.length > 0) {
           const root = await store.hypercombRoot.getDirectoryHandle(lineageSig, { create: true })
@@ -557,16 +578,16 @@ export class HistoryService {
 
   /**
    * Sign a lineage path to get the history bag signature.
-   * Matches the same signing scheme as ShowCellDrone.
+   *
+   * The preimage is the CANONICAL lineage key (see lineage-key.ts) — the same
+   * helper the swarm mesh sig and ShowCellDrone use, so every site that names
+   * this bag agrees byte-for-byte. Canonicalization folds invisible name
+   * variation (punctuation, hyphens, en-dashes, NBSPs, doubled spaces) so two
+   * paths a human reads as the same place hash to the SAME bag.
    */
   public readonly sign = async (lineage: any): Promise<string> => {
     const domain = String(lineage?.domain?.() ?? 'hypercomb.io')
     const explorerSegmentsRaw = lineage?.explorerSegments?.()
-    const explorerSegments = Array.isArray(explorerSegmentsRaw)
-      ? explorerSegmentsRaw
-        .map((x: unknown) => String(x ?? '').trim())
-        .filter((x: string) => x.length > 0)
-      : []
 
     // The bag's identity = the lineage's ancestry, nothing else.
     //
@@ -581,13 +602,30 @@ export class HistoryService {
     // Discard `domain` parameter (still extracted for backward-compat
     // of the call surface) — sig is purely path-derived.
     void domain
-    const key = explorerSegments.join('/')
+    const key = lineageKey(explorerSegmentsRaw)
 
     // use SignatureStore.signText() for memoization — same lineage = same sig
     const sigStore = get<SignatureStore>('@hypercomb/SignatureStore')
-    return sigStore
+    const sig = sigStore
       ? await sigStore.signText(key)
       : await SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer)
+
+    // Migration bridge: if canonicalization CHANGED the key, the tile's
+    // pre-canonicalization history lives in the bag under the OLD raw-key sig.
+    // Remember that mapping so #promoteBag can union the old bag into this new
+    // canonical one (keeping the tile's committed history + head layer). Bounded
+    // to punctuation-bearing names and computed once per canonical sig. Clean
+    // names (raw === key) set no alias and take the unchanged path.
+    const raw = rawLineageKey(explorerSegmentsRaw)
+    if (raw !== key && !this.#rawAlias.has(sig)) {
+      try {
+        const rawSig = sigStore
+          ? await sigStore.signText(raw)
+          : await SignatureService.sign(new TextEncoder().encode(raw).buffer as ArrayBuffer)
+        if (rawSig && rawSig !== sig) this.#rawAlias.set(sig, rawSig)
+      } catch { /* best-effort — a later sign() retries */ }
+    }
+    return sig
   }
 
   /**

@@ -15,6 +15,10 @@
   >
     <header class="features-header">
       <span class="features-title">{{ 'features.viewer.title' | t }}</span>
+      @if (group(); as g) {
+        <span class="features-sep" aria-hidden="true">/</span>
+        <span class="features-cell" [title]="g.cell">{{ g.cell }}</span>
+      }
       <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'features.close' | t">×</button>
     </header>
 
@@ -22,6 +26,17 @@
     @if (selectedCount() > 0) {
       <div class="bulk-bar">
         <span class="bulk-count">{{ 'features.selected' | t: { count: selectedCount() } }}</span>
+        <!-- Open is the primary action — enter the selected view behaviour and
+             close. Opening a view is single-surface, so this opens the first
+             selected enterable row. -->
+        @if (openableSelectedCount() > 0) {
+          <button
+            class="bulk-open"
+            type="button"
+            (click)="openSelected()"
+            [attr.title]="'features.bulk.open.hint' | t"
+          >▶ {{ 'features.bulk.open' | t }}</button>
+        }
         @if (allowableCount() > 0) {
           <button
             class="bulk-allow"
@@ -110,16 +125,9 @@
       </div>
     }
 
-    @if (groups().length === 0) {
-      <p class="features-empty">{{ 'features.empty' | t }}</p>
-    } @else {
+    @if (group(); as group) {
       <div class="features-scroll">
-        @for (group of groups(); track group.cell) {
           <section class="features-group">
-            <header class="fgroup-header">
-              <span class="fgroup-cell" [title]="group.cell">{{ group.cell }}</span>
-              <button class="fgroup-remove" type="button" (click)="removeGroup(group.cell)" [attr.aria-label]="'features.remove' | t">×</button>
-            </header>
 
             <!-- ── Adopt target: WHERE the branch folds (peer tiles only).
                  Captured at adopt-click, editable — adopting into a
@@ -252,6 +260,18 @@
                         </span>
                       }
                     </div>
+                    <!-- Open: ENTER this view behaviour (play the slides, show
+                         the page). Distinct from the on/off switch — only on,
+                         enterable views (slides/website/home/tutor) show it. -->
+                    @if (isOpenable(group, feat)) {
+                      <button
+                        class="feat-open"
+                        type="button"
+                        (click)="openBehavior(group, feat); $event.stopPropagation()"
+                        [attr.title]="'features.open.hint' | t"
+                        [attr.aria-label]="'features.open' | t"
+                      >▶ {{ 'features.open' | t }}</button>
+                    }
                   </li>
                 }
               </ul>
@@ -347,7 +367,6 @@
             }
 
           </section>
-        }
       </div>
       <footer class="features-foot">
         @if (selectedCount() > 0) {
@@ -356,6 +375,8 @@
           {{ 'features.foot.hint' | t }}
         }
       </footer>
+    } @else {
+      <p class="features-empty">{{ 'features.empty' | t }}</p>
     }
   </aside>
 }

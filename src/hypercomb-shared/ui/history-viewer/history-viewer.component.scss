@@ -1,3 +1,5 @@
+@use '../toolwindow' as tw;
+
 :host {
   // Host is portaled to document.body at runtime, so it lives in the
   // top-level stacking context. Keeping the host itself as a simple
@@ -49,14 +51,17 @@
 }
 
 .history-viewer-header {
-  display: flex;
-  align-items: center;
-  gap: 0.667em;
-  padding: 0.667em 0.833em;
+  @include tw.header;
+  // This panel's root font is 12px-based (dense); the shared band anchors to
+  // the root rem, so keep the padding a touch tighter here to match.
+  padding: 0 0.833rem;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .history-viewer-header .title {
+  // rem (not the 12px-scaled em) so the title reads at the same size as the
+  // other tool windows' titles inside the shared-height band.
+  font-size: 0.9rem;
   font-weight: 500;
   letter-spacing: 0.3px;
 }
