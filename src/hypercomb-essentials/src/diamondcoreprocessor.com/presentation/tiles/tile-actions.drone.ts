@@ -772,21 +772,27 @@ export class TileActionsDrone extends Drone {
         break
 
       case 'make-public': {
-        // World-mode: toggle THIS tile's individual public flag. tile-overlay
-        // refreshes the icon tint on tile:public-changed; show-cell re-dims.
+        // World-mode: choose THIS tile's individual public scope. The two
+        // visibility scopes are exclusive for the clicked tile: tile-only
+        // means the root tile is shared, but its descendants are not covered
+        // by this branch root anymore.
         const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
         const location = lineage?.explorerLabel() ?? '/'
-        const isOn = readPublicLabels(location).includes(label)
+        const isOn = isIndividuallyPublic(location, label)
+        if (!isOn) setBranchPublic(location, label, false)
         setCellPublic(location, label, !isOn)
         EffectBus.emit('tile:public-changed', { cell: label, location, public: !isOn })
         break
       }
 
       case 'make-branch-public': {
-        // World-mode: toggle this tile + its entire sub-tree public.
+        // World-mode: choose this tile + its entire subtree. This includes
+        // the branch root tile itself, so clear the redundant tile-only flag
+        // when turning the branch scope on.
         const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
         const location = lineage?.explorerLabel() ?? '/'
         const isOn = isBranchPublic(location, label)
+        if (!isOn) setCellPublic(location, label, false)
         setBranchPublic(location, label, !isOn)
         EffectBus.emit('tile:public-changed', { cell: label, location, public: !isOn, branch: true })
         break

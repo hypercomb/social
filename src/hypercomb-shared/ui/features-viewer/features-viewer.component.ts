@@ -101,6 +101,7 @@ type RowLike = {
   gateSig?: string
   gated?: boolean
   originSegments?: string[]
+  adopted?: boolean
 }
 
 interface FeatureGroup {
@@ -814,14 +815,18 @@ export class FeaturesViewerComponent implements OnDestroy {
     if (cleared) this.group.update(g => g ? { ...g } : g)
   }
 
-  /** Bulk download — mirror every selected feature's bytes onto this machine.
-   *  SwarmAdoptDrone answers `features:download` with the broker's full walk
-   *  (branch) or the page + its refs (page-only), and confirms per cell with
-   *  counts. The status block tracks the whole batch: live file count while
-   *  the walk streams, a per-cell outcome line when each finishes. */
+  /** Bulk download — mirror every selected local/held feature's bytes onto
+   *  this machine. For a not-yet-held peer row, "download" must be the same
+   *  real add as the row switch: fold the branch into the hive first. A silent
+   *  byte mirror alone leaves no local child, so returning to solo makes the
+   *  tile vanish even though the panel said the download completed. */
   downloadSelected(): void {
     const cells = new Set<string>()
     for (const { group, feat } of this.#selectedRows()) {
+      if (group.held === false && feat.adopted === false) {
+        this.#adoptFeature(group, feat as FeatureRow)
+        continue
+      }
       if (!feat.branchSig && !feat.gateSig) continue
       cells.add(group.cell)
       EffectBus.emit('features:download', {
