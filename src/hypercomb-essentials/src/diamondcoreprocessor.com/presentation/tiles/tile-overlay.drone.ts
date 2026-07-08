@@ -2131,13 +2131,6 @@ export class TileOverlayDrone extends Drone {
       void swarm.publishInterest(label).catch(() => { /* silent — swarm logs internally */ })
     }
 
-    // VARIABLE-ROOT hop: the sets index (/sets) lists reference SETS, and a
-    // set is its own ROOT lineage — entering "interests" lands on /interests,
-    // never /sets/interests. The system knows it came from sets (membership
-    // lives in the sets index); the address carries JUST the root, and from
-    // that root the set's tree navigates like any other lineage. Mirrors the
-    // 'sets' convention (entrances-and-sets.md) by string — modules must not
-    // import shared.
     const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
     if (segs.length === 1 && String(segs[0]) === 'sets') {
       const nav = window.ioc.get<{ goRaw?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')

@@ -11,6 +11,8 @@
 // just the index of them (the VARIABLE-ROOT hop, see entrances-and-sets.md and
 // tile-overlay.drone's sets branch). So a card click navigates to `/[name]`,
 // never `/sets/[name]`, and a collection's picture is resolved from its root.
+// Current model: `/sets` indexes first-level collection roots. Opening a listed
+// collection navigates to `/<name>`.
 //
 // MANAGE (rename / delete): both go through the SAME per-page layer state
 // machine as every other edit — a bare `cell:removed` / `cell:added` (no
@@ -174,9 +176,7 @@ export class CollectionsLandingComponent implements OnDestroy {
     return this.empty().get(name) === true
   }
 
-  /** Open a collection — the VARIABLE-ROOT hop: a set is its own root, so we
-   *  travel to `/[name]`, not `/sets/[name]` (matches tile-overlay's sets
-   *  branch and the collections home widget). */
+  /** Open a collection root listed by the sets index. */
   openCollection(name: string): void {
     if (this.renaming() === name) return   // this card's rename field is open
     const nav = ioc()?.get('@hypercomb.social/Navigation') as NavigationLike | undefined
@@ -282,8 +282,7 @@ export class CollectionsLandingComponent implements OnDestroy {
     // immutable + shared, so the new root can reference them verbatim.
     let items: string[] = []
     if (history?.sign) {
-      const oldSig = await history.sign({ explorerSegments: () => [oldName] }).catch(() => '')
-      const oldRoot = oldSig ? await history.currentLayerAt(oldSig).catch(() => null) : null
+      const oldRoot = await this.#readCollectionLayer(oldName, history)
       const raw = Array.isArray(oldRoot?.['children']) ? (oldRoot!['children'] as unknown[]) : []
       items = raw.map(s => String(s ?? '')).filter(s => SIG.test(s))
     }
@@ -335,6 +334,7 @@ export class CollectionsLandingComponent implements OnDestroy {
     const store = ioc()?.get('@hypercomb.social/Store') as StoreLike | undefined
     if (!history?.sign || !store?.getResource) { this.#imageRequested.delete(name); return }
     const imageSig = await this.#collectionImageSig([name], history, store)
+      || await this.#collectionImageSig([SETS, name], history, store)
     if (!imageSig) return
     const blob = await store.getResource(imageSig).catch(() => null)
     if (!blob) return
@@ -409,13 +409,22 @@ export class CollectionsLandingComponent implements OnDestroy {
     } catch { return '' }
   }
 
-  /** Resolve whether a collection's ROOT lineage has any items — drives the
+  /** Preferred collection layer is the first-level root /<name>. A /sets/<name>
+   *  fallback keeps data made during the nested-path experiment readable. */
+  async #readCollectionLayer(name: string, history: HistoryLike): Promise<Record<string, unknown> | null> {
+    const preferredSig = await history.sign({ explorerSegments: () => [name] }).catch(() => '')
+    const preferred = preferredSig ? await history.currentLayerAt(preferredSig).catch(() => null) : null
+    if (preferred) return preferred
+    const legacySig = await history.sign({ explorerSegments: () => [SETS, name] }).catch(() => '')
+    return legacySig ? await history.currentLayerAt(legacySig).catch(() => null) : null
+  }
+
+  /** Resolve whether a collection's layer has any items — drives the
    *  empty-only gate on rename/delete. Null layer (never visited) reads empty. */
   async #resolveEmptiness(name: string): Promise<void> {
     const history = ioc()?.get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
     if (!history?.sign) return
-    const locSig = await history.sign({ explorerSegments: () => [name] }).catch(() => '')
-    const layer = locSig ? await history.currentLayerAt(locSig).catch(() => null) : null
+    const layer = await this.#readCollectionLayer(name, history)
     const children = Array.isArray(layer?.['children']) ? (layer!['children'] as unknown[]) : []
     const isEmpty = children.filter(s => SIG.test(String(s ?? ''))).length === 0
     if (this.#empty.get(name) === isEmpty) return   // no change → no signal churn
@@ -546,7 +555,13 @@ export class CollectionsLandingComponent implements OnDestroy {
 
     this.open.set(active)
     if (active) void this.#activate()
-    else { this.collections.set([]); this.creating.set(false); this.renaming.set(null) }
+    else {
+      // Keep the directory warm while a collection root is open. Stepping back
+      // from /<collection> to /sets should show the cached grid immediately,
+      // then #activate refreshes it against history in the background.
+      this.creating.set(false)
+      this.renaming.set(null)
+    }
   }
 }
 
