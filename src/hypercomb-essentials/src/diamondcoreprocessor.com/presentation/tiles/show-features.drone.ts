@@ -205,7 +205,7 @@ interface StoreLike {
 interface HistoryLike {
   sign(lineage: { explorerSegments?: () => readonly string[] }): Promise<string>
   currentLayerAt(locationSig: string): Promise<unknown | null>
-  getLayerBySig?(sig: string): Promise<{ name?: string } | null>
+  getLayerBySig?(sig: string): Promise<({ name?: string } & Record<string, unknown>) | null>
 }
 
 /** Unified shape resolved from either a visual bee or a cascading capability. */
@@ -662,13 +662,140 @@ export class ShowFeaturesDrone extends Drone {
       if (feature) pushPeer(this.#describe(feature, websiteBee.decorationKind, i18n, 'direct', undefined, branchSig, segments))
     }
 
+    for (const item of await this.#peerDescendantFeatures(layer, segments, branchSig, registry, i18n)) {
+      pushPeer(item)
+    }
+
     this.emitEffect<FeaturesOpenPayload>('features:open', {
       cell: label,
       segments: [...segments],
       applied,
       available: [],
       held: false,
+      hierarchy: { missing: await this.#peerChildNames(layer), extra: [] },
     })
+  }
+
+  async #peerDescendantFeatures(
+    root: Record<string, unknown> | null,
+    rootSegments: readonly string[],
+    branchSig: string,
+    registry: VisualBeeRegistry,
+    i18n: I18nProvider | undefined,
+  ): Promise<FeatureItem[]> {
+    const out: FeatureItem[] = []
+    const seen = new Set<string>()
+    const walk = async (layer: Record<string, unknown> | null, path: readonly string[]): Promise<void> => {
+      if (!layer) return
+      for (const child of await this.#peerChildren(layer)) {
+        const childPath = [...path, child.name]
+        await this.#appendPeerLayerFeatures(child.layer, childPath, branchSig, registry, i18n, seen, out)
+        await walk(child.layer, childPath)
+      }
+    }
+    await walk(root, rootSegments)
+    return out
+  }
+
+  async #appendPeerLayerFeatures(
+    layer: Record<string, unknown>,
+    segments: readonly string[],
+    branchSig: string,
+    registry: VisualBeeRegistry,
+    i18n: I18nProvider | undefined,
+    seen: Set<string>,
+    out: FeatureItem[],
+  ): Promise<void> {
+    const push = (kind: string): void => {
+      const key = `${kind}\u0000${segments.join('\u0000')}`
+      if (seen.has(key)) return
+      seen.add(key)
+      const feature = this.#recognize(kind, registry)
+      if (feature) {
+        out.push(this.#describe(feature, kind, i18n, 'direct', undefined, branchSig, segments))
+      } else if (kind.startsWith('visual:')) {
+        out.push({
+          view: kind,
+          kind,
+          label: this.#t(i18n, 'features.unknown', kind),
+          description: this.#t(i18n, 'features.unknown.desc', ''),
+          cascades: false,
+          origin: 'direct',
+          originSegments: [...segments],
+          branchSig,
+        })
+      }
+    }
+
+    const decorations = Array.isArray(layer['decorations']) ? layer['decorations'] as unknown[] : []
+    for (const raw of decorations) {
+      const sig = String(raw ?? '').trim().toLowerCase()
+      if (!SIG_RE.test(sig)) continue
+      const rec = await this.#peerDecorationRecord(sig)
+      const kind = typeof rec?.kind === 'string' ? rec.kind : ''
+      if (kind) push(kind)
+    }
+
+    const websiteBee = registry.get('website')
+    const slot = layer[WEBSITE_SLOT]
+    if (websiteBee?.decorationKind && Array.isArray(slot) && slot.some(s => SIG_RE.test(String(s)))) {
+      push(websiteBee.decorationKind)
+    }
+  }
+
+  async #peerDecorationRecord(sig: string): Promise<{ kind?: string } | null> {
+    const ioc = this.#ioc()
+    const store = ioc?.get<StoreLike>(STORE_KEY)
+    const broker = ioc?.get<{ fetchBySig?: (sig: string, type: 'layer' | 'resource' | 'dependency') => Promise<Uint8Array | null> }>(BROKER_KEY)
+    try {
+      const blob = await store?.getResource(sig)
+      if (blob) return JSON.parse(await blob.text()) as { kind?: string }
+    } catch { /* try broker */ }
+    try {
+      const bytes = await broker?.fetchBySig?.(sig, 'resource')
+      if (bytes) return JSON.parse(new TextDecoder().decode(bytes)) as { kind?: string }
+    } catch { /* unavailable */ }
+    return null
+  }
+
+  async #peerChildNames(layer: Record<string, unknown> | null): Promise<string[]> {
+    const names: string[] = []
+    const children = Array.isArray(layer?.['children']) ? layer!['children'] as unknown[] : []
+    for (const raw of children) {
+      const entry = String(raw ?? '').trim()
+      if (!entry) continue
+      if (!SIG_RE.test(entry)) {
+        names.push(entry)
+        continue
+      }
+      const child = (await this.#peerChildren({ children: [entry] }))[0]
+      if (child?.name) names.push(child.name)
+    }
+    return names
+  }
+
+  async #peerChildren(layer: Record<string, unknown> | null): Promise<Array<{ name: string; layer: Record<string, unknown> }>> {
+    const history = this.#ioc()?.get<HistoryLike>(HISTORY_KEY)
+    const broker = this.#ioc()?.get<{ fetchBySig?: (sig: string, type: 'layer' | 'resource' | 'dependency') => Promise<Uint8Array | null> }>(BROKER_KEY)
+    const out: Array<{ name: string; layer: Record<string, unknown> }> = []
+    const children = Array.isArray(layer?.['children']) ? layer!['children'] as unknown[] : []
+    for (const raw of children) {
+      const entry = String(raw ?? '').trim()
+      if (!entry) continue
+      if (!SIG_RE.test(entry)) {
+        continue
+      }
+      let child = await history?.getLayerBySig?.(entry).catch(() => null)
+      if (!child) {
+        try {
+          const bytes = await broker?.fetchBySig?.(entry, 'layer')
+          if (bytes) child = JSON.parse(new TextDecoder().decode(bytes)) as { name?: string }
+        } catch { /* unavailable child - skip */ }
+      }
+      const name = typeof child?.name === 'string' ? child.name.trim() : ''
+      if (name && child) out.push({ name, layer: child })
+    }
+    return out
   }
 
   /** Stamp `gated` / `gateSig` / `publisherDomain` onto each DIRECT feature.

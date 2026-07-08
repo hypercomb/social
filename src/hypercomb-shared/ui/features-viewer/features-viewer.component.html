@@ -245,6 +245,9 @@
                            visible (the tile itself for direct features, the declaring
                            ancestor for cascaded ones). -->
                       <span class="feature-attached">{{ 'features.attached' | t: { path: attachedAt(group, feat) } }}</span>
+                      @if (dependencyHint(group, feat); as hint) {
+                        <span class="feature-deps">{{ hint }}</span>
+                      }
                       <!-- Community gate: enabled here but BLOCKED from activating
                            until allowed. The allow override sits at the end of the
                            line (bulk-allow in the top bar covers many at once). -->

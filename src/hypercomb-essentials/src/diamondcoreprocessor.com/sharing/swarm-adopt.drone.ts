@@ -183,7 +183,7 @@ export class SwarmAdoptDrone extends Drone {
           if (kind && await this.#isHeldAt([...parentAt, label])) {
             await this.#mergeFeature(label, parentAt, kind)
           } else {
-            await this.#adoptInline(label, undefined, at)
+            await this.#adoptInline(label, undefined, at, kind || undefined)
           }
         })()
         return
@@ -200,6 +200,18 @@ export class SwarmAdoptDrone extends Drone {
           ? payload.names.map(s => String(s ?? '').trim()).filter(Boolean)
           : undefined
         if (label && segments.length) void this.#mergeChildren(label, segments, names?.length ? names : undefined)
+        return
+      }
+
+      // The Beehaviors hierarchy section for a NOT-YET-HELD peer tile. This is
+      // the explicit "tiles" lever beside the behavior switches: fold the peer
+      // branch at the chosen target, then reopen the panel at the saved tile.
+      if (action === 'adopt-tiles') {
+        const label = String(payload?.label ?? '').trim()
+        const at = Array.isArray(payload?.at)
+          ? payload.at.map(s => String(s ?? '').trim()).filter(Boolean)
+          : undefined
+        if (label) void this.#adoptInline(label, undefined, at)
         return
       }
 
@@ -380,7 +392,7 @@ export class SwarmAdoptDrone extends Drone {
   // agnostic, so a directly-folded foreign page is reviewed before it ever mounts.
   // Only a branch that declares CODE (bees/deps) — or one we can't resolve to
   // inspect — routes to the installer.
-  #adoptInline = async (label: string, pubkey?: string, atOverride?: readonly string[]): Promise<void> => {
+  #adoptInline = async (label: string, pubkey?: string, atOverride?: readonly string[], featureKind?: string): Promise<void> => {
     const branch = this.#resolvePeerBranch(label, pubkey)
     if (!branch) {
       // The peer cache expired / navigation changed since the click — say so
@@ -457,6 +469,14 @@ export class SwarmAdoptDrone extends Drone {
     // so a community-blocked feature reads "enabled — blocked" with its allow
     // override right there — the adopt gesture ends on the decision surface,
     // not on a silent fold.
+    if (res === 'exists' && featureKind) {
+      // A same-named local tile can already exist at the chosen destination
+      // without carrying the peer feature the user just switched on. Treat that
+      // as a feature merge, not a successful no-op, so website/page children
+      // persist instead of only being visitable through the live peer preview.
+      await this.#mergeFeature(branch.label, branch.at, featureKind)
+      return
+    }
     if (res === 'committed' || res === 'exists') {
       // segments = the FOLD location — the refreshed group must read the tile
       // where it landed, which the target picker may have pointed away from

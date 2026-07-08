@@ -787,6 +787,26 @@ $path-fail: #e08a8a;     // failed terminal
   }
 }
 
+.feature-deps {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  margin-top: 0.05em;
+  font-size: 0.62em;
+  line-height: 1.35;
+  color: rgba($accent, 0.78);
+
+  &::before {
+    content: '';
+    width: 0.55em;
+    height: 0.55em;
+    border-radius: 2px;
+    border: 1px solid rgba($accent, 0.55);
+    transform: rotate(45deg);
+  }
+}
+
 .allow-btn {
   background: transparent;
   border: 1px solid rgba(255, 180, 120, 0.45);

@@ -445,6 +445,21 @@ export class FeaturesViewerComponent implements OnDestroy {
     return segs.length ? segs.join(' / ') : '/'
   }
 
+  dependencyHint(group: FeatureGroup, feat: FeatureRow): string {
+    if (feat.adopted !== false) return ''
+    const attached = feat.originSegments?.length ? feat.originSegments : group.segments
+    const childCount = group.hierarchy?.missing?.length ?? 0
+    if (attached.length > group.segments.length) {
+      return childCount > 0
+        ? `Depends on this branch's tiles; "${attached[attached.length - 1]}" is down the hierarchy.`
+        : `Attached down the hierarchy at ${this.attachedAt(group, feat)}.`
+    }
+    if (feat.view === 'website' && childCount > 0) {
+      return `Depends on ${childCount} child tile${childCount === 1 ? '' : 's'} in the hierarchy section.`
+    }
+    return ''
+  }
+
   // ── hidden pool (turn off, retain, restore) ───────────────
 
   /** The location an applied feature is attached at — its declaring ancestor
@@ -562,6 +577,15 @@ export class FeaturesViewerComponent implements OnDestroy {
   /** Merge one missing child (or all of them) from the peer's copy of this
    *  held tile — the hierarchy half of the diff. Additive only. */
   mergeChild(group: FeatureGroup, name?: string): void {
+    if (group.held === false) {
+      EffectBus.emit('tile:action', {
+        action: 'adopt-tiles',
+        label: group.cell,
+        at: this.#targetSegments(group),
+        ...(name ? { names: [name] } : {}),
+      })
+      return
+    }
     EffectBus.emit('tile:action', {
       action: 'merge-children',
       label: group.cell,
