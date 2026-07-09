@@ -1220,7 +1220,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // caret lands ready to continue the path/command. `#setShellValue` calls
       // placeCaretAtEnd(), so the cursor sits right after the slash.
       this.#setShellValue(cell ? `${cell}/` : cell, false)
-      this.shell?.focus()
+      this.#focusShellSoon()
     })
 
     // Enter a text-capture mode (e.g. notes). Suspends normal parsing and
@@ -1275,7 +1275,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
         this.mobileHidden.set(mobile && !visible)
         if (mobile && visible) {
           // give focus to the shell so the keyboard pops up immediately
-          queueMicrotask(() => this.shell?.focus())
+          this.#focusShellSoon()
         }
       },
     )
@@ -2843,6 +2843,18 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (suppress) this.shell.suppress()
     else this.shell.unsuppress()
     this.shell.placeCaretAtEnd()
+  }
+
+  #focusShellSoon(): void {
+    const focus = (): void => {
+      this.shell?.unsuppress()
+      this.shell?.focus()
+      this.shell?.placeCaretAtEnd()
+    }
+    focus()
+    queueMicrotask(focus)
+    requestAnimationFrame(focus)
+    setTimeout(focus, 60)
   }
 
   private readonly clear = (): void => {

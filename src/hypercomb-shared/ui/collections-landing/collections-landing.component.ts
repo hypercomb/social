@@ -29,14 +29,16 @@
 // essentials — every mutation goes through the sanctioned IoC services the
 // command line uses.
 
-import { Component, OnDestroy, signal } from '@angular/core'
+import { Component, OnDestroy, computed, signal } from '@angular/core'
 import { EffectBus, hypercomb } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { registerProximityProvider } from '../../core/proximity-registry'
+import { groupRegistry } from '../../core/group-registry'
 
 /** The reserved lineage that indexes every reference set. */
 const SETS = 'sets'
+const TAG_DECORATION_KIND = 'tag'
 
 type LineageLike = EventTarget & { explorerSegments?: () => readonly string[] }
 type NavigationLike = { goRaw?: (segments: readonly string[]) => void; back?: () => void }
@@ -46,6 +48,16 @@ type HistoryLike = {
   getLayerBySig?(sig: string): Promise<Record<string, unknown> | null>
 }
 type StoreLike = { getResource(sig: string): Promise<Blob | null> }
+type DecorationServiceLike = {
+  list<TPayload>(opts: {
+    kind: string
+    segments: readonly string[]
+  }): Promise<Array<{ sig: string; record: { payload?: TPayload } }>>
+}
+type TagRegistryLike = {
+  ensureLoaded?: () => Promise<void>
+  color?: (name: string) => string
+}
 /** The command line's create primitive — appends the membership child under the
  *  sets index. Read from IoC (essentials service); imports stay forbidden. */
 type CommitterLike = {
@@ -94,6 +106,14 @@ const sameList = (a: readonly string[], b: readonly string[]): boolean =>
 export class CollectionsLandingComponent implements OnDestroy {
   /** Names of the reference sets under `sets/` (the collection index). */
   readonly collections = signal<readonly string[]>([])
+  readonly visibleCollections = computed(() => {
+    const active = this.#activeTagFilters()
+    if (active.size === 0) return this.collections()
+    return this.collections().filter(name => {
+      const tags = this.tags().get(name) ?? []
+      return tags.some(t => active.has(t))
+    })
+  })
   readonly open = signal(false)
   readonly creating = signal(false)
   /** The collection currently being renamed (its old name), or null. */
@@ -104,6 +124,7 @@ export class CollectionsLandingComponent implements OnDestroy {
   /** collection name → whether its root lineage has no items yet. Rename and
    *  delete are offered ONLY for empty collections (nothing to lose). */
   readonly empty = signal<ReadonlyMap<string, boolean>>(new Map())
+  readonly tags = signal<ReadonlyMap<string, readonly string[]>>(new Map())
 
   #lineage: LineageLike | null = null
   #lineageBound = false
@@ -112,6 +133,9 @@ export class CollectionsLandingComponent implements OnDestroy {
   #hidHive = false
   #imageUrls = new Map<string, string>()
   #imageRequested = new Set<string>()
+  #aggregateNames = new Set<string>()
+  #tags = new Map<string, readonly string[]>()
+  #activeTagFilters = signal<ReadonlySet<string>>(new Set())
   /** collection name → its ROOT lineage sig (`sign(['<name>'])`), memoized so the
    *  proximity provider doesn't re-sign every navigation. Each is one click from
    *  being the active root — the shell's nav-driven warmer pre-warms them. */
@@ -126,12 +150,20 @@ export class CollectionsLandingComponent implements OnDestroy {
    *  reload the index so the grid reflects the committed state. */
   #onSynchronize = (): void => this.#scheduleReload()
   #cursorUnsub: (() => void) | null = null
+  #filterUnsub: (() => void) | null = null
+  #tagsChangedUnsub: (() => void) | null = null
+  #groupChanged = (): void => this.#scheduleReload()
 
   constructor() {
     window.addEventListener('keydown', this.#onKey, true)
     window.addEventListener('synchronize', this.#onSynchronize)
     // Undo/redo moves the history cursor; reflect it when it reaches this index.
     this.#cursorUnsub = EffectBus.on('history:cursor-changed', () => this.#scheduleReload())
+    this.#filterUnsub = EffectBus.on<{ active?: readonly string[] }>('tags:filter', (p) => {
+      this.#activeTagFilters.set(new Set((p?.active ?? []).map(t => String(t)).filter(Boolean)))
+    })
+    this.#tagsChangedUnsub = EffectBus.on('tags:changed', () => this.#scheduleReload())
+    groupRegistry.addEventListener('change', this.#groupChanged)
     // Declare our cards as proximity: while the grid is showing, every collection
     // root is one click from being the active root, so the shell's nav-driven
     // warmer pre-warms their subtrees. Off-screen we contribute nothing.
@@ -146,6 +178,9 @@ export class CollectionsLandingComponent implements OnDestroy {
     window.removeEventListener('synchronize', this.#onSynchronize)
     this.#unregisterProximity?.()
     this.#cursorUnsub?.()
+    this.#filterUnsub?.()
+    this.#tagsChangedUnsub?.()
+    groupRegistry.removeEventListener('change', this.#groupChanged)
     if (this.#hidHive) EffectBus.emit('render:set-hive-visible', { visible: true })
     for (const url of this.#imageUrls.values()) URL.revokeObjectURL(url)
   }
@@ -173,12 +208,27 @@ export class CollectionsLandingComponent implements OnDestroy {
    *  items) — so a manage gesture can never silently drop content. Unknown
    *  emptiness (still resolving) reads as not-manageable until confirmed. */
   manageable(name: string): boolean {
+    if (this.#aggregateNames.has(name)) return false
     return this.empty().get(name) === true
+  }
+
+  tagsFor(name: string): readonly string[] {
+    return this.tags().get(name) ?? []
+  }
+
+  tagColor(name: string): string {
+    const registry = ioc()?.get('@hypercomb.social/TagRegistry') as TagRegistryLike | undefined
+    const color = registry?.color?.(name)
+    if (color) return color
+    let h = 5381
+    for (let i = 0; i < name.length; i++) h = ((h << 5) + h + name.charCodeAt(i)) | 0
+    return `hsl(${(h >>> 0) % 360} 70% 62%)`
   }
 
   /** Open a collection root listed by the sets index. */
   openCollection(name: string): void {
     if (this.renaming() === name) return   // this card's rename field is open
+    if (groupRegistry.get(name)) { groupRegistry.show(name); return }
     const nav = ioc()?.get('@hypercomb.social/Navigation') as NavigationLike | undefined
     nav?.goRaw?.([name])
   }
@@ -211,6 +261,7 @@ export class CollectionsLandingComponent implements OnDestroy {
   async create(input: HTMLInputElement): Promise<void> {
     const name = safeCellName(input.value)
     if (!name) { input.focus(); return }
+    if (this.#aggregateNames.has(name)) { input.select(); return }
     if (!this.collections().includes(name)) {
       const committer = ioc()?.get('@diamondcoreprocessor.com/LayerCommitter') as CommitterLike | undefined
       if (!committer?.importTree) return
@@ -273,6 +324,7 @@ export class CollectionsLandingComponent implements OnDestroy {
   async renameCollection(oldName: string, input: HTMLInputElement): Promise<void> {
     const newName = safeCellName(input.value)
     if (!newName || newName === oldName) { this.renaming.set(null); return }
+    if (this.#aggregateNames.has(oldName)) { this.renaming.set(null); return }
     if (this.collections().includes(newName)) { input.select(); return }  // name taken
     const committer = ioc()?.get('@diamondcoreprocessor.com/LayerCommitter') as CommitterLike | undefined
     const history = ioc()?.get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
@@ -311,6 +363,8 @@ export class CollectionsLandingComponent implements OnDestroy {
     if (url) { URL.revokeObjectURL(url); this.#imageUrls.delete(name); this.images.set(new Map(this.#imageUrls)) }
     this.#imageRequested.delete(name)
     this.#rootSigByName.delete(name)   // a re-created name re-signs + re-warms
+    this.#tags.delete(name)
+    this.tags.set(new Map(this.#tags))
     if (this.#empty.delete(name)) this.empty.set(new Map(this.#empty))
   }
 
@@ -422,6 +476,10 @@ export class CollectionsLandingComponent implements OnDestroy {
   /** Resolve whether a collection's layer has any items — drives the
    *  empty-only gate on rename/delete. Null layer (never visited) reads empty. */
   async #resolveEmptiness(name: string): Promise<void> {
+    if (this.#aggregateNames.has(name)) {
+      if (this.#empty.delete(name)) this.empty.set(new Map(this.#empty))
+      return
+    }
     const history = ioc()?.get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
     if (!history?.sign) return
     const layer = await this.#readCollectionLayer(name, history)
@@ -430,6 +488,29 @@ export class CollectionsLandingComponent implements OnDestroy {
     if (this.#empty.get(name) === isEmpty) return   // no change → no signal churn
     this.#empty.set(name, isEmpty)
     this.empty.set(new Map(this.#empty))
+  }
+
+  async #resolveTags(name: string): Promise<void> {
+    const decorations = ioc()?.get('@diamondcoreprocessor.com/DecorationService') as DecorationServiceLike | undefined
+    if (!decorations?.list) return
+    const registry = ioc()?.get('@hypercomb.social/TagRegistry') as TagRegistryLike | undefined
+    void registry?.ensureLoaded?.()
+    const names = new Set<string>()
+    for (const segments of [[name], [SETS, name]] as const) {
+      const records = await decorations.list<{ name?: unknown }>({
+        kind: TAG_DECORATION_KIND,
+        segments,
+      }).catch(() => [])
+      for (const r of records) {
+        const tag = r.record.payload?.name
+        if (typeof tag === 'string' && tag.trim()) names.add(tag.trim())
+      }
+    }
+    const next = [...names].sort((a, b) => a.localeCompare(b))
+    const prev = this.#tags.get(name) ?? []
+    if (sameList(prev, next)) return
+    this.#tags.set(name, next)
+    this.tags.set(new Map(this.#tags))
   }
 
   // ── membership index — the names under `sets/` ──────────────────────────────
@@ -452,6 +533,15 @@ export class CollectionsLandingComponent implements OnDestroy {
       const nm = child?.['name']
       if (typeof nm === 'string' && nm.length > 0) names.push(nm)
     }
+    this.#aggregateNames = new Set(
+      groupRegistry.all()
+        .filter(group => group.members().length > 0)
+        .map(group => group.id)
+        .filter(Boolean),
+    )
+    for (const name of this.#aggregateNames) {
+      if (!names.includes(name)) names.push(name)
+    }
     // Only publish when the membership actually changed — a reactive reload on
     // an unrelated synchronize must not churn the grid (flicker) or fight an
     // in-flight rename field.
@@ -466,6 +556,7 @@ export class CollectionsLandingComponent implements OnDestroy {
       // Emptiness: re-resolve every reload — items get added/removed inside a
       // collection between visits, flipping whether it can be managed here.
       void this.#resolveEmptiness(name)
+      void this.#resolveTags(name)
     }
   }
 

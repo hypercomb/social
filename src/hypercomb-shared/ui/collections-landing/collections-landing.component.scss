@@ -293,6 +293,30 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
   transition: color 150ms ease;
 }
 
+.set-tags {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  width: 100%;
+  min-height: 1.15rem;
+  margin-top: -0.35rem;
+}
+
+.set-tag {
+  max-width: 100%;
+  padding: 0.08rem 0.42rem;
+  border: 1px solid color-mix(in srgb, var(--tag-color, #{$steel}) 58%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tag-color, #{$steel}) 15%, transparent);
+  color: color-mix(in srgb, var(--tag-color, #{$steel}) 70%, #eaf3f9);
+  font-size: 0.68rem;
+  line-height: 1.25;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 // Restrained hover: the ring blooms toward the collection's own accent and the
 // tile lifts a touch. Nothing flashy — just the frame acknowledging its identity.
 .set-card:hover .set-hex {

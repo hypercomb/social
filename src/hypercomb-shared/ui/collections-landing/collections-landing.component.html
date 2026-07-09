@@ -10,8 +10,8 @@
         <header class="landing-head">
           <div class="landing-heading">
             <h1 class="landing-title">{{ 'collections-landing.title' | t }}</h1>
-            @if (collections().length > 0) {
-              <span class="landing-count">{{ collections().length }}</span>
+            @if (visibleCollections().length > 0) {
+              <span class="landing-count">{{ visibleCollections().length }}</span>
             }
           </div>
           <p class="landing-lede">{{ 'collections-landing.lede' | t }}</p>
@@ -34,11 +34,11 @@
           }
         </div>
 
-        @if (collections().length === 0) {
+        @if (visibleCollections().length === 0) {
           <p class="landing-empty">{{ 'collections-landing.empty' | t }}</p>
         } @else {
           <ul class="landing-grid" role="list">
-            @for (name of collections(); track name) {
+            @for (name of visibleCollections(); track name) {
               <li>
                 <div class="set-card" [class.is-renaming]="renaming() === name" [style.--accent]="accent(name)">
                   <button class="set-open" type="button" (click)="openCollection(name)"
@@ -54,6 +54,13 @@
                     </span>
                     @if (renaming() !== name) {
                       <span class="set-name">{{ name }}</span>
+                    }
+                    @if (tagsFor(name).length > 0) {
+                      <span class="set-tags" aria-hidden="true">
+                        @for (tag of tagsFor(name); track tag) {
+                          <span class="set-tag" [style.--tag-color]="tagColor(tag)">{{ tag }}</span>
+                        }
+                      </span>
                     }
                   </button>
 

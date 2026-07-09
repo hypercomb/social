@@ -26,9 +26,8 @@
     "forceConsistentCasingInFileNames": true,
 
     // misc
-    "resolveJsonModule": true,
-    "esModuleInterop": false,
-
+    "resolveJsonModule": true
+    
   },
 
   // 🚫 IMPORTANT: do NOT compile shared here

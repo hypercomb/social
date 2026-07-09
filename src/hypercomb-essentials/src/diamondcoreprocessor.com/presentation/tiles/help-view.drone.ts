@@ -1,52 +1,67 @@
 // diamondcoreprocessor.com/presentation/tiles/help-view.drone.ts
 //
-// Full-viewport HELP takeover for the /help launcher page. The launch group
-// still owns discovery and action-card activation; this renderer only presents
-// the same live members as a readable hierarchy instead of a hexagon field.
+// Full-viewport HELP takeover for /help.
+//
+// This is intentionally a small staged help file, not the old live command
+// browser. New participants first learn navigation, then tile creation, then
+// a short set of next steps.
 
 import { Drone, EffectBus } from '@hypercomb/core'
 
 const HELP_SEGMENT = 'help'
-const MAX_VISIBLE = 5
+const MAX_VISIBLE = 8
+const LONG_PRESS_MS = 5000
+const PROGRESS_KEY = 'hypercomb.help.file.progress'
 
-type GroupMemberLike = {
-  key: string
-  label: string
-  segments?: string[]
-  role?: 'header' | 'action'
-  group?: string
-}
-type LaunchGroupLike = { members(): GroupMemberLike[] }
 type GroupRegistryLike = EventTarget & {
-  get(id: string): LaunchGroupLike | undefined
-  show?(id: string): void
-  currentId?(): string | null
   exitBag?(): void
 }
 type LineageLike = EventTarget & { explorerSegments?: () => readonly string[] }
+type IconOverridesLike = EventTarget & { glyph(id: string, fallback: string): string }
+type IconEditModeLike = EventTarget & {
+  on?: boolean
+  enter?(): void
+  requestPick?(id: string): void
+}
 
-type HelpItem = GroupMemberLike & { kind: string }
 type HelpSection = { id: string; title: string; items: HelpItem[] }
-type MountState = { host: HTMLDivElement; contentKey: string }
-type GuideAction = { label: string; text: string; action: () => void }
+type MountState = { host: HTMLDivElement; contentKey: string; cleanups: Array<() => void> }
+type HelpItem = {
+  key: string
+  label: string
+  kind: string
+  icon?: string
+  summary?: string
+  synthetic?: boolean
+}
 
 const COLORS = {
-  ink: '#111820',
-  panel: 'rgba(255,255,255,0.055)',
-  panelStrong: 'rgba(255,255,255,0.085)',
-  border: '1px solid rgba(188,209,220,0.18)',
-  borderStrong: '1px solid rgba(188,209,220,0.34)',
-  text: '#edf4f7',
-  dim: 'rgba(237,244,247,0.68)',
-  soft: 'rgba(237,244,247,0.48)',
-  accent: '#a9d6c4',
+  ink: '#10151f',
+  panel: 'rgba(255,255,255,0.075)',
+  panelStrong: 'rgba(255,255,255,0.11)',
+  border: '1px solid rgba(166,219,255,0.22)',
+  borderStrong: '1px solid rgba(166,219,255,0.48)',
+  text: '#f4fbff',
+  dim: 'rgba(244,251,255,0.72)',
+  soft: 'rgba(244,251,255,0.52)',
+  accent: '#8df3cf',
+  warm: '#ffc86b',
+  rose: '#ff8ab3',
+  blue: '#8dc6ff',
+}
+
+const DEFAULT_ICONS: Record<string, string> = {
+  gesture: 'near_me',
+  create: 'add_circle',
+  next: 'bolt',
+  action: 'bolt',
 }
 
 export class HelpViewDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
   override genotype = 'presentation'
   override description =
-    'Full-viewport help takeover. When the participant stands on /help, renders the live help launch group as a hierarchical list.'
+    'Full-viewport help file. When the participant stands on /help, teaches navigation first, then tile creation.'
 
   #mount: MountState | null = null
   #viewActive = false
@@ -54,9 +69,12 @@ export class HelpViewDrone extends Drone {
   #lineageBound = false
   #registryBound = false
   #keyBound = false
+  #iconBound = false
+  #effectsBound = false
+  #effectUnsubs: Array<() => void> = []
 
   protected override deps = { lineage: '@hypercomb.social/Lineage' }
-  protected override emits = ['view:active', 'group:open']
+  protected override emits = ['view:active', 'icon:pick-request']
 
   protected override heartbeat = async (): Promise<void> => {
     if (!this.#registered) {
@@ -65,6 +83,7 @@ export class HelpViewDrone extends Drone {
     }
     this.#bindLineage()
     this.#bindRegistry()
+    this.#bindIcons()
     if (!this.#keyBound) {
       window.addEventListener('keydown', this.#onKeyDown, true)
       this.#keyBound = true
@@ -77,7 +96,10 @@ export class HelpViewDrone extends Drone {
     if (this.#lineageBound && lineage?.removeEventListener) lineage.removeEventListener('change', this.#onChange)
     const registry = this.#registry()
     if (this.#registryBound && registry?.removeEventListener) registry.removeEventListener('change', this.#onChange)
+    const icons = this.#icons()
+    if (this.#iconBound && icons?.removeEventListener) icons.removeEventListener('change', this.#onChange)
     if (this.#keyBound) window.removeEventListener('keydown', this.#onKeyDown, true)
+    for (const u of this.#effectUnsubs) { try { u() } catch { /* noop */ } }
     this.#teardown()
   }
 
@@ -99,6 +121,20 @@ export class HelpViewDrone extends Drone {
     }
   }
 
+  #bindIcons(): void {
+    const icons = this.#icons()
+    if (!this.#iconBound && icons?.addEventListener) {
+      icons.addEventListener('change', this.#onChange)
+      this.#iconBound = true
+    }
+    if (this.#effectsBound) return
+    this.#effectsBound = true
+    this.#effectUnsubs.push(
+      EffectBus.on('icon:override-changed', () => { if (this.#mount) this.#mount.contentKey = ''; this.#reconcile() }),
+      EffectBus.on('icon:edit-mode', () => { if (this.#mount) this.#mount.contentKey = ''; this.#reconcile() }),
+    )
+  }
+
   readonly #onChange = (): void => this.#reconcile()
 
   readonly #onKeyDown = (e: KeyboardEvent): void => {
@@ -112,6 +148,14 @@ export class HelpViewDrone extends Drone {
     return window.ioc?.get<GroupRegistryLike>('@hypercomb.social/GroupLauncher')
   }
 
+  #icons(): IconOverridesLike | undefined {
+    return window.ioc?.get<IconOverridesLike>('@hypercomb.social/IconOverrides')
+  }
+
+  #iconEdit(): IconEditModeLike | undefined {
+    return window.ioc?.get<IconEditModeLike>('@hypercomb.social/IconEditMode')
+  }
+
   #segments(): string[] {
     return [...(this.resolve<LineageLike>('lineage')?.explorerSegments?.() ?? [])]
   }
@@ -123,72 +167,50 @@ export class HelpViewDrone extends Drone {
 
   #reconcile(): void {
     if (!this.#onHelpPage()) { this.#teardown(); return }
-    const group = this.#registry()?.get(HELP_SEGMENT)
-    if (!group) { this.#teardown(); return }
-    const sections = this.#sections(group.members())
-    const contentKey = sections
-      .map(s => `${s.title}:${s.items.map(i => i.key + '=' + i.label).join(',')}`)
-      .join('|')
+    const contentKey = `help-file;stage=${this.#stage()}`
     if (this.#mount?.contentKey === contentKey) return
-    this.#mountHelp(sections, contentKey)
+    this.#mountHelp(contentKey)
   }
 
-  #sections(members: GroupMemberLike[]): HelpSection[] {
-    const byId = new Map<string, HelpSection>()
-    const order: HelpSection[] = []
-    const ensure = (id: string, title: string): HelpSection => {
-      let section = byId.get(id)
-      if (!section) {
-        section = { id, title, items: [] }
-        byId.set(id, section)
-        order.push(section)
-      } else if (section.title === 'More' && title !== 'More') {
-        section.title = title
-      }
-      return section
-    }
-
-    for (const m of members) {
-      const id = m.group || 'ungrouped'
-      if (m.role === 'header') {
-        ensure(id, m.label)
-        continue
-      }
-      const title = m.key === 'ui.shortcutSheet' ? 'Start here' : 'More'
-      ensure(id, title).items.push({ ...m, kind: this.#kind(m) })
-    }
-    return order.filter(s => s.items.length > 0)
-  }
-
-  #kind(m: GroupMemberLike): string {
-    if (m.key === 'ui.shortcutSheet') return 'guide'
-    if (m.key.startsWith('slash:')) return 'slash'
-    if (m.key.startsWith('cli:')) return 'input'
-    return 'action'
-  }
-
-  #mountHelp(sections: HelpSection[], contentKey: string): void {
+  #mountHelp(contentKey: string): void {
     this.#teardown()
     const host = document.createElement('div')
     host.id = 'hc-help-view-host'
     host.style.cssText =
-      `position:fixed;inset:0;z-index:59987;overflow:auto;background:${COLORS.ink};` +
-      `color:${COLORS.text};font-family:inherit;`
+      `position:fixed;inset:0;z-index:59987;overflow:auto;color:${COLORS.text};font-family:inherit;` +
+      `background:` +
+      `radial-gradient(circle at 14% 8%, rgba(141,243,207,0.24), transparent 28%),` +
+      `radial-gradient(circle at 92% 14%, rgba(141,198,255,0.28), transparent 26%),` +
+      `radial-gradient(circle at 82% 82%, rgba(255,138,179,0.20), transparent 30%),` +
+      `linear-gradient(135deg, #10151f 0%, #162033 48%, #111820 100%);` +
+      `background-size:110% 110%,115% 115%,120% 120%,100% 100%;animation:hc-help-drift 18s ease-in-out infinite alternate;`
     host.setAttribute('data-consumes-wheel', '')
     document.body.appendChild(host)
 
+    const cleanups: Array<() => void> = []
+    const style = document.createElement('style')
+    style.textContent =
+      '@keyframes hc-help-drift{0%{background-position:0% 0%,100% 0%,85% 100%,0 0}100%{background-position:8% 5%,92% 9%,76% 88%,0 0}}'
+    host.appendChild(style)
+    cleanups.push(() => style.remove())
     const inner = document.createElement('div')
-    inner.style.cssText = 'width:min(1080px,calc(100vw - 40px));margin:0 auto;padding:44px 0 96px;box-sizing:border-box;'
+    inner.style.cssText = 'width:min(1220px,calc(100vw - 36px));margin:0 auto;padding:44px 0 96px;box-sizing:border-box;'
     host.appendChild(inner)
     inner.appendChild(this.#header())
-    inner.appendChild(this.#onboarding())
+
+    const body = document.createElement('div')
+    body.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:18px;align-items:start;'
+    body.appendChild(this.#onboarding())
 
     const list = document.createElement('div')
     list.style.cssText = 'display:grid;grid-template-columns:1fr;gap:14px;'
-    for (const section of sections) list.appendChild(this.#section(section))
-    inner.appendChild(list)
+    const shown = this.#visibleSections()
+    for (const section of shown) list.appendChild(this.#section(section, cleanups))
+    if (this.#stage() < 2) list.appendChild(this.#lockedMore())
+    body.appendChild(list)
+    inner.appendChild(body)
 
-    this.#mount = { host, contentKey }
+    this.#mount = { host, contentKey, cleanups }
     this.#setViewActive(true)
   }
 
@@ -198,11 +220,11 @@ export class HelpViewDrone extends Drone {
 
     const titleBlock = document.createElement('div')
     const title = document.createElement('div')
-    title.style.cssText = 'font-size:30px;font-weight:720;line-height:1.1;margin-bottom:8px;letter-spacing:0;'
+    title.style.cssText = `font-size:34px;font-weight:760;line-height:1.05;margin-bottom:8px;letter-spacing:0;color:${COLORS.text};text-shadow:0 0 28px rgba(141,198,255,0.24);`
     title.textContent = 'Help'
     const sub = document.createElement('div')
     sub.style.cssText = `font-size:14px;line-height:1.55;color:${COLORS.dim};max-width:680px;`
-    sub.textContent = 'A shortlist of things to try first, with the rest tucked into sections when you want more.'
+    sub.textContent = 'A small help file for the first visit: move around, make a tile, then learn a few next steps.'
     titleBlock.appendChild(title)
     titleBlock.appendChild(sub)
 
@@ -210,7 +232,7 @@ export class HelpViewDrone extends Drone {
     exit.type = 'button'
     exit.style.cssText =
       `all:unset;cursor:pointer;flex:none;font-size:13px;color:${COLORS.dim};` +
-      `padding:8px 12px;border-radius:6px;border:${COLORS.border};`
+      `padding:8px 12px;border-radius:6px;border:${COLORS.border};background:rgba(255,255,255,0.06);`
     exit.textContent = 'back'
     exit.addEventListener('click', () => this.#exit())
     exit.addEventListener('mouseenter', () => { exit.style.color = COLORS.text; exit.style.border = COLORS.borderStrong })
@@ -225,85 +247,273 @@ export class HelpViewDrone extends Drone {
     const wrap = document.createElement('section')
     wrap.style.cssText =
       `background:${COLORS.panel};border:${COLORS.borderStrong};border-radius:8px;` +
-      'padding:18px;box-sizing:border-box;margin-bottom:16px;'
+      'padding:18px;box-sizing:border-box;position:sticky;top:20px;box-shadow:0 18px 60px rgba(0,0,0,0.22);'
 
     const title = document.createElement('div')
     title.style.cssText = 'font-size:18px;font-weight:720;margin-bottom:8px;letter-spacing:0;'
-    title.textContent = 'Start here'
+    title.textContent = 'Start simple'
     const body = document.createElement('div')
     body.style.cssText = `font-size:14px;line-height:1.6;color:${COLORS.dim};max-width:760px;margin-bottom:14px;`
-    body.textContent = 'Hypercomb is a place made of tiles. Open a tile to go deeper, add behaviors when you want a tile to do something, and use websites or games as simple first things to explore.'
+    body.textContent = 'Hypercomb mostly asks one question: do you want to go into something that already exists, or make a new tile here? This page only teaches that first.'
     wrap.appendChild(title)
     wrap.appendChild(body)
 
     const steps = document.createElement('div')
-    steps.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:14px;'
-    const cards = [
-      ['1', 'Open a tile', 'Click once to choose something, then open it when you want to go inside.'],
-      ['2', 'Try a behavior', 'Behaviors are features a tile can wear, like a website, home page, presentation, or game.'],
-      ['3', 'Keep it small', 'Use the shortlist first. Open more only when you are ready for the full set.'],
-    ]
-    for (const [num, heading, text] of cards) steps.appendChild(this.#guideCard(num, heading, text))
+    steps.style.cssText = 'display:grid;grid-template-columns:1fr;gap:10px;margin-bottom:14px;'
+    steps.appendChild(this.#lessonCard({
+      num: '1',
+      icon: 'near_me',
+      heading: 'Navigate what is already here',
+      text: 'Click into tiles, pan when the canvas is larger than the screen, zoom to inspect or orient yourself, then come back.',
+      active: this.#stage() === 0,
+      done: this.#stage() > 0,
+      action: () => this.#focusSection('learn-navigation'),
+      complete: () => this.#advance(1),
+    }))
+    steps.appendChild(this.#lessonCard({
+      num: '2',
+      icon: 'add_circle',
+      heading: 'Create a new tile',
+      text: 'Use the command line, type a name, and press Enter. On touch screens, long-press empty space first.',
+      active: this.#stage() === 1,
+      done: this.#stage() > 1,
+      locked: this.#stage() < 1,
+      action: () => this.#focusSection('learn-creation'),
+      complete: () => this.#advance(2),
+    }))
     wrap.appendChild(steps)
-
-    const actions = document.createElement('div')
-    actions.style.cssText = 'display:flex;flex-wrap:wrap;gap:10px;'
-    const guides: GuideAction[] = [
-      { label: 'How to use', text: 'Open the reference sheet', action: () => this.#open('Reference') },
-      { label: 'Websites', text: 'Browse saved websites', action: () => this.#showGroup('websites') },
-      { label: 'Games', text: 'Try something playful', action: () => this.#showGroup('games') },
-    ]
-    for (const guide of guides) actions.appendChild(this.#guideButton(guide))
-    wrap.appendChild(actions)
     return wrap
   }
 
-  #guideCard(num: string, heading: string, text: string): HTMLElement {
+  #lessonCard(opts: {
+    num: string
+    icon: string
+    heading: string
+    text: string
+    active?: boolean
+    done?: boolean
+    locked?: boolean
+    action: () => void
+    complete: () => void
+  }): HTMLElement {
     const card = document.createElement('div')
     card.style.cssText =
-      `background:${COLORS.panelStrong};border:${COLORS.border};border-radius:6px;` +
-      'padding:13px;box-sizing:border-box;min-height:104px;'
-    const badge = document.createElement('div')
-    badge.style.cssText = `font-size:12px;color:${COLORS.accent};font-weight:700;margin-bottom:8px;`
-    badge.textContent = num
+      `background:${opts.active ? 'rgba(141,243,207,0.13)' : COLORS.panelStrong};` +
+      `border:${opts.active ? COLORS.borderStrong : COLORS.border};border-radius:8px;` +
+      `opacity:${opts.locked ? '0.58' : '1'};padding:14px;box-sizing:border-box;`
+    const top = document.createElement('div')
+    top.style.cssText = 'display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:10px;align-items:center;margin-bottom:8px;'
+    const badge = document.createElement('span')
+    badge.className = 'mat-sym'
+    badge.style.cssText =
+      `width:34px;height:34px;border-radius:8px;display:inline-grid;place-items:center;` +
+      `background:${opts.done ? 'rgba(141,243,207,0.24)' : 'rgba(141,198,255,0.18)'};` +
+      `border:1px solid rgba(141,243,207,0.34);color:${COLORS.text};font-size:20px;`
+    badge.textContent = opts.done ? 'check_circle' : opts.icon
     const h = document.createElement('div')
-    h.style.cssText = 'font-size:14px;font-weight:680;margin-bottom:5px;'
-    h.textContent = heading
+    h.style.cssText = 'font-size:14px;font-weight:720;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+    h.textContent = `${opts.num}. ${opts.heading}`
+    const status = document.createElement('span')
+    status.style.cssText = `font-size:11px;color:${opts.done ? COLORS.accent : COLORS.soft};text-transform:uppercase;letter-spacing:0;`
+    status.textContent = opts.locked ? 'next' : opts.done ? 'done' : 'now'
+    top.appendChild(badge)
+    top.appendChild(h)
+    top.appendChild(status)
     const p = document.createElement('div')
-    p.style.cssText = `font-size:13px;line-height:1.45;color:${COLORS.dim};`
-    p.textContent = text
-    card.appendChild(badge)
-    card.appendChild(h)
+    p.style.cssText = `font-size:13px;line-height:1.5;color:${COLORS.dim};margin-bottom:12px;`
+    p.textContent = opts.text
+    const actions = document.createElement('div')
+    actions.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;'
+    const study = this.#plainButton(opts.locked ? 'Locked' : 'Study', opts.action)
+    study.disabled = !!opts.locked
+    if (opts.locked) study.style.opacity = '0.55'
+    const complete = this.#plainButton(opts.done ? 'Review' : 'I tried this', opts.complete)
+    complete.disabled = !!opts.locked
+    if (opts.locked) complete.style.opacity = '0.55'
+    actions.appendChild(study)
+    actions.appendChild(complete)
+    card.appendChild(top)
     card.appendChild(p)
+    card.appendChild(actions)
     return card
   }
 
-  #guideButton(guide: GuideAction): HTMLElement {
+  #plainButton(label: string, action: () => void): HTMLButtonElement {
     const button = document.createElement('button')
     button.type = 'button'
     button.style.cssText =
-      `display:grid;grid-template-columns:1fr;gap:2px;min-width:170px;padding:10px 12px;` +
-      `border-radius:6px;border:${COLORS.border};background:${COLORS.panelStrong};` +
-      `color:${COLORS.text};font:inherit;text-align:left;cursor:pointer;box-sizing:border-box;`
-    const label = document.createElement('span')
-    label.style.cssText = 'font-size:13px;font-weight:680;'
-    label.textContent = guide.label
-    const text = document.createElement('span')
-    text.style.cssText = `font-size:12px;color:${COLORS.soft};`
-    text.textContent = guide.text
-    button.appendChild(label)
-    button.appendChild(text)
-    button.addEventListener('click', guide.action)
-    button.addEventListener('mouseenter', () => { button.style.border = COLORS.borderStrong })
-    button.addEventListener('mouseleave', () => { button.style.border = COLORS.border })
+      `border:${COLORS.border};border-radius:6px;background:rgba(255,255,255,0.08);` +
+      `color:${COLORS.text};font:inherit;font-size:12px;font-weight:660;padding:7px 10px;cursor:pointer;`
+    button.textContent = label
+    button.addEventListener('click', action)
+    button.addEventListener('mouseenter', () => { button.style.border = COLORS.borderStrong; button.style.background = 'rgba(255,255,255,0.15)' })
+    button.addEventListener('mouseleave', () => { button.style.border = COLORS.border; button.style.background = 'rgba(255,255,255,0.08)' })
     return button
   }
 
-  #section(section: HelpSection): HTMLElement {
+  #stage(): number {
+    try {
+      const raw = window.localStorage?.getItem(PROGRESS_KEY)
+      const n = raw ? Number(raw) : 0
+      return Number.isFinite(n) ? Math.max(0, Math.min(2, Math.floor(n))) : 0
+    } catch {
+      return 0
+    }
+  }
+
+  #advance(stage: number): void {
+    const next = Math.max(this.#stage(), Math.max(0, Math.min(2, stage)))
+    try { window.localStorage?.setItem(PROGRESS_KEY, String(next)) } catch { /* storage unavailable */ }
+    if (this.#mount) this.#mount.contentKey = ''
+    this.#reconcile()
+  }
+
+  #navigationItems(): HelpItem[] {
+    return [
+      {
+        key: 'core.click',
+        label: 'Click tiles',
+        icon: 'touch_app',
+        kind: 'gesture',
+        summary: 'Click a tile to open it. If it has children, you move into that next layer.',
+        synthetic: true,
+      },
+      {
+        key: 'core.fit',
+        label: 'Fit the view',
+        icon: 'fit_screen',
+        kind: 'gesture',
+        summary: 'Use Fit when you feel lost or zoomed into the wrong part of the layer.',
+        synthetic: true,
+      },
+      {
+        key: 'core.back',
+        label: 'Step back',
+        icon: 'keyboard_return',
+        kind: 'gesture',
+        summary: 'Right-click the canvas, or Shift-click on a trackpad, to retrace where you came from.',
+        synthetic: true,
+      },
+      {
+        key: 'core.pan',
+        label: 'Pan the canvas',
+        icon: 'pan_tool',
+        kind: 'gesture',
+        summary: 'Hold Space and move the mouse. On touch, drag with one finger.',
+        synthetic: true,
+      },
+      {
+        key: 'core.zoom',
+        label: 'Zoom in and out',
+        icon: 'zoom_in',
+        kind: 'gesture',
+        summary: 'Use the mouse wheel or trackpad scroll over the canvas. Ctrl/Cmd + wheel gives finer zoom.',
+        synthetic: true,
+      },
+    ]
+  }
+
+  #creationItems(): HelpItem[] {
+    return [
+      {
+        key: 'create.open-input',
+        label: 'Open the command line',
+        icon: 'terminal',
+        kind: 'create',
+        summary: 'Click the command line at the top. On touch screens, long-press empty space.',
+        synthetic: true,
+      },
+      {
+        key: 'create.type-name',
+        label: 'Type a tile name',
+        icon: 'edit_note',
+        kind: 'create',
+        summary: 'A plain name makes a tile in the layer you are currently viewing.',
+        synthetic: true,
+      },
+      {
+        key: 'create.enter',
+        label: 'Press Enter',
+        icon: 'keyboard_return',
+        kind: 'create',
+        summary: 'The new tile appears here. Click it later to open its own layer.',
+        synthetic: true,
+      },
+    ]
+  }
+
+  #nextItems(): HelpItem[] {
+    return [
+      {
+        key: 'next.edit',
+        label: 'Edit a tile',
+        icon: 'edit',
+        kind: 'next',
+        summary: 'Hover a tile and use the edit action when you want to rename or adjust it.',
+        synthetic: true,
+      },
+      {
+        key: 'next.organize',
+        label: 'Organize what you make',
+        icon: 'content_paste',
+        kind: 'next',
+        summary: 'Copy, paste, remove, and undo are the everyday tools once tiles exist.',
+        synthetic: true,
+      },
+      {
+        key: 'next.behaviors',
+        label: 'Add behaviors later',
+        icon: 'bolt',
+        kind: 'next',
+        summary: 'Extra features make more sense after navigation and creation feel natural.',
+        synthetic: true,
+      },
+    ]
+  }
+
+  #visibleSections(): HelpSection[] {
+    const stage = this.#stage()
+    const navigation = this.#navigationItems()
+    const creation = this.#creationItems()
+    if (stage === 0) return [{ id: 'learn-navigation', title: 'Navigation', items: navigation }]
+    if (stage === 1) return [
+      { id: 'learn-navigation', title: 'Navigation', items: navigation },
+      { id: 'learn-creation', title: 'Create Tiles', items: creation },
+    ]
+
+    return [
+      { id: 'learn-navigation', title: 'Navigation', items: navigation },
+      { id: 'learn-creation', title: 'Create Tiles', items: creation },
+      { id: 'learn-next', title: 'Next Things', items: this.#nextItems() },
+    ]
+  }
+
+  #focusSection(id: string): void {
+    document.getElementById('hc-help-section-' + id)?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  }
+
+  #lockedMore(): HTMLElement {
     const card = document.createElement('section')
     card.style.cssText =
+      `background:rgba(255,255,255,0.045);border:${COLORS.border};border-radius:8px;` +
+      'padding:16px;box-sizing:border-box;opacity:0.72;'
+    const title = document.createElement('div')
+    title.style.cssText = 'font-size:15px;font-weight:700;margin-bottom:6px;'
+    title.textContent = 'More appears after this'
+    const body = document.createElement('div')
+    body.style.cssText = `font-size:13px;line-height:1.5;color:${COLORS.dim};`
+    body.textContent = 'The next part of the help file appears after navigation and tile creation make sense.'
+    card.appendChild(title)
+    card.appendChild(body)
+    return card
+  }
+
+  #section(section: HelpSection, cleanups: Array<() => void>): HTMLElement {
+    const card = document.createElement('section')
+    card.id = 'hc-help-section-' + section.id
+    card.style.cssText =
       `background:${COLORS.panel};border:${COLORS.border};border-radius:8px;` +
-      'padding:16px;box-sizing:border-box;'
+      'padding:16px;box-sizing:border-box;box-shadow:0 16px 46px rgba(0,0,0,0.18);'
 
     const top = document.createElement('div')
     top.style.cssText = 'display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:10px;'
@@ -319,19 +529,19 @@ export class HelpViewDrone extends Drone {
 
     const visible = section.items.slice(0, MAX_VISIBLE)
     const hidden = section.items.slice(MAX_VISIBLE)
-    card.appendChild(this.#rows(visible))
-    if (hidden.length > 0) card.appendChild(this.#more(hidden))
+    card.appendChild(this.#rows(visible, cleanups))
+    if (hidden.length > 0) card.appendChild(this.#more(hidden, cleanups))
     return card
   }
 
-  #rows(items: HelpItem[]): HTMLElement {
+  #rows(items: HelpItem[], cleanups: Array<() => void>): HTMLElement {
     const rows = document.createElement('div')
     rows.style.cssText = 'display:grid;grid-template-columns:1fr;gap:8px;'
-    for (const item of items) rows.appendChild(this.#row(item))
+    for (const item of items) rows.appendChild(this.#row(item, cleanups))
     return rows
   }
 
-  #more(items: HelpItem[]): HTMLElement {
+  #more(items: HelpItem[], cleanups: Array<() => void>): HTMLElement {
     const details = document.createElement('details')
     details.style.cssText = 'margin-top:8px;'
     const summary = document.createElement('summary')
@@ -340,38 +550,139 @@ export class HelpViewDrone extends Drone {
       'padding:8px 2px 2px;'
     summary.textContent = `show ${items.length} more`
     details.appendChild(summary)
-    details.appendChild(this.#rows(items))
+    details.appendChild(this.#rows(items, cleanups))
     return details
   }
 
-  #row(item: HelpItem): HTMLElement {
+  #row(item: HelpItem, cleanups: Array<() => void>): HTMLElement {
     const button = document.createElement('button')
     button.type = 'button'
     button.style.cssText =
-      `width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:12px;` +
-      `padding:11px 12px;border-radius:6px;border:${COLORS.border};background:${COLORS.panelStrong};` +
+      `width:100%;display:grid;grid-template-columns:36px minmax(0,1fr) auto;align-items:center;gap:12px;` +
+      `padding:10px 12px;border-radius:7px;border:${COLORS.border};background:${COLORS.panelStrong};` +
       `color:${COLORS.text};font:inherit;text-align:left;cursor:pointer;box-sizing:border-box;`
+    const icon = this.#iconButton(item, cleanups)
+    const copy = document.createElement('span')
+    copy.style.cssText = 'display:grid;grid-template-columns:1fr;gap:2px;min-width:0;'
     const label = document.createElement('span')
     label.style.cssText = 'min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;'
     label.textContent = item.label
+    copy.appendChild(label)
+    if (item.summary) {
+      const summary = document.createElement('span')
+      summary.style.cssText = `min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;color:${COLORS.soft};`
+      summary.textContent = item.summary
+      copy.appendChild(summary)
+    }
     const kind = document.createElement('span')
     kind.style.cssText = `font-size:11px;color:${COLORS.soft};text-transform:uppercase;letter-spacing:0;`
     kind.textContent = item.kind
-    button.appendChild(label)
+    button.appendChild(icon)
+    button.appendChild(copy)
     button.appendChild(kind)
-    button.addEventListener('click', () => this.#open(item.label))
-    button.addEventListener('mouseenter', () => { button.style.border = COLORS.borderStrong })
-    button.addEventListener('mouseleave', () => { button.style.border = COLORS.border })
+    button.addEventListener('click', (e) => this.#openFromRow(item, e))
+    button.addEventListener('mouseenter', () => {
+      button.style.border = COLORS.borderStrong
+      button.style.background = 'rgba(255,255,255,0.16)'
+    })
+    button.addEventListener('mouseleave', () => {
+      button.style.border = COLORS.border
+      button.style.background = COLORS.panelStrong
+    })
     return button
   }
 
-  #open(label: string): void {
-    EffectBus.emit('group:open', { label })
+  #iconButton(item: HelpItem, cleanups: Array<() => void>): HTMLElement {
+    return this.#commandIcon({
+      id: this.#iconId(item),
+      label: item.label,
+      fallback: this.#defaultIcon(item),
+      cleanups,
+      action: (e) => this.#openFromRow(item, e),
+    })
   }
 
-  #showGroup(id: string): void {
-    if (!this.#registry()?.get(id)) return
-    window.setTimeout(() => this.#registry()?.show?.(id), 0)
+  #commandIcon(args: {
+    id: string
+    label: string
+    fallback: string
+    cleanups: Array<() => void>
+    action: (event: MouseEvent) => void
+  }): HTMLElement {
+    const icon = document.createElement('span')
+    icon.className = 'mat-sym'
+    icon.setAttribute('role', 'button')
+    icon.setAttribute('aria-label', `Change icon for ${args.label}`)
+    icon.title = 'Hold to change icon'
+    icon.style.cssText =
+      `width:34px;height:34px;border-radius:8px;display:inline-grid;place-items:center;` +
+      `background:linear-gradient(135deg, rgba(141,243,207,0.30), rgba(141,198,255,0.16));` +
+      `border:1px solid rgba(141,243,207,0.40);color:${COLORS.text};font-size:20px;` +
+      `box-shadow:0 0 22px rgba(141,243,207,0.16);user-select:none;`
+    icon.textContent = this.#glyph(args.id, args.fallback)
+
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let consumed = false
+    const clear = (): void => { if (timer) { clearTimeout(timer); timer = null } }
+    const pick = (): void => {
+      consumed = true
+      this.#iconEdit()?.enter?.()
+      const edit = this.#iconEdit()
+      if (edit?.requestPick) edit.requestPick(args.id)
+      else EffectBus.emit('icon:pick-request', { id: args.id })
+    }
+    const down = (e: PointerEvent): void => {
+      clear()
+      consumed = false
+      timer = setTimeout(() => { timer = null; pick() }, LONG_PRESS_MS)
+      e.stopPropagation()
+    }
+    const up = (): void => clear()
+    const click = (e: MouseEvent): void => {
+      e.stopPropagation()
+      if (consumed || this.#iconEdit()?.on) { pick(); consumed = false; return }
+      args.action(e)
+    }
+    icon.addEventListener('pointerdown', down)
+    icon.addEventListener('pointerup', up)
+    icon.addEventListener('pointerleave', up)
+    icon.addEventListener('pointermove', up)
+    icon.addEventListener('click', click)
+    args.cleanups.push(() => {
+      clear()
+      icon.removeEventListener('pointerdown', down)
+      icon.removeEventListener('pointerup', up)
+      icon.removeEventListener('pointerleave', up)
+      icon.removeEventListener('pointermove', up)
+      icon.removeEventListener('click', click)
+    })
+    return icon
+  }
+
+  #iconId(item: HelpItem): string {
+    return 'help:' + item.key
+  }
+
+  #glyph(id: string, fallback: string): string {
+    return this.#icons()?.glyph?.(id, fallback) ?? fallback
+  }
+
+  #defaultIcon(item: HelpItem): string {
+    const key = item.key
+    if (item.icon) return item.icon
+    if (key.includes('palette')) return 'palette'
+    if (key.includes('copy')) return 'content_copy'
+    if (key.includes('paste')) return 'content_paste'
+    if (key.includes('undo')) return 'undo'
+    if (key.includes('redo')) return 'redo'
+    if (key.includes('history')) return 'history'
+    if (key.includes('navigation')) return 'near_me'
+    if (key.includes('selection')) return 'select'
+    return DEFAULT_ICONS[item.kind] ?? DEFAULT_ICONS['action']
+  }
+
+  #openFromRow(_item: HelpItem, _event?: Event): void {
+    // Help-file rows are explanatory, not launchers into the old help system.
   }
 
   #exit(): void {
@@ -380,6 +691,9 @@ export class HelpViewDrone extends Drone {
 
   #teardown(): void {
     if (this.#mount) {
+      for (const cleanup of this.#mount.cleanups) {
+        try { cleanup() } catch { /* noop */ }
+      }
       this.#mount.host.remove()
       this.#mount = null
     }

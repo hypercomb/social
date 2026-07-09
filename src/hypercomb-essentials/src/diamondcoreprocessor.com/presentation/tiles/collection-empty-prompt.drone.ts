@@ -143,8 +143,13 @@ class CollectionEmptyPromptDrone {
       'border:0;border-radius:7px;padding:10px 16px;font:inherit;font-size:14px;font-weight:700;' +
       'color:#0c1118;background:rgb(126,182,214);cursor:pointer;'
     button.textContent = this.#t('collections.empty.action', 'Add a tile')
-    button.addEventListener('click', event => this.#focusCommandLine(event))
-    panel.addEventListener('click', event => this.#focusCommandLine(event))
+    const requestFocus = (event: Event): void => this.#focusCommandLine(event)
+    button.addEventListener('pointerdown', requestFocus, true)
+    button.addEventListener('mousedown', requestFocus, true)
+    button.addEventListener('click', requestFocus, true)
+    panel.addEventListener('pointerdown', requestFocus, true)
+    panel.addEventListener('mousedown', requestFocus, true)
+    panel.addEventListener('click', requestFocus, true)
 
     panel.appendChild(title)
     panel.appendChild(body)
@@ -163,10 +168,12 @@ class CollectionEmptyPromptDrone {
     event?.preventDefault()
     event?.stopPropagation()
     if (event?.target instanceof HTMLElement) event.target.blur()
+    this.#hide()
 
     const mobile = window.matchMedia('(max-width: 599px), (max-height: 599px)').matches
     EffectBus.emit('mobile:input-visible', { visible: true, mobile })
     EffectBus.emit('command:focus', { cell: '' })
+    EffectBus.emit('keymap:invoke', { cmd: 'ui.commandLineToggle' })
 
     const focusInput = (): void => {
       const input = document.querySelector<HTMLInputElement>('hc-command-shell input.command-input')
