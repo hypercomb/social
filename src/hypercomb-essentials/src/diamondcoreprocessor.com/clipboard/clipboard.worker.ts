@@ -9,8 +9,6 @@ interface ClipboardEntry {
   sourceSegments: readonly string[]
 }
 
-const META_FILE = '__meta__'
-
 interface SelectionLike {
   readonly selected: ReadonlySet<string>
   clear(): void
@@ -54,6 +52,8 @@ interface StoreLike {
   readonly clipboard: FileSystemDirectoryHandle
   getResource?: (sig: string) => Promise<Blob | null>
   putResource?: (blob: Blob) => Promise<string>
+  putPoolDoc?: (pool: FileSystemDirectoryHandle, bytes: ArrayBuffer, subKey?: string) => Promise<string | null>
+  getPoolDoc?: (pool: FileSystemDirectoryHandle | undefined, subKey?: string) => Promise<ArrayBuffer | null>
 }
 
 export class ClipboardWorker extends Worker {
@@ -382,7 +382,7 @@ export class ClipboardWorker extends Worker {
   async #persistMetaEntries(op: ClipboardOp, entries: readonly ClipboardEntry[]): Promise<void> {
     const store = this.#store
     if (!store) return
-    await writeMeta(store.clipboard, {
+    await writeMeta(store, {
       op,
       items: entries.map(e => ({ label: e.label, sourceSegments: [...e.sourceSegments] })),
     })
@@ -461,7 +461,7 @@ export class ClipboardWorker extends Worker {
       if (clipboardSvc.isEmpty) {
         await clearDirectory(store.clipboard)
       } else {
-        await writeMeta(store.clipboard, {
+        await writeMeta(store, {
           op: clipboardSvc.operation,
           items: clipboardSvc.items.map(i => ({
             label: i.label,
@@ -792,7 +792,7 @@ export class ClipboardWorker extends Worker {
     if (svc.isEmpty) {
       await clearDirectory(store.clipboard)
     } else {
-      await writeMeta(store.clipboard, {
+      await writeMeta(store, {
         op: svc.operation,
         items: svc.items.map(i => ({
           label: i.label,
@@ -882,7 +882,7 @@ export class ClipboardWorker extends Worker {
     if (svc.isEmpty) {
       await clearDirectory(store.clipboard)
     } else {
-      await writeMeta(store.clipboard, {
+      await writeMeta(store, {
         op: svc.operation,
         items: svc.items.map(i => ({ label: i.label, sourceSegments: [...i.sourceSegments] })),
       })
@@ -899,7 +899,7 @@ export class ClipboardWorker extends Worker {
     if (!store || !clipboardSvc) return
     if (!clipboardSvc.isEmpty) return
 
-    const meta = await readMeta(store.clipboard)
+    const meta = await readMeta(store)
     if (!meta || meta.items.length === 0) return
 
     clipboardSvc.capture(
@@ -913,68 +913,63 @@ export class ClipboardWorker extends Worker {
 }
 
 // ── meta persistence ──────────────────────────────────────
+//
+// The clipboard record is a content-addressed DOCUMENT in the
+// sign('clipboard') pool — putPoolDoc under the sign('clipboard-meta')
+// sub-bucket. The current record is the bucket's single sig-named
+// member: no fixed filename, identical content dedupes, and the new
+// member is fully written BEFORE the old one drops, giving the same
+// crash-safety the old `__meta__.tmp` two-phase swap provided. The
+// legacy fixed-name `__meta__` / `__meta__.tmp` files are READ-fallback
+// drains, removed after the first pool-doc write.
 
 interface ClipboardMeta {
   op: ClipboardOp
   items: { label: string; sourceSegments: string[] }[]
 }
 
-const META_TMP = '__meta__.tmp'
+const META_SUBKEY = 'clipboard-meta'
+const LEGACY_META = '__meta__'
+const LEGACY_META_TMP = '__meta__.tmp'
 
-// Two-phase write: serialise into __meta__.tmp first, verify it parses, then
-// swap into __meta__. If the process dies mid-write, the old __meta__ is
-// untouched. readMeta() prefers a valid __meta__.tmp over __meta__ so a
-// half-swapped state can still be recovered.
 async function writeMeta(
-  clipDir: FileSystemDirectoryHandle,
+  store: StoreLike,
   meta: ClipboardMeta,
 ): Promise<void> {
-  const json = JSON.stringify(meta)
   try {
-    const tmp = await clipDir.getFileHandle(META_TMP, { create: true })
-    const w = await tmp.createWritable()
-    try {
-      await w.write(json)
-    } finally {
-      await w.close()
-    }
-    // verify the temp can be parsed before swapping
-    try {
-      const file = await tmp.getFile()
-      JSON.parse(await file.text())
-    } catch {
-      await clipDir.removeEntry(META_TMP).catch(() => { /* ignore */ })
+    const bytes = new TextEncoder().encode(JSON.stringify(meta))
+    const sig = await store.putPoolDoc?.(store.clipboard, bytes.buffer as ArrayBuffer, META_SUBKEY)
+    if (!sig) {
+      console.warn('[clipboard] writeMeta failed — pool doc unavailable')
       return
     }
-    const handle = await clipDir.getFileHandle(META_FILE, { create: true })
-    const writable = await handle.createWritable()
-    try {
-      await writable.write(json)
-    } finally {
-      await writable.close()
-    }
-    await clipDir.removeEntry(META_TMP).catch(() => { /* ignore */ })
+    // Pool doc is authoritative now — drain the legacy fixed-name files.
+    await store.clipboard.removeEntry(LEGACY_META).catch(() => { /* absent */ })
+    await store.clipboard.removeEntry(LEGACY_META_TMP).catch(() => { /* absent */ })
   } catch (err) {
     console.warn('[clipboard] writeMeta failed:', err)
   }
 }
 
 async function readMeta(
-  clipDir: FileSystemDirectoryHandle,
+  store: StoreLike,
 ): Promise<ClipboardMeta | null> {
+  try {
+    const bytes = await store.getPoolDoc?.(store.clipboard, META_SUBKEY)
+    if (bytes) return JSON.parse(new TextDecoder().decode(bytes)) as ClipboardMeta
+  } catch { /* malformed doc — fall through to legacy */ }
+  // Legacy drain read: pre-pool-doc sessions left `__meta__` (and possibly
+  // an in-flight `__meta__.tmp`) at the pool root.
   const tryParse = async (name: string): Promise<ClipboardMeta | null> => {
     try {
-      const handle = await clipDir.getFileHandle(name, { create: false })
+      const handle = await store.clipboard.getFileHandle(name, { create: false })
       const file = await handle.getFile()
-      const text = await file.text()
-      return JSON.parse(text) as ClipboardMeta
+      return JSON.parse(await file.text()) as ClipboardMeta
     } catch {
       return null
     }
   }
-  // Prefer the committed __meta__; fall back to the in-flight __meta__.tmp
-  // if the committed copy is missing or unreadable.
-  return (await tryParse(META_FILE)) ?? (await tryParse(META_TMP))
+  return (await tryParse(LEGACY_META)) ?? (await tryParse(LEGACY_META_TMP))
 }
 
 async function clearDirectory(dir: FileSystemDirectoryHandle): Promise<void> {
