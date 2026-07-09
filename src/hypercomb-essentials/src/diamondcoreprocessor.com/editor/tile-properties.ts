@@ -222,22 +222,9 @@ export const readCellProperties = async (
  * the function stays callable from contexts that don't touch any
  * nurse-tended key.
  */
-export const writeCellProperties = async (
-  cellDir: FileSystemDirectoryHandle,
-  updates: Record<string, unknown>,
-  cacheKey?: string,
-): Promise<void> => {
-  const existing = await readCellProperties(cellDir)
-  const merged = { ...existing, ...updates }
-  const fileHandle = await cellDir.getFileHandle(TILE_PROPERTIES_FILE, { create: true })
-  const writable = await fileHandle.createWritable()
-  await writable.write(JSON.stringify(merged))
-  await writable.close()
-  EffectBus.emit('cell:0000-changed', {
-    cacheKey: cacheKey ?? cellDir.name,
-    keys: Object.keys(updates),
-  })
-}
+// `writeCellProperties` — the legacy per-cell-dir `0000` WRITER — is
+// deleted (last caller migrated to writeTilePropertiesAt). The 0000
+// path survives as READ fallback only (readCellProperties above).
 
 // ── Layer-slot tile properties (canonical) ───────────────────────────
 //

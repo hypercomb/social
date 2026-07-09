@@ -1,5 +1,5 @@
 import { Component, signal } from '@angular/core'
-import { type Bee, EffectBus } from '@hypercomb/core'
+import { type Bee, EffectBus, hypercomb } from '@hypercomb/core'
 import { RouterOutlet } from '@angular/router'
 import { initializeRuntime } from '@hypercomb/shared/core'
 import { OrientationService } from './orientation.service'
@@ -83,7 +83,9 @@ export class App {
       }
     }
 
-    window.dispatchEvent(new Event('synchronize'))
+    // Boot kick through the processor — hypercomb.act() owns the
+    // `synchronize` dispatch (and the optimize phase).
+    await new hypercomb().act('')
 
     // listen for swarm peer count updates
     EffectBus.on('swarm:peer-count', (payload: any) => {

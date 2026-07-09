@@ -628,29 +628,11 @@ export class HistoryService {
     return sig
   }
 
-  /**
-   * Record an operation into the history bag for the given signature.
-   * Appends a sequential file (00000001, 00000002, ...) with JSON content.
-   *
-   * Ops are a legacy view — the primary history primitive is the layer
-   * snapshot (commitLayer). Any edit while rewound simply appends a new
-   * layer at head; previous layers remain immutable and addressable.
-   */
-  public readonly record = async (signature: string, operation: HistoryOp): Promise<void> => {
-    const bag = await this.getBag(signature)
-
-    const nextIndex = await this.nextIndex(bag)
-    const fileName = String(nextIndex).padStart(8, '0')
-
-    const fileHandle = await bag.getFileHandle(fileName, { create: true })
-    const writable = await fileHandle.createWritable()
-    await writable.write(JSON.stringify(operation))
-    await writable.close()
-
-    // keep the replay cache fresh so future navigations don't re-read OPFS
-    const cached = this.#replayCache.get(signature)
-    if (cached) cached.push(operation)
-  }
+  // `record()` — the legacy op-log WRITER — is deleted. It allocated
+  // numeric NNNNNNNN filenames in the same bag namespace as the
+  // committer's markers and historically raced them (see
+  // history-recorder.drone.ts). The read side (`replay`/`head`) survives
+  // as a drain over old bags; the committer is the sole bag writer.
 
   /**
    * Replay all operations in a bag, in order.
@@ -752,80 +734,10 @@ export class HistoryService {
     }
   }
 
-  // -------------------------------------------------
-  // layer.json — materialized layer state
-  // -------------------------------------------------
-
-  static readonly #LAYER_FILE = 'layer.json'
-
-  public readonly getLayer = async (signature: string): Promise<LayerState> => {
-    try {
-      const bag = await this.bagForRead(signature)
-      const handle = await bag.getFileHandle(HistoryService.#LAYER_FILE)
-      const file = await handle.getFile()
-      const text = await file.text()
-      return JSON.parse(text) as LayerState
-    } catch {
-      return EMPTY_LAYER_STATE
-    }
-  }
-
-  public readonly putLayer = async (signature: string, state: LayerState): Promise<void> => {
-    const bag = await this.getBag(signature)
-    const handle = await bag.getFileHandle(HistoryService.#LAYER_FILE, { create: true })
-    const writable = await handle.createWritable()
-    try {
-      await writable.write(JSON.stringify(state))
-    } finally {
-      await writable.close()
-    }
-  }
-
-  public readonly updateLayer = async (
-    signature: string,
-    next: LayerState
-  ): Promise<{ added: Partial<LayerState>; removed: Partial<LayerState> }> => {
-
-    const prev = await this.getLayer(signature)
-
-    const added: Partial<LayerState> = {}
-    const removed: Partial<LayerState> = {}
-
-    for (const key of ['bees', 'layers', 'dependencies', 'resources'] as const) {
-      const prevSet = new Set(prev[key])
-      const nextSet = new Set(next[key])
-
-      const a = next[key].filter(s => !prevSet.has(s))
-      const r = prev[key].filter(s => !nextSet.has(s))
-
-      if (a.length) added[key] = a
-      if (r.length) removed[key] = r
-    }
-
-    const hasChanges = Object.keys(added).length > 0 || Object.keys(removed).length > 0
-
-    if (hasChanges) {
-      const bag = await this.getBag(signature)
-      const nextIndex = await this.nextIndex(bag)
-      const fileName = String(nextIndex).padStart(8, '0')
-
-      const handle = await bag.getFileHandle(fileName, { create: true })
-      const writable = await handle.createWritable()
-      try {
-        await writable.write(JSON.stringify({ added, removed, at: Date.now() }))
-      } finally {
-        await writable.close()
-      }
-
-      await this.putLayer(signature, next)
-
-      // layer update writes a non-HistoryOp blob into the bag — invalidate so the
-      // next replay re-reads rather than returning a stale cache.
-      this.#replayCache.delete(signature)
-    }
-
-    return { added, removed }
-  }
+  // The `layer.json` block (`getLayer`/`putLayer`/`updateLayer`) is
+  // deleted: it MUTATED a fixed-name file in place inside sigbags —
+  // anti-model (new content = new signature) — and had no live callers.
+  // Layer state lives as immutable sig-named snapshots (commitLayer).
 
   // -------------------------------------------------
   // layer snapshots — signature-addressed history entries

@@ -1,5 +1,5 @@
 import { AfterViewInit, Component, computed, effect, HostBinding, inject, signal } from '@angular/core'
-import { type Bee, EffectBus } from '@hypercomb/core'
+import { type Bee, EffectBus, hypercomb } from '@hypercomb/core'
 import { upgradeFromBundled, checkForUpdate, type BootStatus } from '../setup/ensure-install'
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
@@ -262,7 +262,11 @@ export class App implements AfterViewInit {
       )
     ))
 
-    window.dispatchEvent(new Event('synchronize'))
+    // Boot kick through the processor — hypercomb.act() owns the
+    // `synchronize` dispatch (and the optimize phase). A second pulse of
+    // already-started bees is normal processor behavior, identical to the
+    // first user act.
+    await new hypercomb().act('')
 
     // broadcast initial mesh state so drones can react
     EffectBus.emit('mesh:public-changed', { public: this.meshPublic() })

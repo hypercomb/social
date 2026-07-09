@@ -377,7 +377,7 @@ export class Lineage extends EventTarget {
   readonly #scheduleHeal = (): void => {
     // Only walk when the path actually changed — fs-only invalidations on an
     // already-validated path are skipped. Debounced so a burst coalesces.
-    const key = this.explorerPath.join(' ')
+    const key = this.explorerPath.join('')
     if (key === this.#lastHealedPath) return
     if (this.#healTimer) clearTimeout(this.#healTimer)
     this.#healTimer = setTimeout(() => { this.#healTimer = null; void this.#healPath() }, 0)
@@ -385,7 +385,7 @@ export class Lineage extends EventTarget {
 
   readonly #healPath = async (): Promise<void> => {
     const path = this.explorerPath
-    if (path.length <= 1) { this.#lastHealedPath = path.join(' '); return }
+    if (path.length <= 1) { this.#lastHealedPath = path.join(''); return }
 
     const revision = this.#fsRevision
     const history = get('@diamondcoreprocessor.com/HistoryService') as
@@ -407,7 +407,7 @@ export class Lineage extends EventTarget {
 
     if (result.prefix.length >= path.length) {
       // Fully real — remember it so we don't re-walk on every fs tick.
-      this.#lastHealedPath = path.join(' ')
+      this.#lastHealedPath = path.join('')
       return
     }
 

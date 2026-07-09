@@ -1,5 +1,4 @@
 // revolucionstyle.com/cigar/cigar-catalog.service.ts
-import { SignatureService } from '@hypercomb/core'
 import type { Cigar } from '../journal/journal-entry.js'
 import { cigarKey } from './cigar.js'
 

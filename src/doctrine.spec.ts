@@ -79,14 +79,10 @@ describe('doctrine ratchets', () => {
 
   it('synchronize is dispatched only by the processor (plus frozen boot-kick debt)', () => {
     // hypercomb.act()'s finally block is the sole sanctioned dispatcher.
-    // The three shell boot kicks are frozen debt — route them through
-    // act('') and delete them from this list.
+    // (The three shell boot kicks were routed through act('') — debt paid.)
     const actual = filesMatching(/dispatchEvent\s*\(\s*new\s+(?:Custom)?Event\s*\(\s*['"`]synchronize['"`]/)
     assertRatchet(actual, [
       'hypercomb-core/src/core/hypercomb.ts',   // the processor — sanctioned
-      'hypercomb-web/src/app/app.ts',           // debt: boot kick
-      'hypercomb-dev/src/app/app.ts',           // debt: boot kick
-      'hypercomb-avatars/src/app/app.ts',       // debt: boot kick
     ], 'synchronize dispatch')
   })
 

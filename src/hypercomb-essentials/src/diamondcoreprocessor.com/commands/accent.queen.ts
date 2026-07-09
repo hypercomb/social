@@ -142,26 +142,9 @@ export class AccentQueenBee extends QueenBee {
   }
 }
 
-// ── OPFS 0000 props helpers ─────────────────────────────────────
-
-const PROPS_FILE = '0000'
-
-async function readProps(cellDir: FileSystemDirectoryHandle): Promise<Record<string, unknown>> {
-  try {
-    const fh = await cellDir.getFileHandle(PROPS_FILE)
-    const file = await fh.getFile()
-    return JSON.parse(await file.text())
-  } catch {
-    return {}
-  }
-}
-
-async function writeProps(cellDir: FileSystemDirectoryHandle, updates: Record<string, unknown>): Promise<void> {
-  const fh = await cellDir.getFileHandle(PROPS_FILE, { create: true })
-  const writable = await fh.createWritable()
-  await writable.write(JSON.stringify(updates))
-  await writable.close()
-}
+// Dead OPFS `0000` helpers removed — they wrote raw per-cell files in
+// place, bypassing putResource/commit; per-tile accents go through
+// writeTilePropertiesAt (canonical, sig-addressed).
 
 function loadIndex(): number {
   const stored = localStorage.getItem(STORAGE_KEY)

@@ -1,5 +1,5 @@
 import { AfterViewInit, Component, effect, HostBinding, signal } from '@angular/core';
-import { type Bee, EffectBus } from '@hypercomb/core';
+import { type Bee, EffectBus, hypercomb } from '@hypercomb/core';
 import type { HexOrientation } from '@hypercomb/essentials/diamondcoreprocessor.com/preferences/settings';
 import { RouterOutlet } from '@angular/router';
 import { CommandLineComponent } from '@hypercomb/shared';
@@ -185,7 +185,9 @@ export class App implements AfterViewInit {
       ))
     )
 
-    window.dispatchEvent(new Event('synchronize'))
+    // Boot kick through the processor — hypercomb.act() owns the
+    // `synchronize` dispatch (and the optimize phase).
+    await new hypercomb().act('')
 
     // Dev mode: bees are imported directly, not through ScriptPreloader.
     // Set resourceCount so the command line unlocks.

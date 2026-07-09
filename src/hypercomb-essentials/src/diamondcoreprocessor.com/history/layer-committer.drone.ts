@@ -561,9 +561,9 @@ export class LayerCommitter {
     const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!lineage || !history) return
 
-    // Path encoding: segments joined by ' ' (NUL), or '' for root.
-    const encode = (segs: readonly string[]) => segs.join(' ')
-    const decode = (key: string) => key === '' ? [] : key.split(' ')
+    // Path encoding: segments joined by '' (NUL), or '' for root.
+    const encode = (segs: readonly string[]) => segs.join('')
+    const decode = (key: string) => key === '' ? [] : key.split('')
 
     // Index updates by path.
     const updateByPath = new Map<string, { segments: string[]; layer: { name?: string } & { [slot: string]: unknown } }>()

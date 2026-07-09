@@ -1,5 +1,4 @@
 // revolucionstyle.com/journal/journal-entry.ts
-export const JOURNAL_PROPERTIES_FILE = '0000'
 
 // ── Cigar identity ─────────────────────────────────────────────
 
