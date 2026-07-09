@@ -4,7 +4,7 @@ import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js
 import type { Axial } from '../navigation/hex-detector.js'
 import type { OrderProjection } from '../history/order-projection.js'
 import { writeTilePropertiesAt, readTilePropsIndex, writeTilePropsIndex, cellLocationSig } from '../editor/tile-properties.js'
-import { childNamesOf, childLayerOf, resolveLayerAt, flattenLayerTree } from '../history/layer-placement.js'
+import { childNamesOfStrict, childLayerOf, resolveLayerAt, flattenLayerTree } from '../history/layer-placement.js'
 import type { PlacementHistory, PlacementLayer } from '../history/layer-placement.js'
 
 // Committer/store shapes for the Ctrl-drag COPY path — it re-homes a dragged
@@ -492,23 +492,33 @@ export class MoveDrone extends Drone {
 
     const sourceSegments: readonly string[] = lineage.explorerSegments?.() ?? []
     const sourceParent = await this.#resolveCurrentParent(history, lineage, sourceSegments)
-    const sourceChildren = await childNamesOf(history, sourceParent)
+    const sourceStrict = await childNamesOfStrict(history, sourceParent)
+    const sourceChildren = sourceStrict.names
 
-    // SAFETY: a MOVE removes the dragged names from the source parent's children
-    // list — so we must only commit when that parent resolved AND actually holds
-    // every dragged tile. A cold / partial resolve here would otherwise write an
-    // EMPTY children list and wipe the whole level. Abort (no data loss) instead.
-    if (!sourceParent || !movedLabels.every(l => sourceChildren.includes(l))) {
-      console.warn('[move] drop-into aborted — source parent/children unresolved', { movedLabels, sourceChildren })
+    // SAFETY: a MOVE re-SETs BOTH parents' children lists — so we must only
+    // commit when the source parent resolved, EVERY child sig resolved (a cold
+    // sibling silently missing from the list would be wiped by the SET even
+    // though it was never dragged), and the parent actually holds every dragged
+    // tile. Abort (no data loss) instead.
+    if (!sourceParent || sourceStrict.coldMiss || !movedLabels.every(l => sourceChildren.includes(l))) {
+      console.warn('[move] drop-into aborted — source parent/children unresolved or cold', { movedLabels, sourceChildren, coldMiss: sourceStrict.coldMiss })
       this.cancelMove(source)
       return
     }
 
     // The target tile becomes a parent: resolve its layer (warm, via the source
     // parent's slot) and its existing children so we APPEND, never clobber.
+    // Same strictness: the target's children are re-SET below, so a cold child
+    // of the target must also abort rather than vanish.
     const targetViaParent = await childLayerOf(history, sourceParent, targetLabel)
     const targetLayer = targetViaParent?.layer ?? null
-    const targetChildren = await childNamesOf(history, targetLayer)
+    const targetStrict = await childNamesOfStrict(history, targetLayer)
+    const targetChildren = targetStrict.names
+    if (!targetLayer || targetStrict.coldMiss) {
+      console.warn('[move] drop-into aborted — target layer/children unresolved or cold', { targetLabel, coldMiss: targetStrict.coldMiss })
+      this.cancelMove(source)
+      return
+    }
     const targetParentSegments = [...sourceSegments, targetLabel]
 
     // Suck-into-tile animation up front (purely visual); the importTree below is
@@ -647,17 +657,26 @@ export class MoveDrone extends Drone {
 
     try {
       const sourceParent = await this.#resolveCurrentParent(history, lineage, sourceSegments)
-      const sourceChildren = await childNamesOf(history, sourceParent)
-      // SAFETY: a MOVE removes the names from the source — only commit when the
-      // source resolved AND actually holds the tiles (a cold resolve would
-      // otherwise write an empty children list and wipe the level).
-      if (!sourceParent || !moved.every(l => sourceChildren.includes(l))) {
-        console.warn('[move] promote aborted — source unresolved', { moved, sourceChildren })
+      const sourceStrict = await childNamesOfStrict(history, sourceParent)
+      const sourceChildren = sourceStrict.names
+      // SAFETY: a MOVE re-SETs both parents' children — only commit when the
+      // source resolved, EVERY child sig resolved (a cold sibling missing from
+      // the list would be wiped by the SET), and the source actually holds the
+      // tiles.
+      if (!sourceParent || sourceStrict.coldMiss || !moved.every(l => sourceChildren.includes(l))) {
+        console.warn('[move] promote aborted — source unresolved or cold', { moved, sourceChildren, coldMiss: sourceStrict.coldMiss })
         return
       }
 
+      // Same strictness for the destination: its children are re-SET below,
+      // and a null dest layer would SET a slot-less layer over the parent.
       const destParent = await resolveLayerAt(history, lineage.domain, parentSegments)
-      const destChildren = await childNamesOf(history, destParent)
+      const destStrict = await childNamesOfStrict(history, destParent)
+      const destChildren = destStrict.names
+      if (!destParent || destStrict.coldMiss) {
+        console.warn('[move] promote aborted — destination parent unresolved or cold', { parentSegments, coldMiss: destStrict.coldMiss })
+        return
+      }
       const destTaken = new Set(destChildren)
 
       const treeUpdates: CopyTreeUpdate[] = []
@@ -789,7 +808,16 @@ export class MoveDrone extends Drone {
 
     const parentSegments: readonly string[] = lineage.explorerSegments?.() ?? []
     const parentLayer = await this.#resolveCurrentParent(history, lineage, parentSegments)
-    const existing = await childNamesOf(history, parentLayer)
+    // STRICT: the commit below SETs the parent's children to existing +
+    // copies — a cold sibling missing from `existing` (or a null parent,
+    // which would SET a slot-less layer) would be permanently wiped.
+    const existingStrict = await childNamesOfStrict(history, parentLayer)
+    const existing = existingStrict.names
+    if (!parentLayer || existingStrict.coldMiss) {
+      console.warn('[move] copy aborted — parent/children unresolved or cold', { coldMiss: existingStrict.coldMiss })
+      this.emitEffect('move:copy-drag', null)
+      return false
+    }
     const taken = new Set(existing)
 
     // Target grid slot per dragged label — the drag delta carries the group

@@ -1,5 +1,6 @@
 // diamondcoreprocessor.com/clipboard/image-paste.worker.ts
 import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
+import { childNamesOfStrict, type PlacementHistory } from '../history/layer-placement.js'
 import type { TileEditorService } from '../editor/tile-editor.service.js'
 import type { ImageEditorService } from '../editor/image-editor.service.js'
 import type { SelectionService } from '../selection/selection.service.js'
@@ -103,26 +104,23 @@ export class ImagePasteWorker extends Worker {
       { update?: (segments: readonly string[], layer: { name?: string; [slot: string]: unknown }) => Promise<string> } | undefined
 
     // Resolve existing sibling names from the layer (single source of
-    // truth for "what tiles are here"). When history/layer aren't ready
-    // yet the set stays empty and we land on 'image'; first sibling
-    // wins, the next paste resolves correctly on the following render.
+    // truth for "what tiles are here") — STRICT: a cold sibling sig that
+    // fails to resolve must never be silently dropped, because the commit
+    // below re-SETs the parent's children and a dropped name is a
+    // permanent wipe of that tile (the husk class).
     type ParentLayer = { name?: string; children?: readonly unknown[]; [slot: string]: unknown }
     const existingNames: string[] = []
     const existing = new Set<string>()
     let parentLayer: ParentLayer | null = null
+    let coldMiss = false
     if (typeof lineage.currentLayer === 'function' && history?.getLayerBySig) {
       try {
         const raw = await lineage.currentLayer()
         parentLayer = (raw && typeof raw === 'object') ? raw as ParentLayer : null
-        const childSigs: readonly unknown[] = Array.isArray(parentLayer?.children) ? parentLayer.children : []
-        const resolved = await Promise.all(childSigs.map(async (cs: unknown) => {
-          try {
-            const child = await history.getLayerBySig!(String(cs ?? ''))
-            return (typeof child?.name === 'string' && child.name.length > 0) ? child.name : ''
-          } catch { return '' }
-        }))
-        for (const n of resolved) if (n) { existingNames.push(n); existing.add(n) }
-      } catch { /* keep existing empty */ }
+        const strict = await childNamesOfStrict(history as unknown as PlacementHistory, parentLayer as unknown as Parameters<typeof childNamesOfStrict>[1])
+        coldMiss = strict.coldMiss
+        for (const n of strict.names) { existingNames.push(n); existing.add(n) }
+      } catch { parentLayer = null }
     }
 
     let finalName = 'image'
@@ -136,24 +134,30 @@ export class ImagePasteWorker extends Worker {
       .map(s => String(s ?? '').trim())
       .filter(Boolean)
 
-    // Emit cell:added BEFORE committing so UI subscribers (show-cell
-    // incremental mount, activity log) react instantly. viaUpdate skips
-    // the LayerCommitter's per-event commit queue since the explicit
-    // update() below IS the atomic commit.
-    EffectBus.emit('cell:added', { cell: finalName, segments, viaUpdate: true })
+    // SAFE PATH — parent layer read completely: emit cell:added with
+    // viaUpdate (skips the committer's per-event queue) and make ONE
+    // atomic commit that appends the new name to the fully-resolved set.
+    //
+    // FALLBACK — parent unreadable OR a child sig was cold: never SET a
+    // children list we couldn't fully read. Emit cell:added WITHOUT
+    // viaUpdate so the LayerCommitter's own event queue folds the single
+    // add into its current state — the committer merges, it doesn't
+    // re-list, so cold siblings survive. (Fresh empty locations take
+    // this path too and work: empty state + one child.)
+    const update = committer?.update
+    const canSetChildren = parentLayer !== null && !coldMiss && typeof update === 'function'
+    EffectBus.emit('cell:added', { cell: finalName, segments, ...(canSetChildren ? { viaUpdate: true } : {}) })
 
-    // ONE atomic layer commit: take the current parent layer, append the
-    // new tile name, save.
-    if (committer?.update) {
+    if (canSetChildren && parentLayer && update) {
       const nextParent: { [slot: string]: unknown } = {}
-      if (parentLayer) {
-        for (const [k, v] of Object.entries(parentLayer)) {
-          if (k === 'children') continue
-          nextParent[k] = v
-        }
+      for (const [k, v] of Object.entries(parentLayer)) {
+        if (k === 'children') continue
+        nextParent[k] = v
       }
       nextParent['children'] = [...existingNames, finalName]
-      await committer.update(segments, nextParent)
+      await update(segments, nextParent)
+    } else if (coldMiss) {
+      console.warn('[image-paste] cold sibling during paste — deferring children SET to the committer event queue')
     }
     void new hypercomb().act()
 

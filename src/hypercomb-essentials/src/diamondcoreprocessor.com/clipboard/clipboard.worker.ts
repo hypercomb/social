@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/core/clipboard/clipboard.worker.ts
 import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
 import type { ClipboardService, ClipboardOp } from './clipboard.service.js'
-import { childNamesOf, childLayerOf, resolveLayerAt, flattenLayerTree } from '../history/layer-placement.js'
+import { childNamesOf, childNamesOfStrict, childLayerOf, resolveLayerAt, flattenLayerTree } from '../history/layer-placement.js'
 import { readTilePropsIndex, writeTilePropsIndex, cellLocationSig } from '../editor/tile-properties.js'
 
 interface ClipboardEntry {
@@ -330,7 +330,17 @@ export class ClipboardWorker extends Worker {
           console.warn(`[clipboard] cut skipped — parent layer unresolved at /${parentSegs.join('/')}`)
           continue
         }
-        const survivors = (await childNamesOf(history, parent)).filter(n => !leaves.has(n))
+        // STRICT survivors read — same reasoning as the !parent guard
+        // above, one level down: a cold SIBLING sig missing from the
+        // survivors list would be wiped by the children SET below even
+        // though it was never cut. Decline this parent's commit instead
+        // (entries are on the clipboard; nothing lost).
+        const { names: allChildren, coldMiss } = await childNamesOfStrict(history, parent)
+        if (coldMiss) {
+          console.warn(`[clipboard] cut skipped — cold sibling at /${parentSegs.join('/')}; committing would drop it`)
+          continue
+        }
+        const survivors = allChildren.filter(n => !leaves.has(n))
 
         // Eager visual unmount; `viaUpdate` tells the committer's per-
         // event listener to skip queueing — the update() below IS the
@@ -508,7 +518,20 @@ export class ClipboardWorker extends Worker {
       return { placed: [], failed: items.map(i => i.label) }
     }
 
-    const existing = await childNamesOf(history, parent)
+    // STRICT children read: the commit below SETs the parent's children to
+    // existing + placed — a cold sibling silently missing from `existing`
+    // would be permanently wiped by that SET. Refuse instead (clipboard
+    // stays intact, nothing lost) and let the user retry once warm.
+    const { names: existing, coldMiss } = await childNamesOfStrict(history, parent)
+    if (coldMiss) {
+      console.warn(`[clipboard] paste refused — cold sibling at /${targetSegments.join('/')}; committing would drop it`)
+      EffectBus.emit('toast:show', {
+        type: 'info',
+        title: 'Paste deferred',
+        message: 'Some tiles here haven’t loaded yet — try the paste again in a moment.',
+      })
+      return { placed: [], failed: items.map(i => i.label) }
+    }
     const taken = new Set(existing)
 
     // Participant-local nested-discard exclusions (absolute source paths). Read

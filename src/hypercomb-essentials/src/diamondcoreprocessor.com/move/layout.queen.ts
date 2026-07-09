@@ -1,6 +1,8 @@
 // diamondcoreprocessor.com/move/layout.queen.ts
 
 import { QueenBee, EffectBus, hypercomb } from '@hypercomb/core'
+import { childNamesOfStrict, resolveCurrentLayer, type PlacementHistory } from '../history/layer-placement.js'
+import { writeTilePropertiesAt } from '../editor/tile-properties.js'
 import type { LayoutService } from './layout.service.js'
 
 /**
@@ -21,7 +23,6 @@ import type { LayoutService } from './layout.service.js'
 // only (read / enumerate / remove) — a drain-source fallback, never created.
 // New saves are pending the optimization-substrate rewire (see #save).
 const LAYOUTS_DIR = '__layouts__'
-const SIG_NAME_RE = /^[0-9a-f]{64}$/
 
 export type LayoutTemplate = {
   readonly name: string
@@ -111,12 +112,35 @@ export class LayoutQueenBee extends QueenBee {
       if (!Array.isArray(template.order)) return
     } catch { return }
 
-    // current filesystem cells — merge handles label drift gracefully:
-    // keeps saved order for tiles that still exist, appends new ones
-    const currentCells = await this.#currentCells(dir)
-    const merged = layout.merge(template.order, currentCells)
+    // Current cells come from the LAYER (children names, strict) — the
+    // single source of truth. Merge handles label drift gracefully:
+    // keeps saved order for tiles that still exist, appends new ones.
+    const current = await this.#currentCells()
+    if (!current) {
+      console.warn('[layout] apply refused — current layer/children unresolved or cold')
+      return
+    }
+    const merged = layout.merge(template.order, current)
 
-    await layout.write(dir, merged)
+    // Position is NOT layer state: order lives in each tile's own
+    // `properties` slot as `index` (the same canonical write MoveDrone's
+    // pinned-index path uses — content-addressed, FIFO-committed,
+    // undoable). The legacy `__layout__` sidecar write is gone.
+    const lineage = get('@hypercomb.social/Lineage') as
+      { explorerSegments?: () => readonly string[] } | undefined
+    const segments = lineage?.explorerSegments?.() ?? []
+    for (let i = 0; i < merged.length; i++) {
+      try {
+        await writeTilePropertiesAt(segments, merged[i], { index: i })
+      } catch (err) {
+        console.warn('[layout] failed to persist index for', merged[i], err)
+      }
+    }
+
+    const projection = get('@diamondcoreprocessor.com/OrderProjection') as
+      { reorder?: (cells: string[]) => Promise<string[]> } | undefined
+    await projection?.reorder?.(merged)
+
     EffectBus.emit('cell:reorder', { labels: merged })
     EffectBus.emit('layout:applied', { name, count: merged.length })
 
@@ -165,17 +189,19 @@ export class LayoutQueenBee extends QueenBee {
     return lineage ? await lineage.explorerDir() : null
   }
 
-  async #currentCells(dir: FileSystemDirectoryHandle): Promise<string[]> {
-    const cells: string[] = []
-    for await (const [key, handle] of (dir as any).entries()) {
-      // Cells are NAMED child dirs. Skip legacy underscore sidecars AND
-      // sig-named dirs (64-hex: a pool or lineage bag) so that when the
-      // resolved dir is the flat root, pools/bags are never mistaken for cells.
-      if (handle.kind === 'directory' && !key.startsWith('__') && !SIG_NAME_RE.test(key)) {
-        cells.push(key)
-      }
-    }
-    return cells
+  /** Current cell names from the LAYER, strict — null when the layer (or any
+   *  child sig) can't be fully resolved, so apply refuses rather than write
+   *  index props against a set it couldn't see. */
+  async #currentCells(): Promise<string[] | null> {
+    const history = get('@diamondcoreprocessor.com/HistoryService') as PlacementHistory | undefined
+    const lineage = get('@hypercomb.social/Lineage') as
+      { explorerSegments?: () => readonly string[]; domain?: unknown } | undefined
+    if (!history || !lineage) return null
+    const segments = lineage.explorerSegments?.() ?? []
+    const layer = await resolveCurrentLayer(history, lineage.domain, segments, null)
+    if (!layer) return null
+    const { names, coldMiss } = await childNamesOfStrict(history, layer)
+    return coldMiss ? null : names
   }
 }
 

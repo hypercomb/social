@@ -2,10 +2,10 @@
 //
 // LEGACY ordering sidecar. `__layout__` is a per-directory FILE (never a
 // typed directory) holding the ordered cell list for a content-tree dir.
-// Tile order is layer state now; this sidecar survives only for the
-// still-undrained legacy content trees and is a read-fallback. Nothing new
-// should write it — the ordering rewire onto the optimization substrate is
-// tracked in layout.queen's #save stub.
+// Order lives in each tile's own `properties` slot (`index`) now; this
+// sidecar survives only for still-undrained legacy content trees and is
+// READ-ONLY — the writer was removed when /layout apply moved onto
+// writeTilePropertiesAt.
 const LAYOUT_FILE = '__layout__'
 
 export class LayoutService {
@@ -26,18 +26,6 @@ export class LayoutService {
     } catch {
       return null
     }
-  }
-
-  /**
-   * Write the ordered cell list to the legacy `__layout__` sidecar FILE.
-   * Reachable only from /layout apply against a legacy content-tree dir;
-   * pending the ordering rewire onto the optimization substrate.
-   */
-  async write(dir: FileSystemDirectoryHandle, order: string[]): Promise<void> {
-    const handle = await dir.getFileHandle(LAYOUT_FILE, { create: true })
-    const writable = await handle.createWritable()
-    await writable.write(JSON.stringify(order))
-    await writable.close()
   }
 
   /**
