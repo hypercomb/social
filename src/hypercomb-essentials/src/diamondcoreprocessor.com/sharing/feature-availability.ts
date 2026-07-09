@@ -55,11 +55,10 @@ export function isVerifiedSig(sig: unknown): boolean {
 }
 
 /** Is this page/feature signature one the participant AUTHORED locally? The
- *  per-signature "own content" signal for the gate's planned fail-closed rule
- *  (see authored-sigs.ts). NOT yet consulted by `featureNeedsReview` — the
- *  allow-set is empty until the authoring write-sites + one-time bootstrap land,
- *  so requiring it now would gate every existing page. Exposed so that wiring
- *  can build on a stable reader. */
+ *  per-signature "own content" signal consulted by `featureNeedsReview` as the
+ *  rescue for your own pages under adopted roots. LIVE: the bridge writers
+ *  mark on every local page write, and authored-bootstrap.worker.ts
+ *  grandfathers pre-existing pages (see authored-sigs.ts). */
 export function isLocallyAuthored(sig: unknown): boolean {
   return isAuthored(sig)
 }
