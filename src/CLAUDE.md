@@ -201,6 +201,23 @@ Late subscribers receive the last emitted value immediately. No timing races.
 ### `synchronize` Event (critical)
 The `synchronize` window event **must only be dispatched from the processor** (`hypercomb.act()`). It fires in the `finally` block after all bees have pulsed, coalescing visual updates into a single pass. Because the processor is the sole dispatcher, `synchronize` does not need a `detail` payload — no source tagging, revision data, or history ops. Any code that currently dispatches `synchronize` directly must be refactored to let the processor handle it.
 
+### Optimize Phase (derived caches, never truth)
+
+After `synchronize`, the processor schedules a **coalesced idle pass** that calls the optional `optimize()` hook on every registered bee. This is the ONLY sanctioned place to mint derived-cache records. The contract (full spec: `src/documentation/optimize-phase.md`):
+
+1. Records must be **pure derivations of sig-addressed inputs, keyed by the input signature** (e.g. a children manifest keyed by its parent layer sig). Invalidation is automatic — changed source = new sig = no record yet. There is no update, only derive-on-miss.
+2. Records live in **derived-cache pools** (`sign('manifests')`, `sign('visual-optimization')`, …) — recomputable, wipe-safe, GC-able.
+3. Records are **never load-bearing**: no layer may reference them, no read path may require them, cold paths must produce identical results without them. Complete-or-absent — never write a partial record.
+4. **Never mint truth in the phase**: no layers, no history markers, no lineage writes, no gating.
+
+Litmus test for where a record belongs: *"Could a cold client rebuild this from layers alone?"* Yes → derived-cache pool (may be minted in the optimize phase). No → it is state; it needs its own pool of meaning and must NOT be written from the phase. (This is why hidden-feature records belong in `sign('hidden')`, not the optimization pool.)
+
+Do NOT reintroduce derived-cache writes into the commit path (`commitLayer` mints truth only) and do NOT key caches by name/path/position — only by source signature.
+
+### Doctrine ratchets (`src/doctrine.spec.ts`)
+
+Mechanical anti-drift guards run with the vitest suite. Each compares files matching a forbidden pattern (direct `synchronize` dispatch, hardcoded 64-hex signatures, bare `'__x__'` typed-folder literals, out-of-place children-manifest writers) against a frozen allowlist. **Never extend an allowlist** — fix the code instead. When you pay down a listed debt, remove its entry so the ratchet clicks tight.
+
 ### Drones
 Self-contained modules. Lifecycle: Created → Registered → Active → Disposed.
 - `sense(grammar)` — should this drone activate?
