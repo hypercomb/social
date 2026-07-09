@@ -62,6 +62,15 @@ export abstract class Bee {
    *  long-lived connections, or hydrate caches. */
   public warmup?(): Promise<void>
 
+  /** Optional derived-cache phase — the processor invokes this on idle
+   *  time after act() completes and `synchronize` has coalesced the
+   *  render. Contract: anything written here must be a pure derivation
+   *  of sig-addressed inputs, keyed by the input signature, stored in a
+   *  derived-cache pool — recomputable, wipe-safe, never load-bearing.
+   *  Never mint truth here: no layers, no history markers, no gating.
+   *  The cold path must remain complete when these records are absent. */
+  public optimize?: () => Promise<void>
+
   /** Optional cleanup hook — override in subclasses */
   protected dispose?(): void
 

@@ -938,10 +938,6 @@ export class HistoryService {
     // bytes via store.getLayerPoolBytes(layerSig).
     const store = get<{
       writeLayerBytes?: (sig: string, b: ArrayBuffer) => Promise<void>
-      writeChildrenManifest?: (
-        parentSig: string,
-        manifest: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }>,
-      ) => Promise<void>
     }>('@hypercomb.social/Store')
     if (store?.writeLayerBytes) {
       await store.writeLayerBytes(layerSig, bytes.buffer as ArrayBuffer)
@@ -980,35 +976,11 @@ export class HistoryService {
     // never stale. The legacy `__optimized__`/`__layers__` dirs are
     // read-fallback drain sources only (resolved inside Store).
 
-    // Children manifest: for any layer with a non-empty `children` array,
-    // pre-resolve each child sig to its head layer and write the array
-    // into the sign('manifests') pool keyed by the parent layer sig.
-    // Reads of this parent's children skip the per-child sig→layer walk
-    // on cold load.
-    // Microtask-scheduled (not idle) — the commit return is unblocked,
-    // but the write fires before the next render frame so the manifest
-    // is reliably present on "next start" after a single commit cycle.
-    const childSigs = Array.isArray(canonical.children) ? canonical.children : []
-    if (store?.writeChildrenManifest && childSigs.length > 0) {
-      queueMicrotask(() => {
-        void (async () => {
-          const manifest: Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> = []
-          for (const sig of childSigs) {
-            const child = await this.getLayerBySig(sig)
-            if (!child) continue
-            manifest.push({ sig, layer: child })
-          }
-          // Write ONLY a COMPLETE manifest. A partial (a child didn't
-          // resolve this pass) fails the reader's length check
-          // (manifest.length === children.length) and is silently ignored
-          // on every future load, forcing the slow per-child path that
-          // drops not-yet-cached children — the two-stage render bug. A
-          // missing manifest is fine: resolveChildNames backfills a
-          // complete one once all children are warm.
-          if (manifest.length === childSigs.length) await store.writeChildrenManifest!(layerSig, manifest)
-        })()
-      })
-    }
+    // Children manifest: derived by ManifestOptimizerDrone during the
+    // processor's optimize phase (idle, after synchronize). It queues
+    // this layer's sig off the 'content:wrote' effect emitted below and
+    // writes the complete-or-absent manifest into the sign('manifests')
+    // pool keyed by this layer sig. The commit path mints truth only.
 
     // Hot-cache the just-written bytes so the cursor's next read does not
     // round-trip OPFS / re-hash — getLayerContent picks it up directly.
