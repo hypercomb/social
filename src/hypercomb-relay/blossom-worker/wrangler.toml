@@ -1,0 +1,36 @@
+# hypercomb blossom-worker — public content endpoint (Blossom dialect over R2)
+#
+# The custom-domain route is attached in the Cloudflare dashboard
+# (e.g. content.hypercomb.io/*) — Workers → this worker → Domains & Routes.
+# No route/zone config lives here on purpose: the domain is an operator
+# decision, the worker is the same everywhere.
+
+name = "hypercomb-content"
+main = "worker.js"
+compatibility_date = "2026-06-01"
+
+# The public byte address. custom_domain=true has Cloudflare mint the DNS
+# record + cert on the jwize.com zone; removing this line and redeploying
+# detaches it just as cleanly.
+routes = [
+  { pattern = "content.jwize.com", custom_domain = true }
+]
+
+# R2 bucket holding the flat sig heap: one object per sig, key == sig,
+# Content-Type in httpMetadata. Create before first deploy:
+#   wrangler r2 bucket create hypercomb-content
+[[r2_buckets]]
+binding = "CONTENT"
+bucket_name = "hypercomb-content"
+
+# KV guest list: GRANTS[pubkey] → { quotaBytes, usedBytes, expiresAt }.
+# Create and paste the id:
+#   wrangler kv namespace create GRANTS
+[[kv_namespaces]]
+binding = "GRANTS"
+id = "11e24dcda743413ab24397e936671641"
+
+[vars]
+AUTO_GRANT = "1"                    # '1' mints a grant on first valid upload; '0' closes the door
+DEFAULT_QUOTA_BYTES = "104857600"   # 100 MB per auto-granted pubkey
+GRANT_TTL_DAYS = "90"               # grants lapse; under AUTO_GRANT they re-mint fresh
