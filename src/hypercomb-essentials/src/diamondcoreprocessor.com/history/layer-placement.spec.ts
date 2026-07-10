@@ -5,7 +5,7 @@
 // cold miss so writers can refuse instead of wiping the sibling.
 
 import { describe, expect, it } from 'vitest'
-import { childNamesOf, childNamesOfStrict, resolvePasteSource, type PlacementHistory, type PlacementLayer } from './layer-placement.js'
+import { childNamesOf, childNamesOfStrict, flattenLayerTree, resolvePasteSource, type PlacementHistory, type PlacementLayer } from './layer-placement.js'
 
 const SIG_A = 'a'.repeat(64)
 const SIG_B = 'b'.repeat(64)
@@ -70,6 +70,55 @@ describe('childNamesOfStrict', () => {
     const { names, coldMiss } = await childNamesOfStrict(history, { name: 'root', children: [SIG_A, SIG_B] })
     expect(names).toEqual(['alpha'])
     expect(coldMiss).toBe(true)
+  })
+
+  it('manifest is consulted FIRST — a covering manifest costs zero per-child byte reads', async () => {
+    // The perf contract: on a big bytes-cold page (the root of a real
+    // hive) the old bytes-first order probed N cold fallback chains
+    // before the manifest. One manifest read must replace them all.
+    let byteReads = 0
+    const history = historyWith({ [SIG_A]: { name: 'alpha' }, [SIG_B]: { name: 'beta' } })
+    const inner = history.getLayerBySig
+    history.getLayerBySig = async (sig: string) => { byteReads++; return inner(sig) }
+    history.childrenManifestFor = async () => [
+      { sig: SIG_A, layer: { name: 'alpha' } },
+      { sig: SIG_B, layer: { name: 'beta' } },
+    ]
+    const { names, coldMiss } = await childNamesOfStrict(history, { name: 'root', children: [SIG_A, SIG_B] })
+    expect(names).toEqual(['alpha', 'beta'])
+    expect(coldMiss).toBe(false)
+    expect(byteReads).toBe(0)
+  })
+})
+
+describe('flattenLayerTree', () => {
+  it('re-homes a bytes-cold child via the manifest instead of silently dropping it', async () => {
+    // The pasted-subtree-loses-tiles case: the child layer bytes are
+    // cold but the parent's manifest inlines the full child layer —
+    // the re-home must carry it (name, props slot verbatim).
+    const PROPS = 'f'.repeat(64)
+    const history = historyWith({ [SIG_A]: { name: 'warm', children: [] } })
+    history.childrenManifestFor = async (layer: PlacementLayer) =>
+      layer.name === 'top'
+        ? [
+            { sig: SIG_A, layer: { name: 'warm', children: [] } },
+            { sig: SIG_B, layer: { name: 'cold-child', children: [], properties: [PROPS] } },
+          ]
+        : null
+    const updates = await flattenLayerTree(history, { name: 'top', children: [SIG_A, SIG_B] }, ['dest'])
+    const paths = updates.map(u => u.segments.join('/'))
+    expect(paths).toEqual(['dest', 'dest/warm', 'dest/cold-child'])
+    const top = updates[0].layer as { children?: string[] }
+    expect(top.children).toEqual(['warm', 'cold-child'])
+    const cold = updates[2].layer as { properties?: string[] }
+    expect(cold.properties).toEqual([PROPS])  // slots ride verbatim — the image survives
+  })
+
+  it('still drops a child missing from BOTH bytes and manifest', async () => {
+    const history = historyWith({ [SIG_A]: { name: 'warm', children: [] } })
+    history.childrenManifestFor = async () => [{ sig: SIG_A, layer: { name: 'warm', children: [] } }]
+    const updates = await flattenLayerTree(history, { name: 'top', children: [SIG_A, SIG_B] }, ['dest'])
+    expect(updates.map(u => u.segments.join('/'))).toEqual(['dest', 'dest/warm'])
   })
 })
 

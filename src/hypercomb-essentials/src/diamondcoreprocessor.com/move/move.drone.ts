@@ -921,8 +921,9 @@ export class MoveDrone extends Drone {
     if (typeof existingSig === 'string' && store.getResource) {
       try {
         const blob = await store.getResource(existingSig)
-        if (blob) { const parsed = JSON.parse(await blob.text()); if (parsed && typeof parsed === 'object') props = parsed }
-      } catch { /* fresh props */ }
+        if (!blob) return null // props COLD — a rewrite would STRIP the image; keep the original slot
+        { const parsed = JSON.parse(await blob.text()); if (parsed && typeof parsed === 'object') props = parsed }
+      } catch { return null } // unreadable props — never mint a stripped replacement
     }
     const merged: Record<string, unknown> = { ...props, index }
     const canonical: Record<string, unknown> = {}

@@ -98,30 +98,29 @@ export async function childNamesOfStrict(
   parent: PlacementLayer | null,
 ): Promise<{ names: string[]; coldMiss: boolean }> {
   const childSigs = Array.isArray(parent?.children) ? parent!.children : []
-  const slots: (string | null)[] = []
-  for (const sig of childSigs) {
-    const child = await history.getLayerBySig(String(sig))
-    slots.push((typeof child?.name === 'string' && child.name.length > 0) ? child.name : null)
+  if (childSigs.length === 0) return { names: [], coldMiss: false }
+
+  // MANIFEST FIRST: the children manifest (sign('manifests')) is keyed by
+  // THIS parent layer's own sig — an immutable derivation exactly as
+  // fresh as the layer object in hand — and it inlines every child, so
+  // one file read replaces N per-child byte lookups. On a big
+  // bytes-cold page (the root of a real hive) the bytes-first order made
+  // every paste probe N cold fallback chains before consulting the
+  // manifest; this is the renderer's own fast path, used the same way.
+  const bySig = new Map<string, string | undefined>()
+  if (parent && typeof history.childrenManifestFor === 'function') {
+    const manifest = await history.childrenManifestFor(parent).catch(() => null)
+    if (manifest) for (const e of manifest) bySig.set(String(e.sig), e.layer?.name)
   }
 
-  // Cold-slot fallback: the children MANIFEST (sign('manifests'), keyed
-  // by this parent's layer sig) inlines each child's layer and is
-  // written complete-or-absent — the same source the renderer's fast
-  // path trusts. A child whose BYTES are cold locally (common at the
-  // root of a large hive: manifest-warm, bytes-cold) still resolves its
-  // name here, so membership writers don't refuse a SET the renderer is
-  // happily displaying. Only a child missing from BOTH sources remains
-  // a cold miss.
-  if (parent && slots.some(s => s === null) && typeof history.childrenManifestFor === 'function') {
-    const manifest = await history.childrenManifestFor(parent).catch(() => null)
-    if (manifest) {
-      const bySig = new Map(manifest.map(e => [String(e.sig), e.layer?.name]))
-      for (let i = 0; i < slots.length; i++) {
-        if (slots[i] !== null) continue
-        const n = bySig.get(String(childSigs[i]))
-        if (typeof n === 'string' && n.length > 0) slots[i] = n
-      }
-    }
+  const slots: (string | null)[] = []
+  for (const sig of childSigs) {
+    const fromManifest = bySig.get(String(sig))
+    if (typeof fromManifest === 'string' && fromManifest.length > 0) { slots.push(fromManifest); continue }
+    // Bytes path — manifest absent (or missing this sig): pool-addressed
+    // layer read with its own fallback chain.
+    const child = await history.getLayerBySig(String(sig))
+    slots.push((typeof child?.name === 'string' && child.name.length > 0) ? child.name : null)
   }
 
   return {
@@ -271,10 +270,27 @@ export async function flattenLayerTree(
   // (cells / layers / children) — a built module nests under `cells`, so
   // reading only `children` would drop its whole subtree on re-home.
   const childSigs = childSigsOf(layer)
+  // Manifest fallback for bytes-cold children — the manifest INLINES each
+  // child's full layer, so a subtree whose bytes aren't warm locally
+  // re-homes intact instead of being silently dropped (a paste that
+  // "loses" nested tiles). Read once per node, only when needed.
+  let manifestBySig: Map<string, PlacementLayer> | null | undefined
+  const resolveChild = async (sig: string): Promise<PlacementLayer | null> => {
+    const bytes = await history.getLayerBySig(sig)
+    if (bytes) return bytes
+    if (manifestBySig === undefined) {
+      manifestBySig = null
+      if (typeof history.childrenManifestFor === 'function') {
+        const manifest = await history.childrenManifestFor(layer).catch(() => null)
+        if (manifest) manifestBySig = new Map(manifest.map(e => [String(e.sig), e.layer as PlacementLayer]))
+      }
+    }
+    return manifestBySig?.get(sig) ?? null
+  }
   const childLayers: PlacementLayer[] = []
   const childNames: string[] = []
   for (const sig of childSigs) {
-    const child = await history.getLayerBySig(String(sig))
+    const child = await resolveChild(String(sig))
     if (!child || typeof child.name !== 'string' || child.name.length === 0) continue
     // Untrusted (adopted) child names arrive here via getLayerBySig on signed
     // peer layers. A name that is really a path (separator/control char) would

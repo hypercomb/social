@@ -705,9 +705,11 @@ export class ClipboardWorker extends Worker {
     // canonical fallback — a freshly pasted tile has no entry at its new
     // location, so it renders BLANK until an unrelated reload heals it. Mirrors
     // swarm-adopt's seed for the identical flattenLayerTree/importTree re-home.
-    // FILL-IF-EMPTY: never disturb an image already on a destination tile (the
-    // image-stable invariant). Runs AFTER the paste-target props rewrite, so the
-    // final props sig (index override included) is what lands in the index.
+    // OVERWRITE, not fill-if-empty: paste refuses name collisions, so no LIVE
+    // tile owns a destination key — any existing entry is STALE (a same-named
+    // tile that lived here long ago) and would render the WRONG image over the
+    // pasted tile. The just-placed node's props are authoritative. Runs AFTER
+    // the paste-target props rewrite, so the final props sig lands.
     try {
       const index = readTilePropsIndex()
       let seeded = false
@@ -718,7 +720,7 @@ export class ClipboardWorker extends Worker {
         const segs = u.segments
         if (segs.length === 0) continue
         const key = await cellLocationSig(segs.slice(0, -1), segs[segs.length - 1])
-        if (!key || index[key]) continue
+        if (!key || index[key] === propSig) continue
         index[key] = propSig
         seeded = true
       }
@@ -758,8 +760,10 @@ export class ClipboardWorker extends Worker {
     if (typeof existingSig === 'string' && store.getResource) {
       try {
         const blob = await store.getResource(existingSig)
-        if (blob) { const parsed = JSON.parse(await blob.text()); if (parsed && typeof parsed === 'object') props = parsed }
-      } catch { /* fresh props */ }
+        if (!blob) return null // props exist but are COLD — a rewrite would STRIP the image; keep the original slot
+        const parsed = JSON.parse(await blob.text())
+        if (parsed && typeof parsed === 'object') props = parsed
+      } catch { return null } // unreadable props — never mint a stripped replacement
     }
     const merged: Record<string, unknown> = { ...props, index }
     const canonical: Record<string, unknown> = {}
