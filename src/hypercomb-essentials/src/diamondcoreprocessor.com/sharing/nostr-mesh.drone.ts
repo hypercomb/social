@@ -44,7 +44,12 @@ type MeshEvt = { relay: string; sig: string; event: NostrEvent; payload: any }
 type MeshCb = (e: MeshEvt) => void
 type MeshSub = { close: () => void }
 
-type Bucket = { sig: string; subId: string; cbs: Set<MeshCb> }
+// sinceSec — the REQ replay window for this bucket. undefined = the 15-min
+// default (live-ish kinds: presence, shares — a short catch-up is all they
+// need). A store-and-forward consumer (the feedback channel) passes a wider
+// window so a relay REPLAYS stored events published while it was offline;
+// null = no `since` filter at all (relay retention decides).
+type Bucket = { sig: string; subId: string; cbs: Set<MeshCb>; sinceSec?: number | null }
 
 type MeshStats = {
   startedAtMs: number
@@ -328,12 +333,12 @@ export class NostrMeshDrone extends Drone {
   // read-back: the same "never trust a bare send-ok" discipline HostSyncService
   // uses for HTTP backup. Leaves the keyed subscription untouched (separate
   // subId, no cbs) so it never perturbs live delivery to subscribers.
-  public query = async (sig: string, timeoutMs = 1800): Promise<MeshEvt[]> => {
+  public query = async (sig: string, timeoutMs = 1800, sinceSec?: number | null): Promise<MeshEvt[]> => {
     this.ensureStartedNow()
     const s = String(sig ?? '').trim()
     if (!s) return []
     if (!this.networkEnabled) return this.getNonExpired(s)
-    const bucket: Bucket = { sig: s, subId: this.makeSubId(), cbs: new Set<MeshCb>() }
+    const bucket: Bucket = { sig: s, subId: this.makeSubId(), cbs: new Set<MeshCb>(), sinceSec }
     this.bucketsBySubId.set(bucket.subId, bucket)
     this.sendReqToAll(bucket)
     const t = Math.max(200, Math.min(Number(timeoutMs) || 1800, 8000))
@@ -449,7 +454,7 @@ export class NostrMeshDrone extends Drone {
   // note: signature-only subscription
   // - sig is used as the x tag value
   // - multiple consumers share one network subscription per sig
-  public subscribe = (sig: string, cb: MeshCb): MeshSub => {
+  public subscribe = (sig: string, cb: MeshCb, opts?: { sinceSec?: number | null }): MeshSub => {
     this.ensureStartedNow()
 
     const s = String(sig ?? '').trim()
@@ -458,11 +463,20 @@ export class NostrMeshDrone extends Drone {
     const existing = this.bucketsBySig.get(s)
     if (existing) {
       existing.cbs.add(cb)
+      // A joiner may need a DEEPER replay than the bucket first asked for —
+      // widen the shared window and re-REQ so the stored events flow in
+      // (null = widest; consumers share one subscription per sig).
+      const want = opts?.sinceSec
+      const have = existing.sinceSec === undefined ? 900 : existing.sinceSec
+      if (want !== undefined && (want === null ? have !== null : (have !== null && want > have))) {
+        existing.sinceSec = want
+        this.sendReqToAll(existing)
+      }
       this.note('sub:join', undefined, s, existing.subId, undefined, { consumers: existing.cbs.size })
       return { close: () => this.unsubscribe(s, cb) }
     }
 
-    const bucket: Bucket = { sig: s, subId: this.makeSubId(), cbs: new Set<MeshCb>() }
+    const bucket: Bucket = { sig: s, subId: this.makeSubId(), cbs: new Set<MeshCb>(), sinceSec: opts?.sinceSec }
     bucket.cbs.add(cb)
 
     this.bucketsBySig.set(s, bucket)
@@ -912,7 +926,14 @@ export class NostrMeshDrone extends Drone {
     const ws = this.sockets.get(url)
     if (!ws || ws.readyState !== WebSocket.OPEN) return
 
-    const filter: any = { '#x': [b.sig], since: Math.floor(Date.now() / 1000) - 900 }
+    const filter: any = { '#x': [b.sig] }
+    // Replay window (see Bucket.sinceSec). The old hardcoded 15-min window
+    // silently ate every store-and-forward event published while the reader
+    // was offline — the relay HELD the feedback item, but no late REQ ever
+    // asked for it, so hosts/routines that weren't online within 15 minutes
+    // of the publish read an empty channel forever.
+    const sinceSec = b.sinceSec === undefined ? 900 : b.sinceSec
+    if (sinceSec !== null) filter.since = Math.floor(Date.now() / 1000) - Math.max(0, Number(sinceSec) || 0)
     if (Array.isArray(this.kinds) && this.kinds.length > 0) filter.kinds = this.kinds
 
     this.stats.reqSent++

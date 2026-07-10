@@ -4,7 +4,6 @@
 export * from './adopted-roots'
 export type * from './ambient-presence.worker'
 export type * from './authored-bootstrap.worker'
-export * from './authored-sigs.spec'
 export * from './authored-sigs'
 export type * from './content-broker.drone'
 export type * from './content-health.drone'

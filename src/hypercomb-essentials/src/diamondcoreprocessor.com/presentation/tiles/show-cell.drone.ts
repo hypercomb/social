@@ -3132,22 +3132,22 @@ export class ShowCellDrone extends Drone {
     this.#slots.seed({ names: cellNames, localCells: localCellSet, branches: branchSet, mode: this.#layoutMode })
   }
 
-  /** Pre-paint launcher-shape hydration. On a launch-group aggregator page
-   *  the silhouette is a per-vertex geometry attribute (aShapeMode), so it
-   *  must be indexed BEFORE the paint — a rebuild after the async decoration
-   *  walk visibly shrinks full-size picture hexagons into their silhouettes.
-   *  No-op off `agg-` pages and when the hexagon toggle forces plain hexes;
-   *  the index's per-label memo makes repeat calls synchronous no-ops. */
+  /** Pre-paint launcher-decoration hydration. On a launch-group aggregator
+   *  page the silhouette is a per-vertex geometry attribute (aShapeMode) and
+   *  the clustered-island layout (help's group/role, dashboard islands) keys
+   *  the coordinate override, so BOTH must be indexed BEFORE the paint — a
+   *  rebuild after the async decoration walk visibly shrinks full-size
+   *  picture hexagons into their silhouettes, and a cold group index paints
+   *  a clustered page as one plain spiral. Runs even when the hexagon toggle
+   *  forces plain hexes: that mode only voids silhouettes, never the island
+   *  metadata. The index's per-label memo makes repeat calls synchronous
+   *  no-ops. */
   #ensureLaunchShapes = async (cells: readonly Cell[]): Promise<void> => {
     if (cells.length === 0) return
     const segs = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')?.explorerSegments?.() ?? []
     const launcher = isLauncherLocation(segs)
     const dashboard = !launcher && this.#inDashboardBag()
     if (!launcher && !dashboard) return
-    // The hexagon toggle forces plain hexes on LAUNCHER pages only — in that mode
-    // there are no silhouettes to pre-index. The dashboard always needs its island
-    // metadata pre-indexed so the clusters paint on the first frame.
-    if (launcher && this.#launcherHexagons) return
     await ensureDecorationsIndexed(cells.map(c => c.label), segs).catch(() => { /* best effort */ })
   }
 
@@ -4877,6 +4877,8 @@ export class ShowCellDrone extends Drone {
     window.removeEventListener('hex-image-atlas:evicted', this.#onAtlasEvicted)
     window.removeEventListener('hex-label-atlas:evicted', this.#onLabelAtlasEvicted)
 
+    if (this.#clusterRetryTimer) { clearTimeout(this.#clusterRetryTimer); this.#clusterRetryTimer = null }
+
     if (this.#newCellFadeRaf) {
       cancelAnimationFrame(this.#newCellFadeRaf)
       this.#newCellFadeRaf = 0
@@ -5735,11 +5737,37 @@ export class ShowCellDrone extends Drone {
       else bucket.actions.push(label)
     }
     // Nothing grouped yet (cold hydration) or a non-clustered launcher page
-    // (games/websites): keep the spiral. A late-hydrating group re-renders via
-    // the `launch:indexed` nudge.
-    if (byGroup.size === 0) return null
+    // (games/websites): keep the spiral. A late-hydrating group normally
+    // re-renders via the `launch:indexed` nudge, but every event path to that
+    // nudge can be swallowed on boot (a stream pass hydrates the index with
+    // nudge=false, consumes the walk memo, then LOSES the supersede race — the
+    // winning pass paints cold and no walk ever re-fires). So a cold cluster
+    // paint also arms the bounded index re-check below.
+    if (byGroup.size === 0) {
+      this.#armClusterRetry(names, groupOf)
+      return null
+    }
     const groups: ClusterGroup[] = [...byGroup.values()].sort((a, b) => a.ord - b.ord)
     return { coords: launcherClusterLayout(groups), headers }
+  }
+
+  /** Bounded self-heal for a clustered page painted before its island groups
+   *  hydrated: re-check the group index shortly after the cold paint and
+   *  rebuild geometry once it warms. Three checks with backoff, then give up —
+   *  genuinely non-clustered launcher pages (games, websites) stay cold by
+   *  design and cost only a map lookup per check. */
+  #clusterRetryTimer: ReturnType<typeof setTimeout> | null = null
+  #armClusterRetry = (names: string[], groupOf: (label: string) => string, attempt = 0): void => {
+    if (this.#clusterRetryTimer || attempt > 2) return
+    this.#clusterRetryTimer = setTimeout(() => {
+      this.#clusterRetryTimer = null
+      if (names.some(l => l && groupOf(l))) {
+        this.renderedCellsKey = ''
+        this.requestRender()
+        return
+      }
+      this.#armClusterRetry(names, groupOf, attempt + 1)
+    }, 500 * Math.pow(3, attempt))
   }
 
   private buildCellsFromAxial = (axial: any, names: string[], max: number, localCellSet: Set<string>, branchSet?: Set<string>): Cell[] => {

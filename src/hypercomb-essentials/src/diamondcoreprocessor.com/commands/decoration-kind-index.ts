@@ -552,11 +552,15 @@ async function hydrateLabel(
       indexRecord(label, decorationSig, record)
     }
     // A launcher tile discovered on this walk: nudge show-cell to rebuild its
-    // geometry so the tile's silhouette appears (the walk runs after first
-    // paint). The pre-paint hydration path (ensureDecorationsIndexed) passes
-    // nudge=false — nothing is painted yet, so a rebuild request would only
-    // queue a redundant second render.
-    if (nudge && (launchShapeByLabel.has(label) || islandGroupByLabel.has(label))) EffectBus.emit('launch:indexed', { label })
+    // geometry so the tile's silhouette — or its clustered ISLAND (help
+    // group/role, dashboard islands) — appears (the walk runs after first
+    // paint). Without the launchGroup term a boot whose pre-paint warm came
+    // up cold (big profile, layers not cached yet) painted /help as a plain
+    // spiral of substrate tiles and nothing ever re-clustered it. The
+    // pre-paint hydration path (ensureDecorationsIndexed) passes nudge=false —
+    // nothing is painted yet, so a rebuild request would only queue a
+    // redundant second render.
+    if (nudge && (launchShapeByLabel.has(label) || launchGroupByLabel.has(label) || islandGroupByLabel.has(label))) EffectBus.emit('launch:indexed', { label })
     return tagsByLabel.has(label)
   } catch {
     // Layer unavailable or fetch error — skip this location; another render

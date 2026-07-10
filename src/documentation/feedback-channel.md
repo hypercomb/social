@@ -109,11 +109,20 @@ item is idempotent.
 
 A late reader (the routine starting after the user submitted) still receives
 every **non-evicted** ITEM event: NIP-33 relays return stored matching events
-on a fresh REQ. The durable outbox keeps recent items fresh on the relay across
-its retention window. The one residual gap — an ITEM event evicted before the
-reader connected — is exactly what the **HEAD manifest** (deferred to the HTTP
-hardening below) closes, because only then can the evicted **bytes** actually
-be recovered (HTTP GET). v1 logs such a gap rather than pretending to heal it.
+on a fresh REQ. **The REQ must ask for them, though** — the mesh's default
+replay window is 15 minutes (`since: now-900`), tuned for live-ish kinds
+(presence, shares). That default silently lost every feedback item published
+while the host/routine was offline for more than 15 minutes: the relay held
+the event for its full TTL, but no late REQ ever matched it. The channel
+therefore subscribes AND reconcile-queries with `sinceSec: ITEM_TTL_SEC`
+(7 days — the item TTL; anything older has expired anyway), via the
+per-subscription `sinceSec` option on `mesh.subscribe`/`mesh.query`
+(`null` = no window). The durable outbox keeps recent items fresh on the
+relay across its retention window. The one residual gap — an ITEM event
+evicted before the reader connected — is exactly what the **HEAD manifest**
+(deferred to the HTTP hardening below) closes, because only then can the
+evicted **bytes** actually be recovered (HTTP GET). v1 logs such a gap rather
+than pretending to heal it.
 
 ## Store-and-forward (the "jwize.com is down" requirement)
 
@@ -149,7 +158,35 @@ any leftover entries into the pending map and deletes that folder on sight.)
 - A backstop age-sweep drops pending entries older than 24h (with a warning) so
   a never-reachable relay can't grow the queue without bound. A record retired
   locally (resolved/removed) while still pending drops out too — there is
-  nothing left to sync.
+  nothing left to sync. A swept record is NOT lost: the sweep re-arms the
+  substrate reconcile (below), which re-pends it in a future session.
+
+### The confirmed ledger and the substrate reconcile
+
+Two additions close the loss windows the pending map alone cannot see:
+
+- **Confirmed ledger** (`localStorage['hc:feedback-channel:confirmed']`,
+  sig → confirmedAtMs): written on every receipt — read-back, live echo — AND
+  for every item that ARRIVES from a real relay (it is relay-held by
+  definition; a peer's item must never be re-published under OUR key). The
+  permanent complement of the pending map. Pruned past 180 days; a pruned
+  entry can at worst cause one harmless re-publish (add-only channel,
+  content-addressed dedup).
+- **Substrate reconcile** (`FeedbackChannelDrone.reconcile()`, automatic once
+  per browser via `hc:feedback-channel:reconciled`, scheduled off the boot
+  path): walks `Store.listOptimizations()`, and every syncable record
+  (`feedback`/`qa`/`qa-answer`) that is neither pending nor confirmed is
+  pended and published. This is what rescues **stranded** records:
+  1. feedback written by an OLDER essentials bundle that predates the channel
+     — it was never pended at all (the push-only web install means such
+     bundles linger in returning visitors' browsers for months);
+  2. items the 24h backstop swept while the relay was unreachable (the sweep
+     clears the reconciled flag, handing them to the next session);
+  3. a browser closed before the first drain confirmed delivery.
+  A relay query (full-TTL window) runs first so anything already relay-held
+  is confirmed, not re-published. A READ failure marks the pass incomplete —
+  the flag stays unset and the next session retries; a PARSE failure just
+  means "not a loop record".
 
 So if jwize.com is down when feedback is submitted, the sig rests in the
 pending map and the bytes are republished from the substrate the instant the
@@ -239,7 +276,8 @@ a nav-away/back or reload (until then, re-open the toggle to refresh).
    `hc:nostrmesh:self-domain=jwize.com` + live relay) before the page loads, so it
    converges on the owner's channel with no key injection. Assert with
    `node .claude/skills/feedback-loop/fb.cjs channel-status` →
-   `{ enabled:true, channelId:<64-hex> }`.
+   `{ enabled:true, channelId:<64-hex> }` (now also reports `pending`,
+   `confirmed`, `ingested`, `reconciled`).
 3. Both derive the channel from `hc:nostrmesh:self-domain` (default `jwize.com`) and
    ride the same relay (`wss://jwize.com`, or `wss://localhost:7777` — the same relay
    via cloudflared for a local host).

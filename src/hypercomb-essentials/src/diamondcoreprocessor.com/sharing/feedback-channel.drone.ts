@@ -113,8 +113,8 @@ type MeshEvt = {
 type MeshSub = { close: () => void }
 interface MeshLike {
   publish: (kind: number, sig: string, payload: unknown, extraTags?: string[][]) => Promise<boolean>
-  subscribe: (sig: string, cb: (e: MeshEvt) => void) => MeshSub
-  query?: (sig: string, timeoutMs?: number) => Promise<MeshEvt[]>
+  subscribe: (sig: string, cb: (e: MeshEvt) => void, opts?: { sinceSec?: number | null }) => MeshSub
+  query?: (sig: string, timeoutMs?: number, sinceSec?: number | null) => Promise<MeshEvt[]>
   isNetworkEnabled?: () => boolean
   setNetworkEnabled?: (enabled: boolean, persist?: boolean) => void
 }
@@ -268,12 +268,13 @@ export class FeedbackChannelDrone extends Drone {
     if (!store?.listOptimizations || !store.getOptimization) return   // store not ready — the drain tick retries
     this.#reconciled = true                                           // one attempt per session
 
-    // 1) Confirm everything the relay ALREADY serves.
+    // 1) Confirm everything the relay ALREADY serves — full-TTL window, so an
+    //    alive-but-old item is confirmed rather than re-published.
     const mesh = ioc()?.get<MeshLike>(MESH_KEY)
     const channelId = await this.#resolveChannelId()
     if (mesh?.query && channelId) {
       try {
-        for (const it of await mesh.query(channelId)) {
+        for (const it of await mesh.query(channelId, 5_000, ITEM_TTL_SEC)) {
           if (!it || it.relay === 'local') continue
           const s = (it.payload && typeof it.payload === 'object') ? (it.payload as { s?: unknown }).s : null
           if (typeof s === 'string' && HEX64.test(s.toLowerCase())) this.#confirm(s.toLowerCase())
@@ -328,8 +329,12 @@ export class FeedbackChannelDrone extends Drone {
         mesh.setNetworkEnabled(true, false)
       }
       // HOST only: subscribe to ingest peers' items. A contributor never
-      // subscribes, so it never sees anyone else's feedback.
-      if (sub && !this.#sub) this.#sub = mesh.subscribe(channelId, (e) => void this.#onChannelEvent(e))
+      // subscribes, so it never sees anyone else's feedback. The replay
+      // window matches the item TTL: the relay must REPLAY every stored item
+      // it still holds — the routine may connect hours or days after the
+      // contributor published (the mesh default of 15 min silently lost
+      // everything in between).
+      if (sub && !this.#sub) this.#sub = mesh.subscribe(channelId, (e) => void this.#onChannelEvent(e), { sinceSec: ITEM_TTL_SEC })
       // Either role: the drain timer (re)publishes pending items and clears the
       // read-back-confirmed ones — the store-and-forward guarantee. The
       // reconcile piggybacks so a store that wasn't ready at the idle callback

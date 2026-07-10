@@ -28,7 +28,7 @@ const makeMesh = () => {
   const subs: Array<(e: MeshEvt) => void> = []
   return {
     publish: vi.fn(async () => true),
-    subscribe: vi.fn((_sig: string, cb: (e: MeshEvt) => void) => { subs.push(cb); return { close: () => void 0 } }),
+    subscribe: vi.fn((_sig: string, cb: (e: MeshEvt) => void, _opts?: { sinceSec?: number | null }) => { subs.push(cb); return { close: () => void 0 } }),
     query: vi.fn(async (): Promise<MeshEvt[]> => []),
     isNetworkEnabled: () => true,
     setNetworkEnabled: () => void 0,
@@ -166,6 +166,10 @@ describe('feedback-channel host ingest', () => {
     await boot({})
 
     expect(mesh.subs.length).toBeGreaterThan(0)
+    // The host must ask the relay to REPLAY stored items across the full item
+    // TTL — the mesh's 15-min default silently loses offline-published items.
+    const subOpts = mesh.subscribe.mock.calls[0][2] as { sinceSec?: number | null } | undefined
+    expect(subOpts?.sinceSec).toBe(7 * 24 * 60 * 60)
     // A peer's feedback arrives. Sig verification uses real sha256 inside the
     // drone, so the claimed sig must be honest — compute it the same way.
     const { SignatureService } = await import('@hypercomb/core')

@@ -70,7 +70,13 @@ const writeIfChanged = (filePath: string, content: string): boolean => {
 // helpers
 // -------------------------------------------------
 
-const isSource = (f: string) => (f.endsWith('.ts') || f.endsWith('.js')) && !f.endsWith('.d.ts')
+const isTestFile = (f: string) =>
+  f.endsWith('.spec.ts') || f.endsWith('.test.ts') || f.endsWith('.spec.js') || f.endsWith('.test.js')
+// Vitest files are run in place from src — they are NEVER package source.
+// Barreling one drags it into the tsup bundle (a spec's top-level await
+// breaks the CJS pass); side-effect-importing one boots test scaffolding
+// inside the dev shell.
+const isSource = (f: string) => (f.endsWith('.ts') || f.endsWith('.js')) && !f.endsWith('.d.ts') && !isTestFile(f)
 const isBee = (f: string) =>
   f.endsWith('.drone.ts') || f.endsWith('.drone.js') ||
   f.endsWith('.worker.ts') || f.endsWith('.worker.js')
@@ -579,7 +585,7 @@ else filesSkipped++
 // -------------------------------------------------
 {
   const sideEffectFiles = walkFiles(SRC_ROOT)
-    .filter(f => isSideEffectModule(f) && !isGenerated(f))
+    .filter(f => isSideEffectModule(f) && !isGenerated(f) && !isTestFile(f))
     .sort()
 
   const lines = sideEffectFiles.map(f => {
