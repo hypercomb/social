@@ -905,7 +905,7 @@ export class SiteViewDrone extends Drone {
     // take the first candidate that DEFINITELY has a page.
     const seen = new Set<string>()
     const uniq = candidates.filter(c => {
-      const k = c.join(' ')
+      const k = c.join('\u0000')
       if (seen.has(k)) return false
       seen.add(k); return true
     })
