@@ -107,6 +107,15 @@ expiresAt }`. Policy via env vars:
   promise: "content isn't reachable" becomes structurally impossible.
   Share UX shape: mark → drain → receipts ("proving… 12 of 37") →
   announce arms only on completion.
+- **THE WORLDVIEW ICON IS THE SWITCH (Jaime, 2026-07-09):** one control,
+  three honest states — off / proving… / on-and-proven (receipts arm
+  it). OFF retracts per layer physics: mesh slots republish as EMPTY
+  payloads immediately (#wipeSubtree, already built); the shelf can't be
+  overwritten (content addressing — the integrity guarantee), so bytes
+  go DARK instead: pushes stop, announcements stop, trails evaporate,
+  the lease lapses. True prompt removal = the one legitimate future
+  DELETE: author-requested eviction, the uploader's own signed key
+  asking its own bytes off the shelf.
 
 ## Deploy checklist (in order)
 
