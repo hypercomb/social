@@ -176,7 +176,11 @@ const MAX_MISS_TTL_MS = 30 * 60_000
 // sha256 gates every fetched byte, so a mirror that 404s or serves wrong bytes
 // is harmless — it only ever costs a 404 before the cascade moves on, never
 // corruption.
-const BETA_FALLBACK_DOMAINS = ['jwize.com', 'pluginthematrix.io'] as const
+// content.jwize.com is the PUBLIC content endpoint (Blossom over R2,
+// documentation/public-content-endpoint.md) — where published-public
+// closures land via HostSyncService's public target. Same tier, same
+// flag, same sha256 harmlessness as the mirrors.
+const BETA_FALLBACK_DOMAINS = ['jwize.com', 'pluginthematrix.io', 'content.jwize.com'] as const
 
 export type ContentType = 'layer' | 'resource' | 'dependency'
 
@@ -311,7 +315,7 @@ export class ContentBrokerDrone extends Drone {
     signer: NOSTR_SIGNER_KEY,
   }
   protected override listens: string[] = []
-  protected override emits: string[] = ['broker:fetched', 'adopt:progress', 'adopt:done']
+  protected override emits: string[] = ['broker:fetched', 'broker:outcome', 'adopt:progress', 'adopt:done']
 
   #broadcastSub: MeshSubLike | null = null
   #myPubkey: string | null = null
@@ -713,6 +717,15 @@ export class ContentBrokerDrone extends Drone {
     } catch { /* non-fatal */ }
   }
 
+  /** Fire-and-forget per-host outcome mint (content-health.md §1).
+   *  Pure observability at the existing failure/success points — consumed
+   *  by ContentHealthDrone's in-memory ledger. Never gates or alters fetch
+   *  behavior, backoff, miss windows, or return values. Mesh-path outcomes
+   *  ride under the pseudo-host 'mesh'; local-store hits under 'local'. */
+  #mintOutcome = (host: string, cls: 'ok' | 'not-found' | 'unreachable' | 'timeout' | 'mismatch'): void => {
+    this.emitEffect('broker:outcome', { host, cls, at: Date.now() })
+  }
+
   #fetchOverHttp = async (sig: string, type: ContentType): Promise<Uint8Array | null> => {
     const path = this.#httpPathForType(sig, type)
     if (!path) return null
@@ -776,14 +789,26 @@ export class ContentBrokerDrone extends Drone {
         const probeTimer = setTimeout(() => probeCtrl.abort(), HTTP_PROBE_TIMEOUT_MS)
         try {
           const res = await fetch(url, { cache: 'no-store', signal: probeCtrl.signal })
-          if (!res.ok) continue
+          if (!res.ok) {
+            // 404 = the host answered but doesn't have it; anything else
+            // (5xx, 403, …) = the host isn't usefully reachable for bytes.
+            this.#mintOutcome(host, res.status === 404 ? 'not-found' : 'unreachable')
+            continue
+          }
           // SPA fallback guard: sig-addressed bytes are never text/html —
           // skip before hashing (an extension-less /<sig> on a dev-server
-          // origin 200s with index.html).
-          if ((res.headers.get('content-type') || '').toLowerCase().includes('text/html')) continue
+          // origin 200s with index.html). Health-wise this IS a not-found:
+          // the host answered, it just doesn't serve this sig.
+          if ((res.headers.get('content-type') || '').toLowerCase().includes('text/html')) {
+            this.#mintOutcome(host, 'not-found')
+            continue
+          }
           const buf = await res.arrayBuffer()
           const bytes = new Uint8Array(buf)
-          if (!await this.#verifyBytes(bytes, sig)) continue
+          if (!await this.#verifyBytes(bytes, sig)) {
+            this.#mintOutcome(host, 'mismatch')
+            continue
+          }
           // Branch-closure attribution (§21.14): a host serving a LAYER is
           // presumed to serve the layer's entire closure — the standard is
           // "a branch merkle signature hosts all its contents". Every ref
@@ -798,10 +823,13 @@ export class ContentBrokerDrone extends Drone {
           // layer is returned but never lands in the pool (adopted content
           // silently fails to commit into the hive).
           await this.#persistLocal(sig, type, bytes)
+          this.#mintOutcome(host, 'ok')
           return bytes
-        } catch {
+        } catch (err) {
           // network error / CORS / cert issue / probe timeout — try next
-          // path / host
+          // path / host. Our own probe abort is the one distinguishable
+          // timeout; everything else is opaque to fetch() → unreachable.
+          this.#mintOutcome(host, (err as { name?: string } | null)?.name === 'AbortError' ? 'timeout' : 'unreachable')
           continue
         } finally {
           clearTimeout(probeTimer)
@@ -898,6 +926,7 @@ export class ContentBrokerDrone extends Drone {
       // HostSyncService: signed, queued, receipted, self-domain only.
       this.#stageToHost(s, type, local)
       this.#missBackoff.delete(s)   // resolved — reset any prior backoff
+      this.#mintOutcome('local', 'ok')
       return local
     }
 
@@ -1192,6 +1221,7 @@ export class ContentBrokerDrone extends Drone {
       // Timeout safety net.
       setTimeout(() => {
         if (settled) return
+        this.#mintOutcome('mesh', 'timeout')
         cleanup()
         resolve(null)
       }, Math.max(100, timeoutMs))
@@ -1287,6 +1317,7 @@ export class ContentBrokerDrone extends Drone {
         actual: computed.slice(0, 12),
         type,
       })
+      this.#mintOutcome('mesh', 'mismatch')
       return null
     }
 
@@ -1295,6 +1326,7 @@ export class ContentBrokerDrone extends Drone {
     await this.#persistLocal(sig, type, bytes)
 
     this.emitEffect('broker:fetched', { sig, type, bytes: bytes.byteLength })
+    this.#mintOutcome('mesh', 'ok')
     return bytes
   }
 
