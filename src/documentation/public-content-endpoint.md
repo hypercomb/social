@@ -99,6 +99,16 @@ expiresAt }`. Policy via env vars:
 - One-action sharing stays doctrine: the participant only ever clicks
   share — the multi-target drain fans out to self-host and/or public
   endpoint by receipts; "where bytes live" is never a user decision.
+- **COLLECTIONS ARE NEVER-PUBLIC (Jaime, 2026-07-09):** collections are
+  curation — sensitive by nature — and join the structural never-public
+  class (clipboard, settings, presence, secrets): the publish walk never
+  enumerates collection roots, markPublic refuses their lineages, and
+  share-tile/share-branch actions don't render in collection contexts.
+  Tiles a collection REFERENCES may be shared from the main tree; the
+  curation itself never travels without a future deliberate
+  consent-shaped feature. (Today they're safe by default-off flags;
+  this doctrine upgrades default to structural — guards land with the
+  polish pass.)
 - **BYTES BEFORE BROADCAST (Jaime, 2026-07-09):** a hive must be posted
   and receipted at its tier's shelf BEFORE any share announcement
   propagates — public hive → public endpoint first, then swarm shares/
