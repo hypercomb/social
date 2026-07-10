@@ -52,6 +52,19 @@ same append-only sigbag lineages as everything else — living in the
   keyed by the history HEAD sig — changed history = new head = automatic
   invalidation.
 
+**Why not an array in the layer** (considered 2026-07-09, rejected for
+truth / kept for reads): a layer is AUTHORED truth — strangers' deposits
+would need the author to commit them (gatekeeping their own reputation),
+every deposit would mint a new layer sig (identity churn with other
+people's opinions as the commits), and decay would mean perpetually
+rewriting history. This is the layer-purity rule: community signal is
+external to the layer, like every optimization. The array shape
+consumers want DOES exist — as the derived-cache field keyed by layer
+sig, minted in the optimize phase from the deposit histories: looks like
+`pheromones: [...]` beside the layer, is never truth. The author's own
+labels stay in-layer as today: a tag IS the author's pheromone with no
+decay.
+
 **Canonical meaning string: `'pheromones'`** — fix the spelling once and
 forever. `sign()` of a typo mints a different pool address for eternity;
 derive at runtime via `Store.poolSignature('pheromones')`, never
