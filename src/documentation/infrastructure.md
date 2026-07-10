@@ -161,6 +161,44 @@ for production: `strfry` or `nostr-rs-relay`. for development: `relay.js` on `ws
 
 ---
 
+## public growth infrastructure — researched numbers (2026-07)
+
+if we stand up always-available public infrastructure for initial growth, this is what the money and throughput look like. doctrine unchanged: mesh stays thin (sigs only), bytes ride HTTP `/<sig>`, operator domains absorb byte traffic as adoption grows. these are the training wheels, priced.
+
+### coordination relays
+
+2–3 strfry relays (hetzner: EU CX22 ~€3.79/mo with 20TB traffic; one US CPX-class ~$5–18/mo) = **~$15–35/month total**, comfortable headroom at 4vCPU tiers under ~$75/mo. capacity is thousands of events/sec and tens of thousands of sockets per box; 1k users ≈ 0.6 events/sec average — three orders of magnitude of headroom. relays enforce 64–128KB message caps (NIP-11 `max_message_length`), confirming bytes-over-mesh is structurally out. first real bottlenecks at scale: LMDB disk retention and abuse policy — not throughput.
+
+### byte serving
+
+request costs dominate bandwidth for 1–500KB content-addressed files. monthly, at ~1k users / 50GB egress:
+
+| route | cost | at 1TB/mo | note |
+|---|---|---|---|
+| **cloudflare R2** + custom-domain cache | **~$0–2** | ~$4 | **$0 egress** — the decisive number; immutable `/<sig>` is the perfect infinite-TTL cache workload |
+| **bunny.net** CDN + storage | ~$1–2 | ~$5–10 | $0.005–0.01/GB, zero request fees, $1/mo minimum |
+| azure blob direct (status quo) | ~$1–6 | **~$85** | first 100GB free then $0.087/GB; every long-tail request hits origin uncached |
+| azure front door | ~$40+ | ~$130 | $35/mo floor before serving a byte; classic CDN retires 2027-09-30 |
+
+flat buckets of millions of sig-named objects are fine on all three; skip infrequent-access tiers (retrieval fees) for a hot long tail.
+
+### blossom alignment
+
+the nostr blob spec (BUD-01/02: `GET /<sha256>`, sha256-addressed, signed uploads kind 24242, BUD-04 server-to-server mirroring) is byte-for-byte our flat `/<sig>` heap + NIP-98 PUT shape — see `consent-hosting.md`. exposing our bucket through a blossom-compatible endpoint costs nothing extra, makes hypercomb content consumable by the nostr media ecosystem, and makes every public blossom server (blossom.band, blossom.primal.net, …) a potential consenting host with zero hypercomb code. where wire choices are free, prefer blossom's.
+
+### optional encryption (participant-chosen)
+
+- **default private**: random content key, encrypt-then-hash — **sig = sha256(ciphertext)**. every downstream system (OPFS, mesh, mirrors, CDN, blossom) works unchanged on opaque bytes; readers still verify without decrypting. cost: no cross-user dedup.
+- **key delivery**: content key wrapped per-recipient via NIP-44 in a mesh event — the manifest field stays a plain sig; only the key envelope is per-recipient. composes exactly with the signature-reference doctrine.
+- **group content**: convergent-with-group-secret (tahoe pattern) preserves dedup *within* the group; plain convergent encryption is rejected (confirmation-of-file attacks).
+- tiering: public = plaintext (full dedup) · group = convergent-with-secret · private = random key.
+
+### bottom line
+
+relays + R2 bytes + a blossom-compatible endpoint ≈ **under $40/month at 1k users**, flat curve to 10×. first thing that breaks at 100× is relay retention/abuse handling — and by then operator domains should be carrying bytes, per the scaling table above.
+
+---
+
 ## a note on confidentiality
 
 the mesh is currently **plaintext JSON** — the sig in the `x` tag is visible to the relay and to any subscriber on the broadcast channel. AEAD / encrypted mesh transport is future work. do not assume confidentiality the build doesn't yet provide: anything you publish to the mesh is observable. local OPFS content, by contrast, never leaves your machine until you explicitly publish.
