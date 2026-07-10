@@ -519,6 +519,7 @@ export class ClipboardWorker extends Worker {
           items: clipboardSvc.items.map(i => ({
             label: i.label,
             sourceSegments: [...i.sourceSegments],
+            ...(i.sig ? { sig: i.sig } : {}),
           })),
         })
       }
@@ -551,9 +552,16 @@ export class ClipboardWorker extends Worker {
     // never redirect a paste to wherever the view has drifted. `liveCurrent` is
     // the only live read in this method, and it's used SOLELY for that gate; the
     // target itself (`targetSegments`) was frozen at intent.
+    // Phase stopwatch — one summary line per paste (repo perf-log style:
+    // [script-preloader] find, [preload] preloadFromRoot). Field reports
+    // of multi-second pastes are only diagnosable with this breakdown.
+    const tStart = performance.now()
+    let tParent = 0, tStrict = 0, tResolve = 0, tFlatten = 0, tSeed = 0, tCommit = 0
+
     const liveCurrent = [...lineage.explorerSegments()]
     const onScreen = this.#sameSegments(targetSegments, liveCurrent)
     const parent = await this.#resolveParentLayer(history, targetSegments, liveCurrent)
+    tParent = performance.now() - tStart
 
     // Refuse rather than guess: a non-root bound target that neither resolves up
     // the chain NOR is the page on screen cannot be written safely — committing
@@ -575,7 +583,9 @@ export class ClipboardWorker extends Worker {
     // existing + placed — a cold sibling silently missing from `existing`
     // would be permanently wiped by that SET. Refuse instead (clipboard
     // stays intact, nothing lost) and let the user retry once warm.
+    const tStrict0 = performance.now()
     const { names: existing, coldMiss } = await childNamesOfStrict(history, parent)
+    tStrict = performance.now() - tStrict0
     if (coldMiss) {
       console.warn(`[clipboard] paste refused — cold sibling at /${targetSegments.join('/')}; committing would drop it`)
       EffectBus.emit('toast:show', {
@@ -602,6 +612,7 @@ export class ClipboardWorker extends Worker {
         failed.push(entry.label)
         continue
       }
+      const tEntry0 = performance.now()
       const srcLocSig = await history.sign({
         domain: lineage.domain,
         explorerSegments: () => [...entry.sourceSegments, entry.label],
@@ -630,6 +641,7 @@ export class ClipboardWorker extends Worker {
       // resolvePasteSource (layer-placement.ts), where the order is
       // spec-pinned against regression.
       const srcLayer = await resolvePasteSource(history, lineage.domain, entry, srcLocSig, dstLocSig)
+      tResolve += performance.now() - tEntry0
       if (!srcLayer) {
         console.warn(`[clipboard] paste source missing for '${entry.label}': /${entry.sourceSegments.join('/')}`)
         failed.push(entry.label)
@@ -650,7 +662,9 @@ export class ClipboardWorker extends Worker {
       // source subtree into importTree updates rooted at the dest path.
       if (srcLocSig !== dstLocSig) {
         try {
+          const tFlat0 = performance.now()
           let entryUpdates = await flattenLayerTree(history, srcLayer, [...targetSegments, entry.label])
+          tFlatten += performance.now() - tFlat0
           // Honour clipboard-local nested discards (the side panel's per-item ×
           // while drilled): drop every excluded source descendant AND its whole
           // subtree from this paste, and strip its name from its parent's
@@ -710,6 +724,7 @@ export class ClipboardWorker extends Worker {
     // tile that lived here long ago) and would render the WRONG image over the
     // pasted tile. The just-placed node's props are authoritative. Runs AFTER
     // the paste-target props rewrite, so the final props sig lands.
+    const tSeed0 = performance.now()
     try {
       const index = readTilePropsIndex()
       let seeded = false
@@ -728,11 +743,20 @@ export class ClipboardWorker extends Worker {
     } catch (err) {
       console.warn('[clipboard] props-index seed skipped', err)
     }
+    tSeed = performance.now() - tSeed0
 
+    const tCommit0 = performance.now()
     await committer.importTree([
       { segments: [...targetSegments], layer: { ...(parent ?? {}), children: nextChildren } },
       ...treeUpdates,
     ])
+    tCommit = performance.now() - tCommit0
+    console.log(
+      `[clipboard] paste: total=${Math.round(performance.now() - tStart)}ms ` +
+      `parent=${Math.round(tParent)}ms strict=${Math.round(tStrict)}ms resolve=${Math.round(tResolve)}ms ` +
+      `flatten=${Math.round(tFlatten)}ms seed=${Math.round(tSeed)}ms commit=${Math.round(tCommit)}ms ` +
+      `(${placed.length} placed, ${treeUpdates.length} nodes, ${existing.length} existing children)`
+    )
     await new hypercomb().act()
 
     // No forced full re-render here. `place` (the "add to current" path)
