@@ -26,6 +26,37 @@ administratively:
   "nsfw" marks. A BUD-09 report IS a negative deposit. One mechanism,
   both directions.
 
+## Storage model (Jaime, 2026-07-09): histories in `sign('pheromones')`
+
+Pheromones are NOT a new storage primitive. They are **histories** — the
+same append-only sigbag lineages as everything else — living in the
+`sign('pheromones')` pool of meaning:
+
+```
+<opfs root>/<sign('pheromones')>/<lineage-per-target>/0000, 0001, …
+```
+
+- One lineage per target; each **deposit appends one marker** referencing
+  a sig-addressed deposit record (signed event bytes at the content root
+  — signature-reference doctrine, never inline).
+- The trail IS the history. Intensity and decay are **read-time
+  evaluations** over the deposit chain — evaporation never rewrites or
+  deletes markers; append-only stays sacred, the trail fades by
+  evaluation.
+- Time-travel free: "what did the swarm think of this last month" is
+  just reading the history at a cursor, like any lineage.
+- Sharing/merging free: histories are already the merkle-shareable
+  primitive — peers exchange pheromone lineages like any other, merged
+  under the existing marks+merge model.
+- Aggregated per-sig fields remain derived caches (optimize phase),
+  keyed by the history HEAD sig — changed history = new head = automatic
+  invalidation.
+
+**Canonical meaning string: `'pheromones'`** — fix the spelling once and
+forever. `sign()` of a typo mints a different pool address for eternity;
+derive at runtime via `Store.poolSignature('pheromones')`, never
+hardcode the hex.
+
 ## Mapping onto existing primitives (nothing new invented)
 
 | Pheromone piece | Existing primitive |
