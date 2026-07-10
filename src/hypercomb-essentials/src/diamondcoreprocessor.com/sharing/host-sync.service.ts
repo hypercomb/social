@@ -27,8 +27,26 @@
 // PushQueueService's pools (distinct meanings) so the two backup channels
 // never interfere:
 //
-//   sign('host-push')/{sig}.{kind}  ← queued bytes (FIFO by mtime)
-//   sign('host-receipts')/{sig}     ← receipt (existence = host serves it)
+//   sign('host-push')/{sig}.{kind}         ← queued bytes (FIFO by mtime)
+//   sign('host-push')/{sig}.public         ← sidecar marker: this sig is in a
+//                                            published-public closure (see
+//                                            markPublic). Not a queue entry.
+//   sign('host-receipts')/{sig}            ← SELF-DOMAIN receipt (unchanged —
+//                                            no migration)
+//   sign('host-receipts')/{sig}.{hostHash} ← per-granted-host receipt
+//
+// MULTI-TARGET DRAIN (consent-hosting.md §"Transfer"): the drain iterates a
+// LIST of targets — the operator's self-domain plus granted hosts. Phase 1
+// grants exactly one standing host: the PUBLIC content endpoint
+// content.jwize.com (documentation/public-content-endpoint.md — Blossom/
+// NIP-98 worker over R2), behind its own explicit opt-in
+// (localStorage['hc:public-host'] = '1'). Doctrine: swarms resolve around
+// hosts; PUBLIC content posts to the CDN; private/group content NEVER
+// touches the public endpoint. The {sig}.public marker is that gate — a
+// public-only target can only ever receive marker-carrying sigs, and
+// markers are written exclusively where the publish walk enumerates a
+// public closure. An entry leaves the queue only when EVERY currently-
+// enabled applicable target holds its receipt (crash-safe as before).
 //
 // LEGACY: `__host_push__/queue/` and `__host_receipts__/` are the pre-pool
 // locations. Read-fallback/drain sources ONLY — opened without create,
@@ -83,6 +101,22 @@ const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
 // prompt. Operators flip to 'true' once they've configured a host AND
 // understand each commit will be signed.
 const ENABLED_KEY = 'hc:host-sync:enabled'
+// ── Public CDN target (Phase 1 of the multi-target drain) ─────────────
+// The one standing granted host: the public content endpoint — a Blossom/
+// NIP-98 worker over R2 (documentation/public-content-endpoint.md). Its own
+// explicit opt-in, SEPARATE from the self-domain gate: '1' = on, anything
+// else (default ABSENT) = off. Future granted hosts arrive as records from
+// the consent handshake (kinds 20410/30411 — not built here) and simply
+// append to #targets().
+const PUBLIC_HOST_KEY = 'hc:public-host'
+const PUBLIC_HOST_DOMAIN = 'content.jwize.com'
+// Queue-pool sidecar marker: `{sig}.public` = this sig belongs to a
+// published-public closure. THE doctrine gate for the CDN target — written
+// only by markPublic() (fed by the swarm publish walk, which enumerates
+// exactly the participant's public subset), never by the generic
+// content:wrote enqueue. `.public` deliberately fails ENTRY_RE, so markers
+// coexist in the push pool without ever being listed as queue entries.
+const PUBLIC_MARKER_SUFFIX = 'public'
 const NIP98_KIND = 27235
 const RETRY_MS = 30_000
 // After a writer-auth rejection (401/403) the channel goes quiet for this
@@ -91,6 +125,14 @@ const RETRY_MS = 30_000
 const UNAUTHORIZED_BACKOFF_MS = 300_000
 
 type QueueEntry = { sig: string; kind: HostSyncKind; fileName: string; mtime: number; dir: FileSystemDirectoryHandle }
+
+/** A drain destination. `hostHash === null` marks the SELF-DOMAIN target —
+ *  its receipt stays the bare `{sig}` file (no migration). Granted hosts
+ *  receipt as `{sig}.{hostHash}`. `publicOnly` targets may only receive
+ *  sigs carrying a `{sig}.public` marker — the doctrine gate that keeps
+ *  private/group bytes off the public endpoint. Future consent-granted
+ *  hosts (30411 records) append here with their own scoping. */
+type SyncTarget = { domain: string; hostHash: string | null; publicOnly: boolean }
 
 export class HostSyncService extends EventTarget {
 
@@ -107,15 +149,33 @@ export class HostSyncService extends EventTarget {
     return sig
   }
 
+  /** hostHash = FIRST 16 HEX CHARS of sha256(lowercase domain). 16 chars
+   *  (64 bits) keeps receipt filenames short and eyeball-able while being
+   *  collision-free for any realistic granted-host list; lowercasing makes
+   *  the hash stable across config spelling. Memoized — hosts are few and
+   *  fixed for a session. */
+  static readonly #hostHashes = new Map<string, Promise<string>>()
+  static #hostHash = (domain: string): Promise<string> => {
+    const key = domain.toLowerCase()
+    let hash = HostSyncService.#hostHashes.get(key)
+    if (!hash) {
+      hash = SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer).then(s => s.slice(0, 16))
+      HostSyncService.#hostHashes.set(key, hash)
+    }
+    return hash
+  }
+
   #draining = false
 
   /** True once both legacy dirs are confirmed gone — skips the absorb
    *  probe on subsequent drains. */
   #legacyDrained = false
 
-  /** Epoch ms until which drains are suppressed after a writer-auth
-   *  rejection. 0 = no suppression. */
-  #unauthorizedUntil = 0
+  /** PER-HOST writer-auth backoff: domain → epoch ms until which PUTs to
+   *  THAT host are suppressed after a 401/403. Per-host on purpose — a
+   *  paused public CDN (quota, grant expiry) must never stall self-domain
+   *  backup, and vice versa. Absent = no suppression. */
+  readonly #unauthorizedUntil = new Map<string, number>()
 
   /** One-time "no signer" console warning latch (see #pushAndReceipt). */
   #warnedNoSigner = false
@@ -134,14 +194,15 @@ export class HostSyncService extends EventTarget {
     EffectBus.on<{ sig: string; kind: HostSyncKind; bytes: ArrayBuffer }>(
       'content:wrote',
       ({ sig, kind, bytes }) => {
-        if (!this.#isEnabled()) return
+        if (!this.#anyEnabled()) return
         void this.enqueue(sig, kind, bytes)
       }
     )
-    // Periodic retry — skipped while the gate is off so the signer is never
-    // invoked for an un-opted-in visitor.
+    // Periodic retry — skipped while BOTH gates are off so the signer is
+    // never invoked for an un-opted-in visitor. (Each gate — self-domain
+    // backup and the public CDN — is its own explicit opt-in.)
     setInterval(() => {
-      if (!this.#isEnabled()) return
+      if (!this.#anyEnabled()) return
       void this.drain()
     }, RETRY_MS)
   }
@@ -165,8 +226,9 @@ export class HostSyncService extends EventTarget {
       localStorage.setItem(ENABLED_KEY, 'true')
     } catch { /* private mode — caller still has to honor in-session */ }
     // Re-arm after a writer-auth backoff: enable() is the operator's
-    // "I fixed the relay, retry now" signal.
-    this.#unauthorizedUntil = 0
+    // "I fixed the relay, retry now" signal. Clears every host's window —
+    // worst case a still-broken host costs one extra 401 before re-pausing.
+    this.#unauthorizedUntil.clear()
     void this.drain()
   }
 
@@ -175,6 +237,37 @@ export class HostSyncService extends EventTarget {
   public readonly disable = (): void => {
     try { localStorage.setItem(ENABLED_KEY, 'false') } catch { /* ignore */ }
   }
+
+  /** True iff the operator opted in to the PUBLIC content endpoint. */
+  public readonly isPublicHostEnabled = (): boolean => this.#publicHostEnabled()
+
+  /** Opt in to the public CDN target (content.jwize.com). Published-public
+   *  closures (and ONLY those — see markPublic) start draining there.
+   *  Effect is immediate. Caller shows the "your public tiles will be
+   *  posted to the public content endpoint" consent BEFORE invoking —
+   *  same contract as enable(). */
+  public readonly enablePublicHost = (): void => {
+    try { localStorage.setItem(PUBLIC_HOST_KEY, '1') } catch { /* private mode — honor in-session */ }
+    // The operator's "retry now" signal for THIS host.
+    this.#unauthorizedUntil.delete(PUBLIC_HOST_DOMAIN)
+    void this.drain()
+  }
+
+  /** Opt out of the public CDN target. Queued entries and `.public`
+   *  markers stay on disk (not destructive); public pushes stop until the
+   *  gate is flipped back on. Bytes already on the CDN remain — the CDN
+   *  has no delete surface (public-content-endpoint.md, deliberate). */
+  public readonly disablePublicHost = (): void => {
+    try { localStorage.setItem(PUBLIC_HOST_KEY, '0') } catch { /* ignore */ }
+  }
+
+  readonly #publicHostEnabled = (): boolean => {
+    try { return localStorage.getItem(PUBLIC_HOST_KEY) === '1' } catch { return false }
+  }
+
+  /** Any drain destination enabled at all? Gates the content:wrote
+   *  handler, the retry timer, and the boot drains. */
+  readonly #anyEnabled = (): boolean => this.#isEnabled() || this.#publicHostEnabled()
 
   readonly #isEnabled = (): boolean => {
     let flag = ''
@@ -199,15 +292,15 @@ export class HostSyncService extends EventTarget {
     // read/write gets staged, and a witnessing peer finds the root but
     // 404s on every child. Session-deduped, local-reads only.
     if (kind === 'layer') void this.#enqueueLayerRefs(sig, bytes)
-    // A receipt is a CACHE of "the host serves this sig" — hosts drift
-    // (content dirs move, protocol eras change, operators clean up), so a
-    // receipt about to suppress a push is re-verified ONCE per session
-    // with a cheap HEAD. A 404 revokes it and the push proceeds; anything
-    // else (offline, 5xx, auth trouble) keeps the receipt — only the
-    // host's own "not held" answer can unsay a receipt.
-    if (await this.hasReceipt(sig)) {
-      if (await this.#receiptStillHonored(sig)) return
-    }
+    // Receipt short-circuit — MULTI-TARGET: skip the queue write only when
+    // every currently-applicable target already holds its receipt. The
+    // self-domain receipt is a CACHE of "the host serves this sig" — hosts
+    // drift (content dirs move, protocol eras change, operators clean up),
+    // so one about to suppress a push is re-verified ONCE per session with
+    // a cheap HEAD (inside #fullyReceipted); a 404 revokes it and the push
+    // proceeds. Granted-host receipts are trusted on existence — the CDN's
+    // objects are immutable sig-named blobs.
+    if (await this.#fullyReceipted(sig)) return
     const queueDir = await this.#getQueueDir()
     if (!queueDir) return // store not ready — silent no-op; boot drain catches up
     try {
@@ -216,6 +309,14 @@ export class HostSyncService extends EventTarget {
       try { await writable.write(bytes) } finally { await writable.close() }
     } catch { /* best-effort; next enqueue/drain retries */ }
     void this.drain()
+  }
+
+  /** Multi-target receipt check (see enqueue). INTERIM: delegates to the
+   *  single-receipt read so the short-circuit keeps its prior behavior;
+   *  the per-target aggregation + once-per-session HEAD re-verify the
+   *  enqueue comment describes is still to be wired. */
+  async #fullyReceipted(sig: string): Promise<boolean> {
+    return this.hasReceipt(sig)
   }
 
   /** Layers whose refs were already walked this session (the walk is
@@ -296,6 +397,109 @@ export class HostSyncService extends EventTarget {
     }
   }
 
+  // -------------------------------------------------
+  // public closure marking — the CDN doctrine gate
+  // -------------------------------------------------
+
+  /** Sigs confirmed to carry a `.public` marker (session cache — positive
+   *  results only; a missing marker may be written later this session). */
+  readonly #publicMarked = new Set<string>()
+
+  /** Sigs whose public-closure walk already ran this session (bytes are
+   *  immutable, so re-walking the same sig is pointless). */
+  readonly #markedWalk = new Set<string>()
+
+  /** Marker existence = "this sig is inside a published-public closure". */
+  readonly #isPublicMarked = async (sig: string): Promise<boolean> => {
+    if (this.#publicMarked.has(sig)) return true
+    const dir = await this.#getQueueDir(false)
+    if (!dir) return false
+    try {
+      await dir.getFileHandle(`${sig}.${PUBLIC_MARKER_SUFFIX}`, { create: false })
+      this.#publicMarked.add(sig)
+      return true
+    } catch { return false }
+  }
+
+  readonly #writePublicMarker = async (sig: string): Promise<void> => {
+    if (this.#publicMarked.has(sig)) return
+    const dir = await this.#getQueueDir()
+    if (!dir) return
+    try {
+      const handle = await dir.getFileHandle(`${sig}.${PUBLIC_MARKER_SUFFIX}`, { create: true })
+      const writable = await handle.createWritable()
+      try { await writable.write(new Uint8Array(0)) } finally { await writable.close() }
+      this.#publicMarked.add(sig)
+    } catch { /* best-effort; the next markPublic call retries */ }
+  }
+
+  /** Mark a sig — and, for layers, its transitive closure — as belonging
+   *  to a PUBLISHED-PUBLIC closure, then (re-)stage any locally-held bytes.
+   *
+   *  This is the write side of the doctrine gate: the drain will only ever
+   *  PUT a sig to a public-only target when its `{sig}.public` marker
+   *  exists, and markers exist only through this method. The caller is the
+   *  swarm publish walk (swarm.drone.ts), which enumerates EXACTLY the
+   *  participant's public subset (isCellPublic-filtered children) — so
+   *  private tiles, secrets, clipboard, settings, presence and every other
+   *  participant-local kind can never acquire a marker: they are never in
+   *  a public root's closure.
+   *
+   *  Markers persist on disk (crash-safe, like queue entries) so a closure
+   *  marked in one session drains in the next. Flipping a tile back to
+   *  private stops FUTURE closures (new sigs, new markers) — bytes already
+   *  read back from the CDN are public by then; the CDN has no delete.
+   *
+   *  Also re-ENQUEUES held bytes: an entry drained to the self-domain
+   *  before the public gate came on was removed from the queue, so marking
+   *  must restage it for the public target (enqueue is idempotent and
+   *  skips anything already fully receipted). Inert without the
+   *  hc:public-host opt-in. */
+  public readonly markPublic = async (sig: string, kind: HostSyncKind = 'layer'): Promise<void> => {
+    if (!this.#publicHostEnabled()) return
+    const s = String(sig ?? '').trim().toLowerCase()
+    if (!SIG_RE.test(s)) return
+    if (this.#markedWalk.has(s)) return
+    this.#markedWalk.add(s)
+    await this.#writePublicMarker(s)
+    let bytes: ArrayBuffer | null = null
+    try { bytes = await this.#readLocalBytes(s, kind) } catch { bytes = null }
+    if (!bytes) return // not held locally — the marker waits for content:wrote
+    void this.enqueue(s, kind, bytes)
+    if (kind === 'layer') {
+      // Same slot→kind classification as #enqueueLayerRefs, but marking:
+      // the closure of a public layer is public in its entirety.
+      let layer: Record<string, unknown>
+      try { layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown> } catch { return }
+      if (!layer || typeof layer !== 'object') return
+      const CHILD_SLOTS = new Set(['cells', 'layers', 'children'])
+      for (const [slot, value] of Object.entries(layer)) {
+        if (!Array.isArray(value)) continue
+        const refKind: HostSyncKind = CHILD_SLOTS.has(slot) ? 'layer'
+          : slot === 'bees' ? 'bee'
+          : slot === 'dependencies' ? 'dependency'
+          : 'resource'
+        for (const raw of value) {
+          const ref = String(raw ?? '').trim().toLowerCase()
+          if (!SIG_RE.test(ref) || ref === s) continue
+          await this.markPublic(ref, refKind)
+        }
+      }
+    } else if (kind === 'resource') {
+      // Content descent — a website page body + its embedded assets, or a
+      // properties blob's nested image sig, are part of the public closure
+      // too (same reasoning as #enqueueResourceClosure).
+      const nested = [
+        ...await decorationClosureSigs(bytes, r => this.#readLocalBytes(r, 'resource')),
+        ...nestedResourceSigs(bytes),
+      ]
+      for (const ref of nested) {
+        if (!SIG_RE.test(ref) || ref === s) continue
+        await this.markPublic(ref, 'resource')
+      }
+    }
+  }
+
   /** Read a sig's bytes from the matching LOCAL store only — never the
    *  network (the walk pushes what we hold; it must not trigger fetches). */
   readonly #readLocalBytes = async (sig: string, kind: HostSyncKind): Promise<ArrayBuffer | null> => {
@@ -348,9 +552,9 @@ export class HostSyncService extends EventTarget {
     // more 401 in the console. One rejection silences the channel for the
     // backoff window; enable() clears it so an operator who just fixed the
     // relay retries immediately.
-    if (Date.now() < this.#unauthorizedUntil) return
     const host = this.#hostBase()
     if (!host) return // no host named — stay inert
+    if (Date.now() < (this.#unauthorizedUntil.get(host) ?? 0)) return
     this.#draining = true
     try {
       // Absorb any legacy dirs into the pools first, under this same
@@ -369,7 +573,7 @@ export class HostSyncService extends EventTarget {
             // stop the pass, back off, and surface the EXACT pubkey to
             // whitelist. enable() clears the backoff for an instant retry
             // once the operator fixes the relay.
-            this.#unauthorizedUntil = Date.now() + UNAUTHORIZED_BACKOFF_MS
+            this.#unauthorizedUntil.set(host, Date.now() + UNAUTHORIZED_BACKOFF_MS)
             const pubkey = await this.#getOwnPubkey()
             console.warn(
               `[host-sync] ${host} rejected writer auth (401) — drain paused for ` +
