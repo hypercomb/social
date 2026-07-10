@@ -19,6 +19,13 @@ import { lineageKey } from '../../history/lineage-key.js'
 import type { HistoryCursorService, CursorState } from '../../history/history-cursor.service.js'
 import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoom/zoom.drone.js'
 
+// Render-path diagnostics are opt-in (localStorage 'hc:diag' = '1').
+// resolveChildNames runs on every non-memoized pass; the per-pass info
+// lines below short-circuit on this flag BEFORE their log strings are
+// built. Anomaly warns (stale manifest, null sigs, gate exhausted) stay
+// unconditional — they fire rarely and have earned their keep.
+const DIAG = (() => { try { return localStorage.getItem('hc:diag') === '1' } catch { return false } })()
+
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
 type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean }
@@ -333,7 +340,7 @@ async function resolveChildNames(
       console.warn(`[diag:childres] MANIFEST STALE parent=${parentLayerSig.slice(0, 12)} manifestLen=${manifest.length} childrenLen=${content.children.length} -> falling to per-child`)
     }
     if (manifest && manifest.length === content.children.length) {
-      console.info(`[diag:childres] MANIFEST HIT parent=${parentLayerSig.slice(0, 12)} len=${manifest.length}`)
+      if (DIAG) console.info(`[diag:childres] MANIFEST HIT parent=${parentLayerSig.slice(0, 12)} len=${manifest.length}`)
       // Manifest is current iff it covers every child sig in the parent.
       // Trust it: extract names directly, no bag walk. ALSO seed each
       // inlined child layer into HistoryService's parsed cache — the
@@ -381,7 +388,7 @@ async function resolveChildNames(
   if (stats) stats.resolved = __resolvedCount
   if (__nullSigs.length > 0) {
     console.warn(`[diag:childres] PERCHILD parent=${(parentLayerSig || 'EMPTY').slice(0, 12)} children=${content.children.length} resolved=${out.size} NULL=${__nullSigs.length} nullSigs=[${__nullSigs.join(', ')}]`)
-  } else {
+  } else if (DIAG) {
     console.info(`[diag:childres] PERCHILD parent=${(parentLayerSig || 'EMPTY').slice(0, 12)} children=${content.children.length} all-resolved=${out.size}`)
   }
 
@@ -2579,7 +2586,7 @@ export class ShowCellDrone extends Drone {
         this.#incompleteResolveAttempts.set(gateKey, attempts)
         if (attempts <= ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS) {
           this.#recordRenderAudit('gate', union.size, locationKey)
-          console.info(`[diag:childres] GATE hold loc=${locationKey} attempt=${attempts}/${ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS} expected=${childResolveExpected} got=${union.size} — deferring partial`)
+          if (DIAG) console.info(`[diag:childres] GATE hold loc=${locationKey} attempt=${attempts}/${ShowCellDrone.#RESOLVE_GATE_MAX_ATTEMPTS} expected=${childResolveExpected} got=${union.size} — deferring partial`)
           // Force the next render past the fast-path skip and re-render with a
           // short backoff so the missing bytes land. Missing children resolve
           // ON DEMAND by signature (direct pool reads) — we do NOT brute-force
