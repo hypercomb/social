@@ -107,9 +107,13 @@ expiresAt }`. Policy via env vars:
   promise: "content isn't reachable" becomes structurally impossible.
   Share UX shape: mark → drain → receipts ("proving… 12 of 37") →
   announce arms only on completion.
-- **THE WORLDVIEW ICON IS THE SWITCH (Jaime, 2026-07-09):** one control,
-  three honest states — off / proving… / on-and-proven (receipts arm
-  it). OFF retracts per layer physics: mesh slots republish as EMPTY
+- **THE WORLDVIEW ICON IS THE SWITCH (Jaime, 2026-07-09):** one contract
+  worn by the TWO existing scoped controls — share TILE (closure=false:
+  proves the tile's own layer + resources, never children) and share
+  BRANCH (closure=true: proves the whole subtree) — each with three
+  honest states: off / proving… / on-and-proven (receipts arm it;
+  "proving N of M" counts that scope's closure). Existing exclusivity
+  (branch-on clears the tile flag and vice versa) carries over. OFF retracts per layer physics: mesh slots republish as EMPTY
   payloads immediately (#wipeSubtree, already built); the shelf can't be
   overwritten (content addressing — the integrity guarantee), so bytes
   go DARK instead: pushes stop, announcements stop, trails evaporate,
