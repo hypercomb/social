@@ -4,6 +4,18 @@
 Companions: `public-content-endpoint.md` (the shelf this curates),
 `optimize-phase.md` (where fields are minted).
 
+## Pheromones ARE the sharing layer (Jaime, 2026-07-09)
+
+Sharing has two halves: the shelf makes content AVAILABLE (receipts,
+bytes-before-broadcast); pheromones make it FOUND. A deposit is the
+copyless share — mark a tile and everyone whose filters trust your
+nose now finds it, while it stays where it was: one copy, one sig,
+still the author's. No reposts, no feeds — paths worn by walking. The
+mesh's ~90s events are the ephemeral half of broadcast; trails are the
+durable half, persisting exactly as long as anyone keeps caring.
+Roadmap consequence: the share switch and the mark verb are two hands
+of one gesture — design them within sight of each other.
+
 ## The idea, verbatim
 
 Tags are what an author says once. Pheromones are what the swarm keeps
