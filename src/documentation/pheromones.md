@@ -115,6 +115,20 @@ read-shape field (an array that only LOOKS in-layer). Open (and
 legitimately array-level if ever wanted): an author-declared hint of
 invited pheromone kinds — one writer, deliberate, travels, is truth.
 
+## Consumer contract (Jaime, 2026-07-09)
+
+Two verbs, no routing decisions:
+
+- **View** — any surface (community portal, host portal, tile panel)
+  reads the derived pheromone field through its own filter blend. Same
+  deposits everywhere, different noses per portal.
+- **Mark** — the consumer deposits on a tile; the deposit routes ITSELF
+  by the target's tier (public → global field; swarm → that host's
+  trails). Never a location choice, same doctrine as the share flow.
+
+Every mark is a signed record from the depositor's key — cheap for a
+person, expensive for a spammer.
+
 ## Sybil discipline (the one hard rule)
 
 Raw deposit-count is spammable for free. Intensity must be weighted by
