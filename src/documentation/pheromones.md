@@ -111,7 +111,12 @@ pool/history side:
 
 Deposits lose on every row → folder-level, settled. Array-level
 residents win every row: the author's own tags, and the derived
-read-shape field (an array that only LOOKS in-layer). Open (and
+read-shape field (an array that only LOOKS in-layer).
+
+The whole table collapses to one question, because **a layer is a
+container for sharing** (Jaime, 2026-07-09): *is this part of what I'd
+hand over?* In the container: what you're giving. Outside: everything
+about the shipment that isn't the gift. Open (and
 legitimately array-level if ever wanted): an author-declared hint of
 invited pheromone kinds — one writer, deliberate, travels, is truth.
 
