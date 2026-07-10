@@ -6,12 +6,11 @@
 // BYPASSES the review as an explicit override), its resource signature is
 // recorded here. The READER — essentials `feature-availability.ts` — checks the
 // same `hc:feature-verified` key at render time and lets the feature activate.
-// The two never import each other; they agree ONLY on this key + shape, exactly
-// as portal-overlay reads the shell-written `hc:feature-staging` key.
+// The two never import each other; they agree ONLY on this key + shape.
 //
 // Participant-local, localStorage only — never in any lineage. "Which features
-// have I personally vetted" is local trust state, like adopted-roots, viewport,
-// and feature-staging.
+// have I personally vetted" is local trust state, like adopted-roots and
+// viewport.
 
 const STORAGE_KEY = 'hc:feature-verified'
 const SIG_RE = /^[a-f0-9]{64}$/

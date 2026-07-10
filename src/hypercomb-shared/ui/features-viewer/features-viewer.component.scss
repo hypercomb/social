@@ -246,8 +246,11 @@ $accent: #c8b8ff;
 
 // ── hierarchy diff (held tile vs a peer's same-named copy) ────────
 // Missing children merge in per row; "yours only" is informational.
+// `.restore-btn` (the "Off — kept here" section's one-tap restore) shares the
+// same quiet accent-button look.
 .hier-add,
-.hier-add-all {
+.hier-add-all,
+.restore-btn {
   flex: 0 0 auto;
   align-self: center;
   background: rgba($accent, 0.14);
@@ -389,6 +392,15 @@ $accent: #c8b8ff;
       background: $accent;
       box-shadow: 0 0 6px rgba($accent, 0.5);
     }
+  }
+
+  // Gated rows: the switch is honest — OFF and not clickable. The chip +
+  // allow button on the row are the path to on.
+  &:disabled:not(.busy) {
+    opacity: 0.55;
+    cursor: default;
+
+    &:hover { border-color: rgba(255, 255, 255, 0.22); }
   }
 
   &.busy {
@@ -763,10 +775,10 @@ $path-fail: #e08a8a;     // failed terminal
   &:hover { color: $accent; }
 }
 
-// ── community-blocked line (gated applied rows) ───────────────────
-// The very small line: the feature is ON here but the community gate blocks
-// activation. Amber (caution, matching the review-bypass tone) with the
-// allow override at the end of the line.
+// ── community-gate line (gated applied rows) ──────────────────────
+// The switch is OFF + disabled; this line carries the row's ONE quiet status
+// chip ("needs your OK") with the allow override right beside it. Amber
+// (caution, matching the review-bypass tone), no motion.
 .feature-blocked {
   align-self: flex-start;
   display: inline-flex;
@@ -776,15 +788,21 @@ $path-fail: #e08a8a;     // failed terminal
   font-size: 0.62em;
   letter-spacing: 0.03em;
   color: rgba(255, 200, 150, 0.9);
+}
 
-  &::before {
-    content: '';
-    width: 0.55em;
-    height: 0.55em;
-    border-radius: 50%;
-    background: rgba(255, 180, 120, 0.85);
-    box-shadow: 0 0 5px rgba(255, 180, 120, 0.5);
-  }
+// Quiet status chip — same pill language as .feature-origin, in the existing
+// amber caution tones. Says what is true (needs the participant's OK) while
+// the adjacent allow button says what tapping will do.
+.needs-ok-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.04em 0.42em;
+  border-radius: 3px;
+  font-family: var(--hc-mono, monospace);
+  letter-spacing: 0.02em;
+  color: rgba(255, 200, 150, 0.9);
+  background: rgba(255, 180, 120, 0.1);
+  border: 1px solid rgba(255, 180, 120, 0.35);
 }
 
 .feature-deps {

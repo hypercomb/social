@@ -187,7 +187,7 @@
               <span class="section-label">{{ 'features.section.applied' | t }}</span>
               <span class="section-count">{{ visibleApplied(group).length }}</span>
             </div>
-            @if (visibleApplied(group).length === 0) {
+            @if (visibleApplied(group).length === 0 && hiddenApplied(group).length === 0) {
               <p class="section-empty">{{ 'features.applied.empty' | t }}</p>
             } @else {
               <ul class="features-list">
@@ -199,9 +199,11 @@
                     [class.off]="!isOn(group, feat)"
                     (click)="selectRow(group, feat)"
                   >
-                    <!-- Real on/off switch: ON = active here, OFF = present but
-                         inert — a turned-off local feature OR a peer feature
-                         you haven't adopted yet. Click flips it in place; for a
+                    <!-- Real on/off switch: shows RUNNING, only running. ON =
+                         active here; OFF = present but inert — a peer feature
+                         you haven't adopted yet, or a GATED feature (switch
+                         disabled: the chip + allow button beside it are the
+                         path to on). Click flips it in place; for a
                          not-yet-adopted feature the flip IS the individual add
                          (the only moment anything folds or downloads). The row
                          never disappears. -->
@@ -210,11 +212,11 @@
                       type="button"
                       [class.on]="isOn(group, feat)"
                       [class.busy]="isPending(group, feat)"
-                      [disabled]="isPending(group, feat)"
+                      [disabled]="isPending(group, feat) || feat.gated"
                       (click)="toggleActive(group, feat); $event.stopPropagation()"
                       [attr.aria-pressed]="isOn(group, feat)"
                       [attr.aria-label]="(isOn(group, feat) ? 'features.hide' : 'features.enable') | t"
-                      [attr.title]="(isOn(group, feat) ? 'features.hide.hint' : (feat.adopted === false ? 'features.enable.hint' : 'features.turnon.hint')) | t"
+                      [attr.title]="(feat.gated ? 'features.chip.needsOk' : isOn(group, feat) ? 'features.hide.hint' : (feat.adopted === false ? 'features.enable.hint' : 'features.turnon.hint')) | t"
                     ><span class="knob"></span></button>
                     <div class="feature-meta">
                       <span class="feature-name">{{ feat.label }}</span>
@@ -248,12 +250,14 @@
                       @if (dependencyHint(group, feat); as hint) {
                         <span class="feature-deps">{{ hint }}</span>
                       }
-                      <!-- Community gate: enabled here but BLOCKED from activating
-                           until allowed. The allow override sits at the end of the
-                           line (bulk-allow in the top bar covers many at once). -->
+                      <!-- Community gate: present here but INERT until allowed.
+                           The switch above is OFF + disabled (honest switch);
+                           this quiet chip says why, with the allow override
+                           right beside it (bulk-allow in the top bar covers
+                           many at once). -->
                       @if (feat.gated) {
                         <span class="feature-blocked">
-                          {{ 'features.blocked' | t }}
+                          <span class="needs-ok-chip">{{ 'features.chip.needsOk' | t }}</span>
                           <button
                             class="allow-btn"
                             type="button"
@@ -275,6 +279,32 @@
                         [attr.aria-label]="'features.open' | t"
                       >▶ {{ 'features.open' | t }}</button>
                     }
+                  </li>
+                }
+              </ul>
+            }
+
+            <!-- ── Off — kept here: features the participant turned off (the
+                 hidden pool). Nothing is deleted — restore turns one back on
+                 in place. Rendered only when something is actually off. ── -->
+            @if (hiddenApplied(group).length > 0) {
+              <div class="section-head">
+                <span class="section-label">{{ 'features.section.hidden' | t }}</span>
+                <span class="section-count">{{ hiddenApplied(group).length }}</span>
+              </div>
+              <ul class="features-list">
+                @for (feat of hiddenApplied(group); track feat.kind) {
+                  <li class="features-row off hidden-row">
+                    <div class="feature-meta">
+                      <span class="feature-name">{{ feat.label }}</span>
+                      <span class="feature-kind" [title]="feat.kind">{{ feat.kind }}</span>
+                    </div>
+                    <button
+                      class="restore-btn"
+                      type="button"
+                      (click)="restore(group, feat); $event.stopPropagation()"
+                      [attr.title]="'features.restore.hint' | t"
+                    >{{ 'features.restore' | t }}</button>
                   </li>
                 }
               </ul>

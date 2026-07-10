@@ -3,7 +3,6 @@ import { DomSanitizer, type SafeResourceUrl } from "@angular/platform-browser"
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { HcWidgetDirective } from '../widget-zoom/hc-widget.directive'
-import { stagedSigs } from '../features-viewer/feature-staging'
 
 const DEFAULT_PORTALS: Record<string, string> = {
   meadowverse: 'https://meadowverse.com',
@@ -280,19 +279,17 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
       }
     }
 
-    // Benign feature staging → installer pre-tick. The "show features" panel
-    // records wanted features' branch sigs (feature-staging.ts) as the
-    // participant runs through tiles. When the installer opens, hand them over
-    // as `#stage=<sig,…>`; DCP's #processStageHash ticks the matching nodes ON
-    // by default. Nothing folds until Done — this only sets checkbox state.
-    // Capped so the hash never grows pathological (DCP falls back gracefully).
+    // Explicit stage sigs → installer pre-tick. A headless code adopt hands
+    // the branch's bee/dep sigs in `detail.stage`; DCP's #processStageHash
+    // ticks the matching nodes ON by default. Nothing folds until Done — this
+    // only sets checkbox state. Capped so the hash never grows pathological
+    // (DCP falls back gracefully).
     if ((detail?.target ?? '') === 'dcp') {
-      // Merge the caller's explicit stage sigs (a headless code adopt pre-ticks
-      // the branch's bee/dep nodes) with the "show features" panel's staging.
-      const extra = Array.isArray(detail?.stage)
-        ? detail.stage.map(s => String(s ?? '').trim().toLowerCase()).filter(s => /^[a-f0-9]{64}$/.test(s))
-        : []
-      const sigs = [...new Set([...extra, ...stagedSigs()])].slice(0, 80)
+      const sigs = [...new Set(
+        (Array.isArray(detail?.stage) ? detail.stage : [])
+          .map(s => String(s ?? '').trim().toLowerCase())
+          .filter(s => /^[a-f0-9]{64}$/.test(s)),
+      )].slice(0, 80)
       if (sigs.length) url += (url.includes('#') ? '&' : '#') + `stage=${sigs.join(',')}`
     }
 

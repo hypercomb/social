@@ -8,9 +8,12 @@
 //   • On this layer — the features the tile already HAS (direct + cascaded),
 //     each tagged with where it comes from. The row's switch turns the
 //     feature OFF into the retainable hidden pool. A row the community gate
-//     BLOCKS carries a small "enabled — blocked" line with an inline allow
-//     override (markVerified bypass → `feature:verified` → the render gate
-//     re-reconciles and the feature activates).
+//     BLOCKS renders its switch OFF + disabled (the honest-switch rule: the
+//     switch shows RUNNING, never an inert "on") with a quiet "needs your OK"
+//     chip and an inline allow override (markVerified bypass →
+//     `feature:verified` → the render gate re-reconciles and it activates).
+//   • Off — kept here — features the participant turned off (the hidden
+//     pool). Nothing is deleted; each row has a one-tap restore.
 //   • Available to add — every feature the app knows that this layer does NOT
 //     have yet. The row's switch ADDS it — routed through the bee's OWN slash
 //     command (the same attach logic the command line's `@feature` uses), so
@@ -67,7 +70,8 @@ interface FeatureRow {
    *  anything folds or downloads. Absent = on the local layer. */
   adopted?: boolean
   /** True when the community verification gate currently blocks activation —
-   *  the row shows the "enabled — blocked" line + allow override. */
+   *  the row's switch renders OFF + disabled with the "needs your OK" chip
+   *  and the allow override beside it. */
   gated?: boolean
   /** The payload sig the gate evaluates — what the allow override verifies. */
   gateSig?: string
@@ -515,18 +519,34 @@ export class FeaturesViewerComponent implements OnDestroy {
     return this.#hiddenKeys().has(this.rowKey(group, feat))
   }
 
-  /** Every feature ON THIS LAYER — both active AND turned-off. Turning a
-   *  feature off does NOT remove it from the list (it just flips its switch);
-   *  "off" reads the same as "not adopted", so the row stays put and one click
-   *  turns it back on. */
+  /** The "On this layer" rows — every applied feature EXCEPT the turned-off
+   *  ones, which move to the "Off — kept here" section below. Nothing is
+   *  deleted by turning a feature off; its row just changes section. */
   visibleApplied(group: FeatureGroup): FeatureRow[] {
-    return group.applied
+    return group.applied.filter(f => !this.isHidden(group, f))
   }
 
-  /** Is this row's switch ON? A not-yet-adopted peer feature is always OFF;
-   *  a local feature is ON unless it's in the hidden pool. */
+  /** The "Off — kept here" rows — applied features the participant turned off
+   *  (their identity sits in the hidden pool). Each has a one-tap restore;
+   *  the section is omitted entirely when this is empty. */
+  hiddenApplied(group: FeatureGroup): FeatureRow[] {
+    return group.applied.filter(f => this.isHidden(group, f))
+  }
+
+  /** Restore a turned-off feature — the hidden section's one-tap action.
+   *  Same path as flipping the old in-list switch back on. */
+  restore(group: FeatureGroup, feat: FeatureRow): void {
+    void this.#turnOn(group, feat)
+  }
+
+  /** Is this row's switch ON? The switch shows RUNNING — only running. A
+   *  not-yet-adopted peer feature is always OFF; a GATED feature is inert, so
+   *  its switch never renders on (the honest-switch rule — the "needs your
+   *  OK" chip + allow button carry the story); a local feature is ON unless
+   *  it's in the hidden pool. */
   isOn(group: FeatureGroup, feat: FeatureRow): boolean {
     if (feat.adopted === false) return false
+    if (feat.gated) return false
     return !this.isHidden(group, feat)
   }
 
@@ -547,6 +567,9 @@ export class FeaturesViewerComponent implements OnDestroy {
    *   • local + off → on: its pool member removed (the gate re-mounts). */
   async toggleActive(group: FeatureGroup, feat: FeatureRow): Promise<void> {
     if (feat.adopted === false) { this.#adoptFeature(group, feat); return }
+    // Gated = inert: the switch is disabled in the template; guard here too so
+    // nothing ever writes a hidden record for a feature that isn't running.
+    if (feat.gated) return
     if (this.isHidden(group, feat)) await this.#turnOn(group, feat)
     else await this.#turnOff(group, feat)
   }
