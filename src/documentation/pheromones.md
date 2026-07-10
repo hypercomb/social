@@ -81,6 +81,40 @@ hardcode the hex.
 | Filter | participant-local blend: which kinds count, whose deposits count, thresholds — never global, never in history |
 | Trails feeding layout | meaning-curved geometry + proximity warming can read intensity later |
 
+## Global field, local noses (Jaime, 2026-07-09)
+
+Pheromones are GLOBAL — one shared environment, like a forest floor:
+deposits propagate to everyone, the field is universal. Reading stays
+participant-local (filters, trust blends): global substrate, local
+interpretation — never global consensus, which would be moderation in a
+costume. Mechanics are free: deposits are tiny signed records riding the
+mesh like any event; append-only histories union-merge commutatively
+(the marks+merge model); the public endpoint shelves deposit records for
+cold reads. Scoping rule: **a pheromone inherits the tier of its
+target** — public content's trails are global (CDN + relays), swarm
+content's trails stay host-anchored. Going global promotes the sybil
+rule from advisory to load-bearing.
+
+## Array vs folder — the decision rule (generalizes beyond pheromones)
+
+Six questions; one right-column answer pushes the whole datum to the
+pool/history side:
+
+| Question | Array (in layer) | Folder (pool/history) |
+|---|---|---|
+| Who writes it? | author alone | many writers |
+| Changes content identity? | yes — part of what it IS | no — it's ABOUT the thing |
+| Tempo? | authoring commits | ambient/decaying/counted |
+| Travels with adoption? | intrinsic, in the closure | extrinsic, per context |
+| Cold-rebuild test? | it IS truth | derivable → cache pool; else own pool of meaning |
+| Attribution? | author vouches once | per-record signatures |
+
+Deposits lose on every row → folder-level, settled. Array-level
+residents win every row: the author's own tags, and the derived
+read-shape field (an array that only LOOKS in-layer). Open (and
+legitimately array-level if ever wanted): an author-declared hint of
+invited pheromone kinds — one writer, deliberate, travels, is truth.
+
 ## Sybil discipline (the one hard rule)
 
 Raw deposit-count is spammable for free. Intensity must be weighted by
