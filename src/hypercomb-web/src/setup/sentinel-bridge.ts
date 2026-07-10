@@ -313,6 +313,14 @@ export class SentinelBridge {
 export const initSentinel = async (): Promise<SentinelBridge | null> => {
   return new Promise<SentinelBridge | null>((resolve) => {
     const iframe = document.createElement('iframe')
+    // Sandbox the transaction channel (dcp-single-door.md, gap 3), set BEFORE
+    // src so the policy applies to the initial load. allow-same-origin is
+    // relative to the DCP origin — DCP keeps its own OPFS/storage while
+    // remaining cross-origin to the hive; the sandbox denies top-navigation,
+    // popups, forms, downloads. Matches the visible portal iframe convention
+    // (portal-overlay.component.html) minus allow-forms, which a headless
+    // transaction channel never needs.
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin')
     iframe.src = `${DCP_ORIGIN}/sentinel`
     iframe.style.display = 'none'
     iframe.setAttribute('aria-hidden', 'true')

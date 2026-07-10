@@ -93,13 +93,29 @@ const attachImportMap = async (): Promise<void> => {
 
 const bootstrap = async (): Promise<void> => {
   ;(window as any).__hcBoot('bootstrap() started')
-  await ensureSwControl()
 
-  // Hand the service worker the host domains (self + community) so an
-  // embedded-site /@resource/<sig> request can stream from a host on an OPFS
-  // miss. The SW has no localStorage/IoC, so the page must post them.
-  await postCommunityDomainsToServiceWorker()
-  ;(window as any).__hcBoot('ensureSwControl + sw-domains done')
+  // SW readiness runs OVERLAPPED with the install chain instead of gating it.
+  // ensureSwControl can block up to 1500ms waiting for controllerchange on a
+  // first visit / worker update, and nothing in ensureInstall → attachImportMap
+  // → loader.load() depends on page control (the SW's /@resource/ route serves
+  // embedded-site composition only — see ensureSwControl's hard-reload note;
+  // every hard reload already boots fully uncontrolled). Relative order INSIDE
+  // the chain is preserved: domains are posted only after control is ensured,
+  // so the message reaches the controlling/active worker as before. The chain
+  // is awaited below, before bootstrapApplication, so the end state at first
+  // paint is unchanged.
+  const swChain = (async () => {
+    await ensureSwControl()
+    // Hand the service worker the host domains (self + community) so an
+    // embedded-site /@resource/<sig> request can stream from a host on an OPFS
+    // miss. The SW has no localStorage/IoC, so the page must post them.
+    await postCommunityDomainsToServiceWorker()
+    ;(window as any).__hcBoot('ensureSwControl + sw-domains done')
+  })()
+  // Keep a handler attached from the start so a rejection during the install
+  // overlap can't surface as an unhandledrejection; the real `await swChain`
+  // below rethrows it, preserving the serial chain's abort-boot semantics.
+  swChain.catch(() => {})
 
   // Capture install state BEFORE ensureInstall so the cold-install path
   // is detectable. ensureInstall flips this flag when the first sync
@@ -137,6 +153,12 @@ const bootstrap = async (): Promise<void> => {
   // web didn't, which is why the error showed on 4200 but not 4250.
   await initializeRuntime({ logOpfs: false })
   ;(window as any).__hcBoot('initializeRuntime done')
+
+  // Join the overlapped SW chain before Angular boots: same guarantee as the
+  // old serial order (SW controlled + domains posted before first paint), and
+  // a failure aborts boot exactly like it did when the chain was awaited
+  // up top (rethrows into bootstrap().catch).
+  await swChain
 
   const appRef = await bootstrapApplication(App, appConfig)
   ;(window as any).__hcBoot('bootstrapApplication done (Angular first paint)')

@@ -135,42 +135,65 @@ const _runInitializeRuntime = async (
   // Legacy layer-tree materialization removed. Layers are the only source
   // of truth for hierarchy; no on-disk mirror.
 
-  // Load host translations for the i18n service
+  // Load host translations for the i18n service — LAZILY. Only the ACTIVE
+  // locale (?lang → hc:locale → browser, resolved by LocalizationService's
+  // constructor and exposed as i18n.locale) plus the 'en' fallback are needed
+  // before first paint; importing + registering all 14 catalogs here was pure
+  // pre-paint weight. The remaining catalogs load in a detached idle task.
+  // A locale SWITCH to a not-yet-loaded catalog is safe twice over:
+  //   1. setLocale emits 'locale:changed' (EffectBus) → we load that catalog
+  //      immediately, without waiting for the idle sweep; and
+  //   2. registerTranslations dispatches the service's coalesced 'change'
+  //      event, so even a catalog that lands AFTER the switch re-renders
+  //      every `t` binding the moment it registers (keys show untranslated
+  //      only for the brief import gap — same as any cold catalog fetch).
   const i18n = get('@hypercomb.social/I18n') as LocalizationService | undefined
   if (i18n) {
-    try {
-      const [en, ja, zh, es, ar, pt, fr, de, ko, ru, hi, id, tr, it] = await Promise.all([
-        import('../i18n/en.json', { with: { type: 'json' } }),
-        import('../i18n/ja.json', { with: { type: 'json' } }),
-        import('../i18n/zh.json', { with: { type: 'json' } }),
-        import('../i18n/es.json', { with: { type: 'json' } }),
-        import('../i18n/ar.json', { with: { type: 'json' } }),
-        import('../i18n/pt.json', { with: { type: 'json' } }),
-        import('../i18n/fr.json', { with: { type: 'json' } }),
-        import('../i18n/de.json', { with: { type: 'json' } }),
-        import('../i18n/ko.json', { with: { type: 'json' } }),
-        import('../i18n/ru.json', { with: { type: 'json' } }),
-        import('../i18n/hi.json', { with: { type: 'json' } }),
-        import('../i18n/id.json', { with: { type: 'json' } }),
-        import('../i18n/tr.json', { with: { type: 'json' } }),
-        import('../i18n/it.json', { with: { type: 'json' } }),
-      ])
-      i18n.registerTranslations('app', 'en', en.default)
-      i18n.registerTranslations('app', 'ja', ja.default)
-      i18n.registerTranslations('app', 'zh', zh.default)
-      i18n.registerTranslations('app', 'es', es.default)
-      i18n.registerTranslations('app', 'ar', ar.default)
-      i18n.registerTranslations('app', 'pt', pt.default)
-      i18n.registerTranslations('app', 'fr', fr.default)
-      i18n.registerTranslations('app', 'de', de.default)
-      i18n.registerTranslations('app', 'ko', ko.default)
-      i18n.registerTranslations('app', 'ru', ru.default)
-      i18n.registerTranslations('app', 'hi', hi.default)
-      i18n.registerTranslations('app', 'id', id.default)
-      i18n.registerTranslations('app', 'tr', tr.default)
-      i18n.registerTranslations('app', 'it', it.default)
-    } catch { /* translations unavailable — graceful degradation */ }
-    ;(window as any).__hcBoot?.('i18n catalogs loaded')
+    const catalogLoaders: Record<string, () => Promise<{ default: Record<string, string> }>> = {
+      en: () => import('../i18n/en.json', { with: { type: 'json' } }),
+      ja: () => import('../i18n/ja.json', { with: { type: 'json' } }),
+      zh: () => import('../i18n/zh.json', { with: { type: 'json' } }),
+      es: () => import('../i18n/es.json', { with: { type: 'json' } }),
+      ar: () => import('../i18n/ar.json', { with: { type: 'json' } }),
+      pt: () => import('../i18n/pt.json', { with: { type: 'json' } }),
+      fr: () => import('../i18n/fr.json', { with: { type: 'json' } }),
+      de: () => import('../i18n/de.json', { with: { type: 'json' } }),
+      ko: () => import('../i18n/ko.json', { with: { type: 'json' } }),
+      ru: () => import('../i18n/ru.json', { with: { type: 'json' } }),
+      hi: () => import('../i18n/hi.json', { with: { type: 'json' } }),
+      id: () => import('../i18n/id.json', { with: { type: 'json' } }),
+      tr: () => import('../i18n/tr.json', { with: { type: 'json' } }),
+      it: () => import('../i18n/it.json', { with: { type: 'json' } }),
+    }
+    const loadedLocales = new Set<string>()
+    const loadLocale = async (locale: string): Promise<void> => {
+      const loader = catalogLoaders[locale]
+      if (!loader || loadedLocales.has(locale)) return
+      loadedLocales.add(locale)
+      try {
+        const catalog = await loader()
+        i18n.registerTranslations('app', locale, catalog.default)
+      } catch { /* translations unavailable — graceful degradation */ }
+    }
+
+    // Eager: fallback + active. 'en' is the service's hard fallback locale
+    // (i18n.service.ts FALLBACK_LOCALE) — #resolve consults it for every
+    // missing key, so it must be present at first paint regardless of locale.
+    await Promise.all([loadLocale('en'), loadLocale(i18n.locale)])
+    ;(window as any).__hcBoot?.('i18n catalogs loaded', 'active+en eager, rest idle-deferred')
+
+    // Switch-safety: load the target catalog the moment the locale changes.
+    EffectBus.on<{ locale: string }>('locale:changed', ({ locale }) => { void loadLocale(locale) })
+
+    // Detached idle task for the remaining catalogs — never on the paint path.
+    {
+      const loadRest = (): void => {
+        for (const locale of Object.keys(catalogLoaders)) void loadLocale(locale)
+      }
+      const ric = (window as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback
+      if (typeof ric === 'function') ric(loadRest, { timeout: 3000 })
+      else setTimeout(loadRest, 250)
+    }
 
     // User override layer — a CONTENT-ADDRESSED document in the
     // sign('overrides') document pool, shape { "<locale>": { "<key>":
