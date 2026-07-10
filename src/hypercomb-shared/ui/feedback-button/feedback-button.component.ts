@@ -12,6 +12,7 @@
 // Shell UI: it NEVER imports essentials. It talks to the runtime through
 // window.ioc (the local `get` helper) and EffectBus only.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, signal } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { EffectBus } from '@hypercomb/core'
@@ -215,3 +216,12 @@ export class FeedbackButtonComponent {
     })
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-feedback-button',
+  owner: '@hypercomb.shared/FeedbackButtonComponent',
+  component: FeedbackButtonComponent,
+  order: 190,
+})

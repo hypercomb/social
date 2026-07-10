@@ -32,6 +32,7 @@
 // only through window.ioc at runtime, and gate state arrives pre-computed on
 // the `features:open` payload.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, computed, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -974,3 +975,12 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.close()
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-features-viewer',
+  owner: '@hypercomb.shared/FeaturesViewerComponent',
+  component: FeaturesViewerComponent,
+  order: 120,
+})

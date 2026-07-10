@@ -13,6 +13,7 @@
 // Headless by design — no template, no chrome. Shell UI never imports
 // essentials; ViewMode is resolved at call time through window.ioc.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, OnDestroy } from '@angular/core'
 
 /** Runtime service locator — shared must never statically import essentials, so
@@ -61,3 +62,12 @@ export class WebsiteNavComponent implements OnDestroy {
     if ((launcher?.get(WEBSITES)?.members().length ?? 0) > 0) launcher!.show(WEBSITES)
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-website-nav',
+  owner: '@hypercomb.shared/WebsiteNavComponent',
+  component: WebsiteNavComponent,
+  order: 210,
+})

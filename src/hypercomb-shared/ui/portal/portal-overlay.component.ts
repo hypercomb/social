@@ -1,3 +1,4 @@
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { ChangeDetectorRef, Component, inject, type OnInit, type OnDestroy } from "@angular/core"
 import { DomSanitizer, type SafeResourceUrl } from "@angular/platform-browser"
 import { EffectBus } from '@hypercomb/core'
@@ -659,3 +660,12 @@ export class PortalOverlayComponent implements OnInit, OnDestroy {
     if (wasDcp) window.dispatchEvent(new CustomEvent('actions:available'))
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-portal-overlay',
+  owner: '@hypercomb.shared/PortalOverlayComponent',
+  component: PortalOverlayComponent,
+  order: 230,
+})

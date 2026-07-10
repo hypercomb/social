@@ -4,6 +4,7 @@
 // sections (slash commands, command-line operations, keyboard shortcuts) with
 // a shared filter input. No business logic — the drone owns the data.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import {
   Component,
   computed,
@@ -133,3 +134,12 @@ export class ShortcutSheetComponent implements OnInit, OnDestroy {
     this.#unsub?.()
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-shortcut-sheet',
+  owner: '@hypercomb.shared/ShortcutSheetComponent',
+  component: ShortcutSheetComponent,
+  order: 300,
+})

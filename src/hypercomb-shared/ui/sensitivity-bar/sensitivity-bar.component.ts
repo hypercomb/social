@@ -3,6 +3,7 @@
 // Minimal vertical bar at left screen edge showing current touch sensitivity.
 // Appears during two-finger sensitivity swipe, fades 1s after gesture ends.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, signal, type OnInit, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 
@@ -124,3 +125,12 @@ export class SensitivityBarComponent implements OnInit, OnDestroy {
     if (this.#hideTimer) { clearTimeout(this.#hideTimer); this.#hideTimer = null }
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-sensitivity-bar',
+  owner: '@hypercomb.shared/SensitivityBarComponent',
+  component: SensitivityBarComponent,
+  order: 280,
+})

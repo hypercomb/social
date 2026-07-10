@@ -3,6 +3,7 @@
 // Listens for 'mesh:open-modal' to open, broadcasts 'mesh:modal-open'
 // while open so the controls-bar can highlight the trigger.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, signal, computed, type OnInit, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { fromRuntime } from '../../core/from-runtime'
@@ -238,3 +239,12 @@ export class MeshModalComponent implements OnInit, OnDestroy {
     EffectBus.emit('mesh:secret-draft', { secret: null })
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-mesh-modal',
+  owner: '@hypercomb.shared/MeshModalComponent',
+  component: MeshModalComponent,
+  order: 260,
+})

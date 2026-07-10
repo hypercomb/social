@@ -25,6 +25,7 @@
 // processor's 'mesh:public-changed' broadcast (last-value replay →
 // correct on mount, even if we subscribe after the initial emit).
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, signal, computed, effect, viewChild, type ElementRef, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -339,3 +340,12 @@ export class PresenceBannerComponent implements OnInit, OnDestroy {
     return h % 360
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-presence-banner',
+  owner: '@hypercomb.shared/PresenceBannerComponent',
+  component: PresenceBannerComponent,
+  order: 330,
+})

@@ -8,6 +8,7 @@
 // Moving the mouse or clicking the backdrop reveals the chrome; it auto-hides
 // again after a timeout.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, HostListener, signal } from '@angular/core'
 import { DomSanitizer, type SafeResourceUrl } from '@angular/platform-browser'
 import { EffectBus } from '@hypercomb/core'
@@ -139,3 +140,12 @@ export class YoutubeViewerComponent {
     }
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-youtube-viewer',
+  owner: '@hypercomb.shared/YoutubeViewerComponent',
+  component: YoutubeViewerComponent,
+  order: 350,
+})

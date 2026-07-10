@@ -1,6 +1,7 @@
 // hypercomb-shared/ui/selection-context-menu/selection-context-menu.component.ts
 // Floating vertical icon toolbar — appears when tiles are selected.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import {
   Component,
   computed,
@@ -291,3 +292,12 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
     this.#posY.set(this.#clampY(this.#posY()))
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-selection-context-menu',
+  owner: '@hypercomb.shared/SelectionContextMenuComponent',
+  component: SelectionContextMenuComponent,
+  order: 1,
+})

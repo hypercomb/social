@@ -5,6 +5,7 @@
 // sliders, text inputs, toggles, etc.). Editing a property calls
 // atomizer.apply() in real time.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import {
   Component,
   computed,
@@ -132,3 +133,12 @@ export class AtomizerSidebarComponent implements OnInit, OnDestroy {
     this.onPropertyChange(prop, el.value)
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-atomizer-sidebar',
+  owner: '@hypercomb.shared/AtomizerSidebarComponent',
+  component: AtomizerSidebarComponent,
+  order: 400,
+})

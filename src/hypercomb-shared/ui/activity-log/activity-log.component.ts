@@ -1,6 +1,7 @@
 // hypercomb-shared/ui/activity-log/activity-log.component.ts
 // Minimal activity log — shows recent hive operations as auto-dismissing line items.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import {
   ApplicationRef,
   Component,
@@ -161,3 +162,12 @@ export class ActivityLogComponent implements OnDestroy {
     this.#appRef.tick()
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-activity-log',
+  owner: '@hypercomb.shared/ActivityLogComponent',
+  component: ActivityLogComponent,
+  order: 360,
+})

@@ -10,6 +10,7 @@
 // going through one place that knows about gold lighting and history
 // commit.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, computed, effect, signal, type OnDestroy } from '@angular/core'
 import { NgTemplateOutlet } from '@angular/common'
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
@@ -298,3 +299,12 @@ export class NotesViewerComponent implements OnDestroy {
     return get('@hypercomb.social/I18n') as I18nProvider | undefined
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-notes-viewer',
+  owner: '@hypercomb.shared/NotesViewerComponent',
+  component: NotesViewerComponent,
+  order: 100,
+})

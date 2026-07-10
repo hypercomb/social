@@ -7,6 +7,7 @@
 // decoration. Shell UI — must NOT import essentials. The optional "import
 // .vcf" button parses a vCard locally to prefill the fields.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, signal, type OnDestroy } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import { EffectBus } from '@hypercomb/core'
@@ -128,3 +129,12 @@ export class ContactFormComponent implements OnDestroy {
     }
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-contact-form',
+  owner: '@hypercomb.shared/ContactFormComponent',
+  component: ContactFormComponent,
+  order: 160,
+})

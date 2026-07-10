@@ -11,6 +11,7 @@
 //
 // Drives in lockstep with alt+wheel via the shared SpotlightService.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import {
   Component,
   computed,
@@ -140,3 +141,12 @@ export class LayerCycleStripComponent implements OnInit, OnDestroy {
     else spotlight.set(entry.pubkey)
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-layer-cycle-strip',
+  owner: '@hypercomb.shared/LayerCycleStripComponent',
+  component: LayerCycleStripComponent,
+  order: 310,
+})

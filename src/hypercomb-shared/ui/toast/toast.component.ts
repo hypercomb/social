@@ -3,6 +3,7 @@
 // Renders stacked toast notifications. Subscribes to ToastDrone state via
 // fromRuntime(). No business logic — just rendering + forwarding actions.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, computed, type OnDestroy } from '@angular/core'
 import { fromRuntime } from '../../core/from-runtime'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -59,3 +60,12 @@ export class ToastComponent implements OnDestroy {
     this.#drone = undefined
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-toast',
+  owner: '@hypercomb.shared/ToastComponent',
+  component: ToastComponent,
+  order: 320,
+})

@@ -4,46 +4,18 @@ import { upgradeFromBundled, checkForUpdate, type BootStatus } from '../setup/en
 import { RouterOutlet } from '@angular/router'
 import { Header } from './header/header'
 import { CoreAdapter } from './core-adapter'
-import { TileEditorComponent } from "@hypercomb/shared/ui/tile-editor/tile-editor.component"
 import { ControlsBarComponent } from "@hypercomb/shared/ui/controls-bar/controls-bar.component"
 import { EditActionsComponent } from "@hypercomb/shared/ui/edit-actions/edit-actions.component"
 import { MeshHeaderComponent } from "@hypercomb/shared/ui/mesh-header/mesh-header.component"
-import { PortalOverlayComponent } from "@hypercomb/shared/ui/portal/portal-overlay.component"
-import { SensitivityBarComponent } from "@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component"
-import { SelectionContextMenuComponent } from "@hypercomb/shared/ui/selection-context-menu/selection-context-menu.component"
-import { ConfirmDialogComponent } from "@hypercomb/shared/ui/confirm-dialog/confirm-dialog.component"
-import { DocsOverlayComponent } from "@hypercomb/shared/ui/docs-overlay/docs-overlay.component"
-import { ShortcutSheetComponent } from "@hypercomb/shared/ui/shortcut-sheet/shortcut-sheet.component"
-import { HistoryViewerComponent } from "@hypercomb/shared/ui/history-viewer/history-viewer.component"
 import { ShellSurfacesComponent } from "@hypercomb/shared/ui/shell-surfaces/shell-surfaces.component"
-import { NotesViewerComponent } from "@hypercomb/shared/ui/notes-viewer/notes-viewer.component"
-import { FilesViewerComponent } from "@hypercomb/shared/ui/files-viewer/files-viewer.component"
-import { FeaturesViewerComponent } from "@hypercomb/shared/ui/features-viewer/features-viewer.component"
-import { TagsViewerComponent } from "@hypercomb/shared/ui/tags-viewer/tags-viewer.component"
-import { ObserveViewerComponent } from "@hypercomb/shared/ui/observe-viewer/observe-viewer.component"
-import { ClipboardPanelComponent } from "@hypercomb/shared/ui/clipboard-panel/clipboard-panel.component"
-import { ContactFormComponent } from "@hypercomb/shared/ui/contact-card/contact-form.component"
-import { ContactHoverComponent } from "@hypercomb/shared/ui/contact-card/contact-hover.component"
-import { ActionCardComponent } from "@hypercomb/shared/ui/action-card/action-card.component"
-import { FeedbackButtonComponent } from "@hypercomb/shared/ui/feedback-button/feedback-button.component"
-import { FeedbackViewerComponent } from "@hypercomb/shared/ui/feedback-viewer/feedback-viewer.component"
-import { WebsiteNavComponent } from "@hypercomb/shared/ui/website-nav/website-nav.component"
-import { IconPickerComponent } from "@hypercomb/shared/ui/icon-picker/icon-picker.component"
-import { MeshModalComponent } from "@hypercomb/shared/ui/mesh-modal/mesh-modal.component"
-import { TrustPromptComponent } from "@hypercomb/shared/ui/trust-prompt/trust-prompt.component"
-import { LayerCycleStripComponent } from "@hypercomb/shared/ui/layer-cycle-strip/layer-cycle-strip.component"
-import { ToastComponent } from "@hypercomb/shared/ui/toast/toast.component"
-import { PresenceBannerComponent } from "@hypercomb/shared/ui/presence-banner/presence-banner.component"
 import { SyncIndicatorComponent } from "@hypercomb/shared/ui/sync-indicator/sync-indicator.component"
 import { UpgradeIndicatorComponent } from "@hypercomb/shared/ui/upgrade-indicator/upgrade-indicator.component"
-import { SwarmAdoptPanelComponent } from "@hypercomb/shared/ui/swarm-adopt-panel/swarm-adopt-panel.component"
-import { YoutubeViewerComponent } from "@hypercomb/shared/ui/youtube-viewer/youtube-viewer.component"
 import { TranslatePipe } from "@hypercomb/shared/core/i18n.pipe"
 
 @Component({
   selector: 'app-root',
   standalone: true,
-  imports: [RouterOutlet, Header, TranslatePipe, MeshHeaderComponent, TileEditorComponent, ControlsBarComponent, EditActionsComponent, PortalOverlayComponent, SensitivityBarComponent, SelectionContextMenuComponent, ConfirmDialogComponent, DocsOverlayComponent, ShortcutSheetComponent, HistoryViewerComponent, ShellSurfacesComponent, NotesViewerComponent, FilesViewerComponent, FeaturesViewerComponent, TagsViewerComponent, ObserveViewerComponent, ClipboardPanelComponent, ContactFormComponent, ContactHoverComponent, ActionCardComponent, FeedbackButtonComponent, FeedbackViewerComponent, WebsiteNavComponent, IconPickerComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, ToastComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent, YoutubeViewerComponent],
+  imports: [RouterOutlet, Header, TranslatePipe, MeshHeaderComponent, ControlsBarComponent, EditActionsComponent, ShellSurfacesComponent, SyncIndicatorComponent, UpgradeIndicatorComponent],
   templateUrl: './app.html',
   styleUrl: './app.scss'
 })

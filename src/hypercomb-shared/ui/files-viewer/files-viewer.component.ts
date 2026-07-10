@@ -10,6 +10,7 @@
 // for the per-row badge and the top type-filter bar, downloads via the
 // Store (shared/core), and asks the drone to detach via `files:remove`.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, computed, signal, type OnDestroy } from '@angular/core'
 import { EffectBus, type I18nProvider } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -182,3 +183,12 @@ export class FilesViewerComponent implements OnDestroy {
     return get('@hypercomb.social/I18n') as I18nProvider | undefined
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-files-viewer',
+  owner: '@hypercomb.shared/FilesViewerComponent',
+  component: FilesViewerComponent,
+  order: 110,
+})

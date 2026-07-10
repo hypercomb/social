@@ -3,6 +3,7 @@
 // Subscribes to FormatPainterDrone state and renders a right-side panel
 // with property entries (color swatches + checkboxes) and an Apply button.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { ChangeDetectorRef, Component, computed, inject, signal, type OnInit, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -61,3 +62,12 @@ export class FormatPainterComponent implements OnInit, OnDestroy {
     for (const unsub of this.#unsubs) unsub()
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-format-painter',
+  owner: '@hypercomb.shared/FormatPainterComponent',
+  component: FormatPainterComponent,
+  order: 380,
+})

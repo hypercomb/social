@@ -13,6 +13,7 @@
 // Nothing else. Pins are page-scoped: they belong to the launcher page and
 // re-show when you come back to it.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component } from '@angular/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import { PinnableHoverBase } from '../pinnable/pinnable-hover.base'
@@ -118,3 +119,12 @@ export class ActionCardComponent extends PinnableHoverBase<ActionCardData> {
     }
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-action-card',
+  owner: '@hypercomb.shared/ActionCardComponent',
+  component: ActionCardComponent,
+  order: 180,
+})

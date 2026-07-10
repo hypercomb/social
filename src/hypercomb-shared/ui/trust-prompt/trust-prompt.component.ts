@@ -9,6 +9,7 @@
 // Multiple back-to-back checks are queued — only one prompt visible at a
 // time. The caller's promise stays pending until the user responds.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, signal, computed, type OnInit, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -70,3 +71,12 @@ export class TrustPromptComponent implements OnInit, OnDestroy {
     this.#queue.update((q) => q.slice(1))
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-trust-prompt',
+  owner: '@hypercomb.shared/TrustPromptComponent',
+  component: TrustPromptComponent,
+  order: 270,
+})

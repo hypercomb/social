@@ -27,6 +27,7 @@
 // Placing emits the eager `cell:added` path in the clipboard worker, so the
 // dropped tile renders on the page IMMEDIATELY — no refresh, no navigation.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, computed, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -596,3 +597,12 @@ export class ClipboardPanelComponent implements OnDestroy {
     this.thumbs.set({})
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-clipboard-panel',
+  owner: '@hypercomb.shared/ClipboardPanelComponent',
+  component: ClipboardPanelComponent,
+  order: 150,
+})

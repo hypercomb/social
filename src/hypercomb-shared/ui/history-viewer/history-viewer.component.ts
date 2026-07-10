@@ -8,6 +8,7 @@
 //
 // Clicking a row seeks the HistoryCursor to that entry.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { AfterViewInit, Component, ElementRef, computed, effect, inject, signal, type OnDestroy, type OnInit } from '@angular/core'
 import { EffectBus, IconRef, type IconRef as IconRefType } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -1399,3 +1400,12 @@ function sequenceEqual<T>(a: readonly T[], b: readonly T[]): boolean {
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
   return true
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-history-viewer',
+  owner: '@hypercomb.shared/HistoryViewerComponent',
+  component: HistoryViewerComponent,
+  order: 2,
+})

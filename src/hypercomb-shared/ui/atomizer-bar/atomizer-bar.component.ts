@@ -4,6 +4,7 @@
 // Drag an atomizer onto any matching control to break it apart and expose
 // its configurable properties in a sidebar.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import {
   Component,
   computed,
@@ -120,3 +121,12 @@ export class AtomizerBarComponent implements OnInit, OnDestroy {
     EffectBus.emit('atomizer:drag-end', {})
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-atomizer-bar',
+  owner: '@hypercomb.shared/AtomizerBarComponent',
+  component: AtomizerBarComponent,
+  order: 390,
+})

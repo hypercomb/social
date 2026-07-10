@@ -16,6 +16,7 @@
 // names are off; the panel falls back to a truncated pubkey — a neutral id that
 // still distinguishes peers without revealing who.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -130,3 +131,12 @@ export class ObserveViewerComponent implements OnDestroy {
     return g === 'participant' || g === 'domain' ? g : 'flat'
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-observe-viewer',
+  owner: '@hypercomb.shared/ObserveViewerComponent',
+  component: ObserveViewerComponent,
+  order: 140,
+})

@@ -1,6 +1,7 @@
 // hypercomb-shared/ui/tile-editor/tile-editor.component.ts
 // Tile editor with image manager, link, and border color fields.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import {
   Component,
   computed,
@@ -494,3 +495,12 @@ export class TileEditorComponent implements OnInit, AfterViewInit, OnDestroy {
 
 // ── helpers ──────────────────────────────────────────────────
 
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-tile-editor',
+  owner: '@hypercomb.shared/TileEditorComponent',
+  component: TileEditorComponent,
+  order: 220,
+})

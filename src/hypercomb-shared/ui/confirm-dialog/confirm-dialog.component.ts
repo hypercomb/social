@@ -4,6 +4,7 @@
 // modal dialog. Responds with 'confirm:response' on user decision.
 // Escape key and backdrop click dismiss as cancel.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, signal, computed, type OnInit, type OnDestroy } from '@angular/core'
 import { EffectBus, type ConfirmRequest, type ConfirmResponse } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -57,3 +58,12 @@ export class ConfirmDialogComponent implements OnInit, OnDestroy {
     this.request.set(null)
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-confirm-dialog',
+  owner: '@hypercomb.shared/ConfirmDialogComponent',
+  component: ConfirmDialogComponent,
+  order: 240,
+})

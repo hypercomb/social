@@ -4,6 +4,7 @@
 // Forwards input changes and keyboard navigation back to the drone
 // via EffectBus effects. No business logic lives here.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import {
   Component,
   computed,
@@ -175,3 +176,12 @@ export class CommandPaletteComponent implements OnInit, AfterViewChecked, OnDest
     return window.ioc?.get<InputGateLike>('@diamondcoreprocessor.com/InputGate')
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-command-palette',
+  owner: '@hypercomb.shared/CommandPaletteComponent',
+  component: CommandPaletteComponent,
+  order: 370,
+})

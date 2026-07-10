@@ -15,6 +15,7 @@
 // `render:tags` (show-cell's per-page aggregation); both are sticky on the bus
 // so a freshly-opened panel hydrates immediately.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, computed, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -160,3 +161,12 @@ export class TagsViewerComponent implements OnDestroy {
     this.close()
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-tags-viewer',
+  owner: '@hypercomb.shared/TagsViewerComponent',
+  component: TagsViewerComponent,
+  order: 130,
+})

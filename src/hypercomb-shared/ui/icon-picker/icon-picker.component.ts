@@ -10,6 +10,7 @@
 // click-to-choose UX, self-contained as a chooser. A canvas-integrated Pixi
 // version could replace this later behind the same `icon:pick-request` effect.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, OnDestroy, computed, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -83,3 +84,12 @@ export class IconPickerComponent implements OnDestroy {
     }
   }
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-icon-picker',
+  owner: '@hypercomb.shared/IconPickerComponent',
+  component: IconPickerComponent,
+  order: 250,
+})

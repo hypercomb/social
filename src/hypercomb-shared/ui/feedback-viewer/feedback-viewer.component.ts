@@ -12,6 +12,7 @@
 // Shell UI — never imports essentials; resolves the Store at runtime via the
 // local `get` helper and coordinates over EffectBus only.
 
+import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
@@ -146,3 +147,12 @@ export class FeedbackViewerComponent implements OnDestroy {
 
   trackBySig = (_i: number, item: FeedbackItem): string => item.sig
 }
+
+// Registry-fed shell surface — mounted by <hc-shell-surfaces>, never by an
+// app.html tag (see shell-surface-registry.ts).
+registerShellSurface({
+  name: 'hc-feedback-viewer',
+  owner: '@hypercomb.shared/FeedbackViewerComponent',
+  component: FeedbackViewerComponent,
+  order: 200,
+})

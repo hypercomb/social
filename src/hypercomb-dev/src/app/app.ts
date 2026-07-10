@@ -4,12 +4,7 @@ import type { HexOrientation } from '@hypercomb/essentials/diamondcoreprocessor.
 import { RouterOutlet } from '@angular/router';
 import { CommandLineComponent } from '@hypercomb/shared';
 import { MeshHeaderComponent } from '@hypercomb/shared/ui';
-import { TileEditorComponent } from '@hypercomb/shared/ui/tile-editor/tile-editor.component'
-import { ControlsBarComponent, EditActionsComponent, ShortcutSheetComponent, CommandPaletteComponent, ActivityLogComponent, SelectionContextMenuComponent, HistoryViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, DocsOverlayComponent, ShellSurfacesComponent, NotesViewerComponent, FilesViewerComponent, FeaturesViewerComponent, TagsViewerComponent, ObserveViewerComponent, ClipboardPanelComponent, ContactFormComponent, ContactHoverComponent, ActionCardComponent, FeedbackButtonComponent, FeedbackViewerComponent, WebsiteNavComponent, IconPickerComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent } from '@hypercomb/shared/ui';
-import { FormatPainterComponent } from '@hypercomb/shared/ui/format-painter/format-painter.component'
-import { PortalOverlayComponent } from '@hypercomb/shared/ui/portal/portal-overlay.component'
-import { SensitivityBarComponent } from '@hypercomb/shared/ui/sensitivity-bar/sensitivity-bar.component'
-import { YoutubeViewerComponent } from '@hypercomb/shared/ui/youtube-viewer/youtube-viewer.component'
+import { ControlsBarComponent, EditActionsComponent, ShellSurfacesComponent, SyncIndicatorComponent, UpgradeIndicatorComponent } from '@hypercomb/shared/ui';
 import '@hypercomb/shared/ui/command-line/command-line.atomizer'
 
 // One import boots the full essentials module graph — every drone, queen,
@@ -20,7 +15,7 @@ import '@hypercomb/essentials/side-effects'
 
 @Component({
   selector: 'app-root',
-  imports: [ControlsBarComponent, EditActionsComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, TileEditorComponent, ShortcutSheetComponent, CommandPaletteComponent, PortalOverlayComponent, ActivityLogComponent, SensitivityBarComponent, SelectionContextMenuComponent, HistoryViewerComponent, FormatPainterComponent, YoutubeViewerComponent, AtomizerBarComponent, AtomizerSidebarComponent, ConfirmDialogComponent, ToastComponent, DocsOverlayComponent, ShellSurfacesComponent, NotesViewerComponent, FilesViewerComponent, FeaturesViewerComponent, TagsViewerComponent, ObserveViewerComponent, ClipboardPanelComponent, ContactFormComponent, ContactHoverComponent, ActionCardComponent, FeedbackButtonComponent, FeedbackViewerComponent, WebsiteNavComponent, IconPickerComponent, MeshModalComponent, TrustPromptComponent, LayerCycleStripComponent, PresenceBannerComponent, SyncIndicatorComponent, UpgradeIndicatorComponent, SwarmAdoptPanelComponent],
+  imports: [ControlsBarComponent, EditActionsComponent, MeshHeaderComponent, RouterOutlet, CommandLineComponent, ShellSurfacesComponent, SyncIndicatorComponent, UpgradeIndicatorComponent],
   styleUrls: ['./app.scss'] as any,
   templateUrl: './app.html'
 })
