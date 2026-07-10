@@ -1,108 +1,140 @@
 // hypercomb-shared/core/help-group.ts
 //
-// The "help" launch group — the app's ACTIONS laid out as tiles. Clicking the
-// help icon fills the launcher page with one plain hexagon tile per keymap
-// action (the same live introspection the /help sheet reads), plus a leading
-// "Reference" tile that opens the classic shortcut-sheet overlay — the
-// existing popup, surfaced as one tile operation among the rest.
+// The "help" launch group — a PROGRESSIVE TUTORIAL laid out as tiles.
+//
+// The page is a curated course, not a mirror of the command surface. The
+// first island teaches the absolute basics (click in, right-click out, zoom,
+// pan, arrows, select); clicking the trailing "Show More" tile reveals the
+// next tier — the everyday editing verbs, then the broader skills. Anything
+// not curated here (mesh internals, dev commands, input grammars) never gets
+// a tutorial tile: the full surface stays one click away behind the leading
+// "Reference" tile, which opens the classic shortcut-sheet overlay.
 //
 // Help tiles are DOCUMENTATION, so they follow the contact-card interaction
 // exactly: HOVER a tile and the action's study card peeks (what it does, its
-// shortcut, its category — fed by ActionCardDrone over EffectBus); CLICK the
-// tile and the card PINS like a contact card — drag several apart to compare
-// and study. Executing lives on the card's Run button, which fires the same
-// `keymap:invoke { cmd }` the keyboard and command palette use.
+// shortcut or gesture, and the behavior's detail — fed by ActionCardDrone
+// over EffectBus); CLICK the tile and the card PINS like a contact card —
+// drag several apart to compare and study.
 //
-// Members are discovered from KeyMapService at call time (resolved through
-// window.ioc, never imported — shell code must not depend on essentials).
-// Until the keymap registers, the group still surfaces the Reference tile,
-// so help is ALWAYS available; whenReady re-renders the launcher once the
-// actions arrive. A rebound key re-renders with its new combo, a community
-// binding gets a tile for free — no roster here.
+// The reached tier is a participant preference, not content: it lives in
+// localStorage (like the locale), never in a layer. Every reconcile reads it
+// fresh, so "Show More" only has to bump the number and notify.
+//
+// Members resolve against the LIVE registries at call time (KeyMapService,
+// SlashBehaviourDrone, CommandLineBehaviors — through window.ioc, never
+// imported). A curated key whose behavior hasn't registered yet simply
+// doesn't get a tile; whenReady re-renders once the keymap arrives.
 
 import { EffectBus, type KeyBinding } from '@hypercomb/core'
 import { groupRegistry, type GroupMember } from './group-registry'
 import { LaunchGroupBase } from './launch-group-base'
 
-/** The classic /help reference sheet, as one tile among the actions. Tapping
+/** The classic /help reference sheet, as one tile ahead of the course. Tapping
  *  it toggles the overlay via the same keymap command `/` and /help use —
  *  ShortcutSheetDrone stays the one owner of open/close state. */
 const SHEET_MEMBER: GroupMember = { key: 'ui.shortcutSheet', label: 'Reference', segments: [], icon: 'menu_book' }
 
+/** The tier-advance affordance — the participant ASKING to see more. Clicking
+ *  it bumps the stored tier and reconciles the next island in. It disappears
+ *  once the last tier is reached. */
+const MORE_MEMBER: GroupMember = { key: 'help:more', label: 'Show More', segments: [], icon: 'unfold_more' }
+
+/** Where the reached tier lives — a preference, like the locale. */
+const TIER_KEY = 'hypercomb.help.tier'
+
+/** The mouse/trackpad basics — not keymap bindings, so they are declared
+ *  here. ActionCardDrone owns each card's content (keyed `gesture:<id>`). */
+const GESTURES: readonly { id: string; label: string }[] = [
+  { id: 'open', label: 'Go In' },
+  { id: 'back', label: 'Go Out' },
+  { id: 'zoom', label: 'Zoom' },
+  { id: 'pan', label: 'Pan' },
+  { id: 'arrows', label: 'Arrows' },
+  { id: 'select', label: 'Select' },
+]
+
 /** Curated tile names — binding descriptions are sentences ("Arrange tiles
- *  by the next sequence"); a tile wants a word. Unknown cmds fall back to
- *  their description, so runtime-registered bindings still get a tile. */
+ *  by the next sequence"); a tile wants a word. Only curated commands appear,
+ *  so this map IS the keymap roster. */
 const ACTION_LABELS: Record<string, string> = {
-  'ui.commandPalette': 'Palette',
-  'ui.commandLineToggle': 'Command Line',
-  'render.togglePivot': 'Orientation',
-  'render.toggleBees': 'Bees',
-  'screensaver.show': 'Screensaver',
-  'mesh.togglePublic': 'Public Mode',
-  'navigation.moveUp': 'Up',
-  'navigation.moveDown': 'Down',
-  'navigation.moveLeft': 'Left',
-  'navigation.moveRight': 'Right',
-  'navigation.fitToScreen': 'Fit',
-  'navigation.recenter': 'Center',
+  'tile.editHovered': 'Edit',
   'clipboard.copy': 'Copy',
   'clipboard.paste': 'Paste',
   'layout.cutCells': 'Cut',
-  'sequence.cycle': 'Arrange',
-  'sequence.cyclePrev': 'Arrange Back',
-  'selection.toggleLeader': 'Leader',
   'selection.remove': 'Remove',
-  'tile.editHovered': 'Edit',
   'history.undo': 'Undo',
   'history.redo': 'Redo',
-  'history.toggle-scope': 'Time Scope',
-  'history.exit-revise': 'Exit Revise',
+  'navigation.fitToScreen': 'Fit',
+  'navigation.recenter': 'Center',
+  'ui.commandPalette': 'Palette',
+  'ui.commandLineToggle': 'Command Line',
+  'sequence.cycle': 'Arrange',
+  'sequence.cyclePrev': 'Arrange Back',
+  'render.togglePivot': 'Orientation',
+  'mesh.togglePublic': 'Public Mode',
 }
 
-/** Category order on the page — movement first, then the editing verbs, then
- *  the view/mesh toggles; slash behaviours and command-line operations follow
- *  as their own clusters; anything uncategorized lands last. The Reference
- *  tile leads the grid regardless. */
-const CATEGORY_ORDER = ['Navigation', 'Clipboard', 'Selection', 'Editing', 'Tiles', 'History', 'View', 'Mesh', 'Slash', 'Command Line']
-
-/** Header tile labels that differ from the raw category — to avoid colliding
- *  with an ACTION tile of the same name. The 'Command Line' category (its typed
- *  input behaviours) would otherwise clash with the command-line toggle action,
- *  suffixing the header "Command Line (2)". */
-const HEADER_LABELS: Record<string, string> = { 'Command Line': 'Command Bar' }
-
-/** A category with more than this many tiles splits into alphabetical
- *  sub-islands, so one big group (Slash, ~60 commands) doesn't dwarf the 2–6
- *  tile categories. */
-const MAX_ISLAND = 16
-
-/** Commands that make no sense as a tile. Escape's whole meaning is "leave
- *  the current surface"; the sheet is added explicitly (SHEET_MEMBER). */
-const EXCLUDED_COMMANDS = new Set(['global.escape', 'ui.shortcutSheet'])
-
-/** Slash behaviours that duplicate a tile already on the page. */
-const EXCLUDED_SLASH = new Set(['help'])
+/** Curated names for the command-line input behaviors on the course. */
+const CLI_LABELS: Record<string, string> = {
+  'create': 'Create Tiles',
+}
 
 /** Slash tiles read as their typed form. A REAL '/' can't lead a cell name
  *  (labels travel through path-shaped code), so the fullwidth solidus U+FF0F
  *  stands in — renders as the slash the participant actually types. */
 const SLASH_PREFIX = '／'
 
-/** Curated names for the command-line input behaviors — the registry ids are
- *  code-ish ('shift-enter-navigate'); a tile wants the gesture's name. */
-const CLI_LABELS: Record<string, string> = {
-  'direct-command': 'Direct Commands',
-  'tag-assign': 'Tagging',
-  'cut-paste': 'Cut & Paste Input',
-  'slash-behaviour': 'Slash Input',
-  'bracket': 'Brackets',
-  'paste-url-navigate': 'Paste URL',
-  'remove-cell': 'Remove Input',
-  'go-parent': 'Go Up',
-  'hash-marker': 'Markers',
-  'shift-enter-navigate': 'Navigate Input',
-  'create': 'Create Tiles',
-  'filter': 'Filter Tiles',
+/** The course. One island per tier, revealed in order; tier 0 always shows.
+ *  Keys resolve by shape: `gesture:<id>` (static basics), `slash:<name>`,
+ *  `cli:<name>`, anything else a keymap cmd. A key whose behavior isn't
+ *  registered is skipped, never a broken tile. */
+const TIERS: readonly { header: string; keys: readonly string[] }[] = [
+  {
+    header: 'Basics',
+    keys: GESTURES.map(g => `gesture:${g.id}`),
+  },
+  {
+    header: 'Everyday',
+    keys: [
+      'cli:create',
+      'tile.editHovered',
+      'clipboard.copy',
+      'clipboard.paste',
+      'layout.cutCells',
+      'selection.remove',
+      'history.undo',
+      'history.redo',
+      'navigation.fitToScreen',
+      'navigation.recenter',
+    ],
+  },
+  {
+    header: 'Beyond',
+    keys: [
+      'ui.commandPalette',
+      'ui.commandLineToggle',
+      'sequence.cycle',
+      'sequence.cyclePrev',
+      'render.togglePivot',
+      'mesh.togglePublic',
+      'slash:language',
+      'slash:border',
+      'slash:accent',
+    ],
+  },
+]
+
+const readTier = (): number => {
+  try {
+    const n = Number(window.localStorage?.getItem(TIER_KEY) ?? '0')
+    return Number.isFinite(n) ? Math.max(0, Math.min(TIERS.length - 1, Math.floor(n))) : 0
+  } catch {
+    return 0
+  }
+}
+
+const writeTier = (n: number): void => {
+  try { window.localStorage?.setItem(TIER_KEY, String(Math.max(0, Math.min(TIERS.length - 1, n)))) } catch { /* storage unavailable */ }
 }
 
 type KeyMapLike = { getEffective?: () => KeyBinding[] }
@@ -115,9 +147,9 @@ class HelpGroup extends LaunchGroupBase {
   override readonly icon = 'help'
   override readonly label = 'Help'
   /** The help page renders as clustered ISLANDS — one compact hex blob per
-   *  category, titled by a header tile — not one continuous spiral. This also
+   *  tier, titled by a header tile — not one continuous spiral. This also
    *  makes the reconcile keep the page in members() order so each header
-   *  interleaves directly ahead of its category's tiles. */
+   *  interleaves directly ahead of its tier's tiles. */
   readonly orderedLayout = true
 
   constructor() {
@@ -129,125 +161,77 @@ class HelpGroup extends LaunchGroupBase {
       ?.whenReady?.('@diamondcoreprocessor.com/KeyMapService', () => groupRegistry.notifyChanged())
   }
 
-  /** The Reference tile + one tile per keymap action + one per slash
-   *  behaviour + one per command-line input behavior, in category order.
-   *  Same live introspection the sheet uses (KeyMapService,
-   *  SlashBehaviourDrone, CommandLineBehaviors), so the page never drifts
-   *  from the code — every behavior with usage worth studying gets a tile.
-   *  Help never goes empty: the Reference member is static. */
+  /** The Reference tile + one island per REACHED tier + the Show More tile
+   *  while there is more to show. Non-gesture members resolve against the
+   *  live registries, so a rebound key renders its new combo and a missing
+   *  behavior is skipped — the course never drifts from the code. */
   override members(): GroupMember[] {
-    const seen = new Set<string>()
-    const actions: { member: GroupMember; category: string }[] = []
-
-    // Keyboard actions.
     const bindings = get<KeyMapLike>('@diamondcoreprocessor.com/KeyMapService')?.getEffective?.() ?? []
-    for (const b of bindings) {
-      if (!b?.cmd || !b.description) continue
-      if (EXCLUDED_COMMANDS.has(b.cmd) || seen.has(b.cmd)) continue
-      seen.add(b.cmd)
-      actions.push({
-        member: { key: b.cmd, label: ACTION_LABELS[b.cmd] ?? b.description, segments: [] },
-        category: b.category ?? '',
-      })
+    const byCmd = new Map<string, KeyBinding>()
+    for (const b of bindings) if (b?.cmd && !byCmd.has(b.cmd)) byCmd.set(b.cmd, b)
+    const slash = new Set(
+      (get<SlashDroneLike>('@diamondcoreprocessor.com/SlashBehaviourDrone')?.entries?.() ?? [])
+        .filter(s => s?.name && !s.hidden)
+        .map(s => s.name),
+    )
+    const cli = new Set((get<CliMetaLike>('@hypercomb.social/CommandLineBehaviors') ?? []).map(c => c?.name).filter(Boolean))
+
+    const resolve = (key: string): GroupMember | null => {
+      if (key.startsWith('gesture:')) {
+        const g = GESTURES.find(x => key === `gesture:${x.id}`)
+        return g ? { key, label: g.label, segments: [] } : null
+      }
+      if (key.startsWith('slash:')) {
+        const name = key.slice(6)
+        return slash.has(name) ? { key, label: SLASH_PREFIX + name, segments: [] } : null
+      }
+      if (key.startsWith('cli:')) {
+        const name = key.slice(4)
+        return cli.has(name) ? { key, label: CLI_LABELS[name] ?? name, segments: [] } : null
+      }
+      const b = byCmd.get(key)
+      return b ? { key, label: ACTION_LABELS[key] ?? b.description ?? key, segments: [] } : null
     }
 
-    // Slash behaviours — one tile per typed command, labelled as typed
-    // ("／tags"). Hidden (destructive / dev-only) behaviours stay hidden here
-    // exactly as they do in autocomplete.
-    const slash = get<SlashDroneLike>('@diamondcoreprocessor.com/SlashBehaviourDrone')?.entries?.() ?? []
-    for (const s of slash) {
-      if (!s?.name || s.hidden || EXCLUDED_SLASH.has(s.name)) continue
-      const key = `slash:${s.name}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      actions.push({
-        member: { key, label: SLASH_PREFIX + s.name, segments: [] },
-        category: 'Slash',
-      })
-    }
-
-    // Command-line input behaviors — one tile per behavior; its card lists
-    // every operation with triggers and worked examples.
-    const cli = get<CliMetaLike>('@hypercomb.social/CommandLineBehaviors') ?? []
-    for (const c of cli) {
-      if (!c?.name) continue
-      const key = `cli:${c.name}`
-      if (seen.has(key)) continue
-      seen.add(key)
-      actions.push({
-        member: { key, label: CLI_LABELS[c.name] ?? c.name, segments: [] },
-        category: 'Command Line',
-      })
-    }
-
-    const rank = (c: string): number => {
-      const i = CATEGORY_ORDER.indexOf(c)
-      return i === -1 ? CATEGORY_ORDER.length : i
-    }
-    // Bucket into category islands (source order preserved within each), then
-    // emit them in CATEGORY_ORDER, each led by a header tile that titles the
-    // island. Reference leads the page on its own (no header). The
-    // members()-ORDER reconcile (orderedLayout) keeps this interleaving intact,
-    // and show-cell reads each header's role to lay the categories out as
-    // separated hex blobs.
-    const byCategory = new Map<string, GroupMember[]>()
-    for (const { member, category } of actions) {
-      const cat = category || 'Other'
-      const bucket = byCategory.get(cat)
-      if (bucket) bucket.push(member)
-      else byCategory.set(cat, [member])
-    }
-    const cats = [...byCategory.keys()].sort((a, b) => rank(a) - rank(b))
-    const baseLabel = (cat: string): string => HEADER_LABELS[cat] ?? (cat === 'Other' ? 'More' : cat)
-    // First letter of a label, skipping the slash prefix / punctuation.
-    const initial = (label: string): string => {
-      const m = label.match(/[a-z0-9]/i)
-      return (m ? m[0] : label.charAt(0)).toUpperCase()
-    }
     // Each island gets a group id ('g0', 'g1', …) shared by its header and its
     // tiles, so show-cell gathers the island by IDENTITY — not by render order,
     // which a slot system re-sorts. The trailing number orders the islands.
-    // Reference leads as its own headerless island.
+    // Reference leads as its own headerless island; Show More trails as one.
     let gid = 0
     const nextGroup = (): string => `g${gid++}`
     const out: GroupMember[] = [{ ...SHEET_MEMBER, group: nextGroup() }]
-    for (const cat of cats) {
-      const members = byCategory.get(cat)!
-      if (members.length <= MAX_ISLAND) {
-        const g = nextGroup()
-        out.push({ key: `header:${cat}`, label: baseLabel(cat), segments: [], role: 'header', group: g })
-        out.push(...members.map(m => ({ ...m, group: g })))
-        continue
-      }
-      // Big category (Slash) → balanced alphabetical sub-islands, each its own
-      // group, titled by its letter range ("Slash A–D"), so it stops dominating.
-      const sorted = [...members].sort((a, b) => a.label.localeCompare(b.label))
-      const chunks = Math.ceil(sorted.length / MAX_ISLAND)
-      const size = Math.ceil(sorted.length / chunks)
-      for (let ci = 0; ci < chunks; ci++) {
-        const slice = sorted.slice(ci * size, (ci + 1) * size)
-        if (slice.length === 0) continue
-        const from = initial(slice[0].label)
-        const to = initial(slice[slice.length - 1].label)
-        const label = from === to ? `${baseLabel(cat)} ${from}` : `${baseLabel(cat)} ${from}–${to}`
-        const g = nextGroup()
-        out.push({ key: `header:${cat}:${ci}`, label, segments: [], role: 'header', group: g })
-        out.push(...slice.map(m => ({ ...m, group: g })))
-      }
+    const reached = readTier()
+    for (let t = 0; t <= reached && t < TIERS.length; t++) {
+      const tier = TIERS[t]
+      const members = tier.keys
+        .map(resolve)
+        .filter((m): m is GroupMember => m !== null)
+      if (members.length === 0) continue
+      const g = nextGroup()
+      out.push({ key: `header:${tier.header}`, label: tier.header, segments: [], role: 'header', group: g })
+      out.push(...members.map(m => ({ ...m, group: g })))
     }
+    if (reached < TIERS.length - 1) out.push({ ...MORE_MEMBER, group: nextGroup() })
     return out
   }
 
   /** Help tiles are documentation: a CLICK pins the action's study card (the
-   *  contact-card gesture), it does not execute. ActionCardDrone answers the
-   *  request with a pinned card; the card's Run button is what executes. The
-   *  Reference tile is the one exception — its operation IS the popup, so it
-   *  toggles the sheet directly. */
+   *  contact-card gesture), it does not execute. Two exceptions route for
+   *  real: the Reference tile toggles the sheet (its operation IS the popup)
+   *  and Show More advances the tutorial — the participant asking to see the
+   *  next increment. */
   protected override activate(m: GroupMember): void {
     // Header tiles title an island; they open nothing.
     if (m.role === 'header') return
     if (m.key === 'ui.shortcutSheet') {
       EffectBus.emit('keymap:invoke', { cmd: m.key, binding: null, event: null })
+      return
+    }
+    if (m.key === MORE_MEMBER.key) {
+      writeTier(readTier() + 1)
+      // refreshIfActive reconciles the new island in place — no navigation,
+      // no auto-fit; the page grows and the participant explores to it.
+      groupRegistry.notifyChanged()
       return
     }
     EffectBus.emit('action:request-pin', { cmd: m.key, label: m.label })

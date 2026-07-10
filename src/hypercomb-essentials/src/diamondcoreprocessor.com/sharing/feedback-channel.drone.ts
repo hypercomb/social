@@ -64,6 +64,17 @@ const CHANNEL_HOST_KEY = 'hc:feedback-channel:host' // canonical anchor override
 // Pending-publish bookkeeping: { [sig]: firstAttemptMs }. The sigs still
 // awaiting a relay read-back receipt — the BYTES stay in the substrate.
 const PENDING_KEY = 'hc:feedback-channel:pending'
+// Sigs the relay has CONFIRMED holding — { [sig]: confirmedAtMs }. Written on
+// every receipt (read-back, live echo) AND on every item that ARRIVES from a
+// real relay (it is relay-held by definition; a peer's item must never be
+// re-published under OUR key). The permanent complement of the pending map:
+// it is what lets the substrate reconcile below re-pend everything else
+// without re-flooding the channel every session.
+const CONFIRMED_KEY = 'hc:feedback-channel:confirmed'
+// '1' once a COMPLETE substrate reconcile has run in this browser. The 24h
+// pending sweep clears it, so a swept item is re-discovered next session
+// instead of being lost.
+const RECONCILED_KEY = 'hc:feedback-channel:reconciled'
 // The feedback channel is a SINGLE FIXED rendezvous for the whole community —
 // NOT the per-origin self-domain. Everyone (participants, the host, the routine)
 // computes the identical channel id from this constant regardless of which
@@ -75,6 +86,13 @@ const CANONICAL_FEEDBACK_HOST = 'hypercomb.io'
 const LEGACY_OUTBOX_DIR = '__feedback_outbox__'
 const RETRY_MS = 30_000
 const MAX_PENDING_AGE_MS = 24 * 60 * 60 * 1000     // backstop sweep
+// Confirmed-ledger prune horizon. An entry pruned here can only cause a
+// single harmless re-publish (add-only channel, content-addressed dedup) and
+// only if the reconcile is ever re-armed — the ledger stays bounded.
+const CONFIRMED_PRUNE_MS = 180 * 24 * 60 * 60 * 1000
+// Mirror of Store.#SYNCABLE_OPTIMIZATION_KINDS (modules must never import
+// from shared): the record kinds that cross OPFS boundaries on this channel.
+const SYNCABLE_KINDS = new Set(['feedback', 'qa', 'qa-answer'])
 // NIP-40 relay retention for a published item. Each item carries a unique
 // d-tag (`i:<sig>`), so items never NIP-33-replace one another — without an
 // expiration they accumulate on the relay forever. The window must outlast a
@@ -105,6 +123,7 @@ interface SwarmLike { subscribedTo?: () => string | null }
 interface StoreLike {
   putOptimization?: (blob: Blob, options?: { emit?: boolean }) => Promise<string>
   getOptimization?: (sig: string) => Promise<Blob | null>
+  listOptimizations?: () => Promise<string[]>
   opfsRoot?: FileSystemDirectoryHandle
 }
 
@@ -135,6 +154,11 @@ export class FeedbackChannelDrone extends Drone {
    *  map is the only state — persisted to localStorage, in-session on private
    *  mode. */
   #pending = new Map<string, number>()
+  /** Sigs the relay confirmed holding (sig → epoch ms) — persisted. The
+   *  substrate reconcile skips these, so nothing confirmed is ever
+   *  re-published. */
+  #confirmed = new Map<string, number>()
+  #reconciled = false
   #legacyAbsorbed = false
 
   protected override sense = () => true
@@ -143,6 +167,7 @@ export class FeedbackChannelDrone extends Drone {
     this.#initialized = true
 
     this.#loadPending()
+    this.#loadConfirmed()
 
     // Contributor path: publish MY feedback/qa-answer as it is written. The hook
     // is always registered (cheap) but only ACTS when contributing, so flipping
@@ -153,6 +178,11 @@ export class FeedbackChannelDrone extends Drone {
     })
 
     await this.#ensureActive()
+
+    // Off the boot path: rescue STRANDED records — see #reconcileOnce.
+    const idle = (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback
+      ?? ((cb: () => void) => window.setTimeout(cb, 4_000))
+    idle(() => void this.#reconcileOnce())
   }
 
   // ── roles ───────────────────────────────────────────────
@@ -194,6 +224,7 @@ export class FeedbackChannelDrone extends Drone {
     } catch { /* private mode — honor in-session */ }
     this.#channelId = null
     await this.#ensureActive()
+    void this.#reconcileOnce()
   }
 
   public readonly disable = (): void => {
@@ -206,6 +237,76 @@ export class FeedbackChannelDrone extends Drone {
    *  substrate and clear those the relay confirms via read-back. Runs on a 30s
    *  timer too; exposed for an immediate flush and for tests. */
   public readonly drain = (): Promise<void> => this.#drainPending()
+
+  /** Rescue pass for STRANDED records — see #reconcileOnce. Exposed for tests
+   *  and the bridge. */
+  public readonly reconcile = (): Promise<void> => this.#reconcileOnce()
+
+  /** Mark a sig relay-held: out of pending, into the confirmed ledger. Emits
+   *  the receipt only when it actually was pending (it was OURS to deliver).
+   *  Callers batch #savePending()/#saveConfirmed() after their loop. */
+  readonly #confirm = (sig: string): void => {
+    const wasPending = this.#pending.delete(sig)
+    this.#confirmed.set(sig, Date.now())
+    if (wasPending) EffectBus.emit('feedback:channel-receipt', { sig })
+  }
+
+  /** Pend + publish every syncable record in the local substrate that the
+   *  relay was never CONFIRMED to hold. This closes the three loss windows the
+   *  pending map alone cannot: (1) feedback written by an OLDER bundle with no
+   *  channel code — it was never pended at all (the push-only web install
+   *  means such bundles linger for months); (2) items the 24h backstop swept
+   *  while the relay was unreachable; (3) a browser closed before the first
+   *  drain confirmed delivery. Runs once per browser (RECONCILED_KEY), off the
+   *  boot path; the sweep re-arms it. The relay query up front confirms
+   *  whatever is already held so nothing is re-published needlessly. */
+  readonly #reconcileOnce = async (): Promise<void> => {
+    if (this.#reconciled) return
+    if (!this.#shouldPublish() && !this.#shouldSubscribe()) return
+    try { if (localStorage.getItem(RECONCILED_KEY) === '1') { this.#reconciled = true; return } } catch { /* ignore */ }
+    const store = ioc()?.get<StoreLike>(STORE_KEY)
+    if (!store?.listOptimizations || !store.getOptimization) return   // store not ready — the drain tick retries
+    this.#reconciled = true                                           // one attempt per session
+
+    // 1) Confirm everything the relay ALREADY serves.
+    const mesh = ioc()?.get<MeshLike>(MESH_KEY)
+    const channelId = await this.#resolveChannelId()
+    if (mesh?.query && channelId) {
+      try {
+        for (const it of await mesh.query(channelId)) {
+          if (!it || it.relay === 'local') continue
+          const s = (it.payload && typeof it.payload === 'object') ? (it.payload as { s?: unknown }).s : null
+          if (typeof s === 'string' && HEX64.test(s.toLowerCase())) this.#confirm(s.toLowerCase())
+        }
+      } catch { /* relay down — proceed; the drain confirms later */ }
+    }
+
+    // 2) Pend every unconfirmed, unpended syncable record. A READ failure
+    //    marks the pass incomplete (retry next session); a PARSE failure just
+    //    means "not a loop record".
+    let complete = true
+    let rescued = 0
+    for (const sig of await store.listOptimizations()) {
+      if (this.#pending.has(sig) || this.#confirmed.has(sig)) continue
+      let text: string
+      try {
+        const blob = await store.getOptimization(sig)
+        if (!blob) continue
+        text = await blob.text()
+      } catch { complete = false; continue }
+      try {
+        const rec = JSON.parse(text) as { kind?: unknown }
+        if (typeof rec?.kind !== 'string' || !SYNCABLE_KINDS.has(rec.kind)) continue
+      } catch { continue }
+      this.#pending.set(sig, Date.now())
+      rescued++
+    }
+    this.#savePending()
+    this.#saveConfirmed()
+    if (complete) { try { localStorage.setItem(RECONCILED_KEY, '1') } catch { /* ignore */ } }
+    if (rescued > 0) console.log(`[feedback-channel] reconcile rescued ${rescued} stranded record(s) — publishing`)
+    await this.#drainPending()
+  }
 
   // ── lifecycle ───────────────────────────────────────────
   #starting = false
@@ -230,8 +331,10 @@ export class FeedbackChannelDrone extends Drone {
       // subscribes, so it never sees anyone else's feedback.
       if (sub && !this.#sub) this.#sub = mesh.subscribe(channelId, (e) => void this.#onChannelEvent(e))
       // Either role: the drain timer (re)publishes pending items and clears the
-      // read-back-confirmed ones — the store-and-forward guarantee.
-      if (!this.#timer) this.#timer = setInterval(() => void this.#drainPending(), RETRY_MS)
+      // read-back-confirmed ones — the store-and-forward guarantee. The
+      // reconcile piggybacks so a store that wasn't ready at the idle callback
+      // still gets its rescue pass (it self-guards to one attempt per session).
+      if (!this.#timer) this.#timer = setInterval(() => { void this.#drainPending(); void this.#reconcileOnce() }, RETRY_MS)
       await this.#drainPending()
     } finally {
       this.#starting = false
@@ -304,9 +407,13 @@ export class FeedbackChannelDrone extends Drone {
     for (const [sig, first] of [...this.#pending]) {
       if (Date.now() - first > MAX_PENDING_AGE_MS) {
         // Backstop: 24h without a confirmed read-back means something is
-        // structurally wrong; stop retrying rather than spin forever.
+        // structurally wrong; stop retrying rather than spin forever. The
+        // bytes stay in the substrate and the sig is NOT confirmed, so
+        // re-arming the reconcile hands the item to a future session
+        // instead of losing it.
         this.#pending.delete(sig)
-        console.warn(`[feedback-channel] dropped pending item ${sig.slice(0, 12)}… after 24h with no relay receipt`)
+        try { localStorage.removeItem(RECONCILED_KEY) } catch { /* ignore */ }
+        console.warn(`[feedback-channel] dropped pending item ${sig.slice(0, 12)}… after 24h with no relay receipt — re-armed the substrate reconcile`)
         continue
       }
       const blob = await store.getOptimization(sig)
@@ -335,9 +442,10 @@ export class FeedbackChannelDrone extends Drone {
       }
       for (const e of pending) {
         if (!served.has(e.sig)) continue
-        if (this.#pending.delete(e.sig)) EffectBus.emit('feedback:channel-receipt', { sig: e.sig })
+        this.#confirm(e.sig)
       }
       this.#savePending()
+      this.#saveConfirmed()
     }
 
     this.#emitState()
@@ -360,13 +468,15 @@ export class FeedbackChannelDrone extends Drone {
       return
     }
 
-    // Receipt: a real-relay echo of one of OUR pending items clears its entry.
-    // (Local fanout — e.relay === 'local' — is not proof the relay holds it.)
+    // Any item a REAL relay serves is relay-held by definition — record it in
+    // the confirmed ledger. For OUR pending item this is the live receipt; for
+    // a peer's item it guarantees the reconcile never re-publishes someone
+    // else's record under OUR key. (Local fanout — e.relay === 'local' — is
+    // not proof the relay holds it.)
     if (e.relay && e.relay !== 'local') {
-      if (this.#pending.delete(claimed)) {
-        this.#savePending()
-        EffectBus.emit('feedback:channel-receipt', { sig: claimed })
-      }
+      this.#confirm(claimed)
+      this.#savePending()
+      this.#saveConfirmed()
     }
 
     // Ingest: write into the local substrate if we don't already hold it.
@@ -385,12 +495,14 @@ export class FeedbackChannelDrone extends Drone {
   }
 
   // ── introspection (tests / UI) ──────────────────────────
-  public readonly status = async (): Promise<{ enabled: boolean; publishing: boolean; channelId: string | null; pending: number; ingested: number }> => ({
+  public readonly status = async (): Promise<{ enabled: boolean; publishing: boolean; channelId: string | null; pending: number; ingested: number; confirmed: number; reconciled: boolean }> => ({
     enabled: this.#shouldSubscribe(),
     publishing: this.#shouldPublish(),
     channelId: await this.#resolveChannelId(),
     pending: this.#pending.size,
     ingested: this.#ingested,
+    confirmed: this.#confirmed.size,
+    reconciled: this.#reconciled,
   })
 
   readonly #emitState = (): void => {
@@ -411,6 +523,22 @@ export class FeedbackChannelDrone extends Drone {
 
   readonly #savePending = (): void => {
     try { localStorage.setItem(PENDING_KEY, JSON.stringify(Object.fromEntries(this.#pending))) } catch { /* ignore */ }
+  }
+
+  readonly #loadConfirmed = (): void => {
+    try {
+      const raw = localStorage.getItem(CONFIRMED_KEY)
+      if (!raw) return
+      const obj = JSON.parse(raw) as Record<string, number>
+      const cutoff = Date.now() - CONFIRMED_PRUNE_MS
+      for (const [sig, at] of Object.entries(obj)) {
+        if (HEX64.test(sig) && Number.isFinite(at) && at > cutoff) this.#confirmed.set(sig, at)
+      }
+    } catch { /* private mode / corrupt — in-session map only */ }
+  }
+
+  readonly #saveConfirmed = (): void => {
+    try { localStorage.setItem(CONFIRMED_KEY, JSON.stringify(Object.fromEntries(this.#confirmed))) } catch { /* ignore */ }
   }
 
   /** One-time: an earlier build persisted the outbox as a typed OPFS folder

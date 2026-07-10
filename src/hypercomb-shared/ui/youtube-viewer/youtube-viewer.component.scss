@@ -40,21 +40,59 @@
   }
 }
 
-.close-btn {
+// The guaranteed way out — same identity as the website-mode exit FAB
+// (site-view.drone.ts EXIT_OVERLAY_CSS): steel-blue pill, bottom-right,
+// Material glyph. ALWAYS present while the viewer is open; it dims with the
+// chrome but never disappears, so the hive can't look like a trap.
+.exit-fab {
   position: fixed;
-  top: 1rem;
-  right: 1.5rem;
-  background: transparent;
-  border: none;
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 2rem;
-  cursor: pointer;
+  right: 1.4rem;
+  bottom: 1.4rem;
   z-index: 10001;
-  line-height: 1;
-  padding: 0.25rem 0.5rem;
-  transition: color 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 3rem;
+  border: none;
+  border-radius: 1.5rem;
+  padding: 0 0.75rem 0 1.1rem;
+  background: rgba(126, 182, 214, 0.92);
+  color: #0c1118;
+  box-shadow: 0 8px 26px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  transition: filter 0.16s ease, opacity 0.5s ease, gap 0.5s ease, padding 0.5s ease;
 
   &:hover {
-    color: #fff;
+    filter: brightness(1.12);
+    opacity: 1;
   }
+
+  .chrome-hidden & {
+    opacity: 0.45;
+    gap: 0;
+    padding: 0 0.75rem;
+    cursor: pointer; // exempt from the backdrop's cursor:none — the exit stays usable
+  }
+}
+
+.exit-label {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  max-width: 12rem;
+  overflow: hidden;
+  transition: opacity 0.5s ease, max-width 0.5s ease;
+
+  .chrome-hidden & {
+    opacity: 0;
+    max-width: 0;
+  }
+}
+
+.exit-glyph {
+  font-family: 'Material Symbols Outlined';
+  font-size: 1.5rem;
+  line-height: 1;
 }

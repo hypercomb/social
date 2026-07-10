@@ -45,7 +45,7 @@
     return [bx, by, bz];
   }
   function setCount(n) {
-    while (pts.length < n) { var i = pts.length; pts.push({ p: (n <= 3 ? (BIRTH[n] || PIN[n][i]) : emptiestDir()).slice(), s: 0 }); }
+    while (pts.length < n) { var i = pts.length; pts.push({ p: (n <= 3 ? (BIRTH[n] || PIN[n][i]) : emptiestDir()).slice(), s: (n === 1 ? 1 : 0) }); }
     if (pts.length > n) pts.length = n;
   }
   function relax(iters) {
@@ -76,7 +76,7 @@
   var HOLD0 = 0.3, STEP_DT = 0.2, STEP_END = HOLD0 + 5 * STEP_DT;
   var BALL_T = 1.5, BALL_END = STEP_END + BALL_T;                 // sphere fully formed
   var COLLAPSE = 0.7, COLLAPSE_END = BALL_END + COLLAPSE;         // shrink down to the white dot
-  var DOT_HOLD = 0.9, TOTAL = COLLAPSE_END + DOT_HOLD;            // the small circle fills to solid here, holds, then loops
+  var DOT_FILL = 0.45, TOTAL = COLLAPSE_END;                      // fill during the end of collapse, then loop directly to the first dot
   var SPIN = 0.45, TILT = 0.26, ZOOM0 = 0.75, ZOOM_STEP = 0.62, ZOOM_MIN = 0.30, ZOOM_DOT = 0.045, SPEED = 1.25;
   function ease(x) { return x * x * (3 - 2 * x); }
   function smooth(a, b, x) { var t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); }
@@ -106,8 +106,7 @@
       }
     }
     computeState();
-    var atDot = nowSec >= COLLAPSE_END - 1e-6;               // the pause at the small circle
-    solidify += ((atDot ? 1 : 0) - solidify) * (1 - Math.pow(0.0025, dt));   // fill it to solid white there, only there
+    solidify = smooth(COLLAPSE_END - DOT_FILL, COLLAPSE_END, nowSec);   // fill into the solid white dot before the loop resets
   }
   function integrate(dt) {
     var n = pts.length; if (!n) return;

@@ -1,14 +1,18 @@
 // youtube-viewer.component.ts — full-screen YouTube embed overlay
 //
 // Listens for `viewer:open` effect with kind 'youtube'.
-// Shows an iframe embed with autoplay. Click backdrop or press Escape to close.
-// When open, fades away all chrome (header, controls) and hides the cursor.
-// Click the backdrop to reveal chrome; it auto-hides again after a timeout.
+// Shows an iframe embed with autoplay. The exit FAB (bottom-right, same
+// identity as the website-mode exit) is ALWAYS present while the viewer is
+// open — it dims with the chrome but never disappears, so the takeover can't
+// read as "the hive is broken". Backdrop click and Escape also close.
+// Moving the mouse or clicking the backdrop reveals the chrome; it auto-hides
+// again after a timeout.
 
 import { Component, HostListener, signal } from '@angular/core'
 import { DomSanitizer, type SafeResourceUrl } from '@angular/platform-browser'
 import { EffectBus } from '@hypercomb/core'
 import { parseYouTubeVideoId } from '@hypercomb/essentials/diamondcoreprocessor.com/link/youtube'
+import { TranslatePipe } from '../../core/i18n.pipe'
 
 type ViewerOpenPayload = { kind: string; url: string; label?: string }
 
@@ -38,6 +42,7 @@ function ensureViewerStyle(): void {
 @Component({
   selector: 'hc-youtube-viewer',
   standalone: true,
+  imports: [TranslatePipe],
   templateUrl: './youtube-viewer.component.html',
   styleUrls: ['./youtube-viewer.component.scss'],
 })
@@ -76,6 +81,17 @@ export class YoutubeViewerComponent {
       return
     }
     this.close()
+  }
+
+  // Mouse movement reveals the chrome (the natural "where am I" gesture) and
+  // keeps it up while the pointer is active. Only fires over our own elements —
+  // the iframe swallows pointer events over the video itself.
+  onPointerMove(): void {
+    if (!this.chromeVisible()) {
+      this.#showChrome()
+      return
+    }
+    this.#scheduleHideChrome()
   }
 
   @HostListener('document:keydown.escape')

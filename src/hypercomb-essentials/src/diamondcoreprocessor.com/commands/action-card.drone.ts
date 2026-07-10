@@ -8,12 +8,20 @@
 // sticks like a pinned contact card; stick several and drag them apart to
 // compare and study.
 //
-// THREE kinds of help tile, resolved by the member key's shape:
+// FOUR kinds of help tile, resolved by the member key's shape:
+//   gesture:<id>   — a mouse/trackpad basic (tutorial tier 0): gesture pills,
+//                    description and detail curated HERE (no registry owns
+//                    pointer gestures); `help:more` renders the same way
 //   <keymap cmd>   — a keyboard action: shortcut steps, category, description
 //   slash:<name>   — a typed /command: usage, parameter options (the curated
 //                    "; a | b | c" tail of its description), aliases
 //   cli:<name>     — a command-line input behavior: every operation with its
 //                    trigger and a worked example (input → result)
+//
+// Every card may carry a DETAIL — the paragraph that explains what the
+// behavior actually does beyond its one-line description. Details live in the
+// i18n catalogs under `help.detail.<key>` (gestures inline their English
+// fallback); a key with no detail simply renders none.
 //
 //   tile:hover (help tile)         → emit action:hover-show { …card data }
 //   tile:hover (anything else)     → emit action:hover-hide
@@ -49,15 +57,87 @@ export interface ActionCardOp {
   example?: { input: string; result: string }
 }
 
+/** A card string resolved through i18n with an inline English fallback —
+ *  the same duality as KeyBinding.description / .descriptionKey. */
+type I18nText = { key: string; fallback: string }
+
+/** The tutorial's mouse/trackpad basics. Pointer gestures have no registry,
+ *  so the whole card is curated here: pills (rendered like key pills),
+ *  the one-line description, and the behavior detail. Steps follow the
+ *  keymap shape — one inner array per simultaneous combo. */
+const GESTURE_CARDS: Record<string, { steps: I18nText[][]; description: I18nText; detail?: I18nText }> = {
+  open: {
+    steps: [[{ key: 'help.key.left-click', fallback: 'Left Click' }]],
+    description: { key: 'help.gesture.open', fallback: 'Click a tile to go into it.' },
+    detail: {
+      key: 'help.gesture.open.detail',
+      fallback: 'A tile opens into its own layer, which can hold more tiles of its own. Keep clicking to go deeper.',
+    },
+  },
+  back: {
+    steps: [[{ key: 'help.key.right-click', fallback: 'Right Click' }]],
+    description: { key: 'help.gesture.back', fallback: 'Right-click to come back out one layer.' },
+    detail: {
+      key: 'help.gesture.back.detail',
+      fallback: 'Works anywhere on the canvas. Shift+Click steps back too — handy on a trackpad.',
+    },
+  },
+  zoom: {
+    steps: [[{ key: 'help.key.scroll', fallback: 'Scroll' }]],
+    description: { key: 'help.gesture.zoom', fallback: 'Scroll to zoom in and out.' },
+    detail: {
+      key: 'help.gesture.zoom.detail',
+      fallback: 'Hold Ctrl while scrolling for finer steps. On a touch screen, pinch with two fingers.',
+    },
+  },
+  pan: {
+    steps: [[
+      { key: 'help.key.space', fallback: 'Space' },
+      { key: 'help.key.drag', fallback: 'Drag' },
+    ]],
+    description: { key: 'help.gesture.pan', fallback: 'Hold Space and move the mouse to drag the screen.' },
+    detail: {
+      key: 'help.gesture.pan.detail',
+      fallback: 'On a touch screen, drag with one finger.',
+    },
+  },
+  arrows: {
+    steps: [[{ key: 'help.key.arrows', fallback: 'Arrow Keys' }]],
+    description: { key: 'help.gesture.arrows', fallback: 'Step the selection from tile to tile.' },
+    detail: {
+      key: 'help.gesture.arrows.detail',
+      fallback: 'Each press moves to the neighboring tile in that direction — a way to move around without the mouse.',
+    },
+  },
+  select: {
+    steps: [[
+      { key: 'help.key.ctrl', fallback: 'Ctrl' },
+      { key: 'help.key.click', fallback: 'Click' },
+    ]],
+    description: { key: 'help.gesture.select', fallback: 'Hold Ctrl and click tiles to select them.' },
+    detail: {
+      key: 'help.gesture.select.detail',
+      fallback: 'Ctrl+Click adds or removes one tile; hold Ctrl and drag to paint over a whole area. Selected tiles are what Copy, Cut and Remove act on. On a Mac, use Cmd.',
+    },
+  },
+  more: {
+    steps: [],
+    description: { key: 'help.gesture.more', fallback: 'Reveals the next part of the tutorial.' },
+  },
+}
+
 /** What the shell card renders. `steps` = one entry per keymap sequence step,
  *  each a list of formatted key parts ("Ctrl", "Shift", "8") for pills. */
 export interface ActionCardPayload {
   label: string
   cmd: string
-  kind: 'key' | 'slash' | 'cli'
+  kind: 'key' | 'slash' | 'cli' | 'gesture'
   category: string
   description: string
   steps: string[][]
+  /** The behavior's detail — what actually happens when you use it, beyond
+   *  the one-line description. i18n `help.detail.<key>`; absent = no detail. */
+  detail?: string
   /** slash: the typed form, e.g. "/screensaver". */
   usage?: string
   /** slash: parameter options — the author's structured `options` (QueenBee
@@ -131,9 +211,42 @@ export class ActionCardDrone extends Drone {
 
   /** Dispatch on the member key's shape. */
   #fromKey(key: string, label: string): ActionCardPayload | null {
+    if (key.startsWith('gesture:')) return this.#fromGesture(key.slice(8), key, label)
+    if (key === 'help:more') return this.#fromGesture('more', key, label)
     if (key.startsWith('slash:')) return this.#fromSlash(key.slice(6), key, label)
     if (key.startsWith('cli:')) return this.#fromCli(key.slice(4), key, label)
     return this.#fromBinding(key, label)
+  }
+
+  /** i18n with the key-echo guard: t() returns the KEY itself when
+   *  untranslated (the catalogs fall back to English internally, so this only
+   *  fires when a key is missing everywhere). */
+  #t(text: I18nText): string {
+    const translated = ioc<I18nProvider>(I18N_IOC_KEY)?.t(text.key)
+    return translated && translated !== text.key ? translated : text.fallback
+  }
+
+  /** The behavior's detail paragraph — catalog-only, `help.detail.<key>`.
+   *  Missing key = no detail, never a raw key on the card. */
+  #detail(key: string): string | undefined {
+    const k = `help.detail.${key}`
+    const translated = ioc<I18nProvider>(I18N_IOC_KEY)?.t(k)
+    return translated && translated !== k ? translated : undefined
+  }
+
+  // ── mouse/trackpad gesture (tutorial basics) ─────────────────────────
+  #fromGesture(id: string, key: string, label: string): ActionCardPayload | null {
+    const spec = GESTURE_CARDS[id]
+    if (!spec) return null
+    return {
+      label,
+      cmd: key,
+      kind: 'gesture',
+      category: id === 'more' ? '' : 'Basics',
+      description: this.#t(spec.description),
+      steps: spec.steps.map(step => step.map(part => this.#t(part))),
+      detail: spec.detail ? this.#t(spec.detail) : undefined,
+    }
   }
 
   // ── keyboard action ──────────────────────────────────────────────────
@@ -155,6 +268,7 @@ export class ActionCardDrone extends Drone {
       category: binding.category ?? '',
       description,
       steps: (binding.sequence ?? []).map(ch => formatChord(ch)),
+      detail: this.#detail(cmd),
     }
   }
 
@@ -196,6 +310,7 @@ export class ActionCardDrone extends Drone {
       params: options,
       aliases: (entry.aliases ?? []).map(a => `/${a}`),
       examples: examples.length ? examples : undefined,
+      detail: this.#detail(key),
     }
   }
 
@@ -222,6 +337,7 @@ export class ActionCardDrone extends Drone {
       description: '',
       steps: [],
       ops,
+      detail: this.#detail(key),
     }
   }
 }

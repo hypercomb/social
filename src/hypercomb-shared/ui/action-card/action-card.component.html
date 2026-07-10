@@ -35,10 +35,10 @@
     </header>
 
     <div class="action-card-body">
-      <!-- keyboard action: its shortcut -->
+      <!-- keyboard action: its shortcut; tutorial basics: the gesture -->
       @if (panel.data.steps.length) {
         <div class="action-fact">
-          <span class="action-fact-label">{{ 'action.hover.shortcut' | t }}</span>
+          <span class="action-fact-label">{{ (panel.data.kind === 'gesture' ? 'action.hover.gesture' : 'action.hover.shortcut') | t }}</span>
           <span class="action-combo">
             @for (step of panel.data.steps; track $index) {
               @if ($index > 0) { <span class="action-then">{{ 'shortcuts.chord-sep' | t }}</span> }
@@ -80,6 +80,11 @@
 
       @if (panel.data.description) {
         <p class="action-description">{{ panel.data.description }}</p>
+      }
+
+      <!-- the behavior's detail — what actually happens when you use it -->
+      @if (panel.data.detail) {
+        <p class="action-detail">{{ panel.data.detail }}</p>
       }
 
       <!-- author-supplied worked examples (slash behaviors) -->

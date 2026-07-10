@@ -1,5 +1,6 @@
 @if (embedUrl(); as url) {
-  <div class="viewer-backdrop" [class.chrome-hidden]="!chromeVisible()" (click)="onBackdropClick()">
+  <div class="viewer-backdrop" [class.chrome-hidden]="!chromeVisible()"
+       (click)="onBackdropClick()" (pointermove)="onPointerMove()">
     <div class="video-container" (click)="$event.stopPropagation()">
       <iframe
         [src]="url"
@@ -8,8 +9,10 @@
         allowfullscreen>
       </iframe>
     </div>
-    @if (chromeVisible()) {
-      <button class="close-btn" (click)="close()">&#x2715;</button>
-    }
+    <button class="exit-fab" (click)="$event.stopPropagation(); close()"
+            [title]="'viewer.close' | t" [attr.aria-label]="'viewer.close' | t">
+      <span class="exit-label">{{ 'viewer.close' | t }}</span>
+      <span class="exit-glyph">close</span>
+    </button>
   </div>
 }

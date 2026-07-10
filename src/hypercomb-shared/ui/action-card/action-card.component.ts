@@ -26,10 +26,12 @@ export interface ActionCardOp {
 export interface ActionCardData {
   label: string
   cmd: string
-  kind: 'key' | 'slash' | 'cli'
+  kind: 'key' | 'slash' | 'cli' | 'gesture'
   steps: string[][]
   category: string
   description: string
+  /** The behavior's detail — what actually happens when you use it. */
+  detail?: string
   usage?: string
   params?: string[]
   aliases?: string[]
@@ -90,10 +92,11 @@ export class ActionCardComponent extends PinnableHoverBase<ActionCardData> {
       data: {
         label: p.label,
         cmd: p.cmd,
-        kind: p.kind === 'slash' || p.kind === 'cli' ? p.kind : 'key',
+        kind: p.kind === 'slash' || p.kind === 'cli' || p.kind === 'gesture' ? p.kind : 'key',
         steps: Array.isArray(p.steps) ? p.steps.map(s => (Array.isArray(s) ? s.map(String) : [])) : [],
         category: typeof p.category === 'string' ? p.category : '',
         description: typeof p.description === 'string' ? p.description : '',
+        detail: typeof p.detail === 'string' && p.detail ? p.detail : undefined,
         usage: typeof p.usage === 'string' && p.usage ? p.usage : undefined,
         params: Array.isArray(p.params) && p.params.length ? p.params.map(String) : undefined,
         aliases: Array.isArray(p.aliases) && p.aliases.length ? p.aliases.map(String) : undefined,
