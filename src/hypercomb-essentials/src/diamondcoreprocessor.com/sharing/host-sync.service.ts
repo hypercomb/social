@@ -95,6 +95,7 @@ const LEGACY_QUEUE_SUBDIR = 'queue'
 const LEGACY_RECEIPTS_DIR = '__host_receipts__'
 const NOSTR_SIGNER_KEY = '@diamondcoreprocessor.com/NostrSigner'
 const STORE_KEY = '@hypercomb.social/Store'
+const CONTENT_BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
 const SELF_DOMAIN_KEY = 'hc:nostrmesh:self-domain'
 // Explicit opt-in gate. Default false → no `content:wrote` handler
 // reaches the signer, so a casual visitor never triggers a Nostr-signer
@@ -311,12 +312,74 @@ export class HostSyncService extends EventTarget {
     void this.drain()
   }
 
-  /** Multi-target receipt check (see enqueue). INTERIM: delegates to the
-   *  single-receipt read so the short-circuit keeps its prior behavior;
-   *  the per-target aggregation + once-per-session HEAD re-verify the
-   *  enqueue comment describes is still to be wired. */
+  /** The currently-enabled drain destinations: the operator's self-domain
+   *  (when configured AND opted in) plus the public CDN target (behind its
+   *  own gate). Empty when everything is off. Future consent-granted hosts
+   *  (30411 records) append here with their own scoping. */
+  readonly #targets = async (): Promise<SyncTarget[]> => {
+    const targets: SyncTarget[] = []
+    if (this.#isEnabled()) {
+      const domain = this.#hostBase()
+      if (domain) targets.push({ domain, hostHash: null, publicOnly: false })
+    }
+    if (this.#publicHostEnabled()) {
+      targets.push({
+        domain: PUBLIC_HOST_DOMAIN,
+        hostHash: await HostSyncService.#hostHash(PUBLIC_HOST_DOMAIN),
+        publicOnly: true,
+      })
+    }
+    return targets
+  }
+
+  /** Receipt filename for a target: bare `{sig}` for the self-domain (no
+   *  migration), `{sig}.{hostHash}` for granted hosts. */
+  static #receiptName = (sig: string, target: SyncTarget): string =>
+    target.hostHash === null ? sig : `${sig}.${target.hostHash}`
+
+  /** Pure existence check for a target's receipt — pool first, then the
+   *  legacy drain source while it exists (which only ever held bare
+   *  self-domain names; hostHash-suffixed names simply never match there). */
+  readonly #receiptExists = async (sig: string, target: SyncTarget): Promise<boolean> => {
+    const name = HostSyncService.#receiptName(sig, target)
+    for (const dir of [await this.#getReceiptsDir(), await this.#getLegacyReceiptsDir()]) {
+      if (!dir) continue
+      try {
+        await dir.getFileHandle(name, { create: false })
+        return true
+      } catch { /* not in this source */ }
+    }
+    return false
+  }
+
+  /** True iff this target holds a receipt that should suppress a push.
+   *  A self-domain receipt about to suppress is re-verified ONCE per
+   *  session with a cheap HEAD (#receiptStillHonored) — hosts drift; a
+   *  404 revokes it and the push proceeds. Granted-host receipts are
+   *  trusted on existence — the CDN's objects are immutable sig-named
+   *  blobs. */
+  readonly #targetReceipted = async (sig: string, target: SyncTarget): Promise<boolean> => {
+    if (!(await this.#receiptExists(sig, target))) return false
+    if (target.hostHash === null) return this.#receiptStillHonored(sig)
+    return true
+  }
+
+  /** Multi-target receipt check (see enqueue): the queue write is skipped
+   *  only when EVERY currently-enabled applicable target holds its receipt.
+   *  Public-only targets are applicable only to `.public`-marked sigs (the
+   *  doctrine gate) — an unmarked sig with only the public host enabled has
+   *  no destination, so it reads as fully receipted and never queues;
+   *  markPublic restages it if a marker arrives later. With no target
+   *  enabled at all, fall back to the bare self-domain receipt so the
+   *  short-circuit keeps its prior behavior. */
   async #fullyReceipted(sig: string): Promise<boolean> {
-    return this.hasReceipt(sig)
+    const targets = await this.#targets()
+    if (targets.length === 0) return this.hasReceipt(sig)
+    for (const target of targets) {
+      if (target.publicOnly && !(await this.#isPublicMarked(sig))) continue
+      if (!(await this.#targetReceipted(sig, target))) return false
+    }
+    return true
   }
 
   /** Layers whose refs were already walked this session (the walk is
@@ -406,7 +469,10 @@ export class HostSyncService extends EventTarget {
   readonly #publicMarked = new Set<string>()
 
   /** Sigs whose public-closure walk already ran this session (bytes are
-   *  immutable, so re-walking the same sig is pointless). */
+   *  immutable, so re-walking the same sig is pointless). A bare sig means
+   *  the FULL-closure walk ran; `{sig}:tile` means only the tile-only walk
+   *  (closure=false) ran — a later closure=true call still proceeds, since
+   *  the full walk covers strictly more. */
   readonly #markedWalk = new Set<string>()
 
   /** Marker existence = "this sig is inside a published-public closure". */
@@ -454,13 +520,26 @@ export class HostSyncService extends EventTarget {
    *  before the public gate came on was removed from the queue, so marking
    *  must restage it for the public target (enqueue is idempotent and
    *  skips anything already fully receipted). Inert without the
-   *  hc:public-host opt-in. */
-  public readonly markPublic = async (sig: string, kind: HostSyncKind = 'layer'): Promise<void> => {
+   *  hc:public-host opt-in.
+   *
+   *  `closure` (PRIVACY-CRITICAL): true = the caller vouches the WHOLE
+   *  subtree is public (a public-BRANCH root — isBranchPublic), so the walk
+   *  recurses into child layers. false = only THIS tile is public
+   *  (individually-marked), so the walk keeps the layer's own resource/
+   *  bee/dependency refs and the resource content-descent but NEVER
+   *  recurses into `cells`/`layers`/`children` — a tile-only public tile
+   *  must never mark its private descendants' layers. */
+  public readonly markPublic = async (sig: string, kind: HostSyncKind = 'layer', closure = true): Promise<void> => {
     if (!this.#publicHostEnabled()) return
     const s = String(sig ?? '').trim().toLowerCase()
     if (!SIG_RE.test(s)) return
+    // Walk dedup: a completed full-closure walk (bare `s`) covers both
+    // shapes; a completed tile-only walk must not block a later
+    // closure=true call (branch flipped public after the tile was).
     if (this.#markedWalk.has(s)) return
-    this.#markedWalk.add(s)
+    const walkKey = closure ? s : `${s}:tile`
+    if (this.#markedWalk.has(walkKey)) return
+    this.#markedWalk.add(walkKey)
     await this.#writePublicMarker(s)
     let bytes: ArrayBuffer | null = null
     try { bytes = await this.#readLocalBytes(s, kind) } catch { bytes = null }
@@ -468,21 +547,26 @@ export class HostSyncService extends EventTarget {
     void this.enqueue(s, kind, bytes)
     if (kind === 'layer') {
       // Same slot→kind classification as #enqueueLayerRefs, but marking:
-      // the closure of a public layer is public in its entirety.
+      // the closure of a public-BRANCH layer is public in its entirety;
+      // a tile-only layer shares its own refs but no child layers.
       let layer: Record<string, unknown>
       try { layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown> } catch { return }
       if (!layer || typeof layer !== 'object') return
       const CHILD_SLOTS = new Set(['cells', 'layers', 'children'])
       for (const [slot, value] of Object.entries(layer)) {
         if (!Array.isArray(value)) continue
-        const refKind: HostSyncKind = CHILD_SLOTS.has(slot) ? 'layer'
+        const isChildSlot = CHILD_SLOTS.has(slot)
+        // PRIVACY GATE: without branch closure, descendant layers stay
+        // private — skip the child slots entirely.
+        if (isChildSlot && !closure) continue
+        const refKind: HostSyncKind = isChildSlot ? 'layer'
           : slot === 'bees' ? 'bee'
           : slot === 'dependencies' ? 'dependency'
           : 'resource'
         for (const raw of value) {
           const ref = String(raw ?? '').trim().toLowerCase()
           if (!SIG_RE.test(ref) || ref === s) continue
-          await this.markPublic(ref, refKind)
+          await this.markPublic(ref, refKind, closure)
         }
       }
     } else if (kind === 'resource') {
@@ -540,21 +624,28 @@ export class HostSyncService extends EventTarget {
     return null
   }
 
-  /** Drain the queue to the host. Single-flight. Each entry: signed PUT +
-   *  confirmed read-back; on success writes a receipt and drops the entry;
-   *  on failure leaves it for the retry timer. No-op when no host is
-   *  configured. */
+  /** Drain the queue to every enabled target. Single-flight. Per entry,
+   *  each applicable target gets its own signed PUT + confirmed read-back
+   *  → per-target receipt (public-only targets require the `{sig}.public`
+   *  marker — the doctrine gate — and are skipped silently without it).
+   *  The entry leaves the queue only when EVERY currently-enabled
+   *  applicable target holds its receipt; failures leave it for the retry
+   *  timer. Writer-auth backoff is PER HOST — a paused public CDN never
+   *  stalls self-domain backup, and vice versa. No-op when no target is
+   *  enabled. */
   public readonly drain = async (): Promise<void> => {
     if (this.#draining) return
-    // Writer-auth backoff: a 401 is a HOST config gap (writers list), not
-    // something that heals in seconds — and every read-triggered enqueue()
-    // kicks a fresh drain, so without this gate each staged sig costs one
-    // more 401 in the console. One rejection silences the channel for the
-    // backoff window; enable() clears it so an operator who just fixed the
-    // relay retries immediately.
-    const host = this.#hostBase()
-    if (!host) return // no host named — stay inert
-    if (Date.now() < (this.#unauthorizedUntil.get(host) ?? 0)) return
+    const targets = await this.#targets()
+    if (targets.length === 0) return // nothing enabled — stay inert
+    // Writer-auth backoff (PER HOST): a 401 is a host config gap (writers
+    // list / grant), not something that heals in seconds — and every
+    // read-triggered enqueue() kicks a fresh drain, so without this gate
+    // each staged sig costs one more 401 in the console. One rejection
+    // silences THAT host for the backoff window; enable() /
+    // enablePublicHost() clear it so an operator who just fixed the host
+    // retries immediately. If every target is paused there is nothing to do.
+    const active = (t: SyncTarget): boolean => Date.now() >= (this.#unauthorizedUntil.get(t.domain) ?? 0)
+    if (!targets.some(active)) return
     this.#draining = true
     try {
       // Absorb any legacy dirs into the pools first, under this same
@@ -565,27 +656,54 @@ export class HostSyncService extends EventTarget {
         if (entries.length === 0) break
         let progressed = false
         for (const entry of entries) {
-          if (await this.hasReceipt(entry.sig)) { await this.#removeEntry(entry); continue }
-          const ok = await this.#pushAndReceipt(host, entry)
-          if (ok === 'unauthorized') {
-            // The host refused our writer key — a config gap, not a
-            // per-entry failure. One rejection covers the whole queue;
-            // stop the pass, back off, and surface the EXACT pubkey to
-            // whitelist. enable() clears the backoff for an instant retry
-            // once the operator fixes the relay.
-            this.#unauthorizedUntil.set(host, Date.now() + UNAUTHORIZED_BACKOFF_MS)
-            const pubkey = await this.#getOwnPubkey()
-            console.warn(
-              `[host-sync] ${host} rejected writer auth (401) — drain paused for ` +
-              `${Math.round(UNAUTHORIZED_BACKOFF_MS / 60_000)} min. Add this browser's pubkey to the relay's ` +
-              `--writers list (configure-writers.bat), then call ` +
-              `ioc.get('@diamondcoreprocessor.com/HostSyncService').enable() to retry now: ` +
-              `${pubkey || '(no signer available)'}`
-            )
-            EffectBus.emit('sync:state', { host, pending: entries.length, status: 'unauthorized' })
-            return
+          // Applicable targets for THIS sig: a public-only target requires
+          // the `.public` marker — skip silently without it (the doctrine
+          // gate; the marker may arrive later via markPublic).
+          const applicable: SyncTarget[] = []
+          for (const target of targets) {
+            if (target.publicOnly && !(await this.#isPublicMarked(entry.sig))) continue
+            applicable.push(target)
           }
-          if (ok === 'corrupt') {
+          if (applicable.length === 0) continue // no destination (yet) — entry waits
+          let receipted = 0
+          let corrupt = false
+          for (const target of applicable) {
+            if (await this.#targetReceipted(entry.sig, target)) { receipted++; continue }
+            if (!active(target)) continue // host paused (401 backoff) — entry stays; others proceed
+            const ok = await this.#pushAndReceipt(target, entry)
+            if (ok === 'unauthorized') {
+              // The host refused our writer key — a config gap, not a
+              // per-entry failure. One rejection covers the whole queue FOR
+              // THIS HOST; back off (the active() check silences the rest of
+              // the pass), surface the EXACT pubkey to whitelist, and keep
+              // draining the other targets.
+              this.#unauthorizedUntil.set(target.domain, Date.now() + UNAUTHORIZED_BACKOFF_MS)
+              const pubkey = await this.#getOwnPubkey()
+              const mins = Math.round(UNAUTHORIZED_BACKOFF_MS / 60_000)
+              console.warn(target.publicOnly
+                ? `[host-sync] ${target.domain} rejected writer auth (401) — public pushes paused for ` +
+                  `${mins} min (grant expired / quota exhausted?). Call ` +
+                  `ioc.get('@diamondcoreprocessor.com/HostSyncService').enablePublicHost() to retry now. ` +
+                  `pubkey: ${pubkey || '(no signer available)'}`
+                : `[host-sync] ${target.domain} rejected writer auth (401) — drain paused for ` +
+                  `${mins} min. Add this browser's pubkey to the relay's ` +
+                  `--writers list (configure-writers.bat), then call ` +
+                  `ioc.get('@diamondcoreprocessor.com/HostSyncService').enable() to retry now: ` +
+                  `${pubkey || '(no signer available)'}`
+              )
+              EffectBus.emit('sync:state', { host: target.domain, pending: entries.length, status: 'unauthorized' })
+              continue
+            }
+            if (ok === 'corrupt') { corrupt = true; break }
+            if (!ok) continue // this target unreachable — entry stays; retry timer handles it
+            receipted++
+            progressed = true
+            // Attribution: a PUBLIC-target receipt means the CDN now serves
+            // this sig — record it in the broker's address graph so an
+            // adopt-click can answer getKnownDomains() without a mesh wait.
+            if (target.publicOnly) this.#noteAttribution(entry.sig, target.domain)
+          }
+          if (corrupt) {
             // Local bytes for this sig don't hash to it — the host would (or
             // did) 422. Retrying identical bytes can never succeed, so drop
             // the entry and warn ONCE per sig, naming sig + kind so the
@@ -603,19 +721,44 @@ export class HostSyncService extends EventTarget {
             }
             continue
           }
-          if (!ok) continue // leave entry; retry timer handles offline/host-down
-          await this.#removeEntry(entry)
-          progressed = true
-          this.dispatchEvent(new CustomEvent('receipt', { detail: { sig: entry.sig } }))
-          EffectBus.emit('host:receipt', { sig: entry.sig })
+          if (receipted === applicable.length) {
+            // EVERY currently-enabled applicable target confirmed — the
+            // entry's job is done (crash-safe: receipts land before this
+            // removal, so an interrupted pass just re-checks them).
+            await this.#removeEntry(entry)
+            progressed = true
+            this.dispatchEvent(new CustomEvent('receipt', { detail: { sig: entry.sig } }))
+            EffectBus.emit('host:receipt', { sig: entry.sig })
+          }
         }
-        if (!progressed) break // nothing advanced (host unreachable) — stop; timer retries
+        if (!progressed) break // nothing advanced (hosts unreachable/paused) — stop; timer retries
       }
-      const remaining = (await this.#listQueue()).length
-      EffectBus.emit('sync:state', { host, pending: remaining, status: remaining === 0 ? 'backed-up' : 'syncing' })
+      // Per-host state: pending = entries THIS host still owes a receipt
+      // for. A host inside its 401 backoff keeps 'unauthorized' as its
+      // last-emitted value (don't clobber it with 'syncing').
+      const leftovers = await this.#listQueue()
+      for (const target of targets) {
+        if (!active(target)) continue
+        let pending = 0
+        for (const e of leftovers) {
+          if (target.publicOnly && !(await this.#isPublicMarked(e.sig))) continue
+          if (!(await this.#receiptExists(e.sig, target))) pending++
+        }
+        EffectBus.emit('sync:state', { host: target.domain, pending, status: pending === 0 ? 'backed-up' : 'syncing' })
+      }
     } finally {
       this.#draining = false
     }
+  }
+
+  /** Fire-and-forget: after a PUBLIC-target receipt confirms, attribute
+   *  the sig to that domain in the ContentBroker's address graph. Pure
+   *  observability — never gates or delays the drain. */
+  readonly #noteAttribution = (sig: string, domain: string): void => {
+    try {
+      this.#ioc<{ noteDomainsForSig?: (s: string, domains: string[]) => void }>(CONTENT_BROKER_KEY)
+        ?.noteDomainsForSig?.(sig, [domain])
+    } catch { /* attribution is best-effort */ }
   }
 
   /** Receipts re-verified against the live host this session (HEAD 200). */
@@ -714,7 +857,11 @@ export class HostSyncService extends EventTarget {
   // transport — signed HTTP PUT + confirmed read-back
   // -------------------------------------------------
 
-  readonly #pushAndReceipt = async (host: string, entry: QueueEntry): Promise<boolean | 'unauthorized' | 'corrupt'> => {
+  /** One signed PUT + confirmed read-back against ONE target; on success
+   *  writes THAT target's receipt (bare `{sig}` for self-domain,
+   *  `{sig}.{hostHash}` for granted hosts). */
+  readonly #pushAndReceipt = async (target: SyncTarget, entry: QueueEntry): Promise<boolean | 'unauthorized' | 'corrupt'> => {
+    const host = target.domain
     let bytes: ArrayBuffer
     try {
       // Read from the entry's OWN dir (pool or legacy) — mid-migration a queued
@@ -779,7 +926,7 @@ export class HostSyncService extends EventTarget {
     try {
       const receiptsDir = await this.#getReceiptsDir()
       if (!receiptsDir) return false
-      const handle = await receiptsDir.getFileHandle(entry.sig, { create: true })
+      const handle = await receiptsDir.getFileHandle(HostSyncService.#receiptName(entry.sig, target), { create: true })
       const writable = await handle.createWritable()
       try { await writable.write(new Uint8Array(0)) } finally { await writable.close() }
       return true

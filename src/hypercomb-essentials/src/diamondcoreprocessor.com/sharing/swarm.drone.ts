@@ -30,7 +30,7 @@ import { Drone, EffectBus, SignatureService } from '@hypercomb/core'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
-import { isCellPublic, setCellPublic } from '../presentation/tiles/tile-actions.drone.js'
+import { isBranchPublic, isCellPublic, setCellPublic } from '../presentation/tiles/tile-actions.drone.js'
 import { listDecorations } from '../commands/decoration-manifest.js'
 import { kindsForLabel } from '../commands/decoration-kind-index.js'
 import { SWARM_INVITE_KIND } from './meeting-invite.js'
@@ -2176,8 +2176,25 @@ export class SwarmDrone extends Drone {
     const publicLocation = '/' + segments.join('/')
     const prunedNames: string[] = []
     const filteredRefs: { name: string; layerSig?: string }[] = []
+    const hostSync = this.#getHostSync()
     for (const c of childRefs) {
-      if (isCellPublic(publicLocation, c.name)) filteredRefs.push(c)
+      if (isCellPublic(publicLocation, c.name)) {
+        filteredRefs.push(c)
+        // CDN doctrine-gate feed: this walk enumerates EXACTLY the public
+        // subset, so it is the sanctioned writer of `.public` markers
+        // (host-sync markPublic). A public-BRANCH root vouches for its
+        // whole closure; an individually-public tile marks only its own
+        // layer + resources (closure=false) — private descendants must
+        // never acquire a marker. Fire-and-forget: never awaited in the
+        // walk, never throws into it; inert without the hc:public-host
+        // opt-in.
+        if (c.layerSig && hostSync) {
+          try {
+            void hostSync.markPublic(c.layerSig, 'layer', isBranchPublic(publicLocation, c.name))
+              .catch(() => undefined)
+          } catch { /* never disturb the publish walk */ }
+        }
+      }
       else prunedNames.push(c.name)
     }
     childRefs = filteredRefs
@@ -3124,6 +3141,24 @@ const payload: SwarmLayerPayload = myLabel
     // through this second path.
     const publicLocation = '/' + segments.join('/')
     childEntries = childEntries.filter(c => isCellPublic(publicLocation, c.name))
+    // Same CDN doctrine-gate feed as #publishSubtree — this is the second
+    // enumeration of the public subset, and both must mark: a closure a
+    // follower sees only via the personal channel would otherwise never
+    // acquire its `.public` markers. Branch roots vouch for their closure;
+    // tile-only public marks the layer + resources alone (closure=false).
+    // Fire-and-forget — never awaited, never throws into the publish.
+    {
+      const hostSync = this.#getHostSync()
+      if (hostSync) {
+        for (const c of childEntries) {
+          if (!c.layerSig) continue
+          try {
+            void hostSync.markPublic(c.layerSig, 'layer', isBranchPublic(publicLocation, c.name))
+              .catch(() => undefined)
+          } catch { /* never disturb the publish */ }
+        }
+      }
+    }
 
     type ChildEntry = { name: string; layerSig: string } & Record<string, unknown>
     const children: ChildEntry[] = await Promise.all(childEntries.map(async ({ name, layerSig }): Promise<ChildEntry> => {
@@ -3726,6 +3761,14 @@ const payload: SwarmLayerPayload = myLabel
 
   #getSigner = (): SignerApi | undefined =>
     (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(NOSTR_SIGNER_KEY) as SignerApi | undefined
+
+  // Host sync — the `.public` marker writer (CDN doctrine gate). Resolved
+  // at runtime via IoC (no import); inert until the service registers AND
+  // the operator opts in to the public host.
+  #getHostSync = () =>
+    (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.('@diamondcoreprocessor.com/HostSyncService') as {
+      markPublic: (sig: string, kind?: 'layer' | 'bee' | 'dependency' | 'resource', closure?: boolean) => Promise<void>
+    } | undefined
 
   #getRegistry = (): TileSourceRegistryLike | undefined =>
     (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(TILE_SOURCE_REGISTRY_KEY) as TileSourceRegistryLike | undefined
