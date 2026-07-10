@@ -739,6 +739,27 @@ export class HistoryService {
   // anti-model (new content = new signature) — and had no live callers.
   // Layer state lives as immutable sig-named snapshots (commitLayer).
 
+  /** The children manifest for a layer OBJECT: canonicalize, sign (the
+   *  round-trip invariant — re-signing canonical content reproduces the
+   *  layer's own sig), read the sign('manifests') pool. The manifest
+   *  INLINES each child's layer (complete-or-absent), so it resolves
+   *  child NAMES even when the child layer bytes are cold locally —
+   *  the same fast path the renderer trusts. Membership writers use it
+   *  as the fallback in childNamesOfStrict before refusing a SET. */
+  public readonly childrenManifestFor = async (
+    layer: { name?: string; [k: string]: unknown },
+  ): Promise<Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> | null> => {
+    try {
+      const canonical = HistoryService.canonicalizeLayer(layer as LayerContent)
+      const bytes = new TextEncoder().encode(JSON.stringify(canonical))
+      const layerSig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
+      const store = get<{
+        readChildrenManifest?: (sig: string) => Promise<Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> | null>
+      }>('@hypercomb.social/Store')
+      return await store?.readChildrenManifest?.(layerSig) ?? null
+    } catch { return null }
+  }
+
   // -------------------------------------------------
   // layer snapshots — signature-addressed history entries
   // -------------------------------------------------

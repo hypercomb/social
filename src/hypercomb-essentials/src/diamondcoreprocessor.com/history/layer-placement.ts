@@ -23,6 +23,9 @@ export interface PlacementHistory {
   currentLayerAt(locationSig: string): Promise<PlacementLayer | null>
   commitLayer(locationSig: string, layer: PlacementLayer): Promise<string>
   getLayerBySig(sig: string): Promise<PlacementLayer | null>
+  /** Children manifest for a layer object (HistoryService.childrenManifestFor)
+   *  — the cold-name fallback childNamesOfStrict uses before reporting a miss. */
+  childrenManifestFor?(layer: PlacementLayer): Promise<Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> | null>
 }
 
 export interface PlacementLineage {
@@ -95,14 +98,36 @@ export async function childNamesOfStrict(
   parent: PlacementLayer | null,
 ): Promise<{ names: string[]; coldMiss: boolean }> {
   const childSigs = Array.isArray(parent?.children) ? parent!.children : []
-  const names: string[] = []
-  let coldMiss = false
+  const slots: (string | null)[] = []
   for (const sig of childSigs) {
     const child = await history.getLayerBySig(String(sig))
-    if (!child) { coldMiss = true; continue }
-    if (typeof child.name === 'string' && child.name.length > 0) names.push(child.name)
+    slots.push((typeof child?.name === 'string' && child.name.length > 0) ? child.name : null)
   }
-  return { names, coldMiss }
+
+  // Cold-slot fallback: the children MANIFEST (sign('manifests'), keyed
+  // by this parent's layer sig) inlines each child's layer and is
+  // written complete-or-absent — the same source the renderer's fast
+  // path trusts. A child whose BYTES are cold locally (common at the
+  // root of a large hive: manifest-warm, bytes-cold) still resolves its
+  // name here, so membership writers don't refuse a SET the renderer is
+  // happily displaying. Only a child missing from BOTH sources remains
+  // a cold miss.
+  if (parent && slots.some(s => s === null) && typeof history.childrenManifestFor === 'function') {
+    const manifest = await history.childrenManifestFor(parent).catch(() => null)
+    if (manifest) {
+      const bySig = new Map(manifest.map(e => [String(e.sig), e.layer?.name]))
+      for (let i = 0; i < slots.length; i++) {
+        if (slots[i] !== null) continue
+        const n = bySig.get(String(childSigs[i]))
+        if (typeof n === 'string' && n.length > 0) slots[i] = n
+      }
+    }
+  }
+
+  return {
+    names: slots.filter((s): s is string => s !== null),
+    coldMiss: slots.some(s => s === null),
+  }
 }
 
 /** Resolve a single child cell's layer (and its sig) via its PARENT's

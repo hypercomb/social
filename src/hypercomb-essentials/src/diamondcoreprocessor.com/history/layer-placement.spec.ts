@@ -45,6 +45,32 @@ describe('childNamesOfStrict', () => {
     expect(await childNamesOfStrict(history, { name: 'leaf' })).toEqual({ names: [], coldMiss: false })
     expect(await childNamesOfStrict(history, null)).toEqual({ names: [], coldMiss: false })
   })
+
+  it('children manifest rescues bytes-cold children — no cold miss, order kept', async () => {
+    // The root-of-a-large-hive case: the renderer displays via the
+    // manifest while the child layer bytes are cold; membership writers
+    // must resolve the same names instead of refusing.
+    const history = historyWith({ [SIG_A]: { name: 'alpha' } })
+    history.childrenManifestFor = async () => [
+      { sig: SIG_A, layer: { name: 'alpha' } },
+      { sig: SIG_B, layer: { name: 'beta' } },
+      { sig: SIG_C, layer: { name: 'gamma' } },
+    ]
+    const { names, coldMiss } = await childNamesOfStrict(history, { name: 'root', children: [SIG_A, SIG_B, SIG_C] })
+    expect(names).toEqual(['alpha', 'beta', 'gamma'])
+    expect(coldMiss).toBe(false)
+  })
+
+  it('still cold when a child is missing from BOTH bytes and manifest', async () => {
+    const history = historyWith({ [SIG_A]: { name: 'alpha' } })
+    history.childrenManifestFor = async () => [
+      { sig: SIG_A, layer: { name: 'alpha' } },
+      // SIG_B absent from the manifest too
+    ]
+    const { names, coldMiss } = await childNamesOfStrict(history, { name: 'root', children: [SIG_A, SIG_B] })
+    expect(names).toEqual(['alpha'])
+    expect(coldMiss).toBe(true)
+  })
 })
 
 describe('childNamesOf (non-strict, read-only paths)', () => {
