@@ -1,6 +1,7 @@
 // diamondcoreprocessor.com/core/history.service.ts
 import { EffectBus, SignatureService, SignatureStore } from '@hypercomb/core'
 import { lineageKey, rawLineageKey } from './lineage-key.js'
+import { isBareLayer } from './child-sig-guard.js'
 import { canonicalise, parse as parseRecord, type DeltaRecord } from './delta-record.js'
 import { reduce as reduceRecords, type HydratedState } from './delta-reducer.js'
 export type { DeltaRecord } from './delta-record.js'
@@ -610,6 +611,16 @@ export class HistoryService {
       ? await sigStore.signText(key)
       : await SignatureService.sign(new TextEncoder().encode(key).buffer as ArrayBuffer)
 
+    // Reverse map for the parent-chain fallback: a location sig is a
+    // one-way hash, so this is the only way `#parentCarriedChild` can
+    // recover the path (and thus the parent) from a sig it is handed.
+    if (!this.#segmentsBySig.has(sig)) {
+      const segs = Array.isArray(explorerSegmentsRaw)
+        ? explorerSegmentsRaw.map(s => String(s ?? '').trim()).filter(Boolean)
+        : []
+      this.#segmentsBySig.set(sig, segs)
+    }
+
     // Migration bridge: if canonicalization CHANGED the key, the tile's
     // pre-canonicalization history lives in the bag under the OLD raw-key sig.
     // Remember that mapping so #promoteBag can union the old bag into this new
@@ -856,13 +867,40 @@ export class HistoryService {
     const bytes = new TextEncoder().encode(json)
     const layerSig = await SignatureService.sign(bytes.buffer as ArrayBuffer)
 
-    // Dedup: if this sig matches the bag's current latest, the layer
-    // is unchanged. Skip the write — no meaningless markers.
-    const lastSig = this.#latestSigByLineage.get(locationSig)
+    // Dedup: if this sig matches the bag's current latest (real head or
+    // this session's virtual seed), the layer is unchanged. Skip the
+    // write — no meaningless markers; a virtual seed stays virtual.
+    const lastSig = this.#headSigFor(locationSig)
     if (lastSig === layerSig) return layerSig
 
     const bag = await this.getBag(locationSig)
     await this.#ensureEmptyMarker(bag, layer.name, locationSig)
+
+    // Materialize a pending VIRTUAL seed as a real marker FIRST, so the
+    // bag's timeline reads empty → pasted state → this commit, and undo
+    // of the first edit inside a pasted subtree lands on the pasted
+    // state instead of an empty page. The seed's bytes are already
+    // pool-resident (they are the parent-carried layer).
+    const seeded = this.#seededHeadByLineage.get(locationSig)
+    this.#seededHeadByLineage.delete(locationSig)
+    if (seeded && seeded !== layerSig) {
+      try {
+        const seedList = this.#layerListCache.get(locationSig)
+        const seedMarkerName = (seedList && seedList.length > 0)
+          ? String(seedList.reduce((max, e) => Math.max(max, parseInt(e.filename, 10) || 0), 0) + 1).padStart(8, '0')
+          : await this.#nextMarkerName(bag)
+        const seedHandle = await bag.getFileHandle(seedMarkerName, { create: true })
+        const seedRecord: MarkerRecord = { layer: seeded }
+        const seedBytes = new TextEncoder().encode(JSON.stringify(seedRecord))
+        const seedWritable = await seedHandle.createWritable()
+        try { await seedWritable.write(seedBytes.buffer as ArrayBuffer) } finally { await seedWritable.close() }
+        if (seedList) seedList.push({ layerSig: seeded, at: Date.now(), filename: seedMarkerName })
+      } catch { /* best-effort — the commit below is still correct without it */ }
+    }
+
+    // Seedability can change with every commit (a parent gaining a rich
+    // child makes that child's husk seedable) — drop the memo.
+    this.#huskUnseedable.clear()
 
     // Pool write FIRST — the marker (about to be written) is a pointer
     // record referencing this sig. The pool entry must exist by the time
@@ -1015,28 +1053,52 @@ export class HistoryService {
     // the bag's current head, kept in sync by commitLayer (and
     // invalidated by removeEntries / mergeEntries / promoteToHead).
     // If we've got an entry, AND its bytes are in the preloader, we
-    // already know the answer — no OPFS work.
-    const cached = this.#latestSigByLineage.get(lineageSig)
-    if (cached && this.#preloaderCache.has(cached)) return cached
+    // already know the answer — no OPFS work. A bare head still routes
+    // through the husk check (see currentLayerAt — same fingerprint).
+    const cached = this.#headSigFor(lineageSig)
+    if (cached && this.#preloaderCache.has(cached)) {
+      if (this.#seededHeadByLineage.get(lineageSig) === cached) return cached
+      const parsed = this.#parsedLayerCache.get(cached)
+      if (parsed && isBareLayer(parsed)) {
+        const carried = await this.#maybeSeedOverHusk(lineageSig)
+        if (carried) return carried.sig
+      }
+      return cached
+    }
 
-    // Ensure a bag exists so we always have a real `00000000` to hash.
-    const bag = await this.getBag(lineageSig)
+    // Read WITHOUT creating: an absent bag is a fact the parent-chain
+    // fallback needs to see, not a directory to materialize.
+    let bag: FileSystemDirectoryHandle | null = null
+    try { bag = await this.bagForRead(lineageSig) } catch { bag = null }
 
     let latestName = ''
-    for await (const [entryName, handle] of (bag as any).entries()) {
-      if (handle.kind !== 'file') continue
-      if (!HistoryService.#MARKER_RE.test(entryName)) continue
-      if (entryName > latestName) latestName = entryName
+    if (bag) {
+      for await (const [entryName, handle] of (bag as any).entries()) {
+        if (handle.kind !== 'file') continue
+        if (!HistoryService.#MARKER_RE.test(entryName)) continue
+        if (entryName > latestName) latestName = entryName
+      }
     }
 
     if (!latestName) {
+      // No bag / no markers. Before minting a husk, ask the PARENT: a
+      // pasted or adopted path carries its full layer in the parent's
+      // children — seed the session's virtual head from it. The husk
+      // mint remains ONLY for genuinely-new names (the create path
+      // takes the minted empty sig as the new child's first layer).
+      const carried = await this.#parentCarriedChild(lineageSig)
+      if (carried && !isBareLayer(carried.layer)) {
+        this.#seedVirtualHead(lineageSig, carried.sig)
+        return carried.sig
+      }
       // Brand-new bag: materialize the empty marker on disk so its
       // sig is the hash of real file bytes, not a virtual computation.
+      bag = await this.getBag(lineageSig)
       await this.#ensureEmptyMarker(bag, name, lineageSig)
       latestName = '00000000'
     }
 
-    const handle = await bag.getFileHandle(latestName, { create: false })
+    const handle = await bag!.getFileHandle(latestName, { create: false })
     const file = await handle.getFile()
     const bytes = await file.arrayBuffer()
     // Extract layer sig — handles both modern pointer records and
@@ -1050,6 +1112,16 @@ export class HistoryService {
       this.#opportunisticMigrateMarker(layerSig, bytes, handle)
     }
     this.#latestSigByLineage.set(lineageSig, layerSig)
+    // Husk-only bag (max marker IS the genesis marker and it reads
+    // bare): pre-seeding-era renders minted these for never-visited
+    // children — prefer the parent-carried rich layer.
+    if (latestName === '00000000') {
+      const parsed = await this.getLayerBySig(layerSig)
+      if (isBareLayer(parsed)) {
+        const carried = await this.#maybeSeedOverHusk(lineageSig)
+        if (carried) return carried.sig
+      }
+    }
     return layerSig
   }
 
@@ -1447,6 +1519,114 @@ export class HistoryService {
   readonly #latestSigByLineage = new Map<string, string>()
 
   /**
+   * Reverse index: location sig → the RAW path segments it was signed
+   * from (first-seen). A location sig is a one-way hash, so the
+   * parent-chain fallback (`#parentCarriedChild`) needs this map to
+   * recover "who is my parent". Populated by every sign() call — any
+   * caller that resolves a location signed it moments before, so the
+   * entry is always warm for the paths that matter.
+   */
+  readonly #segmentsBySig = new Map<string, readonly string[]>()
+
+  /**
+   * VIRTUAL heads: location sig → parent-carried layer sig, for paths
+   * whose own bag is absent (or a husk-only auto-mint) but whose parent
+   * lists a rich child layer — the pasted/adopted-not-yet-visited case.
+   * Session-only and NEVER persisted or written to #latestSigByLineage:
+   * the seed is a cache of the parent's truth, and it must die with the
+   * paste being undone elsewhere. commitLayer materializes a pending
+   * seed as a real marker on the first WRITE at the path (reads never
+   * touch the disk), so the bag's timeline reads empty → pasted state →
+   * first edit and undo of that edit lands on the pasted state.
+   */
+  readonly #seededHeadByLineage = new Map<string, string>()
+
+  /** Locations checked for seed-over-husk and found unseedable (real
+   *  multi-marker history, or no rich parent-carried child). Memoises
+   *  the listLayers probe so bare heads don't re-scan per read. */
+  readonly #huskUnseedable = new Set<string>()
+
+  /** The effective head sig for a location: a real bag head first, the
+   *  session's virtual seed otherwise. */
+  readonly #headSigFor = (lineageSig: string): string | undefined =>
+    this.#latestSigByLineage.get(lineageSig) ?? this.#seededHeadByLineage.get(lineageSig)
+
+  readonly #seedVirtualHead = (lineageSig: string, sig: string): void => {
+    this.#seededHeadByLineage.set(lineageSig, sig)
+    this.#lineageBySig.set(sig, lineageSig)
+  }
+
+  /**
+   * Resolve the child layer the PARENT carries for this location — the
+   * merkle fallback for a path with no (real) bag of its own. Walks one
+   * level up via the reverse segments map and reads the parent through
+   * currentLayerAt (which itself falls back, so a whole pasted subtree
+   * resolves recursively). Child match is manifest-first: one pool read
+   * replaces a per-sibling byte scan.
+   */
+  readonly #parentCarriedChild = async (
+    lineageSig: string,
+  ): Promise<{ sig: string; layer: LayerContent } | null> => {
+    const segs = this.#segmentsBySig.get(lineageSig)
+    if (!segs || segs.length === 0) return null
+    const name = segs[segs.length - 1]
+    const parentLoc = await this.sign({ explorerSegments: () => segs.slice(0, -1) })
+    if (!parentLoc || parentLoc === lineageSig) return null
+    const parent = await this.currentLayerAt(parentLoc)
+    if (!parent) return null
+    const childSigs = Array.isArray(parent.children) ? parent.children : []
+    if (childSigs.length === 0) return null
+    const manifest = await this.childrenManifestFor(parent).catch(() => null)
+    if (manifest) {
+      const hit = manifest.find(e => e?.layer?.name === name)
+      if (hit?.sig) {
+        const sig = String(hit.sig)
+        let layer = await this.getLayerBySig(sig)
+        if (!layer && hit.layer?.name) {
+          // The manifest INLINES the child layer — seed the parsed cache
+          // so a bytes-cold child still resolves (and keeps resolving).
+          this.seedParsedLayer(sig, hit.layer as Partial<LayerContent>)
+          layer = await this.getLayerBySig(sig)
+        }
+        if (layer) return { sig, layer }
+      }
+    }
+    for (const cs of childSigs) {
+      const child = await this.getLayerBySig(String(cs))
+      if (child?.name === name) return { sig: String(cs), layer: child }
+    }
+    return null
+  }
+
+  /**
+   * A bare `{name}` head is only truth when the bag has real history
+   * (the user emptied the tile). A single-marker bare head is the
+   * auto-mint fingerprint — for those, prefer the parent-carried rich
+   * child (pasted/adopted path rendered before this fallback existed).
+   * Memoised per location; a later real commit clears nothing because
+   * the head stops being bare.
+   */
+  readonly #maybeSeedOverHusk = async (
+    lineageSig: string,
+  ): Promise<{ sig: string; layer: LayerContent } | null> => {
+    const seeded = this.#seededHeadByLineage.get(lineageSig)
+    if (seeded) {
+      const layer = await this.getLayerBySig(seeded)
+      if (layer) return { sig: seeded, layer }
+    }
+    if (this.#huskUnseedable.has(lineageSig)) return null
+    const markers = this.#layerListCache.get(lineageSig) ?? await this.listLayers(lineageSig)
+    if (markers.length > 1) { this.#huskUnseedable.add(lineageSig); return null }
+    const carried = await this.#parentCarriedChild(lineageSig)
+    if (carried && !isBareLayer(carried.layer)) {
+      this.#seedVirtualHead(lineageSig, carried.sig)
+      return carried
+    }
+    this.#huskUnseedable.add(lineageSig)
+    return null
+  }
+
+  /**
    * Persisted snapshot of #latestSigByLineage. The map is a pure
    * derivation of on-disk state (each bag's max marker), but re-deriving
    * it from scratch means enumerating every bag × every marker — the
@@ -1676,17 +1856,27 @@ export class HistoryService {
     stats?: { cold?: boolean },
   ): Promise<LayerContent | null> => {
     if (!HistoryService.#SIG_RE.test(locationSig)) return null
-    const cached = this.#latestSigByLineage.get(locationSig)
+    const cached = this.#headSigFor(locationSig)
     if (cached) {
       // Warm path. The head may have come from a previous session via the
       // restored head index — resolve it LOCALLY (parsed/preloader/pool),
       // never through getLayerBySig, whose cold-miss fallback would drag
       // the whole 13s preloadAllBags onto this first-paint hop.
       const hit = await this.#resolveLayerLocal(cached)
-      if (hit) return hit
+      if (hit) {
+        // A bare {name} head on a husk-only bag is the auto-mint
+        // fingerprint, not truth — prefer the parent-carried rich child
+        // (the pasted/adopted-never-visited case). Memoised inside.
+        if (isBareLayer(hit)) {
+          const carried = await this.#maybeSeedOverHusk(locationSig)
+          if (carried) return carried.layer
+        }
+        return hit
+      }
       // Stale head (cross-session drift, or its bytes aren't in the pool):
       // drop it and re-derive from disk rather than returning a wrong null.
       this.#latestSigByLineage.delete(locationSig)
+      this.#seededHeadByLineage.delete(locationSig)
       this.#scheduleHeadPersist()
     }
     // SINGLE-LINEAGE cold path — first paint must be linear in "this
@@ -1709,12 +1899,29 @@ export class HistoryService {
     }
     const refreshed = this.#latestSigByLineage.get(locationSig)
     // Warm succeeded and found no marker — the bag genuinely has none.
-    // AUTHORITATIVE absence: cold stays unset.
-    if (!refreshed) return null
+    // AUTHORITATIVE absence for the bag; before concluding "nothing
+    // here", consult the PARENT's children — a pasted/adopted path has
+    // no bag of its own yet, but the parent carries its full layer (the
+    // merkle model IS the fallback). Seed a session-only virtual head so
+    // every later read is warm; the first WRITE materializes it.
+    if (!refreshed) {
+      const carried = await this.#parentCarriedChild(locationSig)
+      if (carried && !isBareLayer(carried.layer)) {
+        this.#seedVirtualHead(locationSig, carried.sig)
+        return carried.layer
+      }
+      return null
+    }
     const layer = await this.getLayerBySig(refreshed)
     // A head sig EXISTS but its bytes didn't resolve (pool miss — sync
     // still landing, cross-session drift). COLD: retrying can succeed.
     if (!layer && stats) stats.cold = true
+    // Husk-only bag (single auto-minted bare marker): not truth — see
+    // the warm path above.
+    if (layer && isBareLayer(layer)) {
+      const carried = await this.#maybeSeedOverHusk(locationSig)
+      if (carried) return carried.layer
+    }
     return layer
   }
 
@@ -1761,7 +1968,7 @@ export class HistoryService {
 
     const head = await this.currentLayerAt(locSig)
     if (!head) return null
-    const headSig = this.#latestSigByLineage.get(locSig) ?? null
+    const headSig = this.#headSigFor(locSig) ?? null
 
     // A location's DIRECT children are authoritative at its own head (adding,
     // removing or renaming a direct child re-commits THIS head). Seal each child
@@ -1814,6 +2021,21 @@ export class HistoryService {
   static readonly #poolWriteLayer = async (sig: string, bytes: Uint8Array): Promise<void> => {
     const store = get<{ writeLayerBytes?: (s: string, b: ArrayBuffer) => Promise<void> }>('@hypercomb.social/Store')
     if (store?.writeLayerBytes) await store.writeLayerBytes(sig, bytes.buffer as ArrayBuffer)
+  }
+
+  /**
+   * Materialize a layer object as pool bytes with NO marker and NO head
+   * advance — canonicalize → sign → pool-write, exactly the seal's node
+   * step. The sig-native re-mint primitive: paste-time index overrides
+   * and nested-discard pruning derive a NEW layer from an existing one
+   * and need only its sig to hand to a parent's children delta.
+   */
+  public readonly materializeLayer = async (layer: LayerContent): Promise<string> => {
+    const { sig, bytes } = await HistoryService.#signLayer(layer)
+    await HistoryService.#poolWriteLayer(sig, bytes)
+    this.#preloaderCache.set(sig, bytes.buffer as ArrayBuffer)
+    this.#parsedLayerCache.set(sig, HistoryService.canonicalizeLayer(layer))
+    return sig
   }
 
   /**
@@ -2323,6 +2545,8 @@ export class HistoryService {
    */
   public readonly refreshLineageCache = async (lineageSig: string): Promise<void> => {
     this.#latestSigByLineage.delete(lineageSig)
+    this.#seededHeadByLineage.delete(lineageSig)
+    this.#huskUnseedable.delete(lineageSig)
     this.#layerListCache.delete(lineageSig)
     this.#scheduleHeadPersist()
     let bag: FileSystemDirectoryHandle
@@ -2504,6 +2728,8 @@ export class HistoryService {
     // last NNNNNNNN.
     if (removed > 0) {
       this.#latestSigByLineage.delete(locationSig)
+      this.#seededHeadByLineage.delete(locationSig)
+      this.#huskUnseedable.delete(locationSig)
       this.#layerListCache.delete(locationSig)
       this.#scheduleHeadPersist()
     }
@@ -2564,6 +2790,8 @@ export class HistoryService {
     }
     if (archived > 0) {
       this.#latestSigByLineage.delete(locationSig)
+      this.#seededHeadByLineage.delete(locationSig)
+      this.#huskUnseedable.delete(locationSig)
       this.#layerListCache.delete(locationSig)
       this.#scheduleHeadPersist()
     }
