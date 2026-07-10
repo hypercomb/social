@@ -6,6 +6,11 @@ export type ClipboardOp = 'copy' | 'cut'
 export interface ClipboardEntry {
   label: string
   sourceSegments: readonly string[]
+  /** The source cell's LAYER SIG, captured at cut/copy intent. History is
+   *  append-only, so this stays resolvable forever — a cut child is gone
+   *  from its parent's head, but its layer bytes remain sig-addressed.
+   *  Paste resolves by sig FIRST; path resolution is the fallback. */
+  sig?: string
 }
 
 export class ClipboardService extends EventTarget {
@@ -28,7 +33,7 @@ export class ClipboardService extends EventTarget {
    *  spans multiple parent dirs (path syntax like `[a, b/c]/cut`). */
   captureEntries(entries: readonly ClipboardEntry[], op: ClipboardOp): void {
     if (entries.length === 0) return
-    this.#items = entries.map(e => ({ label: e.label, sourceSegments: [...e.sourceSegments] }))
+    this.#items = entries.map(e => ({ label: e.label, sourceSegments: [...e.sourceSegments], sig: e.sig }))
     this.#op = op
     this.#notify()
   }

@@ -7,6 +7,11 @@ import { readTilePropsIndex, writeTilePropsIndex, cellLocationSig } from '../edi
 interface ClipboardEntry {
   label: string
   sourceSegments: readonly string[]
+  /** Source cell's layer sig, captured at cut/copy intent (see
+   *  clipboard.service.ts). Paste resolves by sig FIRST — a cut child is
+   *  gone from its parent's head, but history is append-only so the sig
+   *  stays resolvable at any destination. */
+  sig?: string
 }
 
 interface SelectionLike {
@@ -289,6 +294,7 @@ export class ClipboardWorker extends Worker {
       // affected parent gets exactly ONE layer commit.
       const groups = new Map<string, { parentSegs: string[]; leaves: Set<string> }>()
       const moved: ClipboardEntry[] = []
+      const movedByKey = new Map<string, ClipboardEntry>()
       for (const label of labels) {
         const pathSegs = label.split('/').filter(Boolean)
         if (pathSegs.length === 0) continue
@@ -298,7 +304,9 @@ export class ClipboardWorker extends Worker {
         const group = groups.get(key) ?? { parentSegs, leaves: new Set<string>() }
         group.leaves.add(leaf)
         groups.set(key, group)
-        moved.push({ label: leaf, sourceSegments: parentSegs })
+        const entry: ClipboardEntry = { label: leaf, sourceSegments: parentSegs }
+        moved.push(entry)
+        movedByKey.set(`${key}/${leaf}`, entry)
       }
       if (moved.length === 0) return
 
@@ -342,6 +350,16 @@ export class ClipboardWorker extends Worker {
         }
         const survivors = allChildren.filter(n => !leaves.has(n))
 
+        // Capture each cut leaf's LAYER SIG before the parent drops it —
+        // after this commit the child is gone from the parent's head, and
+        // paste-elsewhere can only resolve the source by sig (history is
+        // append-only, so the sig stays addressable forever).
+        for (const leaf of leaves) {
+          const via = await childLayerOf(history, parent, leaf)
+          const entry = movedByKey.get(`${parentSegs.join('/')}/${leaf}`)
+          if (entry && via?.sig) entry.sig = via.sig
+        }
+
         // Eager visual unmount; `viaUpdate` tells the committer's per-
         // event listener to skip queueing — the update() below IS the
         // atomic commit for this action.
@@ -350,6 +368,10 @@ export class ClipboardWorker extends Worker {
         }
         await committer.update(parentSegs, { ...parent, children: survivors })
       }
+
+      // Re-capture with the sigs resolved above — the early capture (pre-
+      // commit, for immediate UI) copied entries before enrichment.
+      this.#clipboardSvc?.captureEntries(moved, 'cut')
 
       this.#selection?.clear()
 
@@ -374,6 +396,19 @@ export class ClipboardWorker extends Worker {
       })
     }
     if (copyEntries.length === 0) return
+    // Best-effort sig capture at intent — the copy source stays in place,
+    // so path resolution remains the fallback; the sig just makes paste
+    // immune to the source page going cold or drifting later.
+    const history = this.#history
+    if (history) {
+      for (const entry of copyEntries) {
+        try {
+          const srcParent = await resolveLayerAt(history, lineage?.domain, entry.sourceSegments)
+          const via = await childLayerOf(history, srcParent, entry.label)
+          if (via?.sig) entry.sig = via.sig
+        } catch { /* path fallback at paste */ }
+      }
+    }
     this.#clipboardSvc?.captureEntries(copyEntries, 'copy')
     EffectBus.emit('clipboard:captured', { labels: copyEntries.map(e => e.label), op: 'copy' })
     void this.#persistMetaEntries('copy', copyEntries)
@@ -384,7 +419,7 @@ export class ClipboardWorker extends Worker {
     if (!store) return
     await writeMeta(store, {
       op,
-      items: entries.map(e => ({ label: e.label, sourceSegments: [...e.sourceSegments] })),
+      items: entries.map(e => ({ label: e.label, sourceSegments: [...e.sourceSegments], ...(e.sig ? { sig: e.sig } : {}) })),
     })
   }
 
@@ -572,20 +607,26 @@ export class ClipboardWorker extends Worker {
         continue
       }
 
-      // Resolve the source cell's layer the authoritative way: through its
-      // PARENT's children slot (pool-addressed sig → getLayerBySig), which
-      // carries the cell's REAL subtree. resolveLayerAt walks the parent chain
-      // to root, so a cell never navigated into still resolves (its own bag is
-      // cold). The own-bag read (currentLayerAt(srcLocSig)) is used ONLY for the
-      // cut-in-place case (src === dst: the parent already dropped the child but
-      // its bag persists). For a real copy/move to a different location we
-      // DELIBERATELY do not fall back to the own bag: that read can return an
-      // unrelated/auto-minted seed and `flattenLayerTree` would dump a whole
-      // layer's children under the pasted name ("all the tiles pasted"). A miss
-      // fails the item cleanly instead.
-      const srcParent = await resolveLayerAt(history, lineage.domain, entry.sourceSegments)
-      const viaParent = await childLayerOf(history, srcParent, entry.label)
-      const srcLayer = viaParent?.layer
+      // Resolve the source cell's layer — SIG FIRST: the entry's layer sig
+      // was captured at cut/copy intent, and history is append-only, so it
+      // resolves at ANY destination even after a cut dropped the child from
+      // its parent's head (the case that made paste-elsewhere fail with
+      // "source missing"). Fallbacks, in order: the source PARENT's children
+      // slot (pool-addressed sig → getLayerBySig — covers sig-less legacy
+      // entries whose source is still in place), then the own-bag read for
+      // cut-in-place ONLY (src === dst: parent dropped the child but its bag
+      // persists). For a re-home to a different location we DELIBERATELY do
+      // not fall back to the own bag: that read can return an unrelated/
+      // auto-minted seed and `flattenLayerTree` would dump a whole layer's
+      // children under the pasted name. A miss fails the item cleanly.
+      const bySig = entry.sig ? await history.getLayerBySig(entry.sig) : null
+      const viaParent = bySig ? null : await childLayerOf(
+        history,
+        await resolveLayerAt(history, lineage.domain, entry.sourceSegments),
+        entry.label,
+      )
+      const srcLayer = bySig
+        ?? viaParent?.layer
         ?? (srcLocSig === dstLocSig ? await history.currentLayerAt(srcLocSig) : null)
       if (!srcLayer) {
         console.warn(`[clipboard] paste source missing for '${entry.label}': /${entry.sourceSegments.join('/')}`)
@@ -902,11 +943,9 @@ export class ClipboardWorker extends Worker {
     const meta = await readMeta(store)
     if (!meta || meta.items.length === 0) return
 
-    clipboardSvc.capture(
-      meta.items.map(i => i.label),
-      meta.items[0]?.sourceSegments ?? [],
-      meta.op,
-    )
+    // Per-entry restore — keeps each item's own sourceSegments AND its
+    // captured source sig, so a restored cut still pastes anywhere.
+    clipboardSvc.captureEntries(meta.items, meta.op)
 
     await this.validate()
   }
@@ -925,7 +964,7 @@ export class ClipboardWorker extends Worker {
 
 interface ClipboardMeta {
   op: ClipboardOp
-  items: { label: string; sourceSegments: string[] }[]
+  items: { label: string; sourceSegments: string[]; sig?: string }[]
 }
 
 const META_SUBKEY = 'clipboard-meta'
