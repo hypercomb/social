@@ -99,6 +99,14 @@ expiresAt }`. Policy via env vars:
 - One-action sharing stays doctrine: the participant only ever clicks
   share — the multi-target drain fans out to self-host and/or public
   endpoint by receipts; "where bytes live" is never a user decision.
+- **BYTES BEFORE BROADCAST (Jaime, 2026-07-09):** a hive must be posted
+  and receipted at its tier's shelf BEFORE any share announcement
+  propagates — public hive → public endpoint first, then swarm shares/
+  invites/meeting-places; private/group hive → its swarm's anchor host
+  first, NEVER the public endpoint. An announcement is a proof, not a
+  promise: "content isn't reachable" becomes structurally impossible.
+  Share UX shape: mark → drain → receipts ("proving… 12 of 37") →
+  announce arms only on completion.
 
 ## Deploy checklist (in order)
 
