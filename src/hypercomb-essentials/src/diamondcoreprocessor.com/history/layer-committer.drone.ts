@@ -93,6 +93,19 @@ type CommitDelta =
   | { kind: 'sig-swap'; slot: string; from: string; to: string }
   | { kind: 'set'; slot: string; sigs: readonly string[] }
   | { kind: 'name'; slot: 'children'; op: 'add' | 'remove'; cell: string }
+  // deltas: N surgical sig-space edits against ONE slot in ONE commit —
+  // the sig-native cut/copy/paste primitive. Unlike 'set'/'layer' this
+  // never re-lists the slot, so a cold sibling can't be wiped and no
+  // name→sig re-resolution (with its husk auto-mint) ever runs. Each
+  // remove matches by sig against the hydrated head; a miss falls back
+  // to `label` (per-page staleness can leave the caller's view of a sig
+  // behind the head's).
+  | {
+      kind: 'deltas'
+      slot: string
+      removes?: readonly { sig?: string; label?: string }[]
+      appends?: readonly string[]
+    }
   // layer: the layer-as-primitive update. The caller passes the full new
   // layer state — `{ name, ...slots }` where each slot value is an array
   // of sigs (or, for `children`, names that resolve at commit time). Empty
@@ -469,6 +482,30 @@ export class LayerCommitter {
     return this.#machine.requestAndWait({
       segments: this.#cleanSegments(segments),
       delta: { kind: 'sig-swap', slot, from, to },
+    })
+  }
+
+  /**
+   * The sig-native cut/copy/paste commit: N surgical children edits in
+   * ONE marker at `segments`. Cut = removes (the detached child's bytes,
+   * markers and bag all survive — nothing is ever deleted, the new head
+   * merely stops listing it). Paste = appends (the sig IS the collection;
+   * the subtree needs no re-commit because its bytes are pool-addressed
+   * and position-independent). No name re-resolution, no re-listing —
+   * cold siblings ride through verbatim.
+   */
+  public commitChildrenDeltas(
+    segments: readonly string[],
+    changes: { removes?: readonly { sig?: string; label?: string }[]; appends?: readonly string[] },
+  ): Promise<void> {
+    return this.#machine.requestAndWait({
+      segments: this.#cleanSegments(segments),
+      delta: {
+        kind: 'deltas',
+        slot: 'children',
+        removes: changes.removes?.slice(),
+        appends: changes.appends?.slice(),
+      },
     })
   }
 
@@ -907,6 +944,29 @@ export class LayerCommitter {
           machine.apply({ slot: d.slot, op: 'swap', from: d.from, to: d.to })
         } else if (d.kind === 'set') {
           machine.apply({ slot: d.slot, op: 'set', sigs: d.sigs })
+        } else if (d.kind === 'deltas') {
+          for (const r of d.removes ?? []) {
+            let hit = false
+            if (r.sig) hit = machine.apply({ slot: d.slot, op: 'removeSig', sig: r.sig }).changed
+            if (!hit && r.label) {
+              // Sig miss — the caller's view of the child sig lags the
+              // head (per-page staleness). Resolve by name against the
+              // hydrated slot; bounded reads, only on the miss path.
+              const present = machine.getSlot(d.slot) as readonly string[]
+              for (const sig of present) {
+                const child = await history.getLayerBySig(String(sig))
+                if (child?.name === r.label) {
+                  machine.apply({ slot: d.slot, op: 'removeSig', sig: String(sig) })
+                  break
+                }
+              }
+            }
+          }
+          for (const sig of d.appends ?? []) {
+            if (typeof sig === 'string' && sig.length > 0) {
+              machine.apply({ slot: d.slot, op: 'append', sig })
+            }
+          }
         } else if (d.kind === 'name') {
           // Legacy children name → sig resolution at commit time.
           if (d.op === 'add') {
@@ -981,6 +1041,31 @@ export class LayerCommitter {
       // fromCascade flag set so the committer's OWN listeners don't
       // re-queue them. Other listeners (show-cell, activity log, the
       // notes pane) process them normally and update their state.
+      // Targeted reconcile for 'deltas' on children: the delta names the
+      // exact sigs that changed, so resolve names for THOSE only —
+      // O(delta) reads, never the O(prev + new) full re-read below.
+      if (req.delta?.kind === 'deltas' && req.delta.slot === 'children') {
+        try {
+          const prevSet = new Set(
+            (Array.isArray(prevLayer?.children) ? prevLayer.children as readonly string[] : []).map(String),
+          )
+          const newSet = new Set((machine.getSlot('children') as readonly string[]).map(String))
+          const changed: { sig: string; dir: 'added' | 'removed' }[] = []
+          for (const s of newSet) if (!prevSet.has(s)) changed.push({ sig: s, dir: 'added' })
+          for (const s of prevSet) if (!newSet.has(s)) changed.push({ sig: s, dir: 'removed' })
+          await Promise.all(changed.map(async ({ sig, dir }) => {
+            const layer = await history.getLayerBySig(sig)
+            const cell = layer?.name
+            if (!cell) return
+            EffectBus.emit(dir === 'added' ? 'cell:added' : 'cell:removed', {
+              cell, segments: sub, fromCascade: true,
+            })
+          }))
+        } catch (err) {
+          console.warn('[LayerCommitter] deltas reconcile failed:', err)
+        }
+      }
+
       if (req.delta && (
         req.delta.kind === 'set' || req.delta.kind === 'layer' || req.delta.kind === 'name'
       )) {

@@ -5,7 +5,7 @@
 // cold miss so writers can refuse instead of wiping the sibling.
 
 import { describe, expect, it } from 'vitest'
-import { childNamesOf, childNamesOfStrict, flattenLayerTree, resolvePasteSource, type PlacementHistory, type PlacementLayer } from './layer-placement.js'
+import { captureCollectionSig, childEntriesOf, childNamesOf, childNamesOfStrict, flattenLayerTree, type PlacementHistory, type PlacementLayer } from './layer-placement.js'
 
 const SIG_A = 'a'.repeat(64)
 const SIG_B = 'b'.repeat(64)
@@ -131,80 +131,83 @@ describe('childNamesOf (non-strict, read-only paths)', () => {
 })
 
 // -------------------------------------------------
-// resolvePasteSource — sig first, parent-chain fallback, own-bag only
-// in-place. Pins the cut+paste-elsewhere fix: after a cut the source
-// parent's head no longer lists the child, so ONLY the intent-captured
-// sig can resolve it at a different destination.
+// childEntriesOf — the sig-level membership read the delta commits use.
+// Manifest-first (one pool read covers the parent); `missing` counts
+// unresolvable children so collision checks can tell "no collision"
+// from "can't see" — but NOTHING is wiped on a miss, because delta
+// commits never re-list the slot.
 // -------------------------------------------------
 
-const SRC_LOC = 'd'.repeat(64)
-const DST_LOC = 'e'.repeat(64)
-
-/** History fixture with path-addressed heads and sig-addressed layers.
- *  sign() derives a deterministic pseudo-loc-sig from the segments so
- *  resolveLayerAt's parent-chain walk works against `heads`. */
-const worldWith = (opts: {
-  layersBySig?: Record<string, PlacementLayer | null>
-  headsByPath?: Record<string, PlacementLayer | null>
-}): PlacementHistory => {
-  const locFor = (segs: readonly string[]) => 'loc:' + segs.join('/')
-  return {
-    sign: async (ctx: { explorerSegments: () => readonly string[] }) => locFor(ctx.explorerSegments()),
-    currentLayerAt: async (locSig: string) => {
-      if (locSig.startsWith('loc:')) return opts.headsByPath?.[locSig.slice(4)] ?? null
-      return opts.headsByPath?.[locSig] ?? null
-    },
-    commitLayer: async () => 'x'.repeat(64),
-    getLayerBySig: async (sig: string) => opts.layersBySig?.[sig] ?? null,
-  } as unknown as PlacementHistory
-}
-
-describe('resolvePasteSource', () => {
-  it('resolves by intent-captured sig even when the parent no longer lists the child (cut+paste-elsewhere)', async () => {
-    const history = worldWith({
-      layersBySig: { [SIG_A]: { name: 'payload', children: [] } },
-      headsByPath: { 'page': { name: 'page', children: [] } },  // post-cut: child GONE from head
-    })
-    const layer = await resolvePasteSource(history, undefined,
-      { label: 'payload', sourceSegments: ['page'], sig: SIG_A }, SRC_LOC, DST_LOC)
-    expect(layer?.name).toBe('payload')
+describe('childEntriesOf', () => {
+  it('pairs every child sig with its name, manifest-first at zero byte reads', async () => {
+    let byteReads = 0
+    const history = historyWith({ [SIG_A]: { name: 'alpha' }, [SIG_B]: { name: 'beta' } })
+    const inner = history.getLayerBySig
+    history.getLayerBySig = async (sig: string) => { byteReads++; return inner(sig) }
+    history.childrenManifestFor = async () => [
+      { sig: SIG_A, layer: { name: 'alpha' } },
+      { sig: SIG_B, layer: { name: 'beta' } },
+    ]
+    const { entries, missing } = await childEntriesOf(history, { name: 'root', children: [SIG_A, SIG_B] })
+    expect(entries).toEqual([{ sig: SIG_A, name: 'alpha' }, { sig: SIG_B, name: 'beta' }])
+    expect(missing).toBe(0)
+    expect(byteReads).toBe(0)
   })
 
-  it('falls back to the source parent chain when the sig is absent (legacy entry, source in place)', async () => {
-    const history = worldWith({
-      layersBySig: { [SIG_B]: { name: 'payload', children: [] } },
-      headsByPath: { 'page': { name: 'page', children: [SIG_B] } },
-    })
-    const layer = await resolvePasteSource(history, undefined,
-      { label: 'payload', sourceSegments: ['page'] }, SRC_LOC, DST_LOC)
-    expect(layer?.name).toBe('payload')
+  it('falls back to byte reads per child when the manifest is absent', async () => {
+    const history = historyWith({ [SIG_A]: { name: 'alpha' }, [SIG_B]: { name: 'beta' } })
+    const { entries, missing } = await childEntriesOf(history, { name: 'root', children: [SIG_A, SIG_B] })
+    expect(entries.map(e => e.name)).toEqual(['alpha', 'beta'])
+    expect(missing).toBe(0)
   })
 
-  it('falls back to the parent chain when the sig no longer resolves', async () => {
-    const history = worldWith({
-      layersBySig: { [SIG_B]: { name: 'payload', children: [] } },
-      headsByPath: { 'page': { name: 'page', children: [SIG_B] } },
-    })
-    const layer = await resolvePasteSource(history, undefined,
-      { label: 'payload', sourceSegments: ['page'], sig: SIG_C }, SRC_LOC, DST_LOC)
-    expect(layer?.name).toBe('payload')
+  it('counts children missing from BOTH sources instead of dropping them silently', async () => {
+    const history = historyWith({ [SIG_A]: { name: 'alpha' }, [SIG_B]: null })
+    const { entries, missing } = await childEntriesOf(history, { name: 'root', children: [SIG_A, SIG_B] })
+    expect(entries).toEqual([{ sig: SIG_A, name: 'alpha' }])
+    expect(missing).toBe(1)
   })
 
-  it('uses the own-bag read ONLY for cut-in-place (src === dst)', async () => {
-    const history = worldWith({
-      headsByPath: { [SRC_LOC]: { name: 'payload', children: [] } },  // own bag persists post-cut
-    })
-    const entry = { label: 'payload', sourceSegments: ['page'] }
-    const inPlace = await resolvePasteSource(history, undefined, entry, SRC_LOC, SRC_LOC)
-    expect(inPlace?.name).toBe('payload')
-    const elsewhere = await resolvePasteSource(history, undefined, entry, SRC_LOC, DST_LOC)
-    expect(elsewhere).toBeNull()  // never dump an own-bag seed at a foreign destination
+  it('empty and null parents are empty with nothing missing', async () => {
+    const history = historyWith({})
+    expect(await childEntriesOf(history, { name: 'leaf' })).toEqual({ entries: [], missing: 0 })
+    expect(await childEntriesOf(history, null)).toEqual({ entries: [], missing: 0 })
+  })
+})
+
+// -------------------------------------------------
+// captureCollectionSig — the sig-at-intent primitive behind cut/copy.
+// Seal FIRST (live merkle fold — per-page history leaves the parent's
+// stored child sig stale for deep edits), stored sig as fallback, and a
+// parent-chain read as the last resort for sig-less legacy entries.
+// -------------------------------------------------
+
+describe('captureCollectionSig', () => {
+  it('prefers the sealed live fold over the stored (possibly stale) sig', async () => {
+    const history = historyWith({})
+    history.sealSubtree = async () => SIG_C
+    expect(await captureCollectionSig(history, ['page', 'payload'], SIG_A)).toBe(SIG_C)
   })
 
-  it('returns null cleanly when nothing resolves', async () => {
-    const history = worldWith({})
-    const layer = await resolvePasteSource(history, undefined,
-      { label: 'payload', sourceSegments: ['page'], sig: SIG_A }, SRC_LOC, DST_LOC)
-    expect(layer).toBeNull()
+  it('falls back to the stored sig when the seal refuses (cold branch)', async () => {
+    const history = historyWith({})
+    history.sealSubtree = async () => null
+    expect(await captureCollectionSig(history, ['page', 'payload'], SIG_A)).toBe(SIG_A)
+  })
+
+  it('resolves through the parent chain when there is no seal and no stored sig', async () => {
+    const history = historyWith({ [SIG_B]: { name: 'payload', children: [] } })
+    const locFor = (segs: readonly string[]) => 'loc:' + segs.join('/')
+    history.sign = (async (ctx: { explorerSegments: () => readonly string[] }) =>
+      locFor(ctx.explorerSegments())) as PlacementHistory['sign']
+    history.currentLayerAt = async (locSig: string) =>
+      locSig === 'loc:page' ? { name: 'page', children: [SIG_B] } : null
+    expect(await captureCollectionSig(history, ['page', 'payload'])).toBe(SIG_B)
+  })
+
+  it('returns null cleanly when nothing can name the subtree', async () => {
+    const history = historyWith({})
+    history.sealSubtree = async () => null
+    expect(await captureCollectionSig(history, ['page', 'payload'])).toBeNull()
   })
 })

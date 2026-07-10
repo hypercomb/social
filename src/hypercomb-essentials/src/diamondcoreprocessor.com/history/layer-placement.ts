@@ -26,6 +26,11 @@ export interface PlacementHistory {
   /** Children manifest for a layer object (HistoryService.childrenManifestFor)
    *  — the cold-name fallback childNamesOfStrict uses before reporting a miss. */
   childrenManifestFor?(layer: PlacementLayer): Promise<Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> | null>
+  /** Merkle fold of a subtree's LIVE location heads into one pool-written
+   *  root sig (HistoryService.sealSubtree) — the collection-capture
+   *  primitive cut/copy uses. Optional: sealing degrades to the parent's
+   *  stored child sig when absent. */
+  sealSubtree?(segments: readonly string[]): Promise<string | null>
 }
 
 export interface PlacementLineage {
@@ -129,6 +134,77 @@ export async function childNamesOfStrict(
   }
 }
 
+/** The (sig, name) pairs of a parent's children, manifest-first — ONE pool
+ *  read replaces N per-child byte lookups when the manifest covers the
+ *  layer. The sig-native cut/copy/paste primitives resolve membership at
+ *  the SIG level (delta commits never re-list names), so unlike the strict
+ *  name reads there is no wipe hazard here: `missing` counts children
+ *  whose name couldn't be resolved (bytes cold, absent from the manifest)
+ *  purely so collision checks can tell "no collision" from "can't see". */
+export async function childEntriesOf(
+  history: PlacementHistory,
+  parent: PlacementLayer | null,
+): Promise<{ entries: { sig: string; name: string }[]; missing: number }> {
+  const childSigs = Array.isArray(parent?.children) ? parent!.children : []
+  if (childSigs.length === 0) return { entries: [], missing: 0 }
+
+  const bySig = new Map<string, string | undefined>()
+  if (parent && typeof history.childrenManifestFor === 'function') {
+    const manifest = await history.childrenManifestFor(parent).catch(() => null)
+    if (manifest) for (const e of manifest) bySig.set(String(e.sig), e.layer?.name)
+  }
+
+  const entries: { sig: string; name: string }[] = []
+  let missing = 0
+  for (const raw of childSigs) {
+    const sig = String(raw)
+    const fromManifest = bySig.get(sig)
+    if (typeof fromManifest === 'string' && fromManifest.length > 0) {
+      entries.push({ sig, name: fromManifest })
+      continue
+    }
+    const child = await history.getLayerBySig(sig)
+    if (typeof child?.name === 'string' && child.name.length > 0) {
+      entries.push({ sig, name: child.name })
+    } else {
+      missing++
+    }
+  }
+  return { entries, missing }
+}
+
+/** Capture "the collection" at a source path as ONE signature — the
+ *  sig-at-intent primitive behind cut/copy (and place-time resolution for
+ *  legacy sig-less entries).
+ *
+ *  Seal FIRST: under per-page history a parent's stored child sig freezes
+ *  the subtree at the parent's last commit, so deep edits since are
+ *  invisible through it. sealSubtree folds the LIVE location heads into a
+ *  merkle-correct root sig (pool-written, no markers) — the same primitive
+ *  sharing uses; cut/copy is sharing with yourself. When the seal refuses
+ *  (a cold branch it won't lossily fold), fall back to the parent's stored
+ *  child sig: still resolvable forever (history is append-only), at worst
+ *  stale for un-visited descendants — for a pasted-never-edited subtree it
+ *  is exact. Returns null only when neither source can name the subtree. */
+export async function captureCollectionSig(
+  history: PlacementHistory,
+  segments: readonly string[],
+  storedSig?: string,
+): Promise<string | null> {
+  if (typeof history.sealSubtree === 'function') {
+    try {
+      const sealed = await history.sealSubtree(segments)
+      if (sealed) return sealed
+    } catch { /* fall through to the stored sig */ }
+  }
+  if (storedSig) return storedSig
+  // Last resort: resolve the child's stored sig via its parent's children.
+  if (segments.length === 0) return null
+  const parent = await resolveLayerAt(history, undefined, segments.slice(0, -1))
+  const found = await childLayerOf(history, parent, segments[segments.length - 1])
+  return found?.sig ?? null
+}
+
 /** Resolve a single child cell's layer (and its sig) via its PARENT's
  *  `children` slot — the authoritative membership path the renderer uses.
  *
@@ -178,39 +254,6 @@ export async function resolveLayerAt(
   const parent = await resolveLayerAt(history, domain, segments.slice(0, -1))
   const found = await childLayerOf(history, parent, segments[segments.length - 1])
   return found?.layer ?? null
-}
-
-/** Resolve a paste/place SOURCE layer for a clipboard entry.
- *
- *  Order matters — this encodes why cut+paste-elsewhere works:
- *  1. SIG FIRST: `entry.sig` is the source cell's layer sig captured at
- *     cut/copy INTENT. History is append-only, so it resolves at ANY
- *     destination — including after a cut committed the source parent
- *     WITHOUT the child (the parent's head no longer lists it, and no
- *     path resolution can find it).
- *  2. Parent-chain fallback (sig-less legacy entries whose source is
- *     still in place): the source PARENT's children slot, the
- *     authoritative membership path.
- *  3. Own-bag read for CUT-IN-PLACE ONLY (src === dst: the parent
- *     dropped the child but its bag persists). For a re-home to a
- *     DIFFERENT location the own bag is deliberately never consulted:
- *     that read can return an unrelated/auto-minted seed and
- *     flattenLayerTree would dump a whole layer's children under the
- *     pasted name. A miss returns null — the caller fails the item
- *     cleanly. */
-export async function resolvePasteSource(
-  history: PlacementHistory,
-  domain: unknown,
-  entry: { label: string; sourceSegments: readonly string[]; sig?: string },
-  srcLocSig: string,
-  dstLocSig: string,
-): Promise<PlacementLayer | null> {
-  const bySig = entry.sig ? await history.getLayerBySig(entry.sig) : null
-  if (bySig) return bySig
-  const srcParent = await resolveLayerAt(history, domain, entry.sourceSegments)
-  const viaParent = await childLayerOf(history, srcParent, entry.label)
-  if (viaParent?.layer) return viaParent.layer
-  return srcLocSig === dstLocSig ? await history.currentLayerAt(srcLocSig) : null
 }
 
 /** Resolve the layer at the CURRENT location robustly: the parent-chain walk

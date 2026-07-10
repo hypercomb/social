@@ -1,16 +1,17 @@
 // diamondcoreprocessor.com/core/clipboard/clipboard.worker.ts
 import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
 import type { ClipboardService, ClipboardOp } from './clipboard.service.js'
-import { childNamesOf, childNamesOfStrict, childLayerOf, resolveLayerAt, resolvePasteSource, flattenLayerTree } from '../history/layer-placement.js'
+import { childNamesOf, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig } from '../history/layer-placement.js'
 import { readTilePropsIndex, writeTilePropsIndex, cellLocationSig } from '../editor/tile-properties.js'
 
 interface ClipboardEntry {
   label: string
   sourceSegments: readonly string[]
-  /** Source cell's layer sig, captured at cut/copy intent (see
-   *  clipboard.service.ts). Paste resolves by sig FIRST — a cut child is
-   *  gone from its parent's head, but history is append-only so the sig
-   *  stays resolvable at any destination. */
+  /** The COLLECTION sig, captured at cut/copy intent: a merkle fold of
+   *  the cell's live subtree (sealSubtree), falling back to the parent's
+   *  stored child sig. One sig carries the whole subtree — paste appends
+   *  it to the destination's children and nothing else. History is
+   *  append-only, so it resolves at any destination, forever. */
   sig?: string
 }
 
@@ -40,17 +41,18 @@ interface HistoryServiceLike {
   commitLayer(locationSig: string, layer: LayerLike): Promise<string>
   getLayerBySig(sig: string): Promise<LayerLike | null>
   childrenManifestFor?(layer: LayerLike): Promise<Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> | null>
+  /** Merkle fold of a subtree's live heads into one pool-written root sig
+   *  — the collection-capture primitive (see captureCollectionSig). */
+  sealSubtree?(segments: readonly string[]): Promise<string | null>
+  /** Pool-write a derived layer (canonicalize → sign → write, NO marker)
+   *  — the re-mint primitive for index overrides and exclusion pruning. */
+  materializeLayer?(layer: { name?: string; [k: string]: unknown }): Promise<string>
 }
 
 interface LayerCommitterLike {
-  update(
+  commitChildrenDeltas(
     segments: readonly string[],
-    layer: { name?: string; [slot: string]: unknown },
-    nameSlots?: ReadonlySet<string>,
-  ): Promise<string>
-  importTree(
-    updates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[],
-    nameSlots?: ReadonlySet<string>,
+    changes: { removes?: readonly { sig?: string; label?: string }[]; appends?: readonly string[] },
   ): Promise<void>
 }
 
@@ -288,11 +290,12 @@ export class ClipboardWorker extends Worker {
       // otherwise the clipboard fills and tiles eager-unmount with no commit.
       if (this.#blockedByRewound('cut')) return
 
-      // Cut = drop the cells from each source parent's `children` slot.
-      // No bytes move: the cell's own history bag stays addressable by
-      // its lineage sig, so paste re-homes it at the target. Labels may
-      // be `/`-separated paths — group leaves by their parent so each
-      // affected parent gets exactly ONE layer commit.
+      // Cut = detach each leaf from its source parent's `children` slot —
+      // surgical sig-space removes, ONE commit per affected parent.
+      // Nothing is deleted: the leaf's bytes, markers and bag all
+      // survive; the parent's new head simply stops listing it (undo
+      // restores it forever). Labels may be `/`-separated paths — group
+      // leaves by their parent.
       const groups = new Map<string, { parentSegs: string[]; leaves: Set<string> }>()
       const moved: ClipboardEntry[] = []
       const movedByKey = new Map<string, ClipboardEntry>()
@@ -315,70 +318,45 @@ export class ClipboardWorker extends Worker {
 
       EffectBus.emit('fs:changed', { segments: [...baseSegments] })
 
-      // ONE commit per affected parent. Survivors = current children
-      // MINUS the cut leaves — the full surviving list, never a partial
-      // one (a partial list passed to update() is a SET that wipes the
-      // siblings it omits). Other parent slots ride along via spread.
-      // Mirrors RemoveQueenBee.
       for (const { parentSegs, leaves } of groups.values()) {
-        // Resolve the parent layer ROBUSTLY. The bare currentLayerAt reads
-        // the parent's OWN history bag, which is empty for a location never
-        // committed into (its content lives as a child sig in ITS parent,
-        // pool-addressed) — so it returns null even when the layer plainly
-        // renders. resolveLayerAt walks the parent chain to get the real
-        // children list.
+        // Resolve the parent for the name→sig map only — the commit below
+        // is delta-shaped and hydrates from the bag head itself.
         const parent = await this.#resolveParentLayer(history, parentSegs, baseSegments)
-        // No reliable parent read → DO NOT commit. survivors would be the
-        // empty/partial list of siblings we couldn't see, and update() SETs
-        // children, so committing would WIPE every tile we missed ("cut
-        // tiles show, current tiles are gone"). Mirrors RemoveQueenBee's
-        // `if (!parent) return` guard. The entries are already on the
-        // clipboard, so nothing is lost — the cut just declines to mutate a
-        // layer it cannot read.
         if (!parent) {
           console.warn(`[clipboard] cut skipped — parent layer unresolved at /${parentSegs.join('/')}`)
           continue
         }
-        // STRICT survivors read — same reasoning as the !parent guard
-        // above, one level down: a cold SIBLING sig missing from the
-        // survivors list would be wiped by the children SET below even
-        // though it was never cut. Decline this parent's commit instead
-        // (entries are on the clipboard; nothing lost).
-        const { names: allChildren, coldMiss } = await childNamesOfStrict(history, parent)
-        if (coldMiss) {
-          console.warn(`[clipboard] cut skipped — cold sibling at /${parentSegs.join('/')}; committing would drop it`)
-          continue
-        }
-        const survivors = allChildren.filter(n => !leaves.has(n))
+        // name → stored child sig, manifest-first: one pool read covers
+        // the whole parent.
+        const { entries } = await childEntriesOf(history, parent)
+        const sigByName = new Map(entries.map(e => [e.name, e.sig]))
 
-        // Capture each cut leaf's LAYER SIG before the parent drops it —
-        // after this commit the child is gone from the parent's head, and
-        // paste-elsewhere can only resolve the source by sig (history is
-        // append-only, so the sig stays addressable forever). Same dual
-        // source as childNamesOfStrict: bytes path first, then the
-        // children manifest for a bytes-cold leaf (name → sig).
-        let parentManifest: Array<{ sig: string; layer: { name?: string } }> | null | undefined
+        // Capture each leaf's COLLECTION sig at intent: sealSubtree folds
+        // the subtree's live heads into one merkle root (the same
+        // primitive sharing uses — cut/copy is sharing with yourself);
+        // the parent's stored child sig is the fallback. History is
+        // append-only, so the captured sig resolves at ANY destination,
+        // forever — including after this commit drops the child.
+        const removes: { sig?: string; label?: string }[] = []
         for (const leaf of leaves) {
           const entry = movedByKey.get(`${parentSegs.join('/')}/${leaf}`)
-          if (!entry) continue
-          const via = await childLayerOf(history, parent, leaf)
-          if (via?.sig) { entry.sig = via.sig; continue }
-          if (parentManifest === undefined) {
-            parentManifest = typeof history.childrenManifestFor === 'function'
-              ? await history.childrenManifestFor(parent).catch(() => null)
-              : null
-          }
-          const fromManifest = parentManifest?.find(e => e?.layer?.name === leaf)
-          if (fromManifest?.sig) entry.sig = fromManifest.sig
+          const stored = sigByName.get(leaf)
+          const captured = await captureCollectionSig(history, [...parentSegs, leaf], stored)
+          if (entry && captured) entry.sig = captured
+          removes.push({ ...(stored ? { sig: stored } : {}), label: leaf })
         }
 
         // Eager visual unmount; `viaUpdate` tells the committer's per-
-        // event listener to skip queueing — the update() below IS the
+        // event listener to skip queueing — the delta commit below IS the
         // atomic commit for this action.
         for (const leaf of leaves) {
           EffectBus.emit('cell:removed', { cell: leaf, segments: [...parentSegs], viaUpdate: true })
         }
-        await committer.update(parentSegs, { ...parent, children: survivors })
+        // ONE surgical commit: children minus the cut sigs. No name
+        // re-listing, so a cold sibling can't be wiped — the old strict
+        // survivors read and its "cut skipped — cold sibling" refusals
+        // are structurally unnecessary now.
+        await committer.commitChildrenDeltas(parentSegs, { removes })
       }
 
       // Re-capture with the sigs resolved above — the early capture (pre-
@@ -408,22 +386,27 @@ export class ClipboardWorker extends Worker {
       })
     }
     if (copyEntries.length === 0) return
-    // Best-effort sig capture at intent — the copy source stays in place,
-    // so path resolution remains the fallback; the sig just makes paste
-    // immune to the source page going cold or drifting later. Dual source
-    // like the cut path: bytes first, children manifest for cold leaves.
+    // Capture each entry's COLLECTION sig at intent — seal-first (live
+    // merkle fold), the parent's stored child sig as fallback. One
+    // manifest-first childEntriesOf read per distinct source parent. The
+    // copy source stays in place, so a failed capture just means paste
+    // re-captures from the path later.
     const history = this.#history
     if (history) {
+      const sigsByParent = new Map<string, Map<string, string>>()
       for (const entry of copyEntries) {
         try {
-          const srcParent = await resolveLayerAt(history, lineage?.domain, entry.sourceSegments)
-          const via = await childLayerOf(history, srcParent, entry.label)
-          if (via?.sig) { entry.sig = via.sig; continue }
-          if (srcParent && typeof history.childrenManifestFor === 'function') {
-            const manifest = await history.childrenManifestFor(srcParent).catch(() => null)
-            const fromManifest = manifest?.find(e => e?.layer?.name === entry.label)
-            if (fromManifest?.sig) entry.sig = fromManifest.sig
+          const key = entry.sourceSegments.join('/')
+          let byName = sigsByParent.get(key)
+          if (!byName) {
+            const srcParent = await resolveLayerAt(history, lineage?.domain, entry.sourceSegments)
+            const { entries } = await childEntriesOf(history, srcParent)
+            byName = new Map(entries.map(e => [e.name, e.sig]))
+            sigsByParent.set(key, byName)
           }
+          const captured = await captureCollectionSig(
+            history, [...entry.sourceSegments, entry.label], byName.get(entry.label))
+          if (captured) entry.sig = captured
         } catch { /* path fallback at paste */ }
       }
     }
@@ -529,13 +512,12 @@ export class ClipboardWorker extends Worker {
   }
 
   // ── shared placement (paste + place) ──────────────────
-  // For each item: skip if the target already holds a cell with that
-  // name (never clobber), else clone the source cell's layer subtree to
-  // the target lineage so its content is addressable at the new path.
-  // Then ONE commit folds every placed label into the target's
-  // `children` slot — existing children first, placed appended, full
-  // list (never partial). Cloning happens BEFORE the commit so the
-  // committer resolves each placed name to its freshly-homed head sig.
+  // Sig-native: each item resolves to ONE collection sig (captured at
+  // cut/copy intent, or sealed at place time), and the whole paste is
+  // ONE surgical commit appending those sigs to the target's `children`.
+  // The subtree is never re-committed — its bytes are pool-addressed and
+  // position-independent, and navigation into it resolves lazily through
+  // the parent chain (HistoryService seeds the bag on first visit/edit).
 
   async #placeItems(
     history: HistoryServiceLike,
@@ -545,90 +527,46 @@ export class ClipboardWorker extends Worker {
     targetSegments: readonly string[],
     targets?: Record<string, number>,
   ): Promise<{ placed: ClipboardEntry[]; failed: string[] }> {
-    // Resolve the BOUND target layer authoritatively by its segments
-    // (resolveLayerAt walks the parent chain). The cursor fallback inside
-    // #resolveParentLayer is gated on the bound target being the page CURRENTLY
-    // on screen — so it heals a cold cache for a normal in-place paste, but can
-    // never redirect a paste to wherever the view has drifted. `liveCurrent` is
-    // the only live read in this method, and it's used SOLELY for that gate; the
-    // target itself (`targetSegments`) was frozen at intent.
-    // Phase stopwatch — one summary line per paste (repo perf-log style:
-    // [script-preloader] find, [preload] preloadFromRoot). Field reports
-    // of multi-second pastes are only diagnosable with this breakdown.
+    // Phase stopwatch — one summary line per paste (repo perf-log style).
     const tStart = performance.now()
-    let tParent = 0, tStrict = 0, tResolve = 0, tFlatten = 0, tSeed = 0, tCommit = 0
+    let tParent = 0, tCapture = 0, tPrep = 0, tSeed = 0, tCommit = 0
 
+    // Resolve the BOUND target layer for the collision check only — the
+    // commit below is delta-shaped (append), hydrates from the bag head
+    // itself, and never re-lists children, so a cold/unresolved target no
+    // longer risks wiping anything. The cursor fallback inside
+    // #resolveParentLayer is gated on the bound target being the page
+    // currently on screen; the target itself was frozen at intent.
     const liveCurrent = [...lineage.explorerSegments()]
-    const onScreen = this.#sameSegments(targetSegments, liveCurrent)
     const parent = await this.#resolveParentLayer(history, targetSegments, liveCurrent)
+    // Collision names: manifest-first, tolerant. An append can't wipe a
+    // cold sibling, so the strict-read refusals ("paste deferred — cold
+    // sibling") are structurally unnecessary; a cold miss at worst lets a
+    // duplicate name through, and the head is the final word on membership.
+    const { entries: existingEntries } = await childEntriesOf(history, parent)
     tParent = performance.now() - tStart
+    const taken = new Set(existingEntries.map(e => e.name))
 
-    // Refuse rather than guess: a non-root bound target that neither resolves up
-    // the chain NOR is the page on screen cannot be written safely — committing
-    // here would SET an empty/partial children list and wipe whatever lives at a
-    // location we can't actually read. Leave the clipboard intact (nothing lost)
-    // and tell the user to navigate there and place again. (Root / a genuinely
-    // empty on-screen target keeps existing=[] — that's correct, not a guess.)
-    if (!parent && targetSegments.length > 0 && !onScreen) {
-      console.warn(`[clipboard] paste refused — bound target unresolved & off-screen at /${targetSegments.join('/')}`)
-      EffectBus.emit('toast:show', {
-        type: 'info',
-        title: 'Paste deferred',
-        message: `Couldn't resolve the paste target — navigate to /${targetSegments.join('/')} and place again.`,
-      })
-      return { placed: [], failed: items.map(i => i.label) }
-    }
-
-    // STRICT children read: the commit below SETs the parent's children to
-    // existing + placed — a cold sibling silently missing from `existing`
-    // would be permanently wiped by that SET. Refuse instead (clipboard
-    // stays intact, nothing lost) and let the user retry once warm.
-    const tStrict0 = performance.now()
-    const { names: existing, coldMiss } = await childNamesOfStrict(history, parent)
-    tStrict = performance.now() - tStrict0
-    if (coldMiss) {
-      console.warn(`[clipboard] paste refused — cold sibling at /${targetSegments.join('/')}; committing would drop it`)
-      EffectBus.emit('toast:show', {
-        type: 'info',
-        title: 'Paste deferred',
-        message: 'Some tiles here haven’t loaded yet — try the paste again in a moment.',
-      })
-      return { placed: [], failed: items.map(i => i.label) }
-    }
-    const taken = new Set(existing)
-
-    // Participant-local nested-discard exclusions (absolute source paths). Read
-    // once; each placed subtree is pruned against it below.
+    // Participant-local nested-discard exclusions (absolute source paths).
     const excluded = readExclusions()
 
     const placed: ClipboardEntry[] = []
+    const appends: string[] = []
     const failed: string[] = []
-    // Re-homed subtrees, flattened into importTree updates and accumulated
-    // across every placed item so the whole paste lands in ONE shared cascade.
-    const treeUpdates: { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }[] = []
     for (const entry of items) {
       if (taken.has(entry.label)) {
         console.warn(`[clipboard] target already has '${entry.label}'; skipping`)
         failed.push(entry.label)
         continue
       }
-      const tEntry0 = performance.now()
-      const srcLocSig = await history.sign({
-        domain: lineage.domain,
-        explorerSegments: () => [...entry.sourceSegments, entry.label],
-      })
-      const dstLocSig = await history.sign({
-        domain: lineage.domain,
-        explorerSegments: () => [...targetSegments, entry.label],
-      })
-
-      // Self / descendant guard: never place a cell into itself or its own
-      // subtree (e.g. dropping `/a/X` at `/a/X/sub`) — that would recurse the
-      // re-home and duplicate the tree. Skip with a failed mark. Cut-in-place
-      // (src === dst, same location) is NOT this case and is allowed.
+      // Self / descendant guard: never place a cell into its own subtree
+      // (e.g. dropping `/a/X` at `/a/X/sub`) — pure path check; location
+      // sigs are path-derived so equal paths ⇔ equal locations. Paste
+      // back in place (identical paths) is allowed.
       const srcPath = [...entry.sourceSegments, entry.label]
       const dstPath = [...targetSegments, entry.label]
-      if (srcLocSig !== dstLocSig &&
+      const samePlace = srcPath.length === dstPath.length && srcPath.every((s, i) => s === dstPath[i])
+      if (!samePlace &&
           dstPath.length >= srcPath.length &&
           srcPath.every((s, i) => s === dstPath[i])) {
         console.warn(`[clipboard] skipped self/descendant paste of '${entry.label}' → /${targetSegments.join('/')}`)
@@ -636,61 +574,53 @@ export class ClipboardWorker extends Worker {
         continue
       }
 
-      // Resolve the source cell's layer — sig-first, parent-chain fallback,
-      // own-bag for cut-in-place only. The full rationale lives on
-      // resolvePasteSource (layer-placement.ts), where the order is
-      // spec-pinned against regression.
-      const srcLayer = await resolvePasteSource(history, lineage.domain, entry, srcLocSig, dstLocSig)
-      tResolve += performance.now() - tEntry0
-      if (!srcLayer) {
+      const tCap0 = performance.now()
+      // The collection sig: captured at cut/copy intent. Sig-less entries
+      // (side-panel drilled children, legacy restores) seal at place time
+      // — same primitive, applied late; the source parent's stored child
+      // sig backs it up inside captureCollectionSig.
+      let sig = entry.sig ?? null
+      if (!sig) sig = await captureCollectionSig(history, srcPath)
+      let layer = sig ? await history.getLayerBySig(sig) : null
+      tCapture += performance.now() - tCap0
+      if (!sig || !layer) {
         console.warn(`[clipboard] paste source missing for '${entry.label}': /${entry.sourceSegments.join('/')}`)
         failed.push(entry.label)
         continue
       }
-      // Name assertion: the resolved layer MUST be the cell we intend to place.
-      // If resolution drifted to a parent/sibling, refuse this item rather than
-      // flatten the wrong subtree in. (Layers carry their own `name`; a missing
-      // name is tolerated — older bags — and falls through to placement.)
-      if (typeof srcLayer.name === 'string' && srcLayer.name !== entry.label) {
-        console.warn(`[clipboard] source mismatch for '${entry.label}': resolved '${srcLayer.name}'; skipping`)
+      // Name assertion: the sig MUST name the cell we intend to place —
+      // if capture drifted to a parent/sibling, refuse this item rather
+      // than link the wrong subtree in.
+      if (typeof layer.name === 'string' && layer.name !== entry.label) {
+        console.warn(`[clipboard] source mismatch for '${entry.label}': resolved '${layer.name}'; skipping`)
         failed.push(entry.label)
         continue
       }
-      // Same source and destination lineage (cut-and-paste in place) needs no
-      // re-home — the content never left its bag; the parent commit below
-      // name-resolves it straight back into children. Otherwise flatten the
-      // source subtree into importTree updates rooted at the dest path.
-      if (srcLocSig !== dstLocSig) {
-        try {
-          const tFlat0 = performance.now()
-          let entryUpdates = await flattenLayerTree(history, srcLayer, [...targetSegments, entry.label])
-          tFlatten += performance.now() - tFlat0
-          // Honour clipboard-local nested discards (the side panel's per-item ×
-          // while drilled): drop every excluded source descendant AND its whole
-          // subtree from this paste, and strip its name from its parent's
-          // children list. Keyed by absolute source path, so it prunes only the
-          // intended branch; the source hive is never touched.
-          entryUpdates = pruneExcludedUpdates(entryUpdates, targetSegments, entry.sourceSegments, excluded)
-          // Hover-number paste target: rewrite the placed TOP tile's `index`
-          // (its spiral slot) inside this same re-home cascade, so it lands in
-          // ONE commit. Only the top node is retargeted; the subtree keeps its
-          // own indexes. No target → unchanged (source index = the default).
-          const target = targets?.[entry.label]
-          if (typeof target === 'number' && Number.isFinite(target)) {
-            const topKey = [...targetSegments, entry.label].join('/')
-            const top = entryUpdates.find(u => u.segments.join('/') === topKey)
-            if (top) {
-              const sig = await this.#propsWithIndex(top.layer, Math.trunc(target))
-              if (sig) top.layer = { ...top.layer, properties: [sig] }
-            }
-          }
-          treeUpdates.push(...entryUpdates)
-        } catch (err) {
-          console.warn(`[clipboard] flatten failed for '${entry.label}':`, err)
-          failed.push(entry.label)
-          continue
+
+      const tPrep0 = performance.now()
+      // Nested discards (the side panel's per-item × while drilled): the
+      // pruned collection is a DERIVED layer — re-mint the spine down to
+      // each excluded branch (pool writes only, no markers, no commits).
+      if (excluded.size > 0) {
+        const pruned = await this.#pruneCollection(history, sig, layer, srcPath, excluded)
+        sig = pruned.sig
+        layer = pruned.layer
+      }
+      // Hover-number paste target: fold the index override into the TOP
+      // node's props and re-mint that one node. The subtree under it is
+      // untouched (its sigs ride along inside the re-minted layer).
+      const target = targets?.[entry.label]
+      if (typeof target === 'number' && Number.isFinite(target) && typeof history.materializeLayer === 'function') {
+        const propsSig = await this.#propsWithIndex(layer, Math.trunc(target))
+        if (propsSig) {
+          const reminted = { ...layer, properties: [propsSig] }
+          sig = await history.materializeLayer(reminted)
+          layer = reminted
         }
       }
+      tPrep += performance.now() - tPrep0
+
+      appends.push(sig)
       placed.push({ label: entry.label, sourceSegments: entry.sourceSegments })
       taken.add(entry.label)
     }
@@ -700,75 +630,129 @@ export class ClipboardWorker extends Worker {
     EffectBus.emit('fs:changed', { segments: [...targetSegments] })
 
     // Eager visual mount; `viaUpdate` makes the committer's per-event
-    // listener skip queueing — the update() below is the atomic commit.
+    // listener skip queueing — the delta commit below is the atomic commit.
     for (const entry of placed) {
       EffectBus.emit('cell:added', { cell: entry.label, segments: [...targetSegments], viaUpdate: true })
     }
-    // ONE mechanical cascade: importTree commits every re-homed node plus the
-    // target parent, deepest-first, with a single shared up-cascade to root —
-    // the same primitive create and bulk-import use. The parent carries the
-    // full new children list (existing + placed, by name) so the pasted tops
-    // fold in; each subtree node carries its own children by name so the
-    // hierarchy rebuilds level by level. Cut-in-place items have no treeUpdate
-    // — the parent's name-resolution re-homes them from their persisted bag.
-    const nextChildren = [...existing, ...placed.map(p => p.label)]
 
-    // Seed the participant-local render index (hc:tile-props-index) for every
-    // re-homed node at its NEW destination lineage. show-cell resolves a LOCAL
-    // tile's image ONLY through this index (keyed by cellLocationSig) with no
-    // canonical fallback — a freshly pasted tile has no entry at its new
-    // location, so it renders BLANK until an unrelated reload heals it. Mirrors
-    // swarm-adopt's seed for the identical flattenLayerTree/importTree re-home.
-    // OVERWRITE, not fill-if-empty: paste refuses name collisions, so no LIVE
-    // tile owns a destination key — any existing entry is STALE (a same-named
-    // tile that lived here long ago) and would render the WRONG image over the
-    // pasted tile. The just-placed node's props are authoritative. Runs AFTER
-    // the paste-target props rewrite, so the final props sig lands.
+    // Seed the participant-local render index (hc:tile-props-index) at the
+    // DESTINATION keys for the whole pasted subtree — a pure sig-walk over
+    // warm pool bytes, no commits. show-cell resolves a LOCAL tile's image
+    // ONLY through this index (keyed by cellLocationSig); overwrite, not
+    // fill-if-empty — paste refuses name collisions, so any existing entry
+    // at a destination key is stale.
     const tSeed0 = performance.now()
     try {
-      const index = readTilePropsIndex()
-      let seeded = false
-      for (const u of treeUpdates) {
-        const props = (u.layer as { properties?: unknown }).properties
-        const propSig = Array.isArray(props) && typeof props[0] === 'string' ? props[0] : undefined
-        if (!propSig || !/^[0-9a-f]{64}$/.test(propSig)) continue
-        const segs = u.segments
-        if (segs.length === 0) continue
-        const key = await cellLocationSig(segs.slice(0, -1), segs[segs.length - 1])
-        if (!key || index[key] === propSig) continue
-        index[key] = propSig
-        seeded = true
-      }
-      if (seeded) writeTilePropsIndex(index)
+      await this.#seedPropsIndex(history, appends, targetSegments)
     } catch (err) {
       console.warn('[clipboard] props-index seed skipped', err)
     }
     tSeed = performance.now() - tSeed0
 
+    // ONE surgical commit: the target's children gain the collection sigs.
+    // Existing children (warm or cold) ride through verbatim.
     const tCommit0 = performance.now()
-    await committer.importTree([
-      { segments: [...targetSegments], layer: { ...(parent ?? {}), children: nextChildren } },
-      ...treeUpdates,
-    ])
+    await committer.commitChildrenDeltas(targetSegments, { appends })
     tCommit = performance.now() - tCommit0
     console.log(
       `[clipboard] paste: total=${Math.round(performance.now() - tStart)}ms ` +
-      `parent=${Math.round(tParent)}ms strict=${Math.round(tStrict)}ms resolve=${Math.round(tResolve)}ms ` +
-      `flatten=${Math.round(tFlatten)}ms seed=${Math.round(tSeed)}ms commit=${Math.round(tCommit)}ms ` +
-      `(${placed.length} placed, ${treeUpdates.length} nodes, ${existing.length} existing children)`
+      `parent=${Math.round(tParent)}ms capture=${Math.round(tCapture)}ms prep=${Math.round(tPrep)}ms ` +
+      `seed=${Math.round(tSeed)}ms commit=${Math.round(tCommit)}ms ` +
+      `(${placed.length} placed, ${existingEntries.length} existing children)`
     )
     await new hypercomb().act()
 
-    // No forced full re-render here. `place` (the "add to current" path)
-    // exits the clipboard view AFTER this returns, and that exit render runs
-    // a same-layer rebuild against the now-committed layer — it shows the
-    // final set (existing + placed) in one clean, mesh-hidden-then-revealed
-    // paint. A post-commit fs:changed would instead clear and rebuild the
-    // already-visible mesh, re-introducing the "resize / disappear / re-render"
-    // flash and an extra full pass. The eager cell:added above keeps the
-    // incremental path covering the paste button's exit-before-commit order.
+    // No forced full re-render here — the eager cell:added above covers the
+    // incremental path, and the clipboard-exit render rebuilds against the
+    // committed layer (see the paste button's exit-before-commit ordering).
 
     return { placed, failed }
+  }
+
+  // Walk a placed collection (pool-warm, sig-addressed) and seed the
+  // participant-local render index at each node's DESTINATION location key.
+  // Read-only over layers; one localStorage write at the end.
+  async #seedPropsIndex(
+    history: HistoryServiceLike,
+    rootSigs: readonly string[],
+    targetSegments: readonly string[],
+  ): Promise<void> {
+    const index = readTilePropsIndex()
+    let seeded = false
+    const seen = new Set<string>()
+    const queue: { sig: string; parentSegs: string[] }[] =
+      rootSigs.map(sig => ({ sig, parentSegs: [...targetSegments] }))
+    while (queue.length > 0) {
+      const { sig, parentSegs } = queue.shift()!
+      const layer = await history.getLayerBySig(sig)
+      const name = typeof layer?.name === 'string' ? layer.name : ''
+      // Unsafe names (path separators / control chars) would address a
+      // different location — skip the node and its subtree, mirroring
+      // flattenLayerTree's guard.
+      if (!layer || !name || /[\\/\x00-\x1f]/.test(name)) continue
+      const dedupeKey = `${sig}|${parentSegs.join('/')}`
+      if (seen.has(dedupeKey)) continue
+      seen.add(dedupeKey)
+      const props = (layer as { properties?: unknown }).properties
+      const propSig = Array.isArray(props) && typeof props[0] === 'string' ? props[0] : undefined
+      if (propSig && /^[0-9a-f]{64}$/.test(propSig)) {
+        const key = await cellLocationSig(parentSegs, name)
+        if (key && index[key] !== propSig) {
+          index[key] = propSig
+          seeded = true
+        }
+      }
+      const children = Array.isArray(layer.children) ? layer.children : []
+      for (const c of children) queue.push({ sig: String(c), parentSegs: [...parentSegs, name] })
+    }
+    if (seeded) writeTilePropsIndex(index)
+  }
+
+  // Re-mint a collection minus its excluded branches — the sig-native
+  // replacement for pruning flattened updates. Exclusions are ABSOLUTE
+  // source paths (see readExclusions); only spines leading to an excluded
+  // branch are re-signed (pool writes via materializeLayer, no markers).
+  async #pruneCollection(
+    history: HistoryServiceLike,
+    sig: string,
+    layer: LayerLike,
+    srcPath: readonly string[],
+    excluded: ReadonlySet<string>,
+  ): Promise<{ sig: string; layer: LayerLike }> {
+    if (typeof history.materializeLayer !== 'function') return { sig, layer }
+    const anyUnder = (path: readonly string[]): boolean => {
+      const key = path.join('/')
+      for (const x of excluded) {
+        if (x === key || x.startsWith(key + '/')) return true
+      }
+      return false
+    }
+    const prune = async (
+      nodeSig: string,
+      node: LayerLike,
+      path: readonly string[],
+    ): Promise<{ sig: string; layer: LayerLike } | null> => {
+      if (excluded.has(path.join('/'))) return null
+      if (!anyUnder(path)) return { sig: nodeSig, layer: node }
+      const childSigs = Array.isArray(node.children) ? node.children.map(String) : []
+      let changed = false
+      const kept: string[] = []
+      for (const cs of childSigs) {
+        const child = await history.getLayerBySig(cs)
+        const name = typeof child?.name === 'string' ? child.name : ''
+        if (!child || !name) { kept.push(cs); continue }
+        const result = await prune(cs, child, [...path, name])
+        if (result === null) { changed = true; continue }
+        kept.push(result.sig)
+        if (result.sig !== cs) changed = true
+      }
+      if (!changed) return { sig: nodeSig, layer: node }
+      const next: LayerLike = { ...node, children: kept }
+      if (kept.length === 0) delete (next as Record<string, unknown>)['children']
+      const nextSig = await history.materializeLayer!(next)
+      return { sig: nextSig, layer: next }
+    }
+    return await prune(sig, layer, srcPath) ?? { sig, layer }
   }
 
   // Build a new props resource = the tile's existing properties with `index`
@@ -835,6 +819,11 @@ export class ClipboardWorker extends Worker {
     const items = svc.items
     const invalid = new Set<string>()
     for (const entry of items) {
+      // Sig-first: the collection sig captured at intent resolves at any
+      // destination regardless of what happened to the source path since
+      // — bytes present ⇒ pasteable ⇒ valid. Only sig-less legacy entries
+      // fall through to path resolution.
+      if (entry.sig && await history.getLayerBySig(entry.sig)) continue
       const parentSig = await history.sign({
         domain: lineage.domain,
         explorerSegments: () => [...entry.sourceSegments],
@@ -1074,55 +1063,6 @@ function readExclusions(): ReadonlySet<string> {
 
 function clearExclusions(): void {
   try { localStorage.removeItem(EXCLUSIONS_KEY) } catch { /* ignore */ }
-}
-
-// Prune a flattened source subtree (importTree updates rooted at
-// `[...targetSegments, entry.label]`) of every node whose ABSOLUTE source path
-// is excluded — and of that node's whole subtree — then strip the excluded leaf
-// names from their surviving parent's children list. `sourceBase` is the placed
-// entry's sourceSegments; a flattened node at dest `segments` maps back to the
-// source path `[...sourceBase, ...segments.slice(targetSegments.length)]`.
-function pruneExcludedUpdates(
-  updates: { segments: string[]; layer: { name?: string; [slot: string]: unknown } }[],
-  targetSegments: readonly string[],
-  sourceBase: readonly string[],
-  excluded: ReadonlySet<string>,
-): typeof updates {
-  if (excluded.size === 0) return updates
-  const tlen = targetSegments.length
-  const srcPathOf = (segs: readonly string[]): string =>
-    [...sourceBase, ...segs.slice(tlen)].join('/')
-
-  // Dest-segment keys of nodes whose source path is excluded.
-  const excludedKeys: string[] = []
-  for (const u of updates) {
-    if (excluded.has(srcPathOf(u.segments))) excludedKeys.push(u.segments.join('/'))
-  }
-  if (excludedKeys.length === 0) return updates
-
-  const underExcluded = (key: string): boolean =>
-    excludedKeys.some(p => key === p || key.startsWith(p + '/'))
-
-  // Excluded leaf name → its parent dest-key, so survivors can drop it.
-  const namesByParent = new Map<string, Set<string>>()
-  for (const key of excludedKeys) {
-    const segs = key.split('/')
-    const name = segs[segs.length - 1]
-    const parentKey = segs.slice(0, -1).join('/')
-    const set = namesByParent.get(parentKey) ?? new Set<string>()
-    set.add(name)
-    namesByParent.set(parentKey, set)
-  }
-
-  return updates
-    .filter(u => !underExcluded(u.segments.join('/')))
-    .map(u => {
-      const drop = namesByParent.get(u.segments.join('/'))
-      if (!drop) return u
-      const children = u.layer['children']
-      if (!Array.isArray(children)) return u
-      return { segments: u.segments, layer: { ...u.layer, children: children.filter((c: unknown) => !drop.has(String(c))) } }
-    })
 }
 
 const _clipboard = new ClipboardWorker()
