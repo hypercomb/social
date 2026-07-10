@@ -13,7 +13,11 @@ compatibility_date = "2026-06-01"
 # record + cert on the jwize.com zone; removing this line and redeploying
 # detaches it just as cleanly.
 routes = [
-  { pattern = "content.jwize.com", custom_domain = true }
+  { pattern = "content.jwize.com", custom_domain = true },
+  # pluginthematrix.io is the legacy-client alias: every deployed client
+  # already probes it as a byte fallback, so serving the same sig heap
+  # here gives old installs public-content reads with zero updates.
+  { pattern = "pluginthematrix.io", custom_domain = true }
 ]
 
 # R2 bucket holding the flat sig heap: one object per sig, key == sig,

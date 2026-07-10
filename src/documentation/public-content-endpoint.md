@@ -2,9 +2,11 @@
 
 **Status: DEPLOYED 2026-07-09, smoke-tested live.** Code:
 `hypercomb-relay/blossom-worker/` (worker.js + wrangler.toml + package.json).
-Live at **`https://content.jwize.com`** (custom domain on the jwize.com
-zone via `routes` in wrangler.toml; the workers.dev route is disabled —
-one canonical address). Served blobs carry `Content-Security-Policy:
+Live at **`https://content.jwize.com`** (canonical) and
+**`https://pluginthematrix.io`** (legacy-client alias — every deployed
+client already probes it as a byte fallback, so old installs get public
+reads with zero updates; zone moved from DreamHost NS 2026-07-09). Both
+are `routes` custom domains in wrangler.toml; workers.dev is disabled. Served blobs carry `Content-Security-Policy:
 sandbox` + `X-Content-Type-Options: nosniff`, so uploaded HTML/SVG renders
 inert — strangers' bytes never act under the domain's authority. R2 bucket `hypercomb-content`, KV
 `hypercomb-grants` (id `11e24dcda743413ab24397e936671641`), auto-grant 100MB /
