@@ -39,6 +39,7 @@ interface HistoryServiceLike {
   currentLayerAt(locationSig: string): Promise<LayerLike | null>
   commitLayer(locationSig: string, layer: LayerLike): Promise<string>
   getLayerBySig(sig: string): Promise<LayerLike | null>
+  childrenManifestFor?(layer: LayerLike): Promise<Array<{ sig: string; layer: { name?: string; [k: string]: unknown } }> | null>
 }
 
 interface LayerCommitterLike {
@@ -353,11 +354,22 @@ export class ClipboardWorker extends Worker {
         // Capture each cut leaf's LAYER SIG before the parent drops it —
         // after this commit the child is gone from the parent's head, and
         // paste-elsewhere can only resolve the source by sig (history is
-        // append-only, so the sig stays addressable forever).
+        // append-only, so the sig stays addressable forever). Same dual
+        // source as childNamesOfStrict: bytes path first, then the
+        // children manifest for a bytes-cold leaf (name → sig).
+        let parentManifest: Array<{ sig: string; layer: { name?: string } }> | null | undefined
         for (const leaf of leaves) {
-          const via = await childLayerOf(history, parent, leaf)
           const entry = movedByKey.get(`${parentSegs.join('/')}/${leaf}`)
-          if (entry && via?.sig) entry.sig = via.sig
+          if (!entry) continue
+          const via = await childLayerOf(history, parent, leaf)
+          if (via?.sig) { entry.sig = via.sig; continue }
+          if (parentManifest === undefined) {
+            parentManifest = typeof history.childrenManifestFor === 'function'
+              ? await history.childrenManifestFor(parent).catch(() => null)
+              : null
+          }
+          const fromManifest = parentManifest?.find(e => e?.layer?.name === leaf)
+          if (fromManifest?.sig) entry.sig = fromManifest.sig
         }
 
         // Eager visual unmount; `viaUpdate` tells the committer's per-
@@ -398,14 +410,20 @@ export class ClipboardWorker extends Worker {
     if (copyEntries.length === 0) return
     // Best-effort sig capture at intent — the copy source stays in place,
     // so path resolution remains the fallback; the sig just makes paste
-    // immune to the source page going cold or drifting later.
+    // immune to the source page going cold or drifting later. Dual source
+    // like the cut path: bytes first, children manifest for cold leaves.
     const history = this.#history
     if (history) {
       for (const entry of copyEntries) {
         try {
           const srcParent = await resolveLayerAt(history, lineage?.domain, entry.sourceSegments)
           const via = await childLayerOf(history, srcParent, entry.label)
-          if (via?.sig) entry.sig = via.sig
+          if (via?.sig) { entry.sig = via.sig; continue }
+          if (srcParent && typeof history.childrenManifestFor === 'function') {
+            const manifest = await history.childrenManifestFor(srcParent).catch(() => null)
+            const fromManifest = manifest?.find(e => e?.layer?.name === entry.label)
+            if (fromManifest?.sig) entry.sig = fromManifest.sig
+          }
         } catch { /* path fallback at paste */ }
       }
     }
