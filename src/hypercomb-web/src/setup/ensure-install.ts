@@ -353,7 +353,13 @@ const installFromBundled = async (bundled: BundledPackage, sigStore: SignatureSt
 
   const fetchBytes = async (path: string): Promise<ArrayBuffer | null> => {
     try {
-      const res = await fetch(path, { cache: 'no-store' })
+      // Default cache mode, NOT 'no-store': every URL through here is
+      // sig-addressed immutable content (`/content/<sig>`, legacy typed
+      // shapes, bag entries under a content-derived bag sig) — same bytes
+      // forever, so the HTTP cache is free bandwidth. The mutable
+      // /content/manifest.json fetch (fetchBundledPackage) keeps its
+      // no-store — that one must always revalidate.
+      const res = await fetch(path)
       if (!res.ok) return null
       // SPA fallback guard: an extension-less flat /content/<sig> on a
       // dev-server origin returns index.html with 200. Sig-addressed
@@ -643,37 +649,68 @@ const resyncPass = async (sentinel: SentinelBridge, store: Store): Promise<void>
   const beesUrlBase = `/opfs/${await Store.poolSignature(Store.BEES_MEANING)}`
   const depsUrlBase = `/opfs/${await Store.poolSignature(Store.DEPENDENCIES_MEANING)}`
 
+  // Apply CONCURRENTLY (same Promise.all shape as installFromBundled's
+  // writeAll) — the old per-file `await write + await cache-seed` loop
+  // serialized every OPFS roundtrip. Files are independent (each lands at its
+  // own sig-named path), so one failed file must not abort the others: the
+  // per-file catch keeps the rest flowing, and the receipt verify below
+  // catches any gap and refuses to advance syncSig — exactly the accounting
+  // that already guards a dropped byte.
   let appliedCount = 0
-  for (const file of files) {
-    switch (file.kind) {
-      case 'layer':
-        await writeBytes(layerDir, file.signature, file.bytes)
-        // Legacy URL token kept as the layer route's cache key — a frozen
-        // URL shape, not an OPFS dir (the SW reads the flat root first).
-        await seedCacheEntry(`/opfs/__layers__/${file.signature}.json`, file.bytes, 'application/json; charset=utf-8')
-        break
-      case 'bee':
-        await writeBytes(store.bees, `${file.signature}.js`, file.bytes)
-        await seedCacheEntry(`${beesUrlBase}/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
-        break
-      case 'dependency':
-        await writeBytes(store.dependencies, `${file.signature}.js`, file.bytes)
-        await seedCacheEntry(`${depsUrlBase}/${file.signature}`, file.bytes, 'application/javascript; charset=utf-8')
-        break
+  await Promise.all(files.map(async (file) => {
+    try {
+      switch (file.kind) {
+        case 'layer':
+          await writeBytes(layerDir, file.signature, file.bytes)
+          // Legacy URL token kept as the layer route's cache key — a frozen
+          // URL shape, not an OPFS dir (the SW reads the flat root first).
+          await seedCacheEntry(`/opfs/__layers__/${file.signature}.json`, file.bytes, 'application/json; charset=utf-8')
+          break
+        case 'bee':
+          await writeBytes(store.bees, `${file.signature}.js`, file.bytes)
+          await seedCacheEntry(`${beesUrlBase}/${file.signature}.js`, file.bytes, 'application/javascript; charset=utf-8')
+          break
+        case 'dependency':
+          await writeBytes(store.dependencies, `${file.signature}.js`, file.bytes)
+          await seedCacheEntry(`${depsUrlBase}/${file.signature}`, file.bytes, 'application/javascript; charset=utf-8')
+          break
+      }
+    } catch (err) {
+      console.warn(`[ensure-install] apply failed for ${file.kind} ${file.signature.slice(0, 12)} — receipt will hold syncSig`, err)
     }
     appliedCount++
     EffectBus.emit('install:sync', { active: true, source: 'resync', current: appliedCount, total: files.length })
-  }
+  }))
 
   // RECEIPT VERIFY — read-back confirm, not bare stream-ok. Synchronizing a
   // sigbag is a normal update(layer): we only advance to the new HEAD (syncSig)
   // once we can confirm the hive actually holds every file the current logical
   // names. A byte dropped mid-stream (or one DCP couldn't resolve) must NOT
   // advance syncSig — otherwise the next boot trusts a manifest whose bytes are
-  // missing and falls back to the wipe path. Re-list OPFS post-apply (the
-  // receipt) and compare against the enabled set; leave syncSig/manifest
-  // untouched on a miss so the next resync re-requests the gap.
-  const present = new Set(await collectPresentSigs(store))
+  // missing and falls back to the wipe path. Leave syncSig/manifest untouched
+  // on a miss so the next resync re-requests the gap.
+  //
+  // TARGETED read-back: the pre-sync `have` scan (collectPresentSigs) already
+  // walked all 8 dirs including the whole OPFS root; repeating that walk here
+  // just to confirm THIS pass's writes was a second full-root scan per resync.
+  // Instead, probe exactly the files applied above — getFileHandle in the dir
+  // each was written to; a written file only counts present if the probe
+  // actually finds it — and union with the pre-scan set. The union is sound
+  // for the enabled-set check: between scan and receipt, removeDisabled only
+  // ever deletes sigs OUTSIDE the enabled set and evictBagDirs only deletes
+  // bag DIRECTORIES, so an enabled sig present at pre-scan is still present.
+  const present = new Set(have)
+  await Promise.all(files.map(async (file) => {
+    const [dir, name] = file.kind === 'layer'
+      ? [layerDir, file.signature] as const
+      : file.kind === 'bee'
+        ? [store.bees, `${file.signature}.js`] as const
+        : [store.dependencies, `${file.signature}.js`] as const
+    try {
+      await dir.getFileHandle(name, { create: false })
+      present.add(file.signature.toLowerCase())
+    } catch { /* probe miss — sig stays missing; receipt below holds syncSig */ }
+  }))
   const missing = [...enabledBees, ...enabledDeps, ...enabledLayers]
     .filter(sig => !present.has(sig.toLowerCase()))
   if (missing.length) {
