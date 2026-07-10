@@ -379,13 +379,11 @@ The web shell's OPFS root holds two zones with different ownership:
 
 **Verification rule:** to prove an essentials change reaches the web shell, do NOT clear OPFS. Use signature comparison instead — make a source change, rebuild, reload, and check that the new bee signatures appear in the manifest and the new bytes are in the `sign('bees')` pool (legacy `__bees__/` only while it drains). The user's data (root sig files, sigbags, pools) should be unchanged across the test. If you find yourself reaching for `localStorage.clear()` or `navigator.storage.getDirectory()` removal, stop — there is a non-destructive way to verify.
 
-## Web/Dev shell parity
+## Web/Dev shell parity — registry-fed surfaces
 
-`hypercomb-web/src/app/app.html` and `hypercomb-dev/src/app/app.html` must mount the same set of shell-level UI components from `@hypercomb/shared/ui/`. Drift between them is a class of bug where data flows correctly (drones register, layers commit) but the relevant panel never renders in production because web's shell template is missing the selector.
+Shell-level UI is **registry-fed** (see `src/documentation/shell-surfaces.md`). Both `app.html` files mount a single `<hc-shell-surfaces>` host; every panel/strip/overlay/viewer self-registers via `registerShellSurface()` (module scope, after the `@Component` class) and is listed once in `hypercomb-shared/ui/shell-surfaces/shell-surfaces.barrel.ts`. Drones contribute surfaces as framework-free custom elements via IoC (`@hypercomb.social/ShellSurfaceRegistry`, `element:` shape) — never an Angular import.
 
-When adding a new shell-level UI component (overlay, panel, strip, viewer):
-1. Add the import + selector to BOTH `hypercomb-web/src/app/app.{ts,html}` and `hypercomb-dev/src/app/app.{ts,html}`.
-2. Long-term direction: move shell-level UI into a registry-fed component the way drones contribute icons via `IconProviderRegistry` (see `drone-installer-contract.md`) so drift becomes structurally impossible.
+**Never add an `<hc-*>` tag to either `app.html`** — a doctrine ratchet (`doctrine.spec.ts`) fails the suite if you do. Add a registration + barrel import instead. `order` on the registration is the only DOM/stacking-order lever. Only bound/structural chrome remains template-mounted (header bar, router-outlet, pixi-host, controls-bar, edit-actions, web's install prompt); THAT set must still be kept in sync manually across the two templates, and its ratchet allowlist may only shrink.
 
 ## Agent Coordination (Multi-Worktree)
 

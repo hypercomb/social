@@ -31,8 +31,19 @@ export type ShellSurface = {
   name: string
   /** IoC key / class name of the contributor, for introspection only. */
   owner?: string
-  /** The standalone Angular component rendered via ngComponentOutlet. */
-  component: Type<unknown>
+  /**
+   * Shell-side shape: a standalone Angular component class. Only code that
+   * already lives in shared/web/dev can use this — modules cannot.
+   */
+  component?: Type<unknown>
+  /**
+   * Module-side shape: a custom-element tag name. The contributor defines the
+   * element (customElements.define) and registers just the tag — no Angular,
+   * no shared import. This is how a DRONE ships shell UI: resolve this
+   * registry via IoC (SHELL_SURFACE_REGISTRY_KEY) and add({name, element}).
+   * Exactly one of component | element per surface.
+   */
+  element?: string
   /**
    * Mount order (ascending). All surfaces share one host container, so this
    * is the only lever over DOM / stacking order. Unset sorts last.
@@ -47,6 +58,10 @@ export class ShellSurfaceRegistry extends EventTarget {
   add(surface: ShellSurface): void {
     if (this.#surfaces.has(surface.name)) {
       console.warn(`[shell-surface-registry] duplicate name "${surface.name}" — ignoring`)
+      return
+    }
+    if (!surface.component === !surface.element) {
+      console.warn(`[shell-surface-registry] "${surface.name}" must provide exactly one of component | element — ignoring`)
       return
     }
     this.#surfaces.set(surface.name, surface)

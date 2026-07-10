@@ -126,6 +126,34 @@ describe('doctrine ratchets', () => {
     ], 'typed-folder literal')
   })
 
+  it('shell templates mount only structural chrome — every other surface is registry-fed', () => {
+    // The shell-surface registry drain (2026-07-09) emptied app.html of
+    // hand-mounted panels: surfaces self-register via registerShellSurface()
+    // and the barrel (shared/ui/shell-surfaces/shell-surfaces.barrel.ts) is
+    // the ONE list. Only bound/structural chrome may appear as a template
+    // tag. Adding a new <hc-*> tag to a shell template reintroduces the
+    // web/dev drift bug class — register the surface instead. A structural
+    // tag leaving a template = debt paid; remove it here so the ratchet
+    // clicks tight.
+    const TEMPLATE_ALLOW: Record<string, string[]> = {
+      'hypercomb-web/src/app/app.html': [
+        'app-header', 'hc-controls-bar', 'hc-edit-actions', 'hc-mesh-header',
+        'hc-shell-surfaces', 'hc-sync-indicator', 'hc-upgrade-indicator', 'router-outlet',
+      ],
+      'hypercomb-dev/src/app/app.html': [
+        'hc-command-line', 'hc-controls-bar', 'hc-edit-actions', 'hc-mesh-header',
+        'hc-shell-surfaces', 'hc-sync-indicator', 'hc-upgrade-indicator', 'router-outlet',
+      ],
+    }
+    for (const [file, allowed] of Object.entries(TEMPLATE_ALLOW)) {
+      const html = readFileSync(join(ROOT, file), 'utf8')
+      const tags = [...new Set(
+        [...html.matchAll(/<([a-z][a-z0-9]*(?:-[a-z0-9]+)+)[\s>]/g)].map(m => m[1]),
+      )].sort()
+      assertRatchet(tags, allowed, `template surface (${file})`)
+    }
+  })
+
   it('derived-cache manifests are written only by the store, the optimize phase, and the render backfill', () => {
     // The commit path mints truth only. writeChildrenManifest is called
     // from the ManifestOptimizerDrone (processor optimize phase) and the
