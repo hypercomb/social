@@ -5,7 +5,7 @@
 // cold miss so writers can refuse instead of wiping the sibling.
 
 import { describe, expect, it } from 'vitest'
-import { childNamesOf, childNamesOfStrict, type PlacementHistory, type PlacementLayer } from './layer-placement.js'
+import { childNamesOf, childNamesOfStrict, resolvePasteSource, type PlacementHistory, type PlacementLayer } from './layer-placement.js'
 
 const SIG_A = 'a'.repeat(64)
 const SIG_B = 'b'.repeat(64)
@@ -78,5 +78,84 @@ describe('childNamesOf (non-strict, read-only paths)', () => {
     const history = historyWith({ [SIG_A]: { name: 'alpha' }, [SIG_B]: null })
     const names = await childNamesOf(history, { name: 'parent', children: [SIG_A, SIG_B] })
     expect(names).toEqual(['alpha'])  // no signal that beta existed
+  })
+})
+
+// -------------------------------------------------
+// resolvePasteSource — sig first, parent-chain fallback, own-bag only
+// in-place. Pins the cut+paste-elsewhere fix: after a cut the source
+// parent's head no longer lists the child, so ONLY the intent-captured
+// sig can resolve it at a different destination.
+// -------------------------------------------------
+
+const SRC_LOC = 'd'.repeat(64)
+const DST_LOC = 'e'.repeat(64)
+
+/** History fixture with path-addressed heads and sig-addressed layers.
+ *  sign() derives a deterministic pseudo-loc-sig from the segments so
+ *  resolveLayerAt's parent-chain walk works against `heads`. */
+const worldWith = (opts: {
+  layersBySig?: Record<string, PlacementLayer | null>
+  headsByPath?: Record<string, PlacementLayer | null>
+}): PlacementHistory => {
+  const locFor = (segs: readonly string[]) => 'loc:' + segs.join('/')
+  return {
+    sign: async (ctx: { explorerSegments: () => readonly string[] }) => locFor(ctx.explorerSegments()),
+    currentLayerAt: async (locSig: string) => {
+      if (locSig.startsWith('loc:')) return opts.headsByPath?.[locSig.slice(4)] ?? null
+      return opts.headsByPath?.[locSig] ?? null
+    },
+    commitLayer: async () => 'x'.repeat(64),
+    getLayerBySig: async (sig: string) => opts.layersBySig?.[sig] ?? null,
+  } as unknown as PlacementHistory
+}
+
+describe('resolvePasteSource', () => {
+  it('resolves by intent-captured sig even when the parent no longer lists the child (cut+paste-elsewhere)', async () => {
+    const history = worldWith({
+      layersBySig: { [SIG_A]: { name: 'payload', children: [] } },
+      headsByPath: { 'page': { name: 'page', children: [] } },  // post-cut: child GONE from head
+    })
+    const layer = await resolvePasteSource(history, undefined,
+      { label: 'payload', sourceSegments: ['page'], sig: SIG_A }, SRC_LOC, DST_LOC)
+    expect(layer?.name).toBe('payload')
+  })
+
+  it('falls back to the source parent chain when the sig is absent (legacy entry, source in place)', async () => {
+    const history = worldWith({
+      layersBySig: { [SIG_B]: { name: 'payload', children: [] } },
+      headsByPath: { 'page': { name: 'page', children: [SIG_B] } },
+    })
+    const layer = await resolvePasteSource(history, undefined,
+      { label: 'payload', sourceSegments: ['page'] }, SRC_LOC, DST_LOC)
+    expect(layer?.name).toBe('payload')
+  })
+
+  it('falls back to the parent chain when the sig no longer resolves', async () => {
+    const history = worldWith({
+      layersBySig: { [SIG_B]: { name: 'payload', children: [] } },
+      headsByPath: { 'page': { name: 'page', children: [SIG_B] } },
+    })
+    const layer = await resolvePasteSource(history, undefined,
+      { label: 'payload', sourceSegments: ['page'], sig: SIG_C }, SRC_LOC, DST_LOC)
+    expect(layer?.name).toBe('payload')
+  })
+
+  it('uses the own-bag read ONLY for cut-in-place (src === dst)', async () => {
+    const history = worldWith({
+      headsByPath: { [SRC_LOC]: { name: 'payload', children: [] } },  // own bag persists post-cut
+    })
+    const entry = { label: 'payload', sourceSegments: ['page'] }
+    const inPlace = await resolvePasteSource(history, undefined, entry, SRC_LOC, SRC_LOC)
+    expect(inPlace?.name).toBe('payload')
+    const elsewhere = await resolvePasteSource(history, undefined, entry, SRC_LOC, DST_LOC)
+    expect(elsewhere).toBeNull()  // never dump an own-bag seed at a foreign destination
+  })
+
+  it('returns null cleanly when nothing resolves', async () => {
+    const history = worldWith({})
+    const layer = await resolvePasteSource(history, undefined,
+      { label: 'payload', sourceSegments: ['page'], sig: SIG_A }, SRC_LOC, DST_LOC)
+    expect(layer).toBeNull()
   })
 })

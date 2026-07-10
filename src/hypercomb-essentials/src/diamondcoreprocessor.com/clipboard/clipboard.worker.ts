@@ -1,7 +1,7 @@
 // diamondcoreprocessor.com/core/clipboard/clipboard.worker.ts
 import { Worker, EffectBus, hypercomb } from '@hypercomb/core'
 import type { ClipboardService, ClipboardOp } from './clipboard.service.js'
-import { childNamesOf, childNamesOfStrict, childLayerOf, resolveLayerAt, flattenLayerTree } from '../history/layer-placement.js'
+import { childNamesOf, childNamesOfStrict, childLayerOf, resolveLayerAt, resolvePasteSource, flattenLayerTree } from '../history/layer-placement.js'
 import { readTilePropsIndex, writeTilePropsIndex, cellLocationSig } from '../editor/tile-properties.js'
 
 interface ClipboardEntry {
@@ -607,27 +607,11 @@ export class ClipboardWorker extends Worker {
         continue
       }
 
-      // Resolve the source cell's layer — SIG FIRST: the entry's layer sig
-      // was captured at cut/copy intent, and history is append-only, so it
-      // resolves at ANY destination even after a cut dropped the child from
-      // its parent's head (the case that made paste-elsewhere fail with
-      // "source missing"). Fallbacks, in order: the source PARENT's children
-      // slot (pool-addressed sig → getLayerBySig — covers sig-less legacy
-      // entries whose source is still in place), then the own-bag read for
-      // cut-in-place ONLY (src === dst: parent dropped the child but its bag
-      // persists). For a re-home to a different location we DELIBERATELY do
-      // not fall back to the own bag: that read can return an unrelated/
-      // auto-minted seed and `flattenLayerTree` would dump a whole layer's
-      // children under the pasted name. A miss fails the item cleanly.
-      const bySig = entry.sig ? await history.getLayerBySig(entry.sig) : null
-      const viaParent = bySig ? null : await childLayerOf(
-        history,
-        await resolveLayerAt(history, lineage.domain, entry.sourceSegments),
-        entry.label,
-      )
-      const srcLayer = bySig
-        ?? viaParent?.layer
-        ?? (srcLocSig === dstLocSig ? await history.currentLayerAt(srcLocSig) : null)
+      // Resolve the source cell's layer — sig-first, parent-chain fallback,
+      // own-bag for cut-in-place only. The full rationale lives on
+      // resolvePasteSource (layer-placement.ts), where the order is
+      // spec-pinned against regression.
+      const srcLayer = await resolvePasteSource(history, lineage.domain, entry, srcLocSig, dstLocSig)
       if (!srcLayer) {
         console.warn(`[clipboard] paste source missing for '${entry.label}': /${entry.sourceSegments.join('/')}`)
         failed.push(entry.label)

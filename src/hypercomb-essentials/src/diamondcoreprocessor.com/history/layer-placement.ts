@@ -181,6 +181,39 @@ export async function resolveLayerAt(
   return found?.layer ?? null
 }
 
+/** Resolve a paste/place SOURCE layer for a clipboard entry.
+ *
+ *  Order matters — this encodes why cut+paste-elsewhere works:
+ *  1. SIG FIRST: `entry.sig` is the source cell's layer sig captured at
+ *     cut/copy INTENT. History is append-only, so it resolves at ANY
+ *     destination — including after a cut committed the source parent
+ *     WITHOUT the child (the parent's head no longer lists it, and no
+ *     path resolution can find it).
+ *  2. Parent-chain fallback (sig-less legacy entries whose source is
+ *     still in place): the source PARENT's children slot, the
+ *     authoritative membership path.
+ *  3. Own-bag read for CUT-IN-PLACE ONLY (src === dst: the parent
+ *     dropped the child but its bag persists). For a re-home to a
+ *     DIFFERENT location the own bag is deliberately never consulted:
+ *     that read can return an unrelated/auto-minted seed and
+ *     flattenLayerTree would dump a whole layer's children under the
+ *     pasted name. A miss returns null — the caller fails the item
+ *     cleanly. */
+export async function resolvePasteSource(
+  history: PlacementHistory,
+  domain: unknown,
+  entry: { label: string; sourceSegments: readonly string[]; sig?: string },
+  srcLocSig: string,
+  dstLocSig: string,
+): Promise<PlacementLayer | null> {
+  const bySig = entry.sig ? await history.getLayerBySig(entry.sig) : null
+  if (bySig) return bySig
+  const srcParent = await resolveLayerAt(history, domain, entry.sourceSegments)
+  const viaParent = await childLayerOf(history, srcParent, entry.label)
+  if (viaParent?.layer) return viaParent.layer
+  return srcLocSig === dstLocSig ? await history.currentLayerAt(srcLocSig) : null
+}
+
 /** Resolve the layer at the CURRENT location robustly: the parent-chain walk
  *  (resolveLayerAt), then the history CURSOR as a last resort.
  *
