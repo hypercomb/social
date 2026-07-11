@@ -11,7 +11,14 @@ export interface ImageUV {
 export class HexImageAtlas {
   #atlas: RenderTexture
   readonly #map = new Map<string, ImageUV>()
-  readonly #failures = new Map<string, number>()
+  // sig → { count, at }: decode-failure tally with the LAST failure time.
+  // Content-addressed bytes are immutable, so a decode failure is usually
+  // deterministic — but the blob READ is not (a truncated OPFS read racing
+  // a write-through, a partial host delivery). Failures therefore EXPIRE
+  // after a TTL instead of pinning the sig imageless for the whole
+  // session: correct bytes arriving later get retried.
+  readonly #failures = new Map<string, { count: number; at: number }>()
+  static readonly FAILURE_RETRY_MS = 60_000
   // Parallel array tracking which signature currently occupies each
   // slot. When the monotonic allocator wraps, the slot's pixels are
   // overwritten by a new image — we must evict the old signature's
@@ -102,14 +109,27 @@ export class HexImageAtlas {
     this.#pinned = new Set(sigs)
   }
 
-  /** Returns true if the signature has permanently failed loading (exceeded max retries). */
+  /** True while the signature is inside a failed-retry window (exceeded
+   *  max retries less than FAILURE_RETRY_MS ago). The window lapsing makes
+   *  the sig retryable again — "failed" is a cooldown, never a verdict. */
   hasFailed(sig: string): boolean {
-    return (this.#failures.get(sig) ?? 0) >= HexImageAtlas.MAX_RETRIES
+    const failure = this.#failures.get(sig)
+    if (!failure || failure.count < HexImageAtlas.MAX_RETRIES) return false
+    if (Date.now() - failure.at < HexImageAtlas.FAILURE_RETRY_MS) return true
+    this.#failures.delete(sig)
+    return false
   }
 
-  /** Clear failure count for a signature so it can be retried (e.g. after re-save). */
+  /** Clear failure count for a signature so it can be retried (e.g. after re-save
+   *  or when fresh bytes for the sig arrive from the host). */
   clearFailure(sig: string): void {
     this.#failures.delete(sig)
+  }
+
+  #recordFailure(sig: string): number {
+    const count = (this.#failures.get(sig)?.count ?? 0) + 1
+    this.#failures.set(sig, { count, at: Date.now() })
+    return count
   }
 
   async loadImage(sig: string, blob: Blob): Promise<ImageUV | null> {
@@ -217,8 +237,7 @@ export class HexImageAtlas {
         bitmap = raw
       }
     } catch {
-      this.#failures.set(sig, (this.#failures.get(sig) ?? 0) + 1)
-      console.warn(`[HexImageAtlas] createImageBitmap failed for ${sig.slice(0, 12)}… (attempt ${this.#failures.get(sig)}/${HexImageAtlas.MAX_RETRIES})`)
+      console.warn(`[HexImageAtlas] createImageBitmap failed for ${sig.slice(0, 12)}… (attempt ${this.#recordFailure(sig)}/${HexImageAtlas.MAX_RETRIES})`)
       return null
     }
 
@@ -227,8 +246,7 @@ export class HexImageAtlas {
       texture = Texture.from(bitmap)
     } catch {
       bitmap.close()
-      this.#failures.set(sig, (this.#failures.get(sig) ?? 0) + 1)
-      console.warn(`[HexImageAtlas] Texture.from failed for ${sig.slice(0, 12)}… (attempt ${this.#failures.get(sig)}/${HexImageAtlas.MAX_RETRIES})`)
+      console.warn(`[HexImageAtlas] Texture.from failed for ${sig.slice(0, 12)}… (attempt ${this.#recordFailure(sig)}/${HexImageAtlas.MAX_RETRIES})`)
       return null
     }
 

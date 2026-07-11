@@ -1086,13 +1086,34 @@ export class HistoryService {
       // children — seed the session's virtual head from it. The husk
       // mint remains ONLY for genuinely-new names (the create path
       // takes the minted empty sig as the new child's first layer).
-      const carried = await this.#parentCarriedChild(lineageSig)
+      const cold: { cold?: boolean } = {}
+      const carried = await this.#parentCarriedChild(lineageSig, cold)
       if (carried && !isBareLayer(carried.layer)) {
         this.#seedVirtualHead(lineageSig, carried.sig)
         return carried.sig
       }
-      // Brand-new bag: materialize the empty marker on disk so its
-      // sig is the hash of real file bytes, not a virtual computation.
+      if (cold.cold) {
+        // The parent chain was COLD — "couldn't see a carried child",
+        // not "there is none". Minting the empty marker here turns a
+        // transient miss into on-disk truth: the husk becomes the bag's
+        // head, the next commit lands on top of it, and the cascade
+        // re-points the parent at a childless head — the real subtree
+        // silently unlinks ("tiles randomly disappear"). Answer with the
+        // empty layer's sig WITHOUT planting a marker: the bytes are
+        // pool-written (inert, content-addressed) so anything minted
+        // against this sig stays resolvable, but the bag stays empty and
+        // the next read re-asks the parent once it warms.
+        const empty = HistoryService.canonicalizeLayer(emptyLayer(name))
+        const { sig, bytes } = await HistoryService.#signLayer(empty)
+        await HistoryService.#poolWriteLayer(sig, bytes)
+        this.#preloaderCache.set(sig, bytes.buffer as ArrayBuffer)
+        this.#parsedLayerCache.set(sig, empty)
+        return sig
+      }
+      // Brand-new bag (authoritative: the parent chain resolved warm and
+      // carries nothing under this name): materialize the empty marker on
+      // disk so its sig is the hash of real file bytes, not a virtual
+      // computation.
       bag = await this.getBag(lineageSig)
       await this.#ensureEmptyMarker(bag, name, lineageSig)
       latestName = '00000000'
@@ -1541,10 +1562,14 @@ export class HistoryService {
    */
   readonly #seededHeadByLineage = new Map<string, string>()
 
-  /** Locations checked for seed-over-husk and found unseedable (real
-   *  multi-marker history, or no rich parent-carried child). Memoises
-   *  the listLayers probe so bare heads don't re-scan per read. */
-  readonly #huskUnseedable = new Set<string>()
+  /** Locations checked for seed-over-husk and found unseedable, mapped to
+   *  when that verdict EXPIRES. Real multi-marker history never expires
+   *  (the bare head is truth — the user emptied the tile). A cold or
+   *  ambiguous parent read is TRANSIENT: memoised only for a TTL, so one
+   *  cold pass can't pin the auto-minted husk as the answer for the whole
+   *  session (the "pasted/adopted subtree renders empty forever" bug). */
+  readonly #huskUnseedable = new Map<string, number>()
+  static readonly #HUSK_RETRY_TTL_MS = 30_000
 
   /** The effective head sig for a location: a real bag head first, the
    *  session's virtual seed otherwise. */
@@ -1566,14 +1591,22 @@ export class HistoryService {
    */
   readonly #parentCarriedChild = async (
     lineageSig: string,
+    stats?: { cold?: boolean },
   ): Promise<{ sig: string; layer: LayerContent } | null> => {
     const segs = this.#segmentsBySig.get(lineageSig)
-    if (!segs || segs.length === 0) return null
+    // Reverse map cold: we can't even name the parent, so "no carried
+    // child" is unknowable — flag cold so callers don't mint truth on it.
+    // An EMPTY segs is the root, which genuinely has no parent.
+    if (!segs) { if (stats) stats.cold = true; return null }
+    if (segs.length === 0) return null
     const name = segs[segs.length - 1]
     const parentLoc = await this.sign({ explorerSegments: () => segs.slice(0, -1) })
     if (!parentLoc || parentLoc === lineageSig) return null
-    const parent = await this.currentLayerAt(parentLoc)
-    if (!parent) return null
+    const parentStats: { cold?: boolean } = {}
+    const parent = await this.currentLayerAt(parentLoc, parentStats)
+    // A cold-null parent (bytes not pooled yet / history root not ready)
+    // says NOTHING about whether it carries this child.
+    if (!parent) { if (parentStats.cold && stats) stats.cold = true; return null }
     const childSigs = Array.isArray(parent.children) ? parent.children : []
     if (childSigs.length === 0) return null
     const manifest = await this.childrenManifestFor(parent).catch(() => null)
@@ -1589,12 +1622,20 @@ export class HistoryService {
           layer = await this.getLayerBySig(sig)
         }
         if (layer) return { sig, layer }
+        // The parent DOES list this name but its layer wouldn't resolve —
+        // definitively a transient byte miss, never an absence.
+        if (stats) stats.cold = true
       }
     }
+    let sawUnresolved = false
     for (const cs of childSigs) {
       const child = await this.getLayerBySig(String(cs))
-      if (child?.name === name) return { sig: String(cs), layer: child }
+      if (!child) { sawUnresolved = true; continue }
+      if (child.name === name) return { sig: String(cs), layer: child }
     }
+    // Some child sigs never resolved to bytes — one of them could be this
+    // name. "Couldn't see", not "isn't there".
+    if (sawUnresolved && stats) stats.cold = true
     return null
   }
 
@@ -1614,15 +1655,25 @@ export class HistoryService {
       const layer = await this.getLayerBySig(seeded)
       if (layer) return { sig: seeded, layer }
     }
-    if (this.#huskUnseedable.has(lineageSig)) return null
+    const unseedableUntil = this.#huskUnseedable.get(lineageSig)
+    if (unseedableUntil !== undefined) {
+      if (Date.now() < unseedableUntil) return null
+      this.#huskUnseedable.delete(lineageSig)
+    }
     const markers = this.#layerListCache.get(lineageSig) ?? await this.listLayers(lineageSig)
-    if (markers.length > 1) { this.#huskUnseedable.add(lineageSig); return null }
-    const carried = await this.#parentCarriedChild(lineageSig)
+    if (markers.length > 1) { this.#huskUnseedable.set(lineageSig, Number.POSITIVE_INFINITY); return null }
+    const cold: { cold?: boolean } = {}
+    const carried = await this.#parentCarriedChild(lineageSig, cold)
     if (carried && !isBareLayer(carried.layer)) {
       this.#seedVirtualHead(lineageSig, carried.sig)
       return carried
     }
-    this.#huskUnseedable.add(lineageSig)
+    // A cold parent chain is "couldn't see a carried child", not "there is
+    // none" — expire the verdict so the husk un-pins once the bytes land.
+    this.#huskUnseedable.set(
+      lineageSig,
+      cold.cold ? Date.now() + HistoryService.#HUSK_RETRY_TTL_MS : Number.POSITIVE_INFINITY,
+    )
     return null
   }
 
@@ -1798,6 +1849,7 @@ export class HistoryService {
     if (local) return local
     const store = get<{
       getLayerPoolBytes?: (sig: string) => Promise<Uint8Array | null>
+      fetchLayerFromHost?: (sig: string) => Promise<Uint8Array | null>
     }>('@hypercomb.social/Store')
 
     // On-demand, content-addressed resolution — NEVER a brute-force scan.
@@ -1824,6 +1876,16 @@ export class HistoryService {
         } catch { /* malformed pool file */ }
       }
     }
+    // Genuine local miss for a KNOWN sig — most often shared/adopted
+    // content whose layer bytes never reached this device. Resources
+    // self-heal through the host on a local miss; layers historically did
+    // NOT, which left adopted subtrees permanently unresolvable (the
+    // render gate exhausted and dropped their tiles). Kick the layer-side
+    // heal DETACHED — never awaited here, so no render path waits on the
+    // network. The Store coalesces callers, negative-caches misses for a
+    // TTL, and announces arrival (`content:arrived`) so gated renders
+    // retry. Inert when no broker/host is configured.
+    void store?.fetchLayerFromHost?.(layerSig)
     return null
   }
 

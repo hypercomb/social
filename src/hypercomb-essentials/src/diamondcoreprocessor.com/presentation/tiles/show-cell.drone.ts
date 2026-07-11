@@ -439,7 +439,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'neon:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'neon:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden', 'content:arrived']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -3913,6 +3913,20 @@ export class ShowCellDrone extends Drone {
     // a snapshot already cached fires this immediately on subscribe.
     this.onEffect('registry:snapshot', () => this.requestRender())
 
+    // content:arrived (kind: layer) — LAYER bytes just landed detached from
+    // the host/mesh (Store.fetchLayerFromHost, the layer-side self-heal).
+    // Any completeness gate that exhausted while those bytes were missing
+    // is stale: re-arm the gates and force a paint so the healed children
+    // surface now instead of waiting for an unrelated invalidation. Cheap
+    // and bounded — arrivals only fire once per healed sig.
+    this.onEffect<{ sig: string; kind: string }>('content:arrived', (payload) => {
+      if (payload?.kind !== 'layer') return
+      this.#incompleteResolveAttempts.clear()
+      this.#resolveGateExhausted.clear()
+      this.#forceNextRender = true
+      this.requestRender()
+    })
+
     // render:set-hive-visible — a takeover feature (screensaver bounce mode)
     // hides the hive grid while it owns the screen, then restores it. While
     // hidden, renderFromSynchronize short-circuits (see #hiveHidden) so a
@@ -5854,6 +5868,9 @@ export class ShowCellDrone extends Drone {
         try {
           const blob = await store.getResource(sig)
           if (!blob) return // not yet delivered — egg; retried after the miss TTL
+          // Fresh bytes for this sig — un-pin any decode-failure record so
+          // the atlas retries with the healed blob instead of skipping it.
+          imageAtlas.clearFailure(sig)
           // Bytes landed (memory + OPFS write-through). Drop the label's
           // cached derivation so the next pass re-derives from fresh
           // bytes, then schedule that pass. The force is required — a

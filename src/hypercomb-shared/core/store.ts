@@ -793,6 +793,59 @@ export class Store extends EventTarget {
     return promise
   }
 
+  readonly #layerHostFetchPending = new Map<string, Promise<Uint8Array | null>>()
+  readonly #layerHostMissUntil = new Map<string, number>()
+
+  /**
+   * Detached self-heal for LAYER bytes — the layer-side mirror of
+   * #fetchResourceFromHost. Resources always healed through the broker on
+   * a local miss; layers did NOT, so a shared/adopted subtree whose layer
+   * closure never fully landed stayed unresolvable forever (the render's
+   * completeness gate exhausted and dropped its tiles for the session).
+   * Same contract as the resource path: the broker verifies sha256 before
+   * returning, misses are negative-cached for HOST_MISS_TTL_MS ("not yet
+   * delivered", never "failed"), and concurrent callers coalesce. Arrival
+   * is written through to the OPFS root and announced on the EffectBus
+   * (`content:arrived`) so gated renders can retry. Callers must NOT
+   * await this on a render path — render never awaits network.
+   */
+  public fetchLayerFromHost = (signature: string): Promise<Uint8Array | null> => {
+    const existing = this.#layerHostFetchPending.get(signature)
+    if (existing) return existing
+    const missUntil = this.#layerHostMissUntil.get(signature)
+    if (missUntil !== undefined) {
+      if (Date.now() < missUntil) return Promise.resolve(null)
+      this.#layerHostMissUntil.delete(signature)
+    }
+    const promise = (async (): Promise<Uint8Array | null> => {
+      try {
+        const broker = (window.ioc?.get?.('@diamondcoreprocessor.com/ContentBrokerDrone')) as
+          | { fetchBySig?: (sig: string, type: string, timeoutMs?: number) => Promise<Uint8Array | null> }
+          | undefined
+        const bytes = await broker?.fetchBySig?.(signature, 'layer')
+        if (!bytes || bytes.byteLength === 0) {
+          this.#layerHostMissUntil.set(signature, Date.now() + HOST_MISS_TTL_MS)
+          return null
+        }
+        const copy = new Uint8Array(bytes)
+        this.#layerBytesCache.set(signature, copy)
+        // Silent write-through: persist for offline + future local hits.
+        // Someone else's bytes — no content:wrote echo back into the
+        // push/host-sync queues.
+        try { await this.writeLayerBytes(signature, copy.buffer as ArrayBuffer) } catch { /* cache-only is acceptable */ }
+        EffectBus.emit('content:arrived', { sig: signature, kind: 'layer' as const })
+        return copy
+      } catch {
+        this.#layerHostMissUntil.set(signature, Date.now() + HOST_MISS_TTL_MS)
+        return null
+      } finally {
+        this.#layerHostFetchPending.delete(signature)
+      }
+    })()
+    this.#layerHostFetchPending.set(signature, promise)
+    return promise
+  }
+
   // -------------------------------------------------
   // persistent decoration substrate — the sign('optimization') pool
   // -------------------------------------------------
