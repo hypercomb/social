@@ -73,6 +73,38 @@ class WebsitesGroup extends LaunchGroupBase {
       if (p?.scope === 'root' || segs.length === 0) return   // '/' is not a menu entry
       void enableAggregation(this.id, segs)
     })
+    // A website PAGE coming into existence IS the website declaring itself —
+    // the feature's responsibility to surface its entry point (menu + icon).
+    // Bridge/skill builds stamp pages via decoration-add and never emit
+    // website:build, so listen to the decoration write itself. A page whose
+    // cell already sits under a declared site root is a SUB-PAGE — part of
+    // the route, never its own menu entry (the sitemap-root rule).
+    EffectBus.on<{ segments?: string[]; op?: string; sig?: string }>('decorations:changed', p => {
+      if (p?.op !== 'append' || !p.sig || !Array.isArray(p.segments)) return
+      void this.#maybeEnableForPage(p.segments, p.sig)
+    })
+  }
+
+  /** Enable the menu entry for a freshly stamped `visual:website:page` cell,
+   *  unless it is (or lies under) an already-declared site root. Best-effort
+   *  and cheap: one resource read to check the kind, and the aggregation
+   *  read only when it matches. */
+  async #maybeEnableForPage(rawSegments: string[], sig: string): Promise<void> {
+    const segs = rawSegments.map(s => String(s ?? '').trim()).filter(Boolean)
+    if (segs.length === 0 || !SIG.test(sig)) return
+    const store = get<StoreLike>('@hypercomb.social/Store')
+    if (!store?.getResource) return
+    const blob = await store.getResource(sig).catch(() => null)
+    if (!blob) return
+    try {
+      if ((JSON.parse(await blob.text()) as { kind?: string })?.kind !== PAGE_KIND) return
+    } catch { return }
+    const key = segs.join('/')
+    for (const m of await listAggregation(this.id)) {
+      const mk = m.segments.join('/')
+      if (key === mk || key.startsWith(mk + '/')) return   // re-stamp or sub-page
+    }
+    void enableAggregation(this.id, segs)
   }
 
   override members(): GroupMember[] { return this.#members }
@@ -93,7 +125,10 @@ class WebsitesGroup extends LaunchGroupBase {
   }
 
   async #scan(): Promise<void> {
-    if (this.#scanning) return
+    // A trigger landing while a scan is in flight must DEFER, not drop —
+    // dropping it left the members stale after an enable whose commit rode
+    // a busy committer FIFO (icon never appeared for the first website).
+    if (this.#scanning) { this.#scheduleScan(250); return }
     this.#scanning = true
     try {
       const history = get<HistoryLike>('@diamondcoreprocessor.com/HistoryService')
