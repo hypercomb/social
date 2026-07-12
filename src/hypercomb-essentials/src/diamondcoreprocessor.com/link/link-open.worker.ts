@@ -3,7 +3,8 @@
 // routes to the photo view (image URLs) or opens in a new tab (other URLs).
 
 import { Worker, EffectBus } from '@hypercomb/core'
-import { isImageUrl, fetchImageBlob } from './photo.js'
+import { fetchImageBlob } from './photo.js'
+import { normalizeLink } from './normalize.js'
 import { parseYouTubeVideoId } from './youtube.js'
 import { readCellProperties, readTilePropertiesAt, cellLocationSig, readTilePropsIndex, lookupTilePropsSig } from '../editor/tile-properties.js'
 import type { PhotoView } from './photo.view.js'
@@ -27,8 +28,13 @@ export class LinkOpenWorker extends Worker {
   }
 
   async #handleOpen(label: string): Promise<void> {
-    const link = await this.#readTileLink(label)
-    if (!link) return
+    const raw = await this.#readTileLink(label)
+    if (!raw) return
+
+    // Hand-typed links often lack a scheme ("localhost:4250", "www.x.com").
+    // Unnormalized they open a tab that navigates nowhere (the host parses
+    // as a URL scheme) or resolve relative to the app origin.
+    const link = normalizeLink(raw)
 
     // YouTube → immersive iframe embed (viewer:open), NOT a new tab. This is
     // how link tiles opened before the emit was lost; YoutubeViewerComponent
