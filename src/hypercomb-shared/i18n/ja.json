@@ -1034,5 +1034,6 @@
   "health.recovered": "{host} が再び応答しています",
   "sync.pending": "{n} 件の変更が {host} へのバックアップを待っています",
   "sync.unauthorized": "{host} がこの端末を拒否しました — 変更はまだバックアップされていません",
-  "sync.backed-up": "{host} にバックアップしました"
+  "sync.backed-up": "{host} にバックアップしました",
+  "features.note.noanswer": "応答がありません — もう一度お試しください"
 }

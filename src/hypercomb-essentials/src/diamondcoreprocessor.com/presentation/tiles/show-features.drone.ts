@@ -231,7 +231,7 @@ export class ShowFeaturesDrone extends Drone {
     'Gathers the bee-feature metadata (no code) of a clicked tile — both render features and cascading capabilities — and emits features:open so the shell panel lists them, tagging each with its origin (direct on the tile, or cascaded from an ancestor). Read-only — staging the features is benign and handled panel-side.'
 
   protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable']
-  protected override emits: string[] = ['features:open', 'selection:has-features', 'activity:log']
+  protected override emits: string[] = ['features:open', 'selection:has-features', 'activity:log', 'features:outcome']
 
   constructor() {
     super()
@@ -294,14 +294,20 @@ export class ShowFeaturesDrone extends Drone {
       if (kind === 'files:dropbox') {
         await writeDropbox(segments, parseAccept(''))
         this.emitEffect('activity:log', { message: `dropbox on "${label}"`, icon: '●' })
+        this.emitEffect('features:outcome', { cell: label, kind, ok: true, message: '' })
       } else {
+        // Row-level outcome: the refusal lands on the panel row that asked,
+        // not only in the transient activity log (the busy switch settles
+        // immediately instead of waiting out its leash).
         this.emitEffect('activity:log', { message: `"${kind}" can't be added from the panel — use its command`, icon: '○' })
+        this.emitEffect('features:outcome', { cell: label, kind, ok: false, message: `"${kind}" can't be added from the panel — use its command` })
         return
       }
       if (label) await this.#open(label)   // refresh the panel group in place
     } catch (err) {
       console.warn('[show-features] enable failed', { kind, segments, err })
       this.emitEffect('activity:log', { message: `couldn't add "${kind}" to "${label}"`, icon: '○' })
+      this.emitEffect('features:outcome', { cell: label, kind, ok: false, message: `couldn't add "${kind}" to "${label}"` })
     }
   }
 

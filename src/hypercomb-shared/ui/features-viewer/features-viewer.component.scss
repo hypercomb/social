@@ -825,6 +825,24 @@ $path-fail: #e08a8a;     // failed terminal
   }
 }
 
+// Row-level outcome: the plain-words failure landing on the row that asked
+// (the activity log gets the same sentence — this is the copy you're looking
+// at). Quiet chrome: muted, no motion. The optional why-line carries the
+// current content-health sentence while fetching is degraded.
+.feature-note {
+  display: block;
+  align-self: flex-start;
+  margin-top: 0.05em;
+  font-size: 0.62em;
+  line-height: 1.35;
+  color: rgba(255, 160, 150, 0.85);
+
+  .note-why {
+    display: block;
+    color: rgba(255, 200, 150, 0.7);
+  }
+}
+
 .allow-btn {
   background: transparent;
   border: 1px solid rgba(255, 180, 120, 0.45);

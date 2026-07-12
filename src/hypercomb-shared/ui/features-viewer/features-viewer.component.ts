@@ -188,6 +188,18 @@ export class FeaturesViewerComponent implements OnDestroy {
    *  double-click and shows the busy state. */
   readonly pending = signal<ReadonlySet<string>>(new Set())
 
+  /** Row-level outcomes: plain-words FAILURE notes by row key, landed by
+   *  `features:outcome` (the same sentence the activity log gets — but on
+   *  the row you're looking at). Success is the state flipping, so ok
+   *  outcomes only CLEAR: silence is the healthy state. Cleared on retry,
+   *  on subject change, and on close. */
+  readonly rowNotes = signal<ReadonlyMap<string, string>>(new Map())
+
+  /** Latest overall content-health condition (EffectBus last-value replay
+   *  seeds it on open) — the quiet WHY line under a failure note while
+   *  fetching is degraded: "couldn't fetch" + "{host} isn't answering". */
+  readonly health = signal<{ condition: string; host: string | null } | null>(null)
+
   /** Bulk downloads in flight (by cell) — the bar's download button shows
    *  busy until every `features:download:done` lands. */
   readonly downloading = signal<ReadonlySet<string>>(new Set())
@@ -279,7 +291,10 @@ export class FeaturesViewerComponent implements OnDestroy {
       // clicking a DIFFERENT tile replaces the subject (and drops the old
       // tile's row selection, which can't carry across cells).
       const prev = this.group()
-      if (prev?.cell !== group.cell) this.selectedKeys.set(new Set())
+      if (prev?.cell !== group.cell) {
+        this.selectedKeys.set(new Set())
+        this.rowNotes.set(new Map())   // notes describe the OLD subject's rows
+      }
       this.group.set(group)
       if (!this.visible()) this.visible.set(true)
       // A fresh group replaces its rows — any in-flight ADD for it is settled.
@@ -350,6 +365,47 @@ export class FeaturesViewerComponent implements OnDestroy {
       if (this.downloading().size === 0) return
       this.downloadedCount.update(n => n + 1)
       this.#armDownloadLeash()
+    }))
+
+    // Row-level outcomes: the drone answers a row's action with the SAME
+    // plain-words sentence the activity log gets. The busy switch settles
+    // the moment the outcome lands (the leashes become dead-producer
+    // backstops), and a failure stays visible on the row that asked.
+    this.#cleanups.push(EffectBus.on<{ cell?: string; kind?: string; ok?: boolean; message?: string }>('features:outcome', (p) => {
+      const group = this.group()
+      if (!group || !p?.cell || p.cell !== group.cell) return
+      const kind = String(p.kind ?? '')
+      const feat = kind
+        ? (group.applied.find(f => f.kind === kind) ?? group.available.find(f => f.kind === kind))
+        : undefined
+      if (!feat) {
+        // Tile-level outcome (no kind, or the row already refreshed away) —
+        // settle every busy marker for this tile immediately.
+        if (this.pending().size) this.pending.set(new Set())
+        this.#pendingAdopt.delete(group.cell)
+        return
+      }
+      const key = this.rowKey(group, feat)
+      this.pending.update(set => {
+        if (!set.has(key)) return set
+        const next = new Set(set)
+        next.delete(key)
+        return next
+      })
+      if (p.ok !== true) this.#pendingAdopt.delete(group.cell)
+      this.rowNotes.update(m => {
+        if (p.ok === true && !m.has(key)) return m
+        const next = new Map(m)
+        if (p.ok === true) next.delete(key)
+        else next.set(key, String(p.message ?? '').trim())
+        return next
+      })
+    }))
+
+    // The overall fetch-health condition — last-value replay seeds the
+    // current state when the panel opens; transitions keep it live.
+    this.#cleanups.push(EffectBus.on<{ condition?: string; host?: string | null }>('content:health', (p) => {
+      this.health.set(p?.condition ? { condition: String(p.condition), host: p.host ?? null } : null)
     }))
 
   }
@@ -429,6 +485,7 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.group.set(null)
     this.selectedKeys.set(new Set())
     this.pending.set(new Set())
+    this.rowNotes.set(new Map())
     this.downloadResults.set([])
     // Reset the target combobox so a reopen starts clean.
     this.openTargetCell.set(null)
@@ -754,6 +811,7 @@ export class FeaturesViewerComponent implements OnDestroy {
     const key = this.rowKey(group, feat)
     if (this.pending().has(key)) return
     this.pending.update(set => new Set([...set, key]))
+    this.#clearNote(key)   // a retry starts clean
     // Seed-others-off applies ONLY to a fresh branch adopt. On a HELD tile
     // this switch is a single-feature MERGE from the peer's copy — seeding
     // would turn the participant's own existing features off.
@@ -767,16 +825,18 @@ export class FeaturesViewerComponent implements OnDestroy {
       // this is simply its own parent path (no target row shows).
       at: this.#targetSegments(group),
     })
-    // Leash: a failed/declined adopt must not wedge the switch (the refresh
-    // normally clears pending long before this).
+    // Backstop leash: every drone answer lands `features:outcome`, which
+    // settles the switch immediately — this fires only when the producer
+    // died without answering, and it says so instead of silently un-wedging.
     setTimeout(() => {
       this.#pendingAdopt.delete(group.cell)
+      if (!this.pending().has(key)) return
       this.pending.update(set => {
-        if (!set.has(key)) return set
         const next = new Set(set)
         next.delete(key)
         return next
       })
+      this.#noteNoAnswer(key)
     }, 8000)
   }
 
@@ -935,6 +995,42 @@ export class FeaturesViewerComponent implements OnDestroy {
     return this.pending().has(this.rowKey(group, feat))
   }
 
+  /** The row's plain-words outcome note ('' = none). Failures only —
+   *  success is the state flipping, and silence is the healthy state. */
+  rowNote(group: FeatureGroup, feat: RowLike): string {
+    return this.rowNotes().get(this.rowKey(group, feat)) ?? ''
+  }
+
+  /** The WHY line under a failure note while fetching is degraded — the
+   *  content-health sentence, same plain words as the indicator pill.
+   *  '' while healthy (the note stands alone). */
+  healthWhy(): string {
+    const h = this.health()
+    if (!h || h.condition === 'healthy') return ''
+    const i18n = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+      ?.get<{ t: (k: string, p?: Record<string, unknown>) => string }>('@hypercomb.social/I18n')
+    return i18n?.t(`health.${h.condition}`, { host: h.host ?? '' }) ?? ''
+  }
+
+  /** Drop one row's note (a retry starts clean). */
+  #clearNote(key: string): void {
+    this.rowNotes.update(m => {
+      if (!m.has(key)) return m
+      const next = new Map(m)
+      next.delete(key)
+      return next
+    })
+  }
+
+  /** The leash's honest landing: a producer that died without answering
+   *  still settles the row with plain words instead of a silent un-wedge. */
+  #noteNoAnswer(key: string): void {
+    const i18n = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+      ?.get<{ t: (k: string, p?: Record<string, unknown>) => string }>('@hypercomb.social/I18n')
+    const msg = i18n?.t('features.note.noanswer') ?? 'no answer — try again'
+    this.rowNotes.update(m => new Map(m).set(key, msg))
+  }
+
   /** ADD an available feature to the tile — the switch's ON gesture. Emits
    *  `features:enable` with the tile's EXPLICIT segments; ShowFeaturesDrone
    *  writes the decoration there and re-opens the group (the row moves into
@@ -948,22 +1044,24 @@ export class FeaturesViewerComponent implements OnDestroy {
     const key = this.rowKey(group, feat)
     if (this.pending().has(key)) return
     this.pending.update(set => new Set([...set, key]))
+    this.#clearNote(key)   // a retry starts clean
     EffectBus.emit('features:enable', {
       cell: group.cell,
       segments: [...group.segments],
       kind: feat.kind,
       view: feat.view,
     })
-    // The drone answers with a fresh `features:open` upsert for this tile,
-    // which replaces the whole group — clear the busy marker on a short leash
-    // so a failed enable doesn't wedge the switch.
+    // Backstop leash: the drone answers every enable with `features:outcome`
+    // (and success also refreshes the group) — this fires only when the
+    // producer died without answering, and it says so on the row.
     setTimeout(() => {
+      if (!this.pending().has(key)) return
       this.pending.update(set => {
-        if (!set.has(key)) return set
         const next = new Set(set)
         next.delete(key)
         return next
       })
+      this.#noteNoAnswer(key)
     }, 4000)
   }
 

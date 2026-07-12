@@ -136,7 +136,7 @@ export class SwarmAdoptDrone extends Drone {
     'Adopts a peer tile by localizing its branch (ContentBroker) and folding it into the hive layer via the same update({children}) cascade as paste, on explicit user click ONLY — no snapshot bridge, no automatic installer fold.'
 
   protected override listens: string[] = ['tile:action', 'registry:snapshot', 'features:download']
-  protected override emits: string[] = ['adopt:started', 'swarm:adopt-panel:open', 'fs:changed', 'fold:receipt', 'tile:saved', 'tile:action', 'features:download:done', 'activity:log']
+  protected override emits: string[] = ['adopt:started', 'swarm:adopt-panel:open', 'fs:changed', 'fold:receipt', 'tile:saved', 'tile:action', 'features:download:done', 'activity:log', 'features:outcome']
 
   // Latest installer registry projection — cached for the Done-gated fold.
   #lastSnapshot: RegistrySnapshotLike | null = null
@@ -392,12 +392,21 @@ export class SwarmAdoptDrone extends Drone {
   // agnostic, so a directly-folded foreign page is reviewed before it ever mounts.
   // Only a branch that declares CODE (bees/deps) — or one we can't resolve to
   // inspect — routes to the installer.
+  /** One row action, one visible landing: the same plain-words sentence goes
+   *  to the activity log AND to `features:outcome`, which the features panel
+   *  puts ON THE ROW that asked — the busy switch settles immediately instead
+   *  of waiting out a silent leash (features-experience-overhaul.md §panel). */
+  #rowOutcome = (cell: string, kind: string | undefined, ok: boolean, message: string): void => {
+    EffectBus.emit('activity:log', { message, icon: ok ? '●' : '○' })
+    EffectBus.emit('features:outcome', { cell, kind: kind ?? '', ok, message })
+  }
+
   #adoptInline = async (label: string, pubkey?: string, atOverride?: readonly string[], featureKind?: string): Promise<void> => {
     const branch = this.#resolvePeerBranch(label, pubkey)
     if (!branch) {
       // The peer cache expired / navigation changed since the click — say so
       // instead of doing nothing (the silent dead-end reads as "adopt broken").
-      EffectBus.emit('activity:log', { message: `couldn't adopt "${label}" — the peer's branch is no longer offered here`, icon: '○' })
+      this.#rowOutcome(label, featureKind, false, `couldn't adopt "${label}" — the peer's branch is no longer offered here`)
       return
     }
     // TARGET override — the features window's chosen destination. Refuse,
@@ -412,7 +421,7 @@ export class SwarmAdoptDrone extends Drone {
         const lineage = ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined
         const target = (history && lineage) ? await resolveLayerAt(history, lineage.domain, at) : null
         if (!target) {
-          EffectBus.emit('activity:log', { message: `couldn't adopt "${label}" — target "/${at.join('/')}" doesn't exist; create it first`, icon: '○' })
+          this.#rowOutcome(label, featureKind, false, `couldn't adopt "${label}" — target "/${at.join('/')}" doesn't exist; create it first`)
           return
         }
       }
@@ -437,7 +446,12 @@ export class SwarmAdoptDrone extends Drone {
         confirmLabel: 'adopt.code.allow',
         cancelLabel: 'adopt.code.deny',
       })
-      if (!ok) return
+      if (!ok) {
+        // The participant said no — settle the panel's busy switch NOW (no
+        // silent 8s leash) with the honest landing, not a wedged toggle.
+        EffectBus.emit('features:outcome', { cell: branch.label, kind: featureKind ?? '', ok: false, message: `code adopt of "${branch.label}" declined — nothing was folded` })
+        return
+      }
       window.dispatchEvent(new CustomEvent('portal:open', {
         detail: {
           target: 'dcp', headless: true,
@@ -481,11 +495,12 @@ export class SwarmAdoptDrone extends Drone {
       // segments = the FOLD location — the refreshed group must read the tile
       // where it landed, which the target picker may have pointed away from
       // the participant's current position.
+      EffectBus.emit('features:outcome', { cell: branch.label, kind: featureKind ?? '', ok: true, message: '' })
       EffectBus.emit('tile:action', { action: 'features', label: branch.label, segments: [...branch.at, branch.label] })
     } else {
       // 'unavailable' — bytes unreachable or a cold-sibling abort. Loud, not
       // console-only: the user clicked and must see WHY nothing appeared.
-      EffectBus.emit('activity:log', { message: `couldn't adopt "${branch.label}" — its content isn't reachable right now, try again shortly`, icon: '○' })
+      this.#rowOutcome(branch.label, featureKind, false, `couldn't adopt "${branch.label}" — its content isn't reachable right now, try again shortly`)
     }
   }
 
@@ -517,7 +532,7 @@ export class SwarmAdoptDrone extends Drone {
   #mergeFeature = async (label: string, at: readonly string[], kind: string): Promise<void> => {
     const branch = this.#resolvePeerBranch(label)
     if (!branch) {
-      EffectBus.emit('activity:log', { message: `couldn't merge from "${label}" — the peer's branch is no longer offered here`, icon: '○' })
+      this.#rowOutcome(label, kind, false, `couldn't merge from "${label}" — the peer's branch is no longer offered here`)
       return
     }
     const ioc = this.#ioc()
@@ -532,7 +547,7 @@ export class SwarmAdoptDrone extends Drone {
       await broker.adopt(branch.layerSig, { layersOnly: true, silent: true })
       const peerRoot = await history.getLayerBySig(branch.layerSig) as (Record<string, unknown> & { name?: string }) | null
       if (!peerRoot) {
-        EffectBus.emit('activity:log', { message: `couldn't merge from "${label}" — the peer's copy isn't reachable right now`, icon: '○' })
+        this.#rowOutcome(label, kind, false, `couldn't merge from "${label}" — the peer's copy isn't reachable right now`)
         return
       }
       // The peer decorations of the wanted kind…
@@ -560,13 +575,13 @@ export class SwarmAdoptDrone extends Drone {
         ? (peerRoot[WEBSITE_SLOT] as unknown[]).map(s => String(s ?? '').trim().toLowerCase()).filter(s => SIG_RE.test(s))
         : []
       if (!wanted.length && !peerWebSlot.length) {
-        EffectBus.emit('activity:log', { message: `the peer's "${label}" doesn't carry that feature anymore`, icon: '○' })
+        this.#rowOutcome(label, kind, false, `the peer's "${label}" doesn't carry that feature anymore`)
         return
       }
       const target = [...at, label]
       const local = await resolveLayerAt(history, lineage.domain, target)
       if (!local) {
-        EffectBus.emit('activity:log', { message: `couldn't merge into "${label}" — its layer didn't resolve`, icon: '○' })
+        this.#rowOutcome(label, kind, false, `couldn't merge into "${label}" — its layer didn't resolve`)
         return
       }
       const union = (cur: unknown, add: readonly string[]): string[] => {
@@ -582,7 +597,7 @@ export class SwarmAdoptDrone extends Drone {
       EffectBus.emit('tile:saved', { cell: label })
       EffectBus.emit('fs:changed', { segments: [...at] })
       await new hypercomb().act()
-      EffectBus.emit('activity:log', { message: `merged "${kind}" from the peer's "${label}"`, icon: '●' })
+      this.#rowOutcome(label, kind, true, `merged "${kind}" from the peer's "${label}"`)
 
       // A HIERARCHY-scoped feature (a website) IS its subtree: the pages are
       // child cells that belong with the feature. Merging just the host cell's
@@ -599,7 +614,7 @@ export class SwarmAdoptDrone extends Drone {
       EffectBus.emit('tile:action', { action: 'features', label, segments: target })
     } catch (err) {
       console.warn('[swarm-adopt] feature merge failed', { label, kind, err })
-      EffectBus.emit('activity:log', { message: `couldn't merge "${kind}" from "${label}"`, icon: '○' })
+      this.#rowOutcome(label, kind, false, `couldn't merge "${kind}" from "${label}"`)
     }
   }
 

@@ -266,6 +266,17 @@
                           >✓ {{ 'features.allow' | t }}</button>
                         </span>
                       }
+                      <!-- Row-level outcome: the action's failure lands HERE, in
+                           the same plain words the activity log gets — plus the
+                           content-health WHY while fetching is degraded. -->
+                      @if (rowNote(group, feat); as note) {
+                        <span class="feature-note">
+                          {{ note }}
+                          @if (healthWhy(); as why) {
+                            <span class="note-why">{{ why }}</span>
+                          }
+                        </span>
+                      }
                     </div>
                     <!-- Open: ENTER this view behaviour (play the slides, show
                          the page). Distinct from the on/off switch — only on,
@@ -392,6 +403,14 @@
                       </span>
                       @if (feat.description) {
                         <span class="feature-desc">{{ feat.description }}</span>
+                      }
+                      @if (rowNote(group, feat); as note) {
+                        <span class="feature-note">
+                          {{ note }}
+                          @if (healthWhy(); as why) {
+                            <span class="note-why">{{ why }}</span>
+                          }
+                        </span>
                       }
                     </div>
                   </li>
