@@ -361,6 +361,7 @@
   "slash.dropbox": "Diesen Standort als typisierte Dateiablage festlegen (kaskadiert zum Unterbaum)",
   "slash.files": "Dateien der ausgewählten Kacheln oder aller sichtbaren Kacheln durchsuchen",
   "features.viewer.title": "Features",
+  "features.search.placeholder": "Features durchsuchen…",
   "features.close": "schließen",
   "features.clear": "leeren",
   "features.remove": "Kachel entfernen",

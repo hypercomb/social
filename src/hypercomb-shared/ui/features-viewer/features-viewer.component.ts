@@ -40,6 +40,7 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { markVerified, markAllowedRoot, branchRootFor } from './feature-verified'
 import { hideFeature, restoreFeature, loadHidden, hiddenKey, type HiddenFeature } from './feature-hidden'
+import { enableWebsite, disableWebsite } from '../../core/websites-pool'
 import { adoptTargetSuggestions, createAdoptTargetPath, type AdoptTargetSuggestion } from './adopt-target'
 
 /** A feature already applied to the layer. */
@@ -180,6 +181,11 @@ export class FeaturesViewerComponent implements OnDestroy {
    *  back on in place. */
   readonly hidden = signal<HiddenFeature[]>([])
 
+  /** The header search — filters every section's rows live (label, kind,
+   *  description, slash command). Cleared when the subject tile changes and
+   *  on close; Escape clears it before it closes the panel. */
+  readonly query = signal('')
+
   /** Multi-selected rows (by stable row key). The bulk bar at the top acts on
    *  this set: allow the blocked ones, download the selected ones. */
   readonly selectedKeys = signal<ReadonlySet<string>>(new Set())
@@ -294,6 +300,7 @@ export class FeaturesViewerComponent implements OnDestroy {
       if (prev?.cell !== group.cell) {
         this.selectedKeys.set(new Set())
         this.rowNotes.set(new Map())   // notes describe the OLD subject's rows
+        this.query.set('')             // a stale filter would hide the new subject's rows
       }
       this.group.set(group)
       if (!this.visible()) this.visible.set(true)
@@ -486,6 +493,7 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.selectedKeys.set(new Set())
     this.pending.set(new Set())
     this.rowNotes.set(new Map())
+    this.query.set('')
     this.downloadResults.set([])
     // Reset the target combobox so a reopen starts clean.
     this.openTargetCell.set(null)
@@ -577,18 +585,43 @@ export class FeaturesViewerComponent implements OnDestroy {
     return this.#hiddenKeys().has(this.rowKey(group, feat))
   }
 
+  /** The header search's live filter. Case-insensitive substring across the
+   *  row's searchable text — feature name, kind, description, slash command,
+   *  AND the tile lineage it's attached at (plus the subject tile's name) so
+   *  "susan/projects" or a tile name finds its rows. Empty query matches all. */
+  #matchesQuery(
+    group: FeatureGroup,
+    feat: { label?: string; kind?: string; description?: string; slashCommand?: string; originSegments?: string[] },
+  ): boolean {
+    const q = this.query().trim().toLowerCase()
+    if (!q) return true
+    const segs = feat.originSegments?.length ? feat.originSegments : group.segments
+    const lineage = segs.join('/')
+    return [feat.label, feat.kind, feat.description, feat.slashCommand, lineage, group.cell]
+      .some(v => typeof v === 'string' && v.toLowerCase().includes(q))
+  }
+
+  onQuery(value: string): void {
+    this.query.set(String(value ?? ''))
+  }
+
   /** The "On this layer" rows — every applied feature EXCEPT the turned-off
    *  ones, which move to the "Off — kept here" section below. Nothing is
    *  deleted by turning a feature off; its row just changes section. */
   visibleApplied(group: FeatureGroup): FeatureRow[] {
-    return group.applied.filter(f => !this.isHidden(group, f))
+    return group.applied.filter(f => !this.isHidden(group, f) && this.#matchesQuery(group, f))
   }
 
   /** The "Off — kept here" rows — applied features the participant turned off
    *  (their identity sits in the hidden pool). Each has a one-tap restore;
    *  the section is omitted entirely when this is empty. */
   hiddenApplied(group: FeatureGroup): FeatureRow[] {
-    return group.applied.filter(f => this.isHidden(group, f))
+    return group.applied.filter(f => this.isHidden(group, f) && this.#matchesQuery(group, f))
+  }
+
+  /** The "Available to add" rows, through the same search filter. */
+  visibleAvailable(group: FeatureGroup): AvailableRow[] {
+    return group.available.filter(f => this.#matchesQuery(group, f))
   }
 
   /** Restore a turned-off feature — the hidden section's one-tap action.
@@ -856,17 +889,23 @@ export class FeaturesViewerComponent implements OnDestroy {
   }
 
   /** Turn a feature OFF: write it into the hidden pool (retained) and
-   *  re-reconcile its render via `feature:hidden`. */
+   *  re-reconcile its render via `feature:hidden`. The WEBSITE row's flip
+   *  additionally appends ONE history item to the sign('websites:menu')
+   *  pool — the switch IS the menu-membership control, and the pool's
+   *  append-only chain is its history. */
   async #turnOff(group: FeatureGroup, feat: FeatureRow): Promise<void> {
     const segments = this.#segmentsFor(group, feat)
     const sig = await hideFeature({ featKind: feat.kind, view: feat.view, label: feat.label, segments })
     if (!sig) return
     EffectBus.emit('feature:hidden', { featKind: feat.kind, segments })
+    if (feat.view === 'website') void disableWebsite(segments)
     await this.#refreshHidden()
   }
 
   /** Turn a feature back ON: remove its hidden-pool member so the gate
-   *  re-mounts it. Resolves the pool record from the row's hide scope. */
+   *  re-mounts it. Resolves the pool record from the row's hide scope.
+   *  The WEBSITE row's flip also appends the enable item to the
+   *  sign('websites:menu') pool (deduped at head — see enableWebsite). */
   async #turnOn(group: FeatureGroup, feat: FeatureRow): Promise<void> {
     const key = this.rowKey(group, feat)
     const rec = this.hidden().find(d => hiddenKey(d.featKind, d.appliesTo) === key)
@@ -874,6 +913,7 @@ export class FeaturesViewerComponent implements OnDestroy {
     const ok = await restoreFeature(rec.recordSig)
     if (!ok) return
     EffectBus.emit('feature:restored', { featKind: rec.featKind, segments: rec.appliesTo })
+    if (feat.view === 'website') void enableWebsite(rec.appliesTo, { label: group.cell })
     await this.#refreshHidden()
   }
 
@@ -1068,8 +1108,10 @@ export class FeaturesViewerComponent implements OnDestroy {
   onKey(event: KeyboardEvent): void {
     if (event.key !== 'Escape') return
     event.preventDefault()
-    // Escape backs out of an in-progress review first, then closes the panel.
+    // Escape backs out of an in-progress review first, then clears an active
+    // search, and only then closes the panel.
     if (this.reviewTarget()) { this.cancelReview(); return }
+    if (this.query()) { this.query.set(''); return }
     this.close()
   }
 }

@@ -361,6 +361,7 @@
   "slash.dropbox": "이 위치를 유형별 파일 드롭박스로 설정 (하위 트리에 적용)",
   "slash.files": "선택한 타일 또는 보이는 모든 타일에 첨부된 파일 탐색",
   "features.viewer.title": "기능",
+  "features.search.placeholder": "기능 검색…",
   "features.close": "닫기",
   "features.clear": "지우기",
   "features.remove": "타일 제거",

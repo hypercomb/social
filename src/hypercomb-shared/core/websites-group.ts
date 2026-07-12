@@ -20,7 +20,7 @@
 import { EffectBus } from '@hypercomb/core'
 import { groupRegistry, type GroupMember } from './group-registry'
 import { LaunchGroupBase } from './launch-group-base'
-import { isSeeded, listWebsites, markSeeded, registerWebsite } from './websites-pool'
+import { enableWebsite, isSeeded, listWebsites, markSeeded } from './websites-pool'
 
 const SIG = /^[0-9a-f]{64}$/
 const PAGE_KIND = 'visual:website:page'
@@ -56,12 +56,13 @@ class WebsitesGroup extends LaunchGroupBase {
     // re-read whenever the pool changes.
     this.#scheduleScan(400)
     EffectBus.on('websites:changed', () => this.#scheduleScan())
-    // A site build/upgrade at a scope IS a declaration — register its root.
-    // The pool write emits websites:changed, which refreshes the members.
+    // A site build/upgrade at a scope IS a declaration — enable its root.
+    // One history item in the pool (deduped at head); the append emits
+    // websites:changed, which refreshes the members.
     EffectBus.on<{ scope?: string; scopeSegments?: string[] }>('website:build', p => {
       const segs = (p?.scopeSegments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
       if (p?.scope === 'root' || segs.length === 0) return   // '/' is not a menu entry
-      void registerWebsite(segs)
+      void enableWebsite(segs)
     })
   }
 
@@ -90,10 +91,11 @@ class WebsitesGroup extends LaunchGroupBase {
       const store = get<StoreLike>('@hypercomb.social/Store')
       if (!history || !store?.getResource || !store?.getPool) { this.#scheduleScan(700); return }   // boot not ready — retry
 
-      // One-time migration: fold the legacy decoration walk into the pool.
+      // One-time migration: fold the legacy decoration walk into the pool —
+      // one enable history item per discovered site root.
       if (!(await isSeeded())) {
         const legacy = await findWebsiteSites(history, store)
-        for (const m of legacy) await registerWebsite(m.segments, { label: m.label, icon: m.icon }, { silent: true })
+        for (const m of legacy) await enableWebsite(m.segments, { label: m.label, icon: m.icon }, { silent: true })
         await markSeeded()
       }
 

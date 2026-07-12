@@ -376,6 +376,7 @@
   "slash.files": "Navegar arquivos anexados aos blocos selecionados ou a todos os blocos visíveis",
   "slash.observe": "Observar a malha — quem está aqui e o que compartilham",
   "features.viewer.title": "Funcionalidades",
+  "features.search.placeholder": "pesquisar funcionalidades…",
   "features.close": "fechar",
   "observe.title": "Observar",
   "observe.empty": "Ainda não há mais ninguém aqui.",

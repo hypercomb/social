@@ -376,6 +376,7 @@
   "slash.files": "Explorar archivos adjuntos a los mosaicos seleccionados o a todos los mosaicos visibles",
   "slash.observe": "Observar la malla — quién está aquí y qué comparten",
   "features.viewer.title": "Características",
+  "features.search.placeholder": "buscar características…",
   "features.close": "cerrar",
   "observe.title": "Observar",
   "observe.empty": "Aún no hay nadie más aquí.",

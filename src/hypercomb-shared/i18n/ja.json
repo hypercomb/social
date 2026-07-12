@@ -346,6 +346,7 @@
   "slash.observe": "スウォームを観察 — 誰がいて何を共有しているか",
   "slash.repush": "共有コンテンツをホストへ再プッシュし、欠落を報告",
   "features.viewer.title": "ビヘイビア",
+  "features.search.placeholder": "ビヘイビアを検索…",
   "features.close": "閉じる",
   "observe.title": "観察",
   "observe.empty": "まだ誰もいません。",

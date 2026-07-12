@@ -376,6 +376,7 @@
   "slash.files": "Sfoglia i file allegati alle tessere selezionate o a tutte le tessere visibili",
   "slash.observe": "Osserva la rete — chi c'è e cosa condividono",
   "features.viewer.title": "Funzionalità",
+  "features.search.placeholder": "cerca funzionalità…",
   "features.close": "chiudi",
   "observe.title": "Osserva",
   "observe.empty": "Non c'è ancora nessun altro qui.",

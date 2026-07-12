@@ -376,6 +376,7 @@
   "slash.files": "تصفح الملفات المرفقة بالبلاطات المحددة أو كل بلاطة في العرض",
   "slash.observe": "مراقبة السرب — من هنا وماذا يشاركون",
   "features.viewer.title": "الميزات",
+  "features.search.placeholder": "ابحث في الميزات…",
   "features.close": "إغلاق",
   "observe.title": "مراقبة",
   "observe.empty": "لا يوجد أحد آخر هنا بعد.",

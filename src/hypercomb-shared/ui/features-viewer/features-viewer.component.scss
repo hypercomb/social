@@ -56,25 +56,31 @@ $accent: #c8b8ff;
   border-bottom: 1px solid rgba($accent, 0.25);
 }
 
-.features-title {
-  flex: 0 0 auto;
-  font-size: 0.9em;
-  letter-spacing: 0.05em;
-  color: rgba($accent, 0.95);
-}
-
-// Divider between the panel name and the tile it's describing — "Beehaviors / cell".
-.features-sep {
-  flex: 0 0 auto;
-  font-size: 0.9em;
-  color: rgba(255, 255, 255, 0.3);
-}
-
-// The ONE tile the panel is scoped to, promoted into the header (the panel is
-// single-tile — no per-group cell row below). Takes the slack and ellipsizes.
-.features-cell {
+// The header IS the search — the panel name rides in the placeholder
+// ("search beehaviors…"). Quiet input, house hairlines, nothing flashy.
+.features-search {
   flex: 1 1 auto;
   min-width: 0;
+  padding: 0.3em 0.6em;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba($accent, 0.2);
+  border-radius: 4px;
+  color: #f3f3f3;
+  font: inherit;
+  font-size: 0.9em;
+  outline: none;
+
+  &::placeholder { color: rgba($accent, 0.55); letter-spacing: 0.03em; }
+  &:focus { border-color: rgba($accent, 0.5); background: rgba(255, 255, 255, 0.06); }
+  // The native clear glyph fights the panel's own Escape-to-clear; hide it.
+  &::-webkit-search-cancel-button { display: none; }
+}
+
+// The ONE tile the panel is scoped to — its own subject line under the header
+// (moved out of the header to make room for the search). Ellipsizes.
+.features-tile {
+  flex: 0 0 auto;
+  padding: 0.45em 0.75em 0;
   font-size: 0.86em;
   font-weight: 600;
   letter-spacing: 0.01em;

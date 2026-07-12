@@ -361,6 +361,7 @@
   "slash.dropbox": "Bu konumu türlü dosya kutusu yap (alt ağaca yayılır)",
   "slash.files": "Seçili döşemelere veya görünümdeki tüm döşemelere eklenmiş dosyalara göz at",
   "features.viewer.title": "Özellikler",
+  "features.search.placeholder": "özellik ara…",
   "features.close": "kapat",
   "features.clear": "temizle",
   "features.remove": "döşemeyi kaldır",

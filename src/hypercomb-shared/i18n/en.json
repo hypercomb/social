@@ -378,6 +378,7 @@
   "slash.observe": "Observe the swarm — who is here and what they share",
   "slash.repush": "Re-push shared content to your host and report holes",
   "features.viewer.title": "Beehaviors",
+  "features.search.placeholder": "search beehaviors…",
   "features.close": "close",
   "observe.title": "Observe",
   "observe.empty": "No one else is here yet.",

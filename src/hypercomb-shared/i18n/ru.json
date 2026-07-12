@@ -361,6 +361,7 @@
   "slash.dropbox": "Сделать это место типизированным файловым ящиком (распространяется на поддерево)",
   "slash.files": "Просмотреть файлы выбранных плиток или всех плиток в виде",
   "features.viewer.title": "Функции",
+  "features.search.placeholder": "поиск функций…",
   "features.close": "закрыть",
   "features.clear": "очистить",
   "features.remove": "удалить плитку",

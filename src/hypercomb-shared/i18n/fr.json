@@ -376,6 +376,7 @@
   "slash.files": "Parcourir les fichiers attachés aux tuiles sélectionnées, ou à toutes les tuiles visibles",
   "slash.observe": "Observer le maillage — qui est ici et ce qu'ils partagent",
   "features.viewer.title": "Fonctionnalités",
+  "features.search.placeholder": "rechercher des fonctionnalités…",
   "features.close": "fermer",
   "observe.title": "Observer",
   "observe.empty": "Personne d'autre n'est encore ici.",

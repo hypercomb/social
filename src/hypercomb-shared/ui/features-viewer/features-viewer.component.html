@@ -13,14 +13,28 @@
     role="dialog"
     [attr.aria-label]="'features.viewer.title' | t"
   >
+    <!-- The header IS the search — the panel name lives in the placeholder
+         ("search beehaviors…"). Typing filters every section's rows live;
+         Escape clears the query first, then closes the panel. -->
     <header class="features-header">
-      <span class="features-title">{{ 'features.viewer.title' | t }}</span>
-      @if (group(); as g) {
-        <span class="features-sep" aria-hidden="true">/</span>
-        <span class="features-cell" [title]="g.cell">{{ g.cell }}</span>
-      }
+      <input
+        class="features-search"
+        type="search"
+        [placeholder]="'features.search.placeholder' | t"
+        [attr.aria-label]="'features.search.placeholder' | t"
+        [value]="query()"
+        (input)="onQuery($any($event.target).value)"
+        spellcheck="false"
+        autocomplete="off"
+      />
       <button class="features-close" type="button" (click)="close()" [attr.aria-label]="'features.close' | t">×</button>
     </header>
+
+    <!-- The ONE tile the panel is scoped to — moved out of the header to make
+         room for the search; the subject line keeps it always visible. -->
+    @if (group(); as g) {
+      <div class="features-tile" [title]="g.cell">{{ g.cell }}</div>
+    }
 
     <!-- ── Bulk bar: acts on the selected rows ── -->
     @if (selectedCount() > 0) {
@@ -360,13 +374,13 @@
             <!-- ── Available to add: features this layer doesn't have yet ── -->
             <div class="section-head">
               <span class="section-label">{{ 'features.section.available' | t }}</span>
-              <span class="section-count">{{ group.available.length }}</span>
+              <span class="section-count">{{ visibleAvailable(group).length }}</span>
             </div>
-            @if (group.available.length === 0) {
+            @if (visibleAvailable(group).length === 0) {
               <p class="section-empty">{{ 'features.available.empty' | t }}</p>
             } @else {
               <ul class="features-list">
-                @for (feat of group.available; track feat.kind) {
+                @for (feat of visibleAvailable(group); track feat.kind) {
                   <li
                     class="features-row available"
                     [class.selected]="isSelected(group, feat)"
