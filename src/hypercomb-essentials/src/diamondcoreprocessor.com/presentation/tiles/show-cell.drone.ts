@@ -206,6 +206,14 @@ class CellSlots {
   markBranch(label: string): void {
     if (this.#names.includes(label)) this.#branches.add(label)
   }
+
+  hasBranch(label: string): boolean {
+    return this.#branches.has(label)
+  }
+
+  has(label: string): boolean {
+    return this.#names.includes(label)
+  }
 }
 
 /**
@@ -1740,15 +1748,25 @@ export class ShowCellDrone extends Drone {
         const lineage = this.resolve<any>('lineage')
         void Promise.resolve(lineage?.explorerDir?.()).then(async (dir) => {
           if (!dir) return
-          // Branch flags (cheap, parallel)
+          // Branch flags (cheap, parallel). A flip must PROPAGATE: the
+          // payload/cache/paint above were built from the pre-fill snapshot,
+          // so a silently-marked branch stays invisible to tile-overlay
+          // (#branchLabels) and stale in #layerCellsCache. Queue an empty
+          // incremental flush to rebuild + re-emit from the marked state.
+          // added is empty on that re-run, so the fill doesn't recurse.
+          let branchFlipped = false
           await Promise.all(added.map(async name => {
             const hasBranch = await this.checkCellHasBranch(dir, name)
-            if (hasBranch) this.#slots.markBranch(name)  // idempotent; pinned-safe
+            if (hasBranch && !this.#slots.hasBranch(name)) {
+              this.#slots.markBranch(name)  // idempotent; pinned-safe
+              branchFlipped = true
+            }
           }))
           // Images + props — pushed per-cell via in-place update
           for (const name of added) {
             await this.#tryInPlaceCellUpdate(name, { dir })
           }
+          if (branchFlipped) this.#queueIncremental({})
         }).catch(() => { /* best effort */ })
       }
 
@@ -4183,7 +4201,18 @@ export class ShowCellDrone extends Drone {
       // nested `a/b/c` adds a child to root, /a AND /a/b — and the tiles for
       // the other locations must NOT appear in this view. When segments are
       // absent (legacy emitters) we assume the current location.
-      if (payload.segments && !this.#segmentsAreCurrent(payload.segments)) return
+      if (payload.segments && !this.#segmentsAreCurrent(payload.segments)) {
+        // A child added ONE level below this screen is deterministic proof
+        // that its parent tile — visible HERE — is now a branch. Flip it
+        // synchronously from the event itself: the eager async branch check
+        // (checkCellHasBranch in the incremental fill) races importTree and
+        // usually reads OPFS before the child bag exists, so a command-line
+        // `abc/123` left `abc` painted as a leaf — omitted from branchLabels,
+        // click routed to the editor instead of #navigateInto, un-enterable
+        // until refresh. No OPFS read needed: the event IS the proof.
+        this.#flipParentBranchFor(payload.segments)
+        return
+      }
       this.#pendingRemoves.delete(payload.cell)
       this.#startNewCellFade(payload.cell)
       if (this.#slots.seeded) {
@@ -5668,6 +5697,24 @@ export class ShowCellDrone extends Drone {
       console.warn('[show-cell] failed to persist index for new cell', name, err),
     )
     return slot
+  }
+
+  /**
+   * A cell:added whose location is exactly one level BELOW the current
+   * screen flips its parent tile — visible here — from leaf to branch.
+   * Mark the slot machine and queue an (empty) incremental flush: the
+   * coalesced re-run rebuilds the cells from the marked snapshot, repaints
+   * the branch dot, refreshes the #layerCellsCache entry, and re-emits
+   * render:cell-count so tile-overlay's #branchLabels admits the click.
+   * Purely in-memory — no OPFS, so it cannot race the commit.
+   */
+  #flipParentBranchFor(childSegments: readonly string[]): void {
+    if (childSegments.length === 0 || !this.#slots.seeded) return
+    if (!this.#segmentsAreCurrent(childSegments.slice(0, -1))) return
+    const parent = String(childSegments[childSegments.length - 1] ?? '')
+    if (!parent || !this.#slots.has(parent) || this.#slots.hasBranch(parent)) return
+    this.#slots.markBranch(parent)
+    this.#queueIncremental({})
   }
 
   /**
