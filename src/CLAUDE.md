@@ -251,6 +251,16 @@ of meaning**, never a `__name__` dir). The model:
     | `threads` | `4cc500db62ede737f8f7a8c83c02b5fc5cbcebf26bffc48fb49b4540ffc67306` |
     | `computation` | `fb209e75cfb94344539afe813559f0950250a5ab843fcb30d1231021428d11ac` |
     | `manifests` | `c7af7c7a948db8800f71f26f3c90280cf09dfc3141b72318c5ff31ffc9470a59` |
+    | `websites:menu` | `17deba5bf2d5bceded9326cba402164b576529d811d73f5f2d2285cd5d038fbb` |
+
+    **Collision rule for NEW meanings**: lineage sigbags share the flat
+    root namespace, and a bag is named `sha256(lineageKey(segments))` —
+    for a single-segment location that is `sha256(<slug>)`, so a bare-word
+    meaning collides with any tile/page whose slug equals it (verified:
+    `sign('websites')` IS the `/websites` launcher bag). `lineageKey`
+    folds every non-letter/number to `-`, so a `:` in the meaning string
+    (e.g. `websites:menu`) can never be produced by a location — new
+    pool meanings should carry a colon.
 
 - **Legacy `__x__` dirs are self-cleaning drain sources.** (`__hive__/`,
   `hypercomb.io/`, `__layers__/`, `__resources__/`, `__optimized__/`,

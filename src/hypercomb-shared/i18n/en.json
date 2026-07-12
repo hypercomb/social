@@ -1027,6 +1027,7 @@
   "website-landing.lede": "Every website living in this hive, gathered in one place. Pick a tile to step inside.",
   "website-landing.close": "Close",
   "website-landing.empty": "No websites yet.",
+  "website-landing.remove": "Remove from Websites",
   "collections-landing.title": "Collections",
   "collections-landing.lede": "Reference sets — pools of material you gather once and point to from anywhere. Open one, or start a new collection below.",
   "collections-landing.new": "New collection",

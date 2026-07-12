@@ -21,7 +21,13 @@
         } @else {
           <ul class="landing-grid" role="list">
             @for (site of sites(); track site.key) {
-              <li>
+              <li class="site-slot">
+                <button class="site-remove mat-sym" type="button"
+                        (click)="removeSite(site, $event)"
+                        [attr.aria-label]="'website-landing.remove' | t"
+                        [title]="'website-landing.remove' | t">
+                  close
+                </button>
                 <button class="site-card" type="button" (click)="openSite(site)"
                         (pointerenter)="warmSite(site)"
                         [style.--accent]="accent(site.label)">

@@ -197,6 +197,41 @@ $hex-clip: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
 .site-card:hover .site-name { color: #f4fafd; }
 .site-card:active .site-hex { transform: translateY(-1px); }
 
+// Curation: a quiet per-tile remove that only surfaces on hover/focus.
+// Unregisters the site from the sign('websites:menu') pool — never touches
+// the site's own cells.
+.site-slot {
+  position: relative;
+
+  &:hover .site-remove,
+  &:focus-within .site-remove { opacity: 1; pointer-events: auto; }
+}
+
+.site-remove {
+  position: absolute;
+  top: 0;
+  right: 0.35rem;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  border: 1px solid rgba($steel, 0.35);
+  border-radius: 50%;
+  background: rgba($ink, 0.85);
+  color: rgba(207, 226, 238, 0.75);
+  cursor: pointer;
+  font-size: 0.85rem;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease, background 150ms ease, border-color 150ms ease;
+
+  &:hover { background: rgba($steel, 0.16); border-color: rgba($steel, 0.6); color: #f4fafd; }
+  &:focus-visible { outline: 1px solid rgba($steel, 0.7); outline-offset: 2px; opacity: 1; pointer-events: auto; }
+}
+
 .mat-sym {
   font-family: 'Material Symbols Outlined';
   line-height: 1;

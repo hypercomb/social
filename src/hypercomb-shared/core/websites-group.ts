@@ -1,21 +1,30 @@
 // hypercomb-shared/core/websites-group.ts
 //
-// The "websites" launch group — discovers every site root in the hive (the
-// topmost cell on each branch carrying a `visual:website:page` decoration, or a
-// first-class `website` slot) and surfaces them as group members. The discovery
-// walk re-runs (debounced) whenever decorations change or a branch is adopted.
+// The "websites" launch group — surfaces the participant's registered sites
+// as group members. Membership is the sign('websites:menu') POOL OF MEANING
+// (websites-pool.ts): declared truth, curated by the participant, never
+// derived from tree structure at read time.
+//
+// The old decoration-walk discovery survives ONLY as a one-time seed: on a
+// profile whose pool has never been seeded, the walk runs once (topmost
+// page-bearing cell per branch), folds its findings into the pool, and marks
+// the seed done. After that, membership changes only through:
+//   - a `website:build` event (a site built/upgraded at a scope registers it)
+//   - explicit curation (the landing page's remove affordance, pool API)
+// Adopting or copying a page-stamped subtree does NOT touch the menu —
+// membership is extrinsic and stays with the participant who declared it.
 //
 // Shell-level: HistoryService / Store / Navigation / ViewMode are resolved
-// through window.ioc at call time (never imports essentials). The walk re-runs
-// (debounced) whenever decorations change or a branch is adopted.
+// through window.ioc at call time (never imports essentials).
 
 import { EffectBus } from '@hypercomb/core'
 import { groupRegistry, type GroupMember } from './group-registry'
 import { LaunchGroupBase } from './launch-group-base'
+import { isSeeded, listWebsites, markSeeded, registerWebsite } from './websites-pool'
 
 const SIG = /^[0-9a-f]{64}$/
 const PAGE_KIND = 'visual:website:page'
-/** Depth guard for the discovery walk — matches the build drone's MAX_DEPTH. */
+/** Depth guard for the seed walk — matches the build drone's MAX_DEPTH. */
 const MAX_DEPTH = 24
 const SITE = 'website'
 
@@ -24,7 +33,10 @@ type HistoryLike = {
   currentLayerAt(locationSig: string): Promise<{ decorations?: unknown; children?: unknown; website?: unknown } | null>
   getLayerBySig(sig: string): Promise<{ name?: unknown } | null>
 }
-type StoreLike = { getResource(sig: string): Promise<Blob | null> }
+type StoreLike = {
+  getResource(sig: string): Promise<Blob | null>
+  getPool(meaning: string): Promise<FileSystemDirectoryHandle | null>
+}
 type NavigationLike = { goRaw?: (segments: readonly string[]) => void }
 type ViewModeLike = EventTarget & { mode?: string; setMode(next: string): void }
 
@@ -40,11 +52,17 @@ class WebsitesGroup extends LaunchGroupBase {
 
   constructor() {
     super()
-    // First scan shortly after boot (let HistoryService/Store register), then
-    // re-scan whenever the set of sites could have changed.
+    // First read shortly after boot (let HistoryService/Store register), then
+    // re-read whenever the pool changes.
     this.#scheduleScan(400)
-    EffectBus.on('decorations:changed', () => this.#scheduleScan())
-    EffectBus.on('adopt:done', () => this.#scheduleScan())
+    EffectBus.on('websites:changed', () => this.#scheduleScan())
+    // A site build/upgrade at a scope IS a declaration — register its root.
+    // The pool write emits websites:changed, which refreshes the members.
+    EffectBus.on<{ scope?: string; scopeSegments?: string[] }>('website:build', p => {
+      const segs = (p?.scopeSegments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+      if (p?.scope === 'root' || segs.length === 0) return   // '/' is not a menu entry
+      void registerWebsite(segs)
+    })
   }
 
   override members(): GroupMember[] { return this.#members }
@@ -70,8 +88,23 @@ class WebsitesGroup extends LaunchGroupBase {
     try {
       const history = get<HistoryLike>('@diamondcoreprocessor.com/HistoryService')
       const store = get<StoreLike>('@hypercomb.social/Store')
-      if (!history || !store?.getResource) { this.#scheduleScan(700); return }   // boot not ready — retry
-      this.#members = await findWebsiteSites(history, store)
+      if (!history || !store?.getResource || !store?.getPool) { this.#scheduleScan(700); return }   // boot not ready — retry
+
+      // One-time migration: fold the legacy decoration walk into the pool.
+      if (!(await isSeeded())) {
+        const legacy = await findWebsiteSites(history, store)
+        for (const m of legacy) await registerWebsite(m.segments, { label: m.label, icon: m.icon }, { silent: true })
+        await markSeeded()
+      }
+
+      this.#members = (await listWebsites())
+        .map(r => ({
+          key: JSON.stringify(r.segments),
+          label: r.label || r.segments[r.segments.length - 1],
+          segments: r.segments,
+          icon: r.icon || 'web',
+        }))
+        .sort((a, b) => a.label.localeCompare(b.label))
       groupRegistry.notifyChanged()
     } finally {
       this.#scanning = false
@@ -79,9 +112,12 @@ class WebsitesGroup extends LaunchGroupBase {
   }
 }
 
-/** Walk the tree from the hive root, returning one member per SITE ROOT (the
- *  topmost page-bearing cell on each branch). Stops descending once a root is
- *  found — the site is a single launcher entry, not one per sub-page. */
+/** SEED WALK (one-time, per profile). Walk the tree from the hive root,
+ *  returning one member per SITE ROOT (the topmost page-bearing cell on each
+ *  branch). Stops descending once a root is found. A cell whose decorations
+ *  cannot all be resolved is OPAQUE: it is neither classified as a site nor
+ *  descended into — a missing blob must not promote a site's sub-pages into
+ *  the menu (the availability fall-through that polluted the directory). */
 async function findWebsiteSites(history: HistoryLike, store: StoreLike): Promise<GroupMember[]> {
   const out: GroupMember[] = []
   const visited = new Set<string>()
@@ -104,17 +140,19 @@ async function findWebsiteSites(history: HistoryLike, store: StoreLike): Promise
   }
 
   /** A site's identity at this cell: its page-decoration payload (icon/label),
-   *  or `{}` for a first-class `website`-slot page (presence, no payload), or
-   *  null when the cell carries no page. */
+   *  `{}` for a first-class `website`-slot page, `'opaque'` when a decoration
+   *  sig failed to resolve (classification unknowable — prune the branch), or
+   *  null when the cell provably carries no page. */
   const siteAt = async (
     layer: { decorations?: unknown; website?: unknown },
-  ): Promise<{ icon: string; label: string } | null> => {
+  ): Promise<{ icon: string; label: string } | 'opaque' | null> => {
     const decos = Array.isArray(layer?.decorations) ? layer.decorations : []
+    let unresolved = false
     for (const entry of decos) {
       const sig = String(entry ?? '')
       if (!SIG.test(sig)) continue
       const blob = await store.getResource(sig).catch(() => null)
-      if (!blob) continue
+      if (!blob) { unresolved = true; continue }
       try {
         const rec = JSON.parse(await blob.text()) as { kind?: string; payload?: { icon?: unknown; label?: unknown } }
         if (rec?.kind === PAGE_KIND) {
@@ -128,7 +166,7 @@ async function findWebsiteSites(history: HistoryLike, store: StoreLike): Promise
     }
     const slot = layer?.website
     if (Array.isArray(slot) && slot.some(s => SIG.test(String(s)))) return { icon: '', label: '' }
-    return null
+    return unresolved ? 'opaque' : null
   }
 
   const walk = async (segments: string[], depth: number): Promise<void> => {
@@ -141,6 +179,7 @@ async function findWebsiteSites(history: HistoryLike, store: StoreLike): Promise
     const layer = await history.currentLayerAt(locSig).catch(() => null)
     if (!layer) return
     const site = await siteAt(layer)
+    if (site === 'opaque') return   // unknowable — never promote sub-pages
     if (site) {
       const label = site.label || (segments.length ? segments[segments.length - 1] : '/')
       out.push({ key: JSON.stringify(segments), label, segments: [...segments], icon: site.icon || 'web' })
