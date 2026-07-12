@@ -9,6 +9,10 @@ export class hypercomb extends web {
       const bees = resolver ? await resolver.find(grammar) : []
 
       for (const bee of bees) {
+        // Same contract as the optimize loop below: a module may register
+        // a constructor-wired product with no pulse — skip it, never throw.
+        // One malformed entry must not silence every bee after it.
+        if (typeof (bee as any)?.pulse !== 'function') continue
         await bee.pulse(grammar)
       }
     } finally {

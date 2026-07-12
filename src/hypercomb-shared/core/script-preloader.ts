@@ -144,7 +144,11 @@ export class ScriptPreloader extends EventTarget implements BeeResolver {
         ;(window as any).__hcBoot?.(`first preloader.find done (total=${findMs.toFixed(0)}ms walk=${walkMs.toFixed(0)}ms bees=${beesMs.toFixed(0)}ms)`)
       }
 
-      return [...this.#beeCache.values()]
+      // The resolver contract is Promise<Bee[]> and the processor pulses
+      // every entry — pulse-less module products (EventTarget UI drones,
+      // constructor-wired services) are legitimate cache residents but
+      // must never reach the pulse loop.
+      return [...this.#beeCache.values()].filter(b => typeof (b as any)?.pulse === 'function')
     }
 
     this.#finding = run()
