@@ -82,12 +82,19 @@ class Model {
     },
   }
 
+  /** Optional rewound-cursor stub for the adapter-read tests. */
+  cursor?: {
+    state: { locationSig: string; rewound: boolean }
+    layerContentAtCursor(): Promise<{ children?: string[] } | null>
+  }
+
   registry(): Record<string, unknown> {
     return {
       '@diamondcoreprocessor.com/HistoryService': this.history,
       '@hypercomb.social/Store': this.store,
       '@diamondcoreprocessor.com/LayerCommitter': this.committer,
       '@hypercomb.social/Lineage': { domain: () => 'test' },
+      '@diamondcoreprocessor.com/HistoryCursorService': this.cursor,
     }
   }
 
@@ -172,6 +179,31 @@ describe('aggregation-layer — curated menu membership as a layer', () => {
     // Re-commit the earlier children set to simulate the cursor stepping back.
     await model.committer.commitSlotSet(['websites'], 'children', childrenAfterSusan)
     expect((await mod.listAggregation('websites')).map(m => m.label)).toEqual(['Susan'])
+  })
+
+  it('listAggregationAtCursor renders the REWOUND menu while the cursor is bound to [g]', async () => {
+    await mod.enableAggregation('websites', ['susan'], { label: 'Susan' })
+    const childrenAfterSusan = model.headChildren('websites')
+    await mod.enableAggregation('websites', ['howard'], { label: 'Howard' })
+
+    // no cursor bound → identical to head
+    expect((await mod.listAggregationAtCursor('websites')).map(m => m.label)).toEqual(['Susan', 'Howard'])
+
+    // a rewound cursor bound to [websites] → the adapter sees the PAST menu…
+    model.cursor = {
+      state: { locationSig: hex64('loc:websites'), rewound: true },
+      layerContentAtCursor: async () => ({ children: childrenAfterSusan }),
+    }
+    expect((await mod.listAggregationAtCursor('websites')).map(m => m.label)).toEqual(['Susan'])
+    // …while truth readers stay on head (icon presence, click routing)
+    expect((await mod.listAggregation('websites')).map(m => m.label)).toEqual(['Susan', 'Howard'])
+
+    // cursor bound elsewhere → head again
+    model.cursor = {
+      state: { locationSig: hex64('loc:elsewhere'), rewound: true },
+      layerContentAtCursor: async () => ({ children: [] }),
+    }
+    expect((await mod.listAggregationAtCursor('websites')).map(m => m.label)).toEqual(['Susan', 'Howard'])
   })
 
   it('is generic across groups — the same primitive drives any curated menu', async () => {

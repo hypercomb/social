@@ -50,6 +50,8 @@ class WebsitesGroup extends LaunchGroupBase {
   override readonly icon = 'language'
   override readonly label = 'Websites'
   readonly shape = 'flower-pot'
+  /** Membership IS the ['websites'] layer — no reconcile, no cursor snap. */
+  readonly curated = true
 
   #members: GroupMember[] = []
   #debounce: ReturnType<typeof setTimeout> | null = null

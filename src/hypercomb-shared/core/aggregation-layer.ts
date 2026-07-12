@@ -51,6 +51,12 @@ const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const COMMITTER_KEY = '@diamondcoreprocessor.com/LayerCommitter'
 const STORE_KEY = '@hypercomb.social/Store'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
+const CURSOR_KEY = '@diamondcoreprocessor.com/HistoryCursorService'
+
+type CursorLike = {
+  state?: { locationSig?: string; rewound?: boolean }
+  layerContentAtCursor(): Promise<{ children?: unknown } | null>
+}
 
 const norm = (segments: readonly string[]): string[] =>
   segments.map(s => String(s ?? '').trim()).filter(Boolean)
@@ -120,8 +126,41 @@ export async function listAggregation(groupId: string): Promise<AggregationMembe
   if (!history || !store?.getResource) return []
   const pageSig = await pageLocSig(history, groupId)
   if (!pageSig) return []
+  return decodeAll(history, store, await childSigsOf(history, pageSig))
+}
+
+/** The members as an ADAPTER should render them: when the history cursor is
+ *  bound to `[g]`'s bag AND rewound, decode the children AT THE CURSOR — so
+ *  standing on /g and pressing undo visibly walks the menu back (redo walks
+ *  it forward). Anywhere else this is identical to {@link listAggregation}
+ *  (head). Truth readers (icon presence, click routing) stay on head;
+ *  cursor-following is strictly a presentation concern. */
+export async function listAggregationAtCursor(groupId: string): Promise<AggregationMember[]> {
+  const history = get<HistoryLike>(HISTORY_KEY)
+  const store = get<StoreLike>(STORE_KEY)
+  if (!history || !store?.getResource) return []
+  const pageSig = await pageLocSig(history, groupId)
+  if (!pageSig) return []
+  const cursor = get<CursorLike>(CURSOR_KEY)
+  if (cursor?.state?.locationSig === pageSig && cursor.state.rewound) {
+    const content = await cursor.layerContentAtCursor().catch(() => null)
+    if (content) {
+      // Position 0 (pre-history) carries no children — an empty menu, correctly.
+      const sigs = (Array.isArray(content.children) ? content.children : [])
+        .map(s => String(s ?? '').trim()).filter(s => SIG.test(s))
+      return decodeAll(history, store, sigs)
+    }
+  }
+  return decodeAll(history, store, await childSigsOf(history, pageSig))
+}
+
+async function decodeAll(
+  history: HistoryLike,
+  store: StoreLike,
+  sigs: readonly string[],
+): Promise<AggregationMember[]> {
   const out: AggregationMember[] = []
-  for (const childSig of await childSigsOf(history, pageSig)) {
+  for (const childSig of sigs) {
     const m = await decodeMember(history, store, childSig)
     if (m) out.push(m)
   }

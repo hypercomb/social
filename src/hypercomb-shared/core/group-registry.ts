@@ -56,6 +56,15 @@ export interface LaunchGroup {
    *  their categories) rather than preserving prior arrangement. Help opts in;
    *  other groups keep the spiral + arrangement-preserving reconcile. */
   orderedLayout?: boolean
+  /** True for a CURATED group: its page layer's children ARE its membership
+   *  (the aggregation-layer model — see documentation/aggregation-layer-
+   *  model.md), so MixedGroupBag must NOT reconcile the page from members()
+   *  (membership already lives there; the reconcile would be circular) and
+   *  must NOT force the history cursor to head — undo/redo at /<id> IS the
+   *  group's curation history. Derived groups (games, help) keep the
+   *  reconcile. */
+  readonly curated?: boolean
+
   /** When true, this group has NO browsable aggregator page: it is a single
    *  toggle surfaced only as a rail icon (the dashboard). Clicking the icon
    *  opens its member DIRECTLY via open() — the registry never navigates to

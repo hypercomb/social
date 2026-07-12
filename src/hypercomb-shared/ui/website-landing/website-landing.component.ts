@@ -22,7 +22,7 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { groupRegistry, type GroupMember } from '../../core/group-registry'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { registerProximityProvider } from '../../core/proximity-registry'
-import { disableAggregation } from '../../core/aggregation-layer'
+import { disableAggregation, listAggregationAtCursor } from '../../core/aggregation-layer'
 
 /** The websites group's page is its OWN root location, /websites — the group
  *  id IS the segment (see mixed-group-bag.ts). */
@@ -85,15 +85,24 @@ export class WebsiteLandingComponent implements OnDestroy {
     groupRegistry.addEventListener('change', this.#onChange)
     window.addEventListener('keydown', this.#onKey, true)
     this.#unregisterProximity = registerProximityProvider(this.#proximitySigs)
+    // ADAPTER, cursor-aware: undo/redo while standing here re-reads the menu
+    // at the cursor (listAggregationAtCursor), so the portal visibly walks
+    // the curation history — sheds the last change, redo restores it.
+    this.#unsubCursor = EffectBus.on('history:cursor-changed', () => {
+      if (this.open()) void this.#loadSites()
+    })
     this.#ensureLineage()
     this.#refresh()
   }
+
+  #unsubCursor: (() => void) | null = null
 
   ngOnDestroy(): void {
     groupRegistry.removeEventListener('change', this.#onChange)
     this.#lineage?.removeEventListener?.('change', this.#onChange)
     window.removeEventListener('keydown', this.#onKey, true)
     this.#unregisterProximity?.()
+    this.#unsubCursor?.()
     if (this.#hidHive) EffectBus.emit('render:set-hive-visible', { visible: true })
     for (const url of this.#imageUrls.values()) URL.revokeObjectURL(url)
   }
@@ -293,7 +302,24 @@ export class WebsiteLandingComponent implements OnDestroy {
     }
 
     this.open.set(active)
-    const members = active ? (groupRegistry.get(WEBSITES)?.members() ?? []) : []
+    if (!active) { this.sites.set([]); return }
+    void this.#loadSites()
+  }
+
+  /** Read the menu THROUGH THE CURSOR (the adapter's view): head normally,
+   *  the rewound state while the participant is undo-browsing this location.
+   *  Re-entered on every registry change and every cursor move; the open()
+   *  guard after the await drops a read that lands after close. */
+  async #loadSites(): Promise<void> {
+    const members = (await listAggregationAtCursor(WEBSITES))
+      .map(m => ({
+        key: JSON.stringify(m.segments),
+        label: m.label || m.segments[m.segments.length - 1],
+        segments: m.segments,
+        icon: m.icon || 'web',
+      }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+    if (!this.open()) return
     this.sites.set(members)
 
     // Resolve each site's tile image once the directory is showing. Deduped by

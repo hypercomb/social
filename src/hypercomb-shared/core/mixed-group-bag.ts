@@ -369,6 +369,17 @@ export class MixedGroupBag {
    *  Commit LEAF-ONLY so the page is never linked into a parent — each group
    *  page is its own root lineage, a separate pool from the hive tree. */
   async #reconcile(history: HistoryLike, id: string): Promise<void> {
+    // CURATED group (aggregation-layer model): the page layer's children ARE
+    // the membership — enable/disableAggregation already committed them, so
+    // reconciling from members() would be circular, and the cursor-forcing
+    // below would snap a deliberately rewound menu back to head (undo/redo at
+    // /<id> IS the group's curation history). Rebuild the label→member click-
+    // routing maps (the only #reconcile side effect a curated group needs)
+    // and leave the layer and the cursor alone.
+    if (this.#registry.get(id)?.curated) {
+      this.#members(id)
+      return
+    }
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
     const domain = lineage?.domain
     const members = this.#members(id)
