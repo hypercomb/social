@@ -40,7 +40,7 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { markVerified, markAllowedRoot, branchRootFor } from './feature-verified'
 import { hideFeature, restoreFeature, loadHidden, hiddenKey, type HiddenFeature } from './feature-hidden'
-import { enableWebsite, disableWebsite } from '../../core/websites-pool'
+import { enableAggregation, disableAggregation } from '../../core/aggregation-layer'
 import { adoptTargetSuggestions, createAdoptTargetPath, type AdoptTargetSuggestion } from './adopt-target'
 
 /** A feature already applied to the layer. */
@@ -890,22 +890,22 @@ export class FeaturesViewerComponent implements OnDestroy {
 
   /** Turn a feature OFF: write it into the hidden pool (retained) and
    *  re-reconcile its render via `feature:hidden`. The WEBSITE row's flip
-   *  additionally appends ONE history item to the sign('websites:menu')
-   *  pool — the switch IS the menu-membership control, and the pool's
-   *  append-only chain is its history. */
+   *  additionally commits ONE menu change to the websites aggregation
+   *  layer — the switch IS the menu-membership control, and the layer's
+   *  ordinary history is its undo. */
   async #turnOff(group: FeatureGroup, feat: FeatureRow): Promise<void> {
     const segments = this.#segmentsFor(group, feat)
     const sig = await hideFeature({ featKind: feat.kind, view: feat.view, label: feat.label, segments })
     if (!sig) return
     EffectBus.emit('feature:hidden', { featKind: feat.kind, segments })
-    if (feat.view === 'website') void disableWebsite(segments)
+    if (feat.view === 'website') void disableAggregation('websites', segments)
     await this.#refreshHidden()
   }
 
   /** Turn a feature back ON: remove its hidden-pool member so the gate
    *  re-mounts it. Resolves the pool record from the row's hide scope.
-   *  The WEBSITE row's flip also appends the enable item to the
-   *  sign('websites:menu') pool (deduped at head — see enableWebsite). */
+   *  The WEBSITE row's flip also commits the enable to the websites
+   *  aggregation layer (idempotent by path — see enableAggregation). */
   async #turnOn(group: FeatureGroup, feat: FeatureRow): Promise<void> {
     const key = this.rowKey(group, feat)
     const rec = this.hidden().find(d => hiddenKey(d.featKind, d.appliesTo) === key)
@@ -913,7 +913,7 @@ export class FeaturesViewerComponent implements OnDestroy {
     const ok = await restoreFeature(rec.recordSig)
     if (!ok) return
     EffectBus.emit('feature:restored', { featKind: rec.featKind, segments: rec.appliesTo })
-    if (feat.view === 'website') void enableWebsite(rec.appliesTo, { label: group.cell })
+    if (feat.view === 'website') void enableAggregation('websites', rec.appliesTo, { label: group.cell })
     await this.#refreshHidden()
   }
 

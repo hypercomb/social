@@ -197,6 +197,19 @@ export type VisualBeeDescriptor = {
   readonly adoptScope?: 'tile' | 'hierarchy'
 
   /**
+   * Where this behavior's records LIVE — the undo/redo opt-out (see
+   * documentation/aggregation-layer-model.md).
+   *   - `'layer'` (default when absent): records ride layers/commits —
+   *     undoable, adoptable, foldable with the group. A layer IS its
+   *     history, so there is no "on the layer but hidden from undo" state.
+   *   - `'derived'`: records ride a pool/cache — recomputable, wipe-safe,
+   *     NEVER undoable or shareable. Reserve for genuinely transient or
+   *     derived data (the optimize-phase litmus: rebuildable from layers
+   *     alone).
+   */
+  readonly resourceScope?: 'layer' | 'derived'
+
+  /**
    * IoC key of the QueenBee that handles this view's slash command.
    * Used by the adoption-icon click handler to dispatch the bee for the
    * clicked cell (`queen.invoke(args)`). Optional: if absent, the icon

@@ -1,16 +1,20 @@
 // hypercomb-shared/core/websites-group.ts
 //
 // The "websites" launch group — surfaces the participant's registered sites
-// as group members. Membership is the sign('websites:menu') POOL OF MEANING
-// (websites-pool.ts): declared truth, curated by the participant, never
-// derived from tree structure at read time.
+// as group members. Membership is the AGGREGATION LAYER (aggregation-layer.ts
+// + documentation/aggregation-layer-model.md): the ['websites'] page layer's
+// children ARE the menu, enable/disable are ordinary commits, and undo/redo
+// is that location's normal history. Declared truth, curated by the
+// participant, never derived from tree structure at read time.
 //
 // The old decoration-walk discovery survives ONLY as a one-time seed: on a
-// profile whose pool has never been seeded, the walk runs once (topmost
-// page-bearing cell per branch), folds its findings into the pool, and marks
-// the seed done. After that, membership changes only through:
-//   - a `website:build` event (a site built/upgraded at a scope registers it)
-//   - explicit curation (the landing page's remove affordance, pool API)
+// profile that has never been seeded (websites-pool.ts sentinel), the walk
+// runs once (topmost page-bearing cell per branch), commits its findings
+// into the layer, and marks the seed done. After that, membership changes
+// only through:
+//   - a `website:build` event (a site built/upgraded at a scope enables it)
+//   - the Beehaviors website row's switch (features-viewer)
+//   - explicit curation (the landing page's remove affordance)
 // Adopting or copying a page-stamped subtree does NOT touch the menu —
 // membership is extrinsic and stays with the participant who declared it.
 //
@@ -18,9 +22,10 @@
 // through window.ioc at call time (never imports essentials).
 
 import { EffectBus } from '@hypercomb/core'
+import { enableAggregation, listAggregation } from './aggregation-layer'
 import { groupRegistry, type GroupMember } from './group-registry'
 import { LaunchGroupBase } from './launch-group-base'
-import { enableWebsite, isSeeded, listWebsites, markSeeded } from './websites-pool'
+import { isSeeded, markSeeded } from './websites-pool'
 
 const SIG = /^[0-9a-f]{64}$/
 const PAGE_KIND = 'visual:website:page'
@@ -53,16 +58,18 @@ class WebsitesGroup extends LaunchGroupBase {
   constructor() {
     super()
     // First read shortly after boot (let HistoryService/Store register), then
-    // re-read whenever the pool changes.
+    // re-read whenever the aggregation layer changes.
     this.#scheduleScan(400)
-    EffectBus.on('websites:changed', () => this.#scheduleScan())
+    EffectBus.on<{ groupId?: string }>('aggregation:changed', p => {
+      if (!p?.groupId || p.groupId === this.id) this.#scheduleScan()
+    })
     // A site build/upgrade at a scope IS a declaration — enable its root.
-    // One history item in the pool (deduped at head); the append emits
-    // websites:changed, which refreshes the members.
+    // One commit at ['websites'] (idempotent by path); the primitive emits
+    // aggregation:changed, which refreshes the members.
     EffectBus.on<{ scope?: string; scopeSegments?: string[] }>('website:build', p => {
       const segs = (p?.scopeSegments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
       if (p?.scope === 'root' || segs.length === 0) return   // '/' is not a menu entry
-      void enableWebsite(segs)
+      void enableAggregation(this.id, segs)
     })
   }
 
@@ -91,15 +98,25 @@ class WebsitesGroup extends LaunchGroupBase {
       const store = get<StoreLike>('@hypercomb.social/Store')
       if (!history || !store?.getResource || !store?.getPool) { this.#scheduleScan(700); return }   // boot not ready — retry
 
-      // One-time migration: fold the legacy decoration walk into the pool —
-      // one enable history item per discovered site root.
+      // One-time migration: fold the legacy decoration walk into the layer —
+      // one enable commit per discovered site root. Launcher cells live at
+      // ['websites', <label>], so a duplicate label (two sites named
+      // 'dolphin' on different branches) must disambiguate or the second
+      // enable would land on the first one's child location.
       if (!(await isSeeded())) {
         const legacy = await findWebsiteSites(history, store)
-        for (const m of legacy) await enableWebsite(m.segments, { label: m.label, icon: m.icon }, { silent: true })
+        const used = new Set<string>()
+        for (const m of legacy) {
+          let label = m.label
+          let n = 2
+          while (used.has(label)) label = `${m.label} (${n++})`
+          used.add(label)
+          await enableAggregation(this.id, m.segments, { label, icon: m.icon })
+        }
         await markSeeded()
       }
 
-      this.#members = (await listWebsites())
+      this.#members = (await listAggregation(this.id))
         .map(r => ({
           key: JSON.stringify(r.segments),
           label: r.label || r.segments[r.segments.length - 1],

@@ -22,7 +22,7 @@ import { TranslatePipe } from '../../core/i18n.pipe'
 import { groupRegistry, type GroupMember } from '../../core/group-registry'
 import { registerShellSurface } from '../../core/shell-surface-registry'
 import { registerProximityProvider } from '../../core/proximity-registry'
-import { disableWebsite } from '../../core/websites-pool'
+import { disableAggregation } from '../../core/aggregation-layer'
 
 /** The websites group's page is its OWN root location, /websites — the group
  *  id IS the segment (see mixed-group-bag.ts). */
@@ -242,14 +242,16 @@ export class WebsiteLandingComponent implements OnDestroy {
     groupRegistry.get(WEBSITES)?.open(site)
   }
 
-  /** Curation: turn a site off in the sign('websites:menu') pool — ONE
-   *  compensating history item, append-only (nothing is deleted; the chain
-   *  keeps every past menu state). The append emits `websites:changed`, the
-   *  group re-folds, and the card disappears. Never touches the site's own
-   *  cells; re-enabling (Beehaviors toggle, a rebuild) appends it back. */
+  /** Curation: turn a site off in the websites aggregation layer — ONE
+   *  ordinary commit at ['websites'] (children minus this launcher cell),
+   *  so standing there and pressing undo restores it: the menu's history
+   *  IS the location's history. The commit emits `aggregation:changed`,
+   *  the group re-reads, and the card disappears. Never touches the
+   *  site's own cells; re-enabling (Beehaviors toggle, a rebuild)
+   *  commits it back. */
   removeSite(site: GroupMember, event: Event): void {
     event.stopPropagation()
-    void disableWebsite(site.segments)
+    void disableAggregation('websites', site.segments)
   }
 
   /** Close the directory — leave the aggregator (plain navigation back to the
