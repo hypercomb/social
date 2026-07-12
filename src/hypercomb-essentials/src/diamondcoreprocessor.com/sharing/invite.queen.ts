@@ -43,7 +43,10 @@ interface StoreLike { putResource: (b: Blob) => Promise<string> }
 interface CredStoreLike { value: string }
 interface NavLike { segments: () => string[] }
 interface SelectionLike { selected: ReadonlySet<string> }
-interface HostSyncLike { isEnabled?: () => boolean }
+interface HostSyncLike {
+  isEnabled?: () => boolean
+  ensureReceipt?: (sig: string, timeoutMs?: number) => Promise<boolean>
+}
 
 function normalizeHost(raw: string): string {
   return String(raw ?? '').trim()
@@ -77,6 +80,19 @@ export class InviteQueenBee {
       return
     }
 
+    // AVAILABILITY GATE — an invite is a DURABLE-HOST contract: the link
+    // (and any stamped junction's bundleSig on the wire) is fetched by
+    // machines that have never met this browser, so the bundle MUST be
+    // host-served before anything is minted. Without hosting we refuse
+    // outright rather than mint a link that 404s for everyone but us —
+    // the share doctrine: to share it, it already has to be available.
+    const hostSync = get<HostSyncLike>(HOST_SYNC_KEY)
+    if (!hostSync?.isEnabled?.()) {
+      this.#toast('error', 'Invite',
+        'Sharing requires hosting — turn on host sync (with a self-domain) so invitees can fetch the invite, then run /invite again.')
+      return
+    }
+
     const alias = args.trim().slice(0, 120) || undefined
     const baseSegments = nav.segments()
     const selection = get<SelectionLike>(SELECTION_KEY)
@@ -94,6 +110,7 @@ export class InviteQueenBee {
 
     let linkSig: string | null = null
     let stamped = 0
+    const mintedSigs: string[] = []
 
     if (selected.length > 0) {
       // Each selected tile becomes a junction pointing at its OWN location.
@@ -115,6 +132,7 @@ export class InviteQueenBee {
           })
           stamped++
           linkSig ??= bundleSig
+          mintedSigs.push(bundleSig)
         } catch (err) {
           console.warn('[invite] stamp failed for', label, err)
         }
@@ -127,6 +145,7 @@ export class InviteQueenBee {
       // No selection — a link to the current location itself.
       try {
         linkSig = await store.putResource(encodeInviteBundle(mkBundle(baseSegments, undefined)))
+        mintedSigs.push(linkSig)
       } catch (err) {
         console.warn('[invite] putResource failed', err)
         this.#toast('error', 'Invite', 'Could not create the invite resource.')
@@ -136,6 +155,20 @@ export class InviteQueenBee {
 
     if (!linkSig) { this.#toast('error', 'Invite', 'Could not create the invite.'); return }
 
+    // AVAILABILITY GATE, second half: putResource emitted `content:wrote`,
+    // so every bundle is already in the host-sync queue — now WAIT for the
+    // confirmed read-back receipt before declaring the link live. Bundles
+    // are single tiny PUTs (normally sub-second); a shared deadline covers
+    // multi-tile stamps. On timeout the queue keeps retrying detached, so
+    // we hand the link over with an honest "still uploading" instead of a
+    // false success — never a silent dead link.
+    const deadline = Date.now() + 12_000
+    let confirmed = true
+    for (const sig of mintedSigs) {
+      const ok = await hostSync.ensureReceipt?.(sig, Math.max(0, deadline - Date.now()))
+      if (!ok) { confirmed = false; break }
+    }
+
     const host = this.#linkHost()
     const scheme = LOOPBACK_RE.test(host) ? 'http' : 'https'
     const url = `${scheme}://${host}/${linkSig}`
@@ -144,17 +177,16 @@ export class InviteQueenBee {
     try { await navigator.clipboard.writeText(url); copied = true }
     catch (err) { console.warn('[invite] clipboard write failed', err) }
 
-    const reachable = !!get<HostSyncLike>(HOST_SYNC_KEY)?.isEnabled?.()
     const stampNote = stamped > 0
       ? `Stamped ${stamped} tile${stamped === 1 ? '' : 's'} as a swarm junction. `
       : ''
-    const linkNote = reachable
+    const linkNote = confirmed
       ? (copied ? 'Link copied — anyone who opens it joins this meeting place.' : url)
       : (copied
-          ? 'Link copied. Turn on host sync (with a self-domain) so others can fetch it; otherwise it only resolves in this browser.'
+          ? 'Link copied — the invite is still uploading to your host; it goes live for others once the upload confirms (retries automatically).'
           : url)
-    this.#toast(reachable ? 'success' : 'tip', 'Meeting place invite', stampNote + linkNote)
-    console.log(`[invite] ${stamped > 0 ? `stamped ${stamped} tile(s); ` : ''}${url}`)
+    this.#toast(confirmed ? 'success' : 'info', 'Meeting place invite', stampNote + linkNote)
+    console.log(`[invite] ${stamped > 0 ? `stamped ${stamped} tile(s); ` : ''}${confirmed ? '' : '(receipt pending) '}${url}`)
   }
 
   #linkHost = (): string => {

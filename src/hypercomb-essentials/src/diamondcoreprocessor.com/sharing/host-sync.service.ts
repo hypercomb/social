@@ -810,6 +810,11 @@ export class HostSyncService extends EventTarget {
           for (const dir of [await this.#getReceiptsDir(false), await this.#getLegacyReceiptsDir()]) {
             try { await dir?.removeEntry(sig) } catch { /* already gone */ }
           }
+          // A revoke can flip a memoized-available closure back to
+          // unavailable — drop the permanent memos and advance the epoch
+          // so the share gate re-verifies before the next announce.
+          this.#availableClosures.clear()
+          this.#receiptEpoch++
           console.warn(`[host-sync] revoked stale receipt ${sig.slice(0, 12)} — host no longer serves it; re-staging`)
           return false
         }
@@ -851,6 +856,146 @@ export class HostSyncService extends EventTarget {
       if (!(await this.hasReceipt(entry.sig))) out.push(entry.sig)
     }
     return out
+  }
+
+  // -------------------------------------------------
+  // availability — the SHARE GATE (read side of receipts)
+  // -------------------------------------------------
+  //
+  // Doctrine: "to share something in a swarm it already has to be
+  // available." The publish walk (swarm.drone.ts) and the invite mint
+  // consult THIS surface before announcing a sig to peers: a closure is
+  // available once every sig in it holds a confirmed read-back receipt on
+  // at least ONE enabled host. Receipts and bytes only accrue (content is
+  // immutable), so a confirmed closure memoizes permanently; an
+  // unavailable verdict is re-checked only after a NEW receipt lands (the
+  // epoch), never re-walked on every publish heartbeat.
+
+  /** Monotonic receipt epoch — bumped on every receipt write AND revoke,
+   *  so unavailable-closure verdicts know when a re-check could differ. */
+  #receiptEpoch = 0
+
+  /** Closure walkKeys confirmed fully receipted (permanent). Same walkKey
+   *  shape as #markedWalk: bare sig = full closure, `{sig}:tile` = the
+   *  tile-only walk. */
+  readonly #availableClosures = new Set<string>()
+
+  /** walkKey → the receipt epoch at which it last read unavailable. */
+  readonly #unavailableAtEpoch = new Map<string, number>()
+
+  /** True when a durable host is configured (either opt-in) — the
+   *  condition under which the announce gate is ACTIVE. With no host
+   *  configured at all, mesh-only live sharing keeps its ungated
+   *  behavior (dev/test: two browsers over a relay, sharer online). */
+  public readonly isGateActive = (): boolean => this.#anyEnabled()
+
+  /** Receipt on ANY enabled target — availability needs one serving host,
+   *  not all of them (a 401-paused CDN must not hide content the
+   *  self-domain already serves). Self-domain receipts get the
+   *  once-per-session HEAD re-verify; granted-host receipts are trusted
+   *  on existence (immutable sig-named CDN objects). */
+  readonly #anyTargetReceipted = async (sig: string): Promise<boolean> => {
+    for (const target of await this.#targets()) {
+      if (await this.#targetReceipted(sig, target)) return true
+    }
+    return false
+  }
+
+  /** Is the full closure rooted at `sig` receipt-confirmed available?
+   *  Mirrors markPublic's traversal exactly (child slots recurse only
+   *  under branch `closure`; resources descend into their content
+   *  closure), but READ-ONLY: no markers, no enqueues, no network beyond
+   *  the throttled self-domain receipt re-verify. Conservative: a
+   *  layer/resource whose bytes we don't hold locally can't vouch for its
+   *  refs and reads unavailable. Memoized true is O(1) on the publish
+   *  heartbeat. */
+  public readonly isClosureAvailable = async (
+    sig: string,
+    kind: HostSyncKind = 'layer',
+    closure = true,
+  ): Promise<boolean> => {
+    const s = String(sig ?? '').trim().toLowerCase()
+    if (!SIG_RE.test(s)) return false
+    const walkKey = closure ? s : `${s}:tile`
+    // A confirmed FULL closure covers the tile-only question too.
+    if (this.#availableClosures.has(walkKey) || this.#availableClosures.has(s)) return true
+    // Nothing receipted since the last miss — the answer cannot have
+    // changed; skip the walk (the drain's next receipt bumps the epoch).
+    if (this.#unavailableAtEpoch.get(walkKey) === this.#receiptEpoch) return false
+    const ok = await this.#closureReceipted(s, kind, closure, new Set<string>())
+    if (ok) {
+      this.#availableClosures.add(walkKey)
+      this.#unavailableAtEpoch.delete(walkKey)
+    } else {
+      this.#unavailableAtEpoch.set(walkKey, this.#receiptEpoch)
+    }
+    return ok
+  }
+
+  readonly #closureReceipted = async (
+    sig: string,
+    kind: HostSyncKind,
+    closure: boolean,
+    visited: Set<string>,
+  ): Promise<boolean> => {
+    if (visited.has(sig)) return true
+    visited.add(sig)
+    if (!(await this.#anyTargetReceipted(sig))) return false
+    let bytes: ArrayBuffer | null = null
+    try { bytes = await this.#readLocalBytes(sig, kind) } catch { bytes = null }
+    // Receipted but not held locally: the host serves THIS sig, but we
+    // can't enumerate its refs to vouch for the rest of the closure.
+    // Bees/dependencies are ref-less leaves — receipt suffices; layers
+    // and resources read unavailable (conservative).
+    if (!bytes) return kind === 'bee' || kind === 'dependency'
+    if (kind === 'layer') {
+      let layer: Record<string, unknown>
+      try { layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown> } catch { return true }
+      if (!layer || typeof layer !== 'object') return true
+      const CHILD_SLOTS = new Set(['cells', 'layers', 'children'])
+      for (const [slot, value] of Object.entries(layer)) {
+        if (!Array.isArray(value)) continue
+        const isChildSlot = CHILD_SLOTS.has(slot)
+        // Tile-only share: descendants are not part of the contract.
+        if (isChildSlot && !closure) continue
+        const refKind: HostSyncKind = isChildSlot ? 'layer'
+          : slot === 'bees' ? 'bee'
+          : slot === 'dependencies' ? 'dependency'
+          : 'resource'
+        for (const raw of value) {
+          const ref = String(raw ?? '').trim().toLowerCase()
+          if (!SIG_RE.test(ref) || ref === sig) continue
+          if (!(await this.#closureReceipted(ref, refKind, closure, visited))) return false
+        }
+      }
+    } else if (kind === 'resource') {
+      const nested = [
+        ...await decorationClosureSigs(bytes, r => this.#readLocalBytes(r, 'resource')),
+        ...nestedResourceSigs(bytes),
+      ]
+      for (const ref of nested) {
+        if (!SIG_RE.test(ref) || ref === sig) continue
+        if (!(await this.#closureReceipted(ref, 'resource', closure, visited))) return false
+      }
+    }
+    return true
+  }
+
+  /** Bounded wait for a sig's receipt on any enabled target — the invite
+   *  mint's gate. Kicks a drain, then polls (receipts land via the
+   *  drain's file write, not an awaitable). False on timeout or when no
+   *  host is enabled; the queue keeps retrying after this returns either
+   *  way, so a timed-out sig usually goes live shortly after. */
+  public readonly ensureReceipt = async (sig: string, timeoutMs = 10_000): Promise<boolean> => {
+    const s = String(sig ?? '').trim().toLowerCase()
+    if (!SIG_RE.test(s) || !this.#anyEnabled()) return false
+    const deadline = Date.now() + Math.max(0, timeoutMs)
+    void this.drain()
+    for (;;) {
+      if (await this.#anyTargetReceipted(s)) return true
+      if (Date.now() >= deadline) return false
+      await new Promise(r => setTimeout(r, 500))
+    }
   }
 
   // -------------------------------------------------
@@ -929,6 +1074,9 @@ export class HostSyncService extends EventTarget {
       const handle = await receiptsDir.getFileHandle(HostSyncService.#receiptName(entry.sig, target), { create: true })
       const writable = await handle.createWritable()
       try { await writable.write(new Uint8Array(0)) } finally { await writable.close() }
+      // A new receipt can flip a closure from unavailable → available:
+      // advance the epoch so the share gate re-walks stale misses.
+      this.#receiptEpoch++
       return true
     } catch { return false }
   }

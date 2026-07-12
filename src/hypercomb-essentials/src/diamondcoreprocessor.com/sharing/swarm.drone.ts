@@ -528,7 +528,7 @@ export class SwarmDrone extends Drone {
   // emits it on every render; if it fires before our lineage-change hook
   // resolves, we still subscribe + publish on time. The primary trigger is
   // the Lineage `change` event we wire up in the constructor below.
-  protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'cell:0000-changed', 'cell:added', 'tile:public-changed']
+  protected override listens: string[] = ['mesh:ensure-started', 'mesh:public-changed', 'mesh:room', 'mesh:secret', 'cell:0000-changed', 'cell:added', 'tile:public-changed', 'host:receipt']
   protected override emits: string[] = ['swarm:peers-changed', 'swarm:presence-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'swarm:interest-changed', 'swarm:label-changed', 'swarm:subscription-changed', 'swarm:subscribe-request-received', 'swarm:following-changed', 'swarm:leader-moved', 'swarm:open-for-subscribers-changed', 'swarm:follow-updated', 'tile:public-changed']
 
   // Per-lineage subscription handle. We open one per visited sig and
@@ -1012,6 +1012,20 @@ export class SwarmDrone extends Drone {
     // path, leaving followers' channel view stale.) The publish paths re-apply
     // the filter; a tile going private shrinks the slot, going public adds it.
     this.onEffect('tile:public-changed', () => { void this.#syncForCurrentLineage() })
+
+    // Host receipt landed — a closure the availability gate held back may
+    // just have become fully served. Re-run the publish walk (debounced;
+    // a big first drain confirms receipts in bursts) so held content
+    // announces the moment it turns durable instead of waiting for the
+    // ~30-75s heartbeat.
+    this.onEffect('host:receipt', () => {
+      if (!this.#currentSig) return
+      if (this.#receiptRepublishTimer !== null) return
+      this.#receiptRepublishTimer = setTimeout(() => {
+        this.#receiptRepublishTimer = null
+        void this.#publishMyLayerAt(this.#currentSig)
+      }, 2_000)
+    })
 
     // Mesh-public toggle handler. Going OFF tears down state so temp
     // shared tiles disappear from the canvas. Going ON re-runs the
@@ -2005,6 +2019,17 @@ export class SwarmDrone extends Drone {
    *  writes coalesce into one publish at the trailing edge. */
   #propsRepublishTimer: ReturnType<typeof setTimeout> | null = null
 
+  /** Once-per-session latch for the availability-gate toast — the gate
+   *  holds on every heartbeat while a big first upload drains, and one
+   *  explanation is plenty. */
+  static #availabilityHoldToasted = false
+
+  /** Debounce token for the receipt-driven republish: each landed host
+   *  receipt can flip a held-back closure to available, but a big drain
+   *  confirms hundreds of receipts in bursts — coalesce to one publish
+   *  walk at a 2s trailing edge (the walk itself also single-flights). */
+  #receiptRepublishTimer: ReturnType<typeof setTimeout> | null = null
+
   // A tile created in a swarm is public by default so the swarm can
   // collaborate on it. Gated on the SAME room+secret check as every other
   // swarm network action (see #syncForCurrentLineage): outside a swarm a
@@ -2177,9 +2202,22 @@ export class SwarmDrone extends Drone {
     const prunedNames: string[] = []
     const filteredRefs: { name: string; layerSig?: string }[] = []
     const hostSync = this.#getHostSync()
+    // AVAILABILITY GATE — the share doctrine: "to share something in a
+    // swarm it already has to be available." ACTIVE only when a durable
+    // host is configured (self-domain and/or public CDN opt-in); with no
+    // host at all, mesh-only live sharing keeps its ungated behavior
+    // (dev/test: two browsers over a relay while the sharer is online).
+    // Under the gate, a public child is announced ONLY once its closure
+    // holds confirmed read-back receipts on at least one enabled host —
+    // until then it is HELD BACK (and retracted if previously announced):
+    // announcing a sig no host serves is exactly the receiver-404 bug.
+    // markPublic below stages the uploads; every landed receipt bumps the
+    // gate's epoch and `host:receipt` re-triggers this walk, so held
+    // content announces the moment it becomes durable.
+    const gateActive = hostSync?.isGateActive?.() === true && typeof hostSync?.isClosureAvailable === 'function'
+    const heldBack: string[] = []
     for (const c of childRefs) {
       if (isCellPublic(publicLocation, c.name)) {
-        filteredRefs.push(c)
         // CDN doctrine-gate feed: this walk enumerates EXACTLY the public
         // subset, so it is the sanctioned writer of `.public` markers
         // (host-sync markPublic). A public-BRANCH root vouches for its
@@ -2194,8 +2232,42 @@ export class SwarmDrone extends Drone {
               .catch(() => undefined)
           } catch { /* never disturb the publish walk */ }
         }
+        // Gate check — sig-less children (layer not committed yet) pass
+        // through: their wire entry is name+props only, nothing for a
+        // receiver to 404 on; the next commit gives them a sig and the
+        // gate takes over.
+        if (gateActive && c.layerSig) {
+          let available = false
+          try {
+            available = await hostSync!.isClosureAvailable!(c.layerSig, 'layer', isBranchPublic(publicLocation, c.name))
+          } catch { available = false }
+          if (!available) {
+            heldBack.push(c.name)
+            // Retract any previously-published slot for this branch — a
+            // peer must not keep resolving tiles whose bytes no host
+            // confirms (host drift revokes receipts the same way).
+            prunedNames.push(c.name)
+            continue
+          }
+        }
+        filteredRefs.push(c)
       }
       else prunedNames.push(c.name)
+    }
+    if (heldBack.length > 0) {
+      EffectBus.emit('swarm:availability-hold', { location: publicLocation, held: [...heldBack] })
+      slog('[swarm] availability gate holding', { location: publicLocation, held: heldBack })
+      // Once per session: tell the user WHY their shared tiles aren't
+      // announcing yet — uploads still confirming. Not per-walk (the
+      // heartbeat re-runs this constantly while a big drain lands).
+      if (!SwarmDrone.#availabilityHoldToasted) {
+        SwarmDrone.#availabilityHoldToasted = true
+        EffectBus.emit('toast:show', {
+          type: 'info',
+          title: 'Uploading before sharing',
+          message: 'Shared tiles announce once their content is confirmed on your host — uploads are in progress.',
+        })
+      }
     }
     childRefs = filteredRefs
     const childNames = childRefs.map(c => c.name)  // legacy local var — still used by recursion + log
@@ -3158,6 +3230,28 @@ const payload: SwarmLayerPayload = myLabel
           } catch { /* never disturb the publish */ }
         }
       }
+      // AVAILABILITY GATE — same contract as #publishSubtree: the personal
+      // channel is the second announce surface, and a follower adopting a
+      // sealed handle no host serves yet 404s identically. Held entries
+      // re-announce via the host:receipt republish once their uploads
+      // confirm. Sealed handles are pool-written locally at seal time, so
+      // the closure walk always has bytes to verify against.
+      if (hostSync?.isGateActive?.() === true && typeof hostSync.isClosureAvailable === 'function') {
+        const gated: typeof childEntries = []
+        for (const c of childEntries) {
+          let available = false
+          try {
+            available = await hostSync.isClosureAvailable(c.layerSig, 'layer', isBranchPublic(publicLocation, c.name))
+          } catch { available = false }
+          if (available) gated.push(c)
+        }
+        if (gated.length < childEntries.length) {
+          slog('[swarm] availability gate holding on personal channel', {
+            held: childEntries.filter(c => !gated.includes(c)).map(c => c.name),
+          })
+        }
+        childEntries = gated
+      }
     }
 
     type ChildEntry = { name: string; layerSig: string } & Record<string, unknown>
@@ -3762,12 +3856,16 @@ const payload: SwarmLayerPayload = myLabel
   #getSigner = (): SignerApi | undefined =>
     (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.(NOSTR_SIGNER_KEY) as SignerApi | undefined
 
-  // Host sync — the `.public` marker writer (CDN doctrine gate). Resolved
-  // at runtime via IoC (no import); inert until the service registers AND
-  // the operator opts in to the public host.
+  // Host sync — the `.public` marker writer (CDN doctrine gate) AND the
+  // availability gate (isGateActive/isClosureAvailable — receipts-backed
+  // "share it only once a host serves it"). Resolved at runtime via IoC
+  // (no import); inert until the service registers AND the operator opts
+  // in to a host.
   #getHostSync = () =>
     (window as { ioc?: { get: (k: string) => unknown } }).ioc?.get?.('@diamondcoreprocessor.com/HostSyncService') as {
       markPublic: (sig: string, kind?: 'layer' | 'bee' | 'dependency' | 'resource', closure?: boolean) => Promise<void>
+      isGateActive?: () => boolean
+      isClosureAvailable?: (sig: string, kind?: 'layer' | 'bee' | 'dependency' | 'resource', closure?: boolean) => Promise<boolean>
     } | undefined
 
   #getRegistry = (): TileSourceRegistryLike | undefined =>

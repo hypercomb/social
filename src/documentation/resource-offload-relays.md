@@ -98,10 +98,43 @@ already the pattern), not faster.
 ## Phases
 
 1. Land `authored-sigs` producers + one-time lineage bootstrap (also closes
-   the audit's path-keyed-trust item).
+   the audit's path-keyed-trust item). — LANDED.
 2. Add the relay/blob rung to ContentBroker behind `use-live-relay`, sha256
    gate unchanged; Blossom origin(s) configurable.
 3. Offload queue + receipts pools; eligibility derivation (optimize phase)
-   + queue worker (push). Consent gate in front.
+   + queue worker (push). Consent gate in front. — **REALIZED via
+   host-sync, not a new pool pair**: the `sign('host-push')` queue +
+   `sign('host-receipts')` receipts (HostSyncService) already implement
+   the queue/receipt ledger for both the self-domain and the public CDN
+   (Blossom/R2 worker) targets, with `.public` markers as the eligibility
+   gate. Building a parallel `sign('offload')`/`sign('offload-receipts')`
+   pair would duplicate that machinery — the meanings stay reserved for a
+   future relay-event (kind 30201) offload channel if one materializes.
 4. Community mirroring: adopters who hold bytes announce as peer sources —
    free replication with integrity guaranteed by the primitive.
+
+## Availability gate (share doctrine — BUILT)
+
+"To share something in a swarm it already has to be available." Receipts
+are the proof surface; the gate is their read side (all in
+`host-sync.service.ts` + `swarm.drone.ts` + `invite.queen.ts`):
+
+- `HostSyncService.isClosureAvailable(sig, kind, closure)` — a closure is
+  available once EVERY sig in it (markPublic's exact traversal, read-only)
+  holds a confirmed read-back receipt on at least one enabled host.
+  Confirmed closures memoize permanently (bytes immutable, receipts
+  accrue); misses re-check only when a new receipt bumps the epoch.
+- Both announce surfaces (the kind-30200 publish walk AND the personal
+  subscribe channel) HOLD BACK public children whose closure isn't
+  available — and retract previously-announced slots — whenever a durable
+  host is configured. With no host configured, mesh-only live sharing
+  stays ungated (dev/test: two browsers over a relay, sharer online).
+  `host:receipt` re-triggers the walk so held content announces the
+  moment it turns durable.
+- `/invite` refuses without hosting ("sharing requires hosting") and
+  waits for the bundle's receipt (`ensureReceipt`) before declaring the
+  link live.
+- Receiver half: a fold whose layer closure fetched incomplete
+  (`broker.adopt` failed>0) is never committed — deferred + retried
+  (complete-or-defer, `swarm-adopt.drone.ts`), because `flattenLayerTree`
+  would silently drop the unfetched branches from the committed copy.

@@ -823,6 +823,52 @@ export class SwarmAdoptDrone extends Drone {
     return next
   }
 
+  // ── deferred-fold retry ladder (complete-or-defer, see #doCommitBranch) ──
+  // A fold refused on an incomplete layer closure retries here: the
+  // publisher may just be mid-upload (their availability gate holds the
+  // announce until receipts land, but a receiver can race a byte the host
+  // hasn't confirmed yet), or a mirror may come online. Bounded + per-sig
+  // deduped; success or ladder-end clears the slot. Timers, not a queue —
+  // a page refresh drops pending retries, and that's fine: the user's next
+  // adopt click starts fresh.
+  readonly #foldRetryAttempts = new Map<string, number>()
+  static readonly #FOLD_RETRY_DELAYS_MS = [20_000, 60_000, 180_000]
+
+  #scheduleFoldRetry = (
+    branchSig: string,
+    atSegments: readonly string[],
+    domain?: string,
+    mode: 'fold' | 'sync' = 'fold',
+  ): void => {
+    const attempt = this.#foldRetryAttempts.get(branchSig) ?? 0
+    if (attempt >= SwarmAdoptDrone.#FOLD_RETRY_DELAYS_MS.length) {
+      this.#foldRetryAttempts.delete(branchSig)
+      EffectBus.emit('activity:log', {
+        message: `couldn't fetch all of "${branchSig.slice(0, 8)}…" — parts aren't reachable from any host yet; adopt it again later`,
+        icon: '○',
+      })
+      return
+    }
+    // attempt+1 marks the slot BEFORE the timer so overlapping deferrals
+    // for the same sig don't stack parallel ladders.
+    this.#foldRetryAttempts.set(branchSig, attempt + 1)
+    setTimeout(() => {
+      void this.#commitBranch(branchSig, atSegments, domain, mode).then(res => {
+        if (res === 'committed' || res === 'exists') {
+          this.#foldRetryAttempts.delete(branchSig)
+          if (res === 'committed') {
+            // importTree's cell:added reconciliation already mounted the
+            // tiles — this line just tells the user the earlier "isn't
+            // reachable" message resolved itself.
+            EffectBus.emit('activity:log', { message: 'adopt completed — the missing content became reachable', icon: '●' })
+          }
+        }
+        // 'unavailable' re-entered #doCommitBranch, which re-scheduled the
+        // next rung (or ended the ladder) — nothing to do here.
+      }).catch(() => undefined)
+    }, SwarmAdoptDrone.#FOLD_RETRY_DELAYS_MS[attempt])
+  }
+
   // mode `fold` (default, adopt / DCP-config fold): idempotent — a tile
   // already present at (name, at) is left untouched, and the props-index
   // seed is fill-if-empty (never disturbs an image already on a tile).
@@ -861,6 +907,24 @@ export class SwarmAdoptDrone extends Drone {
       // the mesh) — the content-availability edge, distinct from a wiring break.
       console.info('[swarm-adopt] fold branch', sig.slice(0, 8),
         'domain=', domain || '(none)', 'broker.adopt=', JSON.stringify(adoptRes), 'resolved=', !!branchLayer)
+
+      // COMPLETE-OR-DEFER: failed>0 means part of the branch's LAYER closure
+      // never fetched — and flattenLayerTree DROPS unresolvable children from
+      // the re-homed tree, so committing now would fold a silently-truncated
+      // copy as FINAL (the pruned branches aren't referenced by the local
+      // copy at all, so not even the layer self-heal can recover them). The
+      // receiver-side half of the availability doctrine: never commit an
+      // incomplete closure. Defer instead — 'unavailable' surfaces loudly at
+      // the click path, and a bounded retry ladder re-runs the whole fold
+      // (adopt is content-addressed + idempotent, and this commit is
+      // serialized through #commitLock, so a retry that finds the closure
+      // complete commits exactly what this attempt should have).
+      if ((adoptRes?.failed ?? 0) > 0) {
+        console.warn('[swarm-adopt] fold deferred — layer closure incomplete; refusing truncated commit',
+          { sig: sig.slice(0, 8), ...adoptRes })
+        this.#scheduleFoldRetry(sig, atSegments, domain, mode)
+        return 'unavailable'
+      }
       const name = (branchLayer && typeof branchLayer.name === 'string') ? branchLayer.name.trim() : ''
       // Name rides untrusted signed peer content — reject path separators and
       // control chars (they corrupt the lineage path). Hyphens/spaces are fine.

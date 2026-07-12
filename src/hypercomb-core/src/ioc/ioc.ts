@@ -34,7 +34,18 @@ export const get = <T = unknown>(
   key: string | ServiceToken<T>
 ): T | undefined => {
   const k = key instanceof ServiceToken ? key.key : key
-  return instances.get(k) as T | undefined
+  const own = instances.get(k) as T | undefined
+  if (own !== undefined) return own
+  // Bridge to the shell registry: web shells register every service via
+  // `window.ioc` (ioc.web's OWN map), not this module's map — so a module
+  // that imported THIS `get` (instead of using the global one ioc.web
+  // exposes) resolved nothing and silently broke ("core services are not
+  // ready yet" from a fully-booted app). Own map stays authoritative;
+  // the fallback only answers what was registered on the shell side.
+  try {
+    return (globalThis as unknown as { ioc?: { get?: (k: string) => unknown } })
+      .ioc?.get?.(k) as T | undefined
+  } catch { return undefined }
 }
 
 export const has = (key: string | ServiceToken<any>): boolean => {
