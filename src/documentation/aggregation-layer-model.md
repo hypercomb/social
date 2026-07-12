@@ -133,18 +133,79 @@ each tile keeps its own tied resource, and it is all undoable/shareable
 because it is all layers. This is the default (`resourceScope: 'layer'`) and
 needs no change — only documenting.
 
-## Migration
+## Activation — dormant until turned on
 
-1. `listWebsites()` reads `['websites']`'s layer children (decode each
-   launcher cell's `launch:target` payload).
-2. `enableWebsite` / `disableWebsite` commit that layer's children via
-   `LayerCommitter` (the exact `#reconcile` child-commit pattern).
-3. The `sign('websites:menu')` pool becomes a **one-time drain source**: on
-   first read after the change, fold any pool records into the page layer as
-   launcher children, then leave the pool read-only (never write it again).
-   Same self-cleaning posture as the legacy `__x__` dirs — never wiped, just
-   drained and abandoned.
-4. Games stay derived; `resourceScope` lands on the visual-bee descriptor.
+The same layer-vs-flag reasoning answers *"what does adopt do, and what runs
+after it."*
 
-No user data is destroyed: the pool's records are read and folded, the menu's
-new home is a normal lineage the participant can undo/redo.
+**Adopt folds the whole subtree — structure now, bytes lazy.** Accepting a
+hive folds its entire tile tree in one gesture: every child signature enters
+your hive immediately (the structure is complete — nothing truncated), and
+the bytes resolve lazily behind the readiness shade (cold tiles brighten in
+place as they arrive). Complete-or-defer moves from *bytes* to *structure*:
+the structure is always complete; the bytes fill in. You prune what you don't
+want with the ordinary tile-delete — there is no special adopt-undo and no
+"tiles" surface in the Beehaviors window.
+
+**Behaviors arrive dormant — present but ignored.** A folded behavior
+decoration sits in its tile's layer, but *presence no longer means running*.
+The default for anything you didn't author is **ignored**: the render/behavior
+gate skips it until it is activated. This flips the old opt-out model
+(presence = active; write a `sign('hidden')` flag per behavior you turn OFF)
+to **opt-in** (presence = ignored; write one activation flag per behavior you
+turn ON).
+
+**Opt-in is fewer flags, not more.** You need exactly one bit of activation
+state either way — only the default differs. Adopt a 200-tile hive and light
+up three websites → three activation records. The dormant default costs
+**zero** flags: at rest, with no extra state at all, everything folded is
+quietly ignored. The opt-out model would have you writing a hidden-flag for
+almost everything you *didn't* want. Fewer writes, and it matches the intent —
+you got the whole thing; you light up what you want.
+
+**The one rule the flip forces.** Presence ≠ active, so authored content needs
+a default, or you'd have to hand-activate every tile you make. One line:
+
+> **active = authored-by-you OR explicitly-activated.**
+> Adopted-and-not-yet-activated = present but ignored.
+
+That composes with what already exists — `isLocallyAuthored` / the
+verification gate already say adopted foreign things don't auto-run. This
+generalizes it: the switch defaults **off** for anything you didn't author,
+and for a gated behavior "activate" *is* "allow" (honest-switch's
+here / allowed / **running** — the activation flag is the *running* bit).
+
+**Where the activation set lives.** It is curated truth you set and would want
+to undo, so — by the doctrine at the top of this document — it is
+**layer-committed** (undoable), not a bespoke pool: the same move as menu
+membership. One opt-in flag, written rarely, on a layer, replacing the
+two-store (hidden pool + menu pool) machinery with one consistent primitive.
+
+## Migration — SHIPPED (development, `e92a2638`)
+
+Websites converged onto this model:
+
+1. `listWebsites()` reads `['websites']`'s layer children — `listAggregation`
+   decodes each launcher cell's `launch:target` payload.
+2. The Beehaviors website-row switch, the `website:build` hook, and the seed
+   walk all call `enableAggregation`; the landing's `×` calls
+   `disableAggregation` — every mutation an ordinary commit at `['websites']`.
+   Launcher cells live at `['websites', <label>]`, so two same-named sites are
+   disambiguated by label (they'd otherwise collide on one child location).
+3. `websites-pool.ts` is demoted to **only the seed sentinel**. There is *no
+   drain*: the interim marker-chain membership format never shipped to the
+   wild, so nothing out there ever wrote it — there is nothing to fold in.
+4. Games stay derived; `resourceScope: 'layer' | 'derived'` landed on the
+   visual-bee descriptor.
+
+Known follow-up (an **adapter** concern, not a data concern): the `/websites`
+landing renders the layer *head*, not the history *cursor* — so data-level
+undo works (spec-proven) but the visible menu doesn't step back on undo yet.
+Fixing it is a cursor-aware read in the landing adapter plus dropping
+`MixedGroupBag`'s reconcile/`jumpToLatest` snap for curated groups — the same
+cursor-aware read the compose-from-root site renderer needs.
+
+The activation model above (dormant-until-activated, one opt-in layer flag) is
+**designed, not yet built** — it lands with the Beehaviors-window redesign
+(adopt-folds-the-subtree, behaviors-only window, row-toggle + elegant
+checkbox).
