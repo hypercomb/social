@@ -28,7 +28,7 @@ const DIAG = (() => { try { return localStorage.getItem('hc:diag') === '1' } cat
 
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
-type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean }
+type Cell = { q: number; r: number; label: string; external: boolean; imageSig?: string; heat?: number; hasBranch?: boolean; hasLink?: boolean; hasSubstrate?: boolean; borderColor?: [number, number, number]; divergence?: number; hideText?: boolean; unshared?: boolean; plain?: boolean; pendingProps?: boolean }
 
 /** Launch-group pages live at single-segment ROOT locations named by group id
  *  (/games, /websites, /help, …) — each is its own leaf-only lineage,
@@ -473,6 +473,20 @@ export class ShowCellDrone extends Drone {
    *  the same sig while one is in flight. */
   readonly #hostFillInFlight = new Set<string>()
 
+  /** Sigs whose detached host fill CONCLUDED without bytes (miss — the
+   *  Store negative-caches it). A sig in here renders bright label-only
+   *  (the terminal state) instead of readiness-shaded, so an image that
+   *  may never arrive can't leave its tile dimmed and inert forever.
+   *  Cleared when a later fill succeeds. */
+  readonly #fillMissedSigs = new Set<string>()
+
+  /** Labels rendered SHADED on the last geometry bake — content still
+   *  arriving (image or props fetch in flight). Mirrored to
+   *  TileOverlayDrone via render:cell-count.shadedLabels so shaded tiles
+   *  are inert to clicks; read locally to suppress the hover ring.
+   *  Bright means "preloaded — a click lands instantly". */
+  readonly #shadedLabels = new Set<string>()
+
   /** Last resolved TileSourceRegistry entries per location key — the
    *  fallback a render pass uses when source resolution exceeds its
    *  budget (see the bounded resolve in the render path). */
@@ -858,6 +872,7 @@ export class ShowCellDrone extends Drone {
     branch?: Float32Array
     borderColor?: Float32Array
     divergence?: Float32Array
+    shaded?: Float32Array
   } = {}
   #labelToIndex = new Map<string, number>()
 
@@ -4876,14 +4891,19 @@ export class ShowCellDrone extends Drone {
     this.onEffect<{ q: number; r: number }>('tile:hover', (payload) => {
       if (!this.shader) return
       const idx = this.#axialToIndex.get(`${payload.q},${payload.r}`)
-      this.shader.setHoveredIndex(idx ?? -1)
 
-      // Resolve the hovered label once — feeds both the tag highlight and the
-      // portal shimmer clock.
+      // Resolve the hovered label once — feeds the shade gate, the tag
+      // highlight and the portal shimmer clock.
       let hoverLabel: string | null = null
       for (const [label, cell] of this.renderedCells) {
         if (cell.q === payload.q && cell.r === payload.r) { hoverLabel = label; break }
       }
+
+      // Readiness gate: a shaded (still-warming) tile never lights the
+      // hover ring — it is inert until it brightens, and the hover accent
+      // would read as "clickable".
+      const hoverShaded = hoverLabel !== null && this.#shadedLabels.has(hoverLabel)
+      this.shader.setHoveredIndex(hoverShaded ? -1 : (idx ?? -1))
 
       // Drive the shimmer clock only while a reference/portal tile is hovered,
       // so u_time (and the magical hover animation) idles the rest of the time.
@@ -5274,6 +5294,7 @@ export class ShowCellDrone extends Drone {
     substrateLabels: string[]
     linkLabels: string[]
     hiddenLabels: string[]
+    shadedLabels: string[]
   } {
     // Empty-layer invitation watermark — DISABLED for now. It should be a
     // genuine-swarm cue, but public mode is the default in some shells, so
@@ -5315,6 +5336,10 @@ export class ShowCellDrone extends Drone {
       substrateLabels: cells.filter(c => c.hasSubstrate).map(c => c.label),
       linkLabels: cells.filter(c => c.hasLink).map(c => c.label),
       hiddenLabels: this.#showHiddenItems ? [...this.#currentHiddenSet] : [],
+      // Readiness shade: tiles whose content is still arriving render
+      // dimmed and are INERT — tile-overlay gates presses/clicks on this
+      // set so bright always means "preloaded, the click lands instantly".
+      shadedLabels: cells.filter(c => this.#cellIsShaded(c)).map(c => c.label),
     }
   }
 
@@ -5942,6 +5967,31 @@ export class ShowCellDrone extends Drone {
     }, 500 * Math.pow(3, attempt))
   }
 
+  /** Readiness shade — DIM IS THE DEFAULT, BRIGHT IS EARNED. A cell renders
+   *  bright only on positive proof of readiness: its image bytes are on
+   *  screen, or its resolution CONCLUDED (label-only by design, decode
+   *  failure, or a host fill that concluded empty — the terminal states).
+   *  Everything else — derivation in flight, bytes in flight, or a label
+   *  never resolved at all — shades, so an unknown state can never
+   *  masquerade as clickable. Shaded cells render dimmed (aShaded) and are
+   *  inert (TileOverlayDrone mirrors the set); they brighten IN PLACE when
+   *  their proof lands. The terminal releases are load-bearing: without
+   *  them, unreachable bytes would strand a tile dimmed/inert forever. */
+  #cellIsShaded(c: Cell): boolean {
+    if (!this.imageAtlas || c.plain) return false
+    if (c.pendingProps) return true                            // props/peer derivation in flight
+    if (c.imageSig) {
+      if (this.imageAtlas.hasImage(c.imageSig)) return false   // proof: bytes on screen
+      if (this.imageAtlas.hasFailed(c.imageSig)) return false  // terminal: decode failure → label-only
+      return !this.#fillMissedSigs.has(c.imageSig)             // in flight → dim; concluded miss → release
+    }
+    // No image sig: bright only when resolution CONCLUDED "no image" for
+    // this label (cache entry present — loadOne writes one on every exit).
+    // A label never resolved this session stays dim: the burden of proof
+    // is on readiness, never on proving brokenness.
+    return !this.cellImageCache.has(c.label)
+  }
+
   private buildCellsFromAxial = (axial: any, names: string[], max: number, localCellSet: Set<string>, branchSet?: Set<string>): Cell[] => {
     const out: Cell[] = []
     // during move drag, use reordered names so labels map to correct indices
@@ -6025,7 +6075,19 @@ export class ShowCellDrone extends Drone {
       void (async () => {
         try {
           const blob = await store.getResource(sig)
-          if (!blob) return // not yet delivered — egg; retried after the miss TTL
+          if (!blob) {
+            // Not yet delivered — egg; retried after the miss TTL. Record
+            // the CONCLUDED miss so the readiness shade releases: the tile
+            // reverts to bright label-only (clickable) instead of staying
+            // dimmed/inert for bytes that may never come.
+            if (!this.#fillMissedSigs.has(sig)) {
+              this.#fillMissedSigs.add(sig)
+              this.#forceNextRender = true
+              this.requestRender()
+            }
+            return
+          }
+          this.#fillMissedSigs.delete(sig)
           // Fresh bytes for this sig — un-pin any decode-failure record so
           // the atlas retries with the healed blob instead of skipping it.
           imageAtlas.clearFailure(sig)
@@ -6144,8 +6206,17 @@ export class ShowCellDrone extends Drone {
           try {
             // LOCAL only — peer bytes that haven't streamed yet must not
             // stall the pass; the detached fill re-renders on arrival.
+            // While that fill is IN FLIGHT the tile is readiness-shaded
+            // (pendingProps) — a concluded miss (#fillMissedSigs) releases
+            // it to the bright label-only preview so an offline publisher
+            // can't strand the tile dimmed/inert.
             const blob = await store.getResourceLocal(peerSig)
-            if (!blob) { fillFromHost(peerSig, cell.label); this.cellImageCache.set(cell.label, null); return }
+            if (!blob) {
+              fillFromHost(peerSig, cell.label)
+              cell.pendingProps = !this.#fillMissedSigs.has(peerSig)
+              this.cellImageCache.set(cell.label, null)
+              return
+            }
             // The wire has carried two shapes: a PROPS pointer (JSON blob
             // whose small.image holds the image sig — the old substrate-
             // cache pointer) and the DIRECT image sig (current visuals
@@ -6212,6 +6283,7 @@ export class ShowCellDrone extends Drone {
       if (!forceReload?.has(cell.label) && this.cellImageCache.has(cell.label)) {
         const cachedSig = this.cellImageCache.get(cell.label) ?? undefined
         cell.imageSig = cachedSig
+        cell.pendingProps = false
         cell.borderColor = this.cellBorderColorCache.get(cell.label)
         cell.hasLink = this.cellLinkCache.get(cell.label) ?? false
         cell.hasSubstrate = this.cellSubstrateCache.get(cell.label) ?? false
@@ -6240,12 +6312,18 @@ export class ShowCellDrone extends Drone {
       try {
         const propsSig = propsSigForLabel(cell.label)
         if (!propsSig) throw new Error('no props')
-        // LOCAL only — a props blob not yet pulled renders label-only this
-        // pass; the detached fill invalidates + re-renders when it lands.
+        // LOCAL only — a props blob not yet pulled renders readiness-SHADED
+        // this pass; the detached fill invalidates + re-renders when it
+        // lands (or releases the shade on a concluded miss).
         const blob = await store.getResourceLocal(propsSig)
-        if (!blob) { fillFromHost(propsSig, cell.label); throw new Error('no blob') }
+        if (!blob) {
+          fillFromHost(propsSig, cell.label)
+          cell.pendingProps = !this.#fillMissedSigs.has(propsSig)
+          throw new Error('no blob')
+        }
         const text = await blob.text()
         const props = JSON.parse(text)
+        cell.pendingProps = false
 
         // extract border color from properties
         const bc = props?.border?.color
@@ -6342,7 +6420,11 @@ export class ShowCellDrone extends Drone {
     for (const c of cells) {
       const ia = c.imageSig && this.imageAtlas?.hasImage(c.imageSig) ? 1 : 0
       const pf = referenceTargetForLabel(c.label) !== null ? 1 : 0
-      s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${ia}:${c.hasBranch ? 1 : 0}:${c.divergence ?? 0}:${c.hideText ? 1 : 0}:${c.unshared ? 1 : 0}:${pf}|`
+      // Readiness-shade bit: shade can flip with an UNCHANGED imageSig/ia
+      // (fill concluded empty → #fillMissedSigs, decode failure) — folding
+      // it in lets the next natural repaint rebake the released shade.
+      const sh = this.#cellIsShaded(c) ? 1 : 0
+      s += `${c.q},${c.r}:${c.label}:${c.external ? 1 : 0}:${c.imageSig ?? ''}:${ia}:${c.hasBranch ? 1 : 0}:${c.divergence ?? 0}:${c.hideText ? 1 : 0}:${c.unshared ? 1 : 0}:${pf}:${sh}|`
     }
     return s
   }
@@ -6377,6 +6459,10 @@ export class ShowCellDrone extends Drone {
     const cellIndex = new Float32Array(cells.length * 4)
     const divergence = new Float32Array(cells.length * 4)
     const unshared = new Float32Array(cells.length * 4)
+    // Readiness shade — 1 while the cell's bytes are still arriving (see
+    // #cellIsShaded). Brightening is an attribute flip on the heal repaint,
+    // never a geometry change, so nothing moves when a tile becomes ready.
+    const shaded = new Float32Array(cells.length * 4)
     // Per-tile launcher silhouette (0 hex · 1 flower-pot · 2 invader) — lets a
     // mixed launch-group page render each group's own shape without sharing.
     const shapeAttr = new Float32Array(cells.length * 4)
@@ -6387,6 +6473,8 @@ export class ShowCellDrone extends Drone {
 
     let pv = 0, uvp = 0, luvp = 0, iuvp = 0, hip = 0, hp = 0, icp = 0, bp = 0, bcp = 0, cip = 0, dp = 0, ii = 0, base = 0, sap = 0, pp = 0
     let ci = 0
+
+    this.#shadedLabels.clear()
 
     for (const c of cells) {
       const { x, y } = this.axialToPixel(c.q, c.r, spacing, this.#flat)
@@ -6476,6 +6564,9 @@ export class ShowCellDrone extends Drone {
       divergence.set([dv, dv, dv, dv], dp)
       const us = c.unshared ? 1 : 0
       unshared.set([us, us, us, us], dp)
+      const sh = this.#cellIsShaded(c) ? 1 : 0
+      shaded.set([sh, sh, sh, sh], dp)
+      if (sh) this.#shadedLabels.add(c.label)
       dp += 4
 
       // Per-tile launcher silhouette. Only launcher tiles carry a launch:target
@@ -6510,13 +6601,14 @@ export class ShowCellDrone extends Drone {
       ; (g as any).addAttribute('aCellIndex', cellIndex, 1)
       ; (g as any).addAttribute('aDivergence', divergence, 1)
       ; (g as any).addAttribute('aUnshared', unshared, 1)
+      ; (g as any).addAttribute('aShaded', shaded, 1)
       ; (g as any).addAttribute('aShapeMode', shapeAttr, 1)
       ; (g as any).addAttribute('aIsPortal', portal, 1)
       ; (g as any).addIndex(idx)
 
     // save buffer references + label→index map so tile:saved can push
     // in-place attribute updates to the GPU without rebuilding geometry
-    this.#buf = { pos, labelUV, imageUV, hasImage, heat, identityColor, branch, borderColor, divergence }
+    this.#buf = { pos, labelUV, imageUV, hasImage, heat, identityColor, branch, borderColor, divergence, shaded }
     this.#labelToIndex.clear()
     for (let i = 0; i < cells.length; i++) this.#labelToIndex.set(cells[i].label, i)
 
@@ -6614,7 +6706,15 @@ export class ShowCellDrone extends Drone {
       this.#writeCellVec4(labelUV, i, ruv.u0, ruv.v0, ruv.u1, ruv.v1)
     }
 
-    if (!this.#pushBuffer('aImageUV') || !this.#pushBuffer('aHasImage') || !this.#pushBuffer('aBorderColor') || !this.#pushBuffer('aLabelUV')) {
+    // Readiness shade follows the fresh image state — brighten (or shade)
+    // in place with the same attribute-only push, and keep the mirrored
+    // inertness set in step.
+    const shadedNow = this.#cellIsShaded({ ...probe, imageSig: sig ?? undefined })
+    this.#writeCellScalar(this.#buf.shaded, i, shadedNow ? 1 : 0)
+    if (shadedNow) this.#shadedLabels.add(label)
+    else this.#shadedLabels.delete(label)
+
+    if (!this.#pushBuffer('aImageUV') || !this.#pushBuffer('aHasImage') || !this.#pushBuffer('aBorderColor') || !this.#pushBuffer('aLabelUV') || !this.#pushBuffer('aShaded')) {
       return false
     }
 
@@ -6627,6 +6727,9 @@ export class ShowCellDrone extends Drone {
       rec.hideText = ht
       const cellsSnapshot = [...this.renderedCells.values()]
       this.renderedCellsKey = this.buildCellsKey(cellsSnapshot)
+      // Shade state may have flipped — refresh tile-overlay's mirrored
+      // sets so click inertness matches what is on screen.
+      this.emitEffect('render:cell-count', this.#buildCellCountPayload(cellsSnapshot))
     }
 
     this.#emitRenderTags([...this.renderedCells.values()])

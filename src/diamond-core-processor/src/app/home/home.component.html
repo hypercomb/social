@@ -14,7 +14,8 @@
       <div class="top-bar-right">
         <button class="kind-toggle"
           [class.active]="layersCollapsed()"
-          (click)="toggleCollapseAllLayers()">
+          (click)="toggleCollapseAllLayers()"
+          [title]="(layersCollapsed() ? 'dcp.expand-layers' : 'dcp.collapse-layers') | t">
           <dcp-diamond [kind]="'layer'" />
         </button>
 
@@ -24,7 +25,8 @@
           <button class="kind-toggle"
             [class.active]="isKindActive(fk.key)"
             [class.inactive]="isFiltering() && !isKindActive(fk.key)"
-            (click)="toggleKindFilter(fk.key)">
+            (click)="toggleKindFilter(fk.key)"
+            [title]="fk.titleKey | t">
             <dcp-diamond [kind]="fk.diamond" />
           </button>
         }
@@ -33,6 +35,26 @@
         <dcp-auditor-settings />
       </div>
     </header>
+
+    <!-- First-run orientation — the visible tier of the explanation that
+         otherwise lives only in hover hints. Dismiss persists locally
+         (participant decoration, never in any lineage). -->
+    @if (!orientationDismissed()) {
+      <aside class="orientation">
+        <p class="orientation-line orientation-lead">{{ 'dcp.orientation-what' | t }}</p>
+        <p class="orientation-line">{{ 'dcp.orientation-install' | t }}</p>
+        <p class="orientation-line">{{ 'dcp.orientation-verbs' | t }}</p>
+        <div class="orientation-footer">
+          <ul class="orientation-legend">
+            <li><i class="legend-swatch layer" aria-hidden="true"></i>{{ 'dcp.legend-layer' | t }}</li>
+            <li><i class="legend-swatch bee" aria-hidden="true"></i>{{ 'dcp.legend-bee' | t }}</li>
+            <li><i class="legend-swatch worker" aria-hidden="true"></i>{{ 'dcp.legend-worker' | t }}</li>
+            <li><i class="legend-swatch dependency" aria-hidden="true"></i>{{ 'dcp.legend-dependency' | t }}</li>
+          </ul>
+          <button class="orientation-dismiss" type="button" (click)="dismissOrientation()">{{ 'dcp.orientation-dismiss' | t }}</button>
+        </div>
+      </aside>
+    }
 
     <!-- command line -->
     @if (sections().length) {
@@ -67,21 +89,21 @@
           <button class="domain-action visibility-toggle"
             (click)="toggleDomainVisibility(group.domain)"
             [class.hidden-state]="!isDomainVisible(group.domain)"
-            [title]="isDomainVisible(group.domain) ? 'Hide this domain from the rendered union view' : 'Show this domain in the rendered union view'"
+            [title]="(isDomainVisible(group.domain) ? 'dcp.domain-hide' : 'dcp.domain-show') | t"
             attr.aria-pressed="{{ !isDomainVisible(group.domain) }}">
             @if (isDomainVisible(group.domain)) {
               <!-- eye-open: domain visible (default) -->
-              &#x1F441;
+              <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             } @else {
               <!-- eye-slash: domain hidden -->
-              &#x1F576;
+              <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
             }
           </button>
           @if (group.domain !== '@logical') {
             <button class="domain-action view-logical-toggle"
               (click)="toggleViewLogical(group.domainName)"
               [class.active]="isViewLogical(group.domainName)"
-              [title]="isViewLogical(group.domainName) ? 'Hide the current logical behaviors from this folder' : 'Show the current logical behaviors alongside this folder (imagine the combined set)'">
+              [title]="(isViewLogical(group.domainName) ? 'dcp.logical-hide' : 'dcp.logical-show') | t">
               &#8801;
             </button>
           }
@@ -130,7 +152,9 @@
 
                 <!-- Adopt / Save / Discard — the package's activation choice.
                      Adopt = enabled (live), Save = installed but off, Discard
-                     = uninstall. The current state is the highlighted segment. -->
+                     = uninstall. The current state is the highlighted segment,
+                     spelled out by the visible note beside it. -->
+                <span class="adopt-state-note">{{ (packageState(section) === 'adopted' ? 'dcp.state-adopted' : 'dcp.state-saved') | t }}</span>
                 <div class="adopt-control" role="group" [attr.aria-label]="'dcp.adopt-state' | t">
                   <button type="button" class="adopt-seg adopt"
                     [class.on]="packageState(section) === 'adopted'"

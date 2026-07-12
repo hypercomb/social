@@ -11,7 +11,7 @@ import { hasDecorationKind, referenceTargetForLabel } from '../../commands/decor
 import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone.js'
 
-type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; noImageLabels?: string[]; substrateLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[] }
+type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; noImageLabels?: string[]; substrateLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[]; shadedLabels?: string[] }
 
 // Backstop timeout (ms) for the navigation-transition guard. This is NOT the
 // normal release — the guard lifts on render:cell-count (the renderer has
@@ -197,6 +197,11 @@ export class TileOverlayDrone extends Drone {
   #substrateLabels = new Set<string>()
   #linkLabels = new Set<string>()
   #hiddenLabels = new Set<string>()
+  /** Readiness shade mirror (render:cell-count.shadedLabels): tiles whose
+   *  content is still arriving render dimmed and are INERT here — no press,
+   *  no click, no action overlay — so a bright tile always means
+   *  "preloaded, the click lands instantly". */
+  #shadedLabels = new Set<string>()
 
   // break-apart effect state
   #shatterContainer: Container | null = null
@@ -521,6 +526,7 @@ export class TileOverlayDrone extends Drone {
         this.#substrateLabels = new Set(payload.substrateLabels ?? [])
         this.#linkLabels = new Set(payload.linkLabels ?? [])
         this.#hiddenLabels = new Set(payload.hiddenLabels ?? [])
+        this.#shadedLabels = new Set(payload.shadedLabels ?? [])
         this.#rebuildOccupiedMap()
         // The maps above now describe the level on screen — release the
         // backstop's tile-enter latch. cell-count only fires at render
@@ -1620,6 +1626,16 @@ export class TileOverlayDrone extends Drone {
       const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
       this.#currentTileExternal = !!(entry?.label && this.#externalLabels.has(entry.label))
 
+      // Readiness gate: no action overlay over a shaded (still-warming)
+      // tile — it is inert until it brightens. The hover ring is
+      // suppressed renderer-side (show-cell checks the same set on
+      // tile:hover), so hovering reads as empty space.
+      if (entry?.label && this.#shadedLabels.has(entry.label)) {
+        this.#overlay.visible = false
+        this.emitEffect('tile:hover', { q: axial.q, r: axial.r, label: entry.label })
+        return
+      }
+
       if (this.#meshPublic) {
         const newKey = this.#resolveProfileKey()
         if (newKey !== this.#activeProfileKey) this.#rebuildActiveProfile()
@@ -1853,6 +1869,11 @@ export class TileOverlayDrone extends Drone {
     const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
     if (!entry?.label) return
 
+    // Readiness gate: a SHADED tile (content still arriving — dimmed by the
+    // renderer) is inert. The press falls through as if the hex were empty;
+    // the tile brightens in place when its bytes land and only then acts.
+    if (this.#shadedLabels.has(entry.label)) return
+
     // Bind this press to the TILE the user saw, not the position: capture the
     // map generation + resolved label. If the axial map is rebuilt between
     // now and the trailing click (render:cell-count for a new layer), #onClick
@@ -1933,6 +1954,8 @@ export class TileOverlayDrone extends Drone {
 
       const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
       if (!entry?.label) return
+      // Readiness gate — shaded tiles are inert to selection clicks too.
+      if (this.#shadedLabels.has(entry.label)) return
 
       this.emitEffect('tile:click', {
         q: axial.q,
@@ -1994,6 +2017,10 @@ export class TileOverlayDrone extends Drone {
       TileOverlayDrone.axialKey(this.#currentAxial!.q, this.#currentAxial!.r),
     )
     if (!entry?.label) return
+
+    // Readiness gate: a SHADED tile is inert — no action buttons, no
+    // selection, no navigation, no open — until it brightens.
+    if (this.#shadedLabels.has(entry.label)) return
 
     const pixiGlobal = this.#clientToPixiGlobal(e.clientX, e.clientY)
     const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))

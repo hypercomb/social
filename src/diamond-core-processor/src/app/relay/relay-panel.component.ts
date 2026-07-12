@@ -25,7 +25,9 @@ interface RelayInfo {
   template: `
     <div class="relay-panel" [class.open]="open()">
       <button class="toggle" [class.connected]="status() === 'connected'" (click)="open.set(!open())" title="Nostr Relay">
-        @if (open()) { &times; } @else { &#9889; }
+        @if (open()) { &times; } @else {
+          <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        }
       </button>
 
       @if (open()) {
@@ -104,13 +106,13 @@ interface RelayInfo {
 
     .toggle {
       background: none;
-      border: 1px solid rgba(0, 0, 0, 0.08);
-      border-radius: 2px;
+      border: 1px solid var(--dcp-line);
+      border-radius: var(--dcp-radius-sm);
       width: 30px;
       height: 30px;
       cursor: pointer;
       font-size: 15px;
-      color: #777;
+      color: var(--dcp-ink-3);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -118,14 +120,20 @@ interface RelayInfo {
     }
 
     .toggle:hover {
-      background: rgba(0, 0, 0, 0.04);
-      border-color: rgba(0, 0, 0, 0.14);
-      color: #333;
+      background: var(--dcp-hover);
+      border-color: var(--dcp-line-2);
+      color: var(--dcp-ink);
     }
 
     .toggle.connected {
-      color: #2a7d3f;
-      border-color: rgba(42, 125, 63, 0.25);
+      color: var(--dcp-z-logical-rail);
+      border-color: var(--dcp-z-logical-rail);
+    }
+
+    .toggle-icon {
+      width: 15px;
+      height: 15px;
+      display: block;
     }
 
     .panel {
@@ -133,10 +141,10 @@ interface RelayInfo {
       top: 38px;
       right: 0;
       width: 380px;
-      background: #fff;
-      border: 1px solid rgba(0, 0, 0, 0.1);
-      border-radius: 2px;
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04);
+      background: var(--dcp-surface);
+      border: 1px solid var(--dcp-line-2);
+      border-radius: var(--dcp-radius-md);
+      box-shadow: var(--dcp-shadow-2);
       z-index: 100;
       overflow: hidden;
       animation: panelIn 0.15s ease;
@@ -158,7 +166,7 @@ interface RelayInfo {
       margin: 0;
       font-size: 13px;
       font-weight: 700;
-      color: #1a1a1a;
+      color: var(--dcp-ink);
       letter-spacing: 0.01em;
     }
 
@@ -166,24 +174,24 @@ interface RelayInfo {
       font-size: 10px;
       font-weight: 600;
       padding: 2px 8px;
-      border-radius: 2px;
+      border-radius: var(--dcp-radius-sm);
     }
 
     .badge-ok {
-      color: #2a7d3f;
-      background: rgba(42, 125, 63, 0.08);
+      color: var(--dcp-z-logical-ink);
+      background: var(--dcp-z-logical-tint);
     }
 
     .badge-off {
-      color: #888;
-      background: rgba(0, 0, 0, 0.05);
+      color: var(--dcp-ink-3);
+      background: var(--dcp-surface-2);
     }
 
     .description {
       margin: 8px 16px 14px;
       font-size: 11px;
       line-height: 1.5;
-      color: #888;
+      color: var(--dcp-ink-2);
     }
 
     .url-row {
@@ -196,18 +204,20 @@ interface RelayInfo {
       flex: 1;
       padding: 7px 10px;
       font-size: 12px;
-      border: 1px solid rgba(0, 0, 0, 0.1);
-      border-radius: 2px;
+      color: var(--dcp-ink);
+      border: 1px solid var(--dcp-line-2);
+      border-radius: var(--dcp-radius-sm);
       outline: none;
-      transition: border-color 0.15s;
-      background: #fafafa;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      background: var(--dcp-surface-2);
       font-family: var(--hc-mono);
       cursor: text;
     }
 
     .field:focus {
-      border-color: rgba(74, 111, 165, 0.5);
-      background: #fff;
+      border-color: var(--dcp-accent);
+      background: var(--dcp-surface);
+      box-shadow: 0 0 0 3px var(--dcp-accent-tint);
     }
 
     .btn-probe {
@@ -215,19 +225,19 @@ interface RelayInfo {
       font-size: 11px;
       font-weight: 600;
       cursor: pointer;
-      border: 1px solid rgba(0, 0, 0, 0.1);
-      border-radius: 2px;
-      background: #1a1a1a;
-      color: #fff;
+      border: 1px solid var(--dcp-accent-strong);
+      border-radius: var(--dcp-radius-sm);
+      background: var(--dcp-accent);
+      color: var(--dcp-on-accent);
       white-space: nowrap;
-      transition: all 0.15s;
+      transition: filter 0.12s ease;
     }
 
-    .btn-probe:hover { background: #333; }
+    .btn-probe:hover { filter: brightness(1.06); }
 
     /* relay info */
     .info-block {
-      border-top: 1px solid rgba(0, 0, 0, 0.06);
+      border-top: 1px solid var(--dcp-line);
       padding: 10px 16px;
     }
 
@@ -240,31 +250,31 @@ interface RelayInfo {
     .info-label {
       font-size: 11px;
       font-weight: 600;
-      color: #555;
+      color: var(--dcp-ink-2);
     }
 
     .info-value {
       font-size: 11px;
-      color: #888;
+      color: var(--dcp-ink-3);
       font-family: var(--hc-mono);
     }
 
     /* install section */
     .install-block {
-      border-top: 1px solid rgba(0, 0, 0, 0.06);
+      border-top: 1px solid var(--dcp-line);
       padding: 14px 16px;
     }
 
     .install-header {
       font-size: 12px;
       font-weight: 700;
-      color: #1a1a1a;
+      color: var(--dcp-ink);
       margin-bottom: 6px;
     }
 
     .install-desc {
       font-size: 11px;
-      color: #888;
+      color: var(--dcp-ink-2);
       line-height: 1.5;
       margin: 0 0 12px;
     }
@@ -280,39 +290,39 @@ interface RelayInfo {
       font-size: 11px;
       font-weight: 600;
       cursor: pointer;
-      border: 1px solid rgba(0, 0, 0, 0.1);
-      border-radius: 2px;
-      background: #1a1a1a;
-      color: #fff;
-      transition: all 0.15s;
+      border: 1px solid var(--dcp-accent-strong);
+      border-radius: var(--dcp-radius-sm);
+      background: var(--dcp-accent);
+      color: var(--dcp-on-accent);
+      transition: filter 0.12s ease;
     }
 
-    .btn-install:hover { background: #333; }
+    .btn-install:hover { filter: brightness(1.06); }
 
     .btn-copy {
       padding: 8px 14px;
       font-size: 11px;
       font-weight: 600;
       cursor: pointer;
-      border: 1px solid rgba(0, 0, 0, 0.1);
-      border-radius: 2px;
-      background: #f8f8f8;
-      color: #555;
+      border: 1px solid var(--dcp-line-2);
+      border-radius: var(--dcp-radius-sm);
+      background: var(--dcp-surface-2);
+      color: var(--dcp-ink-2);
       white-space: nowrap;
-      transition: all 0.15s;
+      transition: color 0.12s ease, border-color 0.12s ease;
     }
 
-    .btn-copy:hover { background: #eee; }
+    .btn-copy:hover { color: var(--dcp-ink); border-color: var(--dcp-ink-3); }
 
     .panel-footer {
       padding: 10px 16px;
-      border-top: 1px solid rgba(0, 0, 0, 0.06);
-      background: #fafafa;
+      border-top: 1px solid var(--dcp-line);
+      background: var(--dcp-surface-2);
     }
 
     .footer-hint {
       font-size: 10px;
-      color: #aaa;
+      color: var(--dcp-ink-3);
     }
 
     @media (max-width: 600px) {

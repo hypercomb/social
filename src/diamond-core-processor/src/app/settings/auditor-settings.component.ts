@@ -11,7 +11,9 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
   template: `
     <div class="trust-panel" [class.open]="open()">
       <button class="toggle" (click)="open.set(!open())" title="Community Trust">
-        @if (open()) { &times; } @else { &#9881; }
+        @if (open()) { &times; } @else {
+          <svg class="toggle-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>
+        }
       </button>
 
       @if (open()) {
@@ -90,13 +92,13 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
 
     .toggle {
       background: none;
-      border: 1px solid rgba(0, 0, 0, 0.08);
-      border-radius: 2px;
+      border: 1px solid var(--dcp-line);
+      border-radius: var(--dcp-radius-sm);
       width: 30px;
       height: 30px;
       cursor: pointer;
       font-size: 15px;
-      color: #777;
+      color: var(--dcp-ink-3);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -104,9 +106,15 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
     }
 
     .toggle:hover {
-      background: rgba(0, 0, 0, 0.04);
-      border-color: rgba(0, 0, 0, 0.14);
-      color: #333;
+      background: var(--dcp-hover);
+      border-color: var(--dcp-line-2);
+      color: var(--dcp-ink);
+    }
+
+    .toggle-icon {
+      width: 15px;
+      height: 15px;
+      display: block;
     }
 
     .panel {
@@ -114,10 +122,10 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
       top: 38px;
       right: 0;
       width: 420px;
-      background: #fff;
-      border: 1px solid rgba(0, 0, 0, 0.1);
-      border-radius: 2px;
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.04);
+      background: var(--dcp-surface);
+      border: 1px solid var(--dcp-line-2);
+      border-radius: var(--dcp-radius-md);
+      box-shadow: var(--dcp-shadow-2);
       z-index: 100;
       overflow: hidden;
       animation: panelIn 0.15s ease;
@@ -139,24 +147,24 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
       margin: 0;
       font-size: 13px;
       font-weight: 700;
-      color: #1a1a1a;
+      color: var(--dcp-ink);
       letter-spacing: 0.01em;
     }
 
     .badge {
       font-size: 10px;
       font-weight: 600;
-      color: #666;
-      background: rgba(0, 0, 0, 0.05);
+      color: var(--dcp-ink-3);
+      background: var(--dcp-surface-2);
       padding: 2px 8px;
-      border-radius: 2px;
+      border-radius: var(--dcp-radius-sm);
     }
 
     .description {
       margin: 8px 16px 14px;
       font-size: 11px;
       line-height: 1.5;
-      color: #888;
+      color: var(--dcp-ink-2);
     }
 
     .add-row {
@@ -176,17 +184,19 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
     .field {
       padding: 7px 10px;
       font-size: 12px;
-      border: 1px solid rgba(0, 0, 0, 0.1);
-      border-radius: 2px;
+      color: var(--dcp-ink);
+      border: 1px solid var(--dcp-line-2);
+      border-radius: var(--dcp-radius-sm);
       outline: none;
-      transition: border-color 0.15s;
-      background: #fafafa;
+      transition: border-color 0.15s, box-shadow 0.15s;
+      background: var(--dcp-surface-2);
       cursor: text;
     }
 
     .field:focus {
-      border-color: rgba(74, 111, 165, 0.5);
-      background: #fff;
+      border-color: var(--dcp-accent);
+      background: var(--dcp-surface);
+      box-shadow: 0 0 0 3px var(--dcp-accent-tint);
     }
 
 
@@ -195,16 +205,16 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
       font-size: 11px;
       font-weight: 600;
       cursor: pointer;
-      border: 1px solid rgba(0, 0, 0, 0.1);
-      border-radius: 2px;
-      background: #1a1a1a;
-      color: #fff;
+      border: 1px solid var(--dcp-accent-strong);
+      border-radius: var(--dcp-radius-sm);
+      background: var(--dcp-accent);
+      color: var(--dcp-on-accent);
       white-space: nowrap;
-      transition: all 0.15s;
+      transition: filter 0.12s ease;
     }
 
     .btn-add:hover:not(:disabled) {
-      background: #333;
+      filter: brightness(1.06);
     }
 
     .btn-add:disabled {
@@ -216,7 +226,7 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
       list-style: none;
       padding: 0;
       margin: 0;
-      border-top: 1px solid rgba(0, 0, 0, 0.06);
+      border-top: 1px solid var(--dcp-line);
     }
 
     .source-item {
@@ -224,12 +234,12 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
       align-items: center;
       gap: 8px;
       padding: 10px 16px;
-      border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+      border-bottom: 1px solid var(--dcp-line);
       transition: background 0.1s;
     }
 
     .source-item:hover {
-      background: rgba(0, 0, 0, 0.015);
+      background: var(--dcp-hover);
     }
 
     .source-info {
@@ -243,12 +253,12 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
     .source-name {
       font-size: 12px;
       font-weight: 600;
-      color: #1a1a1a;
+      color: var(--dcp-ink);
     }
 
     .source-url {
       font-size: 10px;
-      color: #999;
+      color: var(--dcp-ink-3);
       font-family: var(--hc-mono);
       overflow: hidden;
       text-overflow: ellipsis;
@@ -259,7 +269,7 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
       background: none;
       border: none;
       cursor: pointer;
-      color: #ccc;
+      color: var(--dcp-ink-3);
       font-size: 16px;
       padding: 0 4px;
       line-height: 1;
@@ -268,7 +278,7 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
     }
 
     .btn-remove:hover {
-      color: #c00;
+      color: var(--dcp-danger);
     }
 
     .empty-state {
@@ -277,23 +287,23 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
       justify-content: center;
       gap: 8px;
       padding: 20px 16px;
-      border-top: 1px solid rgba(0, 0, 0, 0.06);
+      border-top: 1px solid var(--dcp-line);
     }
 
     .empty-icon {
       font-size: 14px;
-      color: #ccc;
+      color: var(--dcp-ink-3);
     }
 
     .empty-text {
       font-size: 11px;
-      color: #aaa;
+      color: var(--dcp-ink-3);
     }
 
     .panel-footer {
       padding: 12px 16px;
-      border-top: 1px solid rgba(0, 0, 0, 0.06);
-      background: #fafafa;
+      border-top: 1px solid var(--dcp-line);
+      background: var(--dcp-surface-2);
     }
 
     .threshold {
@@ -305,7 +315,7 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
     .threshold label {
       font-size: 11px;
       font-weight: 600;
-      color: #555;
+      color: var(--dcp-ink-2);
     }
 
     .threshold-control {
@@ -318,21 +328,23 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
       width: 40px;
       padding: 4px 6px;
       font-size: 12px;
-      border: 1px solid rgba(0, 0, 0, 0.1);
-      border-radius: 2px;
+      color: var(--dcp-ink);
+      border: 1px solid var(--dcp-line-2);
+      border-radius: var(--dcp-radius-sm);
       text-align: center;
-      background: #fff;
+      background: var(--dcp-surface);
       outline: none;
       cursor: text;
     }
 
     .threshold-input:focus {
-      border-color: rgba(74, 111, 165, 0.5);
+      border-color: var(--dcp-accent);
+      box-shadow: 0 0 0 3px var(--dcp-accent-tint);
     }
 
     .threshold-label {
       font-size: 11px;
-      color: #888;
+      color: var(--dcp-ink-2);
     }
 
     @media (max-width: 600px) {

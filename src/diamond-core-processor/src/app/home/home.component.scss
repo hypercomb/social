@@ -91,6 +91,85 @@
   margin: 0;
 }
 
+/* First-run orientation — the visible tier of the explanation. A quiet
+   bordered panel, no motion; dismiss collapses it for good. */
+.orientation {
+  border: 1px solid var(--dcp-line-2);
+  border-radius: var(--dcp-radius-md);
+  background: var(--dcp-surface);
+  padding: 13px 15px 11px;
+  margin-bottom: 16px;
+}
+
+.orientation-line {
+  margin: 0 0 5px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--dcp-ink-2);
+}
+
+.orientation-lead {
+  color: var(--dcp-ink);
+}
+
+.orientation-footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 9px;
+}
+
+.orientation-legend {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 16px;
+  margin: 0;
+  padding: 0;
+
+  li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--dcp-ink-3);
+    white-space: nowrap;
+  }
+}
+
+/* Static legend swatches — same shape/gradients as dcp-diamond
+   (diamond-icon.component.ts), minus the button and hover motion. */
+.legend-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  transform: rotate(45deg);
+  flex-shrink: 0;
+
+  &.layer      { background: linear-gradient(135deg, #d4b8e8, #7b4fa5); }
+  &.bee        { background: linear-gradient(135deg, #e8d4b8, #a58b4f); }
+  &.worker     { background: linear-gradient(135deg, #e8b8b8, #a54f4f); }
+  &.dependency { background: linear-gradient(135deg, #b8e8d4, #4fa58b); }
+}
+
+.orientation-dismiss {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  color: var(--dcp-ink-3);
+  background: none;
+  border: 1px solid var(--dcp-line);
+  border-radius: var(--dcp-radius-sm);
+  padding: 2px 8px;
+  flex-shrink: 0;
+  transition: color 0.12s ease, border-color 0.12s ease;
+
+  &:hover { color: var(--dcp-ink-2); border-color: var(--dcp-ink-3); }
+}
+
 /* domain input */
 .domain-input {
   display: flex;
@@ -394,9 +473,19 @@ dcp-command-line {
   white-space: nowrap;
 }
 
+/* Visible state note — spells out what the highlighted segment means
+   ("on — live in your view" / "installed, off") without hovering. Carries
+   the auto margin so note + control sit together at the right edge. */
+.adopt-state-note {
+  margin-left: auto;          // right-align note + control within the version-bar
+  align-self: center;
+  font-size: 10px;
+  color: var(--dcp-ink-3);
+  white-space: nowrap;
+}
+
 .adopt-control {
   display: inline-flex;
-  margin-left: auto;          // right-align within the version-bar
   align-self: center;
   border: 1px solid var(--dcp-line);
   border-radius: var(--dcp-radius-sm);
@@ -438,6 +527,14 @@ dcp-command-line {
   padding: 2px 4px;
   border-radius: var(--dcp-radius-sm);
   transition: color 0.12s ease, background 0.12s ease;
+}
+
+/* Monochrome line icons inside action buttons — inherit the button's ink
+   (replaces OS color emoji, which clashed with the cold chrome). */
+.action-icon {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 .domain-action:hover {

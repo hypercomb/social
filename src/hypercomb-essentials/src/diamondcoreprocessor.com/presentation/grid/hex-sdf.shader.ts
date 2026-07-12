@@ -136,6 +136,7 @@ export class HexSdfTextureShader {
     in float aCellIndex;
     in float aDivergence;
     in float aUnshared;
+    in float aShaded;
     in float aShapeMode;
     in float aIsPortal;
 
@@ -150,6 +151,7 @@ export class HexSdfTextureShader {
     out float vCellIndex;
     out float vDivergence;
     out float vUnshared;
+    out float vShaded;
     out float vShapeMode;
     out float vIsPortal;
 
@@ -192,6 +194,7 @@ export class HexSdfTextureShader {
       vCellIndex = aCellIndex;
       vDivergence = aDivergence;
       vUnshared = aUnshared;
+      vShaded = aShaded;
       vShapeMode = aShapeMode;
       vIsPortal = aIsPortal;
     }
@@ -211,6 +214,7 @@ export class HexSdfTextureShader {
     in float vCellIndex;
     in float vDivergence;
     in float vUnshared;
+    in float vShaded;
     in float vShapeMode;
     in float vIsPortal;
 
@@ -616,6 +620,19 @@ export class HexSdfTextureShader {
         color.rgb = mix(color.rgb, vec3(gray), 0.55);
         color.rgb *= 0.5;
         color.a *= 0.7;
+      }
+
+      // readiness shade: this tile's content is still arriving (image/props
+      // fetch in flight) — heavier desaturate + darken than the world-mode
+      // dim so a warming tile reads unmistakably as "not ready yet". Static
+      // by design (no pulse). The tile is inert to clicks while shaded and
+      // brightens IN PLACE when its bytes land — an attribute flip, never a
+      // geometry change.
+      if (vShaded > 0.5) {
+        float sgray = dot(color.rgb, vec3(0.299, 0.587, 0.114));
+        color.rgb = mix(color.rgb, vec3(sgray), 0.8);
+        color.rgb *= 0.38;
+        color.a *= 0.85;
       }
 
       // neon mode (control-bar toggle): every tile's border lights up with an

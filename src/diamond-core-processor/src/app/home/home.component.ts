@@ -24,6 +24,10 @@ import type { BeeDocEntry, TreeNode, TreeNodeKind } from '../core/tree-node'
 
 const DOMAINS_KEY = 'dcp.domains'
 
+// First-run orientation dismissal — participant-local decoration
+// (localStorage), same principle as domain visibility and label overrides.
+const ORIENTATION_DISMISSED_KEY = 'dcp.orientation-dismissed'
+
 // Per-package branch-name OVERRIDE — participant-local decoration
 // (localStorage), keyed by root sig. The deploy-time `label` is the
 // placeholder; a typed name overrides it. Same principle as domain
@@ -174,11 +178,14 @@ export class HomeComponent implements OnDestroy {
   // auto-increments a colliding name with a numeric suffix. Reset per edit.
   readonly overwriteLabel = signal(false)
   readonly #savedExpandStates = new Map<string, boolean>()
-  readonly filterKinds: { key: string, diamond: TreeNodeKind }[] = [
-    { key: 'bee', diamond: 'bee' },
-    { key: 'worker', diamond: 'worker' },
-    { key: 'dependency', diamond: 'dependency' }
+  readonly filterKinds: { key: string, diamond: TreeNodeKind, titleKey: string }[] = [
+    { key: 'bee', diamond: 'bee', titleKey: 'dcp.filter-bee' },
+    { key: 'worker', diamond: 'worker', titleKey: 'dcp.filter-worker' },
+    { key: 'dependency', diamond: 'dependency', titleKey: 'dcp.filter-dependency' }
   ]
+
+  // First-run orientation strip — visible until acknowledged once.
+  readonly orientationDismissed = signal(this.#loadOrientationDismissed())
   readonly inspectSection = signal<DomainSection | null>(null)
   readonly inspectDoc = signal<BeeDocEntry | undefined>(undefined)
   readonly inspectLineage = signal('')
@@ -2785,5 +2792,14 @@ export class HomeComponent implements OnDestroy {
     } catch {
       return []
     }
+  }
+
+  #loadOrientationDismissed(): boolean {
+    try { return localStorage.getItem(ORIENTATION_DISMISSED_KEY) === '1' } catch { return false }
+  }
+
+  dismissOrientation() {
+    this.orientationDismissed.set(true)
+    try { localStorage.setItem(ORIENTATION_DISMISSED_KEY, '1') } catch { /* decoration only */ }
   }
 }

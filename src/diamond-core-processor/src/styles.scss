@@ -1,5 +1,9 @@
 // Include theming for Angular Material with `mat.theme()`.
 @use '@angular/material' as mat;
+// Brand typography — defines --hc-font / --hc-mono (+ Source Sans Pro Light
+// @font-face), same single source of truth the web/dev shells use. Without
+// this every var(--hc-font) below resolved to nothing (serif fallback).
+@use '../../hypercomb-shared/fonts/fonts';
 
 html {
   height: 100%;
