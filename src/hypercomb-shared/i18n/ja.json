@@ -1031,5 +1031,8 @@
   "health.waiting": "スワームから {n} 個のファイルを待っています",
   "health.missing": "この内容を持っている相手はまだ見つかりません",
   "health.tampered": "{host} からのファイルが署名と一致しなかったため無視されました",
-  "health.recovered": "{host} が再び応答しています"
+  "health.recovered": "{host} が再び応答しています",
+  "sync.pending": "{n} 件の変更が {host} へのバックアップを待っています",
+  "sync.unauthorized": "{host} がこの端末を拒否しました — 変更はまだバックアップされていません",
+  "sync.backed-up": "{host} にバックアップしました"
 }

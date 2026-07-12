@@ -52,8 +52,9 @@ const boot = async (): Promise<void> => {
   EffectBus.on<{ message: string }>('activity:log', p => activity.push(p.message))
 }
 
-const setOnLine = (value: boolean): void =>
+const setOnLine = (value: boolean): void => {
   Object.defineProperty(window.navigator, 'onLine', { value, configurable: true })
+}
 
 beforeEach(async () => {
   EffectBus.clear()

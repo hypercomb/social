@@ -1031,5 +1031,8 @@
   "health.waiting": "waiting for {n} files from the swarm",
   "health.missing": "nobody we know has this content yet",
   "health.tampered": "a file from {host} didn't match its signature and was ignored",
-  "health.recovered": "{host} is answering again"
+  "health.recovered": "{host} is answering again",
+  "sync.pending": "{n} changes waiting to back up to {host}",
+  "sync.unauthorized": "{host} rejected this device — your changes aren't backing up yet",
+  "sync.backed-up": "backed up to {host}"
 }
