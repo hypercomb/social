@@ -60,9 +60,10 @@ type LayerContent = { name?: string; children?: string[]; [slot: string]: unknow
 type HistoryServiceLike = {
   sign(l: LineageLike): Promise<string>
   currentLayerAt(locationSig: string): Promise<LayerContent | null>
-  commitLayer(locationSig: string, layer: LayerContent): Promise<string>
   getLayerBySig(sig: string): Promise<LayerContent | null>
 }
+
+type CommitterLike = { bootstrapIfEmpty(segments?: string[] | null): Promise<void> }
 
 type NavigationLike = {
   goRaw: (segments: readonly string[]) => void
@@ -162,13 +163,14 @@ export class DashboardBee extends Worker {
       explorerSegments: () => bagSegments,
     })
 
-    // Mint the empty dashboard layer at the bag's locSig. commitLayer
-    // is leaf-only — no cascade, no parent layer updated, no pollution.
-    // The layer's bytes carry ONLY shareable canonical state.
-    await history.commitLayer(bagLocSig, {
-      name: bagSegments[0],
-      children: [],
-    })
+    // Materialize the empty dashboard layer at the bag's locSig via
+    // LayerCommitter.bootstrapIfEmpty — latestMarkerSigFor auto-mints the
+    // 00000000 `{name}` marker, byte-identical to the old direct
+    // commitLayer of `{name, children: []}` (canonicalizeLayer strips
+    // empty slots). Leaf-only — no cascade, no parent layer updated, no
+    // pollution. The layer's bytes carry ONLY shareable canonical state.
+    const committer = get<CommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
+    await committer?.bootstrapIfEmpty?.([...bagSegments])
 
     const entry: PinnedBag = { locationSig: currentLocSig, bagLocSig, bagSegments }
     this.#bags.set(currentLocSig, entry)

@@ -376,6 +376,7 @@
   "slash.dropbox": "Make this location a typed file dropbox (cascades to its subtree)",
   "slash.files": "Browse files attached to the selected tiles, or every tile in view",
   "slash.observe": "Observe the swarm — who is here and what they share",
+  "slash.repush": "Re-push shared content to your host and report holes",
   "features.viewer.title": "Beehaviors",
   "features.close": "close",
   "observe.title": "Observe",

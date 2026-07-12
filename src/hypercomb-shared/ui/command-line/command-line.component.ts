@@ -97,9 +97,16 @@ function isSelectExecution(v: string): boolean {
   if (/^\/select\[/i.test(v)) return true
   if (!v.startsWith('[')) return BRACKET_CMD_RE.test(v)
   const close = v.indexOf(']')
-  // Bare `[a,b]` (closed, no op) — BracketBehavior owns the Enter. A trailing
-  // `/op` or `:tag` makes it an executing command.
-  return close > 1 && (v[close + 1] === '/' || v[close + 1] === ':')
+  if (close <= 1) return false
+  // Bare `[a,b]` (closed, no op) — BracketBehavior owns the Enter. `:tag`
+  // executes here. A trailing `/op` executes here ONLY when op is a known
+  // select op — anything else is a cut-paste destination (`[items]/dest`,
+  // CutPasteBehavior). Consuming every `/xxx` here silently ate cut-paste:
+  // the dispatcher found no known op and collapsed to a bare select.
+  if (v[close + 1] === ':') return true
+  if (v[close + 1] !== '/') return false
+  const m = v.slice(close + 2).match(/^(\w+)/)
+  return !!m && SELECT_OPS.has(m[1].toLowerCase())
 }
 
 const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
@@ -1431,7 +1438,20 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   #voiceInterimUnsub?: () => void
   #voiceSubmitUnsub?: () => void
   #remoteSubmitUnsub?: () => void
-  readonly #onNavigate = (): void => { this.clear() }
+  // Location segments (bracket stripped) at the last navigate event.
+  #lastNavKey = ''
+  readonly #onNavigate = (): void => {
+    // Only a LOCATION change resets the bar. Selection-only URL writes
+    // (`/parent/[a,b]` — same segments, new bracket tail) also dispatch
+    // 'navigate' so SelectionService can sync from the URL; clearing on
+    // those wiped the selection the same action had just made (clear()
+    // calls selection.clear() while the bar is in select mode), which
+    // broke every keyboard cut/copy after a `[name]` select.
+    const key = this.navigation.segments().join('/')
+    if (key === this.#lastNavKey) return
+    this.#lastNavKey = key
+    this.clear()
+  }
 
   // ── voice input (push-to-hold mic button) ────────────
 
@@ -1610,6 +1630,23 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   /** Bridge: shell forwarded a keydown it didn't consume (not Escape/Up/Down/Tab/Enter). */
   public onShellKeydown = (e: KeyboardEvent): void => {
     const v = this.value()
+
+    // Shift+Enter → run the pluggable behaviors with the REAL event so the
+    // Shift-gated ones (ShiftEnterNavigateBehavior — navigate, never create)
+    // can match. The shell emits `commit` only for plain Enter, so without
+    // this Shift+Enter fell through unhandled and navigate-by-name was dead.
+    if (e.key === 'Enter' && e.shiftKey) {
+      e.preventDefault()
+      const raw = v.trim()
+      if (!raw) return
+      for (const behavior of this.#behaviors) {
+        if (behavior.match(e, raw)) {
+          void Promise.resolve(behavior.execute(raw)).then(() => this.clear())
+          return
+        }
+      }
+      return
+    }
 
     // Escape in capture mode: cancel without committing.
     if (e.key === 'Escape' && this.#captureMode()) {
@@ -1947,6 +1984,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const args = delimIdx === -1 ? '' : raw.slice(delimIdx === parenIdx ? delimIdx : delimIdx + 1).trim()
 
     const drone = get('@diamondcoreprocessor.com/SlashBehaviourDrone') as any
+
+    // Unknown command → the documented create-goto built-in (`/name`
+    // creates the cell and navigates into it). Swallowing unknown slash
+    // input silently left the user on the CURRENT layer while they
+    // believed they had navigated — every follow-up create then landed
+    // in the wrong layer.
+    if (drone?.has && !drone.has(commandName)) {
+      await this.commitCreateCellInPlace()
+      return
+    }
+
     if (drone?.execute) {
       await drone.execute(commandName, args)
     }

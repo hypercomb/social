@@ -46,11 +46,25 @@ export class ShiftEnterNavigateBehavior implements CommandLineBehavior {
 
     if (!parts.length) return
 
-    // verify the path exists — bail if it doesn't
+    // Verify the path exists — bail if it doesn't. Existence = the target
+    // location's lineage bag holds at least one marker. The old check
+    // name-walked OPFS folders (lineage.tryResolve without its `start`
+    // arg → always null; and tiles are merkle entries with sig-named
+    // bags, not name folders), so Shift+Enter silently refused EVERY
+    // navigation.
     const baseSegments = navigation.segments()
     const target = [...baseSegments, ...parts]
-    const exists = await lineage.tryResolve(target)
-    if (!exists) return
+    const history = get('@diamondcoreprocessor.com/HistoryService') as {
+      sign?: (l: unknown) => Promise<string>
+      listMarkerFilenames?: (locSig: string) => Promise<string[]>
+    } | undefined
+    if (!history?.sign || !history.listMarkerFilenames) return
+    const locSig = await history.sign({
+      domain: (lineage as { domain?: () => string }).domain,
+      explorerSegments: () => target,
+    })
+    const markers = await history.listMarkerFilenames(locSig)
+    if (!markers.length) return
 
     // navigate (no creation, no cell:added, no synchronize)
     navigation.goRaw([...navigation.segmentsRaw(), ...parts])

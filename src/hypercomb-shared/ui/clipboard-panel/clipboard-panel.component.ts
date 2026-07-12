@@ -484,7 +484,7 @@ export class ClipboardPanelComponent implements OnDestroy {
     // two same-named items from different source folders (a multi-parent
     // cut), and keying on label alone would make @for reuse one <li> for
     // both — a render glitch.
-    return item.label + ' ' + item.sourceSegments.join('/')
+    return item.label + '\u0000' + item.sourceSegments.join('/')
   }
 
   // ── thumbnails ─────────────────────────────────────────────────────

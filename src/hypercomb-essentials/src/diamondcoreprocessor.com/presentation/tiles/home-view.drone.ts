@@ -41,6 +41,12 @@ type HistoryShape = {
   commitLayer(locationSig: string, layer: Record<string, unknown>): Promise<string>
 }
 type CursorShape = { refreshForLocation?(sig: string): Promise<void>; jumpToLatest?(): void }
+type CommitterShape = {
+  commitChildrenDeltas(
+    segments: readonly string[],
+    changes: { removes?: readonly { sig?: string; label?: string }[]; appends?: readonly string[] },
+  ): Promise<void>
+}
 type StoreShape = {
   hypercombRoot?: unknown
   getResource(sig: string): Promise<Blob | null>
@@ -434,18 +440,18 @@ export class HomeViewDrone extends Drone {
 
   /** Create a child tile wearing a widget decoration — decoration baked into
    *  the same commit (the race-free create+decorate shape from
-   *  mixed-group-bag). Direct commitLayer bypasses LayerCommitter, so the
-   *  cursor is refreshed and pointed at the new head afterwards. */
+   *  mixed-group-bag). The child's own bag is fresh (no contention), so its
+   *  commit stays direct; the PARENT link rides the LayerCommitter FIFO as a
+   *  surgical children append — a direct read-modify-write commitLayer of
+   *  the parent would clobber any interleaved FIFO commit's child. */
   async #seedWidget(segments: readonly string[], name: string, type: string): Promise<void> {
     const history = this.#history()
     const store = this.resolve<StoreShape>('store')
-    if (!history || !store?.putResource) return
+    const committer = window.ioc?.get<CommitterShape>('@diamondcoreprocessor.com/LayerCommitter')
+    if (!history || !store?.putResource || !committer?.commitChildrenDeltas) return
     try {
       const parentSig = await history.sign({ explorerSegments: () => segments })
       const parentLayer = (await history.currentLayerAt(parentSig)) ?? {}
-      const existingChildren = Array.isArray(parentLayer['children'])
-        ? (parentLayer['children'] as unknown[]).map(s => String(s))
-        : []
       const existingNames = await childNamesOf(history, parentLayer as Parameters<typeof childNamesOf>[1])
       if (existingNames.includes(name)) {
         EffectBus.emit('activity:log', {
@@ -463,12 +469,7 @@ export class HomeViewDrone extends Drone {
       const childMarkerSig = await history.commitLayer(childSig, { name, decorations: [decorationSig] })
       EffectBus.emit('decorations:changed', { segments: childSegments, op: 'append', sig: decorationSig })
 
-      const parentName = typeof parentLayer['name'] === 'string'
-        ? String(parentLayer['name'])
-        : (segments.length ? segments[segments.length - 1] : '')
-      await history.commitLayer(parentSig, {
-        ...parentLayer, name: parentName, children: [...existingChildren, childMarkerSig],
-      })
+      await committer.commitChildrenDeltas(segments, { appends: [childMarkerSig] })
       EffectBus.emit('cell:added', { cell: name, segments: [...segments], viaUpdate: true })
 
       window.ioc?.get<{ invalidate?: () => void }>('@hypercomb.social/Lineage')?.invalidate?.()

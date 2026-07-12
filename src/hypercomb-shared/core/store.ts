@@ -753,13 +753,32 @@ export class Store extends EventTarget {
    * Concurrent callers coalesce on #hostFetchPending; the broker also
    * coalesces its own fetches, so a double-miss never double-fetches.
    */
+  /** Effective negative-cache expiry for a sig: the LATER of Store's own
+   *  fixed window and the broker's exponential-backoff window (missUntil).
+   *  Store's fixed HOST_MISS_TTL_MS re-dialed every 60s even after the
+   *  broker had backed a dead sig off to minutes — the two caches never
+   *  talked. Resolved via IoC, optional-chained: with no broker registered
+   *  Store's own window is the sole authority, exactly as before. */
+  #effectiveMissUntil(signature: string, own: number | undefined): number {
+    let until = own ?? 0
+    try {
+      const broker = (window.ioc?.get?.('@diamondcoreprocessor.com/ContentBrokerDrone')) as
+        | { missUntil?: (sig: string) => number }
+        | undefined
+      const brokerUntil = broker?.missUntil?.(signature) ?? 0
+      if (brokerUntil > until) until = brokerUntil
+    } catch { /* no ioc — own window only */ }
+    return until
+  }
+
   #fetchResourceFromHost = (signature: string): Promise<Blob | null> => {
     const existing = this.#hostFetchPending.get(signature)
     if (existing) return existing
     // Within a miss window → answer null instantly, no network. The egg
     // re-tries when the window lapses (or the bytes arrive locally first).
-    const missUntil = this.#hostFetchMissUntil.get(signature)
-    if (missUntil !== undefined) {
+    // The window is the LATER of Store's own and the broker's backoff.
+    const missUntil = this.#effectiveMissUntil(signature, this.#hostFetchMissUntil.get(signature))
+    if (missUntil) {
       if (Date.now() < missUntil) return Promise.resolve(null)
       this.#hostFetchMissUntil.delete(signature)
     }
@@ -812,8 +831,10 @@ export class Store extends EventTarget {
   public fetchLayerFromHost = (signature: string): Promise<Uint8Array | null> => {
     const existing = this.#layerHostFetchPending.get(signature)
     if (existing) return existing
-    const missUntil = this.#layerHostMissUntil.get(signature)
-    if (missUntil !== undefined) {
+    // LATER of Store's own window and the broker's backoff — see
+    // #effectiveMissUntil.
+    const missUntil = this.#effectiveMissUntil(signature, this.#layerHostMissUntil.get(signature))
+    if (missUntil) {
       if (Date.now() < missUntil) return Promise.resolve(null)
       this.#layerHostMissUntil.delete(signature)
     }

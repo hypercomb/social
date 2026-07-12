@@ -598,9 +598,15 @@ export class LayerCommitter {
     const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!lineage || !history) return
 
-    // Path encoding: segments joined by '' (NUL), or '' for root.
-    const encode = (segs: readonly string[]) => segs.join('')
-    const decode = (key: string) => key === '' ? [] : key.split('')
+    // Path encoding: segments joined by NUL, or '' for root. The separator
+    // MUST be the escape sequence '\u0000' — never a literal NUL byte in
+    // source. A literal byte was silently stripped by tooling once
+    // (22d905a0), turning this into per-CHARACTER splitting: every create
+    // committed its child under a bogus /z/t/i/l/e path named by the last
+    // letter, and the parent linkage dedup'd away — tiles vanished on
+    // creation.
+    const encode = (segs: readonly string[]) => segs.join('\u0000')
+    const decode = (key: string) => key === '' ? [] : key.split('\u0000')
 
     // Index updates by path.
     const updateByPath = new Map<string, { segments: string[]; layer: { name?: string } & { [slot: string]: unknown } }>()

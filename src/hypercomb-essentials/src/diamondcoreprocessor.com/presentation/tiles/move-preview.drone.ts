@@ -262,7 +262,7 @@ export class MovePreviewDrone extends Drone {
   #showHeldAt(center: { x: number; y: number } | null, dragged: string[]): void {
     if (!center || dragged.length === 0) { this.#hideHeld(); return }
 
-    const key = dragged.join('')
+    const key = dragged.join('\u0001')
     if (this.#heldKey !== key) {
       this.#destroyHeld()                 // bumps #buildToken, clears state
       this.#heldKey = key

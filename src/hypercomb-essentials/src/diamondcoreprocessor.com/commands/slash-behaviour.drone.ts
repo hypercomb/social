@@ -95,6 +95,20 @@ export class SlashBehaviourDrone extends EventTarget {
       }
     }
   }
+
+  /** True when some provider (manual or auto-wrapped queen) claims the
+   *  command name or one of its aliases. The command line uses this to
+   *  route unknown `/name` input to the create-goto built-in instead of
+   *  swallowing it. */
+  has(behaviourName: string): boolean {
+    const name = behaviourName.toLowerCase().trim()
+    for (const provider of this.#providers) {
+      for (const behaviour of provider.behaviours) {
+        if ([behaviour.name, ...(behaviour.aliases ?? [])].includes(name)) return true
+      }
+    }
+    return false
+  }
 }
 
 // ── starter providers ───────────────────────────────────

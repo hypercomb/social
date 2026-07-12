@@ -252,8 +252,11 @@ async function resolveChildNames(
   // saw the COMPLETE child set. A resolution where resolved < expected is
   // partial — the renderer must NOT paint it (the two-stage load). Counts
   // resolved SIGS, not unique names, so duplicate child names never read
-  // as "incomplete".
-  stats?: { expected: number; resolved: number },
+  // as "incomplete". `unresolvedSigs` lists the FULL child sigs that did
+  // not produce a name this pass — the completeness gate paints these as
+  // explicit unavailable-placeholders once its retry budget is spent,
+  // instead of silently dropping the tiles.
+  stats?: { expected: number; resolved: number; unresolvedSigs?: string[] },
   // Optional out-param: child NAMES that are branches (have their own
   // children). Derived from each child's `children` array LENGTH — one level
   // down, never loading grandchildren — from the SAME manifest / per-child
@@ -350,16 +353,19 @@ async function resolveChildNames(
       // entry would then join the multi-second preloadAllBags scan.
       const seed = (history as { seedParsedLayer?: (sig: string, layer: object) => void }).seedParsedLayer
       let resolvedCount = 0
+      const manifestUnresolved: string[] = []
       for (const entry of manifest) {
         if (entry?.layer?.name) {
           out.add(entry.layer.name)
           resolvedCount++
           if (seed && entry.sig) seed.call(history, entry.sig, entry.layer)
+        } else if (entry?.sig) {
+          manifestUnresolved.push(entry.sig)
         }
       }
       // Manifest hit only reaches here when manifest.length === children
       // length, so a fully-named manifest IS the complete set.
-      if (stats) stats.resolved = resolvedCount
+      if (stats) { stats.resolved = resolvedCount; stats.unresolvedSigs = manifestUnresolved }
       await freshenBranches(out)
       return out
     }
@@ -383,11 +389,11 @@ async function resolveChildNames(
     if (child?.name) {
       out.add(child.name); __resolvedCount++
     }
-    else __nullSigs.push((content.children[__i] || '').slice(0, 12))
+    else if (content.children[__i]) __nullSigs.push(content.children[__i])
   }
-  if (stats) stats.resolved = __resolvedCount
+  if (stats) { stats.resolved = __resolvedCount; stats.unresolvedSigs = [...__nullSigs] }
   if (__nullSigs.length > 0) {
-    console.warn(`[diag:childres] PERCHILD parent=${(parentLayerSig || 'EMPTY').slice(0, 12)} children=${content.children.length} resolved=${out.size} NULL=${__nullSigs.length} nullSigs=[${__nullSigs.join(', ')}]`)
+    console.warn(`[diag:childres] PERCHILD parent=${(parentLayerSig || 'EMPTY').slice(0, 12)} children=${content.children.length} resolved=${out.size} NULL=${__nullSigs.length} nullSigs=[${__nullSigs.map(s => s.slice(0, 12)).join(', ')}]`)
   } else if (DIAG) {
     console.info(`[diag:childres] PERCHILD parent=${(parentLayerSig || 'EMPTY').slice(0, 12)} children=${content.children.length} all-resolved=${out.size}`)
   }
@@ -440,7 +446,7 @@ export class ShowCellDrone extends Drone {
   }
 
   protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'neon:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden', 'content:arrived']
-  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer']
+  protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
 
@@ -528,6 +534,22 @@ export class ShowCellDrone extends Drone {
   // genuinely-unreadable child head can't thrash the render loop.
   readonly #branchColdRetries = new Map<string, number>()
   static readonly #BRANCH_COLD_MAX_RETRIES = 6
+  // Locations whose last paint included unavailable-placeholders (gate
+  // exhausted with unresolved children). Their back-nav cell caches are
+  // dropped on re-arm (content:arrived / miss-window expiry) so a heal
+  // never restores a stale placeholder set from the fast path.
+  readonly #placeholderLocations = new Set<string>()
+  // Per-location dedupe of `content:missing` emissions — the sorted sig
+  // list of the LAST emission. Consecutive identical sets don't re-emit;
+  // a complete resolution clears the entry so a later regression does.
+  readonly #missingEmitKeyByLocation = new Map<string, string>()
+  // Single coalesced miss-window re-arm timer (never a polling loop).
+  // Armed from a placeholder paint when the ContentBrokerDrone reports a
+  // future missUntil for an unresolved sig; fires ONE re-render shortly
+  // after the earliest expiry. A pass that is still incomplete re-arms
+  // for the next window, so healing follows the broker's own cadence.
+  #missWindowTimer: ReturnType<typeof setTimeout> | null = null
+  #missWindowFireAt = 0
 
   private lineageChangeListening = false
 
@@ -2328,6 +2350,9 @@ export class ShowCellDrone extends Drone {
     let childResolveComplete = true
     let childResolveExpected = 0
     let gateParentSig = ''
+    // Full child sigs that failed to resolve this pass — painted as
+    // unavailable-placeholders when the completeness gate exhausts.
+    let childResolveUnresolved: string[] = []
     // Source-diagnostic: children count from the memoized currentLayer()
     // (srcStaleLen) vs the fresh head sig (srcFreshLen). A divergence is the
     // "stale content" two-stage path (renders the subset, then the full set).
@@ -2475,7 +2500,7 @@ export class ShowCellDrone extends Drone {
             for (const b of memo.branches) branchSetFromResolve.add(b)
             childResolveComplete = true
           } else {
-            const stats = { expected: 0, resolved: 0 }
+            const stats = { expected: 0, resolved: 0, unresolvedSigs: [] as string[] }
             const branchStats = { cold: false }
             // branchSetFromResolve is filled in the SAME pass that resolves
             // names — one read, no separate per-child branch walk. branchStats
@@ -2486,6 +2511,7 @@ export class ShowCellDrone extends Drone {
             // Complete iff every child sig produced a name. expected===0 is
             // a (trivially complete) empty layer.
             childResolveComplete = stats.expected === 0 || stats.resolved >= stats.expected
+            childResolveUnresolved = stats.unresolvedSigs
             // A complete NAME set does NOT mean branch-status is settled: a
             // child's head bytes can be cold while its name resolved from the
             // manifest. Only memoize when BOTH are settled — caching a cold
@@ -2600,11 +2626,44 @@ export class ShowCellDrone extends Drone {
         // Budget exhausted — stop gating this layer so it can't thrash the
         // render loop, then fall through to paint what resolved.
         this.#resolveGateExhausted.add(gateKey)
-        console.warn(`[diag:childres] GATE exhausted loc=${locationKey} after ${attempts} attempts expected=${childResolveExpected} got=${union.size} — painting best-effort`)
+        console.warn(`[diag:childres] GATE exhausted loc=${locationKey} after ${attempts} attempts expected=${childResolveExpected} got=${union.size} — painting placeholders for the missing`)
+      }
+      // Gate exhausted (this pass or a prior one). The unresolved children
+      // are NOT dropped: paint each as an explicit unavailable-placeholder —
+      // same hex cell, no image, sig-suffixed label so the user SEES the
+      // tile exists while its content hasn't arrived. Placeholders join
+      // `union` but never `localCellSet`, so they ride the existing
+      // external-tile path end to end: dashed overlay treatment
+      // (externalLabels), excluded from substrate assignment
+      // (noImageLabels filters external), no per-tile index reads (the
+      // index gate ignores non-local names), and never memoized — the
+      // memo only writes on a COMPLETE resolution.
+      if (childResolveUnresolved.length > 0) {
+        for (const missingSig of childResolveUnresolved) {
+          const label = `unavailable ${missingSig.slice(0, 8)}`
+          union.add(label)
+        }
+        this.#placeholderLocations.add(locationKey)
+        // content:missing — surface the unresolved sigs for future UI (a
+        // re-push surface). Deduped per location on the exact sig set, so
+        // repeated placeholder repaints don't spam subscribers.
+        const emitKey = [...childResolveUnresolved].sort().join(',')
+        if (this.#missingEmitKeyByLocation.get(locationKey) !== emitKey) {
+          this.#missingEmitKeyByLocation.set(locationKey, emitKey)
+          this.emitEffect('content:missing', { sigs: [...childResolveUnresolved], segments: [...passSegments] })
+        }
+        // Miss-window re-arm: if the broker is deliberately not fetching
+        // one of these sigs until a miss window expires, schedule ONE
+        // re-render shortly after the earliest expiry (coalesced timer —
+        // never a polling loop). content:arrived remains the other re-arm.
+        this.#armMissWindowRetry(childResolveUnresolved)
       }
     } else if (childResolveComplete && gateParentSig) {
-      // Clean resolution — reset this layer's retry budget.
+      // Clean resolution — reset this layer's retry budget and drop the
+      // placeholder bookkeeping so a later regression re-emits fresh.
       this.#incompleteResolveAttempts.delete(gateParentSig)
+      this.#placeholderLocations.delete(locationKey)
+      this.#missingEmitKeyByLocation.delete(locationKey)
     }
 
     // Now that localCellSet reflects layer-truth (or OPFS truth when no
@@ -3921,10 +3980,7 @@ export class ShowCellDrone extends Drone {
     // and bounded — arrivals only fire once per healed sig.
     this.onEffect<{ sig: string; kind: string }>('content:arrived', (payload) => {
       if (payload?.kind !== 'layer') return
-      this.#incompleteResolveAttempts.clear()
-      this.#resolveGateExhausted.clear()
-      this.#forceNextRender = true
-      this.requestRender()
+      this.#rearmResolveGates()
     })
 
     // render:set-hive-visible — a takeover feature (screensaver bounce mode)
@@ -4916,6 +4972,61 @@ export class ShowCellDrone extends Drone {
       lineage?.removeEventListener('change', this.onLineageChange)
       this.lineageChangeListening = false
     }
+
+    if (this.#missWindowTimer !== null) {
+      clearTimeout(this.#missWindowTimer)
+      this.#missWindowTimer = null
+      this.#missWindowFireAt = 0
+    }
+  }
+
+  // Re-open the completeness gates and force a repaint — shared by the
+  // content:arrived effect and the miss-window timer. Drops the back-nav
+  // cell caches of placeholder locations so the fast path can't restore a
+  // stale placeholder set after the content heals.
+  #rearmResolveGates = (): void => {
+    this.#incompleteResolveAttempts.clear()
+    this.#resolveGateExhausted.clear()
+    for (const loc of this.#placeholderLocations) this.#layerCellsCache.delete(loc)
+    this.#forceNextRender = true
+    this.requestRender()
+  }
+
+  // Schedule ONE coalesced re-render shortly after the earliest miss-window
+  // expiry among the given unresolved sigs. Reads the optional
+  // ContentBrokerDrone.missUntil(sig) defensively — an absent broker or
+  // method means no timer (content:arrived remains the re-arm). Bounded: a
+  // timer is only armed from a placeholder paint, and each expiry fires
+  // exactly one render pass; a still-incomplete pass re-arms for the NEXT
+  // window, so the cadence follows the broker's own miss windows — never a
+  // polling loop, never a retry storm.
+  #armMissWindowRetry = (unresolvedSigs: readonly string[]): void => {
+    let broker: { missUntil?: (sig: string) => number | undefined } | undefined
+    try {
+      broker = (window as any).ioc?.get?.('@diamondcoreprocessor.com/ContentBrokerDrone')
+    } catch { /* broker not registered — content:arrived remains the re-arm */ }
+    if (typeof broker?.missUntil !== 'function') return
+    const now = Date.now()
+    let earliest = Infinity
+    for (const sig of unresolvedSigs) {
+      let until: number | undefined
+      try { until = broker.missUntil(sig) } catch { continue }
+      if (typeof until === 'number' && until > now && until < earliest) earliest = until
+    }
+    if (earliest === Infinity) return
+    // Fire shortly AFTER the expiry so the window is genuinely open when
+    // the re-render's reads reach the broker.
+    const fireAt = earliest + 250
+    // Coalesce onto a single timer: keep an already-armed EARLIER one (its
+    // render pass re-arms for whatever is still missing); replace a later one.
+    if (this.#missWindowTimer !== null && this.#missWindowFireAt <= fireAt) return
+    if (this.#missWindowTimer !== null) clearTimeout(this.#missWindowTimer)
+    this.#missWindowFireAt = fireAt
+    this.#missWindowTimer = setTimeout(() => {
+      this.#missWindowTimer = null
+      this.#missWindowFireAt = 0
+      this.#rearmResolveGates()
+    }, Math.max(0, fireAt - Date.now()))
   }
 
   // Briefly glow a newly created tile so the user can spot it, then ease out

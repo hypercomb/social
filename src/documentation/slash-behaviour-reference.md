@@ -64,6 +64,7 @@ Type `/` in the command line to access slash behaviours. These are pluggable com
 | Command | Aliases | Description |
 |---------|---------|-------------|
 | `/meeting` | `/meet`, `/call` | Start or join a video meeting on the selected tile |
+| `/repush` | | Re-push shared content to your host and report holes (never-pushed refs that 404 for recipients) |
 
 ---
 

@@ -13,13 +13,14 @@ For slash commands (`/help`, `/docs`, `/chat`, etc.), see [slash-behaviour-refer
 | [create](#create) | `name` or `path/to/name` | Enter | built-in |
 | [create-goto](#create-goto) | `/name` or `/path/to/name` | Enter | built-in |
 | [create-sub-child](#create-sub-child) | `parent/child` | Enter | built-in |
-| [navigate](#navigate) | `name` | Shift+Enter | built-in |
-| [shift-enter-navigate](#shift-enter-navigate) | `path/to/folder` | Shift+Enter | pluggable |
+| [navigate](#navigate) | `name` or `path/to/folder` | Shift+Enter | pluggable |
 | [filter](#filter) | `>?keyword` | type | built-in |
 | [open-dcp](#open-dcp) | `#` | Enter | built-in |
 | [go-parent](#go-parent) | `..` or `../..` | Enter | pluggable |
 | [delete-cell](#delete-cell) | `~name` or `~[a,b]` | Enter | pluggable |
-| [batch-create](#batch-create) | `[a,b]` or `path/[a,b]` | Enter | pluggable |
+| [bracket-select](#bracket-select) | `[a,b]` | Enter | built-in |
+| [bracket-item-ops](#bracket-item-ops) | `[+new, ~old, keep]` | Enter | built-in |
+| [select-op](#select-op) | `[a,b]/cut` etc. | Enter | built-in |
 | [cut-paste](#cut-paste) | `[items]/destination` | Enter | pluggable |
 | [hash-marker](#hash-marker) | `cell#Drone` | Enter | pluggable |
 | [slash-behaviour](#slash-behaviour) | `/behaviour args` | Enter | pluggable |
@@ -69,24 +70,14 @@ fruits/banana  → next entry creates a sibling
 
 ### navigate
 
-**Trigger** — Shift+Enter · **Type** — built-in
+**Trigger** — Shift+Enter · **Type** — pluggable · **File** — `shift-enter-navigate.behavior.ts`
 
-Shift+Enter with a single segment. Navigates into an existing cell without creating anything.
+Shift+Enter with a name or `/` path. Navigates only — never creates. If the
+path doesn't exist, nothing happens.
 
 ```
 recipes        → navigates into "recipes" (must already exist)
-```
-
----
-
-### shift-enter-navigate
-
-**Trigger** — Shift+Enter · **Type** — pluggable · **File** — `shift-enter-navigate.behavior.ts`
-
-Shift+Enter with a `/` path. Creates the full folder chain and navigates into the final segment.
-
-```
-meals/dinner   → creates chain if needed, navigates to "dinner"
+meals/dinner   → navigates to meals/dinner (must already exist)
 ```
 
 ---
@@ -143,16 +134,49 @@ Prefix with `~` and press Enter. Supports path syntax and batch syntax. Removes 
 
 ---
 
-### batch-create
+### bracket-select
 
-**Trigger** — Enter · **Type** — pluggable · **File** — `batch-create.behavior.ts`
+**Trigger** — Enter · **Type** — built-in (`BracketBehavior` + select dispatcher)
 
-Use bracket syntax and press Enter. Expands `[a,b]` into multiple cells. Supports mid-path brackets for combinatorial creation.
+Bare bracket syntax SELECTS tiles in the current layer (it no longer batch-creates —
+see [bracket-item-ops](#bracket-item-ops) for creation). The selection is echoed in
+the bar and in the URL as a path-tail bracket so it survives sharing/refresh.
 
 ```
-[a,b]          → creates "a" and "b"
-path/[a,b]     → creates "path/a" and "path/b"
-p/[a,b]/child  → creates "p/a/child" and "p/b/child"
+[a,b]          → selects "a" and "b"
+```
+
+---
+
+### bracket-item-ops
+
+**Trigger** — Enter · **Type** — built-in
+
+Per-item operators inside a bracket: `+name` creates, `~name` removes, bare
+items select. Mix freely in one bracket.
+
+```
+[+t1,+t2,+t3]      → creates t1, t2, t3
+[+new, ~old, keep] → creates "new", removes "old", selects "keep"
+```
+
+---
+
+### select-op
+
+**Trigger** — Enter · **Type** — built-in
+
+A known operation after the bracket executes it on the selection. Known ops:
+`cut`, `copy`, `move(N)`/`move[swapTile]`, `remove`/`rm`/`delete`/`del`,
+`keyword`/`kw`/`tag`, `format`/`fmt`/`fp`, `opus`/`o`, `sonnet`/`s`,
+`haiku`/`h`; `:tag` tags the selection. Anything else after `/` is a
+cut-paste destination (below).
+
+```
+[a,b]/cut       → cuts a and b to the clipboard
+[a,b]/remove    → removes a and b
+[a,b]:urgent    → tags a and b with "urgent"
+[a]/move(3)     → moves a to index 3
 ```
 
 ---
@@ -161,7 +185,9 @@ p/[a,b]/child  → creates "p/a/child" and "p/b/child"
 
 **Trigger** — Enter · **Type** — pluggable · **File** — `cut-paste.behavior.ts`
 
-Bracket-path syntax: copy items from the current directory to a destination. Trailing `/` navigates to the destination after pasting.
+Bracket-path syntax with a destination that is NOT a known select op: copy
+items from the current directory to that destination. Trailing `/` navigates
+to the destination after pasting.
 
 ```
 [cigars,whiskey]/interests   → copies cigars and whiskey into interests/
@@ -217,15 +243,21 @@ Pluggable behaviours are registered in `CommandLineComponent.#behaviors` and eva
 
 ### Resolution order
 
-Pluggable behaviours are checked in this order; first match wins. Built-ins run only if no pluggable matches.
+On plain Enter, the component first routes bracket selects/ops (`[a,b]`,
+`[a,b]/knownOp`, `:tag`) and known `/slash` behaviours; an UNKNOWN `/name`
+falls back to create-goto (create + navigate). Then pluggable behaviours are
+checked in this order; first match wins. Built-ins (create) run only if no
+pluggable matches. Shift+Enter runs the same pluggable list with the real
+event so Shift-gated behaviours can match.
 
 1. **GoParentBehavior** — `..` parent navigation (fastest escape hatch)
 2. **SlashBehaviourBehavior** — `/behaviour` slash dispatch
 3. **RemoveCellBehavior** — `~` prefix
-4. **CutPasteBehavior** — `[items]/path` bracket-path copy
+4. **CutPasteBehavior** — `[items]/path` bracket-path copy (non-select-op destinations)
 5. **HashMarkerBehavior** — `cell#Drone` binding
-6. **BatchCreateBehavior** — `[...]` bracket expansion
-7. **ShiftEnterNavigateBehavior** — `/` with Shift+Enter
+6. **PasteUrlNavigateBehavior** — pasted URL navigation
+7. **BracketBehavior** — bare `[...]` selection
+8. **ShiftEnterNavigateBehavior** — navigate-only with Shift+Enter
 
 ---
 

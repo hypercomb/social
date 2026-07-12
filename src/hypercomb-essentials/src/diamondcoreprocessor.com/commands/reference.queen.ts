@@ -42,6 +42,12 @@ type HistoryShape = {
   commitLayer(locationSig: string, layer: Record<string, unknown>): Promise<string>
 }
 type CursorShape = { refreshForLocation?(sig: string): Promise<void>; jumpToLatest?(): void }
+type CommitterShape = {
+  commitChildrenDeltas(
+    segments: readonly string[],
+    changes: { removes?: readonly { sig?: string; label?: string }[]; appends?: readonly string[] },
+  ): Promise<void>
+}
 
 export class ReferenceQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -84,12 +90,16 @@ export class ReferenceQueenBee extends QueenBee {
   }
 
   /** Create a child tile carrying a `reference` decoration — baked into the
-   *  same commit (the race-free create+decorate shape). Direct commitLayer
-   *  bypasses LayerCommitter, so the cursor is refreshed + re-pointed after. */
+   *  same commit (the race-free create+decorate shape). The child's own bag
+   *  is fresh (no contention), so its commit stays direct; the PARENT link
+   *  rides the LayerCommitter FIFO as a surgical children append — a direct
+   *  read-modify-write commitLayer of the parent would clobber any
+   *  interleaved FIFO commit's child (true tile loss). */
   async #createReference(name: string, targetSegments: readonly string[]): Promise<void> {
     const store = get<StoreShape>('@hypercomb.social/Store')
     const history = get<HistoryShape>('@diamondcoreprocessor.com/HistoryService')
-    if (!store?.putResource || !history) { this.#log('Reference — unavailable'); return }
+    const committer = get<CommitterShape>('@diamondcoreprocessor.com/LayerCommitter')
+    if (!store?.putResource || !history || !committer?.commitChildrenDeltas) { this.#log('Reference — unavailable'); return }
 
     const parentSegments = this.#segments()
     try {
@@ -115,12 +125,7 @@ export class ReferenceQueenBee extends QueenBee {
       const childMarkerSig = await history.commitLayer(childSig, { name, decorations: [decorationSig] })
       EffectBus.emit('decorations:changed', { segments: childSegments, op: 'append', sig: decorationSig })
 
-      const parentName = typeof parentLayer['name'] === 'string'
-        ? String(parentLayer['name'])
-        : (parentSegments.length ? parentSegments[parentSegments.length - 1] : '')
-      await history.commitLayer(parentSig, {
-        ...parentLayer, name: parentName, children: [...existingChildren, childMarkerSig],
-      })
+      await committer.commitChildrenDeltas(parentSegments, { appends: [childMarkerSig] })
       EffectBus.emit('cell:added', { cell: name, segments: [...parentSegments], viaUpdate: true })
 
       get<{ invalidate?: () => void }>('@hypercomb.social/Lineage')?.invalidate?.()

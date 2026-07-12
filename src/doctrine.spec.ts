@@ -165,4 +165,55 @@ describe('doctrine ratchets', () => {
       'hypercomb-essentials/src/diamondcoreprocessor.com/presentation/tiles/show-cell.drone.ts',
     ], 'children-manifest writer')
   })
+
+  it('children-bearing layer commits ride the LayerCommitter FIFO — no inline-children commitLayer', () => {
+    // A direct history.commitLayer(...) whose assembled layer carries a
+    // `children` key is a read-modify-write OUTSIDE the committer's
+    // serialised commit chain: interleaved with a FIFO commit on the same
+    // bag, last-marker-wins silently drops the other commit's child — true
+    // tile loss (the reference.queen clobber, fixed 2026-07-11). Children
+    // mutations must ride LayerCommitter (update / importTree /
+    // commitChildrenDeltas / commitSlot* / bootstrapIfEmpty).
+    //
+    // Heuristic: a bare `children` token between `commitLayer(` and the
+    // first `)`. Catches inline `{ ..., children: [...] }` layer literals
+    // (multi-line included), `children` property shorthand, and
+    // `children?:` in a commitLayer type member that invites the pattern.
+    // KNOWN LIMITS it cannot see: a layer assembled in a variable and
+    // passed whole — the committer's own `commitLayer(sig,
+    // machine.output())` (sanctioned), flatten.queen's byte-verbatim head
+    // re-commit, and history.service's promoteToHead / mergeEntries
+    // (frozen debt: they address a one-way locationSig that cannot reach
+    // the committer's segments-based API — see the comment block at their
+    // definition). Empty allowlist: never write an inline-children
+    // commitLayer again.
+    const actual = filesMatching(/commitLayer\s*\([^)]*\bchildren\b/)
+    assertRatchet(actual, [], 'inline-children commitLayer')
+  })
+
+  it('no literal control bytes in source — use escape sequences', () => {
+    // A literal NUL (or other C0 control) byte in a string literal is
+    // invisible in every editor and gets silently STRIPPED by common
+    // tooling. That exact failure turned layer-committer's path
+    // separator `join('\u0000')` into `join('')` (22d905a0) — decode
+    // split per CHARACTER, every create committed its child under a
+    // bogus per-letter path, and tiles vanished on creation. Control
+    // characters in source must be written as escape sequences
+    // ('\u0000', '\x1f', ...) — never as raw bytes. Empty allowlist:
+    // this may never regress.
+    const hits = new Set<string>()
+    // eslint-disable-next-line no-control-regex
+    const control = new RegExp('[\\x00-\\x08\\x0b\\x0c\\x0e-\\x1f]')
+    for (const dir of SCAN_DIRS) {
+      let files: string[]
+      try { files = walk(join(ROOT, dir)) } catch { continue }
+      for (const file of files) {
+        // RAW read — comments included; a control byte anywhere is a hazard.
+        if (control.test(readFileSync(file, 'utf8'))) {
+          hits.add(relative(ROOT, file).replace(/\\/g, '/'))
+        }
+      }
+    }
+    assertRatchet([...hits].sort(), [], 'literal control byte')
+  })
 })

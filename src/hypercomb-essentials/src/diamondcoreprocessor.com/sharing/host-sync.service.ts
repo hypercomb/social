@@ -392,6 +392,29 @@ export class HostSyncService extends EventTarget {
    *  parsed once, not once per page. */
   #walkedResources = new Set<string>()
 
+  /** Refs the closure walks could not read from ANY local store AND no
+   *  enabled target holds a receipt for — the never-pushed-content hole
+   *  behind a recipient's 404s. Recorded, never thrown: the rest of the
+   *  walk proceeds. Per-session; a sig leaves the set when its bytes turn
+   *  up on a later walk (import, self-heal). Surfaced by reDrain() /
+   *  the /repush queen. */
+  readonly #missingLocal = new Set<string>()
+
+  /** Record a walk miss. A ref the host already serves (any enabled
+   *  target's receipt exists) is NOT a hole — the recipient 200s on it —
+   *  so only receipt-less misses are recorded. Emits
+   *  `share:missing-local` ONCE per sig so shells can surface the hole. */
+  readonly #noteWalkMiss = async (sig: string): Promise<void> => {
+    if (this.#missingLocal.has(sig)) return
+    for (const target of await this.#targets()) {
+      if (await this.#receiptExists(sig, target)) return // host serves it
+    }
+    if (await this.hasReceipt(sig)) return // bare self-domain receipt (targets may be off)
+    if (this.#missingLocal.has(sig)) return // re-check after the awaits above
+    this.#missingLocal.add(sig)
+    EffectBus.emit('share:missing-local', { sig })
+  }
+
   /** Enqueue everything a layer references, recursively. Slot → kind:
    *  `cells`/`layers`/`children` are child LAYERS (recurse via enqueue →
    *  walk), `bees`/`dependencies` keep their kind, every other sig-array
@@ -418,6 +441,7 @@ export class HostSyncService extends EventTarget {
         try {
           const refBytes = await this.#readLocalBytes(ref, kind)
           if (refBytes) {
+            this.#missingLocal.delete(ref) // bytes turned up — no longer a hole
             await this.enqueue(ref, kind, refBytes)
             // Resource-content descent: a resource ref is an opaque leaf to the
             // slot walk, but its bytes can hold FURTHER resource sigs that must
@@ -426,8 +450,10 @@ export class HostSyncService extends EventTarget {
             // records), OR a tile's nested image sig inside its `properties`
             // blob (data resources). Covers both; a no-op for plain leaves.
             if (kind === 'resource') await this.#enqueueResourceClosure(ref, refBytes)
+          } else {
+            await this.#noteWalkMiss(ref) // nothing to push — record the hole, keep walking
           }
-        } catch { /* not held locally — nothing to push */ }
+        } catch { await this.#noteWalkMiss(ref) /* not held locally — record, keep walking */ }
       }
     }
   }
@@ -455,8 +481,13 @@ export class HostSyncService extends EventTarget {
       if (!SIG_RE.test(ref) || ref === sig) continue
       try {
         const bytes = await this.#readLocalBytes(ref, 'resource')
-        if (bytes) await this.enqueue(ref, 'resource', bytes)
-      } catch { /* not held locally — nothing to push */ }
+        if (bytes) {
+          this.#missingLocal.delete(ref) // bytes turned up — no longer a hole
+          await this.enqueue(ref, 'resource', bytes)
+        } else {
+          await this.#noteWalkMiss(ref) // nothing to push — record the hole, keep walking
+        }
+      } catch { await this.#noteWalkMiss(ref) /* not held locally — record, keep walking */ }
     }
   }
 
@@ -816,6 +847,8 @@ export class HostSyncService extends EventTarget {
           this.#availableClosures.clear()
           this.#receiptEpoch++
           console.warn(`[host-sync] revoked stale receipt ${sig.slice(0, 12)} — host no longer serves it; re-staging`)
+          // Surfaceable revocation signal — shells can toast/badge later.
+          EffectBus.emit('share:receipt-revoked', { sig, host })
           return false
         }
         return true
@@ -856,6 +889,87 @@ export class HostSyncService extends EventTarget {
       if (!(await this.hasReceipt(entry.sig))) out.push(entry.sig)
     }
     return out
+  }
+
+  /** The sharer's re-push surface (the /repush queen). Re-walks the closure
+   *  of every queued entry AND every previously-receipted sig, re-verifying
+   *  self-domain receipts against the live host with the existing
+   *  #receiptStillHonored machinery (a 404 revokes the receipt so the
+   *  re-stage proceeds), enqueues anything missing, then drains.
+   *
+   *  Summary: `queued` = entries staged at drain time (deep new refs found
+   *  by the detached recursive walk may land after the count — the retry
+   *  timer drains stragglers), `pushed` = entries confirmed off the queue
+   *  by THIS drain, `failed` = entries still queued (host unreachable,
+   *  401-paused, or no target enabled), `skippedMissingLocal` = refs no
+   *  local store holds and no host receipt covers — the genuine holes
+   *  behind recipient 404s. */
+  public readonly reDrain = async (): Promise<{ queued: number; pushed: number; failed: number; skippedMissingLocal: string[] }> => {
+    // Fresh eyes: forget this session's walk dedup and the receipt HEAD
+    // memo so closure walks and honor checks actually re-run. Also the
+    // operator's "retry now" signal — clear 401 backoffs, same contract
+    // as enable().
+    this.#walkedLayers.clear()
+    this.#walkedResources.clear()
+    this.#verifiedOnHost.clear()
+    this.#unauthorizedUntil.clear()
+
+    // Every previously-receipted sig: pool + legacy source, both name
+    // shapes (`{sig}` self-domain, `{sig}.{hostHash}` granted hosts).
+    const receipted = new Set<string>()
+    for (const dir of [await this.#getReceiptsDir(false), await this.#getLegacyReceiptsDir()]) {
+      if (!dir) continue
+      try {
+        for await (const [name, handle] of (dir as unknown as { entries: () => AsyncIterable<[string, FileSystemHandle]> }).entries()) {
+          if (handle.kind !== 'file') continue
+          const sig = name.slice(0, 64)
+          if (SIG_RE.test(sig)) receipted.add(sig)
+        }
+      } catch { /* source vanished mid-walk (absorb finished) */ }
+    }
+
+    // Re-verify + re-walk each receipted sig. The walk runs BEFORE the
+    // enqueue so the awaited pass (not enqueue's detached kick) covers the
+    // refs; enqueue is idempotent and skips anything still fully receipted.
+    for (const sig of receipted) {
+      await this.#receiptStillHonored(sig)
+      let bytes: ArrayBuffer | null = null
+      try { bytes = await this.#readLocalBytes(sig, 'layer') } catch { bytes = null }
+      if (bytes) {
+        await this.#enqueueLayerRefs(sig, bytes)
+        await this.enqueue(sig, 'layer', bytes)
+        continue
+      }
+      try { bytes = await this.#readLocalBytes(sig, 'resource') } catch { bytes = null }
+      if (bytes) {
+        await this.#enqueueResourceClosure(sig, bytes)
+        await this.enqueue(sig, 'resource', bytes)
+        continue
+      }
+      // Held nowhere locally — fine while the host still serves it; a
+      // genuine hole if the honor check just revoked the receipt.
+      await this.#noteWalkMiss(sig)
+    }
+
+    // Re-walk what already sits in the queue (layers re-enumerate refs —
+    // the original walk may have missed refs that were unreadable then).
+    for (const entry of await this.#listQueue()) {
+      if (entry.kind !== 'layer') continue
+      try {
+        const handle = await entry.dir.getFileHandle(entry.fileName, { create: false })
+        await this.#enqueueLayerRefs(entry.sig, await (await handle.getFile()).arrayBuffer())
+      } catch { /* entry drained mid-walk — nothing to re-walk */ }
+    }
+
+    const queued = (await this.#listQueue()).length
+    await this.drain()
+    const failed = (await this.#listQueue()).length
+    return {
+      queued,
+      pushed: Math.max(0, queued - failed),
+      failed,
+      skippedMissingLocal: [...this.#missingLocal],
+    }
   }
 
   // -------------------------------------------------

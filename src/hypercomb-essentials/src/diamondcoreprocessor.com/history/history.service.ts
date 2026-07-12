@@ -2735,6 +2735,15 @@ export class HistoryService {
   //   projectMerge(markers[])   → same union as mergeEntries but no
   //                                write — returns the projected layer
   //                                content for preview.
+  //
+  // FIFO caveat (frozen debt): promoteToHead / mergeEntries commit
+  // OUTSIDE the LayerCommitter chain — they address a one-way
+  // locationSig, which cannot reach the committer's segments-based
+  // API, and this primitive sits BELOW the committer in the dependency
+  // direction. Both are invoked from the history viewer while the user
+  // is inspecting a bag, not concurrently with create/paste traffic,
+  // so the read-modify-write window is accepted. See the
+  // children-bearing-commit ratchet in doctrine.spec.ts.
 
   /**
    * Bring a layer sig back to head by appending a fresh marker that

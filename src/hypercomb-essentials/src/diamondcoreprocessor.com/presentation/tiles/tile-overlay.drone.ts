@@ -16,12 +16,14 @@ type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; bran
 // Backstop timeout (ms) for the navigation-transition guard. This is NOT the
 // normal release — the guard lifts on render:cell-count (the renderer has
 // rebuilt the maps a click reads for the level we moved TO), mirrored by the
-// post-reveal navigation:guard-end. The timer only prevents a permanent block
-// if a render ever emits neither; sized above the slowest legit cold-layer
-// render so it never preempts a still-rendering navigation. (The prior value
-// was 200ms and WAS the de-facto release — it undercut the guard on any layer
-// whose render took >200ms, dropping it while the leaving level was still on
-// screen so a 2nd click ran up a phantom address.)
+// post-reveal navigation:guard-end. When the timer DOES fire (a render that
+// exceeds it is routine under fetch stalls), it releases INPUT only — the
+// axial map still describes the LEAVING level, so tile-ENTER stays refused
+// via #tileEnterRefused until the first render:cell-count for the current
+// location lands. Pan/zoom/selection stay live so the app never feels dead.
+// (The prior value was 200ms and WAS the de-facto release — it undercut the
+// guard on any layer whose render took >200ms, dropping it while the leaving
+// level was still on screen so a 2nd click ran up a phantom address.)
 const NAV_GUARD_BACKSTOP_MS = 6000
 
 /** Launch-group pages live at single-segment ROOT locations named by group id
@@ -202,6 +204,20 @@ export class TileOverlayDrone extends Drone {
 
   #navigationBlocked = false
   #navigationGuardTimer: ReturnType<typeof setTimeout> | null = null
+  /** Backstop latch: the 6s timer force-released INPUT but the new layer's
+   *  render hasn't landed — the axial map still describes the LEAVING level.
+   *  While set, tile-ENTER navigation (branch entry, launcher open, reference
+   *  portal) is dropped; pan/zoom/selection stay live. Cleared by the first
+   *  render:cell-count (the maps then describe the current location). */
+  #tileEnterRefused = false
+  /** Monotonic axial-map generation — bumped on every #rebuildOccupiedMap.
+   *  A press captures it so the trailing click can detect that the map was
+   *  rebuilt underneath the pointer and re-bind by LABEL instead of position. */
+  #mapGeneration = 0
+  /** What the user actually pressed: captured at pointerdown so the click
+   *  commits against the tile the user SAW, not whatever now sits at that
+   *  position (see the generation re-bind in #onClick). */
+  #pressCapture: { generation: number; axial: Axial; label: string } | null = null
   /** Tracks the pointerId that triggered a pointerdown-navigation, so the trailing pointerup + click can be suppressed. */
   #consumedPointerId: number | null = null
   #meshPublic = false
@@ -506,6 +522,12 @@ export class TileOverlayDrone extends Drone {
         this.#linkLabels = new Set(payload.linkLabels ?? [])
         this.#hiddenLabels = new Set(payload.hiddenLabels ?? [])
         this.#rebuildOccupiedMap()
+        // The maps above now describe the level on screen — release the
+        // backstop's tile-enter latch. cell-count only fires at render
+        // completion for the CURRENT location, which is exactly the arrival
+        // the latch waits on (the backstop released input early; tile entry
+        // stayed refused until this render landed).
+        this.#tileEnterRefused = false
         // A navigation transition is "done" the instant these maps describe the
         // level we moved to — which is exactly this emit: the renderer rebuilds
         // occupancy/branch data for the new level at render completion, right
@@ -1793,6 +1815,9 @@ export class TileOverlayDrone extends Drone {
 
   // ── Instant branch navigation on pointerdown ────────────────────────
   #onPointerDown = (e: PointerEvent): void => {
+    // Every new press invalidates the previous press-capture — a click must
+    // only ever pair with ITS OWN pointerdown's capture.
+    this.#pressCapture = null
     // Right-button down → instant back navigation (trailing pointerup + contextmenu suppressed)
     if (e.button === 2) {
       this.#beginBackGesture(e)
@@ -1828,6 +1853,13 @@ export class TileOverlayDrone extends Drone {
     const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(axial.q, axial.r))
     if (!entry?.label) return
 
+    // Bind this press to the TILE the user saw, not the position: capture the
+    // map generation + resolved label. If the axial map is rebuilt between
+    // now and the trailing click (render:cell-count for a new layer), #onClick
+    // re-resolves by label and swallows the click when the tile is gone —
+    // "the click hits what the user saw" is an invariant.
+    this.#pressCapture = { generation: this.#mapGeneration, axial, label: entry.label }
+
     // If the press is over a VISIBLE overlay action button (edit, note, …), let
     // the click handler run that action — never treat it as a tile-body press.
     // This MUST run before the launcher branch below: on an aggregator page
@@ -1856,6 +1888,13 @@ export class TileOverlayDrone extends Drone {
     if (this.#onLauncherPage() || hasDecorationKind(entry.label, 'launch:target')) {
       this.#consumedPointerId = e.pointerId
       consumePointerGesture(e.pointerId)
+      // Backstop latch: the map still describes the LEAVING level — opening a
+      // launcher target now would navigate off a phantom tile. Drop the whole
+      // gesture (pointer already consumed, so the trailing click dies too).
+      if (this.#tileEnterRefused) {
+        console.warn('[tile-overlay] tile-enter refused — new layer render not landed yet; dropped launcher open for', entry.label)
+        return
+      }
       this.#clearSelectionOnNavigate()
       this.emitEffect('group:open', { label: entry.label })
       return
@@ -1871,6 +1910,7 @@ export class TileOverlayDrone extends Drone {
     // Suppress the orphaned click from a pointerdown that already triggered navigation
     if (this.#consumedPointerId !== null) {
       this.#consumedPointerId = null
+      this.#pressCapture = null
       return
     }
     if (this.#arrangeMode) return // arrange mode absorbs clicks
@@ -1903,6 +1943,32 @@ export class TileOverlayDrone extends Drone {
         metaKey: e.metaKey,
       })
       return
+    }
+
+    // ── Generation re-bind: commit against the tile the user SAW ─────────
+    // #onPointerDown captured {generation, axial, label} when the press
+    // resolved. If the axial map was rebuilt since (render:cell-count landed
+    // between press and click — e.g. a trailing click arriving after the
+    // guard cleared for a NEW layer), the same position now describes a
+    // different layer's tile. Re-resolve by LABEL in the current map: commit
+    // only if the pressed tile still resolves here; otherwise swallow the
+    // click entirely (no navigation, no selection change).
+    const press = this.#pressCapture
+    this.#pressCapture = null
+    if (press && press.generation !== this.#mapGeneration) {
+      let rebound: { q: number; r: number; index: number } | null = null
+      for (const [key, occ] of this.#occupiedByAxial) {
+        if (occ.label !== press.label) continue
+        const [q, r] = key.split(',').map(Number)
+        rebound = { q, r, index: occ.index }
+        break
+      }
+      if (!rebound) {
+        console.warn('[tile-overlay] click swallowed — tile map changed since press and', press.label, 'no longer resolves here')
+        return
+      }
+      this.#currentAxial = { q: rebound.q, r: rebound.r }
+      this.#currentIndex = rebound.index
     }
 
     // If pointermove hasn't fired since navigation (e.g. click without moving
@@ -2047,12 +2113,20 @@ export class TileOverlayDrone extends Drone {
     // as a FIXED deadline: set it once and NEVER push it out. `guard-start`
     // re-arms this on every render of a burst, so resetting the timer each call
     // would let a storm of renders extend the block indefinitely and strand the
-    // layer. Arming only when unset guarantees the guard clears within
+    // layer. Arming only when unset guarantees input frees within
     // NAV_GUARD_BACKSTOP_MS of the FIRST arm, whatever races follow.
     if (!this.#navigationGuardTimer) {
       this.#navigationGuardTimer = setTimeout(() => {
         this.#navigationGuardTimer = null
+        // The render exceeded the deadline (routine under fetch stalls).
+        // Release INPUT so the app never feels dead — but the axial map still
+        // describes the LEAVING level, so entering a tile now would push a
+        // phantom URL segment. Latch tile-ENTER refusal instead: pan/zoom/
+        // selection stay live; navigation INTO a tile is dropped (with a
+        // console.warn) until the first render:cell-count for the current
+        // location lands (cleared in that handler).
         this.#navigationBlocked = false
+        this.#tileEnterRefused = true
       }, NAV_GUARD_BACKSTOP_MS)
     }
   }
@@ -2092,6 +2166,15 @@ export class TileOverlayDrone extends Drone {
   }
 
   #navigateInto(label: string): void {
+    // Backstop latch: input was force-released after NAV_GUARD_BACKSTOP_MS
+    // but the axial map still describes the LEAVING level — entering a tile
+    // now would be a phantom-child navigation (bogus URL segment). Drop the
+    // entry before ANY side effect (no guard arm, no selection change); the
+    // latch clears on the first render:cell-count for the current location.
+    if (this.#tileEnterRefused) {
+      console.warn('[tile-overlay] tile-enter refused — new layer render not landed yet; dropped navigation into', label)
+      return
+    }
     const lineage = this.resolve<{ explorerEnter(name: string): void }>('lineage')
     if (!lineage) return
 
@@ -2281,6 +2364,10 @@ export class TileOverlayDrone extends Drone {
   }
 
   #rebuildOccupiedMap(): void {
+    // Every rebuild is a new GENERATION. A press captured against an older
+    // generation must re-bind by label at click time (see #onClick) — the
+    // same pixel position now describes a different layer's tile.
+    this.#mapGeneration++
     this.#occupiedByAxial.clear()
 
     for (let i = 0; i < this.#cellCount; i++) {

@@ -65,6 +65,13 @@ export class FlattenQueenBee extends QueenBee {
     //    this commit lands at 00000001 with the exact bytes (and
     //    thus the same sig) as the prior head — children, notes,
     //    tags and any other slots survive unchanged.
+    //
+    //    Deliberately DIRECT, not via LayerCommitter: this is a
+    //    byte-verbatim re-commit (no children assembly/mutation), it
+    //    must run even when the cursor is rewound (the committer
+    //    refuses rewound commits — refusing here after the archive
+    //    above would strand the bag headless), and the destructive
+    //    purge→archive→commit sequence has no FIFO seam to ride.
     await history.commitLayer(locationSig, headContent)
 
     // 5. Re-hydrate cursor; land on the top.

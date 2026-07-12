@@ -315,17 +315,26 @@ export class ContentBrokerDrone extends Drone {
     signer: NOSTR_SIGNER_KEY,
   }
   protected override listens: string[] = []
-  protected override emits: string[] = ['broker:fetched', 'broker:outcome', 'adopt:progress', 'adopt:done']
+  protected override emits: string[] = ['broker:fetched', 'broker:outcome', 'adopt:progress', 'adopt:done', 'content:arrived']
 
   #broadcastSub: MeshSubLike | null = null
   #myPubkey: string | null = null
   #initialized = false
 
   // Pending fetch promises, keyed by sig. Multiple concurrent fetches
-  // for the same sig share one in-flight subscription + request,
-  // resolving from a single response. Cleaned up when the fetch
-  // settles.
+  // for the same sig share ONE in-flight remote resolution — the whole
+  // cascade (HTTP tiers + mesh fallback for layers), not just the mesh
+  // leg. Registered BEFORE the cascade starts so N concurrent callers
+  // for the same missing sig pay one cascade, not N. Cleaned up when
+  // the fetch settles.
   #pendingFetches = new Map<string, Promise<Uint8Array | null>>()
+
+  // Per-host URL-shape memo: once a host answers a real 200 (non-HTML
+  // bytes) on the flat `/<sig>` shape or the legacy typed path, only
+  // that shape is probed against the host for the rest of the session.
+  // First contact still tries flat-then-legacy. Halves the 404 cost of
+  // every subsequent miss against a known host.
+  #hostPathShape = new Map<string, 'flat' | 'legacy'>()
 
   // Full-cascade miss window per sig (egg semantics — see fetchBySig).
   // Cleared by new knowledge (#noteDomains / noteDomain) or lapse.
@@ -542,8 +551,15 @@ export class ContentBrokerDrone extends Drone {
     // New address knowledge for this sig — its egg may now hatch; lift
     // the miss window AND reset the backoff so the next ask re-dials
     // immediately (not on the backed-off schedule).
-    this.#fetchMissUntil.delete(sig)
+    const wasMissing = this.#fetchMissUntil.delete(sig)
     this.#missBackoff.delete(sig)
+    // Wake gated consumers: a sig that sat inside a miss window is worth
+    // re-asking NOW that we know a host for it. Same announcement the
+    // layer self-heal uses (Store.fetchLayerFromHost) — completeness
+    // gates re-arm and the next read re-dials through the now-informed
+    // cascade. Only fired when a window was actually cleared, so the
+    // per-ref attribution fan-out (#attributeClosure) can't spam it.
+    if (wasMissing) this.emitEffect('content:arrived', { sig, kind: 'layer' as const })
   }
 
   // ── durable host knowledge — persisted + shared with the service worker ──
@@ -779,8 +795,16 @@ export class ContentBrokerDrone extends Drone {
       // bucket, no typed pools, no extensions; the consumer knows the type
       // and sha256 gates the bytes. The typed path is the legacy fallback
       // for static layouts that can't resolve flat (Azure blob, ng-serve
-      // public/content), kept during the migration.
-      for (const tryPath of [`/${sig}`, path]) {
+      // public/content), kept during the migration. Once a host has
+      // answered real bytes on one shape (#hostPathShape memo), only that
+      // shape is probed for the rest of the session — first contact still
+      // tries flat-then-legacy.
+      const shape = this.#hostPathShape.get(host)
+      const flatPath = `/${sig}`
+      const tryPaths = shape === 'flat' ? [flatPath]
+        : shape === 'legacy' ? [path]
+        : [flatPath, path]
+      for (const tryPath of tryPaths) {
         const url = `${scheme}://${host}${tryPath}`
         // Bounded probe: a dead/hung host must cost at most
         // HTTP_PROBE_TIMEOUT_MS, never the browser's connect timeout —
@@ -803,6 +827,10 @@ export class ContentBrokerDrone extends Drone {
             this.#mintOutcome(host, 'not-found')
             continue
           }
+          // Capability memo: this host serves real (non-HTML) bytes on this
+          // URL shape — remember it and stop probing the other shape. Set
+          // before verification: even mismatched bytes prove the shape.
+          this.#hostPathShape.set(host, tryPath === flatPath ? 'flat' : 'legacy')
           const buf = await res.arrayBuffer()
           const bytes = new Uint8Array(buf)
           if (!await this.#verifyBytes(bytes, sig)) {
@@ -913,7 +941,9 @@ export class ContentBrokerDrone extends Drone {
     const s = String(sig ?? '').toLowerCase().trim()
     if (!SIG_RE.test(s)) return null
 
-    // Coalesce concurrent fetches for the same sig.
+    // Coalesce concurrent fetches for the same sig — checked BEFORE the
+    // miss window so a caller arriving mid-cascade joins the in-flight
+    // resolution instead of getting a fast null off a stale miss record.
     const inFlight = this.#pendingFetches.get(s)
     if (inFlight) return inFlight
 
@@ -944,6 +974,25 @@ export class ContentBrokerDrone extends Drone {
       this.#fetchMissUntil.delete(s)
     }
 
+    // Re-check after the async local read — a concurrent caller may have
+    // registered the cascade while we were on the OPFS read.
+    const raced = this.#pendingFetches.get(s)
+    if (raced) return raced
+
+    // Register the WHOLE remote resolution (HTTP cascade + mesh fallback)
+    // BEFORE starting it, so every concurrent caller for this sig awaits
+    // ONE cascade — previously only the mesh leg coalesced, and N callers
+    // for the same missing sig each dialed the full HTTP tier walk.
+    const fetchPromise = this.#resolveRemote(s, type, timeoutMs)
+    this.#pendingFetches.set(s, fetchPromise)
+    try { return await fetchPromise }
+    finally { this.#pendingFetches.delete(s) }
+  }
+
+  /** The remote half of fetchBySig — HTTP-direct cascade, then the mesh
+   *  fallback for layers. Runs coalesced under #pendingFetches; records
+   *  a full-cascade miss (with backoff) when everything comes up empty. */
+  #resolveRemote = async (s: string, type: ContentType, timeoutMs: number): Promise<Uint8Array | null> => {
     // HTTP-direct path — try known domains' content endpoints first.
     // Per the layer-only-mesh doctrine, heavy bytes (resources, deps)
     // travel via HTTP exclusively; layers can fall back to mesh.
@@ -970,14 +1019,24 @@ export class ContentBrokerDrone extends Drone {
     // returns nothing (no known domains, or every candidate 404'd /
     // failed verify). Layers are tiny — typically <2KB of refs — so
     // the mesh round-trip is cheap.
-    const fetchPromise = this.#fetchOverMesh(s, type, timeoutMs)
-    this.#pendingFetches.set(s, fetchPromise)
-    try {
-      const bytes = await fetchPromise
-      if (!bytes) this.#noteFetchMiss(s)
-      return bytes
-    }
-    finally { this.#pendingFetches.delete(s) }
+    const bytes = await this.#fetchOverMesh(s, type, timeoutMs)
+    if (!bytes) this.#noteFetchMiss(s)
+    return bytes
+  }
+
+  /**
+   * Epoch-ms until which `sig` is negative-cached by the broker's
+   * exponential backoff (FETCH_MISS_TTL_MS doubling to MAX_MISS_TTL_MS),
+   * or 0 when the sig is not in a miss window. Store consults this so
+   * its own fixed negative cache never re-dials a cascade the broker
+   * has backed off. Lapsed entries are pruned on read.
+   */
+  public missUntil = (sig: string): number => {
+    const s = String(sig ?? '').toLowerCase().trim()
+    const until = this.#fetchMissUntil.get(s)
+    if (until === undefined) return 0
+    if (Date.now() >= until) { this.#fetchMissUntil.delete(s); return 0 }
+    return until
   }
 
   /**

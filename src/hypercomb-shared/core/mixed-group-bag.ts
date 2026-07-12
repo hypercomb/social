@@ -54,6 +54,7 @@ type NavigationLike = { goRaw?: (segments: readonly string[]) => void; replaceRa
 type ViewModeLike = EventTarget & { mode?: string }
 type DashboardLike = { isActive?: () => boolean }
 type StoreLike = { putResource(blob: Blob): Promise<string> }
+type CommitterLike = { commitSlotSet(segments: readonly string[], slot: string, sigs: readonly string[]): Promise<void> }
 type IocLike = { whenReady?: (key: string, cb: (v: unknown) => void) => void }
 
 export class MixedGroupBag {
@@ -399,8 +400,9 @@ export class MixedGroupBag {
     //    show-cell renders each tile in its OWN group's shape (websites → flower-pot,
     //    games → space-invader); the decorations:changed emit warms the kind-index /
     //    shape-index synchronously. (NOT a website page, so the website scan never
-    //    re-discovers it as a site.) This mirrors how the PARENT bag is committed
-    //    below — a direct history.commitLayer, not the async committer machine.
+    //    re-discovers it as a site.) Each child's bag is its own private
+    //    lineage (no contention), so these child commits stay direct; the
+    //    PARENT bag's children write below rides the LayerCommitter FIFO.
     // A CLUSTERED (orderedLayout / help) group carries per-tile role + group in
     // the payload, and BOTH header and action tiles need the group. Existing
     // action cells are "kept" (label unchanged), so writing only FRESH cells
@@ -444,16 +446,27 @@ export class MixedGroupBag {
     }))
     const childSigs = resolved.filter(s => s !== '')
 
-    await history.commitLayer(bagLocSig, { name: id, children: childSigs })
+    // The bag's children write rides the LayerCommitter FIFO (commitSlotSet:
+    // full-replace of the children slot with the sigs resolved above; name and
+    // any other slots are preserved from the bag's head). A direct
+    // history.commitLayer here was a read-modify-write OUTSIDE the FIFO —
+    // interleaved with a committer commit on the same bag, last-marker-wins
+    // silently dropped the other commit's child.
+    const committer = get<CommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
+    if (!committer?.commitSlotSet) {
+      console.warn('[mixed-group-bag] LayerCommitter unavailable — children not committed for', id)
+      return
+    }
+    await committer.commitSlotSet(segs, 'children', childSigs)
 
-    // The leaf commit above goes straight through history.commitLayer, bypassing
-    // LayerCommitter — so the history cursor and the lineage layer memo never learn
-    // a new head landed here. Left alone, re-showing while standing in the bag
-    // leaves the cursor one marker behind head ("rewound"), and show-cell's
-    // rewound-render path paints the PREVIOUS group's committed layer — the
-    // "switched group but old content / looks hung" bug under rapid switches. Drop
-    // the lineage memo and force the cursor to head for THIS bag so the next render
-    // reads the freshly-committed children. (On a fresh icon-click entry the cursor is
+    // Even through the committer, force the cursor to head for THIS bag: the
+    // history cursor and the lineage layer memo may still lag the new head.
+    // Left alone, re-showing while standing in the bag leaves the cursor one
+    // marker behind head ("rewound"), and show-cell's rewound-render path
+    // paints the PREVIOUS group's committed layer — the "switched group but
+    // old content / looks hung" bug under rapid switches. Drop the lineage
+    // memo and force the cursor to head for THIS bag so the next render reads
+    // the freshly-committed children. (On a fresh icon-click entry the cursor is
     // still bound to the prior location: refreshForLocation no-ops there and the
     // post-nav cursor.load lands at head on its own, so the guarded jumpToLatest is
     // correctly skipped.)

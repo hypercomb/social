@@ -29,10 +29,7 @@ type LineageLike = {
   domain?: () => string
   explorerSegments?: () => readonly string[]
 }
-type HistoryLike = {
-  sign(l: { domain?: () => string; explorerSegments?: () => readonly string[] }): Promise<string>
-  commitLayer(locationSig: string, layer: { name?: string; children?: string[] }): Promise<string>
-}
+type CommitterLike = { bootstrapIfEmpty(segments?: string[] | null): Promise<void> }
 type NavigationLike = { goRaw: (segments: readonly string[]) => void }
 type SequenceServiceLike = {
   get(name: string): { indexes: number[] } | null
@@ -124,8 +121,8 @@ export class SequenceEditorBee extends Worker {
   public async openEditor(name: string, anchorSegments: readonly string[]): Promise<void> {
     if (this.#active) return
     const lineage = window.ioc.get<LineageLike>('@hypercomb.social/Lineage')
-    const history = window.ioc.get<HistoryLike>('@diamondcoreprocessor.com/HistoryService')
-    if (!lineage || !history) return
+    const committer = window.ioc.get<CommitterLike>('@diamondcoreprocessor.com/LayerCommitter')
+    if (!lineage || !committer?.bootstrapIfEmpty) return
 
     this.#name = (name || 'default').trim() || 'default'
     this.#anchorSegments = anchorSegments.map(s => String(s ?? '').trim()).filter(Boolean)
@@ -138,13 +135,13 @@ export class SequenceEditorBee extends Worker {
     this.#hoverIndex = null
 
     // Mint an empty hidden layer at a one-off segment and navigate in.
+    // bootstrapIfEmpty auto-mints the 00000000 `{name}` marker — byte-
+    // identical to the old direct commitLayer of `{name, children: []}`
+    // (canonicalizeLayer strips empty slots), without a raw commit
+    // outside the LayerCommitter FIFO.
     const salt = Date.now().toString(36)
     this.#bagSegments = [`seq-${salt}`]
-    const bagLocSig = await history.sign({
-      domain: lineage.domain,
-      explorerSegments: () => this.#bagSegments,
-    })
-    await history.commitLayer(bagLocSig, { name: this.#bagSegments[0], children: [] })
+    await committer.bootstrapIfEmpty([...this.#bagSegments])
 
     this.#active = true
     this.#persistReturn()
