@@ -50,6 +50,11 @@ const REGISTRY_SNAPSHOT_KEY = '@hypercomb.social/RegistrySnapshot'
 // Recoverable receipt of branches this hive has folded in — the baseline the
 // pending-diff (portal counts) and the un-fold (remove) path read from.
 const FOLDED_KEY = 'hc:last-folded'
+// Folds the participant asked for that haven't LANDED yet — deferred by the
+// complete-or-defer guard (or a failed post-commit read-back). Persisted so a
+// page refresh RESUMES the retry ladder instead of silently cancelling the
+// adopt: the user watched the import, reloaded, and the fold must still be owed.
+const PENDING_FOLDS_KEY = 'hc:pending-folds'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
@@ -100,6 +105,9 @@ interface RegistrySnapshotStoreLike { snapshot?: RegistrySnapshotLike | null }
  *  branch record (re-enable re-folds) and history keeps the prior marker +
  *  the content-addressed bytes, so nothing is ever lost. */
 interface FoldedEntry { sig: string; name: string; at: string[] }
+
+/** A deferred fold's durable intent (see PENDING_FOLDS_KEY). */
+interface PendingFold { sig: string; at: string[]; domain?: string; mode: 'fold' | 'sync' }
 
 interface TileActionPayload {
   action: string
@@ -296,6 +304,17 @@ export class SwarmAdoptDrone extends Drone {
       'features:download',
       (p) => { void this.#downloadFeature(p) },
     )
+
+    // ── resume folds a refresh interrupted ─────────────────────────────
+    // Each deferred fold persisted its intent (PENDING_FOLDS_KEY); re-enter
+    // it through the same bounded ladder. The first rung fires 20s out, so
+    // boot warming and IoC registration are long done by the first attempt.
+    // A landed commit / exists / ladder give-up clears the entry.
+    try {
+      for (const f of this.#loadPendingFolds()) {
+        this.#scheduleFoldRetry(f.sig, f.at, f.domain, f.mode === 'sync' ? 'sync' : 'fold')
+      }
+    } catch { /* best-effort — a manual re-adopt always works */ }
   }
 
   #ioc = () => (window as { ioc?: { get: (k: string) => unknown } }).ioc
@@ -497,6 +516,11 @@ export class SwarmAdoptDrone extends Drone {
       // the participant's current position.
       EffectBus.emit('features:outcome', { cell: branch.label, kind: featureKind ?? '', ok: true, message: '' })
       EffectBus.emit('tile:action', { action: 'features', label: branch.label, segments: [...branch.at, branch.label] })
+    } else if (res === 'rewound') {
+      // The history cursor is viewing the past — the committer refuses to
+      // write, so a fold now would be a phantom. Only the user can return
+      // to head; say so instead of blaming reachability.
+      this.#rowOutcome(branch.label, featureKind, false, `couldn't adopt "${branch.label}" — you're viewing history here; return to the present first, then adopt again`)
     } else {
       // 'unavailable' — bytes unreachable or a cold-sibling abort. Loud, not
       // console-only: the user clicked and must see WHY nothing appeared.
@@ -831,7 +855,7 @@ export class SwarmAdoptDrone extends Drone {
     atSegments: readonly string[],
     domain?: string,
     mode: 'fold' | 'sync' = 'fold',
-  ): Promise<'committed' | 'exists' | 'unavailable'> => {
+  ): Promise<'committed' | 'exists' | 'unavailable' | 'rewound'> => {
     const run = () => this.#doCommitBranch(branchSig, atSegments, domain, mode)
     const next = this.#commitLock.then(run, run)
     this.#commitLock = next.catch(() => undefined)
@@ -843,9 +867,10 @@ export class SwarmAdoptDrone extends Drone {
   // publisher may just be mid-upload (their availability gate holds the
   // announce until receipts land, but a receiver can race a byte the host
   // hasn't confirmed yet), or a mirror may come online. Bounded + per-sig
-  // deduped; success or ladder-end clears the slot. Timers, not a queue —
-  // a page refresh drops pending retries, and that's fine: the user's next
-  // adopt click starts fresh.
+  // deduped; success or ladder-end clears the slot. The timers are
+  // in-memory, but the INTENT is persisted (PENDING_FOLDS_KEY): a page
+  // refresh mid-ladder resumes it on the next boot instead of silently
+  // cancelling an adopt the user watched download.
   readonly #foldRetryAttempts = new Map<string, number>()
   static readonly #FOLD_RETRY_DELAYS_MS = [20_000, 60_000, 180_000]
 
@@ -858,12 +883,14 @@ export class SwarmAdoptDrone extends Drone {
     const attempt = this.#foldRetryAttempts.get(branchSig) ?? 0
     if (attempt >= SwarmAdoptDrone.#FOLD_RETRY_DELAYS_MS.length) {
       this.#foldRetryAttempts.delete(branchSig)
+      this.#clearPendingFold(branchSig)
       EffectBus.emit('activity:log', {
         message: `couldn't fetch all of "${branchSig.slice(0, 8)}…" — parts aren't reachable from any host yet; adopt it again later`,
         icon: '○',
       })
       return
     }
+    this.#persistPendingFold({ sig: branchSig, at: [...atSegments], domain, mode })
     // attempt+1 marks the slot BEFORE the timer so overlapping deferrals
     // for the same sig don't stack parallel ladders.
     this.#foldRetryAttempts.set(branchSig, attempt + 1)
@@ -879,7 +906,9 @@ export class SwarmAdoptDrone extends Drone {
           }
         }
         // 'unavailable' re-entered #doCommitBranch, which re-scheduled the
-        // next rung (or ended the ladder) — nothing to do here.
+        // next rung (or ended the ladder) — nothing to do here. 'rewound'
+        // stalls the ladder on purpose: only the user can return to head,
+        // and the persisted intent resumes on the next boot.
       }).catch(() => undefined)
     }, SwarmAdoptDrone.#FOLD_RETRY_DELAYS_MS[attempt])
   }
@@ -895,7 +924,7 @@ export class SwarmAdoptDrone extends Drone {
     atSegments: readonly string[],
     domain?: string,
     mode: 'fold' | 'sync' = 'fold',
-  ): Promise<'committed' | 'exists' | 'unavailable'> => {
+  ): Promise<'committed' | 'exists' | 'unavailable' | 'rewound'> => {
     const sig = String(branchSig ?? '').toLowerCase().trim()
     if (!SIG_RE.test(sig)) return 'unavailable'
 
@@ -905,6 +934,19 @@ export class SwarmAdoptDrone extends Drone {
     const committer = ioc?.get?.(COMMITTER_KEY) as CommitterLike | undefined
     const lineage = ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined
     if (!broker?.adopt || !history?.getLayerBySig || !committer?.update || !lineage) return 'unavailable'
+
+    // REWOUND = read-only. importTree refuses to commit while the cursor is
+    // viewing history (its guard returns void), so a fold attempted now would
+    // resolve as success while writing NOTHING — the "adopted tile vanishes
+    // on refresh" phantom. Refuse up front with an outcome the click path can
+    // explain honestly; no retry ladder (only the user can return to head).
+    const cursor = ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as
+      | { state?: { rewound?: boolean } }
+      | undefined
+    if (cursor?.state?.rewound) {
+      console.warn('[swarm-adopt] fold refused — history cursor is rewound', { sig: sig.slice(0, 8) })
+      return 'rewound'
+    }
 
     try {
       // Resolution protocol: pull the branch's LAYER closure into our pool so
@@ -962,14 +1004,21 @@ export class SwarmAdoptDrone extends Drone {
       // are warm (rendered), so this only bites truly-cold members.
       const { names: existing, coldMiss } = await childNamesOfStrict(history, parent)
       if (coldMiss) {
+        // Defer, don't dead-end: the miss is usually the boot drain still
+        // warming the pool — the same ladder that re-runs an incomplete
+        // closure re-runs this, and the whole fold is idempotent.
         console.warn('[swarm-adopt] fold aborted — cold sibling(s) unresolved; refusing lossy children SET', { at })
+        this.#scheduleFoldRetry(sig, atSegments, domain, mode)
         return 'unavailable'
       }
       const alreadyChild = existing.includes(name)
       // FOLD is idempotent — a tile already present here is left untouched.
       // SYNC deliberately falls through to re-home the publisher's CURRENT
       // subtree over the stale local copy (the "pull their latest" gesture).
-      if (alreadyChild && mode !== 'sync') return 'exists'
+      if (alreadyChild && mode !== 'sync') {
+        this.#clearPendingFold(sig)
+        return 'exists'
+      }
 
       // Re-home the subtree and fold the name into the parent's children in ONE
       // mechanical importTree cascade — each affected ancestor commits exactly
@@ -1034,6 +1083,21 @@ export class SwarmAdoptDrone extends Drone {
         { segments: at, layer: { ...(parent ?? {}), children: alreadyChild ? [...existing] : [...existing, name] } },
         ...treeUpdates,
       ])
+
+      // READ-BACK: resolve the fold target through the SAME path a cold boot
+      // uses before reporting success. importTree resolves as void even when
+      // it refused to write (a cursor that rewound mid-await, a machine
+      // refusal), and a 'committed' that didn't land is exactly the "adopted
+      // tile vanishes on refresh" report — the live peer projection keeps the
+      // screen looking right until then. Defer + retry instead of lying.
+      const landed = await resolveLayerAt(history, lineage.domain, [...at, name])
+      if (!landed) {
+        console.warn('[swarm-adopt] fold did not land — no marker after importTree; deferring', { sig: sig.slice(0, 8), at })
+        this.#scheduleFoldRetry(sig, atSegments, domain, mode)
+        return 'unavailable'
+      }
+      this.#clearPendingFold(sig)
+
       // Remember this branch root so the first visit to it (and to any page
       // beneath it) fits-to-content instead of opening at an arbitrary scale.
       // Participant-local — never folded into the layer (see adopted-roots.ts).
@@ -1172,6 +1236,34 @@ export class SwarmAdoptDrone extends Drone {
   }
   #saveFolded = (entries: FoldedEntry[]): void => {
     try { localStorage.setItem(FOLDED_KEY, JSON.stringify(entries)) } catch { /* no localStorage — diff degrades */ }
+  }
+
+  // ── pending (deferred) folds — the durable intent behind the ladder ──
+  // Keyed by branch sig (one owed fold per branch; a newer target wins).
+  // Written on every deferral, cleared on landed commit / exists / ladder
+  // give-up, resumed by the constructor on the next boot.
+  #loadPendingFolds = (): PendingFold[] => {
+    try {
+      const raw = localStorage.getItem(PENDING_FOLDS_KEY)
+      const arr = raw ? JSON.parse(raw) : []
+      return Array.isArray(arr)
+        ? arr.filter((e: unknown): e is PendingFold =>
+            !!e
+            && SIG_RE.test(String((e as PendingFold).sig ?? ''))
+            && Array.isArray((e as PendingFold).at))
+        : []
+    } catch { return [] }
+  }
+  #savePendingFolds = (entries: PendingFold[]): void => {
+    try { localStorage.setItem(PENDING_FOLDS_KEY, JSON.stringify(entries)) } catch { /* no localStorage — retries stay session-only */ }
+  }
+  #persistPendingFold = (f: PendingFold): void => {
+    this.#savePendingFolds([...this.#loadPendingFolds().filter(e => e.sig !== f.sig), f])
+  }
+  #clearPendingFold = (sig: string): void => {
+    const all = this.#loadPendingFolds()
+    const rest = all.filter(e => e.sig !== sig)
+    if (rest.length !== all.length) this.#savePendingFolds(rest)
   }
 
   // ── un-fold (remove) a tile from the hive membership — recoverable ──

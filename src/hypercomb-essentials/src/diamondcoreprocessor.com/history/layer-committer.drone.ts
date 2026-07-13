@@ -592,7 +592,14 @@ export class LayerCommitter {
     if (updates.length === 0) return
 
     const cursor = get<HistoryCursorService>('@diamondcoreprocessor.com/HistoryCursorService')
-    if (cursor?.state?.rewound) return
+    if (cursor?.state?.rewound) {
+      // Never commit while the cursor is rewound (the assembled state reflects
+      // the past view) — but never SILENTLY: a caller that resolves this void
+      // as success (paste/adopt fold) would report committed while nothing was
+      // written, and the work vanishes on the next refresh.
+      console.warn('[LayerCommitter] importTree skipped — history cursor is rewound; nothing was committed', { updates: updates.length })
+      return
+    }
 
     const lineage = get<Lineage>('@hypercomb.social/Lineage')
     const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
