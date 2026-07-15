@@ -121,7 +121,13 @@ function get-relative-file-path {
     [string]$FullPath
   )
 
-  $baseUri = New-Object System.Uri(($BasePath.TrimEnd('\') + '\'))
+  # The trailing separator must match the platform: on Linux a '\' is NOT a
+  # path separator, so a base of "<dist>\" makes System.Uri treat "dist\" as a
+  # file and MakeRelativeUri keeps "dist/" in every relative path — which
+  # silently uploaded the whole payload under a dcp/dist/ prefix no consumer
+  # ever reads (all flat-layout CI publishes were dark until 2026-07-15).
+  $separator = [System.IO.Path]::DirectorySeparatorChar
+  $baseUri = New-Object System.Uri(($BasePath.TrimEnd('\', '/') + $separator))
   $fileUri = New-Object System.Uri($FullPath)
   $relativeUri = $baseUri.MakeRelativeUri($fileUri).ToString()
 
@@ -443,6 +449,14 @@ function get-content-type {
 foreach ($file in $files) {
   $relativePath = get-relative-file-path -BasePath $resolvedSource -FullPath $file.FullName
   $blobName = if ($resolvedDestination) { "$resolvedDestination/$relativePath" } else { $relativePath }
+
+  # Every enumerated file must resolve to a name consumers can actually
+  # fetch: a flat sig, a sigbag entry, a legacy typed path, or manifest.json.
+  # Anything else means relative-path resolution broke (e.g. the dist/ prefix
+  # bug) — fail loudly instead of publishing 300 unreachable blobs green.
+  if (-not (is-content-addressed -RelativePath $relativePath) -and $relativePath -ne 'manifest.json') {
+    fail "unexpected blob name '$relativePath' for '$($file.FullName)' — relative path resolution is broken; refusing to upload unreachable content"
+  }
 
   # content-addressed files: skip if blob already exists on remote.
   # We require BOTH the metadata check AND the public HTTP HEAD to pass
