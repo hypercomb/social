@@ -543,3 +543,38 @@ export const resolveResourceSignatures = async (
   await walk(properties)
   return resolved
 }
+
+// ── Fresh-create invalidation ────────────────────────────────────────
+//
+// A create that RESET a location (typing a name whose previous tile was
+// deleted — LayerCommitter emits `cell:fresh`) wipes the layer's
+// `properties` slot in truth, but the participant-local index still maps
+// the location to the OLD props sig — the render fast path would
+// resurrect the deleted tile's image onto the fresh tile. Drop the
+// lineage-keyed entry (legacy label entries are shared across locations
+// and stay, per the remover doctrine above) and broadcast
+// `cell:0000-changed` with the dropped props' keys so nurse caches let
+// go too. The emitter uses emitTransient (no last-value replay — a
+// replay to a late-loading bundle could clear an entry written AFTER
+// the reset). Idempotent: this module is inlined per-bee-bundle, so
+// several copies of this handler may run per event — the delete and
+// the re-broadcast are both harmless on repeat.
+EffectBus.on<{ cell?: string; segments?: string[] }>('cell:fresh', p => {
+  void (async () => {
+    const cell = p?.cell?.trim()
+    if (!cell) return
+    const key = await cellLocationSig(p?.segments ?? [], cell)
+    if (!key) return
+    const index = readTilePropsIndex()
+    const oldSig = index[key]
+    if (!oldSig) return
+    delete index[key]
+    writeTilePropsIndex(index)
+    let keys: string[] = []
+    try {
+      const blob = await iocGet<StoreLike>(STORE_KEY)?.getResource?.(oldSig)
+      if (blob) keys = Object.keys(JSON.parse(await blob.text()) ?? {})
+    } catch { /* old props unreadable — nurses re-read on next nav */ }
+    if (keys.length) EffectBus.emit('cell:0000-changed', { cacheKey: key, keys })
+  })()
+})

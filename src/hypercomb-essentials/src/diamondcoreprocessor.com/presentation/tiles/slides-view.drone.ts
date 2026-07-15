@@ -33,7 +33,7 @@
 // guard, fixed host below the Pixi layer, `view:active` canvas/chrome hiding —
 // zero shell edits) and PhotoView's image fit (object-fit:contain, max vw/vh).
 
-import { Drone, RESOURCE_URL_PREFIX } from '@hypercomb/core'
+import { Drone, RESOURCE_URL_PREFIX, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { childSigsOf } from '../../history/layer-placement.js'
 import { isFeatureHidden } from '../../sharing/feature-hidden.js'
 import { DECK_KIND, SLIDE_KIND } from '../../commands/present.queen.js'
@@ -456,7 +456,8 @@ export class SlidesViewDrone extends Drone {
     // Empty-state guide (shown when the deck has no diagram tiles yet).
     const empty = document.createElement('div')
     empty.style.cssText = `color:${DIM};font-size:15px;line-height:1.6;text-align:center;max-width:34rem;padding:2rem;`
-    empty.textContent = 'No diagram tiles here yet. Add a child tile, then run /present slide on it to connect an SVG or image.'
+    const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
+    empty.textContent = i18n?.t('slides.empty') ?? 'No diagram tiles here yet. Add a child tile, then run /present slide on it to connect an SVG or image.'
     host.appendChild(empty)
 
     this.#mount = { host, deckKey, slides, stage, titleEl, captionEl, counterEl, dots, empty }

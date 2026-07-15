@@ -1056,5 +1056,17 @@
   "sync.pending": "{n} changes waiting to back up to {host}",
   "sync.unauthorized": "{host} rejected this device — your changes aren't backing up yet",
   "sync.backed-up": "backed up to {host}",
-  "features.note.noanswer": "no answer — try again"
+  "features.note.noanswer": "no answer — try again",
+  "review-gate.title": "Feature not enabled",
+  "review-gate.body": "This page comes from another participant and has not been reviewed. Review its code, then enable it — nothing runs until you do.",
+  "review-gate.action": "Review & enable",
+  "slides.empty": "No diagram tiles here yet. Add a child tile, then run /present slide on it to connect an SVG or image.",
+  "history.branch.title": "New path forward",
+  "history.branch.message": "Editing from an earlier state — your changes create a new branch from here.",
+  "move.rewound.title": "Viewing history",
+  "move.rewound.message": "Can't move while scrubbed back — return to the latest (Restore) to edit.",
+  "copy.rewound.title": "Viewing history",
+  "copy.rewound.message": "Can't copy while scrubbed back — return to the latest (Restore) to edit.",
+  "swarm.availability-hold.title": "Uploading before sharing",
+  "swarm.availability-hold.message": "Shared tiles announce once their content is confirmed on your host — uploads are in progress."
 }

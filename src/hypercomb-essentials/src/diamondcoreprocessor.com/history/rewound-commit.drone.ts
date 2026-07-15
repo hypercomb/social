@@ -7,7 +7,7 @@
 //   1. Enters move mode (if not already active) so the user can reshape
 //   2. Reconciles selection — drops labels that no longer exist at the new head
 //   3. Shows a one-time toast explaining the branch
-import { Drone, EffectBus } from '@hypercomb/core'
+import { Drone, EffectBus, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import type { SelectionService } from '../selection/selection.service.js'
 import type { MoveDroneApi } from '../move/move.drone.js'
 
@@ -67,10 +67,11 @@ export class RewoundCommitDrone extends Drone {
   #showBranchToast(): void {
     if (this.#toastShown) return
     this.#toastShown = true
+    const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
     EffectBus.emit('toast:show', {
       type: 'info',
-      title: 'New path forward',
-      message: 'Editing from an earlier state — your changes create a new branch from here.',
+      title: i18n?.t('history.branch.title') ?? 'New path forward',
+      message: i18n?.t('history.branch.message') ?? 'Editing from an earlier state — your changes create a new branch from here.',
     })
   }
 }

@@ -123,12 +123,15 @@ export class ActivityLogComponent implements OnDestroy {
 
   /** Revert a remove — emit `cell:added` so the children-slot
    *  subscriber re-includes the cell in the parent layer's children.
-   *  No folder mint: the layer is authoritative. */
+   *  No folder mint: the layer is authoritative. `revive: true` links
+   *  the cell's existing bag head — bringing its subtree back is the
+   *  point of this gesture, unlike a plain create (which resets the
+   *  location to a fresh, childless tile). */
   async #revertRemove(cell: string): Promise<void> {
     const lineage = get('@hypercomb.social/Lineage') as Lineage
     const segments = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? ''))
     this.#reverting = true
-    EffectBus.emit('cell:added', { cell, segments })
+    EffectBus.emit('cell:added', { cell, segments, revive: true })
     this.#reverting = false
     await new hypercomb().act()
   }

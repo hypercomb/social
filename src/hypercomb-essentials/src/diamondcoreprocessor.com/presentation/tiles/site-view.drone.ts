@@ -13,7 +13,7 @@
 // navigates the lineage one level down, and that cell's `context`
 // page mounts. No bundle, no manifest, no path-table.
 
-import { Drone, SITE_VIEW_IOC_KEY, RESOURCE_URL_PREFIX } from '@hypercomb/core'
+import { Drone, SITE_VIEW_IOC_KEY, RESOURCE_URL_PREFIX, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
@@ -773,16 +773,17 @@ export class SiteViewDrone extends Drone {
       card = document.createElement('div')
       card.id = 'hc-feature-review'
       card.style.cssText = REVIEW_GATE_CSS
+      const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
       const title = document.createElement('div')
       title.style.cssText = 'font-size:1.25rem;font-weight:600;color:#eaf3f9'
-      title.textContent = 'Feature not enabled'
+      title.textContent = i18n?.t('review-gate.title') ?? 'Feature not enabled'
       const body = document.createElement('div')
       body.style.cssText = 'max-width:34rem;line-height:1.5;opacity:.85'
-      body.textContent = 'This page comes from another participant and has not been reviewed. Review its code, then enable it — nothing runs until you do.'
+      body.textContent = i18n?.t('review-gate.body') ?? 'This page comes from another participant and has not been reviewed. Review its code, then enable it — nothing runs until you do.'
       const review = document.createElement('button')
       review.type = 'button'
       review.className = 'hc-review-btn'
-      review.textContent = 'Review & enable'
+      review.textContent = i18n?.t('review-gate.action') ?? 'Review & enable'
       review.style.cssText = 'margin-top:.5rem;padding:.6rem 1.2rem;border:1px solid rgba(126,182,214,.6);border-radius:.4rem;background:rgba(126,182,214,.16);color:#eaf3f9;cursor:pointer;font-size:.95rem'
       card.append(title, body, review)
       document.body.appendChild(card)

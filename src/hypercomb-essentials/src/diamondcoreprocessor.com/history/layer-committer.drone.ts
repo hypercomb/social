@@ -92,7 +92,12 @@ type CommitDelta =
   | { kind: 'sig'; slot: string; op: 'append' | 'removeSig'; sig: string }
   | { kind: 'sig-swap'; slot: string; from: string; to: string }
   | { kind: 'set'; slot: string; sigs: readonly string[] }
-  | { kind: 'name'; slot: 'children'; op: 'add' | 'remove'; cell: string }
+  // `revive` (add only): link the location bag's CURRENT head instead of
+  // resetting it — the undo-a-remove gesture (activity log revert). A plain
+  // add of a name the parent does not list is a CREATE and must yield a
+  // fresh, childless tile even when the location bag holds a deleted
+  // tile's history (delete never touches the child's bag).
+  | { kind: 'name'; slot: 'children'; op: 'add' | 'remove'; cell: string; revive?: boolean }
   // deltas: N surgical sig-space edits against ONE slot in ONE commit —
   // the sig-native cut/copy/paste primitive. Unlike 'set'/'layer' this
   // never re-lists the slot, so a cold sibling can't be wiped and no
@@ -281,9 +286,9 @@ export class LayerCommitter {
     // Listeners that DON'T originate commits (show-cell's slot machine,
     // activity log, etc.) don't care about either flag and process the
     // event normally, which is exactly the reconciliation we want.
-    EffectBus.on<{ cell?: string; segments?: string[]; fromCascade?: boolean; viaUpdate?: boolean }>('cell:added',   p => {
+    EffectBus.on<{ cell?: string; segments?: string[]; fromCascade?: boolean; viaUpdate?: boolean; revive?: boolean }>('cell:added',   p => {
       if (p?.fromCascade || p?.viaUpdate) return
-      this.#queueChildName(p?.segments, 'add', p?.cell)
+      this.#queueChildName(p?.segments, 'add', p?.cell, p?.revive)
     })
     EffectBus.on<{ cell?: string; segments?: string[]; fromCascade?: boolean; viaUpdate?: boolean }>('cell:removed', p => {
       if (p?.fromCascade || p?.viaUpdate) return
@@ -370,6 +375,7 @@ export class LayerCommitter {
     segments: string[] | null | undefined,
     op: 'add' | 'remove',
     cell?: string,
+    revive?: boolean,
   ): void {
     const trimmed = cell ? String(cell).trim() : ''
     if (!trimmed) {
@@ -378,7 +384,7 @@ export class LayerCommitter {
     }
     this.#machine.request({
       segments: this.#cleanSegments(segments),
-      delta: { kind: 'name', slot: 'children', op, cell: trimmed },
+      delta: { kind: 'name', slot: 'children', op, cell: trimmed, ...(revive ? { revive } : {}) },
     })
   }
 
@@ -652,6 +658,36 @@ export class LayerCommitter {
     // transitions: pathKey → { prevSig, newSig, name } produced by this commit.
     const transitions = new Map<string, { prevSig: string; newSig: string; name: string }>()
 
+    // PRE-batch child names under a parent path — memoised per run. Read
+    // during leaf processing (deepest-first, so every parent is read before
+    // it commits) to decide whether a bare `{name}` update is a CREATE (the
+    // parent does not list the name) or a pass-through of a live tile
+    // (nested create `a/b/c` walking through an existing `a`).
+    const parentChildNames = new Map<string, Promise<Set<string>>>()
+    const namesUnder = (parentSegs: string[]): Promise<Set<string>> => {
+      const key = encode(parentSegs)
+      let pending = parentChildNames.get(key)
+      if (!pending) {
+        pending = (async () => {
+          const parentName = parentSegs.length === 0 ? ROOT_NAME : parentSegs[parentSegs.length - 1]
+          const parentLoc = await history.sign({
+            domain: lineage.domain,
+            explorerSegments: () => parentSegs,
+          } as Lineage)
+          const head = await history.getLayerBySig(await history.latestMarkerSigFor(parentLoc, parentName))
+          const names = new Set<string>()
+          const children = Array.isArray(head?.children) ? head.children as readonly unknown[] : []
+          await Promise.all(children.map(async raw => {
+            const child = await history.getLayerBySig(String(raw))
+            if (child?.name) names.add(child.name)
+          }))
+          return names
+        })()
+        parentChildNames.set(key, pending)
+      }
+      return pending
+    }
+
     for (const pathKey of ordered) {
       const segments = decode(pathKey)
       const ancestorName = segments.length === 0 ? ROOT_NAME : segments[segments.length - 1]
@@ -662,10 +698,26 @@ export class LayerCommitter {
 
       const prevSig = await history.latestMarkerSigFor(ancestorLocSig, ancestorName)
       const prevLayer = await history.getLayerBySig(prevSig)
-      const machine = LayerMachine.fromLayer(prevLayer, ancestorName, segments)
 
-      // Apply this path's leaf update, if it has one.
       const update = updateByPath.get(pathKey)
+
+      // Fresh-create guard: a bare `{name}` update (no slot arrays — the
+      // typed-create shape) for a name the parent does NOT currently list
+      // is a CREATE, and a create yields a fresh tile. The location bag
+      // may still hold a previously-deleted tile's full history (delete
+      // only unlinks from the parent; the bag survives for undo) — so
+      // hydrating from its head would resurrect the old subtree, notes,
+      // and tags into the "new" tile. Hydrate empty instead; the commit
+      // below appends a bare marker (old markers stay — undo inside the
+      // tile still walks back). Updates that carry slot arrays are
+      // explicit layer state (move / adopt / paste) and hydrate from the
+      // head as before, as do bare updates for live names (nested create
+      // passing through an existing tile must not touch it).
+      const fresh = update !== undefined
+        && segments.length > 0
+        && Object.entries(update.layer).every(([k, v]) => k === 'name' || !Array.isArray(v))
+        && !(await namesUnder(segments.slice(0, -1))).has(ancestorName)
+      const machine = LayerMachine.fromLayer(fresh ? null : prevLayer, ancestorName, segments)
       if (update) {
         for (const [slot, raw] of Object.entries(update.layer)) {
           if (slot === 'name') continue
@@ -739,6 +791,15 @@ export class LayerCommitter {
 
       const newSig = await history.commitLayer(ancestorLocSig, machine.output())
       transitions.set(pathKey, { prevSig, newSig, name: ancestorName })
+
+      // A fresh create that actually RESET a rich head: participant-local
+      // caches keyed by this location (props index, nurses) must drop, or
+      // the deleted tile's image resurrects onto the fresh tile.
+      // Transient: a point-in-time event; replaying it to a late
+      // subscriber could clear an entry written AFTER the reset.
+      if (fresh && !isBareLayer(prevLayer)) {
+        EffectBus.emitTransient('cell:fresh', { cell: ancestorName, segments: segments.slice(0, -1) })
+      }
 
       // Post-commit reconcile — mirror what #commit emits so subscribers
       // (show-cell's slot machine, activity log, substrate, tile-overlay)
@@ -987,7 +1048,35 @@ export class LayerCommitter {
               domain: lineage.domain,
               explorerSegments: () => [...sub, d.cell],
             } as Lineage)
-            const cellSig = await history.latestMarkerSigFor(cellLocSig, d.cell)
+            const headSig = await history.latestMarkerSigFor(cellLocSig, d.cell)
+            let cellSig = headSig
+            // Adding a name the parent does NOT list is a CREATE, and a
+            // create yields a fresh tile. The location bag may still hold
+            // a previously-deleted tile's full history (delete only
+            // unlinks from the parent; the bag survives for undo) — so
+            // linking the bag head would resurrect the old subtree.
+            // Reset the head to the bare {name} layer instead; the old
+            // markers stay (undo inside the tile still walks back).
+            // `revive` opts back into head-linking — the undo-a-remove
+            // gesture, where resurrection is exactly the point.
+            if (!d.revive) {
+              let listed = false
+              for (const sig of machine.getSlot('children') as readonly string[]) {
+                const child = await history.getLayerBySig(String(sig))
+                if (child?.name === d.cell) { listed = true; break }
+              }
+              if (!listed) {
+                cellSig = await history.commitLayer(cellLocSig, { name: d.cell })
+                if (cellSig !== headSig) {
+                  // A real reset happened (head was rich) — participant-
+                  // local caches keyed by this location must drop.
+                  // Transient: a point-in-time event; replaying it to a
+                  // late subscriber could clear an entry written AFTER
+                  // the reset.
+                  EffectBus.emitTransient('cell:fresh', { cell: d.cell, segments: sub })
+                }
+              }
+            }
             machine.apply({ slot: 'children', op: 'append', sig: cellSig })
           } else if (d.op === 'remove') {
             const prevChildren = machine.getSlot('children') as readonly string[]

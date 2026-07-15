@@ -481,10 +481,11 @@ export class MoveDrone extends Drone {
     // same guard copy/reorder use. Feedback, then decline; never half-run.
     const cursor = window.ioc.get<{ state?: { rewound?: boolean } }>('@diamondcoreprocessor.com/HistoryCursorService')
     if (cursor?.state?.rewound) {
+      const i18nMove = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
       EffectBus.emit('toast:show', {
         type: 'info',
-        title: 'Viewing history',
-        message: 'Can’t move while scrubbed back — return to the latest (Restore) to edit.',
+        title: i18nMove?.t('move.rewound.title') ?? 'Viewing history',
+        message: i18nMove?.t('move.rewound.message') ?? "Can’t move while scrubbed back — return to the latest (Restore) to edit.",
       })
       this.cancelMove(source)
       return
@@ -797,10 +798,11 @@ export class MoveDrone extends Drone {
     // rewound (scrub-back is view-only). Feedback, then decline — never half-run.
     const cursor = window.ioc.get<{ state?: { rewound?: boolean } }>('@diamondcoreprocessor.com/HistoryCursorService')
     if (cursor?.state?.rewound) {
+      const i18nCopy = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
       EffectBus.emit('toast:show', {
         type: 'info',
-        title: 'Viewing history',
-        message: 'Can’t copy while scrubbed back — return to the latest (Restore) to edit.',
+        title: i18nCopy?.t('copy.rewound.title') ?? 'Viewing history',
+        message: i18nCopy?.t('copy.rewound.message') ?? "Can’t copy while scrubbed back — return to the latest (Restore) to edit.",
       })
       this.emitEffect('move:copy-drag', null)
       return false

@@ -26,7 +26,7 @@
 // subscription on the same sig auto-triggers that paint when an event
 // arrives, so we don't need to dispatch a render signal ourselves.
 
-import { Drone, EffectBus, SignatureService } from '@hypercomb/core'
+import { Drone, EffectBus, SignatureService, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
@@ -2262,10 +2262,11 @@ export class SwarmDrone extends Drone {
       // heartbeat re-runs this constantly while a big drain lands).
       if (!SwarmDrone.#availabilityHoldToasted) {
         SwarmDrone.#availabilityHoldToasted = true
+        const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
         EffectBus.emit('toast:show', {
           type: 'info',
-          title: 'Uploading before sharing',
-          message: 'Shared tiles announce once their content is confirmed on your host — uploads are in progress.',
+          title: i18n?.t('swarm.availability-hold.title') ?? 'Uploading before sharing',
+          message: i18n?.t('swarm.availability-hold.message') ?? 'Shared tiles announce once their content is confirmed on your host — uploads are in progress.',
         })
       }
     }

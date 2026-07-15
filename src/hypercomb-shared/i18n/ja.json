@@ -1056,5 +1056,17 @@
   "sync.pending": "{n} 件の変更が {host} へのバックアップを待っています",
   "sync.unauthorized": "{host} がこの端末を拒否しました — 変更はまだバックアップされていません",
   "sync.backed-up": "{host} にバックアップしました",
-  "features.note.noanswer": "応答がありません — もう一度お試しください"
+  "features.note.noanswer": "応答がありません — もう一度お試しください",
+  "review-gate.title": "機能が有効になっていません",
+  "review-gate.body": "このページは他の参加者からのもので、まだレビューされていません。コードをレビューしてから有効にしてください — 有効にするまで何も実行されません。",
+  "review-gate.action": "レビューして有効にする",
+  "slides.empty": "ダイアグラムタイルがまだありません。子タイルを追加し、/present slide を実行してSVGまたは画像を接続してください。",
+  "history.branch.title": "新しい道へ",
+  "history.branch.message": "過去の状態から編集しています — 変更はここから新しいブランチを作成します。",
+  "move.rewound.title": "履歴を表示中",
+  "move.rewound.message": "巻き戻し中は移動できません — 最新の状態（復元）に戻してから編集してください。",
+  "copy.rewound.title": "履歴を表示中",
+  "copy.rewound.message": "巻き戻し中はコピーできません — 最新の状態（復元）に戻してから編集してください。",
+  "swarm.availability-hold.title": "共有前にアップロード中",
+  "swarm.availability-hold.message": "共有タイルはホストでコンテンツが確認されるとアナウンスされます — アップロードが進行中です。"
 }
