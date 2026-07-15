@@ -9,6 +9,21 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
 import { DraftPayloadCacheService } from '../core/draft-payload-cache.service'
 import { compilePayload } from '../core/compile-payload'
 
+// The embedding shell's origin, derived from the embed context — DCP runs
+// inside the shell's portal iframe (hypercomb.io in production, a localhost
+// port in dev). A hardcoded dev origin here made the browser silently drop
+// every confirm message in production. ancestorOrigins is the reliable
+// source (the portal iframe is loaded with referrerpolicy="no-referrer",
+// so document.referrer is empty); browsers without it fall back to the
+// wildcard announce the sentinel handshake already uses.
+const parentOrigin = (() => {
+  try {
+    const ancestor = window.location.ancestorOrigins?.[0]
+    if (ancestor) return ancestor
+    return document.referrer ? new URL(document.referrer).origin : '*'
+  } catch { return '*' }
+})()
+
 @Component({
   selector: 'app-intent-inspector-pro',
   standalone: true,
@@ -151,7 +166,7 @@ export class IntentInspectorProComponent {
           type: 'compiled.code',
           code: compiled
         },
-        'http://localhost:4200'
+        parentOrigin
       )
 
       // tell the portal overlay to close
@@ -159,7 +174,7 @@ export class IntentInspectorProComponent {
         {
           type: 'dcp:confirm'
         },
-        'http://localhost:4200'
+        parentOrigin
       )
 
     } catch (e: any) {
