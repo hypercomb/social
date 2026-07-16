@@ -86,50 +86,9 @@ export const WEBSITE_PENDING_KIND = 'visual:website:pending'
 
 // View-mode toggle constants. These are the args /website accepts as
 // "I want to switch rendering surface" instead of "stamp / export."
-type ViewModeShape = EventTarget & {
-  mode: string
-  setMode(next: string): void
-  toggle(a?: string, b?: string): string
-}
-
 const HEXAGON_KEYWORDS = new Set(['hex', 'hexagons', 'hexagon', 'off'])
 const WEBSITE_KEYWORDS = new Set(['web', 'site', 'page', 'on', 'view'])
 const VIEW_TOGGLE_KEYWORDS = new Set([...HEXAGON_KEYWORDS, ...WEBSITE_KEYWORDS])
-
-// Instructions-folder grammar. Always at root. Default sub-cells cover
-// the dimensions Claude needs to converge on a single design language —
-// styles, voice, tech, audience, examples. Each starter note teaches
-// the user what to write there.
-const INSTRUCTIONS_DEFAULTS: { name: string; description: string; starter: string }[] = [
-  {
-    name: 'styles',
-    description: 'Design language and visual rules',
-    starter: 'Design language for the generated website. Typography (font family, sizes, weights), color palette (accent, background, text), spacing scale, layout grid, border / radius / shadow conventions. Codegen reads this on every regen so the chrome and per-cell deps converge on one aesthetic. Edit freely; new instructions take effect on the next /website upgrade.',
-  },
-  {
-    name: 'voice',
-    description: 'Tone, audience, vocabulary',
-    starter: 'Voice and tone the generated copy should adopt. Formal vs casual, terse vs expansive, technical vs everyday vocabulary. Audience expectations. Voice rules become hard constraints in codegen — say what you mean here so the site sounds like you.',
-  },
-  {
-    name: 'tech',
-    description: 'Tech stack, browser targets, performance',
-    starter: 'Technology constraints for codegen. Framework choice (vanilla HTML/CSS, vue, react, svelte). Browser targets, performance budgets, accessibility level (WCAG AA?), bundle size limits. Set hard rules here so codegen does not invent dependencies you do not want.',
-  },
-  {
-    name: 'audience',
-    description: 'Who this is for',
-    starter: 'The reader of the generated site — their context, what they already know, what they are trying to learn or accomplish. Codegen calibrates depth, jargon, and section pacing to this audience description.',
-  },
-  {
-    name: 'examples',
-    description: 'Reference sites, code samples, patterns',
-    starter: 'Reference exemplars — sites whose style or structure should inspire the generation. Drop signatures of resources, links to real sites, or notes describing patterns to emulate. Codegen ingests these as positive examples.',
-  },
-]
-
-const INSTRUCTIONS_ROOT_STARTER =
-  'Always-on context for every codegen request. Sub-cells under here divide concerns — styles, voice, tech, audience, examples. Edit any sub-cell to refine what Claude considers when generating chrome and per-cell deps. Never rendered as website pages; always read as the prompt envelope. Codegen also writes its own design decisions back here so the implicit choices stay visible to you.'
 
 type LayerLike = { name?: string; children?: readonly string[]; [k: string]: unknown }
 
@@ -139,66 +98,7 @@ type HistoryServiceLike = {
   sign(lineage: { explorerSegments?: () => readonly string[] }): Promise<string>
 }
 
-type NotesServiceLike = {
-  addAtSegments(parentSegments: readonly string[], cellLabel: string, text: string): Promise<void>
-  getNotesAtSegments(segments: readonly string[]): Promise<readonly { id: string; text: string }[]>
-}
-
-type StoreLike = {
-  hypercombRoot: FileSystemDirectoryHandle | null
-}
-
 const SIG_REGEX = /^[a-f0-9]{64}$/
-
-/**
- * Idempotently bootstrap the `instructions/` tree at root if missing.
- * Reads root, returns early if `instructions` is already a child.
- *
- * NEVER WIPES. Goes through `cell:added` events instead of
- * `committer.update` — the cell:added path uses the additive name-delta
- * (kind: 'name', op: 'add') which preserves all existing siblings. The
- * same path normal user-typed cell creation goes through, so the new
- * tiles also get layout-queen indices and drag-reorder for free.
- *
- * Always uses literal root segments — instructions is grammar at root,
- * regardless of the user's current navigation lineage.
- */
-async function ensureInstructionsBootstrap(): Promise<void> {
-  const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
-  const notes = get<NotesServiceLike>('@diamondcoreprocessor.com/NotesService')
-  if (!history || !notes) return
-
-  // Check if instructions already exists at root (by name).
-  const rootSig = await history.sign({ explorerSegments: () => [] })
-  const root = await history.currentLayerAt(rootSig)
-  if (root?.children) {
-    for (const entry of root.children) {
-      const s = String(entry ?? '').trim()
-      if (s === 'instructions') return
-      if (SIG_REGEX.test(s)) {
-        const child = await history.getLayerBySig(s)
-        if (child?.name === 'instructions') return
-      }
-    }
-  }
-
-  console.log('[/website] bootstrapping instructions/ tree at root (additive, layer-only)')
-
-  // Layer-primitive bootstrap: emit `cell:added` per node and rely on
-  // the LayerCommitter's children-slot subscriber to fold the additions
-  // into the parent layer's children list. The legacy OPFS dir mints
-  // (`hypercomb.io/instructions/` + per-sub-cell dirs) are retired —
-  // hierarchy lives in `layer.children`, not in the folder tree.
-  EffectBus.emit('cell:added', { cell: 'instructions', segments: [] })
-  await notes.addAtSegments([], 'instructions', INSTRUCTIONS_ROOT_STARTER)
-
-  for (const d of INSTRUCTIONS_DEFAULTS) {
-    EffectBus.emit('cell:added', { cell: d.name, segments: ['instructions'] })
-    await notes.addAtSegments(['instructions'], d.name, d.starter)
-  }
-
-  console.log(`[/website] instructions/ bootstrapped with ${INSTRUCTIONS_DEFAULTS.length} default sub-cells (layer-only)`)
-}
 
 const toast = (type: 'info' | 'success' | 'warning' | 'tip', title: string, message: string): void => {
   try { EffectBus.emit('toast:show', { type, title, message }) } catch { /* noop */ }
@@ -481,24 +381,6 @@ export class WebsiteQueenBee extends QueenBee {
 
   protected execute(args: string): void {
     const trimmed = args.trim().toLowerCase()
-
-    // Bootstrap fires only when the website surface is about to be ON —
-    // a no-args toggle from hexagons → website, an explicit website
-    // keyword (on/web/site/page/view), or a build/upgrade trigger.
-    // Toggling explicitly OFF (hex/off/hexagons) or running read-only
-    // ops (export/list/stamp) does NOT touch the tree.
-    const vmCurrent = (get('@hypercomb.social/ViewMode') as ViewModeShape | undefined)?.mode
-    const isToggleOn = !trimmed && vmCurrent === 'hexagons'
-    const isExplicitOn = WEBSITE_KEYWORDS.has(trimmed)
-    const isBuildTrigger =
-      trimmed === 'upgrade' || trimmed.startsWith('upgrade ') ||
-      trimmed === 'new' || trimmed === 'build'
-
-    if (isToggleOn || isExplicitOn || isBuildTrigger) {
-      void ensureInstructionsBootstrap().catch(err =>
-        console.warn('[/website] instructions bootstrap failed', err)
-      )
-    }
 
     // `/website here` — flag THIS cell for the next gen pass. Drops a
     // `visual:website:pending` build-intent decoration on the current cell

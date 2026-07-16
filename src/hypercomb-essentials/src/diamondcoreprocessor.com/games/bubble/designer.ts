@@ -29,6 +29,8 @@ export class Designer {
   setLevel(level: LevelDef): void { this.level = cloneLevel(level) }
   setTool(tool: Tool): void { this.tool = tool }
   newLevel(name = 'My Level'): void { this.level = emptyLevel(name) }
+  /** Pick the level's world (renderer THEMES index — palette, masonry, motif). */
+  setTheme(theme: number): void { this.level.theme = theme }
 
   #idx(col: number, row: number): number { return row * this.level.cols + col }
   #inBounds(col: number, row: number): boolean {

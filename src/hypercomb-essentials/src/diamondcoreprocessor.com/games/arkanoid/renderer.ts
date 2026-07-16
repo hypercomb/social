@@ -201,7 +201,7 @@ export class Renderer {
     let ballIx = 0
     for (const b of engine.balls) {
       if (oscCol && !b.stuck) this.#oscillationAura(b, oscStacks, oscCol, time)
-      this.#ball(b, time, fiery, piercing && b.primary, engine.frantic, scrambled, ballIx++)
+      this.#ball(b, time, fiery, piercing && b.primary, engine.finale, scrambled, ballIx++)
     }
     if (engine.chainBall) this.#ballChain(engine, time)     // the swinging wrecking ball
     if (engine.freezeTimer > 0) this.#freeze(engine, time)  // clock freeze overlay + frost
@@ -213,62 +213,11 @@ export class Renderer {
     this.#pickups(engine.pickups)
     this.#comboPops(engine.comboPops)
     if (engine.milestoneFx) this.#milestone(engine.milestoneFx.n, engine.milestoneFx.t, engine.milestoneFx.life)
-    if (engine.franticFlash > 0) this.#frenzy(engine.franticFlash, time)
-    if (engine.nearClearFrac > 0) this.#nearClear(engine.nearClearFrac, engine, time)   // last-few-bricks BERSERK alert
+    if (engine.rushFlash > 0) this.#finaleBurst(engine.rushFlash, time)
     if (engine.aiming) this.#aimHint(engine, time)
     this.#hud(engine)
   }
 
-  /** Near-clear ALERT: with only the last few bricks left the swarm goes berserk —
-   *  a pulsing red-alert edge vignette, enemy speed-lines + after-images, and an
-   *  "ALERT" klaxon flicker. Layered on top, cheap, deterministic. nc = 0..1. */
-  #nearClear(nc: number, engine: Engine, time: number): void {
-    const ctx = this.#ctx
-    const hz = 3.5 + 4.5 * nc
-    const pulse = 0.5 + 0.5 * Math.sin(time * hz)
-    const intensity = nc * (0.55 + 0.45 * pulse)
-    // 1 ── red-alert vignette (edge-only, so it can't fight the central gold #frenzy)
-    ctx.save()
-    const vg = ctx.createRadialGradient(W / 2, H * 0.5, H * 0.30, W / 2, H * 0.5, H * 0.74)
-    vg.addColorStop(0, 'rgba(255,40,48,0)'); vg.addColorStop(1, `rgba(255,36,44,${0.34 * intensity})`)
-    ctx.fillStyle = vg; ctx.fillRect(0, 0, W, H)
-    ctx.restore()
-    // 2 ── enemy speed-lines + after-images (the "they got fast" read)
-    if (engine.enemies.length) {
-      ctx.save(); ctx.globalCompositeOperation = 'lighter'
-      for (const e of engine.enemies) {
-        const vx = e.vx ?? 0, vy = e.vy ?? 0
-        const sp = Math.hypot(vx, vy)
-        const dx = sp > 0.01 ? vx / sp : 0, dy = sp > 0.01 ? vy / sp : 1
-        for (let i = 1; i <= 2; i++) {
-          const gx = e.x - dx * i * ENEMY_R * 0.8, gy = e.y - dy * i * ENEMY_R * 0.8
-          ctx.globalAlpha = 0.20 * intensity / i; ctx.fillStyle = 'rgba(255,90,90,1)'
-          ctx.beginPath(); ctx.arc(gx, gy, ENEMY_R * (0.9 - i * 0.18), 0, Math.PI * 2); ctx.fill()
-        }
-        ctx.globalAlpha = 0.5 * intensity
-        ctx.strokeStyle = 'rgba(255,170,170,0.9)'; ctx.lineWidth = 1.4; ctx.lineCap = 'round'
-        const nx = -dy, ny = dx
-        for (let k = -1; k <= 1; k++) {
-          const ox = nx * k * ENEMY_R * 0.5, oy = ny * k * ENEMY_R * 0.5, len = ENEMY_R * (1.4 + 1.0 * pulse)
-          ctx.beginPath()
-          ctx.moveTo(e.x + ox - dx * ENEMY_R * 0.9, e.y + oy - dy * ENEMY_R * 0.9)
-          ctx.lineTo(e.x + ox - dx * (ENEMY_R * 0.9 + len), e.y + oy - dy * (ENEMY_R * 0.9 + len))
-          ctx.stroke()
-        }
-      }
-      ctx.restore()
-    }
-    // 3 ── "ALERT" klaxon flicker, top-centre, strobing on the beat
-    if (pulse > 0.6) {
-      ctx.save()
-      ctx.globalAlpha = (pulse - 0.6) / 0.4 * intensity
-      ctx.translate(W / 2, 40 + Math.sin(time * 40) * 1.5)
-      ctx.font = '900 22px "Segoe UI", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-      ctx.lineWidth = 5; ctx.strokeStyle = 'rgba(60,0,4,0.9)'; ctx.strokeText('⚠ ALERT', 0, 0)
-      ctx.fillStyle = '#ff5b5b'; ctx.shadowColor = '#ff2b2b'; ctx.shadowBlur = 14; ctx.fillText('⚠ ALERT', 0, 0)
-      ctx.restore()
-    }
-  }
 
   // ── designer view ────────────────────────────────────────
   drawEditor(grid: readonly string[], hover: { col: number; row: number } | null): void {
@@ -316,6 +265,7 @@ export class Renderer {
         this.#sparkle(b, time, 6)
         continue
       }
+      if (b.gold) { this.#finalBrick(b, time); continue }   // the LAST brick — the finale beacon
       const baseHex = b.max >= 4 ? TOUGH_COLOR : (BRICK_COLORS[b.max] ?? '#46b6f0')
       this.#drawBrick(b.x, b.y, b.w, b.h, baseHex, b.hp / b.max)
       if (b.seed) this.#sparkle(b, time, 2)        // a seed about to bloom into a mega
@@ -323,6 +273,26 @@ export class Renderer {
       if (b.mult && !b.hidden) this.#multBadge(b, time)   // a ×1/×2/×3 score-multiplier tile
     }
     ctx.globalAlpha = 1
+  }
+
+  /** The LAST brick standing — the level's finale beacon. A gold body under a
+   *  breathing halo + sparkle, so the final hit of a level reads as a prize worth
+   *  chasing instead of one more tile. Deterministic in time (no Math.random). */
+  #finalBrick(b: Brick, time: number): void {
+    const ctx = this.#ctx
+    const cx = b.x + b.w / 2, cy = b.y + b.h / 2
+    const pulse = 0.5 + 0.5 * Math.sin(time * 6)
+    const r = b.w * (0.72 + 0.3 * pulse)
+    ctx.save()
+    ctx.globalCompositeOperation = 'lighter'
+    const halo = ctx.createRadialGradient(cx, cy, 1, cx, cy, r)
+    halo.addColorStop(0, `rgba(255,215,106,${0.42 + 0.28 * pulse})`)
+    halo.addColorStop(1, 'rgba(255,176,32,0)')
+    ctx.fillStyle = halo
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill()
+    ctx.restore()
+    this.#drawBrick(b.x, b.y, b.w, b.h, TOUGH_COLOR, b.hp / b.max)
+    this.#sparkle(b, time, 4)
   }
 
   /** A ×N badge on a multiplier tile — blue ×1, green ×2, gold ×3. The hidden ×5
@@ -661,7 +631,7 @@ export class Renderer {
     // health is shown by the bat itself (below) — no separate floating gauge
     // ── glossy cartoon bubble shield dome over the bat ──
     if (engine.shielded) {
-      const heal = engine.regenTimer > 0
+      const heal = engine.regenShield
       const frac = engine.shieldHpFrac                                   // 1 fresh, 0 about to break
       const flash = engine.shieldFlash
       const base = hexRgb(heal ? '#43e0a8' : '#7A3CFF')                 // violet ghost-ward (heal = mint)
@@ -698,7 +668,7 @@ export class Renderer {
       ctx.restore()
     }
     ctx.save()
-    if (engine.pinballTimer > 0) {
+    if (engine.pinball) {
       this.#flippers(engine)                   // real flippers replace the bat (+ its attachments)
       ctx.restore()
       return
@@ -936,11 +906,11 @@ export class Renderer {
     ctx.restore()
   }
 
-  #ball(ball: Ball, time: number, fiery = false, pierce = false, frantic = false, scramble = false, index = 0): void {
+  #ball(ball: Ball, time: number, fiery = false, pierce = false, finale = false, scramble = false, index = 0): void {
     const ctx = this.#ctx
     if (fiery) this.#ballFire(ball, time)                    // dynamite live: flames lick off the ball
     if (pierce) this.#ballPhase(ball, time)                  // pierce active: ghostly phasing aura + trail
-    else if (frantic) this.#windTrail(ball)                  // FRENZY: streaking wind trail behind the doubled ball
+    else if (finale) this.#windTrail(ball)                   // FINALE: streaking trail behind the ball through the fireworks
     ctx.save()
     // squash/stretch along velocity — a base-speed (450) ball is round; only fast /
     // pinball balls stretch. Capped at 0.22 so it reads as juice, not a needle.
@@ -2648,20 +2618,22 @@ export class Renderer {
     ctx.restore()
   }
 
-  /** Frenzy start: a red screen flash + jagged lightning bolts + a "FRENZY!" shout —
-   *  the gold brick wasn't broken in time. Deterministic in time (no Math.random). */
-  #frenzy(flash: number, time: number): void {
+  /** FINALE: a gold screen flash + raining gold streaks + a "JACKPOT!" shout — you
+   *  cleared the level. Deterministic in time (no Math.random). This is the old
+   *  frenzy burst recoloured from red alarm to gold celebration: same shape of juice,
+   *  opposite meaning (it used to mean the board had just turned on you). */
+  #finaleBurst(flash: number, time: number): void {
     const ctx = this.#ctx
     const f = Math.min(1, flash / 0.7)                     // 1 at the start → 0 as it fades
     ctx.save()
-    ctx.fillStyle = `rgba(255,48,48,${0.20 * f})`          // red wash
+    ctx.fillStyle = `rgba(255,196,64,${0.20 * f})`         // gold wash
     ctx.fillRect(0, 0, W, H)
-    // a few jagged lightning bolts top→bottom, flickering with time
+    // raining gold streaks, flickering with time
     ctx.globalCompositeOperation = 'lighter'
     for (let i = 0; i < 4; i++) {
       const baseX = W * (0.18 + 0.21 * i) + Math.sin(time * 30 + i) * 10
-      ctx.strokeStyle = `rgba(${i % 2 ? 200 : 255},${230},255,${(0.55 + 0.35 * Math.sin(time * 50 + i * 2)) * f})`
-      ctx.lineWidth = 2.2; ctx.shadowColor = '#bfe3ff'; ctx.shadowBlur = 12
+      ctx.strokeStyle = `rgba(255,${i % 2 ? 220 : 240},${140},${(0.55 + 0.35 * Math.sin(time * 50 + i * 2)) * f})`
+      ctx.lineWidth = 2.2; ctx.shadowColor = '#ffd76a'; ctx.shadowBlur = 12
       ctx.beginPath(); ctx.moveTo(baseX, 0)
       for (let y = 0; y <= H; y += 40) {
         const jx = baseX + Math.sin(y * 0.09 + i * 3 + time * 40) * 22 + Math.cos(y * 0.21 + time * 60) * 9
@@ -2670,14 +2642,14 @@ export class Renderer {
       ctx.stroke()
     }
     ctx.globalCompositeOperation = 'source-over'; ctx.shadowBlur = 0
-    // FRENZY! shout, jittering
+    // GOLD RUSH! shout, jittering
     const pop = 1 + 0.12 * Math.sin(time * 40)
     ctx.save()
     ctx.translate(W / 2 + Math.sin(time * 53) * 4, H * 0.3); ctx.scale(pop, pop)
     ctx.globalAlpha = f
-    ctx.fillStyle = '#fff'; ctx.shadowColor = '#ff3b3b'; ctx.shadowBlur = 16
-    ctx.font = '900 40px "Segoe UI", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
-    ctx.fillText('FRENZY!', 0, 0)
+    ctx.fillStyle = '#fff8dc'; ctx.shadowColor = '#ffb020'; ctx.shadowBlur = 16
+    ctx.font = '900 36px "Segoe UI", system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    ctx.fillText('JACKPOT!', 0, 0)
     ctx.restore()
     ctx.restore()
   }
@@ -2687,7 +2659,7 @@ export class Renderer {
     const ctx = this.#ctx
     for (const e of explosions) {
       const p = Math.min(1, e.t / EXPLOSION_DUR)        // 0 → 1 over the blast life
-      const r = 8 + p * ROCKET_RADIUS
+      const r = 8 + p * (e.r ?? ROCKET_RADIUS)          // an amped rocket carries its real (bigger) radius
       const plasma = e.hue === 'plasma'                  // fireball detonation = white-hot cyan, not TNT orange
       const core = plasma ? '#7ec8ff' : '#ff7043'
       const ring = plasma ? '#bfe3ff' : '#ffcf5e'
@@ -2758,17 +2730,33 @@ export class Renderer {
     // Reserve balls, top-right — the one in PLAY isn't counted, so on your last
     // life the reserve reads empty. We draw the full reserve capacity as hollow
     // sockets and fill the ones you still hold, so "down to your last" is visible.
+    // The AMPED life ceiling banks up to 20, and a socket per reserve would run the
+    // row across the whole top edge into the score — so past what the row can seat
+    // it collapses to a single ball + a ×N count. Keyed off the reserve itself, not
+    // the amp, because a death drops the amp while the banked lives remain.
     const reserve = Math.max(0, engine.lives - 1)
-    const sockets = Math.max(reserve, 4)   // MAX_LIVES(5) - 1 reserve sockets
-    for (let i = 0; i < sockets; i++) {
-      const cx = W - 12 - i * 16
-      ctx.beginPath()
-      ctx.arc(cx, 16, 5, 0, Math.PI * 2)
-      if (i < reserve) {
-        ctx.fillStyle = '#ffffff'; ctx.fill()
-      } else {
-        ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.fill()
-        ctx.lineWidth = 1; ctx.strokeStyle = reserve === 0 ? 'rgba(255,90,90,0.7)' : 'rgba(255,255,255,0.3)'; ctx.stroke()
+    const SOCKET_MAX = 9
+    if (reserve > SOCKET_MAX) {
+      ctx.save()
+      ctx.beginPath(); ctx.arc(W - 12, 16, 5, 0, Math.PI * 2)
+      ctx.fillStyle = '#ffffff'; ctx.fill()
+      ctx.font = '700 12px "Segoe UI", system-ui, sans-serif'
+      ctx.textAlign = 'right'; ctx.textBaseline = 'middle'
+      ctx.fillStyle = '#ffffff'
+      ctx.fillText(`×${reserve}`, W - 21, 16)
+      ctx.restore()
+    } else {
+      const sockets = Math.max(reserve, 4)   // MAX_LIVES(5) - 1 reserve sockets, un-amped
+      for (let i = 0; i < sockets; i++) {
+        const cx = W - 12 - i * 16
+        ctx.beginPath()
+        ctx.arc(cx, 16, 5, 0, Math.PI * 2)
+        if (i < reserve) {
+          ctx.fillStyle = '#ffffff'; ctx.fill()
+        } else {
+          ctx.fillStyle = 'rgba(255,255,255,0.14)'; ctx.fill()
+          ctx.lineWidth = 1; ctx.strokeStyle = reserve === 0 ? 'rgba(255,90,90,0.7)' : 'rgba(255,255,255,0.3)'; ctx.stroke()
+        }
       }
     }
     // Gun magazine: G (+ stack level) and a row of ball pips — filled = loaded,

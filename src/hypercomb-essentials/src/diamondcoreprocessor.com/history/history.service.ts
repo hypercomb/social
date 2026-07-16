@@ -2,6 +2,7 @@
 import { EffectBus, SignatureService, SignatureStore } from '@hypercomb/core'
 import { lineageKey, rawLineageKey } from './lineage-key.js'
 import { isBareLayer } from './child-sig-guard.js'
+import { parseHeadIndex, buildFlushIndex } from './head-index.js'
 import { canonicalise, parse as parseRecord, type DeltaRecord } from './delta-record.js'
 import { reduce as reduceRecords, type HydratedState } from './delta-reducer.js'
 export type { DeltaRecord } from './delta-record.js'
@@ -967,6 +968,7 @@ export class HistoryService {
     this.#preloaderCache.set(layerSig, bytes.buffer as ArrayBuffer)
     this.#parsedLayerCache.set(layerSig, canonical)
     this.#latestSigByLineage.set(locationSig, layerSig)
+    this.#noteHeadDerived(locationSig, markerName)
     this.#scheduleHeadPersist()
 
     // Mirror up to DCP. PushQueueService listens on EffectBus and
@@ -1049,6 +1051,14 @@ export class HistoryService {
     lineageSig: string,
     name: string,
   ): Promise<string> => {
+    // Never let the commit chain read a restored-but-unvalidated head: a
+    // stale prev-layer here gets minted BACK into the bag as a new marker
+    // — the regression becomes permanent truth (2026-07-16). Validate
+    // first; if the store root isn't ready the cold read below owns it.
+    if (this.#headUnvalidated.has(lineageSig)) {
+      try { await this.#validateRestoredHead(lineageSig) }
+      catch { /* store root not ready — fall through to the bag read */ }
+    }
     // Hot path: housekeeping invariant says #latestSigByLineage tracks
     // the bag's current head, kept in sync by commitLayer (and
     // invalidated by removeEntries / mergeEntries / promoteToHead).
@@ -1133,6 +1143,7 @@ export class HistoryService {
       this.#opportunisticMigrateMarker(layerSig, bytes, handle)
     }
     this.#latestSigByLineage.set(lineageSig, layerSig)
+    this.#noteHeadDerived(lineageSig, latestName)
     // Husk-only bag (max marker IS the genesis marker and it reads
     // bare): pre-seeding-era renders minted these for never-visited
     // children — prefer the parent-carried rich layer.
@@ -1539,6 +1550,50 @@ export class HistoryService {
    */
   readonly #latestSigByLineage = new Map<string, string>()
 
+  // ── head provenance (restored vs session-derived) ────────────────────
+  //
+  // The persisted head index is a DERIVED CACHE whose key (lineageSig)
+  // does not change when the source does (a new marker lands in the same
+  // bag) — the optimize-phase doctrine's forbidden shape. Provenance makes
+  // it safe: restored entries are HINTS that must pass a bag check before
+  // any read or commit path may trust them, and only entries this session
+  // actually derived may be flushed back. (2026-07-16: trusting restored
+  // stale-yet-resolvable heads silently regressed ~100 fresh commits.)
+
+  /** Lineages whose in-memory head was RESTORED from the persisted index
+   *  and has not yet been checked against the bag this session. */
+  readonly #headUnvalidated = new Set<string>()
+
+  /** Lineages whose head this session DERIVED from the bag or COMMITTED —
+   *  the only entries #flushHeadIndex may overwrite in the stored index. */
+  readonly #headOwned = new Set<string>()
+
+  /** Lineages whose head this session REMOVED (bag rewrite / archival) —
+   *  deleted from the stored index on flush, until re-set. */
+  readonly #headDropped = new Set<string>()
+
+  /** Marker FILENAME each known head was derived from — the staleness
+   *  stamp persisted beside the sig. Absent for legacy-format entries,
+   *  which then validate by full re-derivation. */
+  readonly #headStamp = new Map<string, string>()
+
+  /** This session now owns the lineage's head (derived / committed). */
+  readonly #noteHeadDerived = (lineageSig: string, markerName?: string): void => {
+    this.#headOwned.add(lineageSig)
+    this.#headUnvalidated.delete(lineageSig)
+    this.#headDropped.delete(lineageSig)
+    if (markerName) this.#headStamp.set(lineageSig, markerName)
+    else this.#headStamp.delete(lineageSig)
+  }
+
+  /** This session dropped the lineage's head. */
+  readonly #noteHeadDropped = (lineageSig: string): void => {
+    this.#headOwned.delete(lineageSig)
+    this.#headUnvalidated.delete(lineageSig)
+    this.#headStamp.delete(lineageSig)
+    this.#headDropped.add(lineageSig)
+  }
+
   /**
    * Reverse index: location sig → the RAW path segments it was signed
    * from (first-seen). A location sig is a one-way hash, so the
@@ -1691,22 +1746,25 @@ export class HistoryService {
   #headPersistTimer: ReturnType<typeof setTimeout> | null = null
 
   /** Load the persisted head index into #latestSigByLineage. Synchronous
-   *  (localStorage) so it's ready before the first currentLayerAt. Bad/stale
-   *  entries are self-correcting: currentLayerAt re-derives any head whose
-   *  bytes don't resolve, and the reconciliation tail overwrites the file. */
+   *  (localStorage) so it's ready before the first currentLayerAt.
+   *
+   *  Every restored entry lands UNVALIDATED: a stale head whose bytes still
+   *  resolve (content-addressed bytes always resolve) is indistinguishable
+   *  from a current one without consulting the bag, so read/commit paths
+   *  route through #validateRestoredHead (a filename-only dir check against
+   *  the entry's marker stamp) before trusting it. Unresolvable bytes were
+   *  never the only staleness — see the 2026-07-16 regression. */
   readonly #restoreHeadIndex = (): void => {
     try {
-      const raw = localStorage.getItem(HistoryService.#HEAD_INDEX_KEY)
-      if (!raw) return
-      const obj = JSON.parse(raw) as Record<string, string>
+      const parsed = parseHeadIndex(localStorage.getItem(HistoryService.#HEAD_INDEX_KEY))
       let n = 0
-      for (const [lineageSig, layerSig] of Object.entries(obj)) {
-        if (HistoryService.#SIG_RE.test(lineageSig) && HistoryService.#SIG_RE.test(layerSig)) {
-          this.#latestSigByLineage.set(lineageSig, layerSig)
-          n++
-        }
+      for (const [lineageSig, entry] of Object.entries(parsed)) {
+        this.#latestSigByLineage.set(lineageSig, entry.s)
+        if (entry.m) this.#headStamp.set(lineageSig, entry.m)
+        this.#headUnvalidated.add(lineageSig)
+        n++
       }
-      if (n) console.log(`[preload] head index restored from cache: ${n} lineages (first paint skips the bag scan)`)
+      if (n) console.log(`[preload] head index restored from cache: ${n} lineages (validated against the bag on first use)`)
     } catch { /* corrupt/unavailable cache — fall back to derivation, no harm */ }
   }
 
@@ -1717,14 +1775,21 @@ export class HistoryService {
     this.#headPersistTimer = setTimeout(this.#flushHeadIndex, 1500)
   }
 
-  /** Write the current head index now. Called by the debounce and on
-   *  tab-hide so the next boot starts warm. */
+  /** Write the head index now. Called by the debounce and on tab-hide so
+   *  the next boot starts warm.
+   *
+   *  MERGE, never whole-map: only lineages this session derived from the
+   *  bag or committed (#headOwned) overwrite the stored entries, and only
+   *  lineages this session deleted (#headDropped) are removed. Entries
+   *  merely restored from a previous session pass through byte-identical —
+   *  a boot that loaded a stale snapshot can no longer re-persist it over
+   *  lineages it never looked at (the regression's spreading step). */
   readonly #flushHeadIndex = (): void => {
     if (this.#headPersistTimer) { clearTimeout(this.#headPersistTimer); this.#headPersistTimer = null }
     try {
-      const obj: Record<string, string> = {}
-      for (const [lineageSig, layerSig] of this.#latestSigByLineage) obj[lineageSig] = layerSig
-      localStorage.setItem(HistoryService.#HEAD_INDEX_KEY, JSON.stringify(obj))
+      const existing = parseHeadIndex(localStorage.getItem(HistoryService.#HEAD_INDEX_KEY))
+      const next = buildFlushIndex(existing, this.#latestSigByLineage, this.#headStamp, this.#headOwned, this.#headDropped)
+      localStorage.setItem(HistoryService.#HEAD_INDEX_KEY, JSON.stringify(next))
     } catch { /* quota / unavailable — non-fatal, only costs a cold next boot */ }
   }
 
@@ -1918,6 +1983,13 @@ export class HistoryService {
     stats?: { cold?: boolean },
   ): Promise<LayerContent | null> => {
     if (!HistoryService.#SIG_RE.test(locationSig)) return null
+    // A head restored from the persisted index is a HINT until checked
+    // against the bag — never serve one unvalidated (stale-yet-resolvable
+    // restored heads silently regressed fresh commits; 2026-07-16).
+    if (this.#headUnvalidated.has(locationSig)) {
+      try { await this.#validateRestoredHead(locationSig) }
+      catch { if (stats) stats.cold = true; return null } // store root not ready — retry later
+    }
     const cached = this.#headSigFor(locationSig)
     if (cached) {
       // Warm path. The head may have come from a previous session via the
@@ -1939,6 +2011,7 @@ export class HistoryService {
       // drop it and re-derive from disk rather than returning a wrong null.
       this.#latestSigByLineage.delete(locationSig)
       this.#seededHeadByLineage.delete(locationSig)
+      this.#noteHeadDropped(locationSig)
       this.#scheduleHeadPersist()
     }
     // SINGLE-LINEAGE cold path — first paint must be linear in "this
@@ -2184,6 +2257,26 @@ export class HistoryService {
    * as cold instead of authoritative absence.
    */
   readonly #warmLineageHead = async (lineageSig: string): Promise<void> => {
+    const latest = await this.#scanLatestMarker(lineageSig)
+    if (!latest) return
+    try {
+      const fileHandle = await latest.bag.getFileHandle(latest.name, { create: false })
+      const bytes = await (await fileHandle.getFile()).arrayBuffer()
+      const { layerSig, isPointer } = await extractLayerSigFromMarker(bytes)
+      if (!isPointer) this.#preloaderCache.set(layerSig, bytes)
+      this.#latestSigByLineage.set(lineageSig, layerSig)
+      this.#noteHeadDerived(lineageSig, latest.name)
+      this.#scheduleHeadPersist()
+    } catch { /* unreadable head — stay cold; the passive preload may resolve it */ }
+  }
+
+  /** Filename-only union scan across the root bag and every legacy drain
+   *  source: the lineage's max marker name + the dir holding it. Null =
+   *  no marker anywhere (authoritative absence). Throws when the store
+   *  root isn't ready so callers can flag the read as cold. */
+  readonly #scanLatestMarker = async (
+    lineageSig: string,
+  ): Promise<{ name: string; bag: FileSystemDirectoryHandle } | null> => {
     const root = this.hiveRoot
     if (!root) throw new Error('history: store not ready')
     let latestName = ''
@@ -2202,15 +2295,43 @@ export class HistoryService {
     for (const src of this.#legacyBagSources()) {
       try { await scan(src) } catch { /* source unreadable — union what we have */ }
     }
-    if (!latestName || !latestBag) return
-    try {
-      const fileHandle = await (latestBag as FileSystemDirectoryHandle).getFileHandle(latestName, { create: false })
-      const bytes = await (await fileHandle.getFile()).arrayBuffer()
-      const { layerSig, isPointer } = await extractLayerSigFromMarker(bytes)
-      if (!isPointer) this.#preloaderCache.set(layerSig, bytes)
-      this.#latestSigByLineage.set(lineageSig, layerSig)
-      this.#scheduleHeadPersist()
-    } catch { /* unreadable head — stay cold; the passive preload may resolve it */ }
+    return latestName && latestBag ? { name: latestName, bag: latestBag } : null
+  }
+
+  /** A RESTORED head is a hint, not truth. Confirm the entry's stamped
+   *  marker is still the bag's max (filename-only dir check — zero byte
+   *  reads on the happy path); on mismatch, missing stamp (legacy entry),
+   *  or a vanished bag, drop the hint and re-derive from the actual max
+   *  marker. This is what stops a stale-yet-resolvable restored head from
+   *  being served to readers or — worse — used as a commit's prev-layer
+   *  (which mints the stale state back into the bag as new truth; the
+   *  2026-07-16 regression). Throws when the store root isn't ready —
+   *  callers treat the read as cold and retry. */
+  readonly #validateRestoredHead = async (lineageSig: string): Promise<void> => {
+    if (!this.#headUnvalidated.has(lineageSig)) return
+    const latest = await this.#scanLatestMarker(lineageSig) // throws pre-root → caller flags cold
+    if (!latest) {
+      // No marker anywhere: the restored entry is a phantom on this
+      // device (bag archived/removed). Drop it — the parent-carried
+      // fallback owns pathless reads.
+      this.#latestSigByLineage.delete(lineageSig)
+      this.#noteHeadDropped(lineageSig)
+      return
+    }
+    const stamp = this.#headStamp.get(lineageSig)
+    if (stamp && stamp === latest.name && this.#latestSigByLineage.has(lineageSig)) {
+      // The stamped marker is still the bag's max — the restored head IS
+      // current. Promote to session-owned without reading a byte.
+      this.#headUnvalidated.delete(lineageSig)
+      this.#headOwned.add(lineageSig)
+      this.#headDropped.delete(lineageSig)
+      return
+    }
+    // Stale (a newer marker landed after the last flush) or unstamped
+    // legacy entry — never trust it. Re-derive from the max marker.
+    this.#latestSigByLineage.delete(lineageSig)
+    this.#headUnvalidated.delete(lineageSig)
+    await this.#warmLineageHead(lineageSig)
   }
 
   /**
@@ -2408,6 +2529,7 @@ export class HistoryService {
             this.#opportunisticMigrateMarker(layerSig, bytes, fileHandle)
           }
           this.#latestSigByLineage.set(lineageSig, layerSig)
+          this.#noteHeadDerived(lineageSig, latestName)
           cachedCount++
           if (previewSigs.length < 10) previewSigs.push(layerSig.slice(0, 12))
         } catch { /* skip unreadable */ }
@@ -2609,6 +2731,7 @@ export class HistoryService {
     this.#latestSigByLineage.delete(lineageSig)
     this.#seededHeadByLineage.delete(lineageSig)
     this.#huskUnseedable.delete(lineageSig)
+    this.#noteHeadDropped(lineageSig)
     this.#layerListCache.delete(lineageSig)
     this.#scheduleHeadPersist()
     let bag: FileSystemDirectoryHandle
@@ -2631,7 +2754,11 @@ export class HistoryService {
         if (name > latestName) { latestName = name; latestSig = layerSig }
       } catch { /* skip */ }
     }
-    if (latestSig) { this.#latestSigByLineage.set(lineageSig, latestSig); this.#scheduleHeadPersist() }
+    if (latestSig) {
+      this.#latestSigByLineage.set(lineageSig, latestSig)
+      this.#noteHeadDerived(lineageSig, latestName)
+      this.#scheduleHeadPersist()
+    }
   }
 
   /**
@@ -2801,6 +2928,7 @@ export class HistoryService {
       this.#latestSigByLineage.delete(locationSig)
       this.#seededHeadByLineage.delete(locationSig)
       this.#huskUnseedable.delete(locationSig)
+      this.#noteHeadDropped(locationSig)
       this.#layerListCache.delete(locationSig)
       this.#scheduleHeadPersist()
     }
@@ -2863,6 +2991,7 @@ export class HistoryService {
       this.#latestSigByLineage.delete(locationSig)
       this.#seededHeadByLineage.delete(locationSig)
       this.#huskUnseedable.delete(locationSig)
+      this.#noteHeadDropped(locationSig)
       this.#layerListCache.delete(locationSig)
       this.#scheduleHeadPersist()
     }

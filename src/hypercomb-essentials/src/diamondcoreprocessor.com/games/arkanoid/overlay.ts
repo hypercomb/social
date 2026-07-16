@@ -126,7 +126,7 @@ export class ArkanoidOverlay {
   // snapshot diff read AFTER each engine.update() so the engine stays pure (no
   // particle/event system of its own). #intro pops in like the Bubble overlay.
   #shaker = new Shaker()
-  #wasFrantic = false                 // rising-edge detector for the frenzy-start shake
+  #wasFinale = false                  // rising-edge detector for the level-clear celebration shake
   #field = new ParticleField()
   #prevScore = 0
   #prevLives = 3
@@ -593,8 +593,8 @@ export class ArkanoidOverlay {
           // at its centre — the engine needs no particle/event system.
           this.#snapshotBricks(this.#engine)
           this.#engine.update(dt)
-          if (this.#engine.frantic && !this.#wasFrantic) { this.#shaker.add(1.1); this.#renderer?.spike(2.0) }   // frenzy start → hard shake + board-wide neon flare
-          this.#wasFrantic = this.#engine.frantic
+          if (this.#engine.finale && !this.#wasFinale) { this.#shaker.add(1.1); this.#renderer?.spike(2.0) }   // level cleared → celebration shake + board-wide flare
+          this.#wasFinale = this.#engine.finale
           this.#senseJuice()
           this.#diffBricks(this.#engine)
           r.draw(this.#engine, this.#time)
@@ -721,7 +721,7 @@ export class ArkanoidOverlay {
         if (!eng.aiming) this.#launchOffset = eng.launchOffset   // set → remember the on-paddle position all game
         return
       }
-      if (eng && eng.pinballTimer > 0) {                    // pinball: mouse buttons ARE the flippers
+      if (eng && eng.pinball) {                    // pinball: mouse buttons ARE the flippers
         if (e.button === 2) eng.flipRight(true); else eng.flipLeft(true)
         return
       }

@@ -683,7 +683,7 @@ export class ClaudeBridgeWorker extends Worker {
 
   // Read notes at an EXPLICIT cell location (parentSegments + cellLabel).
   // Headless mirror of `note-add` — uses NotesService.getNotesAtSegments
-  // so the bridge can read instructions without temporarily navigating.
+  // so the bridge can read any cell's notes without temporarily navigating.
   async #noteList(req: BridgeRequest): Promise<BridgeResponse> {
     const segments = (req.segments ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
     if (segments.length === 0) {

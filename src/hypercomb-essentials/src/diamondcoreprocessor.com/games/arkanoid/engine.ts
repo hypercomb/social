@@ -7,12 +7,21 @@
 // bubble/solomon engines.
 //
 // Bricks drop power-up "pills" the paddle can catch:
-//   O oscillate — balls weave on a sine path. PERMANENT for the round (no
-//                 timeout): each O doubles the weave width and nudges ball
-//                 speed up a notch. Stacks until you die / clear the level. A
-//                 coloured weave halo signals the stack state (cool teal → hot
-//                 magenta); harder difficulties weave more AGGRESSIVELY (wider,
+//   O oscillate — THE AMP. Balls weave on a sine path, and every stack multiplies
+//                 the effect of every OTHER power-up you pick up: 1 O DOUBLES them,
+//                 2 TRIPLES, 3 QUADRUPLES (the ladder stops at quadruple). See the
+//                 `amp` getter — it is the single knob, read at every grant site, so
+//                 an amped E is wider AND longer, an amped G loads 4× the shots, an
+//                 amped ↑ carries 4 missiles with a 4× blast, an amped 1UP is a
+//                 4-UP into a 4× life ceiling, and so on. PERMANENT
+//                 for the round (no timeout): each O also doubles the weave width and
+//                 nudges ball speed up a notch. Stacks until you die / clear the
+//                 level. A coloured weave halo signals the stack state (cool teal →
+//                 hot magenta); harder difficulties weave more AGGRESSIVELY (wider,
 //                 faster) — peaking at Gangster.
+//                 Amp is read at PICKUP time for one-shot/timed grants (so a pill you
+//                 already hold is never retro-buffed) and LIVE for continuous forces
+//                 (magnet pull, regen rate, the score booster).
 //   B break     — every ball splits into three of its own kind (white → white,
 //                 colour → colour) — multi-ball, and more lives if you split white
 //   L laser     — Space fires upward beams (countdown-timed)
@@ -60,7 +69,7 @@ export interface Brick {
   turret?: boolean                        // pinball: a tile a bumper hit lit up; fires at the player
   mult?: number                           // a points-multiplier tile (×1/×2/×3, or the hidden rare ×5)
   hidden?: boolean                        // a mult tile that looks like a normal brick until broken (the rare ×5)
-  gold?: boolean                          // THE gold brick (centre mega): break it before its timer or it's frantic mode
+  gold?: boolean                          // the LAST brick standing — the level's finale beacon (set by #markFinalBrick, purely a marker)
 }
 export interface Ball { x: number; y: number; vx: number; vy: number; r: number; stuck: boolean; wobble: number; primary: boolean; color: string; pierced?: Set<Brick> }
 export interface Capsule { x: number; y: number; kind: PowerKind; delay?: number; dir?: number }   // delay = hover seconds before it starts falling
@@ -77,22 +86,24 @@ export interface Fireball {
  *  set of multipliers/offsets the engine reads at its tuning sites; Rookie = current. */
 export interface DifficultyProfile {
   name: string; tagline: string; lives: number; ballSpeedMul: number; enemyCapBonus: number
-  enemyFireMul: number; enemyRefillMul: number; franticDelayMul: number; turretDmgMul: number; hazardCooldownMul: number
+  enemyFireMul: number; enemyRefillMul: number; turretDmgMul: number; hazardCooldownMul: number
   oscAggroMul: number   // oscillate aggression: scales weave width, weave frequency AND the per-stack speed bump (1 = base, Gangster = wildest)
   supportMul: number    // defensive-drop flood: scales heal/shield/regen weights (1 = base, Gangster = drowning in support)
-  mayhemMul: number     // action intensity: quickens the pill waves AND the cadence of the recurring frenzy storms (1 = no storms recur, Gangster = relentless)
+  mayhemMul: number     // action intensity: quickens the pill waves (1 = base cadence, Gangster = relentless)
 }
 export const DIFFICULTY: readonly DifficultyProfile[] = [
-  { name: 'Rookie',   tagline: 'Fresh off the block — the streets are still smiling at you.',                  lives: 3, ballSpeedMul: 1,    enemyCapBonus: 0, enemyFireMul: 1,    enemyRefillMul: 1,    franticDelayMul: 1,    turretDmgMul: 1,    hazardCooldownMul: 1,    oscAggroMul: 1,    supportMul: 1,   mayhemMul: 1   },
-  { name: 'Hustler',  tagline: "You've got a corner now — and the corner's got eyes on you.",                  lives: 3, ballSpeedMul: 1.08, enemyCapBonus: 0, enemyFireMul: 0.9,  enemyRefillMul: 0.85, franticDelayMul: 0.85, turretDmgMul: 1.15, hazardCooldownMul: 0.88, oscAggroMul: 1.15, supportMul: 1.3, mayhemMul: 1.2 },
-  { name: 'Made',     tagline: "You got your button — respect's real now, and so are the targets on your back.", lives: 3, ballSpeedMul: 1.16, enemyCapBonus: 1, enemyFireMul: 0.8,  enemyRefillMul: 0.72, franticDelayMul: 0.72, turretDmgMul: 1.3,  hazardCooldownMul: 0.78, oscAggroMul: 1.3,  supportMul: 1.7, mayhemMul: 1.4 },
-  { name: 'Kingpin',  tagline: 'Half the city runs on your say-so — the other half wants you in the river.',   lives: 2, ballSpeedMul: 1.24, enemyCapBonus: 2, enemyFireMul: 0.68, enemyRefillMul: 0.6,  franticDelayMul: 0.6,  turretDmgMul: 1.45, hazardCooldownMul: 0.68, oscAggroMul: 1.5,  supportMul: 2.2, mayhemMul: 1.7 },
-  { name: 'Gangster', tagline: "No rank above you, no mercy below — everybody's gunning for the throne.",       lives: 1, ballSpeedMul: 1.32, enemyCapBonus: 2, enemyFireMul: 0.58, enemyRefillMul: 0.5,  franticDelayMul: 0.5,  turretDmgMul: 1.6,  hazardCooldownMul: 0.6,  oscAggroMul: 1.8,  supportMul: 3.2, mayhemMul: 2.2 },
+  { name: 'Rookie',   tagline: 'Fresh off the block — the streets are still smiling at you.',                  lives: 3, ballSpeedMul: 1,    enemyCapBonus: 0, enemyFireMul: 1,    enemyRefillMul: 1,    turretDmgMul: 1,    hazardCooldownMul: 1,    oscAggroMul: 1,    supportMul: 1,   mayhemMul: 1   },
+  { name: 'Hustler',  tagline: "You've got a corner now — and the corner's got eyes on you.",                  lives: 3, ballSpeedMul: 1.08, enemyCapBonus: 0, enemyFireMul: 0.9,  enemyRefillMul: 0.85, turretDmgMul: 1.15, hazardCooldownMul: 0.88, oscAggroMul: 1.15, supportMul: 1.3, mayhemMul: 1.2 },
+  { name: 'Made',     tagline: "You got your button — respect's real now, and so are the targets on your back.", lives: 3, ballSpeedMul: 1.16, enemyCapBonus: 1, enemyFireMul: 0.8,  enemyRefillMul: 0.72, turretDmgMul: 1.3,  hazardCooldownMul: 0.78, oscAggroMul: 1.3,  supportMul: 1.7, mayhemMul: 1.4 },
+  { name: 'Kingpin',  tagline: 'Half the city runs on your say-so — the other half wants you in the river.',   lives: 2, ballSpeedMul: 1.24, enemyCapBonus: 2, enemyFireMul: 0.68, enemyRefillMul: 0.6,  turretDmgMul: 1.45, hazardCooldownMul: 0.68, oscAggroMul: 1.5,  supportMul: 2.2, mayhemMul: 1.7 },
+  { name: 'Gangster', tagline: "No rank above you, no mercy below — everybody's gunning for the throne.",       lives: 1, ballSpeedMul: 1.32, enemyCapBonus: 2, enemyFireMul: 0.58, enemyRefillMul: 0.5,  turretDmgMul: 1.6,  hazardCooldownMul: 0.6,  oscAggroMul: 1.8,  supportMul: 3.2, mayhemMul: 2.2 },
 ]
 export type ProjKind = 'shot' | 'bomb' | 'bolt' | 'seeker' | 'spread'   // enemy projectile flavours
 export interface TurretShot { x: number; y: number; vx: number; vy: number; kind?: ProjKind; t?: number }
 export interface Rocket { x: number; y: number; vy: number }
-export interface Explosion { x: number; y: number; t: number; hue?: 'plasma' }
+/** `r` = blast radius in world px. Omitted means "the default rocket radius" — set
+ *  it when the blast was amped, so the drawn shock ring matches the real blast. */
+export interface Explosion { x: number; y: number; t: number; hue?: 'plasma'; r?: number }
 // Ten DISTINCT enemies — each its own movement, tactic AND look (see ENEMY_KINDS).
 export type EnemyKind = 'hunter' | 'bomber' | 'splitter' | 'leech' | 'mirror' | 'orbit' | 'dart' | 'blink' | 'polarity' | 'queen'
 export interface Enemy {
@@ -131,7 +142,7 @@ export interface Pickup { x: number; y: number; kind: PowerKind; t: number }   /
 
 export interface PowerMeta { letter: string; color: string; name: string; desc: string }
 export const POWER_META: Record<PowerKind, PowerMeta> = {
-  oscillate: { letter: 'O', color: '#5fe0c0', name: 'oscillate', desc: 'Green mushroom. Balls weave side to side and you score 1.6× points. Permanent for the round — each one doubles the weave and speeds balls up.' },
+  oscillate: { letter: 'O', color: '#5fe0c0', name: 'oscillate', desc: 'Green mushroom — THE AMP. Every other power-up you grab hits harder: one O doubles them, two triples, three quadruples. Balls also weave side to side and score more. Permanent for the round.' },
   break: { letter: 'B', color: '#ff9f43', name: 'break apart', desc: 'Splits every ball into three of its own kind — white into white, colour into colour.' },
   laser: { letter: 'L', color: '#ff5b5b', name: 'laser', desc: 'Hold SPACE to charge a fireball at the bat — release to launch. Longer hold = bigger Hadouken. 4 shots, no timer; grab more to power up.' },
   expand: { letter: 'E', color: '#5fe08a', name: 'expand', desc: 'Widens your paddle. Timed.' },
@@ -140,17 +151,17 @@ export const POWER_META: Record<PowerKind, PowerMeta> = {
   rocket: { letter: '↑', color: '#ff7043', name: 'rocket', desc: 'Right-click to launch your one missile. It explodes on the first thing it hits, blasting bricks in range.' },
   multiplier: { letter: '×', color: '#ffd24a', name: 'multiplier', desc: '2× or 3× score for everything while it lasts.' },
   burst: { letter: '∗', color: '#3dd7ff', name: 'burst', desc: 'For 8 seconds every brick dies in one hit — tough ones included.' },
-  pinball: { letter: 'P', color: '#8c9eff', name: 'pinball', desc: 'Flipper mode: two field bumpers bounce balls around and the white ball doubles in size but does only a quarter of the damage. Timed.' },
+  pinball: { letter: 'P', color: '#8c9eff', name: 'pinball', desc: 'The board becomes a PINBALL MACHINE — fixed flippers on the mouse buttons, bumpers and table props. No timer: you play it out. It ends when you clear the level or lose a ball, then play carries on as normal. The white ball doubles in size but does only a quarter of the damage.' },
   beam: { letter: 'I', color: '#9d5cff', name: 'beam', desc: 'A purple magic mushroom. 4 shots, no timer: charges ~1.2–1.5s then fires a laser up the middle, damaging that whole column. Grab more to power up — level 3 clears the line.' },
   clock: { letter: 'T', color: '#7ee0ff', name: 'time clock', desc: 'Caught from the alien with at least one colour ball in play: freezes your white ball(s) and every hazard for a few seconds while colour balls keep clearing.' },
   ballchain: { letter: '&', color: '#cfd3da', name: 'ball & chain', desc: 'A spiked wrecking ball swings from the white ball — kills the hunter and smashes falling pills. Smash 5 pills before it ends and a gold paper crane flutters down — catch it for the 100,000 jackpot.' },
-  extralife: { letter: '1UP', color: '#5fe08a', name: 'extra life', desc: 'A 1-UP! Catch this pill to gain a life. Spat out by the hopping dispenser, or by shooting the rare winged-heart carrier on its single pass.' },
+  extralife: { letter: '1UP', color: '#5fe08a', name: 'extra life', desc: 'A 1-UP! Catch this pill to gain a life. Spat out by the hopping dispenser, or by shooting the rare winged-heart carrier on its single pass. Amped by the oscillator: a 2-UP, 3-UP or 4-UP, and the life ceiling rises with it (5 → 20).' },
   crane: { letter: '☆', color: '#ffd24a', name: 'paper crane', desc: 'The gold paper-crane prize from a ball & chain run. Catch it for a 100,000 jackpot.' },
   pierce: { letter: '»', color: '#d8e6ff', name: 'pierce', desc: 'The white ball phases THROUGH tiles — one damage each as it passes, no bounce — carving a tunnel. Colour balls do not pierce. Timed.' },
   scramble: { letter: '?', color: '#ff3df0', name: 'scramble', desc: 'Scrambles EVERY ball — including your white one — into random, ever-shifting colours, so you can no longer tell yours apart by colour and must FOLLOW it by eye. Snaps back to normal (yours back to white) when it ends. Grab more to hold it longer (1 → 3 → 5s).' },
   heal: { letter: '♥', color: '#5fe08a', name: 'repair', desc: 'Repairs the paddle — restores a chunk of bat health.' },
-  shield: { letter: '⛨', color: '#5b9bff', name: 'shield', desc: 'A force shield over the bat: it takes no damage and DEFLECTS enemy fire back up. Timed.' },
-  regen: { letter: '✚', color: '#3fe0a8', name: 'healing shield', desc: 'A shield that also REGENERATES bat health while it lasts — defend and heal at once. Timed.' },
+  shield: { letter: '⛨', color: '#5b9bff', name: 'shield', desc: 'A force shield over the bat: it takes no damage and DEFLECTS enemy fire back up. No timer — it lasts until enemy fire chips its strength away and BUSTS it. Amped shields hold a deeper pool, so they soak more hits.' },
+  regen: { letter: '✚', color: '#3fe0a8', name: 'healing shield', desc: 'A shield that also REGENERATES bat health — defend and heal at once. Like the plain shield it has no timer: it heals for as long as it survives, and stops when it busts.' },
 }
 export const POWER_ORDER: PowerKind[] = ['oscillate', 'break', 'laser', 'expand', 'gun', 'magnet', 'rocket', 'multiplier', 'burst', 'pinball', 'beam', 'clock', 'ballchain', 'pierce', 'scramble', 'heal', 'shield', 'regen']
 
@@ -178,7 +189,7 @@ const BALL_SPEED = 450                // px/s, base magnitude (faster start)
 const BALL_SPEED_MIN = BALL_SPEED / 2   // never let a ball crawl below half the start speed
 const LAUNCH_MAX_ANGLE = 0.7          // rad — the on-paddle offset sets the launch angle (centre pivot = straight up)
 const BALL_SPEEDUP = 1.03            // each paddle hit nudges speed up
-const BALL_SPEED_MAX = 640            // headroom for the faster start + frantic ×1.5 + pinball ×2
+const BALL_SPEED_MAX = 640            // headroom for the faster start + the oscillate bumps + pinball ×2
 const MIN_VY_RATIO = 0.3             // keep ≥30% of speed vertical so a ball can't loop horizontally
 const START_LIVES = 3
 const MAX_BALLS = 9
@@ -248,7 +259,7 @@ const POWER_WEIGHTS: Record<PowerKind, number> = {
   crane: 0,                            // never an ambient drop — only earned from a ball & chain run
 }
 // Defensive (survival) drops — their weight is FLOODED by the difficulty's supportMul
-// and again by live danger (low bat HP / on the brink / mid-frenzy). See #randomPower.
+// and again by live danger (low bat HP / on the brink). See #randomPower.
 const DEFENSIVE = new Set<PowerKind>(['heal', 'shield', 'regen'])
 
 // Laser → charge-and-release FIREBALL cannon: 4 shots (no timer); hold to charge,
@@ -308,6 +319,18 @@ const WOBBLE_BASE_AMP = 18            // px of lateral weave at 1 stack (doubled
 const WOBBLE_AMP_MAX = 36             // px cap at base aggression (scaled up by oscAggroMul)
 const WOBBLE_FREQ = 8                 // rad/s at base aggression (scaled up by oscAggroMul)
 const OSC_SPEEDUP = 1.08             // ball-speed bump per O pickup at base aggression (permanent)
+// The AMP ladder: oscillate stacks multiply every OTHER power-up's effect.
+// 0 stacks → ×1 (the un-amped game), 1 → DOUBLE, 2 → TRIPLE, 3+ → QUADRUPLE.
+// The ladder deliberately stops at quadruple: `amp` is a factor on ammo counts,
+// blast radii, durations and ball caps, so an uncapped ladder would run away.
+const AMP_MAX = 4
+// Score booster: 1 + 0.6·(amp-1) → ×1 un-amped, ×1.6 at one stack (exactly as
+// before), rising to ×2.8 at quadruple.
+const OSC_SCORE_PER_AMP = 0.6
+// Break's split cone (rad each side of the parent's heading). The amp subdivides
+// THIS fan into 2·amp splits rather than widening it, so an amped split never
+// fires sideways: at amp 1 the two splits land on exactly the original ±0.35.
+const BREAK_FAN = 0.7
 
 // Rocket: right-click launches one missile straight up; it explodes on the first
 // thing it hits (brick, hunter, or ceiling), blasting every brick in the radius.
@@ -341,7 +364,6 @@ const SCRAMBLE_DURS = [1, 3, 5]      // ? scramble: stacked hold-time of the ran
 const ENEMY_SPAWN_DELAY = 22         // seconds of "taking too long" before the first one appears
 const ENEMY_REFILL_GAP = 6           // gap before the swarm spawns its next member (up to the level cap)
 const ENEMY_SPEED = 105              // px/s homing toward the white ball
-const PANIC_BRICKS = 12              // below this many bricks the swarm goes berserk (ramps to 0 at 0)
 const ENEMY_HP = 3
 // The ten enemy kinds (picked at random on spawn) and their hp ladder — Blink is a
 // 1-hp twitch, the Queen is a 5-hp boss.
@@ -355,19 +377,29 @@ export const ENEMY_R = 15
 const MEGA_COLS = 3                  // footprint width in cells  (the "spots" it takes)
 const MEGA_ROWS = 2                  // footprint height in cells (3×2 = 6 spots)
 const MEGA_HP = 5                    // hits to break the big brick
-const FRANTIC_DELAY = 15             // seconds to break the gold brick before frantic mode kicks in
-const FRANTIC_SPEEDUP = 2.0          // DOUBLE TIME: every ball jumps to 2× speed when frantic starts
-const FRANTIC_MAX = BALL_SPEED * FRANTIC_SPEEDUP   // frenzy gets its OWN ceiling (900) above the normal cap so 2× is genuinely reachable
-const FRANTIC_FLASH = 0.7            // seconds of the frenzy-start lightning/shake burst
-// Recurring frenzy "storm": in the harder modes the gold throne keeps returning after
-// it falls. The gap between storms is STORM_PERIOD / mayhemMul (Rookie's mayhemMul of 1
-// never re-arms, so it keeps the single once-per-board gold race).
-const STORM_PERIOD = 20             // base seconds between recurring storms (scaled down by mayhemMul)
+// ── The FINALE ────────────────────────────────────────────
+// Every level ends on a payoff instead of a fizzle. Down to the LAST brick, that
+// brick turns gold and pulses — a beacon (see #markFinalBrick). Clear the board and
+// the finale fires: a jackpot, a gold flash and a ring of fireworks, played out on
+// the LIVE board for FINALE_HOLD seconds before the overlay's tally opens.
+//
+// There is no timer and no fail state — the finale is pure reward for finishing.
+// (It replaces the old centre "gold brick": a 5-hp throne on a 15s fuse that, if you
+// missed it, threw every ball to 2× speed permanently. Do not bring that back — the
+// end of a level must be a victory lap, never a punishment. The near-clear enemy
+// BERSERK that used to rage below 12 bricks is gone for the same reason.)
+const FINALE_HOLD = 1.3             // seconds the fireworks play on the live board before the level is declared won
+const FINALE_FLASH = 0.7            // seconds of the finale's gold flash / shout
+const FINALE_JACKPOT = 10000        // the level-clear jackpot (rides the score multipliers)
 
 // Pinball: a timed flipper mode. Two field bumpers bounce balls around and the
 // white ball doubles in SIZE — but does only a QUARTER of the damage, so it's
 // bouncy chaos, not a board-melter. The duration is randomly one of these.
-const PINBALL_DURATION = 30          // seconds of pinball flipper mode per pickup
+// Pinball is a MODE, not a timed power: catch the P pill and the board becomes a real
+// pinball machine — fixed flippers, bumpers, props — and you PLAY IT OUT. There is no
+// clock. It ends exactly two ways, both of which already reset it: clear the level (the
+// overlay builds a fresh Engine for the next screen) or drain and lose a life
+// (#resetForLife). Either way play continues as normal afterwards.
 const PINBALL_DAMAGE = 0.25          // the giant pinball ball does only 25% of a normal hit's damage
 const BUMPER_R = 20
 const BUMPER_Y = H * 0.6             // bumpers sit below every brick row — the "non-tile" zone
@@ -403,11 +435,12 @@ const PADDLE_HIT_FLASH = 0.3         // seconds the paddle flashes red after tak
 const PADDLE_MAX_HP = 100
 const TURRET_DMG = 24                // damage from a turret shot / bomb that lands on the bat
 const HEAL_AMOUNT = 45               // ♥ heal pill
-const SHIELD_DURATION = 10           // ⛨ shield: deflects fire while it has strength
+// ⛨ / ✚ shields have NO clock: they last until they're BUSTED. The strength pool is
+// the whole lifetime — every deflected shot chips it, and at 0 the shield breaks.
+// (Amp deepens the pool, so an amped shield survives proportionally more hits.)
 const SHIELD_MAX_HP = 100            // ⛨ shield strength pool — projectiles chip it, 0 → shield breaks
 const SHIELD_HIT_DMG = TURRET_DMG    // strength a deflected shot costs the shield (~4 hits to break)
-const REGEN_DURATION = 12            // ✚ healing shield: shield + HP regen
-const REGEN_RATE = 14               // HP per second while the healing shield is up
+const REGEN_RATE = 14               // HP per second while a healing shield is up (it heals until the shield busts)
 
 // Dynamite (TNT): periodically a crate appears in the middle for TNT_LIFETIME
 // seconds; a ball hit lights the fuse, and TNT_FUSE seconds later it detonates,
@@ -494,9 +527,8 @@ export class Engine {
   turretShots: TurretShot[] = []      // shots fired at the player by lit turret tiles
   paddleHitFlash = 0                  // seconds left of the red flash after a turret shot lands
   paddleHp = PADDLE_MAX_HP            // bat health — enemy fire chips it; 0 → lose a life
-  shieldTimer = 0                     // ⛨ shield active (deflects fire while it has strength)
-  regenTimer = 0                      // ✚ healing shield active (shield + HP regen)
-  shieldHp = 0                        // ⛨ shield strength remaining — projectiles chip it; 0 → breaks
+  shieldHp = 0                        // ⛨ shield strength remaining — projectiles chip it; 0 → it breaks. NO timer: this pool IS the lifetime
+  regenShield = false                 // ✚ this shield also regenerates bat HP (until it busts)
   shieldFlash = 0                     // brief flash when the shield deflects a shot
   tnt: Tnt | null = null              // the centre dynamite crate (null = none on screen)
   alien: Alien | null = null         // the top ship dispenser (respawns when shot)
@@ -519,7 +551,7 @@ export class Engine {
   expandTimer = 0
   magnetTimer = 0
   burstTimer = 0
-  pinballTimer = 0
+  pinball = false                     // pinball MACHINE mode — no clock; ends only on a level clear or a death
   pierceTimer = 0                     // white ball phases through tiles while > 0
   // Scramble (?): while > 0, EVERY ball renders in random, ever-shifting colours
   // (the hero loses its white too) so you must follow yours by eye; reverts to
@@ -572,8 +604,23 @@ export class Engine {
   #colorIdx = 0                       // cycles BALL_COLORS so each ammo ball differs
   #levelClock = 0                     // seconds on this screen — drives the enemy spawn
   #levelRows = 0                      // rows in the current level (mega footprint clamp)
-  #pinballDur = 0                     // the picked pinball duration (for the HUD bar)
   #paddleBaseW = PADDLE_W             // permanent bat width (grown 25% by each oscillate); expand widens on top
+  // Loader sizes / pools SNAPSHOTTED at pickup, because the AMP scales them. The HUD
+  // pip rows and strength bars divide by these, so they must track the grant that
+  // actually happened — reading the base constant would overflow an amped bar, and
+  // reading `amp` live would rescale a bar the moment a later O landed.
+  #gunLoader = GUN_LOADER
+  #beamLoader = BEAM_LOADER
+  #laserLoader = LASER_LOADER
+  #rocketMax = ROCKET_MAX
+  #shieldMax = SHIELD_MAX_HP
+  // Same reason, for the timed powers whose HUD bar is EXACT today (they assign
+  // rather than stack, so a clamped denominator would visibly lie once amped).
+  // expand/magnet/burst/pierce/shield/regen already pin at full when stacked, so
+  // they keep reading their base constant.
+  #scrambleDur = SCRAMBLE_DURS[0]
+  #clockDur = CLOCK_DURATION
+  #ballchainDur = BALLCHAIN_DURATION
   #turretFireCd = 0                   // countdown to the active turret's next shot
   #tntTimer = TNT_FIRST               // seconds until the next dynamite crate appears
   #chainAngle = 0                     // wrecking-ball pendulum angle (0 = straight down)
@@ -592,12 +639,9 @@ export class Engine {
   #waveBudget = 0                     // pills the alien still has loaded this wave (released on hit)
   #colorBallTimer = 0                 // how long ≥ PAC_COLOR_MIN colour balls have been up (summons Pac-Man)
   #tntArmedThisLevel = false          // rolled once per level: is there a crate this board?
-  #enemiesKilled = 0                  // hunters destroyed this match — the 2nd kill blooms the gold brick
-  #megaSpawned = false                // the big gold brick blooms once per match
-  frantic = false                     // frantic mode: didn't break the gold brick in time
-  franticTimer = 0                    // countdown while the gold brick is alive (> 0 = armed)
-  franticFlash = 0                    // seconds left of the frenzy-start lightning/shake burst
-  #stormTimer = 0                     // recurring-storm clock (> 0 = a fresh gold throne is incoming); 0 = disarmed
+  finaleTimer = 0                     // > 0 = the board is clear and the finale fireworks are playing; the win is declared when it runs out
+  rushFlash = 0                       // seconds left of the finale's gold flash burst
+  #finaleFired = false                // the finale plays once per level
   #shipRespawn = 0                    // seconds until the next alien ship flies in (when destroyed)
   #dispenserSeq = Math.floor(Math.random() * DISPENSER_KINDS.length)   // rotates the critter cast (random start)
 
@@ -648,7 +692,7 @@ export class Engine {
     this.alien = { x: dir > 0 ? ALIEN_W / 2 : W - ALIEN_W / 2, y: ALIEN_Y, vx: ALIEN_SPEED * dir, frame: 0, kind }
     // Occasionally release a separate extra-life carrier (a winged heart) — never on
     // the level's first ship, only when it helps (lives < max) and the slot is free.
-    if (allowCarrier && !this.extraLife && this.lives < MAX_LIVES && this.#hazardFree() && Math.random() < EXTRALIFE_CHANCE) {
+    if (allowCarrier && !this.extraLife && this.lives < this.maxLives && this.#hazardFree() && Math.random() < EXTRALIFE_CHANCE) {
       this.#spawnExtraLife()
     }
   }
@@ -792,27 +836,42 @@ export class Engine {
     this.#bumpCombo(x, y)                              // hitting an enemy feeds the combo too
   }
 
-  /** Count a hunter KILL. The big gold brick blooms ONCE per match — at the centre
-   *  of the tile area — the moment the second hunter is destroyed. */
-  #onEnemyKilled(): void {
-    this.#enemiesKilled++
-    if (this.#enemiesKilled === 2 && !this.#megaSpawned) { this.#megaSpawned = true; this.#spawnCenterMega() }
+  /** Mark the LAST brick standing as the level's finale beacon: it turns gold and
+   *  pulses, so the final hit of a level is a target you can see coming. Purely a
+   *  marker — it keeps its own hp and dies to anything, exactly like any other tile.
+   *  Megas are skipped: shattering one refills the board with shards, so it is never
+   *  really "the last brick". */
+  #markFinalBrick(): void {
+    if (this.#finaleFired || this.bricksLeft !== 1) return
+    const last = this.bricks.find(b => b.alive && !b.seed && !b.mega)
+    if (last) last.gold = true
   }
 
-  /** Bloom THE gold throne, centred over the tile area (it floats over any tiles).
-   *  With `arm` it's a RACE — break it within FRANTIC_DELAY or the frenzy kicks in;
-   *  without `arm` it's a pure quell target (used when a frenzy is already raging and
-   *  needs a throne to smash). Only ever one throne stands at a time. */
-  #spawnFrenzyCore(arm: boolean): void {
-    if (this.bricks.some(b => b.gold && b.alive)) return                  // one throne at a time
-    const c0 = clamp(Math.floor((COLS - MEGA_COLS) / 2), 0, Math.max(0, COLS - MEGA_COLS))
-    const r0 = clamp(Math.floor((this.#levelRows - MEGA_ROWS) / 2), 0, Math.max(0, this.#levelRows - MEGA_ROWS))
-    const mega = this.#createMega(c0, r0)
-    mega.gold = true
-    if (arm) this.franticTimer = FRANTIC_DELAY * this.difficulty.franticDelayMul   // arm the race (harder = less time)
+  /** The board just emptied → the FINALE. Fires once, and deliberately on the CLEAR
+   *  rather than on the gold brick's death, so it still pays out when a rocket or a
+   *  TNT blast wipes the last several tiles at once (those routes bypass #damage).
+   *  Holds the win for FINALE_HOLD so the fireworks play on the live board. */
+  #startFinale(): void {
+    if (this.#finaleFired || this.bricksLeft > 0) return
+    this.#finaleFired = true
+    this.finaleTimer = FINALE_HOLD
+    this.rushFlash = FINALE_FLASH
+    this.#addScore(FINALE_JACKPOT)
+    this.comboPops.push({ x: W / 2, y: H * 0.42, n: 0, pts: FINALE_JACKPOT, t: 0 })
+    for (let i = 0; i < 10; i++) {
+      this.explosions.push({ x: W / 2 + Math.cos(i * 0.63) * 78, y: H * 0.42 + Math.sin(i * 0.63) * 46, t: 0 })
+    }
   }
-  /** The first throne of the board (the 2nd-hunter bloom): always an armed race. */
-  #spawnCenterMega(): void { this.#spawnFrenzyCore(true) }
+
+  /** The level is won once the board is empty — but NOT while the finale fireworks
+   *  are still playing, or the overlay would cut to its tally mid-burst. Every win
+   *  check routes through here. */
+  #checkWin(): void {
+    if (this.bricksLeft === 0 && this.finaleTimer <= 0) this.state = 'won'
+  }
+
+  /** True while the finale is playing (renderer/overlay cue). */
+  get finale(): boolean { return this.finaleTimer > 0 }
 
   /** Tick seed bloom timers; a ripe seed blooms into a mega brick. */
   #stepBricks(dt: number): void {
@@ -868,31 +927,10 @@ export class Engine {
     return mega
   }
 
-  /** Frenzy! Failed to break the gold brick in time — every ball jumps to FRANTIC
-   *  speed and any ball heading DOWN is flipped to head up. Fires a lightning/shake
-   *  burst (see franticFlash). Persists (faster floor) until the gold brick falls. */
-  #triggerFrantic(): void {
-    this.frantic = true
-    this.franticTimer = 0
-    this.franticFlash = FRANTIC_FLASH
-    for (const b of this.balls) {
-      if (b.stuck) continue
-      let vy = b.vy
-      if (vy > 0) vy = -vy                                 // invert any downward ball at the start
-      const sp = Math.hypot(b.vx, vy) || BALL_SPEED
-      const ns = Math.min(FRANTIC_MAX, sp * FRANTIC_SPEEDUP)
-      b.vx = (b.vx / sp) * ns; b.vy = (vy / sp) * ns
-    }
-  }
-
   /** Shatter a destroyed mega into 1-hit shards filling its footprint; EVERY shard
    *  is a guaranteed power-up tile — each drops a (weighted-random) power-up when
    *  broken, so cracking the big block rains a bonanza of pills. */
   #breakMega(mega: Brick): void {
-    if (mega.gold) {
-      this.frantic = false; this.franticTimer = 0                    // throne down — win the race / calm the frenzy
-      if (this.difficulty.mayhemMul > 1) this.#stormTimer = STORM_PERIOD / this.difficulty.mayhemMul   // …but in the harder modes another storm is already brewing
-    }
     const c0 = mega.col ?? 0, r0 = mega.row ?? 0
     const cc = mega.megaCols ?? MEGA_COLS, rr = mega.megaRows ?? MEGA_ROWS
     const shards: Brick[] = []
@@ -947,10 +985,10 @@ export class Engine {
     this.#clearTurrets()
     this.paddleHitFlash = 0
     this.paddleHp = PADDLE_MAX_HP                  // a fresh bat at full health
-    this.shieldTimer = this.regenTimer = this.shieldHp = this.shieldFlash = 0
+    this.shieldHp = this.shieldFlash = 0; this.regenShield = false
     this.tnt = null
     this.#tntTimer = TNT_FIRST
-    this.#stormTimer = 0                           // a death buys a breather — storms re-arm only once a fresh throne falls
+    this.rushFlash = 0                             // a death clears the finale's flash (the finale itself can't be running — the board was clear)
     this.pacman = null
     this.#activeHazard = 'none'
     this.#hazardCooldown = 0
@@ -969,11 +1007,22 @@ export class Engine {
     this.comboPops = []
     this.pickups = []
     this.#levelClock = 0
-    this.expandTimer = this.magnetTimer = this.burstTimer = this.pinballTimer = this.pierceTimer = 0
+    this.expandTimer = this.magnetTimer = this.burstTimer = this.pierceTimer = 0
+    this.pinball = false                           // a death ends the pinball machine — back to the bat
     this.scrambleTimer = this.scrambleLevel = 0
     this.beamShots = this.beamLevel = this.beamCharge = this.beamFlash = 0
     this.laserShots = this.laserLevel = this.laserCharge = this.laserMuzzleFlash = 0; this.laserCharging = false; this.fireballs = []
-    this.oscillateStacks = 0
+    this.oscillateStacks = 0                       // the AMP resets with the round — a death costs you the whole ladder
+    // …and so do the loader/pool sizes it had scaled up, or the HUD bars would keep
+    // dividing by an amped denominator the next life never granted.
+    this.#gunLoader = GUN_LOADER
+    this.#beamLoader = BEAM_LOADER
+    this.#laserLoader = LASER_LOADER
+    this.#rocketMax = ROCKET_MAX
+    this.#shieldMax = SHIELD_MAX_HP
+    this.#scrambleDur = SCRAMBLE_DURS[0]
+    this.#clockDur = CLOCK_DURATION
+    this.#ballchainDur = BALLCHAIN_DURATION
     this.goldBonus = this.goldTimer = 0
     this.milestoneFx = null; this.scoreFlash = 0
     this.gunAmmo = this.gunLevel = this.rocketAmmo = 0
@@ -988,12 +1037,24 @@ export class Engine {
     for (const b of this.bricks) if (b.alive) n++
     return n
   }
-  /** 0 = plenty of bricks, →1 as the board nears empty. Drives the swarm's "berserk
-   *  when almost cleared" panic (faster move + fire) and the renderer's alert cue. */
-  get nearClearFrac(): number {
-    const n = this.bricksLeft
-    return n > 0 && n < PANIC_BRICKS ? (PANIC_BRICKS - n) / PANIC_BRICKS : 0
-  }
+
+  /** THE AMP — the oscillator's force multiplier on every OTHER power-up.
+   *  0 stacks → 1 (un-amped), 1 → 2 (double), 2 → 3 (triple), 3+ → 4 (quadruple).
+   *  Every grant site in #applyPower multiplies by this, so one green mushroom
+   *  turns the whole kit up a notch. Capped at AMP_MAX — it scales ammo counts,
+   *  blast radii, ball caps and durations, none of which may run away. */
+  get amp(): number { return Math.min(AMP_MAX, 1 + this.oscillateStacks) }
+
+  /** On-screen ball cap — amped, so a quadrupled Break really is a ball storm. */
+  get maxBalls(): number { return MAX_BALLS * this.amp }
+
+  /** Life ceiling — amped (5 → 10 → 15 → 20). Extra lives are an effect like any
+   *  other, so the amp has to lift the CEILING too: a quadrupled 1-UP that pays +4
+   *  into a cap of 5 would hand back nothing. Every "can you still earn a life?"
+   *  gate reads this — the carrier spawn, the 1-UP pill roll, the combo milestone.
+   *  Only GAINS are gated: a death drops the amp back to 1 without ever clipping
+   *  lives you already banked. */
+  get maxLives(): number { return MAX_LIVES * this.amp }
 
   /** Active powers for the HUD badge row (kind, 0..1 bar, label). The gun is NOT
    *  here — it renders its own pip magazine (see gunActive). */
@@ -1002,38 +1063,46 @@ export class Engine {
     const addTimed = (kind: PowerKind, t: number, dur: number) => {
       if (t > 0) out.push({ kind, frac: clamp(t / dur, 0, 1), label: `${Math.ceil(t)}s` })
     }
-    // Oscillate is permanent (no countdown): its score effect is a flat ×1.6 booster.
-    if (this.oscillateStacks > 0) out.push({ kind: 'oscillate', frac: 1, label: '×1.6' })
+    // Oscillate is permanent (no countdown): the badge reports the AMP the whole kit
+    // is running at, which is the number the player actually plays around.
+    if (this.oscillateStacks > 0) out.push({ kind: 'oscillate', frac: 1, label: `AMP×${this.amp}` })
     addTimed('expand', this.expandTimer, EXPAND_DURATION)
     addTimed('magnet', this.magnetTimer, MAGNET_DURATION)
     addTimed('burst', this.burstTimer, BURST_DURATION)
-    addTimed('pinball', this.pinballTimer, this.#pinballDur || PINBALL_DURATION)
-    addTimed('clock', this.freezeTimer, CLOCK_DURATION)
+    if (this.pinball) out.push({ kind: 'pinball', frac: 1, label: 'ON' })   // a mode, not a countdown — it runs till the level ends or you die
+    addTimed('clock', this.freezeTimer, this.#clockDur)
     addTimed('pierce', this.pierceTimer, PIERCE_DURATION)
-    if (this.scrambleTimer > 0) out.push({ kind: 'scramble', frac: clamp(this.scrambleTimer / SCRAMBLE_DURS[this.scrambleLevel], 0, 1), label: `${Math.ceil(this.scrambleTimer)}s` })
-    addTimed('shield', this.shieldTimer, SHIELD_DURATION)
-    addTimed('regen', this.regenTimer, REGEN_DURATION)
-    if (this.ballchainTimer > 0) out.push({ kind: 'ballchain', frac: clamp(this.ballchainTimer / BALLCHAIN_DURATION, 0, 1), label: `${this.ballchainKills}/${CHAIN_BONUS_PILLS}` })
+    if (this.scrambleTimer > 0) out.push({ kind: 'scramble', frac: clamp(this.scrambleTimer / this.#scrambleDur, 0, 1), label: `${Math.ceil(this.scrambleTimer)}s` })
+    // The shield bar is its STRENGTH, not a clock — it only empties when shots chip it.
+    if (this.shieldHp > 0) {
+      out.push({ kind: this.regenShield ? 'regen' : 'shield', frac: this.shieldHpFrac, label: `${Math.ceil(this.shieldHpFrac * 100)}%` })
+    }
+    if (this.ballchainTimer > 0) out.push({ kind: 'ballchain', frac: clamp(this.ballchainTimer / this.#ballchainDur, 0, 1), label: `${this.ballchainKills}/${CHAIN_BONUS_PILLS}` })
+    // The ammo bars divide by the loader that was actually granted (amped at pickup),
+    // not the base constant — otherwise an amped loader pins the bar at full.
     if (this.beamShots > 0) {
       const lvl = this.beamLevel >= 2 ? `L${this.beamLevel}` : ''
-      out.push({ kind: 'beam', frac: clamp(this.beamShots / BEAM_LOADER, 0, 1), label: `${lvl}×${this.beamShots}` })
+      out.push({ kind: 'beam', frac: clamp(this.beamShots / this.#beamLoader, 0, 1), label: `${lvl}×${this.beamShots}` })
     }
     if (this.laserShots > 0) {
       const lvl = this.laserLevel >= 2 ? `L${this.laserLevel}` : ''
-      out.push({ kind: 'laser', frac: clamp(this.laserShots / LASER_LOADER, 0, 1), label: `${lvl}×${this.laserShots}` })
+      out.push({ kind: 'laser', frac: clamp(this.laserShots / this.#laserLoader, 0, 1), label: `${lvl}×${this.laserShots}` })
     }
     if (this.rocketAmmo > 0 || this.rockets.length > 0) {
-      out.push({ kind: 'rocket', frac: clamp(this.rocketAmmo / ROCKET_MAX, 0, 1), label: `×${this.rocketAmmo}` })
+      out.push({ kind: 'rocket', frac: clamp(this.rocketAmmo / this.#rocketMax, 0, 1), label: `×${this.rocketAmmo}` })
     }
     return out
   }
 
   get gunActive(): boolean { return this.gunAmmo > 0 }
-  get gunLoaderSize(): number { return GUN_LOADER }
+  /** Pips to draw in the magazine — the loader as GRANTED (amped), so the row
+   *  always matches the ammo actually loaded. */
+  get gunLoaderSize(): number { return this.#gunLoader }
   /** Shielded while a plain or healing shield is up AND still has strength left. */
-  get shielded(): boolean { return (this.shieldTimer > 0 || this.regenTimer > 0) && this.shieldHp > 0 }
-  /** 0..1 remaining shield strength (for the dome / depletion read). */
-  get shieldHpFrac(): number { return clamp(this.shieldHp / SHIELD_MAX_HP, 0, 1) }
+  get shielded(): boolean { return this.shieldHp > 0 }
+  /** 0..1 remaining shield strength (for the dome / depletion read), against the
+   *  pool as GRANTED — an amped shield starts full and depletes over more hits. */
+  get shieldHpFrac(): number { return clamp(this.shieldHp / this.#shieldMax, 0, 1) }
   /** 0..1 paddle health (for the bar). */
   get paddleHpFrac(): number { return clamp(this.paddleHp / PADDLE_MAX_HP, 0, 1) }
   /** 0..1 charge progress of the beam (purple mushroom), for the renderer. */
@@ -1113,7 +1182,9 @@ export class Engine {
   /** Right-click: launch the one missile if you have it and none is airborne.
    *  It flies up and explodes on the first thing it hits. */
   fireRocket(): void {
-    if (this.state !== 'playing' || this.rocketAmmo <= 0 || this.rockets.length > 0) return
+    // Amped, up to `amp` missiles may be in the air at once (at amp 1: the original
+    // one-at-a-time rule). Still no manual detonate — each blows on what it hits.
+    if (this.state !== 'playing' || this.rocketAmmo <= 0 || this.rockets.length >= this.amp) return
     this.rocketAmmo--
     this.rockets.push({ x: this.paddle.x, y: this.paddle.y - 8, vy: -ROCKET_SPEED })
   }
@@ -1121,12 +1192,15 @@ export class Engine {
   /** Blast every alive brick within ROCKET_RADIUS of the rocket and leave a
    *  visual shock-ring. Does NOT remove the rocket — the caller owns that. */
   #detonateRocket(rk: Rocket): void {
-    this.explosions.push({ x: rk.x, y: rk.y, t: 0 })
+    // Amped: up to a 4× blast. The radius rides ON the explosion record so the shock
+    // ring the renderer draws is the blast that actually happened, not the constant.
+    const radius = ROCKET_RADIUS * this.amp
+    this.explosions.push({ x: rk.x, y: rk.y, t: 0, r: radius })
     // Snapshot: #breakMega appends shards, which must NOT be caught by this blast.
     for (const brick of [...this.bricks]) {
       if (!brick.alive || brick.seed) continue            // seeds are immune until they bloom
       const bxc = brick.x + brick.w / 2, byc = brick.y + brick.h / 2
-      if (Math.hypot(bxc - rk.x, byc - rk.y) > ROCKET_RADIUS) continue
+      if (Math.hypot(bxc - rk.x, byc - rk.y) > radius) continue
       if (brick.mega) { brick.alive = false; this.#breakMega(brick); continue }   // shatter, don't vaporise
       brick.alive = false
       brick.hp = 0
@@ -1135,11 +1209,11 @@ export class Engine {
       else if (Math.random() < DROP_CHANCE) this.#dropPill(bxc, byc, this.#randomPower())
     }
     // A rocket caught in the blast also blows the ship out of the sky.
-    if (this.alien && Math.hypot(this.alien.x - rk.x, this.alien.y - rk.y) <= ROCKET_RADIUS) this.#destroyShip()
-    if (this.extraLife && Math.hypot(this.extraLife.x - rk.x, this.extraLife.y - rk.y) <= ROCKET_RADIUS) this.#hitExtraLife()
-    this.#blastEnemies(rk.x, rk.y, ROCKET_RADIUS)     // the rocket vaporises any enemies in the blast
-    if (this.pacman && Math.hypot(this.pacman.x - rk.x, this.pacman.y - rk.y) <= ROCKET_RADIUS) this.#killPacman()
-    if (this.bricksLeft === 0) this.state = 'won'
+    if (this.alien && Math.hypot(this.alien.x - rk.x, this.alien.y - rk.y) <= radius) this.#destroyShip()
+    if (this.extraLife && Math.hypot(this.extraLife.x - rk.x, this.extraLife.y - rk.y) <= radius) this.#hitExtraLife()
+    this.#blastEnemies(rk.x, rk.y, radius)     // the rocket vaporises any enemies in the blast
+    if (this.pacman && Math.hypot(this.pacman.x - rk.x, this.pacman.y - rk.y) <= radius) this.#killPacman()
+    this.#checkWin()
   }
 
   #launchBall(b: Ball): void {
@@ -1153,7 +1227,7 @@ export class Engine {
   }
 
   #fireGun(): void {
-    if (this.gunAmmo <= 0 || this.#gunCd > 0 || this.balls.length >= MAX_BALLS) return
+    if (this.gunAmmo <= 0 || this.#gunCd > 0 || this.balls.length >= this.maxBalls) return
     this.#gunCd = GUN_COOLDOWN
     this.gunAmmo--                         // one shot out of the loader
     const a = this.aimAngle, level = this.gunLevel
@@ -1175,7 +1249,7 @@ export class Engine {
   /** Spawn one coloured ammo ball fired along `ang`. Returns false (and spawns
    *  nothing) once the on-screen ball cap is reached, so a volley stops cleanly. */
   #spawnGunBall(ang: number): boolean {
-    if (this.balls.length >= MAX_BALLS) return false
+    if (this.balls.length >= this.maxBalls) return false
     const r = BALL_R + 4
     this.balls.push(this.#newBall(
       this.paddle.x + Math.cos(ang) * r,
@@ -1194,9 +1268,16 @@ export class Engine {
     this.laserShots--
     const tier = this.#tierFor(this.laserCharge)
     const i = tier - 1
+    // Amped at LAUNCH — consistent with the tier snapshot above: an orb already in
+    // flight is never retro-buffed, but the next one you throw carries the new amp.
+    // Bite (dmg/aoe/pierce) scales fully; the orb's size is scaled more gently so a
+    // quadrupled Hadouken reads bigger without swallowing the board.
+    const amp = this.amp
+    const bulk = 1 + (amp - 1) * 0.5
     this.fireballs.push({
       x: this.paddle.x, y: this.paddle.y - 10, vy: -FIREBALL_SPEED,
-      tier, dmg: FIREBALL_DMG[i], aoe: FIREBALL_AOE[i], pierce: FIREBALL_PIERCE[i], r: FIREBALL_R[i], tail: FIREBALL_TAIL[i],
+      tier, dmg: FIREBALL_DMG[i] * amp, aoe: FIREBALL_AOE[i] * amp, pierce: FIREBALL_PIERCE[i] * amp,
+      r: FIREBALL_R[i] * bulk, tail: FIREBALL_TAIL[i] * bulk,
       spin: 0, hit: new Set(), t: 0,
     })
     this.laserMuzzleFlash = LASER_MUZZLE_FLASH
@@ -1230,7 +1311,11 @@ export class Engine {
     // in play — they clear bricks but never save you. (No primary remaining also
     // covers the plain case of every ball being gone.)
     this.balls = this.balls.filter(b => b.y - b.r <= H)
-    if (!this.balls.some(b => b.primary)) { this.#loseLife(); return }
+    // …EXCEPT during the finale: the board is already clear, so a ball draining
+    // through the fireworks must not cost a life on a level you just won. Guarded
+    // here rather than inside #loseLife because this branch RETURNS — a no-op
+    // #loseLife would skip the finale tick below and the win would never land.
+    if (!this.balls.some(b => b.primary) && this.finaleTimer <= 0) { this.#loseLife(); return }
 
     this.#stepPillWaves(dt)
     this.#stepCapsules(dt)
@@ -1249,25 +1334,11 @@ export class Engine {
     if (this.comboPops.length) { for (const p of this.comboPops) p.t += dt; this.comboPops = this.comboPops.filter(p => p.t < COMBO_POP_DUR) }
     if (this.milestoneFx) { this.milestoneFx.t += dt; if (this.milestoneFx.t > 1.1) this.milestoneFx = null }   // milestone eruption runs ~1.1s
     if (this.scoreFlash > 0) this.scoreFlash = Math.max(0, this.scoreFlash - dt)
-    if (this.franticTimer > 0 && this.freezeTimer <= 0) {                // gold-brick race (paused while the clock freezes time)
-      if (this.bricks.some(b => b.gold && b.alive)) { this.franticTimer = Math.max(0, this.franticTimer - dt); if (this.franticTimer === 0) this.#triggerFrantic() }
-      else this.franticTimer = 0                                        // gold brick already broken — race won
-    }
-    // Recurring storm (harder modes): the throne keeps coming back. Re-bloom it on a
-    // cadence that quickens with mayhemMul — relentless pressure, always with a target.
-    if (this.#stormTimer > 0 && this.freezeTimer <= 0) {
-      this.#stormTimer = Math.max(0, this.#stormTimer - dt)
-      if (this.#stormTimer === 0) {
-        if (this.bricksLeft > 0 && !this.aiming && !this.bricks.some(b => b.gold && b.alive)) this.#spawnFrenzyCore(true)
-        else this.#stormTimer = 3                                       // board not ready (mid-aim / a throne still stands) — retry shortly
-      }
-    }
-    // Counterplay invariant (ALL modes): a live frenzy ALWAYS has a throne to smash. If
-    // one is somehow missing, bloom an unarmed quell target so the storm is never unstoppable.
-    if (this.frantic && this.bricksLeft > 0 && !this.aiming && !this.bricks.some(b => b.gold && b.alive)) this.#spawnFrenzyCore(false)
-    if (this.franticFlash > 0) this.franticFlash = Math.max(0, this.franticFlash - dt)
+    this.#markFinalBrick()                                              // down to one → light the finale beacon
+    if (this.bricksLeft === 0) this.#startFinale()                      // board clear → fireworks (holds the win)
+    if (this.finaleTimer > 0) this.finaleTimer = Math.max(0, this.finaleTimer - dt)
     if (this.pickups.length) { for (const p of this.pickups) p.t += dt; this.pickups = this.pickups.filter(p => p.t < PICKUP_DUR) }
-    if (this.bricksLeft === 0) this.state = 'won'
+    this.#checkWin()
   }
 
   #spawnEnemy(): void {
@@ -1295,17 +1366,16 @@ export class Engine {
    *  the first after a long dawdle, refills on a short gap. Per-kind move + contact. */
   #stepEnemy(dt: number): void {
     if (this.freezeTimer > 0) return                  // clock: enemies frozen
-    const panic = this.nearClearFrac
     if (this.enemies.length < this.#enemyCap() && this.bricksLeft > 0) {
       this.#levelClock += dt
-      const delay = (this.enemies.length === 0 ? ENEMY_SPAWN_DELAY : ENEMY_REFILL_GAP) * this.difficulty.enemyRefillMul * (1 - 0.55 * panic)   // the last bricks bring the swarm faster
+      const delay = (this.enemies.length === 0 ? ENEMY_SPAWN_DELAY : ENEMY_REFILL_GAP) * this.difficulty.enemyRefillMul
       if (this.#levelClock >= delay) { this.#spawnEnemy(); this.#levelClock = 0 }
     }
-    // As the board nears empty the swarm goes BERSERK: scaling the per-enemy dt
-    // speeds up BOTH movement and the cd-driven fire cadence in one hook.
-    const frenzy = 1 + 0.9 * panic
+    // The swarm keeps ONE cadence all level. (It used to go berserk below 12 bricks —
+    // move and fire both ramping up — which made the run-in to a clear the most
+    // punishing stretch of the level. The end is a victory lap now; see the FINALE.)
     for (const e of [...this.enemies]) {              // snapshot: a contact can remove an enemy mid-pass
-      this.#enemyMove(e, dt * frenzy)
+      this.#enemyMove(e, dt)
       this.#enemyContact(e)
     }
   }
@@ -1464,7 +1534,6 @@ export class Engine {
     if (e.kind === 'leech' && (e.eaten ?? 0) > 0) this.capsules.push({ x: e.x, y: e.y, kind: this.#randomPower() })   // regurgitate loot
     this.#levelClock = 0                              // pace the next swarm member
     this.#addScore(150)
-    this.#onEnemyKilled()
   }
 
   /** AoE: kill every enemy within `r` of (x,y). Returns true if any died. */
@@ -1670,19 +1739,14 @@ export class Engine {
         this.goldTimer = Math.max(0, this.goldTimer - dt)
         if (this.goldTimer === 0) this.goldBonus = 0           // gold window closed — bonus clears in one step
       }
-      if (this.shieldTimer > 0) this.shieldTimer = Math.max(0, this.shieldTimer - dt)
-      if (this.regenTimer > 0) {
-        this.regenTimer = Math.max(0, this.regenTimer - dt)
-        this.paddleHp = Math.min(PADDLE_MAX_HP, this.paddleHp + REGEN_RATE * dt)   // healing shield regenerates HP
+      // Shields have no clock — they live until their strength is chipped away (see
+      // #stepTurrets). A healing shield regenerates for exactly as long as it survives.
+      if (this.regenShield && this.shieldHp > 0) {
+        this.paddleHp = Math.min(PADDLE_MAX_HP, this.paddleHp + REGEN_RATE * this.amp * dt)   // rate amps live
       }
-      if (this.shieldTimer <= 0 && this.regenTimer <= 0 && this.shieldHp > 0) this.shieldHp = 0   // shield timed out — strength resets so it doesn't carry over
       if (this.expandTimer > 0) {
         this.expandTimer = Math.max(0, this.expandTimer - dt)
         if (this.expandTimer === 0) { this.paddle.w = this.#paddleBaseW; this.paddle.x = clamp(this.paddle.x, this.paddle.w / 2, W - this.paddle.w / 2) }   // restore the oscillate-grown base
-      }
-      if (this.pinballTimer > 0) {
-        this.pinballTimer = Math.max(0, this.pinballTimer - dt)
-        if (this.pinballTimer === 0) { this.bumpers = []; this.pinballProps = []; this.#setPrimaryRadius(BALL_R); this.#clearTurrets() }   // pinball over
       }
       if (this.beamShots > 0) {
         this.beamCharge += dt
@@ -1698,6 +1762,7 @@ export class Engine {
       }
     }
     if (this.beamFlash > 0) this.beamFlash = Math.max(0, this.beamFlash - dt)            // cosmetic, keeps running
+    if (this.rushFlash > 0) this.rushFlash = Math.max(0, this.rushFlash - dt)            // cosmetic, keeps running
     if (this.laserMuzzleFlash > 0) this.laserMuzzleFlash = Math.max(0, this.laserMuzzleFlash - dt)   // launch kick, cosmetic
     if (this.shieldFlash > 0) this.shieldFlash = Math.max(0, this.shieldFlash - dt * 3)
     for (const bm of this.bumpers) if (bm.flash > 0) bm.flash = Math.max(0, bm.flash - dt * 5)
@@ -1713,7 +1778,7 @@ export class Engine {
     const bx = this.paddle.x
     this.beamX = bx
     this.beamFlash = BEAM_FLASH
-    const dmg = this.beamLevel >= 3 ? 99 : this.beamLevel   // L3: enough to clear any brick in the line
+    const dmg = this.beamLevel >= 3 ? 99 : this.beamLevel * this.amp   // L3 already clears the line; below that the amp bites harder
     for (const brick of [...this.bricks]) {            // snapshot: #damage may shatter a mega
       if (!brick.alive || brick.seed) continue          // seeds are invincible until they bloom
       if (bx >= brick.x && bx <= brick.x + brick.w) this.#damage(brick, dmg)
@@ -1793,13 +1858,13 @@ export class Engine {
     if (this.tnt) this.#tntBounce(b)                      // light the dynamite's fuse
     if (this.alien) this.#alienBounce(b)                  // bonk the top dispenser
     if (this.extraLife) this.#extraLifeBounce(b)          // pop the winged-heart 1-UP carrier
-    if (this.pinballTimer > 0) this.#flipperBounce(b)     // pinball: real flippers (L/R mouse)
+    if (this.pinball) this.#flipperBounce(b)     // pinball: real flippers (L/R mouse)
     else this.#paddleBounce(b)                            // normal: the sliding bat
     this.#brickHits(b)
 
-    // Minimum speed: never crawl below half the start speed — and while FRANTIC,
-    // hold it near DOUBLE speed (1.85× floor, 2× ceiling) so the frenzy stays doubled.
-    const floor = this.frantic ? BALL_SPEED * 1.85 : BALL_SPEED_MIN
+    // Minimum speed: never crawl below half the start speed. (The Gold Rush does NOT
+    // touch ball speed — the old frenzy pinned a 1.85× floor here.)
+    const floor = BALL_SPEED_MIN
     let sp = Math.hypot(b.vx, b.vy)
     if (sp > 0 && sp < floor) {
       const k = floor / sp
@@ -1827,8 +1892,9 @@ export class Engine {
     const dx = this.paddle.x - b.x
     const dy = this.paddle.y - b.y
     const d = Math.hypot(dx, dy) || 1
-    b.vx += (dx / d) * MAGNET_G * dt
-    b.vy += (dy / d) * MAGNET_G * dt
+    const g = MAGNET_G * this.amp        // a continuous force: reads the amp LIVE, so an O turns the pull up at once
+    b.vx += (dx / d) * g * dt
+    b.vy += (dy / d) * g * dt
     const sp = Math.hypot(b.vx, b.vy)
     if (sp > BALL_SPEED_MAX) { b.vx = (b.vx / sp) * BALL_SPEED_MAX; b.vy = (b.vy / sp) * BALL_SPEED_MAX }
   }
@@ -1883,21 +1949,25 @@ export class Engine {
         b.y += dy >= 0 ? overlapY : -overlapY
       }
       // The white pinball ball does only a quarter of a normal hit (bouncy chaos, not a board-melter).
-      this.#damage(brick, this.pinballTimer > 0 && b.primary ? PINBALL_DAMAGE : 1)
+      this.#damage(brick, this.pinball && b.primary ? PINBALL_DAMAGE : 1)
       return                                               // one brick per sub-step
     }
   }
 
   /** POINTS axis (skill): the combo chain + the unified gold bonus, capped. A getter
-   *  so it can never desync from combo/gold. */
+   *  so it can never desync from combo/gold. The ceiling amps, so an amped gold pill
+   *  is not handed back a bonus the cap immediately clips off. */
   get pointsMul(): number {
-    return Math.min(POINTS_CAP, 1 + Math.min(this.combo, 25) * 0.2 + this.goldBonus)
+    return Math.min(POINTS_CAP * this.amp, 1 + Math.min(this.combo, 25) * 0.2 + this.goldBonus)
   }
 
   /** Add points through the two-axis multiplier — POINTS × × PILLS × (capped at
-   *  TOTAL_CAP) with oscillate's ×1.6 riding on top while the green mushroom is up. */
+   *  TOTAL_CAP) with the oscillator's booster riding on top. Both the cap and the
+   *  booster scale with the AMP; at amp 1 this is byte-for-byte the old ×1 / ×1.6. */
   #addScore(n: number): void {
-    const total = Math.min(TOTAL_CAP, this.pointsMul * this.pillMul) * (this.oscillateStacks > 0 ? 1.6 : 1)
+    const amp = this.amp
+    const boost = 1 + OSC_SCORE_PER_AMP * (amp - 1)   // amp 1 → ×1, one stack → ×1.6, quadruple → ×2.8
+    const total = Math.min(TOTAL_CAP * amp, this.pointsMul * this.pillMul) * boost
     this.score += Math.round(n * total)
   }
 
@@ -1930,7 +2000,7 @@ export class Engine {
    *  balls keep clearing — releasing it otherwise would be a dead pill). */
   /** A dispenser pill: a rare 1-UP when you're below max lives, else a random power. */
   #dispensePower(): PowerKind {
-    if (this.lives < MAX_LIVES && Math.random() < EXTRALIFE_PILL_CHANCE) return 'extralife'
+    if (this.lives < this.maxLives && Math.random() < EXTRALIFE_PILL_CHANCE) return 'extralife'
     return this.#randomPower()
   }
 
@@ -1938,10 +2008,10 @@ export class Engine {
     const colourUp = this.balls.some(b => !b.primary && !b.stuck)
     const allow = (k: PowerKind): boolean => k !== 'clock' || colourUp
     // Defensive flood: the harder the mode (supportMul) the more heal/shield/regen rain
-    // down — and ANY mode floods them harder under live danger (hurt bat, ≤1 life, or a
-    // raging frenzy). So Gangster drowns you in support while the action stays brutal.
+    // down — and ANY mode floods them harder under live danger (a hurt bat, or ≤1 life).
+    // So Gangster drowns you in support while the action stays brutal.
     const hurt = 1 - clamp(this.paddleHp / PADDLE_MAX_HP, 0, 1)
-    const need = 1 + 1.6 * hurt + (this.frantic ? 1.2 : 0) + (this.lives <= 1 ? 0.8 : 0)
+    const need = 1 + 1.6 * hurt + (this.lives <= 1 ? 0.8 : 0)
     const defBoost = this.difficulty.supportMul * need
     const wt = (k: PowerKind): number => POWER_WEIGHTS[k] * (DEFENSIVE.has(k) ? defBoost : 1)
     let total = 0
@@ -1982,8 +2052,8 @@ export class Engine {
     const before = this.score
     this.#addScore(n * 30)
     const reward = this.score - before
-    const gotLife = n % 15 === 0 && this.lives < MAX_LIVES
-    if (gotLife) this.lives++
+    const gotLife = n % 15 === 0 && this.lives < this.maxLives
+    if (gotLife) this.lives = Math.min(this.maxLives, this.lives + this.amp)   // amped: the milestone pays a multi-UP
     this.milestoneFx = { n, t: 0, life: gotLife }           // renderer draws the burst + 'COMBO ×N' (+ '+1 LIFE' only if granted)
     this.scoreFlash = 0.45                                  // the ✦ score pulses as the points land
     this.explosions.push({ x: W / 2, y: H * 0.42, t: 0 })
@@ -2020,10 +2090,16 @@ export class Engine {
         cap.y += CAPSULE_SPEED * dt
       }
       if (cap.y - CAPSULE_H / 2 > H) continue
-      const caught = cap.y + CAPSULE_H / 2 >= p.y - 2
-        && cap.y - CAPSULE_H / 2 <= p.y + p.h + 2
-        && cap.x >= p.x - p.w / 2 - CAPSULE_W / 2
-        && cap.x <= p.x + p.w / 2 + CAPSULE_W / 2
+      // On the pinball TABLE there is no bat to catch with — a pill is collected the
+      // way a real machine awards a rollover: the BALL runs over it.
+      const caught = this.pinball
+        ? this.balls.some(b => !b.stuck
+          && Math.abs(b.x - cap.x) <= CAPSULE_W / 2 + b.r
+          && Math.abs(b.y - cap.y) <= CAPSULE_H / 2 + b.r)
+        : cap.y + CAPSULE_H / 2 >= p.y - 2
+          && cap.y - CAPSULE_H / 2 <= p.y + p.h + 2
+          && cap.x >= p.x - p.w / 2 - CAPSULE_W / 2
+          && cap.x <= p.x + p.w / 2 + CAPSULE_W / 2
       if (caught) {
         this.#applyPower(cap.kind)
         this.pillMul = Math.min(PILLS_CAP, this.pillMul + 0.1)           // PILLS axis: +0.1 per pill, capped
@@ -2090,14 +2166,21 @@ export class Engine {
   #detonateFireball(fb: Fireball): void {
     this.explosions.push({ x: fb.x, y: fb.y, t: 0, hue: 'plasma' })
     this.#fireballSplash(fb.x, fb.y, fb.aoe * 1.4)
-    if (this.bricksLeft === 0) this.state = 'won'
+    this.#checkWin()
   }
 
   #applyPower(kind: PowerKind): void {
+    // THE AMP — the oscillator's multiplier on this grant (1 = un-amped, 4 = quadruple).
+    // Snapshotted here rather than read later, so an O picked up afterwards never
+    // retro-buffs a power already in hand. Where a grant has a stacking ceiling, the
+    // ceiling is amped too — otherwise an amped grant would be clipped straight back
+    // down by an un-amped cap and the amp would do nothing.
+    const amp = this.amp
     switch (kind) {
       case 'oscillate':
-        // Permanent for the round: stack the weave, nudge every ball faster, AND
-        // grow the bat 25% each time (capped). expand widens on top of this base.
+        // Permanent for the round: raise the AMP (every future pill hits harder),
+        // stack the weave, nudge every ball faster, AND grow the bat 25% each time
+        // (capped). expand widens on top of this base.
         this.oscillateStacks++
         this.#paddleBaseW = Math.min(W * 0.6, this.#paddleBaseW * 1.25)
         if (this.expandTimer <= 0) this.paddle.w = this.#paddleBaseW
@@ -2114,14 +2197,20 @@ export class Engine {
         }
         break
       case 'break': {
+        // Amped: the SAME ±BREAK_FAN spread, subdivided into 2·amp splits per ball —
+        // at amp 1 that is exactly the original ±0.35 pair, and at quadruple it is an
+        // eight-way burst inside the same cone (so splits never fly off sideways).
         const add: Ball[] = []
+        const cap = this.maxBalls
+        const n = 2 * amp
         for (const b of this.balls) {
-          if (this.balls.length + add.length >= MAX_BALLS) break
+          if (this.balls.length + add.length >= cap) break
           const speed = Math.hypot(b.vx, b.vy) || BALL_SPEED
           const ang = b.stuck ? -Math.PI / 2 : Math.atan2(b.vy, b.vx)
           if (b.stuck) { b.stuck = false; b.vx = speed * Math.cos(ang); b.vy = speed * Math.sin(ang) }
-          for (const d of [-0.35, 0.35]) {
-            if (this.balls.length + add.length >= MAX_BALLS) break
+          for (let i = 0; i < n; i++) {
+            if (this.balls.length + add.length >= cap) break
+            const d = -BREAK_FAN + (2 * BREAK_FAN * (i + 0.5)) / n
             // Splits inherit the parent's kind + size: a WHITE ball splits into
             // whites (each a life-bearing primary), a coloured ammo ball into colour.
             const nb = this.#newBall(b.x, b.y, speed * Math.cos(ang + d), speed * Math.sin(ang + d), false, b.primary)
@@ -2134,82 +2223,98 @@ export class Engine {
       }
       case 'laser':
         this.laserLevel = this.laserShots > 0 ? Math.min(LASER_MAX_LEVEL, this.laserLevel + 1) : 1   // re-grab before empty powers up
-        this.laserShots = LASER_LOADER
+        this.#laserLoader = LASER_LOADER * amp        // amped: up to 4× the fireballs
+        this.laserShots = this.#laserLoader
         this.laserCharge = 0
         this.laserCharging = false
         break
       case 'expand':
-        this.paddle.w = Math.max(PADDLE_EXPAND_W, this.#paddleBaseW * 1.3)   // widen on top of the oscillate base
-        this.expandTimer = Math.min(EXPAND_DURATION * 4, this.expandTimer + EXPAND_DURATION)   // time stacks
+        // Amped: wider AND longer. The width factor grows 0.3 per amp step (×1.3 at
+        // amp 1, exactly as before) and is capped so a quadrupled bat still leaves the
+        // player some board to miss.
+        this.paddle.w = Math.min(W * 0.9, Math.max(PADDLE_EXPAND_W, this.#paddleBaseW * (1 + 0.3 * amp)))
+        this.expandTimer = Math.min(EXPAND_DURATION * 4 * amp, this.expandTimer + EXPAND_DURATION * amp)   // time stacks
         this.paddle.x = clamp(this.paddle.x, this.paddle.w / 2, W - this.paddle.w / 2)
         break
       case 'gun':
         // Stacking: a 2nd/3rd gun grabbed while the loader still has shots steps
         // the level up (diagonals, then double). A gun grabbed with an empty
-        // loader starts fresh at level 1. Either way it reloads to a full 10.
+        // loader starts fresh at level 1. Either way it reloads to a full — amped,
+        // that full is up to 4× the shots.
         this.gunLevel = this.gunAmmo > 0 ? Math.min(GUN_MAX_LEVEL, this.gunLevel + 1) : 1
-        this.gunAmmo = GUN_LOADER           // fresh 10-shot loader, no timeout
+        this.#gunLoader = GUN_LOADER * amp
+        this.gunAmmo = this.#gunLoader      // fresh loader, no timeout
         this.aimAngle = GUN_AIM_CENTER      // balanced, facing straight up
         this.#prevPaddleX = this.paddle.x
         break
       case 'magnet':
-        this.magnetTimer = Math.min(MAGNET_DURATION * 4, this.magnetTimer + MAGNET_DURATION)   // time stacks
+        this.magnetTimer = Math.min(MAGNET_DURATION * 4 * amp, this.magnetTimer + MAGNET_DURATION * amp)   // time stacks; pull strength amps live
         break
       case 'rocket':
-        this.rocketAmmo = Math.min(ROCKET_MAX, this.rocketAmmo + ROCKET_LOADER)
+        this.#rocketMax = ROCKET_MAX * amp            // amped: carry (and fly) up to 4 missiles, each with a 4× blast
+        this.rocketAmmo = Math.min(this.#rocketMax, this.rocketAmmo + ROCKET_LOADER * amp)
         break
       case 'multiplier':
         // The gold pill ADDS to the unified gold bonus (same pool as the ×N tiles and
         // the pinball disc) and refreshes the window. Stacks toward the cap.
-        this.goldBonus = Math.min(GOLD_BONUS_CAP, this.goldBonus + 0.5)
-        this.goldTimer = Math.min(GOLD_WINDOW * 4, this.goldTimer + GOLD_WINDOW)
+        this.goldBonus = Math.min(GOLD_BONUS_CAP * amp, this.goldBonus + 0.5 * amp)
+        this.goldTimer = Math.min(GOLD_WINDOW * 4 * amp, this.goldTimer + GOLD_WINDOW * amp)
         break
       case 'burst':
-        this.burstTimer = Math.min(BURST_DURATION * 4, this.burstTimer + BURST_DURATION)   // time stacks
+        this.burstTimer = Math.min(BURST_DURATION * 4 * amp, this.burstTimer + BURST_DURATION * amp)   // time stacks
         break
       case 'pierce':
-        this.pierceTimer = Math.min(PIERCE_DURATION * 4, this.pierceTimer + PIERCE_DURATION)   // time stacks
+        this.pierceTimer = Math.min(PIERCE_DURATION * 4 * amp, this.pierceTimer + PIERCE_DURATION * amp)   // time stacks
         break
       case 'scramble':
         // Scramble every ball into random colours so you must follow yours, then it
         // reverts. Re-grab while it's lit to step the hold-time up (1 → 3 → 5s); each
         // grab refreshes it.
         this.scrambleLevel = this.scrambleTimer > 0 ? Math.min(SCRAMBLE_DURS.length - 1, this.scrambleLevel + 1) : 0
-        this.scrambleTimer = SCRAMBLE_DURS[this.scrambleLevel]
+        this.#scrambleDur = SCRAMBLE_DURS[this.scrambleLevel] * amp
+        this.scrambleTimer = this.#scrambleDur
         break
       case 'heal':
-        this.paddleHp = Math.min(PADDLE_MAX_HP, this.paddleHp + HEAL_AMOUNT)
+        this.paddleHp = Math.min(PADDLE_MAX_HP, this.paddleHp + HEAL_AMOUNT * amp)   // amped: always a full patch-up
         break
       case 'shield':
-        this.shieldTimer = Math.min(SHIELD_DURATION * 3, this.shieldTimer + SHIELD_DURATION)   // time stacks
-        this.shieldHp = SHIELD_MAX_HP                                                            // fresh shield refills its strength
+        // No clock — an amped shield is a DEEPER pool, so it soaks proportionally more
+        // hits before it busts. A fresh grab refills the strength either way.
+        this.#shieldMax = SHIELD_MAX_HP * amp
+        this.shieldHp = this.#shieldMax
         break
       case 'regen':
-        this.regenTimer = Math.min(REGEN_DURATION * 3, this.regenTimer + REGEN_DURATION)        // healing shield
-        this.shieldHp = SHIELD_MAX_HP                                                            // fresh shield refills its strength
+        // The healing flavour. Deliberately does NOT clear on a later plain ⛨ grab —
+        // once you've earned the heal it rides the shield until it busts.
+        this.#shieldMax = SHIELD_MAX_HP * amp
+        this.shieldHp = this.#shieldMax
+        this.regenShield = true
         break
       case 'pinball':
-        this.#pinballDur = PINBALL_DURATION
-        this.pinballTimer = Math.min(PINBALL_DURATION * 3, this.pinballTimer + PINBALL_DURATION)   // time stacks
+        // Flip the board into MACHINE mode and leave it there — no timer to stack.
+        this.pinball = true
         this.#spawnBumpers()
-        this.#spawnPinballProps()                     // a fresh random handful of props each activation
+        this.#spawnPinballProps()                     // a fresh random handful of props each activation (amped = more)
         this.#setPrimaryRadius(BALL_R * 2)            // white ball doubles in size
         break
       case 'beam':
         // Stacking like the gun: another beam before the loader empties powers it
-        // up (1 → 2 → 3, where 3 clears the whole line); either way reloads to 4.
+        // up (1 → 2 → 3, where 3 clears the whole line); either way it reloads —
+        // amped, to up to 4× the shots.
         this.beamLevel = this.beamShots > 0 ? Math.min(BEAM_MAX_LEVEL, this.beamLevel + 1) : 1
-        this.beamShots = BEAM_LOADER
+        this.#beamLoader = BEAM_LOADER * amp
+        this.beamShots = this.#beamLoader
         this.beamCharge = 0                           // charges up before the first release
         this.beamTarget = BEAM_CHARGE_MIN + Math.random() * (BEAM_CHARGE_MAX - BEAM_CHARGE_MIN)
         break
       case 'clock':
         // Only with at least one colour ball in play: freeze the white ball(s) +
         // every hazard while colour balls keep clearing.
-        if (this.balls.some(b => !b.primary)) this.freezeTimer = CLOCK_DURATION
+        if (this.balls.some(b => !b.primary)) { this.#clockDur = CLOCK_DURATION * amp; this.freezeTimer = this.#clockDur }
         break
       case 'ballchain': {
-        this.ballchainTimer = BALLCHAIN_DURATION
+        this.#ballchainDur = BALLCHAIN_DURATION * amp
+        this.ballchainTimer = this.#ballchainDur
         this.ballchainKills = 0
         this.#chainBonusPaid = false
         this.#chainAngle = 0; this.#chainAngVel = 0
@@ -2218,8 +2323,11 @@ export class Engine {
         break
       }
       case 'extralife':
-        if (this.lives < MAX_LIVES) this.lives++       // the 1-UP from the carrier alien
+        this.lives = Math.min(this.maxLives, this.lives + amp)   // the 1-UP from the carrier alien — amped, a multi-UP into an amped ceiling
         break
+      // The crane is deliberately NOT amped here: its jackpot is paid through
+      // #addScore, which already carries the oscillator's score booster. Amping the
+      // payout too would compound the same multiplier twice.
       case 'crane': {                                  // caught the gold paper crane → jackpot
         this.#addScore(CHAIN_BONUS)
         this.comboPops.push({ x: this.paddle.x, y: this.paddle.y - 26, n: 0, pts: CHAIN_BONUS, t: 0 })
@@ -2252,12 +2360,13 @@ export class Engine {
     this.#flipRVel = this.flipRightRaise - pr
   }
 
-  /** The whole flipper assembly slides with the paddle — clamped so both flippers
-   *  stay on screen. (Move the mouse to slide, click L/R to flip.) */
-  get flipperCenterX(): number { return clamp(this.paddle.x, FLIP_PIVOT_DX, W - FLIP_PIVOT_DX) }
+  /** The flipper assembly is BOLTED to the middle of the table — a real machine's
+   *  flippers don't slide. (They used to track the bat's x, which turned the whole
+   *  assembly into a moving platform.) Click L/R to flip; that's the only control. */
+  get flipperCenterX(): number { return W / 2 }
 
   /** The two flippers as segments: pivot (px,py) → tip at the lerped angle. The
-   *  right flipper mirrors the left about the assembly centre (which tracks the bat). */
+   *  right flipper mirrors the left about the table's fixed centre. */
   #flippers(): { px: number; py: number; ang: number; vel: number }[] {
     const fy = PADDLE_Y + FLIP_Y_OFF
     const cxp = this.flipperCenterX
@@ -2325,7 +2434,9 @@ export class Engine {
   #spawnPinballProps(): void {
     const pool = (Object.keys(PINBALL_SHAPE) as PinballKind[]).slice()
     for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[pool[i], pool[j]] = [pool[j], pool[i]] }
-    const n = PINBALL_PROPS_MIN + Math.floor(Math.random() * (PINBALL_PROPS_MAX - PINBALL_PROPS_MIN + 1))
+    // Amped: a fuller table (the slot grid below seats 9, and the kind pool is 20,
+    // so a quadrupled handful of 8 still lays out cleanly and never repeats a kind).
+    const n = (PINBALL_PROPS_MIN + Math.floor(Math.random() * (PINBALL_PROPS_MAX - PINBALL_PROPS_MIN + 1))) * this.amp
     const props: PinballProp[] = []
     const place = (kind: PinballKind, x: number, y: number): PinballProp => {
       const sh = PINBALL_SHAPE[kind]
@@ -2457,7 +2568,7 @@ export class Engine {
    *  a shot that lands on the paddle breaks the combo chain and flashes it red. */
   #stepTurrets(dt: number): void {
     if (this.freezeTimer > 0) return                  // clock: turrets + shots frozen
-    const turret = this.pinballTimer > 0 ? this.bricks.find(b => b.turret && b.alive) : null
+    const turret = this.pinball ? this.bricks.find(b => b.turret && b.alive) : null
     if (turret) {
       this.#turretFireCd -= dt
       if (this.#turretFireCd <= 0) {
@@ -2483,14 +2594,20 @@ export class Engine {
       }
       s.x += s.vx * dt; s.y += s.vy * dt
       if (s.y - TURRET_SHOT_R > H || s.x < -20 || s.x > W + 20) continue   // off-screen
-      const hit = s.y + TURRET_SHOT_R >= p.y && s.y - TURRET_SHOT_R <= p.y + p.h &&
-        s.x >= p.x - p.w / 2 - TURRET_SHOT_R && s.x <= p.x + p.w / 2 + TURRET_SHOT_R
+      // On the pinball TABLE there is no bat, so a shot has nothing to hit: fire is a
+      // visual hazard and the only way to lose a ball is the DRAIN. Without this the
+      // bolted-down flippers leave the bat invisible AND decoupled, so turret fire —
+      // which only exists in pinball mode — would chip an off-screen phantom and take
+      // a life the player never saw coming.
+      const hit = !this.pinball
+        && s.y + TURRET_SHOT_R >= p.y && s.y - TURRET_SHOT_R <= p.y + p.h
+        && s.x >= p.x - p.w / 2 - TURRET_SHOT_R && s.x <= p.x + p.w / 2 + TURRET_SHOT_R
       if (hit) {
         this.combo = 0                                            // chain broken
         if (this.shielded) {                                       // shield DEFLECTS it back up (and dumbs a seeker)...
           s.vy = -Math.abs(s.vy) * 1.1; s.y = p.y - TURRET_SHOT_R - 2; s.kind = 'shot'; survive.push(s)
           this.shieldHp = Math.max(0, this.shieldHp - SHIELD_HIT_DMG)   // ...but the hit CHIPS the shield's strength
-          if (this.shieldHp <= 0) { this.shieldTimer = 0; this.regenTimer = 0; this.shieldFlash = 1.6 }   // drained → shield BREAKS (bigger flash)
+          if (this.shieldHp <= 0) { this.regenShield = false; this.shieldFlash = 1.6 }   // drained → shield BUSTS (bigger flash); the heal goes with it
           else this.shieldFlash = 1
           continue
         }
@@ -2504,8 +2621,8 @@ export class Engine {
     this.turretShots = survive
   }
 
-  /** Pinball ended (timed out or a life lost): morph every turret back to a tile
-   *  and clear any shots in flight. */
+  /** Pinball ended (a life lost — there is no timeout): morph every turret back to
+   *  a tile and clear any shots in flight. */
   #clearTurrets(): void {
     for (const b of this.bricks) if (b.turret) b.turret = false
     this.turretShots = []
@@ -2571,14 +2688,14 @@ export class Engine {
     this.tnt = null
     this.#tntArmedThisLevel = false                        // one crate per level, no re-arm
     this.#endHazard()
-    if (this.bricksLeft === 0) this.state = 'won'
+    this.#checkWin()
   }
 
   #loseLife(): void {
     this.lives--
     if (this.lives <= 0) {                                  // game over: clear transient FX so nothing freezes behind the banner
       this.lives = 0; this.state = 'gameover'
-      this.milestoneFx = null; this.scoreFlash = 0; this.comboPops = []; this.franticFlash = 0
+      this.milestoneFx = null; this.scoreFlash = 0; this.comboPops = []; this.rushFlash = 0
       return
     }
     this.#resetForLife()

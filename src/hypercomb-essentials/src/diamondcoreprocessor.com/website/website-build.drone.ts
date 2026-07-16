@@ -16,7 +16,6 @@
 //     scope: 'root' | 'subtree' | 'named',
 //     scopeSegments: string[],
 //     branch:        BranchNode,    // recursive: { name, children, notes }
-//     instructions:  BranchNode,    // walked from ['instructions']
 //     priorRootSig:  string | null, // last successful build's root sig
 //     priorBranchSig: string | null,// for diff math
 //   }
@@ -93,9 +92,7 @@ type BuildEnvelope = {
   scope: 'root' | 'subtree' | 'named'
   scopeSegments: readonly string[]
   branch: BranchNode | null
-  instructions: BranchNode | null
   branchSig: string | null
-  instructionsSig: string | null
   priorRootSig: string | null
 }
 
@@ -131,11 +128,7 @@ export class WebsiteBuildDrone extends EventTarget {
     const branchSig = await history.sign({ explorerSegments: () => scopeSegments })
     const branch = await this.#walk(history, notes, scopeSegments, MAX_DEPTH)
 
-    // 2) Resolve instructions/ root + walk it (always at literal root).
-    const instructionsSig = await history.sign({ explorerSegments: () => ['instructions'] })
-    const instructions = await this.#walk(history, notes, ['instructions'], MAX_DEPTH)
-
-    // 3) Prior root sig — last successful build, stashed in localStorage
+    // 2) Prior root sig — last successful build, stashed in localStorage
     //    by the build:complete handler when it lands.
     const priorRootSig =
       (typeof payload.priorRootMarker === 'string' && payload.priorRootMarker.length > 0)
@@ -147,9 +140,7 @@ export class WebsiteBuildDrone extends EventTarget {
       scope,
       scopeSegments,
       branch,
-      instructions,
       branchSig,
-      instructionsSig,
       priorRootSig,
     }
 
@@ -160,19 +151,15 @@ export class WebsiteBuildDrone extends EventTarget {
       scope,
       lineage: scopeSegments.join('/') || '(root)',
       branchSig: branchSig.slice(0, 12),
-      instructionsSig: instructionsSig.slice(0, 12),
       priorRootSig: priorRootSig?.slice(0, 12) ?? null,
       branchCells: this.#countCells(branch),
       branchNotes: this.#countNotes(branch),
       branchAttachments: this.#countAttachments(branch),
-      instructionsCells: this.#countCells(instructions),
-      instructionsNotes: this.#countNotes(instructions),
     })
 
     EffectBus.emit('website:build:envelope', envelope)
     EffectBus.emit('website:build:ready', {
       branchSig,
-      instructionsSig,
       priorRootSig,
       mode,
       scope,

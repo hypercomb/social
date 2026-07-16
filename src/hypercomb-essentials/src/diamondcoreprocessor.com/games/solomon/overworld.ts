@@ -14,6 +14,8 @@
 // The overlay owns the loop + input and switches between this and the platformer
 // engine: walk into a mouth to drop into that cavern; clear it to surface here.
 
+import { glowSprite } from './renderer.js'
+
 export const OTILE = 28
 
 export const O_ROCK = 0   // solid cave wall
@@ -240,6 +242,8 @@ const CV = {
 export class OverworldView {
   #ctx: CanvasRenderingContext2D
   #terrain: HTMLCanvasElement | null = null
+  #vignette: HTMLCanvasElement | null = null
+  #vignetteKey = ''
   cam = { x: 0, y: 0 }
 
   constructor(ctx: CanvasRenderingContext2D) { this.#ctx = ctx }
@@ -258,23 +262,24 @@ export class OverworldView {
     ctx.fillStyle = CV.void; ctx.fillRect(0, 0, vw, vh)
     ctx.drawImage(this.#terrain, camx, camy, vw, vh, 0, 0, vw, vh)
 
-    // a light dusk tint (the LAND stays visible), then warm light at Dana + mouths
+    // a light dusk tint (the LAND stays visible), then warm light at Dana + mouths.
+    // Glows are CACHED sprite blits (glowSprite) — no per-frame gradient mints.
     ctx.fillStyle = 'rgba(20,26,40,0.2)'; ctx.fillRect(0, 0, vw, vh)
     ctx.save(); ctx.globalCompositeOperation = 'lighter'
     const dscx = sx(cx), dscy = sy(cy)
-    const torch = ctx.createRadialGradient(dscx, dscy, 6, dscx, dscy, OTILE * 5)
-    torch.addColorStop(0, 'rgba(255,200,120,0.5)'); torch.addColorStop(0.5, 'rgba(255,150,70,0.18)'); torch.addColorStop(1, 'rgba(255,120,40,0)')
-    ctx.fillStyle = torch; ctx.beginPath(); ctx.arc(dscx, dscy, OTILE * 5, 0, Math.PI * 2); ctx.fill()
+    const tr = OTILE * 5
+    ctx.globalAlpha = 0.45
+    ctx.drawImage(glowSprite('#ffb45a'), dscx - tr, dscy - tr, tr * 2, tr * 2)
     for (const n of ow.nodes) {
       const mx = sx(n.col * OTILE + OTILE / 2), my = sy(n.row * OTILE + OTILE / 2)
       if (mx < -60 || mx > vw + 60 || my < -60 || my > vh + 60) continue
       const cleared = ow.cleared.has(n.levelIndex)
       const open = ow.isUnlocked(n.levelIndex)
-      const col = cleared ? CV.glowCool : open ? CV.glowWarm : CV.glowDim
-      const pulse = open && !cleared ? 0.5 + Math.sin(time * 4) * 0.18 : 0.28
-      const g = ctx.createRadialGradient(mx, my, 2, mx, my, OTILE * 1.8)
-      g.addColorStop(0, col + pulse + ')'); g.addColorStop(1, col + '0)')
-      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(mx, my, OTILE * 1.8, 0, Math.PI * 2); ctx.fill()
+      const col = cleared ? '#78d2ff' : open ? '#ffb45a' : '#7878a0'
+      const pulse = open && !cleared ? 0.5 + Math.sin(time * 4) * 0.18 : 0.26
+      const r = OTILE * 1.8
+      ctx.globalAlpha = pulse
+      ctx.drawImage(glowSprite(col), mx - r, my - r, r * 2, r * 2)
     }
     ctx.restore()
 
@@ -293,10 +298,19 @@ export class OverworldView {
     if (ent) this.#prompt(vw, vh, `${ent.label ? 'Cavern ' + ent.label + ' — ' : ''}${ent.name}`, '↵ / Z  enter')
     else if (near && !ow.isUnlocked(near.levelIndex)) this.#prompt(vw, vh, near.name, '🔒 locked — clear the path first')
 
-    // vignette
-    const vg = ctx.createRadialGradient(vw / 2, vh / 2, vh * 0.4, vw / 2, vh / 2, vh * 0.85)
-    vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(8,12,22,0.42)')
-    ctx.fillStyle = vg; ctx.fillRect(0, 0, vw, vh)
+    // vignette (cached per viewport size)
+    const vKey = `${vw}x${vh}`
+    if (this.#vignetteKey !== vKey) {
+      const cv = document.createElement('canvas')
+      cv.width = Math.max(1, vw); cv.height = Math.max(1, vh)
+      const x = cv.getContext('2d')!
+      const vg = x.createRadialGradient(vw / 2, vh / 2, vh * 0.4, vw / 2, vh / 2, vh * 0.85)
+      vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(8,12,22,0.42)')
+      x.fillStyle = vg; x.fillRect(0, 0, vw, vh)
+      this.#vignette = cv
+      this.#vignetteKey = vKey
+    }
+    if (this.#vignette) ctx.drawImage(this.#vignette, 0, 0)
   }
 
   /** Re-bake when a new game starts (caverns relock) — cheap insurance. */
@@ -446,9 +460,13 @@ export class OverworldView {
     const tx = cx + (fx || 0) * 8 + (facing === 'up' ? 0 : 0), tyv = top + (facing === 'up' ? -4 : 2)
     if (facing !== 'up') {
       ctx.strokeStyle = '#6a4a2a'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx + fx * 5, top + 2); ctx.lineTo(tx, tyv); ctx.stroke()
-      const fl = ctx.createRadialGradient(tx, tyv - 3, 0, tx, tyv - 3, 5)
-      fl.addColorStop(0, '#fff3c0'); fl.addColorStop(0.5, '#ff9a30'); fl.addColorStop(1, 'rgba(255,80,20,0)')
-      ctx.fillStyle = fl; ctx.beginPath(); ctx.arc(tx, tyv - 3, 5, 0, Math.PI * 2); ctx.fill()
+      ctx.save()
+      ctx.globalCompositeOperation = 'lighter'
+      ctx.globalAlpha = 0.85
+      ctx.drawImage(glowSprite('#ff9a30'), tx - 5, tyv - 8, 10, 10)
+      ctx.restore()
+      ctx.fillStyle = '#fff3c0'
+      ctx.beginPath(); ctx.arc(tx, tyv - 3, 1.6, 0, Math.PI * 2); ctx.fill()
     }
     ctx.restore()
   }

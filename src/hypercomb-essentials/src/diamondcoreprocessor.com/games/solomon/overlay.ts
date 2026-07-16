@@ -6,7 +6,7 @@
 // Pixi — it mounts above everything as a fixed overlay and tears itself fully
 // down on close. The SolomonDrone owns its lifecycle (open/close).
 
-import { Engine, TILE, type LevelDef } from './engine.js'
+import { Engine, TILE, SIM_DT, type LevelDef } from './engine.js'
 import { Renderer } from './renderer.js'
 import { Designer, TOOLS, type Tool } from './designer.js'
 import {
@@ -15,6 +15,7 @@ import {
 } from './levels.js'
 import { Overworld, OverworldView, type NodeDef } from './overworld.js'
 import { Shaker, ParticleField, easeOutBack, ARCADE } from '../juice.js'
+import { GameAudio } from '../audio.js'
 
 const STYLE_ID = 'sol-overlay-styles'
 const Z = 2147483000
@@ -97,6 +98,7 @@ export class SolomonOverlay {
   #raf = 0
   #lastTs = 0
   #time = 0
+  #acc = 0        // fixed-timestep accumulator — the sim always steps at SIM_DT
   #overShown = false
 
   // Zelda room camera: the sliding origin (#cam), the room indices Dana occupies
@@ -121,11 +123,27 @@ export class SolomonOverlay {
   // is driven purely by score/lives/conjure deltas read after engine.update().
   #shaker = new Shaker(7, 1.8)
   #field = new ParticleField()
+  #audio = new GameAudio()
+  #muteBtn: HTMLButtonElement | null = null
   #prevScore = 0
   #prevLives = 3
   #prevConjure = 0
   #prevSmash = 0
   #prevPickup = 0
+  // new engine event counters (diffed after update — same doctrine as above)
+  #prevKill = 0
+  #prevShot = 0
+  #prevSpawn = 0
+  #prevSecret = 0
+  #prevReveal = 0
+  #prevJump = 0
+  #prevLand = 0
+  #prevFire = 0
+  #prevDoor = false
+  #prevFairies = 0
+  #prevFairyCount = 0
+  #prevLifeLow = false
+  #tallyTick = -1
   #intro: { t: number; title: string; sub: string } | null = null
 
   // Continuous-play state (see the Transition note above). The engine's score is
@@ -189,6 +207,8 @@ export class SolomonOverlay {
     window.removeEventListener('resize', this.#fit)
     window.removeEventListener('pointermove', this.#onPointerMove)
     window.removeEventListener('pointerup', this.#onPointerUp)
+    this.#audio.stopAmbience()
+    this.#audio.dispose()
     this.#root?.remove()
     this.#root = null
     this.#canvas = null
@@ -263,6 +283,14 @@ export class SolomonOverlay {
     const status = el('span', { class: 'sol-status' }) as HTMLSpanElement
     bar.appendChild(status)
     this.#status = status
+
+    const mute = el('button', { class: 'sol-btn', text: this.#audio.muted ? '🔇' : '🔊', title: 'Sound on/off' }) as HTMLButtonElement
+    mute.onclick = () => {
+      this.#audio.unlock()
+      mute.textContent = this.#audio.toggleMuted() ? '🔇' : '🔊'
+    }
+    bar.appendChild(mute)
+    this.#muteBtn = mute
 
     const close = el('button', { class: 'sol-close', text: '✕', title: 'Close (Esc)' }) as HTMLButtonElement
     close.onclick = () => this.#onClose()
@@ -359,6 +387,8 @@ export class SolomonOverlay {
     this.#logicalH = OVIEW_H
     this.#fit()
     this.#updateModeUI()
+    this.#audio.startAmbience({ level: 0.5 })
+    this.#sfx('surface')
   }
 
   /** Drop into a cavern from the map (or jump there directly via prev/next). */
@@ -384,9 +414,12 @@ export class SolomonOverlay {
     this.#levelStartLives = e.lives
     this.#syncJuice(e)
     this.#camInit = false   // snap the room camera to the starting room
+    this.#acc = 0
     this.#hideBanner()
     this.#sizeCanvasToView(def)
     this.#updateModeUI()
+    this.#audio.startAmbience({ level: 1 })
+    this.#sfx('descend')
     this.#beginIntro(def.name, this.#inPrincess ? 'RESCUE!' : 'CAVERN ' + (levelIndex + 1))
   }
 
@@ -499,7 +532,7 @@ export class SolomonOverlay {
   #loop = (ts: number): void => {
     if (!this.#root) return
     if (!this.#lastTs) this.#lastTs = ts
-    const dt = Math.min((ts - this.#lastTs) / 1000, 1 / 30)
+    const dt = Math.min((ts - this.#lastTs) / 1000, 0.1)
     this.#lastTs = ts
     this.#time += dt
 
@@ -529,7 +562,13 @@ export class SolomonOverlay {
         this.#stepTransition(dt)
         this.#drawTransition(r, view)
       } else {
-        this.#engine.update(dt)
+        // Fixed-timestep sim: deterministic arcs for the block puzzles. At most 4
+        // steps per frame (spiral guard — the remainder is dropped on a long stall);
+        // camera / shake / particles / tally still integrate with the frame dt.
+        this.#acc += dt
+        let steps = 0
+        while (this.#acc >= SIM_DT && steps < 4) { this.#engine.update(SIM_DT); this.#acc -= SIM_DT; steps++ }
+        if (steps === 4) this.#acc = 0
         this.#senseJuice(dt)
         // The room camera locks to Dana's screen and slides between rooms (Zelda);
         // the shake folds into the same world translate.
@@ -555,17 +594,58 @@ export class SolomonOverlay {
 
   // ── juice: shake + particles + level intro ───────────────
 
-  /** Read the post-update engine state and convert meaningful changes into shake
-   *  and particle bursts. Pure inference (score / lives / conjure deltas) keeps
-   *  the engine free of any view concerns. Called inside the shaken frame, so the
-   *  bursts it spawns land in world units under the same translate. */
+  /** Procedural SFX recipes. Each is a couple of tones / filtered noise bursts —
+   *  no assets. Intensity `k` scales the impact sounds. */
+  #sfx(name: string, k = 1): void {
+    const a = this.#audio
+    switch (name) {
+      case 'conjure': a.tone({ freq: 220, endFreq: 110, type: 'triangle', dur: 0.09, vol: 0.14 }); a.noise({ dur: 0.12, vol: 0.06, filter: 'lowpass', freq: 420 }); break
+      case 'dispel': a.tone({ freq: 160, endFreq: 320, type: 'triangle', dur: 0.08, vol: 0.12 }); a.tone({ freq: 1320, dur: 0.05, vol: 0.05, delay: 0.02 }); a.tone({ freq: 1760, dur: 0.05, vol: 0.04, delay: 0.05 }); break
+      case 'deny': a.tone({ freq: 110, endFreq: 95, type: 'square', dur: 0.05, vol: 0.05 }); a.noise({ dur: 0.04, vol: 0.03, filter: 'lowpass', freq: 300 }); break
+      case 'secret': a.tone({ freq: 880, dur: 0.08, vol: 0.09 }); a.tone({ freq: 1174, dur: 0.1, vol: 0.09, delay: 0.07 }); a.tone({ freq: 1568, dur: 0.16, vol: 0.09, delay: 0.14 }); break
+      case 'reveal': a.tone({ freq: 660, dur: 0.06, vol: 0.08 }); a.tone({ freq: 990, dur: 0.1, vol: 0.08, delay: 0.05 }); break
+      case 'crack': a.noise({ dur: 0.06, vol: 0.1, filter: 'highpass', freq: 1200 }); a.tone({ freq: 130, endFreq: 70, dur: 0.06, vol: 0.06 }); break
+      case 'shatter': a.noise({ dur: 0.2, vol: 0.14, filter: 'bandpass', freq: 500, endFreq: 200, q: 0.8 }); a.tone({ freq: 120, endFreq: 60, type: 'square', dur: 0.09, vol: 0.05 }); break
+      case 'jump': a.tone({ freq: 300, endFreq: 430, dur: 0.06, vol: 0.1 }); break
+      case 'land': a.tone({ freq: 90, endFreq: 60, dur: 0.08, vol: 0.06 + 0.08 * k }); a.noise({ dur: 0.07, vol: 0.04 + 0.06 * k, filter: 'lowpass', freq: 260 }); break
+      case 'fireball': a.noise({ dur: 0.15, vol: 0.1, filter: 'highpass', freq: 2000, endFreq: 600 }); a.tone({ freq: 200, endFreq: 90, dur: 0.14, vol: 0.09 }); break
+      case 'pickup': a.tone({ freq: 880, dur: 0.07, vol: 0.09 }); a.tone({ freq: 1320, dur: 0.09, vol: 0.08, delay: 0.05 }); break
+      case 'key': a.tone({ freq: 660, dur: 0.08, vol: 0.1 }); a.tone({ freq: 880, dur: 0.08, vol: 0.1, delay: 0.08 }); a.tone({ freq: 1100, dur: 0.14, vol: 0.1, delay: 0.16 }); break
+      case 'hourglass': for (let i = 0; i < 4; i++) a.tone({ freq: 700 + i * 160, dur: 0.05, vol: 0.07, delay: i * 0.05 }); break
+      case 'doorOpen': a.tone({ freq: 98, dur: 0.8, vol: 0.12, attack: 0.02 }); a.tone({ freq: 784, dur: 0.3, vol: 0.05, delay: 0.15 }); a.tone({ freq: 988, dur: 0.35, vol: 0.05, delay: 0.28 }); a.tone({ freq: 1175, dur: 0.4, vol: 0.05, delay: 0.42 }); break
+      case 'clear': for (const [i, f] of [523, 659, 784, 1047].entries()) a.tone({ freq: f, dur: 0.16, vol: 0.11, delay: i * 0.09 }); break
+      case 'kill': a.tone({ freq: 260, endFreq: 90, type: 'square', dur: 0.12, vol: 0.09 }); a.noise({ dur: 0.1, vol: 0.07, filter: 'lowpass', freq: 700 }); break
+      case 'poof': a.noise({ dur: 0.14, vol: 0.05, filter: 'lowpass', freq: 500 }); break
+      case 'spit': a.tone({ freq: 320, endFreq: 180, type: 'sawtooth', dur: 0.09, vol: 0.06 }); a.noise({ dur: 0.05, vol: 0.04, filter: 'highpass', freq: 1600 }); break
+      case 'spawn': a.tone({ freq: 110, type: 'sawtooth', dur: 0.14, vol: 0.07 }); a.tone({ freq: 113, type: 'sawtooth', dur: 0.14, vol: 0.06 }); break
+      case 'death': a.tone({ freq: 400, endFreq: 60, type: 'sawtooth', dur: 0.35, vol: 0.13 }); a.noise({ dur: 0.18, vol: 0.1, filter: 'lowpass', freq: 300, delay: 0.05 }); a.duck(0.5, 1.2); break
+      case 'gameover': a.tone({ freq: 196, dur: 0.4, vol: 0.12 }); a.tone({ freq: 147, dur: 0.7, vol: 0.12, delay: 0.35 }); break
+      case 'bell': a.tone({ freq: 1568, dur: 0.2, vol: 0.08 }); a.tone({ freq: 2093, dur: 0.24, vol: 0.06, delay: 0.03 }); break
+      case 'fairy': for (let i = 0; i < 3; i++) a.tone({ freq: 1047 + i * 262, dur: 0.07, vol: 0.06, delay: i * 0.05 }); break
+      case 'lowLife': a.tone({ freq: 440, endFreq: 436, dur: 0.3, vol: 0.1 }); break
+      case 'tick': a.tone({ freq: 1200, type: 'square', dur: 0.018, vol: 0.04 }); break
+      case 'ding': a.tone({ freq: 1047, dur: 0.14, vol: 0.09 }); break
+      case 'descend': a.noise({ dur: 0.35, vol: 0.08, filter: 'lowpass', freq: 900, endFreq: 200 }); break
+      case 'surface': a.noise({ dur: 0.35, vol: 0.07, filter: 'lowpass', freq: 200, endFreq: 900 }); break
+    }
+  }
+
+  /** Read the post-update engine state and convert meaningful changes into
+   *  shake, particles, light spikes and SFX. Pure inference over the engine's
+   *  flash counters keeps the sim free of any view concerns. Called inside the
+   *  shaken frame, so bursts land in world units under the same translate. */
   #senseJuice(_dt: number): void {
     const e = this.#engine
+    const r = this.#renderer
     if (!e) return
+    const cellXY = (c: { col: number; row: number }): [number, number] => [c.col * TILE + TILE / 2, c.row * TILE + TILE / 2]
 
-    // Life lost — big kick + a spray of sparks at Dana's centre.
+    // Life lost — big kick, sparks, a hurt tint and a master-volume duck.
     if (e.lives < this.#prevLives) {
       this.#shaker.add(0.9)
+      r?.spike(0.8)
+      r?.punch('hurt')
+      this.#sfx('death')
       const px = e.player.x + e.player.w / 2
       const py = e.player.y + e.player.h / 2
       this.#field.burst(px, py, {
@@ -574,52 +654,151 @@ export class SolomonOverlay {
       })
     }
 
-    // Conjure / dispel / fireball muzzle — engine sets conjureFlash on its rising
-    // edge. A small nudge + a short upward stone-dust puff at the target cell.
+    // Takeoff + landing — feet dust scaled by the impact speed.
+    if (e.jumpFlash > this.#prevJump) {
+      this.#sfx('jump')
+      this.#field.burst(e.player.x + e.player.w / 2, e.player.y + e.player.h, {
+        count: 3, speed: 40, gravity: 60, life: 0.3, size: 1.8,
+        color: ['#c9b8a0', '#8a7a64'], angle: Math.PI / 2, arc: 1.2,
+      })
+    }
+    if (e.landFlash > this.#prevLand + 1e-4) {
+      const k = Math.min(1.4, e.landVy / 400)
+      r?.punch('land', k)
+      this.#sfx('land', k)
+      if (e.landVy > 180) {
+        this.#field.burst(e.player.x + e.player.w / 2, e.player.y + e.player.h, {
+          count: Math.round(5 + k * 8), speed: 55, gravity: 90, life: 0.5, size: 2,
+          color: ['#c9b8a0', '#8a7a64', '#6b5b48'], angle: -Math.PI / 2, arc: 2.4,
+        })
+      }
+    }
+
+    // Conjure / dispel — the wand's stone-dust puff at the target cell.
     if (e.conjureFlash > this.#prevConjure + 1e-4) {
       this.#shaker.add(0.18)
-      const cell = e.targetCell()
-      const cx = cell.col * TILE + TILE / 2
-      const cy = cell.row * TILE + TILE / 2
+      r?.spike(0.25)
+      const [cx, cy] = cellXY(e.targetCell())
       this.#field.burst(cx, cy, {
         count: 10, speed: 90, gravity: 120, life: 0.45,
         size: 2.2, color: [...ARCADE.ember], angle: -Math.PI / 2, arc: 1.6,
       })
     }
 
-    // Head-butt — a BRICK shattered overhead. A sharp kick plus stone debris
-    // bursting from the broken cell and tumbling down under gravity.
-    if (e.smashFlash > this.#prevSmash + 1e-4 && e.smashCell) {
-      this.#shaker.add(0.34)
-      const sx = e.smashCell.col * TILE + TILE / 2
-      const sy = e.smashCell.row * TILE + TILE / 2
-      this.#field.burst(sx, sy, {
-        count: 16, speed: 130, gravity: 340, life: 0.5,
-        size: 2.6, color: [...ARCADE.ember],
-      })
+    // Brick cracked or shattered (head-butt, goblin punch, ghost/neul smash,
+    // enemy shots) — debris at the cell; a lighter tick for a first-hit crack.
+    if (e.smashFlash > this.#prevSmash + 1e-4) {
+      if (e.smashFlash <= 0.11) this.#sfx('crack')
+      else if (e.smashCell) {
+        this.#shaker.add(0.34)
+        r?.spike(0.3)
+        this.#sfx('shatter')
+        const [sx, sy] = cellXY(e.smashCell)
+        this.#field.burst(sx, sy, {
+          count: 16, speed: 130, gravity: 340, life: 0.5,
+          size: 2.6, color: [...ARCADE.ember],
+        })
+      }
     }
 
-    // Item grabbed — a quick bright sparkle at the pickup cell (the engine bumps
-    // pickupFlash on its rising edge and records the cell).
+    // Item grabbed — sparkle + a per-kind chime (looked up via the pickup cell).
     if (e.pickupFlash > this.#prevPickup && e.pickupCell) {
-      const cx = e.pickupCell.col * TILE + TILE / 2
-      const cy = e.pickupCell.row * TILE + TILE / 2
+      const [cx, cy] = cellXY(e.pickupCell)
       this.#field.burst(cx, cy, {
         count: 12, speed: 80, gravity: 30, life: 0.5,
         size: 2.2, color: [...ARCADE.spark],
       })
+      const it = e.items.find(i => i.taken && i.col === e.pickupCell!.col && i.row === e.pickupCell!.row)
+      const kind = it?.kind
+      if (kind === 'key') this.#sfx('key')
+      else if (kind === 'hourglass' || kind === 'hourglassHalf') this.#sfx('hourglass')
+      else if (kind === 'bell') this.#sfx('bell')
+      else if (kind === 'fairy' || kind === 'seal' || kind === 'zodiac') this.#sfx('fairy')
+      else this.#sfx('pickup')
     }
 
-    // Any score gain (kill / jewel / key / door) — a small proportional shake. We
-    // don't have exact positions for most of these, so a kick alone is enough.
+    // Enemy killed — a cause-colored squish burst at the cell.
+    if (e.killFlash > this.#prevKill && e.killCell) {
+      const [kx, ky] = cellXY(e.killCell)
+      const colors = e.killCause === 'crush' ? [...ARCADE.ember]
+        : e.killCause === 'fire' ? [...ARCADE.spark]
+          : e.killCause === 'expire' ? ['#8a6a9a', '#5a4a6a']
+            : ['#c9b8a0', '#8a7a64']
+      this.#field.burst(kx, ky, { count: e.killCause === 'expire' ? 8 : 14, speed: 110, gravity: 200, life: 0.5, size: 2.4, color: colors })
+      if (e.killCause !== 'expire') { this.#shaker.add(0.25); r?.spike(0.3); this.#sfx('kill') }
+      else this.#sfx('poof')
+    }
+
+    // Enemy shot loosed — muzzle puff at the barrel.
+    if (e.shotFlash > this.#prevShot && e.shotCell) {
+      const [sx, sy] = cellXY(e.shotCell)
+      this.#field.burst(sx, sy, { count: 5, speed: 60, gravity: 20, life: 0.25, size: 1.8, color: ['#ff8a5a', '#ffd08a'] })
+      this.#sfx('spit')
+    }
+
+    // Mirror emission — violet burst at the glass.
+    if (e.spawnFlash > this.#prevSpawn && e.spawnCell) {
+      const [mx, my] = cellXY(e.spawnCell)
+      this.#field.burst(mx, my, { count: 12, speed: 90, gravity: 20, life: 0.45, size: 2.2, color: ['#b478ff', '#8a5aff', '#e0ccff'] })
+      r?.spike(0.2)
+      this.#sfx('spawn')
+    }
+
+    // A wand-found SECRET — the discovery chime (distinct from a plain reveal).
+    if (e.secretFlash > this.#prevSecret && e.secretCell) {
+      const [sx, sy] = cellXY(e.secretCell)
+      this.#field.burst(sx, sy, { count: 14, speed: 70, gravity: -20, life: 0.6, size: 2, color: ['#ceb8ff', '#e8deff', '#fff'] })
+      r?.spike(0.4)
+      this.#sfx('secret')
+    }
+
+    // A hidden item uncovered by a broken brick.
+    if (e.revealFlash > this.#prevReveal && e.revealCell) {
+      const [rx, ry] = cellXY(e.revealCell)
+      this.#field.burst(rx, ry, { count: 8, speed: 60, gravity: -10, life: 0.5, size: 1.8, color: [...ARCADE.spark] })
+      this.#sfx('reveal')
+    }
+
+    // Door swings open — gold sparkle + a gong.
+    if (!this.#prevDoor && e.doorOpen) {
+      const [dx, dy] = cellXY(e.level.door)
+      this.#field.burst(dx, dy, { count: 14, speed: 70, gravity: -30, life: 0.7, size: 2.2, color: ['#ffd76a', '#ffe9b0', '#fff'] })
+      r?.spike(0.5)
+      this.#sfx('doorOpen')
+    }
+
+    // A bell freed a fairy; collecting one chimes separately.
+    if (e.fairies.length > this.#prevFairies) this.#sfx('bell')
+    if (e.fairyCount > this.#prevFairyCount) this.#sfx('fairy')
+
+    // The meter runs low — one warning toll at the threshold.
+    const low = e.life > 0 && e.life < 2000
+    if (low && !this.#prevLifeLow) this.#sfx('lowLife')
+
+    // Dana's own fireball leaving the wand.
+    if (e.fireFlash > this.#prevFire) this.#sfx('fireball')
+
+    // Any score gain — a small proportional shake + light flare.
     const ds = e.score - this.#prevScore
-    if (ds > 0) this.#shaker.add(Math.min(0.5, 0.12 + ds / 1500))
+    if (ds > 0) { this.#shaker.add(Math.min(0.5, 0.12 + ds / 1500)); r?.spike(Math.min(0.4, ds / 2000)) }
 
     this.#prevScore = e.score
     this.#prevLives = e.lives
     this.#prevConjure = e.conjureFlash
     this.#prevSmash = e.smashFlash
     this.#prevPickup = e.pickupFlash
+    this.#prevKill = e.killFlash
+    this.#prevShot = e.shotFlash
+    this.#prevSpawn = e.spawnFlash
+    this.#prevSecret = e.secretFlash
+    this.#prevReveal = e.revealFlash
+    this.#prevJump = e.jumpFlash
+    this.#prevLand = e.landFlash
+    this.#prevFire = e.fireFlash
+    this.#prevDoor = e.doorOpen
+    this.#prevFairies = e.fairies.length
+    this.#prevFairyCount = e.fairyCount
+    this.#prevLifeLow = low
   }
 
   /** Snap the juice baselines to an engine without firing shake (level swaps),
@@ -630,6 +809,19 @@ export class SolomonOverlay {
     this.#prevConjure = e.conjureFlash
     this.#prevSmash = e.smashFlash
     this.#prevPickup = e.pickupFlash
+    this.#prevKill = e.killFlash
+    this.#prevShot = e.shotFlash
+    this.#prevSpawn = e.spawnFlash
+    this.#prevSecret = e.secretFlash
+    this.#prevReveal = e.revealFlash
+    this.#prevJump = e.jumpFlash
+    this.#prevLand = e.landFlash
+    this.#prevFire = e.fireFlash
+    this.#prevDoor = e.doorOpen
+    this.#prevFairies = e.fairies.length
+    this.#prevFairyCount = e.fairyCount
+    this.#prevLifeLow = false
+    this.#tallyTick = -1
     this.#shaker = new Shaker(7, 1.8)
     this.#field.clear()
   }
@@ -655,12 +847,18 @@ export class SolomonOverlay {
     ctx.textBaseline = 'middle'
     ctx.translate(w / 2, h * 0.36)
     ctx.scale(0.62 + 0.38 * appear, 0.62 + 0.38 * appear)
-    ctx.shadowColor = 'rgba(126,224,255,0.55)'
-    ctx.shadowBlur = 18
-    ctx.fillStyle = ARCADE.cyan
     ctx.font = '800 ' + Math.round(h * 0.085) + 'px "Segoe UI", system-ui, sans-serif'
+    // additive echo instead of shadowBlur (GPU-less-preview safe): a slightly
+    // larger dim copy glows behind the crisp title
+    ctx.save()
+    ctx.globalCompositeOperation = 'lighter'
+    ctx.globalAlpha = fade * 0.35
+    ctx.scale(1.05, 1.08)
+    ctx.fillStyle = 'rgba(126,224,255,0.6)'
     ctx.fillText(intro.title, 0, 0)
-    ctx.shadowBlur = 0
+    ctx.restore()
+    ctx.fillStyle = ARCADE.cyan
+    ctx.fillText(intro.title, 0, 0)
     ctx.fillStyle = ARCADE.gold
     ctx.font = '600 ' + Math.round(h * 0.04) + 'px "Segoe UI", system-ui, sans-serif'
     ctx.fillText(intro.sub, 0, h * 0.08)
@@ -670,6 +868,9 @@ export class SolomonOverlay {
   // ── input: play ──────────────────────────────────────────
 
   #onKeyDown = (e: KeyboardEvent): void => {
+    // First gesture unlocks audio; ambience level tracks the mode (idempotent).
+    this.#audio.unlock()
+    this.#audio.startAmbience({ level: this.#mode === 'play' ? 1 : 0.5 })
     if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); this.#onClose(); return }
     // While typing in the designer's name field, let the field have its keys.
     if (document.activeElement === this.#nameInput) return
@@ -703,9 +904,16 @@ export class SolomonOverlay {
       case 'ArrowLeft': case 'a': case 'A': eng.input.left = true; break
       case 'ArrowRight': case 'd': case 'D': eng.input.right = true; break
       case 'ArrowUp': case 'w': case 'W': case ' ': case 'Spacebar':
-        if (!e.repeat) eng.jump(); break
+        eng.input.jump = true; break   // held — the engine buffers the press edge and cuts on release
       case 'ArrowDown': case 's': case 'S': eng.input.down = true; break
-      case 'j': case 'J': case 'z': case 'Z': if (!e.repeat) eng.cast(); break    // conjure / dispel a block
+      case 'j': case 'J': case 'z': case 'Z':
+        if (!e.repeat) {
+          const r = eng.cast()   // conjure / dispel a block (the cast SFX knows which)
+          if (r === 'dispel') this.#sfx('dispel')
+          else if (r === 'conjure') this.#sfx('conjure')
+          else if (eng.state === 'playing') this.#sfx('deny')   // a blocked cast still answers — never a swallowed press
+        }
+        break
       case 'k': case 'K': case 'x': case 'X': if (!e.repeat) eng.fireball(); break // fireball (needs ammo)
       case 'm': case 'M': this.#enterOverworld(); break                            // back to the map
       case 'r': case 'R': this.#restartCurrent(); break                            // restart this cavern
@@ -732,6 +940,8 @@ export class SolomonOverlay {
       case 'ArrowLeft': case 'a': case 'A': this.#engine.input.left = false; break
       case 'ArrowRight': case 'd': case 'D': this.#engine.input.right = false; break
       case 'ArrowDown': case 's': case 'S': this.#engine.input.down = false; break
+      case 'ArrowUp': case 'w': case 'W': case ' ': case 'Spacebar':
+        this.#engine.input.jump = false; break   // the release signal → variable jump height
     }
   }
 
@@ -749,6 +959,7 @@ export class SolomonOverlay {
   }
 
   #onPointerDown = (e: PointerEvent): void => {
+    this.#audio.unlock()
     if (this.#mode !== 'design') return
     const cell = this.#cellFromEvent(e)
     if (!cell) return
@@ -811,6 +1022,7 @@ export class SolomonOverlay {
     this.#levelStartLives = this.#engine.lives
     this.#syncJuice(this.#engine)
     this.#camInit = false   // snap the room camera to the starting room
+    this.#acc = 0
     this.#hideBanner()
     this.#sizeCanvasToView(this.#designer.level)
     this.#playBar?.classList.remove('sol-hidden')
@@ -892,6 +1104,8 @@ export class SolomonOverlay {
       t: 0, levelScore, timeBonus, bonus, baseScore: this.#levelStartScore,
       prev: eng, princess: this.#inPrincess, testing: this.#testing,
     }
+    this.#tallyTick = 0
+    this.#sfx('clear')
     this.#hideBanner()
   }
 
@@ -900,6 +1114,10 @@ export class SolomonOverlay {
     const tr = this.#transition
     if (!tr) return
     tr.t += dt
+    // count-up ticks while the numbers roll, one ding when they settle
+    const step = Math.floor(tr.t * 16)
+    if (tr.t < TALLY_MS * 0.94 && step !== this.#tallyTick) { this.#tallyTick = step; this.#sfx('tick') }
+    else if (tr.t >= TALLY_MS * 0.94 && this.#tallyTick >= 0) { this.#tallyTick = -1; this.#sfx('ding') }
     if (tr.t < TALLY_MS) return
     this.#transition = null
     if (tr.princess) { this.#ended = true; this.#showEnding(tr.prev, true); return } // true ending
@@ -969,6 +1187,7 @@ export class SolomonOverlay {
   // ── banners + status ─────────────────────────────────────
 
   #showGameOver(): void {
+    this.#sfx('gameover')
     const score = this.#engine?.score ?? 0
     this.#showBanner('Game Over', `✦ ${score}`, [
       { label: '↻ Retry cavern', fn: () => this.#enterCavern(this.#currentCavern) },

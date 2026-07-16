@@ -31,6 +31,11 @@ export interface PlacementHistory {
    *  primitive cut/copy uses. Optional: sealing degrades to the parent's
    *  stored child sig when absent. */
   sealSubtree?(segments: readonly string[]): Promise<string | null>
+  /** Pool-write a DERIVED layer (canonicalize → sign → write, NO marker,
+   *  no head advance) — HistoryService.materializeLayer. The re-mint
+   *  primitive for a collection whose top node gains a landing index or
+   *  loses an excluded branch. */
+  materializeLayer?(layer: PlacementLayer): Promise<string>
 }
 
 export interface PlacementLineage {

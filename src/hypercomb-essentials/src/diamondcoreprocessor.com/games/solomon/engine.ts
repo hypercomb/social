@@ -77,22 +77,40 @@ export interface LevelDef {
   mirrors: MirrorSpawn[]
   /** Starting life-meter value (defaults to LIFE_FULL). */
   lifeStart?: number
+  /** Visual theme the renderer bakes the room with (per-shrine identity):
+   *  'sandstone' | 'verdant' | 'crystal' | 'abyss'. Defaults to sandstone. */
+  theme?: string
 }
 
 export type GameState = 'playing' | 'won' | 'dead' | 'gameover' | 'complete'
 
 interface Body { x: number; y: number; w: number; h: number; vx: number; vy: number }
 
-interface Enemy extends Body {
+/** Per-kind state machines — each foe uses a small subset of these. */
+export type EnemyState =
+  | 'patrol' | 'chase' | 'scan' | 'windup' | 'punch' | 'attack' | 'recover' | 'flee'
+  | 'hover' | 'align' | 'swoop' | 'rise' | 'drift' | 'dart' | 'hunt' | 'stun'
+
+/** How a foe died — the overlay picks SFX/bursts by cause; 'expire' scores nothing. */
+export type KillCause = 'crush' | 'drop' | 'fire' | 'expire'
+
+export interface Enemy extends Body {
   kind: EnemyKind
   dir: 1 | -1
   alive: boolean
   squash: number          // death flatten timer (seconds remaining)
   anim: number            // animation phase, advances while moving
-  fireCd: number          // gargoil / dragon / saramandor / panel shot cadence
-  smashCd: number         // goblin chewing through a brick ahead
+  fireCd: number          // attack cadence (shots / charges / swoops per kind)
+  smashCd: number         // goblin brick-punch cooldown
   ttl: number             // demonhead self-expire countdown (0 = immortal)
   airY: number | null     // y at the moment it left the ground (for drop-death)
+  state: EnemyState
+  stateT: number          // seconds remaining in the current state
+  telegraph: number       // 0..1 attack imminence — the renderer's windup cue
+  lockX: number           // locked dart/swoop unit vector (set at windup end)
+  lockY: number
+  homeY: number           // neul's hover baseline
+  bounces: number         // sparkball bounce tally toward its supercharge
 }
 
 interface Item extends ItemSpawn { taken: boolean; reveal: number }
@@ -100,7 +118,12 @@ interface Item extends ItemSpawn { taken: boolean; reveal: number }
 /** A released fairy — bobs where it was freed until Dana collects it. */
 interface Fairy { x: number; y: number; phase: number; taken: boolean }
 
-interface Mirror extends Cell { cd: number; kind: MirrorKind }
+export interface Mirror extends Cell {
+  cd: number
+  kind: MirrorKind
+  count: number       // spawns emitted so far — emission direction alternates
+  telegraph: number   // 0..1 charge-up glow before the next emission
+}
 
 /** Dana's fireball — a horizontal projectile. A normal bolt dies on the first
  *  enemy it hits; a SUPER bolt plows through every enemy in its path. */
@@ -122,7 +145,30 @@ const PLAYER_W = TILE * 0.7
 const PLAYER_H = TILE
 const DUCK_H = TILE * 0.7
 const STEP_UP = TILE
-const JUMP_V = 308   // tuned with PLAYER_GRAVITY for a ~2.25-tile hop with extra hang
+const JUMP_V = 306   // retuned with the apex hang so the arc still tops out at ~2.25 tiles
+
+// Modern platformer hands: the arc keeps the classic ~2.25-tile reach the block
+// puzzles are built around, but the feel gains coyote time, a jump buffer,
+// release-to-cut, momentum and a floaty apex (which WIDENS the conjure-at-apex
+// window without raising the apex). Every window is ≥4 steps at SIM_DT.
+const JUMP_CUT = 0.45        // release while rising → vy *= this, once
+const COYOTE_TIME = 0.08     // grace after walking off a ledge
+const JUMP_BUFFER = 0.12     // a press is remembered this long before landing
+const APEX_BAND = 40         // |vy| below this counts as "at the apex"
+const APEX_GRAVITY = 0.55    // gravity multiplier inside the apex band
+const ACCEL_GROUND = 1500
+const DECEL_GROUND = 2000
+const SKID_ACCEL = 2600      // reversing against momentum
+const ACCEL_AIR = 1050
+const DECEL_AIR = 700
+const LAND_FLASH_T = 0.15
+/** Touchdown speed at/above which a landing reads as "heavy" (big dust/squash). */
+export const LAND_HEAVY_VY = 320
+/** The fixed simulation step the overlay's accumulator feeds to update(). */
+export const SIM_DT = 1 / 60
+
+/** Dana's animation state, recomputed every step — the renderer draws from this. */
+export type PlayerAnim = 'idle' | 'run' | 'skid' | 'jump' | 'apex' | 'fall' | 'duck' | 'duckWalk' | 'land'
 
 // Life meter. Drains continuously; empty = a lost Dana. Full hourglass restores
 // LIFE_FULL, half restores LIFE_HALF. Remaining life becomes the room's time
@@ -160,18 +206,63 @@ const E = {
 
 const MIRROR_INTERVAL = 2.4   // seconds between spawns
 const MIRROR_CAP = 3          // live spawned foes a single mirror sustains
+const MIRROR_TELEGRAPH = 0.9  // the glass charges up this long before emitting
 const DEMONHEAD_TTL = 7       // a Demonhead fades after this long
-const GARGOIL_FIRE_CD = 1.8
-const PANEL_FIRE_CD = 2.2
-const DRAGON_FIRE_CD = 1.5
-const SARAMANDOR_FIRE_CD = 1.6
 const SHOT_SPEED = 150
 const SHOT_LIFE = 3
 
-const WALKERS = new Set<EnemyKind>(['goblin', 'gargoil', 'dragon', 'saramandor'])
-const SHOOTERS = new Set<EnemyKind>(['gargoil', 'dragon', 'saramandor'])
-const PATROLLERS = new Set<EnemyKind>(['gargoil', 'saramandor']) // turn at walls/ledges
-const HUNTERS = new Set<EnemyKind>(['goblin', 'dragon'])         // steer toward Dana
+// Per-kind state-machine tuning. Every attack is TELEGRAPHED (a windup the
+// renderer draws from `telegraph` 0..1) — individually each foe got fairer, so
+// the level rosters got denser to compensate. All timers, no RNG: determinism.
+const GOBLIN_SIGHT = TILE * 6         // sees Dana this far (same height band)
+const GOBLIN_CHARGE_RANGE = TILE * 4
+const GOBLIN_WINDUP = 0.3
+const GOBLIN_CHARGE_T = 0.9           // locked-direction sprint (runs off ledges — baitable)
+const GOBLIN_CHARGE_MULT = 1.6
+const GOBLIN_CHARGE_CD = 2.5
+const GOBLIN_PUNCH_WINDUP = 0.4       // brick punch is telegraphed now, not instant
+const GOBLIN_PUNCH_RECOVER = 0.35
+const GOBLIN_RECOVER = 0.5
+const GARGOIL_SCAN_T = 0.6            // stands and scans before flipping at an edge
+const GARGOIL_WINDUP = 0.45
+const GARGOIL_RECOVER = 0.4
+const GARGOIL_FIRE_CD = 2.2
+const DRAGON_WINDUP = 0.6
+const DRAGON_BURST_N = 3
+const DRAGON_BURST_GAP = 0.16
+const DRAGON_RECOVER = 0.8
+const DRAGON_FIRE_CD = 3.2
+const SARA_WINDUP = 0.3
+const SARA_FLEE_T = 0.7               // hit-and-run: fires then darts away
+const SARA_FLEE_MULT = 1.3
+const SARAMANDOR_FIRE_CD = 1.8
+const GHOST_HUNT_MULT = 1.5
+const GHOST_HUNT_RANGE = TILE * 7
+const GHOST_STUN_T = 0.35             // smashing a brick stuns it — walls buy time
+const NEUL_WAKE_RANGE = TILE * 6
+const NEUL_SWOOP_RANGE = TILE * 5
+const NEUL_WINDUP = 0.5
+const NEUL_SWOOP_MULT = 2.2
+const NEUL_SWOOP_T = 1.0
+const NEUL_RISE_T = 0.8
+const NEUL_SWOOP_CD = 2.8
+const SPARK_BOUNCES = 6               // every Nth bounce → a supercharge cycle
+const SPARK_WINDUP = 0.5
+const SPARK_SUPER_MULT = 1.6
+const SPARK_SUPER_T = 2.2
+const DHEAD_DRIFT_T = 1.4
+const DHEAD_WINDUP = 0.3
+const DHEAD_DART_T = 0.55
+const DHEAD_DART_MULT = 1.9
+const PANEL_FIRE_CD = 1.7             // idle + the 0.5 windup = the old 2.2 period
+const PANEL_WINDUP = 0.5
+
+/** Step `v` toward `target` by at most `maxDelta` (never overshoots). */
+function moveToward(v: number, target: number, maxDelta: number): number {
+  if (v < target) return Math.min(v + maxDelta, target)
+  if (v > target) return Math.max(v - maxDelta, target)
+  return v
+}
 
 export class Engine {
   level: LevelDef
@@ -226,8 +317,35 @@ export class Engine {
   pickupFlash = 0     // bumps when Dana grabs any item
   pickupCell: Cell | null = null
 
-  // Held input — the overlay writes these from key events.
-  input = { left: false, right: false, down: false }
+  // Movement state the renderer/overlay read. jumpFlash bumps on takeoff;
+  // landFlash counts down after touchdown with landVy holding the impact speed.
+  playerAnim: PlayerAnim = 'idle'
+  jumpFlash = 0
+  landFlash = 0
+  landVy = 0
+  coyote = 0
+  jumpBuffer = 0
+  #jumpHeldPrev = false
+  #jumpActive = false   // a started jump that release can still cut short
+  #groundRow = 0        // body row of the last grounded tick — anchors the airborne cast
+
+  // One-shot event counters + cells (the overlay diffs these after update() for
+  // particles/SFX — same pattern as pickupFlash/pickupCell).
+  killFlash = 0
+  killCell: Cell | null = null
+  killCause: KillCause = 'fire'
+  shotFlash = 0
+  shotCell: Cell | null = null
+  spawnFlash = 0
+  spawnCell: Cell | null = null
+  secretFlash = 0
+  secretCell: Cell | null = null
+  revealFlash = 0
+  revealCell: Cell | null = null
+
+  // Held input — the overlay writes these from key events (jump: press AND
+  // release matter — the release cuts a rising arc short).
+  input = { left: false, right: false, down: false, jump: false }
 
   constructor(level: LevelDef) {
     this.level = level
@@ -271,13 +389,17 @@ export class Engine {
     this.facing = 1
     this.onGround = false
     this.ducking = false
+    this.#groundRow = p.row
     this.fireballs = []
     this.shots = []
     this.fairies = []
     this.ammo = []
     this.ammoCap = MAX_AMMO
     this.#fireCooldown = 0
-    this.input.left = this.input.right = this.input.down = false
+    this.input.left = this.input.right = this.input.down = this.input.jump = false
+    this.playerAnim = 'idle'
+    this.jumpFlash = this.landFlash = this.landVy = this.coyote = this.jumpBuffer = 0
+    this.#jumpHeldPrev = this.#jumpActive = false
     this.doorOpen = false
     this.zodiacHeld = false
     this.wingsHeld = false
@@ -289,11 +411,12 @@ export class Engine {
     // Pages collected this game don't reappear either.
     for (const it of this.items) if ((it.kind === 'pageTime' && this.pageTime) || (it.kind === 'pageSpace' && this.pageSpace)) it.taken = true
     this.enemies = this.level.enemies.map(e => this.#makeEnemy(e.kind ?? 'goblin', e.col, e.row, e.dir ?? 1))
-    this.mirrors = this.level.mirrors.map(m => ({ col: m.col, row: m.row, kind: m.kind ?? 'demonhead', cd: MIRROR_INTERVAL * 0.6 }))
+    this.mirrors = this.level.mirrors.map(m => ({ col: m.col, row: m.row, kind: m.kind ?? 'demonhead', cd: MIRROR_INTERVAL * 0.6, count: 0, telegraph: 0 }))
 
     this.state = 'playing'
     this.conjureFlash = this.hurtFlash = this.smashFlash = this.fireFlash = this.pickupFlash = 0
-    this.smashCell = this.pickupCell = null
+    this.killFlash = this.shotFlash = this.spawnFlash = this.secretFlash = this.revealFlash = 0
+    this.smashCell = this.pickupCell = this.killCell = this.shotCell = this.spawnCell = this.secretCell = this.revealCell = null
   }
 
   #makeEnemy(kind: EnemyKind, col: number, row: number, dir: 1 | -1): Enemy {
@@ -307,6 +430,12 @@ export class Engine {
       smashCd: 0,
       ttl: kind === 'demonhead' ? DEMONHEAD_TTL : 0,
       airY: null,
+      state: kind === 'neul' ? 'hover' : kind === 'demonhead' ? 'drift' : 'patrol',
+      stateT: kind === 'demonhead' ? DHEAD_DRIFT_T : 0,
+      telegraph: 0,
+      lockX: 0, lockY: 0,
+      homeY: row * TILE + (TILE - d.h),
+      bounces: 0,
     }
     if (kind === 'sparkball') { e.vx = dir * E.sparkball.speed; e.vy = E.sparkball.speed * 0.6 }
     return e
@@ -353,12 +482,22 @@ export class Engine {
 
   // ── the wand: conjure / dispel a brick in front of Dana ──
 
-  /** The cell the wand targets: the column Dana faces, at his foot row standing
-   *  (body level — the classic stair-step) or one row LOWER crouched. */
+  /** The cell the wand targets: the column Dana faces, at his body row standing
+   *  or one row LOWER crouched. Airborne, intent wins over pixel position: any
+   *  RISING tick targets one row ABOVE the takeoff row (the classic diagonal-up
+   *  cast — jump+cast always reaches the brick overhead, even under a low
+   *  ceiling), and it stays pinned there through the apex so the hang can never
+   *  aim two rows up and conjure a stray block. Only after falling back below
+   *  the takeoff row does the target track his feet again (the ledge-drop
+   *  rescue-cast). */
   targetCell(): Cell {
     const footRow = Math.floor((this.player.y + this.player.h - 1) / TILE)
     const centerCol = Math.floor((this.player.x + this.player.w / 2) / TILE)
-    return { col: centerCol + this.facing, row: footRow + (this.ducking ? 1 : 0) }
+    let row: number
+    if (this.onGround || this.ducking) row = footRow + (this.ducking ? 1 : 0)
+    else if (this.player.vy < 0) row = this.#groundRow - 1
+    else row = Math.max(footRow, this.#groundRow - 1)
+    return { col: centerCol + this.facing, row }
   }
 
   cast(): 'conjure' | 'dispel' | 'blocked' {
@@ -374,12 +513,17 @@ export class Engine {
       return 'dispel'
     }
     // A SECRET hides in an empty cell — the wand uncovers it instead of conjuring.
-    if (this.#revealSecret(col, row)) { this.conjureFlash = 0.18; return 'conjure' }
+    if (this.#revealSecret(col, row)) {
+      this.conjureFlash = 0.18
+      this.secretFlash += 1
+      this.secretCell = { col, row }
+      return 'conjure'
+    }
     if (!this.#ejectFromCell(col, row)) return 'blocked'
     this.setTile(col, row, BRICK)
     this.conjureFlash = 0.18
     for (const e of this.enemies) {
-      if (e.alive && e.kind !== 'panel' && this.rectOverlapsCell(e, col, row)) this.#killEnemy(e, true)
+      if (e.alive && e.kind !== 'panel' && this.rectOverlapsCell(e, col, row)) this.#killEnemy(e, 'crush')
     }
     return 'conjure'
   }
@@ -420,11 +564,11 @@ export class Engine {
     this.#hazardContact()
   }
 
+  /** Buffered jump press (compat shim — the overlay now drives input.jump; the
+   *  buffer converts the press into a takeoff on the next grounded/coyote tick). */
   jump(): void {
     if (this.state !== 'playing') return
-    if (!this.onGround || this.ducking) return
-    this.player.vy = -JUMP_V
-    this.onGround = false
+    this.jumpBuffer = JUMP_BUFFER
   }
 
   fireball(): void {
@@ -451,16 +595,64 @@ export class Engine {
     if (this.input.down && this.onGround && !this.ducking) this.#engageDuck()
     else if (!this.input.down && this.ducking) this.#tryStand()
 
+    // Jump edges: a press arms the buffer; a release while still rising cuts the
+    // arc short (variable jump height).
+    if (this.input.jump && !this.#jumpHeldPrev) this.jumpBuffer = JUMP_BUFFER
+    if (!this.input.jump && this.#jumpHeldPrev && this.#jumpActive && p.vy < 0) {
+      p.vy *= JUMP_CUT
+      this.#jumpActive = false
+    }
+    this.#jumpHeldPrev = this.input.jump
+
+    // Takeoff BEFORE the coyote decay — a press on the last coyote tick still flies.
+    if (this.jumpBuffer > 0 && (this.onGround || this.coyote > 0) && !this.ducking) {
+      p.vy = -JUMP_V
+      this.onGround = false
+      this.coyote = 0
+      this.jumpBuffer = 0
+      this.#jumpActive = true
+      this.jumpFlash += 1
+    }
+
+    if (this.onGround) { this.coyote = COYOTE_TIME; this.#jumpActive = false }
+    else this.coyote = Math.max(0, this.coyote - dt)
+    if (this.jumpBuffer > 0) this.jumpBuffer = Math.max(0, this.jumpBuffer - dt)
+    if (this.landFlash > 0) this.landFlash = Math.max(0, this.landFlash - dt)
+
     const held = (this.input.left ? -1 : 0) + (this.input.right ? 1 : 0)
     if (held !== 0) this.facing = held as 1 | -1
     this.walking = held !== 0
-    p.vx = held * (this.ducking ? CROUCH_SPEED : MOVE_SPEED)
-    p.vy = Math.min(p.vy + PLAYER_GRAVITY * dt, MAX_FALL)   // Dana floats; enemies use GRAVITY
+    // Momentum: accelerate toward the held target speed, skid hard on reversal,
+    // coast down when nothing is held (air keeps a little more carry).
+    const target = held * (this.ducking ? CROUCH_SPEED : MOVE_SPEED)
+    const reversing = target !== 0 && Math.abs(p.vx) > 1 && Math.sign(target) !== Math.sign(p.vx)
+    const rate = reversing ? (this.onGround ? SKID_ACCEL : ACCEL_AIR)
+      : target !== 0 ? (this.onGround ? ACCEL_GROUND : ACCEL_AIR)
+        : (this.onGround ? DECEL_GROUND : DECEL_AIR)
+    p.vx = moveToward(p.vx, target, rate * dt)
+    // Dana floats near the apex — the hang that makes conjure-a-step land.
+    const g = !this.onGround && Math.abs(p.vy) < APEX_BAND ? PLAYER_GRAVITY * APEX_GRAVITY : PLAYER_GRAVITY
+    p.vy = Math.min(p.vy + g * dt, MAX_FALL)   // Dana falls lighter; enemies use GRAVITY
 
+    const wasGround = this.onGround
+    const vyBefore = p.vy
     this.#moveX(p, p.vx * dt)
     this.#moveYPlayer(p, p.vy * dt)
+    if (!wasGround && this.onGround) { this.landFlash = LAND_FLASH_T; this.landVy = vyBefore }
+    if (this.onGround) this.#groundRow = Math.floor((p.y + p.h - 1) / TILE)
+
+    this.playerAnim = this.#animState(reversing)
 
     if (p.y > this.height + TILE) this.#die()
+  }
+
+  #animState(reversing: boolean): PlayerAnim {
+    const p = this.player
+    if (this.ducking) return Math.abs(p.vx) > 4 ? 'duckWalk' : 'duck'
+    if (!this.onGround) return p.vy < -APEX_BAND ? 'jump' : Math.abs(p.vy) <= APEX_BAND ? 'apex' : 'fall'
+    if (this.landFlash > 0) return 'land'
+    if (reversing && Math.abs(p.vx) > 30) return 'skid'
+    return Math.abs(p.vx) > 4 ? 'run' : 'idle'
   }
 
   #engageDuck(): void {
@@ -496,7 +688,7 @@ export class Engine {
       for (const e of this.enemies) {
         if (!e.alive || e.kind === 'panel') continue
         if (f.x > e.x && f.x < e.x + e.w && f.y > e.y && f.y < e.y + e.h) {
-          this.#killEnemy(e, false)
+          this.#killEnemy(e, 'fire')
           if (!f.super) { consumed = true; break }
         }
       }
@@ -531,6 +723,8 @@ export class Engine {
 
   #fireShot(x: number, y: number, dir: 1 | -1): void {
     this.shots.push({ x, y, vx: dir * SHOT_SPEED, life: SHOT_LIFE })
+    this.shotFlash += 1
+    this.shotCell = { col: Math.floor(x / TILE), row: Math.floor(y / TILE) }
   }
 
   // ── movement primitives ──────────────────────────────────
@@ -567,7 +761,16 @@ export class Engine {
       const ny = p.y + step * move
       if (!this.rectSolid(p.x, ny, p.w, p.h)) { p.y = ny; continue }
       if (step < 0 && this.#headButt(p, ny)) { p.y = ny; continue }
-      if (step > 0) this.onGround = true
+      // Snap flush to the tile boundary (no sub-tile hover): a landing puts the
+      // feet exactly on the surface — onGround is immediate, jumps stay crisp.
+      if (step > 0) {
+        const row = Math.floor((ny + p.h - 1) / TILE)
+        p.y = Math.max(p.y, row * TILE - p.h)
+        this.onGround = true
+      } else {
+        const row = Math.floor(ny / TILE)
+        p.y = Math.min(p.y, (row + 1) * TILE)
+      }
       p.vy = 0
       break
     }
@@ -598,6 +801,16 @@ export class Engine {
 
   #groundCheck(p: Body): void {
     this.onGround = this.rectSolid(p.x, p.y + 1, p.w, p.h)
+    if (!this.onGround) return
+    // Rest flush on the surface (the probe tolerates a sub-pixel hover; the
+    // ground row is floor((y+h)/TILE) whenever the probe hits).
+    const fy = Math.floor((p.y + p.h) / TILE) * TILE - p.h
+    if (fy !== p.y && !this.rectSolid(p.x, fy, p.w, p.h)) p.y = fy
+    // Grounded means no downward motion: without this, sub-pixel sinking lets
+    // gravity sawtooth vy up to ~66px/s between snap ticks, so a ledge walk-off
+    // launches with whatever the tooth held at the edge — exit speed would
+    // depend on x-position parity.
+    if (p.vy > 0) p.vy = 0
   }
 
   // ── enemies ──────────────────────────────────────────────
@@ -617,7 +830,7 @@ export class Engine {
     this.enemies = this.enemies.filter(e => e.alive || e.squash > 0)
   }
 
-  /** Ground foes: gravity + drop-death, then per-kind horizontal AI. */
+  /** Ground foes: shared gravity + drop-death prelude, then a per-kind machine. */
   #stepWalker(e: Enemy, dt: number): void {
     e.vy = Math.min(e.vy + GRAVITY * dt, MAX_FALL)
     const before = e.y
@@ -625,136 +838,428 @@ export class Engine {
     this.#moveYSimple(e, e.vy * dt)
     const grounded = this.#grounded(e)
     if (grounded && e.airY !== null) {
-      if (e.y - e.airY > DROP_KILL) { this.#killEnemy(e, false); return }
+      if (e.y - e.airY > DROP_KILL) { this.#killEnemy(e, 'drop'); return }
       e.airY = null
     }
-    if (e.y > this.height + TILE) { this.#killEnemy(e, false); return }
+    if (e.y > this.height + TILE) { this.#killEnemy(e, 'drop'); return }
 
-    const speed = E[e.kind].speed
-    e.anim += dt * speed
     if (e.smashCd > 0) e.smashCd -= dt
     if (e.fireCd > 0) e.fireCd -= dt
+    if (e.stateT > 0) e.stateT -= dt
 
-    if (grounded && HUNTERS.has(e.kind)) {
-      const dx = this.player.x - e.x
-      if (Math.abs(dx) > 2) e.dir = (dx > 0 ? 1 : -1)
+    switch (e.kind) {
+      case 'gargoil': this.#stepGargoil(e, dt, grounded); break
+      case 'dragon': this.#stepDragon(e, dt, grounded); break
+      case 'saramandor': this.#stepSaramandor(e, dt, grounded); break
+      default: this.#stepGoblin(e, dt, grounded); break
     }
+  }
 
+  // ── walker senses ────────────────────────────────────────
+
+  #aheadInfo(e: Enemy): { col: number; row: number; wallAhead: boolean; brickAhead: boolean; groundAhead: boolean } {
     const aheadX = e.dir > 0 ? e.x + e.w + 1 : e.x - 1
-    const aheadCol = Math.floor(aheadX / TILE)
-    const midRow = Math.floor((e.y + e.h / 2) / TILE)
+    const col = Math.floor(aheadX / TILE)
+    const row = Math.floor((e.y + e.h / 2) / TILE)
     const footRow = Math.floor((e.y + e.h + 2) / TILE)
-    const aheadTile = this.tileAt(aheadCol, midRow)
-    const wallAhead = aheadTile === WALL || aheadTile === BRICK || aheadTile === CRACKED
-    const groundAhead = this.solidAt(aheadCol, footRow)
-
-    // Goblins punch through a breakable brick blocking the chase.
-    if (e.kind === 'goblin' && grounded && (aheadTile === BRICK || aheadTile === CRACKED)) {
-      if (e.smashCd <= 0) {
-        this.setTile(aheadCol, midRow, EMPTY)
-        this.#revealAt(aheadCol, midRow)
-        this.smashCell = { col: aheadCol, row: midRow }
-        this.smashFlash = 0.14
-        e.smashCd = 0.7
-      }
-      return
+    const t = this.tileAt(col, row)
+    return {
+      col, row,
+      wallAhead: t === WALL || t === BRICK || t === CRACKED,
+      brickAhead: t === BRICK || t === CRACKED,
+      groundAhead: this.solidAt(col, footRow),
     }
+  }
 
-    // Fire-spitters loose a block-breaking bolt when Dana is ahead at a similar height.
-    if (SHOOTERS.has(e.kind) && e.fireCd <= 0) {
-      const facingDana = Math.sign(this.player.x - e.x) === e.dir
-      const sameRow = Math.abs((this.player.y + this.player.h) - (e.y + e.h)) < TILE * 1.2
-      if (facingDana && sameRow) {
-        this.#fireShot(e.dir > 0 ? e.x + e.w : e.x, e.y + e.h * 0.45, e.dir)
-        e.fireCd = e.kind === 'dragon' ? DRAGON_FIRE_CD : e.kind === 'saramandor' ? SARAMANDOR_FIRE_CD : GARGOIL_FIRE_CD
-      }
-    }
-
-    if (grounded && PATROLLERS.has(e.kind) && (wallAhead || !groundAhead)) { e.dir = -e.dir as 1 | -1; return }
-
+  #walk(e: Enemy, dt: number, speed: number): void {
     const nx = e.x + e.dir * speed * dt
-    if (!this.rectSolid(nx, e.y, e.w, e.h)) e.x = nx
+    if (!this.rectSolid(nx, e.y, e.w, e.h)) { e.x = nx; e.anim += dt * speed }
     else e.dir = -e.dir as 1 | -1
   }
 
-  /** Ghost: a horizontal flyer (no gravity). Bounces off grey walls and SMASHES
-   *  any brick it touches. Fireball-only kill. */
+  #danaDir(e: Enemy): 1 | -1 {
+    return (this.player.x + this.player.w / 2) >= (e.x + e.w / 2) ? 1 : -1
+  }
+
+  #seesDana(e: Enemy, range: number): boolean {
+    const dx = (this.player.x + this.player.w / 2) - (e.x + e.w / 2)
+    const sameBand = Math.abs((this.player.y + this.player.h) - (e.y + e.h)) < TILE * 1.5
+    return Math.abs(dx) < range && sameBand
+  }
+
+  #facingDana(e: Enemy): boolean { return Math.sign(this.player.x - e.x) === e.dir }
+
+  #sameRow(e: Enemy): boolean {
+    return Math.abs((this.player.y + this.player.h) - (e.y + e.h)) < TILE * 1.2
+  }
+
+  // ── the walkers ──────────────────────────────────────────
+
+  /** Goblin — the brute who commits. Patrols (walks off ledges: the drop-bait
+   *  stays), chases on sight, then telegraphs and CHARGES in a locked direction —
+   *  straight off a ledge if you bait it. Brick punches are telegraphed too. */
+  #stepGoblin(e: Enemy, dt: number, grounded: boolean): void {
+    e.telegraph = 0
+    switch (e.state) {
+      case 'chase': {
+        if (!this.#seesDana(e, GOBLIN_SIGHT * 2)) { e.state = 'patrol'; break }
+        if (grounded) e.dir = this.#danaDir(e)
+        const ahead = this.#aheadInfo(e)
+        if (grounded && ahead.brickAhead && e.smashCd <= 0) { e.state = 'punch'; e.stateT = GOBLIN_PUNCH_WINDUP; break }
+        if (grounded && e.fireCd <= 0 && this.#seesDana(e, GOBLIN_CHARGE_RANGE)) {
+          e.dir = this.#danaDir(e)
+          e.state = 'windup'; e.stateT = GOBLIN_WINDUP
+          break
+        }
+        this.#walk(e, dt, E.goblin.speed)
+        break
+      }
+      case 'punch': {
+        e.telegraph = 1 - Math.max(0, e.stateT) / GOBLIN_PUNCH_WINDUP
+        if (e.stateT > 0) break
+        const ahead = this.#aheadInfo(e)
+        if (ahead.brickAhead) {
+          this.setTile(ahead.col, ahead.row, EMPTY)
+          this.#revealAt(ahead.col, ahead.row)
+          this.smashCell = { col: ahead.col, row: ahead.row }
+          this.smashFlash = 0.14
+          e.smashCd = 0.7
+        }
+        e.state = 'recover'; e.stateT = GOBLIN_PUNCH_RECOVER
+        break
+      }
+      case 'windup':
+        e.telegraph = 1 - Math.max(0, e.stateT) / GOBLIN_WINDUP
+        if (e.stateT <= 0) { e.state = 'attack'; e.stateT = GOBLIN_CHARGE_T; e.fireCd = GOBLIN_CHARGE_CD }
+        break
+      case 'attack': {
+        e.telegraph = 1
+        const nx = e.x + e.dir * E.goblin.speed * GOBLIN_CHARGE_MULT * dt
+        if (this.rectSolid(nx, e.y, e.w, e.h)) { e.state = 'recover'; e.stateT = GOBLIN_RECOVER; break }
+        e.x = nx
+        e.anim += dt * E.goblin.speed * GOBLIN_CHARGE_MULT
+        if (e.stateT <= 0) { e.state = 'recover'; e.stateT = GOBLIN_RECOVER }
+        break
+      }
+      case 'recover':
+        if (e.stateT <= 0) e.state = 'patrol'
+        break
+      default: {
+        if (grounded && this.#seesDana(e, GOBLIN_SIGHT)) { e.state = 'chase'; break }
+        this.#walk(e, dt, E.goblin.speed)
+        break
+      }
+    }
+  }
+
+  /** Gargoil — the sentry with a rhythm. Stands and SCANS at walls/ledges before
+   *  flipping (a readable patrol), and telegraphs every shot. */
+  #stepGargoil(e: Enemy, dt: number, grounded: boolean): void {
+    e.telegraph = 0
+    switch (e.state) {
+      case 'scan':
+        if (e.stateT <= 0) { e.dir = -e.dir as 1 | -1; e.state = 'patrol' }
+        break
+      case 'windup':
+        e.telegraph = 1 - Math.max(0, e.stateT) / GARGOIL_WINDUP
+        if (e.stateT <= 0) {
+          this.#fireShot(e.dir > 0 ? e.x + e.w : e.x, e.y + e.h * 0.45, e.dir)
+          e.fireCd = GARGOIL_FIRE_CD
+          e.state = 'recover'; e.stateT = GARGOIL_RECOVER
+        }
+        break
+      case 'recover':
+        if (e.stateT <= 0) e.state = 'patrol'
+        break
+      default: {
+        if (e.fireCd <= 0 && this.#facingDana(e) && this.#sameRow(e)) { e.state = 'windup'; e.stateT = GARGOIL_WINDUP; break }
+        const ahead = this.#aheadInfo(e)
+        if (grounded && (ahead.wallAhead || !ahead.groundAhead)) { e.state = 'scan'; e.stateT = GARGOIL_SCAN_T; break }
+        this.#walk(e, dt, E.gargoil.speed)
+        break
+      }
+    }
+  }
+
+  /** Dragon — the boss walker. Hunts but REFUSES ledges (you must dispel the
+   *  floor under it or spend a fireball), and rears up into a 3-shot burst. */
+  #stepDragon(e: Enemy, dt: number, grounded: boolean): void {
+    e.telegraph = 0
+    switch (e.state) {
+      case 'windup':
+        e.telegraph = 1 - Math.max(0, e.stateT) / DRAGON_WINDUP
+        if (e.stateT <= 0) { e.state = 'attack'; e.stateT = DRAGON_BURST_N * DRAGON_BURST_GAP; e.lockX = 0 }
+        break
+      case 'attack': {
+        e.telegraph = 1
+        const elapsed = DRAGON_BURST_N * DRAGON_BURST_GAP - Math.max(0, e.stateT)
+        const due = Math.min(DRAGON_BURST_N, 1 + Math.floor(elapsed / DRAGON_BURST_GAP))
+        while (e.lockX < due) {
+          this.#fireShot(e.dir > 0 ? e.x + e.w : e.x, e.y + e.h * 0.45, e.dir)
+          e.lockX += 1
+        }
+        if (e.stateT <= 0) { e.fireCd = DRAGON_FIRE_CD; e.state = 'recover'; e.stateT = DRAGON_RECOVER; e.lockX = 0 }
+        break
+      }
+      case 'recover':
+        if (e.stateT <= 0) e.state = 'patrol'
+        break
+      default: {
+        if (e.fireCd <= 0 && this.#facingDana(e) && this.#sameRow(e)) { e.state = 'windup'; e.stateT = DRAGON_WINDUP; break }
+        if (grounded) e.dir = this.#danaDir(e)
+        const ahead = this.#aheadInfo(e)
+        if (grounded && (!ahead.groundAhead || ahead.wallAhead)) break   // ledge-aware: stands its ground
+        this.#walk(e, dt, E.dragon.speed)
+        break
+      }
+    }
+  }
+
+  /** Saramandor — the skirmisher. A fast telegraphed shot, then it FLEES away
+   *  from Dana before settling back into its patrol. */
+  #stepSaramandor(e: Enemy, dt: number, grounded: boolean): void {
+    e.telegraph = 0
+    switch (e.state) {
+      case 'windup':
+        e.telegraph = 1 - Math.max(0, e.stateT) / SARA_WINDUP
+        if (e.stateT <= 0) {
+          this.#fireShot(e.dir > 0 ? e.x + e.w : e.x, e.y + e.h * 0.45, e.dir)
+          e.fireCd = SARAMANDOR_FIRE_CD
+          e.dir = this.#danaDir(e) === 1 ? -1 : 1
+          e.state = 'flee'; e.stateT = SARA_FLEE_T
+        }
+        break
+      case 'flee': {
+        const ahead = this.#aheadInfo(e)
+        if (grounded && (ahead.wallAhead || !ahead.groundAhead)) { e.state = 'patrol'; break }   // cornered
+        this.#walk(e, dt, E.saramandor.speed * SARA_FLEE_MULT)
+        if (e.stateT <= 0) e.state = 'patrol'
+        break
+      }
+      default: {
+        if (e.fireCd <= 0 && this.#facingDana(e) && this.#sameRow(e)) { e.state = 'windup'; e.stateT = SARA_WINDUP; break }
+        const ahead = this.#aheadInfo(e)
+        if (grounded && (ahead.wallAhead || !ahead.groundAhead)) { e.dir = -e.dir as 1 | -1; break }
+        this.#walk(e, dt, E.saramandor.speed)
+        break
+      }
+    }
+  }
+
+  /** Ghost — the pendulum stalker (fireball-only). Glides with a gentle bob;
+   *  when Dana shares its row it HUNTS at 1.5× with lit eyes (telegraph = 1).
+   *  Smashing a brick STUNS it briefly — walls buy time instead of nothing. */
   #stepGhost(e: Enemy, dt: number): void {
+    if (e.stateT > 0) e.stateT -= dt
     e.anim += dt * E.ghost.speed
-    const nx = e.x + e.dir * E.ghost.speed * dt
+    if (e.state === 'stun') {
+      e.telegraph = 0
+      if (e.stateT <= 0) e.state = 'patrol'
+      return
+    }
+    const rowAligned = Math.abs((this.player.y + this.player.h / 2) - (e.y + e.h / 2)) < TILE
+    const inRange = Math.abs((this.player.x + this.player.w / 2) - (e.x + e.w / 2)) < GHOST_HUNT_RANGE
+    const hunting = rowAligned && inRange
+    e.state = hunting ? 'hunt' : 'patrol'
+    e.telegraph = hunting ? 1 : 0
+    const speed = E.ghost.speed * (hunting ? GHOST_HUNT_MULT : 1)
+    const by = e.y + Math.sin(e.anim * 0.05) * 8 * dt
+    if (!this.rectSolid(e.x, by, e.w, e.h)) e.y = by
+    const nx = e.x + e.dir * speed * dt
     const col = Math.floor((e.dir > 0 ? nx + e.w : nx) / TILE)
     const row = Math.floor((e.y + e.h / 2) / TILE)
     const t = this.tileAt(col, row)
-    if (t === BRICK || t === CRACKED) { this.setTile(col, row, EMPTY); this.#revealAt(col, row); e.x = nx; return }
+    if (t === BRICK || t === CRACKED) {
+      this.setTile(col, row, EMPTY)
+      this.#revealAt(col, row)
+      this.smashCell = { col, row }
+      this.smashFlash = 0.14
+      e.state = 'stun'; e.stateT = GHOST_STUN_T
+      return
+    }
     if (t === WALL) { e.dir = -e.dir as 1 | -1; return }
     e.x = nx
   }
 
-  /** Neul: a vertical flyer that homes on Dana's height (and drifts toward his
-   *  column), smashing bricks in its path. Fireball-only kill. */
+  /** Neul — the elevator ambusher (fireball-only). Hovers at its home height
+   *  ignoring a distant Dana; aligns to his row WITHOUT smashing; then shivers
+   *  (windup) and SWOOPS along a locked vector, smashing bricks en route. */
   #stepNeul(e: Enemy, dt: number): void {
+    if (e.stateT > 0) e.stateT -= dt
+    if (e.fireCd > 0) e.fireCd -= dt
     e.anim += dt * E.neul.speed
     const sp = E.neul.speed
-    // vertical homing
-    const dy = (this.player.y + this.player.h / 2) - (e.y + e.h / 2)
-    const stepY = Math.sign(dy) * Math.min(Math.abs(dy), sp * dt)
-    const ny = e.y + stepY
-    const colY = Math.floor((e.x + e.w / 2) / TILE)
-    const rowY = Math.floor((stepY > 0 ? ny + e.h : ny) / TILE)
-    const tY = this.tileAt(colY, rowY)
-    if (tY === BRICK || tY === CRACKED) { this.setTile(colY, rowY, EMPTY); this.#revealAt(colY, rowY) }
-    if (!this.rectSolid(e.x, ny, e.w, e.h)) e.y = ny
-    // slow horizontal drift toward Dana's column
-    const dx = (this.player.x + this.player.w / 2) - (e.x + e.w / 2)
-    const stepX = Math.sign(dx) * Math.min(Math.abs(dx), sp * 0.5 * dt)
-    const nx = e.x + stepX
-    const colX = Math.floor((stepX > 0 ? nx + e.w : nx) / TILE)
-    const rowX = Math.floor((e.y + e.h / 2) / TILE)
-    const tX = this.tileAt(colX, rowX)
-    if (tX === BRICK || tX === CRACKED) { this.setTile(colX, rowX, EMPTY); this.#revealAt(colX, rowX) }
-    if (!this.rectSolid(nx, e.y, e.w, e.h)) e.x = nx
+    const pcx = this.player.x + this.player.w / 2, pcy = this.player.y + this.player.h / 2
+    const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2
+    const dist = Math.hypot(pcx - ecx, pcy - ecy)
+    e.telegraph = 0
+    switch (e.state) {
+      case 'align': {
+        if (dist > NEUL_WAKE_RANGE * 1.4) { e.state = 'hover'; e.homeY = e.y; break }
+        const dy = pcy - ecy
+        const ny = e.y + Math.sign(dy) * Math.min(Math.abs(dy), sp * dt)
+        if (!this.rectSolid(e.x, ny, e.w, e.h)) e.y = ny
+        const dx = pcx - ecx
+        const nx = e.x + Math.sign(dx) * Math.min(Math.abs(dx), sp * 0.5 * dt)
+        if (!this.rectSolid(nx, e.y, e.w, e.h)) e.x = nx
+        if (Math.abs(dy) < TILE * 0.6 && Math.abs(dx) < NEUL_SWOOP_RANGE && e.fireCd <= 0) {
+          e.state = 'windup'; e.stateT = NEUL_WINDUP
+        }
+        break
+      }
+      case 'windup':
+        e.telegraph = 1 - Math.max(0, e.stateT) / NEUL_WINDUP
+        if (e.stateT <= 0) {
+          const d = Math.max(1, dist)
+          e.lockX = (pcx - ecx) / d
+          e.lockY = (pcy - ecy) / d
+          e.dir = e.lockX >= 0 ? 1 : -1
+          e.state = 'swoop'; e.stateT = NEUL_SWOOP_T
+          e.fireCd = NEUL_SWOOP_CD
+        }
+        break
+      case 'swoop': {
+        e.telegraph = 1
+        const sv = sp * NEUL_SWOOP_MULT * dt
+        const nx = e.x + e.lockX * sv
+        const ny = e.y + e.lockY * sv
+        const col = Math.floor((nx + e.w / 2 + Math.sign(e.lockX) * e.w / 2) / TILE)
+        const row = Math.floor((ny + e.h / 2 + Math.sign(e.lockY) * e.h / 2) / TILE)
+        const t = this.tileAt(col, row)
+        if (t === BRICK || t === CRACKED) {
+          this.setTile(col, row, EMPTY)
+          this.#revealAt(col, row)
+          this.smashCell = { col, row }
+          this.smashFlash = 0.14
+        }
+        if (this.rectSolid(nx, ny, e.w, e.h)) { e.state = 'rise'; e.stateT = NEUL_RISE_T; break }
+        e.x = nx; e.y = ny
+        if (e.stateT <= 0) { e.state = 'rise'; e.stateT = NEUL_RISE_T }
+        break
+      }
+      case 'rise': {
+        const ny = e.y - sp * 0.6 * dt
+        if (!this.rectSolid(e.x, ny, e.w, e.h)) e.y = ny
+        if (e.stateT <= 0) { e.state = 'hover'; e.homeY = e.y }
+        break
+      }
+      default: {   // hover
+        const ny = e.homeY + Math.sin(e.anim * 0.045) * 6
+        if (!this.rectSolid(e.x, ny, e.w, e.h)) e.y = ny
+        if (dist < NEUL_WAKE_RANGE) e.state = 'align'
+        break
+      }
+    }
   }
 
-  /** Sparkball: a relentless 2D bouncer (no gravity) that ricochets off any solid.
-   *  Doesn't expire and doesn't smash blocks — wall it off or fireball it. */
+  /** Sparkball — the clockwork hazard (fireball-only). Ricochets forever; every
+   *  SPARK_BOUNCES-th bounce it pulses (windup) then SUPERCHARGES to 1.6× for a
+   *  spell, then renormalizes to base speed EXACTLY (no float drift). */
   #stepSparkball(e: Enemy, dt: number): void {
+    if (e.stateT > 0) e.stateT -= dt
     e.anim += dt * E.sparkball.speed
+    e.telegraph = 0
+    if (e.state === 'windup') {
+      e.telegraph = 1 - Math.max(0, e.stateT) / SPARK_WINDUP
+      if (e.stateT <= 0) { e.state = 'attack'; e.stateT = SPARK_SUPER_T; this.#sparkNormalize(e, SPARK_SUPER_MULT) }
+    } else if (e.state === 'attack') {
+      e.telegraph = 1
+      if (e.stateT <= 0) { e.state = 'patrol'; e.bounces = 0; this.#sparkNormalize(e, 1) }
+    } else if (e.bounces >= SPARK_BOUNCES) {
+      e.state = 'windup'; e.stateT = SPARK_WINDUP
+    }
     const nx = e.x + e.vx * dt
-    if (this.rectSolid(nx, e.y, e.w, e.h)) e.vx = -e.vx; else e.x = nx
+    if (this.rectSolid(nx, e.y, e.w, e.h)) { e.vx = -e.vx; e.bounces += 1 } else e.x = nx
     const ny = e.y + e.vy * dt
-    if (this.rectSolid(e.x, ny, e.w, e.h)) e.vy = -e.vy; else e.y = ny
+    if (this.rectSolid(e.x, ny, e.w, e.h)) { e.vy = -e.vy; e.bounces += 1 } else e.y = ny
     e.dir = (e.vx >= 0 ? 1 : -1)
   }
 
-  /** Demonhead: mirror-spawned bouncer. Drifts with a vertical bob, reverses at
-   *  any solid, and self-expires after its ttl. */
-  #stepDemonhead(e: Enemy, dt: number): void {
-    e.anim += dt * E.demonhead.speed
-    if (e.ttl > 0) { e.ttl -= dt; if (e.ttl <= 0) { this.#killEnemy(e, false); return } }
-    const nx = e.x + e.dir * E.demonhead.speed * dt
-    const col = Math.floor((e.dir > 0 ? nx + e.w : nx) / TILE)
-    const row = Math.floor((e.y + e.h / 2) / TILE)
-    if (this.solidAt(col, row)) e.dir = -e.dir as 1 | -1
-    else e.x = nx
-    e.y += Math.sin(e.anim * 0.06) * 14 * dt
+  #sparkNormalize(e: Enemy, mult: number): void {
+    const base = E.sparkball.speed
+    e.vx = Math.sign(e.vx || 1) * base * mult
+    e.vy = Math.sign(e.vy || 1) * base * 0.6 * mult
   }
 
-  /** Panel Monster: a fixed turret embedded in the wall. */
+  /** Demonhead — the swarm that lunges. Drifts with the classic bob, then slows
+   *  (windup) and DARTS along a locked vector at Dana. Expiry scores nothing. */
+  #stepDemonhead(e: Enemy, dt: number): void {
+    if (e.stateT > 0) e.stateT -= dt
+    e.anim += dt * E.demonhead.speed
+    if (e.ttl > 0) { e.ttl -= dt; if (e.ttl <= 0) { this.#killEnemy(e, 'expire'); return } }
+    e.telegraph = 0
+    switch (e.state) {
+      case 'windup': {
+        e.telegraph = 1 - Math.max(0, e.stateT) / DHEAD_WINDUP
+        const nx = e.x + e.dir * E.demonhead.speed * 0.4 * dt
+        if (!this.rectSolid(nx, e.y, e.w, e.h)) e.x = nx
+        if (e.stateT <= 0) {
+          const pcx = this.player.x + this.player.w / 2, pcy = this.player.y + this.player.h / 2
+          const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2
+          const d = Math.max(1, Math.hypot(pcx - ecx, pcy - ecy))
+          e.lockX = (pcx - ecx) / d
+          e.lockY = (pcy - ecy) / d
+          e.dir = e.lockX >= 0 ? 1 : -1
+          e.state = 'dart'; e.stateT = DHEAD_DART_T
+        }
+        break
+      }
+      case 'dart': {
+        e.telegraph = 1
+        const sv = E.demonhead.speed * DHEAD_DART_MULT * dt
+        const nx = e.x + e.lockX * sv, ny = e.y + e.lockY * sv
+        if (this.rectSolid(nx, ny, e.w, e.h)) { e.state = 'drift'; e.stateT = DHEAD_DRIFT_T; break }
+        e.x = nx; e.y = ny
+        if (e.stateT <= 0) { e.state = 'drift'; e.stateT = DHEAD_DRIFT_T }
+        break
+      }
+      default: {   // drift
+        const nx = e.x + e.dir * E.demonhead.speed * dt
+        const col = Math.floor((e.dir > 0 ? nx + e.w : nx) / TILE)
+        const row = Math.floor((e.y + e.h / 2) / TILE)
+        if (this.solidAt(col, row)) e.dir = -e.dir as 1 | -1
+        else e.x = nx
+        e.y += Math.sin(e.anim * 0.06) * 14 * dt
+        if (e.stateT <= 0) { e.state = 'windup'; e.stateT = DHEAD_WINDUP }
+        break
+      }
+    }
+  }
+
+  /** Panel Monster — the fair turret (invulnerable). Same firing period as ever,
+   *  but the maw now visibly opens for PANEL_WINDUP before each shot. */
   #stepPanel(e: Enemy, dt: number): void {
+    if (e.state === 'windup') {
+      e.stateT -= dt
+      e.telegraph = 1 - Math.max(0, e.stateT) / PANEL_WINDUP
+      if (e.stateT <= 0) {
+        this.#fireShot(e.dir > 0 ? e.x + e.w : e.x, e.y + e.h * 0.45, e.dir)
+        e.state = 'patrol'
+        e.fireCd = PANEL_FIRE_CD
+        e.telegraph = 0
+      }
+      return
+    }
+    e.telegraph = 0
     if (e.fireCd > 0) { e.fireCd -= dt; return }
-    e.fireCd = PANEL_FIRE_CD
-    this.#fireShot(e.dir > 0 ? e.x + e.w : e.x, e.y + e.h * 0.45, e.dir)
+    e.state = 'windup'; e.stateT = PANEL_WINDUP
   }
 
   #stepMirrors(dt: number): void {
     for (const m of this.mirrors) {
       m.cd -= dt
+      m.telegraph = Math.max(0, Math.min(1, 1 - m.cd / MIRROR_TELEGRAPH))
       if (m.cd > 0) continue
       m.cd = MIRROR_INTERVAL
+      m.telegraph = 0
       const live = this.enemies.filter(e => e.alive && e.kind === m.kind).length
       if (live >= MIRROR_CAP) continue
-      const dir: 1 | -1 = m.col < this.cols / 2 ? 1 : -1
+      const base: 1 | -1 = m.col < this.cols / 2 ? 1 : -1
+      const dir: 1 | -1 = m.count % 2 === 0 ? base : (base === 1 ? -1 : 1)
+      m.count += 1
       this.enemies.push(this.#makeEnemy(m.kind, m.col, m.row, dir))
+      this.spawnFlash += 1
+      this.spawnCell = { col: m.col, row: m.row }
     }
   }
 
@@ -782,18 +1287,26 @@ export class Engine {
     }
   }
 
-  #killEnemy(e: Enemy, crushed: boolean): void {
+  #killEnemy(e: Enemy, cause: KillCause): void {
     if (!e.alive) return
     e.alive = false
-    e.squash = crushed ? 0.4 : 0.3
-    this.score += E[e.kind].score
+    e.squash = cause === 'crush' ? 0.4 : 0.3
+    if (cause !== 'expire') this.score += E[e.kind].score   // a timed-out demonhead earns nothing
+    this.killFlash += 1
+    this.killCell = { col: Math.floor((e.x + e.w / 2) / TILE), row: Math.floor((e.y + e.h / 2) / TILE) }
+    this.killCause = cause
   }
 
   // ── items, fairies, the door ─────────────────────────────
 
   #revealAt(col: number, row: number): void {
     for (const it of this.items) {
-      if (!it.taken && it.hidden && it.col === col && it.row === row) { it.hidden = false; it.reveal = 0.4 }
+      if (!it.taken && it.hidden && it.col === col && it.row === row) {
+        it.hidden = false
+        it.reveal = 0.4
+        this.revealFlash += 1
+        this.revealCell = { col, row }
+      }
     }
   }
 
@@ -811,7 +1324,8 @@ export class Engine {
   #collectibles(): void {
     const p = this.player
     for (const it of this.items) {
-      if (it.taken || it.hidden) { if (it.reveal > 0) it.reveal = Math.max(0, it.reveal - 0.016); continue }
+      if (it.reveal > 0) it.reveal = Math.max(0, it.reveal - 0.016)   // the reveal pop always plays out
+      if (it.taken || it.hidden) continue
       if (this.rectOverlapsCell(p, it.col, it.row)) this.#takeItem(it)
     }
     for (const f of this.fairies) {

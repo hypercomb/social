@@ -99,17 +99,20 @@ type CommitDelta =
   // tile's history (delete never touches the child's bag).
   | { kind: 'name'; slot: 'children'; op: 'add' | 'remove'; cell: string; revive?: boolean }
   // deltas: N surgical sig-space edits against ONE slot in ONE commit —
-  // the sig-native cut/copy/paste primitive. Unlike 'set'/'layer' this
-  // never re-lists the slot, so a cold sibling can't be wiped and no
+  // the sig-native cut/copy/paste/move primitive. Unlike 'set'/'layer'
+  // this never re-lists the slot, so a cold sibling can't be wiped and no
   // name→sig re-resolution (with its husk auto-mint) ever runs. Each
   // remove matches by sig against the hydrated head; a miss falls back
   // to `label` (per-page staleness can leave the caller's view of a sig
-  // behind the head's).
+  // behind the head's). `swaps` re-points an existing entry IN PLACE
+  // (order preserved) — a move commits the gaining node first, then folds
+  // its new sig into the losing parent's same marker for free.
   | {
       kind: 'deltas'
       slot: string
       removes?: readonly { sig?: string; label?: string }[]
       appends?: readonly string[]
+      swaps?: readonly { from: string; to: string }[]
     }
   // layer: the layer-as-primitive update. The caller passes the full new
   // layer state — `{ name, ...slots }` where each slot value is an array
@@ -492,27 +495,51 @@ export class LayerCommitter {
   }
 
   /**
-   * The sig-native cut/copy/paste commit: N surgical children edits in
-   * ONE marker at `segments`. Cut = removes (the detached child's bytes,
-   * markers and bag all survive — nothing is ever deleted, the new head
-   * merely stops listing it). Paste = appends (the sig IS the collection;
-   * the subtree needs no re-commit because its bytes are pool-addressed
-   * and position-independent). No name re-resolution, no re-listing —
-   * cold siblings ride through verbatim.
+   * The sig-native cut/copy/paste/move commit: N surgical children edits
+   * in ONE marker at `segments`. Cut = removes (the detached child's
+   * bytes, markers and bag all survive — nothing is ever deleted, the new
+   * head merely stops listing it). Paste = appends (the sig IS the
+   * collection; the subtree needs no re-commit because its bytes are
+   * pool-addressed and position-independent). Move = the gaining node
+   * commits first, then the losing parent's marker carries `removes` plus
+   * a `swap` of the gaining node's now-stale sig. No name re-resolution,
+   * no re-listing — cold siblings ride through verbatim.
+   *
+   * Returns the location's new head sig, so a caller can fold it into its
+   * parent's delta (the move ordering above).
    */
-  public commitChildrenDeltas(
+  public async commitChildrenDeltas(
     segments: readonly string[],
-    changes: { removes?: readonly { sig?: string; label?: string }[]; appends?: readonly string[] },
-  ): Promise<void> {
-    return this.#machine.requestAndWait({
-      segments: this.#cleanSegments(segments),
+    changes: {
+      removes?: readonly { sig?: string; label?: string }[]
+      appends?: readonly string[]
+      swaps?: readonly { from: string; to: string }[]
+    },
+  ): Promise<string> {
+    const cleaned = this.#cleanSegments(segments) ?? segmentsAtIntent()
+    if (cleaned === null) {
+      console.error('[LayerCommitter] children deltas refused — no address resolvable')
+      return ''
+    }
+    await this.#machine.requestAndWait({
+      segments: cleaned,
       delta: {
         kind: 'deltas',
         slot: 'children',
         removes: changes.removes?.slice(),
         appends: changes.appends?.slice(),
+        swaps: changes.swaps?.slice(),
       },
     })
+    const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
+    const lineageInst = get<Lineage>('@hypercomb.social/Lineage')
+    if (!history || !lineageInst) return ''
+    const name = cleaned.length === 0 ? ROOT_NAME : cleaned[cleaned.length - 1]
+    const locSig = await history.sign({
+      domain: lineageInst.domain,
+      explorerSegments: () => cleaned,
+    } as Lineage)
+    return history.latestMarkerSigFor(locSig, name)
   }
 
   /**
@@ -1019,6 +1046,14 @@ export class LayerCommitter {
         } else if (d.kind === 'set') {
           machine.apply({ slot: d.slot, op: 'set', sigs: d.sigs })
         } else if (d.kind === 'deltas') {
+          // Swaps FIRST: a move's losing parent re-points the gaining
+          // node's stale sig in place, and the removes below must run
+          // against the settled list.
+          for (const s of d.swaps ?? []) {
+            if (typeof s?.from === 'string' && typeof s?.to === 'string' && s.from !== s.to) {
+              machine.apply({ slot: d.slot, op: 'swap', from: s.from, to: s.to })
+            }
+          }
           for (const r of d.removes ?? []) {
             let hit = false
             if (r.sig) hit = machine.apply({ slot: d.slot, op: 'removeSig', sig: r.sig }).changed
@@ -1146,6 +1181,12 @@ export class LayerCommitter {
       // Targeted reconcile for 'deltas' on children: the delta names the
       // exact sigs that changed, so resolve names for THOSE only —
       // O(delta) reads, never the O(prev + new) full re-read below.
+      //
+      // Reconciliation is in NAME space (subscribers are name-keyed), so
+      // the sig diff is folded to names first: a SWAP re-points the same
+      // tile to a new sig, yielding an added+removed pair for ONE name —
+      // that is a cascade, not membership churn, and must emit nothing
+      // (an emit pair would unmount then remount a live tile).
       if (req.delta?.kind === 'deltas' && req.delta.slot === 'children') {
         try {
           const prevSet = new Set(
@@ -1155,14 +1196,20 @@ export class LayerCommitter {
           const changed: { sig: string; dir: 'added' | 'removed' }[] = []
           for (const s of newSet) if (!prevSet.has(s)) changed.push({ sig: s, dir: 'added' })
           for (const s of prevSet) if (!newSet.has(s)) changed.push({ sig: s, dir: 'removed' })
-          await Promise.all(changed.map(async ({ sig, dir }) => {
+          const named = await Promise.all(changed.map(async ({ sig, dir }) => {
             const layer = await history.getLayerBySig(sig)
-            const cell = layer?.name
-            if (!cell) return
-            EffectBus.emit(dir === 'added' ? 'cell:added' : 'cell:removed', {
-              cell, segments: sub, fromCascade: true,
-            })
+            return { cell: layer?.name ?? '', dir }
           }))
+          const addedNames = new Set(named.filter(n => n.dir === 'added' && n.cell).map(n => n.cell))
+          const removedNames = new Set(named.filter(n => n.dir === 'removed' && n.cell).map(n => n.cell))
+          for (const cell of addedNames) {
+            if (removedNames.has(cell)) continue  // sig swap of a live tile
+            EffectBus.emit('cell:added', { cell, segments: sub, fromCascade: true })
+          }
+          for (const cell of removedNames) {
+            if (addedNames.has(cell)) continue
+            EffectBus.emit('cell:removed', { cell, segments: sub, fromCascade: true })
+          }
         } catch (err) {
           console.warn('[LayerCommitter] deltas reconcile failed:', err)
         }

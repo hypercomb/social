@@ -10,19 +10,34 @@
 // the shell (a stray key can otherwise flip the app into website/view mode).
 
 import { Engine, TILE, type LevelDef } from './engine.js'
-import { Renderer } from './renderer.js'
+import { Renderer, themeFor, THEME_NAMES } from './renderer.js'
 import { Designer, TOOLS, type Tool } from './designer.js'
-import { BUILTIN_LEVELS, loadCustomLevels, upsertCustomLevel, deleteCustomLevel, cloneLevel } from './levels.js'
+import { BUILTIN_LEVELS, DIAMOND_ROOM, loadCustomLevels, upsertCustomLevel, deleteCustomLevel, cloneLevel } from './levels.js'
 import { Shaker, easeOutBack, ARCADE } from '../juice.js'
 
 const STYLE_ID = 'bub-overlay-styles'
 const Z = 2147483000
+
+// High score — participant-local UI data (localStorage, same class as the
+// custom-level store; never layer state).
+const HISCORE_KEY = 'hc:bubble-hiscore'
 
 // On-screen zoom. The canvas auto-fits the level to the stage, so the tile size
 // is invisible (it cancels in the fit) — THIS is the real lever for how big the
 // whole game (player + bubbles + platforms, together) renders. < 1 zooms out:
 // everything daintier, sitting on more of the dark backdrop. 1 = fill the stage.
 const ZOOM = 0.8
+
+// DESIGNER zoom. Play auto-fits the whole screen; the designer must not, because
+// the geometry grid is a 15px brick — fitting a 40×26 room to the stage paints
+// each cell at ~12 CSS px, which is far too small to click accurately. These are
+// multipliers ON the fit scale, so ×1 is "show me the whole room" and anything
+// above it trades overview for a cell you can actually hit. The stage scrolls
+// once the grid outgrows it.
+const DESIGN_ZOOMS = [1, 2, 3, 4] as const
+const DESIGN_ZOOM_DEFAULT = 2
+const PHYSICS_STEP = 1 / 120
+const MAX_PHYSICS_STEPS = 8
 
 // Keys that drive PLAY. Movement + K (jump) + J (blow a bubble) + R (restart).
 // Up no longer jumps — jump is K. (All keys are isolated anyway; this set only
@@ -41,6 +56,7 @@ type Mode = 'play' | 'design'
 const TALLY_MS = 1.7          // how long the score add-up reads
 const PAN_MS = 0.85           // how long the next level takes to slide in
 const PERFECT_BONUS = 1000    // awarded when a level is cleared without dying
+const BONUS_EVERY = 5         // clear this many rounds → the DIAMOND ROOM drops in
 
 /** One in-flight level-clear transition: first 'tally' (count the score up),
  *  then 'pan' (slide the cleared level off the top while the next rises from
@@ -54,6 +70,8 @@ interface Transition {
   nextLevel: LevelDef     // the level rising in
   nextIndex: number       // its index in #levels (for the toolbar label)
   testing: boolean        // cleared a designer test (re-pans the same level)
+  warp: number            // rounds skipped by an umbrella (0 = a normal clear)
+  intoBonus: boolean      // the level rising in is the DIAMOND ROOM
   prev: Engine            // the cleared engine — drawn scrolling out during 'pan'
 }
 
@@ -75,6 +93,9 @@ export class BubbleOverlay {
   #designBar: HTMLDivElement | null = null
   #nameInput: HTMLInputElement | null = null
   #loadSelect: HTMLSelectElement | null = null
+  #themeSelect: HTMLSelectElement | null = null
+  #zoomSelect: HTMLSelectElement | null = null
+  #designZoom: number = DESIGN_ZOOM_DEFAULT
   #toolButtons = new Map<Tool, HTMLButtonElement>()
 
   #mode: Mode = 'play'
@@ -86,6 +107,7 @@ export class BubbleOverlay {
 
   #raf = 0
   #lastTs = 0
+  #physicsTime = 0
   #time = 0
   #scaleBack = 1
   #overShown = false
@@ -106,6 +128,13 @@ export class BubbleOverlay {
   #levelStartScore = 0
   #levelStartLives = 3
   #testing = false   // playing a designer test (not part of the level list)
+  // In a DIAMOND ROOM, #levelIndex already points at the round we resume on —
+  // the bonus screen isn't in #levels, it's something that happens between.
+  #inBonus = false
+
+  // High score: tracked live, persisted on clear / game over / unmount.
+  #hiscore = 0
+  #hiscoreDirty = false
 
   // designer pointer-paint state
   #painting = false
@@ -128,6 +157,7 @@ export class BubbleOverlay {
   mount(): void {
     if (this.#root) return
     this.#injectStyles()
+    this.#hiscore = this.#loadHiscore()
     this.#refreshLevels()
     ;(document.activeElement as HTMLElement | null)?.blur?.()
     this.#build()
@@ -147,12 +177,14 @@ export class BubbleOverlay {
     this.#ro = new ResizeObserver(() => this.#fit())
     if (this.#stage) this.#ro.observe(this.#stage)
     this.#lastTs = 0
+    this.#physicsTime = 0
     this.#raf = requestAnimationFrame(this.#loop)
   }
 
   unmount(): void {
     if (this.#raf) cancelAnimationFrame(this.#raf)
     this.#raf = 0
+    this.#saveHiscore()
     window.removeEventListener('keydown', this.#onKeyDown, true)
     window.removeEventListener('keyup', this.#onKeyUp, true)
     window.removeEventListener('resize', this.#fit)
@@ -214,6 +246,23 @@ export class BubbleOverlay {
     nameInput.value = this.#designer.level.name
     designBar.appendChild(nameInput)
     this.#nameInput = nameInput
+    // world picker — repaints the editor live so you author in the real skin
+    const themeSel = el('select', { class: 'bub-select', title: 'World — palette, masonry + backdrop' }) as HTMLSelectElement
+    THEME_NAMES.forEach((n, i) => themeSel.appendChild(opt(String(i), n)))
+    themeSel.onchange = () => {
+      const i = Number(themeSel.value)
+      this.#designer.setTheme(i)
+      this.#flash(`world: ${THEME_NAMES[i]}`)
+    }
+    designBar.appendChild(themeSel)
+    this.#themeSelect = themeSel
+    // zoom — the grid is a 15px brick, so this is what makes a cell clickable
+    const zoomSel = el('select', { class: 'bub-select bub-zoom', title: 'Zoom — the grid is a fine 15px brick; zoom in to place it precisely' }) as HTMLSelectElement
+    for (const z of DESIGN_ZOOMS) zoomSel.appendChild(opt(String(z), z === 1 ? 'Fit' : `Zoom ×${z}`))
+    zoomSel.value = String(this.#designZoom)
+    zoomSel.onchange = () => { this.#designZoom = Number(zoomSel.value); this.#fit() }
+    designBar.appendChild(zoomSel)
+    this.#zoomSelect = zoomSel
     const mkBtn = (txt: string, fn: () => void) => { const b = el('button', { class: 'bub-btn', text: txt }) as HTMLButtonElement; b.onclick = fn; return b }
     designBar.appendChild(mkBtn('New', () => this.#designerNew()))
     designBar.appendChild(mkBtn('Save', () => this.#designerSave()))
@@ -249,7 +298,7 @@ export class BubbleOverlay {
     this.#banner = banner
 
     const help = el('div', { class: 'bub-help' })
-    help.innerHTML = '<b>← →</b> move &nbsp;·&nbsp; <b>K</b> jump &nbsp;·&nbsp; <b>J</b> blow a bubble &nbsp;·&nbsp; trap a foe in a bubble, then <i>bump it to pop it</i> — it bursts into fruit you grab for points &nbsp;·&nbsp; jump <i>up through</i> the platforms &amp; ride empty bubbles upward &nbsp;·&nbsp; pop foes in quick succession to <i>chain</i> them for bigger fruit &nbsp;·&nbsp; the cast: <span style="color:#4aa3ff">Zen-Chan</span>, <span style="color:#ff8a3d">Mighta</span>, <span style="color:#6fe06a">Banebou</span> &amp; the flying <span style="color:#ff9ad5">Monsta</span> &nbsp;·&nbsp; clear every foe to advance — but dawdle and they turn <span style="color:#ff5a5a">angry</span> &nbsp;·&nbsp; grab dropped sweets: 👟 <span style="color:#4aa3ff">shoes</span> (run faster) · 🍬 <span style="color:#ff5d8f">candy</span> (blow faster) — until you lose a life &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> close'
+    help.innerHTML = '<b>← →</b> move &nbsp;·&nbsp; <b>K</b> jump &nbsp;·&nbsp; <b>J</b> blow a bubble &nbsp;·&nbsp; AIM your shots — a bubble only traps a foe <i>while it still has momentum</i>, then it floats up and gathers under the ceiling &nbsp;·&nbsp; <i>touch a bubble to pop it</i> — pops <i>cascade</i> through the whole touching cluster, so trapped foes burst together into bouncing fruit &nbsp;·&nbsp; jump <i>up through</i> the platforms island to island; <b>hold K</b> on a bubble’s crown to bounce and ride the foam up the tall shafts &nbsp;·&nbsp; a <span style="color:#ff5a5a">red-flashing</span> bubble is about to burst — its foe escapes angry &nbsp;·&nbsp; pop the drifting elementals: 💧 <span style="color:#6fc0ff">water</span> floods the platforms, ⚡ <span style="color:#ffe27a">lightning</span> fires <i>opposite the way you face</i> &nbsp;·&nbsp; the cast: <span style="color:#4aa3ff">Zen-Chan</span>, <span style="color:#ff8a3d">Mighta</span> (dodge his boulders!), <span style="color:#6fe06a">Banebou</span> &amp; the flying <span style="color:#ff9ad5">Monsta</span> &nbsp;·&nbsp; sweets: 👟 <span style="color:#4aa3ff">shoes</span> (run faster) · 🍬 <span style="color:#ff5d8f">candy</span> (blow faster) &nbsp;·&nbsp; grab an <b>umbrella</b> to <i>warp ahead</i>: <span style="color:#4aa3ff">blue</span> 3 · <span style="color:#ff4d5e">red</span> 5 · <span style="color:#ff7ad5">pink</span> 7 rounds — chain your pops to earn the better ones &nbsp;·&nbsp; every 5 rounds the <span style="color:#7fdcff">◆ Diamond Room</span> drops in: no foes, sweep every gem before the clock dies &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> close'
     root.appendChild(help)
 
     document.body.appendChild(root)
@@ -269,6 +318,8 @@ export class BubbleOverlay {
     tabs?.forEach((t, i) => t.classList.toggle('on', (i === 0) === (mode === 'play')))
     this.#playBar?.classList.toggle('bub-hidden', mode !== 'play')
     this.#designBar?.classList.toggle('bub-hidden', mode !== 'design')
+    // a zoomed-in grid overflows the stage — let it scroll while designing
+    this.#stage?.classList.toggle('bub-design', mode === 'design')
     this.#hideBanner()
     if (mode === 'play') this.#startPlay(this.#levels[this.#levelIndex])
     else { this.#fit(); this.#updateToolButtons() }
@@ -292,6 +343,7 @@ export class BubbleOverlay {
     this.#engine = new Engine(cloneLevel(level))
     // Fresh run from this level: score back to 0, full lives, no carry-over.
     this.#testing = false
+    this.#inBonus = false
     this.#transition = null
     this.#overShown = false
     this.#levelStartScore = this.#engine.score
@@ -300,7 +352,14 @@ export class BubbleOverlay {
     this.#hideBanner()
     this.#fit()
     this.#updateLevelLabel(level.name, false)
-    this.#beginIntro(level.name, 'LEVEL ' + (this.#levelIndex + 1))
+    this.#beginIntro(level.name, this.#introSub(level))
+  }
+
+  /** The intro card's subtitle: the world this round belongs to, then its
+   *  number — the worlds run in themed sets, so name the one you're entering. */
+  #introSub(level: LevelDef): string {
+    if (level.bonus) return 'GRAB THE TREASURE!'
+    return `${themeFor(level).name.toUpperCase()}  ·  LEVEL ${this.#levelIndex + 1}`
   }
 
   // The toolbar level caption: "Name (n/total)" in play, "Name (test)" while
@@ -309,7 +368,9 @@ export class BubbleOverlay {
     if (!this.#levelLabel) return
     this.#levelLabel.textContent = testing
       ? `${name}  (test)`
-      : `${name}  (${this.#levelIndex + 1}/${this.#levels.length})`
+      : this.#inBonus
+        ? `${name}  (bonus)`
+        : `${name}  (${this.#levelIndex + 1}/${this.#levels.length})`
   }
 
   /** World pixel size of whatever the canvas is currently showing. */
@@ -327,10 +388,11 @@ export class BubbleOverlay {
     const availW = s.clientWidth - 28
     const availH = s.clientHeight - 28
     if (availW <= 0 || availH <= 0) return
-    // Zoom-out is a PLAY aesthetic only — the designer fills the stage at full
-    // size so cells stay big enough to edit precisely.
-    const zoom = this.#mode === 'play' ? ZOOM : 1
-    const cssScale = Math.min(availW / dims.w, availH / dims.h) * zoom
+    // Play zooms OUT a touch for the aesthetic; the designer zooms IN, because
+    // fitting the fine 15px brick grid to the stage leaves a cell far too small
+    // to click. Both are multipliers on the fit scale.
+    const fit = Math.min(availW / dims.w, availH / dims.h)
+    const cssScale = this.#mode === 'play' ? fit * ZOOM : fit * this.#designZoom
     const dispW = dims.w * cssScale, dispH = dims.h * cssScale
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
     c.width = Math.round(dispW * dpr)
@@ -346,7 +408,7 @@ export class BubbleOverlay {
   #loop = (ts: number): void => {
     if (!this.#root) return
     if (!this.#lastTs) this.#lastTs = ts
-    const dt = Math.min((ts - this.#lastTs) / 1000, 1 / 30)
+    const dt = Math.min((ts - this.#lastTs) / 1000, PHYSICS_STEP * MAX_PHYSICS_STEPS)
     this.#lastTs = ts
     this.#time += dt
 
@@ -367,12 +429,20 @@ export class BubbleOverlay {
           this.#stepTransition(dt)
           this.#drawTransition(ctx, r, dims)
         } else {
-          this.#engine.update(dt)
+          this.#physicsTime = Math.min(
+            this.#physicsTime + dt,
+            PHYSICS_STEP * MAX_PHYSICS_STEPS,
+          )
+          while (this.#physicsTime >= PHYSICS_STEP) {
+            this.#engine.update(PHYSICS_STEP)
+            this.#physicsTime -= PHYSICS_STEP
+          }
           this.#senseJuice()
-          r.draw(this.#engine, this.#time)
+          if (this.#engine.score > this.#hiscore) { this.#hiscore = this.#engine.score; this.#hiscoreDirty = true }
+          r.draw(this.#engine, this.#time, this.#hiscore)
           this.#drawIntro(ctx, dims, dt)
           if (this.#engine.state === 'won') this.#beginClear()
-          else if (this.#engine.state === 'gameover' && !this.#overShown) { this.#overShown = true; this.#showGameOver() }
+          else if (this.#engine.state === 'gameover' && !this.#overShown) { this.#overShown = true; this.#saveHiscore(); this.#showGameOver() }
         }
       } else if (this.#mode === 'design') {
         r.drawEditor(this.#designer.level, this.#hover, this.#time)
@@ -451,7 +521,9 @@ export class BubbleOverlay {
     switch (e.key) {
       case 'ArrowLeft': case 'a': case 'A': eng.input.left = true; break
       case 'ArrowRight': case 'd': case 'D': eng.input.right = true; break
-      case 'k': case 'K': if (!e.repeat) eng.jump(); break        // K = jump
+      // K = jump. The impulse is edge-triggered; the HELD state is what lets
+      // Bub bounce off bubble crowns instead of popping them (the arcade move).
+      case 'k': case 'K': eng.input.jump = true; if (!e.repeat) eng.jump(); break
       case 'j': case 'J': if (!e.repeat) eng.blow(); break        // J = blow a bubble
       case 'r': case 'R': this.#startPlay(this.#levels[this.#levelIndex]); break
     }
@@ -466,6 +538,7 @@ export class BubbleOverlay {
     switch (e.key) {
       case 'ArrowLeft': case 'a': case 'A': eng.input.left = false; break
       case 'ArrowRight': case 'd': case 'D': eng.input.right = false; break
+      case 'k': case 'K': eng.input.jump = false; break
     }
   }
 
@@ -488,7 +561,9 @@ export class BubbleOverlay {
     this.#painting = true
     this.#lastCell = { col: -1, row: -1 }
     this.#paintAt(cell)
-    this.#canvas?.setPointerCapture?.(e.pointerId)
+    // Capture keeps a stroke alive past the canvas edge. It throws if the
+    // pointer is already gone by the time we ask — never let that abort a paint.
+    try { this.#canvas?.setPointerCapture?.(e.pointerId) } catch { /* pointer already released */ }
   }
 
   #onPointerMove = (e: PointerEvent): void => {
@@ -517,8 +592,14 @@ export class BubbleOverlay {
   #designerNew(): void {
     this.#designer.newLevel('My Level')
     if (this.#nameInput) this.#nameInput.value = this.#designer.level.name
+    this.#syncThemeSelect()
     this.#fit()
     this.#flash('new blank level')
+  }
+
+  /** Point the world picker at whatever level the designer now holds. */
+  #syncThemeSelect(): void {
+    if (this.#themeSelect) this.#themeSelect.value = String(this.#designer.level.theme ?? 0)
   }
 
   #designerSave(): void {
@@ -539,6 +620,7 @@ export class BubbleOverlay {
     this.#mode = 'play'
     this.#playBar?.classList.remove('bub-hidden')
     this.#designBar?.classList.add('bub-hidden')
+    this.#stage?.classList.remove('bub-design')   // playtests never scroll
     const tabs = this.#root?.querySelectorAll('.bub-tab')
     tabs?.forEach((t, i) => t.classList.toggle('on', i === 0))
     this.#engine = new Engine(cloneLevel(this.#designer.level))
@@ -561,6 +643,7 @@ export class BubbleOverlay {
     if (!lvl) return
     this.#designer.setLevel(lvl)
     if (this.#nameInput) this.#nameInput.value = lvl.name
+    this.#syncThemeSelect()
     this.#fit()
     this.#flash(`editing “${name}”`)
   }
@@ -586,6 +669,7 @@ export class BubbleOverlay {
     if (!text) return
     if (this.#designer.importJson(text)) {
       if (this.#nameInput) this.#nameInput.value = this.#designer.level.name
+      this.#syncThemeSelect()
       this.#fit()
       this.#flash('level imported')
     } else this.#flash('import failed — invalid JSON')
@@ -613,20 +697,61 @@ export class BubbleOverlay {
     if (!eng || this.#transition) return
     const levelScore = Math.max(0, eng.score - this.#levelStartScore)
     // lives only ever fall within a level, so "same as we started" ⇒ no deaths.
-    const bonus = eng.lives >= this.#levelStartLives ? PERFECT_BONUS : 0
+    // But a diamond room has nothing that can kill you, and an umbrella cuts the
+    // round short rather than clearing it — neither earns the perfect bonus.
+    const perfect = !this.#inBonus && eng.warp === 0 && eng.lives >= this.#levelStartLives
+    const bonus = perfect ? PERFECT_BONUS : 0
 
     const count = Math.max(1, this.#levels.length)
-    const nextIndex = this.#testing ? this.#levelIndex : (this.#levelIndex + 1) % count
-    const nextLevel = this.#testing
-      ? this.#designer.level
-      : (this.#levels[nextIndex] ?? eng.level)
+    // Where a cleared round hands off to, in priority order: a designer test
+    // re-runs itself; leaving a diamond room resumes the round it interrupted;
+    // an umbrella skips ahead; otherwise every BONUS_EVERY rounds the diamond
+    // room drops in, and failing all that we simply advance.
+    let nextIndex: number
+    let nextLevel: LevelDef
+    let intoBonus = false
+    if (this.#testing) {
+      nextIndex = this.#levelIndex
+      nextLevel = this.#designer.level
+    } else if (this.#inBonus) {
+      nextIndex = this.#levelIndex           // already points at the resume round
+      nextLevel = this.#levels[nextIndex] ?? eng.level
+    } else if (eng.warp > 0) {
+      nextIndex = (this.#levelIndex + eng.warp) % count
+      nextLevel = this.#levels[nextIndex] ?? eng.level
+    } else {
+      nextIndex = (this.#levelIndex + 1) % count
+      if ((this.#levelIndex + 1) % BONUS_EVERY === 0) {
+        intoBonus = true
+        nextLevel = cloneLevel(DIAMOND_ROOM)  // nextIndex stays the resume round
+      } else {
+        nextLevel = this.#levels[nextIndex] ?? eng.level
+      }
+    }
 
     this.#transition = {
       phase: 'tally', t: 0,
       levelScore, bonus, baseScore: this.#levelStartScore,
-      nextLevel, nextIndex, testing: this.#testing, prev: eng,
+      nextLevel, nextIndex, testing: this.#testing,
+      warp: eng.warp, intoBonus, prev: eng,
     }
+    this.#saveHiscore()
     this.#hideBanner()
+  }
+
+  // ── high score (participant-local) ───────────────────────
+
+  #loadHiscore(): number {
+    try {
+      const n = parseInt(localStorage.getItem(HISCORE_KEY) ?? '0', 10)
+      return Number.isFinite(n) && n > 0 ? n : 0
+    } catch { return 0 }
+  }
+
+  #saveHiscore(): void {
+    if (!this.#hiscoreDirty) return
+    this.#hiscoreDirty = false
+    try { localStorage.setItem(HISCORE_KEY, String(this.#hiscore)) } catch { /* quota / disabled */ }
   }
 
   /** Advance the active transition: count the tally, then build + scroll in the
@@ -639,11 +764,14 @@ export class BubbleOverlay {
       if (tr.t < TALLY_MS) return
       const carriedScore = tr.baseScore + tr.levelScore + tr.bonus
       const e = new Engine(cloneLevel(tr.nextLevel))
-      e.score = carriedScore
       e.lives = tr.prev.lives
+      // seed (not assign) so a clear bonus crossing an extra-life threshold
+      // between screens still awards the 1UP
+      e.seedScore(carriedScore, tr.prev.score)
       e.carryLifePowersFrom(tr.prev)   // sweets (shoes / candy) persist across screens, lost only on death
       this.#engine = e
       this.#levelIndex = tr.nextIndex
+      this.#inBonus = tr.intoBonus   // set before the label reads it
       this.#levelStartScore = e.score
       this.#levelStartLives = e.lives
       this.#syncJuice(e)
@@ -653,7 +781,8 @@ export class BubbleOverlay {
       tr.t = 0
     } else if (tr.t >= PAN_MS) {
       this.#transition = null   // hand control back — play resumes on the new level
-      this.#beginIntro(this.#engine?.level.name ?? '', 'LEVEL ' + (this.#levelIndex + 1))
+      const lvl = this.#engine?.level
+      this.#beginIntro(lvl?.name ?? '', lvl ? this.#introSub(lvl) : '')
     }
   }
 
@@ -663,7 +792,7 @@ export class BubbleOverlay {
     const tr = this.#transition
     if (!tr) return
     if (tr.phase === 'tally') {
-      r.draw(tr.prev, this.#time)
+      r.draw(tr.prev, this.#time, this.#hiscore)
       this.#drawTally(ctx, dims, tr)
     } else {
       // Pan: the outgoing level scrolls up and off while the next rises from
@@ -688,7 +817,7 @@ export class BubbleOverlay {
     const ox = (cw - eng.width * scale) / 2
     const oy = (chh - eng.height * scale) / 2 + dyDevice
     ctx.setTransform(scale, 0, 0, scale, ox, oy)
-    r.draw(eng, this.#time)
+    r.draw(eng, this.#time, this.#hiscore)
   }
 
   /** The score add-up overlay: level gain counts up first, then any perfect
@@ -713,9 +842,16 @@ export class BubbleOverlay {
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
 
-    ctx.fillStyle = '#7ee0ff'
+    ctx.fillStyle = tr.warp > 0 ? '#ff9ad5' : '#7ee0ff'
     ctx.font = font(h * 0.10, 800)
-    ctx.fillText('LEVEL CLEAR', cx, h * 0.30)
+    ctx.fillText(tr.warp > 0 ? 'WARP!' : 'LEVEL CLEAR', cx, h * 0.30)
+
+    // what's coming: an umbrella's skip, or the diamond room dropping in
+    if (tr.warp > 0 || tr.intoBonus) {
+      ctx.fillStyle = '#ffd76a'
+      ctx.font = font(h * 0.045, 700)
+      ctx.fillText(tr.warp > 0 ? `SKIP ${tr.warp} ROUNDS` : '◆  DIAMOND ROOM  ◆', cx, h * 0.385)
+    }
 
     ctx.fillStyle = '#ffffff'
     ctx.font = font(h * 0.052)
@@ -828,6 +964,12 @@ const CSS = `
   background:rgba(255,80,80,.18);color:#ff9a9a;font-size:1rem}
 .bub-close:hover{background:rgba(255,80,80,.34);color:#fff}
 .bub-stage{flex:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;padding:14px}
+/* Designing: the zoomed grid is bigger than the stage, so it has to scroll. The
+   centring switches to auto-margins — flexbox centring makes overflow on the
+   top/left edge unreachable, which would strand part of the room. */
+.bub-stage.bub-design{overflow:auto;align-items:flex-start;justify-content:flex-start}
+.bub-stage.bub-design .bub-canvas{margin:auto}
+.bub-zoom{max-width:6.5rem}
 .bub-canvas{border-radius:12px;
   box-shadow:0 16px 60px rgba(0,0,0,.6),0 0 0 1px rgba(126,182,214,.22),0 0 40px rgba(80,140,255,.12);
   background:#080620;touch-action:none}
