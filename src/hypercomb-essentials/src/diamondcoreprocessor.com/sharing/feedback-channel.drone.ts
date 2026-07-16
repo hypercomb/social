@@ -179,6 +179,15 @@ export class FeedbackChannelDrone extends Drone {
 
     await this.#ensureActive()
 
+    // Bee load order is not deterministic (the web shell loads bees from
+    // OPFS) — if the mesh wasn't on ioc yet, #ensureActive returned before
+    // opening the socket or starting the drain timer, and nothing retried:
+    // an enabled HOST sat dark for the whole session while relay-held
+    // feedback expired unread. Re-arm activation the moment the mesh
+    // registers (fires immediately when it already has); idempotent.
+    const reg = (window as { ioc?: { whenReady?: (key: string, cb: (v: unknown) => void) => void } }).ioc
+    reg?.whenReady?.(MESH_KEY, () => void this.#ensureActive())
+
     // Off the boot path: rescue STRANDED records — see #reconcileOnce.
     const idle = (window as unknown as { requestIdleCallback?: (cb: () => void) => number }).requestIdleCallback
       ?? ((cb: () => void) => window.setTimeout(cb, 4_000))
