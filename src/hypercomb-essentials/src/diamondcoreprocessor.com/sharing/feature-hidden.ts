@@ -127,3 +127,19 @@ export async function isFeatureHidden(segments: readonly string[], featKind: str
   if (!featKind) return false
   return (await hiddenKeys()).has(hiddenKey(featKind, segments))
 }
+
+/** Is the feature hidden at this location OR anywhere above it? BRANCH
+ *  semantics for scope features (a website): a hide record at a node turns
+ *  off that node AND its subtree, so the site root's record is the whole
+ *  site's master off and a mid-branch record silences just that branch.
+ *  Prefixes start at depth 1 — no record ever applies to the hive root as
+ *  a whole. */
+export async function isFeatureHiddenWithin(segments: readonly string[], featKind: string): Promise<boolean> {
+  if (!featKind) return false
+  const keys = await hiddenKeys()
+  const segs = segments.map(s => String(s ?? '').trim()).filter(Boolean)
+  for (let depth = segs.length; depth >= 1; depth--) {
+    if (keys.has(hiddenKey(featKind, segs.slice(0, depth)))) return true
+  }
+  return false
+}

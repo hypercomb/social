@@ -132,130 +132,11 @@ $accent: #c8b8ff;
   padding-top: 0.35em;
 }
 
-// ── adopt target (peer groups) ────────────────────────────────────
-// Where the branch will fold. Quiet mono path input — pre-filled with the
-// location captured at adopt-click, editable before any switch is flipped.
-.fgroup-target {
-  display: flex;
-  align-items: center;
-  gap: 0.5em;
-  padding: 0 1em 0.35em;
-}
-
-.target-label {
-  flex: 0 0 auto;
-  font-size: 0.6em;
-  font-weight: 600;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.5);
-}
-
-// Combobox wrapper: holds the input and anchors the suggestion listbox that
-// drops beneath it (position: relative → the absolute list tracks the input).
-.target-combo {
-  position: relative;
-  flex: 1;
-  min-width: 0;
-}
-
-.target-input {
-  width: 100%;
-  box-sizing: border-box;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
-  padding: 0.2em 0.5em;
-  font-family: var(--hc-mono, monospace);
-  font-size: 0.7em;
-  color: rgba($accent, 0.9);
-
-  &:focus-visible {
-    outline: none;
-    border-color: rgba($accent, 0.55);
-    background: rgba($accent, 0.08);
-  }
-}
-
-// Suggestion listbox — matches first, an optional CREATE row last. Cold/clean:
-// a solid dark sheet so rows beneath don't bleed through, a thin border, and a
-// single soft shadow for separation (no glow, no animation).
-.target-suggest {
-  position: absolute;
-  top: calc(100% + 2px);
-  left: 0;
-  right: 0;
-  z-index: 5;
-  margin: 0;
-  padding: 0.15em;
-  list-style: none;
-  max-height: 14em;
-  overflow-y: auto;
-  background: #17171c;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 4px;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
-}
-
-.target-option {
-  display: flex;
-  align-items: baseline;
-  gap: 0.4em;
-  padding: 0.28em 0.4em;
-  border-radius: 3px;
-  cursor: pointer;
-  font-size: 0.7em;
-  line-height: 1.2;
-  color: rgba(255, 255, 255, 0.85);
-
-  &:hover,
-  &.active {
-    background: rgba($accent, 0.16);
-  }
-
-  .opt-badge {
-    flex: 0 0 auto;
-    width: 1.1em;
-    text-align: center;
-    font-family: var(--hc-mono, monospace);
-    color: rgba(255, 255, 255, 0.4);
-
-    &.create { color: rgba($accent, 0.9); }
-  }
-
-  .opt-text {
-    flex: 0 1 auto;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  // Full path trailing a match, dimmed — the leaf name leads, the location
-  // follows so identical names under different parents stay distinguishable.
-  .opt-path {
-    flex: 1 1 auto;
-    min-width: 0;
-    text-align: right;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: var(--hc-mono, monospace);
-    color: rgba(255, 255, 255, 0.3);
-  }
-
-  // The create row reads as an action, not an existing thing.
-  &.create {
-    color: rgba($accent, 0.95);
-    .opt-text { font-style: italic; }
-  }
-}
-
-// ── hierarchy diff (held tile vs a peer's same-named copy) ────────
-// Missing children merge in per row; "yours only" is informational.
-// `.restore-btn` (the "Off — kept here" section's one-tap restore) shares the
-// same quiet accent-button look.
-.hier-add,
-.hier-add-all,
+// ── quiet accent buttons ───────────────────────────────────────────
+// `.restore-btn` — the "Off — kept here" section's one-tap restore.
+// `.overrides-reset` — the site-root row's "turn all back on" for
+// descendant page/branch overrides.
+.overrides-reset,
 .restore-btn {
   flex: 0 0 auto;
   align-self: center;
@@ -276,21 +157,29 @@ $accent: #c8b8ff;
   &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
 }
 
-.hier-row .feature-name { color: rgba(245, 245, 245, 0.85); }
-
-.hier-extra {
-  margin: 0;
-  padding: 0.1em 1em 0.5em;
-  font-size: 0.66em;
-  color: rgba(255, 255, 255, 0.4);
-  font-style: italic;
+// Scope lineage line — "part of the website at /root". Quiet mono path; the
+// row leads back to where the master switch lives.
+.feature-scope {
+  font-size: 0.62em;
+  font-family: var(--hc-mono, monospace);
+  color: rgba(150, 210, 255, 0.75);
 }
 
-// Peer-origin badge on diff rows — the feature lives on the PEER's copy.
-.feature-origin.peer {
-  color: rgba(150, 210, 255, 0.95);
-  background: rgba(150, 210, 255, 0.1);
-  border-color: rgba(150, 210, 255, 0.35);
+// Site-root override line — "{n} turned off within this site" + reset.
+.feature-overrides {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5em;
+  font-size: 0.64em;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+// Off row's provenance — "off — turned off at /path" when the record that
+// silences this node lives above it.
+.feature-offat {
+  font-size: 0.62em;
+  font-family: var(--hc-mono, monospace);
+  color: rgba(255, 255, 255, 0.4);
 }
 
 // ── section header (On this layer / Available to add) ─────────────
@@ -809,26 +698,6 @@ $path-fail: #e08a8a;     // failed terminal
   color: rgba(255, 200, 150, 0.9);
   background: rgba(255, 180, 120, 0.1);
   border: 1px solid rgba(255, 180, 120, 0.35);
-}
-
-.feature-deps {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4em;
-  margin-top: 0.05em;
-  font-size: 0.62em;
-  line-height: 1.35;
-  color: rgba($accent, 0.78);
-
-  &::before {
-    content: '';
-    width: 0.55em;
-    height: 0.55em;
-    border-radius: 2px;
-    border: 1px solid rgba($accent, 0.55);
-    transform: rotate(45deg);
-  }
 }
 
 // Row-level outcome: the plain-words failure landing on the row that asked

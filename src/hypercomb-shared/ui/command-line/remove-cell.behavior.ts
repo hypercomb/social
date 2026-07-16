@@ -32,8 +32,7 @@ type CommitterLike = {
  *  resolveLayerAt. The own-bag read (currentLayerAt) is authoritative when
  *  warm; a location that exists only as a child sig in its parent (never
  *  committed into, or cold after a reload) falls back to the parent chain.
- *  Copied here rather than imported (shell UI must not import essentials);
- *  matches the same inline copy in adopt-target.ts. */
+ *  Copied here rather than imported (shell UI must not import essentials). */
 async function resolveLayerAt(history: HistoryLike, segments: readonly string[]): Promise<LayerLike | null> {
   const locSig = await history.sign({ explorerSegments: () => segments })
   const direct = await history.currentLayerAt(locSig)

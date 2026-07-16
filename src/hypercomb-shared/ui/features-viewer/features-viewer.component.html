@@ -143,59 +143,6 @@
       <div class="features-scroll">
           <section class="features-group">
 
-            <!-- ── Adopt target: WHERE the branch folds (peer tiles only).
-                 Captured at adopt-click, editable — adopting into a
-                 reorganized hive must not mean adopt-then-move. A combobox:
-                 complete against locations that exist, or CREATE the typed
-                 path (the drone refuses a target that doesn't resolve). ── -->
-            @if (isPeerGroup(group)) {
-              <div class="fgroup-target">
-                <label class="target-label" [attr.for]="'target-' + group.cell">{{ 'features.target' | t }}</label>
-                <div class="target-combo">
-                  <input
-                    class="target-input"
-                    [id]="'target-' + group.cell"
-                    type="text"
-                    role="combobox"
-                    aria-autocomplete="list"
-                    autocomplete="off"
-                    [attr.aria-expanded]="isTargetOpen(group)"
-                    [attr.aria-controls]="'target-list-' + group.cell"
-                    [value]="targetFor(group)"
-                    (input)="onTargetInput(group, $any($event.target).value)"
-                    (focus)="onTargetFocus(group)"
-                    (blur)="onTargetBlur(group)"
-                    (keydown)="onTargetKey(group, $event)"
-                    [attr.title]="'features.target.hint' | t"
-                    spellcheck="false"
-                  />
-                  @if (isTargetOpen(group)) {
-                    <ul class="target-suggest" role="listbox" [id]="'target-list-' + group.cell">
-                      @for (s of targetSuggestions(group); track s.path; let i = $index) {
-                        <li
-                          role="option"
-                          class="target-option"
-                          [class.create]="s.kind === 'create'"
-                          [class.active]="isActiveSuggest(i)"
-                          [attr.aria-selected]="isActiveSuggest(i)"
-                          (mousedown)="pickTarget(group, s); $event.preventDefault()"
-                        >
-                          @if (s.kind === 'create') {
-                            <span class="opt-badge create">+</span>
-                            <span class="opt-text">{{ 'features.target.create' | t: { path: s.path } }}</span>
-                          } @else {
-                            <span class="opt-badge">/</span>
-                            <span class="opt-text">{{ s.name }}</span>
-                            <span class="opt-path">{{ s.path }}</span>
-                          }
-                        </li>
-                      }
-                    </ul>
-                  }
-                </div>
-              </div>
-            }
-
             <!-- ── On this layer: features the tile already has ── -->
             <div class="section-head">
               <span class="section-label">{{ 'features.section.applied' | t }}</span>
@@ -214,13 +161,13 @@
                     (click)="selectRow(group, feat)"
                   >
                     <!-- Real on/off switch: shows RUNNING, only running. ON =
-                         active here; OFF = present but inert — a peer feature
-                         you haven't adopted yet, or a GATED feature (switch
+                         active here; OFF = present but inert — turned off
+                         here (or above here), or a GATED feature (switch
                          disabled: the chip + allow button beside it are the
-                         path to on). Click flips it in place; for a
-                         not-yet-adopted feature the flip IS the individual add
-                         (the only moment anything folds or downloads). The row
-                         never disappears. -->
+                         path to on). Click flips it in place — for a scope
+                         feature (a website) the flip acts AT THIS NODE, so a
+                         page or branch turns off individually. The row never
+                         disappears. -->
                     <button
                       class="feat-toggle"
                       type="button"
@@ -230,17 +177,13 @@
                       (click)="toggleActive(group, feat); $event.stopPropagation()"
                       [attr.aria-pressed]="isOn(group, feat)"
                       [attr.aria-label]="(isOn(group, feat) ? 'features.hide' : 'features.enable') | t"
-                      [attr.title]="(feat.gated ? 'features.chip.needsOk' : isOn(group, feat) ? 'features.hide.hint' : (feat.adopted === false ? 'features.enable.hint' : 'features.turnon.hint')) | t"
+                      [attr.title]="(feat.gated ? 'features.chip.needsOk' : isOn(group, feat) ? 'features.hide.hint' : 'features.turnon.hint') | t"
                     ><span class="knob"></span></button>
                     <div class="feature-meta">
                       <span class="feature-name">{{ feat.label }}</span>
-                      <!-- Origin: direct on the node, cascaded from a parent, or
-                           the PEER's same-named copy (a diff row on a held tile —
-                           flipping it merges that single feature onto yours). -->
-                      <span class="feature-origin" [class.cascade]="feat.origin === 'cascade'" [class.peer]="feat.adopted === false && group.held !== false">
-                        @if (feat.adopted === false && group.held !== false) {
-                          {{ 'features.origin.peer' | t }}
-                        } @else if (feat.origin === 'cascade') {
+                      <!-- Origin: direct on the node, or cascaded from a parent. -->
+                      <span class="feature-origin" [class.cascade]="feat.origin === 'cascade'">
+                        @if (feat.origin === 'cascade') {
                           @if (feat.originCell) {
                             {{ 'features.origin.cascade' | t: { cell: feat.originCell } }}
                           } @else {
@@ -261,8 +204,25 @@
                            visible (the tile itself for direct features, the declaring
                            ancestor for cascaded ones). -->
                       <span class="feature-attached">{{ 'features.attached' | t: { path: attachedAt(group, feat) } }}</span>
-                      @if (dependencyHint(group, feat); as hint) {
-                        <span class="feature-deps">{{ hint }}</span>
+                      <!-- Scope lineage: this node sits inside a website declared
+                           above it — the row leads back to the site root, where
+                           the master switch lives. -->
+                      @if (scopePartOf(group, feat); as scopePath) {
+                        <span class="feature-scope">{{ 'features.scope.partof' | t: { path: scopePath } }}</span>
+                      }
+                      <!-- Site-root row: descendant pages/branches turned off
+                           below this master switch, with a one-tap reset —
+                           "toggle everything back on from the root". -->
+                      @if (overrideRecords(group, feat).length; as offCount) {
+                        <span class="feature-overrides">
+                          {{ 'features.overrides.offbelow' | t: { count: offCount } }}
+                          <button
+                            class="overrides-reset"
+                            type="button"
+                            (click)="resetOverrides(group, feat); $event.stopPropagation()"
+                            [attr.title]="'features.overrides.reset.hint' | t"
+                          >{{ 'features.overrides.reset' | t }}</button>
+                        </span>
                       }
                       <!-- Community gate: present here but INERT until allowed.
                            The switch above is OFF + disabled (honest switch);
@@ -323,6 +283,12 @@
                     <div class="feature-meta">
                       <span class="feature-name">{{ feat.label }}</span>
                       <span class="feature-kind" [title]="feat.kind">{{ feat.kind }}</span>
+                      <!-- An off inherited from ABOVE (a branch or the site root
+                           turned off) says where — restore flips the record that
+                           actually did it. -->
+                      @if (offAt(group, feat); as at) {
+                        <span class="feature-offat">{{ 'features.off.at' | t: { path: at } }}</span>
+                      }
                     </div>
                     <button
                       class="restore-btn"
@@ -333,42 +299,6 @@
                   </li>
                 }
               </ul>
-            }
-
-            <!-- ── Hierarchy diff: a peer publishes a same-named copy of this
-                 held tile — the children each side has that the other doesn't.
-                 `add` merges that child's branch onto yours; what's only on
-                 YOUR copy is listed but never touched (a diff never deletes). ── -->
-            @if (group.hierarchy; as diff) {
-              @if (diff.missing.length || diff.extra.length) {
-                <div class="section-head">
-                  <span class="section-label">{{ 'features.hierarchy' | t }}</span>
-                  <span class="section-count">{{ diff.missing.length }}</span>
-                  @if (diff.missing.length > 1) {
-                    <button class="hier-add-all" type="button" (click)="mergeChild(group)" [attr.title]="'features.hierarchy.addall.hint' | t">
-                      {{ 'features.hierarchy.addall' | t }}
-                    </button>
-                  }
-                </div>
-                @if (diff.missing.length) {
-                  <ul class="features-list">
-                    @for (name of diff.missing; track name) {
-                      <li class="features-row hier-row">
-                        <div class="feature-meta">
-                          <span class="feature-name">{{ name }}</span>
-                          <span class="feature-kind">{{ 'features.hierarchy.frompeer' | t }}</span>
-                        </div>
-                        <button class="hier-add" type="button" (click)="mergeChild(group, name)" [attr.title]="'features.hierarchy.add.hint' | t">
-                          + {{ 'features.hierarchy.add' | t }}
-                        </button>
-                      </li>
-                    }
-                  </ul>
-                }
-                @if (diff.extra.length) {
-                  <p class="hier-extra">{{ 'features.hierarchy.extra' | t: { names: diff.extra.join(', ') } }}</p>
-                }
-              }
             }
 
             <!-- ── Available to add: features this layer doesn't have yet ── -->

@@ -11,15 +11,19 @@
 // content and no snapshot bridge: your layer is the one way into your hive.
 //
 // SAFETY: this drone applies content ONLY in response to an explicit user
-// click — and the click that downloads is the FEATURE switch, not the adopt
-// icon. `adopt` merely opens the features window (ShowFeaturesDrone lists the
-// peer branch's features from its root layer — no fold, no subtree walk, no
-// resource pulls); each feature's switch in that window emits `adopt-feature`,
-// and THAT is when the branch folds / code-consent runs / bytes move. `sync`
-// (re-pull a publisher's current version of a tile you hold) has NO user
-// button — it remains a programmatic action a future auto-sync can ride. It
-// does NOT auto-fold the installer's projected branches (RegistrySnapshot) —
-// nothing enters your tree without a participant action.
+// click. ADOPT IS ADOPT: clicking adopt folds the branch's LAYER closure in
+// right away (structure only — resources stream on demand at render), then
+// lands on the Beehaviors panel so the participant can see what behaviors
+// the adopted tiles carry. Consent stays where it matters: a branch that
+// declares CODE still stops for an explicit allow before anything installs,
+// and foreign pages stay behind the render-time verification gate until
+// allowed. There is NO adopt-time decision surface, no per-feature add, and
+// no tile merging from the Beehaviors window — behaviors are toggles on
+// what the adopted tile already carries. `sync` (re-pull a publisher's
+// current version of a tile you hold) has NO user button — it remains a
+// programmatic action a future auto-sync can ride. It does NOT auto-fold
+// the installer's projected branches (RegistrySnapshot) — nothing enters
+// your tree without a participant action.
 
 import { Drone, EffectBus, hypercomb, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
@@ -37,7 +41,6 @@ import {
   writeTilePropsIndex,
 } from '../editor/tile-properties.js'
 import { forgetDecorationLabel } from '../commands/decoration-kind-index.js'
-import { WEBSITE_SLOT } from '../commands/website-slot.js'
 import { extractPageRefSigs } from './decoration-closure.js'
 import { markAdoptedRoot } from './adopted-roots.js'
 
@@ -117,22 +120,6 @@ interface TileActionPayload {
   /** `adopt-selected` (panel confirm) carries participant-grouped picks;
    *  pubkey disambiguates the same name published by two peers. */
   selections?: readonly { label: string; pubkey?: string }[]
-  /** `adopt-feature` TARGET: the parent path the branch folds under. Captured
-   *  by the features window at adopt-click time (and editable there), so the
-   *  fold lands where the participant CHOSE — never "wherever they happen to
-   *  be standing by the time they toggle". [] = the hive root. */
-  at?: readonly string[]
-  /** `adopt-feature` on a HELD tile: the single feature kind to MERGE from
-   *  the peer's same-named copy (the diff flow — two people sharing one tile
-   *  with different content pull differences across one at a time). */
-  kind?: string
-  /** `merge-children`: the held tile's FULL path, and (optionally) which of
-   *  the peer copy's missing children to pull — absent = all of them. */
-  segments?: readonly string[]
-  names?: readonly string[]
-  q?: number
-  r?: number
-  index?: number
 }
 
 export class SwarmAdoptDrone extends Drone {
@@ -167,62 +154,6 @@ export class SwarmAdoptDrone extends Drone {
         return
       }
 
-      // The features panel's per-feature ADD on a not-yet-adopted peer tile —
-      // THE moment anything actually downloads/folds. This is the individual
-      // consent the adopt gesture defers to: the adopt click only OPENS the
-      // window; each feature's switch does the work for that feature. The
-      // payload's `at` is the CHOSEN target parent (captured at adopt-click,
-      // editable in the window) — adopting into a reorganized hive must not
-      // mean "fold at the original position, then move it".
-      //
-      // On a tile ALREADY HELD at the target (two people sharing one tile
-      // with different content), the same switch is a DIFF MERGE: it pulls
-      // that single feature from the peer's copy onto yours — never a
-      // whole-branch fold that would no-op as 'exists'.
-      if (action === 'adopt-feature') {
-        const label = String(payload?.label ?? '').trim()
-        const at = Array.isArray(payload?.at)
-          ? payload.at.map(s => String(s ?? '').trim()).filter(Boolean)
-          : undefined
-        const kind = String(payload?.kind ?? '').trim()
-        if (!label) return
-        void (async () => {
-          const parentAt = at ?? this.#currentSegments()
-          if (kind && await this.#isHeldAt([...parentAt, label])) {
-            await this.#mergeFeature(label, parentAt, kind)
-          } else {
-            await this.#adoptInline(label, undefined, at, kind || undefined)
-          }
-        })()
-        return
-      }
-
-      // The diff view's hierarchy merge — pull the peer copy's children this
-      // held tile is missing (all of them, or the `names` subset).
-      if (action === 'merge-children') {
-        const label = String(payload?.label ?? '').trim()
-        const segments = Array.isArray(payload?.segments)
-          ? payload.segments.map(s => String(s ?? '').trim()).filter(Boolean)
-          : []
-        const names = Array.isArray(payload?.names)
-          ? payload.names.map(s => String(s ?? '').trim()).filter(Boolean)
-          : undefined
-        if (label && segments.length) void this.#mergeChildren(label, segments, names?.length ? names : undefined)
-        return
-      }
-
-      // The Beehaviors hierarchy section for a NOT-YET-HELD peer tile. This is
-      // the explicit "tiles" lever beside the behavior switches: fold the peer
-      // branch at the chosen target, then reopen the panel at the saved tile.
-      if (action === 'adopt-tiles') {
-        const label = String(payload?.label ?? '').trim()
-        const at = Array.isArray(payload?.at)
-          ? payload.at.map(s => String(s ?? '').trim()).filter(Boolean)
-          : undefined
-        if (label) void this.#adoptInline(label, undefined, at)
-        return
-      }
-
       if (action !== 'adopt' && action !== 'sync') return
 
       // Multi-tile adopt (selection-menu Adopt All) — sequential. Only the
@@ -239,14 +170,13 @@ export class SwarmAdoptDrone extends Drone {
       const label = String(payload?.label ?? '').trim()
       if (!label) return
 
-      // Single adopt-gesture. Adopt is a WINDOW, not a download: open the
-      // features panel for the peer tile and STOP. Nothing folds and nothing
-      // walks the subtree here — ShowFeaturesDrone's peer path lists the
-      // branch's features from its root layer alone (a few tiny reads), and
-      // each feature's switch in the panel is the individual add
-      // (`adopt-feature` above), which is when the fold/consent/downloads
-      // actually happen. Two+ publishers of the same name still disambiguate
-      // through the participant-grouped panel first.
+      // Single adopt-gesture. ADOPT IS ADOPT: fold the branch in right here —
+      // the tiles are what the click asked for. Structure only (layersOnly;
+      // resources stream on demand at render); a branch that declares CODE
+      // still stops for explicit consent inside #adoptInline. The fold lands
+      // on the Beehaviors panel so the participant immediately sees which
+      // behaviors the adopted tiles carry. Two+ publishers of the same name
+      // still disambiguate through the participant-grouped panel first.
       if (action === 'adopt') {
         if (!this.#isPeerTile(label)) return
         const publishers = this.#publishersFor(label)
@@ -254,7 +184,7 @@ export class SwarmAdoptDrone extends Drone {
           this.emitEffect('swarm:adopt-panel:open', { preselect: [label] })
           return
         }
-        EffectBus.emit('tile:action', { action: 'features', label })
+        void this.#adoptInline(label)
         return
       }
 
@@ -420,31 +350,13 @@ export class SwarmAdoptDrone extends Drone {
     EffectBus.emit('features:outcome', { cell, kind: kind ?? '', ok, message })
   }
 
-  #adoptInline = async (label: string, pubkey?: string, atOverride?: readonly string[], featureKind?: string): Promise<void> => {
+  #adoptInline = async (label: string, pubkey?: string): Promise<void> => {
     const branch = this.#resolvePeerBranch(label, pubkey)
     if (!branch) {
       // The peer cache expired / navigation changed since the click — say so
       // instead of doing nothing (the silent dead-end reads as "adopt broken").
-      this.#rowOutcome(label, featureKind, false, `couldn't adopt "${label}" — the peer's branch is no longer offered here`)
+      this.#rowOutcome(label, undefined, false, `couldn't adopt "${label}" — the peer's branch is no longer offered here`)
       return
-    }
-    // TARGET override — the features window's chosen destination. Refuse,
-    // don't guess: an explicitly-typed target that doesn't resolve to an
-    // existing location is a typo or a not-yet-created folder, and silently
-    // folding at the literal path would conjure a phantom hierarchy.
-    if (atOverride) {
-      const at = atOverride.map(s => String(s ?? '').trim()).filter(Boolean)
-      if (at.length > 0) {
-        const ioc = this.#ioc()
-        const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
-        const lineage = ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined
-        const target = (history && lineage) ? await resolveLayerAt(history, lineage.domain, at) : null
-        if (!target) {
-          this.#rowOutcome(label, featureKind, false, `couldn't adopt "${label}" — target "/${at.join('/')}" doesn't exist; create it first`)
-          return
-        }
-      }
-      branch.at = at
     }
     const codeSigs = await this.#branchCodeSigs(branch.layerSig, branch.domain)
     if (codeSigs === null) {
@@ -468,7 +380,7 @@ export class SwarmAdoptDrone extends Drone {
       if (!ok) {
         // The participant said no — settle the panel's busy switch NOW (no
         // silent 8s leash) with the honest landing, not a wedged toggle.
-        EffectBus.emit('features:outcome', { cell: branch.label, kind: featureKind ?? '', ok: false, message: `code adopt of "${branch.label}" declined — nothing was folded` })
+        EffectBus.emit('features:outcome', { cell: branch.label, kind: '', ok: false, message: `code adopt of "${branch.label}" declined — nothing was folded` })
         return
       }
       window.dispatchEvent(new CustomEvent('portal:open', {
@@ -496,205 +408,24 @@ export class SwarmAdoptDrone extends Drone {
       forgetDecorationLabel(branch.label)
       EffectBus.emit('tile:saved', { cell: branch.label })
     }
-    // Adopt SHOWS THE FEATURES: after the fold lands (or when the tile is
+    // Adopt SHOWS THE BEHAVIORS: after the fold lands (or when the tile is
     // already here — re-clicking adopt is how you get back to this view), open
-    // the features panel for the tile. Each feature row carries its gate state,
-    // so a community-blocked feature reads "enabled — blocked" with its allow
-    // override right there — the adopt gesture ends on the decision surface,
-    // not on a silent fold.
-    if (res === 'exists' && featureKind) {
-      // A same-named local tile can already exist at the chosen destination
-      // without carrying the peer feature the user just switched on. Treat that
-      // as a feature merge, not a successful no-op, so website/page children
-      // persist instead of only being visitable through the live peer preview.
-      await this.#mergeFeature(branch.label, branch.at, featureKind)
-      return
-    }
+    // the Beehaviors panel for the tile. The tiles are IN; the panel is where
+    // the participant sees what they carry and toggles it — a community-
+    // blocked feature reads "needs your OK" with its allow override right
+    // there.
     if (res === 'committed' || res === 'exists') {
-      // segments = the FOLD location — the refreshed group must read the tile
-      // where it landed, which the target picker may have pointed away from
-      // the participant's current position.
-      EffectBus.emit('features:outcome', { cell: branch.label, kind: featureKind ?? '', ok: true, message: '' })
+      EffectBus.emit('features:outcome', { cell: branch.label, kind: '', ok: true, message: '' })
       EffectBus.emit('tile:action', { action: 'features', label: branch.label, segments: [...branch.at, branch.label] })
     } else if (res === 'rewound') {
       // The history cursor is viewing the past — the committer refuses to
       // write, so a fold now would be a phantom. Only the user can return
       // to head; say so instead of blaming reachability.
-      this.#rowOutcome(branch.label, featureKind, false, `couldn't adopt "${branch.label}" — you're viewing history here; return to the present first, then adopt again`)
+      this.#rowOutcome(branch.label, undefined, false, `couldn't adopt "${branch.label}" — you're viewing history here; return to the present first, then adopt again`)
     } else {
       // 'unavailable' — bytes unreachable or a cold-sibling abort. Loud, not
       // console-only: the user clicked and must see WHY nothing appeared.
-      this.#rowOutcome(branch.label, featureKind, false, `couldn't adopt "${branch.label}" — its content isn't reachable right now, try again shortly`)
-    }
-  }
-
-  /** The participant's current path — the default target when the panel
-   *  didn't send one. */
-  #currentSegments = (): string[] => {
-    const lineage = this.#ioc()?.get?.(LINEAGE_KEY) as LineageLike | undefined
-    return (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
-  }
-
-  /** Does a layer resolve at this exact path — is the tile HELD locally? */
-  #isHeldAt = async (segments: readonly string[]): Promise<boolean> => {
-    const ioc = this.#ioc()
-    const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
-    const lineage = ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined
-    if (!history || !lineage) return false
-    try { return (await resolveLayerAt(history, lineage.domain, segments)) != null }
-    catch { return false }
-  }
-
-  // ── diff merges: two people share one tile with different content ──────
-  // The features window lists the peer copy's differences; these pull ONE
-  // difference at a time onto the held tile. Additive only — a diff merge
-  // never removes anything of the participant's (turning things off / deleting
-  // tiles stays with the existing affordances).
-
-  /** Merge ONE feature (by decoration kind) from the peer's same-named copy
-   *  onto the held tile at [...at, label]. One committer.update — one marker. */
-  #mergeFeature = async (label: string, at: readonly string[], kind: string): Promise<void> => {
-    const branch = this.#resolvePeerBranch(label)
-    if (!branch) {
-      this.#rowOutcome(label, kind, false, `couldn't merge from "${label}" — the peer's branch is no longer offered here`)
-      return
-    }
-    const ioc = this.#ioc()
-    const broker = ioc?.get?.(BROKER_KEY) as BrokerLike | undefined
-    const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
-    const committer = ioc?.get?.(COMMITTER_KEY) as CommitterLike | undefined
-    const lineage = ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined
-    const store = ioc?.get?.('@hypercomb.social/Store') as { getResource?: (sig: string) => Promise<Blob | null> } | undefined
-    if (!broker?.adopt || !history?.getLayerBySig || !committer?.update || !lineage || !store?.getResource) return
-    try {
-      if (branch.domain) broker.noteDomainsForSig?.(branch.layerSig, [branch.domain])
-      await broker.adopt(branch.layerSig, { layersOnly: true, silent: true })
-      const peerRoot = await history.getLayerBySig(branch.layerSig) as (Record<string, unknown> & { name?: string }) | null
-      if (!peerRoot) {
-        this.#rowOutcome(label, kind, false, `couldn't merge from "${label}" — the peer's copy isn't reachable right now`)
-        return
-      }
-      // The peer decorations of the wanted kind…
-      const wanted: string[] = []
-      const peerDecorations = Array.isArray(peerRoot['decorations']) ? peerRoot['decorations'] as unknown[] : []
-      for (const raw of peerDecorations) {
-        const sig = String(raw ?? '').trim().toLowerCase()
-        if (!SIG_RE.test(sig)) continue
-        try {
-          const blob = await store.getResource(sig)
-          if (!blob) continue
-          const rec = JSON.parse(await blob.text()) as { kind?: string }
-          if (rec?.kind === kind) wanted.push(sig)
-        } catch { /* unavailable record — skip */ }
-      }
-      // …plus the first-class website slot when merging the website feature.
-      const registry = ioc?.get?.('@diamondcoreprocessor.com/VisualBeeRegistry') as
-        | {
-            get?: (view: string) => { decorationKind?: string } | undefined
-            byDecorationKind?: (kind: string) => { adoptScope?: string } | undefined
-          }
-        | undefined
-      const websiteKind = registry?.get?.('website')?.decorationKind
-      const peerWebSlot = (kind === websiteKind && Array.isArray(peerRoot[WEBSITE_SLOT]))
-        ? (peerRoot[WEBSITE_SLOT] as unknown[]).map(s => String(s ?? '').trim().toLowerCase()).filter(s => SIG_RE.test(s))
-        : []
-      if (!wanted.length && !peerWebSlot.length) {
-        this.#rowOutcome(label, kind, false, `the peer's "${label}" doesn't carry that feature anymore`)
-        return
-      }
-      const target = [...at, label]
-      const local = await resolveLayerAt(history, lineage.domain, target)
-      if (!local) {
-        this.#rowOutcome(label, kind, false, `couldn't merge into "${label}" — its layer didn't resolve`)
-        return
-      }
-      const union = (cur: unknown, add: readonly string[]): string[] => {
-        const out = Array.isArray(cur) ? cur.map(s => String(s)) : []
-        for (const s of add) if (!out.includes(s)) out.push(s)
-        return out
-      }
-      const next: Record<string, unknown> = { ...local }
-      if (wanted.length) next['decorations'] = union(local['decorations'], wanted)
-      if (peerWebSlot.length) next[WEBSITE_SLOT] = union(local[WEBSITE_SLOT], peerWebSlot)
-      await committer.update(target, next)
-      forgetDecorationLabel(label)
-      EffectBus.emit('tile:saved', { cell: label })
-      EffectBus.emit('fs:changed', { segments: [...at] })
-      await new hypercomb().act()
-      this.#rowOutcome(label, kind, true, `merged "${kind}" from the peer's "${label}"`)
-
-      // A HIERARCHY-scoped feature (a website) IS its subtree: the pages are
-      // child cells that belong with the feature. Merging just the host cell's
-      // slot/decoration onto a HELD tile would leave a site with no pages, so
-      // after the feature merge fold the peer's owned children too — the same
-      // additive, per-child #commitBranch the manual `merge-children` action
-      // uses (idempotent: children already held return 'exists'; a cold sibling
-      // aborts loudly). #mergeChildren owns the closing panel refresh and its
-      // own "merged N tiles" log; a tile-scoped merge just refreshes the panel.
-      if (registry?.byDecorationKind?.(kind)?.adoptScope === 'hierarchy') {
-        await this.#mergeChildren(label, target)
-        return
-      }
-      EffectBus.emit('tile:action', { action: 'features', label, segments: target })
-    } catch (err) {
-      console.warn('[swarm-adopt] feature merge failed', { label, kind, err })
-      this.#rowOutcome(label, kind, false, `couldn't merge "${kind}" from "${label}"`)
-    }
-  }
-
-  /** Pull the peer copy's MISSING children (all, or the `names` subset) under
-   *  the held tile at `target` — each child folds through the same
-   *  #commitBranch primitive as any adopt (serialized, idempotent, safe). */
-  #mergeChildren = async (label: string, target: readonly string[], names?: readonly string[]): Promise<void> => {
-    const branch = this.#resolvePeerBranch(label)
-    if (!branch) {
-      EffectBus.emit('activity:log', { message: `couldn't merge from "${label}" — the peer's branch is no longer offered here`, icon: '○' })
-      return
-    }
-    const ioc = this.#ioc()
-    const broker = ioc?.get?.(BROKER_KEY) as BrokerLike | undefined
-    const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
-    const lineage = ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined
-    if (!broker?.adopt || !history?.getLayerBySig || !lineage) return
-    try {
-      if (branch.domain) broker.noteDomainsForSig?.(branch.layerSig, [branch.domain])
-      await broker.adopt(branch.layerSig, { layersOnly: true, silent: true })
-      const peerRoot = await history.getLayerBySig(branch.layerSig)
-      if (!peerRoot) {
-        EffectBus.emit('activity:log', { message: `couldn't merge from "${label}" — the peer's copy isn't reachable right now`, icon: '○' })
-        return
-      }
-      const local = await resolveLayerAt(history, lineage.domain, target)
-      const { names: existing, coldMiss } = await childNamesOfStrict(history, local)
-      if (coldMiss) {
-        EffectBus.emit('activity:log', { message: `couldn't merge into "${label}" — some of its tiles haven't loaded yet, try again shortly`, icon: '○' })
-        return
-      }
-      const want = names?.length ? new Set(names) : null
-      let merged = 0, failed = 0
-      for (const raw of childSigsOf(peerRoot)) {
-        const sig = String(raw ?? '').trim().toLowerCase()
-        if (!SIG_RE.test(sig)) continue
-        const child = await history.getLayerBySig(sig)
-        const childName = (child && typeof child.name === 'string') ? child.name.trim() : ''
-        if (!childName || existing.includes(childName)) continue
-        if (want && !want.has(childName)) continue
-        const res = await this.#commitBranch(sig, target, branch.domain, 'fold')
-        if (res === 'committed' || res === 'exists') merged++
-        else failed++
-      }
-      if (merged || failed) {
-        EffectBus.emit('activity:log', {
-          message: failed
-            ? `merged ${merged} tile(s) from the peer's "${label}" — ${failed} unreachable, try again shortly`
-            : `merged ${merged} tile(s) from the peer's "${label}"`,
-          icon: failed ? '○' : '●',
-        })
-      }
-      EffectBus.emit('tile:action', { action: 'features', label, segments: [...target] })
-    } catch (err) {
-      console.warn('[swarm-adopt] children merge failed', { label, err })
-      EffectBus.emit('activity:log', { message: `couldn't merge tiles from "${label}"`, icon: '○' })
+      this.#rowOutcome(branch.label, undefined, false, `couldn't adopt "${branch.label}" — its content isn't reachable right now, try again shortly`)
     }
   }
 

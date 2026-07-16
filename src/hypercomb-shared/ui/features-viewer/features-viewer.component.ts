@@ -1,32 +1,31 @@
 // hypercomb-shared/ui/features-viewer/features-viewer.component.ts
 //
-// Right-docked "Features" panel. Opened when a tile's puzzle-piece icon is
-// clicked — or by the ADOPT gesture, which folds the branch and lands here
-// (ShowFeaturesDrone answers `tile:action` with `features:open`). For each
-// tile it shows TWO sections:
+// Right-docked "Beehaviors" panel — a pure CONTEXT surface. Opened when a
+// tile's puzzle-piece icon is clicked — or by the ADOPT gesture, which folds
+// the branch and lands here (ShowFeaturesDrone answers `tile:action` with
+// `features:open`). While the panel is open it FOLLOWS NAVIGATION: move
+// through the hive and it re-targets to where you are, so a behavior is
+// discovered and managed at the place it applies — go to the page, toggle
+// the behavior. For each tile it shows:
 //
-//   • On this layer — the features the tile already HAS (direct + cascaded),
-//     each tagged with where it comes from. The row's switch turns the
-//     feature OFF into the retainable hidden pool. A row the community gate
-//     BLOCKS renders its switch OFF + disabled (the honest-switch rule: the
-//     switch shows RUNNING, never an inert "on") with a quiet "needs your OK"
-//     chip and an inline allow override (markVerified bypass →
-//     `feature:verified` → the render gate re-reconciles and it activates).
-//   • Off — kept here — features the participant turned off (the hidden
-//     pool). Nothing is deleted; each row has a one-tap restore.
-//   • Available to add — every feature the app knows that this layer does NOT
-//     have yet. The row's switch ADDS it — routed through the bee's OWN slash
-//     command (the same attach logic the command line's `@feature` uses), so
-//     payloads and gating stay correct.
+//   • On this layer — the behaviors the tile already HAS (direct + cascaded
+//     + the website scope it sits inside), each tagged with where it comes
+//     from. The row's switch turns the behavior OFF into the retainable
+//     hidden pool — for a scope feature (a website) the record is written AT
+//     THE NODE YOU'RE ON, so a child page or branch turns off individually
+//     while the rest of the site stays on; the site-root row is the master
+//     switch, with a reset for descendant overrides. A row the community
+//     gate BLOCKS renders its switch OFF + disabled (the honest-switch rule)
+//     with a quiet "needs your OK" chip and an inline allow override.
+//   • Off — kept here — behaviors turned off here (or above here). Nothing
+//     is deleted; each row has a one-tap restore.
+//   • Available to add — every behavior the app knows that this layer does
+//     NOT have yet.
 //
-// Rows are multi-selectable; a bulk bar at the top acts on the selection:
-// ALLOW overrides the community block for every selected blocked feature,
-// DOWNLOAD mirrors the selected features' bytes locally (`features:download`,
-// handled by SwarmAdoptDrone → broker walk).
-//
-// Click another tile's icon and its sections APPEND to the list — you run
-// through the hive comparing what each layer has against what it could have,
-// without leaving for the installer.
+// Beehaviors are TOGGLES ONLY: tiles are never added, removed, or merged
+// from this window. Adopt is adopt — SwarmAdoptDrone folds the tiles on the
+// adopt click itself; this panel only ever flips behaviors of tiles you
+// already hold.
 //
 // Shell UI, so it must NOT import essentials — module services are reached
 // only through window.ioc at runtime, and gate state arrives pre-computed on
@@ -41,7 +40,6 @@ import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directiv
 import { markVerified, markAllowedRoot, branchRootFor } from './feature-verified'
 import { hideFeature, restoreFeature, loadHidden, hiddenKey, type HiddenFeature } from './feature-hidden'
 import { enableAggregation, disableAggregation } from '../../core/aggregation-layer'
-import { adoptTargetSuggestions, createAdoptTargetPath, type AdoptTargetSuggestion } from './adopt-target'
 
 /** A feature already applied to the layer. */
 interface FeatureRow {
@@ -66,11 +64,15 @@ interface FeatureRow {
   /** Full hive path of where the feature is attached (tile for direct, the
    *  declaring ancestor for cascade). Empty/absent = the hive root. */
   originSegments?: string[]
-  /** False = a NOT-YET-ADOPTED peer tile's feature (listed from the peer's
-   *  branch root; nothing local yet). Its switch renders OFF and turning it
-   *  on emits `adopt-feature` — the individual add, and the only moment
-   *  anything folds or downloads. Absent = on the local layer. */
-  adopted?: boolean
+  /** For a SCOPE feature (a website): the site ROOT's path — the outermost
+   *  node declaring it. Descendant rows show "part of the website at {path}";
+   *  the root row (scopeSegments == the tile's own path) gets the
+   *  descendant-override reset. */
+  scopeSegments?: string[]
+  /** Where the off-switch writes its hidden record: `node` = at the tile the
+   *  panel is describing (scope features — per-page/branch off), absent =
+   *  at the feature's attach point (node-local features, unchanged). */
+  hideAt?: 'node' | 'origin'
   /** True when the community verification gate currently blocks activation —
    *  the row's switch renders OFF + disabled with the "needs your OK" chip
    *  and the allow override beside it. */
@@ -107,7 +109,7 @@ type RowLike = {
   gateSig?: string
   gated?: boolean
   originSegments?: string[]
-  adopted?: boolean
+  hideAt?: 'node' | 'origin'
 }
 
 interface FeatureGroup {
@@ -115,13 +117,6 @@ interface FeatureGroup {
   segments: string[]
   applied: FeatureRow[]
   available: AvailableRow[]
-  /** True = the tile exists in the LOCAL layer. False = a peer-only offer —
-   *  the adopt-target row shows only then. */
-  held?: boolean
-  /** Held tile with a live peer counterpart: the children each copy has that
-   *  the other doesn't. `missing` rows merge in per name; `extra` (yours
-   *  only) is informational — a diff never deletes your content. */
-  hierarchy?: { missing: string[]; extra: string[] }
 }
 
 /** Download-leash trip point: this much SILENCE (no progress tick, no done)
@@ -146,8 +141,6 @@ interface FeaturesOpenPayload {
   segments: string[]
   applied: FeatureRow[]
   available: AvailableRow[]
-  held?: boolean
-  hierarchy?: { missing: string[]; extra: string[] }
 }
 
 @Component({
@@ -270,14 +263,11 @@ export class FeaturesViewerComponent implements OnDestroy {
     return n
   })
 
-  /** Fast membership: the hide keys currently in the pool. */
-  readonly #hiddenKeys = computed(() => {
-    const s = new Set<string>()
-    for (const d of this.hidden()) s.add(hiddenKey(d.featKind, d.appliesTo))
-    return s
-  })
-
   #cleanups: (() => void)[] = []
+
+  /** Last navigation path seen (joined) — the follow-navigation handler only
+   *  re-targets when this actually changes, never on fs-only invalidations. */
+  #lastNavKey = ''
 
   constructor() {
     this.#cleanups.push(EffectBus.on<FeaturesOpenPayload>('features:open', (p) => {
@@ -290,8 +280,6 @@ export class FeaturesViewerComponent implements OnDestroy {
         segments: Array.isArray(p.segments) ? p.segments : [],
         applied: Array.isArray(p.applied) ? p.applied : [],
         available: Array.isArray(p.available) ? p.available : [],
-        held: p.held,
-        ...(p.hierarchy ? { hierarchy: p.hierarchy } : {}),
       }
       // One tile at a time: re-clicking the SAME tile refreshes it in place;
       // clicking a DIFFERENT tile replaces the subject (and drops the old
@@ -306,16 +294,35 @@ export class FeaturesViewerComponent implements OnDestroy {
       if (!this.visible()) this.visible.set(true)
       // A fresh group replaces its rows — any in-flight ADD for it is settled.
       if (this.pending().size) this.pending.set(new Set())
-      // An adopt-feature just folded this tile — seed every OTHER direct
-      // feature OFF so only the chosen one activates.
-      const chosen = this.#pendingAdopt.get(group.cell)
-      if (chosen !== undefined) {
-        this.#pendingAdopt.delete(group.cell)
-        void this.#seedOthersOff(group, chosen)
-      }
       // Refresh the hidden pool so the rows' switches read their real state.
       void this.#refreshHidden()
     }))
+
+    // ── the panel FOLLOWS NAVIGATION ──────────────────────────────────
+    // While open, moving through the hive re-targets the panel to the new
+    // location: behaviors are managed where they apply. Lineage fires
+    // 'change' on every fs invalidation too, so re-target ONLY when the
+    // PATH actually changed (the key check) — an fs tick must not clobber
+    // a tile the participant opened via its puzzle-piece icon.
+    const lineage = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+      ?.get<EventTarget & { explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+    if (lineage?.addEventListener) {
+      this.#lastNavKey = (lineage.explorerSegments?.() ?? []).join('\u0000')
+      const onNav = (): void => {
+        const segs = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+        const key = segs.join('\u0000')
+        if (key === this.#lastNavKey) return
+        this.#lastNavKey = key
+        if (!this.visible() || segs.length === 0) return
+        EffectBus.emit('tile:action', {
+          action: 'features',
+          label: segs[segs.length - 1],
+          segments: segs,
+        })
+      }
+      lineage.addEventListener('change', onNav)
+      this.#cleanups.push(() => lineage.removeEventListener('change', onNav))
+    }
 
     this.#cleanups.push(EffectBus.on('features:viewer-close', () => {
       if (this.visible()) this.close()
@@ -389,7 +396,6 @@ export class FeaturesViewerComponent implements OnDestroy {
         // Tile-level outcome (no kind, or the row already refreshed away) —
         // settle every busy marker for this tile immediately.
         if (this.pending().size) this.pending.set(new Set())
-        this.#pendingAdopt.delete(group.cell)
         return
       }
       const key = this.rowKey(group, feat)
@@ -399,7 +405,6 @@ export class FeaturesViewerComponent implements OnDestroy {
         next.delete(key)
         return next
       })
-      if (p.ok !== true) this.#pendingAdopt.delete(group.cell)
       this.rowNotes.update(m => {
         if (p.ok === true && !m.has(key)) return m
         const next = new Map(m)
@@ -484,7 +489,6 @@ export class FeaturesViewerComponent implements OnDestroy {
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
     this.#clearDownloadLeash()
-    this.#cancelTargetBlur()
   }
 
   close(): void {
@@ -495,11 +499,6 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.rowNotes.set(new Map())
     this.query.set('')
     this.downloadResults.set([])
-    // Reset the target combobox so a reopen starts clean.
-    this.openTargetCell.set(null)
-    this.activeSuggestIndex.set(-1)
-    this.#targetSuggestions.clear()
-    this.#cancelTargetBlur()
     // In-flight downloads keep running (the bytes still land, and the header
     // sync pill keeps showing them) — only the panel-local status resets.
   }
@@ -515,26 +514,16 @@ export class FeaturesViewerComponent implements OnDestroy {
     return segs.length ? segs.join(' / ') : '/'
   }
 
-  dependencyHint(group: FeatureGroup, feat: FeatureRow): string {
-    if (feat.adopted !== false) return ''
-    const attached = feat.originSegments?.length ? feat.originSegments : group.segments
-    const childCount = group.hierarchy?.missing?.length ?? 0
-    if (attached.length > group.segments.length) {
-      return childCount > 0
-        ? `Depends on this branch's tiles; "${attached[attached.length - 1]}" is down the hierarchy.`
-        : `Attached down the hierarchy at ${this.attachedAt(group, feat)}.`
-    }
-    if (feat.view === 'website' && childCount > 0) {
-      return `Depends on ${childCount} child tile${childCount === 1 ? '' : 's'} in the hierarchy section.`
-    }
-    return ''
-  }
-
   // ── hidden pool (turn off, retain, restore) ───────────────
 
-  /** The location an applied feature is attached at — its declaring ancestor
-   *  for a cascaded feature, else the tile itself. This is the hide scope. */
+  /** WHERE this row's off-switch acts. `hideAt: 'node'` (scope features — the
+   *  website) = the tile the panel is describing: turning off a child page
+   *  writes the record at that page, so the rest of the site stays on.
+   *  Otherwise the feature's attach point (its declaring ancestor for a
+   *  cascaded capability, else the tile itself) — unchanged for node-local
+   *  features. */
   #segmentsFor(group: FeatureGroup, feat: RowLike): string[] {
+    if (feat.hideAt === 'node') return [...group.segments]
     return feat.originSegments?.length ? [...feat.originSegments] : [...group.segments]
   }
 
@@ -579,10 +568,77 @@ export class FeaturesViewerComponent implements OnDestroy {
     return out
   }
 
-  /** True when this feature is turned OFF (in the hidden pool) — the row's
-   *  switch reads this for its on/off state. Off features stay in the list. */
+  /** The hidden record currently suppressing this row HERE: the exact node's
+   *  record first; for a scope feature (`hideAt: 'node'`) also the NEAREST
+   *  ancestor's record — a branch turned off above you turns you off too
+   *  (matches the renderer's isFeatureHiddenWithin). Null = nothing off. */
+  #suppressingRecord(group: FeatureGroup, feat: RowLike): HiddenFeature | null {
+    const byKey = (key: string): HiddenFeature | undefined =>
+      this.hidden().find(r => hiddenKey(r.featKind, r.appliesTo) === key)
+    const own = byKey(this.rowKey(group, feat))
+    if (own) return own
+    if (feat.hideAt !== 'node') return null
+    for (let depth = group.segments.length - 1; depth >= 1; depth--) {
+      const rec = byKey(hiddenKey(feat.kind, group.segments.slice(0, depth)))
+      if (rec) return rec
+    }
+    return null
+  }
+
+  /** True when this feature is turned OFF (in the hidden pool, at this node
+   *  or above it) — the row's switch reads this for its on/off state. Off
+   *  features stay in the list. */
   isHidden(group: FeatureGroup, feat: RowLike): boolean {
-    return this.#hiddenKeys().has(this.rowKey(group, feat))
+    return this.#suppressingRecord(group, feat) != null
+  }
+
+  /** Where an off row was turned off, when that was ABOVE this node ('' =
+   *  turned off right here). Rendered on the off row so an inherited off is
+   *  never a mystery — and its restore flips the record that actually did it. */
+  offAt(group: FeatureGroup, feat: FeatureRow): string {
+    const rec = this.#suppressingRecord(group, feat)
+    if (!rec) return ''
+    const here = this.#segmentsFor(group, feat).join('/')
+    const at = rec.appliesTo.join('/')
+    return at === here ? '' : '/' + at
+  }
+
+  // ── website scope: root master switch + descendant overrides ──────
+
+  /** Is this node the row's scope ROOT (the site's declaring tile)? True for
+   *  every non-scope feature — only scope rows on descendants return false. */
+  #isScopeRoot(group: FeatureGroup, feat: FeatureRow): boolean {
+    if (!feat.scopeSegments?.length) return true
+    return feat.scopeSegments.join('/') === group.segments.join('/')
+  }
+
+  /** The scope this row belongs to, when the panel is on a DESCENDANT of the
+   *  scope root ('' at the root itself) — "part of the website at {path}". */
+  scopePartOf(group: FeatureGroup, feat: FeatureRow): string {
+    if (!feat.scopeSegments?.length || this.#isScopeRoot(group, feat)) return ''
+    return '/' + feat.scopeSegments.join('/')
+  }
+
+  /** Descendant overrides under this SCOPE-ROOT row — hidden records of the
+   *  same kind strictly below this node. The root row surfaces the count with
+   *  a one-tap reset ("toggle everything back on from the root"). */
+  overrideRecords(group: FeatureGroup, feat: FeatureRow): HiddenFeature[] {
+    if (!this.#isScopeRoot(group, feat) || feat.hideAt !== 'node') return []
+    const rootKey = group.segments.join('/')
+    return this.hidden().filter(r =>
+      r.featKind === feat.kind
+      && r.appliesTo.length > group.segments.length
+      && r.appliesTo.slice(0, group.segments.length).join('/') === rootKey)
+  }
+
+  /** Reset every descendant override under this scope root — the whole site
+   *  returns to the root switch's state (all pages back on). */
+  async resetOverrides(group: FeatureGroup, feat: FeatureRow): Promise<void> {
+    for (const rec of this.overrideRecords(group, feat)) {
+      const ok = await restoreFeature(rec.recordSig)
+      if (ok) EffectBus.emit('feature:restored', { featKind: rec.featKind, segments: rec.appliesTo })
+    }
+    await this.#refreshHidden()
   }
 
   /** The header search's live filter. Case-insensitive substring across the
@@ -631,12 +687,10 @@ export class FeaturesViewerComponent implements OnDestroy {
   }
 
   /** Is this row's switch ON? The switch shows RUNNING — only running. A
-   *  not-yet-adopted peer feature is always OFF; a GATED feature is inert, so
-   *  its switch never renders on (the honest-switch rule — the "needs your
-   *  OK" chip + allow button carry the story); a local feature is ON unless
-   *  it's in the hidden pool. */
+   *  GATED feature is inert, so its switch never renders on (the honest-
+   *  switch rule — the "needs your OK" chip + allow button carry the story);
+   *  otherwise a feature is ON unless a hidden record suppresses it here. */
   isOn(group: FeatureGroup, feat: FeatureRow): boolean {
-    if (feat.adopted === false) return false
     if (feat.gated) return false
     return !this.isHidden(group, feat)
   }
@@ -648,16 +702,16 @@ export class FeaturesViewerComponent implements OnDestroy {
     return feat.openable === true && this.isOn(group, feat)
   }
 
-  /** The applied row's switch. Three cases, all IN PLACE (the row never
+  /** The applied row's switch. Two cases, both IN PLACE (the row never
    *  leaves the list):
-   *   • not-yet-adopted peer feature → `adopt-feature`: THE individual add —
-   *     the only moment the branch folds / code-consent runs / bytes move.
-   *     Every OTHER feature of the tile starts OFF (seeded on the refresh).
-   *   • local + on  → off: written to the hidden pool (inert but retained;
-   *     the render gate keeps it from mounting).
-   *   • local + off → on: its pool member removed (the gate re-mounts). */
+   *   • on  → off: a hidden record written at this row's hide scope (inert
+   *     but retained; the render gate keeps it from mounting). For a scope
+   *     feature that scope is THE NODE YOU'RE ON — a page or branch turns
+   *     off individually while the rest of the site stays on.
+   *   • off → on: the SUPPRESSING record is removed — the one here, or the
+   *     ancestor record that turned this branch off (flipping a child back
+   *     on inside an off site turns the site back on from where you stand). */
   async toggleActive(group: FeatureGroup, feat: FeatureRow): Promise<void> {
-    if (feat.adopted === false) { this.#adoptFeature(group, feat); return }
     // Gated = inert: the switch is disabled in the template; guard here too so
     // nothing ever writes a hidden record for a feature that isn't running.
     if (feat.gated) return
@@ -665,255 +719,38 @@ export class FeaturesViewerComponent implements OnDestroy {
     else await this.#turnOff(group, feat)
   }
 
-  /** Cells with an adopt-feature in flight → the feature kind that was chosen.
-   *  When the post-fold refresh lands, every OTHER direct feature is seeded
-   *  OFF so only the chosen one activates ("click for each individual
-   *  feature" — nothing you didn't ask for turns on or downloads). */
-  #pendingAdopt = new Map<string, string>()
-
-  // ── adopt target ──────────────────────────────────────────────────
-  // WHERE the branch folds. Captured at adopt-click time (the group's own
-  // parent path — never re-derived from wherever the participant wanders) and
-  // EDITABLE per group, so a reorganized hive adopts straight into the right
-  // place instead of "fold at the original position, then move it". Keyed by
-  // cell; the version signal drives re-render on edits.
-  #targetOverrides = new Map<string, string>()
-  readonly #targetsVersion = signal(0)
-
-  /** True when this group is a not-yet-adopted peer tile — the target row
-   *  shows only then. A HELD tile (held !== false) keeps its location even
-   *  when peer DIFF rows (adopted:false) are mixed into its list — those
-   *  merge in place, they don't re-home anything. */
-  isPeerGroup(group: FeatureGroup): boolean {
-    return group.held === false
-  }
-
-  /** Merge one missing child (or all of them) from the peer's copy of this
-   *  held tile — the hierarchy half of the diff. Additive only. */
-  mergeChild(group: FeatureGroup, name?: string): void {
-    if (group.held === false) {
-      EffectBus.emit('tile:action', {
-        action: 'adopt-tiles',
-        label: group.cell,
-        at: this.#targetSegments(group),
-        ...(name ? { names: [name] } : {}),
-      })
-      return
-    }
-    EffectBus.emit('tile:action', {
-      action: 'merge-children',
-      label: group.cell,
-      segments: [...group.segments],
-      ...(name ? { names: [name] } : {}),
-    })
-  }
-
-  /** The group's adopt target as a display path ('/' = the hive root). */
-  targetFor(group: FeatureGroup): string {
-    this.#targetsVersion()   // establish reactive dependency
-    const override = this.#targetOverrides.get(group.cell)
-    if (override !== undefined) return override
-    const parent = group.segments.slice(0, -1)
-    return '/' + parent.join('/')
-  }
-
-  setTarget(group: FeatureGroup, raw: string): void {
-    this.#targetOverrides.set(group.cell, String(raw ?? ''))
-    this.#targetsVersion.update(v => v + 1)
-  }
-
-  /** Parse the target path into parent segments ([] = root). */
-  #targetSegments(group: FeatureGroup): string[] {
-    return this.targetFor(group).split('/').map(s => s.trim()).filter(Boolean)
-  }
-
-  // ── adopt-target autocomplete ─────────────────────────────────────
-  // The target input is a combobox: type a destination and either COMPLETE
-  // against locations that exist or CREATE the typed path (the drone refuses a
-  // target that doesn't resolve, so create-then-set is what makes an adopt into
-  // a not-yet-built folder actually land). One dropdown open at a time, keyed
-  // by cell; suggestions are computed async off HistoryService, so a per-cell
-  // sequence guards against a slow earlier query clobbering a newer one.
-
-  /** The cell whose target dropdown is open (null = none). */
-  readonly openTargetCell = signal<string | null>(null)
-  /** Keyboard cursor within the open dropdown (-1 = none highlighted). */
-  readonly activeSuggestIndex = signal(-1)
-
-  #targetSuggestions = new Map<string, AdoptTargetSuggestion[]>()
-  readonly #targetSuggestVersion = signal(0)
-  #targetSeq = new Map<string, number>()
-  #targetBlurTimer: ReturnType<typeof setTimeout> | null = null
-
-  /** Rows to render for a group's dropdown (reactive via the version signal). */
-  targetSuggestions(group: FeatureGroup): AdoptTargetSuggestion[] {
-    this.#targetSuggestVersion()
-    return this.#targetSuggestions.get(group.cell) ?? []
-  }
-
-  /** Open + non-empty — the only time the listbox renders. */
-  isTargetOpen(group: FeatureGroup): boolean {
-    return this.openTargetCell() === group.cell && this.targetSuggestions(group).length > 0
-  }
-
-  isActiveSuggest(index: number): boolean {
-    return this.activeSuggestIndex() === index
-  }
-
-  onTargetFocus(group: FeatureGroup): void {
-    this.#cancelTargetBlur()
-    this.openTargetCell.set(group.cell)
-    this.activeSuggestIndex.set(-1)
-    void this.#recomputeTargetSuggestions(group)
-  }
-
-  onTargetInput(group: FeatureGroup, value: string): void {
-    this.setTarget(group, value)
-    this.openTargetCell.set(group.cell)
-    this.activeSuggestIndex.set(-1)
-    void this.#recomputeTargetSuggestions(group)
-  }
-
-  /** Close on blur, but after a beat so a mousedown on an option still lands
-   *  (option clicks also preventDefault the blur — this is the belt-and-braces). */
-  onTargetBlur(group: FeatureGroup): void {
-    this.#cancelTargetBlur()
-    this.#targetBlurTimer = setTimeout(() => {
-      this.#targetBlurTimer = null
-      if (this.openTargetCell() === group.cell) this.openTargetCell.set(null)
-    }, 150)
-  }
-
-  onTargetKey(group: FeatureGroup, event: KeyboardEvent): void {
-    if (event.key === 'Escape') {
-      // Close the dropdown WITHOUT letting the panel's own Escape handler fire
-      // and close the whole panel.
-      if (this.openTargetCell() === group.cell) {
-        event.preventDefault()
-        event.stopPropagation()
-        this.openTargetCell.set(null)
-      }
-      return
-    }
-    if (!this.isTargetOpen(group)) return
-    const list = this.targetSuggestions(group)
-    if (event.key === 'ArrowDown') {
-      event.preventDefault()
-      this.activeSuggestIndex.set((this.activeSuggestIndex() + 1) % list.length)
-    } else if (event.key === 'ArrowUp') {
-      event.preventDefault()
-      this.activeSuggestIndex.set((this.activeSuggestIndex() - 1 + list.length) % list.length)
-    } else if (event.key === 'Enter') {
-      const i = this.activeSuggestIndex()
-      if (i >= 0 && i < list.length) {
-        event.preventDefault()
-        void this.pickTarget(group, list[i])
-      }
-    }
-  }
-
-  /** Accept a row: a `create` mints the path first (so the drone's existence
-   *  check passes), then either kind sets the field to the chosen path. */
-  async pickTarget(group: FeatureGroup, suggestion: AdoptTargetSuggestion): Promise<void> {
-    this.#cancelTargetBlur()
-    if (suggestion.kind === 'create') {
-      const ok = await createAdoptTargetPath(suggestion.segments)
-      if (!ok) return
-    }
-    this.setTarget(group, suggestion.path)
-    this.openTargetCell.set(null)
-    this.activeSuggestIndex.set(-1)
-  }
-
-  async #recomputeTargetSuggestions(group: FeatureGroup): Promise<void> {
-    const seq = (this.#targetSeq.get(group.cell) ?? 0) + 1
-    this.#targetSeq.set(group.cell, seq)
-    const list = await adoptTargetSuggestions(this.targetFor(group))
-    if (this.#targetSeq.get(group.cell) !== seq) return   // a newer query superseded this one
-    this.#targetSuggestions.set(group.cell, list)
-    this.#targetSuggestVersion.update(v => v + 1)
-  }
-
-  #cancelTargetBlur(): void {
-    if (!this.#targetBlurTimer) return
-    clearTimeout(this.#targetBlurTimer)
-    this.#targetBlurTimer = null
-  }
-
-  #adoptFeature(group: FeatureGroup, feat: FeatureRow): void {
-    const key = this.rowKey(group, feat)
-    if (this.pending().has(key)) return
-    this.pending.update(set => new Set([...set, key]))
-    this.#clearNote(key)   // a retry starts clean
-    // Seed-others-off applies ONLY to a fresh branch adopt. On a HELD tile
-    // this switch is a single-feature MERGE from the peer's copy — seeding
-    // would turn the participant's own existing features off.
-    if (group.held === false) this.#pendingAdopt.set(group.cell, feat.kind)
-    EffectBus.emit('tile:action', {
-      action: 'adopt-feature',
-      label: group.cell,
-      kind: feat.kind,
-      // The CHOSEN destination — SwarmAdoptDrone validates it exists
-      // (refuse-don't-guess) and folds the branch under it. For a held tile
-      // this is simply its own parent path (no target row shows).
-      at: this.#targetSegments(group),
-    })
-    // Backstop leash: every drone answer lands `features:outcome`, which
-    // settles the switch immediately — this fires only when the producer
-    // died without answering, and it says so instead of silently un-wedging.
-    setTimeout(() => {
-      this.#pendingAdopt.delete(group.cell)
-      if (!this.pending().has(key)) return
-      this.pending.update(set => {
-        const next = new Set(set)
-        next.delete(key)
-        return next
-      })
-      this.#noteNoAnswer(key)
-    }, 8000)
-  }
-
-  /** After an adopt-feature fold lands (the refreshed group arrives), turn
-   *  every OTHER direct feature OFF so only the chosen one is on. Idempotent —
-   *  hideFeature dedups by pool signature. */
-  async #seedOthersOff(group: FeatureGroup, chosenKind: string): Promise<void> {
-    for (const feat of group.applied) {
-      if (feat.origin !== 'direct' || feat.kind === chosenKind) continue
-      if (feat.adopted === false) continue   // still peer-only — nothing local to turn off
-      if (this.isHidden(group, feat)) continue
-      const segments = this.#segmentsFor(group, feat)
-      const sig = await hideFeature({ featKind: feat.kind, view: feat.view, label: feat.label, segments })
-      if (sig) EffectBus.emit('feature:hidden', { featKind: feat.kind, segments })
-    }
-    await this.#refreshHidden()
-  }
-
-  /** Turn a feature OFF: write it into the hidden pool (retained) and
-   *  re-reconcile its render via `feature:hidden`. The WEBSITE row's flip
-   *  additionally commits ONE menu change to the websites aggregation
-   *  layer — the switch IS the menu-membership control, and the layer's
-   *  ordinary history is its undo. */
+  /** Turn a feature OFF: write it into the hidden pool (retained) at this
+   *  row's hide scope — the NODE for a scope feature (per-page/branch off) —
+   *  and re-reconcile its render via `feature:hidden`. The WEBSITE row's flip
+   *  AT THE SITE ROOT additionally commits ONE menu change to the websites
+   *  aggregation layer (the master switch IS the menu-membership control;
+   *  a child-page off never touches the menu). */
   async #turnOff(group: FeatureGroup, feat: FeatureRow): Promise<void> {
     const segments = this.#segmentsFor(group, feat)
     const sig = await hideFeature({ featKind: feat.kind, view: feat.view, label: feat.label, segments })
     if (!sig) return
     EffectBus.emit('feature:hidden', { featKind: feat.kind, segments })
-    if (feat.view === 'website') void disableAggregation('websites', segments)
+    if (feat.view === 'website' && this.#isScopeRoot(group, feat)) void disableAggregation('websites', segments)
     await this.#refreshHidden()
   }
 
-  /** Turn a feature back ON: remove its hidden-pool member so the gate
-   *  re-mounts it. Resolves the pool record from the row's hide scope.
-   *  The WEBSITE row's flip also commits the enable to the websites
-   *  aggregation layer (idempotent by path — see enableAggregation). */
+  /** Turn a feature back ON: remove the SUPPRESSING hidden-pool member so the
+   *  gate re-mounts it — the record at this node, or the ancestor record that
+   *  turned this branch off (restoring from a child re-opens the branch).
+   *  The WEBSITE flip re-commits the menu enable only when the restored
+   *  record is the SITE ROOT's (idempotent by path — see enableAggregation). */
   async #turnOn(group: FeatureGroup, feat: FeatureRow): Promise<void> {
-    const key = this.rowKey(group, feat)
-    const rec = this.hidden().find(d => hiddenKey(d.featKind, d.appliesTo) === key)
+    const rec = this.#suppressingRecord(group, feat)
     if (!rec) return
     const ok = await restoreFeature(rec.recordSig)
     if (!ok) return
     EffectBus.emit('feature:restored', { featKind: rec.featKind, segments: rec.appliesTo })
-    if (feat.view === 'website') void enableAggregation('websites', rec.appliesTo, { label: group.cell })
+    const restoredRoot = feat.scopeSegments?.length
+      ? rec.appliesTo.join('/') === feat.scopeSegments.join('/')
+      : true
+    if (feat.view === 'website' && restoredRoot) {
+      void enableAggregation('websites', rec.appliesTo, { label: rec.appliesTo[rec.appliesTo.length - 1] ?? group.cell })
+    }
     await this.#refreshHidden()
   }
 
@@ -963,18 +800,11 @@ export class FeaturesViewerComponent implements OnDestroy {
     if (cleared) this.group.update(g => g ? { ...g } : g)
   }
 
-  /** Bulk download — mirror every selected local/held feature's bytes onto
-   *  this machine. For a not-yet-held peer row, "download" must be the same
-   *  real add as the row switch: fold the branch into the hive first. A silent
-   *  byte mirror alone leaves no local child, so returning to solo makes the
-   *  tile vanish even though the panel said the download completed. */
+  /** Bulk download — mirror every selected feature's bytes onto this
+   *  machine (the tiles are already held; adopt folded them). */
   downloadSelected(): void {
     const cells = new Set<string>()
     for (const { group, feat } of this.#selectedRows()) {
-      if (group.held === false && feat.adopted === false) {
-        this.#adoptFeature(group, feat as FeatureRow)
-        continue
-      }
       if (!feat.branchSig && !feat.gateSig) continue
       cells.add(group.cell)
       EffectBus.emit('features:download', {

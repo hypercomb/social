@@ -6,7 +6,12 @@
 // Beehaviors panel can list them. Beehaviors are managed ONE tile at a time:
 // clicking another tile's icon REPLACES the panel's subject (its name rides
 // in the panel header) — no accumulation, so you're never acting on several
-// tiles at once.
+// tiles at once. The panel also FOLLOWS NAVIGATION: while it is open, moving
+// through the hive re-targets it to the current location, so behaviors are
+// discovered and managed where they apply — go to the place, toggle the
+// behavior. Beehaviors are TOGGLES ONLY: tiles are never added, removed, or
+// merged from this window (adopt is adopt — SwarmAdoptDrone folds the tiles
+// on the adopt click itself).
 //
 // ── What counts as a "feature" of a tile ──────────────────────────────
 //
@@ -126,12 +131,16 @@ interface FeatureItem {
    *  `direct`, or the declaring ancestor for `cascade`. Empty/absent = the hive
    *  root. Surfaced on hover in the panel so you can see the exact location. */
   originSegments?: string[]
-  /** False when this feature belongs to a NOT-YET-ADOPTED peer tile — listed
-   *  from the peer's branch root so the participant can see what's on offer.
-   *  The panel renders its switch OFF; turning it on is the individual add
-   *  (`adopt-feature`), the only moment anything folds or downloads. Absent =
-   *  the feature is on the local layer. */
-  adopted?: boolean
+  /** For a SCOPE feature (a website): the path of the scope's ROOT — the
+   *  outermost ancestor (or the tile itself) declaring the feature. The panel
+   *  shows "part of the website at {path}" on descendant rows and offers the
+   *  root row the descendant-override reset. */
+  scopeSegments?: string[]
+  /** Where the row's off-switch writes its hidden record. `node` = at the
+   *  tile the panel is describing (scope features: turning off a child page
+   *  turns off that page/branch only). Absent/`origin` = at the feature's
+   *  attach point (the pre-existing behavior for node-local features). */
+  hideAt?: 'node' | 'origin'
   /** True when the verification gate currently BLOCKS this feature from
    *  activating (foreign + not authored + not verified + untrusted domain).
    *  The panel renders the "blocked by community" line + allow override. */
@@ -170,14 +179,6 @@ interface FeaturesOpenPayload {
   applied: FeatureItem[]
   /** Features the app knows but this layer doesn't have yet. */
   available: AvailableItem[]
-  /** True = the tile exists in the LOCAL layer (held). False = a peer-only
-   *  offer; the panel shows the adopt-target row only then. */
-  held?: boolean
-  /** When a live peer publishes a same-named copy of a HELD tile: the
-   *  children each side has that the other doesn't (names). `missing` rows
-   *  get an add affordance (merge that child's branch in); `extra` is
-   *  informational — a diff view never deletes the participant's content. */
-  hierarchy?: { missing: string[]; extra: string[] }
 }
 
 interface TileActionPayload {
@@ -205,7 +206,6 @@ interface StoreLike {
 interface HistoryLike {
   sign(lineage: { explorerSegments?: () => readonly string[] }): Promise<string>
   currentLayerAt(locationSig: string): Promise<unknown | null>
-  getLayerBySig?(sig: string): Promise<({ name?: string } & Record<string, unknown>) | null>
 }
 
 /** Unified shape resolved from either a visual bee or a cascading capability. */
@@ -343,13 +343,11 @@ export class ShowFeaturesDrone extends Drone {
     const branchSig = this.#peerBranchSig(label)
     const i18n = ioc?.get<I18nProvider>(I18N_KEY)
 
-    // ── PEER path: offered on the mesh, NOT yet part of the local layer ──
-    // Adopt is a window, not a download: list the branch's features from its
-    // ROOT layer alone (one tiny layer fetch + its decoration records — no
-    // subtree walk, no fold, no resources). Every row arrives adopted:false
-    // with its switch OFF; turning one on is the individual add.
+    // Behaviors belong to ADOPTED tiles. A peer-only offer has nothing local
+    // to toggle — the honest answer is "adopt it first", not a projection of
+    // the peer's rows (the old adopt-time decision surface).
     if (branchSig && !(await this.#isLocalCell(segments))) {
-      await this.#openPeer(label, segments, branchSig, registry, i18n)
+      this.emitEffect('activity:log', { message: `adopt "${label}" first — behaviors belong to adopted tiles`, icon: '○' })
       return
     }
 
@@ -433,42 +431,44 @@ export class ShowFeaturesDrone extends Drone {
       }
     }
 
-    // ── 2.5 PEER DIFF — two people share this tile with different content ──
-    // A live publisher offers a same-named copy of this HELD tile. The window
-    // is the diff surface: the peer's features NOT on the local copy arrive as
-    // adopted:false rows (switch OFF — flipping one MERGES that single feature
-    // onto your tile), and `hierarchy` carries the children each side has that
-    // the other doesn't. Root-layer reads only — the window stays free; the
-    // per-difference click is what downloads. A diff never deletes: `extra`
-    // (yours only) is informational.
-    let hierarchy: { missing: string[]; extra: string[] } | undefined
-    if (branchSig) {
-      const peerRoot = await this.#peerRootLayer(branchSig)
-      if (peerRoot) {
-        for (const rec of await this.#peerFeatureRecords(peerRoot, registry)) {
-          const feature = this.#recognize(rec.kind, registry)
+    // ── 2.5 WEBSITE SCOPE — the site this node belongs to ──
+    // A website is an APPLICATION SCOPE declared at its root: descendants are
+    // part of the site WITHOUT being stamped (never stamp descendants). Walk
+    // the lineage OUTERMOST-first; the first ancestor carrying the website
+    // feature is the site root. Every website row is `hideAt: 'node'` — its
+    // switch acts where you stand (turn a page/branch off by going there),
+    // and `scopeSegments` names the site root so the panel can say
+    // "part of the website at /root" and offer the root the override reset.
+    // A page-less node inside a site still shows the inherited row.
+    const websiteBee = registry.get('website')
+    if (websiteBee) {
+      let scopeRoot: string[] | undefined
+      for (let d = 1; d < segments.length; d++) {
+        const ancestor = segments.slice(0, d)
+        if (await this.#hasWebsiteAt(ancestor, websiteBee.decorationKind)) { scopeRoot = ancestor; break }
+      }
+      let websiteRow = applied.find(i => i.view === 'website')
+      if (!websiteRow && !appliedViews.has('website')) {
+        // The direct/decoration passes missed it — a SLOT-ONLY page (the
+        // website bee declares no `slot`, so §1b can't see it) or a page-less
+        // node inside a site. Probe the node itself, then mint the one row:
+        // DIRECT when this node is the scope root, CASCADE from the root
+        // otherwise.
+        const selfHas = await this.#hasWebsiteAt(segments, websiteBee.decorationKind)
+        if (selfHas || scopeRoot) {
+          const feature = this.#recognize(websiteBee.decorationKind, registry)
           if (feature) {
-            if (appliedViews.has(feature.view)) continue
-            appliedViews.add(feature.view)
-            const item = this.#describe(feature, rec.kind, i18n, 'direct', undefined, branchSig, segments)
-            item.adopted = false
-            applied.push(item)
-          } else if (rec.kind.startsWith('visual:') && !appliedViews.has(rec.kind)) {
-            appliedViews.add(rec.kind)
-            applied.push({
-              view: rec.kind,
-              kind: rec.kind,
-              label: this.#t(i18n, 'features.unknown', rec.kind),
-              description: this.#t(i18n, 'features.unknown.desc', ''),
-              cascades: false,
-              origin: 'direct',
-              originSegments: [...segments],
-              branchSig,
-              adopted: false,
-            })
+            appliedViews.add('website')
+            websiteRow = scopeRoot
+              ? this.#describe(feature, websiteBee.decorationKind, i18n, 'cascade', scopeRoot[scopeRoot.length - 1], undefined, scopeRoot)
+              : this.#describe(feature, websiteBee.decorationKind, i18n, 'direct', undefined, branchSig, segments)
+            applied.push(websiteRow)
           }
         }
-        hierarchy = await this.#hierarchyDiff(segments, peerRoot)
+      }
+      if (websiteRow) {
+        websiteRow.scopeSegments = [...(scopeRoot ?? segments)]
+        websiteRow.hideAt = 'node'
       }
     }
 
@@ -484,101 +484,20 @@ export class ShowFeaturesDrone extends Drone {
     await this.#stampGates(applied, segments, records)
 
     this.emitEffect<FeaturesOpenPayload>('features:open', {
-      cell: label, segments, applied, available, held: true,
-      ...(hierarchy && (hierarchy.missing.length || hierarchy.extra.length) ? { hierarchy } : {}),
+      cell: label, segments, applied, available,
     })
   }
 
-  /** The peer branch's ROOT layer, fetched through the broker (one small
-   *  layer read — local hit or a single HTTP/mesh fetch). Null when
-   *  unreachable or malformed. */
-  async #peerRootLayer(branchSig: string): Promise<Record<string, unknown> | null> {
-    const broker = this.#ioc()?.get<{ fetchBySig?: (sig: string, type: 'layer' | 'resource' | 'dependency') => Promise<Uint8Array | null> }>(BROKER_KEY)
-    try {
-      const bytes = await broker?.fetchBySig?.(branchSig, 'layer')
-      if (!bytes) return null
-      const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
-      return parsed && typeof parsed === 'object' ? parsed : null
-    } catch {
-      return null
-    }
-  }
-
-  /** Feature kinds carried by a peer root layer: its decoration records plus
-   *  a synthetic website record when the first-class `website` slot is
-   *  non-empty (the renderer's read-through order). */
-  async #peerFeatureRecords(
-    layer: Record<string, unknown>,
-    registry: VisualBeeRegistry,
-  ): Promise<{ kind: string }[]> {
-    const store = this.#ioc()?.get<StoreLike>(STORE_KEY)
-    const out: { kind: string }[] = []
-    const decorations = Array.isArray(layer['decorations']) ? layer['decorations'] as unknown[] : []
-    for (const raw of decorations) {
-      const sig = String(raw ?? '')
-      if (!SIG_RE.test(sig)) continue
-      try {
-        const blob = await store?.getResource(sig)
-        if (!blob) continue
-        const rec = JSON.parse(await blob.text()) as { kind?: string }
-        if (typeof rec?.kind === 'string' && rec.kind) out.push({ kind: rec.kind })
-      } catch { /* unavailable record — skip */ }
-    }
-    const websiteBee = registry.get('website')
+  /** Does this location's layer carry the website feature — a non-empty
+   *  first-class `website` slot, or a `visual:website:page` decoration?
+   *  The scope-root probe for the lineage walk above. */
+  async #hasWebsiteAt(segments: readonly string[], websiteKind: string): Promise<boolean> {
+    const layer = await this.#layerAt(segments)
+    if (!layer) return false
     const slot = layer[WEBSITE_SLOT]
-    if (websiteBee?.decorationKind && Array.isArray(slot) && slot.some(s => SIG_RE.test(String(s)))
-        && !out.some(r => r.kind === websiteBee.decorationKind)) {
-      out.push({ kind: websiteBee.decorationKind })
-    }
-    return out
-  }
-
-  /** Direct-children diff between the LOCAL tile at `segments` and a peer's
-   *  root layer. Names resolve via getLayerBySig for local sigs and via the
-   *  broker (tiny layer reads, direct children only — never recursive) for
-   *  peer sigs the local pool doesn't hold. */
-  async #hierarchyDiff(
-    segments: readonly string[],
-    peerRoot: Record<string, unknown>,
-  ): Promise<{ missing: string[]; extra: string[] } | undefined> {
-    const ioc = this.#ioc()
-    const history = ioc?.get<HistoryLike>(HISTORY_KEY)
-    const broker = ioc?.get<{ fetchBySig?: (sig: string, type: 'layer' | 'resource' | 'dependency') => Promise<Uint8Array | null> }>(BROKER_KEY)
-    if (!history?.getLayerBySig) return undefined
-
-    const resolveNames = async (children: unknown, peer: boolean): Promise<string[]> => {
-      const names: string[] = []
-      if (!Array.isArray(children)) return names
-      for (const raw of children) {
-        const entry = String(raw ?? '').trim()
-        if (!entry) continue
-        if (!SIG_RE.test(entry)) { names.push(entry); continue }   // literal name
-        let layer = await history.getLayerBySig!(entry).catch(() => null)
-        if (!layer && peer) {
-          try {
-            const bytes = await broker?.fetchBySig?.(entry, 'layer')
-            if (bytes) layer = JSON.parse(new TextDecoder().decode(bytes)) as { name?: string }
-          } catch { /* unreachable child — skip */ }
-        }
-        const name = typeof layer?.name === 'string' ? layer.name.trim() : ''
-        if (name) names.push(name)
-      }
-      return names
-    }
-
-    try {
-      const locationSig = await history.sign({ explorerSegments: () => segments })
-      const local = await history.currentLayerAt(locationSig) as { children?: unknown } | null
-      const localNames = await resolveNames(local?.children, false)
-      const peerNames = await resolveNames(peerRoot['children'], true)
-      const localSet = new Set(localNames)
-      const peerSet = new Set(peerNames)
-      const missing = peerNames.filter(n => !localSet.has(n))
-      const extra = localNames.filter(n => !peerSet.has(n))
-      return { missing, extra }
-    } catch {
-      return undefined
-    }
+    if (Array.isArray(slot) && slot.some(s => typeof s === 'string' && SIG_RE.test(s))) return true
+    if (!websiteKind) return false
+    return (await this.#decorationKindsAt(segments)).includes(websiteKind)
   }
 
   /** Does a layer resolve for this exact location — i.e. is the tile part of
@@ -593,215 +512,6 @@ export class ShowFeaturesDrone extends Drone {
     } catch {
       return false
     }
-  }
-
-  /** List a NOT-YET-ADOPTED peer tile's features from its branch ROOT layer
-   *  alone — one small layer fetch plus its decoration records. No fold, no
-   *  subtree walk, no resource pulls: nothing enters the hive and nothing
-   *  heavy downloads until a feature's switch is turned on (`adopt-feature`).
-   *  Rows carry `adopted: false` so the panel renders their switches OFF;
-   *  `available` is empty (you can't ADD features to a tile you don't hold). */
-  async #openPeer(
-    label: string,
-    segments: readonly string[],
-    branchSig: string,
-    registry: VisualBeeRegistry,
-    i18n: I18nProvider | undefined,
-  ): Promise<void> {
-    const ioc = this.#ioc()
-    const broker = ioc?.get<{ fetchBySig?: (sig: string, type: 'layer' | 'resource' | 'dependency') => Promise<Uint8Array | null> }>(BROKER_KEY)
-    const store = ioc?.get<StoreLike>(STORE_KEY)
-
-    let layer: Record<string, unknown> | null = null
-    try {
-      const bytes = await broker?.fetchBySig?.(branchSig, 'layer')
-      if (bytes) layer = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
-    } catch { /* unreachable / malformed root — list nothing rather than guess */ }
-
-    const appliedViews = new Set<string>()
-    const applied: FeatureItem[] = []
-    const pushPeer = (item: FeatureItem): void => {
-      item.adopted = false
-      applied.push(item)
-    }
-
-    // Decoration-borne features on the peer root.
-    const decorations = Array.isArray(layer?.['decorations']) ? layer!['decorations'] as unknown[] : []
-    for (const raw of decorations) {
-      const sig = String(raw ?? '')
-      if (!SIG_RE.test(sig)) continue
-      try {
-        const blob = await store?.getResource(sig)
-        if (!blob) continue
-        const rec = JSON.parse(await blob.text()) as { kind?: string; payload?: unknown }
-        const kind = typeof rec?.kind === 'string' ? rec.kind : ''
-        if (!kind) continue
-        const feature = this.#recognize(kind, registry)
-        if (feature) {
-          if (appliedViews.has(feature.view)) continue
-          appliedViews.add(feature.view)
-          pushPeer(this.#describe(feature, kind, i18n, 'direct', undefined, branchSig, segments))
-        } else if (kind.startsWith('visual:') && !appliedViews.has(kind)) {
-          appliedViews.add(kind)
-          pushPeer({
-            view: kind,
-            kind,
-            label: this.#t(i18n, 'features.unknown', kind),
-            description: this.#t(i18n, 'features.unknown.desc', ''),
-            cascades: false,
-            origin: 'direct',
-            originSegments: [...segments],
-            branchSig,
-          })
-        }
-      } catch { /* unavailable record — skip */ }
-    }
-
-    // The website feature may live in the first-class `website` slot instead
-    // of a decoration — same read-through order the renderer uses.
-    const websiteBee = registry.get('website')
-    const slot = layer?.[WEBSITE_SLOT]
-    if (websiteBee && Array.isArray(slot) && slot.some(s => SIG_RE.test(String(s)))
-        && !appliedViews.has(websiteBee.view)) {
-      appliedViews.add(websiteBee.view)
-      const feature = this.#recognize(websiteBee.decorationKind, registry)
-      if (feature) pushPeer(this.#describe(feature, websiteBee.decorationKind, i18n, 'direct', undefined, branchSig, segments))
-    }
-
-    for (const item of await this.#peerDescendantFeatures(layer, segments, branchSig, registry, i18n)) {
-      pushPeer(item)
-    }
-
-    this.emitEffect<FeaturesOpenPayload>('features:open', {
-      cell: label,
-      segments: [...segments],
-      applied,
-      available: [],
-      held: false,
-      hierarchy: { missing: await this.#peerChildNames(layer), extra: [] },
-    })
-  }
-
-  async #peerDescendantFeatures(
-    root: Record<string, unknown> | null,
-    rootSegments: readonly string[],
-    branchSig: string,
-    registry: VisualBeeRegistry,
-    i18n: I18nProvider | undefined,
-  ): Promise<FeatureItem[]> {
-    const out: FeatureItem[] = []
-    const seen = new Set<string>()
-    const walk = async (layer: Record<string, unknown> | null, path: readonly string[]): Promise<void> => {
-      if (!layer) return
-      for (const child of await this.#peerChildren(layer)) {
-        const childPath = [...path, child.name]
-        await this.#appendPeerLayerFeatures(child.layer, childPath, branchSig, registry, i18n, seen, out)
-        await walk(child.layer, childPath)
-      }
-    }
-    await walk(root, rootSegments)
-    return out
-  }
-
-  async #appendPeerLayerFeatures(
-    layer: Record<string, unknown>,
-    segments: readonly string[],
-    branchSig: string,
-    registry: VisualBeeRegistry,
-    i18n: I18nProvider | undefined,
-    seen: Set<string>,
-    out: FeatureItem[],
-  ): Promise<void> {
-    const push = (kind: string): void => {
-      const key = `${kind}\u0000${segments.join('\u0000')}`
-      if (seen.has(key)) return
-      seen.add(key)
-      const feature = this.#recognize(kind, registry)
-      if (feature) {
-        out.push(this.#describe(feature, kind, i18n, 'direct', undefined, branchSig, segments))
-      } else if (kind.startsWith('visual:')) {
-        out.push({
-          view: kind,
-          kind,
-          label: this.#t(i18n, 'features.unknown', kind),
-          description: this.#t(i18n, 'features.unknown.desc', ''),
-          cascades: false,
-          origin: 'direct',
-          originSegments: [...segments],
-          branchSig,
-        })
-      }
-    }
-
-    const decorations = Array.isArray(layer['decorations']) ? layer['decorations'] as unknown[] : []
-    for (const raw of decorations) {
-      const sig = String(raw ?? '').trim().toLowerCase()
-      if (!SIG_RE.test(sig)) continue
-      const rec = await this.#peerDecorationRecord(sig)
-      const kind = typeof rec?.kind === 'string' ? rec.kind : ''
-      if (kind) push(kind)
-    }
-
-    const websiteBee = registry.get('website')
-    const slot = layer[WEBSITE_SLOT]
-    if (websiteBee?.decorationKind && Array.isArray(slot) && slot.some(s => SIG_RE.test(String(s)))) {
-      push(websiteBee.decorationKind)
-    }
-  }
-
-  async #peerDecorationRecord(sig: string): Promise<{ kind?: string } | null> {
-    const ioc = this.#ioc()
-    const store = ioc?.get<StoreLike>(STORE_KEY)
-    const broker = ioc?.get<{ fetchBySig?: (sig: string, type: 'layer' | 'resource' | 'dependency') => Promise<Uint8Array | null> }>(BROKER_KEY)
-    try {
-      const blob = await store?.getResource(sig)
-      if (blob) return JSON.parse(await blob.text()) as { kind?: string }
-    } catch { /* try broker */ }
-    try {
-      const bytes = await broker?.fetchBySig?.(sig, 'resource')
-      if (bytes) return JSON.parse(new TextDecoder().decode(bytes)) as { kind?: string }
-    } catch { /* unavailable */ }
-    return null
-  }
-
-  async #peerChildNames(layer: Record<string, unknown> | null): Promise<string[]> {
-    const names: string[] = []
-    const children = Array.isArray(layer?.['children']) ? layer!['children'] as unknown[] : []
-    for (const raw of children) {
-      const entry = String(raw ?? '').trim()
-      if (!entry) continue
-      if (!SIG_RE.test(entry)) {
-        names.push(entry)
-        continue
-      }
-      const child = (await this.#peerChildren({ children: [entry] }))[0]
-      if (child?.name) names.push(child.name)
-    }
-    return names
-  }
-
-  async #peerChildren(layer: Record<string, unknown> | null): Promise<Array<{ name: string; layer: Record<string, unknown> }>> {
-    const history = this.#ioc()?.get<HistoryLike>(HISTORY_KEY)
-    const broker = this.#ioc()?.get<{ fetchBySig?: (sig: string, type: 'layer' | 'resource' | 'dependency') => Promise<Uint8Array | null> }>(BROKER_KEY)
-    const out: Array<{ name: string; layer: Record<string, unknown> }> = []
-    const children = Array.isArray(layer?.['children']) ? layer!['children'] as unknown[] : []
-    for (const raw of children) {
-      const entry = String(raw ?? '').trim()
-      if (!entry) continue
-      if (!SIG_RE.test(entry)) {
-        continue
-      }
-      let child = await history?.getLayerBySig?.(entry).catch(() => null)
-      if (!child) {
-        try {
-          const bytes = await broker?.fetchBySig?.(entry, 'layer')
-          if (bytes) child = JSON.parse(new TextDecoder().decode(bytes)) as { name?: string }
-        } catch { /* unavailable child - skip */ }
-      }
-      const name = typeof child?.name === 'string' ? child.name.trim() : ''
-      if (name && child) out.push({ name, layer: child })
-    }
-    return out
   }
 
   /** Stamp `gated` / `gateSig` / `publisherDomain` onto each DIRECT feature.

@@ -17,7 +17,7 @@ import { Drone, SITE_VIEW_IOC_KEY, RESOURCE_URL_PREFIX, I18N_IOC_KEY, type I18nP
 import { rewritePageRefs } from '../../sharing/decoration-closure.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
 import { featureNeedsReview } from '../../sharing/feature-availability.js'
-import { isFeatureHidden } from '../../sharing/feature-hidden.js'
+import { isFeatureHiddenWithin } from '../../sharing/feature-hidden.js'
 
 type MountState = {
   host: HTMLDivElement
@@ -330,14 +330,18 @@ export class SiteViewDrone extends Drone {
       // authoring is never gated. Showing the review gate INSTEAD of mounting
       // is what keeps an un-adopted feature's heavy payload off the wire.
       // Hidden gate (takes precedence — it's the retainable "off"). If the
-      // participant has HIDDEN this cell's website feature, it stays inert:
-      // no mount, no scripts, no fetch. Restoring it from the features panel
-      // re-reconciles and brings it back. The feature's identity is the website
-      // bee's decoration kind — the same kind the panel writes the hide for.
+      // participant has HIDDEN the website feature at this cell OR ANYWHERE
+      // ABOVE it, the page stays inert: no mount, no scripts, no fetch. A
+      // website is a scope — the root's hide record is the whole site's
+      // master off, and a mid-branch record silences just that branch (the
+      // Beehaviors panel writes the record at the node you toggle). Restoring
+      // it from the panel re-reconciles and brings it back. The feature's
+      // identity is the website bee's decoration kind — the same kind the
+      // panel writes the hide for.
       const websiteKind = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
         ?.get<{ get: (view: string) => { decorationKind?: string } | undefined }>('@diamondcoreprocessor.com/VisualBeeRegistry')
         ?.get('website')?.decorationKind
-      const hidden = websiteKind ? await isFeatureHidden(segments, websiteKind) : false
+      const hidden = websiteKind ? await isFeatureHiddenWithin(segments, websiteKind) : false
       if (gen !== this.#gen) return
       if (hidden) {
         this.#removeReviewGate()
