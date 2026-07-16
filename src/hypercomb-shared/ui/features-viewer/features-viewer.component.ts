@@ -39,7 +39,7 @@ import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 import { HcDockedPanelDirective } from '../docked-panel/hc-docked-panel.directive'
 import { markVerified, markAllowedRoot, branchRootFor } from './feature-verified'
 import { hideFeature, restoreFeature, loadHidden, hiddenKey, type HiddenFeature } from './feature-hidden'
-import { enableAggregation, disableAggregation } from '../../core/aggregation-layer'
+import { enableAggregation, disableAggregation, listAggregation } from '../../core/aggregation-layer'
 
 /** A feature already applied to the layer. */
 interface FeatureRow {
@@ -294,8 +294,10 @@ export class FeaturesViewerComponent implements OnDestroy {
       if (!this.visible()) this.visible.set(true)
       // A fresh group replaces its rows — any in-flight ADD for it is settled.
       if (this.pending().size) this.pending.set(new Set())
-      // Refresh the hidden pool so the rows' switches read their real state.
+      // Refresh the hidden pool + websites-menu membership so the rows'
+      // checkboxes read their real state.
       void this.#refreshHidden()
+      void this.#refreshMembers()
     }))
 
     // ── the panel FOLLOWS NAVIGATION ──────────────────────────────────
@@ -661,18 +663,13 @@ export class FeaturesViewerComponent implements OnDestroy {
     this.query.set(String(value ?? ''))
   }
 
-  /** The "On this layer" rows — every applied feature EXCEPT the turned-off
-   *  ones, which move to the "Off — kept here" section below. Nothing is
-   *  deleted by turning a feature off; its row just changes section. */
+  /** The "On this layer" rows — every applied feature, on AND off, in ONE
+   *  list. The row is the toggle: an off row stays exactly where it is with
+   *  its checkbox cleared (plus a "turned off at /path" note when the record
+   *  that silences it lives above this node). Nothing ever moves or
+   *  disappears when toggled. */
   visibleApplied(group: FeatureGroup): FeatureRow[] {
-    return group.applied.filter(f => !this.isHidden(group, f) && this.#matchesQuery(group, f))
-  }
-
-  /** The "Off — kept here" rows — applied features the participant turned off
-   *  (their identity sits in the hidden pool). Each has a one-tap restore;
-   *  the section is omitted entirely when this is empty. */
-  hiddenApplied(group: FeatureGroup): FeatureRow[] {
-    return group.applied.filter(f => this.isHidden(group, f) && this.#matchesQuery(group, f))
+    return group.applied.filter(f => this.#matchesQuery(group, f))
   }
 
   /** The "Available to add" rows, through the same search filter. */
@@ -680,19 +677,19 @@ export class FeaturesViewerComponent implements OnDestroy {
     return group.available.filter(f => this.#matchesQuery(group, f))
   }
 
-  /** Restore a turned-off feature — the hidden section's one-tap action.
-   *  Same path as flipping the old in-list switch back on. */
-  restore(group: FeatureGroup, feat: FeatureRow): void {
-    void this.#turnOn(group, feat)
-  }
-
-  /** Is this row's switch ON? The switch shows RUNNING — only running. A
-   *  GATED feature is inert, so its switch never renders on (the honest-
-   *  switch rule — the "needs your OK" chip + allow button carry the story);
-   *  otherwise a feature is ON unless a hidden record suppresses it here. */
+  /** Is this row's checkbox CHECKED — is the behavior ENABLED here? A hidden
+   *  record (at this node or above) always means off. A WEBSITE at its scope
+   *  root is additionally enabled only when the site is a MEMBER of the
+   *  websites menu — enabling IS what mints the /websites link, so a freshly
+   *  adopted site arrives unchecked and checking it is the explicit enable.
+   *  The community gate is a separate story: a gated row keeps its checkbox
+   *  (your intent) and carries the "needs your OK" chip + allow beside it. */
   isOn(group: FeatureGroup, feat: FeatureRow): boolean {
-    if (feat.gated) return false
-    return !this.isHidden(group, feat)
+    if (this.isHidden(group, feat)) return false
+    if (feat.view === 'website' && this.#isScopeRoot(group, feat)) {
+      return this.websiteMembers().has(group.segments.join('/'))
+    }
+    return true
   }
 
   /** Can this row be ENTERED as a view? True for on, local view behaviours
@@ -702,21 +699,41 @@ export class FeaturesViewerComponent implements OnDestroy {
     return feat.openable === true && this.isOn(group, feat)
   }
 
-  /** The applied row's switch. Two cases, both IN PLACE (the row never
-   *  leaves the list):
-   *   • on  → off: a hidden record written at this row's hide scope (inert
-   *     but retained; the render gate keeps it from mounting). For a scope
-   *     feature that scope is THE NODE YOU'RE ON — a page or branch turns
-   *     off individually while the rest of the site stays on.
-   *   • off → on: the SUPPRESSING record is removed — the one here, or the
-   *     ancestor record that turned this branch off (flipping a child back
-   *     on inside an off site turns the site back on from where you stand). */
+  /** The ROW is the toggle. A plain click flips the behavior in place (the
+   *  row never moves or disappears); Ctrl/Shift-click selects the row for the
+   *  bulk bar instead. */
+  rowClick(group: FeatureGroup, feat: FeatureRow, event?: MouseEvent): void {
+    if (event && (event.ctrlKey || event.metaKey || event.shiftKey)) {
+      this.selectRow(group, feat)
+      return
+    }
+    if (this.isPending(group, feat)) return
+    void this.toggleActive(group, feat)
+  }
+
+  /** An available row's click: ADD it when it's mechanically addable;
+   *  Ctrl/Shift-click selects it for the bulk bar. Non-addable rows (view
+   *  bees whose content must be authored) only select. */
+  availableRowClick(group: FeatureGroup, feat: AvailableRow, event?: MouseEvent): void {
+    if (event && (event.ctrlKey || event.metaKey || event.shiftKey)) {
+      this.selectRow(group, feat)
+      return
+    }
+    if (feat.addable) this.enableAvailable(group, feat)
+    else this.selectRow(group, feat)
+  }
+
+  /** Flip the row's behavior. Two cases, both IN PLACE:
+   *   • enabled → off: a hidden record written at this row's hide scope. For
+   *     a scope feature that scope is THE NODE YOU'RE ON — a page or branch
+   *     turns off individually while the rest of the site stays on.
+   *   • off → enabled: the SUPPRESSING record is removed — the one here, or
+   *     the ancestor record that turned this branch off; a WEBSITE at its
+   *     scope root is also (re)committed into the websites menu, which is
+   *     what makes its /websites link appear. */
   async toggleActive(group: FeatureGroup, feat: FeatureRow): Promise<void> {
-    // Gated = inert: the switch is disabled in the template; guard here too so
-    // nothing ever writes a hidden record for a feature that isn't running.
-    if (feat.gated) return
-    if (this.isHidden(group, feat)) await this.#turnOn(group, feat)
-    else await this.#turnOff(group, feat)
+    if (this.isOn(group, feat)) await this.#turnOff(group, feat)
+    else await this.#turnOn(group, feat)
   }
 
   /** Turn a feature OFF: write it into the hidden pool (retained) at this
@@ -730,32 +747,49 @@ export class FeaturesViewerComponent implements OnDestroy {
     const sig = await hideFeature({ featKind: feat.kind, view: feat.view, label: feat.label, segments })
     if (!sig) return
     EffectBus.emit('feature:hidden', { featKind: feat.kind, segments })
-    if (feat.view === 'website' && this.#isScopeRoot(group, feat)) void disableAggregation('websites', segments)
-    await this.#refreshHidden()
-  }
-
-  /** Turn a feature back ON: remove the SUPPRESSING hidden-pool member so the
-   *  gate re-mounts it — the record at this node, or the ancestor record that
-   *  turned this branch off (restoring from a child re-opens the branch).
-   *  The WEBSITE flip re-commits the menu enable only when the restored
-   *  record is the SITE ROOT's (idempotent by path — see enableAggregation). */
-  async #turnOn(group: FeatureGroup, feat: FeatureRow): Promise<void> {
-    const rec = this.#suppressingRecord(group, feat)
-    if (!rec) return
-    const ok = await restoreFeature(rec.recordSig)
-    if (!ok) return
-    EffectBus.emit('feature:restored', { featKind: rec.featKind, segments: rec.appliesTo })
-    const restoredRoot = feat.scopeSegments?.length
-      ? rec.appliesTo.join('/') === feat.scopeSegments.join('/')
-      : true
-    if (feat.view === 'website' && restoredRoot) {
-      void enableAggregation('websites', rec.appliesTo, { label: rec.appliesTo[rec.appliesTo.length - 1] ?? group.cell })
+    if (feat.view === 'website' && this.#isScopeRoot(group, feat)) {
+      await disableAggregation('websites', segments).catch(() => false)
+      await this.#refreshMembers()
     }
     await this.#refreshHidden()
   }
 
+  /** Turn a feature ON. Removes the SUPPRESSING hidden-pool member when one
+   *  exists (the record at this node, or the ancestor record that turned this
+   *  branch off — restoring from a child re-opens the branch). ENABLING a
+   *  WEBSITE at its scope root ALSO commits it into the websites menu — this
+   *  is THE moment the /websites link appears, and it runs even when there is
+   *  no hidden record at all (a freshly adopted site is not hidden, just not
+   *  yet a member). */
+  async #turnOn(group: FeatureGroup, feat: FeatureRow): Promise<void> {
+    const rec = this.#suppressingRecord(group, feat)
+    if (rec) {
+      const ok = await restoreFeature(rec.recordSig)
+      if (!ok) return
+      EffectBus.emit('feature:restored', { featKind: rec.featKind, segments: rec.appliesTo })
+      await this.#refreshHidden()
+    }
+    if (feat.view === 'website' && this.#isScopeRoot(group, feat)) {
+      const segments = rec?.appliesTo?.length ? rec.appliesTo : this.#segmentsFor(group, feat)
+      await enableAggregation('websites', segments, {
+        label: segments[segments.length - 1] ?? group.cell,
+      }).catch(() => null)
+      await this.#refreshMembers()
+    }
+  }
+
   async #refreshHidden(): Promise<void> {
     this.hidden.set(await loadHidden())
+  }
+
+  /** Current websites-menu membership (path keys) — what the website root
+   *  row's checkbox reads. Refreshed with the hidden pool and after every
+   *  website enable/disable. */
+  readonly websiteMembers = signal<ReadonlySet<string>>(new Set())
+
+  async #refreshMembers(): Promise<void> {
+    const list = await listAggregation('websites').catch(() => [])
+    this.websiteMembers.set(new Set(list.map(m => m.segments.join('/'))))
   }
 
   // ── allow / add / download — the toggles are REAL ─────────────────

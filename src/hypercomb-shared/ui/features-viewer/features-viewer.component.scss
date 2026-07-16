@@ -248,66 +248,42 @@ $accent: #c8b8ff;
   &.available:not(:hover):not(.selected) { opacity: 0.82; }
 }
 
-// ── feature switch ────────────────────────────────────────────────
-// The REAL toggle: ON (applied) → click turns the feature off into the
-// retainable hidden pool; OFF (available) → click ADDS it to the tile via
-// the bee's own slash command. Cold steel track, accent knob when on.
-.feat-toggle {
+// ── row checkbox ──────────────────────────────────────────────────
+// The ROW is the toggle; this square just shows the state. Checked =
+// enabled here (for a website root: committed into the websites menu).
+// Cold steel square, accent check when on — no motion.
+.feat-check {
   flex: 0 0 auto;
   align-self: flex-start;
   margin-top: 0.18em;
-  width: 2em;
-  height: 1.1em;
+  width: 1.05em;
+  height: 1.05em;
   display: flex;
   align-items: center;
-  padding: 0.1em;
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  cursor: pointer;
-  transition: background 150ms ease, border-color 150ms ease;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.05);
+  font-size: 0.85em;
+  line-height: 1;
+  color: transparent;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 
-  .knob {
-    width: 0.8em;
-    height: 0.8em;
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.45);
-    transition: transform 150ms ease, background 150ms ease;
-  }
-
-  &:hover { border-color: rgba($accent, 0.55); }
-  &:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: 1px; }
-
-  &.on {
-    border-color: rgba($accent, 0.6);
-    background: rgba($accent, 0.22);
-
-    .knob {
-      transform: translateX(0.85em);
-      background: $accent;
-      box-shadow: 0 0 6px rgba($accent, 0.5);
-    }
-  }
-
-  // Gated rows: the switch is honest — OFF and not clickable. The chip +
-  // allow button on the row are the path to on.
-  &:disabled:not(.busy) {
-    opacity: 0.55;
-    cursor: default;
-
-    &:hover { border-color: rgba(255, 255, 255, 0.22); }
-  }
-
-  &.busy {
-    opacity: 0.5;
-    cursor: progress;
+  &.checked {
+    border-color: rgba($accent, 0.65);
+    background: rgba($accent, 0.2);
+    color: $accent;
   }
 }
 
-// Keeps non-addable available rows column-aligned with switchable ones.
-.feat-toggle-spacer {
+.features-row:hover .feat-check { border-color: rgba($accent, 0.55); }
+.features-row.busy { opacity: 0.55; cursor: progress; }
+.features-row:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
+
+// Keeps non-addable available rows column-aligned with addable ones.
+.feat-check-spacer {
   flex: 0 0 auto;
-  width: 2em;
+  width: 1.05em;
 }
 
 .feature-meta {

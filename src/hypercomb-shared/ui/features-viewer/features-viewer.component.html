@@ -148,37 +148,37 @@
               <span class="section-label">{{ 'features.section.applied' | t }}</span>
               <span class="section-count">{{ visibleApplied(group).length }}</span>
             </div>
-            @if (visibleApplied(group).length === 0 && hiddenApplied(group).length === 0) {
+            @if (visibleApplied(group).length === 0) {
               <p class="section-empty">{{ 'features.applied.empty' | t }}</p>
             } @else {
               <ul class="features-list">
                 @for (feat of visibleApplied(group); track feat.kind) {
+                  <!-- THE ROW IS THE TOGGLE: click anywhere to flip the
+                       behavior in place (checkbox shows the state); Ctrl/
+                       Shift-click selects the row for the bulk bar. A WEBSITE
+                       row at its site root: checking it is the explicit
+                       enable — it commits the site into the websites menu, so
+                       its /websites link appears the moment it's checked. For
+                       a scope feature the flip acts AT THIS NODE, so a page
+                       or branch turns off individually. The row never moves
+                       or disappears. -->
                   <li
                     class="features-row"
+                    role="checkbox"
+                    tabindex="0"
+                    [attr.aria-checked]="isOn(group, feat)"
                     [class.selected]="isSelected(group, feat)"
                     [class.gated]="feat.gated"
                     [class.off]="!isOn(group, feat)"
-                    (click)="selectRow(group, feat)"
+                    [class.busy]="isPending(group, feat)"
+                    (click)="rowClick(group, feat, $event)"
+                    (keydown.enter)="rowClick(group, feat)"
+                    (keydown.space)="rowClick(group, feat); $event.preventDefault()"
+                    [attr.title]="(isOn(group, feat) ? 'features.hide.hint' : 'features.turnon.hint') | t"
                   >
-                    <!-- Real on/off switch: shows RUNNING, only running. ON =
-                         active here; OFF = present but inert — turned off
-                         here (or above here), or a GATED feature (switch
-                         disabled: the chip + allow button beside it are the
-                         path to on). Click flips it in place — for a scope
-                         feature (a website) the flip acts AT THIS NODE, so a
-                         page or branch turns off individually. The row never
-                         disappears. -->
-                    <button
-                      class="feat-toggle"
-                      type="button"
-                      [class.on]="isOn(group, feat)"
-                      [class.busy]="isPending(group, feat)"
-                      [disabled]="isPending(group, feat) || feat.gated"
-                      (click)="toggleActive(group, feat); $event.stopPropagation()"
-                      [attr.aria-pressed]="isOn(group, feat)"
-                      [attr.aria-label]="(isOn(group, feat) ? 'features.hide' : 'features.enable') | t"
-                      [attr.title]="(feat.gated ? 'features.chip.needsOk' : isOn(group, feat) ? 'features.hide.hint' : 'features.turnon.hint') | t"
-                    ><span class="knob"></span></button>
+                    <span class="feat-check" [class.checked]="isOn(group, feat)" aria-hidden="true">
+                      @if (isOn(group, feat)) {✓}
+                    </span>
                     <div class="feature-meta">
                       <span class="feature-name">{{ feat.label }}</span>
                       <!-- Origin: direct on the node, or cascaded from a parent. -->
@@ -224,11 +224,17 @@
                           >{{ 'features.overrides.reset' | t }}</button>
                         </span>
                       }
-                      <!-- Community gate: present here but INERT until allowed.
-                           The switch above is OFF + disabled (honest switch);
-                           this quiet chip says why, with the allow override
-                           right beside it (bulk-allow in the top bar covers
-                           many at once). -->
+                      <!-- An off inherited from ABOVE (a branch or the site
+                           root turned off) says where — clicking the row
+                           flips the record that actually did it. -->
+                      @if (!isOn(group, feat) && offAt(group, feat); as at) {
+                        <span class="feature-offat">{{ 'features.off.at' | t: { path: at } }}</span>
+                      }
+                      <!-- Community gate: enabled here but INERT until
+                           allowed. The checkbox keeps showing your intent;
+                           this quiet chip says why nothing mounts, with the
+                           allow override right beside it (bulk-allow in the
+                           top bar covers many at once). -->
                       @if (feat.gated) {
                         <span class="feature-blocked">
                           <span class="needs-ok-chip">{{ 'features.chip.needsOk' | t }}</span>
@@ -269,38 +275,6 @@
               </ul>
             }
 
-            <!-- ── Off — kept here: features the participant turned off (the
-                 hidden pool). Nothing is deleted — restore turns one back on
-                 in place. Rendered only when something is actually off. ── -->
-            @if (hiddenApplied(group).length > 0) {
-              <div class="section-head">
-                <span class="section-label">{{ 'features.section.hidden' | t }}</span>
-                <span class="section-count">{{ hiddenApplied(group).length }}</span>
-              </div>
-              <ul class="features-list">
-                @for (feat of hiddenApplied(group); track feat.kind) {
-                  <li class="features-row off hidden-row">
-                    <div class="feature-meta">
-                      <span class="feature-name">{{ feat.label }}</span>
-                      <span class="feature-kind" [title]="feat.kind">{{ feat.kind }}</span>
-                      <!-- An off inherited from ABOVE (a branch or the site root
-                           turned off) says where — restore flips the record that
-                           actually did it. -->
-                      @if (offAt(group, feat); as at) {
-                        <span class="feature-offat">{{ 'features.off.at' | t: { path: at } }}</span>
-                      }
-                    </div>
-                    <button
-                      class="restore-btn"
-                      type="button"
-                      (click)="restore(group, feat); $event.stopPropagation()"
-                      [attr.title]="'features.restore.hint' | t"
-                    >{{ 'features.restore' | t }}</button>
-                  </li>
-                }
-              </ul>
-            }
-
             <!-- ── Available to add: features this layer doesn't have yet ── -->
             <div class="section-head">
               <span class="section-label">{{ 'features.section.available' | t }}</span>
@@ -311,29 +285,26 @@
             } @else {
               <ul class="features-list">
                 @for (feat of visibleAvailable(group); track feat.kind) {
+                  <!-- ADDABLE rows: the row is the toggle here too — clicking
+                       ADDS the feature to this tile (essentials writes the
+                       decoration at the tile's own segments); the empty
+                       checkbox shows it's not on yet. View features aren't
+                       addable by click — their content must be authored
+                       (e.g. /website builds a page) — so those rows carry
+                       the command chip and click only selects. -->
                   <li
                     class="features-row available"
                     [class.selected]="isSelected(group, feat)"
-                    (click)="selectRow(group, feat)"
+                    [class.busy]="isPending(group, feat)"
+                    [attr.role]="feat.addable ? 'checkbox' : null"
+                    [attr.aria-checked]="feat.addable ? false : null"
+                    [attr.title]="feat.addable ? ('features.enable.hint' | t) : null"
+                    (click)="availableRowClick(group, feat, $event)"
                   >
-                    <!-- OFF switch on ADDABLE rows: clicking ADDS the feature to
-                         this tile (essentials writes the decoration at the
-                         tile's own segments). View features aren't switchable —
-                         their content must be authored (e.g. /website builds a
-                         page) — so those rows show the command chip instead. -->
                     @if (feat.addable) {
-                      <button
-                        class="feat-toggle"
-                        type="button"
-                        [class.busy]="isPending(group, feat)"
-                        [disabled]="isPending(group, feat)"
-                        (click)="enableAvailable(group, feat); $event.stopPropagation()"
-                        [attr.aria-pressed]="false"
-                        [attr.aria-label]="'features.enable' | t"
-                        [attr.title]="'features.enable.hint' | t"
-                      ><span class="knob"></span></button>
+                      <span class="feat-check" aria-hidden="true"></span>
                     } @else {
-                      <span class="feat-toggle-spacer"></span>
+                      <span class="feat-check-spacer"></span>
                     }
                     <div class="feature-meta">
                       <span class="feature-name">
