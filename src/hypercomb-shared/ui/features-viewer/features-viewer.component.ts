@@ -634,13 +634,18 @@ export class FeaturesViewerComponent implements OnDestroy {
   }
 
   /** Reset every descendant override under this scope root — the whole site
-   *  returns to the root switch's state (all pages back on). */
-  async resetOverrides(group: FeatureGroup, feat: FeatureRow): Promise<void> {
-    for (const rec of this.overrideRecords(group, feat)) {
-      const ok = await restoreFeature(rec.recordSig)
-      if (ok) EffectBus.emit('feature:restored', { featKind: rec.featKind, segments: rec.appliesTo })
+   *  returns to the root switch's state (all pages back on). Optimistic:
+   *  the line clears immediately; the pool removals run in the background. */
+  resetOverrides(group: FeatureGroup, feat: FeatureRow): void {
+    const records = this.overrideRecords(group, feat)
+    if (!records.length) return
+    const sigs = new Set(records.map(r => r.recordSig))
+    this.hidden.update(list => list.filter(r => !sigs.has(r.recordSig)))
+    for (const rec of records) {
+      void restoreFeature(rec.recordSig).then(ok => {
+        if (ok) EffectBus.emit('feature:restored', { featKind: rec.featKind, segments: rec.appliesTo })
+      }).catch(() => undefined)
     }
-    await this.#refreshHidden()
   }
 
   /** The header search's live filter. Case-insensitive substring across the
@@ -736,46 +741,92 @@ export class FeaturesViewerComponent implements OnDestroy {
     else await this.#turnOn(group, feat)
   }
 
-  /** Turn a feature OFF: write it into the hidden pool (retained) at this
-   *  row's hide scope — the NODE for a scope feature (per-page/branch off) —
-   *  and re-reconcile its render via `feature:hidden`. The WEBSITE row's flip
-   *  AT THE SITE ROOT additionally commits ONE menu change to the websites
-   *  aggregation layer (the master switch IS the menu-membership control;
-   *  a child-page off never touches the menu). */
+  /** Turn a feature OFF — OPTIMISTICALLY. The checkbox must flip the instant
+   *  the click lands: the hidden list and menu membership are updated in
+   *  memory FIRST (no pool rescan — loadHidden walks every record in the
+   *  optimization pool and was the whole perceived click latency), then the
+   *  pool write and the websites-menu commit run in the background. A failed
+   *  write reverts the row and says so on it. */
   async #turnOff(group: FeatureGroup, feat: FeatureRow): Promise<void> {
     const segments = this.#segmentsFor(group, feat)
-    const sig = await hideFeature({ featKind: feat.kind, view: feat.view, label: feat.label, segments })
-    if (!sig) return
-    EffectBus.emit('feature:hidden', { featKind: feat.kind, segments })
-    if (feat.view === 'website' && this.#isScopeRoot(group, feat)) {
-      await disableAggregation('websites', segments).catch(() => false)
-      await this.#refreshMembers()
+    const isRootWebsite = feat.view === 'website' && this.#isScopeRoot(group, feat)
+    const memberKey = segments.join('/')
+
+    // Optimistic: uncheck NOW. recordSig is patched in when the write lands.
+    const optimistic: HiddenFeature = {
+      recordSig: '', featKind: feat.kind, view: feat.view, label: feat.label, appliesTo: segments,
     }
-    await this.#refreshHidden()
+    this.hidden.update(list => [...list, optimistic])
+    const wasMember = this.websiteMembers().has(memberKey)
+    if (isRootWebsite && wasMember) {
+      this.websiteMembers.update(s => { const next = new Set(s); next.delete(memberKey); return next })
+    }
+
+    const sig = await hideFeature({ featKind: feat.kind, view: feat.view, label: feat.label, segments })
+    if (!sig) {
+      // Revert — the pool refused the write; the row goes back to checked.
+      this.hidden.update(list => list.filter(r => r !== optimistic))
+      if (isRootWebsite && wasMember) this.websiteMembers.update(s => new Set(s).add(memberKey))
+      this.rowNotes.update(m => new Map(m).set(this.rowKey(group, feat), this.#t('features.note.noanswer', 'no answer — try again')))
+      return
+    }
+    this.hidden.update(list => list.map(r => r === optimistic ? { ...r, recordSig: sig } : r))
+    EffectBus.emit('feature:hidden', { featKind: feat.kind, segments })
+    // Menu removal rides the committer FIFO — background, never blocks the row.
+    if (isRootWebsite && wasMember) void disableAggregation('websites', segments).catch(() => false)
   }
 
-  /** Turn a feature ON. Removes the SUPPRESSING hidden-pool member when one
-   *  exists (the record at this node, or the ancestor record that turned this
-   *  branch off — restoring from a child re-opens the branch). ENABLING a
-   *  WEBSITE at its scope root ALSO commits it into the websites menu — this
-   *  is THE moment the /websites link appears, and it runs even when there is
-   *  no hidden record at all (a freshly adopted site is not hidden, just not
-   *  yet a member). */
+  /** Turn a feature ON — OPTIMISTICALLY (see #turnOff). Removes the
+   *  SUPPRESSING hidden-pool member when one exists (the record at this node,
+   *  or the ancestor record that turned this branch off — restoring from a
+   *  child re-opens the branch). ENABLING a WEBSITE at its scope root ALSO
+   *  commits it into the websites menu — THE moment the /websites link
+   *  appears — and runs even with no hidden record at all (a freshly adopted
+   *  site is not hidden, just not yet a member). */
   async #turnOn(group: FeatureGroup, feat: FeatureRow): Promise<void> {
     const rec = this.#suppressingRecord(group, feat)
+    const isRootWebsite = feat.view === 'website' && this.#isScopeRoot(group, feat)
+    const segments = rec?.appliesTo?.length ? rec.appliesTo : this.#segmentsFor(group, feat)
+    const memberKey = segments.join('/')
+
+    // Optimistic: check NOW.
+    if (rec) this.hidden.update(list => list.filter(r => r.recordSig !== rec.recordSig))
+    const wasMember = this.websiteMembers().has(memberKey)
+    if (isRootWebsite && !wasMember) this.websiteMembers.update(s => new Set(s).add(memberKey))
+
     if (rec) {
       const ok = await restoreFeature(rec.recordSig)
-      if (!ok) return
+      if (!ok) {
+        this.hidden.update(list => [...list, rec])
+        if (isRootWebsite && !wasMember) {
+          this.websiteMembers.update(s => { const next = new Set(s); next.delete(memberKey); return next })
+        }
+        this.rowNotes.update(m => new Map(m).set(this.rowKey(group, feat), this.#t('features.note.noanswer', 'no answer — try again')))
+        return
+      }
       EffectBus.emit('feature:restored', { featKind: rec.featKind, segments: rec.appliesTo })
-      await this.#refreshHidden()
     }
-    if (feat.view === 'website' && this.#isScopeRoot(group, feat)) {
-      const segments = rec?.appliesTo?.length ? rec.appliesTo : this.#segmentsFor(group, feat)
-      await enableAggregation('websites', segments, {
+    if (isRootWebsite) {
+      // The menu commit (one committer.update per enable) runs in the
+      // background; on failure the row reverts and says so.
+      void enableAggregation('websites', segments, {
         label: segments[segments.length - 1] ?? group.cell,
-      }).catch(() => null)
-      await this.#refreshMembers()
+      }).then(marker => {
+        if (marker) return
+        if (!wasMember) {
+          this.websiteMembers.update(s => { const next = new Set(s); next.delete(memberKey); return next })
+        }
+        this.rowNotes.update(m => new Map(m).set(this.rowKey(group, feat), this.#t('features.note.noanswer', 'no answer — try again')))
+      }).catch(() => undefined)
     }
+  }
+
+  /** Resolve an i18n key at runtime (shell-side — the provider lives in ioc). */
+  #t(key: string, fallback: string): string {
+    const i18n = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+      ?.get<{ t: (k: string) => string }>('@hypercomb.social/I18n')
+    const v = i18n?.t?.(key)
+    return typeof v === 'string' && v && v !== key ? v : fallback
   }
 
   async #refreshHidden(): Promise<void> {
