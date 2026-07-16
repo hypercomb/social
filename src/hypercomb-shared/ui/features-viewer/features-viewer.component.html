@@ -176,9 +176,6 @@
                     (keydown.space)="rowClick(group, feat); $event.preventDefault()"
                     [attr.title]="(isOn(group, feat) ? 'features.hide.hint' : 'features.turnon.hint') | t"
                   >
-                    <span class="feat-check" [class.checked]="isOn(group, feat)" aria-hidden="true">
-                      @if (isOn(group, feat)) {✓}
-                    </span>
                     <div class="feature-meta">
                       <span class="feature-name">{{ feat.label }}</span>
                       <!-- Origin: direct on the node, or cascaded from a parent. -->
@@ -259,7 +256,7 @@
                       }
                     </div>
                     <!-- Open: ENTER this view behaviour (play the slides, show
-                         the page). Distinct from the on/off switch — only on,
+                         the page). Distinct from the row toggle — only on,
                          enterable views (slides/website/home/tutor) show it. -->
                     @if (isOpenable(group, feat)) {
                       <button
@@ -269,6 +266,13 @@
                         [attr.title]="'features.open.hint' | t"
                         [attr.aria-label]="'features.open' | t"
                       >▶ {{ 'features.open' | t }}</button>
+                    }
+                    <!-- The ACTIVE mark — appears only once the row has been
+                         activated. Far right, vertically centered: a filled
+                         accent square with a dark check, unmistakable against
+                         an inactive row (which shows nothing). -->
+                    @if (isOn(group, feat)) {
+                      <span class="feat-check" aria-hidden="true">✓</span>
                     }
                   </li>
                 }
@@ -287,11 +291,11 @@
                 @for (feat of visibleAvailable(group); track feat.kind) {
                   <!-- ADDABLE rows: the row is the toggle here too — clicking
                        ADDS the feature to this tile (essentials writes the
-                       decoration at the tile's own segments); the empty
-                       checkbox shows it's not on yet. View features aren't
-                       addable by click — their content must be authored
-                       (e.g. /website builds a page) — so those rows carry
-                       the command chip and click only selects. -->
+                       decoration at the tile's own segments); the active mark
+                       appears once it's on. View features aren't addable by
+                       click — their content must be authored (e.g. /website
+                       builds a page) — so those rows carry the command chip
+                       and click only selects. -->
                   <li
                     class="features-row available"
                     [class.selected]="isSelected(group, feat)"
@@ -301,11 +305,6 @@
                     [attr.title]="feat.addable ? ('features.enable.hint' | t) : null"
                     (click)="availableRowClick(group, feat, $event)"
                   >
-                    @if (feat.addable) {
-                      <span class="feat-check" aria-hidden="true"></span>
-                    } @else {
-                      <span class="feat-check-spacer"></span>
-                    }
                     <div class="feature-meta">
                       <span class="feature-name">
                         {{ feat.label }}

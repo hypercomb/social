@@ -248,43 +248,30 @@ $accent: #c8b8ff;
   &.available:not(:hover):not(.selected) { opacity: 0.82; }
 }
 
-// ── row checkbox ──────────────────────────────────────────────────
-// The ROW is the toggle; this square just shows the state. Checked =
-// enabled here (for a website root: committed into the websites menu).
-// Cold steel square, accent check when on — no motion.
+// ── the ACTIVE mark ───────────────────────────────────────────────
+// The ROW is the toggle; this mark exists ONLY on an activated row —
+// far right, vertically centered. A solid accent square with a dark
+// check: unmistakable at a glance against an inactive row, which shows
+// nothing. No motion, no glow — cold and clean.
 .feat-check {
   flex: 0 0 auto;
-  align-self: flex-start;
-  margin-top: 0.18em;
-  width: 1.05em;
-  height: 1.05em;
+  align-self: center;
+  margin-left: 0.35em;
+  width: 1.15em;
+  height: 1.15em;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(255, 255, 255, 0.28);
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.05);
-  font-size: 0.85em;
+  background: $accent;
+  font-size: 0.9em;
+  font-weight: 700;
   line-height: 1;
-  color: transparent;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
-
-  &.checked {
-    border-color: rgba($accent, 0.65);
-    background: rgba($accent, 0.2);
-    color: $accent;
-  }
+  color: #14141c;
 }
 
-.features-row:hover .feat-check { border-color: rgba($accent, 0.55); }
 .features-row.busy { opacity: 0.55; cursor: progress; }
 .features-row:focus-visible { outline: 1px solid rgba($accent, 0.6); outline-offset: -1px; }
-
-// Keeps non-addable available rows column-aligned with addable ones.
-.feat-check-spacer {
-  flex: 0 0 auto;
-  width: 1.05em;
-}
 
 .feature-meta {
   flex: 1;
