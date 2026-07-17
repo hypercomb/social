@@ -169,15 +169,45 @@
   //              not be ready yet or looping the animation forever.
   var finishing = false, awaitEnter = false, dismissed = false, dotReal = 0, loops = 0, enterHint = null;
   var MAXLOOPS = 3;                                             // play the genesis animation at most this many times
-  function requestExit() { finishing = true; awaitEnter = false; }   // a real ready signal → finish + auto-reveal (wins over click-to-enter)
+  var readySeen = false;                                        // a real ready signal arrived (regardless of animation state)
+  // A real ready signal → finish + auto-reveal (wins over click-to-enter).
+  // HIDDEN-TAB RULE: the finishing run, the loop cap, and the rAF-deferred
+  // dismiss all ride requestAnimationFrame, which is PARKED in a hidden tab —
+  // a backgrounded boot would strand the splash over a fully-ready hive
+  // (observed 2026-07-16 on a driver tab). Nobody is watching the animation
+  // in a hidden tab, so reveal immediately instead of waiting on frames.
+  function requestExit() {
+    readySeen = true;
+    if (document.hidden) { dismiss(); return; }
+    finishing = true; awaitEnter = false;
+  }
   function dismiss() {
     if (dismissed) return; dismissed = true;
+    if (document.hidden) {                                      // rAF is parked — remove now, no fade (it isn't visible)
+      if (splash.parentNode) splash.parentNode.removeChild(splash);
+      return;
+    }
     requestAnimationFrame(function () {                         // let the tile frame flip to pixels first
       splash.style.transition = 'opacity .45s ease';
       splash.style.opacity = '0';
       setTimeout(function () { if (splash.parentNode) splash.parentNode.removeChild(splash); }, 520);
     });
   }
+  // Tab hidden after the ready signal landed mid-animation: the finishing run
+  // can no longer advance (rAF parked) — reveal so the hive is there on return.
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden && readySeen && !dismissed) dismiss();
+  });
+  // WALL-CLOCK BACKSTOP (rAF-independent): the 3-play cap only accrues while
+  // frames run, so a hidden/throttled boot could outlive it indefinitely.
+  // After 20s real time: ready → reveal; not ready → rest on click-to-enter
+  // (built directly in the DOM — no frame needed) so there is ALWAYS a way in.
+  setTimeout(function () {
+    if (dismissed) return;
+    if (readySeen) { dismiss(); return; }
+    finishing = true; awaitEnter = true;
+    showEnter();
+  }, 20000);
   // After MAXLOOPS plays with no ready signal, rest on the solid dot and offer a way in
   // instead of looping forever OR auto-revealing a not-yet-ready hive. A click anywhere or
   // any keypress enters. Built once (idempotent) the first frame we settle on the dot.
@@ -215,7 +245,7 @@
       // Reveal it NOW so the user can click Start to load the libraries. Holding
       // the splash here is a hard deadlock: no Start → no libraries → no hive.
       bus.on('boot:status', function (s) { if (s && s.kind === 'install-needed') dismiss(); });
-    } else { requestAnimationFrame(waitBus); }
+    } else { setTimeout(waitBus, 250); }   // TIMER, not rAF: a hidden tab parks rAF, so an rAF retry never subscribes at all — the splash would go deaf to every ready signal (incl. the last-value replay)
   })();
   // No blind auto-hide timer: the 3-play cap (see timeline) is the terminal fallback —
   // it rests on the dot and shows "click to enter" so we never reveal a not-ready hive
