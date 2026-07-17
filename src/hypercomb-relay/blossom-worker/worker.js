@@ -373,10 +373,16 @@ export default {
     // Flat sig endpoint — the canonical read: https://<host>/<sig>.
     // Lowercase 64-hex only; this bucket is flat from birth (no legacy
     // typed-dir layout ever lands here, so no fallback probing).
-    const sigMatch = pathname.match(/^\/([0-9a-f]{64})$/)
+    // `/@resource/<sig>` is accepted as a READ alias: hypercomb clients
+    // probe both URL shapes (the relay serves both), and without the alias
+    // every @resource probe against this endpoint was a guaranteed 404 —
+    // half the console-noise wall of 2026-07-16. Same object, same
+    // immutable caching; reads only (writes stay on the canonical shapes).
+    const sigMatch = pathname.match(/^\/(?:(@resource)\/)?([0-9a-f]{64})$/)
     if (sigMatch) {
-      if (method === 'GET' || method === 'HEAD') return serveBlob(request, env, sigMatch[1])
-      if (method === 'PUT') return putSig(request, env, sigMatch[1])
+      const isAlias = !!sigMatch[1]
+      if (method === 'GET' || method === 'HEAD') return serveBlob(request, env, sigMatch[2])
+      if (method === 'PUT' && !isAlias) return putSig(request, env, sigMatch[2])
       return text(405, 'method not allowed')
     }
 
