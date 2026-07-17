@@ -269,6 +269,21 @@ const tileHasInvite = (label: string): boolean =>
 // meeting place". Material "login" path, verbatim.
 const INVITE_ICON = md('M11 7l-1.41 1.41L12.17 11H3v2h9.17l-2.58 2.59L11 17l5-5zM20 19h-8v2h8c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2h-8v2h8v14z')
 
+// Actions whose HANDLER lives in a SEPARATELY, LAZILY-loaded drone: the icon
+// is core chrome (in ICON_REGISTRY) but the bee that services its tile:action
+// isn't loaded until the post-paint background wave. Until that bee registers,
+// the overlay renders the affordance shaded + inert (see tile-overlay's
+// #updatePerTileVisibility) — the "shaded until preloaded" rule, applied to
+// features. Self-backed actions (serviced by THIS drone, or whose icon-provider
+// IS the handler, e.g. edit) are absent here and never gate.
+const BACKING_KEY_BY_ACTION: Record<string, string> = {
+  'adopt': '@diamondcoreprocessor.com/SwarmAdoptDrone',
+  'promote-to-parent': '@diamondcoreprocessor.com/MoveDrone',
+  'features': '@diamondcoreprocessor.com/ShowFeaturesDrone',
+  'files': '@diamondcoreprocessor.com/FileDropDrone',
+  'invite': '@diamondcoreprocessor.com/MeetingInviteWorker',
+}
+
 const ICON_REGISTRY: IconRegistryEntry[] = [
   // ── private profile ──
   { name: 'command', svgMarkup: ICONS.command, hoverTint: 0xa8ffd8, profile: 'private', labelKey: 'action.command', descriptionKey: 'action.command.description' },
@@ -635,6 +650,9 @@ export class TileActionsDrone extends Drone {
           tintWhen: entry.tintWhen,
           labelKey: entry.labelKey,
           descriptionKey: entry.descriptionKey,
+          // Feature-readiness shade: the overlay dims + disables this affordance
+          // until its backing bee registers. undefined for self-backed actions.
+          backingKey: BACKING_KEY_BY_ACTION[entry.name],
           x: positions[i].x,
           y: positions[i].y,
         })
@@ -679,6 +697,8 @@ export class TileActionsDrone extends Drone {
         tintWhen: entry.tintWhen,
         labelKey: entry.labelKey,
         descriptionKey: entry.descriptionKey,
+        // Preserve the feature-readiness backing on re-registration too.
+        backingKey: BACKING_KEY_BY_ACTION[entry.name],
         x: positions[i].x,
         y: positions[i].y,
       })

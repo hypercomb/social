@@ -57,8 +57,10 @@ export type ItemKind =
   | 'pageTime' | 'pageSpace' | 'princess'
 // `hidden` items sit inside a brick (break it to reveal). `secret` items sit in an
 // EMPTY cell, invisible, and materialise only when Dana waves his wand over them —
-// the signature Solomon's Key reveal. A secret is also `hidden` until found.
-export interface ItemSpawn extends Cell { kind: ItemKind; hidden?: boolean; secret?: boolean; value?: number }
+// the signature Solomon's Key reveal. A secret is also `hidden` until found. A
+// `deep` secret is the classic make-then-break find: the first cast walls it in
+// (the brick forms as normal) and only BREAKING that brick uncovers the item.
+export interface ItemSpawn extends Cell { kind: ItemKind; hidden?: boolean; secret?: boolean; deep?: boolean; value?: number }
 
 // A demon mirror — a generator that emits a steady stream of one foe kind.
 export type MirrorKind = 'demonhead' | 'saramandor'
@@ -190,6 +192,9 @@ const FIRE_LIFE = 1.6
 // the "drop him to ruin him" kill. Falling out the bottom of the room also kills.
 const DROP_KILL = TILE * 1.6
 const FAIRIES_PER_LIFE = 10
+// A freed fairy senses sleeping magic and drifts toward it (px/s) — slow enough
+// to shadow on foot, fast enough that following her costs only a little sand.
+const FAIRY_DRIFT = 55
 
 // Per-kind hitbox + score. Scores follow the NES treasure tiers loosely.
 const E = {
@@ -342,6 +347,13 @@ export class Engine {
   secretCell: Cell | null = null
   revealFlash = 0
   revealCell: Cell | null = null
+  // Wand resonance — a cast that lands NEAR a sleeping secret makes the wand hum
+  // (the dowsing hint; it never names the cell). `resonanceT` decays for the
+  // renderer's ring; `resonanceHot` = within one cell (warmer) vs two (colder).
+  resonanceFlash = 0
+  resonanceCell: Cell | null = null
+  resonanceT = 0
+  resonanceHot = false
 
   // Held input — the overlay writes these from key events (jump: press AND
   // release matter — the release cuts a rising arc short).
@@ -415,8 +427,10 @@ export class Engine {
 
     this.state = 'playing'
     this.conjureFlash = this.hurtFlash = this.smashFlash = this.fireFlash = this.pickupFlash = 0
-    this.killFlash = this.shotFlash = this.spawnFlash = this.secretFlash = this.revealFlash = 0
-    this.smashCell = this.pickupCell = this.killCell = this.shotCell = this.spawnCell = this.secretCell = this.revealCell = null
+    this.killFlash = this.shotFlash = this.spawnFlash = this.secretFlash = this.revealFlash = this.resonanceFlash = 0
+    this.resonanceT = 0
+    this.resonanceHot = false
+    this.smashCell = this.pickupCell = this.killCell = this.shotCell = this.spawnCell = this.secretCell = this.revealCell = this.resonanceCell = null
   }
 
   #makeEnemy(kind: EnemyKind, col: number, row: number, dir: 1 | -1): Enemy {
@@ -508,11 +522,13 @@ export class Engine {
     if (t === WALL) return 'blocked'
     if (t === BRICK || t === CRACKED) {
       this.setTile(col, row, EMPTY)
-      this.#revealAt(col, row)
+      if (!this.#revealAt(col, row)) this.#pingResonance(col, row)
       this.conjureFlash = 0.18
       return 'dispel'
     }
     // A SECRET hides in an empty cell — the wand uncovers it instead of conjuring.
+    // (A DEEP secret falls through: the brick forms over it as if nothing were
+    // there, and only breaking that brick brings it to light.)
     if (this.#revealSecret(col, row)) {
       this.conjureFlash = 0.18
       this.secretFlash += 1
@@ -522,6 +538,7 @@ export class Engine {
     if (!this.#ejectFromCell(col, row)) return 'blocked'
     this.setTile(col, row, BRICK)
     this.conjureFlash = 0.18
+    this.#pingResonance(col, row)
     for (const e of this.enemies) {
       if (e.alive && e.kind !== 'panel' && this.rectOverlapsCell(e, col, row)) this.#killEnemy(e, 'crush')
     }
@@ -549,6 +566,7 @@ export class Engine {
     if (this.conjureFlash > 0) this.conjureFlash = Math.max(0, this.conjureFlash - dt)
     if (this.hurtFlash > 0) this.hurtFlash = Math.max(0, this.hurtFlash - dt)
     if (this.smashFlash > 0) this.smashFlash = Math.max(0, this.smashFlash - dt)
+    if (this.resonanceT > 0) this.resonanceT = Math.max(0, this.resonanceT - dt)
     if (this.state !== 'playing') return
 
     this.life -= LIFE_DRAIN * dt
@@ -1263,11 +1281,29 @@ export class Engine {
     }
   }
 
+  /** Fairies are drawn to sleeping magic: a freed fairy drifts toward the nearest
+   *  un-found secret and loosely circles its NEIGHBOURHOOD — never parking on the
+   *  cell itself — until Dana collects her. Watching where she lingers is a hint;
+   *  with no secrets left she just bobs where she was freed. */
   #stepFairies(dt: number): void {
     for (const f of this.fairies) {
       if (f.taken) continue
       f.phase += dt
-      f.y += Math.sin(f.phase * 3) * 10 * dt
+      let sx = 0, sy = 0, best = Infinity
+      for (const it of this.items) {
+        if (it.taken || !it.hidden || !it.secret) continue
+        const cx = it.col * TILE + TILE / 2, cy = it.row * TILE + TILE / 2
+        const d = (cx - f.x) * (cx - f.x) + (cy - f.y) * (cy - f.y)
+        if (d < best) { best = d; sx = cx; sy = cy }
+      }
+      if (best === Infinity) { f.y += Math.sin(f.phase * 3) * 10 * dt; continue }
+      // her wander point orbits a tile or so out from the secret, off-centre
+      const tx = sx + Math.cos(f.phase * 0.9) * TILE * 1.4
+      const ty = sy + Math.sin(f.phase * 1.7) * TILE * 0.9 - TILE * 0.5
+      const dx = tx - f.x, dy = ty - f.y
+      const dist = Math.hypot(dx, dy)
+      const step = Math.min(dist, FAIRY_DRIFT * dt)
+      if (dist > 1) { f.x += (dx / dist) * step; f.y += (dy / dist) * step }
     }
   }
 
@@ -1299,26 +1335,49 @@ export class Engine {
 
   // ── items, fairies, the door ─────────────────────────────
 
-  #revealAt(col: number, row: number): void {
+  /** Uncover hidden items at a broken-brick cell. A buried SECRET (a deep find
+   *  walled in by its own conjured brick) pays out as a wand-found secret, not a
+   *  plain reveal. Returns true if anything came to light. */
+  #revealAt(col: number, row: number): boolean {
+    let found = false
     for (const it of this.items) {
       if (!it.taken && it.hidden && it.col === col && it.row === row) {
         it.hidden = false
         it.reveal = 0.4
-        this.revealFlash += 1
-        this.revealCell = { col, row }
+        found = true
+        if (it.secret) { this.secretFlash += 1; this.secretCell = { col, row } }
+        else { this.revealFlash += 1; this.revealCell = { col, row } }
       }
     }
+    return found
   }
 
   /** Uncover a SECRET (a hidden item in an empty cell) when the wand targets it.
    *  Returns true if anything was revealed (so the cast counts as a reveal, not a
-   *  conjure). Secrets are the cast-to-find Solomon's Key reward. */
+   *  conjure). Secrets are the cast-to-find Solomon's Key reward — except DEEP
+   *  ones, which stay asleep here so the cast walls them in instead. */
   #revealSecret(col: number, row: number): boolean {
     let found = false
     for (const it of this.items) {
-      if (!it.taken && it.hidden && it.secret && it.col === col && it.row === row) { it.hidden = false; it.reveal = 0.4; found = true }
+      if (!it.taken && it.hidden && it.secret && !it.deep && it.col === col && it.row === row) { it.hidden = false; it.reveal = 0.4; found = true }
     }
     return found
+  }
+
+  /** The dowsing hum: a cast landing within two cells of a sleeping secret makes
+   *  the wand resonate — within ONE cell it burns hot. The hum never names the
+   *  cell; it only says "here, somewhere". */
+  #pingResonance(col: number, row: number): void {
+    let d = Infinity
+    for (const it of this.items) {
+      if (it.taken || !it.hidden || !it.secret) continue
+      d = Math.min(d, Math.max(Math.abs(it.col - col), Math.abs(it.row - row)))
+    }
+    if (d > 2) return
+    this.resonanceFlash += 1
+    this.resonanceCell = { col, row }
+    this.resonanceHot = d <= 1
+    this.resonanceT = d <= 1 ? 0.6 : 0.35
   }
 
   #collectibles(): void {

@@ -8,7 +8,10 @@
 // WORLDS: the rounds run in themed sets of three. `theme` indexes the renderer's
 // THEMES table (see renderer.ts) — a whole world, not just a recolour: brick
 // palette AND brick masonry style AND the backdrop motif. Rounds 1-3 Insect Cave,
-// 4-6 Ember Forge, 7-9 Crystal Grotto, 10-12 Moss Thicket, 13-15 Coral Reef.
+// 4-6 Ember Forge, 7-9 Crystal Grotto, 10-12 Moss Thicket, 13-15 Coral Reef,
+// 16-18 Glacier Hollow, 19-21 Clockwork Vault, 22-24 Nebula Heights — and past
+// the last round waits SUPER DRUNK (BOSS_ROOM, interposed by the overlay like
+// the diamond room: not a round you can select, the finale that happens to you).
 //
 // LAYOUT RULE: the grid is the ARCADE-FINE 15px brick (40×26 — Bub spans ~1.5
 // tiles, platforms are ONE tile thin). Ledge tiers sit on a 4-ROW RHYTHM
@@ -328,7 +331,7 @@ export const BUILTIN_LEVELS: LevelDef[] = [
     '.P.......................M',
     '########################################',
   ], 4),
-  // Round 15 — the finale: the full mixed cast on a layered arena.
+  // Round 15 — the full mixed cast on a layered arena.
   fromAscii('Monster Hall', [
     '', '', '', '', '', '', '', '',
     '..e........E.........e.........E',
@@ -346,7 +349,204 @@ export const BUILTIN_LEVELS: LevelDef[] = [
     '.P',
     '########################################',
   ], 4),
+
+  // ═══ World 6 — Glacier Hollow · blue ice under falling snow ═══
+  // Round 16 — symmetric ice shelves; Monstas cruise the cold air.
+  fromAscii('Glacier Hollow', [
+    '', '', '', '',
+    '......o...........................O',
+    '', '', '',
+    '....z.............................Z',
+    '....########................########',
+    '', '',
+    '..............m..........M',
+    '..........########....########',
+    '', '',
+    '......b.....................B',
+    '....######..............######',
+    '', '', '',
+    '..............############',
+    '', '',
+    '.P',
+    '########################################',
+  ], 5),
+  // Round 17 — frozen terraces: long alternating spans, climbed side to side.
+  fromAscii('Frozen Terraces', [
+    '', '', '', '', '', '', '', '',
+    '.........................z.........Z',
+    '....................####################',
+    '', '',
+    '....m',
+    '####################',
+    '', '',
+    '............................b',
+    '....................####################',
+    '', '',
+    '......z',
+    '######################',
+    '', '',
+    '.P....................O',
+    '########################################',
+  ], 5),
+  // Round 18 — icicle falls: short hanging pads in broken columns.
+  fromAscii('Icicle Falls', [
+    '', '', '', '',
+    '.....o..............................O',
+    '', '', '',
+    '......z.........m...........Z',
+    '....######....######....######',
+    '', '',
+    '...........b...............B',
+    '..........####........########',
+    '', '',
+    '....m............................M',
+    '..########..............##########',
+    '', '', '',
+    '............##########',
+    '', '',
+    '.P...............z.z',
+    '########################################',
+  ], 5),
+
+  // ═══ World 7 — Clockwork Vault · copper plate, drifting sparks ═══
+  // Round 19 — plate galleries; Mightas bowl boulders down the walkways.
+  fromAscii('Clockwork Vault', [
+    '', '', '', '', '', '', '', '',
+    '....m.........................M',
+    '..##########..........##########',
+    '', '',
+    '..................z.Z',
+    '..............############',
+    '', '',
+    '....M...........................m',
+    '..######........................######',
+    '', '',
+    '.............b......B',
+    '..........##############',
+    '', '',
+    '.P',
+    '########################################',
+  ], 6),
+  // Round 20 — gear works: offset stub platforms, springing Banebous, and a
+  // pair of placed gems for the daring.
+  fromAscii('Gear Works', [
+    '', '', '', '',
+    '......o',
+    '', '', '',
+    '......b..........b..........B',
+    '....######....######....######',
+    '', '',
+    '.........*..........z.......*',
+    '......########....############',
+    '', '',
+    '....m.......................M',
+    '..######....................########',
+    '', '',
+    '..............z.....Z',
+    '............############',
+    '', '',
+    '.P',
+    '########################################',
+  ], 6),
+  // Round 21 — the boiler deck: one broad working deck over splayed footings.
+  fromAscii('Boiler Deck', [
+    '', '', '', '',
+    '....o.........................O',
+    '', '', '',
+    '..........m..............M',
+    '........####################',
+    '', '',
+    '....z...........................Z',
+    '..######..................########',
+    '', '',
+    '.................b.B',
+    '..............############',
+    '', '',
+    '....z.........................Z',
+    '..########................########',
+    '', '',
+    '.P',
+    '########################################',
+  ], 6),
+  // Round 22 — nebula heights: airy pads floating far apart in the dark.
+  fromAscii('Nebula Heights', [
+    '', '', '',
+    '.......o....................O',
+    '', '', '', '',
+    '.............z.........Z',
+    '..........########....########',
+    '', '',
+    '....b.............................B',
+    '..######......................######',
+    '', '',
+    '..................m',
+    '..............############',
+    '', '',
+    '......z....................Z',
+    '....######............##########',
+    '', '',
+    '.P',
+    '########################################',
+  ], 7),
+  // Round 23 — the comet bridge: one great span with wall perches below it.
+  fromAscii('Comet Bridge', [
+    '', '', '', '', '', '', '', '',
+    '......z..........*..........Z',
+    '....################################',
+    '', '',
+    '..b..................................B',
+    '..####..............................####',
+    '', '',
+    '..............m.....M',
+    '............##########',
+    '', '',
+    '.........z...................Z',
+    '......########..........########',
+    '', '',
+    '.P.................o',
+    '########################################',
+  ], 7),
+  // Round 24 — the STAR GATE: the heaviest roster in the game, guarding the
+  // way up to Super Drunk himself.
+  fromAscii('Star Gate', [
+    '', '', '', '',
+    '.....o..............................O',
+    '', '', '',
+    '..e........E..........e........E',
+    '.########..########..########..########',
+    '', '',
+    '..........*.........z.Z.......*',
+    '........########....############',
+    '', '',
+    '....b.........................B',
+    '..######....................########',
+    '', '',
+    '..............m.....M',
+    '............##########',
+    '', '',
+    '.P',
+    '########################################',
+  ], 7),
 ]
+
+/** SUPER DRUNK'S CAVERN — the boss arena past the last round. Open air for his
+ *  bottle arcs, a low centre pad and two wall perches to blister him from, and
+ *  the round's own updraft carrying your foam up to his hide (the engine lifts
+ *  floating bubbles through the ledges on a `boss` round). Like the diamond
+ *  room it is NOT in BUILTIN_LEVELS — the overlay interposes it as the finale. */
+export const BOSS_ROOM: LevelDef = {
+  ...fromAscii("Super Drunk's Cavern", [
+    '', '', '', '', '', '', '', '', '',
+    '', '', '', '', '', '', '', '',
+    '..######..........................######',
+    '', '', '',
+    '................########',
+    '', '',
+    '.P',
+    '########################################',
+  ], 7),
+  boss: true,
+}
 
 /** The DIAMOND ROOM — the arcade's secret bonus screen, dropped between rounds
  *  (see BONUS_EVERY in overlay.ts). No foes: five tiers of treasure and a short
@@ -380,6 +580,7 @@ export function cloneLevel(l: LevelDef): LevelDef {
     theme: l.theme,
     diamonds: l.diamonds?.map(d => ({ ...d })),
     bonus: l.bonus,
+    boss: l.boss,
   }
 }
 
@@ -453,6 +654,7 @@ export function sanitizeLevel(raw: unknown): LevelDef | null {
     // themeFor() wraps the index, so any non-negative integer is safe here.
     theme: isInt(d['theme']) && d['theme'] >= 0 ? d['theme'] : 0,
     bonus: d['bonus'] === true,
+    boss: d['boss'] === true,
   }
 }
 

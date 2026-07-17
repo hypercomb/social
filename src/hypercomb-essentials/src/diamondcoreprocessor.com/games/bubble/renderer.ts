@@ -13,7 +13,7 @@
 // signature bordered single screen. Every round wears its own THEME palette —
 // classic BB recolours the platforms each screen.
 
-import { Engine, TILE, WALL, POWER_META, BUBBLE_WARN, UMBRELLA_META, enemyKind, type Enemy, type Bubble, type Fruit, type Candy, type FloatText, type Particle, type Ring, type Baron, type Droplet, type Shot, type Diamond, type Umbrella, type PowerKind, type LevelDef } from './engine.js'
+import { Engine, TILE, WALL, POWER_META, BUBBLE_WARN, UMBRELLA_META, EXTEND_WORD, enemyKind, type Enemy, type Bubble, type Fruit, type Candy, type FloatText, type Particle, type Ring, type Baron, type Boss, type Droplet, type Shot, type Diamond, type Umbrella, type PowerKind, type LevelDef } from './engine.js'
 
 // ── worlds (classic BB rethemes every screen) ────────────────
 // A theme is a whole WORLD, not just a recolour: the brick palette, the masonry
@@ -21,8 +21,8 @@ import { Engine, TILE, WALL, POWER_META, BUBBLE_WARN, UMBRELLA_META, enemyKind, 
 // Close shades per palette give subtle per-block variation so a run reads as
 // real masonry rather than a flat slab; backgrounds stay near-black (the BB
 // cabinet look), just tinted toward the world.
-export type BrickStyle = 'stone' | 'crystal' | 'moss' | 'coral'
-export type Motif = 'stars' | 'embers' | 'motes' | 'spores' | 'bubbles'
+export type BrickStyle = 'stone' | 'crystal' | 'moss' | 'coral' | 'ice' | 'metal' | 'void'
+export type Motif = 'stars' | 'embers' | 'motes' | 'spores' | 'bubbles' | 'snow' | 'sparks' | 'comets'
 
 export interface Theme {
   name: string
@@ -65,6 +65,24 @@ const THEMES: Theme[] = [
     frame: '#ff8ab5', bgTop: '#0a1832', bgMid: '#080d22', bgBase: '#040514',
     brick: 'coral', motif: 'bubbles',
   },
+  {
+    name: 'Glacier Hollow',
+    bricks: ['#4f9fd8', '#57a8e0', '#4a97cf', '#4390c8', '#5cb0e6', '#468cc0'],
+    frame: '#9fdcff', bgTop: '#0a1c34', bgMid: '#061024', bgBase: '#030812',
+    brick: 'ice', motif: 'snow',
+  },
+  {
+    name: 'Clockwork Vault',
+    bricks: ['#b4764a', '#bc7e50', '#ab6f45', '#a26840', '#c48856', '#98613c'],
+    frame: '#ffd9a0', bgTop: '#1c1410', bgMid: '#0f0a08', bgBase: '#060404',
+    brick: 'metal', motif: 'sparks',
+  },
+  {
+    name: 'Nebula Heights',
+    bricks: ['#3b4db0', '#4257bd', '#3847a6', '#33429c', '#4a60c8', '#2f3d90'],
+    frame: '#8fa8ff', bgTop: '#170f38', bgMid: '#0b0726', bgBase: '#040313',
+    brick: 'void', motif: 'comets',
+  },
 ]
 /** World names, in theme-index order — the designer's picker reads this. */
 export const THEME_NAMES: readonly string[] = THEMES.map(t => t.name)
@@ -93,6 +111,7 @@ export class Renderer {
     for (const c of e.candies) this.#candy(c, time)
     for (const u of e.umbrellas) this.#umbrella(u, time)
     for (const en of e.enemies) if (en.alive && !en.captured) this.#enemy(en.x + en.w / 2, en.y + en.h / 2, en.w, en, time)
+    if (e.boss) this.#superDrunk(e.boss, time)
     for (const b of e.bubbles) this.#bubble(b, time)
     for (const d of e.waters) this.#droplet(d)
     for (const s of e.shots) this.#shot(s, time)
@@ -103,6 +122,8 @@ export class Renderer {
     for (const f of e.floats) this.#float(f)
     this.#frame(e.width, e.height, th)
     this.#hud(e, hi)
+    if (e.boss) this.#bossBar(e)
+    if (!e.level.bonus) this.#extendChips(e)
     this.#powerBadges(e)
     this.#chainPopup(e)
     this.#hurry(e, time)
@@ -175,6 +196,52 @@ export class Renderer {
           const r = 1.2 + (i % 4) * 0.7
           ctx.strokeStyle = `rgba(150,220,255,${0.14 + 0.16 * Math.abs(Math.sin(time + i))})`
           ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.stroke()
+        }
+        break
+      }
+      case 'snow': {
+        // flakes sinking on a slow sway through the hollow
+        for (let i = 0; i < 24; i++) {
+          const x = (i * 87.7) % w + Math.sin(time * 0.7 + i * 1.9) * 9
+          const y = ((i * 63.1) + time * (9 + (i % 4) * 3)) % (h + 14) - 7
+          const a = 0.16 + 0.24 * Math.abs(Math.sin(time * 0.8 + i))
+          ctx.fillStyle = `rgba(225,240,255,${a})`
+          ctx.beginPath(); ctx.arc(x, y, 0.9 + (i % 3) * 0.45, 0, Math.PI * 2); ctx.fill()
+        }
+        break
+      }
+      case 'sparks': {
+        // stray forge-sparks off the works, drifting up and winking out
+        for (let i = 0; i < 14; i++) {
+          const x = (i * 97.9) % w + Math.sin(time * 1.1 + i * 2.3) * 4
+          const y = h - ((time * (14 + (i % 5) * 4) + i * 71) % (h + 18))
+          const a = Math.max(0, 0.14 + 0.3 * Math.sin(time * 3 + i * 1.7))
+          ctx.fillStyle = `rgba(255,${190 + (i % 3) * 20},120,${a})`
+          ctx.fillRect(x, y, 1.4, 1.4)
+        }
+        break
+      }
+      case 'comets': {
+        // a deep starfield, crossed every few seconds by one shooting star
+        for (let i = 0; i < 24; i++) {
+          const sx = (i * 93.7) % w
+          const sy = (i * 59.3) % h
+          const tw = 0.2 + 0.28 * Math.abs(Math.sin(time * 1.3 + i * 1.1))
+          ctx.fillStyle = `rgba(190,205,255,${tw})`
+          ctx.fillRect(sx, sy, 1.4, 1.4)
+        }
+        const k = (time % 4.7) / 4.7
+        if (k < 0.16) {
+          const seed = Math.floor(time / 4.7)
+          const x0 = ((seed * 137.51) % 1) * w * 0.8 + w * 0.1
+          const y0 = ((seed * 71.13) % 1) * h * 0.4 + 8
+          const p = k / 0.16
+          ctx.strokeStyle = `rgba(230,238,255,${0.5 * (1 - p)})`
+          ctx.lineWidth = 1.2
+          ctx.beginPath()
+          ctx.moveTo(x0 + p * 60, y0 + p * 26)
+          ctx.lineTo(x0 + p * 60 - 14, y0 + p * 26 - 6)
+          ctx.stroke()
         }
         break
       }
@@ -370,6 +437,234 @@ export class Renderer {
     ctx.restore()
   }
 
+  // ── Super Drunk (the finale) ─────────────────────────────
+
+  /** Super Drunk — a five-tile drunken bulk hovering over the arena. Reads his
+   *  whole state machine: bottle raised while winding up (the telegraph), a
+   *  rising shudder before the slam, winded + dizzy in the recover window,
+   *  reddening as his rage phases climb, grayscale sag through the throes. */
+  #superDrunk(b: Boss, time: number): void {
+    const ctx = this.#ctx
+    const R = TILE * 2.6                 // hide radius (mirror engine BOSS_R)
+    const CORE = TILE * 1.7              // the lethal belly (engine BOSS_CORE_R)
+    const f = b.maxHp > 0 ? b.hp / b.maxHp : 0
+    const phase = f > 0.66 ? 0 : f > 0.33 ? 1 : 2
+    const dying = b.state === 'dying'
+    const base = dying ? '#6a6478' : phase === 0 ? '#8a5fd0' : phase === 1 ? '#a054b8' : '#c04a78'
+    const fc = b.face
+    // the rise telegraph shakes him; the recover leaves him squashed low
+    const jit = b.state === 'rise' ? Math.sin(time * 46) * 2.2 * b.telegraph : 0
+    const cx = b.x + jit
+    const cy = b.y
+    const sq = Math.max(-0.4, Math.min(1, b.squash))
+    const sy = 1 - sq * 0.22
+    const sx = 1 + sq * 0.16
+
+    ctx.save()
+    if (dying) ctx.globalAlpha = 0.55 + 0.45 * Math.abs(Math.sin(time * 14))
+
+    // hover shadow-glow beneath the bulk
+    ctx.fillStyle = 'rgba(0,0,0,0.25)'
+    ctx.beginPath(); ctx.ellipse(cx, cy + R * 1.16, R * 0.8, R * 0.16, 0, 0, Math.PI * 2); ctx.fill()
+
+    // rage steam — angry huffs off his crown
+    if (phase === 2 && !dying) {
+      for (let i = 0; i < 3; i++) {
+        const k = ((time * 0.8 + i * 0.37) % 1)
+        ctx.fillStyle = `rgba(255,160,150,${0.28 * (1 - k)})`
+        ctx.beginPath()
+        ctx.arc(cx + (i - 1) * R * 0.3 + Math.sin(time * 3 + i) * 3, cy - R - k * 18, 2.5 + k * 4, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+
+    ctx.translate(cx, cy + R)
+    ctx.scale(sx, sy)
+    ctx.translate(-cx, -(cy + R))
+
+    // stubby beating wings — how something this size stays up
+    const beat = Math.sin(time * 10) * 0.5 + 0.5
+    ctx.fillStyle = this.#hexA(base, 0.6)
+    for (const d of [-1, 1]) {
+      ctx.beginPath()
+      ctx.ellipse(cx + d * R * 0.92, cy - R * 0.45, R * 0.34, R * (0.14 + beat * 0.12), d * 0.6, 0, Math.PI * 2)
+      ctx.fill()
+    }
+
+    // the bulk
+    const g = ctx.createRadialGradient(cx - R * 0.3, cy - R * 0.35, R * 0.15, cx, cy, R)
+    g.addColorStop(0, this.#shade(base, 0.34))
+    g.addColorStop(0.65, base)
+    g.addColorStop(1, this.#shade(base, -0.3))
+    ctx.fillStyle = g
+    ctx.beginPath(); ctx.ellipse(cx, cy, R * 1.0, R * 0.94, 0, 0, Math.PI * 2); ctx.fill()
+
+    // stubby horns
+    ctx.fillStyle = this.#shade(base, -0.35)
+    for (const d of [-1, 1]) {
+      ctx.beginPath()
+      ctx.moveTo(cx + d * R * 0.45, cy - R * 0.72)
+      ctx.lineTo(cx + d * R * 0.68, cy - R * 1.08)
+      ctx.lineTo(cx + d * R * 0.2, cy - R * 0.86)
+      ctx.closePath(); ctx.fill()
+    }
+
+    // the belly — the part that kills. A paler pad with a warm pulsing core so
+    // the lethal zone reads against the safe rim the blisters ride on.
+    const danger = dying ? 0 : 0.22 + 0.12 * Math.sin(time * 4)
+    ctx.fillStyle = this.#shade(base, 0.42)
+    ctx.beginPath(); ctx.ellipse(cx, cy + R * 0.22, CORE * 1.02, CORE * 0.92, 0, 0, Math.PI * 2); ctx.fill()
+    const dg = ctx.createRadialGradient(cx, cy + R * 0.22, CORE * 0.1, cx, cy + R * 0.22, CORE)
+    dg.addColorStop(0, `rgba(255,110,90,${danger})`)
+    dg.addColorStop(1, 'rgba(255,110,90,0)')
+    ctx.fillStyle = dg
+    ctx.beginPath(); ctx.ellipse(cx, cy + R * 0.22, CORE, CORE * 0.9, 0, 0, Math.PI * 2); ctx.fill()
+
+    // face — a drunkard's: heavy lids, swirl-lit pupils, a glowing nose
+    const ey = cy - R * 0.3
+    const dizzy = b.state === 'recover'
+    for (const d of [-1, 1]) {
+      const ex = cx + d * R * 0.32 + fc * R * 0.1
+      ctx.fillStyle = '#fff'
+      ctx.beginPath(); ctx.ellipse(ex, ey, R * 0.2, R * 0.17, 0, 0, Math.PI * 2); ctx.fill()
+      if (dying) {
+        ctx.strokeStyle = '#241a30'; ctx.lineWidth = 2.6; ctx.lineCap = 'round'
+        const s = R * 0.09
+        ctx.beginPath(); ctx.moveTo(ex - s, ey - s); ctx.lineTo(ex + s, ey + s); ctx.stroke()
+        ctx.beginPath(); ctx.moveTo(ex + s, ey - s); ctx.lineTo(ex - s, ey + s); ctx.stroke()
+      } else if (dizzy) {
+        // spun-out spiral pupils while he's winded on the floor
+        ctx.strokeStyle = '#241a30'; ctx.lineWidth = 1.6
+        ctx.beginPath()
+        for (let t = 0; t < 4.6; t += 0.25) {
+          const rr = t * R * 0.022
+          const px2 = ex + Math.cos(t * 2.4 + time * 6) * rr
+          const py2 = ey + Math.sin(t * 2.4 + time * 6) * rr
+          if (t === 0) ctx.moveTo(px2, py2); else ctx.lineTo(px2, py2)
+        }
+        ctx.stroke()
+      } else {
+        ctx.fillStyle = '#241a30'
+        ctx.beginPath(); ctx.arc(ex + fc * R * 0.06, ey + R * 0.02, R * 0.075, 0, Math.PI * 2); ctx.fill()
+        ctx.fillStyle = 'rgba(255,255,255,0.9)'
+        ctx.beginPath(); ctx.arc(ex + fc * R * 0.03, ey - R * 0.03, R * 0.024, 0, Math.PI * 2); ctx.fill()
+        // heavy drunken lid
+        ctx.fillStyle = this.#shade(base, -0.15)
+        ctx.beginPath(); ctx.ellipse(ex, ey - R * 0.09, R * 0.21, R * 0.09, 0, Math.PI, Math.PI * 2); ctx.fill()
+      }
+    }
+    // brows knit as the phases climb
+    if (phase >= 1 && !dying) {
+      ctx.strokeStyle = '#3a1030'; ctx.lineWidth = 3
+      ctx.beginPath(); ctx.moveTo(cx - R * 0.52, ey - R * 0.3); ctx.lineTo(cx - R * 0.12, ey - R * 0.14); ctx.stroke()
+      ctx.beginPath(); ctx.moveTo(cx + R * 0.52, ey - R * 0.3); ctx.lineTo(cx + R * 0.12, ey - R * 0.14); ctx.stroke()
+    }
+    // the nose — a boozer's beacon
+    ctx.fillStyle = '#ff6a6a'
+    ctx.beginPath(); ctx.arc(cx + fc * R * 0.02, ey + R * 0.22, R * 0.11, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = 'rgba(255,255,255,0.5)'
+    ctx.beginPath(); ctx.arc(cx + fc * R * 0.02 - R * 0.03, ey + R * 0.18, R * 0.03, 0, Math.PI * 2); ctx.fill()
+    // mouth — a lopsided grumble that hangs open when winded
+    ctx.strokeStyle = '#2a0f26'; ctx.lineWidth = 2.6; ctx.lineCap = 'round'
+    ctx.beginPath()
+    if (dizzy || dying) ctx.arc(cx, cy + R * 0.52, R * 0.1, 0, Math.PI * 2)
+    else if (phase === 2) ctx.arc(cx, cy + R * 0.62, R * 0.2, 1.1 * Math.PI, 1.9 * Math.PI)
+    else ctx.arc(cx + fc * R * 0.06, cy + R * 0.5, R * 0.16, 0.15 * Math.PI, 0.8 * Math.PI)
+    ctx.stroke()
+
+    // the raised bottle — every throw's tell. It climbs + glints with the windup.
+    if (b.state === 'windup' && !dying) {
+      const t = b.telegraph
+      const ax = cx + fc * R * (0.55 + t * 0.2)
+      const ay = cy - R * (0.45 + t * 0.4)
+      ctx.save()
+      ctx.translate(ax, ay)
+      ctx.rotate(fc * (0.5 - t * 0.9))
+      ctx.fillStyle = '#66c98a'
+      this.#roundRect(-3.4, -8, 6.8, 14, 2.4); ctx.fill()
+      ctx.fillStyle = '#2f7a4a'
+      ctx.fillRect(-1.6, -12, 3.2, 4.4)
+      ctx.fillStyle = `rgba(255,255,255,${0.3 + t * 0.6})`
+      ctx.fillRect(-2.6, -6, 1.4, 9)
+      ctx.restore()
+      // arm holding it
+      ctx.strokeStyle = this.#shade(base, -0.2); ctx.lineWidth = 5; ctx.lineCap = 'round'
+      ctx.beginPath(); ctx.moveTo(cx + fc * R * 0.6, cy + R * 0.1); ctx.lineTo(ax - fc * 2, ay + 10); ctx.stroke()
+    }
+
+    // hit flash
+    if (b.hurt > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${(b.hurt / 0.22) * 0.5})`
+      ctx.beginPath(); ctx.ellipse(cx, cy, R * 1.0, R * 0.94, 0, 0, Math.PI * 2); ctx.fill()
+    }
+    ctx.restore()
+
+    // recover: little stars orbiting the dizzy head (outside the squash transform)
+    if (b.state === 'recover' && !dying) {
+      ctx.save()
+      for (let i = 0; i < 3; i++) {
+        const a = time * 5 + (i * Math.PI * 2) / 3
+        const px2 = cx + Math.cos(a) * R * 0.66
+        const py2 = cy - R * 0.85 + Math.sin(a) * R * 0.14
+        ctx.fillStyle = 'rgba(255,225,130,0.85)'
+        ctx.font = `700 ${Math.round(R * 0.22)}px "Segoe UI", system-ui, sans-serif`
+        ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+        ctx.fillText('✦', px2, py2)
+      }
+      ctx.restore()
+    }
+  }
+
+  /** The boss health bar — segments under the HUD, flashing as he's hurt. */
+  #bossBar(e: Engine): void {
+    const b = e.boss
+    if (!b) return
+    const ctx = this.#ctx
+    const w = e.width * 0.44
+    const x = (e.width - w) / 2, y = 32, h = 9
+    ctx.save()
+    ctx.fillStyle = 'rgba(8,6,24,0.65)'
+    this.#roundRect(x - 2, y - 2, w + 4, h + 4, 5); ctx.fill()
+    const frac = b.maxHp > 0 ? b.hp / b.maxHp : 0
+    const hue = 300 - (1 - frac) * 60          // violet draining toward red
+    ctx.fillStyle = b.hurt > 0 ? '#ffffff' : `hsl(${hue},70%,58%)`
+    if (frac > 0) { this.#roundRect(x, y, Math.max(3, w * frac), h, 3.5); ctx.fill() }
+    // segment ticks — one per hit point
+    ctx.strokeStyle = 'rgba(8,6,24,0.5)'
+    ctx.lineWidth = 1
+    for (let i = 1; i < b.maxHp; i++) {
+      const tx = x + (w * i) / b.maxHp
+      ctx.beginPath(); ctx.moveTo(tx, y); ctx.lineTo(tx, y + h); ctx.stroke()
+    }
+    ctx.fillStyle = '#ffb3d9'
+    ctx.font = '700 9px "Segoe UI", system-ui, sans-serif'
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'
+    ctx.fillText('SUPER DRUNK', e.width / 2, y - 3)
+    ctx.restore()
+  }
+
+  /** The E·X·T·E·N·D column down the right edge — lit letters are collected. */
+  #extendChips(e: Engine): void {
+    const ctx = this.#ctx
+    const x = e.width - 13
+    ctx.save()
+    ctx.font = '800 10px "Segoe UI", system-ui, sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    for (let i = 0; i < EXTEND_WORD.length; i++) {
+      const y = 44 + i * 19
+      const on = e.letters[i]
+      ctx.fillStyle = on ? 'rgba(255,120,205,0.28)' : 'rgba(8,6,24,0.45)'
+      ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2); ctx.fill()
+      ctx.strokeStyle = on ? 'rgba(255,150,220,0.95)' : 'rgba(150,140,190,0.35)'
+      ctx.lineWidth = on ? 1.6 : 1
+      ctx.beginPath(); ctx.arc(x, y, 8, 0, Math.PI * 2); ctx.stroke()
+      ctx.fillStyle = on ? '#ffd3ee' : 'rgba(190,185,215,0.4)'
+      ctx.fillText(EXTEND_WORD[i], x, y + 0.5)
+    }
+    ctx.restore()
+  }
+
   /** One block face in the world's masonry style. */
   #brickFace(fx: number, fy: number, fw: number, fh: number, tint: string, style: BrickStyle): void {
     const ctx = this.#ctx
@@ -413,6 +708,49 @@ export class Renderer {
           ctx.arc(fx + fw * (0.26 + k * 0.24), fy + fh * (k % 2 ? 0.72 : 0.55), 0.9, 0, Math.PI * 2)
           ctx.fill()
         }
+        break
+      }
+      case 'ice': {
+        // a glassy block: pale frosted crown, a hairline internal crack, a glint
+        ctx.fillStyle = this.#shade(tint, 0.12)
+        ctx.fillRect(fx, fy, fw, fh)
+        ctx.fillStyle = this.#shade(tint, 0.5)
+        ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(fx + fw, fy); ctx.lineTo(fx + fw * 0.7, fy + fh * 0.45); ctx.lineTo(fx, fy + fh * 0.3); ctx.closePath(); ctx.fill()
+        ctx.fillStyle = this.#shade(tint, -0.3)
+        ctx.fillRect(fx, fy + fh - 1.1, fw, 1.1)
+        ctx.strokeStyle = this.#shade(tint, -0.18)
+        ctx.lineWidth = 0.7
+        ctx.beginPath(); ctx.moveTo(fx + fw * 0.62, fy + fh * 0.2); ctx.lineTo(fx + fw * 0.4, fy + fh * 0.62); ctx.lineTo(fx + fw * 0.55, fy + fh * 0.88); ctx.stroke()
+        ctx.fillStyle = 'rgba(255,255,255,0.7)'
+        ctx.fillRect(fx + fw * 0.2, fy + fh * 0.22, 1.4, 1.4)
+        break
+      }
+      case 'metal': {
+        // riveted copper plate: strong bevel, two rivets, a brushed sheen
+        this.#stoneFace(fx, fy, fw, fh, tint)
+        ctx.fillStyle = 'rgba(255,255,255,0.16)'
+        ctx.fillRect(fx + 1.4, fy + fh * 0.36, fw - 2.8, 1)
+        for (const rx of [0.24, 0.76]) {
+          const cx2 = fx + fw * rx, cy2 = fy + fh * 0.5
+          ctx.fillStyle = this.#shade(tint, -0.45)
+          ctx.beginPath(); ctx.arc(cx2, cy2, 1.5, 0, Math.PI * 2); ctx.fill()
+          ctx.fillStyle = this.#shade(tint, 0.4)
+          ctx.beginPath(); ctx.arc(cx2 - 0.4, cy2 - 0.4, 0.6, 0, Math.PI * 2); ctx.fill()
+        }
+        break
+      }
+      case 'void': {
+        // dark star-glass: a deep slab with a glossy crown and pinprick stars
+        ctx.fillStyle = this.#shade(tint, -0.22)
+        ctx.fillRect(fx, fy, fw, fh)
+        ctx.fillStyle = this.#shade(tint, 0.28)
+        ctx.fillRect(fx, fy, fw, 1.4)
+        ctx.strokeStyle = this.#shade(tint, 0.42)
+        ctx.lineWidth = 0.8
+        ctx.strokeRect(fx + 0.4, fy + 0.4, fw - 0.8, fh - 0.8)
+        ctx.fillStyle = 'rgba(220,230,255,0.55)'
+        ctx.fillRect(fx + fw * 0.3, fy + fh * 0.42, 1.1, 1.1)
+        ctx.fillRect(fx + fw * 0.68, fy + fh * 0.66, 0.9, 0.9)
         break
       }
       default: this.#stoneFace(fx, fy, fw, fh, tint)
@@ -776,6 +1114,7 @@ export class Renderer {
 
   #bubble(b: Bubble, time: number): void {
     const ctx = this.#ctx
+    if (b.letter !== null) { this.#letterBubble(b, time); return }
     const wob = Math.sin(b.age * 6) * 0.045
     const sq = b.squash > 0 ? (b.squash / 0.2) * 0.22 : 0   // crown-bounce squash
     const rx = b.r * (1 + wob + sq)
@@ -872,6 +1211,45 @@ export class Renderer {
     ctx.beginPath(); ctx.arc(b.x, b.y, rx * 0.74, Math.PI * 1.05, Math.PI * 1.35); ctx.stroke()
   }
 
+  /** An EXTEND letter bubble: a grander magenta film with its letter shining
+   *  inside. It rises steadily — pop it before it slips out the top. */
+  #letterBubble(b: Bubble, time: number): void {
+    const ctx = this.#ctx
+    const wob = Math.sin(b.age * 5) * 0.04
+    const rx = b.r * (1 + wob), ry = b.r * (1 - wob)
+    ctx.save()
+    ctx.shadowColor = 'rgba(255,130,215,0.65)'
+    ctx.shadowBlur = 14
+    const fill = ctx.createRadialGradient(b.x - rx * 0.3, b.y - ry * 0.35, rx * 0.1, b.x, b.y, rx)
+    fill.addColorStop(0, 'rgba(255,255,255,0.45)')
+    fill.addColorStop(0.55, 'rgba(255,160,225,0.22)')
+    fill.addColorStop(1, 'rgba(255,110,205,0.15)')
+    ctx.fillStyle = fill
+    ctx.beginPath(); ctx.ellipse(b.x, b.y, rx, ry, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.restore()
+    // the letter itself, gently pulsing
+    const pulse = 0.85 + 0.15 * Math.sin(time * 5 + b.age)
+    ctx.save()
+    ctx.globalAlpha = pulse
+    ctx.font = `800 ${Math.round(b.r * 1.15)}px "Segoe UI", system-ui, sans-serif`
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+    ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(60,8,44,0.85)'
+    const glyph = EXTEND_WORD[b.letter!] ?? '?'
+    ctx.strokeText(glyph, b.x, b.y + 0.5)
+    ctx.fillStyle = '#ffd3ee'
+    ctx.fillText(glyph, b.x, b.y + 0.5)
+    ctx.restore()
+    // film rim + highlight
+    ctx.lineWidth = 2.6
+    ctx.strokeStyle = 'rgba(255,150,220,0.9)'
+    ctx.beginPath(); ctx.ellipse(b.x, b.y, rx, ry, 0, 0, Math.PI * 2); ctx.stroke()
+    ctx.lineWidth = 1.2
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)'
+    ctx.beginPath(); ctx.ellipse(b.x, b.y, rx - 1.4, ry - 1.4, 0, 0, Math.PI * 2); ctx.stroke()
+    ctx.fillStyle = 'rgba(255,255,255,0.85)'
+    ctx.beginPath(); ctx.ellipse(b.x - rx * 0.34, b.y - ry * 0.38, rx * 0.15, ry * 0.1, -0.6, 0, Math.PI * 2); ctx.fill()
+  }
+
   // ── water droplets + shots (bolts, boulders) ─────────────
 
   /** A water droplet: a falling bead, flattening into a streak as it flows. */
@@ -914,6 +1292,47 @@ export class Renderer {
       ctx.stroke()
       ctx.fillStyle = '#fff7d0'
       ctx.beginPath(); ctx.arc(s.x, s.y, 3.6, 0, Math.PI * 2); ctx.fill()
+      ctx.restore()
+    } else if (s.kind === 'bottle') {
+      // Super Drunk's whisky bottle — green glass tumbling end over end
+      ctx.save()
+      ctx.translate(s.x, s.y)
+      ctx.rotate(s.spin)
+      const bw = 5.2, bh = 12
+      const g = ctx.createLinearGradient(-bw, 0, bw, 0)
+      g.addColorStop(0, '#2f7a4a')
+      g.addColorStop(0.45, '#66c98a')
+      g.addColorStop(1, '#256a3e')
+      ctx.fillStyle = g
+      this.#roundRect(-bw / 2 - 1.2, -bh / 2, bw + 2.4, bh, 2.6)
+      ctx.fill()
+      // neck + cork
+      ctx.fillStyle = '#2f7a4a'
+      ctx.fillRect(-1.6, -bh / 2 - 4, 3.2, 4.4)
+      ctx.fillStyle = '#c9a86a'
+      ctx.fillRect(-1.6, -bh / 2 - 5.4, 3.2, 1.8)
+      // glass glint
+      ctx.fillStyle = 'rgba(255,255,255,0.55)'
+      ctx.fillRect(-bw / 2, -bh / 2 + 1.5, 1.2, bh - 4)
+      ctx.restore()
+    } else if (s.kind === 'shard') {
+      // skidding glass — a low glinting sliver, fading as it spends itself
+      const a = Math.max(0.25, 1 - s.age / 2.2)
+      const dir = Math.sign(s.vx) || 1
+      ctx.save()
+      ctx.globalAlpha = a
+      ctx.translate(s.x, s.y)
+      ctx.fillStyle = '#a9e8c2'
+      ctx.beginPath()
+      ctx.moveTo(dir * 6, 0)
+      ctx.lineTo(-dir * 4, -3.4)
+      ctx.lineTo(-dir * 5, 2.6)
+      ctx.closePath(); ctx.fill()
+      ctx.fillStyle = 'rgba(255,255,255,0.8)'
+      ctx.fillRect(-1, -1, 2, 2)
+      // sparks kicked up behind it
+      ctx.fillStyle = `rgba(210,255,230,${a * 0.5})`
+      ctx.beginPath(); ctx.arc(-dir * 8, -1 + Math.sin(s.age * 30) * 2, 1.1, 0, Math.PI * 2); ctx.fill()
       ctx.restore()
     } else {
       // boulder — a tumbling faceted rock
@@ -1295,6 +1714,10 @@ export class Renderer {
       const urgent = e.bonusTimer < 4
       ctx.fillStyle = urgent ? '#ff8a8a' : '#bfe3ff'
       ctx.fillText(`◆ ${e.diamonds.length} left  ·  ${e.bonusTimer.toFixed(1)}s`, e.width / 2, 14)
+    } else if (e.level.boss) {
+      // the finale reports the man himself, not a roster
+      ctx.fillStyle = e.boss ? '#ffb3d9' : '#bfe3ff'
+      ctx.fillText(e.boss ? '🍾 THE FINAL BATTLE' : 'clear!', e.width / 2, 14)
     } else {
       const remaining = e.enemies.filter(en => en.alive).length
       ctx.fillStyle = '#bfe3ff'

@@ -356,7 +356,8 @@ export class Renderer {
 
     for (const it of e.items) {
       if (it.taken) continue
-      if (it.hidden) { if (it.secret) fx_secretHint(ctx, it.col, it.row, time); continue }
+      if (it.hidden) { if (it.secret) fx_secretAura(ctx, it.col, it.row, time); continue }
+      if (it.secret && it.reveal > 0) fx_materialize(ctx, it.col, it.row, it.reveal)
       item_draw(ctx, it.kind, it.col, it.row, time, pulse, it.reveal, false)
     }
     for (const f of e.fairies) if (!f.taken) item_fairy(ctx, f.x, f.y, time, pulse)
@@ -367,6 +368,7 @@ export class Renderer {
     for (const f of e.fireballs) proj_fireball(ctx, f, time, pulse)
     for (const s of e.shots) proj_shot(ctx, s, time, pulse)
     fx_wandTarget(ctx, e, pulse)
+    fx_resonance(ctx, e)
   }
 
   drawHud(e: Engine, time: number, viewW: number, viewH: number): void {
@@ -2665,22 +2667,89 @@ function proj_shot(ctx: CanvasRenderingContext2D, s: Shot, time: number, pulse: 
 
 // ── fx ──────────────────────────────────────────────────────
 
-/** The un-revealed SECRET cue — a faint violet twinkle + a rare rising mote.
- *  Deliberately subtle: a sharp eye catches it, it's no beacon. */
-function fx_secretHint(ctx: CanvasRenderingContext2D, col: number, row: number, time: number): void {
+/** The sleeping-SECRET ambience — deliberately denatured: nothing ever marks the
+ *  cell itself. A couple of dust motes rise through the surrounding tiles on slow
+ *  offset cycles (they read as torch-dust unless you watch), and every ~8s one
+ *  micro-glint winks NEAR the secret, jittered to a fresh offset each cycle so a
+ *  single blink never pinpoints it. The wand's resonance hum (fx_resonance) is
+ *  the real dowsing tool; this is just the "did I see something?" itch. */
+function fx_secretAura(ctx: CanvasRenderingContext2D, col: number, row: number, time: number): void {
   const cx = col * TILE + TILE / 2, cy = row * TILE + TILE / 2
-  const tw = Math.max(0, Math.sin(time * 1.5 + col * 1.7 + row))
-  const a = 0.05 + tw * tw * 0.16
+  const seed = col * 31 + row * 17
   ctx.save()
-  ctx.fillStyle = `rgba(206,184,255,${a})`
-  ctx.beginPath(); ctx.arc(cx, cy, 1.5 + tw * 1.3, 0, Math.PI * 2); ctx.fill()
-  if (tw > 0.86) {
-    ctx.strokeStyle = `rgba(232,222,255,${a})`; ctx.lineWidth = 0.6
-    ctx.beginPath(); ctx.moveTo(cx - 3, cy); ctx.lineTo(cx + 3, cy); ctx.moveTo(cx, cy - 3); ctx.lineTo(cx, cy + 3); ctx.stroke()
-    // a lone mote drifts up at the twinkle peak
-    const ph = (time * 0.5 + sol_hash(col * 31 + row)) % 1
-    ctx.fillStyle = `rgba(206,184,255,${(1 - ph) * 0.3})`
-    ctx.fillRect(cx + Math.sin(ph * 9) * 2, cy - ph * 12, 1.4, 1.4)
+  // two ambient motes drifting up through the neighbourhood (±1.3 tiles wide)
+  for (let i = 0; i < 2; i++) {
+    const cyc = 4.5 + sol_hash(seed + i * 7) * 2.5
+    const raw = (time + sol_hash(seed + i * 13) * cyc) / cyc
+    const ph = raw % 1
+    const ox = (sol_hash2(seed + i * 29, Math.floor(raw)) - 0.5) * TILE * 2.6
+    const a = Math.sin(ph * Math.PI) * 0.1
+    ctx.fillStyle = `rgba(214,196,255,${a})`
+    ctx.fillRect(cx + ox + Math.sin(ph * 7 + i) * 3, cy + TILE * 0.8 - ph * TILE * 2.2, 1.3, 1.3)
+  }
+  // the rare micro-glint — a 0.35s wink on an ~8s cycle, offset anew each time
+  const GLINT = 8.2
+  const graw = (time + sol_hash(seed) * GLINT) / GLINT
+  if (graw % 1 < 0.043) {
+    const n = Math.floor(graw)
+    const gx = cx + (sol_hash2(seed, n * 101) - 0.5) * TILE * 2.2
+    const gy = cy + (sol_hash2(seed, n * 137) - 0.5) * TILE * 1.6
+    const k = Math.sin(((graw % 1) / 0.043) * Math.PI)
+    ctx.strokeStyle = `rgba(232,222,255,${k * 0.35})`
+    ctx.lineWidth = 0.7
+    const r = 1.5 + k * 1.8
+    ctx.beginPath(); ctx.moveTo(gx - r, gy); ctx.lineTo(gx + r, gy); ctx.moveTo(gx, gy - r); ctx.lineTo(gx, gy + r); ctx.stroke()
+  }
+  ctx.restore()
+}
+
+/** The wand's dowsing hum made visible — a soft ring swelling from the CAST cell
+ *  (not the secret!) while the resonance sounds. Hot casts (within a cell) bloom
+ *  wider and brighter than cold ones (two out). */
+function fx_resonance(ctx: CanvasRenderingContext2D, e: Engine): void {
+  if (e.resonanceT <= 0 || !e.resonanceCell) return
+  const max = e.resonanceHot ? 0.6 : 0.35
+  const k = 1 - e.resonanceT / max
+  const cx = e.resonanceCell.col * TILE + TILE / 2
+  const cy = e.resonanceCell.row * TILE + TILE / 2
+  const r = TILE * (0.3 + k * (e.resonanceHot ? 1.15 : 0.7))
+  const a = (1 - k) * (e.resonanceHot ? 0.34 : 0.2)
+  ctx.save()
+  ctx.globalCompositeOperation = 'lighter'
+  ctx.strokeStyle = `rgba(206,184,255,${a})`
+  ctx.lineWidth = e.resonanceHot ? 1.6 : 1.1
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke()
+  ctx.strokeStyle = `rgba(232,222,255,${a * 0.5})`
+  ctx.lineWidth = 0.7
+  ctx.beginPath(); ctx.arc(cx, cy, r * 0.7, 0, Math.PI * 2); ctx.stroke()
+  ctx.restore()
+}
+
+/** The materialise flourish — the payoff for a found secret. A golden ring, a
+ *  violet afterglow and six rays bloom around the item while its reveal pop
+ *  plays out (reveal 0.4 → 0). */
+function fx_materialize(ctx: CanvasRenderingContext2D, col: number, row: number, reveal: number): void {
+  const k = Math.min(1, Math.max(0, 1 - reveal / 0.4))
+  const cx = col * TILE + TILE / 2, cy = row * TILE + TILE / 2
+  ctx.save()
+  ctx.globalCompositeOperation = 'lighter'
+  const gr = TILE * (0.6 + k * 0.5)
+  ctx.globalAlpha = (1 - k) * 0.5
+  ctx.drawImage(glowSprite('#ceb8ff'), cx - gr, cy - gr, gr * 2, gr * 2)
+  ctx.globalAlpha = 1
+  const r = TILE * (0.25 + k * 0.9)
+  ctx.strokeStyle = `rgba(255,214,120,${(1 - k) * 0.55})`
+  ctx.lineWidth = 2 - k
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke()
+  ctx.strokeStyle = `rgba(255,240,200,${(1 - k) * 0.4})`
+  ctx.lineWidth = 1
+  for (let i = 0; i < 6; i++) {
+    const a = i * Math.PI / 3 + 0.35
+    const r0 = TILE * (0.3 + k * 0.55), r1 = r0 + TILE * 0.35 * (1 - k)
+    ctx.beginPath()
+    ctx.moveTo(cx + Math.cos(a) * r0, cy + Math.sin(a) * r0)
+    ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1)
+    ctx.stroke()
   }
   ctx.restore()
 }

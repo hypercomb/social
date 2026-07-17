@@ -147,7 +147,29 @@ blockquote cite{display:block;margin-top:.7rem;font-style:normal;font-size:.78re
 .wheel-wrap svg{width:min(640px,92vw);height:auto}
 .dot{display:inline-block;width:.62rem;height:.62rem;border-radius:50%;margin-right:.5rem;
   vertical-align:baseline}
-@media(max-width:700px){.nav .links{display:none}.hero{padding:11vh 0 8vh}}
+
+/* ── artwork (sig-addressed hive art) ── */
+.heroart{float:right;width:min(300px,36vw);margin:.3rem 0 1.2rem 2rem}
+.heroart img{display:block;width:100%;aspect-ratio:1;object-fit:cover;border:1px solid var(--gold);
+  outline:1px solid var(--hairline);outline-offset:7px;background:var(--coal)}
+.heroart figcaption{margin-top:.85rem;font-size:.68rem;letter-spacing:.26em;text-transform:uppercase;
+  color:var(--faint);text-align:center}
+.artstrip{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:1.1rem;margin:2.4rem 0}
+.artstrip figure{margin:0;border:1px solid var(--hairline);background:var(--coal);padding:.55rem}
+.artstrip img{display:block;width:100%;aspect-ratio:1;object-fit:cover;border:1px solid var(--hairline)}
+.artstrip figcaption{padding:.6rem .2rem .15rem;font-size:.68rem;letter-spacing:.24em;
+  text-transform:uppercase;color:var(--cream-dim);text-align:center}
+.hexgallery{display:flex;flex-wrap:wrap;gap:1.3rem 1.6rem;justify-content:center;margin:2.4rem 0}
+.hexgallery a,.hexgallery .cell{display:block;text-align:center;color:var(--cream-dim);font-size:.8rem;
+  letter-spacing:.14em;text-transform:uppercase}
+.hexgallery .hexwrap{display:block;width:168px;clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%);
+  background:linear-gradient(160deg,var(--gold-bright),#6e4d28);padding:2px;margin:0 auto .7rem}
+.hexgallery img{display:block;width:100%;aspect-ratio:.866;object-fit:cover;
+  clip-path:polygon(50% 0%,100% 25%,100% 75%,50% 100%,0% 75%,0% 25%)}
+.hexgallery a:hover img{filter:brightness(1.14)}
+.hexgallery a:hover{color:var(--gold-bright)}
+@media(max-width:700px){.nav .links{display:none}.hero{padding:11vh 0 8vh}
+  .heroart{float:none;width:100%;max-width:340px;margin:0 auto 1.6rem}}
 `
 
 // ─── shared page scaffold ────────────────────────────────────────────
@@ -276,6 +298,15 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
   // sig-addressed tile art from the hive itself — SiteViewDrone rewrites
   // resource:<sig> to /@resource/<sig>, and the decoration closure carries it
   const thumb = (key: string) => art[key] ? `<img class="thumb" src="resource:${art[key]}/art.png" alt="">` : ''
+  const heroArt = (key: string, caption: string) => art[key]
+    ? `<figure class="heroart"><img src="resource:${art[key]}/art.png" alt=""><figcaption>${caption}</figcaption></figure>` : ''
+  const stripArt = (key: string, caption: string) => art[key]
+    ? `<figure><img src="resource:${art[key]}/art.png" alt=""><figcaption>${caption}</figcaption></figure>` : ''
+  const hexCell = (key: string, label: string, href?: string) => art[key]
+    ? (href
+      ? `<a href="${href}"><span class="hexwrap"><img src="resource:${art[key]}/art.png" alt=""></span>${label}</a>`
+      : `<span class="cell"><span class="hexwrap"><img src="resource:${art[key]}/art.png" alt=""></span>${label}</span>`)
+    : ''
 
   const home = P('/revolucion', 'The moment is the product', `
   <main class="wrap">
@@ -288,6 +319,16 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
       <div class="btns">
         <a class="btn" href="/revolucion/journal">Open the journal</a>
         <a class="btn ghost" href="/revolucion/mission">Read the manifesto</a>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="rule"><p class="kicker">inside the hive</p></div>
+      <div class="artstrip">
+        ${stripArt('lounge', 'the lounge')}
+        ${stripArt('cigars', 'the catalog')}
+        ${stripArt('journal', 'the journal')}
+        ${stripArt('humidor', 'the humidor')}
       </div>
     </section>
 
@@ -316,7 +357,7 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
         <a class="card link" href="/revolucion/cigars"><span class="num">03</span>${thumb('cigars')}<h3>The Catalog</h3>
           <p>Brands, vitolas, wrappers, origins, strength. The community writes it by smoking.</p></a>
         <a class="card link" href="/revolucion/flavor-wheel"><span class="num">04</span>${thumb('flavor-wheel')}<h3>The Flavor Wheel</h3>
-          <p>Ten families, sixty-three flavors — one shared tasting language. Spin it.</p></a>
+          <p>Ten families, sixty-three flavors — one shared tasting language. Tap it.</p></a>
         <a class="card link" href="/revolucion/lounge"><span class="num">05</span>${thumb('lounge')}<h3>The Cigar Lounge</h3>
           <p>Your corner of the ecosystem. Dress the room; hang your own things soon.</p></a>
         <a class="card link" href="/revolucion/discovery"><span class="num">06</span>${thumb('discovery')}<h3>Discovery</h3>
@@ -339,16 +380,262 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
   </main>`)
 
   const journal = P('/revolucion/journal', 'The Journal', `
-  <main class="wrap">
-    <section class="hero">
+  <style>
+    /* ── the parchment scroll ── the journal page IS a journal: an unrolled
+       scroll on the lounge table. Ink replaces gold; the scene hangs as a
+       tipped-in plate; a wax seal closes the entry. */
+    .scrollpage{padding-top:2.6rem;padding-bottom:1.2rem}
+    .curl{position:relative;z-index:2;height:40px;border-radius:20px;
+      width:calc(100% + 32px);margin-left:-16px;
+      background:linear-gradient(180deg,#8a6a3e,#e9d6a8 26%,#f4e6c2 40%,#cfae76 72%,#6e4f2a);
+      box-shadow:0 10px 18px rgba(0,0,0,.55)}
+    .curl::before,.curl::after{content:'';position:absolute;top:50%;transform:translateY(-50%);
+      width:40px;height:40px;border-radius:50%;
+      background:radial-gradient(circle,#4a3218 0 3px,#c9a76a 3px 7px,#7a5a30 7px 10px,#e9d6a8 10px 14px,#6e4f2a 14px 17px,#3a2814 17px)}
+    .curl::before{left:0}.curl::after{right:0}
+    .sheet{position:relative;margin:-20px 0;padding:4.2rem clamp(1.5rem,5.5vw,5rem) 4.6rem;
+      color:#3b2a18;
+      background:
+        radial-gradient(1100px 520px at 18% 6%,rgba(122,84,40,.10),transparent 60%),
+        radial-gradient(860px 480px at 84% 34%,rgba(122,84,40,.08),transparent 55%),
+        radial-gradient(940px 640px at 46% 96%,rgba(100,66,30,.13),transparent 60%),
+        linear-gradient(180deg,#efe2bf,#e8d6ac 42%,#e1cc9c);
+      box-shadow:inset 0 0 110px rgba(94,60,24,.30),inset 0 0 16px rgba(94,60,24,.22),0 22px 44px rgba(0,0,0,.5)}
+    /* ink overrides — everything on the sheet reads as pen on paper */
+    .sheet .kicker{color:#8c3a1c}
+    .sheet h1,.sheet h2{color:#2c1e0f}
+    .sheet h1 i{color:#8c3a1c}
+    .sheet h3{color:#7a4720}
+    .sheet .lede{color:#52402a}
+    .sheet .lede::first-letter{float:left;font-size:3.1em;line-height:.85;padding:.04em .09em 0 0;
+      font-style:italic;color:#8c3a1c}
+    .sheet .muted{color:#6d5738}
+    .sheet a{color:#8c3a1c;border-bottom:1px solid rgba(140,58,28,.35)}
+    .sheet a:hover{color:#5e2712;border-bottom-color:#5e2712}
+    .sheet .rule::after{background:rgba(59,42,24,.28)}
+    .sheet ::selection{background:#8c3a1c;color:#efe2bf}
+    .sheet .card{background:rgba(255,249,232,.5);border:1px solid rgba(92,61,46,.32);
+      box-shadow:0 1px 3px rgba(59,42,24,.18)}
+    .sheet .card p{color:#52402a}
+    .sheet .card .thumb{border-color:rgba(92,61,46,.4)}
+    .sheet .spoken{background:rgba(255,250,236,.55);border:1px solid rgba(92,61,46,.3);color:#3b2a18}
+    .sheet .spoken b{color:#8c3a1c;border-bottom:1px dotted rgba(140,58,28,.7)}
+    .sheet .heroart img{border-color:#5c3d2e;outline-color:rgba(92,61,46,.35);background:#f2e7cc}
+    .sheet .heroart figcaption{color:#6d5738}
+    /* the golden-hour scene, mounted like a plate in an old journal */
+    .scenewrap{border:12px solid #f6eed9;outline:1px solid rgba(92,61,46,.45);background:#150d15;
+      box-shadow:0 6px 18px rgba(59,42,24,.4);margin:.6rem 0 0}
+    .scenewrap svg{display:block;width:100%;height:auto}
+    .scenecap{font-size:.74rem;letter-spacing:.22em;text-transform:uppercase;color:#6d5738;
+      padding:.85rem 1.1rem .1rem;display:flex;flex-wrap:wrap;gap:.4rem 1.4rem;justify-content:center}
+    .scenecap i{font-style:normal;color:#8c3a1c}
+    .fic{width:54px;height:54px;float:right;margin:-.2rem 0 .55rem .9rem}
+    .beam{margin:.6rem 0 1.4rem}
+    .beam svg{display:block;width:100%;height:auto}
+    .sealrow{display:flex;flex-direction:column;align-items:center;gap:.9rem;margin:4rem 0 .5rem;text-align:center}
+    .sealrow svg{width:112px;height:auto;filter:drop-shadow(0 3px 5px rgba(59,42,24,.4))}
+    .sealrow p{font-size:.72rem;letter-spacing:.34em;text-transform:uppercase;color:#6d5738}
+    @media (prefers-reduced-motion: no-preference){
+      .j-smoke{animation:jdrift 8s ease-in-out infinite}
+      .j-hex{animation:jbob 7s ease-in-out infinite}
+      .j-hex.h2{animation-delay:-2.4s}
+      .j-hex.h3{animation-delay:-4.6s}
+      .j-fly{animation:jfly 5.2s ease-in-out infinite}
+      .j-fly.f2{animation-delay:-1.8s}
+      .j-fly.f3{animation-delay:-3.4s}
+      .j-bulb{animation:jglow 6s ease-in-out infinite}
+      .j-bulb.b2{animation-delay:-3s}
+    }
+    @keyframes jdrift{0%,100%{transform:translateY(0);opacity:.55}50%{transform:translateY(-7px);opacity:.85}}
+    @keyframes jbob{0%,100%{transform:translateY(0)}50%{transform:translateY(-9px)}}
+    @keyframes jfly{0%,100%{opacity:.12}50%{opacity:.95}}
+    @keyframes jglow{0%,100%{opacity:.55}50%{opacity:1}}
+  </style>
+  <main class="wrap scrollpage" style="max-width:1220px">
+    <div class="curl" aria-hidden="true"></div>
+    <div class="sheet">
+    <section class="hero" style="padding:1.6rem 0 1.2rem">
       <p class="kicker">the journal · the entry point</p>
       <h1>Tell it like it <i>was</i>.</h1>
       <p class="lede">Not a form. A moment, captured as experience tiles — the cigar, what you
       tasted, what you drank, where you were, who you were with, and how it felt.</p>
     </section>
 
+    <div class="scenewrap"><svg viewBox="0 0 1200 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A golden-hour patio: an open journal on the table, a cigar resting, and the words of the moment rising as tiles">
+      <defs>
+        <linearGradient id="jsky" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#231a2b"/><stop offset="42%" stop-color="#46283a"/>
+          <stop offset="74%" stop-color="#8a4630"/><stop offset="100%" stop-color="#c67a3e"/>
+        </linearGradient>
+        <radialGradient id="jsun" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="rgba(245,200,122,.95)"/><stop offset="45%" stop-color="rgba(230,150,80,.4)"/>
+          <stop offset="100%" stop-color="rgba(230,150,80,0)"/>
+        </radialGradient>
+        <radialGradient id="jlamp" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="rgba(242,196,126,.5)"/><stop offset="100%" stop-color="rgba(242,196,126,0)"/>
+        </radialGradient>
+        <linearGradient id="jdeck" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#2c1b13"/><stop offset="100%" stop-color="#150c0a"/>
+        </linearGradient>
+      </defs>
+      <rect width="1200" height="400" fill="url(#jsky)"/>
+      <circle cx="300" cy="330" r="175" fill="url(#jsun)"/>
+      <circle cx="300" cy="330" r="40" fill="#f2c47e"/>
+      <ellipse cx="430" cy="296" rx="180" ry="9" fill="rgba(240,196,140,.14)"/>
+      <ellipse cx="220" cy="256" rx="130" ry="7" fill="rgba(240,196,140,.10)"/>
+      <ellipse cx="700" cy="220" rx="150" ry="8" fill="rgba(240,196,140,.07)"/>
+      <path d="M905,150 q7,-8 14,0 M925,158 q6,-7 12,0 M885,166 q6,-7 12,0" stroke="#2a1b28" stroke-width="2" fill="none" stroke-linecap="round"/>
+      <path d="M0,336 Q200,308 420,330 T820,326 T1200,338 L1200,400 L0,400 Z" fill="#2c1a28"/>
+      <path d="M0,362 Q260,338 520,356 T1040,352 L1200,360 L1200,400 L0,400 Z" fill="#221224"/>
+      <path d="M0,34 Q300,108 620,66 T1200,54" fill="none" stroke="rgba(200,151,90,.45)" stroke-width="2"/>
+      <path d="M420,0 Q700,92 1010,28" fill="none" stroke="rgba(200,151,90,.3)" stroke-width="1.6"/>
+      <g class="j-bulb">
+        <circle cx="110" cy="58" r="7" fill="rgba(242,196,126,.22)"/><circle cx="110" cy="58" r="3" fill="#f2c47e"/>
+        <circle cx="420" cy="84" r="7" fill="rgba(242,196,126,.22)"/><circle cx="420" cy="84" r="3" fill="#f2c47e"/>
+        <circle cx="760" cy="58" r="7" fill="rgba(242,196,126,.22)"/><circle cx="760" cy="58" r="3" fill="#f2c47e"/>
+        <circle cx="1110" cy="56" r="7" fill="rgba(242,196,126,.22)"/><circle cx="1110" cy="56" r="3" fill="#f2c47e"/>
+      </g>
+      <g class="j-bulb b2">
+        <circle cx="260" cy="88" r="7" fill="rgba(242,196,126,.22)"/><circle cx="260" cy="88" r="3" fill="#f2c47e"/>
+        <circle cx="580" cy="68" r="7" fill="rgba(242,196,126,.22)"/><circle cx="580" cy="68" r="3" fill="#f2c47e"/>
+        <circle cx="940" cy="60" r="7" fill="rgba(242,196,126,.22)"/><circle cx="940" cy="60" r="3" fill="#f2c47e"/>
+        <circle cx="620" cy="56" r="6" fill="rgba(242,196,126,.2)"/><circle cx="620" cy="56" r="2.6" fill="#f2c47e"/>
+        <circle cx="850" cy="66" r="6" fill="rgba(242,196,126,.2)"/><circle cx="850" cy="66" r="2.6" fill="#f2c47e"/>
+      </g>
+      <g fill="#190f16">
+        <rect y="340" width="1200" height="8"/>
+        <rect y="368" width="1200" height="5"/>
+        <rect y="392" width="1200" height="6"/>
+        <rect x="16" y="340" width="10" height="58"/><rect x="96" y="340" width="10" height="58"/>
+        <rect x="176" y="340" width="10" height="58"/><rect x="256" y="340" width="10" height="58"/>
+        <rect x="336" y="340" width="10" height="58"/><rect x="416" y="340" width="10" height="58"/>
+        <rect x="496" y="340" width="10" height="58"/><rect x="576" y="340" width="10" height="58"/>
+        <rect x="656" y="340" width="10" height="58"/><rect x="736" y="340" width="10" height="58"/>
+        <rect x="816" y="340" width="10" height="58"/><rect x="896" y="340" width="10" height="58"/>
+        <rect x="976" y="340" width="10" height="58"/><rect x="1056" y="340" width="10" height="58"/>
+        <rect x="1136" y="340" width="10" height="58"/>
+      </g>
+      <rect y="398" width="1200" height="162" fill="url(#jdeck)"/>
+      <g stroke="#0f0806" stroke-width="2">
+        <line y1="428" x2="1200" y2="428"/><line y1="458" x2="1200" y2="458"/>
+        <line y1="490" x2="1200" y2="490"/><line y1="524" x2="1200" y2="524"/>
+        <line x1="180" y1="428" x2="180" y2="458"/><line x1="560" y1="458" x2="560" y2="490"/>
+        <line x1="920" y1="428" x2="920" y2="458"/><line x1="360" y1="490" x2="360" y2="524"/>
+        <line x1="1060" y1="490" x2="1060" y2="524"/>
+      </g>
+      <ellipse cx="470" cy="500" rx="120" ry="26" fill="rgba(242,196,126,.07)"/>
+      <ellipse cx="470" cy="472" rx="95" ry="70" fill="url(#jlamp)"/>
+      <g>
+        <rect x="448" y="446" width="44" height="60" fill="#191019" stroke="#c8975a" stroke-width="2"/>
+        <path d="M448,446 L470,432 L492,446" fill="none" stroke="#c8975a" stroke-width="2"/>
+        <circle cx="470" cy="428" r="4" fill="none" stroke="#c8975a" stroke-width="2"/>
+        <path d="M470,492 C464,482 466,474 470,466 C474,474 476,482 470,492 Z" fill="#f2c47e" class="j-bulb"/>
+        <line x1="448" y1="476" x2="492" y2="476" stroke="rgba(200,151,90,.5)"/>
+      </g>
+      <g>
+        <path d="M96,468 L164,468 L152,540 L108,540 Z" fill="#2c1a10" stroke="#c8975a"/>
+        <line x1="100" y1="482" x2="160" y2="482" stroke="rgba(200,151,90,.45)"/>
+        <g stroke="#3f7a4f" stroke-width="4" fill="none" stroke-linecap="round">
+          <path d="M130,468 C128,430 112,412 96,394"/>
+          <path d="M130,468 C134,424 152,410 168,390"/>
+          <path d="M130,468 C130,432 130,410 128,392"/>
+        </g>
+        <ellipse cx="94" cy="392" rx="7" ry="14" fill="#3f7a4f" transform="rotate(-34 94 392)"/>
+        <ellipse cx="170" cy="388" rx="7" ry="14" fill="#3f7a4f" transform="rotate(30 170 388)"/>
+        <ellipse cx="127" cy="388" rx="7" ry="15" fill="#3f7a4f"/>
+      </g>
+      <g>
+        <ellipse cx="780" cy="524" rx="64" ry="12" fill="#170d0a"/>
+        <rect x="768" y="446" width="24" height="76" fill="#241309"/>
+        <ellipse cx="780" cy="430" rx="205" ry="38" fill="#2c1a10" stroke="#c8975a" stroke-width="2"/>
+        <ellipse cx="780" cy="422" rx="205" ry="38" fill="#3a2417" stroke="#c8975a" stroke-width="2"/>
+      </g>
+      <g transform="translate(688 402)">
+        <path d="M0,10 C-20,-2 -66,-6 -92,3 L-92,44 C-66,35 -20,39 0,48 C20,39 66,35 92,44 L92,3 C66,-6 20,-2 0,10 Z" fill="#241309" stroke="#c8975a"/>
+        <path d="M0,8 C-18,-2 -60,-6 -84,2 L-84,38 C-60,30 -18,34 0,42 Z" fill="#f0e6d6"/>
+        <path d="M0,8 C18,-2 60,-6 84,2 L84,38 C60,30 18,34 0,42 Z" fill="#e4d6bd"/>
+        <path d="M0,8 L0,42" stroke="#b9a98e"/>
+        <g stroke="#b9a98e" stroke-width="1.4" fill="none" opacity=".8">
+          <path d="M-72,10 C-52,6 -26,8 -10,12"/>
+          <path d="M-72,18 C-52,14 -26,16 -10,20"/>
+          <path d="M-72,26 C-56,22 -34,24 -10,28"/>
+        </g>
+        <g stroke="#8d7f6f" stroke-width="1.4" fill="none" opacity=".8">
+          <path d="M12,12 C30,8 56,6 74,10"/>
+          <path d="M12,20 C30,16 50,14 66,17"/>
+        </g>
+        <polygon points="30,26 38,21 46,26 46,35 38,40 30,35" fill="none" stroke="#c8975a" stroke-width="1.6"/>
+        <rect x="46" y="34" width="52" height="6" rx="3" fill="#171017" stroke="#c8975a" stroke-width="1" transform="rotate(-8 46 34)"/>
+      </g>
+      <g>
+        <rect x="856" y="382" width="34" height="36" fill="rgba(20,12,16,.4)" stroke="rgba(240,230,214,.8)" stroke-width="1.8"/>
+        <rect x="858" y="399" width="30" height="17" fill="#b3542f" opacity=".9"/>
+        <rect x="862" y="393" width="11" height="11" fill="none" stroke="rgba(240,230,214,.55)"/>
+        <line x1="861" y1="386" x2="861" y2="414" stroke="rgba(240,230,214,.3)" stroke-width="2"/>
+      </g>
+      <g>
+        <ellipse cx="930" cy="412" rx="28" ry="9" fill="#171017" stroke="#8d7f6f"/>
+        <rect x="916" y="396" width="46" height="8" rx="4" fill="#5C3D2E" stroke="#3a2417" transform="rotate(-11 916 400)"/>
+        <rect x="936" y="395" width="8" height="8" fill="#c8975a" transform="rotate(-11 936 399)"/>
+        <circle cx="960" cy="392" r="3.6" fill="#ff9b52"/>
+      </g>
+      <g transform="translate(962 388)"><g class="j-smoke">
+        <path d="M0,0 C-12,-26 10,-44 -4,-70 C-16,-92 6,-108 -2,-130" fill="none" stroke="rgba(224,181,120,.5)" stroke-width="3" stroke-linecap="round"/>
+        <path d="M8,-6 C20,-30 -2,-50 12,-76" fill="none" stroke="rgba(224,181,120,.28)" stroke-width="2.5" stroke-linecap="round"/>
+      </g></g>
+      <g stroke="#9a7a58" stroke-width="3" fill="none" stroke-linecap="round">
+        <path d="M1046,290 Q1044,352 1050,398"/>
+        <path d="M1046,290 Q1082,282 1108,296"/>
+        <path d="M1108,296 L1104,398"/>
+        <path d="M1040,398 L1116,398"/>
+        <path d="M1044,398 L1038,468"/><path d="M1112,398 L1120,468"/>
+        <path d="M1050,344 L1106,344"/>
+      </g>
+      <rect x="1040" y="390" width="78" height="12" rx="5" fill="#7a3b2a" stroke="#9a7a58"/>
+      <path d="M700,380 C640,330 560,300 520,240 C480,180 520,130 600,120" fill="none" stroke="rgba(200,151,90,.3)" stroke-width="1.6" stroke-dasharray="2 8"/>
+      <g transform="translate(612 306)"><g class="j-hex">
+        <polygon points="0,-30 26,-15 26,15 0,30 -26,15 -26,-15" fill="rgba(21,13,21,.88)" stroke="#c8975a" stroke-width="1.5"/>
+        <text y="5" text-anchor="middle" font-size="13" fill="#f0e6d6" font-family="Georgia,serif">patio</text>
+      </g></g>
+      <g transform="translate(508 232)"><g class="j-hex h2">
+        <polygon points="0,-36 31,-18 31,18 0,36 -31,18 -31,-18" fill="rgba(21,13,21,.88)" stroke="#c8975a" stroke-width="1.5"/>
+        <text y="-2" text-anchor="middle" font-size="13" fill="#f0e6d6" font-family="Georgia,serif">golden</text>
+        <text y="14" text-anchor="middle" font-size="13" fill="#f0e6d6" font-family="Georgia,serif">hour</text>
+      </g></g>
+      <g transform="translate(426 148)"><g class="j-hex h3">
+        <polygon points="0,-30 26,-15 26,15 0,30 -26,15 -26,-15" fill="rgba(21,13,21,.88)" stroke="#c8975a" stroke-width="1.5"/>
+        <text y="5" text-anchor="middle" font-size="13" fill="#f0e6d6" font-family="Georgia,serif">scotch</text>
+      </g></g>
+      <g transform="translate(566 110)"><g class="j-hex h2">
+        <polygon points="0,-26 22.5,-13 22.5,13 0,26 -22.5,13 -22.5,-13" fill="rgba(21,13,21,.88)" stroke="#c8975a" stroke-width="1.5"/>
+        <text y="5" text-anchor="middle" font-size="12" fill="#f0e6d6" font-family="Georgia,serif">cedar</text>
+      </g></g>
+      <g transform="translate(688 182)"><g class="j-hex h3">
+        <polygon points="0,-36 31,-18 31,18 0,36 -31,18 -31,-18" fill="rgba(21,13,21,.88)" stroke="#c8975a" stroke-width="1.5"/>
+        <text y="-2" text-anchor="middle" font-size="13" fill="#f0e6d6" font-family="Georgia,serif">close</text>
+        <text y="14" text-anchor="middle" font-size="13" fill="#f0e6d6" font-family="Georgia,serif">friends</text>
+      </g></g>
+      <g transform="translate(782 96)"><g class="j-hex">
+        <polygon points="0,-30 26,-15 26,15 0,30 -26,15 -26,-15" fill="rgba(21,13,21,.88)" stroke="#c8975a" stroke-width="1.5"/>
+        <text y="-2" text-anchor="middle" font-size="12" fill="#f0e6d6" font-family="Georgia,serif">crisp</text>
+        <text y="13" text-anchor="middle" font-size="12" fill="#f0e6d6" font-family="Georgia,serif">air</text>
+      </g></g>
+      <g transform="translate(876 170)"><g class="j-hex h2">
+        <polygon points="0,-38 33,-19 33,19 0,38 -33,19 -33,-19" fill="rgba(21,13,21,.88)" stroke="#c8975a" stroke-width="1.5"/>
+        <text y="-2" text-anchor="middle" font-size="13" fill="#f0e6d6" font-family="Georgia,serif">dark</text>
+        <text y="14" text-anchor="middle" font-size="13" fill="#f0e6d6" font-family="Georgia,serif">chocolate</text>
+      </g></g>
+      <circle cx="220" cy="452" r="2" fill="#f2c47e" class="j-fly"/>
+      <circle cx="356" cy="486" r="1.8" fill="#f2c47e" class="j-fly f2"/>
+      <circle cx="1058" cy="446" r="2" fill="#f2c47e" class="j-fly f3"/>
+      <circle cx="608" cy="520" r="1.8" fill="#f2c47e" class="j-fly f2"/>
+      <circle cx="150" cy="380" r="1.6" fill="#f2c47e" class="j-fly f3"/>
+    </svg></div>
+    <p class="scenecap"><i>golden hour</i> · <i>patio</i> · <i>crisp air</i> · <i>close friends</i> · <i>scotch</i> — say it, and the scene assembles itself</p>
+
     <section class="section">
       <div class="rule"><p class="kicker">speak your moment</p></div>
+      ${heroArt('journal/speak-your-moment', 'speak your moment — hive art')}
       <h2>Press speak. The scene builds itself.</h2>
       <p class="muted">A deterministic script — not AI — listens for grammar keywords and brings
       each element into the scene. Say "cloudy" and the clouds drift in. Say "scotch" and the
@@ -367,26 +654,53 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     <section class="section">
       <div class="rule"><p class="kicker">one entry, six facets</p></div>
       <div class="cards">
-        <div class="card"><h3>Cigar</h3><p>Brand, line, name, vitola, wrapper, origin, strength.</p></div>
-        <div class="card"><h3>Flavors</h3><p>Tap what you tasted on the <a href="/revolucion/flavor-wheel">wheel</a>; slide the intensity.</p></div>
-        <div class="card"><h3>Ratings</h3><p>Draw, burn, construction, flavor, overall.</p></div>
-        <div class="card"><h3>Pairings</h3><p>Coffee, whiskey, rum, wine, beer, tea, food — what stood beside it.</p></div>
-        <div class="card"><h3>Occasion</h3><p>The celebration, the quiet evening, the milestone.</p></div>
-        <div class="card"><h3>Photos</h3><p>The band, the ash, the view.</p></div>
+        <div class="card"><svg class="fic" viewBox="0 0 54 54"><rect x="5" y="24" width="36" height="10" rx="5" fill="#5C3D2E" stroke="#3a2814"/><rect x="24" y="24" width="7" height="10" fill="#c8975a"/><circle cx="45" cy="29" r="3.4" fill="#ff9b52"/><path d="M47,20 C43,15 49,11 45,5" fill="none" stroke="rgba(122,84,40,.55)" stroke-width="2" stroke-linecap="round"/></svg><h3>Cigar</h3><p>Brand, line, name, vitola, wrapper, origin, strength.</p></div>
+        <div class="card"><svg class="fic" viewBox="0 0 54 54"><g transform="translate(27 27)"><circle r="18" fill="none" stroke="#5C3D2E" stroke-width="9"/><circle r="18" fill="none" stroke="#C0392B" stroke-width="9" stroke-dasharray="20 93"/><circle r="18" fill="none" stroke="#D4A017" stroke-width="9" stroke-dasharray="17 96" stroke-dashoffset="-26"/><circle r="18" fill="none" stroke="#27AE60" stroke-width="9" stroke-dasharray="15 98" stroke-dashoffset="-50"/><circle r="7" fill="#f6eed9" stroke="#5c3d2e"/></g></svg><h3>Flavors</h3><p>Tap what you tasted on the <a href="/revolucion/flavor-wheel">wheel</a>; slide the intensity.</p></div>
+        <div class="card"><svg class="fic" viewBox="0 0 54 54"><path d="M27,10 l4.6,9.6 10.6,1.4 -7.8,7.4 2,10.6 -9.4,-5.2 -9.4,5.2 2,-10.6 -7.8,-7.4 10.6,-1.4 Z" fill="#b07a26"/><path d="M9,36 l2,4 4.4,.6 -3.2,3 .8,4.4 -4,-2.2 -4,2.2 .8,-4.4 -3.2,-3 4.4,-.6 Z" fill="none" stroke="#8c3a1c"/><path d="M45,36 l2,4 4.4,.6 -3.2,3 .8,4.4 -4,-2.2 -4,2.2 .8,-4.4 -3.2,-3 4.4,-.6 Z" fill="none" stroke="#8c3a1c"/></svg><h3>Ratings</h3><p>Draw, burn, construction, flavor, overall.</p></div>
+        <div class="card"><svg class="fic" viewBox="0 0 54 54"><rect x="6" y="22" width="20" height="22" fill="none" stroke="#5c3d2e" stroke-width="2"/><rect x="7.5" y="33" width="17" height="9.5" fill="#b3542f"/><path d="M34,26 h14 v10 a7,7 0 0 1 -7,7 a7,7 0 0 1 -7,-7 Z" fill="none" stroke="#7a4720" stroke-width="2"/><path d="M48,28 h2 a3.5,3.5 0 0 1 0,7 h-2" fill="none" stroke="#7a4720" stroke-width="2"/><path d="M38,20 c-2,-3 2,-5 0,-8 M43,20 c-2,-3 2,-5 0,-8" stroke="rgba(122,84,40,.55)" stroke-width="1.8" fill="none" stroke-linecap="round"/></svg><h3>Pairings</h3><p>Coffee, whiskey, rum, wine, beer, tea, food — what stood beside it.</p></div>
+        <div class="card"><svg class="fic" viewBox="0 0 54 54"><path d="M4,14 Q27,30 50,14" fill="none" stroke="#7a4720" stroke-width="2"/><polygon points="10,18 20,20 12,30" fill="#C0392B"/><polygon points="22,22 32,22 27,33" fill="#D4A017"/><polygon points="34,20 44,18 42,29" fill="#27AE60"/><circle cx="27" cy="44" r="2" fill="#b07a26"/><circle cx="14" cy="40" r="1.6" fill="#b07a26"/><circle cx="40" cy="40" r="1.6" fill="#b07a26"/></svg><h3>Occasion</h3><p>The celebration, the quiet evening, the milestone.</p></div>
+        <div class="card"><svg class="fic" viewBox="0 0 54 54"><rect x="6" y="16" width="42" height="28" rx="4" fill="none" stroke="#5c3d2e" stroke-width="2"/><path d="M18,16 L21,10 L33,10 L36,16" fill="none" stroke="#5c3d2e" stroke-width="2"/><circle cx="27" cy="30" r="9" fill="none" stroke="#5c3d2e" stroke-width="2"/><circle cx="27" cy="30" r="3.5" fill="#5c3d2e"/><circle cx="42" cy="22" r="1.8" fill="#8c3a1c"/></svg><h3>Photos</h3><p>The band, the ash, the view.</p></div>
       </div>
     </section>
 
     <section class="section">
       <div class="rule"><p class="kicker">what it becomes</p></div>
+      <div class="beam"><svg viewBox="0 0 1200 120" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A timeline of journaled moments">
+        <line x1="30" y1="58" x2="1170" y2="58" stroke="rgba(59,42,24,.35)" stroke-width="2"/>
+        <circle cx="245" cy="58" r="2.5" fill="rgba(59,42,24,.45)"/>
+        <circle cx="480" cy="58" r="2.5" fill="rgba(59,42,24,.45)"/>
+        <circle cx="720" cy="58" r="2.5" fill="rgba(59,42,24,.45)"/>
+        <circle cx="955" cy="58" r="2.5" fill="rgba(59,42,24,.45)"/>
+        <g transform="translate(130 58)"><polygon points="0,-34 29.5,-17 29.5,17 0,34 -29.5,17 -29.5,-17" fill="#f6eed9" stroke="#5c3d2e" stroke-width="1.5"/><text y="4" text-anchor="middle" font-size="12" fill="#4a3721" font-family="Georgia,serif">reflection</text></g>
+        <g transform="translate(360 58)"><polygon points="0,-34 29.5,-17 29.5,17 0,34 -29.5,17 -29.5,-17" fill="#f6eed9" stroke="#5c3d2e" stroke-width="1.5"/><text y="4" text-anchor="middle" font-size="11" fill="#4a3721" font-family="Georgia,serif">celebration</text></g>
+        <g transform="translate(600 58)"><polygon points="0,-34 29.5,-17 29.5,17 0,34 -29.5,17 -29.5,-17" fill="#f6eed9" stroke="#8c3a1c" stroke-width="2"/><text y="4" text-anchor="middle" font-size="10.5" fill="#2c1e0f" font-family="Georgia,serif">conversation</text></g>
+        <g transform="translate(840 58)"><polygon points="0,-34 29.5,-17 29.5,17 0,34 -29.5,17 -29.5,-17" fill="#f6eed9" stroke="#5c3d2e" stroke-width="1.5"/><text y="4" text-anchor="middle" font-size="12" fill="#4a3721" font-family="Georgia,serif">gratitude</text></g>
+        <g transform="translate(1070 58)"><polygon points="0,-34 29.5,-17 29.5,17 0,34 -29.5,17 -29.5,-17" fill="#f6eed9" stroke="#5c3d2e" stroke-width="1.5"/><text y="4" text-anchor="middle" font-size="12" fill="#4a3721" font-family="Georgia,serif">focus</text></g>
+        <text x="600" y="112" text-anchor="middle" font-size="13" fill="#6d5738" font-family="Georgia,serif" font-style="italic">your timeline of moments — every entry a scene you can revisit</text>
+      </svg></div>
       <div class="cards">
-        <div class="card"><h3>My Moments</h3><p>Your timeline of experiences — every entry a scene you can revisit.</p></div>
-        <div class="card"><h3>Favorites</h3><p>The moments and cigars you keep coming back to.</p></div>
-        <div class="card"><h3>Stats</h3><p>Your patterns: most-tasted flavors, favorite pairings, when and where you smoke best.</p></div>
+        <div class="card">${thumb('journal/my-moments')}<h3>My Moments</h3><p>Your timeline of experiences — every entry a scene you can revisit.</p></div>
+        <div class="card">${thumb('journal/favorites')}<h3>Favorites</h3><p>The moments and cigars you keep coming back to.</p></div>
+        <div class="card">${thumb('journal/stats')}<h3>Stats</h3><p>Your patterns: most-tasted flavors, favorite pairings, when and where you smoke best.</p></div>
       </div>
       <p class="muted">And quietly, with your consent, every entry teaches
       <a href="/revolucion/discovery">discovery</a> what you love and shows
       <a href="/revolucion/insights">the makers</a> who they serve.</p>
     </section>
+
+    <div class="sealrow">
+      <svg viewBox="0 0 120 120" role="img" aria-label="A wax seal pressed with the Revolución hexagon">
+        <path d="M60,8 C82,6 102,20 108,40 C114,60 112,84 96,98 C80,112 44,114 28,102 C12,90 6,66 12,44 C18,22 38,10 60,8 Z" fill="#7e2114"/>
+        <path d="M60,14 C79,12 96,24 102,42 C107,59 105,80 92,92 C77,105 46,107 32,96 C18,85 13,64 18,46 C23,27 41,16 60,14 Z" fill="#93301c"/>
+        <polygon points="60,30 84,44 84,72 60,86 36,72 36,44" fill="none" stroke="#c86a4a" stroke-width="2.5"/>
+        <polygon points="60,40 75,49 75,67 60,76 45,67 45,49" fill="none" stroke="rgba(200,106,74,.55)" stroke-width="1.5"/>
+        <text x="60" y="64" text-anchor="middle" font-size="17" font-style="italic" fill="#d8825e" font-family="Georgia,serif">R</text>
+        <ellipse cx="46" cy="26" rx="14" ry="5" fill="rgba(255,255,255,.14)" transform="rotate(-18 46 26)"/>
+      </svg>
+      <p>journaled · sealed · yours</p>
+    </div>
+    </div>
+    <div class="curl" aria-hidden="true"></div>
   </main>`)
 
   const experience = P('/revolucion/experience', 'The Experience', `
@@ -397,6 +711,15 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
       <p class="lede">Forty-one keywords make up the language of moments. Each one is a tile
       with a predefined look and behavior — a crafted world, not an automated one.</p>
     </section>
+
+    <div class="hexgallery">
+      ${hexCell('experience/weather', 'weather')}
+      ${hexCell('experience/time', 'time')}
+      ${hexCell('experience/setting', 'setting')}
+      ${hexCell('experience/company', 'company')}
+      ${hexCell('experience/mood', 'mood')}
+      ${hexCell('experience/drinks', 'drinks')}
+    </div>
 
     <section class="section">
       <div class="rule"><p class="kicker">weather</p></div>
@@ -440,6 +763,7 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
   const cigars = P('/revolucion/cigars', 'The Catalog', `
   <main class="wrap">
     <section class="hero">
+      ${heroArt('cigars', 'the catalog — hive art')}
       <p class="kicker">the catalog · written by smoking</p>
       <h1>The community writes<br>the <i>catalog</i>.</h1>
       <p class="lede">Every cigar logged in a journal joins it — brand, line, vitola, wrapper,
@@ -448,6 +772,13 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
 
     <section class="section">
       <div class="rule"><p class="kicker">the dimensions</p></div>
+      <div class="hexgallery">
+        ${hexCell('cigars/brands', 'brands')}
+        ${hexCell('cigars/vitolas', 'vitolas')}
+        ${hexCell('cigars/wrappers', 'wrappers')}
+        ${hexCell('cigars/origins', 'origins')}
+        ${hexCell('cigars/strength', 'strength')}
+      </div>
       <div class="facts">
         <div><span class="n">12</span><span class="t">vitolas</span></div>
         <div><span class="n">9</span><span class="t">wrappers</span></div>
@@ -738,16 +1069,20 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
           var f0 = sg.a0 + j * fw + .5, f1 = sg.a0 + (j + 1) * fw - .5, fmid = (f0 + f1) / 2;
           var sel = isSel(lb);
           var atNotch = !!active && active.fm.label === fm.label && active.lb === lb;
-          var rIn = atNotch ? R_FLV - 8 : R_FLV;
-          var rOut = atNotch ? R_OUT + R_RAISE : R_OUT;
+          // selection LIFTS the slice out of the rim — the position change IS
+          // the select cue (a thin border alone read as "nothing happened").
+          // The at-notch slice lifts most; a selected slice lifts a bit less.
+          var lift = atNotch ? R_RAISE : (sel ? 12 : 0);
+          var rIn = R_FLV - (lift ? 8 : 0);
+          var rOut = R_OUT + lift;
           var op = atNotch ? 1 : (sel ? 1 : (focused ? .8 : .5));
           // ink + outline that read ON THIS family's fill — cream ink on the
           // light families (Sweet, Cream & Bread, Fruit…) is unreadable, so
           // dark:true families always mark selection with dark ink/stroke
           var ink = fm.dark ? '#241c14' : '#f0e6d6';
-          var fp = el('path', { d: arcPath(rIn, rOut, atNotch ? f0 - .4 : f0, atNotch ? f1 + .4 : f1), fill: fm.color, opacity: op, 'class': 'flv' }, rot);
-          if (atNotch) { fp.setAttribute('stroke', ink); fp.setAttribute('stroke-width', '3'); }
-          else if (sel) { fp.setAttribute('stroke', ink); fp.setAttribute('stroke-width', '2.5'); }
+          var fp = el('path', { d: arcPath(rIn, rOut, lift ? f0 - .4 : f0, lift ? f1 + .4 : f1), fill: fm.color, opacity: op, 'class': 'flv' }, rot);
+          if (atNotch) { fp.setAttribute('stroke', ink); fp.setAttribute('stroke-width', '1.75'); }
+          else if (sel) { fp.setAttribute('stroke', ink); fp.setAttribute('stroke-width', '1.25'); }
           fp.style.cursor = 'pointer';
           fp.addEventListener('click', function(){ if (dragMoved) return; toggle(lb); });
           el('title', {}, fp).textContent = lb;
@@ -792,8 +1127,10 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
         dragging = true; dragMoved = false;
         downX = ev.clientX; downY = ev.clientY;
         startAngle = angleAt(ev); startRot = state.rot;
-        svg.classList.add('dragging');
-        try { svg.setPointerCapture(ev.pointerId); } catch(e){}
+        // NOTE: do NOT setPointerCapture here — a pure tap would then capture
+        // the pointer and the browser retargets the click to the <svg>, so the
+        // slice's own click listener never fires (you can't select by tapping).
+        // Capture is deferred to the drag threshold below.
       });
       svg.addEventListener('pointermove', function(ev){
         if (!dragging) return;
@@ -806,6 +1143,9 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
           if (dx * dx + dy * dy < 36) return;
           dragMoved = true;
           startAngle = angleAt(ev); // re-baseline so the wheel doesn't jump
+          // a real drag has begun — NOW capture the pointer for smooth spinning
+          svg.classList.add('dragging');
+          try { svg.setPointerCapture(ev.pointerId); } catch(e){}
         }
         var d = angleAt(ev) - startAngle;
         state.rot = startRot + d;
@@ -971,15 +1311,15 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     <section class="section">
       <div class="rule"><p class="kicker">four doors in</p></div>
       <div class="cards">
-        <div class="card"><span class="num">01</span><h3>For You</h3>
+        <div class="card"><span class="num">01</span>${thumb('discovery/for-you')}<h3>For You</h3>
           <p>Flavor-profile similarity against your own entries — cigars whose tasted flavors
           overlap what you already love.</p></div>
-        <div class="card"><span class="num">02</span><h3>By Experience</h3>
+        <div class="card"><span class="num">02</span>${thumb('discovery/by-experience')}<h3>By Experience</h3>
           <p>"I'm in the mood for a reflection experience." Ask for the evening you want;
           we find the leaf that fits it.</p></div>
-        <div class="card"><span class="num">03</span><h3>Kindred Smokers</h3>
+        <div class="card"><span class="num">03</span>${thumb('discovery/kindred-smokers')}<h3>Kindred Smokers</h3>
           <p>People whose palates and moments rhyme with yours — connection, not just products.</p></div>
-        <div class="card"><span class="num">04</span><h3>The Knowledge Graph</h3>
+        <div class="card"><span class="num">04</span>${thumb('discovery/knowledge-graph')}<h3>The Knowledge Graph</h3>
           <p>Cigar × flavor × pairing × weather × company × mood. The deep record the journal
           builds, richer than any rating.</p></div>
       </div>
@@ -1007,13 +1347,13 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     <section class="section">
       <div class="rule"><p class="kicker">how it gathers</p></div>
       <div class="cards">
-        <div class="card"><h3>Shared Moments</h3>
+        <div class="card">${thumb('community/shared-moments')}<h3>Shared Moments</h3>
           <p>Journal entries members choose to share — scenes, not reviews. The patio, the
           golden hour, the conversation that would not stop.</p></div>
-        <div class="card"><h3>The Vocabulary</h3>
+        <div class="card">${thumb('community/vocabulary')}<h3>The Vocabulary</h3>
           <p>Experience terms that emerge organically from real journals. Because they grow from
           lived data they feel authentic — and people start speaking them to each other.</p></div>
-        <div class="card"><h3>Circles</h3>
+        <div class="card">${thumb('community/circles')}<h3>Circles</h3>
           <p>Herf nights, lounge meetups, tasting circles — where the vocabulary is spoken
           out loud and new friendships get lit.</p></div>
       </div>
@@ -1021,6 +1361,7 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
 
     <section class="section">
       <div class="rule"><p class="kicker">first light — for newcomers</p></div>
+      ${heroArt('community/first-light', 'first light — hive art')}
       <h2>Nobody should be intimidated by a leaf.</h2>
       <p class="lede" style="max-width:46rem">A gentle path for new smokers: honest introductions,
       mild starts, and expectations set before the first draw. If the pepper surprises —
@@ -1042,16 +1383,16 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     <section class="section">
       <div class="rule"><p class="kicker">what an insight looks like</p></div>
       <div class="cards">
-        <div class="card"><h3>Occasion Trends</h3>
+        <div class="card">${thumb('insights/occasion-trends')}<h3>Occasion Trends</h3>
           <p>"This blend is most often chosen for quiet evening reflection." Now you know what
           its marketing should sound like — and what its band should feel like.</p></div>
-        <div class="card"><h3>Pairing Performance</h3>
+        <div class="card">${thumb('insights/pairing-performance')}<h3>Pairing Performance</h3>
           <p>"Often exceeds expectations with coffee, but underperforms with whisky pairings."
           A tasting-room fix no focus group would ever surface.</p></div>
-        <div class="card"><h3>Newcomer Experience</h3>
+        <div class="card">${thumb('insights/newcomer-experience')}<h3>Newcomer Experience</h3>
           <p>"New smokers feel intimidated — the pepper is a surprise." Feedback that refines a
           blend's introduction, not its soul.</p></div>
-        <div class="card"><h3>Blend Feedback</h3>
+        <div class="card">${thumb('insights/blend-feedback')}<h3>Blend Feedback</h3>
           <p>Aggregate flavor profiles, vitola preferences, strength drift over seasons — insight
           that helps you refine blends, vitolas, and marketing.</p></div>
       </div>
@@ -1074,6 +1415,7 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
   const collaborations = P('/revolucion/collaborations', 'Named Experiences', `
   <main class="wrap">
     <section class="hero">
+      ${heroArt('collaborations/named-experiences', 'named experiences — hive art')}
       <p class="kicker">collaborations · named experiences</p>
       <h1>Blends named for what<br>they <i>create</i>.</h1>
       <p class="lede">Names shift from wrapper and origin to experience. When a person smokes it,
@@ -1112,6 +1454,7 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
   const humidor = P('/revolucion/humidor', 'The Humidor', `
   <main class="wrap">
     <section class="hero">
+      ${heroArt('humidor', 'the humidor — hive art')}
       <p class="kicker">the humidor · patience, kept</p>
       <h1>What rests in the dark<br>gets <i>better</i>.</h1>
       <p class="lede">Your collection, kept and aging — with the journal one tap away when a
@@ -1121,11 +1464,11 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     <section class="section">
       <div class="rule"><p class="kicker">three shelves</p></div>
       <div class="cards">
-        <div class="card"><h3>My Collection</h3>
+        <div class="card">${thumb('humidor/my-collection')}<h3>My Collection</h3>
           <p>What you hold now — counts, dates acquired, and the entries each cigar has already earned.</p></div>
-        <div class="card"><h3>Wishlist</h3>
+        <div class="card">${thumb('humidor/wishlist')}<h3>Wishlist</h3>
           <p>What <a href="/revolucion/discovery">discovery</a> has convinced you to try next.</p></div>
-        <div class="card"><h3>Aging</h3>
+        <div class="card">${thumb('humidor/aging')}<h3>Aging</h3>
           <p>What rests, and how long it has rested. The humidor remembers so you can forget on purpose.</p></div>
       </div>
       <div class="btns"><a class="btn" href="/revolucion/journal">Journal the next one</a></div>
@@ -1158,6 +1501,27 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     </section>
   </main>`)
 
+  // The lounge hangs REAL hive art in its wall frames when the cells carry
+  // imagery — vector etchings remain as the cold-start fallback.
+  const mantelInner = art['lounge']
+    ? `<image href="resource:${art['lounge']}/art.png" x="632" y="136" width="96" height="126" preserveAspectRatio="xMidYMid slice"/>
+          <rect x="632" y="136" width="96" height="126" fill="none" stroke="rgba(200,151,90,.35)"/>`
+    : `<rect x="632" y="136" width="96" height="126" fill="none" stroke="rgba(200,151,90,.35)"/>
+          <polygon points="680,152 692,159 692,173 680,180 668,173 668,159" fill="none" stroke="rgba(224,181,120,.6)" stroke-width="1.5"/>
+          <text x="680" y="234" text-anchor="middle" font-size="58" font-style="italic" fill="#c8975a" font-family="Georgia,serif">R</text>`
+  const bigFrameInner = art['cigars']
+    ? `<image href="resource:${art['cigars']}/art.png" x="960" y="126" width="96" height="96" preserveAspectRatio="xMidYMid slice"/>`
+    : `<g transform="translate(1008 174)">
+            <circle r="36" fill="none" stroke="#5C3D2E" stroke-width="13"/>
+            <circle r="36" fill="none" stroke="#C0392B" stroke-width="13" stroke-dasharray="34 193"/>
+            <circle r="36" fill="none" stroke="#D4A017" stroke-width="13" stroke-dasharray="30 197" stroke-dashoffset="-40"/>
+            <circle r="36" fill="none" stroke="#27AE60" stroke-width="13" stroke-dasharray="26 201" stroke-dashoffset="-78"/>
+            <circle r="14" fill="#171017"/>
+          </g>`
+  const smallFrameInner = art['journal']
+    ? `<image href="resource:${art['journal']}/art.png" x="1093" y="159" width="58" height="78" preserveAspectRatio="xMidYMid slice"/>`
+    : `<rect x="1107" y="183" width="30" height="30" fill="#c8975a" transform="rotate(45 1122 198)"/>`
+
   const lounge = P('/revolucion/lounge', 'The Cigar Lounge', `
   <style>
     .lounge{display:grid;grid-template-columns:minmax(420px,1.6fr) minmax(280px,.7fr);gap:2.2rem;align-items:start;margin:2rem 0 3rem}
@@ -1174,102 +1538,247 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     .drow .mark{width:.9rem;color:var(--gold-bright)}
     .drow.off{color:var(--faint)}
     .dnote{color:var(--faint);font-size:.86rem;font-style:italic;line-height:1.6}
+    @media (prefers-reduced-motion: no-preference){
+      .l-flame{transform-box:fill-box;transform-origin:50% 100%;animation:lflick 2.8s ease-in-out infinite}
+      .l-flame.f2{animation-delay:-.9s;animation-duration:2.2s}
+      .l-flame.f3{animation-delay:-1.6s;animation-duration:1.8s}
+      .l-glow{animation:lpulse 3.6s ease-in-out infinite}
+      .l-smoke{animation:ldrift 9s ease-in-out infinite}
+      .l-star{animation:ltwink 4.6s ease-in-out infinite}
+      .l-star.s2{animation-delay:-1.5s}
+      .l-star.s3{animation-delay:-3s}
+      .l-fly{animation:ltwink 6.5s ease-in-out infinite}
+      .l-fly.s2{animation-delay:-2.2s}
+      .l-fly.s3{animation-delay:-4.4s}
+    }
+    @keyframes lflick{0%,100%{transform:scaleY(1)}50%{transform:scaleY(.85) scaleX(1.05)}}
+    @keyframes lpulse{0%,100%{opacity:.7}50%{opacity:1}}
+    @keyframes ldrift{0%,100%{transform:translateY(0);opacity:.5}50%{transform:translateY(-9px);opacity:.85}}
+    @keyframes ltwink{0%,100%{opacity:.2}50%{opacity:1}}
   </style>
   <main class="wrap" style="max-width:1220px">
     <section class="hero" style="padding:9vh 0 2vh">
       <p class="kicker">the cigar lounge &middot; your corner of the ecosystem</p>
       <h1>Pull up a <i>chair</i>.</h1>
-      <p class="lede">This room is built to take your things — art on the walls, bottles on the shelf,
-      trophies where they belong. The add-ons below are just the start; the scene is made of slots.</p>
+      <p class="lede">The fire is lit and the good seat is yours. This room is built to take your
+      things — art on the walls, bottles on the shelf, trophies where they belong. The add-ons
+      below are just the start; the scene is made of slots.</p>
     </section>
     <section class="lounge">
-      <div class="scene"><svg viewBox="0 0 1200 620" xmlns="http://www.w3.org/2000/svg">
+      <div class="scene"><svg viewBox="0 0 1200 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A warm cigar lounge: a fire going, a wingback chair with a throw, whiskey poured, and a cat asleep on the rug">
         <defs>
-          <radialGradient id="lglow" cx="50%" cy="35%" r="65%">
-            <stop offset="0%" stop-color="rgba(224,181,120,.34)"/><stop offset="100%" stop-color="rgba(224,181,120,0)"/>
-          </radialGradient>
           <linearGradient id="lwall" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="#221a29"/><stop offset="100%" stop-color="#170f1c"/>
+            <stop offset="0%" stop-color="#241b2c"/><stop offset="100%" stop-color="#181020"/>
           </linearGradient>
+          <radialGradient id="lglow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="rgba(224,181,120,.32)"/><stop offset="100%" stop-color="rgba(224,181,120,0)"/>
+          </radialGradient>
+          <radialGradient id="lfire" cx="50%" cy="60%" r="55%">
+            <stop offset="0%" stop-color="rgba(245,190,110,.85)"/><stop offset="55%" stop-color="rgba(224,120,60,.4)"/>
+            <stop offset="100%" stop-color="rgba(224,120,60,0)"/>
+          </radialGradient>
+          <radialGradient id="lhearth" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stop-color="rgba(230,140,70,.22)"/><stop offset="100%" stop-color="rgba(230,140,70,0)"/>
+          </radialGradient>
         </defs>
-        <rect x="0" y="0" width="1200" height="440" fill="url(#lwall)"/>
-        <rect x="0" y="440" width="1200" height="180" fill="#140d12"/>
-        <line x1="0" y1="440" x2="1200" y2="440" stroke="rgba(200,151,90,.3)"/>
-        <line x1="0" y1="392" x2="1200" y2="392" stroke="rgba(200,151,90,.12)"/>
+        <rect width="1200" height="470" fill="url(#lwall)"/>
+        <rect y="52" width="1200" height="6" fill="#2c2135"/>
+        <line y1="60" x2="1200" y2="60" stroke="rgba(200,151,90,.18)"/>
+        <rect y="336" width="1200" height="6" fill="#342639"/>
+        <rect y="342" width="1200" height="120" fill="#1e1524"/>
+        <g fill="none" stroke="rgba(200,151,90,.13)">
+          <rect x="24" y="356" width="96" height="92"/><rect x="140" y="356" width="96" height="92"/>
+          <rect x="256" y="356" width="96" height="92"/><rect x="372" y="356" width="96" height="92"/>
+          <rect x="488" y="356" width="96" height="92"/><rect x="616" y="356" width="96" height="92"/>
+          <rect x="732" y="356" width="96" height="92"/><rect x="848" y="356" width="96" height="92"/>
+          <rect x="964" y="356" width="96" height="92"/><rect x="1080" y="356" width="96" height="92"/>
+        </g>
+        <rect y="462" width="1200" height="10" fill="#241a22"/>
+        <rect y="472" width="1200" height="168" fill="#150d12"/>
+        <g stroke="#0e0810" stroke-width="2">
+          <line y1="502" x2="1200" y2="502"/><line y1="534" x2="1200" y2="534"/>
+          <line y1="568" x2="1200" y2="568"/><line y1="604" x2="1200" y2="604"/>
+        </g>
         <g id="slot-window">
-          <rect x="86" y="86" width="220" height="240" fill="#0c1220" stroke="#c8975a" stroke-width="2"/>
-          <line x1="196" y1="86" x2="196" y2="326" stroke="#c8975a"/><line x1="86" y1="206" x2="306" y2="206" stroke="#c8975a"/>
-          <circle cx="252" cy="140" r="24" fill="#e0b578" opacity=".9"/>
-          <circle cx="128" cy="120" r="2.5" fill="#f0e6d6"/><circle cx="160" cy="168" r="2" fill="#f0e6d6"/><circle cx="118" y="0" cy="250" r="2" fill="#f0e6d6"/>
-        </g>
-        <g id="slot-shelf">
-          <rect x="360" y="120" width="230" height="8" fill="#3a2417" stroke="#c8975a" stroke-width="1"/>
-          <rect x="376" y="76" width="14" height="44" fill="#5C3D2E"/><rect x="394" y="82" width="12" height="38" fill="#8B6914"/>
-          <rect x="410" y="72" width="15" height="48" fill="#4E2E1E"/><rect x="429" y="84" width="12" height="36" fill="#2C3E50"/>
-          <rect x="470" y="90" width="86" height="30" fill="#3a2417" stroke="#c8975a"/>
-          <circle cx="513" cy="105" r="5" fill="#e0b578"/>
-        </g>
-        <g id="slot-frames">
-          <rect x="950" y="110" width="110" height="110" fill="#171017" stroke="#c8975a" stroke-width="2"/>
-          <g transform="translate(1005 165)">
-            <circle r="36" fill="none" stroke="#5C3D2E" stroke-width="13"/>
-            <circle r="36" fill="none" stroke="#C0392B" stroke-width="13" stroke-dasharray="34 193"/>
-            <circle r="36" fill="none" stroke="#D4A017" stroke-width="13" stroke-dasharray="30 197" stroke-dashoffset="-40"/>
-            <circle r="36" fill="none" stroke="#27AE60" stroke-width="13" stroke-dasharray="26 201" stroke-dashoffset="-78"/>
-            <circle r="14" fill="#171017"/>
-          </g>
-          <rect x="1080" y="150" width="70" height="90" fill="#171017" stroke="#c8975a" stroke-width="2"/>
-          <rect x="1100" y="180" width="30" height="30" fill="#c8975a" transform="rotate(45 1115 195)"/>
-        </g>
-        <g id="slot-lamp">
-          <ellipse cx="470" cy="230" rx="150" ry="170" fill="url(#lglow)"/>
-          <path d="M436,150 L504,150 L488,196 L452,196 Z" fill="#c8975a" opacity=".9"/>
-          <line x1="470" y1="196" x2="470" y2="452" stroke="#8d7f6f" stroke-width="5"/>
-          <ellipse cx="470" cy="456" rx="34" ry="8" fill="#3a2417" stroke="#8d7f6f"/>
-        </g>
-        <g id="slot-rug">
-          <ellipse cx="700" cy="530" rx="290" ry="52" fill="#241318" stroke="#c8975a" stroke-width="2"/>
-          <ellipse cx="700" cy="530" rx="220" ry="36" fill="none" stroke="rgba(200,151,90,.4)"/>
-        </g>
-        <g id="base-chair">
-          <path d="M570,420 L570,250 Q570,215 610,215 L760,215 Q800,215 800,250 L800,420 Z" fill="#3a2417" stroke="#c8975a" stroke-width="2"/>
-          <path d="M560,330 Q535,330 535,362 L535,430 Q535,452 560,452 L575,452 L575,330 Z" fill="#2c1a10" stroke="#c8975a"/>
-          <path d="M810,330 Q835,330 835,362 L835,430 Q835,452 810,452 L795,452 L795,330 Z" fill="#2c1a10" stroke="#c8975a"/>
-          <rect x="575" y="360" width="220" height="70" fill="#2c1a10" stroke="#c8975a"/>
-          <rect x="575" y="430" width="220" height="24" fill="#241309" stroke="#c8975a"/>
-          <line x1="596" y1="454" x2="596" y2="482" stroke="#c8975a" stroke-width="4"/>
-          <line x1="774" y1="454" x2="774" y2="482" stroke="#c8975a" stroke-width="4"/>
-        </g>
-        <g id="base-table">
-          <ellipse cx="905" cy="392" rx="58" ry="12" fill="#3a2417" stroke="#c8975a"/>
-          <line x1="905" y1="404" x2="905" y2="490" stroke="#8d7f6f" stroke-width="5"/>
-          <ellipse cx="905" cy="492" rx="26" ry="6" fill="#3a2417" stroke="#8d7f6f"/>
-          <ellipse cx="884" cy="382" rx="17" ry="5" fill="#171017" stroke="#8d7f6f"/>
-          <rect x="884" y="368" width="34" height="7" rx="0" fill="#3a2417" stroke="#e0b578" stroke-width="1" transform="rotate(-14 884 372)"/>
-          <circle cx="882" cy="366" r="3.4" fill="#ff9b52"/>
-        </g>
-        <g id="slot-smoke">
-          <path d="M881,358 C868,330 900,312 886,284 C874,258 902,244 894,220" fill="none" stroke="rgba(224,181,120,.55)" stroke-width="3" stroke-linecap="round"/>
-          <path d="M893,352 C906,326 882,306 897,282" fill="none" stroke="rgba(224,181,120,.32)" stroke-width="2.5" stroke-linecap="round"/>
-        </g>
-        <g id="slot-whiskey">
-          <rect x="922" y="356" width="26" height="26" fill="none" stroke="#f0e6d6" stroke-width="2"/>
-          <rect x="923" y="368" width="24" height="13" fill="#b3542f" opacity=".85"/>
-          <rect x="928" y="360" width="9" height="9" fill="none" stroke="rgba(240,230,214,.7)"/>
-        </g>
-        <g id="slot-plant">
-          <path d="M1108,468 L1152,468 L1144,516 L1116,516 Z" fill="#3a2417" stroke="#c8975a"/>
-          <path d="M1130,468 C1130,430 1112,420 1104,398 M1130,468 C1130,424 1148,418 1158,394 M1130,468 C1130,436 1130,414 1130,396" stroke="#27AE60" stroke-width="4" fill="none" stroke-linecap="round"/>
+          <line x1="70" y1="82" x2="352" y2="82" stroke="#3a2417" stroke-width="5"/>
+          <circle cx="66" cy="82" r="5" fill="#c8975a"/><circle cx="356" cy="82" r="5" fill="#c8975a"/>
+          <rect x="108" y="96" width="204" height="248" fill="#0b1120" stroke="#c8975a" stroke-width="2"/>
+          <circle cx="262" cy="152" r="30" fill="rgba(232,220,200,.1)"/>
+          <circle cx="262" cy="152" r="21" fill="#e8dcc8"/>
+          <circle cx="255" cy="146" r="4" fill="rgba(20,16,26,.15)"/><circle cx="268" cy="158" r="3" fill="rgba(20,16,26,.12)"/>
+          <circle cx="138" cy="128" r="2.2" fill="#f0e6d6" class="l-star"/>
+          <circle cx="176" cy="180" r="1.8" fill="#f0e6d6" class="l-star s2"/>
+          <circle cx="150" cy="240" r="2" fill="#f0e6d6" class="l-star s3"/>
+          <circle cx="230" cy="110" r="1.7" fill="#f0e6d6" class="l-star s2"/>
+          <circle cx="290" cy="220" r="1.8" fill="#f0e6d6" class="l-star"/>
+          <path d="M108,318 L150,296 L192,310 L246,290 L312,306 L312,344 L108,344 Z" fill="#131a2b"/>
+          <circle cx="164" cy="312" r="1.6" fill="#e0b578"/><circle cx="258" cy="308" r="1.6" fill="#e0b578"/><circle cx="286" cy="318" r="1.4" fill="#e0b578"/>
+          <line x1="210" y1="96" x2="210" y2="344" stroke="#c8975a" stroke-width="2"/>
+          <line x1="108" y1="180" x2="312" y2="180" stroke="#c8975a" stroke-width="2"/>
+          <line x1="108" y1="264" x2="312" y2="264" stroke="#c8975a" stroke-width="2"/>
+          <rect x="98" y="344" width="224" height="10" fill="#3a2417" stroke="#c8975a"/>
+          <path d="M84,88 C104,170 92,260 98,354 L126,354 C112,262 122,168 116,88 Z" fill="#331721" stroke="rgba(200,151,90,.3)"/>
+          <path d="M336,88 C316,170 328,260 322,354 L294,354 C308,262 298,168 304,88 Z" fill="#331721" stroke="rgba(200,151,90,.3)"/>
+          <path d="M92,210 q18,10 26,0 M328,210 q-18,10 -26,0" stroke="#c8975a" stroke-width="3" fill="none"/>
         </g>
         <g id="slot-records">
-          <rect x="96" y="430" width="180" height="60" fill="#3a2417" stroke="#c8975a"/>
-          <line x1="96" y1="452" x2="276" y2="452" stroke="rgba(200,151,90,.5)"/>
-          <circle cx="146" cy="420" r="26" fill="#171017" stroke="#c8975a"/>
-          <circle cx="146" cy="420" r="8" fill="#c8975a"/>
-          <line x1="196" y1="404" x2="216" y2="424" stroke="#e0b578" stroke-width="3"/>
-          <line x1="108" y1="490" x2="108" y2="510" stroke="#8d7f6f" stroke-width="4"/>
-          <line x1="264" y1="490" x2="264" y2="510" stroke="#8d7f6f" stroke-width="4"/>
+          <rect x="90" y="476" width="204" height="82" fill="#2c1a10" stroke="#c8975a"/>
+          <rect x="86" y="470" width="212" height="8" fill="#3a2417" stroke="#c8975a"/>
+          <line x1="192" y1="484" x2="192" y2="550" stroke="rgba(200,151,90,.4)"/>
+          <circle cx="176" cy="516" r="3" fill="#c8975a"/><circle cx="208" cy="516" r="3" fill="#c8975a"/>
+          <line x1="104" y1="558" x2="104" y2="576" stroke="#8d7f6f" stroke-width="4"/>
+          <line x1="280" y1="558" x2="280" y2="576" stroke="#8d7f6f" stroke-width="4"/>
+          <ellipse cx="150" cy="466" rx="36" ry="9" fill="#171017" stroke="#c8975a"/>
+          <circle cx="150" cy="466" r="4" fill="#c8975a"/>
+          <line x1="196" y1="456" x2="176" y2="466" stroke="#e0b578" stroke-width="2.5"/>
+          <circle cx="198" cy="455" r="3" fill="#e0b578"/>
+          <rect x="226" y="428" width="44" height="42" fill="#171017" stroke="#c8975a" transform="rotate(-7 248 470)"/>
+          <circle cx="246" cy="447" r="12" fill="none" stroke="rgba(200,151,90,.5)" transform="rotate(-7 248 470)"/>
         </g>
+        <g id="slot-frames">
+          <rect x="952" y="118" width="112" height="112" fill="#171017" stroke="#c8975a" stroke-width="2"/>
+          ${bigFrameInner}
+          <rect x="1086" y="152" width="72" height="92" fill="#171017" stroke="#c8975a" stroke-width="2"/>
+          ${smallFrameInner}
+        </g>
+        <g>
+          <rect x="560" y="100" width="240" height="362" fill="#221724" stroke="rgba(200,151,90,.2)"/>
+          <line x1="560" y1="100" x2="800" y2="100" stroke="rgba(200,151,90,.3)"/>
+          <rect x="584" y="324" width="24" height="138" fill="#2c1f2b" stroke="rgba(200,151,90,.25)"/>
+          <rect x="752" y="324" width="24" height="138" fill="#2c1f2b" stroke="rgba(200,151,90,.25)"/>
+          <rect x="584" y="306" width="192" height="18" fill="#2c1f2b" stroke="rgba(200,151,90,.25)"/>
+          <rect x="566" y="292" width="228" height="14" fill="#3a2417" stroke="#c8975a"/>
+          <path d="M612,462 L612,364 Q680,320 748,364 L748,462 Z" fill="#0b0710"/>
+          <path d="M612,388 Q680,346 748,388" fill="none" stroke="rgba(179,84,47,.35)" stroke-width="3"/>
+          <rect x="588" y="462" width="184" height="12" fill="#2a2026" stroke="rgba(200,151,90,.25)"/>
+        </g>
+        <g data-slot="slot-frames">
+          <rect x="622" y="126" width="116" height="146" fill="#171017" stroke="#c8975a" stroke-width="2"/>
+          ${mantelInner}
+        </g>
+        <g id="slot-fire">
+          <ellipse cx="680" cy="436" rx="62" ry="42" fill="url(#lfire)" class="l-glow"/>
+          <rect x="634" y="440" width="92" height="10" rx="5" fill="#3a2417" transform="rotate(6 680 445)"/>
+          <rect x="636" y="446" width="90" height="10" rx="5" fill="#2c1a10" transform="rotate(-7 680 451)"/>
+          <path d="M680,446 C658,420 664,392 680,364 C696,392 702,420 680,446 Z" fill="#b3542f" opacity=".92" class="l-flame"/>
+          <path d="M680,444 C668,426 672,406 680,388 C688,406 692,426 680,444 Z" fill="#e0b578" class="l-flame f2"/>
+          <path d="M680,442 C675,432 676,420 680,410 C684,420 685,432 680,442 Z" fill="#f5e2b0" class="l-flame f3"/>
+          <path d="M650,446 C642,432 644,420 652,408 C658,420 658,434 650,446 Z" fill="#b3542f" opacity=".8" class="l-flame f3"/>
+          <path d="M710,446 C702,434 704,420 712,410 C718,422 718,436 710,446 Z" fill="#b3542f" opacity=".8" class="l-flame f2"/>
+          <circle cx="664" cy="380" r="2" fill="#f2c47e" class="l-fly"/>
+          <circle cx="694" cy="366" r="1.8" fill="#f2c47e" class="l-fly s2"/>
+          <circle cx="680" cy="350" r="1.5" fill="#f2c47e" class="l-fly s3"/>
+        </g>
+        <g id="slot-shelf">
+          <rect x="596" y="260" width="62" height="32" fill="#3a2417" stroke="#c8975a"/>
+          <line x1="596" y1="270" x2="658" y2="270" stroke="rgba(200,151,90,.5)"/>
+          <circle cx="627" cy="281" r="4.5" fill="none" stroke="#e0b578" stroke-width="1.5"/>
+          <circle cx="700" cy="272" r="19" fill="#171017" stroke="#c8975a" stroke-width="2"/>
+          <line x1="700" y1="272" x2="700" y2="260" stroke="#e0b578" stroke-width="2"/>
+          <line x1="700" y1="272" x2="709" y2="277" stroke="#e0b578" stroke-width="2"/>
+          <rect x="694" y="290" width="12" height="4" fill="#3a2417"/>
+          <rect x="734" y="252" width="11" height="40" fill="#5C3D2E"/>
+          <rect x="747" y="258" width="10" height="34" fill="#2C3E50"/>
+          <rect x="759" y="254" width="9" height="38" fill="#8B6914" transform="rotate(7 763 292)"/>
+        </g>
+        <g id="slot-plant">
+          <path d="M332,486 L398,486 L386,556 L344,556 Z" fill="#3a2417" stroke="#c8975a"/>
+          <line x1="338" y1="500" x2="392" y2="500" stroke="rgba(200,151,90,.45)"/>
+          <g stroke="#3f7a4f" stroke-width="4" fill="none" stroke-linecap="round">
+            <path d="M365,486 C361,440 341,420 325,398"/>
+            <path d="M365,486 C371,438 389,420 403,396"/>
+            <path d="M365,486 C365,444 363,418 361,398"/>
+            <path d="M365,486 C357,452 345,438 333,428"/>
+          </g>
+          <ellipse cx="323" cy="396" rx="8" ry="15" fill="#3f7a4f" transform="rotate(-32 323 396)"/>
+          <ellipse cx="405" cy="394" rx="8" ry="15" fill="#3f7a4f" transform="rotate(28 405 394)"/>
+          <ellipse cx="360" cy="392" rx="8" ry="16" fill="#3f7a4f"/>
+          <ellipse cx="331" cy="426" rx="7" ry="13" fill="#3f7a4f" transform="rotate(-40 331 426)"/>
+        </g>
+        <g id="slot-lamp">
+          <ellipse cx="450" cy="300" rx="120" ry="150" fill="url(#lglow)" class="l-glow"/>
+          <path d="M418,212 L482,212 L468,258 L432,258 Z" fill="#c8975a" opacity=".95"/>
+          <line x1="450" y1="258" x2="450" y2="508" stroke="#8d7f6f" stroke-width="5"/>
+          <ellipse cx="450" cy="510" rx="32" ry="8" fill="#3a2417" stroke="#8d7f6f"/>
+          <ellipse cx="450" cy="530" rx="105" ry="20" fill="rgba(224,181,120,.07)"/>
+          <rect x="484" y="496" width="44" height="9" fill="#5C3D2E" stroke="rgba(200,151,90,.3)"/>
+          <rect x="488" y="487" width="38" height="9" fill="#7a3b2a" stroke="rgba(200,151,90,.3)"/>
+          <rect x="492" y="478" width="30" height="9" fill="#2C3E50" stroke="rgba(200,151,90,.3)"/>
+        </g>
+        <g id="slot-rug">
+          <ellipse cx="880" cy="566" rx="310" ry="50" fill="#2a1518" stroke="#c8975a" stroke-width="2"/>
+          <ellipse cx="880" cy="566" rx="248" ry="36" fill="none" stroke="rgba(200,151,90,.4)" stroke-dasharray="12 7"/>
+          <rect x="742" y="556" width="18" height="18" fill="none" stroke="rgba(200,151,90,.4)" transform="rotate(45 751 565)"/>
+          <rect x="1002" y="556" width="18" height="18" fill="none" stroke="rgba(200,151,90,.4)" transform="rotate(45 1011 565)"/>
+          <rect x="872" y="588" width="16" height="16" fill="none" stroke="rgba(200,151,90,.35)" transform="rotate(45 880 596)"/>
+        </g>
+        <g id="slot-cat" transform="translate(772 546)">
+          <path d="M30,6 C50,2 52,-16 38,-20" fill="none" stroke="#241c2b" stroke-width="7" stroke-linecap="round"/>
+          <ellipse cx="0" cy="0" rx="34" ry="17" fill="#241c2b" stroke="rgba(200,151,90,.35)"/>
+          <circle cx="-30" cy="-9" r="13" fill="#241c2b" stroke="rgba(200,151,90,.35)"/>
+          <polygon points="-40,-18 -36,-28 -31,-19" fill="#241c2b"/>
+          <polygon points="-27,-20 -22,-29 -18,-19" fill="#241c2b"/>
+          <path d="M-37,-7 q3,3 6,0 M-28,-7 q3,3 6,0" stroke="#c9bba6" stroke-width="1.4" fill="none" stroke-linecap="round"/>
+          <ellipse cx="-18" cy="4" rx="8" ry="5" fill="rgba(240,230,214,.18)"/>
+        </g>
+        <g>
+          <path d="M856,436 L856,296 Q856,238 890,226 Q928,212 966,226 Q1000,238 1000,296 L1000,436 Z" fill="#4a2418" stroke="#c8975a" stroke-width="2"/>
+          <g fill="rgba(224,181,120,.5)">
+            <circle cx="892" cy="272" r="2"/><circle cx="928" cy="266" r="2"/><circle cx="964" cy="272" r="2"/>
+            <circle cx="892" cy="312" r="2"/><circle cx="928" cy="308" r="2"/><circle cx="964" cy="312" r="2"/>
+            <circle cx="892" cy="352" r="2"/><circle cx="928" cy="350" r="2"/><circle cx="964" cy="352" r="2"/>
+          </g>
+          <path d="M856,300 Q826,296 822,332 L822,396 Q822,416 844,420 L856,420 Z" fill="#3c1d13" stroke="#c8975a"/>
+          <path d="M1000,300 Q1030,296 1034,332 L1034,396 Q1034,416 1012,420 L1000,420 Z" fill="#3c1d13" stroke="#c8975a"/>
+          <rect x="818" y="396" width="48" height="52" rx="16" fill="#3c1d13" stroke="#c8975a"/>
+          <rect x="990" y="396" width="48" height="52" rx="16" fill="#3c1d13" stroke="#c8975a"/>
+          <rect x="858" y="414" width="140" height="42" rx="9" fill="#58301c" stroke="#c8975a"/>
+          <rect x="852" y="452" width="152" height="22" fill="#331a10" stroke="#c8975a"/>
+          <line x1="866" y1="474" x2="866" y2="498" stroke="#c8975a" stroke-width="4"/>
+          <line x1="990" y1="474" x2="990" y2="498" stroke="#c8975a" stroke-width="4"/>
+          <rect x="880" y="382" width="44" height="44" rx="4" fill="#7a3b2a" stroke="rgba(240,230,214,.3)" transform="rotate(-9 902 404)"/>
+          <path d="M818,396 C820,376 846,370 862,384 L862,420 C842,424 826,416 820,406 Z" fill="#8a4630" stroke="rgba(240,230,214,.25)"/>
+          <g stroke="rgba(240,230,214,.35)" stroke-width="1.4" fill="none">
+            <path d="M824,388 C836,380 852,380 860,388"/>
+            <path d="M822,400 C834,392 852,392 861,399"/>
+          </g>
+          <g stroke="#8a4630" stroke-width="2">
+            <line x1="824" y1="418" x2="824" y2="426"/><line x1="832" y1="421" x2="832" y2="429"/>
+            <line x1="840" y1="423" x2="840" y2="431"/><line x1="848" y1="424" x2="848" y2="432"/>
+          </g>
+        </g>
+        <g>
+          <rect x="872" y="502" width="118" height="34" rx="10" fill="#4a2418" stroke="#c8975a"/>
+          <line x1="878" y1="519" x2="984" y2="519" stroke="rgba(200,151,90,.35)"/>
+          <line x1="884" y1="536" x2="884" y2="552" stroke="#c8975a" stroke-width="3"/>
+          <line x1="978" y1="536" x2="978" y2="552" stroke="#c8975a" stroke-width="3"/>
+        </g>
+        <g>
+          <ellipse cx="1096" cy="408" rx="48" ry="11" fill="#3a2417" stroke="#c8975a"/>
+          <line x1="1096" y1="419" x2="1096" y2="500" stroke="#8d7f6f" stroke-width="5"/>
+          <ellipse cx="1096" cy="502" rx="24" ry="6" fill="#3a2417" stroke="#8d7f6f"/>
+        </g>
+        <g id="slot-whiskey">
+          <rect x="1052" y="376" width="26" height="26" fill="rgba(20,12,16,.4)" stroke="#f0e6d6" stroke-width="2"/>
+          <rect x="1053" y="388" width="24" height="13" fill="#b3542f" opacity=".9"/>
+          <rect x="1058" y="380" width="9" height="9" fill="none" stroke="rgba(240,230,214,.7)"/>
+          <path d="M1088,402 L1088,374 Q1088,368 1094,368 L1094,360 L1104,360 L1104,368 Q1110,368 1110,374 L1110,402 Z" fill="rgba(179,84,47,.45)" stroke="#f0e6d6" stroke-width="1.6"/>
+          <rect x="1095" y="352" width="8" height="8" fill="#c8975a"/>
+        </g>
+        <g id="slot-smoke">
+          <ellipse cx="1122" cy="404" rx="17" ry="5.5" fill="#171017" stroke="#8d7f6f"/>
+          <rect x="1104" y="390" width="38" height="7" rx="3.5" fill="#5C3D2E" transform="rotate(-12 1104 394)"/>
+          <rect x="1120" y="388" width="7" height="7" fill="#c8975a" transform="rotate(-12 1123 391)"/>
+          <circle cx="1141" cy="385" r="3.2" fill="#ff9b52"/>
+          <g transform="translate(1142 380)"><g class="l-smoke">
+            <path d="M0,0 C-12,-28 10,-46 -4,-74 C-14,-92 4,-106 -2,-120" fill="none" stroke="rgba(224,181,120,.5)" stroke-width="3" stroke-linecap="round"/>
+            <path d="M8,-8 C20,-32 -2,-52 12,-78" fill="none" stroke="rgba(224,181,120,.28)" stroke-width="2.5" stroke-linecap="round"/>
+          </g></g>
+        </g>
+        <ellipse data-slot="slot-fire" cx="680" cy="524" rx="230" ry="46" fill="url(#lhearth)" class="l-glow"/>
+        <circle cx="520" cy="330" r="1.6" fill="#f2c47e" class="l-fly"/>
+        <circle cx="475" cy="380" r="1.4" fill="#f2c47e" class="l-fly s2"/>
+        <circle cx="840" cy="300" r="1.5" fill="#f2c47e" class="l-fly s3"/>
       </svg></div>
       <aside class="dpanel">
         <section>
@@ -1284,17 +1793,29 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
         </section>
       </aside>
     </section>
+
+    <section class="section">
+      <div class="rule"><p class="kicker">through the door</p></div>
+      <div class="hexgallery">
+        ${hexCell('journal', 'the journal', '/revolucion/journal')}
+        ${hexCell('cigars', 'the catalog', '/revolucion/cigars')}
+        ${hexCell('humidor', 'the humidor', '/revolucion/humidor')}
+        ${hexCell('community', 'the circle', '/revolucion/community')}
+      </div>
+    </section>
   </main>
   <script>
   (function(){
     var SLOTS = [
+      { id: 'slot-fire',    label: 'A fire going' },
       { id: 'slot-lamp',    label: 'Reading lamp' },
       { id: 'slot-window',  label: 'Night window' },
       { id: 'slot-rug',     label: 'Rug' },
+      { id: 'slot-cat',     label: 'The lounge cat' },
       { id: 'slot-whiskey', label: 'Whiskey, neat-ish' },
       { id: 'slot-smoke',   label: 'A cigar going' },
       { id: 'slot-frames',  label: 'Wall art' },
-      { id: 'slot-shelf',   label: 'Shelf + humidor' },
+      { id: 'slot-shelf',   label: 'Mantel keepsakes' },
       { id: 'slot-plant',   label: 'Plant' },
       { id: 'slot-records', label: 'Record console' }
     ];
@@ -1304,8 +1825,10 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     SLOTS.forEach(function(s){ if (!(s.id in on)) on[s.id] = true; });
     function apply(){
       SLOTS.forEach(function(s){
-        var g = document.getElementById(s.id);
-        if (g) g.style.display = on[s.id] ? '' : 'none';
+        // a slot may have overlay pieces outside its group (data-slot),
+        // e.g. the hearth glow painted above the rug — hide both together
+        var nodes = document.querySelectorAll('#' + s.id + ', [data-slot="' + s.id + '"]');
+        for (var i = 0; i < nodes.length; i++) nodes[i].style.display = on[s.id] ? '' : 'none';
       });
       try { localStorage.setItem(KEY, JSON.stringify(on)); } catch(e){}
       var list = document.getElementById('decorList');
@@ -1341,6 +1864,28 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
 // ─── main ────────────────────────────────────────────────────────────
 
 async function main(): Promise<void> {
+  // --preview [dir]: write the pages as standalone HTML (chrome.css inlined)
+  // for local eyeballing — no bridge, no host writes.
+  const pv = process.argv.indexOf('--preview')
+  if (pv >= 0) {
+    const { mkdirSync, writeFileSync } = await import('node:fs')
+    const dir = process.argv[pv + 1] ?? 'site-preview'
+    mkdirSync(dir, { recursive: true })
+    // Synthetic art: every key resolves so image layout is previewable
+    // offline; refs are then swapped for an inline placeholder graphic.
+    const fakeSig = 'ab'.repeat(32)
+    const fakeArt = new Proxy({}, { get: () => fakeSig }) as Record<string, string | undefined>
+    const placeholder = 'data:image/svg+xml,' + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect width="200" height="200" fill="#2a1c26"/><polygon points="100,38 154,69 154,131 100,162 46,131 46,69" fill="none" stroke="#c8975a" stroke-width="3"/><circle cx="100" cy="100" r="14" fill="#b3542f"/></svg>')
+    for (const p of buildPages('PREVIEW', fakeArt)) {
+      let html = p.html.replace('<link rel="stylesheet" href="resource:PREVIEW/chrome.css">', `<style>${CHROME_CSS}</style>`)
+      html = html.split(`resource:${fakeSig}/art.png`).join(placeholder)
+      writeFileSync(`${dir}/${p.segments.join('-')}.html`, html)
+      console.log(`[site] preview → ${dir}/${p.segments.join('-')}.html`)
+    }
+    return
+  }
+
   // Preflight — cheap op, confirms relay + renderer.
   const pre = await send({ op: 'layer-at', segments: ['revolucion'] })
   if (!pre.ok) {
@@ -1365,16 +1910,34 @@ async function main(): Promise<void> {
     await send({ op: 'note-add', segments: ['revolucion'], cell: 'lounge', text: 'The cigar lounge — a decorated room of slots you dress yourself. Your own add-ons hang here: art, bottles, bands of cigars you have loved.' })
   }
 
-  // 0b. Tile-art sigs for the home thumbnails — the site reuses the hive's
-  // own sig-addressed imagery (resource:<sig> refs, closure-carried).
-  const ART_CELLS = ['journal', 'experience', 'cigars', 'flavor-wheel', 'discovery', 'community', 'insights', 'collaborations', 'humidor', 'lounge']
-  const art: Record<string, string | undefined> = {}
-  for (const c of ART_CELLS) {
-    const ins = await send({ op: 'inspect', segments: ['revolucion', c] })
-    const sig = ins?.ok ? (ins.data as { small?: { image?: string } })?.small?.image : undefined
-    if (typeof sig === 'string' && /^[0-9a-f]{64}$/.test(sig)) art[c] = sig
+  // 0b. Tile-art sigs — the site reuses the hive's own sig-addressed imagery
+  // (resource:<sig> refs, closure-carried). Harvested TWO levels deep so pages
+  // can hang child art too: wall frames, hex galleries, card thumbnails.
+  const namesAt = async (segments: string[]): Promise<string[]> => {
+    const layer = await send({ op: 'layer-at', segments })
+    const sigs: string[] = layer.ok && Array.isArray(layer.data?.children) ? layer.data.children.map(String) : []
+    const names: string[] = []
+    for (const sig of sigs) {
+      const inf = await send({ op: 'inflate', cell: sig })
+      const nm = typeof (inf?.data as { name?: string })?.name === 'string' ? (inf.data as { name: string }).name.trim() : ''
+      if (nm) names.push(nm)
+    }
+    return names
   }
-  console.log(`[site] art thumbnails resolved: ${Object.values(art).filter(Boolean).length}/${ART_CELLS.length}`)
+  const artOf = async (segments: string[]): Promise<string | undefined> => {
+    const ins = await send({ op: 'inspect', segments })
+    const sig = ins?.ok ? (ins.data as { small?: { image?: string } })?.small?.image : undefined
+    return typeof sig === 'string' && /^[0-9a-f]{64}$/.test(sig) ? sig : undefined
+  }
+  const art: Record<string, string | undefined> = {}
+  const tops = childNames.includes('lounge') ? childNames : [...childNames, 'lounge']
+  for (const c of tops) {
+    art[c] = await artOf(['revolucion', c])
+    for (const k of await namesAt(['revolucion', c])) {
+      art[`${c}/${k}`] = await artOf(['revolucion', c, k])
+    }
+  }
+  console.log(`[site] art resolved: ${Object.values(art).filter(Boolean).length}/${Object.keys(art).length} cells`)
 
   // 1. Chrome stylesheet — minted once, dedupes by signature.
   const chrome = await send({ op: 'put-resource', text: CHROME_CSS })

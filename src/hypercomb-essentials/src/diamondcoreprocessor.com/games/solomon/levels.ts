@@ -153,6 +153,10 @@ function largeCave(name: string, cols: number, rows: number, kind: 'wide' | 'tal
 // foes / mirrors / items are then scattered onto the ledges that architecture made.
 type RoomKind = 'cavern' | 'tower' | 'gallery' | 'throne' | 'depths'
 
+// The classic make-then-break finds: auto-placed wand-secrets of these kinds hide
+// DEEP — the first cast walls them in, and only breaking that brick pays out.
+const DEEP_KINDS = new Set<ItemKind>(['seal', 'life', 'superjar', 'hourglass', 'treasure'])
+
 /** A room's contents, scattered onto the generated ledges (so one compact call
  *  describes a whole large room). `items` ride the upper ledges; `hidden` items
  *  are buried in brick at precise cells; `secret` items sit invisible in EMPTY cells
@@ -165,7 +169,9 @@ interface Roster {
   hidden?: ItemSpawn[]
   secret?: ItemSpawn[]
   /** Wand-secrets auto-placed at generator-chosen "interesting" spots (ledge
-   *  ends, near the door, mid-floor marks) — no hand-picked cells needed. */
+   *  ends, near the door, mid-floor marks) — no hand-picked cells needed. The
+   *  priceless kinds (DEEP_KINDS) automatically hide DEEP: the wand walls them
+   *  in first and only breaking that brick uncovers them. */
   secretItems?: ItemKind[]
   /** Brick-sealed attic caches carved into the top rim: a visible locked
    *  treasure + a bonus hidden inside the seal brick itself. */
@@ -294,7 +300,7 @@ function populate(ctx: {
     while (sp < good.length && taken.has(`${good[sp].col},${good[sp].row}`)) sp++
     const s = sp < good.length ? good[sp] : { col: Math.max(3, mid - 2), row: floor }
     taken.add(`${s.col},${s.row}`)
-    items.push({ col: s.col, row: s.row, kind: k, hidden: true, secret: true, value: k === 'jewel' ? 2000 : k === 'treasure' ? 5000 : undefined })
+    items.push({ col: s.col, row: s.row, kind: k, hidden: true, secret: true, deep: DEEP_KINDS.has(k) || undefined, value: k === 'jewel' ? 2000 : k === 'treasure' ? 5000 : undefined })
   }
 
   // Safety net: key supported + cleared, singletons clear, nothing embedded in stone.
@@ -424,11 +430,11 @@ export const BUILTIN_LEVELS: LevelDef[] = [
 
   // The Vault. A broken-floor vault: panel turret, ghost, gargoil, goblin — an extra
   // Dana, buried jar + jewel, a SECRET treasure, and a capped rim passage.
-  bigRoom('The Vault', 28, 14, 'depths', { foes: { panel: 1, ghost: 1, gargoil: 1, goblin: 1 }, items: ['life'], hidden: [{ col: 8, row: 11, kind: 'jar' }, { col: 18, row: 11, kind: 'jewel', value: 2000 }], secret: [{ col: 21, row: 12, kind: 'treasure', value: 5000 }], passage: true, lifeStart: 13000 }),
+  bigRoom('The Vault', 28, 14, 'depths', { foes: { panel: 1, ghost: 1, gargoil: 1, goblin: 1 }, items: ['life'], hidden: [{ col: 8, row: 11, kind: 'jar' }, { col: 18, row: 11, kind: 'jewel', value: 2000 }], secret: [{ col: 21, row: 12, kind: 'treasure', value: 5000, deep: true }], passage: true, lifeStart: 13000 }),
 
   // Sunken Gallery. The long colonnade — two ghosts sweep the arcade now, a goblin
   // hunts below; a SECRET 1-up, a secret bell, and an attic cache.
-  bigRoom('Sunken Gallery', 34, 14, 'gallery', { foes: { gargoil: 2, ghost: 2, goblin: 1 }, items: ['hourglass', 'jewel', 'jewel', 'bell'], hidden: [{ col: 4, row: 11, kind: 'jar' }], secret: [{ col: 25, row: 12, kind: 'life' }], secretItems: ['bell'], alcoves: 1, lifeStart: 15000 }),
+  bigRoom('Sunken Gallery', 34, 14, 'gallery', { foes: { gargoil: 2, ghost: 2, goblin: 1 }, items: ['hourglass', 'jewel', 'jewel', 'bell'], hidden: [{ col: 4, row: 11, kind: 'jar' }], secret: [{ col: 25, row: 12, kind: 'life', deep: true }], secretItems: ['bell'], alcoves: 1, lifeStart: 15000 }),
 
   // Constellation of Aries. The first ZODIAC PANEL — gargoils, goblins and a ghost
   // guard it; two buried bells and a secret one.
@@ -483,7 +489,7 @@ export const BUILTIN_LEVELS: LevelDef[] = [
 
   // The Castle Depths. The grandest vault — and the FOURTH, secret-only Solomon's
   // Seal (the wand finds what the eye cannot). Passage + attic cache too.
-  bigRoom('The Castle Depths', 28, 14, 'depths', { foes: { gargoil: 2, ghost: 2, neul: 1, sparkball: 1, goblin: 1 }, hidden: [{ col: 14, row: 11, kind: 'jewel', value: 3000 }], secret: [{ col: 9, row: 12, kind: 'treasure', value: 5000 }], secretItems: ['seal'], passage: true, alcoves: 1, lifeStart: 17000 }),
+  bigRoom('The Castle Depths', 28, 14, 'depths', { foes: { gargoil: 2, ghost: 2, neul: 1, sparkball: 1, goblin: 1 }, hidden: [{ col: 14, row: 11, kind: 'jewel', value: 3000 }], secret: [{ col: 9, row: 12, kind: 'treasure', value: 5000, deep: true }], secretItems: ['seal'], passage: true, alcoves: 1, lifeStart: 17000 }),
 
   // Crystal Cavern. The WIDE natural cave — now properly peopled: gargoils, a ghost,
   // a goblin and a sparkball; a secret jewel + an attic cache.
@@ -634,6 +640,7 @@ export function sanitizeLevel(raw: unknown): LevelDef | null {
         col: c.col, row: c.row, kind,
         hidden: !!(raw as ItemSpawn).hidden || secret,   // a secret is always hidden too
         secret: secret || undefined,
+        deep: (secret && !!(raw as ItemSpawn).deep) || undefined,  // deep only means anything on a secret
         value: isInt(value) ? value : undefined,
       })
     }

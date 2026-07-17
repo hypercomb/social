@@ -1,4 +1,4 @@
-import { EffectBus } from '@hypercomb/core'
+import { EffectBus, USAGE_IOC_KEY, type UsageRanker } from '@hypercomb/core'
 import type { Lineage } from './lineage'
 import type { LocalizationService } from './i18n.service'
 import type { Navigation } from './navigation'
@@ -314,7 +314,12 @@ const _runInitializeRuntime = async (
           if (sig) await historyService.preloadNeighbourhood!(sig)
         } catch { /* non-fatal: a cold render is correct, just slower */ }
         try {
-          const proximate = await collectProximity()
+          // Rank declared destinations by local usage so the participant's
+          // most-used one-click targets survive the per-pass cap and warm
+          // first. Absent tracker → original order (a cold participant).
+          const declared = await collectProximity()
+          const ranker = get(USAGE_IOC_KEY) as UsageRanker | undefined
+          const proximate = ranker ? ranker.rank(declared) : declared
           let warmed = 0
           for (const psig of proximate) {
             if (warmedProximity.has(psig)) continue

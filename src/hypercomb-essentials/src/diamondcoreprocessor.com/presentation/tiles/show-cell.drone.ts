@@ -1038,9 +1038,18 @@ export class ShowCellDrone extends Drone {
       }
     }
 
-    // note: ensure relays are queried for this sig (direct call + effect for observability)
-    mesh.ensureStartedForSig(sig)
-    this.emitEffect('mesh:ensure-started', { signature: sig })
+    // Private mode is a hard boundary: rendering/warm-up must not start mesh
+    // consumers as a side effect. In particular, the delayed synchronize pass
+    // reaches this method after first paint; emitting mesh:ensure-started here
+    // used to wake SwarmDrone, presence, avatars, and meeting consumers even
+    // while the UI said private. Keep the mesh completely cold until the user
+    // explicitly enters public/swarm mode.
+    let meshPublic = false
+    try { meshPublic = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* privacy-safe default: off */ }
+    if (meshPublic) {
+      mesh.ensureStartedForSig(sig)
+      this.emitEffect('mesh:ensure-started', { signature: sig })
+    }
 
 
     // note: publish local filesystem cells for this sig when changed

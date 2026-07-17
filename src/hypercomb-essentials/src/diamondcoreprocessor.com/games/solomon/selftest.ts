@@ -671,6 +671,71 @@ function testSecrets(): void {
     && e.revealFlash === 1 && e.revealCell?.col === 8)
 }
 
+// The flat 14-wide corridor the secret-mechanic tests share.
+function secretRoom(): ReturnType<typeof fromAscii> {
+  return fromAscii('secret-room', [
+    '##############',
+    '#D...........#',
+    '#............#',
+    '#..P.........#',
+    '##############',
+  ])
+}
+
+function testDeepSecret(): void {
+  const level = secretRoom()
+  level.items.push({ col: 5, row: 3, kind: 'treasure', hidden: true, secret: true, deep: true })
+  const e = new Engine(level)
+  e.update(SIM_DT)
+  e.facing = 1
+  e.player.x = 4 * TILE + (TILE - e.player.w) / 2   // wand targets (5,3)
+  const r1 = e.cast()
+  const it = e.items.find(i => i.secret)!
+  check('deep secret: the first cast walls it in, still asleep', r1 === 'conjure'
+    && e.tileAt(5, 3) === BRICK && it.hidden === true && e.secretFlash === 0)
+  check('deep secret: the wand hums hot at distance zero', e.resonanceFlash === 1 && e.resonanceHot)
+  const r2 = e.cast()
+  check('deep secret: breaking the brick pays out as a SECRET', r2 === 'dispel'
+    && !it.hidden && e.secretFlash === 1 && e.revealFlash === 0 && e.secretCell?.col === 5)
+}
+
+function testResonance(): void {
+  const level = secretRoom()
+  level.items.push({ col: 5, row: 3, kind: 'jewel', hidden: true, secret: true })
+  const e = new Engine(level)
+  e.update(SIM_DT)
+  e.facing = -1
+  e.player.x = 10 * TILE + (TILE - e.player.w) / 2   // casts (9,3): four cells out
+  e.cast()
+  check('a cast far from any secret stays silent', e.resonanceFlash === 0)
+  e.player.x = 8 * TILE + (TILE - e.player.w) / 2    // casts (7,3): two cells out
+  e.cast()
+  check('two cells out: the wand hums cold', e.resonanceFlash === 1 && !e.resonanceHot)
+  e.player.x = 7 * TILE + (TILE - e.player.w) / 2    // casts (6,3): one cell out
+  e.cast()
+  check('one cell out: the wand hums hot', e.resonanceFlash === 2 && e.resonanceHot)
+}
+
+function testFairyDowsing(): void {
+  const level = secretRoom()
+  level.items.push({ col: 10, row: 3, kind: 'jewel', hidden: true, secret: true })
+  const e = new Engine(level)
+  e.fairies.push({ x: 12.5 * TILE, y: 1.5 * TILE, phase: 0, taken: false })
+  const f = e.fairies[0]
+  const sx = 10.5 * TILE, sy = 3.5 * TILE
+  const d0 = Math.hypot(f.x - sx, f.y - sy)
+  step(e, 4)
+  const d1 = Math.hypot(f.x - sx, f.y - sy)
+  check('a freed fairy drifts in to circle the sleeping secret', d1 < d0 && d1 < TILE * 2.2,
+    `d0=${d0.toFixed(0)} d1=${d1.toFixed(0)}`)
+  // she circles the neighbourhood — never settling on the cell, never leaving it
+  let sum = 0
+  for (let i = 0; i < 240; i++) { e.update(SIM_DT); sum += Math.hypot(f.x - sx, f.y - sy) }
+  const avgD = sum / 240
+  check('the fairy orbits nearby without parking on the cell', avgD > TILE * 0.5 && avgD < TILE * 2,
+    `avg=${avgD.toFixed(0)}`)
+}
+
 // ── Part C: built-in levels + sanitize round-trip ────────────
 
 function testLevelSweep(): void {
@@ -694,6 +759,11 @@ function testLevelSweep(): void {
   check('all 19 built-ins pass the sweep', sweepFails === 0, `${sweepFails} problems`)
   check('the curve densifies toward Cancer', BUILTIN_LEVELS[0].enemies.length < BUILTIN_LEVELS[16].enemies.length)
   check('4 seals exist (one wand-only)', SEAL_TOTAL === 4, `total=${SEAL_TOTAL}`)
+  const deepRooms = BUILTIN_LEVELS.filter(l => l.items.some(i => i.secret && i.deep)).length
+  check('deep finds thread the campaign (but not the tutorial)', deepRooms >= 6
+    && !BUILTIN_LEVELS[0].items.some(i => i.deep), `deepRooms=${deepRooms}`)
+  check('the wand-only seal hides deep', BUILTIN_LEVELS.some(l =>
+    l.items.some(i => i.kind === 'seal' && i.secret && i.deep)))
 }
 
 function testSanitizeRoundTrip(): void {
@@ -702,7 +772,7 @@ function testSanitizeRoundTrip(): void {
     const rt = sanitizeLevel(JSON.parse(JSON.stringify(l)))
     const ok = rt !== null
       && rt.items.length === l.items.length
-      && rt.items.every((it, i) => !!it.secret === !!l.items[i].secret && !!it.hidden === !!l.items[i].hidden && it.kind === l.items[i].kind)
+      && rt.items.every((it, i) => !!it.secret === !!l.items[i].secret && !!it.hidden === !!l.items[i].hidden && !!it.deep === !!l.items[i].deep && it.kind === l.items[i].kind)
     if (!ok) { bad++; console.error(`FAIL  [${l.name}] round-trip mangled`) }
   }
   failures += bad
@@ -735,6 +805,9 @@ testSparkball()
 testDemonheadAndMirror()
 testPanel()
 testSecrets()
+testDeepSecret()
+testResonance()
+testFairyDowsing()
 
 console.log('Solomon selftest — part C: levels')
 testLevelSweep()

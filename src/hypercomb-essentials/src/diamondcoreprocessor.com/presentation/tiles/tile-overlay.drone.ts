@@ -55,6 +55,11 @@ type OverlayAction = {
   labelKey?: string
   /** i18n key for the expanded description */
   descriptionKey?: string
+  /** IoC key of the bee that services this action's `tile:action`. While it is
+   *  unregistered the affordance is shaded + inert (feature not yet loaded). */
+  backingKey?: string
+  /** Derived per-tile: backingKey set but its bee not yet registered. */
+  inert?: boolean
 }
 
 /** Descriptor emitted by provider bees via `overlay:register-action` */
@@ -83,6 +88,9 @@ export type OverlayActionDescriptor = {
   labelKey?: string
   /** i18n key for the expanded description (shown on sustained hover) */
   descriptionKey?: string
+  /** IoC key of the bee that services this action. Until it registers, the
+   *  overlay renders this affordance shaded + inert (feature not yet loaded). */
+  backingKey?: string
 }
 
 export type OverlayVisibilityFn = (ctx: OverlayTileContext) => boolean
@@ -125,6 +133,10 @@ const POOL_BG_ALPHA = 0.6
 const WIGGLE_SPEED = 4
 const WIGGLE_AMPLITUDE = 0.06
 const DRAG_ALPHA = 0.6
+// Feature-readiness shade: an affordance whose backing bee hasn't registered
+// yet renders at this alpha and is inert (see #updatePerTileVisibility and the
+// click hit-test) — the "shaded until preloaded" rule, applied to features.
+const INERT_ALPHA = 0.4
 const DROP_HIGHLIGHT_TINT = 0x88ffff
 
 // ── Action hint constants ────────────────────────────────────────
@@ -170,6 +182,9 @@ export class TileOverlayDrone extends Drone {
   #hexBg: HexOverlayMesh | null = null
   #buttonTray: Graphics | null = null
   #actions: OverlayAction[] = []
+  /** Unhook for the ioc.onRegister watch that un-shades a feature affordance
+   *  the moment its backing bee registers (feature-readiness shade). */
+  #unregisterBackingWatch: (() => void) | undefined
   // Danger row (delete) revealed by tapping the ⋮ toggle. In-memory only —
   // resets when the hovered tile changes (see #onPointerMove) and on refresh.
   #dangerRevealed = false
@@ -416,6 +431,15 @@ export class TileOverlayDrone extends Drone {
           }
         }
         this.#requestRebuild()
+      })
+
+      // Feature-readiness shade: when a backing bee registers, un-shade its
+      // affordance live if the overlay is currently up on a tile that carries
+      // it (otherwise the next hover refresh picks it up). Targeted so the
+      // boot-time flood of registrations only repaints when it actually matters.
+      this.#unregisterBackingWatch = window.ioc?.onRegister?.((key: string) => {
+        if (!this.#overlay?.visible || !this.#currentAxial) return
+        if (this.#actions.some(a => a.backingKey === key)) this.#updatePerTileVisibility()
       })
 
       this.onEffect<{ name: string; profile?: OverlayProfileKey }>('overlay:unregister-action', ({ name, profile }) => {
@@ -710,6 +734,8 @@ export class TileOverlayDrone extends Drone {
 
   protected override dispose(): void {
     this.#clearHint()
+    this.#unregisterBackingWatch?.()
+    this.#unregisterBackingWatch = undefined
     if (this.#arrangeMode) this.#exitArrangeMode()
     if (this.#editCooldownTimer) {
       clearTimeout(this.#editCooldownTimer)
@@ -892,6 +918,7 @@ export class TileOverlayDrone extends Drone {
         tintWhen: desc.tintWhen,
         labelKey: desc.labelKey,
         descriptionKey: desc.descriptionKey,
+        backingKey: desc.backingKey,
       })
     }
 
@@ -1008,6 +1035,12 @@ export class TileOverlayDrone extends Drone {
       }
       const tint = action.tintWhen ? action.tintWhen(ctx) : null
       action.button.setNormalTint(tint ?? null)
+      // Feature-readiness shade: an affordance whose backing bee has not yet
+      // registered (loaded) is shaded + inert until it's available — the same
+      // "shaded until preloaded" rule tiles follow. window.ioc.has is a cheap
+      // live lookup; the onRegister watch (setup) repaints the instant it flips.
+      action.inert = !!action.backingKey && !window.ioc?.has?.(action.backingKey)
+      action.button.alpha = action.inert ? INERT_ALPHA : 1
     }
 
     if (this.#buttonTray) {
@@ -2047,6 +2080,9 @@ export class TileOverlayDrone extends Drone {
         const by = local.y - oy - btn.position.y
 
         if (btn.containsPoint(bx, by)) {
+          // Shaded feature (backing bee not yet loaded): swallow the click so it
+          // neither runs the action nor falls through to a tile-body press.
+          if (action.inert) { this.#clearHint(); return }
           this.#clearHint()
           // Icon edit mode: a tap reskins this overlay icon instead of running it.
           if (this.#iconEditOn) {

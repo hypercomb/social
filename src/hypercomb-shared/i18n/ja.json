@@ -932,6 +932,7 @@
   "history.slider.restore-title": "この状態をヘッドに昇格",
   "history.slider.latest": "最新へジャンプ",
   "history.slider.latest-title": "元に戻すを破棄して現在のヘッドに移動",
+  "history.toggle-slider": "スライダー切替",
   "widgets.zoom.title": "ドラッグで拡大 · ダブルクリックでリセット",
   "substrate.organizer.title": "サブストレート",
   "substrate.organizer.close-title": "閉じる（Esc）",

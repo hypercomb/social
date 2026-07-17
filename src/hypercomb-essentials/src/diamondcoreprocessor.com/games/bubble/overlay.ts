@@ -9,11 +9,12 @@
 // crisp. Keyboard input is FULLY isolated while mounted — no keystroke leaks to
 // the shell (a stray key can otherwise flip the app into website/view mode).
 
-import { Engine, TILE, type LevelDef } from './engine.js'
+import { Engine, TILE, type LevelDef, type FxCounters } from './engine.js'
 import { Renderer, themeFor, THEME_NAMES } from './renderer.js'
 import { Designer, TOOLS, type Tool } from './designer.js'
-import { BUILTIN_LEVELS, DIAMOND_ROOM, loadCustomLevels, upsertCustomLevel, deleteCustomLevel, cloneLevel } from './levels.js'
+import { BUILTIN_LEVELS, DIAMOND_ROOM, BOSS_ROOM, loadCustomLevels, upsertCustomLevel, deleteCustomLevel, cloneLevel } from './levels.js'
 import { Shaker, easeOutBack, ARCADE } from '../juice.js'
+import { GameAudio } from '../audio.js'
 
 const STYLE_ID = 'bub-overlay-styles'
 const Z = 2147483000
@@ -72,6 +73,8 @@ interface Transition {
   testing: boolean        // cleared a designer test (re-pans the same level)
   warp: number            // rounds skipped by an umbrella (0 = a normal clear)
   intoBonus: boolean      // the level rising in is the DIAMOND ROOM
+  intoBoss: boolean       // the level rising in is SUPER DRUNK'S CAVERN
+  ending: boolean         // the cleared level WAS the boss — the happy end
   prev: Engine            // the cleared engine — drawn scrolling out during 'pan'
 }
 
@@ -113,12 +116,19 @@ export class BubbleOverlay {
   #overShown = false
   #ro: ResizeObserver | null = null
 
-  // juice: trauma screen-shake + a short level-intro title card. Shake is driven
-  // by score/lives deltas read after each engine.update() so the engine stays pure.
+  // juice: trauma screen-shake + a short level-intro title card + procedural
+  // sound. Shake and SFX are driven by the engine's fx counters (and score /
+  // lives deltas) read after each engine.update(), so the engine stays pure.
   #shaker = new Shaker()
   #prevScore = 0
   #prevLives = 3
+  #prevFx: FxCounters | null = null
   #intro: { t: number; title: string; sub: string } | null = null
+
+  // procedural WebAudio — the shared arcade kit. Unlocked on the first gesture;
+  // the mute preference is participant-local (suite-wide key).
+  #audio = new GameAudio()
+  #muteBtn: HTMLButtonElement | null = null
 
   // Continuous-play state. The engine's score is the RUNNING total (carried
   // across levels); #levelStartScore / #levelStartLives snapshot the totals when
@@ -131,6 +141,9 @@ export class BubbleOverlay {
   // In a DIAMOND ROOM, #levelIndex already points at the round we resume on —
   // the bonus screen isn't in #levels, it's something that happens between.
   #inBonus = false
+  // In SUPER DRUNK'S CAVERN — the finale interposed after the last round.
+  #inBoss = false
+  #tallyTick = -1   // last tally count-up step that clicked (SFX pacing)
 
   // High score: tracked live, persisted on clear / game over / unmount.
   #hiscore = 0
@@ -185,6 +198,7 @@ export class BubbleOverlay {
     if (this.#raf) cancelAnimationFrame(this.#raf)
     this.#raf = 0
     this.#saveHiscore()
+    this.#audio.dispose()
     window.removeEventListener('keydown', this.#onKeyDown, true)
     window.removeEventListener('keyup', this.#onKeyUp, true)
     window.removeEventListener('resize', this.#fit)
@@ -281,6 +295,15 @@ export class BubbleOverlay {
     bar.appendChild(status)
     this.#status = status
 
+    const mute = el('button', { class: 'bub-btn', text: this.#audio.muted ? '🔇' : '🔊', title: 'Sound on/off' }) as HTMLButtonElement
+    mute.onclick = () => {
+      this.#audio.unlock()
+      mute.textContent = this.#audio.toggleMuted() ? '🔇' : '🔊'
+      this.#syncAmbience()
+    }
+    bar.appendChild(mute)
+    this.#muteBtn = mute
+
     const close = el('button', { class: 'bub-close', text: '✕', title: 'Close (Esc)' }) as HTMLButtonElement
     close.onclick = () => this.#onClose()
     bar.appendChild(close)
@@ -298,7 +321,7 @@ export class BubbleOverlay {
     this.#banner = banner
 
     const help = el('div', { class: 'bub-help' })
-    help.innerHTML = '<b>← →</b> move &nbsp;·&nbsp; <b>K</b> jump &nbsp;·&nbsp; <b>J</b> blow a bubble &nbsp;·&nbsp; AIM your shots — a bubble only traps a foe <i>while it still has momentum</i>, then it floats up and gathers under the ceiling &nbsp;·&nbsp; <i>touch a bubble to pop it</i> — pops <i>cascade</i> through the whole touching cluster, so trapped foes burst together into bouncing fruit &nbsp;·&nbsp; jump <i>up through</i> the platforms island to island; <b>hold K</b> on a bubble’s crown to bounce and ride the foam up the tall shafts &nbsp;·&nbsp; a <span style="color:#ff5a5a">red-flashing</span> bubble is about to burst — its foe escapes angry &nbsp;·&nbsp; pop the drifting elementals: 💧 <span style="color:#6fc0ff">water</span> floods the platforms, ⚡ <span style="color:#ffe27a">lightning</span> fires <i>opposite the way you face</i> &nbsp;·&nbsp; the cast: <span style="color:#4aa3ff">Zen-Chan</span>, <span style="color:#ff8a3d">Mighta</span> (dodge his boulders!), <span style="color:#6fe06a">Banebou</span> &amp; the flying <span style="color:#ff9ad5">Monsta</span> &nbsp;·&nbsp; sweets: 👟 <span style="color:#4aa3ff">shoes</span> (run faster) · 🍬 <span style="color:#ff5d8f">candy</span> (blow faster) &nbsp;·&nbsp; grab an <b>umbrella</b> to <i>warp ahead</i>: <span style="color:#4aa3ff">blue</span> 3 · <span style="color:#ff4d5e">red</span> 5 · <span style="color:#ff7ad5">pink</span> 7 rounds — chain your pops to earn the better ones &nbsp;·&nbsp; every 5 rounds the <span style="color:#7fdcff">◆ Diamond Room</span> drops in: no foes, sweep every gem before the clock dies &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; <b>Esc</b> close'
+    help.innerHTML = '<b>← →</b> move &nbsp;·&nbsp; <b>K</b> jump &nbsp;·&nbsp; <b>J</b> blow a bubble &nbsp;·&nbsp; AIM your shots — a bubble only traps a foe <i>while it still has momentum</i>, then it floats up and gathers under the ledges &nbsp;·&nbsp; <i>touch a bubble to pop it</i> — pops <i>cascade</i> through the whole touching cluster, so trapped foes burst together into bouncing fruit &nbsp;·&nbsp; jump <i>up through</i> the platforms island to island; <b>hold K</b> on a bubble’s crown to bounce and ride the foam up the tall shafts &nbsp;·&nbsp; a <span style="color:#ff5a5a">red-flashing</span> bubble is about to burst — its foe escapes angry &nbsp;·&nbsp; pop the drifting elementals: 💧 <span style="color:#6fc0ff">water</span> floods the platforms, ⚡ <span style="color:#ffe27a">lightning</span> fires <i>opposite the way you face</i> &nbsp;·&nbsp; the cast: <span style="color:#4aa3ff">Zen-Chan</span>, <span style="color:#ff8a3d">Mighta</span> (dodge his boulders!), <span style="color:#6fe06a">Banebou</span> &amp; the flying <span style="color:#ff9ad5">Monsta</span> &nbsp;·&nbsp; sweets: 👟 <span style="color:#4aa3ff">shoes</span> (run faster) · 🍬 <span style="color:#ff5d8f">candy</span> (blow faster) &nbsp;·&nbsp; pop the rising <span style="color:#ff9ad5">letter bubbles</span> and spell <b>E·X·T·E·N·D</b> for a 1UP <i>and</i> a free round &nbsp;·&nbsp; grab an <b>umbrella</b> to <i>warp ahead</i>: <span style="color:#4aa3ff">blue</span> 3 · <span style="color:#ff4d5e">red</span> 5 · <span style="color:#ff7ad5">pink</span> 7 rounds &nbsp;·&nbsp; every 5 rounds the <span style="color:#7fdcff">◆ Diamond Room</span> drops in: sweep every gem before the clock dies &nbsp;·&nbsp; past the last round waits <span style="color:#ffb3d9">🍾 SUPER DRUNK</span> — foam <i>blisters</i> his hide; pop the blisters (they cascade!) and stay off his belly &nbsp;·&nbsp; <b>R</b> restart &nbsp;·&nbsp; 🔊 sound toggle in the bar &nbsp;·&nbsp; <b>Esc</b> close'
     root.appendChild(help)
 
     document.body.appendChild(root)
@@ -322,7 +345,7 @@ export class BubbleOverlay {
     this.#stage?.classList.toggle('bub-design', mode === 'design')
     this.#hideBanner()
     if (mode === 'play') this.#startPlay(this.#levels[this.#levelIndex])
-    else { this.#fit(); this.#updateToolButtons() }
+    else { this.#fit(); this.#updateToolButtons(); this.#syncAmbience() }
   }
 
   #refreshLevels(): void {
@@ -344,6 +367,7 @@ export class BubbleOverlay {
     // Fresh run from this level: score back to 0, full lives, no carry-over.
     this.#testing = false
     this.#inBonus = false
+    this.#inBoss = false
     this.#transition = null
     this.#overShown = false
     this.#levelStartScore = this.#engine.score
@@ -359,6 +383,7 @@ export class BubbleOverlay {
    *  number — the worlds run in themed sets, so name the one you're entering. */
   #introSub(level: LevelDef): string {
     if (level.bonus) return 'GRAB THE TREASURE!'
+    if (level.boss) return 'THE FINAL BATTLE'
     return `${themeFor(level).name.toUpperCase()}  ·  LEVEL ${this.#levelIndex + 1}`
   }
 
@@ -368,9 +393,11 @@ export class BubbleOverlay {
     if (!this.#levelLabel) return
     this.#levelLabel.textContent = testing
       ? `${name}  (test)`
-      : this.#inBonus
-        ? `${name}  (bonus)`
-        : `${name}  (${this.#levelIndex + 1}/${this.#levels.length})`
+      : this.#inBoss
+        ? `${name}  (finale)`
+        : this.#inBonus
+          ? `${name}  (bonus)`
+          : `${name}  (${this.#levelIndex + 1}/${this.#levels.length})`
   }
 
   /** World pixel size of whatever the canvas is currently showing. */
@@ -453,8 +480,9 @@ export class BubbleOverlay {
 
   // ── juice: shake + level intro ───────────────────────────
 
-  /** Read the post-update engine state and convert meaningful changes into shake.
-   *  Pure inference (score/lives deltas) keeps the engine free of view concerns. */
+  /** Read the post-update engine state and convert meaningful changes into
+   *  shake + sound. Pure inference (the engine's fx counters and score/lives
+   *  deltas) keeps the engine free of view concerns. */
   #senseJuice(): void {
     const e = this.#engine
     if (!e) return
@@ -463,16 +491,193 @@ export class BubbleOverlay {
     if (ds > 0) this.#shaker.add(Math.min(0.5, 0.1 + ds / 3500))       // pop / capture / fruit
     this.#prevScore = e.score
     this.#prevLives = e.lives
+
+    // fx counters → one recipe per event kind. A counter that went BACKWARD
+    // means the engine was swapped under us — resnapshot, play nothing.
+    const prev = this.#prevFx
+    this.#prevFx = { ...e.fx }
+    if (!prev) return
+    const d = (k: keyof FxCounters): number => Math.max(0, e.fx[k] - prev[k])
+    if (e.fx.blow < prev.blow) return
+
+    if (d('blow')) this.#sfx('blow')
+    if (d('jump')) this.#sfx('jump')
+    if (d('bounce')) this.#sfx('bounce')
+    if (d('pop')) this.#sfx('pop', e.chain)
+    if (d('defeat')) this.#sfx('defeat', e.chain)
+    if (d('trap')) this.#sfx('trap')
+    if (d('escape')) this.#sfx('escape')
+    if (d('fruit')) this.#sfx('fruit')
+    if (d('candy')) this.#sfx('candy')
+    if (d('diamond')) this.#sfx('diamond')
+    if (d('umbrella')) { this.#sfx('umbrella'); this.#shaker.add(0.3) }
+    if (d('water')) this.#sfx('water')
+    if (d('bolt')) this.#sfx('bolt')
+    if (d('boulder')) this.#sfx('boulder')
+    if (d('bottle')) this.#sfx('bottle')
+    if (d('shatter')) { this.#sfx('shatter'); this.#shaker.add(0.12) }
+    if (d('slam')) { this.#sfx('slam'); this.#shaker.add(0.7) }
+    if (d('bossHurt')) { this.#sfx('bossHurt'); this.#shaker.add(0.2) }
+    if (d('bossDown')) { this.#sfx('bossDown'); this.#shaker.add(1.0) }
+    if (d('die')) this.#sfx('die')
+    if (d('oneUp')) this.#sfx('oneUp')
+    if (d('letter')) this.#sfx('letter')
+    if (d('extend')) { this.#sfx('extend'); this.#shaker.add(0.4) }
+    if (d('hurry')) this.#sfx('hurry')
+    if (d('baron')) this.#sfx('baron')
   }
 
-  /** Snap the juice baselines to an engine without firing shake (level swaps). */
+  /** Snap the juice baselines to an engine without firing shake or sound
+   *  (level swaps), and point the ambience at the new screen. */
   #syncJuice(e: Engine): void {
     this.#prevScore = e.score
     this.#prevLives = e.lives
+    this.#prevFx = { ...e.fx }
     this.#shaker = new Shaker()
+    this.#syncAmbience()
   }
 
-  #beginIntro(title: string, sub: string): void { this.#intro = { t: 0, title, sub } }
+  /** The dungeon bed runs ONLY under the boss fight — everywhere else Bubble
+   *  stays bright and dry. Safe to call any time (idempotent, unlock-gated). */
+  #syncAmbience(): void {
+    if (this.#mode === 'play' && this.#engine?.level.boss) this.#audio.startAmbience({ level: 0.7 })
+    else this.#audio.stopAmbience()
+  }
+
+  /** One recipe per event — bright, watery, cheerful; every sound synthesized
+   *  (no assets, and never the arcade's copyrighted melody). `k` scales pitch
+   *  with the running chain where that reads (pops climb as the combo grows). */
+  #sfx(name: string, k = 1): void {
+    const A = this.#audio
+    switch (name) {
+      case 'blow':
+        A.noise({ dur: 0.08, vol: 0.05, filter: 'bandpass', freq: 1900, endFreq: 900 })
+        A.tone({ freq: 540, endFreq: 320, dur: 0.07, vol: 0.04, type: 'triangle' })
+        break
+      case 'pop': {
+        const f = 620 + Math.min(6, k) * 70
+        A.tone({ freq: f, endFreq: f * 1.9, dur: 0.07, vol: 0.1, type: 'triangle' })
+        A.noise({ dur: 0.045, vol: 0.045, filter: 'highpass', freq: 2600 })
+        break
+      }
+      case 'defeat': {
+        const f = 330 + Math.min(8, k) * 65
+        A.tone({ freq: f, endFreq: f * 2.1, dur: 0.15, vol: 0.12, type: 'square' })
+        A.tone({ freq: f * 1.5, endFreq: f * 2.8, dur: 0.12, vol: 0.05, delay: 0.05, type: 'triangle' })
+        break
+      }
+      case 'trap':
+        A.tone({ freq: 940, endFreq: 340, dur: 0.16, vol: 0.09 })
+        A.tone({ freq: 1400, endFreq: 520, dur: 0.16, vol: 0.045, type: 'triangle' })
+        break
+      case 'escape':
+        A.tone({ freq: 190, endFreq: 520, dur: 0.22, vol: 0.09, type: 'sawtooth' })
+        break
+      case 'jump':
+        A.tone({ freq: 330, endFreq: 640, dur: 0.11, vol: 0.06, type: 'triangle' })
+        break
+      case 'bounce':
+        A.tone({ freq: 230, endFreq: 540, dur: 0.15, vol: 0.09 })
+        A.tone({ freq: 460, endFreq: 1080, dur: 0.15, vol: 0.035, type: 'triangle' })
+        break
+      case 'fruit':
+        A.tone({ freq: 880, dur: 0.06, vol: 0.08, type: 'triangle' })
+        A.tone({ freq: 1320, dur: 0.09, vol: 0.07, delay: 0.055, type: 'triangle' })
+        break
+      case 'candy':
+        A.tone({ freq: 740, endFreq: 1480, dur: 0.12, vol: 0.08 })
+        A.tone({ freq: 1110, endFreq: 2220, dur: 0.12, vol: 0.04, delay: 0.05 })
+        break
+      case 'diamond':
+        A.tone({ freq: 1560, dur: 0.12, vol: 0.08 })
+        A.tone({ freq: 2340, dur: 0.16, vol: 0.05, delay: 0.03 })
+        break
+      case 'umbrella':
+        for (let i = 0; i < 5; i++) A.tone({ freq: 520 * Math.pow(1.25, i), dur: 0.1, vol: 0.07, delay: i * 0.05, type: 'triangle' })
+        break
+      case 'water':
+        A.noise({ dur: 0.4, vol: 0.1, filter: 'lowpass', freq: 1400, endFreq: 300 })
+        A.tone({ freq: 620, endFreq: 180, dur: 0.3, vol: 0.05 })
+        break
+      case 'bolt':
+        A.noise({ dur: 0.18, vol: 0.1, filter: 'highpass', freq: 1800 })
+        A.tone({ freq: 1900, endFreq: 320, dur: 0.16, vol: 0.08, type: 'sawtooth' })
+        break
+      case 'boulder':
+        A.noise({ dur: 0.14, vol: 0.06, filter: 'lowpass', freq: 500 })
+        break
+      case 'bottle':
+        A.noise({ dur: 0.16, vol: 0.045, filter: 'bandpass', freq: 900, endFreq: 1600 })
+        break
+      case 'shatter':
+        A.noise({ dur: 0.22, vol: 0.11, filter: 'highpass', freq: 2600, endFreq: 1200 })
+        A.tone({ freq: 2200, endFreq: 900, dur: 0.1, vol: 0.04, type: 'triangle' })
+        break
+      case 'slam':
+        A.tone({ freq: 110, endFreq: 34, dur: 0.4, vol: 0.2 })
+        A.noise({ dur: 0.3, vol: 0.14, filter: 'lowpass', freq: 700, endFreq: 90 })
+        A.duck(0.3, 0.3)
+        break
+      case 'bossHurt':
+        A.tone({ freq: 300, endFreq: 130, dur: 0.2, vol: 0.13, type: 'square' })
+        A.tone({ freq: 450, endFreq: 200, dur: 0.16, vol: 0.05, type: 'sawtooth' })
+        break
+      case 'bossDown':
+        A.tone({ freq: 220, endFreq: 55, dur: 1.1, vol: 0.16, type: 'sawtooth' })
+        A.noise({ dur: 1.2, vol: 0.1, filter: 'lowpass', freq: 900, endFreq: 80 })
+        for (let i = 0; i < 6; i++) A.tone({ freq: 520 * Math.pow(1.2, i), dur: 0.14, vol: 0.07, delay: 0.5 + i * 0.09, type: 'triangle' })
+        break
+      case 'die':
+        A.duck(0.5, 0.9)
+        A.tone({ freq: 620, endFreq: 90, dur: 0.7, vol: 0.13, type: 'triangle' })
+        A.tone({ freq: 930, endFreq: 140, dur: 0.7, vol: 0.05, delay: 0.05, type: 'sine' })
+        break
+      case 'oneUp':
+        for (let i = 0; i < 4; i++) A.tone({ freq: [523, 659, 784, 1046][i], dur: 0.11, vol: 0.09, delay: i * 0.07, type: 'triangle' })
+        break
+      case 'letter':
+        A.tone({ freq: 1180, dur: 0.1, vol: 0.09 })
+        A.tone({ freq: 1770, dur: 0.14, vol: 0.06, delay: 0.06 })
+        break
+      case 'extend':
+        for (let i = 0; i < 6; i++) A.tone({ freq: 440 * Math.pow(1.19, i), dur: 0.13, vol: 0.09, delay: i * 0.08, type: 'triangle' })
+        A.noise({ dur: 0.7, vol: 0.03, filter: 'highpass', freq: 3200, delay: 0.4 })
+        break
+      case 'hurry':
+        for (let i = 0; i < 2; i++) {
+          A.tone({ freq: 760, dur: 0.11, vol: 0.1, delay: i * 0.24, type: 'square' })
+          A.tone({ freq: 560, dur: 0.11, vol: 0.1, delay: 0.12 + i * 0.24, type: 'square' })
+        }
+        break
+      case 'baron':
+        A.tone({ freq: 70, endFreq: 240, dur: 0.8, vol: 0.12, type: 'sawtooth' })
+        A.tone({ freq: 105, endFreq: 360, dur: 0.8, vol: 0.06, type: 'triangle', delay: 0.05 })
+        break
+      case 'intro':
+        for (let i = 0; i < 4; i++) A.tone({ freq: [392, 523, 659, 784][i], dur: 0.1, vol: 0.055, delay: i * 0.08, type: 'triangle' })
+        break
+      case 'clear':
+        for (let i = 0; i < 3; i++) A.tone({ freq: [659, 784, 1046][i], dur: 0.12, vol: 0.08, delay: i * 0.09, type: 'triangle' })
+        break
+      case 'tick':
+        A.tone({ freq: 1240, dur: 0.03, vol: 0.05, type: 'square' })
+        break
+      case 'ding':
+        A.tone({ freq: 1560, dur: 0.2, vol: 0.09 })
+        break
+      case 'ending':
+        for (let i = 0; i < 8; i++) A.tone({ freq: [523, 659, 784, 1046, 784, 1046, 1318, 1568][i], dur: 0.16, vol: 0.08, delay: i * 0.12, type: 'triangle' })
+        break
+      case 'gameover':
+        for (let i = 0; i < 4; i++) A.tone({ freq: [523, 440, 349, 262][i], dur: 0.28, vol: 0.09, delay: i * 0.22, type: 'triangle' })
+        break
+    }
+  }
+
+  #beginIntro(title: string, sub: string): void {
+    this.#intro = { t: 0, title, sub }
+    this.#sfx('intro')
+  }
 
   /** A short, non-blocking title card that pops in (overshoot), holds, then fades.
    *  Drawn in world units over the live game so play never stalls behind it. */
@@ -507,6 +712,7 @@ export class BubbleOverlay {
   // ── input: play (fully isolated) ─────────────────────────
 
   #onKeyDown = (e: KeyboardEvent): void => {
+    this.#audio.unlock()   // any keystroke is the gesture that frees WebAudio
     if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); this.#onClose(); return }
     // While typing a level name, let the field receive keys untouched.
     if (document.activeElement === this.#nameInput) return
@@ -555,6 +761,7 @@ export class BubbleOverlay {
   }
 
   #onPointerDown = (e: PointerEvent): void => {
+    this.#audio.unlock()
     if (this.#mode !== 'design') return
     const cell = this.#cellFromEvent(e)
     if (!cell) return
@@ -625,6 +832,8 @@ export class BubbleOverlay {
     tabs?.forEach((t, i) => t.classList.toggle('on', i === 0))
     this.#engine = new Engine(cloneLevel(this.#designer.level))
     this.#testing = true
+    this.#inBonus = false
+    this.#inBoss = false
     this.#transition = null
     this.#overShown = false
     this.#levelStartScore = this.#engine.score
@@ -704,23 +913,42 @@ export class BubbleOverlay {
 
     const count = Math.max(1, this.#levels.length)
     // Where a cleared round hands off to, in priority order: a designer test
-    // re-runs itself; leaving a diamond room resumes the round it interrupted;
-    // an umbrella skips ahead; otherwise every BONUS_EVERY rounds the diamond
-    // room drops in, and failing all that we simply advance.
+    // re-runs itself; beating SUPER DRUNK is the happy end (the campaign loops
+    // back to round 1); leaving a diamond room resumes the round it
+    // interrupted; an umbrella skips ahead — but nothing skips PAST the boss:
+    // a warp off the end lands squarely in his cavern, and so does clearing
+    // the last round. Failing all that, every BONUS_EVERY rounds the diamond
+    // room drops in, or we simply advance.
     let nextIndex: number
     let nextLevel: LevelDef
     let intoBonus = false
+    let intoBoss = false
+    let ending = false
     if (this.#testing) {
       nextIndex = this.#levelIndex
       nextLevel = this.#designer.level
+    } else if (this.#inBoss) {
+      ending = true
+      nextIndex = 0
+      nextLevel = this.#levels[0] ?? eng.level
     } else if (this.#inBonus) {
       nextIndex = this.#levelIndex           // already points at the resume round
       nextLevel = this.#levels[nextIndex] ?? eng.level
     } else if (eng.warp > 0) {
-      nextIndex = (this.#levelIndex + eng.warp) % count
-      nextLevel = this.#levels[nextIndex] ?? eng.level
+      if (this.#levelIndex + eng.warp >= count) {
+        intoBoss = true
+        nextIndex = 0                        // after the boss, the campaign loops
+        nextLevel = cloneLevel(BOSS_ROOM)
+      } else {
+        nextIndex = this.#levelIndex + eng.warp
+        nextLevel = this.#levels[nextIndex] ?? eng.level
+      }
+    } else if (this.#levelIndex + 1 >= count) {
+      intoBoss = true
+      nextIndex = 0
+      nextLevel = cloneLevel(BOSS_ROOM)
     } else {
-      nextIndex = (this.#levelIndex + 1) % count
+      nextIndex = this.#levelIndex + 1
       if ((this.#levelIndex + 1) % BONUS_EVERY === 0) {
         intoBonus = true
         nextLevel = cloneLevel(DIAMOND_ROOM)  // nextIndex stays the resume round
@@ -733,8 +961,10 @@ export class BubbleOverlay {
       phase: 'tally', t: 0,
       levelScore, bonus, baseScore: this.#levelStartScore,
       nextLevel, nextIndex, testing: this.#testing,
-      warp: eng.warp, intoBonus, prev: eng,
+      warp: eng.warp, intoBonus, intoBoss, ending, prev: eng,
     }
+    this.#tallyTick = -1
+    this.#sfx(ending ? 'ending' : 'clear')
     this.#saveHiscore()
     this.#hideBanner()
   }
@@ -761,7 +991,8 @@ export class BubbleOverlay {
     if (!tr) return
     tr.t += dt
     if (tr.phase === 'tally') {
-      if (tr.t < TALLY_MS) return
+      // the happy end lingers — let the fanfare and the copy land
+      if (tr.t < (tr.ending ? TALLY_MS * 1.9 : TALLY_MS)) return
       const carriedScore = tr.baseScore + tr.levelScore + tr.bonus
       const e = new Engine(cloneLevel(tr.nextLevel))
       e.lives = tr.prev.lives
@@ -769,9 +1000,11 @@ export class BubbleOverlay {
       // between screens still awards the 1UP
       e.seedScore(carriedScore, tr.prev.score)
       e.carryLifePowersFrom(tr.prev)   // sweets (shoes / candy) persist across screens, lost only on death
+      e.carryLettersFrom(tr.prev)      // the EXTEND word belongs to the run
       this.#engine = e
       this.#levelIndex = tr.nextIndex
       this.#inBonus = tr.intoBonus   // set before the label reads it
+      this.#inBoss = tr.intoBoss
       this.#levelStartScore = e.score
       this.#levelStartLives = e.lives
       this.#syncJuice(e)
@@ -826,13 +1059,18 @@ export class BubbleOverlay {
   #drawTally(ctx: CanvasRenderingContext2D, dims: { w: number; h: number }, tr: Transition): void {
     const { w, h } = dims
     const cx = w / 2
-    const p = Math.min(1, tr.t / TALLY_MS)
+    const dur = tr.ending ? TALLY_MS * 1.9 : TALLY_MS
+    const p = Math.min(1, tr.t / dur)
     // Count the level score over the first ~62%, then the bonus over the rest.
     const levelP = Math.min(1, p / 0.62)
     const bonusP = tr.bonus > 0 ? Math.max(0, Math.min(1, (p - 0.62) / 0.30)) : 0
     const shownLevel = Math.round(tr.levelScore * levelP)
     const shownBonus = Math.round(tr.bonus * bonusP)
     const shownTotal = tr.baseScore + shownLevel + shownBonus
+    // the count-up clicks as it runs, and dings once when it settles
+    const step = Math.floor(levelP * 8)
+    if (p < 0.94 && step !== this.#tallyTick) { this.#tallyTick = step; this.#sfx('tick') }
+    else if (p >= 0.94 && this.#tallyTick >= 0) { this.#tallyTick = -1; this.#sfx('ding') }
     const font = (size: number, weight = 700) =>
       `${weight} ${Math.round(size)}px "Segoe UI", system-ui, sans-serif`
 
@@ -842,15 +1080,21 @@ export class BubbleOverlay {
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
 
-    ctx.fillStyle = tr.warp > 0 ? '#ff9ad5' : '#7ee0ff'
+    ctx.fillStyle = tr.ending ? '#ffd76a' : tr.warp > 0 ? '#ff9ad5' : '#7ee0ff'
     ctx.font = font(h * 0.10, 800)
-    ctx.fillText(tr.warp > 0 ? 'WARP!' : 'LEVEL CLEAR', cx, h * 0.30)
+    ctx.fillText(tr.ending ? 'HAPPY END!' : tr.warp > 0 ? 'WARP!' : 'LEVEL CLEAR', cx, h * 0.30)
 
-    // what's coming: an umbrella's skip, or the diamond room dropping in
-    if (tr.warp > 0 || tr.intoBonus) {
-      ctx.fillStyle = '#ffd76a'
+    // what's coming: the happy end, the boss's cavern, an umbrella's skip, or
+    // the diamond room dropping in
+    if (tr.ending || tr.intoBoss || tr.warp > 0 || tr.intoBonus) {
+      ctx.fillStyle = tr.ending ? '#bfe3ff' : '#ffd76a'
       ctx.font = font(h * 0.045, 700)
-      ctx.fillText(tr.warp > 0 ? `SKIP ${tr.warp} ROUNDS` : '◆  DIAMOND ROOM  ◆', cx, h * 0.385)
+      ctx.fillText(
+        tr.ending ? 'SUPER DRUNK IS BEATEN — THE CAVE IS AT PEACE'
+          : tr.intoBoss ? '🍾  SUPER DRUNK AWAITS  🍾'
+          : tr.warp > 0 ? `SKIP ${tr.warp} ROUNDS`
+          : '◆  DIAMOND ROOM  ◆',
+        cx, h * 0.385)
     }
 
     ctx.fillStyle = '#ffffff'
@@ -869,6 +1113,8 @@ export class BubbleOverlay {
   }
 
   #showGameOver(): void {
+    this.#sfx('gameover')
+    this.#audio.stopAmbience()
     const score = this.#engine?.score ?? 0
     this.#showBanner('Game Over', `✦ ${score}`, [
       { label: '↻ Retry', fn: () => this.#startPlay(this.#levels[this.#levelIndex]) },

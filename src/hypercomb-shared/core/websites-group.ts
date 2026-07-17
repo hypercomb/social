@@ -99,12 +99,45 @@ class WebsitesGroup extends LaunchGroupBase {
     try {
       if ((JSON.parse(await blob.text()) as { kind?: string })?.kind !== PAGE_KIND) return
     } catch { return }
+    // The sitemap-root rule must hold against LAYER TRUTH, not just the menu
+    // projection: during a multi-page build the root's own enable commit can
+    // still be riding the committer FIFO when the next page's decoration
+    // event fires — the projection check below misses it and a SUB-PAGE gets
+    // promoted to its own menu entry (the "extra Journal website"). An
+    // ancestor cell carrying a page decoration is authoritative: sub-page.
+    if (await this.#hasAncestorPage(segs)) return
     const key = segs.join('/')
     for (const m of await listAggregation(this.id)) {
       const mk = m.segments.join('/')
       if (key === mk || key.startsWith(mk + '/')) return   // re-stamp or sub-page
     }
     void enableAggregation(this.id, segs)
+  }
+
+  /** True when any strict ancestor of `segs` carries its own
+   *  `visual:website:page` decoration — read from the layers (truth),
+   *  race-free against in-flight aggregation commits. */
+  async #hasAncestorPage(segs: readonly string[]): Promise<boolean> {
+    const history = get<HistoryLike>('@diamondcoreprocessor.com/HistoryService')
+    const store = get<StoreLike>('@hypercomb.social/Store')
+    if (!history || !store?.getResource) return false
+    for (let depth = segs.length - 1; depth >= 1; depth--) {
+      const prefix = segs.slice(0, depth)
+      const locSig = await history.sign({ explorerSegments: () => prefix }).catch(() => null)
+      if (!locSig) continue
+      const layer = await history.currentLayerAt(locSig).catch(() => null)
+      const decos = Array.isArray(layer?.decorations) ? layer.decorations : []
+      for (const entry of decos) {
+        const dsig = String(entry ?? '')
+        if (!SIG.test(dsig)) continue
+        const dblob = await store.getResource(dsig).catch(() => null)
+        if (!dblob) continue
+        try {
+          if ((JSON.parse(await dblob.text()) as { kind?: string })?.kind === PAGE_KIND) return true
+        } catch { /* malformed — skip */ }
+      }
+    }
+    return false
   }
 
   override members(): GroupMember[] { return this.#members }

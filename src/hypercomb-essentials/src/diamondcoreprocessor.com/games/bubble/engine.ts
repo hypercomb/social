@@ -137,6 +137,10 @@ export interface Bubble {
   // null for every ordinary bubble. A blister rides him instead of floating, and
   // POPPING it is the only thing that hurts him — see #clingBoss / #popCascade.
   cling: number | null
+  // An EXTEND letter bubble carries an index into EXTEND_WORD, or null for
+  // everything else. It rises from below the floor straight through the level
+  // (charmed foam), never traps, and popping it collects its letter.
+  letter: number | null
 }
 
 /** One water droplet: falls, then flows along platform tops until it drips off
@@ -354,6 +358,7 @@ export const BUBBLE_WARN = 1.8         // …and its bubble flashes red for the 
 const BUBBLE_BOUNCE_V = 480            // hold-JUMP crown bounce — a full jump's worth
 const POP_LINK = 1.12                  // pops cascade to bubbles within (r1+r2)×this
 const CEIL_GATHER = 34                 // px/s drift toward the top-centre cluster point
+const BUBBLE_SLIDE = 46                // px/s slide along a shelf's underside toward open air
 
 // Special bubbles: entry cadence, drift, lifespan, and element tuning.
 const SPECIAL_MIN = 7                  // 7–13 s between entries…
@@ -412,6 +417,32 @@ const UMBRELLA_SCORE = 1000
 // taking the ride is a CHOICE you can see coming (and refuse).
 const UMBRELLA_ARM = 0.7
 
+// ── EXTEND (the arcade's letter bubbles) ─────────────────────
+// A letter bubble drifts up from below the floor now and then — more readily
+// when you're chaining pops. Popping it collects its letter; completing the
+// word E-X-T-E-N-D pays an extra life and ends the round on the spot, and the
+// letters survive death and screen changes: they're a per-run word.
+export const EXTEND_WORD = 'EXTEND'
+const LETTER_EVERY_MIN = 19            // the patient route: one on a slow clock…
+const LETTER_EVERY_RAND = 9
+const LETTER_CHAIN = 3                 // …or earn one instantly with a 3-chain
+const LETTER_RISE = 36                 // steady charmed rise, floor to ceiling
+const LETTER_SWAY = 8
+const LETTER_R = TILE * 0.92           // a touch grander than plain foam
+
+/** Per-level-instance event counters. The overlay diffs these after each
+ *  update() to fire sound + shake, so the engine stays pure (no view concerns,
+ *  no callbacks). Monotonic for an engine's lifetime — never reset by spawn(). */
+export interface FxCounters {
+  blow: number; jump: number; bounce: number
+  pop: number; defeat: number; trap: number; escape: number
+  fruit: number; candy: number; diamond: number; umbrella: number
+  water: number; bolt: number; boulder: number
+  bottle: number; shatter: number; slam: number; bossHurt: number; bossDown: number
+  die: number; oneUp: number; letter: number; extend: number
+  hurry: number; baron: number
+}
+
 export class Engine {
   level: LevelDef
   cols: number
@@ -446,6 +477,23 @@ export class Engine {
   bonusTimer = 0
   #diamondTotal = 0            // how many the room started with (all-clear test)
   #specialTimer = 0            // countdown to the next drifting elemental
+  #letterTimer = 0             // countdown to the next EXTEND letter bubble
+
+  /** E-X-T-E-N-D — which letters this run has collected. Survives death and
+   *  screen changes (the overlay carries it across engines); resets only when
+   *  the word completes or a fresh run starts. */
+  letters: boolean[] = [false, false, false, false, false, false]
+
+  /** Event counters for the overlay's sound/shake diffing — see FxCounters. */
+  fx: FxCounters = {
+    blow: 0, jump: 0, bounce: 0,
+    pop: 0, defeat: 0, trap: 0, escape: 0,
+    fruit: 0, candy: 0, diamond: 0, umbrella: 0,
+    water: 0, bolt: 0, boulder: 0,
+    bottle: 0, shatter: 0, slam: 0, bossHurt: 0, bossDown: 0,
+    die: 0, oneUp: 0, letter: 0, extend: 0,
+    hurry: 0, baron: 0,
+  }
 
   // Power state — booleans, not timers: a power stays on until a life is lost.
   shoe = false
@@ -503,6 +551,7 @@ export class Engine {
     this.score = 0
     this.lives = 3
     this.boss = null   // a fresh round — spawn() mints Super Drunk at full health
+    this.letters = this.letters.map(() => false)   // a fresh run — a fresh word
     this.spawn()
   }
 
@@ -556,6 +605,7 @@ export class Engine {
     this.#diamondTotal = this.diamonds.length
     this.bonusTimer = this.level.bonus ? BONUS_TIME : 0
     this.#specialTimer = SPECIAL_MIN + Math.random() * SPECIAL_RAND
+    this.#letterTimer = LETTER_EVERY_MIN + Math.random() * LETTER_EVERY_RAND
     // Super Drunk enters high and centred, already winding up his first bottle.
     // Losing a life resets the SCREEN, never his health — every blister you
     // burst stays burst. (load() nulls him first, so a fresh round starts full.)
@@ -668,6 +718,7 @@ export class Engine {
     this.player.vy = -JUMP_V
     this.onGround = false
     this.#coyote = 0
+    this.fx.jump++
   }
 
   /** Blow one bubble in the facing direction (rate-limited, capped). */
@@ -677,6 +728,7 @@ export class Engine {
     if (this.bubbles.length >= MAX_BUBBLES) return
     this.#blowCooldown = this.#blowDelay
     this.blowFlash = 0.2
+    this.fx.blow++
     const p = this.player
     const r = BUBBLE_R
     const x = p.facing > 0 ? p.x + p.w + r * 0.4 : p.x - r * 0.4
@@ -685,7 +737,29 @@ export class Engine {
       x, y, vx: p.facing * BUBBLE_SHOOT_SPEED, vy: 0,
       phase: 'shoot', age: 0, life: BUBBLE_LIFE, r,
       enemy: null, popped: false, squash: 0,
-      slide: p.facing > 0 ? 1 : -1, special: null, cling: null,
+      slide: p.facing > 0 ? 1 : -1, special: null, cling: null, letter: null,
+    })
+  }
+
+  /** An EXTEND letter bubble rises from below the floor at a flank column. Only
+   *  one is ever out at a time, and only letters still missing are dealt. Pass
+   *  `index` to deal a specific letter (the selftest's seam). */
+  spawnLetter(index?: number): void {
+    if (this.bubbles.some(b => b.letter !== null)) return
+    const missing: number[] = []
+    for (let i = 0; i < this.letters.length; i++) if (!this.letters[i]) missing.push(i)
+    if (missing.length === 0) return
+    const letter = index !== undefined && index >= 0 && index < this.letters.length
+      ? index
+      : missing[Math.floor(Math.random() * missing.length)]
+    const fromLeft = Math.random() < 0.5
+    this.bubbles.push({
+      x: fromLeft ? TILE * 1.6 : this.width - TILE * 1.6,
+      y: this.height + LETTER_R,
+      vx: 0, vy: 0,
+      phase: 'float', age: 0, life: 30, r: LETTER_R,
+      enemy: null, popped: false, squash: 0,
+      slide: fromLeft ? 1 : -1, special: null, cling: null, letter,
     })
   }
 
@@ -701,7 +775,7 @@ export class Engine {
       enemy: null, popped: false, squash: 0,
       slide: fromLeft ? 1 : -1,
       special: Math.random() < 0.5 ? 'water' : 'lightning',
-      cling: null,
+      cling: null, letter: null,
     })
   }
 
@@ -776,11 +850,20 @@ export class Engine {
         return
       }
 
+      // an EXTEND letter drifts up on its own slow clock (chained pops deal one
+      // faster — see #defeatEnemy). Never on the boss screen: the finale is his.
+      this.#letterTimer -= dt
+      if (this.#letterTimer <= 0) {
+        this.#letterTimer = LETTER_EVERY_MIN + Math.random() * LETTER_EVERY_RAND
+        this.spawnLetter()
+      }
+
       // Hurry up! — dawdle and the survivors turn angry (faster + red)…
       this.#levelTime += dt
       if (!this.#hurried && this.#levelTime > HURRY_UP) {
         this.#hurried = true
         this.hurryFlash = 1.0
+        this.fx.hurry++
         for (const e of this.enemies) if (e.alive && !e.captured) e.angry = true
       }
       // …and keep dawdling and Baron von Blubba comes for you.
@@ -792,6 +875,7 @@ export class Engine {
           vx: fromLeft ? BARON_SPEED : -BARON_SPEED, vy: 0, age: 0,
         }
         this.hurryFlash = 1.0
+        this.fx.baron++
       }
       this.#stepBaron(dt)
       if (this.dying === 0) {
@@ -872,12 +956,14 @@ export class Engine {
       const feet = p.y + p.h
       const onCrown = p.vy > 0 && feet < b.y - b.r * 0.2
         && Math.abs((p.x + p.w / 2) - b.x) < b.r * 1.05
-      if (onCrown && this.input.jump && !b.enemy) {
-        // bounce — the bubble dips + squashes under the weight
+      if (onCrown && this.input.jump && !b.enemy && b.letter === null) {
+        // bounce — the bubble dips + squashes under the weight (a letter never
+        // bounces: touching it always collects)
         p.vy = -BUBBLE_BOUNCE_V
         p.y = b.y - b.r - p.h
         b.y += 7
         b.squash = 0.2
+        this.fx.bounce++
         return
       }
       this.#popCascade(b)
@@ -944,6 +1030,7 @@ export class Engine {
       e.throwTimer -= dt * (e.angry ? 1 / 0.6 : 1)
       if (e.throwTimer <= 0) {
         e.throwTimer = BOULDER_MIN + Math.random() * BOULDER_RAND
+        this.fx.boulder++
         this.shots.push({
           kind: 'boulder',
           x: e.x + e.w / 2 + e.dir * e.w * 0.7,
@@ -1052,6 +1139,12 @@ export class Engine {
           b.vx *= 0.4
           b.vy = 0
         }
+      } else if (b.letter !== null) {
+        // an EXTEND bubble: a steady charmed rise from below the floor,
+        // straight through everything — pop it before it slips out the top.
+        b.y -= LETTER_RISE * dt
+        b.x += Math.sin(b.age * 1.8) * LETTER_SWAY * dt
+        if (b.y < -b.r * 2) b.popped = true   // slipped away — no letter earned
       } else if (b.special) {
         // elemental drift: a steady slow crossing — barely buoyant, bouncing
         // off walls and terrain so it stays down in the play space, reachable.
@@ -1063,12 +1156,39 @@ export class Engine {
         else if (b.x > this.width - b.r) { b.x = this.width - b.r; b.vx = -Math.abs(b.vx) }
         if (b.y < b.r) b.y = b.r
       } else {
-        // Buoyancy ramps in: the bubble hangs a beat, then the level's upward
-        // airflow carries it through the one-way platforms.
+        // Buoyancy ramps in: the bubble hangs a beat, then lifts.
         b.vy = Math.max(-BUBBLE_RISE, b.vy - BUBBLE_RISE * BUBBLE_RISE_RAMP * dt)
         b.vx *= Math.max(0, 1 - 3.5 * dt)
         b.x += b.vx * dt + Math.sin(b.age * 2.4) * BUBBLE_SWAY * dt
         b.y += b.vy * dt
+        // Floating foam is SOLID against the terrain (the arcade dynamic —
+        // bubbles gather under a shelf and slide along its underside toward
+        // open air; they never ghost up through it). The one exception is a
+        // BOSS round, whose updraft carries foam through the ledges so the
+        // shots you blow from the floor can rise and blister him overhead.
+        if (!this.level.boss) {
+          const hit = this.#bubbleTerrain(b)
+          if (hit.up) {
+            // aim the slide at the NEARER open end of the blocking shelf, so a
+            // bubble under a wide span escapes within its own lifetime. The
+            // screen edge is not a gap — a shelf welded to the wall only ever
+            // drains out its open side.
+            const row = Math.floor((b.y - b.r) / TILE) - 1
+            const col = Math.floor(b.x / TILE)
+            let span = 99
+            for (const dir of [-1, 1] as const) {
+              for (let i = 1; i <= 12; i++) {
+                const c = col + dir * i
+                if (c < 0 || c >= this.cols) break
+                if (this.tileAt(c, row) !== WALL) {
+                  if (i < span) { span = i; b.slide = dir }
+                  break
+                }
+              }
+            }
+            b.x += b.slide * BUBBLE_SLIDE * dt
+          }
+        }
         if (b.x < b.r) { b.x = b.r; b.slide = 1 }
         else if (b.x > this.width - b.r) { b.x = this.width - b.r; b.slide = -1 }
         if (b.y <= b.r) {
@@ -1084,7 +1204,7 @@ export class Engine {
       // and unlike trapping a foe this needs no momentum: the bubbles you blow
       // from the floor rise on their own and blister him overhead. Elementals
       // pass him by (they hit him with their element instead, on the pop).
-      if (b.cling === null && !b.enemy && !b.special && this.boss && this.boss.state !== 'dying') {
+      if (b.cling === null && !b.enemy && !b.special && b.letter === null && this.boss && this.boss.state !== 'dying') {
         const boss = this.boss
         const d = Math.hypot(b.x - boss.x, b.y - boss.y)
         if (d < BOSS_R + b.r * 0.5) {
@@ -1100,7 +1220,7 @@ export class Engine {
       // Trap a foe ONLY while the shot still has momentum — floated foam is
       // harmless (you aim shots at foes; you don't lay mines). Elementals
       // never trap; they carry an element instead.
-      if (b.cling === null && !b.enemy && !b.special && (b.phase === 'shoot' || b.age < 0.55)) {
+      if (b.cling === null && !b.enemy && !b.special && b.letter === null && (b.phase === 'shoot' || b.age < 0.55)) {
         for (const e of this.enemies) {
           if (!e.alive || e.captured) continue
           const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2
@@ -1111,6 +1231,7 @@ export class Engine {
             b.life = BUBBLE_TRAP_LIFE
             b.vx *= 0.3
             b.vy = 0
+            this.fx.trap++
             this.#spawnPop(b.x, b.y, 200, 6)
             break
           }
@@ -1130,6 +1251,7 @@ export class Engine {
           b.enemy.angry = true
           b.enemy.grace = ENEMY_RELEASE_GRACE
           b.enemy.vy = 0
+          this.fx.escape++
           this.#spawnPop(b.x, b.y, 240, 8)
           this.#spawnRing(b.x, b.y, b.r * 2.4, 0)
         } else {
@@ -1142,11 +1264,14 @@ export class Engine {
     this.bubbles = this.bubbles.filter(b => !b.popped)
 
     // jostle: soft pairwise separation, so gathered bubbles cluster shoulder to
-    // shoulder under the ceiling instead of stacking into one point.
+    // shoulder under the ceiling instead of stacking into one point. Letter
+    // bubbles opt out — their steady rise must not be shoved off course.
     for (let i = 0; i < this.bubbles.length; i++) {
       const a = this.bubbles[i]
+      if (a.letter !== null) continue
       for (let j = i + 1; j < this.bubbles.length; j++) {
         const c = this.bubbles[j]
+        if (c.letter !== null) continue
         const dx = c.x - a.x, dy = c.y - a.y
         const min = (a.r + c.r) * 0.94
         const d2 = dx * dx + dy * dy
@@ -1182,6 +1307,8 @@ export class Engine {
         // him, and it CASCADES, so a ringed hide goes off in a single chain
         this.#hurtBoss(BOSS_POP_DMG, b.x, b.y)
         this.#spawnRing(b.x, b.y, b.r * 3, 300)
+      } else if (b.letter !== null) {
+        this.#collectLetter(b)
       } else if (b.enemy) {
         this.#defeatEnemy(b.enemy, b.x, b.y)
         this.#spawnRing(b.x, b.y, b.r * 3.2, 45)
@@ -1194,11 +1321,36 @@ export class Engine {
         this.#spawnPop(b.x, b.y, 220, 8, 55)
         this.#spawnRing(b.x, b.y, b.r * 2.8, 55)
       } else {
+        this.fx.pop++
         this.#spawnPop(b.x, b.y, 180, 6)
         this.#spawnRing(b.x, b.y, b.r * 2.2, 195)
       }
     }
     this.bubbles = this.bubbles.filter(x => !x.popped)
+  }
+
+  /** A popped letter bubble pays its letter. Completing E-X-T-E-N-D pays an
+   *  extra life AND ends the round on the spot — the arcade's grandest
+   *  interruption — and the word resets for the next one. */
+  #collectLetter(b: Bubble): void {
+    const i = b.letter!
+    this.fx.letter++
+    this.#spawnPop(b.x, b.y, 260, 10, 320)
+    this.#spawnRing(b.x, b.y, b.r * 3, 320)
+    this.#spawnFloat(b.x, b.y - TILE, EXTEND_WORD[i], '#ff9ad5')
+    if (this.letters[i]) return
+    this.letters[i] = true
+    if (!this.letters.every(Boolean)) return
+    // EXTEND! — the word completes
+    this.letters = this.letters.map(() => false)
+    this.fx.extend++
+    this.#award1up()
+    const p = this.player
+    this.#spawnFloat(p.x + p.w / 2, p.y - TILE * 1.6, 'EXTEND!', '#ff9ad5')
+    this.#spawnRing(p.x + p.w / 2, p.y + p.h / 2, TILE * 6, 320)
+    // …and the round ends where it stands (never the boss's — his screen only
+    // ends one way, and letters don't spawn there anyway).
+    if (this.state === 'playing' && !this.level.boss && !this.level.bonus) this.state = 'won'
   }
 
   /** Defeat a foe and pay out the running chain: score, particles, food, the
@@ -1209,9 +1361,12 @@ export class Engine {
     e.captured = false
     this.chain += 1
     this.#chainTimer = COMBO_WINDOW
+    this.fx.defeat++
     this.#addScore(POP_BASE * this.chain)
     this.#spawnPop(x, y, 320, 14)
     this.#spawnFruit(x, y, (Math.max(0, Math.min(this.chain - 1, 3))) as FruitKind, this.chain)
+    // a real cascade deals an EXTEND letter (spawnLetter no-ops if one's out)
+    if (this.chain === LETTER_CHAIN && !this.level.boss) this.spawnLetter()
     if (Math.random() < CANDY_DROP_CHANCE) this.#spawnCandy(x, y)
     // …and rarely an umbrella. The cascade that earned the kill picks its
     // colour, so the bigger the chain, the further the skip.
@@ -1230,6 +1385,7 @@ export class Engine {
       if (d.taken) continue
       if (p.x < d.x + d.w && p.x + p.w > d.x && p.y < d.y + d.h && p.y + p.h > d.y) {
         d.taken = true
+        this.fx.diamond++
         this.#addScore(DIAMOND_SCORE)
         const cx = d.x + d.w / 2, cy = d.y + d.h / 2
         this.#spawnPop(cx, cy, 230, 9, 190)
@@ -1278,6 +1434,7 @@ export class Engine {
       if (p.x < u.x + u.w && p.x + p.w > u.x && p.y < u.y + u.h && p.y + p.h > u.y) {
         u.taken = true
         const meta = UMBRELLA_META[u.kind]
+        this.fx.umbrella++
         this.#addScore(UMBRELLA_SCORE)
         this.warp = meta.skip
         this.state = 'won'
@@ -1293,6 +1450,7 @@ export class Engine {
   /** A popped water bubble bursts into droplets that splash out, fall, and
    *  then flow along the platforms, drowning free foes on contact. */
   #burstWater(x: number, y: number): void {
+    this.fx.water++
     for (let i = 0; i < WATER_COUNT; i++) {
       const spread = (i / (WATER_COUNT - 1)) * 2 - 1        // -1 .. 1
       this.waters.push({
@@ -1307,6 +1465,7 @@ export class Engine {
   /** A popped lightning bubble fires its bolt OPPOSITE Bub's facing — the
    *  arcade's famous quirk. It flies flat through everything. */
   #burstBolt(x: number, y: number): void {
+    this.fx.bolt++
     this.shots.push({ kind: 'bolt', x, y, vx: -this.player.facing * BOLT_SPEED, vy: 0, age: 0, spin: 0 })
   }
 
@@ -1415,6 +1574,7 @@ export class Engine {
     }
 
     for (const s of shattered) {
+      this.fx.shatter++
       this.#spawnPop(s.x, s.y, 210, 7, 40)
       for (const dir of [-1, 1] as const) {
         this.shots.push({ kind: 'shard', x: s.x, y: s.y, vx: dir * SHARD_SPEED, vy: 0, age: 0, spin: 0 })
@@ -1468,6 +1628,7 @@ export class Engine {
       if (!cleaning) { f.life -= dt; if (f.life <= 0) { f.taken = true; continue } }
       if (p.x < f.x + f.w && p.x + p.w > f.x && p.y < f.y + f.h && p.y + p.h > f.y) {
         f.taken = true
+        this.fx.fruit++
         const value = FRUIT_SCORE[f.kind] * f.mult
         this.#addScore(value)
         const fcx = f.x + f.w / 2, fcy = f.y + f.h / 2
@@ -1518,6 +1679,7 @@ export class Engine {
       if (this.state !== 'cleanup') { c.life -= dt; if (c.life <= 0) { c.taken = true; continue } }
       if (p.x < c.x + c.w && p.x + p.w > c.x && p.y < c.y + c.h && p.y + p.h > c.y) {
         c.taken = true
+        this.fx.candy++
         this.#applyPower(c.kind)
         this.#addScore(CANDY_SCORE)
         this.#spawnPop(c.x + c.w / 2, c.y + c.h / 2, 240, 10, POWER_META[c.kind].hue)
@@ -1555,6 +1717,12 @@ export class Engine {
     this.rapid = prev.rapid
   }
 
+  /** EXTEND letters persist across screens AND deaths — the word belongs to the
+   *  run, not the round. The overlay calls this beside carryLifePowersFrom. */
+  carryLettersFrom(prev: Engine): void {
+    this.letters = prev.letters.slice()
+  }
+
   #enemyContact(): void {
     if (this.invuln > 0) return
     const p = this.player
@@ -1573,6 +1741,7 @@ export class Engine {
     if (this.dying > 0) return
     this.lives = Math.max(0, this.lives - 1)
     this.dying = DEATH_TIME
+    this.fx.die++
     this.hurtFlash = 0.5
     this.baron = null
     this.player.vy = -360
@@ -1752,6 +1921,7 @@ export class Engine {
     let vx = (tx - ox) / T
     if (Math.abs(vx) > BOTTLE_VX_CAP) vx = Math.sign(vx) * BOTTLE_VX_CAP
     const vy = (ty - oy - 0.5 * BOTTLE_GRAV * T * T) / T
+    this.fx.bottle++
     this.shots.push({ kind: 'bottle', x: ox, y: oy, vx, vy, age: 0, spin: 0 })
     this.#spawnPop(ox, oy, 90, 3, 40)
   }
@@ -1760,6 +1930,7 @@ export class Engine {
   #slamShock(): void {
     const b = this.boss
     if (!b) return
+    this.fx.slam++
     const y = this.height - TILE * 0.6
     for (const dir of [-1, 1] as const) {
       this.shots.push({ kind: 'shard', x: b.x + dir * BOSS_R * 0.5, y, vx: dir * SHARD_SPEED * 1.15, vy: 0, age: 0, spin: 0 })
@@ -1777,9 +1948,11 @@ export class Engine {
     if (!b || b.state === 'dying') return
     b.hp = Math.max(0, b.hp - n)
     b.hurt = BOSS_HURT_FLASH
+    this.fx.bossHurt++
     this.#spawnPop(x, y, 300, 8, 300)
     if (b.hp > 0) return
     // down he goes — the throes run, then update() rains the hoard.
+    this.fx.bossDown++
     b.state = 'dying'
     b.stateT = 0
     b.telegraph = 0
@@ -1833,6 +2006,7 @@ export class Engine {
   #award1up(): void {
     if (this.lives >= LIVES_CAP) return
     this.lives += 1
+    this.fx.oneUp++
     const p = this.player
     this.#spawnFloat(p.x + p.w / 2, p.y - TILE * 0.8, '1UP!', '#6fe06a')
     this.#spawnRing(p.x + p.w / 2, p.y + p.h / 2, TILE * 4.4, 130)

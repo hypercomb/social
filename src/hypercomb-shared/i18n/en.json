@@ -932,6 +932,7 @@
   "history.slider.restore-title": "Promote this state to head",
   "history.slider.latest": "Jump to latest",
   "history.slider.latest-title": "Discard undo and jump to current head",
+  "history.toggle-slider": "toggle slider",
   "widgets.zoom.title": "Drag to scale · double-click to reset",
   "substrate.organizer.title": "Substrate",
   "substrate.organizer.close-title": "Close (Esc)",

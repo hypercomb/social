@@ -136,6 +136,7 @@ export class SolomonOverlay {
   #prevSpawn = 0
   #prevSecret = 0
   #prevReveal = 0
+  #prevResonance = 0
   #prevJump = 0
   #prevLand = 0
   #prevFire = 0
@@ -602,8 +603,11 @@ export class SolomonOverlay {
       case 'conjure': a.tone({ freq: 220, endFreq: 110, type: 'triangle', dur: 0.09, vol: 0.14 }); a.noise({ dur: 0.12, vol: 0.06, filter: 'lowpass', freq: 420 }); break
       case 'dispel': a.tone({ freq: 160, endFreq: 320, type: 'triangle', dur: 0.08, vol: 0.12 }); a.tone({ freq: 1320, dur: 0.05, vol: 0.05, delay: 0.02 }); a.tone({ freq: 1760, dur: 0.05, vol: 0.04, delay: 0.05 }); break
       case 'deny': a.tone({ freq: 110, endFreq: 95, type: 'square', dur: 0.05, vol: 0.05 }); a.noise({ dur: 0.04, vol: 0.03, filter: 'lowpass', freq: 300 }); break
-      case 'secret': a.tone({ freq: 880, dur: 0.08, vol: 0.09 }); a.tone({ freq: 1174, dur: 0.1, vol: 0.09, delay: 0.07 }); a.tone({ freq: 1568, dur: 0.16, vol: 0.09, delay: 0.14 }); break
+      case 'secret': for (const [i, f] of [880, 1174, 1568, 2093].entries()) a.tone({ freq: f, dur: i === 3 ? 0.22 : 0.09, vol: 0.09, delay: i * 0.07 }); a.noise({ dur: 0.35, vol: 0.03, filter: 'highpass', freq: 5200 }); break
       case 'reveal': a.tone({ freq: 660, dur: 0.06, vol: 0.08 }); a.tone({ freq: 990, dur: 0.1, vol: 0.08, delay: 0.05 }); break
+      // The dowsing hum — soft detuned partials, no attack transient: felt more than heard.
+      case 'resonate': a.tone({ freq: 392, endFreq: 415, type: 'sine', dur: 0.28, vol: 0.045, attack: 0.06 }); a.tone({ freq: 588, dur: 0.22, vol: 0.03, delay: 0.04, attack: 0.05 }); break
+      case 'resonateHot': a.tone({ freq: 523, endFreq: 554, type: 'sine', dur: 0.3, vol: 0.06, attack: 0.04 }); a.tone({ freq: 784, dur: 0.26, vol: 0.045, delay: 0.03, attack: 0.04 }); a.tone({ freq: 1046, dur: 0.18, vol: 0.03, delay: 0.1 }); break
       case 'crack': a.noise({ dur: 0.06, vol: 0.1, filter: 'highpass', freq: 1200 }); a.tone({ freq: 130, endFreq: 70, dur: 0.06, vol: 0.06 }); break
       case 'shatter': a.noise({ dur: 0.2, vol: 0.14, filter: 'bandpass', freq: 500, endFreq: 200, q: 0.8 }); a.tone({ freq: 120, endFreq: 60, type: 'square', dur: 0.09, vol: 0.05 }); break
       case 'jump': a.tone({ freq: 300, endFreq: 430, dur: 0.06, vol: 0.1 }); break
@@ -744,12 +748,22 @@ export class SolomonOverlay {
       this.#sfx('spawn')
     }
 
-    // A wand-found SECRET — the discovery chime (distinct from a plain reveal).
+    // A wand-found SECRET — the discovery flourish (distinct from a plain reveal):
+    // a violet-gold bloom + a slower halo of drifting embers.
     if (e.secretFlash > this.#prevSecret && e.secretCell) {
       const [sx, sy] = cellXY(e.secretCell)
-      this.#field.burst(sx, sy, { count: 14, speed: 70, gravity: -20, life: 0.6, size: 2, color: ['#ceb8ff', '#e8deff', '#fff'] })
-      r?.spike(0.4)
+      this.#field.burst(sx, sy, { count: 22, speed: 85, gravity: -26, life: 0.7, size: 2.2, color: ['#ceb8ff', '#e8deff', '#ffd678', '#fff'] })
+      this.#field.burst(sx, sy, { count: 8, speed: 28, gravity: -34, life: 1.1, size: 1.5, drag: 0.5, color: ['#ffd678', '#e8deff'] })
+      r?.spike(0.55)
       this.#sfx('secret')
+    }
+
+    // The wand HUMMED — a cast landed near a sleeping secret (the dowsing hint).
+    // Sparse motes at the CAST cell; the renderer's ring + the hum carry it.
+    if (e.resonanceFlash > this.#prevResonance && e.resonanceCell) {
+      const [hx, hy] = cellXY(e.resonanceCell)
+      this.#field.burst(hx, hy, { count: e.resonanceHot ? 7 : 4, speed: 26, gravity: -14, life: 0.7, size: 1.4, drag: 0.6, color: ['#ceb8ff', '#9a86d8'] })
+      this.#sfx(e.resonanceHot ? 'resonateHot' : 'resonate')
     }
 
     // A hidden item uncovered by a broken brick.
@@ -792,6 +806,7 @@ export class SolomonOverlay {
     this.#prevSpawn = e.spawnFlash
     this.#prevSecret = e.secretFlash
     this.#prevReveal = e.revealFlash
+    this.#prevResonance = e.resonanceFlash
     this.#prevJump = e.jumpFlash
     this.#prevLand = e.landFlash
     this.#prevFire = e.fireFlash
@@ -814,6 +829,7 @@ export class SolomonOverlay {
     this.#prevSpawn = e.spawnFlash
     this.#prevSecret = e.secretFlash
     this.#prevReveal = e.revealFlash
+    this.#prevResonance = e.resonanceFlash
     this.#prevJump = e.jumpFlash
     this.#prevLand = e.landFlash
     this.#prevFire = e.fireFlash

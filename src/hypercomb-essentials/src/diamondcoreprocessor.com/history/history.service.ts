@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/core/history.service.ts
-import { EffectBus, SignatureService, SignatureStore } from '@hypercomb/core'
+import { EffectBus, SignatureService, SignatureStore, USAGE_IOC_KEY, type UsageRanker } from '@hypercomb/core'
 import { lineageKey, rawLineageKey } from './lineage-key.js'
 import { isBareLayer } from './child-sig-guard.js'
 import { parseHeadIndex, buildFlushIndex } from './head-index.js'
@@ -2700,7 +2700,15 @@ export class HistoryService {
       await Promise.all(
         Array.from({ length: Math.min(CONCURRENCY, frontier.length) }, () => worker()),
       )
-      frontier = [...nextFrontier]
+      // Warm the participant's most-used tiles first WITHIN this depth band:
+      // rank the next level by local usage weight (recency-decayed dwell +
+      // visits). Shallow-first ordering is preserved — we only reorder inside
+      // a level. Best-effort: a cold participant / absent tracker collapses to
+      // raw order, and we never AWAIT the tracker (real-time is never gated on
+      // the preloader).
+      const nextLevel = [...nextFrontier]
+      const ranker = window.ioc?.get?.(USAGE_IOC_KEY) as UsageRanker | undefined
+      frontier = ranker ? ranker.rank(nextLevel) : nextLevel
       depth++
     }
     const elapsed = Math.round(performance.now() - startMs)

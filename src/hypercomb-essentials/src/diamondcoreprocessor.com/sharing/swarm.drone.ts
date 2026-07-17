@@ -35,6 +35,7 @@ import { listDecorations } from '../commands/decoration-manifest.js'
 import { kindsForLabel } from '../commands/decoration-kind-index.js'
 import { SWARM_INVITE_KIND } from './meeting-invite.js'
 import { lineageKey } from '../history/lineage-key.js'
+import { isWithinAdoptedRoot } from './adopted-roots.js'
 
 const SWARM_LAYER_KIND = 30200
 
@@ -1612,6 +1613,15 @@ export class SwarmDrone extends Drone {
   #syncForSig = async (sig: string): Promise<void> => {
     if (!sig) return
 
+    // Defence in depth for the private-mode boundary. ShowCellDrone normally
+    // suppresses mesh:ensure-started while private, but other producers also
+    // emit that shared effect. A delayed warm-up/synchronize event must never
+    // subscribe, recover peer visuals, walk a publish closure, or resurface
+    // retained peer tiles while the user is in private mode.
+    let meshPublic = false
+    try { meshPublic = localStorage.getItem('hc:mesh-public') === 'true' } catch { /* privacy-safe default: off */ }
+    if (!meshPublic) return
+
     // Leaving a lineage closes our live subscription there (bandwidth —
     // stop listening at locations we can no longer see) but RETAINS the
     // peer state we witnessed. Peer tiles at a filter location are
@@ -1765,6 +1775,38 @@ export class SwarmDrone extends Drone {
     }
   }
 
+  // A LIVE layer event under our own pubkey that we did not publish this
+  // session, naming tiles inside an ADOPTED root, is the signature of an
+  // identity collision — another install signing with this key (the
+  // pre-per-origin shared-constant fossil). The self-skip in #onEvent
+  // silences it completely: that publisher can never register as a peer,
+  // so adopted branches never auto-sync. Warn once per session so the
+  // collision is never silent. A second tab of THIS origin trips it too
+  // (same key, legitimately) — the message covers both readings.
+  #warnedSelfSkipAdopted = false
+  readonly #bootMs = Date.now()
+  #noteSelfSkippedLayerEvent = (sig: string, createdAtSec: number, payload: unknown): void => {
+    if (this.#warnedSelfSkipAdopted) return
+    if (!sig || sig !== this.#currentSig) return
+    if (createdAtSec * 1000 <= this.#bootMs) return            // relay replay of our own past
+    if (this.#lastPublishedBySig.has(sig)) return              // our own live echo
+    const visuals = payload && typeof payload === 'object' && Array.isArray((payload as SwarmLayerPayload).visuals)
+      ? (payload as SwarmLayerPayload).visuals
+      : []
+    const at = (this.#getLineage()?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    const adopted = visuals
+      .map(v => (v && typeof v === 'object' && !Array.isArray(v)) ? String((v as Record<string, unknown>)['name'] ?? '').trim() : '')
+      .filter(name => name.length > 0 && isWithinAdoptedRoot([...at, name]))
+    if (adopted.length === 0) return
+    this.#warnedSelfSkipAdopted = true
+    console.warn(
+      `[swarm] identity collision? live broadcast under OUR pubkey ${this.#myPubkey?.slice(0, 8)} names adopted tile(s) ` +
+      `[${adopted.join(', ')}] and was self-skipped — these can never auto-sync from this publisher. If another ` +
+      `machine/origin signs with this key, rotate localStorage['hc:nostr:secret-key'] on this consumer (a fresh ` +
+      `identity mints on reload). Another tab of THIS origin also trips this — harmless in that case.`,
+    )
+  }
+
   #onEvent = (sig: string, evt: MeshEvtLike): void => {
     // Three kinds reach this callback: layer events (30200) carrying
     // a peer's children list, resource events (30201) carrying image
@@ -1842,7 +1884,10 @@ export class SwarmDrone extends Drone {
 
     // Self-skip via relay echo. Until #myPubkey resolves this is a
     // no-op; show-cell's localCellSet dedup catches the overlap.
-    if (this.#myPubkey && pubkey === this.#myPubkey) { return }
+    if (this.#myPubkey && pubkey === this.#myPubkey) {
+      this.#noteSelfSkippedLayerEvent(sig, Number(evt?.event?.created_at ?? 0), evt?.payload)
+      return
+    }
 
     // Ordering guard — drop layer events strictly older than the newest
     // we've already applied from this publisher at this sig. See
