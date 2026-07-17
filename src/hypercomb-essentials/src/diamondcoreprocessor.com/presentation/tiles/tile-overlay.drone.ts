@@ -822,8 +822,15 @@ export class TileOverlayDrone extends Drone {
   #resolveProfileKey(): OverlayProfileKey {
     // World mode takes precedence over everything: only the share-toggles show.
     if (this.#worldMode) return 'world'
+    // A peer-EXTERNAL tile always carries its public-external affordances
+    // (adopt / hide / block): if it is on your screen, you can act on it.
+    // hc:mesh-public gates BROADCASTING your own tiles — it must not gate
+    // adopting what you can already see. (With the old `!meshPublic →
+    // private` short-circuit, peers rendered but hovering them showed NO
+    // icons at all: the silent "hypercomb.io is not adopting" state.)
+    if (this.#currentTileExternal) return 'public-external'
     if (!this.#meshPublic) return 'private'
-    return this.#currentTileExternal ? 'public-external' : 'public-own'
+    return 'public-own'
   }
 
   #rebuildActiveProfile(): void {
@@ -1636,7 +1643,11 @@ export class TileOverlayDrone extends Drone {
         return
       }
 
-      if (this.#meshPublic) {
+      // Recompute on EVERY hover-tile change (cheap key compare; rebuild only
+      // on transitions). Previously gated on #meshPublic — which meant that
+      // with mesh-public off the profile could never switch to
+      // public-external when the pointer landed on a peer tile.
+      {
         const newKey = this.#resolveProfileKey()
         if (newKey !== this.#activeProfileKey) this.#rebuildActiveProfile()
       }
