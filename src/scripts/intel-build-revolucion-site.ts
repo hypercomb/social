@@ -309,23 +309,25 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     <section class="section">
       <div class="rule"><p class="kicker">the ecosystem</p></div>
       <div class="cards">
-        <a class="card link" href="/revolucion/journal"><span class="num">01</span><h3>The Journal</h3>
+        <a class="card link" href="/revolucion/journal"><span class="num">01</span>${thumb('journal')}<h3>The Journal</h3>
           <p>The entry point. Press speak, tell it like it was, and watch the moment assemble itself.</p></a>
-        <a class="card link" href="/revolucion/experience"><span class="num">02</span><h3>The Experience</h3>
+        <a class="card link" href="/revolucion/experience"><span class="num">02</span>${thumb('experience')}<h3>The Experience</h3>
           <p>Forty-one spoken keywords — weather, time, setting, company, mood, drink — each one a tile.</p></a>
-        <a class="card link" href="/revolucion/cigars"><span class="num">03</span><h3>The Catalog</h3>
+        <a class="card link" href="/revolucion/cigars"><span class="num">03</span>${thumb('cigars')}<h3>The Catalog</h3>
           <p>Brands, vitolas, wrappers, origins, strength. The community writes it by smoking.</p></a>
-        <a class="card link" href="/revolucion/flavor-wheel"><span class="num">04</span><h3>The Flavor Wheel</h3>
+        <a class="card link" href="/revolucion/flavor-wheel"><span class="num">04</span>${thumb('flavor-wheel')}<h3>The Flavor Wheel</h3>
           <p>Ten families, sixty-three flavors — one shared tasting language. Spin it.</p></a>
-        <a class="card link" href="/revolucion/discovery"><span class="num">05</span><h3>Discovery</h3>
+        <a class="card link" href="/revolucion/lounge"><span class="num">05</span>${thumb('lounge')}<h3>The Cigar Lounge</h3>
+          <p>Your corner of the ecosystem. Dress the room; hang your own things soon.</p></a>
+        <a class="card link" href="/revolucion/discovery"><span class="num">06</span>${thumb('discovery')}<h3>Discovery</h3>
           <p>Ask for a moment, not a medium-bodied Nicaraguan. Recommendations grown from journals.</p></a>
-        <a class="card link" href="/revolucion/community"><span class="num">06</span><h3>The Circle</h3>
+        <a class="card link" href="/revolucion/community"><span class="num">07</span>${thumb('community')}<h3>The Circle</h3>
           <p>Shared moments, spoken vocabulary, herf nights — and a gentle first light for newcomers.</p></a>
-        <a class="card link" href="/revolucion/insights"><span class="num">07</span><h3>For the Makers</h3>
+        <a class="card link" href="/revolucion/insights"><span class="num">08</span>${thumb('insights')}<h3>For the Makers</h3>
           <p>Anonymized, aggregated truth for the people who blend, roll, and ship the leaf.</p></a>
-        <a class="card link" href="/revolucion/collaborations"><span class="num">08</span><h3>Named Experiences</h3>
+        <a class="card link" href="/revolucion/collaborations"><span class="num">09</span>${thumb('collaborations')}<h3>Named Experiences</h3>
           <p>Conversation. Reflection. Celebration. Blends named for what they create.</p></a>
-        <a class="card link" href="/revolucion/humidor"><span class="num">09</span><h3>The Humidor</h3>
+        <a class="card link" href="/revolucion/humidor"><span class="num">10</span>${thumb('humidor')}<h3>The Humidor</h3>
           <p>What you hold, what you hunt, and what rests in the dark getting better.</p></a>
       </div>
     </section>
@@ -528,9 +530,11 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     .stact{margin-top:.55rem;font-size:.74rem;letter-spacing:.1em;color:var(--faint);text-transform:uppercase}
     .stact.on{color:var(--gold-bright)}
     /* big active-section label above the picker */
-    .biglabel{margin:0 0 1.1rem;border-bottom:3px solid var(--hairline);padding:0 0 .55rem}
+    /* fixed height + nowrap: the title may truncate but NEVER wraps or
+       pushes the wheel down — the wheel's position is layout-stable */
+    .biglabel{margin:0 0 1.1rem;border-bottom:3px solid var(--hairline);padding:0 0 .5rem;height:4.4rem;overflow:hidden}
     .biglabel .k{font-size:.62rem;letter-spacing:.34em;text-transform:uppercase;color:var(--faint)}
-    .biglabel .n{font-size:clamp(1.5rem,3vw,2.2rem);line-height:1.1;color:var(--cream)}
+    .biglabel .n{font-size:clamp(1.2rem,2.1vw,1.75rem);line-height:1.3;color:var(--cream);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .biglabel .n i{font-style:normal;color:var(--gold-bright)}
     .tog{background:none;border:1px solid var(--hairline);color:var(--faint);font-family:var(--serif);
       font-size:.66rem;letter-spacing:.18em;padding:.18rem .6rem;cursor:pointer}
@@ -558,13 +562,13 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
           <p class="hint">Spin the wheel past the notch &mdash; whatever lands here is up next. Tap the big box to take it.</p>
         </section>
         <section>
+          <h3 id="focusTitle">In the scope</h3>
+          <div id="focusList"></div>
+        </section>
+        <section>
           <h3>Selected flavors</h3>
           <div id="selList"></div>
           <div class="clearline"><button id="clear" hidden>Clear all</button></div>
-        </section>
-        <section>
-          <h3 id="focusTitle">In the scope</h3>
-          <div id="focusList"></div>
         </section>
         <section>
           <h3>Strength</h3>
@@ -737,9 +741,13 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
           var rIn = atNotch ? R_FLV - 8 : R_FLV;
           var rOut = atNotch ? R_OUT + R_RAISE : R_OUT;
           var op = atNotch ? 1 : (sel ? 1 : (focused ? .8 : .5));
+          // ink + outline that read ON THIS family's fill — cream ink on the
+          // light families (Sweet, Cream & Bread, Fruit…) is unreadable, so
+          // dark:true families always mark selection with dark ink/stroke
+          var ink = fm.dark ? '#241c14' : '#f0e6d6';
           var fp = el('path', { d: arcPath(rIn, rOut, atNotch ? f0 - .4 : f0, atNotch ? f1 + .4 : f1), fill: fm.color, opacity: op, 'class': 'flv' }, rot);
-          if (atNotch) { fp.setAttribute('stroke', '#f0e6d6'); fp.setAttribute('stroke-width', '3'); }
-          else if (sel) { fp.setAttribute('stroke', '#f0e6d6'); fp.setAttribute('stroke-width', '2.5'); }
+          if (atNotch) { fp.setAttribute('stroke', ink); fp.setAttribute('stroke-width', '3'); }
+          else if (sel) { fp.setAttribute('stroke', ink); fp.setAttribute('stroke-width', '2.5'); }
           fp.style.cursor = 'pointer';
           fp.addEventListener('click', function(){ if (dragMoved) return; toggle(lb); });
           el('title', {}, fp).textContent = lb;
@@ -747,7 +755,7 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
           var fabs = absOf(fmid), flip = fabs > 180;
           var ang = fmid - 90 + (flip ? 180 : 0);
           var p = polar(flip ? rOut - 10 : rIn + 10, fmid);
-          var labelFill = (sel || atNotch) ? '#f0e6d6' : (fm.dark ? '#241c14' : 'rgba(240,230,214,.92)');
+          var labelFill = (sel || atNotch) ? ink : (fm.dark ? '#241c14' : 'rgba(240,230,214,.92)');
           var t = el('text', { x: p[0].toFixed(1), y: p[1].toFixed(1), 'font-size': atNotch ? 17.5 : 15.5, fill: labelFill,
             transform: 'rotate(' + ang.toFixed(1) + ' ' + p[0].toFixed(1) + ' ' + p[1].toFixed(1) + ')' }, rot);
           t.setAttribute('font-family', 'Georgia,serif');
@@ -774,23 +782,32 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
       el('path', { d: 'M' + (nx + 14) + ',' + (ny - 12) + ' L' + nx + ',' + ny + ' L' + (nx + 14) + ',' + (ny + 12) + ' Z', fill: '#e0b578' }, svg);
 
       // ---- drag to spin ---------------------------------------------------
-      var dragging = false, startAngle = 0, startRot = 0, movedDeg = 0;
+      var dragging = false, startAngle = 0, startRot = 0, downX = 0, downY = 0;
       function angleAt(ev){
         var r = svg.getBoundingClientRect();
         var x = ev.clientX - (r.left + r.width / 2), y = ev.clientY - (r.top + r.height / 2);
         return Math.atan2(y, x) * 180 / Math.PI;
       }
       svg.addEventListener('pointerdown', function(ev){
-        dragging = true; dragMoved = false; movedDeg = 0;
+        dragging = true; dragMoved = false;
+        downX = ev.clientX; downY = ev.clientY;
         startAngle = angleAt(ev); startRot = state.rot;
         svg.classList.add('dragging');
         try { svg.setPointerCapture(ev.pointerId); } catch(e){}
       });
       svg.addEventListener('pointermove', function(ev){
         if (!dragging) return;
+        // PIXEL threshold, not angle: an angle test amplifies near the hub
+        // and swallowed slice clicks — tapping the picture must toggle the
+        // flavor, exactly like ticking it in the list. Under 6px is a click:
+        // the wheel does not move and the tap lands on the slice.
+        if (!dragMoved) {
+          var dx = ev.clientX - downX, dy = ev.clientY - downY;
+          if (dx * dx + dy * dy < 36) return;
+          dragMoved = true;
+          startAngle = angleAt(ev); // re-baseline so the wheel doesn't jump
+        }
         var d = angleAt(ev) - startAngle;
-        movedDeg = Math.max(movedDeg, Math.abs(d));
-        if (movedDeg > 2) dragMoved = true;
         state.rot = startRot + d;
         var g = svg.querySelector('#rot');
         if (g) g.setAttribute('transform', 'rotate(' + state.rot + ' ' + C + ' ' + C + ')');
@@ -1141,8 +1158,173 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     </section>
   </main>`)
 
+  const lounge = P('/revolucion/lounge', 'The Cigar Lounge', `
+  <style>
+    .lounge{display:grid;grid-template-columns:minmax(420px,1.6fr) minmax(280px,.7fr);gap:2.2rem;align-items:start;margin:2rem 0 3rem}
+    @media(max-width:960px){.lounge{grid-template-columns:1fr}}
+    .scene{border:1px solid var(--hairline);background:#120d16}
+    .scene svg{display:block;width:100%;height:auto}
+    .dpanel{border:1px solid var(--hairline);background:var(--coal)}
+    .dpanel section{padding:1.05rem 1.15rem;border-bottom:1px solid var(--hairline)}
+    .dpanel section:last-child{border-bottom:none}
+    .dpanel h3{font-size:.7rem;letter-spacing:.32em;text-transform:uppercase;color:var(--gold);margin:0 0 .55rem;font-weight:400}
+    .drow{display:flex;align-items:center;gap:.6rem;padding:.42rem .1rem;border-top:1px solid rgba(200,151,90,.10);font-size:.95rem;cursor:pointer;color:var(--cream)}
+    .drow:first-of-type{border-top:none}
+    .drow:hover{background:rgba(200,151,90,.08)}
+    .drow .mark{width:.9rem;color:var(--gold-bright)}
+    .drow.off{color:var(--faint)}
+    .dnote{color:var(--faint);font-size:.86rem;font-style:italic;line-height:1.6}
+  </style>
+  <main class="wrap" style="max-width:1220px">
+    <section class="hero" style="padding:9vh 0 2vh">
+      <p class="kicker">the cigar lounge &middot; your corner of the ecosystem</p>
+      <h1>Pull up a <i>chair</i>.</h1>
+      <p class="lede">This room is built to take your things — art on the walls, bottles on the shelf,
+      trophies where they belong. The add-ons below are just the start; the scene is made of slots.</p>
+    </section>
+    <section class="lounge">
+      <div class="scene"><svg viewBox="0 0 1200 620" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <radialGradient id="lglow" cx="50%" cy="35%" r="65%">
+            <stop offset="0%" stop-color="rgba(224,181,120,.34)"/><stop offset="100%" stop-color="rgba(224,181,120,0)"/>
+          </radialGradient>
+          <linearGradient id="lwall" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="#221a29"/><stop offset="100%" stop-color="#170f1c"/>
+          </linearGradient>
+        </defs>
+        <rect x="0" y="0" width="1200" height="440" fill="url(#lwall)"/>
+        <rect x="0" y="440" width="1200" height="180" fill="#140d12"/>
+        <line x1="0" y1="440" x2="1200" y2="440" stroke="rgba(200,151,90,.3)"/>
+        <line x1="0" y1="392" x2="1200" y2="392" stroke="rgba(200,151,90,.12)"/>
+        <g id="slot-window">
+          <rect x="86" y="86" width="220" height="240" fill="#0c1220" stroke="#c8975a" stroke-width="2"/>
+          <line x1="196" y1="86" x2="196" y2="326" stroke="#c8975a"/><line x1="86" y1="206" x2="306" y2="206" stroke="#c8975a"/>
+          <circle cx="252" cy="140" r="24" fill="#e0b578" opacity=".9"/>
+          <circle cx="128" cy="120" r="2.5" fill="#f0e6d6"/><circle cx="160" cy="168" r="2" fill="#f0e6d6"/><circle cx="118" y="0" cy="250" r="2" fill="#f0e6d6"/>
+        </g>
+        <g id="slot-shelf">
+          <rect x="360" y="120" width="230" height="8" fill="#3a2417" stroke="#c8975a" stroke-width="1"/>
+          <rect x="376" y="76" width="14" height="44" fill="#5C3D2E"/><rect x="394" y="82" width="12" height="38" fill="#8B6914"/>
+          <rect x="410" y="72" width="15" height="48" fill="#4E2E1E"/><rect x="429" y="84" width="12" height="36" fill="#2C3E50"/>
+          <rect x="470" y="90" width="86" height="30" fill="#3a2417" stroke="#c8975a"/>
+          <circle cx="513" cy="105" r="5" fill="#e0b578"/>
+        </g>
+        <g id="slot-frames">
+          <rect x="950" y="110" width="110" height="110" fill="#171017" stroke="#c8975a" stroke-width="2"/>
+          <g transform="translate(1005 165)">
+            <circle r="36" fill="none" stroke="#5C3D2E" stroke-width="13"/>
+            <circle r="36" fill="none" stroke="#C0392B" stroke-width="13" stroke-dasharray="34 193"/>
+            <circle r="36" fill="none" stroke="#D4A017" stroke-width="13" stroke-dasharray="30 197" stroke-dashoffset="-40"/>
+            <circle r="36" fill="none" stroke="#27AE60" stroke-width="13" stroke-dasharray="26 201" stroke-dashoffset="-78"/>
+            <circle r="14" fill="#171017"/>
+          </g>
+          <rect x="1080" y="150" width="70" height="90" fill="#171017" stroke="#c8975a" stroke-width="2"/>
+          <rect x="1100" y="180" width="30" height="30" fill="#c8975a" transform="rotate(45 1115 195)"/>
+        </g>
+        <g id="slot-lamp">
+          <ellipse cx="470" cy="230" rx="150" ry="170" fill="url(#lglow)"/>
+          <path d="M436,150 L504,150 L488,196 L452,196 Z" fill="#c8975a" opacity=".9"/>
+          <line x1="470" y1="196" x2="470" y2="452" stroke="#8d7f6f" stroke-width="5"/>
+          <ellipse cx="470" cy="456" rx="34" ry="8" fill="#3a2417" stroke="#8d7f6f"/>
+        </g>
+        <g id="slot-rug">
+          <ellipse cx="700" cy="530" rx="290" ry="52" fill="#241318" stroke="#c8975a" stroke-width="2"/>
+          <ellipse cx="700" cy="530" rx="220" ry="36" fill="none" stroke="rgba(200,151,90,.4)"/>
+        </g>
+        <g id="base-chair">
+          <path d="M570,420 L570,250 Q570,215 610,215 L760,215 Q800,215 800,250 L800,420 Z" fill="#3a2417" stroke="#c8975a" stroke-width="2"/>
+          <path d="M560,330 Q535,330 535,362 L535,430 Q535,452 560,452 L575,452 L575,330 Z" fill="#2c1a10" stroke="#c8975a"/>
+          <path d="M810,330 Q835,330 835,362 L835,430 Q835,452 810,452 L795,452 L795,330 Z" fill="#2c1a10" stroke="#c8975a"/>
+          <rect x="575" y="360" width="220" height="70" fill="#2c1a10" stroke="#c8975a"/>
+          <rect x="575" y="430" width="220" height="24" fill="#241309" stroke="#c8975a"/>
+          <line x1="596" y1="454" x2="596" y2="482" stroke="#c8975a" stroke-width="4"/>
+          <line x1="774" y1="454" x2="774" y2="482" stroke="#c8975a" stroke-width="4"/>
+        </g>
+        <g id="base-table">
+          <ellipse cx="905" cy="392" rx="58" ry="12" fill="#3a2417" stroke="#c8975a"/>
+          <line x1="905" y1="404" x2="905" y2="490" stroke="#8d7f6f" stroke-width="5"/>
+          <ellipse cx="905" cy="492" rx="26" ry="6" fill="#3a2417" stroke="#8d7f6f"/>
+          <ellipse cx="884" cy="382" rx="17" ry="5" fill="#171017" stroke="#8d7f6f"/>
+          <rect x="884" y="368" width="34" height="7" rx="0" fill="#3a2417" stroke="#e0b578" stroke-width="1" transform="rotate(-14 884 372)"/>
+          <circle cx="882" cy="366" r="3.4" fill="#ff9b52"/>
+        </g>
+        <g id="slot-smoke">
+          <path d="M881,358 C868,330 900,312 886,284 C874,258 902,244 894,220" fill="none" stroke="rgba(224,181,120,.55)" stroke-width="3" stroke-linecap="round"/>
+          <path d="M893,352 C906,326 882,306 897,282" fill="none" stroke="rgba(224,181,120,.32)" stroke-width="2.5" stroke-linecap="round"/>
+        </g>
+        <g id="slot-whiskey">
+          <rect x="922" y="356" width="26" height="26" fill="none" stroke="#f0e6d6" stroke-width="2"/>
+          <rect x="923" y="368" width="24" height="13" fill="#b3542f" opacity=".85"/>
+          <rect x="928" y="360" width="9" height="9" fill="none" stroke="rgba(240,230,214,.7)"/>
+        </g>
+        <g id="slot-plant">
+          <path d="M1108,468 L1152,468 L1144,516 L1116,516 Z" fill="#3a2417" stroke="#c8975a"/>
+          <path d="M1130,468 C1130,430 1112,420 1104,398 M1130,468 C1130,424 1148,418 1158,394 M1130,468 C1130,436 1130,414 1130,396" stroke="#27AE60" stroke-width="4" fill="none" stroke-linecap="round"/>
+        </g>
+        <g id="slot-records">
+          <rect x="96" y="430" width="180" height="60" fill="#3a2417" stroke="#c8975a"/>
+          <line x1="96" y1="452" x2="276" y2="452" stroke="rgba(200,151,90,.5)"/>
+          <circle cx="146" cy="420" r="26" fill="#171017" stroke="#c8975a"/>
+          <circle cx="146" cy="420" r="8" fill="#c8975a"/>
+          <line x1="196" y1="404" x2="216" y2="424" stroke="#e0b578" stroke-width="3"/>
+          <line x1="108" y1="490" x2="108" y2="510" stroke="#8d7f6f" stroke-width="4"/>
+          <line x1="264" y1="490" x2="264" y2="510" stroke="#8d7f6f" stroke-width="4"/>
+        </g>
+      </svg></div>
+      <aside class="dpanel">
+        <section>
+          <h3>Decorate</h3>
+          <div id="decorList"></div>
+        </section>
+        <section>
+          <h3>Bring your own</h3>
+          <p class="dnote">Every piece in this room is a slot. Soon you will hang your own art,
+          shelve your own bottles, and pin the bands of cigars you have loved — straight from
+          your <a href="/revolucion/journal">journal</a> and <a href="/revolucion/humidor">humidor</a>.</p>
+        </section>
+      </aside>
+    </section>
+  </main>
+  <script>
+  (function(){
+    var SLOTS = [
+      { id: 'slot-lamp',    label: 'Reading lamp' },
+      { id: 'slot-window',  label: 'Night window' },
+      { id: 'slot-rug',     label: 'Rug' },
+      { id: 'slot-whiskey', label: 'Whiskey, neat-ish' },
+      { id: 'slot-smoke',   label: 'A cigar going' },
+      { id: 'slot-frames',  label: 'Wall art' },
+      { id: 'slot-shelf',   label: 'Shelf + humidor' },
+      { id: 'slot-plant',   label: 'Plant' },
+      { id: 'slot-records', label: 'Record console' }
+    ];
+    var KEY = 'rev:lounge:decor';
+    var on = {};
+    try { on = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch(e){ on = {}; }
+    SLOTS.forEach(function(s){ if (!(s.id in on)) on[s.id] = true; });
+    function apply(){
+      SLOTS.forEach(function(s){
+        var g = document.getElementById(s.id);
+        if (g) g.style.display = on[s.id] ? '' : 'none';
+      });
+      try { localStorage.setItem(KEY, JSON.stringify(on)); } catch(e){}
+      var list = document.getElementById('decorList');
+      list.innerHTML = '';
+      SLOTS.forEach(function(s){
+        var d = document.createElement('div');
+        d.className = 'drow' + (on[s.id] ? '' : ' off');
+        d.innerHTML = '<span class="mark">' + (on[s.id] ? '\\u25a0' : '\\u25a1') + '</span>' + s.label;
+        d.addEventListener('click', function(){ on[s.id] = !on[s.id]; apply(); });
+        list.appendChild(d);
+      });
+    }
+    apply();
+  })();
+  </script>`)
+
   return [
     { segments: ['revolucion'], label: 'Revolución', html: home },
+    { segments: ['revolucion', 'lounge'], label: 'The Cigar Lounge', html: lounge },
     { segments: ['revolucion', 'journal'], label: 'The Journal', html: journal },
     { segments: ['revolucion', 'experience'], label: 'The Experience', html: experience },
     { segments: ['revolucion', 'cigars'], label: 'The Catalog', html: cigars },
@@ -1166,6 +1348,34 @@ async function main(): Promise<void> {
     process.exit(1)
   }
 
+  // 0a. Tiles first: make sure the 'lounge' cell exists before its page.
+  const rootLayer = pre.data as { name?: string; children?: unknown }
+  const childSigs = Array.isArray(rootLayer?.children) ? rootLayer.children.map(String) : []
+  const childNames: string[] = []
+  for (const sig of childSigs) {
+    const inf = await send({ op: 'inflate', cell: sig })
+    const nm = typeof (inf?.data as { name?: string })?.name === 'string' ? (inf.data as { name: string }).name.trim() : ''
+    if (nm) childNames.push(nm)
+  }
+  if (!childNames.includes('lounge')) {
+    console.log(`[site] adding lounge cell (current children: ${childNames.join(', ')})`)
+    const up = await send({ op: 'update', segments: ['revolucion'], layer: { name: rootLayer?.name ?? 'revolucion', children: [...childNames, 'lounge'] } })
+    if (!up.ok) { console.error(`[site] lounge cell FAIL: ${up.error}`); process.exit(1) }
+    await send({ op: 'update', segments: ['revolucion', 'lounge'], layer: { name: 'lounge' } })
+    await send({ op: 'note-add', segments: ['revolucion'], cell: 'lounge', text: 'The cigar lounge — a decorated room of slots you dress yourself. Your own add-ons hang here: art, bottles, bands of cigars you have loved.' })
+  }
+
+  // 0b. Tile-art sigs for the home thumbnails — the site reuses the hive's
+  // own sig-addressed imagery (resource:<sig> refs, closure-carried).
+  const ART_CELLS = ['journal', 'experience', 'cigars', 'flavor-wheel', 'discovery', 'community', 'insights', 'collaborations', 'humidor', 'lounge']
+  const art: Record<string, string | undefined> = {}
+  for (const c of ART_CELLS) {
+    const ins = await send({ op: 'inspect', segments: ['revolucion', c] })
+    const sig = ins?.ok ? (ins.data as { small?: { image?: string } })?.small?.image : undefined
+    if (typeof sig === 'string' && /^[0-9a-f]{64}$/.test(sig)) art[c] = sig
+  }
+  console.log(`[site] art thumbnails resolved: ${Object.values(art).filter(Boolean).length}/${ART_CELLS.length}`)
+
   // 1. Chrome stylesheet — minted once, dedupes by signature.
   const chrome = await send({ op: 'put-resource', text: CHROME_CSS })
   if (!chrome.ok) { console.error(`[site] chrome.css FAIL: ${chrome.error}`); process.exit(1) }
@@ -1173,7 +1383,7 @@ async function main(): Promise<void> {
   console.log(`[site] chrome.css → ${chromeSig.slice(0, 12)}… (${chrome.data.bytes} bytes)`)
 
   // 2. Pages: put-resource + decoration-add per cell.
-  const pages = buildPages(chromeSig)
+  const pages = buildPages(chromeSig, art)
   const written: Array<{ path: string; htmlSig: string; decoSig: string }> = []
   for (const p of pages) {
     const route = '/' + p.segments.join('/')

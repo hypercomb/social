@@ -4,7 +4,7 @@ import type { HostReadyPayload } from '../presentation/tiles/pixi-host.worker.js
 import type { Axial } from '../navigation/hex-detector.js'
 import type { OrderProjection } from '../history/order-projection.js'
 import { writeTilePropertiesAt, readTilePropsIndex, writeTilePropsIndex, cellLocationSig } from '../editor/tile-properties.js'
-import { childNamesOfStrict, childLayerOf, resolveLayerAt, flattenLayerTree } from '../history/layer-placement.js'
+import { childNamesOfStrict, childEntriesOf, childLayerOf, resolveLayerAt, captureCollectionSig, flattenLayerTree } from '../history/layer-placement.js'
 import type { PlacementHistory, PlacementLayer } from '../history/layer-placement.js'
 
 // Committer/store shapes for the Ctrl-drag COPY path — it re-homes a dragged
@@ -14,6 +14,16 @@ import type { PlacementHistory, PlacementLayer } from '../history/layer-placemen
 interface CopyTreeUpdate { segments: readonly string[]; layer: { name?: string } & { [slot: string]: unknown } }
 interface CopyCommitterLike {
   importTree(updates: CopyTreeUpdate[], nameSlots?: ReadonlySet<string>): Promise<void>
+  /** Sig-native children delta — the move commit. Returns the location's
+   *  new head sig so the caller can fold it into its parent's marker. */
+  commitChildrenDeltas(
+    segments: readonly string[],
+    changes: {
+      removes?: readonly { sig?: string; label?: string }[]
+      appends?: readonly string[]
+      swaps?: readonly { from: string; to: string }[]
+    },
+  ): Promise<string>
 }
 interface CopyStoreLike {
   getResource?: (sig: string) => Promise<Blob | null>
@@ -462,6 +472,108 @@ export class MoveDrone extends Drone {
     }
   }
 
+  /**
+   * Capture the dragged tiles as COLLECTION SIGS for a re-home — shared by
+   * drop-into and promote (the two directions of the same move).
+   *
+   * Per tile: seal its live subtree into one sig (captureCollectionSig —
+   * the stored child sig is the fallback), then re-mint ONLY its top node
+   * when it needs a landing index at the destination. The subtree itself is
+   * never re-committed; its bytes are pool-addressed and position-
+   * independent, and navigation into it resolves through the parent chain.
+   *
+   * Returns the destination's `appends`, the source's `removes` (by stored
+   * sig, with the label as the staleness fallback), and the landed labels.
+   */
+  async #captureMoves(
+    history: PlacementHistory,
+    sourceSegments: readonly string[],
+    labels: readonly string[],
+    sigByName: ReadonlyMap<string, string>,
+    destTaken: ReadonlySet<string>,
+    startIndex: number,
+    verb: string,
+  ): Promise<{ appends: string[]; removes: { sig?: string; label: string }[]; landed: string[] }> {
+    const appends: string[] = []
+    const removes: { sig?: string; label: string }[] = []
+    const landed: string[] = []
+    const taken = new Set(destTaken)
+    let nextIndex = startIndex
+
+    for (const label of labels) {
+      // Names are immutable identity — never collide a moved tile with an
+      // existing sibling at the destination. Skip (don't clobber).
+      if (taken.has(label)) {
+        console.warn(`[move] ${verb} skipped — name exists at the destination`, label)
+        continue
+      }
+      const stored = sigByName.get(label)
+      let sig = await captureCollectionSig(history, [...sourceSegments, label], stored)
+      let layer = sig ? await history.getLayerBySig(sig) : null
+      if (!sig || !layer) {
+        console.warn(`[move] ${verb} source missing for`, label)
+        continue
+      }
+      // Land after the destination's existing children: fold the index into
+      // the collection by re-minting the top node (pool write, no marker) —
+      // a post-commit props write would race the commit.
+      if (typeof history.materializeLayer === 'function') {
+        const propsSig = await this.#propsWithIndex(layer, nextIndex)
+        if (propsSig) {
+          const reminted: PlacementLayer = { ...layer, properties: [propsSig] }
+          sig = await history.materializeLayer(reminted)
+          layer = reminted
+        }
+      }
+      appends.push(sig)
+      removes.push({ ...(stored ? { sig: stored } : {}), label })
+      landed.push(label)
+      taken.add(label)
+      nextIndex++
+    }
+    return { appends, removes, landed }
+  }
+
+  /**
+   * Seed the participant-local render index (hc:tile-props-index) at each
+   * moved node's DESTINATION location key, walking the collections by sig
+   * over warm pool bytes. FILL-IF-EMPTY — a move never displaces an image
+   * an existing tile at the destination already owns.
+   */
+  async #seedPropsIndex(
+    history: PlacementHistory,
+    rootSigs: readonly string[],
+    destSegments: readonly string[],
+  ): Promise<void> {
+    try {
+      const index = readTilePropsIndex()
+      let seeded = false
+      const seen = new Set<string>()
+      const queue: { sig: string; parentSegs: string[] }[] =
+        rootSigs.map(sig => ({ sig, parentSegs: [...destSegments] }))
+      while (queue.length > 0) {
+        const { sig, parentSegs } = queue.shift()!
+        const layer = await history.getLayerBySig(sig)
+        const name = typeof layer?.name === 'string' ? layer.name : ''
+        if (!layer || !name || /[\\/\x00-\x1f]/.test(name)) continue
+        const dedupeKey = `${sig}|${parentSegs.join('/')}`
+        if (seen.has(dedupeKey)) continue
+        seen.add(dedupeKey)
+        const props = (layer as { properties?: unknown }).properties
+        const propSig = Array.isArray(props) && typeof props[0] === 'string' ? props[0] : undefined
+        if (propSig && /^[0-9a-f]{64}$/.test(propSig)) {
+          const key = await cellLocationSig(parentSegs, name)
+          if (key && !index[key]) { index[key] = propSig; seeded = true }
+        }
+        const children = Array.isArray(layer.children) ? layer.children : []
+        for (const c of children) queue.push({ sig: String(c), parentSegs: [...parentSegs, name] })
+      }
+      if (seeded) writeTilePropsIndex(index)
+    } catch (err) {
+      console.warn('[move] props-index seed skipped', err)
+    }
+  }
+
   async #commitDropIntoUnsafe(axial: Axial, source: string): Promise<void> {
     const targetLabel = this.labelAtAxial(axial)
     if (!targetLabel || this.#movedGroup.has(targetLabel)) {
@@ -493,111 +605,71 @@ export class MoveDrone extends Drone {
 
     const sourceSegments: readonly string[] = lineage.explorerSegments?.() ?? []
     const sourceParent = await this.#resolveCurrentParent(history, lineage, sourceSegments)
-    const sourceStrict = await childNamesOfStrict(history, sourceParent)
-    const sourceChildren = sourceStrict.names
-
-    // SAFETY: a MOVE re-SETs BOTH parents' children lists — so we must only
-    // commit when the source parent resolved, EVERY child sig resolved (a cold
-    // sibling silently missing from the list would be wiped by the SET even
-    // though it was never dragged), and the parent actually holds every dragged
-    // tile. Abort (no data loss) instead.
-    if (!sourceParent || sourceStrict.coldMiss || !movedLabels.every(l => sourceChildren.includes(l))) {
-      console.warn('[move] drop-into aborted — source parent/children unresolved or cold', { movedLabels, sourceChildren, coldMiss: sourceStrict.coldMiss })
+    if (!sourceParent) {
+      console.warn('[move] drop-into aborted — source parent unresolved', { movedLabels })
+      this.cancelMove(source)
+      return
+    }
+    // Sig-space membership: manifest-first name→sig pairs. The commits
+    // below are DELTA-shaped (removeSig / append / swap), so a cold
+    // sibling can no longer be wiped by a re-listing — the old strict
+    // reads and their cold aborts are structurally unnecessary.
+    const { entries: sourceEntries } = await childEntriesOf(history, sourceParent)
+    const sigByName = new Map(sourceEntries.map(e => [e.name, e.sig]))
+    if (!movedLabels.every(l => sigByName.has(l))) {
+      console.warn('[move] drop-into aborted — dragged tiles not resolvable in the source parent', { movedLabels })
       this.cancelMove(source)
       return
     }
 
-    // The target tile becomes a parent: resolve its layer (warm, via the source
-    // parent's slot) and its existing children so we APPEND, never clobber.
-    // Same strictness: the target's children are re-SET below, so a cold child
-    // of the target must also abort rather than vanish.
-    const targetViaParent = await childLayerOf(history, sourceParent, targetLabel)
-    const targetLayer = targetViaParent?.layer ?? null
-    const targetStrict = await childNamesOfStrict(history, targetLayer)
-    const targetChildren = targetStrict.names
-    if (!targetLayer || targetStrict.coldMiss) {
-      console.warn('[move] drop-into aborted — target layer/children unresolved or cold', { targetLabel, coldMiss: targetStrict.coldMiss })
+    // The target tile becomes a parent: its layer + existing children, so
+    // the moved tiles land AFTER them and never collide by name.
+    const targetOldSig = sigByName.get(targetLabel)
+    const targetLayer = targetOldSig ? await history.getLayerBySig(targetOldSig) : null
+    if (!targetLayer) {
+      console.warn('[move] drop-into aborted — target layer unresolved', { targetLabel })
       this.cancelMove(source)
       return
     }
+    const { entries: targetEntries } = await childEntriesOf(history, targetLayer)
+    const targetTaken = new Set(targetEntries.map(e => e.name))
     const targetParentSegments = [...sourceSegments, targetLabel]
 
-    // Suck-into-tile animation up front (purely visual); the importTree below is
-    // the authoritative MOVE.
+    // Suck-into-tile animation up front (purely visual); the commits below
+    // are the authoritative MOVE.
     this.emitEffect('move:drop-into-commit', { label: targetLabel, dragged: [...movedLabels] })
 
-    // Re-home each dragged subtree UNDER the target, keeping its own name — this
-    // is a MOVE, not a copy (no fresh name). flattenLayerTree preserves every
-    // content sig; the SAME primitive copy / adopt / clipboard-paste use.
-    const treeUpdates: CopyTreeUpdate[] = []
-    const landed: string[] = []
-    let nextIndex = targetChildren.length
-
-    for (const label of movedLabels) {
-      const viaParent = await childLayerOf(history, sourceParent, label)
-      let srcLayer = viaParent?.layer ?? null
-      if (!srcLayer) {
-        const ownSig = await history.sign({ domain: lineage.domain, explorerSegments: () => [...sourceSegments, label] })
-        srcLayer = await history.currentLayerAt(ownSig)
-      }
-      if (!srcLayer) { console.warn('[move] drop-into source missing for', label); continue }
-
-      const entryUpdates = await flattenLayerTree(history, srcLayer, [...targetParentSegments, label])
-
-      // Land after the target's existing children — fold the index into the SAME
-      // cascade (a post-commit write races it; see the clipboard paste-target fix).
-      const topKey = [...targetParentSegments, label].join('/')
-      const top = entryUpdates.find(u => u.segments.join('/') === topKey)
-      if (top) {
-        const sig = await this.#propsWithIndex(top.layer, nextIndex)
-        if (sig) top.layer = { ...top.layer, properties: [sig] }
-      }
-      treeUpdates.push(...entryUpdates)
-      landed.push(label)
-      nextIndex++
-    }
-
+    // Each dragged tile is ONE collection sig — captured live (sealSubtree)
+    // with its stored child sig as fallback, then re-minted once if it needs
+    // a landing index. The subtree is never re-committed.
+    const { appends, removes, landed } = await this.#captureMoves(
+      history, sourceSegments, movedLabels, sigByName, targetTaken, targetEntries.length, 'drop-into',
+    )
     if (landed.length === 0) { this.cancelMove(source); return }
-
-    const landedSet = new Set(landed)
-    const newSourceChildren = sourceChildren.filter(c => !landedSet.has(c))
-    const newTargetChildren = [...targetChildren, ...landed]
 
     EffectBus.emit('fs:changed', { segments: [...sourceSegments] })
 
-    // Seed the participant-local render index (hc:tile-props-index) for the moved
-    // tiles at their NEW location under the target. show-cell resolves a local
-    // tile's image ONLY through this index — without the seed a re-homed tile
-    // renders BLANK until a reload heals it. Same gap + fix as clipboard paste
-    // and swarm-adopt. FILL-IF-EMPTY (never disturb an existing image).
-    try {
-      const index = readTilePropsIndex()
-      let seeded = false
-      for (const u of treeUpdates) {
-        const props = (u.layer as { properties?: unknown }).properties
-        const propSig = Array.isArray(props) && typeof props[0] === 'string' ? props[0] : undefined
-        if (!propSig || !/^[0-9a-f]{64}$/.test(propSig)) continue
-        const segs = u.segments
-        if (segs.length === 0) continue
-        const key = await cellLocationSig(segs.slice(0, -1), segs[segs.length - 1])
-        if (!key || index[key]) continue
-        index[key] = propSig
-        seeded = true
-      }
-      if (seeded) writeTilePropsIndex(index)
-    } catch (err) {
-      console.warn('[move] props-index seed skipped', err)
-    }
+    // Seed the participant-local render index (hc:tile-props-index) for the
+    // moved tiles at their NEW location under the target. show-cell resolves
+    // a local tile's image ONLY through this index — without the seed a
+    // re-homed tile renders BLANK until a reload heals it. A pure sig-walk
+    // over the (warm) collections; no commits.
+    await this.#seedPropsIndex(history, appends, targetParentSegments)
 
-    // ONE atomic cascade: the source parent DROPS the moved names from its
-    // children, the target GAINS them, and each subtree is re-homed under the
-    // target. Because the source parent's new children list excludes the moved
-    // names, this is a true MOVE — the tiles can never linger as copies.
-    await committer.importTree([
-      { segments: [...sourceSegments], layer: { ...sourceParent, children: newSourceChildren } },
-      { segments: [...targetParentSegments], layer: { ...(targetLayer ?? {}), children: newTargetChildren } },
-      ...treeUpdates,
-    ])
+    // TWO surgical commits, deepest FIRST: the target gains the collection
+    // sigs, then the source parent drops the moved sigs and — in the SAME
+    // marker, for free — swaps the target's now-stale sig for its post-gain
+    // one. Because the source's new children exclude the moved sigs, this is
+    // a true MOVE; the tiles can never linger as copies. Nothing is deleted:
+    // every moved subtree's bytes, markers and bag survive, so undo at either
+    // page restores the prior state.
+    const targetNewSig = await committer.commitChildrenDeltas(targetParentSegments, { appends })
+    await committer.commitChildrenDeltas(sourceSegments, {
+      removes,
+      swaps: (targetOldSig && targetNewSig && targetOldSig !== targetNewSig)
+        ? [{ from: targetOldSig, to: targetNewSig }]
+        : [],
+    })
 
     // The moved cells leave THIS level (now children of the target). Carry the
     // source segments explicitly — the awaited commit means a segment-less emit
@@ -627,10 +699,11 @@ export class MoveDrone extends Drone {
   /**
    * Promote tiles UP one level — re-home them from the CURRENT location into its
    * PARENT, as siblings of the current location's own tile (the inverse of
-   * drop-into). No-op at the root (no parent). ONE atomic importTree, the same
-   * re-home primitive as drop-into / clipboard paste, and it seeds the render
-   * index so the promoted tiles aren't blank at their new location. Driven from
-   * the selection menu (whole selection) and the tile kebab (one label).
+   * drop-into). No-op at the root (no parent). Two sig-native delta commits
+   * (deepest first — see the commit block below), the same primitive drop-into
+   * and clipboard paste use, and it seeds the render index so the promoted tiles
+   * aren't blank at their new location. Driven from the selection menu (whole
+   * selection) and the tile kebab (one label).
    */
   commitPromoteToParent = async (labels: readonly string[]): Promise<void> => {
     const moved = [...new Set(labels)].filter(Boolean)
@@ -658,93 +731,54 @@ export class MoveDrone extends Drone {
 
     try {
       const sourceParent = await this.#resolveCurrentParent(history, lineage, sourceSegments)
-      const sourceStrict = await childNamesOfStrict(history, sourceParent)
-      const sourceChildren = sourceStrict.names
-      // SAFETY: a MOVE re-SETs both parents' children — only commit when the
-      // source resolved, EVERY child sig resolved (a cold sibling missing from
-      // the list would be wiped by the SET), and the source actually holds the
-      // tiles.
-      if (!sourceParent || sourceStrict.coldMiss || !moved.every(l => sourceChildren.includes(l))) {
-        console.warn('[move] promote aborted — source unresolved or cold', { moved, sourceChildren, coldMiss: sourceStrict.coldMiss })
+      if (!sourceParent) {
+        console.warn('[move] promote aborted — source unresolved', { moved })
+        return
+      }
+      // Sig-space membership — the commits below are delta-shaped, so no
+      // strict read and no cold abort: an unseen sibling rides through the
+      // source's marker verbatim instead of being wiped by a re-listing.
+      const { entries: sourceEntries } = await childEntriesOf(history, sourceParent)
+      const sigByName = new Map(sourceEntries.map(e => [e.name, e.sig]))
+      if (!moved.every(l => sigByName.has(l))) {
+        console.warn('[move] promote aborted — tiles not resolvable in the source', { moved })
         return
       }
 
-      // Same strictness for the destination: its children are re-SET below,
-      // and a null dest layer would SET a slot-less layer over the parent.
       const destParent = await resolveLayerAt(history, lineage.domain, parentSegments)
-      const destStrict = await childNamesOfStrict(history, destParent)
-      const destChildren = destStrict.names
-      if (!destParent || destStrict.coldMiss) {
-        console.warn('[move] promote aborted — destination parent unresolved or cold', { parentSegments, coldMiss: destStrict.coldMiss })
+      if (!destParent) {
+        console.warn('[move] promote aborted — destination parent unresolved', { parentSegments })
         return
       }
-      const destTaken = new Set(destChildren)
+      const { entries: destEntries } = await childEntriesOf(history, destParent)
+      const destTaken = new Set(destEntries.map(e => e.name))
+      // The current location is itself a CHILD of the destination — its sig
+      // changes when it drops the promoted tiles, so the destination's marker
+      // must swap it (folded into the same commit below, for free).
+      const sourceOldSig = destEntries.find(e => e.name === sourceSegments[sourceSegments.length - 1])?.sig
 
-      const treeUpdates: CopyTreeUpdate[] = []
-      const landed: string[] = []
-      let nextIndex = destChildren.length
-
-      for (const label of moved) {
-        // Names are immutable identity — never collide a promoted tile with an
-        // existing sibling at the parent. Skip (don't clobber) on a name clash.
-        if (destTaken.has(label)) { console.warn('[move] promote skipped — name exists at parent', label); continue }
-        const viaParent = await childLayerOf(history, sourceParent, label)
-        let srcLayer = viaParent?.layer ?? null
-        if (!srcLayer) {
-          const ownSig = await history.sign({ domain: lineage.domain, explorerSegments: () => [...sourceSegments, label] })
-          srcLayer = await history.currentLayerAt(ownSig)
-        }
-        if (!srcLayer) { console.warn('[move] promote source missing for', label); continue }
-
-        const entryUpdates = await flattenLayerTree(history, srcLayer, [...parentSegments, label])
-        const topKey = [...parentSegments, label].join('/')
-        const top = entryUpdates.find(u => u.segments.join('/') === topKey)
-        if (top) {
-          const sig = await this.#propsWithIndex(top.layer, nextIndex)
-          if (sig) top.layer = { ...top.layer, properties: [sig] }
-        }
-        treeUpdates.push(...entryUpdates)
-        landed.push(label)
-        destTaken.add(label)
-        nextIndex++
-      }
-
+      const { appends, removes, landed } = await this.#captureMoves(
+        history, sourceSegments, moved, sigByName, destTaken, destEntries.length, 'promote',
+      )
       if (landed.length === 0) return
-
-      const landedSet = new Set(landed)
-      const newSourceChildren = sourceChildren.filter(c => !landedSet.has(c))
-      const newDestChildren = [...destChildren, ...landed]
 
       EffectBus.emit('fs:changed', { segments: [...sourceSegments] })
 
       // Seed the render index for the promoted tiles at their NEW (parent)
       // location — same gap/fix as drop-into and clipboard paste.
-      try {
-        const index = readTilePropsIndex()
-        let seeded = false
-        for (const u of treeUpdates) {
-          const props = (u.layer as { properties?: unknown }).properties
-          const propSig = Array.isArray(props) && typeof props[0] === 'string' ? props[0] : undefined
-          if (!propSig || !/^[0-9a-f]{64}$/.test(propSig)) continue
-          const segs = u.segments
-          if (segs.length === 0) continue
-          const key = await cellLocationSig(segs.slice(0, -1), segs[segs.length - 1])
-          if (!key || index[key]) continue
-          index[key] = propSig
-          seeded = true
-        }
-        if (seeded) writeTilePropsIndex(index)
-      } catch (err) {
-        console.warn('[move] promote props-index seed skipped', err)
-      }
+      await this.#seedPropsIndex(history, appends, parentSegments)
 
-      // ONE atomic cascade: the current location DROPS the promoted names, the
-      // parent GAINS them, and each subtree is re-homed under the parent.
-      await committer.importTree([
-        { segments: [...sourceSegments], layer: { ...sourceParent, children: newSourceChildren } },
-        { segments: [...parentSegments], layer: { ...(destParent ?? {}), children: newDestChildren } },
-        ...treeUpdates,
-      ])
+      // TWO surgical commits, deepest FIRST (the inverse of drop-into: here
+      // the LOSING location is the child). The current location drops the
+      // promoted sigs; then the parent gains them and, in the same marker,
+      // swaps the current location's now-stale sig. Nothing is deleted.
+      const sourceNewSig = await committer.commitChildrenDeltas(sourceSegments, { removes })
+      await committer.commitChildrenDeltas(parentSegments, {
+        appends,
+        swaps: (sourceOldSig && sourceNewSig && sourceOldSig !== sourceNewSig)
+          ? [{ from: sourceOldSig, to: sourceNewSig }]
+          : [],
+      })
 
       // The promoted cells leave THIS level (they're at the parent now). Carry
       // the source segments explicitly.

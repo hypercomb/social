@@ -1609,13 +1609,36 @@ export class HistoryService {
    * whose own bag is absent (or a husk-only auto-mint) but whose parent
    * lists a rich child layer — the pasted/adopted-not-yet-visited case.
    * Session-only and NEVER persisted or written to #latestSigByLineage:
-   * the seed is a cache of the parent's truth, and it must die with the
-   * paste being undone elsewhere. commitLayer materializes a pending
-   * seed as a real marker on the first WRITE at the path (reads never
-   * touch the disk), so the bag's timeline reads empty → pasted state →
-   * first edit and undo of that edit lands on the pasted state.
+   * the seed is a CACHE OF THE PARENT'S TRUTH and has exactly the
+   * parent's lifetime. commitLayer materializes a pending seed as a real
+   * marker on the first WRITE at the path (reads never touch the disk),
+   * so the bag's timeline reads empty → pasted state → first edit and
+   * undo of that edit lands on the pasted state.
    */
   readonly #seededHeadByLineage = new Map<string, string>()
+
+  /**
+   * parent location sig → the child locations seeded FROM its children
+   * slot. A seed is only true while its parent still carries it, so any
+   * commit at the parent drops every seed derived from it: cut the child
+   * away and the ghost dies with the same marker that detached it.
+   * Without this link a seed outlives its justification — and a tile
+   * later created under the same name would inherit the detached
+   * subtree's bytes as a marker in its fresh bag (one undo resurrects
+   * it, defeating the create-reset guard in LayerCommitter).
+   */
+  readonly #seedsByParent = new Map<string, Set<string>>()
+
+  /** Drop every seed derived from this parent's children slot. */
+  readonly #dropSeedsUnder = (parentLoc: string): void => {
+    const seeded = this.#seedsByParent.get(parentLoc)
+    if (!seeded) return
+    for (const childLoc of seeded) {
+      this.#seededHeadByLineage.delete(childLoc)
+      this.#huskUnseedable.delete(childLoc)
+    }
+    this.#seedsByParent.delete(parentLoc)
+  }
 
   /** Locations checked for seed-over-husk and found unseedable, mapped to
    *  when that verdict EXPIRES. Real multi-marker history never expires
