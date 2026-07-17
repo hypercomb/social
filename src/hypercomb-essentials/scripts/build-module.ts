@@ -255,10 +255,16 @@ const isSource = (f: string): boolean =>
 // exclude test files from artifact pipeline. spec files import vitest;
 // when bundled into a namespace dep and loaded in the browser, vitest
 // throws "failed to find the runner" at the first beforeEach call,
-// crashing every consumer of that namespace.
+// crashing every consumer of that namespace. selftest files are NODE
+// harnesses (run via tsx) that execute their whole suite at module load
+// and may call process.exit — bundling the arkanoid selftest into the
+// games/arkanoid namespace dep made the bare `process` throw at import
+// time in the browser and took the whole dependency down (the 2026-07-16
+// "ReferenceError: process is not defined" dependency-loader failure).
 const isSpecFile = (f: string): boolean =>
   f.endsWith('.spec.ts') || f.endsWith('.spec.js') ||
-  f.endsWith('.test.ts') || f.endsWith('.test.js')
+  f.endsWith('.test.ts') || f.endsWith('.test.js') ||
+  f.endsWith('selftest.ts') || f.endsWith('selftest.js')
 
 // exclude key-only files from artifact pipeline
 const isKeysFile = (f: string): boolean => {

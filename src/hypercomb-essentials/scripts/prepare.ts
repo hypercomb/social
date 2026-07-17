@@ -72,10 +72,17 @@ const writeIfChanged = (filePath: string, content: string): boolean => {
 
 const isTestFile = (f: string) =>
   f.endsWith('.spec.ts') || f.endsWith('.test.ts') || f.endsWith('.spec.js') || f.endsWith('.test.js')
+  || f.endsWith('selftest.ts') || f.endsWith('selftest.js')
 // Vitest files are run in place from src — they are NEVER package source.
 // Barreling one drags it into the tsup bundle (a spec's top-level await
 // breaks the CJS pass); side-effect-importing one boots test scaffolding
 // inside the dev shell.
+// selftest.ts files are NODE harnesses (run via tsx) that execute their whole
+// suite at module load and may call process.exit — barreling one shipped the
+// arkanoid selftest inside the browser bee bundle, where the bare `process`
+// threw at import time and took the entire dependency down (the 2026-07-16
+// "ReferenceError: process is not defined" dependency-loader failure on
+// hypercomb.io, which cascaded into broken tile creation).
 const isSource = (f: string) => (f.endsWith('.ts') || f.endsWith('.js')) && !f.endsWith('.d.ts') && !isTestFile(f)
 const isBee = (f: string) =>
   f.endsWith('.drone.ts') || f.endsWith('.drone.js') ||
