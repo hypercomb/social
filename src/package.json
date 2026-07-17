@@ -58,7 +58,9 @@
     "intel:context": "tsx scripts/intel-context.ts",
     "intel:emit-leaves": "tsx scripts/intel-emit-leaves.ts",
     "intel:build-tree": "tsx scripts/intel-build-tree.ts",
-    "intel:build-hive": "tsx scripts/intel-build-hive.ts"
+    "intel:build-hive": "tsx scripts/intel-build-hive.ts",
+    "revolucion:preview": "tsx scripts/intel-build-revolucion-site.ts --preview site-preview && npx -y http-server site-preview -p 4336 -c-1 -o /revolucion.html",
+    "revolucion:deploy": "tsx scripts/intel-build-revolucion-site.ts"
   },
   "dependencies": {
     "@angular/animations": "21.2.4",
