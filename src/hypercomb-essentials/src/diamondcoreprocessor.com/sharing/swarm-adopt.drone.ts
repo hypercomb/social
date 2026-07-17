@@ -42,7 +42,7 @@ import {
 } from '../editor/tile-properties.js'
 import { forgetDecorationLabel } from '../commands/decoration-kind-index.js'
 import { extractPageRefSigs } from './decoration-closure.js'
-import { markAdoptedRoot } from './adopted-roots.js'
+import { markAdoptedRoot, isWithinAdoptedRoot } from './adopted-roots.js'
 
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
@@ -58,6 +58,15 @@ const FOLDED_KEY = 'hc:last-folded'
 // page refresh RESUMES the retry ladder instead of silently cancelling the
 // adopt: the user watched the import, reloaded, and the fold must still be owed.
 const PENDING_FOLDS_KEY = 'hc:pending-folds'
+// AUTO-SYNC receipts: adopted-root path → the publisher's branch sig we last
+// folded/synced FROM. The O(1) update detector: a peer broadcast whose
+// layerSig differs from the receipt means the publisher changed something
+// beneath that root (merkle), so the held copy re-syncs automatically —
+// "keeping a held tile current with its publisher is an INTERNAL concern"
+// (the no-sync-button rule's second half, finally wired). The held root's
+// OWN marker can never be compared against the publisher's sig directly:
+// the fold re-homes children by name, so the bytes always differ.
+const SYNC_RECEIPTS_KEY = 'hc:synced-publisher-roots'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
@@ -130,7 +139,7 @@ export class SwarmAdoptDrone extends Drone {
   public override description =
     'Adopts a peer tile by localizing its branch (ContentBroker) and folding it into the hive layer via the same update({children}) cascade as paste, on explicit user click ONLY — no snapshot bridge, no automatic installer fold.'
 
-  protected override listens: string[] = ['tile:action', 'registry:snapshot', 'features:download']
+  protected override listens: string[] = ['tile:action', 'registry:snapshot', 'features:download', 'swarm:peers-changed']
   protected override emits: string[] = ['adopt:started', 'swarm:adopt-panel:open', 'fs:changed', 'fold:receipt', 'tile:saved', 'tile:action', 'features:download:done', 'activity:log', 'features:outcome']
 
   // Latest installer registry projection — cached for the Done-gated fold.
@@ -138,6 +147,18 @@ export class SwarmAdoptDrone extends Drone {
 
   constructor() {
     super()
+
+    // ── AUTO-SYNC: adopted branches follow their publisher ─────────────
+    // A peer broadcast arriving with a layerSig that differs from the
+    // recorded receipt for an ADOPTED root means the publisher committed
+    // new content — re-sync the held copy through the SAME #syncPeerTile
+    // path the (removed) sync button used. Authored branches never
+    // auto-sync (isWithinAdoptedRoot gates); a sig is attempted at most
+    // once per session; the whole pass is debounced off the peers-changed
+    // burst. Local edits inside an adopted branch are superseded by the
+    // publisher's current version — recoverable, as ever, via the
+    // location's ordinary history.
+    this.onEffect('swarm:peers-changed', () => this.#scheduleAutoSync())
 
     this.onEffect<TileActionPayload>('tile:action', (payload) => {
       const action = String(payload?.action ?? '')
@@ -415,6 +436,9 @@ export class SwarmAdoptDrone extends Drone {
     // blocked feature reads "needs your OK" with its allow override right
     // there.
     if (res === 'committed' || res === 'exists') {
+      // Seed the auto-sync receipt: this publisher sig IS the current
+      // generation here, so re-broadcasts of the same sig never re-fold.
+      this.#recordSyncReceipt([...branch.at, branch.label], branch.layerSig)
       EffectBus.emit('features:outcome', { cell: branch.label, kind: '', ok: true, message: '' })
       EffectBus.emit('tile:action', { action: 'features', label: branch.label, segments: [...branch.at, branch.label] })
     } else if (res === 'rewound') {
@@ -563,6 +587,9 @@ export class SwarmAdoptDrone extends Drone {
     const branch = this.#resolvePeerBranch(label, pubkey)
     if (!branch) return
     const res = await this.#commitBranch(branch.layerSig, branch.at, branch.domain, 'sync')
+    if (res === 'committed' || res === 'exists') {
+      this.#recordSyncReceipt([...branch.at, branch.label], branch.layerSig)
+    }
     if (res === 'committed') {
       // The fold may have added feature decorations to this tile WITHOUT
       // firing per-decoration decorations:changed — forget the label so the
@@ -570,6 +597,74 @@ export class SwarmAdoptDrone extends Drone {
       // the `features` icon's visual-bee gate honest in-session.
       forgetDecorationLabel(branch.label)
       EffectBus.emit('tile:saved', { cell: branch.label })
+    }
+  }
+
+  // ── auto-sync: adopted branches follow their publisher ─────────────
+  // Receipts map an adopted root's PATH to the publisher branch sig last
+  // folded from. Detection is O(1) per broadcast: receipt differs (or is
+  // absent) → the publisher changed something beneath that root.
+  #loadSyncReceipts = (): Record<string, string> => {
+    try {
+      const raw = localStorage.getItem(SYNC_RECEIPTS_KEY)
+      const obj = raw ? JSON.parse(raw) : {}
+      return obj && typeof obj === 'object' ? obj as Record<string, string> : {}
+    } catch { return {} }
+  }
+  #recordSyncReceipt = (segments: readonly string[], publisherSig: string): void => {
+    try {
+      const receipts = this.#loadSyncReceipts()
+      receipts[segments.map(s => String(s ?? '').trim()).filter(Boolean).join('/')] = publisherSig
+      localStorage.setItem(SYNC_RECEIPTS_KEY, JSON.stringify(receipts))
+    } catch { /* no localStorage — auto-sync degrades to once-per-session */ }
+  }
+
+  /** Publisher sigs already attempted this session — one shot per sig, so a
+   *  fold that lands (or honestly fails) never ping-pongs on re-broadcasts. */
+  readonly #autoSyncAttempted = new Set<string>()
+  #autoSyncTimer: ReturnType<typeof setTimeout> | null = null
+
+  #scheduleAutoSync = (): void => {
+    if (this.#autoSyncTimer) clearTimeout(this.#autoSyncTimer)
+    this.#autoSyncTimer = setTimeout(() => {
+      this.#autoSyncTimer = null
+      void this.#autoSyncPass()
+    }, 4000)
+  }
+
+  #autoSyncPass = async (): Promise<void> => {
+    const ioc = this.#ioc()
+    const swarm = ioc?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
+    const lineage = ioc?.get?.(LINEAGE_KEY) as LineageLike | undefined
+    const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
+    if (!swarm?.peerTilesAtCurrentSig || !lineage || !history) return
+    // Never auto-commit while the cursor is rewound — same refusal the
+    // manual fold makes, checked here so we don't even queue attempts.
+    const cursor = ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as
+      | { state?: { rewound?: boolean } }
+      | undefined
+    if (cursor?.state?.rewound) return
+
+    const at = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+    const receipts = this.#loadSyncReceipts()
+    for (const tile of swarm.peerTilesAtCurrentSig()) {
+      const name = String(tile.name ?? '').trim()
+      const sig = String((tile as Record<string, unknown>)['layerSig'] ?? '').trim().toLowerCase()
+      if (!name || !SIG_RE.test(sig)) continue
+      if (this.#autoSyncAttempted.has(sig)) continue
+      const target = [...at, name]
+      // Only content the participant ADOPTED follows its publisher —
+      // authored branches never auto-sync.
+      if (!isWithinAdoptedRoot(target)) continue
+      if (receipts[target.join('/')] === sig) continue          // already current
+      // Held here? A tile the participant never folded stays a projection —
+      // adopting is their click, only REFRESHING is automatic.
+      const held = await resolveLayerAt(history, (ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined)?.domain, target)
+        .then(l => !!l).catch(() => false)
+      if (!held) continue
+      this.#autoSyncAttempted.add(sig)
+      EffectBus.emit('activity:log', { message: `"${name}" updated by its publisher — syncing`, icon: '●' })
+      await this.#syncPeerTile(name, String(tile.peerPubkey ?? '') || undefined)
     }
   }
 
