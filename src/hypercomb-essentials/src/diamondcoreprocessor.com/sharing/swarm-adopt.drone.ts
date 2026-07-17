@@ -27,9 +27,11 @@
 
 import { Drone, EffectBus, hypercomb, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
+  childLayerOf,
   childNamesOfStrict,
   childSigsOf,
   flattenLayerTree,
+  resolveCurrentLayer,
   resolveLayerAt,
   type PlacementHistory,
   type PlacementLayer,
@@ -41,8 +43,16 @@ import {
   writeTilePropsIndex,
 } from '../editor/tile-properties.js'
 import { forgetDecorationLabel } from '../commands/decoration-kind-index.js'
+import { WEBSITE_SLOT } from '../commands/website-slot.js'
 import { extractPageRefSigs } from './decoration-closure.js'
-import { markAdoptedRoot, isWithinAdoptedRoot } from './adopted-roots.js'
+import {
+  markAdoptedRoot,
+  unmarkAdoptedRoot,
+  isWithinAdoptedRoot,
+  markAdoptTombstone,
+  clearAdoptTombstone,
+  isAdoptTombstoned,
+} from './adopted-roots.js'
 
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
@@ -140,7 +150,7 @@ export class SwarmAdoptDrone extends Drone {
     'Adopts a peer tile by localizing its branch (ContentBroker) and folding it into the hive layer via the same update({children}) cascade as paste, on explicit user click ONLY — no snapshot bridge, no automatic installer fold.'
 
   protected override listens: string[] = ['tile:action', 'registry:snapshot', 'features:download', 'swarm:peers-changed']
-  protected override emits: string[] = ['adopt:started', 'swarm:adopt-panel:open', 'fs:changed', 'fold:receipt', 'tile:saved', 'tile:action', 'features:download:done', 'activity:log', 'features:outcome']
+  protected override emits: string[] = ['adopt:started', 'swarm:adopt-panel:open', 'fs:changed', 'fold:receipt', 'tile:saved', 'tile:action', 'features:download:done', 'activity:log', 'features:outcome', 'toast:show']
 
   // Latest installer registry projection — cached for the Done-gated fold.
   #lastSnapshot: RegistrySnapshotLike | null = null
@@ -155,10 +165,30 @@ export class SwarmAdoptDrone extends Drone {
     // path the (removed) sync button used. Authored branches never
     // auto-sync (isWithinAdoptedRoot gates); a sig is attempted at most
     // once per session; the whole pass is debounced off the peers-changed
-    // burst. Local edits inside an adopted branch are superseded by the
-    // publisher's current version — recoverable, as ever, via the
-    // location's ordinary history.
+    // burst. Publisher EDITS inside an adopted branch supersede local
+    // edits (recoverable, as ever, via the location's ordinary history) —
+    // but a local DELETION is a revocation, not an edit: it tombstones
+    // the path (below) and auto-sync never resurrects it.
     this.onEffect('swarm:peers-changed', () => this.#scheduleAutoSync())
+
+    // ── DELETE IS THE UNSUBSCRIBE ──────────────────────────────────────
+    // Removing a tile inside an adopted branch revokes the adoption for
+    // that path: tombstone it (auto-sync skips it from now on), drop
+    // adopted roots at/beneath it, and forget its sync receipts. Cascade
+    // emits (fromCascade) are a commit's diff — including our own sync
+    // folds — not participant intent, so they never tombstone. Only an
+    // explicit adopt/sync gesture on the tile clears the stone — that is
+    // the way back in.
+    this.onEffect<{ cell?: string; segments?: string[]; fromCascade?: boolean }>('cell:removed', (p) => {
+      if (p?.fromCascade) return
+      const cell = String(p?.cell ?? '').trim()
+      if (!cell || !Array.isArray(p?.segments)) return
+      const target = [...p.segments.map(s => String(s ?? '').trim()).filter(Boolean), cell]
+      if (!isWithinAdoptedRoot(target)) return
+      markAdoptTombstone(target)
+      unmarkAdoptedRoot(target)
+      this.#dropSyncReceipts(target)
+    })
 
     this.onEffect<TileActionPayload>('tile:action', (payload) => {
       const action = String(payload?.action ?? '')
@@ -220,7 +250,7 @@ export class SwarmAdoptDrone extends Drone {
       // `sync` → adopt the publisher's VISUALS straight into the hive,
       // replacing the stale local copy in place. No installer; scripts stay
       // off until the participant opts in via the `features` icon.
-      void this.#syncPeerTile(label)
+      void this.#syncPeerTile(label, undefined, { explicit: true })
     })
 
     // ── DCP installer round-trip → hive config fold (on ACCEPT) ────────
@@ -379,6 +409,9 @@ export class SwarmAdoptDrone extends Drone {
       this.#rowOutcome(label, undefined, false, `couldn't adopt "${label}" — the peer's branch is no longer offered here`)
       return
     }
+    // The explicit adopt gesture is the participant RE-SUBSCRIBING — clear
+    // any revocation on this path before the fold (delete's counterpart).
+    clearAdoptTombstone([...branch.at, branch.label])
     const codeSigs = await this.#branchCodeSigs(branch.layerSig, branch.domain)
     if (codeSigs === null) {
       // Couldn't resolve the branch to inspect it → open the installer VISIBLY.
@@ -583,9 +616,12 @@ export class SwarmAdoptDrone extends Drone {
   // single-tile invalidate + re-render chokepoint) so the publisher's
   // refreshed image/border/tags replace the old ones; sync IS the
   // authoritative "give me their current version" gesture.
-  #syncPeerTile = async (label: string, pubkey?: string): Promise<void> => {
+  #syncPeerTile = async (label: string, pubkey?: string, opts?: { explicit?: boolean }): Promise<void> => {
     const branch = this.#resolvePeerBranch(label, pubkey)
     if (!branch) return
+    // An EXPLICIT sync gesture re-subscribes a revoked path; the auto-sync
+    // caller never clears stones — it SKIPS tombstoned targets instead.
+    if (opts?.explicit) clearAdoptTombstone([...branch.at, branch.label])
     const res = await this.#commitBranch(branch.layerSig, branch.at, branch.domain, 'sync')
     if (res === 'committed' || res === 'exists') {
       this.#recordSyncReceipt([...branch.at, branch.label], branch.layerSig)
@@ -597,13 +633,55 @@ export class SwarmAdoptDrone extends Drone {
       // the `features` icon's visual-bee gate honest in-session.
       forgetDecorationLabel(branch.label)
       EffectBus.emit('tile:saved', { cell: branch.label })
+      // VISIBILITY: an upgrade that just changed what the participant sees
+      // must SAY so — a silent fold reads as "nothing happened" (or worse,
+      // "something moved under me"). A website update is named as one.
+      void this.#announceSynced([...branch.at, branch.label], branch.label)
     }
+  }
+
+  /** Toast the landed sync, naming a WEBSITE update as one. Website-ness is
+   *  read from the freshly folded layer itself: a non-empty `website` slot or
+   *  a `visual:website:page` decoration kind (hot index first, layer records
+   *  as the cold fallback — the fold may predate the next index walk). */
+  #announceSynced = async (target: readonly string[], label: string): Promise<void> => {
+    let isWebsite = false
+    try {
+      const ioc = this.#ioc()
+      const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
+      const lineage = ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined
+      const store = ioc?.get?.('@hypercomb.social/Store') as { getResource?: (sig: string) => Promise<Blob | null> } | undefined
+      const layer = (history && lineage) ? await resolveLayerAt(history, lineage.domain, target) : null
+      const slot = (layer as Record<string, unknown> | null)?.[WEBSITE_SLOT]
+      if (Array.isArray(slot) && slot.some(s => typeof s === 'string' && SIG_RE.test(s))) isWebsite = true
+      if (!isWebsite && layer && store?.getResource) {
+        const decos = Array.isArray((layer as { decorations?: unknown }).decorations)
+          ? (layer as { decorations: unknown[] }).decorations : []
+        for (const entry of decos) {
+          const sig = String(entry ?? '')
+          if (!SIG_RE.test(sig)) continue
+          try {
+            const rec = JSON.parse(await (await store.getResource(sig))!.text()) as { kind?: string }
+            if (rec?.kind === 'visual:website:page') { isWebsite = true; break }
+          } catch { /* unavailable record — skip */ }
+        }
+      }
+    } catch { /* announcement is best-effort — the sync already landed */ }
+    EffectBus.emit('toast:show', {
+      type: 'success',
+      title: isWebsite ? 'Website updated' : 'Tile updated',
+      message: isWebsite
+        ? `"${label}" changed at its source — you now have the publisher's latest website.`
+        : `"${label}" now shows its publisher's latest version.`,
+    })
   }
 
   // ── auto-sync: adopted branches follow their publisher ─────────────
   // Receipts map an adopted root's PATH to the publisher branch sig last
-  // folded from. Detection is O(1) per broadcast: receipt differs (or is
-  // absent) → the publisher changed something beneath that root.
+  // folded from. Detection is O(1) per broadcast: an EXISTING receipt
+  // that differs → the publisher changed something beneath that root. An
+  // ABSENT receipt baselines instead of folding — a pre-receipt adoption
+  // must never mass-refold the first time this pass sees it.
   #loadSyncReceipts = (): Record<string, string> => {
     try {
       const raw = localStorage.getItem(SYNC_RECEIPTS_KEY)
@@ -617,6 +695,20 @@ export class SwarmAdoptDrone extends Drone {
       receipts[segments.map(s => String(s ?? '').trim()).filter(Boolean).join('/')] = publisherSig
       localStorage.setItem(SYNC_RECEIPTS_KEY, JSON.stringify(receipts))
     } catch { /* no localStorage — auto-sync degrades to once-per-session */ }
+  }
+  /** Forget receipts at/beneath `segments` — delete-side hygiene so a stale
+   *  receipt can't shadow the fresh baseline of a future explicit re-adopt. */
+  #dropSyncReceipts = (segments: readonly string[]): void => {
+    try {
+      const key = segments.map(s => String(s ?? '').trim()).filter(Boolean).join('/')
+      if (!key) return
+      const receipts = this.#loadSyncReceipts()
+      let changed = false
+      for (const k of Object.keys(receipts)) {
+        if (k === key || k.startsWith(key + '/')) { delete receipts[k]; changed = true }
+      }
+      if (changed) localStorage.setItem(SYNC_RECEIPTS_KEY, JSON.stringify(receipts))
+    } catch { /* no localStorage — nothing recorded to forget */ }
   }
 
   /** Publisher sigs already attempted this session — one shot per sig, so a
@@ -641,12 +733,21 @@ export class SwarmAdoptDrone extends Drone {
     // Never auto-commit while the cursor is rewound — same refusal the
     // manual fold makes, checked here so we don't even queue attempts.
     const cursor = ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as
-      | { state?: { rewound?: boolean } }
+      | { state?: { rewound?: boolean }; currentLayerSig?: string }
       | undefined
     if (cursor?.state?.rewound) return
 
     const at = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
     const receipts = this.#loadSyncReceipts()
+    // Resolve the CURRENT parent once — membership in ITS child list is the
+    // "held here" test. Resolving the tile's OWN bag is wrong for this:
+    // history is append-only, so a DELETED tile still resolves from its old
+    // markers and would read as held — the resurrection loop that kept
+    // folding deleted tiles back in.
+    const domain = (ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined)?.domain
+    const parent = await resolveCurrentLayer(history, domain, at, cursor?.currentLayerSig)
+      .catch(() => null)
+    if (!parent) return  // no local layer here — projections only, nothing held
     for (const tile of swarm.peerTilesAtCurrentSig()) {
       const name = String(tile.name ?? '').trim()
       const sig = String((tile as Record<string, unknown>)['layerSig'] ?? '').trim().toLowerCase()
@@ -656,12 +757,21 @@ export class SwarmAdoptDrone extends Drone {
       // Only content the participant ADOPTED follows its publisher —
       // authored branches never auto-sync.
       if (!isWithinAdoptedRoot(target)) continue
-      if (receipts[target.join('/')] === sig) continue          // already current
-      // Held here? A tile the participant never folded stays a projection —
-      // adopting is their click, only REFRESHING is automatic.
-      const held = await resolveLayerAt(history, (ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined)?.domain, target)
-        .then(l => !!l).catch(() => false)
+      // Deleted here stays deleted — the tombstone is the participant's
+      // revocation; only an explicit adopt/sync click clears it.
+      if (isAdoptTombstoned(target)) continue
+      const receipt = receipts[target.join('/')]
+      if (receipt === sig) continue                    // already current
+      // Held here? Present in the parent's CURRENT child list — a tile the
+      // participant never folded (or removed) stays a projection; adopting
+      // is their click, only REFRESHING is automatic.
+      const held = await childLayerOf(history, parent, name).then(c => !!c).catch(() => false)
       if (!held) continue
+      // No receipt = adopted before receipts existed. BASELINE it: record
+      // the publisher's current sig WITHOUT folding, so this feature's
+      // first pass over an old install can never stomp local state en
+      // masse. Changes the publisher makes from here on sync normally.
+      if (!receipt) { this.#recordSyncReceipt(target, sig); continue }
       this.#autoSyncAttempted.add(sig)
       EffectBus.emit('activity:log', { message: `"${name}" updated by its publisher — syncing`, icon: '●' })
       await this.#syncPeerTile(name, String(tile.peerPubkey ?? '') || undefined)
