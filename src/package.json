@@ -37,6 +37,7 @@
     "publish:essentials": "tsx scripts/publish.ts --essentials-only",
     "build:module": "npm --prefix hypercomb-essentials run build:module",
     "deploy:essentials": "npm --prefix hypercomb-essentials run build:module:deploy",
+    "publish:content": "tsx scripts/publish-content.ts",
     "mirror:content": "pwsh hypercomb-relay/mirror-content-to-azure.ps1",
     "mirror:content:setup": "pwsh hypercomb-relay/mirror-content-to-azure.ps1 -SetupCors",
     "runtime:essentials": "npm run build:module && npm --prefix hypercomb-essentials run copy-to-dcp",
