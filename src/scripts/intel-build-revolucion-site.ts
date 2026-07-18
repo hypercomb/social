@@ -882,7 +882,7 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     <section class="hero" style="padding:9vh 0 2vh">
       <p class="kicker">the flavor wheel &middot; an interactive tasting instrument</p>
       <h1>Spin. Tap. <i>Taste.</i></h1>
-      <p class="lede">Drag to spin the wheel. Tap a family and it turns into the scope notch on the
+      <p class="lede">Drag or scroll to spin the wheel. Tap a family and it turns into the scope notch on the
       right; tap the flavors you taste and the panel answers with cigars, pairings, and moods.</p>
     </section>
     <section class="tool">
@@ -978,6 +978,8 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     function absOf(localDeg){ return ((localDeg + state.rot) % 360 + 360) % 360; }
     function isSel(lb){ return state.sel.indexOf(lb) >= 0; }
     var dragMoved = false;
+    var lastNotch = null;   // flavor label last rendered at the notch
+    var wheelAcc = 0, lastWheelT = 0; // trackpad scroll accumulator
 
     // ---- the selector station: what sits at the notch right now ----------
     function notchAt(){
@@ -1029,20 +1031,49 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
         state.rot = from + delta * e;
         var g = host.querySelector('#rot');
         if (g) g.setAttribute('transform', 'rotate(' + state.rot + ' ' + C + ' ' + C + ')');
-        updateStation();
+        liveTick();
         if (k < 1) requestAnimationFrame(step); else fin();
       }
       requestAnimationFrame(step);
       setTimeout(fin, dur + 200);
     }
+    // one scroll tick = the adjacent flavor dead-center in the notch — the
+    // whole selection presentation (station, scope list, raised slice)
+    // updates on THIS tick, never deferred to the end of the gesture
+    function stepNotch(dir){
+      var t = notchAt(); if (!t) return;
+      var mids = [];
+      SEGS.forEach(function(sg){
+        var n = sg.fm.flavors.length, fw = (sg.a1 - sg.a0) / n;
+        sg.fm.flavors.forEach(function(lb, j){ mids.push(sg.a0 + (j + .5) * fw); });
+      });
+      var idx = 0, bd = 1e9;
+      mids.forEach(function(m, i){ var dd = Math.abs(m - t.mid); if (dd < bd){ bd = dd; idx = i; } });
+      // dir +1 spins clockwise: the slice above the notch drops into it
+      var next = mids[((idx - dir) % mids.length + mids.length) % mids.length];
+      var delta = ((SCOPE_AT - next - state.rot) % 360 + 540) % 360 - 180;
+      state.rot += delta;
+      animId++; // cancel any in-flight snap/spin animation
+      drawRot(); updateStation(); updateScope();
+    }
+    // live tracking during a spin: station always; wheel visuals + scope list
+    // whenever a new flavor crosses the notch
+    function liveTick(){
+      var t = notchAt();
+      if ((t ? t.lb : null) !== lastNotch){ drawRot(); updateScope(); }
+      updateStation();
+    }
 
     // ---- wheel ------------------------------------------------------------
-    function drawWheel(){
-      host.innerHTML = '';
-      var svg = el('svg', { viewBox: '0 0 780 780' }, host);
-      el('circle', { cx: C, cy: C, r: R_OUT + R_RAISE + 5, fill: 'none', stroke: 'rgba(200,151,90,.28)', 'stroke-width': 1 }, svg);
-      var rot = el('g', { id: 'rot', transform: 'rotate(' + state.rot + ' ' + C + ' ' + C + ')' }, svg);
+    // rebuild ONLY the spinning group, in place — the <svg> (with its pointer
+    // capture and listeners) survives, so this is safe mid-drag and mid-scroll
+    function drawRot(){
+      var rot = host.querySelector('#rot');
+      if (!rot) return;
+      while (rot.firstChild) rot.removeChild(rot.firstChild);
+      rot.setAttribute('transform', 'rotate(' + state.rot + ' ' + C + ' ' + C + ')');
       var active = notchAt(); // the family + flavor sitting at the notch
+      lastNotch = active ? active.lb : null;
 
       SEGS.forEach(function(sg, si){
         var fm = sg.fm, focused = !!active && active.fm.label === fm.label;
@@ -1119,11 +1150,19 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
           t.textContent = lb;
         });
       });
+    }
+
+    function drawWheel(){
+      host.innerHTML = '';
+      var svg = el('svg', { viewBox: '0 0 780 780' }, host);
+      el('circle', { cx: C, cy: C, r: R_OUT + R_RAISE + 5, fill: 'none', stroke: 'rgba(200,151,90,.28)', 'stroke-width': 1 }, svg);
+      el('g', { id: 'rot' }, svg);
+      drawRot();
 
       // fixed hub (does not spin)
       el('circle', { cx: C, cy: C, r: R_HUB, fill: '#14101a', stroke: 'rgba(200,151,90,.4)', 'stroke-width': 1, 'class': 'hub' }, svg);
       [{ t: 'REVOLUCI\\u00d3N', y: C - 22, s: 13, c: '#c8975a', ls: 5 },
-       { t: 'drag to spin', y: C + 6, s: 16, c: '#f0e6d6' },
+       { t: 'drag or scroll to spin', y: C + 6, s: 16, c: '#f0e6d6' },
        { t: 'the notch picks the flavor', y: C + 30, s: 13, c: '#8d7f6f' }].forEach(function(ln){
         var t = el('text', { x: C, y: ln.y, 'text-anchor': 'middle', 'font-size': ln.s, fill: ln.c, 'letter-spacing': ln.ls || 0 }, svg);
         t.setAttribute('font-family', 'Georgia,serif'); t.style.pointerEvents = 'none'; t.textContent = ln.t;
@@ -1169,7 +1208,7 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
         state.rot = startRot + d;
         var g = svg.querySelector('#rot');
         if (g) g.setAttribute('transform', 'rotate(' + state.rot + ' ' + C + ' ' + C + ')');
-        updateStation(); // the station tunes live as flavors pass the notch
+        liveTick(); // station + scope list + raised slice track EVERY crossing
       });
       function endDrag(){
         if (!dragging) return;
@@ -1179,6 +1218,20 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
       }
       svg.addEventListener('pointerup', endDrag);
       svg.addEventListener('pointercancel', endDrag);
+
+      // ---- scroll to spin: one flavor per wheel tick, selection lands NOW --
+      svg.addEventListener('wheel', function(ev){
+        ev.preventDefault(); // the wheel eats the scroll — the page stays put
+        var d = ev.deltaY;
+        if (ev.deltaMode === 1) d *= 33; else if (ev.deltaMode === 2) d *= 100;
+        if (ev.timeStamp - lastWheelT > 250) wheelAcc = 0;
+        lastWheelT = ev.timeStamp;
+        // a discrete mouse notch steps exactly one flavor per tick;
+        // trackpads accumulate their small deltas up to the same step
+        if (Math.abs(d) >= 90){ stepNotch(d > 0 ? 1 : -1); wheelAcc = 0; return; }
+        wheelAcc += d;
+        if (Math.abs(wheelAcc) >= 90){ stepNotch(wheelAcc > 0 ? 1 : -1); wheelAcc = 0; }
+      }, { passive: false });
     }
 
     // spin the tapped family into the fixed scope notch
@@ -1205,7 +1258,7 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
         state.rot = from + delta * e;
         var g = host.querySelector('#rot');
         if (g) g.setAttribute('transform', 'rotate(' + state.rot + ' ' + C + ' ' + C + ')');
-        updateStation();
+        liveTick();
         if (k < 1) requestAnimationFrame(step); else finish();
       }
       requestAnimationFrame(step);
@@ -1227,6 +1280,27 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
       return uni ? inter / uni : 0;
     }
     function row(html, cls){ var d = document.createElement('div'); d.className = 'row' + (cls ? ' ' + cls : ''); d.innerHTML = html; return d; }
+    // the scope section FOLLOWS the notch — whatever family is dialed in
+    // is the active section, no separate click-state to manage
+    function updateScope(){
+      var act = notchAt();
+      var ftitle = document.getElementById('focusTitle');
+      var flist = document.getElementById('focusList');
+      if (!ftitle || !flist) return;
+      flist.innerHTML = '';
+      if (!act) {
+        ftitle.textContent = 'In the scope';
+        flist.innerHTML = '<p class="empty">Spin a family into the notch.</p>';
+      } else {
+        ftitle.textContent = 'In the scope \\u2014 ' + act.fm.label;
+        act.fm.flavors.forEach(function(lb){
+          var on = isSel(lb);
+          var r = row('<span class="mark">' + (on ? '\\u25a0' : '\\u25a1') + '</span>' + lb, 'pick' + (on ? ' on' : ''));
+          r.addEventListener('click', function(){ toggle(lb); });
+          flist.appendChild(r);
+        });
+      }
+    }
     function render(){
       drawWheel();
       updateStation();
@@ -1243,24 +1317,7 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
       });
       document.getElementById('clear').hidden = !state.sel.length;
 
-      // the scope section FOLLOWS the notch — whatever family is dialed in
-      // is the active section, no separate click-state to manage
-      var act = notchAt();
-      var ftitle = document.getElementById('focusTitle');
-      var flist = document.getElementById('focusList');
-      flist.innerHTML = '';
-      if (!act) {
-        ftitle.textContent = 'In the scope';
-        flist.innerHTML = '<p class="empty">Spin a family into the notch.</p>';
-      } else {
-        ftitle.textContent = 'In the scope \\u2014 ' + act.fm.label;
-        act.fm.flavors.forEach(function(lb){
-          var on = isSel(lb);
-          var r = row('<span class="mark">' + (on ? '\\u25a0' : '\\u25a1') + '</span>' + lb, 'pick' + (on ? ' on' : ''));
-          r.addEventListener('click', function(){ toggle(lb); });
-          flist.appendChild(r);
-        });
-      }
+      updateScope();
 
       var seg = document.getElementById('seg');
       seg.innerHTML = '';

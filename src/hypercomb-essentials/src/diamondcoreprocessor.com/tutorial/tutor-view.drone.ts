@@ -16,10 +16,10 @@
 // gracefully.)
 
 import { Drone } from '@hypercomb/core'
-import { TUTOR_SLOT } from '../../commands/tutor-slot.js'
-import { isFeatureHidden } from '../../sharing/feature-hidden.js'
-import { TutorShell } from '../../games/tutor/shell.js'
-import type { StudyItem } from '../../games/tutor/deck.types.js'
+import { TUTOR_SLOT } from './tutor-slot.js'
+import { isFeatureHidden } from '../sharing/feature-hidden.js'
+import { TutorShell } from '../games/tutor/shell.js'
+import type { StudyItem } from '../games/tutor/deck.types.js'
 
 const TUTOR_VIEW = 'tutor'
 /** The tutor behaviour's feature identity (registry decorationKind) — the key

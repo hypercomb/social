@@ -23,8 +23,8 @@
 // `visual:tutor:deck` decoration mirrors it so the ViewBee toggle appears.
 
 import { QueenBee, EffectBus } from '@hypercomb/core'
-import type { VisualBeeRegistry } from './visual-bee-registry.js'
-import { writeDecoration, listDecorations, removeDecoration } from './decoration-manifest.js'
+import type { VisualBeeRegistry } from '../commands/visual-bee-registry.js'
+import { writeDecoration, listDecorations, removeDecoration } from '../commands/decoration-manifest.js'
 // Anchor the tutor slot registration against tree-shaking (also imported by
 // the render drone; registration is idempotent).
 import './tutor-slot.js'
