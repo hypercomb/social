@@ -21,9 +21,11 @@ import { Worker, get, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import {
   PENDING_INVITE_KEY,
   SWARM_INVITE_KIND,
+  validateInviteBundle,
   type InviteDecorationPayload,
 } from './meeting-invite.js'
-import { loadInviteBundle, joinMeetingPlace } from './meeting-invite.join.js'
+import { loadBundleJson, loadInviteBundle, joinMeetingPlace } from './meeting-invite.join.js'
+import { validateHiveLinkBundle } from './hive-link.js'
 import { listDecorations } from '../commands/decoration-manifest.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
@@ -48,7 +50,7 @@ export class MeetingInviteWorker extends Worker {
     'Joins a meeting place from a /<sig> invite link (on boot) or from a swarm:invite tile junction (on click): resolves the bundle by signature, confirms, and auth-switches the participant in — restoring prior credentials on cancel.'
   public override effects = ['network'] as const
   protected override listens = ['tile:action']
-  protected override emits = ['mesh:join', 'mesh:room', 'mesh:secret', 'toast:show']
+  protected override emits = ['mesh:join', 'mesh:room', 'mesh:secret', 'toast:show', 'hive:link']
 
   // Synchronous one-shot latch — Worker.pulse sets its own #acted only after
   // act() resolves, so guard re-entrancy ourselves (act awaits nothing before
@@ -90,14 +92,24 @@ export class MeetingInviteWorker extends Worker {
     try { sessionStorage.removeItem(PENDING_INVITE_KEY) } catch { /* ignore */ }
   }
 
+  /** A /<sig> boot link resolves to ONE bundle, dispatched by kind: a
+   *  meeting-invite joins (auth-switch), a hive-link hands off to the
+   *  static-hive preview flow (hive-visit.drone). Unknown/unreachable
+   *  stays the honest invalid-link toast. */
   #joinFromLink = async (sig: string): Promise<void> => {
-    const bundle = await loadInviteBundle(sig)
-    if (!bundle) {
-      const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
-      this.emitEffect('toast:show', { type: 'error', title: i18n?.t('invite.link.title') ?? 'Invite link', message: i18n?.t('invite.error.invalid') ?? 'This invite link is invalid or could not be reached.' })
+    const raw = await loadBundleJson(sig)
+    const invite = validateInviteBundle(raw)
+    if (invite) {
+      await joinMeetingPlace(invite)
       return
     }
-    await joinMeetingPlace(bundle)
+    const hiveLink = validateHiveLinkBundle(raw)
+    if (hiveLink) {
+      this.emitEffect('hive:link', hiveLink)
+      return
+    }
+    const i18n = get(I18N_IOC_KEY) as I18nProvider | undefined
+    this.emitEffect('toast:show', { type: 'error', title: i18n?.t('invite.link.title') ?? 'Invite link', message: i18n?.t('invite.error.invalid') ?? 'This invite link is invalid or could not be reached.' })
   }
 
   #joinFromTile = async (label: string): Promise<void> => {

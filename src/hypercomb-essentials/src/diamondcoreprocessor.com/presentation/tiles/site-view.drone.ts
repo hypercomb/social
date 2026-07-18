@@ -209,7 +209,24 @@ export class SiteViewDrone extends Drone {
     if (vm?.mode === 'website') {
       if (this.#siteEntrySegments === null) this.#captureSiteEntry()
     } else {
+      const entry = this.#siteEntrySegments
       this.#siteEntrySegments = null
+      // Exiting the site back to the HIVE lands on the layer the website was
+      // OPENED from (the site root captured at entry), not whatever page the
+      // reader browsed to — reading a site is not tile navigation. Only for
+      // exits to hexagons: a view toggle onto another surface (slides/tutor)
+      // stays on the current cell, and the launcher's dismiss-then-enter
+      // navigates itself right after this listener (goRaw here is transient).
+      if (entry && vm?.mode === 'hexagons') {
+        const lineage = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
+        const current = [...(lineage?.explorerSegments?.() ?? [])]
+        const atEntry = current.length === entry.length && entry.every((seg, i) => current[i] === seg)
+        if (!atEntry) {
+          (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
+            ?.get<{ goRaw?: (segments: readonly string[]) => void }>('@hypercomb.social/Navigation')
+            ?.goRaw?.(entry)
+        }
+      }
     }
     void this.#reconcile()
   }
@@ -703,7 +720,7 @@ export class SiteViewDrone extends Drone {
       btn.id = 'hc-site-exit'
       btn.type = 'button'
       btn.style.cssText = EXIT_OVERLAY_CSS
-      btn.addEventListener('click', () => { this.#exitToWebsites() })
+      btn.addEventListener('click', () => { this.#exitToHive() })
       // Hover affordance without a stylesheet — cheap inline listeners.
       btn.addEventListener('pointerenter', () => { btn.style.filter = 'brightness(1.12)' })
       btn.addEventListener('pointerleave', () => { btn.style.filter = 'none' })
@@ -717,30 +734,18 @@ export class SiteViewDrone extends Drone {
     const btn = this.#exitOverlay
     if (!btn) return
     btn.textContent = this.#siteIcon || 'grid_view'
-    // The button now steps back to the websites directory, not straight to the
-    // tiles — the label says so (the site's own glyph still tints the button).
-    const label = 'Back to websites'
+    const label = 'Exit website'
     btn.title = label
     btn.setAttribute('aria-label', label)
   }
 
-  /** Exit the page onto the WEBSITES DIRECTORY, not straight to the tiles.
-   *  Leaving a site steps back to the `/websites` menu it was launched from;
-   *  that menu's own close then returns to the hive tiles — a two-step out.
-   *  Routed through the shared GroupLauncher (resolved via IoC, never imported)
-   *  which flips ViewMode back to the hive AND navigates to /websites. Falls
-   *  back to a plain flip to the hive when no sites are discovered yet, so the
-   *  exit is never a dead button. */
-  #exitToWebsites(): void {
+  /** Exit the website straight back to the HIVE TILES — no intermediate
+   *  websites-directory step. Flipping ViewMode is the whole exit: the
+   *  mode-change handler restores the lineage to the layer the site was
+   *  opened from (`#siteEntrySegments`), so the reader lands on the root
+   *  hexagon where the website starts, wherever they browsed inside it. */
+  #exitToHive(): void {
     const ioc = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
-    const launcher = ioc?.get<{
-      show(id: string): void
-      get(id: string): { members(): unknown[] } | undefined
-    }>('@hypercomb.social/GroupLauncher')
-    if (launcher && (launcher.get('websites')?.members().length ?? 0) > 0) {
-      launcher.show('websites')
-      return
-    }
     ioc?.get<{ setMode(m: string): void }>('@hypercomb.social/ViewMode')?.setMode('hexagons')
   }
 

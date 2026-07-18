@@ -244,8 +244,8 @@ export class SwarmAdoptDrone extends Drone {
       // and opens the right-docked panel (read-only, stays in the hive). The
       // installer hand-off survives only as the panel's BENIGN staging: a
       // wanted feature's branch sig is pre-ticked when the installer is opened
-      // later (portal-overlay #stage handoff). `#adoptPeerTile` is kept — it
-      // still backs the registry-snapshot fold and any future installer route.
+      // later (portal-overlay #stage handoff). The visible-installer route
+      // lives in adoptResolvedBranch (the couldn't-inspect fallback).
 
       // `sync` → adopt the publisher's VISUALS straight into the hive,
       // replacing the stale local copy in place. No installer; scripts stay
@@ -351,21 +351,6 @@ export class SwarmAdoptDrone extends Drone {
     return { layerSig, at, domain: ownerDomain || undefined, label }
   }
 
-  // ── VISIBLE installer route → SEND THE SIG TO THE INSTALLER ──
-  // Hands the publisher's branch signature to the DCP installer (portal-overlay
-  // opens DCP with #branch=<sig>&at=…); the install happens THERE. Now reached
-  // only when the inline path couldn't RESOLVE the branch to inspect it — so we
-  // won't inline-fold it blind, nor falsely claim it "brings code." Content
-  // folds inline; a resolved code-bearing feature installs HEADLESS behind a
-  // consent prompt — both via #adoptInline.
-  #adoptPeerTile = async (label: string, pubkey?: string): Promise<void> => {
-    const branch = this.#resolvePeerBranch(label, pubkey)
-    if (!branch) return
-    window.dispatchEvent(new CustomEvent('portal:open', {
-      detail: { target: 'dcp', branchSig: branch.layerSig, at: branch.at, domain: branch.domain, label: branch.label },
-    }))
-  }
-
   /** Distinct publisher pubkeys currently offering `label` (current-location
    *  cache + subscribed channel). One → unambiguous, adopt inline; two+ → the
    *  same name from different peers, so the choose-panel disambiguates. */
@@ -409,16 +394,29 @@ export class SwarmAdoptDrone extends Drone {
       this.#rowOutcome(label, undefined, false, `couldn't adopt "${label}" — the peer's branch is no longer offered here`)
       return
     }
+    await this.adoptResolvedBranch(branch)
+  }
+
+  /** Adopt an ALREADY-RESOLVED branch — the shared tail of every explicit
+   *  adopt gesture. Mesh adopt resolves via #resolvePeerBranch (live peer
+   *  cache); the static hive-visit drone resolves via a publisher-signed
+   *  hive index. Inspection, code consent, the fold, receipts, and the
+   *  Beehaviors landing are identical either way — ADOPT IS ADOPT. */
+  public adoptResolvedBranch = async (
+    branch: { layerSig: string; at: string[]; domain?: string; label: string },
+  ): Promise<'committed' | 'exists' | 'rewound' | 'unavailable' | 'code-routed' | 'declined' | 'uninspectable'> => {
     // The explicit adopt gesture is the participant RE-SUBSCRIBING — clear
     // any revocation on this path before the fold (delete's counterpart).
     clearAdoptTombstone([...branch.at, branch.label])
     const codeSigs = await this.#branchCodeSigs(branch.layerSig, branch.domain)
     if (codeSigs === null) {
-      // Couldn't resolve the branch to inspect it → open the installer VISIBLY.
-      // Never inline-fold content we couldn't verify, and don't falsely claim
-      // "brings code" for something we can't see.
-      await this.#adoptPeerTile(label, pubkey)
-      return
+      // Couldn't resolve the branch to inspect it → open the installer VISIBLY
+      // with the branch we already hold. Never inline-fold content we couldn't
+      // verify, and don't falsely claim "brings code" for something we can't see.
+      window.dispatchEvent(new CustomEvent('portal:open', {
+        detail: { target: 'dcp', branchSig: branch.layerSig, at: branch.at, domain: branch.domain, label: branch.label },
+      }))
+      return 'uninspectable'
     }
     if (codeSigs.length > 0) {
       // Declares CODE → ask consent, then install via a HEADLESS (invisible) DCP,
@@ -435,7 +433,7 @@ export class SwarmAdoptDrone extends Drone {
         // The participant said no — settle the panel's busy switch NOW (no
         // silent 8s leash) with the honest landing, not a wedged toggle.
         EffectBus.emit('features:outcome', { cell: branch.label, kind: '', ok: false, message: `code adopt of "${branch.label}" declined — nothing was folded` })
-        return
+        return 'declined'
       }
       window.dispatchEvent(new CustomEvent('portal:open', {
         detail: {
@@ -449,7 +447,7 @@ export class SwarmAdoptDrone extends Drone {
       // the install lands). segments = the TARGET, so the refreshed group
       // reads the tile where it will actually land.
       EffectBus.emit('tile:action', { action: 'features', label: branch.label, segments: [...branch.at, branch.label] })
-      return
+      return 'code-routed'
     }
     // Content-only → immediate in-place fold; the render-time gate is the trust
     // surface (a foreign page is reviewed before it mounts).
@@ -484,6 +482,7 @@ export class SwarmAdoptDrone extends Drone {
       // console-only: the user clicked and must see WHY nothing appeared.
       this.#rowOutcome(branch.label, undefined, false, `couldn't adopt "${branch.label}" — its content isn't reachable right now, try again shortly`)
     }
+    return res
   }
 
   // ── features:download — mirror a feature's bytes locally (panel action) ──
@@ -622,6 +621,17 @@ export class SwarmAdoptDrone extends Drone {
     // An EXPLICIT sync gesture re-subscribes a revoked path; the auto-sync
     // caller never clears stones — it SKIPS tombstoned targets instead.
     if (opts?.explicit) clearAdoptTombstone([...branch.at, branch.label])
+    await this.syncResolvedBranch(branch)
+  }
+
+  /** Sync an ALREADY-RESOLVED branch — the shared tail of #syncPeerTile,
+   *  also driven by the static-hive boot pass (hive-visit.drone.ts), where
+   *  the publisher's current head comes from a signed hive index instead of
+   *  a live broadcast. Auto-sync semantics: never clears tombstones (the
+   *  caller skips revoked targets), announces a landed update visibly. */
+  public syncResolvedBranch = async (
+    branch: { layerSig: string; at: string[]; domain?: string; label: string },
+  ): Promise<'committed' | 'exists' | 'unavailable' | 'rewound'> => {
     const res = await this.#commitBranch(branch.layerSig, branch.at, branch.domain, 'sync')
     if (res === 'committed' || res === 'exists') {
       this.#recordSyncReceipt([...branch.at, branch.label], branch.layerSig)
@@ -638,6 +648,7 @@ export class SwarmAdoptDrone extends Drone {
       // "something moved under me"). A website update is named as one.
       void this.#announceSynced([...branch.at, branch.label], branch.label)
     }
+    return res
   }
 
   /** Toast the landed sync, naming a WEBSITE update as one. Website-ness is

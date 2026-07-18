@@ -34,6 +34,14 @@ bucket_name = "hypercomb-content"
 binding = "GRANTS"
 id = "11e24dcda743413ab24397e936671641"
 
+# KV hive pointers: HIVES[pubkey] → signed kind-30564 index event mapping
+# the publisher's public lineage keys to their current head sigs.
+# Create and paste the id before deploying:
+#   wrangler kv namespace create HIVES
+[[kv_namespaces]]
+binding = "HIVES"
+id = "REPLACE_WITH_HIVES_NAMESPACE_ID"
+
 [vars]
 AUTO_GRANT = "1"                    # '1' mints a grant on first valid upload; '0' closes the door
 DEFAULT_QUOTA_BYTES = "104857600"   # 100 MB per auto-granted pubkey

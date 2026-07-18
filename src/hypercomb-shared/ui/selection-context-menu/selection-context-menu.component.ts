@@ -54,6 +54,9 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   #hasDocuments = signal(false)
   /** True when at least one selected tile carries a feature — gates the button. */
   #hasFeatures = signal(false)
+  /** World mode (sharing preview) is active — gates the public/private buttons
+   *  so bulk sharing controls only appear while you're choosing what to share. */
+  #worldMode = signal(false)
   #posX = signal(0)
   #posY = signal(0)
   #dragging = signal(false)
@@ -86,6 +89,7 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   readonly clipboardCount = this.#clipboardCount.asReadonly()
   readonly hasDocuments = this.#hasDocuments.asReadonly()
   readonly hasFeatures = this.#hasFeatures.asReadonly()
+  readonly worldMode = this.#worldMode.asReadonly()
   readonly posX = this.#posX.asReadonly()
   readonly posY = this.#posY.asReadonly()
   readonly dragging = this.#dragging.asReadonly()
@@ -105,6 +109,7 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   #clipboardUnsub: (() => void) | null = null
   #hasDocumentsUnsub: (() => void) | null = null
   #hasFeaturesUnsub: (() => void) | null = null
+  #worldModeUnsub: (() => void) | null = null
   #screensaverUnsub: (() => void) | null = null
 
   // ── lifecycle ───────────────────────────────────────────
@@ -148,6 +153,12 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
       this.#screensaverActive.set(payload?.active === true)
     })
 
+    // World mode (sharing preview) — last-value replay keeps this correct on
+    // late mount. The two bulk public/private buttons only surface while it's on.
+    this.#worldModeUnsub = EffectBus.on<{ active?: boolean }>('world:mode', (payload) => {
+      this.#worldMode.set(payload?.active === true)
+    })
+
     window.addEventListener('resize', this.#onResize)
   }
 
@@ -158,6 +169,7 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
     this.#clipboardUnsub?.()
     this.#hasDocumentsUnsub?.()
     this.#hasFeaturesUnsub?.()
+    this.#worldModeUnsub?.()
     this.#screensaverUnsub?.()
     window.removeEventListener('resize', this.#onResize)
     window.removeEventListener('pointermove', this.#onDragMove)
@@ -209,6 +221,18 @@ export class SelectionContextMenuComponent implements OnInit, OnDestroy {
   /** Promote the whole selection UP one level into the parent location. */
   readonly promoteToParent = (): void => {
     EffectBus.emit('controls:action', { action: 'promote-to-parent' })
+  }
+
+  /** Make the whole selection public/private — this tile only. TileActionsDrone
+   *  applies one target state across the selection (all public unless every one
+   *  already is, then all private). */
+  readonly makePublic = (): void => {
+    EffectBus.emit('controls:action', { action: 'make-public' })
+  }
+
+  /** Make the whole selection public/private — each tile AND its sub-tree. */
+  readonly makeBranchPublic = (): void => {
+    EffectBus.emit('controls:action', { action: 'make-branch-public' })
   }
 
   // ── hidden-state check ──────────────────────────────────

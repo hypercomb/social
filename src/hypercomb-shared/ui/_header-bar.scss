@@ -138,6 +138,24 @@
     color: var(--shield-color, rgba(245, 245, 245, 0.45));
   }
 
+  // ── prep / privacy review (world view on, swarm NOT started) ──
+  // Middle state of the join flow: the canvas is dimmed for review and the
+  // glyph is 'login'. Takes the steel accent (same as an active world toggle)
+  // so it reads as "armed, one step from entering" rather than solo pink.
+  // Declared after .solo-mode so it wins — both classes are on in prep.
+  &.prep-mode {
+    color: rgba(126, 182, 214, 0.95);
+
+    &:hover {
+      color: rgba(126, 182, 214, 1);
+      background: rgba(126, 182, 214, 0.08);
+    }
+
+    &:active {
+      background: rgba(126, 182, 214, 0.12);
+    }
+  }
+
   // ── world view (pick what to share) ──
   // Sits to the LEFT of the solo/swarm icon and only renders in swarm mode.
   // Muted steel by default; lifts to the command-shell accent when active so

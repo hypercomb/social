@@ -36,7 +36,9 @@ import { schnorr } from '@noble/curves/secp256k1'
 const SIG_RE = /^[0-9a-f]{64}$/
 const NIP98_KIND = 27235      // NIP-98 HTTP auth (hypercomb host-sync PUTs)
 const BLOSSOM_KIND = 24242    // Blossom BUD-02 upload auth
+const HIVE_KIND = 30564       // hive index — publisher-signed {lineageKey → head sig} manifest
 const AUTH_SKEW_SECS = 60     // freshness window — bounds replay of a captured token
+const HIVE_MAX_BYTES = 65_536 // a hive index is a small map, never a byte store
 
 // ── responses ────────────────────────────────────────────────────────────────
 
@@ -361,6 +363,84 @@ async function getGrant(request, env) {
   return json(200, body, { 'Cache-Control': 'no-store' })
 }
 
+// ── hive pointers (path → head, one signed index per publisher) ──────────────
+//
+// GET/PUT /hive/<pubkey> — the ONE mutable object per publisher on an
+// otherwise immutable heap: a schnorr-signed nostr event (kind 30564) whose
+// content is {"v":1,"roots":{"<lineageKey>":"<headSig>", …}} mapping the
+// publisher's PUBLIC lineage keys to their current sealed head sigs. This is
+// the pointer that makes a statically-hosted hive live: bytes are already
+// here under their sigs; the index says which sig is "now".
+//
+// Trust model mirrors the byte side: the event is signed by the pubkey in
+// the path, so a client that pins the pubkey (it rides in the hive-link
+// bundle) verifies the index END-TO-END — this worker, or any mirror
+// serving the same JSON from a static file, can withhold an index but never
+// forge one. Monotonic created_at closes the rollback hole: a replayed
+// older index can never overwrite a newer one. Kept in its own KV namespace
+// (HIVES) because R2 objects here are content-addressed and this is not.
+
+function validHiveEventContent(evt) {
+  let parsed
+  try { parsed = JSON.parse(evt.content) } catch { return false }
+  if (!parsed || typeof parsed !== 'object') return false
+  const roots = parsed.roots
+  if (!roots || typeof roots !== 'object' || Array.isArray(roots)) return false
+  for (const [key, sig] of Object.entries(roots)) {
+    if (typeof key !== 'string' || !key.trim()) return false
+    if (!SIG_RE.test(String(sig || ''))) return false
+  }
+  return true
+}
+
+// PUT /hive/<pubkey> — NIP-98 proves the CALLER, the body event proves the
+// INDEX. Both must be the path pubkey: a valid guest can't plant an index
+// under someone else's key, and a leaked index event can't be replanted by
+// a stranger (the NIP-98 envelope binds this URL + freshness).
+async function putHive(request, env, pubkey) {
+  const auth = await verifyNip98(request, parseAuthEvent(request))
+  if (!auth.ok) return text(401, auth.reason)
+  if (auth.pubkey !== pubkey) return text(403, 'auth pubkey does not match the hive being written')
+
+  const body = await request.arrayBuffer()
+  if (body.byteLength > HIVE_MAX_BYTES) return text(413, 'hive index too large')
+  let evt
+  try { evt = JSON.parse(new TextDecoder().decode(body)) } catch { return text(400, 'body is not a JSON nostr event') }
+  if (Number(evt?.kind) !== HIVE_KIND) return text(400, `wrong event kind (expected hive index ${HIVE_KIND})`)
+  if (String(evt?.pubkey || '').toLowerCase() !== pubkey) return text(403, 'index event pubkey does not match the hive being written')
+  if (!(await verifyEventSig(evt))) return text(401, 'invalid index event signature')
+  if (!validHiveEventContent(evt)) return text(400, 'index content is not {"v","roots":{lineageKey: sig}}')
+
+  let stored = null
+  try { stored = JSON.parse((await env.HIVES.get(pubkey)) ?? 'null') } catch { stored = null }
+  if (stored) {
+    if (String(stored.id || '') === String(evt.id || '')) return text(200, 'index already current')
+    if (Number(evt.created_at || 0) <= Number(stored.created_at || 0)) {
+      return text(409, 'a newer (or same-age) index is already held - refusing rollback')
+    }
+  }
+  await env.HIVES.put(pubkey, JSON.stringify(evt))
+  // NOTE: the message rides the X-Reason header (ByteString) — ASCII only.
+  return text(stored ? 200 : 201, `hive index updated for ${pubkey.slice(0, 12)}...`)
+}
+
+// GET /hive/<pubkey> — open read, never cached: the whole point of the
+// pointer is freshness. The client re-verifies the schnorr signature, so
+// serving it needs no auth and grants no trust.
+async function getHive(request, env, pubkey) {
+  const raw = await env.HIVES.get(pubkey)
+  if (raw == null) return text(404, 'no hive index for this key')
+  return new Response(raw, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      ...CORS,
+    },
+  })
+}
+
 // ── router ───────────────────────────────────────────────────────────────────
 
 export default {
@@ -394,6 +474,14 @@ export default {
 
     if (pathname === '/grant') {
       if (method === 'GET') return getGrant(request, env)
+      return text(405, 'method not allowed')
+    }
+
+    // Hive pointer — the per-publisher path→head index (see putHive/getHive).
+    const hiveMatch = pathname.match(/^\/hive\/([0-9a-f]{64})$/)
+    if (hiveMatch) {
+      if (method === 'GET' || method === 'HEAD') return getHive(request, env, hiveMatch[1])
+      if (method === 'PUT') return putHive(request, env, hiveMatch[1])
       return text(405, 'method not allowed')
     }
 

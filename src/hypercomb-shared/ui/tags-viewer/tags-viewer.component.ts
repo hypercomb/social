@@ -28,6 +28,10 @@ interface TagRow {
   count: number
 }
 
+/** How wide a pheromone filter reaches. Mirrors the controls-bar / show-cell
+ *  vocabulary exactly — this is the same value that rides `tags:filter`. */
+type Scope = 'local' | 'children' | 'global'
+
 type TagEntry = { color?: string; enabled?: boolean; accent?: string }
 type TagRegistryLike = {
   ensureLoaded(): Promise<void>
@@ -55,6 +59,22 @@ export class TagsViewerComponent implements OnDestroy {
   /** Active tag filters (mirrors `tags:filter` so the panel and the
    *  controls-bar pills agree on what's filtered). */
   readonly #active = signal<Set<string>>(new Set())
+  /** How wide a filter reaches. This panel is the control surface for it — the
+   *  controls-bar glyph used to cycle it blind. Mirrors `tags:filter`, so bar
+   *  and panel can never disagree. Non-sticky, same as the bar. */
+  readonly #scope = signal<Scope>('local')
+
+  readonly scope = this.#scope.asReadonly()
+  readonly activeNames = computed(() => [...this.#active()].sort((a, b) => a.localeCompare(b)))
+  readonly hasFilter = computed(() => this.#active().size > 0)
+
+  /** The three reaches, each named and explained. The whole point of the panel:
+   *  a reach you can read instead of a glyph you have to decode. */
+  readonly scopeOptions: readonly { id: Scope; icon: string }[] = [
+    { id: 'local', icon: 'center_focus_strong' },
+    { id: 'children', icon: 'account_tree' },
+    { id: 'global', icon: 'public' },
+  ]
 
   /** Sorted tag rows: every registry tag plus any page tag not yet registered,
    *  each with its colour and current visible count. */
@@ -92,10 +112,11 @@ export class TagsViewerComponent implements OnDestroy {
     // Registry changed (add / recolor / remove) → re-read.
     this.#cleanups.push(EffectBus.on('tags:registry', () => this.#registryVersion.update(v => v + 1)))
 
-    // Mirror the active filter set (sticky) so the toggles reflect whatever
-    // the controls-bar pills set, and vice-versa.
-    this.#cleanups.push(EffectBus.on<{ active: string[] }>('tags:filter', (p) => {
+    // Mirror the active filter set AND the reach (sticky) so the toggles
+    // reflect whatever the controls-bar pills set, and vice-versa.
+    this.#cleanups.push(EffectBus.on<{ active: string[]; scope?: Scope }>('tags:filter', (p) => {
       this.#active.set(new Set(Array.isArray(p?.active) ? p.active : []))
+      if (p?.scope) this.#scope.set(p.scope)
     }))
   }
 
@@ -122,12 +143,39 @@ export class TagsViewerComponent implements OnDestroy {
   }
 
   /** Toggle a tag in the active filter set and broadcast it — same effect the
-   *  controls-bar pills emit, so the cross-page flatten reacts identically. */
+   *  controls-bar pills emit, so the cross-page flatten reacts identically.
+   *  Always carries `scope`: emitting without it made show-cell fall back to
+   *  'local', so filtering from this panel silently reset the reach to
+   *  page-only however wide the participant had just set it. */
   toggleFilter(name: string): void {
     const next = new Set(this.#active())
     if (next.has(name)) next.delete(name); else next.add(name)
     this.#active.set(next)
-    EffectBus.emit('tags:filter', { active: [...next] })
+    this.#emitFilter(next)
+  }
+
+  isScope(id: Scope): boolean {
+    return this.#scope() === id
+  }
+
+  /** Pick a reach. Re-broadcasts immediately so a live filter re-scans at the
+   *  new width; with nothing filtered it still emits, which is what keeps the
+   *  controls-bar glyph in step. */
+  setScope(id: Scope): void {
+    if (this.#scope() === id) return
+    this.#scope.set(id)
+    this.#emitFilter(this.#active())
+  }
+
+  /** Drop every active filter and return to the unfiltered view. */
+  clearFilter(): void {
+    if (this.#active().size === 0) return
+    this.#active.set(new Set())
+    this.#emitFilter(new Set())
+  }
+
+  #emitFilter(active: ReadonlySet<string>): void {
+    EffectBus.emit('tags:filter', { active: [...active], scope: this.#scope() })
   }
 
   /** Recolour a tag from the native colour input. Writing through the registry
@@ -147,7 +195,7 @@ export class TagsViewerComponent implements OnDestroy {
       const next = new Set(this.#active())
       next.delete(name)
       this.#active.set(next)
-      EffectBus.emit('tags:filter', { active: [...next] })
+      this.#emitFilter(next)
     }
   }
 

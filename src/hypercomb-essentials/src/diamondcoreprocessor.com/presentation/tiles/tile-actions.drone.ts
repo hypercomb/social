@@ -558,10 +558,12 @@ export class TileActionsDrone extends Drone {
         this.#handleAction(payload)
       })
 
-      // Handle hide / reroll from selection context menu (controls:action)
+      // Handle hide / reroll / bulk public-private from selection context menu
       this.onEffect<{ action: string }>('controls:action', (payload) => {
         if (payload?.action === 'hide') this.#bulkHideSelected()
         else if (payload?.action === 'reroll') this.#bulkRerollSelected()
+        else if (payload?.action === 'make-public') this.#bulkSetPublic(false)
+        else if (payload?.action === 'make-branch-public') this.#bulkSetPublic(true)
       })
 
       // Handle icon reorder from arrange mode
@@ -933,6 +935,38 @@ export class TileActionsDrone extends Drone {
       }
       void new hypercomb().act()
     })
+  }
+
+  // Bulk public/private from the selection context menu — apply ONE target
+  // state across the whole selection so a multi-select reads predictably: if
+  // any selected tile is not yet public in this scope, make them ALL public;
+  // only when every one is already public does it retract them ALL. `branch`
+  // picks individual vs sub-tree scope; the two are exclusive on a tile
+  // (mirrors the per-tile world-mode handlers), so turning one on clears the
+  // other. Per-tile tile:public-changed drives the dim repaint + mesh sync.
+  // Collection items are publishable here too — this is a DELIBERATE user
+  // action, never the automatic swarm publish (#autoPublishInSwarm).
+  #bulkSetPublic(branch: boolean): void {
+    const selection = window.ioc.get<{ selected: ReadonlySet<string>; count: number }>('@diamondcoreprocessor.com/SelectionService')
+    if (!selection || selection.count === 0) return
+
+    const lineage = this.resolve<{ explorerLabel(): string }>('lineage')
+    const location = lineage?.explorerLabel() ?? '/'
+    const labels = [...selection.selected]
+
+    const isOnFor = (l: string): boolean => branch ? isBranchPublic(location, l) : isIndividuallyPublic(location, l)
+    const makePublic = !labels.every(isOnFor)
+
+    for (const label of labels) {
+      if (branch) {
+        if (makePublic) setCellPublic(location, label, false)
+        setBranchPublic(location, label, makePublic)
+      } else {
+        if (makePublic) setBranchPublic(location, label, false)
+        setCellPublic(location, label, makePublic)
+      }
+      EffectBus.emit('tile:public-changed', { cell: label, location, public: makePublic, branch })
+    }
   }
 
   #unhide(label: string): void {

@@ -94,6 +94,13 @@
 
     </div>
 
+    @if (joinMode()) {
+      <label class="mesh-modal-skip">
+        <input type="checkbox" [checked]="skipReview()" (change)="toggleSkipReview()" />
+        <span>{{ 'mesh-modal.skip-review' | t }}</span>
+      </label>
+    }
+
     <footer class="mesh-modal-actions">
       <button class="mesh-modal-btn cancel" type="button" (click)="dismiss()">
         {{ 'mesh-modal.cancel' | t }}

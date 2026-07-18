@@ -39,12 +39,13 @@
 
 @if (tags().length > 0) {
   <div class="tag-float">
-    <!-- three-stage filter scope — page → children → global. Defaults to page
-         (local) and is non-sticky; fades in at the left of the list on hover. -->
+    <!-- Opens the pheromone panel. Always visible (it used to fade in only on
+         hover, so the reach control was invisible until you found it) and the
+         glyph reads out the current reach: page → children → global. -->
     <button class="tag-scope" [attr.data-scope]="tagScope()"
-            (click)="cycleTagScope()"
-            [attr.aria-label]="'tags.scope-' + tagScope() | t"
-            [title]="('tags.scope-' + tagScope()) | t">
+            (click)="openPheromones()"
+            [attr.aria-label]="'tags.panel.open' | t"
+            [title]="('tags.panel.open' | t) + ' — ' + ('tags.scope-' + tagScope() | t)">
       <span class="mat-sym">{{ scopeIcon() }}</span>
     </button>
     @for (tag of tags(); track tag.name) {

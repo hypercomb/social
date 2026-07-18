@@ -11,7 +11,7 @@ import { hasDecorationKind, referenceTargetForLabel } from '../../commands/decor
 import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone.js'
 
-type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; noImageLabels?: string[]; substrateLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[]; shadedLabels?: string[] }
+type CellCountPayload = { count: number; labels: string[]; coords: Axial[]; branchLabels?: string[]; externalLabels?: string[]; noImageLabels?: string[]; substrateLabels?: string[]; linkLabels?: string[]; hiddenLabels?: string[]; shadedLabels?: string[]; flatPaths?: Record<string, string[]>; filterBlocked?: string[] }
 
 // Backstop timeout (ms) for the navigation-transition guard. This is NOT the
 // normal release — the guard lifts on render:cell-count (the renderer has
@@ -226,6 +226,13 @@ export class TileOverlayDrone extends Drone {
 
   #occupiedByAxial = new Map<string, { index: number; label: string }>()
   #branchLabels = new Set<string>()
+  /** Tag-flatten only: label → the match's ABSOLUTE lineage. A flattened tile
+   *  can live anywhere, so entering it travels to this path rather than
+   *  appending its name to wherever the view happens to be standing. */
+  #flatPaths = new Map<string, string[]>()
+  /** Tag-flatten only: matches whose subtree holds nothing tagged. Entering one
+   *  would land on an empty filtered mesh, so the click is refused with a toast. */
+  #filterBlocked = new Set<string>()
   #externalLabels = new Set<string>()
   #currentTileExternal = false
   #activeProfileKey: OverlayProfileKey | null = null
@@ -332,7 +339,7 @@ export class TileOverlayDrone extends Drone {
     'keymap:invoke',
     'icon:edit-mode', 'icon:override-changed',
   ]
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'group:open', 'icon:pick-request']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'group:open', 'icon:pick-request', 'toast:show']
 
   #dropDragging = false
   #dropPending = false
@@ -572,6 +579,8 @@ export class TileOverlayDrone extends Drone {
         this.#linkLabels = new Set(payload.linkLabels ?? [])
         this.#hiddenLabels = new Set(payload.hiddenLabels ?? [])
         this.#shadedLabels = new Set(payload.shadedLabels ?? [])
+        this.#flatPaths = new Map(Object.entries(payload.flatPaths ?? {}))
+        this.#filterBlocked = new Set(payload.filterBlocked ?? [])
         this.#rebuildOccupiedMap()
         // The maps above now describe the level on screen — release the
         // backstop's tile-enter latch. cell-count only fires at render
@@ -2300,6 +2309,23 @@ export class TileOverlayDrone extends Drone {
       console.warn('[tile-overlay] tile-enter refused — new layer render not landed yet; dropped navigation into', label)
       return
     }
+
+    // TAG-FILTER dead end. Under a live filter the filter follows you in, so a
+    // branch with nothing tagged inside would open onto a blank mesh. Refuse
+    // and say why. This sits in #navigateInto rather than in a click handler
+    // because entry has more than one gesture path (click and press-drag) —
+    // the choke point is the only place that covers them all.
+    if (this.#filterBlocked.has(label)) {
+      const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
+      EffectBus.emit('toast:show', {
+        type: 'info',
+        title: i18n?.t('tags.filter.blocked.title') ?? 'Nothing tagged in here',
+        message: i18n?.t('tags.filter.blocked.message', { cell: label })
+          ?? `"${label}" has no tagged tiles inside. Clear the filter to browse it.`,
+      })
+      return
+    }
+
     const lineage = this.resolve<{ explorerEnter(name: string): void }>('lineage')
     if (!lineage) return
 
@@ -2320,6 +2346,20 @@ export class TileOverlayDrone extends Drone {
       this.#clearSelectionOnNavigate()
       const nav = window.ioc.get<{ goRaw?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
       nav?.goRaw?.([...refTarget])
+      this.#releaseGuardIfNoMove(before)
+      return
+    }
+
+    // TAG-FLATTEN entry: the tile on screen was gathered from somewhere else in
+    // the hive, so its name means nothing relative to the current location.
+    // Travel to its recorded absolute path — explorerEnter would append the
+    // label here and mint a phantom segment.
+    const flatPath = this.#flatPaths.get(label)
+    if (flatPath) {
+      this.#clearSelectionOnNavigate()
+      this.emitEffect('tile:navigate-in', { label })
+      const nav = window.ioc.get<{ goRaw?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
+      nav?.goRaw?.([...flatPath])
       this.#releaseGuardIfNoMove(before)
       return
     }

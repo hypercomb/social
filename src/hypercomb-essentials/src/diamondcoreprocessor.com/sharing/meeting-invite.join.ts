@@ -12,11 +12,13 @@
 
 import { EffectBus, get, requestConfirm, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { validateInviteBundle, type MeetingInviteBundle } from './meeting-invite.js'
+import { PUBLIC_CONTENT_HOSTS } from './hive-link.js'
 
 const STORE_KEY = '@hypercomb.social/Store'
 const ROOM_KEY = '@hypercomb.social/RoomStore'
 const SECRET_KEY = '@hypercomb.social/SecretStore'
 const NAV_KEY = '@hypercomb.social/Navigation'
+const CONTENT_BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
 
 const SIG_RE = /^[a-f0-9]{64}$/
 
@@ -31,21 +33,35 @@ function toast(type: string, title: string, message: string): void {
   EffectBus.emit('toast:show', { type, title, message })
 }
 
-/** Resolve an invite bundle by signature: memory → OPFS → host via Store,
- *  then a direct origin fetch (sha256-verified) as a last resort. A fresh
- *  recipient won't have the bytes locally; the link/junction host serves
- *  `/<sig>`. Bytes are hash-checked, so an SPA index.html fallback is
- *  rejected. */
-export async function loadInviteBundle(sig: string): Promise<MeetingInviteBundle | null> {
+/** Resolve a link bundle's RAW JSON by signature: memory → OPFS → host via
+ *  Store, then a direct origin fetch (sha256-verified) as a last resort. A
+ *  fresh recipient won't have the bytes locally; the link/junction host
+ *  serves `/<sig>`. Bytes are hash-checked, so an SPA index.html fallback
+ *  is rejected. Kind-agnostic: the caller validates against whichever
+ *  bundle shape(s) it accepts (meeting-invite, hive-link, …). */
+export async function loadBundleJson(sig: string): Promise<unknown | null> {
   if (!SIG_RE.test(sig)) return null
   const store = get<StoreLike>(STORE_KEY)
+  // Teach the broker the standing public CDN as a byte source for this sig
+  // BEFORE the Store cascade runs: a bundle minted to the CDN then opened on
+  // a different app origin has no other reachable host in private mode.
+  try {
+    get<{ noteDomainsForSig?: (sig: string, domains: string[]) => void }>(CONTENT_BROKER_KEY)
+      ?.noteDomainsForSig?.(sig, PUBLIC_CONTENT_HOSTS)
+  } catch { /* broker absent — origin fetch below still covers same-origin */ }
   let blob: Blob | null = null
   try { blob = (await store?.getResource(sig)) ?? null } catch { /* fall through */ }
   if (!blob) blob = await fetchAndVerify(sig)
   if (!blob) return null
   // Persist for repeat opens; suppress host re-push (someone else's bytes).
   try { await store?.putResource?.(blob, { emit: false }) } catch { /* ignore */ }
-  try { return validateInviteBundle(JSON.parse(await blob.text())) } catch { return null }
+  try { return JSON.parse(await blob.text()) as unknown } catch { return null }
+}
+
+/** Resolve + validate a MEETING-INVITE bundle (the tile-junction path,
+ *  which only ever carries invites). */
+export async function loadInviteBundle(sig: string): Promise<MeetingInviteBundle | null> {
+  return validateInviteBundle(await loadBundleJson(sig))
 }
 
 async function fetchAndVerify(sig: string): Promise<Blob | null> {

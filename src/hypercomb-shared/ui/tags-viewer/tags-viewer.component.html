@@ -19,9 +19,48 @@
       <button class="tags-close" type="button" (click)="close()" [attr.aria-label]="'tags.close' | t">×</button>
     </header>
 
+    <p class="tags-intro">{{ 'tags.intro' | t }}</p>
+
+    <!-- Reach. Was a single glyph cycling through three states with only a
+         tooltip to explain it; here each reach is named and described. -->
+    <section class="tags-scope-section">
+      <h3 class="tags-section-title">{{ 'tags.scope.title' | t }}</h3>
+      @for (opt of scopeOptions; track opt.id) {
+        <button
+          class="scope-option"
+          type="button"
+          [class.selected]="isScope(opt.id)"
+          [attr.aria-pressed]="isScope(opt.id)"
+          (click)="setScope(opt.id)"
+        >
+          <span class="mat-sym scope-icon">{{ opt.icon }}</span>
+          <span class="scope-text">
+            <span class="scope-label">{{ 'tags.scope.' + opt.id + '.label' | t }}</span>
+            <span class="scope-desc">{{ 'tags.scope.' + opt.id + '.desc' | t }}</span>
+          </span>
+        </button>
+      }
+    </section>
+
+    <!-- What is filtered right now, and the way out of it. -->
+    <section class="tags-active-section">
+      @if (hasFilter()) {
+        <div class="active-line">
+          <span class="active-label">{{ 'tags.active.label' | t }}</span>
+          @for (name of activeNames(); track name) {
+            <span class="active-chip">{{ name }}</span>
+          }
+        </div>
+        <button class="tags-clear" type="button" (click)="clearFilter()">{{ 'tags.clear' | t }}</button>
+      } @else {
+        <p class="active-none">{{ 'tags.active.none' | t }}</p>
+      }
+    </section>
+
     @if (rows().length === 0) {
       <p class="tags-empty">{{ 'tags.empty' | t }}</p>
     } @else {
+      <h3 class="tags-section-title">{{ 'tags.list.title' | t }}</h3>
       <ul class="tags-list">
         @for (row of rows(); track row.name) {
           <li class="tags-row" [class.filtered]="isFiltered(row.name)">

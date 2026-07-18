@@ -126,7 +126,13 @@ export class ReferenceQueenBee extends QueenBee {
       EffectBus.emit('decorations:changed', { segments: childSegments, op: 'append', sig: decorationSig })
 
       await committer.commitChildrenDeltas(parentSegments, { appends: [childMarkerSig] })
-      EffectBus.emit('cell:added', { cell: name, segments: [...parentSegments], viaUpdate: true })
+      // `reference: true` marks this as a COLLECTION ITEM so the swarm's
+      // auto-publish-in-swarm path leaves it private by default (a personal
+      // collection must never auto-share just because you're in a swarm). The
+      // flag travels WITH the event because the decoration index warms async
+      // (fetchDecorationRecord) — referenceTargetForLabel isn't populated yet
+      // at this instant, so a downstream index lookup would race.
+      EffectBus.emit('cell:added', { cell: name, segments: [...parentSegments], viaUpdate: true, reference: true })
 
       get<{ invalidate?: () => void }>('@hypercomb.social/Lineage')?.invalidate?.()
       const cursor = get<CursorShape>('@diamondcoreprocessor.com/HistoryCursorService')

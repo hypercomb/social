@@ -1,20 +1,15 @@
 <div class="mesh-header">
-  @if (meshPublic) {
-    <button class="mode-toggle world-toggle"
-      [class.active]="worldMode()"
-      type="button"
-      [title]="'controls.world-mode' | t"
-      [attr.aria-label]="'controls.world-mode' | t"
-      (click)="toggleWorldMode()">
-      <span class="mat-sym" [class.filled]="worldMode()">public</span>
-    </button>
-  }
+  <!-- ONE three-stage share toggle: private → world (choose scopes) → host.
+       Boots at private on every refresh; a further click wraps back to private. -->
   <button class="mode-toggle"
-    [class.solo-mode]="!meshPublic"
+    [class.solo-mode]="!meshPublic && stage() === 0"
     [class.shield-mode]="!!meshPublic"
+    [class.prep-mode]="!meshPublic && stage() > 0"
     [style.--shield-color]="shieldColor()"
     type="button"
+    [title]="modeTitleKey() | t"
+    [attr.aria-label]="modeTitleKey() | t"
     (click)="onToggle()">
-    <span class="mat-sym" [class.filled]="meshPublic">{{ meshPublic ? 'groups' : 'person' }}</span>
+    <span class="mat-sym" [class.filled]="meshPublic || stage() > 0">{{ modeGlyph() }}</span>
   </button>
 </div>

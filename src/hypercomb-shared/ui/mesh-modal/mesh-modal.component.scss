@@ -220,6 +220,30 @@
 }
 
 // ── actions ───────────────────────────────────────────
+// Pre-join privacy-review opt-out — sits between the body and the actions.
+// Deliberately quiet: this opts OUT of a safety step, so it never competes
+// with the primary action.
+.mesh-modal-skip {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0 1rem 0.6rem;
+  color: rgba(245, 245, 245, 0.45);
+  font-size: 0.68rem;
+  cursor: pointer;
+  user-select: none;
+
+  input {
+    margin: 0;
+    accent-color: rgba(126, 182, 214, 0.9);
+    cursor: pointer;
+  }
+
+  &:hover {
+    color: rgba(245, 245, 245, 0.7);
+  }
+}
+
 .mesh-modal-actions {
   display: flex;
   justify-content: flex-end;

@@ -1,0 +1,14 @@
+<!-- The adopt-for-review strip: state + the only two exits. -->
+@if (visible()) {
+  <div class="preview-banner" role="status">
+    <span class="pulse" aria-hidden="true"></span>
+    <span class="title">{{ 'preview.banner.title' | t }}</span>
+    <span class="name">{{ label() }}</span>
+    <span class="meta">{{ 'preview.banner.from' | t: { publisher: publisherShort() } }}</span>
+    @if (tiles() > 0) {
+      <span class="meta">{{ 'preview.banner.tiles' | t: { count: tiles() } }}</span>
+    }
+    <button type="button" class="adopt" (click)="onAdopt()">{{ 'preview.adopt' | t }}</button>
+    <button type="button" class="dismiss" (click)="onDismiss()">{{ 'preview.dismiss' | t }}</button>
+  </div>
+}

@@ -191,8 +191,8 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   readonly viewToggles = input<readonly { view: string; icon: string; label: string; active: boolean }[]>([])
 
   // Arcade game toggles (Solomon's Key, Bubble Bobble, Arkanoid, …) are no
-  // longer per-game header icons — they aggregate under the single "games"
-  // launch-group icon (<hc-group-launchers>). See games-group.ts.
+  // longer per-game header icons — they aggregate under the "games" launch
+  // group, reached at /games or from `/sets`. See games-group.ts.
 
   /**
    * Briefly true when the user tried to pan or zoom while the view is held

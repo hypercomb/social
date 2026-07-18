@@ -3,6 +3,7 @@ import { EffectBus, SignatureService, SignatureStore, USAGE_IOC_KEY, type UsageR
 import { lineageKey, rawLineageKey } from './lineage-key.js'
 import { isBareLayer } from './child-sig-guard.js'
 import { parseHeadIndex, buildFlushIndex } from './head-index.js'
+import { chooseSealChildHandle } from './seal-preference.js'
 import { canonicalise, parse as parseRecord, type DeltaRecord } from './delta-record.js'
 import { reduce as reduceRecords, type HydratedState } from './delta-reducer.js'
 export type { DeltaRecord } from './delta-record.js'
@@ -878,6 +879,14 @@ export class HistoryService {
     locationSig: string,
     layer: LayerContent,
   ): Promise<string> => {
+    // PREVIEW GUARD: a location whose head is a preview seed must never
+    // gain a real marker — the seed-materialization below would fold a
+    // FOREIGN branch into the visitor's lineage without the adopt gesture.
+    // LayerCommitter refuses user commits wholesale while a preview is
+    // active; this is the safety net for any direct commitLayer caller.
+    if (this.#previewSeeds.has(locationSig)) {
+      throw new Error('[history] refusing to commit at a previewed location — adopt or dismiss the preview first')
+    }
     const canonical = HistoryService.canonicalizeLayer(layer)
     const json = JSON.stringify(canonical)
     const bytes = new TextEncoder().encode(json)
@@ -1672,6 +1681,59 @@ export class HistoryService {
   readonly #seedVirtualHead = (lineageSig: string, sig: string): void => {
     this.#seededHeadByLineage.set(lineageSig, sig)
     this.#lineageBySig.set(sig, lineageSig)
+    // While a preview is active, every freshly-minted seed is (with
+    // overwhelming likelihood) a descendant the visitor is browsing INTO —
+    // claim it for the preview so dismissal drops it and commitLayer
+    // refuses to materialize it. A false claim is harmless: seeds are
+    // caches of parent truth, re-derived on demand after the drop.
+    if (this.#previewSeeds.size > 0) this.#previewSeeds.add(lineageSig)
+  }
+
+  // ── PREVIEW heads — the "adopt for review" state ─────────────────────
+  //
+  // A preview is a virtual head seeded at a path the visitor does NOT own:
+  // a statically-hosted branch resolved from a publisher-signed hive index
+  // (sharing/hive-visit.drone.ts). It rides the SAME session-only seed
+  // machinery as pasted-subtree resolution — renders through the one real
+  // render path, browsable, gone on refresh — with two extra guarantees:
+  //   1. NOTHING persists: commitLayer refuses to materialize a preview
+  //      seed into a marker (the guard below), and LayerCommitter refuses
+  //      user gestures wholesale while a preview is active.
+  //   2. Dismissal is total: dropPreviewHead() forgets every seed the
+  //      preview minted, root and browsed-into descendants alike.
+
+  /** Locations whose virtual heads belong to the active preview. Non-empty
+   *  set == preview active. */
+  readonly #previewSeeds = new Set<string>()
+
+  /** Is an "adopt for review" preview currently active? LayerCommitter
+   *  checks this before every user-gesture commit. */
+  public get previewActive(): boolean { return this.#previewSeeds.size > 0 }
+
+  /** Seed a preview head: render `layerSig` at `segments` without any
+   *  lineage write. Refuses (null) when the location already has a real
+   *  head this session — a preview must never shadow the visitor's own
+   *  content. Returns the location sig on success. */
+  public readonly seedPreviewHead = async (
+    segments: readonly string[],
+    layerSig: string,
+  ): Promise<string | null> => {
+    const loc = await this.sign({ explorerSegments: () => [...segments] })
+    if (!loc) return null
+    if (this.#latestSigByLineage.has(loc)) return null
+    this.#previewSeeds.add(loc)
+    this.#seedVirtualHead(loc, layerSig)
+    return loc
+  }
+
+  /** End the preview: forget every seed it minted. Nothing was ever on
+   *  disk, so forgetting IS the teardown. */
+  public readonly dropPreviewHead = (): void => {
+    for (const loc of this.#previewSeeds) {
+      this.#seededHeadByLineage.delete(loc)
+      this.#huskUnseedable.delete(loc)
+    }
+    this.#previewSeeds.clear()
   }
 
   /**
@@ -2147,6 +2209,16 @@ export class HistoryService {
     // removing or renaming a direct child re-commits THIS head). Seal each child
     // through its OWN live head — recursing by LOCATION, never by the possibly-
     // stale child sig, is what freshens grandchildren and deeper.
+    //
+    // EXCEPT when the two truths diverge off-lineage: pool re-mints
+    // (clipboard/move/build via materializeLayer) commit a parent whose hint
+    // names a child generation the child's bag never headed at. Recursing
+    // into that bag re-derives the SUPERSEDED subtree byte-for-byte, and the
+    // publish walk then broadcasts yesterday's tree forever (the 2026-07-18
+    // stale-seal bug). chooseSealChildHandle arbitrates: hint present among
+    // the child bag's markers → the location legitimately advanced past it →
+    // keep the fresh seal; hint absent → the parent's committed truth names
+    // an off-lineage generation → carry the hint wholesale.
     const childSigs = Array.isArray(head.children) ? head.children : []
     const sealedChildren: string[] = []
     for (const cs of childSigs) {
@@ -2155,7 +2227,21 @@ export class HistoryService {
       if (!name) return null // cold / unresolvable child — refuse a lossy seal
       const sealed = await this.sealSubtree([...segments, name], visited)
       if (!sealed) return null
-      sealedChildren.push(sealed)
+      if (sealed === String(cs)) { sealedChildren.push(sealed); continue }
+      const childLoc = await this.sign({ explorerSegments: () => [...segments, name] })
+      const bag = childLoc ? await this.listLayers(childLoc) : []
+      const decision = chooseSealChildHandle({
+        hintSig: String(cs),
+        sealSig: sealed,
+        bagSigs: bag.map(e => e.layerSig),
+      })
+      if (decision.reason === 'hint-off-lineage') {
+        console.info(
+          `[history] sealSubtree: off-lineage hint honored at /${[...segments, name].join('/')} ` +
+          `(hint ${String(cs).slice(0, 8)}, location seal ${sealed.slice(0, 8)})`,
+        )
+      }
+      sealedChildren.push(decision.handle)
     }
 
     // Leaf: the head is already a correct merkle node. getLayerBySig ===
@@ -2209,6 +2295,65 @@ export class HistoryService {
     this.#preloaderCache.set(sig, bytes.buffer as ArrayBuffer)
     this.#parsedLayerCache.set(sig, HistoryService.canonicalizeLayer(layer))
     return sig
+  }
+
+  /**
+   * DELIBERATE repair op: RE-ASSERT the current head chain into descendant
+   * bags. Walks a subtree from its live head and, wherever a child location's
+   * bag head disagrees with the layer the parent chain names for it, commits
+   * that hinted layer forward as the child's new head marker. Covers BOTH
+   * divergence damages: off-lineage hints (pool re-mints that never touched
+   * the child bag) and bag-level regressions (stale-head sessions re-committing
+   * superseded content on top of good markers — the 2026-07-16 catastrophe;
+   * its fingerprint is runs of duplicate markers). After a heal, bags agree
+   * with their ancestors, so sealSubtree and every location walk yield the
+   * asserted generation natively — append-only, the doctrine's "re-apply
+   * forward" recovery, generalized.
+   *
+   * THE INVOKER ASSERTS THE TREE. If a descendant carries a legitimate edit
+   * newer than the parent's frozen hint (normal leaf-only staleness), this op
+   * re-commits the hint OVER it — only run it on a branch whose head chain
+   * you have verified current (and read the returned report). Mints real
+   * markers (truth): explicit user/repair action ONLY — never from the
+   * optimize phase, never on a schedule. Absent bags are left absent (the
+   * virtual-seed/husk machinery owns those).
+   */
+  public readonly healSubtreeBags = async (
+    segments: readonly string[],
+    report: { healed: { path: string; from: string; to: string }[]; visited: number } = { healed: [], visited: 0 },
+    seen: Set<string> = new Set(),
+  ): Promise<{ healed: { path: string; from: string; to: string }[]; visited: number }> => {
+    const locSig = await this.sign({ explorerSegments: () => [...segments] })
+    if (!locSig || seen.has(locSig)) return report
+    seen.add(locSig)
+    report.visited++
+
+    const head = await this.currentLayerAt(locSig)
+    if (!head) return report
+    const childSigs = Array.isArray(head.children) ? head.children : []
+    for (const cs of childSigs) {
+      const child = await this.getLayerBySig(String(cs))
+      const name = (child?.name ?? '').trim()
+      if (!child || !name) continue // unresolvable child — nothing to compare, nothing to mint
+      const childPath = [...segments, name]
+      const childLoc = await this.sign({ explorerSegments: () => childPath })
+      if (childLoc) {
+        const bag = await this.listLayers(childLoc)
+        const bagHead = bag.length > 0 ? bag[bag.length - 1].layerSig : null
+        if (bagHead && bagHead !== String(cs)) {
+          const offLineage = !bag.some(e => e.layerSig === String(cs))
+          const committed = await this.commitLayer(childLoc, child)
+          report.healed.push({ path: childPath.join('/'), from: bagHead, to: committed })
+          console.info(
+            `[history] healSubtreeBags: /${childPath.join('/')} advanced ` +
+            `${bagHead.slice(0, 8)} → ${committed.slice(0, 8)} ` +
+            `(${offLineage ? 'off-lineage hint' : 'bag head superseded by parent chain'})`,
+          )
+        }
+      }
+      await this.healSubtreeBags(childPath, report, seen)
+    }
+    return report
   }
 
   /**

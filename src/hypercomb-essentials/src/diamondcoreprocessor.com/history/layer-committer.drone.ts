@@ -638,6 +638,15 @@ export class LayerCommitter {
     const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!lineage || !history) return
 
+    // Never commit while an "adopt for review" preview is active — the
+    // rendered state includes a FOREIGN branch the visitor hasn't adopted;
+    // a commit now could materialize preview seeds into real markers.
+    // (hive-visit drops the preview before its own adopt fold.)
+    if (history.previewActive) {
+      console.warn('[LayerCommitter] importTree skipped — a preview is active; adopt or dismiss it first', { updates: updates.length })
+      return
+    }
+
     // Path encoding: segments joined by NUL, or '' for root. The separator
     // MUST be the escape sequence '\u0000' — never a literal NUL byte in
     // source. A literal byte was silently stripped by tooling once
@@ -987,6 +996,13 @@ export class LayerCommitter {
     const lineage = get<Lineage>('@hypercomb.social/Lineage')
     const history = get<HistoryService>('@diamondcoreprocessor.com/HistoryService')
     if (!lineage || !history) return
+
+    // Never commit while an "adopt for review" preview is active — the
+    // assembled state includes a FOREIGN branch the visitor hasn't adopted.
+    if (history.previewActive) {
+      console.warn('[LayerCommitter] commit skipped — a preview is active; adopt or dismiss it first')
+      return
+    }
 
     // The address was BOUND at enqueue (CommitMachine.#addressed). A
     // drain-time fallback to the current lineage is forbidden: the queue

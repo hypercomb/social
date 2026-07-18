@@ -749,13 +749,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   })
 
 
-  /** Cycle the filter scope local → children → global → local. When a filter is
-   *  already active, re-apply it immediately so the new reach takes effect. */
-  readonly cycleTagScope = (): void => {
-    const order = ['local', 'children', 'global'] as const
-    this.#tagScope.update(s => order[(order.indexOf(s) + 1) % order.length])
-    const active = [...this.#activeTagFilters()]
-    if (active.length) EffectBus.emit('tags:filter', { active, scope: this.#tagScope() })
+  /** Open the pheromone panel. This icon used to CYCLE the reach in place —
+   *  three states behind one glyph, explained only by a tooltip, so the reach
+   *  was effectively invisible. The panel names each reach and says what it
+   *  does; the glyph here stays as a readout of the current one. */
+  readonly openPheromones = (): void => {
+    EffectBus.emit('tags:view-open', undefined)
   }
 
   readonly isTagFilterActive = (name: string): boolean => {
@@ -811,6 +810,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #layoutModeUnsub: (() => void) | null = null
   #beesUnsub: (() => void) | null = null
   #tagsUnsub: (() => void) | null = null
+  #tagFilterUnsub: (() => void) | null = null
   #hoverTagsUnsub: (() => void) | null = null
   #voiceActiveUnsub: (() => void) | null = null
   #showHiddenUnsub: (() => void) | null = null
@@ -949,6 +949,16 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       // sort by hue so tags form a rainbow gradient
       const sorted = [...tags].sort((a, b) => extractHue(this.tagColor(a.name)) - extractHue(this.tagColor(b.name)))
       this.#tags.set(sorted)
+    })
+
+    // Mirror the filter — the pheromone panel can change the active set AND the
+    // reach, and this bar must follow. Without this the bar kept its own stale
+    // copy and the next pill click re-emitted it, silently reverting whatever
+    // the panel had just set (the same way a filter set straight on the bus is
+    // reverted). Sticky, so the bar hydrates on subscribe.
+    this.#tagFilterUnsub = EffectBus.on<{ active: string[]; scope?: 'local' | 'children' | 'global' }>('tags:filter', (p) => {
+      this.#activeTagFilters.set(new Set(Array.isArray(p?.active) ? p.active : []))
+      if (p?.scope) this.#tagScope.set(p.scope)
     })
 
     this.#hoverTagsUnsub = EffectBus.on<{ tags: string[] }>('tile:hover-tags', ({ tags }) => {
@@ -1093,6 +1103,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#notesOpenUnsub?.()
     this.#feedbackOpenUnsub?.()
     this.#tagsUnsub?.()
+    this.#tagFilterUnsub?.()
     this.#hoverTagsUnsub?.()
     this.#atomizeModeUnsub?.()
     this.#atomizeAtomsUnsub?.()

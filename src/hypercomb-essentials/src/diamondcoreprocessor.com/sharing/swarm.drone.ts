@@ -31,6 +31,7 @@ import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-prop
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
 import { isBranchPublic, isCellPublic, setCellPublic } from '../presentation/tiles/tile-actions.drone.js'
+import { referenceTargetForLabel } from '../commands/decoration-kind-index.js'
 import { listDecorations } from '../commands/decoration-manifest.js'
 import { kindsForLabel } from '../commands/decoration-kind-index.js'
 import { SWARM_INVITE_KIND } from './meeting-invite.js'
@@ -2083,7 +2084,17 @@ export class SwarmDrone extends Drone {
   // isCellPublic guard makes this idempotent: a re-emitted cell:added (e.g.
   // tagging an already-public tile) or a tile already covered by a public
   // branch is a no-op, so we never churn a resync for nothing.
-  #autoPublishInSwarm = (payload: { cell?: string; segments?: readonly string[] }): void => {
+  //
+  // COLLECTION ITEMS ARE EXEMPT — private by default even inside a swarm. A
+  // personal collection (reference set) must never auto-publish just because
+  // you happen to be sharing elsewhere. Three race-free signals:
+  //   • payload.reference — the creator flags it (the decoration index warms
+  //     async, so it can't be trusted at create time; the flag can);
+  //   • the /sets index location — tiles minted on the collections page;
+  //   • referenceTargetForLabel — a WARM reference being re-touched (tag edit).
+  // This only suppresses the AUTOMATIC publish; you can still make a collection
+  // item public deliberately in world mode.
+  #autoPublishInSwarm = (payload: { cell?: string; segments?: readonly string[]; reference?: boolean }): void => {
     const cell = String(payload?.cell ?? '').trim()
     if (!cell) return
     const room = this.#getRoomStore()?.value?.trim() ?? ''
@@ -2093,6 +2104,10 @@ export class SwarmDrone extends Drone {
     const segments = (Array.isArray(segsRaw) ? segsRaw : [])
       .map(s => String(s ?? '').trim())
       .filter(Boolean)
+    // Collection-item exemption (see method comment) — leave it private.
+    if (payload?.reference === true) return
+    if (segments[0] === 'sets') return
+    if (referenceTargetForLabel(cell) !== null) return
     // Same location string the publish paths feed isCellPublic (see
     // #publishCurrentVisualsToMyChannel) so the marker and the broadcast
     // filter agree on the key.

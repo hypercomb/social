@@ -39,6 +39,7 @@ function normalizeHost(raw: string): string {
 export class MeshModalComponent implements OnInit, OnDestroy {
 
   #unsubOpen: (() => void) | null = null
+  #unsubClose: (() => void) | null = null
   #unsubEscape: (() => void) | null = null
   #onWindowKeyDown: ((e: KeyboardEvent) => void) | null = null
 
@@ -51,6 +52,9 @@ export class MeshModalComponent implements OnInit, OnDestroy {
   readonly labelDraft = signal('')
   readonly hostDraft = signal('')
   readonly secretVisible = signal(false)
+  /** JOIN mode only: persisted opt-out so a future join skips the pre-join
+   *  privacy-review step (mesh-header reads `hc:skip-privacy-review`). */
+  readonly skipReview = signal(false)
 
   readonly savedLocations = fromRuntime(
     get('@hypercomb.social/SavedLocationsStore') as EventTarget | undefined,
@@ -98,12 +102,19 @@ export class MeshModalComponent implements OnInit, OnDestroy {
       this.labelDraft.set(this.#readMyLabel())
       this.hostDraft.set(this.#readHost())
       this.secretVisible.set(false)
+      try { this.skipReview.set(localStorage.getItem('hc:skip-privacy-review') === '1') }
+      catch { this.skipReview.set(false) }
       this.open.set(true)
       EffectBus.emit('mesh:modal-open', { open: true })
       EffectBus.emit('mesh:secret-draft', { secret: initialSecret })
       queueMicrotask(() => {
         document.querySelector<HTMLInputElement>('.mesh-modal-room')?.focus()
       })
+    })
+
+    // The share toggle wrapping HOST → PRIVATE closes the selector with it.
+    this.#unsubClose = EffectBus.on('mesh:close-modal', () => {
+      if (this.open()) this.#close()
     })
 
     this.#unsubEscape = EffectBus.on<{ cmd: string }>('keymap:invoke', (payload) => {
@@ -122,6 +133,7 @@ export class MeshModalComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.#unsubOpen?.()
+    this.#unsubClose?.()
     this.#unsubEscape?.()
     if (this.#onWindowKeyDown) window.removeEventListener('keydown', this.#onWindowKeyDown)
   }
@@ -183,6 +195,20 @@ export class MeshModalComponent implements OnInit, OnDestroy {
 
   readonly toggleSecretVisible = (): void => {
     this.secretVisible.set(!this.secretVisible())
+  }
+
+  readonly toggleSkipReview = (): void => {
+    const next = !this.skipReview()
+    this.skipReview.set(next)
+    try { localStorage.setItem('hc:skip-privacy-review', next ? '1' : '0') }
+    catch { /* ignore */ }
+    // Unchecking it means "I DO want the review" — so step BACK to that stage
+    // (the header returns to WORLD) and close. Checking it is a no-op for
+    // navigation: you're already past the review, standing in the selector.
+    if (!next) {
+      EffectBus.emit('mesh:privacy-step-back', {})
+      this.#close()
+    }
   }
 
   readonly pickLocation = (name: string): void => {

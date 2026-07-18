@@ -25,6 +25,18 @@
         <span class="mat-sym">delete</span>
       </button>
 
+      @if (worldMode()) {
+        <!-- Sharing preview is on — bulk public/private for the whole selection.
+             globe = this tile only; share = tile + its sub-tree. -->
+        <div class="ctx-divider"></div>
+        <button class="ctx-btn" (click)="makePublic()" [attr.aria-label]="'selection.make-public' | t">
+          <span class="mat-sym">public</span>
+        </button>
+        <button class="ctx-btn" (click)="makeBranchPublic()" [attr.aria-label]="'selection.make-branch-public' | t">
+          <span class="mat-sym">share</span>
+        </button>
+      }
+
       @if (selectionFeatures.hide || selectionFeatures.reroll) {
         <div class="ctx-divider"></div>
         @if (selectionFeatures.hide) {

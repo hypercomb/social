@@ -3,7 +3,6 @@
 import { AfterViewInit, Component, computed, signal, ViewChild, type OnDestroy } from '@angular/core'
 import { CommandShellComponent } from '../command-shell/command-shell.component'
 import { HintBarComponent } from '../hint-bar/hint-bar.component'
-import { GroupLaunchersComponent } from '../group-launchers/group-launchers.component'
 import { PinnedEntrancesComponent } from '../pinned-entrances/pinned-entrances.component'
 import type { Lineage } from '../../core/lineage'
 import type { MovementService } from '../../core/movement.service'
@@ -120,7 +119,7 @@ const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
 @Component({
   selector: 'hc-command-line',
   standalone: true,
-  imports: [CommandShellComponent, HintBarComponent, TranslatePipe, GroupLaunchersComponent, PinnedEntrancesComponent],
+  imports: [CommandShellComponent, HintBarComponent, TranslatePipe, PinnedEntrancesComponent],
   templateUrl: './command-line.component.html',
   styleUrls: ['./command-line.component.scss'],
   host: {
@@ -568,9 +567,9 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   )
 
   // Arcade games (Solomon's Key, Bubble Bobble, Arkanoid, Roper, …) are no
-  // longer per-game header icons here — they aggregate under the single
-  // "games" launch-group meaning-icon rendered by <hc-group-launchers>, the
-  // same way websites do. See hypercomb-shared/core/games-group.ts.
+  // longer per-game header icons here — they aggregate under the "games"
+  // launch group, reached at /games or from the `/sets` landing, the same way
+  // websites do. See hypercomb-shared/core/games-group.ts.
 
   // ── open-for-subscribers toggle ───────────────────────
   //
@@ -2162,11 +2161,18 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   /**
    * Apply `+name` (create) and `~name` (remove) per-item operators inside a
    * leading bracket, then return the value reduced to the remaining selection
-   * (plus any trailing op). Bare items (no prefix) and the trailing op are left
-   * intact for the normal select/op routing. Returns the input UNCHANGED when no
-   * `+`/`~` item is present, so pure `[a,b]` selection and `[a,b]/op` are never
-   * disturbed. Returns `''` when only creates/removes were requested (nothing
-   * left to select). Whole-group `~[…]` is left to RemoveCellBehavior.
+   * (plus any trailing op). The bracket is multi-purpose: in a PURE bracket
+   * (no trailing op) a bare name that does not exist at this level CREATES it,
+   * so `[Monday, Tuesday, Wednesday]` mints an array of tiles in one atomic
+   * commit and selects them, and a bare PATH item is an add-at-depth gesture —
+   * `[abc, hello/world]` mints on multiple levels at once (no quoting; each
+   * comma-separated item is a path and/or leaf). Bare single names that
+   * already exist keep pure-selection semantics, as does any `[a,b]/op` form
+   * (ops never create their operands).
+   * Returns the input UNCHANGED when nothing is created or removed, so pure
+   * existing-name selection is never disturbed. Returns `''` when only
+   * creates/removes were requested (nothing left to select). Whole-group
+   * `~[…]` is left to RemoveCellBehavior.
    */
   async #applyBracketItemOps(v: string): Promise<string> {
     if (!v.startsWith('[')) {
@@ -2180,6 +2186,11 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     const inner = v.slice(open + 1, close)
     const trailing = v.slice(close + 1)
 
+    // create-if-missing applies only to the pure bracket — `[x]/remove` on a
+    // typo must not mint-then-delete a junk tile
+    const pureBracket = trailing.trim() === ''
+    const existing = new Set((this.cellNames$() ?? []).map(n => this.completions.normalize(n)))
+
     const creates: string[][] = []
     const removes: string[] = []
     const keeps: string[] = []
@@ -2192,8 +2203,21 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       } else if (t.startsWith('~')) {
         const path = t.slice(1).split('/').map(s => this.completions.normalize(s.trim())).filter(Boolean).join('/')
         if (path) removes.push(path)
+      } else if (pureBracket && t.includes('/')) {
+        // Nested lineage — a path item adds on multiple levels at once:
+        // `[abc, hello/world]` mints `hello` then `hello/world`. Paths are an
+        // add-at-depth gesture, so they always route to create (importTree
+        // no-ops levels that already exist).
+        const segs = t.split('/').map(s => this.completions.normalize(s.trim())).filter(Boolean)
+        if (segs.length) creates.push(segs)
+        else keeps.push(t)
       } else {
-        keeps.push(t)
+        const normalized = this.completions.normalize(t)
+        if (pureBracket && normalized && !existing.has(normalized)) {
+          creates.push([normalized])
+        } else {
+          keeps.push(t)
+        }
       }
     }
 
@@ -2203,8 +2227,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     await this.#createPaths(creates)
     await this.#removeLabels(removes)
 
-    // Freshly created leaves join the selection.
-    const remaining = [...keeps, ...creates.map(segs => segs.join('/'))]
+    // Freshly created tiles join the selection — by their TOP-LEVEL name only.
+    // A `/` inside the echoed bracket would be split as a URL segment boundary
+    // when BracketBehavior pushes the selection (`/[hello-x` + `world-x]` —
+    // phantom paths, empty render), so a nested create selects its visible
+    // top-level parent instead of the deep leaf.
+    const remaining = [...new Set([...keeps, ...creates.map(segs => segs[0])])]
     if (remaining.length === 0) return ''
     return '[' + remaining.join(',') + ']' + trailing
   }

@@ -29,15 +29,16 @@
     (viewToggle)="onViewToggle($event)"
   />
 
-  <!-- launch-group meaning-icons (websites, …) live inside the command line.
-       The Pools of Meaning portal is NOT here — it lives on the control bar
-       (controls-bar 'pools'): it manages referenced hives on different roots
-       and is not an aggregate. -->
-  <hc-group-launchers></hc-group-launchers>
-
   <!-- Per-LEVEL pinned quick links — entrances the participant dragged up
-       from a tile's entrance badge. Scoped to the current level only; also
-       the drop target while a badge drag is in flight. -->
+       from a tile's ⋮ feature icon. Scoped to the current level only; also
+       the drop target while a badge drag is in flight.
+
+       This is the ONLY icon strip in the command line. Launch groups no
+       longer auto-render a row of aggregate meaning-icons here (websites,
+       games, …): an entrance earns a place in the chrome only by being
+       dragged up, and a group's page is still reached by address or from
+       the `/sets` landing. The Pools of Meaning portal is likewise NOT here —
+       it lives on the control bar (controls-bar 'pools'). -->
   <hc-pinned-entrances></hc-pinned-entrances>
 
   @if (voiceSupported && pushToTalkEnabled()) {

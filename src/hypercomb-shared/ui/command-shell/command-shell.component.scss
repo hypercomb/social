@@ -497,8 +497,8 @@ $bp-phone-max: 599px;
 }
 
 // Arcade game toggles (.solomon-btn / .bubble-btn / .arkanoid-btn) were
-// retired here — games now aggregate under the single "games" launch-group
-// icon rendered by <hc-group-launchers>. See games-group.ts.
+// retired here — games now aggregate under the "games" launch group, reached
+// at /games or from `/sets`. See games-group.ts.
 
 // ── open-for-subscribers toggle (floats inside command-line, right) ──
 //

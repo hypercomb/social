@@ -76,6 +76,147 @@ $steel: #7eb6d6;
   line-height: 1.5;
 }
 
+// ── explainer + section headings ──────────────────────────
+
+// The panel is a flex column whose LIST is the only scroller — pin every
+// fixed block so a short viewport squeezes the list, never the explanations.
+.tags-intro,
+.tags-section-title,
+.tags-scope-section,
+.tags-active-section { flex: 0 0 auto; }
+
+.tags-intro {
+  margin: 0;
+  padding: 0.85em 1em 0.7em;
+  color: #8ea2b0;
+  font-size: 0.76em;
+  line-height: 1.5;
+}
+
+.tags-section-title {
+  margin: 0;
+  padding: 0.6em 1em 0.35em;
+  color: rgba($steel, 0.8);
+  font-size: 0.68em;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+// ── reach picker ──────────────────────────────────────────
+
+.tags-scope-section {
+  border-top: 1px solid rgba($steel, 0.12);
+  padding-bottom: 0.45em;
+}
+
+.scope-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6em;
+  width: 100%;
+  text-align: left;
+  padding: 0.45em 1em;
+  background: none;
+  border: none;
+  border-left: 2px solid transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: background 0.12s ease, border-color 0.12s ease;
+
+  &:hover { background: rgba($steel, 0.06); }
+
+  // the selected reach carries the steel edge — same cue the docked panels use
+  &.selected {
+    background: rgba($steel, 0.12);
+    border-left-color: rgba($steel, 0.85);
+
+    .scope-label { color: #eaf5fb; font-weight: 600; }
+    .scope-icon { color: $steel; }
+  }
+}
+
+.scope-icon {
+  flex: 0 0 auto;
+  font-size: 1.05em;
+  line-height: 1.2;
+  color: #6e8290;
+}
+
+.scope-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.12em;
+  min-width: 0;
+}
+
+.scope-label {
+  font-size: 0.82em;
+  color: #c6d5e0;
+}
+
+.scope-desc {
+  font-size: 0.7em;
+  line-height: 1.4;
+  color: #8ea2b0;
+}
+
+// ── current filter state ──────────────────────────────────
+
+.tags-active-section {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  flex-wrap: wrap;
+  padding: 0.6em 1em;
+  border-top: 1px solid rgba($steel, 0.12);
+  border-bottom: 1px solid rgba($steel, 0.12);
+}
+
+.active-line {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  flex-wrap: wrap;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.active-label {
+  font-size: 0.72em;
+  color: #8ea2b0;
+}
+
+.active-chip {
+  font-size: 0.74em;
+  color: #eaf5fb;
+  background: rgba($steel, 0.18);
+  border-radius: 999px;
+  padding: 0.1em 0.6em;
+}
+
+.active-none {
+  margin: 0;
+  font-size: 0.74em;
+  color: #8ea2b0;
+}
+
+.tags-clear {
+  flex: 0 0 auto;
+  background: none;
+  border: 1px solid rgba($steel, 0.35);
+  border-radius: 3px;
+  color: #c6d5e0;
+  font: inherit;
+  font-size: 0.72em;
+  padding: 0.15em 0.6em;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+
+  &:hover { background: rgba($steel, 0.16); color: #fff; }
+}
+
 .tags-list {
   list-style: none;
   margin: 0;

@@ -838,10 +838,35 @@ export class ShowCellDrone extends Drone {
   /** How wide a tag filter reaches: 'local' = current page only, 'children' =
    *  the current subtree, 'global' = the whole hive. Defaults to 'local'. */
   #filterScope: 'local' | 'children' | 'global' = 'local'
-  /** Flat list of {label, dir} from cross-page tag scan. null = normal mode.
-   *  `dir` is null under the layer model (sub-locations have no on-disk folder);
-   *  the consume path only reads `label`. */
-  #tagFlattenResults: { label: string; dir: FileSystemDirectoryHandle | null }[] | null = null
+  /** Flat list of matches from the cross-page tag scan. null = normal mode.
+   *  `dir` is null under the layer model (sub-locations have no on-disk folder).
+   *  `path` is the ABSOLUTE lineage of the match — a flattened tile can live
+   *  anywhere, so entering it must goRaw(path); appending the label to the
+   *  current location would mint a phantom segment. `hasChildren` is structural
+   *  truth (drives the branch flag); `matchesInside` counts matches strictly
+   *  below it, which is what the filter would show if you entered — 0 means
+   *  entering lands on an empty mesh, so the click is refused instead. */
+  #tagFlattenResults: {
+    label: string
+    dir: FileSystemDirectoryHandle | null
+    path: string[]
+    hasChildren: boolean
+    matchesInside: number
+  }[] | null = null
+  /** Absolute path per flattened label — handed to tile-overlay so a click
+   *  travels to the match's real location instead of appending its name. */
+  #flatPathByLabel = new Map<string, string[]>()
+  /** Flattened labels whose subtree holds no match under the active filter.
+   *  tile-overlay refuses entry and toasts rather than opening a blank page. */
+  #filterBlockedLabels = new Set<string>()
+  /** Lineage the scan last ran from — re-scan when the location moves under a
+   *  live filter, which is what makes the filter FOLLOW you as you drill in. */
+  #filterScanKey: string | null = null
+  /** Where the filter was switched on. A global filter reads the whole hive
+   *  from the root only while you stand here; once you enter a match the walk
+   *  re-roots to the current location (otherwise every level would show the
+   *  identical global flatten and entering would be a no-op). */
+  #filterAnchorKey: string | null = null
   /** Saved lineage segments before entering tag filter — restored when filter clears. */
   #preFilterSegments: string[] | null = null
   private moveNames: string[] | null = null
@@ -2321,13 +2346,28 @@ export class ShowCellDrone extends Drone {
     }
 
     // ── tag flatten override ──────────────────────────────
+    // The filter FOLLOWS you: entering a match re-roots the walk at wherever
+    // you landed, so the flatten narrows as you drill in rather than redrawing
+    // the same set at every level. A moved location means the scan is stale.
+    if (this.filterTags.size > 0) {
+      const segs = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
+      if ([...segs].join('/') !== this.#filterScanKey) await this.#scanTagsAcrossPages()
+    }
+
+    // Flatten state describes ONE flatten render and nothing else. Drop it here
+    // so an ordinary page can never inherit the previous filter's paths — a
+    // stale entry would redirect (or refuse) a click on an unrelated tile. The
+    // flatten branch below repopulates before it emits.
+    this.#flatPathByLabel.clear()
+    this.#filterBlockedLabels.clear()
+
     // An active filter that matched nothing in scope shows an EMPTY mesh — not
     // a silent fall-through to the unfiltered page. We deliberately skip
     // #emitRenderTags here so the last tag list (with the active filter pill)
     // stays on screen, leaving a way to clear the filter.
     if (this.filterTags.size > 0 && this.#tagFlattenResults && this.#tagFlattenResults.length === 0) {
       this.clearMesh('tag-filter: no matches in scope')
-      this.renderedCellsKey = `tag-flatten:${this.#filterScope}:` + [...this.filterTags].sort().join(',')
+      this.renderedCellsKey = `tag-flatten:${this.#filterScope}:${this.#filterScanKey ?? ''}:` + [...this.filterTags].sort().join(',')
       this.renderedLocationKey = locationKey
       this.renderedCells.clear()
       this.emitEffect('render:cell-count', { ...this.#buildCellCountPayload([]), settled: true })
@@ -2344,8 +2384,18 @@ export class ShowCellDrone extends Drone {
       const axial = this.resolve<any>('axial')
       if (!axial) { this.rendering = false; return }
 
+      // A flattened match keeps its structural truth: a tile with children still
+      // renders as a branch, so a filter never turns a parent into a leaf whose
+      // click opens the editor. Entering it is gated separately (below) on
+      // whether the subtree actually holds a match.
+      const flatBranchSet = new Set(flatResults.filter(r => r.hasChildren).map(r => r.label))
+      this.#flatPathByLabel = new Map(flatResults.map(r => [r.label, r.path]))
+      this.#filterBlockedLabels = new Set(
+        flatResults.filter(r => r.hasChildren && r.matchesInside === 0).map(r => r.label),
+      )
+
       const maxCells = Math.min(cellNames.length, typeof axial.items.size === 'number' ? axial.items.size : cellNames.length)
-      const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, flatSeedSet)
+      const cells = this.buildCellsFromAxial(axial, cellNames, maxCells, flatSeedSet, flatBranchSet)
       if (cells.length === 0) { this.clearMesh(`flat-seed: axial yielded 0 cells (names=${cellNames.length})`); this.rendering = false; return }
 
       // load images (best-effort). Runs even when dir is null —
@@ -2358,8 +2408,10 @@ export class ShowCellDrone extends Drone {
 
       this.cachedCellNames = cellNames
       this.cachedLocalCellSet = flatSeedSet
-      this.cachedBranchSet = new Set()
-      this.renderedCellsKey = `tag-flatten:${this.#filterScope}:` + [...this.filterTags].sort().join(',')
+      this.cachedBranchSet = flatBranchSet
+      // The scan root is part of the identity of a flatten now — without it a
+      // drill-down into a match would reuse the parent level's geometry.
+      this.renderedCellsKey = `tag-flatten:${this.#filterScope}:${this.#filterScanKey ?? ''}:` + [...this.filterTags].sort().join(',')
       this.renderedLocationKey = locationKey
 
       this.renderedCells.clear()
@@ -3901,11 +3953,21 @@ export class ShowCellDrone extends Drone {
     } | undefined
     if (!history?.sign || !history?.currentLayerAt || !store?.getResource) {
       this.#tagFlattenResults = null
+      // Stamp the key anyway — otherwise the render-side "location moved" check
+      // sees an unscanned location and re-runs this on every single frame.
+      const segs = this.resolve<any>('lineage')?.explorerSegments?.() ?? []
+      this.#filterScanKey = [...segs].join('/')
       return
     }
 
     const SIG_RE = /^[0-9a-f]{64}$/
-    const results: { label: string; dir: FileSystemDirectoryHandle | null }[] = []
+    const results: {
+      label: string
+      dir: FileSystemDirectoryHandle | null
+      path: string[]
+      hasChildren: boolean
+      matchesInside: number
+    }[] = []
     const seen = new Set<string>()
     const MAX_DEPTH = 32
 
@@ -3914,10 +3976,20 @@ export class ShowCellDrone extends Drone {
     //  • children — the current subtree, unbounded depth
     //  • local    — the current page only (its immediate cells; depth 1)
     const lineage = this.resolve<any>('lineage')
-    const rootPath: string[] = this.#filterScope === 'global'
+    const currentSegments: string[] = lineage?.explorerSegments?.() ? [...lineage.explorerSegments()] : []
+    const currentKey = currentSegments.join('/')
+    // A global filter reads from the hive root only while you stand at the
+    // location where you switched it on. Enter a match and the walk re-roots
+    // to where you now are — the filter follows you down instead of redrawing
+    // the same hive-wide flatten at every level.
+    const rootPath: string[] = (this.#filterScope === 'global' && currentKey === this.#filterAnchorKey)
       ? []
-      : (lineage?.explorerSegments?.() ? [...lineage.explorerSegments()] : [])
-    const maxRelDepth = this.#filterScope === 'local' ? 1 : MAX_DEPTH
+      : currentSegments
+    const recordDepth = this.#filterScope === 'local' ? 1 : MAX_DEPTH
+    // Walk ONE level past the deepest recorded row purely to count. A local
+    // filter records depth 1, but the enterability gate for those rows asks
+    // "would depth 1 FROM there hold anything?" — which is depth 2 from here.
+    const maxRelDepth = Math.min(recordDepth + 1, MAX_DEPTH)
 
     // Tag names on a single layer: tag-kind decorations ∪ legacy properties.tags.
     const tagNamesOf = async (layer: Record<string, unknown>): Promise<Set<string>> => {
@@ -3948,45 +4020,63 @@ export class ShowCellDrone extends Drone {
 
     // relDepth is measured from the scope root: 0 is the root itself (a page
     // container — never a result), 1 is its immediate cells, and so on.
-    const walk = async (path: string[], relDepth: number): Promise<void> => {
-      if (relDepth > maxRelDepth) return
+    // Returns how many matches sit AT `path` or below it, which is what lets a
+    // recorded row learn whether entering it would show anything.
+    const walk = async (path: string[], relDepth: number): Promise<number> => {
+      if (relDepth > maxRelDepth) return 0
       let layer: Record<string, unknown> | null
       try {
         const locSig = await history.sign({ explorerSegments: () => path })
         layer = await history.currentLayerAt(locSig)
-      } catch { return }
-      if (!layer) return
-
-      if (relDepth >= 1) {
-        const label = path[path.length - 1]
-        if (!seen.has(label)) {
-          const names = await tagNamesOf(layer)
-          for (const t of active) {
-            if (names.has(t)) { seen.add(label); results.push({ label, dir: null }); break }
-          }
-        }
-      }
-
-      if (relDepth >= maxRelDepth) return
+      } catch { return 0 }
+      if (!layer) return 0
 
       const rawChildren = Array.isArray(layer['children']) ? layer['children'] as unknown[] : []
-      for (const entry of rawChildren) {
-        const s = String(entry ?? '').trim()
-        if (!s) continue
-        let childName = s
-        if (SIG_RE.test(s)) {
-          try {
-            const child = await history.getLayerBySig(s)
-            if (!child?.name) continue
-            childName = String(child.name)
-          } catch { continue }
+
+      // Push the row before recursing; matchesInside is patched in below, since
+      // it isn't knowable until the subtree has been counted.
+      let selfMatched = false
+      let row: (typeof results)[number] | null = null
+      if (relDepth >= 1) {
+        const label = path[path.length - 1]
+        const names = await tagNamesOf(layer)
+        for (const t of active) if (names.has(t)) { selfMatched = true; break }
+        // Rows are recorded only down to recordDepth — anything past that is
+        // walked purely to answer "is there a match in here?".
+        if (selfMatched && relDepth <= recordDepth && !seen.has(label)) {
+          seen.add(label)
+          row = { label, dir: null, path: [...path], hasChildren: rawChildren.length > 0, matchesInside: 0 }
+          results.push(row)
         }
-        await walk([...path, childName], relDepth + 1)
       }
+
+      let below = 0
+      if (relDepth < maxRelDepth) {
+        for (const entry of rawChildren) {
+          const s = String(entry ?? '').trim()
+          if (!s) continue
+          let childName = s
+          if (SIG_RE.test(s)) {
+            try {
+              const child = await history.getLayerBySig(s)
+              if (!child?.name) continue
+              childName = String(child.name)
+            } catch { continue }
+          }
+          below += await walk([...path, childName], relDepth + 1)
+          // The counting-only level records nothing, so one hit already answers
+          // the gate — stop reading siblings instead of paying for the rest.
+          if (below > 0 && relDepth + 1 > recordDepth) break
+        }
+      }
+
+      if (row) row.matchesInside = below
+      return (selfMatched ? 1 : 0) + below
     }
 
     await walk(rootPath, 0)
     this.#tagFlattenResults = results
+    this.#filterScanKey = currentKey
   }
 
   /** Returns the current imageMix value, accounting for substrate fade-in animation. */
@@ -4477,12 +4567,19 @@ export class ShowCellDrone extends Drone {
       const wasFiltering = this.filterTags.size > 0
       this.#filterScope = scope ?? 'local'
       this.filterTags = new Set(active)
+      // Any change to the tag set or the scope invalidates the previous walk.
+      this.#filterScanKey = null
       if (this.filterTags.size > 0) {
+        const lineage = this.resolve<any>('lineage')
+        const here: string[] = lineage?.explorerSegments?.() ? [...lineage.explorerSegments()] : []
         // Save location before entering filter mode
-        if (!wasFiltering) {
-          const lineage = this.resolve<any>('lineage')
-          this.#preFilterSegments = lineage?.explorerSegments?.() ? [...lineage.explorerSegments()] : []
-        }
+        if (!wasFiltering) this.#preFilterSegments = here
+        // Re-anchor on EVERY filter change, not just activation: the anchor is
+        // "where you were when you last touched the filter". A global filter
+        // reads the whole hive while you stand on its anchor and re-roots once
+        // you enter a match — so widening the scope after drilling in has to
+        // move the anchor here, or global would never actually go global.
+        this.#filterAnchorKey = here.join('/')
         // Scan the whole tree, THEN render — the flatten override reads the
         // freshly-populated #tagFlattenResults. Clear the render key so the
         // flatten geometry rebuilds rather than reusing the prior page.
@@ -4494,11 +4591,22 @@ export class ShowCellDrone extends Drone {
         })()
       } else {
         this.#tagFlattenResults = null
+        this.#flatPathByLabel.clear()
+        this.#filterBlockedLabels.clear()
+        this.#filterAnchorKey = null
         this.renderedCellsKey = ''
-        // Restore previous location
+        // Restore the pre-filter location ONLY if the filter never moved us.
+        // Entering a match is now a real, path-correct navigation the user
+        // chose — teleporting them back to where they opened the filter would
+        // throw that away. (The restore exists because the old flatten had no
+        // way to enter a match without minting a phantom segment.)
         if (this.#preFilterSegments !== null) {
-          const nav = get('@hypercomb.social/Navigation') as { goRaw?: (segs: string[]) => void } | undefined
-          nav?.goRaw?.(this.#preFilterSegments)
+          const lineage = this.resolve<any>('lineage')
+          const here: string[] = lineage?.explorerSegments?.() ? [...lineage.explorerSegments()] : []
+          if (here.join('/') === this.#preFilterSegments.join('/')) {
+            const nav = get('@hypercomb.social/Navigation') as { goRaw?: (segs: string[]) => void } | undefined
+            nav?.goRaw?.(this.#preFilterSegments)
+          }
           this.#preFilterSegments = null
         }
         this.requestRender()
@@ -5371,6 +5479,8 @@ export class ShowCellDrone extends Drone {
     linkLabels: string[]
     hiddenLabels: string[]
     shadedLabels: string[]
+    flatPaths: Record<string, string[]>
+    filterBlocked: string[]
   } {
     // Empty-layer invitation watermark — DISABLED for now. It should be a
     // genuine-swarm cue, but public mode is the default in some shells, so
@@ -5416,6 +5526,16 @@ export class ShowCellDrone extends Drone {
       // dimmed and are INERT — tile-overlay gates presses/clicks on this
       // set so bright always means "preloaded, the click lands instantly".
       shadedLabels: cells.filter(c => this.#cellIsShaded(c)).map(c => c.label),
+      // Tag-flatten only — hence the filterTags guard: several render paths
+      // reach this helper without passing the flatten block, and a stale entry
+      // surviving into an ordinary page would redirect (or refuse) a click on
+      // an unrelated tile that merely shares a name with a past match.
+      // A match can live anywhere, so entering it travels to its absolute path;
+      // appending the label to wherever you're standing mints a phantom segment.
+      flatPaths: this.filterTags.size > 0 ? Object.fromEntries(this.#flatPathByLabel) : {},
+      // Matches with children but nothing tagged inside: entering would land on
+      // a blank filtered mesh, so tile-overlay refuses and says why.
+      filterBlocked: this.filterTags.size > 0 ? [...this.#filterBlockedLabels] : [],
     }
   }
 

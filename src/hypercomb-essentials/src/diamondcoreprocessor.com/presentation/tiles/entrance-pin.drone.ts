@@ -41,8 +41,29 @@ type FeaturePressPayload = {
   clientY?: number
 }
 
+/** An armed press on a feature icon — a drag candidate until it passes the
+ *  threshold, at which point it becomes a pin drag. */
+type PressState = {
+  pointerId: number
+  startX: number
+  startY: number
+  group: LaunchGroupLike
+  member: GroupMemberLike
+  /** The view this entrance opens, parsed from the pressed icon's action
+   *  (`view-enter:<view>`). The shell asks the VisualBeeRegistry whether that
+   *  view CASCADES, which decides how far the pin reaches. */
+  view: string
+  dragging: boolean
+  ghost: HTMLDivElement | null
+}
+
 /** Pointer travel (px) that turns a feature-icon press into a pin drag. */
 const DRAG_THRESHOLD_PX = 6
+
+/** Action-name prefix of a view ENTER icon (visual-bee-icons owns the
+ *  emission; mirrored here rather than imported so the drone keeps its own
+ *  flat dependency surface). The suffix is the view the entrance opens. */
+const VIEW_ENTER_PREFIX = 'view-enter:'
 
 export class EntrancePinDrone extends Drone {
   readonly namespace = 'diamondcoreprocessor.com'
@@ -59,15 +80,7 @@ export class EntrancePinDrone extends Drone {
    *  the release must not run the icon's action or a tile press). */
   #consumedPointerId: number | null = null
 
-  #press: {
-    pointerId: number
-    startX: number
-    startY: number
-    group: LaunchGroupLike
-    member: GroupMemberLike
-    dragging: boolean
-    ghost: HTMLDivElement | null
-  } | null = null
+  #press: PressState | null = null
 
   protected override sense = () => true
 
@@ -94,6 +107,7 @@ export class EntrancePinDrone extends Drone {
       pointerId: p.pointerId,
       startX: p.clientX ?? 0, startY: p.clientY ?? 0,
       group: entrance.group, member: entrance.member,
+      view: EntrancePinDrone.#viewOf(p.action),
       dragging: false, ghost: null,
     }
     document.addEventListener('pointermove', this.#onPressMove)
@@ -119,6 +133,14 @@ export class EntrancePinDrone extends Drone {
     return null
   }
 
+  /** `view-enter:website` → `website`. Anything else (a feature icon that
+   *  isn't a view entry) yields '' — the pin then has no behavior to ask
+   *  about and stays strictly on the page it was dropped on. */
+  static #viewOf(action: string | undefined): string {
+    const name = String(action ?? '')
+    return name.startsWith(VIEW_ENTER_PREFIX) ? name.slice(VIEW_ENTER_PREFIX.length) : ''
+  }
+
   static #pathKey(segments: readonly string[]): string {
     return segments
       .map(s => String(s ?? '').trim()).filter(Boolean)
@@ -138,10 +160,7 @@ export class EntrancePinDrone extends Drone {
       // the icon's action (or land as a tile press) when the pointer lets go.
       this.#consumedPointerId = p.pointerId
       p.ghost = this.#createGhost(p.member.icon || p.group.icon || 'flag')
-      EffectBus.emit('entrance:drag-start', {
-        groupId: p.group.id, memberKey: p.member.key,
-        icon: p.member.icon || p.group.icon || '', label: p.member.label,
-      })
+      EffectBus.emit('entrance:drag-start', this.#pinPayload(p))
     }
     if (p.ghost) {
       p.ghost.style.left = `${e.clientX}px`
@@ -158,12 +177,24 @@ export class EntrancePinDrone extends Drone {
     // Ghost is pointer-events:none, so elementFromPoint sees through it.
     const under = document.elementFromPoint(e.clientX, e.clientY)
     if (under?.closest('[data-entrance-dropzone]')) {
-      EffectBus.emit('entrance:pin', {
-        groupId: p.group.id, memberKey: p.member.key,
-        icon: p.member.icon || p.group.icon || '', label: p.member.label,
-      })
+      EffectBus.emit('entrance:pin', this.#pinPayload(p))
     }
     EffectBus.emit('entrance:drag-end', {})
+  }
+
+  /** What the shell persists. `view` + `segments` are what let it decide the
+   *  pin's REACH: it asks the VisualBeeRegistry whether `view` cascades, and
+   *  if so keeps the icon up throughout `segments`' subtree. Sent on
+   *  drag-start too so the bar can preview the same shape it will store. */
+  #pinPayload(p: PressState): Record<string, unknown> {
+    return {
+      groupId: p.group.id,
+      memberKey: p.member.key,
+      icon: p.member.icon || p.group.icon || '',
+      label: p.member.label,
+      view: p.view,
+      segments: [...p.member.segments],
+    }
   }
 
   #onPressCancel = (e: PointerEvent): void => {

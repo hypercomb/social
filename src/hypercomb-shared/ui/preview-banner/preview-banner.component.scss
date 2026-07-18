@@ -1,0 +1,92 @@
+// hypercomb-shared/ui/preview-banner/preview-banner.component.scss
+//
+// Quiet top-center strip, same chrome family as the presence banner:
+// frosted dark pill, no motion beyond one soft pulse dot. The two
+// buttons are the whole point — keep them unmistakable but cold.
+
+:host {
+  position: fixed;
+  // Clear the top header bar (2.5rem desktop, scaled by --hc-header-zoom);
+  // sit a step below the presence strip so both can coexist.
+  top: calc(2.5rem * var(--hc-header-zoom, 1) + 2.6rem);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 56;
+  pointer-events: none;
+  display: block;
+  max-width: 86vw;
+}
+
+@media (pointer: coarse) {
+  :host {
+    top: calc(3.5rem * var(--hc-header-zoom, 1) + 2.6rem);
+  }
+}
+
+.preview-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0.65rem;
+  background: color-mix(in srgb, var(--md-surface-c-low, #1a1a1a) 78%, transparent);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(245, 245, 245, 0.1);
+  border-radius: 999px;
+  pointer-events: auto;
+  white-space: nowrap;
+  font-size: 0.8rem;
+  color: rgba(245, 245, 245, 0.85);
+}
+
+.pulse {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 50%;
+  background: #6fd39a;
+  box-shadow: 0 0 6px rgba(111, 211, 154, 0.7);
+  animation: preview-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes preview-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+.title {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.68rem;
+  color: rgba(245, 245, 245, 0.55);
+}
+
+.name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 22vw;
+}
+
+.meta {
+  color: rgba(245, 245, 245, 0.45);
+  font-size: 0.72rem;
+}
+
+button {
+  border: 1px solid rgba(245, 245, 245, 0.14);
+  border-radius: 999px;
+  padding: 0.18rem 0.7rem;
+  font-size: 0.74rem;
+  cursor: pointer;
+  background: transparent;
+  color: rgba(245, 245, 245, 0.85);
+  transition: background 120ms ease, border-color 120ms ease;
+
+  &:hover { background: rgba(245, 245, 245, 0.08); }
+}
+
+.adopt {
+  border-color: rgba(111, 211, 154, 0.5);
+  color: #6fd39a;
+
+  &:hover { background: rgba(111, 211, 154, 0.12); }
+}

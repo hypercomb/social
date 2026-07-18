@@ -3,7 +3,7 @@
 import { QueenBee, EffectBus } from '@hypercomb/core'
 
 /**
- * /tutorial — AB the bee flies around the screen and teaches the basics:
+ * /tutorial — a beeing flies around the screen and teaches the basics:
  * going into and out of tiles, creating a tile from the command line,
  * giving it children, travelling between them, zoom, pan, and Home.
  *
@@ -16,7 +16,7 @@ export class TutorialQueenBee extends QueenBee {
   readonly namespace = 'diamondcoreprocessor.com'
   readonly command = 'tutorial'
   override readonly aliases = ['tour']
-  override description = 'Guided beginner tour — AB the bee shows you the basics'
+  override description = 'Guided beginner tour — a beeing shows you the basics'
   override descriptionKey = 'slash.tutorial'
   override options = ['stop']
   override examples = [
