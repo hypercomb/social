@@ -585,9 +585,11 @@ window.ioc.register('@diamondcoreprocessor.com/WebsiteQueenBee', _website)
       slashCommand: '/website',
       iconName: 'website',
       toggleIcon: 'web',
-      // Websites are opened from the launch-group aggregator (the cloud
-      // tiles); a per-node toggle beside the launcher icons is redundant.
-      commandLineToggle: false,
+      // Per-node toggle ON: standing on any page-bearing cell (root or
+      // sub-page) surfaces this site's own glyph, so "go to the tile, click
+      // the website" enters the site right there. The launcher aggregator
+      // still opens sites from their ROOTS; this is the child-page entrance
+      // the launcher can't provide.
       decorationKind: 'visual:website:page',
       labelKey: 'view.website',
       descriptionKey: 'view.website.description',

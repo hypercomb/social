@@ -33,6 +33,16 @@ export type TileIconProvider = {
    * Defaults to false — opt in.
    */
   defaultActive?: boolean
+  /**
+   * A FEATURE affordance (website, files, contact, …): never rendered in the
+   * always-visible top row. The ⋮ (more) toggle reveals the feature row(s) —
+   * bigger icons showcasing what this tile actually carries. While a tile has
+   * visible feature icons, the danger row (delete) stays hidden: features must
+   * be removed before the tile can be deleted from the overlay.
+   */
+  featureRow?: boolean
+  /** Ride the hidden row revealed by ⋮ — for destructive actions (delete). */
+  dangerRow?: boolean
   hoverTint?: number
   visibleWhen?: (ctx: any) => boolean
   tintWhen?: (ctx: any) => number | null | undefined

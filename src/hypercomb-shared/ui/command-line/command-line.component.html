@@ -35,6 +35,11 @@
        and is not an aggregate. -->
   <hc-group-launchers></hc-group-launchers>
 
+  <!-- Per-LEVEL pinned quick links — entrances the participant dragged up
+       from a tile's entrance badge. Scoped to the current level only; also
+       the drop target while a badge drag is in flight. -->
+  <hc-pinned-entrances></hc-pinned-entrances>
+
   @if (voiceSupported && pushToTalkEnabled()) {
     <button class="mic-btn" [class.recording]="voiceActive()"
       (pointerdown)="startVoice($event)" (pointerup)="stopVoice()" (pointerleave)="stopVoice()"

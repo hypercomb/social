@@ -1,0 +1,19 @@
+<!-- Per-level pinned quick links. Rendered only when this level has pins, or
+     while an entrance-badge drag is in flight (the dashed drop slot invites
+     the drop). Hidden entirely in swarm mode — solo-authoring chrome. -->
+@if (!swarmMode() && (pins().length > 0 || dropArmed())) {
+  <div class="pinned-entrances" [class.drop-armed]="dropArmed()">
+    @for (p of pins(); track p.groupId + ':' + p.memberKey) {
+      <button class="pin-btn" type="button"
+              [class.dragging]="draggingKey() === p.memberKey"
+              [class.dragging-out]="draggingKey() === p.memberKey && draggingOut()"
+              (pointerdown)="onPinDown(p, $event)"
+              [attr.aria-label]="p.label" [title]="p.label">
+        <span class="mat-sym">{{ p.icon }}</span>
+      </button>
+    }
+    @if (dropArmed()) {
+      <span class="drop-slot" aria-hidden="true"></span>
+    }
+  </div>
+}

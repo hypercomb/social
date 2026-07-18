@@ -79,6 +79,13 @@ export type LayerContent = {
 export const EMPTY_LAYER_CONTENT_SIG = 'a8a9aaacd1d7631b9d1b66a6b0e4b14fdd2f1052ffd5dfac2e92c0740020ee8d'
 export const EMPTY_LAYER_CONTENT: Readonly<LayerContent> = Object.freeze({ name: '', children: [] })
 
+/** Minimal Store surface the neighbourhood warm needs to hydrate a tile's own
+ *  content signatures (slots + nested image) without a host round-trip. */
+type StoreContentWarm = {
+  getResourceLocal?: (sig: string) => Promise<Blob | null>
+  collectSignatures?: (value: unknown, out?: Set<string>) => Set<string>
+}
+
 /** Root's display name. Used when the layer has no path segments. */
 export const ROOT_NAME = '/'
 
@@ -181,6 +188,14 @@ export class HistoryService {
         if (document.visibilityState === 'hidden') this.#flushHeadIndex()
       })
     } catch { /* non-DOM context — head persistence is a main-thread-only optimization */ }
+    try {
+      // REAL-TIME SUPERSEDES PRELOADER: any navigation makes an in-flight
+      // neighbourhood warm stale (it serves the location the user just LEFT).
+      // Bump the generation; the walk and its content warms check it per node
+      // and bail, so a warm never competes for OPFS with the render of the
+      // location the user is actually entering.
+      window.addEventListener('navigate', () => { this.#preloadGeneration++ })
+    } catch { /* non-DOM context */ }
     // SELF-CLEANING: when the legacy `__history__` pool (or a per-bag
     // `__temporary__` archive) still exists, drain it into the signed
     // locations and remove the orphaned dirs — automatically. Detached
@@ -2636,12 +2651,15 @@ export class HistoryService {
    * Logs progress every 50 layers so a long boot doesn't look frozen,
    * and emits a summary at the end with depth-binned counts.
    */
-  // Bounded neighbourhood warm: root pool → children → … up to this depth,
-  // one file per tile. NOT the whole hive — an unbounded walk fetched every
-  // reachable layer (~1500 on a big tree) and its OPFS churn starved paint
-  // and input. Deeper tiles warm ON DEMAND (one file per tile) as the user
-  // navigates into them; there is no need to pull the entire universe ahead.
+  // Bounded neighbourhood warm, BEST-FIRST by local usage: warm the current
+  // tile's OWN content first (image + every slot), then descend into its
+  // most-USED child, and so on down the lineage — up to this depth. NOT the
+  // whole hive (an unbounded walk fetched ~1500 layers and starved paint);
+  // tiles beyond the bound warm ON DEMAND as the user navigates into them.
   static readonly #PRELOAD_MAX_DEPTH = 3
+  // Best-first can chase a hot path deep within the depth bound; cap total
+  // tiles warmed per pass so a pathological neighbourhood can't run away.
+  static readonly #PRELOAD_NODE_BUDGET = 512
   public readonly preloadFromRoot = async (
     rootSig: string,
     maxDepth: number = HistoryService.#PRELOAD_MAX_DEPTH,
@@ -2653,8 +2671,8 @@ export class HistoryService {
     let cacheHits = 0
     let walked = 0
 
-    // Cooperative slicing — mirror preloadAllBags: yield whenever a slice
-    // exceeds ~12ms so an in-flight render keeps the event loop.
+    // Cooperative slicing — yield whenever a slice exceeds ~12ms so an
+    // in-flight render keeps the event loop.
     let sliceStart = performance.now()
     const yieldIfDue = async (): Promise<void> => {
       if (performance.now() - sliceStart < 12) return
@@ -2662,54 +2680,77 @@ export class HistoryService {
       sliceStart = performance.now()
     }
 
-    const CONCURRENCY = 12
-    let frontier: string[] = [rootSig]
-    let depth = 0
+    // BEST-FIRST by local usage. A single priority frontier of tiles; each
+    // round drains the highest-weight slice (bounded worker pool), warms each
+    // tile's OWN content (image + every slot) so the TILE itself becomes
+    // available/bright FIRST, then enqueues its children weighted by usage.
+    // Popping the highest weight next makes the walk descend the most-USED
+    // path down the lineage ("move down as you finish the parent") instead of
+    // finishing every level. Cold participant (all weights 0) → the depth
+    // tiebreak makes it shallow-first, i.e. the prior breadth-first behaviour.
+    // Best-effort throughout: never AWAIT the tracker, never gate real-time.
+    const ranker = get<UsageRanker>(USAGE_IOC_KEY)
+    const weightOf = (sig: string): number => (ranker ? ranker.weight(sig) : 0)
+    const store = get<StoreContentWarm>('@hypercomb.social/Store')
+    // Superseded-by-navigation check: captured now, compared per node. The
+    // moment the user navigates again this walk is warming a STALE
+    // neighbourhood — bail immediately rather than contend for OPFS with the
+    // new location's render.
+    const gen = this.#preloadGeneration
+    let superseded = false
 
-    // BOUNDED: stop once we've warmed `maxDepth` levels out from the root.
-    // Beyond that is on-demand (getLayerBySig cold path, one file per tile).
-    while (frontier.length && depth < maxDepth) {
-      const nextFrontier = new Set<string>()
-      // Bounded worker pool over this depth level. A shared cursor hands
-      // each idle worker the next sig; visited is pre-seeded so no sig is
-      // fetched twice even when several parents reference the same child.
+    type WarmNode = { sig: string; depth: number; weight: number }
+    const frontier: WarmNode[] = [{ sig: rootSig, depth: 0, weight: weightOf(rootSig) }]
+    const CONCURRENCY = 12
+
+    while (frontier.length && walked < HistoryService.#PRELOAD_NODE_BUDGET && this.#preloadGeneration === gen) {
+      // Highest-usage first; equal weight → shallower first (cold ⇒ BFS).
+      frontier.sort((a, b) => (b.weight - a.weight) || (a.depth - b.depth))
+      const slice = frontier.splice(0, CONCURRENCY)
       let cursor = 0
-      const drainLevel = frontier
       const worker = async (): Promise<void> => {
-        while (cursor < drainLevel.length) {
-          const sig = drainLevel[cursor++]
-          const wasCached = this.#parsedLayerCache.has(sig) || this.#preloaderCache.has(sig)
-          const layer = await this.getLayerBySig(sig)
+        while (cursor < slice.length) {
+          if (this.#preloadGeneration !== gen) { superseded = true; return }
+          const node = slice[cursor++]
+          const wasCached = this.#parsedLayerCache.has(node.sig) || this.#preloaderCache.has(node.sig)
+          const layer = await this.getLayerBySig(node.sig)
           await yieldIfDue()
           if (!layer) continue
           walked++
-          depthHistogram.set(depth, (depthHistogram.get(depth) ?? 0) + 1)
+          depthHistogram.set(node.depth, (depthHistogram.get(node.depth) ?? 0) + 1)
           if (wasCached) cacheHits++
           if (walked % 50 === 0) {
-            console.log(`[preload] preloadFromRoot progress: ${walked} layers walked (depth ≤ ${depth})`)
+            console.log(`[preload] best-first progress: ${walked} tiles warmed (depth ≤ ${node.depth})`)
           }
-          const children = Array.isArray(layer.children) ? layer.children : []
-          for (const childSig of children) {
-            if (HistoryService.#SIG_RE.test(childSig) && !visited.has(childSig)) {
-              visited.add(childSig)
-              nextFrontier.add(childSig)
+          // Warm this tile's OWN content (all slots + the nested image) so it
+          // renders bright without a network hop, BEFORE descending to its
+          // children. Fire-and-forget + localOnly (memory→OPFS, never host: a
+          // background warm must not 404 on an absent/historical sig).
+          // Depth-bounded to what INSTANT-CLICK needs: the CURRENT view (0),
+          // its children (1 — this view's tiles), and grandchildren (2 — the
+          // props+images that must paint the moment a child is clicked;
+          // without them a first visit pays ~1.3-1.9s of OPFS image reads AT
+          // CLICK TIME — measured). Deeper levels warm layer BYTES only.
+          // Safe at this volume ONLY because reads are side-effect-bounded:
+          // the #stageToHost rate limiter keeps read-triggered staging to a
+          // trickle (the earlier flood was staging's per-sig durable-queue
+          // writes, not the reads themselves).
+          if (node.depth <= 2) this.#warmTileContent(layer, store, gen)
+          // Enqueue children weighted by usage, bounded by depth.
+          if (node.depth + 1 < maxDepth) {
+            const children = Array.isArray(layer.children) ? layer.children : []
+            for (const childSig of children) {
+              if (HistoryService.#SIG_RE.test(childSig) && !visited.has(childSig)) {
+                visited.add(childSig)
+                frontier.push({ sig: childSig, depth: node.depth + 1, weight: weightOf(childSig) })
+              }
             }
           }
         }
       }
       await Promise.all(
-        Array.from({ length: Math.min(CONCURRENCY, frontier.length) }, () => worker()),
+        Array.from({ length: Math.min(CONCURRENCY, slice.length) }, () => worker()),
       )
-      // Warm the participant's most-used tiles first WITHIN this depth band:
-      // rank the next level by local usage weight (recency-decayed dwell +
-      // visits). Shallow-first ordering is preserved — we only reorder inside
-      // a level. Best-effort: a cold participant / absent tracker collapses to
-      // raw order, and we never AWAIT the tracker (real-time is never gated on
-      // the preloader).
-      const nextLevel = [...nextFrontier]
-      const ranker = window.ioc?.get?.(USAGE_IOC_KEY) as UsageRanker | undefined
-      frontier = ranker ? ranker.rank(nextLevel) : nextLevel
-      depth++
     }
     const elapsed = Math.round(performance.now() - startMs)
     const depthSummary = [...depthHistogram.entries()]
@@ -2717,9 +2758,52 @@ export class HistoryService {
       .map(([d, n]) => `d${d}:${n}`)
       .join(' ')
     console.log(
-      `[preload] preloadFromRoot done: ${walked} layers reachable from ${rootSig.slice(0, 12)} ` +
-      `(${cacheHits} already cached, ${walked - cacheHits} newly warmed) in ${elapsed}ms. depths: ${depthSummary}`
+      `[preload] preloadFromRoot ${superseded || this.#preloadGeneration !== gen ? 'SUPERSEDED by navigation' : 'done'} ` +
+      `(best-first): ${walked} tiles warmed from ${rootSig.slice(0, 12)} ` +
+      `(${cacheHits} already cached) in ${elapsed}ms. depths: ${depthSummary}`
     )
+  }
+
+  /** Warm a tile's OWN content signatures — every slot plus the image nested
+   *  at `properties[0] → props.small.image` — into Store's resource cache so
+   *  the tile renders bright without a network hop. Excludes `children` (those
+   *  are layers, warmed by the walk itself). LocalOnly (memory→OPFS, never
+   *  host) and fire-and-forget: a background warm must not 404 on an absent or
+   *  historical sig, and real-time render is never gated on it. */
+  #warmTileContent = (layer: LayerContent, store: StoreContentWarm | undefined, gen?: number): void => {
+    const getLocal = store?.getResourceLocal
+    const collect = store?.collectSignatures
+    if (!getLocal || !collect) return
+    const sigs = new Set<string>()
+    for (const [key, val] of Object.entries(layer)) {
+      if (key === 'name' || key === 'children') continue
+      collect(val, sigs)
+    }
+    if (sigs.size === 0) return
+    // SEQUENTIAL within the tile (detached from the walk — the walk runs ≤12
+    // tiles concurrently, bounding total concurrent OPFS reads) and PARSE-
+    // FREE: getResourceLocal warms the BYTES into the resource cache with no
+    // host fetch and no JSON.parse. Only SMALL blobs (props-sized JSON) are
+    // parsed to chase the nested image sig — the earlier version pushed
+    // EVERY blob through store.resolve, which JSON.parses megabyte IMAGE
+    // bytes on the main thread: at proximity-walk scale that stacked into a
+    // 45s+ main-thread freeze. Never parse what you only need cached.
+    void (async () => {
+      for (const s of sigs) {
+        // Stale the moment the user navigates again — stop contending.
+        if (gen !== undefined && this.#preloadGeneration !== gen) return
+        try {
+          const blob = await getLocal(s)
+          if (!blob || blob.size > 32768) continue
+          const props = JSON.parse(await blob.text()) as
+            { small?: { image?: unknown }; flat?: { small?: { image?: unknown } } } | null
+          const img = props?.flat?.small?.image ?? props?.small?.image
+          if (typeof img === 'string' && HistoryService.#SIG_RE.test(img)) {
+            await getLocal(img)
+          }
+        } catch { /* not JSON / absent — any bytes read are warmed regardless */ }
+      }
+    })()
   }
 
   // Bounded NEIGHBOURHOOD pre-warm — the "passive warmer" the disabled boot
@@ -2735,6 +2819,9 @@ export class HistoryService {
   // runtime-initializer on boot + every lineage 'change' (debounced + idle
   // there). Non-fatal: a cold render is correct, just slower.
   #lastWarmedHead = ''
+  // Bumped on every `navigate` (constructor listener). Walks capture it at
+  // start and abandon as soon as it moves — a superseded warm is dead weight.
+  #preloadGeneration = 0
   public readonly preloadNeighbourhood = async (
     locationSig: string,
     maxDepth: number = HistoryService.#PRELOAD_MAX_DEPTH,

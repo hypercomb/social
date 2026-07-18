@@ -157,6 +157,10 @@ type IconProviderEntry = {
   /** Ride the hidden row revealed by the ⋮ (more) toggle instead of the
    *  always-visible row — for secondary or destructive actions. */
   dangerRow?: boolean
+  /** A FEATURE affordance — revealed by ⋮ as a bigger icon on the feature
+   *  row(s), never in the always-visible top row. See TileIconProvider in
+   *  hypercomb-shared (the canonical contract). */
+  featureRow?: boolean
   hoverTint?: number
   visibleWhen?: (ctx: OverlayTileContext) => boolean
   tintWhen?: OverlayTintFn
@@ -235,8 +239,12 @@ export type IconRegistryEntry = {
   defaultActive?: boolean
   /** Lives in the hidden "danger" row revealed by tapping the overlay's ⋮
    *  (more) icon — used for destructive actions (delete) so they're never a
-   *  one-tap default. */
+   *  one-tap default. Suppressed entirely while the tile has visible
+   *  feature icons — features must be removed before delete surfaces. */
   dangerRow?: boolean
+  /** A FEATURE affordance — ⋮ reveals it bigger on the feature row(s),
+   *  never the always-visible top row. */
+  featureRow?: boolean
   visibleWhen?: (ctx: OverlayTileContext) => boolean
   tintWhen?: OverlayTintFn
   /** i18n key for the short hint label (shown on sustained hover) */
@@ -380,17 +388,17 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   // decoration — your own (private / public-own) or a peer's (public-external,
   // so their attached docs are downloadable). visibleWhen reads the synchronous
   // decoration-kind index; the click is handled by FileDropDrone via tile:action.
-  { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
-  { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
-  { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, profile: 'public-external', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
+  { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, featureRow: true, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
+  { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, featureRow: true, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
+  { name: 'files', svgMarkup: FILES_ICON, hoverTint: 0xa8c8ff, featureRow: true, profile: 'public-external', visibleWhen: (ctx: OverlayTileContext) => hasDecorationKind(ctx.label, FILES_ATTACHMENT_KIND), labelKey: 'action.files', descriptionKey: 'action.files.description' },
   // ── swarm invite (all profiles) ──
   // The invite icon appears on any tile carrying a `swarm:invite` junction —
   // your own (private / public-own) or a peer's broadcasting it (public-external).
   // visibleWhen reads the synchronous decoration index + peer cache; the click
   // is handled by MeetingInviteWorker via tile:action (auth-switch join).
-  { name: 'invite', svgMarkup: INVITE_ICON, hoverTint: 0xa8ffd8, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => tileHasInvite(ctx.label), labelKey: 'action.invite', descriptionKey: 'action.invite.description' },
-  { name: 'invite', svgMarkup: INVITE_ICON, hoverTint: 0xa8ffd8, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => tileHasInvite(ctx.label), labelKey: 'action.invite', descriptionKey: 'action.invite.description' },
-  { name: 'invite', svgMarkup: INVITE_ICON, hoverTint: 0xa8ffd8, profile: 'public-external', visibleWhen: (ctx: OverlayTileContext) => tileHasInvite(ctx.label), labelKey: 'action.invite', descriptionKey: 'action.invite.description' },
+  { name: 'invite', svgMarkup: INVITE_ICON, hoverTint: 0xa8ffd8, featureRow: true, profile: 'private', visibleWhen: (ctx: OverlayTileContext) => tileHasInvite(ctx.label), labelKey: 'action.invite', descriptionKey: 'action.invite.description' },
+  { name: 'invite', svgMarkup: INVITE_ICON, hoverTint: 0xa8ffd8, featureRow: true, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => tileHasInvite(ctx.label), labelKey: 'action.invite', descriptionKey: 'action.invite.description' },
+  { name: 'invite', svgMarkup: INVITE_ICON, hoverTint: 0xa8ffd8, featureRow: true, profile: 'public-external', visibleWhen: (ctx: OverlayTileContext) => tileHasInvite(ctx.label), labelKey: 'action.invite', descriptionKey: 'action.invite.description' },
   // NOTE: feature icons (e.g. `contact`) are NOT listed here. A feature
   // contributes its overlay icon by registering ONE `IconProviderRegistry`
   // provider declaring `profiles` + `defaultActive` + `visibleWhen` (see
@@ -596,6 +604,7 @@ export class TileActionsDrone extends Drone {
           profile: prof as OverlayProfileKey,
           defaultActive: p.defaultActive,
           dangerRow: p.dangerRow,
+          featureRow: p.featureRow,
           visibleWhen: p.visibleWhen,
           tintWhen: p.tintWhen,
           labelKey: p.labelKey,
@@ -646,6 +655,7 @@ export class TileActionsDrone extends Drone {
           hoverTint: entry.hoverTint,
           profile: entry.profile,
           dangerRow: entry.dangerRow,
+          featureRow: entry.featureRow,
           visibleWhen: entry.visibleWhen,
           tintWhen: entry.tintWhen,
           labelKey: entry.labelKey,
@@ -690,6 +700,7 @@ export class TileActionsDrone extends Drone {
         hoverTint: entry.hoverTint,
         profile: entry.profile,
         dangerRow: entry.dangerRow,
+        featureRow: entry.featureRow,
         visibleWhen: entry.visibleWhen,
         // Preserve tintWhen on re-registration — without it the world icons
         // (the only tintWhen users) lose their public-state color after any

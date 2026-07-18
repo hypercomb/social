@@ -1,6 +1,6 @@
 // diamondcoreprocessor.com/pixi/show-cell.drone.ts
-import { Drone, I18N_IOC_KEY } from '@hypercomb/core'
-import type { I18nProvider } from '@hypercomb/core'
+import { Drone, I18N_IOC_KEY, USAGE_IOC_KEY } from '@hypercomb/core'
+import type { I18nProvider, UsageRanker } from '@hypercomb/core'
 import { Application, Container, Geometry, Mesh, Texture } from 'pixi.js'
 import type { HostReadyPayload } from './pixi-host.worker.js'
 import { HexLabelAtlas } from '../grid/hex-label.atlas.js'
@@ -25,6 +25,18 @@ import type { ViewportPersistence, ViewportSnapshot } from '../../navigation/zoo
 // built. Anomaly warns (stale manifest, null sigs, gate exhausted) stay
 // unconditional — they fire rarely and have earned their keep.
 const DIAG = (() => { try { return localStorage.getItem('hc:diag') === '1' } catch { return false } })()
+
+// Children-readiness shade — OPT-IN while under development (localStorage
+// 'hc:child-shade' = '1'). The gate ("a branch tile stays shaded until the
+// tiles INSIDE it are proven loaded, releasing individually most-used first,
+// memoized so a page shades once per session") is built end-to-end but its
+// bolt-on integration kept regressing live: readiness state derived from
+// lineage reads that straddle navigations (currentSig vs explorerSegments vs
+// cursor) wiped memos and stuck tiles shaded. It needs to be driven from the
+// render pass's OWN settled address instead of re-reading lineage. Until that
+// integration lands, default OFF = the original own-image shade (stable since
+// 2026-07-11); flag ON re-enables the children gate for development.
+const CHILD_SHADE = (() => { try { return localStorage.getItem('hc:child-shade') === '1' } catch { return false } })()
 
 type Axial = { q: number; r: number }
 /** divergence: 0 = current, 1 = future-add (ghost), 2 = future-remove (marked) */
@@ -537,6 +549,43 @@ export class ShowCellDrone extends Drone {
   // changes" pattern — safe only because we gate on completeness before
   // writing here.
   readonly #completeChildNamesByParentSig = new Map<string, { names: string[]; branches: string[] }>()
+  // Children-readiness shade. A branch tile stays shaded until the tiles INSIDE
+  // it (its direct children) all have their images present locally — an
+  // un-shaded branch means "click me, the inside is already loaded and bright".
+  // `#childrenReadyByLabel`: label → all direct children's images present-or-
+  // concluded. `#childImageSigsByParent`: parent layer sig → child label →
+  // that child's grandchild image sigs (structure is stable per parent sig, so
+  // it is resolved once and only byte-PRESENCE is re-checked each pass).
+  readonly #childrenReadyByLabel = new Map<string, boolean>()
+  readonly #childImageSigsByParent = new Map<string, Map<string, string[]>>()
+  #childReadinessInFlight = false
+  #readinessLocationKey = ''
+  // Readiness memo across visits, keyed by LOCATION (segments join — known
+  // SYNCHRONOUSLY in the render pass, unlike the async parent sig): a
+  // revisited page seeds bright on its FIRST frame, so each page shades at
+  // most ONCE per session. Each entry records the parentLayerSig it was
+  // proven under — the compute drops the entry when the head moved (content
+  // changed → re-verify; content-addressed correctness preserved).
+  readonly #readyByLocation = new Map<string, { parentSig: string; labels: Set<string> }>()
+  // Monotonic brightness per location-visit: once a label has painted bright
+  // it never re-shades this visit (a late-arriving branch dot or props churn
+  // must not dim an already-bright tile — dim → bright only, never back).
+  readonly #brightLabels = new Set<string>()
+  // Usage-ordered, bounded child-image warm queue. Missing child images are
+  // fetched a few at a time IN PRIORITY ORDER — never a simultaneous blast —
+  // so tiles complete (and un-shade) incrementally, most-used first.
+  readonly #childWarmQueue: string[] = []
+  readonly #childWarmQueued = new Set<string>()
+  #childWarmActive = 0
+  static readonly #CHILD_WARM_CONCURRENCY = 4
+  #readinessRepaintTimer: ReturnType<typeof setTimeout> | null = null
+  // Bumped on every `navigate`: an in-flight compute for the location the
+  // user just LEFT is stale — it must stop (it holds the in-flight guard)
+  // and above all must never SEED (seeding from a stale run wipes the
+  // CURRENT location's released state — the "stuck shaded forever" bug).
+  #readinessGen = 0
+  #readinessNavHooked = false
+  #computeRetryQueued = false
   // Per-gate-key count of consecutive INCOMPLETE child resolutions. Bounds
   // the completeness gate so a genuinely-absent child (corrupt / deleted /
   // never-synced) can't hold the canvas blank forever — after the budget
@@ -2500,11 +2549,18 @@ export class ShowCellDrone extends Drone {
           // head sig below (latestMarkerSigFor — a hot cache hit, location-
           // correct), never the cursor sig.
           let parentLayerSig: string = isRewound ? (cursorService.currentLayerSig || '') : ''
-          if (!parentLayerSig && historyService?.latestMarkerSigFor) {
+          // The pass's LOCATION sig — the same source (currentSig) that picked
+          // `content`, so it always matches the cells this pass paints. The
+          // children-readiness seed keys on THIS, never on segments/labels,
+          // whose update can straddle the navigation (the memo-wipe bug).
+          let passLocSig = ''
+          try {
+            passLocSig = await (lineage as { currentSig?: () => Promise<string> }).currentSig?.() ?? ''
+          } catch { /* leave empty — seed skipped, compute seeds instead */ }
+          if (!parentLayerSig && passLocSig && historyService?.latestMarkerSigFor) {
             try {
-              const locSig = await (lineage as { currentSig?: () => Promise<string> }).currentSig?.() ?? ''
               const label = String((lineage as { explorerLabel?: () => string }).explorerLabel?.() ?? '/')
-              if (locSig) parentLayerSig = await historyService.latestMarkerSigFor(locSig, label) ?? ''
+              parentLayerSig = await historyService.latestMarkerSigFor(passLocSig, label) ?? ''
             } catch { /* leave empty */ }
           }
           // SOURCE DIAGNOSTIC ONLY — record the memoized currentLayer() child
@@ -2523,6 +2579,16 @@ export class ShowCellDrone extends Drone {
           // Record the parent sig so the completeness gate below can key
           // its retry budget on the LAYER (content), not the location.
           gateParentSig = parentLayerSig
+          // Children-readiness seed — keyed by the pass's LOCATION SIG
+          // (currentSig — the source that picked `content`, so it matches
+          // the painted cells even mid-popstate). Never by segments/labels
+          // (they straddle navigations → memo wipes) and never by this
+          // pass's parentLayerSig (cursor-derived, can lag). Seeding before
+          // the shade bits bake means a revisited page paints bright on its
+          // FIRST frame — each page shades at most once per session.
+          // #computeChildrenReadiness validates the memo against the real
+          // parent sig and drops it only when content actually changed.
+          if (CHILD_SHADE && passLocSig) this.#seedChildReadinessForLocation(passLocSig)
           childResolveExpected = Array.isArray(content.children) ? content.children.length : 0
           // Warm-path memo: a prior COMPLETE resolution under this exact
           // parent content sig is authoritative — the child set can't have
@@ -5006,6 +5072,7 @@ export class ShowCellDrone extends Drone {
     window.removeEventListener('hex-label-atlas:evicted', this.#onLabelAtlasEvicted)
 
     if (this.#clusterRetryTimer) { clearTimeout(this.#clusterRetryTimer); this.#clusterRetryTimer = null }
+    if (this.#readinessRepaintTimer) { clearTimeout(this.#readinessRepaintTimer); this.#readinessRepaintTimer = null }
 
     if (this.#newCellFadeRaf) {
       cancelAnimationFrame(this.#newCellFadeRaf)
@@ -5986,19 +6053,38 @@ export class ShowCellDrone extends Drone {
    *  inert (TileOverlayDrone mirrors the set); they brighten IN PLACE when
    *  their proof lands. The terminal releases are load-bearing: without
    *  them, unreachable bytes would strand a tile dimmed/inert forever. */
+  /** True once this cell's OWN image/props have settled — present on screen,
+   *  decode-failed, or concluded-missing. The original readiness predicate,
+   *  extracted so the branch gate can require BOTH own-settled and
+   *  children-ready. */
+  #ownImageSettled(c: Cell): boolean {
+    if (c.pendingProps) return false
+    if (c.imageSig) {
+      if (this.imageAtlas?.hasImage(c.imageSig)) return true
+      if (this.imageAtlas?.hasFailed(c.imageSig)) return true
+      return this.#fillMissedSigs.has(c.imageSig)
+    }
+    return this.cellImageCache.has(c.label)
+  }
+
   #cellIsShaded(c: Cell): boolean {
     if (!this.imageAtlas || c.plain) return false
-    if (c.pendingProps) return true                            // props/peer derivation in flight
-    if (c.imageSig) {
-      if (this.imageAtlas.hasImage(c.imageSig)) return false   // proof: bytes on screen
-      if (this.imageAtlas.hasFailed(c.imageSig)) return false  // terminal: decode failure → label-only
-      return !this.#fillMissedSigs.has(c.imageSig)             // in flight → dim; concluded miss → release
-    }
-    // No image sig: bright only when resolution CONCLUDED "no image" for
-    // this label (cache entry present — loadOne writes one on every exit).
-    // A label never resolved this session stays dim: the burden of proof
-    // is on readiness, never on proving brokenness.
-    return !this.cellImageCache.has(c.label)
+    // Monotonic per location-visit: once a label has painted bright it never
+    // re-shades this visit — a late-arriving branch dot or props churn must
+    // not dim an already-released tile (dim → bright only, never back).
+    if (this.#brightLabels.has(c.label)) return false
+    // BRANCH (opt-in, see CHILD_SHADE): shaded until its OWN image settles
+    // AND the tiles INSIDE it (its direct children) all have their images
+    // present-or-concluded — an un-shaded branch means "click me, the inside
+    // is already loaded, the click lands with ZERO latency". LEAF (and every
+    // tile while the flag is off): just its own image. Burden of proof is on
+    // readiness; each release is recorded so the gate only ever opens.
+    const own = this.#ownImageSettled(c)
+    const ready = (CHILD_SHADE && c.hasBranch)
+      ? own && this.#childrenReadyByLabel.get(c.label) === true
+      : own
+    if (ready) this.#brightLabels.add(c.label)
+    return !ready
   }
 
   private buildCellsFromAxial = (axial: any, names: string[], max: number, localCellSet: Set<string>, branchSet?: Set<string>): Cell[] => {
@@ -6401,6 +6487,333 @@ export class ShowCellDrone extends Drone {
     }
 
     await Promise.all(cells.map(loadOne))
+
+    // Children-readiness shade: once the visible cells' OWN images resolve,
+    // drive each BRANCH tile's shade off whether the tiles INSIDE it (its
+    // direct children) have their images present — a branch un-shades only
+    // when clicking it would land on an already-bright view. Fire-and-forget;
+    // warms any missing child images and forces one repaint when a readiness
+    // bit flips (buildCellsKey folds the shade bit → rebake).
+    void this.#computeChildrenReadiness(cells, renderSegments)
+  }
+
+  /** Swap children-readiness state to this LOCATION (segments key — known
+   *  synchronously in the render pass, unlike the async parent sig). A
+   *  revisit seeds from the per-location memo so its FIRST bake paints
+   *  bright — each page shades at most once per session; a new location
+   *  starts empty — dim until proven, then released incrementally,
+   *  most-used first. Parent-sig validation (content changed ⇒ drop +
+   *  re-verify) lives in the compute, which resolves the real head. */
+  #seedChildReadinessForLocation(key: string): void {
+    if (key === this.#readinessLocationKey) return
+    this.#readinessLocationKey = key
+    this.#childrenReadyByLabel.clear()
+    this.#brightLabels.clear()
+    const memo = this.#readyByLocation.get(key)
+    if (memo) for (const label of memo.labels) this.#childrenReadyByLabel.set(label, true)
+    if (DIAG) console.info(`[diag:readiness] seed key=${key.slice(0, 8)} memo=${memo?.labels.size ?? 0}`)
+  }
+
+  /** One deferred compute retry. A skipped or aborted readiness run must
+   *  ALWAYS leave a trigger behind — without it, churny navigation (Lineage
+   *  re-emits `navigate`) aborted every run and the location's tiles stayed
+   *  shaded until some unrelated pass happened by (the "stuck shaded" bug). */
+  #queueComputeRetry(): void {
+    if (this.#computeRetryQueued) return
+    this.#computeRetryQueued = true
+    if (DIAG) console.info('[diag:readiness] retry queued')
+    setTimeout(() => { this.#computeRetryQueued = false; this.#scheduleReadinessRepaint() }, 250)
+  }
+
+  /** Resolve a parent's direct-children image sigs (memoised per parent layer
+   *  sig) and release each branch tile INCREMENTALLY — most-used first — the
+   *  moment ALL its children's images are present locally or concluded
+   *  (absent/failed — a permanently-missing child image can never strand its
+   *  parent inert). Missing bytes go through a bounded, usage-ordered warm
+   *  queue (never a simultaneous blast); each completion re-renders, so tiles
+   *  brighten ONE BY ONE as their insides finish loading — and once a tile is
+   *  bright, clicking it lands with zero latency. */
+  #computeChildrenReadiness = async (cells: Cell[], parentSegments: readonly string[]): Promise<void> => {
+    if (!CHILD_SHADE) return
+    if (!this.#readinessNavHooked) {
+      this.#readinessNavHooked = true
+      try { window.addEventListener('navigate', () => { this.#readinessGen++ }) } catch { /* non-DOM */ }
+    }
+    if (!this.imageAtlas) return
+    if (this.#childReadinessInFlight) {
+      // A previous location's compute still holds the guard. Retry once it
+      // frees — without this, the skip was permanent and the new location's
+      // tiles stayed shaded forever (nothing else re-triggers the compute).
+      this.#queueComputeRetry()
+      return
+    }
+    const gen = this.#readinessGen
+    // Do NOT filter on c.hasBranch here: the cells array at loadCellImages
+    // time predates branch stamping, so every branch read as false and the
+    // compute exited silently while the final bake (which DOES see hasBranch)
+    // shaded them — tiles stayed shaded forever. Process every pending cell;
+    // the grandkid map below decides: childless → trivially released.
+    const branchCells = cells.filter(c =>
+      !c.plain && this.#childrenReadyByLabel.get(c.label) !== true)
+    if (branchCells.length === 0) return
+    this.#childReadinessInFlight = true
+    try {
+      const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as {
+        getResourceLocal: (sig: string) => Promise<Blob | null>
+        getResource: (sig: string) => Promise<Blob | null>
+        readChildrenManifest?: (sig: string) => Promise<Array<{ sig: string; layer: { name?: string; children?: string[] } }> | null>
+      } | undefined
+      const history = (window as any).ioc?.get?.('@diamondcoreprocessor.com/HistoryService') as {
+        getLayerBySig: (sig: string) => Promise<{ name?: string; children?: string[] } | null>
+        latestMarkerSigFor?: (locSig: string, label: string) => Promise<string | undefined>
+      } | undefined
+      const lineage = (window as any).ioc?.get?.('@hypercomb.social/Lineage') as {
+        currentSig?: () => Promise<string>; explorerLabel?: () => string
+      } | undefined
+      if (!store || !history?.latestMarkerSigFor || !history.getLayerBySig) return
+      const locSig = (await lineage?.currentSig?.()) ?? ''
+      if (!locSig) return
+      const parentLayerSig = (await history.latestMarkerSigFor(locSig, String(lineage?.explorerLabel?.() ?? '/'))) ?? ''
+      if (!parentLayerSig) return
+      // COHERENCE GATE. locKey derives from explorerSegments; parentLayerSig
+      // from currentSig. Mid-navigation (popstate especially) those can
+      // straddle TWO locations — and validating the memo with a mismatched
+      // pair produced a false "content changed" that WIPED the revisit memo
+      // on every nav away (memo=0 forever → every back-nav re-shaded and
+      // stuck). Compare SIGNATURES, not labels (explorerLabel is a display
+      // label, not the segment slug — a label comparison dead-locked every
+      // non-root location): the segments-derived lineage sig must equal the
+      // live currentSig, else retry once lineage settles. Root has no
+      // segments to derive from and its two sources cannot disagree the same
+      // way — skip.
+      if (parentSegments.length) {
+        const locFromSegments = await cellLocationSig(
+          parentSegments.slice(0, -1),
+          parentSegments[parentSegments.length - 1],
+        )
+        if (locFromSegments !== locSig) { this.#queueComputeRetry(); return }
+      }
+      if (DIAG) console.info(`[diag:readiness] enter parent=${parentLayerSig.slice(0, 8)} pending=${branchCells.map(c => c.label).join(',')}`)
+
+      // STALE-RUN GATE, before touching any shared state: if the user
+      // navigated while we resolved the parent, this compute belongs to a
+      // location they LEFT — seeding now would wipe the current location's
+      // released state. Queue a retry so the live location's pass re-runs us.
+      if (gen !== this.#readinessGen) { this.#queueComputeRetry(); return }
+      // Label-keyed state must never leak across locations. Seed by the
+      // LOCATION SIG (same source the render pass seeds with), then validate
+      // the memo against the REAL parent sig: head moved ⇒ children may
+      // differ ⇒ drop the memo and re-verify from scratch.
+      const locKey = locSig
+      this.#seedChildReadinessForLocation(locKey)
+      const memoEntry = this.#readyByLocation.get(locKey)
+      if (memoEntry && memoEntry.parentSig !== parentLayerSig) {
+        this.#readyByLocation.delete(locKey)
+        this.#childrenReadyByLabel.clear()
+        this.#brightLabels.clear()
+      }
+
+      // ONE cheap read up front: the children manifest inlines each child's
+      // own children (the grandchild sigs). Everything ELSE resolves PER
+      // TILE, most-used first, below — so the first (most-used) tile's
+      // release never waits on the whole level's resolution. A failure here
+      // leaves the map empty → tiles release fail-open (never inert).
+      const grandkidsByLabel = new Map<string, string[]>()
+      try {
+        const manifest = store.readChildrenManifest ? await store.readChildrenManifest(parentLayerSig).catch(() => null) : null
+        if (manifest) {
+          for (const e of manifest) {
+            const n = String(e.layer?.name ?? '')
+            if (n) grandkidsByLabel.set(n, Array.isArray(e.layer?.children) ? e.layer.children.map(String) : [])
+          }
+        } else {
+          const parent = await history.getLayerBySig(parentLayerSig)
+          for (const cs of (Array.isArray(parent?.children) ? parent!.children : [])) {
+            const cl = await history.getLayerBySig(String(cs))
+            const n = String(cl?.name ?? '')
+            if (cl && n) grandkidsByLabel.set(n, Array.isArray(cl.children) ? cl.children.map(String) : [])
+          }
+        }
+      } catch { /* unknown structure → fail-open below */ }
+      const livePropsIndex: Record<string, string> = (() => {
+        try { return JSON.parse(localStorage.getItem('hc:tile-props-index') ?? '{}') } catch { return {} }
+      })()
+      // Per-label sig cache under this parent (content-addressed → stable).
+      let cachedSigs = this.#childImageSigsByParent.get(parentLayerSig)
+      if (!cachedSigs) {
+        cachedSigs = new Map<string, string[]>()
+        this.#childImageSigsByParent.set(parentLayerSig, cachedSigs)
+        if (this.#childImageSigsByParent.size > 64) {
+          const oldest = this.#childImageSigsByParent.keys().next().value
+          if (oldest !== undefined) this.#childImageSigsByParent.delete(oldest)
+        }
+      }
+
+      // MOST-USED FIRST: rank the pending branch tiles by the participant's
+      // local usage of each child location, then check them SERIALLY. A tile
+      // whose children are all present/concluded is released IMMEDIATELY —
+      // its own repaint, not one batch flip at the end — so tiles brighten
+      // one by one, and the ones you actually open brighten first. Misses
+      // enqueue in this same priority order, so the warm queue drains toward
+      // the most-used tile's children before anything else.
+      const ranker = window.ioc?.get?.(USAGE_IOC_KEY) as UsageRanker | undefined
+      const weighted = await Promise.all(branchCells.map(async c => ({
+        c,
+        w: ranker ? ranker.weight(await cellLocationSig(parentSegments, c.label)) : 0,
+      })))
+      weighted.sort((a, b) => b.w - a.w)
+
+      for (const { c } of weighted) {
+        // Superseded by navigation — abort but ALWAYS leave a retry behind.
+        if (gen !== this.#readinessGen) { this.#queueComputeRetry(); return }
+        if (this.#childrenReadyByLabel.get(c.label) === true) continue
+        // PER-TILE structure + presence in ONE bounded-parallel pass (8-way).
+        // Strictly serial, a 145-child branch was ~435 sequential reads —
+        // seconds before the tile could release. Cache the sig list only when
+        // fully known (no cold props); a blocked build re-resolves next pass.
+        let allReady = true
+        const cached = cachedSigs.get(c.label)
+        if (cached) {
+          let i = 0
+          await Promise.all(Array.from({ length: Math.min(8, cached.length) }, async () => {
+            while (i < cached.length) {
+              if (gen !== this.#readinessGen) return
+              const sig = cached[i++]
+              if (this.#fillMissedSigs.has(sig) || this.imageAtlas?.hasFailed(sig)) continue // concluded → doesn't block
+              const blob = await store.getResourceLocal(sig)
+              if (!blob) { allReady = false; this.#enqueueChildWarm(sig) }
+            }
+          }))
+        } else {
+          const grandkids = grandkidsByLabel.get(c.label) ?? []
+          const sigs: string[] = []
+          let blocked = false
+          const childSegments = [...parentSegments, c.label]
+          let i = 0
+          await Promise.all(Array.from({ length: Math.min(8, grandkids.length) }, async () => {
+            while (i < grandkids.length) {
+              if (gen !== this.#readinessGen) return
+              const gSig = grandkids[i++]
+              const gl = await history.getLayerBySig(gSig)
+              const gName = String(gl?.name ?? '')
+              if (!gName) continue
+              const key = await cellLocationSig(childSegments, gName)
+              const propsSig = livePropsIndex[key] ?? livePropsIndex[gName]
+              if (!propsSig || !isSignature(propsSig)) continue
+              if (this.#fillMissedSigs.has(propsSig)) continue   // concluded-missing props → fail-open
+              const pblob = await store.getResourceLocal(propsSig)
+              if (!pblob) {
+                // Props not local → the image sig is UNKNOWN. Hold the parent
+                // and queue the props blob; re-resolve once it lands (or a
+                // concluded miss releases it). Don't cache a blocked build.
+                allReady = false
+                blocked = true
+                this.#enqueueChildWarm(propsSig)
+                continue
+              }
+              try {
+                const props = JSON.parse(await pblob.text())
+                const img = (this.#flat && props?.flat?.small?.image) || props?.small?.image
+                if (typeof img === 'string' && isSignature(img)) {
+                  sigs.push(img)
+                  if (this.#fillMissedSigs.has(img) || this.imageAtlas?.hasFailed(img)) continue
+                  const blob2 = await store.getResourceLocal(img)
+                  if (!blob2) { allReady = false; this.#enqueueChildWarm(img) }
+                }
+              } catch { /* skip malformed props */ }
+            }
+          }))
+          if (!blocked) cachedSigs.set(c.label, sigs)
+        }
+        if (DIAG) console.info(`[diag:readiness] ${c.label} allReady=${allReady} cached=${!!cached} queue=${this.#childWarmQueue.length}`)
+        if (allReady) {
+          this.#childrenReadyByLabel.set(c.label, true)
+          // Remember per LOCATION, proven under this parent sig: the next
+          // visit seeds bright on its FIRST frame — a page shades at most
+          // once per session, until its content (head sig) changes.
+          let entry = this.#readyByLocation.get(locKey)
+          if (!entry || entry.parentSig !== parentLayerSig) {
+            entry = { parentSig: parentLayerSig, labels: new Set<string>() }
+            this.#readyByLocation.set(locKey, entry)
+            if (this.#readyByLocation.size > 64) {
+              const oldest = this.#readyByLocation.keys().next().value
+              if (oldest !== undefined) this.#readyByLocation.delete(oldest)
+            }
+          }
+          entry.labels.add(c.label)
+          // Release this tile via the short-window coalesced repaint: tiles
+          // brighten INDIVIDUALLY as each completes (different child counts ⇒
+          // different completion times), batching only near-simultaneous
+          // completions — never one full render pass per tile.
+          this.#scheduleReadinessRepaint()
+        }
+      }
+    } catch (e) {
+      // best-effort readiness — a cold branch just stays shaded. NEVER let
+      // this swallow silently under diagnostics: a throw here is exactly the
+      // "tiles never release" failure.
+      if (DIAG) console.warn('[diag:readiness] THREW', e)
+    }
+    finally { this.#childReadinessInFlight = false }
+  }
+
+  /** Bounded, usage-ordered child-image warm queue. A few fetches run at a
+   *  time, in the order enqueued (the most-used tile's children first) —
+   *  never a simultaneous blast that floods the host and makes everything
+   *  arrive "all at once". Each completion — bytes landed OR a concluded
+   *  miss — forces a repaint, so the owning tile's readiness re-checks and
+   *  it un-shades the moment its inside finishes loading. */
+  #enqueueChildWarm = (sig: string): void => {
+    if (this.#childWarmQueued.has(sig) || this.#hostFillInFlight.has(sig)) return
+    this.#childWarmQueued.add(sig)
+    this.#childWarmQueue.push(sig)
+    this.#pumpChildWarms()
+  }
+
+  #pumpChildWarms = (): void => {
+    while (this.#childWarmActive < ShowCellDrone.#CHILD_WARM_CONCURRENCY && this.#childWarmQueue.length > 0) {
+      const sig = this.#childWarmQueue.shift()!
+      this.#childWarmQueued.delete(sig)
+      if (this.#hostFillInFlight.has(sig)) continue
+      this.#hostFillInFlight.add(sig)
+      this.#childWarmActive++
+      void (async () => {
+        let landed = false
+        try {
+          const store = (window as any).ioc?.get?.('@hypercomb.social/Store') as { getResource: (s: string) => Promise<Blob | null> } | undefined
+          const blob = await store?.getResource(sig)
+          landed = !!blob
+        } catch { /* treated as a concluded miss below */ }
+        finally {
+          // ANY failure — null, throw, missing store — CONCLUDES the sig so
+          // the parent releases and the presence loop can never re-enqueue it
+          // into an infinite warm→fail→re-render loop.
+          if (landed) this.#fillMissedSigs.delete(sig)
+          else this.#fillMissedSigs.add(sig)
+          this.#hostFillInFlight.delete(sig)
+          this.#childWarmActive--
+          this.#scheduleReadinessRepaint()
+          this.#pumpChildWarms()
+        }
+      })()
+    }
+  }
+
+  /** Coalesced repaint for readiness transitions. Tile releases and warm
+   *  completions request ONE repaint per short window instead of forcing a
+   *  full render pass EACH — per-event forcing at scale stacked dozens of
+   *  back-to-back full passes and pegged the main thread for tens of seconds
+   *  (the frozen-renderer failure). The window is SHORT (60ms) so tiles
+   *  visibly brighten one by one as each completes — only near-simultaneous
+   *  completions share a flip. */
+  #scheduleReadinessRepaint = (): void => {
+    if (this.#readinessRepaintTimer) return
+    this.#readinessRepaintTimer = setTimeout(() => {
+      this.#readinessRepaintTimer = null
+      if (DIAG) console.info('[diag:readiness] repaint fire')
+      this.#forceNextRender = true
+      this.requestRender()
+    }, 30)
   }
 
   private buildCellsKey = (cells: Cell[]): string => {

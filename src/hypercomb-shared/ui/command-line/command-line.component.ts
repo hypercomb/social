@@ -4,6 +4,7 @@ import { AfterViewInit, Component, computed, signal, ViewChild, type OnDestroy }
 import { CommandShellComponent } from '../command-shell/command-shell.component'
 import { HintBarComponent } from '../hint-bar/hint-bar.component'
 import { GroupLaunchersComponent } from '../group-launchers/group-launchers.component'
+import { PinnedEntrancesComponent } from '../pinned-entrances/pinned-entrances.component'
 import type { Lineage } from '../../core/lineage'
 import type { MovementService } from '../../core/movement.service'
 import type { Navigation } from '../../core/navigation'
@@ -119,7 +120,7 @@ const MOVE_ARROW_OFFSETS: Record<string, { dq: number; dr: number }> = {
 @Component({
   selector: 'hc-command-line',
   standalone: true,
-  imports: [CommandShellComponent, HintBarComponent, TranslatePipe, GroupLaunchersComponent],
+  imports: [CommandShellComponent, HintBarComponent, TranslatePipe, GroupLaunchersComponent, PinnedEntrancesComponent],
   templateUrl: './command-line.component.html',
   styleUrls: ['./command-line.component.scss'],
   host: {

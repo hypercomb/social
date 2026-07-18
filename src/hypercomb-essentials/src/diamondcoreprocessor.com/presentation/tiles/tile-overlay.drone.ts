@@ -45,8 +45,12 @@ type OverlayAction = {
   button: HexIconButton
   profile: OverlayProfileKey
   genotype?: string
-  /** Lives in the hidden danger row (delete) — revealed by tapping ⋮ (more). */
+  /** Lives in the hidden danger row (delete) — revealed by tapping ⋮ (more).
+   *  Suppressed while the tile has visible feature icons. */
   dangerRow?: boolean
+  /** A FEATURE affordance — ⋮ reveals it BIGGER on the feature row(s),
+   *  never the always-visible top row. */
+  featureRow?: boolean
   /** If provided, called to determine per-tile visibility */
   visibleWhen?: OverlayVisibilityFn
   /** If provided, called to compute per-tile tint */
@@ -74,8 +78,12 @@ export type OverlayActionDescriptor = {
   y: number
   hoverTint?: number
   profile: OverlayProfileKey
-  /** Route into the hidden danger row (delete), revealed by the ⋮ toggle. */
+  /** Route into the hidden danger row (delete), revealed by the ⋮ toggle.
+   *  Suppressed while the tile has visible feature icons. */
   dangerRow?: boolean
+  /** Route into the FEATURE row(s) revealed by ⋮ — bigger icons showcasing
+   *  what the tile carries (website, files, …). Never in the top row. */
+  featureRow?: boolean
   visibleWhen?: OverlayVisibilityFn
   /**
    * Per-tile dynamic tint. Returns the colour the icon should show when the
@@ -113,14 +121,27 @@ export type OverlayProfileKey = 'private' | 'public-own' | 'public-external' | '
 
 // ── Icon sizing ──────────────────────────────────────────────────
 const DEFAULT_ICON_SIZE = 7     // integer for pixel-perfect rendering
+/** Feature-row icons render BIGGER — the reveal is a showcase of what the
+ *  tile actually carries (a website, files, …), not another utility strip.
+ *  ~80% of the first cut (12 was too big inside the ⋮); integer for
+ *  pixel-perfect rendering. */
+const FEATURE_ICON_SIZE = 10
 
-// ── Two-row layout + danger reveal ───────────────────────────────
+// ── Row layout + ⋮ reveal ────────────────────────────────────────
 // The hover row holds at most MAX_ROW_ICONS icons. A ⋮ (more) toggle appends
-// when there are hidden icons (delete + any overflow); tapping it reveals them,
-// wrapping to a second row ROW_GAP below when the first row is already full.
-// #dangerRevealed is in-memory only, so it resets on tile change / refresh.
+// when there is anything hidden: main-row overflow, the tile's FEATURE icons
+// (bigger, on their own row(s)), and — only when the tile has NO visible
+// features — the danger row (delete). Features must be removed before delete
+// surfaces, so a feature-bearing tile is never one reveal away from its
+// garbage can. #dangerRevealed is in-memory only, so it resets on refresh.
 const MAX_ROW_ICONS = 5
 const ROW_GAP = 11              // vertical center-to-center between wrapped rows
+/** Edge-to-edge vertical padding between heterogeneous rows (matches the
+ *  ROW_GAP feel: 11 center-to-center at size 7 = 4px between edges). */
+const ROW_PAD = 4
+/** Feature icons per row — larger glyphs need more horizontal room. */
+const FEATURE_ROW_MAX = 4
+const FEATURE_ICON_SPACING = 14
 
 // ── Arrange mode constants ────────────────────────────────────────
 
@@ -311,7 +332,7 @@ export class TileOverlayDrone extends Drone {
     'keymap:invoke',
     'icon:edit-mode', 'icon:override-changed',
   ]
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'group:open', 'icon:pick-request']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'group:open', 'icon:pick-request']
 
   #dropDragging = false
   #dropPending = false
@@ -897,7 +918,8 @@ export class TileOverlayDrone extends Drone {
 
     for (const desc of descs) {
       const btn = new HexIconButton({
-        size: DEFAULT_ICON_SIZE,
+        // Feature icons are the showcase — bigger glyph, bigger hit area.
+        size: desc.featureRow ? FEATURE_ICON_SIZE : DEFAULT_ICON_SIZE,
         hoverTint: desc.hoverTint,
       })
       this.#overlay.addChild(btn)
@@ -914,6 +936,7 @@ export class TileOverlayDrone extends Drone {
         profile: key,
         genotype: desc.genotype,
         dangerRow: desc.dangerRow,
+        featureRow: desc.featureRow,
         visibleWhen: desc.visibleWhen,
         tintWhen: desc.tintWhen,
         labelKey: desc.labelKey,
@@ -927,61 +950,76 @@ export class TileOverlayDrone extends Drone {
     this.#updatePerTileVisibility()
   }
 
-  // ── Icon row layout (wraps at MAX_ROW_ICONS; ⋮ reveals the danger row) ──
+  // ── Icon row layout (wraps at MAX_ROW_ICONS; ⋮ reveals features/danger) ──
   // `base` = icons that passed their per-tile visibleWhen (set upstream by
-  // #updatePerTileVisibility). We split them into the normal `main` icons, the
-  // `more` (⋮) toggle, and the `danger` icons (delete). Collapsed shows the
-  // capped main row + ⋮; revealed appends the overflow + danger icons, wrapping
-  // to a second row when the first is full.
+  // #updatePerTileVisibility). Split into the normal `main` icons, the `more`
+  // (⋮) toggle, the FEATURE icons, and the `danger` icons (delete). Collapsed
+  // shows the capped main row + ⋮. Revealed appends: main overflow, then the
+  // feature row(s) — BIGGER icons showcasing what the tile carries — then the
+  // danger row ONLY when the tile has no visible features (the garbage can
+  // never shares a reveal with features; remove the features first).
 
   #layoutIconRow(): void {
     const base = this.#actions.filter(a => a.button.visible)
     const more = base.find(a => a.name === 'more') ?? null
-    const main = base.filter(a => a.name !== 'more' && !a.dangerRow)
-    const danger = base.filter(a => a.dangerRow)
-    const hasHidden = main.length > MAX_ROW_ICONS || danger.length > 0
+    const feature = base.filter(a => a.featureRow)
+    const main = base.filter(a => a.name !== 'more' && !a.dangerRow && !a.featureRow)
+    const danger = feature.length === 0 ? base.filter(a => a.dangerRow) : []
+    const hasHidden = main.length > MAX_ROW_ICONS || feature.length > 0 || danger.length > 0
 
-    const seq: OverlayAction[] = this.#dangerRevealed
-      ? [...main, ...danger]
-      : main.slice(0, MAX_ROW_ICONS)
+    const mainSeq: OverlayAction[] = this.#dangerRevealed ? [...main] : main.slice(0, MAX_ROW_ICONS)
     // The ⋮ toggle trails the icons only when there's something to reveal.
-    if (more && hasHidden) seq.push(more)
+    if (more && hasHidden) mainSeq.push(more)
 
-    // Only the laid-out sequence is shown — hide collapsed danger/overflow and
-    // the ⋮ when nothing is hidden, so hover/click hit-testing matches the view.
-    const inSeq = new Set(seq)
+    // Heterogeneous rows: main (+overflow) at the default size, features
+    // bigger on their own row(s), danger last (only feature-less tiles).
+    const rows: { items: OverlayAction[]; size: number; spacing: number }[] = []
+    for (let i = 0; i < mainSeq.length; i += MAX_ROW_ICONS) {
+      rows.push({ items: mainSeq.slice(i, i + MAX_ROW_ICONS), size: DEFAULT_ICON_SIZE, spacing: ICON_SPACING })
+    }
+    if (this.#dangerRevealed) {
+      for (let i = 0; i < feature.length; i += FEATURE_ROW_MAX) {
+        rows.push({ items: feature.slice(i, i + FEATURE_ROW_MAX), size: FEATURE_ICON_SIZE, spacing: FEATURE_ICON_SPACING })
+      }
+      for (let i = 0; i < danger.length; i += MAX_ROW_ICONS) {
+        rows.push({ items: danger.slice(i, i + MAX_ROW_ICONS), size: DEFAULT_ICON_SIZE, spacing: ICON_SPACING })
+      }
+    }
+
+    // Only the laid-out sequence is shown — hide collapsed feature/danger/
+    // overflow and the ⋮ when nothing is hidden, so hit-testing matches.
+    const inSeq = new Set(rows.flatMap(r => r.items))
     for (const a of this.#actions) a.button.visible = inSeq.has(a)
 
     // Hex horizontal bound (mirrors computeIconPositions) — rows compress to fit.
     const available = (27.7 - 3) * 2
     let maxRowWidth = 0
-    const rows = Math.ceil(seq.length / MAX_ROW_ICONS)
-    for (let r = 0; r * MAX_ROW_ICONS < seq.length; r++) {
-      const row = seq.slice(r * MAX_ROW_ICONS, r * MAX_ROW_ICONS + MAX_ROW_ICONS)
-      let spacing = ICON_SPACING
-      if (row.length > 1 && (row.length - 1) * spacing > available) {
-        spacing = available / (row.length - 1)
+    let y = ICON_Y
+    for (let r = 0; r < rows.length; r++) {
+      const { items, size } = rows[r]
+      let spacing = rows[r].spacing
+      if (items.length > 1 && (items.length - 1) * spacing > available) {
+        spacing = available / (items.length - 1)
       }
-      const startX = Math.round(-(row.length - 1) * spacing / 2)
-      const y = ICON_Y + r * ROW_GAP
-      row.forEach((a, j) => a.button.position.set(Math.round(startX + j * spacing), y))
-      maxRowWidth = Math.max(maxRowWidth, (row.length - 1) * spacing + DEFAULT_ICON_SIZE)
+      if (r > 0) y += rows[r - 1].size / 2 + ROW_PAD + size / 2
+      const startX = Math.round(-(items.length - 1) * spacing / 2)
+      items.forEach((a, j) => a.button.position.set(Math.round(startX + j * spacing), Math.round(y)))
+      maxRowWidth = Math.max(maxRowWidth, (items.length - 1) * spacing + size)
     }
 
-    this.#drawButtonTray(maxRowWidth, rows)
+    const top = rows.length ? ICON_Y - rows[0].size / 2 - 3 : 0
+    const bottom = rows.length ? y + rows[rows.length - 1].size / 2 + 3 : 0
+    this.#drawButtonTray(maxRowWidth, rows.length, top, bottom)
   }
 
   /** Translucent tray behind every laid-out row. */
-  #drawButtonTray(contentWidth: number, rows: number): void {
+  #drawButtonTray(contentWidth: number, rows: number, top: number, bottom: number): void {
     if (!this.#buttonTray) return
     this.#buttonTray.clear()
     if (rows === 0) return
 
-    const halfIcon = DEFAULT_ICON_SIZE / 2
     const pad = 3
     const totalWidth = contentWidth + pad * 2
-    const top = ICON_Y - halfIcon - pad
-    const bottom = ICON_Y + (rows - 1) * ROW_GAP + halfIcon + pad
 
     this.#buttonTray.roundRect(-(totalWidth / 2), top, totalWidth, bottom - top, 2)
     this.#buttonTray.fill({ color: 0x0c0c1a, alpha: 0.6 })
@@ -1939,7 +1977,19 @@ export class TileOverlayDrone extends Drone {
         const btn = action.button
         const bx = local.x - ox - btn.position.x
         const by = local.y - oy - btn.position.y
-        if (btn.containsPoint(bx, by)) return
+        if (btn.containsPoint(bx, by)) {
+          // A press on a FEATURE icon may become a pin drag: EntrancePinDrone
+          // tracks the pointer from here and, past the threshold, drags the
+          // entrance up to the header bar. A plain release stays a click —
+          // the trailing click runs the action as always.
+          if (action.featureRow) {
+            this.emitEffect('overlay:feature-press', {
+              action: action.name, label: entry.label,
+              pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY,
+            })
+          }
+          return
+        }
       }
     }
 
@@ -2089,7 +2139,8 @@ export class TileOverlayDrone extends Drone {
             this.emitEffect('icon:pick-request', { id: 'overlay:' + action.name })
             return
           }
-          // ⋮ toggle — reveal/hide the danger row in place; never a tile action.
+          // ⋮ toggle — reveal/hide the feature row(s) (and, on a feature-less
+          // tile, the danger row) in place; never a tile action.
           if (action.name === 'more') {
             this.#dangerRevealed = !this.#dangerRevealed
             this.#updatePerTileVisibility()

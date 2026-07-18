@@ -42,6 +42,7 @@ type IconProviderRegistryLike = {
     svgMarkup: string
     profiles?: readonly string[]
     defaultActive?: boolean
+    featureRow?: boolean
     hoverTint?: number
     visibleWhen?: (ctx: { label?: string }) => boolean
     labelKey?: string
@@ -92,6 +93,8 @@ export class ContactDrone extends Drone {
       svgMarkup: CONTACT_ICON_SVG,
       profiles: ['private', 'public-own'],
       defaultActive: true,
+      // Contact cards are a tile FEATURE — surfaced by ⋮ on the feature row.
+      featureRow: true,
       hoverTint: 0xa8ffd8,
       visibleWhen: (ctx) => this.#iconVisible(ctx?.label),
       labelKey: 'action.contact',

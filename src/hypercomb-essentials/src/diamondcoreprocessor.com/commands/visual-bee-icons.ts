@@ -54,6 +54,13 @@ const ICON_REGISTRY_KEY = '@hypercomb.social/IconProviderRegistry'
  *  dispatcher in this module listens for actions matching `view:*`. */
 const VIEW_ACTION_PREFIX = 'view:'
 
+/** Action-name prefix for ENTER icons — the behavior-provided affordance on a
+ *  tile that already HAS the view's content (a website page, …). Clicking it
+ *  goes to the tile and opens the view there — "go to the tile, click the
+ *  website, and you're on the website". Complementary to `view:*` (the adopt
+ *  opt-in shown when the content is absent). */
+const ENTER_ACTION_PREFIX = 'view-enter:'
+
 /** Profile under which visual-bee icons register. `public-external`
  *  matches the "peer-supplied" semantics: these are features adopted
  *  from someone else's tile, surfaced in the pool of available icons
@@ -63,8 +70,13 @@ const ICON_PROFILE = 'public-external'
 /** Bare-bones default SVG used when a visual bee doesn't carry its own
  *  icon mark. Replace per-bee by registering a richer icon under the
  *  same name in IconProviderRegistry from the bee's own module. */
+// xmlns + explicit width/height are REQUIRED: the rasteriser decodes the
+// markup as an <img> blob (no-xmlns SVGs throw EncodingError and the icon
+// renders as an empty backdrop) and scales by rewriting the width/height
+// attributes. Stroke is pure white so the overlay's tint pipeline works.
 const DEFAULT_VIEW_ICON_SVG = `
-<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+     fill="none" stroke="#ffffff" stroke-width="1.6"
      stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
   <circle cx="12" cy="12" r="9"/>
   <path d="M3 12h18"/>
@@ -76,7 +88,14 @@ type TileIconProvider = {
   name: string
   owner?: string
   svgMarkup: string
-  profile: string
+  /** Single profile (legacy shape) — prefer `profiles`. */
+  profile?: string
+  /** Profiles this icon lives in; expanded per-profile by tile-actions. */
+  profiles?: readonly string[]
+  /** Auto-join the default arrangement for the declared profiles. */
+  defaultActive?: boolean
+  /** Feature affordance — ⋮ reveals it bigger on the feature row(s). */
+  featureRow?: boolean
   hoverTint?: number
   visibleWhen?: (ctx: unknown) => boolean
   labelKey?: string
@@ -93,6 +112,11 @@ const REGISTERED_ICONS = new Set<string>()
 /** Compose the IconProviderRegistry name for a visual bee. */
 function iconNameForBee(bee: VisualBeeDescriptor): string {
   return `${VIEW_ACTION_PREFIX}${bee.view}`
+}
+
+/** Compose the IconProviderRegistry name for a bee's ENTER icon. */
+function enterIconNameForBee(bee: VisualBeeDescriptor): string {
+  return `${ENTER_ACTION_PREFIX}${bee.view}`
 }
 
 /** Sync the IconProviderRegistry to the current set of adoptable visual
@@ -132,6 +156,38 @@ function syncIcons(): void {
       visibleWhen: (ctx) => {
         const label = (ctx as { label?: string })?.label
         return typeof label === 'string' && !hasDecorationKind(label, bee.decorationKind)
+      },
+    })
+    REGISTERED_ICONS.add(name)
+  }
+
+  // ENTER icons — the behavior provides its icon on any tile that HAS the
+  // view's content (render behaviors only; navigation behaviors have no
+  // per-cell content to enter). Shown on the tile's action row across
+  // profiles: your own tiles and a peer's (a foreign page still passes
+  // through the site-view review gate before mounting). The inverse
+  // predicate of the adopt icon above — the two never coexist on one tile.
+  for (const bee of visualBees.all()) {
+    if (bee.behavior === 'navigation') continue
+    const name = enterIconNameForBee(bee)
+    want.add(name)
+    if (REGISTERED_ICONS.has(name)) continue
+    iconRegistry.add({
+      name,
+      owner: '@diamondcoreprocessor.com/visual-bee-icons',
+      svgMarkup: DEFAULT_VIEW_ICON_SVG,
+      profiles: ['private', 'public-own', 'public-external'],
+      defaultActive: true,
+      // A view IS a tile feature: ⋮ reveals it bigger on the feature row —
+      // never the always-visible top row. While any feature icon shows, the
+      // overlay keeps the delete (danger) row hidden.
+      featureRow: true,
+      hoverTint: 0xa8d8ff,
+      labelKey: bee.labelKey,
+      descriptionKey: bee.descriptionKey,
+      visibleWhen: (ctx) => {
+        const label = (ctx as { label?: string })?.label
+        return typeof label === 'string' && hasDecorationKind(label, bee.decorationKind)
       },
     })
     REGISTERED_ICONS.add(name)
@@ -181,6 +237,31 @@ function dispatchViewAction(action: string, label: string | undefined): void {
   })
 }
 
+type LineageLike = { explorerSegments?: () => readonly string[] }
+type NavigationLike = { goRaw?: (segments: readonly string[]) => void }
+type ViewModeLike = { setMode?: (next: string) => void }
+
+/** Dispatch a click on an ENTER icon: go to the clicked cell and open the
+ *  view there. Mirrors the websites launch group's activation — navigate
+ *  first (synchronous lineage update) so the view renderer captures THIS
+ *  cell as its entry floor when the surface flips. */
+function dispatchEnterAction(action: string, label: string | undefined): void {
+  const view = action.slice(ENTER_ACTION_PREFIX.length)
+  if (!view || !label) return
+  const visualBees = window.ioc.get<VisualBeeRegistry>('@diamondcoreprocessor.com/VisualBeeRegistry')
+  const bee = visualBees?.get(view)
+  if (!bee || bee.behavior === 'navigation') return
+
+  const lineage = window.ioc.get<LineageLike>('@hypercomb.social/Lineage')
+  const nav = window.ioc.get<NavigationLike>('@hypercomb.social/Navigation')
+  const vm = window.ioc.get<ViewModeLike>('@hypercomb.social/ViewMode')
+  if (!nav?.goRaw || !vm?.setMode) return
+
+  const here = (lineage?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+  nav.goRaw([...here, label])
+  vm.setMode(bee.view)
+}
+
 // ── Wire up: listen to registry changes + tile:action events ──────────
 
 ;(window as { ioc?: { whenReady?: <T>(k: string, cb: (v: T) => void) => void } }).ioc?.whenReady?.<VisualBeeRegistry>(
@@ -191,10 +272,18 @@ function dispatchViewAction(action: string, label: string | undefined): void {
   },
 )
 
-// tile-action dispatcher. Catch every action whose name starts with the
-// view-icon prefix and route it through the visual-bee registry.
-addEventListener('tile:action' as keyof WindowEventMap, (event) => {
-  const detail = (event as CustomEvent<{ action?: string; label?: string }>).detail
-  if (!detail?.action?.startsWith(VIEW_ACTION_PREFIX)) return
-  dispatchViewAction(detail.action, detail.label)
+// tile-action dispatcher. Catch every action whose name starts with a
+// view-icon prefix and route it through the visual-bee registry. The enter
+// check runs first — `view-enter:` must never fall through to the adopt path.
+// NOTE: `tile:action` is an EFFECTBUS event (the overlay emits via
+// emitEffect), not a window CustomEvent — a window listener never fires.
+EffectBus.on<{ action?: string; label?: string }>('tile:action', (detail) => {
+  if (!detail?.action) return
+  if (detail.action.startsWith(ENTER_ACTION_PREFIX)) {
+    dispatchEnterAction(detail.action, detail.label)
+    return
+  }
+  if (detail.action.startsWith(VIEW_ACTION_PREFIX)) {
+    dispatchViewAction(detail.action, detail.label)
+  }
 })

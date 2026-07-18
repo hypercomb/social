@@ -809,6 +809,17 @@ export class HostSyncService extends EventTarget {
   #verifySlots = 0
   static readonly #VERIFY_MAX_CONCURRENT = 4
 
+  /** Host-down circuit breaker. An UNHEALTHY host (503s, timeouts) used to
+   *  defeat the once-per-session memo — only 200 memoized, so every sweep
+   *  re-HEAD'd every sig forever: a sustained ~11 req/s probe storm was
+   *  measured against a 503ing host. Failures now ALSO memoize (the audit is
+   *  freshness-only; absence must be asserted by the host, and a sick host
+   *  asserts nothing), and a failure streak pauses ALL probing for a window. */
+  #probeFailStreak = 0
+  #probesPausedUntil = 0
+  static readonly #PROBE_FAIL_STREAK_MAX = 10
+  static readonly #PROBE_PAUSE_MS = 5 * 60 * 1000
+
   readonly #acquireVerifySlot = async (): Promise<void> => {
     while (this.#verifySlots >= HostSyncService.#VERIFY_MAX_CONCURRENT) {
       await new Promise(r => setTimeout(r, 50))
@@ -824,6 +835,7 @@ export class HostSyncService extends EventTarget {
    *  failure. */
   readonly #receiptStillHonored = (sig: string): Promise<boolean> => {
     if (this.#verifiedOnHost.has(sig)) return Promise.resolve(true)
+    if (Date.now() < this.#probesPausedUntil) return Promise.resolve(true) // breaker open — keep receipts, no probes
     const inFlight = this.#verifyInFlight.get(sig)
     if (inFlight) return inFlight
     const host = this.#hostBase()
@@ -831,10 +843,17 @@ export class HostSyncService extends EventTarget {
     const run = (async (): Promise<boolean> => {
       await this.#acquireVerifySlot()
       try {
+        // Re-check the breaker AFTER the slot wait: one sweep enqueues
+        // hundreds of probes in a burst, and they all pass the entry check
+        // before the streak opens the breaker — without this, the whole
+        // queued burst still fired (measured: 1000 HEADs against a 503ing
+        // host despite the breaker).
+        if (Date.now() < this.#probesPausedUntil) { this.#verifiedOnHost.add(sig); return true }
         const scheme = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)(?::\d+)?$/i.test(host) ? 'http' : 'https'
         const res = await fetch(`${scheme}://${host}/${sig}`, { method: 'HEAD', cache: 'no-store' })
-        if (res.ok) { this.#verifiedOnHost.add(sig); return true }
+        if (res.ok) { this.#probeFailStreak = 0; this.#verifiedOnHost.add(sig); return true }
         if (res.status === 404) {
+          this.#probeFailStreak = 0 // the host is alive and ASSERTING — not a failure
           // Revoke from BOTH the pool and the legacy dir — mid-migration the
           // receipt may still sit in the legacy source; leaving it there would
           // keep hasReceipt() true and suppress the re-stage.
@@ -851,8 +870,9 @@ export class HostSyncService extends EventTarget {
           EffectBus.emit('share:receipt-revoked', { sig, host })
           return false
         }
+        this.#noteProbeFailure(sig) // 5xx/etc — keep the receipt, don't re-probe this session
         return true
-      } catch { return true } // offline / CORS — keep the receipt
+      } catch { this.#noteProbeFailure(sig); return true } // offline / CORS — keep the receipt
       finally {
         this.#verifySlots--
         this.#verifyInFlight.delete(sig)
@@ -860,6 +880,18 @@ export class HostSyncService extends EventTarget {
     })()
     this.#verifyInFlight.set(sig, run)
     return run
+  }
+
+  /** A probe failed without the host asserting anything. Memoize the sig as
+   *  audited-this-session (re-probing a sick host gains nothing) and, on a
+   *  streak, open the breaker so sweeps stop burning HEADs entirely. */
+  #noteProbeFailure(sig: string): void {
+    this.#verifiedOnHost.add(sig)
+    if (++this.#probeFailStreak >= HostSyncService.#PROBE_FAIL_STREAK_MAX && Date.now() >= this.#probesPausedUntil) {
+      this.#probesPausedUntil = Date.now() + HostSyncService.#PROBE_PAUSE_MS
+      this.#probeFailStreak = 0
+      console.warn(`[host-sync] host unhealthy — pausing receipt probes for ${HostSyncService.#PROBE_PAUSE_MS / 60000}min`)
+    }
   }
 
   /** True iff the host has confirmed (read-back) this sig. Dual-read: the

@@ -1,0 +1,53 @@
+// hypercomb-shared/ui/pinned-entrances/pinned-entrances.component.scss
+//
+// Same cold, quiet icon language as the group launchers — normal small
+// glyphs, never launcher tiles. The drop slot is a bare dashed circle that
+// appears only while an entrance drag is in flight.
+
+:host { display: inline-flex; align-items: center; }
+
+.pinned-entrances {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.pin-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  color: rgba(206, 224, 240, 0.6);
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease, opacity 150ms ease;
+
+  .mat-sym {
+    font-family: 'Material Symbols Outlined';
+    font-size: 1.3rem;
+    line-height: 1;
+  }
+
+  &:hover { color: #eaf5fb; background: rgba(126, 182, 214, 0.12); }
+  &:active { transform: scale(0.94); }
+  &:focus-visible { outline: 1px solid rgba(126, 182, 214, 0.6); outline-offset: 2px; }
+
+  // Being dragged: dim in place (the pointer is the drag feedback);
+  // once outside the bar, fade further — "let go here removes it".
+  &.dragging { opacity: 0.55; }
+  &.dragging-out { opacity: 0.25; }
+}
+
+// Drop slot — raised only while an entrance badge drag is in flight.
+.drop-slot {
+  display: inline-flex;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 8px;
+  border: 1px dashed rgba(126, 182, 214, 0.55);
+  background: rgba(126, 182, 214, 0.08);
+}

@@ -690,6 +690,21 @@ export class Store extends EventTarget {
    *  self-domain: with host-sync disabled (the default) this is a no-op and
    *  the staging functionality is simply absent. Resolved via IoC so shared
    *  never imports essentials. */
+  // Staging RATE LIMITER. Read-triggered staging fires on every local read,
+  // and background warm sweeps read THOUSANDS of sigs in bursts — each
+  // enqueue is a durable-queue OPFS WRITE plus a full byte copy, and a burst
+  // of them starves the single OPFS service queue (measured: multi-second
+  // render stalls during navigation while a warm swept, plus a per-sig probe
+  // storm against an unhealthy host). Cap enqueues per window; sigs over
+  // budget are NOT marked, so a later read stages them once the bucket
+  // refills — staging trickles across the session instead of bursting.
+  // Instant-click doctrine: a read must never carry more than O(1) cheap
+  // side-effect work.
+  #stageWindowStart = 0
+  #stageWindowCount = 0
+  static readonly #STAGE_MAX_PER_WINDOW = 3
+  static readonly #STAGE_WINDOW_MS = 1000
+
   #stageToHost(signature: string, kind: 'resource' | 'layer', data: Blob | Uint8Array): void {
     try {
       if (this.#stagedToHost.has(signature)) return
@@ -697,6 +712,13 @@ export class Store extends EventTarget {
         '@diamondcoreprocessor.com/HostSyncService',
       ) as { isEnabled?: () => boolean; enqueue?: (sig: string, kind: string, bytes: ArrayBuffer) => Promise<void> } | undefined
       if (!hostSync?.isEnabled?.() || !hostSync.enqueue) return
+      const now = Date.now()
+      if (now - this.#stageWindowStart >= Store.#STAGE_WINDOW_MS) {
+        this.#stageWindowStart = now
+        this.#stageWindowCount = 0
+      }
+      if (this.#stageWindowCount >= Store.#STAGE_MAX_PER_WINDOW) return  // over budget — a later read stages it
+      this.#stageWindowCount++
       this.#stagedToHost.add(signature)
       void (async () => {
         try {
@@ -705,7 +727,10 @@ export class Store extends EventTarget {
             : data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
           await hostSync.enqueue!(signature, kind, bytes)
         } catch {
-          this.#stagedToHost.delete(signature)  // enqueue hiccup → retry on next read
+          // KEEP the mark. Receipts make staging idempotent across sessions,
+          // and un-marking here re-armed every failed sig on its next read —
+          // against an unhealthy host that became a perpetual re-stage storm
+          // (thousands of enqueue retries riding every warm sweep).
         }
       })()
     } catch { /* non-fatal */ }

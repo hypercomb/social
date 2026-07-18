@@ -307,9 +307,38 @@ const _runInitializeRuntime = async (
     // declared set drains over several navs instead of flooding one idle slice.
     const warmedProximity = new Set<string>()
     const PROXIMITY_WARM_CAP = 16
+    // REAL-TIME SUPERSEDES PRELOADER — enforced, not aspirational. OPFS is
+    // effectively a single service queue: a subtree warm that runs while the
+    // just-navigated location is still painting queues hundreds of reads IN
+    // FRONT of the render's own props/image reads and starves first paint
+    // (measured on a large hive: 21s click→paint with the warm racing the
+    // render). So before warming, wait for the first SETTLED render pass
+    // after the nav — the paint the user is waiting on — bounded so a pass
+    // that never settles can't wedge the warmer.
+    const awaitSettledPaint = (): Promise<void> => new Promise<void>((resolve) => {
+      let done = false
+      let off: (() => void) | undefined
+      const finish = (): void => {
+        if (done) return
+        done = true
+        try { off?.() } catch { /* already gone */ }
+        clearTimeout(timer)
+        resolve()
+      }
+      const timer = setTimeout(finish, 2500)
+      let replay = true
+      const maybeOff = EffectBus.on?.('render:cell-count', (p: { settled?: boolean } | undefined) => {
+        // First emission is the last-value REPLAY (the PREVIOUS location's
+        // pass) — skip it; only a fresh pass proves the new location painted.
+        if (replay) { replay = false; return }
+        if (p?.settled !== false) finish()
+      })
+      off = typeof maybeOff === 'function' ? maybeOff : undefined
+    })
     const warmCurrent = (): void => {
       void (async () => {
         try {
+          await awaitSettledPaint()
           const sig = await lineage.currentSig()
           if (sig) await historyService.preloadNeighbourhood!(sig)
         } catch { /* non-fatal: a cold render is correct, just slower */ }

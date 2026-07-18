@@ -817,6 +817,10 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     #wheelHost{position:relative;user-select:none;-webkit-user-select:none;touch-action:none}
     #wheelHost svg{width:100%;height:auto;display:block;cursor:grab}
     #wheelHost svg.dragging{cursor:grabbing}
+    /* hover = brightness ONLY (transient) — never a lift or a gold mark, so it
+       can't be mistaken for selected (gold cap) or at-notch (lifted + arrow) */
+    #wheelHost path.flv{transition:filter .1s ease}
+    #wheelHost path.flv:hover{filter:brightness(1.22)}
     .panel{border:1px solid var(--hairline);background:var(--coal)}
     .panel section{padding:1.05rem 1.15rem;border-bottom:1px solid var(--hairline)}
     .panel section:last-child{border-bottom:none}
@@ -852,13 +856,16 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
     .hint{color:var(--faint);font-size:.8rem;font-style:italic;margin-top:.6rem}
     /* the selector station — a zoomed view of whatever sits at the notch */
     .station{display:grid;grid-template-columns:1fr 1.7fr;gap:1px;background:var(--hairline);border:1px solid var(--hairline)}
-    .stbox{padding:.85rem .95rem;background:var(--night);min-height:6rem}
+    /* FIXED height — the box must NOT grow/shrink with family/flavor name
+       length or the selected-hint text, or the whole panel below it shifts.
+       kick pins to top, name in the middle, action hint pins to the bottom. */
+    .stbox{padding:.8rem .9rem;background:var(--night);height:7.5rem;overflow:hidden;display:flex;flex-direction:column}
     #stFlv{cursor:pointer}
     #stFlv:hover{background:#201927}
     .stkick{font-size:.6rem;letter-spacing:.3em;text-transform:uppercase;opacity:.75}
-    .stname{font-size:1.12rem;margin-top:.35rem;line-height:1.15}
-    .stname.big{font-size:1.55rem;color:var(--cream)}
-    .stact{margin-top:.55rem;font-size:.74rem;letter-spacing:.1em;color:var(--faint);text-transform:uppercase}
+    .stname{font-size:1.05rem;margin-top:.3rem;line-height:1.14}
+    .stname.big{font-size:1.4rem;color:var(--cream)}
+    .stact{margin-top:auto;font-size:.7rem;letter-spacing:.08em;color:var(--faint);text-transform:uppercase}
     .stact.on{color:var(--gold-bright)}
     /* big active-section label above the picker */
     /* fixed height + nowrap: the title may truncate but NEVER wraps or
@@ -950,7 +957,8 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
       acc += w + GAP;
     });
     var C = 390, R_OUT = 368, R_FLV = 236, R_FAM = 158, R_HUB = 148;
-    var R_RAISE = 22; // how far the notch flavor lifts above the rim
+    var R_RAISE = 12; // how far the notch flavor lifts above the rim — kept
+    // short so the lifted outer edge + its gold cap never clip the 780 viewBox
     var SCOPE_AT = 90; // the fixed notch: 3 o'clock, pointing at the panel
 
     var state = { rot: 0, sel: [], str: 0, cigOn: true };
@@ -1003,7 +1011,7 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
       var on = isSel(t.lb);
       flvBox.style.borderLeft = '5px solid ' + t.fm.color;
       flvBox.innerHTML = '<div class="stkick">at the notch</div><div class="stname big">' + t.lb + '</div>' +
-        '<div class="stact' + (on ? ' on' : '') + '">' + (on ? '\\u25a0 selected \\u2014 tap to remove' : '\\u25a1 tap to select') + '</div>';
+        '<div class="stact' + (on ? ' on' : '') + '">' + (on ? '\\u25a0 tap to remove' : '\\u25a1 tap to select') + '</div>';
       flvBox.onclick = function(){ toggle(t.lb); };
     }
     // ease the nearest flavor's center into the notch after a spin
@@ -1072,7 +1080,7 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
           // selection LIFTS the slice out of the rim — the position change IS
           // the select cue (a thin border alone read as "nothing happened").
           // The at-notch slice lifts most; a selected slice lifts a bit less.
-          var lift = atNotch ? R_RAISE : (sel ? 12 : 0);
+          var lift = atNotch ? R_RAISE : (sel ? 8 : 0);
           var rIn = R_FLV - (lift ? 8 : 0);
           var rOut = R_OUT + lift;
           var op = atNotch ? 1 : (sel ? 1 : (focused ? .8 : .5));
@@ -1081,8 +1089,18 @@ function buildPages(chromeSig: string, art: Record<string, string | undefined> =
           // dark:true families always mark selection with dark ink/stroke
           var ink = fm.dark ? '#241c14' : '#f0e6d6';
           var fp = el('path', { d: arcPath(rIn, rOut, lift ? f0 - .4 : f0, lift ? f1 + .4 : f1), fill: fm.color, opacity: op, 'class': 'flv' }, rot);
-          if (atNotch) { fp.setAttribute('stroke', ink); fp.setAttribute('stroke-width', '1.75'); }
-          else if (sel) { fp.setAttribute('stroke', ink); fp.setAttribute('stroke-width', '1.25'); }
+          // AT-NOTCH: a light ink outline + the biggest lift + the notch arrow
+          // mark it "in the scope". SELECTED: a bright-gold cap hugging the
+          // outer edge (dark halo behind it so it reads on ANY family colour) —
+          // a categorical "chosen" mark that hover (brightness) and the notch
+          // (position) never wear, so the three states never blur together.
+          if (atNotch) { fp.setAttribute('stroke', ink); fp.setAttribute('stroke-width', '1.5'); }
+          if (sel) {
+            var cr = rOut + 2, c0 = polar(cr, f0 - .4), c1 = polar(cr, f1 + .4);
+            var capD = 'M' + c0[0].toFixed(1) + ',' + c0[1].toFixed(1) + ' A' + cr + ',' + cr + ' 0 0 1 ' + c1[0].toFixed(1) + ',' + c1[1].toFixed(1);
+            el('path', { d: capD, fill: 'none', stroke: '#14101a', 'stroke-width': 7, 'stroke-linecap': 'round' }, rot);
+            el('path', { d: capD, fill: 'none', stroke: '#e0b578', 'stroke-width': 4, 'stroke-linecap': 'round' }, rot);
+          }
           fp.style.cursor = 'pointer';
           fp.addEventListener('click', function(){ if (dragMoved) return; toggle(lb); });
           el('title', {}, fp).textContent = lb;
