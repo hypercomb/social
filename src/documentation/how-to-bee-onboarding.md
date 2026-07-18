@@ -1,15 +1,29 @@
 # How to bee! — progressive onboarding & the Progression gate
 
-**Status:** design (agreed with Jaime 2026-07-07) · not built
-**Owner concept:** turn `/help` from a flat command dump into a gated, gamified learning path; ease newcomers into the whole program by holding advanced surfaces back until they are earned.
+**Status:** design (agreed with Jaime 2026-07-18) · not built · **re-anchored 2026-07-18**
+**Owner concept:** add *earned progression* to `/help`'s existing curated tiers — done-marking, dim-don't-hide, gated unlock — and ease newcomers into the whole program by holding advanced surfaces back until earned.
+
+> **Correction (2026-07-18).** An earlier draft of this doc assumed `/help` was still a flat ~97-command dump. That is **false** — see §1. The curriculum-from-scratch plan it contained is superseded by the delta in §3.
 
 ---
 
-## 1. The idea
+## 1. Ground truth — `/help` is ALREADY a progressive tutorial
 
-`/help` today auto-introspects the entire ~97-command surface into flat clustered islands — every bit of jargon at once. **How to bee!** replaces that landing with a **walkable hierarchy of Stages → Lessons**, ordered as a real learning arc: the plain essentials first, the jargon and odd behaviors held to the end. Completing a stage's lessons earns it a ✓, lights up the next stage, and **graduates** the real features that stage teaches (they stop being held back in the live app). Learn-by-doing: wherever possible a lesson **checks itself off when the user actually performs the action** — the tile they create *is* the proof.
+Verified in `hypercomb-shared/core/help-group.ts` (built 2026-07-09, in the working tree; see `project_help_progressive_tutorial` memory). Three **curated, whitelist-only** tiers (`TIERS`, line 91) rendered as clustered islands:
 
-The full pre-existing command reference is **not deleted** — it relocates to its own root and becomes the deepest, last-unlocked level ("Grow your powers").
+| Tier | Members |
+|---|---|
+| **Basics** | 6 `gesture:<id>` — Go In, Go Out, Zoom, Pan, Arrows, Select |
+| **Everyday** | `cli:create`, Edit, Copy, Paste, Cut, Remove, Undo, Redo, Fit, Center |
+| **Beyond** | Palette, Command Line, Arrange, Arrange Back, Orientation, Public Mode, ／language, ／border, ／accent |
+
+`MORE_MEMBER` ("Show More", key `help:more`) bumps `TIER_KEY = 'hypercomb.help.tier'` in localStorage → the next island reconciles in; it disappears at the last tier. A `Reference` tile leads the page (the full sheet, as the esoteric escape hatch). Anything uncurated **never** gets a tile.
+
+**Therefore: chronological ordering, "no jargon", and "only a few features at the beginning" are already solved.** Do not re-plan them.
+
+## 1b. The complement, not a duplicate
+
+`/tutorial` (alias `/tour`) — the flying bee guide on a transient practice page — is **already built and committed** (`a2e6f185`, 2026-07-17; see `project_bee_tutorial_tour`). Its script already ends by pointing at `/help`. That tour is the **one-time guided walkthrough**; *How to bee!* is the **persistent earned skill tree**. Cross-link them; never duplicate.
 
 ### Decisions (Jaime, 2026-07-07)
 1. **Lives at `/help`** (reorganized in place), not a new root. The flat reference relocates and is portaled-to from the final stage.
@@ -45,18 +59,34 @@ A single participant-local **`Progression` service** (IoC) is the source of trut
 
 ---
 
-## 3. Curriculum (first draft)
+## 3. The delta — what *How to bee!* actually adds
 
-Six stages, chronological, jargon deferred. Each stage = a hexagon at the `/help` root; each lesson = a hexagon child. Human titles/instructions live in **notes** (tile *names* stay normalized lowercase-hyphen, per the bridge normalization rule). Only Stage 1 lit initially.
+The tier roster in §1 stays as the spine (it is already Jaime-curated and jargon-filtered). Four changes turn it from *progressive reveal* into an *earned skill tree*:
 
-| Stage | Lessons | Auto-complete trigger | Graduates (unlocks) |
+| # | Change | Today | After |
 |---|---|---|---|
-| **1 · Look Around** | Pan the view · Zoom in & out · Meet a tile (hover) | pan / zoom / hover effects | basic navigation chrome |
-| **2 · Make Something** | Create your first tile · Name it · Give it a face (image) | history commit / image-set (*these become real first tiles*) | create/edit affordances |
-| **3 · Go Deeper** | Step inside a tile · Add a couple of children · Step back out | `explorerEnter` / back-nav | navigation into/branches |
-| **4 · Change & Undo** | Edit a tile · Undo · Redo ("you can always go back") | history undo/redo effects | history controls |
-| **5 · Organize** | Select several · Move one · Tag them | selection / move / tag effects | selection, move, tags, notes |
-| **6 · Share & Beyond** | Make it yours (settings) · Share your hive · **Grow your powers** → portal to the full command reference + Beehaviors | mixed: manual "got it" for concept tiles | sharing/swarm, Beehaviors, slash commands, the flat reference |
+| 1 | **Earned, not free** | `Show More` reveals the next tier for free — nothing is learned | Practicing a tier's items unlocks the next. `Show More` demoted to an explicit **"I already know this"** escape so nobody is ever trapped. |
+| 2 | **Dim, don't hide** | The next tier is simply *absent* | Future tiers render **dimmed + gray ring + lock badge** — Jaime asked to *see* what's ahead ("dim out the features and hold them back"). Motivating, and it reuses the verified `unshared` dim recipe. |
+| 3 | **Mark off as done** | No completion tracking at all | Each tile earns a **green ring + ✓** when the participant actually performs that gesture/command, auto-detected on the EffectBus. Participant-local. |
+| 4 | **Live-app hold-back** (Tier 2) | Nothing is held back outside `/help` | View-behaviors, slash commands, command-bar chrome and keymap are held back for the not-yet-graduated and revealed as tiers complete. |
+
+**Key simplification:** `TIERS[n].keys` **is** the unlock manifest — each tier already lists exactly the features it teaches. No separate manifest, no new curriculum content to author.
+
+## 3b. Hierarchy — RESOLVED (2026-07-18): sub-group pages, no refactor
+
+The earlier framing ("flat islands" vs "dismantle the launcher machinery") was a false binary. A **third path gives the real walkable hierarchy while reusing the launcher machinery**, and two verified facts make it cheap:
+
+1. `isLauncherLocation` (`show-cell.drone.ts:51`) returns true for **any** single segment that resolves to a **registered group id** — so registering a group named `help-basics` automatically makes `/help-basics` a full launcher page (island layout, cards, hover-peek/click-pin) with **zero new rendering**.
+2. The `group-launchers` chrome icon strip was **deleted** in `930ead04` (−244 lines), superseded by **pinned-entrances**. Groups no longer auto-render an icon — they surface only when the participant pins them. **So registering extra groups costs no chrome.**
+
+**The shape:**
+- `/help` = the **index page** — `Reference` + one tile per tier (Basics / Everyday / Beyond), each carrying the locked / current / done ring state.
+- A tier tile's `activate()` → `nav.goRaw(['help-basics'])` → that tier's **own page**, whose `members()` are its lessons, each earning its own ✓ when practiced.
+- Walk in → practice → walk back out → the next tier lights up.
+
+This is genuinely the walkable Stages→Lessons tree, achieved by **reusing** the launcher rather than dismantling it: no navigate-into refactor, no chrome pollution, no new renderer. `LaunchGroupBase` already supports everything needed; `WebsitesGroup.activate` is the existing precedent for a group that navigates.
+
+⚠ Verify at build time that a tier sub-group is not accidentally pinnable/listed anywhere it shouldn't be, and that `Show More` semantics move to the index page.
 
 **Aesthetic (per Jaime's prefs — no flashy effects, chrome cold/clean, plain hexagons):**
 - unlock = **brighten** (dim → lit, no sparkle)
@@ -71,11 +101,14 @@ Lessons run on the **real hive** (a fresh profile starts empty, so it's safe and
 
 ## 4. Build phases (each shippable + dev-verifiable on 4250)
 
-- **Phase 0 — Author the tree (bridge only).** Script the `/help` stages + lessons as real tiles: normalized names, titles/instructions in notes, a `learn:lesson` decoration per node (`{stage, order, unlockAfter, trigger, unlocks}`). Relocate the existing flat reference to its own launcher root; Stage 6 portals to it. Verify via chrome driver. Pure data — zero code risk. *This is the literal "use the bridge to organize the help collection into a hierarchy" deliverable.*
-- **Phase 1 — Progression engine + tile states.** `LearnProgress` (done-set + unlocked-set, localStorage) · `LearnWatcher` (EffectBus auto-complete + manual "got it" fallback) · the three tile states in `show-cell` · lock navigation into a locked stage. Makes it a *gated, gamified* path. Convert `/help` to a normal root + rewire the command-bar Help icon to navigate there.
-- **Phase 2 — Hold back view-behaviors.** New `kind:'locked'` substrate + `isFeatureLocked` + `feature:unlocked`; view-behavior drones also gate on it; stage-complete unlocks; Beehaviors panel renders locked-and-dimmed (non-restorable, distinct from user-hidden).
-- **Phase 3 — Full program eases in (Tier 2).** The `Progression` service as the single unlocked-set source; per-user runtime suppression hooks for slash autocomplete, command-bar chrome, and (optionally) keymap; unlock manifest drives it; graduated escape hatch + existing-profile default. Biggest lift.
-- **Phase 4 — Polish.** Graduation artifact, quest-log HUD, i18n (en/ja + fallback), web/dev shell parity, `build:essentials` for production OPFS bundles.
+> **No bridge authoring is required.** The roster is **code-defined** (`TIERS` in `help-group.ts`), not hive content — so "organize the help collection" is a source edit, not a bridge script. The bridge/chrome driver are still the right tools for **driving and verifying** the result on the dev shell (4250).
+
+- **Phase 0 — Practice detection.** A `LearnWatcher` that maps each tier key (`gesture:<id>`, `cli:*`, keymap cmd, `slash:*`) to the EffectBus signal proving the participant performed it, writing a participant-local done-set (`hc:help:practiced`, localStorage, keyed on the tier key). Ship it **silent** first — no UI — and confirm on the dev shell that real usage marks the right keys. Zero visual risk; de-risks the whole feature.
+- **Phase 1 — Show it: done + locked states.** Thread a `Map<label, 'locked'|'current'|'done'>` into `show-cell`'s cell-build loop → green ring + ✓ badge for practiced, dim + gray ring + lock for not-yet-reached tiers (which now **render** instead of being absent). Reuses `borderColor` + the `unshared` dim + a `presence-badge` clone. No new shader.
+- **Phase 2 — Earn it: gate the tiers.** Tier N+1 unlocks when tier N's items are practiced; `Show More` becomes the explicit "I already know this" override. This is the behavioural heart — verify it feels good before going further.
+- **Phase 3 — Hold back view-behaviors.** New `kind:'locked'` substrate + `isFeatureLocked` + `feature:unlocked`; view-behavior drones also gate on it; tier-complete unlocks; Beehaviors panel renders locked-and-dimmed (non-restorable, distinct from user-hidden).
+- **Phase 4 — Full program eases in (Tier 2).** The `Progression` service as the single unlocked-set source; per-user runtime suppression hooks for slash autocomplete, command-bar chrome, and (optionally) keymap; `TIERS[n].keys` drives it; graduated escape hatch + existing-profile default. Biggest lift.
+- **Phase 5 — Polish.** Graduation artifact, optional quest-log HUD, i18n (en/ja + fallback), web/dev shell parity, `build:essentials` for production OPFS bundles. Cross-link `/tutorial` ⇄ `/help`.
 
 ---
 

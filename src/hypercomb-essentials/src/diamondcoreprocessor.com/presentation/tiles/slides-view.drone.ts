@@ -2,32 +2,50 @@
 //
 // Full-viewport SLIDES takeover — the presentation sibling of SiteViewDrone /
 // HomeViewDrone / TutorViewDrone. When ViewMode is 'slides', the current cell
-// (the DECK) renders as a PowerPoint-style, screen-by-screen slideshow of its
-// child DIAGRAM tiles instead of the hex grid. One slide fills the viewport;
-// arrow keys / on-screen chevrons step through; a counter and dot strip track
-// position; Escape / right-click / the exit button return to hexagons.
+// (the DECK) renders as a PowerPoint-style, screen-by-screen deck of its
+// children instead of the hex grid. One slide fills the viewport; arrow keys /
+// on-screen chevrons step through; a counter and dot strip track position;
+// Escape / right-click / the exit button return to hexagons.
 //
-// Slides are the deck cell's CHILDREN, so adding a diagram child tile "just
-// plugs in" on the next collect (cell:added / decorations:changed). Each child
-// becomes a slide via, in resolution order:
-//   1. a `visual:diagram:slide` decoration  → payload { contentSig, format,
-//      title?, caption?, order? }  (canonical, richest)
-//   2. a `visual:lightbox:gallery` decoration → payload.images[]  (each image a
-//      slide; the existing gallery tiles)
-//   3. the child's own `link` slot pointing at an image resource
-//      (`/@resource/<sig>` or a bare 64-hex sig) — the existing `/diagrams`
-//      tiles, so they present with zero migration.
+// ── A UNIVERSAL viewer AND player ────────────────────────────────────
 //
-// Rendering: each slide is addressed by its content SIGNATURE and painted as a
-// `background-image` (background-size:contain) on a definite-size <div> — NOT an
-// <img>, because an SVG with only a viewBox and no width/height (common for
-// exported/mermaid diagrams) has no intrinsic size and collapses an <img> to
-// 0×0. The bytes are fetched via `Store.getResource(sig)` and shown as an OBJECT
-// URL — NOT the `/@resource/<sig>` route — because the service worker serves that
-// route as `application/octet-stream` (it infers MIME from the URL tail, and a
-// bare sig has none), which won't render as an image; the store blob carries its
-// own correct MIME. Object URLs are cached by sig and revoked on teardown.
-// (Inline-SVG theming is a future enhancement.)
+// A slide is not just a picture. Whatever a child tile points at becomes the
+// slide, and ONE stage renders every kind:
+//   • image  — painted as a background layer (diagrams, photos, SVG)
+//   • video  — native <video> with controls
+//   • audio  — native <audio> with controls
+//   • embed  — a provider page in an iframe (YouTube via the nocookie host)
+// So a deck can mix a diagram, a screen recording, a track, and a YouTube
+// video, and you step through them all in one presentation.
+//
+// Slides are the deck cell's CHILDREN, so adding a child "just plugs in" on the
+// next collect (cell:added / decorations:changed). Each child resolves via, in
+// order: a `visual:diagram:slide` decoration (payload { contentSig, format,
+// title?, caption?, order? }) → a `visual:lightbox:gallery` decoration
+// (payload.images[]) → the child's own LINK.
+//
+// The link is a TILE PROPERTY (`properties[0].link` — where the attach flow
+// writes it), NOT a top-level layer field, and it is read from the child's OWN
+// lineage-bag head (the parent's children-slot sig can lag it). Reading
+// `child.link` off the parent's ref layer was why attached diagrams never
+// appeared. See #childLink / #collectSlides.
+//
+// KIND resolution: a content-addressed resource (bare sig, or a
+// `/@resource/<sig>` URL in any form, relative or absolute) is fetched via
+// `Store.getResource` and its BLOB'S OWN MIME decides image/video/audio — a
+// signature has no extension, and the SW serves that route as
+// `application/octet-stream`, so the bytes are the only honest signal. A plain
+// URL is classified from the link itself (provider embed → image → media file).
+// Object URLs are cached by sig and revoked on teardown.
+//
+// Images render as a `background-image` (background-size:contain) on a
+// definite-size <div> — NOT an <img> — because an SVG with only a viewBox and
+// no width/height (common for exported/mermaid diagrams) has no intrinsic size
+// and collapses an <img> to 0×0 even with an explicit CSS width.
+//
+// Media never autoplays (browsers block unmuted autoplay, and a deck that
+// starts blaring on navigation is hostile); stepping away pauses and unmounts
+// the player so nothing keeps running off-screen.
 //
 // Mirrors HomeViewDrone's lifecycle (lineage + ViewMode listeners, re-entrancy
 // guard, fixed host below the Pixi layer, `view:active` canvas/chrome hiding —
@@ -38,6 +56,7 @@ import { childSigsOf } from '../../history/layer-placement.js'
 import { isFeatureHidden } from '../../sharing/feature-hidden.js'
 import { DECK_KIND, SLIDE_KIND } from '../../commands/present.queen.js'
 import { isImageUrl } from '../../link/photo.js'
+import { embedUrlFor, mediaKindForUrl, kindForMime, type PlayableKind } from '../../link/media.js'
 
 const SLIDES_VIEW = 'slides'
 const SIG = /^[0-9a-f]{64}$/
@@ -55,10 +74,15 @@ type HistoryShape = {
 }
 type StoreShape = { getResource(sig: string): Promise<Blob | null> }
 
-// `src` is EITHER a 64-hex resource signature (content in OPFS, resolved via
-// Store → object URL) OR a full image URL (an external diagram a child links
-// to, used directly as a background-image — no CORS needed to DISPLAY one).
-type Slide = { src: string; title: string; caption?: string }
+/** How a slide renders. `auto` = content-addressed bytes whose real kind is
+ *  read from the blob's MIME at paint time (a signature carries no extension);
+ *  every other kind is decided up-front from the link. */
+type SlideKind = 'auto' | PlayableKind
+
+// `src` is EITHER a 64-hex resource signature (content in OPFS → object URL +
+// MIME) OR a full URL: an external image, a direct media file, or a provider
+// EMBED url. ONE stage renders all of them — that's the universal player.
+type Slide = { kind: SlideKind; src: string; title: string; caption?: string }
 
 type MountState = {
   host: HTMLDivElement
@@ -84,8 +108,10 @@ export class SlidesViewDrone extends Drone {
   #index = 0
   /** Guards async image resolution against a newer #show landing first. */
   #showToken = 0
-  /** Cache of resolved slide bytes: content sig → object URL. Revoked on teardown. */
-  #objectUrls = new Map<string, string>()
+  /** Cache of resolved slide bytes: content sig → { object URL, blob MIME }.
+   *  The MIME is what decides image vs video vs audio for a bare signature.
+   *  URLs are revoked on teardown. */
+  #resolved = new Map<string, { url: string; mime: string }>()
   #viewActive = false
   #registered = false
   #lineageBound = false
@@ -176,7 +202,19 @@ export class SlidesViewDrone extends Drone {
     switch (e.key) {
       case 'Escape':
         e.preventDefault(); e.stopImmediatePropagation(); vm.setMode('hexagons'); return
-      case 'ArrowRight': case 'ArrowDown': case 'PageDown': case ' ': case 'Spacebar':
+      case ' ': case 'Spacebar': {
+        // On a MEDIA slide the spacebar belongs to the PLAYER (play/pause) —
+        // that is what makes this a player and not just a viewer. On any other
+        // slide it advances, the presentation convention. Arrows always
+        // navigate, so a deck stays steppable either way.
+        e.preventDefault(); e.stopImmediatePropagation()
+        const media = this.#stageMedia()
+        if (!media) { this.#step(1); return }
+        if (media.paused) void media.play().catch(() => { /* refused — leave paused */ })
+        else media.pause()
+        return
+      }
+      case 'ArrowRight': case 'ArrowDown': case 'PageDown':
         e.preventDefault(); e.stopImmediatePropagation(); this.#step(1); return
       case 'ArrowLeft': case 'ArrowUp': case 'PageUp':
         e.preventDefault(); e.stopImmediatePropagation(); this.#step(-1); return
@@ -265,7 +303,7 @@ export class SlidesViewDrone extends Drone {
       }
     } catch { /* cold read — render the empty guide, retry on next reconcile */ }
     out.sort((a, b) => a.order - b.order)
-    return out.map(({ src, title, caption }) => ({ src, title, caption }))
+    return out.map(({ kind, src, title, caption }) => ({ kind, src, title, caption }))
   }
 
   /** Resolve one child layer to its slide(s): slide-decoration → gallery → link. */
@@ -302,6 +340,7 @@ export class SlidesViewDrone extends Drone {
         const titleRaw = slidePayload['title']
         const captionRaw = slidePayload['caption']
         return [{
+          kind: 'auto' as const,
           src: contentSig,
           title: (typeof titleRaw === 'string' && titleRaw.trim()) ? titleRaw : name,
           caption: typeof captionRaw === 'string' ? captionRaw : undefined,
@@ -311,25 +350,37 @@ export class SlidesViewDrone extends Drone {
     }
     if (gallery && gallery.length) {
       return gallery.map((imgSig, i) => ({
+        kind: 'auto' as const,
         src: imgSig,
         title: gallery!.length > 1 ? `${name} ${i + 1}` : name,
         order: childIndex + i / 1000,
       }))
     }
 
-    // 3: the child's own LINK — the diagram/image the tile points at IS the
-    // slide. The link is a TILE PROPERTY (`properties[0].link`, where the attach
-    // flow writes it), with a legacy top-level `link` as fallback. A
-    // content-addressed resource (bare sig, or a `/@resource/<sig>` URL in any
-    // form) resolves through the Store; an external IMAGE url (…/diagram.png,
-    // .svg, …) is shown directly. A non-image hyperlink is navigation, not a
-    // slide, so it contributes nothing.
+    // 3: the child's own LINK — whatever the tile points at IS the slide. The
+    // link is a TILE PROPERTY (`properties[0].link`, where the attach flow
+    // writes it), with a legacy top-level `link` as fallback.
     const link = await this.#childLink(child, store)
-    const sig = this.#resourceSig(link)
-    if (sig) return [{ src: sig, title: name, order: childIndex }]
-    if (isImageUrl(link)) return [{ src: link, title: name, order: childIndex }]
+    const slide = this.#slideFromLink(link, name, childIndex)
+    return slide ? [slide] : []
+  }
 
-    return []
+  /** Classify a link into a playable slide — the whole point of the universal
+   *  player. Order matters: a content-addressed resource wins (its kind comes
+   *  from the blob's MIME, so an attached mp4 plays and an svg paints); then a
+   *  provider EMBED (YouTube → nocookie iframe); then a direct image; then a
+   *  direct media file. Null for anything else — a plain hyperlink is
+   *  navigation, not a slide, and contributes nothing. */
+  #slideFromLink(link: string, title: string, order: number): (Slide & { order: number }) | null {
+    if (!link) return null
+    const sig = this.#resourceSig(link)
+    if (sig) return { kind: 'auto', src: sig, title, order }
+    const embed = embedUrlFor(link)
+    if (embed) return { kind: 'embed', src: embed, title, order }
+    if (isImageUrl(link)) return { kind: 'image', src: link, title, order }
+    const media = mediaKindForUrl(link)
+    if (media) return { kind: media, src: link, title, order }
+    return null
   }
 
   /** The child tile's link. Attached links/diagrams live in the tile's
@@ -369,28 +420,32 @@ export class SlidesViewDrone extends Drone {
     return null
   }
 
-  /** Resolve a slide `src` to the URL painted as the stage background: a
-   *  resource sig goes through the Store (object URL, blob's own MIME); a full
-   *  image URL is already displayable and used as-is (a background-image needs
-   *  no CORS to render, unlike reading pixels). */
-  async #srcToUrl(src: string): Promise<string> {
-    return SIG.test(src) ? this.#urlForSig(src) : src
+  /** Resolve a slide to the concrete { kind, url } the stage renders. An
+   *  `auto` slide is content-addressed: fetch the bytes once and let the blob's
+   *  own MIME decide image vs video vs audio. Every other kind was already
+   *  settled from the link and its src is directly usable (an external image or
+   *  media file needs no CORS to DISPLAY/PLAY, only to read pixels/samples). */
+  async #resolveSlide(slide: Slide): Promise<{ kind: PlayableKind; url: string } | null> {
+    if (slide.kind !== 'auto') return { kind: slide.kind, url: slide.src }
+    const { url, mime } = await this.#resolveSig(slide.src)
+    return url ? { kind: kindForMime(mime), url } : null
   }
 
-  /** Resolve a content sig to a same-origin object URL carrying the blob's own
-   *  MIME (so an SVG renders in <img>). Cached; revoked on teardown. */
-  async #urlForSig(sig: string): Promise<string> {
-    const cached = this.#objectUrls.get(sig)
+  /** Resolve a content sig to a same-origin object URL plus the blob's own MIME
+   *  — the only kind signal a bare signature carries. Cached; revoked on
+   *  teardown. */
+  async #resolveSig(sig: string): Promise<{ url: string; mime: string }> {
+    const cached = this.#resolved.get(sig)
     if (cached) return cached
     const store = this.resolve<StoreShape>('store')
-    if (!store?.getResource) return ''
+    if (!store?.getResource) return { url: '', mime: '' }
     try {
       const blob = await store.getResource(sig)
-      if (!blob) return ''
-      const url = URL.createObjectURL(blob)
-      this.#objectUrls.set(sig, url)
-      return url
-    } catch { return '' }
+      if (!blob) return { url: '', mime: '' }
+      const entry = { url: URL.createObjectURL(blob), mime: blob.type || '' }
+      this.#resolved.set(sig, entry)
+      return entry
+    } catch { return { url: '', mime: '' } }
   }
 
   // ── DOM ────────────────────────────────────────────────────
@@ -407,17 +462,15 @@ export class SlidesViewDrone extends Drone {
     host.setAttribute('data-consumes-wheel', '')
     document.body.appendChild(host)
 
-    // Stage — a definite-size box painted with the slide as a BACKGROUND image
-    // (background-size:contain), not an <img>. This renders reliably regardless
-    // of the source's intrinsic dimensions: an SVG with only a viewBox and no
-    // width/height (common for exported/mermaid diagrams) has no intrinsic size
-    // and collapses an <img> to 0×0 even with an explicit CSS width, whereas a
-    // background image simply fits the definite box. flex:0 0 auto stops the
-    // flex host from shrinking it.
+    // Stage — a definite-size box the slide's element mounts INTO. ONE stage,
+    // many kinds: an image paints as a background layer (see #mediaElement for
+    // why not an <img>), a video/audio mounts a native player, a provider mounts
+    // an iframe. flex:0 0 auto stops the flex host from shrinking it; centering
+    // keeps a smaller player (audio, a short video) in the middle.
     const stage = document.createElement('div')
     stage.style.cssText =
-      'width:92vw;height:86vh;flex:0 0 auto;' +
-      'background-position:center;background-repeat:no-repeat;background-size:contain;'
+      'width:92vw;height:86vh;flex:0 0 auto;overflow:hidden;' +
+      'display:flex;align-items:center;justify-content:center;'
     host.appendChild(stage)
 
     // Title (top) + caption (bottom).
@@ -515,13 +568,13 @@ export class SlidesViewDrone extends Drone {
     // Empty deck — show the guide, hide the stage chrome.
     const hasSlides = n > 0
     m.empty.style.display = hasSlides ? 'none' : 'block'
-    m.stage.style.display = hasSlides ? 'block' : 'none'
+    m.stage.style.display = hasSlides ? 'flex' : 'none'
     m.dots.style.display = hasSlides ? 'flex' : 'none'
     if (!hasSlides) {
       m.titleEl.textContent = ''
       m.captionEl.textContent = ''
       m.counterEl.textContent = ''
-      m.stage.style.backgroundImage = 'none'
+      this.#clearStage(m)
       return
     }
 
@@ -534,11 +587,81 @@ export class SlidesViewDrone extends Drone {
     m.counterEl.textContent = `${index + 1} / ${n}`
     this.#renderDots(m, n, index)
 
+    // Stop + drop whatever the PREVIOUS slide mounted before painting the next
+    // one — a video must never keep playing off-screen behind a later slide.
+    this.#clearStage(m)
+
     const token = ++this.#showToken
-    void this.#srcToUrl(slide.src).then(url => {
+    void this.#resolveSlide(slide).then(res => {
       if (token !== this.#showToken || this.#mount !== m) return // superseded / torn down
-      m.stage.style.backgroundImage = url ? `url("${url}")` : 'none'
+      if (!res) return
+      m.stage.appendChild(this.#mediaElement(res.kind, res.url))
     })
+  }
+
+  /** The native player mounted on the CURRENT slide, when it has one. Drives
+   *  the spacebar's play/pause vs advance decision. */
+  #stageMedia(): HTMLMediaElement | null {
+    return (this.#mount?.stage.querySelector('video, audio') as HTMLMediaElement | null) ?? null
+  }
+
+  /** Empty the stage, stopping anything that was playing. Pausing + dropping
+   *  the src before removal matters: a detached <video> that still holds a src
+   *  can keep buffering, and an <iframe> only stops when it leaves the DOM. */
+  #clearStage(m: MountState): void {
+    const media = m.stage.querySelector('video, audio') as HTMLMediaElement | null
+    if (media) {
+      try { media.pause() } catch { /* already gone */ }
+      media.removeAttribute('src')
+      try { media.load() } catch { /* best-effort */ }
+    }
+    m.stage.replaceChildren()
+  }
+
+  /** Build the element for one resolved slide — the universal player's only
+   *  branch point.
+   *
+   *  IMAGE is a background layer on a definite-size div, NOT an <img>: an SVG
+   *  with only a viewBox and no width/height (common for exported/mermaid
+   *  diagrams) has no intrinsic size and collapses an <img> to 0×0 even with an
+   *  explicit CSS width, whereas a background image simply fits the box.
+   *
+   *  VIDEO/AUDIO get native controls and are NOT autoplayed — browsers block
+   *  unmuted autoplay anyway, and a deck that starts blaring on navigation is
+   *  hostile. Space toggles play/pause on these slides (see #onKeyDown).
+   *
+   *  EMBED is a provider iframe (YouTube via the nocookie host). It is
+   *  sandboxed: the frame keeps its OWN origin so the player works, but it
+   *  cannot navigate the app away or submit forms into it. */
+  #mediaElement(kind: PlayableKind, url: string): HTMLElement {
+    if (kind === 'embed') {
+      const frame = document.createElement('iframe')
+      frame.src = url
+      frame.style.cssText = 'width:100%;height:100%;border:none;background:#000;'
+      frame.allow = 'accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture'
+      frame.setAttribute('allowfullscreen', '')
+      frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation allow-popups')
+      frame.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin')
+      return frame
+    }
+
+    if (kind === 'video' || kind === 'audio') {
+      const media = document.createElement(kind) as HTMLVideoElement | HTMLAudioElement
+      media.src = url
+      media.controls = true
+      media.preload = 'metadata'
+      media.style.cssText = kind === 'video'
+        ? 'max-width:100%;max-height:100%;background:#000;outline:none;'
+        : 'width:min(38rem,90%);outline:none;'
+      return media
+    }
+
+    const layer = document.createElement('div')
+    layer.style.cssText =
+      'width:100%;height:100%;' +
+      'background-position:center;background-repeat:no-repeat;background-size:contain;'
+    layer.style.backgroundImage = `url("${url}")`
+    return layer
   }
 
   /** Dot strip — one tappable dot per slide (hidden past a sane cap to avoid a
@@ -568,13 +691,15 @@ export class SlidesViewDrone extends Drone {
 
   #teardown(): void {
     if (this.#mount) {
+      // Stop anything playing before the host leaves the DOM.
+      this.#clearStage(this.#mount)
       this.#mount.host.remove()
       this.#mount = null
     }
-    for (const url of this.#objectUrls.values()) {
+    for (const { url } of this.#resolved.values()) {
       try { URL.revokeObjectURL(url) } catch { /* noop */ }
     }
-    this.#objectUrls.clear()
+    this.#resolved.clear()
     if (this.#viewActive) this.#setViewActive(false)
   }
 

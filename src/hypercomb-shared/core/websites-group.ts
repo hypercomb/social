@@ -56,6 +56,10 @@ class WebsitesGroup extends LaunchGroupBase {
   #members: GroupMember[] = []
   #debounce: ReturnType<typeof setTimeout> | null = null
   #scanning = false
+  /** Site roots whose `website` pheromone was ensured this session —
+   *  avoids re-emitting the decoration trigger on every scan tick (the
+   *  layer-level append is idempotent regardless). */
+  #pheromoneStamped = new Set<string>()
 
   constructor() {
     super()
@@ -152,6 +156,22 @@ class WebsitesGroup extends LaunchGroupBase {
     vm?.setMode?.(SITE)
   }
 
+  /** Ensure the cell at `segments` carries the `website` tag decoration.
+   *  DecorationService lives in essentials — resolved via IoC at call time
+   *  (shared never imports essentials). Un-marks the session guard on
+   *  failure so a later scan retries (e.g. essentials not loaded yet). */
+  async #ensureWebsitePheromone(segments: readonly string[]): Promise<void> {
+    if (segments.length === 0) return
+    const key = segments.join('/')
+    if (this.#pheromoneStamped.has(key)) return
+    this.#pheromoneStamped.add(key)
+    const deco = get<{ addTag?: (s: readonly string[], name: string) => Promise<string> }>(
+      '@diamondcoreprocessor.com/DecorationService',
+    )
+    if (!deco?.addTag) { this.#pheromoneStamped.delete(key); return }
+    try { await deco.addTag(segments, 'website') } catch { this.#pheromoneStamped.delete(key) }
+  }
+
   #scheduleScan(delay = 450): void {
     if (this.#debounce) clearTimeout(this.#debounce)
     this.#debounce = setTimeout(() => { this.#debounce = null; void this.#scan() }, delay)
@@ -194,6 +214,13 @@ class WebsitesGroup extends LaunchGroupBase {
           icon: r.icon || 'web',
         }))
         .sort((a, b) => a.label.localeCompare(b.label))
+      // Pheromone stamp: a declared site root carries the author's `website`
+      // tag in its OWN layer decorations (a tag IS the author's pheromone —
+      // documentation/pheromones.md), so websites surface through the
+      // existing tag reach filter and the mark travels with adoption.
+      // Covers new declarations AND back-fills roots declared before this
+      // existed; duplicate appends no-op at the layer machine.
+      for (const m of this.#members) void this.#ensureWebsitePheromone(m.segments)
       groupRegistry.notifyChanged()
     } finally {
       this.#scanning = false
