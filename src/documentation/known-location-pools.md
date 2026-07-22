@@ -208,6 +208,35 @@ mechanism — queries are (kind, scope), nearest-enclosing wins, the
 pheromone lineage is derived by reading the walk: see *Scoped sniffing*
 in `pheromones.md`.
 
+### How this composes with the swarm (verified against shipped code)
+
+The mesh's one agreement mechanism is arithmetic, not messaging:
+`channel = sha256(lineageKey(segments) ␀ room ␀ secret)` — same place,
+same swarm → same slot with zero coordination (swarm.drone's
+composeSigForSegments; room+secret both required or the drone stays
+silent). Sync is the merkle root compare: equal sealed head = entire
+tree current, O(1); different = walk only the changed-sig subtrees.
+
+The named-hive style changes NONE of this, because it separates ENTRY
+from COORDINATES and the mesh only ever depended on coordinates:
+
+- **Names are internal.** A hive name is a local bookmark in
+  `sign('hives:names')`; it never rides the mesh as an address, so a
+  rename forks nothing.
+- **Coordinates are hive-root-relative.** Entering re-roots the
+  session at the hive's root; visitor and host derive byte-identical
+  lineage keys from that root (hive-visit already resolves
+  `manifest.roots[lineageKey(host segments)]` — the visitor's own
+  mount path never leaks into keys).
+- **Cross-hive path collisions are scoped away** by (room, secret) —
+  identical internal paths in two swarms are disjoint channels; the
+  same move as the colon in pool meanings.
+
+The two failure shapes to guard in review: hive names used as channel
+keys (rename = fork), and visitor mount paths leaking into lineage
+derivation (peers never converge). Neither exists today; neither may
+be introduced.
+
 ## The rules (enforced where possible)
 
 1. **Every NEW pool meaning carries a colon.** Ratchet-enforced
