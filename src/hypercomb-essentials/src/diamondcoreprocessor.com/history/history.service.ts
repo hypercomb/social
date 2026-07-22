@@ -1,5 +1,5 @@
 // diamondcoreprocessor.com/core/history.service.ts
-import { EffectBus, SignatureService, SignatureStore, USAGE_IOC_KEY, type UsageRanker } from '@hypercomb/core'
+import { EffectBus, SignatureService, SignatureStore, USAGE_IOC_KEY, isPoolAddress, poolAddresses, poolMeaningOf, type UsageRanker } from '@hypercomb/core'
 import { lineageKey, rawLineageKey } from './lineage-key.js'
 import { isBareLayer } from './child-sig-guard.js'
 import { parseHeadIndex, buildFlushIndex } from './head-index.js'
@@ -413,25 +413,19 @@ export class HistoryService {
   }
 
   /** sign(meaning) pool addresses that share the OPFS root with lineage
-   *  sigbags. Derived at runtime — sha256 of the UTF-8 meaning bytes,
-   *  never hardcoded hex — and excluded from bag enumeration: a pool dir
-   *  is not a lineage. The list mirrors the known pool meanings across
-   *  subsystems (Store pre-opens the first seven). */
-  static readonly #POOL_MEANINGS = [
-    'bees', 'dependencies', 'clipboard', 'threads', 'computation',
-    'manifests', 'optimization', 'temporary', 'receipts', 'structure',
-    'roots', 'patches',
-  ] as const
-  #poolSigsPromise: Promise<ReadonlySet<string>> | null = null
-  readonly #poolSigs = (): Promise<ReadonlySet<string>> => {
-    return this.#poolSigsPromise ??= (async () => {
-      const sigs = new Set<string>()
-      for (const meaning of HistoryService.#POOL_MEANINGS) {
-        sigs.add(await SignatureService.sign(new TextEncoder().encode(meaning).buffer as ArrayBuffer))
-      }
-      return sigs
-    })()
-  }
+   *  sigbags — excluded from bag enumeration: a pool dir is not a lineage.
+   *
+   *  Sourced from the core POOL REGISTRY, never a local list. The root is
+   *  an untagged union of {bag, pool} and ANY module may mint a pool, so a
+   *  hardcoded denylist here went stale the moment a new meaning appeared
+   *  (it was missing 13 live ones — `registry`, `viewport`, `authored`,
+   *  `substrate`, `push`, `host-push`, `host-receipts`, `overrides`,
+   *  `translations`, `visual-optimization`, …), and every one of those was
+   *  being walked as if it were a lineage bag. The registry is seeded with
+   *  the full census AND self-extends: deriving a pool address registers
+   *  it. NOT memoized here — the registry grows as modules address new
+   *  pools, and a stale snapshot is how this class of bug returns. */
+  readonly #poolSigs = (): Promise<ReadonlySet<string>> => poolAddresses()
 
   /** SELF-CLEANING drain of the legacy `__history__/` pool — the single
    *  destructive step on NEVER-WIPE history. Union-merges every remaining
@@ -3058,6 +3052,16 @@ export class HistoryService {
    * /flatten, which the user invokes deliberately.
    *
    * Idempotent: a clean bag is unchanged.
+   *
+   * REFUSES TO RUN ON A POOL ADDRESS. Pools of meaning share the flat root
+   * with lineage bags, and a BARE-WORD meaning hashes to exactly the same
+   * address as a same-named root tile (sign('clipboard') IS the bag of a
+   * root tile called `clipboard`). In that case the directory holds the
+   * pool's sig-named members AND this location's markers — and every pool
+   * member reads as "non-canonical" here, so an unguarded pass would HARD
+   * DELETE the user's entire clipboard/registry/viewport/... pool. A no-op
+   * is always the right answer over destroying data we cannot restore
+   * (this is a hard delete — unlike `archiveEntries`, nothing is kept).
    */
   public readonly purgeNonLayerFiles = async (
     locationSig: string,
@@ -3066,6 +3070,16 @@ export class HistoryService {
   readonly #quarantineNonLayerFiles = async (
     locationSig: string,
   ): Promise<void> => {
+    if (await isPoolAddress(locationSig)) {
+      const meaning = await poolMeaningOf(locationSig)
+      console.warn(
+        `[history] refusing to purge ${locationSig.slice(0, 8)}… — it is the ` +
+        `sign('${meaning}') pool sharing an address with this location. ` +
+        `Purging would destroy the pool's members.`,
+      )
+      return
+    }
+
     let bag: FileSystemDirectoryHandle
     try {
       bag = await this.bagForRead(locationSig)

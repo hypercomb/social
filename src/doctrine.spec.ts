@@ -15,6 +15,7 @@
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync } from 'fs'
 import { join, relative } from 'path'
+import { BARE_WORD_POOL_MEANINGS } from '@hypercomb/core'
 
 const ROOT = __dirname
 
@@ -229,5 +230,58 @@ describe('doctrine ratchets', () => {
     // emit('view:active') may never return — register an owner instead.
     const actual = filesMatching(/(?:emitEffect|EffectBus\.emit(?:Transient)?)\s*(?:<[^>]*>)?\s*\(\s*['"`]view:active['"`]/)
     assertRatchet(actual, [], 'raw view:active emit')
+  })
+
+  it('no NEW bare-word pool meaning — a new pool meaning must carry a colon', () => {
+    // Pools of meaning and lineage sigbags share ONE flat OPFS root
+    // namespace:
+    //   pool address = sign(meaning)              = sha256(meaning)
+    //   bag address  = sign(lineageKey(segments)) = sha256(<slug>)
+    // `lineageKey` preserves letters and digits, so a BARE-WORD meaning
+    // hashes to exactly the same directory as a same-named root tile —
+    // sign('clipboard') IS the bag of a root tile called `clipboard`.
+    // Committing there writes markers into the pool, and /flatten then
+    // HARD-DELETES every sig-named member it finds (the pool's contents).
+    //
+    // A colon fixes this by construction: lineageKey folds every
+    // non-letter/number to '-', so no location can ever produce one.
+    // Every NEW pool meaning must be scoped (`websites:menu`,
+    // `usage:dwell`). The bare-word list is FROZEN — it may only shrink,
+    // as existing meanings are migrated away WITH a drain plan (sign() of
+    // a new spelling mints a different address forever, so an unplanned
+    // rename strands every existing member).
+    // Fail LOUDLY and accurately if the frozen list didn't load. Run from
+    // a directory without vitest.config.ts and `@hypercomb/core` resolves
+    // to the nearest node_modules — in a worktree, the MAIN checkout's
+    // dist — where this export may not exist. `new Set(undefined)` is an
+    // empty set, which would report every pre-existing meaning as new
+    // drift and send you hunting a regression that isn't there.
+    expect(
+      Array.isArray(BARE_WORD_POOL_MEANINGS) && BARE_WORD_POOL_MEANINGS.length > 0,
+      'BARE_WORD_POOL_MEANINGS did not load from @hypercomb/core — run vitest from `src/` ' +
+      '(where vitest.config.ts maps @hypercomb/* to source), not from the repo root.',
+    ).toBe(true)
+
+    const frozen = new Set(BARE_WORD_POOL_MEANINGS)
+    const found = new Map<string, string>()  // meaning → first file
+    const decl = /(?:^|\b)[A-Z_]*MEANING[A-Z_]*\s*(?::[^=]*)?=\s*'([^']+)'/gm
+    for (const dir of SCAN_DIRS) {
+      let files: string[]
+      try { files = walk(join(ROOT, dir)) } catch { continue }
+      for (const file of files) {
+        const code = stripComments(readFileSync(file, 'utf8'))
+        for (const m of code.matchAll(decl)) {
+          const meaning = m[1]
+          if (meaning.includes(':')) continue           // collision-proof
+          if (!found.has(meaning)) found.set(meaning, relative(ROOT, file).replace(/\\/g, '/'))
+        }
+      }
+    }
+    const drift = [...found].filter(([meaning]) => !frozen.has(meaning))
+    expect(
+      drift.map(([meaning, file]) => `${meaning}  (${file})`),
+      '\nNEW BARE-WORD POOL MEANING — it collides with a same-named root tile.\n' +
+      'Give it a colon (e.g. "thing:records") instead of adding it to the list.\n',
+    ).toEqual([])
   })
 })

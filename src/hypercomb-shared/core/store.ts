@@ -1,7 +1,7 @@
 // hypercomb-shared/core/store.ts
 // hypercomb-web/src/app/core/store.ts
 
-import { Bee, EffectBus, SignatureService, isSignature } from '@hypercomb/core'
+import { Bee, EffectBus, SignatureService, isSignature, registerPoolMeaning } from '@hypercomb/core'
 
 /** How long a host-resolution MISS is remembered before the cascade may be
  *  re-dialed for that sig. Render passes within the window get an instant
@@ -175,17 +175,18 @@ export class Store extends EventTarget {
   public legacyTranslations?: FileSystemDirectoryHandle
 
   /** sign(meaning) → pool address: sha256 of the UTF-8 bytes of the
-   *  meaning string, memoized. The derivation IS the registry — any
-   *  tier computes the identical address. */
-  static #poolSignatures = new Map<string, string>()
-  public static poolSignature = async (meaning: string): Promise<string> => {
-    let sig = Store.#poolSignatures.get(meaning)
-    if (!sig) {
-      sig = await SignatureService.sign(new TextEncoder().encode(meaning).buffer as ArrayBuffer)
-      Store.#poolSignatures.set(meaning, sig)
-    }
-    return sig
-  }
+   *  meaning string, memoized. The derivation IS the address — any tier
+   *  computes the identical one.
+   *
+   *  Deriving also REGISTERS the meaning in the core pool registry.
+   *  Pools and lineage sigbags share one flat OPFS root namespace and a
+   *  bare-word meaning hashes to exactly the same address as a same-named
+   *  root tile, so every walker of the root needs to be able to tell the
+   *  two apart — and only the registry can answer, since any module may
+   *  mint a pool. Registering here means addressing a pool is enough; no
+   *  caller has to remember to declare it. */
+  public static poolSignature = (meaning: string): Promise<string> =>
+    registerPoolMeaning(meaning)
 
   /** Open (creating if needed) the pool dir for a meaning — for IoC
    *  consumers that need a pool Store doesn't pre-open. Null when OPFS

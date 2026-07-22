@@ -5,7 +5,7 @@ import { Component, signal, type OnDestroy } from '@angular/core'
 import { FormsModule } from '@angular/forms'
 import type { Lineage } from '../../core/lineage'
 import { Store } from '../../core/store'
-import { hypercomb, requestConfirm } from '@hypercomb/core'
+import { hypercomb, requestConfirm, poolMeanings } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
 import type { ScriptPreloader } from '../../core/script-preloader'
 import { LocationParser } from '../../core/initializers/location-parser'
@@ -50,14 +50,10 @@ export class OpfsExplorerComponent extends hypercomb {
   private static readonly SIG_RE = /^[0-9a-f]{64}$/
   /** Legacy `__x__` dirs — drain sources only, never live locations. */
   private static readonly LEGACY_DRAIN_RE = /^__.+__$/
-  /** Pools of meaning the explorer can label — dir name = sign(meaning),
-   *  derived via Store.poolSignature (the derivation IS the registry). */
-  private static readonly POOL_MEANINGS = [
-    Store.BEES_MEANING, Store.DEPENDENCIES_MEANING, Store.CLIPBOARD_MEANING,
-    Store.THREADS_MEANING, Store.COMPUTATION_MEANING, Store.MANIFESTS_MEANING,
-    Store.OPTIMIZATION_MEANING, Store.OVERRIDES_MEANING, Store.TRANSLATIONS_MEANING,
-    'registry', 'receipts', 'structure', 'patches', 'roots',
-  ]
+  // Pools of meaning are labelled from the core POOL REGISTRY (see
+  // #loadPoolMeanings) — seeded with every known meaning and self-extending
+  // as modules address new pools. A local list here went stale and showed
+  // real pools as unlabelled sig dirs, indistinguishable from lineage bags.
   /** The explorer browses the true OPFS root (`hypercombRoot === opfsRoot`).
    *  The old `'hypercomb.io'` label here named what is now a legacy drain
    *  dir — the path bar shows the root itself, no domain prefix. */
@@ -142,8 +138,8 @@ export class OpfsExplorerComponent extends hypercomb {
   }
 
   #loadPoolMeanings = async (): Promise<void> => {
-    for (const meaning of OpfsExplorerComponent.POOL_MEANINGS) {
-      this.#poolMeaningBySig.set(await Store.poolSignature(meaning), meaning)
+    for (const [sig, meaning] of await poolMeanings()) {
+      this.#poolMeaningBySig.set(sig, meaning)
     }
     this.requestRefresh()  // pool dirs are recognizable now
   }

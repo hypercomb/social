@@ -79,7 +79,7 @@
 //   - BranchService / Save. That layer reads hasReceipt(); building
 //     it next is straightforward now that the transport exists.
 
-import { EffectBus, SignatureService } from '@hypercomb/core'
+import { EffectBus, registerPoolMeaning } from '@hypercomb/core'
 
 export type IntakeKind = 'layer' | 'bee' | 'dependency' | 'resource'
 
@@ -107,18 +107,12 @@ export class PushQueueService extends EventTarget {
   static readonly #SIG_RE = /^[a-f0-9]{64}$/
   static readonly #ENTRY_RE = /^([a-f0-9]{64})\.(layer|bee|dependency|resource)$/
 
-  /** sign(meaning) → pool address, memoized. Same derivation as
-   *  Store.poolSignature — reimplemented because essentials must
-   *  never import shared. */
-  static readonly #poolSigs = new Map<string, Promise<string>>()
-  static #poolSignature = (meaning: string): Promise<string> => {
-    let sig = PushQueueService.#poolSigs.get(meaning)
-    if (!sig) {
-      sig = SignatureService.sign(new TextEncoder().encode(meaning).buffer as ArrayBuffer)
-      PushQueueService.#poolSigs.set(meaning, sig)
-    }
-    return sig
-  }
+  /** sign(meaning) → pool address, memoized, via the core POOL REGISTRY.
+   *  Deriving the address REGISTERS the meaning, so anything that walks
+   *  the OPFS root can tell this pool apart from a lineage sigbag (they
+   *  share one flat namespace, and a bare-word meaning hashes to the same
+   *  address as a same-named root tile). Never re-derive locally. */
+  static #poolSignature = (meaning: string): Promise<string> => registerPoolMeaning(meaning)
 
   #draining = false
   /** True once both legacy dirs are confirmed gone — skips the absorb

@@ -72,7 +72,7 @@
 // Toggle live via the public enable()/disable() methods; localStorage
 // changes take effect on the next event, no reload required.
 
-import { EffectBus, SignatureService } from '@hypercomb/core'
+import { EffectBus, SignatureService, registerPoolMeaning } from '@hypercomb/core'
 import { decorationClosureSigs, nestedResourceSigs } from './decoration-closure.js'
 
 export type HostSyncKind = 'layer' | 'bee' | 'dependency' | 'resource'
@@ -137,18 +137,12 @@ type SyncTarget = { domain: string; hostHash: string | null; publicOnly: boolean
 
 export class HostSyncService extends EventTarget {
 
-  /** sign(meaning) → pool address, memoized. Same derivation as
-   *  Store.poolSignature — reimplemented because essentials must never
-   *  import shared. */
-  static readonly #poolSigs = new Map<string, Promise<string>>()
-  static #poolSignature = (meaning: string): Promise<string> => {
-    let sig = HostSyncService.#poolSigs.get(meaning)
-    if (!sig) {
-      sig = SignatureService.sign(new TextEncoder().encode(meaning).buffer as ArrayBuffer)
-      HostSyncService.#poolSigs.set(meaning, sig)
-    }
-    return sig
-  }
+  /** sign(meaning) → pool address, memoized, via the core POOL REGISTRY.
+   *  Deriving the address REGISTERS the meaning, so anything that walks
+   *  the OPFS root can tell this pool apart from a lineage sigbag (they
+   *  share one flat namespace, and a bare-word meaning hashes to the same
+   *  address as a same-named root tile). Never re-derive locally. */
+  static #poolSignature = (meaning: string): Promise<string> => registerPoolMeaning(meaning)
 
   /** hostHash = FIRST 16 HEX CHARS of sha256(lowercase domain). 16 chars
    *  (64 bits) keeps receipt filenames short and eyeball-able while being

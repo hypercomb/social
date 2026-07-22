@@ -26,7 +26,7 @@
 // subscription on the same sig auto-triggers that paint when an event
 // arrives, so we don't need to dispatch a render signal ourselves.
 
-import { Drone, EffectBus, SignatureService, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
+import { Drone, EffectBus, poolAddresses, I18N_IOC_KEY, type I18nProvider } from '@hypercomb/core'
 import { readTilePropertiesAt, writeTilePropertiesAt } from '../editor/tile-properties.js'
 import { sanitizeVisual } from './visual-sanitizer.js'
 import { sessionHideStore } from '../presentation/tiles/session-hide.store.js'
@@ -353,24 +353,18 @@ const SYSTEM_DIR_NAMES = new Set([
   'hypercomb.io', 'overrides', 'translations',
 ])
 
-// POOLS OF MEANING are signature-addressed — dir name = sign(meaning),
-// derived exactly as Store derives it (sha256 of the UTF-8 meaning
-// bytes) so the firewall computes the identical addresses with no
-// registry. Every known pool is excluded: pool records never ride the
-// swarm. The derivations are async, but the synchronous 64-hex rule in
+// POOLS OF MEANING are signature-addressed — dir name = sign(meaning).
+// Every known pool is excluded: pool records never ride the swarm.
+// Sourced from the core POOL REGISTRY rather than a local list, which
+// went stale as new pools appeared (it was missing `registry`,
+// `viewport`, `authored` and `visual-optimization`). The registry
+// self-extends — addressing a pool registers it.
+//
+// The derivations are async, but the synchronous 64-hex rule in
 // isSystemDirName already excludes every sig-named dir (pools AND
-// lineage sigbags), so a walk racing these additions cannot leak a
-// pool onto the wire — this set is defence in depth + documentation.
-const POOL_MEANINGS = [
-  'optimization', 'bees', 'dependencies', 'clipboard', 'threads',
-  'computation', 'manifests', 'push', 'receipts', 'structure',
-  'roots', 'patches', 'host-push', 'host-receipts', 'substrate',
-  'temporary', 'overrides', 'translations',
-] as const
-for (const meaning of POOL_MEANINGS) {
-  void SignatureService.sign(new TextEncoder().encode(meaning).buffer as ArrayBuffer)
-    .then((sig) => { SYSTEM_DIR_NAMES.add(sig) })
-}
+// lineage sigbags), so a walk racing these additions cannot leak a pool
+// onto the wire — this set is defence in depth + documentation.
+void poolAddresses().then((sigs) => { for (const sig of sigs) SYSTEM_DIR_NAMES.add(sig) })
 
 const SIG_DIR_RE = /^[0-9a-f]{64}$/
 

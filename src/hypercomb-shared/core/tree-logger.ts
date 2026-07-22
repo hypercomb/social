@@ -10,27 +10,22 @@
 // collapse into a single count line. Everything else (domain trees,
 // overrides) deep-walks as before.
 
+import { poolMeanings } from '@hypercomb/core'
 import { Store } from './store'
 
 const SIG_RE = /^[a-f0-9]{64}$/i
 /** Legacy `__x__` dirs — drain sources awaiting self-clean removal. */
 const LEGACY_DRAIN_RE = /^__.+__$/
-/** Pools of meaning the logger knows how to label. */
-const POOL_MEANINGS = [
-    Store.BEES_MEANING, Store.DEPENDENCIES_MEANING, Store.CLIPBOARD_MEANING,
-    Store.THREADS_MEANING, Store.COMPUTATION_MEANING, Store.MANIFESTS_MEANING,
-    Store.OPTIMIZATION_MEANING, 'registry', 'receipts', 'structure', 'patches', 'roots',
-]
 
 export class OpfsTreeLogger {
 
     public log = async (): Promise<void> => {
         console.clear()
-        // sign(meaning) → meaning, derived fresh (memoized inside Store).
-        const pools = new Map<string, string>()
-        for (const meaning of POOL_MEANINGS) {
-            pools.set(await Store.poolSignature(meaning), meaning)
-        }
+        // sign(meaning) → meaning, from the core pool registry (seeded with
+        // every known meaning and self-extending as modules address new
+        // pools — a local list here went stale and mislabelled real pools
+        // as lineage sigbags).
+        const pools = await poolMeanings()
         try {
             const root = await navigator.storage.getDirectory()
             console.log('📂 /')
@@ -43,7 +38,7 @@ export class OpfsTreeLogger {
     #walk = async (
         dir: FileSystemDirectoryHandle,
         indent: string,
-        pools: Map<string, string>,
+        pools: ReadonlyMap<string, string>,
         atRoot: boolean,
     ): Promise<void> => {
         const entries: Array<{ name: string; kind: FileSystemHandleKind; handle: FileSystemHandle }> = []

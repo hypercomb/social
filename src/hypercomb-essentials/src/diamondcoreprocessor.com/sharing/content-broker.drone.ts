@@ -70,7 +70,7 @@
 // self-cleaning drain removes it. Layer/resource paths use the
 // canonical Store APIs.
 
-import { Drone, SignatureService } from '@hypercomb/core'
+import { Drone, registerPoolMeaning } from '@hypercomb/core'
 import { decorationClosureSigs } from './decoration-closure.js'
 
 const NOSTR_MESH_KEY = '@diamondcoreprocessor.com/NostrMeshDrone'
@@ -284,19 +284,12 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 
 const SIG_RE = /^[0-9a-f]{64}$/
 
-// sign(meaning) → pool address: sha256 of the UTF-8 bytes of the
-// meaning string, memoized. Identical to Store.poolSignature — derived
-// by convention, no registry — reimplemented here because essentials
-// must never import shared.
-const poolSigCache = new Map<string, Promise<string>>()
-const poolSignature = (meaning: string): Promise<string> => {
-  let sig = poolSigCache.get(meaning)
-  if (!sig) {
-    sig = SignatureService.sign(new TextEncoder().encode(meaning).buffer as ArrayBuffer)
-    poolSigCache.set(meaning, sig)
-  }
-  return sig
-}
+// sign(meaning) → pool address, memoized, via the core POOL REGISTRY.
+// Deriving the address REGISTERS the meaning, so anything that walks the
+// OPFS root can tell this pool apart from a lineage sigbag (they share one
+// flat namespace, and a bare-word meaning hashes to the same address as a
+// same-named root tile). Never re-derive locally.
+const poolSignature = (meaning: string): Promise<string> => registerPoolMeaning(meaning)
 
 // ── drone ───────────────────────────────────────────────────────────
 
