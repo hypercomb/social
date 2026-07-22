@@ -264,6 +264,50 @@ The reference vocabulary, weakest binding to strongest:
 2. **by name** — a hive entry, durable, position-free
 3. **by sig** — exact sealed content, immutable
 
+### Filtering is a PRIMITIVE — show and share are one operation (Jaime, 2026-07-21)
+
+A filter is `(kind, scope, required marks)` evaluated by a nose — and it
+is BOTH how data is shown and how the share boundary is drawn: **sharing
+never crosses the pheromone guards.** A shared filtered collection
+exposes an intersection — `matches ∧ the publisher's already-public
+closure` — so the filter can never leak what privacy hasn't already
+opened (items never auto-publish; the two guards compose). Two
+consumption modes, both already doctrine:
+
+- **Visit** — the projection evaluates publisher-side, inside their
+  shared closure; the visitor sees the filtered collection.
+- **Adopt** — the RULE travels and re-resolves against the adopter's
+  own hive (requirement is truth; result is projection).
+
+**Draft syntax (explicitly evolving — the shape matters, the spelling
+does not yet):**
+
+```
+/reference@people(family,hello,world)
+```
+
+- `/reference` — a slash behaviour, like any command-line queen
+- `@people` — the kind, on the existing @-feature convention (the
+  vertical-intellisense design autocompletes kinds AND marks)
+- `(family,hello,world)` — required pheromones; short names resolve
+  through the participant's ACTIVE NAMESPACES (above)
+- **Update = re-reference**: issuing the command against the same
+  reference replaces its mark list (decoration replaceKind semantics —
+  idempotent, no new primitive)
+
+The resulting reference is a TILE — per-tile public/private applies.
+This splits the reference-tile privacy rule into its two species
+rather than revising it:
+
+| | carries | shareable? |
+|---|---|---|
+| **alias reference** (path/sig into a tree) | addressing | NEVER — always private; sharing leaks structure |
+| **requirement reference** (kind + marks) | no addressing, only a rule | tile-like — public or hidden, author's call |
+
+The requirement reference is safe to share precisely BECAUSE it
+contains no addressing — the receiver resolves it with their own walk
+and nose, inside whatever closure they can already see.
+
 ## Sybil discipline (the one hard rule)
 
 Raw deposit-count is spammable for free. Intensity must be weighted by
