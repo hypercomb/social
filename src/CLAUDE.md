@@ -259,8 +259,26 @@ of meaning**, never a `__name__` dir). The model:
     meaning collides with any tile/page whose slug equals it (verified:
     `sign('websites')` IS the `/websites` launcher bag). `lineageKey`
     folds every non-letter/number to `-`, so a `:` in the meaning string
-    (e.g. `websites:menu`) can never be produced by a location — new
-    pool meanings should carry a colon.
+    (e.g. `websites:menu`) can never be produced by a location — every
+    NEW pool meaning MUST carry a colon. A doctrine ratchet enforces
+    this: the bare-word set in `hypercomb-core/src/core/pool-registry.ts`
+    is frozen and may only SHRINK (migrating one away needs a drain plan
+    — `sign()` of a new spelling mints a different address forever).
+
+    **Never keep a local list of pool meanings.** The root is an
+    UNTAGGED UNION of `{lineage bag, pool}` and any module may mint a
+    pool, so no fixed list is ever complete — four separate copies had
+    drifted, and `/flatten` on a colliding bare-word address HARD
+    DELETED the whole pool. Ask the registry instead:
+    `isPoolAddress(sig)`, `poolMeaningOf(sig)`, `poolAddresses()`,
+    `poolMeanings()`. It is seeded with the full census AND
+    self-extending — `Store.poolSignature` / `registerPoolMeaning` are
+    the only sanctioned derivations, and deriving an address registers
+    it. Anything that walks, prunes, or enumerates the root must
+    consult it before treating a sig-named dir as a lineage bag.
+    Full paradigm — closed root vocabulary, user names scoped one level
+    down inside known pools, marks classify never resolve:
+    `src/documentation/known-location-pools.md`.
 
 - **Legacy `__x__` dirs are self-cleaning drain sources.** (`__hive__/`,
   `hypercomb.io/`, `__layers__/`, `__resources__/`, `__optimized__/`,
