@@ -40,10 +40,9 @@ export class App implements AfterViewInit {
   @HostBinding('class.view-website')
   get viewWebsiteClass() { return this.viewMode() === 'website'; }
 
-  public readonly meshPublic = signal(
-    localStorage.getItem('hc:mesh-public') === 'true' ? true
-    : false // default: solo mode
-  );
+  // Always boots false — REFRESH → PRIVATE (the constructor force-writes
+  // the flag off before bee startup; membership never survives a reload).
+  public readonly meshPublic = signal(false);
   public readonly inputOpen = signal(false);
   public readonly viewActive = signal(false);
   public readonly orientation = signal<HexOrientation>(
@@ -51,6 +50,12 @@ export class App implements AfterViewInit {
   );
 
   constructor() {
+    // REFRESH → PRIVATE. Force swarm membership off FIRST, synchronously,
+    // so every live localStorage sampler (nostr-mesh gate, swarm broadcast,
+    // show-cell privacy reads) sees solo from the first moment of this
+    // session. Parity with hypercomb-web's core-adapter module-scope write.
+    try { localStorage.setItem('hc:mesh-public', 'false') } catch { /* no storage — default is off anyway */ }
+
     // Parity with hypercomb-web (app.ts): swallow the benign "ResizeObserver
     // loop completed with undelivered notifications" warning. It fires on
     // routine layout frames; without this it surfaces as a red ERROR AND runs
@@ -128,23 +133,15 @@ export class App implements AfterViewInit {
 
     // Runtime already initialized by main.ts — go straight to bee startup.
     //
-    // Dev shell defaults `hc:mesh-public` to ON. The dev relay
-    // (ws://localhost:7777) is already in the relay-list default
-    // (loadRelays in nostr-mesh.drone.ts), so a fresh tab — including
-    // a brand-new incognito session — has everything it needs to join
-    // the swarm immediately once the user sets a room + secret. This
-    // avoids the "I configured everything but it's still not syncing"
-    // trap where mesh-public stays off silently. Production
-    // (hypercomb-web) keeps the privacy default (off).
+    // REFRESH → PRIVATE, dev exactly like production: the constructor
+    // force-wrote `hc:mesh-public` off, and here the mesh network starts
+    // disconnected to match. (The old dev-only default-ON is retired.)
+    // Joining stays a one-gesture act — the dev relay (ws://localhost:7777)
+    // is still in the relay-list defaults (loadRelays in
+    // nostr-mesh.drone.ts), so a join needs zero extra setup.
     queueMicrotask(() => {
-      if (localStorage.getItem('hc:mesh-public') === null) {
-        localStorage.setItem('hc:mesh-public', 'true')
-      }
-      const stored = localStorage.getItem('hc:mesh-public')
-      if (stored !== null) {
-        const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
-        mesh?.setNetworkEnabled?.(stored === 'true', true)
-      }
+      const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
+      mesh?.setNetworkEnabled?.(false, true)
       void this.startRegisteredBees()
     })
   }

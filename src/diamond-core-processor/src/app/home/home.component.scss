@@ -2,10 +2,10 @@
 
 .tree-home {
   width: 100%;
-  max-width: 660px;
+  max-width: 740px;
   margin: 0 auto;
-  padding: 28px 20px 40px;
-  font-family: var(--hc-font);
+  padding: 30px 22px 90px;
+  font-family: var(--dcp-ui);
   color: var(--dcp-ink);
 }
 
@@ -70,25 +70,58 @@
   to   { opacity: 1; transform: translate(-50%, 0); }
 }
 
-.top-bar {
+/* ── spec bar + masthead ─────────────────────────────────────────────── */
+.specbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  height: 26px;
+  border-bottom: 1px solid var(--dcp-line);
+  color: var(--dcp-ink-4);
+  font-family: var(--hc-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.mast {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 18px;
+  padding: 22px 0 20px;
+}
+
+.brand { display: flex; align-items: center; gap: 15px; }
+
+.mark { width: 32px; height: 32px; flex: none; }
+.mark path { fill: none; stroke-linejoin: miter; stroke-linecap: butt; }
+.mark .e { stroke: var(--dcp-ice); }
+.mark .f { opacity: 0.55; }
+.mark .s { stroke: var(--dcp-gold); }
+
+.word {
+  margin: 0;
+  font-family: var(--dcp-ui);
+  font-size: 25px;
+  font-weight: 800;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  line-height: 1;
+  color: var(--dcp-ink);
+}
+.kicker {
+  margin-top: 7px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--dcp-ink-3);
 }
 
 .top-bar-right {
   display: flex;
   align-items: center;
-  gap: 6px;
-}
-
-.title {
-  font-size: 21px;
-  font-weight: 500;
-  letter-spacing: -0.015em;
-  color: var(--dcp-ink);
-  margin: 0;
+  gap: 7px;
 }
 
 /* First-run orientation — the visible tier of the explanation. A quiet
@@ -141,16 +174,14 @@
 /* Static legend swatches — same shape/gradients as dcp-diamond
    (diamond-icon.component.ts), minus the button and hover motion. */
 .legend-swatch {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-  transform: rotate(45deg);
+  width: 9px;
+  height: 9px;
   flex-shrink: 0;
 
-  &.layer      { background: linear-gradient(135deg, #d4b8e8, #7b4fa5); }
-  &.bee        { background: linear-gradient(135deg, #e8d4b8, #a58b4f); }
-  &.worker     { background: linear-gradient(135deg, #e8b8b8, #a54f4f); }
-  &.dependency { background: linear-gradient(135deg, #b8e8d4, #4fa58b); }
+  &.layer      { background: var(--dcp-z-package-ink); }
+  &.bee        { background: var(--dcp-k-bee); }
+  &.worker     { background: var(--dcp-k-worker); }
+  &.dependency { background: var(--dcp-k-dependency); }
 }
 
 .orientation-dismiss {
@@ -170,49 +201,47 @@
   &:hover { color: var(--dcp-ink-2); border-color: var(--dcp-ink-3); }
 }
 
-/* domain input */
+/* install bar — one joined sharp field + gold action */
 .domain-input {
   display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 30px;
+  border: 1px solid var(--dcp-line-2);
 }
 
 .domain-input input {
   flex: 1;
-  padding: 0 13px;
-  height: 38px;
+  padding: 0 16px;
+  height: 46px;
   font-size: 13px;
-  font-family: var(--hc-font);
+  font-family: var(--hc-mono);
+  letter-spacing: 0.02em;
   color: var(--dcp-ink);
   background: var(--dcp-surface);
-  border: 1px solid var(--dcp-line-2);
-  border-radius: var(--dcp-radius-md);
+  border: 0;
   outline: none;
   cursor: text;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
-.domain-input input:focus {
-  border-color: var(--dcp-accent);
-  box-shadow: 0 0 0 3px var(--dcp-accent-tint);
-}
+.domain-input input::placeholder { color: var(--dcp-ink-4); }
+.domain-input input:focus { background: var(--dcp-surface-2); }
 
 .btn {
-  height: 38px;
-  padding: 0 18px;
-  font-size: 13px;
-  font-weight: 500;
-  font-family: var(--hc-font);
+  height: 46px;
+  padding: 0 26px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  font-family: var(--dcp-ui);
   color: var(--dcp-on-accent);
-  border: 1px solid var(--dcp-accent-strong);
-  border-radius: var(--dcp-radius-md);
-  background: var(--dcp-accent);
+  border: 0;
+  background: var(--dcp-gold);
   cursor: pointer;
-  transition: filter 0.12s ease;
+  transition: background 0.12s ease;
 }
 
 .btn:hover {
-  filter: brightness(1.06);
+  background: var(--dcp-gold-strong);
 }
 
 .sample-link {
@@ -232,39 +261,41 @@ dcp-command-line {
   margin-bottom: 16px;
 }
 
-.kind-toggle {
-  background: none;
-  border: 1px solid transparent;
-  border-radius: var(--dcp-radius-sm);
-  padding: 5px 6px;
+.tbtn {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  background: transparent;
+  border: 1px solid var(--dcp-line);
   cursor: pointer;
-  transition: opacity 0.15s, filter 0.15s, border-color 0.15s, background 0.15s;
-  opacity: 0.5;
+  transition: border-color 0.12s, background 0.12s, opacity 0.12s;
 }
 
-.kind-toggle:hover {
-  opacity: 0.85;
-  background: var(--dcp-hover);
+.tbtn:hover {
+  border-color: var(--dcp-line-2);
+  background: var(--dcp-surface-2);
 }
 
-.kind-toggle.active {
-  opacity: 1;
+.tbtn.on {
+  border-color: var(--dcp-gold-dim);
+  background: var(--dcp-gold-dim);
 }
 
-.kind-toggle.inactive {
-  opacity: 0.2;
-  filter: grayscale(1);
+.tbtn.dim {
+  opacity: 0.35;
 }
 
-.kind-toggle dcp-diamond {
+.tbtn dcp-diamond {
   pointer-events: none;
 }
 
-.filter-divider {
+.vsep {
   width: 1px;
-  height: 16px;
-  background: var(--dcp-line-2);
+  height: 20px;
+  background: var(--dcp-line);
   flex-shrink: 0;
+  margin: 0 4px;
 }
 
 /* domain sections */
@@ -379,10 +410,13 @@ dcp-command-line {
   &.open { color: var(--dcp-ink); }
 
   .group-chevron {
-    font-size: 10px;
+    width: 13px;
+    height: 13px;
     color: var(--dcp-ink-3);
     flex-shrink: 0;
+    transition: transform 0.12s ease;
   }
+  .group-chevron.open { transform: rotate(90deg); }
   .group-note {
     font-size: 10px;
     font-weight: 400;
@@ -542,6 +576,26 @@ dcp-command-line {
   background: var(--dcp-hover);
 }
 
+/* Secondary header actions (view-logical ≡, download ⇩) rest hidden so a
+   settled header reads as name + visibility + close; they fade in on hover.
+   Space is reserved (opacity, not display) so nothing reflows. An ACTIVE
+   view-logical toggle stays visible — you must see that it's on. */
+.view-logical-toggle,
+.download-toggle {
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.12s ease, background 0.12s ease;
+}
+.domain-header:hover .view-logical-toggle,
+.domain-header:hover .download-toggle,
+.view-logical-toggle.active {
+  opacity: 1;
+}
+/* Touch has no hover — keep them reachable. */
+@media (hover: none) {
+  .view-logical-toggle,
+  .download-toggle { opacity: 1; }
+}
+
 .versions-toggle {
   font-family: var(--hc-mono);
   font-size: 12px;
@@ -610,31 +664,33 @@ dcp-command-line {
   gap: 12px;
   margin: 8px 14px;
   padding: 9px 12px;
-  border: 1px solid rgba(222, 158, 46, 0.5);
-  border-left: 3px solid rgba(222, 158, 46, 0.9);
+  // Amber = the host provenance zone, theme-aware so the ink stays readable
+  // on dark (was a hardcoded rgb(150,100,14) brown — invisible on dark).
+  border: 1px solid var(--dcp-z-host-rail);
+  border-left: 3px solid var(--dcp-z-host-rail);
   border-radius: var(--dcp-radius-sm, 6px);
-  background: rgba(232, 168, 56, 0.1);
+  background: var(--dcp-z-host-tint);
 }
 .upgrade-banner-text {
   flex: 1;
   font-size: 12.5px;
   font-weight: 500;
-  color: rgb(150, 100, 14);
+  color: var(--dcp-z-host-ink);
 }
 .upgrade-optin-all {
   flex-shrink: 0;
   padding: 5px 13px;
-  border: 1px solid rgba(222, 158, 46, 0.9);
+  border: 1px solid var(--dcp-z-host-rail);
   border-radius: 999px;
-  background: rgba(222, 158, 46, 0.16);
-  color: rgb(150, 100, 14);
+  background: var(--dcp-z-host-tint);
+  color: var(--dcp-z-host-ink);
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   transition: background 0.12s ease;
 }
-.upgrade-optin-all:hover { background: rgba(222, 158, 46, 0.28); }
-.upgrade-optin-all:active { background: rgba(222, 158, 46, 0.36); }
+.upgrade-optin-all:hover { background: var(--dcp-z-host-head); }
+.upgrade-optin-all:active { background: var(--dcp-z-host-head); }
 
 /* Live resolve cue on an adopted branch row — sweeping bar while the broker
    walk fills layers/resources (no total exists: the walk discovers its

@@ -1,20 +1,16 @@
-// Include theming for Angular Material with `mat.theme()`.
-@use '@angular/material' as mat;
 // Brand typography — defines --hc-font / --hc-mono (+ Source Sans Pro Light
 // @font-face), same single source of truth the web/dev shells use. Without
 // this every var(--hc-font) below resolved to nothing (serif fallback).
 @use '../../hypercomb-shared/fonts/fonts';
 
+// NOTE: Angular Material's `mat.theme()` was removed here. Nothing in the
+// installer consumes a Material component or a `--mat-sys-*` token, so it
+// only shipped a dead rose/red palette (a #ba005c pink that fought the
+// installer's own navy accent) and extra CSS weight. The design system is
+// the `--dcp-*` tokens below — one source of truth, no second palette.
+
 html {
   height: 100%;
-  @include mat.theme((
-    color: (
-      primary: mat.$rose-palette,
-      tertiary: mat.$red-palette,
-    ),
-    typography: Roboto,
-    density: 0,
-  ));
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -22,18 +18,21 @@ html {
 // ink, accent, radii, elevation, and provenance zones. Custom properties
 // inherit through Angular's view-encapsulated component styles, so defining
 // them once at :root themes every component (home, tree-row, toggle,
-// command-line, panels). Light is the warm-paper default; dark is a real
-// theme, not an inversion. A future in-app switch can force either mode via
-// [data-dcp-theme]; today it follows the OS via prefers-color-scheme.
+// command-line, panels). DARK is the default — the installer lives inside
+// the hive's dark portal frame and the hive boots dark, so dark keeps the
+// whole adopt flow one continuous surface. Light is a real theme, not an
+// inversion, opt-in via [data-dcp-theme='light'] (a future in-app switch).
 // ─────────────────────────────────────────────────────────────────────────
 
 @mixin dcp-light {
   --dcp-bg: #fdfdfd;
   --dcp-surface: #ffffff;
   --dcp-surface-2: #f4f5f6;
+  --dcp-raise: #eceef0;
   --dcp-ink: #1b1b18;
   --dcp-ink-2: #6f6e68;
   --dcp-ink-3: #9a9a93;
+  --dcp-ink-4: #b8b7b0;
   --dcp-line: rgba(28, 28, 24, 0.08);
   --dcp-line-2: rgba(28, 28, 24, 0.14);
 
@@ -68,71 +67,92 @@ html {
   --dcp-danger: #c0392b;
 }
 
+// ── FOUNDRY (dark, default) ────────────────────────────────────────────
+// Near-black precision-instrument surface, molten-gold (hive/honey) accent,
+// an ice-cool brand mark. Zero-radius chrome; the warmth lives in the accent
+// and the kind inks, not in rounded corners.
 @mixin dcp-dark {
-  --dcp-bg: #1a1a17;
-  --dcp-surface: #222220;
-  --dcp-surface-2: #2a2a27;
-  --dcp-ink: #ecebe6;
-  --dcp-ink-2: #a8a79f;
-  --dcp-ink-3: #74736c;
-  --dcp-line: rgba(255, 255, 250, 0.09);
-  --dcp-line-2: rgba(255, 255, 250, 0.17);
+  --dcp-bg: #0c0c0e;
+  --dcp-surface: #141417;
+  --dcp-surface-2: #17181c;
+  --dcp-raise: #1e1f24;
+  --dcp-ink: #f2f1ec;
+  --dcp-ink-2: #a6a59c;
+  --dcp-ink-3: #6d6c64;
+  --dcp-ink-4: #4c4b45;
+  --dcp-line: rgba(255, 255, 255, 0.08);
+  --dcp-line-2: rgba(255, 255, 255, 0.15);
 
-  --dcp-accent: #7e9bdc;
-  --dcp-accent-strong: #95acea;
-  --dcp-accent-tint: rgba(126, 155, 220, 0.15);
-  --dcp-on-accent: #15151a;
+  // accent = molten gold
+  --dcp-accent: #f5a623;
+  --dcp-accent-strong: #ffb838;
+  --dcp-accent-tint: #3a2c12;
+  --dcp-on-accent: #160e00;
 
-  --dcp-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --dcp-shadow-2: 0 10px 34px rgba(0, 0, 0, 0.55);
-  --dcp-hover: rgba(255, 255, 250, 0.055);
+  --dcp-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --dcp-shadow-2: 0 12px 38px rgba(0, 0, 0, 0.6);
+  --dcp-hover: rgba(255, 255, 255, 0.045);
 
   --dcp-active-elsewhere: #8f8e85;
-  --dcp-active-elsewhere-soft: rgba(255, 255, 250, 0.05);
+  --dcp-active-elsewhere-soft: rgba(255, 255, 255, 0.05);
 
-  --dcp-z-logical-rail: #3fb488;  --dcp-z-logical-tint: rgba(46, 158, 117, 0.13);  --dcp-z-logical-head: rgba(46, 158, 117, 0.18);  --dcp-z-logical-ink: #8fe0c2;
-  --dcp-z-default-rail: #4fc2b5;  --dcp-z-default-tint: rgba(63, 186, 174, 0.13);  --dcp-z-default-head: rgba(63, 186, 174, 0.18);  --dcp-z-default-ink: #88e0d5;
-  --dcp-z-current-rail: #9e81d6;  --dcp-z-current-tint: rgba(124, 90, 192, 0.18);  --dcp-z-current-head: rgba(124, 90, 192, 0.24);  --dcp-z-current-ink: #cbb8ee;
-  --dcp-z-host-rail: #ddb05a;     --dcp-z-host-tint: rgba(200, 147, 46, 0.14);     --dcp-z-host-head: rgba(200, 147, 46, 0.20);     --dcp-z-host-ink: #ecc987;
-  --dcp-z-package-rail: #6e8fd6;  --dcp-z-package-tint: rgba(110, 143, 214, 0.15); --dcp-z-package-head: rgba(110, 143, 214, 0.22); --dcp-z-package-ink: #b6c9f0;
+  --dcp-z-logical-rail: #5bbf80;  --dcp-z-logical-tint: rgba(91,191,128,0.12);  --dcp-z-logical-head: rgba(91,191,128,0.17);  --dcp-z-logical-ink: #8fe0b0;
+  --dcp-z-default-rail: #3fb59a;  --dcp-z-default-tint: rgba(63,181,154,0.12);  --dcp-z-default-head: rgba(63,181,154,0.17);  --dcp-z-default-ink: #7fe0cc;
+  --dcp-z-current-rail: #9a7ad6;  --dcp-z-current-tint: rgba(154,122,214,0.15); --dcp-z-current-head: rgba(154,122,214,0.22); --dcp-z-current-ink: #c9b6f0;
+  --dcp-z-host-rail: #d99a2e;     --dcp-z-host-tint: rgba(217,154,46,0.12);     --dcp-z-host-head: rgba(217,154,46,0.20);     --dcp-z-host-ink: #ffcf7a;
+  --dcp-z-package-rail: #5b7fb0;  --dcp-z-package-tint: rgba(91,127,176,0.13);  --dcp-z-package-head: rgba(91,127,176,0.20);  --dcp-z-package-ink: #a8c4ea;
 
-  --dcp-k-bee: #cdab63;
-  --dcp-k-worker: #d98080;
-  --dcp-k-drone: #c5bf6a;
-  --dcp-k-dependency: #5fc2aa;
+  --dcp-k-bee: #e6b968;
+  --dcp-k-worker: #e08a86;
+  --dcp-k-drone: #cfc86a;
+  --dcp-k-dependency: #66c8b0;
   --dcp-k-queen: #b79ae6;
 
-  --dcp-danger: #e57368;
+  --dcp-danger: #e2564b;
 }
 
 :root {
-  @include dcp-light;
-  color-scheme: light;
-  // radii + motion are theme-independent
-  --dcp-radius-sm: 6px;
-  --dcp-radius-md: 10px;
-  --dcp-radius-lg: 14px;
-  --dcp-radius-xl: 16px;
-}
-// Dark is OPT-IN only — light is the default for everyone, regardless of the
-// OS setting. Set data-dcp-theme="dark" on <html> (a future in-app switch) to
-// enable the dark theme; we intentionally do NOT auto-apply it from
-// prefers-color-scheme, so a dark-OS user still gets the light installer.
-:root[data-dcp-theme='dark'] {
   @include dcp-dark;
   color-scheme: dark;
+  // FOUNDRY is zero-radius — sharp chrome throughout. Icon STROKES round via
+  // SVG stroke-linejoin (per-component), never border-radius.
+  --dcp-radius-sm: 0px;
+  --dcp-radius-md: 0px;
+  --dcp-radius-lg: 0px;
+  --dcp-radius-xl: 0px;
+  // brand constants — identical in both themes
+  --dcp-gold: #f5a623;
+  --dcp-gold-strong: #ffb838;
+  --dcp-gold-dim: #3a2c12;
+  --dcp-gold-ink: #ffcf7a;
+  --dcp-ice: #bcd4ff;
+  // UI type — a system grotesque stack with REAL weights (400–800). The
+  // bundled --hc-font is Source Sans Pro *Light* only (300), so heavy/medium
+  // weights synthesize badly; the installer's structural type needs genuine
+  // weight, so it uses this stack. Signatures/technical data use --hc-mono.
+  --dcp-ui: "Inter", "Helvetica Neue", "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+}
+// Light is OPT-IN only — dark is the default for everyone (the installer is
+// embedded in the hive's dark portal frame; a light installer on a dark
+// frame is the visual whiplash this overhaul removes). Set
+// data-dcp-theme="light" on <html> (a future in-app switch) to force light;
+// we intentionally do NOT auto-apply either mode from prefers-color-scheme.
+:root[data-dcp-theme='light'] {
+  @include dcp-light;
+  color-scheme: light;
 }
 
 body {
   background-color: var(--dcp-bg);
   color: var(--dcp-ink);
-  font-family: var(--hc-font);
+  font-family: var(--dcp-ui);
   font-size: 14px;
   line-height: 1.5;
   margin: 0;
   height: 100%;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  font-feature-settings: "tnum" 1;
 }
 
 /* highlight.js theme for code viewer */

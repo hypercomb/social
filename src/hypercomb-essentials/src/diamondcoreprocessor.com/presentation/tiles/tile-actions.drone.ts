@@ -1018,6 +1018,9 @@ export class TileActionsDrone extends Drone {
       const removeSet = new Set(labels)
       const updated = hidden.filter(l => !removeSet.has(l))
       sessionHideStore.setItem(key, JSON.stringify(updated))
+      // Keep the zone-INDEPENDENT lineage list in sync (mirrors #unhide) so
+      // the unhide holds across zone/sig changes, not just the current zone.
+      for (const label of labels) removeHiddenLineage(this.#segments(), label)
       for (const label of labels) EffectBus.emit('tile:unhidden', { cell: label, location })
       // Re-emit to force show-cell cache clear and re-render without the grayed state
       EffectBus.emit('visibility:show-hidden', { active: localStorage.getItem('hc:show-hidden') === '1' })
@@ -1026,6 +1029,13 @@ export class TileActionsDrone extends Drone {
       // At least one visible → add all to the hidden list
       for (const label of labels) if (!hiddenSet.has(label)) hidden.push(label)
       sessionHideStore.setItem(key, JSON.stringify(hidden))
+      // Mirror to the zone-INDEPENDENT lineage list too (single-hide via
+      // #hideOrBlock does this). Without it a BULK-hidden tile has no
+      // zone-independent record, so it reappears on a zone/sig change
+      // (e.g. joining a swarm) until the 30s heartbeat echo — the exact
+      // bug show-cell's hc:hidden-lineages read fixes. addHiddenLineage is
+      // idempotent, so re-adding an already-hidden label is a no-op.
+      for (const label of labels) addHiddenLineage(this.#segments(), label)
       for (const label of labels) EffectBus.emit('tile:hidden', { cell: label, location })
       // Auto-enable show-hidden so grayed tiles are visible
       localStorage.setItem('hc:show-hidden', '1')

@@ -28,6 +28,7 @@
 import { Component, type OnDestroy, type OnInit, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { ensureViewportInsetVars } from '../../core/viewport-inset-vars'
 
 /** Runtime service locator — shared must never statically import essentials,
  *  so cross-service resolution goes through window.ioc at call time. */
@@ -65,6 +66,12 @@ export class EditActionsComponent implements OnInit, OnDestroy {
   #cursorUnsub: (() => void) | null = null
 
   ngOnInit(): void {
+    // Start the shared inset→CSS-var bridge. edit-actions is template-mounted in
+    // both shells, so this runs at bootstrap and the vars track every docked
+    // toolwindow from the first one opened. Idempotent — safe if youtube-viewer
+    // (the other consumer) already started it.
+    ensureViewportInsetVars()
+
     // Last-value replayed: a late mount immediately receives the current
     // cursor state, so the buttons reflect reality with no manual initial read.
     this.#cursorUnsub = EffectBus.on<CursorStateLike>('history:cursor-changed', (s) => {

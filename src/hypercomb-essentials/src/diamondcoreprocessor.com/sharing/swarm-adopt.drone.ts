@@ -868,10 +868,12 @@ export class SwarmAdoptDrone extends Drone {
   // mode `fold` (default, DCP-config fold): idempotent — a tile already
   // present at (name, at) is left untouched, and the props-index seed is
   // fill-if-empty (never disturbs an image already on a tile).
-  // mode `sync` (the sync icon AND the explicit adopt gesture): the "pull
-  // their latest" gesture — re-homes the publisher's CURRENT subtree OVER the
-  // stale local copy and overwrites the props index so their refreshed image
-  // wins. ADOPT MEANS GET THE LATEST, so an explicit adopt rides this path too.
+  // mode `sync`: INTERNAL "pull their latest" — re-homes the publisher's
+  // CURRENT subtree OVER the stale local copy and overwrites the props index
+  // so their refreshed image wins. NOT a user-facing option (there is no sync
+  // icon/button): the explicit adopt gesture rides it (ADOPT MEANS GET THE
+  // LATEST) and the automatic refresh of adopted branches rides it. The mode
+  // name is historical plumbing only.
   #doCommitBranch = async (
     branchSig: string,
     atSegments: readonly string[],

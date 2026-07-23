@@ -14,6 +14,11 @@
 // the "important / attention" affordance notes carry without breaking the
 // design system.
 @use '../../styles/notes-shapes';
+@use '../toolwindow' as tw;
+
+// Match the cold-steel toolwindow chrome shared by the Tags (pheromone),
+// Feedback and Files panels — same hairline colour, same dark glass.
+$steel: #7eb6d6;
 
 :host {
   position: fixed;
@@ -67,16 +72,27 @@
 .notes-strip {
   pointer-events: auto;
   position: relative;  // anchor for absolute children (resize handle)
+
+  // ── Pheromone-panel palette ──────────────────────────────
+  // Adopt the Tags / Feedback toolwindow chrome. Remapping the accent + font
+  // tokens HERE reskins every inner control (form, chips, tree, footer) in one
+  // place: the warm `--md-secondary` yellow becomes steel and all copy renders
+  // in the mono UI face, so the panel reads as part of the docked column.
+  --md-secondary: #{$steel};
+  --md-on-secondary: #0e0e16;
+  --md-font-ui: var(--hc-mono, system-ui);
+  --md-font-display: var(--hc-mono, system-ui);
+
   display: flex;
   flex-direction: column;
-  background: linear-gradient(180deg,
-                color-mix(in srgb, var(--md-surface-c-low) 96%, transparent),
-                color-mix(in srgb, var(--md-surface-c) 94%, transparent));
-  backdrop-filter: blur(6px);
-  font-family: var(--md-font-ui, Inter, system-ui);
-  border: 1px solid var(--md-outline-variant);
-  border-radius: 12px;
-  box-shadow: var(--md-elev-3);
+  background: rgba(14, 14, 22, 0.96);
+  backdrop-filter: blur(18px);
+  font-family: var(--hc-mono, system-ui);
+  color: #eaf0f4;
+  border: none;
+  border-left: 1px solid rgba($steel, 0.5);
+  border-radius: 0;
+  box-shadow: -10px 0 40px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba($steel, 0.06) inset;
   // The strip docks vertically: full height of :host (which already
   // reserves space for header + pill) so the footer always sits at
   // viewport bottom (minus pill clearance). Width + height are
@@ -108,13 +124,23 @@
 .notes-strip.dock-right {
   position: fixed;
   right: 0;
-  top: calc(3rem * var(--hc-header-zoom, 1.0));
+  // Match the pheromone / feedback panels' header clearance so the docked
+  // column's tops line up.
+  top: calc(2.8rem * var(--hc-header-zoom, 1.0));
   bottom: 0;
   margin: 0;
   height: auto !important;
   max-height: none !important;
-  border-radius: 12px 0 0 12px;
+  // Flush against the viewport edge — no rounded corners on a full-height
+  // dock (they read as a floating card that doesn't "fit").
+  border-radius: 0;
 }
+
+// The visible corner + bottom resize grips are float-mode affordances; a
+// full-height right dock resizes from its left edge only (the invisible
+// .cv2-resize-edge-left strip), exactly like the pheromone panel.
+.notes-strip.dock-right .cv2-resize-handle,
+.notes-strip.dock-right .cv2-resize-edge-bottom { display: none; }
 
 // ── Header (shared) ────────────────────────────────────
 // Compact strip header carrying a panel label on the left and a hide
@@ -187,7 +213,7 @@
   gap: 0.3rem;
   align-self: flex-start;
   padding: 0.05rem 0.5rem 0.05rem 0.35rem;
-  border-radius: 999px;
+  border-radius: 3px;
   background: color-mix(in srgb, var(--md-on-surface) 8%, transparent);
   color: color-mix(in srgb, var(--md-on-surface) 75%, transparent);
   font-size: 0.62rem;
@@ -406,54 +432,27 @@
   }
 }
 
-// ── drag-bar (replaces .notes-strip-header) ──────────────
+// ── header (shared toolwindow band) ──────────────────────
+// Same header geometry as every other docked tool window (tw.header). The old
+// grab-cursor + grip dots are gone: a full-height dock isn't dragged, it's
+// resized from its left edge like the pheromone panel.
 .cv2-dragbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  height: 30px;
-  padding: 0 8px 0 6px;
-  background: linear-gradient(180deg,
-                color-mix(in srgb, var(--md-on-surface) 4%, var(--md-surface-c)),
-                color-mix(in srgb, var(--md-on-surface) 2%, var(--md-surface-c-low)));
-  border-bottom: 1px solid var(--md-outline-variant);
-  border-radius: 12px 12px 0 0;
-  cursor: grab;
+  @include tw.header;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba($steel, 0.25);
+  border-radius: 0;
   user-select: none;
-  flex-shrink: 0;
-
-  &:active { cursor: grabbing; }
-}
-
-.cv2-grip {
-  display: inline-grid;
-  grid-template-columns: repeat(2, 3px);
-  grid-template-rows: repeat(3, 3px);
-  gap: 3px;
-  padding: 4px;
-  border-radius: 4px;
-  margin-right: 2px;
-  opacity: 0.7;
-
-  span {
-    display: block;
-    width: 3px;
-    height: 3px;
-    background: var(--md-on-surface-faint);
-    border-radius: 50%;
-  }
-
-  .cv2-dragbar:hover & { opacity: 1; }
 }
 
 .cv2-dragbar-title {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-family: var(--md-font-mono);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  color: var(--md-on-surface);
+  gap: 0.4rem;
+  font-family: var(--hc-mono, monospace);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(206, 224, 240, 0.96);
 }
 
 .cv2-dragbar-sep { color: var(--md-on-surface-faint); }
@@ -461,25 +460,27 @@
 .cv2-dragbar-spacer { flex: 1; }
 
 .cv2-mini-btn {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   background: transparent;
   border: 1px solid transparent;
-  color: var(--md-on-surface-faint);
+  color: rgba(226, 235, 244, 0.6);
   border-radius: 5px;
   cursor: pointer;
   padding: 0;
   font-family: inherit;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
 
   &:hover {
-    color: var(--md-on-surface-strong);
-    background: color-mix(in srgb, var(--md-on-surface) 6%, transparent);
+    color: #fff;
+    background: rgba($steel, 0.16);
+    border-color: rgba($steel, 0.4);
   }
 
-  &.ghost { color: var(--md-on-surface-faint); }
+  &.ghost { color: rgba(226, 235, 244, 0.4); }
 }
 
 // Labeled exit pill — sits in the dragbar when see-all mode is on.
@@ -1146,12 +1147,13 @@
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  border-top: 1px solid var(--md-outline-variant);
-  background: color-mix(in srgb, var(--md-on-surface) 2.5%, transparent);
-  font-family: var(--md-font-mono);
+  border-top: 1px solid rgba($steel, 0.18);
+  background: rgba(255, 255, 255, 0.02);
+  font-family: var(--hc-mono, monospace);
   font-size: 10.5px;
   color: var(--md-on-surface-faint);
-  border-radius: 0 0 12px 12px;
+  // Flush with the square-cornered dock (no rounded bottom on a full-height panel).
+  border-radius: 0;
   letter-spacing: 0.04em;
   flex-shrink: 0;
 
@@ -1233,7 +1235,7 @@
   padding: 4px 6px 4px 11px;
   background: color-mix(in srgb, var(--md-on-surface) 5%, transparent);
   border: 1px solid var(--md-outline-variant);
-  border-radius: 999px;
+  border-radius: 3px;
   color: color-mix(in srgb, var(--md-on-surface) 85%, transparent);
   font-family: inherit;
   font-size: 0.8rem;
@@ -1269,7 +1271,7 @@
   font-variant-numeric: tabular-nums;
   color: color-mix(in srgb, var(--md-on-surface) 65%, transparent);
   background: color-mix(in srgb, var(--md-on-surface) 12%, transparent);
-  border-radius: 999px;
+  border-radius: 3px;
   padding: 0.05rem 0.35rem;
 
   .cv2-tilechip.is-active & {

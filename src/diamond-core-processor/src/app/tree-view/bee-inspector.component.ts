@@ -111,7 +111,7 @@ import type { BeeDocEntry } from '../core/tree-node'
       position: fixed;
       inset: 0;
       z-index: 1000;
-      background: #fff;
+      background: var(--dcp-surface);
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -125,23 +125,23 @@ import type { BeeDocEntry } from '../core/tree-node'
       align-items: center;
       gap: 16px;
       padding: 10px 20px;
-      border-bottom: 1px solid #e0e0e0;
-      background: #fafafa;
+      border-bottom: 1px solid var(--dcp-line);
+      background: var(--dcp-surface-2);
       min-height: 44px;
     }
 
     .hdr-back {
       background: none;
-      border: 1px solid #ddd;
+      border: 1px solid var(--dcp-line);
       padding: 4px 10px;
       font-size: 12px;
-      color: #555;
+      color: var(--dcp-ink-2);
       cursor: pointer;
       white-space: nowrap;
       flex-shrink: 0;
     }
 
-    .hdr-back:hover { color: #111; border-color: #bbb; }
+    .hdr-back:hover { color: var(--dcp-ink); border-color: var(--dcp-line-2); }
 
     .hdr-title {
       display: flex;
@@ -155,19 +155,19 @@ import type { BeeDocEntry } from '../core/tree-node'
       font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.08em;
-      color: #a58b4f;
+      color: var(--dcp-k-bee);
       flex-shrink: 0;
     }
 
-    .hdr-kind.dep { color: #4fa58b; }
-    .hdr-kind.worker { color: #a54f4f; }
-    .hdr-kind.drone { color: #a59b4f; }
-    .hdr-kind.queen { color: #7b4fa5; }
+    .hdr-kind.dep { color: var(--dcp-k-dependency); }
+    .hdr-kind.worker { color: var(--dcp-k-worker); }
+    .hdr-kind.drone { color: var(--dcp-k-drone); }
+    .hdr-kind.queen { color: var(--dcp-k-queen); }
 
     .hdr-name {
       font-size: 15px;
       font-weight: 600;
-      color: #111;
+      color: var(--dcp-ink);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
@@ -180,29 +180,29 @@ import type { BeeDocEntry } from '../core/tree-node'
       margin-left: auto;
       flex-shrink: 0;
       font-size: 11px;
-      color: #999;
+      color: var(--dcp-ink-3);
       font-family: var(--hc-mono);
     }
 
-    .hdr-sep { color: #ccc; }
+    .hdr-sep { color: var(--dcp-ink-3); }
 
-    .hdr-sig { color: #aaa; }
+    .hdr-sig { color: var(--dcp-ink-3); }
 
     .hdr-copy, .hdr-edit {
       font-size: 10px;
       font-weight: 600;
-      color: #666;
+      color: var(--dcp-ink-2);
       background: none;
-      border: 1px solid #ddd;
+      border: 1px solid var(--dcp-line);
       padding: 1px 8px;
       cursor: pointer;
       margin-left: 2px;
     }
 
-    .hdr-copy:hover, .hdr-edit:hover { background: #f0f0f0; border-color: #bbb; }
+    .hdr-copy:hover, .hdr-edit:hover { background: var(--dcp-hover); border-color: var(--dcp-line-2); }
 
-    .hdr-edit { color: #4a6fa5; border-color: rgba(74, 111, 165, 0.3); }
-    .hdr-edit:hover { background: rgba(74, 111, 165, 0.06); }
+    .hdr-edit { color: var(--dcp-accent); border-color: var(--dcp-accent); }
+    .hdr-edit:hover { background: var(--dcp-accent-tint); }
 
     /* --- scrollable content --- */
 
@@ -228,12 +228,12 @@ import type { BeeDocEntry } from '../core/tree-node'
     .details {
       padding-top: 12px;
       padding-bottom: 12px;
-      border-bottom: 1px solid #f0f0f0;
+      border-bottom: 1px solid var(--dcp-line);
     }
 
     .desc {
       font-size: 13px;
-      color: #444;
+      color: var(--dcp-ink);
       line-height: 1.5;
       margin: 0 0 10px;
     }
@@ -254,7 +254,7 @@ import type { BeeDocEntry } from '../core/tree-node'
       text-transform: uppercase;
       letter-spacing: 0.06em;
       font-size: 9px;
-      color: #999;
+      color: var(--dcp-ink-3);
       width: 65px;
       padding-right: 10px;
     }
@@ -262,16 +262,16 @@ import type { BeeDocEntry } from '../core/tree-node'
     .props code {
       font-family: var(--hc-mono);
       font-size: 11px;
-      color: #555;
+      color: var(--dcp-ink-2);
     }
 
     .cmd {
       font-weight: 600;
-      color: #7b4fa5;
+      color: var(--dcp-k-queen);
     }
 
     .alias {
-      color: #999;
+      color: var(--dcp-ink-3);
       margin-left: 6px;
     }
 
@@ -281,10 +281,10 @@ import type { BeeDocEntry } from '../core/tree-node'
       margin: 1px 2px 1px 0;
     }
 
-    .pill.listen { color: #2e7d32; background: rgba(46, 125, 50, 0.07); }
-    .pill.emit { color: #c62828; background: rgba(198, 40, 40, 0.07); }
-    .pill.effect { color: #1565c0; background: rgba(21, 101, 192, 0.07); }
-    .pill.dep { color: #4fa58b; background: rgba(79, 165, 139, 0.07); }
+    .pill.listen { color: var(--dcp-z-logical-ink); background: color-mix(in srgb, var(--dcp-z-logical-ink) 14%, transparent); }
+    .pill.emit { color: var(--dcp-danger); background: color-mix(in srgb, var(--dcp-danger) 14%, transparent); }
+    .pill.effect { color: var(--dcp-accent); background: var(--dcp-accent-tint); }
+    .pill.dep { color: var(--dcp-k-dependency); background: color-mix(in srgb, var(--dcp-k-dependency) 14%, transparent); }
 
     .dep-link {
       cursor: pointer;
@@ -292,13 +292,13 @@ import type { BeeDocEntry } from '../core/tree-node'
     }
 
     .dep-link:hover {
-      background: rgba(79, 165, 139, 0.18);
-      color: #2e7d5b;
+      background: color-mix(in srgb, var(--dcp-k-dependency) 24%, transparent);
+      color: var(--dcp-k-dependency);
     }
 
     .link {
       font-size: 11px;
-      color: #1565c0;
+      color: var(--dcp-accent);
       text-decoration: none;
       margin-right: 8px;
     }
@@ -310,13 +310,13 @@ import type { BeeDocEntry } from '../core/tree-node'
       padding: 6px 14px;
       font-size: 11px;
       font-weight: 600;
-      color: #4a6fa5;
+      color: var(--dcp-accent);
       background: none;
-      border: 1px solid rgba(74, 111, 165, 0.2);
+      border: 1px solid var(--dcp-accent);
       cursor: pointer;
     }
 
-    .source-btn:hover { background: rgba(74, 111, 165, 0.06); }
+    .source-btn:hover { background: var(--dcp-accent-tint); }
 
     /* --- edit mode --- */
 
@@ -335,26 +335,26 @@ import type { BeeDocEntry } from '../core/tree-node'
       padding: 8px 20px;
       font-size: 12px;
       font-weight: 600;
-      color: #fff;
-      background: #4a6fa5;
+      color: var(--dcp-on-accent);
+      background: var(--dcp-accent);
       border: none;
       cursor: pointer;
     }
 
-    .patch-btn:hover:not(:disabled) { background: #3d5d8a; }
+    .patch-btn:hover:not(:disabled) { background: var(--dcp-accent-strong); }
     .patch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
     .cancel-btn {
       padding: 8px 20px;
       font-size: 12px;
       font-weight: 600;
-      color: #666;
+      color: var(--dcp-ink-2);
       background: none;
-      border: 1px solid #ddd;
+      border: 1px solid var(--dcp-line);
       cursor: pointer;
     }
 
-    .cancel-btn:hover { background: #f5f5f5; }
+    .cancel-btn:hover { background: var(--dcp-hover); }
 
     /* --- loading / error --- */
 
@@ -365,17 +365,17 @@ import type { BeeDocEntry } from '../core/tree-node'
       padding-top: 24px;
       padding-bottom: 24px;
       font-size: 11px;
-      color: #888;
+      color: var(--dcp-ink-3);
       font-family: var(--hc-mono);
     }
 
-    .status.error { color: #b00020; }
+    .status.error { color: var(--dcp-danger); }
 
     .loading-dot {
       width: 6px;
       height: 6px;
       border-radius: 50%;
-      background: #4a6fa5;
+      background: var(--dcp-accent);
       animation: pulse 1s ease infinite;
     }
 

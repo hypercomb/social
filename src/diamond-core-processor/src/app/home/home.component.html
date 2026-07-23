@@ -2,34 +2,52 @@
 @if (installToastVisible()) {
   <div class="install-toast" role="status" aria-live="polite">
     <div class="install-toast-body">
-      <strong>Pushed to Hypercomb</strong>
-      <span>Switch back to your Hypercomb tab — it will reload with the new modules.</span>
+      <strong>{{ 'dcp.toast-pushed-title' | t }}</strong>
+      <span>{{ 'dcp.toast-pushed-body' | t }}</span>
     </div>
-    <button class="install-toast-close" type="button" (click)="dismissInstallToast()" aria-label="Dismiss">&times;</button>
+    <button class="install-toast-close" type="button" (click)="dismissInstallToast()" [attr.aria-label]="'dcp.toast-dismiss' | t">&times;</button>
   </div>
 }
 <div class="tree-home">
-    <header class="top-bar">
-      <h1 class="title">{{ 'dcp.title' | t }}</h1>
+    <div class="specbar">
+      <span>{{ 'dcp.spec-verified' | t }}</span>
+      <span>{{ 'dcp.spec-count' | t: { domains: domainGrouped().length, modules: allNodes().length } }}</span>
+    </div>
+
+    <header class="mast">
+      <div class="brand">
+        <svg class="mark" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+          <path class="e" d="M20 2 L34 20 L20 38 L6 20 Z" stroke-width="1.5"/>
+          <path class="e f" d="M20 2 L27 20 L20 38 L13 20 Z" stroke-width="1"/>
+          <path class="e f" d="M6 20 L34 20" stroke-width="1"/>
+          <path class="s" d="M20 2 L20 20" stroke-width="1.5"/>
+        </svg>
+        <div class="brand-txt">
+          <h1 class="word">{{ 'dcp.title' | t }}</h1>
+          <div class="kicker">{{ 'dcp.tagline' | t }}</div>
+        </div>
+      </div>
       <div class="top-bar-right">
-        <button class="kind-toggle"
-          [class.active]="layersCollapsed()"
+        <button class="tbtn"
+          [class.on]="layersCollapsed()"
           (click)="toggleCollapseAllLayers()"
           [title]="(layersCollapsed() ? 'dcp.expand-layers' : 'dcp.collapse-layers') | t">
           <dcp-diamond [kind]="'layer'" />
         </button>
 
-        <span class="filter-divider"></span>
+        <span class="vsep"></span>
 
         @for (fk of filterKinds; track fk.key) {
-          <button class="kind-toggle"
-            [class.active]="isKindActive(fk.key)"
-            [class.inactive]="isFiltering() && !isKindActive(fk.key)"
+          <button class="tbtn"
+            [class.on]="isKindActive(fk.key)"
+            [class.dim]="isFiltering() && !isKindActive(fk.key)"
             (click)="toggleKindFilter(fk.key)"
             [title]="fk.titleKey | t">
             <dcp-diamond [kind]="fk.diamond" />
           </button>
         }
+
+        <span class="vsep"></span>
 
         <dcp-relay-panel />
         <dcp-auditor-settings />
@@ -69,7 +87,7 @@
     <div class="domain-input">
       <input
         type="text"
-        [placeholder]="'dcp.filter-placeholder' | t"
+        [placeholder]="'dcp.install-placeholder' | t"
         [value]="domainInput()"
         (input)="domainInput.set($any($event.target).value)"
         (keydown.enter)="addDomain()" />
@@ -104,21 +122,21 @@
               (click)="toggleViewLogical(group.domainName)"
               [class.active]="isViewLogical(group.domainName)"
               [title]="(isViewLogical(group.domainName) ? 'dcp.logical-hide' : 'dcp.logical-show') | t">
-              &#8801;
+              <svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="12" height="12"/><rect x="8" y="8" width="12" height="12"/></svg>
             </button>
           }
           <button class="domain-url" [title]="group.domain"
             (click)="toggleGroupOpen(group.domainName)"
             [class.open]="isGroupOpen(group.domainName)">
-            <span class="group-chevron">{{ isGroupOpen(group.domainName) ? '▾' : '▸' }}</span>
+            <svg class="group-chevron" [class.open]="isGroupOpen(group.domainName)" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
             {{ group.domainName }}/
             @if (group.sections[0]?.installStatus && !group.sections[0]?.loading) {
               <span class="group-note">{{ group.sections[0]?.installStatus }}</span>
             }
           </button>
           <span class="header-sig" [title]="group.sections[0]?.rootSig">{{ group.sections[0] ? displayLabel(group.sections[0]) : '' }}</span>
-          <button class="domain-action" (click)="downloadPackage(group.sections[0])" [title]="'dcp.download-package' | t">&#8615;</button>
-          <button class="remove" (click)="removeDomain(group.domain)">&times;</button>
+          <button class="domain-action download-toggle" (click)="downloadPackage(group.sections[0])" [title]="'dcp.download-package' | t"><svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m0 0l-4-4m4 4l4-4M4 21h16"/></svg></button>
+          <button class="remove" (click)="removeDomain(group.domain)" aria-label="Remove"><svg class="action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
         </div>
 
         @if (isGroupOpen(group.domainName)) {

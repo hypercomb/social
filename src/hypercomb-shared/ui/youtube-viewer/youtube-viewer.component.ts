@@ -14,6 +14,7 @@ import { DomSanitizer, type SafeResourceUrl } from '@angular/platform-browser'
 import { EffectBus } from '@hypercomb/core'
 import { parseYouTubeVideoId } from '@hypercomb/essentials/diamondcoreprocessor.com/link/youtube'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { ensureViewportInsetVars } from '../../core/viewport-inset-vars'
 
 type ViewerOpenPayload = { kind: string; url: string; label?: string }
 
@@ -32,10 +33,15 @@ function ensureViewerStyle(): void {
   // pointer-events:auto <canvas> eating clicks through the viewer. This style
   // tag now only fades the chrome; the `viewer-open` body class (toggled below)
   // triggers the shared canvas-suppress rule.
+  // The undo/redo/save cluster shares the bottom-right corner with the video's
+  // close FAB, so it must not sit over the video at all — it's hidden for the
+  // WHOLE takeover (`viewer-open`), not just once the chrome auto-hides
+  // (`viewer-active`). The header + controls-bar still only fade on auto-hide.
   style.textContent = `
     .header-bar, hc-controls-bar { transition: opacity 0.5s ease; }
     body.viewer-active .header-bar,
     body.viewer-active hc-controls-bar { opacity: 0; pointer-events: none; }
+    body.viewer-open hc-edit-actions { display: none; }
   `
   document.head.appendChild(style)
 }
@@ -56,6 +62,10 @@ export class YoutubeViewerComponent {
 
   constructor(private sanitizer: DomSanitizer) {
     ensureViewerStyle()
+    // The exit-fab offsets by --hc-inset-right (below) so a docked panel can't
+    // cover it; make sure the var is being published even if this viewer is the
+    // first chrome to need it. Idempotent.
+    ensureViewportInsetVars()
 
     this.#unsub = EffectBus.on<ViewerOpenPayload>('viewer:open', (payload) => {
       if (payload.kind !== 'youtube') return

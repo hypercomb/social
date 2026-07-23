@@ -11,12 +11,20 @@ $steel: rgb(126, 182, 214);
 
 :host { display: contents; }
 
-// ── horizontal frosted pill, just left of the round feedback FAB ──
-// FAB is right:1.4rem and ~2.9rem wide, so this clears it by ~0.8rem.
+// ── bare undo/redo cluster, bottom-right corner ──
+// The old round feedback FAB that used to sit here has moved up into the
+// command-line chrome, freeing the corner. Undo now sits just inside the
+// breadcrumb's right edge and drops to the bottom band so it reads in line
+// with the pheromone opener at the bottom-left rather than floating above it.
+// Both offsets are eye-tuned against the live chrome.
 .edit-actions {
   position: fixed;
-  right: 5.1rem;
-  bottom: 1.5rem;
+  // Slides left of any right-docked toolwindow so the panel never paints over
+  // the cluster — same `--hc-inset-right` term the breadcrumb carries, so the
+  // two stay aligned as panels open/close. (0 when no panel is open; published
+  // by viewport-inset-vars.ts.)
+  right: calc(0.675rem + var(--hc-inset-right, 0px));
+  bottom: 0.525rem;
   z-index: 59995;
 
   // row-reverse pins UNDO (first child) at the fixed right edge, so it never
@@ -25,12 +33,12 @@ $steel: rgb(126, 182, 214);
   // would put SAVE exactly where undo just was, inviting an accidental save on
   // a rapid second click.) DOM order stays undo→redo→save for tab/reading order.
   // No container chrome — the undo/redo icons stand bare and quiet, matching the
-  // tag list. Grouping comes from proximity, not a frosted box.
+  // tag list. Grouping comes from proximity, not a frosted box. Height is the
+  // buttons' own (no fixed box) so the cluster hugs the bottom band.
   display: flex;
   flex-direction: row-reverse;
   align-items: center;
   gap: 0.3rem;
-  height: 2.32rem;
 }
 
 .ea-btn {
@@ -99,7 +107,7 @@ $steel: rgb(126, 182, 214);
 
 // ── phone: keep the cluster, shift to clear the smaller FAB inset ──
 @include phone-only {
-  .edit-actions { right: 4.4rem; bottom: 1.1rem; height: 2.1rem; }
+  .edit-actions { right: calc(0.3rem + var(--hc-inset-right, 0px)); bottom: 0.15rem; }
   .ea-btn {
     width: 1.85rem;
     height: 1.85rem;

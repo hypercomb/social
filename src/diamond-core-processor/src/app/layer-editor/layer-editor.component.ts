@@ -132,7 +132,7 @@ type AiMessage = {
       position: fixed;
       inset: 0;
       z-index: 1000;
-      background: #fff;
+      background: var(--dcp-bg);
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -143,22 +143,22 @@ type AiMessage = {
       align-items: center;
       gap: 12px;
       padding: 8px 16px;
-      border-bottom: 1px solid #e0e0e0;
-      background: #fafafa;
+      border-bottom: 1px solid var(--dcp-line);
+      background: var(--dcp-surface-2);
       flex-shrink: 0;
     }
 
     .back-btn {
       background: none;
-      border: 1px solid #ddd;
+      border: 1px solid var(--dcp-line);
       border-radius: 4px;
       cursor: pointer;
       padding: 4px 10px;
       font-size: 13px;
-      color: #555;
+      color: var(--dcp-ink-2);
     }
 
-    .back-btn:hover { background: #f0f0f0; }
+    .back-btn:hover { background: var(--dcp-hover); }
 
     .header-info {
       display: flex;
@@ -170,13 +170,13 @@ type AiMessage = {
 
     .header-lineage {
       font-size: 11px;
-      color: #999;
+      color: var(--dcp-ink-3);
     }
 
     .header-name {
       font-size: 14px;
       font-weight: 600;
-      color: #333;
+      color: var(--dcp-ink);
     }
 
     .header-actions {
@@ -188,36 +188,36 @@ type AiMessage = {
 
     .discard-btn {
       background: none;
-      border: 1px solid #e0c080;
+      border: 1px solid var(--dcp-line);
       border-radius: 4px;
       cursor: pointer;
       padding: 4px 10px;
       font-size: 12px;
-      color: #a58b4f;
+      color: var(--dcp-k-bee);
     }
 
-    .discard-btn:hover { background: #fef8e8; }
+    .discard-btn:hover { background: var(--dcp-hover); }
 
     .lock-input {
       font-size: 12px;
       padding: 4px 8px;
-      border: 1px solid #ccc;
+      border: 1px solid var(--dcp-line);
       border-radius: 4px;
       width: 120px;
     }
 
     .commit-btn {
-      background: #2a6e3f;
+      background: var(--dcp-accent);
       border: none;
       border-radius: 4px;
       cursor: pointer;
       padding: 4px 14px;
       font-size: 12px;
-      color: #fff;
+      color: var(--dcp-on-accent);
       font-weight: 500;
     }
 
-    .commit-btn:hover { background: #1e5a30; }
+    .commit-btn:hover { background: var(--dcp-accent-strong); }
     .commit-btn:disabled { opacity: 0.5; cursor: default; }
 
     .ai-bar {
@@ -225,8 +225,8 @@ type AiMessage = {
       align-items: center;
       gap: 8px;
       padding: 8px 16px;
-      border-bottom: 1px solid #e0e0e0;
-      background: #f5f5f5;
+      border-bottom: 1px solid var(--dcp-line);
+      background: var(--dcp-surface-2);
       flex-shrink: 0;
     }
 
@@ -234,17 +234,17 @@ type AiMessage = {
       flex: 1;
       font-size: 13px;
       padding: 6px 10px;
-      border: 1px solid #ccc;
+      border: 1px solid var(--dcp-line);
       border-radius: 4px;
-      background: #fff;
+      background: var(--dcp-surface);
     }
 
-    .ai-input:focus { outline: none; border-color: #4a6fa5; }
-    .ai-input:disabled { background: #eee; }
+    .ai-input:focus { outline: none; border-color: var(--dcp-accent); }
+    .ai-input:disabled { background: var(--dcp-surface-2); }
 
     .ai-spinner {
       font-size: 11px;
-      color: #999;
+      color: var(--dcp-ink-3);
       flex-shrink: 0;
     }
 
@@ -252,19 +252,19 @@ type AiMessage = {
     .commit-error {
       padding: 6px 16px;
       font-size: 12px;
-      color: #c44;
-      background: #fff0f0;
-      border-bottom: 1px solid #fcc;
+      color: var(--dcp-danger);
+      background: var(--dcp-surface-2);
+      border-bottom: 1px solid var(--dcp-line);
       flex-shrink: 0;
     }
 
     .messages {
       padding: 8px 16px;
-      border-bottom: 1px solid #e0e0e0;
+      border-bottom: 1px solid var(--dcp-line);
       max-height: 200px;
       overflow-y: auto;
       flex-shrink: 0;
-      background: #fcfcfc;
+      background: var(--dcp-surface);
     }
 
     .message {
@@ -279,23 +279,23 @@ type AiMessage = {
       font-weight: 600;
       font-size: 10px;
       text-transform: uppercase;
-      color: #999;
+      color: var(--dcp-ink-3);
       flex-shrink: 0;
       width: 60px;
     }
 
-    .message.user .message-role { color: #4a6fa5; }
-    .message.assistant .message-role { color: #6a4fa5; }
+    .message.user .message-role { color: var(--dcp-accent); }
+    .message.assistant .message-role { color: var(--dcp-k-queen); }
 
     .message-content {
-      color: #333;
+      color: var(--dcp-ink);
       white-space: pre-wrap;
       word-break: break-word;
     }
 
     .message-changes {
       font-size: 10px;
-      color: #2a6e3f;
+      color: var(--dcp-accent);
       flex-shrink: 0;
     }
 
@@ -309,13 +309,13 @@ type AiMessage = {
     .empty {
       padding: 24px 0;
       text-align: center;
-      color: #999;
+      color: var(--dcp-ink-3);
       font-size: 13px;
     }
 
     .file-panel {
       margin-top: 12px;
-      border: 1px solid #e0e0e0;
+      border: 1px solid var(--dcp-line);
       border-radius: 4px;
       overflow: hidden;
     }
@@ -325,8 +325,8 @@ type AiMessage = {
       align-items: center;
       gap: 8px;
       padding: 6px 10px;
-      background: #f5f5f5;
-      border-bottom: 1px solid #e0e0e0;
+      background: var(--dcp-surface-2);
+      border-bottom: 1px solid var(--dcp-line);
       font-size: 12px;
     }
 
@@ -336,25 +336,25 @@ type AiMessage = {
       font-size: 10px;
     }
 
-    .file-kind.bee { color: #a58b4f; }
-    .file-kind.dependency { color: #4fa58b; }
+    .file-kind.bee { color: var(--dcp-k-bee); }
+    .file-kind.dependency { color: var(--dcp-k-dependency); }
 
     .file-name {
-      color: #333;
+      color: var(--dcp-ink);
       font-weight: 500;
     }
 
     .file-sig {
       font-family: var(--hc-mono);
       font-size: 10px;
-      color: #bbb;
+      color: var(--dcp-ink-3);
       margin-left: auto;
     }
 
     .file-modified {
       font-size: 10px;
-      color: #2a6e3f;
-      background: #e6f4ea;
+      color: var(--dcp-accent);
+      background: var(--dcp-accent-tint);
       padding: 1px 6px;
       border-radius: 2px;
     }
@@ -364,7 +364,7 @@ type AiMessage = {
       border: none;
       cursor: pointer;
       font-size: 16px;
-      color: #c44;
+      color: var(--dcp-danger);
       padding: 0 2px;
       line-height: 1;
     }

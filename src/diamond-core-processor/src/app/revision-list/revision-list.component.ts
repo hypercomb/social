@@ -95,8 +95,8 @@ export interface RevisionRow {
     }
     .revision-item:hover { background: var(--dcp-hover, rgba(126,182,214,0.08)); }
     .revision-item.active {
-      background: rgba(126,182,214,0.10);
-      border-color: rgba(126,182,214,0.30);
+      background: var(--dcp-accent-tint);
+      border-color: var(--dcp-accent);
     }
 
     .revision-label {

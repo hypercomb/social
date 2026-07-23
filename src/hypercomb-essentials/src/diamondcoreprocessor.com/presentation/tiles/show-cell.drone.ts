@@ -3036,32 +3036,40 @@ export class ShowCellDrone extends Drone {
       const swarmHidden = swarm?.hiddenAtCurrentSig?.() ?? new Set<string>()
       for (const n of swarmHidden) hiddenSet.add(n)
     } catch { /* swarm not registered yet — local hides still apply */ }
+
+    // Zone-INDEPENDENT hide list (hc:hidden-lineages, path-keyed). Every
+    // source above is keyed by the CURRENT zone / composed sig, which
+    // CHANGES the instant you join a swarm (room+secret enter the sig):
+    // hideStorageKey() flips to the new zone suffix and hiddenAtCurrentSig()
+    // reads the new sig — both empty at that moment. Nothing then re-asserts
+    // the hide until the 30s heartbeat republishes the kind-30202 event and
+    // its relay echo lands, so a tile you hid visibly reappears for ~30s
+    // after joining. This path-keyed list survives every zone transition
+    // (it's the SAME "skip these forever" list the swarm tile source already
+    // applies to PEER visuals — SwarmDrone.readHiddenLineages), so reading it
+    // here makes the own-tile hide hold INSTANTLY on join. Name/path
+    // convention matches the peer path exactly: `<locKey>/<name>` (bare
+    // `<name>` at root). Session-only (sessionHideStore), same as the keys
+    // above, so a reload still clears it — unchanged behaviour there.
+    try {
+      const rawLineages = sessionHideStore.getItem('hc:hidden-lineages')
+      const lineageArr = rawLineages ? JSON.parse(rawLineages) : []
+      if (Array.isArray(lineageArr) && lineageArr.length > 0) {
+        const lineageSet = new Set<string>(lineageArr as string[])
+        const locKey = passSegments.join('/')
+        for (const name of union) {
+          const path = locKey ? `${locKey}/${name}` : name
+          if (lineageSet.has(path)) hiddenSet.add(name)
+        }
+      }
+    } catch { /* malformed hc:hidden-lineages — other hide sources still apply */ }
+
     this.#currentHiddenSet = hiddenSet
     if (!this.#showHiddenItems) {
       for (const hidden of hiddenSet) {
         union.delete(hidden)
         ephemeralCellSet.delete(hidden)
         peerCellSet.delete(hidden)
-      }
-    }
-
-    // SWARM PRIVACY FILTER — in a swarm your own non-shared (private) tiles
-    // are invisible on the canvas: the swarm surface shows only what you
-    // actually share plus what peers broadcast. This mirrors the publish
-    // filter (isCellPublic, kinds 29010 / 30200) exactly, so "what you see
-    // of your own" == "what leaves the device" — you never stare at tiles
-    // the swarm can't. Only OWN tiles are dropped; a peer/ephemeral tile of
-    // the same name stays (it's someone else's shared content, not your
-    // private copy). Skipped when world mode is ON: that toggle is the
-    // deliberate reveal that DIMS private tiles (with make-public
-    // affordances) so you can manage sharing. Off-swarm (solo) nothing is
-    // filtered — you see your whole hive.
-    if (this.#publicMode && !this.#worldMode) {
-      const privacyLocation = String(lineage?.explorerLabel?.() ?? '/')
-      for (const name of localCellSet) {
-        if (isCellPublic(privacyLocation, name)) continue
-        if (peerCellSet.has(name) || ephemeralCellSet.has(name)) continue
-        union.delete(name)
       }
     }
 
@@ -4813,13 +4821,6 @@ export class ShowCellDrone extends Drone {
       }
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
-      // Entering/leaving a swarm changes membership at the SAME location —
-      // the swarm privacy filter drops your private tiles on join and
-      // restores them on leave. The slot state machine is seeded once and
-      // reused across passes, so without clearing it requestRender() would
-      // re-read the stale membership and the private tiles would linger
-      // (same class of bug as swarm:peers-changed — see CellSlots).
-      this.#slots.clear()
       this.requestRender()
     })
 
@@ -5065,16 +5066,11 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
-    // World mode toggle from the command bar. Two effects: it dims unshared
-    // tiles (shader), AND — in a swarm — it gates the swarm privacy filter,
-    // revealing your private tiles (world ON) or hiding them (world OFF). The
-    // reveal/hide is a MEMBERSHIP change, so clear the slot machine too or the
-    // stale snapshot keeps the just-toggled tiles as-is.
+    // World mode toggle from the command bar — dims unshared tiles (no filter).
     this.onEffect<{ active: boolean }>('world:mode', ({ active }) => {
       this.#worldMode = !!active
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
-      this.#slots.clear()
       this.requestRender()
     })
 
@@ -5109,19 +5105,10 @@ export class ShowCellDrone extends Drone {
       // a fresh authoritative snapshot so the latest-snapshot-wins consumer
       // drops a now-private tile at once instead of unioning it for ~10 min.
       void this.refreshMeshCells('', true)
-      // A public/private flip changes the canvas in two swarm situations:
-      //  • world mode ON — the dim state of the flipped tile changes.
-      //  • in a swarm, world mode OFF — the swarm privacy filter adds (made
-      //    public) or removes (made private) the tile from the render union,
-      //    including auto-publish-on-create. Solo (not public, not world),
-      //    the flag is inert on-screen, so skip the repaint.
-      if (!this.#worldMode && !this.#publicMode) return
+      // Render only changes in world mode (the dim state of unshared tiles).
+      if (!this.#worldMode) return
       this.#layerCellsCache.clear()
       this.renderedCellsKey = ''
-      // In a swarm (world off) the flip moves the tile in/out of the privacy
-      // filter's union — a membership change, so the slot machine must be
-      // reseeded or the tile won't actually appear/disappear.
-      this.#slots.clear()
       this.requestRender()
     })
 

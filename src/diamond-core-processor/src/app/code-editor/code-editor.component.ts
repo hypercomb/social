@@ -19,7 +19,7 @@ import { syntaxHighlighting, defaultHighlightStyle, bracketMatching } from '@cod
     .editor-host {
       width: 100%;
       min-height: 200px;
-      border: 1px solid #ddd;
+      border: 1px solid var(--dcp-line);
       border-radius: 4px;
       overflow: hidden;
     }

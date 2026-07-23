@@ -52,14 +52,14 @@ import type { PatchRecord } from '../core/patch-store'
       font-weight: 600;
       text-transform: uppercase;
       letter-spacing: 0.06em;
-      color: #888;
+      color: var(--dcp-ink-3);
       background: none;
       border: none;
       cursor: pointer;
       padding: 4px 0;
     }
 
-    .toggle:hover { color: #555; }
+    .toggle:hover { color: var(--dcp-ink-2); }
 
     .chevron {
       font-size: 8px;
@@ -89,15 +89,15 @@ import type { PatchRecord } from '../core/patch-store'
       border-radius: 3px;
     }
 
-    .patch-item:hover { background: #f5f5f5; }
+    .patch-item:hover { background: var(--dcp-hover); }
 
     .patch-item.active {
-      background: rgba(74, 111, 165, 0.06);
-      border-color: rgba(74, 111, 165, 0.2);
+      background: var(--dcp-accent-tint);
+      border-color: var(--dcp-accent);
     }
 
     .patch-label {
-      color: #333;
+      color: var(--dcp-ink);
       font-weight: 500;
       min-width: 0;
       overflow: hidden;
@@ -109,17 +109,17 @@ import type { PatchRecord } from '../core/patch-store'
     .patch-sig {
       font-family: var(--hc-mono);
       font-size: 10px;
-      color: #aaa;
+      color: var(--dcp-ink-3);
       flex-shrink: 0;
     }
 
     .patch-time {
       font-size: 10px;
-      color: #bbb;
+      color: var(--dcp-ink-3);
       flex-shrink: 0;
     }
 
-    .original .patch-label { color: #888; }
+    .original .patch-label { color: var(--dcp-ink-2); }
   `]
 })
 export class PatchListComponent {

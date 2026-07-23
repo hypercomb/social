@@ -667,17 +667,21 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // Pan/zoom attempted while input is locked — flash the lock icon.
       // Transient (no replay), so a fresh mount never flashes spuriously.
       EffectBus.on('input:locked-attempt', () => this.#flashLocked()),
-      // Notes strip open/closed — lights the notes toggle.
+      // Notes strip open/closed — lights the notes toggle. Opening it folds
+      // the other top-chrome panels away (mutual exclusion, see #encloseOthers).
       EffectBus.on<{ open?: boolean }>('notes:panel-state', ({ open }) => {
         this.#notesPanelOpen.set(!!open)
+        if (open) this.#encloseOthers('notes')
       }),
       // Share-feedback panel open/closed — lights the feedback toggle.
       EffectBus.on<{ open?: boolean }>('feedback:panel-state', ({ open }) => {
         this.#feedbackPanelOpen.set(!!open)
+        if (open) this.#encloseOthers('feedback')
       }),
       // Pheromone panel open/closed — lights the pheromones toggle.
       EffectBus.on<{ open?: boolean }>('tags:view-state', ({ open }) => {
         this.#pheromonePanelOpen.set(!!open)
+        if (open) this.#encloseOthers('pheromones')
       }),
       // Pheromone reach — sticky broadcast, so the glyph hydrates on mount
       // and follows changes made from the panel or the bottom strip.
@@ -753,6 +757,28 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (!swarm?.setOpenForSubscribers) return
     const current = !!swarm.openForSubscribers()
     swarm.setOpenForSubscribers(!current)
+  }
+
+  /** The three top-chrome panels are mutually exclusive: opening any one folds
+   *  the other two away, so only a single strip/panel is ever on screen (and
+   *  toggling the open one leaves the chrome clear). Each entry closes its
+   *  panel, guarded by its own open-state so we emit nothing for an already
+   *  closed one — feedback's only lever is a pure toggle, so the guard is what
+   *  keeps "close" from re-opening it. */
+  readonly #closePanel: Record<'notes' | 'feedback' | 'pheromones', () => void> = {
+    notes: () => { if (this.#notesPanelOpen()) EffectBus.emit('notes:panel', { visible: false }) },
+    feedback: () => { if (this.#feedbackPanelOpen()) EffectBus.emit('feedback:toggle', {}) },
+    pheromones: () => { if (this.#pheromonePanelOpen()) EffectBus.emit('tags:view-close', undefined) },
+  }
+
+  /** Close every top-chrome panel except the one that just opened. Reacts to
+   *  the panels' own state broadcasts, so it holds however a panel was opened —
+   *  header button, bottom tag strip, or the `/tags` command. A close emits an
+   *  `open:false` state, which never re-enters this path, so there is no loop. */
+  #encloseOthers(opened: 'notes' | 'feedback' | 'pheromones'): void {
+    for (const key of ['notes', 'feedback', 'pheromones'] as const) {
+      if (key !== opened) this.#closePanel[key]()
+    }
   }
 
   /** Flip the notes strip open/closed. The strip broadcasts state back via

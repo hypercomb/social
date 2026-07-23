@@ -15,13 +15,9 @@
        [style.transform]="panelTransformActive()"
        (pointerenter)="onNotesEnter()" (pointerleave)="onNotesLeave()">
 
-    <!-- Drag-bar header -->
-    <div class="cv2-dragbar" data-drag-grip
-         (pointerdown)="onDragStart($event)"
-         (dblclick)="resetPanelOffset()">
-      <span class="cv2-grip" aria-hidden="true">
-        <span></span><span></span><span></span><span></span><span></span><span></span>
-      </span>
+    <!-- Toolwindow header — title left, actions right (no grip: a full-height
+         dock is resized from its left edge, not dragged). -->
+    <div class="cv2-dragbar">
       <span class="cv2-dragbar-title">
         <span class="hex-mark" aria-hidden="true"></span>
         <span>{{ cell() || ('notes.strip.title' | t) }}</span>

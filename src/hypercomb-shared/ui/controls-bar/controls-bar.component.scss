@@ -40,7 +40,10 @@ $actions-corner: 12rem;
     calc(3.25rem * var(--hc-header-zoom, 1.0)),
     calc(var(--hc-header-bottom, 0px) + 0.35rem)
   );
-  right: 0.6rem;
+  // Sit BESIDE an open right-docked toolwindow (behaviors/features, tags,
+  // notes, …) instead of under it. --hc-inset-right is the reserved right-edge
+  // width (0 when no panel is open); see core/viewport-inset-vars.ts.
+  right: calc(0.6rem + var(--hc-inset-right, 0px));
   z-index: 59999;
 
   display: flex;

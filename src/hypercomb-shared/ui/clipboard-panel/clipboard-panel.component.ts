@@ -31,6 +31,7 @@ import { registerShellSurface } from '../../core/shell-surface-registry'
 import { Component, computed, signal, type OnDestroy } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
 import { TranslatePipe } from '../../core/i18n.pipe'
+import { DockInsetDirective } from '../dock-inset/dock-inset.directive'
 
 interface ClipboardItem {
   label: string
@@ -73,7 +74,7 @@ type StoreLike = { getResource?: (sig: string) => Promise<Blob | null> }
 @Component({
   selector: 'hc-clipboard-panel',
   standalone: true,
-  imports: [TranslatePipe],
+  imports: [TranslatePipe, DockInsetDirective],
   templateUrl: './clipboard-panel.component.html',
   styleUrls: ['./clipboard-panel.component.scss'],
 })

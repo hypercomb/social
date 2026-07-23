@@ -32,6 +32,9 @@
     },
     {
       "path": "hypercomb-cli"
+    },
+    {
+      "path": "hypercomb-extensions"
     }
   ],
   "launch": {

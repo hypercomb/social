@@ -9,9 +9,12 @@ const _ = [DependencyLoader, DroneRegistry, IconProviderRegistry, LayerInstaller
 
 const MESH_PUBLIC_KEY = 'hc:mesh-public'
 
-function readMeshPublic(): boolean {
-  return localStorage.getItem(MESH_PUBLIC_KEY) === 'true'
-}
+// REFRESH → PRIVATE. Swarm membership is a per-session gesture, never a
+// persisted posture: force the flag off at module load — before any drone
+// samples it — so a reload always boots solo/private. Joining is always an
+// explicit in-session act (mesh-header cycle → selector → START, or the
+// keymap toggle), and leaving is one refresh away.
+try { localStorage.setItem(MESH_PUBLIC_KEY, 'false') } catch { /* no storage — default is off anyway */ }
 
 @Injectable({ providedIn: 'root' })
 export class CoreAdapter {
@@ -19,7 +22,8 @@ export class CoreAdapter {
   // -------------------------------------------------
   // dependencies (lazy IoC resolution)
   // -------------------------------------------------
-  public readonly meshPublic = signal(readMeshPublic());
+  // Always boots false — the module-scope force-write above is the truth.
+  public readonly meshPublic = signal(false);
 
   // -------------------------------------------------
   // state
@@ -56,21 +60,11 @@ export class CoreAdapter {
     if (this.initialized) return
     this.initialized = true
 
-    await initializeRuntime({
-      logOpfs: false,
-      onMeshStateChange: enabled => {
-        // first visit: always start in solo mode, then sticky
-        if (readMeshPublic() === null) {
-          localStorage.setItem(MESH_PUBLIC_KEY, 'false')
-        }
-      },
-    })
+    await initializeRuntime({ logOpfs: false })
 
-    // push stored preference to the mesh after init
-    const stored = readMeshPublic()
-    if (stored !== null) {
-      const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
-      mesh?.setNetworkEnabled?.(stored, true)
-    }
+    // REFRESH → PRIVATE: every boot starts disconnected (the module-scope
+    // force-write is the flag's truth); membership never survives a reload.
+    const mesh = get('@diamondcoreprocessor.com/NostrMeshDrone') as any
+    mesh?.setNetworkEnabled?.(false, true)
   }
 }
