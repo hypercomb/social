@@ -606,7 +606,8 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   // Mirrors the pheromone reach carried on the sticky `tags:filter`
   // broadcast so the top-chrome glyph reads out the current scope
   // (page → children → global), exactly like the controls-bar tag-scope
-  // button at the bottom. Clicks open the pheromone panel.
+  // button at the bottom. Clicks TOGGLE the pheromone panel, and the
+  // panel's open-state (mirrored below) lights the button.
   readonly #tagScope = signal<'local' | 'children' | 'global'>('local')
   readonly pheromoneScopeIcon = computed(() => {
     switch (this.#tagScope()) {
@@ -615,6 +616,12 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       default: return 'center_focus_strong'
     }
   })
+  // Whether the pheromone panel is open — mirrored from the panel's own
+  // `tags:view-state` broadcast (like notes / feedback) so the header toggle
+  // lights and the click flips the right way regardless of how the panel was
+  // opened (bottom strip, `/tags`, or this button).
+  readonly #pheromonePanelOpen = signal(false)
+  readonly pheromonePanelOpen = this.#pheromonePanelOpen.asReadonly()
 
   // ── locked-attempt flash ──────────────────────────────
   //
@@ -667,6 +674,10 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // Share-feedback panel open/closed — lights the feedback toggle.
       EffectBus.on<{ open?: boolean }>('feedback:panel-state', ({ open }) => {
         this.#feedbackPanelOpen.set(!!open)
+      }),
+      // Pheromone panel open/closed — lights the pheromones toggle.
+      EffectBus.on<{ open?: boolean }>('tags:view-state', ({ open }) => {
+        this.#pheromonePanelOpen.set(!!open)
       }),
       // Pheromone reach — sticky broadcast, so the glyph hydrates on mount
       // and follows changes made from the panel or the bottom strip.
@@ -751,22 +762,17 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     EffectBus.emit('notes:panel', { visible: !this.#notesPanelOpen() })
   }
 
-  /** Open (or close) the /help reference sheet — the same effect the
-   *  `/help` slash behaviour emits; ShortcutSheetDrone owns the toggle. */
-  onHelpToggle(): void {
-    EffectBus.emit('keymap:invoke', { cmd: 'ui.shortcutSheet', binding: null, event: null })
-  }
-
   /** Flip the feedback panel — FeedbackViewerComponent listens and
    *  broadcasts state back via `feedback:panel-state`. */
   onFeedbackToggle(): void {
     EffectBus.emit('feedback:toggle', {})
   }
 
-  /** Open the pheromone panel — same effect the controls-bar tag-scope
-   *  button emits; the panel owns reach selection and filtering. */
+  /** Toggle the pheromone panel — open it when closed, close it when open.
+   *  The panel owns reach selection and filtering, and mirrors its open-state
+   *  back on `tags:view-state` so this button lights and flips in step. */
   onPheromonesToggle(): void {
-    EffectBus.emit('tags:view-open', undefined)
+    EffectBus.emit(this.#pheromonePanelOpen() ? 'tags:view-close' : 'tags:view-open', undefined)
   }
 
   /** Forward a view-toggle click to ViewBee, which flips the single GLOBAL

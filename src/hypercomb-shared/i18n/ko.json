@@ -1156,5 +1156,20 @@
   "tutorial.chip.practice": "연습 페이지",
   "tutorial.practice": "먼저 깨끗한 연습 페이지를 열어볼게요 — 여러분의 페이지는 전혀 바뀌지 않고, 끝나면 제가 정리할게요.",
   "tutorial.cleanup": "이건 연습 페이지였어요 — 제가 정리하는 걸 보세요. 이제 방법을 알았으니 아무 페이지에서 진짜를 만들어 보세요.",
-  "tutorial.name.sandbox": "꿀벌 튜토리얼"
+  "tutorial.name.sandbox": "꿀벌 튜토리얼",
+  "tags.expand": "이 페이지의 모든 페로몬 표시",
+  "tags.collapse": "한 줄로 접기",
+  "tags.removal.title": "{tag} 제거 중",
+  "tags.removal.hint": "이 태그가 있는 모든 타일이 화면에 표시됩니다. 제거할 것을 클릭하세요. 제거를 누르기 전까지 아무것도 바뀌지 않습니다.",
+  "tags.removal.empty": "아직 타일을 선택하지 않았습니다.",
+  "tags.removal.commit": "{count}개 타일에서 제거",
+  "tags.removal.commit.one": "1개 타일에서 제거",
+  "tags.removal.commit.zero": "제거",
+  "tags.removal.commit.hint": "준비된 제거 적용",
+  "tags.removal.all": "모두 표시됨",
+  "tags.removal.cancel": "취소",
+  "tags.removal.forget": "이 페로몬을 완전히 잊기",
+  "tags.removal.done.title": "{tag} 제거됨",
+  "tags.removal.done.message": "\"{tag}\"이(가) {count}개 타일에서 제거되었습니다.",
+  "tags.removal.done.message.one": "\"{tag}\"이(가) 1개 타일에서 제거되었습니다."
 }

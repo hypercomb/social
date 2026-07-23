@@ -1156,5 +1156,20 @@
   "tutorial.chip.practice": "Página de prática",
   "tutorial.practice": "Primeiro, deixa eu abrir uma página de prática limpa — nada nas suas páginas vai mudar, e eu arrumo tudo quando terminarmos.",
   "tutorial.cleanup": "Essa foi nossa página de prática — olha eu arrumando tudo. Construa de verdade em qualquer página: agora você sabe como.",
-  "tutorial.name.sandbox": "Tutorial Abelha"
+  "tutorial.name.sandbox": "Tutorial Abelha",
+  "tags.expand": "Mostrar todos os feromonios nesta pagina",
+  "tags.collapse": "Recolher para uma linha",
+  "tags.removal.title": "Removendo {tag}",
+  "tags.removal.hint": "Todos os ladrilhos que o carregam estao na tela. Clique nos que deseja remover. Nada muda ate pressionar Remover.",
+  "tags.removal.empty": "Nenhum ladrilho selecionado ainda.",
+  "tags.removal.commit": "Remover de {count} ladrilhos",
+  "tags.removal.commit.one": "Remover de 1 ladrilho",
+  "tags.removal.commit.zero": "Remover",
+  "tags.removal.commit.hint": "aplicar as remocoes preparadas",
+  "tags.removal.all": "Todos mostrados",
+  "tags.removal.cancel": "Cancelar",
+  "tags.removal.forget": "Esquecer completamente este feromonio",
+  "tags.removal.done.title": "{tag} removido",
+  "tags.removal.done.message": "\"{tag}\" removido de {count} ladrilhos.",
+  "tags.removal.done.message.one": "\"{tag}\" removido de 1 ladrilho."
 }

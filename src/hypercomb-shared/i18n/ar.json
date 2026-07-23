@@ -1156,5 +1156,20 @@
   "tutorial.chip.practice": "صفحة التمرين",
   "tutorial.practice": "أولًا، دعني أفتح صفحة تمرين نظيفة — لن يتغير شيء في صفحاتك، وسأرتّبها حين ننتهي.",
   "tutorial.cleanup": "كانت تلك صفحة التمرين — شاهدني وأنا أرتّبها. ابنِ ما تريد على أي صفحة: أنت تعرف الطريقة الآن.",
-  "tutorial.name.sandbox": "جولة النحلة"
+  "tutorial.name.sandbox": "جولة النحلة",
+  "tags.expand": "عرض جميع الفيرومونات في هذه الصفحة",
+  "tags.collapse": "طي إلى صف واحد",
+  "tags.removal.title": "إزالة {tag}",
+  "tags.removal.hint": "كل بلاطة تحمله تظهر على الشاشة. انقر على التي تريد إزالته منها. لا يتغير شيء حتى تضغط إزالة.",
+  "tags.removal.empty": "لم يتم اختيار بلاطات بعد.",
+  "tags.removal.commit": "إزالة من {count} بلاطات",
+  "tags.removal.commit.one": "إزالة من بلاطة واحدة",
+  "tags.removal.commit.zero": "إزالة",
+  "tags.removal.commit.hint": "تطبيق عمليات الإزالة المرحلية",
+  "tags.removal.all": "جميع المعروضة",
+  "tags.removal.cancel": "إلغاء",
+  "tags.removal.forget": "نسيان هذا الفيرومون نهائياً",
+  "tags.removal.done.title": "تمت إزالة {tag}",
+  "tags.removal.done.message": "تمت إزالة \"{tag}\" من {count} بلاطات.",
+  "tags.removal.done.message.one": "تمت إزالة \"{tag}\" من بلاطة واحدة."
 }

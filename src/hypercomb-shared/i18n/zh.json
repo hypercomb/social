@@ -1156,5 +1156,20 @@
   "tutorial.chip.practice": "练习页面",
   "tutorial.practice": "首先，让我打开一个空白练习页面 — 你的页面上不会有任何更改，教程结束后我会收拾干净。",
   "tutorial.cleanup": "这是我们的练习页面 — 看我把它收拾干净。你现在知道怎么做了，在任何页面上建造真正的东西吧。",
-  "tutorial.name.sandbox": "蜜蜂教程"
+  "tutorial.name.sandbox": "蜜蜂教程",
+  "tags.expand": "显示此页面上的所有信息素",
+  "tags.collapse": "折叠为一行",
+  "tags.removal.title": "移除 {tag}",
+  "tags.removal.hint": "带有此标签的每个磁贴都在屏幕上。点击要移除的磁贴。在按下移除之前，不会有任何变化。",
+  "tags.removal.empty": "尚未选择磁贴。",
+  "tags.removal.commit": "从 {count} 个磁贴移除",
+  "tags.removal.commit.one": "从 1 个磁贴移除",
+  "tags.removal.commit.zero": "移除",
+  "tags.removal.commit.hint": "应用已准备的移除",
+  "tags.removal.all": "全部已显示",
+  "tags.removal.cancel": "取消",
+  "tags.removal.forget": "完全忘记此信息素",
+  "tags.removal.done.title": "已移除 {tag}",
+  "tags.removal.done.message": "已将\"{tag}\"从 {count} 个磁贴移除。",
+  "tags.removal.done.message.one": "已将\"{tag}\"从 1 个磁贴移除。"
 }

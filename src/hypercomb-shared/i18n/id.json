@@ -1156,5 +1156,20 @@
   "tutorial.chip.practice": "Halaman latihan",
   "tutorial.practice": "Pertama, biar aku buka halaman latihan yang bersih — tidak ada yang berubah di halamanmu, dan aku akan merapikannya saat kita selesai.",
   "tutorial.cleanup": "Itu tadi halaman latihan kita — lihat aku merapikannya. Bangun yang sungguhan di halaman mana saja: kamu sudah tahu caranya sekarang.",
-  "tutorial.name.sandbox": "Tutorial Lebah"
+  "tutorial.name.sandbox": "Tutorial Lebah",
+  "tags.expand": "Tampilkan semua feromon di halaman ini",
+  "tags.collapse": "Lipat kembali ke satu baris",
+  "tags.removal.title": "Menghapus {tag}",
+  "tags.removal.hint": "Setiap ubin yang membawanya ada di layar. Klik yang ingin dihapus. Tidak ada yang berubah sampai Anda menekan Hapus.",
+  "tags.removal.empty": "Belum ada ubin yang dipilih.",
+  "tags.removal.commit": "Hapus dari {count} ubin",
+  "tags.removal.commit.one": "Hapus dari 1 ubin",
+  "tags.removal.commit.zero": "Hapus",
+  "tags.removal.commit.hint": "terapkan penghapusan yang disiapkan",
+  "tags.removal.all": "Semua ditampilkan",
+  "tags.removal.cancel": "Batal",
+  "tags.removal.forget": "Lupakan feromon ini sepenuhnya",
+  "tags.removal.done.title": "{tag} dihapus",
+  "tags.removal.done.message": "\"{tag}\" dihapus dari {count} ubin.",
+  "tags.removal.done.message.one": "\"{tag}\" dihapus dari 1 ubin."
 }

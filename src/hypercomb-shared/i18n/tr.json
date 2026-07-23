@@ -1156,5 +1156,20 @@
   "tutorial.chip.practice": "Alıştırma sayfası",
   "tutorial.practice": "Önce temiz bir alıştırma sayfası açayım — sayfalarındaki hiçbir şey değişmeyecek ve bitirince toplayacağım.",
   "tutorial.cleanup": "Bu bizim alıştırma sayfamızdı — onu toplayışımı izle. Gerçeğini istediğin sayfada inşa et: artık nasıl yapılacağını biliyorsun.",
-  "tutorial.name.sandbox": "Arı Eğitimi"
+  "tutorial.name.sandbox": "Arı Eğitimi",
+  "tags.expand": "Bu sayfadaki tum feromonlari goster",
+  "tags.collapse": "Tek satira katla",
+  "tags.removal.title": "{tag} kaldiriliyor",
+  "tags.removal.hint": "Bu etiketi tasiyan her karo ekranda. Kaldirmak istediklerinize tiklayin. Kaldir a basana kadar hicbir sey degismez.",
+  "tags.removal.empty": "Henuz karo secilmedi.",
+  "tags.removal.commit": "{count} karodan kaldir",
+  "tags.removal.commit.one": "1 karodan kaldir",
+  "tags.removal.commit.zero": "Kaldir",
+  "tags.removal.commit.hint": "hazirlanan kaldirmalari uygula",
+  "tags.removal.all": "Tumu gosteriliyor",
+  "tags.removal.cancel": "Iptal",
+  "tags.removal.forget": "Bu feromonu tamamen unut",
+  "tags.removal.done.title": "{tag} kaldirildi",
+  "tags.removal.done.message": "\"{tag}\" {count} karodan kaldirildi.",
+  "tags.removal.done.message.one": "\"{tag}\" 1 karodan kaldirildi."
 }

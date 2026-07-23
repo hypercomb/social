@@ -1156,5 +1156,20 @@
   "tutorial.chip.practice": "Page d'entraînement",
   "tutorial.practice": "D'abord, laissez-moi ouvrir une page d'entraînement vierge — rien sur vos pages ne changera, et je rangerai tout quand on aura fini.",
   "tutorial.cleanup": "C'était notre page d'entraînement — regardez-moi la ranger. Construisez en vrai sur n'importe quelle page : vous savez comment maintenant.",
-  "tutorial.name.sandbox": "Tutoriel Abeille"
+  "tutorial.name.sandbox": "Tutoriel Abeille",
+  "tags.expand": "Afficher toutes les pheromones sur cette page",
+  "tags.collapse": "Replier sur une ligne",
+  "tags.removal.title": "Suppression de {tag}",
+  "tags.removal.hint": "Toutes les tuiles portant ce tag sont a l ecran. Cliquez sur celles dont vous voulez le retirer. Rien ne change tant que vous n appuyez pas sur Supprimer.",
+  "tags.removal.empty": "Aucune tuile selectionnee pour l instant.",
+  "tags.removal.commit": "Retirer de {count} tuiles",
+  "tags.removal.commit.one": "Retirer de 1 tuile",
+  "tags.removal.commit.zero": "Supprimer",
+  "tags.removal.commit.hint": "appliquer les suppressions preparees",
+  "tags.removal.all": "Toutes affichees",
+  "tags.removal.cancel": "Annuler",
+  "tags.removal.forget": "Oublier completement cette pheromone",
+  "tags.removal.done.title": "{tag} supprime",
+  "tags.removal.done.message": "\"{tag}\" retire de {count} tuiles.",
+  "tags.removal.done.message.one": "\"{tag}\" retire de 1 tuile."
 }

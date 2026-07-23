@@ -188,9 +188,6 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Aria-label / tooltip for the notes toggle. */
   readonly notesLabel = input<string>('notes')
 
-  /** Aria-label / tooltip for the help toggle. */
-  readonly helpLabel = input<string>('help')
-
   /** Whether the feedback panel is currently open — lights the feedback toggle. */
   readonly feedbackPanelOpen = input<boolean>(false)
 
@@ -201,6 +198,9 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    *  children / global. Same vocabulary as the controls-bar tag-scope
    *  button at the bottom; the parent owns the `tags:filter` mirror. */
   readonly pheromoneScopeIcon = input<string>('center_focus_strong')
+
+  /** Whether the pheromone panel is currently open — lights the pheromones toggle. */
+  readonly pheromonePanelOpen = input<boolean>(false)
 
   /** Aria-label / tooltip for the pheromones button. */
   readonly pheromonesLabel = input<string>('pheromones')
@@ -267,16 +267,13 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
    *  via the `notes:panel` command channel — the shell stays presentational. */
   readonly notesToggle = output<void>()
 
-  /** Emitted when the help toggle is clicked. Parent opens the /help
-   *  reference sheet — the shell stays presentational. */
-  readonly helpToggle = output<void>()
-
   /** Emitted when the feedback toggle is clicked. Parent flips the
    *  share-feedback panel — the shell stays presentational. */
   readonly feedbackToggle = output<void>()
 
-  /** Emitted when the pheromones button is clicked. Parent opens the
-   *  pheromone panel (`tags:view-open`) — the shell stays presentational. */
+  /** Emitted when the pheromones button is clicked. Parent toggles the
+   *  pheromone panel (`tags:view-open` / `tags:view-close`) — the shell
+   *  stays presentational. */
   readonly pheromonesToggle = output<void>()
 
   /**

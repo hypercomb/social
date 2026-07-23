@@ -1156,5 +1156,20 @@
   "tutorial.chip.practice": "Übungsseite",
   "tutorial.practice": "Zuerst öffne ich eine leere Übungsseite — an deinen Seiten ändert sich nichts, und ich räume auf, wenn wir fertig sind.",
   "tutorial.cleanup": "Das war unsere Übungsseite — schau, wie ich aufräume. Baue das Richtige auf jeder beliebigen Seite: du weißt jetzt wie.",
-  "tutorial.name.sandbox": "Bienen-Tutorial"
+  "tutorial.name.sandbox": "Bienen-Tutorial",
+  "tags.expand": "Alle Pheromone auf dieser Seite anzeigen",
+  "tags.collapse": "Auf eine Zeile zusammenfalten",
+  "tags.removal.title": "{tag} entfernen",
+  "tags.removal.hint": "Jede Kachel mit diesem Tag ist auf dem Bildschirm. Klicke die an, von denen es entfernt werden soll. Nichts aendert sich, bis du Entfernen drueckst.",
+  "tags.removal.empty": "Noch keine Kacheln ausgewaehlt.",
+  "tags.removal.commit": "Von {count} Kacheln entfernen",
+  "tags.removal.commit.one": "Von 1 Kachel entfernen",
+  "tags.removal.commit.zero": "Entfernen",
+  "tags.removal.commit.hint": "die vorgemerkten Entfernungen anwenden",
+  "tags.removal.all": "Alle angezeigt",
+  "tags.removal.cancel": "Abbrechen",
+  "tags.removal.forget": "Dieses Pheromon vollstaendig vergessen",
+  "tags.removal.done.title": "{tag} entfernt",
+  "tags.removal.done.message": "\"{tag}\" von {count} Kacheln entfernt.",
+  "tags.removal.done.message.one": "\"{tag}\" von 1 Kachel entfernt."
 }

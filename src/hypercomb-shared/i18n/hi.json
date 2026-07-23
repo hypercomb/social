@@ -1156,5 +1156,20 @@
   "tutorial.chip.practice": "अभ्यास पृष्ठ",
   "tutorial.practice": "पहले मुझे एक साफ़ अभ्यास पृष्ठ खोलने दीजिए — आपके पृष्ठों पर कुछ नहीं बदलेगा, और काम होने पर मैं इसे साफ़ कर दूँगी।",
   "tutorial.cleanup": "यह हमारा अभ्यास पृष्ठ था — देखिए मैं इसे साफ़ कर रही हूँ। असली चीज़ किसी भी पृष्ठ पर बनाएँ: अब आप जानते हैं कैसे।",
-  "tutorial.name.sandbox": "मधुमक्खी ट्यूटोरियल"
+  "tutorial.name.sandbox": "मधुमक्खी ट्यूटोरियल",
+  "tags.expand": "इस पेज पर सभी फेरोमोन दिखाएँ",
+  "tags.collapse": "एक पंक्ति में सिमटाएँ",
+  "tags.removal.title": "{tag} हटाना",
+  "tags.removal.hint": "इसे ले जाने वाली हर टाइल स्क्रीन पर है। जिनसे हटाना है उन पर क्लिक करें। जब तक हटाएँ नहीं दबाते, कुछ नहीं बदलता।",
+  "tags.removal.empty": "अभी तक कोई टाइल नहीं चुनी गई।",
+  "tags.removal.commit": "{count} टाइलों से हटाएँ",
+  "tags.removal.commit.one": "1 टाइल से हटाएँ",
+  "tags.removal.commit.zero": "हटाएँ",
+  "tags.removal.commit.hint": "चरणबद्ध हटावों को लागू करें",
+  "tags.removal.all": "सभी दिखाए गए",
+  "tags.removal.cancel": "रद्द करें",
+  "tags.removal.forget": "इस फेरोमोन को पूरी तरह भूलें",
+  "tags.removal.done.title": "{tag} हटा दिया",
+  "tags.removal.done.message": "\"{tag}\" {count} टाइलों से हटाया गया।",
+  "tags.removal.done.message.one": "\"{tag}\" 1 टाइल से हटाया गया।"
 }

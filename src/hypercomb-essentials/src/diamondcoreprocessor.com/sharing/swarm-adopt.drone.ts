@@ -449,20 +449,25 @@ export class SwarmAdoptDrone extends Drone {
       EffectBus.emit('tile:action', { action: 'features', label: branch.label, segments: [...branch.at, branch.label] })
       return 'code-routed'
     }
-    // Content-only → immediate in-place fold; the render-time gate is the trust
-    // surface (a foreign page is reviewed before it mounts).
-    const res = await this.#commitBranch(branch.layerSig, branch.at, branch.domain, 'fold')
+    // Content-only → pull the publisher's LATEST and fold it in place. ADOPT
+    // MEANS GET THE LATEST: commit with `sync` semantics so a re-adopt re-homes
+    // the publisher's CURRENT subtree over a stale local copy and SAVES a fresh
+    // revision — instead of the old idempotent `exists` no-op that re-pulled
+    // nothing. An unchanged branch still dedups to no new marker (commitLayer
+    // byte-dedup), so re-adopting settled content is free. The render-time gate
+    // stays the trust surface (a foreign page is reviewed before it mounts).
+    const res = await this.#commitBranch(branch.layerSig, branch.at, branch.domain, 'sync')
     if (res === 'committed') {
-      // Folding may add feature decorations without a per-decoration event —
-      // forget the label so the re-render re-walks the decorations slot (keeps
-      // the features icon's visual-bee gate honest) and bust the tile's per-cell
-      // caches so the folded image/border/tags show.
+      // The pull may add/refresh feature decorations without a per-decoration
+      // event — forget the label so the re-render re-walks the decorations slot
+      // (keeps the features icon's visual-bee gate honest) and bust the tile's
+      // per-cell caches so the publisher's latest image/border/tags show.
       forgetDecorationLabel(branch.label)
       EffectBus.emit('tile:saved', { cell: branch.label })
     }
-    // Adopt SHOWS THE BEHAVIORS: after the fold lands (or when the tile is
-    // already here — re-clicking adopt is how you get back to this view), open
-    // the Beehaviors panel for the tile. The tiles are IN; the panel is where
+    // Adopt SHOWS THE BEHAVIORS: after the pull lands (re-clicking adopt
+    // re-pulls the publisher's latest and returns you to this view), open the
+    // Beehaviors panel for the tile. The tiles are IN; the panel is where
     // the participant sees what they carry and toggles it — a community-
     // blocked feature reads "needs your OK" with its allow override right
     // there.
@@ -860,12 +865,13 @@ export class SwarmAdoptDrone extends Drone {
     }, SwarmAdoptDrone.#FOLD_RETRY_DELAYS_MS[attempt])
   }
 
-  // mode `fold` (default, adopt / DCP-config fold): idempotent — a tile
-  // already present at (name, at) is left untouched, and the props-index
-  // seed is fill-if-empty (never disturbs an image already on a tile).
-  // mode `sync` (the sync icon): the explicit "pull their latest" gesture —
-  // re-homes the publisher's CURRENT subtree OVER the stale local copy and
-  // overwrites the props index so their refreshed image wins.
+  // mode `fold` (default, DCP-config fold): idempotent — a tile already
+  // present at (name, at) is left untouched, and the props-index seed is
+  // fill-if-empty (never disturbs an image already on a tile).
+  // mode `sync` (the sync icon AND the explicit adopt gesture): the "pull
+  // their latest" gesture — re-homes the publisher's CURRENT subtree OVER the
+  // stale local copy and overwrites the props index so their refreshed image
+  // wins. ADOPT MEANS GET THE LATEST, so an explicit adopt rides this path too.
   #doCommitBranch = async (
     branchSig: string,
     atSegments: readonly string[],

@@ -124,6 +124,8 @@ export class TagsViewerComponent implements OnDestroy {
       void this.#registry()?.ensureLoaded().then(() => this.#registryVersion.update(v => v + 1))
       this.#registryVersion.update(v => v + 1)
       this.visible.set(true)
+      // Broadcast open-state (last-value replayed) so the header toggle lights.
+      EffectBus.emit('tags:view-state', { open: true })
     }))
     this.#cleanups.push(EffectBus.on('tags:view-close', () => this.close()))
 
@@ -271,6 +273,7 @@ export class TagsViewerComponent implements OnDestroy {
   close(): void {
     if (this.#removalTag()) this.cancelRemoval()
     this.visible.set(false)
+    EffectBus.emit('tags:view-state', { open: false })
   }
 
   onKey(event: KeyboardEvent): void {

@@ -1156,5 +1156,20 @@
   "tutorial.chip.practice": "Pagina di prova",
   "tutorial.practice": "Prima, lascia che apra una pagina di prova pulita — niente nelle tue pagine cambierà, e la rimuoverò quando avremo finito.",
   "tutorial.cleanup": "Quella era la nostra pagina di prova — guardami mentre la rimuovo. Costruisci sul serio su qualsiasi pagina: ora sai come.",
-  "tutorial.name.sandbox": "Tutorial Ape"
+  "tutorial.name.sandbox": "Tutorial Ape",
+  "tags.expand": "Mostra tutti i feromoni in questa pagina",
+  "tags.collapse": "Ripiega in una riga",
+  "tags.removal.title": "Rimozione di {tag}",
+  "tags.removal.hint": "Ogni tessera che lo porta e sullo schermo. Clicca quelle da cui vuoi toglierlo. Nulla cambia finche non premi Rimuovi.",
+  "tags.removal.empty": "Nessuna tessera selezionata.",
+  "tags.removal.commit": "Rimuovi da {count} tessere",
+  "tags.removal.commit.one": "Rimuovi da 1 tessera",
+  "tags.removal.commit.zero": "Rimuovi",
+  "tags.removal.commit.hint": "applica le rimozioni preparate",
+  "tags.removal.all": "Tutte mostrate",
+  "tags.removal.cancel": "Annulla",
+  "tags.removal.forget": "Dimentica completamente questo feromone",
+  "tags.removal.done.title": "{tag} rimosso",
+  "tags.removal.done.message": "\"{tag}\" rimosso da {count} tessere.",
+  "tags.removal.done.message.one": "\"{tag}\" rimosso da 1 tessera."
 }

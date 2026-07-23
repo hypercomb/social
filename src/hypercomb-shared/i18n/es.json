@@ -1156,5 +1156,20 @@
   "tutorial.chip.practice": "Página de práctica",
   "tutorial.practice": "Primero déjame abrir una página de práctica limpia — nada en tus páginas cambiará, y la ordenaré cuando terminemos.",
   "tutorial.cleanup": "Esa fue nuestra página de práctica — mira cómo la ordeno. Construye lo real en cualquier página: ya sabes cómo.",
-  "tutorial.name.sandbox": "Tutorial Abeja"
+  "tutorial.name.sandbox": "Tutorial Abeja",
+  "tags.expand": "Mostrar todas las feromonas en esta pagina",
+  "tags.collapse": "Contraer a una fila",
+  "tags.removal.title": "Quitando {tag}",
+  "tags.removal.hint": "Todos los mosaicos que la llevan estan en pantalla. Haz clic en los que quieras quitarla. Nada cambia hasta que pulses Quitar.",
+  "tags.removal.empty": "Aun no se han seleccionado mosaicos.",
+  "tags.removal.commit": "Quitar de {count} mosaicos",
+  "tags.removal.commit.one": "Quitar de 1 mosaico",
+  "tags.removal.commit.zero": "Quitar",
+  "tags.removal.commit.hint": "aplicar las eliminaciones preparadas",
+  "tags.removal.all": "Todos mostrados",
+  "tags.removal.cancel": "Cancelar",
+  "tags.removal.forget": "Olvidar esta feromona por completo",
+  "tags.removal.done.title": "{tag} quitada",
+  "tags.removal.done.message": "\"{tag}\" quitada de {count} mosaicos.",
+  "tags.removal.done.message.one": "\"{tag}\" quitada de 1 mosaico."
 }

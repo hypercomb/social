@@ -127,6 +127,23 @@
         <span class="mat-sym" aria-hidden="true">sticky_note_2</span>
       </button>
 
+      <!-- pheromones — sits directly right of notes; toggles the pheromone
+           panel from the top chrome and lights while it is open. The glyph
+           reads out the current reach (page → children → global), the same
+           vocabulary as the controls-bar tag-scope button, which stays at the
+           bottom as the second opener. -->
+      <button
+        class="pheromone-toggle-btn"
+        [class.on]="pheromonePanelOpen()"
+        type="button"
+        (mousedown)="$event.preventDefault(); pheromonesToggle.emit()"
+        [attr.aria-label]="pheromonesLabel()"
+        [attr.aria-pressed]="pheromonePanelOpen()"
+        [title]="pheromonesLabel()"
+      >
+        <span class="mat-sym" aria-hidden="true">{{ pheromoneScopeIcon() }}</span>
+      </button>
+
       <!-- feedback — opens the share-feedback panel (replaces the old
            bottom-right FAB that sat on top of undo/redo) -->
       <button
@@ -139,31 +156,6 @@
         [title]="feedbackLabel()"
       >
         <span class="mat-sym" aria-hidden="true">forum</span>
-      </button>
-
-      <!-- help — opens the /help reference sheet (momentary, no lit state) -->
-      <button
-        class="help-toggle-btn"
-        type="button"
-        (mousedown)="$event.preventDefault(); helpToggle.emit()"
-        [attr.aria-label]="helpLabel()"
-        [title]="helpLabel()"
-      >
-        <span class="mat-sym" aria-hidden="true">help</span>
-      </button>
-
-      <!-- pheromones — opens the pheromone panel from the top chrome. The
-           glyph reads out the current reach (page → children → global),
-           the same vocabulary as the controls-bar tag-scope button, which
-           stays at the bottom as the second opener. -->
-      <button
-        class="pheromone-toggle-btn"
-        type="button"
-        (mousedown)="$event.preventDefault(); pheromonesToggle.emit()"
-        [attr.aria-label]="pheromonesLabel()"
-        [title]="pheromonesLabel()"
-      >
-        <span class="mat-sym" aria-hidden="true">{{ pheromoneScopeIcon() }}</span>
       </button>
 
     </div>

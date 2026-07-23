@@ -1156,5 +1156,20 @@
   "tutorial.chip.practice": "Тренировочная страница",
   "tutorial.practice": "Сначала я открою чистую тренировочную страницу — на твоих страницах ничего не изменится, и я уберу её, когда закончим.",
   "tutorial.cleanup": "Это была наша тренировочная страница — смотри, как я её убираю. Строй по-настоящему на любой странице: теперь ты знаешь как.",
-  "tutorial.name.sandbox": "Обучение с пчёлкой"
+  "tutorial.name.sandbox": "Обучение с пчёлкой",
+  "tags.expand": "Показать все феромоны на этой странице",
+  "tags.collapse": "Свернуть в одну строку",
+  "tags.removal.title": "Удаление {tag}",
+  "tags.removal.hint": "Все плитки с этим тегом на экране. Нажмите на те, с которых хотите его убрать. Ничего не изменится, пока вы не нажмете Удалить.",
+  "tags.removal.empty": "Плитки еще не выбраны.",
+  "tags.removal.commit": "Убрать с {count} плиток",
+  "tags.removal.commit.one": "Убрать с 1 плитки",
+  "tags.removal.commit.zero": "Удалить",
+  "tags.removal.commit.hint": "применить подготовленные удаления",
+  "tags.removal.all": "Все показаны",
+  "tags.removal.cancel": "Отмена",
+  "tags.removal.forget": "Полностью забыть этот феромон",
+  "tags.removal.done.title": "{tag} удален",
+  "tags.removal.done.message": "\"{tag}\" убран с {count} плиток.",
+  "tags.removal.done.message.one": "\"{tag}\" убран с 1 плитки."
 }
