@@ -4850,10 +4850,22 @@ export class ShowCellDrone extends Drone {
     // next render runs the full path (lists local cells, queries the
     // registry, includes peer additions, re-seeds the slot machine).
     this.onEffect('swarm:peers-changed', () => {
+      // A newly-published (or retracted) peer tile must repaint without a
+      // reload. The render reads its cell-name list from the SLOT STATE
+      // MACHINE (#slots), seeded once and reused across passes — so clearing
+      // only the layer/source caches wasn't enough: requestRender re-read
+      // the stale slot snapshot and the new peer tile never appeared (and a
+      // retracted one lingered) — the "can't adopt a newly-offered swarm
+      // tile" bug. This mirrors the proven `fs:changed` handler EXACTLY,
+      // whose `#slots.clear()` is the piece that forces a fresh seed.
+      // #layerCellsCache/#sourceEntriesCache are cleared unconditionally
+      // (not keyed by the often-empty renderedLocationKey) so the next pass
+      // takes the full path and re-resolves peers; the emit is debounced
+      // ~150ms upstream, so this is one rebuild per burst.
+      this.#layerCellsCache.clear()
+      this.#sourceEntriesCache.clear()
       this.renderedCellsKey = ''
-      const locationKey = this.renderedLocationKey
-      this.renderedLocationKey = ''
-      if (locationKey) this.#layerCellsCache.delete(locationKey)
+      this.#slots.clear()
       this.requestRender()
     })
 
