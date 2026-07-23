@@ -723,7 +723,8 @@ export class HomeComponent implements OnDestroy {
       // If neither serves it (browser-published, no endpoint), the resolver
       // falls back to polling local OPFS and ultimately an undelivered egg.
       const byteSource = (devDefaultBootstrap()?.byteSource || sourceDomainScoped || '').trim()
-      void this.#resolveBranchSection(branchSig, branchSection.domain, byteSource)
+      // adoptIntent: the participant chose THIS branch (the #branch handoff).
+      void this.#resolveBranchSection(branchSig, branchSection.domain, byteSource, true)
 
       // Scroll once Angular renders the new section element.
       setTimeout(() => this.#scrollSectionIntoView(branchSection.domain), 100)
@@ -1160,7 +1161,14 @@ export class HomeComponent implements OnDestroy {
    *  populate the section's items. Bounded retries — if the walk doesn't
    *  complete in time the section surfaces an error and the user can
    *  decide whether to retry the adoption. */
-  async #resolveBranchSection(branchSig: string, sectionDomain: string, byteSource?: string): Promise<void> {
+  /** `adoptIntent` — true ONLY when resolution was triggered by the
+   *  participant's own gesture on THIS branch (the #branch adopt handoff,
+   *  clicking an egg). A lineage refresh / package-update hydration passes
+   *  false: those resolve branches NOBODY adopted, and the content-only
+   *  auto-enable in #fillBranchSection must not fire for them — that is how
+   *  a package update folded the publisher's whole content tree into a
+   *  hive uninvited (every never-touched branch auto-enabled, Done folded). */
+  async #resolveBranchSection(branchSig: string, sectionDomain: string, byteSource?: string, adoptIntent = false): Promise<void> {
     // BYTE PATH — "send the signature → fetch from the domain → the tree
     // fills." If we know where the bytes live, FETCH the branch (layer + refs)
     // from that domain first, so the subtree appears rather than waiting for
@@ -1169,7 +1177,7 @@ export class HomeComponent implements OnDestroy {
     if (byteSource) {
       try {
         const root = await this.#resolver.resolveBranchFromDomain(byteSource, branchSig, sectionDomain)
-        if (root) { this.#fillBranchSection(branchSig, sectionDomain, root); return }
+        if (root) { this.#fillBranchSection(branchSig, sectionDomain, root, adoptIntent); return }
       } catch (e) { console.warn('[home] branch fetch from domain failed', e) }
     }
 
@@ -1179,7 +1187,7 @@ export class HomeComponent implements OnDestroy {
     for (let i = 0; i < MAX_RETRIES; i++) {
       try {
         const root = await this.#resolver.resolveFromLocal(branchSig, sectionDomain)
-        if (root) { this.#fillBranchSection(branchSig, sectionDomain, root); return }
+        if (root) { this.#fillBranchSection(branchSig, sectionDomain, root, adoptIntent); return }
       } catch { /* swallow + retry — bytes may not have landed yet */ }
       await new Promise(r => setTimeout(r, 200))
     }
@@ -1222,7 +1230,7 @@ export class HomeComponent implements OnDestroy {
    *  features are visible the moment it fills (whether the bytes came from a
    *  domain fetch or local OPFS). Preserves visual-context nodes; scrolls to
    *  it; records cross-domain deps. */
-  #fillBranchSection(branchSig: string, sectionDomain: string, root: TreeNode): void {
+  #fillBranchSection(branchSig: string, sectionDomain: string, root: TreeNode, adoptIntent = false): void {
     this.sections.update(secs => secs.map(s => {
       if (s.rootSig !== branchSig) return s
       // Rename the resolved root to the TILE name the participant adopted
@@ -1254,12 +1262,20 @@ export class HomeComponent implements OnDestroy {
     // nothing until the participant finds the master switch. Branches that
     // carry CODE keep the OFF default: their first enable goes through the
     // activation trust gate (#32), which auto-enable must not bypass.
+    //
+    // GATED ON adoptIntent: only the participant's own gesture on this
+    // branch qualifies. Lineage-refresh / package-update hydration resolves
+    // branches nobody adopted — auto-enabling those folded the publisher's
+    // entire content tree into the hive on the next Done. New content
+    // arriving via update stays OFF (offered, opt-in); already-ENABLED
+    // branches still merge updates through the portal diff (new root sig =
+    // add, old = remove — union re-fold).
     const subtreeHasCode = (n: TreeNode): boolean =>
       isCodeKind(n.kind) || (n.children ?? []).some(subtreeHasCode)
     // Explicit participant OFF is sacred — a re-resolve/refill of a branch
     // the participant deliberately disabled must NOT flip it back on. Only
     // the never-touched default qualifies for auto-enable.
-    if (!subtreeHasCode(root) && this.#toggleState.stored(root.id) !== false) {
+    if (adoptIntent && !subtreeHasCode(root) && this.#toggleState.stored(root.id) !== false) {
       this.#toggleState.setEnabled(root.id, true)
       void this.#domainStorage.setFeatureEnabled(branchSig, true)
         .then(() => this.#domainStorage.recomputeLogical())
@@ -2087,7 +2103,9 @@ export class HomeComponent implements OnDestroy {
       this.sections.update(secs => secs.map(s =>
         s.rootSig === section.rootSig ? { ...s, loading: true, installStatus: 'Re-fetching…' } : s
       ))
-      void this.#resolveBranchSection(section.rootSig, section.domain)
+      // adoptIntent: the participant clicked this egg to retry delivery —
+      // a direct gesture on the branch, completing their original adopt.
+      void this.#resolveBranchSection(section.rootSig, section.domain, undefined, true)
     }
   }
 
