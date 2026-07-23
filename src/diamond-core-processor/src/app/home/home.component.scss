@@ -261,6 +261,38 @@ dcp-command-line {
   margin-bottom: 16px;
 }
 
+/* PRIMARY filter axis — content vs functionality. A sharp segmented pair,
+   same language as the adopt control; the kind icons beside it are the fine
+   grain that only exists within Features. */
+.scope-control {
+  display: inline-flex;
+  height: 34px;
+  border: 1px solid var(--dcp-line-2);
+}
+
+.scope-seg {
+  padding: 0 12px;
+  font-family: var(--dcp-ui);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--dcp-ink-3);
+  background: none;
+  border: none;
+  border-left: 1px solid var(--dcp-line-2);
+  cursor: pointer;
+  transition: color 0.12s ease, background 0.12s ease;
+
+  &:first-child { border-left: none; }
+  &:hover { color: var(--dcp-ink); background: var(--dcp-hover); }
+
+  &.on {
+    color: var(--dcp-on-accent);
+    background: var(--dcp-accent);
+  }
+}
+
 .tbtn {
   display: grid;
   place-items: center;

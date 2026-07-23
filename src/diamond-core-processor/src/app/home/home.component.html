@@ -28,24 +28,41 @@
         </div>
       </div>
       <div class="top-bar-right">
+        <!-- PRIMARY axis: content vs functionality. Spelled out in words, not
+             icons, so it reads as the coarse choice the kind icons sit beneath. -->
+        <div class="scope-control" role="group" [attr.aria-label]="'dcp.scope' | t">
+          <button type="button" class="scope-seg"
+            [class.on]="isScopeActive('tiles')"
+            (click)="setScope('tiles')"
+            [title]="'dcp.scope-tiles-hint' | t">{{ 'dcp.scope-tiles' | t }}</button>
+          <button type="button" class="scope-seg"
+            [class.on]="isScopeActive('features')"
+            (click)="setScope('features')"
+            [title]="'dcp.scope-features-hint' | t">{{ 'dcp.scope-features' | t }}</button>
+        </div>
+
+        <!-- Fine grain — only meaningful inside the features scope, so it only
+             exists there. Nothing to dim until a narrowing is actually on. -->
+        @if (isScopeActive('features')) {
+          @for (fk of filterKinds; track fk.key) {
+            <button class="tbtn"
+              [class.on]="isKindActive(fk.key)"
+              [class.dim]="kindFilters().size > 0 && !isKindActive(fk.key)"
+              (click)="toggleKindFilter(fk.key)"
+              [title]="fk.titleKey | t">
+              <dcp-diamond [kind]="fk.diamond" />
+            </button>
+          }
+        }
+
+        <span class="vsep"></span>
+
         <button class="tbtn"
           [class.on]="layersCollapsed()"
           (click)="toggleCollapseAllLayers()"
           [title]="(layersCollapsed() ? 'dcp.expand-layers' : 'dcp.collapse-layers') | t">
           <dcp-diamond [kind]="'layer'" />
         </button>
-
-        <span class="vsep"></span>
-
-        @for (fk of filterKinds; track fk.key) {
-          <button class="tbtn"
-            [class.on]="isKindActive(fk.key)"
-            [class.dim]="isFiltering() && !isKindActive(fk.key)"
-            (click)="toggleKindFilter(fk.key)"
-            [title]="fk.titleKey | t">
-            <dcp-diamond [kind]="fk.diamond" />
-          </button>
-        }
 
         <span class="vsep"></span>
 

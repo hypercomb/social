@@ -161,6 +161,17 @@ export class HomeComponent implements OnDestroy {
   readonly inspectBee = signal<string | null>(null)
   readonly inspectKind = signal<TreeNodeKind>('bee')
   readonly kindFilters = signal<Set<string>>(new Set())
+
+  /** PRIMARY filter axis: content vs functionality.
+   *    'tiles'    — only what you'd see on the hive: layers/domains, pruned
+   *                 but NEVER flattened (with tiles the hierarchy IS the
+   *                 content, so collapsing it destroys the thing you asked for)
+   *    'features' — only functionality (isCodeKind: bee/drone/worker/
+   *                 dependency), flattened to a scan list; `kindFilters`
+   *                 narrows within it
+   *    'all'      — no scope filter
+   *  A coarse grouping of kinds that already exist — not a new concept. */
+  readonly filterScope = signal<'all' | 'tiles' | 'features'>('all')
   readonly layersCollapsed = signal(false)
   // The active deploy revision per package domain (from active.json), keyed by
   // domainName. domainGrouped reads it to pick which version renders as the
@@ -514,6 +525,7 @@ export class HomeComponent implements OnDestroy {
   readonly filteredSections = computed(() => {
     const term = this.searchTerm().toLowerCase().trim()
     const active = this.kindFilters()
+    const scope = this.filterScope()
     let sections = this.sections()
 
     if (term) {
@@ -522,11 +534,20 @@ export class HomeComponent implements OnDestroy {
         .filter(s => s.items.length > 0)
     }
 
-    if (active.size > 0) {
+    if (scope === 'tiles') {
+      // Content keeps its shape — prune, never flatten.
+      sections = sections
+        .map(s => ({ ...s, items: this.#pruneToTiles(s.items) }))
+        .filter(s => s.items.length > 0)
+    } else if (scope === 'features' || active.size > 0) {
       const kindSet = new Set<TreeNodeKind>()
       if (active.has('bee')) { kindSet.add('bee'); kindSet.add('drone') }
       if (active.has('worker')) kindSet.add('worker')
       if (active.has('dependency')) kindSet.add('dependency')
+      // Whole-scope Features = every code kind (isCodeKind's set).
+      if (kindSet.size === 0) {
+        kindSet.add('bee'); kindSet.add('drone'); kindSet.add('worker'); kindSet.add('dependency')
+      }
       sections = sections
         .map(s => ({ ...s, items: this.#flattenByKind(s.items, kindSet) }))
         .filter(s => s.items.length > 0)
@@ -1366,12 +1387,26 @@ export class HomeComponent implements OnDestroy {
     this.receivedLayerSigs.set(sigs)
   }
 
-  // kind filter toggles
+  /** Primary axis. Picking the active scope again clears it. Leaving
+   *  'features' drops the fine-grain narrowing with it — those kind buttons
+   *  only exist inside that scope. */
+  setScope(scope: 'tiles' | 'features'): void {
+    const next = this.filterScope() === scope ? 'all' : scope
+    this.filterScope.set(next)
+    if (next !== 'features') this.kindFilters.set(new Set())
+  }
+
+  isScopeActive(scope: 'tiles' | 'features'): boolean {
+    return this.filterScope() === scope
+  }
+
+  // kind filter toggles — the fine grain WITHIN the features scope
   toggleKindFilter(key: string): void {
     const next = new Set(this.kindFilters())
     if (next.has(key)) next.delete(key)
     else next.add(key)
     this.kindFilters.set(next)
+    if (next.size > 0) this.filterScope.set('features')
   }
 
   isKindActive(key: string): boolean {
@@ -1379,7 +1414,7 @@ export class HomeComponent implements OnDestroy {
   }
 
   isFiltering(): boolean {
-    return this.kindFilters().size > 0
+    return this.filterScope() !== 'all' || this.kindFilters().size > 0
   }
 
   // command line bridge
@@ -1389,6 +1424,7 @@ export class HomeComponent implements OnDestroy {
 
   onKindFilter(kinds: Set<string>): void {
     this.kindFilters.set(kinds)
+    if (kinds.size > 0) this.filterScope.set('features')
   }
 
   onSelectedNames(names: string[]): void {
@@ -1460,6 +1496,7 @@ export class HomeComponent implements OnDestroy {
     if (remaining.length === 0) {
       this.searchTerm.set('')
       this.kindFilters.set(new Set())
+      this.filterScope.set('all')
       this.layersCollapsed.set(false)
     }
 
@@ -2783,13 +2820,17 @@ export class HomeComponent implements OnDestroy {
     return result
   }
 
-  #filterByKind(nodes: TreeNode[], active: Set<TreeNodeKind>): TreeNode[] {
+  /** Prune a tree to CONTENT, keeping its shape. Code nodes are dropped at
+   *  every level; everything else survives with its children pruned the same
+   *  way. Deliberately NOT the flatten the feature filter uses: with tiles the
+   *  hierarchy is the content, so flattening would destroy what was asked for.
+   *  A tile with no tile children is still a tile, so it is kept as a leaf. */
+  #pruneToTiles(nodes: TreeNode[]): TreeNode[] {
     const result: TreeNode[] = []
     for (const node of nodes) {
-      const filteredChildren = this.#filterByKind(node.children, active)
-      if (active.has(node.kind) || filteredChildren.length > 0) {
-        result.push({ ...node, children: filteredChildren.length ? filteredChildren : node.children })
-      }
+      if (isCodeKind(node.kind)) continue
+      const children = this.#pruneToTiles(node.children)
+      result.push({ ...node, children, expanded: children.length > 0 ? true : node.expanded })
     }
     return result
   }
