@@ -117,9 +117,17 @@ export class MeshHeaderComponent implements OnInit, OnDestroy, OnChanges {
 
   ngOnChanges(changes: SimpleChanges): void {
     const mp = changes['meshPublic']
-    // Left the swarm → drop straight back to secure/private. Joining keeps the
-    // current stage so the preview (and its scope controls) carry into the swarm.
-    if (mp && !mp.firstChange && !mp.currentValue) this.#setStage(STAGE_PRIVATE)
+    if (!mp || mp.firstChange) return
+    // Either transition drops the WORLD/privacy-selector preview. The WORLD
+    // stage is PREP — "choose what to share" BEFORE joining; once meshPublic
+    // flips (joined OR left) the prep is over, so world mode must go off and
+    // the actual swarm view (peer tiles + adopt affordances) takes over.
+    // (Previously joining kept stage >= WORLD to carry the scope controls in,
+    // which stranded the participant in the privacy selector inside the
+    // swarm instead of switching to the live swarm — reversed here.) Both
+    // land on PRIVATE: on JOIN the glyph still reads 'groups' because
+    // meshPublic wins that check; on LEAVE it returns to the secure lock.
+    this.#setStage(STAGE_PRIVATE)
   }
 
   ngOnDestroy(): void {
