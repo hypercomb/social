@@ -26,7 +26,7 @@ export interface RevisionRow {
       <div class="revision-list">
         <button class="toggle" (click)="expanded = !expanded">
           {{ 'dcp.revisions' | t }} ({{ revisions().length }})
-          <span class="chevron" [class.open]="expanded">&#9654;</span>
+          <svg class="chevron" [class.open]="expanded" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
         </button>
 
         @if (expanded) {
@@ -70,7 +70,7 @@ export interface RevisionRow {
     }
     .toggle:hover { color: var(--dcp-ink-2); }
 
-    .chevron { font-size: 8px; transition: transform 0.15s; }
+    .chevron { width: 11px; height: 11px; flex-shrink: 0; transition: transform 0.15s ease; }
     .chevron.open { transform: rotate(90deg); }
 
     .items {
@@ -93,7 +93,7 @@ export interface RevisionRow {
       cursor: pointer;
       text-align: left;
     }
-    .revision-item:hover { background: var(--dcp-hover, rgba(126,182,214,0.08)); }
+    .revision-item:hover { background: var(--dcp-hover); }
     .revision-item.active {
       background: var(--dcp-accent-tint);
       border-color: var(--dcp-accent);

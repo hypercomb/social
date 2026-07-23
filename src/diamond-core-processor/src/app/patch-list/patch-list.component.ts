@@ -11,7 +11,7 @@ import type { PatchRecord } from '../core/patch-store'
       <div class="patch-list">
         <button class="toggle" (click)="expanded = !expanded">
           patches ({{ patches().length }})
-          <span class="chevron" [class.open]="expanded">&#9654;</span>
+          <svg class="chevron" [class.open]="expanded" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
         </button>
 
         @if (expanded) {
@@ -62,8 +62,10 @@ import type { PatchRecord } from '../core/patch-store'
     .toggle:hover { color: var(--dcp-ink-2); }
 
     .chevron {
-      font-size: 8px;
-      transition: transform 0.15s;
+      width: 11px;
+      height: 11px;
+      flex-shrink: 0;
+      transition: transform 0.15s ease;
     }
 
     .chevron.open { transform: rotate(90deg); }

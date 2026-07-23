@@ -61,7 +61,7 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
             </ul>
           } @else {
             <div class="empty-state">
-              <span class="empty-icon">&#9737;</span>
+              <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l7 3v6c0 4.4-3 8.2-7 9-4-.8-7-4.6-7-9V6l7-3z"/></svg>
               <span class="empty-text">{{ 'dcp.trust-empty' | t }}</span>
             </div>
           }
@@ -291,7 +291,8 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
     }
 
     .empty-icon {
-      font-size: 14px;
+      width: 18px;
+      height: 18px;
       color: var(--dcp-ink-3);
     }
 
@@ -436,7 +437,8 @@ import { DcpTranslatePipe } from '../core/dcp-translate.pipe'
       }
 
       .empty-icon {
-        font-size: 18px;
+        width: 20px;
+        height: 20px;
       }
 
       .empty-text {
