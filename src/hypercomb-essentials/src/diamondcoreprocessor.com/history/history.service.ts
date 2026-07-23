@@ -1393,12 +1393,13 @@ export class HistoryService {
         const { layerSig, isPointer } = await extractLayerSigFromMarker(bytes)
         if (!HistoryService.#SIG_RE.test(layerSig)) continue
         if (!isPointer) {
-          // Validate that the inline bytes really are a layer (have
-          // a non-empty `name`). Op-JSON files left over from the
-          // pre-layer recorder land here and must be filtered.
+          // Validate that the inline bytes really are a layer (a string
+          // `name` — may be '': the ROOT lineage's canonical layer signs
+          // as empty). Op-JSON files left over from the pre-layer
+          // recorder have no `name` and are filtered here.
           let parsed: Partial<LayerContent>
           try { parsed = JSON.parse(text) as Partial<LayerContent> } catch { continue }
-          if (typeof parsed.name !== 'string' || parsed.name.length === 0) continue
+          if (typeof parsed.name !== 'string') continue
           this.#preloaderCache.set(layerSig, bytes)
           this.#opportunisticMigrateMarker(layerSig, bytes, handle as FileSystemFileHandle)
         }
@@ -1469,7 +1470,8 @@ export class HistoryService {
     if (cachedBytes) {
       try {
         const parsed = JSON.parse(new TextDecoder().decode(cachedBytes)) as Partial<LayerContent>
-        if (typeof parsed.name === 'string' && parsed.name.length > 0) {
+        // `name` may be '' — the ROOT lineage's canonical layer signs as empty.
+        if (typeof parsed.name === 'string') {
           const hydrated = HistoryService.#hydrateLayer(parsed as LayerContent)
           this.#parsedLayerCache.set(layerSig, hydrated)
           return hydrated
@@ -1513,7 +1515,7 @@ export class HistoryService {
         cacheMap.set(layerSig, fileBytes)
         this.#preloaderCache.set(layerSig, fileBytes)
         const parsed = JSON.parse(new TextDecoder().decode(fileBytes)) as Partial<LayerContent>
-        if (typeof parsed.name !== 'string' || parsed.name.length === 0) return null
+        if (typeof parsed.name !== 'string') return null
         const hydrated = HistoryService.#hydrateLayer(parsed as LayerContent)
         this.#parsedLayerCache.set(layerSig, hydrated)
         this.#opportunisticMigrateMarker(layerSig, fileBytes, handle as FileSystemFileHandle)
@@ -1968,7 +1970,9 @@ export class HistoryService {
     if (cached) {
       try {
         const parsed = JSON.parse(new TextDecoder().decode(cached)) as Partial<LayerContent>
-        if (parsed.name) {
+        // typeof, not truthy: '' is a legal name (the ROOT lineage's
+        // canonical layer signs as empty).
+        if (typeof parsed.name === 'string') {
           const hydrated = HistoryService.#hydrateLayer(parsed)
           this.#parsedLayerCache.set(layerSig, hydrated)
           return hydrated
@@ -1988,7 +1992,7 @@ export class HistoryService {
       if (poolBytes) {
         try {
           const parsed = JSON.parse(new TextDecoder().decode(poolBytes)) as Partial<LayerContent>
-          if (parsed.name) {
+          if (typeof parsed.name === 'string') {
             const hydrated = HistoryService.#hydrateLayer(parsed)
             this.#parsedLayerCache.set(layerSig, hydrated)
             this.#preloaderCache.set(layerSig, poolBytes.buffer as ArrayBuffer)
@@ -2026,7 +2030,7 @@ export class HistoryService {
       if (bytes) {
         try {
           const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<LayerContent>
-          if (parsed.name) {
+          if (typeof parsed.name === 'string') {
             const hydrated = HistoryService.#hydrateLayer(parsed)
             this.#parsedLayerCache.set(layerSig, hydrated)
             this.#preloaderCache.set(layerSig, bytes.buffer as ArrayBuffer)
@@ -3042,9 +3046,12 @@ export class HistoryService {
   /**
    * Purge non-canonical files from a bag.
    *
-   * Canonical = NNNN file whose content is a JSON object with at least
-   * the slim-layer fields (`children` array). Pre-merkle bags (containing
-   * legacy sig-named pool pointers, op-JSON entries, etc.) are dropped.
+   * Canonical = NNNN file whose content is either a pointer record
+   * `{"layer":"<sig>"}` (the modern shape every marker converges on)
+   * or legacy inline layer JSON (a string `name` — which may be EMPTY:
+   * the ROOT lineage's canonical layer signs as empty). Pre-merkle bags
+   * (containing legacy sig-named pool pointers, op-JSON entries, etc.)
+   * are dropped.
    *
    * USER-DRIVEN ONLY. listLayers no longer calls this — silently
    * deleting markers from a passive read path is destructive (a single
@@ -3089,18 +3096,26 @@ export class HistoryService {
     for await (const [name, handle] of (bag as any).entries()) {
       if (handle.kind !== 'file') continue
 
-      // Canonical marker: NNNN name + JSON-with-name content.
+      // Canonical marker: NNNN name + canonical content.
       if (HistoryService.#MARKER_RE.test(name)) {
         try {
           const file = await (handle as FileSystemFileHandle).getFile()
           const text = (await file.text()).trim()
           // Bare-sig content is the pre-merkle marker shape; drop it.
           if (HistoryService.#SIG_RE.test(text)) { drop.push(name); continue }
-          // Layer-JSON content — keep if it parses to an object with a
-          // non-empty `name`. children is optional (empty-layer shape `{name}`).
           try {
             const parsed = JSON.parse(text)
-            if (parsed && typeof parsed === 'object' && typeof parsed.name === 'string' && parsed.name.length > 0) continue
+            if (parsed && typeof parsed === 'object') {
+              // Pointer record `{layer:<sig>}` — the modern shape every
+              // marker converges on (commitLayer, #ensureEmptyMarker and
+              // #opportunisticMigrateMarker all write it).
+              if (typeof parsed.layer === 'string' && HistoryService.#SIG_RE.test(parsed.layer)) continue
+              // Legacy inline layer JSON. `name` may be '' — the ROOT
+              // lineage's canonical layer signs as empty, so a non-empty
+              // keep-test here would erase real root history. Op-JSON
+              // from the pre-layer recorder has no `name` and still drops.
+              if (typeof parsed.name === 'string') continue
+            }
           } catch { /* unparseable — drop */ }
         } catch { /* unreadable — drop */ }
       }

@@ -227,9 +227,13 @@ const normalize = async (bag: MockDir): Promise<void> => {
         if (SIG_RE.test(text)) { drop.push(name); continue }
         try {
           const parsed = JSON.parse(text)
-          // Canonical: must have non-empty name. children is optional
-          // (empty-layer shape `{name}` is valid).
-          if (parsed && typeof parsed === 'object' && typeof parsed.name === 'string' && parsed.name.length > 0) continue
+          if (parsed && typeof parsed === 'object') {
+            // Pointer record {layer:<sig>} — the modern canonical shape.
+            if (typeof parsed.layer === 'string' && SIG_RE.test(parsed.layer)) continue
+            // Inline layer JSON — `name` may be '' (the ROOT lineage's
+            // canonical layer signs as empty). Op-JSON has no `name`.
+            if (typeof parsed.name === 'string') continue
+          }
         } catch { /* fall through */ }
       } catch { /* drop */ }
     }
@@ -287,7 +291,7 @@ const getLayerContent = async (
       const sig = await sha256Hex(bytes)
       if (sig !== layerSig) continue
       const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<LayerContent>
-      if (!parsed.name) continue
+      if (typeof parsed.name !== 'string') continue
       const out: LayerContent = { name: parsed.name }
       for (const k of Object.keys(parsed)) {
         if (k === 'name') continue
@@ -350,7 +354,7 @@ const getLayerBySig = async (
   if (cached) {
     try {
       const parsed = JSON.parse(new TextDecoder().decode(cached)) as Partial<LayerContent>
-      if (!parsed.name) return null
+      if (typeof parsed.name !== 'string') return null
       const out: LayerContent = { name: parsed.name }
       for (const k of Object.keys(parsed)) {
         if (k === 'name') continue
@@ -372,7 +376,7 @@ const getLayerBySig = async (
       if (sig !== layerSig) continue
       try {
         const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Partial<LayerContent>
-        if (!parsed.name) return null
+        if (typeof parsed.name !== 'string') return null
         const out: LayerContent = { name: parsed.name }
         for (const k of Object.keys(parsed)) {
           if (k === 'name') continue
@@ -683,6 +687,46 @@ describe('normalize — drops legacy shapes, keeps merkle markers', () => {
     const after = await listLayers(historyRoot, lineageSig)
     expect(after.length).toBe(before.length)
     expect(after[after.length - 1].layerSig).toBe(before[before.length - 1].layerSig)
+  })
+
+  it('keeps pointer-record markers ({layer:<sig>} — the modern canonical shape)', async () => {
+    const lineageSig = await signLineage(['abc'])
+    const bag = await historyRoot.getDirectoryHandle(lineageSig, { create: true })
+    const layerSig = await sha256Hex('some layer bytes')
+    await writeBytes(bag, '00000001', new TextEncoder().encode(JSON.stringify({ layer: layerSig })))
+
+    await normalize(bag)
+    expect(await fileExists(bag, '00000001')).toBe(true)
+  })
+
+  it('REGRESSION purge-at-root: keeps root markers although the canonical root layer name is empty', async () => {
+    // The ROOT lineage's canonical layer signs as empty — its layer JSON
+    // is {"name":"",...} (EMPTY_LAYER_CONTENT). A keep-test requiring a
+    // NON-EMPTY name silently erased real root history (verified live:
+    // listLayers(rootSig) → 1 marker, purge → 0). Both canonical marker
+    // shapes must survive a purge of the root bag.
+    const rootSig = await signLineage([])
+    const bag = await historyRoot.getDirectoryHandle(rootSig, { create: true })
+    // Legacy inline shape: the root layer itself, name ''.
+    await writeBytes(bag, '00000000', new TextEncoder().encode(JSON.stringify({ name: '', children: [] })))
+    // Modern pointer shape referencing the root layer's sig.
+    const rootLayerSig = await sha256Hex(JSON.stringify({ children: [fakeSig('r')], name: '' }))
+    await writeBytes(bag, '00000001', new TextEncoder().encode(JSON.stringify({ layer: rootLayerSig })))
+
+    await normalize(bag)
+    expect(await fileExists(bag, '00000000')).toBe(true)
+    expect(await fileExists(bag, '00000001')).toBe(true)
+  })
+
+  it('still drops op-JSON and bare-sig markers at the root bag', async () => {
+    const rootSig = await signLineage([])
+    const bag = await historyRoot.getDirectoryHandle(rootSig, { create: true })
+    await writeBytes(bag, '00000001', new TextEncoder().encode('{"op":"add","cell":"x","at":1}'))
+    await writeBytes(bag, '00000002', new TextEncoder().encode(await sha256Hex('legacy')))
+
+    await normalize(bag)
+    expect(await fileExists(bag, '00000001')).toBe(false)
+    expect(await fileExists(bag, '00000002')).toBe(false)
   })
 })
 
