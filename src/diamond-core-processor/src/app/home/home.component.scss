@@ -32,7 +32,7 @@
   border-radius: var(--dcp-radius-md);
   background: var(--dcp-accent);
   color: var(--dcp-on-accent);
-  font-family: var(--hc-font);
+  font-family: var(--dcp-ui);
   box-shadow: var(--dcp-shadow-2);
   animation: install-toast-in 0.18s ease-out;
 }
@@ -298,46 +298,64 @@ dcp-command-line {
   margin: 0 4px;
 }
 
-/* domain sections */
+/* domain sections — a flat card split into a provenance SPINE (the left rail)
+   and the section body. The rail's edge color, the card tint, and the header
+   tint all derive from one per-zone token set, mapped once into local --zc-*
+   vars here so the shared rules below stay DRY. Keys mirror groupZone(). */
 .domain-section {
+  display: flex;
   margin-bottom: 14px;
   border: 1px solid var(--dcp-line);
-  border-radius: var(--dcp-radius-lg);
-  background: var(--dcp-surface);
+  background: var(--zc-tint, var(--dcp-surface));
   box-shadow: var(--dcp-shadow-1);
   overflow: hidden;
+
+  &[data-zone="logical"] { --zc-rail: var(--dcp-z-logical-rail); --zc-tint: var(--dcp-z-logical-tint); --zc-head: var(--dcp-z-logical-head); --zc-ink: var(--dcp-z-logical-ink); }
+  &[data-zone="default"] { --zc-rail: var(--dcp-z-default-rail); --zc-tint: var(--dcp-z-default-tint); --zc-head: var(--dcp-z-default-head); --zc-ink: var(--dcp-z-default-ink); }
+  &[data-zone="current"] { --zc-rail: var(--dcp-z-current-rail); --zc-tint: var(--dcp-z-current-tint); --zc-head: var(--dcp-z-current-head); --zc-ink: var(--dcp-z-current-ink); }
+  &[data-zone="host"]    { --zc-rail: var(--dcp-z-host-rail);    --zc-tint: var(--dcp-z-host-tint);    --zc-head: var(--dcp-z-host-head);    --zc-ink: var(--dcp-z-host-ink); }
+  &[data-zone="package"] { --zc-rail: var(--dcp-z-package-rail); --zc-tint: var(--dcp-z-package-tint); --zc-head: var(--dcp-z-package-head); --zc-ink: var(--dcp-z-package-ink); }
 }
 
-/* Provenance ZONES — a soft tint fill, a tinted header, and an inset left
-   rail per group so you can tell at a glance where a section's content comes
-   from. Driven by [data-zone] from groupZone(). The rail is an inset
-   box-shadow (not a border) so it follows the card's rounded corners cleanly
-   and never collides with the base border. All values come from theme tokens,
-   so the zones read correctly in both light and dark. */
-.domain-section[data-zone="logical"] {
-  background: var(--dcp-z-logical-tint);
-  box-shadow: inset 3px 0 0 var(--dcp-z-logical-rail), var(--dcp-shadow-1);
-  .domain-header { background: var(--dcp-z-logical-head); }
+/* provenance spine — filing-cabinet rail: a solid zone edge, the section
+   ordinal at the head, the zone name running bottom-to-top. Reinforces the
+   color coding with a word without spending a whole row on it. */
+.zone-rail {
+  flex: none;
+  width: 30px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 0 12px;
+  border-right: 1px solid var(--dcp-line);
+  border-left: 2px solid var(--zc-rail, var(--dcp-line-2));
+  background: var(--zc-head, var(--dcp-surface-2));
+  color: var(--zc-ink, var(--dcp-ink-3));
+  font-family: var(--hc-mono);
+  user-select: none;
 }
-.domain-section[data-zone="default"] {
-  background: var(--dcp-z-default-tint);
-  box-shadow: inset 3px 0 0 var(--dcp-z-default-rail), var(--dcp-shadow-1);
-  .domain-header { background: var(--dcp-z-default-head); }
+
+.zone-idx {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  opacity: 0.9;
 }
-.domain-section[data-zone="current"] {
-  background: var(--dcp-z-current-tint);
-  box-shadow: inset 3px 0 0 var(--dcp-z-current-rail), var(--dcp-shadow-1);
-  .domain-header { background: var(--dcp-z-current-head); }
+
+.zone-name {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  opacity: 0.72;
 }
-.domain-section[data-zone="host"] {
-  background: var(--dcp-z-host-tint);
-  box-shadow: inset 3px 0 0 var(--dcp-z-host-rail), var(--dcp-shadow-1);
-  .domain-header { background: var(--dcp-z-host-head); }
-}
-.domain-section[data-zone="package"] {
-  background: var(--dcp-z-package-tint);
-  box-shadow: inset 3px 0 0 var(--dcp-z-package-rail), var(--dcp-shadow-1);
-  .domain-header { background: var(--dcp-z-package-head); }
+
+.section-body {
+  flex: 1;
+  min-width: 0;
 }
 
 /* brief highlight when the tree auto-opens to a freshly-adopted branch, so
@@ -355,7 +373,7 @@ dcp-command-line {
   align-items: center;
   gap: 8px;
   padding: 11px 14px;
-  background: var(--dcp-surface-2);
+  background: var(--zc-head, var(--dcp-surface-2));
   border-bottom: 1px solid var(--dcp-line);
   position: sticky;
   top: 0;
@@ -494,7 +512,7 @@ dcp-command-line {
   &:hover { color: var(--dcp-ink-2); border-color: var(--dcp-ink-3); }
 
   &.active {
-    color: var(--dcp-surface);
+    color: var(--dcp-on-accent);
     background: var(--dcp-accent);
     border-color: var(--dcp-accent);
   }
@@ -518,38 +536,39 @@ dcp-command-line {
   white-space: nowrap;
 }
 
+/* Adopt / Save / Discard — a sharp segmented control. Hairline dividers, the
+   active segment gold-filled; discard flips to danger only on hover. */
 .adopt-control {
   display: inline-flex;
   align-self: center;
-  border: 1px solid var(--dcp-line);
-  border-radius: var(--dcp-radius-sm);
+  border: 1px solid var(--dcp-line-2);
   overflow: hidden;
 }
 
 .adopt-seg {
   font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.03em;
+  font-weight: 700;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   cursor: pointer;
   color: var(--dcp-ink-3);
   background: none;
   border: none;
-  border-left: 1px solid var(--dcp-line);
-  padding: 2px 8px;
+  border-left: 1px solid var(--dcp-line-2);
+  padding: 3px 9px;
   transition: color 0.12s ease, background 0.12s ease;
 
   &:first-child { border-left: none; }
-  &:hover { color: var(--dcp-ink); background: var(--dcp-hover, rgba(126,182,214,0.08)); }
+  &:hover { color: var(--dcp-ink); background: var(--dcp-hover); }
 
-  // Highlight the segment that reflects the package's current state.
+  // the segment reflecting the package's current state — gold-filled
   &.on {
-    color: var(--dcp-surface);
+    color: var(--dcp-on-accent);
     background: var(--dcp-accent);
   }
 
-  // Discard is destructive — reads as a warning on hover, never "on".
-  &.discard:hover { color: #fff; background: var(--dcp-danger, #c0473b); }
+  // discard is destructive — reads as a warning on hover, never "on"
+  &.discard:hover { color: #fff; background: var(--dcp-danger); }
 }
 
 .domain-action {
@@ -681,7 +700,6 @@ dcp-command-line {
   flex-shrink: 0;
   padding: 5px 13px;
   border: 1px solid var(--dcp-z-host-rail);
-  border-radius: 999px;
   background: var(--dcp-z-host-tint);
   color: var(--dcp-z-host-ink);
   font-size: 12px;
@@ -712,7 +730,6 @@ dcp-command-line {
   display: block;
   height: 3px;
   margin-top: 6px;
-  border-radius: 999px;
   background: var(--dcp-line-2);
   overflow: hidden;
 }
@@ -722,7 +739,6 @@ dcp-command-line {
   top: 0;
   bottom: 0;
   width: 35%;
-  border-radius: 999px;
   background: var(--dcp-z-host-rail);
   animation: resolve-sweep 1.4s ease-in-out infinite;
 }

@@ -476,6 +476,10 @@ export class HomeComponent implements OnDestroy {
     return 'package'
   }
 
+  /** Two-digit ordinal for a section's provenance rail (01, 02, …). Purely a
+   *  filing-spine index for the eye — never an identity, never persisted. */
+  railIndex(i: number): string { return String(i + 1).padStart(2, '0') }
+
   /** IMPORT mode: set when you arrive via an adopt (a #branch handoff), so
    *  the installer opens the IMPORTING domain (not the logical-view sibling)
    *  and renders the logical PANE — the merged "what's here + what you're
