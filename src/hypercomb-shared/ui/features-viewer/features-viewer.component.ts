@@ -54,6 +54,10 @@ interface FeatureRow {
    *  the tile and switches to that view; the switch stays the on/off control.
    *  Stamped by ShowFeaturesDrone, which has the visual-bee registry. */
   openable?: boolean
+  /** True when the view opens IN PLACE over the current layer (no navigation),
+   *  the same takeover a click on the tile performs — so closing it returns
+   *  you to the layer you opened it from. */
+  opensInPlace?: boolean
   branchSig?: string
   /** True when this feature, declared on a container, flows to its subtree. */
   cascades?: boolean
@@ -927,6 +931,14 @@ export class FeaturesViewerComponent implements OnDestroy {
    *  new view already sees the deck (not the parent we opened the panel from). */
   openBehavior(group: FeatureGroup, feat: FeatureRow): void {
     if (!feat.openable || !feat.view) return
+    // IN-PLACE views (a slides deck) mount over the CURRENT layer — the same
+    // takeover clicking the tile performs. Nothing navigates, so closing the
+    // view drops you back exactly where you opened it from.
+    if (feat.opensInPlace) {
+      EffectBus.emit('view:open-for-tile', { view: feat.view, segments: [...group.segments] })
+      this.close()
+      return
+    }
     const nav = (window as { ioc?: { get: <T>(k: string) => T | undefined } }).ioc
       ?.get<{ go?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
     nav?.go?.([...group.segments])

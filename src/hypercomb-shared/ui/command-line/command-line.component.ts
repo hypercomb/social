@@ -583,6 +583,39 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
   readonly openForSubscribers = this.#openForSubscribers.asReadonly()
   readonly showOpenForSubscribersToggle = this.#swarmAvailable.asReadonly()
 
+  // ── notes toggle ──────────────────────────────────────
+  //
+  // Mirrors the notes strip's open state (`notes:panel-state`, last-value
+  // replayed) and routes clicks to the same `notes:panel` command channel
+  // the controls-bar Notes button uses — a second, always-visible switch
+  // in the top chrome since notes ride along with every page.
+  readonly #notesPanelOpen = signal(false)
+  readonly notesPanelOpen = this.#notesPanelOpen.asReadonly()
+
+  // ── feedback toggle ───────────────────────────────────
+  //
+  // Mirrors the feedback panel's `feedback:panel-state` broadcast and routes
+  // clicks to `feedback:toggle`. This is the ONLY entry point to the combined
+  // right-docked panel (inbox list on top, share form at the bottom) — the
+  // controls-bar icon and the bottom-right FAB it replaced are both gone.
+  readonly #feedbackPanelOpen = signal(false)
+  readonly feedbackPanelOpen = this.#feedbackPanelOpen.asReadonly()
+
+  // ── pheromones button ─────────────────────────────────
+  //
+  // Mirrors the pheromone reach carried on the sticky `tags:filter`
+  // broadcast so the top-chrome glyph reads out the current scope
+  // (page → children → global), exactly like the controls-bar tag-scope
+  // button at the bottom. Clicks open the pheromone panel.
+  readonly #tagScope = signal<'local' | 'children' | 'global'>('local')
+  readonly pheromoneScopeIcon = computed(() => {
+    switch (this.#tagScope()) {
+      case 'children': return 'account_tree'
+      case 'global': return 'public'
+      default: return 'center_focus_strong'
+    }
+  })
+
   // ── locked-attempt flash ──────────────────────────────
   //
   // A brief lock icon that flashes to the left of the right-side icons
@@ -627,6 +660,19 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
       // Pan/zoom attempted while input is locked — flash the lock icon.
       // Transient (no replay), so a fresh mount never flashes spuriously.
       EffectBus.on('input:locked-attempt', () => this.#flashLocked()),
+      // Notes strip open/closed — lights the notes toggle.
+      EffectBus.on<{ open?: boolean }>('notes:panel-state', ({ open }) => {
+        this.#notesPanelOpen.set(!!open)
+      }),
+      // Share-feedback panel open/closed — lights the feedback toggle.
+      EffectBus.on<{ open?: boolean }>('feedback:panel-state', ({ open }) => {
+        this.#feedbackPanelOpen.set(!!open)
+      }),
+      // Pheromone reach — sticky broadcast, so the glyph hydrates on mount
+      // and follows changes made from the panel or the bottom strip.
+      EffectBus.on<{ scope?: 'local' | 'children' | 'global' }>('tags:filter', (p) => {
+        if (p?.scope) this.#tagScope.set(p.scope)
+      }),
     )
 
     // Restore sticky indicators from localStorage. Producer-owned pills
@@ -696,6 +742,31 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     if (!swarm?.setOpenForSubscribers) return
     const current = !!swarm.openForSubscribers()
     swarm.setOpenForSubscribers(!current)
+  }
+
+  /** Flip the notes strip open/closed. The strip broadcasts state back via
+   *  `notes:panel-state`; this header toggle is the sole on/off control now
+   *  that the controls-bar Notes button is gone. */
+  onNotesToggle(): void {
+    EffectBus.emit('notes:panel', { visible: !this.#notesPanelOpen() })
+  }
+
+  /** Open (or close) the /help reference sheet — the same effect the
+   *  `/help` slash behaviour emits; ShortcutSheetDrone owns the toggle. */
+  onHelpToggle(): void {
+    EffectBus.emit('keymap:invoke', { cmd: 'ui.shortcutSheet', binding: null, event: null })
+  }
+
+  /** Flip the feedback panel — FeedbackViewerComponent listens and
+   *  broadcasts state back via `feedback:panel-state`. */
+  onFeedbackToggle(): void {
+    EffectBus.emit('feedback:toggle', {})
+  }
+
+  /** Open the pheromone panel — same effect the controls-bar tag-scope
+   *  button emits; the panel owns reach selection and filtering. */
+  onPheromonesToggle(): void {
+    EffectBus.emit('tags:view-open', undefined)
   }
 
   /** Forward a view-toggle click to ViewBee, which flips the single GLOBAL
@@ -2523,7 +2594,7 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
    */
   async #applyFeatureOps(op: { target: string; view: string; remove: boolean }): Promise<void> {
     const registry = get('@diamondcoreprocessor.com/VisualBeeRegistry') as
-      { get(view: string): { view: string; slashCommand?: string } | undefined } | undefined
+      { get(view: string): { view: string; slashCommand?: string; attachable?: boolean } | undefined } | undefined
     const bee = registry?.get(op.view)
     if (!bee) return
 
@@ -2545,6 +2616,14 @@ export class CommandLineComponent implements AfterViewInit, OnDestroy {
     EffectBus.emit('feature:apply', { view: op.view, segments, remove: op.remove })
 
     if (op.remove) return
+
+    // An ATTACHABLE behaviour is fully installed by the `feature:apply` above
+    // (its decoration written at the target). Running its slash command here
+    // would be actively wrong: a view bee's bare command TOGGLES the view, so
+    // `diagram@slides` flipped the cell you're standing on into slides instead
+    // of making `diagram` a deck. The slash fallback is only for behaviours
+    // that still need their own authoring pass.
+    if (bee.attachable) return
 
     const slash = (bee.slashCommand ?? '').replace(/^\//, '')
     if (slash) {

@@ -17,6 +17,13 @@
     [openForSubscribers]="openForSubscribers()"
     [openForSubscribersLabel]="'command-line.open-for-subscribers' | t"
     [viewToggles]="viewToggles()"
+    [notesPanelOpen]="notesPanelOpen()"
+    [notesLabel]="'controls.notes' | t"
+    [helpLabel]="'slash.help' | t"
+    [feedbackPanelOpen]="feedbackPanelOpen()"
+    [feedbackLabel]="'feedback.button' | t"
+    [pheromoneScopeIcon]="pheromoneScopeIcon()"
+    [pheromonesLabel]="'tags.panel.open' | t"
     [lockedFlash]="lockedFlash()"
     [lockedLabel]="'command-line.pinned' | t"
     (valueChange)="onShellValueChange($event)"
@@ -27,6 +34,10 @@
     (armedResourceDismiss)="onArmedResourceDismiss()"
     (openForSubscribersToggle)="onOpenForSubscribersToggle()"
     (viewToggle)="onViewToggle($event)"
+    (notesToggle)="onNotesToggle()"
+    (helpToggle)="onHelpToggle()"
+    (feedbackToggle)="onFeedbackToggle()"
+    (pheromonesToggle)="onPheromonesToggle()"
   />
 
   <!-- Per-LEVEL pinned quick links — entrances the participant dragged up

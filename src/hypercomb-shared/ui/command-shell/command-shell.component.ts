@@ -182,6 +182,29 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Optional aria-label override for the open-for-subscribers button. */
   readonly openForSubscribersLabel = input<string>('Allow anyone to subscribe to my hive')
 
+  /** Whether the notes strip is currently open — lights the notes toggle. */
+  readonly notesPanelOpen = input<boolean>(false)
+
+  /** Aria-label / tooltip for the notes toggle. */
+  readonly notesLabel = input<string>('notes')
+
+  /** Aria-label / tooltip for the help toggle. */
+  readonly helpLabel = input<string>('help')
+
+  /** Whether the feedback panel is currently open — lights the feedback toggle. */
+  readonly feedbackPanelOpen = input<boolean>(false)
+
+  /** Aria-label / tooltip for the feedback toggle. */
+  readonly feedbackLabel = input<string>('feedback')
+
+  /** Material Symbol readout of the current pheromone reach — page /
+   *  children / global. Same vocabulary as the controls-bar tag-scope
+   *  button at the bottom; the parent owns the `tags:filter` mirror. */
+  readonly pheromoneScopeIcon = input<string>('center_focus_strong')
+
+  /** Aria-label / tooltip for the pheromones button. */
+  readonly pheromonesLabel = input<string>('pheromones')
+
   /**
    * Available view-behavior toggles for the current node (e.g. website).
    * Rendered as stateful on/off Material icons on the right side, sourced
@@ -239,6 +262,22 @@ export class CommandShellComponent implements AfterViewInit, OnDestroy {
   /** Emitted when the open-for-subscribers icon is clicked. Parent
    *  flips swarm.setOpenForSubscribers — the shell never touches IoC. */
   readonly openForSubscribersToggle = output<void>()
+
+  /** Emitted when the notes toggle is clicked. Parent flips the strip
+   *  via the `notes:panel` command channel — the shell stays presentational. */
+  readonly notesToggle = output<void>()
+
+  /** Emitted when the help toggle is clicked. Parent opens the /help
+   *  reference sheet — the shell stays presentational. */
+  readonly helpToggle = output<void>()
+
+  /** Emitted when the feedback toggle is clicked. Parent flips the
+   *  share-feedback panel — the shell stays presentational. */
+  readonly feedbackToggle = output<void>()
+
+  /** Emitted when the pheromones button is clicked. Parent opens the
+   *  pheromone panel (`tags:view-open`) — the shell stays presentational. */
+  readonly pheromonesToggle = output<void>()
 
   /**
    * Emitted when a view toggle is clicked. `view` is the view name (e.g.

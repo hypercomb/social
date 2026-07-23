@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Smart Autolinker settings</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="settings">
+    <header><span class="mark">↗</span><div><h1>Smart Autolinker</h1><p>Turn recurring words into links as you type or paste.</p></div></header>
+
+    <section>
+      <div class="section-title"><div><h2>Groups</h2><p>Create contexts such as Pheromones, Email, or Articles.</p></div><button id="addGroup" class="secondary">+ Add group</button></div>
+      <div id="groupList" class="group-list"></div>
+    </section>
+
+    <section>
+      <div class="section-title"><div><h2>Replacement list</h2><p>Matches whole words and phrases. Longer phrases take priority.</p></div><button id="addReplacement" class="secondary">+ Add replacement</button></div>
+      <div id="replacementList" class="rows"></div>
+    </section>
+
+    <section>
+      <div class="section-title"><div><h2>Enabled sites</h2><p>LinkedIn is enabled by default. Subdomains are included.</p></div></div>
+      <form id="domainForm" class="inline-form"><input id="newDomain" aria-label="Domain" placeholder="gmail.com" required><button class="secondary">+ Add site</button></form>
+      <div id="domainList" class="chips"></div>
+      <div id="domainRules" class="domain-rules"></div>
+    </section>
+
+    <section class="preferences">
+      <h2>Preferences</h2>
+      <label><input id="caseSensitive" type="checkbox"> Match case exactly</label>
+      <label><input id="openInNewTab" type="checkbox"> Open generated links in a new tab</label>
+    </section>
+
+    <footer><span id="saveStatus" role="status"></span><button id="save" class="primary">Save changes</button></footer>
+  </main>
+  <template id="replacementTemplate">
+    <div class="replacement-row">
+      <label>Word or phrase<input class="phrase" placeholder="hypercomb"></label>
+      <label>Destination URL<input class="url" type="url" placeholder="https://hypercomb.io"></label>
+      <label>Group<select class="item-group"></select></label>
+      <label class="enabled-field"><span>Active</span><input class="item-enabled" type="checkbox"></label>
+      <button class="icon-button remove" type="button" aria-label="Remove replacement">×</button>
+    </div>
+  </template>
+  <template id="groupTemplate">
+    <div class="group-row">
+      <input class="group-name" aria-label="Group name" placeholder="Group name">
+      <label class="group-enabled"><input type="checkbox"> Active</label>
+      <button class="icon-button remove-group" type="button" aria-label="Remove group">×</button>
+    </div>
+  </template>
+  <script src="defaults.js"></script>
+  <script src="options.js"></script>
+</body>
+</html>

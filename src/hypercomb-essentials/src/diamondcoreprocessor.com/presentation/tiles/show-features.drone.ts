@@ -65,6 +65,7 @@ import { featureNeedsReview } from '../../sharing/feature-availability.js'
 import { writeDropbox } from '../../files/files-attachment.js'
 import { parseAccept } from '../../files/file-types.js'
 import { WEBSITE_SLOT } from '../../commands/website-slot.js'
+import { writeDecoration, listDecorations, removeDecoration } from '../../commands/decoration-manifest.js'
 import type { VisualBeeRegistry, VisualBeeDescriptor } from '../../commands/visual-bee-registry.js'
 
 const VISUAL_BEE_REGISTRY_KEY = '@diamondcoreprocessor.com/VisualBeeRegistry'
@@ -118,6 +119,9 @@ interface FeatureItem {
    *  Absent for cascading capabilities (dropbox) and unrecognized foreign
    *  kinds — there is no view to enter. */
   openable?: boolean
+  /** True when opening it mounts the view IN PLACE over the current layer
+   *  (no navigation) — so closing returns the participant where they were. */
+  opensInPlace?: boolean
   label: string
   description: string
   branchSig?: string
@@ -220,6 +224,9 @@ interface RecognizedFeature {
   /** True for a registered visual bee (an enterable view); false for a
    *  cascading capability (dropbox) — which has no view to open. */
   isVisualBee: boolean
+  /** True when the view opens IN PLACE over the current layer (no navigation),
+   *  the same takeover a click on the tile performs. */
+  opensInPlace: boolean
 }
 
 export class ShowFeaturesDrone extends Drone {
@@ -230,7 +237,7 @@ export class ShowFeaturesDrone extends Drone {
   public override description =
     'Gathers the bee-feature metadata (no code) of a clicked tile — both render features and cascading capabilities — and emits features:open so the shell panel lists them, tagging each with its origin (direct on the tile, or cascaded from an ancestor). Read-only — staging the features is benign and handled panel-side.'
 
-  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable']
+  protected override listens: string[] = ['tile:action', 'selection:changed', 'controls:action', 'features:enable', 'feature:apply']
   protected override emits: string[] = ['features:open', 'selection:has-features', 'activity:log', 'features:outcome']
 
   constructor() {
@@ -283,6 +290,52 @@ export class ShowFeaturesDrone extends Drone {
       void this.#enableAt(segments, kind)
     })
 
+    // `name@view` from the command line (`diagram@slides` / `~diagram@slides`).
+    // The command line emits this intent and, until now, NOTHING listened — so
+    // the attach silently did nothing and the fallback ran the bee's bare slash
+    // command, which for a view bee TOGGLES the view (flipping the cell you're
+    // standing on into slides) instead of making the TARGET a deck. Attach it
+    // properly here, at the target's own segments.
+    this.onEffect<{ view?: string; segments?: string[]; remove?: boolean }>('feature:apply', (p) => {
+      const view = String(p?.view ?? '')
+      const segments = Array.isArray(p?.segments) ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean) : []
+      if (!view || segments.length === 0) return
+      void this.#applyFeature(view, segments, p?.remove === true)
+    })
+
+  }
+
+  /** Attach (or detach) an ATTACHABLE view behaviour at `segments` by writing
+   *  its decoration there — the whole install for a behaviour whose content is
+   *  simply what the cell already has (a deck plays its children). Bees that
+   *  need an authoring pass (a website page, a tutor deck) declare no
+   *  `attachable` and are left alone. */
+  async #applyFeature(view: string, segments: readonly string[], remove: boolean): Promise<void> {
+    const registry = this.#ioc()?.get<VisualBeeRegistry>(VISUAL_BEE_REGISTRY_KEY)
+    const bee = registry?.get?.(view)
+    if (!bee?.attachable || !bee.decorationKind) return
+    const label = segments[segments.length - 1] ?? ''
+    try {
+      const existing = await listDecorations({ kind: bee.decorationKind, segments: [...segments] })
+      if (remove) {
+        for (const e of existing) removeDecoration({ sig: e.sig, segments: [...segments] })
+        this.emitEffect('activity:log', { message: `${view} off "${label}"`, icon: '○' })
+        return
+      }
+      if (existing.length === 0) {
+        await writeDecoration({
+          kind: bee.decorationKind,
+          appliesTo: [...segments],
+          segments: [...segments],
+          payload: bee.toggleIcon ? { icon: bee.toggleIcon } : {},
+          mark: 'persistent',
+        })
+      }
+      this.emitEffect('activity:log', { message: `${view} on "${label}"`, icon: '▶' })
+    } catch (err) {
+      console.warn('[show-features] feature:apply failed', { view, segments, err })
+      this.emitEffect('activity:log', { message: `couldn't put ${view} on "${label}"`, icon: '○' })
+    }
   }
 
   /** Attach an addable feature at `segments`. Only cascading capabilities are
@@ -615,6 +668,7 @@ export class ShowFeaturesDrone extends Drone {
         fallbackLabel: bee.view,
         cascades: bee.cascades === true,
         isVisualBee: true,
+        opensInPlace: bee.opensOnTileClick === true,
       }
     }
     const cap = CASCADING_CAPABILITIES[kind]
@@ -627,6 +681,7 @@ export class ShowFeaturesDrone extends Drone {
         fallbackLabel: cap.fallbackLabel,
         cascades: true,
         isVisualBee: false,
+        opensInPlace: false,
       }
     }
     return null
@@ -649,6 +704,7 @@ export class ShowFeaturesDrone extends Drone {
       slashCommand: feature.slashCommand,
       behavior: feature.behavior,
       openable: feature.isVisualBee,
+      opensInPlace: feature.opensInPlace,
       label: this.#t(i18n, feature.labelKey, feature.fallbackLabel),
       description: this.#t(i18n, feature.descriptionKey, ''),
       cascades: feature.cascades,

@@ -25,9 +25,14 @@ type FileItem = {
   sig: string           // bytes resource — for download
   decorationSig: string // decoration record — for remove
   cell?: string         // source tile (aggregate mode only)
+  path?: string[]       // absolute segments — set once the gather reaches past this page
 }
 
 type Scope = 'tile' | 'selection' | 'all'
+/** How wide the gather reaches. Same three, same words, as the pheromone
+ *  filter and the feedback panel. The drone owns the walk; this is the
+ *  control surface for it. */
+type Reach = 'local' | 'children' | 'global'
 
 type StoreLike = { getResource(sig: string): Promise<Blob | null> }
 
@@ -43,8 +48,16 @@ export class FilesViewerComponent implements OnDestroy {
   readonly visible = signal(false)
   readonly title = signal<string>('')
   readonly scope = signal<Scope>('tile')
+  readonly reach = signal<Reach>('local')
   readonly files = signal<FileItem[]>([])
   readonly #segments = signal<string[]>([])
+
+  /** The three reaches, in order — same ids and glyphs as everywhere else. */
+  readonly scopeOptions: readonly { id: Reach; icon: string }[] = [
+    { id: 'local', icon: 'center_focus_strong' },
+    { id: 'children', icon: 'account_tree' },
+    { id: 'global', icon: 'public' },
+  ]
 
   /** Active type filters — empty means "all". */
   readonly activeTypes = signal<ReadonlySet<FileTypeKey>>(new Set())
@@ -75,13 +88,16 @@ export class FilesViewerComponent implements OnDestroy {
   #cleanups: (() => void)[] = []
 
   constructor() {
-    this.#cleanups.push(EffectBus.on<{ cellLabel: string; segments: string[]; files: FileItem[]; scope?: Scope }>('files:open', (p) => {
+    this.#cleanups.push(EffectBus.on<{ cellLabel: string; segments: string[]; files: FileItem[]; scope?: Scope; reach?: Reach }>('files:open', (p) => {
       if (!p) return
       // Mutually exclusive with the Features panel — they share the right-side
       // dock, so opening Files closes Features.
       EffectBus.emit('features:viewer-close', {})
       this.title.set(p.cellLabel ?? '')
       this.scope.set(p.scope ?? 'tile')
+      // Mirror the reach the gather actually ran at, so opening from a tile
+      // icon (always this page) resets the trio instead of leaving it lit.
+      this.reach.set(p.reach ?? 'local')
       this.#segments.set(p.segments ?? [])
       this.files.set(Array.isArray(p.files) ? p.files : [])
       // Drop filters that no longer apply to the new list.
@@ -107,9 +123,19 @@ export class FilesViewerComponent implements OnDestroy {
     this.files.set([])
     this.title.set('')
     this.scope.set('tile')
+    this.reach.set('local')
     this.activeTypes.set(new Set())
     this.#segments.set([])
     EffectBus.emit('files:viewer', { active: false })
+  }
+
+  /** Pick a reach. The drone re-walks the layer tree and answers with a fresh
+   *  `files:open` — a wider reach is a new gather, not a filter over the list
+   *  already on screen, because the files it wants aren't in that list. */
+  setReach(id: Reach): void {
+    if (this.reach() === id) return
+    this.reach.set(id)
+    EffectBus.emit('files:reach', { reach: id })
   }
 
   // ── type filters ──────────────────────────────────────
@@ -156,11 +182,14 @@ export class FilesViewerComponent implements OnDestroy {
     }
   }
 
-  /** Detach a file. In tile mode `#segments` is the tile itself; in
-   *  aggregate mode it's the common parent and the row carries its own
-   *  source tile, so append `cell`. */
+  /** Detach a file. A row gathered from beyond this page carries its own
+   *  absolute `path` — appending its label to the common parent would name
+   *  a tile that isn't there. Otherwise: tile mode is `#segments` itself,
+   *  page-wide aggregate is the common parent plus the row's `cell`. */
   remove(file: FileItem): void {
-    const segments = file.cell ? [...this.#segments(), file.cell] : this.#segments()
+    const segments = file.path?.length
+      ? file.path
+      : (file.cell ? [...this.#segments(), file.cell] : this.#segments())
     EffectBus.emit('files:remove', { decorationSig: file.decorationSig, segments })
   }
 

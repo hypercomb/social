@@ -224,6 +224,31 @@ export type VisualBeeDescriptor = {
    * via tile adoption (e.g. views that depend on local-only state).
    */
   readonly adoptable?: boolean
+
+  /**
+   * Whether this behaviour can be ATTACHED declaratively — its content is
+   * whatever the cell already has (slides play the cell's children), so
+   * writing `decorationKind` at the target IS the whole install.
+   *
+   * The `name@view` command line and the Beehaviors panel use this to attach
+   * it directly instead of falling back to running the bee's slash command
+   * (which for a view bee TOGGLES the view rather than attaching anything —
+   * `diagram@slides` used to flip the current cell into slides instead of
+   * making `diagram` a deck). Leave unset for behaviours whose content must
+   * be authored first (a website page, a tutor deck).
+   */
+  readonly attachable?: boolean
+
+  /**
+   * Whether clicking a tile that carries this behaviour OPENS THE VIEW
+   * instead of entering the tile's hexagon layer.
+   *
+   * The view takes the screen in place — nothing navigates — so closing it
+   * drops the participant back on the layer they clicked from, and they never
+   * see the tile's own grid. Leave unset for behaviours that should not
+   * hijack the primary navigation gesture.
+   */
+  readonly opensOnTileClick?: boolean
 }
 
 /**

@@ -38,7 +38,14 @@
 </div>
 
 @if (tags().length > 0) {
-  <div class="tag-float">
+  <!-- The strip runs left→right along the bottom. `rail-left` shifts its start
+       clear of the left-docked rail so the tags begin just inside it; on mobile
+       it keeps the older right-anchored placement (the bottom centre belongs to
+       the mobile nav there). -->
+  <div class="tag-float"
+       [class.rail-left]="dockSide() === 'left' && !isMobile()"
+       [class.mobile]="isMobile()"
+       [class.expanded]="tagsExpanded()">
     <!-- Opens the pheromone panel. Always visible (it used to fade in only on
          hover, so the reach control was invisible until you found it) and the
          glyph reads out the current reach: page → children → global. -->
@@ -48,13 +55,48 @@
             [title]="('tags.panel.open' | t) + ' — ' + ('tags.scope-' + tagScope() | t)">
       <span class="mat-sym">{{ scopeIcon() }}</span>
     </button>
-    @for (tag of tags(); track tag.name) {
-      <button class="tag-crumb"
-              [class.tag-active]="isTagFilterActive(tag.name)"
-              [class.tag-hovered]="isTagHovered(tag.name)"
-              [style.--tag-color]="tagColor(tag.name)"
-              (click)="toggleTagFilter(tag.name)">{{ tag.name }}</button>
-    }
+
+    <!-- Collapsed: one row, clipped at the fade. Opened out: as many rows as
+         the tags need, so the whole page's set at the current reach is on
+         screen at once. The strip itself scrolls past a few rows, and claims
+         the wheel while the pointer is over it so scrolling the list never
+         zooms the hive underneath. -->
+    <div class="tag-strip" data-consumes-wheel>
+      @if (tagsExpanded()) {
+        <!-- Reach lives INSIDE the opened-out strip: the tags you're looking at
+             are the ones this reach admits, so the control that changes which
+             ones those are belongs beside them, not only in the panel. -->
+        <span class="tag-scope-set" role="group" [attr.aria-label]="'tags.scope.title' | t">
+          @for (opt of tagScopeOptions; track opt.id) {
+            <button class="tag-scope-opt"
+                    [class.selected]="isTagScope(opt.id)"
+                    [attr.aria-pressed]="isTagScope(opt.id)"
+                    (click)="setTagScope(opt.id)"
+                    [title]="('tags.scope.' + opt.id + '.label' | t) + ' — ' + ('tags.scope.' + opt.id + '.desc' | t)">
+              <span class="mat-sym">{{ opt.icon }}</span>
+            </button>
+          }
+        </span>
+      }
+      @for (tag of tags(); track tag.name) {
+        <button class="tag-crumb"
+                [class.tag-active]="isTagFilterActive(tag.name)"
+                [class.tag-hovered]="isTagHovered(tag.name)"
+                [style.--tag-color]="tagColor(tag.name)"
+                (click)="toggleTagFilter(tag.name)">{{ tag.name }}</button>
+      }
+    </div>
+
+    <!-- Right end, outside the fade so it is never the thing that gets clipped:
+         open the row out to every tag, or fold it back. Sticky. -->
+    <button class="tag-expand"
+            [class.open]="tagsExpanded()"
+            (click)="toggleTagsExpanded()"
+            [attr.aria-expanded]="tagsExpanded()"
+            [attr.aria-label]="(tagsExpanded() ? 'tags.collapse' : 'tags.expand') | t"
+            [title]="(tagsExpanded() ? 'tags.collapse' : 'tags.expand') | t">
+      <span class="mat-sym">{{ tagsExpanded() ? 'expand_more' : 'expand_less' }}</span>
+    </button>
   </div>
 }
 
@@ -76,8 +118,15 @@
        The left full-height rail manages its own height, so the zoom (which
        would scale the rail off the bottom) is dropped while docked left. -->
   <div class="pill-scaled" [style.zoom]="dockSide() === 'left' && !isMobile() ? null : pillZoom()">
+  <!-- data-consumes-wheel: the wheel belongs to the toolbar whenever the
+       pointer is over it, never to the hive underneath — the same mutual
+       exclusion every other scroll surface in the app declares. The global
+       wheel-zoom + spotlight-scroll inputs both bail on this attribute, which
+       leaves the browser free to scroll the icon list natively. -->
   <div
     class="controls-pill"
+    data-consumes-wheel
+    (wheel)="onBarWheel($event)"
     [class.public-mode]="meshPublic()"
     [class.column]="!!dockSide() && !isMobile()"
     [class.power-ctrl]="powerKey() === 'ctrl'"
@@ -135,35 +184,43 @@
              end of the row toggles edit mode — while editing, every click
              flips an item's enabled state instead of running its action. -->
         <div class="controls-rows" [class.editing]="editMode()">
-          <!-- PIN + HOME — the two fixed actions at the very TOP of the
-               left-docked rail. PIN sits ABOVE home so the view-lock toggle is
-               the first thing reachable. Its active (view-locked) cue is pure
-               CSS — accent colour + a solid chip — because macOS/Safari does
-               not reliably repaint the Material Symbols FILL axis when it is
-               toggled, so the .filled glyph alone leaves the locked state
-               invisible there. Both are shown only on the left dock, where the
-               rail is a full-height vertical strip with a scrollable middle. -->
-          @if (dockSide() === 'left') {
-            <button class="ctl-btn rail-pin"
-                    [class.active]="locked()"
-                    [class.lock-bump]="lockBump()"
-                    (click)="togglePin()"
-                    [attr.aria-label]="'controls.pin' | t"
-                    data-ctrl-id="pin">
-              <span class="mat-sym" [class.filled]="locked()">push_pin</span>
-            </button>
-            <!-- HOME ("comb") — jumps to the domain root (hypercomb.io home),
-                 same target as the leading domain crumb. -->
-            <button class="ctl-btn rail-home"
-                    (click)="goHome()"
-                    [attr.aria-label]="'controls.home' | t">
-              <span class="mat-sym">home</span>
-            </button>
-          }
-          <!-- SCROLLABLE icon list — every control except back. As the set
-               grows the rail scrolls here while home (top) and the footer
-               (bottom) stay pinned and reachable. -->
-          <div class="controls-row">
+          <!-- SCROLLABLE icon list — EVERY control except the two footer
+               actions, in one continuous run. Pin and home lead it on the left
+               rail (they used to be pinned above it, which split the rail into
+               two stacks and left the scrollbar as a stub in the middle); now
+               the whole upper rail is one list and one scroll region, with only
+               the footer (adjust + back) pinned to the bottom.
+
+               (pointerdown) starts a drag-scroll: press anywhere in here —
+               including on an icon — and drag to move the list, the same as
+               the wheel does. Past the slop the icon does not fire on
+               release; touch is left to scroll the box natively. -->
+          <div class="controls-row"
+               [class.drag-scrolling]="dragScrolling()"
+               (pointerdown)="onListDragStart($event)">
+            @if (dockSide() === 'left') {
+              <!-- PIN leads the list so the view-lock toggle is the first thing
+                   reachable. Its active (view-locked) cue is pure CSS — accent
+                   colour + a solid chip — because macOS/Safari does not reliably
+                   repaint the Material Symbols FILL axis when it is toggled, so
+                   the .filled glyph alone leaves the locked state invisible
+                   there. -->
+              <button class="ctl-btn rail-pin"
+                      [class.active]="locked()"
+                      [class.lock-bump]="lockBump()"
+                      (click)="togglePin()"
+                      [attr.aria-label]="'controls.pin' | t"
+                      data-ctrl-id="pin">
+                <span class="mat-sym" [class.filled]="locked()">push_pin</span>
+              </button>
+              <!-- HOME ("comb") — jumps to the domain root (hypercomb.io home),
+                   same target as the leading domain crumb. -->
+              <button class="ctl-btn rail-home"
+                      (click)="goHome()"
+                      [attr.aria-label]="'controls.home' | t">
+                <span class="mat-sym">home</span>
+              </button>
+            }
             @for (ctrl of railControls(); track ctrl.id) {
               <button class="ctl-btn"
                       [class.active]="ctrl.id !== 'fit' && isActive(ctrl)"
@@ -201,10 +258,10 @@
               </button>
             }
           </div>
-          <!-- FOOTER — pinned to the BOTTOM of the rail. The edit-mode chevron
-               sits at the bottom of the list so it stays reachable even when
-               the icons overflow and scroll; back is anchored below it as the
-               very-bottom rail action. In the horizontal pill this zone
+          <!-- FOOTER — the only pinned zone, held at the BOTTOM of the rail:
+               the edit-mode chevron ("adjust items") with back anchored beneath
+               it. Both stay put while everything above scrolls. In the
+               horizontal pill this zone
                collapses (display:contents) and CSS order keeps back leftmost /
                chevron rightmost, exactly as before. -->
           <div class="rail-footer">

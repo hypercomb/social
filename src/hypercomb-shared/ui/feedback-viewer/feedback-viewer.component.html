@@ -18,14 +18,28 @@
         <span class="fv-title">{{ 'feedback.viewer.title' | t }}</span>
         <span class="fv-subtitle">{{ 'feedback.viewer.subtitle' | t }}</span>
       </div>
+      <!-- Reach scope — the same three reaches the pheromone filter uses:
+           this page / this page and below / the whole hive. -->
+      <div class="fv-scope" role="group" [attr.aria-label]="'tags.scope.title' | t">
+        @for (opt of scopeOptions; track opt.id) {
+          <button
+            type="button"
+            class="fv-scope-btn"
+            [class.active]="scope() === opt.id"
+            [attr.aria-pressed]="scope() === opt.id"
+            [title]="('tags.scope.' + opt.id + '.label') | t"
+            (click)="setScope(opt.id)"
+          ><span class="mat-sym">{{ opt.icon }}</span></button>
+        }
+      </div>
       <button class="fv-close" type="button" (click)="close()" [attr.aria-label]="'feedback.viewer.close' | t">×</button>
     </header>
 
-    @if (items().length === 0) {
-      <p class="fv-empty">{{ 'feedback.viewer.empty' | t }}</p>
+    @if (scoped().length === 0) {
+      <p class="fv-empty">{{ (items().length === 0 ? 'feedback.viewer.empty' : 'feedback.viewer.empty-scope') | t }}</p>
     } @else {
       <ul class="fv-list">
-        @for (item of items(); track trackBySig($index, item)) {
+        @for (item of scoped(); track trackBySig($index, item)) {
           <li class="fv-row" [class.issue]="item.category === 'issue'">
             <span class="fv-icon mat-sym">{{ icon(item.category) }}</span>
             <div class="fv-body">
@@ -42,5 +56,47 @@
         }
       </ul>
     }
+
+    <!-- Compose — the old share-feedback panel, docked at the bottom. -->
+    <footer class="fv-compose">
+      @if (needsPermission) {
+        <p class="fv-permission-hint">{{ 'feedback.permission.hint' | t }}</p>
+      }
+      <div class="fv-segmented" role="tablist" [attr.aria-label]="'feedback.category.label' | t">
+        <button
+          type="button"
+          role="tab"
+          class="fv-seg-btn"
+          [class.active]="category() === 'idea'"
+          [attr.aria-selected]="category() === 'idea'"
+          (click)="setCategory('idea')"
+        >
+          <span class="mat-sym">lightbulb</span>{{ 'feedback.category.idea' | t }}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          class="fv-seg-btn"
+          [class.active]="category() === 'issue'"
+          [attr.aria-selected]="category() === 'issue'"
+          (click)="setCategory('issue')"
+        >
+          <span class="mat-sym">bug_report</span>{{ 'feedback.category.issue' | t }}
+        </button>
+      </div>
+
+      <textarea
+        class="fv-compose-text"
+        rows="3"
+        [(ngModel)]="text"
+        [placeholder]="'feedback.placeholder' | t"
+      ></textarea>
+
+      <div class="fv-actions">
+        <button class="fv-btn primary" type="button" (click)="submit()" [disabled]="!canSubmit">
+          {{ (needsPermission ? 'feedback.request.send' : 'feedback.send') | t }}
+        </button>
+      </div>
+    </footer>
   </section>
 }

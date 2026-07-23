@@ -84,10 +84,30 @@ type DropTarget = {
 }
 
 type Scope = 'tile' | 'selection' | 'all'
-type OpenSpec = { scope: Scope; labels: string[]; title: string }
+/** How wide a file gather reaches. Same three reaches — and the same words —
+ *  as the pheromone filter and the feedback panel, so "this page / and below /
+ *  the whole hive" means one thing everywhere in the app. */
+type Reach = 'local' | 'children' | 'global'
+type OpenSpec = {
+  scope: Scope
+  labels: string[]
+  title: string
+  /** Absolute path per label. Present once a gather has reached past the
+   *  current page, where a bare label no longer locates the tile. */
+  paths?: Map<string, string[]>
+}
 
 type StoreLike = { putResource(blob: Blob): Promise<string> }
 type LineageLike = { explorerSegments?: () => readonly string[] }
+type HistoryLike = {
+  sign(l: { explorerSegments?: () => readonly string[] }): Promise<string>
+  currentLayerAt(sig: string): Promise<Record<string, unknown> | null>
+  getLayerBySig(sig: string): Promise<{ name?: string } | null>
+}
+
+const SIG_RE = /^[0-9a-f]{64}$/
+/** Same ceiling the tag flatten walks to. */
+const MAX_DEPTH = 32
 type DropboxLike = { active(): boolean; accepts(file: { name: string; type?: string }): boolean }
 
 const lastOf = (a: readonly string[]): string => (a.length ? a[a.length - 1] : '')
@@ -97,10 +117,10 @@ export class FileDropDrone extends Drone {
   override genotype = 'files'
 
   public override description =
-    'Attaches dropped documents to tiles in a dropbox subtree and serves the file list (tile / selection / all) for the viewer panel.'
+    'Attaches dropped documents to tiles in a dropbox subtree and serves the file list for the viewer panel — one tile, a selection, or gathered across this page, this page and below, or the whole hive.'
 
   protected override emits = ['files:open', 'selection:has-documents']
-  protected override listens = ['drop:target', 'render:cell-count', 'tile:action', 'files:open-scope', 'files:remove', 'files:viewer', 'decorations:changed', 'cell:attach-resource', 'selection:changed', 'controls:action']
+  protected override listens = ['drop:target', 'render:cell-count', 'tile:action', 'files:open-scope', 'files:reach', 'files:remove', 'files:viewer', 'decorations:changed', 'cell:attach-resource', 'selection:changed', 'controls:action']
 
   /** Last hex position reported by TileOverlayDrone during drag. */
   #lastTarget: DropTarget | null = null
@@ -108,6 +128,9 @@ export class FileDropDrone extends Drone {
   #viewLabels: string[] = []
   /** What the open panel is showing (for live refresh). */
   #open: OpenSpec | null = null
+  /** Reach of the last gather. The panel's header trio drives this; every
+   *  other way in (tile icon, selection) resets it to the page. */
+  #reach: Reach = 'local'
   #effectsRegistered = false
 
   constructor() {
@@ -129,13 +152,24 @@ export class FileDropDrone extends Drone {
     // File icon clicked → open the viewer for that single tile.
     this.onEffect<{ action: string; label: string }>('tile:action', (p) => {
       if (p?.action !== 'files' || !p.label) return
+      this.#reach = 'local'
       this.#open = { scope: 'tile', labels: [p.label], title: p.label }
       void this.#listAndEmit()
+    })
+
+    // The panel's reach trio. Widening is always an AGGREGATE view — the
+    // question "what files are in here?" only has a per-tile answer at the
+    // narrowest reach — so this re-gathers rather than re-filtering a list.
+    this.onEffect<{ reach?: Reach }>('files:reach', (p) => {
+      const reach: Reach = p?.reach === 'children' || p?.reach === 'global' ? p.reach : 'local'
+      this.#reach = reach
+      void this.#gatherAtReach()
     })
 
     // /files → aggregate across a selection or the whole view.
     this.onEffect<{ scope: Scope; labels?: string[]; title?: string }>('files:open-scope', (p) => {
       if (!p) return
+      this.#reach = 'local'
       if (p.scope === 'selection') {
         const labels = (p.labels ?? []).map(String).filter(Boolean)
         this.#open = { scope: 'selection', labels, title: p.title ?? `${labels.length} selected` }
@@ -354,16 +388,89 @@ export class FileDropDrone extends Drone {
 
   // ── viewer data ───────────────────────────────────────────────
 
+  /** Re-gather at the current reach and open the aggregate view.
+   *  local    — the tiles on this page (what `/files` has always shown)
+   *  children — this page and everything under it, however deep
+   *  global   — the whole hive, from the root down */
+  async #gatherAtReach(): Promise<void> {
+    const reach = this.#reach
+    if (reach === 'local') {
+      const labels = this.#viewLabels.filter(l => hasDecorationKind(l, FILES_ATTACHMENT_KIND))
+      this.#open = { scope: 'all', labels, title: 'all files' }
+      await this.#listAndEmit()
+      return
+    }
+
+    const found = await this.#walkForCells(reach === 'global' ? [] : this.#parentSegments())
+    this.#open = {
+      scope: 'all',
+      labels: found.map(c => c.label),
+      title: 'all files',
+      paths: new Map(found.map(c => [c.label, c.path])),
+    }
+    await this.#listAndEmit()
+  }
+
+  /** Every cell at or below `root`, with its absolute path. Mirrors the tag
+   *  flatten's walk (sign path → currentLayerAt → recurse `children`): the
+   *  layer tree is the only source of truth for what tiles exist, and a
+   *  child entry may be a name or a signature. Cells are deduped by label —
+   *  the panel keys its rows that way. */
+  async #walkForCells(root: string[]): Promise<{ label: string; path: string[] }[]> {
+    const history = get('@diamondcoreprocessor.com/HistoryService') as HistoryLike | undefined
+    if (!history?.sign || !history?.currentLayerAt) return []
+
+    const out: { label: string; path: string[] }[] = []
+    const seen = new Set<string>()
+
+    const walk = async (path: string[], depth: number): Promise<void> => {
+      if (depth > MAX_DEPTH) return
+      let layer: Record<string, unknown> | null
+      try {
+        layer = await history.currentLayerAt(await history.sign({ explorerSegments: () => path }))
+      } catch { return }
+      if (!layer) return
+
+      if (depth >= 1) {
+        const label = lastOf(path)
+        if (label && !seen.has(label)) { seen.add(label); out.push({ label, path: [...path] }) }
+      }
+
+      const children = Array.isArray(layer['children']) ? layer['children'] as unknown[] : []
+      for (const entry of children) {
+        const raw = String(entry ?? '').trim()
+        if (!raw) continue
+        let name = raw
+        if (SIG_RE.test(raw)) {
+          try {
+            const child = await history.getLayerBySig(raw)
+            if (!child?.name) continue
+            name = String(child.name)
+          } catch { continue }
+        }
+        await walk([...path, name], depth + 1)
+      }
+    }
+
+    await walk(root, 0)
+    return out
+  }
+
   async #listAndEmit(): Promise<void> {
     const open = this.#open
     if (!open) return
     const parent = this.#parentSegments()
     const aggregate = open.scope !== 'tile'
-    const files: Array<{ name: string; mime: string; size: number; sig: string; decorationSig: string; cell?: string }> = []
+    const files: Array<{
+      name: string; mime: string; size: number; sig: string
+      decorationSig: string; cell?: string; path?: string[]
+    }> = []
 
     try {
       for (const label of open.labels) {
-        const segments = [...parent, label]
+        // Past the current page a bare label doesn't locate the tile, so the
+        // gather's recorded path wins wherever it has one.
+        const segments = open.paths?.get(label) ?? [...parent, label]
         const found = await listAttachments(segments)
         for (const f of found) {
           files.push({
@@ -372,7 +479,7 @@ export class FileDropDrone extends Drone {
             size: f.payload.size,
             sig: f.payload.sig,        // bytes resource — for download
             decorationSig: f.sig,      // decoration record — for remove
-            ...(aggregate ? { cell: label } : {}),
+            ...(aggregate ? { cell: label, path: segments } : {}),
           })
         }
       }
@@ -381,9 +488,12 @@ export class FileDropDrone extends Drone {
     }
 
     // In tile mode `segments` is the tile itself; in aggregate mode it's
-    // the common parent and each file carries its own `cell`.
+    // the common parent and each file carries its own `cell` (and, once the
+    // gather reaches past this page, its own absolute `path`).
     const segments = aggregate ? parent : [...parent, open.labels[0] ?? '']
-    EffectBus.emit('files:open', { cellLabel: open.title, segments, scope: open.scope, files })
+    EffectBus.emit('files:open', {
+      cellLabel: open.title, segments, scope: open.scope, reach: this.#reach, files,
+    })
   }
 
   // ── IoC accessors ─────────────────────────────────────────────

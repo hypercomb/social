@@ -13,34 +13,66 @@
     role="dialog"
     [attr.aria-label]="'tags.viewer.title' | t"
   >
+    <!-- Reach rides in the header, the same segmented trio the feedback panel
+         and the bottom strip use — one place to look for reach, whichever
+         surface you're on. The label and its explanation live in the tooltip. -->
     <header class="tags-header">
-      <span class="tags-title">{{ 'tags.viewer.title' | t }}</span>
-      <span class="tags-total">{{ totalTags() }}</span>
+      <div class="tags-heading">
+        <span class="tags-title">{{ 'tags.viewer.title' | t }}</span>
+        <span class="tags-total">{{ totalTags() }}</span>
+      </div>
+      <div class="tags-scope" role="group" [attr.aria-label]="'tags.scope.title' | t">
+        @for (opt of scopeOptions; track opt.id) {
+          <button
+            type="button"
+            class="tags-scope-btn"
+            [class.active]="isScope(opt.id)"
+            [attr.aria-pressed]="isScope(opt.id)"
+            [title]="('tags.scope.' + opt.id + '.label' | t) + ' — ' + ('tags.scope.' + opt.id + '.desc' | t)"
+            (click)="setScope(opt.id)"
+          ><span class="mat-sym">{{ opt.icon }}</span></button>
+        }
+      </div>
       <button class="tags-close" type="button" (click)="close()" [attr.aria-label]="'tags.close' | t">×</button>
     </header>
 
     <p class="tags-intro">{{ 'tags.intro' | t }}</p>
 
-    <!-- Reach. Was a single glyph cycling through three states with only a
-         tooltip to explain it; here each reach is named and described. -->
-    <section class="tags-scope-section">
-      <h3 class="tags-section-title">{{ 'tags.scope.title' | t }}</h3>
-      @for (opt of scopeOptions; track opt.id) {
-        <button
-          class="scope-option"
-          type="button"
-          [class.selected]="isScope(opt.id)"
-          [attr.aria-pressed]="isScope(opt.id)"
-          (click)="setScope(opt.id)"
-        >
-          <span class="mat-sym scope-icon">{{ opt.icon }}</span>
-          <span class="scope-text">
-            <span class="scope-label">{{ 'tags.scope.' + opt.id + '.label' | t }}</span>
-            <span class="scope-desc">{{ 'tags.scope.' + opt.id + '.desc' | t }}</span>
-          </span>
-        </button>
-      }
-    </section>
+    <!-- Armed removal: the review surface. The hive is filtered to this
+         keyword; every tile you click joins the list below and paints
+         struck-through. Nothing is written until Remove. -->
+    @if (removalTag(); as tag) {
+      <section class="tags-removal-section">
+        <h3 class="tags-section-title removal-title">{{ 'tags.removal.title' | t: { tag: tag } }}</h3>
+        <p class="removal-hint">{{ 'tags.removal.hint' | t }}</p>
+
+        @if (removalCount() === 0) {
+          <p class="removal-empty">{{ 'tags.removal.empty' | t }}</p>
+        } @else {
+          <ul class="removal-list">
+            @for (cell of removalCells(); track cell) {
+              <li class="removal-cell">
+                <span class="mat-sym removal-cell-icon">close</span>
+                <span class="removal-cell-name">{{ cell }}</span>
+              </li>
+            }
+          </ul>
+        }
+
+        <div class="removal-actions">
+          <button
+            class="removal-commit"
+            type="button"
+            [disabled]="removalCount() === 0"
+            (click)="commitRemoval()"
+          >{{ 'tags.removal.commit' | t: { count: removalCount() } }}</button>
+          <button class="removal-all" type="button" (click)="stageAllShown()">{{ 'tags.removal.all' | t }}</button>
+          <button class="removal-cancel" type="button" (click)="cancelRemoval()">{{ 'tags.removal.cancel' | t }}</button>
+        </div>
+
+        <button class="removal-forget" type="button" (click)="forgetTag(tag)">{{ 'tags.removal.forget' | t }}</button>
+      </section>
+    }
 
     <!-- What is filtered right now, and the way out of it. -->
     <section class="tags-active-section">
@@ -63,7 +95,7 @@
       <h3 class="tags-section-title">{{ 'tags.list.title' | t }}</h3>
       <ul class="tags-list">
         @for (row of rows(); track row.name) {
-          <li class="tags-row" [class.filtered]="isFiltered(row.name)">
+          <li class="tags-row" [class.filtered]="isFiltered(row.name)" [class.staging]="isStaging(row.name)">
             <label class="tag-swatch" [style.background]="row.color" [attr.title]="'tags.recolor' | t">
               <input type="color" [value]="row.color" (change)="recolor(row.name, $event)" />
             </label>
@@ -75,13 +107,16 @@
               [attr.title]="'tags.filter.hint' | t"
             >{{ row.name }}</button>
             <span class="tag-count" [attr.title]="'tags.count.hint' | t">{{ row.count }}</span>
+            <!-- Arms the staged removal; clicking it again commits whatever is
+                 staged, which is why it turns into a tick. -->
             <button
               class="tag-remove"
               type="button"
-              (click)="remove(row.name)"
+              [class.armed]="isStaging(row.name)"
+              (click)="beginRemoval(row.name)"
               [attr.aria-label]="'tags.remove' | t: { tag: row.name }"
-              [attr.title]="'tags.remove.hint' | t"
-            >×</button>
+              [attr.title]="(isStaging(row.name) ? 'tags.removal.commit.hint' : 'tags.remove.hint') | t"
+            >{{ isStaging(row.name) ? '✓' : '×' }}</button>
           </li>
         }
       </ul>

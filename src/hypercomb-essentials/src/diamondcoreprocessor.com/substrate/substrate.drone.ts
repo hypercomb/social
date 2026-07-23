@@ -20,7 +20,7 @@ export class SubstrateDrone extends Drone {
   protected override listens = [
     'cell:added', 'cell:removed',
     'substrate:changed', 'substrate:folder-permission',
-    'drop:pending', 'clipboard:paste-start', 'clipboard:paste-done',
+    'clipboard:paste-start', 'clipboard:paste-done',
     'editor:mode', 'render:cell-count',
     'cell:attach-pending',
     'indicator:click',
@@ -28,7 +28,6 @@ export class SubstrateDrone extends Drone {
   protected override emits = ['substrate:applied', 'substrate:ready', 'indicator:set', 'indicator:clear', 'substrate-organizer:open', 'activity:log']
 
   #initialized = false
-  #dropPending = false
   #pastePending = false
   #editorActive = false
   #visibilityBound = false
@@ -53,7 +52,6 @@ export class SubstrateDrone extends Drone {
       })
     }
 
-    this.onEffect<{ active: boolean }>('drop:pending', (p) => { this.#dropPending = p?.active ?? false })
     this.onEffect('clipboard:paste-start', () => { this.#pastePending = true })
     this.onEffect('clipboard:paste-done',  () => { this.#pastePending = false })
     this.onEffect<{ active: boolean }>('editor:mode', (p) => { this.#editorActive = p?.active ?? false })
@@ -71,7 +69,7 @@ export class SubstrateDrone extends Drone {
     // the assignment lands on the exact hive location, not the bare name.
     this.onEffect<{ cell: string; segments?: readonly string[] }>('cell:added', ({ cell, segments }) => {
       if (!cell) return
-      if (this.#dropPending || this.#pastePending || this.#editorActive) return
+      if (this.#pastePending || this.#editorActive) return
       if (this.#attachPending.has(cell)) return
       const svc = this.#service()
       if (!svc) return

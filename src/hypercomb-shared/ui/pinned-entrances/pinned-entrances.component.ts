@@ -10,6 +10,12 @@
 // launcher tiles.
 //
 //   click a pin      → open the entrance (the owning group's own routing)
+//   ctrl/cmd+click   → the owning group's AGGREGATE page (/websites, …) —
+//                      the "every instance of this behavior" view. Only when
+//                      the group provides a browsable page (openDirectly
+//                      groups don't); otherwise the modifier degrades to the
+//                      plain open. This is the sole header route to a group
+//                      page — no auto strip exists when nothing is pinned.
 //   drag a pin OFF   → let go to remove it
 //   drop-target      → while an entrance badge drag is in flight
 //                      (EffectBus `entrance:drag-start` / `entrance:drag-end`,
@@ -29,6 +35,7 @@
 
 import { Component, ElementRef, OnDestroy, inject, signal } from '@angular/core'
 import { EffectBus } from '@hypercomb/core'
+import { TranslatePipe } from '../../core/i18n.pipe'
 import { groupRegistry, type GroupMember, type LaunchGroup } from '../../core/group-registry'
 import { pinnedEntrances, type PinnedEntrance } from '../../core/pinned-entrances.store'
 import { registerProximityProvider } from '../../core/proximity-registry'
@@ -46,6 +53,11 @@ type PinView = {
   level: string[]
   /** Reaching us by cascade rather than by being pinned right here. */
   cascaded: boolean
+  /** The owning group's display label — the Ctrl+click tooltip names it. */
+  groupLabel: string
+  /** The owning group has a browsable aggregate page (/websites, …) for
+   *  Ctrl+click to open. False for openDirectly groups and unknown groups. */
+  hasAggregate: boolean
 }
 
 type LineageLike = EventTarget & { explorerSegments?: () => readonly string[] }
@@ -65,7 +77,7 @@ const REMOVE_SLOP_PX = 24
 @Component({
   selector: 'hc-pinned-entrances',
   standalone: true,
-  imports: [],
+  imports: [TranslatePipe],
   templateUrl: './pinned-entrances.component.html',
   styleUrls: ['./pinned-entrances.component.scss'],
   host: { 'data-entrance-dropzone': '' },
@@ -162,7 +174,7 @@ export class PinnedEntrancesComponent implements OnDestroy {
     const wasOut = this.draggingOut()
     this.draggingKey.set('')
     this.draggingOut.set(false)
-    if (!wasDrag) { this.#open(d.pin); return }
+    if (!wasDrag) { this.#open(d.pin, ev.ctrlKey || ev.metaKey); return }
     // Dragged off the bar and let go → remove the pin. Target the level that
     // STORES it, which for a cascaded pin is an ancestor page, not the one
     // we're standing on — removing from here would silently no-op and the
@@ -200,13 +212,23 @@ export class PinnedEntrancesComponent implements OnDestroy {
     return out
   }
 
-  #open(pin: PinView): void {
+  #open(pin: PinView, wantAggregate = false): void {
     const group = groupRegistry.get(pin.groupId)
     if (!group) return
+    // Ctrl/Cmd+click = the owning group's aggregate page, when it has one to
+    // show. Without one the modifier click degrades to the plain open — a
+    // held modifier must never turn a working pin into a dead end.
+    if (wantAggregate && !group.openDirectly) { groupRegistry.show(group.id); return }
     const member = pin.member
       ?? group.members().find(m => m.key === pin.memberKey)
       ?? null
     if (member) group.open(member)
+  }
+
+  /** Hover intent: warm the owning group's aggregate page so a Ctrl+click
+   *  lands fast (read-only, non-navigating; no-op without a page). */
+  onPinEnter(pin: PinView): void {
+    if (pin.hasAggregate) groupRegistry.prewarmGroup(pin.groupId)
   }
 
   #segments(): readonly string[] {
@@ -275,6 +297,8 @@ export class PinnedEntrancesComponent implements OnDestroy {
         member,
         level,
         cascaded: level.join('/') !== hereKey,
+        groupLabel: group?.label || pin.groupId,
+        hasAggregate: !!group && !group.openDirectly,
       }
     }))
   }

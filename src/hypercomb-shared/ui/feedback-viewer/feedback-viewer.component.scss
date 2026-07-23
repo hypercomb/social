@@ -1,8 +1,9 @@
 // hypercomb-shared/ui/feedback-viewer/feedback-viewer.component.scss
 //
-// Right-docked "Feedback" review panel. Not a dimming modal — the hive stays
-// visible behind it (host pointer-events:none; panel auto). Steel accent
-// matches the feedback button. Cold, clean chrome.
+// Right-docked "Feedback" panel — inbox list on top, share-feedback compose
+// form at the bottom, reach-scope icons in the header. Not a dimming modal —
+// the hive stays visible behind it (host pointer-events:none; panel auto).
+// Steel accent. Cold, clean chrome.
 
 @use '../breakpoints' as *;
 @use '../toolwindow' as tw;
@@ -62,6 +63,44 @@ $steel: rgb(126, 182, 214);
   color: rgba(206, 224, 240, 0.5);
 }
 
+// ── reach scope (mirrors the pheromone panel's three reaches) ──
+.fv-scope {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0.2rem;
+  margin-left: auto;
+  padding: 0.15rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+}
+
+.fv-scope-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.24rem 0.4rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: rgba(226, 235, 244, 0.55);
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
+
+  .mat-sym {
+    font-family: 'Material Symbols Outlined';
+    font-size: 1rem;
+    line-height: 1;
+  }
+
+  &:hover { color: rgba(238, 243, 248, 0.9); }
+  &.active {
+    color: #fff;
+    background: rgba($steel, 0.16);
+    border-color: rgba($steel, 0.45);
+  }
+}
+
 .fv-close {
   flex-shrink: 0;
   background: transparent;
@@ -80,6 +119,8 @@ $steel: rgb(126, 182, 214);
   padding: 1.5rem 1rem;
   font-size: 0.82rem;
   color: rgba(226, 235, 244, 0.45);
+  // Fill the middle so the compose footer stays pinned to the floor.
+  flex: 1;
 }
 
 .fv-list {
@@ -165,6 +206,110 @@ $steel: rgb(126, 182, 214);
     color: #fff;
     background: rgba($steel, 0.16);
     border-color: rgba($steel, 0.55);
+  }
+}
+
+// ── compose (the old share-feedback panel, docked at the bottom) ──
+.fv-compose {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem 0.85rem;
+  border-top: 1px solid rgba($steel, 0.22);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.fv-permission-hint {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: rgba(206, 224, 240, 0.85);
+  background: rgba($steel, 0.1);
+  border: 1px solid rgba($steel, 0.28);
+  border-radius: 7px;
+}
+
+.fv-segmented {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.2rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+}
+
+.fv-seg-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.5rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: rgba(226, 235, 244, 0.6);
+  font-family: inherit;
+  font-size: 0.76rem;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
+
+  .mat-sym { font-family: 'Material Symbols Outlined'; font-size: 1rem; line-height: 1; }
+
+  &:hover { color: rgba(238, 243, 248, 0.85); }
+  &.active {
+    color: #fff;
+    background: rgba($steel, 0.16);
+    border-color: rgba($steel, 0.45);
+  }
+}
+
+.fv-compose-text {
+  font-family: inherit;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: #eef3f8;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 7px;
+  padding: 0.55rem 0.65rem;
+  resize: vertical;
+  min-height: 3.4rem;
+  outline: none;
+  transition: border-color 150ms ease, background 150ms ease;
+
+  &::placeholder { color: rgba(226, 235, 244, 0.35); }
+  &:focus {
+    border-color: rgba($steel, 0.6);
+    background: rgba($steel, 0.05);
+  }
+}
+
+.fv-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.fv-btn {
+  font-family: inherit;
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 0.42rem 0.95rem;
+  transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+
+  &.primary {
+    background: rgba($steel, 0.16);
+    border: 1px solid rgba($steel, 0.55);
+    color: rgba(206, 224, 240, 0.95);
+    &:hover:not(:disabled) { background: rgba($steel, 0.28); color: #fff; border-color: rgba($steel, 0.9); }
+    &:disabled { opacity: 0.4; cursor: not-allowed; }
   }
 }
 

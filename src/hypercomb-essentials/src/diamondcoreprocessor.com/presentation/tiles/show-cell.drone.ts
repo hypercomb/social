@@ -47,12 +47,17 @@ type Cell = { q: number; r: number; label: string; external: boolean; imageSig?:
  *  addressable directly. Resolved LIVE against the shell's GroupLauncher
  *  registry over IoC at call time (modules must not IMPORT shared — an IoC
  *  read is the sanctioned bridge). Legacy `agg-` locations still count so old
- *  history renders. */
+ *  history renders.
+ *
+ *  `openDirectly` groups are EXCLUDED per the LaunchGroup contract
+ *  (group-registry.ts): they have no browsable aggregator page, so /<id> is a
+ *  REAL cell page (the dashboard's question tiles live at /dashboard). */
 function isLauncherLocation(segs: readonly unknown[]): boolean {
   if (segs.length !== 1 || typeof segs[0] !== 'string') return false
   if (segs[0].startsWith('agg-')) return true
-  const reg = (window as any).ioc?.get?.('@hypercomb.social/GroupLauncher') as { get?: (id: string) => unknown } | undefined
-  return !!reg?.get?.(segs[0])
+  const reg = (window as any).ioc?.get?.('@hypercomb.social/GroupLauncher') as { get?: (id: string) => { openDirectly?: boolean } | undefined } | undefined
+  const group = reg?.get?.(segs[0])
+  return !!group && group.openDirectly !== true
 }
 
 /** Map a launch group's shape id (from its `launch:target` decoration) to the
@@ -465,7 +470,7 @@ export class ShowCellDrone extends Drone {
     layout: '@diamondcoreprocessor.com/LayoutService',
   }
 
-  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'neon:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden', 'content:arrived']
+  protected override listens = ['render:host-ready', 'mesh:ready', 'mesh:items-updated', 'tile:saved', 'search:filter', 'render:set-orientation', 'render:set-pivot', 'mesh:room', 'mesh:secret', 'cell:place-at', 'cell:reorder', 'render:set-gap', 'move:preview', 'clipboard:captured', 'layout:mode', 'tags:changed', 'tags:filter', 'tags:indexed', 'tags:removal-pending', 'history:cursor-changed', 'tile:toggle-text', 'visibility:show-hidden', 'world:mode', 'neon:mode', 'tile:public-changed', 'overlay:neon-color', 'translation:tile-start', 'translation:tile-done', 'locale:changed', 'substrate:changed', 'substrate:ready', 'substrate:applied', 'substrate:rerolled', 'cell:added', 'cell:removed', 'swarm:peers-changed', 'swarm:interest-changed', 'swarm:resource-arrived', 'swarm:hide-changed', 'tile:hidden', 'tile:unhidden', 'content:arrived']
   protected override emits = ['mesh:ensure-started', 'mesh:subscribe', 'mesh:publish', 'render:mesh-offset', 'render:cell-count', 'render:geometry-changed', 'render:tags', 'tile:hover-tags', 'swarm:empty-layer', 'content:missing']
   private geom: Geometry | null = null
   private shader: HexSdfTextureShader | null = null
@@ -873,6 +878,11 @@ export class ShowCellDrone extends Drone {
   #divergenceFutureAdds = new Set<string>()
   #divergenceFutureRemoves = new Set<string>()
   #pendingRemoves = new Set<string>()
+  /** Tiles staged to lose the keyword being removed (TagRemovalDrone). They
+   *  render as a future-remove — struck through, as if the pheromone were
+   *  already gone — while the participant builds the list. Nothing is written
+   *  until the commit, so this is pure intent, cleared on cancel. */
+  #tagRemovalStaged = new Set<string>()
   /** When cursor is rewound, holds cell→propertiesSig overrides from content-state ops. */
   #cursorPropsOverride: Map<string, string> | null = null
   /** Cache key for cursor-time reconstruction: `{locationSig}:{position}` — avoids redundant OPFS reads */
@@ -4562,6 +4572,19 @@ export class ShowCellDrone extends Drone {
       this.requestRender()
     })
 
+    // tags:removal-pending — TagRemovalDrone's staged set for the keyword being
+    // removed. Purely visual: the staged tiles paint as future-removes so the
+    // pending change is legible on the hive itself, not only in the panel's
+    // list. No geometry moves; only the divergence attribute rebakes.
+    this.onEffect<{ cells?: string[] }>('tags:removal-pending', ({ cells }) => {
+      const next = new Set(Array.isArray(cells) ? cells : [])
+      if (next.size === this.#tagRemovalStaged.size
+        && [...next].every(l => this.#tagRemovalStaged.has(l))) return
+      this.#tagRemovalStaged = next
+      this.renderedCellsKey = ''
+      this.requestRender()
+    })
+
     // tags:filter effect — tag flatten, scoped to page / children / global
     this.onEffect<{ active: string[]; scope?: 'local' | 'children' | 'global' }>('tags:filter', ({ active, scope }) => {
       const wasFiltering = this.filterTags.size > 0
@@ -6241,7 +6264,13 @@ export class ShowCellDrone extends Drone {
       }
       if (!label) continue
 
-      const div = this.#divergenceFutureAdds.has(label) ? 1 : this.#divergenceFutureRemoves.has(label) ? 2 : 0
+      // Staged-for-removal tiles borrow the future-remove treatment: this
+      // pheromone is about to leave them, which is exactly what that mark
+      // means. Ahead of the cursor divergence marks — an armed removal is
+      // what the participant is looking at right now.
+      const div = this.#tagRemovalStaged.has(label) ? 2
+        : this.#divergenceFutureAdds.has(label) ? 1
+          : this.#divergenceFutureRemoves.has(label) ? 2 : 0
       // Heat ring = max(transient activity heat, steady peer-presence glow).
       // The activity pulse (new-cell fade, hover) still plays on top; the
       // presence glow keeps a tile lit while peers are exploring inside it.

@@ -9,6 +9,9 @@
 @use '../toolwindow' as tw;
 
 $steel: #7eb6d6;
+// The one warm accent in a cold panel — used only by the armed-removal
+// surface, and matched to the strikethrough the staged tiles carry on canvas.
+$amber: #d99a4e;
 
 :host {
   position: fixed;
@@ -39,7 +42,15 @@ $steel: #7eb6d6;
 
 .tags-header {
   @include tw.header;
+  justify-content: space-between;
   border-bottom: 1px solid rgba($steel, 0.25);
+}
+
+.tags-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  min-width: 0;
 }
 
 .tags-title {
@@ -56,8 +67,42 @@ $steel: #7eb6d6;
   padding: 0.05em 0.55em;
 }
 
-.tags-close {
+// ── reach, in the header (mirrors the feedback panel) ─────
+.tags-scope {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0.2rem;
   margin-left: auto;
+  padding: 0.15rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+}
+
+.tags-scope-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.24rem 0.4rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: rgba(226, 235, 244, 0.55);
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
+
+  .mat-sym { font-size: 1rem; line-height: 1; }
+
+  &:hover { color: rgba(238, 243, 248, 0.9); }
+
+  &.active {
+    color: #fff;
+    background: rgba($steel, 0.16);
+    border-color: rgba($steel, 0.45);
+  }
+}
+
+.tags-close {
   background: none;
   border: none;
   color: #9fb3c2;
@@ -82,7 +127,7 @@ $steel: #7eb6d6;
 // fixed block so a short viewport squeezes the list, never the explanations.
 .tags-intro,
 .tags-section-title,
-.tags-scope-section,
+.tags-removal-section,
 .tags-active-section { flex: 0 0 auto; }
 
 .tags-intro {
@@ -103,64 +148,9 @@ $steel: #7eb6d6;
   text-transform: uppercase;
 }
 
-// ── reach picker ──────────────────────────────────────────
-
-.tags-scope-section {
-  border-top: 1px solid rgba($steel, 0.12);
-  padding-bottom: 0.45em;
-}
-
-.scope-option {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.6em;
-  width: 100%;
-  text-align: left;
-  padding: 0.45em 1em;
-  background: none;
-  border: none;
-  border-left: 2px solid transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
-
-  &:hover { background: rgba($steel, 0.06); }
-
-  // the selected reach carries the steel edge — same cue the docked panels use
-  &.selected {
-    background: rgba($steel, 0.12);
-    border-left-color: rgba($steel, 0.85);
-
-    .scope-label { color: #eaf5fb; font-weight: 600; }
-    .scope-icon { color: $steel; }
-  }
-}
-
-.scope-icon {
-  flex: 0 0 auto;
-  font-size: 1.05em;
-  line-height: 1.2;
-  color: #6e8290;
-}
-
-.scope-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0.12em;
-  min-width: 0;
-}
-
-.scope-label {
-  font-size: 0.82em;
-  color: #c6d5e0;
-}
-
-.scope-desc {
-  font-size: 0.7em;
-  line-height: 1.4;
-  color: #8ea2b0;
-}
+// Reach used to be a full-width list of three named + described rows here.
+// It now rides in the header as the segmented trio (see `.tags-scope` above),
+// so every panel that has a reach shows it in the same place.
 
 // ── current filter state ──────────────────────────────────
 
@@ -217,6 +207,117 @@ $steel: #7eb6d6;
   &:hover { background: rgba($steel, 0.16); color: #fff; }
 }
 
+// ── armed removal ─────────────────────────────────────────
+//
+// The only state in this panel that is about to change the hive, so it is the
+// only one that carries colour.
+
+.tags-removal-section {
+  border-top: 1px solid rgba($amber, 0.35);
+  border-bottom: 1px solid rgba($amber, 0.35);
+  background: rgba($amber, 0.07);
+  padding-bottom: 0.7em;
+}
+
+.removal-title { color: rgba($amber, 0.95); }
+
+.removal-hint,
+.removal-empty {
+  margin: 0;
+  padding: 0 1em 0.5em;
+  font-size: 0.72em;
+  line-height: 1.45;
+  color: #a89880;
+}
+
+.removal-empty { color: rgba($amber, 0.8); }
+
+.removal-list {
+  list-style: none;
+  margin: 0 0 0.6em;
+  padding: 0 1em;
+  max-height: 9em;
+  overflow-y: auto;
+}
+
+.removal-cell {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.12em 0;
+  font-size: 0.76em;
+  color: #e6d5bd;
+}
+
+.removal-cell-icon {
+  flex: 0 0 auto;
+  font-size: 0.9em;
+  color: rgba($amber, 0.9);
+}
+
+.removal-cell-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: line-through;
+  text-decoration-color: rgba($amber, 0.7);
+}
+
+.removal-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4em;
+  flex-wrap: wrap;
+  padding: 0 1em;
+}
+
+.removal-commit,
+.removal-all,
+.removal-cancel {
+  background: none;
+  border: 1px solid rgba($steel, 0.35);
+  border-radius: 3px;
+  color: #c6d5e0;
+  font: inherit;
+  font-size: 0.72em;
+  padding: 0.2em 0.65em;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+
+  &:hover { background: rgba($steel, 0.16); color: #fff; }
+}
+
+.removal-commit {
+  border-color: rgba($amber, 0.6);
+  color: #f0d9b6;
+
+  &:hover:not(:disabled) { background: rgba($amber, 0.22); color: #fff; }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+    border-color: rgba($steel, 0.2);
+    color: #8ea2b0;
+  }
+}
+
+.removal-forget {
+  display: block;
+  margin: 0.6em 1em 0;
+  background: none;
+  border: none;
+  padding: 0;
+  color: #8ea2b0;
+  font: inherit;
+  font-size: 0.68em;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+
+  &:hover { color: #e06b6b; }
+}
+
 .tags-list {
   list-style: none;
   margin: 0;
@@ -234,6 +335,8 @@ $steel: #7eb6d6;
 
   &:hover { background: rgba($steel, 0.06); }
   &.filtered { background: rgba($steel, 0.14); }
+  // the row whose removal is armed carries the same amber as its section
+  &.staging { background: rgba($amber, 0.16); }
 }
 
 .tag-swatch {
@@ -295,6 +398,15 @@ $steel: #7eb6d6;
 
   .tags-row:hover & { opacity: 1; }
   &:hover { color: #e06b6b; }
+
+  // armed: the tick stays visible without a hover — it is the commit control
+  // for whatever is staged, so it must never be hidden.
+  &.armed {
+    opacity: 1;
+    color: $amber;
+
+    &:hover { color: #f0d9b6; }
+  }
 }
 
 .tags-foot {

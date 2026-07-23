@@ -827,7 +827,13 @@ export class SiteViewDrone extends Drone {
   #setViewActive(active: boolean): void {
     if (this.#viewActive === active) return
     this.#viewActive = active
-    this.emitEffect<{ active: boolean }>('view:active', { active })
+    // Owner-counted, not a raw boolean: a modal/photo closing on top of this
+    // view must not unhide the chrome while this view is still open
+    // (see navigation/mode-registry.service.ts).
+    const modes = window.ioc.get('@diamondcoreprocessor.com/ModeRegistry') as
+      { enter(mode: string, owner: string): void; exit(mode: string, owner: string): void } | undefined
+    if (active) modes?.enter('view:active', 'site-view')
+    else modes?.exit('view:active', 'site-view')
   }
 
   /**

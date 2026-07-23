@@ -13,9 +13,26 @@
     role="dialog"
     [attr.aria-label]="'files.viewer.title' | t"
   >
+    <!-- Reach in the header, the same segmented trio as the pheromone and
+         feedback panels: gather files from this page, this page and
+         everything under it, or the whole hive. -->
     <header class="files-header">
-      <span class="files-title">{{ 'files.viewer.title' | t }}</span>
-      <span class="files-cell">{{ title() }}</span>
+      <div class="files-heading">
+        <span class="files-title">{{ 'files.viewer.title' | t }}</span>
+        <span class="files-cell">{{ title() }}</span>
+      </div>
+      <div class="files-scope" role="group" [attr.aria-label]="'tags.scope.title' | t">
+        @for (opt of scopeOptions; track opt.id) {
+          <button
+            type="button"
+            class="files-scope-btn"
+            [class.active]="reach() === opt.id"
+            [attr.aria-pressed]="reach() === opt.id"
+            [title]="('tags.scope.' + opt.id + '.label' | t) + ' — ' + ('tags.scope.' + opt.id + '.desc' | t)"
+            (click)="setReach(opt.id)"
+          ><span class="mat-sym">{{ opt.icon }}</span></button>
+        }
+      </div>
       <button class="files-close" type="button" (click)="close()" [attr.aria-label]="'files.close' | t">×</button>
     </header>
 

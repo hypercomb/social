@@ -83,15 +83,28 @@ export class PixiHostWorker extends Worker {
     host.appendChild(note)
   }
 
+  // Two INDEPENDENT owners hide the canvas: the tile editor and a full-surface
+  // view (website / slides / photo / qa-modal). Each is tracked separately and
+  // the host is hidden while EITHER holds — a single `style.visibility` slot
+  // written by whoever emitted last let a closing editor un-hide the canvas
+  // under a still-open view (and vice-versa). OR them instead of clobbering.
+  #editorActive = false
+  #viewActive = false
+
+  #applyHostVisibility(): void {
+    if (!this.host) return
+    this.host.style.visibility = (this.#editorActive || this.#viewActive) ? 'hidden' : 'visible'
+  }
+
   constructor() {
     super()
     this.onEffect<{ active: boolean }>('editor:mode', ({ active }) => {
-      if (!this.host) return
-      this.host.style.visibility = active ? 'hidden' : 'visible'
+      this.#editorActive = active
+      this.#applyHostVisibility()
     })
     this.onEffect<{ active: boolean }>('view:active', ({ active }) => {
-      if (!this.host) return
-      this.host.style.visibility = active ? 'hidden' : 'visible'
+      this.#viewActive = active
+      this.#applyHostVisibility()
     })
     this.onEffect<{ owner: string; side: 'left' | 'right' | 'top' | 'bottom'; size: number }>(
       'viewport:inset',

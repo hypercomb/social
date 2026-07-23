@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Smart Autolinker</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="popup">
+  <main>
+    <div class="brand"><span class="mark">↗</span><div><h1>Smart Autolinker</h1><p id="siteStatus">Checking this site…</p></div></div>
+    <label class="switch-row"><span>Enable automatic linking</span><input id="enabled" type="checkbox" role="switch"></label>
+    <div class="popup-heading"><h2>Active groups</h2><button id="manageGroups" class="secondary" type="button">Manage</button></div>
+    <div id="popupGroups" class="popup-groups"></div>
+    <div class="popup-heading"><h2>My links</h2><button id="addLink" class="secondary" type="button">+ Add</button></div>
+    <div id="popupLinks" class="popup-links"></div>
+    <p id="popupStatus" class="popup-message" role="status"></p>
+    <button id="openOptions" class="text-button" type="button">Sites and advanced settings →</button>
+  </main>
+  <template id="popupLinkTemplate">
+    <div class="popup-link">
+      <div class="popup-link-fields">
+        <input class="popup-phrase" aria-label="Word or phrase" placeholder="Word or phrase">
+        <input class="popup-url" type="url" aria-label="Destination URL" placeholder="https://example.com">
+        <select class="popup-group" aria-label="Link group"></select>
+      </div>
+      <label class="popup-active" title="Enable this link"><input class="popup-item-enabled" type="checkbox" aria-label="Enabled"></label>
+      <button class="popup-remove" type="button" aria-label="Remove link">×</button>
+    </div>
+  </template>
+  <script src="defaults.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

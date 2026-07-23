@@ -216,4 +216,18 @@ describe('doctrine ratchets', () => {
     }
     assertRatchet([...hits].sort(), [], 'literal control byte')
   })
+
+  it('view:active is emitted only by the ModeRegistry — never a raw boolean broadcast', () => {
+    // A full-surface mode (view:active) broadcast as a single-slot boolean by
+    // whoever emitted last was a real desync bug class: a modal/photo closing
+    // over an open website view emitted view:active{false} and unhid the chrome
+    // UNDER the still-open view, which never re-asserted true (2026-07-22). The
+    // cure is owner-counted state — ModeRegistry.enter/exit, active while ANY
+    // owner holds, aggregate emitted (by dynamic `mode` var, never the literal)
+    // only on a 0<->1 transition. Every surface must route through enter()/exit()
+    // instead of emitting the literal. Empty allowlist: a direct
+    // emit('view:active') may never return — register an owner instead.
+    const actual = filesMatching(/(?:emitEffect|EffectBus\.emit(?:Transient)?)\s*(?:<[^>]*>)?\s*\(\s*['"`]view:active['"`]/)
+    assertRatchet(actual, [], 'raw view:active emit')
+  })
 })

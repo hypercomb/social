@@ -202,6 +202,11 @@ export class ClaudeBridgeWorker extends Worker {
       case 'optimization-list':   return this.#optimizationList(req)
       case 'optimization-remove': return this.#optimizationRemove(req)
       case 'feedback-channel-status': return this.#feedbackChannelStatus(req)
+      case 'behaviors-list': return this.#behaviorsList(req)
+      case 'ui-state': return this.#uiState(req)
+      case 'diag-open': return this.#diagOpen(req)
+      case 'effect-last': return this.#effectLast(req)
+      case 'hit-test': return this.#hitTest(req)
       case 'decoration-add':      return this.#decorationAdd(req)
       case 'bag-add':      return this.#bagMutate(req, 'add')
       case 'bag-remove':   return this.#bagMutate(req, 'remove')
@@ -340,6 +345,105 @@ export class ClaudeBridgeWorker extends Worker {
     if (!drone?.status) return { id: req.id, ok: false, error: 'FeedbackChannelDrone not available' }
     try { return { id: req.id, ok: true, data: await drone.status() } }
     catch (e) { return { id: req.id, ok: false, error: `channel status failed: ${(e as Error)?.message ?? 'unknown'}` } }
+  }
+
+  // ─── behaviors-list ────────────────────────────────────────────────
+  //
+  // The hive's capability inventory: every registered visual bee
+  // (behavior package) as {view, slashCommand, decorationKind, adoptable}.
+  // Read-only. The meaning-loop sweep grounds its option suggestions in
+  // this list — a capability that is PRESENT shapes "build X here"
+  // options; one that is ABSENT shapes "look for / adopt X" options
+  // (documentation/meaning-loop.md, "Capability-aware options").
+  async #behaviorsList(req: BridgeRequest): Promise<BridgeResponse> {
+    const registry = get<{ all?: () => readonly Record<string, unknown>[] }>('@diamondcoreprocessor.com/VisualBeeRegistry')
+    if (!registry?.all) return { id: req.id, ok: false, error: 'VisualBeeRegistry not available' }
+    const items = registry.all().map(b => ({
+      view: String(b['view'] ?? ''),
+      slashCommand: String(b['slashCommand'] ?? ''),
+      decorationKind: String(b['decorationKind'] ?? ''),
+      adoptable: b['adoptable'] === true,
+    }))
+    return { id: req.id, ok: true, data: items }
+  }
+
+  // ─── ui-state ──────────────────────────────────────────────────────
+  //
+  // Read-only snapshot of the renderer tab's TRANSIENT input state — the
+  // things that can silently eat tile clicks (a stuck selection routes
+  // clicks to `tile:click`; a locked input gate swallows the gesture; a
+  // non-hexagon view mode isn't showing tiles at all). Diagnosis surface
+  // for the driver; nothing here mutates.
+  async #uiState(req: BridgeRequest): Promise<BridgeResponse> {
+    const lineage = get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+    const selection = get<{ count?: number }>('@diamondcoreprocessor.com/SelectionService')
+    const gate = get<{ active?: boolean; locked?: boolean; owner?: string | null }>('@diamondcoreprocessor.com/InputGate')
+    const viewMode = get<{ mode?: string }>('@hypercomb.social/ViewMode')
+    return {
+      id: req.id,
+      ok: true,
+      data: {
+        segments: (lineage?.explorerSegments?.() ?? []).map(s => String(s)),
+        selectionCount: selection?.count ?? null,
+        gateActive: gate?.active ?? null,
+        gateLocked: gate?.locked ?? null,
+        gateOwner: gate?.owner ?? null,
+        viewMode: viewMode?.mode ?? null,
+      },
+    }
+  }
+
+  // ─── effect-last ───────────────────────────────────────────────────
+  //
+  // Read the LAST STICKY VALUE of an EffectBus effect (the bus replays
+  // the last emission synchronously to a new subscriber — that replay IS
+  // the read; the momentary subscription is removed immediately).
+  // Diagnosis surface: "did a tile:hover / tile:action / render:cell-count
+  // ever fire in this tab, and with what payload?"
+  async #effectLast(req: BridgeRequest): Promise<BridgeResponse> {
+    const name = typeof req.cell === 'string' ? req.cell.trim() : ''
+    if (!name) return { id: req.id, ok: false, error: 'effect-last requires `cell` (effect name)' }
+    let captured: unknown = undefined
+    const off = EffectBus.on(name, (payload: unknown) => { captured = payload })
+    try { if (typeof off === 'function') off() } catch { /* unsubscribe best-effort */ }
+    return { id: req.id, ok: true, data: { name, last: captured === undefined ? null : captured } }
+  }
+
+  // ─── hit-test ──────────────────────────────────────────────────────
+  //
+  // What is the TOPMOST element at a viewport point? The tile overlay's
+  // click handler silently drops any click whose target is not the Pixi
+  // canvas (`e.target !== #canvas`), while hover is computed from raw
+  // coordinates and pierces covers — so "hover works, clicks are dead"
+  // means something invisible sits over the canvas. This op names it.
+  // Defaults to the canvas center when x/y are not given.
+  async #hitTest(req: BridgeRequest): Promise<BridgeResponse> {
+    const canvas = document.querySelector('canvas')
+    const rect = canvas?.getBoundingClientRect()
+    const point = req as unknown as { x?: unknown; y?: unknown }
+    const x = typeof point.x === 'number' ? point.x : rect ? rect.left + rect.width / 2 : 0
+    const y = typeof point.y === 'number' ? point.y : rect ? rect.top + rect.height / 2 : 0
+    const stack = document.elementsFromPoint(x, y).slice(0, 5).map(el => ({
+      tag: el.tagName.toLowerCase(),
+      id: el.id || null,
+      className: String((el as HTMLElement).className ?? '').slice(0, 80) || null,
+      isTheCanvas: el === canvas,
+    }))
+    return { id: req.id, ok: true, data: { x, y, top: stack[0] ?? null, stack } }
+  }
+
+  // ─── diag-open ─────────────────────────────────────────────────────
+  //
+  // Emit the default `open` tile action for `label` exactly as a body
+  // click on a leaf tile would — driving DashboardQOpenWorker (and any
+  // other tile:action consumer) from the bridge. Diagnosis: when this
+  // opens the QA card but a real click does not, the break is in the
+  // click gesture/guards, not the open pipeline.
+  async #diagOpen(req: BridgeRequest): Promise<BridgeResponse> {
+    const label = typeof req.cell === 'string' ? req.cell.trim() : ''
+    if (!label) return { id: req.id, ok: false, error: 'diag-open requires `cell` (tile label)' }
+    EffectBus.emit('tile:action', { action: 'open', label, q: 0, r: 0, index: 0 })
+    return { id: req.id, ok: true, data: { emitted: 'open', label } }
   }
 
   // ─── decoration-add ────────────────────────────────────────────────

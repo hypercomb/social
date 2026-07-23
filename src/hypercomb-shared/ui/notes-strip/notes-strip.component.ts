@@ -23,10 +23,6 @@ const NOTES_STRIP_WIDTH_KEY = 'hc:notes-strip-width'
 // across reloads so the strip stays where the user dropped it.
 const NOTES_STRIP_OFFSET_KEY = 'hc:notes-strip-offset'
 
-// Owner token for the InputGate lock the strip holds while visible. Owner-
-// scoped so it composes with the editor's lock rather than stomping it.
-const NOTES_STRIP_LOCK_OWNER = 'notes-strip'
-
 // Dock side — 'right' snaps the strip to a full-height rail on the right
 // edge (so it never fights the left-docked control bar); 'float' is the
 // free, draggable, centred-baseline mode. Persisted across reloads.
@@ -94,15 +90,6 @@ type InputModeStackLike = {
   push(mode: InputModeLike): void
   pop(name: string): void
   remove(name: string): void
-}
-
-/** Structural type for the InputGate — the shared tile-input lock. Resolved
- *  at runtime via window.ioc (shared must never import from modules). The
- *  owner-scoped lock/unlock lets the strip hold its lock without stomping
- *  locks held by the editor or the manual lock button. */
-type InputGateLike = {
-  lock(owner?: string): void
-  unlock(owner?: string): void
 }
 
 @Component({
@@ -1095,6 +1082,16 @@ export class NotesStripComponent implements OnDestroy {
         this.#warmed.set(new Set())
         this.#notesByCell.set(new Map())
         this.#qaByCell.set(new Map())
+        // The active cell / capture target belong to the layer we just LEFT —
+        // the same label resolves to a different location (or nothing) here.
+        // Keeping them would pin the editor to a stale context and make the
+        // strip look frozen after navigation; dropping them hands the panel
+        // back to the new layer's tile navigator. Selection's change event
+        // re-establishes an active cell if one is selected in the new layer.
+        this.#activeCell.set(null)
+        this.#capturingFor.set(null)
+        this.editingNoteId.set(null)
+        this.draftText.set('')
         this.#version.update(v => v + 1)
         // Re-poll the layer's tile list — navigation changed which cells exist.
         this.#refreshLayerCellLabels()
@@ -1111,6 +1108,21 @@ export class NotesStripComponent implements OnDestroy {
     const onSync = (): void => this.#refreshLayerCellLabels()
     window.addEventListener('synchronize', onSync)
     this.#cleanups.push(() => window.removeEventListener('synchronize', onSync))
+
+    // The polls above race the provider: CellSuggestionProvider refreshes its
+    // names ASYNCHRONOUSLY after the same lineage-change / synchronize events,
+    // so a synchronous suggestions() read at event time still returns the
+    // PREVIOUS layer's names — the navigator would go stale exactly when the
+    // user navigates. Subscribing to the provider's own 'change' event (fired
+    // once its refresh lands) delivers the fresh list the moment it exists,
+    // keeping the strip in lock-step with the current layer. whenReady covers
+    // the provider registering after this component constructs.
+    window.ioc.whenReady<EventTarget>('@hypercomb.social/CellSuggestionProvider', (provider) => {
+      const onProviderChange = (): void => this.#refreshLayerCellLabels()
+      provider.addEventListener('change', onProviderChange)
+      this.#cleanups.push(() => provider.removeEventListener('change', onProviderChange))
+      this.#refreshLayerCellLabels()
+    })
 
     // SelectionService lives in a bee bundle that loads AFTER this Angular
     // component's constructor on hypercomb-web. Synchronous get() returns
@@ -1292,21 +1304,13 @@ export class NotesStripComponent implements OnDestroy {
       queueMicrotask(() => this.#syncPanelResize())
     })
 
-    // Lock the tile viewport while the strip is showing. The notes strip is
-    // a modal-style overlay drawn over the canvas (z-index 60001); per the
-    // "modals lock tiles while showing" rule it must pin the hexes beneath
-    // it — no pan, pinch, spacebar-pan, wheel-zoom, or drag-select bleeding
-    // through. The owner-scoped lock composes with the editor's lock instead
-    // of stomping it. The gate is resolved lazily because its bee may
-    // register after this component constructs on hypercomb-web; visible()
-    // is the tracked dependency, so this re-runs on every show/hide.
-    effect(() => {
-      const showing = this.visible()
-      const gate = this.#gate()
-      if (!gate) return
-      if (showing) gate.lock(NOTES_STRIP_LOCK_OWNER)
-      else gate.unlock(NOTES_STRIP_LOCK_OWNER)
-    })
+    // The strip does NOT lock tile input. It is a docked side rail, not a
+    // centred modal — the hive must stay fully navigable (pan, zoom, tile
+    // click) while notes are showing, and the strip adapts in real time to
+    // wherever the user goes (lineage + selection listeners above). Wheel
+    // bleed while the cursor is OVER the strip is already handled by the
+    // 'notes-hover' input mode; the host's pointer-events:none lets every
+    // click outside the panel reach the canvas.
 
     // Broadcast the toggle's open state so the control-bar Notes button can
     // light up and toggle correctly. Tracks #open (the intent) rather than
@@ -1421,10 +1425,6 @@ export class NotesStripComponent implements OnDestroy {
   ngOnDestroy(): void {
     for (const c of this.#cleanups) c()
     this.#selectionListener?.()
-    // Release the tile lock on teardown — the visibility effect is destroyed
-    // with the component and won't run a final unlock, so a strip torn down
-    // while visible would otherwise leave the hexes locked.
-    this.#gate()?.unlock(NOTES_STRIP_LOCK_OWNER)
     this.#resizeObserver?.disconnect()
     this.#resizeObserver = null
     this.#observingEl = null
@@ -1445,14 +1445,6 @@ export class NotesStripComponent implements OnDestroy {
       this.#stack()?.pop(this.#notesDragMode.name)
       this.#dragModeActive = false
     }
-  }
-
-  /** InputGate — the shared tile-input lock. Resolved at runtime (shared
-   *  must never import from modules); the bee may register after this
-   *  component constructs on hypercomb-web, so we look it up lazily on
-   *  each use. */
-  #gate(): InputGateLike | undefined {
-    return window.ioc?.get<InputGateLike>('@diamondcoreprocessor.com/InputGate')
   }
 
   // ── resize wiring ─────────────────────────────────────────
@@ -1713,11 +1705,22 @@ export class NotesStripComponent implements OnDestroy {
     this.#open.set(false)
   }
 
-  /** Delete a single note from the active cell's list. */
+  /** Delete a single note from the active cell's list. Optimistic like
+   *  commitForm: the row vanishes on click; the drone's tree rewrite +
+   *  cascade + `notes:changed` re-read is the authoritative reconcile. */
   remove(noteId: string, event: Event): void {
     event.stopPropagation()
     const cell = this.cell()
     if (!cell || !noteId) return
+    const prune = (list: readonly Note[]): Note[] =>
+      list.filter(n => n.id !== noteId)
+        .map(n => n.children.length ? { ...n, children: prune(n.children) } : n)
+    this.#notesByCell.update(prev => {
+      const next = new Map(prev)
+      next.set(cell, prune(next.get(cell) ?? []))
+      return next
+    })
+    this.#version.update(v => v + 1)
     EffectBus.emit('note:delete', { cellLabel: cell, noteId })
   }
 

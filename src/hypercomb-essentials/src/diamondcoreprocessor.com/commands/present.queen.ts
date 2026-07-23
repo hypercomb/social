@@ -206,6 +206,12 @@ window.ioc.register('@diamondcoreprocessor.com/PresentQueenBee', _present)
       queenKey: '@diamondcoreprocessor.com/PresentQueenBee',
       adoptable: true,
       adoptScope: 'hierarchy',
+      // A deck's content IS its children, so `diagram@slides` only has to write
+      // the deck decoration — no authoring pass, no slash-command toggle.
+      attachable: true,
+      // Clicking a deck plays it instead of entering its hexagon layer; the
+      // viewer takes the screen in place and closing returns you where you were.
+      opensOnTileClick: true,
     })
   },
 )

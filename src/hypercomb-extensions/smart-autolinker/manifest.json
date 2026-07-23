@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Smart Autolinker",
+  "version": "1.2.0",
+  "description": "Automatically link configured words while typing or pasting in enabled sites.",
+  "permissions": ["storage"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_title": "Smart Autolinker",
+    "default_popup": "popup.html"
+  },
+  "options_page": "options.html",
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["defaults.js", "content.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    }
+  ]
+}

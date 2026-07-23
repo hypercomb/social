@@ -507,7 +507,11 @@ $bp-phone-max: 599px;
 // glow color + soft halo, signalling "I'm broadcasting acceptance to
 // subscriber requests." Click toggles; persisted via swarm drone (no
 // session-local state in the shell).
-.open-for-subscribers-btn {
+.open-for-subscribers-btn,
+.help-toggle-btn,
+.feedback-toggle-btn,
+.pheromone-toggle-btn,
+.notes-toggle-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -543,6 +547,36 @@ $bp-phone-max: 599px;
 
   svg {
     display: block;
+  }
+
+  .mat-sym { font-size: 1.05em; line-height: 1; }
+}
+
+// Notes is THE always-there page switch — bigger than its neighbours and
+// post-it yellow (filled glyph) so it reads as a sticky note, not chrome.
+.notes-toggle-btn {
+  width: 2.2em;
+  height: 2.2em;
+  color: rgba(255, 213, 79, 0.55);
+
+  .mat-sym {
+    font-size: 1.4em;
+    font-variation-settings: 'FILL' 1;
+  }
+
+  &:hover {
+    color: rgba(255, 213, 79, 0.9);
+    background: rgba(255, 213, 79, 0.1);
+  }
+
+  &.on {
+    color: rgb(255, 213, 79);
+    background: rgba(255, 213, 79, 0.16);
+    box-shadow: 0 0 6px rgba(255, 213, 79, 0.5);
+  }
+
+  &.on:hover {
+    background: rgba(255, 213, 79, 0.26);
   }
 }
 

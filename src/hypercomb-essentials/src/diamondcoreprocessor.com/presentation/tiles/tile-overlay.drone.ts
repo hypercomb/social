@@ -7,7 +7,8 @@ import type { HostReadyPayload } from './pixi-host.worker.js'
 import type { Axial, HexDetector } from '../../navigation/hex-detector.js'
 import type { InputGate } from '../../navigation/input-gate.service.js'
 import { type HexGeometry, DEFAULT_HEX_GEOMETRY } from '../grid/hex-geometry.js'
-import { hasDecorationKind, referenceTargetForLabel } from '../../commands/decoration-kind-index.js'
+import { hasDecorationKind, referenceTargetForLabel, kindsForLabel } from '../../commands/decoration-kind-index.js'
+import type { VisualBeeRegistry } from '../../commands/visual-bee-registry.js'
 import type { IconRegistryEntry } from './tile-actions.drone.js'
 import { ICON_SPACING, ICON_Y, computeIconPositions } from './tile-actions.drone.js'
 
@@ -32,12 +33,19 @@ const NAV_GUARD_BACKSTOP_MS = 6000
  *  registry over IoC at call time (modules must not IMPORT shared — an IoC
  *  read is the sanctioned bridge). Legacy `agg-` locations still count so old
  *  history renders. On such a page every tile is a launcher: a click opens
- *  its target directly. */
+ *  its target directly.
+ *
+ *  `openDirectly` groups are EXCLUDED per the LaunchGroup contract
+ *  (group-registry.ts): they have no browsable aggregator page, so /<id> is a
+ *  REAL cell page (the dashboard's question tiles live at /dashboard). Without
+ *  this exclusion every press there was consumed into a silent `group:open`
+ *  and the trailing click died — "clicking a dashboard tile does nothing". */
 function isLauncherLocation(segs: readonly unknown[]): boolean {
   if (segs.length !== 1 || typeof segs[0] !== 'string') return false
   if (segs[0].startsWith('agg-')) return true
-  const reg = window.ioc.get<{ get?: (id: string) => unknown }>('@hypercomb.social/GroupLauncher')
-  return !!reg?.get?.(segs[0])
+  const reg = window.ioc.get<{ get?: (id: string) => { openDirectly?: boolean } | undefined }>('@hypercomb.social/GroupLauncher')
+  const group = reg?.get?.(segs[0])
+  return !!group && group.openDirectly !== true
 }
 
 type OverlayAction = {
@@ -214,6 +222,12 @@ export class TileOverlayDrone extends Drone {
   #meshOffset = { x: 0, y: 0 }
   #currentAxial: Axial | null = null
   #currentIndex: number | undefined = undefined
+  /** Last raw pointer position over the canvas. A save / cell-count cascade can
+   *  clear or desync #currentAxial while the cursor sits perfectly still — with
+   *  no pointermove to follow, the menu would stay gone until the pointer next
+   *  crossed a hex boundary ("icons gone after edit, until I wiggle the mouse").
+   *  #recoverHover re-derives the hovered tile from this when that happens. */
+  #lastPointerClient: { x: number; y: number } | null = null
 
   #geo: HexGeometry = DEFAULT_HEX_GEOMETRY
 
@@ -277,6 +291,10 @@ export class TileOverlayDrone extends Drone {
   #editCooldown = false
   #editCooldownTimer: ReturnType<typeof setTimeout> | null = null
   #hasSelection = false
+  /** A pheromone removal is armed (TagRemovalDrone): tile clicks stage and
+   *  unstage tiles instead of entering or opening them, and the icon overlay
+   *  stays out of the way. Cleared when the removal commits or is cancelled. */
+  #tagRemovalArmed = false
   #touchDragging = false
   // The screensaver has taken over the screen — keep the icon overlay hidden
   // until it ends. Enforced centrally in #updateVisibility.
@@ -331,18 +349,18 @@ export class TileOverlayDrone extends Drone {
     'navigation:guard-start', 'navigation:guard-end',
     'mesh:public-changed', 'world:mode', 'editor:mode', 'selection:changed',
     'overlay:register-action', 'overlay:unregister-action', 'overlay:neon-color',
-    'drop:dragging', 'drop:pending',
+    'drop:dragging',
     'overlay:arrange-mode', 'overlay:pool-icons',
     'bee:disposed', 'genotype:set-visible',
     'substrate:applied', 'cell:removed', 'tile:saved',
     'tile:public-changed',
     'keymap:invoke',
     'icon:edit-mode', 'icon:override-changed',
+    'tags:removal-pending',
   ]
-  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'group:open', 'icon:pick-request', 'toast:show']
+  protected override emits = ['tile:hover', 'tile:action', 'tile:click', 'tile:navigate-in', 'tile:navigate-back', 'drop:target', 'overlay:icons-reordered', 'overlay:request-register', 'overlay:feature-press', 'group:open', 'icon:pick-request', 'toast:show', 'diag:click', 'diag:click-capture', 'tags:removal-toggle']
 
   #dropDragging = false
-  #dropPending = false
 
   #effectsRegistered = false
   // Handshake state: #requestedRegister makes #initOverlay emit
@@ -385,7 +403,7 @@ export class TileOverlayDrone extends Drone {
         if (this.#editing || this.#editCooldown) return
         if (this.#arrangeMode) return
         if (this.#meshPublic && !this.#hasSelection) return
-        if (this.#dropDragging || this.#dropPending) return
+        if (this.#dropDragging) return
         if (!this.#currentAxial) return
         const entry = this.#occupiedByAxial.get(
           TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r),
@@ -415,7 +433,7 @@ export class TileOverlayDrone extends Drone {
         if (this.#editing || this.#editCooldown) return
         if (this.#arrangeMode) return
         if (this.#meshPublic) return              // public mode: delete via select + menu only
-        if (this.#dropDragging || this.#dropPending) return
+        if (this.#dropDragging) return
         if (this.#currentTileExternal) return     // can't delete a peer's tile from your layer
         if (!this.#currentAxial) return
         const entry = this.#occupiedByAxial.get(
@@ -598,14 +616,11 @@ export class TileOverlayDrone extends Drone {
         // let the click run up a phantom address. No-op on same-level re-renders
         // (edits/substrate) — nothing is blocked then.
         this.#endNavigationTransition()
-        if (this.#overlay && this.#currentAxial) {
-          this.#currentIndex = this.#lookupIndex(this.#currentAxial.q, this.#currentAxial.r)
-          // Overlay-level visibility first, then per-icon visibility.
-          // #updatePerTileVisibility is the sole authority on individual button
-          // visibility �� #updateVisibility never touches buttons.
-          this.#updateVisibility()
-          this.#updatePerTileVisibility()
-        }
+        // The occupied map was just rebuilt (indices shifted). #recoverHover
+        // re-looks-up #currentIndex against it — and re-derives #currentAxial
+        // from the last pointer if the cascade cleared it — so overlay- and
+        // button-visibility stay in agreement even if the cursor never moved.
+        this.#recoverHover()
       })
 
       // substrate:applied runs via an in-place buffer path that doesn't re-emit
@@ -707,23 +722,19 @@ export class TileOverlayDrone extends Drone {
           this.#editCooldownTimer = setTimeout(() => {
             this.#editCooldownTimer = null
             this.#editCooldown = false
-            // Safety refresh after cooldown ends. The image-drop save
-            // cascade (cell:added → render:cell-count → cell list
-            // rebuild) can clear #currentAxial/#currentIndex between
-            // the editor:mode emit and the final settle. The immediate
-            // #updateVisibility below runs while occupied may still be
-            // false; this deferred refresh re-derives once the cascade
-            // is settled so the overlay reappears on the (still-
-            // hovered) tile without requiring the cursor to cross a
-            // hex boundary.
-            this.#updateVisibility()
-            this.#updatePerTileVisibility()
+            // Safety refresh after cooldown ends. The image-drop save cascade
+            // (cell:added → render:cell-count → cell-list rebuild) can clear
+            // #currentAxial/#currentIndex between the editor:mode emit and the
+            // final settle. #recoverHover re-derives the hovered tile (from the
+            // last pointer if #currentAxial was cleared) so the menu reappears
+            // on the still-hovered tile without the cursor crossing a hex.
+            this.#recoverHover()
           }, 300)
-          // Refresh per-tile visibility now — properties (link, hideText,
-          // noImage, image) may have just changed. The cursor may already
-          // be over the tile, so without this the post-save icon set
-          // doesn't appear until the next pointer move.
-          this.#updatePerTileVisibility()
+          // Refresh now too — properties (link, hideText, noImage, image) may
+          // have just changed and the cursor may already be over the tile, so
+          // without this the post-save icon set doesn't appear until the next
+          // pointer move. The deferred pass above covers the cascade-clears case.
+          this.#recoverHover()
         }
         this.#updateVisibility()
       })
@@ -748,16 +759,26 @@ export class TileOverlayDrone extends Drone {
         this.#updatePerTileVisibility()
       })
 
-      this.onEffect<{ active: boolean }>('drop:dragging', ({ active }) => {
-        this.#dropDragging = active
-        this.#updatePerTileVisibility()
+      // A staged pheromone removal takes over tile clicks: while it is armed,
+      // clicking a tile stages/unstages it rather than entering or opening it.
+      // Same shape as the selection takeover — presses stop navigating and the
+      // click becomes a toggle — so the gesture is one the participant already
+      // knows. The overlay hides too: none of its actions apply mid-staging.
+      this.onEffect<{ active?: boolean }>('tags:removal-pending', (payload) => {
+        this.#tagRemovalArmed = payload?.active === true
         this.#updateVisibility()
+        this.#updatePerTileVisibility()
       })
 
-      this.onEffect<{ active: boolean }>('drop:pending', ({ active }) => {
-        this.#dropPending = active
-        this.#updatePerTileVisibility()
-        this.#updateVisibility()
+      this.onEffect<{ active: boolean }>('drop:dragging', ({ active }) => {
+        this.#dropDragging = active
+        // Entering the drag: suppress buttons (overlay is a bare drop target).
+        // Leaving it: recover — the drop may have opened the editor or rebuilt
+        // the map, clearing #currentAxial; #recoverHover re-derives so the menu
+        // isn't stranded hidden. (No-ops while editing — the editor:mode close
+        // handler runs the recovery once the panel dismisses.)
+        if (active) { this.#updatePerTileVisibility(); this.#updateVisibility() }
+        else this.#recoverHover()
       })
     }
   }
@@ -1036,15 +1057,25 @@ export class TileOverlayDrone extends Drone {
 
   // ── Per-tile icon visibility ───────────────────────────────────────
 
-  #updatePerTileVisibility(): void {
-    if (!this.#currentAxial) return
+  /** Hide every action button + the tray. The single reset used by all of
+   *  #updatePerTileVisibility's "nothing to show here" exits, so no exit path
+   *  can leave the buttons in a stale visible/hidden state from a prior call. */
+  #hideAllButtons(): void {
+    for (const action of this.#actions) action.button.visible = false
+    if (this.#buttonTray) this.#buttonTray.visible = false
+  }
 
-    // during image drag-over or pending drop, hide all action buttons — overlay is just a drop target
-    if (this.#dropDragging || this.#dropPending) {
-      for (const action of this.#actions) action.button.visible = false
-      if (this.#buttonTray) this.#buttonTray.visible = false
-      return
-    }
+  #updatePerTileVisibility(): void {
+    // TOTAL FUNCTION: every exit fully determines button + tray state. The old
+    // early `return`s left whatever the previous call set — so a drag hid the
+    // tray, then a cleared #currentAxial / rebuilt occupied map bailed BEFORE
+    // the restore at the bottom, stranding the menu hidden under a visible hex
+    // ("icons gone after dropping an image / editing"). Now a missing tile
+    // hides cleanly and #recoverHover re-derives once the cascade settles.
+    if (!this.#currentAxial) { this.#hideAllButtons(); return }
+
+    // during image drag-over, hide all action buttons — overlay is just a drop target
+    if (this.#dropDragging) { this.#hideAllButtons(); return }
 
     // Public mode used to hide every icon here, on the theory that
     // public was a "clean view" surface. With paired-channel sync we
@@ -1059,7 +1090,7 @@ export class TileOverlayDrone extends Drone {
     }
 
     const entry = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(this.#currentAxial.q, this.#currentAxial.r))
-    if (!entry) return
+    if (!entry) { this.#hideAllButtons(); return }
 
     const ctx: OverlayTileContext = {
       label: entry.label,
@@ -1638,10 +1669,26 @@ export class TileOverlayDrone extends Drone {
     document.addEventListener('click', this.#onClick)
     document.addEventListener('pointerup', this.#onPointerUp)
     document.addEventListener('contextmenu', this.#onContextMenu)
+    // CAPTURE-phase witness: records every raw click before any handler can
+    // stopPropagation it. Read remotely via the bridge's `effect-last` —
+    // `diag:click-capture` fired while `diag:click` stayed silent = something
+    // between capture and bubble ate the event; both silent after a real
+    // click = the click never dispatched at all (gesture/pointer level).
+    document.addEventListener('click', (e) => {
+      this.#captureClickCount++
+      this.emitEffect('diag:click-capture', {
+        n: this.#captureClickCount,
+        target: (e.target as HTMLElement | null)?.tagName ?? null,
+        targetIsCanvas: e.target === this.#canvas,
+      })
+    }, true)
   }
+
+  #captureClickCount = 0
 
   /** Track hex position during image drag-over (pointermove doesn't fire during drag). */
   #onDragOverTrack = (e: DragEvent): void => {
+    this.#lastPointerClient = { x: e.clientX, y: e.clientY }
     if (!this.#dropDragging) return
     if (!this.#renderContainer || !this.#overlay || !this.#renderer || !this.#canvas) return
 
@@ -1678,6 +1725,9 @@ export class TileOverlayDrone extends Drone {
   }
 
   #onPointerMove = (e: PointerEvent): void => {
+    // Record the raw position unconditionally (before any guard) so #recoverHover
+    // always has the freshest cursor to re-derive from after a settle.
+    this.#lastPointerClient = { x: e.clientX, y: e.clientY }
     if (this.#arrangeMode) return // arrange mode uses its own pointer handling
     if (!this.#renderContainer || !this.#overlay || !this.#renderer || !this.#canvas) return
 
@@ -1943,6 +1993,9 @@ export class TileOverlayDrone extends Drone {
     if (this.#navigationBlocked) return
     if (this.#editing || this.#editCooldown) return
     if (this.#hasSelection) return
+    // Armed removal: the press must not navigate — the trailing click stages
+    // the tile instead (see #onClick).
+    if (this.#tagRemovalArmed) return
     if (this.#touchDragging) return
     if (e.ctrlKey || e.metaKey) return
     if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
@@ -2031,17 +2084,41 @@ export class TileOverlayDrone extends Drone {
   }
 
   #onClick = (e: MouseEvent): void => {
+    // Every early-return names itself on `diag:click` — the bridge's
+    // `effect-last` reads the sticky, so "clicking does nothing" is
+    // diagnosable remotely instead of by guessing which guard ate it.
+    const diag = (stage: string): void => {
+      this.emitEffect('diag:click', { stage, target: (e.target as HTMLElement | null)?.tagName ?? null })
+    }
     // Suppress the orphaned click from a pointerdown that already triggered navigation
     if (this.#consumedPointerId !== null) {
       this.#consumedPointerId = null
       this.#pressCapture = null
+      diag('consumed-pointer')
       return
     }
-    if (this.#arrangeMode) return // arrange mode absorbs clicks
-    if (this.#navigationBlocked) return
-    if (this.#editing || this.#editCooldown) return
-    if (!this.#renderContainer || !this.#renderer || !this.#canvas) return
-    if (e.target !== this.#canvas) return
+    if (this.#arrangeMode) { diag('arrange-mode'); return } // arrange mode absorbs clicks
+    if (this.#navigationBlocked) { diag('navigation-blocked'); return }
+    if (this.#editing || this.#editCooldown) { diag('editing'); return }
+    if (!this.#renderContainer || !this.#renderer || !this.#canvas) { diag('no-renderer'); return }
+    if (e.target !== this.#canvas) { diag('target-not-canvas'); return }
+
+    // ── Armed pheromone removal ──────────────────────────────────────────
+    // A click stages (or unstages) the tile for losing the keyword — it never
+    // navigates, opens or selects while the removal is armed. Resolved from
+    // the click's own coordinates so it works without a preceding hover, and
+    // placed ahead of every other branch so no action button can eat it.
+    if (this.#tagRemovalArmed) {
+      const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
+      if (!detector) { diag('no-detector'); return }
+      const pg = this.#clientToPixiGlobal(e.clientX, e.clientY)
+      const lp = this.#renderContainer.toLocal(new Point(pg.x, pg.y))
+      const ax = detector.pixelToAxial(lp.x - this.#meshOffset.x, lp.y - this.#meshOffset.y, this.#flat)
+      const staged = this.#occupiedByAxial.get(TileOverlayDrone.axialKey(ax.q, ax.r))
+      if (!staged?.label) { diag('removal-empty-hex'); return }
+      this.emitEffect('tags:removal-toggle', { label: staged.label })
+      return
+    }
 
     // For Ctrl/Meta clicks, resolve axial from click coordinates directly
     // rather than relying on pointermove having set #currentIndex
@@ -2091,6 +2168,7 @@ export class TileOverlayDrone extends Drone {
       }
       if (!rebound) {
         console.warn('[tile-overlay] click swallowed — tile map changed since press and', press.label, 'no longer resolves here')
+        diag('press-rebind-failed')
         return
       }
       this.#currentAxial = { q: rebound.q, r: rebound.r }
@@ -2114,16 +2192,16 @@ export class TileOverlayDrone extends Drone {
       this.#currentIndex = this.#lookupIndex(axial.q, axial.r)
     }
 
-    if (this.#currentIndex === undefined || this.#currentIndex >= this.#cellCount) return
+    if (this.#currentIndex === undefined || this.#currentIndex >= this.#cellCount) { diag('index-out-of-range'); return }
 
     const entry = this.#occupiedByAxial.get(
       TileOverlayDrone.axialKey(this.#currentAxial!.q, this.#currentAxial!.r),
     )
-    if (!entry?.label) return
+    if (!entry?.label) { diag('no-entry-at-axial'); return }
 
     // Readiness gate: a SHADED tile is inert — no action buttons, no
     // selection, no navigation, no open — until it brightens.
-    if (this.#shadedLabels.has(entry.label)) return
+    if (this.#shadedLabels.has(entry.label)) { diag('shaded'); return }
 
     const pixiGlobal = this.#clientToPixiGlobal(e.clientX, e.clientY)
     const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
@@ -2299,6 +2377,20 @@ export class TileOverlayDrone extends Drone {
     if (this.#currentLocationKey() === before) this.#endNavigationTransition()
   }
 
+  /** The view of a behaviour on this tile that TAKES OVER the click — opening
+   *  its view instead of entering the tile. Null when the tile carries none.
+   *  Both reads are synchronous (the hot decoration index + the registry), so
+   *  this stays safe inside the click path. */
+  #viewTakeoverFor(label: string): string | null {
+    const registry = window.ioc.get<VisualBeeRegistry>('@diamondcoreprocessor.com/VisualBeeRegistry')
+    if (!registry?.byDecorationKind) return null
+    for (const kind of kindsForLabel(label)) {
+      const bee = registry.byDecorationKind(kind)
+      if (bee?.opensOnTileClick) return bee.view
+    }
+    return null
+  }
+
   #navigateInto(label: string): void {
     // Backstop latch: input was force-released after NAV_GUARD_BACKSTOP_MS
     // but the axial map still describes the LEAVING level — entering a tile
@@ -2323,6 +2415,20 @@ export class TileOverlayDrone extends Drone {
         message: i18n?.t('tags.filter.blocked.message', { cell: label })
           ?? `"${label}" has no tagged tiles inside. Clear the filter to browse it.`,
       })
+      return
+    }
+
+    // VIEW TAKEOVER: this tile carries a behaviour that declares it OPENS ON
+    // TILE CLICK (a slides deck). PLAY it instead of entering its hexagon
+    // layer — the view mounts over THIS layer and nothing navigates, so closing
+    // it returns the participant right here and the deck's own grid is never
+    // rendered. Deliberately BEFORE the navigation transition is armed: there
+    // is no navigation to guard, and arming it would strand the guard.
+    const takeover = this.#viewTakeoverFor(label)
+    if (takeover) {
+      const segs = (window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')
+        ?.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
+      EffectBus.emit('view:open-for-tile', { view: takeover, segments: [...segs, label] })
       return
     }
 
@@ -2457,14 +2563,18 @@ export class TileOverlayDrone extends Drone {
     // hover/selection state. Released when screensaver:active goes false.
     if (this.#screensaverActive) { this.#overlay.visible = false; return }
 
+    // An armed pheromone removal owns tile clicks — every icon here would be
+    // unreachable, so show none of them rather than dead ones.
+    if (this.#tagRemovalArmed) { this.#overlay.visible = false; return }
+
     // Arrange mode: overlay stays visible
     if (this.#arrangeMode) {
       this.#overlay.visible = true
       return
     }
 
-    // during image drag-over or pending drop, show overlay as a drop target / placeholder
-    if (this.#dropDragging || this.#dropPending) {
+    // during image drag-over, show overlay as a drop target / placeholder
+    if (this.#dropDragging) {
       this.#overlay.visible = true
       return
     }
@@ -2506,6 +2616,46 @@ export class TileOverlayDrone extends Drone {
     } else if (!shouldShow && this.#hexBg) {
       this.#hexBg.hide()
     }
+  }
+
+  /** Re-assert the hovered tile's overlay after a state transition settles.
+   *  The save / cell-count cascade rebuilds the occupied map (indices shift)
+   *  and can clear #currentAxial while the cursor sits still. Without a
+   *  pointermove to follow, the two visibility functions would disagree —
+   *  #updateVisibility reading a stale-valid #currentIndex (overlay shown)
+   *  while #updatePerTileVisibility finds no map entry (buttons hidden): a hex
+   *  with an empty menu. This re-derives #currentAxial from the last pointer
+   *  when it was cleared, ALWAYS re-looks-up #currentIndex against the fresh
+   *  map so both functions agree, then refreshes. No-op mid-navigation (maps
+   *  still describe the leaving level) or while editing (overlay stays hidden). */
+  #recoverHover(): void {
+    if (this.#navigationBlocked || this.#editing) return
+    if (!this.#currentAxial) this.#deriveHoverFromLastPointer()
+    else this.#currentIndex = this.#lookupIndex(this.#currentAxial.q, this.#currentAxial.r)
+    if (this.#overlay && this.#currentAxial) {
+      this.#updateVisibility()
+      this.#updatePerTileVisibility()
+    }
+  }
+
+  /** Recompute #currentAxial/#currentIndex from #lastPointerClient — the same
+   *  pixel→axial path #onPointerMove runs, used only when the cursor is still
+   *  and #currentAxial was cleared. Leaves them untouched if the pointer or the
+   *  render refs are unavailable (recovery is best-effort; the next real
+   *  pointermove always corrects it). */
+  #deriveHoverFromLastPointer(): void {
+    const p = this.#lastPointerClient
+    if (!p) return
+    if (!this.#renderContainer || !this.#overlay || !this.#renderer || !this.#canvas) return
+    const detector = this.resolve<{ pixelToAxial(px: number, py: number, flat?: boolean): Axial }>('detector')
+    if (!detector) return
+    const pixiGlobal = this.#clientToPixiGlobal(p.x, p.y)
+    const local = this.#renderContainer.toLocal(new Point(pixiGlobal.x, pixiGlobal.y))
+    const axial = detector.pixelToAxial(local.x - this.#meshOffset.x, local.y - this.#meshOffset.y, this.#flat)
+    this.#currentAxial = axial
+    this.#currentIndex = this.#lookupIndex(axial.q, axial.r)
+    this.#positionOverlay(axial.q, axial.r)
+    this.#updateCellLabel(axial.q, axial.r)
   }
 
   #positionOverlay(q: number, r: number): void {

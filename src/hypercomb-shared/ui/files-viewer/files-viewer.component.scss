@@ -47,22 +47,65 @@ $accent: #a8c8ff;
 
 .files-header {
   @include tw.header;
+  justify-content: space-between;
   border-bottom: 1px solid rgba($accent, 0.25);
+}
+
+.files-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  min-width: 0;
 }
 
 .files-title {
   font-size: 0.9em;
   letter-spacing: 0.05em;
   color: rgba($accent, 0.95);
+  flex-shrink: 0;
 }
 
 .files-cell {
-  flex: 1;
   font-size: 0.8em;
   color: rgba(255, 255, 255, 0.55);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+// ── reach, in the header (mirrors the feedback + pheromone panels) ──
+.files-scope {
+  flex-shrink: 0;
+  display: flex;
+  gap: 0.2rem;
+  margin-left: auto;
+  padding: 0.15rem;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 7px;
+}
+
+.files-scope-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.24rem 0.4rem;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: rgba(226, 235, 244, 0.55);
+  cursor: pointer;
+  transition: color 150ms ease, background 150ms ease, border-color 150ms ease;
+
+  .mat-sym { font-size: 1rem; line-height: 1; }
+
+  &:hover { color: rgba(238, 243, 248, 0.9); }
+
+  &.active {
+    color: #fff;
+    background: rgba($accent, 0.16);
+    border-color: rgba($accent, 0.45);
+  }
 }
 
 .files-close {

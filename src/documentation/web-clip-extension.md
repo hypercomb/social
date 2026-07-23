@@ -55,7 +55,7 @@ producer). Nothing touches core, shared, or the web shell.
 
 ## The clip record
 
-Same substrate conventions as `kind:'feedback'` (feedback-button.component.ts
+Same substrate conventions as `kind:'feedback'` (feedback-viewer.component.ts
 writes `{ kind, appliesTo, payload, mark }`):
 
 ```json

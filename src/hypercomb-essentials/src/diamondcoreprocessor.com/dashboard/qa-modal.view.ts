@@ -35,6 +35,11 @@ export type QaBindingPayload = {
   qSig: string
   qPath: readonly string[]
   question: string
+  /** The dashboard-bag path this question's TILE lives at
+   *  ([...bagSegments, label]) — carried so the producer's fast path can
+   *  drop the answered card immediately, without waiting for the full
+   *  debounced rebuild. Absent on legacy bindings; those just wait. */
+  bagPath?: readonly string[]
 }
 
 type StoreLike = {
@@ -51,6 +56,17 @@ export class QaModalView extends EventTarget {
   #overlay: HTMLDivElement | null = null
   #current: QaBindingPayload | null = null
   #onAfterCommit: ((payload: QaBindingPayload) => void) | null = null
+
+  /** Route view-mode through the owner-counted ModeRegistry (not a raw
+   *  boolean broadcast): closing this modal over an open website/slides view
+   *  must leave the chrome hidden until that view itself closes. See
+   *  navigation/mode-registry.service.ts. */
+  #setViewMode(active: boolean): void {
+    const modes = window.ioc.get('@diamondcoreprocessor.com/ModeRegistry') as
+      { enter(mode: string, owner: string): void; exit(mode: string, owner: string): void } | undefined
+    if (active) modes?.enter('view:active', 'qa-modal')
+    else modes?.exit('view:active', 'qa-modal')
+  }
 
   show(binding: QaBindingPayload, onAfterCommit?: (p: QaBindingPayload) => void): void {
     if (this.#overlay) this.close()
@@ -168,7 +184,7 @@ export class QaModalView extends EventTarget {
     setTimeout(() => { try { input.focus() } catch { /* ignore */ } }, 60)
 
     document.addEventListener('keydown', this.#onKeyDown)
-    EffectBus.emit('view:active', { active: true, type: 'qa-modal' })
+    this.#setViewMode(true)
 
     const setStatus = (msg: string, isErr = false): void => {
       status.textContent = msg
@@ -181,30 +197,29 @@ export class QaModalView extends EventTarget {
       status.classList.remove('hc-qa__status--err')
     }
 
-    const submit = async (): Promise<void> => {
+    const submit = (): void => {
       const text = input.value.trim()
       if (!text) { setStatus('type an answer first', true); input.focus(); return }
       const cur = this.#current
       if (!cur) { setStatus('no question loaded', true); return }
-      doneBtn.disabled = true
-      input.disabled = true
-      setStatus('committing answer…')
-      try {
-        await this.#commit(cur, text)
-        this.#onAfterCommit?.(cur)
-        this.close()
-      } catch (err) {
-        doneBtn.disabled = false
-        input.disabled = false
-        const msg = err instanceof Error ? err.message : String(err)
-        setStatus('failed: ' + msg, true)
-      }
+      // Done means done: dismiss NOW. Nothing on screen depends on the OPFS
+      // round-trip, so the writes run behind the dismissal. The producer's
+      // fast path hides the answered card on `dashboard:q-answered`; if the
+      // background commit fails, the open-Q record is still in the pool, so
+      // a refresh restores the card instead of losing the question.
+      this.#onAfterCommit?.(cur)
+      this.close()
+      EffectBus.emit('dashboard:q-answered', { ...cur })
+      void this.#commit(cur, text).catch((err) => {
+        console.warn('[qa-modal] answer commit failed', err)
+        EffectBus.emit('dashboard:refresh', {})
+      })
     }
 
-    doneBtn.addEventListener('click', () => void submit())
+    doneBtn.addEventListener('click', () => submit())
     // Cmd/Ctrl + Enter submits from the textarea; typing clears a stale error.
     input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void submit() }
+      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submit() }
     })
     input.addEventListener('input', () => { if (!status.dataset['hint']) resetHint() })
   }
@@ -219,7 +234,7 @@ export class QaModalView extends EventTarget {
     overlay.addEventListener('transitionend', () => overlay.remove(), { once: true })
     setTimeout(() => overlay.remove(), 280)
     document.removeEventListener('keydown', this.#onKeyDown)
-    EffectBus.emit('view:active', { active: false, type: 'qa-modal' })
+    this.#setViewMode(false)
   }
 
   get isOpen(): boolean {

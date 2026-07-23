@@ -1,5 +1,13 @@
 @use '../breakpoints' as *;
 
+// Width of the left-docked rail. Shared so the bottom tag strip can start just
+// inside it — the two must move together or the tags drift under the rail.
+$rail-width: 3.4rem;
+// Bottom-right corner the document actions own (undo · redo · save at
+// right:5.1rem, and the feedback FAB inboard of them). The tag strip stops
+// short of this so a long list is clipped rather than run under them.
+$actions-corner: 12rem;
+
 :host {
   display: contents;
 }
@@ -101,7 +109,10 @@
   border-bottom: 1px solid transparent;
   background: none;
   font-family: inherit;
-  font-size: 0.72rem;
+  // Size comes from .tag-strip — see the note there; the collapsed one-row cap
+  // is derived from it, so the two can't be set independently.
+  font-size: inherit;
+  line-height: inherit;
   letter-spacing: 0.02em;
   white-space: nowrap;
   color: rgba(214, 228, 240, 0.5);
@@ -137,22 +148,159 @@
   &::before { opacity: 1; }
 }
 
+// The strip runs along the BOTTOM EDGE, left → right: reach glyph, the page's
+// pheromones, then the open-out arrow at the right end. Collapsed it is ONE row
+// clipped at a fade; opened out (sticky) it wraps to as many rows as the tags
+// need and grows upward, since the box is bottom-anchored.
+//
+// Three children, and the order matters: the glyph and the arrow sit OUTSIDE
+// `.tag-strip` so the fade — which lives on the strip — can never eat either
+// control. Wrapping used to be the resting behaviour and it grew into the
+// undo/redo cluster, which is why the box stops a corner's width short of it.
 .tag-float {
   position: fixed;
   bottom: 0.45rem;
-  right: 0.7rem;
+  left: 0.7rem;
+  // Hugs its content and grows rightward only as far as the free width — so
+  // the arrow ends up beside the last tag, and the opened-out surface is only
+  // as wide as the tags it holds instead of a mostly-empty full-width bar.
+  // The max-width is what keeps a long list off the undo/redo corner.
+  width: fit-content;
+  max-width: calc(100vw - 0.7rem - #{$actions-corner});
+  // border-box or the opened-out surface's padding is ADDED to max-width and
+  // the panel overhangs the corner it was told to keep clear of.
+  box-sizing: border-box;
   z-index: 59999;
 
   display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 0.15rem 0.7rem;
-  max-width: 22rem;
+  // Bottom-aligned so the glyph and the arrow stay on the last row — the arrow
+  // must not travel up the screen as rows are added under the cursor.
+  align-items: flex-end;
+  gap: 0 0.55rem;
 
   font-family: var(--hc-mono);
   pointer-events: auto;
   transition: opacity 200ms ease;
+}
+
+.tag-strip {
+  // `0 1 auto`, NOT `1 1 auto`: the strip takes only the width its tags need,
+  // so the arrow that follows it sits right after the last tag. Once the tags
+  // outgrow the free width the strip fills it, wraps inside, and the arrow
+  // comes to rest at the right end — where it then stays.
+  flex: 0 1 auto;
+  min-width: 0;
+
+  // The row size lives HERE rather than on .tag-crumb so the collapsed height
+  // cap below can be expressed in `em` and follow the breakpoint overrides on
+  // its own. Anything that changes tag text size changes this, not the crumb.
+  font-size: 0.72rem;
+  line-height: 1.35;
+
+  display: flex;
+  // Always wrapping: overflow is whole tags moved to the next row, never a tag
+  // sliced down the middle. Collapsed, those rows are simply out of view.
+  flex-wrap: wrap;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 0.3rem 0.7rem;
+  overflow: hidden;
+}
+
+// Collapsed: exactly one row tall, the rest wrapped out of sight until opened.
+// The cap is one line of text plus the crumb's vertical padding, in `em` of the
+// strip — so it tracks the font size at every breakpoint with no magic numbers.
+.tag-float:not(.expanded) .tag-strip { max-height: calc(1.35em + 0.2rem); }
+
+// Left-docked menu: start the row just inside the rail rather than under it.
+.tag-float.rail-left {
+  left: calc(#{$rail-width} + 0.85rem);
+  max-width: calc(100vw - #{$rail-width} - 0.85rem - #{$actions-corner});
+}
+
+// ── opened out ────────────────────────────────────────────
+// Every tag for the page at the current reach, on as many rows as it takes.
+// This is the one state where the strip earns a surface: several rows of small
+// text over the hive need something to sit on. Past a few rows it scrolls
+// rather than climbing the screen.
+.tag-float.expanded {
+  padding: 0.45rem 0.6rem;
+  background: rgba(14, 14, 22, 0.9);
+  border: 1px solid rgba(126, 182, 214, 0.18);
+  border-radius: 4px;
+
+  .tag-strip {
+    max-height: 40vh;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+}
+
+// Reach, inside the opened-out strip: three glyphs, the active one lit. Same
+// ids and icons as the pheromone panel — one vocabulary for reach.
+.tag-scope-set {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+  margin-right: 0.35rem;
+  padding-right: 0.5rem;
+  border-right: 1px solid rgba(126, 182, 214, 0.18);
+}
+
+.tag-scope-opt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: rgba(126, 182, 214, 0.5);
+  cursor: pointer;
+  transition: color var(--md-dur-short) var(--md-easing-standard),
+              background var(--md-dur-short) var(--md-easing-standard);
+
+  .mat-sym { font-size: 0.95rem; line-height: 1; }
+
+  &:hover { color: #eaf5fb; }
+
+  &.selected {
+    color: #d6ecf7;
+    background: rgba(126, 182, 214, 0.16);
+  }
+}
+
+// The open-out arrow, pinned at the right end of the strip.
+.tag-expand {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: rgba(126, 182, 214, 0.55);
+  cursor: pointer;
+  transition: color var(--md-dur-short) var(--md-easing-standard);
+
+  .mat-sym { font-size: 1.02rem; line-height: 1; }
+
+  &:hover { color: #eaf5fb; }
+  &.open { color: rgba(126, 182, 214, 0.9); }
+}
+
+// Mobile keeps the older right-anchored placement — the bottom centre is the
+// mobile nav's, so a full-width row would run straight under it. The box hugs
+// the right edge but its CONTENT still starts at the left, so the reach glyph
+// leads the row and can never be the thing that gets clipped.
+.tag-float.mobile {
+  left: auto;
+  right: 0.8rem;
+  max-width: min(22rem, calc(100vw - 1.6rem));
 }
 
 // ── universal icon protocol: edit-mode jiggle ──
@@ -312,7 +460,7 @@
     overflow: hidden;
     height: 100%;
     max-height: none;
-    width: 3.4rem;             // a calm, even rail width
+    width: $rail-width;        // a calm, even rail width — shared with .tag-float.rail-left
     padding: 0.35rem 0 0;      // bottom padding removed so back sits flush
     gap: 0.05rem;
     border: none;
@@ -327,33 +475,51 @@
     );
   }
 
-  // The rail is three stacked zones: home (top, fixed), the scrollable icon
-  // list (middle, grows + scrolls), and the footer (bottom, fixed). controls-rows
-  // fills the height between grip and bottom edge; only the middle scrolls.
+  // The rail is TWO stacked zones: one scrolling icon list (everything —
+  // pin, home and every control — grows + scrolls as one run) and the footer
+  // (bottom, fixed). controls-rows fills the height between grip and bottom
+  // edge; only the list scrolls.
   .controls-rows { flex: 1; width: 100%; min-height: 0; }
 
-  // Scrollable middle. A thin scrollbar appears only when the icon set
-  // outgrows the rail, so the whole list stays reachable as it lengthens.
+  // The scroll region: the ENTIRE top of the rail — pin, home and every
+  // control scroll as one run when the set outgrows the rail.
+  //
+  // The scrollbar itself is hidden (same treatment as the right-dock column
+  // below). A visible bar in a 3.4rem rail is both heavy and, worse, it steals
+  // layout width from THIS zone only — pushing the scrolling icons several
+  // pixels left of the pinned footer icons, so the rail stops reading as one
+  // vertical line the moment it overflows. There's no deterministic way to
+  // reserve a matching gutter for the footer either: Chromium ignores
+  // `::-webkit-scrollbar` sizing whenever `scrollbar-width`/`scrollbar-color`
+  // is set, and macOS overlay scrollbars reserve nothing at all. The list
+  // clipping mid-icon at the footer hairline is the cue that it scrolls.
   .controls-row {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
-    scrollbar-width: thin;
-    scrollbar-color: color-mix(in srgb, var(--md-outline-variant) 85%, transparent) transparent;
-    &::-webkit-scrollbar { width: 6px; }
-    &::-webkit-scrollbar-thumb {
-      background: color-mix(in srgb, var(--md-outline-variant) 85%, transparent);
-      border-radius: 3px;
-    }
-    &::-webkit-scrollbar-track { background: transparent; }
+    scrollbar-width: none;
+    &::-webkit-scrollbar { display: none; }
+
+    // Drag-scrolling: a press-drag anywhere in here moves the list. Kill text
+    // selection so the drag never paints a selection over the glyphs, and let
+    // touch keep its native vertical scroll (pan-y) — the pointer handler
+    // deliberately sits out touch so the box isn't scrolled twice.
+    user-select: none;
+    touch-action: pan-y;
+
+    // Grabbing cursor only WHILE dragging — the resting cursor stays `pointer`
+    // over the icons, which is what they are until you move.
+    &.drag-scrolling,
+    &.drag-scrolling .ctl-btn { cursor: grabbing; }
 
     // Keep icons at their natural height so the list overflows (and scrolls)
     // rather than squashing every icon to fit.
     > .ctl-btn { flex-shrink: 0; }
   }
 
-  // Pin pinned ABOVE home at the very top of the rail (under the grip).
+  // Pin leads the list, home follows (see the order rules at the bottom of
+  // this file) — both scroll with the rest of the icons.
   // The active (view-locked) state must read on EVERY platform: macOS/Safari
   // does not reliably repaint the Material Symbols FILL axis when .filled is
   // toggled, so the locked cue here never relies on the variable-font fill
@@ -379,19 +545,20 @@
     }
   }
 
-  // Home pinned just below pin, a hairline below it.
+  // Home sits directly under pin. No divider under it — the rail is one
+  // uniform run of icons now, and a hairline that scrolls with the list would
+  // land at an arbitrary point mid-rail.
   .rail-home {
     flex-shrink: 0;
     padding: 0.5rem 0 0.55rem;
-    border-bottom: 1px solid color-mix(in srgb, var(--md-outline-variant) 50%, transparent);
     color: var(--md-on-surface);
     &:hover { color: whitesmoke; }
   }
 
-  // Footer pinned at the bottom: the edit-toggle chevron sits at the bottom of
-  // the list (always reachable, even when the icons scroll), with back anchored
-  // beneath it as a grounded footer action separated by a hairline. Slightly
-  // taller so it feels like a footer, not just another icon.
+  // Footer — the one pinned zone, at the bottom: the edit-toggle chevron
+  // ("adjust items") with back anchored beneath it as a grounded footer action,
+  // separated from the scrolling list by a hairline. Slightly taller so it
+  // feels like a footer, not just another icon.
   .rail-footer {
     border-top: 1px solid color-mix(in srgb, var(--md-outline-variant) 50%, transparent);
   }
@@ -507,18 +674,23 @@
   .controls-row { flex-direction: column; }
 }
 
-// Explicit rail icon order (top → bottom). Mostly registry order, but the two
-// magnifiers are flipped so the +(zoom-in) stays ABOVE the −(zoom-out). Any
+// Explicit rail icon order (top → bottom). Pin and home lead the list (they
+// are the two navigation constants), then registry order — except the two
+// magnifiers, flipped so the +(zoom-in) stays ABOVE the −(zoom-out). Any
 // enabled extra (default order 50) falls below the named set. The edit-mode
-// chevron and back now live in the pinned footer (a separate zone), so they're
-// no longer ordered here.
+// chevron and back live in the pinned footer (a separate zone), so they're
+// not ordered here.
 .pill-stage.dock-left .controls-row {
   .ctl-btn                             { order: 50; }
+  .rail-pin                            { order: -2; }
+  .rail-home                           { order: -1; }
   .ctl-btn[data-ctrl-id='dcp']         { order: 1; }
   .ctl-btn[data-ctrl-id='fit']         { order: 2; }
   .ctl-btn[data-ctrl-id='zoom-in']     { order: 3; }
   .ctl-btn[data-ctrl-id='zoom-out']    { order: 4; }
-  .ctl-btn[data-ctrl-id='pin']         { order: 5; }
+  // no [data-ctrl-id='pin'] rule: railControls() drops the registry pin on the
+  // left rail, so .rail-pin (order -2, above) is the only pin here — an
+  // attribute selector for it would out-specify that and drag it back down.
   .ctl-btn[data-ctrl-id='fullscreen']  { order: 6; }
 }
 
@@ -1045,7 +1217,9 @@
   .close-x { font-size: 1.1rem; }
 
   .room-display { font-size: 0.7rem; }
-  .tag-crumb { font-size: 0.875rem; }
+  // Sized on the strip, not the crumb — the collapsed one-row cap is in `em`
+  // of the strip, so it follows this automatically.
+  .tag-strip { font-size: 0.875rem; }
 }
 
 // ── tablet landscape / Surface (1024–1366px) ──────────────
@@ -1160,13 +1334,12 @@
   .clipboard-empty { font-size: 0.72rem; }
   .close-x { font-size: 1.3rem; }
 
-  .tag-crumb {
-    font-size: 1rem;
-    padding: 0.08rem 0.55rem;
-  }
+  .tag-strip { font-size: 1rem; }
+  .tag-crumb { padding: 0.08rem 0.55rem; }
 
   .room-display { font-size: 0.8rem; }
-  .tag-float { right: 0.8rem; }
+  // Placement at this width is owned by `.tag-float.mobile` (same 599px
+  // threshold as `isMobile`), which anchors the strip to the right edge.
 }
 
 // ── phone landscape ───────────────────────────────────────
@@ -1226,8 +1399,7 @@
     .dcp-icon { font-size: 2.32rem; }
   }
 
-  .tag-float { max-width: 36rem; }
   // kept proportional to the base size — at 0.7rem this override had fallen
   // BELOW the base, so pheromones shrank on the widest monitors
-  .tag-crumb { font-size: 0.8rem; }
+  .tag-strip { font-size: 0.8rem; }
 }

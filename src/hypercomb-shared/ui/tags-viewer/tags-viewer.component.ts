@@ -7,7 +7,22 @@
 //   • the count of currently-visible tiles carrying it,
 //   • a filter toggle (drives the same cross-page tag flatten as the
 //     controls-bar pills, via `tags:filter`),
-//   • a remove control (drops it from the master registry).
+//   • a remove control, which ARMS a staged removal rather than acting at once
+//     (see below).
+//
+// ── Staged removal ────────────────────────────────────────────────────────
+// Removing a keyword used to be one-way and invisible: the × dropped the tag
+// from the master registry while every tile kept its decoration, and there was
+// no UI path to take a keyword back off the tiles. Now the × arms a removal:
+// the hive filters to that keyword (so every tile carrying it is on screen),
+// clicking a tile stages it — the tile paints struck-through and the panel's
+// list grows — and only then does Remove commit. Cancel throws it away; the
+// hive was never written to.
+//
+// This panel owns the review surface (the list + the two buttons); the staging
+// itself lives in TagRemovalDrone (essentials), which resolves each staged
+// tile's location and splices the decoration on commit. `tags:removal-pending`
+// is the shared truth between the two, and the renderer marks the same set.
 //
 // Shell UI, so it must NOT import essentials — it reads the TagRegistry and
 // emits tag effects over IoC / EffectBus, exactly like the controls bar. Tag
@@ -64,7 +79,17 @@ export class TagsViewerComponent implements OnDestroy {
    *  and panel can never disagree. Non-sticky, same as the bar. */
   readonly #scope = signal<Scope>('local')
 
+  /** The keyword whose removal is armed, or null. Mirrors
+   *  `tags:removal-pending` so the panel can never disagree with the renderer
+   *  about what is staged. */
+  readonly #removalTag = signal<string | null>(null)
+  /** Tiles staged to lose that keyword — the list that grows as you click. */
+  readonly #removalCells = signal<string[]>([])
+
   readonly scope = this.#scope.asReadonly()
+  readonly removalTag = this.#removalTag.asReadonly()
+  readonly removalCells = this.#removalCells.asReadonly()
+  readonly removalCount = computed(() => this.#removalCells().length)
   readonly activeNames = computed(() => [...this.#active()].sort((a, b) => a.localeCompare(b)))
   readonly hasFilter = computed(() => this.#active().size > 0)
 
@@ -118,6 +143,14 @@ export class TagsViewerComponent implements OnDestroy {
       this.#active.set(new Set(Array.isArray(p?.active) ? p.active : []))
       if (p?.scope) this.#scope.set(p.scope)
     }))
+
+    // Staging state (sticky): the drone is the owner, this panel renders it.
+    this.#cleanups.push(EffectBus.on<{ tag: string | null; cells: string[]; active: boolean }>(
+      'tags:removal-pending', (p) => {
+        this.#removalTag.set(p?.active ? (p.tag ?? null) : null)
+        this.#removalCells.set(Array.isArray(p?.cells) ? [...p.cells] : [])
+      },
+    ))
   }
 
   ngOnDestroy(): void {
@@ -186,10 +219,44 @@ export class TagsViewerComponent implements OnDestroy {
     void this.#registry()?.add(name, color)
   }
 
-  /** Remove a tag from the master registry (global GC). Tag decorations already
-   *  on cells stay until removed per-cell via `~cell:tag`; this clears the tag
-   *  from the registry-driven UI (pills, this view) and the active filter. */
-  remove(name: string): void {
+  isStaging(name: string): boolean {
+    return this.#removalTag() === name
+  }
+
+  /** Arm a removal: filter the hive to this keyword — so every tile carrying it
+   *  is on screen at the current reach — and hand the staging to the drone.
+   *  Nothing is written; clicking tiles builds the list, Remove commits it. */
+  beginRemoval(name: string): void {
+    if (this.#removalTag() === name) { this.commitRemoval(); return }
+    const only = new Set([name])
+    this.#active.set(only)
+    this.#emitFilter(only)
+    EffectBus.emit('tags:removal-begin', { tag: name })
+  }
+
+  /** Stage every tile currently on screen — the "all of them" shortcut for a
+   *  keyword that was applied by mistake. */
+  stageAllShown(): void {
+    EffectBus.emit('tags:removal-select-all', {})
+  }
+
+  /** Apply the staged removals. The drone splices each tile's decoration and
+   *  re-runs the filter, so the committed tiles drop out of view. */
+  commitRemoval(): void {
+    if (this.removalCount() === 0) { this.cancelRemoval(); return }
+    EffectBus.emit('tags:removal-commit', {})
+  }
+
+  cancelRemoval(): void {
+    EffectBus.emit('tags:removal-cancel', {})
+  }
+
+  /** Forget the keyword itself — drop it from the master registry so it stops
+   *  appearing in this list and the controls-bar pills. Tiles keep whatever
+   *  decorations they carry; use the staged removal above to take it off them.
+   *  Only offered while a removal is armed, so it can't be hit by accident. */
+  forgetTag(name: string): void {
+    this.cancelRemoval()
     void this.#registry()?.remove(name)
     if (this.#active().has(name)) {
       const next = new Set(this.#active())
@@ -199,13 +266,19 @@ export class TagsViewerComponent implements OnDestroy {
     }
   }
 
+  /** Closing the panel disarms any staged removal — the review surface is
+   *  gone, so leaving tile clicks hijacked would strand the participant. */
   close(): void {
+    if (this.#removalTag()) this.cancelRemoval()
     this.visible.set(false)
   }
 
   onKey(event: KeyboardEvent): void {
     if (event.key !== 'Escape') return
     event.preventDefault()
+    // Escape steps back one level: out of the armed removal first, out of the
+    // panel only once nothing is staged.
+    if (this.#removalTag()) { this.cancelRemoval(); return }
     this.close()
   }
 }

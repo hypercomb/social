@@ -55,8 +55,10 @@ import { Drone, RESOURCE_URL_PREFIX, I18N_IOC_KEY, type I18nProvider } from '@hy
 import { childSigsOf } from '../../history/layer-placement.js'
 import { isFeatureHidden } from '../../sharing/feature-hidden.js'
 import { DECK_KIND, SLIDE_KIND } from '../../commands/present.queen.js'
-import { isImageUrl } from '../../link/photo.js'
+import { isImageUrl, sniffImageMime } from '../../link/photo.js'
 import { embedUrlFor, mediaKindForUrl, kindForMime, type PlayableKind } from '../../link/media.js'
+import { TAG_DECORATION_KIND } from '../../commands/decoration-kind-index.js'
+import { readTilePropsIndex, lookupTilePropsSig, cellLocationSig } from '../../editor/tile-properties.js'
 
 const SLIDES_VIEW = 'slides'
 const SIG = /^[0-9a-f]{64}$/
@@ -72,7 +74,16 @@ type HistoryShape = {
   currentLayerAt(sig: string): Promise<Record<string, unknown> | null>
   getLayerBySig(sig: string): Promise<Record<string, unknown> | null>
 }
-type StoreShape = { getResource(sig: string): Promise<Blob | null> }
+type StoreShape = {
+  getResource(sig: string): Promise<Blob | null>
+  /** LOCAL-ONLY read (memory → OPFS, NEVER the host/CDN). All slide RESOLUTION
+   *  (which props/decorations/tags a child has) goes through this so collecting
+   *  a deck can't BLOCK on an unreachable content host — the same reason
+   *  show-cell paints tile props from getResourceLocal. `getResource` (with its
+   *  host fallback) is kept only for the actual slide MEDIA, resolved async
+   *  per-slide in #show so a slow fetch never stalls the collect. */
+  getResourceLocal(sig: string): Promise<Blob | null>
+}
 
 /** How a slide renders. `auto` = content-addressed bytes whose real kind is
  *  read from the blob's MIME at paint time (a signature carries no extension);
@@ -96,6 +107,9 @@ type MountState = {
   counterEl: HTMLElement
   dots: HTMLElement
   empty: HTMLElement
+  /** The unfiltered empty-state copy, captured at mount so the filtered
+   *  variant can replace it and then restore. */
+  emptyDefault: string
 }
 
 export class SlidesViewDrone extends Drone {
@@ -106,6 +120,20 @@ export class SlidesViewDrone extends Drone {
 
   #mount: MountState | null = null
   #index = 0
+  /** The deck being played when it was opened FOR A SPECIFIC TILE (a click on a
+   *  deck, or the Beehaviors panel's Open) rather than for wherever the
+   *  participant is standing. While set, the viewer presents THIS path and the
+   *  lineage never moves — so closing drops you back on the layer you opened
+   *  from, and you never see the deck's own hexagon layer. Null = present the
+   *  current cell, which is what a bare `/present` does. */
+  #targetSegments: string[] | null = null
+  /** The marks currently being filtered on (`tags:filter`). While non-empty a
+   *  child only plays if it carries one of them — the deck narrows with the
+   *  same filter the hex grid honours. Tags are the AUTHOR'S pheromones, the
+   *  tier that exists today (documentation/pheromones.md: deposits, decay and
+   *  sybil-weighting are still DESIGN); when the deposit histories land, this
+   *  set is what swaps to reading the derived pheromone field. */
+  #filterTags = new Set<string>()
   /** Guards async image resolution against a newer #show landing first. */
   #showToken = 0
   /** Cache of resolved slide bytes: content sig → { object URL, blob MIME }.
@@ -170,6 +198,28 @@ export class SlidesViewDrone extends Drone {
       // Hide / restore in the Beehaviors panel turns this behaviour off / back on.
       this.onEffect('feature:hidden', () => { void this.#reconcile() })
       this.onEffect('feature:restored', () => { void this.#reconcile() })
+      // The mark filter changed — re-collect so the deck narrows (or reopens)
+      // with it. Last-value replay means a filter set BEFORE the viewer opened
+      // is picked up on subscribe, so playing into an active filter is filtered
+      // from the first frame.
+      this.onEffect<{ active?: string[] }>('tags:filter', (p) => {
+        const active = Array.isArray(p?.active)
+          ? p!.active!.map(s => String(s ?? '').trim()).filter(Boolean)
+          : []
+        const next = new Set(active)
+        if (next.size === this.#filterTags.size && [...next].every(t => this.#filterTags.has(t))) return
+        this.#filterTags = next
+        void this.#reconcile()
+      })
+      // A tile carrying this behaviour was clicked (tile-overlay), or the
+      // Beehaviors panel's Open was used. Play THAT deck in place.
+      this.onEffect<{ view?: string; segments?: string[] }>('view:open-for-tile', (p) => {
+        if (String(p?.view ?? '') !== SLIDES_VIEW) return
+        const segments = Array.isArray(p?.segments)
+          ? p!.segments!.map(s => String(s ?? '').trim()).filter(Boolean)
+          : []
+        void this.#openTarget(segments)
+      })
       this.#effectsBound = true
     }
     void this.#reconcile()
@@ -240,19 +290,26 @@ export class SlidesViewDrone extends Drone {
     this.#reconciling = true
     try {
       const vm = this.#vm()
-      if (!vm || vm.mode !== SLIDES_VIEW) { this.#teardown(); return }
+      // EXIT — closed via Escape / right-click / the exit button / a raw flip.
+      // Drop the targeted deck too, so the next bare `/present` presents
+      // wherever the participant actually is.
+      if (!vm || vm.mode !== SLIDES_VIEW) { this.#targetSegments = null; this.#teardown(); return }
 
       const lineage = this.resolve<{ explorerSegments?: () => readonly string[] }>('lineage')
       const store = this.resolve<StoreShape>('store')
       const history = this.#history()
       if (!lineage || !store?.getResource || !history) return
 
-      const segments: string[] = [...(lineage.explorerSegments?.() ?? [])]
+      // A TARGETED open plays that deck wherever the participant is standing;
+      // otherwise present the current cell (bare `/present`).
+      const segments: string[] = this.#targetSegments
+        ? [...this.#targetSegments]
+        : [...(lineage.explorerSegments?.() ?? [])]
       // Honor the Beehaviors panel's off switch: a hidden deck stays inert (torn
       // down) until restored — the same hidden-pool gate SiteViewDrone uses.
       if (await isFeatureHidden(segments, DECK_KIND)) { this.#teardown(); return }
       const slides = await this.#collectSlides(segments, history, store)
-      if (this.#vm()?.mode !== SLIDES_VIEW) { this.#teardown(); return } // flipped mid-read
+      if (this.#vm()?.mode !== SLIDES_VIEW) { this.#targetSegments = null; this.#teardown(); return } // flipped mid-read
 
       const deckKey = segments.join('/')
       if (this.#mount && this.#mount.deckKey === deckKey) {
@@ -266,6 +323,26 @@ export class SlidesViewDrone extends Drone {
       this.#reconciling = false
       if (this.#queued) { this.#queued = false; void this.#reconcile() }
     }
+  }
+
+  /** Play the deck at `segments` IN PLACE — the tile-click / panel entry point.
+   *  Nothing navigates: the viewer mounts over the current layer, so closing it
+   *  leaves the participant exactly where they opened it from and the deck's own
+   *  hexagon layer is never rendered.
+   *
+   *  When the behaviour is turned OFF in the Beehaviors panel there is nothing
+   *  to play, so fall back to what the click would otherwise have done — enter
+   *  the tile normally — rather than appearing to do nothing. */
+  async #openTarget(segments: readonly string[]): Promise<void> {
+    if (segments.length === 0) return
+    if (await isFeatureHidden(segments, DECK_KIND)) {
+      window.ioc?.get<{ goRaw?: (s: readonly string[]) => void }>('@hypercomb.social/Navigation')
+        ?.goRaw?.([...segments])
+      return
+    }
+    this.#targetSegments = [...segments]
+    this.#vm()?.setMode(SLIDES_VIEW)
+    void this.#reconcile()
   }
 
   /** Walk the deck cell's children and resolve each to zero-or-more slides.
@@ -297,7 +374,7 @@ export class SlidesViewDrone extends Drone {
             if (fresh) child = fresh
           } catch { /* keep the ref layer */ }
         }
-        const found = await this.#slidesFromChild(child, name, childIndex, store)
+        const found = await this.#slidesFromChild(child, name, childIndex, store, segments)
         out.push(...found)
         childIndex++
       }
@@ -312,26 +389,40 @@ export class SlidesViewDrone extends Drone {
     name: string,
     childIndex: number,
     store: StoreShape,
+    deckSegments: readonly string[],
   ): Promise<Array<Slide & { order: number }>> {
     const decorationSigs = Array.isArray(child['decorations'])
       ? (child['decorations'] as unknown[]).map(s => String(s)).filter(s => SIG.test(s))
       : []
 
-    // 1 + 2: decoration-driven slides.
+    // 1 + 2: decoration-driven slides — and the child's MARKS in the same pass.
+    // Deliberately no early break: a tag record can sit after the slide record
+    // in the slot, and the filter below needs every one of them.
     let slidePayload: Record<string, unknown> | null = null
     let gallery: string[] | null = null
+    const marks: string[] = []
     for (const sig of decorationSigs) {
-      const blob = await store.getResource(sig)
+      const blob = await store.getResourceLocal(sig)
       if (!blob) continue
       try {
         const rec = JSON.parse(await blob.text()) as { kind?: string; payload?: Record<string, unknown> }
-        if (rec?.kind === SLIDE_KIND && rec.payload) { slidePayload = rec.payload; break }
+        if (rec?.kind === SLIDE_KIND && rec.payload && !slidePayload) { slidePayload = rec.payload; continue }
         if (rec?.kind === GALLERY_KIND) {
           const imgs = rec.payload?.['images']
           if (Array.isArray(imgs)) gallery = imgs.map(s => String(s)).filter(s => SIG.test(s))
+          continue
+        }
+        if (rec?.kind === TAG_DECORATION_KIND) {
+          const mark = rec.payload?.['name']
+          if (typeof mark === 'string' && mark.trim()) marks.push(mark.trim())
         }
       } catch { /* malformed record — skip */ }
     }
+
+    // PHEROMONE FILTER — with marks being filtered, a child only plays if it
+    // carries one of them, so the presentation narrows exactly like the grid
+    // does instead of ignoring the filter you're standing in.
+    if (this.#filterTags.size > 0 && !marks.some(m => this.#filterTags.has(m))) return []
 
     if (slidePayload) {
       const contentSig = String(slidePayload['contentSig'] ?? '')
@@ -360,7 +451,7 @@ export class SlidesViewDrone extends Drone {
     // 3: the child's own LINK — whatever the tile points at IS the slide. The
     // link is a TILE PROPERTY (`properties[0].link`, where the attach flow
     // writes it), with a legacy top-level `link` as fallback.
-    const link = await this.#childLink(child, store)
+    const link = await this.#childLink(child, name, deckSegments, store)
     const slide = this.#slideFromLink(link, name, childIndex)
     return slide ? [slide] : []
   }
@@ -383,24 +474,53 @@ export class SlidesViewDrone extends Drone {
     return null
   }
 
-  /** The child tile's link. Attached links/diagrams live in the tile's
-   *  canonical PROPERTIES resource (`properties[0]` → JSON → `link`), NOT a
-   *  top-level layer field — that's why a plain `child.link` read missed every
-   *  attached diagram. Falls back to a legacy top-level `link` for tiles that
-   *  stored it inline. Empty when the tile has no link. */
-  async #childLink(child: Record<string, unknown>, store: StoreShape): Promise<string> {
-    const slot = child['properties']
-    const propSig = Array.isArray(slot) && typeof slot[0] === 'string' ? slot[0] : ''
-    if (SIG.test(propSig)) {
+  /** The child tile's link — resolved through the SAME sources the renderer
+   *  uses, in the same order, so anything you can SEE on a tile can play.
+   *
+   *  A link is a tile PROPERTY, never a top-level layer field, and it lives in
+   *  TWO stores that can disagree:
+   *    1. CANONICAL — the tile's own layer slot (`properties[0]`). Travels with
+   *       adoption/sync; what a peer or another device sees.
+   *    2. PARTICIPANT-LOCAL props index (`hc:tile-props-index`) — what
+   *       show-cell's `propsSigForLabel` actually reads to paint the tile.
+   *  Tiles written before the canonical write existed (and any path that only
+   *  updated the index) have an EMPTY canonical slot while still rendering
+   *  their link — reading canonical alone made those decks come up blank even
+   *  though every tile visibly had its media. Hence the fallback.
+   *
+   *  3. LEGACY inline `link` on the layer, for tiles that stored it there. */
+  async #childLink(
+    child: Record<string, unknown>,
+    name: string,
+    deckSegments: readonly string[],
+    store: StoreShape,
+  ): Promise<string> {
+    const linkFromPropsSig = async (sig: string): Promise<string> => {
+      if (!SIG.test(sig)) return ''
       try {
-        const blob = await store.getResource(propSig)
-        if (blob) {
-          const props = JSON.parse(await blob.text()) as Record<string, unknown>
-          const link = props['link']
-          if (typeof link === 'string' && link.trim()) return link.trim()
-        }
-      } catch { /* unreadable/malformed props — fall back to a legacy inline link */ }
+        const blob = await store.getResourceLocal(sig)
+        if (!blob) return ''
+        const props = JSON.parse(await blob.text()) as Record<string, unknown>
+        const link = props['link']
+        return typeof link === 'string' ? link.trim() : ''
+      } catch { return '' }
     }
+
+    const slot = child['properties']
+    const canonical = await linkFromPropsSig(
+      Array.isArray(slot) && typeof slot[0] === 'string' ? slot[0] : '',
+    )
+    if (canonical) return canonical
+
+    try {
+      const key = name ? await cellLocationSig(deckSegments, name) : ''
+      const indexed = lookupTilePropsSig(readTilePropsIndex(), key, name)
+      if (indexed) {
+        const fromIndex = await linkFromPropsSig(indexed)
+        if (fromIndex) return fromIndex
+      }
+    } catch { /* index unavailable — fall through to the legacy field */ }
+
     return typeof child['link'] === 'string' ? (child['link'] as string).trim() : ''
   }
 
@@ -442,7 +562,23 @@ export class SlidesViewDrone extends Drone {
     try {
       const blob = await store.getResource(sig)
       if (!blob) return { url: '', mime: '' }
-      const entry = { url: URL.createObjectURL(blob), mime: blob.type || '' }
+      // Content-addressed resources are stored WITHOUT a MIME (a signature has
+      // no extension; the SW serves them as octet-stream). An object URL of an
+      // EMPTY-type blob does NOT decode as an image in a CSS background — the
+      // diagram is present but paints nothing (the "viewer shows, every slide
+      // blank" bug, confirmed live: a valid 900×470 SVG with `blob.type === ''`
+      // painted nothing until re-wrapped). Recover the real type from the BYTES
+      // — the only honest signal, the same sniff link-drop uses for a dropped
+      // `/@resource` diagram — and re-wrap so the object URL carries a correct
+      // MIME. A blob that already declares its type (external media) is left be.
+      let typed = blob
+      let mime = blob.type || ''
+      if (!mime) {
+        const bytes = new Uint8Array(await blob.arrayBuffer())
+        mime = sniffImageMime(bytes) || ''
+        if (mime) typed = new Blob([bytes], { type: mime })
+      }
+      const entry = { url: URL.createObjectURL(typed), mime }
       this.#resolved.set(sig, entry)
       return entry
     } catch { return { url: '', mime: '' } }
@@ -513,7 +649,7 @@ export class SlidesViewDrone extends Drone {
     empty.textContent = i18n?.t('slides.empty') ?? 'No diagram tiles here yet. Add a child tile, then run /present slide on it to connect an SVG or image.'
     host.appendChild(empty)
 
-    this.#mount = { host, deckKey, slides, stage, titleEl, captionEl, counterEl, dots, empty }
+    this.#mount = { host, deckKey, slides, stage, titleEl, captionEl, counterEl, dots, empty, emptyDefault: empty.textContent ?? '' }
     this.#index = 0
     this.#setViewActive(true)
     this.#show(0)
@@ -538,8 +674,10 @@ export class SlidesViewDrone extends Drone {
     const btn = document.createElement('button')
     btn.type = 'button'
     btn.textContent = 'grid_view'
-    btn.title = 'Back to the hive'
-    btn.setAttribute('aria-label', 'Back to the hive')
+    const i18n = window.ioc.get<I18nProvider>(I18N_IOC_KEY)
+    const exitLabel = i18n?.t('slides.exit') ?? 'Back to the hive'
+    btn.title = exitLabel
+    btn.setAttribute('aria-label', exitLabel)
     btn.style.cssText =
       'position:absolute;bottom:16px;right:20px;width:3rem;height:3rem;' +
       'display:flex;align-items:center;justify-content:center;border:none;border-radius:50%;' +
@@ -574,6 +712,11 @@ export class SlidesViewDrone extends Drone {
       m.titleEl.textContent = ''
       m.captionEl.textContent = ''
       m.counterEl.textContent = ''
+      // A filter that hides EVERY slide has to say so — otherwise the deck reads
+      // as empty and you go hunting for content that is merely filtered out.
+      m.empty.textContent = this.#filterTags.size > 0
+        ? `Nothing in this deck carries ${this.#markLabel()}. Clear the filter to play the whole deck.`
+        : m.emptyDefault
       this.#clearStage(m)
       return
     }
@@ -584,7 +727,11 @@ export class SlidesViewDrone extends Drone {
 
     m.titleEl.textContent = slide.title
     m.captionEl.textContent = slide.caption ?? ''
-    m.counterEl.textContent = `${index + 1} / ${n}`
+    // Show WHAT is being filtered next to the count — "2 / 3" alone hides the
+    // fact that you are watching a narrowed deck.
+    m.counterEl.textContent = this.#filterTags.size > 0
+      ? `${index + 1} / ${n} · ${this.#markLabel()}`
+      : `${index + 1} / ${n}`
     this.#renderDots(m, n, index)
 
     // Stop + drop whatever the PREVIOUS slide mounted before painting the next
@@ -597,6 +744,11 @@ export class SlidesViewDrone extends Drone {
       if (!res) return
       m.stage.appendChild(this.#mediaElement(res.kind, res.url))
     })
+  }
+
+  /** The active marks, rendered for display (`#alpha #beta`). */
+  #markLabel(): string {
+    return [...this.#filterTags].map(t => `#${t}`).join(' ')
   }
 
   /** The native player mounted on the CURRENT slide, when it has one. Drives
@@ -706,7 +858,13 @@ export class SlidesViewDrone extends Drone {
   #setViewActive(active: boolean): void {
     if (this.#viewActive === active) return
     this.#viewActive = active
-    this.emitEffect<{ active: boolean }>('view:active', { active })
+    // Owner-counted, not a raw boolean: a modal/photo closing on top of this
+    // view must not unhide the chrome while this view is still open
+    // (see navigation/mode-registry.service.ts).
+    const modes = window.ioc.get('@diamondcoreprocessor.com/ModeRegistry') as
+      { enter(mode: string, owner: string): void; exit(mode: string, owner: string): void } | undefined
+    if (active) modes?.enter('view:active', 'slides-view')
+    else modes?.exit('view:active', 'slides-view')
   }
 }
 

@@ -8,7 +8,11 @@
               [class.dragging]="draggingKey() === p.memberKey"
               [class.dragging-out]="draggingKey() === p.memberKey && draggingOut()"
               (pointerdown)="onPinDown(p, $event)"
-              [attr.aria-label]="p.label" [title]="p.label">
+              (pointerenter)="onPinEnter(p)"
+              [attr.aria-label]="p.label"
+              [title]="p.hasAggregate
+                ? ('pinned.aggregate-hint' | t: { label: p.label, group: p.groupLabel })
+                : p.label">
         <span class="mat-sym">{{ p.icon }}</span>
       </button>
     }

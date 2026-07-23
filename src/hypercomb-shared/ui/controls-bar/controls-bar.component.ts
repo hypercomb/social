@@ -33,6 +33,11 @@ const ENABLED_MAP_KEY = 'hc:controls-enabled-map'
 /** How long the pin button pulses after a pan/zoom attempt on a pinned view. */
 const LOCK_BUMP_MS = 900
 
+/** Pointer travel that turns a press on the rail from a click into a scroll.
+ *  Past this the gesture belongs to the list and the icon under the pointer
+ *  must not fire on release. */
+const DRAG_SLOP_PX = 5
+
 // ── control registry ──────────────────────────────────────
 //
 // Each control has an id, a localization key for its label, the action
@@ -66,7 +71,9 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // launch-group pages — every normal hive page is hexagons regardless.
   { id: 'launcher-shapes', label: 'controls.launcher-shapes', action: 'toggleLauncherShapes', visibleWhen: 'always' },
   { id: 'text-only',    label: 'controls.text-only',    action: 'toggleTextOnly',     visibleWhen: 'always' },
-  { id: 'notes',        label: 'controls.notes',        action: 'toggleNotes',        visibleWhen: 'always' },
+  // 'notes' moved to the command-line header (the post-it toggle at the right
+  // of the input) — notes ride along with every page, so their switch lives in
+  // the top chrome now, not here.
   // Pools of Meaning — the reference feature's portal (one-state, like DCP):
   // navigates to the `sets/` layer, where each tile is a reference set (see
   // documentation/entrances-and-sets.md). Lives HERE on the control bar, not
@@ -84,7 +91,8 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
   // pops as the JOIN step when the participant flips solo → public (see
   // toggleMeshPublic below): configure where, press start, you're in the swarm.
   { id: 'bees',         label: 'controls.toggle-bees',  action: 'toggleBees',         visibleWhen: 'public' },
-  { id: 'feedback',     label: 'controls.feedback',     action: 'toggleFeedback',     visibleWhen: 'always' },
+  // 'feedback' is gone from the bar — the command-line header's feedback
+  // toggle opens the combined panel (inbox list + share form) now.
 ]
 
 // First-time defaults: items the previous primary-row had on stay enabled,
@@ -93,9 +101,9 @@ const CONTROL_REGISTRY: readonly ControlItem[] = [
 const DEFAULT_ENABLED_MAP: Record<string, boolean> = {
   'back': true, 'dcp': true, 'fit': true, 'zoom-out': true, 'zoom-in': true, 'pin': true, 'fullscreen': true,
   'show-hidden': false, 'neon-mode': false, 'launcher-shapes': false, 'text-only': false,
-  'notes': true, 'pools': true,
+  'pools': true,
   'cut': false, 'copy': false,
-  'clipboard': true, 'voice': false, 'bees': false, 'feedback': false,
+  'clipboard': true, 'voice': false, 'bees': false,
 }
 
 @Component({
@@ -315,14 +323,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // `clipboard:open` state event so the toolbar button can both toggle it
   // and light up while it's showing.
   #clipboardPanelOpen = signal(false)
-  // Whether the notes strip is currently open. Mirrors the strip's own
-  // `notes:panel-state` event so the Notes button toggles it and lights up
-  // while it's showing. The strip no longer auto-opens on selection — this
-  // toggle is the sole on/off control.
-  #notesPanelOpen = signal(false)
-  // Mirrors the feedback review panel's `feedback:viewer-open` broadcast so the
-  // controls-bar button lights up while the panel is showing.
-  #feedbackPanelOpen = signal(false)
   #hasSelection = signal(false)
   #textOnly = signal(false)
   #layoutPinned = signal(false)
@@ -331,6 +331,10 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   // Filter scope — how wide a tag filter reaches. Non-sticky: resets to 'local'
   // every session (never persisted), so filtering defaults to the current page.
   #tagScope = signal<'local' | 'children' | 'global'>('local')
+  // Bottom strip opened out to every tag on multiple rows. STICKY, unlike the
+  // reach: this is a workspace preference (how much room the pheromones get),
+  // not a filter state, so a hive that lives on its tags stays opened out.
+  #tagsExpanded = signal(localStorage.getItem('hc:tags-expanded') === '1')
   #hoveredTags = signal<Set<string>>(new Set())
   readonly addressHover = signal(false)
   #atomizeTarget = signal('')
@@ -427,14 +431,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     toggleNeonMode: () => this.toggleNeonMode(),
     toggleLauncherShapes: () => this.toggleLauncherShapes(),
     toggleTextOnly: () => this.toggleTextOnly(),
-    toggleNotes: () => this.toggleNotes(),
     openPools: () => this.navigateTo(['sets']),
     cut: () => this.cut(),
     copy: () => this.copy(),
     toggleClipboard: () => this.toggleClipboard(),
     toggleVoice: () => this.toggleVoice(),
     toggleBees: () => this.toggleBees(),
-    toggleFeedback: () => EffectBus.emit('feedback:viewer-toggle', {}),
   }
 
   readonly runAction = (action: string, event: MouseEvent): void => {
@@ -444,7 +446,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly isActive = (ctrl: ControlItem): boolean => {
     switch (ctrl.id) {
       case 'clipboard': return this.#clipboardPanelOpen()
-      case 'notes': return this.#notesPanelOpen()
       case 'pin': return this.#locked()
       case 'fit': return this.fitLocked()
       case 'show-hidden': return this.#showHidden()
@@ -453,7 +454,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'text-only': return this.#textOnly()
       case 'bees': return this.#beesVisible()
       case 'voice': return this.voiceActive()
-      case 'feedback': return this.#feedbackPanelOpen()
       default: return false
     }
   }
@@ -491,14 +491,12 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       case 'neon-mode':    return 'flare'
       case 'launcher-shapes': return 'hexagon'
       case 'text-only':    return this.textOnly() ? 'text_fields' : 'subject'
-      case 'notes':        return 'sticky_note_2'
       case 'pools':        return 'workspaces'
       case 'cut':          return 'content_cut'
       case 'copy':         return 'content_copy'
       case 'clipboard':    return 'content_paste'
       case 'voice':        return 'mic'
       case 'bees':         return 'hub'
-      case 'feedback':     return 'rate_review'
       default:             return ''
     }
   }
@@ -737,6 +735,16 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   readonly tags = this.#tags.asReadonly()
 
   readonly tagScope = this.#tagScope.asReadonly()
+  readonly tagsExpanded = this.#tagsExpanded.asReadonly()
+
+  /** The three reaches, in order, for the expanded strip's scope row. Same ids
+   *  and glyphs as the pheromone panel — one vocabulary for reach, wherever
+   *  you meet it. */
+  readonly tagScopeOptions: readonly { id: 'local' | 'children' | 'global'; icon: string }[] = [
+    { id: 'local', icon: 'center_focus_strong' },
+    { id: 'children', icon: 'account_tree' },
+    { id: 'global', icon: 'public' },
+  ]
 
   /** Material Symbol for the scope cycle button — a glyph per reach, so the
    *  control reads as a control and never as a tag. page → children → global. */
@@ -747,6 +755,26 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
       default: return 'center_focus_strong'
     }
   })
+
+  /** Open the strip out to every tag on as many rows as it takes, or fold it
+   *  back to the single row. Persisted — see `#tagsExpanded`. */
+  readonly toggleTagsExpanded = (): void => {
+    const next = !this.#tagsExpanded()
+    this.#tagsExpanded.set(next)
+    localStorage.setItem('hc:tags-expanded', next ? '1' : '0')
+  }
+
+  readonly isTagScope = (id: 'local' | 'children' | 'global'): boolean => this.#tagScope() === id
+
+  /** Set the reach from the expanded strip. Always re-broadcasts `tags:filter`
+   *  carrying the CURRENT filter set — a live filter must re-scan at the new
+   *  width, and with nothing filtered the emit is what keeps the panel and the
+   *  readout glyph in step. Mirrors the panel's own `setScope`. */
+  readonly setTagScope = (id: 'local' | 'children' | 'global'): void => {
+    if (this.#tagScope() === id) return
+    this.#tagScope.set(id)
+    EffectBus.emit('tags:filter', { active: [...this.#activeTagFilters()], scope: id })
+  }
 
 
   /** Open the pheromone panel. This icon used to CYCLE the reach in place —
@@ -819,8 +847,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #launcherShapesUnsub: (() => void) | null = null
   #clipboardAvailableUnsub: (() => void) | null = null
   #clipboardOpenUnsub: (() => void) | null = null
-  #notesOpenUnsub: (() => void) | null = null
-  #feedbackOpenUnsub: (() => void) | null = null
   #atomizeModeUnsub: (() => void) | null = null
   #atomizeAtomsUnsub: (() => void) | null = null
   #atomizeStrategyUnsub: (() => void) | null = null
@@ -831,6 +857,11 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
   #onIconOverride = (): void => this.iconRev.update(v => v + 1)
 
   ngOnInit(): void {
+    // Host-level capture guard so a drag-scroll's trailing click never
+    // reaches an icon. On the host (not the list) because the list is
+    // created and destroyed by the mode/dock branches.
+    this.#installClickSwallow()
+
     // Pulse the pin button when a pan/zoom is rejected because input is
     // locked. Transient (no replay) so a fresh mount never bumps.
     this.#lockBumpUnsub = EffectBus.on('input:locked-attempt', this.#flashLockBump)
@@ -909,18 +940,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     // replayed, so a late mount reflects the current panel state.
     this.#clipboardOpenUnsub = EffectBus.on<{ open?: boolean }>('clipboard:open', ({ open }) => {
       this.#clipboardPanelOpen.set(!!open)
-    })
-
-    // Mirror the notes strip's open state (it emits `notes:panel-state` from
-    // its toggle chokepoint) so the Notes button toggles correctly and lights
-    // up while the strip is showing. Last-value replayed, so a late mount
-    // reflects the current strip state.
-    this.#notesOpenUnsub = EffectBus.on<{ open?: boolean }>('notes:panel-state', ({ open }) => {
-      this.#notesPanelOpen.set(!!open)
-    })
-
-    this.#feedbackOpenUnsub = EffectBus.on<{ open?: boolean }>('feedback:viewer-open', ({ open }) => {
-      this.#feedbackPanelOpen.set(!!open)
     })
 
     this.#moveModeUnsub = EffectBus.on<{ active: boolean }>('move:mode', ({ active }) => {
@@ -1100,8 +1119,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#launcherShapesUnsub?.()
     this.#clipboardAvailableUnsub?.()
     this.#clipboardOpenUnsub?.()
-    this.#notesOpenUnsub?.()
-    this.#feedbackOpenUnsub?.()
     this.#tagsUnsub?.()
     this.#tagFilterUnsub?.()
     this.#hoverTagsUnsub?.()
@@ -1114,6 +1131,7 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     this.#iconEditUnsub?.()
     iconOverrides.removeEventListener('change', this.#onIconOverride)
     this.#clearIconPress()
+    this.#detachListDrag()   // in case we're torn down mid drag-scroll
     if (this.#lockBumpTimer) clearTimeout(this.#lockBumpTimer)
     window.removeEventListener('keydown', this.#onPowerKeyDown)
     window.removeEventListener('keyup', this.#onPowerKeyUp)
@@ -1542,14 +1560,6 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
     EffectBus.emit('clipboard:panel', { visible: true })
   }
 
-  /** Notes button — toggles the notes strip open/closed. The strip no longer
-   *  auto-opens on selection, so this is the sole on/off control. The strip
-   *  broadcasts its state back via `notes:panel-state`, keeping
-   *  #notesPanelOpen (and the button's lit highlight) in sync. */
-  readonly toggleNotes = (): void => {
-    EffectBus.emit('notes:panel', { visible: !this.#notesPanelOpen() })
-  }
-
   // ── atomize ──────────────────────────────────────────
 
   readonly STRATEGY_NAMES = ['shatter', 'orbital', 'blueprint', 'cascade', 'particle'] as const
@@ -1624,6 +1634,102 @@ export class ControlsBarComponent implements OnInit, AfterViewInit, OnDestroy {
 
   readonly onBarEnter = (): void => { this.#hovered.set(true) }
   readonly onBarLeave = (): void => { this.#hovered.set(false) }
+
+  // ── wheel ─────────────────────────────────────────────
+  // The whole bar is [data-consumes-wheel], so the wheel never reaches the
+  // hive while the pointer is over it. Inside the icon list the browser
+  // scrolls natively and this does nothing; over the grip or the pinned
+  // footer there is nothing to scroll natively, so forward the delta to the
+  // list — the bar reads as ONE scroll surface rather than a scrollable
+  // middle with dead ends.
+  readonly onBarWheel = (event: WheelEvent): void => {
+    const bar = event.currentTarget as HTMLElement | null
+    const list = bar?.querySelector('.controls-row')
+    if (!list || !(event.target instanceof Node)) return
+    if (list.contains(event.target)) return          // native scroll handles it
+    if (list.scrollHeight <= list.clientHeight) return
+    list.scrollBy(0, event.deltaY)
+    event.preventDefault()
+  }
+
+  // ── drag-to-scroll ────────────────────────────────────
+  // Press anywhere in the icon list — including ON an icon — and drag to
+  // scroll it, the same movement the wheel makes. Past DRAG_SLOP_PX the
+  // gesture has committed to scrolling, so the icon under the pointer must
+  // NOT fire when the button comes back up; #swallowNextClick eats the
+  // trailing click in the capture phase (see #installClickSwallow), which
+  // covers every button in the list rather than each handler opting in.
+  //
+  // Mouse and pen only: a touch drag already scrolls the box natively, and
+  // running both would scroll it twice per pixel.
+  readonly dragScrolling = signal(false)
+  #dragList: HTMLElement | null = null
+  #dragPointerId: number | null = null
+  #dragStartY = 0
+  #dragStartScroll = 0
+  #dragPassedSlop = false
+  #swallowNextClick = false
+
+  readonly onListDragStart = (event: PointerEvent): void => {
+    if (event.pointerType === 'touch' || event.button !== 0) return
+    const list = event.currentTarget as HTMLElement | null
+    if (!list || list.scrollHeight <= list.clientHeight) return
+    this.#swallowNextClick = false
+    this.#dragList = list
+    this.#dragPointerId = event.pointerId
+    this.#dragStartY = event.clientY
+    this.#dragStartScroll = list.scrollTop
+    this.#dragPassedSlop = false
+    window.addEventListener('pointermove', this.#onListDragMove)
+    window.addEventListener('pointerup', this.#onListDragEnd)
+    window.addEventListener('pointercancel', this.#onListDragEnd)
+  }
+
+  #onListDragMove = (event: PointerEvent): void => {
+    if (event.pointerId !== this.#dragPointerId || !this.#dragList) return
+    const dy = event.clientY - this.#dragStartY
+    if (!this.#dragPassedSlop) {
+      if (Math.abs(dy) < DRAG_SLOP_PX) return
+      this.#dragPassedSlop = true
+      this.dragScrolling.set(true)
+      // A drag is not a long-press — cancel the icon-edit timer it started.
+      this.#clearIconPress()
+    }
+    // Content follows the pointer: drag up → later icons come into view.
+    this.#dragList.scrollTop = this.#dragStartScroll - dy
+  }
+
+  #detachListDrag(): void {
+    window.removeEventListener('pointermove', this.#onListDragMove)
+    window.removeEventListener('pointerup', this.#onListDragEnd)
+    window.removeEventListener('pointercancel', this.#onListDragEnd)
+  }
+
+  #onListDragEnd = (event: PointerEvent): void => {
+    if (event.pointerId !== this.#dragPointerId) return
+    this.#detachListDrag()
+    this.#dragPointerId = null
+    this.#dragList = null
+    this.dragScrolling.set(false)
+    if (!this.#dragPassedSlop) return
+    this.#dragPassedSlop = false
+    // The click generated by this release belongs to the scroll. It arrives
+    // in the same task, so clear the flag on the next tick — otherwise a
+    // release that produces no click at all would eat a later real one.
+    this.#swallowNextClick = true
+    setTimeout(() => { this.#swallowNextClick = false }, 0)
+  }
+
+  /** Capture-phase guard on the host: kills the click that trails a
+   *  drag-scroll before it reaches any button underneath. */
+  #installClickSwallow(): void {
+    this.#host.nativeElement.addEventListener('click', (event: Event) => {
+      if (!this.#swallowNextClick) return
+      this.#swallowNextClick = false
+      event.stopPropagation()
+      event.preventDefault()
+    }, { capture: true })
+  }
 
   // ── swipe-to-go-back (right-to-left from right edge) ──
 

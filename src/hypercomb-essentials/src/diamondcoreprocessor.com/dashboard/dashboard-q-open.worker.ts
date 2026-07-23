@@ -41,11 +41,19 @@ export class DashboardQOpenWorker extends Worker {
 
   protected override emits: string[] = []
 
+  // Parsed bindings keyed by their appliesTo path. Built by ONE pool scan
+  // on the first click, then reused — scanning every optimization record
+  // per click made the modal take visibly long to open on grown pools.
+  // Any pool write may be a producer binding rewrite, so the cache drops
+  // on `optimization:wrote` and rebuilds on the next click.
+  #bindings: Map<string, QaBindingPayload> | null = null
+
   protected override act = async (): Promise<void> => {
     EffectBus.on<TileActionPayload>('tile:action', (payload) => {
       if (payload.action !== 'open') return
       void this.#handleOpen(payload.label)
     })
+    EffectBus.on('optimization:wrote', () => { this.#bindings = null })
   }
 
   async #handleOpen(label: string): Promise<void> {
@@ -70,8 +78,15 @@ export class DashboardQOpenWorker extends Worker {
   }
 
   async #findBinding(targetPath: readonly string[]): Promise<QaBindingPayload | null> {
+    const cache = this.#bindings ?? await this.#scanBindings()
+    return cache.get(targetPath.join('|')) ?? null
+  }
+
+  async #scanBindings(): Promise<Map<string, QaBindingPayload>> {
+    const cache = new Map<string, QaBindingPayload>()
+    this.#bindings = cache
     const store = get<StoreLike>('@hypercomb.social/Store')
-    if (!store?.listOptimizations || !store?.getOptimization) return null
+    if (!store?.listOptimizations || !store?.getOptimization) return cache
 
     const sigs = await store.listOptimizations()
     for (const sig of sigs) {
@@ -81,23 +96,18 @@ export class DashboardQOpenWorker extends Worker {
       try { parsed = JSON.parse(await blob.text()) } catch { continue }
       if (parsed.kind !== BINDING_KIND) continue
       if (!Array.isArray(parsed.appliesTo)) continue
-      const ap = parsed.appliesTo as unknown[]
-      if (ap.length !== targetPath.length) continue
-      let match = true
-      for (let i = 0; i < ap.length; i++) {
-        if (String(ap[i]) !== targetPath[i]) { match = false; break }
-      }
-      if (!match) continue
+      const ap = (parsed.appliesTo as unknown[]).map(String)
       const payload = parsed.payload as Partial<QaBindingPayload> | undefined
       if (!payload || typeof payload.qId !== 'string' || typeof payload.question !== 'string') continue
-      return {
+      cache.set(ap.join('|'), {
         qId: payload.qId,
         qSig: typeof payload.qSig === 'string' ? payload.qSig : '',
         qPath: Array.isArray(payload.qPath) ? payload.qPath.map(String) : [],
         question: payload.question,
-      }
+        bagPath: ap,
+      })
     }
-    return null
+    return cache
   }
 }
 

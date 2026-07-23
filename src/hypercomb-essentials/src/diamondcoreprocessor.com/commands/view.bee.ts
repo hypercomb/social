@@ -15,17 +15,17 @@
 // undoable resources living on each cell's own layer — no central map, no
 // cross-cell dependency).
 //
-// The command-line toggle is PER-NODE: it appears only on a cell that
-// actually HAS a page of the view's kind — i.e. the build pass has written a
-// `visual:website:page` decoration on the cell the user is standing on. It is
-// deliberately NOT global presence: one page somewhere must not light the
-// toggle everywhere, because clicking it on a page-less cell would flip the
-// global view to a blank "empty website" screen. This is the same decoration
-// SiteViewDrone reads to mount the page, so the toggle shows up exactly where
-// the renderer would draw a page and never on a dead end. Clicking it flips
-// the global ViewMode; its active state mirrors the flag. The cell's own
-// decoration payload supplies the toggle glyph/label so every site keeps its
-// distinct icon.
+// The command-line toggle is SCOPE-BOUND: it appears on a cell that HAS a
+// page of the view's kind (a `visual:website:page` decoration or a
+// first-class `website` slot), and — for the website view — anywhere INSIDE
+// that site's hierarchy (a website is an APPLICATION SCOPE declared at its
+// root; descendants are members without stamping). It is deliberately NOT
+// global presence: one page somewhere must not light the toggle everywhere.
+// Standing on the PARENT of a site root — the page where the site's tile
+// merely sits as a child — is OUTSIDE the scope: no toggle. Clicking it
+// flips the global ViewMode; its active state mirrors the flag. The site
+// root's decoration payload supplies the toggle glyph/label so every site
+// keeps its distinct icon.
 //
 // `/website here` (handled in website.queen.ts) is a SEPARATE gesture: it
 // drops a `visual:website:pending` decoration on the current cell for the
@@ -37,6 +37,8 @@
 
 import { Worker, EffectBus } from '@hypercomb/core'
 import type { VisualBeeRegistry, VisualBeeDescriptor } from './visual-bee-registry.js'
+import { WEBSITE_SLOT } from './website-slot.js'
+import { isFeatureHiddenWithin } from '../sharing/feature-hidden.js'
 
 const SIG_RE = /^[0-9a-f]{64}$/
 /** Fallback glyph when a view forgets to declare a Material toggleIcon. */
@@ -65,7 +67,7 @@ type HistoryServiceLike = {
   currentLayerAt(locationSig: string): Promise<LayerLike | null>
   getLayerBySig(sig: string): Promise<LayerLike | null>
 }
-type HistoryCursorLike = { currentLayerSig?: string }
+type HistoryCursorLike = { currentLayerSig?: string; state?: { locationSig?: string } }
 type StoreLike = { getResource(sig: string): Promise<Blob | null> }
 type RegistryLike = Pick<VisualBeeRegistry, 'all' | 'get'>
 
@@ -118,6 +120,12 @@ export class ViewBee extends Worker {
     // its toggle's availability or active-state may have changed.
     EffectBus.on('dashboard:state', () => this.#schedule())
 
+    // The cursor rebinding to a new location (or the user rewinding) changes
+    // which layer "here" resolves to. Without this, a navigation whose
+    // cursor.load() finished after our last recompute left the PREVIOUS
+    // node's toggles (the website icon) stuck on the new page.
+    EffectBus.on('history:cursor-changed', () => this.#schedule())
+
     // Command-line click and the `/website` slash command both arrive here.
     // A `navigation` behavior delegates to its controller (open/close a
     // lineage); a `render` behavior flips the GLOBAL ViewMode directly. There
@@ -164,7 +172,10 @@ export class ViewBee extends Worker {
     const views = (registry?.all?.() ?? []) as VisualBeeDescriptor[]
     if (!views.length || !vm) { this.#emit([]); return }
 
-    const layer = await this.#currentNodeLayer()
+    const lineage = get<LineageLike>('@hypercomb.social/Lineage')
+    const segments = (lineage?.explorerSegments?.() ?? [])
+      .map(s => String(s ?? '').trim()).filter(Boolean)
+    const layer = await this.#currentNodeLayer(segments)
     const records = await this.#decorationRecords(layer)
 
     const toggles: ViewToggle[] = []
@@ -222,6 +233,40 @@ export class ViewBee extends Worker {
           payloadLabel = typeof payload?.['label'] === 'string' ? (payload['label'] as string).trim() : ''
         }
       }
+
+      if (v.view === 'website') {
+        // Slot-only page on THIS node — the website bee declares no
+        // descriptor `slot`; its first-class home is the `website` layer
+        // slot, so the generic check above can't see it.
+        if (!present && this.#hasWebsiteSlot(layer)) present = true
+
+        // WEBSITE SCOPE — a website is an APPLICATION SCOPE declared at its
+        // root; descendants are members WITHOUT stamping. When this node has
+        // no page of its own, walk the lineage outermost-first: the first
+        // ancestor carrying the website feature is the site root, and being
+        // under it makes the view available here. The walk probes only
+        // STRICT prefixes of the current path, so standing on the PARENT of
+        // a site root (where the site tile merely sits as a child) never
+        // matches — step outside the hierarchy and the toggle drops.
+        if (!present && segments.length > 1) {
+          const root = await this.#websiteScopeRoot(segments, v)
+          if (root) {
+            present = true
+            const record = v.decorationKind ? root.records.find(r => r.kind === v.decorationKind) : undefined
+            const payload = record?.payload
+            payloadIcon = typeof payload?.['icon'] === 'string' ? (payload['icon'] as string).trim() : ''
+            payloadLabel = typeof payload?.['label'] === 'string' ? (payload['label'] as string).trim() : ''
+          }
+        }
+
+        // Hidden-pool gate (branch semantics): a hide record at this node or
+        // any ancestor turns the site off for this subtree — never offer a
+        // toggle for a view SiteViewDrone refuses to mount.
+        if (present && v.decorationKind) {
+          const hidden = await isFeatureHiddenWithin(segments, v.decorationKind).catch(() => false)
+          if (hidden) present = false
+        }
+      }
       if (!present) continue
 
       toggles.push({
@@ -234,22 +279,62 @@ export class ViewBee extends Worker {
     this.#emit(toggles)
   }
 
-  /** The node the user is currently sitting on. Reads the node's own layer
-   *  authoritatively so it stays correct on a deep-link where the
-   *  decoration-kind index hasn't hydrated yet. Prefers the warm cursor
-   *  layer sig; falls back to signing the path. */
-  async #currentNodeLayer(): Promise<LayerLike | null> {
+  /** The node the user is currently sitting on. Signs the current path and
+   *  reads its head layer. The warm cursor layer sig is used ONLY when the
+   *  cursor is bound to THIS location — during a navigation the cursor still
+   *  points at the PREVIOUS location's head until its async load() completes,
+   *  and trusting it blindly left the old node's toggles (the website icon)
+   *  stuck on the new page. */
+  async #currentNodeLayer(segments: readonly string[]): Promise<LayerLike | null> {
     const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
     if (!history) return null
-    const cursorSig = get<HistoryCursorLike>('@diamondcoreprocessor.com/HistoryCursorService')?.currentLayerSig
-    if (cursorSig && SIG_RE.test(cursorSig)) {
+    const lineage = get<LineageLike>('@hypercomb.social/Lineage')
+    const locSig = await history.sign({ domain: lineage?.domain, explorerSegments: () => [...segments] }).catch(() => null)
+    const cursor = get<HistoryCursorLike>('@diamondcoreprocessor.com/HistoryCursorService')
+    const cursorSig = cursor?.currentLayerSig
+    if (cursorSig && SIG_RE.test(cursorSig) && locSig && cursor?.state?.locationSig === locSig) {
       const layer = await history.getLayerBySig(cursorSig).catch(() => null)
       if (layer) return layer
     }
+    if (!locSig) return null
+    return history.currentLayerAt(locSig).catch(() => null)
+  }
+
+  /** Non-empty first-class `website` slot on a layer — a slot-only page. */
+  #hasWebsiteSlot(layer: LayerLike | null): boolean {
+    const slot = layer ? (layer as Record<string, unknown>)[WEBSITE_SLOT] : undefined
+    return Array.isArray(slot) && slot.some(s => typeof s === 'string' && SIG_RE.test(s))
+  }
+
+  /** Outermost-first ancestor walk for the website APPLICATION SCOPE.
+   *  Returns the site root's layer + parsed decoration records when the
+   *  current node sits INSIDE a website hierarchy, null otherwise. Probes
+   *  only strict prefixes of the path, so the parent of a site root never
+   *  matches. Mirrors ShowFeaturesDrone's scope pass. */
+  async #websiteScopeRoot(
+    segments: readonly string[],
+    v: VisualBeeDescriptor,
+  ): Promise<{ layer: LayerLike; records: DecorationRecord[] } | null> {
+    for (let d = 1; d < segments.length; d++) {
+      const layer = await this.#layerAtSegments(segments.slice(0, d))
+      if (!layer) continue
+      if (this.#hasWebsiteSlot(layer)) {
+        return { layer, records: await this.#decorationRecords(layer) }
+      }
+      if (v.decorationKind) {
+        const records = await this.#decorationRecords(layer)
+        if (records.some(r => r.kind === v.decorationKind)) return { layer, records }
+      }
+    }
+    return null
+  }
+
+  /** Head layer at an arbitrary location (sign the path → current layer). */
+  async #layerAtSegments(segments: readonly string[]): Promise<LayerLike | null> {
+    const history = get<HistoryServiceLike>('@diamondcoreprocessor.com/HistoryService')
+    if (!history) return null
     const lineage = get<LineageLike>('@hypercomb.social/Lineage')
-    const segments = (lineage?.explorerSegments?.() ?? [])
-      .map(s => String(s ?? '').trim()).filter(Boolean)
-    const locSig = await history.sign({ domain: lineage?.domain, explorerSegments: () => segments }).catch(() => null)
+    const locSig = await history.sign({ domain: lineage?.domain, explorerSegments: () => [...segments] }).catch(() => null)
     if (!locSig) return null
     return history.currentLayerAt(locSig).catch(() => null)
   }

@@ -96,6 +96,14 @@ export class DashboardProducerDrone extends Drone {
     const schedule = () => { if (this.#isEnabled()) this.#scheduleRebuild() }
     this.onEffect('feedback:channel-ingested', schedule)
     this.onEffect('optimization:wrote', schedule)
+    // The modal emits this the instant Done is clicked — drop the answered
+    // card NOW; the debounced full rebuild reconciles bindings + islands.
+    this.onEffect<{ bagPath?: readonly string[] }>('dashboard:q-answered', (p) => {
+      if (this.#isEnabled()) void this.#dropAnswered(p?.bagPath)
+    })
+    // Escape hatch for a failed background answer-commit: re-derive the
+    // surface from the pool so the optimistically-hidden card comes back.
+    this.onEffect('dashboard:refresh', schedule)
     if (this.#isEnabled()) this.#scheduleRebuild()  // boot sync
   }
 
@@ -111,7 +119,47 @@ export class DashboardProducerDrone extends Drone {
 
   #scheduleRebuild(): void {
     if (this.#timer) clearTimeout(this.#timer)
-    this.#timer = setTimeout(() => { this.#timer = null; void this.#rebuild() }, REBUILD_DEBOUNCE_MS)
+    this.#timer = setTimeout(() => {
+      this.#timer = null
+      // Never churn the pool scan + per-tile commits under an open answer
+      // modal — that work stutters the textarea while the user types. Stay
+      // armed and land once the modal closes.
+      const modal = ioc()?.get<{ isOpen?: boolean }>('@diamondcoreprocessor.com/QaModalView')
+      if (modal?.isOpen) { this.#scheduleRebuild(); return }
+      void this.#rebuild()
+    }, REBUILD_DEBOUNCE_MS)
+  }
+
+  /** Fast path for an answered question: pull just that label out of the
+   *  bag's children so the card vanishes immediately. Only the pinned bag
+   *  has a fast path (legacy literal ['dashboard'] waits for the rebuild).
+   *  Always chases with the debounced authoritative rebuild. */
+  async #dropAnswered(bagPath?: readonly string[]): Promise<void> {
+    try {
+      if (!bagPath?.length) return
+      const label = bagPath[bagPath.length - 1]
+      if (!label) return
+      const bee = ioc()?.get<DashboardBeeLike>(DASHBOARD_BEE_KEY)
+      const history = ioc()?.get<HistoryLike>(HISTORY_KEY)
+      const committer = ioc()?.get<CommitterLike>(COMMITTER_KEY)
+      const bag = bee?.listPinnedBags?.()[0]
+      if (!bag?.bagSegments?.length || !history || !committer?.update) return
+      const bagSegs = bagPath.slice(0, -1)
+      if (bagSegs.length !== bag.bagSegments.length || bagSegs.some((s, i) => s !== bag.bagSegments[i])) return
+      const cur = (await history.currentLayerAt(bag.bagLocSig)) ?? {}
+      const prev = Array.isArray(cur['children']) ? (cur['children'] as unknown[]).map(String) : []
+      if (!prev.includes(label)) return
+      const payload: { name?: string; [slot: string]: unknown } = { name: String(bag.bagSegments[0]) }
+      for (const [k, v] of Object.entries(cur)) {
+        if (k === 'name' || k === 'children') continue
+        if (Array.isArray(v)) payload[k] = v
+      }
+      payload['children'] = prev.filter(l => l !== label)
+      await committer.update(bag.bagSegments, payload)
+      if (bee?.isActive?.()) ioc()?.get<NavigationLike>(NAV_KEY)?.goRaw?.(bag.bagSegments)
+    } finally {
+      this.#scheduleRebuild()
+    }
   }
 
   /** Public manual trigger (tests / explicit refresh). Resolves after the

@@ -1,11 +1,21 @@
 // diamondcoreprocessor.com/link/photo.view.ts
 // Photo view — fullscreen image viewer with forced MIME safety.
-// When active, emits `view:active` to hide stage + chrome.
-
-import { EffectBus } from '@hypercomb/core'
+// When active, enters the owner-counted `view:active` mode to hide stage +
+// chrome — so closing this photo over an open website view can't unhide the
+// chrome the view is still covering.
 
 export class PhotoView extends EventTarget {
   #overlay: HTMLDivElement | null = null
+
+  /** Route view-mode through the owner-counted ModeRegistry (not a raw
+   *  boolean broadcast): closing this photo must leave the chrome hidden if a
+   *  website/slides view underneath is still open. See mode-registry.service.ts. */
+  #setViewMode(active: boolean): void {
+    const modes = window.ioc.get('@diamondcoreprocessor.com/ModeRegistry') as
+      { enter(mode: string, owner: string): void; exit(mode: string, owner: string): void } | undefined
+    if (active) modes?.enter('view:active', 'photo')
+    else modes?.exit('view:active', 'photo')
+  }
 
   show(imageUrl: string): void {
     if (this.#overlay) this.close()
@@ -73,7 +83,7 @@ export class PhotoView extends EventTarget {
     requestAnimationFrame(() => { overlay.style.opacity = '1' })
 
     document.addEventListener('keydown', this.#onKeyDown)
-    EffectBus.emit('view:active', { active: true, type: 'photo' })
+    this.#setViewMode(true)
   }
 
   showBlob(blob: Blob): void {
@@ -95,7 +105,7 @@ export class PhotoView extends EventTarget {
     setTimeout(() => overlay.remove(), 350)
 
     document.removeEventListener('keydown', this.#onKeyDown)
-    EffectBus.emit('view:active', { active: false, type: 'photo' })
+    this.#setViewMode(false)
   }
 
   get isOpen(): boolean {
