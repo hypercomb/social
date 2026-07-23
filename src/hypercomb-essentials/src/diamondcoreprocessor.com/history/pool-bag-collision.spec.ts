@@ -205,4 +205,25 @@ describe('pool address / lineage bag address collision', () => {
 
     expect(names(bag)).toEqual(['00000000'])
   })
+
+  it('purge at the ROOT lineage keeps canonical markers (root layer name is empty)', async () => {
+    // The ROOT bag is sha256('') and its canonical layer signs as EMPTY
+    // ({"name":"",...} — EMPTY_LAYER_CONTENT). Regression: the keep-test
+    // once required a NON-EMPTY name and knew nothing of pointer records,
+    // so a purge at the root dropped every real marker (verified live:
+    // listLayers(rootSig) → 1 marker, purge → 0).
+    const address = await bagSignature([])
+    const bag = await root.getDirectoryHandle(address, { create: true })
+    // Legacy inline shape: the root layer itself, name ''.
+    await write(bag, '00000000', JSON.stringify({ name: '', children: [] }))
+    // Modern pointer shape — what commitLayer writes.
+    await write(bag, '00000001', JSON.stringify({ layer: 'd'.repeat(64) }))
+    // Pre-merkle bare-sig marker — must still drop, even at the root.
+    await write(bag, '00000002', 'e'.repeat(64))
+
+    const history = new HistoryService()
+    await history.purgeNonLayerFiles(address)
+
+    expect(names(bag)).toEqual(['00000000', '00000001'])
+  })
 })
