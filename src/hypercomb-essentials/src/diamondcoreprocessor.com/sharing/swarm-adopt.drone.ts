@@ -53,6 +53,7 @@ import {
   clearAdoptTombstone,
   isAdoptTombstoned,
 } from './adopted-roots.js'
+import { setDivergedLabels, clearPeerDivergence } from './peer-divergence.js'
 
 const SWARM_DRONE_KEY = '@diamondcoreprocessor.com/SwarmDrone'
 const LINEAGE_KEY = '@hypercomb.social/Lineage'
@@ -60,6 +61,7 @@ const BROKER_KEY = '@diamondcoreprocessor.com/ContentBrokerDrone'
 const HISTORY_KEY = '@diamondcoreprocessor.com/HistoryService'
 const COMMITTER_KEY = '@diamondcoreprocessor.com/LayerCommitter'
 const REGISTRY_SNAPSHOT_KEY = '@hypercomb.social/RegistrySnapshot'
+const SNAPSHOT_QUEEN_KEY = '@diamondcoreprocessor.com/SnapshotQueenBee'
 // Recoverable receipt of branches this hive has folded in — the baseline the
 // pending-diff (portal counts) and the un-fold (remove) path read from.
 const FOLDED_KEY = 'hc:last-folded'
@@ -83,6 +85,12 @@ const SIG_RE = /^[a-f0-9]{64}$/
 interface SwarmDroneLike {
   peerTilesAtCurrentSig: () => readonly ({ name: string; peerPubkey: string } & Record<string, unknown>)[]
   subscribedTiles?: () => readonly ({ name: string; peerPubkey: string } & Record<string, unknown>)[]
+  /** Peer tiles at an ARBITRARY location sig — lets the divergence scan
+   *  look one level INTO a held tile without navigating there. */
+  peerTilesAtSig?: (sig: string) => readonly ({ name: string; peerPubkey: string } & Record<string, unknown>)[]
+  /** Compose the swarm sig for a path (same bytes the publisher used), so
+   *  the scan can address a child location's peer cache. */
+  composeSigForSegments?: (segments: readonly string[]) => Promise<string>
 }
 
 interface LineageLike {
@@ -158,18 +166,37 @@ export class SwarmAdoptDrone extends Drone {
   constructor() {
     super()
 
-    // ── AUTO-SYNC: adopted branches follow their publisher ─────────────
-    // A peer broadcast arriving with a layerSig that differs from the
-    // recorded receipt for an ADOPTED root means the publisher committed
-    // new content — re-sync the held copy through the SAME #syncPeerTile
-    // path the (removed) sync button used. Authored branches never
-    // auto-sync (isWithinAdoptedRoot gates); a sig is attempted at most
-    // once per session; the whole pass is debounced off the peers-changed
-    // burst. Publisher EDITS inside an adopted branch supersede local
-    // edits (recoverable, as ever, via the location's ordinary history) —
-    // but a local DELETION is a revocation, not an edit: it tombstones
-    // the path (below) and auto-sync never resurrects it.
-    this.onEffect('swarm:peers-changed', () => this.#scheduleAutoSync())
+    // ── DIVERGENCE SCAN: detect, NEVER apply ───────────────────────────
+    // NOTHING EVER RE-SYNCS ON ITS OWN. This pass used to auto-fold a
+    // publisher's newer bytes into any adopted root ("adopted branches
+    // follow their publisher"); that is retired. Every swarm join where
+    // something changed now requires an EXPLICIT add — adopt (folds the
+    // whole tree), or the installer (per-tile on/off), with behaviors
+    // added afterwards in the Beehaviors window. The only sanctioned
+    // automation is DETECTION, which lights the adopt affordance and
+    // applies nothing.
+    //
+    // Two rules mark a HELD tile as having something to take, both
+    // ADDITIVE ("they have children you don't") and never "yours is
+    // stale":
+    //   1. adopted root whose publisher sig differs from our receipt —
+    //      the merkle handle covers their whole subtree, so this catches
+    //      changes at any depth beneath it;
+    //   2. any held tile a peer publishes children for that we lack —
+    //      the name diff, which is the only comparison that works for
+    //      tiles we AUTHORED (no receipt exists) and the only unit the
+    //      participant can act on.
+    // Debounced off the peers-changed burst; the result is a sync-readable
+    // set the overlay reads, never a commit.
+    this.onEffect('swarm:peers-changed', () => this.#scheduleDivergenceScan())
+
+    // The answer is LOCATION-scoped. Leaving invalidates it immediately —
+    // carrying it across would light adopt on a same-named tile somewhere
+    // else entirely. The next peer burst at the new location recomputes.
+    this.onEffect('navigation:guard-start', () => {
+      if (this.#divergenceTimer) { clearTimeout(this.#divergenceTimer); this.#divergenceTimer = null }
+      if (clearPeerDivergence()) EffectBus.emit('swarm:divergence-changed', {})
+    })
 
     // ── DELETE IS THE UNSUBSCRIBE ──────────────────────────────────────
     // Removing a tile inside an adopted branch revokes the adoption for
@@ -394,7 +421,118 @@ export class SwarmAdoptDrone extends Drone {
       this.#rowOutcome(label, undefined, false, `couldn't adopt "${label}" — the peer's branch is no longer offered here`)
       return
     }
+    // ADDITIVE when already held. A tile you hold that a peer diverged on is
+    // adopted by ADDING the children they publish that you don't have — never
+    // by re-homing the tile, which SETs its children list to the peer's and so
+    // drops any child you have that they lack. Only a tile you DON'T hold folds
+    // whole. (This is the standing rule: adopt is additive, never removes or
+    // overwrites — a shared tile stays one tile.)
+    if (await this.#isHeldHere(branch.at, branch.label)) {
+      await this.#additiveAdoptHeld(branch)
+      return
+    }
     await this.adoptResolvedBranch(branch)
+  }
+
+  /** Is `label` a live child of the layer at `at` right now? Routes adopt to
+   *  its additive branch. Cursor-aware; resolves through the parent chain so a
+   *  cold own-bag never reads as absent. False on any resolve failure — treat
+   *  unknown as NOT held, i.e. fall back to the whole-tile fold, never to a
+   *  path that could silently overwrite. */
+  #isHeldHere = async (at: readonly string[], label: string): Promise<boolean> => {
+    const ioc = this.#ioc()
+    const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
+    const lineage = ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined
+    if (!history) return false
+    const cursor = ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as { currentLayerSig?: string } | undefined
+    const parent = await resolveCurrentLayer(history, lineage?.domain, at, cursor?.currentLayerSig).catch(() => null)
+    if (!parent) return false
+    const child = await childLayerOf(history, parent, label).catch(() => null)
+    return !!child
+  }
+
+  /**
+   * Additive adopt for a tile you ALREADY HOLD: fold in the children the peer
+   * publishes that you don't have — and NOTHING else. Never re-homes the tile
+   * (that SETs its children to the peer's list, dropping your own-only ones);
+   * never removes; never overwrites a child you already hold. One level here —
+   * deeper divergence re-lights as you navigate in, matching the one-level
+   * detector. On full success records the peer's current generation as the
+   * held tile's receipt so the adopt affordance clears.
+   */
+  #additiveAdoptHeld = async (
+    branch: { layerSig: string; at: string[]; domain?: string; label: string },
+  ): Promise<void> => {
+    const ioc = this.#ioc()
+    const swarm = ioc?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
+    const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
+    const lineage = ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined
+    const childLoc = [...branch.at, branch.label]
+
+    if (!swarm?.composeSigForSegments || !swarm?.peerTilesAtSig || !history) {
+      this.#rowOutcome(branch.label, undefined, false, `couldn't read what "${branch.label}" is missing — try again in a moment`)
+      return
+    }
+
+    // Their direct children of the held tile (from the live peer cache at the
+    // held tile's OWN location sig — the same read the divergence scan used).
+    const theirSig = await swarm.composeSigForSegments(childLoc).catch(() => '')
+    const theirs = theirSig ? swarm.peerTilesAtSig(theirSig) : []
+
+    // My direct children — resolved THROUGH the parent so a cold own-bag never
+    // reads as empty. coldMiss ⇒ refuse rather than mis-add against partial
+    // knowledge (a cold read that dropped a child I hold would re-add it).
+    const cursor = ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as { currentLayerSig?: string } | undefined
+    const parent = await resolveCurrentLayer(history, lineage?.domain, branch.at, cursor?.currentLayerSig).catch(() => null)
+    const held = parent ? await childLayerOf(history, parent, branch.label).catch(() => null) : null
+    const { names: myNames, coldMiss } = held
+      ? await childNamesOfStrict(history, held.layer).catch(() => ({ names: [] as string[], coldMiss: true }))
+      : { names: [] as string[], coldMiss: true }
+    if (coldMiss) {
+      this.#rowOutcome(branch.label, undefined, false, `"${branch.label}" isn't fully loaded yet — try again in a moment`)
+      return
+    }
+    const mine = new Set(myNames.map(n => n.trim().toLowerCase()))
+
+    const missing = theirs
+      .map(t => ({
+        name: String(t?.name ?? '').trim(),
+        sig: String((t as Record<string, unknown>)['layerSig'] ?? '').trim().toLowerCase(),
+      }))
+      .filter(t => t.name.length > 0 && SIG_RE.test(t.sig) && !mine.has(t.name.toLowerCase()))
+
+    // Fold each missing child at the held tile's location. adoptResolvedBranch
+    // gives every child the SAME code-consent + complete-or-defer + receipt as
+    // a normal adopt; `silent` suppresses the per-tile Beehaviors landing so N
+    // children don't open N panels. A not-held child's `sync` commit APPENDS
+    // (its parent has no update in the tree, so importTree's swap/append path
+    // links it) — additive, your existing children untouched.
+    let failed = 0
+    for (const child of missing) {
+      const res = await this.adoptResolvedBranch(
+        { layerSig: child.sig, at: childLoc, domain: branch.domain, label: child.name },
+        { silent: true },
+      )
+      if (res !== 'committed' && res !== 'exists' && res !== 'code-routed') failed++
+    }
+
+    // Acknowledge the peer's current generation for the HELD tile so rule 1
+    // (adopted-root receipt ≠ announced sig) clears — but only when nothing was
+    // left owed, so a deferred/failed child keeps the affordance lit to retry.
+    if (failed === 0) this.#recordSyncReceipt(childLoc, branch.layerSig.toLowerCase())
+
+    // Recompute the diverged set now so the adopt icon updates without waiting
+    // for the next peer burst.
+    this.#scheduleDivergenceScan()
+
+    const added = missing.length - failed
+    if (missing.length === 0) {
+      this.#rowOutcome(branch.label, undefined, true, `"${branch.label}" already has everything shared here`)
+    } else if (failed === 0) {
+      this.#rowOutcome(branch.label, undefined, true, `added ${added} to "${branch.label}"`)
+    } else {
+      this.#rowOutcome(branch.label, undefined, false, `added ${added} to "${branch.label}", ${failed} couldn't be reached — try again shortly`)
+    }
   }
 
   /** Adopt an ALREADY-RESOLVED branch — the shared tail of every explicit
@@ -404,6 +542,7 @@ export class SwarmAdoptDrone extends Drone {
    *  Beehaviors landing are identical either way — ADOPT IS ADOPT. */
   public adoptResolvedBranch = async (
     branch: { layerSig: string; at: string[]; domain?: string; label: string },
+    opts?: { silent?: boolean },
   ): Promise<'committed' | 'exists' | 'rewound' | 'unavailable' | 'code-routed' | 'declined' | 'uninspectable'> => {
     // The explicit adopt gesture is the participant RE-SUBSCRIBING — clear
     // any revocation on this path before the fold (delete's counterpart).
@@ -475,8 +614,13 @@ export class SwarmAdoptDrone extends Drone {
       // Seed the auto-sync receipt: this publisher sig IS the current
       // generation here, so re-broadcasts of the same sig never re-fold.
       this.#recordSyncReceipt([...branch.at, branch.label], branch.layerSig)
-      EffectBus.emit('features:outcome', { cell: branch.label, kind: '', ok: true, message: '' })
-      EffectBus.emit('tile:action', { action: 'features', label: branch.label, segments: [...branch.at, branch.label] })
+      // Bulk additive child-adopt (#additiveAdoptHeld) suppresses the per-tile
+      // Beehaviors landing — folding N missing children must not open N panels.
+      // The single-tile adopt still lands on the panel (its whole point).
+      if (!opts?.silent) {
+        EffectBus.emit('features:outcome', { cell: branch.label, kind: '', ok: true, message: '' })
+        EffectBus.emit('tile:action', { action: 'features', label: branch.label, segments: [...branch.at, branch.label] })
+      }
     } else if (res === 'rewound') {
       // The history cursor is viewing the past — the committer refuses to
       // write, so a fold now would be a phantom. Only the user can return
@@ -727,31 +871,46 @@ export class SwarmAdoptDrone extends Drone {
     } catch { /* no localStorage — nothing recorded to forget */ }
   }
 
-  /** Publisher sigs already attempted this session — one shot per sig, so a
-   *  fold that lands (or honestly fails) never ping-pongs on re-broadcasts. */
-  readonly #autoSyncAttempted = new Set<string>()
-  #autoSyncTimer: ReturnType<typeof setTimeout> | null = null
+  #divergenceTimer: ReturnType<typeof setTimeout> | null = null
 
-  #scheduleAutoSync = (): void => {
-    if (this.#autoSyncTimer) clearTimeout(this.#autoSyncTimer)
-    this.#autoSyncTimer = setTimeout(() => {
-      this.#autoSyncTimer = null
-      void this.#autoSyncPass()
+  #scheduleDivergenceScan = (): void => {
+    if (this.#divergenceTimer) clearTimeout(this.#divergenceTimer)
+    this.#divergenceTimer = setTimeout(() => {
+      this.#divergenceTimer = null
+      void this.#divergenceScanPass()
     }, 4000)
   }
 
-  #autoSyncPass = async (): Promise<void> => {
+  /**
+   * Which HELD tiles at this location have something a peer is offering
+   * that we don't have. Pure detection — this pass NEVER commits, folds,
+   * or fetches. Its only output is the sync-readable set the overlay
+   * reads to decide whether `adopt` appears on a tile you already hold.
+   *
+   * Depth: rule 1 (receipt) covers an adopted root at ANY depth, because
+   * the publisher's handle seals their whole subtree. Rule 2 (name diff)
+   * sees ONE level into a held tile — deeper differences surface as the
+   * participant navigates in, which is also where they'd act on them.
+   */
+  #divergenceScanPass = async (): Promise<void> => {
     const ioc = this.#ioc()
     const swarm = ioc?.get?.(SWARM_DRONE_KEY) as SwarmDroneLike | undefined
     const lineage = ioc?.get?.(LINEAGE_KEY) as LineageLike | undefined
     const history = ioc?.get?.(HISTORY_KEY) as PlacementHistory | undefined
-    if (!swarm?.peerTilesAtCurrentSig || !lineage || !history) return
-    // Never auto-commit while the cursor is rewound — same refusal the
-    // manual fold makes, checked here so we don't even queue attempts.
+    if (!swarm?.peerTilesAtCurrentSig || !lineage || !history) {
+      if (clearPeerDivergence()) EffectBus.emit('swarm:divergence-changed', {})
+      return
+    }
+    // A rewound cursor is viewing the past — the tiles on screen aren't the
+    // present, so "what am I missing" is not a question we can answer
+    // honestly here. Say nothing rather than mark the wrong generation.
     const cursor = ioc?.get?.('@diamondcoreprocessor.com/HistoryCursorService') as
       | { state?: { rewound?: boolean }; currentLayerSig?: string }
       | undefined
-    if (cursor?.state?.rewound) return
+    if (cursor?.state?.rewound) {
+      if (clearPeerDivergence()) EffectBus.emit('swarm:divergence-changed', {})
+      return
+    }
 
     const at = (lineage.explorerSegments?.() ?? []).map(s => String(s ?? '').trim()).filter(Boolean)
     const receipts = this.#loadSyncReceipts()
@@ -763,35 +922,92 @@ export class SwarmAdoptDrone extends Drone {
     const domain = (ioc?.get?.(LINEAGE_KEY) as PlacementLineage | undefined)?.domain
     const parent = await resolveCurrentLayer(history, domain, at, cursor?.currentLayerSig)
       .catch(() => null)
-    if (!parent) return  // no local layer here — projections only, nothing held
+    if (!parent) {
+      // No local layer here — everything on screen is a projection, and an
+      // unheld tile already carries adopt through the peer profile.
+      if (clearPeerDivergence()) EffectBus.emit('swarm:divergence-changed', {})
+      return
+    }
+    const diverged = new Set<string>()
     for (const tile of swarm.peerTilesAtCurrentSig()) {
       const name = String(tile.name ?? '').trim()
+      if (!name) continue
       const sig = String((tile as Record<string, unknown>)['layerSig'] ?? '').trim().toLowerCase()
-      if (!name || !SIG_RE.test(sig)) continue
-      if (this.#autoSyncAttempted.has(sig)) continue
       const target = [...at, name]
-      // Only content the participant ADOPTED follows its publisher —
-      // authored branches never auto-sync.
-      if (!isWithinAdoptedRoot(target)) continue
       // Deleted here stays deleted — the tombstone is the participant's
-      // revocation; only an explicit adopt/sync click clears it.
+      // revocation; only an explicit adopt gesture is the way back in, so
+      // nothing about a revoked path should light up again.
       if (isAdoptTombstoned(target)) continue
-      const receipt = receipts[target.join('/')]
-      if (receipt === sig) continue                    // already current
-      // Held here? Present in the parent's CURRENT child list — a tile the
-      // participant never folded (or removed) stays a projection; adopting
-      // is their click, only REFRESHING is automatic.
-      const held = await childLayerOf(history, parent, name).then(c => !!c).catch(() => false)
+      // Held here? Present in the parent's CURRENT child list. An UNHELD
+      // peer tile is out of scope: it already shows adopt via the peer
+      // profile, and marking it here would double the affordance.
+      const held = await childLayerOf(history, parent, name).catch(() => null)
       if (!held) continue
-      // No receipt = adopted before receipts existed. BASELINE it: record
-      // the publisher's current sig WITHOUT folding, so this feature's
-      // first pass over an old install can never stomp local state en
-      // masse. Changes the publisher makes from here on sync normally.
-      if (!receipt) { this.#recordSyncReceipt(target, sig); continue }
-      this.#autoSyncAttempted.add(sig)
-      EffectBus.emit('activity:log', { message: `"${name}" updated by its publisher — syncing`, icon: '●' })
-      await this.#syncPeerTile(name, String(tile.peerPubkey ?? '') || undefined)
+
+      // ── rule 1: adopted root, publisher moved past our receipt ────────
+      if (SIG_RE.test(sig) && isWithinAdoptedRoot(target)) {
+        const receipt = receipts[target.join('/')]
+        // No receipt = adopted before receipts existed. BASELINE it (record
+        // WITHOUT folding) so an old install doesn't light up wholesale on
+        // its first pass. Changes from here on read as divergence.
+        if (!receipt) { this.#recordSyncReceipt(target, sig); continue }
+        if (receipt !== sig) { diverged.add(name); continue }
+      }
+
+      // ── rule 2: name diff one level in ────────────────────────────────
+      // The only rule that works for tiles we AUTHORED (no receipt can
+      // exist) and the only unit the participant can act on: children they
+      // publish that we don't hold. Additive by construction — children we
+      // have and they don't are simply never considered.
+      // NOTE `held.layer`, not `held` — childLayerOf returns { sig, layer }.
+      // PlacementLayer carries an index signature, so the wrapper satisfies
+      // it structurally and tsc stays silent; the wrapper has no `children`,
+      // which reads as "I hold nothing here" and would mark EVERY held tile
+      // with any peer child as diverged.
+      if (await this.#peerOffersUnheldChildren(swarm, history, target, held.layer)) {
+        diverged.add(name)
+      }
     }
+    if (setDivergedLabels(diverged)) {
+      EffectBus.emit('swarm:divergence-changed', { labels: [...diverged] })
+    }
+  }
+
+  /**
+   * Does any peer publish a child of `target` whose NAME we don't hold?
+   *
+   * Names, not signatures — deliberately. The fold re-homes children by
+   * name, so an adopted copy's bytes always differ from the publisher's
+   * (swarm-adopt.drone.ts header); byte comparison between two hives can
+   * never read equal and would light this permanently. Name membership is
+   * the only comparison that both converges and matches what the
+   * participant can act on.
+   *
+   * Returns false on ANY uncertainty — no peer cache for the child
+   * location, or a cold local read (`coldMiss`). Absence of evidence is
+   * not evidence of divergence: a cold page must not light adopt on
+   * everything it hasn't finished reading.
+   */
+  #peerOffersUnheldChildren = async (
+    swarm: SwarmDroneLike,
+    history: PlacementHistory,
+    target: readonly string[],
+    heldChild: PlacementLayer,
+  ): Promise<boolean> => {
+    if (!swarm.composeSigForSegments || !swarm.peerTilesAtSig) return false
+    const childSig = await swarm.composeSigForSegments(target).catch(() => '')
+    if (!childSig) return false
+    const theirs = swarm.peerTilesAtSig(childSig)
+    if (!theirs || theirs.length === 0) return false
+    const { names, coldMiss } = await childNamesOfStrict(history, heldChild)
+      .catch(() => ({ names: [] as string[], coldMiss: true }))
+    if (coldMiss) return false
+    const mine = new Set(names.map(n => n.trim().toLowerCase()))
+    for (const t of theirs) {
+      const n = String(t?.name ?? '').trim().toLowerCase()
+      if (n && !mine.has(n)) return true
+    }
+    return false
   }
 
   // ── the one primitive: localize + re-home + re-point children ──────
@@ -1100,6 +1316,9 @@ export class SwarmAdoptDrone extends Drone {
 
   #folding = false
   #foldQueued = false
+  // One auto-checkpoint per accept-burst (not per coalesced sub-run) — reset
+  // when the burst ends so the next Done takes a fresh restore point.
+  #checkpointedThisFold = false
   #foldEnabledConfig = async (): Promise<void> => {
     // COALESCE re-entry, never drop it: sequential headless installs (the
     // portal-overlay pending-open queue) fire `actions:available` back-to-back,
@@ -1108,6 +1327,7 @@ export class SwarmAdoptDrone extends Drone {
     // single trailing re-run reads the latest snapshot, so N triggers coalesce.
     if (this.#folding) { this.#foldQueued = true; return }
     this.#folding = true
+    this.#checkpointedThisFold = false
     try {
       do {
         this.#foldQueued = false
@@ -1115,6 +1335,27 @@ export class SwarmAdoptDrone extends Drone {
       } while (this.#foldQueued)
     } finally {
       this.#folding = false
+    }
+  }
+
+  /**
+   * Auto-checkpoint BEFORE an incoming content fold changes the hive — the
+   * same safety /restore takes before it rewinds. A fold appends markers at
+   * many locations, so undo (per-location) is a poor way back; a named restore
+   * point makes the way back one gesture. Best-effort: a seal that can't
+   * complete (a cold tile) must NEVER block the fold the participant already
+   * accepted. Reuses the proven /snapshot path (SnapshotQueenBee.invoke), the
+   * same call restore.queen makes. Code/package updates are excluded from the
+   * seal, so this only fires for real tile changes.
+   */
+  #checkpointBeforeFold = async (changes: number): Promise<void> => {
+    try {
+      const queen = this.#ioc()?.get?.(SNAPSHOT_QUEEN_KEY) as { invoke?: (a: string) => Promise<void> } | undefined
+      if (!queen?.invoke) return
+      EffectBus.emit('activity:log', { message: 'saving a restore point before installing…', icon: '●' })
+      await queen.invoke(`before installing ${changes} change${changes === 1 ? '' : 's'}`)
+    } catch (err) {
+      console.warn('[swarm-adopt] pre-fold checkpoint skipped', err)
     }
   }
 
@@ -1143,6 +1384,15 @@ export class SwarmAdoptDrone extends Drone {
 
     console.info(`[swarm-adopt] fold: desired ${desired.length}, folded ${folded.length} → +${adds.length} −${removes.length}`)
     if (!adds.length && !removes.length) return
+
+    // A real diff — the hive is about to change at potentially many locations.
+    // Take a restore point FIRST (once per accept-burst), before any mutation,
+    // so "go back to before this install" is one gesture. Best-effort; never
+    // blocks the fold on a snapshot failure.
+    if (!this.#checkpointedThisFold) {
+      this.#checkpointedThisFold = true
+      await this.#checkpointBeforeFold(adds.length + removes.length)
+    }
 
     // Next receipt begins as the still-desired folded entries.
     const nextFolded: FoldedEntry[] = folded.filter(f => desiredSigs.has(f.sig))

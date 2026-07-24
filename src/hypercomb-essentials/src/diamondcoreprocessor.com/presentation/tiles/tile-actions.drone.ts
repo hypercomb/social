@@ -9,6 +9,7 @@ import { hasDecorationKind } from '../../commands/decoration-kind-index.js'
 import { FILES_ATTACHMENT_KIND } from '../../files/files-attachment.js'
 import { FILES_ICON } from '../../files/file-types.js'
 import { SWARM_INVITE_KIND } from '../../sharing/meeting-invite.js'
+import { peerDivergesAt } from '../../sharing/peer-divergence.js'
 // Arrangement persistence currently disabled — `#getRootDir` returns
 // null pending the layer-slot read/write path, so the legacy
 // readCellProperties / writeCellProperties imports are no longer needed.
@@ -349,11 +350,16 @@ const ICON_REGISTRY: IconRegistryEntry[] = [
   { name: 'more', svgMarkup: ICONS.more, hoverTint: 0xc8d4ff, profile: 'public-own' },
   { name: 'break-apart', svgMarkup: ICONS.breakApart, hoverTint: 0x66ccff, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => ctx.isHidden, labelKey: 'action.break-apart', descriptionKey: 'action.break-apart.description' },
   { name: 'promote-to-parent', svgMarkup: ICONS.arrowUpward, hoverTint: 0xc8d4ff, profile: 'public-own', visibleWhen: () => (window.ioc.get<{ explorerSegments?: () => readonly string[] }>('@hypercomb.social/Lineage')?.explorerSegments?.() ?? []).length > 0, labelKey: 'action.promote-to-parent', descriptionKey: 'action.promote-to-parent.description' },
-  // NOTE: there is NO `sync` button. Pulling a broadcasting peer's current
-  // version of a tile you hold is an INTERNAL concern (SwarmAdoptDrone still
-  // answers the `sync` action programmatically — a future auto-sync can ride
-  // it) — never a per-tile icon. The participant's surface is Add (adopt) +
-  // the features window; a feature that is ON keeps itself current.
+  // NOTE: there is still NO `sync` button — but ADOPT COMES BACK when a peer
+  // is offering something this held tile doesn't have. Nothing re-syncs on its
+  // own any more (the auto-sync pass is detection-only), so the merge has to
+  // be visible or it may as well not exist: `peerDivergesAt` is the sync-
+  // readable answer SwarmAdoptDrone's divergence scan publishes, and the
+  // affordance is the SAME adopt icon, not a second verb. Additive by
+  // construction — clicking it adds what they have and never removes or
+  // overwrites what you have. `sync` stays programmatic (SwarmAdoptDrone
+  // answers it for an explicit gesture) and never becomes an icon.
+  { name: 'adopt', svgMarkup: ICONS.adopt, hoverTint: 0xa8ffd8, profile: 'public-own', visibleWhen: (ctx: OverlayTileContext) => peerDivergesAt(ctx.label), labelKey: 'action.adopt', descriptionKey: 'action.adopt.description' },
   // `features` (the puzzle-piece) is the BEEHAVIORS window: click it and
   // ShowFeaturesDrone gathers the META details (no code) of this tile's
   // beehaviors and opens the right-docked panel — you stay in the hive.
@@ -423,9 +429,11 @@ const DEFAULT_ACTIVE: Record<OverlayProfileKey, string[]> = {
   // Your own tile in public mode. `more` + `remove` ride the same danger-row
   // reveal as private. `features` (puzzle-piece) opens the SHOW FEATURES
   // panel for any tile carrying a registered visual bee — it stays in the
-  // hive and has NO peer-broadcast requirement. (No `sync` icon — keeping a
-  // held tile current is internal, not a button.)
-  'public-own': ['features', 'break-apart', 'files', 'invite', 'more', 'remove'],
+  // hive and has NO peer-broadcast requirement. (Still no `sync` icon.)
+  // `adopt` leads because when it IS visible a peer is offering something
+  // this tile doesn't have — it is the only entry here gated on live swarm
+  // evidence, so it renders on nothing but a real merge.
+  'public-own': ['adopt', 'features', 'break-apart', 'files', 'invite', 'more', 'remove'],
   // Peer-only mesh tiles. Single-click `adopt` is the explicit
   // "I want to expand on this topic" action — writes the tile to
   // your local layer AND pulls the resources it references (images

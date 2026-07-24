@@ -652,6 +652,14 @@ export class TileOverlayDrone extends Drone {
         if (this.#overlay && this.#currentAxial) this.#updatePerTileVisibility()
       })
 
+      // A held tile started (or stopped) offering a peer merge. Same
+      // treatment as notes: the icon's gate is derived inline at render
+      // time from peer-divergence, so there's no cached set here to drift —
+      // this only says WHEN to look again.
+      this.onEffect('swarm:divergence-changed', () => {
+        if (this.#overlay && this.#currentAxial) this.#updatePerTileVisibility()
+      })
+
       this.onEffect<{ flat: boolean }>('render:set-orientation', (payload) => {
         this.#flat = payload.flat
         this.#updateHexBg()
